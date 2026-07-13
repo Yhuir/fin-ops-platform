@@ -1,5 +1,12 @@
 # Read Model 实施记录
 
+## 2026-07-13 - committed SLO miss 的恢复前收敛
+
+- 真实原因：生产三方关系确认已提交，但 HTTP 用时 `5.270s` 超过同步写 5s 门禁；旧 runner 在记录 SLO failure 后立即读取恢复 checkpoint 的隔离页基线，正撞上 read model `202 refreshing`，因此没有执行撤回。
+- 关键决策：SLO miss 继续是 failure，不放宽目标；已提交写在恢复前通过响应返回的精确 `outbox_event_ids` 复用现有 write-operation SLO 边界等待 fan-out 完成，再读取 isolation baseline 和执行正式撤回。禁止用 sleep、忽略 202、直接 SQL 或取消 SLO failure 修复。
+- 边界与旧逻辑：变更仅位于生产验证工具编排层；业务写仍走正式 API，refresh 状态仍由 PostgreSQL durable queue 证明。删除“committed step failure 后立即进入 recovery baseline”的旧时序，不新增第二套恢复链路。
+- 测试覆盖：新增 committed SLO miss→精确 receipt 收敛→fresh isolation baseline→recovery withdraw 回归；完整 write-operation E2E/impact matrix 与 lint 通过。发布后继续用同一生产三方场景验证。
+
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 

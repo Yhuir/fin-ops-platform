@@ -121,6 +121,9 @@ event 或 worker instance 时，必须先更新 registry，再让 deploy/preflig
 - discovery 只读 PostgreSQL 事实并输出候选；真正 apply 仍必须提供真实 OA/Admin auth，但不再需要临时业务 ticket。
 - `finops-deploy-control write-operation-e2e-smoke ... --apply-stdin` 从 stdin 第一行读取 Admin Token、
   第二行读取 standing approval ticket；任一为空都在业务 mutation 前失败，避免把 root-owned env 漂移误判为已授权。
+- 同步写超过门禁仍判定为 SLO failure；如果 HTTP 结果已经证明 mutation committed，恢复步骤必须先按该响应的
+  精确 `outbox_event_ids` 等待 durable fan-out 收敛，再读取隔离页基线和执行撤回。`202 refreshing`
+  不是稳定恢复基线，不能据此跳过撤回或把生产关系留在 active 状态。
 - no-OA withdraw 候选必须同时满足 `app.no_oa_bank_batches.status='submitted'`、`relation.status='active'`
   和 `relation.relation_mode='no_oa_bank_batch'`，不能把 bank-flow rule batch 关系误送到 no-OA endpoint。
 

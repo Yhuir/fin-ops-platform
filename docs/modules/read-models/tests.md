@@ -30,6 +30,15 @@
 
 ## 场景覆盖清单
 
+## 2026-07-13 - committed write SLO miss 恢复收敛门禁
+
+- 变更类型：生产 write-operation E2E recovery orchestration；不改变业务关系状态机、HTTP response shape、read model scope、worker event、queue schema、权限或前端行为。
+- 覆盖证据：mutation HTTP 已提交但同步写超过 5s 时，runner 保留原 SLO failure，同时使用响应中的精确 outbox receipt 等待 fan-out 完成；只有随后隔离页可读为 fresh，才读取恢复基线并执行正式撤回 checkpoint。
+- 新增/更新测试：`tests/test_write_operation_e2e_smoke.py::WriteOperationE2ESmokeTests::test_committed_write_slo_miss_waits_for_fanout_before_recovery_baseline`；既有 committed/ambiguous recovery、双 checkpoint、System Audit retry 和 impact matrix 回归继续覆盖。
+- 七类测试决策：service-layer orchestration、read model/cache/background job、end-to-end business-flow recovery、existing feature regression 适用并覆盖；business core、API contract、frontend interaction 不适用，因为业务规则、外部接口和 UI 均未改变。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest -q tests/test_write_operation_e2e_smoke.py tests/test_write_operation_impact_matrix.py`；`bash scripts/verify.sh lint`。
+- 未测风险：本地 fake 不能证明真实 worker drain；发布后必须重新执行同一受控可逆生产场景，并确认 recovery 不再在 `202 refreshing` 上失败。
+
 ## 2026-07-06 - Page read model fact-display matrix guard
 
 - 变更类型：spec-first coverage guard / documentation contract；不改变运行时代码、HTTP response shape、权限、业务状态机、worker event、queue schema 或前端行为。

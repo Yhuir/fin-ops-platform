@@ -626,6 +626,21 @@ def _run_one_scenario(
                 or bool(result.get("mutation_committed") and checkpoint.relation_state_after == "active")
             )
             if recovery_required and not result.get("mutation_ambiguous") and scenario.recovery_checkpoint is not None:
+                if (
+                    result.get("mutation_committed")
+                    and (result.get("write_slo") or {}).get("reason") == "write_step_failed"
+                ):
+                    result["recovery_precondition"] = _wait_for_failed_committed_mutation_refresh(
+                        connection,
+                        checkpoint=checkpoint,
+                        tenant_id=tenant_id,
+                        started_at=result.get("started_at"),
+                        variables=variables,
+                        refresh_target_ms=refresh_target_ms,
+                        timeout_seconds=timeout_seconds,
+                        poll_interval_seconds=poll_interval_seconds,
+                        limit=limit,
+                    )
                 recovery = _run_checkpoint(
                     connection,
                     scenario.recovery_checkpoint,
@@ -674,6 +689,48 @@ def _run_one_scenario(
             }
         )
     return payload
+
+
+def _wait_for_failed_committed_mutation_refresh(
+    connection: Any,
+    *,
+    checkpoint: WriteCheckpoint,
+    tenant_id: str,
+    started_at: Any,
+    variables: Mapping[str, Any],
+    refresh_target_ms: float,
+    timeout_seconds: float,
+    poll_interval_seconds: float,
+    limit: int,
+) -> dict[str, Any]:
+    """Let a committed write finish its durable fan-out before recovery reads a baseline."""
+
+    event_ids = _response_outbox_event_ids(variables.get(_RESPONSE_OUTBOX_EVENT_IDS))
+    if not event_ids:
+        mutation = next((step for step in checkpoint.steps if step.mutation), None)
+        idempotency_key = str(((mutation.json_body if mutation else None) or {}).get("idempotency_key") or "").strip()
+        if idempotency_key:
+            try:
+                event_ids = write_operation_slo_audit.committed_workbench_outbox_event_ids(
+                    connection,
+                    tenant_id=tenant_id,
+                    idempotency_key=idempotency_key,
+                )
+            except Exception as exc:
+                return {"status": "fail", "error": str(exc) or exc.__class__.__name__}
+    if not event_ids:
+        return {"status": "fail", "error": "committed_mutation_outbox_receipt_missing"}
+    return _wait_for_write_slo(
+        connection,
+        operations=checkpoint.operations,
+        tenant_id=tenant_id,
+        started_at=started_at,
+        target_ms=refresh_target_ms,
+        timeout_seconds=timeout_seconds,
+        poll_interval_seconds=poll_interval_seconds,
+        limit=limit,
+        event_ids=event_ids,
+    )
 
 
 def _run_checkpoint(

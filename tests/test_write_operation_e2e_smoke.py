@@ -1586,6 +1586,135 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         self.assertEqual(result["recovery"]["status"], "pass")
         self.assertFalse(result["recovery_required"])
 
+    def test_committed_write_slo_miss_waits_for_fanout_before_recovery_baseline(self) -> None:
+        isolation_consumer = write_operation_e2e_smoke.ConsumerProbe(
+            probe=http_slo_probe.HttpProbe("isolation", "/api/isolation", target_ms=1000),
+            assertions=(write_operation_e2e_smoke.JsonPointerAssertion("/rows/0/id", "equals", "stable"),),
+            page_key="output-invoice-collections",
+            role="isolation",
+        )
+
+        def checkpoint(name: str, *, key: str, relation_state_after: str) -> write_operation_e2e_smoke.WriteCheckpoint:
+            return write_operation_e2e_smoke.WriteCheckpoint(
+                name=name,
+                operations=("workbench_relation_withdraw",),
+                steps=(
+                    write_operation_e2e_smoke.WriteStep(
+                        name=name,
+                        method="POST",
+                        path=f"/api/{name}",
+                        json_body={"idempotency_key": key, "row_ids": ["test-row-1"]},
+                        expected_statuses=(200,),
+                    ),
+                ),
+                consumers=(isolation_consumer,),
+                system_audit_path=write_operation_e2e_smoke.SYSTEM_AUDIT_PATH,
+                relation_state_after=relation_state_after,
+            )
+
+        scenario = write_operation_e2e_smoke.WriteScenario(
+            name="closure",
+            operations=(),
+            steps=(),
+            post_api_probes=(),
+            checkpoints=(checkpoint("confirm", key="confirm-key", relation_state_after="active"),),
+            recovery_checkpoint=checkpoint("recover", key="recover-key", relation_state_after="inactive"),
+            fixture_ownership="test_owned",
+        )
+        mutation_started = False
+        refresh_ready = False
+        audit_count = 0
+
+        def request_fn(
+            url: str, method: str, headers, body, timeout_seconds: float
+        ) -> http_slo_probe.HttpProbeResponse:
+            nonlocal audit_count
+            if "page-audit" in url:
+                audit_count += 1
+                payload = _system_audit_payload(f"system-audit:slo-recovery:{audit_count}")
+                status = 200
+            elif url.endswith("/api/isolation") and mutation_started and not refresh_ready:
+                payload = {"read_model_status": "refreshing", "refresh_enqueued": True}
+                status = 202
+            else:
+                payload = {
+                    "read_model_status": "fresh",
+                    "refresh_enqueued": False,
+                    "rows": [{"id": "stable"}],
+                }
+                status = 200
+            return http_slo_probe.HttpProbeResponse(
+                status_code=status,
+                headers={"content-type": "application/json"},
+                body=json.dumps(payload).encode(),
+            )
+
+        execute_count = 0
+
+        def execute_step(*_args, **_kwargs):
+            nonlocal execute_count, mutation_started
+            execute_count += 1
+            mutation_started = True
+            result = write_operation_e2e_smoke.WriteStepResult(
+                name="confirm" if execute_count == 1 else "recover",
+                method="POST",
+                path="/api/confirm" if execute_count == 1 else "/api/recover",
+                status="fail" if execute_count == 1 else "pass",
+                elapsed_ms=5270.0 if execute_count == 1 else 500.0,
+                status_code=200,
+                response_bytes=2,
+                content_type="application/json",
+                error="write_step_slo_miss:5270.0>5000.0" if execute_count == 1 else None,
+            )
+            return write_operation_e2e_smoke._ExecutedStep(
+                result=result,
+                captures={
+                    write_operation_e2e_smoke._RESPONSE_OUTBOX_EVENT_IDS: [
+                        "event-confirm" if execute_count == 1 else "event-recover"
+                    ]
+                },
+                committed=True,
+                ambiguous=False,
+            )
+
+        wait_event_ids: list[list[str]] = []
+
+        def wait_for_write_slo(*_args, **kwargs):
+            nonlocal refresh_ready
+            wait_event_ids.append(list(kwargs["event_ids"]))
+            refresh_ready = True
+            return {"status": "pass", "results": []}
+
+        with (
+            patch(
+                "fin_ops_platform.tools.write_operation_e2e_smoke._execute_step",
+                side_effect=execute_step,
+            ),
+            patch(
+                "fin_ops_platform.tools.write_operation_e2e_smoke._wait_for_write_slo",
+                side_effect=wait_for_write_slo,
+            ),
+        ):
+            report = write_operation_e2e_smoke.run_write_operation_e2e_smoke(
+                FakeConnection([]),
+                scenarios=[scenario],
+                apply=True,
+                base_url="https://example.test",
+                api_prefix="/fin-ops-api",
+                tenant_id="default",
+                headers={"Authorization": "Bearer token"},
+                approval_reference="TEST-APPROVAL",
+                request_fn=request_fn,
+            )
+
+        result = report["results"][0]
+        self.assertEqual(report["status"], "fail")
+        self.assertEqual(result["checkpoints"][0]["steps"][0]["error"], "write_step_slo_miss:5270.0>5000.0")
+        self.assertEqual(result["checkpoints"][0]["recovery_precondition"]["status"], "pass")
+        self.assertEqual(wait_event_ids, [["event-confirm"], ["event-recover"]])
+        self.assertEqual(result["recovery"]["status"], "pass")
+        self.assertFalse(result["recovery_required"])
+
     def test_committed_withdraw_gate_failure_does_not_issue_a_second_withdraw(self) -> None:
         checkpoints = (
             _strict_checkpoint("confirm", key="confirm-key", relation_state_after="active"),
