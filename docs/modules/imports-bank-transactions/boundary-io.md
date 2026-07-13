@@ -35,6 +35,8 @@
 | 预览确认 | `ImportWorkflowPage.tsx`、`features/imports/api.ts` | 银行流水页面只能调用 `/imports/files/preview`、`/imports/files/confirm`、`/imports/files/sessions/*`；确认后创建可追踪 job |
 | Job event | runtime worker handlers | 后台处理必须可恢复 |
 
+Import worker 注册 handler 时只固定 processor 类型，不得把启动时的 `FileImportService` / canonical import snapshot 长期缓存到后续 job。每次 `import.process.requested` 执行前必须从 PostgreSQL durable facts 重新构造 processor，使 worker 启动后新创建的 session/file 以及最新 canonical 去重事实可见。
+
 ## 输出 I/O
 
 | 输出 | 目标 | 合同 |

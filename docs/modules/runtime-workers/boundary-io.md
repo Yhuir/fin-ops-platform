@@ -39,6 +39,7 @@
 | Relation-dependent invoice publish | `InvoiceUsageCollectionSqlProjectionBuilder` / runtime worker | input/output invoice projection 读取共享 relation scope 前必须通过 `workbench_relation` freshness gate；关系 scope pending/processing/stale 时抛出 `workbench_relation_read_model_not_fresh` 并由 worker 短延迟 defer，禁止把并行 claim 的旧 relation source versions 写成 fresh。 |
 | Claim hot path index | PostgreSQL migration | `job.outbox_events` active queue claim 必须保留 event-type-first 索引 `outbox_events_claim_event_type_priority_idx`，覆盖 `event_type/status/priority rank/available_at/created_at/id`；该索引只优化 worker lane claim I/O，不改变 durable queue 状态机、priority 语义或 freshness/readiness 事实源 |
 | Handler call | runtime worker | handler 只处理登记 event type |
+| Import processor state | PostgreSQL canonical/import file facts | import worker 只缓存 processor 类型；每个 job 调用必须重新构造 durable processor state，禁止启动时 snapshot 污染后来创建的 file session、canonical dedupe 或确认结果 |
 
 ## 输出 I/O
 

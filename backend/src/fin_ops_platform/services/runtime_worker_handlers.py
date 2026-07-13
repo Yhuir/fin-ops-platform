@@ -68,6 +68,12 @@ from fin_ops_platform.services.workbench_sql_projection import WORKBENCH_SQL_PRO
 
 
 IMPORT_FACT_CHANGED_EVENT = "import.fact.changed"
+IMPORT_JOB_PROCESSOR_TYPES = (
+    "file_import.confirm",
+    "etc_invoice_import.confirm",
+    "tax_certified_import.confirm",
+    "oa_manual_import.create",
+)
 SEARCH_MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 
 
@@ -83,6 +89,18 @@ class ImportRuntimeProcessorFactory:
         self._queue_repository = queue_repository
 
     def build_processors(self) -> dict[str, Callable[[Any], dict[str, object]]]:
+        return {import_type: self._durable_processor(import_type) for import_type in IMPORT_JOB_PROCESSOR_TYPES}
+
+    def _durable_processor(self, import_type: str) -> Callable[[Any], dict[str, object]]:
+        def process(job: Any) -> dict[str, object]:
+            processor = self._build_processors_from_durable_state().get(import_type)
+            if not callable(processor):
+                raise RuntimeError(f"Import processor is not registered: {import_type}")
+            return processor(job)
+
+        return process
+
+    def _build_processors_from_durable_state(self) -> dict[str, Callable[[Any], dict[str, object]]]:
         state_store = self._state_store()
         import_fact_repository = getattr(state_store, "import_fact_repository", None)
         import_service = ImportNormalizationService.from_snapshot(

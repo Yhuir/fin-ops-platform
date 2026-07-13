@@ -19,6 +19,7 @@ from fin_ops_platform.services.import_job_queue import (
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 from fin_ops_platform.services.runtime_worker_handlers import (
     IMPORT_FACT_CHANGED_EVENT,
+    ImportRuntimeProcessorFactory,
     _input_invoice_usage_scope_keys_for_import_file_session,
     _output_invoice_collection_scope_keys_for_import_file_session,
     _tax_offset_scope_keys_for_import_file_session,
@@ -196,6 +197,28 @@ def import_job(**overrides: object) -> ImportJob:
 
 
 class ImportJobRepositoryTests(unittest.TestCase):
+    def test_runtime_import_processor_reloads_durable_state_after_worker_bootstrap(self) -> None:
+        factory = ImportRuntimeProcessorFactory(data_dir="/tmp/finops-test", connection=object())
+        generations: list[int] = []
+
+        def build_current_processors():
+            generation = len(generations) + 1
+            generations.append(generation)
+            return {"file_import.confirm": lambda _job: {"generation": generation}}
+
+        with patch.object(
+            factory,
+            "_build_processors_from_durable_state",
+            side_effect=build_current_processors,
+        ) as builder:
+            processors = factory.build_processors()
+
+            self.assertEqual(builder.call_count, 0)
+            self.assertEqual(processors["file_import.confirm"](import_job()), {"generation": 1})
+            self.assertEqual(processors["file_import.confirm"](import_job()), {"generation": 2})
+
+        self.assertEqual(generations, [1, 2])
+
     def test_postgres_import_processing_backend_uses_durable_queue_and_inline_is_rejected(self) -> None:
         app = build_application()
         app._runtime_repositories = SimpleNamespace(  # noqa: SLF001
