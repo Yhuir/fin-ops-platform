@@ -146,6 +146,7 @@ DEFAULT_OPERATION_EXPECTATIONS: tuple[OperationExpectation, ...] = (
     OperationExpectation("workbench_relation_confirm_cross_page", "invoice_lifecycle", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_confirm_cross_page", "pending_invoice", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_confirm_cross_page", "input_invoice_usage", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_confirm_cross_page", "output_invoice_collection", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_confirm_cross_page", "oa_pending_payment", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_confirm_cross_page", "cost_statistics", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_confirm_cross_page", "search", "workbench_relation_changed"),
@@ -157,6 +158,7 @@ DEFAULT_OPERATION_EXPECTATIONS: tuple[OperationExpectation, ...] = (
     OperationExpectation("workbench_relation_withdraw_cross_page", "invoice_lifecycle", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_withdraw_cross_page", "pending_invoice", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_withdraw_cross_page", "input_invoice_usage", "workbench_relation_changed"),
+    OperationExpectation("workbench_relation_withdraw_cross_page", "output_invoice_collection", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_withdraw_cross_page", "oa_pending_payment", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_withdraw_cross_page", "cost_statistics", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_withdraw_cross_page", "search", "workbench_relation_changed"),
@@ -179,6 +181,9 @@ DEFAULT_OPERATION_EXPECTATIONS: tuple[OperationExpectation, ...] = (
         "workbench_relation_confirm_bank_invoice_cross_page", "input_invoice_usage", "workbench_relation_changed"
     ),
     OperationExpectation(
+        "workbench_relation_confirm_bank_invoice_cross_page", "output_invoice_collection", "workbench_relation_changed"
+    ),
+    OperationExpectation(
         "workbench_relation_confirm_bank_invoice_cross_page", "cost_statistics", "workbench_relation_changed"
     ),
     OperationExpectation("workbench_relation_confirm_bank_invoice_cross_page", "search", "workbench_relation_changed"),
@@ -199,6 +204,9 @@ DEFAULT_OPERATION_EXPECTATIONS: tuple[OperationExpectation, ...] = (
     ),
     OperationExpectation(
         "workbench_relation_withdraw_bank_invoice_cross_page", "input_invoice_usage", "workbench_relation_changed"
+    ),
+    OperationExpectation(
+        "workbench_relation_withdraw_bank_invoice_cross_page", "output_invoice_collection", "workbench_relation_changed"
     ),
     OperationExpectation(
         "workbench_relation_withdraw_bank_invoice_cross_page", "cost_statistics", "workbench_relation_changed"

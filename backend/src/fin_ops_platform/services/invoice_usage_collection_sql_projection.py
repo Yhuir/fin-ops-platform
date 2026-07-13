@@ -115,6 +115,7 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
 
     def rebuild_input_invoice_usage_read_model_scope(self, scope_key: str) -> dict[str, object]:
         normalized_scope_key = self._month_scope(scope_key)
+        self._require_fresh_workbench_relation_scope(normalized_scope_key)
         source_versions = input_invoice_usage_source_versions(
             payment_status_rules_version=self._payment_rules_provider.rules_source_version(),
         )
@@ -150,6 +151,7 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
 
     def rebuild_output_invoice_collection_read_model_scope(self, scope_key: str) -> dict[str, object]:
         normalized_scope_key = self._month_scope(scope_key)
+        self._require_fresh_workbench_relation_scope(normalized_scope_key)
         source_versions = output_invoice_collection_source_versions()
         relation_source_versions = self._workbench_relation_source_versions_for_scope(normalized_scope_key)
         if relation_source_versions:
@@ -381,6 +383,15 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
             if isinstance(source_versions, dict) and source_versions:
                 return dict(source_versions)
         return dict(self._workbench_relation_read_facade.last_source_versions)
+
+    def _require_fresh_workbench_relation_scope(self, scope_key: str) -> None:
+        payload = self._workbench_relation_read_facade.list_by_month(
+            scope_key,
+            require_fresh=True,
+            reason="invoice_usage_collection_sql_projection",
+        )
+        if not isinstance(payload, dict) or str(payload.get("status") or "") != "fresh":
+            raise RuntimeError("workbench_relation_read_model_not_fresh")
 
     def _import_service(self) -> ImportNormalizationService:
         return ImportNormalizationService.from_snapshot(None, fact_repository=self._core_repository)

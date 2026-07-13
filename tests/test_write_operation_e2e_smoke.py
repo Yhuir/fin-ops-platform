@@ -137,6 +137,7 @@ _BANK_INVOICE_CONSUMER_PAGES = (
     "bank-details",
     "pending-invoices",
     "input-invoice-usage",
+    "output-invoice-collections",
     "cost-statistics",
     "tax-offset",
 )
@@ -146,6 +147,7 @@ _CONSUMER_PATHS = {
     "bank-details": "/api/bank-details/transactions?year=2026&page=1&page_size=20",
     "pending-invoices": "/api/pending-invoices/rows?page=1&page_size=20",
     "input-invoice-usage": "/api/input-invoice-usage/rows?page=1&page_size=20",
+    "output-invoice-collections": "/api/output-invoice-collections/rows?page=1&page_size=20",
     "oa-pending-payments": "/api/oa-pending-payments/rows?page=1&page_size=20",
     "cost-statistics": "/api/cost-statistics/explorer?month=2026-07",
     "tax-offset": "/api/tax-offset?month=2026-07",

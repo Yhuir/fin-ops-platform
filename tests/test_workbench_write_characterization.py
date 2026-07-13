@@ -1160,6 +1160,14 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
 
         self.assertEqual(scope_keys, ["expense:all:2026-03", "income:all:2026-03"])
 
+        unresolved_scope_keys = facade._relation_pending_invoice_scope_keys(
+            relation={"row_ids": ["bank-absolute-amount"], "row_types": ["bank"]},
+            rows=[],
+            month="2026-03",
+        )
+
+        self.assertEqual(unresolved_scope_keys, ["expense:all:2026-03", "income:all:2026-03"])
+
     def test_withdraw_link_uses_uow_transaction_when_available(self) -> None:
         app = self._build_app()
         row_ids = self._default_open_row_ids(app)

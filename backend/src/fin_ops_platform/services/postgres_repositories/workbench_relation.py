@@ -427,9 +427,6 @@ def _workbench_relation_downstream_scope_map(
     has_oa = "oa" in row_types
     is_no_oa_batch = relation_mode in _NO_OA_RELATION_MODES
     is_bank_flow_rule_batch = relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE
-    invoice_directions = _workbench_relation_invoice_directions(connection, row_ids) if has_invoice else set()
-    unknown_invoice_direction = has_invoice and not invoice_directions
-
     actual_invoice_scope_keys = set(domain_scope_keys.get("invoice", set()))
     actual_oa_scope_keys = set(domain_scope_keys.get("oa", set()))
     bank_scope_keys = _domain_scope_keys(domain_scope_keys, "bank", dirty_scope_keys)
@@ -454,10 +451,8 @@ def _workbench_relation_downstream_scope_map(
         add("invoice_lifecycle", lifecycle_scope_keys or broad_scope_keys)
     if has_invoice or unknown_row_types:
         invoice_downstream_scope_keys = broad_scope_keys if unknown_row_types else (actual_invoice_scope_keys or {"all"})
-        if "input" in invoice_directions or unknown_invoice_direction or unknown_row_types:
-            add("input_invoice_usage", invoice_downstream_scope_keys)
-        if "output" in invoice_directions or unknown_invoice_direction or unknown_row_types:
-            add("output_invoice_collection", invoice_downstream_scope_keys)
+        add("input_invoice_usage", invoice_downstream_scope_keys)
+        add("output_invoice_collection", invoice_downstream_scope_keys)
     if has_oa:
         add("oa_pending_payment", actual_oa_scope_keys or {"all"})
     cost_scope_keys: set[str] = set()
@@ -657,28 +652,6 @@ def _workbench_relation_workbench_scope_keys(connection: Any, relation: dict[str
         (row_ids,),
     )
     return {text(row.get("scope_key")) for row in rows if text(row.get("scope_key"))}
-
-
-def _workbench_relation_invoice_directions(connection: Any, row_ids: list[str]) -> set[str]:
-    if not row_ids:
-        return set()
-    rows = connection.fetch_all(
-        """
-        select distinct invoice_type
-        from app.invoices
-        where status <> 'deleted'
-          and coalesce(legacy_mongo_id, id::text) = any(%s)
-        """,
-        (row_ids,),
-    )
-    directions: set[str] = set()
-    for row in rows:
-        invoice_type = (text(row.get("invoice_type")) or "").lower()
-        if "input" in invoice_type or "进" in invoice_type:
-            directions.add("input")
-        if "output" in invoice_type or "销" in invoice_type:
-            directions.add("output")
-    return directions
 
 
 def _workbench_relation_bank_directions(connection: Any, row_ids: list[str]) -> set[str]:

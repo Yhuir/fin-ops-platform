@@ -132,6 +132,19 @@ class FreshEmptyWorkbenchRelationFacade:
         return self.list_by_month()
 
 
+class RefreshingWorkbenchRelationFacade(FreshEmptyWorkbenchRelationFacade):
+    def list_by_month(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+        return {
+            "status": "refreshing",
+            "rows": [],
+            "groups": [],
+            "source_versions": {},
+            "read_model_scope_keys": ["2026-05"],
+            "refresh_enqueued": False,
+            "stale_reasons": ["dirty_scope"],
+        }
+
+
 class FreshStaticWorkbenchRelationFacade:
     def __init__(self, relations: list[dict[str, object]]) -> None:
         self.relations = [dict(relation) for relation in relations]
@@ -2493,6 +2506,29 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(result["row_count"], 154)
         self.assertEqual(result["source_versions"], expected_source_versions)
         self.assertIsNone(read_repository.saved_input)
+
+    def test_invoice_page_projections_defer_until_relation_scope_is_fresh(self) -> None:
+        read_repository = RecordingInvoiceRelationReadRepository()
+        builder = InvoiceUsageCollectionSqlProjectionBuilder(
+            connection=EmptyTransactionConnection(),
+            workbench_relation_read_facade=RefreshingWorkbenchRelationFacade(),
+        )
+        builder._read_repository = read_repository
+        builder._input_invoice_usage_read_model_repository = read_repository
+        builder._output_invoice_collection_read_model_repository = read_repository
+
+        for rebuild in (
+            builder.rebuild_input_invoice_usage_read_model_scope,
+            builder.rebuild_output_invoice_collection_read_model_scope,
+        ):
+            with self.subTest(rebuild=rebuild.__name__), self.assertRaisesRegex(
+                RuntimeError,
+                "workbench_relation_read_model_not_fresh",
+            ):
+                rebuild("2026-05")
+
+        self.assertIsNone(read_repository.saved_input)
+        self.assertIsNone(read_repository.saved_output)
 
     def test_input_projection_keeps_current_scope_relation_versions_after_cross_month_fallback(self) -> None:
         read_repository = RecordingInvoiceRelationReadRepository()

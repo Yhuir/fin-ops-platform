@@ -3829,19 +3829,13 @@ class WorkbenchWriteFacade:
         has_bank = "bank" in row_types or unknown_row_types
         has_invoice = "invoice" in row_types or unknown_row_types
         has_oa = "oa" in row_types
-        invoice_directions = self._invoice_directions(rows)
-        unknown_invoice_direction = has_invoice and not invoice_directions
-
         scope_types: set[str] = {"search", "workbench_relation"}
         if has_bank:
             scope_types.update({"bank_detail", "pending_invoice"})
         if has_invoice or has_oa or unknown_row_types:
             scope_types.add("invoice_lifecycle")
         if has_invoice:
-            if "input" in invoice_directions or unknown_invoice_direction:
-                scope_types.add("input_invoice_usage")
-            if "output" in invoice_directions or unknown_invoice_direction:
-                scope_types.add("output_invoice_collection")
+            scope_types.update({"input_invoice_usage", "output_invoice_collection"})
         if has_oa:
             scope_types.add("oa_pending_payment")
         if has_bank or has_invoice or has_oa or unknown_row_types:
@@ -3859,8 +3853,6 @@ class WorkbenchWriteFacade:
         if row_types and "bank" not in row_types:
             return []
         directions = self._bank_directions(rows)
-        if not directions:
-            directions = self._bank_directions_from_relation(relation)
         if not directions:
             directions = {"expense", "income"}
         scope_keys: list[str] = []
@@ -3893,19 +3885,6 @@ class WorkbenchWriteFacade:
             if row_type_for_workbench_row_id(row_id, unknown="")
         }
 
-    @staticmethod
-    def _invoice_directions(rows: list[dict[str, object]]) -> set[str]:
-        directions: set[str] = set()
-        for row in list(rows or []):
-            if str(row.get("type") or "") != "invoice":
-                continue
-            invoice_type = str(row.get("invoice_type") or row.get("invoiceType") or "").strip().lower()
-            if "input" in invoice_type or "进" in invoice_type:
-                directions.add("input")
-            if "output" in invoice_type or "销" in invoice_type:
-                directions.add("output")
-        return directions
-
     def _bank_directions(self, rows: list[dict[str, object]]) -> set[str]:
         directions: set[str] = set()
         for row in list(rows or []):
@@ -3921,27 +3900,6 @@ class WorkbenchWriteFacade:
             if debit_amount is not None and debit_amount > 0:
                 directions.add("expense")
             if credit_amount is not None and credit_amount > 0:
-                directions.add("income")
-        return directions
-
-    def _bank_directions_from_relation(self, relation: dict[str, object]) -> set[str]:
-        row_ids = [str(row_id).strip() for row_id in list(relation.get("row_ids") or []) if str(row_id).strip()]
-        row_types = [str(row_type).strip() for row_type in list(relation.get("row_types") or [])]
-        directions: set[str] = set()
-        for index, row_id in enumerate(row_ids):
-            row_type = row_types[index] if index < len(row_types) and row_types[index] else row_type_for_workbench_row_id(row_id, unknown="")
-            if row_type != "bank":
-                continue
-            try:
-                transaction_amount = self._transaction_amount_for_row_id(row_id)
-            except Exception:
-                continue
-            amount = self._decimal_from_value(transaction_amount)
-            if amount is None:
-                continue
-            if amount < 0:
-                directions.add("expense")
-            elif amount > 0:
                 directions.add("income")
         return directions
 

@@ -44,6 +44,7 @@ REVERSIBLE_RELATION_CONSUMER_CONTRACTS: dict[str, dict[str, object]] = {
     "bank-details": {"path": "/api/bank-details/transactions", "business_roots": ("rows",)},
     "pending-invoices": {"path": "/api/pending-invoices/rows", "business_roots": ("rows",)},
     "input-invoice-usage": {"path": "/api/input-invoice-usage/rows", "business_roots": ("rows",)},
+    "output-invoice-collections": {"path": "/api/output-invoice-collections/rows", "business_roots": ("rows",)},
     "oa-pending-payments": {"path": "/api/oa-pending-payments/rows", "business_roots": ("rows",)},
     "cost-statistics": {
         "path": "/api/cost-statistics/explorer",
@@ -71,7 +72,7 @@ REVERSIBLE_RELATION_SHAPE_CONTRACTS: dict[str, dict[str, object]] = {
             "input-invoice-usage",
             "cost-statistics",
         ),
-        "non_consumer_isolation_page_keys": ("tax-offset",),
+        "non_consumer_isolation_page_keys": ("output-invoice-collections", "tax-offset"),
     },
     "bank_turnover": {
         "mutation_contract": "turnover_closure",
@@ -96,7 +97,7 @@ REVERSIBLE_RELATION_SHAPE_CONTRACTS: dict[str, dict[str, object]] = {
             "oa-pending-payments",
             "cost-statistics",
         ),
-        "non_consumer_isolation_page_keys": ("tax-offset",),
+        "non_consumer_isolation_page_keys": ("output-invoice-collections", "tax-offset"),
     },
 }
 

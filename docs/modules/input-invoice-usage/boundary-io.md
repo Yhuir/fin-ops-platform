@@ -37,6 +37,7 @@
 | OA reverse 写操作 | `input_invoice_usage_oa_reverse_service.py` | 必须带 OA applicant context 和审计 |
 | OA reverse target envelope | `InputInvoiceUsageOaReverseService.batch_payload(..., include_write_targets=True)` | 仅用于 evidence detected / relation-impacting 写入；从 batch invoice display rows 提取 invoice month；无月份时退回 `all`，并返回 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets` |
 | Refresh scope | `input_invoice_usage` manifest | month or `all`；`all` 是 fan-out command |
+| Relation upstream freshness | `workbench_relation` month scope | projection 在读取 relation source versions、执行 unchanged-scope 判断或写 rows 前必须先通过 fresh gate；non-fresh 抛出已登记 dependency-not-fresh 错误交 worker defer，禁止与 relation refresh 并行落盘旧版本 |
 
 ## 输出 I/O
 

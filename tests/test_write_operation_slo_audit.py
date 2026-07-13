@@ -459,6 +459,7 @@ class WriteOperationSloAuditTests(unittest.TestCase):
             _event(scope_type="invoice_lifecycle", reason="workbench_relation_changed"),
             _event(scope_type="pending_invoice", reason="workbench_relation_changed"),
             _event(scope_type="input_invoice_usage", reason="workbench_relation_changed"),
+            _event(scope_type="output_invoice_collection", reason="workbench_relation_changed"),
             _event(scope_type="oa_pending_payment", reason="workbench_relation_changed"),
             _event(scope_type="cost_statistics", reason="workbench_relation_changed"),
             _event(scope_type="search", reason="workbench_relation_changed"),
@@ -471,7 +472,7 @@ class WriteOperationSloAuditTests(unittest.TestCase):
         )
 
         self.assertEqual(report["status"], "pass")
-        self.assertEqual(report["expectation_count"], 9)
+        self.assertEqual(report["expectation_count"], 10)
 
     def test_workbench_relation_confirm_profile_requires_operation_visible_workbench_scopes(self) -> None:
         rows = [
@@ -501,6 +502,7 @@ class WriteOperationSloAuditTests(unittest.TestCase):
             _event(scope_type="invoice_lifecycle", reason="workbench_relation_changed"),
             _event(scope_type="pending_invoice", reason="workbench_relation_changed"),
             _event(scope_type="input_invoice_usage", reason="workbench_relation_changed"),
+            _event(scope_type="output_invoice_collection", reason="workbench_relation_changed"),
             _event(scope_type="oa_pending_payment", reason="workbench_relation_changed"),
             _event(scope_type="cost_statistics", reason="workbench_relation_changed"),
             _event(scope_type="search", reason="workbench_relation_changed"),
@@ -513,7 +515,7 @@ class WriteOperationSloAuditTests(unittest.TestCase):
         )
 
         self.assertEqual(report["status"], "pass")
-        self.assertEqual(report["expectation_count"], 9)
+        self.assertEqual(report["expectation_count"], 10)
 
     def test_full_cross_page_profiles_require_oa_pending_payment_refresh(self) -> None:
         for operation in (
@@ -536,6 +538,7 @@ class WriteOperationSloAuditTests(unittest.TestCase):
             _event(scope_type="invoice_lifecycle", reason="workbench_relation_changed"),
             _event(scope_type="pending_invoice", reason="workbench_relation_changed"),
             _event(scope_type="input_invoice_usage", reason="workbench_relation_changed"),
+            _event(scope_type="output_invoice_collection", reason="workbench_relation_changed"),
             _event(scope_type="cost_statistics", reason="workbench_relation_changed"),
             _event(scope_type="search", reason="workbench_relation_changed"),
         ]
@@ -547,7 +550,7 @@ class WriteOperationSloAuditTests(unittest.TestCase):
         )
 
         self.assertEqual(report["status"], "pass")
-        self.assertEqual(report["expectation_count"], 8)
+        self.assertEqual(report["expectation_count"], 9)
         self.assertIn(
             "cost_statistics",
             {result["scope_type"] for result in report["results"]},
@@ -561,6 +564,7 @@ class WriteOperationSloAuditTests(unittest.TestCase):
             _event(scope_type="invoice_lifecycle", reason="workbench_relation_changed"),
             _event(scope_type="pending_invoice", reason="workbench_relation_changed"),
             _event(scope_type="input_invoice_usage", reason="workbench_relation_changed"),
+            _event(scope_type="output_invoice_collection", reason="workbench_relation_changed"),
             _event(scope_type="cost_statistics", reason="workbench_relation_changed"),
             _event(scope_type="search", reason="workbench_relation_changed"),
         ]
@@ -572,7 +576,7 @@ class WriteOperationSloAuditTests(unittest.TestCase):
         )
 
         self.assertEqual(report["status"], "pass")
-        self.assertEqual(report["expectation_count"], 8)
+        self.assertEqual(report["expectation_count"], 9)
         self.assertIn(
             "cost_statistics",
             {result["scope_type"] for result in report["results"]},
