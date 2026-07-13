@@ -3,12 +3,14 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import re
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 from fin_ops_platform.app.server import build_application
 from fin_ops_platform.app import server as server_module
 from fin_ops_platform.services import file_object_migration as file_object_migration_module
+from fin_ops_platform.services.import_file_service import FileImportSession
 from fin_ops_platform.services import postgres_state_store as postgres_state_store_module
 from fin_ops_platform.services.postgres_state_store import PostgresStateStore
 from fin_ops_platform.services import runtime_bootstrap as runtime_bootstrap_module
@@ -97,6 +99,35 @@ class MissingBankAccountBalanceRepository:
 
 
 class RuntimeBootstrapTests(unittest.TestCase):
+    def test_postgres_file_import_boundary_reloads_current_session_without_full_state_load(self) -> None:
+        session = FileImportSession(
+            id="import_session_0021",
+            imported_by="operator",
+            file_count=0,
+            status="preview_ready",
+            files=[],
+        )
+        calls: list[str] = []
+        store = SimpleNamespace(
+            storage_backend="postgres",
+            import_fact_repository=None,
+            load_imports_snapshot=lambda: calls.append("imports") or {},
+            load_file_imports_snapshot=lambda: calls.append("file_imports")
+            or {
+                "session_counter": 21,
+                "file_counter": 63,
+                "sessions": {session.id: session},
+            },
+        )
+        app = object.__new__(server_module.Application)
+        app._state_store = store
+
+        app._reload_file_import_runtime_state()
+
+        self.assertEqual(calls, ["imports", "file_imports"])
+        self.assertIs(app._file_import_service.get_session(session.id), session)
+        self.assertEqual(store.__dict__.get("load_calls", 0), 0)
+
     def test_lightweight_bootstrap_does_not_call_full_state_load_and_exposes_repositories(self) -> None:
         store = LoadTrackingStore()
         with patch("fin_ops_platform.app.server.build_state_store", return_value=store):

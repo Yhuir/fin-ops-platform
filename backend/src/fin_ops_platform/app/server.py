@@ -5115,6 +5115,7 @@ class Application:
         return AppHealthService._job_payload(job)
 
     def _retry_file_import_background_job(self, job, owner_user_id: str) -> Response:
+        self._reload_file_import_runtime_state()
         source = job.source if isinstance(job.source, dict) else {}
         session_id = str(source.get("session_id") or "").strip()
         selected_file_ids = [
@@ -9635,6 +9636,7 @@ class Application:
             )
         normalized_session_id = str(session_id)
         normalized_selected_file_ids = [str(item) for item in selected_file_ids]
+        self._reload_file_import_runtime_state()
         try:
             session = self._file_import_service.get_session(normalized_session_id)
         except KeyError as exc:
@@ -9755,6 +9757,7 @@ class Application:
                     "message": "session_id and selected_file_ids are required.",
                 },
             )
+        self._reload_file_import_runtime_state()
         try:
             session = self._file_import_service.retry_session_files(
                 session_id=str(session_id),
@@ -9775,6 +9778,7 @@ class Application:
         return self._json_response(HTTPStatus.OK, self._serialize_file_session(session))
 
     def _handle_import_file_session(self, session_id: str) -> Response:
+        self._reload_file_import_runtime_state()
         try:
             session = self._file_import_service.get_session(session_id)
         except KeyError:
@@ -9783,6 +9787,25 @@ class Application:
                 {"error": "import_file_session_not_found", "session_id": session_id},
             )
         return self._json_response(HTTPStatus.OK, self._serialize_file_session(session))
+
+    def _reload_file_import_runtime_state(self) -> None:
+        if str(getattr(self._state_store, "storage_backend", "") or "").strip() != "postgres":
+            return
+        load_imports = getattr(self._state_store, "load_imports_snapshot", None)
+        load_file_imports = getattr(self._state_store, "load_file_imports_snapshot", None)
+        if not callable(load_imports) or not callable(load_file_imports):
+            raise RuntimeError("PostgreSQL file import runtime requires explicit import snapshot loaders.")
+        import_service = ImportNormalizationService.from_snapshot(
+            load_imports(),
+            id_registry=self._state_store,
+            fact_repository=getattr(self._state_store, "import_fact_repository", None),
+        )
+        self._import_service = import_service
+        self._file_import_service = FileImportService.from_snapshot(
+            import_service,
+            load_file_imports(),
+            file_store=self._state_store,
+        )
 
     def _parse_import_file_preview_overrides(
         self,
