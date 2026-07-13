@@ -1324,6 +1324,78 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         self.assertEqual(audit["status"], "fail")
         self.assertEqual(audit["error"], "system_audit_snapshot_missing")
 
+    def test_consumer_wait_retries_refreshing_but_not_content_or_latency_failures(self) -> None:
+        checkpoint = _strict_checkpoint("confirm", key="confirm-key", relation_state_after="active")
+        attempts = 0
+
+        def refreshing_then_fresh(*_args) -> http_slo_probe.HttpProbeResponse:
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                status = 202
+                payload = {"read_model_status": "refreshing", "refresh_enqueued": True}
+            else:
+                status = 200
+                payload = {
+                    "read_model_status": "fresh",
+                    "refresh_enqueued": False,
+                    "rows": [{"linked": True}],
+                }
+            return http_slo_probe.HttpProbeResponse(
+                status_code=status,
+                headers={"content-type": "application/json"},
+                body=json.dumps(payload).encode(),
+            )
+
+        with patch("fin_ops_platform.tools.write_operation_e2e_smoke.sleep", return_value=None):
+            converged = write_operation_e2e_smoke._wait_for_checkpoint_consumers(
+                checkpoint,
+                base_url="https://example.test",
+                api_prefix="/fin-ops-api",
+                headers={"Authorization": "Bearer token"},
+                timeout_seconds=1,
+                poll_interval_seconds=0.05,
+                request_fn=refreshing_then_fresh,
+                variables={},
+                strict=True,
+            )
+
+        self.assertEqual(converged["status"], "pass")
+        self.assertEqual(attempts, 2)
+
+        attempts = 0
+
+        def wrong_content(*_args) -> http_slo_probe.HttpProbeResponse:
+            nonlocal attempts
+            attempts += 1
+            return http_slo_probe.HttpProbeResponse(
+                status_code=200,
+                headers={"content-type": "application/json"},
+                body=json.dumps(
+                    {
+                        "read_model_status": "fresh",
+                        "refresh_enqueued": False,
+                        "rows": [{"linked": False}],
+                    }
+                ).encode(),
+            )
+
+        failed = write_operation_e2e_smoke._wait_for_checkpoint_consumers(
+            checkpoint,
+            base_url="https://example.test",
+            api_prefix="/fin-ops-api",
+            headers={"Authorization": "Bearer token"},
+            timeout_seconds=1,
+            poll_interval_seconds=0.05,
+            request_fn=wrong_content,
+            variables={},
+            strict=True,
+        )
+
+        self.assertEqual(failed["status"], "fail")
+        self.assertEqual(attempts, 1)
+        self.assertEqual(failed["results"][0]["assertions"][0]["error"], "json_assertion_mismatch")
+
     def test_system_audit_waits_for_transient_queue_backlog_and_requires_new_snapshot(self) -> None:
         checkpoint = _strict_checkpoint("confirm", key="confirm-key", relation_state_after="active")
         attempts = 0

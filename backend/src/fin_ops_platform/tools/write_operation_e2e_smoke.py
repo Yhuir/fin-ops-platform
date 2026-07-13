@@ -883,12 +883,13 @@ def _run_checkpoint(
             mutation_ambiguous=mutation_ambiguous,
             write_slo=write_slo,
         )
-    post_api = _collect_checkpoint_consumers(
+    post_api = _wait_for_checkpoint_consumers(
         checkpoint,
         base_url=base_url,
         api_prefix=api_prefix,
         headers=headers,
         timeout_seconds=timeout_seconds,
+        poll_interval_seconds=poll_interval_seconds,
         request_fn=request_fn,
         variables=variables,
         strict=strict,
@@ -1354,6 +1355,51 @@ def _collect_checkpoint_consumers(
         "consumer_count": len(results),
         "results": results,
     }
+
+
+_RETRYABLE_CONSUMER_ERRORS = {
+    "consumer_read_model_not_fresh",
+    "unexpected_status:202",
+    "unexpected_status:503",
+}
+
+
+def _wait_for_checkpoint_consumers(
+    checkpoint: WriteCheckpoint,
+    *,
+    base_url: str,
+    api_prefix: str,
+    headers: Mapping[str, str],
+    timeout_seconds: float,
+    poll_interval_seconds: float,
+    request_fn: RequestFn,
+    variables: Mapping[str, Any],
+    strict: bool,
+    isolation_baseline: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    deadline = monotonic() + max(1.0, timeout_seconds)
+    while True:
+        result = _collect_checkpoint_consumers(
+            checkpoint,
+            base_url=base_url,
+            api_prefix=api_prefix,
+            headers=headers,
+            timeout_seconds=timeout_seconds,
+            request_fn=request_fn,
+            variables=variables,
+            strict=strict,
+            isolation_baseline=isolation_baseline,
+        )
+        if result.get("status") in {"pass", "skipped"}:
+            return result
+        failed = [item for item in list(result.get("results") or []) if item.get("status") != "pass"]
+        if (
+            not failed
+            or any(str(item.get("error") or "") not in _RETRYABLE_CONSUMER_ERRORS for item in failed)
+            or monotonic() >= deadline
+        ):
+            return result
+        sleep(max(0.05, poll_interval_seconds))
 
 
 def _capture_isolation_baseline(
