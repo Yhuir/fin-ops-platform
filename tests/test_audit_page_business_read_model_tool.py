@@ -4,7 +4,14 @@ import io
 import json
 import unittest
 
+from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
+from fin_ops_platform.services.postgres_repositories import page_business_audit
 from fin_ops_platform.tools import audit_page_business_read_model
+from tests.postgres_test_utils import (
+    apply_test_migrations,
+    require_postgres_test_database_url,
+    truncate_test_database,
+)
 
 
 class FakeConnection:
@@ -365,6 +372,10 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertIn("row.transaction_id = source.id::text", queried_sql)
         self.assertIn("row.source_versions, '{}'::jsonb) - 'source_version'", queried_sql)
         self.assertIn("canonical_relation_summary", queried_sql)
+        self.assertIn("scope_bank_identities", queried_sql)
+        self.assertIn("coalesce(source.legacy_mongo_id, source.id::text)", queried_sql)
+        self.assertIn("source.id::text", queried_sql)
+        self.assertIn("relation.row_ids && identities.row_ids", queried_sql)
 
     def test_bank_detail_audit_proves_linked_relation_tag_case_and_status_contract(self) -> None:
         connection = FakeConnection()
@@ -920,6 +931,88 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         payload = json.loads(stdout.getvalue())
         self.assertEqual(payload["overall_status"], "issues_found")
         self.assertEqual(payload["summary"]["issue_sample_counts_by_code"], {"read_model_scope_not_fresh": 1})
+
+
+class BankDetailAuditPostgresTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.database_url = require_postgres_test_database_url()
+        apply_test_migrations(cls.database_url)
+
+    def setUp(self) -> None:
+        truncate_test_database(self.database_url)
+        self.connection = PostgresConnection(PostgresSettings(database_url=self.database_url, pool_enabled=False))
+
+    def tearDown(self) -> None:
+        truncate_test_database(self.database_url)
+
+    def test_cross_month_relation_membership_is_part_of_each_bank_scope_expected_summary(self) -> None:
+        self.connection.execute(
+            """
+            insert into app.bank_transactions(
+                legacy_mongo_id, account_no, txn_direction, counterparty_name_raw,
+                amount, signed_amount, txn_date, txn_month, status, raw_payload
+            ) values
+                ('bank-feb', '6222', 'inflow', '测试往来', 100, 100, '2026-02-01', '2026-02-01', 'active', '{}'::jsonb),
+                ('bank-mar', '6222', 'outflow', '测试往来', 100, -100, '2026-03-01', '2026-03-01', 'active', '{}'::jsonb)
+            """
+        )
+        relation = self.connection.fetch_one(
+            """
+            insert into app.workbench_pair_relations(
+                case_id, relation_mode, status, month_scope, row_ids, row_types, updated_at
+            ) values (
+                'turnover:test-cross-month', 'turnover_manual_closure', 'active', '2026-03-01',
+                array['bank-feb', 'bank-mar'], array['bank', 'bank'],
+                '2026-07-13 08:00:00+00'::timestamptz
+            )
+            returning updated_at::text as relation_updated_at
+            """
+        )
+        relation_updated_at = str((relation or {})["relation_updated_at"])
+        for scope_key in ("2026-02", "2026-03"):
+            source_versions = {
+                "workbench_relation_source_versions": {
+                    "source": "workbench_pair_relations",
+                    "scope_key": scope_key,
+                    "relation_count": 1,
+                    "relation_updated_at": relation_updated_at,
+                }
+            }
+            self.connection.execute(
+                """
+                insert into read_model.bank_detail_scopes(
+                    scope_key, scope_month, schema_version, status, row_count, source_versions
+                ) values (%s, (%s || '-01')::date, 10, 'fresh', 0, %s::jsonb)
+                """,
+                (scope_key, scope_key, json.dumps(source_versions)),
+            )
+
+        sql, params, _issue_code = page_business_audit._embedded_relation_source_summary_query(  # noqa: SLF001
+            "bank_details",
+            "read_model.bank_detail_scopes",
+            "scope",
+            "default",
+            50,
+        )
+
+        self.assertEqual(self.connection.fetch_all(sql, params), [])
+
+        self.connection.execute(
+            """
+            update read_model.bank_detail_scopes
+            set source_versions = jsonb_set(
+                source_versions,
+                '{workbench_relation_source_versions,relation_count}',
+                '0'::jsonb
+            )
+            where scope_key = '2026-02'
+            """
+        )
+        mismatches = self.connection.fetch_all(sql, params)
+
+        self.assertEqual([row["scope_key"] for row in mismatches], ["2026-02"])
+        self.assertEqual(mismatches[0]["current_relation_versions"]["relation_count"], 1)
 
 
 def _check_name(sql: str) -> str:

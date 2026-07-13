@@ -439,6 +439,7 @@
 
 - 第三组生产可逆关系测试证明：turnover 跨月 relation 撤回后 shared edges 已删除，但 bank-detail 的 source summary 只按 relation `month_scope` 过滤，未覆盖通过 row membership 横跨 2026-02/03 的关系；unchanged fast-path 因而保留旧 case id 并错误发布 fresh。
 - 修复：projection 在计算 relation source summary 前先收集该 scope 全部银行流水的 legacy row id 与 canonical UUID，并通过既有 workbench-relations repository port 以 `month_scope OR row_ids overlap` 取 stable summary；行投影继续复用同一组身份。bank-detail schema 提升到 v10，禁止旧 v9 scope 被当作兼容 fresh。
+- Audit：只读 expected-side 独立扫描 canonical bank identities 与 active pair-relation membership，使用相同业务集合语义但不调用 projection builder/读取 projected tags，防止 v10 的正确跨月计数被旧 month-only 审计误报。
 - 边界：不改变 Workbench relation 事实、不新增第二份 relation snapshot、不直接跨模块 SQL；仅修正既有 repository port 的查询参数与 bank-detail source-version 合同。
 
 ## 2026-06-14 - Bank detail stale source guard

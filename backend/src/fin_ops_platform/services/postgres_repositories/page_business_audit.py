@@ -3170,7 +3170,28 @@ def _embedded_relation_source_summary_query(
     return (
         f"""
         /* check: source_versions_mismatch */
-        with canonical_relation_summary as (
+        with scope_bank_identities as (
+            select {alias}.scope_key,
+                   coalesce(
+                       array_agg(distinct identity.row_id) filter (where identity.row_id is not null),
+                       '{{}}'::text[]
+                   ) as row_ids
+            from {scope_table} {alias}
+            left join app.bank_transactions source
+              on source.status <> 'deleted'
+             and source.txn_date >= ({alias}.scope_key || '-01')::date
+             and source.txn_date < (({alias}.scope_key || '-01')::date + interval '1 month')
+            left join lateral (
+                select unnest(array[
+                    coalesce(source.legacy_mongo_id, source.id::text),
+                    source.id::text
+                ]) as row_id
+            ) identity on source.id is not null
+            where {alias}.tenant_id = %s
+              and {alias}.scope_key ~ '^[0-9]{{4}}-[0-9]{{2}}$'
+            group by {alias}.scope_key
+        ),
+        canonical_relation_summary as (
             select {alias}.scope_key,
                    jsonb_build_object(
                        'source', 'workbench_pair_relations',
@@ -3179,9 +3200,13 @@ def _embedded_relation_source_summary_query(
                        'relation_updated_at', coalesce(max(relation.updated_at)::text, '')
                    ) as source_versions
             from {scope_table} {alias}
+            join scope_bank_identities identities on identities.scope_key = {alias}.scope_key
             left join app.workbench_pair_relations relation
               on relation.status = 'active'
-             and relation.month_scope = ({alias}.scope_key || '-01')::date
+             and (
+                    relation.month_scope = ({alias}.scope_key || '-01')::date
+                 or relation.row_ids && identities.row_ids
+             )
             where {alias}.tenant_id = %s
               and {alias}.scope_key ~ '^[0-9]{{4}}-[0-9]{{2}}$'
             group by {alias}.scope_key
@@ -3198,7 +3223,7 @@ def _embedded_relation_source_summary_query(
         order by {alias}.scope_key
         limit %s
         """,
-        (tenant_id, tenant_id, limit),
+        (tenant_id, tenant_id, tenant_id, limit),
         f"{domain}_relation_source_versions_mismatch",
     )
 
