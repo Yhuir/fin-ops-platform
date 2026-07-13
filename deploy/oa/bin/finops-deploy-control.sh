@@ -45,6 +45,8 @@ commands:
                                       check or repair read model scope contracts using runtime env
   read-model-slo-smoke <release-name> [args]
                                       run read model SLO smoke dry-run using runtime env; --apply is refused
+  write-operation-e2e-smoke <release-name> <scenario-path> [--dry-run|--apply-stdin]
+                                      run the fixed production relation runner; admin token is read from stdin
   read-model-refresh <release-name> [args]
                                       validate or enqueue read-model refresh scopes through the durable gateway
   settings-normalize <release-name> [--dry-run|--execute]
@@ -496,6 +498,50 @@ read_model_slo_smoke() {
   run_with_runtime_env "$src" -m fin_ops_platform.tools.read_model_slo_smoke "$@"
 }
 
+write_operation_e2e_smoke() {
+  local release="${1:-}" scenario="${2:-}" mode="${3:---dry-run}"
+  [[ -n "$release" ]] || die "write-operation-e2e-smoke requires release name"
+  [[ "$scenario" =~ ^/tmp/finops-write-e2e-[A-Za-z0-9._-]+\.json$ ]] \
+    || die "scenario path must match /tmp/finops-write-e2e-*.json"
+  [[ -f "$scenario" && ! -L "$scenario" ]] || die "scenario must be a regular non-symlink file"
+  [[ "$(stat -c '%U' "$scenario")" == "finops-deploy" ]] || die "scenario must be owned by finops-deploy"
+  [[ "$(stat -c '%s' "$scenario")" -le 1048576 ]] || die "scenario exceeds 1 MiB"
+  find "$scenario" -maxdepth 0 -perm /022 -print -quit | grep -q . \
+    && die "scenario must not be group/world writable"
+  [[ "$mode" == "--dry-run" || "$mode" == "--apply-stdin" ]] || die "unsupported write-operation mode: $mode"
+  [[ $# -le 3 ]] || die "write-operation-e2e-smoke accepts no additional arguments"
+
+  local src
+  src="$(release_src "$release")"
+  assert_runtime_env_contract
+  (
+    set -a
+    # shellcheck disable=SC1090
+    source "$COMMON_ENV"
+    # shellcheck disable=SC1090
+    source "$SECRETS_ENV"
+    set +a
+    export PYTHONPATH="$src/backend/src${PYTHONPATH:+:$PYTHONPATH}"
+    export FIN_OPS_DATA_DIR="${FIN_OPS_DATA_DIR:-/opt/fin-ops/data}"
+    local apply_args=()
+    if [[ "$mode" == "--apply-stdin" ]]; then
+      local admin_token
+      IFS= read -r admin_token
+      [[ -n "$admin_token" ]] || die "admin token stdin is empty"
+      export FIN_OPS_HTTP_SLO_ADMIN_TOKEN="$admin_token"
+      apply_args=(--apply)
+    fi
+    cd "$src"
+    "$API_PYTHON" -m fin_ops_platform.tools.write_operation_e2e_smoke \
+      --scenario "$scenario" \
+      --base-url https://www.yn-sourcing.com \
+      --api-prefix /fin-ops-api \
+      --write-target-ms 1000 \
+      --http-target-ms 1000 \
+      "${apply_args[@]}"
+  )
+}
+
 read_model_refresh() {
   local release="${1:-}"
   [[ -n "$release" ]] || die "read-model-refresh requires release name"
@@ -575,6 +621,10 @@ case "$cmd" in
   read-model-slo-smoke)
     shift
     read_model_slo_smoke "$@"
+    ;;
+  write-operation-e2e-smoke)
+    shift
+    write_operation_e2e_smoke "$@"
     ;;
   read-model-refresh)
     shift

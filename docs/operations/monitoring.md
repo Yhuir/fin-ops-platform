@@ -751,6 +751,22 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_scenari
 
 可逆关系 runtime contract 随 backend release 发布，定义三个 shape、正式 consumer API 与允许的业务数据根；`docs/dev/write-operation-impact-matrix.json` 是测试约束的文档镜像，runner 不在生产读取 `docs/`。mutation 返回非预期 HTTP/HTML 时先视为 ambiguous，并只读查询 durable idempotency record：明确 committed 才允许按正式 recovery checkpoint 清理，明确 failed 才可判定未提交；missing/reserved/冲突保持 `recovery_required`，禁止盲重试或盲撤回。
 
+没有可下发 PostgreSQL DSN 的生产环境通过 root-owned helper 执行同一 runner。scenario 必须位于
+`/tmp/finops-write-e2e-*.json`、由 `finops-deploy` 持有、不可 group/world write 且不超过 1 MiB；helper
+固定公网 API prefix 和 SLO，拒绝任意 Python/SQL/额外参数。apply 时 Admin Token 只能经 SSH stdin 输入：
+
+```bash
+scripts/with-production-admin-token.sh bash -lc '
+  printf "%s\n" "$FIN_OPS_HTTP_SLO_ADMIN_TOKEN" |
+    ssh finops-deploy@finops-prod \
+      sudo -n /usr/local/sbin/finops-deploy-control \
+      write-operation-e2e-smoke <release-name> \
+      /tmp/finops-write-e2e-<run-id>.json --apply-stdin
+'
+```
+
+runner 结束后删除远端临时 scenario；禁止把 token 放入命令参数、scenario 或输出文件。
+
 ## Phase 1.5 读 API 验证
 
 生产和 staging 的工作台列表页使用分层契约，不再把完整 group payload 当作首屏数据：

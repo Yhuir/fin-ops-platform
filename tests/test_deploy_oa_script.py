@@ -317,6 +317,12 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("read_model_slo_smoke()", script)
         self.assertIn("read-model-slo-smoke only permits dry-run through deploy-control", script)
         self.assertIn('run_with_runtime_env "$src" -m fin_ops_platform.tools.read_model_slo_smoke "$@"', script)
+        self.assertIn("write-operation-e2e-smoke <release-name> <scenario-path> [--dry-run|--apply-stdin]", script)
+        self.assertIn("write_operation_e2e_smoke()", script)
+        self.assertIn("scenario path must match /tmp/finops-write-e2e-*.json", script)
+        self.assertIn('IFS= read -r admin_token', script)
+        self.assertIn('export FIN_OPS_HTTP_SLO_ADMIN_TOKEN="$admin_token"', script)
+        self.assertIn("write-operation-e2e-smoke accepts no additional arguments", script)
         self.assertIn("read-model-refresh <release-name> [args]", script)
         self.assertIn("settings-normalize <release-name> [--dry-run|--execute]", script)
         self.assertIn("runtime-queue-resolve-covered <release-name> [args]", script)
@@ -366,6 +372,26 @@ class DeployOAScriptTest(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("read-model-slo-smoke only permits dry-run through deploy-control", result.stderr)
+        self.assertNotIn("release src directory not found", result.stderr)
+
+    def test_deploy_control_write_operation_runner_refuses_untrusted_scenario_path(self) -> None:
+        result = subprocess.run(
+            [
+                str(DEPLOY_CONTROL_SCRIPT_PATH),
+                "write-operation-e2e-smoke",
+                "fake-release",
+                "/etc/passwd",
+                "--apply-stdin",
+            ],
+            cwd=Path(__file__).resolve().parents[1],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("scenario path must match /tmp/finops-write-e2e-*.json", result.stderr)
         self.assertNotIn("release src directory not found", result.stderr)
 
 

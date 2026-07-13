@@ -435,6 +435,8 @@ sudo /usr/local/sbin/finops-deploy-control read-model-slo-smoke <release-name> \
   --json \
   --critical-only \
   --target-ms 5000
+sudo /usr/local/sbin/finops-deploy-control write-operation-e2e-smoke <release-name> \
+  /tmp/finops-write-e2e-<run-id>.json --dry-run
 sudo /usr/local/sbin/finops-deploy-control read-model-refresh <release-name> \
   --scope tax_offset=all --scope turnover_ledger=all --dry-run
 sudo /usr/local/sbin/finops-deploy-control settings-normalize <release-name> --dry-run
@@ -451,6 +453,8 @@ sudo /usr/local/sbin/finops-deploy-control runtime-queue-resolve-covered <releas
 `read-model-slo-smoke` 只运行 release 内的 `fin_ops_platform.tools.read_model_slo_smoke` dry-run，
 用于在不暴露 PostgreSQL DSN 的情况下发现 critical read model scopes；该 helper 明确拒绝 `--apply`，
 真实 enqueue-to-fresh 只能在单独批准的 root session 中执行。
+`write-operation-e2e-smoke` 只运行 release 内的固定 relation runner；scenario 仅接受受限 `/tmp` JSON，
+apply 的 Admin Token 只从 stdin 读取，固定走公网 `/fin-ops-api`，不提供任意命令或 SQL 能力。
 
 说明：
 
