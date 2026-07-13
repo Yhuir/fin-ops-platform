@@ -87,6 +87,33 @@ class FakeRelationFacade:
 
 
 class WorkbenchRelationCommandServiceTests(unittest.TestCase):
+    def test_write_precondition_preserves_explicit_cross_month_scope_hints(self) -> None:
+        facade = FakeRelationFacade(
+            {
+                "status": "fresh",
+                "rows": [],
+                "groups": [],
+                "read_model_scope_keys": ["2026-04", "2026-06"],
+                "stale_reasons": [],
+                "refresh_enqueued": False,
+            }
+        )
+        service = WorkbenchRelationCommandService(
+            relation_repository=FakeRelationRepository(),
+            relation_facade=facade,
+            require_fresh_relations=True,
+        )
+
+        result = service.assert_write_precondition(
+            row_ids=["bank-april", "bank-june"],
+            month_scope="all",
+            scope_keys_hint=["2026-04", "2026-06", "2026-04"],
+        )
+
+        self.assertEqual(result["status"], "fresh")
+        self.assertEqual(facade.calls[0]["month_hint"], "all")
+        self.assertEqual(facade.calls[0]["scope_keys_hint"], ["2026-04", "2026-06"])
+
     def test_confirm_relation_uses_scoped_relation_snapshot_for_target_rows(self) -> None:
         repository = FakeRelationRepository(
             {

@@ -5,6 +5,11 @@ Spec-first Browser e2e 审计入口：
 - `e2e-spec.md`：关系事实源跨页面 Browser e2e 验收合同。
 - `e2e-coverage.md`：Spec ID 到现有 Playwright/Vitest/API/integration 的映射和缺口。
 
+## 2026-07-13 跨月写前 freshness scope 回归
+
+- `WorkbenchRelationCommandService.assert_write_precondition(...)` 接受精确 `scope_keys_hint`；测试锁定跨月 open/unlinked rows 在对应月份 scope 都 fresh 时返回 fresh，而不是因压缩成 `all` 且查不到 relation row 被误判为 missing。
+- Turnover adapter 测试锁定 `affected_months` 原样进入 command boundary；未新增旁路查询、live canonical fallback 或直接 SQL。
+
 ## 2026-07-12 - 三组可逆关系写后证明闭环
 
 - 三种登记 shape：bank+invoice、bank+turnover、bank+OA+invoice；每种只使用一对 confirm/withdraw profile，不做 17×operation 重复套件。

@@ -1,5 +1,11 @@
 # 外部往来款管理 实施记录
 
+## 2026-07-13 - 跨月确认保留 relation freshness 精确 scope
+
+- 生产可逆场景发现：两条跨月 open 流水的 `affected_months` 被压缩成 `month_scope=all` 后，写前 freshness 查询丢失精确月份；因为尚无 relation rows，合法的 fresh empty 集合被误判为 missing 并返回 409。
+- 修复：Turnover adapter 把全部 affected months 作为 `scope_keys_hint` 交给既有 `WorkbenchRelationCommandService`，command boundary 去重后传入 read facade。继续 fail closed 校验每个精确月份，不绕过 freshness、不读 live relation 表、不增加 fallback。
+- 旧逻辑结论：没有第二条确认链需要删除；污染点是既有边界的有损 `all` 压缩，已由精确 scope I/O 取代。
+
 ## 2026-07-05 - Worker / Read Model 抖动收敛
 
 - 目标：降低外部往来款 read model worker 在 source_versions 已明显变化时仍先等待 Workbench relation fresh gate 的抖动，减少无意义 relation read I/O 和 dependency defer。

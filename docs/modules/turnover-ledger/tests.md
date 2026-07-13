@@ -2,6 +2,12 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口、回归范围和未测风险。实现后按实际影响更新矩阵。
 
+## 2026-07-13 跨月关系 freshness scope 回归
+
+- Service/read model：`tests/test_workbench_relation_command_service.py::WorkbenchRelationCommandServiceTests::test_write_precondition_preserves_explicit_cross_month_scope_hints` 证明 `month_scope=all` 时仍以全部精确月份校验 relation read model，允许 fresh empty/unlinked 集合进入正常业务校验。
+- 跨模块 UoW adapter：`tests/test_turnover_ledger_uow_contract.py::TurnoverLedgerUoWContractTests::test_turnover_manual_closure_precondition_keeps_cross_month_scope_keys` 证明 Turnover boundary 不丢失 `affected_months` I/O。
+- 不适用：HTTP response shape、权限、关系状态机、worker、projection schema 和前端均未改变；继续由既有 API、read model、E2E 和生产可逆场景回归覆盖。
+
 ## 影响面清单
 
 外部往来款不是孤立页面。修改时必须先确认影响面：

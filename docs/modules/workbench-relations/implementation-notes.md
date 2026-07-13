@@ -1,5 +1,9 @@
 # 关联台关系事实源 实施记录
 
+## 2026-07-13 - 写前 freshness 支持跨月精确 scope hints
+
+`WorkbenchRelationCommandService.assert_write_precondition(...)` 现在可接收已知 `scope_keys_hint`。多月关系仍可用 `month_scope=all` 表达聚合关系，但 freshness proof 必须逐个校验调用方已知月份，使 open/unlinked rows 在对应 scope fresh 时得到 fresh empty context；未知 scope 才保持原有 fail-closed missing/enqueue 行为。
+
 ## 2026-07-11 - 删除 relation → tax_offset 污染 I/O
 
 目标：纠正历史 Browser mock 和 refresh 合同把 Workbench relation 误当成税金抵扣 projection source 的问题。

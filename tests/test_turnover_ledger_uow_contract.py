@@ -812,6 +812,33 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(call["special_metadata"]["paired_requirement_source"], "turnover_ledger_manual_closure")
         self.assertEqual(call["history_operation_type"], "turnover_manual_closure_confirm")
 
+    def test_turnover_manual_closure_precondition_keeps_cross_month_scope_keys(self) -> None:
+        module = self._write_adapters_module()
+
+        class RecordingRelationCommandService:
+            def __init__(self) -> None:
+                self.precondition_calls: list[dict[str, object]] = []
+
+            def assert_write_precondition(self, **kwargs: object) -> dict[str, object]:
+                self.precondition_calls.append(dict(kwargs))
+                return {"status": "fresh"}
+
+        command = RecordingRelationCommandService()
+        port = module.TurnoverLedgerWorkbenchPairPort(
+            relation_command_service_factory=lambda transaction: command,
+        )
+
+        port.assert_turnover_manual_closure_write_precondition(
+            bank_row_ids=["bank-april", "bank-june"],
+            affected_months=["2026-04", "2026-06"],
+            transaction=object(),
+        )
+
+        self.assertEqual(len(command.precondition_calls), 1)
+        self.assertEqual(command.precondition_calls[0]["row_ids"], ["bank-april", "bank-june"])
+        self.assertEqual(command.precondition_calls[0]["month_scope"], "all")
+        self.assertEqual(command.precondition_calls[0]["scope_keys_hint"], ["2026-04", "2026-06"])
+
     def test_turnover_manual_closure_merges_existing_oa_bank_relations(self) -> None:
         module = self._write_adapters_module()
 

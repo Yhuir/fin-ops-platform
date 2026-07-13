@@ -457,10 +457,12 @@ class WorkbenchRelationCommandService:
         *,
         row_ids: list[str],
         month_scope: str = "all",
+        scope_keys_hint: list[str] | None = None,
     ) -> dict[str, Any]:
         return self._assert_relation_read_model_fresh(
             row_ids=list(row_ids or []),
             month_scope=month_scope,
+            scope_keys_hint=scope_keys_hint,
         )
 
     def active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, Any]]:
@@ -920,6 +922,7 @@ class WorkbenchRelationCommandService:
         *,
         row_ids: list[str],
         month_scope: str,
+        scope_keys_hint: list[str] | None = None,
     ) -> dict[str, Any]:
         if not self._require_fresh_relations:
             return {
@@ -951,12 +954,19 @@ class WorkbenchRelationCommandService:
                     "refresh_enqueued": False,
                 },
             )
+        normalized_scope_keys = list(
+            dict.fromkeys(
+                str(scope_key).strip()
+                for scope_key in list(scope_keys_hint or [])
+                if str(scope_key).strip()
+            )
+        )
         payload = reader(
             [str(row_id) for row_id in list(row_ids or [])],
             require_fresh=True,
             reason="workbench_relation_write_precondition",
             month_hint=month_scope,
-            scope_keys_hint=self._affected_months(month_scope),
+            scope_keys_hint=normalized_scope_keys or self._affected_months(month_scope),
         )
         if not isinstance(payload, dict):
             payload = {"status": "unavailable"}

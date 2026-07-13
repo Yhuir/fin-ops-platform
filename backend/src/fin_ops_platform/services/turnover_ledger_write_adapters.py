@@ -1468,6 +1468,11 @@ class TurnoverLedgerWorkbenchPairPort:
                     if str(row_id).strip()
                 ],
                 month_scope=self._month_scope(affected_months),
+                scope_keys_hint=[
+                    str(month).strip()
+                    for month in list(affected_months or [])
+                    if str(month).strip()
+                ],
             )
         except WorkbenchRelationCommandError as exc:
             raise self._command_precondition_error(exc) from exc
