@@ -37,7 +37,7 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| OA projection rows | repositories/read models | 带 source version；完成态 workflow status 由 OA projection 边界统一归一/识别，必须兼容 canonical `completed` 和历史完成态别名（如 `已完成`、`approved`、`2`），下游 read model 不得各自实现完成态判断。 |
+| OA projection rows | repositories/read models | 带 source version；完成态 workflow status 由 OA projection 边界统一归一/识别，必须兼容 canonical `completed` 和历史完成态别名（如 `已完成`、`approved`、`2`），下游 read model 不得各自实现完成态判断。projection 成功写入后必须通过 `ReadModelRefreshGateway` 按受影响月份 fan-out `workbench_relation` 及其直接页面 consumers（bank detail、invoice lifecycle、input/output invoice、turnover、no-OA/bank-flow batch）；`workbench`、search、OA pending、pending invoice 保持各自现有 producer/gateway，cost statistics 由 Workbench 发布后的 owner fan-out。禁止只刷新 Workbench 却让嵌入 relation source_versions 的页面保留旧 OA projection 版本并标记 fresh。 |
 | OA sync status/run facts | AppHealth/AppStatus/operations dashboard | `app.oa_sync_runs(sync_type='oa_projection')` 是上一次读取 Mongo/projection run 的事实源；`job.outbox_events` 和 worker heartbeat 表示 refreshing/error，不得使用进程内内存状态或行级 `app.oa_applications.synced_at` 覆盖运行事实 |
 | OA session/permission payload | frontend session | 不泄露 secret |
 | Attachment invoice result | invoice/ETC/input usage modules | 经 service 边界传递 |

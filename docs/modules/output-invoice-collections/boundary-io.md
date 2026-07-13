@@ -36,6 +36,7 @@
 | 写后 target envelope | `output_invoice_collection_freshness_metadata(...)` | 按发票所属月份返回 `output_invoice_collection` 的 affected/read-model scope 和 operation barrier target |
 | Refresh scope | `output_invoice_collection` manifest | month or `all`；`all` 是 fan-out command |
 | Relation upstream freshness | `workbench_relation` month scope | projection 在读取 relation source versions、执行 unchanged-scope 判断或写 rows 前必须先通过 fresh gate；non-fresh 交 worker defer。当前 input/output 页面共用月份 relation source-version proof，因此任一发票 relation 改变都刷新本 scope；若关系不含销项发票，rows 必须作为 isolation baseline 保持不变 |
+| OA projection source version | OA projection sync worker | `workbench_relation_source_versions.oa_projection_updated_at` 是本 read model 的完整性合同；OA projection 更新受影响月份时必须经正式 refresh gateway 同时置脏本 scope，不能让 queue drained 后仍保留旧 embedded relation versions |
 
 ## 输出 I/O
 

@@ -345,6 +345,17 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         self.assertIn(("workbench", "all", "oa_projection_sync"), queue.refreshes)
         self.assertIn(("search", "2026-05", "oa_projection_sync"), queue.refreshes)
         self.assertIn(("pending_invoice", "expense:all", "oa_projection_sync"), queue.refreshes)
+        for read_model_key in (
+            "workbench_relation",
+            "bank_detail",
+            "invoice_lifecycle",
+            "input_invoice_usage",
+            "output_invoice_collection",
+            "turnover_ledger",
+            "no_oa_bank_batch",
+            "bank_flow_rule_batch",
+        ):
+            self.assertIn((read_model_key, "2026-05", "oa_projection_sync"), queue.refreshes)
         self.assertEqual(repository.runs[0]["status"], "succeeded")
 
     def test_oa_sync_all_scope_respects_retention_cutoff_months(self) -> None:

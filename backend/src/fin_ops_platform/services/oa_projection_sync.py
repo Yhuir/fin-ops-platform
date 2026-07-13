@@ -14,6 +14,17 @@ from fin_ops_platform.services.search_read_model_refresh_producer import SearchR
 
 MONTH_FORMAT = "%Y-%m"
 
+OA_PROJECTION_SCOPED_READ_MODEL_DEPENDENTS = (
+    "workbench_relation",
+    "bank_detail",
+    "invoice_lifecycle",
+    "input_invoice_usage",
+    "output_invoice_collection",
+    "turnover_ledger",
+    "no_oa_bank_batch",
+    "bank_flow_rule_batch",
+)
+
 
 class OAProjectionSyncService:
     def __init__(
@@ -268,6 +279,9 @@ class OAProjectionSyncService:
         self._search_read_model_refresh_producer.enqueue(target_scopes, reason="oa_projection_sync")
         refresh_gateway.enqueue_many("oa_pending_payment", target_scopes, reason="oa_projection_sync")
         refresh_gateway.enqueue_many("pending_invoice", ["expense:all", "income:all"], reason="oa_projection_sync")
+        concrete_month_scopes = [scope for scope in target_scopes if scope != "all"] or ["all"]
+        for read_model_key in OA_PROJECTION_SCOPED_READ_MODEL_DEPENDENTS:
+            refresh_gateway.enqueue_many(read_model_key, concrete_month_scopes, reason="oa_projection_sync")
 
 
 def _is_invoice_attachment_payload(value: Any) -> bool:

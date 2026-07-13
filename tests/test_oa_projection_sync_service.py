@@ -55,6 +55,18 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
         self.assertEqual([record.workflow_status for record in projection_repository.deleted_non_completed_records], ["completed", "in_progress"])
         self.assertIn(("oa_pending_payment", "2026-06", "oa_projection_sync"), queue_repository.refreshes)
         self.assertIn(("oa_pending_payment", "all", "oa_projection_sync"), queue_repository.refreshes)
+        for read_model_key in (
+            "workbench_relation",
+            "bank_detail",
+            "invoice_lifecycle",
+            "input_invoice_usage",
+            "output_invoice_collection",
+            "turnover_ledger",
+            "no_oa_bank_batch",
+            "bank_flow_rule_batch",
+        ):
+            self.assertIn((read_model_key, "2026-06", "oa_projection_sync"), queue_repository.refreshes)
+            self.assertNotIn((read_model_key, "all", "oa_projection_sync"), queue_repository.refreshes)
 
     def test_oa_sync_treats_legacy_completed_workflow_aliases_as_completed(self) -> None:
         records = [
