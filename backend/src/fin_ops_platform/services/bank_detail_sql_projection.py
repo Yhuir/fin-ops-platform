@@ -80,7 +80,17 @@ class BankDetailSqlProjectionBuilder:
         )
         self._configure_auto_category_service_from_app_settings()
         manual_categories = self._load_manual_categories(transaction_rows) if transaction_rows else {}
-        relation_source_versions = self._workbench_relation_source_versions_for_scope(normalized_scope_key)
+        transaction_ids = [str(row["id"]) for row in transaction_rows]
+        transaction_id_aliases = {
+            str(row["transaction_id"]): str(row["id"])
+            for row in transaction_rows
+            if str(row.get("transaction_id") or "").strip()
+            and str(row.get("transaction_id")) != str(row.get("id"))
+        }
+        relation_source_versions = self._workbench_relation_source_versions_for_scope(
+            normalized_scope_key,
+            row_ids=text_list([*transaction_ids, *transaction_id_aliases]),
+        )
         source_versions = self._source_versions(
             source_version=source_version,
             row_count=len(transaction_rows),
@@ -108,13 +118,6 @@ class BankDetailSqlProjectionBuilder:
                 source_versions=source_versions,
             )
             return {"scope_key": normalized_scope_key, "row_count": 0, "source_versions": source_versions}
-        transaction_ids = [str(row["id"]) for row in transaction_rows]
-        transaction_id_aliases = {
-            str(row["transaction_id"]): str(row["id"])
-            for row in transaction_rows
-            if str(row.get("transaction_id") or "").strip()
-            and str(row.get("transaction_id")) != str(row.get("id"))
-        }
         relations = self._load_relation_tags(
             scope_key=normalized_scope_key,
             transaction_ids=transaction_ids,
@@ -687,9 +690,14 @@ class BankDetailSqlProjectionBuilder:
             "raw_payload": {"source": row.get("raw_payload") or {}, "normalized_payload": payload},
         }
 
-    def _workbench_relation_source_versions_for_scope(self, scope_key: str) -> dict[str, Any]:
+    def _workbench_relation_source_versions_for_scope(
+        self,
+        scope_key: str,
+        *,
+        row_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
         if self._relation_tags_from_source:
-            return self._workbench_relation_source_versions_from_source(scope_key)
+            return self._workbench_relation_source_versions_from_source(scope_key, row_ids=row_ids)
         source_versions_loader = getattr(self._read_model_repository, "workbench_relation_source_versions", None)
         if callable(source_versions_loader):
             source_versions = source_versions_loader(scope_key=scope_key)
@@ -697,13 +705,25 @@ class BankDetailSqlProjectionBuilder:
                 return dict(source_versions)
         return dict(self._workbench_relation_read_facade.last_source_versions)
 
-    def _workbench_relation_source_versions_from_source(self, scope_key: str) -> dict[str, Any]:
+    def _workbench_relation_source_versions_from_source(
+        self,
+        scope_key: str,
+        *,
+        row_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
         if not _is_month_scope(scope_key):
             return {}
         summary_reader = getattr(self._read_model_repository, "workbench_relation_source_summary_from_source", None)
         if not callable(summary_reader):
             return {}
-        return dict(summary_reader(scope_key=scope_key))
+        normalized_row_ids = text_list(row_ids)
+        return dict(
+            summary_reader(
+                scope_key=scope_key,
+                row_ids=normalized_row_ids,
+                include_row_ids=bool(normalized_row_ids),
+            )
+        )
 
     @staticmethod
     def _source_signature(

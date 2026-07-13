@@ -435,6 +435,12 @@
 - 删除项：移除“force refresh 被静默降级成普通 refresh”的旧行为；没有增加 fallback、第二事实源、页面同步扫描或直接 SQL 运维修复。
 - 验证责任：普通 unchanged 优化、force month rebuild、force all fan-out、完整 bank-details 回归、生产 durable queue/freshness/page Audit。
 
+## 2026-07-13 - 跨月 relation 删除的 stable source proof
+
+- 第三组生产可逆关系测试证明：turnover 跨月 relation 撤回后 shared edges 已删除，但 bank-detail 的 source summary 只按 relation `month_scope` 过滤，未覆盖通过 row membership 横跨 2026-02/03 的关系；unchanged fast-path 因而保留旧 case id 并错误发布 fresh。
+- 修复：projection 在计算 relation source summary 前先收集该 scope 全部银行流水的 legacy row id 与 canonical UUID，并通过既有 workbench-relations repository port 以 `month_scope OR row_ids overlap` 取 stable summary；行投影继续复用同一组身份。bank-detail schema 提升到 v10，禁止旧 v9 scope 被当作兼容 fresh。
+- 边界：不改变 Workbench relation 事实、不新增第二份 relation snapshot、不直接跨模块 SQL；仅修正既有 repository port 的查询参数与 bank-detail source-version 合同。
+
 ## 2026-06-14 - Bank detail stale source guard
 
 - 目标：修复真实关联台 confirm/withdraw 连续写入时，旧 `bank_detail` source_version 事件仍完整 rebuild，导致新版本 bank detail 和下游 pending invoice 写后 SLO 超过 5s。

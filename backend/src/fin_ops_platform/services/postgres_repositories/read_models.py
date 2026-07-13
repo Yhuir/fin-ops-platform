@@ -30,7 +30,7 @@ from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
 from fin_ops_platform.services.workbench_candidate_match_service import CANDIDATE_MATCH_SCHEMA_VERSION
 
 MONTH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
-BANK_DETAIL_READ_MODEL_SCHEMA_VERSION = 9
+BANK_DETAIL_READ_MODEL_SCHEMA_VERSION = 10
 BANK_ACCOUNT_BALANCE_READ_MODEL_SCHEMA_VERSION = 1
 BANK_DETAIL_PURPOSE_TEXT_LABELS = ("用途", "交易用途")
 BANK_DETAIL_SUMMARY_TEXT_LABELS = ("摘要",)

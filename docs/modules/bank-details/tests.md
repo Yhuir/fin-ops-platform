@@ -2,6 +2,14 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+## 2026-07-13 - 跨月 relation 删除 source-version 闭环
+
+- 变更类型：read model canonical source-version 修复。
+- 新增/更新测试：`BankDetailSqlProjectionBuilderTests.test_relation_source_summary_tracks_cross_month_members_by_legacy_and_canonical_id`，并将 bank-detail schema 合同提升到 v10。
+- 覆盖点：relation source summary 不再只按 relation 自身 `month_scope` 取数，而是同时使用当前 bank-detail scope 内所有 legacy/canonical bank row IDs 做 overlap；因此跨月 relation 的新增、成员替换、撤回删除都会使 stable source versions 变化，普通 worker refresh 不会把旧 case/tag 标成 fresh。
+- 旧逻辑删除：删除“月 scope summary 忽略跨月 relation，只能靠 force repair”的旧证明方式；force 仍保留为受控修复工具，不参与正常正确性链路。
+- 生产验收：执行 bank+turnover confirm/withdraw/recovery，等待全部 chained fan-out，再要求 bank-details edge equality 与 17/16 System Audit 全通过。
+
 ## 2026-07-13 - force refresh 合同闭环
 
 - 变更类型：read model / worker I/O 合同修复。

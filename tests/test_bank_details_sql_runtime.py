@@ -1976,7 +1976,13 @@ class BankDetailSqlProjectionBuilderTests(unittest.TestCase):
             def _configure_auto_category_service_from_app_settings(self) -> None:
                 return None
 
-            def _workbench_relation_source_versions_for_scope(self, scope_key: str) -> dict[str, object]:
+            def _workbench_relation_source_versions_for_scope(
+                self,
+                scope_key: str,
+                *,
+                row_ids: list[str] | None = None,
+            ) -> dict[str, object]:
+                self.relation_source_row_ids = list(row_ids or [])
                 return {"scope_key": scope_key, "source_version": 5}
 
             def _source_versions(self, **kwargs: object) -> dict[str, object]:
@@ -2001,6 +2007,92 @@ class BankDetailSqlProjectionBuilderTests(unittest.TestCase):
         self.assertEqual(result["row_count"], 0)
         self.assertEqual(repository.saved_rows, [])
         self.assertEqual(repository.marked_scopes[0]["scope_key"], "2026-05")
+
+    def test_relation_source_summary_tracks_cross_month_members_by_legacy_and_canonical_id(self) -> None:
+        class Repository(CaptureBankDetailReadModelRepository):
+            def __init__(self) -> None:
+                super().__init__()
+                self.relation_source_calls: list[dict[str, object]] = []
+
+            def workbench_relation_source_summary_from_source(self, **kwargs: object) -> dict[str, object]:
+                self.relation_source_calls.append(dict(kwargs))
+                return {
+                    "source": "workbench_pair_relations",
+                    "scope_key": kwargs.get("scope_key"),
+                    "relation_count": 1,
+                    "relation_updated_at": "2026-07-13T07:00:00+00:00",
+                }
+
+        repository = Repository()
+        builder = BankDetailSqlProjectionBuilder(
+            connection=FakeConnection(),
+            read_model_repository=repository,
+            relation_tags_from_source=True,
+        )
+
+        result = builder._workbench_relation_source_versions_for_scope(  # noqa: SLF001
+            "2026-02",
+            row_ids=["txn_imported_1278", "efdb0ec0-9a97-5a0d-9ec4-e4f5eaf918a0"],
+        )
+
+        self.assertEqual(result["relation_count"], 1)
+        self.assertEqual(
+            repository.relation_source_calls,
+            [
+                {
+                    "scope_key": "2026-02",
+                    "row_ids": ["txn_imported_1278", "efdb0ec0-9a97-5a0d-9ec4-e4f5eaf918a0"],
+                    "include_row_ids": True,
+                }
+            ],
+        )
+
+    def test_rebuild_passes_scope_legacy_and_canonical_ids_to_relation_source_summary(self) -> None:
+        class ProjectionBuilder(BankDetailSqlProjectionBuilder):
+            def _load_transaction_rows_with_auto_category_context(
+                self,
+                scope_key: str,
+            ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+                row = {"id": "txn_imported_1278", "transaction_id": "canonical-bank-uuid"}
+                return [row], [row]
+
+            def _configure_auto_category_service_from_app_settings(self) -> None:
+                return None
+
+            def _load_manual_categories(
+                self,
+                transaction_rows: list[dict[str, object]],
+            ) -> dict[str, dict[str, object]]:
+                return {}
+
+            def _workbench_relation_source_versions_for_scope(
+                self,
+                scope_key: str,
+                *,
+                row_ids: list[str] | None = None,
+            ) -> dict[str, object]:
+                self.relation_source_call = {"scope_key": scope_key, "row_ids": list(row_ids or [])}
+                return {"relation_count": 0, "relation_updated_at": ""}
+
+            def _unchanged_scope_result(self, **kwargs: object) -> dict[str, object] | None:
+                return {"scope_key": kwargs["scope_key"], "row_count": kwargs["row_count"], "skipped": True}
+
+        builder = ProjectionBuilder(
+            connection=FakeConnection(),
+            read_model_repository=CaptureBankDetailReadModelRepository(),
+            relation_tags_from_source=True,
+        )
+
+        result = builder.rebuild_bank_detail_read_model_scope("2026-02", source_version=11)
+
+        self.assertTrue(result["skipped"])
+        self.assertEqual(
+            builder.relation_source_call,
+            {
+                "scope_key": "2026-02",
+                "row_ids": ["txn_imported_1278", "canonical-bank-uuid"],
+            },
+        )
 
     def test_rebuild_loads_custom_auto_tag_rules_from_app_settings(self) -> None:
         repository = CaptureBankDetailReadModelRepository()
@@ -2413,7 +2505,7 @@ class BankDetailSqlProjectionBuilderTests(unittest.TestCase):
         self.assertIn("from app.workbench_pair_relations", sql_text)
 
     def test_relation_tags_source_fast_path_resolves_canonical_bank_id_alias(self) -> None:
-        self.assertGreaterEqual(BANK_DETAIL_READ_MODEL_SCHEMA_VERSION, 9)
+        self.assertGreaterEqual(BANK_DETAIL_READ_MODEL_SCHEMA_VERSION, 10)
         connection = FakeConnection(
             relation_rows=[
                 {
