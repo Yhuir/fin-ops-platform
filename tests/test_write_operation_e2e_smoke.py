@@ -139,6 +139,7 @@ _BANK_INVOICE_CONSUMER_PAGES = (
     "pending-invoices",
     "input-invoice-usage",
     "output-invoice-collections",
+    "oa-pending-payments",
     "cost-statistics",
     "tax-offset",
 )

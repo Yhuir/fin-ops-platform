@@ -453,8 +453,8 @@ def _workbench_relation_downstream_scope_map(
         invoice_downstream_scope_keys = broad_scope_keys if unknown_row_types else (actual_invoice_scope_keys or {"all"})
         add("input_invoice_usage", invoice_downstream_scope_keys)
         add("output_invoice_collection", invoice_downstream_scope_keys)
-    if has_oa:
-        add("oa_pending_payment", actual_oa_scope_keys or {"all"})
+    if has_bank or has_invoice or has_oa or unknown_row_types:
+        add("oa_pending_payment", actual_oa_scope_keys or broad_scope_keys)
     cost_scope_keys: set[str] = set()
     if unknown_row_types:
         cost_scope_keys = broad_scope_keys

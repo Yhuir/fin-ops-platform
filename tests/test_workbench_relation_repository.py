@@ -499,6 +499,7 @@ def test_relation_downstream_refresh_enqueues_all_scope_when_invoice_month_is_un
 
     assert scope_keys_by_type["workbench_relation"] == {"2026-04"}
     assert scope_keys_by_type["input_invoice_usage"] == {"all"}
+    assert scope_keys_by_type["oa_pending_payment"] == {"2026-04"}
     assert "tax_offset" not in scope_keys_by_type
 
 

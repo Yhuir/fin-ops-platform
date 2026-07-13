@@ -1168,6 +1168,16 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
 
         self.assertEqual(unresolved_scope_keys, ["expense:all:2026-03", "income:all:2026-03"])
 
+    def test_bank_invoice_relation_refreshes_oa_pending_shared_relation_proof(self) -> None:
+        facade = object.__new__(WorkbenchWriteFacade)
+
+        scope_types = facade._relation_downstream_scope_types(
+            relation={"row_types": ["bank", "invoice"]},
+            rows=[],
+        )
+
+        self.assertIn("oa_pending_payment", scope_types)
+
     def test_withdraw_link_uses_uow_transaction_when_available(self) -> None:
         app = self._build_app()
         row_ids = self._default_open_row_ids(app)

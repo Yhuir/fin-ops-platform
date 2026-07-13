@@ -34,7 +34,7 @@
       "confirm_profile": "workbench_relation_confirm_bank_invoice_cross_page",
       "withdraw_profile": "workbench_relation_withdraw_bank_invoice_cross_page",
       "affected_consumer_page_keys": ["reconciliation-workbench", "bank-details", "pending-invoices", "input-invoice-usage", "cost-statistics"],
-      "non_consumer_isolation_page_keys": ["output-invoice-collections", "tax-offset"],
+      "non_consumer_isolation_page_keys": ["output-invoice-collections", "oa-pending-payments", "tax-offset"],
       "safety_contract": {
         "fixture_ownership": "test_owned",
         "bounded_row_ids": true,
@@ -331,8 +331,8 @@
       "write_entrypoints": ["/api/workbench/actions/confirm-link"],
       "write_fact_sources": ["app.workbench_pair_relations", "app.bank_transactions", "app.invoices"],
       "pairing_relation_fact_sources": ["app.workbench_pair_relations", "read_model.workbench_relation_rows"],
-      "expected_outbox_scope_types": ["bank_detail", "cost_statistics", "input_invoice_usage", "invoice_lifecycle", "output_invoice_collection", "pending_invoice", "search", "workbench", "workbench_relation"],
-      "target_read_model_keys": ["bank_detail", "cost_statistics", "input_invoice_usage", "invoice_lifecycle", "output_invoice_collection", "pending_invoice", "search", "workbench", "workbench_relation"],
+      "expected_outbox_scope_types": ["bank_detail", "cost_statistics", "input_invoice_usage", "invoice_lifecycle", "oa_pending_payment", "output_invoice_collection", "pending_invoice", "search", "workbench", "workbench_relation"],
+      "target_read_model_keys": ["bank_detail", "cost_statistics", "input_invoice_usage", "invoice_lifecycle", "oa_pending_payment", "output_invoice_collection", "pending_invoice", "search", "workbench", "workbench_relation"],
       "target_page_keys": ["reconciliation-workbench", "bank-details", "pending-invoices", "input-invoice-usage", "cost-statistics"],
       "production_gate": {"slo_audit_profile": "workbench_relation_confirm_bank_invoice_cross_page", "apply_policy": "audit_profile_only"},
       "deterministic_evidence": [{"path": "web/e2e/input-invoice-relation-fanout.spec.ts", "required_markers": ["SD-INV-E2E-REL-001", "已关联oa"]}]
@@ -343,8 +343,8 @@
       "write_entrypoints": ["/api/workbench/actions/withdraw-link"],
       "write_fact_sources": ["app.workbench_pair_relations", "app.bank_transactions", "app.invoices"],
       "pairing_relation_fact_sources": ["app.workbench_pair_relations", "read_model.workbench_relation_rows"],
-      "expected_outbox_scope_types": ["bank_detail", "cost_statistics", "input_invoice_usage", "invoice_lifecycle", "output_invoice_collection", "pending_invoice", "search", "workbench", "workbench_relation"],
-      "target_read_model_keys": ["bank_detail", "cost_statistics", "input_invoice_usage", "invoice_lifecycle", "output_invoice_collection", "pending_invoice", "search", "workbench", "workbench_relation"],
+      "expected_outbox_scope_types": ["bank_detail", "cost_statistics", "input_invoice_usage", "invoice_lifecycle", "oa_pending_payment", "output_invoice_collection", "pending_invoice", "search", "workbench", "workbench_relation"],
+      "target_read_model_keys": ["bank_detail", "cost_statistics", "input_invoice_usage", "invoice_lifecycle", "oa_pending_payment", "output_invoice_collection", "pending_invoice", "search", "workbench", "workbench_relation"],
       "target_page_keys": ["reconciliation-workbench", "bank-details", "pending-invoices", "input-invoice-usage", "cost-statistics"],
       "production_gate": {"slo_audit_profile": "workbench_relation_withdraw_bank_invoice_cross_page", "apply_policy": "audit_profile_only"},
       "deterministic_evidence": [{"path": "web/e2e/workbench-withdraw-flow.spec.ts", "required_markers": ["withdraw_relation:CASE-202603-101", "91330108MA27B4011D"]}]
