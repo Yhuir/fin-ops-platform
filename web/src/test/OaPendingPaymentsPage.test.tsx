@@ -1561,7 +1561,7 @@ describe("OA pending payments page", () => {
     renderAuthenticatedAppAt("/oa-pending-payments");
 
     const page = await screen.findByTestId("oa-pending-payments-page");
-    await user.click(within(page).getByRole("button", { name: "查看 OA 张三 详情" }));
+    await user.click(await within(page).findByRole("button", { name: "查看 OA 张三 详情" }));
 
     expect(await screen.findByRole("heading", { name: "OA详情" })).toBeInTheDocument();
     expect(await screen.findByText("详情暂不可用")).toBeInTheDocument();

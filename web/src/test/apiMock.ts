@@ -2199,7 +2199,7 @@ function mockWorkbenchRowMatchesPaneFilters(
         continue;
       }
       const rowValues = mockWorkbenchColumnValues(row, pane, columnKey);
-      if (!rowValues.some((value) => selectedValues.includes(value))) {
+      if (!selectedValues.every((value) => rowValues.includes(value))) {
         return false;
       }
     }
