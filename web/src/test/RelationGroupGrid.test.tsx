@@ -1736,8 +1736,8 @@ describe("Workbench candidate grouping layout", () => {
     renderWorkbenchPage();
 
     const headerScroll = await screen.findByTestId("pane-scroll-head-unpaired-bank");
-    const footerScroll = screen.getByTestId("pane-scrollbar-unpaired-bank");
-    const groupScroll = screen.getByTestId("candidate-scroll-unpaired-row:bk-o-202603-001-bank");
+    const footerScroll = await screen.findByTestId("pane-scrollbar-unpaired-bank");
+    const groupScroll = await screen.findByTestId("candidate-scroll-unpaired-row:bk-o-202603-001-bank");
 
     fireEvent.scroll(footerScroll, { target: { scrollLeft: 96 } });
 

@@ -1397,7 +1397,7 @@ describe("OA pending payments page", () => {
     renderAuthenticatedAppAt("/oa-pending-payments");
 
     const page = await screen.findByTestId("oa-pending-payments-page");
-    await user.click(within(page).getByRole("button", { name: "查看 OA 张三 详情" }));
+    await user.click(await within(page).findByRole("button", { name: "查看 OA 张三 详情" }));
     expect(await screen.findByRole("heading", { name: "OA详情" })).toBeInTheDocument();
     const oaDetailTable = await screen.findByRole("table", { name: "OA详情明细表" });
     expect(within(oaDetailTable).getByRole("rowheader", { name: "申请人" })).toBeInTheDocument();

@@ -34,6 +34,7 @@
 - `bash scripts/verify.sh all` 后端：4182 passed、33 skipped；skipped 均为未配置外部集成环境的显式门禁。首次远端分支 CI 发现 `tests/test_invoice_lifecycle_sql_projection.py` 使用未声明的 `pytest`，且其中 4 个顶层函数不会被标准 `unittest discover` 收集；已改为 `unittest.TestCase`，本地统一入口实际执行 4/4 通过。`tests/test_import_processing_service.py` 的 3 个顶层函数也已收敛到 `unittest.TestCase`，并新增持久化失败零发布测试，总计 4/4 纳入统一入口。
 - `cd web && npm test -- --run`：71 files、835 passed。
 - 第二次远端 CI 的 21 个前端失败横跨无共同业务改动的页面，并伴随 `MaxListenersExceededWarning`；固定 Vitest `fileParallelism=false`、`maxWorkers=1` 后，本地两次全量均为 835/835。三个下载 API 测试移除 cross-realm `instanceof Blob`，改为验证非空 bytes 与 XLSX MIME，保持业务合同而不依赖 VM realm。
+- 第三次远端 CI 在 GitHub Node 20 上仍有 14 个测试失败；失败 DOM 均停留在明确的 loading/零行首帧，根因是测试等待页面或抽屉容器后立即同步读取异步数据，而不是产品链路失败。测试现等待账户/OA/流水/发票行、详情字段、正式关系行或刷新后的当前 DOM 节点；没有提高全局超时、没有 retry 掩盖、没有放宽业务结果。随后用 Node 20 全量串行扫描补齐同类相邻断言，最终 71 files / 835 tests 一次通过，且本轮无 `MaxListenersExceededWarning`。
 - `cd web && npm run build`：成功。
 - 全量 Chromium 业务流：177 passed，覆盖权限、导入、关联确认/撤回、异常、freshness、跨页 fan-out 与大数据集交互。
 - 旧链路 guard、migration contract、formal repository/orchestrator/grouping 定向门禁：292 passed、24 subtests passed。

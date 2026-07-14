@@ -272,7 +272,7 @@ describe("InputInvoiceUsageDetailDrawer", () => {
     const header = title.closest(".finance-drawer__header");
     expect(header).toContainElement(screen.getByRole("button", { name: "关闭详情抽屉" }));
 
-    expect(screen.getByText("申请人")).toBeInTheDocument();
+    expect(await screen.findByText("申请人")).toBeInTheDocument();
     expect(screen.getByText("樊租芳")).toBeInTheDocument();
     expect(screen.queryByText("发票行 ID")).not.toBeInTheDocument();
     expect(screen.queryByText("workflow_request_id")).not.toBeInTheDocument();
@@ -1141,11 +1141,11 @@ describe("Input invoice usage workflow drawers", () => {
 
     await user.click(await screen.findByRole("tab", { name: "已提交" }));
 
-    expect(await screen.findByText("陈秀云")).toBeInTheDocument();
+    expect(await screen.findByText("2026-06-10 10:30")).toBeInTheDocument();
+    expect(screen.getByText("陈秀云")).toBeInTheDocument();
     expect(screen.getByText("99.72")).toBeInTheDocument();
     expect(screen.getByText("SD-INV-001")).toBeInTheDocument();
     expect(screen.getByText("昆明供应商二")).toBeInTheDocument();
-    expect(screen.getByText("2026-06-10 10:30")).toBeInTheDocument();
     expect(screen.queryByText("2026-06-10T10:30:00+08:00")).not.toBeInTheDocument();
     expect(screen.queryByText("batch-hidden")).not.toBeInTheDocument();
     expect(screen.queryByText("draft-hidden")).not.toBeInTheDocument();

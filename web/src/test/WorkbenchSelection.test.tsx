@@ -107,7 +107,7 @@ describe("Workbench row selection and detail drawer", () => {
     const unpairedZone = await screen.findByTestId("zone-unpaired");
     const openBankPane = within(unpairedZone).getByTestId("pane-bank");
 
-    expect(within(unpairedZone).getAllByText("杭州张三广告有限公司").length).toBeGreaterThan(0);
+    expect((await within(unpairedZone).findAllByText("杭州张三广告有限公司")).length).toBeGreaterThan(0);
     expect(within(unpairedZone).getAllByText("智能工厂设备商").length).toBeGreaterThan(0);
 
     await user.click(within(openBankPane).getByRole("button", { name: "银行流水时间筛选" }));
@@ -790,13 +790,13 @@ describe("Workbench row selection and detail drawer", () => {
     renderWorkbenchPage();
 
     const unpairedZone = await screen.findByTestId("zone-unpaired");
-    const openOaRow = within(unpairedZone).getByRole("row", {
+    const openOaRow = await within(unpairedZone).findByRole("row", {
       name: /陈涛.*智能工厂设备商/,
     });
-    const openBankRow = within(unpairedZone).getByRole("row", {
+    const openBankRow = await within(unpairedZone).findByRole("row", {
       name: /2026-03-28.*智能工厂设备商/,
     });
-    const openInvoiceRow = within(unpairedZone).getByRole("row", {
+    const openInvoiceRow = await within(unpairedZone).findByRole("row", {
       name: /91330108MA27B4011D.*杭州溯源科技有限公司/,
     });
 
@@ -857,10 +857,10 @@ describe("Workbench row selection and detail drawer", () => {
     renderWorkbenchPage();
 
     const unpairedZone = await screen.findByTestId("zone-unpaired");
-    const oa2035Row = within(unpairedZone).getByRole("row", {
+    const oa2035Row = await within(unpairedZone).findByRole("row", {
       name: /胡瑢.*248(?:\.00)?/,
     });
-    const paymentReceiptRow = within(unpairedZone).getByRole("row", {
+    const paymentReceiptRow = await within(unpairedZone).findByRole("row", {
       name: /微信支付.*胡瑢.*200(?:\.00)?/,
     });
 
@@ -1244,7 +1244,7 @@ describe("Workbench row selection and detail drawer", () => {
     expect(confirmButton).toBeDisabled();
     expect(exceptionButton).toBeDisabled();
 
-    const openOaRow = within(unpairedZone).getByRole("row", {
+    const openOaRow = await within(unpairedZone).findByRole("row", {
       name: /陈涛.*智能工厂设备商/,
     });
 
@@ -1253,7 +1253,7 @@ describe("Workbench row selection and detail drawer", () => {
     expect(confirmButton).toBeDisabled();
     expect(exceptionButton).toBeEnabled();
 
-    const openBankRow = within(unpairedZone).getByRole("row", {
+    const openBankRow = await within(unpairedZone).findByRole("row", {
       name: /2026-03-28.*智能工厂设备商/,
     });
 
@@ -2034,7 +2034,7 @@ describe("Workbench row selection and detail drawer", () => {
 
     expect(cancelButton).toBeDisabled();
 
-    const pairedBankRow = within(pairedZone).getByRole("row", {
+    const pairedBankRow = await within(pairedZone).findByRole("row", {
       name: /2026-03-25 14:22.*华东设备供应商/,
     });
 
@@ -2140,7 +2140,7 @@ describe("Workbench row selection and detail drawer", () => {
 
     const pairedZone = await screen.findByTestId("zone-paired");
     await user.click(
-      within(pairedZone).getByRole("row", {
+      await within(pairedZone).findByRole("row", {
         name: /2026-03-25 14:22.*华东设备供应商/,
       }),
     );
@@ -2276,10 +2276,10 @@ describe("Workbench row selection and detail drawer", () => {
 
     const unpairedZone = await screen.findByTestId("zone-unpaired");
     expect(within(unpairedZone).getByRole("button", { name: /已处理异常\d+项/ })).toBeInTheDocument();
-    const openOaRow = within(unpairedZone).getByRole("row", {
+    const openOaRow = await within(unpairedZone).findByRole("row", {
       name: /陈涛.*智能工厂设备商/,
     });
-    const openBankRow = within(unpairedZone).getByRole("row", {
+    const openBankRow = await within(unpairedZone).findByRole("row", {
       name: /2026-03-28.*智能工厂设备商/,
     });
 
@@ -2305,7 +2305,7 @@ describe("Workbench row selection and detail drawer", () => {
       ).not.toBeInTheDocument();
     });
 
-    await user.click(within(unpairedZone).getByRole("button", { name: /已处理异常\d+项/ }));
+    await user.click(await screen.findByRole("button", { name: /已处理异常\d+项/ }));
 
     const processedModal = await screen.findByRole("dialog", { name: "已处理异常弹窗" });
     expect(within(processedModal).getAllByText("追进项发票").length).toBeGreaterThanOrEqual(2);
@@ -2322,10 +2322,10 @@ describe("Workbench row selection and detail drawer", () => {
     renderWorkbenchPage();
 
     const unpairedZone = await screen.findByTestId("zone-unpaired");
-    const openOaRow = within(unpairedZone).getByRole("row", {
+    const openOaRow = await within(unpairedZone).findByRole("row", {
       name: /陈涛.*智能工厂设备商/,
     });
-    const openBankRow = within(unpairedZone).getByRole("row", {
+    const openBankRow = await within(unpairedZone).findByRole("row", {
       name: /2026-03-28.*智能工厂设备商/,
     });
 

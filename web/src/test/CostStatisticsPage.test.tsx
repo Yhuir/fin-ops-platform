@@ -600,7 +600,7 @@ describe("Cost statistics page", () => {
     renderCostStatisticsPage();
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
-    const monthScopeButton = screen.getByRole("button", { name: "时间统计时间范围：2026年3月" });
+    const monthScopeButton = await screen.findByRole("button", { name: "时间统计时间范围：2026年3月" });
     expect(screen.queryByRole("button", { name: "三月" })).not.toBeInTheDocument();
 
     await user.click(monthScopeButton);

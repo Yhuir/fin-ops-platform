@@ -200,6 +200,7 @@ describe("Bank details page", () => {
 
     const page = await screen.findByTestId("bank-details-page");
     const accountList = within(page).getByRole("list", { name: "银行账户" });
+    await within(accountList).findByRole("button", { name: /工商银行 6386/ });
     expect(within(accountList).getAllByRole("listitem")).toHaveLength(3);
     const allAccountsButton = within(accountList).getByRole("button", { name: /全部流水/ });
     expect(allAccountsButton).toBeInTheDocument();
@@ -1060,7 +1061,7 @@ describe("Bank details page", () => {
     renderBankDetailsPage();
 
     const page = await screen.findByTestId("bank-details-page");
-    await user.click(within(page).getByRole("button", { name: /交通银行 3847/ }));
+    await user.click(await within(page).findByRole("button", { name: /交通银行 3847/ }));
 
     expect(await within(page).findByText("当前时间范围内没有流水。")).toBeInTheDocument();
     expect(within(page).getByLabelText(/交通银行 3847 余额/)).toHaveTextContent("余额为空");

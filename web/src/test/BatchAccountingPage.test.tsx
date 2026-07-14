@@ -595,7 +595,7 @@ describe("BatchAccountingPage", () => {
       await screen.findByRole("heading", { name: "日常报销批量账务管理" });
       expect(screen.getByRole("button", { name: "关联OA项与流水" })).toBeDisabled();
 
-      await user.click(screen.getByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
+      await user.click(await screen.findByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
       expect(screen.getByText("已选 OA 1 项")).toBeInTheDocument();
       expect(screen.getByText("已选 OA 金额 700.00")).toBeInTheDocument();
       expect(screen.getByText("差额 500.00")).toBeInTheDocument();
@@ -641,7 +641,7 @@ describe("BatchAccountingPage", () => {
     renderPage();
     await screen.findByRole("heading", { name: "日常报销批量账务管理" });
 
-    await user.click(screen.getByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
+    await user.click(await screen.findByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
     const noteInput = screen.getByLabelText("差额说明");
     expect(noteInput.tagName).toBe("INPUT");
     expect(screen.getByRole("button", { name: "关联OA项与流水" })).toBeDisabled();
@@ -671,12 +671,12 @@ describe("BatchAccountingPage", () => {
     renderPage();
     await screen.findByRole("heading", { name: "日常报销批量账务管理" });
 
-    await user.click(screen.getByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
+    await user.click(await screen.findByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
     await user.type(screen.getByLabelText("差额说明"), "财务确认差额闭环");
     expect(screen.getByLabelText("差额说明")).toHaveValue("财务确认差额闭环");
 
     await user.click(screen.getByRole("button", { name: /批量账务集中处理.*800.00.*2026-01-08 09:00:00.*支出.*招行 1888/ }));
-    await user.click(screen.getByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
+    await user.click(await screen.findByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
 
     expect(screen.getByLabelText("差额说明")).toHaveValue("");
   });
@@ -688,7 +688,7 @@ describe("BatchAccountingPage", () => {
     renderPage();
     await screen.findByRole("heading", { name: "日常报销批量账务管理" });
 
-    await user.click(screen.getByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
+    await user.click(await screen.findByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
     await user.type(screen.getByLabelText("差额说明"), "财务确认差额闭环");
     expect(screen.getByLabelText("差额说明")).toHaveValue("财务确认差额闭环");
 
@@ -696,7 +696,7 @@ describe("BatchAccountingPage", () => {
     await screen.findByRole("table", { name: "已关联OA项" });
     await user.click(screen.getByRole("button", { name: /^未提交/ }));
     await screen.findByRole("table", { name: "可关联OA项" });
-    await user.click(screen.getByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
+    await user.click(await screen.findByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
 
     expect(screen.getByLabelText("差额说明")).toHaveValue("");
   });
@@ -708,7 +708,7 @@ describe("BatchAccountingPage", () => {
     renderPage();
     await screen.findByRole("heading", { name: "日常报销批量账务管理" });
 
-    await user.click(screen.getByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
+    await user.click(await screen.findByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
     await user.type(screen.getByLabelText("差额说明"), "财务确认差额闭环");
     await user.click(screen.getByRole("checkbox", { name: "选择 王青 2026-01-07" }));
     expect(screen.queryByLabelText("差额说明")).not.toBeInTheDocument();
@@ -732,7 +732,7 @@ describe("BatchAccountingPage", () => {
     await screen.findByRole("heading", { name: "日常报销批量账务管理" });
 
     expect(await screen.findByText("关联台关系读模型 missing，正在刷新。")).toBeInTheDocument();
-    await user.click(screen.getByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
+    await user.click(await screen.findByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
     await user.click(screen.getByRole("checkbox", { name: "选择 王青 2026-01-07" }));
     expect(screen.getByText("已选 OA 2 项")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "关联OA项与流水" })).toBeEnabled();
@@ -780,7 +780,7 @@ describe("BatchAccountingPage", () => {
     renderPage();
     await screen.findByRole("heading", { name: "日常报销批量账务管理" });
 
-    await user.click(screen.getByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
+    await user.click(await screen.findByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
     await user.click(screen.getByRole("checkbox", { name: "选择 王青 2026-01-07" }));
     await user.click(screen.getByRole("button", { name: "关联OA项与流水" }));
 
@@ -819,14 +819,14 @@ describe("BatchAccountingPage", () => {
 
     renderPage();
     await screen.findByRole("heading", { name: "日常报销批量账务管理" });
-    await user.click(screen.getByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
+    await user.click(await screen.findByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
     await user.click(screen.getByRole("checkbox", { name: "选择 王青 2026-01-07" }));
     expect(screen.getByRole("button", { name: "关联OA项与流水" })).toBeEnabled();
 
     await user.click(screen.getByRole("button", { name: "刷新" }));
 
     expect(await screen.findByText("当前年份暂无批量账务流水")).toBeInTheDocument();
-    expect(screen.getByText("银行流水金额 0.00")).toBeInTheDocument();
+    expect(await screen.findByText("银行流水金额 0.00")).toBeInTheDocument();
     expect(screen.getByText("已选 OA 0 项")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "关联OA项与流水" })).toBeDisabled();
     expect(fetchMock.mock.calls.some(([input]) => {
@@ -842,7 +842,7 @@ describe("BatchAccountingPage", () => {
     renderPage();
     await screen.findByRole("heading", { name: "日常报销批量账务管理" });
 
-    await user.click(screen.getByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
+    await user.click(await screen.findByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
     expect(screen.getByText("已选 OA 1 项")).toBeInTheDocument();
     expect(screen.getByText("已选 OA 金额 700.00")).toBeInTheDocument();
 
@@ -852,7 +852,7 @@ describe("BatchAccountingPage", () => {
     expect(screen.getByText("已选 OA 1 项")).toBeInTheDocument();
     expect(screen.getByText("已选 OA 金额 700.00")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("checkbox", { name: "选择 陈雄兵 2025-12-23" }));
+    await user.click(await screen.findByRole("checkbox", { name: "选择 陈雄兵 2025-12-23" }));
     expect(screen.getByText("已选 OA 2 项")).toBeInTheDocument();
     expect(screen.getByText("已选 OA 金额 1,200.00")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "关联OA项与流水" })).toBeEnabled();
@@ -919,7 +919,7 @@ describe("BatchAccountingPage", () => {
       renderPage();
       await screen.findByRole("heading", { name: "日常报销批量账务管理" });
 
-      await user.click(screen.getByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
+      await user.click(await screen.findByRole("checkbox", { name: "选择 刘晨 2026-01-06" }));
       await user.click(screen.getByRole("checkbox", { name: "选择 王青 2026-01-07" }));
       await user.click(screen.getByRole("button", { name: "关联OA项与流水" }));
 
@@ -937,7 +937,7 @@ describe("BatchAccountingPage", () => {
     renderPage();
 
     const oaTable = await screen.findByRole("table", { name: "可关联OA项" });
-    expect(within(oaTable).getByText("刘晨")).toBeInTheDocument();
+    expect(await within(oaTable).findByText("刘晨")).toBeInTheDocument();
     expect(within(oaTable).getByText("王青")).toBeInTheDocument();
 
     await user.type(screen.getByLabelText("搜索OA内容"), "上海客户");
