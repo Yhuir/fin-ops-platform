@@ -27,11 +27,13 @@ ETC 票据管理页面以 `/api/etc/business-batches*` 和 `etc_business_batches
 | `ETC-TICKET-E2E-008` | Workbench summary fan-out | P0 | 人工已提交业务批次必须在 Workbench open 区形成折叠 `etc_invoice_summary`；已存在 active relation 时 open 区过滤陈旧 summary；delete/reset 后 summary 消失且散票恢复。 |
 | `ETC-TICKET-E2E-009` | 权限、旧入口和 regression | P0 | read-only 用户不得触发 OA 草稿、人工确认、删除/reset、source file/upload/import mutation；旧 `/api/etc/batches*` 后端兼容入口、测试 mock 假后端、invoice-id 级 `/api/etc/invoices/revoke-submitted` 和 ETC `oa-status/refresh` 不得回归；已移除 ETC OA 自动检测入口和字段不得回归。 |
 | `ETC-TICKET-E2E-010` | 真实基础设施 worker drain | P1 | 真实 PostgreSQL/RabbitMQ/Redis/systemd/OA/对象存储/Nginx 环境下，导入、source file、OA 草稿、人工确认、delete/reset、Workbench summary、税金/成本/search 最终页面收敛；该项必须在 staging/runtime smoke 验证。 |
+| `ETC-TICKET-E2E-011` | OA 草稿后发票 PDF 合并下载 | P0 | 只有已有 OA 草稿的 actor-scope 业务批次显示下载入口；read-export 用户可下载。服务端以 `business_batch.invoice_ids` 为成员，稳定排序并输出 N 张发票=N 页，任一 PDF 缺失、损坏、hash 不一致或非单页时整体失败；浏览器使用服务端 UTF-8 文件名且无隐藏错误。 |
 
 ## 不属于本地 deterministic E2E 的风险
 
 - 真实大 ZIP、票根网 PDF/XML/TXT 混合包、Nginx 上传超时、对象存储权限和 source file 大文件 I/O。
 - 真实 OA 草稿页面、附件上传、OA iframe/session/cookie 和人工确认后的真实 OA 系统状态。
+- 真实 PostgreSQL + MinIO 中历史批次所有 PDF 的对象 key、hash、字节和页数完整性；发布后需用授权真实批次做只读下载 smoke。
 - 生产历史 ETC 迁移、orphan task 清理、旧 business batch pickle 和历史半迁移 relation。
 - 真实 PostgreSQL/RabbitMQ/Redis/systemd import/workbench/tax/cost/search worker drain 和长队列重试。
 - 真实 Workbench、税金抵扣、成本统计、search 全量重建后的最终页面展示。

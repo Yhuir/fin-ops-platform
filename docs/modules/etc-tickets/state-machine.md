@@ -17,6 +17,7 @@
   - 用户点击“新建批次”时，由 `POST /api/etc/business-batches` 闭环编排创建 reconciliation task 和 active business batch，并返回统一业务批次 payload；前端不得先创建空 task 再把 task 当作批次显示。
   - 未提交业务批次允许通过 `PATCH /api/etc/business-batches/{id}` 修改 `title`，必须带 `expectedVersion` 防并发覆盖；标题更新写入业务批次审计，并同步 linked reconciliation task title。
   - 创建 OA 草稿后只能由 `manual-oa-status` 人工确认 `submitted` 或 `not_submitted`。
+  - OA 草稿创建成功后允许只读下载当前 business batch 关联的 ETC 发票合并 PDF；下载不改变批次状态。`invoice_ids` 决定成员，稳定排序后每张发票必须恰好贡献一页，任一来源异常时整包失败。
   - `submitted` 成功后，关联台 open 区生成一条 `source_kind=etc_invoice_summary` 折叠汇总发票行，金额取业务批次上报金额，等待未来 OA 和银行流水进入后普通配对。
   - 任意业务阶段允许删除本地批次记录；删除必须写入审计并校验 `expectedVersion` 防并发覆盖，但不得因 `importing`、`oa_draft_created`、`submitted_confirmed`、`closed` 等流程状态阻塞。
   - 删除未提交批次会清理本地导入批次、ETC metadata/附件关系和绑定任务；删除已提交批次会本地 reset 业务批次，释放 ETC 发票 `current_batch_id`，让 `etc_invoice_summary` 消失；只有原本已存在于统一发票池的发票才可能回到普通发票视图。
@@ -32,7 +33,7 @@
 
 ## UI 状态
 
-- loading：页面加载业务批次、导入/草稿/人工确认动作执行中时显示按钮级 loading，不展示后台英文状态码作为主文案。
+- loading：页面加载业务批次、导入/草稿/人工确认或合并下载动作执行中时显示按钮级 loading，不展示后台英文状态码作为主文案。
 - empty：未提交或已提交 tab 下无批次时只显示该 bucket 的空态；一个业务批次在前端只出现一次。
 - initial load：页面进入和刷新只能读取已有业务批次/对账任务，不得自动创建空 ETC 对账任务；新建批次只能由用户点击“新建批次”触发。
 - batch list：左侧批次列表和 tab 计数只使用 `/api/etc/business-batches*` 事实；页面不再提供月份选择器，默认展示全部用户可见批次并只分“未提交/已提交”两个 bucket；task-only active task 只允许出现在 workflow 内部状态或异常恢复入口，不得混入批次列表。
@@ -41,7 +42,7 @@
 - upload/delete conflict：上传仍在解析时若来源被并发删除，页面接收 HTTP 409 和“源文件在解析完成前已被删除，请重新上传”，不得显示上传成功；刷新后“已上传文件”和解析明细必须由同一组 source `file_id` 派生。
 - submitted delete confirm：已提交批次删除确认框必须说明“取消发票合并，OA 系统中的草稿和已提交记录不会删除”，不得展示为撤销 OA。
 - stale/refreshing：ETC 页面本身不触发 OA 自动检测；关联台 read model 刷新状态由关联台页面展示。
-- permission disabled/hidden：权限不足时隐藏或禁用创建、导入、草稿、人工确认入口；删除入口不做流程状态阻塞，后端只保留版本并发校验和本地清理一致性校验。
+- permission disabled/hidden：权限不足时隐藏或禁用创建、导入、草稿、人工确认入口；read-export 用户在 actor scope 内仍可下载 OA 草稿批次的发票合并 PDF；删除入口不做流程状态阻塞，后端只保留版本并发校验和本地清理一致性校验。
 
 ## Read Model / Worker 状态
 
@@ -57,6 +58,7 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-07-14 | OA 草稿成功后新增批次 ETC 发票 PDF 合并下载；成员按 business batch 事实、单票单页、全有或全无，并写下载审计 | ETC 页面审批确认区、business batch read API、对象存储读取端口、PyMuPDF 合并边界 | `tests/test_etc_invoice_pdf_bundle_service.py`；`web/src/test/EtcApi.test.ts`；`web/src/test/EtcTicketManagementPage.test.tsx`；`web/e2e/etc-tickets-flow.spec.ts` |
 | 2026-07-14 | 修复慢 OCR 与 source file 删除并发造成的孤儿解析结果；新增解析提交存在性校验、互斥、孤儿清理和 formal file row deleted 对账 | 信用卡/票根上传、source file 删除、对账任务 payload、PostgreSQL formal file 状态、409 错误合同 | `tests/test_etc_reconciliation_service.py`；`tests/test_etc_backend.py`；`tests/test_postgres_repositories_boundaries.py` |
 | 2026-07-05 | 删除 ETC invoice-id 级 `/api/etc/invoices/revoke-submitted` 回退入口、旧 `/api/etc/batches*` 前端测试 mock 假后端和 ETC `oa-status/refresh` mock | ETC invoice list route owner 变为只读 I/O；提交状态回退只允许走 business batch 状态机；测试 mock 不再支持线上已删除旧入口 | `tests.test_platform_runtime_boundary_guards`；`tests.test_etc_backend.EtcServiceTests.test_batch_status_mark_not_submitted_and_draft_creation_with_fake_oa_client`；`web/src/test/EtcApi.test.ts` |
 | 2026-07-01 | ETC 页面移除月份选择器，未提交业务批次支持提交前内联编辑标题并同步 linked task title | ETC 页面 UI 状态、business batch `title` payload、ETC 发票导入 ready task 下拉标题 | `tests.test_etc_backend.EtcServiceTests.test_business_batch_title_update_persists_and_locks_submitted`；`tests.test_etc_backend.EtcApiTests.test_business_batch_title_patch_updates_linked_task_title`；`web/src/test/EtcTicketManagementPage.test.tsx`；`web/src/test/EtcApi.test.ts` |

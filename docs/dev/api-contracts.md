@@ -954,6 +954,7 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 - 权限不足、状态冲突、发票占用、OA 草稿失败和撤销失败需要返回稳定错误码。
 - dry-run、迁移和人工确认动作要返回 affected batches、affected invoices、affected months 和审计信息。
 - ETC 页面创建 OA 草稿后，业务批次状态为 `oa_confirmation_pending`，使用 `POST /api/etc/business-batches/{id}/manual-oa-status` 确认 `submitted` 或 `not_submitted`。
+- `GET /api/etc/business-batches/{id}/invoice-pdf` 使用 read session，仅在业务批次已有 `oaDraftId` 时可用。成员必须来自该批次 `invoice_ids`，按开票日期、发票号、ID 稳定排序；每张来源 PDF 必须恰好一页且通过已记录 SHA-256 校验。成功返回 `application/pdf`、`Content-Disposition` UTF-8 文件名、`Cache-Control: private, no-store`、`X-ETC-Invoice-Count` 和 `X-PDF-Page-Count`，并记录下载审计；任一来源异常时不返回部分文件。未创建草稿/空批次返回 409，数量或总字节超限返回 413，文件不可读返回 503，损坏或非单页返回 422。
 - ETC 专用 OA 自动检测入口已移除：后端不再提供 `/api/etc/business-batches/{id}/oa-status/refresh`，不再输出 `oaDetection*` 字段，也不再注册 ETC OA 检测 worker 或 detector adapter。
 - ETC invoice list 只保留 `GET /api/etc/invoices` 读侧入口；旧 `/api/etc/invoices/revoke-submitted` 已删除，不得通过 invoice id 直接回退 submitted 状态。提交状态回退必须走 business batch `manual-oa-status`、`oa-draft/revoke` 或 delete/reset 状态机。
 - `submitted` 人工确认成功后，后端必须同时闭环该业务批次绑定的 ETC 对账任务，并在关联台 open 区投影一条 `source_kind=etc_invoice_summary` 的折叠汇总发票行。该行“ETC发票数量/合计”必须从批次实际 canonical ETC 发票明细重算，不得使用 OA 申请金额、业务批次上报金额或历史计数字段冒充发票合计；散票继续作为折叠明细，不直接散落展示，但每条明细必须写入同一 active generation 的 `workbench_rows` 以支持完整展开和 row detail。

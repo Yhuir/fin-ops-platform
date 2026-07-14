@@ -54,6 +54,7 @@ dry-run 报告保存到部署日志或 `docs/operations/` 下的发布记录。�
 - `GET /api/etc/reconciliation-tasks` 与 `GET /api/etc/reconciliation-tasks/ready-for-import` 均返回 JSON，不得因历史任务和新任务混合排序返回 500；新建 business batch 后必须同时能读取单 task、任务列表和 ready task 列表。
 - `POST /api/etc/business-batches` 可省略 `taskId`，成功响应必须返回已绑定 `taskId` 和 `title` 的 business batch；随后 `GET /api/etc/business-batches?status=active` 能看到该批次，且 `/api/etc/reconciliation-tasks` 中的 task-only 记录不得额外混入 ETC 左侧批次列表。
 - `POST /api/etc/business-batches`、`PATCH /api/etc/business-batches/{id}`、`POST /api/etc/business-batches/{id}/etc-import/preview`、`POST /api/etc/business-batches/{id}/etc-import/confirm`、`POST /api/etc/business-batches/{id}/manual-oa-status` 和 `DELETE /api/etc/business-batches/{id}` 的代理路径都命中后端。
+- 已创建 OA 草稿的授权批次调用 `GET /api/etc/business-batches/{id}/invoice-pdf` 返回 `application/pdf` 而不是 HTML/JSON；`X-ETC-Invoice-Count` 与 `X-PDF-Page-Count` 相等，保存后用 `pdfinfo` 核对页数。read-export 账号允许下载，未创建草稿返回结构化 409。
 - Nginx `/api/` 与 `/fin-ops-api/` 下的 GET、POST、DELETE 都不返回 HTML 502、官网 HTML 或 React shell。
 - 旧 `/api/etc/batches` 和 `/api/etc/invoices/revoke-submitted` 已删除；任何探针、脚本或前端回滚都不得依赖这些兼容/回退入口。
 - 生产日志可按 `requestId`、`businessBatchId`、`taskId`、`externalEtcBatchId` 和 `oaRowId` 检索。
@@ -63,11 +64,13 @@ dry-run 报告保存到部署日志或 `docs/operations/` 下的发布记录。�
 ```bash
 curl -i https://<host>/fin-ops-api/api/etc/business-batches
 curl -i -X PATCH https://<host>/fin-ops-api/api/etc/business-batches/<id> -H 'Content-Type: application/json' --data '{"title":"ETC smoke batch","expectedVersion":1}'
+curl -fS -D /tmp/etc-invoice-pdf.headers -o /tmp/etc-invoice-pdf.pdf https://<host>/fin-ops-api/api/etc/business-batches/<oa-draft-batch-id>/invoice-pdf
+pdfinfo /tmp/etc-invoice-pdf.pdf | grep '^Pages:'
 curl -i -X POST https://<host>/fin-ops-api/api/etc/business-batches/<id>/manual-oa-status
 curl -i -X DELETE https://<host>/fin-ops-api/api/etc/business-batches/<id>
 ```
 
-响应 `Content-Type` 必须是 JSON 类型。出现 `text/html`、`502 Bad Gateway` HTML、公司官网 HTML 或前端 `index.html` 都视为 Nginx/API smoke 失败。
+JSON API 响应 `Content-Type` 必须是 JSON 类型；`invoice-pdf` 必须是 `application/pdf`。出现 `text/html`、`502 Bad Gateway` HTML、公司官网 HTML 或前端 `index.html` 都视为 Nginx/API smoke 失败。完成后删除 `/tmp/etc-invoice-pdf.*`，不得把真实发票留在共享目录或提交到仓库。
 
 ## OA 草稿人工确认
 

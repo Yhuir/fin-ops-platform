@@ -6,12 +6,12 @@
 
 | 层级 | 当前入口 | 回归风险 |
 | --- | --- | --- |
-| Frontend page | `web/src/pages/EtcTicketManagementPage.tsx` | unsubmitted/submitted tab、无月份选择器的全部批次列表、业务批次车牌/关键词筛选计数、未提交批次标题内联编辑、workflow/detail/error/loading/delete dialog、首屏 business-batches 暂时失败刷新恢复、OA 草稿暂时失败重试、人工确认暂时失败重试、未提交和已提交 business batch delete/reset 暂时失败重试、source file delete 暂时失败重试、ticket-root source upload 暂时失败重试、OA 草稿和人工确认、source file 上传、严格浏览器错误捕获、成功后无可见错误残留 |
-| Frontend API mapper | `web/src/features/etc/api.ts` | `/api/etc/business-batches*` envelope、canonical invoice list `importBatchId` 查询、multipart upload、HTML/proxy error、stale preview error、本地化错误、旧 `/api/etc/batches*` 和 `/api/etc/invoices/revoke-submitted` API 不得回归 |
+| Frontend page | `web/src/pages/EtcTicketManagementPage.tsx` | unsubmitted/submitted tab、无月份选择器的全部批次列表、业务批次车牌/关键词筛选计数、未提交批次标题内联编辑、workflow/detail/error/loading/delete dialog、首屏 business-batches 暂时失败刷新恢复、OA 草稿暂时失败重试、人工确认暂时失败重试、OA 草稿后发票 PDF 下载及按钮 loading/error、未提交和已提交 business batch delete/reset 暂时失败重试、source file delete 暂时失败重试、ticket-root source upload 暂时失败重试、OA 草稿和人工确认、source file 上传、严格浏览器错误捕获、成功后无可见错误残留 |
+| Frontend API mapper | `web/src/features/etc/api.ts` | `/api/etc/business-batches*` envelope、发票 PDF blob/UTF-8 文件名、HTML/proxy error、canonical invoice list `importBatchId` 查询、multipart upload、stale preview error、本地化错误、旧 `/api/etc/batches*` 和 `/api/etc/invoices/revoke-submitted` API 不得回归 |
 | Workbench UI | `web/src/components/workbench/CandidateGroupGrid.tsx` | `etc_invoice_summary` 折叠/展开、open/paired 区显示、撤回/删除后 summary 释放和已存在 canonical invoice 可见性 |
-| HTTP routes | `server.py` `/api/etc*` | business batch、business batch title patch、reconciliation task、只读 invoice list、import preview/confirm、source files、manual status、delete/reset 的状态码和结构化错误；慢解析期间 source file 被删除时必须返回 409 / `source_file_deleted_during_parse`；旧 `/api/etc/batches*`、`/api/etc/business-batches/{id}/oa-status/refresh`、`/api/etc/invoices/revoke-submitted` 不得回归 |
+| HTTP routes | `server.py` `/api/etc*` | business batch、business batch title patch、reconciliation task、只读 invoice list、`invoice-pdf` 二进制响应/错误码/权限、import preview/confirm、source files、manual status、delete/reset 的状态码和结构化错误；慢解析期间 source file 被删除时必须返回 409 / `source_file_deleted_during_parse`；旧 `/api/etc/batches*`、`/api/etc/business-batches/{id}/oa-status/refresh`、`/api/etc/invoices/revoke-submitted` 不得回归 |
 | Business service | `EtcService`、`EtcBatchInvoiceLinkService` | 业务批次幂等、标题持久化/版本/提交后锁定、状态流转、ETC metadata/附件占用释放、已存在 canonical invoice 关联、ETC batch invoice link 幂等写入、历史 batch 迁移、删除 audit |
-| Application service | `EtcBusinessBatchApplicationService` | OA 草稿、manual OA status、source file、绑定 task 恢复、Workbench invalidation |
+| Application service | `EtcBusinessBatchApplicationService`、`EtcInvoicePdfBundleService` | OA 草稿、manual OA status、source file、绑定 task 恢复、发票 PDF scope/成员/排序/单页/大小/hash/审计、Workbench invalidation |
 | Reconciliation service | `EtcReconciliationTaskService`、`CcbCreditCardStatementParser` | task ready/importing/imported/closed/deleted、source files、version、tombstone、重启 hydrate；信用卡 PDF 可选文字优先、图像型 PDF 布局 OCR fallback、OCR 人工核对 warning；解析提交与删除互斥、已删除来源拒绝提交、历史孤儿解析结果可审计清理 |
 | Import worker | `ImportProcessingService`、runtime import worker | `etc_invoice_import` job、同 session 重试/幂等、后台导入成功后的 business batch 与 ETC metadata/附件关系保存 |
 | Workbench projection | `WorkbenchSqlProjectionBuilder`、`WorkbenchPairRelationService` | submitted business batch -> `etc_invoice_summary`、active relation 排除 open summary、submitted ETC 重叠正式发票不再作为普通 open invoice row、delete/reset 后不恢复旧 OA+银行二栏 relation |
@@ -21,6 +21,7 @@
 ## 关键 smoke flows
 
 - 可选文字或图像型信用卡 PDF 上传 -> 文本解析或布局 OCR -> 票根文件上传 -> reconciliation task ready -> ETC ZIP preview -> confirm import job -> business batch visible -> OA draft -> manual submitted -> Workbench open 区出现 `etc_invoice_summary`。
+- OA 草稿已创建 -> read-export 用户点击“下载发票PDF” -> `invoice-pdf` 读取 business batch 的 68 个 PDF -> 输出一份 68 页文件 -> 浏览器使用服务端 UTF-8 文件名保存；任一来源异常时不下载部分文件。
 - Browser e2e：ETC 票据管理首屏 business-batches 暂时 503 -> 错误态且无普通空态 -> 点击刷新恢复未提交业务批次和发票明细；未提交业务批次删除第一次暂时 503 -> 错误可见且确认弹窗/批次行保持 -> 第二次成功后列表刷新为空；已提交业务批次 reset/delete 第一次暂时 503 -> expectedVersion/reason 使用已提交语义、错误可见且确认弹窗/已提交批次行/计数保持 -> 第二次成功后已提交列表刷新为空；source file 删除第一次暂时 503 -> 错误可见且确认弹窗/文件行保持 -> 第二次成功后文件列表刷新为空；ticket-root source upload 第一次暂时 503 -> 错误可见且不追加文件 -> 第二次成功后追加 TXT source file；创建 OA 草稿第一次暂时 503 -> 错误可见且不进入 OA 提交确认伪成功 -> dialog 保持可重试 -> 第二次成功；人工确认已提交第一次暂时 503 -> 错误可见且不切已提交 bucket -> OA 提交确认保持可重试 -> 第二次成功；未提交业务批次首屏 -> 展开发票明细 -> 创建 OA 草稿 -> 人工确认已提交 -> 已提交 bucket 展示人工确认状态；恢复、删除、上传、OA 草稿和人工确认成功后都检查无可见错误残留。
 - 用户点击“新建批次” -> `POST /api/etc/business-batches` 可省略 `taskId` -> 后端创建 task + active business batch -> 未提交列表只显示返回的 business batch；若 business batch 创建失败，新建 task 必须 tombstone，不得留下刷新后复活的 task-only 批次。
 - 用户在未提交列表点击批次标题 -> 内联编辑 -> `PATCH /api/etc/business-batches/{id}` 持久化 `title` 并同步 linked reconciliation task title -> ETC 发票导入页 ready task 下拉显示新标题；已提交批次标题不可编辑。
@@ -45,6 +46,16 @@
 | 6. End-to-end business-flow integration tests | 适用 | `tests/test_etc_backend.py`、`web/e2e/etc-tickets-flow.spec.ts` | 覆盖导入/批次/人工提交/创建 OA 草稿/对账任务闭环/关联台展示/已提交批次本地 reset、任务入口删除绑定业务批次并取消 summary relation 的关键路径，并覆盖 durable import restart 后业务批次与 linked task 的一致性恢复；Playwright 补充真实浏览器 business-batches GET 暂时失败 -> 刷新 -> 恢复批次/明细、未提交 business batch delete 暂时失败 -> 弹窗/行保持 -> 重试成功后列表刷新、已提交 business batch reset/delete 暂时失败 -> submitted row/计数保持 -> 重试成功后列表刷新、source file delete 暂时失败 -> 弹窗/文件行保持 -> 重试成功后文件列表刷新、ticket-root source upload 暂时失败 -> 不追加文件 -> 重试成功后追加 source file、OA draft 暂时失败 -> dialog 保持 -> 重试成功、manual OA status 暂时失败 -> 保持提交确认 -> 重试成功，以及从未提交业务批次创建 OA 草稿到人工已提交 bucket 的页面闭环和成功后错误残留检查。 |
 | 7. Existing feature regression tests | 适用 | `tests/test_etc_backend.py`、`tests/test_object_storage_repository.py`、`tests/test_oa_projection_sql_runtime.py`、`tests/test_mongo_oa_adapter.py`、`tests/test_postgres_migrations.py`、`tests/test_postgres_state_store_integration.py`、`tests/test_rabbitmq_staging_preflight.py`、`web/src/test/EtcTicketManagementPage.test.tsx`、`web/e2e/etc-tickets-flow.spec.ts` | 覆盖既有 ETC 页面旧入口、OA 匹配汇总行、删除/文件/补充凭证交互、OA projection/Mongo adapter 删除 ETC 专用候选查询后不影响非 ETC OA 能力、对象存储 repository 暴露 backend/bucket 给 PostgreSQL 文件写入，migration 清单连续且 0103 只从 typed 时间列幂等补齐缺失 payload 时间，RabbitMQ staging preflight 不再要求 ETC OA detection worker，防止首屏加载失败被伪装为空态、历史任务与新任务混排导致 list/ready-list 500、未提交/已提交 business batch delete/reset 暂时失败被伪装成已删除、source file delete 暂时失败被伪装成已删除、ticket-root source upload 暂时失败被伪装成已上传、OA draft 暂时失败被伪装成提交确认成功、manual OA status 暂时失败被伪装成已提交、旧撤销提交入口、旧检测入口、旧删除状态阻塞、浏览器层 OA 草稿确认流程和“成功但报错提示仍显示”重新漂移。 |
 
+## 2026-07-14 发票 PDF 合并下载回归增量
+
+- 类别 1（业务核心）：适用。`tests/test_etc_invoice_pdf_bundle_service.py` 以真实 PDF 字节覆盖 68 张=68 页、稳定顺序、空批次/无草稿、缺失/损坏/hash 不一致/多页和资源上限。
+- 类别 2（service）：适用。同一测试覆盖 application service 的 actor scope、批次成员解析、文件读取端口、全有或全无和下载审计；不直接依赖 MinIO client 或 HTTP response。
+- 类别 3（API 合同）：适用。覆盖成功二进制 response、UTF-8 文件名、no-store、数量/页数 headers、无草稿 409 和结构化错误映射。
+- 类别 4（read model/cache/job）：不适用。下载只读 canonical business batch + 对象存储字节，不新增或刷新 read model，不入队 worker，不写缓存/预生成文件。
+- 类别 5（前端交互）：适用。Vitest 覆盖 blob、文件名、结构化错误、按钮点击和 URL 释放；Playwright 覆盖 read-export 用户可见按钮、浏览器 download event 和服务端文件名。
+- 类别 6（端到端）：适用。本地 API + 浏览器组合覆盖 OA 草稿存在 -> 合并 API -> 浏览器下载；生产 PostgreSQL + MinIO 真实对象属于发布后只读 smoke。
+- 类别 7（既有功能回归）：适用。复跑 ETC API/页面既有套件，保护 OA 人工确认、删除/reset、导入、页面按钮和代理 fallback 不受影响。
+
 ## 2026-07-14 慢解析并发删除回归增量
 
 - 类别 1（业务核心）与类别 2（service）：`tests/test_etc_reconciliation_service.py` 覆盖已删除来源拒绝解析提交、孤儿 parse/card 数据清理和审计事件。
@@ -58,6 +69,7 @@
 
 ```bash
 PYTHONPATH=backend/src python3 -m unittest tests.test_etc_backend -v
+PYTHONPATH=backend/src python3 -m unittest tests.test_etc_invoice_pdf_bundle_service -v
 PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_relation_command_service.py tests/test_historical_etc_business_batch_migration_service.py -q
 PYTHONPATH=backend/src python3 -m pytest tests/test_etc_backend.py::EtcApiTests::test_etc_summary_relation_cancel_delegates_to_workbench_relation_command_service tests/test_etc_backend.py::EtcApiTests::test_submitted_etc_business_batch_delete_uses_canonical_relation_when_read_model_is_stale -q
 PYTHONPATH=backend/src python3 -m pytest tests/test_etc_backend.py::EtcApiTests::test_historical_etc_repair_requires_relation_command_service_before_local_writes tests/test_etc_backend.py::EtcApiTests::test_existing_etc_batch_link_requires_relation_command_service_before_local_writes tests/test_historical_etc_business_batch_migration_service.py::HistoricalEtcBusinessBatchMigrationServiceTests::test_migration_requires_relation_command_service_before_business_batch_write -q

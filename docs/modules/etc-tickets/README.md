@@ -27,6 +27,7 @@
 - `backend/src/fin_ops_platform/app/server.py` 中 `/api/etc*` dispatch。
 - `backend/src/fin_ops_platform/services/etc_service.py`
 - `backend/src/fin_ops_platform/services/etc_business_batch_application_service.py`
+- `backend/src/fin_ops_platform/services/etc_invoice_pdf_bundle_service.py`
 - `backend/src/fin_ops_platform/services/invoice_attachment_recognition_service.py`
 - `backend/src/fin_ops_platform/services/etc_document_parsers.py`
 - `backend/src/fin_ops_platform/services/etc_reconciliation_service.py`
@@ -56,6 +57,7 @@
 - 没有 active business batch 绑定的 task-only 记录不得进入左侧批次列表或 tab 计数；只可作为 workflow 内部状态、异常恢复线索或运维清理对象处理。
 - 旧 `/api/etc/batches*` 后端兼容入口、前端测试 mock 假后端、invoice-id 级 `/api/etc/invoices/revoke-submitted` 回退入口和 ETC `oa-status/refresh` 入口已删除；页面、测试和运维入口不得重新依赖它们。
 - ETC 专用 OA 自动检测链路已移除；创建 OA 草稿后只允许用户通过 `manual-oa-status` 人工确认 `submitted` 或 `not_submitted`，不得通过 invoice id 直接回退提交状态。
+- OA 草稿创建成功后，页面提供当前业务批次 ETC 发票 PDF 合并下载。批次 `invoice_ids` 是成员事实源，application service 负责范围校验与审计，PDF bundle service 只通过文件读取端口读取对象存储/本地字节并按开票日期、发票号、ID 稳定排序；每张来源必须恰好一页，任一缺失、损坏、hash 不一致或多页时整包失败，不允许静默漏票。
 - `submitted` 只表示 ETC 批次已人工确认提交，不等于关联台三项已配对；Workbench open 区必须生成折叠 `etc_invoice_summary`，等待 OA 和银行流水进入后通过普通配对闭环。
 - ETC 发票本质上是进项发票；统一发票池只保留 `app.invoices` 内的正式进/销项发票。ETC 专用导入保存 ZIP 内命中本批次的 PDF/XML 和 ETC metadata，用于 OA 附件和 summary 展示；不得因为 ETC ZIP 中出现一张票就在统一发票池创建新发票。
 - 业务批次任意阶段允许本地删除/reset；删除不得撤销真实 OA 草稿或 OA 流程，已提交批次删除必须释放 ETC 发票合并关系，并取消包含 summary row 的 active relation。

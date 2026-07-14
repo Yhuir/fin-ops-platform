@@ -27,7 +27,7 @@
 | 待找发票 | `web/src/pages/PendingInvoicesPage.tsx` | pending invoice routes/query service | 支出/收入流水、进项发票、规则建议、选择已有发票关系、收入状态覆盖 | 进项导入、选择已有发票确认/撤回、收入状态覆盖、规则变更 |
 | OA 待付款核对 | `web/src/pages/OaPendingPaymentsPage.tsx` | OA pending payments routes/query/command service | completed: 普通 OA completed projection；in-progress: OA MySQL `t_payment_simple.flow_id` 准入 + payment-admitted OA projection；OA 待付款 workflow status、付款流水、进项发票、Workbench relation、SQL read model | OA 导入/同步、银行流水导入、发票关系变化、Workbench relation 确认/撤回、进行中 OA 确认已支付 |
 | 税金抵扣 / 发票使用 | tax offset / invoice usage pages | invoice usage/read model routes | 已认证发票、使用状态、销项收款、ETC 发票 | 发票导入、认证状态、收款关系、backfill/refresh |
-| ETC 业务批次 | ETC pages/components | ETC business batch routes/service | ETC 票据、人工业务批次、导入草稿、OA 提交确认 | ETC 导入、OA 草稿创建、人工提交确认 |
+| ETC 业务批次 | ETC pages/components | ETC business batch routes/service、invoice PDF bundle service | ETC 票据、人工业务批次、导入草稿、OA 提交确认、草稿后批次发票合并下载 | ETC 导入、OA 草稿创建、人工提交确认、对象存储 PDF 读取与只读下载审计 |
 | 成本统计 | cost statistics page | cost routes/query service | 项目、费用、发票、核销关系 | 项目范围变化、发票/流水关系变化 |
 | 设置 / 账户 / 项目 | settings pages | settings/account/project routes | 用户、角色、项目状态、规则配置 | 配置保存、权限变化、数据重置 |
 | App Health | shell/status components | app health routes、runtime queue、worker registry | queue、read model freshness、worker 状态、cache 状态 | worker heartbeat、refresh job、后台任务 |

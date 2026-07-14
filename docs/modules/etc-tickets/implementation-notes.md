@@ -28,6 +28,17 @@
 
 ## 历史记录
 
+## 2026-07-14 - OA 草稿后 ETC 发票 PDF 合并下载
+
+- 目标：OA 草稿创建成功后，在 ETC 票据页一次下载当前业务批次的全部 ETC 发票 PDF；68 张发票输出一份 68 页文件，每页一张。
+- 影响范围：ETC 页面审批确认区、前端 ETC API client、business batch route/application service、`EtcService` 文件读取端口、新的 PDF bundle service、审计和模块/API/运维文档；不改 OA payload、业务批次状态机、数据库 schema、read model 或 worker。
+- 关键决策：`business_batch.invoice_ids` 是唯一成员事实源；read session 和既有 actor scope 控制访问；复用已安装 PyMuPDF 和既有对象存储/本地文件读取端口，按开票日期/发票号/ID 稳定排序。每张来源必须恰好一页且通过已记录 SHA-256，任一来源异常时整包失败；单次限制 500 张/512 MiB，不新增异步任务、缓存、预生成文件或依赖。
+- 文档影响：更新模块 README、boundary、state、tests、e2e spec/coverage、产品口径、API contract、页面架构和 ETC 运维 smoke。
+- 测试覆盖：真实 PDF 字节的 68 页 unit；缺失、损坏、多页、hash 不一致、无草稿、超状态 API 合同和审计；前端 blob/文件名/错误与按钮交互；read-export Playwright download event。
+- 验证命令：见本轮最终执行记录。
+- 未测风险：本地自动化不证明生产 PostgreSQL `invoice_ids` 与 MinIO 历史对象全部存在且 hash 正确；部署后必须选授权真实批次执行一次只读下载 smoke，核对响应头、页数和审计。
+- 后续事项：仅当真实批次规模持续超过同步阈值或代理超时时，再基于观测数据评估异步生成；当前不预建任务系统。
+
 ## 2026-07-14 - 信用卡慢 OCR 与 source file 删除并发一致性修复
 
 - 目标：修复 source file 已被删除但慢 OCR 随后仍提交 `FileParseResult`，导致“已上传文件”不含信用卡账单、下方却出现信用卡明细的孤儿状态。

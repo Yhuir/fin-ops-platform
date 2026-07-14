@@ -2150,6 +2150,13 @@ class EtcService:
     def list_invoices_by_ids(self, invoice_ids: list[str]) -> list[EtcInvoice]:
         return [replace(self._get_invoice(invoice_id)) for invoice_id in invoice_ids]
 
+    def read_invoice_pdf_bytes(self, invoice_id: str) -> bytes:
+        invoice = self._get_invoice(invoice_id)
+        path = str(invoice.pdf_file_path or "").strip()
+        if not path or not self._stored_invoice_file_exists(path):
+            raise FileNotFoundError(f"ETC invoice PDF not found: {invoice.invoice_number}")
+        return self._read_stored_invoice_file(path)
+
     def list_invoices_by_numbers(self, invoice_numbers: list[str]) -> list[EtcInvoice]:
         normalized_numbers = [str(number).strip() for number in invoice_numbers if str(number).strip()]
         invoices: list[EtcInvoice] = []

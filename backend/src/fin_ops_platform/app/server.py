@@ -168,6 +168,7 @@ from fin_ops_platform.services.etc_service import (
 )
 from fin_ops_platform.services.etc_business_batch_application_service import EtcBusinessBatchApplicationService
 from fin_ops_platform.services.etc_business_batch_delete_service import EtcBusinessBatchDeleteService
+from fin_ops_platform.services.etc_invoice_pdf_bundle_service import EtcInvoicePdfBundle, EtcInvoicePdfBundleService
 from fin_ops_platform.services.etc_reconciliation_models import SourceFileKind
 from fin_ops_platform.services.etc_reconciliation_import_cleanup_service import EtcReconciliationImportCleanupService
 from fin_ops_platform.services.etc_reconciliation_service import EtcReconciliationTaskService
@@ -5357,6 +5358,20 @@ class Application:
             oa_client_factory=self._build_etc_oa_client,
             link_etc_invoices_to_existing_invoices=self._link_etc_invoices_to_existing_invoices,
             refresh_after_etc_invoice_link=self._refresh_after_etc_invoice_link,
+            invoice_pdf_bundle_service=EtcInvoicePdfBundleService(
+                read_invoice_pdf=self._etc_service.read_invoice_pdf_bytes,
+            ),
+            record_invoice_pdf_download=lambda actor, batch, bundle: self._audit_service.record_action(
+                actor_id=actor.actor_id,
+                action="etc_invoice_pdf_bundle_downloaded",
+                entity_type="etc_business_batch",
+                entity_id=batch.business_batch_id,
+                metadata={
+                    "filename": bundle.filename,
+                    "invoice_count": bundle.invoice_count,
+                    "page_count": bundle.page_count,
+                },
+            ),
         )
         self._etc_business_batch_application_service = service
         self._etc_business_batch_dependency_key = dependency_key
@@ -5470,6 +5485,32 @@ class Application:
                 return result
             status_code, payload = result
             return self._json_response(status_code, payload)
+        if method == "GET" and action == "invoice-pdf":
+            session = self._etc_business_session(headers, require_mutation=False)
+            if isinstance(session, Response):
+                return session
+            status_code, result = self._etc_business_routes().invoice_pdf_bundle(
+                business_batch_id,
+                session=session,
+            )
+            if not isinstance(result, EtcInvoicePdfBundle):
+                return self._json_response(status_code, result)
+            return Response(
+                status_code=int(status_code),
+                body=result.content,
+                headers={
+                    "Content-Type": "application/pdf",
+                    "Content-Disposition": _build_content_disposition(result.filename),
+                    "Content-Length": str(len(result.content)),
+                    "Cache-Control": "private, no-store",
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Headers": "Content-Type",
+                    "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+                    "Access-Control-Expose-Headers": "Content-Disposition",
+                    "X-ETC-Invoice-Count": str(result.invoice_count),
+                    "X-PDF-Page-Count": str(result.page_count),
+                },
+            )
         session = self._etc_business_session(headers, require_mutation=True)
         if isinstance(session, Response):
             return session

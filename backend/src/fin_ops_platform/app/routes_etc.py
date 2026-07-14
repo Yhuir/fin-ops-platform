@@ -21,6 +21,7 @@ from fin_ops_platform.services.etc_service import (
     UploadedEtcZipFile,
 )
 from fin_ops_platform.services.etc_business_batch_delete_service import EtcBusinessBatchDeleteService
+from fin_ops_platform.services.etc_invoice_pdf_bundle_service import EtcInvoicePdfBundle, EtcInvoicePdfBundleError
 from fin_ops_platform.services.object_storage import ObjectStorageWriteError
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 
@@ -92,6 +93,21 @@ class EtcBusinessBatchApiRoutes:
         except Exception as exc:
             return self._error_response(exc)
         return self._success(HTTPStatus.OK, result)
+
+    def invoice_pdf_bundle(
+        self,
+        business_batch_id: str,
+        *,
+        session: OARequestSession,
+    ) -> tuple[HTTPStatus, EtcInvoicePdfBundle | dict[str, Any]]:
+        try:
+            result = self._application_service.invoice_pdf_bundle(
+                business_batch_id,
+                actor=self._actor(session),
+            )
+        except Exception as exc:
+            return self._error_response(exc)
+        return HTTPStatus.OK, result
 
     def delete_batch(
         self,
@@ -277,6 +293,17 @@ class EtcBusinessBatchApiRoutes:
                     "actualVersion": exc.actual_version,
                 },
             )
+        if isinstance(exc, EtcInvoicePdfBundleError):
+            status_by_code = {
+                "invoice_pdf_bundle_not_ready": HTTPStatus.CONFLICT,
+                "invoice_pdf_bundle_empty": HTTPStatus.CONFLICT,
+                "invoice_pdf_bundle_too_large": HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                "invoice_pdf_unavailable": HTTPStatus.SERVICE_UNAVAILABLE,
+                "invoice_pdf_invalid": HTTPStatus.UNPROCESSABLE_ENTITY,
+                "invoice_pdf_page_count_invalid": HTTPStatus.UNPROCESSABLE_ENTITY,
+                "invoice_pdf_bundle_invariant_failed": HTTPStatus.INTERNAL_SERVER_ERROR,
+            }
+            return status_by_code.get(exc.code, HTTPStatus.UNPROCESSABLE_ENTITY), cls._error(exc.code, str(exc))
         if isinstance(exc, WorkbenchRelationCommandError):
             return HTTPStatus.CONFLICT, cls._error(
                 exc.error_code,
