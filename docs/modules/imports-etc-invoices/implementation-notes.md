@@ -6,6 +6,7 @@
 - 初步把剩余延迟归因于 59 个串行 archive verified writes，并尝试最多 4 路并发。真实部署后 Nginx 仍在 61.918 秒返回 504，绕过 Nginx 的后端请求 300 秒仍不收敛；该方案已回滚，不作为最终实现。
 - 回滚版绕过 Nginx 的串行请求同样在 240 秒未完成；本地使用生产 task payload 跑完整 `preview_etc_zip_for_task` 后，CPU 栈稳定落在多发票金额组合搜索。根因是 `_select_global_requirement_matches` 未像 sequential path 一样先按车牌与日期窗口过滤候选，导致 38 个需求分别在 99 张发票上构建大量无关组合，并存在跨车牌/日期误配风险。
 - 修复由 `_requirement_match_options` 统一复用既有 `_invoice_satisfies_requirement_context`；精确金额组合改为按候选两半枚举并通过 `(张数, 金额)` 索引合并，只保留排序最优的 64 个精确组合，避免旧实现对每个候选复制并重排全部中间金额状态。不改变金额、发票张数、全局不重叠分配或 package-group 规则；并发 session store 改动撤销。新增跨车牌同金额组合与 30 候选/6 张发票回归，并使用同一真实 59 ZIP + 生产 task payload 做 task-aware 性能验证。
+- release `main-7cbc77f64-etc59match-20260714` 使用同一 59 ZIP 通过公开 Nginx/API 入口完成 PostgreSQL + MinIO preview smoke：上传约 24.98MB，17.760 秒返回 HTTP 200；59 files / 99 items 中 68 included、31 excluded、0 blocking，应用性能样本 15.573 秒、505 次 SQL、数据库累计 1.649 秒。smoke 只持久化 preview session，没有 confirm；task version 19 仍为 `ready_for_import`、正式导入数 0。
 
 ## 2026-07-14：多 ZIP 预览 504 根因修复
 

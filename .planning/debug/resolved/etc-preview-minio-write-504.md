@@ -1,5 +1,5 @@
 ---
-status: fixing
+status: resolved
 trigger: "修复历史附件重复读取并部署 744e1c4d5 后，真实 59 ZIP ETC 发票预览仍在约 62 秒返回 504，页面表现为导入后没反应。"
 created: 2026-07-14
 updated: 2026-07-14
@@ -18,9 +18,9 @@ updated: 2026-07-14
 ## Current Focus
 
 - hypothesis: confirmed — task-aware preview 的全局需求匹配没有在金额组合搜索前约束车牌与日期窗口，并使用逐候选复制/排序全部中间金额状态的 DP；真实任务 38 个需求、99 张候选中的 14 个多发票需求触发组合爆炸。
-- test: 在 `_requirement_match_options` 统一过滤 requirement context，并使用 meet-in-the-middle `(张数, 金额)` 索引生成精确组合、仅保留 deterministic score 最优 64 个；用同一 task payload 和 59 ZIP 复测完整 task-aware preview。
-- expecting: 生产 preview 在 60 秒内返回 HTTP 200 和 sessionId；99 张 ZIP 发票按 task 过滤到本次 68 张要求，PostgreSQL/MinIO durable 写入成功。
-- next_action: 提交已回归的匹配修复，独立部署并复跑真实 59 ZIP production smoke。
+- test: passed — `_requirement_match_options` 统一过滤 requirement context，meet-in-the-middle `(张数, 金额)` 索引只保留 deterministic score 最优 64 个精确组合；同一 task payload/59 ZIP 本地与生产均已复测。
+- expecting: satisfied — 生产 preview 在 17.760 秒返回 HTTP 200 和 sessionId；99 张 ZIP 发票筛选到本次 68 张要求，PostgreSQL/MinIO durable 写入成功。
+- next_action: none；不执行 confirm，保留真实任务为 `ready_for_import` 供用户核对后正式导入。
 - reasoning_checkpoint:
   - evidence_for: 并发 archive writer 上线后 public preview 仍在 61.918 秒 504，绕过 Nginx 300 秒不返回；回滚版串行请求绕过 Nginx 240 秒同样不返回。生产 API 持续消耗 CPU；本地完整 task-aware preview 的 faulthandler 栈稳定在 `_find_amount_combinations`，而普通 ZIP parser 只需 614ms。
   - evidence_against: archive verified writes 仍属于请求耗时，但不是导致数分钟无响应的主因；修复后仍需真实 PostgreSQL + MinIO smoke 证明总时长低于代理阈值。
@@ -38,6 +38,8 @@ updated: 2026-07-14
 - 2026-07-14: 真实 task context 过滤后，14 个多发票需求的单需求 eligible candidates 最大仍为 30、invoice_count 最大 6；旧 DP 对每个候选复制所有 sum state，并逐 sum 反复计算组合 score/排序。
 - 2026-07-14: 修复后同一生产 task payload + 59 ZIP 的完整 `preview_etc_zip_for_task` 用时 304.158ms，99 个 preview items、68 个 allowed invoice numbers、0 blocking issues。
 - 2026-07-14: 95 个 ETC reconciliation tests 与 52 个 ETC service/API/session/object-storage tests 通过；Ruff 与 docs check 通过。
+- 2026-07-14: release `main-7cbc77f64-etc59match-20260714` 公开 multipart smoke 上传 24,978,647 bytes，在 17.759950 秒返回 HTTP 200 和 session `389194f402ee456991d815110df0fe07`；response 含 59 files、38 importFiles、99 items、68 included、31 excluded、0 blocking issues。
+- 2026-07-14: `/health` 记录 completed preview sample：应用 duration 15,573.451ms、PostgreSQL query count 505、database duration 1,649.118ms、status 200；证明请求已越过对象 verified write 与 session repository commit。smoke 后 task 仍是 version 19 / `ready_for_import` / importedInvoiceCount 0 / hasImportedInvoices false。
 
 ## Eliminated
 
@@ -51,5 +53,5 @@ updated: 2026-07-14
 
 - root_cause: `_select_global_requirement_matches` 把全量发票候选直接交给多发票金额组合搜索，没有先执行 requirement 的车牌和日期窗口 contract；旧 `_find_amount_combinations` 又在每轮候选上复制、打分和排序全部中间金额状态，真实 38×99 数据形成 CPU 组合爆炸并允许跨上下文误配。
 - fix: `_requirement_match_options` 统一先执行 `_invoice_satisfies_requirement_context`；精确张数/金额组合使用 meet-in-the-middle，将候选分半并按 `(张数, 金额)` 合并，只保留 score 最优 64 个完整组合。撤销未经生产验证的并发 session store 改动。
-- verification: 新增跨车牌同金额与 30 候选/6 张发票组合回归；95 个 reconciliation tests、52 个 ETC service/API/session/object-storage tests、Ruff、docs check 全部通过。真实 task-aware 本地回归从不收敛降至 304.158ms；生产 PostgreSQL + MinIO smoke 待新 release 部署后完成。
+- verification: 新增跨车牌同金额与 30 候选/6 张发票组合回归；95 个 reconciliation tests、52 个 ETC service/API/session/object-storage tests、Ruff、docs check 全部通过。真实 task-aware 本地回归从不收敛降至 304.158ms；生产 PostgreSQL + MinIO 59 ZIP smoke 在 17.760 秒返回 HTTP 200、68 included、0 blocking，任务未被正式导入。
 - files_changed: `backend/src/fin_ops_platform/services/etc_reconciliation_zip_filter.py`、`tests/test_etc_reconciliation_service.py`、`backend/src/fin_ops_platform/services/etc_import_session_store.py`、`tests/test_etc_import_session_store.py`、`docs/modules/imports-etc-invoices/{boundary-io.md,tests.md,implementation-notes.md}`。
