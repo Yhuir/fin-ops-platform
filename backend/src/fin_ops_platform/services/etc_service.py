@@ -1453,8 +1453,8 @@ class EtcService:
         seen_invoice_numbers: dict[str, str] = {}
         preview_state: dict[str, tuple[bool, bool]] = {
             invoice.invoice_number: (
-                self._stored_invoice_file_exists(invoice.xml_file_path),
-                self._stored_invoice_file_exists(invoice.pdf_file_path),
+                self._preview_invoice_file_exists(invoice.xml_file_path),
+                self._preview_invoice_file_exists(invoice.pdf_file_path),
             )
             for invoice in self._invoices.values()
         }
@@ -1562,10 +1562,11 @@ class EtcService:
     ) -> EtcImportResult:
         result = EtcImportResult()
         import_batch = self._create_import_batch(uploads, import_session_id=import_session_id) if persist else None
+        file_exists = self._stored_invoice_file_exists if persist else self._preview_invoice_file_exists
         preview_state: dict[str, tuple[bool, bool]] = {
             invoice.invoice_number: (
-                self._stored_invoice_file_exists(invoice.xml_file_path),
-                self._stored_invoice_file_exists(invoice.pdf_file_path),
+                file_exists(invoice.xml_file_path),
+                file_exists(invoice.pdf_file_path),
             )
             for invoice in self._invoices.values()
         }
@@ -2619,6 +2620,12 @@ class EtcService:
             exists = getattr(self._state_store, "etc_invoice_file_exists", None)
             return bool(callable(exists) and exists(path))
         return Path(path).exists()
+
+    def _preview_invoice_file_exists(self, path: str | None) -> bool:
+        if path and path.startswith(("minio://", "s3://")):
+            # ponytail: object refs are returned only after verified writes; byte integrity belongs to read/audit paths.
+            return True
+        return self._stored_invoice_file_exists(path)
 
     def _read_stored_invoice_file(self, path: str) -> bytes:
         if self._is_external_file_ref(path):

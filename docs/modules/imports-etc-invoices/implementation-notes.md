@@ -1,5 +1,11 @@
 # ETC发票导入 实施记录
 
+## 2026-07-14：多 ZIP 预览 504 根因修复
+
+- 生产只读证据显示已有 293 张 ETC 发票且附件为 MinIO object ref；task-aware preview 在两次 inspect 的 result/audit baseline 中逐张下载并 hash 校验 XML/PDF，共放大为 2344 次历史附件 SQL + MinIO 读取。59 个新 ZIP durable save 还会在 verified write 后同步重下载全部 archive，叠加 Nginx 默认 60 秒形成 504。
+- 预览分类改用 verified MinIO/S3 object ref，不在请求热路径下载历史附件；真实导入写入仍保留 `_stored_invoice_file_exists` 检查，本地缺失附件修复语义不变。durable session 保存保留每个 ZIP 的 temporary/final 双写双读验证和 repository transaction，只删除提交成功后的冗余整批 readback。
+- 新增 service 与 session store 回归，分别锁定“预览不探测 verified 历史附件”和“保存成功后不重下载 archive”；API shape、task/version/hash/fingerprint、worker 重载和对象写入校验合同不变。
+
 ## 2026-07-12：补齐 durable session file 运行角色权限
 
 - 生产发布 0098 后，System Audit 首次读取 `app.etc_import_session_files` 暴露 `permission denied`；同一缺口也会阻断 API preview 的 replace/delete 和 worker confirm 的只读加载。

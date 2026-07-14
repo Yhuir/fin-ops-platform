@@ -139,10 +139,7 @@ class PostgresEtcImportSessionStore:
             if stored_paths:
                 self._archive_store.delete_etc_import_archives(stored_paths)
             raise
-        loaded = self.get(session.session_id)
-        if loaded is None:
-            raise RuntimeError("ETC import session was not readable after persistence.")
-        return loaded
+        return persisted
 
     def get(self, session_id: str) -> StoredEtcImportSession | None:
         row = self._repository.get(str(session_id or "").strip())

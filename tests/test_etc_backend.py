@@ -814,6 +814,28 @@ class EtcServiceTests(unittest.TestCase):
         self.assertTrue(payload["has_pdf"])
         self.assertTrue(payload["has_xml"])
 
+    def test_preview_does_not_download_verified_object_attachments_for_existing_invoices(self) -> None:
+        class NoPreviewProbeStore(MemoryEtcStateStore):
+            def etc_invoice_file_exists(self, _stored_file_path: str) -> bool:
+                raise AssertionError("preview must not download verified object attachments")
+
+        with TemporaryDirectory() as temp_dir:
+            store = NoPreviewProbeStore(Path(temp_dir))
+            service = EtcService(state_store=store)
+            service.import_zips([UploadedEtcZipFile("initial.zip", etc_zip(["ETC001"]))])
+            invoice = service._invoices["etc_invoice_0001"]
+            invoice.xml_file_path = "minio://fin-ops-files/objects/etc_invoice/ETC001.xml"
+            invoice.pdf_file_path = "minio://fin-ops-files/objects/etc_invoice/ETC001.pdf"
+
+            preview = service.preview_import_zips(
+                [UploadedEtcZipFile("duplicate.zip", etc_zip(["ETC001"]))]
+            )
+
+        self.assertEqual(
+            preview["summary"],
+            {"imported": 0, "duplicatesSkipped": 1, "attachmentsCompleted": 0, "failed": 0},
+        )
+
     def test_preview_valid_zip_reports_imported_without_persisting_records(self) -> None:
         with TemporaryDirectory() as temp_dir:
             service = EtcService(data_dir=Path(temp_dir))
