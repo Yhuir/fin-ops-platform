@@ -38,6 +38,7 @@
 - 第四次远端 CI 在异步历史行稳定出现后暴露时间展示依赖 runner 时区：`2026-06-10T10:30:00+08:00` 在 UTC runner 被渲染为 `02:30`。OA 反提已提交历史现显式使用 `Asia/Shanghai` 业务时区；测试先等待已提交发票语义表格，再精确断言 `2026-06-10 10:30`，不会用时间文本兼任加载就绪信号。
 - 第五次远程 CI 为 176/177；唯一失败是待找发票文本选择 E2E 用元素 bounding-box 中线做像素拖拽，在 CI 字体/换行布局下落到空白区。测试现对同一可见文本节点执行 Playwright 浏览器文本选择，仍精确断言 `window.getSelection()` 包含“智能工厂设备”；未改产品 UI、未增加 retry、未放宽业务结果。
 - 第六次远程 CI 的唯一失败是 ETC 统一批次列表测试等待静态 list 容器后同步读取异步批次行；现以 `etc-batch-unsubmitted-01` 业务行作为 readiness anchor，不改 ETC 业务链路与 I/O。
+- 第七次远程 CI 已通过后端、835 前端与 177 浏览器流，最后 docs gate 因 runner 未安装 `rg` 而把命令缺失误报为文档缺失。验证入口现集中选择 `rg` 或 `grep`/`git grep`，并移除未使用的固定 `/tmp` 文件写入。
 - `cd web && npm run build`：成功。
 - 全量 Chromium 业务流：177 passed，覆盖权限、导入、关联确认/撤回、异常、freshness、跨页 fan-out 与大数据集交互。
 - 旧链路 guard、migration contract、formal repository/orchestrator/grouping 定向门禁：292 passed、24 subtests passed。

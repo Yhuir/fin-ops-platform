@@ -63,6 +63,8 @@ bash scripts/verify.sh runtime-check
 bash scripts/verify.sh docs
 ```
 
+文档门禁优先使用 `rg`；GitHub runner 或最小化环境未安装 `rg` 时，固定文件检查使用 `grep`，跟踪文档全量扫描使用 `git grep`。两条路径共享同一匹配合同，不写入临时文件，也不扫描 `node_modules` 等非跟踪内容。
+
 真实基础设施 smoke 是显式 opt-in，不属于默认 `verify.sh all`：
 
 ```bash

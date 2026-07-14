@@ -84,10 +84,34 @@ run_e2e() {
   npm run e2e:smoke
 }
 
+find_stale_doc_refs() {
+  local pattern="$1"
+  if command -v rg >/dev/null 2>&1; then
+    rg -n "$pattern" README.md docs backend web deploy -g '*.md' -g '!docs/dev/testing.md'
+    return
+  fi
+  git grep -n -E "$pattern" -- \
+    README.md \
+    ':(glob)docs/**/*.md' \
+    ':(glob)backend/**/*.md' \
+    ':(glob)web/**/*.md' \
+    ':(glob)deploy/**/*.md' \
+    ':(exclude)docs/dev/testing.md'
+}
+
+doc_file_matches() {
+  local pattern="$1"
+  local path="$2"
+  if command -v rg >/dev/null 2>&1; then
+    rg -q "$pattern" "$path"
+    return
+  fi
+  grep -Eq "$pattern" "$path"
+}
+
 run_docs() {
   cd "$ROOT_DIR"
-  find docs -maxdepth 3 -type f -name '*.md' | sort >/tmp/fin_ops_docs_files.txt
-  stale_refs="$(rg -n "docs/product/|OA 集成当前 app 技术方案" README.md docs backend web deploy -g '*.md' -g '!docs/dev/testing.md' || true)"
+  stale_refs="$(find_stale_doc_refs "docs/product/|OA 集成当前 app 技术方案" || true)"
   if [[ -n "$stale_refs" ]]; then
     printf '%s\n' "$stale_refs"
     echo "Stale documentation reference found." >&2
@@ -110,17 +134,17 @@ run_docs() {
     fi
   done
 
-  if ! rg -q "不作为当前需求、架构、API 或验收事实源" .planning/README.md; then
+  if ! doc_file_matches "不作为当前需求、架构、API 或验收事实源" .planning/README.md; then
     echo ".planning/README.md must state that GSD records are not current facts." >&2
     exit 1
   fi
 
-  if ! rg -q "不作为当前 app 后端、API、read model、worker 或生产运行事实源" docs/refactor-ui/README.md; then
+  if ! doc_file_matches "不作为当前 app 后端、API、read model、worker 或生产运行事实源" docs/refactor-ui/README.md; then
     echo "docs/refactor-ui/README.md must scope prompt/state files to UI migration only." >&2
     exit 1
   fi
 
-  if ! rg -q "\.planning/.*不作为当前需求、架构、API 或验收事实源" docs/index.md; then
+  if ! doc_file_matches "\.planning/.*不作为当前需求、架构、API 或验收事实源" docs/index.md; then
     echo "docs/index.md must document the .planning fact-source boundary." >&2
     exit 1
   fi
