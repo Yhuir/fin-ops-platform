@@ -31,7 +31,7 @@
 
 ## 本地证据
 
-- `bash scripts/verify.sh all` 后端：4174 passed、33 skipped；skipped 均为未配置外部集成环境的显式门禁。
+- `bash scripts/verify.sh all` 后端：4178 passed、33 skipped；skipped 均为未配置外部集成环境的显式门禁。首次远端分支 CI 发现 `tests/test_invoice_lifecycle_sql_projection.py` 使用未声明的 `pytest`，且其中 4 个顶层函数不会被标准 `unittest discover` 收集；已改为 `unittest.TestCase`，本地统一入口实际执行 4/4 通过。
 - `cd web && npm test -- --run`：71 files、835 passed。
 - `cd web && npm run build`：成功。
 - 全量 Chromium 业务流：177 passed，覆盖权限、导入、关联确认/撤回、异常、freshness、跨页 fan-out 与大数据集交互。

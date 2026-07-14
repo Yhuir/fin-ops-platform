@@ -151,7 +151,7 @@ None. The phase must close implementation, legacy deletion, migration, tests, do
 |---|---|---|
 | Python | 3.13.9 | backend service、matcher、migration/audit tools |
 | PostgreSQL client/server contract | psql 17.10；本机 socket 可接受连接 | canonical facts、relations、queue、read models |
-| `unittest` / pytest | repository primary unittest；pytest 9.0.2 installed | backend deterministic/integration checks |
+| `unittest` | repository primary and CI-declared backend test runtime；pytest is not a declared dependency | backend deterministic/integration checks |
 | Node.js / npm | Node 26.3.0 / npm 11.16.0 | frontend build/tests |
 | Vitest | 2.1.9 installed | frontend contract/component tests |
 | Playwright | 1.60.0 installed | deterministic business-flow browser tests |
@@ -451,7 +451,7 @@ Rollback reads only the manifest-created relation-ID allowlist, previews current
 
 | Property | Value |
 |---|---|
-| Backend | Python unittest discovery; pytest 9.0.2 available for opt-in fixtures |
+| Backend | Python unittest discovery; tests on the standard verification path must not require undeclared pytest fixtures |
 | Frontend | Vitest 2.1.9 |
 | Browser | Playwright 1.60.0 |
 | Quick backend | `PYTHONPATH=backend/src python3 -m unittest tests.test_workbench_free_matching_engine tests.test_workbench_matching_orchestrator tests.test_workbench_sql_runtime -v` (file names will change with legacy deletion) |
