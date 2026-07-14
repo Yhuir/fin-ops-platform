@@ -31,14 +31,15 @@
 
 ## 本地证据
 
-- `python3 -m pytest -q`：4216 passed、48 skipped、605 subtests passed。
-- `cd web && npm test -- --run`：833 passed。
+- `bash scripts/verify.sh all` 后端：4174 passed、33 skipped；skipped 均为未配置外部集成环境的显式门禁。
+- `cd web && npm test -- --run`：71 files、835 passed。
 - `cd web && npm run build`：成功。
-- 关键 Chromium 业务流：6 passed，覆盖 Workbench confirm/withdraw、银行明细、进项发票和 OA 待付款 fan-out。
-- migration contract：56 passed、19 subtests passed。
+- 全量 Chromium 业务流：177 passed，覆盖权限、导入、关联确认/撤回、异常、freshness、跨页 fan-out 与大数据集交互。
+- 旧链路 guard、migration contract、formal repository/orchestrator/grouping 定向门禁：292 passed、24 subtests passed。
 - 520 fixture：`oa-pay-2169` + `inv_imported_0369` + 发票号 `26532000000716859331` 保留原 active relation，历史 `decision:*` identity 仍显示 paired，不新建关系。
 - 13-row fixture：13 个 canonical invoice identities 各自 unpaired singleton，minor units 合计 170949，无隐藏/重复/伪配对。
 - lint、docs 和旧链路静态 guard 通过。
+- 全量门禁首次运行发现两处历史 E2E 证据锚点仍引用旧候选语义；修正后在 clean commit `a4b9e6276` 从头复跑并全部通过。
 
 ## 未完成的生产门
 

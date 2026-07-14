@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: verifying
-stopped_at: Phase 21 local implementation and full automated verification complete; production cutover remains gated.
-last_updated: "2026-07-14T15:05:00+08:00"
-last_activity: 2026-07-14 - completed deterministic formal relation chain, exact paired/unpaired projection, legacy removal and local full regression
+stopped_at: Release A clean branch passed full local gates; remote PR, production cutover and Release B remain gated.
+last_updated: "2026-07-15T00:13:09+08:00"
+last_activity: 2026-07-15 - Release A passed 4174 backend, 835 frontend, production build and 177 Chromium tests on a clean commit
 progress:
   total_phases: 21
   completed_phases: 2
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-16)
 
 **Core value:** Preserve production finance workflow correctness while improving individual pages through isolated, reviewable GSD phases.
-**Current focus:** Phase 21 deterministic relation implementation is locally complete; clean deployment, migration 0104, rehydrate and production data-safety evidence remain gated.
+**Current focus:** Phase 21 Release A is isolated and fully verified locally; remote review, clean deployment, rehydrate and production data-safety evidence remain gated. Migration 0104 stays in Release B only.
 
 ## Current Position
 
 Phase: 21 of 21 (关联台确定性自动正式关系与全量可见性生产闭环)
 Plan: 21-01 through 21-03 complete; 21-04 production cutover pending
 Status: local implementation and automated verification complete; current production still shows the 520 relation as unpaired
-Last activity: 2026-07-14 - completed deterministic formal relation chain, exact paired/unpaired projection, legacy removal and local full regression
+Last activity: 2026-07-15 - Release A passed 4174 backend, 835 frontend, production build and 177 Chromium tests on a clean commit
 
 Progress: [█████████░] 92%
 
@@ -102,9 +102,9 @@ None yet.
 
 ### Blockers/Concerns
 
-- Phase 21 full backend baseline is zero-failure: 4216 passed / 48 skipped / 605 subtests；frontend 833/833 and six critical Chromium flows pass.
+- Phase 21 Release A full local gate is zero-failure: backend 4174 passed / 33 explicitly environment-gated skipped；frontend 835/835；Chromium 177/177；production build passed.
 - `FIN_OPS_TEST_DATABASE_URL` is not configured, so real disposable PostgreSQL migration/catalog/hash integration remains unexecuted.
-- The shared main worktree is dirty with overlapping/unrelated changes; production deployment from it is unsafe until the Phase 21 diff is isolated and reviewed on a clean commit.
+- Release A is isolated on clean branch `codex/workbench-formal-relations-release-a`; remote PR review/CI and production pre-deploy evidence are still required before merge/deploy.
 - Current production read-only evidence still shows the Yunnan Lifu 520 relation as unpaired; migration 0104, registered rehydrate, worker drain and production System Audit have not run.
 - 17/17 pages expose ready v17 proofs and local System Audit is complete; authorized production read-only execution has not occurred.
 - External bank/OA/invoice/ETC control evidence remains unregistered/unknown, so end-to-end external source completeness is still unproven.
