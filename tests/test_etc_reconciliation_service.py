@@ -2292,6 +2292,33 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         self.assertEqual({item.invoice_number for item in included}, {"ETC1201", "ETC1708", "ETC0023", "ETC1307"})
         self.assertTrue(all(item.requirement_id == "TASK-REQ-0001" for item in included))
 
+    def test_zip_preview_bounds_six_invoice_search_with_many_context_candidates(self) -> None:
+        amounts = [Decimal("10.00") + Decimal(index) / Decimal("100") for index in range(1, 31)]
+        task = ready_task_with_requirement(
+            amount=str(sum(amounts[9:15])),
+            transaction_at="2026-04-03 18:14:27",
+            invoice_count=6,
+        )
+        entries = {
+            f"package/xml/ETC{index:04d}.xml": etc_xml(
+                f"ETC{index:04d}",
+                issue_date="2026-04-03",
+                total_amount=str(amount),
+            )
+            for index, amount in enumerate(amounts, start=1)
+        }
+
+        preview = preview_etc_zip_for_task(
+            task=task,
+            uploads=[UploadedEtcZipFile("ticket-root.zip", zip_bytes(entries))],
+        )
+
+        self.assertEqual(preview.allowed_invoice_numbers, [])
+        self.assertEqual(len(preview.blocking_issues), 1)
+        self.assertEqual(preview.blocking_issues[0]["error"], "ambiguous_etc_invoice_match")
+        self.assertEqual(preview.blocking_issues[0]["requirementId"], "TASK-REQ-0001")
+        self.assertGreaterEqual(len(preview.blocking_issues[0]["invoiceNumbers"]), 6)
+
     def test_zip_preview_deduplicates_repeated_invoice_number_before_matching(self) -> None:
         task = ready_task_with_requirement(amount="71.25", transaction_at="2026-04-08 18:57:17", invoice_count=2)
 
@@ -2470,6 +2497,60 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         }
         self.assertEqual(included_by_requirement["TASK-REQ-0001"], {"ETC1000", "ETC2000"})
         self.assertEqual(included_by_requirement["TASK-REQ-0002"], {"ETC3000"})
+
+    def test_zip_preview_excludes_unrelated_context_before_global_amount_combinations(self) -> None:
+        task = ready_task_with_requirement(
+            amount="30.00",
+            transaction_at="2026-04-08 18:00:00",
+            invoice_count=2,
+        )
+
+        preview = preview_etc_zip_for_task(
+            task=task,
+            uploads=[
+                UploadedEtcZipFile(
+                    "ticket-root.zip",
+                    zip_bytes(
+                        {
+                            "package/xml/BAD1000.xml": etc_xml(
+                                "BAD1000",
+                                issue_date="2026-04-08",
+                                plate_number="云A00000",
+                                total_amount="10.00",
+                            ),
+                            "package/xml/BAD2000.xml": etc_xml(
+                                "BAD2000",
+                                issue_date="2026-04-08",
+                                plate_number="云A00000",
+                                total_amount="20.00",
+                            ),
+                            "package/xml/ETC1000.xml": etc_xml(
+                                "ETC1000",
+                                issue_date="2026-04-08",
+                                total_amount="10.00",
+                            ),
+                            "package/xml/ETC2000.xml": etc_xml(
+                                "ETC2000",
+                                issue_date="2026-04-08",
+                                total_amount="20.00",
+                            ),
+                        }
+                    ),
+                )
+            ],
+        )
+
+        self.assertEqual(preview.blocking_issues, [])
+        self.assertEqual(preview.allowed_invoice_numbers, ["ETC1000", "ETC2000"])
+        self.assertEqual(
+            {item.invoice_number: item.filter_status for item in preview.items},
+            {
+                "BAD1000": "excluded_extra_zip_invoice",
+                "BAD2000": "excluded_extra_zip_invoice",
+                "ETC1000": "included",
+                "ETC2000": "included",
+            },
+        )
 
     def test_zip_preview_matches_single_invoice_package_to_multiple_requirements(self) -> None:
         task = ready_task_with_requirement(

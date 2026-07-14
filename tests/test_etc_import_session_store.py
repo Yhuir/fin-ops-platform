@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import replace
 from hashlib import sha256
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from threading import Lock
-from time import sleep
 import unittest
 
 from fin_ops_platform.services.etc_import_session_store import (
@@ -47,25 +44,6 @@ def _session() -> StoredEtcImportSession:
             ),
         ),
     )
-
-
-def _session_with_uploads(count: int) -> StoredEtcImportSession:
-    session = _session()
-    uploads = []
-    for index in range(count):
-        content = f"PK\x03\x04archive-{index}".encode()
-        uploads.append(
-            replace(
-                session.uploads[0],
-                file_id=f"etc-import-{index + 1:04d}",
-                file_name=f"input-{index + 1:04d}.zip",
-                content=content,
-                sha256=sha256(content).hexdigest(),
-                size_bytes=len(content),
-                ordinal=index,
-            )
-        )
-    return replace(session, uploads=tuple(uploads))
 
 
 class EtcImportSessionStoreTests(unittest.TestCase):
@@ -112,82 +90,6 @@ class EtcImportSessionStoreTests(unittest.TestCase):
 
         self.assertEqual(saved.uploads[0].stored_file_path, "minio://bucket/etc-import-0001")
         self.assertEqual(saved.uploads[0].content, _session().uploads[0].content)
-
-    def test_durable_save_runs_verified_archive_writes_with_bounded_concurrency(self) -> None:
-        class Repository:
-            def save_preview(self, _payload: dict, _files: list[dict]) -> None:
-                return None
-
-        class ArchiveStore:
-            def __init__(self) -> None:
-                self._lock = Lock()
-                self.active = 0
-                self.max_active = 0
-
-            def store_etc_import_archive(self, **kwargs: object) -> dict[str, object]:
-                content = bytes(kwargs["content"])
-                file_id = str(kwargs["file_id"])
-                with self._lock:
-                    self.active += 1
-                    self.max_active = max(self.max_active, self.active)
-                sleep(0.02)
-                with self._lock:
-                    self.active -= 1
-                return {
-                    "stored_file_path": f"minio://bucket/{file_id}",
-                    "file_object_id": f"object-{file_id}",
-                    "sha256": sha256(content).hexdigest(),
-                    "size_bytes": len(content),
-                }
-
-            def delete_etc_import_archives(self, _stored_file_paths: list[str]) -> int:
-                return 0
-
-        archive_store = ArchiveStore()
-        store = PostgresEtcImportSessionStore(repository=Repository(), archive_store=archive_store)
-
-        saved = store.save_preview(_session_with_uploads(8))
-
-        self.assertGreater(archive_store.max_active, 1)
-        self.assertLessEqual(archive_store.max_active, 4)
-        self.assertEqual([upload.ordinal for upload in saved.uploads], list(range(8)))
-
-    def test_durable_save_cleans_all_successful_parallel_writes_after_one_failure(self) -> None:
-        class Repository:
-            def save_preview(self, _payload: dict, _files: list[dict]) -> None:
-                raise AssertionError("failed archive writes must not persist a session")
-
-        class ArchiveStore:
-            def __init__(self) -> None:
-                self.deleted_paths: list[str] = []
-
-            def store_etc_import_archive(self, **kwargs: object) -> dict[str, object]:
-                content = bytes(kwargs["content"])
-                file_id = str(kwargs["file_id"])
-                if file_id == "etc-import-0003":
-                    raise RuntimeError("object storage unavailable")
-                sleep(0.01)
-                return {
-                    "stored_file_path": f"minio://bucket/{file_id}",
-                    "file_object_id": f"object-{file_id}",
-                    "sha256": sha256(content).hexdigest(),
-                    "size_bytes": len(content),
-                }
-
-            def delete_etc_import_archives(self, stored_file_paths: list[str]) -> int:
-                self.deleted_paths.extend(stored_file_paths)
-                return len(stored_file_paths)
-
-        archive_store = ArchiveStore()
-        store = PostgresEtcImportSessionStore(repository=Repository(), archive_store=archive_store)
-
-        with self.assertRaisesRegex(RuntimeError, "object storage unavailable"):
-            store.save_preview(_session_with_uploads(6))
-
-        self.assertEqual(
-            sorted(archive_store.deleted_paths),
-            [f"minio://bucket/etc-import-{index:04d}" for index in (1, 2, 4, 5, 6)],
-        )
 
 
 class PostgresEtcImportSessionStoreTests(unittest.TestCase):

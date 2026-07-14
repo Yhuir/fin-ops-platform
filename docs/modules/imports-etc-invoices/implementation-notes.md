@@ -1,11 +1,11 @@
 # ETC发票导入 实施记录
 
-## 2026-07-14：真实 59 ZIP 二次 504 与 bounded verified writes
+## 2026-07-14：真实 59 ZIP 二次 504 与全局组合候选边界
 
-- 部署首轮历史附件 read 优化后，使用 `发票5、6月.zip` 中 59 个真实、唯一且完整的内层 ZIP 复测；项目 parser 在本地 614ms 内解析 99 张发票、0 失败，但生产 multipart preview 上传约 24.98MB 后仍于 62.145 秒返回 Nginx 504，证明剩余阻塞不在解析或前端。
-- 剩余热路径是 `PostgresEtcImportSessionStore.save_preview` 对 59 个 archive 串行执行 verified object write；每个文件必须保留 temporary PUT/GET、final PUT/GET 和 PostgreSQL file-object registration，不能靠放宽完整性校验或延长代理超时掩盖。
-- session store 改为固定最多 4 个 writer，低于默认 PostgreSQL pool 10；对象结果按原 ordinal 归位，全部成功后才提交 session。任一 future 失败时仍等待所有任务收敛，统一清理全部成功对象，不留下半写 session。API shape、单文件 verified-write 合同、worker reload 和 confirm 行为不变。
-- 新增 bounded concurrency 与 partial failure cleanup 回归；发布后仍必须用同一 59 ZIP 复跑生产 preview，确认 HTTP 200、session ID、任务筛选结果和 MinIO/PostgreSQL durable 边界。
+- 部署首轮历史附件 read 优化后，使用 `发票5、6月.zip` 中 59 个真实、唯一且完整的内层 ZIP 复测；普通 parser 在本地 614ms 内解析 99 张发票、0 失败，但生产 multipart preview 上传约 24.98MB 后仍于 62 秒返回 Nginx 504。
+- 初步把剩余延迟归因于 59 个串行 archive verified writes，并尝试最多 4 路并发。真实部署后 Nginx 仍在 61.918 秒返回 504，绕过 Nginx 的后端请求 300 秒仍不收敛；该方案已回滚，不作为最终实现。
+- 回滚版绕过 Nginx 的串行请求同样在 240 秒未完成；本地使用生产 task payload 跑完整 `preview_etc_zip_for_task` 后，CPU 栈稳定落在多发票金额组合搜索。根因是 `_select_global_requirement_matches` 未像 sequential path 一样先按车牌与日期窗口过滤候选，导致 38 个需求分别在 99 张发票上构建大量无关组合，并存在跨车牌/日期误配风险。
+- 修复由 `_requirement_match_options` 统一复用既有 `_invoice_satisfies_requirement_context`；精确金额组合改为按候选两半枚举并通过 `(张数, 金额)` 索引合并，只保留排序最优的 64 个精确组合，避免旧实现对每个候选复制并重排全部中间金额状态。不改变金额、发票张数、全局不重叠分配或 package-group 规则；并发 session store 改动撤销。新增跨车牌同金额组合与 30 候选/6 张发票回归，并使用同一真实 59 ZIP + 生产 task payload 做 task-aware 性能验证。
 
 ## 2026-07-14：多 ZIP 预览 504 根因修复
 

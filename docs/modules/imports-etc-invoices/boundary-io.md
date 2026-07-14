@@ -7,7 +7,7 @@
 - 状态：close
 - 当前边界可信度：high
 - 目标边界：ETC 发票导入通过 ETC parsers/import job/reconciliation services 进入 ETC 批次和发票附件识别链路。
-- 当前闭环：Web preview 把 task/version/hash、原始 ZIP file object、preview fingerprint/counts/match edges 持久化到 `app.etc_import_sessions` / `app.etc_import_session_files`；独立 worker 只按 durable session id 重载并处理。预览热路径以已验证的 MinIO/S3 object ref 作为附件存在性事实，不重复下载全部历史 ETC 附件；同一 session 的 archive verified writes 最多 4 路并发且每个文件仍保留 temporary/final PUT+GET 校验，全部成功后才提交 session repository，任一失败会等待并发任务结束并清理所有已成功对象。提交成功后直接返回已持久化 session，只有后续 validate/worker 重载才读取 ZIP bytes。页面统一 Audit 已登记为 direct-canonical、zero own read model、ETC internal-relation consumer。
+- 当前闭环：Web preview 把 task/version/hash、原始 ZIP file object、preview fingerprint/counts/match edges 持久化到 `app.etc_import_sessions` / `app.etc_import_session_files`；独立 worker 只按 durable session id 重载并处理。预览热路径以已验证的 MinIO/S3 object ref 作为附件存在性事实，不重复下载全部历史 ETC 附件；archive verified write 与 session repository commit 成功后直接返回已持久化 session，只有后续 validate/worker 重载才读取 ZIP bytes。对账需求的全局发票组合只接收已满足车牌与日期窗口的候选，避免无关发票进入组合搜索或被错误分配。页面统一 Audit 已登记为 direct-canonical、zero own read model、ETC internal-relation consumer。
 - 当前缺口：真实大 ZIP、对象存储 bytes 可读性、真实 worker drain、外部 ETC control total 和 OA 草稿仍是发布前 external smoke/evidence 风险，不由数据库 Audit 伪装为已证明。
 - 旧代码删除状态：进程内 `_import_sessions` / `_etc_reconciliation_import_previews`、inline confirm 和旧 `POST /api/etc/import` 410 runtime surface 已删除；历史污染清理由 `docs/operations/invoice-pool-cleanup.md` 和独立工具负责。
 
