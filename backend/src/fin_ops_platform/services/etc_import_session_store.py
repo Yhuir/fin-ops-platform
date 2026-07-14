@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any, Protocol
+
+
+# ponytail: four workers stay below the 10-connection PostgreSQL pool; configure only if measured throughput needs it.
+_MAX_ARCHIVE_WRITE_WORKERS = 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,33 +109,33 @@ class PostgresEtcImportSessionStore:
 
     def save_preview(self, session: StoredEtcImportSession) -> StoredEtcImportSession:
         stored_paths: list[str] = []
-        stored_uploads: list[StoredEtcImportUpload] = []
+        stored_uploads: list[StoredEtcImportUpload | None] = [None] * len(session.uploads)
+        errors: list[Exception] = []
         try:
-            for upload in session.uploads:
-                metadata = self._archive_store.store_etc_import_archive(
-                    session_id=session.session_id,
-                    file_id=upload.file_id,
-                    file_name=upload.file_name,
-                    content=upload.content,
-                )
-                stored_path = str(metadata.get("stored_file_path") or "").strip()
-                file_object_id = str(metadata.get("file_object_id") or "").strip()
-                if not stored_path or not file_object_id:
-                    raise RuntimeError("ETC import archive storage did not return a verified object reference.")
-                if (
-                    str(metadata.get("sha256") or "") != upload.sha256
-                    or int(metadata.get("size_bytes") or -1) != upload.size_bytes
-                ):
-                    raise RuntimeError("ETC import archive storage hash or size verification failed.")
-                stored_paths.append(stored_path)
-                stored_uploads.append(
-                    replace(
-                        upload,
-                        file_object_id=file_object_id,
-                        stored_file_path=stored_path,
-                    )
-                )
-            persisted = replace(session, uploads=tuple(stored_uploads))
+            if session.uploads:
+                worker_count = min(_MAX_ARCHIVE_WRITE_WORKERS, len(session.uploads))
+                with ThreadPoolExecutor(
+                    max_workers=worker_count,
+                    thread_name_prefix="etc-import-archive",
+                ) as executor:
+                    future_indexes = {
+                        executor.submit(self._store_upload, session.session_id, upload): index
+                        for index, upload in enumerate(session.uploads)
+                    }
+                    for future in as_completed(future_indexes):
+                        index = future_indexes[future]
+                        try:
+                            stored_upload = future.result()
+                        except Exception as error:
+                            errors.append(error)
+                            continue
+                        stored_uploads[index] = stored_upload
+                        stored_paths.append(str(stored_upload.stored_file_path))
+                if errors:
+                    raise errors[0]
+            if any(upload is None for upload in stored_uploads):
+                raise RuntimeError("ETC import archive storage did not complete every upload.")
+            persisted = replace(session, uploads=tuple(upload for upload in stored_uploads if upload is not None))
             self._repository.save_preview(
                 _session_payload(persisted),
                 [_upload_payload(upload) for upload in persisted.uploads],
@@ -140,6 +145,28 @@ class PostgresEtcImportSessionStore:
                 self._archive_store.delete_etc_import_archives(stored_paths)
             raise
         return persisted
+
+    def _store_upload(self, session_id: str, upload: StoredEtcImportUpload) -> StoredEtcImportUpload:
+        metadata = self._archive_store.store_etc_import_archive(
+            session_id=session_id,
+            file_id=upload.file_id,
+            file_name=upload.file_name,
+            content=upload.content,
+        )
+        stored_path = str(metadata.get("stored_file_path") or "").strip()
+        file_object_id = str(metadata.get("file_object_id") or "").strip()
+        if not stored_path or not file_object_id:
+            raise RuntimeError("ETC import archive storage did not return a verified object reference.")
+        if (
+            str(metadata.get("sha256") or "") != upload.sha256
+            or int(metadata.get("size_bytes") or -1) != upload.size_bytes
+        ):
+            raise RuntimeError("ETC import archive storage hash or size verification failed.")
+        return replace(
+            upload,
+            file_object_id=file_object_id,
+            stored_file_path=stored_path,
+        )
 
     def get(self, session_id: str) -> StoredEtcImportSession | None:
         row = self._repository.get(str(session_id or "").strip())

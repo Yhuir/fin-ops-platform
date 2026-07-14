@@ -1,5 +1,12 @@
 # ETC发票导入 实施记录
 
+## 2026-07-14：真实 59 ZIP 二次 504 与 bounded verified writes
+
+- 部署首轮历史附件 read 优化后，使用 `发票5、6月.zip` 中 59 个真实、唯一且完整的内层 ZIP 复测；项目 parser 在本地 614ms 内解析 99 张发票、0 失败，但生产 multipart preview 上传约 24.98MB 后仍于 62.145 秒返回 Nginx 504，证明剩余阻塞不在解析或前端。
+- 剩余热路径是 `PostgresEtcImportSessionStore.save_preview` 对 59 个 archive 串行执行 verified object write；每个文件必须保留 temporary PUT/GET、final PUT/GET 和 PostgreSQL file-object registration，不能靠放宽完整性校验或延长代理超时掩盖。
+- session store 改为固定最多 4 个 writer，低于默认 PostgreSQL pool 10；对象结果按原 ordinal 归位，全部成功后才提交 session。任一 future 失败时仍等待所有任务收敛，统一清理全部成功对象，不留下半写 session。API shape、单文件 verified-write 合同、worker reload 和 confirm 行为不变。
+- 新增 bounded concurrency 与 partial failure cleanup 回归；发布后仍必须用同一 59 ZIP 复跑生产 preview，确认 HTTP 200、session ID、任务筛选结果和 MinIO/PostgreSQL durable 边界。
+
 ## 2026-07-14：多 ZIP 预览 504 根因修复
 
 - 生产只读证据显示已有 293 张 ETC 发票且附件为 MinIO object ref；task-aware preview 在两次 inspect 的 result/audit baseline 中逐张下载并 hash 校验 XML/PDF，共放大为 2344 次历史附件 SQL + MinIO 读取。59 个新 ZIP durable save 还会在 verified write 后同步重下载全部 archive，叠加 Nginx 默认 60 秒形成 504。
