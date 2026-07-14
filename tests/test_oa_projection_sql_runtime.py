@@ -180,6 +180,48 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         self.assertIn("'completed'", connection.executed[0][0])
         self.assertIn("'已完成'", connection.executed[0][0])
 
+    def test_postgres_oa_projection_repository_normalizes_only_the_legacy_open_section(self) -> None:
+        from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository
+
+        legacy_payload = asdict(oa_record(row_id="oa-pay-legacy-open"))
+        legacy_payload["section"] = "open"
+        missing_section_payload = asdict(oa_record(row_id="oa-pay-missing-section"))
+        missing_section_payload.pop("section")
+        paired_payload = asdict(oa_record(row_id="oa-pay-paired"))
+        paired_payload["section"] = "paired"
+        connection = OAProjectionConnection(
+            rows=[
+                {
+                    "row_id": payload["id"],
+                    "month": "2026-05",
+                    "normalized_payload": payload,
+                    "raw_payload": {"normalized_payload": payload},
+                }
+                for payload in (legacy_payload, missing_section_payload, paired_payload)
+            ]
+        )
+        repository = PostgresOAProjectionRepository(connection)
+
+        records = repository.list_application_records("2026-05")
+
+        self.assertEqual(
+            {record.id: record.section for record in records},
+            {
+                "oa-pay-legacy-open": "unpaired",
+                "oa-pay-missing-section": "unpaired",
+                "oa-pay-paired": "paired",
+            },
+        )
+
+    def test_postgres_oa_projection_repository_rejects_unknown_stored_section(self) -> None:
+        from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository
+
+        payload = asdict(oa_record(row_id="oa-pay-invalid-section"))
+        payload["section"] = "candidate"
+
+        with self.assertRaisesRegex(ValueError, "Unsupported stored OA Workbench section"):
+            PostgresOAProjectionRepository._record_from_payload(payload)
+
     def test_postgres_oa_projection_repository_writes_structured_items_and_attachments(self) -> None:
         from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository
 
