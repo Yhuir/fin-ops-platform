@@ -37,6 +37,7 @@
 - 第三次远端 CI 在 GitHub Node 20 上仍有 14 个测试失败；失败 DOM 均停留在明确的 loading/零行首帧，根因是测试等待页面或抽屉容器后立即同步读取异步数据，而不是产品链路失败。测试现等待账户/OA/流水/发票行、详情字段、正式关系行或刷新后的当前 DOM 节点；没有提高全局超时、没有 retry 掩盖、没有放宽业务结果。随后用 Node 20 全量串行扫描补齐同类相邻断言，最终 71 files / 835 tests 一次通过，且本轮无 `MaxListenersExceededWarning`。
 - 第四次远端 CI 在异步历史行稳定出现后暴露时间展示依赖 runner 时区：`2026-06-10T10:30:00+08:00` 在 UTC runner 被渲染为 `02:30`。OA 反提已提交历史现显式使用 `Asia/Shanghai` 业务时区；测试先等待已提交发票语义表格，再精确断言 `2026-06-10 10:30`，不会用时间文本兼任加载就绪信号。
 - 第五次远程 CI 为 176/177；唯一失败是待找发票文本选择 E2E 用元素 bounding-box 中线做像素拖拽，在 CI 字体/换行布局下落到空白区。测试现对同一可见文本节点执行 Playwright 浏览器文本选择，仍精确断言 `window.getSelection()` 包含“智能工厂设备”；未改产品 UI、未增加 retry、未放宽业务结果。
+- 第六次远程 CI 的唯一失败是 ETC 统一批次列表测试等待静态 list 容器后同步读取异步批次行；现以 `etc-batch-unsubmitted-01` 业务行作为 readiness anchor，不改 ETC 业务链路与 I/O。
 - `cd web && npm run build`：成功。
 - 全量 Chromium 业务流：177 passed，覆盖权限、导入、关联确认/撤回、异常、freshness、跨页 fan-out 与大数据集交互。
 - 旧链路 guard、migration contract、formal repository/orchestrator/grouping 定向门禁：292 passed、24 subtests passed。

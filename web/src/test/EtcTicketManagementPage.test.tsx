@@ -661,7 +661,7 @@ describe("ETC ticket management page", () => {
     expect(await within(page).findByRole("list", { name: "ETC批次列表" })).toBeInTheDocument();
     expect(within(page).queryByRole("region", { name: "ETC对账任务列表" })).not.toBeInTheDocument();
     expect(within(page).queryByText("对账任务")).not.toBeInTheDocument();
-    expect(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-01")).toHaveTextContent("3月批次");
+    expect(await within(page).findByTestId("etc-batch-row-etc-batch-unsubmitted-01")).toHaveTextContent("3月批次");
   });
 
   test("shows business batch load errors without rendering a real empty batch state", async () => {
