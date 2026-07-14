@@ -416,12 +416,14 @@ read model refresh 和只读审计验证。
 
 ### 2026-07-14 正式关系二态迁移
 
-migration `0104_drop_legacy_workbench_relation_states.sql` 只 forward-drop 旧 candidate/decision 派生表和
-旧 app-setting，不修改 OA、银行流水、发票、正式 relation 或 history。发布该迁移后必须执行一次
-`workbench-rehydrate`：所有事实月份重建新的 Workbench generation，等待 `workbench` 与
-`workbench_relation` scope fresh，再运行页面 Audit。验收必须同时证明 canonical counts/checksum 未减少、
-active relation typed members 全部位于 paired、其余 canonical facts 全部是 unpaired singleton；不能通过
-原地更新旧 generation、恢复旧表或隐藏不一致行完成迁移。
+该迁移必须拆成两个不可合并的生产发布。Release A 只发布 paired/unpaired 新运行时并移除全部旧
+candidate/decision 运行时访问，不携带 migration 0104，旧表在稳定窗口内仅作为应用回滚保护保留。
+Release A 上线后执行 `workbench-rehydrate`：所有事实月份重建新的 Workbench generation，等待
+`workbench` 与 `workbench_relation` scope fresh，再运行页面 Audit。只有 canonical counts/checksum、
+active relation/history hash、520/未配对集合、queue/freshness/Audit 和旧表运行时零访问证据全部通过，
+Release B 才可发布 `0104_drop_legacy_workbench_relation_states.sql`。0104 只 forward-drop 旧
+candidate/decision 派生表和旧 app-setting，不修改 OA、银行流水、发票、正式 relation 或 history；
+Release B 后不允许回滚到读取旧表的应用版本。不能通过原地更新旧 generation、恢复旧表或隐藏不一致行完成迁移。
 
 Workbench `all` active generation 从 month shard 聚合时必须传播单一且完整的
 `workbench_matching_rules_version`。如果 all scope 缺失该版本证明，先通过正式 Workbench refresh 重建

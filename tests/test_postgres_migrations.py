@@ -117,7 +117,6 @@ EXPECTED_MIGRATIONS = [
     "0101_phase19_audit_contract_boundaries.sql",
     "0102_workbench_idempotency_runtime_evidence_grant.sql",
     "0103_etc_reconciliation_task_timestamps.sql",
-    "0104_drop_legacy_workbench_relation_states.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -274,7 +273,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 105)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 104)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -666,14 +665,6 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
 
 
 class PostgresMigrationSqlTests(unittest.TestCase):
-    def test_legacy_workbench_candidate_and_decision_tables_are_dropped_forward_only(self) -> None:
-        migration = (MIGRATIONS_DIR / "0104_drop_legacy_workbench_relation_states.sql").read_text(encoding="utf-8").lower()
-
-        self.assertIn("drop table if exists read_model.workbench_candidate_matches", migration)
-        self.assertIn("drop table if exists read_model.workbench_reconciliation_decisions", migration)
-        self.assertIn("delete from app.app_settings", migration)
-        self.assertNotIn("create table", migration)
-
     def test_sql_contains_required_schemas_and_tables(self) -> None:
         sql = migration_sql().lower()
         for schema in ("app", "read_model", "job", "audit", "staging"):
@@ -1125,16 +1116,6 @@ class PostgresMigrationSqlTests(unittest.TestCase):
             "allowed_workbench_relation_rows_dedupe",
             sql,
             flags=re.S,
-        )
-        sql = re.sub(
-            r"\bdrop\s+table\s+if\s+exists\s+read_model\.workbench_(reconciliation_decisions|candidate_matches)\s*;",
-            "allowed_phase21_legacy_workbench_state_drop",
-            sql,
-        )
-        sql = re.sub(
-            r"\bdelete\s+from\s+app\.app_settings\s+where\s+settings_key\s*=\s*'state:workbench_candidate_matches'\s*;",
-            "allowed_phase21_legacy_workbench_state_delete",
-            sql,
         )
         forbidden_patterns = [
             r"\bdrop\s+(database|schema|table)\b",

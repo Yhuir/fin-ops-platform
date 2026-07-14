@@ -56,13 +56,13 @@
 - `month=all` 查询组合 active 月分片，并在分页前做唯一 canonical owner 仲裁。
 - schema/version 由 `workbench_read_model_version.py` 统一提供；旧 generation 版本不得冒充 fresh。
 - matching scope、workbench scope 和 workbench_relation scope 都以 PostgreSQL durable queue/state 为事实源；Redis 只缓存 fresh payload，RabbitMQ 只做可选唤醒。
-- 0104 发布后必须执行一次全量 Workbench rehydrate，使旧 `open`/candidate/decision generation 被新的 paired/unpaired generation 原子替换；不得原地修改旧 active generation。
+- Release A 上线后先执行一次全量 Workbench rehydrate，使旧 `open`/candidate/decision generation 被新的 paired/unpaired generation 原子替换；不得原地修改旧 active generation。Release B 的 0104 只在 A 的零访问和数据安全证据通过后执行。
 
 ## 旧链路删除合同
 
-已删除且禁止恢复：
+Release A 已删除运行时链路且禁止恢复；旧表物理存储只为短期回滚窗口保留，并由 Release B 删除：
 
-- `workbench_candidate_matches` 与 `workbench_reconciliation_decisions` 表及 repository/service/store/cleanup。
+- `workbench_candidate_matches` 与 `workbench_reconciliation_decisions` 的 repository/service/store/cleanup 和全部运行时访问。
 - candidate grouping、special candidate rule、decision engine/models 和 candidate repair CLI。
 - `automatic_decision` / `automatic_match` 作为 relation mode 或页面 group type。
 - in-memory matching dirty-scope fallback 作为生产状态源。
@@ -88,7 +88,7 @@
 ## 数据恢复与回滚
 
 - 发布前备份 relation facts、history、active generation metadata 和 queue 状态；candidate/decision 表是派生旧状态，不进入业务备份恢复源。
-- migration 0104 只做 forward drop 和旧 app-setting 清理，不改 canonical facts。
+- Release B 的 migration 0104 只做 forward drop 和旧 app-setting 清理，不改 canonical facts；Release A 不携带 0104。
 - 发布后运行 `scripts/rehydrate-workbench-read-models.py`，等待 matching/workbench/workbench_relation scopes fresh，再运行页面 Audit。
 - 回滚应用版本不得重新创建旧 candidate/decision 表；若必须回退展示代码，只能继续读取 active formal relations 和 paired/unpaired generation。
 - 修复验收必须证明 520 关系进入 paired、13 张合计 1709.49 的发票各自 unpaired、canonical count 未减少、active relation/history 未损坏。
