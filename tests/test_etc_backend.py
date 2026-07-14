@@ -3870,6 +3870,64 @@ class EtcApiTests(unittest.TestCase):
         self.assertIn("文件存储", payload["message"])
         self.assertEqual(stored_task.source_files, [])
 
+    def test_credit_card_statement_upload_parses_pdf_and_returns_items(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            task = app._etc_reconciliation_task_service.create_task(title="ETC upload", created_by="alice")
+            body, headers = multipart(
+                {"statement.pdf": b"%PDF-1.4\n%%EOF"},
+                fields={"expectedVersion": str(task.version)},
+            )
+
+            with patch(
+                "fin_ops_platform.services.etc_document_parsers._extract_pdf_text",
+                return_value=CCB_STATEMENT_TEXT,
+            ):
+                response = app.handle_request(
+                    "POST",
+                    f"/api/etc/reconciliation-tasks/{task.task_id}/credit-card-statement",
+                    body=body,
+                    headers=headers,
+                )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(payload["sourceFiles"]), 1)
+        self.assertEqual(payload["sourceFiles"][0]["sourceKind"], "credit_card_statement")
+        self.assertEqual(len(payload["creditCardItems"]), 2)
+        self.assertEqual(payload["parseIssues"], [])
+
+    def test_credit_card_statement_image_pdf_upload_returns_ocr_warning(self) -> None:
+        ocr_row = "2026-04-10 2026-04-11 8514 财付通-贵州黔通智联高速通行费 CNY 147.25CNY 147.25"
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            task = app._etc_reconciliation_task_service.create_task(title="ETC OCR upload", created_by="alice")
+            body, headers = multipart(
+                {"scan.pdf": b"%PDF-1.4\n%%EOF"},
+                fields={"expectedVersion": str(task.version)},
+            )
+
+            with (
+                patch("fin_ops_platform.services.etc_document_parsers._extract_pdf_text", return_value=""),
+                patch(
+                    "fin_ops_platform.services.etc_document_parsers.TicketRootOcrTextExtractor.__call__",
+                    return_value=[ocr_row],
+                ),
+            ):
+                response = app.handle_request(
+                    "POST",
+                    f"/api/etc/reconciliation-tasks/{task.task_id}/credit-card-statement",
+                    body=body,
+                    headers=headers,
+                )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(payload["creditCardItems"]), 1)
+        self.assertEqual(len(payload["parseIssues"]), 1)
+        self.assertEqual(payload["parseIssues"][0]["severity"], "warning")
+        self.assertEqual(payload["parseIssues"][0]["extractionMethod"], "ocr")
+
     def test_reconciliation_task_level_supplement_upload_parses_evidence(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))

@@ -119,6 +119,18 @@ PROVINCE_LINE_VALUES = {
 class CcbCreditCardStatementParser:
     parser_code = "ccb_credit_card_statement_v1"
 
+    def __init__(
+        self,
+        *,
+        pdf_text_extractor: Callable[[bytes], str] | None = None,
+        ocr_text_extractor: Callable[[bytes], list[str]] | None = None,
+    ) -> None:
+        self._pdf_text_extractor = pdf_text_extractor or _extract_pdf_text
+        self._ocr_text_extractor = ocr_text_extractor or TicketRootOcrTextExtractor(
+            render_scale=3,
+            group_by_row=True,
+        )
+
     def parse_text(self, *, file_id: str, text: str, task_id: str = "") -> FileParseResult:
         if not text.strip():
             return FileParseResult(
@@ -183,7 +195,33 @@ class CcbCreditCardStatementParser:
         return FileParseResult(file_id=file_id, parser_code=self.parser_code, credit_card_items=items)
 
     def parse_pdf_bytes(self, *, file_id: str, content: bytes, task_id: str = "") -> FileParseResult:
-        return self.parse_text(file_id=file_id, text=_extract_pdf_text(content), task_id=task_id)
+        text_result = self.parse_text(
+            file_id=file_id,
+            text=self._pdf_text_extractor(content),
+            task_id=task_id,
+        )
+        if text_result.credit_card_items:
+            return text_result
+        ocr_text = "\n".join(page_text for page_text in self._ocr_text_extractor(content) if page_text.strip())
+        if not ocr_text:
+            return text_result
+        ocr_text = _normalize_credit_card_ocr_text(ocr_text)
+        ocr_result = self.parse_text(file_id=file_id, text=ocr_text, task_id=task_id)
+        if ocr_result.credit_card_items:
+            ocr_result.issues.append(
+                ParseIssue(
+                    issue_id=_stable_id("issue", file_id, "credit_card_ocr_review"),
+                    file_id=file_id,
+                    severity=ParseIssueSeverity.WARNING,
+                    message="图像型信用卡账单已通过 OCR 识别，请核对交易明细是否完整，并确认日期和金额准确。",
+                    extraction_method="ocr",
+                    field_name="statement_rows",
+                )
+            )
+        else:
+            for issue in ocr_result.issues:
+                issue.extraction_method = "ocr"
+        return ocr_result
 
 
 class TicketRootPdfTextParser:
@@ -414,7 +452,9 @@ class TicketRootDocumentParser:
 
 
 class TicketRootOcrTextExtractor:
-    def __init__(self) -> None:
+    def __init__(self, *, render_scale: float = 2, group_by_row: bool = False) -> None:
+        self._render_scale = render_scale
+        self._group_by_row = group_by_row
         self._ocr_engine: Any | None = None
         self._ocr_engine_unavailable = False
 
@@ -434,7 +474,7 @@ class TicketRootOcrTextExtractor:
             return []
         try:
             page_images: list[bytes] = []
-            matrix = fitz.Matrix(2, 2)
+            matrix = fitz.Matrix(self._render_scale, self._render_scale)
             for page in document:
                 pixmap = page.get_pixmap(matrix=matrix, alpha=False)
                 page_images.append(pixmap.tobytes("png"))
@@ -462,6 +502,8 @@ class TicketRootOcrTextExtractor:
         result = raw_result[0] if isinstance(raw_result, tuple) else raw_result
         if not result:
             return []
+        if self._group_by_row:
+            return _group_ocr_result_by_row(result)
         lines: list[str] = []
         for item in result:
             if not isinstance(item, (list, tuple)) or len(item) < 2:
@@ -729,6 +771,63 @@ def _normalize_ticket_datetime(value: str) -> str:
 
 def _clean_ocr_line(value: object) -> str:
     return re.sub(r"[\s\u3000]+", " ", str(value or "")).strip()
+
+
+def _normalize_credit_card_ocr_text(text: str) -> str:
+    normalized = re.sub(r"(?<=\d)(?=CNY\b)", " ", text)
+    return re.sub(r"\bCNY(?=[-0-9])", "CNY ", normalized)
+
+
+def _group_ocr_result_by_row(result: object) -> list[str]:
+    if not isinstance(result, (list, tuple)):
+        return []
+    plain_lines: list[str] = []
+    positioned: list[tuple[float, float, float, str]] = []
+    for item in result:
+        if not isinstance(item, (list, tuple)) or len(item) < 2:
+            continue
+        text = _clean_ocr_line(item[1])
+        if not text:
+            continue
+        plain_lines.append(text)
+        box = item[0]
+        if not isinstance(box, (list, tuple)):
+            continue
+        points = [point for point in box if isinstance(point, (list, tuple)) and len(point) >= 2]
+        try:
+            x_values = [float(point[0]) for point in points]
+            y_values = [float(point[1]) for point in points]
+        except (TypeError, ValueError):
+            continue
+        if not x_values or not y_values:
+            continue
+        positioned.append(
+            (
+                min(x_values),
+                (min(y_values) + max(y_values)) / 2,
+                max(1.0, max(y_values) - min(y_values)),
+                text,
+            )
+        )
+    if len(positioned) != len(plain_lines):
+        return plain_lines
+
+    rows: list[list[tuple[float, float, float, str]]] = []
+    for entry in sorted(positioned, key=lambda value: (value[1], value[0])):
+        row = next(
+            (
+                candidate
+                for candidate in reversed(rows[-4:])
+                if abs(entry[1] - sum(item[1] for item in candidate) / len(candidate))
+                <= max(entry[2], max(item[2] for item in candidate)) * 0.6
+            ),
+            None,
+        )
+        if row is None:
+            rows.append([entry])
+        else:
+            row.append(entry)
+    return [" ".join(item[3] for item in sorted(row, key=lambda value: value[0])) for row in rows]
 
 
 def _normalize_ocr_text(text: str) -> str:

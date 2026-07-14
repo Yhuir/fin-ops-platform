@@ -28,6 +28,16 @@
 
 ## 历史记录
 
+## 2026-07-14 - 信用卡 PDF 文本解析与图像 OCR fallback
+
+- 目标：信用卡账单 PDF 同时支持可选文字和无可选文字的图像页，不改变后续银行对账数据合同。
+- 影响范围：`CcbCreditCardStatementParser`、复用的 PDF 按页渲染/RapidOCR 边界、信用卡 source file 上传 API 回归和 ETC 模块测试矩阵；不改 API DTO、对账状态机、read model 或 worker。
+- 关键决策：保留 pdfplumber/PyMuPDF/pdftotext 原文本路径为首选，只在无交易行时回退 OCR；信用卡账单对 OCR box 按纵向中心分行、按横向坐标排列，不改票根既有 OCR 默认行为；OCR 成功仍输出人工核对 warning。
+- 文档影响：更新本模块 README、`boundary-io.md`、`tests.md` 和实施记录；产品口径、API shape 和运维入口不变。
+- 测试覆盖：新增可选文字 PDF 不调用 OCR、图像型 PDF 布局 OCR fallback 及 warning、multipart 上传 API 返回信用卡 ETC 候选项的回归测试。
+- 验证命令：见本轮最终执行记录。
+- 未测风险：仓库未提供真实图像型建行账单固定样例；低清、旋转、阴影或高密表格扫描件仍需用实际文件校准，页面会保留 warning 防止静默漏行。
+
 ## 2026-07-14 - Phase 19 历史任务时间戳回归修复
 
 - 目标：恢复 ETC 新建批次后的流程列表和 ETC 发票导入 ready task 列表，保证历史已提交批次与新任务共同存在时不会因排序异常返回 500。

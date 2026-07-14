@@ -3202,6 +3202,69 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         self.assertGreater(len(result.credit_card_items), 0)
         self.assertEqual(result.credit_card_items[0].description, "财付通-贵州黔通智联高速通行费")
 
+    def test_credit_card_statement_pdf_prefers_selectable_text_without_ocr(self) -> None:
+        def unexpected_ocr(_content: bytes) -> list[str]:
+            self.fail("selectable-text statements must not run OCR")
+
+        result = CcbCreditCardStatementParser(
+            pdf_text_extractor=lambda _content: APRIL_STATEMENT_TEXT,
+            ocr_text_extractor=unexpected_ocr,
+        ).parse_pdf_bytes(file_id="CARD-TEXT", content=b"%PDF-1.4\n%%EOF")
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.issues, [])
+        self.assertEqual(len(result.credit_card_items), 1)
+        self.assertEqual(result.credit_card_items[0].description, "财付通-贵州黔通智联高速通行费")
+
+    def test_credit_card_statement_image_pdf_falls_back_to_layout_ocr(self) -> None:
+        from PIL import Image
+        import fin_ops_platform.services.etc_document_parsers as parsers
+
+        class FakeRapidOCR:
+            def __call__(self, _content: bytes) -> tuple[list[list[object]], object]:
+                tokens = [
+                    "2026-04-10",
+                    "2026-04-11",
+                    "8514",
+                    "财付通-贵州黔通智联高速通行费",
+                    "CNY",
+                    "147.25CNY",
+                    "147.25",
+                ]
+                return (
+                    [
+                        [
+                            [[index * 100, 0], [index * 100 + 90, 0], [index * 100 + 90, 30], [index * 100, 30]],
+                            token,
+                            0.99,
+                        ]
+                        for index, token in enumerate(tokens)
+                    ],
+                    None,
+                )
+
+        image = Image.new("RGB", (100, 100), "white")
+        buffer = BytesIO()
+        image.save(buffer, format="PDF")
+        original_rapid_ocr = parsers.RapidOCR
+        try:
+            parsers.RapidOCR = FakeRapidOCR
+            result = CcbCreditCardStatementParser().parse_pdf_bytes(
+                file_id="CARD-IMAGE",
+                content=buffer.getvalue(),
+            )
+        finally:
+            parsers.RapidOCR = original_rapid_ocr
+
+        self.assertTrue(result.ok)
+        self.assertEqual(len(result.credit_card_items), 1)
+        self.assertEqual(result.credit_card_items[0].card_last4, "8514")
+        self.assertEqual(result.credit_card_items[0].settlement_amount, Decimal("147.25"))
+        self.assertTrue(result.credit_card_items[0].is_etc_candidate)
+        self.assertEqual(len(result.issues), 1)
+        self.assertEqual(result.issues[0].severity, ParseIssueSeverity.WARNING)
+        self.assertEqual(result.issues[0].extraction_method, "ocr")
+
     def test_pdf_text_extraction_returns_empty_string_when_pdftotext_is_unavailable_or_fails(self) -> None:
         import fin_ops_platform.services.etc_document_parsers as parsers
 
