@@ -48,6 +48,8 @@ export default defineConfig(function (_a) {
             exclude: ["node_modules", "dist", "e2e"],
             setupFiles: "./src/test/setup.ts",
             testTimeout: 15000,
+            fileParallelism: false,
+            maxWorkers: 1,
         },
     };
 });

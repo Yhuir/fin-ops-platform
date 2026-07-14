@@ -580,7 +580,8 @@ describe("pending invoices and tag settings API mapping", () => {
 
     const downloaded = await api().downloadPendingInvoiceExport({ direction: "expense", filter: "requires_invoice", page: 7, pageSize: 25 });
     expect(downloaded.fileName).toBe("pending-invoices.xlsx");
-    expect(downloaded.blob).toBeInstanceOf(Blob);
+    expect(downloaded.blob.size).toBeGreaterThan(0);
+    expect(downloaded.blob.type).toBe("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   });
 
   test("surfaces backend row-limit messages from failed export downloads", async () => {

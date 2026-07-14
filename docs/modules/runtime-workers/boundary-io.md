@@ -52,7 +52,7 @@
 | Fan-out parent result | readiness / app health | manifest 为 `fan_out_command` 的 command-only `all` parent 只负责入队 child scopes，不写 current readiness；parent event/dirty scope 的当前失败仍可观察，历史 readiness 只作为 diagnostics。真实 queryable all scope（当前 `bank_account_balance:all`）和 queryable parent 不适用该忽略规则。 |
 | Worker heartbeat | `job.runtime_worker_heartbeats` | 空轮询 `idle` heartbeat 必须节流，禁止每个 0.05s poll 同步写库；`processing`、`deferred`、`failed`、`stopping`、`stopped` 等事件状态必须即时写入 |
 | Read model projection | 对应 repository | 只写 worker 对应投影 |
-| Import canonical delta | state-store/import repository | 只通过 `save_import_delta` 窄端口；PostgreSQL 幂等 upsert、本地按稳定 id 合并，禁止 generic full-state replace；随后只 fan-out write target envelope 声明的受影响 scope |
+| Import canonical delta | state-store/import repository | 只通过 `save_import_delta` 窄端口；PostgreSQL 幂等 upsert、本地按稳定 id 合并，禁止 generic full-state replace；必须在 durable delta 成功后才 fan-out write target envelope、tax invalidation 与 Workbench matching，持久化失败时不得产生下游事件 |
 | Wakeup/transport | RabbitMQ 可选 | 不能作为状态事实源 |
 | Queue history retention result | runtime queue ops / deploy timer | 只删除 `done` 历史；输出按 outbox event type 与 dirty scope type 聚合的 candidate/deleted count |
 

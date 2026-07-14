@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import unittest
 from types import SimpleNamespace
 
 from fin_ops_platform.services.import_processing_service import ImportProcessingService
 
 
-def test_import_write_target_envelope_uses_bank_detail_months_for_pending_invoice() -> None:
+def _assert_import_write_target_envelope_uses_bank_detail_months_for_pending_invoice() -> None:
     result = ImportProcessingService._import_write_target_envelope(
         cost_statistics_scope_keys=[],
         tax_offset_scope_keys=[],
@@ -20,7 +21,8 @@ def test_import_write_target_envelope_uses_bank_detail_months_for_pending_invoic
     assert {"read_model_key": "pending_invoice", "scope_key": "expense:all"} not in result["operation_barrier_targets"]
 
 
-def test_file_import_confirm_job_returns_import_write_targets() -> None:
+def _assert_file_import_confirm_job_returns_import_write_targets(*, fail_persist: bool = False) -> None:
+    events: list[str] = []
     persisted: list[dict[str, object]] = []
     import_state_payload = {"imports": {"batches": {"batch-1": object()}}, "file_imports": {"sessions": {}}}
     confirmed_session = SimpleNamespace(
@@ -34,6 +36,13 @@ def test_file_import_confirm_job_returns_import_write_targets() -> None:
             )
         ],
     )
+
+    def persist_confirmed_import_delta(**kwargs: object) -> None:
+        events.append("persist")
+        persisted.append(dict(kwargs))
+        if fail_persist:
+            raise RuntimeError("persist failed")
+
     service = ImportProcessingService(
         file_import_service=SimpleNamespace(
             get_session=lambda _session_id: confirmed_session,
@@ -47,9 +56,9 @@ def test_file_import_confirm_job_returns_import_write_targets() -> None:
         serialize_value=lambda value: value,
         execute_derived_data_lifecycle_event=lambda *args, **kwargs: None,
         schedule_or_run_workbench_auto_matching_for_scopes=lambda *args, **kwargs: None,
-        enqueue_workbench_auto_matching_for_scopes=lambda *args, **kwargs: None,
-        persist_confirmed_import_delta=lambda **kwargs: persisted.append(dict(kwargs)),
-        invalidate_tax_offset_read_model_scopes=lambda *args, **kwargs: None,
+        enqueue_workbench_auto_matching_for_scopes=lambda *args, **kwargs: events.append("matching"),
+        persist_confirmed_import_delta=persist_confirmed_import_delta,
+        invalidate_tax_offset_read_model_scopes=lambda *args, **kwargs: events.append("tax_offset"),
         workbench_matching_scope_months_for_import_file_session=lambda _session, _selected_file_ids: ["2026-06"],
         tax_offset_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
         cost_statistics_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: ["2026-06"],
@@ -61,6 +70,21 @@ def test_file_import_confirm_job_returns_import_write_targets() -> None:
         etc_import_preview_service=SimpleNamespace(),
     )
 
+    if fail_persist:
+        try:
+            service.execute_file_import_confirm_job(
+                session_id="session-1",
+                selected_file_ids=["file-bank"],
+                owner_user_id="user",
+                background_job_id="",
+            )
+        except RuntimeError as exc:
+            assert str(exc) == "persist failed"
+        else:
+            raise AssertionError("persistence failure must fail the import job")
+        assert events == ["persist"]
+        return
+
     result = service.execute_file_import_confirm_job(
         session_id="session-1",
         selected_file_ids=["file-bank"],
@@ -68,6 +92,7 @@ def test_file_import_confirm_job_returns_import_write_targets() -> None:
         background_job_id="",
     )
 
+    assert events == ["persist", "tax_offset", "matching"]
     assert result["affected_months"] == ["2026-06"]
     assert persisted[0]["import_state_payload"] is import_state_payload
     assert {"read_model_key": "bank_detail", "scope_key": "2026-06"} in result["operation_barrier_targets"]
@@ -75,7 +100,7 @@ def test_file_import_confirm_job_returns_import_write_targets() -> None:
     assert {"read_model_key": "cost_statistics", "scope_key": "active:2026-06"} in result["operation_barrier_targets"]
 
 
-def test_etc_invoice_import_confirm_job_returns_targets_after_changed_months_are_known() -> None:
+def _assert_etc_invoice_import_confirm_job_returns_targets_after_changed_months_are_known() -> None:
     refresh_calls: list[tuple[list[str], str]] = []
     imported_marks: list[dict[str, object]] = []
     business_batch = SimpleNamespace(
@@ -138,3 +163,17 @@ def test_etc_invoice_import_confirm_job_returns_targets_after_changed_months_are
     assert {"read_model_key": "input_invoice_usage", "scope_key": "2026-04"} in result["operation_barrier_targets"]
     assert {"read_model_key": "workbench_relation", "scope_key": "2026-04"} in result["operation_barrier_targets"]
     assert {"read_model_key": "cost_statistics", "scope_key": "active:2026-04"} in result["operation_barrier_targets"]
+
+
+class ImportProcessingServiceTests(unittest.TestCase):
+    def test_import_write_target_envelope_uses_bank_detail_months_for_pending_invoice(self) -> None:
+        _assert_import_write_target_envelope_uses_bank_detail_months_for_pending_invoice()
+
+    def test_file_import_confirm_persists_before_publishing_downstream_work(self) -> None:
+        _assert_file_import_confirm_job_returns_import_write_targets()
+
+    def test_file_import_confirm_does_not_publish_downstream_work_when_persistence_fails(self) -> None:
+        _assert_file_import_confirm_job_returns_import_write_targets(fail_persist=True)
+
+    def test_etc_invoice_import_confirm_job_returns_targets_after_changed_months_are_known(self) -> None:
+        _assert_etc_invoice_import_confirm_job_returns_targets_after_changed_months_are_known()

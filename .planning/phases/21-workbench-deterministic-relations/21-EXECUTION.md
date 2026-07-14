@@ -1,6 +1,6 @@
 # Phase 21 执行与闭环状态
 
-日期：2026-07-14
+日期：2026-07-15
 状态：本地实现与自动化验证完成；生产 cutover 未执行
 
 ## 已锁定产品合同
@@ -31,8 +31,9 @@
 
 ## 本地证据
 
-- `bash scripts/verify.sh all` 后端：4178 passed、33 skipped；skipped 均为未配置外部集成环境的显式门禁。首次远端分支 CI 发现 `tests/test_invoice_lifecycle_sql_projection.py` 使用未声明的 `pytest`，且其中 4 个顶层函数不会被标准 `unittest discover` 收集；已改为 `unittest.TestCase`，本地统一入口实际执行 4/4 通过。
+- `bash scripts/verify.sh all` 后端：4182 passed、33 skipped；skipped 均为未配置外部集成环境的显式门禁。首次远端分支 CI 发现 `tests/test_invoice_lifecycle_sql_projection.py` 使用未声明的 `pytest`，且其中 4 个顶层函数不会被标准 `unittest discover` 收集；已改为 `unittest.TestCase`，本地统一入口实际执行 4/4 通过。`tests/test_import_processing_service.py` 的 3 个顶层函数也已收敛到 `unittest.TestCase`，并新增持久化失败零发布测试，总计 4/4 纳入统一入口。
 - `cd web && npm test -- --run`：71 files、835 passed。
+- 第二次远端 CI 的 21 个前端失败横跨无共同业务改动的页面，并伴随 `MaxListenersExceededWarning`；固定 Vitest `fileParallelism=false`、`maxWorkers=1` 后，本地两次全量均为 835/835。三个下载 API 测试移除 cross-realm `instanceof Blob`，改为验证非空 bytes 与 XLSX MIME，保持业务合同而不依赖 VM realm。
 - `cd web && npm run build`：成功。
 - 全量 Chromium 业务流：177 passed，覆盖权限、导入、关联确认/撤回、异常、freshness、跨页 fan-out 与大数据集交互。
 - 旧链路 guard、migration contract、formal repository/orchestrator/grouping 定向门禁：292 passed、24 subtests passed。
@@ -40,6 +41,7 @@
 - 13-row fixture：13 个 canonical invoice identities 各自 unpaired singleton，minor units 合计 170949，无隐藏/重复/伪配对。
 - lint、docs 和旧链路静态 guard 通过。
 - 全量门禁首次运行发现两处历史 E2E 证据锚点仍引用旧候选语义；修正后在 clean commit `a4b9e6276` 从头复跑并全部通过。
+- CI 稳定化后的统一门禁曾捕获 file import confirm 先 enqueue Workbench matching、后 `save_import_delta` 的真实 I/O 竞态：后台状态写入可把 durable session 从 `confirmed` 覆盖回 `preview_ready`，独立 worker 也可能在 canonical facts 提交前消费 scope。`ImportProcessingService` 现严格执行 durable delta → tax/read-model invalidation → matching enqueue；持久化失败时下游发布为零。重启集成用例连续 50 次通过，最终 `verify.sh all` 再次零失败。
 
 ## 未完成的生产门
 
