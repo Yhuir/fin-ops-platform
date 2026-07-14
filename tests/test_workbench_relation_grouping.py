@@ -135,6 +135,26 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         self.assertNotIn("case_id", row)
         self.assertNotIn("relation_mode", row)
 
+    def test_unpaired_row_preserves_active_override_relation_mode(self) -> None:
+        payload = self.service.group_payload(
+            "2026-01",
+            rows_by_id={
+                "oa-pay-1977": {
+                    "id": "oa-pay-1977",
+                    "type": "oa",
+                    "object_identity_key": "oa-pay-1977",
+                    "case_id": None,
+                    "relation_mode": "pending_input_invoice",
+                }
+            },
+            active_relations=[],
+        )
+
+        row = payload["unpaired"]["groups"][0]["oa_rows"][0]
+        self.assertEqual(row["status"], "unpaired")
+        self.assertIsNone(row["case_id"])
+        self.assertEqual(row["relation_mode"], "pending_input_invoice")
+
     def test_unpaired_etc_summary_preserves_all_collapsed_invoice_details(self) -> None:
         payload = self.service.group_payload(
             "2026-04",

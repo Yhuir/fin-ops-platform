@@ -852,6 +852,7 @@ class WorkbenchSqlProjectionBuilder:
         override_service = WorkbenchOverrideService.from_snapshot(
             {"row_overrides": row_overrides}
         )
+        override_row_ids = set(row_overrides)
         for row_id in row_overrides:
             row = rows_by_id.get(row_id)
             if row is None:
@@ -862,6 +863,7 @@ class WorkbenchSqlProjectionBuilder:
                 str(row_id).strip()
                 for row_id in list(case_payload.get("row_ids") or [])
                 if str(row_id).strip() in rows_by_id
+                and str(row_id).strip() not in override_row_ids
             ]
             if not case_row_ids:
                 continue

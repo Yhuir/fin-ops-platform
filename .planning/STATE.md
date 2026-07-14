@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: verifying
-stopped_at: Release A clean branch passed full local gates after CI isolation and import publish-order repair; updated remote CI, production cutover and Release B remain gated.
-last_updated: "2026-07-15T01:11:49+08:00"
-last_activity: 2026-07-15 - Release A passed 4182 backend, 835 frontend, production build and 177 Chromium tests; durable import facts now commit before downstream publication
+stopped_at: v3 full local gate passed after the safe v2 rollback; branch/main exact-SHA CI and recutover remain gated.
+last_updated: "2026-07-15T07:54:07+08:00"
+last_activity: 2026-07-15 - v3 full gate passed with 4192 backend, 835 frontend, production build and 177 Chromium tests
 progress:
   total_phases: 21
   completed_phases: 2
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-16)
 
 **Core value:** Preserve production finance workflow correctness while improving individual pages through isolated, reviewable GSD phases.
-**Current focus:** Phase 21 Release A v2 production-audit hotfix is fully verified locally; production remains on the rehydrated safe rollback release while branch/main exact-SHA CI, clean deployment, rehydrate and production data-safety evidence remain gated. Migration 0104 stays in Release B only.
+**Current focus:** Phase 21 Release A v3 production-audit hotfix preserves active override ownership after v2 failed its second production Audit; production remains on the rehydrated safe rollback release while branch/main exact-SHA CI, clean deployment, rehydrate and production data-safety evidence remain gated. Migration 0104 stays in Release B only.
 
 ## Current Position
 
 Phase: 21 of 21 (关联台确定性自动正式关系与全量可见性生产闭环)
 Plan: 21-01 through 21-03 complete; 21-04 production cutover pending
-Status: v2 hotfix local verification complete; production safely rolled back after the new runtime Audit found 53 blocking projection mismatches
-Last activity: 2026-07-15 - v2 passed 4190 backend, 835 frontend, production build and 177 Chromium tests after repairing ETC summary/detail materialization and retired ownership sanitation
+Status: v3 full local gate passes; production safely rolled back after v2 Audit retained 5 blocking override mismatches
+Last activity: 2026-07-15 - v3 full gate passed with 4192 backend, 835 frontend, production build and 177 Chromium tests
 
 Progress: [█████████░] 92%
 
@@ -109,6 +109,7 @@ None yet.
 - 第八次远程 CI 的后端已通过，前端仅有 3 个异步首帧时序失败：成本统计测试把页面标题误当成表格或 refreshing 状态已完成，税金抵扣测试把静态统计卡误当成发票选择行已完成。测试现直接等待对应表格、refreshing 文案和业务复选框，不改产品链路、不加 retry、不放宽业务结果。
 - Release A 首次生产激活后，OA sync fan-out 暴露 PostgreSQL OA projection 历史 payload 仍含 `section=open`，新 Workbench core 按两态合同 fail fast。生产已立即回滚到 `etc-import-e5d6e6a4e-20260714-visibility`；hotfix 只在 repository 反序列化 I/O 边界把 legacy `open`/缺失值归一化为 `unpaired`，核心继续拒绝旧状态和未知状态。
 - main `1f1ec5324bc7dde9987b51f79d4d2a6ebe502841` 再次生产激活并完成受控 Workbench rehydrate 后，page Audit 捕获 51 个 ETC summary/detail mismatch 与 2 个 override ownership mismatch；生产立即回滚并 rehydrate `etc-import-e5d6e6a4e-20260714-visibility`，恢复 219 active relations、19 scopes、876 relation rows、1296 group rows与零问题，且 migration 仍为 0001–0103。v2 hotfix 已通过 4190 backend / 835 frontend / 177 Chromium 本地全量门禁，远程精确 SHA 与重新 cutover 仍待执行。
+- v2 已合并并通过 branch/main CI；生产 release `main-a127c58c7-workbench-audit-v2-20260715072607` 的 19-month rehydrate 让 51 个 ETC mismatch 归零，但仍有 3 个合法 `pending_input_invoice` mode 被删除、2 个 active null override 被 candidate exception 覆盖。生产再次立即回滚、rehydrate 并恢复零问题；v3 修复 active override precedence 与过宽 mode allowlist，本地全量门禁为 backend 4192 passed / 33 explicit environment-gated skipped、frontend 835 passed、production build succeeded、Chromium 177 passed。
 - legacy section hotfix 分支精确 SHA CI 成功后，main 精确 merge SHA CI 暴露两个旧测试边界竞态：OA 待付款测试只等待静态页面容器便同步读取异步业务行；Workbench mock server 对同列多值使用 OR，而正式 repository 与本地 display model 使用 AND。测试现等待 OA 业务按钮，并让 mock 复刻正式 AND 合同；不改生产业务链路。
 - `FIN_OPS_TEST_DATABASE_URL` is not configured, so real disposable PostgreSQL migration/catalog/hash integration remains unexecuted.
 - Release A 已通过 PR #2 合并到 main（merge SHA `85ec4c26195bd7d2320b90c6c92ff3529d920d52`），分支与 main 精确 SHA 远程 CI 均成功；首次生产激活因上述 legacy OA projection payload 问题立即回滚，未把故障版本留作 active release。

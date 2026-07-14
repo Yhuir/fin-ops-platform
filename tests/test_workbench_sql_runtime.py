@@ -7722,6 +7722,52 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(row["case_id"], "CASE-EXCEPTION-1")
         self.assertEqual(row["invoice_relation"]["tone"], "danger")
 
+    def test_sql_projection_active_row_override_wins_over_exception_projection(self) -> None:
+        recorder = ReadModelSnapshotRecorder()
+        connection = WorkbenchProjectionSettingsConnection(
+            overrides=[
+                {
+                    "row_id": "oa-pay-1982",
+                    "override_payload": {
+                        "case_id": None,
+                        "relation_mode": "pending_input_invoice",
+                    },
+                }
+            ],
+            exception_cases=[
+                {
+                    "case_id": "candidate:025bf390496affde60b984e7a06785ae174cb0d13fc052559b005a71380dcaf4",
+                    "raw_payload": {
+                        "case_id": "candidate:025bf390496affde60b984e7a06785ae174cb0d13fc052559b005a71380dcaf4",
+                        "status": "confirmed",
+                        "exception_code": "pending_input_invoice",
+                        "exception_label": "待找进项发票",
+                        "category": "oa",
+                        "row_ids": ["oa-pay-1982"],
+                        "row_types": ["oa"],
+                        "scope_months": ["2026-01"],
+                    },
+                }
+            ],
+        )
+        builder = WorkbenchSqlProjectionBuilder(connection=connection, read_model_repository=recorder)
+        rows_by_id = {
+            "oa-pay-1982": {
+                "id": "oa-pay-1982",
+                "type": "oa",
+                "source_kind": "oa",
+                "amount": "100.00",
+                "counterparty_name": "供应商",
+            }
+        }
+
+        payload = builder._group_payload("2026-01", with_test_object_identities(rows_by_id), [])
+
+        row = payload["unpaired"]["groups"][0]["oa_rows"][0]
+        self.assertIsNone(row["case_id"])
+        self.assertEqual(row["relation_mode"], "pending_input_invoice")
+        self.assertNotIn("exception_case_id", row)
+
 
 if __name__ == "__main__":
     unittest.main()
