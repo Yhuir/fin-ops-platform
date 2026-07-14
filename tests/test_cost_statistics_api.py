@@ -50,7 +50,7 @@ class _FallbackCostStatsOAAdapter:
             OAApplicationRecord(
                 id="oa-cost-fallback-001",
                 month="2026-03",
-                section="open",
+                section="unpaired",
                 case_id=None,
                 applicant="刘际涛",
                 project_name="云南溯源科技",

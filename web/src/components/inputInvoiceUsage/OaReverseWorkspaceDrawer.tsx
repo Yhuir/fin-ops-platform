@@ -43,7 +43,7 @@ export type OaReverseRejectedInvoice = {
   reason: string;
 };
 
-type OaRelationStatus = "linked" | "candidate" | "unlinked";
+type OaRelationStatus = "linked" | "unlinked";
 type OaRelationFilter = "all" | "linked" | "unlinked";
 
 type OaReverseDisplayInvoice = InputInvoiceUsageOaReverseInvoice & {
@@ -672,7 +672,7 @@ function oaRelationDisabledLabel(value: OaRelationStatus) {
 }
 
 function normalizeOaRelationStatus(value: unknown): OaRelationStatus {
-  return value === "linked" || value === "candidate" ? value : "unlinked";
+  return value === "linked" ? value : "unlinked";
 }
 
 function oaRelationBusinessStatus(value: OaRelationStatus): OaRelationFilter {
@@ -761,9 +761,7 @@ function invoicesFromPreview(preview: OaReversePreviewPayload) {
   };
   const putNonSelectableRejected = (invoice: OaReverseRejectedInvoice, targetApplicantName?: string) => {
     const invoiceNumber = invoice.displayNo || invoice.invoiceNumber || invoice.invoiceId;
-    const relationStatus = normalizeOaRelationStatus(
-      invoice.oaRelationStatus || (invoice.reasonCode === "already_has_candidate_oa" ? "candidate" : "linked"),
-    );
+    const relationStatus = normalizeOaRelationStatus(invoice.oaRelationStatus || "linked");
     byId.set(invoice.invoiceId, {
       invoiceId: invoice.invoiceId,
       invoiceNumber: String(invoice.invoiceNumber || invoiceNumber || ""),
@@ -785,7 +783,7 @@ function invoicesFromPreview(preview: OaReversePreviewPayload) {
     putSelectable(invoice);
   }
   for (const invoice of preview.rejectedInvoices ?? []) {
-    if (invoice.reasonCode === "already_has_active_oa" || invoice.reasonCode === "already_has_candidate_oa") {
+    if (invoice.reasonCode === "already_has_active_oa") {
       putNonSelectableRejected(invoice, preview.targetApplicantName);
     }
   }
@@ -817,7 +815,7 @@ function invoicesFromPreview(preview: OaReversePreviewPayload) {
       }
     }
     for (const invoice of group.rejectedInvoices ?? []) {
-      if (invoice.reasonCode !== "already_has_active_oa" && invoice.reasonCode !== "already_has_candidate_oa") {
+      if (invoice.reasonCode !== "already_has_active_oa") {
         continue;
       }
       putNonSelectableRejected(invoice, group.targetApplicantName);
@@ -870,8 +868,17 @@ function formatSubmittedAt(value: string) {
   if (Number.isNaN(date.getTime())) {
     return trimmed;
   }
-  const pad = (part: number) => String(part).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")} ${part("hour")}:${part("minute")}`;
 }
 
 function SummaryMetric({ label, value }: { label: string; value: string }) {

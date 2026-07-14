@@ -200,6 +200,7 @@ describe("Bank details page", () => {
 
     const page = await screen.findByTestId("bank-details-page");
     const accountList = within(page).getByRole("list", { name: "银行账户" });
+    await within(accountList).findByRole("button", { name: /工商银行 6386/ });
     expect(within(accountList).getAllByRole("listitem")).toHaveLength(3);
     const allAccountsButton = within(accountList).getByRole("button", { name: /全部流水/ });
     expect(allAccountsButton).toBeInTheDocument();
@@ -232,9 +233,9 @@ describe("Bank details page", () => {
     expect(within(table).queryByText("2026-05-01 10:30:00+08:00")).not.toBeInTheDocument();
     expect(tradeTimeText?.closest(".bank-counterparty-meta-row")).not.toBeNull();
     expect(tradeTimeText?.closest(".bank-relation-chip-row")).toBeNull();
-    expect(within(table).getByText("候选oa").closest(".bank-relation-tag")).toHaveClass("bank-relation-tag-candidate");
-    expect(within(table).getByText("候选发票").closest(".bank-relation-tag")).toHaveClass("bank-relation-tag-candidate");
-    expect(within(table).getByText("候选oa").closest(".bank-counterparty-meta-row")?.querySelector(".bank-trade-time-text")).not.toBeNull();
+    expect(within(table).getByText("无oa").closest(".bank-relation-tag")).toHaveClass("bank-relation-tag-none");
+    expect(within(table).getByText("无发票").closest(".bank-relation-tag")).toHaveClass("bank-relation-tag-none");
+    expect(within(table).getByText("无oa").closest(".bank-counterparty-meta-row")?.querySelector(".bank-trade-time-text")).not.toBeNull();
     expect(within(table).getByText("收").closest(".direction-tag")).toHaveClass("bank-direction-tag-centered");
     expect(within(table).getByText("收").closest(".direction-tag")).toHaveClass("bank-chip-auto-size");
     expect(within(table).getByText("工商银行 6386").closest(".bank-source-chip")).toHaveClass("bank-chip-auto-size");
@@ -1060,7 +1061,7 @@ describe("Bank details page", () => {
     renderBankDetailsPage();
 
     const page = await screen.findByTestId("bank-details-page");
-    await user.click(within(page).getByRole("button", { name: /交通银行 3847/ }));
+    await user.click(await within(page).findByRole("button", { name: /交通银行 3847/ }));
 
     expect(await within(page).findByText("当前时间范围内没有流水。")).toBeInTheDocument();
     expect(within(page).getByLabelText(/交通银行 3847 余额/)).toHaveTextContent("余额为空");

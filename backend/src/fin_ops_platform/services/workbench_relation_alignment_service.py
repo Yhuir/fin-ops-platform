@@ -239,7 +239,7 @@ class WorkbenchRelationAlignmentService:
             target_amount = oa_amounts.get(oa_id)
             if target_amount is None:
                 continue
-            candidate_matches: list[list[str]] = []
+            exact_matches: list[list[str]] = []
             ambiguous = False
             for size in range(2, max_size + 1):
                 bank_ids = states_by_size[size].get(target_amount)
@@ -248,9 +248,9 @@ class WorkbenchRelationAlignmentService:
                 if bank_ids == AMBIGUOUS_SUBSET_MATCH:
                     ambiguous = True
                     continue
-                candidate_matches.append(list(bank_ids))
-            if ambiguous or len(candidate_matches) > 1:
-                matches[oa_id] = [candidate_matches[0], []] if candidate_matches else [[], []]
+                exact_matches.append(list(bank_ids))
+            if ambiguous or len(exact_matches) > 1:
+                matches[oa_id] = [exact_matches[0], []] if exact_matches else [[], []]
             else:
-                matches[oa_id] = candidate_matches
+                matches[oa_id] = exact_matches
         return matches

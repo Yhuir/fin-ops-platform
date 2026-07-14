@@ -1,34 +1,40 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, is_dataclass
 import re
+from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Callable
 
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.app_settings_service import (
-    AppSettingsService,
     DEFAULT_OA_IMPORT_FORM_TYPES,
     DEFAULT_OA_IMPORT_STATUSES,
     DEFAULT_OA_RETENTION_CUTOFF_DATE,
+    AppSettingsService,
 )
 from fin_ops_platform.services.audit import AuditTrailService
 from fin_ops_platform.services.background_job_service import BackgroundJobService
+from fin_ops_platform.services.bank_account_balance_read_model_refresh_producer import (
+    BankAccountBalanceReadModelRefreshProducer,
+)
 from fin_ops_platform.services.bank_transaction_auto_category_service import BankTransactionAutoCategoryService
 from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService
-from fin_ops_platform.services.bank_account_balance_read_model_refresh_producer import BankAccountBalanceReadModelRefreshProducer
 from fin_ops_platform.services.derived_data_lifecycle_service import DerivedDataLifecycleService
 from fin_ops_platform.services.etc_existing_invoice_link_service import EtcExistingInvoiceLinkService
 from fin_ops_platform.services.etc_reconciliation_service import EtcReconciliationTaskService
 from fin_ops_platform.services.etc_service import EtcService
 from fin_ops_platform.services.import_file_service import FileImportService
-from fin_ops_platform.services.import_job_queue import IMPORT_PROCESS_REQUESTED_EVENT, ImportJobRepository, ImportJobWorker
+from fin_ops_platform.services.import_job_queue import (
+    IMPORT_PROCESS_REQUESTED_EVENT,
+    ImportJobRepository,
+    ImportJobWorker,
+)
 from fin_ops_platform.services.import_processing_service import ImportProcessingService
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.integrations import IntegrationHubService
 from fin_ops_platform.services.ledgers import LedgerReminderService
 from fin_ops_platform.services.matching import MatchingEngineService
-from fin_ops_platform.services.reconciliation import ManualReconciliationService
 from fin_ops_platform.services.no_oa_bank_batch_service import NoOaBankBatchService
 from fin_ops_platform.services.oa_attachment_invoice_cache import attachment_invoice_cache_parser_version
 from fin_ops_platform.services.oa_role_sync_service import OARoleSyncService
@@ -36,36 +42,40 @@ from fin_ops_platform.services.pending_invoice_scope_planner import (
     pending_invoice_read_model_scope_keys_for_import_state,
 )
 from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
+from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
+from fin_ops_platform.services.postgres_repositories.workbench_formal_relation import (
+    PostgresWorkbenchFormalRelationFactRepository,
+)
+from fin_ops_platform.services.postgres_repositories.workbench_idempotency import (
+    PostgresWorkbenchIdempotencyRepository,
+)
+from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
 from fin_ops_platform.services.project_costing import ProjectCostingService
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
+from fin_ops_platform.services.reconciliation import ManualReconciliationService
+from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
 from fin_ops_platform.services.search_read_model_refresh_producer import SearchReadModelRefreshProducer
 from fin_ops_platform.services.search_service import SearchService
 from fin_ops_platform.services.tax_certified_import_service import TaxCertifiedImportService
-from fin_ops_platform.services.workbench_candidate_match_service import (
-    CANDIDATE_MATCH_SCHEMA_VERSION,
-    WorkbenchCandidateMatchService,
-)
-from fin_ops_platform.services.workbench_exception_case_service import WorkbenchExceptionCaseService
 from fin_ops_platform.services.workbench_exception_projection import EXCEPTION_PROJECTION_VERSION
 from fin_ops_platform.services.workbench_exception_rules import RULE_VERSION as WORKBENCH_EXCEPTION_RULE_VERSION
+from fin_ops_platform.services.workbench_free_matching_engine import (
+    RULE_VERSION as WORKBENCH_FORMAL_RELATION_RULE_VERSION,
+)
+from fin_ops_platform.services.workbench_free_matching_engine import (
+    WorkbenchFreeMatchingEngine,
+)
 from fin_ops_platform.services.workbench_matching_dirty_scope_worker import (
     WorkbenchMatchingDirtyScopeWorker,
     WorkbenchMatchingDirtyScopeWorkerConfig,
 )
 from fin_ops_platform.services.workbench_matching_orchestrator import WorkbenchMatchingOrchestrator
-from fin_ops_platform.services.workbench_matching_rules import WORKBENCH_MATCHING_RULES_VERSION, WorkbenchMatchingRules
-from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService
-from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
-from fin_ops_platform.services.workbench_reconciliation_engine import WorkbenchMatchingRelationReadPort
-from fin_ops_platform.services.workbench_reconciliation_decision_store import WorkbenchReconciliationDecisionStore
 from fin_ops_platform.services.workbench_reconciliation_dirty_queue import WorkbenchReconciliationDirtyQueue
-from fin_ops_platform.services.workbench_relation_command_service import (
-    CallbackWorkbenchRelationRepository,
-    WorkbenchRelationCommandService,
+from fin_ops_platform.services.workbench_sql_projection import (
+    WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
+    WorkbenchSqlProjectionBuilder,
 )
-from fin_ops_platform.services.workbench_special_pair_rule_service import WorkbenchSpecialPairRuleService
-from fin_ops_platform.services.workbench_sql_projection import WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION, WorkbenchSqlProjectionBuilder
-
+from fin_ops_platform.services.workbench_uow import RuntimeQueueReadModelRefreshWriter, WorkbenchWriteUnitOfWork
 
 IMPORT_FACT_CHANGED_EVENT = "import.fact.changed"
 IMPORT_JOB_PROCESSOR_TYPES = (
@@ -180,9 +190,20 @@ class ImportRuntimeProcessorFactory:
         return processing_service.build_import_job_processors()
 
     def _state_store(self) -> Any:
+        from fin_ops_platform.services.object_storage import ObjectStorageSettings, S3ObjectStorageRepository
         from fin_ops_platform.services.postgres_state_store import PostgresStateStore
 
-        return PostgresStateStore(data_dir=self._data_dir, connection=self._connection)
+        object_storage_settings = ObjectStorageSettings.from_env()
+        object_storage_repository = (
+            S3ObjectStorageRepository(object_storage_settings) if object_storage_settings.enabled else None
+        )
+        kwargs = {
+            "data_dir": self._data_dir,
+            "connection": self._connection,
+        }
+        if object_storage_repository is not None:
+            kwargs["object_storage_repository"] = object_storage_repository
+        return PostgresStateStore(**kwargs)
 
 
 class WorkbenchMatchingWorkerFactory:
@@ -203,26 +224,24 @@ class WorkbenchMatchingWorkerFactory:
     ) -> WorkbenchMatchingDirtyScopeWorker:
         state_store = self._state_store()
         read_model_repository = getattr(state_store, "read_model_repository", None)
-        pair_relation_service = WorkbenchPairRelationService.from_snapshot(state_store.load_workbench_pair_relations())
-        relation_command_service = self._relation_command_service(
-            state_store=state_store,
-            pair_relation_service=pair_relation_service,
-        )
         app_settings_service = _app_settings_service(state_store)
-        row_provider = _WorkbenchSqlMatchingRowProvider(connection=self._connection)
+        queue_repository = RuntimeQueueRepository(self._connection)
+        relation_uow = WorkbenchWriteUnitOfWork(
+            connection=self._connection,
+            repository_factory=self._workbench_uow_repository_factory,
+            read_model_refresh_writer=RuntimeQueueReadModelRefreshWriter(
+                queue_repository,
+                tenant_id="default",
+                priority="high",
+            ),
+            idempotency_store=PostgresWorkbenchIdempotencyRepository(self._connection),
+        )
         return build_workbench_matching_dirty_scope_worker(
             dirty_queue=WorkbenchReconciliationDirtyQueue(repository=read_model_repository),
             matching_orchestrator=WorkbenchMatchingOrchestrator(
-                row_provider=row_provider.rows_for_scope,
-                relation_read_port=WorkbenchMatchingRelationReadPort(pair_relation_service),
-                candidate_match_service=WorkbenchCandidateMatchService.from_snapshot(state_store.load_workbench_candidate_matches()),
-                read_model_service=WorkbenchReadModelService.from_snapshot({}),
-                rules=WorkbenchMatchingRules(include_special_rules=False),
-                special_rule_service=WorkbenchSpecialPairRuleService(),
-                exception_case_service=WorkbenchExceptionCaseService.from_snapshot(state_store.load_workbench_exception_cases()),
-                decision_store=WorkbenchReconciliationDecisionStore(repository=read_model_repository),
-                relation_command_service=relation_command_service,
-                settings_provider=lambda: _workbench_matching_settings(app_settings_service),
+                fact_repository=PostgresWorkbenchFormalRelationFactRepository(self._connection),
+                matcher=WorkbenchFreeMatchingEngine(),
+                relation_uow=relation_uow,
                 source_versions_provider=lambda: _workbench_matching_source_versions(app_settings_service),
             ),
             source_versions_provider=lambda: _workbench_matching_source_versions(app_settings_service),
@@ -241,23 +260,12 @@ class WorkbenchMatchingWorkerFactory:
         return PostgresStateStore(data_dir=self._data_dir, connection=self._connection)
 
     @staticmethod
-    def _relation_command_service(
-        *,
-        state_store: Any,
-        pair_relation_service: WorkbenchPairRelationService,
-    ) -> WorkbenchRelationCommandService:
-        def save_snapshot(snapshot: dict[str, Any], *, changed_case_ids: list[str]) -> None:
-            state_store.save_workbench_pair_relations(snapshot, changed_case_ids=set(changed_case_ids or []))
-            updated = WorkbenchPairRelationService.from_snapshot(snapshot)
-            pair_relation_service._pair_relations.update(updated._pair_relations)
-            pair_relation_service._pair_relation_history = list(updated._pair_relation_history)
-
-        return WorkbenchRelationCommandService(
-            relation_repository=CallbackWorkbenchRelationRepository(
-                load_snapshot=lambda: pair_relation_service.snapshot(),
-                save_snapshot=save_snapshot,
-            ),
-            require_fresh_relations=False,
+    def _workbench_uow_repository_factory(transaction: Any) -> SimpleNamespace:
+        workbench_repository = PostgresWorkbenchRepository(transaction)
+        return SimpleNamespace(
+            pair_relations=PostgresWorkbenchRelationRepository(transaction, enqueue_refreshes=False),
+            exception_cases=workbench_repository,
+            row_overrides=workbench_repository,
         )
 
 
@@ -340,7 +348,7 @@ class _RuntimeWorkerDerivedLifecycle:
         return {
             "queued_months": self._mark_workbench_matching_months(scope_months, reason=reason),
             "processed_months": [],
-            "candidate_count": 0,
+            "planned_relation_count": 0,
             "reason": reason,
         }
 
@@ -361,13 +369,13 @@ class _RuntimeWorkerDerivedLifecycle:
             return None
         return create_job(
             job_type="workbench_matching",
-            label="生成关联台候选",
+            label="生成正式配对关系",
             owner_user_id=owner_user_id,
             phase="queued",
             current=0,
             total=len(months),
-            message="生成关联台候选任务已创建。",
-            result_summary={"processed_months": [], "affected_months": months, "candidate_count": 0},
+            message="生成正式配对关系任务已创建。",
+            result_summary={"processed_months": [], "affected_months": months, "planned_relation_count": 0},
             source={**(source or {}), "reason": reason, "scope_months": months, "triggered_by": triggered_by},
             affected_scopes=["workbench"],
             affected_months=months,
@@ -416,7 +424,6 @@ class _RuntimeWorkerDerivedLifecycle:
         return {
             "workbench_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "workbench", reason),
             "workbench_relation_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "workbench_relation", reason),
-            "workbench_candidate_matches": lambda domain_plan: self._mark_workbench_matching(domain_plan, reason),
             "workbench_matching_dirty_scopes": lambda domain_plan: self._mark_workbench_matching(domain_plan, reason),
             "invoice_lifecycle_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "invoice_lifecycle", reason),
             "cost_statistics_read_model": lambda domain_plan: self._enqueue_domain(domain_plan, "cost_statistics", reason),
@@ -703,15 +710,10 @@ def _app_settings_service(state_store: Any) -> AppSettingsService:
     )
 
 
-def _workbench_matching_settings(app_settings_service: AppSettingsService) -> dict[str, object]:
-    return {"offset_applicant_names": app_settings_service.get_oa_invoice_offset_applicant_names()}
-
-
 def _workbench_matching_source_versions(app_settings_service: AppSettingsService) -> dict[str, object]:
     payload: dict[str, object] = {
         "workbench_read_model_schema_version": WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
-        "workbench_candidate_match_schema_version": CANDIDATE_MATCH_SCHEMA_VERSION,
-        "workbench_matching_rules_version": WORKBENCH_MATCHING_RULES_VERSION,
+        "workbench_formal_relation_rule_version": WORKBENCH_FORMAL_RELATION_RULE_VERSION,
         "workbench_exception_rules_version": WORKBENCH_EXCEPTION_RULE_VERSION,
         "workbench_exception_projection_version": EXCEPTION_PROJECTION_VERSION,
         "bank_auto_tag_rules_version": _current_bank_auto_tag_rules_version(app_settings_service),

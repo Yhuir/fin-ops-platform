@@ -104,11 +104,11 @@ describe("Workbench row selection and detail drawer", () => {
     installMockApiFetch();
     renderWorkbenchPage();
 
-    const openZone = await screen.findByTestId("zone-open");
-    const openBankPane = within(openZone).getByTestId("pane-bank");
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
+    const openBankPane = within(unpairedZone).getByTestId("pane-bank");
 
-    expect(within(openZone).getAllByText("杭州张三广告有限公司").length).toBeGreaterThan(0);
-    expect(within(openZone).getAllByText("智能工厂设备商").length).toBeGreaterThan(0);
+    expect((await within(unpairedZone).findAllByText("杭州张三广告有限公司")).length).toBeGreaterThan(0);
+    expect(within(unpairedZone).getAllByText("智能工厂设备商").length).toBeGreaterThan(0);
 
     await user.click(within(openBankPane).getByRole("button", { name: "银行流水时间筛选" }));
     const dialog = await screen.findByRole("dialog", { name: "银行流水时间筛选面板" });
@@ -116,13 +116,13 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(within(dialog).getByRole("button", { name: "按月" }));
     await user.click(within(dialog).getByRole("button", { name: "4月" }));
 
-    expect(within(openZone).getAllByText("杭州张三广告有限公司").length).toBeGreaterThan(0);
-    expect(within(openZone).queryByText("智能工厂设备商")).not.toBeInTheDocument();
+    expect(within(unpairedZone).getAllByText("杭州张三广告有限公司").length).toBeGreaterThan(0);
+    expect(within(unpairedZone).queryByText("智能工厂设备商")).not.toBeInTheDocument();
 
     await user.click(within(openBankPane).getByRole("button", { name: "清除银行流水时间筛选 2026年4月" }));
 
-    expect(within(openZone).getAllByText("杭州张三广告有限公司").length).toBeGreaterThan(0);
-    expect(within(openZone).getAllByText("智能工厂设备商").length).toBeGreaterThan(0);
+    expect(within(unpairedZone).getAllByText("杭州张三广告有限公司").length).toBeGreaterThan(0);
+    expect(within(unpairedZone).getAllByText("智能工厂设备商").length).toBeGreaterThan(0);
   });
 
   test("clicking detail opens the drawer and highlights rows with the same case id", async () => {
@@ -260,7 +260,7 @@ describe("Workbench row selection and detail drawer", () => {
     expect(within(dialog).queryByText("source_expense_item_id")).not.toBeInTheDocument();
   });
 
-  test("open zone header confirm link opens preview before submit", async () => {
+  test("unpaired zone header confirm link opens preview before submit", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
     const relationUpdatedListener = vi.fn();
@@ -294,14 +294,14 @@ describe("Workbench row selection and detail drawer", () => {
     expectRelationPreviewTriPane(before);
     expectRelationPreviewTriPane(after);
     const beforeGroups = within(before).getAllByTestId(/^candidate-group-/);
-    expect(beforeGroups).toHaveLength(1);
-    expect(within(beforeGroups[0]).getByRole("row", { name: /陈涛.*智能工厂设备商/ })).toHaveClass(
+    expect(beforeGroups).toHaveLength(3);
+    expect(within(before).getByRole("row", { name: /陈涛.*智能工厂设备商/ })).toHaveClass(
       "record-card-sheet-row",
     );
-    expect(within(beforeGroups[0]).getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toHaveClass(
+    expect(within(before).getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toHaveClass(
       "record-card-sheet-row",
     );
-    expect(within(beforeGroups[0]).getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ })).toHaveClass(
+    expect(within(before).getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ })).toHaveClass(
       "record-card-sheet-row",
     );
     const afterGroups = within(after).getAllByTestId(/^candidate-group-/);
@@ -319,7 +319,6 @@ describe("Workbench row selection and detail drawer", () => {
         body: JSON.stringify({
           month: "all",
           row_ids: ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"],
-          case_id: "CASE-202603-101",
         }),
       }),
     );
@@ -338,7 +337,6 @@ describe("Workbench row selection and detail drawer", () => {
           body: JSON.stringify({
             month: "all",
             row_ids: ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"],
-            case_id: "CASE-202603-101",
           }),
         }),
       );
@@ -403,7 +401,7 @@ describe("Workbench row selection and detail drawer", () => {
           groups: [
             {
               group_id: "preview:mixed-bank-before",
-              group_type: "open",
+              group_type: "unpaired",
               match_confidence: "medium",
               reason: "manual_preview",
               oa_rows: [
@@ -451,7 +449,7 @@ describe("Workbench row selection and detail drawer", () => {
           groups: [
             {
               group_id: "case:preview:mixed-bank-after",
-              group_type: "manual_confirmed",
+              group_type: "relation",
               match_confidence: "medium",
               reason: "manual_preview",
               oa_rows: [
@@ -541,7 +539,7 @@ describe("Workbench row selection and detail drawer", () => {
           groups: [
             {
               group_id: "case:CASE-202603-101",
-              group_type: "manual_confirmed",
+              group_type: "relation",
               can_withdraw: true,
               oa_rows: [],
               bank_rows: [
@@ -605,7 +603,7 @@ describe("Workbench row selection and detail drawer", () => {
     ).toBe(1);
   });
 
-  test("open zone header confirm link uses the whole selected group from one clicked row", async () => {
+  test("one unpaired singleton never pulls legacy case siblings into the selection", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
     renderWorkbenchPage();
@@ -615,23 +613,17 @@ describe("Workbench row selection and detail drawer", () => {
     });
 
     await user.click(openOaRow);
-    await user.click(screen.getByRole("button", { name: "确认关联" }));
 
-    expect(await screen.findByRole("dialog", { name: "关联预览" })).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith(
+    expect(screen.getByText("已选 1")).toBeInTheDocument();
+    expect(screen.queryByText(/带入/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "确认关联" })).toBeDisabled();
+    expect(fetchMock).not.toHaveBeenCalledWith(
       "/api/workbench/actions/confirm-link/preview",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          month: "all",
-          row_ids: ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"],
-          case_id: "CASE-202603-101",
-        }),
-      }),
+      expect.anything(),
     );
   });
 
-  test("open zone header confirm link includes source OA context for bank plus attachment invoice selection", async () => {
+  test("unpaired confirmation uses only explicitly selected bank and invoice rows", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
     renderWorkbenchPage();
@@ -651,9 +643,8 @@ describe("Workbench row selection and detail drawer", () => {
     const after = within(dialog).getByTestId("relation-preview-after");
     const afterSummary = expectRelationPreviewSummary(after);
     const sourceOaMetric = within(afterSummary).getByTestId("relation-preview-summary-metric-oa");
-    expect(within(sourceOaMetric).getByText("58000.00")).toBeInTheDocument();
-    expect(sourceOaMetric).not.toHaveClass("mismatch");
-    expect(within(after).getByTestId("pane-oa")).not.toHaveClass("mismatch");
+    expect(within(sourceOaMetric).getByText("-")).toBeInTheDocument();
+    expect(within(after).getByTestId("pane-oa")).toHaveTextContent("0 项");
     await user.click(within(dialog).getByRole("button", { name: "确认关联" }));
 
     await waitFor(() => {
@@ -663,47 +654,46 @@ describe("Workbench row selection and detail drawer", () => {
           method: "POST",
           body: JSON.stringify({
             month: "all",
-            row_ids: ["bk-o-202603-001", "iv-o-202603-001", "oa-o-202603-001"],
-            case_id: "CASE-202603-101",
+            row_ids: ["bk-o-202603-001", "iv-o-202603-001"],
           }),
         }),
       );
     });
   });
 
-  test("open selection summary and confirm preview keep explicitly selected rows hidden by pane time filters", async () => {
+  test("unpaired selection summary and confirm preview keep explicitly selected rows hidden by pane time filters", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
     renderWorkbenchPage();
 
-    const openZone = await screen.findByTestId("zone-open");
-    const openBankPane = within(openZone).getByTestId("pane-bank");
-    const openOaRow = await within(openZone).findByRole("row", {
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
+    const openBankPane = within(unpairedZone).getByTestId("pane-bank");
+    const openOaRow = await within(unpairedZone).findByRole("row", {
       name: /王青.*维保续费项目/,
     });
-    const openBankRow = within(openZone).getByRole("row", {
+    const openBankRow = within(unpairedZone).getByRole("row", {
       name: /2026-04-20.*杭州张三广告有限公司/,
     });
 
     await user.click(openOaRow);
     await user.click(openBankRow);
 
-    expect(within(openZone).getByText("OA 1 / 6,000.00")).toBeInTheDocument();
-    expect(within(openZone).getByText("流水 1 / 6,000.00")).toBeInTheDocument();
-    expect(within(openZone).getByText("发票 1 / 6,000.00")).toBeInTheDocument();
+    expect(within(unpairedZone).getByText("OA 1 / 6,000.00")).toBeInTheDocument();
+    expect(within(unpairedZone).getByText("流水 1 / 6,000.00")).toBeInTheDocument();
+    expect(within(unpairedZone).queryByText(/发票 1/)).not.toBeInTheDocument();
 
     await user.click(within(openBankPane).getByRole("button", { name: "银行流水时间筛选" }));
     const dialog = await screen.findByRole("dialog", { name: "银行流水时间筛选面板" });
     await user.click(within(dialog).getByRole("button", { name: "按月" }));
     await user.click(within(dialog).getByRole("button", { name: "3月" }));
 
-    expect(within(openZone).queryByRole("row", { name: /王青.*维保续费项目/ })).not.toBeInTheDocument();
-    expect(within(openZone).queryByRole("row", { name: /2026-04-20.*杭州张三广告有限公司/ })).not.toBeInTheDocument();
-    expect(within(openZone).getByText("OA 1 / 6,000.00")).toBeInTheDocument();
-    expect(within(openZone).getByText("流水 1 / 6,000.00")).toBeInTheDocument();
-    expect(within(openZone).getByText("发票 1 / 6,000.00")).toBeInTheDocument();
+    expect(within(unpairedZone).queryByRole("row", { name: /王青.*维保续费项目/ })).not.toBeInTheDocument();
+    expect(within(unpairedZone).queryByRole("row", { name: /2026-04-20.*杭州张三广告有限公司/ })).not.toBeInTheDocument();
+    expect(within(unpairedZone).getByText("OA 1 / 6,000.00")).toBeInTheDocument();
+    expect(within(unpairedZone).getByText("流水 1 / 6,000.00")).toBeInTheDocument();
+    expect(within(unpairedZone).queryByText(/发票 1/)).not.toBeInTheDocument();
 
-    await user.click(within(openZone).getByRole("button", { name: "确认关联" }));
+    await user.click(within(unpairedZone).getByRole("button", { name: "确认关联" }));
 
     expect(await screen.findByRole("dialog", { name: "关联预览" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
@@ -712,36 +702,35 @@ describe("Workbench row selection and detail drawer", () => {
         method: "POST",
         body: JSON.stringify({
           month: "all",
-          row_ids: ["oa-o-202604-001", "bk-o-202604-001", "iv-o-202604-001"],
-          case_id: "CASE-202604-101",
+          row_ids: ["oa-o-202604-001", "bk-o-202604-001"],
         }),
       }),
     );
   });
 
-  test("open selection summary and confirm preview include OA attachment invoice context", async () => {
+  test("unpaired selection summary never includes unselected attachment invoice context", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
     renderWorkbenchPage();
 
-    const openZone = await screen.findByTestId("zone-open");
-    const openOaRow = await within(openZone).findByRole("row", {
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
+    const openOaRow = await within(unpairedZone).findByRole("row", {
       name: /陈涛.*智能工厂设备商/,
     });
-    const openBankRow = within(openZone).getByRole("row", {
+    const openBankRow = within(unpairedZone).getByRole("row", {
       name: /2026-03-28.*智能工厂设备商/,
     });
 
     await user.click(openOaRow);
     await user.click(openBankRow);
 
-    expect(within(openZone).getByText("已选 2")).toBeInTheDocument();
-    expect(within(openZone).getByText("带入 1")).toBeInTheDocument();
-    expect(within(openZone).getByText("OA 1 / 58,000.00")).toBeInTheDocument();
-    expect(within(openZone).getByText("流水 1 / 58,000.00")).toBeInTheDocument();
-    expect(within(openZone).getByText("发票 1 / 65,540.00")).toBeInTheDocument();
+    expect(within(unpairedZone).getByText("已选 2")).toBeInTheDocument();
+    expect(within(unpairedZone).queryByText(/带入/)).not.toBeInTheDocument();
+    expect(within(unpairedZone).getByText("OA 1 / 58,000.00")).toBeInTheDocument();
+    expect(within(unpairedZone).getByText("流水 1 / 58,000.00")).toBeInTheDocument();
+    expect(within(unpairedZone).queryByText(/发票 1/)).not.toBeInTheDocument();
 
-    await user.click(within(openZone).getByRole("button", { name: "确认关联" }));
+    await user.click(within(unpairedZone).getByRole("button", { name: "确认关联" }));
 
     expect(await screen.findByRole("dialog", { name: "关联预览" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
@@ -750,8 +739,7 @@ describe("Workbench row selection and detail drawer", () => {
         method: "POST",
         body: JSON.stringify({
           month: "all",
-          row_ids: ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"],
-          case_id: "CASE-202603-101",
+          row_ids: ["oa-o-202603-001", "bk-o-202603-001"],
         }),
       }),
     );
@@ -796,26 +784,26 @@ describe("Workbench row selection and detail drawer", () => {
     );
   });
 
-  test("open zone exception action accepts invoice selections and uses the unified exception modal", async () => {
+  test("unpaired zone exception action accepts invoice selections and uses the unified exception modal", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
     renderWorkbenchPage();
 
-    const openZone = await screen.findByTestId("zone-open");
-    const openOaRow = within(openZone).getByRole("row", {
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
+    const openOaRow = await within(unpairedZone).findByRole("row", {
       name: /陈涛.*智能工厂设备商/,
     });
-    const openBankRow = within(openZone).getByRole("row", {
+    const openBankRow = await within(unpairedZone).findByRole("row", {
       name: /2026-03-28.*智能工厂设备商/,
     });
-    const openInvoiceRow = within(openZone).getByRole("row", {
+    const openInvoiceRow = await within(unpairedZone).findByRole("row", {
       name: /91330108MA27B4011D.*杭州溯源科技有限公司/,
     });
 
     await user.click(openOaRow);
     await user.click(openBankRow);
     await user.click(openInvoiceRow);
-    const exceptionButton = within(openZone)
+    const exceptionButton = within(unpairedZone)
       .getAllByRole("button", { name: "异常处理" })
       .find((button) => button.classList.contains("zone-selection-btn"));
     expect(exceptionButton).toBeDefined();
@@ -863,16 +851,16 @@ describe("Workbench row selection and detail drawer", () => {
     expect(calledPaths.slice(applyIndex + 1)).toContain("/api/workbench/summary?month=all");
   });
 
-  test("open zone exception action accepts OA 2035 attachment payment receipt selections from the backend group", async () => {
+  test("unpaired zone exception action accepts OA 2035 attachment payment receipt selections from the backend group", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch({ includeOaAttachmentPaymentReceipt: true });
     renderWorkbenchPage();
 
-    const openZone = await screen.findByTestId("zone-open");
-    const oa2035Row = within(openZone).getByRole("row", {
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
+    const oa2035Row = await within(unpairedZone).findByRole("row", {
       name: /胡瑢.*248(?:\.00)?/,
     });
-    const paymentReceiptRow = within(openZone).getByRole("row", {
+    const paymentReceiptRow = await within(unpairedZone).findByRole("row", {
       name: /微信支付.*胡瑢.*200(?:\.00)?/,
     });
 
@@ -882,7 +870,7 @@ describe("Workbench row selection and detail drawer", () => {
     expect(oa2035Row).toHaveAttribute("data-row-state", "selected");
     expect(paymentReceiptRow).toHaveAttribute("data-row-state", "selected");
 
-    const exceptionButton = within(openZone)
+    const exceptionButton = within(unpairedZone)
       .getAllByRole("button", { name: "异常处理" })
       .find((button) => button.classList.contains("zone-selection-btn"));
     expect(exceptionButton).toBeDefined();
@@ -946,7 +934,7 @@ describe("Workbench row selection and detail drawer", () => {
     vi.stubGlobal("fetch", fetchMock);
     renderWorkbenchPage();
 
-    const openZone = await screen.findByTestId("zone-open");
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
     const pairedZone = await screen.findByTestId("zone-paired");
     const openBankRow = await screen.findByRole("row", {
       name: /2026-03-28.*智能工厂设备商/,
@@ -963,8 +951,8 @@ describe("Workbench row selection and detail drawer", () => {
 
     expectRelationPreviewBlocking(preview, "确认关联");
     expect(within(preview).getByText("正在确认关联...")).toBeInTheDocument();
-    expect(openZone).toHaveTextContent("2026-03-28");
-    expect(openZone).toHaveTextContent("智能工厂设备商");
+    expect(unpairedZone).toHaveTextContent("2026-03-28");
+    expect(unpairedZone).toHaveTextContent("智能工厂设备商");
     await waitFor(() => {
       expect(within(preview).getByText("关系已写入，正在同步关联台最新数据...")).toBeInTheDocument();
     }, { timeout: 2_000 });
@@ -973,7 +961,7 @@ describe("Workbench row selection and detail drawer", () => {
       expect(screen.queryByRole("dialog", { name: "关联预览" })).not.toBeInTheDocument();
     }, { timeout: 5_000 });
     expect(
-      within(openZone).queryByRole("row", {
+      within(unpairedZone).queryByRole("row", {
         name: /2026-03-28.*智能工厂设备商/,
       }),
     ).not.toBeInTheDocument();
@@ -1042,7 +1030,7 @@ describe("Workbench row selection and detail drawer", () => {
     installMockApiFetch({ actionDelayMs: 20, workbenchBackgroundLoadDelayMs: 180 });
     renderWorkbenchPage();
 
-    const openZone = await screen.findByTestId("zone-open");
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
     const openBankRow = await screen.findByRole("row", {
       name: /2026-03-28.*智能工厂设备商/,
     });
@@ -1057,8 +1045,8 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(within(preview).getByRole("button", { name: "确认关联" }));
 
     expectRelationPreviewBlocking(preview, "确认关联");
-    expect(openZone).toHaveTextContent("2026-03-28");
-    expect(openZone).toHaveTextContent("智能工厂设备商");
+    expect(unpairedZone).toHaveTextContent("2026-03-28");
+    expect(unpairedZone).toHaveTextContent("智能工厂设备商");
     await waitFor(() => {
       expect(screen.queryByRole("dialog", { name: "关联预览" })).not.toBeInTheDocument();
     });
@@ -1072,7 +1060,7 @@ describe("Workbench row selection and detail drawer", () => {
     });
     renderWorkbenchPage();
 
-    const openZone = await screen.findByTestId("zone-open");
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
     const pairedZone = await screen.findByTestId("zone-paired");
     const openBankRow = await screen.findByRole("row", {
       name: /2026-03-28.*智能工厂设备商/,
@@ -1092,7 +1080,7 @@ describe("Workbench row selection and detail drawer", () => {
     }, { timeout: 2_000 });
     expect(screen.queryByText(/关联台刷新未完成/)).not.toBeInTheDocument();
     expect(
-      within(openZone).queryByRole("row", {
+      within(unpairedZone).queryByRole("row", {
         name: /2026-03-28.*智能工厂设备商/,
       }),
     ).not.toBeInTheDocument();
@@ -1118,7 +1106,7 @@ describe("Workbench row selection and detail drawer", () => {
     ).toBeInTheDocument();
   });
 
-  test("withdraw link finishes only after the fresh refetch moves the group back to open", async () => {
+  test("withdraw link finishes only after the fresh refetch restores every row as an unpaired singleton", async () => {
     const user = userEvent.setup();
     installMockApiFetch({ actionDelayMs: 20, workbenchLoadDelayMs: 160 });
     const relationUpdatedListener = vi.fn();
@@ -1126,7 +1114,7 @@ describe("Workbench row selection and detail drawer", () => {
     renderWorkbenchPage();
 
     const pairedZone = await screen.findByTestId("zone-paired");
-    const openZone = await screen.findByTestId("zone-open");
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
 
     const pairedBankRow = await screen.findByRole("row", {
       name: /2026-03-25 14:22.*华东设备供应商/,
@@ -1151,21 +1139,24 @@ describe("Workbench row selection and detail drawer", () => {
     expectRelationPreviewTriPane(after);
     expect(within(before).getAllByTestId(/^candidate-group-/)).toHaveLength(1);
     const afterGroups = within(after).getAllByTestId(/^candidate-group-/);
-    expect(afterGroups).toHaveLength(2);
-    const restoredGroup = afterGroups.find((group) => within(group).queryByRole("row", { name: /赵华.*华东设备供应商/ }));
-    expect(restoredGroup).toBeDefined();
-    expect(within(restoredGroup!).getByRole("row", { name: /91310000MA1K8A001X.*华东设备供应商/ })).toBeInTheDocument();
-    expect(within(restoredGroup!).queryByRole("row", { name: /2026-03-25 14:22.*华东设备供应商/ })).not.toBeInTheDocument();
+    expect(afterGroups).toHaveLength(3);
+    const oaOnlyGroup = afterGroups.find((group) => within(group).queryByRole("row", { name: /赵华.*华东设备供应商/ }));
+    expect(oaOnlyGroup).toBeDefined();
+    expect(within(oaOnlyGroup!).queryByRole("row", { name: /91310000MA1K8A001X.*华东设备供应商/ })).not.toBeInTheDocument();
+    expect(within(oaOnlyGroup!).queryByRole("row", { name: /2026-03-25 14:22.*华东设备供应商/ })).not.toBeInTheDocument();
     const bankOnlyGroup = afterGroups.find((group) => within(group).queryByRole("row", { name: /2026-03-25 14:22.*华东设备供应商/ }));
     expect(bankOnlyGroup).toBeDefined();
     expect(within(bankOnlyGroup!).queryByRole("row", { name: /赵华.*华东设备供应商/ })).not.toBeInTheDocument();
+    const invoiceOnlyGroup = afterGroups.find((group) => within(group).queryByRole("row", { name: /91310000MA1K8A001X.*华东设备供应商/ }));
+    expect(invoiceOnlyGroup).toBeDefined();
+    expect(within(invoiceOnlyGroup!).queryByRole("row", { name: /赵华.*华东设备供应商/ })).not.toBeInTheDocument();
     await user.click(within(preview).getByRole("button", { name: "确认撤回" }));
 
     expectRelationPreviewBlocking(preview, "确认撤回");
     expect(within(preview).getByText("正在撤回关联...")).toBeInTheDocument();
     expect(pairedZone).toHaveTextContent(/2026-03-25\s*14:22/);
     expect(pairedZone).toHaveTextContent("华东设备供应商");
-    expect(openZone).not.toHaveTextContent(/2026-03-25\s*14:22/);
+    expect(unpairedZone).not.toHaveTextContent(/2026-03-25\s*14:22/);
     await waitFor(() => {
       expect(screen.queryByRole("dialog", { name: "关联预览" })).not.toBeInTheDocument();
     });
@@ -1174,132 +1165,95 @@ describe("Workbench row selection and detail drawer", () => {
         name: /2026-03-25 14:22.*华东设备供应商/,
       }),
     ).not.toBeInTheDocument();
-    const openGroupsAfterWithdraw = within(openZone).getAllByTestId(/^candidate-group-/);
-    const restoredOpenGroup = openGroupsAfterWithdraw.find((group) => within(group).queryByRole("row", { name: /赵华.*华东设备供应商/ }));
-    expect(restoredOpenGroup).toBeDefined();
-    expect(within(restoredOpenGroup!).getByRole("row", { name: /91310000MA1K8A001X.*华东设备供应商/ })).toBeInTheDocument();
-    expect(within(restoredOpenGroup!).queryByRole("row", { name: /2026-03-25 14:22.*华东设备供应商/ })).not.toBeInTheDocument();
-    const bankOnlyOpenGroup = openGroupsAfterWithdraw.find((group) =>
-      within(group).queryByRole("row", { name: /2026-03-25 14:22.*华东设备供应商/ }),
-    );
-    expect(bankOnlyOpenGroup).toBeDefined();
-    expect(within(bankOnlyOpenGroup!).queryByRole("row", { name: /赵华.*华东设备供应商/ })).not.toBeInTheDocument();
-    expect(within(bankOnlyOpenGroup!).queryByRole("row", { name: /91310000MA1K8A001X.*华东设备供应商/ })).not.toBeInTheDocument();
+    const restoredOaGroup = await within(unpairedZone).findByTestId("candidate-group-unpaired-row:oa-p-202603-001");
+    const bankOnlyUnpairedGroup = within(unpairedZone).getByTestId("candidate-group-unpaired-row:bk-p-202603-001");
+    const invoiceOnlyUnpairedGroup = within(unpairedZone).getByTestId("candidate-group-unpaired-row:iv-p-202603-001");
+    expect(within(restoredOaGroup).queryByRole("row", { name: /91310000MA1K8A001X.*华东设备供应商/ })).not.toBeInTheDocument();
+    expect(within(restoredOaGroup).queryByRole("row", { name: /2026-03-25 14:22.*华东设备供应商/ })).not.toBeInTheDocument();
+    expect(within(bankOnlyUnpairedGroup).queryByRole("row", { name: /赵华.*华东设备供应商/ })).not.toBeInTheDocument();
+    expect(within(bankOnlyUnpairedGroup).queryByRole("row", { name: /91310000MA1K8A001X.*华东设备供应商/ })).not.toBeInTheDocument();
+    expect(within(invoiceOnlyUnpairedGroup).queryByRole("row", { name: /赵华.*华东设备供应商/ })).not.toBeInTheDocument();
     await waitFor(() => {
       expectCustomEventDetailContaining(relationUpdatedListener, { affectedMonths: ["2026-03"] });
     });
     window.removeEventListener("workbenchRelationUpdated", relationUpdatedListener);
   });
 
-  test("open zone withdraw opens a preview for one selected group", async () => {
+  test("unpaired zone never exposes a withdraw action because it has no formal relation", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
     renderWorkbenchPage();
 
-    const openZone = await screen.findByTestId("zone-open");
-    const withdrawButton = within(openZone).getByRole("button", { name: "撤回关联" });
-    expect(withdrawButton).toBeDisabled();
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
+    expect(within(unpairedZone).queryByRole("button", { name: "撤回关联" })).not.toBeInTheDocument();
 
-    await user.click(await within(openZone).findByRole("row", { name: /孙敏.*华东设备供应商/ }));
+    await user.click(await within(unpairedZone).findByRole("row", { name: /孙敏.*华东设备供应商/ }));
 
-    expect(withdrawButton).toBeEnabled();
-
-    await user.click(withdrawButton);
-    const preview = await screen.findByRole("dialog", { name: "关联预览" });
-    expect(within(preview).getByText("撤回关联预览")).toBeInTheDocument();
-    const before = within(preview).getByTestId("relation-preview-before");
-    const after = within(preview).getByTestId("relation-preview-after");
-    expectRelationPreviewSummary(before);
-    expectRelationPreviewSummary(after);
-    expectRelationPreviewTriPane(before);
-    expectRelationPreviewTriPane(after);
+    expect(within(unpairedZone).queryByRole("button", { name: "撤回关联" })).not.toBeInTheDocument();
   });
 
-  test("open zone withdraw blocks multi-group selection with a prompt", async () => {
-    const user = userEvent.setup();
-    const fetchMock = installMockApiFetch();
-    renderWorkbenchPage();
-
-    const openZone = await screen.findByTestId("zone-open");
-    const withdrawButton = within(openZone).getByRole("button", { name: "撤回关联" });
-
-    await user.click(await within(openZone).findByRole("row", { name: /陈涛.*智能工厂设备商/ }));
-    await user.click(within(openZone).getByRole("row", { name: /林晨.*尾差设备商/ }));
-
-    expect(withdrawButton).toBeEnabled();
-    fetchMock.mockClear();
-    await user.click(withdrawButton);
-
-    expect(await screen.findByText("一次只能处理一个关联组。")).toBeInTheDocument();
-    expect(
-      fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/workbench/actions/withdraw-link/preview")),
-    ).toBe(false);
-  });
-
-  test("pane search filters only the active pane while keeping aligned rows visible", async () => {
+  test("pane search filters singleton unpaired rows without surfacing legacy case siblings", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
     renderWorkbenchPage();
 
-    const openZone = await screen.findByTestId("zone-open");
-    const openOaPane = within(openZone).getByTestId("pane-oa");
-    const openBankPane = within(openZone).getByTestId("pane-bank");
-    const openInvoicePane = within(openZone).getByTestId("pane-invoice");
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
+    const openOaPane = within(unpairedZone).getByTestId("pane-oa");
+    const openBankPane = within(unpairedZone).getByTestId("pane-bank");
+    const openInvoicePane = within(unpairedZone).getByTestId("pane-invoice");
 
     await user.click(within(openOaPane).getByRole("button", { name: "搜索 OA" }));
     await user.type(within(openOaPane).getByLabelText("搜索 OA"), "智能工厂");
 
-    expect(within(openZone).getByRole("row", { name: /陈涛.*智能工厂设备商/ })).toBeInTheDocument();
-    expect(within(openZone).getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeInTheDocument();
-    expect(within(openZone).getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ })).toBeInTheDocument();
-    expect(within(openZone).queryByText("杭州张三广告有限公司")).not.toBeInTheDocument();
+    expect(within(unpairedZone).getByRole("row", { name: /陈涛.*智能工厂设备商/ })).toBeInTheDocument();
+    expect(within(unpairedZone).queryByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).not.toBeInTheDocument();
+    expect(within(unpairedZone).queryByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ })).not.toBeInTheDocument();
+    expect(within(unpairedZone).queryByText("杭州张三广告有限公司")).not.toBeInTheDocument();
     expect(within(openBankPane).getByRole("button", { name: "搜索 银行流水" })).toBeInTheDocument();
     expect(within(openInvoicePane).getByRole("button", { name: "搜索 进销项发票" })).toBeInTheDocument();
 
     await user.click(within(openOaPane).getByRole("button", { name: "清空搜索 OA" }));
 
-    expect(within(openZone).getAllByText("杭州张三广告有限公司").length).toBeGreaterThan(0);
+    expect(within(unpairedZone).getAllByText("杭州张三广告有限公司").length).toBeGreaterThan(0);
 
     await user.click(within(openInvoicePane).getByRole("button", { name: "搜索 进销项发票" }));
     await user.type(within(openInvoicePane).getByLabelText("搜索 进销项发票"), "91330108");
 
-    expect(within(openZone).getByRole("row", { name: /陈涛.*智能工厂设备商/ })).toBeInTheDocument();
-    expect(within(openZone).getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeInTheDocument();
-    expect(within(openZone).getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ })).toBeInTheDocument();
+    expect(within(unpairedZone).queryByRole("row", { name: /陈涛.*智能工厂设备商/ })).not.toBeInTheDocument();
+    expect(within(unpairedZone).queryByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).not.toBeInTheDocument();
+    expect(within(unpairedZone).getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ })).toBeInTheDocument();
     expect(within(openOaPane).getByRole("button", { name: "搜索 OA" })).toBeInTheDocument();
     expect(within(openBankPane).getByRole("button", { name: "搜索 银行流水" })).toBeInTheDocument();
     expect(within(openInvoicePane).getByRole("searchbox", { name: "搜索 进销项发票" })).toHaveValue("91330108");
     expect(within(openInvoicePane).getByRole("button", { name: "清空搜索 进销项发票" })).toBeInTheDocument();
   });
 
-  test("open zone header actions use the selected group context", async () => {
+  test("unpaired zone header actions use the selected group context", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
     renderWorkbenchPage();
 
-    const openZone = await screen.findByTestId("zone-open");
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
 
-    const clearButton = within(openZone).getByRole("button", { name: "清空选择" });
-    const confirmButton = within(openZone).getByRole("button", { name: "确认关联" });
-    const exceptionButton = within(openZone).getByRole("button", { name: "异常处理" });
-    const withdrawButton = within(openZone).getByRole("button", { name: "撤回关联" });
+    const clearButton = within(unpairedZone).getByRole("button", { name: "清空选择" });
+    const confirmButton = within(unpairedZone).getByRole("button", { name: "确认关联" });
+    const exceptionButton = within(unpairedZone).getByRole("button", { name: "异常处理" });
+    expect(within(unpairedZone).queryByRole("button", { name: "撤回关联" })).not.toBeInTheDocument();
 
     expect(clearButton).toBeEnabled();
     expect(confirmButton).toBeDisabled();
     expect(exceptionButton).toBeDisabled();
-    expect(withdrawButton).toBeDisabled();
 
-    const openOaRow = within(openZone).getByRole("row", {
+    const openOaRow = await within(unpairedZone).findByRole("row", {
       name: /陈涛.*智能工厂设备商/,
     });
 
     await user.click(openOaRow);
 
-    expect(confirmButton).toBeEnabled();
+    expect(confirmButton).toBeDisabled();
     expect(exceptionButton).toBeEnabled();
-    expect(withdrawButton).toBeEnabled();
 
-    const openBankRow = within(openZone).getByRole("row", {
+    const openBankRow = await within(unpairedZone).findByRole("row", {
       name: /2026-03-28.*智能工厂设备商/,
     });
 
@@ -1307,7 +1261,6 @@ describe("Workbench row selection and detail drawer", () => {
 
     expect(confirmButton).toBeEnabled();
     expect(exceptionButton).toBeEnabled();
-    expect(withdrawButton).toBeEnabled();
   });
 
   test("workbench stale refresh does not globally disable selected group actions", async () => {
@@ -1339,13 +1292,15 @@ describe("Workbench row selection and detail drawer", () => {
     });
     renderAppAt("/");
 
-    const openZone = await screen.findByTestId("zone-open");
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
     expect(await screen.findByRole("status", { name: /关联台待刷新/ })).toBeInTheDocument();
-    await user.click(await within(openZone).findByRole("row", { name: /陈涛.*智能工厂设备商/ }));
+    await user.click(await within(unpairedZone).findByRole("row", { name: /陈涛.*智能工厂设备商/ }));
 
-    expect(within(openZone).getByRole("button", { name: "确认关联" })).toBeEnabled();
-    expect(within(openZone).getByRole("button", { name: "异常处理" })).toBeEnabled();
-    expect(within(openZone).getByRole("button", { name: "撤回关联" })).toBeEnabled();
+    expect(within(unpairedZone).getByRole("button", { name: "确认关联" })).toBeDisabled();
+    expect(within(unpairedZone).getByRole("button", { name: "异常处理" })).toBeEnabled();
+    await user.click(within(unpairedZone).getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }));
+    expect(within(unpairedZone).getByRole("button", { name: "确认关联" })).toBeEnabled();
+    expect(within(unpairedZone).queryByRole("button", { name: "撤回关联" })).not.toBeInTheDocument();
   });
 
   test("OA dirty sync still disables selected group actions", async () => {
@@ -1377,13 +1332,13 @@ describe("Workbench row selection and detail drawer", () => {
     });
     renderAppAt("/");
 
-    const openZone = await screen.findByTestId("zone-open");
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
     expect(await screen.findByRole("status", { name: /关联台待刷新/ })).toBeInTheDocument();
-    await user.click(await within(openZone).findByRole("row", { name: /陈涛.*智能工厂设备商/ }));
+    await user.click(await within(unpairedZone).findByRole("row", { name: /陈涛.*智能工厂设备商/ }));
 
-    expect(within(openZone).getByRole("button", { name: "确认关联" })).toBeDisabled();
-    expect(within(openZone).getByRole("button", { name: "异常处理" })).toBeDisabled();
-    expect(within(openZone).getByRole("button", { name: "撤回关联" })).toBeDisabled();
+    expect(within(unpairedZone).getByRole("button", { name: "确认关联" })).toBeDisabled();
+    expect(within(unpairedZone).getByRole("button", { name: "异常处理" })).toBeDisabled();
+    expect(within(unpairedZone).queryByRole("button", { name: "撤回关联" })).not.toBeInTheDocument();
   });
 
   test("workbench settings can manage allowed app accounts", async () => {
@@ -1673,7 +1628,7 @@ describe("Workbench row selection and detail drawer", () => {
     expect(await within(settingsPage).findByRole("button", { name: /正在清理 app 内部状态。 25%/ })).toBeDisabled();
 
     await user.click(screen.getByRole("link", { name: "关联台" }));
-    await screen.findByTestId("zone-open");
+    await screen.findByTestId("zone-unpaired");
     settingsPage = await openWorkbenchSettingsPage(user);
     settingsTree = within(settingsPage).getByRole("tree", { name: "设置分类" });
     await user.click(within(settingsTree).getByRole("treeitem", { name: /数据重置/ }));
@@ -2045,7 +2000,7 @@ describe("Workbench row selection and detail drawer", () => {
     });
     renderAppAt("/");
 
-    const openZone = await screen.findByTestId("zone-open");
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
     const pairedZone = await screen.findByTestId("zone-paired");
 
     expect(screen.queryByRole("button", { name: "银行流水导入" })).not.toBeInTheDocument();
@@ -2053,11 +2008,11 @@ describe("Workbench row selection and detail drawer", () => {
     expect(screen.queryByRole("button", { name: "销项发票导入" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "进项发票导入" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "ETC发票导入" })).not.toBeInTheDocument();
-    expect(within(openZone).getByRole("button", { name: "确认关联" })).toBeDisabled();
-    expect(within(openZone).getByRole("button", { name: "异常处理" })).toBeDisabled();
+    expect(within(unpairedZone).getByRole("button", { name: "确认关联" })).toBeDisabled();
+    expect(within(unpairedZone).getByRole("button", { name: "异常处理" })).toBeDisabled();
     expect(within(pairedZone).getByRole("button", { name: "撤回关联" })).toBeDisabled();
 
-    const invoiceRow = within(openZone).getByRole("row", {
+    const invoiceRow = within(unpairedZone).getByRole("row", {
       name: /91330108MA27B4011D.*杭州溯源科技有限公司/,
     });
     expect(within(invoiceRow).queryByRole("button", { name: "忽略" })).not.toBeInTheDocument();
@@ -2079,7 +2034,7 @@ describe("Workbench row selection and detail drawer", () => {
 
     expect(cancelButton).toBeDisabled();
 
-    const pairedBankRow = within(pairedZone).getByRole("row", {
+    const pairedBankRow = await within(pairedZone).findByRole("row", {
       name: /2026-03-25 14:22.*华东设备供应商/,
     });
 
@@ -2113,7 +2068,7 @@ describe("Workbench row selection and detail drawer", () => {
           groups: [
             {
               group_id: "case:CASE-OA-ATT-oa-exp-2066-2",
-              group_type: "manual_confirmed",
+              group_type: "relation",
               can_withdraw: false,
               oa_rows: [
                 {
@@ -2141,7 +2096,7 @@ describe("Workbench row selection and detail drawer", () => {
           groups: [
             {
               group_id: "case:CASE-OA-ATT-oa-exp-2066-2",
-              group_type: "manual_confirmed",
+              group_type: "relation",
               can_withdraw: false,
               oa_rows: [
                 {
@@ -2185,7 +2140,7 @@ describe("Workbench row selection and detail drawer", () => {
 
     const pairedZone = await screen.findByTestId("zone-paired");
     await user.click(
-      within(pairedZone).getByRole("row", {
+      await within(pairedZone).findByRole("row", {
         name: /2026-03-25 14:22.*华东设备供应商/,
       }),
     );
@@ -2205,7 +2160,7 @@ describe("Workbench row selection and detail drawer", () => {
     renderWorkbenchPage();
 
     const pairedZone = await screen.findByTestId("zone-paired");
-    const openZone = await screen.findByTestId("zone-open");
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
 
     const pairedBankRow = within(pairedZone).getByRole("row", {
       name: /2026-03-25 14:22.*华东设备供应商/,
@@ -2241,14 +2196,14 @@ describe("Workbench row selection and detail drawer", () => {
         }),
       ).not.toBeInTheDocument();
       expect(
-        within(openZone).getByRole("row", {
+        within(unpairedZone).getByRole("row", {
           name: /2026-03-25 14:22.*华东设备供应商/,
         }),
       ).toBeInTheDocument();
     });
   });
 
-  test("open zone header exception action opens the unified modal instead of the OA-bank modal", async () => {
+  test("unpaired zone header exception action opens the unified modal instead of the OA-bank modal", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
     renderWorkbenchPage();
@@ -2314,23 +2269,23 @@ describe("Workbench row selection and detail drawer", () => {
     expect(workbenchRefreshCalls.length).toBeGreaterThan(0);
   });
 
-  test("processed exception rows move out of the open zone and appear in the processed exception modal", async () => {
+  test("processed exception rows move out of the unpaired zone and appear in the processed exception modal", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
     renderWorkbenchPage();
 
-    const openZone = await screen.findByTestId("zone-open");
-    expect(within(openZone).getByRole("button", { name: /已处理异常\d+项/ })).toBeInTheDocument();
-    const openOaRow = within(openZone).getByRole("row", {
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
+    expect(within(unpairedZone).getByRole("button", { name: /已处理异常\d+项/ })).toBeInTheDocument();
+    const openOaRow = await within(unpairedZone).findByRole("row", {
       name: /陈涛.*智能工厂设备商/,
     });
-    const openBankRow = within(openZone).getByRole("row", {
+    const openBankRow = await within(unpairedZone).findByRole("row", {
       name: /2026-03-28.*智能工厂设备商/,
     });
 
     await user.click(openOaRow);
     await user.click(openBankRow);
-    await user.click(within(openZone).getByRole("button", { name: "异常处理" }));
+    await user.click(within(unpairedZone).getByRole("button", { name: "异常处理" }));
 
     const exceptionModal = await screen.findByRole("dialog", { name: "统一异常处理" });
     await user.click(await within(exceptionModal).findByRole("radio", { name: /追进项发票/ }));
@@ -2339,18 +2294,18 @@ describe("Workbench row selection and detail drawer", () => {
 
     await waitFor(() => {
       expect(
-        within(openZone).queryByRole("row", {
+        within(unpairedZone).queryByRole("row", {
           name: /陈涛.*智能工厂设备商/,
         }),
       ).not.toBeInTheDocument();
       expect(
-        within(openZone).queryByRole("row", {
+        within(unpairedZone).queryByRole("row", {
           name: /2026-03-28.*智能工厂设备商/,
         }),
       ).not.toBeInTheDocument();
     });
 
-    await user.click(within(openZone).getByRole("button", { name: /已处理异常\d+项/ }));
+    await user.click(await screen.findByRole("button", { name: /已处理异常\d+项/ }));
 
     const processedModal = await screen.findByRole("dialog", { name: "已处理异常弹窗" });
     expect(within(processedModal).getAllByText("追进项发票").length).toBeGreaterThanOrEqual(2);
@@ -2361,22 +2316,22 @@ describe("Workbench row selection and detail drawer", () => {
     expect(within(processedModal).getAllByRole("button", { name: "取消异常处理" }).length).toBeGreaterThan(0);
   });
 
-  test("processed exception modal can cancel exception handling and move rows back to open", async () => {
+  test("processed exception modal cancels only the explicitly chosen singleton exception row", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch({ actionDelayMs: 80 });
     renderWorkbenchPage();
 
-    const openZone = await screen.findByTestId("zone-open");
-    const openOaRow = within(openZone).getByRole("row", {
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
+    const openOaRow = await within(unpairedZone).findByRole("row", {
       name: /陈涛.*智能工厂设备商/,
     });
-    const openBankRow = within(openZone).getByRole("row", {
+    const openBankRow = await within(unpairedZone).findByRole("row", {
       name: /2026-03-28.*智能工厂设备商/,
     });
 
     await user.click(openOaRow);
     await user.click(openBankRow);
-    await user.click(within(openZone).getByRole("button", { name: "异常处理" }));
+    await user.click(within(unpairedZone).getByRole("button", { name: "异常处理" }));
 
     const exceptionModal = await screen.findByRole("dialog", { name: "统一异常处理" });
     await user.click(await within(exceptionModal).findByRole("radio", { name: /追进项发票/ }));
@@ -2384,7 +2339,7 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(within(exceptionModal).getByRole("button", { name: "提交处理" }));
 
     await waitFor(() => {
-      expect(within(openZone).queryByRole("row", { name: /陈涛.*智能工厂设备商/ })).not.toBeInTheDocument();
+      expect(within(unpairedZone).queryByRole("row", { name: /陈涛.*智能工厂设备商/ })).not.toBeInTheDocument();
     });
     await waitFor(() => {
       expect(screen.queryByRole("dialog", { name: "统一异常处理" })).not.toBeInTheDocument();
@@ -2408,7 +2363,7 @@ describe("Workbench row selection and detail drawer", () => {
           method: "POST",
           body: JSON.stringify({
             month: "all",
-            row_ids: ["oa-o-202603-001", "bk-o-202603-001"],
+            row_ids: ["oa-o-202603-001"],
             comment: "由已处理异常弹窗撤回异常处理",
           }),
         }),
@@ -2416,24 +2371,20 @@ describe("Workbench row selection and detail drawer", () => {
     });
     await waitFor(() => {
       expect(
-        within(openZone).getByRole("row", {
+        within(unpairedZone).getByRole("row", {
           name: /陈涛.*智能工厂设备商/,
         }),
       ).toBeInTheDocument();
-      expect(
-        within(openZone).getByRole("row", {
-          name: /2026-03-28.*智能工厂设备商/,
-        }),
-      ).toBeInTheDocument();
+      expect(within(unpairedZone).queryByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).not.toBeInTheDocument();
     });
   });
 
-  test("canceling processed exception restores rows after the fresh workbench refetch", async () => {
+  test("canceling a processed singleton exception restores that row after the fresh workbench refetch", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
     renderWorkbenchPage();
 
-    const openZone = await screen.findByTestId("zone-open");
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
     const openOaRow = await screen.findByRole("row", {
       name: /陈涛.*智能工厂设备商/,
     });
@@ -2443,18 +2394,18 @@ describe("Workbench row selection and detail drawer", () => {
 
     await user.click(openOaRow);
     await user.click(openBankRow);
-    await user.click(within(openZone).getByRole("button", { name: "异常处理" }));
+    await user.click(within(unpairedZone).getByRole("button", { name: "异常处理" }));
 
     const exceptionModal = await screen.findByRole("dialog", { name: "统一异常处理" });
     await user.click(await within(exceptionModal).findByRole("radio", { name: /追进项发票/ }));
     await user.type(within(exceptionModal).getByLabelText("备注"), "金额核对后暂时继续异常");
     await user.click(within(exceptionModal).getByRole("button", { name: "提交处理" }));
     await waitFor(() => {
-      expect(within(openZone).queryByRole("row", { name: /陈涛.*智能工厂设备商/ })).not.toBeInTheDocument();
+      expect(within(unpairedZone).queryByRole("row", { name: /陈涛.*智能工厂设备商/ })).not.toBeInTheDocument();
     });
     fetchMock.mockClear();
 
-    await user.click(within(openZone).getByRole("button", { name: /已处理异常\d+项/ }));
+    await user.click(within(unpairedZone).getByRole("button", { name: /已处理异常\d+项/ }));
     const processedModal = await screen.findByRole("dialog", { name: "已处理异常弹窗" });
     await user.click(within(processedModal).getAllByRole("button", { name: "取消异常处理" })[0]);
 
@@ -2476,15 +2427,11 @@ describe("Workbench row selection and detail drawer", () => {
 
     await waitFor(() => {
       expect(
-        within(openZone).getByRole("row", {
+        within(unpairedZone).getByRole("row", {
           name: /陈涛.*智能工厂设备商/,
         }),
       ).toBeInTheDocument();
-      expect(
-        within(openZone).getByRole("row", {
-          name: /2026-03-28.*智能工厂设备商/,
-        }),
-      ).toBeInTheDocument();
+      expect(within(unpairedZone).queryByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).not.toBeInTheDocument();
     });
   }, 30_000);
 
@@ -2516,10 +2463,10 @@ describe("Workbench row selection and detail drawer", () => {
     });
     renderWorkbenchPage();
 
-    await screen.findByTestId("zone-open");
+    await screen.findByTestId("zone-unpaired");
     expect(screen.queryByText("关联台待刷新，当前结果可能不是完整最新数据。")).not.toBeInTheDocument();
     expect(screen.queryByText("当前没有可展示的 OA / 银行流水 / 发票记录。")).not.toBeInTheDocument();
-    expect(within(screen.getByTestId("zone-open")).getByText("未配对 0 项")).toBeInTheDocument();
+    expect(within(screen.getByTestId("zone-unpaired")).getByText("未配对 0 项")).toBeInTheDocument();
   });
 
   test("requeued workbench refresh failure does not show the stale failure banner", async () => {
@@ -2560,13 +2507,13 @@ describe("Workbench row selection and detail drawer", () => {
 
     await user.click(screen.getByRole("button", { name: /放大 未配对/ }));
 
-    expect(screen.getByTestId("zone-open")).not.toHaveClass("zone-hidden");
+    expect(screen.getByTestId("zone-unpaired")).not.toHaveClass("zone-hidden");
     expect(screen.getByTestId("zone-paired")).toHaveClass("zone-hidden");
     expect(screen.getByRole("button", { name: /恢复 未配对/ })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /恢复 未配对/ }));
 
-    expect(screen.getByTestId("zone-open")).not.toHaveClass("zone-hidden");
+    expect(screen.getByTestId("zone-unpaired")).not.toHaveClass("zone-hidden");
     expect(screen.getByTestId("zone-paired")).not.toHaveClass("zone-hidden");
   });
 });

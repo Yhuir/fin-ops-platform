@@ -25,7 +25,6 @@ class WorkbenchWriteUnitOfWorkContext:
     pair_relations: Any
     exception_cases: Any
     row_overrides: Any
-    candidate_matches: Any
     idempotency_store: Any
 
 
@@ -91,7 +90,6 @@ class WorkbenchWriteUnitOfWork:
                 pair_relations=repositories.pair_relations,
                 exception_cases=repositories.exception_cases,
                 row_overrides=repositories.row_overrides,
-                candidate_matches=repositories.candidate_matches,
                 idempotency_store=idempotency_store,
             )
             handler_started_at = monotonic()

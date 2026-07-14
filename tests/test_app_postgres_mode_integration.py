@@ -148,9 +148,9 @@ class AppPostgresModeIntegrationTests(unittest.TestCase):
             scope_key="2026-03",
             payload={
                 "month": "2026-03",
-                "summary": {"oa_count": 0, "bank_count": 1, "invoice_count": 0, "paired_count": 0, "open_count": 1, "exception_count": 0},
+                "summary": {"oa_count": 0, "bank_count": 1, "invoice_count": 0, "paired_count": 0, "unpaired_count": 1, "exception_count": 0},
                 "paired": {"groups": []},
-                "open": {
+                "unpaired": {
                     "groups": [
                         {
                             "group_id": "case:no_oa_stage09",

@@ -133,7 +133,6 @@ class PlaywrightE2EStrictDiagnosticsTests(unittest.TestCase):
         allowed_without_guard = {
             "web/e2e/permissions-role-matrix.spec.ts",
             "web/e2e/workbench-permissions-flow.spec.ts",
-            "web/e2e/workbench-relations-candidate-semantics.spec.ts",
             "web/e2e/workbench-stale-error-flow.spec.ts",
         }
         missing_guard: set[str] = set()

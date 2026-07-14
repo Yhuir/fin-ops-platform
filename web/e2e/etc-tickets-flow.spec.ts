@@ -82,6 +82,42 @@ async function openEtcDisclosure(page: Page, name: RegExp | string) {
 }
 
 test.describe("ETC ticket management browser flow", () => {
+  test("downloads the merged invoice PDF after the OA draft exists", async ({ page }, testInfo) => {
+    const browserErrors = startStrictBrowserErrorCapture(page);
+    await installDeterministicApiMocks(page, {
+      etcTicketInitialBusinessBatchStatus: "oa_confirmation_pending",
+      sessionMode: "read_export_only",
+    });
+    await page.route("**/api/etc/business-batches/etc-business-e2e-001/invoice-pdf", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/pdf",
+        headers: {
+          "Content-Disposition": "attachment; filename*=UTF-8''ETC%E5%8F%91%E7%A5%A8_3%E6%9C%88%E6%89%B9%E6%AC%A1_2%E5%BC%A0.pdf",
+        },
+        body: "%PDF-1.4\n%%EOF\n",
+      });
+    });
+    const recordLatency = createEtcLatencyRecorder(page, testInfo);
+
+    await recordLatency({
+      operationId: "etc-tickets.download-merged-invoice-pdf",
+      visibleLabel: "下载发票PDF",
+      actionType: "click",
+    }, async (mark) => {
+      await page.goto("/etc-tickets");
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByRole("button", { name: "下载发票PDF" })).toBeVisible());
+      const downloadPromise = page.waitForEvent("download");
+      await page.getByRole("button", { name: "下载发票PDF" }).click();
+      const download = await mark("finalSettledLatencyMs", downloadPromise);
+      expect(download.suggestedFilename()).toBe("ETC发票_3月批次_2张.pdf");
+    });
+
+    await expect(page.getByText("当前账号仅支持查看和导出")).toBeVisible();
+    await expectNoUnexpectedSuccessUiErrors(page);
+    expect(browserErrors).toEqual([]);
+  });
+
   test("recovers business batches after a transient load failure when refreshed", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page, {
       allowedConsoleErrors: [/Failed to load resource: the server responded with a status of 503/],

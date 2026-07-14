@@ -61,8 +61,8 @@ export default function useWorkbenchSelection() {
     setSelectedOpenRows([]);
   }, []);
 
-  const getRowState = useCallback((row: WorkbenchRecord, zoneId: "paired" | "open"): WorkbenchRowState => {
-    if (zoneId === "open") {
+  const getRowState = useCallback((row: WorkbenchRecord, zoneId: "paired" | "unpaired"): WorkbenchRowState => {
+    if (zoneId === "unpaired") {
       return selectedOpenRowIdSet.has(row.id) ? "selected" : "idle";
     }
 

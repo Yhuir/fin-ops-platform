@@ -199,16 +199,6 @@ class WorkbenchReadConnection:
 
 class ReadModelReadConnection:
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
-        if "read_model.workbench_candidate_matches" in sql:
-            return [
-                {
-                    "key": "candidate-1",
-                    "payload": {
-                        "month": "2026-05",
-                        "row_ids": [],
-                    },
-                }
-            ]
         return [
             {
                 "key": "2026-05",
@@ -1289,15 +1279,10 @@ def test_read_model_loaders_strip_export_only_rebuildable_marker() -> None:
     repository = PostgresReadModelRepository(ReadModelReadConnection())
 
     assert "rebuildable" not in repository.load_workbench_read_models()["read_models"]["2026-05"]
-    assert "rebuildable" not in repository.load_workbench_candidate_matches()["candidates"]["candidate-1"]
     assert "rebuildable" not in repository.load_cost_statistics_read_models()["read_models"]["2026-05"]
     assert "rebuildable" not in repository.load_tax_offset_read_models()["read_models"]["2026-05"]
 
 
-def test_candidate_match_loader_drops_rebuildable_transform_cache_rows() -> None:
-    repository = PostgresReadModelRepository(RebuildableCandidateReadConnection())
-
-    assert repository.load_workbench_candidate_matches() == {}
 
 
 def test_max_numeric_suffix_supports_dash_and_underscore_identifiers() -> None:

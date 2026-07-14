@@ -368,7 +368,11 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
             if group.get("relation_mode") == "bank_flow_rule_batch"
         )
         self.assertEqual(workbench_payload["summary"]["paired_count"], 1)
-        self.assertCountEqual([row["id"] for row in paired_group["bank_rows"]], row_ids)
+        self.assertEqual(
+            [row["id"] for row in paired_group["bank_rows"]],
+            [f"relation_summary:{relation['case_id']}"],
+        )
+        self.assertCountEqual([row["id"] for row in paired_group["collapsed_rows"]["bank"]], row_ids)
         self.assertEqual(paired_group["bank_rows"][0]["special_metadata"]["source"], "bank_flow_rule_batch")
         self.assertEqual(paired_group["bank_rows"][0]["invoice_relation"]["code"], "bank_flow_rule_batch")
 
@@ -634,7 +638,7 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
         self.assertEqual(payload["batch"]["batch_id"], batch_id)
         self.assertEqual(payload["rows"][0]["id"], row_id)
 
-    def test_salary_auto_candidate_does_not_create_active_relation_before_batch_submit(self) -> None:
+    def test_salary_row_remains_a_visible_unpaired_singleton_before_batch_submit(self) -> None:
         app = build_application()
         preview = app._import_service.preview_import(
             batch_type=BatchType.BANK_TRANSACTION,
@@ -660,13 +664,9 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
 
         response = app.handle_request("GET", "/api/workbench?month=all")
         payload = json.loads(response.body)
-        auto_results = app._live_workbench_service.list_auto_pair_candidates("all")
-
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["summary"]["paired_count"], 0)
-        self.assertEqual([row["id"] for row in flatten_groups(payload["open"]["groups"], "bank")], [salary_row_id])
-        self.assertEqual(len(auto_results), 1)
-        self.assertEqual(auto_results[0].rule_code, "salary_personal_auto_match")
+        self.assertEqual([row["id"] for row in flatten_groups(payload["unpaired"]["groups"], "bank")], [salary_row_id])
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id(salary_row_id))
 
     def test_no_oa_salary_batch_relation_pairs_then_cancel_returns_to_open(self) -> None:
@@ -745,7 +745,7 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
         open_payload = json.loads(open_response.body)
 
         self.assertEqual(open_payload["summary"]["paired_count"], 0)
-        self.assertEqual([row["id"] for row in flatten_groups(open_payload["open"]["groups"], "bank")], [salary_row_id])
+        self.assertEqual([row["id"] for row in flatten_groups(open_payload["unpaired"]["groups"], "bank")], [salary_row_id])
 
     def test_submit_selection_fee_rows_render_as_collapsed_paired_workbench_group(self) -> None:
         app = build_application()
@@ -804,7 +804,7 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
         self.assertEqual(paired_group["relation_mode"], "no_oa_bank_batch")
         self.assertEqual(paired_group["display_mode"], "collapsed_summary")
         self.assertTrue(paired_group["default_collapsed"])
-        self.assertEqual([row["id"] for row in paired_group["bank_rows"]], [f"no_oa_summary:{submitted['batch_id']}"])
+        self.assertEqual([row["id"] for row in paired_group["bank_rows"]], [f"relation_summary:{submitted['batch_id']}"])
         self.assertCountEqual([row["id"] for row in paired_group["collapsed_rows"]["bank"]], row_ids)
         self.assertEqual(summary_row["source_kind"], "no_oa_bank_batch_summary")
         self.assertEqual(summary_row["invoice_relation"]["code"], "no_oa_bank_batch")
@@ -842,7 +842,7 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
         self.assertEqual(paired_payload["summary"]["paired_count"], 1)
         self.assertEqual(paired_group["relation_mode"], "no_oa_bank_batch")
         self.assertEqual(paired_group["display_mode"], "collapsed_summary")
-        self.assertEqual([row["id"] for row in paired_group["bank_rows"]], [f"no_oa_summary:{submitted['batch_id']}"])
+        self.assertEqual([row["id"] for row in paired_group["bank_rows"]], [f"relation_summary:{submitted['batch_id']}"])
         self.assertCountEqual([row["id"] for row in paired_group["collapsed_rows"]["bank"]], row_ids)
         summary_row = paired_group["summary_row"]
         self.assertEqual(summary_row["invoice_relation"]["label"], "已匹配：内部往来款")
@@ -862,7 +862,7 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
         open_payload = json.loads(app.handle_request("GET", "/api/workbench?month=all").body)
 
         self.assertEqual(open_payload["summary"]["paired_count"], 0)
-        self.assertCountEqual([row["id"] for row in flatten_groups(open_payload["open"]["groups"], "bank")], row_ids)
+        self.assertCountEqual([row["id"] for row in flatten_groups(open_payload["unpaired"]["groups"], "bank")], row_ids)
 
     def test_historical_salary_relations_same_month_account_collapse_into_one_submitted_group(self) -> None:
         app = build_application()
@@ -936,7 +936,7 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(workbench_payload["summary"]["paired_count"], 1)
         self.assertEqual(paired_group["display_mode"], "collapsed_summary")
-        self.assertEqual([row["id"] for row in paired_group["bank_rows"]], [f"no_oa_summary:{salary_batch['batch_id']}"])
+        self.assertEqual([row["id"] for row in paired_group["bank_rows"]], [f"relation_summary:{salary_batch['batch_id']}"])
         self.assertCountEqual([row["id"] for row in paired_group["collapsed_rows"]["bank"]], salary_row_ids)
         self.assertEqual(paired_group["summary_row"]["special_metadata"]["row_count"], 4)
         self.assertEqual(paired_group["summary_row"]["special_metadata"]["total_amount"], "50.00")
@@ -1045,7 +1045,7 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
         self.assertCountEqual(active_relations[0]["row_ids"], salary_row_ids)
         self.assertEqual(workbench_payload["summary"]["paired_count"], 1)
         self.assertEqual(paired_group["display_mode"], "collapsed_summary")
-        self.assertEqual([row["id"] for row in paired_group["bank_rows"]], [f"no_oa_summary:{salary_batch['batch_id']}"])
+        self.assertEqual([row["id"] for row in paired_group["bank_rows"]], [f"relation_summary:{salary_batch['batch_id']}"])
         self.assertCountEqual([row["id"] for row in paired_group["collapsed_rows"]["bank"]], salary_row_ids)
         self.assertEqual(paired_group["summary_row"]["special_metadata"]["row_count"], 3)
         self.assertEqual(paired_group["summary_row"]["special_metadata"]["total_amount"], "33.00")
@@ -1144,7 +1144,7 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
         salary_group = next(
             group
             for group in paired_groups
-            if group["bank_rows"][0]["special_metadata"]["batch_type"] == "salary"
+            if group["case_id"] == submitted_by_type["salary"]["batch_id"]
         )
         transfer_group = next(group for group in paired_groups if group is not salary_group)
         salary_row = salary_group["bank_rows"][0]
@@ -1158,7 +1158,7 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
         self.assertEqual(transfer_group["display_mode"], "collapsed_summary")
         self.assertEqual(
             transfer_summary_row["id"],
-            f"no_oa_summary:{submitted_by_type['internal_transfer']['batch_id']}",
+            f"relation_summary:{submitted_by_type['internal_transfer']['batch_id']}",
         )
         self.assertCountEqual(
             [row["id"] for row in transfer_group["collapsed_rows"]["bank"]],

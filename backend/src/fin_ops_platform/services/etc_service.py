@@ -779,6 +779,7 @@ class EtcService:
         task_id: str | None = None,
         status: str | None = None,
     ) -> list[EtcBusinessBatch]:
+        self._reload_from_state_store()
         normalized_task_id = str(task_id or "").strip()
         normalized_status = str(status or "").strip()
         batches = [
@@ -791,6 +792,7 @@ class EtcService:
         return [self._copy_business_batch(batch) for batch in sorted(batches, key=lambda item: item.created_at, reverse=True)]
 
     def get_business_batch(self, business_batch_id: str) -> EtcBusinessBatch:
+        self._reload_from_state_store()
         batch = self._get_business_batch_mutable(business_batch_id)
         if batch.status == EtcBusinessBatchStatus.DELETED.value:
             raise EtcBusinessBatchNotFoundError(f"ETC business batch not found: {business_batch_id}")
@@ -1453,8 +1455,8 @@ class EtcService:
         seen_invoice_numbers: dict[str, str] = {}
         preview_state: dict[str, tuple[bool, bool]] = {
             invoice.invoice_number: (
-                self._stored_invoice_file_exists(invoice.xml_file_path),
-                self._stored_invoice_file_exists(invoice.pdf_file_path),
+                self._preview_invoice_file_exists(invoice.xml_file_path),
+                self._preview_invoice_file_exists(invoice.pdf_file_path),
             )
             for invoice in self._invoices.values()
         }
@@ -1562,10 +1564,11 @@ class EtcService:
     ) -> EtcImportResult:
         result = EtcImportResult()
         import_batch = self._create_import_batch(uploads, import_session_id=import_session_id) if persist else None
+        file_exists = self._stored_invoice_file_exists if persist else self._preview_invoice_file_exists
         preview_state: dict[str, tuple[bool, bool]] = {
             invoice.invoice_number: (
-                self._stored_invoice_file_exists(invoice.xml_file_path),
-                self._stored_invoice_file_exists(invoice.pdf_file_path),
+                file_exists(invoice.xml_file_path),
+                file_exists(invoice.pdf_file_path),
             )
             for invoice in self._invoices.values()
         }
@@ -1633,6 +1636,7 @@ class EtcService:
         page: int = 1,
         page_size: int = 50,
     ) -> tuple[list[EtcInvoice], int, dict[str, int]]:
+        self._reload_from_state_store()
         resolved_status = _coerce_invoice_status(status) if status else None
         normalized_import_batch_id = str(import_batch_id or "").strip()
         all_invoices = list(self._invoices.values())
@@ -2149,6 +2153,13 @@ class EtcService:
     def list_invoices_by_ids(self, invoice_ids: list[str]) -> list[EtcInvoice]:
         return [replace(self._get_invoice(invoice_id)) for invoice_id in invoice_ids]
 
+    def read_invoice_pdf_bytes(self, invoice_id: str) -> bytes:
+        invoice = self._get_invoice(invoice_id)
+        path = str(invoice.pdf_file_path or "").strip()
+        if not path or not self._stored_invoice_file_exists(path):
+            raise FileNotFoundError(f"ETC invoice PDF not found: {invoice.invoice_number}")
+        return self._read_stored_invoice_file(path)
+
     def list_invoices_by_numbers(self, invoice_numbers: list[str]) -> list[EtcInvoice]:
         normalized_numbers = [str(number).strip() for number in invoice_numbers if str(number).strip()]
         invoices: list[EtcInvoice] = []
@@ -2257,6 +2268,12 @@ class EtcService:
         with self._state_path.open("rb") as handle:
             loaded = pickle.load(handle)  # noqa: S301 - trusted local application state
         return loaded if isinstance(loaded, dict) else {}
+
+    def _reload_from_state_store(self) -> None:
+        if str(getattr(self._state_store, "storage_backend", "") or "").strip() != "postgres":
+            return
+        with self._business_batch_lock:
+            self._hydrate(self._load_snapshot())
 
     def _persist(self) -> None:
         if self._state_store is not None and hasattr(self._state_store, "save_etc_state"):
@@ -2619,6 +2636,12 @@ class EtcService:
             exists = getattr(self._state_store, "etc_invoice_file_exists", None)
             return bool(callable(exists) and exists(path))
         return Path(path).exists()
+
+    def _preview_invoice_file_exists(self, path: str | None) -> bool:
+        if path and path.startswith(("minio://", "s3://")):
+            # ponytail: object refs are returned only after verified writes; byte integrity belongs to read/audit paths.
+            return True
+        return self._stored_invoice_file_exists(path)
 
     def _read_stored_invoice_file(self, path: str) -> bytes:
         if self._is_external_file_ref(path):

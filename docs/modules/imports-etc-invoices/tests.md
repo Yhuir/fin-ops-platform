@@ -1,14 +1,14 @@
 # ETC发票导入测试矩阵
 
-## 2026-07-11 durable session / Audit 增量
+## 2026-07-14 MinIO worker wiring / confirmable count 增量
 
 | 类别 | 覆盖 |
 | --- | --- |
 | 业务核心 | task/version/hash、ZIP allowlist、preview counts/fingerprint、partial/failure/retry |
-| Service | durable session store、跨 store 实例重载、worker `begin_import` 幂等、terminal status |
+| Service | durable session store、跨 store 实例重载、worker object storage 注入、worker 写入后的 API query reload、`begin_import` 幂等、terminal status |
 | API contract | preview storage 503、confirm queue 503、旧 `/api/etc/import` 404、admin-only Audit |
 | Read model / queue | zero own read model；page-owned import job/outbox gate；下游仅 impact targets |
-| Frontend | ETC Audit 控件、ZIP/task/preview/confirm 回归 |
+| Frontend | ETC Audit 控件使用 `confirmable_count`、ZIP/task/preview/confirm 回归 |
 | E2E integration | disposable PostgreSQL 0001–0098 store + Audit clean/destructive proof |
 | Existing regression | ETC tickets、business batch/OA draft/delete、canonical linking、file/object migrations |
 
@@ -46,6 +46,7 @@
 - confirm API/worker 入队失败必须错误可见，不能展示“已开始后台导入”，不能把下游 read model 伪装成 fresh。
 - confirm 必须创建 `etc_invoice_import` background job，并能在 import-job worker 模式下以 `etc_invoice_import.confirm` processor 异步处理。
 - confirm job 必须创建/复用 task-scoped business batch，导入匹配发票，写入 task import status，失败时 mark import failed。
+- PostgreSQL 模式下独立 worker 写入 task、business batch 和 ETC invoice 后，已在运行的 API query service 必须无需重启即可读到新状态；本地 file/memory backend 不启用该 reload。
 - ETC import result 必须保存 ETC metadata/附件并关联已存在 canonical invoices；缺失 canonical invoice 时不得自动创建，也不得把不同 invoice number 的相同金额票据错误合并。
 - runtime worker 的 ETC import link helper 必须只调用 `upsert_etc_invoice` 的 link-existing 入口；缺失 canonical invoice 时不得调用 `upsert_invoice`、`create_invoice` 或 `register_invoice` 等创建入口。
 - 删除导入结果或 business batch 时不得调用通用 import service 做 legacy canonical cleanup；响应不得暴露 `removedCanonicalInvoiceCount` 之类旧清理字段。
@@ -78,6 +79,11 @@
 | Browser 中 confirm 失败仍展示后台导入成功 | `web/e2e/imports-etc-invoices-flow.spec.ts` 的 confirm failure Browser 回归，断言错误可见、无“已开始后台导入”、不走通用 files confirm |
 | Browser 中 confirm 或下游 fresh 成功后仍残留导入失败/read model 失败提示 | `web/e2e/imports-etc-invoices-flow.spec.ts` 的 success visible-error guard，断言导入页、ETC 票据、税金抵扣和成本统计成功节点没有导入失败、后台导入失败或 read model 失败等可见错误残留 |
 | confirm 重复请求产生重复导入 | `tests/test_etc_backend.py::EtcApiTests::test_etc_confirm_repeated_session_returns_same_job_without_duplicate_import` |
+| 多 ZIP preview 对历史 MinIO 附件逐张重复下载并在 session 保存后重下载全部 ZIP，触发代理 504 | `tests/test_etc_backend.py::EtcServiceTests::test_preview_does_not_download_verified_object_attachments_for_existing_invoices`、`tests/test_etc_import_session_store.py::EtcImportSessionStoreTests::test_durable_save_does_not_redownload_archives_after_verified_write` |
+| 59 ZIP / 38 个需求的全局组合搜索把不符合车牌和日期窗口的发票也纳入金额组合，并反复复制/排序全部中间金额状态，导致 CPU 长时间不返回且可能跨上下文误配 | `tests/test_etc_reconciliation_service.py::EtcReconciliationServiceTests::test_zip_preview_excludes_unrelated_context_before_global_amount_combinations`、`test_zip_preview_bounds_six_invoice_search_with_many_context_candidates`，并使用真实 59 ZIP + 生产 task payload 做本地 task-aware 性能回归 |
+| API 预览已把 ZIP 写入 MinIO，但独立 import worker 构造 `PostgresStateStore` 时未注入对象存储，confirm 在第一张发票前报 `Object storage is not configured for PostgreSQL file access.` | `tests/test_import_job_queue.py::ImportJobRepositoryTests::test_runtime_import_processor_configures_object_storage_for_durable_archives`，并在发布后用失败 session 重试验证 PostgreSQL + MinIO worker drain |
+| 独立 worker 已成功写入 PostgreSQL，但常驻 API 仍返回启动时的 task/business batch/invoice 快照，页面表现为“导入后没反应” | `tests/test_etc_backend.py::EtcApiTests::test_etc_query_services_reload_worker_writes_from_postgres_state_store`，使用先创建 API service、后由另一组 worker service 写入的共享 PostgreSQL 语义 store 验证跨进程可见性 |
+| ETC audit 的 `importable_count=0` 但 `confirmable_count>0` 时页面误显示“可导入 0”，掩盖 reconciliation allowlist 中可确认记录 | `web/src/test/ImportCenterPage.test.tsx` ETC preview audit 回归、`web/e2e/imports-etc-invoices-flow.spec.ts` 浏览器预览回归 |
 | ETC confirm job 缺少 App Status task/domain/route metadata | `tests/test_etc_backend.py::EtcApiTests::test_etc_confirm_returns_background_job_and_imports_asynchronously` 断言 `affected_domains=["imports_etc_invoices","etc_tickets"]`、route `/imports/etc-invoices` 和 `source.task_id`；`tests/test_app_status_overview_service.py` 覆盖 registry/payload fallback |
 | partial success 被当作完整成功 | `tests/test_etc_backend.py::EtcApiTests::test_etc_confirm_job_partial_success_when_some_items_fail` |
 | 混合 zip 中有效发票、重复 XML 和坏 XML 未分离计数 | `tests/test_etc_backend.py::EtcServiceTests::test_preview_large_mixed_zip_keeps_valid_invoices_duplicates_and_failures_separate` |

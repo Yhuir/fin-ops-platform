@@ -269,7 +269,7 @@ describe("pending invoices and tag settings API mapping", () => {
         relationCount: 2,
         hasMultiple: true,
         detailAvailable: true,
-        primary: { id: "oa-001", applicant: "张三", projectName: "维护项目", formNo: "2048", detailAvailable: true, relationCaseId: "candidate:api-oa-bank", relationStatus: "candidate" },
+        primary: { id: "oa-001", applicant: "张三", projectName: "维护项目", formNo: "2048", detailAvailable: true, relationCaseId: "candidate:api-oa-bank", relationStatus: "unlinked" },
       },
     });
     expect(payload.rows[0].bankTransactions.summaries[1]).toMatchObject({
@@ -277,7 +277,7 @@ describe("pending invoices and tag settings API mapping", () => {
       counterpartyName: "云南供应商二号",
       relationStatus: "linked",
     });
-    expect(payload.rows[0].inputInvoices.summaries[1]).toMatchObject({ id: "inv_002", relationStatus: "candidate" });
+    expect(payload.rows[0].inputInvoices.summaries[1]).toMatchObject({ id: "inv_002", relationStatus: "unlinked" });
     expect(payload.pagination).toEqual({ page: 2, pageSize: 25, total: 51 });
     expect(payload.summary).toEqual({
       totalRows: 51,
@@ -525,13 +525,13 @@ describe("pending invoices and tag settings API mapping", () => {
       invoiceTotal: "2000.00",
       availableActions: ["attach_existing_invoice"],
       relatedOa: [
-        { id: "oa_001", applicant: "杨丽萍", applicationType: "支付申请", projectName: "云南溯源项目", relationStatus: "candidate" },
+        { id: "oa_001", applicant: "杨丽萍", applicationType: "支付申请", projectName: "云南溯源项目", relationStatus: "unlinked" },
         { id: "oa_002", applicant: "刘晓宇", applicationType: "日常报销", projectName: "云南溯源项目二期" },
       ],
       relationCaseIds: ["case_001", "case_002"],
     });
-    expect(relation.relatedInvoices[0]).toMatchObject({ id: "inv_001", relationStatus: "candidate" });
-    expect(relation.paymentRows[0]).toMatchObject({ id: "txn_001", relationStatus: "candidate" });
+    expect(relation.relatedInvoices[0]).toMatchObject({ id: "inv_001", relationStatus: "unlinked" });
+    expect(relation.paymentRows[0]).toMatchObject({ id: "txn_001", relationStatus: "unlinked" });
 
     const detail = await api().fetchPendingInvoiceObjectDetail({ kind: "invoice", id: "inv_001", rowId: "txn_001" });
     expect(detail).toMatchObject({ title: "DIG-001", sections: [{ title: "发票字段" }] });
@@ -580,7 +580,8 @@ describe("pending invoices and tag settings API mapping", () => {
 
     const downloaded = await api().downloadPendingInvoiceExport({ direction: "expense", filter: "requires_invoice", page: 7, pageSize: 25 });
     expect(downloaded.fileName).toBe("pending-invoices.xlsx");
-    expect(downloaded.blob).toBeInstanceOf(Blob);
+    expect(downloaded.blob.size).toBeGreaterThan(0);
+    expect(downloaded.blob.type).toBe("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   });
 
   test("surfaces backend row-limit messages from failed export downloads", async () => {

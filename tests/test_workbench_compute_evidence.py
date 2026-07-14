@@ -46,7 +46,7 @@ class FakeWorkbenchComputeEvidenceConnection:
                     "status": "completed",
                     "reason": "matching_rule_changed",
                     "duration_ms": 210,
-                    "source_versions": {"workbench_matching_rules_version": "v1"},
+                    "source_versions": {"workbench_formal_relation_rule_version": "v1"},
                 }
             ]
         if "from job.runtime_worker_heartbeats" in normalized:
@@ -60,25 +60,14 @@ class FakeWorkbenchComputeEvidenceConnection:
                     "payload": {"worker_instance": "workbench-matching"},
                 }
             ]
-        if "from read_model.workbench_candidate_matches" in normalized:
+        if "from app.workbench_pair_relations" in normalized:
             return [
                 {
                     "scope_month": "2026-03",
-                    "candidate_count": 5,
-                    "auto_closed_count": 2,
-                    "conflict_count": 1,
-                }
-            ]
-        if "from read_model.workbench_reconciliation_decisions" in normalized and "group by scope_month" in normalized:
-            return [
-                {
-                    "scope_month": "2026-03",
-                    "decision_count": 8,
-                    "paired_count": 3,
-                    "open_count": 2,
-                    "expired_count": 1,
-                    "suppressed_count": 1,
-                    "consumed_count": 1,
+                    "relation_count": 5,
+                    "active_count": 4,
+                    "inactive_count": 1,
+                    "member_count": 12,
                 }
             ]
         if "from read_model.workbench_generations" in normalized and "read_model.workbench_group_rows" in normalized:
@@ -164,8 +153,8 @@ class WorkbenchComputeEvidenceTests(unittest.TestCase):
         )
         self.assertEqual(sections["worker_heartbeat"]["data"]["required_metrics"]["worker_status"], "ready")
         self.assertEqual(
-            sections["candidate_decision_counts"]["data"]["decision_counts_by_scope"][0]["paired_count"],
-            3,
+            sections["formal_relation_counts"]["data"]["relations_by_scope"][0]["active_count"],
+            4,
         )
         self.assertEqual(sections["active_generation_row_counts"]["data"][0]["held_row_count"], 2)
         self.assertEqual(

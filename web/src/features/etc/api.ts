@@ -1566,6 +1566,75 @@ export async function createEtcBusinessBatchOaDraft(
   return mapBusinessBatchDetail(unwrapBusinessBatchPayload(rawPayload));
 }
 
+function contentDispositionFileName(value: string | null) {
+  if (!value) {
+    return null;
+  }
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(value)?.[1];
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded);
+    } catch {
+      return encoded;
+    }
+  }
+  return /filename="([^"]+)"/i.exec(value)?.[1] ?? null;
+}
+
+export async function downloadEtcBusinessBatchInvoicePdf(businessBatchId: string) {
+  let lastHtmlError: Error | null = null;
+  const requestSignal = requestTimeoutSignal(undefined, ETC_FILE_UPLOAD_TIMEOUT_MS);
+  try {
+    for (const candidateUrl of requestUrlCandidates(
+      `/api/etc/business-batches/${encodeURIComponent(businessBatchId)}/invoice-pdf`,
+    )) {
+      const response = await apiFetchResolved(candidateUrl, {
+        method: "GET",
+        signal: requestSignal.signal,
+      });
+      const contentType = response.headers.get("Content-Type") ?? "";
+      if (!response.ok) {
+        const rawText = await response.text();
+        if (rawText.trim().startsWith("<") || contentType.toLowerCase().includes("text/html")) {
+          lastHtmlError = htmlResponseError(candidateUrl, response, rawText);
+          continue;
+        }
+        try {
+          const payload = JSON.parse(rawText) as { error?: { code?: string; message?: string; details?: unknown } };
+          if (payload.error?.message) {
+            throw responseError(response, payload.error.code ?? "", payload.error.message, payload.error.details);
+          }
+        } catch (error) {
+          if (error instanceof EtcApiError) {
+            throw error;
+          }
+        }
+        throw responseError(response, "", rawText || "ETC 发票 PDF 下载失败。");
+      }
+      if (!contentType.toLowerCase().includes("application/pdf")) {
+        const rawText = await response.text();
+        if (rawText.trim().startsWith("<") || contentType.toLowerCase().includes("text/html")) {
+          lastHtmlError = htmlResponseError(candidateUrl, response, rawText);
+          continue;
+        }
+        throw new Error("ETC 发票下载接口返回的不是 PDF 文件。");
+      }
+      return {
+        blob: await response.blob(),
+        fileName: contentDispositionFileName(response.headers.get("Content-Disposition")) ?? "ETC发票.pdf",
+      };
+    }
+    throw lastHtmlError ?? new Error("ETC 发票 PDF 下载失败。");
+  } catch (error) {
+    if (requestSignal.timedOut) {
+      throw new Error("ETC 发票 PDF 下载超时，请稍后重试。");
+    }
+    throw error;
+  } finally {
+    requestSignal.cleanup();
+  }
+}
+
 export async function revokeEtcBusinessBatchOaDraft(
   businessBatchId: string,
   payload: EtcBusinessBatchReasonedPayload,

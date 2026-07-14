@@ -293,7 +293,7 @@ class ManualReconciliationServiceTests(unittest.TestCase):
         self.assertEqual({line.object_type for line in case.lines}, {"invoice", "offset_note"})
         self.assertEqual(self.audit_service.list_entries()[-1].action, "offset_reconciliation_recorded")
 
-    def test_build_workbench_keeps_negative_invoices_visible_for_reverse_flow(self) -> None:
+    def test_build_workbench_keeps_negative_invoices_visible_unpaired_for_reverse_flow(self) -> None:
         invoice_ids = self._confirm(
             BatchType.OUTPUT_INVOICE,
             [
@@ -310,9 +310,9 @@ class ManualReconciliationServiceTests(unittest.TestCase):
 
         workbench = self.reconciliation_service.build_workbench(month="2026-03")
 
-        self.assertIn(invoice_ids[0], [item["id"] for item in workbench["open"]["invoice"]])
+        self.assertIn(invoice_ids[0], [item["id"] for item in workbench["unpaired"]["invoice"]])
 
-    def test_build_workbench_groups_paired_and_open_rows_from_live_services(self) -> None:
+    def test_build_workbench_groups_paired_and_unpaired_rows_from_live_services(self) -> None:
         paired_invoice_ids = self._confirm(
             BatchType.OUTPUT_INVOICE,
             [
@@ -382,10 +382,10 @@ class ManualReconciliationServiceTests(unittest.TestCase):
         self.assertEqual(workbench["month"], "2026-03")
         self.assertEqual(len(workbench["paired"]["invoice"]), 1)
         self.assertEqual(len(workbench["paired"]["bank"]), 1)
-        self.assertEqual(len(workbench["open"]["invoice"]), 1)
-        self.assertEqual(len(workbench["open"]["bank"]), 1)
-        self.assertEqual(workbench["open"]["invoice"][0]["id"], open_invoice_ids[0])
-        self.assertEqual(workbench["open"]["bank"][0]["id"], open_transaction_ids[0])
+        self.assertEqual(len(workbench["unpaired"]["invoice"]), 1)
+        self.assertEqual(len(workbench["unpaired"]["bank"]), 1)
+        self.assertEqual(workbench["unpaired"]["invoice"][0]["id"], open_invoice_ids[0])
+        self.assertEqual(workbench["unpaired"]["bank"][0]["id"], open_transaction_ids[0])
         self.assertIn("SO-A", [item["code"] for item in workbench["context_options"]["receivable_exceptions"]])
 
     def _confirm(self, batch_type: BatchType, rows: list[dict[str, str]]) -> list[str]:

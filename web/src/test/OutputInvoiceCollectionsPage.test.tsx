@@ -893,7 +893,7 @@ describe("Output invoice collections page", () => {
     const candidateCollectionRow = bodyRows.find((row) => within(row).queryByText("XSFP-2026-RED"));
     expect(candidateCollectionRow).toBeDefined();
     expect(within(candidateCollectionRow as HTMLElement).getByText("候选回款客户")).toBeInTheDocument();
-    expect(within(candidateCollectionRow as HTMLElement).getByText("候选")).toBeInTheDocument();
+    expect(within(candidateCollectionRow as HTMLElement).queryByText("候选")).not.toBeInTheDocument();
     expect(within(candidateCollectionRow as HTMLElement).getByText("待收款")).toBeInTheDocument();
     expect(within(page).queryByText("存在收入流水，但收入流水合计小于发票价税合计。")).not.toBeInTheDocument();
     expect(within(page).getByRole("button", { name: "查看发票 XSFP-2026-0001 详情" })).toBeInTheDocument();

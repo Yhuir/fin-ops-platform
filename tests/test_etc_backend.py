@@ -37,6 +37,7 @@ from fin_ops_platform.services.etc_service import (
 from fin_ops_platform.services.etc_business_batch_application_service import EtcBusinessBatchActor
 from fin_ops_platform.services.etc_document_parsers import CcbCreditCardStatementParser, SupplementEvidenceParser, TicketRootPdfTextParser
 from fin_ops_platform.services.etc_reconciliation_models import FileParseResult, SourceFileKind
+from fin_ops_platform.services.etc_reconciliation_service import EtcReconciliationTaskService
 from fin_ops_platform.services.historical_etc_repair_service import (
     HistoricalEtcRepairBatchSpec,
     HistoricalEtcRepairService,
@@ -814,6 +815,28 @@ class EtcServiceTests(unittest.TestCase):
         self.assertTrue(payload["has_pdf"])
         self.assertTrue(payload["has_xml"])
 
+    def test_preview_does_not_download_verified_object_attachments_for_existing_invoices(self) -> None:
+        class NoPreviewProbeStore(MemoryEtcStateStore):
+            def etc_invoice_file_exists(self, _stored_file_path: str) -> bool:
+                raise AssertionError("preview must not download verified object attachments")
+
+        with TemporaryDirectory() as temp_dir:
+            store = NoPreviewProbeStore(Path(temp_dir))
+            service = EtcService(state_store=store)
+            service.import_zips([UploadedEtcZipFile("initial.zip", etc_zip(["ETC001"]))])
+            invoice = service._invoices["etc_invoice_0001"]
+            invoice.xml_file_path = "minio://fin-ops-files/objects/etc_invoice/ETC001.xml"
+            invoice.pdf_file_path = "minio://fin-ops-files/objects/etc_invoice/ETC001.pdf"
+
+            preview = service.preview_import_zips(
+                [UploadedEtcZipFile("duplicate.zip", etc_zip(["ETC001"]))]
+            )
+
+        self.assertEqual(
+            preview["summary"],
+            {"imported": 0, "duplicatesSkipped": 1, "attachmentsCompleted": 0, "failed": 0},
+        )
+
     def test_preview_valid_zip_reports_imported_without_persisting_records(self) -> None:
         with TemporaryDirectory() as temp_dir:
             service = EtcService(data_dir=Path(temp_dir))
@@ -1448,6 +1471,46 @@ class EtcServiceTests(unittest.TestCase):
 
 
 class EtcApiTests(unittest.TestCase):
+    def test_etc_query_services_reload_worker_writes_from_postgres_state_store(self) -> None:
+        class SharedPostgresEtcStateStore(MemoryEtcStateStore):
+            storage_backend = "postgres"
+
+            def __init__(self, data_dir: Path) -> None:
+                super().__init__(data_dir)
+                self.reconciliation_snapshot: dict[str, object] = {}
+
+            def load_etc_reconciliation_state(self) -> dict[str, object]:
+                return dict(self.reconciliation_snapshot)
+
+            def save_etc_reconciliation_state(self, snapshot: dict[str, object]) -> None:
+                self.reconciliation_snapshot = dict(snapshot)
+
+        with TemporaryDirectory() as temp_dir:
+            store = SharedPostgresEtcStateStore(Path(temp_dir))
+            api_task_service = EtcReconciliationTaskService(state_store=store)
+            api_etc_service = EtcService(state_store=store)
+            worker_task_service = EtcReconciliationTaskService(state_store=store)
+            worker_etc_service = EtcService(state_store=store)
+
+            task = worker_task_service.create_task(title="worker imported ETC", created_by="worker")
+            batch = worker_etc_service.create_business_batch(task_id=task.task_id, title=task.title)
+            worker_etc_service.import_zips([
+                UploadedEtcZipFile(
+                    "worker.zip",
+                    zip_bytes({
+                        "xml/ETC-WORKER-001.xml": etc_xml("ETC-WORKER-001"),
+                        "pdf/ETC-WORKER-001.pdf": fake_pdf("ETC-WORKER-001"),
+                    }),
+                )
+            ])
+
+            invoices, total, _counts = api_etc_service.list_invoices()
+
+        self.assertEqual(api_task_service.get_task(task.task_id).task_id, task.task_id)
+        self.assertEqual(api_etc_service.get_business_batch(batch.business_batch_id).business_batch_id, batch.business_batch_id)
+        self.assertEqual(total, 1)
+        self.assertEqual(invoices[0].invoice_number, "ETC-WORKER-001")
+
     def _wait_for_job(self, app, job_id: str, *, timeout: float = 2.0) -> dict[str, object]:
         app._test_import_queue.process_all(raise_errors=False)
         deadline = time.monotonic() + timeout
@@ -3330,7 +3393,7 @@ class EtcApiTests(unittest.TestCase):
             workbench_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-02").body)
             open_invoice_rows = [
                 row
-                for group in workbench_payload["open"]["groups"]
+                for group in workbench_payload["unpaired"]["groups"]
                 for row in group["invoice_rows"]
             ]
             summary_rows = [row for row in open_invoice_rows if row.get("source_kind") == "etc_invoice_summary"]
@@ -3391,7 +3454,7 @@ class EtcApiTests(unittest.TestCase):
             before_workbench = json.loads(app.handle_request("GET", "/api/workbench?month=2026-02").body)
             before_rows = [
                 row
-                for group in before_workbench["open"]["groups"]
+                for group in before_workbench["unpaired"]["groups"]
                 for row in group["invoice_rows"]
             ]
 
@@ -3406,7 +3469,7 @@ class EtcApiTests(unittest.TestCase):
             after_workbench = json.loads(app.handle_request("GET", "/api/workbench?month=2026-02").body)
             after_rows = [
                 row
-                for group in after_workbench["open"]["groups"]
+                for group in after_workbench["unpaired"]["groups"]
                 for row in group["invoice_rows"]
             ]
             submitted_batches = json.loads(app.handle_request("GET", "/api/etc/business-batches?status=submitted").body)["data"]
@@ -3472,7 +3535,7 @@ class EtcApiTests(unittest.TestCase):
             before_workbench = json.loads(app.handle_request("GET", "/api/workbench?month=2026-02").body)
             before_rows = [
                 row
-                for group in before_workbench["open"]["groups"]
+                for group in before_workbench["unpaired"]["groups"]
                 for row in group["invoice_rows"]
             ]
             summary_row = next(row for row in before_rows if row.get("source_kind") == "etc_invoice_summary")
@@ -3513,7 +3576,7 @@ class EtcApiTests(unittest.TestCase):
             after_workbench = json.loads(app.handle_request("GET", "/api/workbench?month=2026-02").body)
             after_rows = [
                 row
-                for group in after_workbench["open"]["groups"]
+                for group in after_workbench["unpaired"]["groups"]
                 for row in group["invoice_rows"]
             ]
             relation_for_summary = app._workbench_pair_relation_service.get_active_relation_by_row_id(str(summary_row["id"]))
@@ -3709,7 +3772,7 @@ class EtcApiTests(unittest.TestCase):
             before_workbench = json.loads(app.handle_request("GET", "/api/workbench?month=2026-02").body)
             before_rows = [
                 row
-                for group in before_workbench["open"]["groups"]
+                for group in before_workbench["unpaired"]["groups"]
                 for row in group["invoice_rows"]
             ]
             summary_row = next(row for row in before_rows if row.get("source_kind") == "etc_invoice_summary")
@@ -3748,7 +3811,7 @@ class EtcApiTests(unittest.TestCase):
             after_workbench = json.loads(app.handle_request("GET", "/api/workbench?month=2026-02").body)
             after_rows = [
                 row
-                for group in after_workbench["open"]["groups"]
+                for group in after_workbench["unpaired"]["groups"]
                 for row in group["invoice_rows"]
             ]
             relation_for_summary = app._workbench_pair_relation_service.get_active_relation_by_row_id(str(summary_row["id"]))
@@ -5089,11 +5152,11 @@ class EtcApiTests(unittest.TestCase):
                     "bank_count": 1,
                     "invoice_count": 0,
                     "paired_count": 0,
-                    "open_count": 1,
+                    "unpaired_count": 1,
                     "exception_count": 0,
                 },
                 "paired": {"oa": [], "bank": [], "invoice": []},
-                "open": {
+                "unpaired": {
                     "oa": [
                         {
                             "id": "oa-existing-etc",

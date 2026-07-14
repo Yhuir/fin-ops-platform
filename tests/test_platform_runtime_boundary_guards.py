@@ -466,8 +466,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 "pair_relation_service": 6,
             },
             "backend/src/fin_ops_platform/services/runtime_worker_handlers.py": {
-                "WorkbenchPairRelationService": 4,
-                "pair_relation_service": 9,
+                "WorkbenchPairRelationService": 0,
+                "pair_relation_service": 0,
             },
             "backend/src/fin_ops_platform/services/turnover_ledger_write_adapters.py": {
                 "pair_relation_service": 7,
@@ -975,9 +975,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         method_names = (
             "load_workbench_read_models",
             "save_workbench_read_models",
-            "load_workbench_candidate_matches",
-            "save_workbench_candidate_matches",
-            "save_workbench_matching_dirty_scopes",
         )
         violations: list[str] = []
 
@@ -989,15 +986,11 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         for forbidden in (
             "WORKBENCH_READ_MODELS_META_COLLECTION",
             "WORKBENCH_READ_MODELS_COLLECTION",
-            "WORKBENCH_CANDIDATE_MATCHES_META_COLLECTION",
-            "WORKBENCH_CANDIDATE_MATCHES_COLLECTION",
             "WORKBENCH_MATCHING_DIRTY_SCOPES_META_COLLECTION",
             "WORKBENCH_MATCHING_DIRTY_SCOPES_COLLECTION",
             "_load_workbench_read_models_detailed_payload",
-            "_load_workbench_candidate_matches_detailed_payload",
             "_load_workbench_matching_dirty_scopes_detailed_payload",
             "_save_workbench_read_models_detailed",
-            "_save_workbench_candidate_matches_detailed",
             "_save_workbench_matching_dirty_scopes_detailed",
         ):
             if forbidden in source:
@@ -4228,15 +4221,11 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_workbench_matching_uses_relation_read_port_not_pair_service(self) -> None:
+    def test_workbench_matching_uses_formal_relation_uow_not_broad_pair_service(self) -> None:
         checks = {
             "backend/src/fin_ops_platform/services/workbench_matching_orchestrator.py": (
                 "WorkbenchMatchingOrchestrator",
-                "WorkbenchMatchingRelationReadPort",
-            ),
-            "backend/src/fin_ops_platform/services/workbench_reconciliation_engine.py": (
-                "WorkbenchReconciliationEngine",
-                "WorkbenchMatchingRelationReadPort",
+                "WorkbenchFormalRelationCommand",
             ),
         }
         violations: list[str] = []
@@ -4261,15 +4250,11 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         runtime_source = runtime_path.read_text(encoding="utf-8")
         runtime_tree = _parse(runtime_path)
         factory_source = _class_source(runtime_tree, runtime_source, "WorkbenchMatchingWorkerFactory")
-        if "WorkbenchMatchingRelationReadPort" not in runtime_source:
-            violations.append("WorkbenchMatchingWorkerFactory does not import the matching relation read port")
         if "matching_orchestrator=WorkbenchMatchingOrchestrator(" not in factory_source:
             violations.append("WorkbenchMatchingWorkerFactory no longer constructs WorkbenchMatchingOrchestrator")
         else:
             orchestrator_call = factory_source.split("matching_orchestrator=WorkbenchMatchingOrchestrator(", 1)[1]
             orchestrator_call = orchestrator_call.split("),\n            source_versions_provider", 1)[0]
-            if "relation_read_port=WorkbenchMatchingRelationReadPort(pair_relation_service)" not in orchestrator_call:
-                violations.append("WorkbenchMatchingWorkerFactory does not pass WorkbenchMatchingRelationReadPort")
             if "pair_relation_service=" in orchestrator_call:
                 violations.append("WorkbenchMatchingWorkerFactory passes stale pair_relation_service keyword to orchestrator")
 
@@ -5047,7 +5032,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append("exception restore wrapper does not delegate to service restore method")
             for forbidden in (
                 "WorkbenchExceptionCaseService.from_snapshot",
-                "WorkbenchCandidateMatchService.from_snapshot",
                 "WorkbenchOverrideService.from_snapshot",
                 "save_workbench_exception_cases(",
             ):
@@ -5058,7 +5042,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append("exception inline restore path does not delegate to rollback restore service")
             for forbidden in (
                 "WorkbenchExceptionCaseService.from_snapshot",
-                "WorkbenchCandidateMatchService.from_snapshot",
                 "WorkbenchOverrideService.from_snapshot",
                 "save_workbench_exception_cases(previous_exception_snapshot)",
             ):
@@ -5071,7 +5054,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "def restore_override_snapshots(",
             "WorkbenchExceptionCaseService.from_snapshot(previous_exception_snapshot)",
             "WorkbenchPairRelationService.from_snapshot(previous_pair_snapshot)",
-            "WorkbenchCandidateMatchService.from_snapshot(previous_candidate_snapshot)",
             "WorkbenchOverrideService.from_snapshot(previous_override_snapshot)",
             "save_workbench_exception_cases(",
         ):
@@ -5578,7 +5560,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
     def test_workbench_compute_reference_state_writes_stay_in_python_boundaries(self) -> None:
         worker_source = (SERVICES_ROOT / "workbench_matching_dirty_scope_worker.py").read_text(encoding="utf-8")
         orchestrator_source = (SERVICES_ROOT / "workbench_matching_orchestrator.py").read_text(encoding="utf-8")
-        engine_source = (SERVICES_ROOT / "workbench_reconciliation_engine.py").read_text(encoding="utf-8")
+        engine_source = (SERVICES_ROOT / "workbench_free_matching_engine.py").read_text(encoding="utf-8")
 
         violations: list[str] = []
         for marker in (
@@ -5592,24 +5574,23 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"Workbench matching dirty worker no longer owns state marker {marker}")
 
         for marker in (
-            "_candidate_match_service.upsert_candidate",
-            "mark_scope_processed",
-            "_invalidate_read_models(scope_month)",
-            "WorkbenchReconciliationEngine",
-            "_relation_read_port",
+            "_matcher.plan_relations",
+            "_relation_uow.run",
+            "confirm_formal_relation_plans",
+            "WorkbenchFormalRelationCommand",
         ):
             if marker not in orchestrator_source:
                 violations.append(f"Workbench matching orchestrator no longer owns reference marker {marker}")
 
         for marker in (
-            "expire_stale(",
-            "expire_missing_for_scope",
-            "upsert_decisions",
-            "confirm_relation(",
-            "consume_by_row_ids",
+            "plan_relations(",
+            "_build_edges(",
+            "_plans_for_component(",
+            "withdrawal_fingerprints",
+            "preserved_active_count",
         ):
             if marker not in engine_source:
-                violations.append(f"Workbench reconciliation engine no longer owns decision/relation marker {marker}")
+                violations.append(f"Workbench deterministic relation engine no longer owns safety marker {marker}")
 
         self.assertEqual(violations, [])
 
@@ -6642,7 +6623,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "append_etc_invoice_summary_rows",
             "build_invoice_inventory",
             "derive_tags",
-            "ensure_candidate_matches=True",
             "retained[\"invoice_inventory\"]",
         ):
             if marker not in assembler_source:
@@ -6713,7 +6693,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         for marker in (
             "class WorkbenchRawPayloadAssembler",
             "has_live_rows_for_month",
-            "sync_live_auto_pair_relations",
             "build_live_workbench_row_payload",
             "build_oa_workbench_row_payload",
             "sync_oa_invoice_offset_auto_pair_relations",
@@ -6727,7 +6706,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         for marker in (
             "WorkbenchRawPayloadAssembler(",
             "has_live_rows_for_month=lambda month: self._live_workbench_service.has_rows_for_month(month)",
-            "sync_live_auto_pair_relations=self._sync_live_auto_pair_relations",
             "build_live_workbench_row_payload=self._build_live_workbench_row_payload",
             "build_oa_workbench_row_payload=self._build_oa_workbench_row_payload",
             "sync_oa_invoice_offset_auto_pair_relations=self._sync_oa_invoice_offset_auto_pair_relations",
@@ -7386,7 +7364,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"Application {method_name} does not delegate to raw payload mutation helper")
         combined_method_source = "\n".join([replace_source, dedupe_source, summary_source])
         for forbidden in (
-            "for section_name in (\"paired\", \"open\")",
+            "for section_name in (\"paired\", \"unpaired\")",
             "seen_row_ids",
             "deduped_rows",
             "exception_count",
@@ -7400,7 +7378,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "def replace_row(",
             "def dedupe_rows_by_id(",
             "def refresh_summary(",
-            "for section_name in (\"paired\", \"open\")",
+            "for section_name in (\"paired\", \"unpaired\")",
             "seen_row_ids",
             "exception_count",
             "serialize_value",
@@ -7597,7 +7575,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         if "WorkbenchGroupRowPayloadHelper(" not in group_source:
             violations.append("Application _group_row_payload does not delegate to group row payload helper")
         for marker in (
-            "grouping_service=WorkbenchCandidateGroupingService()",
+            "grouping_service=WorkbenchRelationGroupingService()",
             "serialize_value=Application._serialize_value",
             ").group(payload, turnover_relations=turnover_relations)",
         ):
@@ -7678,10 +7656,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"Application {method_name} does not delegate to cache read payload helper")
         combined_method_source = "\n".join([can_use_source, persist_source, fallback_source, status_source])
         for forbidden in (
-            "workbench_candidate_snapshot_hash",
             "WORKBENCH_READ_MODEL_SCHEMA_VERSION",
-            "CANDIDATE_MATCH_SCHEMA_VERSION",
-            "WORKBENCH_MATCHING_RULES_VERSION",
             "oa_attachment_invoice_parser_version",
             "summary",
             "payload.get(\"oa_status\")",
@@ -7694,10 +7669,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "def can_persist_payload(",
             "def can_fallback_to_stale_payload(",
             "def oa_status_is_ready_for_cache(",
-            "workbench_candidate_snapshot_hash",
             "workbench_read_model_schema_version",
-            "candidate_match_schema_version",
-            "workbench_matching_rules_version",
             "oa_attachment_invoice_parser_version",
         ):
             if marker not in helper_source:
@@ -7706,11 +7678,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "WorkbenchCacheReadPayloadHelper(",
             "is_mongo_oa_adapter=self._workbench_cache_uses_strict_oa_source_gates",
             "cached_payload_needs_oa_invoice_offset_rebuild=self._cached_payload_needs_oa_invoice_offset_rebuild",
-            "workbench_candidate_snapshot_hash=self._workbench_candidate_snapshot_hash",
             "current_oa_attachment_invoice_parser_version=self._current_oa_attachment_invoice_parser_version",
             "workbench_read_model_schema_version=WORKBENCH_READ_MODEL_SCHEMA_VERSION",
-            "candidate_match_schema_version=CANDIDATE_MATCH_SCHEMA_VERSION",
-            "workbench_matching_rules_version=WORKBENCH_MATCHING_RULES_VERSION",
         ):
             if marker not in builder_source:
                 violations.append(f"Application cache helper missing explicit dependency: {marker}")
@@ -7767,7 +7736,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "source_kind",
             "\"oa_attachment_invoice\"",
             "oa_attachment_matches_oa(",
-            "section == \"open\"",
+            "section == \"unpaired\"",
         ):
             if forbidden in "\n".join([rebuild_source, attachment_source]):
                 violations.append(f"Application still owns OA invoice offset rebuild detail: {forbidden}")
@@ -7778,7 +7747,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "applicant_names_provider",
             "attachment_matches_oa",
             "offset_tag",
-            "section == \"open\"",
+            "section == \"unpaired\"",
             "cost_excluded",
             "oa_attachment_invoice",
         ):
@@ -8161,8 +8130,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "self._state_store.save_workbench_overrides({})",
             "self._state_store.save_workbench_pair_relations({})",
             "self._state_store.save_workbench_read_models({})",
-            "self._state_store.save_workbench_candidate_matches({})",
-            "self._state_store.save_workbench_matching_dirty_scopes({})",
         ):
             if snippet not in service_class_source:
                 violations.append(f"SettingsDataResetService reset persistence no longer uses explicit port {snippet}")
@@ -8170,8 +8137,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             '"workbench_overrides": {}',
             '"workbench_pair_relations": {}',
             '"workbench_read_models": {}',
-            '"workbench_candidate_matches": {}',
-            '"workbench_matching_dirty_scopes": {}',
         ):
             if forbidden in service_class_source:
                 violations.append(f"SettingsDataResetService still clears workbench state through broad save payload {forbidden}")
@@ -8255,8 +8220,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         forbidden_snippets = {
             "_build_raw_workbench_payload",
             "_bank_details_relation_tag_workbench_read_model",
-            "WorkbenchCandidateMatchService",
-            "workbench_candidate_match_service",
             "candidate_match",
             "workbench_pair_relation_service",
             "WorkbenchPairRelationService",
@@ -8709,18 +8672,11 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "backend/src/fin_ops_platform/services/workbench_exception_classifier.py",
             "backend/src/fin_ops_platform/services/workbench_exception_rules.py",
             "backend/src/fin_ops_platform/services/workbench_matching_orchestrator.py",
-            "backend/src/fin_ops_platform/services/workbench_candidate_grouping.py",
             "backend/src/fin_ops_platform/services/workbench_free_matching_engine.py",
-            "backend/src/fin_ops_platform/services/workbench_matching_rules.py",
-            "backend/src/fin_ops_platform/services/workbench_candidate_match_service.py",
-            "backend/src/fin_ops_platform/services/workbench_matching_dirty_scope_service.py",
+            "backend/src/fin_ops_platform/services/workbench_relation_grouping.py",
+            "backend/src/fin_ops_platform/services/postgres_repositories/workbench_formal_relation.py",
             "backend/src/fin_ops_platform/services/workbench_matching_dirty_scope_worker.py",
             "backend/src/fin_ops_platform/services/workbench_amount_check_service.py",
-            "backend/src/fin_ops_platform/services/workbench_special_pair_rule_service.py",
-            "backend/src/fin_ops_platform/services/workbench_special_rule_detectors.py",
-            "backend/src/fin_ops_platform/services/workbench_special_reconciliation_adapter.py",
-            "backend/src/fin_ops_platform/services/workbench_reconciliation_engine.py",
-            "backend/src/fin_ops_platform/services/workbench_reconciliation_decision_store.py",
             "backend/src/fin_ops_platform/services/workbench_reconciliation_dirty_queue.py",
         }
         violations: list[str] = []
@@ -8741,6 +8697,80 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             ):
                 violations.append(f"{rel_path} imports MongoOAAdapter")
 
+        self.assertEqual(violations, [])
+
+    def test_legacy_workbench_candidate_and_decision_modules_are_removed(self) -> None:
+        removed_modules = {
+            "workbench_candidate_grouping",
+            "workbench_candidate_match_service",
+            "workbench_matching_rules",
+            "workbench_matching_dirty_scope_service",
+            "workbench_reconciliation_decision_cleanup",
+            "workbench_reconciliation_decision_store",
+            "workbench_reconciliation_engine",
+            "workbench_reconciliation_models",
+            "workbench_special_pair_rule_service",
+            "workbench_special_reconciliation_adapter",
+            "workbench_special_rule_detectors",
+        }
+        violations: list[str] = []
+
+        for module_name in sorted(removed_modules):
+            path = SERVICES_ROOT / f"{module_name}.py"
+            if path.exists():
+                violations.append(f"{_relative(path)} still exists")
+        for path in [*_python_files(APP_ROOT), *_python_files(SERVICES_ROOT)]:
+            source = path.read_text(encoding="utf-8")
+            for module_name in removed_modules:
+                if f"services.{module_name}" in source:
+                    violations.append(f"{_relative(path)} imports removed {module_name}")
+
+        self.assertEqual(violations, [])
+
+    def test_legacy_workbench_candidate_state_is_only_sanitized_at_read_boundaries(self) -> None:
+        legacy_terms = {
+            "automatic_decision",
+            "candidate_relation_distribution",
+            "candidate_snapshot_version",
+            "workbench_candidate",
+            "workbench_reconciliation_decision",
+        }
+        sanitation_allowlist = {
+            (
+                "backend/src/fin_ops_platform/services/workbench_read_model_service.py",
+                "candidate_snapshot_version",
+            ): 2,
+            (
+                "backend/src/fin_ops_platform/services/postgres_repositories/read_models.py",
+                "workbench_reconciliation_decision",
+            ): 1,
+        }
+        observed_allowlist: dict[tuple[str, str], int] = {}
+        violations: list[str] = []
+
+        for path in _python_files(APP_ROOT, SERVICES_ROOT, TOOLS_ROOT):
+            relative_path = _relative(path)
+            source = path.read_text(encoding="utf-8")
+            for term in legacy_terms:
+                count = source.count(term)
+                if not count:
+                    continue
+                key = (relative_path, term)
+                expected_count = sanitation_allowlist.get(key)
+                if expected_count is None:
+                    violations.append(f"{relative_path} contains legacy Workbench state term {term}")
+                    continue
+                observed_allowlist[key] = count
+                if count != expected_count:
+                    violations.append(
+                        f"{relative_path} contains {count} {term} references; expected {expected_count} sanitation references"
+                    )
+
+        missing_sanitation = sorted(set(sanitation_allowlist) - set(observed_allowlist))
+        violations.extend(
+            f"{path} no longer contains the explicit {term} read-boundary sanitation"
+            for path, term in missing_sanitation
+        )
         self.assertEqual(violations, [])
 
     def test_workbench_write_facade_uses_granular_constructor_dependencies(self) -> None:

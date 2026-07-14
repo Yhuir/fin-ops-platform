@@ -4,7 +4,7 @@
 
 ## 模块目标
 
-关联台是银行流水、OA 单据、正式发票/OA 附件发票、ETC 和异常关系的统一核销工作台。它必须让用户在真实浏览器中完成候选查看、三栏选择、确认、撤回、异常处理和跨页面 relation fan-out，并且不能在 read model 非 fresh 时伪装成功。
+关联台是银行流水、OA 单据、正式发票/OA 附件发票、ETC 和异常关系的统一核销工作台。它必须让用户在真实浏览器中查看未配对行、完成三栏选择、确认、撤回、异常处理和跨页面 relation fan-out，并且不能在 read model 非 fresh 时伪装成功。
 
 ## 用户角色
 
@@ -29,11 +29,11 @@
 
 | Spec ID | 场景 | 优先级 | 验收标准 |
 | --- | --- | --- | --- |
-| `RECON-WB-E2E-001` | 从候选三栏确认 OA + 银行流水 + 发票关系 | P0 | 用户能进入 open group，选择三栏 row，打开关联预览，看到操作前/操作后三栏和金额状态，提交后等待 operation barrier，页面展示 paired group，不做本地 optimistic 假移动。 |
+| `RECON-WB-E2E-001` | 从未配对行确认 OA + 银行流水 + 发票关系 | P0 | 用户能进入 unpaired 区域，选择三栏 row，打开关联预览，看到操作前/操作后三栏和金额状态，提交后等待 operation barrier，页面展示 paired group，不做本地 optimistic 假移动。 |
 | `RECON-WB-E2E-002` | 关联台 confirm 后银行明细 relation tags 更新 | P0 | 从关联台确认后，银行明细重新读取并显示 `有oa` / `有发票`，请求次数增加，不能只依赖前端 event。 |
 | `RECON-WB-E2E-003` | 关联台 confirm 后待找发票状态更新 | P0 | 待找发票从 `已支付待开票` 变为 `已支付已开票`，显示发票号码和 OA 申请人。 |
-| `RECON-WB-E2E-004` | 关联台 withdraw preview/submit | P0 | 已配对 group 可撤回；preview 锁定 `operation_type`、`preview_id`、`submit_expected_versions`；提交后未恢复 row 独立回 open；弹窗内阻塞直到 fresh refetch。 |
-| `RECON-WB-E2E-005` | 自动候选不作为可见关系 | P0 | 未正式化 automatic decision/candidate 不应显示为同一行 linked group；没有 active relation 时撤回 preview 必须拒绝，不能 suppress 候选或当 active relation withdraw。 |
+| `RECON-WB-E2E-004` | 关联台 withdraw preview/submit | P0 | 已配对 group 可撤回；preview 锁定 `operation_type`、`preview_id`、`submit_expected_versions`；提交后 row 独立回 unpaired；弹窗内阻塞直到 fresh refetch。 |
+| `RECON-WB-E2E-005` | 无正式关系的对象保持可见 | P0 | 历史非正式 automatic metadata 不应合并对象；没有 active relation 时每个对象必须独立显示在 unpaired，撤回 preview 必须拒绝。 |
 | `RECON-WB-E2E-006` | stale/refreshing/read model failed 状态 | P0 | stale/refreshing 时页面提示状态；不能把空 rows 当真实无候选；OA sync dirty/refreshing 禁写，普通 Workbench stale 不全局禁用无关 group。 |
 | `RECON-WB-E2E-007` | 写 API 失败或 fresh refetch 失败 | P0 | 写 API 失败不移动行、不发成功 toast；写成功但 refetch 失败时停留在弹窗错误状态，提示不要重复写入。 |
 | `RECON-WB-E2E-008` | 权限 gate | P0 | `read_export_only` 不显示或禁用确认/撤回/异常写入口，并且不会发出 mutation API。 |

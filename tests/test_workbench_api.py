@@ -1,14 +1,22 @@
 import json
 import unittest
+from copy import deepcopy
 
+from fin_ops_platform.services.workbench_relation_grouping import (
+    WorkbenchRelationPreviewGroupingService,
+)
 from tests.app_test_support import build_local_state_application as build_application
 
 
 class WorkbenchApiTests(unittest.TestCase):
     def test_relation_groups_dedupes_duplicate_relation_row_ids(self) -> None:
-        app = build_application()
+        grouping = WorkbenchRelationPreviewGroupingService(
+            serialize_value=deepcopy,
+            row_type_for_row_id=lambda row_id: str(row_id).split("-", 1)[0],
+            derive_row_tags=lambda row, group, relation: [],
+        )
 
-        groups = app._relation_groups(  # pylint: disable=protected-access
+        groups = grouping.group_relations(
             [
                 {
                     "case_id": "CASE-DUPE-OA",

@@ -9,7 +9,7 @@ function requestPath(requestUrl: string) {
 }
 
 test.describe("cost statistics relation browser fan-out", () => {
-  test("excludes candidate relations from cost amounts until workbench confirm", async ({ page }) => {
+  test("excludes unpaired rows from cost amounts until workbench confirm", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
       costStatisticsRelationFanout: true,
       sessionMode: "full_access",

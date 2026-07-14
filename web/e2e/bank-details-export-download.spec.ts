@@ -19,8 +19,8 @@ test.describe("bank details export browser download", () => {
 
     await gotoAndExpectPageReady(page, "/bank-details", "bank-details-page", { diagnostics });
     const bankRowBefore = page.getByRole("row", { name: /智能工厂设备商/ });
-    await expect(bankRowBefore.getByText("候选oa")).toBeVisible();
-    await expect(bankRowBefore.getByText("候选发票")).toBeVisible();
+    await expect(bankRowBefore.getByText("无oa")).toBeVisible();
+    await expect(bankRowBefore.getByText("无发票")).toBeVisible();
 
     await confirmWorkbenchRelation(page, recordLatency);
     expect(api.count("POST /api/workbench/actions/confirm-link")).toBe(1);
@@ -103,8 +103,8 @@ test.describe("bank details export browser download", () => {
     expect(content).toContain("有oa");
     expect(content).toContain("有发票");
     expect(content).toContain("linked");
-    expect(content).not.toContain("候选oa");
-    expect(content).not.toContain("候选发票");
+    expect(content).not.toContain("无oa");
+    expect(content).not.toContain("无发票");
     expect(api.count("GET /api/bank-details/transactions/export")).toBe(1);
     await expect(page.getByText("已开始下载")).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);

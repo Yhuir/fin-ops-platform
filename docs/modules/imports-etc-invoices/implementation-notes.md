@@ -1,5 +1,27 @@
 # ETC发票导入 实施记录
 
+## 2026-07-14：confirm worker MinIO 依赖与可确认计数修复
+
+- 生产 job `job_20260714_091414_65dc66a3` 在 `0/68` 即失败，错误为 `Object storage is not configured for PostgreSQL file access.`；PostgreSQL task/business batch 均未产生半写。API preview 通过 `build_state_store` 注入了对象存储，但 `ImportRuntimeProcessorFactory` 独立构造 `PostgresStateStore` 时漏掉同一依赖，worker 无法读取 durable session 的 `minio://` archive ref。
+- 修复只在 import worker state-store 组装边界复用既有 `ObjectStorageSettings.from_env()` 与 `S3ObjectStorageRepository`；不改 session、queue、API 或存储协议，也不增加本地 fallback。
+- ETC preview 页面原来展示 `importable_count`，对 reconciliation allowlist 中已存在但仍可确认关联的记录会显示为 0；改为展示既有合同字段 `confirmable_count`，确认文案同步使用同一数字。
+- 首次发布后复用原失败 session，真实 worker 已完成 68/68（新增 64、重复 4、失败 0），但 API 查询仍返回进程启动时快照；根因是 `EtcService` 与 `EtcReconciliationTaskService` 只在构造时 hydrate。修复在 PostgreSQL 只读查询入口重载正式 snapshot，使独立 worker 写入无需重启 API 即可见；file/memory backend 行为保持不变。
+- 回归覆盖 worker 对象存储注入、跨 service 实例的 PostgreSQL 查询可见性、前端组件与 Chromium flow。发布后复用原失败 session 验证真实 PostgreSQL + MinIO worker drain，并在第二次发布后用同一 task/business batch 做只读可见性 smoke。
+
+## 2026-07-14：真实 59 ZIP 二次 504 与全局组合候选边界
+
+- 部署首轮历史附件 read 优化后，使用 `发票5、6月.zip` 中 59 个真实、唯一且完整的内层 ZIP 复测；普通 parser 在本地 614ms 内解析 99 张发票、0 失败，但生产 multipart preview 上传约 24.98MB 后仍于 62 秒返回 Nginx 504。
+- 初步把剩余延迟归因于 59 个串行 archive verified writes，并尝试最多 4 路并发。真实部署后 Nginx 仍在 61.918 秒返回 504，绕过 Nginx 的后端请求 300 秒仍不收敛；该方案已回滚，不作为最终实现。
+- 回滚版绕过 Nginx 的串行请求同样在 240 秒未完成；本地使用生产 task payload 跑完整 `preview_etc_zip_for_task` 后，CPU 栈稳定落在多发票金额组合搜索。根因是 `_select_global_requirement_matches` 未像 sequential path 一样先按车牌与日期窗口过滤候选，导致 38 个需求分别在 99 张发票上构建大量无关组合，并存在跨车牌/日期误配风险。
+- 修复由 `_requirement_match_options` 统一复用既有 `_invoice_satisfies_requirement_context`；精确金额组合改为按候选两半枚举并通过 `(张数, 金额)` 索引合并，只保留排序最优的 64 个精确组合，避免旧实现对每个候选复制并重排全部中间金额状态。不改变金额、发票张数、全局不重叠分配或 package-group 规则；并发 session store 改动撤销。新增跨车牌同金额组合与 30 候选/6 张发票回归，并使用同一真实 59 ZIP + 生产 task payload 做 task-aware 性能验证。
+- release `main-7cbc77f64-etc59match-20260714` 使用同一 59 ZIP 通过公开 Nginx/API 入口完成 PostgreSQL + MinIO preview smoke：上传约 24.98MB，17.760 秒返回 HTTP 200；59 files / 99 items 中 68 included、31 excluded、0 blocking，应用性能样本 15.573 秒、505 次 SQL、数据库累计 1.649 秒。smoke 只持久化 preview session，没有 confirm；task version 19 仍为 `ready_for_import`、正式导入数 0。
+
+## 2026-07-14：多 ZIP 预览 504 根因修复
+
+- 生产只读证据显示已有 293 张 ETC 发票且附件为 MinIO object ref；task-aware preview 在两次 inspect 的 result/audit baseline 中逐张下载并 hash 校验 XML/PDF，共放大为 2344 次历史附件 SQL + MinIO 读取。59 个新 ZIP durable save 还会在 verified write 后同步重下载全部 archive，叠加 Nginx 默认 60 秒形成 504。
+- 预览分类改用 verified MinIO/S3 object ref，不在请求热路径下载历史附件；真实导入写入仍保留 `_stored_invoice_file_exists` 检查，本地缺失附件修复语义不变。durable session 保存保留每个 ZIP 的 temporary/final 双写双读验证和 repository transaction，只删除提交成功后的冗余整批 readback。
+- 新增 service 与 session store 回归，分别锁定“预览不探测 verified 历史附件”和“保存成功后不重下载 archive”；API shape、task/version/hash/fingerprint、worker 重载和对象写入校验合同不变。
+
 ## 2026-07-12：补齐 durable session file 运行角色权限
 
 - 生产发布 0098 后，System Audit 首次读取 `app.etc_import_session_files` 暴露 `permission denied`；同一缺口也会阻断 API preview 的 replace/delete 和 worker confirm 的只读加载。

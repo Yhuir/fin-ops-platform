@@ -21,7 +21,7 @@ describe("workbench api runtime base path", () => {
       new Response(
         JSON.stringify({
           month: "all",
-          zone: "open",
+          zone: "unpaired",
           page: 1,
           page_size: 50,
           total: 0,
@@ -34,10 +34,10 @@ describe("workbench api runtime base path", () => {
     );
     const { fetchWorkbenchGroupsPage } = await import("../features/workbench/api");
 
-    await fetchWorkbenchGroupsPage("all", "open", 1, 50, undefined, { detailLevel: "summary" });
+    await fetchWorkbenchGroupsPage("all", "unpaired", 1, 50, undefined, { detailLevel: "summary" });
 
     const [input, init] = fetchSpy.mock.calls[0];
-    expect(String(input)).toBe("/fin-ops-api/api/workbench/groups?month=all&zone=open&page=1&page_size=50&detail_level=summary");
+    expect(String(input)).toBe("/fin-ops-api/api/workbench/groups?month=all&zone=unpaired&page=1&page_size=50&detail_level=summary");
     expect(init?.credentials).toBe("include");
     expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer prod-token");
   });

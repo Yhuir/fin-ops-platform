@@ -661,7 +661,7 @@ describe("ETC ticket management page", () => {
     expect(await within(page).findByRole("list", { name: "ETC批次列表" })).toBeInTheDocument();
     expect(within(page).queryByRole("region", { name: "ETC对账任务列表" })).not.toBeInTheDocument();
     expect(within(page).queryByText("对账任务")).not.toBeInTheDocument();
-    expect(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-01")).toHaveTextContent("3月批次");
+    expect(await within(page).findByTestId("etc-batch-row-etc-batch-unsubmitted-01")).toHaveTextContent("3月批次");
   });
 
   test("shows business batch load errors without rendering a real empty batch state", async () => {
@@ -1574,6 +1574,11 @@ describe("ETC ticket management page", () => {
     const user = userEvent.setup();
     const openMock = vi.fn();
     vi.stubGlobal("open", openMock);
+    const createObjectUrl = vi.fn(() => "blob:etc-invoice-pdf");
+    const revokeObjectUrl = vi.fn();
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectUrl });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revokeObjectUrl });
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
     installMockApiFetch();
     const importedTask = {
       taskId: "etc-recon-imported-business-linked-001",
@@ -1650,6 +1655,10 @@ describe("ETC ticket management page", () => {
       invoiceItems: [],
     } as never);
     const manualOaStatus = vi.spyOn(etcApi, "manualEtcBusinessBatchOaStatus").mockResolvedValue(submittedBatch as never);
+    const downloadInvoicePdf = vi.spyOn(etcApi, "downloadEtcBusinessBatchInvoicePdf").mockResolvedValue({
+      blob: new Blob(["merged-pdf"], { type: "application/pdf" }),
+      fileName: "ETC发票_5月批次_37张.pdf",
+    });
 
     renderAppAt("/etc-tickets");
 
@@ -1663,6 +1672,11 @@ describe("ETC ticket management page", () => {
       "_blank",
       "noopener,noreferrer",
     );
+    await user.click(within(oaStatusPanel).getByRole("button", { name: "下载发票PDF" }));
+    await waitFor(() => expect(downloadInvoicePdf).toHaveBeenCalledWith("etc-business-linked-001"));
+    expect(createObjectUrl).toHaveBeenCalledWith(expect.any(Blob));
+    expect(anchorClick).toHaveBeenCalledTimes(1);
+    expect(revokeObjectUrl).toHaveBeenCalledWith("blob:etc-invoice-pdf");
     expect(within(oaStatusPanel).queryByRole("button", { name: "刷新检测" })).not.toBeInTheDocument();
     expect(within(oaStatusPanel).queryByRole("button", { name: "撤销草稿" })).not.toBeInTheDocument();
     expect(within(oaStatusPanel).queryByRole("button", { name: "异常处理" })).not.toBeInTheDocument();

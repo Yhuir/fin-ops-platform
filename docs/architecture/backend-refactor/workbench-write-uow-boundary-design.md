@@ -1,5 +1,7 @@
 # Workbench Write Unit of Work Boundary Design
 
+> 2026-07-14：本文是历史 UoW 演进设计。candidate snapshot/decision store 相关事务成员与消费步骤已被 Phase 21 删除，不得恢复；当前正式关系 UoW、repository、outbox 和 read facade 合同以 `docs/modules/workbench-relations/boundary-io.md` 为准。
+
 对应 prompt：`PF-P018 - Workbench Write Unit of Work Boundary Design`
 
 状态：`verified`

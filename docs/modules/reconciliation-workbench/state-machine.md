@@ -1,148 +1,67 @@
 # 关联台状态机
 
-> 修改 `关联台` 相关业务状态、UI 状态、read model 状态或 worker 状态前必须读取本文件。关联台使用 active generation 原子发布模型；不要机械套成普通 read model gateway。
+日期：2026-07-14
 
-## 业务状态
+## 页面关系状态
 
-| 状态域 | 状态 | 事实源 | 允许流转 |
-| --- | --- | --- | --- |
-| 待处理 group（历史代码名 Candidate group） | `open` | active workbench generation、自动匹配规则、exception/open relation projection | 关系未完整闭环或 active relation 未满足 paired 展示条件，等待发票/OA/银行/人工确认。可通过 confirm/exception/no-OA/turnover 等动作流转；不是第三种业务关系状态。 |
-| 待处理 group（历史代码名 Candidate group） | `paired` | active pair relation、closed exception relation、active generation paired zone | confirm 成功、closed exception、流水规则批量处理/免 OA/往来款等 relation 满足闭环要求后进入。 |
-| 待处理 group（历史代码名 Candidate group） | `ignored` | exception/ignore case fact | 用户忽略发票或异常 case 后进入；unignore 后回到 open。 |
-| Pair relation | `active` | `app.workbench_pair_relations` / repository | confirm、特殊规则、流水规则批量处理、免 OA、turnover、batch accounting 等写入。 |
-| Pair relation | `withdrawn` / cancelled | relation audit/history、撤回动作 | cancel/withdraw 后进入；必须恢复或重建受影响 open group。 |
-| Exception case | `open` | exception case service/projection | preview/apply 等动作创建，影响 open zone row display。 |
-| Exception case | `closed` | exception relation/projection | 三方闭合、OA 免单等处理完成后进入 paired/processed 展示。 |
-| ETC summary | `open etc_invoice_summary` | ETC 业务批次 + active generation projection | 已提交 OA 的 ETC 批次折叠为一条发票汇总行，等待普通三项配对。 |
-| Matching decision | `fresh` / `dirty` / `failed` | workbench matching dirty queue、decision store | lifecycle mark dirty 后由 worker 重建；满足正式化条件的 paired decision 通过 relation command 写入 active relation，失败进入 retry/failed。 |
+```text
+canonical fact + active formal relation  -> paired
+canonical fact - active formal relation  -> unpaired singleton
+```
 
-关键规则：
+页面关系状态只有 `paired` 和 `unpaired`。`open`、`proposed`、candidate、decision 不是页面关系状态，也不是隐藏状态。
 
-- `oa_bank_exact_sum`：1 条 OA 与唯一一组 2 到 6 条同方向银行流水，且每条银行流水均有 OA-bank 业务证据，金额按分精度唯一闭合时，生成 paired decision；若金额核对 matched、无 active 冲突且同 row-set 未被撤回，后台通过 relation command 写成正式 active relation。缺少发票时仍属于两栏正式关系，不进入三栏 paired 展示。
-- 自动匹配文本归一化是确定性规则，不使用自然语言处理：NFKC、大小写归一、去空白和常见标点后比较。纯空白字段必须视为缺失并继续读取同义后备字段，不能因为 `" "` truthy 而挡住有效的 `counterparty`、`counterparty_name`、`project`、`project_name`、`reason` 或 `summary`。
-- `oa_bank_invoice_exact_amount` 三方闭合允许从任意强证据边进入：OA+银行强证据、OA+发票强证据或银行+发票强证据都可以作为 anchor；当银行流水与发票先形成唯一强证据且金额闭合时，只能补齐唯一一个同时具备 OA-银行或 OA-发票业务证据的 OA。仅金额相同、缺少业务文本/名称/税号/source evidence 的 OA 不能被自动提升为三方 paired。
-- `oa_bank_invoice_exact_sum` 三方闭合覆盖任意非空三栏 exact-sum 组合：1 条或多条 OA、1 条或多条银行流水、1 张或多张正式发票均可参与，但每栏组合大小有固定上限。生成 paired decision 的前置条件是三栏同方向、总额严格相等、处在五个月窗口内、预约付款日期兼容、证据图在 OA/银行/发票 row 之间连通且每个 row 至少有一条确定性证据边。现有 `oa_bank_invoice_exact_amount`、OA 附件发票、单笔精确和多 OA+bank pair 等具体规则优先；通用 exact-sum 只补缺口。仅金额相等、证据断裂、候选组合过多或多个候选竞争时必须保持 open/conflict。
-- OA 附件发票 source-linked 是父 OA 归属证据，不是最终分区状态。候选 case 中 OA+银行先出现、OA 附件发票随后通过 `derived_from_oa_id` 回挂父 OA 时，回挂后的 group 必须重新判定三栏闭合：1 条 OA、1 条银行流水和 1 张或多张 OA 附件发票含税合计闭合时进入 paired；缺少银行流水、金额不闭合、存在多个可选银行流水或附件来源不明确时保持 source-linked open。
-- OA 自带附件发票一旦能通过 canonical row id 或 source alias 证明父 OA，必须始终与父 OA 保持同一 active relation。用户撤回完整 OA+银行+附件发票关系时，只能撤回用户新增的银行/其他关系，不能把 OA 与自带附件发票拆成不同 open 行；用户只选择 OA+自带附件发票撤回时，preview 必须提示“无法撤回”并禁用提交。
-- `oa_bank_exact_amount` 预约付款日期消歧：当 OA 文本明确包含“预约 X 月 X 日转款/付款/支付/打款”时，该日期是 OA-bank 候选的强消歧证据；只有银行流水真实交易日期与预约日期一致的候选可继续参与唯一性判断。预约日期不替代金额、方向和业务文本证据；没有明确预约付款日期时，重复同金额候选仍保持 conflict/open，不随机选择。
-- 单笔 `oa_bank_exact_amount` 优先于多流水合计；存在多个等额银行流水组合、任一流水缺少证据、或已有更高优先级候选时，不自动选择。
-- 发票方向归一化是自动匹配前置契约：`input`、`进项*` 和 `source_kind=oa_attachment_invoice` 只进入支出侧匹配，`output`、`销项*` 只进入收入侧匹配；未知发票类型 fail closed，不得默认当作支出侧发票参与三方候选或金额核对。
-- 已有 active relation 的 ETC summary 不得继续出现在 open 区；paired 区仍可展示展开明细。
-- active relation 的 `row_ids` 是集合语义：同一 relation 内重复 row id 必须在写入/normalize/repair/query grouping 层去重；同一 row id 不能跨不同 active case 复用。重复 row id 的真实结果是列表详情重复渲染同一个 OA/银行/发票，不代表存在两条业务事实。
-- 已配对多 OA 大组展示时，确定 source OA 的发票或流水必须与对应 OA 同排。Workbench SQL active generation 必须先在后端生成 `special_metadata.row_alignment`，并把确定归属投影为行级 `source_oa_id` / `source_oa_row_id`；OA 附件发票来源允许是 `oa-exp-*:item:*` 明细项 ID，分段前必须先归一到父 OA row id。无 source OA 的行只允许在同一个已返回 group 内按唯一精确金额或唯一 2 到 6 条金额合计闭合做展示 fallback；金额不唯一、无法唯一闭合或只能依赖顺序/位置的行保持 group-level 展示，并由审计工具暴露缺失或歧义证据。
-- 关联台确认/撤回是跨页面事实，必须产生 affected scopes/months、审计和下游 refresh 信号。
-- 进行中 OA 在 OA 待付款核对页面关联的支出流水会写入 Workbench active relation，并在关联台银行行展示“已关联进行中OA”chip。由于进行中 OA 尚不属于普通 completed OA 关联台主流程，这类流水仍可能出现在 open/未配对上下文，但不得被当作未占用流水重复确认到其他 active case。
-- 普通 `relation_mode=manual_confirmed` 两栏 relation 是 Workbench active pair relation 事实源，允许 OA+银行、OA+发票、银行+发票任意两栏先确认或由 free paired decision 自动正式化并占用 row。含银行流水的 relation 必须按 Bank Transaction Paired Policy metadata 判定 paired/open；不含银行流水的普通两栏 relation 仍保留 canonical `case:<case_id>` open group，等待补齐三栏或显式业务例外。若 matching engine 产出唯一三栏 `paired` decision，且该 decision 正好补齐一个普通两栏 active relation 的剩余栏，后台可以通过 relation command service 原子替换原 case 为三栏 relation，并把 decision 标记为 `consumed`。
-- 自动 decision 正式化为 active `manual_confirmed` relation 后可以继续使用原 `decision:*` case id；当前状态由 canonical relation mode 和 active generation group type 决定，不能从 ID 前缀反推。未正式化组仍可按 `automatic_decision` / `automatic_match` 或缺少正式关系状态被隐藏；正式化两栏组按普通 active relation 留在 open，补齐三栏或满足显式 paired policy 后再进入 paired。
-- 任何含银行流水的 group 必须先按 Bank Transaction Paired Policy 判定是否可进入 paired：银行流水 row 的 `special_metadata.requires_oa` / `paired_requires_oa` 为 true 时必须存在 OA row，`special_metadata.requires_invoice` / `paired_requires_invoice` 为 true 时必须存在发票 row；两者都为 false 时银行-only 或部分栏位 relation 可 paired。缺 metadata 或单项字段缺失时默认等价于需要 OA 和发票，fail closed 到 open。已配对例外不能再绕过这个门。
-- `relation_mode=bank_flow_rule_batch` 只是流水规则批量处理的关系类型和展示类型，不再单独决定 paired/open；它必须满足 Bank Transaction Paired Policy。银行流水数大于 3 条时默认折叠展示，原始 rows 必须可展开。
-- 外部往来 `relation_mode=turnover_manual_closure` 是 Workbench active pair relation 事实源；同一个 active case 下两条及以上银行流水形成的外部往来闭环必须保留 canonical `case:<case_id>` ownership 和“收支闭环”证据。分区仍只读取物化 relation metadata，不回读当前标签设置；旧 `manual_confirmed` 的 `turnover:*` case 必须先由规则保存同步链路升级为 `turnover_manual_closure`。
+## 自动正式化
 
-禁止流转：
+```text
+durable dirty scope
+  -> load canonical facts + active relations + withdrawal fingerprints
+  -> pure deterministic plan
+  -> ambiguous / unsafe / resource limited: no write, facts remain unpaired
+  -> safe unique plan: one relation UoW
+  -> active formal relation + history + outbox
+  -> paired after fresh generation publish
+```
 
-- 禁止前端本地合并底层 OA/银行/发票事实来伪造 paired/open。
-- 禁止 read model 非 fresh 时把空 open rows 当成真实无候选。
-- 禁止 ETC 批次人工确认后直接进入 paired；必须仍经过普通 OA/银行/发票关系确认。
-- 禁止 failed generation、building generation 或 stale Redis payload 被展示为 fresh。
-- 禁止 groups list、group detail 或 all-scope owner 仲裁仅凭 `case:decision:*` 历史来源前缀隐藏已经正式化的 active relation；也禁止放开真正未正式化 automatic decision 使其成为可操作 group。
-- 禁止 active relation payload 保留重复 row id，或以不同 active case 复用同一 row id 来表达多付款/多发票场景；这类场景必须合并到同一 relation 并通过 summaries/+N 展开。
-- 禁止 all-scope open 区把已被 `app.workbench_pair_relations.status='active'` 占用的 row 发布到非 canonical owner（例如 `scope:*:temp:*`、standalone、candidate 残留）。active relation 的合法 open/display owner 必须是 `case:<case_id>`；非 canonical owner 必须在 publish/consistency 阶段被抑制或标为 inconsistent，不能进入 fresh。若 all-scope 中同一个 `case:<case_id>` 已经存在可见 paired group，则该 paired group 的 row owner 优先级高于 same-case canonical-open 例外，open candidate 残留必须被删除。
+匹配过程中没有持久候选状态。安全计划在事务提交前也不能成为页面事实。
 
-## UI 状态
+## 正式关系生命周期
 
-| UI 状态 | 来源 | 语义 |
+| 状态 | 含义 | 页面效果 |
 | --- | --- | --- |
-| loading | 初次请求 `/api/workbench*`、分页/详情加载 | 显示加载，不保留旧页面 snapshot 作为事实。 |
-| refreshing | `read_model_status=refreshing`、OA sync refreshing、dirty scope processing | 可展示旧 active generation 和刷新提示；只要 paired/open page 不是 fresh，就不能把 zero summary/empty rows 展示成真实空态。OA sync refreshing 需要阻断写入，Workbench active generation 后台刷新不全局禁用无关 group。 |
-| stale | `read_model_status=stale`、failed/dirty scope、source mismatch | 页面必须提示陈旧；不能把空 rows 解释成真实业务结论。只有 paired/open page 都是 fresh 时，zero summary 才能显示“当前没有可展示记录”。Workbench active generation stale 不等同于 OA dirty，不应把页面所有写操作全局禁用。 |
-| error | API/action/read model unavailable 或 failed | 展示业务错误；不暴露底层 SQL 细节。 |
-| empty | fresh active generation 中目标 zone/group 为空 | 只有 fresh 后才能认为 open/paired 为空。 |
-| operation pending | 关联预览弹窗或 `GlobalOperationOverlayProvider` 包裹中的写操作 | 确认/撤回 preview 提交后留在预览弹窗内阻塞：禁用关闭、取消、重复提交和备注编辑；写 API 成功后等待受影响月份 `workbench_relation` 操作级 barrier fresh。响应带 `operation_projection` 时，前端应用该写后投影并关闭预览，当前 Workbench active generation 只后台刷新；响应缺少有效 projection 时才重新读取当前 Workbench fresh payload 后关闭预览。写 API 临时失败且未 committed 时保留同一 preview 并允许重试；409/stale preview/version conflict 不能复用同一 `preview_id`/`expected_versions`，只允许关闭后重新预览。异常 apply 也留在异常弹窗内 busy：禁用关闭、取消、重复提交和字段编辑，写入成功后等待返回的 freshness targets 与当前 Workbench fresh refetch，成功后展示 processed exception；写后同步失败时停留在 committed error，不引导重复提交。预览路径不使用本地 optimistic 重排；刷新失败时停留在弹窗错误状态。cancel exception、ignore/unignore 等非预览动作通过 operation barrier + Workbench fresh refetch 后释放，并同步刷新 ignored auxiliary data。带后端 operation projection 的非预览动作可只等目标 operation barrier 后应用 projection；未带 projection 的动作仍需等待目标 read model/scope fresh 或重新读取 Workbench active generation 后释放。 |
-| permission disabled/hidden | session 权限、App Health write safety gate、OA sync write gate | 无写权限、`overall.write_safety.blocks_mutations=true` 或 OA sync dirty/refreshing 时禁用确认/撤回；普通 read model blocked/red 只提示读侧故障并交给具体写 API precondition，不全局禁用无关 group。 |
+| `active` | 当前唯一有效正式关系，成员被该 case 独占 | 关系全部成员进入同一 paired group |
+| `cancelled` | 被上层业务取消或替换 | 不再拥有成员，成员按当前事实重新分区 |
+| `withdrawn` | 用户/业务 owner 撤回 | 不再拥有成员；精确 typed member fingerprint 阻止自动重建 |
+| `superseded` | 被新正式关系显式替代 | 旧关系仅保留审计，新 active relation 决定分组 |
 
-前端 domain event：
+人工、历史、系统自动创建不是状态。它们只记录在 actor、rule/evidence、source metadata 和 history 中。
 
-- `workbenchRelationUpdated` 由关联台确认/撤回等动作发出，提示当前浏览器页面刷新。
-- 关联台订阅 `turnoverRelationUpdated`、`workbenchRelationUpdated`、`bankTransactionCategoryUpdated` 后重新加载或刷新局部状态。
-- 事件只做刷新提示，不证明后端 relation/read model 已 fresh。
+## 人工确认与撤回
 
-## Read Model / Worker 状态
+```text
+unpaired singleton selection
+  -> preview locks canonical row set + expected versions
+  -> command/UoW creates active relation
+  -> operation barrier fresh
+  -> paired group
 
-| 状态 | 判定 | 后续动作 |
-| --- | --- | --- |
-| `fresh` | active generation source/schema/version 一致，且没有 active dirty scope | 页面可展示和 Redis 可缓存。 |
-| `refreshing` | dirty scope pending/processing，或 refresh handler 正在重建 | 页面展示刷新状态，worker 继续处理；同 scope active repair 优先于旧 generation consistency failure 的当前错误展示。 |
-| `stale` | active generation 落后、failed generation newer、dirty scope failed、source mismatch | 入队/重试 refresh；不能缓存 stale payload。 |
-| `failed` | generation consistency failure 或 refresh handler failed | App Health/refresh status 暴露失败，运维修复后重跑 worker。 |
-| `unavailable` | SQL/read model/runtime dependency 不可用 | route 返回可恢复错误或 unavailable 状态。 |
+paired group
+  -> withdraw preview locks active case + expected versions
+  -> command/UoW withdraws/cancels relation
+  -> operation barrier fresh
+  -> each no-longer-owned fact becomes an unpaired singleton
+```
 
-Refresh 触发来源：
+旧 row `case_id` 不能让撤回后的 facts 继续同组。没有 active relation 的行不能执行撤回。
 
-- 导入确认、OA 同步、发票/银行/ETC 变化和设置变化。
-- 关联台确认/撤回、exception apply/cancel、ignore/unignore。
-- 下游模块如流水规则批量处理、no-OA、turnover、batch accounting 通过 relation/dirty outbox 影响关联台。
-- worker `workbench.read_model.refresh` 发布 active generation；matching dirty worker 重建候选。
-- `workbench:all` aggregate-only refresh 如果携带 `parent_scope_keys`，必须等这些 parent month shard 的 `workbench` scope 真实 fresh 后再聚合；parent 仍 pending/processing/failed/stale 时返回 `workbench_read_model_not_fresh` 并由 runtime worker defer，不能把暂态 parent/member mismatch 写成 failed all generation。若 all-scope 聚合前发现 parent active generation 自身存在 metadata/actual count mismatch、重复 owner 或 active relation open membership 等 consistency failure，也必须返回 `workbench_read_model_not_fresh: parent_generation_inconsistent parent_scope_keys=...`，由 runtime worker 重刷对应 parent month scope 后再重试 aggregate-only all；不得发布新的 failed all generation。
-- `/api/workbench/refresh-status` 和 App Health 的 current-effective 状态以同一 scope 合并后的当前事实为准：同一 scope 旧 `failed` 或旧 generation consistency failure 已被新的 `pending`/`processing` dirty scope 或 building generation 覆盖时展示 `refreshing/rebuilding`，旧 `last_error` 只作为历史诊断，不再弹出当前失败横幅，也不能把 `workbench_read_model` dependency 提升为全局 blocked。没有 active repair 的 generation consistency failure 仍是 `failed`。
-- `read_model.workbench_reconciliation_decisions` 的 upsert、stale expire 和 missing expire 必须在同一事务内同时入队 `workbench_relation` 与主 `workbench` month scope refresh；只刷新 relation 会导致 downstream relation fresh 但 Workbench active generation 继续发布旧自动候选/旧分组。
-- Workbench SQL active generation 的 `source_versions` 必须包含 `workbench_matching_rules_version`。匹配规则版本变化后，旧 generation 必须被 freshness 判为 stale 并入队刷新，不能继续被 API 当作 fresh。
-- `workbench-matching` worker 每轮 claim 前会把 completed 但 matching source versions 落后的 scope run 原子转回 dirty。这个自愈路径是规则版本发布后的主恢复机制；`startup_stale_scan` 只是 opt-in 补扫，不是常驻一致性边界。
-- Workbench `all` active generation 必须从所有 month shard source versions 聚合 `workbench_matching_rules_version`；缺失或多版本混杂时 all scope 不发布该版本证明，后续 freshness/审计必须按 source mismatch 处理。
-- Workbench `all` 聚合执行 open group owner 去重时，只能移除被更强 open group 明确拥有的 row；如果自动决策 group 被剥离 OA 后仍剩余未被任何 group 认领的银行流水或发票，剩余事实行必须保留。只有 paired shard 或 canonical active relation claim 抢占 row 时，partial automatic decision group 才能被整体清空，避免已配对流水回流到 open 区。同一个 case 同时存在 visible paired shard 与 open shard 时，visible paired shard 是 strict owner；same-case canonical relation 例外只适用于没有可见 paired group、但仍需以 `case:<case_id>` open 展示 partial relation 的场景。
-- `startup_stale_scan` 默认关闭；启用时只标记 stale matching dirty scopes；它不直接 invalidating workbench read model。
-- PostgreSQL formal read path 必须恢复 `job.workbench_matching_dirty_scopes.status='completed'` 的 scope run，供 `WorkbenchCandidateMatchService.is_scope_fresh(...)` 判断 freshness；否则 opt-in 启动补扫会因为缺少 scope run 证明而把已完成月份重新标 dirty。
+## Read model 状态
 
-失败恢复：
+| 状态 | 页面行为 |
+| --- | --- |
+| `fresh` | 可展示，满足权限和 write-safety 时可写 |
+| `refreshing` | 展示刷新诊断，不把旧结果当新事实 |
+| `stale` | 明确陈旧；禁止依赖该版本提交关系写入 |
+| `failed` | 展示错误和重试入口，不显示 false-empty |
+| `missing` | 触发受控 enqueue；不得回退旧 candidate/snapshot 链路 |
 
-1. 查 `/api/workbench/refresh-status`、App Health、dirty scopes、outbox 和 worker heartbeat。
-2. 如果是 matching dirty scope，重试 `workbench-matching` worker；不要回退 legacy dirty scope。
-3. 如果是 active generation inconsistency，修复 generation 或重建 scope；不得手工把 failed 改 fresh。`workbench:all` 发现 parent month generation inconsistent 时应自动重刷 parent month scope 并 defer all aggregate；只有 parent scope 自身反复失败才升级为运维故障。
-4. 如果是页面交互问题，先确认写 API response 的 affected months、operation freshness targets、operation projection、`/api/workbench*` 的 `read_model_status` 和 active generation freshness，再看 domain event/selection 状态。确认/撤回/拆分候选预览必须等操作级 `workbench_relation` barrier；响应带有效 operation projection 时直接应用投影并后台刷新 Workbench，响应缺 projection 时才等待当前 Workbench fresh refetch 后关闭。它不应等待 `workbench:all` 或下游跨页面 read model 才释放。这些下游失败或 pending 仍是后台一致性问题，必须单独修复。
-
-## 变更记录
-
-| 日期 | 变更 | 影响 | 验证 |
-| --- | --- | --- | --- |
-| 2026-07-05 | Workbench 用户写操作 high/urgent 月分片发布后立即投递 `workbench:all` aggregate；普通/低优先级后台 refresh 保留 3 秒合并窗口；前端关联台 operation barrier 轮询间隔降为 150ms | `WorkbenchReadModelRefreshService` hot aggregate scheduling、`ReconciliationWorkbenchPage` operation barrier polling | `tests/test_workbench_sql_runtime.py`、`web/src/test/WorkbenchSelection.test.tsx` |
-| 2026-07-01 | all-scope aggregate 区分 visible paired strict claim 与 canonical relation extra claim；同一 case 已有 paired group 时删除 open candidate 残留，避免 `duplicate_row_membership` consistency failure | `WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION`、all-scope active generation owner 去重、active generation consistency | `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests.test_repository_all_scope_visible_paired_group_wins_over_same_case_open_candidate`、`tests/test_workbench_sql_runtime.py` |
-| 2026-07-01 | 跨月 active relation 月度投影改为按 `row_ids && 当前月行集合` 读取，不再用 relation `month_scope` 限制成员投影；同步 bump Workbench SQL projection schema version，避免旧 generation 继续被视为 fresh | `WorkbenchSqlProjectionBuilder._active_pair_relations_for_month`、`WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION`、active generation consistency | `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_sql_projection_reads_cross_month_active_relations_by_row_overlap`、`tests/test_workbench_sql_runtime.py` |
-| 2026-06-30 | 外部往来闭环 paired/open 判定改为 relation metadata 驱动：规则保存会把旧 `turnover:* manual_confirmed` relation 升级为 `turnover_manual_closure` 并写入 `requires_oa/requires_invoice`；Workbench 仅在显式 requirement 满足时进 paired，metadata 缺失仍 fail closed | `WorkbenchCandidateGroupingService`、`NoOaBankBatchApplicationService` 规则保存同步、`WorkbenchRelationCommandService.update_relation_metadata_for_case_id`、外部往来闭环 relation metadata 合同 | `tests/test_workbench_turnover_grouping.py::WorkbenchTurnoverGroupingTests::test_two_pane_turnover_manual_closure_with_no_invoice_requirement_is_paired`、`tests/test_no_oa_bank_batch_tag_selection_api.py::NoOaBankBatchTagSelectionApiTests::test_tag_rule_update_upgrades_legacy_turnover_relation_from_persistent_repository`、`tests/test_workbench_relation_command_service.py::WorkbenchRelationCommandServiceTests::test_update_relation_metadata_for_case_id_can_upgrade_relation_mode` |
-| 2026-06-23 | Amount-check 输入优先级合同守卫：显式 `reconciliation_amount` 必须优先于旧 `detail_fields.明细金额合计` fallback；fallback 只作旧 read model 兼容 | `WorkbenchAmountCheckService` 输入合同；不改变业务/UI/read model/worker 状态定义 | `tests/test_workbench_amount_check_service.py::WorkbenchAmountCheckServiceTests::test_explicit_reconciliation_amount_wins_over_legacy_detail_mismatch_fields` |
-| 2026-06-23 | 修复 OA 附件发票 source-linked 回挂后不再提升 paired 的分区架构问题：父 OA 回挂完成后重新纳入唯一候选银行流水，并重新执行 auto-close promotion；同时 bump Workbench SQL projection/all-scope aggregate builder version，使旧 active generation 被 freshness 判 stale 后重建 | `WorkbenchCandidateGroupingService`、`WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION`、`WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION`、关联台 open/paired 分区、OA 附件发票三栏闭合展示 | `tests/test_workbench_candidate_grouping.py::WorkbenchCandidateGroupingTests::test_candidate_case_oa_attachment_invoices_promote_with_matching_bank`、`tests/test_workbench_candidate_grouping.py`、`tests/test_workbench_sql_runtime.py` |
-| 2026-06-23 | 三栏 exact-sum 自动配对矩阵补齐：`oa_bank_invoice_exact_sum` 覆盖任意非空 OA/银行/发票组合，包括多 OA 合计到单流水单发票、单 OA 单流水多发票和多 OA/多流水/多发票；matching rules version bump 到 `2026-06-23-three-way-exact-sum-completion-v3` | `WorkbenchFreeMatchingEngine`、`workbench_matching_rules_version`、matching dirty scope 自愈、关联台三栏自动 decision、普通两栏 active relation 自动补齐升级 | `tests/test_workbench_free_matching_engine.py::WorkbenchFreeMatchingEngineTests::test_multiple_oa_sum_to_single_bank_and_single_invoice_is_paired`、`test_single_oa_single_bank_multi_invoice_exact_sum_is_paired_without_direct_oa_bank_text`、`test_multi_oa_multi_bank_multi_invoice_exact_sum_is_paired_when_evidence_connected`、`test_three_pane_exact_sum_does_not_promote_amount_only_oa_group`、`tests/test_workbench_reconciliation_engine.py::WorkbenchReconciliationEngineTests::test_active_multi_oa_single_bank_relation_can_extend_to_matching_invoice` |
-| 2026-06-23 | 三方 free matching 补齐银行流水+发票强证据 anchor，并修复纯空白字段挡住同义后备字段的问题；matching rules version bump 到 `2026-06-23-three-way-completion-v2`，使 completed matching scope 在 worker claim 前自动重投 dirty | `WorkbenchFreeMatchingEngine`、`workbench_matching_rules_version`、matching dirty scope 自愈、关联台三栏自动 decision | `tests/test_workbench_free_matching_engine.py::WorkbenchFreeMatchingEngineTests::test_counterparty_whitespace_uses_fallback_field_for_three_way_match`、`test_bank_invoice_anchor_and_oa_invoice_evidence_upgrade_to_three_way`、`test_bank_invoice_anchor_does_not_promote_amount_only_oa`、`tests/test_workbench_matching_rules.py`、`tests/test_workbench_reconciliation_engine.py`、`tests/test_workbench_matching_orchestrator.py`、`tests/test_workbench_matching_dirty_scope_worker.py` |
-| 2026-06-23 | 普通 `manual_confirmed` 两栏 active relation 支持由唯一三栏自动 decision 补齐升级：OA+银行、OA+发票、银行+发票任意两栏占用 row 时，matching engine 允许这些 row 参与三栏 free matching；命中后走 `WorkbenchRelationCommandService.confirm_relation(..., replace_existing=True)` 原子替换原 case，并 consume decision | `WorkbenchReconciliationEngine`、`WorkbenchMatchingOrchestrator`、runtime worker production wiring、关联台 open/paired 分区 | `tests/test_workbench_reconciliation_engine.py::WorkbenchReconciliationEngineTests::test_active_oa_bank_relation_can_extend_to_matching_invoice`、`test_active_oa_invoice_relation_can_extend_to_matching_bank`、`test_active_bank_invoice_relation_can_extend_to_matching_oa`、`test_special_two_pane_relation_is_not_auto_completed_by_free_decision`、`tests/test_workbench_matching_orchestrator.py`、`tests/test_workbench_matching_dirty_scope_worker.py` |
-| 2026-06-23 | 多 OA active relation 增加后端 row alignment source evidence：SQL projection 用确定性金额/唯一合计和附件来源生成 `row_alignment`，并在 bank/invoice row 上投影 `source_oa_id`；审计工具阻断多 OA bank row 缺 source OA 的旧 generation | `WorkbenchRelationAlignmentService`、Workbench SQL active generation schema、`audit_workbench_relation_display`、前端 API mapper/三栏分段 | `tests/test_workbench_relation_alignment_service.py`、`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_sql_projection_emits_source_oa_for_deterministic_multi_oa_relation_alignment`、`tests/test_audit_workbench_relation_display_tool.py::AuditWorkbenchRelationDisplayToolTests::test_reports_multi_oa_relation_bank_row_missing_source_alignment`、`web/src/test/WorkbenchApi.test.ts`、`web/src/test/groupDisplayModel.test.ts`、`web/src/test/CandidateGroupGrid.test.tsx` |
-| 2026-06-23 | 发票方向归一化覆盖英文 `input/output` 与中文 `进项/销项`，未知类型 fail closed；避免英文 `output` 销项发票被误判为支出侧发票后制造 `multiple_three_way_candidates` 伪冲突 | `workbench_invoice_direction`、`WorkbenchFreeMatchingEngine`、legacy `WorkbenchMatchingRules`、special matching、candidate grouping、amount check、matching rules version | `tests/test_workbench_free_matching_engine.py`、`tests/test_workbench_matching_rules.py`、`tests/test_workbench_reconciliation_engine.py`、`tests/test_workbench_amount_check_service.py` |
-| 2026-06-22 | 确认/撤回预览恢复 operation projection 释放路径 | 关系写入且 `workbench_relation` barrier fresh 后，前端应用后端写后投影并关闭预览；主 Workbench active generation refreshing 只作为后台追赶，不再把已写入操作报成失败 | `cd web && npm test -- --run src/test/WorkbenchSelection.test.tsx --testNamePattern "confirm link"` |
-| 2026-06-22 | 纠正普通两栏 `manual_confirmed` active relation paired zone 口径：active relation 继续作为 confirmed fact 和 row occupation；含银行流水的 relation 由物化 `requires_oa` / `requires_invoice` policy metadata 判定 paired/open，不含银行流水的普通两栏 relation 留在 open 待处理区 | `WorkbenchCandidateGroupingService`、Workbench SQL active generation、confirm-link operation projection、前端 API mapper/selection model | `tests/test_workbench_candidate_grouping.py::WorkbenchCandidateGroupingTests::test_manual_confirmed_oa_three_bank_rows_use_policy_without_invoice`、`test_bank_transaction_missing_policy_defaults_to_full_three_pane_requirement`、`tests/test_workbench_v2_api.py::WorkbenchV2ApiTests::test_confirm_link_writes_bank_transaction_paired_policy_metadata` |
-| 2026-06-22 | 纠正外部往来 `turnover_manual_closure` paired zone 口径：active relation 继续作为共同事实源，但 bank-only / OA+bank-only 未满足 paired 条件时必须留在 open 待处理区；满足 relation metadata requirement 后进入 paired | WorkbenchCandidateGroupingService、Workbench SQL projection schema、外部往来闭环后关联台展示 | `tests/test_workbench_turnover_grouping.py::WorkbenchTurnoverGroupingTests::test_bank_only_turnover_manual_closure_rows_stay_open_until_three_way_complete`、`tests/test_workbench_turnover_grouping.py::WorkbenchTurnoverGroupingTests::test_two_pane_turnover_manual_closure_rows_stay_open_until_invoice_exists`、`tests/test_workbench_turnover_grouping.py::WorkbenchTurnoverGroupingTests::test_three_pane_turnover_manual_closure_rows_render_as_paired_case`、`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_sql_projection_keeps_turnover_manual_closure_bank_only_case_open_until_three_way_complete`、`tests/test_turnover_workbench_integration.py::TurnoverWorkbenchIntegrationTests::test_manual_closure_accepts_three_bank_rows_and_keeps_workbench_case_open_until_invoice_exists` |
-| 2026-06-21 | 历史错误口径：外部往来 `turnover_manual_closure` bank-only active relation 曾被改为 paired case；该结论已被 2026-06-22 纠正 | WorkbenchCandidateGroupingService、Workbench SQL projection schema、外部往来闭环后关联台展示 | 已由 2026-06-22 回归测试覆盖 |
-| 2026-06-21 | Workbench active repair 优先于旧 generation consistency failure 展示为 refreshing，保留 consistency diagnostics 但不把旧 last_error 作为当前阻断 | `/api/workbench/refresh-status`、App Status Workbench domain blocked/busy 口径、外部往来闭环后的 Workbench 后台追赶 | `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_reports_inconsistent_workbench_generation_as_refreshing_during_active_repair` |
-| 2026-06-22 | App Health 聚合层同步 active repair 优先级：Workbench `read_model_status=refreshing/rebuilding` 时旧 consistency failure 只作为诊断，不写 unavailable dependency 或全局 blocked | `/api/app-health`、App Status popover、关联台后台追赶状态展示 | `tests/test_app_health_api.py::AppHealthApiTests::test_app_health_keeps_workbench_consistency_failure_busy_during_active_repair` |
-| 2026-06-21 | `workbench:all` aggregate-only 遇到 parent active generation inconsistent 时改为 dependency-not-fresh defer，并由 runtime worker 补投 parent month scope；普通月 scope 发布顺手刷新 all 时只跳过 all，不回滚月 shard、不写 failed all generation | `PostgresReadModelRepository` all-scope 聚合、`WorkbenchSqlProjectionBuilder` aggregate-only all、runtime worker parent dependency refresh、App Health failed/backlog 自愈 | `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_aggregate_only_all_scope_defers_when_parent_generation_is_inconsistent`、`test_repository_does_not_publish_all_scope_when_month_generation_is_inconsistent`、`tests/test_runtime_worker.py::RuntimeWorkerTests::test_run_once_requeues_same_scope_parent_when_generation_is_inconsistent` |
-| 2026-06-21 | 已配对多 OA 大组按 source OA 做横向子分段；OA 附件发票或银行流水 `oa-exp-*:item:*` 明细项来源归一到父 OA row id 后再对齐 | `CandidateGroupGrid` / `groupDisplayModel` 展示契约；防止 405 等 OA 的对应发票或流水只落在大组而不在同一行 | `web/src/test/CandidateGroupGrid.test.tsx::aligns attachment invoice item ids with their parent OA row inside a multi-OA group`、`web/src/test/CandidateGroupGrid.test.tsx::aligns source bank rows with their parent OA row inside a multi-OA group` |
-| 2026-06-18 | App Health write-safety blocked 纳入浏览器级闭环：`read_export_only`、`full_access`、`admin` 仍可查看 open/paired/processed/ignored 读侧状态，但确认、撤回、异常 apply/cancel、ignore/unignore 写入口隐藏或 disabled，且 Workbench mutation API 与 operation barrier 零调用 | `ReconciliationWorkbenchPage` 写 gate、`AppHealthStatusContext` write-safety source、deterministic Playwright mock、Spec-first E2E 覆盖矩阵 | `web/e2e/workbench-permissions-flow.spec.ts` |
-| 2026-06-18 | 关联台银行行支持展示 OA 待付款核对创建的进行中 OA relation chip | `special_metadata.origin=oa_pending_payment_in_progress` 的 active relation 在 Workbench payload 中显示“已关联进行中OA”，防止进行中 OA 已占用流水被误当作普通未配对流水 | `tests.test_workbench_sql_runtime.WorkbenchSqlProjectionRelationPayloadTests.test_oa_pending_in_progress_relation_uses_dedicated_bank_chip` |
-| 2026-06-18 | 关联预览网络恢复、409 stale preview 和重复提交防护纳入浏览器级闭环：临时失败可同预览重试，stale preview 必须重新预览，confirm/withdraw 双击只产生一次 mutation | `ReconciliationWorkbenchPage` 预览错误状态机、deterministic Playwright mock、Spec-first E2E 覆盖矩阵 | `web/e2e/workbench-network-recovery-flow.spec.ts` |
-| 2026-06-18 | `read_export_only` 逐入口权限纳入浏览器级闭环：open/paired/processed/ignored 状态可查看，但确认、撤回、异常 apply/cancel、ignore/unignore 写入口隐藏或 disabled，且 Workbench mutation API 与 operation barrier 零调用 | `ReconciliationWorkbenchPage` 写 gate、`WorkbenchZone` selection toolbar、`RowActions`、processed/ignored modal、deterministic Playwright mock、Spec-first E2E 覆盖矩阵 | `web/e2e/workbench-permissions-flow.spec.ts` |
-| 2026-06-18 | 大数据长列表/三栏滚动纳入浏览器级闭环：205 个 open group 下首屏分页、加载更多、搜索过滤、详情抽屉、选择状态保持、横向滚动同步和关键按钮无遮挡 | deterministic Playwright mock、`CandidateGroupGrid`/`WorkbenchZone` 滚动与分页 contract、Spec-first E2E 覆盖矩阵 | `web/e2e/workbench-large-scroll-flow.spec.ts` |
-| 2026-06-18 | 关联预览提交的 relation event / selection clear 移到 operation barrier 与当前 Workbench fresh refetch 成功之后；barrier timeout 或 fresh refetch failure 保持 committed error 弹窗，不允许重试且不提前移动底层行 | `ReconciliationWorkbenchPage` 预览提交状态机、domain event 时序、deterministic Playwright mock、Spec-first E2E 覆盖矩阵 | `web/e2e/workbench-stale-error-flow.spec.ts` |
-| 2026-06-18 | 异常 apply/cancel/ignore/unignore 纳入浏览器级闭环：apply 弹窗内阻塞到 operation barrier 与 Workbench fresh refetch 后展示 processed exception；open group 发票行暴露 ignore action；ignored modal 在 ignore/unignore 后刷新 | `WorkbenchExceptionModal`、`ReconciliationWorkbenchPage` exception/ignore 操作状态机、三栏默认 action column、deterministic Playwright mock、Spec-first E2E 覆盖矩阵 | `web/e2e/workbench-exception-flow.spec.ts`、`web/src/test/WorkbenchExceptionModal.test.tsx`、`tests/test_workbench_v2_api.py` |
-| 2026-06-18 | Workbench refreshing/stale false-empty 纳入浏览器级闭环：page read model 非 fresh 时显示刷新/待刷新诊断，不显示真实空态；普通 Workbench refreshing 不全局禁写，OA sync refreshing 禁写 | `ReconciliationWorkbenchPage` 空态判定、deterministic Playwright/Vitest mock、Spec-first E2E 覆盖矩阵 | `web/e2e/workbench-stale-error-flow.spec.ts`、`web/src/test/WorkbenchSelection.test.tsx` |
-| 2026-06-18 | stale/error 浏览器负面链路纳入 Spec-first E2E：Workbench stale 只提示不全局禁写，OA dirty 禁用写入口，refresh failed 保留当前 active generation 可查看，写 API 失败停留在预览弹窗且不移动行；同时修复 `app_status` 存在时前端 health context 丢失 `oa_sync.dirty_scopes` 的状态源缺口 | `AppHealthStatusContext` source 合成、deterministic Playwright mock、`ReconciliationWorkbenchPage` 写 gate、Spec-first E2E 覆盖矩阵 | `web/src/test/AppHealthStatusContext.test.tsx`、`web/e2e/workbench-stale-error-flow.spec.ts` |
-| 2026-06-18 | 确认/撤回关联预览提交改为弹窗内阻塞，等待操作级 `workbench_relation` fresh 和当前 Workbench fresh refetch 后才关闭；预览期间不应用 operation projection 先移动底层行 | `ReconciliationWorkbenchPage` 预览状态机、关联预览 UI、WorkbenchSelection 前端回归 | `web/src/test/WorkbenchSelection.test.tsx` |
-| 2026-06-18 | `workbench:all` aggregate-only event 等待声明的 parent month shard 收敛；parent scope 仍 pending/processing/failed/stale 时走 dependency-not-fresh defer，不发布 failed all generation；同 scope 旧 failed 被重试覆盖时 refresh-status 展示 refreshing | `WorkbenchReadModelRefreshService`、`RuntimeQueueRepository`、`/api/workbench/refresh-status`、runtime worker defer、确认关联后 Workbench month/all 后台追赶 | `tests.test_workbench_sql_runtime.WorkbenchSqlRuntimeTests.test_workbench_refresh_handler_defers_all_aggregate_while_parent_scope_refreshing`、`test_workbench_refresh_handler_defers_all_aggregate_while_parent_scope_failed`、`test_workbench_refresh_status_api_treats_requeued_failed_scope_as_refreshing`、`tests.test_runtime_queue.RuntimeQueueRepositoryTests.test_read_model_refresh_is_fresh_checks_no_active_or_failed_dirty_scope`、`web/src/test/WorkbenchSelection.test.tsx` |
-| 2026-06-17 | 关联台 operation barrier 等待窗口改为覆盖生产 worker 尾延迟，并将 outbox 判定收敛为目标 scope | `ReconciliationWorkbenchPage` 确认/撤回 overlay、`OperationFreshnessBarrierService`、`RuntimeMonitoringRepository.app_status_runtime_snapshot` | `tests/test_operation_freshness_barrier.py`、`tests/test_app_status_overview_service.py::AppStatusRuntimeRepositoryTests`、`web/src/test/WorkbenchSelection.test.tsx` |
-| 2026-06-15 | matching 规则版本变化后，`workbench-matching` worker 在 claim 前自检 completed dirty scopes 的 source_versions，原子重投旧版本 scope；all-scope 聚合传播 `workbench_matching_rules_version` | `WorkbenchMatchingDirtyScopeWorker`、`WorkbenchReconciliationDirtyQueue`、`PostgresReadModelRepository` matching dirty scope SQL、Workbench all-scope source_versions | `tests/test_workbench_matching_dirty_scope_worker.py`；`tests/test_workbench_reconciliation_dirty_queue.py`；`tests/test_workbench_sql_runtime.py` |
-| 2026-06-15 | 自动匹配加入“预约付款日期”OA-bank 消歧，并将 matching rules version 纳入 Workbench SQL active generation freshness；reconciliation decision 写入/过期同时刷新 `workbench_relation` 与主 `workbench` month scope | `WorkbenchFreeMatchingEngine`、legacy `WorkbenchMatchingRules`、`read_model.workbench_reconciliation_decisions` repository、Workbench SQL projection/source_versions | `tests/test_workbench_free_matching_engine.py`；`tests/test_workbench_matching_rules.py`；`tests/test_workbench_reconciliation_decision_store.py`；`tests/test_workbench_sql_runtime.py` |
-| 2026-06-15 | 确认/撤回提交响应增加 operation freshness targets 与后端 operation projection；前端 overlay 只等操作级 `workbench_relation` fresh 后应用投影，`workbench` month/all 和下游 read model 后台追赶；修复 all aggregate active generation 已发布但被自身 dirty scope 误判 refreshing 的 dead-letter 循环 | `WorkbenchWriteFacade` confirm/withdraw response contract、`WorkbenchReadModelRefreshService` aggregate-only publish gate、`ReconciliationWorkbenchPage` operation overlay、`write_operation_slo_audit` 操作级/cross-page profile | `tests/test_workbench_auth_context_idempotency.py`；`tests/test_workbench_sql_runtime.py`；`tests/test_write_operation_slo_audit.py`；`web/src/test/WorkbenchSelection.test.tsx`；`npm run build` |
-| 2026-06-15 | all-scope 聚合接入 canonical active relation occupancy gate：保留合法 `case:<case_id>` open/display owner，抑制 `scope:*:temp:*` 等旧 open owner；确认预览遇到已 active row-set 时返回撤回预览，防止 all scope 旧 open owner 继续误导用户确认 | `PostgresReadModelRepository` all-scope aggregate/generation consistency、`WorkbenchReadModelRefreshService` aggregate-only event、`WorkbenchWriteFacade.preview_confirm_link`、`RelationPreviewDialog` existing operation flow | `tests/test_workbench_sql_runtime.py`；`tests/test_workbench_v2_api.py::WorkbenchV2ApiTests::test_confirm_link_preview_for_already_active_relation_returns_withdraw_preview`；`web/src/test/WorkbenchSelection.test.tsx` |
-| 2026-06-14 | 关联台写操作从本地 optimistic 重排改为全屏 operation overlay；初始版本等待 `workbench_relation` barrier 与 Workbench active generation fresh 后释放，后续已收敛为有 operation projection 的确认/撤回只阻塞到 `workbench_relation` fresh | `ReconciliationWorkbenchPage` 写操作 gate、`GlobalOperationOverlayProvider`、`/api/operation-barrier/status` | `web/src/test/WorkbenchSelection.test.tsx`；`web/src/test/GlobalOperationOverlayContext.test.tsx`；`web/src/test/OperationBarrierApi.test.ts`；`tests/test_operation_freshness_barrier.py` |
-| 2026-06-12 | 关联台撤回 preview 操作后未恢复 row 逐行独立展示，并拆分 Workbench stale 与 OA dirty 写阻断 | `Application._relation_groups`、`WorkbenchWriteFacade` withdraw preview、App Health source mapping、前端 optimistic update/pending row lock | `tests/test_workbench_auth_context_idempotency.py`；`web/src/test/WorkbenchSelection.test.tsx`；`web/src/test/AppHealthStatusContext.test.tsx` |
-| 2026-06-11 | 补齐测试闭环状态机 | open/paired/exception/dirty/active generation/UI/read model 状态边界 | 待本轮 Workbench 验证 |
-| 2026-06-11 | active pair relation 增加 row id 去重和跨 active case 复用防线，修复 paired 详情重复 OA 展示 | WorkbenchPairRelationService、server relation grouping、integrity repair、pending invoice attach relation 合并 | `tests/test_workbench_pair_relation_service.py`、`tests/test_workbench_pair_relation_integrity_repair.py`、`tests/test_workbench_api.py`、`tests/test_pending_invoice_service.py` |
-| 2026-06-11 | 外部往来 bank-only 手动闭环移除无条件 paired 例外；当前 paired/open 由 relation policy metadata 判定，缺 required OA 或发票时留 open | WorkbenchCandidateGroupingService、server relation display payload、关联台本地 optimistic update | `tests/test_workbench_turnover_grouping.py`、`tests/test_turnover_workbench_integration.py`、`web/src/test/WorkbenchSelection.test.tsx` |
-| 2026-06-10 | 新增 `oa_bank_exact_sum` 自动候选：1 条 OA 可与唯一一组 2..6 条银行流水合计闭合付款金额，并保持待发票 open candidate group | Workbench matching rules、free decision engine、candidate grouping、API payload/read model invalidation | `tests.test_workbench_matching_rules`；`tests.test_workbench_free_matching_engine`；`tests.test_workbench_matching_orchestrator`；`tests.test_workbench_v2_api` |
-| 2026-06-09 | 已有 active relation 的 ETC summary 在 open 区增加 projection/repository 双重排除，并保留 paired 区展开明细 | Workbench open/paired 查询、历史 ETC 批次迁移、陈旧 active generation 防线 | `tests.test_workbench_sql_runtime`；生产库只读验证 |
-| 2026-06-08 | 已提交 ETC 批次在 open 区投影折叠 `etc_invoice_summary`，等待普通三项配对 | 关联台 open/paired 分区、Workbench projection | `tests.test_etc_backend` |
+只有完成、校验通过并原子激活的 generation 可成为页面事实。

@@ -1342,7 +1342,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                 {
                     "row_id": "txn-1",
                     "source_kind": "bank",
-                    "status": "open",
+                    "status": "unpaired",
                     "title": "昆明供应商",
                     "subtitle": "工行",
                     "searchable_text": "昆明 10.00",
@@ -1354,7 +1354,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                 {
                     "row_id": "inv-1",
                     "source_kind": "invoice",
-                    "status": "open",
+                    "status": "unpaired",
                     "title": "发票",
                     "searchable_text": "发票 10.00",
                     "payload": {"row_id": "inv-1", "record_type": "invoice", "month": "2026-05"},
@@ -1426,13 +1426,13 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                         "row_id": "txn-1",
                         "record_type": "bank",
                         "month": "2026-05",
-                        "zone_hint": "open",
+                        "zone_hint": "unpaired",
                         "matched_field": "对方户名",
                         "title": "昆明供应商",
                         "primary_meta": "2026-05-02 / 10.00 / 支出",
                         "secondary_meta": "工行 / 项目A",
                         "status_label": "未配对",
-                        "jump_target": {"month": "2026-05", "row_id": "txn-1", "record_type": "bank", "zone_hint": "open"},
+                        "jump_target": {"month": "2026-05", "row_id": "txn-1", "record_type": "bank", "zone_hint": "unpaired"},
                     },
                 }
             ]

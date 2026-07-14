@@ -811,7 +811,7 @@ class NoOaBankBatchService:
                 changed_ids = self._cancel_no_oa_relation(
                     relation_case_id,
                     occurred_at=self._timestamp(),
-                    reason="历史免OA候选关系分类已变化，取消旧关系。",
+                    reason="历史免 OA 关系分类已变化，取消旧关系。",
                     history_operation_type="no_oa_legacy_relation_category_mismatch",
                 )
                 if changed_ids:

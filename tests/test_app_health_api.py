@@ -521,14 +521,14 @@ class AppHealthApiTests(unittest.TestCase):
         )
         partial_job = app._background_job_service.create_job(
             job_type="workbench_matching",
-            label="生成关联台候选",
+            label="生成正式配对关系",
             owner_user_id="test_finops_user",
             affected_months=["2026-05"],
         )
         app._background_job_service.fail_job(failed_job.job_id, "银行流水导入失败。", "boom")
         app._background_job_service.succeed_job(
             partial_job.job_id,
-            "关联台候选部分完成。",
+            "正式配对关系部分完成。",
             status="partial_success",
         )
 
@@ -580,11 +580,11 @@ class AppHealthApiTests(unittest.TestCase):
         app = build_application()
         job = app._background_job_service.create_job(
             job_type="workbench_matching",
-            label="生成关联台候选",
+            label="生成正式配对关系",
             owner_user_id="test_finops_user",
             affected_months=["2026-05"],
         )
-        app._background_job_service.succeed_job(job.job_id, "关联台候选部分完成。", status="partial_success")
+        app._background_job_service.succeed_job(job.job_id, "正式配对关系部分完成。", status="partial_success")
 
         response = app.handle_request("GET", "/api/app-health")
         payload = json.loads(response.body)

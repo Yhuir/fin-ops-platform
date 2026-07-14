@@ -377,17 +377,11 @@ function mapAccount(account: ApiBankDetailAccount): BankDetailAccount {
 }
 
 function normalizeOaRelationTag(value: unknown): OaRelationTag {
-  if (value === "有oa" || value === "候选oa") {
-    return value;
-  }
-  return "无oa";
+  return value === "有oa" ? value : "无oa";
 }
 
 function normalizeInvoiceRelationTag(value: unknown): InvoiceRelationTag {
-  if (value === "有发票" || value === "候选发票") {
-    return value;
-  }
-  return "无发票";
+  return value === "有发票" ? value : "无发票";
 }
 
 function normalizeRelationStatus(value: unknown): BankDetailRelationStatus {
@@ -395,10 +389,10 @@ function normalizeRelationStatus(value: unknown): BankDetailRelationStatus {
     return "";
   }
   const normalized = value.trim();
-  if (normalized === "candidate" || normalized === "linked") {
-    return normalized;
+  if (!normalized) {
+    return "";
   }
-  return "";
+  return normalized === "linked" ? "linked" : "unlinked";
 }
 
 function formatBankDetailTradeTime(value: string) {
@@ -474,11 +468,13 @@ function mapAutoCandidateCategory(value: ApiBankDetailAutoCandidateCategory): Ba
 }
 
 function mapTransaction(row: ApiBankDetailTransaction): BankDetailTransaction {
-  const relationTags = Array.isArray(row.relation_tags)
+  const rawRelationTags = Array.isArray(row.relation_tags)
     ? row.relation_tags.map(String).map((tag) => tag.trim()).filter(Boolean)
     : [];
-  const oaRelationTag = normalizeOaRelationTag(row.oa_relation_tag ?? relationTags[0]);
-  const invoiceRelationTag = normalizeInvoiceRelationTag(row.invoice_relation_tag ?? relationTags[1]);
+  const oaRelationTag = normalizeOaRelationTag(row.oa_relation_tag ?? rawRelationTags[0]);
+  const invoiceRelationTag = normalizeInvoiceRelationTag(row.invoice_relation_tag ?? rawRelationTags[1]);
+  const relationTags = [oaRelationTag, invoiceRelationTag];
+  const relationStatus = normalizeRelationStatus(row.relation_status ?? row.relationStatus);
   return {
     id: row.id,
     tradeTime: formatBankDetailTradeTime(row.trade_time),
@@ -533,11 +529,11 @@ function mapTransaction(row: ApiBankDetailTransaction): BankDetailTransaction {
     effectiveCategorySource: row.effective_category_source ?? "",
     oaRelationTag,
     invoiceRelationTag,
-    relationTags: [oaRelationTag, invoiceRelationTag],
-    relationCaseId: typeof row.relation_case_id === "string" && row.relation_case_id.trim()
+    relationTags,
+    relationCaseId: relationStatus === "linked" && typeof row.relation_case_id === "string" && row.relation_case_id.trim()
       ? row.relation_case_id.trim()
       : null,
-    relationStatus: normalizeRelationStatus(row.relation_status ?? row.relationStatus),
+    relationStatus,
   };
 }
 

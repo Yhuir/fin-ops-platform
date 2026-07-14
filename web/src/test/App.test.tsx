@@ -114,7 +114,7 @@ describe("Finance operations shell", () => {
     expect(screen.getByRole("spinbutton", { name: "月份" })).toHaveAttribute("aria-valuenow", "3");
     expect(fetchMock).toHaveBeenCalledWith("/api/workbench/summary?month=all", expect.any(Object));
     expect(fetchMock.mock.calls.some(([input]) => String(input).startsWith("/api/workbench/groups?month=all&zone=paired"))).toBe(true);
-    expect(fetchMock.mock.calls.some(([input]) => String(input).startsWith("/api/workbench/groups?month=all&zone=open"))).toBe(true);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).startsWith("/api/workbench/groups?month=all&zone=unpaired"))).toBe(true);
     expect(fetchMock.mock.calls.some(([input]) => String(input).startsWith("/api/workbench?"))).toBe(false);
     expect(fetchMock).toHaveBeenCalledWith("/api/tax-offset?month=2026-03", expect.any(Object));
   });

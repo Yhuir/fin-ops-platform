@@ -1,9 +1,9 @@
-import CandidateGroupGrid from "./CandidateGroupGrid";
-import type { WorkbenchCandidateGroup, WorkbenchRecord } from "../../features/workbench/types";
+import RelationGroupGrid from "./RelationGroupGrid";
+import type { WorkbenchRelationGroup, WorkbenchRecord } from "../../features/workbench/types";
 import type { WorkbenchPane } from "./ResizableTriPane";
 
 type ProcessedExceptionsModalProps = {
-  groups: WorkbenchCandidateGroup[];
+  groups: WorkbenchRelationGroup[];
   panes: WorkbenchPane[];
   highlightedRowId?: string | null;
   canMutateData: boolean;
@@ -44,7 +44,7 @@ export default function ProcessedExceptionsModal({
           {groups.length === 0 ? (
             <div className="detail-state-panel">当前没有已处理异常项。</div>
           ) : (
-            <CandidateGroupGrid
+            <RelationGroupGrid
               actionMode="cancel-exception-only"
               getRowState={() => "idle"}
               groups={groups}
@@ -86,7 +86,7 @@ function ProcessedExceptionSummaryText({ value }: { value: string }) {
   return <span className="processed-exception-summary-text" title={value}>{value}</span>;
 }
 
-function resolveProcessedExceptionReason(group: WorkbenchCandidateGroup) {
+function resolveProcessedExceptionReason(group: WorkbenchRelationGroup) {
   const summary = group.processedExceptionSummary;
   return firstText(
     summary?.scenario?.label,
@@ -99,7 +99,7 @@ function resolveProcessedExceptionReason(group: WorkbenchCandidateGroup) {
   );
 }
 
-function resolveProcessedExceptionNote(group: WorkbenchCandidateGroup) {
+function resolveProcessedExceptionNote(group: WorkbenchRelationGroup) {
   const row = firstProcessedRow(group);
   return firstText(
     group.processedExceptionSummary?.detailNote,
@@ -112,7 +112,7 @@ function resolveProcessedExceptionNote(group: WorkbenchCandidateGroup) {
   );
 }
 
-function firstProcessedRow(group: WorkbenchCandidateGroup) {
+function firstProcessedRow(group: WorkbenchRelationGroup) {
   return [...group.rows.oa, ...group.rows.bank, ...group.rows.invoice][0];
 }
 

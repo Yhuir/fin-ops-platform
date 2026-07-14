@@ -191,7 +191,6 @@ class WorkbenchReadModelServiceTests(unittest.TestCase):
             exception_projection_version="exception_projection_v1",
             case_snapshot_version="case:v1",
             pair_relation_snapshot_version="relation:v1",
-            candidate_snapshot_version="candidate:v1",
             matching_rules_version="matching:v1",
         )
 
@@ -203,7 +202,6 @@ class WorkbenchReadModelServiceTests(unittest.TestCase):
                 exception_projection_version="exception_projection_v1",
                 case_snapshot_version="case:v1",
                 pair_relation_snapshot_version="relation:v1",
-                candidate_snapshot_version="candidate:v1",
                 matching_rules_version="matching:v1",
             )
         )
@@ -214,7 +212,6 @@ class WorkbenchReadModelServiceTests(unittest.TestCase):
                 exception_projection_version="exception_projection_v1",
                 case_snapshot_version="case:v2",
                 pair_relation_snapshot_version="relation:v1",
-                candidate_snapshot_version="candidate:v1",
                 matching_rules_version="matching:v1",
             )
         )
@@ -235,7 +232,6 @@ class WorkbenchReadModelServiceTests(unittest.TestCase):
                 "exception_projection_version": "exception_projection_v1",
                 "case_snapshot_version": "case:v1",
                 "pair_relation_snapshot_version": "relation:v1",
-                "candidate_snapshot_version": "candidate:v1",
                 "matching_rules_version": "matching:v1",
             },
         )
@@ -248,7 +244,6 @@ class WorkbenchReadModelServiceTests(unittest.TestCase):
                     "exception_projection_version": "exception_projection_v1",
                     "case_snapshot_version": "case:v1",
                     "pair_relation_snapshot_version": "relation:v2",
-                    "candidate_snapshot_version": "candidate:v1",
                     "matching_rules_version": "matching:v1",
                 },
             )
@@ -259,6 +254,37 @@ class WorkbenchReadModelServiceTests(unittest.TestCase):
         second = WorkbenchReadModelService.snapshot_version({"cases": {"WEX-1": {"status": "closed"}}})
 
         self.assertNotEqual(first, second)
+
+    def test_snapshot_restore_removes_legacy_candidate_version_fields(self) -> None:
+        service = WorkbenchReadModelService.from_snapshot(
+            {
+                "read_models": {
+                    "2026-05": {
+                        "schema_version": WORKBENCH_READ_MODEL_SERVICE_SCHEMA_VERSION,
+                        "scope_key": "2026-05",
+                        "candidate_snapshot_version": "candidate:v1",
+                        "payload": {
+                            "month": "2026-05",
+                            "candidate_snapshot_version": "candidate:v1",
+                        },
+                        "source_versions": {
+                            "candidate_snapshot_version": "candidate:v1",
+                            "pair_relation_snapshot_version": "relation:v1",
+                        },
+                    }
+                }
+            }
+        )
+
+        restored = service.get_read_model("2026-05")
+
+        self.assertIsNotNone(restored)
+        self.assertNotIn("candidate_snapshot_version", restored)
+        self.assertNotIn("candidate_snapshot_version", restored["payload"])
+        self.assertEqual(
+            restored["source_versions"],
+            {"pair_relation_snapshot_version": "relation:v1"},
+        )
 
 
 if __name__ == "__main__":

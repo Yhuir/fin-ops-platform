@@ -59,8 +59,8 @@ test.describe("bank details initial browser state", () => {
     const bankRow = page.getByRole("row", { name: /智能工厂设备商/ });
     await expect(bankRow).toBeVisible();
     await expect(bankRow.getByText("2026-03-28 10:18:00")).toBeVisible();
-    await expect(bankRow.getByText("候选oa")).toBeVisible();
-    await expect(bankRow.getByText("候选发票")).toBeVisible();
+    await expect(bankRow.getByText("无oa")).toBeVisible();
+    await expect(bankRow.getByText("无发票")).toBeVisible();
     await expect(bankRow.getByText("设备款")).toBeVisible();
     await expect(bankRow.getByText("58,000.00")).toBeVisible();
     await expect(bankRow.getByText("建设银行 1138")).toBeVisible();

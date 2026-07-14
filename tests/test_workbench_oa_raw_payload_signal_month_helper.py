@@ -19,7 +19,7 @@ class WorkbenchOaRawPayloadSignalMonthHelperTests(unittest.TestCase):
                     {"id": "oa-2", "detail_fields": {"申请日期": "2026-02-03"}},
                 ],
             },
-            "open": {
+            "unpaired": {
                 "oa": [
                     {"id": "oa-3", "summary_fields": {"审批完成时间": "2026-03-04"}},
                     {"id": "oa-bad", "application_date": "bad"},
@@ -32,17 +32,17 @@ class WorkbenchOaRawPayloadSignalMonthHelperTests(unittest.TestCase):
     def test_has_oa_attachment_invoice_signal_detects_tags_and_fields(self) -> None:
         self.assertTrue(
             WorkbenchOaRawPayloadSignalMonthHelper.has_oa_attachment_invoice_signal(
-                {"paired": {"oa": [{"tags": ["OA附件"]}]}, "open": {"oa": []}}
+                {"paired": {"oa": [{"tags": ["OA附件"]}]}, "unpaired": {"oa": []}}
             )
         )
         self.assertTrue(
             WorkbenchOaRawPayloadSignalMonthHelper.has_oa_attachment_invoice_signal(
-                {"paired": {"oa": [{"detail_fields": {"附件发票数量": "1"}}]}, "open": {"oa": []}}
+                {"paired": {"oa": [{"detail_fields": {"附件发票数量": "1"}}]}, "unpaired": {"oa": []}}
             )
         )
         self.assertFalse(
             WorkbenchOaRawPayloadSignalMonthHelper.has_oa_attachment_invoice_signal(
-                {"paired": {"oa": [{"detail_fields": {"附件发票数量": "0 张"}}]}, "open": {"oa": []}}
+                {"paired": {"oa": [{"detail_fields": {"附件发票数量": "0 张"}}]}, "unpaired": {"oa": []}}
             )
         )
 

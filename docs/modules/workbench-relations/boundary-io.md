@@ -1,116 +1,72 @@
-# 关联台关系事实源模块边界与 I/O
+# Workbench 正式关系边界与 I/O
 
-日期：2026-07-06
+日期：2026-07-14
 
-## 模块化状态
+## Owner
 
-- 状态：closed
-- 当前边界可信度：high
-- 目标边界：关系写入、撤回、展示、历史回放和下游 read model 扇出统一通过 workbench relation command/read boundary。
-- 当前闭环：确认、撤回、修复、展示、历史回放和 fan-out 的运行时入口通过 command service、read facade 或明确 adapter；旧 Workbench action service、旧 `/workbench*` HTTP 入口和旧 direct Workbench action wrapper 已删除。离线 migration/audit/repair 工具可保留为显式 adapter，不属于页面链路污染。
-- 旧代码删除条件：新增或修改确认/撤回/修复调用点时，必须继续通过 command service 或明确 adapter，且下游 fan-out 测试覆盖；删除离线工具前必须逐工具核验迁移/审计用途。
+| 事实 | Owner | 说明 |
+| --- | --- | --- |
+| `app.workbench_pair_relations` | workbench-relations | 当前/历史关系实体；只有 active 拥有成员 |
+| `app.workbench_pair_relation_history` | workbench-relations | confirm/extend/replace/cancel/withdraw/repair 审计历史 |
+| `read_model.workbench_relation_*` | read-models + workbench-relations projection | 下游 linked/unlinked 投影，不是写事实源 |
 
-## 职责边界
-
-### 负责
-
-- 关联关系事实源，包括配对、撤回、关系展示、关系历史和分布投影。
-- 产生 workbench_relation read model 和下游页面刷新依据。
-- 为 pending invoice、no-OA、turnover、batch accounting、ETC 等模块提供关系读取边界。
-
-### 不负责
-
-- 不拥有下游页面 read model 的最终投影。
-- 不直接替代各页面的业务 service。
-- 不在调用方模块散落关系状态机判断。
+Release A 已移除旧 `read_model.workbench_candidate_matches`、`read_model.workbench_reconciliation_decisions` 和 `state:workbench_candidate_matches` 的全部运行时依赖，但暂不删除其物理存储，以保留应用回滚能力。只有 Release A 的运行时零访问、数据哈希、freshness、queue 和 Audit 证据全部通过后，Release B 才可用 migration 0104 forward-drop；任何生产调用方都不得重新依赖这些旧状态。
 
 ## 输入 I/O
 
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
-| 关系写命令 | workbench、workbench matching、batch accounting、pending invoice、no-OA、turnover、ETC 修复工具 | 必须包含关系对象、方向、操作上下文和审计身份。跨进程或生产修复场景必须让 command repository 的 load/save 接入 durable repository，不能只读进程内 `WorkbenchPairRelationService` snapshot。自动 paired decision 只有通过 command service 写成 active relation 后，才算业务已配对。 |
-| 已知 row/case 的关系命令读取 | `WorkbenchRelationCommandService.confirm_relation(...)`、按 row 撤回/预览、按 case 更新/撤回 | 必须通过 `load_workbench_pair_relations_for_row_ids(row_ids, case_ids=...)` 读取 scoped snapshot，只加载可能与目标 row 冲突的 active relation 和目标 case/history。写前 relation read model freshness 检查若已知多个 affected months，必须以精确 `scope_keys_hint` 校验这些月份；`month_scope=all` 只是关系的聚合表示，不能吞掉已知月份并把合法的 fresh empty/unlinked 集合误判为 missing。禁止在这些热路径调用 `load_workbench_pair_relations()` 全量快照；全量 loader 只允许全量列表、离线审计、迁移或明确需要遍历所有 relation 的场景使用。 |
-| 撤回 row id alias | `WorkbenchWriteFacade` -> `WorkbenchRelationCommandService.preview_withdraw_relation(...)` / `withdraw_relation(...)` -> `WorkbenchPairRelationService.preview_withdraw_for_row_ids(...)` / `withdraw_latest_for_row_ids(...)` | 撤回 preview 和 submit 必须显式携带 `row_id_aliases`，把历史 relation fact 中残留的 OA source id 映射到 canonical Workbench row id。恢复历史 relation 时，`restorable_on_withdraw=true` 仍必须经过 alias-aware canonical row-set 比较；canonical 后与当前 active relation 同 row-set 的历史快照不能恢复，必须展示/提交为撤回到无关系状态。OA 自带附件发票 binding 不走 history restore 标记：完整 relation 撤回后必须保留或重建 OA+自带附件发票 active relation，纯 OA+自带附件发票 relation 的撤回 preview 必须不可提交，submit 必须被拒绝。 |
-| OA 附件发票不可变 binding | `WorkbenchOaAttachmentContextRowIndex`、`WorkbenchCanonicalOaAttachmentRawPayloadRepairer`、`WorkbenchOaAttachmentRepairContextExecutor`、`WorkbenchPairRelationService`、`WorkbenchRelationCommandService`、`WorkbenchCandidateGroupingService`、`oa_attachment_invoice_linking` | `oa-att-inv-<oa-row-id>*` 或通过 OA source alias 可证明来自父 OA 的发票必须和该 OA 处于同一个 active relation。该 relation 是 source binding，不是用户配对结果；不能只作为 display-only candidate，也不能被普通撤回拆成 OA standalone + 发票 standalone。 |
-| 撤回提交 preview lock | `WorkbenchRelationCommandService.withdraw_relation(...)` | submit 路径必须在同一个 canonical pair-service snapshot 上完成 active relation 读取、preview lock 和状态转换；只允许一次 relation read model fresh precondition。preview lock、恢复历史 relation 和 submit 状态转换必须使用同一份 alias-aware after relation 合同。禁止 submit 内部先按 case 加载 snapshot，又调用 public preview API 重新加载 snapshot/重复 fresh check。submit 响应必须优先返回写入结果、affected scopes 和 `freshness_targets` / `operation_barrier_targets`；可选 UI `operation_projection` 只属于 preview/local projection 快路径，不能在 submit hot path 同步重建 after groups。 |
-| no-OA relation metadata | `NoOaBankBatchApplicationService` | legacy `special_metadata` 可包含 `paired_requires_oa`、`paired_requires_invoice`、`paired_requirement_tag_code`、`paired_requirement_version`；关系事实源负责原样保存和投影，不拥有标签规则解释 |
-| Bank Transaction Paired Policy metadata | `BankFlowRuleBatchApplicationService` submit / tag-rule sync / turnover sync / legacy no-OA submit | policy-managed 银行 relation facts（`no_oa_bank_batch`、`bank_flow_rule_batch`、`turnover_manual_closure`，以及工资、内部转账、个人垫付还款等银行自动闭合 code）应把 paired policy 物化到银行流水 row 可投影的 `special_metadata.requires_oa` / `requires_invoice` 或 legacy `paired_requires_oa` / `paired_requires_invoice`。`relation_mode=bank_flow_rule_batch` 的 metadata 还至少包含 `source_batch_id`、`flow_rule_tag_code`、`flow_rule_version`、`source_row_count`、`collapsed_bank_rows`；`row_types=["bank"]` 且已有 `month_scope` 的内部往来提交，relation fan-out scope resolver 必须直接使用 relation month，禁止再探测 invoice/OA/workbench source 表或银行月份 scope。标签规则保存后也必须通过 command service 更新这些 requirement 字段。关系事实源只保存和分发，不解释银行标签规则。普通 `manual_confirmed` 与 `batch_accounting` 关系不得伪装成该 policy 输入。 |
-| 外部往来闭环 relation metadata | `TurnoverLedgerWorkbenchPairPort` / 流水规则 tag-rule sync | `relation_mode=turnover_manual_closure`；`special_metadata` 至少包含 `source=turnover_ledger`、`turnover_relation_id`、`requires_oa`、`requires_invoice`、`paired_requirement_source`、`paired_requirement_version`。历史 `turnover:* manual_confirmed` 关系只能通过 `WorkbenchRelationCommandService.update_relation_metadata_for_case_id(..., relation_mode=turnover_manual_closure)` 受控升级并记录 before/after history |
-| 关系读请求 | 下游 read facade/service | 只暴露 read facade 或 repository port |
-| 批量账务 submitted count | `BatchAccountingService` | 未提交首屏通过 `WorkbenchRelationReadFacade.count_batch_accounting_relations_by_year(year)` 读取年份级 batch-accounting relation count 和 freshness/status；禁止为了 summary count 读取 12 个月 relation DTO |
-| 批量账务 submitted relation DTO | `BatchAccountingService` | 已提交 bucket 通过 `WorkbenchRelationReadFacade.list_batch_accounting_relations_by_year(year)` 一次读取年份内 active batch-accounting relation groups 和 freshness/status；禁止调用方按 12 个月循环 list 或直接 SQL 读 relation read model 表 |
-| 批量账务 relation metadata | `BatchAccountingService.submit` | `relation_mode=batch_accounting`、`special_metadata.source=batch_accounting`、`bank_row_id`、`oa_row_ids`、`invoice_row_ids`、`bank_year`、`oa_years`、`affected_scope_keys`。关系事实源负责原样保存并投影；`affected_scope_keys` 是 command repository dirty/outbox fan-out 的 scope I/O，跨月关系也应是具体月份集合，不应自动变成 `all`。批量账务撤回必须通过 command service 的取消语义把当前 batch relation 持久化为 cancelled，并记录 `withdraw_link` history；不得走调用方旧 snapshot restore 或 in-memory-only fallback。 |
-| 关系源端摘要和行读取 | 下游 read model worker（当前 `bank_detail`、`pending_invoice`） | 仅允许通过 `WorkbenchRelationReadModelRepositoryPort.list_active_workbench_relation_source_rows(...)` 和 `workbench_relation_source_summary_from_source(...)` 读取 `app.workbench_pair_relations` 的 active row/source summary，用于 source-version proof 和展示标签/关联上下文的 worker 投影。`list_active_workbench_relation_source_rows(..., include_member_summaries=True)` 可在同一 workbench-relations repository 边界内补齐 relation 成员的银行、OA 和发票源摘要，供 pending_invoice 构造可展示 payload；默认不补摘要，避免影响只需要 row_ids/row_types 的调用方。SQL owner 保持在 workbench-relations/read-model repository；下游 projection 不得直接 SQL 读取 relation 表，也不得把该源端快路径用于关系写前状态机或页面 fresh payload。 |
-| Refresh scope | `workbench_relation` manifest | month scope；`all` 只允许明确 fan-out command。确认/撤回/取消等关系写操作必须把本次操作影响的 `row_ids` / `case_ids` 写入 refresh metadata，供月份 worker 选择操作级局部投影；lifecycle executor 和兼容 repository 也必须透传该 metadata。同 scope pending event 发生 dedupe 合并时必须合并并去重 `row_ids` / `case_ids`，让小集合继续走局部投影；合并后超过 bounded metadata 上限时必须清空 row/case metadata 并降级为 full month rebuild，避免用截断 row ids 伪装完整刷新。批量账务 submit/withdraw route 不再直接触发 duplicate lifecycle；repository 必须根据具体月份 scope 投递 dirty/outbox，不能把 all 当默认后置刷新 |
-| Projection source objects | `app.bank_transactions`、`app.oa_applications`、`app.invoices`、`app.workbench_pair_relations` | `workbench_relation` 月分片 full projection 先读取本月源对象，再读取 active relation；关系成员若已存在于本月对象集，禁止第二次全月扫描。带 `row_ids` 的操作级 refresh 只能读取受影响 row 与仍 active relation 成员，不得恢复全月源表扫描；只有跨月 relation 的缺失成员可按显式 `row_id` 补读，并且必须根据 relation `row_types` 限定到 bank/OA/invoice 所需源表。OA 源对象完成态由 OA projection 边界统一定义，必须接受 canonical `completed` 和历史完成态别名，不能让 relation distribution 因 workflow status 表示差异丢失 `linked_oa` summary。 |
+| manual command | Workbench/业务 owner API | canonical typed row ids、actor、tenant、idempotency、expected versions、note |
+| formal auto plan | matching orchestrator | immutable `FormalRelationPlan`：case/member set/fingerprint/rule/evidence/amount/scope/batch hash |
+| current snapshot | relation repository | active + relevant historical facts，必须在 UoW transaction 中加载 |
+| withdraw command | owner API | active case identity、preview id、expected versions、reason |
+| read request | downstream facade | scope keys、row ids、`require_fresh`、source version contract |
 
 ## 输出 I/O
 
-| 输出 | 目标 | 合同 |
+| 输出 | Consumer | 合同 |
 | --- | --- | --- |
-| 关系事实 | repository | 原子持久化关系状态和审计 |
-| 关系 read model | `workbench_relation` projection | scoped incremental distribution；`rows` 是 scope 内 row 索引，唯一键为 `(tenant_id, scope_key, row_id)`；只向下游分发 active relation 的 linked/unlinked 业务口径，不分发 automatic decision candidate。 |
-| 下游 dirty scope | runtime queue | command repository/UoW target planner 按受影响页面 fan-out。bank+OA+invoice 的 confirm/withdraw 必须包含 `oa_pending_payment`；bank+invoice 必须包含真实 `cost_statistics` fan-out；tax-offset 对所有 Workbench relation shape 都是非消费者。turnover closure 使用独立正式 Turnover UoW/profile。写后 closure 以 committed idempotency record 的精确 outbox event IDs 对照正式 required/optional profile，不能用同 profile 时间窗样本替代归属。 |
-| no-OA / 流水规则批量 read model dirty scope | `no_oa_bank_batch` runtime queue | `relation_mode=no_oa_bank_batch` 与 `relation_mode=bank_flow_rule_batch` 共用迁移期底座，但 dirty/outbox payload 必须携带 `relation_mode`，outbox dedupe key 必须按 relation mode 分桶；不能让同一月份 no-OA 与 bank-flow 刷新互相覆盖 metadata。 |
+| active relation | Workbench/downstream | deduped aligned `row_ids`/`row_types`，一个 row 只属于一个 active case |
+| history | Audit/withdraw | before/after、actor、event、timestamp、reason、rule/provenance |
+| command result | caller | relation/version/affected rows/months/idempotent replay/outbox ids/barrier targets |
+| dirty/outbox | durable runtime | 同事务 enqueue `workbench_relation`、`workbench` 和明确下游 scope |
+| read distribution | downstream pages | 只有 `linked` / `unlinked`；non-fresh 不能返回为业务空集合 |
 
-## 持久化与投影
+## 合法 relation modes
 
-- Read model：`workbench_relation`
-- Projection：`scoped_incremental_distribution`
-- Worker：`workbench-relation`
-- Repository owner：`WorkbenchRelationReadModelRepositoryPort`
-- Query owner：`WorkbenchRelationReadFacade`
-- 跨月关系合同：一个 active relation 可同时包含 OA、银行流水、进项/销项发票等不同月份对象。每个被重建的 `workbench_relation` month scope 必须保存该 scope 内 relation group 涉及的所有成员 row 索引，而不仅是当前月份原生对象；下游页面按自身 row id 读取时必须能发现跨月 group。操作级局部重建必须先从同 scope 旧 distribution 读取与初始 affected rows 相连的旧 group 成员，把这些成员扩入本次重算集合；旧 distribution 在这里仅作为 invalidation closure 输入，当前关系和展示字段仍从 canonical facts 重算。repository 随后按旧 group membership 删除全部旧成员 row index，再删除旧 group、写回当前 active group、已退出关系成员的 unlinked row 和其他相关 rows，并重算 scope summary/source_versions；不能只按初始 affected/current row ids 清理，也不能把 scope 标记 fresh 后留下幽灵 edge 或丢失已退出关系成员的 unlinked row。局部刷新不得为了同步 source_versions 全量 UPDATE 同月未变 rows/groups；freshness 和对外 source_versions 以 `read_model.workbench_relation_scopes` 为事实源。
-- 源对象读取性能合同：月分片对象读取和跨月缺失成员补读是两个不同输入 I/O。普通同月确认/撤回后的 changed rebuild 不得恢复旧逻辑的第二次全月 `bank_transactions` / `oa_applications` / `invoices` 扫描；跨月补读也不得为了一个缺失发票 row 再探测银行和 OA 源表。该规则只改变 projection 读取计划，不改变 relation 状态机、read model payload schema 或下游 fan-out。
-- 批量账务性能合同：未提交列表只做候选 row-id relation lookup 和年份级 submitted count；已提交列表才读取完整 relation DTO，并且必须使用年份级 `list_batch_accounting_relations_by_year` I/O。`count_batch_accounting_relations_by_year` 和 `list_batch_accounting_relations_by_year` 都是 read facade/repository port 合同的一部分，不能被调用方直接 SQL 替代。
-- 批量账务写入合同：批量账务 submit/withdraw 不能在 command service 保存 relation 后再次调用旧 pair relation persist/snapshot restore、duplicate derived lifecycle 或旧 workbench read model persist。关系事实持久化和 read model dirty/outbox fan-out 只通过 command repository；调用方只消费 changed scopes 返回给前端。生产 PostgreSQL runtime 的 command service 必须接入 `PostgresWorkbenchRelationRepository`，否则 command 只能改变进程内 snapshot，会导致 API 成功但 `app.workbench_pair_relations`、`workbench_relation` 和关联台 active generation 不收敛。
-- 命令读取性能合同：`PostgresWorkbenchRelationRepository.load_workbench_pair_relations_for_row_ids(row_ids, case_ids=...)` 是确认/撤回/按 case 更新等热命令的 durable 读入口，SQL 只能按 `row_ids` overlap 和显式 `case_id` 限定 relation，再按选中 case 读取 history。`WorkbenchPairRelationService.snapshot_case_ids(...)` 也只能输出相关 case 的 relation 和 history，不能把全量 history 带回 mutation persistence。旧 `load_workbench_pair_relations()` 全量读取不得重新接入这些热命令，否则会随着历史 relation 数量线性放大提交耗时。
-- Workbench withdraw UoW 合同：`WorkbenchWriteFacade._withdraw_link_with_uow_from_row_ids(...)` 不得在事务外读取 `WorkbenchPairRelationService.snapshot()`，也不得在事务外先执行完整 withdraw preview；rollback、idempotency、relation command write 和 read model dirty/outbox enqueue 必须由 `WorkbenchWriteUnitOfWork` 的单一事务边界承担。row-id submit command 可保持 `scope_keys=[]`，由 transaction-bound command service 返回 `before_relation` / `affected_scope_keys` / `refresh_metadata`，再由 UoW 合并到 outbox metadata。
-- Workbench withdraw submit 性能合同：提交路径不得为了响应中的可选 `operation_projection` 重建 withdraw preview after groups，也不得在 Facade 层为找 case_id 先跑 public preview API；row id alias map 只能解析一次，并必须在 postprocess canonicalize 中复用。row-id UoW submit 不得为了精确判断 invoice direction 同步读取 live rows；缺方向时通过 downstream fan-out 刷新 input/output 相关 read model 来保证正确性。前端若没有 projection，必须通过 `freshness_targets` / `operation_barrier_targets` 等待真实 `workbench` 与 `workbench_relation` read model fresh 后刷新页面。
-- 事务内 read model refresh 合同：关系 repository 只通过 `_append_read_model_refresh(...)` 聚合 refresh payload，再由 `_enqueue_read_model_refreshes_in_transaction(...)` 一次写入 dirty scopes/outbox。旧单 scope `_enqueue_read_model_refresh_in_transaction(...)` 链路已删除，不得作为测试兼容 wrapper 或调用方 fallback 恢复；成本统计 scope expansion 必须在 append 阶段展开为 `active:<month>` 和 `all:<month>`。兼容 repository 只能把普通 relation 写入投递到具体月份；scope 完全未知时才允许 `workbench:all` full refresh，禁止恢复“月份 + all aggregate”双投递旧逻辑。
-- 下游 worker 源端快路径合同：`list_active_workbench_relation_source_rows(...)` 与 `workbench_relation_source_summary_from_source(...)` 是 read-model worker 的窄 port，只返回 active relation source rows/summary，不返回页面 DTO、不绕过 `WorkbenchRelationCommandService` 写边界，也不替代 `WorkbenchRelationReadFacade` 的页面 fresh-gated 读取。该 port 的目标是让银行明细、待找发票等下游投影在关系源事实已提交后立即计算 source version，避免等待 `workbench_relation` 分发 read model 的尾延迟。
-- Workbench withdraw alias 合同：`row_id_aliases` 是撤回 command I/O，不是 UI 展示修正。pair service 的 `_restorable_relation_snapshots(...)` 必须在 alias-aware row-set 上过滤同一 active relation；facade 在 canonicalize restored/after relations 后还必须执行同一过滤，防止测试替身、兼容 adapter 或历史路径返回污染后的 after relation。
-- OA 附件发票 binding 合同：row index 和 raw payload repair 必须用 OA canonical row id 和 source aliases（如 Mongo 文档 ID、OA 单号）识别附件发票父 OA；raw payload repair 必须在发现可证明的父 OA+自带附件发票且缺 active relation 时，通过 command service 创建 `CASE-OA-ATT-<oa_row_id>` source binding；pair service 必须在 withdraw preview/submit 的状态转换中维护父 OA+自带附件发票 active relation；command service 必须把纯 OA+自带附件发票撤回变成不可提交 preview 和业务错误，防止 API 绕过前端禁用按钮；grouping 必须把 immutable OA+附件发票两栏 active relation 留在 open/source binding group，不能把 source binding 当作进入 paired 区的业务完成条件。该规则不允许通过 `existing_case`、row payload `case_id` 或未标记 history 恢复任意旧关系。
-- 旧逻辑已废弃：`read_model.workbench_relation_rows` 不允许再使用 `(tenant_id, row_id)` 全局唯一覆盖模型；迁移 `0077_workbench_relation_rows_scope_unique.sql` 建立目标约束，`0078_workbench_relation_rows_scope_unique_repair.sql` 为已应用早期 0077 的环境做幂等 forward repair，`0079_workbench_relation_rows_scope_unique_hardening.sql` 在已接受 0077/0078 checksum drift 的环境中重新断言目标唯一性并清理同 scope 重复投影行，避免最后一次重建的月份覆盖其它月份的关系索引。跨月成员索引、scoped source version 与旧组成员 invalidation closure 属于 projection schema 合同，当前版本为 `2026-07-13-partial-replacement-closure-v1`；发布该版本后必须通过正式 gateway 受控重建 `workbench_relation` 月份 shard，再按依赖顺序重建受其影响的下游 read model。OA 完成态别名变更由 `OA_PROJECTION_SYNC_VERSION=2026-07-03-completed-workflow-status-aliases-v1` 驱动重建，禁止在 pending invoice 等下游页面用 fallback 反推 OA。
+Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 registry 包括普通确认、exception closed、OA exempt、个人暂借还清、OA/附件冲抵、pending invoice、bank-flow batch、no-OA、turnover、batch accounting、ETC、input invoice OA reverse 等已登记 mode。新增 mode 必须进入 registry、状态转换测试、下游刷新矩阵和模块文档。
+
+`automatic_decision`、`automatic_match`、`existing_case` 不是可新增的正式写入 mode。系统自动关系使用登记的正式 mode并以 actor/rule metadata 记录系统来源。
+
+## 事务与一致性
+
+- command service 必须接收明确 repository/idempotency/freshness 依赖，不接收整个 `Application`。
+- relation、history、idempotency、audit/dirty/outbox 的业务事务必须原子；失败不得留下半关系或漏刷新。
+- case id 重用、active member overlap、row type 对齐、expected version 和 idempotency fingerprint 必须在写入边界校验。
+- 任意 `N:M:K` member set 都合法，只要上游业务规则已证明安全并且成员非空、唯一、typed。
+- 自动扩展既有 active case 必须使用 `target_case_id` 并原子 replace；不得创建重叠的第二条 active relation。
+- 精确 typed member set 的人工撤回历史阻止 deterministic engine 自动重建同一关系。
+
+## Read facade
+
+- `require_fresh=True` 时，missing/stale/source mismatch 必须返回非 fresh 并受控 enqueue，调用方不得把空 rows 当作无关系。
+- 下游只有 active relation 是 linked 证据。历史关系、显示 tags、候选搜索结果、matching evidence 都不是支付/关联/成本证据。
+- downstream read models 必须记录并比较 relation source versions，relation mutation 后旧 payload 不得继续 fresh。
 
 ## 文件范围
 
-| 层 | 文件或目录 |
+| 层 | 文件 |
 | --- | --- |
-| Backend services | `backend/src/fin_ops_platform/services/workbench_pair_relation_service.py`、`workbench_relation_command_service.py`、`workbench_oa_attachment_repair_context_executor.py`、`workbench_candidate_grouping.py`、`workbench_relation_read_facade.py`、`workbench_relation_sql_projection.py`、`workbench_relation_read_model_refresh.py` |
-| Adapters | `backend/src/fin_ops_platform/services/workbench_relation_command_repository_adapter.py`、`workbench_relation_repository.py` |
-| Repository / SQL | `backend/src/fin_ops_platform/services/postgres_repositories/workbench_relation.py`、`postgres_repositories/workbench.py` |
-| Downstream callers | `pending_invoice_service.py`、`bank_flow_rule_batch_*`、`no_oa_bank_batch_*`、`turnover_ledger_*`、`batch_accounting_service.py`、`input_invoice_usage_oa_reverse_service.py`、ETC migration/repair services |
-| Tools | `backend/src/fin_ops_platform/tools/link_existing_etc_batches.py`、`migrate_historical_etc_business_batches.py` |
-| Tests | `tests/test_workbench_relation_*.py`、`tests/test_workbench_pair_relation_*.py`、downstream fan-out e2e specs |
+| Domain/command | `workbench_pair_relation_service.py`、`workbench_relation_command_service.py`、`workbench_relation_modes.py` |
+| UoW/repository | `workbench_uow.py`、`workbench_relation_command_repository_adapter.py`、`postgres_repositories/workbench_relation.py` |
+| Read/projection | `workbench_relation_read_facade.py`、`workbench_relation_sql_projection.py`、`workbench_relation_read_model_refresh.py` |
+| Auto formalization | `workbench_free_matching_engine.py`、`workbench_matching_orchestrator.py`、`postgres_repositories/workbench_formal_relation.py` |
+| Tests | `tests/test_workbench_relation_*.py`、`test_workbench_formal_relation_repository.py`、`test_workbench_matching_orchestrator.py` |
 
-## 依赖方向
+## 禁止路径与删除条件
 
-- 允许依赖：repository port、audit、runtime queue、downstream scope mapping。
-- 必须通过：command service for writes、read facade for reads。
-- 禁止绕过：调用方直接改关系表、直接构造下游 read model payload、跳过撤回状态机。
-
-## 测试与验证
-
-- Core/service：`tests/test_workbench_relation_command_service.py`、`tests/test_workbench_relation_read_facade.py`。
-- Withdraw alias regression：`tests/test_workbench_pair_relation_service.py::WorkbenchPairRelationServiceTests::test_withdraw_ignores_restorable_snapshot_with_same_canonical_alias_row_set`、`tests/test_workbench_auth_context_idempotency.py::WorkbenchAuthContextIdempotencyTests::test_withdraw_preview_filters_same_canonical_alias_after_relation`。
-- Withdraw submit hot path：`tests/test_workbench_auth_context_idempotency.py::WorkbenchAuthContextIdempotencyTests::test_withdraw_link_submit_skips_optional_operation_projection_rebuild`、`tests/test_workbench_auth_context_idempotency.py::WorkbenchAuthContextIdempotencyTests::test_withdraw_link_targets_preview_row_months_when_relation_scope_is_all`、`tests/test_workbench_relation_command_service.py::WorkbenchRelationCommandServiceTests::test_withdraw_relation_row_id_submit_fingerprint_distinguishes_row_ids`、`tests/test_workbench_uow_contract.py::WorkbenchUoWContractTests::test_withdraw_link_merges_handler_refresh_metadata_in_transactional_outbox`。
-- OA attachment immutable withdraw regression：`tests/test_workbench_pair_relation_service.py::WorkbenchPairRelationServiceTests::test_withdraw_preserves_oa_attachment_binding_without_history`、`tests/test_workbench_pair_relation_service.py::WorkbenchPairRelationServiceTests::test_withdraw_rejects_plain_oa_attachment_binding_relation`、`tests/test_workbench_relation_command_service.py::WorkbenchRelationCommandServiceTests::test_preview_withdraw_relation_blocks_plain_oa_attachment_binding`、`tests/test_workbench_relation_command_service.py::WorkbenchRelationCommandServiceTests::test_withdraw_relation_rejects_plain_oa_attachment_binding_submit`。
-- Projection：`tests/test_workbench_relation_sql_projection.py`。
-- Cross-month / partial regression：`tests/test_workbench_relation_sql_projection.py::test_rebuild_indexes_cross_month_relation_members_in_current_scope`、`tests/test_workbench_relation_sql_projection.py::WorkbenchRelationSqlProjectionTests::test_rebuild_rows_uses_changed_row_ids_without_month_source_scan`。同月撤回热路径还必须覆盖源表各只扫一次；跨月成员补读必须覆盖只按缺失成员类型补读；操作级 row refresh 必须证明不做全月源表扫描。
-- E2E fan-out：`web/e2e/workbench-relation-fanout.spec.ts`、`workbench-relations-*.spec.ts`。
-
-## 当前缺口和删除条件
-
-- 每个历史修复工具保留时必须写明迁移/兼容理由。
-- 删除旧关系路径前必须证明确认关联和撤回都可通过业务逻辑恢复到原状态。
-
-## Canonical facts ownership
-
-- Owned facts: `app.workbench_pair_relations`、`app.workbench_pair_relation_history`。
-- Allowed writes: `WorkbenchRelationCommandService`、relation UoW、明确 migration/repair adapter。`update_relation_metadata_for_case_id` 可更新 metadata/display tags/amount_check，并可在 command service 白名单校验后升级 relation mode；调用方不得绕过 command service 直接改 relation mode。
-- Allowed reads: `WorkbenchRelationReadFacade`、relation repository/read ports。
-- Downstream outputs: workbench_relation、workbench、bank_flow_rule_batch、pending invoice、input/output invoice usage、OA pending、tax、cost、search dirty scopes 或 owner producer 输出。
-- `no_oa_bank_batch` 下游输出在过渡期同时覆盖 no-OA 与 bank-flow 批量处理：关系事实源只根据 relation payload 的 `relation_mode` 分发，不解释业务规则；worker handler 必须从 payload/metadata 读取目标 relation mode。
-- Forbidden paths: 调用方不得直接改关系表、不得自行拼 confirmed relation 状态、不得通过 legacy fallback 绕过 command service。
-- Old code deletion: direct pair relation write fallback、旧关系修复半写入和调用方内联关系状态机必须删除；legacy `WorkbenchActionService` 已删除，legacy `WorkbenchApiRoutes` 不再承载 `confirm_link`、`mark_exception`、`cancel_link` 或 `update_bank_exception` 写状态机；旧 `/workbench`、`/workbench/prototype` 和 `/workbench/actions/confirm|difference|exception|offline|offset` HTTP compat route owner 已删除，不再作为 relation 写入口；离线 migration/audit/rollback 工具保留不算 closure。
+- 禁止 route/service/worker 直接 SQL 写 relation/history。
+- 禁止 `Application` snapshot、`app_settings state:*`、Redis、RabbitMQ、read model 或前端 event 成为 relation 事实源。
+- 禁止 candidate/decision service/store/table/API、隐藏 fallback 或双写重新进入调用图。
+- 旧 generic `MatchingEngineService` 仅可服务其独立 legacy reconciliation/内部转账备注上下文；它的 result 不得决定 Workbench membership、zone、linked status 或正式关系写入。该隔离由 boundary guards 和 grouping tests 保护。
+- migration/repair 工具必须 dry-run、精确 scope、审计和 rollback manifest，且只能调用正式 command/repository adapter。

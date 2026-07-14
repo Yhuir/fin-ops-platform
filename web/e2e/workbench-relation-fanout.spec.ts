@@ -18,8 +18,8 @@ test.describe("workbench relation browser flow", () => {
     await expect(page.getByTestId("bank-details-page")).toBeVisible();
     const bankRowBefore = page.getByRole("row", { name: /智能工厂设备商/ });
     await expect(bankRowBefore).toBeVisible();
-    await expect(bankRowBefore.getByText("候选oa")).toBeVisible();
-    await expect(bankRowBefore.getByText("候选发票")).toBeVisible();
+    await expect(bankRowBefore.getByText("无oa")).toBeVisible();
+    await expect(bankRowBefore.getByText("无发票")).toBeVisible();
     const bankTransactionRequestCountBefore = api.count("GET /api/bank-details/transactions");
 
     await confirmWorkbenchRelation(page, recordLatency);

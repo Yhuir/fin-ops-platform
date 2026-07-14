@@ -394,7 +394,7 @@ class CostStatisticsProjectionConnection:
                     [
                         {
                             "group_id": "group-candidate",
-                            "zone": "open",
+                            "zone": "unpaired",
                             "payload": {
                                 "group_id": "group-candidate",
                                 "group_type": "candidate",
@@ -420,7 +420,7 @@ class CostStatisticsProjectionConnection:
                         },
                         {
                             "group_id": "group-candidate",
-                            "zone": "open",
+                            "zone": "unpaired",
                             "payload": {
                                 "group_id": "group-candidate",
                                 "group_type": "candidate",

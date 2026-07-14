@@ -74,7 +74,6 @@ class SettingsDataResetService:
         workbench_override_service: Any,
         workbench_pair_snapshot_port: SettingsDataResetPairSnapshotPort,
         workbench_read_model_service: Any,
-        workbench_matching_dirty_scope_service: Any,
         tax_certified_import_service: Any,
     ) -> None:
         self._state_store = state_store
@@ -84,7 +83,6 @@ class SettingsDataResetService:
         self._workbench_override_service = workbench_override_service
         self._workbench_pair_snapshot_port = workbench_pair_snapshot_port
         self._workbench_read_model_service = workbench_read_model_service
-        self._workbench_matching_dirty_scope_service = workbench_matching_dirty_scope_service
         self._tax_certified_import_service = tax_certified_import_service
 
     @staticmethod
@@ -143,8 +141,6 @@ class SettingsDataResetService:
             "workbench_row_overrides": len(self._row_overrides()),
             "workbench_pair_relations": len(self._pair_relations()),
             "workbench_read_models": len(self._read_models()),
-            "workbench_candidate_matches": len(self._candidate_matches()),
-            "workbench_matching_dirty_scopes": len(self._matching_dirty_scopes()),
             "stored_import_files": deleted_blob_count,
         }
         return SettingsDataResetResult(
@@ -157,8 +153,6 @@ class SettingsDataResetService:
                 "workbench_row_overrides",
                 "workbench_pair_relations",
                 "workbench_read_models",
-                "workbench_candidate_matches",
-                "workbench_matching_dirty_scopes",
                 "import_batches(bank_transaction)",
                 "file_import_sessions(bank_transaction)",
                 "file_import_files(bank_transaction)",
@@ -202,8 +196,6 @@ class SettingsDataResetService:
             "workbench_row_overrides": len(self._row_overrides()),
             "workbench_pair_relations": len(self._pair_relations()),
             "workbench_read_models": len(self._read_models()),
-            "workbench_candidate_matches": len(self._candidate_matches()),
-            "workbench_matching_dirty_scopes": len(self._matching_dirty_scopes()),
             "tax_certified_import_sessions": tax_deleted_counts["sessions"],
             "tax_certified_import_batches": tax_deleted_counts["batches"],
             "tax_certified_import_records": tax_deleted_counts["records"],
@@ -219,8 +211,6 @@ class SettingsDataResetService:
                 "workbench_row_overrides",
                 "workbench_pair_relations",
                 "workbench_read_models",
-                "workbench_candidate_matches",
-                "workbench_matching_dirty_scopes",
                 "tax_certified_import_sessions",
                 "tax_certified_import_batches",
                 "tax_certified_import_records",
@@ -264,7 +254,6 @@ class SettingsDataResetService:
             "workbench_oa_pair_relations": removed_oa_pair_relation_count,
             "workbench_preserved_non_oa_pair_relations": preserved_non_oa_pair_relation_count,
             "workbench_read_models": len(read_models),
-            "workbench_candidate_matches": len(self._candidate_matches()),
         }
         self._emit_progress(progress_callback, "persist_state", "正在写入 OA 重置结果。", 1, 2)
         self._state_store.save_workbench_overrides(
@@ -275,7 +264,6 @@ class SettingsDataResetService:
         )
         self._workbench_pair_snapshot_port.save_pair_relations(kept_pair_relations)
         self._state_store.save_workbench_read_models({})
-        self._state_store.save_workbench_candidate_matches({})
         return SettingsDataResetResult(
             action=RESET_OA_AND_REBUILD_ACTION,
             status="completed",
@@ -283,7 +271,6 @@ class SettingsDataResetService:
                 "workbench_row_overrides",
                 "workbench_pair_relations",
                 "workbench_read_models",
-                "workbench_candidate_matches",
             ],
             deleted_counts=deleted_counts,
             protected_targets=self.protected_targets(),
@@ -313,8 +300,6 @@ class SettingsDataResetService:
         self._state_store.save_workbench_overrides({})
         self._state_store.save_workbench_pair_relations({})
         self._state_store.save_workbench_read_models({})
-        self._state_store.save_workbench_candidate_matches({})
-        self._state_store.save_workbench_matching_dirty_scopes({})
 
     def _build_filtered_imports_snapshot(
         self,
@@ -420,16 +405,6 @@ class SettingsDataResetService:
         snapshot = self._workbench_read_model_service.snapshot()
         read_models = snapshot.get("read_models")
         return read_models if isinstance(read_models, dict) else {}
-
-    def _candidate_matches(self) -> dict[str, Any]:
-        snapshot = self._state_store.load_workbench_candidate_matches()
-        candidates = snapshot.get("candidates") if isinstance(snapshot, dict) else {}
-        return candidates if isinstance(candidates, dict) else {}
-
-    def _matching_dirty_scopes(self) -> dict[str, Any]:
-        snapshot = self._workbench_matching_dirty_scope_service.snapshot()
-        dirty_scopes = snapshot.get("dirty_scopes") if isinstance(snapshot, dict) else {}
-        return dirty_scopes if isinstance(dirty_scopes, dict) else {}
 
     @classmethod
     def _is_oa_workbench_row_override(cls, row_id: str, override: Any) -> bool:

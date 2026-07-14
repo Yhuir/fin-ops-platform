@@ -14,7 +14,7 @@ function createInputInvoiceUsageFanoutLatencyRecorder(page: Page, testInfo: Test
 }
 
 test.describe("input invoice usage relation browser fan-out", () => {
-  test("keeps legacy OA evidence non-selectable and refreshes downstream read models after workbench confirm", async ({ page }, testInfo) => {
+  test("keeps an unpaired invoice selectable and refreshes formal downstream relations after workbench confirm", async ({ page }, testInfo) => {
     const browserErrors: string[] = [];
     page.on("pageerror", (error) => {
       browserErrors.push(`pageerror: ${error.stack || error.message}`);
@@ -59,9 +59,8 @@ test.describe("input invoice usage relation browser fan-out", () => {
     const relationRowBefore = page.getByRole("row", { name: /SD-INV-E2E-REL-001/ });
     await expect(relationRowBefore).toBeVisible();
     await expect(relationRowBefore).toContainText("智能工厂设备商");
-    await expect(relationRowBefore).toContainText("陈涛");
     await expect(relationRowBefore).toContainText("待处理");
-    await expect(relationRowBefore).toContainText("设备尾款候选关系");
+    await expect(relationRowBefore).not.toContainText("关联台已确认");
 
     const workflow = page.getByLabel("以发票反提 OA 工作流", { exact: true });
     await recordLatency({
@@ -81,7 +80,7 @@ test.describe("input invoice usage relation browser fan-out", () => {
     const candidateInvoice = workflow.getByRole("row", { name: /SD-INV-E2E-REL-001/ });
     await expect(candidateInvoice).toBeVisible();
     await expect(candidateInvoice.getByText("未关联oa")).toBeVisible();
-    await expect(workflow.getByLabel("未关联 OA 发票 SD-INV-E2E-REL-001 不可选择")).toBeDisabled();
+    await expect(workflow.getByLabel("选择候选发票 SD-INV-E2E-REL-001")).toBeChecked();
     await expect(workflow.getByLabel("选择候选发票 SD-INV-E2E-001")).toBeChecked();
     expect(api.count("POST /api/input-invoice-usage/oa-reverse/oa-draft")).toBe(0);
 

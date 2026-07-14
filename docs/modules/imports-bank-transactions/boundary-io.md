@@ -1,6 +1,6 @@
 # 银行流水导入模块边界与 I/O
 
-日期：2026-07-11
+日期：2026-07-15
 
 ## 模块化状态
 
@@ -40,6 +40,8 @@ Import worker 注册 handler 时只固定 processor 类型，不得把启动时�
 生产 API 的 session GET、confirm、retry 与 background retry 在进入 file/session service 前同样必须从 `load_imports_snapshot` + `load_file_imports_snapshot` 显式恢复当前 PostgreSQL import runtime；该恢复只属于导入操作边界，不得重新启用 `state:imports`、`state:file_imports` 或 full-state bootstrap fallback。
 
 file/session confirm 的持久化输出必须是本次所选 session、正式 batch 及其新建/状态更新 canonical facts 的精确 delta。合法重复行只引用既有 transaction，不重新拥有或回写该 transaction；该链不得回写其它 session、未受影响 invoice、ETC 或 tax-certified 全量 snapshot。调用方必须通过 `ApplicationStateStoreProtocol.save_import_delta(...)` 写入；PostgreSQL 实现幂等 upsert，本地实现按 batch/entity/session id 合并，二者共享“未出现在 delta 中的事实保持不变”语义，再由 write target envelope 触发受影响页面 fan-out。
+
+confirm 的 I/O 顺序必须是 `save_import_delta` 成功提交在先，tax/read-model invalidation 与 Workbench matching enqueue 在后。持久化失败时不得发布任何下游任务；禁止让 worker 在 canonical facts 可见之前消费 scope，也禁止后台状态写入与 confirm 形成丢失更新窗口。
 
 通用 `Application._persist_state()` 已从 import canonical/session 写链隔离，不得再包含 `imports`、`file_imports` 或调用其全量 snapshot。preview/retry 只通过 `_persist_import_preview_state()` 持久化 session/file 状态，confirm 只通过上述 delta 边界持久化正式事实；OA 附件发票晋升和 ETC metadata 关联分别使用 `save_invoices` 与 `save_invoice_etc_metadata` 窄端口。
 

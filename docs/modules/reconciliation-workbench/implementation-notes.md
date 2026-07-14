@@ -1050,3 +1050,13 @@
 - 测试覆盖：`test_repository_composed_all_open_page_keeps_formalized_decision_origin_group` 同时证明旧 automatic group 被移除、正式化 decision-origin group 被保留且 counts 正确；`test_repository_group_detail_distinguishes_formalized_decision_origin_relation` 保护 detail；`test_workbench_groups_api_redis_cache_key_includes_groups_page_schema_version` 保护 cache invalidation I/O。
 - 旧链路清理：全仓扫描确认仅移除 repository groups list 的前缀-only SQL 和重复后置过滤；relation mode registry、downstream distribution、projection cleanup 与 withdraw 对未正式化 decision 的拒绝继续保留。
 - 数据安全：修复是纯 read-side 查询和缓存键变更，不写 canonical facts、read model rows、dirty scope 或 outbox。生产恢复只需发布代码并只读复核目标 list/detail/page audit；不执行 repair SQL 或 read model rebuild。
+
+## 2026-07-14 - 正式关系二态与确定性自动正式化
+
+- 目标：关联台用户关系状态只保留 `paired` / `unpaired`；active 正式关系完整成员同组，其余 canonical facts 全部 singleton 可见。
+- 完整根因：旧 candidate/decision/open 投影把计算结果混入展示 ownership；部分 repository/filter 又按历史 case 前缀判断可见性，既可能隐藏已正式化关系，也可能把无正式关系的事实合并或隐藏。
+- 决策：删除 candidate/decision 表、service、store、engine、API 与前端组件；纯 `WorkbenchFreeMatchingEngine` 只生成可直接提交的 `FormalRelationPlan`，由 orchestrator 在单 relation UoW 中创建或扩展 active 正式关系。
+- 安全规则：显式引用查全历史；组合证据 365 日；强证据图连通；币种、方向、各 pane 合计严格一致；支持有界任意 `N:M:K`；金额-only、模糊/date-only、竞争闭合、资源超限和无显式原始引用的红冲退款全部 fail closed。
+- 分组不变量：`paired = active relation members`、`unpaired = canonical facts - paired`；旧 `case_id`、candidate metadata、输入 section 与来源 provenance 不能改变 membership。
+- 迁移：0104 只 forward-drop 派生旧状态，不触碰 canonical facts/relation/history；发布后必须全量 rehydrate、等待 durable scopes fresh 并执行页面 Audit。
+- 固定验收：云南立孚 520 发票/OA active case 必须 paired；13 张合计 1709.49 元但无唯一强证据的发票必须完整显示为 13 个 unpaired singleton。

@@ -4,7 +4,7 @@ import ResizableTriPane, { type WorkbenchPane } from "./ResizableTriPane";
 import { useResizablePanes } from "../../hooks/useResizablePanes";
 import type { WorkbenchPaneTimeFilter, WorkbenchZoneDisplayState } from "../../features/workbench/groupDisplayModel";
 import type {
-  WorkbenchCandidateGroup,
+  WorkbenchRelationGroup,
   WorkbenchColumnLayouts,
   WorkbenchInvoiceInventory,
   WorkbenchRecord,
@@ -15,24 +15,24 @@ import type { WorkbenchInlineAction } from "./RowActions";
 import type { WorkbenchColumnDropPosition } from "../../features/workbench/columnLayout";
 
 type WorkbenchZoneProps = {
-  zoneId: "paired" | "open";
+  zoneId: "paired" | "unpaired";
   title: string;
   tone: "success" | "warning";
   meta?: string;
   panes: WorkbenchPane[];
-  groups?: WorkbenchCandidateGroup[];
-  sourceGroups?: WorkbenchCandidateGroup[];
+  groups?: WorkbenchRelationGroup[];
+  sourceGroups?: WorkbenchRelationGroup[];
   invoiceInventory?: WorkbenchInvoiceInventory;
   displayState: WorkbenchZoneDisplayState;
   columnLayouts?: WorkbenchColumnLayouts;
   isExpanded: boolean;
   isVisible: boolean;
   onToggleExpand: () => void;
-  getRowState: (row: WorkbenchRecord, zoneId: "paired" | "open") => WorkbenchRowState;
-  onSelectRow: (row: WorkbenchRecord, zoneId: "paired" | "open") => void;
+  getRowState: (row: WorkbenchRecord, zoneId: "paired" | "unpaired") => WorkbenchRowState;
+  onSelectRow: (row: WorkbenchRecord, zoneId: "paired" | "unpaired") => void;
   onOpenDetail: (row: WorkbenchRecord) => void;
   onRowAction: (row: WorkbenchRecord, action: WorkbenchInlineAction) => void;
-  onEnsureGroupDetail?: (zoneId: "paired" | "open", groupId: string) => Promise<void>;
+  onEnsureGroupDetail?: (zoneId: "paired" | "unpaired", groupId: string) => Promise<void>;
   canMutateData: boolean;
   highlightedRowId?: string | null;
   selectionSummary?: {
@@ -65,19 +65,19 @@ type WorkbenchZoneProps = {
     onClick: () => void;
     tone?: "warning" | "danger";
   }>;
-  onTogglePaneSearch: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => void;
-  onClosePaneSearch: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => void;
-  onClearPaneSearch: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => void;
-  onPaneSearchQueryChange: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice", query: string) => void;
+  onTogglePaneSearch: (zoneId: "paired" | "unpaired", paneId: "oa" | "bank" | "invoice") => void;
+  onClosePaneSearch: (zoneId: "paired" | "unpaired", paneId: "oa" | "bank" | "invoice") => void;
+  onClearPaneSearch: (zoneId: "paired" | "unpaired", paneId: "oa" | "bank" | "invoice") => void;
+  onPaneSearchQueryChange: (zoneId: "paired" | "unpaired", paneId: "oa" | "bank" | "invoice", query: string) => void;
   onColumnFilterChange: (
-    zoneId: "paired" | "open",
+    zoneId: "paired" | "unpaired",
     paneId: "oa" | "bank" | "invoice",
     columnKey: string,
     selectedValues: string[],
   ) => void;
-  onTogglePaneSort: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => void;
+  onTogglePaneSort: (zoneId: "paired" | "unpaired", paneId: "oa" | "bank" | "invoice") => void;
   onPaneTimeFilterChange?: (
-    zoneId: "paired" | "open",
+    zoneId: "paired" | "unpaired",
     paneId: "oa" | "bank" | "invoice",
     filter: WorkbenchPaneTimeFilter,
   ) => void;

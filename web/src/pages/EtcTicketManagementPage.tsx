@@ -1,6 +1,7 @@
 import {
   ArrowRight,
   CheckCircle2,
+  Download,
   ExternalLink,
   Plus,
   RefreshCw,
@@ -29,6 +30,7 @@ import {
   deleteEtcReconciliationTask,
   deleteEtcReconciliationTaskImportedInvoices,
   deleteEtcReconciliationSourceFile,
+  downloadEtcBusinessBatchInvoicePdf,
   fetchEtcBusinessBatchDetail,
   fetchEtcBusinessBatches,
   fetchEtcInvoices,
@@ -865,6 +867,7 @@ export default function EtcTicketManagementPage() {
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
   const [draftCreating, setDraftCreating] = useState(false);
+  const [invoicePdfDownloadingBatchId, setInvoicePdfDownloadingBatchId] = useState("");
   const [draftResult, setDraftResult] = useState<EtcOaDraftPayload | null>(null);
   const [oaActionLoading, setOaActionLoading] = useState(false);
   const [editingBatchTitleId, setEditingBatchTitleId] = useState("");
@@ -2054,6 +2057,30 @@ export default function EtcTicketManagementPage() {
     openOaDraftUrl(draftResult?.oaDraftUrl || currentOaActionBatch?.oaDraftUrl || "");
   };
 
+  const handleDownloadInvoicePdf = async (batch: EtcBusinessBatchDetail | EtcBusinessBatchSummary) => {
+    setActionError(null);
+    setInvoicePdfDownloadingBatchId(batch.businessBatchId);
+    try {
+      const result = await downloadEtcBusinessBatchInvoicePdf(batch.businessBatchId);
+      if (typeof URL.createObjectURL !== "function") {
+        throw new Error("当前浏览器不支持文件下载。");
+      }
+      const objectUrl = URL.createObjectURL(result.blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = result.fileName;
+      anchor.rel = "noopener";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch (caught) {
+      setActionError(formatEtcUiErrorMessage(caught, "ETC 发票 PDF 下载失败。"));
+    } finally {
+      setInvoicePdfDownloadingBatchId("");
+    }
+  };
+
   const handleManualBusinessBatchOaStatus = async (
     decision: "submitted" | "not_submitted",
     batch?: EtcBusinessBatchDetail | EtcBusinessBatchSummary | null,
@@ -2123,6 +2150,15 @@ export default function EtcTicketManagementPage() {
               打开草稿
             </button>
           ) : null}
+          <button
+            type="button"
+            className="etc-secondary-action"
+            disabled={invoicePdfDownloadingBatchId === batch.businessBatchId}
+            onClick={() => void handleDownloadInvoicePdf(batch)}
+          >
+            <Download aria-hidden="true" size={16} />
+            {invoicePdfDownloadingBatchId === batch.businessBatchId ? "正在合并..." : "下载发票PDF"}
+          </button>
           <button
             type="button"
             className="etc-primary-action"

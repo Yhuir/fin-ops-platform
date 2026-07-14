@@ -1274,22 +1274,13 @@ class InputInvoiceUsageQueryService:
     @staticmethod
     def _relation_status(relation: dict[str, Any] | None) -> str:
         if not relation:
-            return ""
-        relation_status = str(relation.get("relation_status") or relation.get("relationStatus") or "").strip()
-        if relation_status:
-            return relation_status
-        if str(relation.get("status") or "").strip() == "active":
-            return "linked"
-        return ""
+            return "unlinked"
+        return "linked" if str(relation.get("status") or "active").strip() == "active" else "unlinked"
 
     @classmethod
     def _relation_is_confirmed(cls, relation: dict[str, Any]) -> bool:
         relation_status = cls._relation_status(relation)
-        if relation_status == "candidate":
-            return False
-        if relation_status == "linked":
-            return True
-        return str(relation.get("status") or "").strip() == "active"
+        return relation_status == "linked"
 
 def _parse_positive_int(value: int | str | None, field: str, *, maximum: int | None = None) -> int:
     try:

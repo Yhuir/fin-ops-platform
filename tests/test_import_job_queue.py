@@ -197,6 +197,38 @@ def import_job(**overrides: object) -> ImportJob:
 
 
 class ImportJobRepositoryTests(unittest.TestCase):
+    def test_runtime_import_processor_configures_object_storage_for_durable_archives(self) -> None:
+        connection = object()
+        repository = object()
+        state_store = object()
+        settings = SimpleNamespace(enabled=True)
+        factory = ImportRuntimeProcessorFactory(data_dir="/tmp/finops-test", connection=connection)
+
+        with (
+            patch(
+                "fin_ops_platform.services.object_storage.ObjectStorageSettings.from_env",
+                return_value=settings,
+            ) as settings_from_env,
+            patch(
+                "fin_ops_platform.services.object_storage.S3ObjectStorageRepository",
+                return_value=repository,
+            ) as repository_type,
+            patch(
+                "fin_ops_platform.services.postgres_state_store.PostgresStateStore",
+                return_value=state_store,
+            ) as state_store_type,
+        ):
+            result = factory._state_store()  # noqa: SLF001
+
+        self.assertIs(result, state_store)
+        settings_from_env.assert_called_once_with()
+        repository_type.assert_called_once_with(settings)
+        state_store_type.assert_called_once_with(
+            data_dir="/tmp/finops-test",
+            connection=connection,
+            object_storage_repository=repository,
+        )
+
     def test_runtime_import_processor_reloads_durable_state_after_worker_bootstrap(self) -> None:
         factory = ImportRuntimeProcessorFactory(data_dir="/tmp/finops-test", connection=object())
         generations: list[int] = []

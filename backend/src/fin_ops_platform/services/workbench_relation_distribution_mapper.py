@@ -38,7 +38,7 @@ def relation_dict_from_distribution_group(group: dict[str, Any]) -> dict[str, An
     relation_status = _text(payload.get("relation_status") or group.get("relation_status")) or "linked"
     relation_mode = _text(payload.get("relation_mode"))
     relation_source = _text(group.get("relation_source") or payload.get("relation_source"))
-    if relation_status != "linked" or relation_mode == "automatic_decision" or relation_source == "automatic_decision":
+    if relation_status != "linked":
         return None
     return {
         "case_id": group_id,

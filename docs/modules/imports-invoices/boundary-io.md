@@ -1,6 +1,6 @@
 # 发票导入模块边界与 I/O
 
-日期：2026-06-26
+日期：2026-07-15
 
 ## 模块化状态
 
@@ -32,6 +32,8 @@
 | 上传文件/模板选择 | `ImportInvoicesPage.tsx` | 文件先进入 import file service |
 | 预览确认 | `ImportWorkflowPage.tsx` | 确认后创建 job/正式化 |
 | Job event | import job queue | 后台可恢复处理 |
+
+file/session confirm 必须先通过 `save_import_delta` 持久化所选 session、batch 与 canonical invoice 精确 delta，成功后才允许发布 tax/read-model invalidation 和 Workbench matching。持久化失败时下游发布数必须为零；禁止以“先 enqueue、后保存”的旧顺序让 worker 读取未提交事实或覆盖确认状态。
 
 ## 输出 I/O
 

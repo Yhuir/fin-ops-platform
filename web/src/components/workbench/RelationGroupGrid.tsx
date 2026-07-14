@@ -20,7 +20,7 @@ import {
   type WorkbenchZoneDisplayState,
 } from "../../features/workbench/groupDisplayModel";
 import type {
-  WorkbenchCandidateGroup,
+  WorkbenchRelationGroup,
   WorkbenchColumnLayouts,
   WorkbenchInvoiceInventory,
   WorkbenchRecord,
@@ -30,17 +30,17 @@ import type { WorkbenchRowState } from "../../hooks/useWorkbenchSelection";
 import { getWorkbenchColumns, getWorkbenchPaneGridStyle } from "../../features/workbench/tableConfig";
 import type { WorkbenchInlineAction } from "./RowActions";
 import type { WorkbenchPane } from "./ResizableTriPane";
-import CandidateGroupCell from "./CandidateGroupCell";
+import RelationGroupCell from "./RelationGroupCell";
 import WorkbenchColumnFilterMenu from "./WorkbenchColumnFilterMenu";
 import WorkbenchPaneSearch from "./WorkbenchPaneSearch";
 import WorkbenchPaneTimeFilter from "./WorkbenchPaneTimeFilter";
 import type { WorkbenchColumnDropPosition } from "../../features/workbench/columnLayout";
 
-type CandidateGroupGridProps = {
-  zoneId: "paired" | "open";
+type RelationGroupGridProps = {
+  zoneId: "paired" | "unpaired";
   panes: WorkbenchPane[];
-  groups: WorkbenchCandidateGroup[];
-  sourceGroups?: WorkbenchCandidateGroup[];
+  groups: WorkbenchRelationGroup[];
+  sourceGroups?: WorkbenchRelationGroup[];
   invoiceInventory?: WorkbenchInvoiceInventory;
   displayState?: WorkbenchZoneDisplayState;
   columnLayouts?: WorkbenchColumnLayouts;
@@ -49,28 +49,28 @@ type CandidateGroupGridProps = {
     key: string;
     label: string;
     className?: string;
-    renderGroup: (group: WorkbenchCandidateGroup) => ReactNode;
+    renderGroup: (group: WorkbenchRelationGroup) => ReactNode;
   }>;
   actionMode?: "default" | "cancel-exception-only";
   highlightedRowId?: string | null;
-  getRowState: (row: WorkbenchRecord, zoneId: "paired" | "open") => WorkbenchRowState;
-  onSelectRow: (row: WorkbenchRecord, zoneId: "paired" | "open") => void;
+  getRowState: (row: WorkbenchRecord, zoneId: "paired" | "unpaired") => WorkbenchRowState;
+  onSelectRow: (row: WorkbenchRecord, zoneId: "paired" | "unpaired") => void;
   onOpenDetail: (row: WorkbenchRecord) => void;
   onRowAction: (row: WorkbenchRecord, action: WorkbenchInlineAction) => void;
-  onEnsureGroupDetail?: (zoneId: "paired" | "open", groupId: string) => Promise<void>;
-  onTogglePaneSearch?: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => void;
-  onClosePaneSearch?: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => void;
-  onClearPaneSearch?: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => void;
-  onPaneSearchQueryChange?: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice", query: string) => void;
+  onEnsureGroupDetail?: (zoneId: "paired" | "unpaired", groupId: string) => Promise<void>;
+  onTogglePaneSearch?: (zoneId: "paired" | "unpaired", paneId: "oa" | "bank" | "invoice") => void;
+  onClosePaneSearch?: (zoneId: "paired" | "unpaired", paneId: "oa" | "bank" | "invoice") => void;
+  onClearPaneSearch?: (zoneId: "paired" | "unpaired", paneId: "oa" | "bank" | "invoice") => void;
+  onPaneSearchQueryChange?: (zoneId: "paired" | "unpaired", paneId: "oa" | "bank" | "invoice", query: string) => void;
   onColumnFilterChange?: (
-    zoneId: "paired" | "open",
+    zoneId: "paired" | "unpaired",
     paneId: "oa" | "bank" | "invoice",
     columnKey: string,
     selectedValues: string[],
   ) => void;
-  onTogglePaneSort?: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => void;
+  onTogglePaneSort?: (zoneId: "paired" | "unpaired", paneId: "oa" | "bank" | "invoice") => void;
   onPaneTimeFilterChange?: (
-    zoneId: "paired" | "open",
+    zoneId: "paired" | "unpaired",
     paneId: "oa" | "bank" | "invoice",
     filter: WorkbenchPaneTimeFilterState,
   ) => void;
@@ -89,7 +89,7 @@ type CollapsedSummaryCopy = {
 };
 
 function resolveCollapsedSummaryCopy(
-  group: WorkbenchCandidateGroup,
+  group: WorkbenchRelationGroup,
   paneId: WorkbenchRecordType,
   collapsedRows: WorkbenchRecord[],
 ): CollapsedSummaryCopy {
@@ -136,7 +136,7 @@ function resolvePreviewExpansionCopy(paneId: WorkbenchRecordType): CollapsedSumm
   };
 }
 
-function CandidateGroupGrid({
+function RelationGroupGrid({
   zoneId,
   panes,
   groups,
@@ -162,7 +162,7 @@ function CandidateGroupGrid({
   onPaneTimeFilterChange = () => undefined,
   onReorderPaneColumns = () => undefined,
   canMutateData,
-}: CandidateGroupGridProps) {
+}: RelationGroupGridProps) {
   const gridRef = useRef<HTMLDivElement | null>(null);
   const [openFilterMenu, setOpenFilterMenu] = useState<{ paneId: WorkbenchRecordType; columnKey: string } | null>(null);
   const [expandedPaneGroups, setExpandedPaneGroups] = useState<Set<string>>(() => new Set());
@@ -325,7 +325,7 @@ function CandidateGroupGrid({
   }, []);
 
   const togglePaneGroupExpansion = useCallback(async (
-    group: WorkbenchCandidateGroup,
+    group: WorkbenchRelationGroup,
     paneId: WorkbenchRecordType,
     isExpanded: boolean,
     totalRowCount: number,
@@ -522,7 +522,7 @@ function CandidateGroupGrid({
                           gridRow: segmentIndex + 1,
                         }}
                       >
-                        <CandidateGroupCell
+                        <RelationGroupCell
                           actionMode={actionMode}
                           columnGridStyle={paneGridStyleByPane[paneId]}
                           columns={columnsByPane[paneId]}
@@ -538,7 +538,7 @@ function CandidateGroupGrid({
                           scrollPaneId={paneId}
                           scrollTestId={`candidate-scroll-${zoneId}-${group.id}-${segment.id}-${pane.id}`}
                           showActionColumn={paneHasActionColumn(paneId)}
-                          showWorkflowActions={zoneId !== "open"}
+                          showWorkflowActions={zoneId !== "unpaired"}
                           canMutateData={canMutateData}
                           zoneId={zoneId}
                         />
@@ -561,7 +561,7 @@ function CandidateGroupGrid({
                       gridRow: `1 / span ${segmentCount}`,
                     }}
                   >
-                    <CandidateGroupCell
+                    <RelationGroupCell
                       actionMode={actionMode}
                       columnGridStyle={paneGridStyleByPane[paneId]}
                       columns={columnsByPane[paneId]}
@@ -577,7 +577,7 @@ function CandidateGroupGrid({
                       scrollPaneId={paneId}
                       scrollTestId={`candidate-scroll-${zoneId}-${group.id}-${pane.id}`}
                       showActionColumn={paneHasActionColumn(paneId)}
-                      showWorkflowActions={zoneId !== "open"}
+                      showWorkflowActions={zoneId !== "unpaired"}
                       canMutateData={canMutateData}
                       zoneId={zoneId}
                     />
@@ -639,7 +639,7 @@ function CandidateGroupGrid({
               return (
                 <Fragment key={`${group.id}-${pane.id}`}>
                   <div className="candidate-group-pane-slot candidate-group-pane-slot-sheet">
-                    <CandidateGroupCell
+                    <RelationGroupCell
                       actionMode={actionMode}
                       columnGridStyle={paneGridStyleByPane[paneId]}
                       columns={columnsByPane[paneId]}
@@ -655,7 +655,7 @@ function CandidateGroupGrid({
                       scrollPaneId={paneId}
                       scrollTestId={`candidate-scroll-${zoneId}-${group.id}-${pane.id}`}
                       showActionColumn={paneHasActionColumn(paneId)}
-                      showWorkflowActions={zoneId !== "open"}
+                      showWorkflowActions={zoneId !== "unpaired"}
                       canMutateData={canMutateData}
                       zoneId={zoneId}
                     />
@@ -886,7 +886,7 @@ function CandidateGroupGrid({
   );
 }
 
-export default memo(CandidateGroupGrid);
+export default memo(RelationGroupGrid);
 
 function hasDefaultRowActions(row: WorkbenchRecord) {
   return row.availableActions.some((action) => action !== "detail" && action !== "view_relation");
@@ -899,7 +899,7 @@ function isSourceSegmentedPane(paneId: WorkbenchRecordType, segments: ReturnType
   return Boolean(segments?.some((segment) => segment.rows[paneId].length > 0));
 }
 
-function buildCollapsedSummaryDetailRequestKey(zoneId: "paired" | "open", group: WorkbenchCandidateGroup, panes: WorkbenchPane[]) {
+function buildCollapsedSummaryDetailRequestKey(zoneId: "paired" | "unpaired", group: WorkbenchRelationGroup, panes: WorkbenchPane[]) {
   if (group.displayMode !== "collapsed_summary") {
     return null;
   }
@@ -915,7 +915,7 @@ function buildCollapsedSummaryDetailRequestKey(zoneId: "paired" | "open", group:
   return `${zoneId}:${group.id}:${truncatedPaneSignatures.join("|")}`;
 }
 
-function clearPreviewDetailRequestKeys(zoneId: "paired" | "open", groupId: string, requestKeys: Set<string>) {
+function clearPreviewDetailRequestKeys(zoneId: "paired" | "unpaired", groupId: string, requestKeys: Set<string>) {
   const prefix = `${zoneId}:${groupId}:`;
   requestKeys.forEach((requestKey) => {
     if (requestKey.startsWith(prefix)) {

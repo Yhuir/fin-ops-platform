@@ -23,10 +23,10 @@ test.describe("workbench withdraw browser flow", () => {
     await confirmWorkbenchRelation(page);
 
     const pairedZone = page.getByTestId("zone-paired");
-    const openZone = page.getByTestId("zone-open");
+    const openZone = page.getByTestId("zone-unpaired");
     const pairedGroup = page.getByTestId("candidate-group-paired-case:CASE-202603-101");
     await expect(pairedGroup).toBeVisible();
-    await expect(page.getByTestId("candidate-group-open-case:CASE-202603-101")).toHaveCount(0);
+    await expect(page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001")).toHaveCount(0);
 
     await pairedGroup.getByRole("row", { name: /陈涛.*智能工厂设备商/ }).click();
     await pairedGroup.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }).click();
@@ -58,14 +58,12 @@ test.describe("workbench withdraw browser flow", () => {
     await expect(previewDialog.getByRole("button", { name: "关闭关联预览" })).toBeDisabled();
     await expect(previewDialog.getByRole("textbox", { name: "备注" })).toBeDisabled();
     await expect(pairedGroup).toBeVisible();
-    await expect(page.getByTestId("candidate-group-open-case:CASE-202603-101")).toHaveCount(0);
+    await expect(page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001")).toHaveCount(0);
 
     await expect(page.getByRole("dialog", { name: "关联预览" })).toHaveCount(0);
-    const restoredOpenGroup = page.getByTestId("candidate-group-open-case:CASE-202603-101");
-    await expect(restoredOpenGroup).toBeVisible();
-    await expect(restoredOpenGroup.getByRole("row", { name: /陈涛.*智能工厂设备商/ })).toBeVisible();
-    await expect(restoredOpenGroup.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeVisible();
-    await expect(restoredOpenGroup.getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ })).toBeVisible();
+    await expect(page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001")).toBeVisible();
+    await expect(page.getByTestId("candidate-group-unpaired-row:bk-o-202603-001")).toBeVisible();
+    await expect(page.getByTestId("candidate-group-unpaired-row:iv-o-202603-001")).toBeVisible();
     await expect(page.getByTestId("candidate-group-paired-case:CASE-202603-101")).toHaveCount(0);
     await expect(openZone.getByText("已选 0")).toBeVisible();
 
@@ -86,8 +84,8 @@ test.describe("workbench withdraw browser flow", () => {
 
     await page.getByRole("link", { name: "银行明细" }).click();
     const bankRow = page.getByRole("row", { name: /智能工厂设备商/ });
-    await expect(bankRow.getByText("候选oa")).toBeVisible();
-    await expect(bankRow.getByText("候选发票")).toBeVisible();
+    await expect(bankRow.getByText("无oa")).toBeVisible();
+    await expect(bankRow.getByText("无发票")).toBeVisible();
 
     await page.getByRole("link", { name: "待找发票" }).click();
     const pendingRow = page.getByRole("row", { name: /智能工厂设备商/ });
@@ -97,12 +95,12 @@ test.describe("workbench withdraw browser flow", () => {
     await page.getByRole("link", { name: "进项发票使用情况" }).click();
     const invoiceRow = page.getByRole("row", { name: /SD-INV-E2E-REL-001/ });
     await expect(invoiceRow).toContainText("待处理");
-    await expect(invoiceRow).toContainText("设备尾款候选关系");
+    await expect(invoiceRow).not.toContainText("关联台已确认");
 
     await page.getByRole("link", { name: "OA待付款核对" }).click();
     const oaRow = page.getByRole("row", { name: /陈涛/ });
     await expect(oaRow.locator(".oa-pending-payment-status-cell .finance-status-tag")).toHaveText("未支付");
-    expect(await oaRow.getByText("候选").count()).toBeGreaterThan(0);
+    await expect(oaRow.getByText("候选")).toHaveCount(0);
 
     await page.getByRole("link", { name: "成本统计" }).click();
     await page.getByRole("button", { name: "按项目" }).click();

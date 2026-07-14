@@ -102,7 +102,7 @@ create index if not exists workbench_group_rows_column_values_gin on read_model.
 - `read_model_refresh_slow_events`：最近 bounded 样本中最慢的有限条 outbox event 摘要，包含 event/scope/status/source_version/duration/enqueue-to-fresh/skipped 信息；该字段只用于 `/health/ready` drilldown，不把 `event_id` 或 `scope_key` 作为 Prometheus label。
 - `read_model_refresh_current_slow_events`：`recent_6h` bounded 样本中最慢的有限条 event/scope 摘要，用于定位当前窗口内具体慢 scope；同样不作为 Prometheus label 导出。
 - `stale_dirty_scope_count` 和 `stale_dirty_scopes`：超时 dirty scope 摘要。
-- `read_model.workbench_generation_consistency`：active workbench generation 的 metadata、实际 rows/groups、对象身份跨区一致性和可见 row 归属唯一性。`inconsistent` 必须按 read model unavailable 处理；如果原因是 `duplicate_invoice_identity_cross_zone`、`duplicate_bank_identity_cross_zone` 或 `duplicate_row_membership`，先运行 `python3 -m fin_ops_platform.tools.audit_object_identity --json --workbench-scope <scope>` 定位重复对象，再重建受影响 workbench/workbench_relation scope。发布前也要用同一审计命令确认 `workbench_open_visible_owner_duplicate_group_count=0`；同一命令的 `blocking_issue_count` 只计入强发票 identity、银行 identity、OA 附件强 identity、Workbench 归属和 active relation orphan 风险，弱税额指纹与 `app.etc_invoices` 原始来源重复只作为 warning。
+- `read_model.workbench_generation_consistency`：active workbench generation 的 metadata、实际 rows/groups、对象身份跨区一致性和可见 row 归属唯一性。`inconsistent` 必须按 read model unavailable 处理；如果原因是 `duplicate_invoice_identity_cross_zone`、`duplicate_bank_identity_cross_zone` 或 `duplicate_row_membership`，先运行 `python3 -m fin_ops_platform.tools.audit_object_identity --json --workbench-scope <scope>` 定位重复对象，再重建受影响 workbench/workbench_relation scope。发布前也要用同一审计命令确认 `workbench_unpaired_visible_owner_duplicate_group_count=0`；同一命令的 `blocking_issue_count` 只计入强发票 identity、银行 identity、OA 附件强 identity、Workbench 归属和 active relation orphan 风险，弱税额指纹与 `app.etc_invoices` 原始来源重复只作为 warning。
 - `redis_hit_count` / `redis_miss_count`：进程内 Redis helper 计数。
 
 RabbitMQ 接入后仍以 PostgreSQL 指标为准；RabbitMQ queue depth 和 DLQ 只能补充投递层健康度，不能代替 outbox/dirty scope 的事实状态。`/health/ready` 不实时调用 RabbitMQ Management API，避免可选管理接口把 readiness 探针拖慢；ready payload 中出现 `rabbitmq_metric_error=ready_health_rabbitmq_metrics_skipped` 表示该探针主动跳过管理指标。完整 RabbitMQ Management 指标只在 `/health`、Prometheus 或显式启用 `FIN_OPS_APP_HEALTH_DASHBOARD_RABBITMQ_METRICS=1` 的 dashboard 路径中作为补充证据。RabbitMQ 相关指标包括：
@@ -118,41 +118,11 @@ RabbitMQ 接入后仍以 PostgreSQL 指标为准；RabbitMQ queue depth 和 DLQ 
 - `rabbitmq_dlq_count`：RabbitMQ DLQ 消息数量。
 - `rabbitmq_metric_error`：RabbitMQ Management API 不可用或权限错误。
 
-### Workbench 自动决策污染修复
+### Workbench 匹配与可见性修复
 
-当关联台出现 `oa_bank_exact_sum` 把弱文本证据、OA 项目/申请人 token、已被 active relation 占用的 row，或已被 submitted no-OA batch 闭环的银行流水拼成候选时，必须先确认生成规则和 cleanup dry-run 判定已修复，再清理旧 decision；只删页面缓存或手工改一条 SQL 会被下一次 matching upsert 或 read model rebuild 污染回来。
+关联台不再保存或展示自动候选/decision。确定性匹配只有两种结果：满足安全规则时通过正式 relation command/UoW 写 active relation；否则不写关系，相关 canonical facts 各自保持 unpaired。出现错误配对、事实缺失或历史 metadata 影响分组时，先运行对象身份审计与统一 Workbench 页面审计，区分 canonical/relation 问题和 read-model freshness 问题；禁止恢复已删除的 candidate/decision 工具或表。
 
-dry-run：
-
-```bash
-PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.repair_workbench_reconciliation_decisions \
-  --scope 2026-02 \
-  --json
-```
-
-dry-run 的 `plan.items[].reasons[].code` 至少应明确命中一种已知污染原因，例如：
-
-- `active_relation_row_overlap`：decision 复用 active Workbench relation 已占用 row。
-- `submitted_no_oa_batch_row_overlap`：decision 复用 submitted no-OA batch 中的银行流水，即使对应 relation snapshot 已被取消或滞后也必须清理旧 decision。
-- `weak_only_oa_bank_sum_evidence`：`oa_bank_exact_sum` 只由弱 token 或 OA 项目/申请人来源 token 支撑。
-
-执行清理：
-
-```bash
-PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.repair_workbench_reconciliation_decisions \
-  --scope 2026-02 \
-  --execute \
-  --reason invalid_oa_bank_exact_sum_cleanup_2026_06_14 \
-  --json
-```
-
-执行清理必须通过 repair 工具或同等 service/repository 边界完成。工具会在同一事务内 expire
-无效 decision，并补投受影响月份的 `workbench` 与 `workbench_relation` read model refresh；不要绕过
-source-version guard 直接改表。若历史上已用旧版本工具执行过 expire，导致 dry-run 已归零但月度
-active generation 仍保留旧 `case:decision:*` open 组，应先通过既有 read model refresh gateway/queue
-补投该月份 `workbench` scope，再重建页面 projection。
-
-清理后重建受影响 Workbench generation，并让 `all` 从 active shards 重新聚合：
+如果 active relation 本身错误，只能使用正式、带审计的 withdraw/cancel 命令处理；如果 active relation 正确而页面分组错误，只重建受影响 Workbench generation，并让 `all` 从 active month shards 重新组合：
 
 ```bash
 PYTHONPATH=backend/src python3 scripts/rehydrate-workbench-read-models.py \
@@ -161,7 +131,7 @@ PYTHONPATH=backend/src python3 scripts/rehydrate-workbench-read-models.py \
   --json
 ```
 
-如果 relation facts 也发生变更，再通过既有 runtime queue/backfill 入口刷新下游 `workbench_relation`、`bank_detail`、`cost_statistics`、`search` 等 scope；仅清理 reconciliation decision 时，不要直接改 `app.workbench_pair_relations` 中正确的 no-OA/internal-transfer relation，也不要为了让 cleanup 命中而手工改 submitted no-OA batch。
+如果 relation facts 发生变更，再通过既有 runtime queue/backfill 入口刷新下游 `workbench_relation`、`bank_detail`、`cost_statistics`、`search` 等 scope。不得直接修改 `read_model.*`，也不得为了改变页面归属而手工改正确的 no-OA/internal-transfer relation。修复后必须证明 `paired = active relation members`、`unpaired = canonical facts - paired`、两者无交集且并集不漏事实，并等待相关 dirty/outbox drained、read models fresh、页面 Audit 零 blocking issue。
 
 告警建议：
 
@@ -778,7 +748,7 @@ runner 结束后删除远端临时 scenario；禁止把 token 放入命令参数
 - `/api/workbench/groups/detail?...&group_id=...`：单个 group 的完整详情，按用户动作懒加载。
 - Redis page cache key 必须包含 `detail_level`，避免 summary 和 full payload 互相污染。
 - Redis page cache key 必须随 active generation 变化而失效；如果页面显示旧数据，先看 `active_generation_id/read_model_version/generated_at` 是否变化，再看 Redis hit/miss 和版本 key。
-- `worker-workbench` 默认不把 Redis page-cache warmup 放进 refresh ack 前热路径；页面仍从 fresh SQL read model 读取，API 读路径只在 fresh gate 后写 Redis payload。只有显式设置 `FIN_OPS_WORKBENCH_GROUPS_SYNC_CACHE_WARMUP_ENABLED=1` 时才同步预热首屏 `paired/open` page 1 summary 和 Redis version key。若首个用户承担冷启动，按顺序检查 Redis `set_text/set_json` 错误、`FIN_OPS_WORKBENCH_GROUPS_REDIS_TTL_SECONDS`、`redis_miss_count` 和 page cache key 的 generation version。
+- `worker-workbench` 默认不把 Redis page-cache warmup 放进 refresh ack 前热路径；页面仍从 fresh SQL read model 读取，API 读路径只在 fresh gate 后写 Redis payload。只有显式设置 `FIN_OPS_WORKBENCH_GROUPS_SYNC_CACHE_WARMUP_ENABLED=1` 时才同步预热首屏 `paired/unpaired` page 1 summary 和 Redis version key。若首个用户承担冷启动，按顺序检查 Redis `set_text/set_json` 错误、`FIN_OPS_WORKBENCH_GROUPS_REDIS_TTL_SECONDS`、`redis_miss_count` 和 page cache key 的 generation version。
 - 普通 read model 的 Redis fresh-cache 必须使用 `ReadModelQueryGateway` 的 fresh-gate envelope：`payload` 之外必须有 `fresh_gate.scope_key`、`fresh_gate.read_model_status=fresh`、`fresh_gate.schema_version` 和 `fresh_gate.source_versions`。命中时 gateway 会按当前 expected source versions 校验；旧格式或 source version 不匹配的 payload 只能 fail closed 回 SQL read model，不能被当作 fresh 返回。
 - `/api/workbench/summary` 不应在热路径查询 `app.bank_transactions` 或全量扫描 `read_model.workbench_group_rows` 来修复 counts/diagnostics；summary p95 变慢时先查 `read_model.workbench_summary` active generation 是否缺失，再查 refresh worker 发布失败原因。
 - `read_model.workbench_generations` 中同一 `scope_key` 只能有一个 `status='active'`。如果存在 `building_generation_id` 但页面仍显示旧数据，这是正常刷新中；如果存在 `failed_generation_id`，页面仍读取 active generation，同时运维需要处理 `last_error`。

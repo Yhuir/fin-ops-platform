@@ -161,20 +161,6 @@ class ImportProcessingService:
                 confirmed_session,
                 selected_file_ids,
             )
-            matching_job_id = None
-            if any(file.status == "confirmed" for file in confirmed_session.files):
-                matching_job = self._enqueue_workbench_auto_matching_for_scopes(
-                    scope_months,
-                    reason="import_file_confirm",
-                    owner_user_id=owner_user_id,
-                    source={
-                        "session_id": confirmed_session.id,
-                        "selected_file_ids": selected_file_ids,
-                        "trigger_job_id": background_job_id,
-                    },
-                    triggered_by=f"import_session:{confirmed_session.id}",
-                )
-                matching_job_id = matching_job.job_id if matching_job is not None else None
             tax_offset_scope_keys = self._tax_offset_scope_keys_for_import_file_session(
                 confirmed_session,
                 selected_file_ids,
@@ -199,10 +185,6 @@ class ImportProcessingService:
                 session_id=session_id,
                 selected_file_ids=selected_file_ids,
             )
-            self._invalidate_tax_offset_read_model_scopes(
-                tax_offset_scope_keys,
-                reason="invoice_file_import_confirm",
-            )
             self._persist_confirmed_import_delta(
                 import_state_payload=import_state_payload,
                 cost_statistics_scope_keys=cost_statistics_scope_keys,
@@ -210,6 +192,24 @@ class ImportProcessingService:
                 input_invoice_usage_scope_keys=input_invoice_usage_scope_keys,
                 output_invoice_collection_scope_keys=output_invoice_collection_scope_keys,
             )
+            self._invalidate_tax_offset_read_model_scopes(
+                tax_offset_scope_keys,
+                reason="invoice_file_import_confirm",
+            )
+            matching_job_id = None
+            if any(file.status == "confirmed" for file in confirmed_session.files):
+                matching_job = self._enqueue_workbench_auto_matching_for_scopes(
+                    scope_months,
+                    reason="import_file_confirm",
+                    owner_user_id=owner_user_id,
+                    source={
+                        "session_id": confirmed_session.id,
+                        "selected_file_ids": selected_file_ids,
+                        "trigger_job_id": background_job_id,
+                    },
+                    triggered_by=f"import_session:{confirmed_session.id}",
+                )
+                matching_job_id = matching_job.job_id if matching_job is not None else None
             result_summary = {
                 "confirmed": confirmed_count,
                 "selected": total,

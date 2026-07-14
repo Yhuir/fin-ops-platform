@@ -484,22 +484,22 @@ class ManualReconciliationService:
             for transaction in all_transactions
             if transaction.id in paired_object_ids
         ]
-        open_invoice_rows = [
+        unpaired_invoice_rows = [
             self._build_invoice_row(
                 invoice,
                 case_id=self._open_link_id(invoice.id, result_by_object_id),
-                section="open",
+                section="unpaired",
                 result=result_by_object_id.get(invoice.id),
                 exception_case=exception_case_by_object_id.get(invoice.id),
             )
             for invoice in all_invoices
             if invoice.outstanding_amount != ZERO
         ]
-        open_bank_rows = [
+        unpaired_bank_rows = [
             self._build_bank_row(
                 transaction,
                 case_id=self._open_link_id(transaction.id, result_by_object_id),
-                section="open",
+                section="unpaired",
                 result=result_by_object_id.get(transaction.id),
                 exception_case=exception_case_by_object_id.get(transaction.id),
             )
@@ -513,7 +513,7 @@ class ManualReconciliationService:
                 "bank": len(all_transactions),
                 "invoice": len(all_invoices),
                 "paired": len(paired_invoice_rows) + len(paired_bank_rows),
-                "open": len(open_invoice_rows) + len(open_bank_rows),
+                "unpaired": len(unpaired_invoice_rows) + len(unpaired_bank_rows),
                 "exceptions": len(self._exception_records),
                 "case_count": len(self._cases),
             },
@@ -521,9 +521,9 @@ class ManualReconciliationService:
                 "bank": paired_bank_rows,
                 "invoice": paired_invoice_rows,
             },
-            "open": {
-                "bank": open_bank_rows,
-                "invoice": open_invoice_rows,
+            "unpaired": {
+                "bank": unpaired_bank_rows,
+                "invoice": unpaired_invoice_rows,
             },
             "context_options": {
                 "receivable_exceptions": RECEIVABLE_EXCEPTION_OPTIONS,

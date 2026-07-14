@@ -65,7 +65,7 @@ import { reorderWorkbenchColumnLayout, type WorkbenchColumnDropPosition } from "
 import { buildWorkbenchSelectionContext } from "../features/workbench/selectionModel";
 import type {
   IgnoredWorkbenchData,
-  WorkbenchCandidateGroup,
+  WorkbenchRelationGroup,
   WorkbenchData,
   WorkbenchExceptionApplyResult,
   WorkbenchGroupsPageQuery,
@@ -114,7 +114,7 @@ type CashTicketPurchaseDialogState = {
 };
 
 type CancelProcessedExceptionDialogState = {
-  group: WorkbenchCandidateGroup;
+  group: WorkbenchRelationGroup;
 };
 
 type WorkbenchLoadProgressState = {
@@ -125,7 +125,7 @@ type WorkbenchLoadProgressState = {
   indeterminate: boolean;
 };
 
-function createInitialZonePageInfo(zone: "paired" | "open"): WorkbenchZonePageInfo {
+function createInitialZonePageInfo(zone: "paired" | "unpaired"): WorkbenchZonePageInfo {
   return {
     zone,
     page: 0,
@@ -134,13 +134,14 @@ function createInitialZonePageInfo(zone: "paired" | "open"): WorkbenchZonePageIn
     rowCounts: { oa: 0, bank: 0, invoice: 0, rows: 0 },
     hasMore: false,
     readModelStatus: "refreshing",
+    readModelVersion: null,
   };
 }
 
-function createInitialZonePages(): Record<"paired" | "open", WorkbenchZonePageInfo> {
+function createInitialZonePages(): Record<"paired" | "unpaired", WorkbenchZonePageInfo> {
   return {
     paired: createInitialZonePageInfo("paired"),
-    open: createInitialZonePageInfo("open"),
+    unpaired: createInitialZonePageInfo("unpaired"),
   };
 }
 
@@ -235,16 +236,16 @@ function createWorkbenchServerPageQueryKey(query: WorkbenchGroupsPageQuery) {
 }
 
 function createWorkbenchZoneServerPageQueryKeys(
-  queries: Record<"paired" | "open", WorkbenchGroupsPageQuery>,
+  queries: Record<"paired" | "unpaired", WorkbenchGroupsPageQuery>,
 ) {
   return {
     paired: createWorkbenchServerPageQueryKey(queries.paired),
-    open: createWorkbenchServerPageQueryKey(queries.open),
+    unpaired: createWorkbenchServerPageQueryKey(queries.unpaired),
   };
 }
 
 function createWorkbenchZoneServerPageQueriesKey(
-  queries: Record<"paired" | "open", WorkbenchGroupsPageQuery>,
+  queries: Record<"paired" | "unpaired", WorkbenchGroupsPageQuery>,
 ) {
   return JSON.stringify(createWorkbenchZoneServerPageQueryKeys(queries));
 }
@@ -340,11 +341,11 @@ function actionResultMessage(result: string | WorkbenchActionResult) {
 }
 
 function workbenchInitialPageIsFresh(result: WorkbenchInitialPageResult | null) {
-  return result?.pages.paired.readModelStatus === "fresh" && result.pages.open.readModelStatus === "fresh";
+  return result?.pages.paired.readModelStatus === "fresh" && result.pages.unpaired.readModelStatus === "fresh";
 }
 
-function workbenchZonePagesReadModelStatus(pages: Record<"paired" | "open", WorkbenchZonePageInfo>) {
-  const statuses = [pages.paired.readModelStatus, pages.open.readModelStatus]
+function workbenchZonePagesReadModelStatus(pages: Record<"paired" | "unpaired", WorkbenchZonePageInfo>) {
+  const statuses = [pages.paired.readModelStatus, pages.unpaired.readModelStatus]
     .map((status) => String(status || "refreshing").trim() || "refreshing");
   if (statuses.some((status) => status === "failed")) {
     return "failed";
@@ -417,14 +418,14 @@ export default function ReconciliationWorkbenchPage() {
     useWorkbenchSelection();
   const [workbenchData, setWorkbenchData] = useState<WorkbenchData | null>(null);
   const [loadedZoneServerPageQueryKeys, setLoadedZoneServerPageQueryKeys] = useState<
-    Record<"paired" | "open", string> | null
+    Record<"paired" | "unpaired", string> | null
   >(null);
-  const [selectionSourceGroups, setSelectionSourceGroups] = useState<Record<"paired" | "open", WorkbenchCandidateGroup[]>>({
+  const [selectionSourceGroups, setSelectionSourceGroups] = useState<Record<"paired" | "unpaired", WorkbenchRelationGroup[]>>({
     paired: [],
-    open: [],
+    unpaired: [],
   });
-  const [zonePages, setZonePages] = useState<Record<"paired" | "open", WorkbenchZonePageInfo>>(() => createInitialZonePages());
-  const [loadingMoreZone, setLoadingMoreZone] = useState<"paired" | "open" | null>(null);
+  const [zonePages, setZonePages] = useState<Record<"paired" | "unpaired", WorkbenchZonePageInfo>>(() => createInitialZonePages());
+  const [loadingMoreZone, setLoadingMoreZone] = useState<"paired" | "unpaired" | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [loadProgress, setLoadProgress] = useState<WorkbenchLoadProgressState>({
@@ -440,7 +441,7 @@ export default function ReconciliationWorkbenchPage() {
   const [detailError, setDetailError] = useState<string | null>(null);
   const detailRequestSeqRef = useRef(0);
   const [lastActionMessage, setLastActionMessage] = useState<string | null>(null);
-  const [expandedZoneId, setExpandedZoneId] = useState<"paired" | "open" | null>(null);
+  const [expandedZoneId, setExpandedZoneId] = useState<"paired" | "unpaired" | null>(null);
   const [actionDialog, setActionDialog] = useState<ActionDialogState | null>(null);
   const [relationPreviewDialog, setRelationPreviewDialog] = useState<RelationPreviewDialogState | null>(null);
   const [ignoredData, setIgnoredData] = useState<IgnoredWorkbenchData>({ month: WORKBENCH_VIEW_MONTH, rows: [] });
@@ -489,10 +490,10 @@ export default function ReconciliationWorkbenchPage() {
     () => buildWorkbenchServerPageQuery(deferredOpenDisplayState),
     [deferredOpenDisplayState],
   );
-  const zoneServerPageQueries = useMemo<Record<"paired" | "open", WorkbenchGroupsPageQuery>>(
+  const zoneServerPageQueries = useMemo<Record<"paired" | "unpaired", WorkbenchGroupsPageQuery>>(
     () => ({
       paired: pairedServerPageQuery,
-      open: openServerPageQuery,
+      unpaired: openServerPageQuery,
     }),
     [openServerPageQuery, pairedServerPageQuery],
   );
@@ -508,7 +509,7 @@ export default function ReconciliationWorkbenchPage() {
   const [oaSyncShellStatus, setOaSyncShellStatus] = useState<{ level: "ok" | "pending" | "error"; reason: string } | null>(null);
 
   const updateZoneDisplayState = useCallback((
-    zoneId: "paired" | "open",
+    zoneId: "paired" | "unpaired",
     updater: (current: WorkbenchZoneDisplayState) => WorkbenchZoneDisplayState,
   ) => {
     if (zoneId === "paired") {
@@ -518,7 +519,7 @@ export default function ReconciliationWorkbenchPage() {
     setOpenDisplayState((current) => updater(current));
   }, []);
 
-  const handleTogglePaneSearch = useCallback((zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => {
+  const handleTogglePaneSearch = useCallback((zoneId: "paired" | "unpaired", paneId: "oa" | "bank" | "invoice") => {
     updateZoneDisplayState(zoneId, (current) => {
       const isOpen = current.openSearchPaneId === paneId;
       const nextState: WorkbenchZoneDisplayState = {
@@ -536,7 +537,7 @@ export default function ReconciliationWorkbenchPage() {
     });
   }, [updateZoneDisplayState]);
 
-  const handleClosePaneSearch = useCallback((zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => {
+  const handleClosePaneSearch = useCallback((zoneId: "paired" | "unpaired", paneId: "oa" | "bank" | "invoice") => {
     updateZoneDisplayState(zoneId, (current) => {
       if (current.openSearchPaneId !== paneId) {
         return current;
@@ -556,7 +557,7 @@ export default function ReconciliationWorkbenchPage() {
     });
   }, [updateZoneDisplayState]);
 
-  const handleClearPaneSearch = useCallback((zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => {
+  const handleClearPaneSearch = useCallback((zoneId: "paired" | "unpaired", paneId: "oa" | "bank" | "invoice") => {
     updateZoneDisplayState(zoneId, (current) => {
       const nextState: WorkbenchZoneDisplayState = {
         ...current,
@@ -578,7 +579,7 @@ export default function ReconciliationWorkbenchPage() {
   }, [updateZoneDisplayState]);
 
   const handlePaneSearchQueryChange = useCallback(
-    (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice", query: string) => {
+    (zoneId: "paired" | "unpaired", paneId: "oa" | "bank" | "invoice", query: string) => {
       updateZoneDisplayState(zoneId, (current) => {
         const nextState: WorkbenchZoneDisplayState = {
           ...current,
@@ -603,7 +604,7 @@ export default function ReconciliationWorkbenchPage() {
 
   const handleColumnFilterChange = useCallback(
     (
-      zoneId: "paired" | "open",
+      zoneId: "paired" | "unpaired",
       paneId: "oa" | "bank" | "invoice",
       columnKey: string,
       selectedValues: string[],
@@ -633,7 +634,7 @@ export default function ReconciliationWorkbenchPage() {
   );
 
   const handleTogglePaneSort = useCallback(
-    (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => {
+    (zoneId: "paired" | "unpaired", paneId: "oa" | "bank" | "invoice") => {
       updateZoneDisplayState(zoneId, (current) => {
         const nextDirection = current.sortByPane[paneId] === "desc" ? "asc" : "desc";
         const nextState: WorkbenchZoneDisplayState = {
@@ -655,7 +656,7 @@ export default function ReconciliationWorkbenchPage() {
 
   const handlePaneTimeFilterChange = useCallback(
     (
-      zoneId: "paired" | "open",
+      zoneId: "paired" | "unpaired",
       paneId: "oa" | "bank" | "invoice",
       filter: WorkbenchPaneTimeFilter,
     ) => {
@@ -816,7 +817,7 @@ export default function ReconciliationWorkbenchPage() {
 
   function applyWorkbenchInitialPageResult(
     workbenchPayload: WorkbenchInitialPageResult,
-    resolvedZoneQueries: Record<"paired" | "open", WorkbenchGroupsPageQuery>,
+    resolvedZoneQueries: Record<"paired" | "unpaired", WorkbenchGroupsPageQuery>,
   ) {
     setWorkbenchData(workbenchPayload.data);
     setLoadedZoneServerPageQueryKeys(createWorkbenchZoneServerPageQueryKeys(resolvedZoneQueries));
@@ -829,7 +830,7 @@ export default function ReconciliationWorkbenchPage() {
     options?: {
       background?: boolean;
       includeAuxiliary?: boolean;
-      zoneQueries?: Record<"paired" | "open", WorkbenchGroupsPageQuery>;
+      zoneQueries?: Record<"paired" | "unpaired", WorkbenchGroupsPageQuery>;
       propagateError?: boolean;
       deferStateApply?: boolean;
     },
@@ -919,7 +920,7 @@ export default function ReconciliationWorkbenchPage() {
         deferStateApply,
       });
       const pairedStatus = result?.pages.paired.readModelStatus ?? "unknown";
-      const openStatus = result?.pages.open.readModelStatus ?? "unknown";
+      const openStatus = result?.pages.unpaired.readModelStatus ?? "unknown";
       lastReadModelStatus = pairedStatus === openStatus ? pairedStatus : `${pairedStatus}/${openStatus}`;
       if (workbenchInitialPageIsFresh(result)) {
         return result;
@@ -961,7 +962,7 @@ export default function ReconciliationWorkbenchPage() {
     }
   }, [scheduleWorkbenchReadModelReload]);
 
-  const handleLoadMoreZone = useCallback(async (zone: "paired" | "open") => {
+  const handleLoadMoreZone = useCallback(async (zone: "paired" | "unpaired") => {
     const pageInfo = zonePages[zone];
     if (!workbenchData || !pageInfo.hasMore || loadingMoreZone) {
       return;
@@ -998,13 +999,23 @@ export default function ReconciliationWorkbenchPage() {
     }
   }, [loadingMoreZone, workbenchData, zonePages, zoneServerPageQueries]);
 
-  const handleEnsureGroupDetail = useCallback(async (zone: "paired" | "open", groupId: string) => {
+  const handleEnsureGroupDetail = useCallback(async (zone: "paired" | "unpaired", groupId: string) => {
     const normalizedGroupId = groupId.trim();
     if (!normalizedGroupId) {
       return;
     }
+    const expectedReadModelVersion = zonePages[zone].readModelVersion;
+    if (!expectedReadModelVersion) {
+      setLastActionMessage("数据版本尚未就绪，请刷新后重试。");
+      return;
+    }
     try {
-      const group = await fetchWorkbenchGroupDetail(WORKBENCH_VIEW_MONTH, zone, normalizedGroupId);
+      const group = await fetchWorkbenchGroupDetail(
+        WORKBENCH_VIEW_MONTH,
+        zone,
+        normalizedGroupId,
+        expectedReadModelVersion,
+      );
       setWorkbenchData((current) => {
         if (!current) {
           return current;
@@ -1022,7 +1033,7 @@ export default function ReconciliationWorkbenchPage() {
       setLastActionMessage("加载完整明细失败，请稍后重试。");
       throw new Error("workbench_group_detail_load_failed");
     }
-  }, []);
+  }, [zonePages]);
 
   useEffect(() => {
     if (!active) {
@@ -1050,7 +1061,7 @@ export default function ReconciliationWorkbenchPage() {
     }
     setSelectionSourceGroups((current) => ({
       paired: mergeWorkbenchGroupsByIdReplacingExisting(current.paired, workbenchData.paired.groups),
-      open: mergeWorkbenchGroupsByIdReplacingExisting(current.open, workbenchData.open.groups),
+      unpaired: mergeWorkbenchGroupsByIdReplacingExisting(current.unpaired, workbenchData.unpaired.groups),
     }));
   }, [workbenchData]);
 
@@ -1251,17 +1262,17 @@ export default function ReconciliationWorkbenchPage() {
   useEffect(() => () => setWorkbenchStatus(null), [setWorkbenchStatus]);
 
   const processedExceptionRows = useMemo(
-    () => flattenGroups(collectProcessedExceptionGroups(workbenchData?.open.groups ?? [])),
+    () => flattenGroups(collectProcessedExceptionGroups(workbenchData?.unpaired.groups ?? [])),
     [workbenchData],
   );
 
   const visibleOpenGroups = useMemo(
-    () => removeProcessedExceptionRows(workbenchData?.open.groups ?? []),
+    () => removeProcessedExceptionRows(workbenchData?.unpaired.groups ?? []),
     [workbenchData],
   );
 
   const processedExceptionGroups = useMemo(
-    () => collectProcessedExceptionGroups(workbenchData?.open.groups ?? []),
+    () => collectProcessedExceptionGroups(workbenchData?.unpaired.groups ?? []),
     [workbenchData],
   );
 
@@ -1290,30 +1301,30 @@ export default function ReconciliationWorkbenchPage() {
       deferredOpenDisplayState,
       {
         serverFiltered:
-          loadedZoneServerPageQueryKeys?.open === zoneServerPageQueryKeys.open
+          loadedZoneServerPageQueryKeys?.unpaired === zoneServerPageQueryKeys.unpaired
           && hasWorkbenchServerPageCriteria(openServerPageQuery),
       },
     ),
     [
       deferredOpenDisplayState,
-      loadedZoneServerPageQueryKeys?.open,
+      loadedZoneServerPageQueryKeys?.unpaired,
       openServerPageQuery,
       visibleOpenGroups,
-      zoneServerPageQueryKeys.open,
+      zoneServerPageQueryKeys.unpaired,
     ],
   );
 
   const sourceAllGroups = useMemo(() => {
     if (!workbenchData) {
-      return [] as WorkbenchCandidateGroup[];
+      return [] as WorkbenchRelationGroup[];
     }
     return [...workbenchData.paired.groups, ...visibleOpenGroups];
   }, [visibleOpenGroups, workbenchData]);
 
   const sourceAllRows = useMemo(() => flattenGroups(sourceAllGroups), [sourceAllGroups]);
   const openSelectionSourceGroups = useMemo(
-    () => mergeWorkbenchGroupsByIdReplacingExisting(selectionSourceGroups.open, workbenchData?.open.groups ?? []),
-    [selectionSourceGroups.open, workbenchData?.open.groups],
+    () => mergeWorkbenchGroupsByIdReplacingExisting(selectionSourceGroups.unpaired, workbenchData?.unpaired.groups ?? []),
+    [selectionSourceGroups.unpaired, workbenchData?.unpaired.groups],
   );
   const pairedSelectionSourceGroups = useMemo(
     () => mergeWorkbenchGroupsByIdReplacingExisting(selectionSourceGroups.paired, workbenchData?.paired.groups ?? []),
@@ -1324,7 +1335,7 @@ export default function ReconciliationWorkbenchPage() {
     () => buildWorkbenchSelectionContext({
       explicitRows: explicitSelectedOpenRows,
       sourceGroups: openSelectionSourceGroups,
-      zoneId: "open",
+      zoneId: "unpaired",
     }),
     [explicitSelectedOpenRows, openSelectionSourceGroups],
   );
@@ -1345,34 +1356,23 @@ export default function ReconciliationWorkbenchPage() {
   const pairedSelectionSummary = pairedSelectionContext.summary;
   const contextualOpenRowIds = openSelectionContext.relatedRowIdSet;
   const contextualPairedRowIds = pairedSelectionContext.relatedRowIdSet;
-  const getWorkbenchRowState = useCallback((row: WorkbenchRecord, zoneId: "paired" | "open") => {
+  const getWorkbenchRowState = useCallback((row: WorkbenchRecord, zoneId: "paired" | "unpaired") => {
     const explicitState = getRowState(row, zoneId);
     if (explicitState !== "idle") {
       return explicitState;
     }
-    return (zoneId === "open" ? contextualOpenRowIds : contextualPairedRowIds).has(row.id) ? "related" : "idle";
+    return (zoneId === "unpaired" ? contextualOpenRowIds : contextualPairedRowIds).has(row.id) ? "related" : "idle";
   }, [contextualOpenRowIds, contextualPairedRowIds, getRowState]);
 
   const canConfirmOpenSelection = openSelectionSummary.bank > 0 && openSelectionSummary.oa + openSelectionSummary.invoice > 0;
   const canHandleOpenSelectionException = openSelectionSummary.total > 0;
-  const selectedOpenGroupsForUnifiedAction = useMemo(() => {
-    const selectedRowIdSet = new Set(openSelectionContext.includedRowIds);
-    return openSelectionSourceGroups.filter((group) => flattenGroups([group]).some((row) => selectedRowIdSet.has(row.id)));
-  }, [openSelectionContext.includedRowIds, openSelectionSourceGroups]);
   const selectedPairedGroupsForUnifiedAction = useMemo(() => {
     const selectedRowIdSet = new Set(pairedSelectionContext.includedRowIds);
     return pairedSelectionSourceGroups.filter((group) => flattenGroups([group]).some((row) => selectedRowIdSet.has(row.id)));
   }, [pairedSelectionContext.includedRowIds, pairedSelectionSourceGroups]);
-  const canWithdrawOpenSelection = useMemo(() => {
-    if (openSelectionSummary.total === 0) {
-      return false;
-    }
-    return selectedOpenGroupsForUnifiedAction.length === 1;
-  }, [openSelectionSummary.total, selectedOpenGroupsForUnifiedAction.length]);
   const isOpenConfirmSelectionDisabled = !canConfirmOpenSelection;
   const isOpenExceptionSelectionDisabled = openSelectionSummary.total < 1;
   const isPairedCancelSelectionDisabled = pairedSelectionSummary.total < 1;
-  const isOpenWithdrawSelectionDisabled = openSelectionSummary.total < 1;
 
   const collectCaseRowIds = useCallback((row: WorkbenchRecord) => {
     const containingGroup = sourceAllGroups.find((group) =>
@@ -1519,10 +1519,10 @@ export default function ReconciliationWorkbenchPage() {
             affectedRowIds,
           ),
         },
-        open: {
+        unpaired: {
           groups: applyOperationProjectionToGroups(
-            current.open.groups,
-            projection?.after.openGroups ?? [],
+            current.unpaired.groups,
+            projection?.after.unpairedGroups ?? [],
             affectedRowIds,
           ),
         },
@@ -1534,9 +1534,9 @@ export default function ReconciliationWorkbenchPage() {
         projection?.after.pairedGroups ?? [],
         affectedRowIds,
       ),
-      open: applyOperationProjectionToGroups(
-        current.open,
-        projection?.after.openGroups ?? [],
+      unpaired: applyOperationProjectionToGroups(
+        current.unpaired,
+        projection?.after.unpairedGroups ?? [],
         affectedRowIds,
       ),
     }));
@@ -1820,8 +1820,8 @@ export default function ReconciliationWorkbenchPage() {
     });
   }, [cashTicketPurchaseDialog, ensureCanWriteWorkbench, runBlockingAction]);
 
-  const handleSelectRow = useCallback((row: WorkbenchRecord, zoneId: "paired" | "open") => {
-    if (zoneId === "open") {
+  const handleSelectRow = useCallback((row: WorkbenchRecord, zoneId: "paired" | "unpaired") => {
+    if (zoneId === "unpaired") {
       toggleOpenRowSelection(row);
       return;
     }
@@ -1835,13 +1835,11 @@ export default function ReconciliationWorkbenchPage() {
 
   const openConfirmPreview = async (rows: WorkbenchRecord[]) => {
     const rowIds = rows.map((row) => row.id);
-    const caseId = resolveSelectedCaseId(rows);
     const preview = await previewWorkbenchConfirmLink({
       month: WORKBENCH_VIEW_MONTH,
       rowIds,
-      caseId,
     });
-    setRelationPreviewDialog({ preview, rowIds, caseId });
+    setRelationPreviewDialog({ preview, rowIds });
   };
 
   const openWithdrawPreview = async (rows: WorkbenchRecord[]) => {
@@ -1945,25 +1943,6 @@ export default function ReconciliationWorkbenchPage() {
     }
     try {
       await openConfirmPreview(selectedOpenRows);
-    } catch (error) {
-      openRelationPreviewErrorDialog(error);
-    }
-  };
-
-  const handleWithdrawOpenSelection = async () => {
-    if (!ensureCanWriteWorkbench()) {
-      return;
-    }
-    if (!canWithdrawOpenSelection) {
-      openActionResultDialog(
-        selectedOpenGroupsForUnifiedAction.length > 1
-          ? "一次只能处理一个关联组。"
-          : "请先选择一个待处理关联组。",
-      );
-      return;
-    }
-    try {
-      await openWithdrawPreview(flattenGroups(selectedOpenGroupsForUnifiedAction));
     } catch (error) {
       openRelationPreviewErrorDialog(error);
     }
@@ -2105,16 +2084,16 @@ export default function ReconciliationWorkbenchPage() {
   const openPanes = useMemo<WorkbenchPane[]>(
     () => {
       const paneRows = buildWorkbenchPaneRows(displayOpenGroups);
-      const totals = zonePages.open.rowCounts.rows > 0
-        ? zonePages.open.rowCounts
-        : workbenchData?.summary.zoneCounts.open;
+      const totals = zonePages.unpaired.rowCounts.rows > 0
+        ? zonePages.unpaired.rowCounts
+        : workbenchData?.summary.zoneCounts.unpaired;
       return [
         { id: "oa", title: "OA", rows: paneRows.oa, totalRows: totals?.oa },
         { id: "bank", title: "银行流水", rows: paneRows.bank, totalRows: totals?.bank },
         { id: "invoice", title: "进销项发票", rows: paneRows.invoice, totalRows: totals?.invoice },
       ];
     },
-    [displayOpenGroups, workbenchData?.summary.zoneCounts.open, zonePages.open.rowCounts],
+    [displayOpenGroups, workbenchData?.summary.zoneCounts.unpaired, zonePages.unpaired.rowCounts],
   );
 
   const togglePairedExpand = useCallback(() => {
@@ -2122,7 +2101,7 @@ export default function ReconciliationWorkbenchPage() {
   }, []);
 
   const toggleOpenExpand = useCallback(() => {
-    setExpandedZoneId((current) => (current === "open" ? null : "open"));
+    setExpandedZoneId((current) => (current === "unpaired" ? null : "unpaired"));
   }, []);
 
   const openAuxiliaryHeaderActions = useMemo(
@@ -2148,9 +2127,9 @@ export default function ReconciliationWorkbenchPage() {
   const isOaReady = oaStatus?.code === "ready";
   const oaStatusPanelMessage = oaStatus && !isOaReady ? `${oaStatus.message}，本次结果未包含完整 OA 数据。` : null;
   const isPairedVisible = expandedZoneId === null || expandedZoneId === "paired";
-  const isOpenVisible = expandedZoneId === null || expandedZoneId === "open";
+  const isUnpairedVisible = expandedZoneId === null || expandedZoneId === "unpaired";
   const pairedZoneItemCount = resolveZoneItemCount(zonePages.paired, workbenchData?.summary.zoneCounts.paired);
-  const openZoneItemCount = resolveZoneItemCount(zonePages.open, workbenchData?.summary.zoneCounts.open);
+  const unpairedZoneItemCount = resolveZoneItemCount(zonePages.unpaired, workbenchData?.summary.zoneCounts.unpaired);
   const pairedZoneElement = (
     <WorkbenchZone
       canMutateData={canWriteWorkbench}
@@ -2191,17 +2170,17 @@ export default function ReconciliationWorkbenchPage() {
     />
   );
 
-  const openZoneElement = (
+  const unpairedZoneElement = (
     <WorkbenchZone
       auxiliaryHeaderActions={openAuxiliaryHeaderActions}
       canMutateData={canWriteWorkbench}
       getRowState={getWorkbenchRowState}
-      isExpanded={expandedZoneId === "open"}
-      isVisible={isOpenVisible}
+      isExpanded={expandedZoneId === "unpaired"}
+      isVisible={isUnpairedVisible}
       onClearSelection={handleClearOpenSelection}
       onOpenDetail={handleOpenDetail}
       onEnsureGroupDetail={handleEnsureGroupDetail}
-      onLoadMore={() => handleLoadMoreZone("open")}
+      onLoadMore={() => handleLoadMoreZone("unpaired")}
       onPrimarySelectionAction={handleConfirmOpenSelection}
       primarySelectionActionDisabled={isOpenConfirmSelectionDisabled || !canWriteWorkbench}
       onRowAction={handleRowAction}
@@ -2210,8 +2189,6 @@ export default function ReconciliationWorkbenchPage() {
       onSelectRow={handleSelectRow}
       onSecondarySelectionAction={handleOpenSelectionException}
       secondarySelectionActionDisabled={isOpenExceptionSelectionDisabled || !canWriteWorkbench}
-      onTertiarySelectionAction={handleWithdrawOpenSelection}
-      tertiarySelectionActionDisabled={isOpenWithdrawSelectionDisabled || !canWriteWorkbench}
       onToggleExpand={toggleOpenExpand}
       displayState={openDisplayState}
       onColumnFilterChange={handleColumnFilterChange}
@@ -2224,17 +2201,16 @@ export default function ReconciliationWorkbenchPage() {
       groups={displayOpenGroups}
       sourceGroups={visibleOpenGroups}
       invoiceInventory={workbenchData?.invoiceInventory}
-      loadingMore={loadingMoreZone === "open"}
-      pageInfo={zonePages.open}
+      loadingMore={loadingMoreZone === "unpaired"}
+      pageInfo={zonePages.unpaired}
       highlightedRowId={null}
       panes={openPanes}
       primarySelectionActionLabel="确认关联"
       secondarySelectionActionLabel="异常处理"
-      tertiarySelectionActionLabel="撤回关联"
       selectionSummary={openSelectionSummary}
-      title={`未配对 ${openZoneItemCount} 项`}
+      title={`未配对 ${unpairedZoneItemCount} 项`}
       tone="warning"
-      zoneId="open"
+      zoneId="unpaired"
     />
   );
 
@@ -2272,9 +2248,9 @@ export default function ReconciliationWorkbenchPage() {
               {pairedZoneElement}
             </div>
             <div
-              className={`workbench-zone-slot workbench-zone-slot-bottom${isOpenVisible ? "" : " workbench-zone-slot-hidden"}`}
+              className={`workbench-zone-slot workbench-zone-slot-bottom${isUnpairedVisible ? "" : " workbench-zone-slot-hidden"}`}
             >
-              {openZoneElement}
+              {unpairedZoneElement}
             </div>
           </div>
         ) : null}
@@ -2445,7 +2421,7 @@ type RelationPreviewSubmitState =
   | { phase: WorkbenchActionProgressPhase; message: string; committed: boolean }
   | { phase: "error"; message: string; committed: boolean; retryable: boolean };
 
-function countRelationPreviewRows(groups: WorkbenchCandidateGroup[]) {
+function countRelationPreviewRows(groups: WorkbenchRelationGroup[]) {
   return groups.reduce(
     (counts, group) => ({
       oa: counts.oa + group.rows.oa.length,
@@ -2661,9 +2637,9 @@ function isProcessedExceptionRow(row: WorkbenchRecord) {
   return LEGACY_HANDLED_EXCEPTION_CODES.has(row.statusCode) || LEGACY_HANDLED_EXCEPTION_LABELS.has(row.status);
 }
 
-function collectProcessedExceptionGroups(groups: WorkbenchCandidateGroup[]) {
+function collectProcessedExceptionGroups(groups: WorkbenchRelationGroup[]) {
   return groups.flatMap((group) => {
-    const nextGroup: WorkbenchCandidateGroup = {
+    const nextGroup: WorkbenchRelationGroup = {
       ...group,
       rows: {
         oa: group.rows.oa.filter(isProcessedExceptionRow),
@@ -2676,9 +2652,9 @@ function collectProcessedExceptionGroups(groups: WorkbenchCandidateGroup[]) {
   });
 }
 
-function removeProcessedExceptionRows(groups: WorkbenchCandidateGroup[]) {
+function removeProcessedExceptionRows(groups: WorkbenchRelationGroup[]) {
   return groups.flatMap((group) => {
-    const nextGroup: WorkbenchCandidateGroup = {
+    const nextGroup: WorkbenchRelationGroup = {
       ...group,
       rows: {
         oa: group.rows.oa.filter((row) => !isProcessedExceptionRow(row)),
@@ -2691,13 +2667,13 @@ function removeProcessedExceptionRows(groups: WorkbenchCandidateGroup[]) {
   });
 }
 
-function flattenGroups(groups: WorkbenchCandidateGroup[]) {
+function flattenGroups(groups: WorkbenchRelationGroup[]) {
   return groups.flatMap((group) => [...group.rows.oa, ...group.rows.bank, ...group.rows.invoice]);
 }
 
 function mergeWorkbenchGroupsByIdReplacingExisting(
-  existingGroups: WorkbenchCandidateGroup[],
-  incomingGroups: WorkbenchCandidateGroup[],
+  existingGroups: WorkbenchRelationGroup[],
+  incomingGroups: WorkbenchRelationGroup[],
 ) {
   const byId = new Map(existingGroups.map((group) => [group.id, group]));
   incomingGroups.forEach((group) => byId.set(group.id, group));
@@ -2705,12 +2681,12 @@ function mergeWorkbenchGroupsByIdReplacingExisting(
 }
 
 function applyOperationProjectionToGroups(
-  existingGroups: WorkbenchCandidateGroup[],
-  incomingGroups: WorkbenchCandidateGroup[],
+  existingGroups: WorkbenchRelationGroup[],
+  incomingGroups: WorkbenchRelationGroup[],
   affectedRowIds: Set<string>,
 ) {
   const filteredGroups = existingGroups.flatMap((group) => {
-    const nextGroup: WorkbenchCandidateGroup = {
+    const nextGroup: WorkbenchRelationGroup = {
       ...group,
       rows: {
         oa: group.rows.oa.filter((row) => !affectedRowIds.has(row.id)),
@@ -2730,7 +2706,7 @@ function operationProjectionAffectedRowIds(result: WorkbenchActionResult) {
       ...(result.operationProjection
         ? flattenGroups([
           ...result.operationProjection.after.pairedGroups,
-          ...result.operationProjection.after.openGroups,
+          ...result.operationProjection.after.unpairedGroups,
         ]).map((row) => row.id)
         : []),
     ].filter(Boolean),
@@ -2740,7 +2716,7 @@ function operationProjectionAffectedRowIds(result: WorkbenchActionResult) {
 function hasOperationProjection(projection: WorkbenchOperationProjection | undefined) {
   return Boolean(projection && (
     projection.after.pairedGroups.length > 0
-    || projection.after.openGroups.length > 0
+    || projection.after.unpairedGroups.length > 0
   ));
 }
 

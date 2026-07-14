@@ -612,8 +612,10 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
 
         canonical_sql = next(sql for sql, _params in connection.fetch_all_calls if "canonical_expected_set" in sql)
         self.assertIn("group_row.source_kinds && array['oa', 'bank']::text[]", canonical_sql)
-        self.assertIn("has_candidate_member", canonical_sql)
-        self.assertIn("has_linked_oa", canonical_sql)
+        self.assertIn("zone = 'paired'", canonical_sql)
+        self.assertNotIn("candidate", canonical_sql)
+        self.assertIn("bool_or(pane = 'oa') as has_oa", canonical_sql)
+        self.assertIn("bool_or(pane = 'bank') as has_bank", canonical_sql)
         self.assertIn("member.member_payload->>'project_id'", canonical_sql)
         self.assertIn("member.member_payload->>'applicant'", canonical_sql)
         self.assertIn("member.member_payload->>'debit_amount'", canonical_sql)

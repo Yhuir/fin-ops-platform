@@ -17,14 +17,14 @@ class WorkbenchOaAttachmentContextRowIndexTests(unittest.TestCase):
             oa_source_ids=oa_row_source_ids,
         )
 
-    def test_raw_payload_rows_by_id_indexes_rows_from_paired_and_open_sections(self) -> None:
+    def test_raw_payload_rows_by_id_indexes_rows_from_paired_and_unpaired_sections(self) -> None:
         payload = {
             "paired": {
                 "oa": [{"id": "oa-1", "type": "oa"}],
                 "bank": [{"id": "bk-1", "type": "bank"}],
                 "invoice": [{"id": "", "type": "invoice"}, "bad"],
             },
-            "open": {
+            "unpaired": {
                 "invoice": [{"id": "inv-1", "type": "invoice"}],
             },
         }
@@ -41,7 +41,7 @@ class WorkbenchOaAttachmentContextRowIndexTests(unittest.TestCase):
                 "bank": [{"id": "bk-1"}],
                 "invoice": [{"id": ""}, "bad"],
             },
-            "open": {
+            "unpaired": {
                 "invoice": [{"id": "inv-1"}],
             },
         }

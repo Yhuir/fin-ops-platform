@@ -6,6 +6,8 @@ updated: 2026-07-14
 resolved: 2026-07-14
 ---
 
+> 历史诊断，已被 Phase 21 取代：本记录只修复“正式关系被旧 `case:decision:*` 列表过滤”的早期问题，并按当时口径把 OA+发票关系显示在 `open`。当前产品合同要求所有 active 正式关系显示为 `paired`，其余 canonical facts 各自显示为 `unpaired`；2026-07-14 对现网的只读复核仍看到该 520 关系为未配对，因此下文的旧发布记录不是 Phase 21 的生产闭环证据。
+
 # Symptoms
 
 - expected: 统一事实源存在的 520 元发票和已完成 OA 应能进入关联台候选或关系展示。

@@ -4,7 +4,7 @@ import {
   collectWorkbenchFilterOptions,
   createEmptyWorkbenchZoneDisplayState,
 } from "../features/workbench/groupDisplayModel";
-import type { WorkbenchCandidateGroup, WorkbenchRecord, WorkbenchRecordType } from "../features/workbench/types";
+import type { WorkbenchRelationGroup, WorkbenchRecord, WorkbenchRecordType } from "../features/workbench/types";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 
 import { installMockApiFetch } from "./apiMock";
@@ -31,10 +31,10 @@ function buildRow(id: string, recordType: WorkbenchRecordType, tableValues: Reco
 
 describe("Workbench pane display model", () => {
   test("keeps original groups when no pane search or filter is active", () => {
-    const groups: WorkbenchCandidateGroup[] = [
+    const groups: WorkbenchRelationGroup[] = [
       {
         id: "group-1",
-        groupType: "candidate",
+        groupType: "unpaired",
         matchConfidence: "medium",
         reason: "test",
         rows: {
@@ -49,10 +49,10 @@ describe("Workbench pane display model", () => {
   });
 
   test("keeps the matched candidate group visible across panes while searching by one pane", () => {
-    const groups: WorkbenchCandidateGroup[] = [
+    const groups: WorkbenchRelationGroup[] = [
       {
         id: "group-1",
-        groupType: "candidate",
+        groupType: "unpaired",
         matchConfidence: "medium",
         reason: "test",
         rows: {
@@ -84,10 +84,10 @@ describe("Workbench pane display model", () => {
   });
 
   test("sorts groups by bank transaction time for the active pane and keeps groups without bank rows last", () => {
-    const groups: WorkbenchCandidateGroup[] = [
+    const groups: WorkbenchRelationGroup[] = [
       {
         id: "group-late",
-        groupType: "candidate",
+        groupType: "unpaired",
         matchConfidence: "medium",
         reason: "test",
         rows: {
@@ -98,7 +98,7 @@ describe("Workbench pane display model", () => {
       },
       {
         id: "group-empty",
-        groupType: "candidate",
+        groupType: "unpaired",
         matchConfidence: "medium",
         reason: "test",
         rows: {
@@ -109,7 +109,7 @@ describe("Workbench pane display model", () => {
       },
       {
         id: "group-early",
-        groupType: "candidate",
+        groupType: "unpaired",
         matchConfidence: "medium",
         reason: "test",
         rows: {
@@ -131,10 +131,10 @@ describe("Workbench pane display model", () => {
   });
 
   test("sorts groups by invoice issue date descending for the active pane", () => {
-    const groups: WorkbenchCandidateGroup[] = [
+    const groups: WorkbenchRelationGroup[] = [
       {
         id: "group-march",
-        groupType: "candidate",
+        groupType: "unpaired",
         matchConfidence: "medium",
         reason: "test",
         rows: {
@@ -145,7 +145,7 @@ describe("Workbench pane display model", () => {
       },
       {
         id: "group-april",
-        groupType: "candidate",
+        groupType: "unpaired",
         matchConfidence: "medium",
         reason: "test",
         rows: {
@@ -166,10 +166,10 @@ describe("Workbench pane display model", () => {
   });
 
   test("sorts groups by OA approval time for the active pane", () => {
-    const groups: WorkbenchCandidateGroup[] = [
+    const groups: WorkbenchRelationGroup[] = [
       {
         id: "group-late",
-        groupType: "candidate",
+        groupType: "unpaired",
         matchConfidence: "medium",
         reason: "test",
         rows: {
@@ -180,7 +180,7 @@ describe("Workbench pane display model", () => {
       },
       {
         id: "group-empty",
-        groupType: "candidate",
+        groupType: "unpaired",
         matchConfidence: "medium",
         reason: "test",
         rows: {
@@ -191,7 +191,7 @@ describe("Workbench pane display model", () => {
       },
       {
         id: "group-early",
-        groupType: "candidate",
+        groupType: "unpaired",
         matchConfidence: "medium",
         reason: "test",
         rows: {
@@ -217,10 +217,10 @@ describe("Workbench pane display model", () => {
     renderWorkbenchPage();
     await screen.findByText("陈涛");
 
-    const openZone = screen.getByTestId("zone-open");
-    const openOaPane = within(openZone).getByTestId("pane-oa");
-    const openBankPane = within(openZone).getByTestId("pane-bank");
-    const openInvoicePane = within(openZone).getByTestId("pane-invoice");
+    const unpairedZone = screen.getByTestId("zone-unpaired");
+    const openOaPane = within(unpairedZone).getByTestId("pane-oa");
+    const openBankPane = within(unpairedZone).getByTestId("pane-bank");
+    const openInvoicePane = within(unpairedZone).getByTestId("pane-invoice");
 
     fireEvent.click(within(openOaPane).getByRole("button", { name: "搜索 OA" }));
 
@@ -230,9 +230,10 @@ describe("Workbench pane display model", () => {
     fireEvent.change(oaSearchInput, { target: { value: "陈涛" } });
 
     await waitFor(() => {
-      expect(within(openZone).queryByTestId("candidate-group-open-row:oa-o-202603-002")).not.toBeInTheDocument();
+      expect(within(unpairedZone).queryByTestId("candidate-group-unpaired-row:oa-o-202603-002")).not.toBeInTheDocument();
     });
-    expect(within(openZone).getAllByText((content) => content.includes("智能工厂设备商")).length).toBeGreaterThan(1);
+    expect(within(unpairedZone).getAllByText((content) => content.includes("智能工厂设备商"))).toHaveLength(1);
+    expect(within(unpairedZone).queryByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).not.toBeInTheDocument();
     expect(oaSearchInput.closest(".pane-search-field")).not.toBeNull();
     expect(within(openOaPane).getByRole("button", { name: "收起搜索 OA" })).toHaveClass("pane-search-toggle-btn", "pane-search-toggle-btn--header-control");
     expect(within(openOaPane).getByRole("button", { name: "清空搜索 OA" })).toBeInTheDocument();
@@ -258,7 +259,7 @@ describe("Workbench pane display model", () => {
     expect(within(openOaPane).getByRole("searchbox", { name: "搜索 OA" })).toBeInTheDocument();
     fireEvent.click(within(openOaPane).getByRole("button", { name: "清空搜索 OA" }));
     await waitFor(() => {
-      expect(within(openZone).getByTestId("candidate-group-open-row:oa-o-202603-002")).toBeInTheDocument();
+      expect(within(unpairedZone).getByTestId("candidate-group-unpaired-row:oa-o-202603-002")).toBeInTheDocument();
     });
     expect(within(openOaPane).getByRole("searchbox", { name: "搜索 OA" })).toHaveValue("");
     expect(within(openOaPane).getByRole("button", { name: "收起搜索 OA" })).toBeInTheDocument();
@@ -272,8 +273,8 @@ describe("Workbench pane display model", () => {
     renderWorkbenchPage();
     await screen.findByText("陈涛");
 
-    const openZone = screen.getByTestId("zone-open");
-    const openOaPane = within(openZone).getByTestId("pane-oa");
+    const unpairedZone = screen.getByTestId("zone-unpaired");
+    const openOaPane = within(unpairedZone).getByTestId("pane-oa");
 
     fireEvent.click(within(openOaPane).getByRole("button", { name: "筛选 申请人" }));
 
@@ -281,33 +282,33 @@ describe("Workbench pane display model", () => {
     fireEvent.click(within(menu).getByLabelText("陈涛"));
 
     await waitFor(() => {
-      expect(within(openZone).getAllByText("陈涛").length).toBeGreaterThan(0);
-      expect(within(openZone).queryByTestId("candidate-group-open-row:oa-o-202603-002")).not.toBeInTheDocument();
+      expect(within(unpairedZone).getAllByText("陈涛").length).toBeGreaterThan(0);
+      expect(within(unpairedZone).queryByTestId("candidate-group-unpaired-row:oa-o-202603-002")).not.toBeInTheDocument();
     });
 
     fireEvent.click(within(menu).getByRole("button", { name: "全选" }));
     await waitFor(() => {
-      expect(within(openZone).getAllByText("陈涛").length).toBeGreaterThan(0);
-      expect(within(openZone).queryByTestId("candidate-group-open-row:oa-o-202603-002")).not.toBeInTheDocument();
+      expect(within(unpairedZone).getAllByText("陈涛").length).toBeGreaterThan(0);
+      expect(within(unpairedZone).queryByTestId("candidate-group-unpaired-row:oa-o-202603-002")).not.toBeInTheDocument();
     });
 
     fireEvent.click(within(menu).getByRole("button", { name: "清空" }));
     await waitFor(() => {
-      expect(within(openZone).getAllByText("陈涛").length).toBeGreaterThan(0);
-      expect(within(openZone).getByTestId("candidate-group-open-row:oa-o-202603-002")).toBeInTheDocument();
+      expect(within(unpairedZone).getAllByText("陈涛").length).toBeGreaterThan(0);
+      expect(within(unpairedZone).getByTestId("candidate-group-unpaired-row:oa-o-202603-002")).toBeInTheDocument();
     });
   });
 
   test("applies pane search and column filters locally while the server page refresh is pending", async () => {
     const fetchMock = installMockApiFetch({ workbenchLoadDelayMs: 1000 });
     renderWorkbenchPage();
-    await screen.findByTestId("zone-open", {}, { timeout: 3000 });
+    await screen.findByTestId("zone-unpaired", {}, { timeout: 3000 });
 
-    const openZone = screen.getByTestId("zone-open");
-    const openBankPane = within(openZone).getByTestId("pane-bank");
+    const unpairedZone = screen.getByTestId("zone-unpaired");
+    const openBankPane = within(unpairedZone).getByTestId("pane-bank");
     await waitFor(() => {
-      expect(within(openZone).getByRole("row", { name: /智能工厂设备商.*建设银行 1138/ })).toBeInTheDocument();
-      expect(within(openZone).getByRole("row", { name: /尾差设备商.*建设银行 1138/ })).toBeInTheDocument();
+      expect(within(unpairedZone).getByRole("row", { name: /智能工厂设备商.*建设银行 1138/ })).toBeInTheDocument();
+      expect(within(unpairedZone).getByRole("row", { name: /尾差设备商.*建设银行 1138/ })).toBeInTheDocument();
     }, { timeout: 3000 });
 
     fireEvent.click(within(openBankPane).getByRole("button", { name: "搜索 银行流水" }));
@@ -318,27 +319,27 @@ describe("Workbench pane display model", () => {
     fireEvent.click(within(screen.getByRole("dialog", { name: "筛选 金额" })).getByLabelText("建设银行 1138"));
 
     await waitFor(() => {
-      expect(within(openZone).getByRole("row", { name: /智能工厂设备商.*建设银行 1138/ })).toBeInTheDocument();
-      expect(within(openZone).queryByRole("row", { name: /尾差设备商.*建设银行 1138/ })).not.toBeInTheDocument();
+      expect(within(unpairedZone).getByRole("row", { name: /智能工厂设备商.*建设银行 1138/ })).toBeInTheDocument();
+      expect(within(unpairedZone).queryByRole("row", { name: /尾差设备商.*建设银行 1138/ })).not.toBeInTheDocument();
     }, { timeout: 400 });
     await waitFor(() => {
       expect(fetchMock.mock.calls.some(([input]) => {
         const url = new URL(String(input), "http://localhost");
         return (
           url.pathname === "/api/workbench/groups"
-          && url.searchParams.get("search") === "智能工厂"
-          && url.searchParams.get("search_mode") === "linked_context"
-          && !url.searchParams.has("search_by_pane")
+          && url.searchParams.get("search_by_pane") === JSON.stringify({ bank: "智能工厂" })
+          && !url.searchParams.has("search")
+          && !url.searchParams.has("search_mode")
         );
       })).toBe(true);
     }, { timeout: 3000 });
   });
 
   test("uses direction and payment account options for the bank amount filter instead of raw amounts", () => {
-    const groups: WorkbenchCandidateGroup[] = [
+    const groups: WorkbenchRelationGroup[] = [
       {
         id: "group-1",
-        groupType: "candidate",
+        groupType: "unpaired",
         matchConfidence: "medium",
         reason: "test",
         rows: {
@@ -371,10 +372,10 @@ describe("Workbench pane display model", () => {
   });
 
   test("combines linked search with bank dropdown filters without forcing the same row", () => {
-    const groups: WorkbenchCandidateGroup[] = [
+    const groups: WorkbenchRelationGroup[] = [
       {
         id: "split-bank-criteria",
-        groupType: "candidate",
+        groupType: "unpaired",
         matchConfidence: "medium",
         reason: "test",
         rows: {
@@ -398,7 +399,7 @@ describe("Workbench pane display model", () => {
       },
       {
         id: "same-bank-row-criteria",
-        groupType: "candidate",
+        groupType: "unpaired",
         matchConfidence: "medium",
         reason: "test",
         rows: {
@@ -430,10 +431,10 @@ describe("Workbench pane display model", () => {
   });
 
   test("requires all selected bank amount filter values on the same row", () => {
-    const groups: WorkbenchCandidateGroup[] = [
+    const groups: WorkbenchRelationGroup[] = [
       {
         id: "split-bank-filter-values",
-        groupType: "candidate",
+        groupType: "unpaired",
         matchConfidence: "medium",
         reason: "test",
         rows: {
@@ -457,7 +458,7 @@ describe("Workbench pane display model", () => {
       },
       {
         id: "same-bank-filter-values",
-        groupType: "candidate",
+        groupType: "unpaired",
         matchConfidence: "medium",
         reason: "test",
         rows: {

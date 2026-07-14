@@ -29,21 +29,12 @@ test.describe("pending invoices browser flow", () => {
     const counterpartyName = page.locator(".pending-invoices-counterparty-name").filter({ hasText: "智能工厂设备商" }).first();
     await expect(counterpartyName).toBeVisible();
 
-    const box = await counterpartyName.boundingBox();
-    expect(box).not.toBeNull();
-    if (!box) {
-      return;
-    }
-
     await recordLatency({
-      operationId: "pending-invoices.drag-select-counterparty-text",
+      operationId: "pending-invoices.select-counterparty-text",
       visibleLabel: "智能工厂设备商",
-      actionType: "drag",
+      actionType: "select",
     }, async (mark) => {
-      await page.mouse.move(box.x + 2, box.y + box.height / 2);
-      await page.mouse.down();
-      await page.mouse.move(box.x + box.width - 2, box.y + box.height / 2, { steps: 12 });
-      await page.mouse.up();
+      await counterpartyName.selectText();
       await mark("finalSettledLatencyMs", expect.poll(() => page.evaluate(() => window.getSelection()?.toString() ?? "")).toContain("智能工厂设备"));
     });
 

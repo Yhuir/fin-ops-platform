@@ -146,11 +146,11 @@ describe("WorkbenchZone", () => {
         onTertiarySelectionAction={onTertiarySelectionAction}
         onToggleExpand={() => {}}
         panes={panes}
-        zoneId="open"
+        zoneId="unpaired"
       />,
     );
 
-    const zone = screen.getByTestId("zone-open");
+    const zone = screen.getByTestId("zone-unpaired");
     const toolbar = within(zone).getByText("已选 2").closest(".zone-selection-toolbar");
 
     expect(toolbar).not.toBeNull();
@@ -296,7 +296,7 @@ describe("WorkbenchZone", () => {
     });
     const triPaneCoreFiles = [
       "components/workbench/ResizableTriPane.tsx",
-      "components/workbench/CandidateGroupGrid.tsx",
+      "components/workbench/RelationGroupGrid.tsx",
     ].flatMap((path) => {
       const source = readFileSync(resolve(sourceRoot, path), "utf8");
       return /from ["']@mui\/|import\s+[^;]*@mui\/|Mui[A-Z]|\.Mui/.test(source) ? [path] : [];
@@ -364,8 +364,7 @@ describe("WorkbenchZone", () => {
     expect(screen.getByText(/差额说明：财务确认差额闭环/)).toBeInTheDocument();
   });
 
-  test("shows reconciliation warning details on paired OA rows", async () => {
-    const user = userEvent.setup();
+  test("does not expose removed automatic-candidate warning state", () => {
     const oaRowWithWarning = {
       ...panes[0].rows[0],
       reconciliationWarnings: [
@@ -399,52 +398,10 @@ describe("WorkbenchZone", () => {
       />,
     );
 
-    const icon = await screen.findByLabelText("查看自动匹配警示");
-    expect(icon).toBeInTheDocument();
-
-    await user.click(icon);
-    expect(await screen.findByText("附件发票合计与 OA/流水金额不一致")).toBeInTheDocument();
-    expect(screen.getByText("金额不一致")).toBeInTheDocument();
-  });
-
-  test("does not expose automatic matching warning icons in open rows", () => {
-    const oaRowWithWarning = {
-      ...panes[0].rows[0],
-      reconciliationWarnings: [
-        {
-          code: "invoice_amount_mismatch",
-          message: "附件发票合计与 OA/流水金额不一致",
-        },
-      ],
-    };
-
-    render(
-      <WorkbenchZone
-        getRowState={() => "idle"}
-        isExpanded={false}
-        isVisible
-        title="未配对"
-        tone="warning"
-        onOpenDetail={() => {}}
-        onRowAction={() => {}}
-        onSelectRow={() => {}}
-        onToggleExpand={() => {}}
-        panes={[
-          {
-            ...panes[0],
-            rows: [oaRowWithWarning],
-          },
-          panes[1],
-          panes[2],
-        ]}
-        zoneId="open"
-      />,
-    );
-
     expect(screen.queryByLabelText("查看自动匹配警示")).not.toBeInTheDocument();
   });
 
-  test("keeps paired/open zones as the only visible display states", () => {
+  test("keeps paired/unpaired zones as the only visible display states", () => {
     render(
       <WorkbenchZone
         getRowState={() => "idle"}
@@ -457,7 +414,7 @@ describe("WorkbenchZone", () => {
         onSelectRow={() => {}}
         onToggleExpand={() => {}}
         panes={panes}
-        zoneId="open"
+        zoneId="unpaired"
       />,
     );
 
@@ -616,7 +573,7 @@ describe("WorkbenchZone", () => {
         onSelectRow={() => {}}
         onToggleExpand={() => {}}
         panes={panes}
-        zoneId="open"
+        zoneId="unpaired"
       />,
     );
 
@@ -653,7 +610,7 @@ describe("WorkbenchZone", () => {
         isExpanded={false}
         isVisible
         onToggleExpand={() => {}}
-        zoneId="open"
+        zoneId="unpaired"
       />,
     );
 

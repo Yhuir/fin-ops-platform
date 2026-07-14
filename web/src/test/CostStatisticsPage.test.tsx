@@ -600,7 +600,7 @@ describe("Cost statistics page", () => {
     renderCostStatisticsPage();
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
-    const monthScopeButton = screen.getByRole("button", { name: "时间统计时间范围：2026年3月" });
+    const monthScopeButton = await screen.findByRole("button", { name: "时间统计时间范围：2026年3月" });
     expect(screen.queryByRole("button", { name: "三月" })).not.toBeInTheDocument();
 
     await user.click(monthScopeButton);
@@ -622,7 +622,7 @@ describe("Cost statistics page", () => {
     renderCostStatisticsPage();
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
-    expect(screen.getByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
+    expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "按银行" }));
 
@@ -691,7 +691,7 @@ describe("Cost statistics page", () => {
     renderCostStatisticsPage();
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
-    expect(screen.getByText("成本统计读模型正在刷新，当前结果生成后会自动更新。")).toBeInTheDocument();
+    expect(await screen.findByText("成本统计读模型正在刷新，当前结果生成后会自动更新。")).toBeInTheDocument();
     expect(document.querySelector(".cost-page .stat-card")).toBeNull();
     expect(screen.queryByText("当前时间范围没有可用于成本统计的支出流水。")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "导出中心" })).toBeDisabled();

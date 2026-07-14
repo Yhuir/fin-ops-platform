@@ -991,7 +991,7 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
         self.assertEqual([invoice["id"] for invoice in payload["rows"][0]["invoices"]], ["inv_output"])
         self.assertEqual(payload["rows"][0]["oa_applicant"], "—")
 
-    def test_candidate_distribution_is_visible_without_closing_pending_invoice(self) -> None:
+    def test_nonformal_distribution_is_ignored_without_closing_pending_invoice(self) -> None:
         vendor = self._counterparty("cp_vendor", "Vendor Candidate")
         txn = self._bank_transaction("txn_candidate", TransactionDirection.OUTFLOW, "Vendor Candidate", "118.00")
         invoice = self._invoice(
@@ -1023,7 +1023,7 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
             {
                 "row_id": row_id,
                 "row_type": row_type,
-                "relation_status": "candidate",
+                "relation_status": "unlinked",
                 "group_ids": ["candidate-pending-invoice"],
                 "linked_oa": [
                     {
@@ -1035,7 +1035,7 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
                         "form_no": "OA-CANDIDATE",
                         "detail_available": True,
                         "relation_case_id": "candidate-pending-invoice",
-                        "relation_status": "candidate",
+                        "relation_status": "unlinked",
                     }
                 ],
                 "linked_bank_transactions": [
@@ -1045,7 +1045,7 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
                         "trade_time": txn.trade_time,
                         "counterparty_name": txn.counterparty_name_raw,
                         "relation_case_id": "candidate-pending-invoice",
-                        "relation_status": "candidate",
+                        "relation_status": "unlinked",
                     }
                 ],
                 "linked_input_invoices": [
@@ -1056,7 +1056,7 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
                         "seller_name": invoice.seller_name,
                         "total_with_tax": "118.00",
                         "relation_case_id": "candidate-pending-invoice",
-                        "relation_status": "candidate",
+                        "relation_status": "unlinked",
                     }
                 ],
                 "linked_output_invoices": [],
@@ -1068,13 +1068,13 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
             groups=[
                 {
                     "group_id": "candidate-pending-invoice",
-                    "relation_status": "candidate",
+                    "relation_status": "unlinked",
                     "payload": {
                         "group_id": "candidate-pending-invoice",
                         "row_ids": ["oa-candidate", txn.id, invoice.id],
                         "row_types": ["oa", "bank", "invoice"],
-                        "relation_status": "candidate",
-                        "relation_mode": "automatic_decision",
+                        "relation_status": "unlinked",
+                        "relation_mode": "unlinked_evidence",
                         "amount_check": {"matched": True},
                     },
                     "oa_row_ids": ["oa-candidate"],
@@ -1095,15 +1095,15 @@ class PendingInvoiceQueryServiceTests(unittest.TestCase):
         detail = service.relation_detail(transaction_id=txn.id, direction="expense")
         candidates = service.invoice_candidates(transaction_id=txn.id)
 
-        self.assertEqual(row["input_invoices"]["relation_count"], 1)
-        self.assertEqual(row["input_invoices"]["summaries"][0]["relation_status"], "candidate")
-        self.assertEqual(row["oa"]["summaries"][0]["relation_status"], "candidate")
+        self.assertEqual(row["input_invoices"]["relation_count"], 0)
+        self.assertEqual(row["input_invoices"]["summaries"], [])
+        self.assertEqual(row["oa"]["summaries"], [])
         self.assertEqual(row["input_invoices"]["payment_summary"]["paid_total"], "0.00")
         self.assertEqual(row["invoice_acquisition_status"]["code"], "paid_pending_invoice")
         self.assertTrue(row["can_create_invoice"])
-        self.assertEqual(detail["payment_rows"][0]["relation_status"], "candidate")
+        self.assertEqual(detail["payment_rows"], [])
         self.assertEqual(detail["paid_total"], "0.00")
-        self.assertEqual(detail["related_invoices"][0]["relation_status"], "candidate")
+        self.assertEqual(detail["related_invoices"], [])
         self.assertEqual(candidates["rows"][0]["candidate_status"], "available")
         self.assertEqual(candidates["rows"][0]["paid_total"], "0.00")
 

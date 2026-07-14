@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import re
 import shlex
+import shutil
+import subprocess
+import tempfile
 import unittest
 
 
@@ -51,6 +55,24 @@ class NightlyCITests(unittest.TestCase):
             script,
             re.compile(r"all\)\s+run_backend\s+run_frontend\s+run_e2e\s+run_docs\s+;;", re.MULTILINE),
         )
+
+    def test_docs_verification_falls_back_when_ripgrep_is_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_bin = Path(temp_dir)
+            for command in ("dirname", "find", "git", "grep", "sort"):
+                executable = shutil.which(command)
+                self.assertIsNotNone(executable, f"Required test command is unavailable: {command}")
+                os.symlink(executable, temp_bin / command)
+            result = subprocess.run(
+                ["/bin/bash", str(VERIFY_SCRIPT_PATH), "docs"],
+                cwd=REPO_ROOT,
+                env={"PATH": str(temp_bin)},
+                capture_output=True,
+                check=False,
+                text=True,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_e2e_smoke_script_includes_every_non_production_browser_spec(self) -> None:
         package_json = json.loads(WEB_PACKAGE_JSON_PATH.read_text(encoding="utf-8"))

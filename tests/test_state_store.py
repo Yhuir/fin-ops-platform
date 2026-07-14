@@ -607,56 +607,7 @@ class StateStoreTests(unittest.TestCase):
         self.assertEqual(bank_flow_snapshot["batches"]["batch-1"]["status"], "submitted")
         self.assertEqual(workbench_snapshot, {})
 
-    def test_local_snapshot_persists_and_loads_workbench_candidate_matches(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            data_dir = Path(temp_dir)
-            snapshot = {
-                "imports": {},
-                "file_imports": {},
-                "matching": {},
-                "workbench_candidate_matches": {
-                    "candidates": {
-                        "candidate:001": {
-                            "candidate_key": "candidate:001",
-                            "scope_month": "2026-05",
-                            "status": "needs_review",
-                        }
-                    }
-                },
-            }
 
-            store = ApplicationStateStore(data_dir)
-            store.save(snapshot)
-
-            reloaded = ApplicationStateStore(data_dir)
-            loaded = reloaded.load()
-
-        self.assertEqual(loaded["workbench_candidate_matches"], snapshot["workbench_candidate_matches"])
-
-    def test_save_workbench_candidate_matches_persists_locally_across_store_instances(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            data_dir = Path(temp_dir)
-            snapshot = {
-                "candidates": {
-                    "candidate:001": {
-                        "candidate_id": "candidate:001",
-                        "candidate_key": "candidate:001",
-                        "scope_month": "2026-05",
-                        "candidate_type": "oa_bank_invoice",
-                        "status": "needs_review",
-                        "confidence": "medium",
-                        "rule_code": "same_amount",
-                        "row_ids": ["oa-001", "bank-001"],
-                        "generated_at": "2026-05-06T10:00:00+00:00",
-                    }
-                }
-            }
-
-            store = ApplicationStateStore(data_dir)
-            store.save_workbench_candidate_matches(snapshot)
-            loaded = ApplicationStateStore(data_dir).load_workbench_candidate_matches()
-
-            self.assertEqual(loaded, snapshot)
 
     def test_save_turnover_relations_persists_locally_across_store_instances(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -717,30 +668,6 @@ class StateStoreTests(unittest.TestCase):
 
         self.assertEqual(loaded, snapshot)
 
-    def test_save_workbench_candidate_matches_accepts_changed_months_for_local_snapshot(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            data_dir = Path(temp_dir)
-            store = ApplicationStateStore(data_dir)
-            snapshot = {
-                "scope_runs": {},
-                "candidates": {
-                    "candidate:new-mar": {
-                        "candidate_id": "candidate:new-mar",
-                        "candidate_key": "candidate:new-mar",
-                        "scope_month": "2026-03",
-                    },
-                    "candidate:keep-apr": {
-                        "candidate_id": "candidate:keep-apr",
-                        "candidate_key": "candidate:keep-apr",
-                        "scope_month": "2026-04",
-                    },
-                },
-            }
-
-            store.save_workbench_candidate_matches(snapshot, changed_scope_months=["2026-03"])
-            loaded = ApplicationStateStore(data_dir).load_workbench_candidate_matches()
-
-        self.assertEqual(loaded, snapshot)
 
     def test_save_workbench_read_models_accepts_changed_scopes_for_local_snapshot(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -755,24 +682,6 @@ class StateStoreTests(unittest.TestCase):
 
             store.save_workbench_read_models(snapshot, changed_scope_keys=["all"])
             loaded = ApplicationStateStore(data_dir).load_workbench_read_models()
-
-        self.assertEqual(loaded, snapshot)
-
-    def test_save_workbench_matching_dirty_scopes_persists_locally_across_store_instances(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            data_dir = Path(temp_dir)
-            snapshot = {
-                "dirty_scopes": {
-                    "2026-03": {
-                        "scope_month": "2026-03",
-                        "reasons": ["manual_category_dirty"],
-                    }
-                }
-            }
-
-            store = ApplicationStateStore(data_dir)
-            store.save_workbench_matching_dirty_scopes(snapshot)
-            loaded = ApplicationStateStore(data_dir).load().get("workbench_matching_dirty_scopes")
 
         self.assertEqual(loaded, snapshot)
 

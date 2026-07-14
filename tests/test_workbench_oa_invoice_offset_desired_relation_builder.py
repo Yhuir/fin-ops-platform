@@ -48,7 +48,7 @@ class WorkbenchOaInvoiceOffsetDesiredRelationBuilderTests(unittest.TestCase):
 
     def test_build_returns_desired_relation_for_configured_applicant_attachment_rows(self) -> None:
         payload = {
-            "open": {
+            "unpaired": {
                 "oa": [{"id": "oa-1", "applicant": "周洁莹", "month": "2026-03"}],
                 "invoice": [
                     {
@@ -80,7 +80,7 @@ class WorkbenchOaInvoiceOffsetDesiredRelationBuilderTests(unittest.TestCase):
 
     def test_build_skips_unconfigured_applicant_missing_attachment_and_manual_conflict(self) -> None:
         payload = {
-            "open": {
+            "unpaired": {
                 "oa": [
                     {"id": "oa-unconfigured", "applicant": "李四", "month": "2026-03"},
                     {"id": "oa-missing-attachment", "applicant": "周洁莹", "month": "2026-03"},
@@ -122,7 +122,7 @@ class WorkbenchOaInvoiceOffsetDesiredRelationBuilderTests(unittest.TestCase):
 
     def test_build_returns_empty_without_applicant_configuration(self) -> None:
         payload = {
-            "open": {
+            "unpaired": {
                 "oa": [{"id": "oa-1", "applicant": "周洁莹"}],
                 "invoice": [
                     {"id": "inv-1", "source_kind": "oa_attachment_invoice", "derived_from_oa_id": "oa-1"}

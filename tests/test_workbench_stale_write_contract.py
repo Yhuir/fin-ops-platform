@@ -35,9 +35,9 @@ class WorkbenchStaleWriteContractTests(unittest.TestCase):
     def _default_open_row_ids(self, app: Application) -> list[str]:
         payload = _json_response(app.handle_request("GET", "/api/workbench?month=2026-03"))
         return [
-            _flatten_groups(payload["open"]["groups"], "oa")[0]["id"],
-            _flatten_groups(payload["open"]["groups"], "bank")[0]["id"],
-            _flatten_groups(payload["open"]["groups"], "invoice")[0]["id"],
+            _flatten_groups(payload["unpaired"]["groups"], "oa")[0]["id"],
+            _flatten_groups(payload["unpaired"]["groups"], "bank")[0]["id"],
+            _flatten_groups(payload["unpaired"]["groups"], "invoice")[0]["id"],
         ]
 
     def _post(self, app: Application, path: str, payload: dict[str, object]):

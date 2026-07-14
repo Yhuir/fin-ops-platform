@@ -13,25 +13,21 @@ class FakeGroupingService:
         self,
         month: str,
         *,
-        oa_rows: list[dict[str, object]],
-        bank_rows: list[dict[str, object]],
-        invoice_rows: list[dict[str, object]],
-        turnover_relations: list[dict[str, object]] | None = None,
+        rows_by_id: dict[str, dict[str, object]],
+        active_relations: list[dict[str, object]],
     ) -> dict[str, object]:
         self.calls.append(
             {
                 "month": month,
-                "oa_rows": oa_rows,
-                "bank_rows": bank_rows,
-                "invoice_rows": invoice_rows,
-                "turnover_relations": turnover_relations,
+                "rows_by_id": rows_by_id,
+                "active_relations": active_relations,
             }
         )
-        return {"month": month, "paired": {"groups": []}, "open": {"groups": []}}
+        return {"month": month, "paired": {"groups": []}, "unpaired": {"groups": []}}
 
 
 class WorkbenchGroupRowPayloadHelperTests(unittest.TestCase):
-    def test_group_filters_ignored_rows_and_passes_turnover_relations(self) -> None:
+    def test_group_filters_ignored_rows_and_passes_only_formal_relations(self) -> None:
         grouping_service = FakeGroupingService()
         helper = WorkbenchGroupRowPayloadHelper(
             grouping_service=grouping_service,
@@ -41,25 +37,36 @@ class WorkbenchGroupRowPayloadHelperTests(unittest.TestCase):
             "month": "2026-03",
             "oa_status": {"code": "ready"},
             "paired": {
-                "oa": [{"id": "oa-1"}, {"id": "oa-ignored", "ignored": True}],
-                "bank": [{"id": "bank-1"}],
-                "invoice": [{"id": "invoice-1"}],
+                "oa": [
+                    {"id": "oa-1", "type": "oa", "case_id": "CASE-1"},
+                    {"id": "oa-ignored", "type": "oa", "case_id": "CASE-1", "ignored": True},
+                ],
+                "bank": [{"id": "bank-1", "type": "bank", "case_id": "CASE-1"}],
+                "invoice": [{"id": "invoice-1", "type": "invoice", "case_id": "CASE-1"}],
             },
-            "open": {
-                "oa": [{"id": "oa-2"}],
-                "bank": [{"id": "bank-ignored", "ignored": True}],
-                "invoice": [{"id": "invoice-2"}],
+            "unpaired": {
+                "oa": [{"id": "oa-2", "type": "oa"}],
+                "bank": [{"id": "bank-ignored", "type": "bank", "ignored": True}],
+                "invoice": [{"id": "invoice-2", "type": "invoice"}],
             },
         }
-        turnover_relations = [{"id": "turnover-1"}]
 
-        grouped = helper.group(payload, turnover_relations=turnover_relations)
+        grouped = helper.group(payload)
 
         self.assertEqual(grouping_service.calls[0]["month"], "2026-03")
-        self.assertEqual(grouping_service.calls[0]["oa_rows"], [{"id": "oa-1"}, {"id": "oa-2"}])
-        self.assertEqual(grouping_service.calls[0]["bank_rows"], [{"id": "bank-1"}])
-        self.assertEqual(grouping_service.calls[0]["invoice_rows"], [{"id": "invoice-1"}, {"id": "invoice-2"}])
-        self.assertEqual(grouping_service.calls[0]["turnover_relations"], turnover_relations)
+        self.assertEqual(set(grouping_service.calls[0]["rows_by_id"]), {"oa-1", "oa-2", "bank-1", "invoice-1", "invoice-2"})
+        self.assertEqual(
+            grouping_service.calls[0]["active_relations"],
+            [
+                {
+                    "case_id": "CASE-1",
+                    "row_ids": ["oa-1", "bank-1", "invoice-1"],
+                    "row_types": ["oa", "bank", "invoice"],
+                    "status": "active",
+                    "relation_mode": "manual_confirmed",
+                }
+            ],
+        )
         self.assertEqual(grouped["oa_status"], {"code": "ready", "serialized": True})
 
     def test_group_tolerates_missing_sections(self) -> None:
@@ -69,12 +76,11 @@ class WorkbenchGroupRowPayloadHelperTests(unittest.TestCase):
             serialize_value=lambda value: value,
         )
 
-        grouped = helper.group({"month": "all", "paired": None, "open": None})
+        grouped = helper.group({"month": "all", "paired": None, "unpaired": None})
 
         self.assertEqual(grouped["month"], "all")
-        self.assertEqual(grouping_service.calls[0]["oa_rows"], [])
-        self.assertEqual(grouping_service.calls[0]["bank_rows"], [])
-        self.assertEqual(grouping_service.calls[0]["invoice_rows"], [])
+        self.assertEqual(grouping_service.calls[0]["rows_by_id"], {})
+        self.assertEqual(grouping_service.calls[0]["active_relations"], [])
 
 
 if __name__ == "__main__":

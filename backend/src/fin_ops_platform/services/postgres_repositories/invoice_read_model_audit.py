@@ -34,10 +34,9 @@ class InvoiceReadModelAuditContract:
     duplicate_member_issue_code: str
     amount_mismatch_issue_code: str
     relation_split_issue_code: str
-    candidate_projection_check: str
-    candidate_projection_issue_code: str
-    candidate_workbench_row_issue_code: str
-    candidate_workbench_group_issue_code: str
+    invalid_projection_status_issue_code: str
+    invalid_relation_row_status_issue_code: str
+    invalid_relation_group_status_issue_code: str
     relation_group_ids_column: str
 
 
@@ -59,10 +58,9 @@ INPUT_INVOICE_AUDIT_CONTRACT = InvoiceReadModelAuditContract(
     duplicate_member_issue_code="duplicate_input_invoice_usage_member",
     amount_mismatch_issue_code="input_invoice_usage_amount_mismatch",
     relation_split_issue_code="active_relation_members_split_across_input_usage_rows",
-    candidate_projection_check="candidate_relation_in_input_usage",
-    candidate_projection_issue_code="candidate_relation_projected_into_input_usage",
-    candidate_workbench_row_issue_code="candidate_workbench_relation_for_input_invoice",
-    candidate_workbench_group_issue_code="candidate_workbench_relation_group_for_input_invoice",
+    invalid_projection_status_issue_code="invalid_relation_status_in_input_usage",
+    invalid_relation_row_status_issue_code="invalid_workbench_relation_row_status_for_input_invoice",
+    invalid_relation_group_status_issue_code="invalid_workbench_relation_group_status_for_input_invoice",
     relation_group_ids_column="input_invoice_ids",
 )
 
@@ -87,10 +85,9 @@ OUTPUT_INVOICE_AUDIT_CONTRACT = InvoiceReadModelAuditContract(
     duplicate_member_issue_code="duplicate_output_invoice_collection_member",
     amount_mismatch_issue_code="output_invoice_collection_amount_mismatch",
     relation_split_issue_code="active_relation_members_split_across_output_collection_rows",
-    candidate_projection_check="candidate_relation_in_output_collection",
-    candidate_projection_issue_code="candidate_relation_projected_into_output_collection",
-    candidate_workbench_row_issue_code="candidate_workbench_relation_for_output_invoice",
-    candidate_workbench_group_issue_code="candidate_workbench_relation_group_for_output_invoice",
+    invalid_projection_status_issue_code="invalid_relation_status_in_output_collection",
+    invalid_relation_row_status_issue_code="invalid_workbench_relation_row_status_for_output_invoice",
+    invalid_relation_group_status_issue_code="invalid_workbench_relation_group_status_for_output_invoice",
     relation_group_ids_column="output_invoice_ids",
 )
 
@@ -269,8 +266,7 @@ def _audit_invoice_read_model_snapshot(
         _relation_edge_equality_issues,
         _consumer_relation_edge_equality_issues,
         _relation_member_split_row_issues,
-        _candidate_relation_in_projection_issues,
-        _candidate_workbench_relation_issues,
+        _invalid_relation_status_issues,
     )
     for check in checks:
         issues.extend(check(connection, contract=contract, tenant_id=tenant_id, limit=limit + 1))
@@ -981,7 +977,7 @@ def _relation_member_split_row_issues(
     ]
 
 
-def _candidate_relation_in_projection_issues(
+def _invalid_relation_status_issues(
     connection: Any,
     contract: InvoiceReadModelAuditContract,
     *,
@@ -989,7 +985,7 @@ def _candidate_relation_in_projection_issues(
     limit: int,
 ) -> list[AuditIssue]:
     _ = tenant_id
-    candidate_exists_sql = """
+    invalid_status_exists_sql = """
         exists (
             select 1
             from jsonb_array_elements(
@@ -999,17 +995,17 @@ def _candidate_relation_in_projection_issues(
                     else '[]'::jsonb
                 end
             ) as summary(value)
-            where coalesce(summary.value->>'relationStatus', summary.value->>'relation_status') = 'candidate'
+            where coalesce(summary.value->>'relationStatus', summary.value->>'relation_status') not in ('linked', 'unlinked')
         )
     """
     rows = connection.fetch_all(
         f"""
-        /* check: {contract.candidate_projection_check} */
+        /* check: invalid_relation_projection_status */
         select row.scope_key, row.row_id, row.invoice_id, row.payment_status
         from {contract.rows_table} row
-        where {candidate_exists_sql}
-           or {candidate_exists_sql}
-           or {candidate_exists_sql}
+        where {invalid_status_exists_sql}
+           or {invalid_status_exists_sql}
+           or {invalid_status_exists_sql}
         order by row.scope_key, row.row_id
         limit %s
         """,
@@ -1023,20 +1019,29 @@ def _candidate_relation_in_projection_issues(
             limit,
         ),
     )
-    return [
+    issues = [
         AuditIssue(
             severity="error",
-            code=contract.candidate_projection_issue_code,
-            message=f"A candidate relation appears inside {contract.read_model_key} relation summaries.",
+            code=contract.invalid_projection_status_issue_code,
+            message=f"A relation status outside linked/unlinked appears inside {contract.read_model_key} summaries.",
             subject_id=_text(row.get("row_id")),
             scope_key=_text(row.get("scope_key")),
             details=_details(row, "invoice_id", "payment_status"),
         )
         for row in rows
     ]
+    issues.extend(
+        _invalid_workbench_relation_status_issues(
+            connection,
+            contract=contract,
+            tenant_id=tenant_id,
+            limit=limit,
+        )
+    )
+    return issues
 
 
-def _candidate_workbench_relation_issues(
+def _invalid_workbench_relation_status_issues(
     connection: Any,
     contract: InvoiceReadModelAuditContract,
     *,
@@ -1045,7 +1050,7 @@ def _candidate_workbench_relation_issues(
 ) -> list[AuditIssue]:
     rows = connection.fetch_all(
         f"""
-        /* check: candidate_workbench_relation */
+        /* check: invalid_workbench_relation_status */
         with {_invoice_lookup_cte(contract)}
         select
             relation_row.scope_key,
@@ -1057,7 +1062,7 @@ def _candidate_workbench_relation_issues(
         join invoice_relation_lookup lookup
           on lookup.relation_row_id = relation_row.row_id
         where relation_row.tenant_id = %s
-          and relation_row.relation_status = 'candidate'
+          and relation_row.relation_status not in ('linked', 'unlinked')
         order by relation_row.scope_key, relation_row.row_id
         limit %s
         """,
@@ -1066,8 +1071,8 @@ def _candidate_workbench_relation_issues(
     issues = [
         AuditIssue(
             severity="error",
-            code=contract.candidate_workbench_row_issue_code,
-            message=f"A candidate workbench_relation row exists for a {contract.direction} invoice relation lookup id.",
+            code=contract.invalid_relation_row_status_issue_code,
+            message=f"A workbench_relation row has a status outside linked/unlinked for a {contract.direction} invoice.",
             subject_id=_text(row.get("row_id")),
             scope_key=_text(row.get("scope_key")),
             details=_details(row, "invoice_id", "row_type", "group_ids"),
@@ -1076,11 +1081,11 @@ def _candidate_workbench_relation_issues(
     ]
     group_rows = connection.fetch_all(
         f"""
-        /* check: candidate_workbench_relation_group */
+        /* check: invalid_workbench_relation_group_status */
         select scope_key, group_id, {contract.relation_group_ids_column}
         from read_model.workbench_relation_groups
         where tenant_id = %s
-          and relation_status = 'candidate'
+          and relation_status not in ('linked', 'unlinked')
           and coalesce(array_length({contract.relation_group_ids_column}, 1), 0) > 0
         order by scope_key, group_id
         limit %s
@@ -1090,8 +1095,8 @@ def _candidate_workbench_relation_issues(
     issues.extend(
         AuditIssue(
             severity="error",
-            code=contract.candidate_workbench_group_issue_code,
-            message=f"A candidate workbench_relation group contains {contract.direction} invoice members.",
+            code=contract.invalid_relation_group_status_issue_code,
+            message=f"A workbench_relation group has a status outside linked/unlinked for {contract.direction} invoices.",
             subject_id=_text(row.get("group_id")),
             scope_key=_text(row.get("scope_key")),
             details=_details(row, contract.relation_group_ids_column),

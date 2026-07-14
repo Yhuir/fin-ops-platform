@@ -25,7 +25,6 @@ class WorkbenchApiPayloadAssembler:
         read_model = self._read_model_provider(
             month,
             visibility_key=visibility_key,
-            ensure_candidate_matches=True,
         )
         payload = read_model.get("payload")
         retained = self._apply_oa_retention(payload if isinstance(payload, dict) else {})

@@ -151,18 +151,6 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
                 }
             }
         )
-        self.store.save_workbench_candidate_matches(
-            {
-                "candidates": {
-                    "candidate-1": {
-                        "scope_month": "2026-03",
-                        "status": "fresh",
-                        "row_ids": ["bank-1", "invoice-1"],
-                        "confidence": "0.900000",
-                    }
-                }
-            }
-        )
         self.store.save_bank_transaction_categories(
             {
                 "categories": {"bank-1": {"category": "fee", "source": "manual", "confidence": "1", "version": 1}},
@@ -210,7 +198,6 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
             "app.no_oa_bank_batches": 1,
             "app.no_oa_bank_batch_events": 1,
             "read_model.workbench_snapshots": 1,
-            "read_model.workbench_candidate_matches": 1,
             "app.bank_transaction_categories": 1,
             "app.bank_transaction_category_events": 1,
             "app.turnover_relations": 1,
@@ -623,49 +610,6 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
             "t",
         )
 
-    def test_changed_scope_preserves_absent_workbench_generation_rows_and_updates_candidates(self) -> None:
-        self.store.save_workbench_read_models(
-            {
-                "read_models": {
-                    "2026-03": {"scope_month": "2026-03", "rows": [{"id": "keep"}]},
-                    "2026-04": {"scope_month": "2026-04", "rows": [{"id": "remove"}]},
-                }
-            }
-        )
-        self.store.save_workbench_read_models(
-            {"read_models": {"2026-03": {"scope_month": "2026-03", "rows": [{"id": "keep"}]}}},
-            changed_scope_keys={"2026-03", "2026-04"},
-        )
-
-        self.assertEqual(fetch_scalar(self.database_url, "select count(*) from read_model.workbench_snapshots where scope_key = '2026-03';"), "2")
-        self.assertEqual(fetch_scalar(self.database_url, "select count(*) from read_model.workbench_snapshots where scope_key = '2026-04';"), "1")
-        self.assertEqual(fetch_scalar(self.database_url, "select count(*) from read_model.workbench_rows where scope_key = '2026-04';"), "1")
-
-        self.store.save_workbench_candidate_matches(
-            {
-                "candidates": {
-                    "candidate-old": {"scope_month": "2026-03", "row_ids": ["old"], "confidence": "0.1"},
-                    "candidate-other": {"scope_month": "2026-04", "row_ids": ["other"], "confidence": "0.2"},
-                }
-            }
-        )
-        self.store.save_workbench_candidate_matches(
-            {
-                "candidates": {
-                    "candidate-new": {"scope_month": "2026-03", "row_ids": ["new"], "confidence": "0.9"},
-                    "candidate-other-new": {"scope_month": "2026-04", "row_ids": ["other-new"], "confidence": "0.8"},
-                }
-            },
-            changed_scope_months={"2026-03"},
-        )
-
-        self.assertEqual(
-            fetch_scalar(
-                self.database_url,
-                "select string_agg(candidate_key, ',' order by candidate_key) from read_model.workbench_candidate_matches;",
-            ),
-            "candidate-new,candidate-other",
-        )
 
     def test_save_no_oa_bank_batches_replaces_absent_read_model_rows(self) -> None:
         self.store.save_no_oa_bank_batches(

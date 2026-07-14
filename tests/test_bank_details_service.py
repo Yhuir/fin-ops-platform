@@ -397,7 +397,7 @@ class BankDetailsServiceTests(unittest.TestCase):
         self.assertEqual(row["relation_tags"], ["有oa", "有发票"])
         self.assertEqual(row["relation_case_id"], "CASE-LINKED")
 
-    def test_transactions_display_candidate_relation_tags_explicitly(self) -> None:
+    def test_transactions_treat_nonformal_relation_payload_as_unlinked(self) -> None:
         service = BankDetailsService(
             _ImportServiceStub(
                 [
@@ -416,11 +416,11 @@ class BankDetailsServiceTests(unittest.TestCase):
 
         row = service.list_transactions(account_key="工商银行:6386")["rows"][0]
 
-        self.assertEqual(row["oa_relation_tag"], "候选oa")
-        self.assertEqual(row["invoice_relation_tag"], "候选发票")
-        self.assertEqual(row["relation_tags"], ["候选oa", "候选发票"])
-        self.assertEqual(row["relation_case_id"], "CASE-CANDIDATE")
-        self.assertEqual(row["relation_status"], "candidate")
+        self.assertEqual(row["oa_relation_tag"], "无oa")
+        self.assertEqual(row["invoice_relation_tag"], "无发票")
+        self.assertEqual(row["relation_tags"], ["无oa", "无发票"])
+        self.assertNotIn("relation_case_id", row)
+        self.assertEqual(row["relation_status"], "unlinked")
 
     def test_transactions_use_relation_provider_for_invoice_only_boundary(self) -> None:
         service = BankDetailsService(
@@ -485,11 +485,15 @@ class BankDetailsServiceTests(unittest.TestCase):
 
         self.assertEqual(
             service.relation_tag_for_transaction("txn-shared"),
-            {"case_id": "CASE-DISTRIBUTED", "row_types": ["bank", "invoice", "oa"]},
+            {
+                "case_id": "CASE-DISTRIBUTED",
+                "row_types": ["bank", "invoice", "oa"],
+                "relation_status": "linked",
+            },
         )
         self.assertEqual(facade.calls, [["txn-shared"]])
 
-    def test_relation_tag_projection_preserves_candidate_status(self) -> None:
+    def test_relation_tag_projection_ignores_nonformal_distribution_rows(self) -> None:
         facade = _RelationDistributionFacade(
             [
                 {
@@ -505,10 +509,7 @@ class BankDetailsServiceTests(unittest.TestCase):
         )
         service = BankDetailsRelationTagProjectionService(relation_facade=facade)
 
-        self.assertEqual(
-            service.relation_tag_for_transaction("txn-candidate"),
-            {"case_id": "CASE-CANDIDATE", "row_types": ["bank", "invoice", "oa"], "relation_status": "candidate"},
-        )
+        self.assertIsNone(service.relation_tag_for_transaction("txn-candidate"))
 
     def test_relation_tag_projection_returns_none_for_unlinked_distribution_row(self) -> None:
         service = BankDetailsRelationTagProjectionService(

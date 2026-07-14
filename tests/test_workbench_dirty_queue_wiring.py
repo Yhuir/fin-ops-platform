@@ -14,16 +14,41 @@ from fin_ops_platform.services.workbench_matching_dirty_scope_worker import (
     WorkbenchMatchingDirtyScopeWorker,
     WorkbenchMatchingDirtyScopeWorkerConfig,
 )
-from fin_ops_platform.services.workbench_reconciliation_models import expand_scope_month_window
+from fin_ops_platform.services.workbench_reconciliation_dirty_queue import expand_scope_month_window
 
 
 class RecordingDirtyQueue:
-    def __init__(self, *, claim_months: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        claim_months: list[str] | None = None,
+        stale_months: list[str] | None = None,
+    ) -> None:
         self.mark_calls: list[dict[str, object]] = []
+        self.stale_scan_calls: list[dict[str, object]] = []
         self.claim_calls: list[dict[str, object]] = []
         self.complete_calls: list[dict[str, object]] = []
         self.fail_calls: list[dict[str, object]] = []
         self.claim_months = list(claim_months or [])
+        self.stale_months = list(stale_months or [])
+
+    def mark_stale_completed_scopes(
+        self,
+        *,
+        source_versions: dict[str, object],
+        reason: str,
+        debounce_seconds: int = 0,
+        limit: int | None = None,
+    ) -> list[str]:
+        self.stale_scan_calls.append(
+            {
+                "source_versions": dict(source_versions),
+                "reason": reason,
+                "debounce_seconds": debounce_seconds,
+                "limit": limit,
+            }
+        )
+        return list(self.stale_months)
 
     def mark_dirty_expanded(
         self,
@@ -94,18 +119,6 @@ class RecordingDirtyQueue:
                 "request_id": request_id,
             }
         )
-
-
-class FailingClaimDirtyQueue(RecordingDirtyQueue):
-    def claim_due_scopes(
-        self,
-        *,
-        worker_id: str,
-        limit: int,
-        lease_seconds: int | None = None,
-        request_id: str | None = None,
-    ) -> list[str]:
-        raise RuntimeError("db queue unavailable")
 
 
 class FailingMarkDirtyQueue(RecordingDirtyQueue):
@@ -292,118 +305,6 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
         self.assertNotIn(("output_invoice_collection", "2026-05", "import_state_changed"), refreshes)
         self.assertFalse(any(scope_type == "cost_statistics" for scope_type, _scope_key, _reason in refreshes))
 
-    def test_dirty_scope_worker_claims_db_queue_and_completes_with_lease_identity(self) -> None:
-        app = build_application()
-        queue = RecordingDirtyQueue(claim_months=["2026-05"])
-        app._workbench_reconciliation_dirty_queue = queue
-
-        with patch.object(
-            app,
-            "_run_workbench_auto_matching_for_scopes",
-            return_value={"processed_months": ["2026-05"], "candidate_count": 2},
-        ) as run_matching:
-            result = app._rebuild_workbench_matching_dirty_scopes_once(
-                worker_id="worker-a",
-                request_id="request-1",
-                limit=10,
-                lease_seconds=300,
-            )
-
-        run_matching.assert_called_once_with(
-            ["2026-05"],
-            reason="dirty_scope_retry",
-            request_id="request-1:2026-05",
-            requeue_on_error=False,
-            raise_on_error=True,
-        )
-        self.assertEqual(queue.claim_calls[0]["worker_id"], "worker-a")
-        self.assertEqual(queue.claim_calls[0]["request_id"], "request-1")
-        self.assertEqual(
-            queue.complete_calls,
-            [
-                {
-                    "scope_month": "2026-05",
-                    "source_versions": app._workbench_matching_source_versions(),
-                    "worker_id": "worker-a",
-                    "request_id": "request-1:2026-05",
-                }
-            ],
-        )
-        self.assertEqual(result["processed_months"], ["2026-05"])
-        self.assertEqual(result["failed_months"], [])
-
-    def test_dirty_scope_worker_fails_db_queue_scope_when_matching_raises(self) -> None:
-        app = build_application()
-        queue = RecordingDirtyQueue(claim_months=["2026-05"])
-        app._workbench_reconciliation_dirty_queue = queue
-
-        with patch.object(
-            app,
-            "_run_workbench_auto_matching_for_scopes",
-            side_effect=RuntimeError("matching unavailable"),
-        ):
-            result = app._rebuild_workbench_matching_dirty_scopes_once(
-                worker_id="worker-a",
-                request_id="request-1",
-                limit=10,
-                retry_delay_seconds=45,
-            )
-
-        self.assertEqual(queue.complete_calls, [])
-        self.assertEqual(
-            queue.fail_calls,
-            [
-                {
-                    "scope_month": "2026-05",
-                    "error": "matching unavailable",
-                    "retry_delay_seconds": 45,
-                    "worker_id": "worker-a",
-                    "request_id": "request-1:2026-05",
-                }
-            ],
-        )
-        self.assertEqual(result["processed_months"], [])
-        self.assertEqual(result["failed_months"], ["2026-05"])
-
-    def test_db_dirty_queue_empty_claim_does_not_drain_legacy_dirty_scopes(self) -> None:
-        app = build_application()
-        queue = RecordingDirtyQueue(claim_months=[])
-        app._workbench_reconciliation_dirty_queue = queue
-        app._workbench_matching_dirty_scope_service.mark_dirty(["2026-05"], reason="legacy")
-
-        with patch.object(app, "_run_workbench_auto_matching_for_scopes") as run_matching:
-            result = app._rebuild_workbench_matching_dirty_scopes_once(
-                worker_id="worker-a",
-                request_id="request-1",
-                limit=10,
-            )
-
-        self.assertIsNone(result)
-        run_matching.assert_not_called()
-        self.assertEqual(
-            [entry["scope_month"] for entry in app._workbench_matching_dirty_scope_service.list_dirty_scopes()],
-            ["2026-05"],
-        )
-
-    def test_db_dirty_queue_claim_failure_does_not_run_legacy_dirty_scopes(self) -> None:
-        app = build_application()
-        app._workbench_reconciliation_dirty_queue = FailingClaimDirtyQueue()
-        app._workbench_matching_dirty_scope_service.mark_dirty(["2026-05"], reason="legacy")
-
-        with patch.object(app, "_run_workbench_auto_matching_for_scopes") as run_matching:
-            with self.assertRaisesRegex(RuntimeError, "db queue unavailable"):
-                app._rebuild_workbench_matching_dirty_scopes_once(
-                    worker_id="worker-a",
-                    request_id="request-1",
-                    limit=10,
-                )
-
-        run_matching.assert_not_called()
-        self.assertEqual(
-            [entry["scope_month"] for entry in app._workbench_matching_dirty_scope_service.list_dirty_scopes()],
-            ["2026-05"],
-        )
-
     def test_db_dirty_queue_write_path_marks_scope_instead_of_inline_matching(self) -> None:
         app = build_application()
         queue = RecordingDirtyQueue()
@@ -420,14 +321,14 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
         self.assertEqual(queue.mark_calls[0]["reason"], "import_confirm")
         self.assertEqual(result["queued_months"], ["2026-03", "2026-04", "2026-05", "2026-06", "2026-07"])
 
-    def test_db_dirty_queue_mark_failure_does_not_fall_back_to_legacy_dirty_scopes(self) -> None:
+    def test_db_dirty_queue_mark_failure_does_not_fall_back_to_in_memory_state(self) -> None:
         app = build_application()
         app._workbench_reconciliation_dirty_queue = FailingMarkDirtyQueue()
 
         with self.assertRaisesRegex(RuntimeError, "db queue unavailable"):
             app._schedule_or_run_workbench_auto_matching_for_scopes(["2026-05"], reason="import_confirm")
 
-        self.assertEqual(app._workbench_matching_dirty_scope_service.list_dirty_scopes(), [])
+        self.assertFalse(hasattr(app, "_workbench_matching_dirty_scope_service"))
 
     def test_exception_apply_api_marks_db_dirty_queue(self) -> None:
         app = build_application()
@@ -515,38 +416,6 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
 
         self.assertFalse(app.workbench_dirty_started)
 
-    def test_matching_row_provider_does_not_supplement_historical_pair_relation_rows(self) -> None:
-        app = build_application()
-        raw_payload = {
-            "paired": {"oa": [], "bank": [], "invoice": []},
-            "open": {
-                "oa": [{"id": "oa-match-provider-001", "type": "oa", "amount": "100.00", "month": "2026-03"}],
-                "bank": [
-                    {
-                        "id": "bank-match-provider-001",
-                        "type": "bank",
-                        "amount": "100.00",
-                        "month": "2026-03",
-                        "trade_time": "2026-03-10",
-                    }
-                ],
-                "invoice": [
-                    {
-                        "id": "invoice-match-provider-001",
-                        "type": "invoice",
-                        "total_with_tax": "100.00",
-                        "issue_date": "2026-03-10",
-                    }
-                ],
-            },
-        }
-
-        with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload) as build_payload:
-            rows = app._workbench_matching_rows_for_scope("2026-03")
-
-        build_payload.assert_called_once_with("2026-03", supplement_missing_pair_relation_rows=False)
-        self.assertEqual([row["id"] for row in rows["oa_rows"]], ["oa-match-provider-001"])
-
     def test_oa_invoice_offset_settings_change_marks_all_available_months_dirty(self) -> None:
         app = build_application()
         queue = RecordingDirtyQueue()
@@ -608,45 +477,36 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
 
         scan.assert_called_once()
 
-    def test_startup_stale_scan_marks_available_months_dirty_when_db_queue_exists(self) -> None:
+    def test_startup_stale_scan_requeues_only_stale_completed_durable_scopes(self) -> None:
+        app = build_application()
+        queue = RecordingDirtyQueue(stale_months=["2026-05"])
+        app._workbench_reconciliation_dirty_queue = queue
+
+        summary = app._schedule_startup_workbench_matching_stale_scan()
+
+        self.assertEqual(
+            queue.stale_scan_calls,
+            [
+                {
+                    "source_versions": app._workbench_matching_source_versions(),
+                    "reason": "startup_matching_source_versions_changed",
+                    "debounce_seconds": 0,
+                    "limit": 1000,
+                }
+            ],
+        )
+        self.assertEqual(
+            summary,
+            {"queued_months": ["2026-05"], "reason": "startup_matching_source_versions_changed"},
+        )
+
+    def test_startup_stale_scan_is_noop_when_durable_queue_has_no_stale_completed_scope(self) -> None:
         app = build_application()
         queue = RecordingDirtyQueue()
         app._workbench_reconciliation_dirty_queue = queue
 
-        with patch.object(app._workbench_query_service, "list_available_months", return_value=["2026-05"]):
-            summary = app._schedule_startup_workbench_matching_stale_scan()
-
-        self.assertEqual(
-            [(call["months"], call["reason"]) for call in queue.mark_calls],
-            [(["2026-05"], "startup_stale_scan")],
-        )
-        self.assertEqual(
-            summary["invalidated_scopes"],
-            ["2026-03", "2026-04", "2026-05", "2026-06", "2026-07"],
-        )
-        self.assertEqual(summary["enqueued_jobs"], [])
-        self.assertEqual(summary["deleted_counts"], {"workbench_matching_dirty_scopes": 0})
-
-    def test_startup_stale_scan_skips_fresh_matching_months(self) -> None:
-        app = build_application()
-        queue = RecordingDirtyQueue()
-        app._workbench_reconciliation_dirty_queue = queue
-        app._workbench_candidate_match_service.mark_scope_processed(
-            "2026-05",
-            source_versions=app._workbench_matching_source_versions(),
-            candidate_count=0,
-            request_id="test-fresh-scope",
-            reason="test",
-        )
-
-        with patch.object(app._workbench_query_service, "list_available_months", return_value=["2026-05", "2026-06"]):
-            summary = app._schedule_startup_workbench_matching_stale_scan()
-
-        self.assertEqual(
-            [(call["months"], call["reason"]) for call in queue.mark_calls],
-            [(["2026-06"], "startup_stale_scan")],
-        )
-        self.assertIn("2026-06", summary["invalidated_scopes"])
+        self.assertIsNone(app._schedule_startup_workbench_matching_stale_scan())
+        self.assertEqual(len(queue.stale_scan_calls), 1)
 
     def test_worker_cli_exposes_workbench_matching_dirty_queue_options(self) -> None:
         args = build_parser().parse_args(

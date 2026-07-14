@@ -6,11 +6,8 @@ from fin_ops_platform.services.workbench_raw_payload_assembler import WorkbenchR
 
 
 class WorkbenchRawPayloadAssemblerTests(unittest.TestCase):
-    def test_live_branch_syncs_and_applies_pair_relations_then_overrides(self) -> None:
+    def test_live_branch_applies_formal_relations_then_overrides(self) -> None:
         calls: list[tuple[str, object]] = []
-
-        def sync_live() -> None:
-            calls.append(("sync_live", None))
 
         def build_live(month: str) -> dict[str, object]:
             calls.append(("build_live", month))
@@ -34,7 +31,6 @@ class WorkbenchRawPayloadAssemblerTests(unittest.TestCase):
 
         assembler = WorkbenchRawPayloadAssembler(
             has_live_rows_for_month=lambda _month: True,
-            sync_live_auto_pair_relations=sync_live,
             build_live_workbench_row_payload=build_live,
             build_oa_workbench_row_payload=lambda _month: {"source": "oa"},
             sync_oa_invoice_offset_auto_pair_relations=sync_oa_invoice_offset,
@@ -49,16 +45,15 @@ class WorkbenchRawPayloadAssemblerTests(unittest.TestCase):
         self.assertTrue(payload["overridden"])
         self.assertEqual(
             [name for name, _payload in calls],
-            ["sync_live", "build_live", "sync_oa_offset", "repair", "pair", "override"],
+            ["build_live", "sync_oa_offset", "repair", "pair", "override"],
         )
-        self.assertEqual(calls[4][1]["supplement_missing_rows"], False)
+        self.assertEqual(calls[3][1]["supplement_missing_rows"], False)
 
     def test_oa_branch_skips_live_sync(self) -> None:
         calls: list[str] = []
 
         assembler = WorkbenchRawPayloadAssembler(
             has_live_rows_for_month=lambda _month: False,
-            sync_live_auto_pair_relations=lambda: calls.append("sync_live"),
             build_live_workbench_row_payload=lambda _month: {"source": "live"},
             build_oa_workbench_row_payload=lambda month: calls.append(f"build_oa:{month}") or {"source": "oa"},
             sync_oa_invoice_offset_auto_pair_relations=lambda _payload: calls.append("sync_oa_offset"),

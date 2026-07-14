@@ -892,7 +892,7 @@ class MongoOAAdapter(OAAdapter):
         return OAApplicationRecord(
             id=f"oa-pay-{external_id}",
             month=self._derive_month(data, document),
-            section="open",
+            section="unpaired",
             case_id=None,
             applicant=applicant,
             project_name=project_name,
@@ -1130,7 +1130,7 @@ class MongoOAAdapter(OAAdapter):
             OAApplicationRecord(
                 id=f"oa-exp-{external_id}",
                 month=record_month,
-                section="open",
+                section="unpaired",
                 case_id=None,
                 applicant=applicant,
                 project_name=project_name_summary,

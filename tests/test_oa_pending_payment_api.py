@@ -467,8 +467,8 @@ class OaPendingPaymentApiTests(unittest.TestCase):
                     "case_id": "candidate-oa-bank",
                     "row_ids": ["oa-candidate", "bank-candidate"],
                     "row_types": ["oa", "bank"],
-                    "relation_mode": "automatic_decision",
-                    "relation_status": "candidate",
+                    "relation_mode": "unlinked_evidence",
+                    "relation_status": "unlinked",
                     "amount_check": {"matched": True},
                 }
             ]),

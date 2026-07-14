@@ -26,7 +26,7 @@ class WorkbenchSelectedScopeRawOaPayloadBuilder:
         supplemental_oa_row_ids: set[str],
     ) -> dict[str, object]:
         paired: dict[str, list[dict[str, object]]] = {"oa": [], "bank": [], "invoice": []}
-        open_rows: dict[str, list[dict[str, object]]] = {"oa": [], "bank": [], "invoice": []}
+        unpaired_rows: dict[str, list[dict[str, object]]] = {"oa": [], "bank": [], "invoice": []}
         retained_oa_row_ids = set(supplemental_oa_row_ids) | set(self._manual_retained_oa_row_ids())
 
         for row in self._record_snapshots():
@@ -39,19 +39,19 @@ class WorkbenchSelectedScopeRawOaPayloadBuilder:
                 include_row = row_month in months or str(row.get("derived_from_oa_id", "")) in retained_oa_row_ids
             if not include_row:
                 continue
-            section_payload = paired if row.get("_section") == "paired" else open_rows
+            section_payload = paired if row.get("_section") == "paired" else unpaired_rows
             section_payload[row_type].append(self._serialize_row(row))
 
-        month_rows = [*paired["oa"], *open_rows["oa"], *paired["invoice"], *open_rows["invoice"]]
+        month_rows = [*paired["oa"], *unpaired_rows["oa"], *paired["invoice"], *unpaired_rows["invoice"]]
         return {
             "month": "all",
             "oa_status": self._oa_status_payload(),
             "summary": {
-                "oa_count": len(paired["oa"]) + len(open_rows["oa"]),
+                "oa_count": len(paired["oa"]) + len(unpaired_rows["oa"]),
                 "bank_count": 0,
-                "invoice_count": len(paired["invoice"]) + len(open_rows["invoice"]),
+                "invoice_count": len(paired["invoice"]) + len(unpaired_rows["invoice"]),
                 "paired_count": len(paired["oa"]) + len(paired["invoice"]),
-                "open_count": len(open_rows["oa"]) + len(open_rows["invoice"]),
+                "unpaired_count": len(unpaired_rows["oa"]) + len(unpaired_rows["invoice"]),
                 "exception_count": sum(
                     1
                     for row in month_rows
@@ -62,5 +62,5 @@ class WorkbenchSelectedScopeRawOaPayloadBuilder:
                 ),
             },
             "paired": paired,
-            "open": open_rows,
+            "unpaired": unpaired_rows,
         }

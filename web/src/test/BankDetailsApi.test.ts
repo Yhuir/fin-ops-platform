@@ -62,11 +62,11 @@ describe("bank details API", () => {
     const payload = await fetchBankDetailTransactions({});
 
     expect(payload.rows[0]).toMatchObject({
-      oaRelationTag: "候选oa",
-      invoiceRelationTag: "候选发票",
-      relationTags: ["候选oa", "候选发票"],
-      relationCaseId: "CASE-202605-001",
-      relationStatus: "candidate",
+      oaRelationTag: "无oa",
+      invoiceRelationTag: "无发票",
+      relationTags: ["无oa", "无发票"],
+      relationCaseId: null,
+      relationStatus: "unlinked",
       tradeTime: "2026-05-01 10:30:00",
       purposeText: "交易用途",
       summaryText: "项目回款摘要",
@@ -466,7 +466,8 @@ describe("bank details API", () => {
     expect(url.searchParams.get("category_primary_label")).toBe("费用");
     expect(url.searchParams.get("category_sub_label")).toBe("手续费");
     expect(result.fileName).toBe("银行明细.xlsx");
-    expect(result.blob).toBeInstanceOf(Blob);
+    expect(result.blob.size).toBeGreaterThan(0);
+    expect(result.blob.type).toBe("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   });
 
   test("maps bank detail export API errors", async () => {

@@ -6,16 +6,15 @@ import hashlib
 import json
 from typing import Any, Callable
 
-from fin_ops_platform.services.workbench_candidate_match_service import WorkbenchCandidateMatchService
 from fin_ops_platform.services.workbench_exception_case_service import WorkbenchExceptionCaseService
 from fin_ops_platform.services.workbench_exception_classifier import WorkbenchExceptionClassifier
 from fin_ops_platform.services.workbench_exception_rules import ACTION_DEFINITIONS, RULE_VERSION, action
-from fin_ops_platform.services.workbench_reconciliation_decision_store import WorkbenchReconciliationDecisionStore
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 
 
 RowProvider = Callable[[str, list[str]], list[dict[str, Any]]]
 SourceVersionsProvider = Callable[[], dict[str, Any]]
+ExceptionEvidenceProvider = Callable[[str, list[str]], list[dict[str, Any]]]
 
 
 class WorkbenchExceptionApplicationConflict(ValueError):
@@ -31,16 +30,14 @@ class WorkbenchExceptionApplicationService:
         *,
         row_provider: RowProvider,
         case_service: WorkbenchExceptionCaseService,
-        candidate_match_service: WorkbenchCandidateMatchService | None = None,
-        decision_store: WorkbenchReconciliationDecisionStore | None = None,
+        exception_evidence_provider: ExceptionEvidenceProvider | None = None,
         classifier: WorkbenchExceptionClassifier | None = None,
         source_versions_provider: SourceVersionsProvider | None = None,
         relation_command_service: Any | None = None,
     ) -> None:
         self._row_provider = row_provider
         self._case_service = case_service
-        self._candidate_match_service = candidate_match_service
-        self._decision_store = decision_store
+        self._exception_evidence_provider = exception_evidence_provider
         self._classifier = classifier or WorkbenchExceptionClassifier()
         self._source_versions_provider = source_versions_provider or (lambda: {})
         self._relation_command_service = relation_command_service
@@ -60,7 +57,6 @@ class WorkbenchExceptionApplicationService:
         warnings = self._normalized_classifier_warnings(classification.get("warnings"))
         active_cases = self._case_service.preview_existing_case_conflicts(row_ids)
         active_relations = self._active_relations_for_row_ids(row_ids)
-        candidate_lifecycle_conflicts = self._candidate_lifecycle_conflicts(candidate_evidence)
         if active_cases:
             warnings.append(
                 self._warning(
@@ -77,8 +73,7 @@ class WorkbenchExceptionApplicationService:
                     {"case_ids": [str(relation.get("case_id") or "") for relation in active_relations]},
                 )
             )
-        warnings.extend(candidate_lifecycle_conflicts)
-        can_apply = not active_cases and not active_relations and not candidate_lifecycle_conflicts
+        can_apply = not active_cases and not active_relations
         return self._preview_payload(
             classification=classification,
             warnings=warnings,
@@ -98,11 +93,6 @@ class WorkbenchExceptionApplicationService:
         existing_case = self._case_service.find_case_by_idempotency_key(idempotency_key)
         if existing_case is not None:
             relation = self._active_relation_by_case_id(str(existing_case.get("id") or ""))
-            self._mark_decisions_resolved(
-                row_ids=row_ids,
-                case_id=str(existing_case.get("id") or ""),
-                relation_case_id=str(relation.get("case_id") or "") if isinstance(relation, dict) else "",
-            )
             return self._apply_payload(
                 case=existing_case,
                 pair_relation=relation,
@@ -147,11 +137,7 @@ class WorkbenchExceptionApplicationService:
             workflow_projection=deepcopy(preview.get("workflow_projection") or {}),
             actor=actor,
             payload=resolution_payload,
-            candidate_ids=[
-                str(candidate.get("candidate_id") or "")
-                for candidate in list(preview.get("candidate_evidence") or [])
-                if str(candidate.get("candidate_id") or "").strip()
-            ],
+            candidate_ids=[],
             source_versions=self._source_versions(str(preview.get("rule_version") or RULE_VERSION)),
             idempotency_key=idempotency_key,
         )
@@ -169,25 +155,6 @@ class WorkbenchExceptionApplicationService:
                 relation_command_service=relation_command_service,
             )
 
-        consumed_candidates = self._mark_candidates_consumed(
-            month=month,
-            row_ids=row_ids,
-            case_id=str(case_payload.get("id") or ""),
-            relation_case_id=str(pair_relation.get("case_id") or "") if isinstance(pair_relation, dict) else "",
-            preview=preview,
-        )
-        if consumed_candidates:
-            case_payload = self._case_service.append_audit_event(
-                str(case_payload["id"]),
-                event="candidate_consumed",
-                actor=actor,
-                payload={"candidate_ids": [str(candidate.get("candidate_id") or "") for candidate in consumed_candidates]},
-            )
-        self._mark_decisions_resolved(
-            row_ids=row_ids,
-            case_id=str(case_payload.get("id") or ""),
-            relation_case_id=str(pair_relation.get("case_id") or "") if isinstance(pair_relation, dict) else "",
-        )
         return self._apply_payload(
             case=case_payload,
             pair_relation=pair_relation,
@@ -217,50 +184,12 @@ class WorkbenchExceptionApplicationService:
         return [rows_by_id[row_id] for row_id in row_ids]
 
     def _candidate_evidence(self, month: str, row_ids: list[str]) -> list[dict[str, Any]]:
-        if self._candidate_match_service is None:
+        if self._exception_evidence_provider is None:
             return []
-        requested_row_ids = set(row_ids)
-        if month == "all":
-            snapshot = self._candidate_match_service.snapshot()
-            raw_candidates = list((snapshot.get("candidates") if isinstance(snapshot.get("candidates"), dict) else {}).values())
-        else:
-            raw_candidates = self._candidate_match_service.list_candidates_by_month(month)
-        evidence: list[dict[str, Any]] = []
-        for candidate in raw_candidates:
-            if not isinstance(candidate, dict):
-                continue
-            candidate_row_ids = {str(row_id) for row_id in list(candidate.get("row_ids") or [])}
-            if not requested_row_ids.intersection(candidate_row_ids):
-                continue
-            item = deepcopy(candidate)
-            special_metadata = item.get("special_metadata")
-            if isinstance(special_metadata, dict):
-                item.setdefault("evidence", deepcopy(special_metadata.get("evidence") if isinstance(special_metadata.get("evidence"), dict) else special_metadata))
-                if special_metadata.get("special_type") and not item.get("special_type"):
-                    item["special_type"] = special_metadata.get("special_type")
-            evidence.append(item)
-        return evidence
-
-    @staticmethod
-    def _candidate_lifecycle_conflicts(candidate_evidence: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        warnings: list[dict[str, Any]] = []
-        for candidate in candidate_evidence:
-            status = str(candidate.get("status") or "")
-            if status not in {"consumed", "suppressed"}:
-                continue
-            warnings.append(
-                WorkbenchExceptionApplicationService._warning(
-                    "candidate_lifecycle_conflict",
-                    "Selected rows include a consumed or suppressed candidate.",
-                    {
-                        "candidate_id": str(candidate.get("candidate_id") or ""),
-                        "status": status,
-                        "consumed_by_case_id": str(candidate.get("consumed_by_case_id") or ""),
-                        "consumed_by_relation_case_id": str(candidate.get("consumed_by_relation_case_id") or ""),
-                    },
-                )
-            )
-        return warnings
+        raw_evidence = self._exception_evidence_provider(month, list(row_ids))
+        if not isinstance(raw_evidence, list):
+            raise ValueError("exception_evidence_provider must return a list.")
+        return [deepcopy(item) for item in raw_evidence if isinstance(item, dict)]
 
     @staticmethod
     def _preview_payload(
@@ -310,7 +239,7 @@ class WorkbenchExceptionApplicationService:
         if preview.get("can_apply"):
             return
         warnings = [warning for warning in list(preview.get("warnings") or []) if isinstance(warning, dict)]
-        priority = ["active_pair_relation_conflict", "active_exception_case_conflict", "candidate_lifecycle_conflict"]
+        priority = ["active_pair_relation_conflict", "active_exception_case_conflict"]
         for code in priority:
             for warning in warnings:
                 if warning.get("code") == code:
@@ -520,52 +449,6 @@ class WorkbenchExceptionApplicationService:
                 return None
             raise
         return deepcopy(relation) if isinstance(relation, dict) else None
-
-    def _mark_candidates_consumed(
-        self,
-        *,
-        month: str,
-        row_ids: list[str],
-        case_id: str,
-        relation_case_id: str,
-        preview: dict[str, Any],
-    ) -> list[dict[str, Any]]:
-        if self._candidate_match_service is None:
-            return []
-        candidates = [
-            candidate
-            for candidate in list(preview.get("candidate_evidence") or [])
-            if isinstance(candidate, dict) and str(candidate.get("status") or "") not in {"consumed", "suppressed"}
-        ]
-        if not candidates:
-            return []
-        return self._candidate_match_service.mark_candidates_consumed(
-            candidate_ids=[
-                str(candidate.get("candidate_id") or "")
-                for candidate in candidates
-                if str(candidate.get("candidate_id") or "").strip()
-            ],
-            row_ids=row_ids,
-            consumed_by_case_id=case_id,
-            consumed_by_relation_case_id=relation_case_id,
-            exception_preview={
-                "scenario_code": str(preview.get("scenario", {}).get("scenario_code") or ""),
-                "available_action_codes": [
-                    str(action_payload.get("action_code") or "")
-                    for action_payload in list(preview.get("available_actions") or [])
-                    if isinstance(action_payload, dict)
-                ],
-            },
-        )
-
-    def _mark_decisions_resolved(self, *, row_ids: list[str], case_id: str, relation_case_id: str) -> int:
-        if self._decision_store is None:
-            return 0
-        if relation_case_id:
-            return self._decision_store.consume_by_row_ids(row_ids, relation_id=relation_case_id)
-        if case_id:
-            return self._decision_store.suppress_by_row_ids(row_ids, exception_case_id=case_id)
-        return 0
 
     def _source_versions(self, rule_version: str) -> dict[str, Any]:
         source_versions = deepcopy(self._source_versions_provider() or {})

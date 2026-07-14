@@ -128,20 +128,6 @@ class AuditOutputInvoiceCollectionReadModelToolTests(unittest.TestCase):
                         "current_relation_versions": {"source_version": "new"},
                     }
                 ],
-                "candidate_relation_in_output_collection": [
-                    {
-                        "row_id": "row-candidate",
-                        "scope_key": "2026-05",
-                        "invoice_id": "out-candidate",
-                    }
-                ],
-                "candidate_workbench_relation_group": [
-                    {
-                        "group_id": "case-candidate",
-                        "scope_key": "2026-05",
-                        "output_invoice_ids": ["out-candidate"],
-                    }
-                ],
             }
         )
 
@@ -151,9 +137,7 @@ class AuditOutputInvoiceCollectionReadModelToolTests(unittest.TestCase):
         issue_codes = set(report["summary"]["issue_sample_counts_by_code"])
         self.assertIn("missing_output_invoice_collection_member", issue_codes)
         self.assertIn("output_collection_relation_source_versions_mismatch", issue_codes)
-        self.assertIn("candidate_relation_projected_into_output_collection", issue_codes)
-        self.assertIn("candidate_workbench_relation_group_for_output_invoice", issue_codes)
-        self.assertEqual(report["summary"]["blocking_issue_sample_count"], 4)
+        self.assertEqual(report["summary"]["blocking_issue_sample_count"], 2)
         self.assertEqual(connection.executed, [])
 
 

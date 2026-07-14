@@ -223,7 +223,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 | `sub_label` | 流水子标签；为空时前端可显示主标签。 |
 | `status` | 当前只返回 `active`。 |
 
-`rules[*].requires_oa=true` 表示该标签的流水必须有关联 OA row 才能进入关联台已配对区；`rules[*].requires_invoice=true` 表示必须有关联发票 row。未勾选表示该项不是进入已配对区的前置条件。新增或未配置标签默认 `requires_oa=true, requires_invoice=true`。
+`rules[*].requires_oa` / `requires_invoice` 表示该标签业务闭环所需的单据类型，用于规则校验和审计提示；它们不再决定关联台分区。只要存在 active 正式关系，关系完整成员就进入 paired；没有 active relation 的事实进入 unpaired singleton。
 
 `PUT /api/bank-flow-rule-batches/tag-rules`
 
@@ -282,7 +282,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 - 实现初期要求所有流水来自同一月份、同一银行账户、同一当前有效银行标签；后续放宽必须更新本 API 和模块状态机。
 - 提交前必须重查银行流水、标签、active relation 占用和规则版本。
 - 成功后写入 `relation_mode=bank_flow_rule_batch`，并在 relation `special_metadata` 写入 `source_batch_id`、`flow_rule_tag_code`、`flow_rule_version`、`requires_oa`、`requires_invoice`、`source_row_count`、`collapsed_bank_rows`。
-- 关联台按 metadata 判断 open/paired；`source_row_count > 3` 时默认折叠。
+- 关联台按 active 正式关系判断 paired/unpaired；该批次 active relation 的完整成员进入 paired，`source_row_count > 3` 时默认折叠。
 - Workbench 折叠摘要必须输出 `source_kind=bank_flow_rule_batch_summary`、summary id prefix `bank_flow_rule_summary:`、`invoice_relation.code=bank_flow_rule_batch` 和 `流水规则` display tag；不得输出 `no_oa_bank_batch_summary` 或 `免OA` tag 作为 bank-flow 摘要 I/O。
 - 成功响应返回 `batch_id`、`case_id`、`affected_months`、`affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`。
 
@@ -323,7 +323,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 | `selected_tag_codes` | 兼容字段：当前仍可用、且 `OA/发票` 都不需要的标签 code 列表。首次为空数组；新调用方应以 `rules` 为准。 |
 | `inactive_selected_tag_codes` | 历史配置中已停用或不可用的标签 code；不参与候选生成，保存后会被清理。 |
 | `active_tags` | 银行明细自动标签规则中的可用标签，供抽屉以只读 grid 展示 `收支类型 / 流水主标签 / 流水子标签`。 |
-| `rules` | 当前可用标签的闭环要求列表。每行包含 `tag_code`、`requires_oa`、`requires_invoice`；`true` 表示必须有对应 OA 或发票行才能进入关联台已配对区。 |
+| `rules` | 当前可用标签的闭环要求列表。每行包含 `tag_code`、`requires_oa`、`requires_invoice`；字段只表达业务闭环/审计要求，不决定关联台 paired/unpaired 分区。 |
 | `requirements_by_tag_code` | `rules` 的 code map 形式，便于后端服务和前端 draft 合并。 |
 
 `active_tags[*]` 至少包含：
@@ -358,7 +358,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 
 - `expected_version` 必填；版本不一致返回 `409 no_oa_bank_batch_tag_selection_version_conflict`。
 - `rules` 是当前主合同；`selected_tag_codes` 只用于旧调用方兼容。旧调用方只传 `selected_tag_codes` 时，后端解释为这些标签 `requires_oa=false, requires_invoice=false`。
-- `rules[*].requires_oa=true` 表示该标签流水必须关联 OA 才能进入关联台已配对区；`requires_invoice=true` 表示必须关联发票才可进入已配对区。未勾选表示该项不是进入已配对的前置条件。
+- `rules[*].requires_oa=true` / `requires_invoice=true` 表示该标签业务闭环要求 OA / 发票；关联台仍只按是否存在 active 正式关系分为 paired/unpaired。
 - 只有 `requires_oa=false` 且 `requires_invoice=false` 的标签会派生到 `selected_tag_codes`，并进入免 OA 未提交候选。新增银行自动标签若没有保存过规则，默认 `requires_oa=true, requires_invoice=true`，避免新增标签自动放行到免 OA 候选。
 - 只能提交当前 `active_tags` 中存在且处于可用状态的标签 code；未知或停用标签返回业务错误。
 - 成功后返回与 GET 相同结构，并写审计动作 `no_oa_bank_batch_tag_selection_updated`。
@@ -404,7 +404,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 - `transaction_ids` 必填且不能为空，不能重复。
 - 所有流水必须来自同一月份、同一银行账户、同一 `category_code`，且该 `category_code` 必须在当前免 OA 标签准入范围内。
 - 只提交请求中的流水；同银行区域内未选中的流水不提交。
-- 成功后写入 `relation_mode=no_oa_bank_batch`，并在 relation `special_metadata` 写入 `paired_requires_oa`、`paired_requires_invoice`、`paired_requirement_tag_code` 和 `paired_requirement_version`；关联台分组按这些字段判断是否可进入已配对区，返回 `affected_months` 和 `workbench_rebuild_queued` 供前端刷新关联台。
+- 成功后写入 `relation_mode=no_oa_bank_batch`，并可在 relation `special_metadata` 保留 `paired_requires_oa`、`paired_requires_invoice`、`paired_requirement_tag_code` 和 `paired_requirement_version` 作为历史业务规则审计；这些字段不改变 active relation 进入 paired 的事实。接口返回 `affected_months` 和 `workbench_rebuild_queued` 供前端刷新关联台。
 
 `POST /api/no-oa-bank-batches/{batch_id}/withdraw`
 
@@ -492,7 +492,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 
 当响应携带 `read_model_status` 且不为 `fresh` 时，前端可以展示当前可用数据，但必须把闭环确认、流水选择、补充信息编辑等写操作置为不可用，直到后续查询恢复 fresh。未返回 `read_model_status` 时按 `fresh` 处理。
 
-外部往来款 `deterministic` 只表示系统识别到零差额候选，不表示已闭环，也不得作为关联台 open 分组或已配对事实。外部往来闭环的共同事实源是 Workbench active pair relation；来源可以是外部往来页人工确认闭环，也可以是关联台已经把同一往来组内的银行收入/支出配成同一个零差额 case。`view=grouped` 的 `summary_row` 和 `flow_rows[*]` 必须输出 `linked_oa`、`linked_invoice`、`cash_closure_linked`、`cash_closure_case_id`、`cash_closure_source`、`cash_closure_relation_id`；前端只能据此显示“已关联 OA”“已关联 发票”“收支闭环”三个正向 chip，不得从 `workbench_relation_status/mode` 自行推断“已关联业务单据”“未闭环”“候选关联”等旧 chip。若所选银行流水已存在仅含 OA + 银行的 active relation，确认闭环应把既有 OA-bank relation 和新增银行流水合并进同一个 `turnover_manual_closure` active case。Workbench 分区不再使用“三栏补齐”作为银行流水关系的硬规则；是否进入 paired 取决于 Workbench active pair relation 中固化的 `requires_oa` / `requires_invoice` 规则元数据。
+外部往来款 `deterministic` 只表示系统识别到零差额计算结果，不表示已闭环，也不形成关联台关系组。外部往来闭环的共同事实源是 Workbench active pair relation；来源可以是外部往来页人工确认闭环，也可以是关联台已经把同一往来组内的银行收入/支出配成同一个零差额 case。`view=grouped` 的 `summary_row` 和 `flow_rows[*]` 必须输出 `linked_oa`、`linked_invoice`、`cash_closure_linked`、`cash_closure_case_id`、`cash_closure_source`、`cash_closure_relation_id`；前端只能据此显示“已关联 OA”“已关联 发票”“收支闭环”三个正向 chip。若所选银行流水已存在 OA + 银行 active relation，确认闭环应把新增流水原子扩展进同一个 `turnover_manual_closure` case。Workbench 只按 active relation 分区：active relation 全部进入 paired，其余事实 singleton unpaired。
 
 `POST /api/turnover-ledger/closures/confirm`
 
@@ -521,7 +521,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 | 字段 | 说明 |
 | --- | --- |
 | `turnover_relation` / `relation` | Turnover 手动闭环关系，`status=confirmed`、`source=manual`；两笔流水保留 `evidence.closure_mode=manual_zero_difference_pair`，三笔及以上为 `manual_zero_difference_group`。该 relation 自身不再依赖 `sync_to_workbench` 表示闭环。 |
-| `workbench_pair_relation` | 同一写事务内创建的 Workbench active pair relation，`relation_mode=turnover_manual_closure`，作为共同事实源。可为 bank-only，也可在合并既有 OA-bank relation 时包含 `oa` + `bank` rows；是否进入关联台 paired 区由 relation 中固化的 `requires_oa` / `requires_invoice` 规则元数据决定。 |
+| `workbench_pair_relation` | 同一写事务内创建的 Workbench active pair relation，`relation_mode=turnover_manual_closure`，作为共同事实源。可为 bank-only，也可在合并既有 OA-bank relation 时包含 `oa` + `bank` rows；active 后完整成员进入关联台 paired。 |
 | `affected_months` | 受影响月份，用于前端刷新外部往来、关联台和 relation read model。 |
 
 成功写入必须通过 dirty/outbox 标记 `turnover_ledger`、`workbench`、`workbench_relation` 相关 scope 刷新；不得在页面或 Workbench 查询层用 `turnover_relation` 重新拼 open 分组。
@@ -768,6 +768,14 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 
 工作台 DTO 必须保留稳定的分页、summary、group、relation、exception、read model status 和 source version 字段。新增字段只能向后兼容添加；删除、重命名或改变含义需要同步更新前端 DTO、测试和本文档。
 
+关系分区只允许 `paired` / `unpaired`：
+
+- `paired.groups[*]` 必须一一对应 active 正式关系，完整包含该 relation 在当前查询范围内的 OA、银行流水和发票成员，`group_type=relation`。
+- `unpaired.groups[*]` 必须恰好包含一个未被任何 active relation 占用的 canonical fact，`group_type=unpaired`。
+- `summary` 使用 `paired_count` / `unpaired_count`；不得返回 `open_count` 或把 candidate/decision 作为第三种关系状态。
+- 历史 row `case_id`、来源 section、display tag 或 candidate/decision metadata 不能合并未配对行，也不能隐藏 canonical fact。
+- 未知 zone/group type 必须返回结构化 contract error，不能静默映射为 unpaired 或 paired。
+
 Workbench row payload 可包含可选对象身份字段：`object_identity`、`object_identity_key`、`object_identity_kind`、`object_identity_source`、`object_identity_confidence` 和 `identity_alias_rows`。这些字段用于后端投影审计、跨区重复治理和详情解释；前端不得依赖它们替代 row id 执行动作，旧客户端未读取这些字段时响应仍必须可用。
 
 Workbench row payload 还可包含可选来源 OA 字段：`source_oa_id`、`source_oa_row_id`、`derived_from_oa_id` 和 `oa_row_id`。这些字段是多 OA active relation 内做横向子分段的后端事实证据；银行流水或发票行有确定归属时应由 Workbench SQL active generation 写入，前端只消费这些字段做同源同排展示。无法确定归属时后端不得臆造 source OA，应通过 `special_metadata.row_alignment.unresolved_row_ids` 和审计工具暴露。
@@ -954,10 +962,11 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 - 权限不足、状态冲突、发票占用、OA 草稿失败和撤销失败需要返回稳定错误码。
 - dry-run、迁移和人工确认动作要返回 affected batches、affected invoices、affected months 和审计信息。
 - ETC 页面创建 OA 草稿后，业务批次状态为 `oa_confirmation_pending`，使用 `POST /api/etc/business-batches/{id}/manual-oa-status` 确认 `submitted` 或 `not_submitted`。
+- `GET /api/etc/business-batches/{id}/invoice-pdf` 使用 read session，仅在业务批次已有 `oaDraftId` 时可用。成员必须来自该批次 `invoice_ids`，按开票日期、发票号、ID 稳定排序；每张来源 PDF 必须恰好一页且通过已记录 SHA-256 校验。成功返回 `application/pdf`、`Content-Disposition` UTF-8 文件名、`Cache-Control: private, no-store`、`X-ETC-Invoice-Count` 和 `X-PDF-Page-Count`，并记录下载审计；任一来源异常时不返回部分文件。未创建草稿/空批次返回 409，数量或总字节超限返回 413，文件不可读返回 503，损坏或非单页返回 422。
 - ETC 专用 OA 自动检测入口已移除：后端不再提供 `/api/etc/business-batches/{id}/oa-status/refresh`，不再输出 `oaDetection*` 字段，也不再注册 ETC OA 检测 worker 或 detector adapter。
 - ETC invoice list 只保留 `GET /api/etc/invoices` 读侧入口；旧 `/api/etc/invoices/revoke-submitted` 已删除，不得通过 invoice id 直接回退 submitted 状态。提交状态回退必须走 business batch `manual-oa-status`、`oa-draft/revoke` 或 delete/reset 状态机。
-- `submitted` 人工确认成功后，后端必须同时闭环该业务批次绑定的 ETC 对账任务，并在关联台 open 区投影一条 `source_kind=etc_invoice_summary` 的折叠汇总发票行。该行“ETC发票数量/合计”必须从批次实际 canonical ETC 发票明细重算，不得使用 OA 申请金额、业务批次上报金额或历史计数字段冒充发票合计；散票继续作为折叠明细，不直接散落展示，但每条明细必须写入同一 active generation 的 `workbench_rows` 以支持完整展开和 row detail。
-- `etc_invoice_summary` 在没有 OA 和银行流水三项完全匹配前必须保持 open/pending 状态，关系标签显示待匹配 OA/流水；只有关联台普通配对逻辑确认三项关系后，才进入已配对区。
+- `submitted` 人工确认成功后，后端必须同时闭环该业务批次绑定的 ETC 对账任务，并把 `source_kind=etc_invoice_summary` 作为 canonical display fact 投影到关联台。该行“ETC发票数量/合计”必须从批次实际 canonical ETC 发票明细重算；散票继续作为折叠明细，每条明细必须写入同一 active generation 的 `workbench_rows`。若 summary 已属于 active relation，则随完整关系进入 paired；否则作为 unpaired singleton 显示。
+- `etc_invoice_summary` 不存在 pending/open 关系状态。没有 active relation 时是 unpaired；正式关系创建后进入 paired。
 - `DELETE /api/etc/business-batches/{id}` 对任意阶段业务批次执行本地删除/reset，不撤销 OA。请求可带 `expectedVersion` 做并发保护，不要求删除原因；成功响应至少包含 `deleted=true`、`businessBatchId`、`kind`、`releasedInvoiceCount` 和关联删除结果。后端必须删除该批次本地创建/导入的 ETC 对账任务、导入来源、核对结果、提交批次元数据和 ETC 发票；若已提交批次存在 `etc_invoice_summary`，必须释放 ETC 发票合并关系并刷新 Workbench，使原 `etc_invoice_summary` 消失。若该 summary 已参与 active relation，删除时通过 canonical relation command 取消包含该 summary 的 relation，OA 和银行流水不得恢复成二栏 active relation。`workbench_relation` distribution/read model 非 fresh 不得阻断该删除/reset；写安全以权限、expected version、canonical relation 状态、持久化和 outbox/refresh enqueue 为准，失败时返回对应稳定错误码。
 - ETC 对账任务和业务批次源文件上传必须先落对象存储，再追加 source file 元数据。对象存储不可写时返回稳定错误码 `reconciliation_file_storage_unavailable` 和 HTTP 503，上传不得留下半写入的 source file、版本号或审计事件。慢解析/OCR 的结果提交必须与 source file 删除互斥；提交前来源已删除时返回 HTTP 409、`{ "error": "source_file_deleted_during_parse", "message": "源文件在解析完成前已被删除，请重新上传。" }`，不得留下孤儿解析结果或明细。`/api/etc/reconciliation-tasks/{task_id}/credit-card-statement`、`/ticket-root-files`、`/ticket-root-texts`、`/supplement-evidences` 使用直接错误结构 `{ "error": "...", "message": "..." }`；`/api/etc/business-batches/{id}/source-files` 使用 business batch envelope `{ "ok": false, "error": { "code": "...", "message": "..." } }`。
 

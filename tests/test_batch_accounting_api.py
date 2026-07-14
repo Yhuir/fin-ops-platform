@@ -412,7 +412,7 @@ class BatchAccountingApiTests(unittest.TestCase):
             "month": "all",
             "summary": {},
             "paired": {"groups": []},
-            "open": {
+            "unpaired": {
                 "groups": [
                     {
                         "group_id": "eligible-bank",
@@ -591,7 +591,7 @@ class BatchAccountingApiTests(unittest.TestCase):
             "month": "all",
             "summary": {},
             "paired": {"groups": []},
-            "open": {
+            "unpaired": {
                 "groups": [
                     {
                         "group_id": "large-batch-bank",
@@ -806,7 +806,7 @@ class BatchAccountingApiTests(unittest.TestCase):
             "month": "all",
             "summary": {},
             "paired": {"groups": []},
-            "open": {
+            "unpaired": {
                 "groups": [
                     {
                         "group_id": "mixed-candidates",
@@ -874,7 +874,7 @@ class BatchAccountingApiTests(unittest.TestCase):
 
     def test_unsubmitted_list_deduplicates_sql_read_model_rows_by_row_id(self) -> None:
         duplicate_payload = self._grouped_payload()
-        group = duplicate_payload["open"]["groups"][0]
+        group = duplicate_payload["unpaired"]["groups"][0]
         group["bank_rows"] = [group["bank_rows"][0], {**group["bank_rows"][0], "version": 2}]
         group["oa_rows"] = [
             {
@@ -1217,8 +1217,8 @@ class BatchAccountingApiTests(unittest.TestCase):
 
     def test_submit_records_concrete_affected_scope_keys_for_cross_month_relation(self) -> None:
         payload = self._grouped_payload()
-        payload["open"]["groups"][0]["bank_rows"][0]["trade_time"] = "2026-03-19 10:32:00"  # type: ignore[index]
-        payload["open"]["groups"][5]["oa_rows"][0]["apply_time"] = "2026-02-10"  # type: ignore[index]
+        payload["unpaired"]["groups"][0]["bank_rows"][0]["trade_time"] = "2026-03-19 10:32:00"  # type: ignore[index]
+        payload["unpaired"]["groups"][5]["oa_rows"][0]["apply_time"] = "2026-02-10"  # type: ignore[index]
         pair_service = WorkbenchPairRelationService()
         relation_command = RecordingBatchRelationCommandService(pair_service)
         service = BatchAccountingService(
@@ -1772,8 +1772,8 @@ class BatchAccountingApiTests(unittest.TestCase):
 
     def test_withdraw_legacy_relation_derives_scope_keys_from_narrow_context(self) -> None:
         payload = self._grouped_payload()
-        payload["open"]["groups"][0]["bank_rows"][0]["trade_time"] = "2026-03-19 10:32:00"  # type: ignore[index]
-        payload["open"]["groups"][5]["oa_rows"][0]["apply_time"] = "2026-02-10"  # type: ignore[index]
+        payload["unpaired"]["groups"][0]["bank_rows"][0]["trade_time"] = "2026-03-19 10:32:00"  # type: ignore[index]
+        payload["unpaired"]["groups"][5]["oa_rows"][0]["apply_time"] = "2026-02-10"  # type: ignore[index]
         pair_service = WorkbenchPairRelationService()
         pair_service.create_active_relation(
             case_id="CASE-BATCH-txn_imported_202601_batch_001",
@@ -1808,8 +1808,8 @@ class BatchAccountingApiTests(unittest.TestCase):
 
     def test_withdraw_legacy_relation_uses_sql_narrow_loader_for_scope_backfill(self) -> None:
         payload = self._grouped_payload()
-        payload["open"]["groups"][0]["bank_rows"][0]["trade_time"] = "2026-03-19 10:32:00"  # type: ignore[index]
-        payload["open"]["groups"][5]["oa_rows"][0]["apply_time"] = "2026-02-10"  # type: ignore[index]
+        payload["unpaired"]["groups"][0]["bank_rows"][0]["trade_time"] = "2026-03-19 10:32:00"  # type: ignore[index]
+        payload["unpaired"]["groups"][5]["oa_rows"][0]["apply_time"] = "2026-02-10"  # type: ignore[index]
 
         class SqlReadModel:
             def __init__(self, scoped_payload: dict[str, object]) -> None:

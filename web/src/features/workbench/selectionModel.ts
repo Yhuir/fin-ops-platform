@@ -1,4 +1,4 @@
-import type { WorkbenchCandidateGroup, WorkbenchRecord, WorkbenchRecordType } from "./types";
+import type { WorkbenchRelationGroup, WorkbenchRecord, WorkbenchRecordType } from "./types";
 
 const paneIds: WorkbenchRecordType[] = ["oa", "bank", "invoice"];
 
@@ -25,8 +25,8 @@ export function buildWorkbenchSelectionContext({
   zoneId,
 }: {
   explicitRows: WorkbenchRecord[];
-  sourceGroups: WorkbenchCandidateGroup[];
-  zoneId: "paired" | "open";
+  sourceGroups: WorkbenchRelationGroup[];
+  zoneId: "paired" | "unpaired";
 }): WorkbenchSelectionContext {
   const sourceRowsById = new Map(flattenWorkbenchGroups(sourceGroups).map((row) => [row.id, row]));
   const explicitRowIds = explicitRows.map((row) => row.id);
@@ -116,10 +116,10 @@ function workbenchSummaryAmount(row: WorkbenchRecord) {
   return row.amount;
 }
 
-function flattenWorkbenchGroups(groups: WorkbenchCandidateGroup[]) {
+function flattenWorkbenchGroups(groups: WorkbenchRelationGroup[]) {
   return groups.flatMap(flattenWorkbenchGroup);
 }
 
-function flattenWorkbenchGroup(group: WorkbenchCandidateGroup) {
+function flattenWorkbenchGroup(group: WorkbenchRelationGroup) {
   return paneIds.flatMap((paneId) => group.rows[paneId]);
 }

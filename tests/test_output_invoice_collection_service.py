@@ -306,7 +306,7 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
                 {
                     "row_id": invoice.id,
                     "row_type": "invoice",
-                    "relation_status": "candidate",
+                    "relation_status": "unlinked",
                     "group_ids": ["candidate-output-bank"],
                     "linked_oa": [],
                     "linked_bank_transactions": [
@@ -315,23 +315,23 @@ class OutputInvoiceCollectionQueryServiceTests(unittest.TestCase):
                             "amount": "100.00",
                             "direction": "inflow",
                             "relation_case_id": "candidate-output-bank",
-                            "relation_status": "candidate",
+                            "relation_status": "unlinked",
                         }
                     ],
                     "linked_input_invoices": [],
-                    "linked_output_invoices": [{"id": invoice.id, "relation_case_id": "candidate-output-bank", "relation_status": "candidate"}],
+                    "linked_output_invoices": [{"id": invoice.id, "relation_case_id": "candidate-output-bank", "relation_status": "unlinked"}],
                 }
             ],
             groups=[
                 {
                     "group_id": "candidate-output-bank",
-                    "relation_status": "candidate",
+                    "relation_status": "unlinked",
                     "payload": {
                         "group_id": "candidate-output-bank",
                         "row_ids": [invoice.id, bank.id],
                         "row_types": ["invoice", "bank"],
-                        "relation_status": "candidate",
-                        "relation_mode": "automatic_decision",
+                        "relation_status": "unlinked",
+                        "relation_mode": "unlinked_evidence",
                         "amount_check": {"matched": True},
                     },
                     "oa_row_ids": [],

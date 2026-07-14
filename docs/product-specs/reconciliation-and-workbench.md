@@ -1,51 +1,49 @@
-# 银企核销与关联工作台
+# 关联台与正式关系产品口径
 
-本文合并维护银企核销、核销单、关联台、异常处理和跨对象关系确认的当前业务口径。
+更新日期：2026-07-14
 
-## 业务目标
+## 用户可见状态
 
-- 将银行流水、OA 单据、进项/销项发票、ETC 票据和项目成本关系收敛到可审计的核销链路。
-- 关联台提供“自动匹配、正式配对、撤回、状态刷新、异常处理”的统一操作界面。
-- 核销事实必须能被银行明细、待找发票、税金抵扣、成本统计、往来款等页面复用。
+关联台只存在两种关系状态：
 
-## 关联台职责
+1. `paired`：对象属于一条 `app.workbench_pair_relations.status='active'` 的正式关系，同一正式关系的全部 OA、银行流水和发票显示在同一组。
+2. `unpaired`：对象不属于任何 active 正式关系，每个 canonical fact 独立显示一行。
 
-- 展示待处理对象、系统自动匹配结果和已确认关系；对用户的关系口径只保留正式配对和无配对。
-- 支持搜索、筛选、三栏工作流、批量确认、撤回和详情查看。
-- 消费后端 read model 或 active generation，不在前端重新拼底层事实。
-- 展示 freshness、refreshing、stale、job 等状态，不能把旧 read model 伪装为 fresh。
+不存在第三种“自动候选”“待确认配对”“假配对”或“隐藏但仍存在”的用户关系状态。系统未能安全正式化的计算结果不持久化、不合并行、不隐藏事实，也不进入下游已关联口径。
 
-## 自动匹配规则
+## 完整性不变量
 
-- `oa_bank_exact_sum`：当 1 条 OA 与 2 到 6 条同方向银行流水均通过 OA-bank 业务证据，且银行流水按分精度合计金额唯一等于 OA 金额时，后端生成 paired decision。decision 满足金额校验、无 active 冲突且未被用户撤回过同一 row-set 时，后台通过 relation command 写成正式 active relation；缺少发票时仍是两栏正式关系，不等同于完整三方闭环。
-- 该规则必须由后端 matching service/decision engine 产生。前端消费 active generation/read model 结果，但不能把未正式化 decision 暴露成第三种用户关系状态。
-- 单笔 `oa_bank_exact_amount` 优先于多流水合计；存在多个等额银行流水组合时不自动选择。
+- 设统一事实源中可见 canonical facts 为 `C`，active 正式关系拥有的 facts 为 `R`，则 `paired = R`、`unpaired = C - R`。
+- `paired` 与 `unpaired` 不相交，二者并集必须精确等于 `C`；任何事实不得遗漏、重复显示或同时属于两个 active case。
+- 历史 `case_id`、row 上残留的 `case_id`、来源标签、显示 metadata 和旧 case 前缀都不能决定分组。即使 case id 以 `case:decision:` 开头，只要当前存在 active 正式关系就必须显示为 `paired`。
+- 一条 active relation 可以是任意非空的 OA/银行流水/发票成员组合，包括一对一、一对多、多对一以及 `N:M:K`。关系来源不形成用户可见的业务状态区分。
 
-## 核销关系
+## 确定性自动正式化
 
-核销关系是跨页面事实，至少需要记录：
+自动匹配引擎只输出可直接提交到正式关系命令边界的 `FormalRelationPlan`，不输出候选或 decision 状态。计划必须在同一个 UoW 中通过 `WorkbenchRelationCommandService` 写入 active relation、history、幂等记录和 durable refresh outbox；部分失败必须整体回滚。
 
-- 关系双方对象类型、对象 id、来源系统和 source version。
-- 关系状态、确认/撤回人、确认/撤回时间、原因和审计信息；用户关系口径只有正式 active relation 与无 active relation。
-- 影响范围，例如月份、项目、流水、发票、OA 单据、业务批次。
+安全规则如下：
 
-## 异常处理
+- 允许显式 canonical source/reference 跨全部保留历史查找；显式引用必须唯一指向 typed canonical identity。
+- 组合证据最多跨 365 天，不限制为同月。窗口边界按真实日期计算，366 天必须拒绝。
+- 金额按最小货币单位精确比较；关系中每个已出现 pane 的合计必须相等，币种和收支方向必须一致。
+- 每个成员必须通过税号、规范化对方名称、发票号/数电票号、项目号、流水号、source link 等允许的强证据边接入同一个连通证据图。
+- 金额相同本身不是证据；模糊文本、日期接近、通用词或仅项目描述不得单独建立关系。
+- 同一 component 存在多个竞争闭合、共享引用不唯一、成员冲突或证据图不连通时 fail closed，全部事实继续作为 `unpaired` 单行显示。
+- 搜索状态数、内存和工作量有硬上限；达到上限只记录阻断原因，不创建部分关系。
+- 红冲、退款和反向流水只有存在对原始业务事实的唯一显式引用时才允许自动正式化。
+- 已在 active relation 中的成员保持稳定；系统只能在唯一且安全时扩展原 case，不能重建第二条关系。
+- 用户撤回的精确 typed member set 形成阻断指纹，自动引擎不得再次创建同一关系。
 
-异常必须结构化记录，不能只依赖页面提示：
+## 页面与下游
 
-- case 类型：缺少候选、金额不一致、重复对象、状态冲突、外部数据缺失、read model stale。
-- 动作：忽略、重新匹配、人工确认、撤回、repair、backfill。
-- 审计：操作者、时间、前后状态、影响对象、失败原因。
+- 前端只消费 active generation 发布的 `paired.groups` 与 `unpaired.groups`，不得本地拼关系或按旧 `case_id` 合并未配对事实。
+- 已配对区可以撤回正式关系；未配对区可以选择多行发起人工正式配对，但没有“撤回候选”动作。
+- 关系 provenance、规则版本、证据摘要、actor 和时间只用于审计，不拆分用户可见关系状态。
+- `workbench_relation` 下游只输出 `linked` / `unlinked`。只有 active 正式关系能驱动已支付、已关联、成本、待找发票、OA 待付款或银行关系标签。
+- stale/refreshing/failed read model 不得伪装 fresh；页面必须显示诊断并按写安全合同禁用相关写入口。
 
-## 设计边界
+## 固定验收样例
 
-- 业务规则在后端 policy/service 中维护，页面只消费结果。
-- 多页面共享且需要回填/新鲜度的结果，使用 read boundary 或 active generation。
-- 命令写入、权限校验、版本冲突和审计不做分发 read model。
-
-## 相关文档
-
-- 页面结构：`../app-architecture/pages.md`
-- 运行时和 owner：`../app-architecture/runtime-and-ownership.md`
-- API 契约：`../dev/api-contracts.md`
-- Worker 运维：`../operations/runtime-worker-governance.md`
+- 云南立孚科技 520 元：发票 `inv_imported_0369`（发票号 `26532000000716859331`）与 OA `oa-pay-2169` 必须存在于 canonical facts；历史 case `case:decision:2026-05:oa_invoice_exact_amount:oa-pay-2169:inv_imported_0369` 只作为 identity 保留，active 正式关系必须在 `paired` 显示。
+- 13 张合计 1709.49 元的省略发票样例在没有唯一强证据闭合时必须是 13 个 `unpaired` 单行，不能因合计金额形成伪关系，也不能被隐藏。

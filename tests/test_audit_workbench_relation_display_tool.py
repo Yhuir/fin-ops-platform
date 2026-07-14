@@ -82,7 +82,9 @@ class AuditWorkbenchRelationDisplayToolTests(unittest.TestCase):
         self.assertIn("'etc_invoice_summary'", queried_sql)
         self.assertIn("'bank_flow_rule_batch_summary'", queried_sql)
         self.assertIn("where member.row_id = oa.row_id", queried_sql)
-        self.assertIn("like 'candidate:%%'", queried_sql)
+        self.assertIn("group_row.zone = 'paired'", queried_sql)
+        self.assertIn("group_row.zone = 'unpaired'", queried_sql)
+        self.assertNotIn("candidate:%%", queried_sql)
 
     def test_relation_display_can_be_clean_while_canonical_object_is_missing(self) -> None:
         report = audit_workbench_relation_display.audit_workbench_relation_display(
@@ -327,7 +329,7 @@ class AuditWorkbenchRelationDisplayToolTests(unittest.TestCase):
             {issue["code"] for issue in report["issues"]},
         )
 
-    def test_internal_month_decision_rows_do_not_count_as_query_composed_relations(self) -> None:
+    def test_system_origin_relation_rows_use_the_same_query_composed_contract(self) -> None:
         connection = FakeConnection(
             relations=[],
             generations=[_generation("all", "2026-07-10 09:00:00+08")],
@@ -337,7 +339,7 @@ class AuditWorkbenchRelationDisplayToolTests(unittest.TestCase):
                     "invoice-decision-1",
                     group_id="case:decision:decision-1",
                     payload_case_id="decision:decision-1",
-                    relation_mode="automatic_decision",
+                    relation_mode="manual_confirmed",
                 ),
             ],
         )
@@ -345,7 +347,7 @@ class AuditWorkbenchRelationDisplayToolTests(unittest.TestCase):
         report = audit_workbench_relation_display.audit_workbench_relation_display(connection)
 
         self.assertEqual(report["overall_status"], "pass")
-        self.assertNotIn("visible_automatic_decision_row_count", report["summary"])
+        self.assertNotIn("relation_origin_status", report["summary"])
         self.assertEqual(connection.executed, [])
 
     def test_cli_fail_on_issues_returns_nonzero(self) -> None:
@@ -435,7 +437,7 @@ def _group_row(
         "generation_id": f"workbench:{scope_key}:001",
         "generation_activated_at": "2026-06-14 10:00:00+08",
         "group_id": group_id,
-        "zone": "open",
+        "zone": "unpaired",
         "pane": pane,
         "row_id": row_id,
         "row_role": "normal",

@@ -97,7 +97,7 @@ class WorkbenchCanonicalOaAttachmentInvoiceRowBuilder:
             "id": str(getattr(invoice, "id", "") or ""),
             "type": "invoice",
             "source_kind": "oa_attachment_invoice",
-            "status": "open",
+            "status": "unpaired",
             "case_id": None,
             "seller_tax_no": str(getattr(invoice, "seller_tax_no", "") or ""),
             "seller_name": seller_name or counterparty_name,

@@ -610,7 +610,7 @@ class WorkbenchRelationReadFacadeTests(unittest.TestCase):
                     {
                         "row_id": "txn-candidate",
                         "row_type": "bank_transaction",
-                        "relation_status": "candidate",
+                        "relation_status": "unlinked",
                         "group_ids": ["decision-open-candidate"],
                     }
                 ],
@@ -618,13 +618,13 @@ class WorkbenchRelationReadFacadeTests(unittest.TestCase):
                     {
                         "group_id": "decision-open-candidate",
                         "scope_month": "2026-01",
-                        "relation_source": "automatic_decision",
-                        "relation_status": "candidate",
+                        "relation_source": "unlinked_evidence",
+                        "relation_status": "unlinked",
                         "payload": {
                             "row_ids": ["oa-candidate", "txn-candidate"],
                             "row_types": ["oa", "bank"],
-                            "relation_mode": "automatic_decision",
-                            "relation_status": "candidate",
+                            "relation_mode": "unlinked_evidence",
+                            "relation_status": "unlinked",
                         },
                     }
                 ],

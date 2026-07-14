@@ -15,7 +15,7 @@ class WorkbenchOaRawPayloadSignalMonthHelper:
 
     def months_from_raw_payload(self, payload: dict[str, object]) -> set[str]:
         months: set[str] = set()
-        for section_name in ("paired", "open"):
+        for section_name in ("paired", "unpaired"):
             section_payload = payload.get(section_name)
             if not isinstance(section_payload, dict):
                 continue
@@ -28,7 +28,7 @@ class WorkbenchOaRawPayloadSignalMonthHelper:
 
     @staticmethod
     def has_oa_attachment_invoice_signal(payload: dict[str, object]) -> bool:
-        for section_name in ("paired", "open"):
+        for section_name in ("paired", "unpaired"):
             section_payload = payload.get(section_name)
             if not isinstance(section_payload, dict):
                 continue

@@ -17,10 +17,15 @@ function formatMoney(value: string) {
 }
 
 function RelationStatusChip({ status }: { status?: string }) {
-  if (status !== "candidate") {
+  if (!status) {
     return null;
   }
-  return <span className="pending-invoices-tag pending-invoices-tag--candidate">候选</span>;
+  const paired = status.trim().toLowerCase() === "linked";
+  return (
+    <span className={`pending-invoices-tag pending-invoices-tag--${paired ? "linked" : "unlinked"}`}>
+      {paired ? "已配对" : "未配对"}
+    </span>
+  );
 }
 
 export default function PendingInvoiceRelationDrawer({

@@ -67,6 +67,27 @@ class RetentionScopedMongoWorkbenchOAAdapter(MongoOAAdapter):
         return list(self._form_documents.get(str(form_id), []))
 
 
+class RecordingWorkbenchMatchingDirtyQueue:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def mark_dirty_expanded(
+        self,
+        months: list[str],
+        *,
+        reason: str,
+        source_versions: dict[str, object] | None = None,
+    ) -> list[str]:
+        self.calls.append(
+            {
+                "months": list(months),
+                "reason": reason,
+                "source_versions": dict(source_versions or {}),
+            }
+        )
+        return list(dict.fromkeys(months))
+
+
 class SettingsDataResetServiceTests(unittest.TestCase):
     @contextmanager
     def _temporary_env(self, **updates: str | None):
@@ -105,6 +126,19 @@ class SettingsDataResetServiceTests(unittest.TestCase):
         adapter.set_import_settings_provider(app._app_settings_service.get_oa_import_settings)
         app._workbench_query_service._oa_adapter = adapter
         return adapter
+
+    @staticmethod
+    def _install_workbench_matching_dirty_queue(app) -> RecordingWorkbenchMatchingDirtyQueue:
+        queue = RecordingWorkbenchMatchingDirtyQueue()
+        reload_runtime_services = app._reload_runtime_services
+
+        def reload_with_queue() -> None:
+            reload_runtime_services()
+            app._workbench_reconciliation_dirty_queue = queue
+
+        app._workbench_reconciliation_dirty_queue = queue
+        app._reload_runtime_services = reload_with_queue
+        return queue
 
     def _preserve_test_mongo_oa_adapter_after_reload(self, app) -> None:
         original_reload_runtime_services = app._reload_runtime_services
@@ -225,6 +259,7 @@ class SettingsDataResetServiceTests(unittest.TestCase):
     def test_execute_data_reset_triggers_historical_etc_repair_for_invoice_and_oa_resets(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
+            self._install_workbench_matching_dirty_queue(app)
             with patch.object(
                 app,
                 "_maybe_reconcile_historical_etc_repair",
@@ -234,7 +269,7 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                 with patch.object(app, "_run_workbench_auto_matching_for_scopes"), patch.object(
                     app,
                     "_build_api_workbench_payload",
-                    return_value={"summary": {}, "paired": {"groups": []}, "open": {"groups": []}},
+                    return_value={"summary": {}, "paired": {"groups": []}, "unpaired": {"groups": []}},
                 ):
                     oa_result = app._execute_settings_data_reset(RESET_OA_AND_REBUILD_ACTION)
             reasons = [
@@ -260,6 +295,7 @@ class SettingsDataResetServiceTests(unittest.TestCase):
         ):
             with self.subTest(action=action), tempfile.TemporaryDirectory() as temp_dir:
                 app = build_application(data_dir=Path(temp_dir))
+                self._install_workbench_matching_dirty_queue(app)
                 app._cost_statistics_read_model_service.upsert_read_model(
                     "2026-03",
                     "active",
@@ -275,7 +311,7 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                 ), patch.object(app, "_run_workbench_auto_matching_for_scopes"), patch.object(
                     app,
                     "_build_api_workbench_payload",
-                    return_value={"summary": {}, "paired": {"groups": []}, "open": {"groups": []}},
+                    return_value={"summary": {}, "paired": {"groups": []}, "unpaired": {"groups": []}},
                 ):
                     result = app._execute_settings_data_reset(action)
 
@@ -586,6 +622,7 @@ class SettingsDataResetServiceTests(unittest.TestCase):
     def test_reset_oa_job_rebuilds_progress_with_retained_months_only(self) -> None:
         with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
+            self._install_workbench_matching_dirty_queue(app)
             app._app_settings_service.update_settings(
                 completed_project_ids=[],
                 bank_account_mappings=[],
@@ -716,6 +753,7 @@ class SettingsDataResetServiceTests(unittest.TestCase):
     def test_reset_oa_api_uses_mode_b_and_rebuilds_with_oa_retention_cutoff(self) -> None:
         with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
+            self._install_workbench_matching_dirty_queue(app)
             app._app_settings_service.update_settings(
                 completed_project_ids=[],
                 bank_account_mappings=[],
@@ -742,9 +780,9 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                 scope_key="all",
                 payload={
                     "month": "all",
-                    "summary": {"oa_count": 1, "bank_count": 0, "invoice_count": 0, "paired_count": 0, "open_count": 1, "exception_count": 0},
+                    "summary": {"oa_count": 1, "bank_count": 0, "invoice_count": 0, "paired_count": 0, "unpaired_count": 1, "exception_count": 0},
                     "paired": {"groups": []},
-                    "open": {"groups": [{"group_id": "old", "oa_rows": [{"id": "oa-stale"}], "bank_rows": [], "invoice_rows": []}]},
+                    "unpaired": {"groups": [{"group_id": "old", "oa_rows": [{"id": "oa-stale"}], "bank_rows": [], "invoice_rows": []}]},
                 },
             )
             app._workbench_pair_relation_service.create_active_relation(
@@ -792,12 +830,10 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                 "workbench_row_overrides",
                 "workbench_pair_relations",
                 "workbench_read_models",
-                "workbench_candidate_matches",
             ],
         )
         self.assertNotIn("oa_attachment_invoice_cache", payload["deleted_counts"])
         self.assertEqual(payload["deleted_counts"]["workbench_read_models"], 1)
-        self.assertIn("workbench_candidate_matches", payload["deleted_counts"])
         self.assertEqual(payload["deleted_counts"]["workbench_pair_relations"], 1)
         self.assertEqual(payload["deleted_counts"]["workbench_row_overrides"], 1)
         self.assertIsNotNone(retained_attachment_cache_entry)
@@ -884,6 +920,7 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                 encoding="utf-8",
             )
             app = build_application(data_dir=data_dir, bootstrap_mode="legacy")
+            self._install_workbench_matching_dirty_queue(app)
             app._app_settings_service._oa_import_options_provider = None
             app._app_settings_service.update_settings(
                 completed_project_ids=[],
@@ -1033,6 +1070,7 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                 encoding="utf-8",
             )
             app = build_application(data_dir=data_dir, bootstrap_mode="legacy")
+            self._install_workbench_matching_dirty_queue(app)
             app._app_settings_service._oa_import_options_provider = None
             app._app_settings_service.update_settings(
                 completed_project_ids=[],
@@ -1173,7 +1211,7 @@ class SettingsDataResetServiceTests(unittest.TestCase):
         rebuilt_invoice_ids = _flatten_group_rows(rebuilt_payload, "invoice")
         self.assertEqual(
             rebuilt_invoice_ids,
-            ["oa-att-inv-oa-exp-exp-attach-001-e932b5c147bf4f20", "iv-o-202604-001"],
+            ["oa-att-inv-oa-exp-exp-attach-001-e932b5c147bf4f20"],
         )
         invoice_rows = _flatten_group_payload_rows(rebuilt_payload, "invoice")
         attachment_row = next(
@@ -1372,9 +1410,9 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                 scope_key="all",
                 payload={
                     "month": "all",
-                    "summary": {"oa_count": 1, "bank_count": 0, "invoice_count": 0, "paired_count": 0, "open_count": 1, "exception_count": 0},
+                    "summary": {"oa_count": 1, "bank_count": 0, "invoice_count": 0, "paired_count": 0, "unpaired_count": 1, "exception_count": 0},
                     "paired": {"groups": []},
-                    "open": {"groups": [{"group_id": "keep", "oa_rows": [{"id": "oa-keep"}], "bank_rows": [], "invoice_rows": []}]},
+                    "unpaired": {"groups": [{"group_id": "keep", "oa_rows": [{"id": "oa-keep"}], "bank_rows": [], "invoice_rows": []}]},
                 },
             )
 
@@ -1418,11 +1456,11 @@ def _build_retention_raw_payload(
             "bank_count": len(bank_rows),
             "invoice_count": len(invoice_rows),
             "paired_count": 0,
-            "open_count": len(oa_rows) + len(bank_rows) + len(invoice_rows),
+            "unpaired_count": len(oa_rows) + len(bank_rows) + len(invoice_rows),
             "exception_count": 0,
         },
         "paired": {"oa": [], "bank": [], "invoice": []},
-        "open": {"oa": oa_rows, "bank": bank_rows, "invoice": invoice_rows},
+        "unpaired": {"oa": oa_rows, "bank": bank_rows, "invoice": invoice_rows},
     }
 
 
@@ -1450,7 +1488,7 @@ def _flatten_group_rows(payload: dict[str, object], row_type: str) -> list[str]:
 
 def _flatten_group_payload_rows(payload: dict[str, object], row_type: str) -> list[dict[str, object]]:
     row_key = f"{row_type}_rows"
-    groups = [*list(payload["paired"]["groups"]), *list(payload["open"]["groups"])]
+    groups = [*list(payload["paired"]["groups"]), *list(payload["unpaired"]["groups"])]
     return [row for group in groups for row in list(group.get(row_key, []))]
 
 

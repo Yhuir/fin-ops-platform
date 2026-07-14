@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from bisect import insort
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
 from io import BytesIO
+from itertools import combinations
 from pathlib import Path
 from zipfile import BadZipFile, ZipFile
 
@@ -656,11 +658,16 @@ def _requirement_match_options(
     candidates: list[_InvoiceCandidate],
     requirement: ExpectedEtcInvoiceRequirement,
 ) -> list[_RequirementMatch]:
+    context_candidates = [
+        candidate
+        for candidate in candidates
+        if _invoice_satisfies_requirement_context(candidate.invoice, requirement)
+    ]
     expected_count = max(int(requirement.invoice_count or 1), 1)
     if expected_count == 1:
         exact_candidates = [
             candidate
-            for candidate in candidates
+            for candidate in context_candidates
             if _invoice_matches_requirement(candidate.invoice, requirement)
         ]
         return [
@@ -675,7 +682,7 @@ def _requirement_match_options(
     target_cents = _money_cents(requirement.amount)
     amount_candidates = [
         candidate
-        for candidate in candidates
+        for candidate in context_candidates
         if 0 < _money_cents(candidate.invoice.total_amount) <= target_cents
     ]
     return [
@@ -731,35 +738,40 @@ def _find_amount_combinations(
     expected_count = max(int(requirement.invoice_count or 1), 1)
     if expected_count <= 1 or expected_count > len(sorted_candidates):
         return []
-    max_count = expected_count
+
     retained_per_sum = 64
-    combinations_by_sum: dict[int, list[tuple[int, ...]]] = {0: [()]}
-    for index, candidate in enumerate(sorted_candidates):
-        amount_cents = _money_cents(candidate.invoice.total_amount)
-        next_by_sum = {amount: list(combinations) for amount, combinations in combinations_by_sum.items()}
-        for current_sum, combinations in combinations_by_sum.items():
-            new_sum = current_sum + amount_cents
-            if new_sum > target_cents:
+    candidate_amounts = [_money_cents(candidate.invoice.total_amount) for candidate in sorted_candidates]
+    split_index = len(sorted_candidates) // 2
+    right_combinations_by_count_and_sum: dict[tuple[int, int], list[tuple[int, ...]]] = {}
+    for count in range(0, min(expected_count, len(sorted_candidates) - split_index) + 1):
+        for indexes in combinations(range(split_index, len(sorted_candidates)), count):
+            amount_sum = sum(candidate_amounts[index] for index in indexes)
+            if amount_sum > target_cents:
                 continue
-            for combination in combinations:
-                if len(combination) + 1 > max_count:
-                    continue
-                new_combination = (*combination, index)
-                next_by_sum.setdefault(new_sum, []).append(new_combination)
-        for amount, combinations in next_by_sum.items():
-            deduped = list(dict.fromkeys(combinations))
-            deduped.sort(
-                key=lambda combination: _combination_match_score(
-                    tuple(sorted_candidates[candidate_index] for candidate_index in combination),
-                    requirement,
-                )
-            )
-            next_by_sum[amount] = deduped[:retained_per_sum]
-        combinations_by_sum = next_by_sum
+            right_combinations_by_count_and_sum.setdefault((count, amount_sum), []).append(indexes)
+
+    retained: list[tuple[tuple[object, ...], tuple[int, ...]]] = []
+    for left_count in range(0, min(expected_count, split_index) + 1):
+        right_count = expected_count - left_count
+        if right_count < 0 or right_count > len(sorted_candidates) - split_index:
+            continue
+        for left_indexes in combinations(range(0, split_index), left_count):
+            left_sum = sum(candidate_amounts[index] for index in left_indexes)
+            if left_sum > target_cents:
+                continue
+            for right_indexes in right_combinations_by_count_and_sum.get(
+                (right_count, target_cents - left_sum),
+                [],
+            ):
+                indexes = (*left_indexes, *right_indexes)
+                match = tuple(sorted_candidates[index] for index in indexes)
+                insort(retained, (_combination_match_score(match, requirement), indexes))
+                if len(retained) > retained_per_sum:
+                    retained.pop()
+
     return [
-        tuple(sorted_candidates[candidate_index] for candidate_index in combination)
-        for combination in combinations_by_sum.get(target_cents, [])
-        if len(combination) == expected_count
+        tuple(sorted_candidates[index] for index in indexes)
+        for _score, indexes in retained
     ]
 
 

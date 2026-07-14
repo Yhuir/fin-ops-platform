@@ -12,6 +12,7 @@ This roadmap is the root page-analysis roadmap. Cross-module modular IO refactor
 
 - Integer phases (0-17): Cross-page baseline first, then page-specific analysis and planning work for every registered app page.
 - Phase 18: Cross-module repair/evolution work that closes the canonical invoice + ETC batch-link boundary after the page-analysis phases exposed the issue.
+- Phase 19-21: Cross-page Audit, reversible relation runtime proof, and deterministic Workbench relation visibility production closure.
 - Decimal phases (2.1, 2.2): Urgent insertions between existing phases.
 
 ## Phase Details
@@ -452,5 +453,27 @@ Plans:
 Plans:
 
 - [x] 20-01-PLAN — Build the single checkpoint closure runner, register three reversible relation shapes, remove retired paths, and verify deterministic plus disposable-PostgreSQL evidence.
+
+### Phase 21: 关联台确定性自动正式关系与全量可见性生产闭环
+
+**Goal:** Replace persisted automatic candidates/decisions with one deterministic fail-closed formal-relation path, make the Workbench projection an exact partition of canonical facts into active paired groups or standalone unpaired rows, repair all-scope union omissions, remove the complete legacy runtime chain, and prove data-safe recovery through production-grade tests and controlled evidence.
+**Requirements**: RELVIS-01, RELVIS-02, RELVIS-03, RELVIS-04, RELVIS-05, RELVIS-06, RELVIS-07, RELVIS-08, RELVIS-09, RELVIS-10
+**Depends on:** Phase 20
+**Canonical refs:** `.planning/phases/21-workbench-deterministic-relations/21-CONTEXT.md`, `docs/product-specs/workbench.md`, `docs/product-specs/reconciliation.md`, `docs/architecture/module-boundaries/canonical-facts.md`, `docs/architecture/module-boundaries/read-model-contracts.md`, `docs/modules/reconciliation-workbench/boundary-io.md`, `docs/modules/workbench-relations/boundary-io.md`, `docs/modules/read-models/boundary-io.md`, `docs/modules/runtime-workers/boundary-io.md`, `docs/operations/runtime-worker-governance.md`
+**Success Criteria** (what must be TRUE):
+
+  1. For eligible canonical facts `C`, active relation members `R`, visible paired facts `P`, and visible unpaired facts `U`: `P = R`, `U = C - R`, `P ∩ U = ∅`, and `P ∪ U = C`, with every fact represented once.
+  2. Deterministic safe automatic results directly create formal active relations through the existing command/UoW boundary; no candidate/decision persistence, display state, compatibility filter or dual orchestrator path remains.
+  3. Cross-month arbitrary N:M:K matching is exact, evidence-connected, bounded and ambiguity-safe; existing relations remain stable and explicit withdrawal/cancel remains the only lifecycle exit.
+  4. `month=all` unions active month-shard members by canonical identity without omission or duplication, including the known 13-invoice counterexample; the Yunnan Lifu 520 OA+invoice relation is displayed as paired.
+  5. Forward schema migration, read-model rebuild, worker drain, seven-category tests, data hashes and System Audit prove no canonical fact damage and no runtime access to retired candidate/decision objects.
+
+**Plans:** 4 plans
+Plans:
+
+- [x] 21-01 — Freeze deterministic matching contracts, 520/13 fixtures and fail-closed safety rules.
+- [x] 21-02 — Replace candidate/decision persistence with direct formal relation command/UoW orchestration.
+- [x] 21-03 — Enforce the paired/unpaired exact visibility partition across read models, API, UI and downstream consumers.
+- [ ] 21-04 — Deploy the clean cutover, run migration 0104, rehydrate registered scopes and capture production data-safety/Audit evidence.
 
 ---

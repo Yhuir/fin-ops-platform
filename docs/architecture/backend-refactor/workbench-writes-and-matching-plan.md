@@ -2,9 +2,11 @@
 
 对应 prompt：`PF-P011 - Workbench Matching Engine / Writes Discovery and Planning`
 
-状态：`verified`
+状态：`historical / superseded by Phase 21`
 
-本文档是 Workbench 写路径、pair-relations/actions、exceptions、matching/candidates、dirty scope 和 worker refresh 的事实源。它只记录发现、边界、风险和下一步测试计划；本轮未修改业务代码、测试、SQL migration、前端、部署或生产配置。
+> 2026-07-14：本文保留 PF-P011 当时的发现与演进记录，但其中 candidate store、reconciliation decision、special candidate rules 和 matching dirty fallback 已被删除，禁止作为当前实现蓝图。当前边界与 I/O 以 `docs/modules/reconciliation-workbench/boundary-io.md`、`docs/modules/workbench-relations/boundary-io.md` 和 `docs/product-specs/reconciliation-and-workbench.md` 为准。
+
+本文档只保留当时对 Workbench 写路径、pair-relations/actions、exceptions、matching/candidates、dirty scope 和 worker refresh 的发现快照；当前事实不得从本文恢复。该历史阶段未修改业务代码、测试、SQL migration、前端、部署或生产配置。
 
 PF-P011 已由用户确认 `verified`。PF-P012 已由用户确认 `verified`，并已锁定本文档列出的写路径测试缺口。PF-P013 已由用户确认 `verified`，在不改变当前行为的前提下抽取第一层写路径 facade 边界。PF-P013-MG 已由用户确认 `verified` 并 push 到 `origin/main`。PF-P014 与 PF-P014-MG 已由用户确认 `verified`，并已 push 到 `origin/main`。PF-P015 已由用户确认 `verified`，产物是 `workbench-remaining-write-facade-plan.md`。PF-P016 已由用户确认 `verified`。PF-P017 已由用户确认 `verified`。PF-P017-MG 已由用户确认 `verified` 并 push 到 `origin/main`。PF-P018 已由用户确认 `verified`，产物是 `workbench-write-uow-boundary-design.md`。PF-P019 已由用户确认 `verified`，新增 UoW 目标契约测试。PF-P020 已由用户确认 `verified`，新增 transaction-bound dirty/outbox writer。PF-P021 已由用户确认 `verified`，新增 minimal UoW skeleton。PF-P021-MG 已执行但 blocked，未合入 `main`。PF-P021-CI 已执行并记录为 `implemented`，等待用户确认。
 

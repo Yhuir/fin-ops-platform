@@ -10,7 +10,7 @@
 - `source_unique_key`、`data_fingerprint` 和现有唯一索引继续保留。
 - Workbench 展示状态由 `WorkbenchObjectIdentityArbitrationService` 在分组前仲裁：正式发票与 OA 附件发票命中同一强发票 identity 时，只允许进入一个最终展示区。
 - 强发票 identity 只包含数电发票号、发票代码+号码。税额指纹、金额、项目、申请人、对方名称等弱字段只用于审计提示，不用于自动跨来源合并。
-- 银行流水只有在稳定 business-fields identity 完整且其中一条已被 paired/异常/忽略占用时，才压制同 identity 的 open 别名；全 open 重复只审计。
+- 银行流水只有在稳定 business-fields identity 完整且其中一条已被 paired/异常/忽略占用时，才压制同 identity 的 unpaired 别名；全 unpaired 重复只审计。
 - OA 单据以 `row_id` 为主身份，`form_id`/`workflow_no` 只作为 alias 审计线索，不按金额、申请人或项目推断合并。
 - OA source alias 只能来自 `app.oa_source_aliases.status='active'` 的显式审计事实；用于把同一 OA 生命周期中的旧 source row 归一到 canonical row，不删除 OA 原始投影、附件或 cache。
 - 历史冲突不做破坏性合并。审计输出报告，人工 repair 或 read model rebuild 后再重新审计。
@@ -42,8 +42,8 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.audit_object_identity \
 - `app.oa_attachment_invoice_cache`：OA 附件票缓存中的正式发票 evidence/invoices canonical、suspected duplicate、missing canonical。
 - `app.oa_attachment_invoice_cache_sources` / `app.oa_attachments`：将 OA 附件票缓存 key 映射回真实附件和 OA，用于区分“缓存内部重复”和“跨 OA 重复发票”。
 - `app.oa_source_aliases`：只读取 `active` alias，将已确认的 OA lifecycle/migration alias 归一到 canonical OA row；缺表或无 active alias 时保持原判定。
-- `read_model.workbench_group_rows` active generation：同一强发票 identity 或稳定银行 identity 是否同时存在于 `paired` 和 `open` zone。
-- `read_model.workbench_group_rows` active generation：同一 row id 或同一强发票 identity 是否在多个 open group 中同时成为 visible/operable owner；银行流水 open/open 只按 row id 审计，不按稳定 business-fields identity 阻断。
+- `read_model.workbench_group_rows` active generation：同一强发票 identity 或稳定银行 identity 是否同时存在于 `paired` 和 `unpaired` zone。
+- `read_model.workbench_group_rows` active generation：同一 row id 或同一强发票 identity 是否在多个 unpaired group 中同时成为 visible/operable owner；银行流水 unpaired/unpaired 只按 row id 审计，不按稳定 business-fields identity 阻断。
 - `app.oa_applications`：同一 `form_id` 是否映射多个 `row_id`，用于排查 OA alias 风险。
 - `app.workbench_pair_relations`：active relation 中是否存在指向已不存在对象的 row_id。
 
@@ -63,7 +63,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.audit_workbench_relatio
 - 同一 relation row 在同一个 active scope 中是否有多个 visible owner。
 - row payload 中的 `case_id` / `relation_mode` 是否与 canonical relation 不一致。
 - `all` generation 是否旧于 relation 成员所在月份 generation。
-- visible automatic decision/candidate 是否仍污染 active generation。
+- active relation members 是否精确等于 paired members，以及其余 canonical facts 是否各自成为唯一 unpaired owner；历史 metadata 不得改变归属。
 
 出现 blocking issue 时，不要直接修改 `read_model.workbench_group_rows` 或 `read_model.workbench_generations`。修复必须走现有刷新边界：按 relation 成员月份通过 `ReadModelRefreshGateway` / 事务内 repository scope contract 入队 Workbench month refresh，再用 aggregate-only `all` refresh 收敛全局 active generation。修复后重跑统一页面 Audit 和对象 identity 审计，确认页面报告 `integrity=pass`、`freshness=fresh`、`queue=drained` 且 `blocking_issue_count=0`。
 
@@ -89,8 +89,8 @@ Blocking issue 包含：
 - 同一 canonical key 下出现多条银行流水。
 - 同一 OA 附件票强 canonical key 出现在多个不同 OA 报销中。强 key 包含数电票号、发票代码+号码、附件稳定 hash；`seller_tax_no + buyer_tax_no + invoice_date + total_with_tax` 这类弱税额指纹不作为 OA 附件票 blocking key。
 - 历史 `source_unique_key` 与当前强发票或银行 policy canonical key 不一致。正式发票弱税额指纹 mismatch 不阻断发布。
-- Workbench active generation 中同一强发票 identity 或稳定银行 identity 同时出现在 `paired` 与 `open`。
-- Workbench active generation 中同一 row id 或同一强发票 identity 同时出现在多个 open group，导致同一事实有多个 visible/operable owner。
+- Workbench active generation 中同一强发票 identity 或稳定银行 identity 同时出现在 `paired` 与 `unpaired`。
+- Workbench active generation 中同一 row id 或同一强发票 identity 同时出现在多个 unpaired group，导致同一事实有多个 visible/operable owner。
 - Active workbench relation 指向已不存在的 row_id。
 - Active workbench relation 的成员 row 在 active Workbench generation 中缺失、拆组、重复 visible owner、payload relation 不一致，或 `all` generation 旧于成员月份 generation。
 

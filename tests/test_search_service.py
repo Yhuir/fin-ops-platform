@@ -111,7 +111,7 @@ class SearchServiceTests(unittest.TestCase):
             "2026-03": {
                 "month": "2026-03",
                 "paired": {"oa": [], "bank": [], "invoice": []},
-                "open": {
+                "unpaired": {
                     "oa": [self.oa_row],
                     "bank": [self.bank_row],
                     "invoice": [self.invoice_row],
@@ -120,7 +120,7 @@ class SearchServiceTests(unittest.TestCase):
             "2026-04": {
                 "month": "2026-04",
                 "paired": {"oa": [], "bank": [], "invoice": []},
-                "open": {
+                "unpaired": {
                     "oa": [],
                     "bank": [self.processed_bank_row],
                     "invoice": [self.ignored_invoice_row],
@@ -132,7 +132,7 @@ class SearchServiceTests(unittest.TestCase):
                 "month": "2026-03",
                 "summary": {},
                 "paired": {"groups": []},
-                "open": {
+                "unpaired": {
                     "groups": [
                         {
                             "group_id": "case:CASE-SEARCH-001",
@@ -150,7 +150,7 @@ class SearchServiceTests(unittest.TestCase):
                 "month": "2026-04",
                 "summary": {},
                 "paired": {"groups": []},
-                "open": {
+                "unpaired": {
                     "groups": [
                         {
                             "group_id": "group:processed",
@@ -178,7 +178,7 @@ class SearchServiceTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["invoice"], 0)
         result = payload["oa_results"][0]
         self.assertEqual(result["row_id"], "oa-open-001")
-        self.assertEqual(result["zone_hint"], "open")
+        self.assertEqual(result["zone_hint"], "unpaired")
         self.assertEqual(result["matched_field"], "申请人")
         self.assertEqual(result["jump_target"]["month"], "2026-03")
         self.assertEqual(result["jump_target"]["row_id"], "oa-open-001")
@@ -243,7 +243,7 @@ class SearchServiceTests(unittest.TestCase):
                         }
                     ]
                 },
-                "open": {"groups": []},
+                "unpaired": {"groups": []},
             }
         }
         service = SearchService(
@@ -298,9 +298,9 @@ class SearchServiceTests(unittest.TestCase):
             },
         }
         raw_payloads = {
-            "2026-05": {"month": "2026-05", "paired": {"oa": [], "bank": [], "invoice": []}, "open": {"oa": [], "bank": [matching_bank_row], "invoice": []}},
-            "2026-04": {"month": "2026-04", "paired": {"oa": [], "bank": [], "invoice": []}, "open": {"oa": [], "bank": [matching_bank_row], "invoice": []}},
-            "2026-03": {"month": "2026-03", "paired": {"oa": [], "bank": [], "invoice": []}, "open": {"oa": [], "bank": [matching_bank_row], "invoice": []}},
+            "2026-05": {"month": "2026-05", "paired": {"oa": [], "bank": [], "invoice": []}, "unpaired": {"oa": [], "bank": [matching_bank_row], "invoice": []}},
+            "2026-04": {"month": "2026-04", "paired": {"oa": [], "bank": [], "invoice": []}, "unpaired": {"oa": [], "bank": [matching_bank_row], "invoice": []}},
+            "2026-03": {"month": "2026-03", "paired": {"oa": [], "bank": [], "invoice": []}, "unpaired": {"oa": [], "bank": [matching_bank_row], "invoice": []}},
         }
         service = SearchService(
             known_months_loader=lambda: ["2026-05", "2026-04", "2026-03"],

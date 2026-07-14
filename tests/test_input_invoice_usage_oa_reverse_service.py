@@ -201,7 +201,7 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         self.assertTrue(preview["canCreateDraft"])
         self.assertEqual(preview["nextAction"], "create_batch")
 
-    def test_preview_marks_oa_candidate_relations_without_treating_them_as_unlinked(self) -> None:
+    def test_preview_treats_nonformal_oa_relation_metadata_as_unlinked(self) -> None:
         vendor = self._counterparty("vendor", "供应商")
         invoice = self._invoice("inv-candidate-oa", "9501", vendor, total_with_tax="109.00")
         read_model_row = self._read_model_row(invoice.id, invoice.invoice_no)
@@ -227,13 +227,11 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
             can_create_draft=True,
         )
 
-        self.assertEqual(preview["invoiceCount"], 0)
-        self.assertFalse(preview["canCreateDraft"])
-        candidate_rejection = preview["rejectedInvoices"][0]
-        self.assertEqual(candidate_rejection["invoiceId"], invoice.id)
-        self.assertEqual(candidate_rejection["reasonCode"], "already_has_candidate_oa")
-        self.assertEqual(candidate_rejection["oaRelationStatus"], "candidate")
-        self.assertEqual(candidate_rejection["invoiceNo"], "9501")
+        self.assertEqual(preview["invoiceCount"], 1)
+        self.assertTrue(preview["canCreateDraft"])
+        self.assertEqual(preview["rejectedInvoices"], [])
+        self.assertEqual(preview["invoiceRows"][0]["invoiceId"], invoice.id)
+        self.assertEqual(preview["invoiceRows"][0]["oaRelationStatus"], "unlinked")
 
     def test_preview_current_filters_uses_read_model_loader_without_live_query(self) -> None:
         calls: list[dict[str, list[object]]] = []

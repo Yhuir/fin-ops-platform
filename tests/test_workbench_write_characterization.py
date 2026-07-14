@@ -82,22 +82,22 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
     def _default_open_row_ids(self, app: Application) -> list[str]:
         payload = self._workbench_payload(app)
         return [
-            _flatten_groups(payload["open"]["groups"], "oa")[0]["id"],
-            _flatten_groups(payload["open"]["groups"], "bank")[0]["id"],
-            _flatten_groups(payload["open"]["groups"], "invoice")[0]["id"],
+            _flatten_groups(payload["unpaired"]["groups"], "oa")[0]["id"],
+            _flatten_groups(payload["unpaired"]["groups"], "bank")[0]["id"],
+            _flatten_groups(payload["unpaired"]["groups"], "invoice")[0]["id"],
         ]
 
     def _default_open_rows(self, app: Application) -> dict[str, dict[str, object]]:
         payload = self._workbench_payload(app)
         return {
-            "oa": _flatten_groups(payload["open"]["groups"], "oa")[0],
-            "bank": _flatten_groups(payload["open"]["groups"], "bank")[0],
-            "invoice": _flatten_groups(payload["open"]["groups"], "invoice")[0],
+            "oa": _flatten_groups(payload["unpaired"]["groups"], "oa")[0],
+            "bank": _flatten_groups(payload["unpaired"]["groups"], "bank")[0],
+            "invoice": _flatten_groups(payload["unpaired"]["groups"], "invoice")[0],
         }
 
     def _default_invoice_row_id(self, app: Application) -> str:
         payload = self._workbench_payload(app)
-        return str(_flatten_groups(payload["open"]["groups"], "invoice")[0]["id"])
+        return str(_flatten_groups(payload["unpaired"]["groups"], "invoice")[0]["id"])
 
     def _post(self, app: Application, path: str, payload: dict[str, object]):
         if path == "/api/workbench/actions/confirm-link":
@@ -190,11 +190,11 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
                 "bank_count": 3,
                 "invoice_count": 0,
                 "paired_count": 0,
-                "open_count": 4,
+                "unpaired_count": 4,
                 "exception_count": 0,
             },
             "paired": {"oa": [], "bank": [], "invoice": []},
-            "open": {
+            "unpaired": {
                 "oa": [
                     {
                         "id": "oa-personal-advance-characterization-001",
@@ -931,7 +931,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
                 {
                     "month": "2026-03",
                     "row_id": invoice_row_id,
-                    "expected_versions": {f"row:{invoice_row_id}": "open"},
+                    "expected_versions": {f"row:{invoice_row_id}": "unpaired"},
                 },
             )
 
@@ -1824,21 +1824,13 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
 
 
 class WorkbenchWriteWorkerTriggerCharacterizationTests(unittest.TestCase):
-    def test_http_process_dirty_worker_uses_opt_in_interval_and_starts_once(self) -> None:
+    def test_http_process_never_starts_matching_dirty_scope_worker(self) -> None:
         app = build_application()
 
         with patch("fin_ops_platform.app.server.Thread") as thread_class:
             self.assertFalse(app.start_workbench_matching_dirty_scope_worker(interval_seconds=0))
+            self.assertFalse(app.start_workbench_matching_dirty_scope_worker(interval_seconds=1))
             self.assertFalse(thread_class.called)
-
-            self.assertTrue(app.start_workbench_matching_dirty_scope_worker(interval_seconds=1))
-            self.assertTrue(app.start_workbench_matching_dirty_scope_worker(interval_seconds=1))
-
-        thread_class.assert_called_once()
-        self.assertEqual(thread_class.call_args.kwargs["target"], app._run_workbench_matching_dirty_scope_worker)
-        self.assertEqual(thread_class.call_args.kwargs["kwargs"], {"interval_seconds": 60.0})
-        self.assertTrue(thread_class.call_args.kwargs["daemon"])
-        thread_class.return_value.start.assert_called_once()
 
     def test_standalone_matching_loop_honors_max_iterations_without_sleeping_after_final_iteration(self) -> None:
         class FakeDirtyQueue:

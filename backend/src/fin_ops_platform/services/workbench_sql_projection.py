@@ -26,7 +26,6 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import (
     PostgresOAProjectionRepository,
 )
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
-from fin_ops_platform.services.workbench_candidate_grouping import WorkbenchCandidateGroupingService
 from fin_ops_platform.services.workbench_exception_case_service import ACTIVE_CASE_STATUSES
 from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
 from fin_ops_platform.services.workbench_object_identity_arbitration import WorkbenchObjectIdentityArbitrationService
@@ -35,13 +34,15 @@ from fin_ops_platform.services.workbench_query_service import (
     WorkbenchQueryService,
 )
 from fin_ops_platform.services.workbench_relation_alignment_service import WorkbenchRelationAlignmentService
+from fin_ops_platform.services.workbench_relation_grouping import WorkbenchRelationGroupingService
+from fin_ops_platform.services.workbench_read_model_version import WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION
 from fin_ops_platform.services.oa_attachment_invoice_cache import attachment_invoice_cache_parser_version
-from fin_ops_platform.services.workbench_matching_rules import WORKBENCH_MATCHING_RULES_VERSION
+from fin_ops_platform.services.workbench_free_matching_engine import RULE_VERSION as WORKBENCH_FORMAL_RELATION_RULE_VERSION
 
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
-WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION = "2026-07-12-canonical-source-proof-v5"
+WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION = WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION
 ETC_BATCH_TAG = "ETC批量提交"
 
 
@@ -147,16 +148,11 @@ class WorkbenchSqlProjectionBuilder:
             excluded_bank_transaction_ids=pending_claimed_bank_ids,
         )
         relations = self._active_pair_relations_for_month(normalized_scope, set(rows_by_id))
-        decisions = self._active_reconciliation_decisions_for_month(
-            normalized_scope,
-            excluded_bank_transaction_ids=pending_claimed_bank_ids,
-        )
         self._supplement_missing_relation_rows(rows_by_id, relations)
         payload = self._group_payload(
             normalized_scope,
             rows_by_id,
             relations,
-            decisions=decisions,
         )
         snapshot = {
             "read_models": {
@@ -169,7 +165,7 @@ class WorkbenchSqlProjectionBuilder:
                     "source_versions": {
                         "builder": WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
                         "source_version": resolved_source_version,
-                        "workbench_matching_rules_version": WORKBENCH_MATCHING_RULES_VERSION,
+                        "workbench_formal_relation_rule_version": WORKBENCH_FORMAL_RELATION_RULE_VERSION,
                         "bank_auto_tag_rules_version": self._current_bank_auto_tag_rules_version(),
                         "oa_attachment_invoice_parser_version": attachment_invoice_cache_parser_version(),
                         "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
@@ -180,9 +176,12 @@ class WorkbenchSqlProjectionBuilder:
         self._read_model_repository.save_workbench_read_models(
             snapshot,
             changed_scope_keys={normalized_scope},
-            refresh_all_scope_from_month_shards=False,
         )
-        row_count = sum(len(group.get(f"{kind}_rows") or []) for group in payload["paired"]["groups"] + payload["open"]["groups"] for kind in ("oa", "bank", "invoice"))
+        row_count = sum(
+            len(group.get(f"{kind}_rows") or [])
+            for group in payload["paired"]["groups"] + payload["unpaired"]["groups"]
+            for kind in ("oa", "bank", "invoice")
+        )
         return {
             "scope_key": normalized_scope,
             "base_scope_key": normalized_scope,
@@ -216,11 +215,6 @@ class WorkbenchSqlProjectionBuilder:
         normalized_scope = str(scope_key or "").strip() or "all"
         if normalized_scope != "all":
             raise ValueError("workbench all-scope aggregation requires scope_key='all'.")
-        self._read_model_repository.save_workbench_read_models(
-            {"read_models": {}},
-            changed_scope_keys={"all"},
-            raise_on_all_scope_parent_inconsistent=True,
-        )
         status = self._read_model_repository.get_workbench_refresh_status(scope_key="all")
         if str(status.get("read_model_status") or "").strip() == "failed":
             raise RuntimeError(str(status.get("last_error") or "Workbench all-scope aggregation failed."))
@@ -252,7 +246,7 @@ class WorkbenchSqlProjectionBuilder:
         self._supplement_source_oa_rows_for_attachment_invoices(rows, invoice_rows)
         for row in invoice_rows:
             rows[str(row["id"])] = row
-        for row in self._open_etc_invoice_summary_rows(month):
+        for row in self._unpaired_etc_invoice_summary_rows(month):
             rows[str(row["id"])] = row
         return rows
 
@@ -280,7 +274,7 @@ class WorkbenchSqlProjectionBuilder:
             if row_month != month or row_type != "oa":
                 continue
             payload = self._oa_query_service.serialize_row(row)
-            payload["status"] = "open"
+            payload["status"] = "unpaired"
             payload.setdefault("source_kind", payload.get("type") or row_type)
             result.append(payload)
         return result
@@ -299,7 +293,7 @@ class WorkbenchSqlProjectionBuilder:
             if str(row.get("type") or "").strip() != "oa":
                 continue
             payload = self._oa_query_service.serialize_row(row)
-            payload["status"] = "open"
+            payload["status"] = "unpaired"
             payload.setdefault("source_kind", payload.get("type") or row.get("type"))
             result.append(payload)
         missing_row_ids = wanted - {str(row.get("id") or "").strip() for row in result}
@@ -354,7 +348,7 @@ class WorkbenchSqlProjectionBuilder:
             "id": row_id,
             "type": "oa",
             "source_kind": "oa",
-            "status": "open",
+            "status": "unpaired",
             "workflow_status": row.get("workflow_status") or payload.get("workflow_status"),
             "applicant": row.get("applicant") or payload.get("applicant"),
             "apply_time": apply_time,
@@ -440,7 +434,7 @@ class WorkbenchSqlProjectionBuilder:
             "id": row_id,
             "type": "bank",
             "source_kind": "bank",
-            "status": "open",
+            "status": "unpaired",
             "case_id": None,
             "trade_time": _date_text(row.get("trade_time") or row.get("txn_date")),
             "account_no": account_no,
@@ -576,7 +570,7 @@ class WorkbenchSqlProjectionBuilder:
             "id": row_id,
             "type": "invoice",
             "source_kind": source_kind,
-            "status": "open",
+            "status": "unpaired",
             "case_id": None,
             "invoice_type": row.get("invoice_type"),
             "invoice_no": invoice_no,
@@ -681,15 +675,6 @@ class WorkbenchSqlProjectionBuilder:
             )
         return result
 
-    def _active_reconciliation_decisions_for_month(
-        self,
-        month: str,
-        *,
-        excluded_bank_transaction_ids: set[str] | None = None,
-    ) -> list[dict[str, Any]]:
-        _ = month, excluded_bank_transaction_ids
-        return []
-
     def _pending_claimed_bank_transaction_ids_for_month(self, month: str) -> list[str]:
         rows = self._connection.fetch_all(
             """
@@ -732,27 +717,18 @@ class WorkbenchSqlProjectionBuilder:
         month: str,
         rows_by_id: dict[str, dict[str, Any]],
         relations: list[dict[str, Any]],
-        *,
-        decisions: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         working_rows_by_id = {row_id: dict(row) for row_id, row in rows_by_id.items()}
         self._apply_workbench_overrides_and_exceptions(working_rows_by_id)
         etc_summary_rows_by_external_batch_id = self._etc_invoice_summary_rows_for_relations(relations)
-        paired_row_ids: set[str] = set()
         for relation in relations:
             relation_row_ids = [row_id for row_id in list(relation.get("row_ids") or []) if row_id in working_rows_by_id]
-            relation_row_ids.extend(
-                row_id
-                for row_id in self._attachment_row_ids_for_relation(relation, working_rows_by_id)
-                if row_id not in relation_row_ids
-            )
             if not relation_row_ids:
                 continue
             case_id = str(relation.get("case_id") or "")
             external_etc_batch_id = self._relation_external_etc_batch_id(relation)
             relation_amount_check = relation.get("amount_check") if isinstance(relation.get("amount_check"), dict) else None
             for row_id in relation_row_ids:
-                paired_row_ids.add(row_id)
                 row = working_rows_by_id[row_id]
                 row["status"] = "paired"
                 row["case_id"] = case_id
@@ -780,6 +756,7 @@ class WorkbenchSqlProjectionBuilder:
                     row = deepcopy(summary_row)
                     row["case_id"] = case_id
                     row["status"] = "paired"
+                    row["workbench_display_role"] = "summary"
                     row["relation_mode"] = relation.get("relation_mode")
                     self._apply_active_relation_metadata(row, relation)
                     row["invoice_bank_relation"] = {
@@ -795,332 +772,19 @@ class WorkbenchSqlProjectionBuilder:
                         row["relation_amount_check"] = deepcopy(relation_amount_check)
                     working_rows_by_id[str(row["id"])] = row
 
-        self._apply_reconciliation_decisions_to_rows(
-            working_rows_by_id,
-            decisions or [],
-            paired_row_ids,
-        )
         WorkbenchObjectIdentityArbitrationService(identity_policy=OBJECT_IDENTITY_POLICY).arbitrate_rows(
             working_rows_by_id
         )
-
-        oa_rows: list[dict[str, Any]] = []
-        bank_rows: list[dict[str, Any]] = []
-        invoice_rows: list[dict[str, Any]] = []
-        for row in working_rows_by_id.values():
-            row_type = str(row.get("type") or "")
-            if row_type == "oa":
-                oa_rows.append(row)
-            elif row_type == "bank":
-                bank_rows.append(row)
-            elif row_type == "invoice":
-                invoice_rows.append(row)
-
-        grouped = WorkbenchCandidateGroupingService().group_payload(
+        grouped = WorkbenchRelationGroupingService().group_payload(
             month,
-            oa_rows=oa_rows,
-            bank_rows=bank_rows,
-            invoice_rows=invoice_rows,
+            rows_by_id=working_rows_by_id,
+            active_relations=relations,
         )
-        self._demote_visible_candidate_groups(grouped)
         grouped["oa_status"] = {"code": "ready", "message": "OA projection ready"}
         grouped["workbench_read_model_schema_version"] = WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
         grouped["oa_attachment_invoice_parser_version"] = attachment_invoice_cache_parser_version()
         grouped["oa_projection_sync_version"] = OA_PROJECTION_SYNC_VERSION
         return grouped
-
-    @classmethod
-    def _demote_visible_candidate_groups(cls, payload: dict[str, Any]) -> None:
-        paired_groups = cls._payload_groups(payload, "paired")
-        open_groups = cls._payload_groups(payload, "open")
-        resolved_paired: list[dict[str, Any]] = []
-        resolved_open: list[dict[str, Any]] = []
-
-        for group in paired_groups:
-            kept_groups, demoted_groups = cls._resolve_candidate_group_display(group)
-            resolved_paired.extend(kept_groups)
-            resolved_open.extend(demoted_groups)
-        for group in open_groups:
-            kept_groups, demoted_groups = cls._resolve_candidate_group_display(group)
-            resolved_open.extend([*kept_groups, *demoted_groups])
-
-        payload.setdefault("paired", {})["groups"] = resolved_paired
-        payload.setdefault("open", {})["groups"] = resolved_open
-        summary = payload.get("summary")
-        if isinstance(summary, dict):
-            summary["paired_count"] = len(resolved_paired)
-            summary["open_count"] = len(resolved_open)
-            summary["exception_count"] = sum(1 for group in resolved_open if cls._serialized_group_has_danger(group))
-
-    @staticmethod
-    def _payload_groups(payload: dict[str, Any], zone: str) -> list[dict[str, Any]]:
-        section = payload.get(zone)
-        if not isinstance(section, dict):
-            return []
-        return [group for group in list(section.get("groups") or []) if isinstance(group, dict)]
-
-    @classmethod
-    def _resolve_candidate_group_display(cls, group: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        group_type = str(group.get("group_type") or "").strip()
-        if group_type not in {"candidate", "auto_closed"}:
-            return [group], []
-        if cls._group_is_explicit_active_relation_group(group):
-            return [group], []
-
-        rows_by_type = cls._serialized_group_rows_by_type(group)
-        source_groups, remaining_rows_by_type = cls._source_attachment_open_groups(group, rows_by_type)
-        demoted_groups = cls._open_row_groups_for_rows(
-            str(group.get("group_id") or "candidate").strip() or "candidate",
-            remaining_rows_by_type,
-        )
-        cls._restore_etc_collapsed_details_after_demotion(group, demoted_groups)
-        return [], [*source_groups, *demoted_groups]
-
-    @staticmethod
-    def _restore_etc_collapsed_details_after_demotion(
-        source_group: dict[str, Any],
-        demoted_groups: list[dict[str, Any]],
-    ) -> None:
-        collapsed_rows = source_group.get("collapsed_rows")
-        invoice_details = (
-            collapsed_rows.get("invoice")
-            if isinstance(collapsed_rows, dict)
-            else None
-        )
-        if not isinstance(invoice_details, list) or not invoice_details:
-            return
-        summary_ids = {
-            str(row.get("id") or row.get("row_id") or "").strip()
-            for row in list(source_group.get("invoice_rows") or [])
-            if isinstance(row, dict)
-            and str(row.get("source_kind") or "").strip() == "etc_invoice_summary"
-            and str(row.get("id") or row.get("row_id") or "").strip()
-        }
-        if not summary_ids:
-            return
-        for group in demoted_groups:
-            owns_summary = any(
-                str(row.get("id") or row.get("row_id") or "").strip() in summary_ids
-                for row in list(group.get("invoice_rows") or [])
-                if isinstance(row, dict)
-            )
-            if not owns_summary:
-                continue
-            group["display_mode"] = "collapsed_summary"
-            group["default_collapsed"] = True
-            group["collapsed_rows"] = {"invoice": deepcopy(invoice_details)}
-            group["collapsed_row_counts"] = {"invoice": len(invoice_details)}
-            return
-
-    @classmethod
-    def _group_is_explicit_active_relation_group(cls, group: dict[str, Any]) -> bool:
-        if str(group.get("reason") or "").strip() == "relation_snapshot":
-            return True
-        if str(group.get("relation_mode") or "").strip() in {
-            BANK_FLOW_RULE_BATCH_RELATION_MODE,
-            NO_OA_BANK_BATCH_RELATION_MODE,
-        }:
-            return True
-        rows = cls._serialized_group_rows(group)
-        return bool(rows) and all(cls._row_has_active_pair_relation_marker(row) for row in rows)
-
-    @staticmethod
-    def _row_has_active_pair_relation_marker(row: dict[str, Any]) -> bool:
-        metadata = row.get("special_metadata")
-        if not isinstance(metadata, dict):
-            return False
-        return (
-            bool(metadata.get("active_pair_relation"))
-            or bool(str(metadata.get("active_relation_case_id") or "").strip())
-        )
-
-    @classmethod
-    def _source_attachment_open_groups(
-        cls,
-        group: dict[str, Any],
-        rows_by_type: dict[str, list[dict[str, Any]]],
-    ) -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]]]:
-        used_row_keys: set[tuple[str, str] | tuple[str, int]] = set()
-        source_groups: list[dict[str, Any]] = []
-        invoice_rows = list(rows_by_type.get("invoice") or [])
-        for oa_row in list(rows_by_type.get("oa") or []):
-            oa_row_id = str(oa_row.get("id") or "").strip()
-            if not oa_row_id:
-                continue
-            linked_invoice_rows = [
-                invoice_row
-                for invoice_row in invoice_rows
-                if cls._is_oa_attachment_invoice_for_oa(invoice_row, oa_row_id)
-                and cls._row_key("invoice", invoice_row) not in used_row_keys
-            ]
-            if not linked_invoice_rows:
-                continue
-            source_case_id = cls._source_attachment_case_id(oa_row, linked_invoice_rows)
-            source_group = deepcopy(group)
-            source_group["group_id"] = f"case:{source_case_id}" if source_case_id else f"source:oa_attachment:{oa_row_id}"
-            source_group["group_type"] = "source_linked"
-            source_group["match_confidence"] = "high"
-            source_group["reason"] = "oa_attachment_source_relation"
-            source_group["oa_rows"] = [cls._source_attachment_open_row(oa_row)]
-            source_group["bank_rows"] = []
-            source_group["invoice_rows"] = [cls._source_attachment_open_row(row) for row in linked_invoice_rows]
-            source_group.pop("relation_mode", None)
-            source_group.pop("can_withdraw", None)
-            source_group.pop("amount_check", None)
-            source_groups.append(source_group)
-            used_row_keys.add(cls._row_key("oa", oa_row))
-            used_row_keys.update(cls._row_key("invoice", row) for row in linked_invoice_rows)
-
-        if not used_row_keys:
-            return [], rows_by_type
-
-        remaining_rows_by_type = {
-            row_type: [
-                row
-                for row in list(rows_by_type.get(row_type) or [])
-                if cls._row_key(row_type, row) not in used_row_keys
-            ]
-            for row_type in ("oa", "bank", "invoice")
-        }
-        return source_groups, remaining_rows_by_type
-
-    @staticmethod
-    def _is_oa_attachment_invoice_for_oa(row: dict[str, Any], oa_row_id: str) -> bool:
-        if str(row.get("source_kind") or "").strip() != OA_ATTACHMENT_INVOICE_SOURCE_KIND:
-            return False
-        return oa_attachment_matches_oa(row, oa_row_id)
-
-    @staticmethod
-    def _source_attachment_case_id(oa_row: dict[str, Any], invoice_rows: list[dict[str, Any]]) -> str:
-        candidate_case_ids = [
-            str(row.get("case_id") or "").strip()
-            for row in [oa_row, *invoice_rows]
-            if str(row.get("case_id") or "").strip().startswith("CASE-OA-ATT-")
-        ]
-        return candidate_case_ids[0] if candidate_case_ids else ""
-
-    @classmethod
-    def _source_attachment_open_row(cls, row: dict[str, Any]) -> dict[str, Any]:
-        resolved = cls._demoted_candidate_row(row)
-        resolved.pop("relation_mode", None)
-        resolved.pop("relation_amount_check", None)
-        return resolved
-
-    @staticmethod
-    def _row_key(row_type: str, row: dict[str, Any]) -> tuple[str, str] | tuple[str, int]:
-        row_id = str(row.get("id") or row.get("row_id") or "").strip()
-        if row_id:
-            return (row_type, row_id)
-        return (row_type, id(row))
-
-    @staticmethod
-    def _canonical_row_case_id(row: dict[str, Any]) -> str:
-        case_id = str(row.get("case_id") or "").strip()
-        if not case_id:
-            return ""
-        if case_id.startswith(("candidate:", "decision:", "temp:")):
-            return ""
-        if not WorkbenchSqlProjectionBuilder._row_has_linked_relation_code(row):
-            return ""
-        return case_id
-
-    @staticmethod
-    def _row_has_linked_relation_code(row: dict[str, Any]) -> bool:
-        for field_name in ("oa_bank_relation", "invoice_relation", "invoice_bank_relation"):
-            relation = row.get(field_name)
-            if not isinstance(relation, dict):
-                continue
-            if str(relation.get("code") or "").strip() == "fully_linked":
-                return True
-        return False
-
-    @classmethod
-    def _candidate_group_open_row_groups(cls, group: dict[str, Any]) -> list[dict[str, Any]]:
-        group_id = str(group.get("group_id") or "candidate").strip() or "candidate"
-        return cls._open_row_groups_for_rows(group_id, cls._serialized_group_rows_by_type(group))
-
-    @classmethod
-    def _open_row_groups_for_rows(cls, group_id: str, rows_by_type: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
-        open_groups: list[dict[str, Any]] = []
-        for row_type, key in (("oa", "oa_rows"), ("bank", "bank_rows"), ("invoice", "invoice_rows")):
-            for row in list(rows_by_type.get(row_type) or []):
-                if not isinstance(row, dict):
-                    continue
-                row_payload = cls._demoted_candidate_row(row)
-                row_id = str(row_payload.get("id") or row_payload.get("row_id") or len(open_groups) + 1).strip()
-                open_groups.append(
-                    {
-                        "group_id": f"open:{group_id}:{row_type}:{row_id}",
-                        "group_type": "open",
-                        "match_confidence": "low",
-                        "reason": "unlinked_candidate_demoted",
-                        "oa_rows": [row_payload] if row_type == "oa" else [],
-                        "bank_rows": [row_payload] if row_type == "bank" else [],
-                        "invoice_rows": [row_payload] if row_type == "invoice" else [],
-                    }
-                )
-        return open_groups
-
-    @staticmethod
-    def _group_with_rows(
-        group: dict[str, Any],
-        rows_by_type: dict[str, list[dict[str, Any]]],
-        *,
-        group_id: str,
-    ) -> dict[str, Any]:
-        resolved = deepcopy(group)
-        resolved["group_id"] = group_id
-        resolved["oa_rows"] = [deepcopy(row) for row in rows_by_type.get("oa", [])]
-        resolved["bank_rows"] = [deepcopy(row) for row in rows_by_type.get("bank", [])]
-        resolved["invoice_rows"] = [deepcopy(row) for row in rows_by_type.get("invoice", [])]
-        return resolved
-
-    @staticmethod
-    def _demoted_candidate_row(row: dict[str, Any]) -> dict[str, Any]:
-        resolved = deepcopy(row)
-        case_id = str(resolved.get("case_id") or "").strip()
-        if not case_id or case_id.startswith(("candidate:", "decision:", "temp:")):
-            resolved.pop("case_id", None)
-        if not WorkbenchSqlProjectionBuilder._row_has_active_pair_relation_marker(resolved):
-            resolved.pop("relation_mode", None)
-            resolved.pop("relation_amount_check", None)
-        elif str(resolved.get("relation_mode") or "").strip() in {"automatic_decision", "automatic_match"}:
-            resolved.pop("relation_mode", None)
-        if str(resolved.get("status") or "").strip() == "paired":
-            resolved["status"] = "open"
-        for field_name in ("oa_bank_relation", "invoice_relation", "invoice_bank_relation"):
-            relation = resolved.get(field_name)
-            if not isinstance(relation, dict):
-                continue
-            relation_code = str(relation.get("code") or "").strip()
-            if relation_code not in {"pending_match", "pending_invoice_match", "pending_collection", "unmatched", ""}:
-                resolved.pop(field_name, None)
-        resolved.pop("workbench_reconciliation_decision", None)
-        return resolved
-
-    @staticmethod
-    def _serialized_group_rows(group: dict[str, Any]) -> list[dict[str, Any]]:
-        rows: list[dict[str, Any]] = []
-        for key in ("oa_rows", "bank_rows", "invoice_rows"):
-            rows.extend(row for row in list(group.get(key) or []) if isinstance(row, dict))
-        return rows
-
-    @staticmethod
-    def _serialized_group_rows_by_type(group: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
-        return {
-            "oa": [row for row in list(group.get("oa_rows") or []) if isinstance(row, dict)],
-            "bank": [row for row in list(group.get("bank_rows") or []) if isinstance(row, dict)],
-            "invoice": [row for row in list(group.get("invoice_rows") or []) if isinstance(row, dict)],
-        }
-
-    @classmethod
-    def _serialized_group_has_danger(cls, group: dict[str, Any]) -> bool:
-        for row in cls._serialized_group_rows(group):
-            for field_name in ("oa_bank_relation", "invoice_relation", "invoice_bank_relation"):
-                relation = row.get(field_name)
-                if isinstance(relation, dict) and str(relation.get("tone") or "") == "danger":
-                    return True
-        return False
 
     def _apply_relation_row_alignment(
         self,
@@ -1160,15 +824,6 @@ class WorkbenchSqlProjectionBuilder:
                     continue
                 row["source_oa_id"] = oa_row_id
                 row["source_oa_row_id"] = oa_row_id
-
-    def _apply_reconciliation_decisions_to_rows(
-        self,
-        rows_by_id: dict[str, dict[str, Any]],
-        decisions: list[dict[str, Any]],
-        paired_row_ids: set[str],
-    ) -> None:
-        _ = rows_by_id, decisions, paired_row_ids
-        return
 
     def _current_dirty_scope_source_version(self, scope_key: str) -> int:
         row = self._connection.fetch_one(
@@ -1361,7 +1016,7 @@ class WorkbenchSqlProjectionBuilder:
             return {}
         return self._etc_invoice_summary_rows(external_batch_ids=external_batch_ids)
 
-    def _open_etc_invoice_summary_rows(self, month: str) -> list[dict[str, Any]]:
+    def _unpaired_etc_invoice_summary_rows(self, month: str) -> list[dict[str, Any]]:
         linked_external_batch_ids = self._active_etc_relation_external_batch_ids()
         return list(
             self._etc_invoice_summary_rows(
@@ -1973,45 +1628,12 @@ class WorkbenchSqlProjectionBuilder:
         }
 
     @staticmethod
-    def _row_is_held_for_matching(row: dict[str, Any]) -> bool:
-        if bool(row.get("ignored")) or bool(row.get("handled_exception")):
-            return True
-        case_id = str(row.get("case_id") or "").strip()
-        if case_id and not case_id.startswith("candidate:"):
-            return True
-        exception_case_id = str(row.get("exception_case_id") or "").strip()
-        if exception_case_id:
-            return True
-        return False
-
-    @staticmethod
     def _relation_field_name(row_type: str) -> str:
         if row_type == "oa":
             return "oa_bank_relation"
         if row_type == "bank":
             return "invoice_relation"
         return "invoice_bank_relation"
-
-    @staticmethod
-    def _attachment_row_ids_for_relation(
-        relation: dict[str, Any],
-        rows_by_id: dict[str, dict[str, Any]],
-    ) -> list[str]:
-        row_ids = [str(row_id).strip() for row_id in list(relation.get("row_ids") or []) if str(row_id).strip()]
-        row_types = [str(row_type).strip() for row_type in list(relation.get("row_types") or [])]
-        oa_row_ids = {
-            row_id
-            for index, row_id in enumerate(row_ids)
-            if (row_types[index] if index < len(row_types) else "") == "oa" or row_id.startswith("oa-")
-        }
-        if not oa_row_ids:
-            return []
-        return [
-            row_id
-            for row_id, row in rows_by_id.items()
-            if str(row.get("source_kind") or "").strip() == OA_ATTACHMENT_INVOICE_SOURCE_KIND
-            and any(oa_attachment_matches_oa(row, oa_row_id) for oa_row_id in oa_row_ids)
-        ]
 
     @staticmethod
     def _empty_group(month: str, *, case_id: str, relation_mode: str) -> dict[str, Any]:

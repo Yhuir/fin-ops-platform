@@ -21,7 +21,7 @@ class WorkbenchOaInvoiceOffsetRebuildHelper:
         applicant_names = self._applicant_names()
         if not applicant_names:
             return False
-        for section in ("paired", "open"):
+        for section in ("paired", "unpaired"):
             section_payload = payload.get(section, {})
             if not isinstance(section_payload, dict):
                 continue
@@ -35,7 +35,7 @@ class WorkbenchOaInvoiceOffsetRebuildHelper:
                         continue
                     if not self.attachment_invoice_rows_for_oa(oa_row, invoice_rows):
                         continue
-                    if section == "open":
+                    if section == "unpaired":
                         return True
                     for row in [*oa_rows, *invoice_rows]:
                         tags = {str(tag).strip() for tag in list(row.get("tags") or []) if str(tag).strip()}

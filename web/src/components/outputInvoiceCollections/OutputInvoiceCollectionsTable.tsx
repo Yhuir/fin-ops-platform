@@ -344,7 +344,6 @@ function OutputInvoiceCollectionDataRow({
             <TextLine strong value={oa.applicantName} />
             <span className="output-invoice-collections-tag-row">
               <FinanceTag>{oa.applicationType || "类型为空"}</FinanceTag>
-              {oa.relationStatus === "candidate" ? <FinanceTag tone="warning">候选</FinanceTag> : null}
             </span>
           </>
         ) : <EmptyValue />}
@@ -381,7 +380,6 @@ function OutputInvoiceCollectionDataRow({
             />
             <span className="output-invoice-collections-tag-row">
               <FinanceTag>{bank.tradeTime || "收款日期为空"}</FinanceTag>
-              {bank.relationStatus === "candidate" ? <FinanceTag tone="warning">候选</FinanceTag> : null}
               {bank.detailAvailable ? (
                 <ActionButton
                   ariaLabel={`查看流水 ${bank.counterpartyName || bank.id} 详情`}

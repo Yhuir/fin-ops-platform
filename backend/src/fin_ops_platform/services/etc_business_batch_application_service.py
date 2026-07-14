@@ -7,6 +7,11 @@ from enum import Enum
 from typing import Any, Callable, Iterable
 
 from fin_ops_platform.services.etc_reconciliation_models import ParseIssueSeverity, SourceFileKind
+from fin_ops_platform.services.etc_invoice_pdf_bundle_service import (
+    EtcInvoicePdfBundle,
+    EtcInvoicePdfBundleError,
+    EtcInvoicePdfBundleService,
+)
 from fin_ops_platform.services.etc_service import (
     ETC_BUSINESS_BATCH_MANUAL_STATUS_ALLOWED_STATUSES,
     EtcBusinessBatch,
@@ -44,12 +49,18 @@ class EtcBusinessBatchApplicationService:
         oa_client_factory: Callable[[dict[str, str] | None], Any] | None = None,
         link_etc_invoices_to_existing_invoices: Callable[[list[object]], list[str]] | None = None,
         refresh_after_etc_invoice_link: Callable[[list[str], str], None] | None = None,
+        invoice_pdf_bundle_service: EtcInvoicePdfBundleService | None = None,
+        record_invoice_pdf_download: Callable[[EtcBusinessBatchActor, EtcBusinessBatch, EtcInvoicePdfBundle], None] | None = None,
     ) -> None:
         self._etc_service = etc_service
         self._reconciliation_task_service = reconciliation_task_service
         self._oa_client_factory = oa_client_factory
         self._link_etc_invoices_to_existing_invoices = link_etc_invoices_to_existing_invoices
         self._refresh_after_etc_invoice_link = refresh_after_etc_invoice_link
+        self._invoice_pdf_bundle_service = invoice_pdf_bundle_service or EtcInvoicePdfBundleService(
+            read_invoice_pdf=etc_service.read_invoice_pdf_bytes,
+        )
+        self._record_invoice_pdf_download = record_invoice_pdf_download
 
     def list_batches_payload(self, query: dict[str, list[str]], *, actor: EtcBusinessBatchActor) -> dict[str, object]:
         requested_status = str((query.get("status") or [None])[0] or "").strip()
@@ -164,6 +175,21 @@ class EtcBusinessBatchApplicationService:
     def detail_payload(self, business_batch_id: str, *, actor: EtcBusinessBatchActor) -> dict[str, object]:
         batch = self._scoped_batch(business_batch_id, actor)
         return {"businessBatch": self.business_batch_payload(batch, include_invoice_items=True)}
+
+    def invoice_pdf_bundle(self, business_batch_id: str, *, actor: EtcBusinessBatchActor) -> EtcInvoicePdfBundle:
+        batch = self._scoped_batch(business_batch_id, actor)
+        invoice_ids = list(getattr(batch, "invoice_ids", []) or [])
+        try:
+            invoices = self._etc_service.list_invoices_by_ids(invoice_ids)
+        except Exception as exc:
+            raise EtcInvoicePdfBundleError(
+                "当前 ETC 业务批次的发票关联不完整，请刷新后重试或联系管理员。",
+                code="invoice_pdf_unavailable",
+            ) from exc
+        bundle = self._invoice_pdf_bundle_service.build(batch=batch, invoices=invoices)
+        if self._record_invoice_pdf_download is not None:
+            self._record_invoice_pdf_download(actor, batch, bundle)
+        return bundle
 
     def preview_import_payload(
         self,

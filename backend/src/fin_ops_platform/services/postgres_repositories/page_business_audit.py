@@ -1604,7 +1604,7 @@ def _canonical_expected_set_issues(
               and scope_key ~ '^[0-9]{4}-[0-9]{2}$'
             order by scope_key, activated_at desc nulls last, updated_at desc
         ),
-        group_candidates as (
+        scoped_groups as (
             select generation.generation_id, generation.scope_key, group_row.group_id, group_row.zone,
                    case
                        when group_row.payload is not null then
@@ -1625,7 +1625,7 @@ def _canonical_expected_set_issues(
             join read_model.workbench_groups group_row
               on group_row.generation_id = generation.generation_id
              and group_row.scope_key = generation.scope_key
-            where group_row.zone in ('paired', 'open')
+            where group_row.zone in ('paired', 'unpaired')
               and group_row.source_kinds && array['oa', 'bank']::text[]
         ),
         member_payloads as (
@@ -1659,7 +1659,7 @@ def _canonical_expected_set_issues(
                            end
                        else '{}'::jsonb
                    end as member_payload
-            from group_candidates group_row
+            from scoped_groups group_row
             join read_model.workbench_group_rows member
               on member.generation_id = group_row.generation_id
              and member.scope_key = group_row.scope_key
@@ -1674,24 +1674,7 @@ def _canonical_expected_set_issues(
         group_facts as (
             select generation_id, scope_key, group_id, zone, group_payload,
                    bool_or(pane = 'oa') as has_oa,
-                   bool_or(pane = 'bank') as has_bank,
-                   bool_or(
-                       lower(btrim(coalesce(
-                           nullif(member_payload->>'relation_status', ''),
-                           nullif(member_payload->>'relationStatus', ''),
-                           nullif(member_payload->>'status', ''),
-                           ''
-                       ))) = 'candidate'
-                   ) as has_candidate_member,
-                   bool_or(
-                       pane = 'oa'
-                       and member_payload->'oa_bank_relation'->>'code'
-                           in ('fully_linked', 'automatic_match')
-                   ) as has_linked_oa,
-                   bool_or(
-                       pane = 'bank'
-                       and member_payload->'available_actions' ? 'cancel_link'
-                   ) as has_cancel_link
+                   bool_or(pane = 'bank') as has_bank
             from member_payloads
             group by generation_id, scope_key, group_id, zone, group_payload
         ),
@@ -1700,22 +1683,7 @@ def _canonical_expected_set_issues(
             from group_facts
             where has_oa
               and has_bank
-              and lower(btrim(coalesce(
-                    nullif(group_payload->>'relation_status', ''),
-                    nullif(group_payload->>'relationStatus', ''),
-                    nullif(group_payload->>'status', ''),
-                    ''
-                  ))) <> 'candidate'
-              and not has_candidate_member
-              and (
-                    has_linked_oa
-                 or lower(btrim(coalesce(group_payload->>'group_type', ''))) <> 'candidate'
-              )
-              and (
-                    zone = 'paired'
-                 or has_linked_oa
-                 or has_cancel_link
-              )
+              and zone = 'paired'
         ),
         oa_contexts as (
             select group_row.generation_id, group_row.scope_key, group_row.group_id,

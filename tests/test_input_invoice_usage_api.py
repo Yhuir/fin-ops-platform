@@ -634,7 +634,7 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
                     {
                         "row_id": invoice.id,
                         "row_type": "input_invoice",
-                        "relation_status": "candidate",
+                        "relation_status": "unlinked",
                         "group_ids": ["decision-open-oa-candidate"],
                         "linked_oa": [],
                         "linked_bank_transactions": [],
@@ -646,8 +646,8 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
                     {
                         "group_id": "decision-open-oa-candidate",
                         "scope_month": "2026-05",
-                        "relation_source": "automatic_decision",
-                        "relation_status": "candidate",
+                        "relation_source": "unlinked_evidence",
+                        "relation_status": "unlinked",
                         "oa_row_ids": ["oa-candidate-existing"],
                         "bank_transaction_ids": [],
                         "input_invoice_ids": [invoice.id],
@@ -656,8 +656,8 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
                             "group_id": "decision-open-oa-candidate",
                             "row_ids": ["oa-candidate-existing", invoice.id],
                             "row_types": ["oa", "invoice"],
-                            "relation_mode": "automatic_decision",
-                            "relation_status": "candidate",
+                            "relation_mode": "unlinked_evidence",
+                            "relation_status": "unlinked",
                             "amount_check": {"matched": True},
                         },
                     }

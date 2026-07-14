@@ -23,8 +23,10 @@ function isPostTo(pathname: string) {
 }
 
 export async function confirmWorkbenchRelation(page: Page, recordLatency?: OperationLatencyRecorder) {
-  const openZone = page.getByTestId("zone-open");
-  const openGroup = page.getByTestId("candidate-group-open-case:CASE-202603-101");
+  const openZone = page.getByTestId("zone-unpaired");
+  const openOaGroup = page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001");
+  const openBankGroup = page.getByTestId("candidate-group-unpaired-row:bk-o-202603-001");
+  const openInvoiceGroup = page.getByTestId("candidate-group-unpaired-row:iv-o-202603-001");
 
   await runOperation(recordLatency, {
     route: "/",
@@ -36,7 +38,7 @@ export async function confirmWorkbenchRelation(page: Page, recordLatency?: Opera
   }, async (mark) => {
     await page.getByRole("link", { name: "关联台" }).click();
     await mark("firstVisibleResponseLatencyMs", expect(openZone).toBeVisible());
-    await mark("finalSettledLatencyMs", expect(openGroup).toBeVisible());
+    await mark("finalSettledLatencyMs", expect(openOaGroup).toBeVisible());
   });
 
   await runOperation(recordLatency, {
@@ -47,7 +49,7 @@ export async function confirmWorkbenchRelation(page: Page, recordLatency?: Opera
     visibleLabel: "陈涛 智能工厂设备商",
     actionType: "click",
   }, async (mark) => {
-    await openGroup.getByRole("row", { name: /陈涛.*智能工厂设备商/ }).click();
+    await openOaGroup.getByRole("row", { name: /陈涛.*智能工厂设备商/ }).click();
     await mark("firstVisibleResponseLatencyMs", expect(openZone.getByText("已选 1")).toBeVisible());
     await mark("finalSettledLatencyMs", expect(openZone.getByText("已选 1")).toBeVisible());
   });
@@ -60,7 +62,7 @@ export async function confirmWorkbenchRelation(page: Page, recordLatency?: Opera
     visibleLabel: "2026-03-28 智能工厂设备商",
     actionType: "click",
   }, async (mark) => {
-    await openGroup.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }).click();
+    await openBankGroup.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }).click();
     await mark("firstVisibleResponseLatencyMs", expect(openZone.getByText("已选 2")).toBeVisible());
     await mark("finalSettledLatencyMs", expect(openZone.getByText("已选 2")).toBeVisible());
   });
@@ -73,7 +75,7 @@ export async function confirmWorkbenchRelation(page: Page, recordLatency?: Opera
     visibleLabel: "91330108MA27B4011D 杭州溯源科技有限公司",
     actionType: "click",
   }, async (mark) => {
-    await openGroup.getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ }).click();
+    await openInvoiceGroup.getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ }).click();
     await mark("firstVisibleResponseLatencyMs", expect(openZone.getByText("已选 3")).toBeVisible());
     await mark("finalSettledLatencyMs", expect(openZone.getByText("已选 3")).toBeVisible());
   });

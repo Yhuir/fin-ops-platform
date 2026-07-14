@@ -2,14 +2,14 @@ import { Fragment, memo, useMemo, useRef } from "react";
 
 import type { WorkbenchPaneTimeFilter, WorkbenchZoneDisplayState } from "../../features/workbench/groupDisplayModel";
 import type {
-  WorkbenchCandidateGroup,
+  WorkbenchRelationGroup,
   WorkbenchColumnLayouts,
   WorkbenchInvoiceInventory,
   WorkbenchRecord,
   WorkbenchRecordType,
 } from "../../features/workbench/types";
 import type { WorkbenchRowState } from "../../hooks/useWorkbenchSelection";
-import CandidateGroupGrid from "./CandidateGroupGrid";
+import RelationGroupGrid from "./RelationGroupGrid";
 import type { WorkbenchInlineAction } from "./RowActions";
 import type { WorkbenchColumnDropPosition } from "../../features/workbench/columnLayout";
 
@@ -23,35 +23,35 @@ export type WorkbenchPane = {
 };
 
 type ResizableTriPaneProps = {
-  zoneId: "paired" | "open";
+  zoneId: "paired" | "unpaired";
   panes: WorkbenchPane[];
-  groups?: WorkbenchCandidateGroup[];
-  sourceGroups?: WorkbenchCandidateGroup[];
+  groups?: WorkbenchRelationGroup[];
+  sourceGroups?: WorkbenchRelationGroup[];
   invoiceInventory?: WorkbenchInvoiceInventory;
   displayState: WorkbenchZoneDisplayState;
   columnLayouts?: WorkbenchColumnLayouts;
   widths: number[];
   visibleIndices: number[];
   onStartDrag: (leftIndex: number, rightIndex: number, clientX: number, containerWidth: number) => void;
-  getRowState: (row: WorkbenchRecord, zoneId: "paired" | "open") => WorkbenchRowState;
+  getRowState: (row: WorkbenchRecord, zoneId: "paired" | "unpaired") => WorkbenchRowState;
   highlightedRowId?: string | null;
-  onSelectRow: (row: WorkbenchRecord, zoneId: "paired" | "open") => void;
+  onSelectRow: (row: WorkbenchRecord, zoneId: "paired" | "unpaired") => void;
   onOpenDetail: (row: WorkbenchRecord) => void;
   onRowAction: (row: WorkbenchRecord, action: WorkbenchInlineAction) => void;
-  onEnsureGroupDetail?: (zoneId: "paired" | "open", groupId: string) => Promise<void>;
-  onTogglePaneSearch: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => void;
-  onClosePaneSearch: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => void;
-  onClearPaneSearch: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => void;
-  onPaneSearchQueryChange: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice", query: string) => void;
+  onEnsureGroupDetail?: (zoneId: "paired" | "unpaired", groupId: string) => Promise<void>;
+  onTogglePaneSearch: (zoneId: "paired" | "unpaired", paneId: "oa" | "bank" | "invoice") => void;
+  onClosePaneSearch: (zoneId: "paired" | "unpaired", paneId: "oa" | "bank" | "invoice") => void;
+  onClearPaneSearch: (zoneId: "paired" | "unpaired", paneId: "oa" | "bank" | "invoice") => void;
+  onPaneSearchQueryChange: (zoneId: "paired" | "unpaired", paneId: "oa" | "bank" | "invoice", query: string) => void;
   onColumnFilterChange: (
-    zoneId: "paired" | "open",
+    zoneId: "paired" | "unpaired",
     paneId: "oa" | "bank" | "invoice",
     columnKey: string,
     selectedValues: string[],
   ) => void;
-  onTogglePaneSort: (zoneId: "paired" | "open", paneId: "oa" | "bank" | "invoice") => void;
+  onTogglePaneSort: (zoneId: "paired" | "unpaired", paneId: "oa" | "bank" | "invoice") => void;
   onPaneTimeFilterChange?: (
-    zoneId: "paired" | "open",
+    zoneId: "paired" | "unpaired",
     paneId: "oa" | "bank" | "invoice",
     filter: WorkbenchPaneTimeFilter,
   ) => void;
@@ -142,7 +142,7 @@ function ResizableTriPane({
           );
         })}
       </div>
-      <CandidateGroupGrid
+      <RelationGroupGrid
         columnLayouts={columnLayouts}
         displayState={displayState}
         getRowState={getRowState}
@@ -173,7 +173,7 @@ function ResizableTriPane({
 
 export default memo(ResizableTriPane);
 
-function buildFallbackGroups(panes: WorkbenchPane[], zoneId: "paired" | "open"): WorkbenchCandidateGroup[] {
+function buildFallbackGroups(panes: WorkbenchPane[], zoneId: "paired" | "unpaired"): WorkbenchRelationGroup[] {
   const maxRows = Math.max(...panes.map((pane) => pane.rows.length), 0);
   return Array.from({ length: maxRows }, (_, index) => ({
     id: `fallback-${index + 1}`,

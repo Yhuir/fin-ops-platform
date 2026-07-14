@@ -14,7 +14,7 @@
 
 ### 负责
 
-- ETC 票据管理页面、ETC 发票/批次、识别、对账、历史批次修复。
+- ETC 票据管理页面、ETC 发票/批次、识别、对账、OA 草稿后批次发票 PDF 合并下载、历史批次修复。
 - ETC 与发票附件、关联台候选之间的业务转换。
 - 通过 lifecycle 触发 workbench/invoice/search 相关刷新。
 
@@ -33,6 +33,7 @@
 | 信用卡账单 PDF | `POST /api/etc/reconciliation-tasks/{task_id}/credit-card-statement`、`CcbCreditCardStatementParser` | 先落 source file 元数据，再从可选文字解析交易行；无可用交易行时才按页渲染并用布局 OCR 重建表格行。OCR 结果附带人工核对 warning；两种路径都输出同一 `FileParseResult`/`CreditCardItem` 合同。解析提交与 source file 删除互斥；OCR 期间源文件已删除时返回 HTTP 409 / `source_file_deleted_during_parse`，不得生成孤儿明细。 |
 | ETC 发票导入/识别 | imports/services/parsers | 输出批次、任务、附件识别结果 |
 | ETC invoice list | `GET /api/etc/invoices` | 只读查询入口；route owner 只接收 `etc_service`、`json_response`、`serialize_invoice` 三个读侧端口，不接收 JSON body、link refresh 或状态回退端口 |
+| OA 草稿后发票 PDF 下载 | `GET /api/etc/business-batches/{id}/invoice-pdf` | 使用 read session；application service 校验 actor scope、OA 草稿和 `business_batch.invoice_ids`，再把发票元数据与 `EtcService.read_invoice_pdf_bytes` 读取端口交给 PDF bundle service；不直接读取 HTTP cookie/header，不写业务状态 |
 | 历史修复/迁移 | tools | 只作为显式运维入口 |
 | 页面 Audit | `GET /api/operations/app-health/page-audit?page=etc-tickets` | 管理员只读；同一 `REPEATABLE READ READ ONLY` snapshot 直接读取 canonical tables，不创建或刷新 read model |
 
@@ -41,6 +42,8 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | ETC ticket/batch payload | 前端页面 | API response shape 稳定，business batch payload 包含用户可见 `title` |
+| Worker 持久化后的查询可见性 | ETC 票据/导入页面 | PostgreSQL 模式的 task、business batch、invoice 查询在读取前重载正式 snapshot，保证独立 import worker 的完成结果无需 API 重启即可见；file/memory backend 保持原有进程内语义 |
+| ETC 发票合并 PDF | 浏览器下载 | `application/pdf`、RFC 5987 UTF-8 文件名、`private, no-store`；按开票日期/发票号/ID 稳定排序，每张发票恰好贡献一页；任一来源不可读、损坏、hash 不一致或不是单页时整包失败；成功记录 `etc_invoice_pdf_bundle_downloaded` 审计，不新增批次状态或 read model |
 | linked reconciliation task title | ETC 发票导入 ready task 下拉 | business batch title 更新后同步 task title，导入页下拉展示最新批次标题 |
 | 关联候选/关系影响 | workbench relation/lifecycle | 不直接写下游 read model |
 | 修复/迁移结果 | 运维工具 | 可审计、可回滚或可重复 |
@@ -55,6 +58,7 @@
 - ETC 导入完成消费会额外等待 `tax_offset`、`input_invoice_usage`、`pending_invoice`、`oa_pending_payment`、`cost_statistics` 等 job result targets。
 - Worker：通过 import/runtime handler、derived lifecycle 和 registered workers 扇出。
 - PostgreSQL formal file rows：active task 每次保存时把不再存在于 task `source_files` 的 `app.etc_reconciliation_files` 行标记为 `deleted`；仍存在的文件继续 upsert 为 `stored`。formal rows 不得让已删除来源在重启后复活。
+- PostgreSQL query consistency：`EtcService` 与 `EtcReconciliationTaskService` 的页面只读入口必须从 state store 重载 worker 最新写入；进程内 snapshot 不是跨进程事实源。
 
 ## 文件范围
 
@@ -63,7 +67,7 @@
 | Frontend page | `web/src/pages/EtcTicketManagementPage.tsx` |
 | Frontend feature/components | `web/src/features/etc/*`、`web/src/components/workbench/CandidateGroupGrid.tsx` |
 | Backend route | `routes_etc.py`、`routes_etc_import.py`、`routes_etc_invoices.py`、`routes_etc_reconciliation.py` |
-| Backend service | `etc_service.py`、`etc_business_batch_application_service.py`、`etc_document_parsers.py`、`etc_reconciliation_*`、`invoice_attachment_recognition_service.py` |
+| Backend service | `etc_service.py`、`etc_business_batch_application_service.py`、`etc_invoice_pdf_bundle_service.py`、`etc_document_parsers.py`、`etc_reconciliation_*`、`invoice_attachment_recognition_service.py` |
 | Audit proof owner | `services/postgres_repositories/etc_tickets_page_audit.py`、`services/page_audit_registry.py`、`services/postgres_repositories/operations_audit.py` |
 | Workbench integration | `workbench_sql_projection.py`、`workbench_pair_relation_service.py`、`workbench_relation_command_service.py` |
 | Tools | `cleanup_orphan_etc_reconciliation_tasks.py`、`migrate_historical_etc_business_batches.py`、`link_existing_etc_batches.py` |
@@ -72,12 +76,14 @@
 ## 依赖方向
 
 - 允许依赖：ETC parsers, invoice attachment recognition, workbench relation, derived lifecycle。
+- PDF 下载允许依赖：现有 PyMuPDF 合并能力与 `EtcService` 文件字节读取端口；对象存储 key、MinIO client 和 HTTP response 不得进入 PDF bundle service。
 - 必须通过：ETC application/reconciliation services。
 - 禁止绕过：修复工具直接成为常规业务写路径；页面直接操作历史批次状态；任何代码重新暴露 legacy `/api/etc/batches*`、`/api/etc/business-batches/{id}/oa-status/refresh` 或 `/api/etc/invoices/revoke-submitted`。
 
 ## 测试与验证
 
 - `tests/test_etc_backend.py`
+- `tests/test_etc_invoice_pdf_bundle_service.py`
 - `tests/test_etc_reconciliation_service.py`
 - `tests/test_import_processing_service.py`
 - `tests/test_audit_etc_tickets_read_model_tool.py`

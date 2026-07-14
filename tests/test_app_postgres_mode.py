@@ -98,9 +98,6 @@ class FakeStore:
         self.runtime_loader_calls.append("load_workbench_pair_relations")
         return self.runtime_snapshots.get("workbench_pair_relations", {})
 
-    def load_workbench_candidate_matches(self) -> dict:
-        raise AssertionError("production bootstrap must not eagerly load candidate match read models")
-
     def load_app_settings(self) -> dict:
         return {
             "completed_project_ids": [],

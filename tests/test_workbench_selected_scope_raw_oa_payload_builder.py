@@ -21,14 +21,14 @@ class WorkbenchSelectedScopeRawOaPayloadBuilderTests(unittest.TestCase):
                 "id": "oa-retained",
                 "type": "oa",
                 "_month": "2025-12",
-                "_section": "open",
+                "_section": "unpaired",
                 "oa_bank_relation": {"tone": "warn"},
             },
             {
                 "id": "invoice-retained",
                 "type": "invoice",
                 "_month": "2025-12",
-                "_section": "open",
+                "_section": "unpaired",
                 "source_kind": "oa_attachment_invoice",
                 "derived_from_oa_id": "oa-retained",
                 "invoice_bank_relation": {"tone": "danger"},
@@ -37,7 +37,7 @@ class WorkbenchSelectedScopeRawOaPayloadBuilderTests(unittest.TestCase):
                 "id": "invoice-ignored",
                 "type": "invoice",
                 "_month": "2025-12",
-                "_section": "open",
+                "_section": "unpaired",
                 "source_kind": "manual",
                 "derived_from_oa_id": "oa-retained",
             },
@@ -52,15 +52,15 @@ class WorkbenchSelectedScopeRawOaPayloadBuilderTests(unittest.TestCase):
         payload = builder.build(months={"2026-03"}, supplemental_oa_row_ids=set())
 
         self.assertEqual([row["id"] for row in payload["paired"]["oa"]], ["oa-month"])
-        self.assertEqual([row["id"] for row in payload["open"]["oa"]], ["oa-retained"])
-        self.assertEqual([row["id"] for row in payload["open"]["invoice"]], ["invoice-retained"])
+        self.assertEqual([row["id"] for row in payload["unpaired"]["oa"]], ["oa-retained"])
+        self.assertEqual([row["id"] for row in payload["unpaired"]["invoice"]], ["invoice-retained"])
         self.assertEqual(payload["oa_status"], {"ready": True})
         self.assertEqual(payload["summary"]["oa_count"], 2)
         self.assertEqual(payload["summary"]["invoice_count"], 1)
         self.assertEqual(payload["summary"]["paired_count"], 1)
-        self.assertEqual(payload["summary"]["open_count"], 2)
+        self.assertEqual(payload["summary"]["unpaired_count"], 2)
         self.assertEqual(payload["summary"]["exception_count"], 2)
-        self.assertTrue(payload["open"]["oa"][0]["serialized"])
+        self.assertTrue(payload["unpaired"]["oa"][0]["serialized"])
 
     def test_build_includes_supplemental_retained_oa_rows(self) -> None:
         builder = WorkbenchSelectedScopeRawOaPayloadBuilder(
@@ -70,7 +70,7 @@ class WorkbenchSelectedScopeRawOaPayloadBuilderTests(unittest.TestCase):
                     "id": "oa-linked-bank",
                     "type": "oa",
                     "_month": "2025-11",
-                    "_section": "open",
+                    "_section": "unpaired",
                 },
             ],
             serialize_row=lambda row: row,
@@ -79,14 +79,14 @@ class WorkbenchSelectedScopeRawOaPayloadBuilderTests(unittest.TestCase):
 
         payload = builder.build(months={"2026-03"}, supplemental_oa_row_ids={"oa-linked-bank"})
 
-        self.assertEqual([row["id"] for row in payload["open"]["oa"]], ["oa-linked-bank"])
+        self.assertEqual([row["id"] for row in payload["unpaired"]["oa"]], ["oa-linked-bank"])
         self.assertEqual(payload["summary"]["oa_count"], 1)
 
     def test_build_uses_record_snapshot_once(self) -> None:
         calls: list[str] = []
         snapshots = [
-            {"id": "oa-1", "type": "oa", "_month": "2026-01", "_section": "open"},
-            {"id": "oa-2", "type": "oa", "_month": "2026-01", "_section": "open"},
+            {"id": "oa-1", "type": "oa", "_month": "2026-01", "_section": "unpaired"},
+            {"id": "oa-2", "type": "oa", "_month": "2026-01", "_section": "unpaired"},
         ]
 
         def record_snapshots() -> list[dict[str, object]]:
@@ -103,7 +103,7 @@ class WorkbenchSelectedScopeRawOaPayloadBuilderTests(unittest.TestCase):
         payload = builder.build(months={"2026-01"}, supplemental_oa_row_ids=set())
 
         self.assertEqual(calls, ["snapshots"])
-        self.assertEqual({row["id"] for row in payload["open"]["oa"]}, {"oa-1", "oa-2"})
+        self.assertEqual({row["id"] for row in payload["unpaired"]["oa"]}, {"oa-1", "oa-2"})
 
 
 if __name__ == "__main__":

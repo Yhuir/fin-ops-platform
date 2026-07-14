@@ -14,7 +14,6 @@ READ_MODEL_SOURCE_VERSION_FIELDS = (
     "exception_projection_version",
     "case_snapshot_version",
     "pair_relation_snapshot_version",
-    "candidate_snapshot_version",
     "turnover_relation_snapshot_version",
     "matching_rules_version",
     "bank_auto_tag_rules_version",
@@ -80,7 +79,6 @@ class WorkbenchReadModelService:
         exception_projection_version: str | None = None,
         case_snapshot_version: str | None = None,
         pair_relation_snapshot_version: str | None = None,
-        candidate_snapshot_version: str | None = None,
         matching_rules_version: str | None = None,
     ) -> dict[str, Any]:
         resolved_scope_key = str(scope_key).strip()
@@ -93,7 +91,6 @@ class WorkbenchReadModelService:
             exception_projection_version=exception_projection_version,
             case_snapshot_version=case_snapshot_version,
             pair_relation_snapshot_version=pair_relation_snapshot_version,
-            candidate_snapshot_version=candidate_snapshot_version,
             matching_rules_version=matching_rules_version,
         )
         resolved_payload = deepcopy(payload if isinstance(payload, dict) else {})
@@ -126,7 +123,6 @@ class WorkbenchReadModelService:
         exception_projection_version: str | None = None,
         case_snapshot_version: str | None = None,
         pair_relation_snapshot_version: str | None = None,
-        candidate_snapshot_version: str | None = None,
         matching_rules_version: str | None = None,
     ) -> dict[str, Any] | None:
         if not self.is_read_model_fresh(
@@ -136,7 +132,6 @@ class WorkbenchReadModelService:
             exception_projection_version=exception_projection_version,
             case_snapshot_version=case_snapshot_version,
             pair_relation_snapshot_version=pair_relation_snapshot_version,
-            candidate_snapshot_version=candidate_snapshot_version,
             matching_rules_version=matching_rules_version,
         ):
             return None
@@ -151,7 +146,6 @@ class WorkbenchReadModelService:
         exception_projection_version: str | None = None,
         case_snapshot_version: str | None = None,
         pair_relation_snapshot_version: str | None = None,
-        candidate_snapshot_version: str | None = None,
         matching_rules_version: str | None = None,
     ) -> bool:
         expected_versions = self._merge_source_versions(
@@ -160,7 +154,6 @@ class WorkbenchReadModelService:
             exception_projection_version=exception_projection_version,
             case_snapshot_version=case_snapshot_version,
             pair_relation_snapshot_version=pair_relation_snapshot_version,
-            candidate_snapshot_version=candidate_snapshot_version,
             matching_rules_version=matching_rules_version,
         )
         read_model = self.get_read_model(scope_key)
@@ -211,7 +204,7 @@ class WorkbenchReadModelService:
         normalized["ignored_rows"] = deepcopy(ignored_rows if isinstance(ignored_rows, list) else [])
         source_versions = read_model.get("source_versions")
         normalized_source_versions = (
-            deepcopy(source_versions)
+            cls._merge_source_versions(source_versions=source_versions)
             if isinstance(source_versions, dict)
             else cls._source_versions_from_payload(normalized["payload"])
         )
@@ -224,6 +217,8 @@ class WorkbenchReadModelService:
             normalized_value = str(value)
             normalized_source_versions[field_name] = normalized_value
             normalized[field_name] = normalized_value
+        normalized.pop("candidate_snapshot_version", None)
+        normalized["payload"].pop("candidate_snapshot_version", None)
         normalized["source_versions"] = normalized_source_versions
         return normalized
 
@@ -246,7 +241,6 @@ class WorkbenchReadModelService:
         exception_projection_version: str | None = None,
         case_snapshot_version: str | None = None,
         pair_relation_snapshot_version: str | None = None,
-        candidate_snapshot_version: str | None = None,
         turnover_relation_snapshot_version: str | None = None,
         matching_rules_version: str | None = None,
         bank_auto_tag_rules_version: str | int | None = None,
@@ -264,7 +258,6 @@ class WorkbenchReadModelService:
             "exception_projection_version": exception_projection_version,
             "case_snapshot_version": case_snapshot_version,
             "pair_relation_snapshot_version": pair_relation_snapshot_version,
-            "candidate_snapshot_version": candidate_snapshot_version,
             "turnover_relation_snapshot_version": turnover_relation_snapshot_version,
             "matching_rules_version": matching_rules_version,
             "bank_auto_tag_rules_version": bank_auto_tag_rules_version,

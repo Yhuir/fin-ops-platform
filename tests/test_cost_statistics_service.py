@@ -130,7 +130,7 @@ class CostStatisticsServiceTests(unittest.TestCase):
                         },
                     ]
                 },
-                "open": {"groups": []},
+                "unpaired": {"groups": []},
             }
         }
     def test_month_statistics_only_counts_outflow_rows_with_complete_oa_cost_fields(self) -> None:
@@ -209,7 +209,7 @@ class CostStatisticsServiceTests(unittest.TestCase):
                     }
                 ]
             },
-            "open": {"groups": []},
+            "unpaired": {"groups": []},
         }
         service = CostStatisticsService(
             import_service,
@@ -268,7 +268,7 @@ class CostStatisticsServiceTests(unittest.TestCase):
                         }
                     ]
                 },
-                "open": {"groups": []},
+                "unpaired": {"groups": []},
             }
         }
 
@@ -324,7 +324,7 @@ class CostStatisticsServiceTests(unittest.TestCase):
                         }
                     ]
                 },
-                "open": {"groups": []},
+                "unpaired": {"groups": []},
             }
         }
         service = CostStatisticsService(
@@ -359,7 +359,7 @@ class CostStatisticsServiceTests(unittest.TestCase):
                         )
                     ]
                 },
-                "open": {"groups": []},
+                "unpaired": {"groups": []},
             }
         }
         service = CostStatisticsService(
@@ -394,7 +394,7 @@ class CostStatisticsServiceTests(unittest.TestCase):
                         )
                     ]
                 },
-                "open": {"groups": []},
+                "unpaired": {"groups": []},
             }
         }
         service = CostStatisticsService(
@@ -433,7 +433,7 @@ class CostStatisticsServiceTests(unittest.TestCase):
                         )
                     ]
                 },
-                "open": {"groups": []},
+                "unpaired": {"groups": []},
             }
         }
         service = CostStatisticsService(
@@ -478,7 +478,7 @@ class CostStatisticsServiceTests(unittest.TestCase):
                         ),
                     ]
                 },
-                "open": {"groups": []},
+                "unpaired": {"groups": []},
             }
         }
         service = CostStatisticsService(
@@ -507,7 +507,7 @@ class CostStatisticsServiceTests(unittest.TestCase):
                 "month": "2026-03",
                 "summary": {},
                 "paired": {"groups": []},
-                "open": {
+                "unpaired": {
                     "groups": [
                         {
                             "group_id": "group-open-linked-cost",

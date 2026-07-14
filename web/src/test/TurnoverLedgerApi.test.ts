@@ -955,7 +955,9 @@ describe("turnover ledger API", () => {
             return null;
           },
         },
-        blob: async () => new Blob(["xlsx-bytes"]),
+        blob: async () => new Blob(["xlsx-bytes"], {
+          type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        }),
         text: async () => {
           throw new Error("download response should not be parsed as text");
         },
@@ -980,8 +982,8 @@ describe("turnover ledger API", () => {
 
     const downloaded = await downloadTurnoverLedgerExport({ family: "business" });
     expect(downloaded.fileName).toBe("turnover.xlsx");
-    expect(downloaded.blob).toBeInstanceOf(Blob);
     expect(downloaded.blob.size).toBeGreaterThan(0);
+    expect(downloaded.blob.type).toBe("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     expect(exportJsonSpy).not.toHaveBeenCalled();
   });
 

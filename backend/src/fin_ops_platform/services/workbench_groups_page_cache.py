@@ -6,7 +6,7 @@ import os
 from typing import Any
 
 
-WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION = "2026-07-14-formalized-decision-origin-visibility"
+WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION = "2026-07-14-formal-relation-partition-v1"
 
 
 def normalize_workbench_group_search_mode(value: str | None) -> str:
@@ -117,7 +117,7 @@ class WorkbenchGroupsPageCacheWarmer:
         redis_helper: object | None,
         schema_version: str = WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION,
         ttl_seconds: int = 600,
-        zones: tuple[str, ...] = ("paired", "open"),
+        zones: tuple[str, ...] = ("paired", "unpaired"),
         page_size: int = 200,
     ) -> None:
         self._repository = repository

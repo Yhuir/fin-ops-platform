@@ -9,6 +9,7 @@ import {
   deleteEtcBusinessBatch,
   deleteEtcReconciliationTask,
   deleteEtcReconciliationTaskImportedInvoices,
+  downloadEtcBusinessBatchInvoicePdf,
   fetchEtcBusinessBatchDetail,
   fetchEtcBusinessBatches,
   fetchEtcReconciliationTask,
@@ -40,6 +41,46 @@ afterEach(() => {
 });
 
 describe("etc api", () => {
+  test("downloads a merged ETC invoice PDF with the server filename", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      new Blob(["merged-pdf"], { type: "application/pdf" }),
+      {
+        status: 200,
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": "attachment; filename=\"ETC_68.pdf\"; filename*=UTF-8''ETC%E5%8F%91%E7%A5%A8_68%E5%BC%A0.pdf",
+        },
+      },
+    ));
+    global.fetch = fetchMock as typeof fetch;
+
+    const result = await downloadEtcBusinessBatchInvoicePdf("etc_business_batch_0001");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/etc/business-batches/etc_business_batch_0001/invoice-pdf",
+      expect.objectContaining({ method: "GET", credentials: "include" }),
+    );
+    expect(result.fileName).toBe("ETC发票_68张.pdf");
+    expect(result.blob.type).toBe("application/pdf");
+  });
+
+  test("surfaces the structured ETC invoice PDF download error", async () => {
+    global.fetch = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({
+        error: {
+          code: "invoice_pdf_page_count_invalid",
+          message: "ETC 发票 001 的 PDF 必须恰好为 1 页。",
+        },
+      }),
+      { status: 422, headers: { "Content-Type": "application/json" } },
+    )) as typeof fetch;
+
+    await expect(downloadEtcBusinessBatchInvoicePdf("etc_business_batch_0001")).rejects.toMatchObject({
+      code: "invoice_pdf_page_count_invalid",
+      message: "ETC 发票 001 的 PDF 必须恰好为 1 页。",
+    });
+  });
+
   test("maps ETC business batches from envelope and legacy fields", async () => {
     const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;

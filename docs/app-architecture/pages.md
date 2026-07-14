@@ -27,7 +27,7 @@
 | 待找发票 | `web/src/pages/PendingInvoicesPage.tsx` | pending invoice routes/query service | 支出/收入流水、进项发票、规则建议、选择已有发票关系、收入状态覆盖 | 进项导入、选择已有发票确认/撤回、收入状态覆盖、规则变更 |
 | OA 待付款核对 | `web/src/pages/OaPendingPaymentsPage.tsx` | OA pending payments routes/query/command service | completed: 普通 OA completed projection；in-progress: OA MySQL `t_payment_simple.flow_id` 准入 + payment-admitted OA projection；OA 待付款 workflow status、付款流水、进项发票、Workbench relation、SQL read model | OA 导入/同步、银行流水导入、发票关系变化、Workbench relation 确认/撤回、进行中 OA 确认已支付 |
 | 税金抵扣 / 发票使用 | tax offset / invoice usage pages | invoice usage/read model routes | 已认证发票、使用状态、销项收款、ETC 发票 | 发票导入、认证状态、收款关系、backfill/refresh |
-| ETC 业务批次 | ETC pages/components | ETC business batch routes/service | ETC 票据、人工业务批次、导入草稿、OA 提交确认 | ETC 导入、OA 草稿创建、人工提交确认 |
+| ETC 业务批次 | ETC pages/components | ETC business batch routes/service、invoice PDF bundle service | ETC 票据、人工业务批次、导入草稿、OA 提交确认、草稿后批次发票合并下载 | ETC 导入、OA 草稿创建、人工提交确认、对象存储 PDF 读取与只读下载审计 |
 | 成本统计 | cost statistics page | cost routes/query service | 项目、费用、发票、核销关系 | 项目范围变化、发票/流水关系变化 |
 | 设置 / 账户 / 项目 | settings pages | settings/account/project routes | 用户、角色、项目状态、规则配置 | 配置保存、权限变化、数据重置 |
 | App Health | shell/status components | app health routes、runtime queue、worker registry | queue、read model freshness、worker 状态、cache 状态 | worker heartbeat、refresh job、后台任务 |
@@ -81,9 +81,9 @@ domain registry 是页面域入口；`AppStatusReadModelRegistry` 是 read model
 | 写入动作 | 事件影响 | 典型受影响页面 |
 | --- | --- | --- |
 | 银行流水导入确认 | 新流水、标签和统计需要刷新 | 银行明细、关联台、往来款、成本统计、App Health |
-| OA/发票/ETC 导入确认 | 外部单据、自动匹配 decision 和正式关系相关 read model 变化 | 关联台、待找发票、OA 待付款、税金抵扣、ETC 批次 |
+| OA/发票/ETC 导入确认 | 外部单据进入 canonical facts；确定性匹配若唯一安全则直接创建正式关系，并刷新相关 read model | 关联台、待找发票、OA 待付款、税金抵扣、ETC 批次 |
 | 关系确认 / 撤回 | 对象关系、流水状态、发票使用状态变化 | 关联台、银行明细、待找发票、税金抵扣、往来款 |
-| 外部往来手动闭环 | 同一往来组多笔银行流水形成 Turnover 手动闭环和 Workbench pair relation；既有 OA-bank relation 可合并进同一 `turnover_manual_closure` active case；确认后外部往来台账显示“收支闭环”，关联台保留同一个 canonical case/evidence。展示分区由 relation metadata 的 OA/发票 requirement 决定，未满足 paired 条件时留在待处理 open 区，满足后进入 paired | 往来款、关联台、成本统计、搜索 |
+| 外部往来手动闭环 | 同一往来组多笔银行流水形成 Turnover 手动闭环和 Workbench active relation；既有正式关系可原子扩展进同一 `turnover_manual_closure` case。关联台所有 active relation 都显示为 paired，未被 active relation 占用的事实各自显示为 unpaired singleton | 往来款、关联台、成本统计、搜索 |
 | 标签/规则配置保存 | 标签判定和候选建议变化 | 银行明细、关联台、待找发票、成本统计 |
 | 数据重置 / backfill | read model 状态和缓存失效 | 所有列表页、App Health |
 

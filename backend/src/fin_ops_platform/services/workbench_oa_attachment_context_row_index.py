@@ -21,7 +21,7 @@ class WorkbenchOaAttachmentContextRowIndex:
 
     def raw_payload_rows_by_id(self, payload: dict[str, object]) -> dict[str, dict[str, object]]:
         rows_by_id: dict[str, dict[str, object]] = {}
-        for section_name in ("paired", "open"):
+        for section_name in ("paired", "unpaired"):
             section_payload = payload.get(section_name)
             if not isinstance(section_payload, dict):
                 continue
@@ -42,6 +42,24 @@ class WorkbenchOaAttachmentContextRowIndex:
                     if isinstance(row, dict) and str(row.get("id", "")).strip():
                         row_ids.add(str(row.get("id", "")).strip())
         return row_ids
+
+    def grouped_payload_rows_by_id(self, payload: dict[str, object]) -> dict[str, dict[str, object]]:
+        rows_by_id: dict[str, dict[str, object]] = {}
+        for section_name in ("paired", "unpaired"):
+            section_payload = payload.get(section_name)
+            if not isinstance(section_payload, dict):
+                continue
+            for group in list(section_payload.get("groups") or []):
+                if not isinstance(group, dict):
+                    continue
+                for pane in ("oa_rows", "bank_rows", "invoice_rows"):
+                    for row in list(group.get(pane) or []):
+                        if not isinstance(row, dict):
+                            continue
+                        row_id = str(row.get("id") or "").strip()
+                        if row_id:
+                            rows_by_id[row_id] = row
+        return rows_by_id
 
     def attachment_row_ids_by_oa_id(
         self,
@@ -96,7 +114,7 @@ class WorkbenchOaAttachmentContextRowIndex:
     @staticmethod
     def _raw_payload_sections(payload: dict[str, object]) -> list[dict[str, object]]:
         sections: list[dict[str, object]] = []
-        for section_name in ("paired", "open"):
+        for section_name in ("paired", "unpaired"):
             section_payload = payload.get(section_name)
             if isinstance(section_payload, dict):
                 sections.append(section_payload)

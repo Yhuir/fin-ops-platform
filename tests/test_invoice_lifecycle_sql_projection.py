@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-
-import pytest
+import unittest
 
 from fin_ops_platform.services.invoice_lifecycle_sql_projection import InvoiceLifecycleSqlProjectionBuilder
 
@@ -99,135 +98,156 @@ class FreshInvoiceLifecycleReadModelRepository:
         raise AssertionError("unchanged invoice lifecycle scope must not be rewritten")
 
 
-def test_invoice_lifecycle_reuses_fresh_input_usage_read_model_rows() -> None:
-    read_repository = FreshInvoiceUsageReadRepository()
-    builder = InvoiceLifecycleSqlProjectionBuilder(
-        connection=SimpleNamespace(),
-        read_model_repository=read_repository,
-        workbench_relation_read_facade=SimpleNamespace(last_source_versions={}),
-    )
+class InvoiceLifecycleSqlProjectionTests(unittest.TestCase):
+    def test_invoice_lifecycle_reuses_fresh_input_usage_read_model_rows(self) -> None:
+        read_repository = FreshInvoiceUsageReadRepository()
+        builder = InvoiceLifecycleSqlProjectionBuilder(
+            connection=SimpleNamespace(),
+            read_model_repository=read_repository,
+            workbench_relation_read_facade=SimpleNamespace(last_source_versions={}),
+        )
 
-    rows = builder._input_invoice_lifecycle_rows("2026-05")
+        rows = builder._input_invoice_lifecycle_rows("2026-05")
 
-    assert read_repository.calls == [
-        {
-            "month": "2026-05",
-            "page": 1,
-            "page_size": 200,
-            "sort_field": "invoice_date",
-            "sort_direction": "desc",
+        self.assertEqual(
+            read_repository.calls,
+            [
+                {
+                    "month": "2026-05",
+                    "page": 1,
+                    "page_size": 200,
+                    "sort_field": "invoice_date",
+                    "sort_direction": "desc",
+                }
+            ],
+        )
+        self.assertEqual(
+            rows,
+            [
+                {
+                    "subject_id": "input-invoice-1",
+                    "subject_type": "input_invoice",
+                    "scope_key": "2026-05",
+                    "scope_month": "2026-05",
+                    "invoice_identity_key": "identity-1",
+                    "lifecycle_status": "paid",
+                    "acquisition_status": {},
+                    "payment_status": {"code": "paid", "label": "已支付"},
+                    "collection_status": {},
+                    "certification_status": {},
+                }
+            ],
+        )
+        self.assertEqual(
+            builder._read_model_dependency_source_versions,
+            {
+                "input_invoice_usage_read_model_source_versions": {
+                    "workbench_relation_source_versions": {"2026-05": 7}
+                }
+            },
+        )
+
+    def test_invoice_lifecycle_sql_projection_skips_unchanged_scope_without_rebuild(self) -> None:
+        connection = InvoiceLifecycleSkipConnection()
+        read_repository = InvoiceLifecycleSkipReadRepository()
+        invoice_repository = FreshInvoiceLifecycleReadModelRepository()
+        builder = InvoiceLifecycleSqlProjectionBuilder(
+            connection=connection,
+            read_model_repository=read_repository,
+            workbench_relation_read_facade=SimpleNamespace(last_source_versions={}),
+            invoice_lifecycle_read_model_repository=invoice_repository,
+        )
+        builder._read_model_dependency_source_versions = builder._dependency_source_versions_for_scope("2026-05")
+        invoice_repository.source_versions = builder._source_versions()
+        read_repository.relation_calls = []
+
+        result = builder.rebuild_invoice_lifecycle_read_model_scope("2026-05")
+
+        self.assertEqual(result["scope_key"], "2026-05")
+        self.assertEqual(result["row_count"], 1)
+        self.assertIs(result["skipped"], True)
+        self.assertEqual(result["skip_reason"], "source_versions_unchanged")
+        self.assertEqual(invoice_repository.summary_months, ["2026-05"])
+        self.assertEqual(invoice_repository.listed_months, [])
+        self.assertEqual(read_repository.relation_calls, ["2026-05"])
+        self.assertFalse(connection.fetch_all_calls)
+        self.assertEqual(
+            result["source_versions"]["workbench_relation_source_versions"],
+            {
+                "scope_key": "2026-05",
+                "source_signature": "relation-v1",
+            },
+        )
+        self.assertEqual(
+            result["source_versions"]["pending_invoice_read_model_source_versions"],
+            {
+                "expense:all:2026-05": {"pending_invoice": "expense-v1"},
+                "income:all:2026-05": {"pending_invoice": "income-v1"},
+            },
+        )
+
+    def test_invoice_lifecycle_dependency_versions_ignore_runtime_source_version_only(self) -> None:
+        connection = InvoiceLifecycleSkipConnection()
+        connection.pending_versions = {
+            "expense:all:2026-05": {
+                "pending_invoice": "expense-v1",
+                "bank_detail_source_versions": {
+                    "source_version": 1,
+                    "bank_detail_source_signature": "bank-same",
+                },
+            },
+            "income:all:2026-05": {
+                "pending_invoice": "income-v1",
+                "bank_detail_source_versions": {
+                    "source_version": 2,
+                    "bank_detail_source_signature": "bank-same",
+                },
+            },
         }
-    ]
-    assert rows == [
-        {
-            "subject_id": "input-invoice-1",
-            "subject_type": "input_invoice",
-            "scope_key": "2026-05",
-            "scope_month": "2026-05",
-            "invoice_identity_key": "identity-1",
-            "lifecycle_status": "paid",
-            "acquisition_status": {},
-            "payment_status": {"code": "paid", "label": "已支付"},
-            "collection_status": {},
-            "certification_status": {},
-        }
-    ]
-    assert builder._read_model_dependency_source_versions == {
-        "input_invoice_usage_read_model_source_versions": {"workbench_relation_source_versions": {"2026-05": 7}}
-    }
+        connection.input_versions = {"source_version": 3, "input_signature": "input-same"}
+        connection.output_versions = {"source_version": 4, "output_signature": "output-same"}
+        connection.oa_versions = {"source_version": 5, "oa_signature": "oa-same"}
+        read_repository = InvoiceLifecycleSkipReadRepository()
+        invoice_repository = FreshInvoiceLifecycleReadModelRepository()
+        builder = InvoiceLifecycleSqlProjectionBuilder(
+            connection=connection,
+            read_model_repository=read_repository,
+            workbench_relation_read_facade=SimpleNamespace(last_source_versions={}),
+            invoice_lifecycle_read_model_repository=invoice_repository,
+        )
+        builder._read_model_dependency_source_versions = builder._dependency_source_versions_for_scope("2026-05")
+        invoice_repository.source_versions = builder._source_versions()
+        self.assertFalse(_has_exact_source_version_key(invoice_repository.source_versions))
 
+        connection.pending_versions["expense:all:2026-05"]["bank_detail_source_versions"]["source_version"] = 101  # type: ignore[index]
+        connection.pending_versions["income:all:2026-05"]["bank_detail_source_versions"]["source_version"] = 102  # type: ignore[index]
+        connection.input_versions["source_version"] = 103
+        connection.output_versions["source_version"] = 104
+        connection.oa_versions["source_version"] = 105
+        read_repository.relation_source_version = 106
+        connection.fetch_all_calls = []
 
-def test_invoice_lifecycle_sql_projection_skips_unchanged_scope_without_rebuild() -> None:
-    connection = InvoiceLifecycleSkipConnection()
-    read_repository = InvoiceLifecycleSkipReadRepository()
-    invoice_repository = FreshInvoiceLifecycleReadModelRepository()
-    builder = InvoiceLifecycleSqlProjectionBuilder(
-        connection=connection,
-        read_model_repository=read_repository,
-        workbench_relation_read_facade=SimpleNamespace(last_source_versions={}),
-        invoice_lifecycle_read_model_repository=invoice_repository,
-    )
-    builder._read_model_dependency_source_versions = builder._dependency_source_versions_for_scope("2026-05")
-    invoice_repository.source_versions = builder._source_versions()
-    read_repository.relation_calls = []
+        result = builder.rebuild_invoice_lifecycle_read_model_scope("2026-05")
 
-    result = builder.rebuild_invoice_lifecycle_read_model_scope("2026-05")
+        self.assertIs(result["skipped"], True)
+        self.assertEqual(result["skip_reason"], "source_versions_unchanged")
+        self.assertFalse(_has_exact_source_version_key(result["source_versions"]))
+        self.assertFalse(connection.fetch_all_calls)
 
-    assert result["scope_key"] == "2026-05"
-    assert result["row_count"] == 1
-    assert result["skipped"] is True
-    assert result["skip_reason"] == "source_versions_unchanged"
-    assert invoice_repository.summary_months == ["2026-05"]
-    assert invoice_repository.listed_months == []
-    assert read_repository.relation_calls == ["2026-05"]
-    assert not connection.fetch_all_calls
-    assert result["source_versions"]["workbench_relation_source_versions"] == {
-        "scope_key": "2026-05",
-        "source_signature": "relation-v1",
-    }
-    assert result["source_versions"]["pending_invoice_read_model_source_versions"] == {
-        "expense:all:2026-05": {"pending_invoice": "expense-v1"},
-        "income:all:2026-05": {"pending_invoice": "income-v1"},
-    }
+    def test_invoice_lifecycle_defers_when_dependency_scope_is_dirty(self) -> None:
+        connection = InvoiceLifecycleSkipConnection()
+        connection.active_dirty_scopes.add(("input_invoice_usage", "2026-05"))
+        builder = InvoiceLifecycleSqlProjectionBuilder(
+            connection=connection,
+            read_model_repository=InvoiceLifecycleSkipReadRepository(),
+            workbench_relation_read_facade=SimpleNamespace(last_source_versions={}),
+            invoice_lifecycle_read_model_repository=FreshInvoiceLifecycleReadModelRepository(),
+        )
 
+        with self.assertRaisesRegex(RuntimeError, "input_invoice_usage_read_model_not_fresh"):
+            builder.rebuild_invoice_lifecycle_read_model_scope("2026-05")
 
-def test_invoice_lifecycle_dependency_versions_ignore_runtime_source_version_only() -> None:
-    connection = InvoiceLifecycleSkipConnection()
-    connection.pending_versions = {
-        "expense:all:2026-05": {
-            "pending_invoice": "expense-v1",
-            "bank_detail_source_versions": {"source_version": 1, "bank_detail_source_signature": "bank-same"},
-        },
-        "income:all:2026-05": {
-            "pending_invoice": "income-v1",
-            "bank_detail_source_versions": {"source_version": 2, "bank_detail_source_signature": "bank-same"},
-        },
-    }
-    connection.input_versions = {"source_version": 3, "input_signature": "input-same"}
-    connection.output_versions = {"source_version": 4, "output_signature": "output-same"}
-    connection.oa_versions = {"source_version": 5, "oa_signature": "oa-same"}
-    read_repository = InvoiceLifecycleSkipReadRepository()
-    invoice_repository = FreshInvoiceLifecycleReadModelRepository()
-    builder = InvoiceLifecycleSqlProjectionBuilder(
-        connection=connection,
-        read_model_repository=read_repository,
-        workbench_relation_read_facade=SimpleNamespace(last_source_versions={}),
-        invoice_lifecycle_read_model_repository=invoice_repository,
-    )
-    builder._read_model_dependency_source_versions = builder._dependency_source_versions_for_scope("2026-05")
-    invoice_repository.source_versions = builder._source_versions()
-    assert not _has_exact_source_version_key(invoice_repository.source_versions)
-
-    connection.pending_versions["expense:all:2026-05"]["bank_detail_source_versions"]["source_version"] = 101  # type: ignore[index]
-    connection.pending_versions["income:all:2026-05"]["bank_detail_source_versions"]["source_version"] = 102  # type: ignore[index]
-    connection.input_versions["source_version"] = 103
-    connection.output_versions["source_version"] = 104
-    connection.oa_versions["source_version"] = 105
-    read_repository.relation_source_version = 106
-    connection.fetch_all_calls = []
-
-    result = builder.rebuild_invoice_lifecycle_read_model_scope("2026-05")
-
-    assert result["skipped"] is True
-    assert result["skip_reason"] == "source_versions_unchanged"
-    assert not _has_exact_source_version_key(result["source_versions"])
-    assert not connection.fetch_all_calls
-
-
-def test_invoice_lifecycle_defers_when_dependency_scope_is_dirty() -> None:
-    connection = InvoiceLifecycleSkipConnection()
-    connection.active_dirty_scopes.add(("input_invoice_usage", "2026-05"))
-    builder = InvoiceLifecycleSqlProjectionBuilder(
-        connection=connection,
-        read_model_repository=InvoiceLifecycleSkipReadRepository(),
-        workbench_relation_read_facade=SimpleNamespace(last_source_versions={}),
-        invoice_lifecycle_read_model_repository=FreshInvoiceLifecycleReadModelRepository(),
-    )
-
-    with pytest.raises(RuntimeError, match="input_invoice_usage_read_model_not_fresh"):
-        builder.rebuild_invoice_lifecycle_read_model_scope("2026-05")
-
-    assert not connection.fetch_all_calls
+        self.assertFalse(connection.fetch_all_calls)
 
 
 def _has_exact_source_version_key(value: object) -> bool:

@@ -82,8 +82,8 @@ def collect_evidence(
             )
         ),
         "worker_heartbeat": _safe_section(lambda: _worker_heartbeat(connection, limit=normalized_limit)),
-        "candidate_decision_counts": _safe_section(
-            lambda: _candidate_decision_counts(
+        "formal_relation_counts": _safe_section(
+            lambda: _formal_relation_counts(
                 connection,
                 tenant_id=tenant_id,
                 window_hours=normalized_window_hours,
@@ -112,7 +112,7 @@ def collect_evidence(
     missing_fields = _missing_evidence_fields(sections)
     status = "available" if not missing_fields and available_count == len(sections) else "partial"
     return {
-        "version": 1,
+        "version": 2,
         "tool": "workbench_compute_evidence",
         "status": status,
         "mode": "read_only",
@@ -229,43 +229,25 @@ def _worker_heartbeat(connection: Any, *, limit: int) -> dict[str, Any]:
     }
 
 
-def _candidate_decision_counts(connection: Any, *, tenant_id: str, window_hours: int) -> dict[str, Any]:
-    candidate_rows = connection.fetch_all(
+def _formal_relation_counts(connection: Any, *, tenant_id: str, window_hours: int) -> dict[str, Any]:
+    relation_rows = connection.fetch_all(
         """
         select
-          coalesce(to_char(scope_month, 'YYYY-MM'), 'unknown') as scope_month,
-          count(*)::bigint as candidate_count,
-          count(*) filter (where status = 'auto_closed')::bigint as auto_closed_count,
-          count(*) filter (where status = 'conflict')::bigint as conflict_count
-        from read_model.workbench_candidate_matches
-        where tenant_id = %s
-          and updated_at >= now() - (%s::text || ' hours')::interval
-        group by coalesce(to_char(scope_month, 'YYYY-MM'), 'unknown')
-        order by candidate_count desc, scope_month
+          coalesce(to_char(month_scope, 'YYYY-MM'), 'unknown') as scope_month,
+          count(*)::bigint as relation_count,
+          count(*) filter (where status = 'active')::bigint as active_count,
+          count(*) filter (where status <> 'active')::bigint as inactive_count,
+          sum(cardinality(row_ids))::bigint as member_count
+        from app.workbench_pair_relations
+        where updated_at >= now() - (%s::text || ' hours')::interval
+        group by coalesce(to_char(month_scope, 'YYYY-MM'), 'unknown')
+        order by relation_count desc, scope_month
         """,
-        (tenant_id, window_hours),
-    )
-    decision_rows = connection.fetch_all(
-        """
-        select
-          to_char(scope_month, 'YYYY-MM') as scope_month,
-          count(*)::bigint as decision_count,
-          count(*) filter (where decision_status = 'paired')::bigint as paired_count,
-          count(*) filter (where decision_status = 'open')::bigint as open_count,
-          count(*) filter (where decision_status = 'expired')::bigint as expired_count,
-          count(*) filter (where decision_status = 'suppressed')::bigint as suppressed_count,
-          count(*) filter (where decision_status = 'consumed')::bigint as consumed_count
-        from read_model.workbench_reconciliation_decisions
-        where tenant_id = %s
-          and updated_at >= now() - (%s::text || ' hours')::interval
-        group by scope_month
-        order by decision_count desc, scope_month
-        """,
-        (tenant_id, window_hours),
+        (window_hours,),
     )
     return {
-        "candidate_counts_by_scope": [_normalize_row(row) for row in candidate_rows],
-        "decision_counts_by_scope": [_normalize_row(row) for row in decision_rows],
+        "relations_by_scope": [_normalize_row(row) for row in relation_rows],
+        "tenant_id": tenant_id,
     }
 
 
@@ -317,7 +299,7 @@ def _workbench_refresh_after_matching(connection: Any, *, tenant_id: str, window
           and event_type = 'workbench.read_model.refresh'
           and updated_at >= now() - (%s::text || ' hours')::interval
           and (
-            raw_payload->>'reason' in ('candidate_match_changed', 'dirty_scope_retry', 'workbench_matching_changed')
+            raw_payload->>'reason' in ('dirty_scope_retry', 'workbench_matching_changed', 'formal_relation_changed')
             or raw_payload->'metadata'->>'source' = 'workbench_matching'
             or raw_payload::text like '%%workbench_matching%%'
           )
@@ -367,8 +349,6 @@ def _pg_stat_workbench_queries(connection: Any, *, limit: int) -> list[dict[str,
             (
                 [
                     "%workbench_matching_dirty_scopes%",
-                    "%workbench_reconciliation_decisions%",
-                    "%workbench_candidate_matches%",
                     "%workbench_rows%",
                     "%workbench_generations%",
                     "%workbench_pair_relations%",
@@ -397,11 +377,11 @@ def _explain_probes(connection: Any) -> list[dict[str, Any]]:
               and gen.status = 'active'
             group by gen.scope_key
         """,
-        "workbench_decision_counts": """
-            select scope_month, decision_status, count(*)::bigint
-            from read_model.workbench_reconciliation_decisions
-            where tenant_id = 'default'
-            group by scope_month, decision_status
+        "active_formal_relation_counts": """
+            select month_scope, count(*)::bigint
+            from app.workbench_pair_relations
+            where status = 'active'
+            group by month_scope
         """,
     }
     rows: list[dict[str, Any]] = []
@@ -424,7 +404,7 @@ def _missing_evidence_fields(sections: dict[str, dict[str, Any]]) -> list[str]:
         "matching_scope_durations": "worker p95/p99 duration by scope",
         "matching_scope_samples": "claimed/processed/failed/stale-completed scope samples",
         "worker_heartbeat": "workbench-matching heartbeat",
-        "candidate_decision_counts": "candidate/decision count evidence",
+        "formal_relation_counts": "formal relation count evidence",
         "active_generation_row_counts": "OA/bank/invoice/active relation row counts",
         "workbench_refresh_after_matching": "Workbench enqueue-to-fresh after matching",
         "query_timing_evidence": "query timing evidence",
@@ -449,10 +429,10 @@ def _section_has_required_evidence(key: str, data: Any) -> bool:
     if key == "worker_heartbeat":
         metrics = data.get("required_metrics") if isinstance(data, dict) else {}
         return bool(metrics.get("heartbeat_lag_seconds") is not None and metrics.get("worker_status"))
-    if key == "candidate_decision_counts":
+    if key == "formal_relation_counts":
         if not isinstance(data, dict):
             return False
-        return bool(data.get("candidate_counts_by_scope") or data.get("decision_counts_by_scope"))
+        return bool(data.get("relations_by_scope"))
     if key == "query_timing_evidence":
         metrics = data.get("required_metrics") if isinstance(data, dict) else {}
         return bool(metrics.get("query_timing_available"))

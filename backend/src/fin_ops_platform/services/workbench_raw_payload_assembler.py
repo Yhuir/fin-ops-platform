@@ -10,7 +10,6 @@ class WorkbenchRawPayloadAssembler:
         self,
         *,
         has_live_rows_for_month: Callable[[str], bool],
-        sync_live_auto_pair_relations: Callable[[], None],
         build_live_workbench_row_payload: Callable[[str], dict[str, object]],
         build_oa_workbench_row_payload: Callable[[str], dict[str, object]],
         sync_oa_invoice_offset_auto_pair_relations: Callable[[dict[str, object]], None],
@@ -19,7 +18,6 @@ class WorkbenchRawPayloadAssembler:
         apply_overrides_to_payload: Callable[[dict[str, object]], dict[str, object]],
     ) -> None:
         self._has_live_rows_for_month = has_live_rows_for_month
-        self._sync_live_auto_pair_relations = sync_live_auto_pair_relations
         self._build_live_workbench_row_payload = build_live_workbench_row_payload
         self._build_oa_workbench_row_payload = build_oa_workbench_row_payload
         self._sync_oa_invoice_offset_auto_pair_relations = sync_oa_invoice_offset_auto_pair_relations
@@ -34,7 +32,6 @@ class WorkbenchRawPayloadAssembler:
         supplement_missing_pair_relation_rows: bool = True,
     ) -> dict[str, object]:
         if self._has_live_rows_for_month(month):
-            self._sync_live_auto_pair_relations()
             payload = self._build_live_workbench_row_payload(month)
         else:
             payload = self._build_oa_workbench_row_payload(month)

@@ -13,7 +13,6 @@ from fin_ops_platform.services.postgres_state_store import PostgresStateStore
 from fin_ops_platform.services.state_store_diff import diff_state_snapshots
 from fin_ops_platform.services.state_store_factory import build_state_store
 from fin_ops_platform.services.etc_service import EtcBatch
-from fin_ops_platform.services.workbench_candidate_match_service import CANDIDATE_MATCH_SCHEMA_VERSION
 
 
 def unwrap_jsonb(value):
@@ -187,40 +186,13 @@ class EtcFormalAndFallbackConnection(FakePostgresConnection):
         return []
 
 
-class CandidateFormalAndFallbackConnection(FakePostgresConnection):
-    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
-        if "from read_model.workbench_candidate_matches" in sql:
-            return [
-                {
-                    "key": "candidate-stale",
-                    "payload": {"candidate_key": "candidate-stale", "scope_month": "2026-05"},
-                }
-            ]
-        return []
-
-
-class CandidateFormalWithCompletedScopeRunsConnection(CandidateFormalAndFallbackConnection):
-    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
-        if "from job.workbench_matching_dirty_scopes" in sql:
-            return [
-                {
-                    "scope_month": "2026-05",
-                    "source_versions": {"source_version": 7},
-                    "generated_at": "2026-06-13 01:20:00+08",
-                    "request_id": "worker:2026-05",
-                    "reason": "write_event",
-                }
-            ]
-        return super().fetch_all(sql, params)
-
-
 class WorkbenchReadModelFormalAndFallbackConnection(FakePostgresConnection):
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
         if "from read_model.workbench_snapshots" in sql:
             return [
                 {
                     "key": "2026-05",
-                    "payload": {"scope_key": "2026-05", "payload": {"open": {"groups": []}}},
+                    "payload": {"scope_key": "2026-05", "payload": {"unpaired": {"groups": []}}},
                 }
             ]
         return []
@@ -642,23 +614,6 @@ class PostgresStateStoreTests(unittest.TestCase):
 
         self.assertNotIn("state:matching", connection.settings)
 
-    def test_postgres_workbench_matching_dirty_scopes_do_not_use_runtime_snapshot(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            connection = FakePostgresConnection()
-            connection.settings["state:workbench_matching_dirty_scopes"] = {
-                "dirty_scopes": {"2026-05": {"scope_month": "2026-05"}}
-            }
-            store = PostgresStateStore(data_dir=Path(temp_dir), connection=connection)
-
-            snapshot = store.load()
-            store.save_workbench_matching_dirty_scopes({"dirty_scopes": {"2026-06": {"scope_month": "2026-06"}}})
-
-        self.assertEqual(snapshot["workbench_matching_dirty_scopes"], {})
-        self.assertEqual(
-            connection.settings["state:workbench_matching_dirty_scopes"],
-            {"dirty_scopes": {"2026-05": {"scope_month": "2026-05"}}},
-        )
-
     def test_etc_repository_ignores_legacy_current_state_aggregate_rows(self) -> None:
         snapshot = PostgresOpsTaxEtcRepository(EtcReadConnection()).load_etc_state()
 
@@ -743,64 +698,8 @@ class PostgresStateStoreTests(unittest.TestCase):
         self.assertNotIn("legacy", connection.historical_etc_repair_states)
         self.assertEqual(connection.settings["state:historical_etc_repair_bundles"], {"legacy": {"bundle_id": "legacy"}})
 
-    def test_postgres_candidate_matches_ignore_runtime_snapshot_fallback(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            connection = CandidateFormalAndFallbackConnection()
-            connection.settings["state:workbench_candidate_matches"] = {
-                "schema_version": "workbench_candidate_matches.v1",
-                "scope_runs": {"2026-05": {"status": "processed"}},
-                "candidates": {"candidate-current": {"candidate_key": "candidate-current", "scope_month": "2026-05"}},
-            }
-            store = PostgresStateStore(data_dir=Path(temp_dir), connection=connection)
 
-            snapshot = store.load_workbench_candidate_matches()
 
-        self.assertNotIn("schema_version", snapshot)
-        self.assertNotIn("scope_runs", snapshot)
-        self.assertEqual(list(snapshot["candidates"]), ["candidate-stale"])
-
-    def test_postgres_candidate_matches_restore_completed_scope_runs(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            store = PostgresStateStore(
-                data_dir=Path(temp_dir),
-                connection=CandidateFormalWithCompletedScopeRunsConnection(),
-            )
-
-            snapshot = store.load_workbench_candidate_matches()
-
-        self.assertEqual(snapshot["schema_version"], CANDIDATE_MATCH_SCHEMA_VERSION)
-        self.assertEqual(list(snapshot["candidates"]), ["candidate-stale"])
-        self.assertEqual(
-            snapshot["scope_runs"]["2026-05"],
-            {
-                "schema_version": CANDIDATE_MATCH_SCHEMA_VERSION,
-                "source_versions": {"source_version": 7},
-                "candidate_count": 0,
-                "generated_at": "2026-06-13 01:20:00+08",
-                "request_id": "worker:2026-05",
-                "reason": "write_event",
-            },
-        )
-
-    def test_postgres_save_candidate_matches_does_not_write_runtime_snapshot(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            connection = FakePostgresConnection()
-            store = PostgresStateStore(data_dir=Path(temp_dir), connection=connection)
-
-            store.save_workbench_candidate_matches(
-                {
-                    "candidates": {
-                        "candidate-current": {
-                            "candidate_key": "candidate-current",
-                            "scope_month": "2026-05",
-                            "row_ids": ["bank-1", "invoice-1"],
-                            "confidence": "0.9",
-                        },
-                    },
-                }
-            )
-
-        self.assertNotIn("state:workbench_candidate_matches", connection.settings)
 
     def test_postgres_workbench_read_models_ignore_runtime_snapshot_fallback(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -911,7 +810,7 @@ class PostgresStateStoreTests(unittest.TestCase):
             store = PostgresStateStore(data_dir=Path(temp_dir), connection=connection)
 
             store.save_background_jobs({"job-1": {"job_id": "job-1", "status": "queued"}})
-            store.save_app_health_alerts({"records": {"alert-1": {"alert_id": "alert-1", "status": "open"}}})
+            store.save_app_health_alerts({"records": {"alert-1": {"alert_id": "alert-1", "status": "unpaired"}}})
 
         self.assertNotIn("state:background_jobs", connection.settings)
         self.assertNotIn("state:app_health_alerts", connection.settings)

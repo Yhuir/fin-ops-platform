@@ -139,7 +139,6 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
                 "bank_detail_read_model",
                 "workbench_read_model",
                 "workbench_relation_read_model",
-                "workbench_candidate_matches",
                 "workbench_matching_dirty_scopes",
                 "invoice_lifecycle_read_model",
                 "pending_invoice_read_model",
@@ -160,7 +159,6 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
             [
                 "workbench_read_model",
                 "workbench_relation_read_model",
-                "workbench_candidate_matches",
                 "workbench_matching_dirty_scopes",
                 "invoice_lifecycle_read_model",
                 "pending_invoice_read_model",
@@ -196,22 +194,6 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         self.assertIn("workbench_matching", pair_plan["will_enqueue_jobs"])
         self.assertIn("workbench_matching", exception_plan["will_enqueue_jobs"])
 
-    def test_candidate_match_changed_refreshes_workbench_without_rerunning_matching(self) -> None:
-        service = DerivedDataLifecycleService()
-
-        plan = service.plan_event("candidate_match_changed", scope_keys=["2026-02"])
-
-        self.assertEqual(plan["affected_scopes"], ["2026-02", "all"])
-        self.assertEqual(
-            [domain["domain"] for domain in plan["domains"]],
-            [
-                "workbench_read_model",
-                "workbench_relation_read_model",
-                "search_cache",
-            ],
-        )
-        self.assertNotIn("workbench_matching_dirty_scopes", [domain["domain"] for domain in plan["domains"]])
-        self.assertEqual(plan["will_enqueue_jobs"], [])
 
     def test_batch_accounting_relation_changed_refreshes_bank_detail_tags(self) -> None:
         service = DerivedDataLifecycleService()
@@ -433,7 +415,6 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
                 "project_scope_changed",
                 "manual_derived_cache_cleanup",
                 "startup_stale_scan",
-                "candidate_match_changed",
             ),
         )
         self.assertEqual(
@@ -441,7 +422,6 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
             (
                 "workbench_read_model",
                 "workbench_relation_read_model",
-                "workbench_candidate_matches",
                 "workbench_matching_dirty_scopes",
                 "invoice_lifecycle_read_model",
                 "cost_statistics_read_model",

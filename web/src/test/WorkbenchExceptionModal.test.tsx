@@ -94,7 +94,7 @@ describe("WorkbenchExceptionModal", () => {
     renderModal({ rows: defaultRows });
 
     const dialog = await screen.findByRole("dialog", { name: "统一异常处理" });
-    expect(within(dialog).getByText("异常预览加载失败")).toBeInTheDocument();
+    expect(await within(dialog).findByText("异常预览加载失败")).toBeInTheDocument();
     expect(within(dialog).getByText("preview backend unavailable")).toBeInTheDocument();
     expect(within(dialog).queryByRole("button", { name: "提交处理" })).not.toBeInTheDocument();
   });
@@ -129,7 +129,7 @@ describe("WorkbenchExceptionModal", () => {
     });
 
     const dialog = await screen.findByRole("dialog", { name: "统一异常处理" });
-    await user.click(within(dialog).getByRole("radio", { name: /人工确认免 OA/ }));
+    await user.click(await within(dialog).findByRole("radio", { name: /人工确认免 OA/ }));
     await user.type(within(dialog).getByLabelText("原因代码"), "manual_business_exemption");
     await user.type(within(dialog).getByLabelText("到期日期"), "2026-05-31");
     await user.type(within(dialog).getByLabelText("备注"), "业务确认无需 OA");
@@ -197,7 +197,7 @@ describe("WorkbenchExceptionModal", () => {
     renderModal({ rows: defaultRows, onApplied, onClose });
 
     const dialog = await screen.findByRole("dialog", { name: "统一异常处理" });
-    expect(within(dialog).getByText("确认支出闭环")).toBeInTheDocument();
+    expect(await within(dialog).findByText("确认支出闭环")).toBeInTheDocument();
 
     await user.click(within(dialog).getByRole("button", { name: "提交处理" }));
 
@@ -251,7 +251,7 @@ describe("WorkbenchExceptionModal", () => {
     });
 
     const dialog = await screen.findByRole("dialog", { name: "统一异常处理" });
-    await user.click(within(dialog).getByRole("radio", { name: /人工确认免 OA/ }));
+    await user.click(await within(dialog).findByRole("radio", { name: /人工确认免 OA/ }));
     await user.type(within(dialog).getByLabelText("原因代码"), "manual_business_exemption");
     await user.type(within(dialog).getByLabelText("到期日期"), "2026-05-31");
     await user.type(within(dialog).getByLabelText("备注"), "业务确认无需 OA");

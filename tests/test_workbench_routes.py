@@ -19,15 +19,29 @@ class FakeWorkbenchQueryFacade:
             {
                 "month": "all",
                 "scope_key": "all",
-                "zone": "open",
+                "zone": "unpaired",
                 "group_id": "case:1",
                 "group": {"group_id": "case:1"},
                 "read_model_status": "fresh",
             },
         )
 
-    def group_detail(self, month: str | None, *, zone: str, group_id: str) -> WorkbenchQueryResult:
-        self.calls.append({"month": month, "zone": zone, "group_id": group_id})
+    def group_detail(
+        self,
+        month: str | None,
+        *,
+        zone: str,
+        group_id: str,
+        expected_read_model_version: str | None = None,
+    ) -> WorkbenchQueryResult:
+        self.calls.append(
+            {
+                "month": month,
+                "zone": zone,
+                "group_id": group_id,
+                "expected_read_model_version": expected_read_model_version,
+            }
+        )
         return self.result
 
     def summary(self, month: str | None) -> WorkbenchQueryResult:
@@ -83,11 +97,21 @@ class WorkbenchGroupDetailApiRoutesTests(unittest.TestCase):
         facade = FakeWorkbenchQueryFacade()
         routes = WorkbenchGroupDetailApiRoutes(query_facade_provider=lambda: facade)
 
-        status, payload = routes.get_detail(None, zone=" open ", group_id=" case:1 ")
+        status, payload = routes.get_detail(None, zone=" unpaired ", group_id=" case:1 ")
 
         self.assertEqual(status, HTTPStatus.OK)
         self.assertEqual(payload, facade.result.payload)
-        self.assertEqual(facade.calls, [{"month": "all", "zone": "open", "group_id": "case:1"}])
+        self.assertEqual(
+            facade.calls,
+            [
+                {
+                    "month": "all",
+                    "zone": "unpaired",
+                    "group_id": "case:1",
+                    "expected_read_model_version": None,
+                }
+            ],
+        )
 
     def test_group_detail_rejects_invalid_zone_without_calling_facade(self) -> None:
         facade = FakeWorkbenchQueryFacade()
@@ -96,7 +120,7 @@ class WorkbenchGroupDetailApiRoutesTests(unittest.TestCase):
         status, payload = routes.get_detail("2026-05", zone="processed", group_id="case:1")
 
         self.assertEqual(status, HTTPStatus.BAD_REQUEST)
-        self.assertEqual(payload, {"error": "invalid_workbench_zone", "message": "zone must be open or paired."})
+        self.assertEqual(payload, {"error": "invalid_workbench_zone", "message": "zone must be unpaired or paired."})
         self.assertEqual(facade.calls, [])
 
     def test_group_detail_requires_group_id_without_calling_facade(self) -> None:
@@ -140,10 +164,10 @@ class WorkbenchReadApiRoutesTests(unittest.TestCase):
 
         status, payload = routes.groups(
             None,
-            zone=" open ",
+            zone=" unpaired ",
             page="2",
             page_size="50",
-            status="candidate",
+            status="unpaired",
             source_kind="bank",
             search="vendor",
             search_mode="pane",
@@ -162,10 +186,10 @@ class WorkbenchReadApiRoutesTests(unittest.TestCase):
                 {
                     "endpoint": "groups",
                     "month": "all",
-                    "zone": "open",
+                    "zone": "unpaired",
                     "page": "2",
                     "page_size": "50",
-                    "status": "candidate",
+                    "status": "unpaired",
                     "source_kind": "bank",
                     "search": "vendor",
                     "search_mode": "pane",
@@ -185,14 +209,14 @@ class WorkbenchReadApiRoutesTests(unittest.TestCase):
         status, payload = routes.groups("2026-05", zone="ignored")
 
         self.assertEqual(status, HTTPStatus.BAD_REQUEST)
-        self.assertEqual(payload, {"error": "invalid_workbench_zone", "message": "zone must be open or paired."})
+        self.assertEqual(payload, {"error": "invalid_workbench_zone", "message": "zone must be unpaired or paired."})
         self.assertEqual(facade.calls, [])
 
     def test_groups_rejects_invalid_json_query_without_calling_facade(self) -> None:
         facade = FakeWorkbenchQueryFacade()
         routes = WorkbenchReadApiRoutes(query_facade_provider=lambda: facade)
 
-        status, payload = routes.groups("2026-05", zone="open", column_filters="[1, 2]")
+        status, payload = routes.groups("2026-05", zone="unpaired", column_filters="[1, 2]")
 
         self.assertEqual(status, HTTPStatus.BAD_REQUEST)
         self.assertEqual(

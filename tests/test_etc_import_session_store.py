@@ -7,6 +7,7 @@ import unittest
 
 from fin_ops_platform.services.etc_import_session_store import (
     InMemoryEtcImportSessionStore,
+    PostgresEtcImportSessionStore,
     StoredEtcImportSession,
     StoredEtcImportUpload,
     build_etc_import_session_store,
@@ -57,6 +58,38 @@ class EtcImportSessionStoreTests(unittest.TestCase):
         self.assertEqual(loaded, saved)
         self.assertIsNot(loaded, saved)
         self.assertEqual(loaded.uploads[0].content, _session().uploads[0].content)
+
+    def test_durable_save_does_not_redownload_archives_after_verified_write(self) -> None:
+        class Repository:
+            def save_preview(self, _payload: dict, _files: list[dict]) -> None:
+                return None
+
+            def get(self, _session_id: str) -> dict:
+                raise AssertionError("save_preview must not reload persisted archive bytes")
+
+        class ArchiveStore:
+            def store_etc_import_archive(self, **kwargs: object) -> dict[str, object]:
+                content = bytes(kwargs["content"])
+                file_id = str(kwargs["file_id"])
+                return {
+                    "stored_file_path": f"minio://bucket/{file_id}",
+                    "file_object_id": f"object-{file_id}",
+                    "sha256": sha256(content).hexdigest(),
+                    "size_bytes": len(content),
+                }
+
+            def read_etc_import_archive(self, _stored_file_path: str) -> bytes:
+                raise AssertionError("save_preview must not reload persisted archive bytes")
+
+            def delete_etc_import_archives(self, _stored_file_paths: list[str]) -> int:
+                return 0
+
+        store = PostgresEtcImportSessionStore(repository=Repository(), archive_store=ArchiveStore())
+
+        saved = store.save_preview(_session())
+
+        self.assertEqual(saved.uploads[0].stored_file_path, "minio://bucket/etc-import-0001")
+        self.assertEqual(saved.uploads[0].content, _session().uploads[0].content)
 
 
 class PostgresEtcImportSessionStoreTests(unittest.TestCase):

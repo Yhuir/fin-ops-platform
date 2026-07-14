@@ -474,7 +474,7 @@ function formatConfirmAuditMessage(audit: ImportPreviewAuditCounts | null) {
   }
   const skippedDuplicateCount = audit.duplicateCount + audit.existingDuplicateCount;
   const reviewCount = audit.suspectedDuplicateCount + audit.errorCount;
-  return `将导入 ${audit.importableCount} 条唯一记录，跳过 ${skippedDuplicateCount} 条重复${reviewCount > 0 ? `，${reviewCount} 条需复核` : ""}。`;
+  return `将导入 ${audit.confirmableCount} 条唯一记录，跳过 ${skippedDuplicateCount} 条重复${reviewCount > 0 ? `，${reviewCount} 条需复核` : ""}。`;
 }
 
 function isUnimportedDecision(decision: ImportRowDecision | string | null | undefined) {
@@ -536,7 +536,7 @@ function AuditSummaryCards({ audit }: { audit: ImportPreviewAuditCounts | null }
     ["唯一", audit.uniqueCount],
     ["重复", audit.duplicateCount],
     ["已存在", audit.existingDuplicateCount],
-    ["可导入", audit.importableCount],
+    ["可导入", audit.confirmableCount],
     ["异常", audit.errorCount],
     ["未导入", audit.skippedCount],
   ] as const;

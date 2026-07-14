@@ -1,12 +1,17 @@
 ---
-gsd_state_version: '1.0'
-status: executing
+gsd_state_version: 1.0
+milestone: v1.0
+milestone_name: milestone
+status: verifying
+stopped_at: Release A clean branch passed full local gates after CI isolation and import publish-order repair; updated remote CI, production cutover and Release B remain gated.
+last_updated: "2026-07-15T01:11:49+08:00"
+last_activity: 2026-07-15 - Release A passed 4182 backend, 835 frontend, production build and 177 Chromium tests; durable import facts now commit before downstream publication
 progress:
-  total_phases: 20
+  total_phases: 21
   completed_phases: 2
-  total_plans: 22
-  completed_plans: 21
-  percent: 95
+  total_plans: 26
+  completed_plans: 24
+  percent: 92
 ---
 
 # Project State
@@ -16,20 +21,21 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-16)
 
 **Core value:** Preserve production finance workflow correctness while improving individual pages through isolated, reviewable GSD phases.
-**Current focus:** Phase 19 production release evidence remains gated; Phase 20 reversible relation runtime-proof capability is implementation-complete.
+**Current focus:** Phase 21 Release A is isolated and fully verified locally after deterministic test-runner isolation and import I/O ordering repair; updated remote review/CI, clean deployment, rehydrate and production data-safety evidence remain gated. Migration 0104 stays in Release B only.
 
 ## Current Position
 
-Phase: 20 of 20 (三组可逆关系写操作的 Fan-out、Worker、Freshness 与 System Audit 生产级闭环)
-Plan: 20-01 complete; 19-21 production evidence remains gated
-Status: Phase 20 implementation and full local verification complete; controlled staging/production apply requires explicit test-owned fixtures and runtime credentials
-Last activity: 2026-07-13 - completed the single checkpoint runner, three reversible shape contracts, exact durable evidence, recovery safety, legacy cleanup and full regression
+Phase: 21 of 21 (关联台确定性自动正式关系与全量可见性生产闭环)
+Plan: 21-01 through 21-03 complete; 21-04 production cutover pending
+Status: local implementation and automated verification complete; current production still shows the 520 relation as unpaired
+Last activity: 2026-07-15 - Release A passed 4182 backend, 835 frontend, production build and 177 Chromium tests; durable import facts now commit before downstream publication
 
-Progress: [█████████░] 95%
+Progress: [█████████░] 92%
 
 ## Performance Metrics
 
 **Velocity:**
+
 - Total plans completed: 21
 - Baseline planning docs completed: 1
 - Average duration: N/A
@@ -88,6 +94,7 @@ Progress: [█████████░] 95%
 - 2026-07-11: Phase 19 added for the cross-page Audit proof, readiness semantics, and legacy-path production closure.
 - 2026-07-12: Phase 20 added for three reversible relation write scenarios spanning fan-out, worker drain, freshness, System Audit, and legacy test-path removal.
 - 2026-07-13: Phase 20 implementation completed with disposable PostgreSQL, full backend/frontend/build and 178-test Chromium verification; real-environment apply remains an explicit external gate.
+- 2026-07-14: Phase 21 added for deterministic automatic formal relations, exact Workbench visibility partition, all-scope omission repair, legacy candidate/decision removal, and data-safe recovery proof.
 
 ### Pending Todos
 
@@ -95,7 +102,14 @@ None yet.
 
 ### Blockers/Concerns
 
-- Full backend baseline is zero-failure: 4389 passed / 42 skipped / 589 subtests; the prior 13 classified failures and the reset/reload background-job owner race are closed without relaxed gates.
+- Phase 21 Release A full local gate is zero-failure: backend 4182 passed / 33 explicitly environment-gated skipped；frontend 835/835；Chromium 177/177；production build passed. 首次远端分支 CI 揭示一个既有测试模块依赖未声明的 `pytest`，且 4 个顶层测试未被 `unittest discover` 执行；现已改为标准 `unittest.TestCase`。第二次远端 CI 暴露 Vitest 文件并行下的全局 I/O/监听器竞争与 cross-realm Blob 断言；前端测试现固定单 worker，Blob 以 size/MIME 合同断言。第三次远端 CI 证明多个前端测试把页面/抽屉壳出现误当成异步数据 I/O 完成；相关测试现以用户可见数据行、详情字段或当前 DOM 节点作为 readiness anchor。第四次远端 CI 进一步暴露 OA 反提历史时间依赖执行机本地时区；该业务时间现显式按 `Asia/Shanghai` 格式化，并由语义表格 readiness + 精确时间断言保护。与 CI 一致的 Node 20 全量运行最终 71 files / 835 tests 全绿，且不再出现 `MaxListenersExceededWarning`。统一门禁还捕获 import confirm 在持久化前发布 matching 的竞态；已改为 durable delta 成功后才发布所有下游信号，并将 4 项 import-processing 测试纳入 `unittest discover`。
+- 第五次远程 CI 为 176/177；唯一失败是待找发票文本选择 E2E 用元素 bounding-box 中线做像素拖拽，在 CI 字体/换行布局下落到空白区。测试现对同一可见文本节点执行 Playwright 浏览器文本选择，仍精确验证 `window.getSelection()`，不改业务 UI、不加 retry、不放宽结果。
+- 第六次远程 CI 的唯一失败是 ETC 统一批次列表测试等待静态 list 容器后同步读取异步批次行；现以 `etc-batch-unsubmitted-01` 业务行作为 readiness anchor，不改 ETC 业务链路与 I/O。
+- 第七次远程 CI 已通过后端、835 前端与 177 浏览器流，最后 docs gate 因 runner 未安装 `rg` 而把命令缺失误报为文档缺失。验证入口现集中选择 `rg` 或 `grep`/`git grep`，并移除未使用的固定 `/tmp` 文件写入。
+- 第八次远程 CI 的后端已通过，前端仅有 3 个异步首帧时序失败：成本统计测试把页面标题误当成表格或 refreshing 状态已完成，税金抵扣测试把静态统计卡误当成发票选择行已完成。测试现直接等待对应表格、refreshing 文案和业务复选框，不改产品链路、不加 retry、不放宽业务结果。
+- `FIN_OPS_TEST_DATABASE_URL` is not configured, so real disposable PostgreSQL migration/catalog/hash integration remains unexecuted.
+- Release A is isolated on clean branch `codex/workbench-formal-relations-release-a`; remote PR review/CI and production pre-deploy evidence are still required before merge/deploy.
+- Current production read-only evidence still shows the Yunnan Lifu 520 relation as unpaired; migration 0104, registered rehydrate, worker drain and production System Audit have not run.
 - 17/17 pages expose ready v17 proofs and local System Audit is complete; authorized production read-only execution has not occurred.
 - External bank/OA/invoice/ETC control evidence remains unregistered/unknown, so end-to-end external source completeness is still unproven.
 

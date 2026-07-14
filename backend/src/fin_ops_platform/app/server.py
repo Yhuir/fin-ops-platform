@@ -168,6 +168,7 @@ from fin_ops_platform.services.etc_service import (
 )
 from fin_ops_platform.services.etc_business_batch_application_service import EtcBusinessBatchApplicationService
 from fin_ops_platform.services.etc_business_batch_delete_service import EtcBusinessBatchDeleteService
+from fin_ops_platform.services.etc_invoice_pdf_bundle_service import EtcInvoicePdfBundle, EtcInvoicePdfBundleService
 from fin_ops_platform.services.etc_reconciliation_models import SourceFileKind
 from fin_ops_platform.services.etc_reconciliation_import_cleanup_service import EtcReconciliationImportCleanupService
 from fin_ops_platform.services.etc_reconciliation_service import EtcReconciliationTaskService
@@ -428,30 +429,14 @@ from fin_ops_platform.services.turnover_relation_service import (
     TurnoverRelationService,
     TurnoverRelationValidationError,
 )
-from fin_ops_platform.services.workbench_candidate_grouping import WorkbenchCandidateGroupingService
 from fin_ops_platform.services.workbench_amount_check_service import WorkbenchAmountCheckService
 from fin_ops_platform.services.workbench_api_payload_assembler import WorkbenchApiPayloadAssembler
-from fin_ops_platform.services.workbench_candidate_match_service import (
-    CANDIDATE_MATCH_SCHEMA_VERSION,
-    WorkbenchCandidateMatchService,
-)
-from fin_ops_platform.services.workbench_matching_dirty_scope_service import WorkbenchMatchingDirtyScopeService
-from fin_ops_platform.services.workbench_matching_dirty_scope_worker import (
-    WorkbenchMatchingDirtyScopeWorker,
-    WorkbenchMatchingDirtyScopeWorkerConfig,
-    WorkbenchMatchingScopeRunnerAdapter,
-)
-from fin_ops_platform.services.workbench_matching_orchestrator import WorkbenchMatchingOrchestrator
+from fin_ops_platform.services.workbench_free_matching_engine import RULE_VERSION as WORKBENCH_FORMAL_RELATION_RULE_VERSION
 from fin_ops_platform.services.workbench_live_payload_builder import WorkbenchLivePayloadBuilder
-from fin_ops_platform.services.workbench_matching_rules import (
-    WORKBENCH_MATCHING_RULES_VERSION,
-    WorkbenchMatchingRules,
-)
 from fin_ops_platform.services.workbench_oa_payload_builder import WorkbenchOaPayloadBuilder
 from fin_ops_platform.services.workbench_auto_pair_conflict_relation_read_port import (
     WorkbenchAutoPairConflictRelationReadPort,
 )
-from fin_ops_platform.services.workbench_reconciliation_engine import WorkbenchMatchingRelationReadPort
 from fin_ops_platform.services.workbench_groups_page_cache import (
     WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION,
     build_workbench_groups_redis_cache_key_from_version,
@@ -465,9 +450,12 @@ from fin_ops_platform.services.workbench_confirm_link_context_relation_read_port
 from fin_ops_platform.services.workbench_events_active_stream_registry import WorkbenchEventsActiveStreamRegistry
 from fin_ops_platform.services.workbench_legacy_api_sql_read_provider import WorkbenchLegacyApiSqlReadProvider
 from fin_ops_platform.services.workbench_reconciliation_dirty_queue import WorkbenchReconciliationDirtyQueue
-from fin_ops_platform.services.workbench_reconciliation_decision_store import WorkbenchReconciliationDecisionStore
 from fin_ops_platform.services.workbench_query_facade import WorkbenchQueryFacade
 from fin_ops_platform.services.workbench_raw_payload_assembler import WorkbenchRawPayloadAssembler
+from fin_ops_platform.services.workbench_relation_grouping import (
+    WorkbenchRelationGroupingService,
+    WorkbenchRelationPreviewGroupingService,
+)
 from fin_ops_platform.services.workbench_retained_all_oa_payload_builder import WorkbenchRetainedAllOaPayloadBuilder
 from fin_ops_platform.services.workbench_refresh_status_payload import WorkbenchRefreshStatusPayloadNormalizer
 from fin_ops_platform.services.workbench_refresh_status_payload_provider import (
@@ -559,7 +547,6 @@ from fin_ops_platform.services.workbench_supplemental_retained_oa_row_selector i
 )
 from fin_ops_platform.services.postgres_repositories.read_models import (
     BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
-    WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION,
     WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION,
     PostgresReadModelRepository,
 )
@@ -572,17 +559,14 @@ from fin_ops_platform.services.workbench_idempotency import (
     WorkbenchIdempotencyKeyConflict,
 )
 from fin_ops_platform.services.workbench_uow import RuntimeQueueReadModelRefreshWriter, WorkbenchWriteUnitOfWork
-from fin_ops_platform.services.workbench_special_pair_rule_service import (
-    CASH_TURNOVER_DETECTED,
-    CASH_TURNOVER_TAG,
-    WorkbenchSpecialPairRuleService,
-)
 from fin_ops_platform.services.workbench_sql_projection import (
     MONTH_RE as WORKBENCH_SQL_MONTH_RE,
     WorkbenchSqlProjectionBuilder,
     WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
 )
 from fin_ops_platform.services.seeds import build_demo_seed
+
+CASH_TURNOVER_TAG = "现金往来"
 
 
 OA_INVOICE_OFFSET_AUTO_MATCH_MODE = "oa_invoice_offset_auto_match"
@@ -790,21 +774,6 @@ class Application:
             return repository
         return None
 
-    def _workbench_reconciliation_decision_store_repository(self):
-        repository = getattr(self._state_store, "read_model_repository", None)
-        required_methods = (
-            "upsert_workbench_reconciliation_decisions",
-            "list_workbench_reconciliation_decisions",
-            "consume_workbench_reconciliation_decisions_by_row_ids",
-            "suppress_workbench_reconciliation_decisions_by_row_ids",
-            "expire_stale_workbench_reconciliation_decisions",
-        )
-        if repository is not None and all(
-            callable(getattr(repository, method_name, None)) for method_name in required_methods
-        ):
-            return repository
-        return None
-
     def _runtime_repository_snapshot(
         self,
         persisted_state: dict[str, object],
@@ -985,29 +954,10 @@ class Application:
             persisted_state.get("workbench_read_models"),
         )
         self._derived_data_lifecycle_service = DerivedDataLifecycleService()
-        self._workbench_candidate_match_service = WorkbenchCandidateMatchService.from_snapshot(
-            persisted_state.get("workbench_candidate_matches"),
-        )
-        self._workbench_matching_dirty_scope_service = WorkbenchMatchingDirtyScopeService.from_snapshot(
-            persisted_state.get("workbench_matching_dirty_scopes"),
-        )
         dirty_queue_repository = self._workbench_reconciliation_dirty_queue_repository()
-        self._workbench_reconciliation_dirty_queue = (
-            WorkbenchReconciliationDirtyQueue(
-                repository=dirty_queue_repository,
-                tenant_id=self._workbench_reconciliation_tenant_id(),
-            )
-            if dirty_queue_repository is not None
-            else None
-        )
-        decision_store_repository = self._workbench_reconciliation_decision_store_repository()
-        self._workbench_reconciliation_decision_store = (
-            WorkbenchReconciliationDecisionStore(
-                repository=decision_store_repository,
-                tenant_id=self._workbench_reconciliation_tenant_id(),
-            )
-            if decision_store_repository is not None
-            else None
+        self._workbench_reconciliation_dirty_queue = WorkbenchReconciliationDirtyQueue(
+            repository=dirty_queue_repository,
+            tenant_id=self._workbench_reconciliation_tenant_id(),
         )
         self._cost_statistics_read_model_service = CostStatisticsReadModelService.from_snapshot(
             persisted_state.get("cost_statistics_read_models"),
@@ -1070,7 +1020,6 @@ class Application:
             dynamic_admin_usernames_provider=self._app_settings_service.get_admin_usernames,
         )
         bank_account_resolver = BankAccountResolver(self._app_settings_service.get_bank_account_mapping_dict)
-        self._candidate_grouping_service = WorkbenchCandidateGroupingService()
         self._workbench_query_service = WorkbenchQueryService(
             oa_adapter=oa_adapter,
             seed_demo_rows=not self._requires_sql_read_model_runtime(),
@@ -1083,29 +1032,6 @@ class Application:
             )
             if self._state_store is not None and oa_adapter is not None
             else None
-        )
-        self._workbench_matching_rules = WorkbenchMatchingRules(include_special_rules=False)
-        self._workbench_special_pair_rule_service = WorkbenchSpecialPairRuleService()
-        self._workbench_matching_orchestrator = WorkbenchMatchingOrchestrator(
-            row_provider=self._workbench_matching_rows_for_scope,
-            relation_read_port=WorkbenchMatchingRelationReadPort(
-                self._workbench_relation_command_service(
-                    repository=getattr(self, "_state_store", None),
-                    require_fresh_relations=False,
-                )
-            ),
-            candidate_match_service=self._workbench_candidate_match_service,
-            read_model_service=self._workbench_read_model_service,
-            rules=self._workbench_matching_rules,
-            special_rule_service=self._workbench_special_pair_rule_service,
-            exception_case_service=self._workbench_exception_case_service,
-            decision_store=self._workbench_reconciliation_decision_store,
-            relation_command_service=self._workbench_relation_command_service(
-                repository=getattr(self, "_state_store", None),
-                require_fresh_relations=False,
-            ),
-            settings_provider=self._workbench_matching_settings,
-            source_versions_provider=self._workbench_matching_source_versions,
         )
         self._configure_workbench_exception_application_service()
         self._live_workbench_service = LiveWorkbenchService(
@@ -1300,7 +1226,6 @@ class Application:
                     save_pair_relation_snapshot=self._state_store.save_workbench_pair_relations,
                 ),
                 workbench_read_model_service=self._workbench_read_model_service,
-                workbench_matching_dirty_scope_service=self._workbench_matching_dirty_scope_service,
                 tax_certified_import_service=self._tax_certified_import_service,
             )
             if self._state_store is not None
@@ -1593,17 +1518,9 @@ class Application:
         self._workbench_exception_application_service = WorkbenchExceptionApplicationService(
             row_provider=lambda month, row_ids: self._resolve_live_rows_direct(row_ids, month_hint=month),
             case_service=self._workbench_exception_case_service,
-            candidate_match_service=self._workbench_candidate_match_service,
-            decision_store=getattr(self, "_workbench_reconciliation_decision_store", None),
             source_versions_provider=self._workbench_matching_source_versions,
             relation_command_service=self._workbench_relation_command_service(),
         )
-
-    def _consume_workbench_reconciliation_decisions(self, *, row_ids: list[str], relation_id: str) -> int:
-        decision_store = getattr(self, "_workbench_reconciliation_decision_store", None)
-        if decision_store is None:
-            return 0
-        return decision_store.consume_by_row_ids(row_ids, relation_id=relation_id)
 
     def _reload_runtime_services(self) -> None:
         self._initialize_runtime_services(self._runtime_bootstrap_state())
@@ -1919,6 +1836,7 @@ class Application:
                 query.get("month", [None])[0],
                 zone=query.get("zone", [None])[0],
                 group_id=query.get("group_id", [None])[0],
+                expected_read_model_version=query.get("expected_read_model_version", [None])[0],
             )
         if method == "GET" and route_path == "/api/workbench/groups":
             month = query.get("month", [None])[0]
@@ -2665,7 +2583,7 @@ class Application:
                 if isinstance(raw_summary, dict):
                     summary_counts = {
                         key: raw_summary.get(key)
-                        for key in ("paired_count", "open_count", "oa_count", "bank_count", "invoice_count")
+                        for key in ("paired_count", "unpaired_count", "oa_count", "bank_count", "invoice_count")
                         if key in raw_summary
                     }
             else:
@@ -2675,7 +2593,7 @@ class Application:
             summary_status = "error"
             errors.append(f"summary:{str(exc) or exc.__class__.__name__}")
         groups: dict[str, object] = {}
-        for zone in ("paired", "open"):
+        for zone in ("paired", "unpaired"):
             try:
                 page_payload = get_groups_page(
                     scope_key=scope_key,
@@ -2792,6 +2710,11 @@ class Application:
         )
 
     def _workbench_write_facade(self) -> WorkbenchWriteFacade:
+        preview_grouping = WorkbenchRelationPreviewGroupingService(
+            serialize_value=self._serialize_value,
+            row_type_for_row_id=self._row_type_for_row_id,
+            derive_row_tags=self._derive_workbench_row_tags,
+        )
         return WorkbenchWriteFacade(
             relation_read_snapshot_port=WorkbenchWriteRelationReadSnapshotPort(
                 self._workbench_pair_relation_service
@@ -2802,7 +2725,6 @@ class Application:
             exception_service=self._workbench_exception_application_service,
             exception_case_service=self._workbench_exception_case_service,
             override_service=self._workbench_override_service,
-            candidate_match_service=self._workbench_candidate_match_service,
             next_case_id=self._next_workbench_relation_case_id,
             normalize_row_ids=self._normalize_row_ids,
             resolved_row_types_for_row_ids=self._resolved_row_types_for_row_ids,
@@ -2817,7 +2739,7 @@ class Application:
             scope_keys_for_rows=self._scope_keys_for_rows,
             resolve_live_rows_direct=self._resolve_live_rows_direct,
             resolve_live_row=self._resolve_live_row,
-            relation_groups=self._relation_groups,
+            relation_groups=preview_grouping.group_relations,
             withdraw_rows_and_after_relations=self._withdraw_rows_and_after_relations,
             amount_check_for_rows_by_type=self._amount_check_for_rows_by_type,
             transaction_amount_for_row_id=self._workbench_transaction_amount_for_row_id,
@@ -2826,12 +2748,10 @@ class Application:
             save_exception_cases_snapshot=self._save_workbench_exception_cases_snapshot,
             persist_pair_relations=self._persist_workbench_pair_relations,
             save_overrides_snapshot=self._save_workbench_overrides_snapshot,
-            persist_candidate_matches_best_effort=self._persist_workbench_candidate_matches_best_effort,
             restore_exception_write_snapshots=self._restore_workbench_exception_write_snapshots,
             restore_exception_override_snapshots=self._restore_workbench_exception_override_snapshots,
             restore_exception_pair_snapshots=self._restore_workbench_exception_pair_snapshots,
             schedule_pair_relation_persist=self._schedule_workbench_pair_relation_persist,
-            consume_reconciliation_decisions=self._consume_workbench_reconciliation_decisions,
             restore_pair_relation_snapshot=self._restore_workbench_pair_relation_snapshot,
             execute_derived_data_lifecycle_event=self._execute_derived_data_lifecycle_event,
             schedule_read_model_persist=self._schedule_workbench_read_model_persist,
@@ -2840,7 +2760,6 @@ class Application:
             cancel_link_uow=self._workbench_cancel_link_unit_of_work(),
             withdraw_link_uow=self._workbench_withdraw_link_unit_of_work(),
             persist_pair_relations_in_transaction=self._persist_workbench_pair_relations_in_transaction,
-            consume_reconciliation_decisions_in_transaction=self._consume_workbench_reconciliation_decisions_in_transaction,
             bank_transaction_category_codes_for_row_ids=self._bank_transaction_category_codes_for_workbench_row_ids,
             bank_flow_rule_tag_rules_payload=self._app_settings_service.get_bank_flow_rule_batch_tag_rules_payload,
             submit_internal_transfer_rows_from_workbench=lambda **kwargs: (
@@ -2849,7 +2768,6 @@ class Application:
             relation_command_service_factory=lambda repository=None: self._workbench_relation_command_service(
                 repository=repository,
             ),
-            reconciliation_decision_store=getattr(self, "_workbench_reconciliation_decision_store", None),
         )
 
     def _next_workbench_relation_case_id(self) -> str:
@@ -3454,7 +3372,6 @@ class Application:
             pair_relations=relation_repository,
             exception_cases=workbench_repository,
             row_overrides=workbench_repository,
-            candidate_matches=workbench_repository,
         )
 
     def _workbench_write_response(self, result: WorkbenchWriteResult) -> Response:
@@ -3465,13 +3382,11 @@ class Application:
         *,
         previous_exception_snapshot: dict[str, object],
         previous_pair_snapshot: dict[str, object],
-        previous_candidate_snapshot: dict[str, object],
         previous_override_snapshot: dict[str, object],
     ) -> None:
         self._workbench_exception_rollback_restore_service().restore_write_snapshots(
             previous_exception_snapshot=previous_exception_snapshot,
             previous_pair_snapshot=previous_pair_snapshot,
-            previous_candidate_snapshot=previous_candidate_snapshot,
             previous_override_snapshot=previous_override_snapshot,
         )
 
@@ -3505,16 +3420,12 @@ class Application:
             state_store=self._state_store,
             replace_exception_case_service=self._replace_workbench_exception_case_service,
             replace_pair_relation_service=self._replace_workbench_pair_relation_service,
-            replace_candidate_match_service=self._replace_workbench_candidate_match_service,
             replace_override_service=self._replace_workbench_override_service,
             configure_exception_application_service=self._configure_workbench_exception_application_service,
         )
 
     def _replace_workbench_exception_case_service(self, service: WorkbenchExceptionCaseService) -> None:
         self._workbench_exception_case_service = service
-
-    def _replace_workbench_candidate_match_service(self, service: WorkbenchCandidateMatchService) -> None:
-        self._workbench_candidate_match_service = service
 
     def _replace_workbench_override_service(self, service: WorkbenchOverrideService) -> None:
         self._workbench_override_service = service
@@ -3586,11 +3497,13 @@ class Application:
         *,
         zone: str | None,
         group_id: str | None,
+        expected_read_model_version: str | None = None,
     ) -> Response:
         status_code, payload = self._workbench_group_detail_routes().get_detail(
             month,
             zone=zone,
             group_id=group_id,
+            expected_read_model_version=expected_read_model_version,
         )
         return self._json_response(status_code, payload)
 
@@ -4528,7 +4441,8 @@ class Application:
         payload = self._serialize_value(self._oa_sync_status_payload())
         if not isinstance(payload, dict):
             payload = {}
-        matching_dirty_scopes = self._workbench_matching_dirty_scope_service.list_dirty_scopes()
+        matching_queue = getattr(self, "_workbench_reconciliation_dirty_queue", None)
+        matching_dirty_scopes = matching_queue.list_dirty_scopes() if matching_queue is not None else []
         with self._workbench_matching_run_lock:
             matching_running_scopes = sorted(self._workbench_matching_running_scope_months)
         if matching_running_scopes:
@@ -4620,7 +4534,7 @@ class Application:
                 HTTPStatus.BAD_REQUEST,
                 {
                     "error": "invalid_search_request",
-                    "message": "status must be paired, open, ignored, or processed_exception.",
+                    "message": "status must be paired, unpaired, ignored, or processed_exception.",
                 },
             )
         sql_payload = self._search_query_freshness_service().get_payload(
@@ -5357,6 +5271,20 @@ class Application:
             oa_client_factory=self._build_etc_oa_client,
             link_etc_invoices_to_existing_invoices=self._link_etc_invoices_to_existing_invoices,
             refresh_after_etc_invoice_link=self._refresh_after_etc_invoice_link,
+            invoice_pdf_bundle_service=EtcInvoicePdfBundleService(
+                read_invoice_pdf=self._etc_service.read_invoice_pdf_bytes,
+            ),
+            record_invoice_pdf_download=lambda actor, batch, bundle: self._audit_service.record_action(
+                actor_id=actor.actor_id,
+                action="etc_invoice_pdf_bundle_downloaded",
+                entity_type="etc_business_batch",
+                entity_id=batch.business_batch_id,
+                metadata={
+                    "filename": bundle.filename,
+                    "invoice_count": bundle.invoice_count,
+                    "page_count": bundle.page_count,
+                },
+            ),
         )
         self._etc_business_batch_application_service = service
         self._etc_business_batch_dependency_key = dependency_key
@@ -5470,6 +5398,31 @@ class Application:
                 return result
             status_code, payload = result
             return self._json_response(status_code, payload)
+        if method == "GET" and action == "invoice-pdf":
+            session = self._etc_business_session(headers, require_mutation=False)
+            if isinstance(session, Response):
+                return session
+            status_code, result = self._etc_business_routes().invoice_pdf_bundle(
+                business_batch_id,
+                session=session,
+            )
+            if not isinstance(result, EtcInvoicePdfBundle):
+                return self._json_response(status_code, result)
+            return Response(
+                status_code=int(status_code),
+                body=result.content,
+                headers={
+                    "Content-Type": "application/pdf",
+                    "Content-Disposition": _build_content_disposition(result.filename),
+                    "Cache-Control": "private, no-store",
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Headers": "Content-Type",
+                    "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+                    "Access-Control-Expose-Headers": "Content-Disposition",
+                    "X-ETC-Invoice-Count": str(result.invoice_count),
+                    "X-PDF-Page-Count": str(result.page_count),
+                },
+            )
         session = self._etc_business_session(headers, require_mutation=True)
         if isinstance(session, Response):
             return session
@@ -5979,7 +5932,6 @@ class Application:
     ) -> dict[str, object]:
         previous_exception_snapshot = self._workbench_exception_case_service.snapshot()
         previous_pair_snapshot = self._workbench_pair_relation_service.snapshot()
-        previous_candidate_snapshot = self._workbench_candidate_match_service.snapshot()
         previous_override_snapshot = self._workbench_override_service.snapshot()
         result = self._workbench_exception_application_service.apply(payload, actor=actor)
         row_ids = [
@@ -6013,12 +5965,10 @@ class Application:
                     changed_case_ids=[str(relation.get("case_id") or "")],
                 )
             self._save_workbench_overrides_snapshot(changed_row_ids=row_ids)
-            self._persist_workbench_candidate_matches_best_effort(operation=action_name)
         except Exception as exc:
             self._workbench_exception_rollback_restore_service().restore_write_snapshots(
                 previous_exception_snapshot=previous_exception_snapshot,
                 previous_pair_snapshot=previous_pair_snapshot,
-                previous_candidate_snapshot=previous_candidate_snapshot,
                 previous_override_snapshot=previous_override_snapshot,
             )
             raise StatePersistenceError("工作台状态暂时无法保存，请稍后重试。") from exc
@@ -6148,60 +6098,21 @@ class Application:
         ]
 
     def start_workbench_matching_dirty_scope_worker(self, *, interval_seconds: float | None = None) -> bool:
-        resolved_interval = interval_seconds
-        if resolved_interval is None:
-            try:
-                resolved_interval = float(os.getenv("FIN_OPS_WORKBENCH_MATCHING_DIRTY_INTERVAL_SECONDS", "900"))
-            except ValueError:
-                resolved_interval = 900
-        if float(resolved_interval) <= 0:
-            return False
-        with self._workbench_matching_dirty_worker_lock:
-            if self._workbench_matching_dirty_worker_started:
-                return True
-            self._workbench_matching_dirty_worker_started = True
-        Thread(
-            target=self._run_workbench_matching_dirty_scope_worker,
-            kwargs={"interval_seconds": max(60.0, float(resolved_interval))},
-            daemon=True,
-        ).start()
-        return True
-
-    def _run_workbench_matching_dirty_scope_worker(self, *, interval_seconds: float) -> None:
-        while True:
-            try:
-                self._rebuild_workbench_matching_dirty_scopes_once()
-            except Exception as exc:
-                self._emit_workbench_persistence_warning(
-                    operation="dirty_scope_worker",
-                    detail=f"workbench dirty scope worker iteration failed: {exc}",
-                )
-            sleep(interval_seconds)
+        _ = interval_seconds
+        return False
 
     def _schedule_startup_workbench_matching_stale_scan(self) -> dict[str, object] | None:
         if getattr(self, "_workbench_reconciliation_dirty_queue", None) is None:
             return None
-        scope_months = [
-            str(month).strip()
-            for month in list(self._workbench_query_service.list_available_months() or [])
-            if SEARCH_MONTH_RE.match(str(month).strip())
-        ]
-        scope_months = sorted(dict.fromkeys(scope_months))
-        if not scope_months:
-            return None
-        stale_months = self._workbench_candidate_match_service.stale_scope_months(
-            scope_months,
+        stale_months = self._workbench_reconciliation_dirty_queue.mark_stale_completed_scopes(
             source_versions=self._workbench_matching_source_versions(),
+            reason="startup_matching_source_versions_changed",
+            debounce_seconds=0,
+            limit=1000,
         )
         if not stale_months:
             return None
-        return self._execute_derived_data_lifecycle_event(
-            "startup_stale_scan",
-            months=stale_months,
-            include_all=False,
-            metadata={"source": "application_startup", "reason": "startup_stale_scan"},
-            schedule_cost_warmup=False,
-        )
+        return {"queued_months": list(stale_months), "reason": "startup_matching_source_versions_changed"}
 
     def _rebuild_workbench_matching_dirty_scopes_once(
         self,
@@ -6212,63 +6123,10 @@ class Application:
         lease_seconds: int | None = None,
         retry_delay_seconds: int | None = None,
     ) -> dict[str, object] | None:
-        queue = getattr(self, "_workbench_reconciliation_dirty_queue", None)
-        claim_due_scopes = getattr(queue, "claim_due_scopes", None)
-        if callable(claim_due_scopes):
-            return self._rebuild_workbench_matching_db_dirty_scopes_once(
-                worker_id=worker_id,
-                request_id=request_id,
-                limit=limit,
-                lease_seconds=lease_seconds,
-                retry_delay_seconds=retry_delay_seconds,
-            )
-
-        scope_months = self._workbench_matching_dirty_scope_service.take_dirty_scopes()
-        if not scope_months:
-            return None
-        return self._run_workbench_auto_matching_for_scopes(
-            scope_months,
-            reason="dirty_scope_retry",
+        _ = worker_id, request_id, limit, lease_seconds, retry_delay_seconds
+        raise RuntimeError(
+            "Workbench matching is executed only by the dedicated workbench-matching runtime worker."
         )
-
-    def _rebuild_workbench_matching_db_dirty_scopes_once(
-        self,
-        *,
-        worker_id: str | None,
-        request_id: str | None,
-        limit: int | None,
-        lease_seconds: int | None,
-        retry_delay_seconds: int | None,
-    ) -> dict[str, object] | None:
-        queue = self._workbench_reconciliation_dirty_queue
-        resolved_worker_id = str(
-            worker_id or os.getenv("FIN_OPS_WORKBENCH_MATCHING_WORKER_ID") or "workbench-matching-worker"
-        ).strip()
-        resolved_request_id = str(request_id or f"workbench-dirty-{uuid4().hex}").strip()
-        try:
-            configured_limit = int(os.getenv("FIN_OPS_WORKBENCH_MATCHING_DIRTY_BATCH_SIZE", "10"))
-        except ValueError:
-            configured_limit = 10
-        resolved_limit = max(1, int(limit or configured_limit))
-        heartbeat_recorder = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None) or object()
-        worker = WorkbenchMatchingDirtyScopeWorker(
-            dirty_queue=queue,
-            matching_orchestrator=WorkbenchMatchingScopeRunnerAdapter(self._run_workbench_auto_matching_for_scopes),
-            source_versions_provider=self._workbench_matching_source_versions,
-            heartbeat_recorder=heartbeat_recorder,
-            config=WorkbenchMatchingDirtyScopeWorkerConfig(
-                worker_id=resolved_worker_id,
-                batch_size=resolved_limit,
-                lease_seconds=lease_seconds or 600,
-                retry_delay_seconds=retry_delay_seconds,
-                max_iterations=1,
-                request_id_factory=lambda: resolved_request_id,
-            ),
-        )
-        summary = worker.run_once()
-        if not summary.get("scope_months"):
-            return None
-        return summary
 
     def _expand_workbench_read_model_scope_keys_for_base_scopes(self, base_scope_keys: list[str]) -> list[str]:
         normalized_base_scope_keys = {
@@ -7509,8 +7367,6 @@ class Application:
             reload_percent = 15 if action == RESET_OA_AND_REBUILD_ACTION else 90
             progress("reload", "正在重新载入运行时服务。", reload_percent)
         self._reload_runtime_services()
-        if action == RESET_OA_AND_REBUILD_ACTION:
-            self._workbench_matching_dirty_scope_service = WorkbenchMatchingDirtyScopeService()
         lifecycle_summary = self._execute_derived_data_lifecycle_event(
             "settings_reset_completed",
             include_all=True,
@@ -10169,22 +10025,15 @@ class Application:
 
         queue = getattr(self, "_workbench_reconciliation_dirty_queue", None)
         mark_dirty_expanded = getattr(queue, "mark_dirty_expanded", None)
-        if callable(mark_dirty_expanded):
-            return list(
-                mark_dirty_expanded(
-                    normalized_months,
-                    reason=reason,
-                    source_versions=self._workbench_matching_source_versions(),
-                )
+        if not callable(mark_dirty_expanded):
+            raise RuntimeError("Durable Workbench matching dirty queue is unavailable.")
+        return list(
+            mark_dirty_expanded(
+                normalized_months,
+                reason=reason,
+                source_versions=self._workbench_matching_source_versions(),
             )
-
-        dirty_months = self._workbench_matching_dirty_scope_service.mark_dirty(
-            normalized_months,
-            reason=reason,
-            error=error,
         )
-        self._persist_workbench_matching_dirty_scopes_best_effort(operation=f"{reason}_legacy_dirty_scopes")
-        return dirty_months
 
     def _schedule_or_run_workbench_auto_matching_for_scopes(
         self,
@@ -10194,21 +10043,17 @@ class Application:
         request_id: str | None = None,
         progress_callback=None,
     ) -> dict[str, object] | None:
-        queue = getattr(self, "_workbench_reconciliation_dirty_queue", None)
-        if queue is not None:
-            queued_months = self._mark_workbench_matching_dirty_scopes(scope_months, reason=reason)
-            return {
-                "queued_months": queued_months,
-                "processed_months": [],
-                "candidate_count": 0,
-                "reason": reason,
-            }
-        return self._run_workbench_auto_matching_for_scopes(
-            scope_months,
-            reason=reason,
-            request_id=request_id,
-            progress_callback=progress_callback,
-        )
+        _ = request_id, progress_callback
+        queued_months = self._mark_workbench_matching_dirty_scopes(scope_months, reason=reason)
+        return {
+            "queued_months": queued_months,
+            "processed_months": [],
+            "planned_relation_count": 0,
+            "created_relation_count": 0,
+            "extended_relation_count": 0,
+            "blocked_count": 0,
+            "reason": reason,
+        }
 
     def _enqueue_workbench_auto_matching_for_scopes(
         self,
@@ -10228,7 +10073,7 @@ class Application:
         if not normalized_months:
             return None
 
-        label = "生成关联台候选"
+        label = "生成正式配对关系"
         job = self._background_job_service.create_job(
             job_type="workbench_matching",
             label=label,
@@ -10240,7 +10085,8 @@ class Application:
             result_summary={
                 "processed_months": [],
                 "affected_months": normalized_months,
-                "candidate_count": 0,
+                "planned_relation_count": 0,
+                "created_relation_count": 0,
             },
             source={
                 **(source or {}),
@@ -10255,13 +10101,14 @@ class Application:
             self._background_job_service.update_progress(
                 running_job.job_id,
                 phase="workbench_matching",
-                message=f"正在生成关联台候选：{', '.join(normalized_months)}。",
+                message=f"正在生成正式配对关系：{', '.join(normalized_months)}。",
                 current=0,
                 total=len(normalized_months),
                 result_summary={
                     "processed_months": [],
                     "affected_months": normalized_months,
-                    "candidate_count": 0,
+                    "planned_relation_count": 0,
+                    "created_relation_count": 0,
                 },
             )
 
@@ -10271,7 +10118,7 @@ class Application:
                 self._background_job_service.update_progress(
                     running_job.job_id,
                     phase="workbench_matching",
-                    message=f"正在生成关联台候选：{current_month or ', '.join(normalized_months)}。",
+                    message=f"正在生成正式配对关系：{current_month or ', '.join(normalized_months)}。",
                     current=len(processed_months),
                     total=len(normalized_months),
                     result_summary={
@@ -10300,7 +10147,7 @@ class Application:
             completion_message = (
                 f"关联台匹配已排队：{', '.join(queued_months)}。"
                 if queued_months
-                else f"关联台候选已生成：{', '.join(normalized_months)}。"
+                else f"关联台正式配对已完成：{', '.join(normalized_months)}。"
             )
             self._background_job_service.update_progress(
                 running_job.job_id,
@@ -10326,201 +10173,18 @@ class Application:
         requeue_on_error: bool = True,
         raise_on_error: bool = False,
     ) -> dict[str, object] | None:
-        normalized_months = [
-            str(month).strip()
-            for month in list(scope_months or [])
-            if SEARCH_MONTH_RE.match(str(month).strip())
-        ]
-        normalized_months = sorted(dict.fromkeys(normalized_months))
-        if not normalized_months:
-            return None
-        with self._workbench_matching_run_lock:
-            running_overlap = sorted(set(normalized_months).intersection(self._workbench_matching_running_scope_months))
-            if running_overlap:
-                if requeue_on_error:
-                    self._mark_workbench_matching_dirty_scopes(
-                        normalized_months,
-                        reason=f"{reason}_coalesced",
-                    )
-                if self._state_store is not None:
-                    self._persist_state()
-                if raise_on_error:
-                    raise RuntimeError(f"Workbench matching scopes already running: {', '.join(running_overlap)}")
-                return None
-            self._workbench_matching_running_scope_months.update(normalized_months)
-        try:
-            summary = self._workbench_matching_orchestrator.run(
-                changed_scope_months=normalized_months,
-                reason=reason,
-                request_id=request_id or f"workbench-match-{uuid4().hex}",
-                progress_callback=progress_callback,
-            )
-        except Exception as exc:
-            if requeue_on_error:
-                self._mark_workbench_matching_dirty_scopes(
-                    normalized_months,
-                    reason=reason,
-                    error=str(exc),
-                )
-            if self._state_store is not None:
-                self._persist_state()
-            warning_detail = (
-                f"queued dirty scopes after matching failure: {exc}"
-                if requeue_on_error
-                else f"matching failed without requeue; caller owns retry state: {exc}"
-            )
-            self._emit_workbench_persistence_warning(
-                operation=f"{reason}_auto_matching",
-                detail=warning_detail,
-            )
-            if raise_on_error:
-                raise
-            return None
-        finally:
-            with self._workbench_matching_run_lock:
-                for month in normalized_months:
-                    self._workbench_matching_running_scope_months.discard(month)
-        read_model_scope_keys = self._expand_workbench_read_model_scope_keys_for_base_scopes(normalized_months)
-        for scope_key in read_model_scope_keys:
-            self._workbench_read_model_service.delete_read_model(scope_key)
-        if self._state_store is not None:
-            self._persist_workbench_candidate_matches_best_effort(operation=f"{reason}_candidate_matches")
-            self._persist_workbench_read_models_best_effort(
-                snapshot=self._workbench_read_model_service.snapshot(),
-                changed_scope_keys=read_model_scope_keys,
-                operation=f"{reason}_invalidate_read_models",
-            )
-        self._search_service.clear_cache()
-        return summary
-
-    def _workbench_matching_rows_for_scope(self, scope_month: str) -> dict[str, list[dict[str, object]]]:
-        payload = self._build_raw_workbench_payload(scope_month, supplement_missing_pair_relation_rows=False)
-        oa_rows = self._workbench_matching_rows_from_payload(payload, "oa")
-        invoice_rows = self._workbench_matching_rows_from_payload(payload, "invoice")
-        bank_rows = self._workbench_matching_rows_from_payload(payload, "bank")
-        if self._should_include_cross_month_bank_rows(oa_rows, invoice_rows):
-            bank_rows.extend(self._workbench_matching_imported_bank_rows())
-        return {
-            "oa_rows": oa_rows,
-            "bank_rows": self._dedupe_workbench_matching_rows(bank_rows),
-            "invoice_rows": invoice_rows,
-        }
-
-    @staticmethod
-    def _should_include_cross_month_bank_rows(
-        oa_rows: list[dict[str, object]],
-        invoice_rows: list[dict[str, object]],
-    ) -> bool:
-        oa_ids = {
-            str(row.get("id") or row.get("row_id") or "").strip()
-            for row in oa_rows
-            if isinstance(row, dict)
-        }
-        if not oa_ids:
-            return False
-        for row in invoice_rows:
-            if not isinstance(row, dict):
-                continue
-            if str(row.get("source_kind") or "").strip() != "oa_attachment_invoice":
-                continue
-            linked_oa_id = str(row.get("derived_from_oa_id") or row.get("oa_row_id") or row.get("oa_id") or "").strip()
-            if linked_oa_id in oa_ids:
-                return True
-        return False
-
-    def _workbench_matching_imported_bank_rows(self) -> list[dict[str, object]]:
-        rows: list[dict[str, object]] = []
-        for transaction in self._import_service.list_transactions():
-            direction = str(getattr(transaction, "txn_direction", "") or "").strip()
-            amount = getattr(transaction, "amount", None)
-            if amount is None:
-                continue
-            amount_text = str(amount)
-            debit_amount = amount_text if direction == "outflow" else ""
-            credit_amount = amount_text if direction == "inflow" else ""
-            if not debit_amount and not credit_amount:
-                continue
-            trade_time = (
-                str(getattr(transaction, "trade_time", None) or "")
-                or str(getattr(transaction, "pay_receive_time", None) or "")
-                or str(getattr(transaction, "txn_date", None) or "")
-            )
-            category = self._bank_transaction_category_service.get(str(getattr(transaction, "id", "") or ""))
-            category_code = str(category.get("category_code") or "").strip()
-            category_label = str(category.get("category_label") or "").strip()
-            category_path = [
-                str(item).strip()
-                for item in list(category.get("category_path") or [])
-                if str(item).strip()
-            ]
-            rows.append(
-                {
-                    "id": str(getattr(transaction, "id", "") or ""),
-                    "type": "bank",
-                    "case_id": None,
-                    "trade_time": trade_time,
-                    "pay_receive_time": str(getattr(transaction, "pay_receive_time", None) or trade_time),
-                    "account_no": str(getattr(transaction, "account_no", None) or ""),
-                    "account_name": str(getattr(transaction, "account_name", None) or ""),
-                    "counterparty_account_no": str(getattr(transaction, "counterparty_account_no", None) or ""),
-                    "debit_amount": debit_amount,
-                    "credit_amount": credit_amount,
-                    "counterparty_name": str(getattr(transaction, "counterparty_name_raw", None) or ""),
-                    "summary": str(getattr(transaction, "summary", None) or ""),
-                    "remark": str(getattr(transaction, "remark", None) or ""),
-                    "category_code": category_code,
-                    "category_label": category_label,
-                    "category_path": category_path,
-                    "category_source": str(category.get("source") or "").strip(),
-                }
-            )
-        return self._dedupe_workbench_matching_rows(rows)
-
-    @staticmethod
-    def _workbench_matching_rows_from_payload(
-        payload: dict[str, object],
-        row_type: str,
-    ) -> list[dict[str, object]]:
-        rows: list[dict[str, object]] = []
-        for section_name in ("paired", "open"):
-            section = payload.get(section_name)
-            if isinstance(section, dict):
-                section_rows = section.get(row_type)
-                if isinstance(section_rows, list):
-                    rows.extend(row for row in section_rows if isinstance(row, dict))
-                groups = section.get("groups")
-                if isinstance(groups, list):
-                    for group in groups:
-                        if not isinstance(group, dict):
-                            continue
-                        group_rows = group.get(f"{row_type}_rows")
-                        if isinstance(group_rows, list):
-                            rows.extend(row for row in group_rows if isinstance(row, dict))
-        return Application._dedupe_workbench_matching_rows(rows)
-
-    @staticmethod
-    def _dedupe_workbench_matching_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
-        seen: set[str] = set()
-        deduped: list[dict[str, object]] = []
-        for row in rows:
-            row_id = str(row.get("id") or row.get("row_id") or "").strip()
-            if row_id and row_id not in seen:
-                seen.add(row_id)
-                deduped.append(row)
-        return deduped
-
-    def _workbench_matching_settings(self) -> dict[str, object]:
-        return {
-            "offset_applicant_names": self._app_settings_service.get_oa_invoice_offset_applicant_names(),
-        }
+        _ = request_id, progress_callback, requeue_on_error, raise_on_error
+        return self._schedule_or_run_workbench_auto_matching_for_scopes(
+            scope_months,
+            reason=reason,
+        )
 
     def _workbench_matching_source_versions(self) -> dict[str, object]:
         parser_version = self._current_oa_attachment_invoice_parser_version()
         projection_sync_version = self._current_oa_projection_sync_version()
         payload: dict[str, object] = {
             "workbench_read_model_schema_version": WORKBENCH_READ_MODEL_SCHEMA_VERSION,
-            "workbench_candidate_match_schema_version": CANDIDATE_MATCH_SCHEMA_VERSION,
-            "workbench_matching_rules_version": WORKBENCH_MATCHING_RULES_VERSION,
+            "workbench_formal_relation_rule_version": WORKBENCH_FORMAL_RELATION_RULE_VERSION,
             "workbench_exception_rules_version": WORKBENCH_EXCEPTION_RULE_VERSION,
             "workbench_exception_projection_version": EXCEPTION_PROJECTION_VERSION,
             "bank_auto_tag_rules_version": self._current_bank_auto_tag_rules_version(),
@@ -10554,7 +10218,7 @@ class Application:
         )
         payload: dict[str, object] = {
             "builder": builder_version,
-            "workbench_matching_rules_version": WORKBENCH_MATCHING_RULES_VERSION,
+            "workbench_formal_relation_rule_version": WORKBENCH_FORMAL_RELATION_RULE_VERSION,
             "bank_auto_tag_rules_version": self._current_bank_auto_tag_rules_version(),
         }
         parser_version = self._current_oa_attachment_invoice_parser_version()
@@ -10655,13 +10319,10 @@ class Application:
                 self._workbench_exception_case_service.snapshot()
             ),
             "pair_relation_snapshot_version": relation_source_versions.pair_relation_snapshot_version(),
-            "candidate_snapshot_version": WorkbenchReadModelService.snapshot_version(
-                self._workbench_candidate_match_service.snapshot()
-            ),
             "turnover_relation_snapshot_version": WorkbenchReadModelService.snapshot_version(
                 self._turnover_relation_snapshot_for_workbench()
             ),
-            "matching_rules_version": WORKBENCH_MATCHING_RULES_VERSION,
+            "workbench_formal_relation_rule_version": WORKBENCH_FORMAL_RELATION_RULE_VERSION,
             "bank_auto_tag_rules_version": self._current_bank_auto_tag_rules_version(),
         }
         parser_version = self._current_oa_attachment_invoice_parser_version()
@@ -10709,32 +10370,6 @@ class Application:
     def _active_turnover_relations_for_workbench(self) -> list[dict[str, object]]:
         return []
 
-    def _persist_workbench_candidate_matches_best_effort(
-        self,
-        *,
-        operation: str,
-        changed_scope_months: list[str] | None = None,
-    ) -> None:
-        if self._state_store is None:
-            return
-        try:
-            self._state_store.save_workbench_candidate_matches(
-                self._workbench_candidate_match_service.snapshot(),
-                changed_scope_months=changed_scope_months,
-            )
-        except Exception as exc:
-            self._emit_workbench_persistence_warning(operation=operation, detail=str(exc))
-
-    def _persist_workbench_matching_dirty_scopes_best_effort(self, *, operation: str) -> None:
-        if self._state_store is None:
-            return
-        try:
-            self._state_store.save_workbench_matching_dirty_scopes(
-                self._workbench_matching_dirty_scope_service.snapshot()
-            )
-        except Exception as exc:
-            self._emit_workbench_persistence_warning(operation=operation, detail=str(exc))
-
     def _persist_turnover_relations_best_effort(self, *, operation: str) -> None:
         if self._state_store is None:
             return
@@ -10769,8 +10404,6 @@ class Application:
             ("save_workbench_overrides", self._workbench_override_service.snapshot()),
             ("save_workbench_exception_cases", self._workbench_exception_case_service.snapshot()),
             ("save_workbench_read_models", self._workbench_read_model_service.snapshot()),
-            ("save_workbench_candidate_matches", self._workbench_candidate_match_service.snapshot()),
-            ("save_workbench_matching_dirty_scopes", self._workbench_matching_dirty_scope_service.snapshot()),
             ("save_turnover_relations", self._turnover_relation_service.snapshot()),
             ("save_turnover_ledger_extras", self._turnover_ledger_api_routes.extras_snapshot()),
             ("save_pending_invoice_commands", dict(getattr(self, "_pending_invoice_commands", {}) or {})),
@@ -10929,24 +10562,6 @@ class Application:
             changed_case_ids={str(case_id) for case_id in list(changed_case_ids or []) if str(case_id).strip()}
             if changed_case_ids is not None
             else None,
-        )
-
-    def _consume_workbench_reconciliation_decisions_in_transaction(
-        self,
-        *,
-        transaction: object,
-        row_ids: list[str],
-        relation_id: str,
-    ) -> int:
-        if transaction is None:
-            raise StatePersistenceError("transaction is required for Workbench reconciliation decision consumption.")
-        return int(
-            PostgresReadModelRepository(transaction).consume_workbench_reconciliation_decisions_by_row_ids(
-                tenant_id=self._workbench_reconciliation_tenant_id(),
-                row_ids=row_ids,
-                relation_id=relation_id,
-            )
-            or 0
         )
 
     def _schedule_workbench_pair_relation_persist(
@@ -11134,36 +10749,8 @@ class Application:
         sql_result = self._rebuild_workbench_sql_projection_scope(normalized_scope_key)
         if sql_result is not None:
             return sql_result
-        base_scope_key = self._workbench_read_model_base_scope_key(normalized_scope_key)
-        raw_payload = self._build_raw_workbench_payload(base_scope_key)
-        candidate_payload = self._apply_candidate_matches_to_payload(raw_payload, base_scope_key)
-        grouped_payload = self._group_row_payload(
-            candidate_payload,
-            turnover_relations=self._active_turnover_relations_for_workbench(),
-        )
-        self._apply_workbench_runtime_metadata(grouped_payload, base_scope_key)
-        ignored_rows = self._extract_ignored_rows(candidate_payload)
-        read_model = self._workbench_read_model_service.upsert_read_model(
-            scope_key=normalized_scope_key,
-            payload=grouped_payload,
-            ignored_rows=ignored_rows,
-            source_versions=self._workbench_read_model_source_versions(),
-        )
-        if persist:
-            self._persist_workbench_read_models_best_effort(
-                snapshot=self._workbench_read_model_service.snapshot_scope_keys([normalized_scope_key]),
-                changed_scope_keys=[normalized_scope_key],
-                operation="worker_rebuild_read_model_scope",
-            )
-        payload = read_model.get("payload") if isinstance(read_model, dict) else grouped_payload
-        row_count = sum(self._workbench_grouped_summary(payload if isinstance(payload, dict) else {}).values())
-        return {
-            "scope_key": normalized_scope_key,
-            "base_scope_key": base_scope_key,
-            "row_count": row_count,
-            "ignored_row_count": len(ignored_rows),
-            "projection": "legacy",
-        }
+        _ = persist
+        raise RuntimeError("Workbench read-model rebuild requires the SQL projection builder.")
 
     def _rebuild_workbench_sql_projection_scope(self, scope_key: str) -> dict[str, object] | None:
         builder = getattr(self, "_workbench_sql_projection_builder", None)
@@ -11320,13 +10907,11 @@ class Application:
         month: str,
         *,
         visibility_key: str = "global",
-        ensure_candidate_matches: bool = False,
     ) -> dict[str, object]:
         read_model_scope_key = self._workbench_read_model_scope_key(month, visibility_key=visibility_key)
         read_model_source_versions = self._workbench_read_model_source_versions()
         cached_read_model = self._workbench_read_model_service.get_read_model(read_model_scope_key)
         fallback_read_model: dict[str, object] | None = None
-        candidate_freshness_checked = False
         if isinstance(cached_read_model, dict):
             cached_payload = cached_read_model.get("payload")
             cached_ignored_rows = cached_read_model.get("ignored_rows")
@@ -11339,16 +10924,6 @@ class Application:
                 read_model_source_versions,
             ):
                 is_version_fresh = True
-            if (
-                ensure_candidate_matches
-                and isinstance(cached_payload, dict)
-                and str(cached_payload.get("workbench_candidate_snapshot_hash") or "").strip()
-            ):
-                self._ensure_workbench_candidate_matches_for_scope(
-                    month,
-                    reason="workbench_read_model_candidate_freshness",
-                )
-                candidate_freshness_checked = True
             if (
                 isinstance(cached_payload, dict)
                 and isinstance(cached_ignored_rows, list)
@@ -11363,21 +10938,14 @@ class Application:
             ):
                 fallback_read_model = cached_read_model
 
-        if ensure_candidate_matches and not candidate_freshness_checked:
-            self._ensure_workbench_candidate_matches_for_scope(
-                month,
-                reason="workbench_read_model_candidate_freshness",
-            )
-
         raw_payload = self._build_raw_workbench_payload(month)
         relation_payload = self._apply_pair_relations_to_payload(raw_payload)
-        candidate_payload = self._apply_candidate_matches_to_payload(relation_payload, month)
         grouped_payload = self._group_row_payload(
-            candidate_payload,
+            relation_payload,
             turnover_relations=self._active_turnover_relations_for_workbench(),
         )
         self._apply_workbench_runtime_metadata(grouped_payload, month)
-        ignored_rows = self._extract_ignored_rows(candidate_payload)
+        ignored_rows = self._extract_ignored_rows(relation_payload)
         if not self._can_persist_workbench_payload(grouped_payload):
             if fallback_read_model is not None:
                 return self._sanitize_workbench_read_model_for_return(fallback_read_model)
@@ -11404,11 +10972,7 @@ class Application:
         return read_model
 
     def _sanitize_workbench_read_model_for_return(self, read_model: dict[str, object]) -> dict[str, object]:
-        result = self._serialize_value(read_model)
-        payload = result.get("payload")
-        if isinstance(payload, dict):
-            WorkbenchSqlProjectionBuilder._demote_visible_candidate_groups(payload)
-        return result
+        return self._serialize_value(read_model)
 
     def _get_persisted_workbench_read_model(self, month: str, *, visibility_key: str = "global") -> dict[str, object]:
         read_model_scope_key = self._workbench_read_model_scope_key(month, visibility_key=visibility_key)
@@ -11433,39 +10997,6 @@ class Application:
             current_source_versions.get("turnover_relation_snapshot_version")
             == empty_turnover_snapshot_version
         )
-
-    def _ensure_workbench_candidate_matches_for_scope(self, month: str, *, reason: str) -> None:
-        source_versions = self._workbench_matching_source_versions()
-        scope_months = self._workbench_candidate_scope_months(month)
-        stale_months = self._workbench_candidate_match_service.stale_scope_months(
-            scope_months,
-            source_versions=source_versions,
-        )
-        if not stale_months:
-            return
-        self._schedule_or_run_workbench_auto_matching_for_scopes(
-            stale_months,
-            reason=reason,
-        )
-
-    def _workbench_candidate_scope_months(self, month: str) -> list[str]:
-        normalized_month = str(month or "").strip()
-        if SEARCH_MONTH_RE.match(normalized_month):
-            return [normalized_month]
-        if normalized_month == "all":
-            snapshot = self._workbench_candidate_match_service.snapshot()
-            candidate_snapshot = snapshot.get("candidates")
-            candidates = candidate_snapshot if isinstance(candidate_snapshot, dict) else {}
-            months = {
-                str(candidate.get("scope_month") or "").strip()
-                for candidate in candidates.values()
-                if isinstance(candidate, dict)
-            }
-            scope_runs = snapshot.get("scope_runs")
-            if isinstance(scope_runs, dict):
-                months.update(str(scope_month or "").strip() for scope_month in scope_runs.keys())
-            return sorted(month for month in months if SEARCH_MONTH_RE.match(month))
-        return []
 
     def _build_api_workbench_payload(self, month: str, *, visibility_key: str = "global") -> dict[str, object]:
         return self._workbench_api_payload_assembler().build(month, visibility_key=visibility_key)
@@ -11494,7 +11025,7 @@ class Application:
     @staticmethod
     def _count_oa_attachment_invoice_rows(grouped_payload: dict[str, object]) -> int:
         count = 0
-        for section in ("paired", "open"):
+        for section in ("paired", "unpaired"):
             section_payload = grouped_payload.get(section)
             if not isinstance(section_payload, dict):
                 continue
@@ -11514,7 +11045,7 @@ class Application:
         if not summary_rows_by_external_batch_id and not supplement_rows_by_external_batch_id:
             return
         appended_external_batch_ids: set[str] = set()
-        for section in ("paired", "open"):
+        for section in ("paired", "unpaired"):
             section_payload = payload.get(section)
             if not isinstance(section_payload, dict):
                 continue
@@ -11563,10 +11094,10 @@ class Application:
         ) - appended_external_batch_ids
         if not missing_external_batch_ids:
             return
-        open_section = payload.setdefault("open", {"groups": []})
-        if not isinstance(open_section, dict):
+        unpaired_section = payload.setdefault("unpaired", {"groups": []})
+        if not isinstance(unpaired_section, dict):
             return
-        groups = open_section.setdefault("groups", [])
+        groups = unpaired_section.setdefault("groups", [])
         if not isinstance(groups, list):
             return
         for external_batch_id in sorted(missing_external_batch_ids):
@@ -11943,17 +11474,12 @@ class Application:
         return f"{value.quantize(Decimal('0.01')):,.2f}"
 
     def _apply_workbench_runtime_metadata(self, payload: dict[str, object], month: str) -> None:
+        _ = month
         payload["workbench_read_model_schema_version"] = WORKBENCH_READ_MODEL_SCHEMA_VERSION
-        payload["workbench_candidate_match_schema_version"] = CANDIDATE_MATCH_SCHEMA_VERSION
-        payload["workbench_matching_rules_version"] = WORKBENCH_MATCHING_RULES_VERSION
-        payload["workbench_candidate_snapshot_hash"] = self._workbench_candidate_snapshot_hash(month)
+        payload["workbench_formal_relation_rule_version"] = WORKBENCH_FORMAL_RELATION_RULE_VERSION
         parser_version = self._current_oa_attachment_invoice_parser_version()
         if parser_version:
             payload["oa_attachment_invoice_parser_version"] = parser_version
-
-    def _workbench_candidate_snapshot_hash(self, month: str) -> str:
-        _ = month
-        return "visible-linked-relations-v1"
 
     def _current_oa_attachment_invoice_parser_version(self) -> str:
         return attachment_invoice_cache_parser_version()
@@ -12064,7 +11590,6 @@ class Application:
         if assembler is None:
             assembler = WorkbenchRawPayloadAssembler(
                 has_live_rows_for_month=lambda month: self._live_workbench_service.has_rows_for_month(month),
-                sync_live_auto_pair_relations=self._sync_live_auto_pair_relations,
                 build_live_workbench_row_payload=self._build_live_workbench_row_payload,
                 build_oa_workbench_row_payload=self._build_oa_workbench_row_payload,
                 sync_oa_invoice_offset_auto_pair_relations=self._sync_oa_invoice_offset_auto_pair_relations,
@@ -12340,10 +11865,9 @@ class Application:
         turnover_relations: list[dict[str, object]] | None = None,
     ) -> dict[str, object]:
         grouped = WorkbenchGroupRowPayloadHelper(
-            grouping_service=WorkbenchCandidateGroupingService(),
+            grouping_service=WorkbenchRelationGroupingService(),
             serialize_value=Application._serialize_value,
         ).group(payload, turnover_relations=turnover_relations)
-        WorkbenchSqlProjectionBuilder._demote_visible_candidate_groups(grouped)
         return grouped
 
     def _can_use_cached_workbench_payload(self, payload: dict[str, object]) -> bool:
@@ -12364,11 +11888,8 @@ class Application:
             helper = WorkbenchCacheReadPayloadHelper(
                 is_mongo_oa_adapter=self._workbench_cache_uses_strict_oa_source_gates,
                 cached_payload_needs_oa_invoice_offset_rebuild=self._cached_payload_needs_oa_invoice_offset_rebuild,
-                workbench_candidate_snapshot_hash=self._workbench_candidate_snapshot_hash,
                 current_oa_attachment_invoice_parser_version=self._current_oa_attachment_invoice_parser_version,
                 workbench_read_model_schema_version=WORKBENCH_READ_MODEL_SCHEMA_VERSION,
-                candidate_match_schema_version=CANDIDATE_MATCH_SCHEMA_VERSION,
-                workbench_matching_rules_version=WORKBENCH_MATCHING_RULES_VERSION,
             )
             self._workbench_cache_read_payload_helper_instance = helper
         return helper
@@ -12399,7 +11920,7 @@ class Application:
         manual_retained_oa_row_ids = set(self._manual_retained_oa_row_ids())
         result = self._serialize_value(payload)
         changed = False
-        for section in ("paired", "open"):
+        for section in ("paired", "unpaired"):
             section_payload = result.setdefault(section, {})
             original_groups = list(section_payload.get("groups", []))
             filtered_groups: list[dict[str, object]] = []
@@ -12467,15 +11988,15 @@ class Application:
     @staticmethod
     def _workbench_grouped_summary(payload: dict[str, object]) -> dict[str, int]:
         paired_groups = list(payload.get("paired", {}).get("groups", []))
-        open_groups = list(payload.get("open", {}).get("groups", []))
-        all_groups = [*paired_groups, *open_groups]
+        unpaired_groups = list(payload.get("unpaired", {}).get("groups", []))
+        all_groups = [*paired_groups, *unpaired_groups]
         return {
             "oa_count": sum(len(group.get("oa_rows", [])) for group in all_groups),
             "bank_count": sum(len(group.get("bank_rows", [])) for group in all_groups),
             "invoice_count": sum(len(group.get("invoice_rows", [])) for group in all_groups),
             "paired_count": len(paired_groups),
-            "open_count": len(open_groups),
-            "exception_count": sum(1 for group in open_groups if Application._group_has_danger_relation(group)),
+            "unpaired_count": len(unpaired_groups),
+            "exception_count": sum(1 for group in unpaired_groups if Application._group_has_danger_relation(group)),
         }
 
     @staticmethod
@@ -12499,34 +12020,35 @@ class Application:
     ) -> dict[str, object]:
         result = self._serialize_value(payload)
         paired_section = result.setdefault("paired", {})
-        open_section = result.setdefault("open", {})
+        unpaired_section = result.setdefault("unpaired", {})
         if supplement_missing_rows:
-            self._supplement_missing_active_pair_relation_rows(paired_section, open_section)
+            self._supplement_missing_active_pair_relation_rows(paired_section, unpaired_section)
         relation_read_port = self._workbench_payload_relation_read_port()
         for row_type in ("oa", "bank", "invoice"):
             source_paired_rows = list(paired_section.get(row_type, []))
-            source_open_rows = list(open_section.get(row_type, []))
+            source_unpaired_rows = list(unpaired_section.get(row_type, []))
             patched_paired_rows: list[dict[str, object]] = []
-            patched_open_rows: list[dict[str, object]] = []
-            for row in [*source_paired_rows, *source_open_rows]:
+            patched_unpaired_rows: list[dict[str, object]] = []
+            for row in [*source_paired_rows, *source_unpaired_rows]:
                 relation = relation_read_port.get_active_relation_by_row_id(str(row.get("id", "")))
                 if isinstance(relation, dict):
                     patched_paired_rows.append(self._apply_pair_relation_to_row(row, relation))
-                elif row in source_paired_rows:
-                    patched_paired_rows.append(self._serialize_value(row))
                 else:
-                    patched_open_rows.append(self._serialize_value(row))
+                    normalized_row = self._serialize_value(row)
+                    normalized_row["status"] = "unpaired"
+                    normalized_row["case_id"] = None
+                    patched_unpaired_rows.append(normalized_row)
             paired_section[row_type] = patched_paired_rows
-            open_section[row_type] = patched_open_rows
+            unpaired_section[row_type] = patched_unpaired_rows
         return result
 
     def _supplement_missing_active_pair_relation_rows(
         self,
         paired_section: dict[str, object],
-        open_section: dict[str, object],
+        unpaired_section: dict[str, object],
     ) -> None:
         rows_by_id: dict[str, dict[str, object]] = {}
-        for section in (paired_section, open_section):
+        for section in (paired_section, unpaired_section):
             for row_type in ("oa", "bank", "invoice"):
                 for row in list(section.get(row_type) or []):
                     if not isinstance(row, dict):
@@ -12558,9 +12080,9 @@ class Application:
             row_type = str(row.get("type") or self._row_type_for_row_id(row_id)).strip()
             if not row_id or row_id in rows_by_id or row_type not in {"oa", "bank", "invoice"}:
                 continue
-            open_rows = open_section.setdefault(row_type, [])
-            if isinstance(open_rows, list):
-                open_rows.append(self._serialize_value(row))
+            unpaired_rows = unpaired_section.setdefault(row_type, [])
+            if isinstance(unpaired_rows, list):
+                unpaired_rows.append(self._serialize_value(row))
                 rows_by_id[row_id] = row
 
     def _resolve_pair_relation_rows_best_effort(self, row_ids: list[str]) -> list[dict[str, object]]:
@@ -12583,10 +12105,6 @@ class Application:
             seen.add(normalized)
             result.append(normalized)
         return result
-
-    def _apply_candidate_matches_to_payload(self, payload: dict[str, object], month: str) -> dict[str, object]:
-        _ = month
-        return self._serialize_value(payload)
 
     def _sync_oa_invoice_offset_auto_pair_relations(self, payload: dict[str, object]) -> None:
         self._workbench_oa_invoice_offset_sync_executor().sync(payload)
@@ -12819,7 +12337,6 @@ class Application:
         executors = {
             "workbench_read_model": self._derived_lifecycle_workbench_read_model_executor,
             "workbench_relation_read_model": self._workbench_relation_derived_lifecycle_executor().execute,
-            "workbench_candidate_matches": self._derived_lifecycle_candidate_matches_executor,
             "workbench_matching_dirty_scopes": self._derived_lifecycle_dirty_scopes_executor,
             "invoice_lifecycle_read_model": self._invoice_lifecycle_derived_lifecycle_executor().execute,
             "cost_statistics_read_model": lambda domain_plan: self._cost_statistics_derived_lifecycle_executor().execute(
@@ -12908,28 +12425,6 @@ class Application:
         if not refresh_gateway.can_enqueue():
             return False
         return bool(refresh_gateway.enqueue_many(scope_type, scope_keys, reason=reason, metadata=metadata))
-
-    def _derived_lifecycle_candidate_matches_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
-        scope_keys = self._domain_plan_scope_keys(domain_plan)
-        months = self._months_from_lifecycle_scope_keys(scope_keys)
-        if months:
-            deleted_candidate_keys = []
-            for month in months:
-                deleted_candidate_keys.extend(self._workbench_candidate_match_service.delete_month(month))
-            self._persist_workbench_candidate_matches_best_effort(
-                operation="derived_lifecycle_candidate_matches",
-                changed_scope_months=months,
-            )
-        elif "all" in scope_keys:
-            deleted_candidate_keys = self._workbench_candidate_match_service.clear()
-            if deleted_candidate_keys:
-                self._persist_workbench_candidate_matches_best_effort(operation="derived_lifecycle_candidate_matches")
-        else:
-            deleted_candidate_keys = []
-        return {
-            "deleted_counts": {"workbench_candidate_matches": len(deleted_candidate_keys)},
-            "invalidated_scopes": deleted_candidate_keys,
-        }
 
     def _derived_lifecycle_dirty_scopes_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
         scope_keys = self._domain_plan_scope_keys(domain_plan)
@@ -13546,7 +13041,7 @@ class Application:
 
     def _apply_grouped_row_overrides(self, payload: dict[str, object]) -> dict[str, object]:
         result = self._serialize_value(payload)
-        for section in ("paired", "open"):
+        for section in ("paired", "unpaired"):
             section_payload = result.get(section, {})
             groups = list(section_payload.get("groups", []))
             normalized_groups = []
@@ -13563,7 +13058,7 @@ class Application:
 
     def _grouped_rows_by_id(self, payload: dict[str, object]) -> dict[str, dict[str, object]]:
         rows_by_id: dict[str, dict[str, object]] = {}
-        for section in ("paired", "open"):
+        for section in ("paired", "unpaired"):
             section_payload = payload.get(section, {})
             if not isinstance(section_payload, dict):
                 continue
@@ -13644,6 +13139,13 @@ class Application:
             self._row_type_for_row_id(row_id) == "bank"
             for row_id in expanded_row_ids
         )
+        for context_row_id in self._cached_oa_attachment_context_row_ids(
+            selected_row_ids=seen,
+            selected_oa_source_ids=selected_oa_source_ids,
+            has_selected_bank_context=has_selected_bank_context,
+            month_hint=month,
+        ):
+            add(context_row_id)
         for group in self._cached_existing_context_groups_for_row_ids(expanded_row_ids, month_hint=month):
             for context_row_id in self._confirm_link_context_row_ids_to_preserve(
                 group,
@@ -13653,6 +13155,40 @@ class Application:
             ):
                 add(context_row_id)
         return expanded_row_ids
+
+    def _cached_oa_attachment_context_row_ids(
+        self,
+        *,
+        selected_row_ids: set[str],
+        selected_oa_source_ids: set[str],
+        has_selected_bank_context: bool,
+        month_hint: str,
+    ) -> list[str]:
+        if not has_selected_bank_context:
+            return []
+        scope_keys = [str(month_hint or "").strip() or "all"]
+        if scope_keys[0] != "all":
+            scope_keys.append("all")
+        rows_by_id: dict[str, dict[str, object]] = {}
+        row_index = self._workbench_oa_attachment_context_row_index()
+        for scope_key in scope_keys:
+            read_model = self._workbench_read_model_service.get_read_model(scope_key)
+            payload = read_model.get("payload") if isinstance(read_model, dict) else None
+            if isinstance(payload, dict):
+                rows_by_id.update(row_index.grouped_payload_rows_by_id(payload))
+        attachment_ids_by_oa_id = row_index.attachment_row_ids_by_oa_id(rows_by_id)
+        selected_attachment_ids = {
+            row_id
+            for row_id in selected_row_ids
+            if row_index.invoice_row_is_attachment_context(rows_by_id.get(row_id, {}))
+        }
+        result: list[str] = []
+        for oa_row_id, attachment_row_ids in sorted(attachment_ids_by_oa_id.items()):
+            if oa_row_id not in selected_oa_source_ids and selected_attachment_ids.isdisjoint(attachment_row_ids):
+                continue
+            result.append(oa_row_id)
+            result.extend(attachment_row_ids)
+        return self._normalize_row_ids(result) if result else []
 
     def _confirm_link_selected_oa_source_ids(
         self,
@@ -13717,7 +13253,7 @@ class Application:
             payload = read_model.get("payload")
             if not isinstance(payload, dict):
                 continue
-            for section_name in ("paired", "open"):
+            for section_name in ("paired", "unpaired"):
                 section_payload = payload.get(section_name)
                 if not isinstance(section_payload, dict):
                     continue
@@ -13745,7 +13281,7 @@ class Application:
         if reason in {"relation_snapshot", "oa_attachment_source_relation"}:
             return True
         group_type = str(group.get("group_type") or "").strip()
-        if group_type in {"", "candidate", "selection", "processed_exception"}:
+        if group_type in {"", "unpaired", "selection", "processed_exception"}:
             return False
         if reason in {"selected_row", "selected_rows"}:
             return False
@@ -13909,128 +13445,6 @@ class Application:
                 has_credit = True
         return has_debit and has_credit and debit_total == credit_total
 
-    def _relation_groups(
-        self,
-        relations: list[dict[str, object]],
-        *,
-        selected_rows: list[dict[str, object]],
-        ungrouped_selected_rows: str = "single",
-    ) -> list[dict[str, object]]:
-        rows_by_id = {str(row.get("id", "")): self._serialize_value(row) for row in selected_rows}
-        groups: list[dict[str, object]] = []
-        grouped_row_ids: set[str] = set()
-        for relation in relations:
-            group = {
-                "group_id": f"case:{relation.get('case_id', '')}",
-                "group_type": str(relation.get("relation_mode") or "manual_confirmed"),
-                "match_confidence": "high",
-                "reason": "relation_snapshot",
-                "special_metadata": self._serialize_value(relation.get("special_metadata") or {}),
-                "oa_rows": [],
-                "bank_rows": [],
-                "invoice_rows": [],
-            }
-            row_ids = [str(row_id) for row_id in list(relation.get("row_ids") or [])]
-            row_types = [str(row_type) for row_type in list(relation.get("row_types") or [])]
-            relation_grouped_row_ids: set[str] = set()
-            for index, row_id in enumerate(row_ids):
-                if not row_id or row_id in relation_grouped_row_ids:
-                    continue
-                relation_grouped_row_ids.add(row_id)
-                grouped_row_ids.add(row_id)
-                row_type = row_types[index] if index < len(row_types) else self._row_type_for_row_id(row_id)
-                row = dict(rows_by_id.get(row_id) or {"id": row_id, "type": row_type})
-                row["case_id"] = str(relation.get("case_id") or "")
-                if isinstance(relation.get("special_metadata"), dict):
-                    row["special_metadata"] = self._serialize_value(relation.get("special_metadata") or {})
-                row["tags"] = self._derive_workbench_row_tags(row, group, relation)
-                if row_type == "oa":
-                    group["oa_rows"].append(row)
-                elif row_type == "bank":
-                    group["bank_rows"].append(row)
-                elif row_type == "invoice":
-                    group["invoice_rows"].append(row)
-            groups.append(group)
-        ungrouped_rows = [
-            row
-            for row in selected_rows
-            if str(row.get("id", "")).strip() and str(row.get("id", "")).strip() not in grouped_row_ids
-        ]
-        if ungrouped_selected_rows == "individual":
-            for row in ungrouped_rows:
-                row_id = str(row.get("id", "")).strip()
-                if not row_id:
-                    continue
-                group = {
-                    "group_id": f"selected:{row_id}",
-                    "group_type": "selection",
-                    "match_confidence": "low",
-                    "reason": "selected_row",
-                    "oa_rows": [],
-                    "bank_rows": [],
-                    "invoice_rows": [],
-                }
-                preview_row = dict(row)
-                preview_row["case_id"] = ""
-                preview_row["tags"] = []
-                preview_row["oa_bank_relation"] = None
-                preview_row["invoice_relation"] = None
-                preview_row["invoice_bank_relation"] = None
-                row_type = str(preview_row.get("type", ""))
-                if row_type == "oa":
-                    group["oa_rows"].append(preview_row)
-                elif row_type == "bank":
-                    group["bank_rows"].append(preview_row)
-                elif row_type == "invoice":
-                    group["invoice_rows"].append(preview_row)
-                groups.append(group)
-        elif ungrouped_selected_rows == "separate":
-            selected_groups: dict[str, dict[str, object]] = {str(group.get("group_id", "")): group for group in groups}
-            for row in ungrouped_rows:
-                row_id = str(row.get("id", "")).strip()
-                case_id = str(row.get("case_id") or "").strip()
-                group_id = f"case:{case_id}" if case_id else f"selected:{row_id}"
-                group = selected_groups.get(group_id)
-                if group is None:
-                    group = {
-                        "group_id": group_id,
-                        "group_type": "selection",
-                        "match_confidence": "low",
-                        "reason": "selected_existing_case" if case_id else "selected_row",
-                        "oa_rows": [],
-                        "bank_rows": [],
-                        "invoice_rows": [],
-                    }
-                    selected_groups[group_id] = group
-                    groups.append(group)
-                row_type = str(row.get("type", ""))
-                if row_type == "oa":
-                    group["oa_rows"].append(row)
-                elif row_type == "bank":
-                    group["bank_rows"].append(row)
-                elif row_type == "invoice":
-                    group["invoice_rows"].append(row)
-        elif not groups and ungrouped_rows:
-            group = {
-                "group_id": "selected",
-                "group_type": "selection",
-                "match_confidence": "low",
-                "reason": "selected_rows",
-                "oa_rows": [],
-                "bank_rows": [],
-                "invoice_rows": [],
-            }
-            for row in ungrouped_rows:
-                row_type = str(row.get("type", ""))
-                if row_type == "oa":
-                    group["oa_rows"].append(row)
-                elif row_type == "bank":
-                    group["bank_rows"].append(row)
-                elif row_type == "invoice":
-                    group["invoice_rows"].append(row)
-            groups.append(group)
-        return groups
-
     def _withdraw_rows_and_after_relations(
         self,
         *,
@@ -14101,7 +13515,7 @@ class Application:
 
     def _derive_tags_for_grouped_payload(self, payload: dict[str, object]) -> dict[str, object]:
         result = self._serialize_value(payload)
-        for section in ("paired", "open"):
+        for section in ("paired", "unpaired"):
             section_payload = result.get(section, {})
             if not isinstance(section_payload, dict):
                 continue
@@ -14268,7 +13682,7 @@ class Application:
             return None
 
     def _group_for_row_id(self, payload: dict[str, object], row_id: str) -> dict[str, object] | None:
-        for section in ("paired", "open"):
+        for section in ("paired", "unpaired"):
             section_payload = payload.get(section, {})
             for group in section_payload.get("groups", []):
                 for key in ("oa_rows", "bank_rows", "invoice_rows"):
@@ -14465,22 +13879,13 @@ class Application:
     @staticmethod
     def _extract_ignored_rows(payload: dict[str, object]) -> list[dict[str, object]]:
         rows: list[dict[str, object]] = []
-        for section in ("paired", "open"):
+        for section in ("paired", "unpaired"):
             section_payload = payload.get(section, {})
             for key in ("oa", "bank", "invoice"):
                 for row in section_payload.get(key, []):
                     if row.get("ignored"):
                         rows.append(row)
         return rows
-
-    def _sync_live_auto_pair_relations(self) -> None:
-        if not hasattr(self._live_workbench_service, "list_auto_pair_candidates"):
-            return
-        # Salary and internal-transfer detector output remains available as evidence,
-        # but closed relations for the no-OA scope are now created only by
-        # NoOaBankBatchService after an explicit batch submit. Existing historical
-        # salary/internal active relations are intentionally left untouched.
-        return
 
     def _auto_pair_conflicts_with_manual_relation(self, row_ids: list[str]) -> bool:
         relation_read_port = self._workbench_auto_pair_conflict_relation_read_port()
@@ -14825,8 +14230,6 @@ def _operation_text(value: object) -> str:
 
 def run_http_server(host: str, port: int, app: Application | None = None) -> None:
     application = app or build_application()
-    if os.getenv("FIN_OPS_WORKBENCH_MATCHING_DIRTY_WORKER_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}:
-        application.start_workbench_matching_dirty_scope_worker()
     handler_factory = _build_handler_factory(application)
     server = ThreadingHTTPServer((host, port), handler_factory)
     print(f"Serving fin-ops-platform foundation API on http://{host}:{port}")

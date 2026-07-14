@@ -112,10 +112,9 @@ from fin_ops_platform.services.workbench_relation_read_model_refresh import (
     WorkbenchRelationReadModelRefreshService,
 )
 from fin_ops_platform.services.workbench_relation_sql_projection import WorkbenchRelationSqlProjectionBuilder
-from fin_ops_platform.services.workbench_candidate_match_service import CANDIDATE_MATCH_SCHEMA_VERSION
 from fin_ops_platform.services.workbench_exception_projection import EXCEPTION_PROJECTION_VERSION
 from fin_ops_platform.services.workbench_exception_rules import RULE_VERSION as WORKBENCH_EXCEPTION_RULE_VERSION
-from fin_ops_platform.services.workbench_matching_rules import WORKBENCH_MATCHING_RULES_VERSION
+from fin_ops_platform.services.workbench_free_matching_engine import RULE_VERSION as WORKBENCH_FORMAL_RELATION_RULE_VERSION
 from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchPairRelationService, WorkbenchPairRelationService as PairRelationService
 from fin_ops_platform.services.workbench_groups_page_cache import (
     WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION,
@@ -664,8 +663,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 def _no_oa_workbench_matching_source_versions(app_settings_service: AppSettingsService) -> dict[str, object]:
     payload: dict[str, object] = {
         "workbench_read_model_schema_version": WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
-        "workbench_candidate_match_schema_version": CANDIDATE_MATCH_SCHEMA_VERSION,
-        "workbench_matching_rules_version": WORKBENCH_MATCHING_RULES_VERSION,
+        "workbench_formal_relation_rule_version": WORKBENCH_FORMAL_RELATION_RULE_VERSION,
         "workbench_exception_rules_version": WORKBENCH_EXCEPTION_RULE_VERSION,
         "workbench_exception_projection_version": EXCEPTION_PROJECTION_VERSION,
         "bank_auto_tag_rules_version": _current_bank_auto_tag_rules_version(app_settings_service),

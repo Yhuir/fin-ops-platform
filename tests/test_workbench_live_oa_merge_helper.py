@@ -13,7 +13,7 @@ class WorkbenchLiveOaMergeHelperTests(unittest.TestCase):
                 "oa": [{"id": "live-oa"}],
                 "invoice": [{"id": "invoice-live", "source_kind": "manual"}],
             },
-            "open": {
+            "unpaired": {
                 "oa": [],
                 "invoice": [{"id": "invoice-shared", "stale": True}],
             },
@@ -27,7 +27,7 @@ class WorkbenchLiveOaMergeHelperTests(unittest.TestCase):
                     {"id": "invoice-ignored", "source_kind": "manual"},
                 ],
             },
-            "open": {
+            "unpaired": {
                 "oa": [{"id": "oa-open"}],
                 "invoice": [
                     {"id": "invoice-shared", "source_kind": "oa_attachment_invoice", "fresh": True},
@@ -38,7 +38,7 @@ class WorkbenchLiveOaMergeHelperTests(unittest.TestCase):
         merged = helper.merge_rows(live_payload, oa_payload)
 
         self.assertEqual(merged["paired"]["oa"], [{"id": "oa-paired"}])
-        self.assertEqual(merged["open"]["oa"], [{"id": "oa-open"}])
+        self.assertEqual(merged["unpaired"]["oa"], [{"id": "oa-open"}])
         self.assertEqual(
             merged["paired"]["invoice"],
             [
@@ -47,7 +47,7 @@ class WorkbenchLiveOaMergeHelperTests(unittest.TestCase):
             ],
         )
         self.assertEqual(
-            merged["open"]["invoice"],
+            merged["unpaired"]["invoice"],
             [{"id": "invoice-shared", "source_kind": "oa_attachment_invoice", "fresh": True}],
         )
         self.assertEqual(merged["oa_status"], {"code": "ready"})
@@ -55,7 +55,7 @@ class WorkbenchLiveOaMergeHelperTests(unittest.TestCase):
     def test_merge_rows_uses_ready_status_default(self) -> None:
         helper = WorkbenchLiveOaMergeHelper(serialize_value=lambda value: value)
 
-        merged = helper.merge_rows({"paired": {}, "open": {}}, {"paired": {}, "open": {}})
+        merged = helper.merge_rows({"paired": {}, "unpaired": {}}, {"paired": {}, "unpaired": {}})
 
         self.assertEqual(merged["oa_status"], {"code": "ready", "message": "OA 已同步"})
 

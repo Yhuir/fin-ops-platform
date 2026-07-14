@@ -356,7 +356,7 @@ def _oa_record(
     return OAApplicationRecord(
         id=record_id,
         month="2026-06",
-        section="open",
+        section="unpaired",
         case_id=case_id,
         applicant="刘际涛",
         project_name="测试项目",

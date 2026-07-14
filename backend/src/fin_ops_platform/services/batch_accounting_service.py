@@ -90,7 +90,7 @@ class _WorkbenchContext:
     rows_by_id: dict[str, dict[str, Any]]
     groups: list[dict[str, Any]]
     bank_rows: list[dict[str, Any]]
-    open_oa_rows: list[dict[str, Any]]
+    unpaired_oa_rows: list[dict[str, Any]]
     invoice_ids_by_oa_id: dict[str, list[str]]
     linked_row_ids: set[str]
     bank_linked_row_ids: set[str]
@@ -346,7 +346,7 @@ class BatchAccountingService:
 
         eligible_oa_by_id = {
             str(row.get("id")): row
-            for row in context.open_oa_rows
+            for row in context.unpaired_oa_rows
             if self._is_eligible_oa_row_for_submission(row, linked_row_ids=set())
         }
         selected_oa_rows: list[dict[str, Any]] = []
@@ -515,7 +515,7 @@ class BatchAccountingService:
         }
 
     def _build_list_context(self, *, bank_year: str) -> _WorkbenchContext:
-        return self._context_with_candidate_relation_distribution(
+        return self._context_with_relation_distribution(
             self._build_workbench_row_context(bank_year=bank_year),
             bank_year=bank_year,
         )
@@ -559,10 +559,10 @@ class BatchAccountingService:
         groups = self._groups_from_payload(payload)
         rows_by_id: dict[str, dict[str, Any]] = {}
         bank_rows: list[dict[str, Any]] = []
-        open_oa_rows: list[dict[str, Any]] = []
+        unpaired_oa_rows: list[dict[str, Any]] = []
         invoice_ids_by_oa_id: dict[str, list[str]] = {}
         seen_bank_row_ids: set[str] = set()
-        seen_open_oa_row_ids: set[str] = set()
+        seen_unpaired_oa_row_ids: set[str] = set()
         seen_invoice_row_ids: set[str] = set()
         relation_read_model_status = _RelationReadModelStatus()
         for group in groups:
@@ -589,11 +589,11 @@ class BatchAccountingService:
                     continue
                 rows_by_id.setdefault(row_id, row)
                 unique_group_oa_rows.append(row)
-                if section == "open":
-                    if row_id in seen_open_oa_row_ids:
+                if section == "unpaired":
+                    if row_id in seen_unpaired_oa_row_ids:
                         continue
-                    seen_open_oa_row_ids.add(row_id)
-                    open_oa_rows.append(row)
+                    seen_unpaired_oa_row_ids.add(row_id)
+                    unpaired_oa_rows.append(row)
             invoice_rows = [
                 self._annotated_row(row, group, section)
                 for row in list(group.get("invoice_rows") or [])
@@ -607,13 +607,13 @@ class BatchAccountingService:
                 seen_invoice_row_ids.add(row_id)
                 rows_by_id.setdefault(row_id, row)
                 unique_invoice_rows.append(row)
-            if section == "open":
+            if section == "unpaired":
                 self._index_group_invoice_links(unique_group_oa_rows, unique_invoice_rows, invoice_ids_by_oa_id)
         return _WorkbenchContext(
             rows_by_id=rows_by_id,
             groups=groups,
             bank_rows=bank_rows,
-            open_oa_rows=open_oa_rows,
+            unpaired_oa_rows=unpaired_oa_rows,
             invoice_ids_by_oa_id=invoice_ids_by_oa_id,
             linked_row_ids=set(),
             bank_linked_row_ids=set(),
@@ -622,13 +622,13 @@ class BatchAccountingService:
             relation_read_model_status=relation_read_model_status,
         )
 
-    def _context_with_candidate_relation_distribution(
+    def _context_with_relation_distribution(
         self,
         context: _WorkbenchContext,
         *,
         bank_year: str,
     ) -> _WorkbenchContext:
-        candidate_bank_rows = [
+        selectable_bank_rows = [
             row
             for row in context.bank_rows
             if self._is_batch_bank_row(
@@ -637,18 +637,18 @@ class BatchAccountingService:
                 require_unlinked=False,
             )
         ]
-        candidate_oa_rows = [
+        selectable_oa_rows = [
             row
-            for row in context.open_oa_rows
+            for row in context.unpaired_oa_rows
             if self._is_eligible_oa_row(row, linked_row_ids=set())
         ]
         linked_row_ids, bank_linked_row_ids = self._relation_distribution_row_id_sets(
-            [*candidate_bank_rows, *candidate_oa_rows],
+            [*selectable_bank_rows, *selectable_oa_rows],
             read_model_status=context.relation_read_model_status,
         )
         eligible_bank_rows = [
             row
-            for row in candidate_bank_rows
+            for row in selectable_bank_rows
             if self._is_batch_bank_row(
                 row,
                 bank_year,
@@ -658,7 +658,7 @@ class BatchAccountingService:
         ]
         eligible_oa_rows = [
             row
-            for row in candidate_oa_rows
+            for row in selectable_oa_rows
             if self._is_eligible_oa_row(row, linked_row_ids=bank_linked_row_ids)
         ]
         return replace(
@@ -700,7 +700,7 @@ class BatchAccountingService:
     @staticmethod
     def _groups_from_payload(payload: dict[str, Any]) -> list[dict[str, Any]]:
         groups: list[dict[str, Any]] = []
-        for section in ("open", "paired"):
+        for section in ("unpaired", "paired"):
             section_payload = payload.get(section)
             if not isinstance(section_payload, dict):
                 continue

@@ -17,7 +17,7 @@ class WorkbenchCanonicalOaAttachmentRawPayloadRepairerTests(unittest.TestCase):
         invoice = SimpleNamespace(id="invoice-1")
         payload: dict[str, object] = {
             "paired": {"oa": [{"id": "oa-1"}], "bank": [], "invoice": []},
-            "open": {"oa": [], "bank": [], "invoice": []},
+            "unpaired": {"oa": [], "bank": [], "invoice": []},
         }
         repairer = WorkbenchCanonicalOaAttachmentRawPayloadRepairer(
             list_invoices=lambda: [invoice],
@@ -42,7 +42,7 @@ class WorkbenchCanonicalOaAttachmentRawPayloadRepairerTests(unittest.TestCase):
         invoice = SimpleNamespace(id="invoice-1")
         payload: dict[str, object] = {
             "paired": {"oa": [{"id": "oa-1"}], "bank": [], "invoice": [{"id": "invoice-1", "stale": True}]},
-            "open": {"oa": [], "bank": [], "invoice": []},
+            "unpaired": {"oa": [], "bank": [], "invoice": []},
         }
 
         def replace(payload: dict[str, object], **kwargs: object) -> bool:
@@ -81,7 +81,7 @@ class WorkbenchCanonicalOaAttachmentRawPayloadRepairerTests(unittest.TestCase):
         )
         payload: dict[str, object] = {
             "paired": {"oa": [], "bank": [], "invoice": []},
-            "open": {
+            "unpaired": {
                 "oa": [
                     {
                         "id": "oa-exp-2156",
@@ -110,7 +110,7 @@ class WorkbenchCanonicalOaAttachmentRawPayloadRepairerTests(unittest.TestCase):
 
         repairer.repair(payload)
 
-        self.assertEqual(payload["open"]["invoice"], [{"id": invoice_id, "source_oa_id": "oa-exp-2156"}])
+        self.assertEqual(payload["unpaired"]["invoice"], [{"id": invoice_id, "source_oa_id": "oa-exp-2156"}])
         self.assertEqual(calls, ["dedupe", "summary"])
 
     def test_repair_noops_when_payload_has_no_oa_rows(self) -> None:
@@ -125,7 +125,7 @@ class WorkbenchCanonicalOaAttachmentRawPayloadRepairerTests(unittest.TestCase):
             refresh_raw_workbench_payload_summary=lambda payload: calls.append("summary"),
         )
 
-        repairer.repair({"paired": {"oa": [], "invoice": []}, "open": {"oa": [], "invoice": []}})
+        repairer.repair({"paired": {"oa": [], "invoice": []}, "unpaired": {"oa": [], "invoice": []}})
 
         self.assertEqual(calls, [])
 

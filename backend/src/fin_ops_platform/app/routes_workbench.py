@@ -111,14 +111,15 @@ class WorkbenchGroupDetailApiRoutes:
         *,
         zone: str | None,
         group_id: str | None,
+        expected_read_model_version: str | None = None,
     ) -> tuple[HTTPStatus, dict[str, object]]:
         current_month = month or "all"
         normalized_zone = str(zone or "").strip()
         normalized_group_id = str(group_id or "").strip()
-        if normalized_zone not in {"open", "paired"}:
+        if normalized_zone not in {"unpaired", "paired"}:
             return (
                 HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_workbench_zone", "message": "zone must be open or paired."},
+                {"error": "invalid_workbench_zone", "message": "zone must be unpaired or paired."},
             )
         if not normalized_group_id:
             return (
@@ -129,6 +130,7 @@ class WorkbenchGroupDetailApiRoutes:
             current_month,
             zone=normalized_zone,
             group_id=normalized_group_id,
+            expected_read_model_version=str(expected_read_model_version or "").strip() or None,
         )
         return result.status_code, result.payload
 
@@ -166,10 +168,10 @@ class WorkbenchReadApiRoutes:
     ) -> tuple[HTTPStatus, dict[str, object]]:
         current_month = month or "all"
         normalized_zone = str(zone or "").strip()
-        if normalized_zone not in {"open", "paired"}:
+        if normalized_zone not in {"unpaired", "paired"}:
             return (
                 HTTPStatus.BAD_REQUEST,
-                {"error": "invalid_workbench_zone", "message": "zone must be open or paired."},
+                {"error": "invalid_workbench_zone", "message": "zone must be unpaired or paired."},
             )
         try:
             normalized_column_filters = self._normalize_json_query_param(column_filters, "column_filters")

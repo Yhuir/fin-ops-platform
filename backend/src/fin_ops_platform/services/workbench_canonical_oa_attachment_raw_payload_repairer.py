@@ -31,7 +31,7 @@ class WorkbenchCanonicalOaAttachmentRawPayloadRepairer:
         oa_rows_by_id: dict[str, dict[str, object]] = {}
         oa_sections_by_id: dict[str, str] = {}
         existing_invoice_row_ids: set[str] = set()
-        for section_name in ("paired", "open"):
+        for section_name in ("paired", "unpaired"):
             section_payload = payload.get(section_name)
             if not isinstance(section_payload, dict):
                 continue
@@ -80,7 +80,7 @@ class WorkbenchCanonicalOaAttachmentRawPayloadRepairer:
                 if self._replace_raw_workbench_row(payload, row_type="invoice", replacement=row):
                     changed = True
                 continue
-            section_name = oa_sections_by_id.get(source_oa_id, "open")
+            section_name = oa_sections_by_id.get(source_oa_id, "unpaired")
             section_payload = payload.setdefault(section_name, {})
             if not isinstance(section_payload, dict):
                 continue

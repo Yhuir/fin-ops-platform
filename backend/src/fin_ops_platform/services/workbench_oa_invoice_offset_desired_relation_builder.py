@@ -30,7 +30,7 @@ class WorkbenchOaInvoiceOffsetDesiredRelationBuilder:
 
         oa_rows: list[dict[str, object]] = []
         invoice_rows: list[dict[str, object]] = []
-        for section in ("paired", "open"):
+        for section in ("paired", "unpaired"):
             section_payload = payload.get(section, {})
             if not isinstance(section_payload, dict):
                 continue
