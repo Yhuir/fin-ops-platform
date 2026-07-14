@@ -1,7 +1,7 @@
 # Phase 21: Workbench Deterministic Relations - Research
 
-**Researched:** 2026-07-14  
-**Domain:** 关联台确定性正式关系、跨月 N:M:K 匹配、active-generation read model、旧候选链迁移  
+**Researched:** 2026-07-14
+**Domain:** 关联台确定性正式关系、跨月 N:M:K 匹配、active-generation read model、旧候选链迁移
 **Confidence:** HIGH
 
 <user_constraints>
@@ -214,16 +214,16 @@ Canonical columns already include invoice and bank `currency`; OA projection wri
 
 ### B. Pure deterministic matcher
 
-**Input:** complete immutable fact batch + active relation anchors + withdrawal fingerprints + explicit budgets.  
-**Output:** zero or more immutable `FormalRelationPlan` values containing canonical row IDs/types, create-or-extend target, amount check, rule/version, evidence, affected scopes and deterministic idempotency key.  
+**Input:** complete immutable fact batch + active relation anchors + withdrawal fingerprints + explicit budgets.
+**Output:** zero or more immutable `FormalRelationPlan` values containing canonical row IDs/types, create-or-extend target, amount check, rule/version, evidence, affected scopes and deterministic idempotency key.
 **Forbidden output:** candidate ID, decision status, display state, repository call, clock read, log write or queue mutation.
 
 The smallest implementation is to refactor/rename the useful algorithms in `workbench_free_matching_engine.py` into one pure matcher module and define the plan dataclass beside it. Do not add a generic rule framework or replacement model package.[VERIFIED: current engine is already mostly pure; Ponytail constraint]
 
 ### C. Orchestrator
 
-**Input:** claimed dirty scope.  
-**Flow:** bulk read → matcher → for each deterministic plan call transaction-bound `WorkbenchRelationCommandService.confirm_relation` through the existing UoW → complete/fail dirty scope.  
+**Input:** claimed dirty scope.
+**Flow:** bulk read → matcher → for each deterministic plan call transaction-bound `WorkbenchRelationCommandService.confirm_relation` through the existing UoW → complete/fail dirty scope.
 **Output:** run summary with created/extended relation IDs, skipped reason counts, affected scopes and outbox IDs; no candidate/decision inventory.
 
 Use `relation_mode='manual_confirmed'` as generic confirmed storage. Put `origin=system_deterministic`, rule/version/evidence and run/manifest IDs only in audit metadata/history.[VERIFIED: command signature supports relation mode, evidence, rule version, actor, history operation and idempotency]
@@ -236,7 +236,7 @@ Add one repository port operation that acquires sorted PostgreSQL transaction ad
 
 ### E. Relation-only projection
 
-**Input:** eligible canonical facts `C`, active relations `R`, orthogonal exception/ignored metadata.  
+**Input:** eligible canonical facts `C`, active relations `R`, orthogonal exception/ignored metadata.
 **Output:**
 
 - one paired group per active relation, with all available canonical members;
@@ -406,43 +406,43 @@ Rollback reads only the manifest-created relation-ID allowlist, previews current
 ## Common Pitfalls
 
 ### Treating “unpaired” as a persisted candidate
-**Failure:** creates a replacement state table and another visibility policy.  
-**Prevention:** unpaired is computed `C-R` at projection time; unsafe matcher output is nothing.  
+**Failure:** creates a replacement state table and another visibility policy.
+**Prevention:** unpaired is computed `C-R` at projection time; unsafe matcher output is nothing.
 **Warning:** any new candidate ID/status/store/upsert method.
 
 ### Preserving pane-completeness in visibility
-**Failure:** active OA+invoice such as the 520 relation remains open/unpaired.  
-**Prevention:** paired membership is exactly active relation membership; amount/pane completeness is creation safety only.  
+**Failure:** active OA+invoice such as the 520 relation remains open/unpaired.
+**Prevention:** paired membership is exactly active relation membership; amount/pane completeness is creation safety only.
 **Warning:** `_paired_group_has_enough_row_types`, relation-mode allowlists or bank requirement metadata in zone selection.
 
 ### Calling the matcher per month or per row
-**Failure:** cross-month links are missed and DB I/O becomes N+1.  
-**Prevention:** seed → all-history explicit references + one 365-day bulk window.  
+**Failure:** cross-month links are missed and DB I/O becomes N+1.
+**Prevention:** seed → all-history explicit references + one 365-day bulk window.
 **Warning:** repository calls inside match loops.
 
 ### Replacing the six-row cap with a larger business cap
-**Failure:** legitimate large N:M:K relations remain impossible.  
-**Prevention:** bound search states/time/memory, not valid cardinality; fail closed with no stored state.  
+**Failure:** legitimate large N:M:K relations remain impossible.
+**Prevention:** bound search states/time/memory, not valid cardinality; fail closed with no stored state.
 **Warning:** `MAX_*_COMBINATION_SIZE`.
 
 ### Using amount/date/name score to choose one ambiguous match
-**Failure:** irreversible false formal relation.  
-**Prevention:** exact closure + strong graph + invariant unique partition.  
+**Failure:** irreversible false formal relation.
+**Prevention:** exact closure + strong graph + invariant unique partition.
 **Warning:** best-score/date-distance winner logic.
 
 ### Dropping tables before the new runtime is active
-**Failure:** old worker crashes or loses migration inventory.  
-**Prevention:** quiesce worker, Release A zero-access proof, then Release B drop.  
+**Failure:** old worker crashes or loses migration inventory.
+**Prevention:** quiesce worker, Release A zero-access proof, then Release B drop.
 **Warning:** migrations applied while old matching worker is still running.
 
 ### Rebuilding or mutating all canonical facts
-**Failure:** repair exceeds scope and data safety cannot be proven.  
-**Prevention:** hash facts, write only formal relations through command, refresh only affected scopes.  
+**Failure:** repair exceeds scope and data safety cannot be proven.
+**Prevention:** hash facts, write only formal relations through command, refresh only affected scopes.
 **Warning:** direct UPDATE/DELETE on invoices/OA/bank/relation tables.
 
 ### Fixing all-scope only in list
-**Failure:** count, pagination, detail and Audit disagree.  
-**Prevention:** one logical-group/member SQL owner and generation-set boundary.  
+**Failure:** count, pagination, detail and Audit disagree.
+**Prevention:** one logical-group/member SQL owner and generation-set boundary.
 **Warning:** a Python post-filter or detail-specific latest-shard query.
 
 ## Validation Architecture
@@ -615,7 +615,7 @@ Do not combine DB dropping with the first runtime cutover task, and do not decla
 - Migration: HIGH for repository/runtime sequence; production execution remains approval-gated.
 - Counterexample identity: HIGH for 520; MEDIUM for the exact 13 production IDs until manifest capture.
 
-**Research date:** 2026-07-14  
+**Research date:** 2026-07-14
 **Valid until:** 2026-08-13, or earlier if Workbench matching/projection migrations change.
 
 ## RESEARCH COMPLETE

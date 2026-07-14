@@ -284,8 +284,10 @@ systemd 模板位于：
 `/opt/fin-ops/current/backend`。
 
 关联台自动配对必须单独启用 `workbench-matching` worker。它消费
-`job.workbench_matching_dirty_scopes`，生成 `read_model.workbench_reconciliation_decisions`；
-`workbench-read-model` worker 只负责把已有关系和自动决策投影到页面读模型，不能替代自动配对。
+`job.workbench_matching_dirty_scopes`，批量读取 canonical OA、流水、发票和 active relation，
+仅把满足确定性安全规则的结果通过 Workbench relation UoW 写成正式 active relation；不生成或读取
+候选/decision 状态。`workbench-read-model` worker 只负责把 active relation 与逐条未配对事实投影到
+页面读模型，不能替代自动配对。
 生产实例配置示例：
 
 - `deploy/oa/env/fin-ops.worker.workbench-matching.env.example`

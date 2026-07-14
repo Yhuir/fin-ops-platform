@@ -23,9 +23,9 @@
 ## 2026-07-11 - 正式 relation lineage 与全银行流水口径测试收敛
 
 - 变更类型：test fixture contract correction + read model lineage regression。
-- 架构结论：成本统计 OA 归因只能消费 active `workbench_relation`，Workbench open/proposed candidate 即使相似度很高也不得进入成本；API fixture 必须通过正式 confirm-link 写边界建立 active relation。`按标签` / `按时间` 的 `bank_flow_time_rows` 是独立的全银行流水 projection；2026-07-13 起包含收入与支出，测试数据必须从 canonical bank transactions 构造。
+- 架构结论：成本统计 OA 归因只能消费 active `workbench_relation`；没有 active relation 的相似事实不得进入成本，新 Workbench runtime 也不再生成 open/proposed candidate。API fixture 必须通过正式 confirm-link 写边界建立 active relation。`按标签` / `按时间` 的 `bank_flow_time_rows` 是独立的全银行流水 projection；2026-07-13 起包含收入与支出，测试数据必须从 canonical bank transactions 构造。
 - 更新测试：`tests/test_cost_statistics_api.py`。
-- 覆盖点：fixture 通过真实 `/api/workbench/actions/confirm-link` 建立关系；候选关系仍被排除；全银行流水可包含没有 OA relation 的收入或支出，并保持 `未配对OA` / `未分类` 展示口径；project/expense-type export 继续消费 OA 配对支出行。
+- 覆盖点：fixture 通过真实 `/api/workbench/actions/confirm-link` 建立关系；没有 active relation 的相似事实仍被排除；全银行流水可包含没有 OA relation 的收入或支出，并保持 `未配对OA` / `未分类` 展示口径；project/expense-type export 继续消费 OA 配对支出行。
 - 七类测试决策：business core、service-layer、API contract、read model/cache/background job、end-to-end business-flow integration、existing regression 适用并由成本统计 API/服务组合测试覆盖；frontend interaction 行为未变，继续由既有 `CostStatisticsPage.test.tsx` 与 Browser flow 覆盖。
 
 ## 2026-07-10 - 成本统计标签规则和双统计口径

@@ -114,7 +114,7 @@ OA、银行流水、进项发票、销项发票之间的两两/三栏关系上�
 - 分发 rows 必须覆盖无关联对象：`relation_status='unlinked'`、`group_ids=[]`、`linked_*=[]`。页面需要显示空 OA/空发票时直接消费空数组，不再自行补空。
 - OA 附件发票只从 `read_model.workbench_rows.source_kind='oa_attachment_invoice'` 纳入 `linked_input_invoices`；付款凭证、未知附件、解析失败附件不得进入发票关系。
 - standalone worker 用 `python3 -m fin_ops_platform.app.worker --enable-workbench-relation-read-model-refresh` claim `workbench_relation.read_model.refresh` 后按 `YYYY-MM` shard 重建。`all` 只展开为月份 shard，不在 API 热路径同步扫描事实。
-- 写入或撤回 pair relation 时，事务内 writer 必须标记 `workbench_relation` dirty/outbox，并触发待找发票、OA 待付款、进项发票使用、销项发票收款、银行明细、搜索、成本、税金和免 OA 批次等下游 read model 重新收敛。自动决策 upsert/expire 也必须标记对应月份的 `workbench_relation` dirty。
+- 写入、扩展或撤回 active pair relation 时，事务内 writer 必须标记 `workbench_relation` dirty/outbox，并触发待找发票、OA 待付款、进项发票使用、销项发票收款、银行明细、搜索、成本、税金和免 OA 批次等下游 read model 重新收敛。确定性匹配只允许经同一 relation UoW 写正式关系；不存在 candidate/decision 的 upsert/expire 刷新路径。
 - 该机制不是关联台 UI payload 复用。各页面保留自己的 SQL read model、筛选、状态、权限和导出，只消费统一关系上下文作为上游事实。
 
 ## 成本统计 SQL read model 边界
