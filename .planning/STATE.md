@@ -106,6 +106,7 @@ None yet.
 - 第五次远程 CI 为 176/177；唯一失败是待找发票文本选择 E2E 用元素 bounding-box 中线做像素拖拽，在 CI 字体/换行布局下落到空白区。测试现对同一可见文本节点执行 Playwright 浏览器文本选择，仍精确验证 `window.getSelection()`，不改业务 UI、不加 retry、不放宽结果。
 - 第六次远程 CI 的唯一失败是 ETC 统一批次列表测试等待静态 list 容器后同步读取异步批次行；现以 `etc-batch-unsubmitted-01` 业务行作为 readiness anchor，不改 ETC 业务链路与 I/O。
 - 第七次远程 CI 已通过后端、835 前端与 177 浏览器流，最后 docs gate 因 runner 未安装 `rg` 而把命令缺失误报为文档缺失。验证入口现集中选择 `rg` 或 `grep`/`git grep`，并移除未使用的固定 `/tmp` 文件写入。
+- 第八次远程 CI 的后端已通过，前端仅有 3 个异步首帧时序失败：成本统计测试把页面标题误当成表格或 refreshing 状态已完成，税金抵扣测试把静态统计卡误当成发票选择行已完成。测试现直接等待对应表格、refreshing 文案和业务复选框，不改产品链路、不加 retry、不放宽业务结果。
 - `FIN_OPS_TEST_DATABASE_URL` is not configured, so real disposable PostgreSQL migration/catalog/hash integration remains unexecuted.
 - Release A is isolated on clean branch `codex/workbench-formal-relations-release-a`; remote PR review/CI and production pre-deploy evidence are still required before merge/deploy.
 - Current production read-only evidence still shows the Yunnan Lifu 520 relation as unpaired; migration 0104, registered rehydrate, worker drain and production System Audit have not run.
