@@ -113,6 +113,75 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         self.assertFalse(paired & unpaired)
         self.assertEqual(paired | unpaired, canonical)
 
+    def test_unpaired_row_does_not_leak_legacy_candidate_ownership(self) -> None:
+        payload = self.service.group_payload(
+            "2026-01",
+            rows_by_id={
+                "oa-pay-1982": {
+                    "id": "oa-pay-1982",
+                    "type": "oa",
+                    "object_identity_key": "oa-pay-1982",
+                    "status": "paired",
+                    "case_id": "candidate:025bf390496affde60b984e7a06785ae174cb0d13fc052559b005a71380dcaf4",
+                    "relation_mode": "automatic_decision",
+                    "workbench_reconciliation_decision": {"decision_status": "paired"},
+                }
+            },
+            active_relations=[],
+        )
+
+        row = payload["unpaired"]["groups"][0]["oa_rows"][0]
+        self.assertEqual(row["status"], "unpaired")
+        self.assertNotIn("case_id", row)
+        self.assertNotIn("relation_mode", row)
+
+    def test_unpaired_etc_summary_preserves_all_collapsed_invoice_details(self) -> None:
+        payload = self.service.group_payload(
+            "2026-04",
+            rows_by_id={
+                "etc-summary-batch-1": {
+                    "id": "etc-summary-batch-1",
+                    "type": "invoice",
+                    "object_identity_key": "etc-summary:batch-1",
+                    "source_kind": "etc_invoice_summary",
+                    "status": "unpaired",
+                    "etc_invoice_count": 2,
+                    "etc_invoice_detail_rows": [
+                        {
+                            "id": "etc-invoice-1",
+                            "type": "invoice",
+                            "source_kind": "etc_invoice",
+                            "status": "paired",
+                            "amount_value": "12.34",
+                        },
+                        {
+                            "id": "etc-invoice-2",
+                            "type": "invoice",
+                            "source_kind": "etc_invoice",
+                            "status": "paired",
+                            "amount_value": "56.78",
+                        },
+                    ],
+                }
+            },
+            active_relations=[],
+        )
+
+        group = payload["unpaired"]["groups"][0]
+        self.assertEqual(group["display_mode"], "collapsed_summary")
+        self.assertTrue(group["default_collapsed"])
+        self.assertEqual(group["summary_row"]["id"], "etc-summary-batch-1")
+        self.assertEqual(group["summary_row"]["status"], "unpaired")
+        self.assertEqual(
+            [row["id"] for row in group["collapsed_rows"]["invoice"]],
+            ["etc-invoice-1", "etc-invoice-2"],
+        )
+        self.assertEqual(
+            [row["status"] for row in group["collapsed_rows"]["invoice"]],
+            ["unpaired", "unpaired"],
+        )
+        self.assertEqual(group["collapsed_row_counts"], {"invoice": 2})
+
     def test_single_pane_active_relation_is_still_paired(self) -> None:
         rows = {
             "bank-a": {"id": "bank-a", "type": "bank", "object_identity_key": "bank-a"},

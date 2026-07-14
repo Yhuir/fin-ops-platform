@@ -41,6 +41,9 @@
 - UoW 失败时 relation、history、idempotency 和 outbox 不得半写入。
 - source payload 即使把无 active relation 的 row 放在旧 paired section，最终也必须降级为 unpaired singleton。
 - E2E mock 不得用共享历史 `case_id` 构造未配对组；搜索只过滤对应 pane，不得把其他 pane 的独立 canonical facts 隐藏。
+- 未配对 canonical row 若携带旧 `candidate:` / `decision:` / `temp:` ownership 或 automatic candidate mode，输出必须清理这些装饰且仍保持 singleton；正式 exception/override 字段必须与 canonical control facts 精确一致。
+- ETC collapsed-summary 必须同时物化 summary row 和全部 invoice detail rows；paired/unpaired 只改变 zone/status，不得丢失、重复或隐藏明细。
+- Workbench groups page cache schema 必须与 projection schema 同步，projection 行为升级后旧 Redis payload 必须自动失效。
 
 ## 验证命令
 

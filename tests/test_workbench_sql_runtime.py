@@ -14,11 +14,14 @@ from fin_ops_platform.services.app_health_service import AppHealthService
 from fin_ops_platform.services.postgres_repositories.read_models import (
     WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION,
     PostgresReadModelRepository,
+    _workbench_group_row_records,
+    _workbench_row_payload_for_write,
 )
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 from fin_ops_platform.services.runtime_worker_handlers import _RuntimeWorkerDerivedLifecycle
 from fin_ops_platform.services.workbench_free_matching_engine import RULE_VERSION as WORKBENCH_FORMAL_RELATION_RULE_VERSION
+from fin_ops_platform.services.workbench_groups_page_cache import WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION
 from fin_ops_platform.services.workbench_read_model_refresh import WorkbenchReadModelRefreshService
 from fin_ops_platform.services.workbench_sql_projection import (
     WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
@@ -3791,6 +3794,57 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             {"bank-summary": "paired", "bank-detail": "paired", "etc-detail": "paired"},
         )
 
+    def test_workbench_persistence_materializes_detached_etc_summary_row(self) -> None:
+        group = {
+            "group_id": "case:etc-linked",
+            "zone": "paired",
+            "oa_rows": [{"id": "oa-1", "type": "oa"}],
+            "bank_rows": [],
+            "invoice_rows": [],
+            "summary_row": {
+                "id": "etc-summary-batch-1",
+                "type": "invoice",
+                "source_kind": "etc_invoice_summary",
+                "status": "paired",
+            },
+            "collapsed_rows": {
+                "invoice": [
+                    {
+                        "id": "etc-invoice-1",
+                        "type": "invoice",
+                        "source_kind": "etc_invoice",
+                        "status": "paired",
+                    }
+                ]
+            },
+        }
+        payload = {"paired": {"groups": [group]}}
+
+        rows = PostgresReadModelRepository._iter_workbench_rows(payload)
+        group_rows = _workbench_group_row_records(group)
+
+        self.assertEqual(
+            {row["id"] for row in rows},
+            {"oa-1", "etc-summary-batch-1", "etc-invoice-1"},
+        )
+        self.assertIn(
+            ("etc-summary-batch-1", "summary", "etc_invoice_summary"),
+            {
+                (row["row_id"], row["row_role"], row["source_kind"])
+                for row in group_rows
+            },
+        )
+
+        unpaired_payload = _workbench_row_payload_for_write(
+            {
+                "id": "oa-pay-1982",
+                "type": "oa",
+                "status": "unpaired",
+                "workbench_reconciliation_decision": {"decision_status": "paired"},
+            }
+        )
+        self.assertNotIn("workbench_reconciliation_decision", unpaired_payload)
+
     def test_repository_reads_single_workbench_group_detail(self) -> None:
         connection = WorkbenchSummaryGroupsConnection()
         repository = PostgresReadModelRepository(connection)
@@ -4935,6 +4989,12 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             key_b = app._workbench_groups_redis_cache_key_from_version(**kwargs)
 
         self.assertNotEqual(key_a, key_b)
+
+    def test_workbench_groups_page_cache_version_tracks_projection_schema(self) -> None:
+        self.assertEqual(
+            WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION,
+            WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
+        )
 
     def test_workbench_groups_api_reports_missing_groups_table_as_unavailable(self) -> None:
         app = object.__new__(Application)

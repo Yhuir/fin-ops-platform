@@ -1060,3 +1060,12 @@
 - 分组不变量：`paired = active relation members`、`unpaired = canonical facts - paired`；旧 `case_id`、candidate metadata、输入 section 与来源 provenance 不能改变 membership。
 - 迁移：0104 只 forward-drop 派生旧状态，不触碰 canonical facts/relation/history；发布后必须全量 rehydrate、等待 durable scopes fresh 并执行页面 Audit。
 - 固定验收：云南立孚 520 发票/OA active case 必须 paired；13 张合计 1709.49 元但无唯一强证据的发票必须完整显示为 13 个 unpaired singleton。
+
+## 2026-07-15 - Release A 生产投影审计回滚与 v2 修复
+
+- 生产证据：release `main-1f1ec5324-workbench-formal-relations-hotfix-20260715060112` 激活并完成受控 rehydrate 后，Workbench freshness 与 queue 均正常，但 page Audit 阻断：51 个 `workbench_etc_summary_details_mismatch`、2 个 `workbench_override_exception_fields_mismatch`，active group rows 从基线 1296 降为 1291。生产随即回滚到 `etc-import-e5d6e6a4e-20260714-visibility` 并重新 rehydrate，恢复 219 个 active relations、19 个 active generation scopes、876 个 relation row ids、1296 个 group rows、零审计问题；0001–0103 migration 状态未变化，未执行 0104。
+- 根因一：二态 grouping 将未配对 ETC summary 当普通 singleton 输出，嵌入的 `etc_invoice_detail_rows` 没有转换成 `collapsed_rows`；paired ETC summary 又只存放于 group 的独立 `summary_row`，repository 的 row/group-row 迭代器未物化该独立行。因此 canonical ETC 明细存在，但结构化 read model 丢失 51 条展示成员。
+- 根因二：没有 active relation ownership 的 canonical row 仍可能携带历史 `candidate:` / `decision:` / `temp:` case id、`automatic_decision` / `automatic_match` mode 与 reconciliation decision decoration，导致未配对行错误暴露旧候选归属，并与 canonical override 的空值不一致。
+- 修复边界：纯 `WorkbenchRelationGroupingService` 负责把 ETC summary 映射成 paired/unpaired 对应的 collapsed display，并按当前 relation-mode registry 从 unpaired 输出剥离非正式 ownership；`PostgresReadModelRepository` 在既有 read-model sanitation 边界移除 retired decision decoration，并物化独立 summary row 与 collapsed detail rows。没有恢复 candidate service、第三种状态、fallback 或业务写链路。
+- 版本与缓存：projection schema 升级为 `2026-07-15-formal-relation-partition-v2`，all-scope builder 升级为 `workbench_sql_projection.composed_active_month_shards.formal_relation_partition.v2`；groups page Redis cache 直接复用 month projection schema，确保旧 v1 payload 自动 miss。该变更无 schema migration，不修改 canonical facts、active relation/history、dirty scope 或 outbox。
+- 回归保护：新增未配对旧 candidate ownership 清理、未配对 ETC summary 全明细保留、独立 ETC summary row/group-row 物化和 cache/projection schema 同步测试。新 release 只有在 full local gate、分支/main 精确 SHA CI、受控生产 rehydrate、page Audit 零阻断、520 paired、13 张发票完整 unpaired 和数据基线不变后才能保持 active；否则继续回滚旧 release。

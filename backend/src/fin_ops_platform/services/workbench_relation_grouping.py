@@ -9,10 +9,15 @@ from fin_ops_platform.services.no_oa_bank_batch_service import (
     BANK_FLOW_RULE_BATCH_RELATION_MODE,
     NO_OA_BANK_BATCH_RELATION_MODE,
 )
+from fin_ops_platform.services.workbench_relation_modes import (
+    DISPLAY_ONLY_WORKBENCH_RELATION_MODES,
+    VALID_WORKBENCH_RELATION_MODES,
+)
 
 
 ROW_TYPES = ("oa", "bank", "invoice")
 DISPLAY_ROLES = frozenset({"summary", "collapsed_summary"})
+LEGACY_CANDIDATE_CASE_PREFIXES = ("candidate:", "decision:", "temp:")
 
 
 class WorkbenchRelationGroupingService:
@@ -174,7 +179,7 @@ class WorkbenchRelationGroupingService:
         display_tags = self._display_tags(rows, relation)
         if display_tags:
             group["display_tags"] = display_tags
-        self._apply_display_summary(group, display_rows_by_case.get(case_id, []))
+        self._apply_display_summary(group, display_rows_by_case.get(case_id, []), zone="paired")
         if relation_mode in {NO_OA_BANK_BATCH_RELATION_MODE, BANK_FLOW_RULE_BATCH_RELATION_MODE}:
             self._apply_bank_batch_summary(group, relation_mode=relation_mode)
         return group
@@ -188,18 +193,40 @@ class WorkbenchRelationGroupingService:
         return resolved
 
     def _unpaired_group(self, row: dict[str, Any]) -> dict[str, Any]:
-        resolved = deepcopy(row)
-        resolved["status"] = "unpaired"
+        resolved = self._unpaired_row(row)
+        display_row = deepcopy(resolved)
+        resolved.pop("etc_invoice_detail_rows", None)
         row_type = str(resolved["type"])
         identity = str(resolved["object_identity_key"])
         digest = sha256(f"{row_type}\0{identity}".encode("utf-8")).hexdigest()[:24]
-        return self._base_group(
+        group = self._base_group(
             group_id=f"unpaired:{row_type}:{digest}",
             group_type="unpaired",
             reason="no_active_relation",
             zone="unpaired",
             rows=[resolved],
         )
+        if str(display_row.get("source_kind") or "").strip() == "etc_invoice_summary":
+            self._apply_display_summary(group, [display_row], zone="unpaired")
+        return group
+
+    @staticmethod
+    def _unpaired_row(row: dict[str, Any]) -> dict[str, Any]:
+        resolved = deepcopy(row)
+        resolved["status"] = "unpaired"
+        case_id = str(resolved.get("case_id") or "").strip()
+        if case_id.startswith(LEGACY_CANDIDATE_CASE_PREFIXES):
+            resolved.pop("case_id", None)
+            resolved.pop("relation_mode", None)
+            resolved.pop("relation_amount_check", None)
+        relation_mode = str(resolved.get("relation_mode") or "").strip()
+        if relation_mode and relation_mode not in {
+            *VALID_WORKBENCH_RELATION_MODES,
+            *DISPLAY_ONLY_WORKBENCH_RELATION_MODES,
+        }:
+            resolved.pop("relation_mode", None)
+            resolved.pop("relation_amount_check", None)
+        return resolved
 
     @staticmethod
     def _base_group(
@@ -235,12 +262,19 @@ class WorkbenchRelationGroupingService:
         return tags
 
     @staticmethod
-    def _apply_display_summary(group: dict[str, Any], display_rows: list[dict[str, Any]]) -> None:
+    def _apply_display_summary(
+        group: dict[str, Any],
+        display_rows: list[dict[str, Any]],
+        *,
+        zone: str,
+    ) -> None:
         if not display_rows:
             return
         summary = deepcopy(sorted(display_rows, key=lambda row: str(row.get("id") or ""))[0])
         details = [deepcopy(row) for row in list(summary.pop("etc_invoice_detail_rows", []) or []) if isinstance(row, dict)]
-        summary["status"] = "paired"
+        summary["status"] = zone
+        for detail in details:
+            detail["status"] = zone
         group["display_mode"] = "collapsed_summary"
         group["default_collapsed"] = True
         group["summary_row"] = summary
@@ -338,9 +372,12 @@ class WorkbenchRelationGroupingService:
     def _member_identities(groups: list[dict[str, Any]]) -> set[tuple[str, str]]:
         identities: set[tuple[str, str]] = set()
         for group in groups:
-            rows_by_type = group.get("collapsed_rows") if isinstance(group.get("collapsed_rows"), dict) else None
+            collapsed_rows = group.get("collapsed_rows") if isinstance(group.get("collapsed_rows"), dict) else {}
             for row_type in ROW_TYPES:
-                rows = list((rows_by_type or {}).get(row_type) or group.get(f"{row_type}_rows") or [])
+                rows = [
+                    *list(group.get(f"{row_type}_rows") or []),
+                    *list(collapsed_rows.get(row_type) or []),
+                ]
                 for row in rows:
                     if not isinstance(row, dict) or str(row.get("workbench_display_role") or "") in DISPLAY_ROLES:
                         continue

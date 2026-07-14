@@ -5,8 +5,10 @@ import json
 import os
 from typing import Any
 
+from fin_ops_platform.services.workbench_read_model_version import WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION
 
-WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION = "2026-07-14-formal-relation-partition-v1"
+
+WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION = WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION
 
 
 def normalize_workbench_group_search_mode(value: str | None) -> str:
