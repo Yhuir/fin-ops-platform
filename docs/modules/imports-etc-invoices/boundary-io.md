@@ -1,6 +1,6 @@
 # ETC发票导入模块边界与 I/O
 
-日期：2026-07-11
+日期：2026-07-14
 
 ## 模块化状态
 
@@ -40,7 +40,7 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | ETC import preview/result | 前端页面 | 可审计、可失败恢复 |
-| ETC import session/files | PostgreSQL + object storage | metadata/edge 在 PostgreSQL；ZIP bytes 只经窄 file-object port；worker 可跨进程重载 |
+| ETC import session/files | PostgreSQL + object storage | metadata/edge 在 PostgreSQL；ZIP bytes 只经窄 file-object port；import worker 必须用与 API 相同的对象存储环境配置构造 state store，才能跨进程重载 `minio://` / S3 archive ref |
 | 导入文件事实列表 | `/api/import-facts/files`、HTTP SLO probe | 只返回分页文件摘要字段；不得输出完整 `raw_payload`、`row_results`、`normalized_rows`，预览明细只能走导入 session/preview 边界 |
 | ETC batch/invoice facts | ETC services | 供 ETC 票据管理读取 |
 | Ready task title | `/imports/etc-invoices` 下拉 | 展示 linked reconciliation task 当前标题，与 business batch `title` 保持同步 |

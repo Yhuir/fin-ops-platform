@@ -180,9 +180,20 @@ class ImportRuntimeProcessorFactory:
         return processing_service.build_import_job_processors()
 
     def _state_store(self) -> Any:
+        from fin_ops_platform.services.object_storage import ObjectStorageSettings, S3ObjectStorageRepository
         from fin_ops_platform.services.postgres_state_store import PostgresStateStore
 
-        return PostgresStateStore(data_dir=self._data_dir, connection=self._connection)
+        object_storage_settings = ObjectStorageSettings.from_env()
+        object_storage_repository = (
+            S3ObjectStorageRepository(object_storage_settings) if object_storage_settings.enabled else None
+        )
+        kwargs = {
+            "data_dir": self._data_dir,
+            "connection": self._connection,
+        }
+        if object_storage_repository is not None:
+            kwargs["object_storage_repository"] = object_storage_repository
+        return PostgresStateStore(**kwargs)
 
 
 class WorkbenchMatchingWorkerFactory:

@@ -143,8 +143,8 @@ async function previewEtcZipFiles(page: Page, recordLatency?: OperationLatencyRe
   await expect(page.getByRole("heading", { name: "ETC导入预览" })).toBeVisible();
   await expect(page.getByText("etc_import_session_e2e_001")).toBeVisible();
   await expect(page.getByLabel("审计汇总 原始 4")).toBeVisible();
-  await expect(page.getByLabel("审计汇总 可导入 1")).toBeVisible();
-  await expect(page.getByText("将导入 1 条唯一记录，跳过 2 条重复，1 条需复核。")).toBeVisible();
+  await expect(page.getByLabel("审计汇总 可导入 2")).toBeVisible();
+  await expect(page.getByText("将导入 2 条唯一记录，跳过 2 条重复，1 条需复核。")).toBeVisible();
   await expect(page.getByRole("grid", { name: "ETC导入预览结果" })).toBeVisible();
   await expect(page.getByText("ETC-2026-005")).toBeVisible();
   await expect(page.getByText("新发票待导入")).toBeVisible();

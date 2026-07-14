@@ -1,5 +1,12 @@
 # ETC发票导入 实施记录
 
+## 2026-07-14：confirm worker MinIO 依赖与可确认计数修复
+
+- 生产 job `job_20260714_091414_65dc66a3` 在 `0/68` 即失败，错误为 `Object storage is not configured for PostgreSQL file access.`；PostgreSQL task/business batch 均未产生半写。API preview 通过 `build_state_store` 注入了对象存储，但 `ImportRuntimeProcessorFactory` 独立构造 `PostgresStateStore` 时漏掉同一依赖，worker 无法读取 durable session 的 `minio://` archive ref。
+- 修复只在 import worker state-store 组装边界复用既有 `ObjectStorageSettings.from_env()` 与 `S3ObjectStorageRepository`；不改 session、queue、API 或存储协议，也不增加本地 fallback。
+- ETC preview 页面原来展示 `importable_count`，对 reconciliation allowlist 中已存在但仍可确认关联的记录会显示为 0；改为展示既有合同字段 `confirmable_count`，确认文案同步使用同一数字。
+- 回归覆盖 worker 对象存储注入、前端组件与 Chromium flow。发布后复用原失败 session 重试，验证真实 PostgreSQL + MinIO worker drain 与 business batch 落库。
+
 ## 2026-07-14：真实 59 ZIP 二次 504 与全局组合候选边界
 
 - 部署首轮历史附件 read 优化后，使用 `发票5、6月.zip` 中 59 个真实、唯一且完整的内层 ZIP 复测；普通 parser 在本地 614ms 内解析 99 张发票、0 失败，但生产 multipart preview 上传约 24.98MB 后仍于 62 秒返回 Nginx 504。

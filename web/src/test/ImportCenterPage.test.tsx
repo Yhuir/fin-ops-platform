@@ -588,9 +588,9 @@ describe("Import pages", () => {
     expect(screen.getByLabelText("审计汇总 唯一 3")).toBeInTheDocument();
     expect(screen.getByLabelText("审计汇总 重复 1")).toBeInTheDocument();
     expect(screen.getByLabelText("审计汇总 已存在 1")).toBeInTheDocument();
-    expect(screen.getByLabelText("审计汇总 可导入 1")).toBeInTheDocument();
+    expect(screen.getByLabelText("审计汇总 可导入 2")).toBeInTheDocument();
     expectProjectPreviewTable("ETC导入预览结果");
-    expect(screen.getByText("将导入 1 条唯一记录，跳过 2 条重复，1 条需复核。")).toBeInTheDocument();
+    expect(screen.getByText("将导入 2 条唯一记录，跳过 2 条重复，1 条需复核。")).toBeInTheDocument();
   });
 
   test("ETC invoice import preview lists missing reconciliation task items", async () => {
