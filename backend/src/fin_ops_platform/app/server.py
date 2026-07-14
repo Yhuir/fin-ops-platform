@@ -5501,7 +5501,6 @@ class Application:
                 headers={
                     "Content-Type": "application/pdf",
                     "Content-Disposition": _build_content_disposition(result.filename),
-                    "Content-Length": str(len(result.content)),
                     "Cache-Control": "private, no-store",
                     "Access-Control-Allow-Origin": "*",
                     "Access-Control-Allow-Headers": "Content-Type",

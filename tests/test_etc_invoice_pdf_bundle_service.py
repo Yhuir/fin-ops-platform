@@ -211,6 +211,7 @@ class EtcInvoicePdfBundleApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["Content-Type"], "application/pdf")
         self.assertIn("filename*=UTF-8''", response.headers["Content-Disposition"])
+        self.assertNotIn("Content-Length", response.headers)
         self.assertEqual(response.headers["Cache-Control"], "private, no-store")
         self.assertEqual(response.headers["X-ETC-Invoice-Count"], "3")
         self.assertEqual(response.headers["X-PDF-Page-Count"], "3")

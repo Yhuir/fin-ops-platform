@@ -50,7 +50,7 @@
 
 - 类别 1（业务核心）：适用。`tests/test_etc_invoice_pdf_bundle_service.py` 以真实 PDF 字节覆盖 68 张=68 页、稳定顺序、空批次/无草稿、缺失/损坏/hash 不一致/多页和资源上限。
 - 类别 2（service）：适用。同一测试覆盖 application service 的 actor scope、批次成员解析、文件读取端口、全有或全无和下载审计；不直接依赖 MinIO client 或 HTTP response。
-- 类别 3（API 合同）：适用。覆盖成功二进制 response、UTF-8 文件名、no-store、数量/页数 headers、无草稿 409 和结构化错误映射。
+- 类别 3（API 合同）：适用。覆盖成功二进制 response、UTF-8 文件名、no-store、数量/页数 headers、无草稿 409 和结构化错误映射；业务路由不写 `Content-Length`，由统一 HTTP handler 只发送一次，防止 Nginx 因重复长度头返回 502。
 - 类别 4（read model/cache/job）：不适用。下载只读 canonical business batch + 对象存储字节，不新增或刷新 read model，不入队 worker，不写缓存/预生成文件。
 - 类别 5（前端交互）：适用。Vitest 覆盖 blob、文件名、结构化错误、按钮点击和 URL 释放；Playwright 覆盖 read-export 用户可见按钮、浏览器 download event 和服务端文件名。
 - 类别 6（端到端）：适用。本地 API + 浏览器组合覆盖 OA 草稿存在 -> 合并 API -> 浏览器下载；生产 PostgreSQL + MinIO 真实对象属于发布后只读 smoke。
