@@ -251,6 +251,49 @@ class EtcReconciliationReadConnection:
         return []
 
 
+class EtcReconciliationDeletedFileReadConnection:
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        if "from app.etc_reconciliation_tasks" in sql:
+            return [
+                {
+                    "key": "ETC-RECON-000026",
+                    "raw_payload": {
+                        "normalized_payload": {
+                            "task_id": "ETC-RECON-000026",
+                            "source_files": [],
+                            "audit_events": [],
+                        }
+                    },
+                }
+            ]
+        if "from app.etc_reconciliation_files" in sql:
+            return [
+                {
+                    "task_id": "ETC-RECON-000026",
+                    "key": "ETC-RECON-FILE-000061",
+                    "status": "stored",
+                    "raw_payload": {
+                        "normalized_payload": {
+                            "task_id": "ETC-RECON-000026",
+                            "file_id": "ETC-RECON-FILE-000061",
+                        }
+                    },
+                },
+                {
+                    "task_id": "ETC-RECON-000026",
+                    "key": "ETC-RECON-FILE-000062",
+                    "status": "deleted",
+                    "raw_payload": {
+                        "normalized_payload": {
+                            "task_id": "ETC-RECON-000026",
+                            "file_id": "ETC-RECON-FILE-000062",
+                        }
+                    },
+                },
+            ]
+        return []
+
+
 class RebuildableCandidateReadConnection:
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
         return [
@@ -1066,6 +1109,13 @@ def test_ops_tax_etc_multi_table_saves_use_transactions() -> None:
     executed_sql = " ".join(sql for sql, _ in connection.executed)
     assert "insert into app.etc_reconciliation_tasks" in executed_sql
     assert "insert into app.etc_reconciliation_files" in executed_sql
+    assert "update app.etc_reconciliation_files set status = 'deleted'" in executed_sql
+    stale_file_update = next(
+        (sql, params)
+        for sql, params in connection.executed
+        if "update app.etc_reconciliation_files" in sql
+    )
+    assert stale_file_update[1] == ("task-1", ["file-1"])
 
 
 def test_ops_tax_etc_deleted_reconciliation_task_clears_formal_file_rows() -> None:
@@ -1270,3 +1320,17 @@ def test_etc_reconciliation_load_derives_counters_from_task_payload_and_strips_t
     assert snapshot["file_counter"] == 60
     assert snapshot["audit_counter"] == 7
     assert "id" not in snapshot["tasks"]["ETC-RECON-000026"]
+
+
+def test_etc_reconciliation_load_ignores_deleted_formal_files_without_reusing_ids() -> None:
+    repository = PostgresOpsTaxEtcRepository(EtcReconciliationDeletedFileReadConnection())
+
+    snapshot = repository.load_etc_reconciliation_state()
+
+    assert snapshot["tasks"]["ETC-RECON-000026"]["source_files"] == [
+        {
+            "task_id": "ETC-RECON-000026",
+            "file_id": "ETC-RECON-FILE-000061",
+        }
+    ]
+    assert snapshot["file_counter"] == 62

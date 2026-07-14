@@ -988,12 +988,19 @@ class PostgresOpsTaxEtcRepository:
         if not tasks:
             return {}
         file_rows = self._connection.fetch_all(
-            "select task_id, file_id as key, raw_payload from app.etc_reconciliation_files order by created_at, file_id"
+            "select task_id, file_id as key, status, raw_payload "
+            "from app.etc_reconciliation_files order by created_at, file_id"
         )
         files_by_task: dict[str, list[dict[str, Any]]] = {}
+        formal_file_ids: dict[str, dict[str, Any]] = {}
         for row in file_rows:
             payload = row_payload(row, "raw_payload")
             if not isinstance(payload, dict):
+                continue
+            file_id = str(payload.get("file_id") or row.get("key") or "").strip()
+            if file_id:
+                formal_file_ids[file_id] = payload
+            if str(row.get("status") or "").strip() == "deleted":
                 continue
             task_id = str(payload.get("task_id") or row.get("task_id") or "").strip()
             if not task_id:
@@ -1011,12 +1018,6 @@ class PostgresOpsTaxEtcRepository:
             if isinstance(task_payload, dict)
             for file in task_payload.get("source_files", [])
             if isinstance(file, dict) and file.get("file_id")
-        }
-        formal_file_ids = {
-            str(file.get("file_id")): file
-            for files in files_by_task.values()
-            for file in files
-            if file.get("file_id")
         }
         return {
             "schema_version": 1,
@@ -1064,6 +1065,22 @@ class PostgresOpsTaxEtcRepository:
                 if task_status == "deleted":
                     connection.execute("delete from app.etc_reconciliation_files where task_id = %s", (task_id,))
                     continue
+                source_file_ids = [
+                    file_id
+                    for file_payload in source_files
+                    if isinstance(file_payload, dict)
+                    if (file_id := text(file_payload.get("file_id")))
+                ]
+                connection.execute(
+                    """
+                    update app.etc_reconciliation_files
+                    set status = 'deleted', updated_at = now()
+                    where task_id = %s
+                      and status <> 'deleted'
+                      and not (file_id = any(%s))
+                    """,
+                    (task_id, source_file_ids),
+                )
                 for file_payload in source_files:
                     if not isinstance(file_payload, dict):
                         continue

@@ -665,6 +665,65 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         self.assertEqual([source.file_id for source in updated.source_files], [statement_file.file_id])
         self.assertFalse(Path(ticket_file.stored_path).exists())
 
+    def test_uploaded_parse_result_rejects_source_deleted_before_parse_commit(self) -> None:
+        service = EtcReconciliationTaskService(data_dir=Path(self.temp_dir.name))
+        task = service.create_task(title="ETC", created_by="alice")
+        source_file = service.store_uploaded_source_file(
+            task_id=task.task_id,
+            source_kind=SourceFileKind.CREDIT_CARD_STATEMENT,
+            original_name="statement.pdf",
+            content_type="application/pdf",
+            content=b"statement",
+            created_by="alice",
+        )
+        current = service.get_task(task.task_id)
+        service.delete_source_file(
+            task_id=task.task_id,
+            file_id=source_file.file_id,
+            expected_version=current.version,
+            actor="alice",
+        )
+
+        with self.assertRaisesRegex(ValueError, "source_file_deleted_during_parse"):
+            service.apply_parse_result(
+                task_id=task.task_id,
+                parse_result=CcbCreditCardStatementParser().parse_text(
+                    file_id=source_file.file_id,
+                    text=CCB_STATEMENT_TEXT,
+                ),
+                actor="alice",
+                require_source_file=True,
+            )
+
+        current = service.get_task(task.task_id)
+        self.assertEqual(current.source_files, [])
+        self.assertEqual(current.parse_results, [])
+        self.assertEqual(current.credit_card_items, [])
+
+    def test_delete_source_file_cleans_existing_orphan_parse_result(self) -> None:
+        service = EtcReconciliationTaskService(data_dir=Path(self.temp_dir.name))
+        task = service.create_task(title="ETC", created_by="alice")
+        task = service.apply_parse_result(
+            task_id=task.task_id,
+            parse_result=CcbCreditCardStatementParser().parse_text(
+                file_id="ORPHAN-CARD-FILE",
+                text=CCB_STATEMENT_TEXT,
+            ),
+            actor="alice",
+        )
+
+        updated = service.delete_source_file(
+            task_id=task.task_id,
+            file_id="ORPHAN-CARD-FILE",
+            expected_version=task.version,
+            actor="alice",
+        )
+
+        self.assertEqual(updated.source_files, [])
+        self.assertEqual(updated.parse_results, [])
+        self.assertEqual(updated.credit_card_items, [])
+        self.assertEqual(updated.audit_events[-1].event_type, "orphan_parse_result_deleted")
+
     def test_delete_linked_ticket_source_file_resets_invalid_card_resolution(self) -> None:
         service = EtcReconciliationTaskService(data_dir=Path(self.temp_dir.name))
         task = service.create_task(title="ETC", created_by="alice")

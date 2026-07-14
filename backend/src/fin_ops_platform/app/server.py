@@ -5030,6 +5030,7 @@ class Application:
             "ticket_root_source_mode_conflict_pdf",
             "ticket_root_source_mode_conflict_text_file",
             "ticket_root_source_mode_conflict_mixed_upload",
+            "source_file_deleted_during_parse",
         } else HTTPStatus.BAD_REQUEST
         messages = {
             "ticket_root_source_mode_conflict": "已有手工粘贴票根网源，请先删除已有票根来源后才能切换导入方式。",
@@ -5042,6 +5043,7 @@ class Application:
             "credit_card_item_already_resolved": "该信用卡项已有处理结果，不能直接上传补充凭证覆盖。",
             "linked_supplement_evidence_required": "补充凭证覆盖项缺少已关联的补充凭证。",
             "duplicate_supplement_evidence_file": "该补充凭证文件已经上传。",
+            "source_file_deleted_during_parse": "源文件在解析完成前已被删除，请重新上传。",
         }
         normalized_code = "ticket_root_source_mode_conflict" if code.startswith("ticket_root_source_mode_conflict") else code
         return self._json_response(status, {"error": normalized_code, "message": messages.get(code, code)})

@@ -1971,6 +1971,31 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(payload["parseIssues"], [])
         self.assertFalse(Path(bad_file.stored_path).exists())
 
+    def test_delete_reconciliation_source_file_route_cleans_orphan_parse_result(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            task = app._etc_reconciliation_task_service.create_task(title="ETC", created_by="alice")
+            task = app._etc_reconciliation_task_service.apply_parse_result(
+                task_id=task.task_id,
+                parse_result=CcbCreditCardStatementParser().parse_text(
+                    file_id="ORPHAN-CARD-FILE",
+                    text=CCB_STATEMENT_TEXT,
+                ),
+                actor="alice",
+            )
+
+            response = app.handle_request(
+                "DELETE",
+                f"/api/etc/reconciliation-tasks/{task.task_id}/source-files/ORPHAN-CARD-FILE",
+                json.dumps({"expectedVersion": task.version, "actor": "alice"}),
+            )
+            payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["sourceFiles"], [])
+        self.assertEqual(payload["creditCardItems"], [])
+        self.assertEqual(payload["auditEvents"][-1]["event_type"], "orphan_parse_result_deleted")
+
     def test_delete_reconciliation_source_file_route_requires_version_and_mutable_status(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -3896,6 +3921,47 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(payload["sourceFiles"][0]["sourceKind"], "credit_card_statement")
         self.assertEqual(len(payload["creditCardItems"]), 2)
         self.assertEqual(payload["parseIssues"], [])
+
+    def test_credit_card_statement_upload_rejects_parse_commit_after_source_deleted(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            task = app._etc_reconciliation_task_service.create_task(title="ETC upload", created_by="alice")
+            body, headers = multipart(
+                {"statement.pdf": b"%PDF-1.4\n%%EOF"},
+                fields={"expectedVersion": str(task.version)},
+            )
+
+            def parse_after_source_delete(*, file_id: str, content: bytes) -> FileParseResult:
+                _ = content
+                current = app._etc_reconciliation_task_service.get_task(task.task_id)
+                app._etc_reconciliation_task_service.delete_source_file(
+                    task_id=task.task_id,
+                    file_id=file_id,
+                    expected_version=current.version,
+                    actor="alice",
+                )
+                return CcbCreditCardStatementParser().parse_text(file_id=file_id, text=CCB_STATEMENT_TEXT)
+
+            with patch(
+                "fin_ops_platform.services.etc_reconciliation_source_upload_service."
+                "CcbCreditCardStatementParser.parse_pdf_bytes",
+                side_effect=parse_after_source_delete,
+            ):
+                response = app.handle_request(
+                    "POST",
+                    f"/api/etc/reconciliation-tasks/{task.task_id}/credit-card-statement",
+                    body=body,
+                    headers=headers,
+                )
+            payload = json.loads(response.body)
+            stored_task = app._etc_reconciliation_task_service.get_task(task.task_id)
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(payload["error"], "source_file_deleted_during_parse")
+        self.assertEqual(payload["message"], "源文件在解析完成前已被删除，请重新上传。")
+        self.assertEqual(stored_task.source_files, [])
+        self.assertEqual(stored_task.parse_results, [])
+        self.assertEqual(stored_task.credit_card_items, [])
 
     def test_credit_card_statement_image_pdf_upload_returns_ocr_warning(self) -> None:
         ocr_row = "2026-04-10 2026-04-11 8514 财付通-贵州黔通智联高速通行费 CNY 147.25CNY 147.25"

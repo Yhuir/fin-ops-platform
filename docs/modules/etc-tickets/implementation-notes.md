@@ -28,6 +28,17 @@
 
 ## 历史记录
 
+## 2026-07-14 - 信用卡慢 OCR 与 source file 删除并发一致性修复
+
+- 目标：修复 source file 已被删除但慢 OCR 随后仍提交 `FileParseResult`，导致“已上传文件”不含信用卡账单、下方却出现信用卡明细的孤儿状态。
+- 影响范围：`EtcReconciliationTaskService`、`EtcReconciliationSourceUploadService`、reconciliation API 错误映射、PostgreSQL ETC formal file row 对账及定向回归；不改前端 mapper、页面列表、OCR 提取算法、匹配规则、read model 或 worker。
+- 关键决策：以 source `file_id` 生命周期为唯一不变量；解析提交和删除使用同一互斥边界，上传路径在提交前强制验证 source file 仍存在；既有 DELETE source API 可清理历史孤儿 parse result 并写 `orphan_parse_result_deleted` 审计；active task 保存时仅把 task snapshot 已缺失的 formal file row 标记 `deleted`，不叠加兼容 fallback。
+- 文档影响：更新 ETC 模块 README、boundary、state、tests、实施记录和 API 合同；产品口径、成功响应 DTO 和前端行为不变，新增并发失败的 HTTP 409 / `source_file_deleted_during_parse` 合同。
+- 测试覆盖：service unit 覆盖删除后拒绝解析提交和孤儿清理；API contract 覆盖 409 本地化错误、不残留 parse/card 数据和 DELETE 孤儿恢复；repository boundary 覆盖缺失 formal file row 的 deleted 对账并保留当前 file id。
+- 验证命令：见本轮最终执行记录。
+- 未测风险：锁是单进程服务内互斥；当前生产 HTTP runtime 为单进程 `ThreadingHTTPServer`，符合现有部署拓扑。若未来改为多进程/多副本上传服务，必须把同一不变量迁到数据库事务锁或 compare-and-swap 边界。
+- 后续事项：发布后按 `expectedVersion` 先清理当前任务的历史孤儿 `ETC-RECON-FILE-000200`，再重新上传原 PDF，验证 source count、card count、parse issue 和明细引用一致。
+
 ## 2026-07-14 - 信用卡 PDF 文本解析与图像 OCR fallback
 
 - 目标：信用卡账单 PDF 同时支持可选文字和无可选文字的图像页，不改变后续银行对账数据合同。

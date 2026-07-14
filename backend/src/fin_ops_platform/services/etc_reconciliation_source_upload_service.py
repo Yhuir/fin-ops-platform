@@ -82,7 +82,12 @@ class EtcReconciliationSourceUploadService:
                 ticket_root_upload_mode=ticket_root_upload_mode,
                 evidence_kind_override=evidence_kind_override,
             )
-            task = self._task_service.apply_parse_result(task_id=task_id, parse_result=parse_result, actor=actor)
+            task = self._task_service.apply_parse_result(
+                task_id=task_id,
+                parse_result=parse_result,
+                actor=actor,
+                require_source_file=True,
+            )
         return task
 
     def submit_ticket_root_texts(
@@ -115,6 +120,7 @@ class EtcReconciliationSourceUploadService:
                 task_id=task_id,
                 parse_result=parse_result,
                 actor=actor,
+                require_source_file=True,
             )
         return task
 

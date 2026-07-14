@@ -21,6 +21,7 @@
   - 任意业务阶段允许删除本地批次记录；删除必须写入审计并校验 `expectedVersion` 防并发覆盖，但不得因 `importing`、`oa_draft_created`、`submitted_confirmed`、`closed` 等流程状态阻塞。
   - 删除未提交批次会清理本地导入批次、ETC metadata/附件关系和绑定任务；删除已提交批次会本地 reset 业务批次，释放 ETC 发票 `current_batch_id`，让 `etc_invoice_summary` 消失；只有原本已存在于统一发票池的发票才可能回到普通发票视图。
   - 绑定的 `etc_reconciliation_tasks` 删除后必须落为 `deleted` tombstone，而不是从内存 snapshot 中物理移除；列表、详情、ready-for-import 入口必须过滤 deleted task，但 tombstone 保留 task counter 和重启后的删除事实，防止 Postgres 只追加/更新式持久化在部署后重新加载旧 task-only 行。
+  - 信用卡 PDF/票根文件上传先建立 source file，再执行解析；解析提交和 source file 删除必须互斥。若慢 OCR 完成前 source file 已被删除，解析提交返回 `source_file_deleted_during_parse`，不得把 `FileParseResult`、信用卡项或异常项写回任务。历史孤儿解析结果允许由同一 source file 删除入口按 `file_id` 清理并记录审计。
   - 已提交 `etc_invoice_summary` 若已经参与关联台 active relation，删除批次时必须取消包含该 summary row 的 active relation；取消后不得恢复历史 OA+银行流水二栏 active relation，OA 和银行流水各自回到未配对。
 - 禁止流转：
   - ETC 页面不得提供自动 OA 检测、刷新检测或异常检测入口。
@@ -37,6 +38,7 @@
 - batch list：左侧批次列表和 tab 计数只使用 `/api/etc/business-batches*` 事实；页面不再提供月份选择器，默认展示全部用户可见批次并只分“未提交/已提交”两个 bucket；task-only active task 只允许出现在 workflow 内部状态或异常恢复入口，不得混入批次列表。
 - title editing：未提交 business batch 行的标题可点击内联编辑，Enter 或失焦保存，Esc 取消；保存失败保留错误提示，不伪装为已保存。已提交 bucket 不展示标题编辑入口。
 - error：导入、创建草稿、人工确认、删除失败时显示本地化业务错误；内部对象 id、文件 id、旧检测码不作为主要用户文案。
+- upload/delete conflict：上传仍在解析时若来源被并发删除，页面接收 HTTP 409 和“源文件在解析完成前已被删除，请重新上传”，不得显示上传成功；刷新后“已上传文件”和解析明细必须由同一组 source `file_id` 派生。
 - submitted delete confirm：已提交批次删除确认框必须说明“取消发票合并，OA 系统中的草稿和已提交记录不会删除”，不得展示为撤销 OA。
 - stale/refreshing：ETC 页面本身不触发 OA 自动检测；关联台 read model 刷新状态由关联台页面展示。
 - permission disabled/hidden：权限不足时隐藏或禁用创建、导入、草稿、人工确认入口；删除入口不做流程状态阻塞，后端只保留版本并发校验和本地清理一致性校验。
@@ -55,6 +57,7 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-07-14 | 修复慢 OCR 与 source file 删除并发造成的孤儿解析结果；新增解析提交存在性校验、互斥、孤儿清理和 formal file row deleted 对账 | 信用卡/票根上传、source file 删除、对账任务 payload、PostgreSQL formal file 状态、409 错误合同 | `tests/test_etc_reconciliation_service.py`；`tests/test_etc_backend.py`；`tests/test_postgres_repositories_boundaries.py` |
 | 2026-07-05 | 删除 ETC invoice-id 级 `/api/etc/invoices/revoke-submitted` 回退入口、旧 `/api/etc/batches*` 前端测试 mock 假后端和 ETC `oa-status/refresh` mock | ETC invoice list route owner 变为只读 I/O；提交状态回退只允许走 business batch 状态机；测试 mock 不再支持线上已删除旧入口 | `tests.test_platform_runtime_boundary_guards`；`tests.test_etc_backend.EtcServiceTests.test_batch_status_mark_not_submitted_and_draft_creation_with_fake_oa_client`；`web/src/test/EtcApi.test.ts` |
 | 2026-07-01 | ETC 页面移除月份选择器，未提交业务批次支持提交前内联编辑标题并同步 linked task title | ETC 页面 UI 状态、business batch `title` payload、ETC 发票导入 ready task 下拉标题 | `tests.test_etc_backend.EtcServiceTests.test_business_batch_title_update_persists_and_locks_submitted`；`tests.test_etc_backend.EtcApiTests.test_business_batch_title_patch_updates_linked_task_title`；`web/src/test/EtcTicketManagementPage.test.tsx`；`web/src/test/EtcApi.test.ts` |
 | 2026-06-17 | 补充 ETC 票据管理 Browser e2e，覆盖未提交业务批次、发票明细、OA 草稿创建、人工已提交确认和已提交 bucket 展示 | ETC 页面 UI 状态、business batch `imported -> oa_confirmation_pending -> manually_marked_submitted` 可见链路、Playwright smoke | `cd web && npx playwright test e2e/etc-tickets-flow.spec.ts` |

@@ -10,6 +10,7 @@ import pickle
 import re
 import shutil
 from pathlib import Path
+from threading import Lock
 from typing import Any, Iterable
 
 from fin_ops_platform.services.etc_document_parsers import SupplementEvidenceParser, with_task_id
@@ -49,6 +50,7 @@ class EtcReconciliationTaskService:
         self._file_counter = 0
         self._audit_counter = 0
         self._tasks: dict[str, EtcReconciliationTask] = {}
+        self._source_parse_commit_lock = Lock()
         self._root.mkdir(parents=True, exist_ok=True)
         self._hydrate(self._load_snapshot())
 
@@ -276,32 +278,42 @@ class EtcReconciliationTaskService:
             raise
         return replace(metadata)
 
-    def apply_parse_result(self, *, task_id: str, parse_result: FileParseResult, actor: str) -> EtcReconciliationTask:
-        task = self._get_active_task_mutable(task_id)
-        self._assert_mutable_task(task)
-        result = with_task_id(parse_result, task_id)
-        replaced_existing = any(existing.file_id == result.file_id for existing in task.parse_results)
-        if replaced_existing and not result.ok:
-            raise ValueError("Refusing to replace an existing parse result with blocking parse issues.")
-        task.parse_results = [existing for existing in task.parse_results if existing.file_id != result.file_id]
-        task.parse_results.append(result)
-        self._rebuild_task_from_parse_results(task)
-        self._touch(task)
-        affected_item_ids = [
-            item.item_id
-            for item in [*result.credit_card_items, *result.ticket_root_items]
-        ] + [evidence.evidence_id for evidence in result.supplement_evidences]
-        task.audit_events.append(
-            self._new_audit_event(
-                task_id=task_id,
-                event_type="file_parse_result_replaced" if replaced_existing else "file_parsed",
-                actor=actor,
-                file_id=result.file_id,
-                affected_item_ids=affected_item_ids,
+    def apply_parse_result(
+        self,
+        *,
+        task_id: str,
+        parse_result: FileParseResult,
+        actor: str,
+        require_source_file: bool = False,
+    ) -> EtcReconciliationTask:
+        with self._source_parse_commit_lock:
+            task = self._get_active_task_mutable(task_id)
+            self._assert_mutable_task(task)
+            result = with_task_id(parse_result, task_id)
+            if require_source_file and not any(source.file_id == result.file_id for source in task.source_files):
+                raise ValueError("source_file_deleted_during_parse")
+            replaced_existing = any(existing.file_id == result.file_id for existing in task.parse_results)
+            if replaced_existing and not result.ok:
+                raise ValueError("Refusing to replace an existing parse result with blocking parse issues.")
+            task.parse_results = [existing for existing in task.parse_results if existing.file_id != result.file_id]
+            task.parse_results.append(result)
+            self._rebuild_task_from_parse_results(task)
+            self._touch(task)
+            affected_item_ids = [
+                item.item_id
+                for item in [*result.credit_card_items, *result.ticket_root_items]
+            ] + [evidence.evidence_id for evidence in result.supplement_evidences]
+            task.audit_events.append(
+                self._new_audit_event(
+                    task_id=task_id,
+                    event_type="file_parse_result_replaced" if replaced_existing else "file_parsed",
+                    actor=actor,
+                    file_id=result.file_id,
+                    affected_item_ids=affected_item_ids,
+                )
             )
-        )
-        self._persist()
-        return _copy_task(task)
+            self._persist()
+            return _copy_task(task)
 
     def upload_supplement_evidences_for_card(
         self,
@@ -449,15 +461,31 @@ class EtcReconciliationTaskService:
         expected_version: int,
         actor: str,
     ) -> EtcReconciliationTask:
+        with self._source_parse_commit_lock:
+            return self._delete_source_file(
+                task_id=task_id,
+                file_id=file_id,
+                expected_version=expected_version,
+                actor=actor,
+            )
+
+    def _delete_source_file(
+        self,
+        *,
+        task_id: str,
+        file_id: str,
+        expected_version: int,
+        actor: str,
+    ) -> EtcReconciliationTask:
         task = self._get_active_task_mutable(task_id)
         self._assert_expected_version(task, expected_version)
         self._assert_mutable_task(task)
         source_file = next((item for item in task.source_files if item.file_id == file_id), None)
-        if source_file is None:
+        removed_results = [result for result in task.parse_results if result.file_id == file_id]
+        if source_file is None and not removed_results:
             raise KeyError("unknown_source_file")
 
         previous_task = deepcopy(task)
-        removed_results = [result for result in task.parse_results if result.file_id == file_id]
         removed_card_ids = {
             item.item_id
             for result in removed_results
@@ -500,11 +528,11 @@ class EtcReconciliationTaskService:
         task.audit_events.append(
             self._new_audit_event(
                 task_id=task_id,
-                event_type="source_file_deleted",
+                event_type="source_file_deleted" if source_file is not None else "orphan_parse_result_deleted",
                 actor=actor,
-                file_id=source_file.file_id,
-                file_name=source_file.original_name,
-                file_sha256=source_file.sha256,
+                file_id=file_id,
+                file_name=source_file.original_name if source_file is not None else None,
+                file_sha256=source_file.sha256 if source_file is not None else None,
             )
         )
         try:
@@ -512,10 +540,11 @@ class EtcReconciliationTaskService:
         except Exception:
             self._tasks[task_id] = previous_task
             raise
-        try:
-            self._delete_uploaded_source_file(source_file)
-        except OSError:
-            pass
+        if source_file is not None:
+            try:
+                self._delete_uploaded_source_file(source_file)
+            except OSError:
+                pass
         return _copy_task(task)
 
     def refresh_matches(self, *, task_id: str) -> EtcReconciliationTask:
