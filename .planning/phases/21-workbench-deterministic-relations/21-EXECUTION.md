@@ -40,6 +40,8 @@
 - 第六次远程 CI 的唯一失败是 ETC 统一批次列表测试等待静态 list 容器后同步读取异步批次行；现以 `etc-batch-unsubmitted-01` 业务行作为 readiness anchor，不改 ETC 业务链路与 I/O。
 - 第七次远程 CI 已通过后端、835 前端与 177 浏览器流，最后 docs gate 因 runner 未安装 `rg` 而把命令缺失误报为文档缺失。验证入口现集中选择 `rg` 或 `grep`/`git grep`，并移除未使用的固定 `/tmp` 文件写入。
 - 第八次远程 CI 的后端已通过，前端仅有 3 个异步首帧时序失败：成本统计测试把页面标题误当成表格或 refreshing 状态已完成，税金抵扣测试把静态统计卡误当成发票选择行已完成。测试现直接等待对应表格、refreshing 文案和业务复选框，不改产品链路、不加 retry、不放宽业务结果。
+- Release A 首次生产激活后，OA sync fan-out 暴露 PostgreSQL OA projection 历史 payload 仍含 `section=open`，新 Workbench core 按两态合同 fail fast。生产已立即回滚到 `etc-import-e5d6e6a4e-20260714-visibility`；hotfix 只在 repository 反序列化 I/O 边界把 legacy `open`/缺失值归一化为 `unpaired`，核心继续拒绝旧状态和未知状态。
+- Release A 已通过 PR #2 合并到 main（merge SHA `85ec4c26195bd7d2320b90c6c92ff3529d920d52`），分支与 main 精确 SHA 远程 CI 均成功；故障版本未留作 active release，hotfix 必须再次通过本地全量门禁、分支精确 SHA CI、main 精确 SHA CI 后才能重新激活。
 - `cd web && npm run build`：成功。
 - 全量 Chromium 业务流：177 passed，覆盖权限、导入、关联确认/撤回、异常、freshness、跨页 fan-out 与大数据集交互。
 - 旧链路 guard、migration contract、formal repository/orchestrator/grouping 定向门禁：292 passed、24 subtests passed。

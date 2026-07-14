@@ -994,7 +994,12 @@ class PostgresOAProjectionRepository:
         kwargs = {name: data.get(name) for name in field_names if name in data}
         kwargs.setdefault("id", row_id or text(data.get("id")) or "oa-unknown")
         kwargs.setdefault("month", text(data.get("month")) or "all")
-        kwargs.setdefault("section", text(data.get("section")) or "open")
+        stored_section = (text(data.get("section")) or "").lower()
+        if stored_section in {"", "open"}:
+            stored_section = "unpaired"
+        if stored_section not in {"paired", "unpaired"}:
+            raise ValueError(f"Unsupported stored OA Workbench section: {data.get('section')!r}")
+        kwargs["section"] = stored_section
         kwargs.setdefault("case_id", data.get("case_id"))
         kwargs.setdefault("applicant", text(data.get("applicant")) or "")
         kwargs.setdefault("project_name", text(data.get("project_name")) or "--")

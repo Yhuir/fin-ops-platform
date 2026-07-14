@@ -501,6 +501,12 @@ class BulkOAAdapter:
 
 
 class WorkbenchQueryServiceTests(unittest.TestCase):
+    def test_workbench_core_rejects_legacy_open_section(self) -> None:
+        self.assertEqual(WorkbenchQueryService._normalize_workbench_section("paired"), "paired")
+        self.assertEqual(WorkbenchQueryService._normalize_workbench_section("unpaired"), "unpaired")
+        with self.assertRaisesRegex(ValueError, "Unsupported OA Workbench section"):
+            WorkbenchQueryService._normalize_workbench_section("open")
+
     def test_unpaired_invoice_rows_include_ignore_action(self) -> None:
         service = WorkbenchQueryService()
 

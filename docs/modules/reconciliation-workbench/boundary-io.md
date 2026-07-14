@@ -23,6 +23,7 @@
 | 输入 | Owner | 合同 |
 | --- | --- | --- |
 | canonical rows | OA / bank / invoice repositories | 每行必须有稳定 `id`、`type`、`object_identity_key`；重复 typed identity fail fast |
+| OA projection rows | PostgreSQL OA projection repository | 读取边界把持久化历史值 `section=open` 和缺失值归一化为 `unpaired`；只有 `paired|unpaired` 可进入 Workbench core，未知值 fail fast |
 | active relations | workbench-relations | 只接受 `status=active` 的正式关系；row ids 必须存在且不可跨 case 重叠 |
 | list query | Workbench API | `month`、zone=`paired|unpaired`、分页、搜索、排序、generation/source versions |
 | row/group detail | Workbench read repository | 必须固定到同一 active generation；miss 不得合成占位行或回退旧 snapshot |
