@@ -1306,7 +1306,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
                         **base_versions,
                         "workbench_relation_source_versions": {
                             "workbench_pair_relations_updated_at": "2026-06-10 01:39:49+08",
-                            "workbench_reconciliation_decisions_updated_at": "2026-06-10 03:06:22+08",
+                            "workbench_formal_relations_updated_at": "2026-06-10 03:06:22+08",
                         },
                     },
                     "cache_status": "fresh",
@@ -1317,7 +1317,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
                         **base_versions,
                         "workbench_relation_source_versions": {
                             "workbench_pair_relations_updated_at": "2026-06-10 09:58:40+08",
-                            "workbench_reconciliation_decisions_updated_at": "2026-06-10 09:13:13+08",
+                            "workbench_formal_relations_updated_at": "2026-06-10 09:13:13+08",
                         },
                     },
                     "cache_status": "fresh",

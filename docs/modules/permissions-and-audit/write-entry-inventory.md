@@ -143,7 +143,7 @@
 
 | Opener ID | Module | 已打开区域 | 当前证明 |
 | --- | --- | --- | --- |
-| `reconciliation-workbench:open-candidate-actions` | `reconciliation-workbench` | 未配对候选选择后的确认/异常/撤回写入口和列顺序拖拽设置保存入口 | read-export 下列拖拽 handle 全部 disabled，尝试拖拽不会进入 column-layout dragging 或触发 `POST /api/workbench/settings`；选择三栏候选后确认关联、异常处理、撤回关联禁用，行级忽略/标记异常/确认关联入口隐藏，且复扫候选。 |
+| `reconciliation-workbench:unpaired-actions` | `reconciliation-workbench` | 未配对行选择后的确认/异常写入口和列顺序拖拽设置保存入口 | read-export 下列拖拽 handle 全部 disabled，尝试拖拽不会进入 column-layout dragging 或触发 `POST /api/workbench/settings`；选择未配对行后确认关联、异常处理禁用，行级忽略/标记异常/确认关联入口隐藏，且复扫写控件。 |
 | `reconciliation-workbench:paired-withdraw-actions` | `reconciliation-workbench` | 已配对候选选择后的撤回关联写入口 | read-export 下选择已配对三栏候选后撤回关联禁用，更多/取消关联/异常处理入口隐藏，withdraw durable mutation 零调用，且复扫候选。 |
 | `reconciliation-workbench:cash-special-actions` | `reconciliation-workbench` | 已配对银行行的现金过账、现金买票和取消现金处理行级菜单 | deterministic mock 暴露 `confirm_cash_pass_through`、`confirm_cash_ticket_purchase`、`cancel_cash_special` 后，read-export 下更多菜单不可见，确认为过账/确认为买票/取消现金处理 menuitem 和确认买票成本弹窗均不可见，三个现金处理 durable mutation 零调用，且复扫候选。 |
 | `bank-details:auto-tag-rules` | `bank-details` | 自动标签规则抽屉 | read-export 下新增标签、重新应用规则、保存禁用，且复扫 visible enabled 写控件候选。 |

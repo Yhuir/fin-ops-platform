@@ -109,7 +109,7 @@ export type OutputInvoiceCollectionBankSummary = {
   summary: string;
   remark: string;
   relationCaseId?: string;
-  relationStatus?: string;
+  relationStatus?: "linked" | "unlinked";
   relationSource?: string;
   detailAvailable: boolean;
 };
@@ -122,7 +122,7 @@ export type OutputInvoiceCollectionOaSummary = {
   amount: string;
   status: string;
   relationCaseId?: string;
-  relationStatus?: string;
+  relationStatus?: "linked" | "unlinked";
   relationSource?: string;
   detailAvailable: boolean;
 };
@@ -138,7 +138,7 @@ export type OutputInvoiceCollectionRelatedInvoiceSummary = {
   totalWithTax: string;
   taxableItemName: string;
   relationCaseId?: string;
-  relationStatus?: string;
+  relationStatus?: "linked" | "unlinked";
   relationSource?: string;
 };
 

@@ -31,13 +31,11 @@ DERIVED_DATA_EVENTS = (
     "project_scope_changed",
     "manual_derived_cache_cleanup",
     "startup_stale_scan",
-    "candidate_match_changed",
 )
 
 DERIVED_DATA_DOMAINS = (
     "workbench_read_model",
     "workbench_relation_read_model",
-    "workbench_candidate_matches",
     "workbench_matching_dirty_scopes",
     "invoice_lifecycle_read_model",
     "cost_statistics_read_model",
@@ -86,7 +84,6 @@ class DerivedDataLifecycleService:
     _DOMAIN_ACTIONS: dict[str, str] = {
         "workbench_read_model": "invalidate",
         "workbench_relation_read_model": "invalidate",
-        "workbench_candidate_matches": "cleanup_old_schema",
         "workbench_matching_dirty_scopes": "mark_dirty",
         "invoice_lifecycle_read_model": "invalidate",
         "cost_statistics_read_model": "invalidate",
@@ -232,7 +229,6 @@ class DerivedDataLifecycleService:
             "bank_detail_read_model",
             "workbench_read_model",
             "workbench_relation_read_model",
-            "workbench_candidate_matches",
             "workbench_matching_dirty_scopes",
             "invoice_lifecycle_read_model",
             "pending_invoice_read_model",
@@ -244,7 +240,6 @@ class DerivedDataLifecycleService:
             "no_oa_bank_batch_read_model",
             "workbench_read_model",
             "workbench_relation_read_model",
-            "workbench_candidate_matches",
             "workbench_matching_dirty_scopes",
             "invoice_lifecycle_read_model",
             "pending_invoice_read_model",
@@ -254,7 +249,6 @@ class DerivedDataLifecycleService:
         "pending_invoice_rules_changed": (
             "workbench_read_model",
             "workbench_relation_read_model",
-            "workbench_candidate_matches",
             "workbench_matching_dirty_scopes",
             "invoice_lifecycle_read_model",
             "pending_invoice_read_model",
@@ -350,7 +344,6 @@ class DerivedDataLifecycleService:
             "bank_detail_read_model",
             "workbench_read_model",
             "workbench_relation_read_model",
-            "workbench_candidate_matches",
             "workbench_matching_dirty_scopes",
             "invoice_lifecycle_read_model",
             "input_invoice_usage_read_model",
@@ -371,11 +364,6 @@ class DerivedDataLifecycleService:
         "manual_derived_cache_cleanup": DERIVED_DATA_DOMAINS,
         "startup_stale_scan": (
             "workbench_matching_dirty_scopes",
-        ),
-        "candidate_match_changed": (
-            "workbench_read_model",
-            "workbench_relation_read_model",
-            "search_cache",
         ),
     }
 

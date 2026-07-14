@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import { buildWorkbenchSelectionContext } from "../features/workbench/selectionModel";
-import type { WorkbenchCandidateGroup, WorkbenchRecord } from "../features/workbench/types";
+import type { WorkbenchRelationGroup, WorkbenchRecord } from "../features/workbench/types";
 
 function row(id: string, recordType: WorkbenchRecord["recordType"], amount = "100.00"): WorkbenchRecord {
   return {
@@ -17,57 +17,57 @@ function row(id: string, recordType: WorkbenchRecord["recordType"], amount = "10
     counterparty: "测试往来",
     tableValues: {},
     detailFields: [],
-    actionVariant: "open",
+    actionVariant: "detail-only",
     availableActions: [],
   };
 }
 
-function group(id: string): WorkbenchCandidateGroup {
+function group(id: string): WorkbenchRelationGroup {
   return {
     id,
-    groupType: "open",
-    rawGroupType: "candidate",
-    matchConfidence: "medium",
-    reason: "automatic_candidate",
+    groupType: "unpaired",
+    rawGroupType: "unpaired",
+    matchConfidence: "low",
+    reason: "unpaired_fact",
     rows: {
-      oa: [row(`${id}-oa`, "oa")],
       bank: [row(`${id}-bank`, "bank")],
-      invoice: [row(`${id}-invoice`, "invoice")],
+      oa: [],
+      invoice: [],
     },
   };
 }
 
 describe("buildWorkbenchSelectionContext", () => {
-  test("open zone selection brings in the whole candidate group when any row is selected", () => {
-    const sourceGroup = group("candidate-1");
+  test("unpaired zone selection keeps a singleton fact independent", () => {
+    const sourceGroup = group("unpaired-1");
     const selectedBankRow = sourceGroup.rows.bank[0];
 
     const context = buildWorkbenchSelectionContext({
       explicitRows: [selectedBankRow],
       sourceGroups: [sourceGroup],
-      zoneId: "open",
+      zoneId: "unpaired",
     });
 
-    expect(context.explicitRows.map((record) => record.id)).toEqual(["candidate-1-bank"]);
-    expect(context.includedRowIds).toEqual(["candidate-1-bank", "candidate-1-oa", "candidate-1-invoice"]);
-    expect([...context.relatedRowIdSet].sort()).toEqual(["candidate-1-invoice", "candidate-1-oa"]);
+    expect(context.explicitRows.map((record) => record.id)).toEqual(["unpaired-1-bank"]);
+    expect(context.includedRowIds).toEqual(["unpaired-1-bank"]);
+    expect([...context.relatedRowIdSet]).toEqual([]);
     expect(context.summary).toMatchObject({
       explicitTotal: 1,
-      total: 3,
-      oa: 1,
+      total: 1,
+      oa: 0,
       bank: 1,
-      invoice: 1,
+      invoice: 0,
     });
   });
 
-  test("open zone selection keeps a manual two-pane relation as one selectable group", () => {
-    const sourceGroup: WorkbenchCandidateGroup = {
+  test("paired zone selection keeps a formal two-pane relation as one selectable group", () => {
+    const sourceGroup: WorkbenchRelationGroup = {
       id: "case:CASE-PARTIAL",
-      groupType: "open",
-      rawGroupType: "candidate",
+      groupType: "paired",
+      rawGroupType: "relation",
       relationMode: "manual_confirmed",
       matchConfidence: "medium",
-      reason: "confirmed_partial_relation",
+      reason: "active_formal_relation",
       rows: {
         oa: [row("oa-partial", "oa")],
         bank: [row("bank-partial", "bank")],
@@ -78,7 +78,7 @@ describe("buildWorkbenchSelectionContext", () => {
     const context = buildWorkbenchSelectionContext({
       explicitRows: [sourceGroup.rows.bank[0]],
       sourceGroups: [sourceGroup],
-      zoneId: "open",
+      zoneId: "paired",
     });
 
     expect(context.explicitRows.map((record) => record.id)).toEqual(["bank-partial"]);

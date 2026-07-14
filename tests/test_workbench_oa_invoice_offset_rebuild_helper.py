@@ -34,9 +34,9 @@ class WorkbenchOaInvoiceOffsetRebuildHelperTests(unittest.TestCase):
         self.assertFalse(self._helper([]).cached_payload_needs_rebuild(payload))
         self.assertFalse(self._helper().cached_payload_needs_rebuild(payload))
 
-    def test_open_group_with_configured_applicant_and_attachment_needs_rebuild(self) -> None:
+    def test_unpaired_group_with_configured_applicant_and_attachment_needs_rebuild(self) -> None:
         payload = {
-            "open": {
+            "unpaired": {
                 "groups": [
                     {
                         "oa_rows": [{"id": "oa-1", "applicant": "周洁莹"}],

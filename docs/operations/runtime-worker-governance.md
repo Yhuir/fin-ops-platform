@@ -408,9 +408,20 @@ emergency 清理后必须重新执行普通 `VACUUM (ANALYZE)`、确认 active g
 worker 会通过 `WorkbenchReconciliationDirtyQueue` / repository 检查
 `job.workbench_matching_dirty_scopes.status='completed'` 的 scope run；如果 row 的 `source_versions`
 不包含当前 matching source versions（例如 `workbench_matching_rules_version`），repository 使用
-`for update skip locked` 把该 scope 原子转回 `dirty`，再由同一 worker 正常 claim、重建候选/decision、
-complete。不要手工改 `job.workbench_matching_dirty_scopes` 状态来补指定月份；生产恢复应走发布后的
-worker、read model refresh 和只读审计验证。
+`for update skip locked` 把该 scope 原子转回 `dirty`，再由同一 worker 正常 claim、读取 canonical facts、
+执行纯确定性规划，并把唯一安全结果通过 relation UoW 直接写成 active 正式关系后 complete。该 worker
+不持久化候选/decision；ambiguous、unsafe 或 resource-limited 结果只记录计数，事实继续保持未配对。
+不要手工改 `job.workbench_matching_dirty_scopes` 状态来补指定月份；生产恢复应走发布后的 worker、
+read model refresh 和只读审计验证。
+
+### 2026-07-14 正式关系二态迁移
+
+migration `0104_drop_legacy_workbench_relation_states.sql` 只 forward-drop 旧 candidate/decision 派生表和
+旧 app-setting，不修改 OA、银行流水、发票、正式 relation 或 history。发布该迁移后必须执行一次
+`workbench-rehydrate`：所有事实月份重建新的 Workbench generation，等待 `workbench` 与
+`workbench_relation` scope fresh，再运行页面 Audit。验收必须同时证明 canonical counts/checksum 未减少、
+active relation typed members 全部位于 paired、其余 canonical facts 全部是 unpaired singleton；不能通过
+原地更新旧 generation、恢复旧表或隐藏不一致行完成迁移。
 
 Workbench `all` active generation 从 month shard 聚合时必须传播单一且完整的
 `workbench_matching_rules_version`。如果 all scope 缺失该版本证明，先通过正式 Workbench refresh 重建

@@ -174,20 +174,6 @@ class AuditInputInvoiceUsageReadModelToolTests(unittest.TestCase):
                         "mismatch_kind": "canonical_missing_group_edge",
                     }
                 ],
-                "candidate_relation_in_input_usage": [
-                    {
-                        "row_id": "row-candidate",
-                        "scope_key": "2026-05",
-                        "invoice_id": "inv-candidate",
-                    }
-                ],
-                "candidate_workbench_relation": [
-                    {
-                        "row_id": "inv-candidate",
-                        "scope_key": "2026-05",
-                        "invoice_id": "inv-candidate",
-                    }
-                ],
                 "consumer_relation_edge_equality": [
                     {
                         "subject_id": "case-extra",
@@ -208,10 +194,8 @@ class AuditInputInvoiceUsageReadModelToolTests(unittest.TestCase):
         self.assertIn("duplicate_input_invoice_usage_member", issue_codes)
         self.assertIn("input_invoice_usage_amount_mismatch", issue_codes)
         self.assertIn("input_invoice_usage_relation_edge_mismatch", issue_codes)
-        self.assertIn("candidate_relation_projected_into_input_usage", issue_codes)
-        self.assertIn("candidate_workbench_relation_for_input_invoice", issue_codes)
         self.assertIn("input_invoice_usage_consumer_relation_edge_mismatch", issue_codes)
-        self.assertEqual(report["summary"]["blocking_issue_sample_count"], 7)
+        self.assertEqual(report["summary"]["blocking_issue_sample_count"], 5)
         self.assertEqual(connection.executed, [])
 
     def test_cli_fail_on_issues_returns_nonzero(self) -> None:

@@ -18,7 +18,7 @@ class SearchApiTests(unittest.TestCase):
         self.assertGreaterEqual(payload["summary"]["bank"], 1)
         self.assertGreaterEqual(payload["summary"]["invoice"], 1)
         self.assertEqual(payload["oa_results"][0]["jump_target"]["month"], "2026-03")
-        self.assertIn(payload["oa_results"][0]["zone_hint"], {"paired", "open"})
+        self.assertIn(payload["oa_results"][0]["zone_hint"], {"paired", "unpaired"})
         self.assertIsInstance(payload["oa_results"][0]["primary_meta"], str)
         self.assertIsInstance(payload["oa_results"][0]["secondary_meta"], str)
         self.assertIsInstance(payload["bank_results"][0]["primary_meta"], str)
@@ -27,7 +27,11 @@ class SearchApiTests(unittest.TestCase):
     def test_search_api_supports_status_filter_for_ignored_rows(self) -> None:
         app = build_application()
         raw_payload = app._build_raw_workbench_payload("2026-03")
-        target_row = raw_payload["open"]["invoice"][0]
+        target_row = next(
+            row
+            for row in raw_payload["unpaired"]["invoice"]
+            if row.get("invoice_no") == "12561048"
+        )
         app._workbench_override_service.ignore_row(row=target_row, comment="测试忽略")
 
         response = app.handle_request("GET", "/api/search?q=12561048&month=2026-03&status=ignored")
@@ -50,11 +54,11 @@ class SearchApiTests(unittest.TestCase):
                     "bank_count": 0,
                     "invoice_count": 0,
                     "paired_count": 0,
-                    "open_count": 0,
+                    "unpaired_count": 0,
                     "exception_count": 0,
                 },
                 "paired": {"groups": []},
-                "open": {"groups": []},
+                "unpaired": {"groups": []},
             },
             ignored_rows=[
                 {

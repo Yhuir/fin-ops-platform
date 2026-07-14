@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -27,16 +28,17 @@ from fin_ops_platform.services.postgres_repositories.common import (
     without_keys,
 )
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
-from fin_ops_platform.services.workbench_candidate_match_service import CANDIDATE_MATCH_SCHEMA_VERSION
-
+from fin_ops_platform.services.workbench_read_model_version import (
+    WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION,
+    WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION,
+    WorkbenchReadModelVersionConflictError,
+)
 MONTH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
 BANK_DETAIL_READ_MODEL_SCHEMA_VERSION = 10
 BANK_ACCOUNT_BALANCE_READ_MODEL_SCHEMA_VERSION = 1
 BANK_DETAIL_PURPOSE_TEXT_LABELS = ("用途", "交易用途")
 BANK_DETAIL_SUMMARY_TEXT_LABELS = ("摘要",)
 BANK_DETAIL_NOTE_TEXT_LABELS = ("备注", "附言", "客户附言")
-WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION = "workbench_sql_projection.aggregate.visible_linked_relations.v1"
-WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION = "workbench_sql_projection.composed_active_month_shards.visible_linked_relations.v1"
 WORKBENCH_PANES = ("oa", "bank", "invoice")
 WORKBENCH_FILTER_PLACEHOLDERS = {"", "--", "—"}
 NO_OA_BANK_BATCH_SUMMARY_SOURCE_KIND = "no_oa_bank_batch_summary"
@@ -54,38 +56,12 @@ LOGGER = logging.getLogger(__name__)
 def _workbench_active_month_groups_sql() -> str:
     return """
         (
-            select distinct on (active_groups.zone, active_groups.all_scope_group_id)
-                active_groups.generation_id,
-                active_groups.all_scope_group_id as group_id,
-                active_groups.group_id as source_group_id,
-                active_groups.scope_key,
-                active_groups.scope_month,
-                active_groups.zone,
-                active_groups.status,
-                active_groups.group_type,
-                active_groups.source_kinds,
-                active_groups.row_count,
-                active_groups.searchable_text,
-                active_groups.oa_sort_min,
-                active_groups.oa_sort_max,
-                active_groups.bank_sort_min,
-                active_groups.bank_sort_max,
-                active_groups.invoice_sort_min,
-                active_groups.invoice_sort_max,
-                active_groups.source_versions,
-                active_groups.generated_at,
-                active_groups.cache_status,
-                active_groups.payload,
-                active_groups.raw_payload,
-                active_groups.updated_at
-            from (
+            with active_groups as (
                 select
                     g.*,
                     case
                         when left(g.group_id, 5) = 'case:'
-                          or left(g.group_id, 9) = 'turnover:'
-                          or left(g.group_id, 17) = 'batch-accounting:'
-                          or left(g.group_id, 21) = 'source:oa_attachment:'
+                          or left(g.group_id, 9) = 'unpaired:'
                             then g.group_id
                         else 'scope:' || g.scope_key || ':' || g.group_id
                     end as all_scope_group_id
@@ -96,12 +72,49 @@ def _workbench_active_month_groups_sql() -> str:
                  and gen.generation_id = g.generation_id
                  and gen.status = 'active'
                 where g.scope_key <> 'all'
-            ) active_groups
-            order by
-                active_groups.zone,
-                active_groups.all_scope_group_id,
-                active_groups.scope_month desc nulls last,
-                active_groups.updated_at desc
+            ), ranked_groups as (
+                select
+                    active_groups.*,
+                    row_number() over (
+                        partition by active_groups.zone, active_groups.all_scope_group_id
+                        order by active_groups.scope_month desc nulls last, active_groups.updated_at desc
+                    ) as logical_rank,
+                    min(active_groups.oa_sort_min) over logical_window as logical_oa_sort_min,
+                    max(active_groups.oa_sort_max) over logical_window as logical_oa_sort_max,
+                    min(active_groups.bank_sort_min) over logical_window as logical_bank_sort_min,
+                    max(active_groups.bank_sort_max) over logical_window as logical_bank_sort_max,
+                    min(active_groups.invoice_sort_min) over logical_window as logical_invoice_sort_min,
+                    max(active_groups.invoice_sort_max) over logical_window as logical_invoice_sort_max,
+                    string_agg(active_groups.searchable_text, ' ') over logical_window as logical_searchable_text
+                from active_groups
+                window logical_window as (partition by active_groups.zone, active_groups.all_scope_group_id)
+            )
+            select
+                ranked_groups.generation_id,
+                ranked_groups.all_scope_group_id as group_id,
+                ranked_groups.all_scope_group_id as source_group_id,
+                ranked_groups.scope_key,
+                ranked_groups.scope_month,
+                ranked_groups.zone,
+                ranked_groups.status,
+                ranked_groups.group_type,
+                ranked_groups.source_kinds,
+                ranked_groups.row_count,
+                ranked_groups.logical_searchable_text as searchable_text,
+                ranked_groups.logical_oa_sort_min as oa_sort_min,
+                ranked_groups.logical_oa_sort_max as oa_sort_max,
+                ranked_groups.logical_bank_sort_min as bank_sort_min,
+                ranked_groups.logical_bank_sort_max as bank_sort_max,
+                ranked_groups.logical_invoice_sort_min as invoice_sort_min,
+                ranked_groups.logical_invoice_sort_max as invoice_sort_max,
+                ranked_groups.source_versions,
+                ranked_groups.generated_at,
+                ranked_groups.cache_status,
+                ranked_groups.payload,
+                ranked_groups.raw_payload,
+                ranked_groups.updated_at
+            from ranked_groups
+            where ranked_groups.logical_rank = 1
         ) g
     """
 
@@ -5816,40 +5829,41 @@ class PostgresReadModelRepository:
 
     @staticmethod
     def _workbench_active_month_generation_version(executor: Any) -> dict[str, Any]:
-        row = executor.fetch_one(
+        rows = executor.fetch_all(
             """
             select
-                count(*)::bigint as scope_count,
-                coalesce(
-                    max(
-                        case
-                            when coalesce(source_versions->>'source_version', '') ~ '^[0-9]+$'
-                                then (source_versions->>'source_version')::bigint
-                            else 0
-                        end
-                    ),
-                    0
-                )::bigint as source_version,
-                max(coalesce(activated_at, completed_at, updated_at))::text as generated_at
+                scope_key,
+                generation_id,
+                source_versions,
+                coalesce(activated_at, completed_at, updated_at)::text as generated_at
             from read_model.workbench_generations
             where tenant_id = 'default'
               and status = 'active'
               and scope_key <> 'all'
               and scope_key ~ '^[0-9]{4}-[0-9]{2}$'
+            order by scope_key, generation_id
             """,
         )
-        if not isinstance(row, dict):
+        generation_set = [
+            {
+                "scope_key": text(row.get("scope_key")),
+                "generation_id": text(row.get("generation_id")),
+                "source_versions": row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {},
+            }
+            for row in rows
+            if isinstance(row, dict) and text(row.get("scope_key")) and text(row.get("generation_id"))
+        ]
+        if not generation_set:
             return {}
-        scope_count = int_value(row.get("scope_count"), 0)
-        source_version = int_value(row.get("source_version"), 0)
-        generated_at = text(row.get("generated_at")) or ""
-        if scope_count <= 0:
-            return {}
+        digest = hashlib.sha256(
+            json.dumps(generation_set, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        generated_at = max((text(row.get("generated_at")) or "" for row in rows if isinstance(row, dict)), default="")
         return {
-            "scope_count": scope_count,
-            "source_version": source_version,
+            "scope_count": len(generation_set),
+            "generation_set": generation_set,
             "generated_at": generated_at,
-            "version": f"workbench:all:active-month-shards:{scope_count}:{source_version}:{generated_at}",
+            "version": f"workbench:all:active-generation-set:{digest}",
         }
 
     def _workbench_all_composed_generation_metadata(self) -> dict[str, Any]:
@@ -6071,9 +6085,9 @@ class PostgresReadModelRepository:
                      and target_generations.scope_key = gr.scope_key
                     where gr.row_role <> 'summary'
                       and gr.object_identity_key is not null
-                      and gr.zone in ('paired', 'open')
+                      and gr.zone in ('paired', 'unpaired')
                     group by gr.generation_id, gr.scope_key, gr.pane, gr.object_identity_key, gr.object_identity_kind
-                    having bool_or(gr.zone = 'paired') and bool_or(gr.zone = 'open')
+                    having bool_or(gr.zone = 'paired') and bool_or(gr.zone = 'unpaired')
                 ) duplicate_rows
                 where duplicate_rows.object_kind is not null
                 group by duplicate_rows.generation_id, duplicate_rows.scope_key
@@ -6105,17 +6119,17 @@ class PostgresReadModelRepository:
                       on target_generations.generation_id = gr.generation_id
                      and target_generations.scope_key = gr.scope_key
                     where gr.row_role <> 'summary'
-                      and gr.zone in ('paired', 'open')
+                      and gr.zone in ('paired', 'unpaired')
                     group by gr.generation_id, gr.scope_key, gr.pane, gr.row_id
                     having count(distinct gr.zone || ':' || gr.group_id) > 1
                 ) duplicate_rows
                 group by duplicate_rows.generation_id, duplicate_rows.scope_key
             ),
-            active_relation_open_membership_counts as (
+            active_relation_unpaired_membership_counts as (
                 select
                     active_rows.generation_id,
                     active_rows.scope_key,
-                    count(*)::bigint as active_relation_open_membership_count,
+                    count(*)::bigint as active_relation_unpaired_membership_count,
                     jsonb_agg(
                         jsonb_build_object(
                             'case_id', active_rows.case_id,
@@ -6124,7 +6138,7 @@ class PostgresReadModelRepository:
                             'group_id', active_rows.group_id
                         )
                         order by active_rows.case_id, active_rows.pane, active_rows.row_id
-                    ) as active_relation_open_membership_samples
+                    ) as active_relation_unpaired_membership_samples
                 from (
                     select distinct
                         gr.generation_id,
@@ -6141,9 +6155,8 @@ class PostgresReadModelRepository:
                       on rel.status = 'active'
                      and gr.row_id = any(rel.row_ids)
                     where coalesce(gr.row_role, '') <> 'summary'
-                      and gr.zone = 'open'
+                      and gr.zone = 'unpaired'
                       and gr.row_id is not null
-                      and (gr.group_id is null or gr.group_id <> ('case:' || rel.case_id))
                 ) active_rows
                 group by active_rows.generation_id, active_rows.scope_key
             )
@@ -6168,10 +6181,10 @@ class PostgresReadModelRepository:
                     as duplicate_row_membership_count,
                 coalesce(duplicate_row_membership_counts.duplicate_row_membership_samples, '[]'::jsonb)
                     as duplicate_row_membership_samples,
-                coalesce(active_relation_open_membership_counts.active_relation_open_membership_count, 0)::bigint
-                    as active_relation_open_membership_count,
-                coalesce(active_relation_open_membership_counts.active_relation_open_membership_samples, '[]'::jsonb)
-                    as active_relation_open_membership_samples
+                coalesce(active_relation_unpaired_membership_counts.active_relation_unpaired_membership_count, 0)::bigint
+                    as active_relation_unpaired_membership_count,
+                coalesce(active_relation_unpaired_membership_counts.active_relation_unpaired_membership_samples, '[]'::jsonb)
+                    as active_relation_unpaired_membership_samples
             from target_generations gen
             left join row_counts
               on row_counts.generation_id = gen.generation_id
@@ -6191,9 +6204,9 @@ class PostgresReadModelRepository:
             left join duplicate_row_membership_counts
               on duplicate_row_membership_counts.generation_id = gen.generation_id
              and duplicate_row_membership_counts.scope_key = gen.scope_key
-            left join active_relation_open_membership_counts
-              on active_relation_open_membership_counts.generation_id = gen.generation_id
-             and active_relation_open_membership_counts.scope_key = gen.scope_key
+            left join active_relation_unpaired_membership_counts
+              on active_relation_unpaired_membership_counts.generation_id = gen.generation_id
+             and active_relation_unpaired_membership_counts.scope_key = gen.scope_key
             order by gen.scope_key
             """,
             tuple(params),
@@ -6213,7 +6226,7 @@ class PostgresReadModelRepository:
             duplicate_invoice_identity_count = int_value(row.get("duplicate_invoice_identity_count"), 0)
             duplicate_bank_identity_count = int_value(row.get("duplicate_bank_identity_count"), 0)
             duplicate_row_membership_count = int_value(row.get("duplicate_row_membership_count"), 0)
-            active_relation_open_membership_count = int_value(row.get("active_relation_open_membership_count"), 0)
+            active_relation_unpaired_membership_count = int_value(row.get("active_relation_unpaired_membership_count"), 0)
             reasons: list[str] = []
             if group_count != actual_group_count:
                 reasons.append(f"group_count metadata={group_count} actual={actual_group_count}")
@@ -6227,8 +6240,8 @@ class PostgresReadModelRepository:
                 reasons.append(f"duplicate_bank_identity_cross_zone count={duplicate_bank_identity_count}")
             if duplicate_row_membership_count:
                 reasons.append(f"duplicate_row_membership count={duplicate_row_membership_count}")
-            if active_relation_open_membership_count:
-                reasons.append(f"active_relation_open_membership count={active_relation_open_membership_count}")
+            if active_relation_unpaired_membership_count:
+                reasons.append(f"active_relation_unpaired_membership count={active_relation_unpaired_membership_count}")
             if reasons:
                 failures.append(
                     {
@@ -6250,9 +6263,9 @@ class PostgresReadModelRepository:
                         "duplicate_row_membership_samples": row.get("duplicate_row_membership_samples")
                         if isinstance(row.get("duplicate_row_membership_samples"), list)
                         else [],
-                        "active_relation_open_membership_count": active_relation_open_membership_count,
-                        "active_relation_open_membership_samples": row.get("active_relation_open_membership_samples")
-                        if isinstance(row.get("active_relation_open_membership_samples"), list)
+                        "active_relation_unpaired_membership_count": active_relation_unpaired_membership_count,
+                        "active_relation_unpaired_membership_samples": row.get("active_relation_unpaired_membership_samples")
+                        if isinstance(row.get("active_relation_unpaired_membership_samples"), list)
                         else [],
                         "reasons": reasons,
                     }
@@ -6477,7 +6490,7 @@ class PostgresReadModelRepository:
         row_source_versions = row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}
         view_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
         if isinstance(view_payload, dict) and _workbench_snapshot_payload_requires_group_materialization(view_payload):
-            view_payload = self._load_workbench_legacy_groups_payload(
+            view_payload = self._load_workbench_groups_payload(
                 scope_key=normalized_scope_key,
                 generation_id=text(row.get("generation_id")) or active_generation_id,
                 payload=view_payload,
@@ -6503,7 +6516,7 @@ class PostgresReadModelRepository:
             )
         return result
 
-    def _load_workbench_legacy_groups_payload(
+    def _load_workbench_groups_payload(
         self,
         *,
         scope_key: str,
@@ -6512,7 +6525,7 @@ class PostgresReadModelRepository:
     ) -> dict[str, Any]:
         result = dict(payload)
         result.setdefault("paired", {"groups": []})
-        result.setdefault("open", {"groups": []})
+        result.setdefault("unpaired", {"groups": []})
         if not generation_id:
             return result
         rows = self._connection.fetch_all(
@@ -6529,20 +6542,21 @@ class PostgresReadModelRepository:
             (scope_key, generation_id),
         )
         materialized_rows = self._materialize_workbench_group_payloads(rows)
-        grouped: dict[str, list[dict[str, Any]]] = {"paired": [], "open": []}
+        grouped: dict[str, list[dict[str, Any]]] = {"paired": [], "unpaired": []}
         for row, group_payload in zip(rows, materialized_rows, strict=False):
-            zone = text(row.get("zone")) or "open"
+            zone = text(row.get("zone")) or "unpaired"
             if zone not in grouped:
                 continue
             if isinstance(group_payload, dict):
                 grouped[zone].append(group_payload)
         result["paired"] = {"groups": grouped["paired"]}
-        result["open"] = {"groups": grouped["open"]}
+        result["unpaired"] = {"groups": grouped["unpaired"]}
         return result
 
     def _materialize_workbench_group_payloads(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         groups: list[dict[str, Any]] = []
         materialized_keys: list[tuple[str, str, str, str]] = []
+        all_scope_keys: list[tuple[str, str]] = []
         for row in rows:
             group = _read_model_payload(row)
             if not isinstance(group, dict):
@@ -6551,10 +6565,10 @@ class PostgresReadModelRepository:
             if display_group_id:
                 group["group_id"] = display_group_id
                 group["id"] = display_group_id
-            group.setdefault("zone", text(row.get("zone")) or "open")
+            group.setdefault("zone", text(row.get("zone")) or "unpaired")
             scope_key = text(row.get("scope_key"))
             generation_id = text(row.get("generation_id"))
-            zone = text(row.get("zone")) or text(group.get("zone")) or "open"
+            zone = text(row.get("zone")) or text(group.get("zone")) or "unpaired"
             group_id = text(row.get("source_group_id")) or display_group_id or text(group.get("group_id"))
             if (
                 _workbench_group_payload_requires_row_materialization(group)
@@ -6562,13 +6576,18 @@ class PostgresReadModelRepository:
                 and generation_id
                 and group_id
             ):
-                materialized_keys.append((scope_key, generation_id, zone, group_id))
+                if text(row.get("source_group_id")):
+                    all_scope_keys.append((zone, group_id))
+                else:
+                    materialized_keys.append((scope_key, generation_id, zone, group_id))
             groups.append(group)
-        if not materialized_keys:
+        if not materialized_keys and not all_scope_keys:
             return groups
 
-        member_rows = self._connection.fetch_all(
-            """
+        member_rows: list[dict[str, Any]] = []
+        if materialized_keys:
+            member_rows.extend(self._connection.fetch_all(
+                """
             with target_groups as (
                 select *
                 from unnest(%s::text[], %s::text[], %s::text[], %s::text[])
@@ -6617,31 +6636,129 @@ class PostgresReadModelRepository:
                 gr.row_index,
                 gr.row_id
             """,
-            (
-                [key[0] for key in materialized_keys],
-                [key[1] for key in materialized_keys],
-                [key[2] for key in materialized_keys],
-                [key[3] for key in materialized_keys],
-            ),
-        )
+                (
+                    [key[0] for key in materialized_keys],
+                    [key[1] for key in materialized_keys],
+                    [key[2] for key in materialized_keys],
+                    [key[3] for key in materialized_keys],
+                ),
+            ))
+        if all_scope_keys:
+            member_rows.extend(self._connection.fetch_all(
+                """
+                with target_groups as (
+                    select *
+                    from unnest(%s::text[], %s::text[]) as target(zone, logical_group_id)
+                ), physical_groups as (
+                    select
+                        g.*,
+                        case
+                            when left(g.group_id, 5) = 'case:' or left(g.group_id, 9) = 'unpaired:'
+                                then g.group_id
+                            else 'scope:' || g.scope_key || ':' || g.group_id
+                        end as logical_group_id
+                    from read_model.workbench_groups g
+                    join read_model.workbench_generations gen
+                      on gen.tenant_id = 'default'
+                     and gen.scope_key = g.scope_key
+                     and gen.generation_id = g.generation_id
+                     and gen.status = 'active'
+                    where g.scope_key <> 'all'
+                ), ranked_members as (
+                    select
+                        target.logical_group_id,
+                        gr.*,
+                        wr.payload as row_payload,
+                        wr.raw_payload as row_raw_payload,
+                        row_number() over (
+                            partition by
+                                target.zone,
+                                target.logical_group_id,
+                                gr.pane,
+                                case
+                                    when coalesce(gr.row_role, '') = 'summary' then 'summary:' || gr.row_id
+                                    else coalesce(nullif(gr.object_identity_key, ''), gr.row_id)
+                                end
+                            order by gr.scope_month desc nulls last, gr.updated_at desc, gr.row_id
+                        ) as member_rank
+                    from target_groups target
+                    join physical_groups pg
+                      on pg.zone = target.zone
+                     and pg.logical_group_id = target.logical_group_id
+                    join read_model.workbench_group_rows gr
+                      on gr.scope_key = pg.scope_key
+                     and gr.generation_id = pg.generation_id
+                     and gr.zone = pg.zone
+                     and gr.group_id = pg.group_id
+                    left join read_model.workbench_rows wr
+                      on wr.scope_key = gr.scope_key
+                     and wr.generation_id = gr.generation_id
+                     and wr.row_id = gr.row_id
+                )
+                select
+                    'all' as scope_key,
+                    'all-active-shards' as generation_id,
+                    zone,
+                    logical_group_id as group_id,
+                    pane,
+                    row_id,
+                    row_role,
+                    row_index,
+                    source_kind,
+                    status,
+                    time_value,
+                    time_date::text as time_date,
+                    column_values,
+                    searchable_text,
+                    object_identity_key,
+                    object_identity_kind,
+                    object_identity_source,
+                    object_identity_confidence,
+                    row_payload,
+                    row_raw_payload,
+                    payload as member_payload,
+                    raw_payload as member_raw_payload
+                from ranked_members
+                where member_rank = 1
+                order by
+                    zone,
+                    logical_group_id,
+                    case pane when 'oa' then 0 when 'bank' then 1 when 'invoice' then 2 else 3 end,
+                    row_role,
+                    row_index,
+                    row_id
+                """,
+                (
+                    [key[0] for key in all_scope_keys],
+                    [key[1] for key in all_scope_keys],
+                ),
+            ))
         rows_by_group: dict[tuple[str, str, str, str], list[dict[str, Any]]] = {}
         for row in member_rows:
             key = (
                 text(row.get("scope_key")) or "",
                 text(row.get("generation_id")) or "",
-                text(row.get("zone")) or "open",
+                text(row.get("zone")) or "unpaired",
                 text(row.get("group_id")) or "",
             )
             rows_by_group.setdefault(key, []).append(row)
 
         materialized: list[dict[str, Any]] = []
         for row, group in zip(rows, groups, strict=False):
-            key = (
-                text(row.get("scope_key")) or "",
-                text(row.get("generation_id")) or "",
-                text(row.get("zone")) or text(group.get("zone")) or "open",
-                text(row.get("source_group_id")) or text(row.get("group_id")) or text(group.get("group_id")) or "",
-            )
+            if text(row.get("source_group_id")):
+                key = (
+                    "all",
+                    "all-active-shards",
+                    text(row.get("zone")) or text(group.get("zone")) or "unpaired",
+                    text(row.get("source_group_id")) or text(row.get("group_id")) or "",
+                )
+            else:
+                key = (
+                    text(row.get("scope_key")) or "",
+                    text(row.get("generation_id")) or "",
+                    text(row.get("zone")) or text(group.get("zone")) or "unpaired",
+                    text(row.get("group_id")) or text(group.get("group_id")) or "",
+                )
             materialized.append(_materialize_workbench_group_payload(group, rows_by_group.get(key, [])))
         return materialized
 
@@ -6673,7 +6790,7 @@ class PostgresReadModelRepository:
             "bank_count": 0,
             "invoice_count": 0,
             "paired_count": 0,
-            "open_count": 0,
+            "unpaired_count": 0,
             "exception_count": 0,
             "zone_counts": _empty_workbench_zone_counts(),
         }
@@ -6690,11 +6807,11 @@ class PostgresReadModelRepository:
                 continue
             complete_summary_count += 1
             row_summary = _normalize_workbench_summary_counts(payload["summary"])
-            for key in ("oa_count", "bank_count", "invoice_count", "paired_count", "open_count", "exception_count"):
+            for key in ("oa_count", "bank_count", "invoice_count", "paired_count", "unpaired_count", "exception_count"):
                 summary[key] += int_value(row_summary.get(key), 0)
             zone_counts = row_summary.get("zone_counts")
             if isinstance(zone_counts, dict):
-                for zone in ("paired", "open"):
+                for zone in ("paired", "unpaired"):
                     zone_payload = zone_counts.get(zone)
                     if not isinstance(zone_payload, dict):
                         continue
@@ -7021,15 +7138,15 @@ class PostgresReadModelRepository:
         generated_at: str | None,
     ) -> dict[str, Any]:
         paired_groups = []
-        open_groups = []
+        unpaired_groups = []
         paired_section = grouped_payload.get("paired")
-        open_section = grouped_payload.get("open")
+        unpaired_section = grouped_payload.get("unpaired")
         if isinstance(paired_section, dict) and isinstance(paired_section.get("groups"), list):
             paired_groups = [group for group in paired_section.get("groups", []) if isinstance(group, dict)]
-        if isinstance(open_section, dict) and isinstance(open_section.get("groups"), list):
-            open_groups = [group for group in open_section.get("groups", []) if isinstance(group, dict)]
+        if isinstance(unpaired_section, dict) and isinstance(unpaired_section.get("groups"), list):
+            unpaired_groups = [group for group in unpaired_section.get("groups", []) if isinstance(group, dict)]
         summary = _summarize_workbench_payload_groups(
-            {"paired": {"groups": paired_groups}, "open": {"groups": open_groups}}
+            {"paired": {"groups": paired_groups}, "unpaired": {"groups": unpaired_groups}}
         )
         invoice_inventory = grouped_payload.get("invoice_inventory")
         if not isinstance(invoice_inventory, dict):
@@ -7057,7 +7174,7 @@ class PostgresReadModelRepository:
         zone_counts = normalized_summary.get("zone_counts")
         if not isinstance(zone_counts, dict):
             zone_counts = _empty_workbench_zone_counts()
-        for zone in ("paired", "open"):
+        for zone in ("paired", "unpaired"):
             counts = zone_counts.get(zone) if isinstance(zone_counts.get(zone), dict) else {}
             oa_count = int_value(counts.get("oa"), 0)
             bank_count = int_value(counts.get("bank"), 0)
@@ -7230,12 +7347,12 @@ class PostgresReadModelRepository:
             clauses.append("g.status = %s")
             params.append(normalized)
         if normalized := text(source_kind):
-            clauses.append("%s = any(g.source_kinds)")
+            clauses.append(
+                _workbench_all_active_member_exists_sql("r_source.source_kind = %s", row_alias="r_source")
+                if composed_all_scope
+                else "%s = any(g.source_kinds)"
+            )
             params.append(normalized)
-        excludes_linked_etc_summary_groups = normalized_zone == "open"
-        if excludes_linked_etc_summary_groups:
-            clauses.append(_workbench_open_automatic_decision_group_exclusion_sql())
-            clauses.append(_workbench_open_linked_etc_summary_group_exclusion_sql(group_id_sql=group_row_join_id_sql))
         normalized_search = text(search)
         if (
             normalized_search
@@ -7248,7 +7365,14 @@ class PostgresReadModelRepository:
             pattern = f"%{normalized_search}%"
             params.extend([pattern, pattern])
         if normalized_search and normalized_search_mode == "linked_context":
-            clauses.append(_workbench_linked_search_exists_sql(group_id_sql=group_row_join_id_sql))
+            clauses.append(
+                _workbench_all_active_member_exists_sql(
+                    "r_linked_search.searchable_text ilike %s",
+                    row_alias="r_linked_search",
+                )
+                if composed_all_scope
+                else _workbench_linked_search_exists_sql(group_id_sql=group_row_join_id_sql)
+            )
             params.append(f"%{normalized_search}%")
         row_filter_sql, row_filter_params = _workbench_group_row_filter_exists_sql(
             column_filters=normalized_column_filters,
@@ -7256,32 +7380,13 @@ class PostgresReadModelRepository:
             search_by_pane=normalized_search_by_pane,
             fallback_search=None if normalized_search_mode == "linked_context" else normalized_search,
             group_id_sql=group_row_join_id_sql,
+            composed_all_scope=composed_all_scope,
         )
         if row_filter_sql:
             clauses.append(row_filter_sql)
             params.extend(row_filter_params)
         where_sql = " and ".join(clauses)
         order_by_sql = _workbench_groups_order_by(sort)
-        if composed_all_scope and normalized_zone == "open":
-            return self._composed_all_open_workbench_groups_page(
-                groups_from_sql=groups_from_sql,
-                group_select_sql=group_select_sql,
-                where_sql=where_sql,
-                params=params,
-                order_by_sql=order_by_sql,
-                normalized_scope_key=normalized_scope_key,
-                normalized_zone=normalized_zone,
-                normalized_page=normalized_page,
-                normalized_page_size=normalized_page_size,
-                normalized_detail_level=normalized_detail_level,
-                normalized_column_filters=normalized_column_filters,
-                normalized_time_filters=normalized_time_filters,
-                normalized_search_by_pane=normalized_search_by_pane,
-                normalized_search_mode=normalized_search_mode,
-                normalized_search=normalized_search,
-                active_generation_id=active_generation_id,
-                active_source_versions=active_source_versions,
-            )
         oa_row_filter_sql, oa_row_filter_params = _workbench_group_row_count_filter_sql(
             "oa",
             column_filters=normalized_column_filters,
@@ -7304,19 +7409,18 @@ class PostgresReadModelRepository:
             fallback_search=None if normalized_search_mode == "linked_context" else normalized_search,
         )
         materialized_counts = None
-        if not excludes_linked_etc_summary_groups:
-            materialized_counts = self._workbench_generation_stats_for_groups_page(
-                scope_key=normalized_scope_key,
-                generation_id=None if composed_all_scope else active_generation_id,
-                zone=normalized_zone,
-                status=status,
-                source_kind=source_kind,
-                search=normalized_search,
-                search_mode=normalized_search_mode,
-                search_by_pane=normalized_search_by_pane,
-                column_filters=normalized_column_filters,
-                time_filters=normalized_time_filters,
-            )
+        materialized_counts = self._workbench_generation_stats_for_groups_page(
+            scope_key=normalized_scope_key,
+            generation_id=None if composed_all_scope else active_generation_id,
+            zone=normalized_zone,
+            status=status,
+            source_kind=source_kind,
+            search=normalized_search,
+            search_mode=normalized_search_mode,
+            search_by_pane=normalized_search_by_pane,
+            column_filters=normalized_column_filters,
+            time_filters=normalized_time_filters,
+        )
         if materialized_counts is None:
             count_row = self._connection.fetch_one(
                 f"""
@@ -7326,15 +7430,42 @@ class PostgresReadModelRepository:
                 """,
                 tuple(params),
             )
+            if composed_all_scope:
+                member_join_sql = f"""
+                left join read_model.workbench_groups physical_group
+                  on physical_group.zone = g.zone
+                 and {_workbench_all_logical_group_id_sql('physical_group.group_id', 'physical_group.scope_key')} = g.group_id
+                left join read_model.workbench_generations physical_generation
+                  on physical_generation.tenant_id = 'default'
+                 and physical_generation.scope_key = physical_group.scope_key
+                 and physical_generation.generation_id = physical_group.generation_id
+                 and physical_generation.status = 'active'
+                left join read_model.workbench_group_rows r
+                  on physical_generation.generation_id is not null
+                 and r.scope_key = physical_group.scope_key
+                 and r.generation_id = physical_group.generation_id
+                 and r.zone = physical_group.zone
+                 and r.group_id = physical_group.group_id
+                """
+                distinct_row_sql = "(r.pane, coalesce(nullif(r.object_identity_key, ''), r.row_id))"
+            else:
+                member_join_sql = f"""
+                left join read_model.workbench_group_rows r
+                  on r.scope_key = g.scope_key
+                 and r.generation_id = g.generation_id
+                 and r.zone = g.zone
+                 and r.group_id = {group_row_join_id_sql}
+                """
+                distinct_row_sql = "r.row_id"
             row_count_row = self._connection.fetch_one(
                 f"""
                 select
-                    count(distinct r.row_id) filter (
+                    count(distinct {distinct_row_sql}) filter (
                         where r.pane = 'oa'
                           and coalesce(r.row_role, '') <> 'summary'
                           {oa_row_filter_sql}
                     )::bigint as oa_count,
-                    count(distinct r.row_id) filter (
+                    count(distinct {distinct_row_sql}) filter (
                         where r.pane = 'bank'
                           and coalesce(r.row_role, '') <> 'summary'
                           and coalesce(r.source_kind, '') not in (
@@ -7343,17 +7474,13 @@ class PostgresReadModelRepository:
                           )
                           {bank_row_filter_sql}
                     )::bigint as bank_count,
-                    count(distinct r.row_id) filter (
+                    count(distinct {distinct_row_sql}) filter (
                         where r.pane = 'invoice'
                           and coalesce(r.row_role, '') <> 'summary'
                           {invoice_row_filter_sql}
                     )::bigint as invoice_count
                 from {groups_from_sql}
-                left join read_model.workbench_group_rows r
-                  on r.scope_key = g.scope_key
-                 and r.generation_id = g.generation_id
-                 and r.zone = g.zone
-                 and r.group_id = {group_row_join_id_sql}
+                {member_join_sql}
                 where {where_sql}
                 """,
                 tuple(
@@ -7420,107 +7547,14 @@ class PostgresReadModelRepository:
             "read_model_version": active_generation_id,
         }
 
-    def _composed_all_open_workbench_groups_page(
+    def get_workbench_group_detail(
         self,
         *,
-        groups_from_sql: str,
-        group_select_sql: str,
-        where_sql: str,
-        params: list[Any],
-        order_by_sql: str,
-        normalized_scope_key: str,
-        normalized_zone: str,
-        normalized_page: int,
-        normalized_page_size: int,
-        normalized_detail_level: str,
-        normalized_column_filters: dict[str, dict[str, list[str]]],
-        normalized_time_filters: dict[str, dict[str, str]],
-        normalized_search_by_pane: dict[str, str],
-        normalized_search_mode: str,
-        normalized_search: str | None,
-        active_generation_id: str | None,
-        active_source_versions: dict[str, Any],
-    ) -> dict[str, Any]:
-        # ponytail: all/open is sub-1k active groups today; push owner arbitration into SQL if this breaches SLO.
-        rows = self._connection.fetch_all(
-            f"""
-            select {group_select_sql}
-            from {groups_from_sql}
-            where {where_sql}
-            order by {order_by_sql}
-            """,
-            tuple(params),
-        )
-        paired_rows = self._connection.fetch_all(
-            f"""
-            select {group_select_sql}
-            from {groups_from_sql}
-            where g.zone = %s
-            order by {order_by_sql}
-            """,
-            ("paired",),
-        )
-        groups = self._materialized_workbench_groups_for_all_scope_page(rows, expected_zone="open")
-        paired_groups = self._materialized_workbench_groups_for_all_scope_page(paired_rows, expected_zone="paired")
-        _suppress_all_scope_open_rows_claimed_by_paired(paired_groups, groups)
-        _suppress_all_scope_open_rows_claimed_by_other_open_groups(groups)
-        groups = [
-            group
-            for group in groups
-            if _workbench_group_fact_row_counts(group)["rows"] > 0
-        ]
-        total = len(groups)
-        row_counts = _sum_workbench_group_fact_row_counts(groups)
-        offset = (normalized_page - 1) * normalized_page_size
-        page_groups = groups[offset : offset + normalized_page_size + 1]
-        visible_groups = page_groups[:normalized_page_size]
-        result_groups: list[dict[str, Any]] = []
-        for group in visible_groups:
-            if normalized_detail_level == "summary":
-                group = _filter_workbench_group_preview_rows_for_criteria(
-                    group,
-                    column_filters=normalized_column_filters,
-                    time_filters=normalized_time_filters,
-                    search_by_pane=normalized_search_by_pane,
-                    fallback_search=None if normalized_search_mode == "linked_context" else normalized_search,
-                )
-                group = _compact_workbench_group_for_summary_page(group)
-            result_groups.append(group)
-        read_model_status = self._workbench_read_model_status_for_groups_page(scope_key=normalized_scope_key)
-        return {
-            "month": normalized_scope_key,
-            "scope_key": normalized_scope_key,
-            "zone": normalized_zone,
-            "page": normalized_page,
-            "page_size": normalized_page_size,
-            "detail_level": normalized_detail_level,
-            "total": total,
-            "row_counts": row_counts,
-            "has_more": len(page_groups) > normalized_page_size,
-            "groups": result_groups,
-            "read_model_status": read_model_status,
-            "source_versions": active_source_versions,
-            "active_generation_id": active_generation_id,
-            "read_model_version": active_generation_id,
-        }
-
-    def _materialized_workbench_groups_for_all_scope_page(
-        self,
-        rows: list[dict[str, Any]],
-        *,
-        expected_zone: str,
-    ) -> list[dict[str, Any]]:
-        groups: list[dict[str, Any]] = []
-        for group in self._materialize_workbench_group_payloads(rows):
-            if not isinstance(group, dict):
-                continue
-            if text(group.get("zone") or group.get("status")) != expected_zone:
-                continue
-            group = _sanitize_workbench_group_invoice_rows(group)
-            groups.append(_with_workbench_group_counts(group))
-        return groups
-
-    def get_workbench_group_detail(self, *, scope_key: str, zone: str, group_id: str) -> dict[str, Any] | None:
+        scope_key: str,
+        zone: str,
+        group_id: str,
+        expected_read_model_version: str | None = None,
+    ) -> dict[str, Any] | None:
         normalized_scope_key = str(scope_key or "").strip() or "all"
         normalized_zone = str(zone or "").strip()
         normalized_group_id = str(group_id or "").strip()
@@ -7535,6 +7569,9 @@ class PostgresReadModelRepository:
             groups_from_sql = "read_model.workbench_groups g"
             scope_where, scope_params = self._workbench_scope_filter(normalized_scope_key)
             active_generation_id = self._active_workbench_generation_id(self._connection, scope_key=normalized_scope_key)
+        expected_version = text(expected_read_model_version)
+        if expected_version and expected_version != active_generation_id:
+            raise WorkbenchReadModelVersionConflictError(expected=expected_version, current=active_generation_id)
         source_group_select_sql = "g.source_group_id," if composed_all_scope else ""
         generation_clause = ""
         generation_params: list[Any] = []
@@ -7543,12 +7580,6 @@ class PostgresReadModelRepository:
             generation_params.append(active_generation_id)
         group_scope_clause = "true" if composed_all_scope else f"g.{scope_where}"
         group_id_clause = "(g.group_id = %s or g.source_group_id = %s)" if composed_all_scope else "g.group_id = %s"
-        group_row_join_id_sql = "coalesce(g.source_group_id, g.group_id)" if composed_all_scope else "g.group_id"
-        exclusion_clause = ""
-        if normalized_zone == "open":
-            exclusion_clause = (
-                f"and {_workbench_open_linked_etc_summary_group_exclusion_sql(group_id_sql=group_row_join_id_sql)}"
-            )
         row = self._connection.fetch_one(
             f"""
             select
@@ -7569,7 +7600,6 @@ class PostgresReadModelRepository:
               {generation_clause}
               and g.zone = %s
               and {group_id_clause}
-              {exclusion_clause}
             order by g.scope_month desc nulls last, g.updated_at desc
             limit 1
             """,
@@ -7588,8 +7618,6 @@ class PostgresReadModelRepository:
         group = materialized_groups[0] if materialized_groups else _read_model_payload(row)
         if not isinstance(group, dict):
             group = {"group_id": text(row.get("group_id"))}
-        if normalized_zone == "open" and _is_workbench_automatic_decision_group(group):
-            return None
         result = _with_workbench_group_counts(_sanitize_workbench_group_invoice_rows(group))
         result["scope_key"] = "all" if composed_all_scope else resolved_scope_key
         if composed_all_scope and resolved_scope_key and resolved_scope_key != "all":
@@ -7833,14 +7861,13 @@ class PostgresReadModelRepository:
             if normalized_scope_key == "all"
             else self._workbench_generation_metadata(self._connection, scope_key=normalized_scope_key)
         )
-        consistency_failures = (
-            self._workbench_generation_consistency_failures(
+        consistency_failures = []
+        if include_consistency:
+            consistency_failures = self._workbench_generation_consistency_failures(
                 self._connection,
-                scope_key=normalized_scope_key,
+                scope_key=None if normalized_scope_key == "all" else normalized_scope_key,
+                include_all=normalized_scope_key != "all",
             )
-            if include_consistency
-            else []
-        )
         all_scope_parent_failures = self._workbench_all_scope_parent_stale_failures(
             self._connection,
             scope_key=normalized_scope_key,
@@ -8203,85 +8230,7 @@ class PostgresReadModelRepository:
                 source_kind=source_kind,
                 search=search,
             )
-        active_view = self._load_active_workbench_snapshot_view(scope_key="all")
-        if active_view is not None:
-            return active_view
-        rows = self._connection.fetch_all(
-            """
-            select scope_key, payload, raw_payload, cache_status, generated_at, source_versions, row_count
-            from read_model.workbench_snapshots
-            where scope_key <> 'all'
-            order by scope_key desc
-            """
-        )
-        if not rows:
-            return None
-        payloads = [_read_model_payload(row) for row in rows]
-        grouped_payloads = [
-            payload.get("payload") if isinstance(payload, dict) and isinstance(payload.get("payload"), dict) else payload
-            for payload in payloads
-            if isinstance(payload, dict)
-        ]
-        combined = {
-            "month": "all",
-            "summary": {
-                "oa_count": 0,
-                "bank_count": 0,
-                "invoice_count": 0,
-                "paired_count": 0,
-                "open_count": 0,
-                "exception_count": 0,
-            },
-            "paired": {"groups": []},
-            "open": {"groups": []},
-            "read_model_scope_key": "all",
-        }
-        for payload in grouped_payloads:
-            summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
-            for key in ("oa_count", "bank_count", "invoice_count", "paired_count", "open_count", "exception_count"):
-                combined["summary"][key] += int_value(summary.get(key), 0)
-            for section_name in ("paired", "open"):
-                section = payload.get(section_name) if isinstance(payload.get(section_name), dict) else {}
-                groups = section.get("groups") if isinstance(section, dict) else []
-                if isinstance(groups, list):
-                    combined[section_name]["groups"].extend(groups)
-        _dedupe_workbench_payload_groups(combined)
-        combined["summary"] = _summarize_workbench_payload_groups(combined)
-        dirty_row = self._connection.fetch_one(
-            """
-            select status, updated_at, last_error
-            from job.read_model_dirty_scopes
-            where tenant_id = 'default'
-              and scope_type = 'workbench'
-              and scope_key = 'all'
-              and status in ('pending', 'processing', 'failed')
-            order by updated_at desc
-            limit 1
-            """
-        )
-        refresh_status = "fresh"
-        if dirty_row is not None:
-            refresh_status = "refreshing" if text(dirty_row.get("status")) in {"pending", "processing"} else "stale"
-        result = {
-            "scope_key": "all",
-            "payload": combined,
-            "cache_status": "fresh",
-            "generated_at": max((text(row.get("generated_at")) or "" for row in rows), default=""),
-            "source_versions": {},
-            "row_count": sum(int_value(row.get("row_count"), 0) for row in rows),
-            "refresh_status": refresh_status,
-            "dirty_scope": dict(dirty_row) if isinstance(dirty_row, dict) else None,
-        }
-        if page is not None or page_size is not None or status or source_kind or search:
-            result["rows_page"] = self._load_workbench_rows_page(
-                scope_key="all",
-                page=page,
-                page_size=page_size,
-                status=status,
-                source_kind=source_kind,
-                search=search,
-            )
-        return result
+        return self._load_active_workbench_snapshot_view(scope_key="all")
 
     def _load_all_workbench_rows_page_view(
         self,
@@ -8310,7 +8259,7 @@ class PostgresReadModelRepository:
                 "month": "all",
                 "summary": _normalize_workbench_summary_counts(summary),
                 "paired": {"groups": []},
-                "open": {"groups": []},
+                "unpaired": {"groups": []},
                 "read_model_scope_key": "all",
                 "page_mode": "sql_rows",
             }
@@ -8327,73 +8276,7 @@ class PostgresReadModelRepository:
                 "read_model_version": text(summary_payload.get("read_model_version")),
                 "rows_page": rows_page,
             }
-        rows = self._connection.fetch_all(
-            """
-            select
-                scope_key,
-                coalesce(payload #> '{payload,summary}', payload->'summary', '{}'::jsonb) as summary,
-                cache_status,
-                generated_at,
-                row_count
-            from read_model.workbench_snapshots
-            where scope_key <> 'all'
-            order by scope_key desc
-            """
-        )
-        if not rows:
-            return None
-        combined = {
-            "month": "all",
-            "summary": {
-                "oa_count": 0,
-                "bank_count": 0,
-                "invoice_count": 0,
-                "paired_count": 0,
-                "open_count": 0,
-                "exception_count": 0,
-            },
-            "paired": {"groups": []},
-            "open": {"groups": []},
-            "read_model_scope_key": "all",
-            "page_mode": "sql_rows",
-        }
-        for row in rows:
-            summary = row.get("summary") if isinstance(row.get("summary"), dict) else {}
-            for key in ("oa_count", "bank_count", "invoice_count", "paired_count", "open_count", "exception_count"):
-                combined["summary"][key] += int_value(summary.get(key), 0)
-        dirty_row = self._connection.fetch_one(
-            """
-            select status, updated_at, last_error
-            from job.read_model_dirty_scopes
-            where tenant_id = 'default'
-              and scope_type = 'workbench'
-              and scope_key = 'all'
-              and status in ('pending', 'processing', 'failed')
-            order by updated_at desc
-            limit 1
-            """
-        )
-        refresh_status = "fresh"
-        if dirty_row is not None:
-            refresh_status = "refreshing" if text(dirty_row.get("status")) in {"pending", "processing"} else "stale"
-        return {
-            "scope_key": "all",
-            "payload": combined,
-            "cache_status": "fresh",
-            "generated_at": max((text(row.get("generated_at")) or "" for row in rows), default=""),
-            "source_versions": {},
-            "row_count": sum(int_value(row.get("row_count"), 0) for row in rows),
-            "refresh_status": refresh_status,
-            "dirty_scope": dict(dirty_row) if isinstance(dirty_row, dict) else None,
-            "rows_page": self._load_workbench_rows_page(
-                scope_key="all",
-                page=page,
-                page_size=page_size,
-                status=status,
-                source_kind=source_kind,
-                search=search,
-            ),
-        }
+        return None
 
     def load_workbench_read_models(self) -> dict[str, Any]:
         rows = self._connection.fetch_all("select scope_key as key, payload, raw_payload from read_model.workbench_snapshots order by scope_key")
@@ -8406,30 +8289,22 @@ class PostgresReadModelRepository:
         snapshot: dict[str, Any],
         *,
         changed_scope_keys: set[str] | None = None,
-        refresh_all_scope_from_month_shards: bool = True,
-        raise_on_all_scope_parent_inconsistent: bool = False,
     ) -> None:
         started_generations: list[tuple[str, str, dict[str, Any]]] = []
         published_scope_keys: set[str] = set()
 
         def write(connection: Any) -> None:
             read_models = snapshot.get("read_models") if isinstance(snapshot, dict) else None
-            refresh_all_scope = False
             if changed_scope_keys is not None:
                 present_scope_keys = {scope_key for scope_key, _ in iter_mapping(read_models)}
-                for scope_key in sorted(set(changed_scope_keys) - present_scope_keys):
-                    if scope_key == "all" or (
-                        refresh_all_scope_from_month_shards and MONTH_SCOPE_RE.match(str(scope_key or ""))
-                    ):
-                        refresh_all_scope = True
+                if set(changed_scope_keys) - present_scope_keys:
+                    raise ValueError("changed_scope_keys must reference payloads written in this call.")
             for scope_key, payload in iter_mapping(read_models):
                 if changed_scope_keys is not None and scope_key not in changed_scope_keys:
                     continue
                 self._lock_workbench_generation_scope(connection, scope_key=scope_key)
-                if scope_key == "all" or (
-                    refresh_all_scope_from_month_shards and MONTH_SCOPE_RE.match(str(scope_key or ""))
-                ):
-                    refresh_all_scope = True
+                if scope_key == "all":
+                    raise ValueError("all-scope is composed from active month shards and must not be materialized.")
                 grouped_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
                 source_versions = payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}
                 generated_at = text(payload.get("generated_at"))
@@ -8579,7 +8454,7 @@ class PostgresReadModelRepository:
                             month_start(row.get("scope_month") or row.get("month") or scope_month),
                             scope_key,
                             text(row.get("source_kind") or row.get("type") or "workbench_row") or "workbench_row",
-                            text(row.get("status") or payload.get("status") or "open") or "open",
+                            text(row.get("status") or payload.get("status") or "unpaired") or "unpaired",
                             text(row.get("project_id")),
                             text(row.get("project_name") or row.get("project")),
                             text(row.get("counterparty_name") or row.get("counterparty") or row.get("supplier_name")),
@@ -8631,9 +8506,10 @@ class PostgresReadModelRepository:
                             group_id,
                             scope_key,
                             group_scope_month,
-                            text(group.get("zone")) or "open",
-                            text(group.get("status")) or text(group.get("zone")) or "open",
-                            text(group.get("group_type")) or "candidate",
+                            text(group.get("zone")) or "unpaired",
+                            text(group.get("status")) or text(group.get("zone")) or "unpaired",
+                            text(group.get("group_type"))
+                            or ("relation" if text(group.get("zone")) == "paired" else "unpaired"),
                             text_list(group.get("source_kinds")),
                             int_value(group.get("row_count"), 0),
                             text(group.get("searchable_text")) or "",
@@ -8658,14 +8534,14 @@ class PostgresReadModelRepository:
                                 generation_id,
                                 scope_key,
                                 group_scope_month,
-                                text(group_row.get("zone")) or text(group.get("zone")) or "open",
+                                text(group_row.get("zone")) or text(group.get("zone")) or "unpaired",
                                 group_id,
                                 text(group_row.get("pane")) or "",
                                 text(group_row.get("row_id")) or "",
                                 text(group_row.get("row_role")) or "normal",
                                 int_value(group_row.get("row_index"), 0),
                                 text(group_row.get("source_kind")) or "workbench_row",
-                                text(group_row.get("status")) or text(group.get("status")) or "open",
+                                text(group_row.get("status")) or text(group.get("status")) or "unpaired",
                                 text(group_row.get("time_value")),
                                 text(group_row.get("time_date")),
                                 jsonb(group_row.get("column_values") if isinstance(group_row.get("column_values"), dict) else {}),
@@ -8722,13 +8598,6 @@ class PostgresReadModelRepository:
                     summary_count=1,
                 )
                 published_scope_keys.add(scope_key)
-            if refresh_all_scope:
-                if self._refresh_workbench_all_scope_from_month_shards(
-                    connection,
-                    raise_on_parent_inconsistent=raise_on_all_scope_parent_inconsistent,
-                ):
-                    published_scope_keys.add("all")
-
         try:
             run_in_transaction(self._connection, write)
         except Exception as exc:
@@ -8786,371 +8655,6 @@ class PostgresReadModelRepository:
                 deleted_count,
                 ",".join(normalized_scope_keys),
             )
-
-    def _refresh_workbench_all_scope_from_month_shards(
-        self,
-        connection: Any,
-        *,
-        raise_on_parent_inconsistent: bool = False,
-    ) -> bool:
-        self._lock_workbench_generation_scope(connection, scope_key="all")
-        consistency_failures = self._workbench_generation_consistency_failures(connection, include_all=False)
-        if consistency_failures:
-            if raise_on_parent_inconsistent:
-                parent_scope_keys = ",".join(
-                    sorted(
-                        {
-                            str(failure.get("scope_key") or "").strip()
-                            for failure in consistency_failures
-                            if str(failure.get("scope_key") or "").strip()
-                        }
-                    )
-                )
-                raise RuntimeError(
-                    "workbench_read_model_not_fresh: parent_generation_inconsistent "
-                    f"parent_scope_keys={parent_scope_keys}; "
-                    + self._workbench_generation_consistency_error(consistency_failures)
-                )
-            return False
-        group_rows = connection.fetch_all(
-            """
-            select
-                g.scope_key,
-                g.generation_id,
-                g.scope_month,
-                g.zone,
-                g.group_id,
-                g.payload,
-                g.source_versions,
-                g.generated_at::text as generated_at
-            from read_model.workbench_groups g
-            join read_model.workbench_generations gen
-              on gen.generation_id = g.generation_id
-             and gen.scope_key = g.scope_key
-             and gen.tenant_id = 'default'
-             and gen.status = 'active'
-            where g.scope_key <> 'all'
-            order by g.scope_month desc nulls last, g.zone, g.group_id, g.updated_at desc
-            """
-        )
-        groups = []
-        max_generated_at = ""
-        max_source_version: int | None = None
-        parser_versions: set[str] = set()
-        bank_auto_tag_rules_versions: set[str] = set()
-        oa_projection_sync_versions: set[str] = set()
-        workbench_matching_rules_versions: set[str] = set()
-        has_group_without_parser_version = False
-        has_group_without_bank_auto_tag_rules_version = False
-        has_group_without_oa_projection_sync_version = False
-        has_group_without_workbench_matching_rules_version = False
-        materialized_group_rows = self._materialize_workbench_group_payloads(group_rows)
-        for row, group in zip(group_rows, materialized_group_rows, strict=False):
-            if not isinstance(group, dict):
-                continue
-            row_source_versions = row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}
-            parser_version = text(row_source_versions.get("oa_attachment_invoice_parser_version"))
-            if parser_version:
-                parser_versions.add(parser_version)
-            else:
-                has_group_without_parser_version = True
-            bank_auto_tag_rules_version = text(row_source_versions.get("bank_auto_tag_rules_version"))
-            if bank_auto_tag_rules_version:
-                bank_auto_tag_rules_versions.add(bank_auto_tag_rules_version)
-            else:
-                has_group_without_bank_auto_tag_rules_version = True
-            oa_projection_sync_version = text(row_source_versions.get("oa_projection_sync_version"))
-            if oa_projection_sync_version:
-                oa_projection_sync_versions.add(oa_projection_sync_version)
-            else:
-                has_group_without_oa_projection_sync_version = True
-            workbench_matching_rules_version = text(row_source_versions.get("workbench_matching_rules_version"))
-            if workbench_matching_rules_version:
-                workbench_matching_rules_versions.add(workbench_matching_rules_version)
-            else:
-                has_group_without_workbench_matching_rules_version = True
-            normalized_group = dict(group)
-            normalized_group["_source_scope_key"] = text(row.get("scope_key"))
-            normalized_group["_source_scope_month"] = text(row.get("scope_month"))
-            normalized_group.setdefault("group_id", text(row.get("group_id")))
-            normalized_group["zone"] = text(row.get("zone")) or normalized_group.get("zone") or "open"
-            normalized_group["scope_key"] = "all"
-            normalized_group["month"] = "all"
-            normalized_group["scope_month"] = None
-            groups.append(normalized_group)
-            generated_at = text(row.get("generated_at")) or ""
-            if generated_at > max_generated_at:
-                max_generated_at = generated_at
-            source_version = _source_version_value(row.get("source_versions"))
-            if source_version is not None:
-                max_source_version = max(source_version, max_source_version or source_version)
-        if not groups:
-            return False
-
-        (
-            canonical_paired_row_keys,
-            canonical_paired_identity_keys,
-            canonical_relation_claims_by_row_key,
-        ) = _workbench_active_relation_claim_keys_for_groups(
-            connection,
-            groups,
-        )
-        aggregate_payload = _aggregate_workbench_all_scope_payload(
-            groups,
-            paired_row_keys=canonical_paired_row_keys,
-            paired_identity_keys=canonical_paired_identity_keys,
-            canonical_relation_claims_by_row_key=canonical_relation_claims_by_row_key,
-        )
-        aggregate_source_versions = {
-            "builder": WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION,
-            "source_version": max_source_version or 0,
-        }
-        if len(parser_versions) == 1 and not has_group_without_parser_version:
-            aggregate_source_versions["oa_attachment_invoice_parser_version"] = next(iter(parser_versions))
-        if len(bank_auto_tag_rules_versions) == 1 and not has_group_without_bank_auto_tag_rules_version:
-            aggregate_source_versions["bank_auto_tag_rules_version"] = next(iter(bank_auto_tag_rules_versions))
-        if len(oa_projection_sync_versions) == 1 and not has_group_without_oa_projection_sync_version:
-            aggregate_source_versions["oa_projection_sync_version"] = next(iter(oa_projection_sync_versions))
-        if len(workbench_matching_rules_versions) == 1 and not has_group_without_workbench_matching_rules_version:
-            aggregate_source_versions["workbench_matching_rules_version"] = next(iter(workbench_matching_rules_versions))
-        generated_at = max_generated_at or None
-        workbench_rows = list(self._iter_workbench_rows(aggregate_payload))
-        workbench_groups = list(self._iter_workbench_groups(aggregate_payload))
-        generation_id = self._new_workbench_generation_id("all")
-        aggregate_source_versions_jsonb = jsonb(aggregate_source_versions)
-        empty_jsonb = jsonb({})
-        self._start_workbench_generation(
-            connection,
-            scope_key="all",
-            generation_id=generation_id,
-            source_versions=aggregate_source_versions,
-            generated_at=generated_at,
-            row_count=len(workbench_rows),
-            group_count=len(workbench_groups),
-            build_metadata={"source": "_refresh_workbench_all_scope_from_month_shards"},
-        )
-        connection.execute(
-            """
-            insert into read_model.workbench_snapshots(
-                generation_id, scope_key, scope_month, source_versions, generated_at, cache_status, row_count, payload, raw_payload
-            )
-            values (%s, 'all', null, %s, coalesce(%s::timestamptz, now()), 'fresh', %s, %s, %s)
-            on conflict (generation_id, scope_key) do update set
-                source_versions = excluded.source_versions,
-                generated_at = excluded.generated_at,
-                cache_status = excluded.cache_status,
-                row_count = excluded.row_count,
-                payload = excluded.payload,
-                raw_payload = excluded.raw_payload,
-                updated_at = now()
-            """,
-            (
-                generation_id,
-                aggregate_source_versions_jsonb,
-                generated_at,
-                len(workbench_rows),
-                jsonb(
-                    _workbench_snapshot_payload_for_write(
-                        scope_key="all",
-                        scope_month="all",
-                        grouped_payload=aggregate_payload,
-                        source_versions=aggregate_source_versions,
-                        generated_at=generated_at,
-                        cache_status="fresh",
-                    )
-                ),
-                empty_jsonb,
-            ),
-        )
-        workbench_row_params: list[tuple[Any, ...]] = []
-        for row in workbench_rows:
-            row_id = text(row.get("id") or row.get("row_id"))
-            if row_id is None:
-                continue
-            workbench_row_params.append(
-                (
-                    generation_id,
-                    row_id,
-                    month_start(row.get("scope_month") or row.get("month")),
-                    text(row.get("source_kind") or row.get("type") or "workbench_row") or "workbench_row",
-                    text(row.get("status") or "open") or "open",
-                    text(row.get("project_id")),
-                    text(row.get("project_name") or row.get("project")),
-                    text(row.get("counterparty_name") or row.get("counterparty") or row.get("supplier_name")),
-                    decimal_text(row.get("amount") or row.get("amount_with_tax") or row.get("invoice_amount")),
-                    text(row.get("object_identity_key")),
-                    text(row.get("object_identity_kind")),
-                    text(row.get("object_identity_source")),
-                    text(row.get("object_identity_confidence")),
-                    aggregate_source_versions_jsonb,
-                    generated_at,
-                    jsonb(_workbench_row_payload_for_write(row)),
-                    empty_jsonb,
-                ),
-            )
-        _execute_many(
-            connection,
-            """
-            insert into read_model.workbench_rows(
-                generation_id, row_id, scope_month, scope_key, source_kind, status, project_id, project_name,
-                counterparty_name, amount, object_identity_key, object_identity_kind,
-                object_identity_source, object_identity_confidence,
-                source_versions, generated_at, cache_status, payload, raw_payload
-            )
-            values (
-                %s, %s, %s::date, 'all', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, coalesce(%s::timestamptz, now()), 'fresh', %s, %s
-            )
-            """,
-            workbench_row_params,
-        )
-        workbench_group_params: list[tuple[Any, ...]] = []
-        workbench_group_row_params: list[tuple[Any, ...]] = []
-        for group in workbench_groups:
-            group_id = text(group.get("group_id"))
-            if group_id is None:
-                continue
-            sort_keys = _workbench_existing_group_sort_keys(group)
-            group_payload = group.get("payload") if isinstance(group.get("payload"), dict) else group
-            group_payload_for_write = _workbench_group_payload_for_write(group, payload=group_payload)
-            workbench_group_params.append(
-                (
-                    generation_id,
-                    group_id,
-                    text(group.get("zone")) or "open",
-                    text(group.get("status")) or text(group.get("zone")) or "open",
-                    text(group.get("group_type")) or "candidate",
-                    text_list(group.get("source_kinds")),
-                    int_value(group.get("row_count"), 0),
-                    text(group.get("searchable_text")) or _searchable_group_text(group),
-                    text(group.get("oa_sort_min") or sort_keys.get("oa_sort_min")),
-                    text(group.get("oa_sort_max") or sort_keys.get("oa_sort_max")),
-                    text(group.get("bank_sort_min") or sort_keys.get("bank_sort_min")),
-                    text(group.get("bank_sort_max") or sort_keys.get("bank_sort_max")),
-                    text(group.get("invoice_sort_min") or sort_keys.get("invoice_sort_min")),
-                    text(group.get("invoice_sort_max") or sort_keys.get("invoice_sort_max")),
-                    aggregate_source_versions_jsonb,
-                    generated_at,
-                    jsonb(group_payload_for_write),
-                    empty_jsonb,
-                ),
-            )
-            for group_row in _workbench_group_row_records(
-                _workbench_group_payload_for_rows(group, payload=group_payload)
-            ):
-                workbench_group_row_params.append(
-                    (
-                        generation_id,
-                        text(group_row.get("zone")) or text(group.get("zone")) or "open",
-                        group_id,
-                        text(group_row.get("pane")) or "",
-                        text(group_row.get("row_id")) or "",
-                        text(group_row.get("row_role")) or "normal",
-                        int_value(group_row.get("row_index"), 0),
-                        text(group_row.get("source_kind")) or "workbench_row",
-                        text(group_row.get("status")) or text(group.get("status")) or "open",
-                        text(group_row.get("time_value")),
-                        text(group_row.get("time_date")),
-                        jsonb(group_row.get("column_values") if isinstance(group_row.get("column_values"), dict) else {}),
-                        text(group_row.get("searchable_text")) or "",
-                        text(group_row.get("object_identity_key")),
-                        text(group_row.get("object_identity_kind")),
-                        text(group_row.get("object_identity_source")),
-                        text(group_row.get("object_identity_confidence")),
-                        empty_jsonb,
-                        generated_at,
-                        empty_jsonb,
-                        empty_jsonb,
-                    ),
-                )
-        _execute_many(
-            connection,
-            """
-            insert into read_model.workbench_groups(
-                generation_id, group_id, scope_key, scope_month, zone, status, group_type, source_kinds,
-                row_count, searchable_text, oa_sort_min, oa_sort_max, bank_sort_min, bank_sort_max,
-                invoice_sort_min, invoice_sort_max, source_versions, generated_at, cache_status,
-                payload, raw_payload
-            )
-            values (
-                %s, %s, 'all', null, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, coalesce(%s::timestamptz, now()), 'fresh', %s, %s
-            )
-            """,
-            workbench_group_params,
-        )
-        _execute_many(
-            connection,
-            """
-            insert into read_model.workbench_group_rows(
-                generation_id, scope_key, scope_month, zone, group_id, pane, row_id, row_role, row_index,
-                source_kind, status, time_value, time_date, column_values, searchable_text,
-                object_identity_key, object_identity_kind, object_identity_source, object_identity_confidence,
-                source_versions, generated_at, cache_status, payload, raw_payload
-            )
-            values (
-                %s, 'all', null, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::date, %s, %s,
-                %s, %s, %s, %s, %s, coalesce(%s::timestamptz, now()), 'fresh', %s, %s
-            )
-            """,
-            workbench_group_row_params,
-        )
-        final_summary_payload = self._workbench_summary_from_payload(
-            scope_key="all",
-            grouped_payload=aggregate_payload,
-            source_versions=aggregate_source_versions,
-            generated_at=generated_at,
-        )
-        final_summary_payload["invoice_inventory"] = self._workbench_invoice_inventory(
-            scope_key="all",
-            generation_id=generation_id,
-        )
-        connection.execute(
-            """
-            insert into read_model.workbench_summary(
-                generation_id, scope_key, scope_month, source_versions, generated_at, cache_status,
-                summary, invoice_inventory, payload, raw_payload
-            )
-            values (%s, 'all', null, %s, coalesce(%s::timestamptz, now()), 'fresh', %s, %s, %s, %s)
-            on conflict (generation_id, scope_key) do update set
-                source_versions = excluded.source_versions,
-                generated_at = excluded.generated_at,
-                cache_status = excluded.cache_status,
-                summary = excluded.summary,
-                invoice_inventory = excluded.invoice_inventory,
-                payload = excluded.payload,
-                raw_payload = excluded.raw_payload,
-                updated_at = now()
-            """,
-            (
-                generation_id,
-                aggregate_source_versions_jsonb,
-                generated_at,
-                jsonb(final_summary_payload.get("summary") if isinstance(final_summary_payload.get("summary"), dict) else {}),
-                jsonb(
-                    final_summary_payload.get("invoice_inventory")
-                    if isinstance(final_summary_payload.get("invoice_inventory"), dict)
-                    else {}
-                ),
-                jsonb(final_summary_payload),
-                empty_jsonb,
-            ),
-        )
-        self._upsert_workbench_generation_stats(
-            connection,
-            generation_id=generation_id,
-            scope_key="all",
-            summary_payload=final_summary_payload,
-        )
-        self._activate_workbench_generation(
-            connection,
-            scope_key="all",
-            generation_id=generation_id,
-            row_count=len(workbench_rows),
-            group_count=len(workbench_groups),
-            summary_count=1,
-        )
-        return True
 
     def _load_workbench_rows_page(
         self,
@@ -9479,7 +8983,7 @@ class PostgresReadModelRepository:
             "month": "all",
             "summary": {},
             "paired": {"groups": []},
-            "open": {
+            "unpaired": {
                 "groups": [
                     {
                         "group_id": f"batch-accounting:{bank_year}:unpaired-oa",
@@ -9504,547 +9008,6 @@ class PostgresReadModelRepository:
             if row_id:
                 payload_rows.append({"id": row_id, "type": text(row.get("source_kind")) or "unknown"})
         return payload_rows
-
-    def load_workbench_candidate_matches(self) -> dict[str, Any]:
-        rows = self._connection.fetch_all(
-            "select candidate_key as key, payload, raw_payload from read_model.workbench_candidate_matches order by candidate_key"
-        )
-        values = {
-            str(row.get("key")): payload
-            for row in rows
-            if (payload := _read_model_payload(row, drop_rebuildable_rows=True)) is not None
-        }
-        scope_rows = self._connection.fetch_all(
-            """
-            select
-                to_char(scope_month, 'YYYY-MM') as scope_month,
-                source_versions,
-                completed_at::text as generated_at,
-                request_id,
-                reason
-            from job.workbench_matching_dirty_scopes
-            where tenant_id = 'default'
-              and status = 'completed'
-            order by scope_month
-            """
-        )
-        scope_runs: dict[str, dict[str, Any]] = {}
-        for row in scope_rows:
-            scope_month = str(row.get("scope_month") or "").strip()
-            if not MONTH_SCOPE_RE.match(scope_month):
-                continue
-            scope_runs[scope_month] = {
-                "schema_version": CANDIDATE_MATCH_SCHEMA_VERSION,
-                "source_versions": row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {},
-                "candidate_count": 0,
-                "generated_at": str(row.get("generated_at") or ""),
-                "request_id": str(row.get("request_id") or ""),
-                "reason": str(row.get("reason") or ""),
-            }
-        result: dict[str, Any] = {}
-        if values:
-            result["candidates"] = values
-        if scope_runs:
-            result["schema_version"] = CANDIDATE_MATCH_SCHEMA_VERSION
-            result["scope_runs"] = scope_runs
-        return result
-
-    def upsert_workbench_reconciliation_decisions(
-        self,
-        *,
-        tenant_id: str,
-        decisions: list[dict[str, Any]],
-    ) -> None:
-        def write(connection: Any) -> None:
-            dirty_scope_keys: set[str] = set()
-            for decision in decisions:
-                payload = serialize_value(decision)
-                scope_month = month_start(payload.get("scope_month"))
-                if scope_month is not None:
-                    dirty_scope_keys.add(str(scope_month)[:7])
-                connection.execute(
-                    """
-                    insert into read_model.workbench_reconciliation_decisions(
-                        tenant_id, scope_month, decision_id, decision_key, display_state, decision_status,
-                        match_domain, match_shape, rule_code, rule_version, row_ids, row_types,
-                        oa_row_ids, bank_row_ids, invoice_row_ids, amount, direction, cardinality,
-                        payment_amount_closed, invoice_amount_closed, warnings, evidence, blockers,
-                        conflict_set, explanation, source_versions, generated_at, raw_payload
-                    )
-                    values (
-                        %s, %s::date, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s, %s,
-                        %s, %s, %s::timestamptz, %s
-                    )
-                    on conflict (tenant_id, decision_key) do update set
-                        scope_month = excluded.scope_month,
-                        decision_id = excluded.decision_id,
-                        display_state = excluded.display_state,
-                        decision_status = case
-                            when read_model.workbench_reconciliation_decisions.decision_status = 'suppressed'
-                                then read_model.workbench_reconciliation_decisions.decision_status
-                            else excluded.decision_status
-                        end,
-                        match_domain = excluded.match_domain,
-                        match_shape = excluded.match_shape,
-                        rule_code = excluded.rule_code,
-                        rule_version = excluded.rule_version,
-                        row_ids = excluded.row_ids,
-                        row_types = excluded.row_types,
-                        oa_row_ids = excluded.oa_row_ids,
-                        bank_row_ids = excluded.bank_row_ids,
-                        invoice_row_ids = excluded.invoice_row_ids,
-                        amount = excluded.amount,
-                        direction = excluded.direction,
-                        cardinality = excluded.cardinality,
-                        payment_amount_closed = excluded.payment_amount_closed,
-                        invoice_amount_closed = excluded.invoice_amount_closed,
-                        warnings = excluded.warnings,
-                        evidence = excluded.evidence,
-                        blockers = excluded.blockers,
-                        conflict_set = excluded.conflict_set,
-                        explanation = excluded.explanation,
-                        source_versions = excluded.source_versions,
-                        generated_at = excluded.generated_at,
-                        raw_payload = excluded.raw_payload,
-                        consumed_by_relation_id = case
-                            when read_model.workbench_reconciliation_decisions.decision_status = 'suppressed'
-                                then read_model.workbench_reconciliation_decisions.consumed_by_relation_id
-                            else null
-                        end,
-                        suppressed_by_exception_case_id = case
-                            when read_model.workbench_reconciliation_decisions.decision_status = 'suppressed'
-                                then read_model.workbench_reconciliation_decisions.suppressed_by_exception_case_id
-                            else null
-                        end,
-                        updated_at = now()
-                    """,
-                    (
-                        text(tenant_id) or "default",
-                        month_start(payload.get("scope_month")),
-                        text(payload.get("decision_id")),
-                        text(payload.get("decision_key")),
-                        text(payload.get("display_state")),
-                        text(payload.get("decision_status")),
-                        text(payload.get("match_domain")),
-                        text(payload.get("match_shape")),
-                        text(payload.get("rule_code")),
-                        text(payload.get("rule_version")),
-                        text_list(payload.get("row_ids")),
-                        _workbench_reconciliation_row_types(payload),
-                        text_list(payload.get("oa_row_ids")),
-                        text_list(payload.get("bank_row_ids")),
-                        text_list(payload.get("invoice_row_ids")),
-                        decimal_text(payload.get("amount")),
-                        text(payload.get("direction")),
-                        text(payload.get("cardinality")),
-                        bool(payload.get("payment_amount_closed")),
-                        bool(payload.get("invoice_amount_closed")),
-                        jsonb(payload.get("warnings") if isinstance(payload.get("warnings"), list) else []),
-                        jsonb(payload.get("evidence") if isinstance(payload.get("evidence"), dict) else {}),
-                        jsonb(payload.get("blockers") if isinstance(payload.get("blockers"), list) else []),
-                        jsonb(payload.get("conflict_set") if isinstance(payload.get("conflict_set"), list) else []),
-                        text(payload.get("explanation")),
-                        jsonb(payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}),
-                        text(payload.get("generated_at")),
-                        jsonb({"normalized_payload": payload}),
-                    ),
-                )
-            for scope_key in sorted(dirty_scope_keys):
-                _enqueue_workbench_relation_refresh_in_transaction(
-                    connection,
-                    tenant_id=text(tenant_id) or "default",
-                    scope_key=scope_key,
-                    reason="workbench_reconciliation_decision_changed",
-                )
-                _enqueue_workbench_refresh_in_transaction(
-                    connection,
-                    tenant_id=text(tenant_id) or "default",
-                    scope_key=scope_key,
-                    reason="workbench_reconciliation_decision_changed",
-                )
-
-        run_in_transaction(self._connection, write)
-
-    def list_workbench_reconciliation_decisions(
-        self,
-        *,
-        tenant_id: str,
-        scope_month: str,
-        statuses: set[str] | None = None,
-    ) -> list[dict[str, Any]]:
-        where = ["tenant_id = %s", "scope_month = %s::date"]
-        params: list[Any] = [text(tenant_id) or "default", month_start(scope_month)]
-        if statuses:
-            where.append("decision_status = any(%s)")
-            params.append(sorted(str(status) for status in statuses))
-        rows = self._connection.fetch_all(
-            f"""
-            select
-                decision_key, scope_month, display_state, decision_status, match_domain, match_shape,
-                rule_code, rule_version, row_ids, oa_row_ids, bank_row_ids, invoice_row_ids,
-                amount, direction, payment_amount_closed, invoice_amount_closed, warnings, evidence,
-                blockers, source_versions, consumed_by_relation_id, suppressed_by_exception_case_id,
-                decision_id, explanation, raw_payload
-            from read_model.workbench_reconciliation_decisions
-            where {" and ".join(where)}
-            order by decision_key
-            """,
-            tuple(params),
-        )
-        return [_workbench_reconciliation_decision_payload(row) for row in rows]
-
-    def list_active_workbench_reconciliation_decisions_for_cleanup(
-        self,
-        *,
-        tenant_id: str,
-        scope_months: list[str] | None = None,
-        decision_keys: list[str] | None = None,
-    ) -> list[dict[str, Any]]:
-        where = [
-            "dec.tenant_id = %s",
-            "dec.decision_status in ('proposed', 'paired', 'open')",
-        ]
-        params: list[Any] = [text(tenant_id) or "default"]
-        normalized_scope_months = sorted(
-            {month for month in (month_start(value) for value in list(scope_months or [])) if month}
-        )
-        normalized_decision_keys = sorted({value for value in (text(value) for value in list(decision_keys or [])) if value})
-        if normalized_scope_months:
-            where.append("dec.scope_month = any(%s::date[])")
-            params.append(normalized_scope_months)
-        if normalized_decision_keys:
-            where.append("dec.decision_key = any(%s)")
-            params.append(normalized_decision_keys)
-        rows = self._connection.fetch_all(
-            f"""
-            select
-                dec.decision_key,
-                dec.scope_month,
-                dec.display_state,
-                dec.decision_status,
-                dec.match_domain,
-                dec.match_shape,
-                dec.rule_code,
-                dec.rule_version,
-                dec.row_ids,
-                dec.oa_row_ids,
-                dec.bank_row_ids,
-                dec.invoice_row_ids,
-                dec.amount,
-                dec.direction,
-                dec.payment_amount_closed,
-                dec.invoice_amount_closed,
-                dec.warnings,
-                dec.evidence,
-                dec.blockers,
-                dec.source_versions,
-                dec.consumed_by_relation_id,
-                dec.suppressed_by_exception_case_id,
-                dec.decision_id,
-                dec.explanation,
-                dec.raw_payload,
-                dec.updated_at,
-                coalesce(active_relation_overlaps.items, '[]'::jsonb) as active_relation_overlaps,
-                coalesce(submitted_no_oa_batch_overlaps.items, '[]'::jsonb) as submitted_no_oa_batch_overlaps
-            from read_model.workbench_reconciliation_decisions dec
-            left join lateral (
-                select jsonb_agg(
-                    jsonb_build_object(
-                        'case_id', rel.case_id,
-                        'relation_mode', rel.relation_mode,
-                        'month_scope', coalesce(to_char(rel.month_scope, 'YYYY-MM'), 'all'),
-                        'row_ids', rel.row_ids,
-                        'row_types', rel.row_types,
-                        'overlap_row_ids', overlap_rows.overlap_row_ids
-                    )
-                    order by rel.case_id
-                ) as items
-                from app.workbench_pair_relations rel
-                cross join lateral (
-                    select array_agg(decision_row_id order by decision_row_id) as overlap_row_ids
-                    from unnest(dec.row_ids) decision_row_id
-                    where decision_row_id = any(rel.row_ids)
-                ) overlap_rows
-                where rel.status = 'active'
-                  and rel.row_ids && dec.row_ids
-                  and cardinality(overlap_rows.overlap_row_ids) > 0
-                  and (
-                    rel.month_scope is null
-                    or rel.month_scope between (dec.scope_month - interval '2 months')::date
-                                           and (dec.scope_month + interval '2 months')::date
-                  )
-            ) active_relation_overlaps on true
-            left join lateral (
-                select jsonb_agg(
-                    jsonb_build_object(
-                        'batch_id', batch.batch_id,
-                        'batch_type', batch.raw_payload->'normalized_payload'->>'batch_type',
-                        'batch_label', batch.raw_payload->'normalized_payload'->>'batch_label',
-                        'status', batch.status,
-                        'scope_month', coalesce(to_char(batch.scope_month, 'YYYY-MM'), 'all'),
-                        'bank_transaction_ids', batch.bank_transaction_ids,
-                        'overlap_row_ids', overlap_rows.overlap_row_ids
-                    )
-                    order by batch.batch_id
-                ) as items
-                from app.no_oa_bank_batches batch
-                cross join lateral (
-                    select array_agg(decision_bank_row_id order by decision_bank_row_id) as overlap_row_ids
-                    from unnest(dec.bank_row_ids) decision_bank_row_id
-                    where decision_bank_row_id = any(batch.bank_transaction_ids)
-                ) overlap_rows
-                where batch.status = 'submitted'
-                  and batch.bank_transaction_ids && dec.bank_row_ids
-                  and cardinality(overlap_rows.overlap_row_ids) > 0
-                  and (
-                    batch.scope_month is null
-                    or batch.scope_month between (dec.scope_month - interval '2 months')::date
-                                             and (dec.scope_month + interval '2 months')::date
-                  )
-            ) submitted_no_oa_batch_overlaps on true
-            where {" and ".join(where)}
-            order by dec.scope_month, dec.decision_key
-            """,
-            tuple(params),
-        )
-        payloads: list[dict[str, Any]] = []
-        for row in rows:
-            payload = _workbench_reconciliation_decision_payload(row)
-            payload["active_relation_overlaps"] = (
-                row.get("active_relation_overlaps") if isinstance(row.get("active_relation_overlaps"), list) else []
-            )
-            payload["submitted_no_oa_batch_overlaps"] = (
-                row.get("submitted_no_oa_batch_overlaps")
-                if isinstance(row.get("submitted_no_oa_batch_overlaps"), list)
-                else []
-            )
-            payload["updated_at"] = text(row.get("updated_at"))
-            payloads.append(payload)
-        return payloads
-
-    def expire_workbench_reconciliation_decisions_by_keys(
-        self,
-        *,
-        tenant_id: str,
-        decision_keys: list[str],
-        reason: str,
-        actor: str = "repair_workbench_reconciliation_decisions",
-    ) -> dict[str, Any]:
-        normalized_decision_keys = sorted({value for value in (text(value) for value in list(decision_keys or [])) if value})
-        if not normalized_decision_keys:
-            return {"expired_count": 0, "scope_keys": []}
-
-        def write(connection: Any) -> dict[str, Any]:
-            rows = connection.fetch_all(
-                """
-                with expired as (
-                    update read_model.workbench_reconciliation_decisions
-                    set decision_status = 'expired',
-                        raw_payload = raw_payload || jsonb_build_object(
-                            'expired_reason', %s::text,
-                            'expired_by', %s::text
-                        ),
-                        updated_at = now()
-                    where tenant_id = %s::text
-                      and decision_key = any(%s::text[])
-                      and decision_status in ('proposed', 'paired', 'open')
-                    returning to_char(scope_month, 'YYYY-MM') as scope_key
-                )
-                select scope_key, count(*)::bigint as expired_count
-                from expired
-                group by scope_key
-                order by scope_key
-                """,
-                (
-                    text(reason) or "invalid_workbench_reconciliation_decision",
-                    text(actor) or "repair_workbench_reconciliation_decisions",
-                    text(tenant_id) or "default",
-                    normalized_decision_keys,
-                ),
-            )
-            scope_keys = [str(row.get("scope_key") or "").strip() for row in rows if str(row.get("scope_key") or "").strip()]
-            expired_count = sum(int_value(row.get("expired_count"), 0) for row in rows)
-            for scope_key in scope_keys:
-                _enqueue_workbench_relation_refresh_in_transaction(
-                    connection,
-                    tenant_id=text(tenant_id) or "default",
-                    scope_key=scope_key,
-                    reason="workbench_reconciliation_decision_expired",
-                )
-                _enqueue_workbench_refresh_in_transaction(
-                    connection,
-                    tenant_id=text(tenant_id) or "default",
-                    scope_key=scope_key,
-                    reason="workbench_reconciliation_decision_expired",
-                )
-            return {"expired_count": expired_count, "scope_keys": scope_keys}
-
-        result: dict[str, Any] = {"expired_count": 0, "scope_keys": []}
-
-        def capture(connection: Any) -> None:
-            nonlocal result
-            result = write(connection)
-
-        run_in_transaction(self._connection, capture)
-        return result
-
-    def consume_workbench_reconciliation_decisions_by_row_ids(
-        self,
-        *,
-        tenant_id: str,
-        row_ids: list[str],
-        relation_id: str,
-    ) -> int:
-        return int(
-            self._connection.execute(
-                """
-                update read_model.workbench_reconciliation_decisions
-                set decision_status = 'consumed',
-                    consumed_by_relation_id = %s,
-                    updated_at = now()
-                where tenant_id = %s
-                  and decision_status in ('proposed', 'paired', 'open')
-                  and row_ids && %s
-                """,
-                (relation_id, text(tenant_id) or "default", text_list(row_ids)),
-            )
-            or 0
-        )
-
-    def suppress_workbench_reconciliation_decisions_by_row_ids(
-        self,
-        *,
-        tenant_id: str,
-        row_ids: list[str],
-        exception_case_id: str,
-    ) -> int:
-        return int(
-            self._connection.execute(
-                """
-                update read_model.workbench_reconciliation_decisions
-                set decision_status = 'suppressed',
-                    suppressed_by_exception_case_id = %s,
-                    updated_at = now()
-                where tenant_id = %s
-                  and decision_status in ('proposed', 'paired', 'open')
-                  and row_ids && %s
-                """,
-                (exception_case_id, text(tenant_id) or "default", text_list(row_ids)),
-            )
-            or 0
-        )
-
-    def expire_stale_workbench_reconciliation_decisions(
-        self,
-        *,
-        tenant_id: str,
-        scope_months: list[str],
-        source_versions: dict[str, object],
-    ) -> int:
-        normalized_scope_months = sorted({month_start(month) for month in scope_months if month_start(month)})
-
-        def write(connection: Any) -> int:
-            affected = int(
-                connection.execute(
-                """
-                update read_model.workbench_reconciliation_decisions
-                set decision_status = 'expired',
-                    updated_at = now()
-                where tenant_id = %s
-                  and scope_month = any(%s::date[])
-                  and decision_status in ('proposed', 'paired', 'open')
-                  and not (source_versions @> %s)
-                """,
-                (
-                    text(tenant_id) or "default",
-                    normalized_scope_months,
-                    jsonb(source_versions),
-                ),
-            )
-            or 0
-            )
-            if affected:
-                for scope_month in normalized_scope_months:
-                    scope_key = str(scope_month)[:7]
-                    _enqueue_workbench_relation_refresh_in_transaction(
-                        connection,
-                        tenant_id=text(tenant_id) or "default",
-                        scope_key=scope_key,
-                        reason="workbench_reconciliation_decision_expired",
-                    )
-                    _enqueue_workbench_refresh_in_transaction(
-                        connection,
-                        tenant_id=text(tenant_id) or "default",
-                        scope_key=scope_key,
-                        reason="workbench_reconciliation_decision_expired",
-                    )
-            return affected
-
-        result = 0
-
-        def capture(connection: Any) -> None:
-            nonlocal result
-            result = write(connection)
-
-        run_in_transaction(self._connection, capture)
-        return result
-
-    def expire_missing_workbench_reconciliation_decisions(
-        self,
-        *,
-        tenant_id: str,
-        scope_month: str,
-        active_decision_keys: list[str],
-    ) -> int:
-        normalized_scope_month = month_start(scope_month)
-
-        def write(connection: Any) -> int:
-            affected = int(
-                connection.execute(
-                """
-                update read_model.workbench_reconciliation_decisions
-                set decision_status = 'expired',
-                    updated_at = now()
-                where tenant_id = %s
-                  and scope_month = %s::date
-                  and decision_status in ('proposed', 'paired', 'open')
-                  and not (decision_key = any(%s))
-                """,
-                (
-                    text(tenant_id) or "default",
-                    normalized_scope_month,
-                    text_list(active_decision_keys),
-                ),
-            )
-            or 0
-            )
-            if affected and normalized_scope_month is not None:
-                scope_key = str(normalized_scope_month)[:7]
-                _enqueue_workbench_relation_refresh_in_transaction(
-                    connection,
-                    tenant_id=text(tenant_id) or "default",
-                    scope_key=scope_key,
-                    reason="workbench_reconciliation_decision_expired",
-                )
-                _enqueue_workbench_refresh_in_transaction(
-                    connection,
-                    tenant_id=text(tenant_id) or "default",
-                    scope_key=scope_key,
-                    reason="workbench_reconciliation_decision_expired",
-                )
-            return affected
-
-        result = 0
-
-        def capture(connection: Any) -> None:
-            nonlocal result
-            result = write(connection)
-
-        run_in_transaction(self._connection, capture)
-        return result
 
     def mark_workbench_matching_dirty_scopes(
         self,
@@ -10399,86 +9362,6 @@ class PostgresReadModelRepository:
             (text(tenant_id) or "default",),
         )
 
-    def save_workbench_candidate_matches(self, snapshot: dict[str, Any], *, changed_scope_months: set[str] | None = None) -> None:
-        def write(connection: Any) -> None:
-            candidates = snapshot.get("candidates") if isinstance(snapshot, dict) else None
-            normalized_months = {str(month)[:7] for month in changed_scope_months or set() if str(month or "").strip()}
-            scope_runs = snapshot.get("scope_runs") if isinstance(snapshot, dict) else None
-            incoming_versions_by_month = {
-                str(month)[:7]: _source_version_value(
-                    run.get("source_versions") if isinstance(run, dict) else {}
-                )
-                for month, run in iter_mapping(scope_runs)
-                if str(month or "").strip()
-            }
-            stale_months: set[str] = set()
-            for scope_month in sorted(normalized_months):
-                incoming_source_version = incoming_versions_by_month.get(scope_month)
-                existing_row = connection.fetch_one(
-                    """
-                    select max((source_versions->>'source_version')::bigint) as source_version
-                    from read_model.workbench_candidate_matches
-                    where to_char(scope_month, 'YYYY-MM') = %s
-                      and source_versions ? 'source_version'
-                    """,
-                    (scope_month,),
-                )
-                existing_source_version = _source_version_value(
-                    {"source_version": existing_row.get("source_version")} if isinstance(existing_row, dict) else {}
-                )
-                if (
-                    incoming_source_version is not None
-                    and existing_source_version is not None
-                    and incoming_source_version < existing_source_version
-                ):
-                    stale_months.add(scope_month)
-                    continue
-                connection.execute(
-                    "delete from read_model.workbench_candidate_matches where to_char(scope_month, 'YYYY-MM') = %s",
-                    (scope_month,),
-                )
-            for candidate_key, payload in iter_mapping(candidates):
-                scope_month = month_start(payload.get("scope_month") or payload.get("month"))
-                normalized_scope_month = str(scope_month or "")[:7]
-                if normalized_months and normalized_scope_month not in normalized_months:
-                    continue
-                if normalized_scope_month in stale_months:
-                    continue
-                connection.execute(
-                    """
-                    insert into read_model.workbench_candidate_matches(
-                        candidate_key, scope_month, status, row_ids, confidence, source_versions,
-                        generated_at, cache_status, payload, raw_payload
-                    )
-                    values (%s, %s::date, %s, %s, %s, %s, coalesce(%s::timestamptz, now()), %s, %s, %s)
-                    on conflict (candidate_key) do update set
-                        scope_month = excluded.scope_month,
-                        status = excluded.status,
-                        row_ids = excluded.row_ids,
-                        confidence = excluded.confidence,
-                        source_versions = excluded.source_versions,
-                        generated_at = excluded.generated_at,
-                        cache_status = excluded.cache_status,
-                        payload = excluded.payload,
-                        raw_payload = excluded.raw_payload,
-                        updated_at = now()
-                    """,
-                    (
-                        candidate_key,
-                        scope_month,
-                        text(payload.get("status") or "active"),
-                        text_list(payload.get("row_ids")),
-                        decimal_text(payload.get("confidence")),
-                        jsonb(payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}),
-                        text(payload.get("generated_at")),
-                        text(payload.get("cache_status") or "fresh"),
-                        jsonb(payload),
-                        jsonb({"normalized_payload": payload}),
-                    ),
-                )
-
-        run_in_transaction(self._connection, write)
-
     @staticmethod
     def _iter_workbench_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
@@ -10492,7 +9375,7 @@ class PostgresReadModelRepository:
                 return
             seen.add(row_id)
             row = dict(value)
-            if zone in {"paired", "open"}:
+            if zone in {"paired", "unpaired"}:
                 row["status"] = zone
             rows.append(row)
 
@@ -10516,7 +9399,7 @@ class PostgresReadModelRepository:
             if isinstance(value, list):
                 for row in value:
                     add_row(row)
-        for section_name in ("paired", "open", "ignored"):
+        for section_name in ("paired", "unpaired", "ignored"):
             section = payload.get(section_name)
             if not isinstance(section, dict):
                 continue
@@ -10533,7 +9416,7 @@ class PostgresReadModelRepository:
         groups: list[dict[str, Any]] = []
         seen: set[tuple[str, str]] = set()
         seen_row_sets: set[tuple[str, tuple[tuple[str, str], ...]]] = set()
-        for zone in ("paired", "open"):
+        for zone in ("paired", "unpaired"):
             section = payload.get(zone)
             if not isinstance(section, dict):
                 continue
@@ -10571,7 +9454,7 @@ class PostgresReadModelRepository:
                         "month": normalized_group.get("month") or payload.get("month"),
                         "zone": zone,
                         "status": zone,
-                        "group_type": text(normalized_group.get("group_type")) or "candidate",
+                        "group_type": text(normalized_group.get("group_type")) or ("relation" if zone == "paired" else "unpaired"),
                         "source_kinds": source_kinds,
                         "row_count": _workbench_group_fact_row_counts(normalized_group)["rows"],
                         "searchable_text": _searchable_group_text(normalized_group),
@@ -11479,628 +10362,6 @@ def _format_decimal(value: Decimal) -> str:
     return format(normalized, "f")
 
 
-def _dedupe_workbench_payload_groups(payload: dict[str, Any]) -> None:
-    for zone in ("paired", "open"):
-        section = payload.get(zone)
-        if not isinstance(section, dict):
-            continue
-        groups = section.get("groups")
-        if not isinstance(groups, list):
-            continue
-        deduped: list[dict[str, Any]] = []
-        seen_keys: set[tuple[str, str]] = set()
-        seen_row_sets: set[tuple[str, tuple[tuple[str, str], ...]]] = set()
-        for index, group in enumerate(groups):
-            if not isinstance(group, dict):
-                continue
-            group_id = text(group.get("group_id") or group.get("id")) or f"{zone}:{index}"
-            group_key = (zone, group_id)
-            if group_key in seen_keys:
-                continue
-            row_identity = _workbench_group_row_identity(group)
-            if row_identity:
-                row_key = (zone, row_identity)
-                if row_key in seen_row_sets:
-                    continue
-                seen_row_sets.add(row_key)
-            seen_keys.add(group_key)
-            deduped.append(group)
-        section["groups"] = deduped
-
-
-def _workbench_active_relation_claim_keys_for_groups(
-    executor: Any,
-    groups: list[dict[str, Any]],
-) -> tuple[set[tuple[str, str]], set[tuple[str, str, str]], dict[tuple[str, str], set[str]]]:
-    row_panes_by_id: dict[str, set[str]] = {}
-    for group in list(groups or []):
-        if not isinstance(group, dict):
-            continue
-        for pane, row_role, _row_index, row in _iter_typed_group_rows_with_metadata(group):
-            if row_role == "summary":
-                continue
-            row_id = _workbench_row_id(row)
-            if row_id is None:
-                continue
-            row_panes_by_id.setdefault(row_id, set()).add(pane)
-    if not row_panes_by_id:
-        return set(), set(), {}
-    rows = executor.fetch_all(
-        """
-        select case_id, row_ids
-        from app.workbench_pair_relations
-        where status = 'active'
-          and row_ids && %s::text[]
-        order by case_id
-        """,
-        (sorted(row_panes_by_id),),
-    )
-
-    paired_row_keys: set[tuple[str, str]] = set()
-    canonical_relation_claims_by_row_key: dict[tuple[str, str], set[str]] = {}
-    for relation in list(rows or []):
-        case_id = text(relation.get("case_id"))
-        for row_id in text_list(relation.get("row_ids")):
-            for pane in row_panes_by_id.get(row_id, set()):
-                row_key = (pane, row_id)
-                paired_row_keys.add(row_key)
-                if case_id:
-                    canonical_relation_claims_by_row_key.setdefault(row_key, set()).add(case_id)
-    return paired_row_keys, set(), canonical_relation_claims_by_row_key
-
-
-def _aggregate_workbench_all_scope_payload(
-    groups: list[dict[str, Any]],
-    *,
-    paired_row_keys: set[tuple[str, str]] | None = None,
-    paired_identity_keys: set[tuple[str, str, str]] | None = None,
-    canonical_relation_claims_by_row_key: dict[tuple[str, str], set[str]] | None = None,
-) -> dict[str, Any]:
-    aggregate = {
-        "month": "all",
-        "scope_key": "all",
-        "read_model_scope_key": "all",
-        "paired": {"groups": []},
-        "open": {"groups": []},
-        "workbench_read_model_schema_version": WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION,
-    }
-    grouped: dict[tuple[str, str], dict[str, Any]] = {}
-    for group in groups:
-        zone = text(group.get("zone") or group.get("status")) or "open"
-        if zone not in {"paired", "open"}:
-            zone = "open"
-        source_group_id = text(group.get("group_id") or group.get("id"))
-        if source_group_id is None:
-            continue
-        group_id = _all_scope_group_id(group, source_group_id)
-        key = (zone, group_id)
-        if key not in grouped:
-            grouped[key] = _normalize_all_scope_group(group, zone=zone, group_id=group_id)
-            continue
-        _merge_all_scope_group(grouped[key], group)
-
-    finalized_by_zone: dict[str, list[dict[str, Any]]] = {"paired": [], "open": []}
-    for (zone, _group_id), group in grouped.items():
-        _finalize_all_scope_group(group, zone=zone)
-        finalized_by_zone[zone].append(group)
-    _co_locate_all_scope_oa_attachment_invoices_with_parent_groups(finalized_by_zone)
-    _suppress_all_scope_open_rows_claimed_by_paired(
-        finalized_by_zone["paired"],
-        finalized_by_zone["open"],
-        extra_paired_row_keys=paired_row_keys,
-        extra_paired_identity_keys=paired_identity_keys,
-        canonical_relation_claims_by_row_key=canonical_relation_claims_by_row_key,
-    )
-    _suppress_all_scope_open_rows_claimed_by_other_open_groups(finalized_by_zone["open"])
-    for zone in ("paired", "open"):
-        aggregate[zone]["groups"] = [
-            group
-            for group in finalized_by_zone[zone]
-            if _workbench_group_fact_row_counts(group)["rows"] > 0
-        ]
-        aggregate[zone]["groups"].sort(key=lambda item: text(item.get("group_id")) or "")
-    aggregate["summary"] = _summarize_workbench_payload_groups(aggregate)
-    return aggregate
-
-
-def _co_locate_all_scope_oa_attachment_invoices_with_parent_groups(
-    finalized_by_zone: dict[str, list[dict[str, Any]]],
-) -> None:
-    all_groups = [group for zone in ("paired", "open") for group in finalized_by_zone.get(zone, [])]
-    parent_groups_by_oa_id: dict[str, dict[str, Any]] = {}
-    for group in all_groups:
-        for row in _as_workbench_row_list(group.get("oa_rows")):
-            row_id = _workbench_row_id(row)
-            if row_id:
-                parent_groups_by_oa_id.setdefault(row_id, group)
-    if not parent_groups_by_oa_id:
-        return
-
-    changed_groups: set[int] = set()
-    for group in all_groups:
-        invoice_rows = _as_workbench_row_list(group.get("invoice_rows"))
-        if not invoice_rows:
-            continue
-        retained_rows: list[dict[str, Any]] = []
-        for row in invoice_rows:
-            parent_oa_id = _all_scope_oa_attachment_parent_oa_id(row)
-            target_group = parent_groups_by_oa_id.get(parent_oa_id or "")
-            if target_group is None or target_group is group:
-                retained_rows.append(row)
-                continue
-            target_group["invoice_rows"] = _merge_workbench_rows(target_group.get("invoice_rows"), [row])
-            _mark_all_scope_oa_attachment_source_group(target_group)
-            changed_groups.add(id(target_group))
-            changed_groups.add(id(group))
-        if len(retained_rows) != len(invoice_rows):
-            group["invoice_rows"] = retained_rows
-
-    if not changed_groups:
-        return
-    for zone, groups in finalized_by_zone.items():
-        for group in groups:
-            if id(group) in changed_groups:
-                _finalize_all_scope_group(group, zone=zone)
-
-
-def _all_scope_oa_attachment_parent_oa_id(row: dict[str, Any]) -> str | None:
-    if text(row.get("source_kind")) != "oa_attachment_invoice":
-        return None
-    candidates = [
-        row.get("derived_from_oa_id"),
-        row.get("source_oa_row_id"),
-        row.get("source_expense_item_id"),
-        row.get("source_id"),
-    ]
-    source_links = row.get("source_links")
-    if isinstance(source_links, list):
-        for source_link in source_links:
-            if not isinstance(source_link, dict):
-                continue
-            if text(source_link.get("source_type")) != "oa_attachment_invoice":
-                continue
-            candidates.extend(
-                [
-                    source_link.get("derived_from_oa_id"),
-                    source_link.get("source_oa_row_id"),
-                    source_link.get("source_expense_item_id"),
-                    source_link.get("source_id"),
-                ]
-            )
-    for candidate in candidates:
-        parent_oa_id = _normalize_all_scope_oa_attachment_parent_oa_id(candidate)
-        if parent_oa_id:
-            return parent_oa_id
-    return None
-
-
-def _normalize_all_scope_oa_attachment_parent_oa_id(value: Any) -> str | None:
-    normalized = text(value)
-    if normalized is None:
-        return None
-    return re.sub(r":item:.*$", "", normalized)
-
-
-def _mark_all_scope_oa_attachment_source_group(group: dict[str, Any]) -> None:
-    if text(group.get("zone") or group.get("status")) == "paired":
-        return
-    if text(group.get("group_type")) in {"manual_confirmed", "auto_closed", "open_exception", "processed_exception", "ignored", "legacy_exception"}:
-        return
-    group["group_type"] = "source_linked"
-    group["match_confidence"] = "high"
-    group["reason"] = "oa_attachment_source_relation"
-
-
-def _suppress_all_scope_open_rows_claimed_by_paired(
-    paired_groups: list[dict[str, Any]],
-    open_groups: list[dict[str, Any]],
-    *,
-    extra_paired_row_keys: set[tuple[str, str]] | None = None,
-    extra_paired_identity_keys: set[tuple[str, str, str]] | None = None,
-    canonical_relation_claims_by_row_key: dict[tuple[str, str], set[str]] | None = None,
-) -> None:
-    paired_row_keys: set[tuple[str, str]] = set(extra_paired_row_keys or set())
-    paired_identity_keys: set[tuple[str, str, str]] = set(extra_paired_identity_keys or set())
-    relation_claims_by_row_key = {
-        key: set(value)
-        for key, value in (canonical_relation_claims_by_row_key or {}).items()
-    }
-    visible_paired_row_keys: set[tuple[str, str]] = set()
-    visible_paired_identity_keys: set[tuple[str, str, str]] = set()
-    for group in paired_groups:
-        for pane, row_role, _row_index, row in _iter_typed_group_rows_with_metadata(group):
-            if row_role == "summary":
-                continue
-            row_id = _workbench_row_id(row)
-            if row_id is not None:
-                row_key = (pane, row_id)
-                paired_row_keys.add(row_key)
-                visible_paired_row_keys.add(row_key)
-            identity = _workbench_strong_object_identity(row, pane)
-            if identity is not None:
-                paired_identity_keys.add(identity)
-                visible_paired_identity_keys.add(identity)
-
-    if not paired_row_keys and not paired_identity_keys:
-        for group in open_groups:
-            _drop_all_scope_automatic_decision_group(group)
-        return
-
-    for group in open_groups:
-        _remove_workbench_rows_from_group(
-            group,
-            paired_row_keys=paired_row_keys,
-            paired_identity_keys=paired_identity_keys,
-            visible_paired_row_keys=visible_paired_row_keys,
-            visible_paired_identity_keys=visible_paired_identity_keys,
-            canonical_relation_claims_by_row_key=relation_claims_by_row_key,
-        )
-        _drop_all_scope_automatic_decision_group(group)
-        _finalize_all_scope_group(group, zone="open")
-
-
-def _suppress_all_scope_open_rows_claimed_by_other_open_groups(open_groups: list[dict[str, Any]]) -> None:
-    owner_by_claim_key: dict[tuple[str, ...], tuple[tuple[Any, ...], dict[str, Any]]] = {}
-    for group in open_groups:
-        rank = _all_scope_open_group_claim_rank(group)
-        for pane, row_role, _row_index, row in _iter_typed_group_rows_with_metadata(group):
-            if row_role == "summary":
-                continue
-            for claim_key in _workbench_open_visible_owner_claim_keys(row, pane):
-                owner = owner_by_claim_key.get(claim_key)
-                if owner is None or rank < owner[0]:
-                    owner_by_claim_key[claim_key] = (rank, group)
-
-    if not owner_by_claim_key:
-        return
-
-    for group in open_groups:
-        _remove_workbench_rows_from_group_claimed_by_other_open_group(
-            group,
-            owner_by_claim_key=owner_by_claim_key,
-        )
-        _finalize_all_scope_group(group, zone="open")
-
-
-def _drop_all_scope_automatic_decision_group(group: dict[str, Any]) -> None:
-    if _is_workbench_automatic_decision_group(group):
-        _clear_workbench_group_rows(group)
-
-
-def _is_workbench_automatic_decision_group(group: dict[str, Any]) -> bool:
-    automatic_modes = {"automatic_decision", "automatic_match"}
-    group_type = text(group.get("group_type")) or ""
-    relation_modes = {
-        mode
-        for mode in [
-            text(group.get("relation_mode")),
-            *(text(row.get("relation_mode")) for row in _iter_group_rows(group)),
-        ]
-        if mode
-    }
-    if group_type == "manual_confirmed" or any(mode not in automatic_modes for mode in relation_modes):
-        return False
-    if relation_modes.intersection(automatic_modes):
-        return True
-    group_id = text(group.get("group_id") or group.get("id")) or ""
-    if group_id.startswith("case:decision:"):
-        return True
-    for row in _iter_group_rows(group):
-        case_id = text(row.get("case_id"))
-        if case_id and case_id.startswith("decision:"):
-            return True
-    return False
-
-
-def _clear_workbench_group_rows(group: dict[str, Any]) -> None:
-    for row_key in ("oa_rows", "bank_rows", "invoice_rows"):
-        group[row_key] = []
-    collapsed_rows = group.get("collapsed_rows")
-    if isinstance(collapsed_rows, dict):
-        for pane in list(collapsed_rows):
-            collapsed_rows[pane] = []
-
-
-def _all_scope_open_group_claim_rank(group: dict[str, Any]) -> tuple[Any, ...]:
-    group_type = text(group.get("group_type")) or ""
-    reason = text(group.get("reason")) or ""
-    fact_counts = _workbench_group_fact_row_counts(group)
-    pane_count = sum(1 for pane in WORKBENCH_PANES if fact_counts.get(pane, 0) > 0)
-    row_count = fact_counts.get("rows", 0)
-    has_reconciliation_decision = any(
-        isinstance(row.get("workbench_reconciliation_decision"), dict) for row in _iter_group_rows(group)
-    )
-    if group_type == "source_linked":
-        group_type_priority = 0
-    elif group_type in {"auto_closed", "manual_confirmed", "open_exception", "ignored", "legacy_exception"}:
-        group_type_priority = 1
-    elif group_type == "open" and (reason == "reconciliation_decision_open" or has_reconciliation_decision):
-        group_type_priority = 2
-    elif group_type == "candidate":
-        group_type_priority = 3
-    elif group_type == "open":
-        group_type_priority = 4
-    else:
-        group_type_priority = 5
-    confidence_priority = {"high": 0, "medium": 1, "low": 2}.get(text(group.get("match_confidence")) or "", 3)
-    stable_group_id = text(group.get("group_id") or group.get("id")) or ""
-    return (group_type_priority, -pane_count, -row_count, confidence_priority, stable_group_id)
-
-
-def _remove_workbench_rows_from_group_claimed_by_other_open_group(
-    group: dict[str, Any],
-    *,
-    owner_by_claim_key: dict[tuple[str, ...], tuple[tuple[Any, ...], dict[str, Any]]],
-) -> None:
-    for pane, row_key in (("oa", "oa_rows"), ("bank", "bank_rows"), ("invoice", "invoice_rows")):
-        rows = group.get(row_key)
-        if isinstance(rows, list):
-            group[row_key] = [
-                row
-                for row in rows
-                if isinstance(row, dict)
-                and _workbench_row_owned_by_group(
-                    row,
-                    pane,
-                    group=group,
-                    owner_by_claim_key=owner_by_claim_key,
-                )
-            ]
-    collapsed_rows = group.get("collapsed_rows")
-    if isinstance(collapsed_rows, dict):
-        for pane, rows in list(collapsed_rows.items()):
-            if not isinstance(rows, list):
-                continue
-            collapsed_rows[pane] = [
-                row
-                for row in rows
-                if isinstance(row, dict)
-                and _workbench_row_owned_by_group(
-                    row,
-                    str(pane),
-                    group=group,
-                    owner_by_claim_key=owner_by_claim_key,
-                )
-            ]
-
-
-def _workbench_row_owned_by_group(
-    row: dict[str, Any],
-    pane: str,
-    *,
-    group: dict[str, Any],
-    owner_by_claim_key: dict[tuple[str, ...], tuple[tuple[Any, ...], dict[str, Any]]],
-) -> bool:
-    for claim_key in _workbench_open_visible_owner_claim_keys(row, pane):
-        owner = owner_by_claim_key.get(claim_key)
-        if owner is not None and owner[1] is not group:
-            return False
-    return True
-
-
-def _remove_workbench_rows_from_group(
-    group: dict[str, Any],
-    *,
-    paired_row_keys: set[tuple[str, str]],
-    paired_identity_keys: set[tuple[str, str, str]],
-    visible_paired_row_keys: set[tuple[str, str]] | None = None,
-    visible_paired_identity_keys: set[tuple[str, str, str]] | None = None,
-    canonical_relation_claims_by_row_key: dict[tuple[str, str], set[str]] | None = None,
-) -> None:
-    group_relation_case_id = _workbench_canonical_relation_case_id_for_group(group)
-    for pane, row_key in (("oa", "oa_rows"), ("bank", "bank_rows"), ("invoice", "invoice_rows")):
-        rows = group.get(row_key)
-        if isinstance(rows, list):
-            group[row_key] = [
-                row
-                for row in rows
-                if isinstance(row, dict)
-                and not _workbench_row_claimed_by_paired(
-                    row,
-                    pane,
-                    paired_row_keys=paired_row_keys,
-                    paired_identity_keys=paired_identity_keys,
-                    visible_paired_row_keys=visible_paired_row_keys or set(),
-                    visible_paired_identity_keys=visible_paired_identity_keys or set(),
-                    canonical_relation_claims_by_row_key=canonical_relation_claims_by_row_key,
-                    group_relation_case_id=group_relation_case_id,
-                )
-            ]
-    collapsed_rows = group.get("collapsed_rows")
-    if isinstance(collapsed_rows, dict):
-        for pane, rows in list(collapsed_rows.items()):
-            if not isinstance(rows, list):
-                continue
-            collapsed_rows[pane] = [
-                row
-                for row in rows
-                if isinstance(row, dict)
-                and not _workbench_row_claimed_by_paired(
-                    row,
-                    str(pane),
-                    paired_row_keys=paired_row_keys,
-                    paired_identity_keys=paired_identity_keys,
-                    visible_paired_row_keys=visible_paired_row_keys or set(),
-                    visible_paired_identity_keys=visible_paired_identity_keys or set(),
-                    canonical_relation_claims_by_row_key=canonical_relation_claims_by_row_key,
-                    group_relation_case_id=group_relation_case_id,
-                )
-            ]
-
-
-def _workbench_row_claimed_by_paired(
-    row: dict[str, Any],
-    pane: str,
-    *,
-    paired_row_keys: set[tuple[str, str]],
-    paired_identity_keys: set[tuple[str, str, str]],
-    visible_paired_row_keys: set[tuple[str, str]],
-    visible_paired_identity_keys: set[tuple[str, str, str]],
-    canonical_relation_claims_by_row_key: dict[tuple[str, str], set[str]] | None = None,
-    group_relation_case_id: str | None = None,
-) -> bool:
-    row_id = _workbench_row_id(row)
-    if row_id is not None:
-        row_key = (pane, row_id)
-        if row_key in visible_paired_row_keys:
-            return True
-        if row_key not in paired_row_keys:
-            identity = _workbench_strong_object_identity(row, pane)
-            if identity is not None and identity in visible_paired_identity_keys:
-                return True
-            return identity is not None and identity in paired_identity_keys
-        claim_case_ids = (canonical_relation_claims_by_row_key or {}).get(row_key, set())
-        if group_relation_case_id and group_relation_case_id in claim_case_ids:
-            return False
-        return True
-    identity = _workbench_strong_object_identity(row, pane)
-    if identity is not None and identity in visible_paired_identity_keys:
-        return True
-    return identity is not None and identity in paired_identity_keys
-
-
-def _workbench_canonical_relation_case_id_for_group(group: dict[str, Any]) -> str | None:
-    group_id = text(group.get("group_id") or group.get("id")) or ""
-    if group_id.startswith("case:"):
-        return group_id.removeprefix("case:")
-    return None
-
-
-def _workbench_open_visible_owner_claim_keys(row: dict[str, Any], pane: str) -> list[tuple[str, ...]]:
-    keys: list[tuple[str, ...]] = []
-    row_id = _workbench_row_id(row)
-    if row_id is not None:
-        keys.append(("row", pane, row_id))
-    identity = _workbench_strong_object_identity(row, pane)
-    if pane == "invoice" and identity is not None:
-        keys.append(("identity", *identity))
-    return keys
-
-
-def _workbench_strong_object_identity(row: dict[str, Any], pane: str) -> tuple[str, str, str] | None:
-    identity_key = text(row.get("object_identity_key"))
-    identity_kind = text(row.get("object_identity_kind"))
-    if identity_key is None or identity_kind is None:
-        return None
-    if pane == "invoice" and identity_kind in {"digital_invoice_no", "invoice_code_no"}:
-        return (pane, identity_kind, identity_key)
-    if pane == "bank" and identity_kind == "business_fields":
-        return (pane, identity_kind, identity_key)
-    return None
-
-
-def _normalize_all_scope_group(group: dict[str, Any], *, zone: str, group_id: str) -> dict[str, Any]:
-    normalized = dict(group)
-    normalized["group_id"] = group_id
-    normalized["id"] = group_id
-    normalized["zone"] = zone
-    normalized["status"] = zone
-    normalized["scope_key"] = "all"
-    normalized["month"] = "all"
-    normalized["scope_month"] = None
-    normalized.pop("_source_scope_key", None)
-    normalized.pop("_source_scope_month", None)
-    normalized.pop("collapsed_row_counts", None)
-    normalized.pop("display_row_counts", None)
-    for key in ("oa_rows", "bank_rows", "invoice_rows"):
-        normalized[key] = _dedupe_workbench_rows(normalized.get(key))
-    collapsed_rows = normalized.get("collapsed_rows")
-    if isinstance(collapsed_rows, dict):
-        normalized["collapsed_rows"] = {
-            str(row_type): _dedupe_workbench_rows(rows)
-            for row_type, rows in collapsed_rows.items()
-            if isinstance(rows, list)
-        }
-    return _with_workbench_group_counts(normalized)
-
-
-def _all_scope_group_id(group: dict[str, Any], group_id: str) -> str:
-    if _is_all_scope_mergeable_group_id(group_id):
-        return group_id
-    source_scope_key = text(group.get("_source_scope_key") or group.get("source_scope_key"))
-    if source_scope_key and source_scope_key != "all":
-        return f"scope:{source_scope_key}:{group_id}"
-    source_scope_month = text(group.get("_source_scope_month") or group.get("source_scope_month"))
-    if source_scope_month:
-        return f"scope-month:{source_scope_month}:{group_id}"
-    return group_id
-
-
-def _is_all_scope_mergeable_group_id(group_id: str) -> bool:
-    return group_id.startswith(("case:", "turnover:", "batch-accounting:", "source:oa_attachment:"))
-
-
-def _expected_workbench_groups_builder(scope_key: str) -> str | None:
-    return WORKBENCH_ALL_SCOPE_AGGREGATE_SCHEMA_VERSION if scope_key == "all" else None
-
-
-def _merge_all_scope_group(target: dict[str, Any], incoming: dict[str, Any]) -> None:
-    for key in ("oa_rows", "bank_rows", "invoice_rows"):
-        target[key] = _merge_workbench_rows(target.get(key), incoming.get(key))
-    incoming_collapsed = incoming.get("collapsed_rows")
-    if isinstance(incoming_collapsed, dict):
-        target_collapsed = target.get("collapsed_rows")
-        if not isinstance(target_collapsed, dict):
-            target_collapsed = {}
-            target["collapsed_rows"] = target_collapsed
-        for row_type, rows in incoming_collapsed.items():
-            existing_rows = target_collapsed.get(str(row_type))
-            target_collapsed[str(row_type)] = _merge_workbench_rows(existing_rows, rows)
-    target["source_kinds"] = sorted(
-        {
-            source_kind
-            for row in _iter_group_rows(target)
-            if (source_kind := text(row.get("source_kind") or row.get("type"))) is not None
-        }
-    )
-
-
-def _finalize_all_scope_group(group: dict[str, Any], *, zone: str) -> None:
-    group.pop("collapsed_row_counts", None)
-    group.pop("display_row_counts", None)
-    group["zone"] = zone
-    group["status"] = zone
-    group["scope_key"] = "all"
-    group["month"] = "all"
-    group["scope_month"] = None
-    group.update(_with_workbench_group_counts(group))
-    group["source_kinds"] = sorted(
-        {
-            source_kind
-            for row in _iter_group_rows(group)
-            if (source_kind := text(row.get("source_kind") or row.get("type"))) is not None
-        }
-    )
-    group["searchable_text"] = _searchable_group_text(group)
-    group.update(_workbench_group_sort_keys(group))
-
-
-def _merge_workbench_rows(left: Any, right: Any) -> list[dict[str, Any]]:
-    return _dedupe_workbench_rows([*_as_workbench_row_list(left), *_as_workbench_row_list(right)])
-
-
-def _dedupe_workbench_rows(rows: Any) -> list[dict[str, Any]]:
-    result: list[dict[str, Any]] = []
-    seen: set[tuple[str, str]] = set()
-    for row in _as_workbench_row_list(rows):
-        row_id = text(row.get("id") or row.get("row_id"))
-        if row_id is None:
-            continue
-        row_type = text(row.get("type") or row.get("record_type") or row.get("source_kind")) or ""
-        key = (row_type, row_id)
-        if key in seen:
-            continue
-        seen.add(key)
-        result.append(row)
-    return result
-
-
-def _as_workbench_row_list(rows: Any) -> list[dict[str, Any]]:
-    if not isinstance(rows, list):
-        return []
-    return [dict(row) for row in rows if isinstance(row, dict)]
-
-
 def _workbench_row_id(row: dict[str, Any]) -> str | None:
     return text(row.get("id") or row.get("row_id"))
 
@@ -12175,7 +10436,7 @@ def _with_workbench_group_counts(group: dict[str, Any]) -> dict[str, Any]:
 def _empty_workbench_zone_counts() -> dict[str, dict[str, int]]:
     return {
         "paired": {"groups": 0, "oa": 0, "bank": 0, "invoice": 0, "rows": 0},
-        "open": {"groups": 0, "oa": 0, "bank": 0, "invoice": 0, "rows": 0},
+        "unpaired": {"groups": 0, "oa": 0, "bank": 0, "invoice": 0, "rows": 0},
     }
 
 
@@ -12185,10 +10446,10 @@ def _normalize_workbench_summary_counts(summary: dict[str, Any]) -> dict[str, An
     if not isinstance(zone_counts, dict):
         zone_counts = _empty_workbench_zone_counts()
         zone_counts["paired"]["groups"] = int_value(normalized.get("paired_count"), 0)
-        zone_counts["open"]["groups"] = int_value(normalized.get("open_count"), 0)
+        zone_counts["unpaired"]["groups"] = int_value(normalized.get("unpaired_count"), 0)
     else:
         merged = _empty_workbench_zone_counts()
-        for zone in ("paired", "open"):
+        for zone in ("paired", "unpaired"):
             zone_payload = zone_counts.get(zone)
             if not isinstance(zone_payload, dict):
                 continue
@@ -12301,6 +10562,29 @@ def _workbench_linked_search_exists_sql(*, group_id_sql: str = "g.group_id") -> 
     )
 
 
+def _workbench_all_logical_group_id_sql(group_id_sql: str, scope_key_sql: str) -> str:
+    return (
+        f"case when left({group_id_sql}, 5) = 'case:' or left({group_id_sql}, 9) = 'unpaired:' "
+        f"then {group_id_sql} else 'scope:' || {scope_key_sql} || ':' || {group_id_sql} end"
+    )
+
+
+def _workbench_all_active_member_exists_sql(predicate_sql: str, *, row_alias: str = "r") -> str:
+    logical_group_id_sql = _workbench_all_logical_group_id_sql(
+        f"{row_alias}.group_id",
+        f"{row_alias}.scope_key",
+    )
+    return (
+        f"exists (select 1 from read_model.workbench_group_rows {row_alias} "
+        "join read_model.workbench_generations member_generation "
+        f"on member_generation.scope_key = {row_alias}.scope_key "
+        f"and member_generation.generation_id = {row_alias}.generation_id "
+        "and member_generation.tenant_id = 'default' and member_generation.status = 'active' "
+        f"where {row_alias}.scope_key <> 'all' and {row_alias}.zone = g.zone "
+        f"and {logical_group_id_sql} = g.group_id and {predicate_sql})"
+    )
+
+
 def _json_object_payload(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
@@ -12320,6 +10604,7 @@ def _workbench_group_row_filter_exists_sql(
     search_by_pane: dict[str, str],
     fallback_search: str | None,
     group_id_sql: str = "g.group_id",
+    composed_all_scope: bool = False,
 ) -> tuple[str, list[Any]]:
     pane_exists: list[str] = []
     params: list[Any] = []
@@ -12334,16 +10619,19 @@ def _workbench_group_row_filter_exists_sql(
         )
         if not row_match_clauses:
             continue
-        row_clauses = [
-            "r.scope_key = g.scope_key",
-            "r.generation_id = g.generation_id",
-            "r.zone = g.zone",
-            f"r.group_id = {group_id_sql}",
-            *row_match_clauses,
-        ]
-        pane_exists.append(
-            "exists (select 1 from read_model.workbench_group_rows r where " + " and ".join(row_clauses) + ")"
-        )
+        if composed_all_scope:
+            pane_exists.append(_workbench_all_active_member_exists_sql(" and ".join(row_match_clauses)))
+        else:
+            row_clauses = [
+                "r.scope_key = g.scope_key",
+                "r.generation_id = g.generation_id",
+                "r.zone = g.zone",
+                f"r.group_id = {group_id_sql}",
+                *row_match_clauses,
+            ]
+            pane_exists.append(
+                "exists (select 1 from read_model.workbench_group_rows r where " + " and ".join(row_clauses) + ")"
+            )
         params.extend(row_match_params)
     if not pane_exists:
         return "", []
@@ -12445,13 +10733,13 @@ def _summarize_workbench_payload_groups(payload: dict[str, Any]) -> dict[str, An
         "bank_count": 0,
         "invoice_count": 0,
         "paired_count": 0,
-        "open_count": 0,
+        "unpaired_count": 0,
         "exception_count": 0,
         "zone_counts": _empty_workbench_zone_counts(),
     }
     seen_rows: set[tuple[str, str]] = set()
-    seen_rows_by_zone: dict[str, set[tuple[str, str]]] = {"paired": set(), "open": set()}
-    for zone in ("paired", "open"):
+    seen_rows_by_zone: dict[str, set[tuple[str, str]]] = {"paired": set(), "unpaired": set()}
+    for zone in ("paired", "unpaired"):
         section = payload.get(zone)
         groups = section.get("groups") if isinstance(section, dict) else []
         if not isinstance(groups, list):
@@ -12462,7 +10750,7 @@ def _summarize_workbench_payload_groups(payload: dict[str, Any]) -> dict[str, An
         for group in groups:
             if not isinstance(group, dict):
                 continue
-            if zone == "open" and _workbench_group_has_danger(group):
+            if zone == "unpaired" and _workbench_group_has_danger(group):
                 summary["exception_count"] += 1
             for pane, row_role, _row_index, row in _iter_typed_group_rows_with_metadata(group):
                 if row_role == "summary":
@@ -12518,40 +10806,6 @@ def _workbench_groups_order_by(sort: str | None) -> str:
     if prefix is None:
         return "scope_month desc nulls last, updated_at desc, group_id"
     return f"{prefix}, scope_month desc nulls last, updated_at desc, group_id"
-
-
-def _workbench_open_automatic_decision_group_exclusion_sql() -> str:
-    return """
-    (
-        g.group_id not like 'case:decision:%%'
-        or g.group_type = 'manual_confirmed'
-        or coalesce(nullif(g.payload->>'relation_mode', ''), '') not in (
-            '',
-            'automatic_decision',
-            'automatic_match'
-        )
-    )
-    """
-
-
-def _workbench_open_linked_etc_summary_group_exclusion_sql(*, group_id_sql: str = "g.group_id") -> str:
-    return f"""
-    not exists (
-        select 1
-        from read_model.workbench_group_rows gr
-        join app.workbench_pair_relations rel
-          on rel.status = 'active'
-         and nullif(rel.amount_check->>'external_etc_batch_id', '') is not null
-         and gr.row_id = concat('etc-summary-', rel.amount_check->>'external_etc_batch_id')
-        where gr.scope_key = g.scope_key
-          and gr.generation_id = g.generation_id
-          and gr.zone = g.zone
-          and gr.group_id = {group_id_sql}
-          and gr.pane = 'invoice'
-          and coalesce(gr.row_role, '') <> 'summary'
-          and gr.source_kind = 'etc_invoice_summary'
-    )
-    """
 
 
 def _normalize_workbench_group_detail_level(detail_level: str | None) -> str:
@@ -12814,35 +11068,12 @@ def _compact_workbench_row_for_summary_page(row: dict[str, Any]) -> dict[str, An
             "object_identity_source",
             "object_identity_confidence",
             "candidate_ids",
+            "workbench_reconciliation_decision",
+            "reconciliation_decision",
             "group_metadata",
         },
     )
-    decision = compact.get("workbench_reconciliation_decision")
-    if isinstance(decision, dict):
-        compact["workbench_reconciliation_decision"] = _compact_workbench_reconciliation_decision_for_summary_page(decision)
-    reconciliation_decision = compact.get("reconciliation_decision")
-    if isinstance(reconciliation_decision, dict):
-        compact["reconciliation_decision"] = _compact_workbench_reconciliation_decision_for_summary_page(
-            reconciliation_decision
-        )
     return compact
-
-
-def _compact_workbench_reconciliation_decision_for_summary_page(decision: dict[str, Any]) -> dict[str, Any]:
-    return {
-        key: value
-        for key, value in decision.items()
-        if key
-        not in {
-            "evidence",
-            "blockers",
-            "source_versions",
-            "sourceVersions",
-            "debug",
-            "raw_payload",
-            "payload",
-        }
-    }
 
 
 def _normalize_workbench_invoice_display_fields(row: dict[str, Any]) -> dict[str, Any]:
@@ -13098,7 +11329,7 @@ def _workbench_group_row_identity(group: dict[str, Any]) -> tuple[tuple[str, str
 def _workbench_group_row_records(group: dict[str, Any]) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     group_id = text(group.get("group_id") or group.get("id"))
-    zone = text(group.get("zone") or group.get("status")) or "open"
+    zone = text(group.get("zone") or group.get("status")) or "unpaired"
     if group_id is None:
         return records
     for pane, row_role, row_index, row in _iter_typed_group_rows_with_metadata(group):
@@ -13142,8 +11373,8 @@ def _workbench_group_payload_for_rows(group: dict[str, Any], *, payload: dict[st
     source_payload = payload if isinstance(payload, dict) else group.get("payload")
     payload = dict(source_payload if isinstance(source_payload, dict) else group)
     payload.setdefault("group_id", text(group.get("group_id") or group.get("id")))
-    payload.setdefault("zone", text(group.get("zone") or group.get("status")) or "open")
-    payload.setdefault("status", text(group.get("status") or group.get("zone")) or "open")
+    payload.setdefault("zone", text(group.get("zone") or group.get("status")) or "unpaired")
+    payload.setdefault("status", text(group.get("status") or group.get("zone")) or "unpaired")
     payload.setdefault("scope_month", group.get("scope_month"))
     payload.setdefault("month", group.get("month"))
     return payload
@@ -13165,8 +11396,8 @@ def _workbench_group_payload_for_write(group: dict[str, Any], *, payload: dict[s
         if str(key).endswith("_rows") or str(key) in WORKBENCH_GROUP_MEMBER_PAYLOAD_KEYS:
             normalized.pop(key, None)
     normalized.setdefault("group_id", text(group.get("group_id") or group.get("id")))
-    normalized.setdefault("zone", text(group.get("zone") or group.get("status")) or "open")
-    normalized.setdefault("status", text(group.get("status") or group.get("zone")) or "open")
+    normalized.setdefault("zone", text(group.get("zone") or group.get("status")) or "unpaired")
+    normalized.setdefault("status", text(group.get("status") or group.get("zone")) or "unpaired")
     normalized.setdefault("scope_month", group.get("scope_month"))
     normalized.setdefault("month", group.get("month"))
     normalized["workbench_group_rows_materialized"] = True
@@ -13281,7 +11512,7 @@ def _workbench_snapshot_payload_for_write(
         "scope_month": scope_month,
         "summary": serialize_value(summary),
         "paired": {"groups": []},
-        "open": {"groups": []},
+        "unpaired": {"groups": []},
         "workbench_groups_materialized": True,
     }
     for key in (
@@ -13393,49 +11624,6 @@ def _input_invoice_usage_payload_invoice_ids(row: dict[str, Any], payload: dict[
     )
 
 
-def _workbench_reconciliation_row_types(payload: dict[str, Any]) -> list[str]:
-    row_types: list[str] = []
-    for row_type, key in (("oa", "oa_row_ids"), ("bank", "bank_row_ids"), ("invoice", "invoice_row_ids")):
-        row_types.extend(row_type for _row_id in text_list(payload.get(key)))
-    return row_types
-
-
-def _workbench_reconciliation_decision_payload(row: dict[str, Any]) -> dict[str, Any]:
-    payload = _read_model_payload(row)
-    if isinstance(payload, dict) and payload:
-        result = dict(payload)
-    else:
-        result = {}
-    for key in (
-        "decision_id",
-        "decision_key",
-        "display_state",
-        "decision_status",
-        "match_domain",
-        "match_shape",
-        "rule_code",
-        "rule_version",
-        "direction",
-        "explanation",
-    ):
-        result[key] = text(row.get(key))
-    result["scope_month"] = str(row.get("scope_month") or "")[:7]
-    result["row_ids"] = text_list(row.get("row_ids"))
-    result["oa_row_ids"] = text_list(row.get("oa_row_ids"))
-    result["bank_row_ids"] = text_list(row.get("bank_row_ids"))
-    result["invoice_row_ids"] = text_list(row.get("invoice_row_ids"))
-    result["amount"] = decimal_text(row.get("amount"))
-    result["payment_amount_closed"] = bool(row.get("payment_amount_closed"))
-    result["invoice_amount_closed"] = bool(row.get("invoice_amount_closed"))
-    result["warnings"] = row.get("warnings") if isinstance(row.get("warnings"), list) else []
-    result["evidence"] = row.get("evidence") if isinstance(row.get("evidence"), dict) else {}
-    result["blockers"] = row.get("blockers") if isinstance(row.get("blockers"), list) else []
-    result["source_versions"] = row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}
-    result["consumed_by_relation_id"] = text(row.get("consumed_by_relation_id"))
-    result["suppressed_by_exception_case_id"] = text(row.get("suppressed_by_exception_case_id"))
-    return result
-
-
 def _enqueue_workbench_relation_refresh_in_transaction(
     connection: Any,
     *,
@@ -13506,23 +11694,6 @@ def _enqueue_workbench_relation_refresh_in_transaction(
     )
 
 
-def _enqueue_workbench_refresh_in_transaction(
-    connection: Any,
-    *,
-    tenant_id: str,
-    scope_key: str,
-    reason: str,
-) -> None:
-    RuntimeQueueRepository(connection).enqueue_read_model_refresh_in_transaction(
-        transaction=connection,
-        tenant_id=text(tenant_id) or "default",
-        scope_type="workbench",
-        scope_key=text(scope_key) or "all",
-        reason=text(reason) or "workbench_changed",
-        metadata={"source": "workbench_reconciliation_decision_cleanup"},
-    )
-
-
 def _retry_backoff_case_sql(retry_backoff_seconds: list[int]) -> str:
     backoffs = [max(0, int_value(value, 0)) for value in retry_backoff_seconds]
     if not backoffs:
@@ -13546,6 +11717,15 @@ def _source_version_value(source_versions: Any) -> int | None:
         return None
 
 
+def _expected_workbench_groups_builder(scope_key: str) -> str | None:
+    normalized = str(scope_key or "").strip()
+    if MONTH_SCOPE_RE.fullmatch(normalized):
+        return WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION
+    if normalized == "all":
+        return WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION
+    return None
+
+
 def _workbench_composed_all_source_versions(rows: list[dict[str, Any]]) -> dict[str, Any]:
     source_versions_rows = [
         row.get("source_versions")
@@ -13560,7 +11740,7 @@ def _workbench_composed_all_source_versions(rows: list[dict[str, Any]]) -> dict[
         "oa_attachment_invoice_parser_version",
         "bank_auto_tag_rules_version",
         "oa_projection_sync_version",
-        "workbench_matching_rules_version",
+        "workbench_formal_relation_rule_version",
     ):
         observed = [text(versions.get(key)) for versions in source_versions_rows]
         values = {value for value in observed if value}

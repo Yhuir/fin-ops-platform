@@ -583,7 +583,7 @@ test.describe("bank flow rule batches browser flow", () => {
 
     await page.goto("/");
     const pairedZone = page.getByTestId("zone-paired");
-    const openZone = page.getByTestId("zone-open");
+    const openZone = page.getByTestId("zone-unpaired");
     const pairedGroup = page.getByTestId("candidate-group-paired-bank-flow-rule-batch:bank_flow_rule_batch_e2e_fee");
 
     await expect(pairedGroup).toBeVisible();
@@ -599,7 +599,7 @@ test.describe("bank flow rule batches browser flow", () => {
     await expect(pairedZone.getByRole("button", { name: "收起流水规则批次明细" })).toBeVisible();
 
     const invoiceRequiredGroup = page.getByTestId(
-      "candidate-group-open-bank-flow-rule-batch:bank_flow_rule_batch_e2e_invoice_required",
+      "candidate-group-unpaired-bank-flow-rule-batch:bank_flow_rule_batch_e2e_invoice_required",
     );
     await expect(invoiceRequiredGroup).toBeVisible();
     await expect(openZone.getByText("需要发票后才进入已配对")).toBeVisible();

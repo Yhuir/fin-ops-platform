@@ -181,7 +181,7 @@ def discover_write_operation_scenarios(
 ) -> dict[str, Any]:
     normalized_limit = max(1, int(limit))
     turnover_candidates = _turnover_withdraw_candidates(connection, limit=normalized_limit)
-    workbench_candidates = _workbench_withdraw_candidates(connection, limit=normalized_limit)
+    workbench_withdraw_contexts = _workbench_withdraw_candidates(connection, limit=normalized_limit)
     bank_flow_candidates = _bank_flow_rule_batch_submit_candidates(connection, limit=normalized_limit)
     no_oa_candidates = _no_oa_withdraw_candidates(connection, limit=normalized_limit)
     scenarios = [
@@ -200,7 +200,7 @@ def discover_write_operation_scenarios(
         "page_write_scenario_policy": _page_write_scenario_policy_payload(),
         "candidate_counts": {
             "turnover_manual_closure_or_withdraw": len(turnover_candidates),
-            "workbench_pair_withdraw_context": len(workbench_candidates),
+            "workbench_pair_withdraw_context": len(workbench_withdraw_contexts),
             "bank_flow_rule_batch_submit_context": len(bank_flow_candidates),
             "no_oa_bank_batch_withdraw_context": len(no_oa_candidates),
         },
@@ -228,7 +228,7 @@ def discover_write_operation_scenarios(
         },
         "candidates": {
             "turnover_manual_closure_or_withdraw": turnover_candidates,
-            "workbench_pair_withdraw_context": workbench_candidates,
+            "workbench_pair_withdraw_context": workbench_withdraw_contexts,
             "bank_flow_rule_batch_submit_context": bank_flow_candidates,
             "no_oa_bank_batch_withdraw_context": no_oa_candidates,
         },

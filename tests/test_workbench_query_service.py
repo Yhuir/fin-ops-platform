@@ -32,7 +32,7 @@ class AttachmentRecord:
     def __init__(self) -> None:
         self.id = "oa-attach-202603-001"
         self.month = "2026-03"
-        self.section = "open"
+        self.section = "unpaired"
         self.case_id = None
         self.applicant = "刘际涛"
         self.project_name = "玉烟维护项目"
@@ -74,7 +74,7 @@ class AggregatedAttachmentRecord:
     def __init__(self) -> None:
         self.id = "oa-exp-exp-agg-001"
         self.month = "2026-03"
-        self.section = "open"
+        self.section = "unpaired"
         self.case_id = None
         self.applicant = "刘际涛"
         self.project_name = "玉烟维护项目；云南溯源科技"
@@ -149,7 +149,7 @@ class MultiProjectDisplayRecord:
     def __init__(self) -> None:
         self.id = "oa-exp-display-001"
         self.month = "2026-03"
-        self.section = "open"
+        self.section = "unpaired"
         self.case_id = None
         self.applicant = "刘际涛"
         self.project_name = "玉烟维护项目；云南溯源科技"
@@ -207,7 +207,7 @@ class SourceBoundAttachmentRecord:
     def __init__(self) -> None:
         self.id = "oa-exp-hurong-248"
         self.month = "2026-03"
-        self.section = "open"
+        self.section = "unpaired"
         self.case_id = None
         self.applicant = "胡瑢"
         self.project_name = "2024-2026年度红塔集团工作证管理系统维护项目"
@@ -288,7 +288,7 @@ class SingleSourceAttachmentRecord:
     def __init__(self) -> None:
         self.id = "oa-exp-hurong-292"
         self.month = "2026-03"
-        self.section = "open"
+        self.section = "unpaired"
         self.case_id = None
         self.applicant = "胡瑢"
         self.project_name = "红云红河烟草能源管理运维项目"
@@ -343,7 +343,7 @@ class EvidenceAttachmentRecord:
     def __init__(self) -> None:
         self.id = "oa-evidence-2035"
         self.month = "2026-03"
-        self.section = "open"
+        self.section = "unpaired"
         self.case_id = None
         self.applicant = "胡瑢"
         self.project_name = "工作证管理系统维护项目"
@@ -424,7 +424,7 @@ class UnparsedAttachmentRecord:
     def __init__(self) -> None:
         self.id = "oa-unparsed-202603-001"
         self.month = "2026-03"
-        self.section = "open"
+        self.section = "unpaired"
         self.case_id = None
         self.applicant = "胡瑢"
         self.project_name = "玉烟维护项目"
@@ -457,7 +457,7 @@ class EtcBatchRecord:
     def __init__(self) -> None:
         self.id = "oa-etc-202605-001"
         self.month = "2026-05"
-        self.section = "open"
+        self.section = "unpaired"
         self.case_id = None
         self.applicant = "刘际涛"
         self.project_name = "云南溯源科技"
@@ -501,11 +501,11 @@ class BulkOAAdapter:
 
 
 class WorkbenchQueryServiceTests(unittest.TestCase):
-    def test_open_invoice_rows_include_ignore_action(self) -> None:
+    def test_unpaired_invoice_rows_include_ignore_action(self) -> None:
         service = WorkbenchQueryService()
 
         payload = service.get_workbench("2026-03")
-        invoice_row = payload["open"]["invoice"][0]
+        invoice_row = payload["unpaired"]["invoice"][0]
 
         self.assertIn("ignore", invoice_row["available_actions"])
 
@@ -515,7 +515,7 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
                 OAApplicationRecord(
                     id="oa-real-lookup-001",
                     month="2026-03",
-                    section="open",
+                    section="unpaired",
                     case_id=None,
                     applicant="刘际涛",
                     project_name="云南溯源科技",
@@ -543,7 +543,7 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
                     OAApplicationRecord(
                         id="oa-real-001",
                         month="2026-03",
-                        section="open",
+                        section="unpaired",
                         case_id=None,
                         applicant="刘际涛",
                         project_name="云南溯源科技",
@@ -561,7 +561,7 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
         service = WorkbenchQueryService(oa_adapter=adapter)
 
         first_payload = service.get_workbench("2026-03")
-        oa_row = first_payload["open"]["oa"][0]
+        oa_row = first_payload["unpaired"]["oa"][0]
         self.assertEqual(oa_row["applicant"], "刘际涛")
         self.assertEqual(oa_row["amount"], "199")
 
@@ -575,7 +575,7 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
             OAApplicationRecord(
                 id="oa-real-001",
                 month="2026-03",
-                section="open",
+                section="unpaired",
                 case_id=None,
                 applicant="刘际涛-更新",
                 project_name="云南溯源科技",
@@ -601,10 +601,10 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
 
         payload = service.get_workbench("2026-03")
 
-        oa_row = payload["open"]["oa"][0]
+        oa_row = payload["unpaired"]["oa"][0]
         attachment_invoice_rows = [
             row
-            for row in payload["open"]["invoice"]
+            for row in payload["unpaired"]["invoice"]
             if row.get("detail_fields", {}).get("来源OA单号") == "OA-ATT-001"
         ]
         self.assertEqual(len(attachment_invoice_rows), 1)
@@ -622,12 +622,12 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
 
         payload = service.get_workbench("2026-03")
 
-        oa_rows = [row for row in payload["open"]["oa"] if row["id"] == "oa-exp-exp-agg-001"]
+        oa_rows = [row for row in payload["unpaired"]["oa"] if row["id"] == "oa-exp-exp-agg-001"]
         self.assertEqual(len(oa_rows), 1)
         oa_row = oa_rows[0]
         attachment_invoice_rows = [
             row
-            for row in payload["open"]["invoice"]
+            for row in payload["unpaired"]["invoice"]
             if row.get("derived_from_oa_id") == oa_row["id"]
         ]
         self.assertEqual(
@@ -660,11 +660,11 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
 
         payload = service.get_workbench("2026-03")
 
-        oa_rows = [row for row in payload["open"]["oa"] if row["id"] == "oa-exp-hurong-248"]
+        oa_rows = [row for row in payload["unpaired"]["oa"] if row["id"] == "oa-exp-hurong-248"]
         self.assertEqual(len(oa_rows), 1)
         invoice_rows = [
             row
-            for row in payload["open"]["invoice"]
+            for row in payload["unpaired"]["invoice"]
             if row.get("derived_from_oa_id") == "oa-exp-hurong-248"
         ]
         self.assertEqual(
@@ -683,13 +683,13 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
 
         payload = service.get_workbench("2026-03")
 
-        oa_row = next(row for row in payload["open"]["oa"] if row["id"] == "oa-evidence-2035")
+        oa_row = next(row for row in payload["unpaired"]["oa"] if row["id"] == "oa-evidence-2035")
         self.assertEqual(oa_row["detail_fields"]["附件发票数量"], "1")
         self.assertEqual(oa_row["detail_fields"]["付款凭证数量"], "1")
 
         evidence_rows = [
             row
-            for row in payload["open"]["invoice"]
+            for row in payload["unpaired"]["invoice"]
             if row.get("derived_from_oa_id") == "oa-evidence-2035"
         ]
         self.assertEqual(len(evidence_rows), 1)
@@ -703,11 +703,11 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
 
         payload = service.get_workbench("2026-03")
 
-        oa_rows = [row for row in payload["open"]["oa"] if row["id"] == "oa-exp-hurong-292"]
+        oa_rows = [row for row in payload["unpaired"]["oa"] if row["id"] == "oa-exp-hurong-292"]
         self.assertEqual(len(oa_rows), 1)
         invoice_rows = [
             row
-            for row in payload["open"]["invoice"]
+            for row in payload["unpaired"]["invoice"]
             if row.get("derived_from_oa_id") == "oa-exp-hurong-292"
         ]
         self.assertEqual(len(invoice_rows), 1)
@@ -722,7 +722,7 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
 
         payload = service.get_workbench("2026-03")
 
-        oa_row = next(row for row in payload["open"]["oa"] if row["id"] == "oa-exp-display-001")
+        oa_row = next(row for row in payload["unpaired"]["oa"] if row["id"] == "oa-exp-display-001")
         self.assertEqual(oa_row["project_name"], "玉烟维护项目；云南溯源科技")
         self.assertEqual(oa_row["project_name_display"], "多个项目")
         self.assertEqual(oa_row["project_names"], ["玉烟维护项目", "云南溯源科技"])
@@ -735,7 +735,7 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
 
         payload = service.get_workbench("2026-03")
 
-        oa_row = payload["open"]["oa"][0]
+        oa_row = payload["unpaired"]["oa"][0]
         self.assertIn("未解析发票", oa_row["tags"])
         self.assertEqual(oa_row["detail_fields"]["附件发票数量"], "0")
         self.assertEqual(oa_row["detail_fields"]["附件发票识别情况"], "已解析 0 / 2")
@@ -767,7 +767,7 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
 
         payload = service.get_workbench("2026-03")
 
-        oa_row = payload["open"]["oa"][0]
+        oa_row = payload["unpaired"]["oa"][0]
         self.assertNotIn("未解析发票", oa_row["tags"])
         self.assertEqual(oa_row["detail_fields"]["附件发票数量"], "0")
         self.assertEqual(oa_row["detail_fields"]["付款凭证数量"], "1")
@@ -777,7 +777,7 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
 
         payload = service.get_workbench("2026-05")
 
-        oa_row = payload["open"]["oa"][0]
+        oa_row = payload["unpaired"]["oa"][0]
         self.assertEqual(oa_row["source"], "etc_batch")
         self.assertEqual(oa_row["etc_batch_id"], "etc_20260503_001")
         self.assertEqual(oa_row["etcBatchId"], "etc_20260503_001")
@@ -791,7 +791,7 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
                 OAApplicationRecord(
                     id="oa-bulk-202603-001",
                     month="2026-03",
-                    section="open",
+                    section="unpaired",
                     case_id=None,
                     applicant="刘际涛",
                     project_name="云南溯源科技",
@@ -806,7 +806,7 @@ class WorkbenchQueryServiceTests(unittest.TestCase):
                 OAApplicationRecord(
                     id="oa-bulk-202604-001",
                     month="2026-04",
-                    section="open",
+                    section="unpaired",
                     case_id=None,
                     applicant="樊祖芳",
                     project_name="大理卷烟厂余热综合利用项目",

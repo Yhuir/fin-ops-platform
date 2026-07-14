@@ -53,7 +53,7 @@ class WorkbenchQueryService:
             self._sync_oa_rows(month)
             month_rows = [row for row in self.list_record_snapshots() if row["_month"] == month]
         paired_rows = [row for row in month_rows if row["_section"] == "paired"]
-        open_rows = [row for row in month_rows if row["_section"] == "open"]
+        unpaired_rows = [row for row in month_rows if row["_section"] == "unpaired"]
 
         return {
             "month": month,
@@ -63,11 +63,11 @@ class WorkbenchQueryService:
                 "bank_count": sum(1 for row in month_rows if row["type"] == "bank"),
                 "invoice_count": sum(1 for row in month_rows if row["type"] == "invoice"),
                 "paired_count": len(paired_rows),
-                "open_count": len(open_rows),
-                "exception_count": sum(1 for row in open_rows if self._relation_payload(row)["tone"] == "danger"),
+                "unpaired_count": len(unpaired_rows),
+                "exception_count": sum(1 for row in unpaired_rows if self._relation_payload(row)["tone"] == "danger"),
             },
             "paired": self._group_rows(paired_rows),
-            "open": self._group_rows(open_rows),
+            "unpaired": self._group_rows(unpaired_rows),
         }
 
     def oa_status_payload(self) -> dict[str, str]:
@@ -184,9 +184,9 @@ class WorkbenchQueryService:
     def available_actions(self, row_type: str, section: str) -> list[str]:
         if row_type == "bank":
             return ["detail", "view_relation", "cancel_link", "handle_exception"]
-        if row_type == "invoice" and section == "open":
+        if row_type == "invoice" and section == "unpaired":
             return ["detail", "confirm_link", "mark_exception", "ignore"]
-        if section == "open":
+        if section == "unpaired":
             return ["detail", "confirm_link", "mark_exception"]
         return ["detail", "cancel_link"]
 
@@ -266,7 +266,7 @@ class WorkbenchQueryService:
                     continue
                 if row["type"] == "oa" and row_id not in seen_ids:
                     relation = row["oa_bank_relation"]
-                    if row["_section"] == "open" and relation["code"] in {"pending_match", "oa_pending_approval"}:
+                    if row["_section"] == "unpaired" and relation["code"] in {"pending_match", "oa_pending_approval"}:
                         del self._records_by_id[row_id]
                     continue
 
@@ -352,7 +352,7 @@ class WorkbenchQueryService:
                     "id": row_id,
                     "type": "invoice",
                     "source_kind": OA_ATTACHMENT_INVOICE_SOURCE_KIND,
-                    "status": "open",
+                    "status": "unpaired",
                     "case_id": None,
                     "seller_tax_no": str(attachment_invoice.get("seller_tax_no") or ""),
                     "seller_name": seller_name,
@@ -381,7 +381,7 @@ class WorkbenchQueryService:
                     "evidence_type": source_link["evidence_type"],
                     "document_kind": source_link["document_kind"],
                     "source_oa_month": str(getattr(record, "month", "") or oa_row.get("_month") or ""),
-                    "available_actions": self.available_actions("invoice", "open"),
+                    "available_actions": self.available_actions("invoice", "unpaired"),
                     "summary_fields": {
                         "销方名称": seller_name or "—",
                         "购买方名称": buyer_name or "—",
@@ -394,7 +394,7 @@ class WorkbenchQueryService:
                     },
                     "detail_fields": detail_fields,
                     "_month": str(getattr(record, "month", "") or oa_row.get("_month") or ""),
-                    "_section": str(oa_row.get("_section") or "open"),
+                    "_section": str(oa_row.get("_section") or "unpaired"),
                     "_summary_fields": {
                         "销方名称": seller_name or "—",
                         "购买方名称": buyer_name or "—",
@@ -441,6 +441,7 @@ class WorkbenchQueryService:
         return refreshed
 
     def _build_oa_row(self, record: OAApplicationRecord) -> dict[str, Any]:
+        section = self._normalize_workbench_section(record.section)
         source_metadata = self._oa_source_metadata(record)
         source = source_metadata.get("source")
         etc_batch_id = source_metadata.get("etc_batch_id")
@@ -512,13 +513,13 @@ class WorkbenchQueryService:
             "counterparty_name": record.counterparty_name,
             "reason": record.reason,
             "oa_bank_relation": relation,
-            "available_actions": self.available_actions("oa", record.section),
+            "available_actions": self.available_actions("oa", section),
             "tags": tags,
             "source": source,
             "etc_batch_id": etc_batch_id,
             "etcBatchId": etc_batch_id,
             "_month": record.month,
-            "_section": record.section,
+            "_section": section,
             "_summary_fields": {
                 "申请人": record.applicant,
                 "项目名称": project_name_display,
@@ -530,6 +531,15 @@ class WorkbenchQueryService:
             },
             "_detail_fields": detail_fields,
         }
+
+    @staticmethod
+    def _normalize_workbench_section(section: object) -> str:
+        normalized = str(section or "").strip().lower()
+        if normalized == "paired":
+            return "paired"
+        if normalized == "unpaired":
+            return "unpaired"
+        raise ValueError(f"Unsupported OA Workbench section: {section!r}")
 
     @classmethod
     def _record_project_name_display(
@@ -808,7 +818,7 @@ class WorkbenchQueryService:
                 OAApplicationRecord(
                     id="oa-o-202603-001",
                     month="2026-03",
-                    section="open",
+                    section="unpaired",
                     case_id="CASE-202603-101",
                     applicant="陈涛",
                     project_name="智能工厂项目",
@@ -829,7 +839,7 @@ class WorkbenchQueryService:
                 OAApplicationRecord(
                     id="oa-o-202603-002",
                     month="2026-03",
-                    section="open",
+                    section="unpaired",
                     case_id="CASE-202603-102",
                     applicant="周颖",
                     project_name="项目支持",
@@ -873,7 +883,7 @@ class WorkbenchQueryService:
                 OAApplicationRecord(
                     id="oa-o-202604-001",
                     month="2026-04",
-                    section="open",
+                    section="unpaired",
                     case_id="CASE-202604-101",
                     applicant="王青",
                     project_name="维保续费项目",
@@ -931,7 +941,7 @@ class WorkbenchQueryService:
                 self._build_bank_row(
                     row_id="bk-o-202603-001",
                     month=month,
-                    section="open",
+                    section="unpaired",
                     case_id="CASE-202603-101",
                     trade_time="2026-03-28 10:18",
                     debit_amount="58,000.00",
@@ -962,7 +972,7 @@ class WorkbenchQueryService:
                 self._build_bank_row(
                     row_id="bk-o-202603-002",
                     month=month,
-                    section="open",
+                    section="unpaired",
                     case_id="CASE-202603-102",
                     trade_time="2026-03-29 09:18",
                     debit_amount="",
@@ -1027,7 +1037,7 @@ class WorkbenchQueryService:
             self._build_bank_row(
                 row_id="bk-o-202604-001",
                 month=month,
-                section="open",
+                section="unpaired",
                 case_id="CASE-202604-101",
                 trade_time="2026-04-20 09:15",
                 debit_amount="6,000.00",
@@ -1100,7 +1110,7 @@ class WorkbenchQueryService:
                 self._build_invoice_row(
                     row_id="iv-o-202603-001",
                     month=month,
-                    section="open",
+                    section="unpaired",
                     case_id="CASE-202603-101",
                     seller_tax_no="91330108MA27B4011D",
                     seller_name="智能工厂设备商",
@@ -1137,7 +1147,7 @@ class WorkbenchQueryService:
                 self._build_invoice_row(
                     row_id="iv-o-202603-002",
                     month=month,
-                    section="open",
+                    section="unpaired",
                     case_id="CASE-202603-103",
                     seller_tax_no="91330102MA8T32A2X7",
                     seller_name="杭州张三广告有限公司",
@@ -1214,7 +1224,7 @@ class WorkbenchQueryService:
             self._build_invoice_row(
                 row_id="iv-o-202604-001",
                 month=month,
-                section="open",
+                section="unpaired",
                 case_id="CASE-202604-101",
                 seller_tax_no="91330102MA8T32A2X7",
                 seller_name="杭州张三广告有限公司",

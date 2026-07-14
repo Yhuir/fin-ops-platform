@@ -57,6 +57,30 @@ class WorkbenchRelationCommandRepositoryAdapter:
             saver(snapshot, changed_case_ids=normalized_case_ids)
         self._apply_snapshot(snapshot, changed_case_ids=normalized_case_ids)
 
+    def acquire_relation_member_locks(
+        self,
+        row_ids: list[str],
+        *,
+        row_types: list[str] | None = None,
+        case_ids: list[str] | None = None,
+    ) -> list[str]:
+        acquire = getattr(self._repository, "acquire_relation_member_locks", None)
+        if callable(acquire):
+            return list(
+                acquire(
+                    list(row_ids or []),
+                    row_types=list(row_types or []),
+                    case_ids=list(case_ids or []),
+                )
+                or []
+            )
+        normalized_types = [str(item).strip() for item in list(row_types or [])]
+        return sorted(
+            f"{normalized_types[index] if index < len(normalized_types) else 'unknown'}:{row_id}"
+            for index, row_id in enumerate(str(item).strip() for item in list(row_ids or []))
+            if row_id
+        )
+
     def _apply_snapshot(
         self,
         snapshot: dict[str, Any],

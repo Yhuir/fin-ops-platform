@@ -48,7 +48,13 @@ class RecordingOrchestrator:
         self.run_calls.append(dict(kwargs))
         if self.fail:
             raise RuntimeError("matching failed")
-        return {"candidate_count": 3, "processed_months": list(kwargs["changed_scope_months"])}
+        return {
+            "planned_relation_count": 3,
+            "created_relation_count": 2,
+            "extended_relation_count": 1,
+            "blocked_count": 0,
+            "processed_months": list(kwargs["changed_scope_months"]),
+        }
 
 
 class RecordingHeartbeatRecorder:
@@ -123,13 +129,13 @@ class WorkbenchMatchingDirtyScopeWorkerTests(unittest.TestCase):
         worker, recorder, _ = self._worker(
             dirty_queue=dirty_queue,
             orchestrator=orchestrator,
-            source_versions={"workbench_matching_rules_version": "v2"},
+            source_versions={"workbench_formal_relation_rule_version": "v2"},
         )
 
         summary = worker.run_once()
 
         self.assertEqual(dirty_queue.events[:2], ["mark_stale_completed_scopes", "claim_due_scopes"])
-        self.assertEqual(dirty_queue.mark_stale_calls[0]["source_versions"], {"workbench_matching_rules_version": "v2"})
+        self.assertEqual(dirty_queue.mark_stale_calls[0]["source_versions"], {"workbench_formal_relation_rule_version": "v2"})
         self.assertEqual(dirty_queue.mark_stale_calls[0]["reason"], "matching_source_versions_changed")
         self.assertEqual(dirty_queue.mark_stale_calls[0]["limit"], 7)
         self.assertEqual(summary["stale_completed_scope_months"], ["2026-01"])
@@ -151,7 +157,9 @@ class WorkbenchMatchingDirtyScopeWorkerTests(unittest.TestCase):
         self.assertEqual(dirty_queue.complete_calls[0]["worker_id"], "worker-a")
         self.assertEqual(dirty_queue.complete_calls[0]["request_id"], "request-a:2026-01")
         self.assertEqual(summary["processed_months"], ["2026-01"])
-        self.assertEqual(summary["candidate_count"], 3)
+        self.assertEqual(summary["planned_relation_count"], 3)
+        self.assertEqual(summary["created_relation_count"], 2)
+        self.assertEqual(summary["extended_relation_count"], 1)
 
     def test_run_once_fails_scope_and_records_failed_heartbeat_on_exception(self) -> None:
         dirty_queue = RecordingDirtyQueue(["2026-02"])

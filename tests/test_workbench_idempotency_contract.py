@@ -654,9 +654,9 @@ class WorkbenchIdempotencyApiCompatibilityTests(unittest.TestCase):
     def _default_open_row_ids(self, app: Application) -> list[str]:
         payload = self._workbench_payload(app)
         return [
-            str(_flatten_groups(payload["open"]["groups"], "oa")[0]["id"]),
-            str(_flatten_groups(payload["open"]["groups"], "bank")[0]["id"]),
-            str(_flatten_groups(payload["open"]["groups"], "invoice")[0]["id"]),
+            str(_flatten_groups(payload["unpaired"]["groups"], "oa")[0]["id"]),
+            str(_flatten_groups(payload["unpaired"]["groups"], "bank")[0]["id"]),
+            str(_flatten_groups(payload["unpaired"]["groups"], "invoice")[0]["id"]),
         ]
 
     def _post(self, app: Application, path: str, payload: dict[str, object]) -> object:

@@ -497,6 +497,9 @@ class PendingInvoiceQueryService:
 
     @staticmethod
     def _relation_case_ids_from_distribution(row: dict[str, Any]) -> list[str]:
+        relation_status = str(row.get("relation_status") or "linked").strip() or "linked"
+        if relation_status != "linked":
+            return []
         values: list[str] = []
         for value in list(row.get("group_ids") or []):
             text = str(value or "").strip()
@@ -518,6 +521,8 @@ class PendingInvoiceQueryService:
         seen: set[str] = set()
         for item in list(row.get(key) or []):
             if not isinstance(item, dict):
+                continue
+            if not _distribution_item_is_linked(item):
                 continue
             invoice_id = str(item.get("id") or item.get("invoice_id") or "").strip()
             if not invoice_id or invoice_id in seen:
@@ -562,6 +567,8 @@ class PendingInvoiceQueryService:
         for item in list(row.get("linked_oa") or []):
             if not isinstance(item, dict):
                 continue
+            if not _distribution_item_is_linked(item):
+                continue
             oa_id = str(item.get("id") or item.get("oa_id") or "").strip()
             if not oa_id or oa_id in seen:
                 continue
@@ -582,7 +589,7 @@ class PendingInvoiceQueryService:
             )
         if not summaries:
             for group in list(row.get("_relation_groups") or []):
-                if not isinstance(group, dict):
+                if not isinstance(group, dict) or not _distribution_group_is_linked(group):
                     continue
                 payload = group.get("payload") if isinstance(group.get("payload"), dict) else {}
                 metadata = payload.get("special_metadata") if isinstance(payload.get("special_metadata"), dict) else {}
@@ -610,6 +617,8 @@ class PendingInvoiceQueryService:
         seen: set[str] = set()
         for item in list(row.get("linked_bank_transactions") or []):
             if not isinstance(item, dict):
+                continue
+            if not _distribution_item_is_linked(item):
                 continue
             transaction_id = str(item.get("id") or item.get("transaction_id") or "").strip()
             if not transaction_id or transaction_id in seen:
@@ -647,12 +656,13 @@ class PendingInvoiceQueryService:
             for item in list(row.get("linked_bank_transactions") or []):
                 if not isinstance(item, dict):
                     continue
+                if not _distribution_item_is_linked(item):
+                    continue
                 transaction_id = str(item.get("id") or item.get("transaction_id") or "").strip()
                 if not transaction_id or transaction_id in seen:
                     continue
                 seen.add(transaction_id)
-                if _distribution_item_is_linked(item):
-                    linked_count += 1
+                linked_count += 1
                 try:
                     transaction = self._import_service.get_transaction(transaction_id)
                 except KeyError:

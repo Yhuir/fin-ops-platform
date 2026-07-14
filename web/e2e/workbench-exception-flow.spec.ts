@@ -10,8 +10,8 @@ const workbenchRowIds = [
 ];
 
 async function selectOpenWorkbenchGroup(page: Page) {
-  const openZone = page.getByTestId("zone-open");
-  const openGroup = page.getByTestId("candidate-group-open-case:CASE-202603-101");
+  const openZone = page.getByTestId("zone-unpaired");
+  const openGroup = page.getByTestId("candidate-group-unpaired-case:CASE-202603-101");
   await expect(openZone).toBeVisible();
   await expect(openGroup).toBeVisible();
 
@@ -53,7 +53,7 @@ test.describe("workbench exception browser flow", () => {
     await expect(openGroup).toBeVisible();
 
     await expect(page.getByRole("dialog", { name: "统一异常处理" })).toHaveCount(0);
-    await expect(page.getByTestId("candidate-group-open-case:CASE-202603-101")).toHaveCount(0);
+    await expect(page.getByTestId("candidate-group-unpaired-case:CASE-202603-101")).toHaveCount(0);
     await expect(openZone.getByRole("button", { name: /已处理异常3项/ })).toBeVisible();
 
     const previewBody = api.lastBody("POST /api/workbench/exception/preview");
@@ -90,7 +90,7 @@ test.describe("workbench exception browser flow", () => {
     await expect(cancelModal.getByText("确认取消异常处理后，这组记录会回到未配对区域。")).toBeVisible();
     await cancelModal.getByRole("button", { name: "确认取消异常处理" }).click();
 
-    const restoredOpenGroup = page.getByTestId("candidate-group-open-case:CASE-202603-101");
+    const restoredOpenGroup = page.getByTestId("candidate-group-unpaired-case:CASE-202603-101");
     await expect(restoredOpenGroup).toBeVisible();
     await expect(restoredOpenGroup.getByRole("row", { name: /陈涛.*智能工厂设备商/ })).toBeVisible();
     await expect(restoredOpenGroup.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeVisible();
@@ -115,8 +115,8 @@ test.describe("workbench exception browser flow", () => {
 
     await page.goto("/");
 
-    const openZone = page.getByTestId("zone-open");
-    const openGroup = page.getByTestId("candidate-group-open-case:CASE-202603-101");
+    const openZone = page.getByTestId("zone-unpaired");
+    const openGroup = page.getByTestId("candidate-group-unpaired-case:CASE-202603-101");
     await expect(openGroup).toBeVisible();
     const invoiceRow = openGroup.getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ });
     await expect(invoiceRow).toBeVisible();

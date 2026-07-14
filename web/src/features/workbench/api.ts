@@ -9,7 +9,7 @@ import type {
 } from "./exceptionTypes";
 import type {
   WorkbenchActionVariant,
-  WorkbenchCandidateGroup,
+  WorkbenchRelationGroup,
   WorkbenchDetailField,
   IgnoredWorkbenchData,
   BankAccountMapping,
@@ -30,8 +30,6 @@ import type {
   WorkbenchOaImportOption,
   WorkbenchOaSyncStatus,
   WorkbenchInvoiceInventory,
-  WorkbenchReconciliationDecision,
-  WorkbenchReconciliationWarning,
   WorkbenchSourceKind,
   WorkbenchGroupType,
   WorkbenchGroupsPageQuery,
@@ -149,10 +147,6 @@ type ApiWorkbenchRow = {
   relation_amount_check?: ApiWorkbenchRelationAmountCheck | null;
   cost_excluded?: boolean | null;
   special_metadata?: Record<string, unknown> | null;
-  workbench_reconciliation_decision?: ApiWorkbenchReconciliationDecision | null;
-  reconciliation_decision?: ApiWorkbenchReconciliationDecision | null;
-  workbench_reconciliation_warnings?: ApiWorkbenchReconciliationWarning[] | null;
-  reconciliation_warnings?: ApiWorkbenchReconciliationWarning[] | null;
 };
 
 type ApiWorkbenchPayload = {
@@ -167,14 +161,14 @@ type ApiWorkbenchPayload = {
     bank_count: number;
     invoice_count: number;
     paired_count: number;
-    open_count: number;
+    unpaired_count: number;
     exception_count: number;
     zone_counts?: Partial<Record<WorkbenchZoneId, Partial<WorkbenchZoneCounts>>>;
   };
   paired: {
     groups: ApiWorkbenchGroup[];
   };
-  open: {
+  unpaired: {
     groups: ApiWorkbenchGroup[];
   };
 };
@@ -184,6 +178,7 @@ type ApiWorkbenchSummaryPayload = {
   scope_key?: string;
   generated_at?: string | null;
   read_model_status?: WorkbenchReadModelStatus;
+  read_model_version?: string | null;
   oa_status?: ApiWorkbenchPayload["oa_status"];
   invoice_inventory?: ApiWorkbenchInvoiceInventory;
   summary: ApiWorkbenchPayload["summary"];
@@ -199,6 +194,7 @@ type ApiWorkbenchGroupsPayload = {
   row_counts?: Partial<Pick<WorkbenchZoneCounts, "oa" | "bank" | "invoice" | "rows">>;
   has_more: boolean;
   read_model_status?: WorkbenchReadModelStatus;
+  read_model_version?: string | null;
   groups: ApiWorkbenchGroup[];
 };
 
@@ -394,53 +390,6 @@ type ApiWorkbenchGroup = {
   amount_check?: ApiWorkbenchRelationAmountCheck | null;
   special_metadata?: Record<string, unknown> | null;
   processed_exception_summary?: Record<string, unknown> | null;
-  warnings?: ApiWorkbenchReconciliationWarning[] | null;
-};
-
-type ApiWorkbenchReconciliationWarning = {
-  code?: unknown;
-  message?: unknown;
-  label?: unknown;
-  severity?: unknown;
-};
-
-type ApiWorkbenchReconciliationDecision = {
-  decision_id?: unknown;
-  decisionId?: unknown;
-  decision_key?: unknown;
-  decisionKey?: unknown;
-  display_state?: unknown;
-  displayState?: unknown;
-  decision_status?: unknown;
-  decisionStatus?: unknown;
-  match_domain?: unknown;
-  matchDomain?: unknown;
-  match_shape?: unknown;
-  matchShape?: unknown;
-  rule_code?: unknown;
-  ruleCode?: unknown;
-  rule_version?: unknown;
-  ruleVersion?: unknown;
-  row_ids?: unknown;
-  rowIds?: unknown;
-  oa_row_ids?: unknown;
-  oaRowIds?: unknown;
-  bank_row_ids?: unknown;
-  bankRowIds?: unknown;
-  invoice_row_ids?: unknown;
-  invoiceRowIds?: unknown;
-  amount?: unknown;
-  direction?: unknown;
-  payment_amount_closed?: unknown;
-  paymentAmountClosed?: unknown;
-  invoice_amount_closed?: unknown;
-  invoiceAmountClosed?: unknown;
-  warnings?: ApiWorkbenchReconciliationWarning[] | null;
-  evidence?: unknown;
-  blockers?: unknown;
-  explanation?: unknown;
-  source_versions?: unknown;
-  sourceVersions?: unknown;
 };
 
 type ApiWorkbenchRelationAmountCheck = {
@@ -550,8 +499,7 @@ type ApiWorkbenchOperationProjection = {
   after?: {
     pairedGroups?: ApiWorkbenchGroup[];
     paired_groups?: ApiWorkbenchGroup[];
-    openGroups?: ApiWorkbenchGroup[];
-    open_groups?: ApiWorkbenchGroup[];
+    unpairedGroups?: ApiWorkbenchGroup[];
   };
 };
 
@@ -563,8 +511,8 @@ export type WorkbenchActionFreshnessTarget = {
 
 export type WorkbenchOperationProjection = {
   after: {
-    pairedGroups: WorkbenchCandidateGroup[];
-    openGroups: WorkbenchCandidateGroup[];
+    pairedGroups: WorkbenchRelationGroup[];
+    unpairedGroups: WorkbenchRelationGroup[];
   };
 };
 
@@ -1018,122 +966,6 @@ function mapRelationAmountCheck(value: ApiWorkbenchRelationAmountCheck | null | 
   };
 }
 
-function cleanReconciliationStringList(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return Array.from(new Set(value.map((item) => String(item ?? "").trim()).filter(Boolean)));
-}
-
-function optionalString(value: unknown): string | undefined {
-  const text = String(value ?? "").trim();
-  return text ? text : undefined;
-}
-
-function optionalRecord(value: unknown): Record<string, unknown> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return undefined;
-  }
-  return value as Record<string, unknown>;
-}
-
-function optionalUnknownArray(value: unknown): unknown[] | undefined {
-  return Array.isArray(value) ? value : undefined;
-}
-
-function optionalBoolean(value: unknown): boolean | null | undefined {
-  if (value === null) {
-    return null;
-  }
-  if (typeof value === "boolean") {
-    return value;
-  }
-  return undefined;
-}
-
-function mapReconciliationWarning(value: unknown): WorkbenchReconciliationWarning | null {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-  const payload = value as ApiWorkbenchReconciliationWarning;
-  const code = optionalString(payload.code) ?? optionalString(payload.label) ?? "warning";
-  const message = optionalString(payload.message) ?? optionalString(payload.label) ?? code;
-  const severity = optionalString(payload.severity);
-  return {
-    code,
-    message,
-    ...(severity ? { severity: severity as WorkbenchReconciliationWarning["severity"] } : {}),
-  };
-}
-
-function mapReconciliationWarnings(value: unknown): WorkbenchReconciliationWarning[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return dedupeReconciliationWarnings(value.map(mapReconciliationWarning).filter((warning): warning is WorkbenchReconciliationWarning => Boolean(warning)));
-}
-
-function dedupeReconciliationWarnings(warnings: WorkbenchReconciliationWarning[]): WorkbenchReconciliationWarning[] {
-  const seen = new Set<string>();
-  const result: WorkbenchReconciliationWarning[] = [];
-  warnings.forEach((warning) => {
-    const key = `${warning.code}\u0000${warning.message}`;
-    if (seen.has(key)) {
-      return;
-    }
-    seen.add(key);
-    result.push(warning);
-  });
-  return result;
-}
-
-function normalizeDecisionDisplayState(value: unknown): WorkbenchGroupType {
-  return String(value ?? "").trim() === "paired" ? "paired" : "open";
-}
-
-function mapReconciliationDecision(value: unknown): WorkbenchReconciliationDecision | undefined {
-  if (!value || typeof value !== "object") {
-    return undefined;
-  }
-  const payload = value as ApiWorkbenchReconciliationDecision;
-  const decisionId = optionalString(payload.decision_id ?? payload.decisionId) ?? "";
-  const decisionKey = optionalString(payload.decision_key ?? payload.decisionKey) ?? decisionId;
-  const warnings = mapReconciliationWarnings(payload.warnings);
-  const amount = optionalString(payload.amount);
-  const direction = optionalString(payload.direction);
-  const evidence = optionalRecord(payload.evidence);
-  const blockers = optionalUnknownArray(payload.blockers);
-  const explanation = optionalString(payload.explanation);
-  const sourceVersions = optionalRecord(payload.source_versions ?? payload.sourceVersions);
-  if (!decisionId && !decisionKey) {
-    return undefined;
-  }
-
-  return {
-    decisionId,
-    decisionKey,
-    displayState: normalizeDecisionDisplayState(payload.display_state ?? payload.displayState),
-    decisionStatus: optionalString(payload.decision_status ?? payload.decisionStatus) ?? "",
-    matchDomain: optionalString(payload.match_domain ?? payload.matchDomain) ?? "",
-    matchShape: optionalString(payload.match_shape ?? payload.matchShape) ?? "",
-    ruleCode: optionalString(payload.rule_code ?? payload.ruleCode) ?? "",
-    ruleVersion: optionalString(payload.rule_version ?? payload.ruleVersion) ?? "",
-    rowIds: cleanReconciliationStringList(payload.row_ids ?? payload.rowIds),
-    oaRowIds: cleanReconciliationStringList(payload.oa_row_ids ?? payload.oaRowIds),
-    bankRowIds: cleanReconciliationStringList(payload.bank_row_ids ?? payload.bankRowIds),
-    invoiceRowIds: cleanReconciliationStringList(payload.invoice_row_ids ?? payload.invoiceRowIds),
-    ...(amount ? { amount } : {}),
-    ...(direction ? { direction } : {}),
-    paymentAmountClosed: optionalBoolean(payload.payment_amount_closed ?? payload.paymentAmountClosed),
-    invoiceAmountClosed: optionalBoolean(payload.invoice_amount_closed ?? payload.invoiceAmountClosed),
-    warnings,
-    ...(evidence ? { evidence } : {}),
-    ...(blockers ? { blockers } : {}),
-    ...(explanation ? { explanation } : {}),
-    ...(sourceVersions ? { sourceVersions } : {}),
-  };
-}
-
 function mapProcessedExceptionSummary(value: unknown) {
   if (!value || typeof value !== "object") {
     return undefined;
@@ -1235,18 +1067,13 @@ function mapGroupType(groupType: ApiWorkbenchGroup["group_type"], zoneHint?: Wor
     return zoneHint;
   }
   const normalizedGroupType = String(groupType || "").trim();
-  if (normalizedGroupType === "paired" || normalizedGroupType === "open") {
-    return normalizedGroupType;
-  }
-  if (
-    normalizedGroupType === "auto_closed"
-    || normalizedGroupType === "manual_confirmed"
-    || normalizedGroupType === "source_linked"
-    || normalizedGroupType === "processed_exception"
-  ) {
+  if (normalizedGroupType === "relation") {
     return "paired";
   }
-  return "open";
+  if (normalizedGroupType === "unpaired") {
+    return "unpaired";
+  }
+  throw new Error(`Unsupported Workbench group type: ${normalizedGroupType || "<empty>"}`);
 }
 
 function rowActionVariant(row: ApiWorkbenchRow, availableActions: string[]): WorkbenchActionVariant {
@@ -1492,14 +1319,7 @@ function resolveBankAmount(row: ApiWorkbenchRow) {
 
 function mapRow(row: ApiWorkbenchRow): WorkbenchRecord {
   const availableActions = normalizeRowAvailableActions(row);
-  const reconciliationDecision = mapReconciliationDecision(
-    row.workbench_reconciliation_decision ?? row.reconciliation_decision,
-  );
-  const reconciliationWarnings = dedupeReconciliationWarnings([
-    ...mapReconciliationWarnings(row.workbench_reconciliation_warnings ?? row.reconciliation_warnings),
-    ...(reconciliationDecision?.warnings ?? []),
-  ]);
-  const mapped: WorkbenchRecord = {
+  return {
     id: row.id,
     caseId: row.case_id ?? undefined,
     exceptionCaseId: row.exception_case_id ?? undefined,
@@ -1530,13 +1350,6 @@ function mapRow(row: ApiWorkbenchRow): WorkbenchRecord {
     relationAmountCheck: mapRelationAmountCheck(row.relation_amount_check),
     specialMetadata: row.special_metadata && typeof row.special_metadata === "object" ? row.special_metadata : undefined,
   };
-  if (reconciliationDecision) {
-    mapped.reconciliationDecision = reconciliationDecision;
-  }
-  if (reconciliationWarnings.length > 0) {
-    mapped.reconciliationWarnings = reconciliationWarnings;
-  }
-  return mapped;
 }
 
 function resolveWorkbenchRowSourceOaId(row: ApiWorkbenchRow) {
@@ -1560,7 +1373,7 @@ function mapPaneRows(panes: Record<WorkbenchRecordType, ApiWorkbenchRow[]>): Wor
   };
 }
 
-function mapGroup(group: ApiWorkbenchGroup, zoneHint?: WorkbenchZoneId): WorkbenchCandidateGroup {
+function mapGroup(group: ApiWorkbenchGroup, zoneHint?: WorkbenchZoneId): WorkbenchRelationGroup {
   const summaryRow = group.summary_row ? mapRow(group.summary_row) : undefined;
   const rowCounts = mapPaneRowCounts(group.row_counts);
   const displayRowCounts = mapPaneRowCounts(group.display_row_counts);
@@ -1577,15 +1390,8 @@ function mapGroup(group: ApiWorkbenchGroup, zoneHint?: WorkbenchZoneId): Workben
     bank: group.bank_rows.map(mapRow),
     invoice: group.invoice_rows.map(mapRow),
   };
-  const rowWarnings = dedupeReconciliationWarnings([
-    ...mapReconciliationWarnings(group.warnings),
-    ...[...rows.oa, ...rows.bank, ...rows.invoice].flatMap((row) => row.reconciliationWarnings ?? []),
-  ]);
-  const reconciliationDecision = [...rows.oa, ...rows.bank, ...rows.invoice]
-    .map((row) => row.reconciliationDecision)
-    .find((decision): decision is WorkbenchReconciliationDecision => Boolean(decision));
   const rawGroupType = String(group.group_type || "").trim();
-  const mapped: WorkbenchCandidateGroup = {
+  const mapped: WorkbenchRelationGroup = {
     id: group.group_id,
     groupType: mapGroupType(group.group_type, zoneHint),
     rawGroupType: rawGroupType || undefined,
@@ -1613,20 +1419,14 @@ function mapGroup(group: ApiWorkbenchGroup, zoneHint?: WorkbenchZoneId): Workben
       || groupHasNoOaWithdrawAction(group),
     ),
   };
-  if (reconciliationDecision) {
-    mapped.reconciliationDecision = reconciliationDecision;
-  }
-  if (rowWarnings.length > 0) {
-    mapped.warnings = rowWarnings;
-  }
   return mapped;
 }
 
-function mapPaneRowCounts(counts: ApiWorkbenchGroup["row_counts"]): WorkbenchCandidateGroup["rowCounts"] | undefined {
+function mapPaneRowCounts(counts: ApiWorkbenchGroup["row_counts"]): WorkbenchRelationGroup["rowCounts"] | undefined {
   if (!counts || typeof counts !== "object") {
     return undefined;
   }
-  const mapped: WorkbenchCandidateGroup["rowCounts"] = {};
+  const mapped: WorkbenchRelationGroup["rowCounts"] = {};
   (["oa", "bank", "invoice"] as WorkbenchRecordType[]).forEach((paneId) => {
     const count = Number(counts[paneId]);
     if (Number.isFinite(count) && count >= 0) {
@@ -1819,7 +1619,7 @@ function mapZoneCounts(
 ): Record<WorkbenchZoneId, WorkbenchZoneCounts> {
   const source = summary.zone_counts ?? fallback ?? {};
   const paired = source.paired ?? {};
-  const open = source.open ?? {};
+  const unpaired = source.unpaired ?? {};
   const mapOne = (value: Partial<WorkbenchZoneCounts>, groupFallback: number): WorkbenchZoneCounts => {
     const oa = toCount(value.oa);
     const bank = toCount(value.bank);
@@ -1835,7 +1635,7 @@ function mapZoneCounts(
 
   return {
     paired: mapOne(paired, toCount(summary.paired_count)),
-    open: mapOne(open, toCount(summary.open_count)),
+    unpaired: mapOne(unpaired, toCount(summary.unpaired_count)),
   };
 }
 
@@ -1849,7 +1649,7 @@ function mapSummaryCounts(summary: ApiWorkbenchPayload["summary"]): WorkbenchSum
     bankCount,
     invoiceCount,
     pairedCount: toCount(summary.paired_count),
-    openCount: toCount(summary.open_count),
+    unpairedCount: toCount(summary.unpaired_count),
     exceptionCount: toCount(summary.exception_count),
     totalCount: oaCount + bankCount + invoiceCount,
     zoneCounts,
@@ -1875,6 +1675,7 @@ function mapWorkbenchZonePage(payload: ApiWorkbenchGroupsPayload): WorkbenchZone
     },
     hasMore: payload.has_more === true,
     readModelStatus: mapReadModelStatus(payload.read_model_status),
+    readModelVersion: payload.read_model_version ?? null,
   };
 }
 
@@ -2589,12 +2390,14 @@ export async function fetchWorkbenchGroupDetail(
   month: string,
   zone: WorkbenchZoneId,
   groupId: string,
+  expectedReadModelVersion: string,
   signal?: AbortSignal,
-): Promise<WorkbenchCandidateGroup> {
+): Promise<WorkbenchRelationGroup> {
   const params = new URLSearchParams({
     month,
     zone,
     group_id: groupId,
+    expected_read_model_version: expectedReadModelVersion,
   });
   const payload = await requestJson<{
     group: ApiWorkbenchGroup;
@@ -2629,13 +2432,13 @@ export async function fetchWorkbenchInitialPage(
     percent: 55,
     indeterminate: false,
   });
-  const [pairedPage, openPage] = await Promise.all([
+  const [pairedPage, unpairedPage] = await Promise.all([
     fetchWorkbenchGroupsPage(month, "paired", 1, WORKBENCH_GROUP_PAGE_SIZE, signal, {
       ...zoneQueries.paired,
       detailLevel: "summary",
     }),
-    fetchWorkbenchGroupsPage(month, "open", 1, WORKBENCH_GROUP_PAGE_SIZE, signal, {
-      ...zoneQueries.open,
+    fetchWorkbenchGroupsPage(month, "unpaired", 1, WORKBENCH_GROUP_PAGE_SIZE, signal, {
+      ...zoneQueries.unpaired,
       detailLevel: "summary",
     }),
   ]);
@@ -2656,13 +2459,13 @@ export async function fetchWorkbenchInitialPage(
       paired: {
         groups: pairedPage.groups,
       },
-      open: {
-        groups: openPage.groups,
+      unpaired: {
+        groups: unpairedPage.groups,
       },
     },
     pages: {
       paired: pairedPage.page,
-      open: openPage.page,
+      unpaired: unpairedPage.page,
     },
   };
 }
@@ -3102,15 +2905,11 @@ function mapWorkbenchOperationProjection(value: unknown): WorkbenchOperationProj
     : Array.isArray(after.paired_groups)
       ? after.paired_groups
       : [];
-  const openGroups = Array.isArray(after.openGroups)
-    ? after.openGroups
-    : Array.isArray(after.open_groups)
-      ? after.open_groups
-      : [];
+  const unpairedGroups = Array.isArray(after.unpairedGroups) ? after.unpairedGroups : [];
   return {
     after: {
       pairedGroups: pairedGroups.map((group) => mapGroup(group, "paired")),
-      openGroups: openGroups.map((group) => mapGroup(group, "open")),
+      unpairedGroups: unpairedGroups.map((group) => mapGroup(group, "unpaired")),
     },
   };
 }

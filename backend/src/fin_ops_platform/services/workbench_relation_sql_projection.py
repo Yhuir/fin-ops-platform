@@ -13,7 +13,7 @@ from fin_ops_platform.services.workbench_relation_read_model_repository import W
 
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
-WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION = "2026-07-13-partial-replacement-closure-v1"
+WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION = "2026-07-14-formal-linked-unlinked-v1"
 OBJECT_IDENTITY_POLICY = FinancialObjectIdentityPolicy()
 HARD_INVOICE_IDENTITY_KINDS = frozenset({"digital_invoice_no", "invoice_code_no"})
 
@@ -634,7 +634,7 @@ def _relation_group_payload(relation: dict[str, Any], *, objects: dict[str, dict
     group_id = text(relation.get("case_id")) or ""
     typed_ids = _relation_typed_row_ids(relation, objects=objects)
     relation_kind = _relation_kind(typed_ids)
-    relation_status = text(relation.get("relation_status")) or "linked"
+    relation_status = "linked"
     summaries_by_id = {
         row_id: dict(summary)
         for row_id, object_payload in objects.items()
@@ -717,7 +717,7 @@ def _linked_summaries(
                 continue
             item = dict(summary)
             item["relation_case_id"] = text(group.get("group_id"))
-            item["relation_status"] = text(group.get("relation_status")) or "linked"
+            item["relation_status"] = "linked"
             item["relation_source"] = text(group.get("relation_source")) or "manual"
             summaries.append(item)
             seen.add(row_id)
@@ -725,12 +725,7 @@ def _linked_summaries(
 
 
 def _row_relation_status(groups: list[dict[str, Any]]) -> str:
-    statuses = {text(group.get("relation_status")) or "linked" for group in groups}
-    if "linked" in statuses:
-        return "linked"
-    if "candidate" in statuses:
-        return "candidate"
-    return "unlinked"
+    return "linked" if groups else "unlinked"
 
 
 def _relation_typed_row_ids(relation: dict[str, Any], *, objects: dict[str, dict[str, Any]]) -> dict[str, list[str]]:

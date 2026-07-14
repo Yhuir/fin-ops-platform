@@ -66,7 +66,7 @@ class WorkbenchOverrideService:
 
     def apply_to_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
         result = deepcopy(payload)
-        for section in ("paired", "open"):
+        for section in ("paired", "unpaired"):
             section_payload = result.get(section)
             if not isinstance(section_payload, dict):
                 continue
@@ -215,7 +215,7 @@ class WorkbenchOverrideService:
             self._row_overrides[str(row["id"])] = {
                 "case_id": None,
                 "relation": pending,
-                "available_actions": self.available_actions(str(row["type"]), "open"),
+                "available_actions": self.available_actions(str(row["type"]), "unpaired"),
                 "detail_note": comment or "已取消关联",
                 "auto_close_suppressed": True,
                 "handled_exception": False,
@@ -239,7 +239,7 @@ class WorkbenchOverrideService:
                 "label": comment or "待人工处理",
                 "tone": "danger",
             },
-            "available_actions": self.available_actions(str(row["type"]), "open"),
+            "available_actions": self.available_actions(str(row["type"]), "unpaired"),
             "detail_note": comment or exception_code,
             "handled_exception": True,
         }
@@ -262,7 +262,7 @@ class WorkbenchOverrideService:
                 "label": relation_label,
                 "tone": "danger",
             },
-            "available_actions": self.available_actions("bank", "open"),
+            "available_actions": self.available_actions("bank", "unpaired"),
             "detail_note": comment or relation_label,
             "handled_exception": True,
         }
@@ -291,7 +291,7 @@ class WorkbenchOverrideService:
                     "label": exception_label,
                     "tone": "danger",
                 },
-                "available_actions": self.available_actions(row_type, "open"),
+                "available_actions": self.available_actions(row_type, "unpaired"),
                 "detail_note": detail_note,
                 "handled_exception": True,
             }
@@ -321,7 +321,7 @@ class WorkbenchOverrideService:
             "case_id": None,
             "exception_case_id": None,
             "relation": self.pending_relation(str(row["type"])),
-            "available_actions": self.available_actions(str(row["type"]), "open"),
+            "available_actions": self.available_actions(str(row["type"]), "unpaired"),
             "detail_note": "已撤回忽略",
             "auto_close_suppressed": True,
             "ignored": False,
@@ -338,7 +338,7 @@ class WorkbenchOverrideService:
                 "case_id": None,
                 "exception_case_id": None,
                 "relation": self.pending_relation(row_type),
-                "available_actions": self.available_actions(row_type, "open"),
+                "available_actions": self.available_actions(row_type, "unpaired"),
                 "detail_note": detail_note,
                 "auto_close_suppressed": True,
                 "handled_exception": False,
@@ -371,9 +371,9 @@ class WorkbenchOverrideService:
     def available_actions(row_type: str, section: str) -> list[str]:
         if row_type == "bank":
             return ["detail", "view_relation", "cancel_link", "handle_exception"]
-        if row_type == "invoice" and section == "open":
+        if row_type == "invoice" and section == "unpaired":
             return ["detail", "confirm_link", "mark_exception", "ignore"]
-        if section == "open":
+        if section == "unpaired":
             return ["detail", "confirm_link", "mark_exception"]
         return ["detail", "cancel_link"]
 

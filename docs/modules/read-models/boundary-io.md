@@ -45,7 +45,7 @@
 | Projection source versions | Worker/projection/upstream read model | 必须包含 own projection schema version 和依赖 source_versions；行为变更必须 bump version |
 | Query-time read model filters | 页面 query service / settings owner | 只允许在 fresh payload 之后做不会改变 projection source fact 的过滤，例如成本统计标签规则；这类 filter 必须进入 query cache key，但不得写 dirty scope/outbox 或伪装成 read model source version |
 | Parent/shard freshness | Repository/API fresh gate | 父 scope 不能在子 scope dirty/missing dependency 时返回 fresh；`pending_invoice` 父 scope 必须聚合子月份 dirty status |
-| Workbench pending OA claim lookup | `app.bank_transaction_relation_claims` | Workbench 月投影排除 OA 待付款进行中认领的银行流水时，必须使用 active `oa_pending_payment_relation` + `scope_month` + `bank_transaction_id` 的窄索引合同；该 I/O 只影响投影读取计划，不改变候选/关系业务语义 |
+| Workbench pending OA claim lookup | `app.bank_transaction_relation_claims` | Workbench 月投影排除 OA 待付款进行中认领的银行流水时，必须使用 active `oa_pending_payment_relation` + `scope_month` + `bank_transaction_id` 的窄索引合同；该 I/O 只影响投影读取计划，不改变正式关系业务语义 |
 
 ## 输出 I/O
 

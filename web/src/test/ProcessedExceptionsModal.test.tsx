@@ -2,7 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import { describe, expect, test, vi } from "vitest";
 
 import ProcessedExceptionsModal from "../components/workbench/ProcessedExceptionsModal";
-import type { WorkbenchCandidateGroup, WorkbenchRecord } from "../features/workbench/types";
+import type { WorkbenchRelationGroup, WorkbenchRecord } from "../features/workbench/types";
 
 describe("ProcessedExceptionsModal", () => {
   test("keeps three panes on one row and appends exception reason and note columns", () => {
@@ -84,7 +84,7 @@ const processedExceptionGroup = {
       note: "缺进项票，等待补票",
     },
   },
-} as WorkbenchCandidateGroup & {
+} as WorkbenchRelationGroup & {
   processedExceptionSummary: Record<string, unknown>;
 };
 

@@ -1,12 +1,17 @@
 ---
-gsd_state_version: '1.0'
-status: executing
+gsd_state_version: 1.0
+milestone: v1.0
+milestone_name: milestone
+status: verifying
+stopped_at: Phase 21 local implementation and full automated verification complete; production cutover remains gated.
+last_updated: "2026-07-14T15:05:00+08:00"
+last_activity: 2026-07-14 - completed deterministic formal relation chain, exact paired/unpaired projection, legacy removal and local full regression
 progress:
-  total_phases: 20
+  total_phases: 21
   completed_phases: 2
-  total_plans: 22
-  completed_plans: 21
-  percent: 95
+  total_plans: 26
+  completed_plans: 24
+  percent: 92
 ---
 
 # Project State
@@ -16,20 +21,21 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-16)
 
 **Core value:** Preserve production finance workflow correctness while improving individual pages through isolated, reviewable GSD phases.
-**Current focus:** Phase 19 production release evidence remains gated; Phase 20 reversible relation runtime-proof capability is implementation-complete.
+**Current focus:** Phase 21 deterministic relation implementation is locally complete; clean deployment, migration 0104, rehydrate and production data-safety evidence remain gated.
 
 ## Current Position
 
-Phase: 20 of 20 (三组可逆关系写操作的 Fan-out、Worker、Freshness 与 System Audit 生产级闭环)
-Plan: 20-01 complete; 19-21 production evidence remains gated
-Status: Phase 20 implementation and full local verification complete; controlled staging/production apply requires explicit test-owned fixtures and runtime credentials
-Last activity: 2026-07-13 - completed the single checkpoint runner, three reversible shape contracts, exact durable evidence, recovery safety, legacy cleanup and full regression
+Phase: 21 of 21 (关联台确定性自动正式关系与全量可见性生产闭环)
+Plan: 21-01 through 21-03 complete; 21-04 production cutover pending
+Status: local implementation and automated verification complete; current production still shows the 520 relation as unpaired
+Last activity: 2026-07-14 - completed deterministic formal relation chain, exact paired/unpaired projection, legacy removal and local full regression
 
-Progress: [█████████░] 95%
+Progress: [█████████░] 92%
 
 ## Performance Metrics
 
 **Velocity:**
+
 - Total plans completed: 21
 - Baseline planning docs completed: 1
 - Average duration: N/A
@@ -88,6 +94,7 @@ Progress: [█████████░] 95%
 - 2026-07-11: Phase 19 added for the cross-page Audit proof, readiness semantics, and legacy-path production closure.
 - 2026-07-12: Phase 20 added for three reversible relation write scenarios spanning fan-out, worker drain, freshness, System Audit, and legacy test-path removal.
 - 2026-07-13: Phase 20 implementation completed with disposable PostgreSQL, full backend/frontend/build and 178-test Chromium verification; real-environment apply remains an explicit external gate.
+- 2026-07-14: Phase 21 added for deterministic automatic formal relations, exact Workbench visibility partition, all-scope omission repair, legacy candidate/decision removal, and data-safe recovery proof.
 
 ### Pending Todos
 
@@ -95,7 +102,10 @@ None yet.
 
 ### Blockers/Concerns
 
-- Full backend baseline is zero-failure: 4389 passed / 42 skipped / 589 subtests; the prior 13 classified failures and the reset/reload background-job owner race are closed without relaxed gates.
+- Phase 21 full backend baseline is zero-failure: 4216 passed / 48 skipped / 605 subtests；frontend 833/833 and six critical Chromium flows pass.
+- `FIN_OPS_TEST_DATABASE_URL` is not configured, so real disposable PostgreSQL migration/catalog/hash integration remains unexecuted.
+- The shared main worktree is dirty with overlapping/unrelated changes; production deployment from it is unsafe until the Phase 21 diff is isolated and reviewed on a clean commit.
+- Current production read-only evidence still shows the Yunnan Lifu 520 relation as unpaired; migration 0104, registered rehydrate, worker drain and production System Audit have not run.
 - 17/17 pages expose ready v17 proofs and local System Audit is complete; authorized production read-only execution has not occurred.
 - External bank/OA/invoice/ETC control evidence remains unregistered/unknown, so end-to-end external source completeness is still unproven.
 

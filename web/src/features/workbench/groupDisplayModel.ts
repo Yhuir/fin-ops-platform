@@ -1,5 +1,5 @@
 import type {
-  WorkbenchCandidateGroup,
+  WorkbenchRelationGroup,
   WorkbenchGroupsPageQuery,
   WorkbenchPaneRows,
   WorkbenchRecord,
@@ -63,10 +63,10 @@ export function createEmptyWorkbenchZoneDisplayState(): WorkbenchZoneDisplayStat
 }
 
 export function buildWorkbenchDisplayGroups(
-  groups: WorkbenchCandidateGroup[],
+  groups: WorkbenchRelationGroup[],
   state: WorkbenchZoneDisplayState,
   options: { serverFiltered?: boolean } = {},
-): WorkbenchCandidateGroup[] {
+): WorkbenchRelationGroup[] {
   if (options.serverFiltered) {
     return groups;
   }
@@ -106,7 +106,7 @@ export function buildWorkbenchDisplayGroups(
   return sortWorkbenchGroups(displayGroups, activePaneId, sortDirection);
 }
 
-export function buildWorkbenchPaneRows(groups: WorkbenchCandidateGroup[]): WorkbenchPaneRows {
+export function buildWorkbenchPaneRows(groups: WorkbenchRelationGroup[]): WorkbenchPaneRows {
   return {
     oa: groups.flatMap((group) => group.rows.oa),
     bank: groups.flatMap((group) => group.rows.bank),
@@ -115,7 +115,7 @@ export function buildWorkbenchPaneRows(groups: WorkbenchCandidateGroup[]): Workb
 }
 
 export function buildWorkbenchGroupDisplaySegments(
-  group: WorkbenchCandidateGroup,
+  group: WorkbenchRelationGroup,
 ): WorkbenchGroupDisplaySegment[] | null {
   if (group.displayMode === "collapsed_summary" || group.rows.oa.length < 2) {
     return null;
@@ -284,9 +284,9 @@ function findUniqueAmountSubset(rows: WorkbenchRecord[], targetAmount: bigint): 
 }
 
 export function mergeWorkbenchGroupsById(
-  currentGroups: WorkbenchCandidateGroup[],
-  incomingGroups: WorkbenchCandidateGroup[],
-): WorkbenchCandidateGroup[] {
+  currentGroups: WorkbenchRelationGroup[],
+  incomingGroups: WorkbenchRelationGroup[],
+): WorkbenchRelationGroup[] {
   const seenGroupIds = new Set(currentGroups.map((group) => group.id));
   const mergedGroups = [...currentGroups];
   incomingGroups.forEach((group) => {
@@ -301,10 +301,13 @@ export function mergeWorkbenchGroupsById(
 
 export function buildWorkbenchServerPageQuery(state: WorkbenchZoneDisplayState): WorkbenchGroupsPageQuery {
   const query: WorkbenchGroupsPageQuery = {};
-  const searchContext = resolveWorkbenchSearchContext(state);
-  if (searchContext?.rawQuery) {
-    query.search = searchContext.rawQuery;
-    query.searchMode = "linked_context";
+  const searchByPane = Object.fromEntries(
+    workbenchPaneIds
+      .map((paneId) => [paneId, (state.searchQueryByPane[paneId] ?? "").trim()] as const)
+      .filter(([, value]) => Boolean(value)),
+  );
+  if (Object.keys(searchByPane).length > 0) {
+    query.searchByPane = searchByPane;
   }
   const sortPaneId = workbenchPaneIds.find((paneId) => state.sortByPane[paneId]);
   if (sortPaneId) {
@@ -377,7 +380,7 @@ function normalizeSourceOaId(value: string | undefined) {
   return normalizedValue.replace(/:item:.*$/, "");
 }
 
-export function countWorkbenchGroupRows(group: WorkbenchCandidateGroup): number {
+export function countWorkbenchGroupRows(group: WorkbenchRelationGroup): number {
   return workbenchPaneIds.reduce((total, paneId) => {
     const paneCount = group.rowCounts?.[paneId];
     if (typeof paneCount === "number") {
@@ -395,12 +398,12 @@ export function countWorkbenchGroupRows(group: WorkbenchCandidateGroup): number 
   }, 0);
 }
 
-export function countWorkbenchGroupsRows(groups: WorkbenchCandidateGroup[]): number {
+export function countWorkbenchGroupsRows(groups: WorkbenchRelationGroup[]): number {
   return groups.reduce((total, group) => total + countWorkbenchGroupRows(group), 0);
 }
 
 export function collectWorkbenchFilterOptions(
-  groups: WorkbenchCandidateGroup[],
+  groups: WorkbenchRelationGroup[],
   paneId: WorkbenchRecordType,
   columnKey: string,
 ): string[] {
@@ -424,7 +427,7 @@ export function collectWorkbenchFilterOptions(
 }
 
 export function collectWorkbenchTimeFilterYears(
-  groups: WorkbenchCandidateGroup[],
+  groups: WorkbenchRelationGroup[],
   paneId: WorkbenchRecordType,
 ): string[] {
   const years = new Set<string>();
@@ -480,14 +483,12 @@ function resolveWorkbenchSearchContext(state: WorkbenchZoneDisplayState) {
   };
 }
 
-function groupMatchesPaneCriteria(group: WorkbenchCandidateGroup, state: WorkbenchZoneDisplayState) {
+function groupMatchesPaneCriteria(group: WorkbenchRelationGroup, state: WorkbenchZoneDisplayState) {
   const linkedSearchContext = resolveWorkbenchSearchContext(state);
   if (
     linkedSearchContext
-    && !workbenchPaneIds.some((paneId) =>
-      getWorkbenchGroupPaneRowsForCriteria(group, paneId).some((row) =>
-        matchesWorkbenchRowText(row, linkedSearchContext.normalizedQuery),
-      ),
+    && !getWorkbenchGroupPaneRowsForCriteria(group, linkedSearchContext.paneId).some((row) =>
+      matchesWorkbenchRowText(row, linkedSearchContext.normalizedQuery),
     )
   ) {
     return false;
@@ -507,14 +508,14 @@ function groupMatchesPaneCriteria(group: WorkbenchCandidateGroup, state: Workben
   });
 }
 
-function isCollapsedSummaryGroup(group: WorkbenchCandidateGroup) {
+function isCollapsedSummaryGroup(group: WorkbenchRelationGroup) {
   return group.displayMode === "collapsed_summary";
 }
 
 function applyPaneCriteriaToGroup(
-  group: WorkbenchCandidateGroup,
+  group: WorkbenchRelationGroup,
   state: WorkbenchZoneDisplayState,
-): WorkbenchCandidateGroup {
+): WorkbenchRelationGroup {
   const rows = Object.fromEntries(
     workbenchPaneIds.map((paneId) => {
       const paneFilters = state.filtersByPaneAndColumn[paneId] ?? {};
@@ -537,7 +538,7 @@ function applyPaneCriteriaToGroup(
   };
 }
 
-function groupHasRowsInCriteriaPanes(group: WorkbenchCandidateGroup, state: WorkbenchZoneDisplayState) {
+function groupHasRowsInCriteriaPanes(group: WorkbenchRelationGroup, state: WorkbenchZoneDisplayState) {
   return workbenchPaneIds.every((paneId) => !paneHasWorkbenchRowCriteria(state, paneId) || group.rows[paneId].length > 0);
 }
 
@@ -571,7 +572,7 @@ function matchesWorkbenchRow(
   });
 }
 
-function collectBankAmountFilterOptions(groups: WorkbenchCandidateGroup[]) {
+function collectBankAmountFilterOptions(groups: WorkbenchRelationGroup[]) {
   const directionValues = new Set<string>();
   const accountValues = new Set<string>();
 
@@ -593,7 +594,7 @@ function collectBankAmountFilterOptions(groups: WorkbenchCandidateGroup[]) {
   return [...orderedDirections, ...orderedAccounts];
 }
 
-function getWorkbenchGroupPaneRowsForCriteria(group: WorkbenchCandidateGroup, paneId: WorkbenchRecordType) {
+function getWorkbenchGroupPaneRowsForCriteria(group: WorkbenchRelationGroup, paneId: WorkbenchRecordType) {
   return [
     ...group.rows[paneId],
     ...(group.collapsedRows?.[paneId] ?? []),
@@ -661,7 +662,7 @@ function paneHasWorkbenchRowCriteria(state: WorkbenchZoneDisplayState, paneId: W
 }
 
 function sortWorkbenchGroups(
-  groups: WorkbenchCandidateGroup[],
+  groups: WorkbenchRelationGroup[],
   paneId: WorkbenchRecordType,
   direction: "asc" | "desc",
 ) {
@@ -692,7 +693,7 @@ function sortWorkbenchGroups(
 }
 
 function resolveWorkbenchGroupSortKey(
-  group: WorkbenchCandidateGroup,
+  group: WorkbenchRelationGroup,
   paneId: WorkbenchRecordType,
   direction: "asc" | "desc",
 ) {

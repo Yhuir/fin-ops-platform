@@ -790,18 +790,6 @@ class PostgresStateStore:
                     batch_ids.add(normalized_batch_id)
         return {batch_id for batch_id in batch_ids if batch_id}
 
-    def load_workbench_candidate_matches(self) -> dict[str, Any]:
-        snapshot = self._read_model_repository.load_workbench_candidate_matches()
-        if snapshot:
-            return snapshot
-        return {}
-
-    def save_workbench_candidate_matches(self, snapshot: dict[str, Any], *, changed_scope_months: set[str] | None = None) -> None:
-        self._read_model_repository.save_workbench_candidate_matches(snapshot, changed_scope_months=changed_scope_months)
-
-    def save_workbench_matching_dirty_scopes(self, snapshot: dict[str, Any]) -> None:
-        return None
-
     def load_bank_transaction_categories(self) -> dict[str, Any]:
         snapshot = self._workbench_repository.load_bank_transaction_categories()
         if snapshot:
@@ -995,8 +983,6 @@ class PostgresStateStore:
             "workbench_exception_cases": self.load_workbench_exception_cases(),
             "workbench_pair_relations": self.load_workbench_pair_relations(),
             "workbench_read_models": self.load_workbench_read_models(),
-            "workbench_candidate_matches": self.load_workbench_candidate_matches(),
-            "workbench_matching_dirty_scopes": {},
             "no_oa_bank_batches": self.load_no_oa_bank_batches(),
             "turnover_relations": self.load_turnover_relations(),
             "turnover_ledger_extras": self.load_turnover_ledger_extras(),
@@ -1027,10 +1013,6 @@ class PostgresStateStore:
             self.save_no_oa_bank_batches(normalized.get("no_oa_bank_batches") or {})
         if "workbench_read_models" in normalized:
             self.save_workbench_read_models(normalized.get("workbench_read_models") or {})
-        if "workbench_candidate_matches" in normalized:
-            self.save_workbench_candidate_matches(normalized.get("workbench_candidate_matches") or {})
-        if "workbench_matching_dirty_scopes" in normalized:
-            self.save_workbench_matching_dirty_scopes(normalized.get("workbench_matching_dirty_scopes") or {})
         if "turnover_relations" in normalized:
             self.save_turnover_relations(normalized.get("turnover_relations") or {})
         if "turnover_ledger_extras" in normalized:

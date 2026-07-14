@@ -3,7 +3,6 @@ from __future__ import annotations
 import unittest
 from typing import Any
 
-from fin_ops_platform.services.workbench_candidate_match_service import WorkbenchCandidateMatchService
 from fin_ops_platform.services.workbench_exception_case_service import WorkbenchExceptionCaseService
 from fin_ops_platform.services.workbench_exception_rollback_restore_service import WorkbenchExceptionRollbackRestoreService
 from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
@@ -22,7 +21,7 @@ class StateStoreStub:
 
 
 class WorkbenchExceptionRollbackRestoreServiceTests(unittest.TestCase):
-    def test_restore_write_snapshots_replaces_all_services_and_reconfigures(self) -> None:
+    def test_restore_write_snapshots_replaces_owned_services_and_reconfigures(self) -> None:
         replaced: dict[str, object] = {}
         configured: list[str] = []
         service = self._service(replaced=replaced, configured=configured)
@@ -30,13 +29,11 @@ class WorkbenchExceptionRollbackRestoreServiceTests(unittest.TestCase):
         service.restore_write_snapshots(
             previous_exception_snapshot=WorkbenchExceptionCaseService().snapshot(),
             previous_pair_snapshot=self._pair_snapshot("CASE-EX-001"),
-            previous_candidate_snapshot={"candidates": {"candidate-1": {"id": "candidate-1"}}},
             previous_override_snapshot={"row_overrides": {"row-1": {"case_id": "case-1"}}},
         )
 
         self.assertIsInstance(replaced["exception"], WorkbenchExceptionCaseService)
         self.assertIsInstance(replaced["pair"], WorkbenchPairRelationService)
-        self.assertIsInstance(replaced["candidate"], WorkbenchCandidateMatchService)
         self.assertIsInstance(replaced["override"], WorkbenchOverrideService)
         self.assertEqual(configured, ["configured"])
 
@@ -78,7 +75,6 @@ class WorkbenchExceptionRollbackRestoreServiceTests(unittest.TestCase):
             state_store=state_store,
             replace_exception_case_service=lambda service: replaced.__setitem__("exception", service),
             replace_pair_relation_service=lambda service: replaced.__setitem__("pair", service),
-            replace_candidate_match_service=lambda service: replaced.__setitem__("candidate", service),
             replace_override_service=lambda service: replaced.__setitem__("override", service),
             configure_exception_application_service=lambda: configured.append("configured"),
         )

@@ -18,7 +18,7 @@ def oa_record(row_id: str = "oa-pay-001", month: str = "2026-05") -> OAApplicati
     return OAApplicationRecord(
         id=row_id,
         month=month,
-        section="open",
+        section="unpaired",
         case_id=None,
         applicant="刘际涛",
         project_name="玉烟维护项目",
@@ -294,7 +294,7 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual(repository.months, ["2026-05"])
         self.assertEqual(payload["summary"]["oa_count"], 1)
-        self.assertEqual(payload["open"]["oa"][0]["id"], "oa-pay-001")
+        self.assertEqual(payload["unpaired"]["oa"][0]["id"], "oa-pay-001")
         self.assertEqual(payload["oa_status"], {"code": "ready", "message": "OA projection ready"})
 
     def test_oa_sync_worker_persists_projection_and_marks_downstream_scopes_dirty(self) -> None:

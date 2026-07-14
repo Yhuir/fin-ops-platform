@@ -72,6 +72,21 @@ class CallbackWorkbenchRelationRepository:
             ],
         )
 
+    @staticmethod
+    def acquire_relation_member_locks(
+        row_ids: list[str],
+        *,
+        row_types: list[str] | None = None,
+        case_ids: list[str] | None = None,
+    ) -> list[str]:
+        _ = case_ids
+        normalized_types = [str(item).strip() for item in list(row_types or [])]
+        return sorted(
+            f"{normalized_types[index] if index < len(normalized_types) else 'unknown'}:{row_id}"
+            for index, row_id in enumerate(str(item).strip() for item in list(row_ids or []))
+            if row_id
+        )
+
 
 class WorkbenchRelationCommandService:
     def __init__(
@@ -144,6 +159,11 @@ class WorkbenchRelationCommandService:
         freshness = self._assert_relation_read_model_fresh(
             row_ids=list(row_ids or []),
             month_scope=month_scope,
+        )
+        self._acquire_relation_member_locks(
+            list(row_ids or []),
+            row_types=list(row_types or []),
+            case_ids=[case_id],
         )
         pair_service = self._pair_service_for_row_ids(list(row_ids or []), case_ids=[case_id])
         active_relations = pair_service.active_relations_for_row_ids(list(row_ids or []))
@@ -239,6 +259,156 @@ class WorkbenchRelationCommandService:
         self._save_idempotency_result(idempotency_key, fingerprint, result)
         return result
 
+    def confirm_formal_relation_plans(
+        self,
+        plans: list[Any],
+        *,
+        actor_id: str,
+    ) -> dict[str, Any]:
+        normalized_plans = [plan for plan in list(plans or []) if plan is not None]
+        if not normalized_plans:
+            return {
+                "status": "noop",
+                "relations": [],
+                "histories": [],
+                "changed_case_ids": [],
+                "affected_months": [],
+            }
+        row_ids = [
+            str(row_id)
+            for plan in normalized_plans
+            for row_id in tuple(getattr(plan, "row_ids", ()) or ())
+        ]
+        row_types = [
+            str(row_type)
+            for plan in normalized_plans
+            for row_type in tuple(getattr(plan, "row_types", ()) or ())
+        ]
+        case_ids = [str(getattr(plan, "case_id", "") or "") for plan in normalized_plans]
+        if len(row_ids) != len(row_types) or any(not item for item in (*row_ids, *row_types, *case_ids)):
+            raise WorkbenchRelationCommandError(
+                "invalid_formal_relation_plan",
+                "Formal relation plans require aligned row ids, row types and case ids.",
+            )
+        self._acquire_relation_member_locks(row_ids, row_types=row_types, case_ids=case_ids)
+        pair_service = self._pair_service_for_row_ids(row_ids, case_ids=case_ids)
+        relations: list[dict[str, Any]] = []
+        histories: list[dict[str, Any]] = []
+        changed_case_ids: set[str] = set()
+        affected_months: set[str] = set()
+        for plan in sorted(normalized_plans, key=lambda item: str(getattr(item, "relation_fingerprint", ""))):
+            plan_row_ids = [str(item) for item in tuple(getattr(plan, "row_ids", ()) or ())]
+            plan_row_types = [str(item) for item in tuple(getattr(plan, "row_types", ()) or ())]
+            case_id = str(getattr(plan, "case_id", "") or "")
+            target_case_id = str(getattr(plan, "target_case_id", "") or "")
+            active_relations = pair_service.active_relations_for_row_ids(plan_row_ids)
+            conflicts = [
+                relation
+                for relation in active_relations
+                if str(relation.get("case_id") or "") != target_case_id
+            ]
+            if conflicts:
+                raise WorkbenchRelationCommandError(
+                    "workbench_relation_active_row_conflict",
+                    "One or more formal plan members are already active in another Workbench relation.",
+                    payload={
+                        "case_id": case_id,
+                        "conflicting_case_ids": sorted(
+                            str(relation.get("case_id") or "")
+                            for relation in conflicts
+                            if str(relation.get("case_id") or "")
+                        ),
+                    },
+                )
+            scope_keys = [
+                str(item)
+                for item in tuple(getattr(plan, "scope_keys", ()) or ())
+                if str(item) and str(item) != "all"
+            ]
+            month_scope = scope_keys[0] if len(scope_keys) == 1 else "all"
+            amount_minor = int(getattr(plan, "amount_minor", 0) or 0)
+            amount_check = {
+                "status": "matched" if amount_minor else "explicit_reference",
+                "amount_minor": amount_minor,
+                "currency": str(getattr(plan, "currency", "CNY") or "CNY"),
+            }
+            evidence = dict(tuple(getattr(plan, "evidence_summary", ()) or ()))
+            special_metadata = {
+                "formal_relation": {
+                    "origin": "system_deterministic",
+                    "relation_fingerprint": str(getattr(plan, "relation_fingerprint", "") or ""),
+                    "batch_hash": str(getattr(plan, "batch_hash", "") or ""),
+                    "rule_code": str(getattr(plan, "rule_code", "") or ""),
+                    "rule_version": str(getattr(plan, "rule_version", "") or ""),
+                }
+            }
+            if target_case_id:
+                before_relation = pair_service.get_active_relation_by_case_id(target_case_id)
+                if not isinstance(before_relation, dict):
+                    raise WorkbenchRelationCommandError(
+                        "workbench_relation_extension_target_missing",
+                        "The active relation targeted by an explicit reference extension no longer exists.",
+                        payload={"case_id": target_case_id},
+                    )
+                if not set(before_relation.get("row_ids") or []).issubset(plan_row_ids):
+                    raise WorkbenchRelationCommandError(
+                        "workbench_relation_extension_members_changed",
+                        "The active relation targeted by an explicit reference extension changed members.",
+                        payload={"case_id": target_case_id},
+                    )
+                relation, history = pair_service.replace_with_confirmed_relation(
+                    case_id=target_case_id,
+                    row_ids=plan_row_ids,
+                    row_types=plan_row_types,
+                    relation_mode="manual_confirmed",
+                    created_by=actor_id,
+                    month_scope=month_scope,
+                    note="系统确定性配对扩展",
+                    amount_check=amount_check,
+                    special_metadata=special_metadata,
+                    operation_type="confirm_link",
+                    history_created_by=actor_id,
+                    history_note="系统确定性配对扩展",
+                    rule_version=str(getattr(plan, "rule_version", "") or ""),
+                    evidence=evidence,
+                    before_relations=[before_relation],
+                )
+            else:
+                relation = pair_service.create_active_relation(
+                    case_id=case_id,
+                    row_ids=plan_row_ids,
+                    row_types=plan_row_types,
+                    relation_mode="manual_confirmed",
+                    created_by=actor_id,
+                    month_scope=month_scope,
+                    note="系统确定性配对",
+                    amount_check=amount_check,
+                    special_metadata=special_metadata,
+                    rule_version=str(getattr(plan, "rule_version", "") or ""),
+                    evidence=evidence,
+                )
+                history = pair_service.record_history(
+                    operation_type="confirm_link",
+                    before_relations=[],
+                    after_relations=[relation],
+                    affected_row_ids=plan_row_ids,
+                    created_by=actor_id,
+                    note="系统确定性配对",
+                    amount_check=amount_check,
+                )
+            relations.append(relation)
+            histories.append(history)
+            changed_case_ids.add(case_id)
+            affected_months.update(scope_keys)
+        self._save_changed_cases(pair_service, sorted(changed_case_ids))
+        return {
+            "status": "confirmed",
+            "relations": relations,
+            "histories": histories,
+            "changed_case_ids": sorted(changed_case_ids),
+            "affected_months": sorted(affected_months),
+        }
+
     def cancel_relation(
         self,
         *,
@@ -263,6 +433,7 @@ class WorkbenchRelationCommandService:
         if replay is not None:
             return replay
 
+        self._acquire_relation_member_locks([], case_ids=[resolved_case_id])
         pair_service = self._pair_service_for_case_ids([resolved_case_id])
         before_relation = pair_service.get_active_relation_by_case_id(resolved_case_id)
         if not isinstance(before_relation, dict):
@@ -337,6 +508,7 @@ class WorkbenchRelationCommandService:
         if replay is not None:
             return replay
 
+        self._acquire_relation_member_locks(normalized_row_ids)
         pair_service = self._pair_service_for_row_ids(normalized_row_ids)
         before_relations = pair_service.active_relations_for_row_ids(normalized_row_ids)
         freshness = self._assert_relation_read_model_fresh(
@@ -656,6 +828,10 @@ class WorkbenchRelationCommandService:
         if replay is not None:
             return replay
 
+        self._acquire_relation_member_locks(
+            selected_row_ids,
+            case_ids=[resolved_case_id] if resolved_case_id else None,
+        )
         if resolved_case_id:
             pair_service = self._pair_service_for_case_ids([resolved_case_id])
             before_relation = pair_service.get_active_relation_by_case_id(resolved_case_id)
@@ -856,6 +1032,25 @@ class WorkbenchRelationCommandService:
                 "Workbench relation repository does not expose load_workbench_pair_relations.",
             )
         return WorkbenchPairRelationService.from_snapshot(loader())
+
+    def _acquire_relation_member_locks(
+        self,
+        row_ids: list[str],
+        *,
+        row_types: list[str] | None = None,
+        case_ids: list[str] | None = None,
+    ) -> list[str]:
+        acquire = getattr(self._relation_repository, "acquire_relation_member_locks", None)
+        if not callable(acquire):
+            return []
+        return list(
+            acquire(
+                list(row_ids or []),
+                row_types=list(row_types or []),
+                case_ids=list(case_ids or []),
+            )
+            or []
+        )
 
     def _pair_service_for_row_ids(
         self,

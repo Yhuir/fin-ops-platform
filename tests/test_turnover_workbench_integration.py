@@ -186,10 +186,10 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
         return transaction_ids
 
     @staticmethod
-    def _workbench_open_groups(app: Application) -> list[dict[str, object]]:
+    def _workbench_unpaired_groups(app: Application) -> list[dict[str, object]]:
         response = app.handle_request("GET", "/api/workbench?month=2026-03")
         payload = json.loads(response.body)
-        return list(payload["open"]["groups"])
+        return list(payload["unpaired"]["groups"])
 
     @staticmethod
     def _workbench_paired_groups(app: Application) -> list[dict[str, object]]:
@@ -419,7 +419,7 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             self._tag_borrow_in_rows(app, transaction_ids)
 
             ledger_payload = json.loads(app.handle_request("GET", "/api/turnover-ledger?family=company").body)
-            groups = self._workbench_open_groups(app)
+            groups = self._workbench_unpaired_groups(app)
 
         self.assertEqual(ledger_payload["rows"][0]["status"], "deterministic")
         self.assertFalse([
@@ -435,7 +435,7 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             self._tag_borrow_in_rows(app, transaction_ids)
 
             ledger_payload = json.loads(app.handle_request("GET", "/api/turnover-ledger?family=company").body)
-            groups = self._workbench_open_groups(app)
+            groups = self._workbench_unpaired_groups(app)
 
         self.assertEqual(ledger_payload["rows"][0]["status"], "suggested")
         self.assertFalse([group for group in groups if group.get("group_type") == "turnover_relation"])
@@ -456,14 +456,14 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
                 body=json.dumps({"bank_row_ids": transaction_ids, "note": "人工确认同一笔往来"}),
             )
             confirmed_payload = json.loads(confirmed.body)
-            confirmed_groups = self._workbench_open_groups(app)
+            confirmed_groups = self._workbench_unpaired_groups(app)
 
             withdrawn = app.handle_request(
                 "POST",
                 f"/api/turnover-ledger/relations/{confirmed_payload['relation']['relation_id']}/withdraw",
                 body=json.dumps({"note": "撤销归并"}),
             )
-            withdrawn_groups = self._workbench_open_groups(app)
+            withdrawn_groups = self._workbench_unpaired_groups(app)
 
         self.assertEqual(confirmed.status_code, 200)
         self.assertEqual(withdrawn.status_code, 200)
@@ -480,7 +480,7 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             and set(self._group_bank_ids(group)) == set(transaction_ids)
         ])
 
-    def test_manual_zero_difference_closure_creates_open_bank_only_workbench_relation_until_invoice_exists(self) -> None:
+    def test_manual_zero_difference_closure_creates_paired_bank_only_workbench_relation(self) -> None:
         with self._temporary_app() as app:
             transaction_ids = self._import_bank_rows(app)
             self._tag_borrow_in_rows(app, transaction_ids)
@@ -492,7 +492,7 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             )
             payload = json.loads(response.body)
             paired_groups = self._workbench_paired_groups(app)
-            open_groups = self._workbench_open_groups(app)
+            unpaired_groups = self._workbench_unpaired_groups(app)
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["turnover_relation"]["status"], "confirmed")
@@ -504,16 +504,16 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
                 {"read_model_key": "workbench_relation", "scope_key": "2026-03"},
             ],
         )
-        matching_open_groups = [
-            group
-            for group in open_groups
-            if set(self._group_bank_ids(group)) == set(transaction_ids)
-        ]
-        self.assertEqual(len(matching_open_groups), 1)
-        self.assertEqual(matching_open_groups[0]["relation_mode"], "turnover_manual_closure")
-        self.assertFalse([
+        matching_paired_groups = [
             group
             for group in paired_groups
+            if set(self._group_bank_ids(group)) == set(transaction_ids)
+        ]
+        self.assertEqual(len(matching_paired_groups), 1)
+        self.assertEqual(matching_paired_groups[0]["relation_mode"], "turnover_manual_closure")
+        self.assertFalse([
+            group
+            for group in unpaired_groups
             if set(self._group_bank_ids(group)) == set(transaction_ids)
         ])
 
@@ -614,7 +614,7 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
         self.assertEqual(set(payload["turnover_relation"]["bank_row_ids"]), set(transaction_ids))
         self.assertEqual(payload["workbench_pair_relation"]["relation_mode"], "turnover_manual_closure")
 
-    def test_manual_closure_accepts_three_bank_rows_and_keeps_workbench_case_open_until_invoice_exists(self) -> None:
+    def test_manual_closure_accepts_three_bank_rows_and_creates_paired_workbench_case(self) -> None:
         with self._temporary_app() as app:
             preview = app._import_service.preview_import(
                 batch_type=BatchType.BANK_TRANSACTION,
@@ -693,7 +693,7 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             )
             payload = json.loads(response.body)
             paired_groups = self._workbench_paired_groups(app)
-            open_groups = self._workbench_open_groups(app)
+            unpaired_groups = self._workbench_unpaired_groups(app)
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["turnover_relation"]["evidence"]["closure_mode"], "manual_zero_difference_group")
@@ -704,16 +704,16 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
         self.assertTrue(payload["workbench_pair_relation"]["special_metadata"]["requires_oa"])
         self.assertFalse(payload["workbench_pair_relation"]["special_metadata"]["requires_invoice"])
         self.assertEqual(set(payload["turnover_relation"]["bank_row_ids"]), set(transaction_ids))
-        matching_open_groups = [
-            group
-            for group in open_groups
-            if set(self._group_bank_ids(group)) == set(transaction_ids)
-        ]
-        self.assertEqual(len(matching_open_groups), 1)
-        self.assertEqual(matching_open_groups[0]["relation_mode"], "turnover_manual_closure")
-        self.assertFalse([
+        matching_paired_groups = [
             group
             for group in paired_groups
+            if set(self._group_bank_ids(group)) == set(transaction_ids)
+        ]
+        self.assertEqual(len(matching_paired_groups), 1)
+        self.assertEqual(matching_paired_groups[0]["relation_mode"], "turnover_manual_closure")
+        self.assertFalse([
+            group
+            for group in unpaired_groups
             if set(self._group_bank_ids(group)) == set(transaction_ids)
         ])
 

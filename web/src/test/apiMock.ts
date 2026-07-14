@@ -1424,11 +1424,11 @@ function emptyWorkbenchPayload(month: string): RawWorkbenchPayload {
       bank_count: 0,
       invoice_count: 0,
       paired_count: 0,
-      open_count: 0,
+      unpaired_count: 0,
       exception_count: 0,
     },
     paired: { oa: [], bank: [], invoice: [] },
-    open: { oa: [], bank: [], invoice: [] },
+    unpaired: { oa: [], bank: [], invoice: [] },
   };
 }
 
@@ -1441,7 +1441,7 @@ function mockWorkbenchPayloadForMonth(
     ? emptyWorkbenchPayload(month)
     : cloneJson(store.get(month));
 }
-type RawWorkbenchSectionKey = "paired" | "open";
+type RawWorkbenchSectionKey = "paired" | "unpaired";
 type RawWorkbenchPaneKey = "oa" | "bank" | "invoice";
 type RawWorkbenchRow = RawWorkbenchPayload["paired"][RawWorkbenchPaneKey][number];
 
@@ -1457,7 +1457,7 @@ function buildWorkbenchRowPayload(
         bank_count: 2,
         invoice_count: 2,
         paired_count: 3,
-        open_count: 3,
+        unpaired_count: 3,
         exception_count: 1,
       },
       paired: {
@@ -1516,7 +1516,7 @@ function buildWorkbenchRowPayload(
           },
         ],
       },
-      open: {
+      unpaired: {
         oa: [
           {
             id: "oa-o-202604-001",
@@ -1603,11 +1603,11 @@ function buildWorkbenchRowPayload(
         bank_count: 0,
         invoice_count: 0,
         paired_count: 0,
-        open_count: 0,
+        unpaired_count: 0,
         exception_count: 0,
       },
       paired: { oa: [], bank: [], invoice: [] },
-      open: { oa: [], bank: [], invoice: [] },
+      unpaired: { oa: [], bank: [], invoice: [] },
     };
   }
 
@@ -1618,7 +1618,7 @@ function buildWorkbenchRowPayload(
       bank_count: 4,
       invoice_count: 4,
       paired_count: 3,
-      open_count: 10,
+      unpaired_count: 10,
       exception_count: 1,
     },
     paired: {
@@ -1681,7 +1681,7 @@ function buildWorkbenchRowPayload(
         },
       ],
     },
-    open: {
+    unpaired: {
       oa: [
         {
           id: "oa-o-202603-001",
@@ -2006,14 +2006,14 @@ function toGroupedWorkbenchPayload(payload: {
     bank_count: number;
     invoice_count: number;
     paired_count: number;
-    open_count: number;
+    unpaired_count: number;
     exception_count: number;
   };
   paired: Record<"oa" | "bank" | "invoice", Array<Record<string, unknown>>>;
-  open: Record<"oa" | "bank" | "invoice", Array<Record<string, unknown>>>;
+  unpaired: Record<"oa" | "bank" | "invoice", Array<Record<string, unknown>>>;
 }, oaStatus?: MockApiOptions["workbenchOaStatus"]) {
   const pairedGroups = buildGroups(payload.paired, "paired");
-  const openGroups = buildGroups(payload.open, "open");
+  const unpairedGroups = buildGroups(payload.unpaired, "unpaired");
 
   return {
     month: payload.month,
@@ -2023,8 +2023,8 @@ function toGroupedWorkbenchPayload(payload: {
       bank_count: payload.summary.bank_count,
       invoice_count: payload.summary.invoice_count,
       paired_count: pairedGroups.length,
-      open_count: openGroups.length,
-      exception_count: openGroups.filter((group) => groupHasDanger(group)).length,
+      unpaired_count: unpairedGroups.length,
+      exception_count: unpairedGroups.filter((group) => groupHasDanger(group)).length,
     },
     invoice_inventory: {
       system_total: 9,
@@ -2036,19 +2036,19 @@ function toGroupedWorkbenchPayload(payload: {
       oa_attachment_total: 5,
     },
     paired: { groups: pairedGroups },
-    open: { groups: openGroups },
+    unpaired: { groups: unpairedGroups },
   };
 }
 
 function buildGroups(
   rows: Record<"oa" | "bank" | "invoice", Array<Record<string, unknown>>>,
-  section: "paired" | "open",
+  section: "paired" | "unpaired",
 ) {
   const groups = new Map<
     string,
     {
       group_id: string;
-      group_type: "auto_closed" | "manual_confirmed" | "candidate" | "source_linked";
+      group_type: "relation" | "unpaired";
       match_confidence: "high" | "medium" | "low";
       reason: string;
       oa_rows: Array<Record<string, unknown>>;
@@ -2060,14 +2060,13 @@ function buildGroups(
 
   for (const row of [...rows.oa, ...rows.bank, ...rows.invoice]) {
     const caseId = typeof row.case_id === "string" && row.case_id ? row.case_id : null;
-    const groupId = caseId ? `case:${caseId}` : `row:${String(row.id)}`;
+    const groupId = section === "paired" && caseId ? `case:${caseId}` : `row:${String(row.id)}`;
     if (!groups.has(groupId)) {
-      const isOaAttachmentSourceGroup = caseId?.includes("OA-ATTACHMENT") ?? false;
       groups.set(groupId, {
         group_id: groupId,
-        group_type: isOaAttachmentSourceGroup ? "source_linked" : section === "paired" ? "manual_confirmed" : "candidate",
-        match_confidence: section === "paired" || isOaAttachmentSourceGroup ? "high" : "medium",
-        reason: isOaAttachmentSourceGroup ? "oa_attachment_source_relation" : caseId ? "mock_case_group" : "mock_row_group",
+        group_type: section === "paired" ? "relation" : "unpaired",
+        match_confidence: section === "paired" ? "high" : "low",
+        reason: section === "paired" ? "active_formal_relation" : "unpaired_fact",
         oa_rows: [],
         bank_rows: [],
         invoice_rows: [],
@@ -2083,16 +2082,10 @@ function buildGroups(
     }
   }
 
-  return Array.from(groups.values()).map((group) => {
-    const groupRows = [...group.oa_rows, ...group.bank_rows, ...group.invoice_rows];
-    const hasWithdrawHistory = groupRows.some((row) =>
-      Array.isArray(row.available_actions) && row.available_actions.includes("withdraw_link"),
-    );
-    return {
-      ...group,
-      can_withdraw: section === "paired" || hasWithdrawHistory ? true : undefined,
-    };
-  });
+  return Array.from(groups.values()).map((group) => ({
+    ...group,
+    can_withdraw: section === "paired" ? true : undefined,
+  }));
 }
 
 function groupHasDanger(group: {
@@ -2419,11 +2412,11 @@ function createWorkbenchStateStore(options: Pick<MockApiOptions, "includeOaAttac
         bank_count: 0,
         invoice_count: 0,
         paired_count: 0,
-        open_count: 0,
+        unpaired_count: 0,
         exception_count: 0,
       },
       paired: { oa: [], bank: [], invoice: [] },
-      open: { oa: [], bank: [], invoice: [] },
+      unpaired: { oa: [], bank: [], invoice: [] },
     };
 
     for (const month of WORKBENCH_STATE_MONTHS) {
@@ -2432,14 +2425,14 @@ function createWorkbenchStateStore(options: Pick<MockApiOptions, "includeOaAttac
       merged.summary.bank_count += payload.summary.bank_count;
       merged.summary.invoice_count += payload.summary.invoice_count;
       merged.summary.paired_count += payload.summary.paired_count;
-      merged.summary.open_count += payload.summary.open_count;
+      merged.summary.unpaired_count += payload.summary.unpaired_count;
       merged.summary.exception_count += payload.summary.exception_count;
       merged.paired.oa.push(...cloneJson(payload.paired.oa));
       merged.paired.bank.push(...cloneJson(payload.paired.bank));
       merged.paired.invoice.push(...cloneJson(payload.paired.invoice));
-      merged.open.oa.push(...cloneJson(payload.open.oa));
-      merged.open.bank.push(...cloneJson(payload.open.bank));
-      merged.open.invoice.push(...cloneJson(payload.open.invoice));
+      merged.unpaired.oa.push(...cloneJson(payload.unpaired.oa));
+      merged.unpaired.bank.push(...cloneJson(payload.unpaired.bank));
+      merged.unpaired.invoice.push(...cloneJson(payload.unpaired.invoice));
     }
 
     return merged;
@@ -2454,7 +2447,7 @@ function createWorkbenchStateStore(options: Pick<MockApiOptions, "includeOaAttac
     resolveMonthForRow(rowId: string) {
       for (const month of WORKBENCH_STATE_MONTHS) {
         const payload = ensureMonth(month);
-        for (const section of ["paired", "open"] as const) {
+        for (const section of ["paired", "unpaired"] as const) {
           for (const pane of ["oa", "bank", "invoice"] as const) {
             if (payload[section][pane].some((row) => String(row.id) === rowId)) {
               return month;
@@ -2522,7 +2515,7 @@ type MockSearchResult = {
   row_id: string;
   record_type: "oa" | "bank" | "invoice";
   month: string;
-  zone_hint: "paired" | "open" | "ignored" | "processed_exception";
+  zone_hint: "paired" | "unpaired" | "ignored" | "processed_exception";
   matched_field: string;
   title: string;
   primary_meta: string;
@@ -2531,7 +2524,7 @@ type MockSearchResult = {
   jump_target: {
     month: string;
     row_id: string;
-    zone_hint: "paired" | "open" | "ignored" | "processed_exception";
+    zone_hint: "paired" | "unpaired" | "ignored" | "processed_exception";
     record_type: "oa" | "bank" | "invoice";
   };
 };
@@ -2578,7 +2571,7 @@ function buildSearchPayload({
 
   for (const resolvedMonth of months) {
     const payload = workbenchStateStore.get(resolvedMonth);
-    for (const zoneKey of ["paired", "open"] as const) {
+    for (const zoneKey of ["paired", "unpaired"] as const) {
       for (const pane of ["oa", "bank", "invoice"] as const) {
         for (const row of payload[zoneKey][pane]) {
           const result = buildSearchResult(row, resolvedMonth, zoneKey, matchesField);
@@ -2634,7 +2627,7 @@ function buildSearchPayload({
 function buildSearchResult(
   row: RawWorkbenchRow,
   month: string,
-  zoneHint: "paired" | "open" | "ignored",
+  zoneHint: "paired" | "unpaired" | "ignored",
   matchesField: (value: string | null | undefined) => boolean,
 ): MockSearchResult | null {
   if (row.type === "oa") {
@@ -2809,11 +2802,11 @@ function reopenWorkbenchRow(row: RawWorkbenchRow): RawWorkbenchRow {
 }
 
 function moveInvoiceToIgnored(payload: RawWorkbenchPayload, ignoredRows: RawWorkbenchRow[], rowId: string) {
-  const invoiceIndex = payload.open.invoice.findIndex((candidate) => String(candidate.id) === rowId);
+  const invoiceIndex = payload.unpaired.invoice.findIndex((candidate) => String(candidate.id) === rowId);
   if (invoiceIndex < 0) {
     return false;
   }
-  const [row] = payload.open.invoice.splice(invoiceIndex, 1);
+  const [row] = payload.unpaired.invoice.splice(invoiceIndex, 1);
   ignoredRows.push({
     ...row,
     available_actions: ["detail"],
@@ -2827,7 +2820,7 @@ function restoreIgnoredInvoice(payload: RawWorkbenchPayload, ignoredRows: RawWor
     return false;
   }
   const [row] = ignoredRows.splice(invoiceIndex, 1);
-  payload.open.invoice.push(reopenWorkbenchRow(row));
+  payload.unpaired.invoice.push(reopenWorkbenchRow(row));
   return true;
 }
 
@@ -2847,7 +2840,7 @@ function moveWorkbenchGroup(payload: RawWorkbenchPayload, source: RawWorkbenchSe
     payload[source][pane] = payload[source][pane].filter((candidate) => !shouldMove(candidate));
     payload[target][pane] = [
       ...payload[target][pane],
-      ...matchedGroup.rows[pane].map((row) => (target === "open" ? reopenWorkbenchRow(row) : row)),
+      ...matchedGroup.rows[pane].map((row) => (target === "unpaired" ? reopenWorkbenchRow(row) : row)),
     ];
   }
 
@@ -2872,16 +2865,16 @@ function withdrawWorkbenchGroup(payload: RawWorkbenchPayload, rowId: string) {
     payload.paired[pane] = payload.paired[pane].filter((candidate) => !shouldMove(candidate));
   }
 
-  payload.open.oa = [
-    ...payload.open.oa,
+  payload.unpaired.oa = [
+    ...payload.unpaired.oa,
     ...matchedGroup.rows.oa.map((row) => ({ ...reopenWorkbenchRow(row), case_id: "CASE-RESTORED" })),
   ];
-  payload.open.invoice = [
-    ...payload.open.invoice,
+  payload.unpaired.invoice = [
+    ...payload.unpaired.invoice,
     ...matchedGroup.rows.invoice.map((row) => ({ ...reopenWorkbenchRow(row), case_id: "CASE-RESTORED" })),
   ];
-  payload.open.bank = [
-    ...payload.open.bank,
+  payload.unpaired.bank = [
+    ...payload.unpaired.bank,
     ...matchedGroup.rows.bank.map((row) => ({ ...reopenWorkbenchRow(row), case_id: "" })),
   ];
 
@@ -2895,7 +2888,7 @@ function findWorkbenchRowsByIds(
 ) {
   const payload = workbenchStateStore.get(month);
   const rowsById = new Map<string, RawWorkbenchRow>();
-  for (const section of ["paired", "open"] as const) {
+  for (const section of ["paired", "unpaired"] as const) {
     for (const pane of ["oa", "bank", "invoice"] as const) {
       for (const row of payload[section][pane]) {
         rowsById.set(String(row.id), row);
@@ -2908,7 +2901,7 @@ function findWorkbenchRowsByIds(
 function buildRelationPreviewGroups(
   rows: RawWorkbenchRow[],
   caseId: string,
-  section: "paired" | "open",
+  section: "paired" | "unpaired",
   mode: "together" | "separate" | "restored-with-ungrouped" = "together",
 ) {
   if (mode === "separate") {
@@ -2942,21 +2935,21 @@ function buildRelationPreviewGroups(
   }
   return [
     ...buildGroups(panes, section),
-    ...ungroupedRows.flatMap((row) => buildRelationPreviewGroups([{ ...row, case_id: "" }], "", "open", "together")),
+    ...ungroupedRows.flatMap((row) => buildRelationPreviewGroups([{ ...row, case_id: "" }], "", "unpaired", "together")),
   ];
 }
 
 function buildWithdrawAfterPreviewGroups(rows: RawWorkbenchRow[]) {
   const hasOaRow = rows.some((row) => row.type === "oa");
   if (!hasOaRow) {
-    return rows.flatMap((row) => buildRelationPreviewGroups([{ ...row, case_id: "" }], "", "open", "together"));
+    return rows.flatMap((row) => buildRelationPreviewGroups([{ ...row, case_id: "" }], "", "unpaired", "together"));
   }
   const restoredRows = rows.filter((row) => row.type !== "bank");
   const restoredRowIds = new Set(restoredRows.map((row) => String(row.id)));
   const ungroupedRows = rows.filter((row) => !restoredRowIds.has(String(row.id)));
   return [
-    ...(restoredRows.length >= 2 ? buildRelationPreviewGroups(restoredRows, "CASE-RESTORED", "open", "together") : []),
-    ...ungroupedRows.flatMap((row) => buildRelationPreviewGroups([{ ...row, case_id: "" }], "", "open", "together")),
+    ...(restoredRows.length >= 2 ? buildRelationPreviewGroups(restoredRows, "CASE-RESTORED", "unpaired", "together") : []),
+    ...ungroupedRows.flatMap((row) => buildRelationPreviewGroups([{ ...row, case_id: "" }], "", "unpaired", "together")),
   ];
 }
 
@@ -3001,7 +2994,7 @@ function buildMockRelationPreview({
       groups: buildRelationPreviewGroups(
         rows,
         caseId,
-        operation === "withdraw_link" ? "paired" : "open",
+        operation === "withdraw_link" ? "paired" : "unpaired",
         operation === "withdraw_link" ? "together" : "separate",
       ),
     },
@@ -4827,7 +4820,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       if (options.workbenchErrorMonths?.includes(month)) {
         return { status: 500, body: { message: "workbench groups failed" } };
       }
-      const zone = url.searchParams.get("zone") === "paired" ? "paired" : "open";
+      const zone = url.searchParams.get("zone") === "paired" ? "paired" : "unpaired";
       const page = Math.max(1, Number(url.searchParams.get("page") ?? "1") || 1);
       const pageSize = Math.max(1, Number(url.searchParams.get("page_size") ?? "50") || 50);
       const payload = toGroupedWorkbenchPayload(mockWorkbenchPayloadForMonth(workbenchStateStore, month, options), options.workbenchOaStatus);
@@ -6958,7 +6951,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       for (const resolvedMonth of touchedMonths) {
         const payload = workbenchStateStore.get(resolvedMonth);
         for (const rowId of rowIds) {
-          moveWorkbenchGroup(payload, "open", "paired", rowId);
+          moveWorkbenchGroup(payload, "unpaired", "paired", rowId);
         }
       }
       const operationProjection = {
@@ -6971,7 +6964,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
               "together",
             ),
           ),
-          open_groups: [],
+          unpaired_groups: [],
         },
       };
       const body = {
@@ -7027,7 +7020,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       const operationProjection = {
         after: {
           paired_groups: [],
-          open_groups: Array.from(touchedMonths).flatMap((resolvedMonth) =>
+          unpaired_groups: Array.from(touchedMonths).flatMap((resolvedMonth) =>
             buildWithdrawAfterPreviewGroups(findWorkbenchRowsByIds(workbenchStateStore, resolvedMonth, rowIds)),
           ),
         },
@@ -7073,7 +7066,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       for (const resolvedMonth of touchedMonths) {
         const payload = workbenchStateStore.get(resolvedMonth);
         for (const pane of ["oa", "bank", "invoice"] as const) {
-          payload.open[pane] = payload.open[pane].map((row) => {
+          payload.unpaired[pane] = payload.unpaired[pane].map((row) => {
             if (!rowIds.includes(String(row.id))) {
               return row;
             }
@@ -7132,7 +7125,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       const month = String(jsonBody?.month ?? "");
       const rowId = String(jsonBody?.row_id ?? "");
       const resolvedMonth = month === "all" ? workbenchStateStore.resolveMonthForRow(rowId) ?? month : month;
-      moveWorkbenchGroup(workbenchStateStore.get(resolvedMonth), "paired", "open", rowId);
+      moveWorkbenchGroup(workbenchStateStore.get(resolvedMonth), "paired", "unpaired", rowId);
       return {
         body: {
           success: true,
@@ -7163,7 +7156,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       for (const resolvedMonth of touchedMonths) {
         const payload = workbenchStateStore.get(resolvedMonth);
         for (const pane of ["oa", "bank", "invoice"] as const) {
-          payload.open[pane] = payload.open[pane].map((row) => {
+          payload.unpaired[pane] = payload.unpaired[pane].map((row) => {
             if (!rowIds.includes(String(row.id))) {
               return row;
             }
@@ -7776,7 +7769,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             job_id: `retry_${jobId}`,
             type: "workbench_matching",
             status: "queued",
-            label: "生成关联台候选",
+            label: "生成正式配对关系",
           },
         },
       });

@@ -23,8 +23,8 @@ function isPostTo(pathname: string) {
 }
 
 export async function confirmWorkbenchRelation(page: Page, recordLatency?: OperationLatencyRecorder) {
-  const openZone = page.getByTestId("zone-open");
-  const openGroup = page.getByTestId("candidate-group-open-case:CASE-202603-101");
+  const openZone = page.getByTestId("zone-unpaired");
+  const openGroup = page.getByTestId("candidate-group-unpaired-case:CASE-202603-101");
 
   await runOperation(recordLatency, {
     route: "/",

@@ -3393,7 +3393,7 @@ class EtcApiTests(unittest.TestCase):
             workbench_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-02").body)
             open_invoice_rows = [
                 row
-                for group in workbench_payload["open"]["groups"]
+                for group in workbench_payload["unpaired"]["groups"]
                 for row in group["invoice_rows"]
             ]
             summary_rows = [row for row in open_invoice_rows if row.get("source_kind") == "etc_invoice_summary"]
@@ -3454,7 +3454,7 @@ class EtcApiTests(unittest.TestCase):
             before_workbench = json.loads(app.handle_request("GET", "/api/workbench?month=2026-02").body)
             before_rows = [
                 row
-                for group in before_workbench["open"]["groups"]
+                for group in before_workbench["unpaired"]["groups"]
                 for row in group["invoice_rows"]
             ]
 
@@ -3469,7 +3469,7 @@ class EtcApiTests(unittest.TestCase):
             after_workbench = json.loads(app.handle_request("GET", "/api/workbench?month=2026-02").body)
             after_rows = [
                 row
-                for group in after_workbench["open"]["groups"]
+                for group in after_workbench["unpaired"]["groups"]
                 for row in group["invoice_rows"]
             ]
             submitted_batches = json.loads(app.handle_request("GET", "/api/etc/business-batches?status=submitted").body)["data"]
@@ -3535,7 +3535,7 @@ class EtcApiTests(unittest.TestCase):
             before_workbench = json.loads(app.handle_request("GET", "/api/workbench?month=2026-02").body)
             before_rows = [
                 row
-                for group in before_workbench["open"]["groups"]
+                for group in before_workbench["unpaired"]["groups"]
                 for row in group["invoice_rows"]
             ]
             summary_row = next(row for row in before_rows if row.get("source_kind") == "etc_invoice_summary")
@@ -3576,7 +3576,7 @@ class EtcApiTests(unittest.TestCase):
             after_workbench = json.loads(app.handle_request("GET", "/api/workbench?month=2026-02").body)
             after_rows = [
                 row
-                for group in after_workbench["open"]["groups"]
+                for group in after_workbench["unpaired"]["groups"]
                 for row in group["invoice_rows"]
             ]
             relation_for_summary = app._workbench_pair_relation_service.get_active_relation_by_row_id(str(summary_row["id"]))
@@ -3772,7 +3772,7 @@ class EtcApiTests(unittest.TestCase):
             before_workbench = json.loads(app.handle_request("GET", "/api/workbench?month=2026-02").body)
             before_rows = [
                 row
-                for group in before_workbench["open"]["groups"]
+                for group in before_workbench["unpaired"]["groups"]
                 for row in group["invoice_rows"]
             ]
             summary_row = next(row for row in before_rows if row.get("source_kind") == "etc_invoice_summary")
@@ -3811,7 +3811,7 @@ class EtcApiTests(unittest.TestCase):
             after_workbench = json.loads(app.handle_request("GET", "/api/workbench?month=2026-02").body)
             after_rows = [
                 row
-                for group in after_workbench["open"]["groups"]
+                for group in after_workbench["unpaired"]["groups"]
                 for row in group["invoice_rows"]
             ]
             relation_for_summary = app._workbench_pair_relation_service.get_active_relation_by_row_id(str(summary_row["id"]))
@@ -5152,11 +5152,11 @@ class EtcApiTests(unittest.TestCase):
                     "bank_count": 1,
                     "invoice_count": 0,
                     "paired_count": 0,
-                    "open_count": 1,
+                    "unpaired_count": 1,
                     "exception_count": 0,
                 },
                 "paired": {"oa": [], "bank": [], "invoice": []},
-                "open": {
+                "unpaired": {
                     "oa": [
                         {
                             "id": "oa-existing-etc",

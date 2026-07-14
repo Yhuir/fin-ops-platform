@@ -212,7 +212,7 @@ class AppTests(unittest.TestCase):
                 self.summary_scope_key = scope_key
                 return {
                     "read_model_status": "fresh",
-                    "summary": {"paired_count": 2, "open_count": 3},
+                    "summary": {"paired_count": 2, "unpaired_count": 3},
                 }
 
             def get_workbench_groups_page(self, **kwargs):
@@ -239,10 +239,10 @@ class AppTests(unittest.TestCase):
                 "scope_key": "all",
                 "status": "ok",
                 "summary_status": "fresh",
-                "summary_counts": {"paired_count": 2, "open_count": 3},
+                "summary_counts": {"paired_count": 2, "unpaired_count": 3},
                 "groups": {
                     "paired": {"status": "fresh", "total": 10, "returned_count": 1},
-                    "open": {"status": "fresh", "total": 20, "returned_count": 1},
+                    "unpaired": {"status": "fresh", "total": 20, "returned_count": 1},
                 },
                 "errors": [],
             },

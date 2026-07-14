@@ -119,8 +119,8 @@ class LiveWorkbenchServiceTests(unittest.TestCase):
         service = LiveWorkbenchService(import_service, MatchingEngineService(import_service))
         payload = service.get_workbench("2026-03")
 
-        self.assertEqual([row["id"] for row in payload["open"]["invoice"]], ["sql-invoice-202603"])
-        self.assertEqual([row["id"] for row in payload["open"]["bank"]], ["sql-bank-202603"])
+        self.assertEqual([row["id"] for row in payload["unpaired"]["invoice"]], ["sql-invoice-202603"])
+        self.assertEqual([row["id"] for row in payload["unpaired"]["bank"]], ["sql-bank-202603"])
         self.assertEqual(payload["summary"]["invoice_count"], 1)
         self.assertEqual(payload["summary"]["bank_count"], 1)
         self.assertEqual(repository.invoice_calls[0]["month"], "2026-03")
@@ -147,7 +147,7 @@ class LiveWorkbenchServiceTests(unittest.TestCase):
 
         service = LiveWorkbenchService(import_service, MatchingEngineService(import_service))
         payload = service.get_workbench("2026-03")
-        invoice_row = payload["open"]["invoice"][0]
+        invoice_row = payload["unpaired"]["invoice"][0]
 
         self.assertEqual(invoice_row["invoice_code"], "033001")
         self.assertEqual(invoice_row["invoice_no"], "9001")
@@ -197,7 +197,7 @@ class LiveWorkbenchServiceTests(unittest.TestCase):
 
         service = LiveWorkbenchService(import_service, MatchingEngineService(import_service))
         payload = service.get_workbench("2026-03")
-        bank_rows = payload["open"]["bank"]
+        bank_rows = payload["unpaired"]["bank"]
 
         self.assertEqual(len(bank_rows), 1)
         self.assertEqual(bank_rows[0]["counterparty_name"], "真实供应商")
@@ -261,7 +261,7 @@ class LiveWorkbenchServiceTests(unittest.TestCase):
         service = LiveWorkbenchService(import_service, matching_service)
 
         payload = service.get_workbench("2026-03")
-        invoice_rows = {row["id"]: row for row in payload["open"]["invoice"]}
+        invoice_rows = {row["id"]: row for row in payload["unpaired"]["invoice"]}
 
         output_row = invoice_rows["inv_sparse_output"]
         self.assertEqual(output_row["seller_tax_no"], "915300007194052520")
@@ -351,7 +351,7 @@ class LiveWorkbenchServiceTests(unittest.TestCase):
         )
 
         payload = service.get_workbench("2026-03")
-        bank_row = payload["open"]["bank"][0]
+        bank_row = payload["unpaired"]["bank"][0]
 
         self.assertEqual(bank_row["category_code"], "borrow_in_company_pending_repayment")
         self.assertEqual(bank_row["category_label"], "公司暂借款：待还款")
@@ -397,7 +397,7 @@ class LiveWorkbenchServiceTests(unittest.TestCase):
             category_provider=provider,
         )
 
-        bank_row = service.get_workbench("2026-03")["open"]["bank"][0]
+        bank_row = service.get_workbench("2026-03")["unpaired"]["bank"][0]
 
         self.assertEqual(bank_row["category_code"], "fee")
         self.assertEqual(bank_row["category_label"], "手续费")
@@ -448,7 +448,7 @@ class LiveWorkbenchServiceTests(unittest.TestCase):
             category_provider=provider,
         )
 
-        bank_row = service.get_workbench("2026-03")["open"]["bank"][0]
+        bank_row = service.get_workbench("2026-03")["unpaired"]["bank"][0]
 
         self.assertEqual(bank_row["category_code"], "fee")
         self.assertEqual(bank_row["category_label"], "手续费")
@@ -490,7 +490,7 @@ class LiveWorkbenchServiceTests(unittest.TestCase):
             category_provider=provider,
         )
 
-        bank_row = service.get_workbench("2026-03")["open"]["bank"][0]
+        bank_row = service.get_workbench("2026-03")["unpaired"]["bank"][0]
 
         self.assertEqual(bank_row["category_code"], "fee")
         self.assertEqual(bank_row["category_label"], "手续费")
@@ -537,7 +537,7 @@ class LiveWorkbenchServiceTests(unittest.TestCase):
             category_provider=provider,
         )
 
-        bank_rows = service.get_workbench("2026-03")["open"]["bank"]
+        bank_rows = service.get_workbench("2026-03")["unpaired"]["bank"]
 
         self.assertEqual(len(bank_rows), 2)
         for bank_row in bank_rows:
@@ -576,120 +576,6 @@ class LiveWorkbenchServiceTests(unittest.TestCase):
         self.assertEqual(detail["id"], transaction_id)
         self.assertEqual(detail["summary_fields"]["对方户名"], "云南溯源科技有限公司")
 
-    def test_list_auto_pair_candidates_detects_internal_transfers_within_time_window(self) -> None:
-        import_service = ImportNormalizationService()
-        preview = import_service.preview_import(
-            batch_type=BatchType.BANK_TRANSACTION,
-            source_name="internal-transfer.xlsx",
-            imported_by="user_finance_01",
-            rows=[
-                {
-                    "account_no": "62220001",
-                    "account_name": "云南溯源科技有限公司建设银行基本户",
-                    "txn_date": "2026-02-03",
-                    "trade_time": "2026-02-03 09:15:00",
-                    "pay_receive_time": "2026-02-03 09:15:00",
-                    "counterparty_name": "云南溯源科技有限公司",
-                    "debit_amount": "50000.00",
-                    "credit_amount": "",
-                    "summary": "内部往来支出",
-                },
-                {
-                    "account_no": "62220002",
-                    "account_name": "云南溯源科技有限公司招商银行一般户",
-                    "txn_date": "2026-02-03",
-                    "trade_time": "2026-02-03 10:02:00",
-                    "pay_receive_time": "2026-02-03 10:02:00",
-                    "counterparty_name": "云南溯源科技有限公司",
-                    "debit_amount": "",
-                    "credit_amount": "50000.00",
-                    "summary": "内部往来收入",
-                },
-            ],
-        )
-        import_service.confirm_import(preview.id)
-
-        service = LiveWorkbenchService(import_service, MatchingEngineService(import_service))
-        payload = service.get_workbench("all")
-        auto_results = service.list_auto_pair_candidates("all")
-
-        self.assertEqual(payload["summary"]["paired_count"], 0)
-        self.assertEqual(len(payload["open"]["bank"]), 2)
-        self.assertEqual(len(auto_results), 1)
-        self.assertEqual(auto_results[0].rule_code, "internal_transfer_pair")
-        self.assertEqual(len(auto_results[0].transaction_ids), 2)
-
-    def test_list_auto_pair_candidates_rejects_internal_transfer_when_income_and_expense_accounts_are_same(self) -> None:
-        import_service = ImportNormalizationService()
-        preview = import_service.preview_import(
-            batch_type=BatchType.BANK_TRANSACTION,
-            source_name="same-account-internal-transfer.xlsx",
-            imported_by="user_finance_01",
-            rows=[
-                {
-                    "account_no": "62220001",
-                    "account_name": "云南溯源科技有限公司建设银行基本户",
-                    "txn_date": "2026-02-03",
-                    "trade_time": "2026-02-03 09:15:00",
-                    "pay_receive_time": "2026-02-03 09:15:00",
-                    "counterparty_name": "云南溯源科技有限公司",
-                    "debit_amount": "50000.00",
-                    "credit_amount": "",
-                    "summary": "内部往来支出",
-                },
-                {
-                    "account_no": "62220001",
-                    "account_name": "云南溯源科技有限公司建设银行基本户",
-                    "txn_date": "2026-02-03",
-                    "trade_time": "2026-02-03 10:02:00",
-                    "pay_receive_time": "2026-02-03 10:02:00",
-                    "counterparty_name": "云南溯源科技有限公司",
-                    "debit_amount": "",
-                    "credit_amount": "50000.00",
-                    "summary": "内部往来收入",
-                },
-            ],
-        )
-        import_service.confirm_import(preview.id)
-
-        service = LiveWorkbenchService(import_service, MatchingEngineService(import_service))
-        auto_results = service.list_auto_pair_candidates("all")
-
-        self.assertEqual(auto_results, [])
-
-    def test_list_auto_pair_candidates_detects_salary_transactions_for_personal_counterparties(self) -> None:
-        import_service = ImportNormalizationService()
-        preview = import_service.preview_import(
-            batch_type=BatchType.BANK_TRANSACTION,
-            source_name="salary-payment.xlsx",
-            imported_by="user_finance_01",
-            rows=[
-                {
-                    "account_no": "62220003",
-                    "account_name": "云南溯源科技有限公司建设银行基本户",
-                    "txn_date": "2026-02-28",
-                    "trade_time": "2026-02-28 17:08:00",
-                    "pay_receive_time": "2026-02-28 17:08:00",
-                    "counterparty_name": "李四",
-                    "debit_amount": "9.00",
-                    "credit_amount": "",
-                    "summary": "2月工资发放",
-                    "remark": "工资",
-                },
-            ],
-        )
-        import_service.confirm_import(preview.id)
-
-        service = LiveWorkbenchService(import_service, MatchingEngineService(import_service))
-        payload = service.get_workbench("all")
-        auto_results = service.list_auto_pair_candidates("all")
-
-        self.assertEqual(payload["summary"]["paired_count"], 0)
-        self.assertEqual(len(payload["open"]["bank"]), 1)
-        self.assertEqual(payload["open"]["bank"][0]["counterparty_name"], "李四")
-        self.assertEqual(len(auto_results), 1)
-        self.assertEqual(auto_results[0].rule_code, "salary_personal_auto_match")
-        self.assertEqual(auto_results[0].transaction_ids, [payload["open"]["bank"][0]["id"]])
 
     def test_selected_bank_mapping_controls_payment_account_label(self) -> None:
         import_service = ImportNormalizationService()
@@ -717,7 +603,7 @@ class LiveWorkbenchServiceTests(unittest.TestCase):
 
         service = LiveWorkbenchService(import_service, MatchingEngineService(import_service))
         payload = service.get_workbench("2026-03")
-        bank_row = payload["open"]["bank"][0]
+        bank_row = payload["unpaired"]["bank"][0]
 
         self.assertEqual(bank_row["payment_account_label"], "建设银行 基本户 8826")
         detail_row = service.get_row_detail(bank_row["id"])

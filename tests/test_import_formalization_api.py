@@ -104,7 +104,8 @@ class ImportFormalizationApiTests(unittest.TestCase):
             self.assertTrue(matching_job_id)
             matching_job_payload = self._wait_for_background_job(app, matching_job_id)
             self.assertEqual(matching_job_payload["status"], "succeeded")
-            self.assertGreater(matching_job_payload["result_summary"]["candidate_count"], 0)
+            self.assertIn("planned_relation_count", matching_job_payload["result_summary"])
+            self.assertNotIn("candidate_count", matching_job_payload["result_summary"])
             self.assertIn("2026-01", matching_job_payload["result_summary"]["affected_months"])
             self.assertNotIn("matching_results", matching_job_payload["result_summary"])
 

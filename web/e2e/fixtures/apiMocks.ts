@@ -113,7 +113,6 @@ type ApiMockOptions = {
   inputInvoiceUsageRowsFailuresBeforeSuccess?: number;
   inputInvoiceUsageRelationDetailReadModelStatus?: InputInvoiceUsageReadModelMockStatus;
   inputInvoiceUsageRelationFanout?: boolean;
-  oaPendingPaymentCandidateRelations?: boolean;
   oaPendingPaymentBankLinkDelayMs?: number;
   oaPendingPaymentBankLinkError?: boolean;
   oaPendingPaymentBankLinkFlow?: boolean;
@@ -143,7 +142,6 @@ type ApiMockOptions = {
   outputInvoiceDownstreamFanout?: boolean;
   outputInvoiceCollectionReadModelStatus?: OutputInvoiceCollectionReadModelMockStatus;
   outputInvoiceRedRelationCandidate?: boolean;
-  pendingInvoiceCandidateRelations?: boolean;
   pendingInvoiceAttachExistingBatchRows?: boolean;
   pendingInvoiceAttachExistingConfirmFailOnce?: boolean;
   pendingInvoiceAttachExistingConfirmFailuresBeforeSuccess?: number;
@@ -187,7 +185,7 @@ type ApiMockOptions = {
   workbenchWithdrawSubmitDelayMs?: number;
 };
 
-type WorkbenchZone = "paired" | "open";
+type WorkbenchZone = "paired" | "unpaired";
 type BatchAccountingBucket = "unsubmitted" | "submitted";
 type ImportScenario = "bank" | "invoice";
 type SettingsDataResetAction = "reset_bank_transactions" | "reset_invoices" | "reset_oa_and_rebuild";
@@ -774,7 +772,7 @@ function buildWorkbenchGroup(zone: WorkbenchZone, linked: boolean, includeCashSp
   const rows = linked ? linkedWorkbenchRows(includeCashSpecialActions) : workbenchRows();
   return {
     group_id: "case:CASE-202603-101",
-    group_type: zone === "paired" ? "manual_confirmed" : "candidate",
+    group_type: zone === "paired" ? "relation" : "unpaired",
     match_confidence: zone === "paired" ? "high" : "medium",
     reason: "browser_e2e_relation_fanout",
     oa_rows: [rows.oa],
@@ -886,7 +884,7 @@ function bankFlowRuleInvoiceRequiredGroup(zone: WorkbenchZone, linked: boolean) 
   };
   return {
     group_id: "bank-flow-rule-batch:bank_flow_rule_batch_e2e_invoice_required",
-    group_type: zone === "paired" ? "manual_confirmed" : "candidate",
+    group_type: zone === "paired" ? "relation" : "unpaired",
     match_confidence: zone === "paired" ? "high" : "medium",
     reason: linked ? "流水规则已补齐发票" : "流水规则待补发票",
     relation_mode: "bank_flow_rule_batch",
@@ -924,7 +922,7 @@ function bankFlowRuleWorkbenchGroups(zone: WorkbenchZone, invoiceRequiredConfirm
     };
     return [{
       group_id: "bank-flow-rule-batch:bank_flow_rule_batch_e2e_fee",
-      group_type: "manual_confirmed",
+      group_type: "relation",
       match_confidence: "high",
       reason: "流水规则手续费批次",
       relation_mode: "bank_flow_rule_batch",
@@ -949,11 +947,10 @@ function bankFlowRuleConfirmPreviewPayload() {
     operation_type: "confirm_link",
     preview_id: "bank-flow-rule-confirm-preview",
     submit_expected_versions: { bank_flow_rule_batch_e2e_invoice_required: 1 },
-    candidate_keys: ["bank_flow_rule_batch_e2e_invoice_required"],
     can_submit: true,
     requires_note: false,
     message: "确认后将把 1 条流水和 1 条发票按流水规则闭环。",
-    before: { groups: [bankFlowRuleInvoiceRequiredGroup("open", false)] },
+    before: { groups: [bankFlowRuleInvoiceRequiredGroup("unpaired", false)] },
     after: { groups: [bankFlowRuleInvoiceRequiredGroup("paired", true)] },
     amount_summary: {
       before: { oa_total: "0.00", bank_total: "19.90", invoice_total: "19.90" },
@@ -981,14 +978,14 @@ function bankFlowRuleConfirmResultPayload() {
     operation_projection: {
       after: {
         paired_groups: [bankFlowRuleInvoiceRequiredGroup("paired", true)],
-        open_groups: [],
+        unpaired_groups: [],
       },
     },
     message: "已确认流水规则批次补票关联。",
   };
 }
 
-function buildLargeWorkbenchGroup(index: number, zone: WorkbenchZone = "open") {
+function buildLargeWorkbenchGroup(index: number, zone: WorkbenchZone = "unpaired") {
   const suffix = String(index).padStart(3, "0");
   const caseId = `CASE-LARGE-202603-${suffix}`;
   const amount = `${(42000 + index * 137).toLocaleString("en-US")}.00`;
@@ -1040,7 +1037,7 @@ function buildLargeWorkbenchGroup(index: number, zone: WorkbenchZone = "open") {
   };
   return {
     group_id: `case:${caseId}`,
-    group_type: zone === "paired" ? "manual_confirmed" : "candidate",
+    group_type: zone === "paired" ? "relation" : "unpaired",
     match_confidence: zone === "paired" ? "high" : "medium",
     reason: `browser_e2e_large_dataset_${suffix}`,
     oa_rows: [rows.oa],
@@ -1122,8 +1119,8 @@ function buildProcessedExceptionGroup() {
   };
 }
 
-function buildOpenGroupWithoutIgnoredInvoice() {
-  const group = buildWorkbenchGroup("open", false);
+function buildUnpairedGroupWithoutIgnoredInvoice() {
+  const group = buildWorkbenchGroup("unpaired", false);
   return {
     ...group,
     invoice_rows: [],
@@ -1165,9 +1162,9 @@ function workbenchGroups(
     return [buildProcessedExceptionGroup()];
   }
   if (rowIgnored) {
-    return [buildOpenGroupWithoutIgnoredInvoice()];
+    return [buildUnpairedGroupWithoutIgnoredInvoice()];
   }
-  return relationConfirmed ? [] : [buildWorkbenchGroup("open", false)];
+  return relationConfirmed ? [] : [buildWorkbenchGroup("unpaired", false)];
 }
 
 function countWorkbenchRows(groups: Array<{ oa_rows: unknown[]; bank_rows: unknown[]; invoice_rows: unknown[] }>) {
@@ -1195,7 +1192,7 @@ function workbenchSummary(
       bank_count: 0,
       invoice_count: 0,
       paired_count: 0,
-      open_count: 0,
+      unpaired_count: 0,
       exception_count: 0,
       ignored_count: rowIgnored ? 1 : 0,
     };
@@ -1206,7 +1203,7 @@ function workbenchSummary(
       bank_count: 210,
       invoice_count: 210,
       paired_count: 5,
-      open_count: 205,
+      unpaired_count: 205,
       exception_count: 0,
       ignored_count: rowIgnored ? 1 : 0,
     };
@@ -1216,7 +1213,7 @@ function workbenchSummary(
     bank_count: 1,
     invoice_count: 1,
     paired_count: relationConfirmed ? 1 : 0,
-    open_count: relationConfirmed || exceptionApplied ? 0 : 1,
+    unpaired_count: relationConfirmed || exceptionApplied ? 0 : 1,
     exception_count: exceptionApplied ? 3 : 0,
     ignored_count: rowIgnored ? 1 : 0,
   };
@@ -1309,7 +1306,7 @@ function findWorkbenchRow(
       largeDataset,
       includeCashSpecialActions,
     ),
-    ...workbenchGroups("open", relationConfirmed, exceptionApplied, rowIgnored, largeDataset),
+    ...workbenchGroups("unpaired", relationConfirmed, exceptionApplied, rowIgnored, largeDataset),
   ];
   return groups
     .flatMap((group) => [...group.oa_rows, ...group.bank_rows, ...group.invoice_rows])
@@ -1415,7 +1412,7 @@ function legacyWorkbenchPayload(
           includeCashSpecialActions,
         ),
     },
-    open: { groups: pageEmpty ? [] : workbenchGroups("open", relationConfirmed, exceptionApplied, rowIgnored, largeDataset) },
+    unpaired: { groups: pageEmpty ? [] : workbenchGroups("unpaired", relationConfirmed, exceptionApplied, rowIgnored, largeDataset) },
     read_model_status: pageStatus,
     generated_at: "2026-06-17T01:00:00Z",
   };
@@ -2571,45 +2568,49 @@ function inputInvoiceUsageWorkbenchRelationRow(relationConfirmed: boolean) {
       : {
         code: "pending",
         label: "待处理",
-        reason: "关联台候选关系仅作为证据展示，不能证明已支付。",
+        reason: "关联台尚未建立 active 正式关系，不能证明已支付。",
       },
     oa: {
-      primary: {
-        id: "oa-o-202603-001",
-        applicant: "陈涛",
-        application_type: "供应商付款申请",
-        project_name: "智能工厂项目",
-        amount: "58000.00",
-        detail_available: true,
-        relation_case_id: "CASE-202603-101",
-        relation_status: relationConfirmed ? "linked" : "candidate",
-        relation_source: relationConfirmed ? "workbench_relation" : "workbench_relation_candidate",
-      },
-      relation_count: 1,
+      primary: relationConfirmed
+        ? {
+            id: "oa-o-202603-001",
+            applicant: "陈涛",
+            application_type: "供应商付款申请",
+            project_name: "智能工厂项目",
+            amount: "58000.00",
+            detail_available: true,
+            relation_case_id: "CASE-202603-101",
+            relation_status: "linked",
+            relation_source: "workbench_relation",
+          }
+        : null,
+      relation_count: relationConfirmed ? 1 : 0,
       has_multiple: false,
-      detail_mode: "single",
+      detail_mode: relationConfirmed ? "single" : "none",
       summaries: [],
     },
     bank: {
-      primary: {
-        id: "bk-o-202603-001",
-        counterparty_name: "智能工厂设备商",
-        trade_time: "2026-03-28 10:18:00",
-        amount: "58000.00",
-        direction: "outflow",
-        direction_label: "支出",
-        bank_name: "建设银行",
-        account_last4: "1138",
-        summary: relationConfirmed ? "设备尾款已闭环" : "设备尾款候选关系",
-        remark: relationConfirmed ? "关联台已确认" : "关联台关系证据",
-        detail_available: true,
-        relation_case_id: "CASE-202603-101",
-        relation_status: relationConfirmed ? "linked" : "candidate",
-        relation_source: relationConfirmed ? "workbench_relation" : "workbench_relation_candidate",
-      },
-      relation_count: 1,
+      primary: relationConfirmed
+        ? {
+            id: "bk-o-202603-001",
+            counterparty_name: "智能工厂设备商",
+            trade_time: "2026-03-28 10:18:00",
+            amount: "58000.00",
+            direction: "outflow",
+            direction_label: "支出",
+            bank_name: "建设银行",
+            account_last4: "1138",
+            summary: "设备尾款已闭环",
+            remark: "关联台已确认",
+            detail_available: true,
+            relation_case_id: "CASE-202603-101",
+            relation_status: "linked",
+            relation_source: "workbench_relation",
+          }
+        : null,
+      relation_count: relationConfirmed ? 1 : 0,
       has_multiple: false,
-      detail_mode: "single",
+      detail_mode: relationConfirmed ? "single" : "none",
       summaries: [],
     },
     invoice_relations: {
@@ -3333,7 +3334,7 @@ function inputInvoiceOaReverseInvoice(index: 1 | 2) {
   };
 }
 
-function inputInvoiceOaReverseRejectedRelationInvoice(relationConfirmed: boolean) {
+function inputInvoiceOaReverseWorkbenchInvoice() {
   return {
     invoice_id: "input-invoice-row-e2e-relation",
     invoice_no: "SD-INV-E2E-REL-001",
@@ -3341,11 +3342,18 @@ function inputInvoiceOaReverseRejectedRelationInvoice(relationConfirmed: boolean
     seller_name: "智能工厂设备商",
     issue_date: "2026-03-28",
     total_with_tax: "65540.00",
-    payment_status_label: relationConfirmed ? "已支付" : "待处理",
+    payment_status_label: "待处理",
     target_applicant_name: "陈涛",
-    oa_relation_status: relationConfirmed ? "linked" : "candidate",
-    reason_code: relationConfirmed ? "already_has_active_oa" : "already_has_candidate_oa",
-    reason: relationConfirmed ? "关联台已确认 OA 关系。" : "关联台存在未配对 OA 候选关系。",
+  };
+}
+
+function inputInvoiceOaReverseRejectedRelationInvoice() {
+  return {
+    ...inputInvoiceOaReverseWorkbenchInvoice(),
+    payment_status_label: "已支付",
+    oa_relation_status: "linked",
+    reason_code: "already_has_active_oa",
+    reason: "关联台已确认 OA 关系。",
   };
 }
 
@@ -3389,14 +3397,22 @@ function inputInvoiceOaReversePreviewPayload(
   includeWorkbenchRelationEvidence = false,
   canCreateDraft = true,
 ) {
+  const selectableInvoices = [
+    inputInvoiceOaReverseInvoice(1),
+    inputInvoiceOaReverseInvoice(2),
+    ...includeWorkbenchRelationEvidence && !relationConfirmed ? [inputInvoiceOaReverseWorkbenchInvoice()] : [],
+  ];
   const selected = selectedInvoiceIds.length > 0
     ? selectedInvoiceIds
-    : ["input-oa-invoice-e2e-001", "input-oa-invoice-e2e-002"];
-  const invoices = [inputInvoiceOaReverseInvoice(1), inputInvoiceOaReverseInvoice(2)]
+    : selectableInvoices.map((invoice) => invoice.invoice_id);
+  const invoices = selectableInvoices
     .filter((invoice) => selected.includes(invoice.invoice_id));
   const isSubset = invoices.length === 1;
-  const rejectedRelationInvoices = includeWorkbenchRelationEvidence
-    ? [inputInvoiceOaReverseRejectedRelationInvoice(relationConfirmed)]
+  const totalWithTax = invoices
+    .reduce((total, invoice) => total + Number.parseFloat(invoice.total_with_tax), 0)
+    .toFixed(2);
+  const rejectedRelationInvoices = includeWorkbenchRelationEvidence && relationConfirmed
+    ? [inputInvoiceOaReverseRejectedRelationInvoice()]
     : [];
   return {
     preview_id: isSubset ? "input-oa-reverse-preview-e2e-subset" : "input-oa-reverse-preview-e2e-all",
@@ -3409,14 +3425,14 @@ function inputInvoiceOaReversePreviewPayload(
       { code: "zhou_jieying", name: "周洁莹" },
     ],
     invoice_count: invoices.length,
-    total_with_tax: isSubset ? "49.86" : "99.72",
+    total_with_tax: totalWithTax,
     invoice_rows: invoices,
     groups: [
       {
         target_applicant_code: "chen_xiuyun",
         target_applicant_name: "陈秀云",
         invoice_count: invoices.length,
-        total_with_tax: isSubset ? "49.86" : "99.72",
+        total_with_tax: totalWithTax,
         candidate_invoice_ids: invoices.map((invoice) => invoice.invoice_id),
         invoice_rows: invoices,
         rejected_invoices: rejectedRelationInvoices,
@@ -3474,14 +3490,7 @@ function inputInvoiceOaReverseSubmittedHistoryPayload(submitted: boolean) {
   };
 }
 
-function oaPendingPaymentRowsPayload(candidateRelations = false, includeInvoiceImportEvidence = false) {
-  const candidateRelationFields = candidateRelations
-    ? {
-      relationStatus: "candidate",
-      relationSource: "workbench_relation_candidate",
-    }
-    : {};
-
+function oaPendingPaymentRowsPayload(includeInvoiceImportEvidence = false) {
   return {
     rows: [
       {
@@ -3494,22 +3503,16 @@ function oaPendingPaymentRowsPayload(candidateRelations = false, includeInvoiceI
           applicationTime: "2026-05-20",
           amount: "12000.00",
           detailAvailable: true,
-          relationCount: candidateRelations ? 1 : 0,
-          ...candidateRelationFields,
+          relationCount: 1,
+          relationStatus: "linked",
+          relationSource: "workbench_relation",
         },
-        paymentStatus: candidateRelations
-          ? {
-            code: "unpaid",
-            label: "未支付",
-            reason: "只有候选关系，尚无已确认支出流水关系",
-            severity: "warning",
-          }
-          : {
+        paymentStatus: {
             code: "paid",
             label: "已支付",
             reason: "已存在已配对支出流水关系，金额差额不影响付款状态",
             severity: "success",
-          },
+        },
         bankTransaction: {
           primaryBankTransactionId: "bank-payment-e2e-001",
           accountDetailNo: "bank-detail-payment-e2e-001",
@@ -3537,7 +3540,8 @@ function oaPendingPaymentRowsPayload(candidateRelations = false, includeInvoiceI
           amount: "8000.00",
           paidTotal: "8000.00",
           relationCount: 1,
-          ...candidateRelationFields,
+          relationStatus: "linked",
+          relationSource: "workbench_relation",
           hasMultiple: false,
           detailMode: "single",
         },
@@ -3548,7 +3552,8 @@ function oaPendingPaymentRowsPayload(candidateRelations = false, includeInvoiceI
           invoiceDate: "2026-05-22",
           totalWithTax: "12000.00",
           relationCount: 1,
-          ...candidateRelationFields,
+          relationStatus: "linked",
+          relationSource: "workbench_relation",
           hasMultiple: false,
           detailMode: "single",
         },
@@ -3701,7 +3706,7 @@ function oaPendingPaymentWritebackPaidRowsPayload(confirmed: boolean) {
           paidTotal: "9800.00",
           relationCount: 1,
           relationStatus: "linked",
-          relationSource: "automatic_decision",
+          relationSource: "workbench_relation",
           hasMultiple: false,
           detailMode: "single",
         },
@@ -3947,8 +3952,8 @@ function oaPendingPaymentBankCandidatesPayload(relationStatus = "all") {
 
 function oaPendingPaymentRelationFanoutRowsPayload(relationConfirmed: boolean) {
   const relationFields = {
-    relationStatus: relationConfirmed ? "linked" : "candidate",
-    relationSource: relationConfirmed ? "workbench_relation" : "workbench_relation_candidate",
+    relationStatus: relationConfirmed ? "linked" : "unlinked",
+    relationSource: relationConfirmed ? "workbench_relation" : "",
   };
   return {
     rows: [
@@ -3962,7 +3967,7 @@ function oaPendingPaymentRelationFanoutRowsPayload(relationConfirmed: boolean) {
           applicationTime: "2026-03-28",
           amount: "58000.00",
           detailAvailable: true,
-          relationCount: 1,
+          relationCount: relationConfirmed ? 1 : 0,
           ...relationFields,
         },
         paymentStatus: relationConfirmed
@@ -3975,13 +3980,13 @@ function oaPendingPaymentRelationFanoutRowsPayload(relationConfirmed: boolean) {
           : {
             code: "unpaid",
             label: "未支付",
-            reason: "存在候选关系，未确认前不能计入已支付。",
+            reason: "关联台尚未建立 active 正式关系，不能计入已支付。",
             severity: "warning",
           },
         bankTransaction: {
-          primaryBankTransactionId: "bk-o-202603-001",
-          accountDetailNo: "bk-o-202603-001",
-          enterpriseSerialNo: "E2E-BANK-202603-001",
+          primaryBankTransactionId: relationConfirmed ? "bk-o-202603-001" : "",
+          accountDetailNo: relationConfirmed ? "bk-o-202603-001" : "",
+          enterpriseSerialNo: relationConfirmed ? "E2E-BANK-202603-001" : "",
           voucherKind: "电子转账凭证",
           voucherNo: "E2E-BANK-202603-001",
           bankName: "建设银行",
@@ -3996,26 +4001,26 @@ function oaPendingPaymentRelationFanoutRowsPayload(relationConfirmed: boolean) {
           creditAmount: "0.00",
           balance: "130500.50",
           currency: "人民币元",
-          counterpartyName: "智能工厂设备商",
+          counterpartyName: relationConfirmed ? "智能工厂设备商" : "",
           counterpartyAccountNo: "",
           counterpartyBankName: "建设银行",
           bookedDate: "20260328",
-          summary: relationConfirmed ? "设备尾款已闭环" : "设备尾款候选关系",
-          remark: relationConfirmed ? "关联台已确认" : "关联台关系证据",
+          summary: relationConfirmed ? "设备尾款已闭环" : "",
+          remark: relationConfirmed ? "关联台已确认" : "",
           amount: "58000.00",
           paidTotal: relationConfirmed ? "58000.00" : "0.00",
-          relationCount: 1,
+          relationCount: relationConfirmed ? 1 : 0,
           ...relationFields,
           hasMultiple: false,
           detailMode: "single",
         },
         invoice: {
-          primaryInvoiceId: "iv-o-202603-001",
-          digitalInvoiceNo: "12561048",
-          sellerName: "智能工厂设备商",
-          invoiceDate: "2026-03-28",
-          totalWithTax: "65540.00",
-          relationCount: 1,
+          primaryInvoiceId: relationConfirmed ? "iv-o-202603-001" : "",
+          digitalInvoiceNo: relationConfirmed ? "12561048" : "",
+          sellerName: relationConfirmed ? "智能工厂设备商" : "",
+          invoiceDate: relationConfirmed ? "2026-03-28" : "",
+          totalWithTax: relationConfirmed ? "65540.00" : "0.00",
+          relationCount: relationConfirmed ? 1 : 0,
           ...relationFields,
           hasMultiple: false,
           detailMode: "single",
@@ -6010,11 +6015,10 @@ function confirmPreviewPayload() {
     operation_type: "confirm_link",
     preview_id: "browser-e2e-confirm-preview",
     submit_expected_versions: { "CASE-202603-101": 1 },
-    candidate_keys: ["CASE-202603-101"],
     can_submit: true,
     requires_note: false,
     message: "确认后将把 1 条 OA、1 条流水和 1 条发票闭环。",
-    before: { groups: [buildWorkbenchGroup("open", false)] },
+    before: { groups: [buildWorkbenchGroup("unpaired", false)] },
     after: { groups: [buildWorkbenchGroup("paired", true)] },
     amount_summary: amountSummary(),
   };
@@ -6038,7 +6042,7 @@ function confirmResultPayload() {
     operation_projection: {
       after: {
         paired_groups: [buildWorkbenchGroup("paired", true)],
-        open_groups: [],
+        unpaired_groups: [],
       },
     },
     message: "已确认 3 条记录关联。",
@@ -6051,7 +6055,6 @@ function withdrawPreviewPayload() {
     operation_type: "withdraw_relation",
     preview_id: "withdraw_relation:CASE-202603-101",
     submit_expected_versions: { "CASE-202603-101": 1 },
-    candidate_keys: ["CASE-202603-101"],
     can_submit: true,
     requires_note: false,
     message: "所选记录已确认关联，可在此撤回这组配对关系。",
@@ -6061,7 +6064,7 @@ function withdrawPreviewPayload() {
       row_ids: ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"],
     },
     before: { groups: [buildWorkbenchGroup("paired", true)] },
-    after: { groups: [buildWorkbenchGroup("open", false)] },
+    after: { groups: [buildWorkbenchGroup("unpaired", false)] },
     amount_summary: amountSummary(),
   };
 }
@@ -6084,7 +6087,7 @@ function withdrawResultPayload() {
     operation_projection: {
       after: {
         paired_groups: [],
-        open_groups: [buildWorkbenchGroup("open", false)],
+        unpaired_groups: [buildWorkbenchGroup("unpaired", false)],
       },
     },
     message: "已撤回 3 条记录关联。",
@@ -6219,7 +6222,7 @@ function workbenchCashSpecialResultPayload(action: WorkbenchCashSpecialAction) {
     operation_projection: {
       after: {
         paired_groups: [buildWorkbenchGroup("paired", true, true)],
-        open_groups: [],
+        unpaired_groups: [],
       },
     },
     message: messages[action],
@@ -6571,7 +6574,7 @@ function bankTransactionsPayload(
     total?: number;
   } = {},
 ) {
-  const relationTags = relationConfirmed ? ["有oa", "有发票"] : ["候选oa", "候选发票"];
+  const relationTags = relationConfirmed ? ["有oa", "有发票"] : ["无oa", "无发票"];
   const rows = options.rowsEmpty
     ? []
     : [
@@ -6617,8 +6620,8 @@ function bankTransactionsPayload(
         oa_relation_tag: relationTags[0],
         invoice_relation_tag: relationTags[1],
         relation_tags: relationTags,
-        relation_case_id: "CASE-202603-101",
-        relation_status: relationConfirmed ? "linked" : "candidate",
+        relation_case_id: relationConfirmed ? "CASE-202603-101" : "",
+        relation_status: relationConfirmed ? "linked" : "unlinked",
       },
       ...(bankImportConfirmed ? [
         {
@@ -6712,8 +6715,8 @@ function bankTransactionsPayload(
           oa_relation_tag: relationTags[0],
           invoice_relation_tag: relationTags[1],
           relation_tags: relationTags,
-          relation_case_id: `CASE-LARGE-202603-${padded}`,
-          relation_status: relationConfirmed ? "linked" : "candidate",
+          relation_case_id: relationConfirmed ? `CASE-LARGE-202603-${padded}` : "",
+          relation_status: relationConfirmed ? "linked" : "unlinked",
         };
       }) : []),
     ];
@@ -6967,8 +6970,7 @@ function bankAutoTagRulesPayload(canSave = true, options: BankAutoTagRulesPayloa
   };
 }
 
-function pendingInvoiceRow(relationConfirmed: boolean, candidateRelations = false) {
-  const hasCandidateRelations = !relationConfirmed && candidateRelations;
+function pendingInvoiceRow(relationConfirmed: boolean) {
   const status = relationConfirmed
     ? {
       code: "paid_invoiced",
@@ -6984,7 +6986,7 @@ function pendingInvoiceRow(relationConfirmed: boolean, candidateRelations = fals
       severity: "warning",
       primary_action: "attach_existing_invoice",
     };
-  const inputInvoice = relationConfirmed || hasCandidateRelations ? {
+  const inputInvoice = relationConfirmed ? {
     id: "iv-o-202603-001",
     invoice_no: "12561048",
     digital_invoice_no: "",
@@ -6996,10 +6998,10 @@ function pendingInvoiceRow(relationConfirmed: boolean, candidateRelations = fals
     buyer_name: "杭州溯源科技有限公司",
     invoice_type: "input",
     relation_case_id: "CASE-202603-101",
-    relation_status: relationConfirmed ? "linked" : "candidate",
-    relation_source: relationConfirmed ? "workbench_relation" : "workbench_relation_candidate",
+    relation_status: "linked",
+    relation_source: "workbench_relation",
   } : null;
-  const oaSummary = relationConfirmed || hasCandidateRelations ? {
+  const oaSummary = relationConfirmed ? {
     id: "oa-o-202603-001",
     applicant: "陈涛",
     application_type: "供应商付款申请",
@@ -7008,8 +7010,8 @@ function pendingInvoiceRow(relationConfirmed: boolean, candidateRelations = fals
     form_no: "CASE-202603-101",
     detail_available: true,
     relation_case_id: "CASE-202603-101",
-    relation_status: relationConfirmed ? "linked" : "candidate",
-    relation_source: relationConfirmed ? "workbench_relation" : "workbench_relation_candidate",
+    relation_status: "linked",
+    relation_source: "workbench_relation",
   } : null;
   return {
     id: "bk-o-202603-001",
@@ -7071,8 +7073,7 @@ function pendingInvoiceRow(relationConfirmed: boolean, candidateRelations = fals
   };
 }
 
-function pendingInvoiceSecondAttachRow(relationConfirmed: boolean, candidateRelations = false) {
-  const hasCandidateRelations = !relationConfirmed && candidateRelations;
+function pendingInvoiceSecondAttachRow(relationConfirmed: boolean) {
   const status = relationConfirmed
     ? {
       code: "paid_invoiced",
@@ -7088,7 +7089,7 @@ function pendingInvoiceSecondAttachRow(relationConfirmed: boolean, candidateRela
       severity: "warning",
       primary_action: "attach_existing_invoice",
     };
-  const inputInvoice = relationConfirmed || hasCandidateRelations ? {
+  const inputInvoice = relationConfirmed ? {
     id: "iv-o-202603-002",
     invoice_no: "12561049",
     digital_invoice_no: "",
@@ -7100,8 +7101,8 @@ function pendingInvoiceSecondAttachRow(relationConfirmed: boolean, candidateRela
     buyer_name: "杭州溯源科技有限公司",
     invoice_type: "input",
     relation_case_id: "CASE-202603-102",
-    relation_status: relationConfirmed ? "linked" : "candidate",
-    relation_source: relationConfirmed ? "workbench_relation" : "workbench_relation_candidate",
+    relation_status: "linked",
+    relation_source: "workbench_relation",
   } : null;
   return {
     id: "bk-o-202603-002",
@@ -7247,7 +7248,6 @@ function pendingInvoiceImportFanoutRow() {
 
 function pendingInvoiceRowsPayload(
   relationConfirmed: boolean,
-  candidateRelations = false,
   readModelStatus: PendingInvoiceReadModelMockStatus = "fresh",
   rowsEmpty = false,
   includeAttachExistingBatchRows = false,
@@ -7257,8 +7257,8 @@ function pendingInvoiceRowsPayload(
   const rows = rowsEmpty
     ? []
     : [
-      pendingInvoiceRow(relationConfirmed, candidateRelations),
-      ...(includeAttachExistingBatchRows ? [pendingInvoiceSecondAttachRow(relationConfirmed, candidateRelations)] : []),
+      pendingInvoiceRow(relationConfirmed),
+      ...(includeAttachExistingBatchRows ? [pendingInvoiceSecondAttachRow(relationConfirmed)] : []),
       ...(includeInvoiceImportEvidence ? [pendingInvoiceImportFanoutRow()] : []),
     ];
   const totalRows = rows.length;
@@ -7337,8 +7337,8 @@ function pendingInvoiceFilterSortRowsPayload(
   const sortField = url.searchParams.get("sort_field") ?? "trade_date";
   const sortDirection = url.searchParams.get("sort_direction") ?? "desc";
   let rows = [
-    pendingInvoiceRow(relationConfirmed, false),
-    pendingInvoiceSecondAttachRow(relationConfirmed, false),
+    pendingInvoiceRow(relationConfirmed),
+    pendingInvoiceSecondAttachRow(relationConfirmed),
   ].filter((row) => {
     const statusCode = String(row.invoice_acquisition_status.code ?? "");
     const counterpartyName = String(row.bank_transaction.counterparty_name ?? "");
@@ -7368,7 +7368,6 @@ function pendingInvoiceFilterSortRowsPayload(
   }
   const payload = pendingInvoiceRowsPayload(
     relationConfirmed,
-    false,
     readModelStatus,
     false,
     true,
@@ -7725,7 +7724,7 @@ function pendingInvoiceExportBody(relationConfirmed: boolean, url: URL) {
 }
 
 function bankDetailsExportBody(relationConfirmed: boolean, url: URL) {
-  const relationTags = relationConfirmed ? ["有oa", "有发票"] : ["候选oa", "候选发票"];
+  const relationTags = relationConfirmed ? ["有oa", "有发票"] : ["无oa", "无发票"];
   return createMinimalXlsx([
     ["交易ID", "对方户名", "银行账户", "标签", "关系案例", "OA关系", "发票关系", "关系状态", "摘要"],
     [
@@ -7733,10 +7732,10 @@ function bankDetailsExportBody(relationConfirmed: boolean, url: URL) {
       "智能工厂设备商",
       "建设银行 1138",
       "设备款",
-      "CASE-202603-101",
+      relationConfirmed ? "CASE-202603-101" : "",
       relationTags[0],
       relationTags[1],
-      relationConfirmed ? "linked" : "candidate",
+      relationConfirmed ? "linked" : "unlinked",
       relationConfirmed ? "设备尾款已闭环" : "设备尾款待进项票",
     ],
     [
@@ -8592,10 +8591,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       if (options.oaPendingPaymentRelationFanout) {
         return json(route, oaPendingPaymentRelationFanoutRowsPayload(relationConfirmed));
       }
-      return json(route, oaPendingPaymentRowsPayload(
-        Boolean(options.oaPendingPaymentCandidateRelations),
-        invoiceImportDownstreamConfirmed,
-      ));
+      return json(route, oaPendingPaymentRowsPayload(invoiceImportDownstreamConfirmed));
     }
 
     if (path === "/api/oa-pending-payments/filter-options") {
@@ -9219,7 +9215,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     if (path === "/api/workbench") {
       if (options.workbenchBankFlowRuleBatchScenario) {
         const pairedGroups = bankFlowRuleWorkbenchGroups("paired", relationConfirmed);
-        const openGroups = bankFlowRuleWorkbenchGroups("open", relationConfirmed);
+        const unpairedGroups = bankFlowRuleWorkbenchGroups("unpaired", relationConfirmed);
         return json(route, {
           month: "all",
           summary: {
@@ -9227,7 +9223,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
             bank_count: 5,
             invoice_count: relationConfirmed ? 1 : 0,
             paired_count: relationConfirmed ? 2 : 1,
-            open_count: relationConfirmed ? 0 : 1,
+            unpaired_count: relationConfirmed ? 0 : 1,
             exception_count: 0,
             ignored_count: 0,
           },
@@ -9242,7 +9238,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
             oa_attachment_total: 0,
           },
           paired: { groups: pairedGroups },
-          open: { groups: openGroups },
+          unpaired: { groups: unpairedGroups },
           read_model_status: "fresh",
           generated_at: "2026-06-17T01:00:00Z",
         });
@@ -9378,7 +9374,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
             bank_count: 5,
             invoice_count: relationConfirmed ? 1 : 0,
             paired_count: relationConfirmed ? 2 : 1,
-            open_count: relationConfirmed ? 0 : 1,
+            unpaired_count: relationConfirmed ? 0 : 1,
             exception_count: 0,
             ignored_count: 0,
           },
@@ -9413,7 +9409,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           message: "browser workbench refetch failed",
         }, 500);
       }
-      const zone = url.searchParams.get("zone") === "paired" ? "paired" : "open";
+      const zone = url.searchParams.get("zone") === "paired" ? "paired" : "unpaired";
       const requestedPage = Number.parseInt(url.searchParams.get("page") ?? "1", 10);
       const requestedPageSize = Number.parseInt(url.searchParams.get("page_size") ?? "50", 10);
       if (options.workbenchBankFlowRuleBatchScenario) {
@@ -9778,7 +9774,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       }
       return json(route, pendingInvoiceRowsPayload(
         relationConfirmed,
-        Boolean(options.pendingInvoiceCandidateRelations),
         options.pendingInvoiceReadModelStatus ?? "fresh",
         Boolean(options.pendingInvoiceRowsEmpty),
         Boolean(options.pendingInvoiceAttachExistingBatchRows),

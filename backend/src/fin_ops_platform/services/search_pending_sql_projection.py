@@ -231,7 +231,7 @@ class SearchPendingSqlProjectionBuilder:
             source_kind = str(row.get("source_kind") or payload.get("type") or payload.get("record_type") or "").strip()
             if not row_id or source_kind not in {"oa", "bank", "invoice"}:
                 continue
-            zone_hint = str(row.get("group_zone") or row.get("status") or payload.get("zone_hint") or "open").strip() or "open"
+            zone_hint = str(row.get("group_zone") or row.get("status") or payload.get("zone_hint") or "unpaired").strip() or "unpaired"
             group_id = text(row.get("group_id") or payload.get("group_id"))
             title = _search_title(source_kind, payload, row)
             primary_meta = _primary_meta(payload, row)
@@ -1079,7 +1079,7 @@ def _join_text(*parts: object) -> str:
 def _status_label(status: str) -> str:
     return {
         "paired": "已配对",
-        "open": "未配对",
+        "unpaired": "未配对",
         "ignored": "已忽略",
         "processed_exception": "已处理异常",
     }.get(status, status)

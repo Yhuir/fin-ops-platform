@@ -381,6 +381,11 @@ function stringValue(value: unknown, fallback = "") {
   return typeof value === "string" && value.trim() ? value : fallback;
 }
 
+function formalRelationStatus(value: unknown, fallback: "linked" | "unlinked" = "linked"): "linked" | "unlinked" {
+  const normalized = stringValue(value, fallback).trim().toLowerCase();
+  return normalized === "linked" ? "linked" : "unlinked";
+}
+
 function displayDateTime(value: unknown, fallback = "") {
   const text = stringValue(value, fallback);
   const match = text.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?$/);
@@ -498,7 +503,7 @@ function mapBankTransactionSummary(value: ApiBankTransactionPayload | null | und
   return {
     ...mapped,
     relationCaseId: stringValue(value?.relation_case_id, stringValue(value?.relationCaseId)),
-    relationStatus: stringValue(value?.relation_status, stringValue(value?.relationStatus, "linked")),
+    relationStatus: formalRelationStatus(value?.relation_status ?? value?.relationStatus),
     relationSource: stringValue(value?.relation_source, stringValue(value?.relationSource)),
   };
 }
@@ -517,7 +522,7 @@ function mapInvoice(value: ApiInvoiceSummary | null | undefined): PendingInvoice
     buyerName: stringValue(value?.buyer_name),
     invoiceType: stringValue(value?.invoice_type, "input") as PendingInvoiceSummary["invoiceType"],
     relationCaseId: stringValue(value?.relation_case_id, stringValue(value?.relationCaseId)),
-    relationStatus: stringValue(value?.relation_status, stringValue(value?.relationStatus, "linked")),
+    relationStatus: formalRelationStatus(value?.relation_status ?? value?.relationStatus),
     relationSource: stringValue(value?.relation_source, stringValue(value?.relationSource)),
   };
 }
@@ -536,7 +541,7 @@ function mapOa(value: ApiOaSummary | null | undefined): PendingInvoiceOaSummary 
     formNo: stringValue(value?.form_no),
     detailAvailable: value?.detail_available !== false,
     relationCaseId: stringValue(value?.relation_case_id, stringValue(value?.relationCaseId)),
-    relationStatus: stringValue(value?.relation_status, stringValue(value?.relationStatus, "linked")),
+    relationStatus: formalRelationStatus(value?.relation_status ?? value?.relationStatus),
     relationSource: stringValue(value?.relation_source, stringValue(value?.relationSource)),
   };
 }
@@ -854,7 +859,7 @@ function mapRelationDetail(payload: ApiRelationDetail): PendingInvoiceRelationDe
       counterpartyName: stringValue(row.counterparty_name),
       debitAmount: stringValue(row.debit_amount, stringValue(row.amount)),
       relationCaseId: stringValue(row.relation_case_id, stringValue(row.relationCaseId)),
-      relationStatus: stringValue(row.relation_status, stringValue(row.relationStatus, "linked")),
+      relationStatus: formalRelationStatus(row.relation_status ?? row.relationStatus),
       relationSource: stringValue(row.relation_source, stringValue(row.relationSource)),
     })),
     paidTotal: stringValue(payload.paid_total),

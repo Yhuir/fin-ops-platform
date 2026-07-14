@@ -6,8 +6,8 @@ import type { WorkbenchInlineAction } from "./RowActions";
 import WorkbenchRecordCard from "./WorkbenchRecordCard";
 import type { WorkbenchColumn } from "../../features/workbench/tableConfig";
 
-type CandidateGroupCellProps = {
-  zoneId: "paired" | "open";
+type RelationGroupCellProps = {
+  zoneId: "paired" | "unpaired";
   paneId: WorkbenchRecordType;
   columns: WorkbenchColumn[];
   columnGridStyle?: {
@@ -21,8 +21,8 @@ type CandidateGroupCellProps = {
   showActionColumn?: boolean;
   highlightedRowId?: string | null;
   searchQuery?: string;
-  getRowState: (row: WorkbenchRecord, zoneId: "paired" | "open") => WorkbenchRowState;
-  onSelectRow: (row: WorkbenchRecord, zoneId: "paired" | "open") => void;
+  getRowState: (row: WorkbenchRecord, zoneId: "paired" | "unpaired") => WorkbenchRowState;
+  onSelectRow: (row: WorkbenchRecord, zoneId: "paired" | "unpaired") => void;
   onOpenDetail: (row: WorkbenchRecord) => void;
   onRowAction: (row: WorkbenchRecord, action: WorkbenchInlineAction) => void;
   showWorkflowActions: boolean;
@@ -31,7 +31,7 @@ type CandidateGroupCellProps = {
   leadingControl?: ReactNode;
 };
 
-function CandidateGroupCell({
+function RelationGroupCell({
   zoneId,
   paneId,
   columns,
@@ -51,7 +51,7 @@ function CandidateGroupCell({
   canMutateData,
   readOnly = false,
   leadingControl,
-}: CandidateGroupCellProps) {
+}: RelationGroupCellProps) {
   const isSingleRecord = records.length === 1;
 
   if (records.length === 0) {
@@ -104,4 +104,4 @@ function CandidateGroupCell({
   );
 }
 
-export default memo(CandidateGroupCell);
+export default memo(RelationGroupCell);

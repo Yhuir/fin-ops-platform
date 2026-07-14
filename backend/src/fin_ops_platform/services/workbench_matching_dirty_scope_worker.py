@@ -72,7 +72,10 @@ class WorkbenchMatchingDirtyScopeWorker:
             "stale_completed_scope_months": stale_completed_scope_months,
             "processed_months": [],
             "failed_months": [],
-            "candidate_count": 0,
+            "planned_relation_count": 0,
+            "created_relation_count": 0,
+            "extended_relation_count": 0,
+            "blocked_count": 0,
         }
         self._record_heartbeat(
             "polling",
@@ -119,7 +122,7 @@ class WorkbenchMatchingDirtyScopeWorker:
                 {
                     "request_id": request_id,
                     "processed_months": list(summary["processed_months"]),
-                    "candidate_count": summary["candidate_count"],
+                    "created_relation_count": summary["created_relation_count"],
                 },
             )
         return summary
@@ -176,9 +179,13 @@ class WorkbenchMatchingDirtyScopeWorker:
             processed_months = list(summary["processed_months"])
             processed_months.append(scope_month)
             summary["processed_months"] = processed_months
-            summary["candidate_count"] = int(summary.get("candidate_count") or 0) + int(
-                run_summary.get("candidate_count") or 0
-            )
+            for count_key in (
+                "planned_relation_count",
+                "created_relation_count",
+                "extended_relation_count",
+                "blocked_count",
+            ):
+                summary[count_key] = int(summary.get(count_key) or 0) + int(run_summary.get(count_key) or 0)
         except Exception as exc:
             self._dirty_queue.fail(
                 scope_month,

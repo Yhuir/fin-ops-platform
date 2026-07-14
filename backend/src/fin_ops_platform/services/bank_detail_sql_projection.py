@@ -493,12 +493,13 @@ class BankDetailSqlProjectionBuilder:
                 },
             )
             normalized_status = str(relation_status or "").strip() or "linked"
-            if current.get("relation_status") != "linked":
-                current["relation_status"] = normalized_status
+            if normalized_status != "linked":
+                continue
+            current["relation_status"] = "linked"
             if has_oa:
-                current["oa_relation_tag"] = "候选oa" if normalized_status == "candidate" else "有oa"
+                current["oa_relation_tag"] = "有oa"
             if has_invoice:
-                current["invoice_relation_tag"] = "候选发票" if normalized_status == "candidate" else "有发票"
+                current["invoice_relation_tag"] = "有发票"
             current["relation_case_id"] = current.get("relation_case_id") or case_id
 
     def _normalize_transaction_row(self, row: dict[str, Any]) -> dict[str, Any]:

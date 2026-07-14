@@ -15,7 +15,7 @@ test.describe("bank details read model freshness browser behavior", () => {
 
     const bankRow = page.getByRole("row", { name: /智能工厂设备商/ });
     await expect(bankRow.getByText("设备款")).toBeVisible();
-    await expect(bankRow.getByText("候选oa")).toBeVisible();
+    await expect(bankRow.getByText("无oa")).toBeVisible();
     await expect(page.getByText("当前时间范围内没有流水。")).not.toBeVisible();
   });
 

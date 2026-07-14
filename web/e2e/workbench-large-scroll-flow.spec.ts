@@ -50,9 +50,9 @@ test.describe("workbench large dataset browser flow", () => {
 
     await page.goto("/");
 
-    const openZone = page.getByTestId("zone-open");
+    const openZone = page.getByTestId("zone-unpaired");
     await expect(openZone.getByText("已加载 200 / 205")).toBeVisible();
-    await expect(page.getByTestId("candidate-group-open-case:CASE-LARGE-202603-001")).toBeVisible();
+    await expect(page.getByTestId("candidate-group-unpaired-case:CASE-LARGE-202603-001")).toBeVisible();
 
     await openZone.locator(".candidate-grid-body").evaluate((element) => {
       element.scrollTop = element.scrollHeight;
@@ -65,10 +65,10 @@ test.describe("workbench large dataset browser flow", () => {
 
     await openZone.getByRole("button", { name: "搜索 银行流水" }).click();
     await page.getByRole("searchbox", { name: "搜索 银行流水" }).fill("长列表供应商065");
-    const targetGroup = page.getByTestId("candidate-group-open-case:CASE-LARGE-202603-065");
+    const targetGroup = page.getByTestId("candidate-group-unpaired-case:CASE-LARGE-202603-065");
     await expect(targetGroup).toBeVisible();
     await expect(openZone.getByText("已加载 1 / 1")).toBeVisible();
-    await expect(page.getByTestId("candidate-group-open-case:CASE-LARGE-202603-001")).toHaveCount(0);
+    await expect(page.getByTestId("candidate-group-unpaired-case:CASE-LARGE-202603-001")).toHaveCount(0);
 
     await targetGroup.getByRole("row", { name: /大数据申请人065/ }).click();
     await expect(openZone.getByText("已选 1")).toBeVisible();
@@ -89,9 +89,9 @@ test.describe("workbench large dataset browser flow", () => {
     await expect(openZone.getByText("带入 2")).toBeVisible();
     await expect(confirmButton).toBeEnabled();
 
-    const bankFooter = page.getByTestId("pane-scrollbar-open-bank");
-    const bankHeader = page.getByTestId("pane-scroll-head-open-bank");
-    const bankRow = page.getByTestId("candidate-scroll-open-case:CASE-LARGE-202603-065-bank");
+    const bankFooter = page.getByTestId("pane-scrollbar-unpaired-bank");
+    const bankHeader = page.getByTestId("pane-scroll-head-unpaired-bank");
+    const bankRow = page.getByTestId("candidate-scroll-unpaired-case:CASE-LARGE-202603-065-bank");
     const scrollLeft = await scrollPaneHorizontally(bankFooter);
     await expect.poll(() => bankHeader.evaluate((element) => element.scrollLeft)).toBe(scrollLeft);
     await expect.poll(() => bankRow.evaluate((element) => element.scrollLeft)).toBe(scrollLeft);

@@ -16,6 +16,7 @@ from fin_ops_platform.services.postgres_repositories.common import (
 )
 from fin_ops_platform.services.postgres_repositories.oa_projection import COMPLETED_WORKFLOW_STATUS_SQL
 from fin_ops_platform.services.postgres_snapshot_contracts import normalize_workbench_pair_relations
+from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
 
 
 WORKBENCH_RELATION_DOWNSTREAM_SCOPE_TYPES = (
@@ -128,6 +129,66 @@ class PostgresWorkbenchRelationRepository:
             relations,
             [payload for row in history_rows if isinstance((payload := row_payload(row, "raw_payload")), dict)],
         )
+
+    def acquire_relation_member_locks(
+        self,
+        row_ids: list[str],
+        *,
+        row_types: list[str] | None = None,
+        case_ids: list[str] | None = None,
+    ) -> list[str]:
+        normalized_row_ids = text_list(row_ids)
+        normalized_row_types = text_list(row_types)
+        normalized_case_ids = text_list(case_ids)
+        member_keys: set[str] = set()
+        for index, row_id in enumerate(normalized_row_ids):
+            row_type = (
+                normalized_row_types[index]
+                if index < len(normalized_row_types)
+                else row_type_for_workbench_row_id(row_id, unknown="")
+            )
+            if not row_type:
+                raise ValueError(f"Cannot resolve Workbench relation member type for {row_id}.")
+            member_keys.add(f"{row_type}:{row_id}")
+        if normalized_case_ids:
+            persisted_rows = self._connection.fetch_all(
+                """
+                select case_id, row_ids, row_types
+                from app.workbench_pair_relations
+                where case_id = any(%s::text[])
+                  and status = 'active'
+                order by case_id
+                """,
+                (normalized_case_ids,),
+            )
+            for relation in persisted_rows:
+                persisted_ids = text_list(relation.get("row_ids"))
+                persisted_types = text_list(relation.get("row_types"))
+                for index, row_id in enumerate(persisted_ids):
+                    row_type = (
+                        persisted_types[index]
+                        if index < len(persisted_types)
+                        else row_type_for_workbench_row_id(row_id, unknown="")
+                    )
+                    if not row_type:
+                        raise ValueError(f"Cannot resolve persisted Workbench relation member type for {row_id}.")
+                    member_keys.add(f"{row_type}:{row_id}")
+        ordered_keys = sorted(member_keys)
+        if ordered_keys:
+            self._connection.fetch_all(
+                """
+                select pg_advisory_xact_lock(
+                    hashtextextended('workbench_relation_member:' || ordered.member_key, 0)
+                )
+                from (
+                    select member_key
+                    from unnest(%s::text[]) as members(member_key)
+                    order by member_key
+                ) ordered
+                """,
+                (ordered_keys,),
+            )
+        return ordered_keys
 
     def save_workbench_pair_relations(
         self,

@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from http import HTTPStatus
 from typing import Callable
 
+from fin_ops_platform.services.workbench_read_model_version import WorkbenchReadModelVersionConflictError
+
 
 @dataclass(frozen=True)
 class WorkbenchQueryResult:
@@ -109,7 +111,7 @@ class WorkbenchQueryFacade:
                         "bank_count": 0,
                         "invoice_count": 0,
                         "paired_count": 0,
-                        "open_count": 0,
+                        "unpaired_count": 0,
                         "exception_count": 0,
                     },
                     "read_model_status": "refreshing",
@@ -330,7 +332,14 @@ class WorkbenchQueryFacade:
             set_cached(cache_key, {"payload": payload}, ttl_seconds=self._groups_redis_ttl_seconds())
         return WorkbenchQueryResult(HTTPStatus.OK, payload)
 
-    def group_detail(self, month: str | None, *, zone: str, group_id: str) -> WorkbenchQueryResult:
+    def group_detail(
+        self,
+        month: str | None,
+        *,
+        zone: str,
+        group_id: str,
+        expected_read_model_version: str | None = None,
+    ) -> WorkbenchQueryResult:
         current_month = month or "all"
         scope_key = self._scope_key_for_month(current_month)
         get_group_detail = getattr(self._repository, "get_workbench_group_detail", None)
@@ -351,8 +360,26 @@ class WorkbenchQueryFacade:
                 },
             )
         try:
-            group = get_group_detail(scope_key=scope_key, zone=zone, group_id=group_id)
+            group = get_group_detail(
+                scope_key=scope_key,
+                zone=zone,
+                group_id=group_id,
+                expected_read_model_version=expected_read_model_version,
+            )
         except Exception as error:
+            if isinstance(error, WorkbenchReadModelVersionConflictError):
+                return WorkbenchQueryResult(
+                    HTTPStatus.CONFLICT,
+                    {
+                        "error": "workbench_read_model_version_conflict",
+                        "message": str(error),
+                        "scope_key": scope_key,
+                        "zone": zone,
+                        "group_id": group_id,
+                        "expected_read_model_version": error.expected,
+                        "read_model_version": error.current,
+                    },
+                )
             if self._missing_read_model_error(error):
                 self._emit_status_metric(
                     endpoint="/api/workbench/groups/detail",

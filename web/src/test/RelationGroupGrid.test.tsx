@@ -2,12 +2,12 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { readFileSync } from "node:fs";
 import { useState } from "react";
 
-import CandidateGroupGrid from "../components/workbench/CandidateGroupGrid";
-import CandidateGroupCell from "../components/workbench/CandidateGroupCell";
+import RelationGroupGrid from "../components/workbench/RelationGroupGrid";
+import RelationGroupCell from "../components/workbench/RelationGroupCell";
 import WorkbenchRecordCard from "../components/workbench/WorkbenchRecordCard";
 import { createEmptyWorkbenchZoneDisplayState } from "../features/workbench/groupDisplayModel";
 import { getWorkbenchColumns, getWorkbenchPaneGridStyle } from "../features/workbench/tableConfig";
-import type { WorkbenchCandidateGroup, WorkbenchRecord } from "../features/workbench/types";
+import type { WorkbenchRelationGroup, WorkbenchRecord } from "../features/workbench/types";
 import { installMockApiFetch } from "./apiMock";
 import { expectCustomEventDetailContaining } from "./eventAssertions";
 import { renderWorkbenchPage } from "./workbenchRenderHelpers";
@@ -161,7 +161,7 @@ describe("Workbench candidate grouping layout", () => {
     };
   }
 
-  function createTruncatedManualInvoiceGroup(): WorkbenchCandidateGroup {
+  function createTruncatedManualInvoiceGroup(): WorkbenchRelationGroup {
     const invoiceRows = [
       createInvoiceRecord("manual-inv-many-1", "MANUAL-MANY-001"),
       createInvoiceRecord("manual-inv-many-2", "MANUAL-MANY-002"),
@@ -169,8 +169,8 @@ describe("Workbench candidate grouping layout", () => {
     ];
     return {
       id: "case:CASE-MANUAL-INVOICE-MANY",
-      groupType: "open",
-      rawGroupType: "source_linked",
+      groupType: "unpaired",
+      rawGroupType: "relation",
       matchConfidence: "high",
       reason: "manual_invoice_source_relation",
       rows: {
@@ -221,11 +221,11 @@ describe("Workbench candidate grouping layout", () => {
     };
   }
 
-  function createNoOaCollapsedGroup(): WorkbenchCandidateGroup {
+  function createNoOaCollapsedGroup(): WorkbenchRelationGroup {
     const summary = createNoOaBankRecord("nooa-summary-NOOA-202603-FEE", "免OA手续费批次", "30.00", "2 条手续费");
     return {
       id: "no-oa-bank-batch:NOOA-202603-FEE",
-      groupType: "manual_confirmed",
+      groupType: "paired",
       matchConfidence: "high",
       reason: "免OA手续费批次",
       relationMode: "no_oa_bank_batch",
@@ -258,7 +258,7 @@ describe("Workbench candidate grouping layout", () => {
     };
   }
 
-  function createBankFlowCollapsedGroup(): WorkbenchCandidateGroup {
+  function createBankFlowCollapsedGroup(): WorkbenchRelationGroup {
     const summary = createNoOaBankRecord("bank-flow-summary-BATCH-202603-FEE", "流水规则手续费批次", "124.50", "15 条手续费");
     return {
       ...createNoOaCollapsedGroup(),
@@ -295,7 +295,7 @@ describe("Workbench candidate grouping layout", () => {
     };
   }
 
-  function createBankFlowPlaceholderGroup(): WorkbenchCandidateGroup {
+  function createBankFlowPlaceholderGroup(): WorkbenchRelationGroup {
     const group = createBankFlowCollapsedGroup();
     const placeholder: WorkbenchRecord = {
       ...createNoOaBankRecord("bk-bank-flow-placeholder-001", "占位明细", "--", "--"),
@@ -329,7 +329,7 @@ describe("Workbench candidate grouping layout", () => {
     };
   }
 
-  function createBankFlowFullDetailGroup(): WorkbenchCandidateGroup {
+  function createBankFlowFullDetailGroup(): WorkbenchRelationGroup {
     const group = createBankFlowCollapsedGroup();
     const collapsedRows = Array.from({ length: 15 }, (_, index) => {
       const itemNumber = index + 1;
@@ -383,11 +383,11 @@ describe("Workbench candidate grouping layout", () => {
     } as WorkbenchRecord;
   }
 
-  function createTruncatedTurnoverGroup(): WorkbenchCandidateGroup {
+  function createTruncatedTurnoverGroup(): WorkbenchRelationGroup {
     return {
       id: "case:turnover:turnover_rel_36266274e9235566",
-      groupType: "open",
-      rawGroupType: "candidate",
+      groupType: "unpaired",
+      rawGroupType: "unpaired",
       matchConfidence: "high",
       reason: "existing_case_group",
       relationMode: "manual_confirmed",
@@ -409,7 +409,7 @@ describe("Workbench candidate grouping layout", () => {
     };
   }
 
-  function createFullTurnoverGroup(): WorkbenchCandidateGroup {
+  function createFullTurnoverGroup(): WorkbenchRelationGroup {
     const group = createTruncatedTurnoverGroup();
     return {
       ...group,
@@ -455,7 +455,7 @@ describe("Workbench candidate grouping layout", () => {
     };
   }
 
-  function createEtcCollapsedGroup(): WorkbenchCandidateGroup {
+  function createEtcCollapsedGroup(): WorkbenchRelationGroup {
     const summary: WorkbenchRecord = {
       id: "etc-summary-ETC-OA-20260215-154900",
       recordType: "invoice",
@@ -521,9 +521,9 @@ describe("Workbench candidate grouping layout", () => {
     };
   }
 
-  function renderNoOaGrid(group: WorkbenchCandidateGroup = createNoOaCollapsedGroup()) {
+  function renderNoOaGrid(group: WorkbenchRelationGroup = createNoOaCollapsedGroup()) {
     return render(
-      <CandidateGroupGrid
+      <RelationGroupGrid
         canMutateData
         displayState={createEmptyWorkbenchZoneDisplayState()}
         getRowState={() => "idle"}
@@ -553,7 +553,7 @@ describe("Workbench candidate grouping layout", () => {
   test("shows server total pane counts instead of the currently loaded page row count", () => {
     const group = createNoOaCollapsedGroup();
     render(
-      <CandidateGroupGrid
+      <RelationGroupGrid
         canMutateData
         displayState={createEmptyWorkbenchZoneDisplayState()}
         getRowState={() => "idle"}
@@ -585,11 +585,11 @@ describe("Workbench candidate grouping layout", () => {
         bank_count: 3,
         invoice_count: 0,
         paired_count: 1,
-        open_count: 0,
+        unpaired_count: 0,
         exception_count: 0,
         zone_counts: {
           paired: { groups: 1, oa: 0, bank: 3, invoice: 0, rows: 3 },
-          open: { groups: 0, oa: 0, bank: 0, invoice: 0, rows: 0 },
+          unpaired: { groups: 0, oa: 0, bank: 0, invoice: 0, rows: 0 },
         },
       },
       invoice_inventory: {},
@@ -597,7 +597,7 @@ describe("Workbench candidate grouping layout", () => {
         groups: [
           {
             group_id: "no-oa-bank-batch:NOOA-202603-FEE",
-            group_type: "manual_confirmed",
+            group_type: "relation",
             match_confidence: "high",
             reason: "免OA手续费批次",
             relation_mode: "no_oa_bank_batch",
@@ -644,7 +644,7 @@ describe("Workbench candidate grouping layout", () => {
           },
         ],
       },
-      open: { groups: [] },
+      unpaired: { groups: [] },
     };
   }
 
@@ -687,7 +687,7 @@ describe("Workbench candidate grouping layout", () => {
         );
       }
       if (url.pathname === "/api/workbench/groups") {
-        const zone = url.searchParams.get("zone") === "open" ? "open" : "paired";
+        const zone = url.searchParams.get("zone") === "unpaired" ? "unpaired" : "paired";
         const groups = payload[zone].groups;
         return new Response(
           JSON.stringify({
@@ -832,7 +832,7 @@ describe("Workbench candidate grouping layout", () => {
     const ensureGroupDetail = vi.fn().mockResolvedValue(undefined);
 
     render(
-      <CandidateGroupGrid
+      <RelationGroupGrid
         canMutateData
         getRowState={() => "idle"}
         groups={[group]}
@@ -847,7 +847,7 @@ describe("Workbench candidate grouping layout", () => {
         ]}
         rowTemplateColumns="1fr 8px 1fr 8px 1fr"
         sourceGroups={[group]}
-        zoneId="open"
+        zoneId="unpaired"
       />,
     );
 
@@ -860,7 +860,7 @@ describe("Workbench candidate grouping layout", () => {
 
     fireEvent.click(expandButton);
 
-    await waitFor(() => expect(ensureGroupDetail).toHaveBeenCalledWith("open", "case:CASE-MANUAL-INVOICE-MANY"));
+    await waitFor(() => expect(ensureGroupDetail).toHaveBeenCalledWith("unpaired", "case:CASE-MANUAL-INVOICE-MANY"));
   });
 
   test("auto-loads complete collapsed summary detail when summary response truncates collapsed rows", async () => {
@@ -868,7 +868,7 @@ describe("Workbench candidate grouping layout", () => {
     const ensureGroupDetail = vi.fn().mockResolvedValue(undefined);
 
     render(
-      <CandidateGroupGrid
+      <RelationGroupGrid
         canMutateData
         displayState={createEmptyWorkbenchZoneDisplayState()}
         getRowState={() => "idle"}
@@ -890,15 +890,15 @@ describe("Workbench candidate grouping layout", () => {
     await waitFor(() => expect(ensureGroupDetail).toHaveBeenCalledWith("paired", "bank-flow-rule-batch:BATCH-202603-FEE"));
   });
 
-  test("renders OA, bank, and invoice candidates on the same horizontal group row", async () => {
+  test("renders a formal OA, bank, and invoice relation on the same horizontal group row", async () => {
     installMockApiFetch();
     renderWorkbenchPage();
 
-    const groupRow = await screen.findByTestId("candidate-group-open-case:CASE-202603-101");
+    const groupRow = await screen.findByTestId("candidate-group-paired-case:CASE-202603-001");
 
-    expect(within(groupRow).getByText("陈涛")).toBeInTheDocument();
-    expect(within(groupRow).getAllByText("智能工厂设备商").length).toBeGreaterThan(0);
-    expect(within(groupRow).getAllByText("58000").length).toBeGreaterThan(0);
+    expect(within(groupRow).getByText("赵华")).toBeInTheDocument();
+    expect(within(groupRow).getAllByText("华东设备供应商").length).toBeGreaterThan(0);
+    expect(within(groupRow).getAllByText("128000").length).toBeGreaterThan(0);
     expect(within(groupRow).getByText("进")).toBeInTheDocument();
   });
 
@@ -906,10 +906,10 @@ describe("Workbench candidate grouping layout", () => {
     const oa294 = createOaRecord("oa-294", "刘晓宇", "294.31");
     const oa135 = createOaRecord("oa-135", "陈雄兵", "135");
     const bank = createBankRecord();
-    const group: WorkbenchCandidateGroup = {
+    const group: WorkbenchRelationGroup = {
       id: "case:CASE-MULTI-OA-ATTACHMENT",
-      groupType: "open",
-      rawGroupType: "manual_confirmed",
+      groupType: "unpaired",
+      rawGroupType: "relation",
       matchConfidence: "high",
       reason: "existing_case_group",
       rows: {
@@ -925,7 +925,7 @@ describe("Workbench candidate grouping layout", () => {
     };
 
     render(
-      <CandidateGroupGrid
+      <RelationGroupGrid
         canMutateData
         displayState={createEmptyWorkbenchZoneDisplayState()}
         getRowState={() => "idle"}
@@ -939,11 +939,11 @@ describe("Workbench candidate grouping layout", () => {
           { id: "invoice", title: "进销项发票", rows: group.rows.invoice },
         ]}
         rowTemplateColumns="1fr 8px 1fr 8px 1fr"
-        zoneId="open"
+        zoneId="unpaired"
       />,
     );
 
-    const firstOaSegment = screen.getByTestId("candidate-group-segment-open-case:CASE-MULTI-OA-ATTACHMENT-oa-294");
+    const firstOaSegment = screen.getByTestId("candidate-group-segment-unpaired-case:CASE-MULTI-OA-ATTACHMENT-oa-294");
     expect(within(firstOaSegment).getByText("刘晓宇")).toBeInTheDocument();
     expect(within(firstOaSegment).getByText("294.31")).toBeInTheDocument();
     expect(within(firstOaSegment).getAllByText("56.22").length).toBeGreaterThan(0);
@@ -952,7 +952,7 @@ describe("Workbench candidate grouping layout", () => {
     expect(within(firstOaSegment).queryByText("陈雄兵")).not.toBeInTheDocument();
     expect(within(firstOaSegment).queryByText("大理江尾老军饭店")).not.toBeInTheDocument();
 
-    const secondOaSegment = screen.getByTestId("candidate-group-segment-open-case:CASE-MULTI-OA-ATTACHMENT-oa-135");
+    const secondOaSegment = screen.getByTestId("candidate-group-segment-unpaired-case:CASE-MULTI-OA-ATTACHMENT-oa-135");
     expect(within(secondOaSegment).getByText("陈雄兵")).toBeInTheDocument();
     expect(within(secondOaSegment).getByText("大理江尾老军饭店")).toBeInTheDocument();
     expect(within(secondOaSegment).getAllByText("135").length).toBeGreaterThanOrEqual(2);
@@ -963,10 +963,10 @@ describe("Workbench candidate grouping layout", () => {
   test("aligns attachment invoice item ids with their parent OA row inside a multi-OA group", () => {
     const parentOa = createOaRecord("oa-exp-1968", "吴云江", "405");
     const siblingOa = createOaRecord("oa-exp-2001", "吴云江", "282");
-    const group: WorkbenchCandidateGroup = {
+    const group: WorkbenchRelationGroup = {
       id: "case:CASE-MULTI-OA-ITEM-ATTACHMENT",
       groupType: "paired",
-      rawGroupType: "manual_confirmed",
+      rawGroupType: "relation",
       matchConfidence: "high",
       reason: "existing_case_group",
       rows: {
@@ -984,7 +984,7 @@ describe("Workbench candidate grouping layout", () => {
     };
 
     render(
-      <CandidateGroupGrid
+      <RelationGroupGrid
         canMutateData
         displayState={createEmptyWorkbenchZoneDisplayState()}
         getRowState={() => "idle"}
@@ -1015,10 +1015,10 @@ describe("Workbench candidate grouping layout", () => {
   test("aligns source bank rows with their parent OA row inside a multi-OA group", () => {
     const parentOa = createOaRecord("oa-exp-1968", "吴云江", "405");
     const siblingOa = createOaRecord("oa-exp-2001", "吴云江", "282");
-    const group: WorkbenchCandidateGroup = {
+    const group: WorkbenchRelationGroup = {
       id: "case:CASE-MULTI-OA-SOURCE-BANK",
       groupType: "paired",
-      rawGroupType: "manual_confirmed",
+      rawGroupType: "relation",
       matchConfidence: "high",
       reason: "existing_case_group",
       rows: {
@@ -1029,7 +1029,7 @@ describe("Workbench candidate grouping layout", () => {
     };
 
     render(
-      <CandidateGroupGrid
+      <RelationGroupGrid
         canMutateData
         displayState={createEmptyWorkbenchZoneDisplayState()}
         getRowState={() => "idle"}
@@ -1088,10 +1088,10 @@ describe("Workbench candidate grouping layout", () => {
         grossAmount: "29350",
       },
     };
-    const group: WorkbenchCandidateGroup = {
+    const group: WorkbenchRelationGroup = {
       id: "case:CASE-MULTI-OA-AMOUNT-FALLBACK",
       groupType: "paired",
-      rawGroupType: "manual_confirmed",
+      rawGroupType: "relation",
       matchConfidence: "high",
       reason: "existing_case_group",
       rows: {
@@ -1102,7 +1102,7 @@ describe("Workbench candidate grouping layout", () => {
     };
 
     render(
-      <CandidateGroupGrid
+      <RelationGroupGrid
         canMutateData
         displayState={createEmptyWorkbenchZoneDisplayState()}
         getRowState={() => "idle"}
@@ -1182,7 +1182,7 @@ describe("Workbench candidate grouping layout", () => {
     function GridHarness() {
       const [group, setGroup] = useState(summaryGroup);
       return (
-        <CandidateGroupGrid
+        <RelationGroupGrid
           canMutateData
           displayState={createEmptyWorkbenchZoneDisplayState()}
           getRowState={() => "idle"}
@@ -1201,14 +1201,14 @@ describe("Workbench candidate grouping layout", () => {
             { id: "invoice", title: "进销项发票", rows: group.rows.invoice },
           ]}
           rowTemplateColumns="1fr 8px 1fr 8px 1fr"
-          zoneId="open"
+          zoneId="unpaired"
         />
       );
     }
 
     render(<GridHarness />);
 
-    const bankCell = screen.getByTestId("candidate-scroll-open-case:turnover:turnover_rel_36266274e9235566-bank");
+    const bankCell = screen.getByTestId("candidate-scroll-unpaired-case:turnover:turnover_rel_36266274e9235566-bank");
     const expandButton = screen.getByRole("button", {
       name: "展开全部银行流水，当前显示 3 条，共 4 条",
     });
@@ -1230,7 +1230,7 @@ describe("Workbench candidate grouping layout", () => {
 
     expect(screen.getByText("加载中")).toBeInTheDocument();
     await waitFor(() => {
-      expect(ensureGroupDetail).toHaveBeenCalledWith("open", "case:turnover:turnover_rel_36266274e9235566");
+      expect(ensureGroupDetail).toHaveBeenCalledWith("unpaired", "case:turnover:turnover_rel_36266274e9235566");
     });
 
     await act(async () => {
@@ -1256,7 +1256,7 @@ describe("Workbench candidate grouping layout", () => {
     function GridHarness() {
       const [group, setGroup] = useState(summaryGroup);
       return (
-        <CandidateGroupGrid
+        <RelationGroupGrid
           canMutateData
           displayState={createEmptyWorkbenchZoneDisplayState()}
           getRowState={() => "idle"}
@@ -1304,7 +1304,7 @@ describe("Workbench candidate grouping layout", () => {
     const group = createBankFlowCollapsedGroup();
     const ensureGroupDetail = vi.fn().mockRejectedValue(new Error("stale"));
     render(
-      <CandidateGroupGrid
+      <RelationGroupGrid
         canMutateData
         displayState={createEmptyWorkbenchZoneDisplayState()}
         getRowState={() => "idle"}
@@ -1339,7 +1339,7 @@ describe("Workbench candidate grouping layout", () => {
   test("renders ETC invoice summaries collapsed by default and expands in the invoice pane", () => {
     const group = createEtcCollapsedGroup();
     render(
-      <CandidateGroupGrid
+      <RelationGroupGrid
         canMutateData
         displayState={createEmptyWorkbenchZoneDisplayState()}
         getRowState={() => "idle"}
@@ -1387,14 +1387,14 @@ describe("Workbench candidate grouping layout", () => {
     );
 
     render(
-      <CandidateGroupGrid
+      <RelationGroupGrid
         canMutateData
         displayState={createEmptyWorkbenchZoneDisplayState()}
         getRowState={() => "idle"}
         groups={[
           {
             id: "no-oa-bank-batch:NOOA-202603-SALARY",
-            groupType: "manual_confirmed",
+            groupType: "paired",
             matchConfidence: "high",
             reason: "免OA工资批次",
             relationMode: "no_oa_bank_batch",
@@ -1407,7 +1407,7 @@ describe("Workbench candidate grouping layout", () => {
           },
           {
             id: "no-oa-bank-batch:NOOA-202603-INTERNAL",
-            groupType: "manual_confirmed",
+            groupType: "paired",
             matchConfidence: "high",
             reason: "免OA内部往来款批次",
             relationMode: "no_oa_bank_batch",
@@ -1508,7 +1508,7 @@ describe("Workbench candidate grouping layout", () => {
         row={createBankRecord()}
         rowState="idle"
         showWorkflowActions={false}
-        zoneId="open"
+        zoneId="unpaired"
         onOpenDetail={() => undefined}
         onRowAction={() => undefined}
         onSelectRow={() => undefined}
@@ -1522,57 +1522,48 @@ describe("Workbench candidate grouping layout", () => {
     expect(screen.queryByText(/客户附言：/)).not.toBeInTheDocument();
   });
 
-  test("renders OA 2035 source OA and formal attachment invoices in the same horizontal group row", async () => {
+  test("renders OA 2035 and every unpaired attachment invoice as separate visible rows", async () => {
     installMockApiFetch();
     renderWorkbenchPage();
 
-    const groupRow = await screen.findByTestId("candidate-group-open-case:CASE-202603-OA-ATTACHMENT-2035");
-    const oaCell = within(groupRow).getByTestId("candidate-scroll-open-case:CASE-202603-OA-ATTACHMENT-2035-oa");
-    const invoiceCell = within(groupRow).getByTestId(
-      "candidate-scroll-open-case:CASE-202603-OA-ATTACHMENT-2035-invoice",
-    );
+    const oaGroup = await screen.findByTestId("candidate-group-unpaired-row:oa-exp-2035");
+    const machine25Group = await screen.findByTestId("candidate-group-unpaired-row:iv-oa-2035-machine-25");
+    const machine23Group = await screen.findByTestId("candidate-group-unpaired-row:iv-oa-2035-machine-23");
+    const fuelGroup = await screen.findByTestId("candidate-group-unpaired-row:iv-oa-2035-fuel-200");
 
-    expect(within(oaCell).getByRole("row", { name: /胡瑢.*248/ })).toBeInTheDocument();
-    expect(within(invoiceCell).getByRole("row", { name: /OA2035-MACHINE-25.*25/ })).toBeInTheDocument();
-    expect(within(invoiceCell).getByRole("row", { name: /OA2035-MACHINE-23.*23/ })).toBeInTheDocument();
-    expect(within(invoiceCell).getByRole("row", { name: /OA2035-FUEL-200.*200/ })).toBeInTheDocument();
-    expect(within(invoiceCell).queryByRole("row", { name: /微信支付/ })).not.toBeInTheDocument();
-    expect(within(invoiceCell).getAllByRole("row")).toHaveLength(3);
-    expect(within(invoiceCell).getAllByText("OA附件")).toHaveLength(3);
-    expect(within(invoiceCell).queryByText("付款凭证")).not.toBeInTheDocument();
-    expect(within(invoiceCell).queryByText("人工导入")).not.toBeInTheDocument();
+    expect(within(oaGroup).getByRole("row", { name: /胡瑢.*248/ })).toBeInTheDocument();
+    expect(within(machine25Group).getByRole("row", { name: /OA2035-MACHINE-25.*25/ })).toBeInTheDocument();
+    expect(within(machine23Group).getByRole("row", { name: /OA2035-MACHINE-23.*23/ })).toBeInTheDocument();
+    expect(within(fuelGroup).getByRole("row", { name: /OA2035-FUEL-200.*200/ })).toBeInTheDocument();
+    expect(screen.queryByRole("row", { name: /微信支付/ })).not.toBeInTheDocument();
 
     expect(screen.queryByRole("row", { name: /胡瑢付款项/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("row", { name: /付款项\s*[123].*248/ })).not.toBeInTheDocument();
   });
 
-  test("renders 292 source OA with only one OA attachment invoice in the same horizontal group row", async () => {
+  test("renders OA 292 and its unpaired attachment invoice as separate visible rows", async () => {
     installMockApiFetch();
     renderWorkbenchPage();
 
-    const groupRow = await screen.findByTestId("candidate-group-open-case:CASE-202603-OA-ATTACHMENT-292");
-    const oaCell = within(groupRow).getByTestId("candidate-scroll-open-case:CASE-202603-OA-ATTACHMENT-292-oa");
-    const invoiceCell = within(groupRow).getByTestId(
-      "candidate-scroll-open-case:CASE-202603-OA-ATTACHMENT-292-invoice",
-    );
+    const oaGroup = await screen.findByTestId("candidate-group-unpaired-row:oa-exp-292");
+    const invoiceGroup = await screen.findByTestId("candidate-group-unpaired-row:iv-oa-attachment-292-001");
 
-    expect(within(oaCell).getByRole("row", { name: /胡瑢.*292/ })).toBeInTheDocument();
-    expect(within(invoiceCell).getByRole("row", { name: /OAATT-292-001.*292/ })).toBeInTheDocument();
-    expect(within(invoiceCell).getAllByRole("row")).toHaveLength(1);
+    expect(within(oaGroup).getByRole("row", { name: /胡瑢.*292/ })).toBeInTheDocument();
+    expect(within(invoiceGroup).getByRole("row", { name: /OAATT-292-001.*292/ })).toBeInTheDocument();
   });
 
-  test("renders each candidate group as a shared sheet band instead of isolated cards", async () => {
+  test("renders formal relation groups as shared sheet bands and unpaired facts as singleton bands", async () => {
     installMockApiFetch();
     renderWorkbenchPage();
 
-    const groupedRow = await screen.findByTestId("candidate-group-open-case:CASE-202603-101");
-    const emptyRow = await screen.findByTestId("candidate-group-open-row:oa-o-202603-002");
+    const groupedRow = await screen.findByTestId("candidate-group-paired-case:CASE-202603-001");
+    const emptyRow = await screen.findByTestId("candidate-group-unpaired-row:oa-o-202603-002");
 
-    const oaCell = within(groupedRow).getByTestId("candidate-scroll-open-case:CASE-202603-101-oa");
-    const bankCell = within(groupedRow).getByTestId("candidate-scroll-open-case:CASE-202603-101-bank");
-    const invoiceCell = within(groupedRow).getByTestId("candidate-scroll-open-case:CASE-202603-101-invoice");
-    const bankRow = within(bankCell).getByRole("row", { name: /2026-03-28.*智能工厂设备商/ });
-    const emptyBankCell = within(emptyRow).getByTestId("candidate-scroll-open-row:oa-o-202603-002-bank");
+    const oaCell = within(groupedRow).getByTestId("candidate-scroll-paired-case:CASE-202603-001-oa");
+    const bankCell = within(groupedRow).getByTestId("candidate-scroll-paired-case:CASE-202603-001-bank");
+    const invoiceCell = within(groupedRow).getByTestId("candidate-scroll-paired-case:CASE-202603-001-invoice");
+    const bankRow = within(bankCell).getByRole("row", { name: /2026-03-25.*华东设备供应商/ });
+    const emptyBankCell = within(emptyRow).getByTestId("candidate-scroll-unpaired-row:oa-o-202603-002-bank");
 
     expect(groupedRow).toHaveClass("candidate-group-row-sheet");
     expect(oaCell).toHaveClass("candidate-group-cell-sheet");
@@ -1586,7 +1577,7 @@ describe("Workbench candidate grouping layout", () => {
     installMockApiFetch();
     renderWorkbenchPage();
 
-    const rows = await screen.findAllByTestId(/candidate-group-open-/);
+    const rows = await screen.findAllByTestId(/candidate-group-unpaired-/);
     expect(rows[0]).toHaveClass("candidate-group-row-tone-0");
     expect(rows[1]).toHaveClass("candidate-group-row-tone-1");
     expect(rows[2]).toHaveClass("candidate-group-row-tone-2");
@@ -1596,7 +1587,7 @@ describe("Workbench candidate grouping layout", () => {
   test("uses stretched sheet rows for single records and split sheet rows for multiple records", () => {
     render(
       <div>
-        <CandidateGroupCell
+        <RelationGroupCell
           actionMode="default"
           canMutateData
           columnGridStyle={invoiceGridStyle}
@@ -1610,9 +1601,9 @@ describe("Workbench candidate grouping layout", () => {
           scrollPaneId="invoice"
           scrollTestId="sheet-single"
           showWorkflowActions
-          zoneId="open"
+          zoneId="unpaired"
         />
-        <CandidateGroupCell
+        <RelationGroupCell
           actionMode="default"
           canMutateData
           columnGridStyle={invoiceGridStyle}
@@ -1629,7 +1620,7 @@ describe("Workbench candidate grouping layout", () => {
           scrollPaneId="invoice"
           scrollTestId="sheet-multi"
           showWorkflowActions
-          zoneId="open"
+          zoneId="unpaired"
         />
       </div>,
     );
@@ -1662,7 +1653,7 @@ describe("Workbench candidate grouping layout", () => {
           row={createInvoiceRecord("state-selected", "INV-STATE-001")}
           rowState="selected"
           showWorkflowActions
-          zoneId="open"
+          zoneId="unpaired"
         />
         <WorkbenchRecordCard
           actionMode="default"
@@ -1677,7 +1668,7 @@ describe("Workbench candidate grouping layout", () => {
           row={createInvoiceRecord("state-related", "INV-STATE-002")}
           rowState="related"
           showWorkflowActions
-          zoneId="open"
+          zoneId="unpaired"
         />
         <WorkbenchRecordCard
           actionMode="default"
@@ -1692,7 +1683,7 @@ describe("Workbench candidate grouping layout", () => {
           row={createInvoiceRecord("state-highlight", "INV-STATE-003")}
           rowState="idle"
           showWorkflowActions
-          zoneId="open"
+          zoneId="unpaired"
         />
       </div>,
     );
@@ -1710,7 +1701,7 @@ describe("Workbench candidate grouping layout", () => {
     installMockApiFetch();
     renderWorkbenchPage();
 
-    const groupRow = await screen.findByTestId("candidate-group-open-row:oa-o-202603-002");
+    const groupRow = await screen.findByTestId("candidate-group-unpaired-row:oa-o-202603-002");
     const emptyCells = within(groupRow).getAllByText("-");
 
     expect(within(groupRow).getByText("孙敏")).toBeInTheDocument();
@@ -1721,9 +1712,9 @@ describe("Workbench candidate grouping layout", () => {
     installMockApiFetch();
     renderWorkbenchPage();
 
-    const openZone = await screen.findByTestId("zone-open");
-    const invoicePane = within(openZone).getByTestId("pane-invoice");
-    const groupRow = await screen.findByTestId("candidate-group-open-row:oa-o-202603-002");
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
+    const invoicePane = within(unpairedZone).getByTestId("pane-invoice");
+    const groupRow = await screen.findByTestId("candidate-group-unpaired-row:oa-o-202603-002");
     const diagnostics = within(invoicePane).getByRole("button", {
       name: "进销项发票库存统计：系统发票总数 9，人工导入总数 7，普通可见 4，已提交 ETC 隐藏 2，额外 ETC 1，ETC 折叠批次 3，OA附件解析发票 5",
     });
@@ -1740,13 +1731,13 @@ describe("Workbench candidate grouping layout", () => {
     expect(within(groupRow).queryByRole("button", { name: /附件统计/ })).not.toBeInTheDocument();
   });
 
-  test("syncs pane header and candidate blocks from a single bottom scrollbar", async () => {
+  test("syncs pane header and unpaired singleton rows from a single bottom scrollbar", async () => {
     installMockApiFetch();
     renderWorkbenchPage();
 
-    const headerScroll = await screen.findByTestId("pane-scroll-head-open-bank");
-    const footerScroll = screen.getByTestId("pane-scrollbar-open-bank");
-    const groupScroll = screen.getByTestId("candidate-scroll-open-case:CASE-202603-101-bank");
+    const headerScroll = await screen.findByTestId("pane-scroll-head-unpaired-bank");
+    const footerScroll = screen.getByTestId("pane-scrollbar-unpaired-bank");
+    const groupScroll = screen.getByTestId("candidate-scroll-unpaired-row:bk-o-202603-001-bank");
 
     fireEvent.scroll(footerScroll, { target: { scrollLeft: 96 } });
 
@@ -1763,33 +1754,33 @@ describe("Workbench candidate grouping layout", () => {
     expect(footerScrollRule).toMatch(/height:\s*10px;/);
   });
 
-  test("toggles bank and invoice group sorting in open and paired zones", async () => {
+  test("toggles bank and invoice group sorting in unpaired and paired zones", async () => {
     installMockApiFetch();
     renderWorkbenchPage();
 
-    const openZone = await screen.findByTestId("zone-open");
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
     const pairedZone = await screen.findByTestId("zone-paired");
-    const openBankPane = within(openZone).getByTestId("pane-bank");
+    const unpairedBankPane = within(unpairedZone).getByTestId("pane-bank");
     const pairedInvoicePane = within(pairedZone).getByTestId("pane-invoice");
 
-    fireEvent.click(within(openBankPane).getByRole("button", { name: "银行流水按时间降序" }));
+    fireEvent.click(within(unpairedBankPane).getByRole("button", { name: "银行流水按时间降序" }));
 
     await waitFor(() => {
-      const openDescOrder = getZoneGroupOrder(openZone);
-      expect(openDescOrder.indexOf("candidate-group-open-case:CASE-202604-101")).toBeLessThan(
-        openDescOrder.indexOf("candidate-group-open-case:CASE-202603-101"),
+      const unpairedDescOrder = getZoneGroupOrder(unpairedZone);
+      expect(unpairedDescOrder.indexOf("candidate-group-unpaired-row:bk-o-202604-001")).toBeLessThan(
+        unpairedDescOrder.indexOf("candidate-group-unpaired-row:bk-o-202603-001"),
       );
-      expect(openDescOrder.indexOf("candidate-group-open-row:oa-o-202603-002")).toBeGreaterThan(
-        openDescOrder.indexOf("candidate-group-open-case:CASE-202603-101"),
+      expect(unpairedDescOrder.indexOf("candidate-group-unpaired-row:oa-o-202603-002")).toBeGreaterThan(
+        unpairedDescOrder.indexOf("candidate-group-unpaired-row:bk-o-202603-001"),
       );
     });
 
-    fireEvent.click(within(openBankPane).getByRole("button", { name: "银行流水按时间升序" }));
+    fireEvent.click(within(unpairedBankPane).getByRole("button", { name: "银行流水按时间升序" }));
 
     await waitFor(() => {
-      const openAscOrder = getZoneGroupOrder(openZone);
-      expect(openAscOrder.indexOf("candidate-group-open-case:CASE-202603-101")).toBeLessThan(
-        openAscOrder.indexOf("candidate-group-open-case:CASE-202604-101"),
+      const unpairedAscOrder = getZoneGroupOrder(unpairedZone);
+      expect(unpairedAscOrder.indexOf("candidate-group-unpaired-row:bk-o-202603-001")).toBeLessThan(
+        unpairedAscOrder.indexOf("candidate-group-unpaired-row:bk-o-202604-001"),
       );
     });
 

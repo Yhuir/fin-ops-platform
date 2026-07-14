@@ -1,0 +1,650 @@
+from __future__ import annotations
+
+from calendar import monthrange
+from datetime import date, datetime, timedelta
+from decimal import Decimal, InvalidOperation
+from typing import Any, Iterable
+
+from fin_ops_platform.services.postgres_repositories.common import row_payload, text
+from fin_ops_platform.services.postgres_repositories.oa_projection import COMPLETED_WORKFLOW_STATUS_SQL
+from fin_ops_platform.services.workbench_free_matching_engine import (
+    ActiveFormalRelationAnchor,
+    FormalRelationFact,
+    FormalRelationFactBatch,
+    FormalRelationReference,
+    canonical_member_key,
+    relation_fingerprint,
+)
+from fin_ops_platform.services.workbench_invoice_direction import invoice_workbench_direction_from_row
+from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
+from fin_ops_platform.services.workbench_text_normalization import normalize_match_text
+
+
+_MATCHABLE_DIRECTIONS = {"expenditure", "income"}
+_WEAK_SUBJECT_VALUES = frozenset(
+    {
+        normalize_match_text("云南溯源科技"),
+        normalize_match_text("云南溯源科技有限公司"),
+        normalize_match_text("供应商"),
+        normalize_match_text("客户"),
+        normalize_match_text("科技"),
+        normalize_match_text("有限公司"),
+    }
+)
+_WITHDRAW_EVENTS = frozenset(
+    {
+        "cancel_active_relation",
+        "cancel_link",
+        "cancel_relation",
+        "withdraw_link",
+        "withdraw_relation",
+    }
+)
+
+
+class PostgresWorkbenchFormalRelationFactRepository:
+    """The only SQL owner for deterministic Workbench matching inputs."""
+
+    def __init__(self, connection: Any) -> None:
+        self._connection = connection
+
+    def load_batch(
+        self,
+        scope_months: list[str],
+        *,
+        source_versions: dict[str, object] | None = None,
+    ) -> FormalRelationFactBatch:
+        normalized_scopes = _normalize_scope_months(scope_months)
+        start_date, end_date = _composite_window(normalized_scopes)
+        oa_rows = self._connection.fetch_all(
+            """
+            select
+                row_id as canonical_object_identity,
+                row_id,
+                amount,
+                currency,
+                application_date as fact_date,
+                workflow_no,
+                project_id,
+                project_name,
+                applicant,
+                status,
+                workflow_status,
+                normalized_payload,
+                greatest(updated_at, synced_at) as source_version
+            from app.oa_applications
+            where coalesce(application_date, scope_month) between %s::date and %s::date
+              and status <> 'deleted'
+              and """
+            + COMPLETED_WORKFLOW_STATUS_SQL
+            + """
+            order by row_id
+            """,
+            (start_date, end_date),
+        )
+        bank_rows = self._connection.fetch_all(
+            """
+            select
+                coalesce(legacy_mongo_id, id::text) as canonical_object_identity,
+                coalesce(legacy_mongo_id, id::text) as row_id,
+                amount,
+                signed_amount,
+                coalesce(currency, 'CNY') as currency,
+                coalesce(txn_date, trade_time::date, pay_receive_time::date) as fact_date,
+                txn_direction,
+                counterparty_name_raw,
+                normalized_counterparty_name,
+                project_id,
+                bank_serial_no,
+                source_unique_key,
+                summary,
+                remark,
+                bank_text_fields,
+                raw_payload,
+                updated_at as source_version
+            from app.bank_transactions
+            where coalesce(txn_date, trade_time::date, pay_receive_time::date) between %s::date and %s::date
+              and status <> 'deleted'
+            order by coalesce(legacy_mongo_id, id::text)
+            """,
+            (start_date, end_date),
+        )
+        invoice_rows = self._connection.fetch_all(
+            """
+            select
+                coalesce(legacy_mongo_id, id::text) as canonical_object_identity,
+                coalesce(legacy_mongo_id, id::text) as row_id,
+                invoice_type,
+                invoice_no,
+                invoice_code,
+                digital_invoice_no,
+                invoice_date as fact_date,
+                amount,
+                signed_amount,
+                total_with_tax,
+                currency,
+                counterparty_name,
+                seller_name,
+                seller_tax_no,
+                buyer_name,
+                buyer_tax_no,
+                oa_form_id,
+                source_unique_key,
+                source_links,
+                raw_payload,
+                updated_at as source_version
+            from app.invoices
+            where invoice_date between %s::date and %s::date
+              and status <> 'deleted'
+              and coalesce(workbench_visibility, 'visible') <> 'hidden_after_etc_submission'
+              and coalesce(raw_payload->'normalized_payload'->>'workbench_visibility', 'visible')
+                    <> 'hidden_after_etc_submission'
+              and coalesce(raw_payload->'normalized_payload'->>'etc_submission_status', '') <> 'submitted'
+            order by coalesce(legacy_mongo_id, id::text)
+            """,
+            (start_date, end_date),
+        )
+
+        initial_facts = _facts_from_rows(oa_rows=oa_rows, bank_rows=bank_rows, invoice_rows=invoice_rows)
+        target_ids = _explicit_target_ids(initial_facts)
+        historical_rows = self._load_historical_targets(target_ids)
+        facts = _merge_facts(
+            initial_facts,
+            _facts_from_rows(
+                oa_rows=historical_rows["oa"],
+                bank_rows=historical_rows["bank"],
+                invoice_rows=historical_rows["invoice"],
+            ),
+        )
+
+        active_rows = self._connection.fetch_all(
+            """
+            select case_id, row_ids, row_types
+            from app.workbench_pair_relations
+            where status = 'active'
+            order by case_id
+            """
+        )
+        history_rows = self._connection.fetch_all(
+            """
+            select event_type, actor_id, before_payload
+            from app.workbench_pair_relation_history
+            where event_type = any(%s::text[])
+              and nullif(actor_id, '') is not null
+              and actor_id not like 'system:%'
+              and actor_id not like 'migration:%'
+            order by occurred_at, case_id
+            """,
+            (sorted(_WITHDRAW_EVENTS),),
+        )
+        active_relations = tuple(_active_anchor(row) for row in active_rows)
+        withdrawals = frozenset(
+            fingerprint
+            for row in history_rows
+            for fingerprint in _withdrawal_fingerprints(row)
+        )
+        versions = tuple(
+            sorted(
+                (str(key).strip(), str(value).strip())
+                for key, value in dict(source_versions or {}).items()
+                if str(key).strip()
+            )
+        )
+        return FormalRelationFactBatch(
+            facts=facts,
+            active_relations=active_relations,
+            withdrawal_fingerprints=withdrawals,
+            affected_scopes=tuple(sorted({*normalized_scopes, "all"})),
+            source_versions=versions,
+        )
+
+    def _load_historical_targets(self, target_ids: dict[str, set[str]]) -> dict[str, list[dict[str, Any]]]:
+        oa_ids = sorted(target_ids["oa"])
+        bank_ids = sorted(target_ids["bank"])
+        invoice_ids = sorted(target_ids["invoice"])
+        oa_rows = self._connection.fetch_all(
+            """
+            select
+                row_id as canonical_object_identity,
+                row_id,
+                amount,
+                currency,
+                application_date as fact_date,
+                workflow_no,
+                project_id,
+                project_name,
+                applicant,
+                status,
+                workflow_status,
+                normalized_payload,
+                greatest(updated_at, synced_at) as source_version
+            from app.oa_applications
+            where row_id = any(%s::text[])
+              and status <> 'deleted'
+              and """
+            + COMPLETED_WORKFLOW_STATUS_SQL
+            + """
+            order by row_id
+            """,
+            (oa_ids,),
+        ) if oa_ids else []
+        bank_rows = self._connection.fetch_all(
+            """
+            select
+                coalesce(legacy_mongo_id, id::text) as canonical_object_identity,
+                coalesce(legacy_mongo_id, id::text) as row_id,
+                amount,
+                signed_amount,
+                coalesce(currency, 'CNY') as currency,
+                coalesce(txn_date, trade_time::date, pay_receive_time::date) as fact_date,
+                txn_direction,
+                counterparty_name_raw,
+                normalized_counterparty_name,
+                project_id,
+                bank_serial_no,
+                source_unique_key,
+                summary,
+                remark,
+                bank_text_fields,
+                raw_payload,
+                updated_at as source_version
+            from app.bank_transactions
+            where coalesce(legacy_mongo_id, id::text) = any(%s::text[])
+              and status <> 'deleted'
+            order by coalesce(legacy_mongo_id, id::text)
+            """,
+            (bank_ids,),
+        ) if bank_ids else []
+        invoice_rows = self._connection.fetch_all(
+            """
+            select
+                coalesce(legacy_mongo_id, id::text) as canonical_object_identity,
+                coalesce(legacy_mongo_id, id::text) as row_id,
+                invoice_type,
+                invoice_no,
+                invoice_code,
+                digital_invoice_no,
+                invoice_date as fact_date,
+                amount,
+                signed_amount,
+                total_with_tax,
+                currency,
+                counterparty_name,
+                seller_name,
+                seller_tax_no,
+                buyer_name,
+                buyer_tax_no,
+                oa_form_id,
+                source_unique_key,
+                source_links,
+                raw_payload,
+                updated_at as source_version
+            from app.invoices
+            where coalesce(legacy_mongo_id, id::text) = any(%s::text[])
+              and status <> 'deleted'
+              and coalesce(workbench_visibility, 'visible') <> 'hidden_after_etc_submission'
+            order by coalesce(legacy_mongo_id, id::text)
+            """,
+            (invoice_ids,),
+        ) if invoice_ids else []
+        return {"oa": oa_rows, "bank": bank_rows, "invoice": invoice_rows}
+
+
+def _facts_from_rows(
+    *,
+    oa_rows: Iterable[dict[str, Any]],
+    bank_rows: Iterable[dict[str, Any]],
+    invoice_rows: Iterable[dict[str, Any]],
+) -> tuple[FormalRelationFact, ...]:
+    facts: list[FormalRelationFact] = []
+    for row in oa_rows:
+        facts.append(_oa_fact(row))
+    for row in bank_rows:
+        facts.append(_bank_fact(row))
+    for row in invoice_rows:
+        facts.append(_invoice_fact(row))
+    return tuple(facts)
+
+
+def _oa_fact(row: dict[str, Any]) -> FormalRelationFact:
+    payload = row_payload(row, "normalized_payload")
+    payload = payload if isinstance(payload, dict) else {}
+    detail = payload.get("detail_fields") if isinstance(payload.get("detail_fields"), dict) else {}
+    apply_type = text(payload.get("apply_type") or payload.get("application_type") or detail.get("报销/支付")) or ""
+    direction = "income" if "收" in apply_type and "付" not in apply_type else "expenditure"
+    evidence = _evidence_keys(
+        counterparty=payload.get("counterparty_name") or payload.get("counterparty"),
+        tax_no=payload.get("counterparty_tax_no"),
+        business_references=(
+            row.get("workflow_no"),
+            payload.get("contract_no"),
+            payload.get("order_no"),
+        ),
+        project_references=(row.get("project_id"), payload.get("project_no")),
+    )
+    return FormalRelationFact(
+        row_type="oa",
+        canonical_object_identity=_required_identity(row),
+        row_id=_required_row_id(row),
+        amount_minor=_minor_units(row.get("amount")),
+        currency=text(row.get("currency")) or "CNY",
+        direction=direction,
+        fact_date=_date_value(row.get("fact_date")),
+        evidence_keys=evidence,
+        references=_references_from_payload(payload),
+        source_version=_source_version(row),
+    )
+
+
+def _bank_fact(row: dict[str, Any]) -> FormalRelationFact:
+    direction = _bank_direction(row.get("txn_direction"), row.get("signed_amount"))
+    if direction not in _MATCHABLE_DIRECTIONS:
+        raise ValueError(f"Unsupported bank transaction direction for {_required_row_id(row)}.")
+    payload = row_payload(row, "raw_payload")
+    payload = payload if isinstance(payload, dict) else {}
+    evidence = _evidence_keys(
+        counterparty=row.get("normalized_counterparty_name") or row.get("counterparty_name_raw"),
+        tax_no=payload.get("counterparty_tax_no"),
+        business_references=(row.get("bank_serial_no"), row.get("source_unique_key")),
+        project_references=(row.get("project_id"),),
+        invoice_numbers=_invoice_numbers_in_bank_payload(row, payload),
+    )
+    return FormalRelationFact(
+        row_type="bank",
+        canonical_object_identity=_required_identity(row),
+        row_id=_required_row_id(row),
+        amount_minor=_minor_units(row.get("amount")),
+        currency=text(row.get("currency")) or "CNY",
+        direction=direction,
+        fact_date=_date_value(row.get("fact_date")),
+        evidence_keys=evidence,
+        references=_references_from_payload(payload),
+        source_version=_source_version(row),
+    )
+
+
+def _invoice_fact(row: dict[str, Any]) -> FormalRelationFact:
+    direction = invoice_workbench_direction_from_row(row)
+    if direction not in _MATCHABLE_DIRECTIONS:
+        raise ValueError(f"Unsupported invoice direction for {_required_row_id(row)}.")
+    payload = row_payload(row, "raw_payload")
+    payload = payload if isinstance(payload, dict) else {}
+    normalized = payload.get("normalized_payload") if isinstance(payload.get("normalized_payload"), dict) else payload
+    amount = row.get("total_with_tax") if row.get("total_with_tax") is not None else row.get("amount")
+    signed_amount = _decimal_value(row.get("signed_amount"))
+    if signed_amount is not None and signed_amount < 0:
+        amount = signed_amount
+    if direction == "income":
+        counterparty = row.get("buyer_name") or row.get("counterparty_name")
+        tax_no = row.get("buyer_tax_no")
+    else:
+        counterparty = row.get("seller_name") or row.get("counterparty_name")
+        tax_no = row.get("seller_tax_no")
+    evidence = _evidence_keys(
+        counterparty=counterparty,
+        tax_no=tax_no,
+        business_references=(row.get("source_unique_key"), normalized.get("contract_no"), normalized.get("order_no")),
+        project_references=(normalized.get("project_no"), normalized.get("project_id")),
+        invoice_numbers=(row.get("invoice_no"), row.get("digital_invoice_no")),
+    )
+    references = [*_references_from_payload(normalized), *_references_from_source_links(row.get("source_links"))]
+    return FormalRelationFact(
+        row_type="invoice",
+        canonical_object_identity=_required_identity(row),
+        row_id=_required_row_id(row),
+        amount_minor=_minor_units(amount),
+        currency=text(row.get("currency")) or "CNY",
+        direction=direction,
+        fact_date=_date_value(row.get("fact_date")),
+        evidence_keys=evidence,
+        references=tuple(sorted(set(references))),
+        source_version=_source_version(row),
+    )
+
+
+def _references_from_payload(payload: dict[str, Any]) -> tuple[FormalRelationReference, ...]:
+    references: list[FormalRelationReference] = []
+    for field, kind, target_type in (
+        ("source_oa_row_id", "oa_source", "oa"),
+        ("oa_row_id", "oa_source", "oa"),
+        ("derived_from_oa_id", "attachment_source", "oa"),
+        ("source_workbench_row_id", "canonical_source", "oa"),
+        ("original_invoice_row_id", "original_reference", "invoice"),
+        ("original_bank_row_id", "original_reference", "bank"),
+    ):
+        target = _canonical_target_identity(target_type, payload.get(field))
+        if target:
+            references.append(
+                FormalRelationReference(
+                    kind=kind,
+                    value=f"{field}:{target}",
+                    target_row_type=target_type,
+                    target_identity=target,
+                    original=kind == "original_reference",
+                )
+            )
+    return tuple(sorted(set(references)))
+
+
+def _references_from_source_links(value: Any) -> tuple[FormalRelationReference, ...]:
+    if not isinstance(value, list):
+        return ()
+    references: list[FormalRelationReference] = []
+    for link in value:
+        if not isinstance(link, dict):
+            continue
+        metadata = link.get("metadata") if isinstance(link.get("metadata"), dict) else {}
+        combined = {**link, **metadata}
+        references.extend(_references_from_payload(combined))
+    return tuple(sorted(set(references)))
+
+
+def _evidence_keys(
+    *,
+    counterparty: Any = None,
+    tax_no: Any = None,
+    business_references: Iterable[Any] = (),
+    project_references: Iterable[Any] = (),
+    invoice_numbers: Iterable[Any] = (),
+) -> tuple[tuple[str, str], ...]:
+    evidence: set[tuple[str, str]] = set()
+    normalized_counterparty = normalize_match_text(counterparty)
+    if len(normalized_counterparty) >= 4 and normalized_counterparty not in _WEAK_SUBJECT_VALUES:
+        evidence.add(("counterparty", normalized_counterparty))
+    normalized_tax_no = normalize_match_text(tax_no)
+    if len(normalized_tax_no) >= 8:
+        evidence.add(("tax_no", normalized_tax_no))
+    for raw_value in business_references:
+        normalized = normalize_match_text(raw_value)
+        if len(normalized) >= 6:
+            evidence.add(("business_reference", normalized))
+    for raw_value in project_references:
+        normalized = normalize_match_text(raw_value)
+        if len(normalized) >= 4:
+            evidence.add(("project_reference", normalized))
+    for raw_value in invoice_numbers:
+        normalized = normalize_match_text(raw_value)
+        if len(normalized) >= 8:
+            evidence.add(("invoice_number", normalized))
+    return tuple(sorted(evidence))
+
+
+def _invoice_numbers_in_bank_payload(row: dict[str, Any], payload: dict[str, Any]) -> tuple[str, ...]:
+    values: list[str] = []
+    for field in ("invoice_no", "invoice_number", "digital_invoice_no"):
+        value = text(payload.get(field))
+        if value:
+            values.append(value)
+    bank_text_fields = row.get("bank_text_fields")
+    if isinstance(bank_text_fields, list):
+        for item in bank_text_fields:
+            if isinstance(item, dict) and str(item.get("label") or "").strip() in {"发票号码", "数电发票号码"}:
+                value = text(item.get("value"))
+                if value:
+                    values.append(value)
+    return tuple(values)
+
+
+def _active_anchor(row: dict[str, Any]) -> ActiveFormalRelationAnchor:
+    case_id = text(row.get("case_id"))
+    row_ids = [str(item).strip() for item in list(row.get("row_ids") or []) if str(item).strip()]
+    row_types = [str(item).strip().lower() for item in list(row.get("row_types") or [])]
+    if not case_id or len(row_ids) < 2:
+        raise ValueError("Active Workbench relation requires case_id and at least two row_ids.")
+    members = []
+    for index, row_id in enumerate(row_ids):
+        row_type = row_types[index] if index < len(row_types) and row_types[index] else row_type_for_workbench_row_id(row_id)
+        members.append(canonical_member_key(row_type, row_id))
+    return ActiveFormalRelationAnchor(case_id=case_id, member_keys=tuple(members))
+
+
+def _withdrawal_fingerprints(row: dict[str, Any]) -> tuple[str, ...]:
+    if str(row.get("event_type") or "").strip() not in _WITHDRAW_EVENTS:
+        return ()
+    actor_id = str(row.get("actor_id") or "").strip()
+    if not actor_id or actor_id.startswith(("system:", "migration:")):
+        return ()
+    fingerprints: set[str] = set()
+    for relation in _relation_payloads(row.get("before_payload")):
+        try:
+            anchor = _active_anchor(relation)
+            fingerprints.add(relation_fingerprint(anchor.member_keys))
+        except (TypeError, ValueError):
+            continue
+    return tuple(sorted(fingerprints))
+
+
+def _relation_payloads(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    if not isinstance(value, dict):
+        return []
+    for key in ("before_relations", "relations"):
+        nested = value.get(key)
+        if isinstance(nested, list):
+            return [item for item in nested if isinstance(item, dict)]
+    normalized = value.get("normalized_payload")
+    if isinstance(normalized, dict):
+        return _relation_payloads(normalized)
+    return [value] if value.get("row_ids") else []
+
+
+def _explicit_target_ids(facts: Iterable[FormalRelationFact]) -> dict[str, set[str]]:
+    targets = {"oa": set(), "bank": set(), "invoice": set()}
+    for fact in facts:
+        for reference in fact.references:
+            target = reference.target_member_key
+            if target is not None:
+                targets[target[0]].add(target[1])
+    return targets
+
+
+def _merge_facts(*collections: Iterable[FormalRelationFact]) -> tuple[FormalRelationFact, ...]:
+    facts_by_key: dict[tuple[str, str], FormalRelationFact] = {}
+    for collection in collections:
+        for fact in collection:
+            existing = facts_by_key.get(fact.member_key)
+            if existing is not None and existing != fact:
+                raise ValueError(f"Conflicting canonical fact rows for {fact.member_key}.")
+            facts_by_key[fact.member_key] = fact
+    return tuple(facts_by_key.values())
+
+
+def _normalize_scope_months(scope_months: list[str]) -> tuple[str, ...]:
+    if not isinstance(scope_months, list):
+        raise TypeError("scope_months must be a list.")
+    normalized: set[str] = set()
+    for raw_scope in scope_months:
+        scope = str(raw_scope or "").strip()
+        try:
+            parsed = date.fromisoformat(f"{scope}-01")
+        except ValueError as exc:
+            raise ValueError("scope_months values must be YYYY-MM.") from exc
+        if parsed.strftime("%Y-%m") != scope:
+            raise ValueError("scope_months values must be YYYY-MM.")
+        normalized.add(scope)
+    if not normalized:
+        raise ValueError("scope_months must include at least one month.")
+    return tuple(sorted(normalized))
+
+
+def _composite_window(scope_months: tuple[str, ...]) -> tuple[date, date]:
+    first = date.fromisoformat(f"{scope_months[0]}-01")
+    last_month = date.fromisoformat(f"{scope_months[-1]}-01")
+    last = last_month.replace(day=monthrange(last_month.year, last_month.month)[1])
+    return first - timedelta(days=365), last + timedelta(days=365)
+
+
+def _minor_units(value: Any) -> int:
+    decimal = _decimal_value(value)
+    if decimal is None:
+        raise ValueError("Formal relation fact amount is required and must be numeric.")
+    cents = decimal * Decimal("100")
+    integral = cents.to_integral_value()
+    if cents != integral:
+        raise ValueError("Formal relation fact amount must be exact to the currency minor unit.")
+    return int(integral)
+
+
+def _decimal_value(value: Any) -> Decimal | None:
+    if value is None or value == "":
+        return None
+    try:
+        return Decimal(str(value).replace(",", ""))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+
+
+def _date_value(value: Any) -> date | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError as exc:
+        raise ValueError(f"Invalid canonical fact date: {value}.") from exc
+
+
+def _bank_direction(value: Any, signed_amount: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"outflow", "expenditure", "debit", "支出", "付款"}:
+        return "expenditure"
+    if normalized in {"inflow", "income", "credit", "收入", "收款"}:
+        return "income"
+    signed = _decimal_value(signed_amount)
+    if signed is not None:
+        return "expenditure" if signed < 0 else "income"
+    return ""
+
+
+def _canonical_target_identity(row_type: str, value: Any) -> str:
+    target = str(value or "").strip()
+    if not target:
+        return ""
+    if row_type == "oa" and ":item:" in target:
+        target = target.split(":item:", 1)[0]
+    return target
+
+
+def _required_identity(row: dict[str, Any]) -> str:
+    identity = str(row.get("canonical_object_identity") or "").strip()
+    if not identity:
+        raise ValueError("Canonical fact identity is required.")
+    return identity
+
+
+def _required_row_id(row: dict[str, Any]) -> str:
+    row_id = str(row.get("row_id") or "").strip()
+    if not row_id:
+        raise ValueError("Canonical fact row_id is required.")
+    return row_id
+
+
+def _source_version(row: dict[str, Any]) -> str:
+    value = row.get("source_version")
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return str(value or "").strip()

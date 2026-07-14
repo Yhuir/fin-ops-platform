@@ -19,7 +19,7 @@ import {
   createEmptyWorkbenchZoneDisplayState,
   workbenchRowMatchesUnifiedSearch,
 } from "../features/workbench/groupDisplayModel";
-import type { WorkbenchCandidateGroup, WorkbenchRecord, WorkbenchRecordType } from "../features/workbench/types";
+import type { WorkbenchRelationGroup, WorkbenchRecord, WorkbenchRecordType } from "../features/workbench/types";
 
 const workbenchPanes: WorkbenchRecordType[] = ["oa", "bank", "invoice"];
 
@@ -48,13 +48,13 @@ function createWorkbenchRow(paneId: WorkbenchRecordType, id: string, counterpart
   };
 }
 
-function createWorkbenchGroup(id: string, hitPanes: WorkbenchRecordType[]): WorkbenchCandidateGroup {
+function createWorkbenchGroup(id: string, hitPanes: WorkbenchRecordType[]): WorkbenchRelationGroup {
   return {
     id,
-    groupType: "open",
-    rawGroupType: "candidate",
-    matchConfidence: "medium",
-    reason: "测试三栏上下文搜索",
+    groupType: "paired",
+    rawGroupType: "relation",
+    matchConfidence: "high",
+    reason: "active_formal_relation",
     rows: {
       oa: [createWorkbenchRow("oa", `${id}-oa`, hitPanes.includes("oa") ? "张三" : "上下文OA")],
       bank: [createWorkbenchRow("bank", `${id}-bank`, hitPanes.includes("bank") ? "张三" : "上下文银行")],
@@ -126,12 +126,12 @@ describe("workbench api bank amount mapping", () => {
       ),
     );
 
-    await expect(fetchWorkbenchGroupsPage("all", "open", 1, 50)).rejects.toThrow(
+    await expect(fetchWorkbenchGroupsPage("all", "unpaired", 1, 50)).rejects.toThrow(
       "接口处理失败，请联系管理员查看后端日志。 · requestId req-500-audit",
     );
   });
 
-  test("maps two-pane confirm operation projection as an open manual partial relation", async () => {
+  test("maps two-pane confirm operation projection as a formal relation", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -145,14 +145,13 @@ describe("workbench api bank amount mapping", () => {
           operation_barrier_targets: [{ read_model_key: "workbench_relation", scope_key: "2026-05" }],
           operation_projection: {
             after: {
-              paired_groups: [],
-              open_groups: [
+              paired_groups: [
                 {
                   group_id: "case:CASE-PARTIAL",
-                  group_type: "candidate",
+                  group_type: "relation",
                   relation_mode: "manual_confirmed",
                   match_confidence: "medium",
-                  reason: "confirmed_partial_relation",
+                  reason: "active_formal_relation",
                   oa_rows: [
                     {
                       id: "oa-partial",
@@ -176,6 +175,7 @@ describe("workbench api bank amount mapping", () => {
                   invoice_rows: [],
                 },
               ],
+              unpaired_groups: [],
             },
           },
           message: "已确认 2 条记录关联。",
@@ -190,17 +190,17 @@ describe("workbench api bank amount mapping", () => {
       caseId: "CASE-PARTIAL",
     });
 
-    expect(result.operationProjection?.after.pairedGroups).toEqual([]);
-    expect(result.operationProjection?.after.openGroups).toHaveLength(1);
-    expect(result.operationProjection?.after.openGroups[0]).toMatchObject({
+    expect(result.operationProjection?.after.pairedGroups).toHaveLength(1);
+    expect(result.operationProjection?.after.pairedGroups[0]).toMatchObject({
       id: "case:CASE-PARTIAL",
-      groupType: "open",
-      rawGroupType: "candidate",
+      groupType: "paired",
+      rawGroupType: "relation",
       relationMode: "manual_confirmed",
     });
-    expect(result.operationProjection?.after.openGroups[0].rows.oa.map((row) => row.id)).toEqual(["oa-partial"]);
-    expect(result.operationProjection?.after.openGroups[0].rows.bank.map((row) => row.id)).toEqual(["bank-partial"]);
-    expect(result.operationProjection?.after.openGroups[0].rows.invoice).toEqual([]);
+    expect(result.operationProjection?.after.pairedGroups[0].rows.oa.map((row) => row.id)).toEqual(["oa-partial"]);
+    expect(result.operationProjection?.after.pairedGroups[0].rows.bank.map((row) => row.id)).toEqual(["bank-partial"]);
+    expect(result.operationProjection?.after.pairedGroups[0].rows.invoice).toEqual([]);
+    expect(result.operationProjection?.after.unpairedGroups).toEqual([]);
     expect(result.operationBarrierTargets).toEqual([{ readModelKey: "workbench_relation", scopeKey: "2026-05" }]);
   });
 
@@ -217,11 +217,11 @@ describe("workbench api bank amount mapping", () => {
                 bank_count: 1,
                 invoice_count: 0,
                 paired_count: 1,
-                open_count: 1,
+                unpaired_count: 1,
                 exception_count: 0,
                 zone_counts: {
                   paired: { groups: 1, oa: 0, bank: 7, invoice: 0, rows: 7 },
-                  open: { groups: 1, oa: 3, bank: 0, invoice: 5, rows: 8 },
+                  unpaired: { groups: 1, oa: 3, bank: 0, invoice: 5, rows: 8 },
                 },
               },
               oa_status: { code: "ready", message: "OA 已同步" },
@@ -255,7 +255,7 @@ describe("workbench api bank amount mapping", () => {
               groups: [
                 {
                   group_id: "case:paired",
-                  group_type: "manual_confirmed",
+                  group_type: "relation",
                   match_confidence: "high",
                   reason: "已确认",
                   oa_rows: [],
@@ -269,12 +269,12 @@ describe("workbench api bank amount mapping", () => {
           ),
         );
       }
-      if (url.includes("zone=open")) {
+      if (url.includes("zone=unpaired")) {
         return Promise.resolve(
           new Response(
             JSON.stringify({
               month: "all",
-              zone: "open",
+              zone: "unpaired",
               page: 1,
               page_size: 200,
               total: 1,
@@ -282,11 +282,11 @@ describe("workbench api bank amount mapping", () => {
               row_counts: { oa: 3, bank: 0, invoice: 5, rows: 8 },
               groups: [
                 {
-                  group_id: "case:open",
-                  group_type: "candidate",
+                  group_id: "row:oa-unpaired",
+                  group_type: "unpaired",
                   match_confidence: "medium",
                   reason: "候选",
-                  oa_rows: [{ id: "oa-open", type: "oa", available_actions: ["detail"] }],
+                  oa_rows: [{ id: "oa-unpaired", type: "oa", available_actions: ["detail"] }],
                   bank_rows: [],
                   invoice_rows: [],
                 },
@@ -306,11 +306,11 @@ describe("workbench api bank amount mapping", () => {
     expect(result.data.summary.zoneCounts.paired.bank).toBe(7);
     expect(result.pages.paired.rowCounts.bank).toBe(7);
     expect(result.data.paired.groups[0].id).toBe("case:paired");
-    expect(result.data.open.groups[0].id).toBe("case:open");
+    expect(result.data.unpaired.groups[0].id).toBe("row:oa-unpaired");
     expect(result.data.invoiceInventory.systemTotal).toBe(9);
     expect(result.data.invoiceInventory.oaAttachmentTotal).toBe(5);
     expect(result.data.oaStatus.message).toBe("OA 已同步");
-    expect(result.pages.open.hasMore).toBe(false);
+    expect(result.pages.unpaired.hasMore).toBe(false);
     expect(fetchSpy.mock.calls.some(([input]) => String(input).startsWith("/api/workbench?"))).toBe(false);
     const groupCalls = fetchSpy.mock.calls
       .map(([input]) => new URL(String(input), "http://localhost"))
@@ -320,7 +320,7 @@ describe("workbench api bank amount mapping", () => {
     expect(groupCalls.every((url) => url.searchParams.get("detail_level") === "summary")).toBe(true);
   });
 
-  test("maps backend reconciliation state from workbench group pages", async () => {
+  test("maps formal relation groups from workbench group pages", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -332,52 +332,16 @@ describe("workbench api bank amount mapping", () => {
           has_more: false,
           groups: [
             {
-              group_id: "case:decision-paired",
-              group_type: "manual_confirmed",
+              group_id: "case:formal-paired",
+              group_type: "relation",
               match_confidence: "high",
-              reason: "automatic_reconciliation_decision",
-              warnings: [
-                {
-                  code: "invoice_amount_mismatch",
-                  message: "附件发票合计与 OA/流水金额不一致",
-                },
-              ],
+              reason: "active_formal_relation",
               oa_rows: [
                 {
                   id: "oa-paired",
                   type: "oa",
                   applicant: "张三",
                   amount: "100.00",
-                  workbench_reconciliation_decision: {
-                    decision_id: "decision-paired",
-                    decision_key: "decision:paired",
-                    display_state: "paired",
-                    decision_status: "paired",
-                    match_domain: "free",
-                    match_shape: "oa_bank_invoice",
-                    rule_code: "free_three_way",
-                    rule_version: "v1",
-                    row_ids: ["oa-paired", "bank-paired", "invoice-paired"],
-                    oa_row_ids: ["oa-paired"],
-                    bank_row_ids: ["bank-paired"],
-                    invoice_row_ids: ["invoice-paired"],
-                    amount: "100.00",
-                    direction: "expense",
-                    payment_amount_closed: true,
-                    invoice_amount_closed: false,
-                    warnings: [
-                      {
-                        code: "invoice_amount_mismatch",
-                        message: "附件发票合计与 OA/流水金额不一致",
-                      },
-                    ],
-                  },
-                  workbench_reconciliation_warnings: [
-                    {
-                      code: "invoice_amount_mismatch",
-                      message: "附件发票合计与 OA/流水金额不一致",
-                    },
-                  ],
                   available_actions: ["detail"],
                 },
               ],
@@ -386,7 +350,7 @@ describe("workbench api bank amount mapping", () => {
                   id: "bank-paired",
                   type: "bank",
                   debit_amount: "100.00",
-                  invoice_relation: { code: "automatic_match", label: "自动匹配", tone: "warn" },
+                  invoice_relation: { code: "fully_linked", label: "完全关联", tone: "success" },
                   available_actions: ["detail"],
                 },
               ],
@@ -396,7 +360,7 @@ describe("workbench api bank amount mapping", () => {
                   type: "invoice",
                   seller_name: "供应商A",
                   total_with_tax: "99.00",
-                  invoice_bank_relation: { code: "automatic_match", label: "自动匹配", tone: "warn" },
+                  invoice_bank_relation: { code: "fully_linked", label: "完全关联", tone: "success" },
                   available_actions: ["detail"],
                 },
               ],
@@ -410,18 +374,10 @@ describe("workbench api bank amount mapping", () => {
 
     const result = await fetchWorkbenchGroupsPage("2026-05", "paired", 1, 50);
     const group = result.groups[0];
-    const oaRow = group.rows.oa[0];
-
     expect(group.groupType).toBe("paired");
-    expect(group.rawGroupType).toBe("manual_confirmed");
-    expect(group.warnings?.map((warning) => warning.code)).toEqual(["invoice_amount_mismatch"]);
-    expect(group.reconciliationDecision?.paymentAmountClosed).toBe(true);
-    expect(group.reconciliationDecision?.invoiceAmountClosed).toBe(false);
-    expect(oaRow.reconciliationDecision?.paymentAmountClosed).toBe(true);
-    expect(oaRow.reconciliationWarnings?.[0]).toMatchObject({
-      code: "invoice_amount_mismatch",
-      message: "附件发票合计与 OA/流水金额不一致",
-    });
+    expect(group.rawGroupType).toBe("relation");
+    expect(group.reason).toBe("active_formal_relation");
+    expect(group.rows.oa.map((row) => row.id)).toEqual(["oa-paired"]);
   });
 
   test("serializes workbench group page SQL query controls", async () => {
@@ -429,7 +385,7 @@ describe("workbench api bank amount mapping", () => {
       new Response(
         JSON.stringify({
           month: "all",
-          zone: "open",
+          zone: "unpaired",
           page: 2,
           page_size: 25,
           total: 0,
@@ -441,13 +397,13 @@ describe("workbench api bank amount mapping", () => {
       ),
     );
 
-    await fetchWorkbenchGroupsPage("all", "open", 2, 25, undefined, {
+    await fetchWorkbenchGroupsPage("all", "unpaired", 2, 25, undefined, {
       search: "供应商A",
       searchMode: "linked_context",
       searchByPane: {
         bank: "建行",
       },
-      status: "open",
+      status: "unpaired",
       sourceKind: "bank_transaction",
       sort: "bank:desc",
       detailLevel: "summary",
@@ -465,7 +421,7 @@ describe("workbench api bank amount mapping", () => {
     const url = new URL(String(fetchSpy.mock.calls[0][0]), "http://localhost");
     expect(url.pathname).toBe("/api/workbench/groups");
     expect(url.searchParams.get("month")).toBe("all");
-    expect(url.searchParams.get("zone")).toBe("open");
+    expect(url.searchParams.get("zone")).toBe("unpaired");
     expect(url.searchParams.get("page")).toBe("2");
     expect(url.searchParams.get("page_size")).toBe("25");
     expect(url.searchParams.get("search")).toBe("供应商A");
@@ -473,7 +429,7 @@ describe("workbench api bank amount mapping", () => {
     expect(JSON.parse(url.searchParams.get("search_by_pane") ?? "{}")).toEqual({
       bank: "建行",
     });
-    expect(url.searchParams.get("status")).toBe("open");
+    expect(url.searchParams.get("status")).toBe("unpaired");
     expect(url.searchParams.get("source_kind")).toBe("bank_transaction");
     expect(url.searchParams.get("sort")).toBe("bank:desc");
     expect(url.searchParams.get("detail_level")).toBe("summary");
@@ -503,14 +459,13 @@ describe("workbench api bank amount mapping", () => {
     });
   });
 
-  test("builds linked context search query from any pane search", () => {
+  test("builds a pane-scoped search query from any pane search", () => {
     const state = createEmptyWorkbenchZoneDisplayState();
     state.activePaneId = "invoice";
     state.searchQueryByPane.invoice = "花";
 
     expect(buildWorkbenchServerPageQuery(state)).toEqual({
-      search: "花",
-      searchMode: "linked_context",
+      searchByPane: { invoice: "花" },
     });
   });
 
@@ -534,7 +489,7 @@ describe("workbench api bank amount mapping", () => {
           read_model_status: "fresh",
           group: {
             group_id: "case:no-oa",
-            group_type: "manual_confirmed",
+            group_type: "relation",
             match_confidence: "high",
             reason: "免OA批次",
             relation_mode: "no_oa_bank_batch",
@@ -582,7 +537,7 @@ describe("workbench api bank amount mapping", () => {
         {
           id: "nooa-group",
           groupType: "paired",
-          rawGroupType: "manual_confirmed",
+          rawGroupType: "relation",
           matchConfidence: "high",
           reason: "免OA批次",
           relationMode: "no_oa_bank_batch",
@@ -628,7 +583,7 @@ describe("workbench api bank amount mapping", () => {
         {
           id: "nooa-salary-group",
           groupType: "paired",
-          rawGroupType: "manual_confirmed",
+          rawGroupType: "relation",
           matchConfidence: "high",
           reason: "免OA工资批次",
           relationMode: "no_oa_bank_batch",
@@ -661,7 +616,7 @@ describe("workbench api bank amount mapping", () => {
   });
 
   test.each(workbenchPanes)(
-    "keeps row context for groups whose linked search is entered from %s pane",
+    "keeps formal relation context only for groups matching the searched %s pane",
     (activePaneId) => {
       const groups = createContextSearchGroups(activePaneId);
       const state = createEmptyWorkbenchZoneDisplayState();
@@ -674,8 +629,6 @@ describe("workbench api bank amount mapping", () => {
 
       expect(displayIds).toEqual([
         `${activePaneId}-anchor`,
-        `${supplementPanes[0]}-supplement`,
-        `${supplementPanes[1]}-supplement`,
         "multi-pane-hit",
       ]);
       expect(displayIds.filter((id) => id === "multi-pane-hit")).toHaveLength(1);
@@ -767,7 +720,7 @@ describe("workbench groups summary contract", () => {
           groups: [
             {
               group_id: "case-summary",
-              group_type: "candidate",
+              group_type: "unpaired",
               match_confidence: "medium",
               reason: "summary preview",
               row_counts: { oa: 5, bank: 8, invoice: 2, rows: 15 },
@@ -813,7 +766,7 @@ describe("workbench groups summary contract", () => {
           groups: [
             {
               group_id: "case-mixed",
-              group_type: "candidate",
+              group_type: "unpaired",
               match_confidence: "medium",
               row_counts: { oa: 0, bank: 10, invoice: 0, rows: 10 },
               display_row_counts: { oa: 0, bank: 2, invoice: 0, rows: 2 },

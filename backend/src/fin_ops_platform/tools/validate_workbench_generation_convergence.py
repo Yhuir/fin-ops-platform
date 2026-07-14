@@ -30,7 +30,7 @@ def _summary_counts(payload: dict[str, Any]) -> dict[str, int]:
     summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
     return {
         key: int(summary.get(key) or 0)
-        for key in ("oa_count", "bank_count", "invoice_count", "paired_count", "open_count")
+        for key in ("oa_count", "bank_count", "invoice_count", "paired_count", "unpaired_count")
     }
 
 
@@ -102,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Validate workbench read model generation convergence.")
     parser.add_argument("--base-url", required=True, help="API base URL, for example http://localhost:8000")
     parser.add_argument("--month", default="all")
-    parser.add_argument("--zone", choices=("open", "paired"), default="paired")
+    parser.add_argument("--zone", choices=("unpaired", "paired"), default="paired")
     parser.add_argument("--page-size", type=int, default=200)
     parser.add_argument("--iterations", type=int, default=5)
     parser.add_argument("--delay-seconds", type=float, default=1.0)

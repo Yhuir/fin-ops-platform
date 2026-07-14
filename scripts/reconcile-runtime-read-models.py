@@ -95,11 +95,11 @@ def workbench_report(connection: PostgresConnection, scope_key: str) -> dict[str
         """,
         (scope_key,),
     )
-    candidate_rows = connection.fetch_all(
+    relation_rows = connection.fetch_all(
         """
         select status, count(*) as count
-        from read_model.workbench_candidate_matches
-        where to_char(scope_month, 'YYYY-MM') = %s
+        from app.workbench_pair_relations
+        where to_char(month_scope, 'YYYY-MM') = %s
         group by status
         order by status
         """,
@@ -109,7 +109,7 @@ def workbench_report(connection: PostgresConnection, scope_key: str) -> dict[str
         "snapshot": dict(snapshot) if isinstance(snapshot, dict) else None,
         "rows_by_status": rows_by_key(rows_by_status, "status"),
         "rows_by_source_kind": rows_by_key(rows_by_kind, "source_kind"),
-        "candidate_matches_by_status": rows_by_key(candidate_rows, "status"),
+        "formal_relations_by_status": rows_by_key(relation_rows, "status"),
     }
 
 

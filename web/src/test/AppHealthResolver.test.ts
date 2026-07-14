@@ -106,7 +106,7 @@ describe("resolveAppHealthStatus", () => {
       fallbackReason: "OA 已同步",
     })).toMatchObject({
       level: "busy",
-      reason: "正在生成关联台候选：2026-03",
+      reason: "正在生成正式配对关系：2026-03",
     });
   });
 

@@ -555,7 +555,7 @@ def _oa(
     return OAApplicationRecord(
         id=record_id,
         month=month,
-        section="open",
+        section="unpaired",
         case_id=None,
         applicant=applicant,
         project_name=project_name,

@@ -17,10 +17,6 @@ from fin_ops_platform.services.cost_statistics_read_model_service import (
     COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
     CostStatisticsReadModelService,
 )
-from fin_ops_platform.services.cost_statistics_relation_rules import (
-    is_candidate_workbench_group,
-    is_cost_eligible_open_group,
-)
 from fin_ops_platform.services.live_workbench_service import format_decimal
 from fin_ops_platform.services.oa_attachment_invoice_cache import attachment_invoice_cache_parser_version
 from fin_ops_platform.services.postgres_repositories.common import month_start, row_payload
@@ -433,7 +429,7 @@ class CostStatisticsSqlProjectionBuilder:
              and wr.scope_key = gr.scope_key
              and wr.row_id = gr.row_id
             where g.scope_key = %s
-              and g.zone in ('paired', 'open')
+              and g.zone in ('paired', 'unpaired')
               and g.source_kinds && array['oa', 'bank']::text[]
               and gr.pane in ('oa', 'bank')
               and coalesce(gr.row_role, '') <> 'collapsed'
@@ -468,14 +464,7 @@ class CostStatisticsSqlProjectionBuilder:
                 member_payload.setdefault("row_id", row_id)
             member_payload.setdefault("type", pane)
             group_payload.setdefault(f"{pane}_rows", []).append(member_payload)
-        groups = []
-        for group_payload in groups_by_id.values():
-            if is_candidate_workbench_group(group_payload):
-                continue
-            zone = str(group_payload.get("zone") or "paired").strip().lower()
-            if zone == "open" and not is_cost_eligible_open_group(group_payload):
-                continue
-            groups.append(group_payload)
+        groups = [group for group in groups_by_id.values() if group.get("zone") == "paired"]
         bank_tag_contexts = self._bank_tag_contexts_for_rows(
             [
                 row

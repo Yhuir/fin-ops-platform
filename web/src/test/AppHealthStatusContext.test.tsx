@@ -356,7 +356,7 @@ describe("AppHealthStatusProvider", () => {
     renderProbe();
     await waitFor(() => {
       expect(screen.getByLabelText("health")).toHaveAttribute("data-level", "busy");
-      expect(screen.getByLabelText("health")).toHaveAttribute("data-reason", "正在生成关联台候选：2026-03");
+      expect(screen.getByLabelText("health")).toHaveAttribute("data-reason", "正在生成正式配对关系：2026-03");
     });
   });
 

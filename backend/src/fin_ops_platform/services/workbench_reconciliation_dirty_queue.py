@@ -2,11 +2,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, Callable
-
-from fin_ops_platform.services.workbench_reconciliation_models import expand_scope_month_window
-
 
 DEFAULT_DIRTY_DEBOUNCE_SECONDS = 60
 DEFAULT_LEASE_TIMEOUT_SECONDS = 600
@@ -16,6 +13,15 @@ DEFAULT_RETRY_BACKOFF_SECONDS = (60, 300, 900, 1800, 3600)
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+def expand_scope_month_window(scope_month: str) -> list[str]:
+    try:
+        month = date.fromisoformat(f"{str(scope_month).strip()}-01")
+    except ValueError as exc:
+        raise ValueError("scope_month must be YYYY-MM.") from exc
+    base = month.year * 12 + month.month - 1
+    return [f"{value // 12:04d}-{value % 12 + 1:02d}" for value in range(base - 2, base + 3)]
 
 
 @dataclass(frozen=True, slots=True)

@@ -29,7 +29,7 @@ const COMPACT_BANK_NAME_BY_PREFIX: Record<string, string> = {
 const HIDDEN_OA_PROJECT_TAGS = new Set(["多明细"]);
 
 type WorkbenchRecordCardProps = {
-  zoneId: "paired" | "open";
+  zoneId: "paired" | "unpaired";
   paneId: WorkbenchRecordType;
   columns?: WorkbenchColumn[];
   columnGridStyle?: {
@@ -43,7 +43,7 @@ type WorkbenchRecordCardProps = {
   highlighted?: boolean;
   searchQuery?: string;
   sheetRowMode?: "stretched" | "split";
-  onSelectRow: (row: WorkbenchRecord, zoneId: "paired" | "open") => void;
+  onSelectRow: (row: WorkbenchRecord, zoneId: "paired" | "unpaired") => void;
   onOpenDetail: (row: WorkbenchRecord) => void;
   onRowAction: (row: WorkbenchRecord, action: WorkbenchInlineAction) => void;
   showWorkflowActions: boolean;
@@ -208,7 +208,7 @@ function renderCellValue(
   value: string,
   row: WorkbenchRecord,
   paneId: WorkbenchRecordType,
-  zoneId: "paired" | "open",
+  zoneId: "paired" | "unpaired",
   showInlineDetail: boolean,
   onOpenDetail: () => void,
   searchQuery = "",
@@ -236,7 +236,7 @@ function renderCellValue(
   }
 
   if (paneId === "oa" && column.kind === "money") {
-    return renderOaMoneyValue(value, row, zoneId);
+    return renderOaMoneyValue(value);
   }
 
   if (paneId === "bank" && column.kind === "money") {
@@ -441,7 +441,7 @@ function renderBankMoneyValue(
   paymentAccount: string,
   categoryLabel: string,
   row: WorkbenchRecord,
-  zoneId: "paired" | "open",
+  zoneId: "paired" | "unpaired",
 ) {
   const hasValue = value !== "--" && value !== "—" && value !== "";
   const normalizedDirection = resolveDirectionForMoneyCell(columnKey, direction, hasValue);
@@ -477,15 +477,12 @@ function renderBankMoneyValue(
 
 function renderOaMoneyValue(
   value: string,
-  row: WorkbenchRecord,
-  zoneId: "paired" | "open",
 ) {
   const hasValue = value !== "--" && value !== "—" && value !== "";
   return (
     <span className="money-cell-stack">
       <span className="money-cell-value">
         <span>{hasValue ? value : "--"}</span>
-        <ReconciliationDecisionWarningIcon row={row} zoneId={zoneId} />
       </span>
     </span>
   );
@@ -543,54 +540,6 @@ function BankAmountMismatchWarning({ row }: { row: WorkbenchRecord }) {
   );
 }
 
-function ReconciliationDecisionWarningIcon({ row, zoneId }: { row: WorkbenchRecord; zoneId: "paired" | "open" }) {
-  const [open, setOpen] = useState(false);
-  const warnings = zoneId === "paired" ? row.reconciliationWarnings ?? [] : [];
-
-  if (warnings.length === 0) {
-    return null;
-  }
-
-  const showTooltip = (
-    event: MouseEvent<HTMLButtonElement> | FocusEvent<HTMLButtonElement> | TouchEvent<HTMLButtonElement>,
-  ) => {
-    event.stopPropagation();
-    setOpen(true);
-  };
-  const hideTooltip = (event: MouseEvent<HTMLButtonElement> | FocusEvent<HTMLButtonElement>) => {
-    event.stopPropagation();
-    setOpen(false);
-  };
-
-  return (
-    <span className="record-warning-tooltip-wrap">
-      <button
-        aria-label="查看自动匹配警示"
-        className="record-warning-icon-btn"
-        type="button"
-        onBlur={hideTooltip}
-        onClick={showTooltip}
-        onFocus={showTooltip}
-        onMouseEnter={showTooltip}
-        onMouseLeave={hideTooltip}
-        onTouchStart={showTooltip}
-      >
-        <WarningTriangleIcon />
-      </button>
-      {open ? (
-        <span className="bank-amount-mismatch-tooltip" role="tooltip">
-          <strong>{reconciliationWarningTitle(warnings)}</strong>
-          {warnings.map((warning) => (
-            <span key={`${warning.code}:${warning.message}`}>
-              {warning.message || warning.code}
-            </span>
-          ))}
-        </span>
-      ) : null}
-    </span>
-  );
-}
-
 function WarningTriangleIcon() {
   return (
     <svg aria-hidden="true" className="record-warning-icon" viewBox="0 0 20 20">
@@ -605,13 +554,6 @@ function WarningTriangleIcon() {
       <circle cx="10" cy="14.1" r="0.8" fill="currentColor" />
     </svg>
   );
-}
-
-function reconciliationWarningTitle(warnings: WorkbenchRecord["reconciliationWarnings"]) {
-  if (warnings?.some((warning) => warning.code === "invoice_amount_mismatch")) {
-    return "金额不一致";
-  }
-  return "自动匹配警示";
 }
 
 function formatMismatchAmount(value: string | undefined) {

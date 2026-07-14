@@ -229,7 +229,7 @@ def _oa(row_id: str, month: str, *, workflow_status: str) -> OAApplicationRecord
     return OAApplicationRecord(
         id=row_id,
         month=month,
-        section="open",
+        section="unpaired",
         case_id=None,
         applicant="测试申请人",
         project_name="测试项目",

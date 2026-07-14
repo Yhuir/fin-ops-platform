@@ -53,7 +53,7 @@ class WorkbenchLegacyApiSqlReadProviderTests(unittest.TestCase):
             def get_workbench_view(self, **kwargs: object) -> dict[str, object]:
                 calls.append(kwargs)
                 return {
-                    "payload": {"open": {"groups": []}},
+                    "payload": {"unpaired": {"groups": []}},
                     "refresh_status": "fresh",
                     "generated_at": "2026-05-22T09:30:00+00:00",
                     "rows_page": {"page": 3, "rows": [{"id": "bank-row-1"}]},
@@ -74,7 +74,7 @@ class WorkbenchLegacyApiSqlReadProviderTests(unittest.TestCase):
             "2026-05",
             page="3",
             page_size="10",
-            status="open",
+            status="unpaired",
             source_kind="bank_transaction",
             search="supplier",
         )
@@ -93,7 +93,7 @@ class WorkbenchLegacyApiSqlReadProviderTests(unittest.TestCase):
                     "scope_key": "scope:2026-05",
                     "page": "3",
                     "page_size": "10",
-                    "status": "open",
+                    "status": "unpaired",
                     "source_kind": "bank_transaction",
                     "search": "supplier",
                 }
@@ -103,7 +103,7 @@ class WorkbenchLegacyApiSqlReadProviderTests(unittest.TestCase):
     def test_stale_source_versions_enqueue_refresh(self) -> None:
         class Repository:
             def get_workbench_view(self, **_kwargs: object) -> dict[str, object]:
-                return {"payload": {"open": {"groups": []}}, "refresh_status": "fresh", "source_versions": {}}
+                return {"payload": {"unpaired": {"groups": []}}, "refresh_status": "fresh", "source_versions": {}}
 
         refreshes: list[tuple[str, str]] = []
         provider = WorkbenchLegacyApiSqlReadProvider(
@@ -128,7 +128,7 @@ class WorkbenchLegacyApiSqlReadProviderTests(unittest.TestCase):
     def test_oa_sync_refresh_reason_enqueues_projection_sync(self) -> None:
         class Repository:
             def get_workbench_view(self, **_kwargs: object) -> dict[str, object]:
-                return {"payload": {"open": {"groups": []}}, "generated_at": "2026-05-22"}
+                return {"payload": {"unpaired": {"groups": []}}, "generated_at": "2026-05-22"}
 
         syncs: list[tuple[str, str]] = []
         provider = WorkbenchLegacyApiSqlReadProvider(

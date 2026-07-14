@@ -97,7 +97,7 @@ else:
                       (select count(*) from app.oa_applications),
                       (select count(*) from app.oa_sync_runs),
                       (select count(*) from read_model.workbench_rows),
-                      (select count(*) from read_model.workbench_candidate_matches)
+                      (select count(*) from app.workbench_pair_relations where status = 'active')
                     """
                 )
                 counts = cur.fetchone()
@@ -106,7 +106,7 @@ else:
             "PostgreSQL ready "
             f"(invoices={counts[0]}, bank_transactions={counts[1]}, import_batches={counts[2]}, "
             f"verified_files={counts[3]}, oa_applications={counts[4]}, oa_sync_runs={counts[5]}, "
-            f"workbench_rows={counts[6]}, candidate_matches={counts[7]}, topology={pg_topology}, "
+            f"workbench_rows={counts[6]}, active_formal_relations={counts[7]}, topology={pg_topology}, "
             f"connect_select_ms={connect_select_ms:.0f}, count_query_ms={count_query_ms:.0f})"
         )
         if pg_topology == "ssh_tunnel":
@@ -187,8 +187,8 @@ if mode in {"--all", "--require-backend"}:
         workbench_summary = http_json(f"{base_url}/api/workbench/summary?month=all", timeout=15)
         summary = workbench_summary.get("summary") or {}
         paired_page = http_json(f"{base_url}/api/workbench/groups?month=all&zone=paired&page=1&page_size=5", timeout=15)
-        open_page = http_json(f"{base_url}/api/workbench/groups?month=all&zone=open&page=1&page_size=5", timeout=15)
-        open_groups = open_page.get("groups") or []
+        unpaired_page = http_json(f"{base_url}/api/workbench/groups?month=all&zone=unpaired&page=1&page_size=5", timeout=15)
+        unpaired_groups = unpaired_page.get("groups") or []
         paired_groups = paired_page.get("groups") or []
         total_count = int(
             summary.get("totalCount")
@@ -200,7 +200,7 @@ if mode in {"--all", "--require-backend"}:
             )
             or 0
         )
-        visible_groups = len(open_groups) + len(paired_groups)
+        visible_groups = len(unpaired_groups) + len(paired_groups)
         if total_count <= 0 and visible_groups <= 0:
             fail("Workbench summary/groups API returned an empty read model for month=all.")
         else:

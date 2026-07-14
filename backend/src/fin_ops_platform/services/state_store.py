@@ -755,28 +755,6 @@ class ApplicationStateStore:
         else:
             self.save_bank_flow_rule_batches(bank_flow_rule_batch_snapshot)
 
-    def load_workbench_candidate_matches(self) -> dict[str, Any]:
-        current_payload = self._load_local_pickle()
-        snapshot = current_payload.get("workbench_candidate_matches")
-        return snapshot if isinstance(snapshot, dict) else {}
-
-    def save_workbench_candidate_matches(
-        self,
-        snapshot: dict[str, Any],
-        *,
-        changed_scope_months: list[str] | None = None,
-    ) -> None:
-        normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
-        current_payload = self._load_local_pickle()
-        current_payload["workbench_candidate_matches"] = normalized_snapshot
-        self._save_local_pickle(current_payload)
-
-    def save_workbench_matching_dirty_scopes(self, snapshot: dict[str, Any]) -> None:
-        normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
-        current_payload = self._load_local_pickle()
-        current_payload["workbench_matching_dirty_scopes"] = normalized_snapshot
-        self._save_local_pickle(current_payload)
-
     def load_bank_transaction_categories(self) -> dict[str, Any]:
         current_payload = self._load_local_pickle()
         snapshot = current_payload.get("bank_transaction_categories")
@@ -1135,8 +1113,6 @@ class ApplicationStateStore:
                 "workbench_exception_cases",
                 "workbench_pair_relations",
                 "workbench_read_models",
-                "workbench_candidate_matches",
-                "workbench_matching_dirty_scopes",
                 "no_oa_bank_batches",
                 "turnover_relations",
                 "turnover_ledger_extras",

@@ -62,11 +62,11 @@ describe("bank details API", () => {
     const payload = await fetchBankDetailTransactions({});
 
     expect(payload.rows[0]).toMatchObject({
-      oaRelationTag: "候选oa",
-      invoiceRelationTag: "候选发票",
-      relationTags: ["候选oa", "候选发票"],
-      relationCaseId: "CASE-202605-001",
-      relationStatus: "candidate",
+      oaRelationTag: "无oa",
+      invoiceRelationTag: "无发票",
+      relationTags: ["无oa", "无发票"],
+      relationCaseId: null,
+      relationStatus: "unlinked",
       tradeTime: "2026-05-01 10:30:00",
       purposeText: "交易用途",
       summaryText: "项目回款摘要",

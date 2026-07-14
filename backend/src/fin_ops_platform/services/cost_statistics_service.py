@@ -6,7 +6,6 @@ from typing import Any, Callable
 
 from fin_ops_platform.domain.enums import TransactionDirection
 from fin_ops_platform.services.cost_statistics_bank_tags import bank_tag_context_from_row
-from fin_ops_platform.services.cost_statistics_relation_rules import is_cost_eligible_open_group
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.live_workbench_service import format_decimal
 
@@ -191,11 +190,6 @@ class CostStatisticsService:
             payload = self._grouped_workbench_loader(scoped_month)
             groups = [
                 *list(((payload.get("paired") or {}).get("groups") or [])),
-                *[
-                    group
-                    for group in list(((payload.get("open") or {}).get("groups") or []))
-                    if is_cost_eligible_open_group(group)
-                ],
             ]
             for group in groups:
                 oa_rows = list(group.get("oa_rows") or [])

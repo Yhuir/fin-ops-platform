@@ -220,7 +220,7 @@ async function expectWorkbenchColumnDragDisabled(page: Page) {
   await expect(page.locator("body")).not.toHaveClass(/column-layout-dragging/);
 }
 
-async function selectWorkbenchGroupRows(page: Page, zone: "open" | "paired") {
+async function selectWorkbenchGroupRows(page: Page, zone: "unpaired" | "paired") {
   const zoneLocator = page.getByTestId(`zone-${zone}`);
   const group = page.getByTestId(`candidate-group-${zone}-case:CASE-202603-101`);
   await expect(zoneLocator).toBeVisible();
@@ -241,20 +241,20 @@ const etcReadOnlyDisclosureControls = [/^上传文件/, /^已上传文件/];
 
 const readExportDynamicWriteControlOpeners: DynamicWriteControlOpener[] = [
   {
-    id: "reconciliation-workbench:open-candidate-actions",
-    label: "workbench open candidate write controls",
+    id: "reconciliation-workbench:unpaired-actions",
+    label: "workbench unpaired write controls",
     verify: async (page) => {
       await page.goto("/");
       await expectWorkbenchColumnDragDisabled(page);
-      const { zoneLocator: openZone, group: openGroup } = await selectWorkbenchGroupRows(page, "open");
-      await expect(openGroup.getByRole("button", { name: "详情" }).first()).toBeVisible();
-      await expect(openZone.getByRole("button", { name: "确认关联" })).toBeDisabled();
-      await expect(openZone.getByRole("button", { name: "异常处理" })).toBeDisabled();
-      await expect(openZone.getByRole("button", { name: "撤回关联" })).toBeDisabled();
-      await expect(openGroup.getByRole("button", { name: "忽略", exact: true })).toHaveCount(0);
-      await expect(openGroup.getByRole("button", { name: "标记异常" })).toHaveCount(0);
-      await expect(openGroup.getByRole("button", { name: "异常处理" })).toHaveCount(0);
-      await expect(openGroup.getByRole("button", { name: "确认关联" })).toHaveCount(0);
+      const { zoneLocator: unpairedZone, group: unpairedGroup } = await selectWorkbenchGroupRows(page, "unpaired");
+      await expect(unpairedGroup.getByRole("button", { name: "详情" }).first()).toBeVisible();
+      await expect(unpairedZone.getByRole("button", { name: "确认关联" })).toBeDisabled();
+      await expect(unpairedZone.getByRole("button", { name: "异常处理" })).toBeDisabled();
+      await expect(unpairedZone.getByRole("button", { name: "撤回关联" })).toBeDisabled();
+      await expect(unpairedGroup.getByRole("button", { name: "忽略", exact: true })).toHaveCount(0);
+      await expect(unpairedGroup.getByRole("button", { name: "标记异常" })).toHaveCount(0);
+      await expect(unpairedGroup.getByRole("button", { name: "异常处理" })).toHaveCount(0);
+      await expect(unpairedGroup.getByRole("button", { name: "确认关联" })).toHaveCount(0);
       await expect(page.getByRole("dialog", { name: "关联预览" })).toHaveCount(0);
       await expect(page.getByRole("dialog", { name: "统一异常处理" })).toHaveCount(0);
       await expectNoEnabledWriteControlCandidates(page);
@@ -407,7 +407,7 @@ const readExportDynamicWriteControlOpeners: DynamicWriteControlOpener[] = [
       const workflow = page.getByLabel("以发票反提 OA 工作流", { exact: true });
       await expect(workflow).toBeVisible();
       await expect(page.getByLabel("以发票反提 OA 提示").getByText("当前账户或预览状态暂不允许创建 OA 草稿。")).toBeVisible();
-      await expect(workflow.getByRole("table", { name: "反提 OA 候选发票清单" })).toBeVisible();
+      await expect(workflow.getByRole("table", { name: "反提 OA 无发票清单" })).toBeVisible();
       await expect(workflow.getByRole("button", { name: "创建 OA 草稿" })).toBeDisabled();
       await expectNoEnabledWriteControlCandidates(page, [/^全选候选$/, /^清空选择$/]);
       await page.getByRole("button", { name: "关闭以发票反提 OA 工作流" }).click();
@@ -626,10 +626,10 @@ const readExportWorkbenchRecoveryWriteControlOpeners: DynamicWriteControlOpener[
     label: "workbench processed exception and ignored recovery controls",
     verify: async (page) => {
       await page.goto("/");
-      const openZone = page.getByTestId("zone-open");
-      await expect(openZone).toBeVisible();
+      const unpairedZone = page.getByTestId("zone-unpaired");
+      await expect(unpairedZone).toBeVisible();
 
-      await openZone.getByRole("button", { name: /已处理异常3项/ }).click();
+      await unpairedZone.getByRole("button", { name: /已处理异常3项/ }).click();
       const processedModal = page.getByRole("dialog", { name: "已处理异常弹窗" });
       await expect(processedModal).toBeVisible();
       await expect(processedModal.getByText("追进项发票").first()).toBeVisible();
@@ -639,7 +639,7 @@ const readExportWorkbenchRecoveryWriteControlOpeners: DynamicWriteControlOpener[
       await processedModal.getByRole("button", { name: "关闭" }).click();
       await expect(processedModal).toBeHidden();
 
-      await openZone.getByRole("button", { name: /已忽略1项/ }).click();
+      await unpairedZone.getByRole("button", { name: /已忽略1项/ }).click();
       const ignoredModal = page.getByRole("dialog", { name: "已忽略弹窗" });
       await expect(ignoredModal).toBeVisible();
       await expect(ignoredModal.getByText("智能工厂设备商")).toBeVisible();

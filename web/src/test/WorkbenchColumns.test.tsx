@@ -104,7 +104,7 @@ describe("Workbench columns and inline actions", () => {
         }}
         rowState="idle"
         showWorkflowActions
-        zoneId="open"
+        zoneId="unpaired"
       />,
     );
 
@@ -236,7 +236,7 @@ describe("Workbench columns and inline actions", () => {
         }}
         rowState="idle"
         showWorkflowActions
-        zoneId="open"
+        zoneId="unpaired"
       />,
     );
 
@@ -378,7 +378,7 @@ describe("Workbench columns and inline actions", () => {
     await screen.findByText("赵华");
 
     const pairedGroup = screen.getByTestId("candidate-group-paired-case:CASE-202603-001");
-    const openGroup = screen.getByTestId("candidate-group-open-case:CASE-202603-101");
+    const unpairedInvoiceGroup = screen.getByTestId("candidate-group-unpaired-row:iv-o-202603-001");
     const oaRow = within(pairedGroup)
       .getAllByRole("row")
       .find((row) => row.classList.contains("record-card-oa"));
@@ -388,7 +388,7 @@ describe("Workbench columns and inline actions", () => {
     const pairedInvoiceRow = within(pairedGroup)
       .getAllByRole("row")
       .find((row) => row.classList.contains("record-card-invoice"));
-    const openInvoiceRow = within(openGroup)
+    const openInvoiceRow = within(unpairedInvoiceGroup)
       .getAllByRole("row")
       .find((row) => row.classList.contains("record-card-invoice"));
 
@@ -622,7 +622,7 @@ describe("Workbench columns and inline actions", () => {
         }}
         rowState="idle"
         showWorkflowActions
-        zoneId="open"
+        zoneId="unpaired"
       />,
     );
 
@@ -677,7 +677,7 @@ describe("Workbench columns and inline actions", () => {
         }}
         rowState="idle"
         showWorkflowActions
-        zoneId="open"
+        zoneId="unpaired"
       />,
     );
 
@@ -736,7 +736,7 @@ describe("Workbench columns and inline actions", () => {
           row={createInvoiceRow("inv-oa-source", "oa_attachment_invoice")}
           rowState="idle"
           showWorkflowActions
-          zoneId="open"
+          zoneId="unpaired"
         />
         <WorkbenchRecordCard
           actionMode="default"
@@ -749,7 +749,7 @@ describe("Workbench columns and inline actions", () => {
           row={createInvoiceRow("inv-manual-source")}
           rowState="idle"
           showWorkflowActions
-          zoneId="open"
+          zoneId="unpaired"
         />
       </div>,
     );
@@ -855,7 +855,7 @@ describe("Workbench columns and inline actions", () => {
         }}
         rowState="idle"
         showWorkflowActions
-        zoneId="open"
+        zoneId="unpaired"
       />,
     );
 
@@ -863,18 +863,18 @@ describe("Workbench columns and inline actions", () => {
     expect(screen.getByText("50.00")).toBeInTheDocument();
   });
 
-  test("renders open zone batch action buttons in the zone header instead of row inline workflow buttons", async () => {
+  test("renders unpaired zone batch action buttons in the zone header instead of row inline workflow buttons", async () => {
     installMockApiFetch();
     renderWorkbenchPage();
     await screen.findByText("陈涛");
 
-    const openGroup = screen.getByTestId("candidate-group-open-case:CASE-202603-101");
-    const openZone = screen.getByTestId("zone-open");
+    const unpairedGroup = screen.getByTestId("candidate-group-unpaired-row:oa-o-202603-001");
+    const unpairedZone = screen.getByTestId("zone-unpaired");
 
-    expect(within(openZone).getByRole("button", { name: "确认关联" })).toBeInTheDocument();
-    expect(within(openZone).getByRole("button", { name: "异常处理" })).toBeInTheDocument();
-    expect(within(openZone).getByRole("button", { name: "清空选择" })).toBeInTheDocument();
-    expect(within(openGroup).queryByRole("button", { name: "确认关联" })).not.toBeInTheDocument();
-    expect(within(openGroup).queryByRole("button", { name: "标记异常" })).not.toBeInTheDocument();
+    expect(within(unpairedZone).getByRole("button", { name: "确认关联" })).toBeInTheDocument();
+    expect(within(unpairedZone).getByRole("button", { name: "异常处理" })).toBeInTheDocument();
+    expect(within(unpairedZone).getByRole("button", { name: "清空选择" })).toBeInTheDocument();
+    expect(within(unpairedGroup).queryByRole("button", { name: "确认关联" })).not.toBeInTheDocument();
+    expect(within(unpairedGroup).queryByRole("button", { name: "标记异常" })).not.toBeInTheDocument();
   });
 });

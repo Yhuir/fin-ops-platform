@@ -23,8 +23,8 @@ async function clickTwiceAtCenter(page: Page, locator: Locator) {
 }
 
 async function selectAllOpenRows(page: Page) {
-  const openZone = page.getByTestId("zone-open");
-  const openGroup = page.getByTestId("candidate-group-open-case:CASE-202603-101");
+  const openZone = page.getByTestId("zone-unpaired");
+  const openGroup = page.getByTestId("candidate-group-unpaired-case:CASE-202603-101");
   await expect(openZone).toBeVisible();
   await expect(openGroup).toBeVisible();
 
@@ -89,7 +89,7 @@ test.describe("workbench network recovery and duplicate submit browser flow", ()
 
     await expect(page.getByRole("dialog", { name: "关联预览" })).toHaveCount(0);
     await expect(page.getByTestId("candidate-group-paired-case:CASE-202603-101")).toBeVisible();
-    await expect(page.getByTestId("candidate-group-open-case:CASE-202603-101")).toHaveCount(0);
+    await expect(page.getByTestId("candidate-group-unpaired-case:CASE-202603-101")).toHaveCount(0);
     expect(api.count("POST /api/workbench/actions/confirm-link")).toBe(2);
     expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(0);
     expect(api.count("GET /api/workbench/groups")).toBeGreaterThan(workbenchGroupCallsBeforeRetry);
@@ -160,7 +160,7 @@ test.describe("workbench network recovery and duplicate submit browser flow", ()
     await expect(submitButton).toBeDisabled();
     await expect(pairedGroup).toBeVisible();
     await expect(page.getByRole("dialog", { name: "关联预览" })).toHaveCount(0);
-    await expect(page.getByTestId("candidate-group-open-case:CASE-202603-101")).toBeVisible();
+    await expect(page.getByTestId("candidate-group-unpaired-case:CASE-202603-101")).toBeVisible();
     await expect(page.getByTestId("candidate-group-paired-case:CASE-202603-101")).toHaveCount(0);
     const submitBody = api.lastBody("POST /api/workbench/actions/withdraw-link");
     expect(submitBody).toMatchObject({

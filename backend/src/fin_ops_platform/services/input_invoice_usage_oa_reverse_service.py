@@ -852,13 +852,6 @@ class InputInvoiceUsageOaReverseService:
                 "reason": "发票已有 active OA 关系",
                 "oaRelationStatus": "linked",
             }
-        if oa_relation_status == "candidate":
-            return {
-                "invoiceId": invoice_id,
-                "reasonCode": "already_has_candidate_oa",
-                "reason": "发票已有待确认 OA 候选关系",
-                "oaRelationStatus": "candidate",
-            }
         return None
 
     @staticmethod
@@ -892,8 +885,8 @@ class InputInvoiceUsageOaReverseService:
         }
         if "linked" in statuses:
             return "linked"
-        if "candidate" in statuses:
-            return "candidate"
+        if summaries:
+            return "unlinked"
         if int(oa_payload.get("relationCount") or 0) > 0:
             return "linked"
         return "unlinked"

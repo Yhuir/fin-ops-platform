@@ -5,7 +5,7 @@ import {
   createEmptyWorkbenchZoneDisplayState,
   mergeWorkbenchGroupsById,
 } from "../features/workbench/groupDisplayModel";
-import type { WorkbenchCandidateGroup, WorkbenchRecord } from "../features/workbench/types";
+import type { WorkbenchRelationGroup, WorkbenchRecord } from "../features/workbench/types";
 
 function buildBankRow(id: string, transactionTime: string): WorkbenchRecord {
   return {
@@ -14,7 +14,7 @@ function buildBankRow(id: string, transactionTime: string): WorkbenchRecord {
     recordType: "bank",
     label: `bank-${id}`,
     status: "待处理",
-    statusCode: "open",
+    statusCode: "unpaired",
     statusTone: "warn",
     exceptionHandled: false,
     amount: "100.00",
@@ -35,7 +35,7 @@ function buildOaRow(id: string, amount = "100.00"): WorkbenchRecord {
     recordType: "oa",
     label: `oa-${id}`,
     status: "待处理",
-    statusCode: "open",
+    statusCode: "unpaired",
     statusTone: "warn",
     exceptionHandled: false,
     amount,
@@ -81,7 +81,7 @@ function buildInvoiceRow(id: string, amount = "100.00"): WorkbenchRecord {
     recordType: "invoice",
     label: `invoice-${id}`,
     status: "待处理",
-    statusCode: "open",
+    statusCode: "unpaired",
     statusTone: "warn",
     exceptionHandled: false,
     amount,
@@ -96,13 +96,13 @@ function buildInvoiceRow(id: string, amount = "100.00"): WorkbenchRecord {
   };
 }
 
-function buildGroup(id: string, transactionTime: string): WorkbenchCandidateGroup {
+function buildGroup(id: string, transactionTime: string): WorkbenchRelationGroup {
   return {
     id,
-    groupType: "open",
-    rawGroupType: "candidate",
-    matchConfidence: "medium",
-    reason: "test",
+    groupType: "unpaired",
+    rawGroupType: "unpaired",
+    matchConfidence: "low",
+    reason: "unpaired_fact",
     rows: {
       oa: [],
       bank: [buildBankRow(id, transactionTime)],
@@ -118,10 +118,10 @@ describe("groupDisplayModel time filter", () => {
     const invoice120 = buildAttachmentInvoiceRow("invoice-120", "oa-exp-248", "120.00");
     const invoice128 = buildAttachmentInvoiceRow("invoice-128", "oa-exp-248", "128.00");
     const invoice292 = buildAttachmentInvoiceRow("invoice-292", "oa-exp-292", "292.00");
-    const group: WorkbenchCandidateGroup = {
+    const group: WorkbenchRelationGroup = {
       id: "case:source-segment",
-      groupType: "open",
-      rawGroupType: "manual_confirmed",
+      groupType: "paired",
+      rawGroupType: "relation",
       matchConfidence: "high",
       reason: "source relation",
       rows: {
@@ -150,10 +150,10 @@ describe("groupDisplayModel time filter", () => {
     const bank64996 = { ...buildBankRow("bank-64996", "2026-04-23 15:28"), amount: "64996.69" };
     const bank23053 = { ...buildBankRow("bank-23053", "2026-04-23 15:28"), amount: "23053.31" };
     const invoice29350 = buildInvoiceRow("invoice-29350", "29350");
-    const group: WorkbenchCandidateGroup = {
+    const group: WorkbenchRelationGroup = {
       id: "case:amount-fallback-segment",
       groupType: "paired",
-      rawGroupType: "manual_confirmed",
+      rawGroupType: "relation",
       matchConfidence: "high",
       reason: "existing_case_group",
       rows: {
@@ -172,7 +172,7 @@ describe("groupDisplayModel time filter", () => {
     expect(segments?.[2].rows.bank).toEqual([bank64996, bank23053]);
   });
 
-  test("dedupes repeated paginated groups for paired and open zones", () => {
+  test("dedupes repeated paginated groups for paired and unpaired zones", () => {
     const firstPageGroups = [
       buildGroup("case:paired-1", "2026-03-28 10:18"),
       buildGroup("case:paired-2", "2026-03-29 10:18"),
@@ -206,8 +206,7 @@ describe("groupDisplayModel time filter", () => {
     } as ReturnType<typeof createEmptyWorkbenchZoneDisplayState>;
 
     expect(buildWorkbenchServerPageQuery(state)).toEqual({
-      search: "供应商A",
-      searchMode: "linked_context",
+      searchByPane: { bank: "供应商A" },
       sort: "bank:desc",
     });
   });

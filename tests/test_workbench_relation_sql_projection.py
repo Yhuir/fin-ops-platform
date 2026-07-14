@@ -166,8 +166,6 @@ class WorkbenchRelationProjectionConnection:
                     "raw_payload": {"source_links": [{"source_type": "oa_attachment_invoice"}]},
                 },
             ]
-        if "from read_model.workbench_reconciliation_decisions" in normalized:
-            return []
         if "from app.workbench_pair_relations" in normalized:
             return [
                 {
@@ -293,9 +291,6 @@ class CrossMonthRelationProjectionConnection(WorkbenchRelationProjectionConnecti
                     }
                 ]
             return []
-        if "from read_model.workbench_reconciliation_decisions" in normalized:
-            self.sql_statements.append(sql)
-            return []
         return []
 
 
@@ -374,32 +369,6 @@ class DuplicateInvoiceIdentityRelationProjectionConnection(WorkbenchRelationProj
         return super().fetch_all(sql, params)
 
 
-class CandidateDecisionRelationProjectionConnection(WorkbenchRelationProjectionConnection):
-    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:
-        normalized = " ".join(sql.lower().split())
-        if "from read_model.workbench_reconciliation_decisions" in normalized:
-            self.sql_statements.append(sql)
-            if "display_state = 'open'" not in normalized and "decision_status in" not in normalized:
-                return []
-            return [
-                {
-                    "decision_key": "decision-open-candidate",
-                    "scope_month": "2026-01-01",
-                    "row_ids": ["oa-tian-196", "txn-tian-196", "oa-att-inv-70"],
-                    "row_types": [],
-                    "oa_row_ids": ["oa-tian-196"],
-                    "bank_row_ids": ["txn-tian-196"],
-                    "invoice_row_ids": ["oa-att-inv-70"],
-                    "amount": "196.00",
-                    "payment_amount_closed": False,
-                    "invoice_amount_closed": False,
-                    "source_versions": {"decision": "v1"},
-                    "raw_payload": {"decision_status": "open", "display_state": "open"},
-                }
-            ]
-        if "from app.workbench_pair_relations" in normalized:
-            return []
-        return super().fetch_all(sql, params)
 
 
 class PendingClaimedBankRelationProjectionConnection(WorkbenchRelationProjectionConnection):
@@ -411,13 +380,6 @@ class PendingClaimedBankRelationProjectionConnection(WorkbenchRelationProjection
         return super().fetch_all(sql, params)
 
 
-class PendingClaimedCandidateDecisionProjectionConnection(CandidateDecisionRelationProjectionConnection):
-    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:
-        normalized = " ".join(sql.lower().split())
-        if "from app.bank_transaction_relation_claims" in normalized:
-            self.sql_statements.append(sql)
-            return [{"bank_transaction_id": "txn-tian-196"}]
-        return super().fetch_all(sql, params)
 
 
 class LegacyCompletedOaRelationProjectionConnection(CrossMonthRelationProjectionConnection):
@@ -681,7 +643,7 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         source_versions = builder._source_versions()
         self.assertEqual(
             source_versions["workbench_relation_schema_version"],
-            "2026-07-13-partial-replacement-closure-v1",
+            "2026-07-14-formal-linked-unlinked-v1",
         )
         self.assertNotIn("workbench_reconciliation_decisions_updated_at", source_versions)
         repository.existing_scope_summary = {
@@ -701,7 +663,7 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         saved = repository.saved[0]
         self.assertEqual(
             saved["source_versions"]["workbench_relation_schema_version"],
-            "2026-07-13-partial-replacement-closure-v1",
+            "2026-07-14-formal-linked-unlinked-v1",
         )
         rows_by_id = {row["row_id"]: row for row in saved["rows"]}
         self.assertIn("input-invoice-nanjing", rows_by_id)
@@ -717,7 +679,7 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
 
         self.assertEqual(
             source_versions["workbench_relation_schema_version"],
-            "2026-07-13-partial-replacement-closure-v1",
+            "2026-07-14-formal-linked-unlinked-v1",
         )
         self.assertNotIn("workbench_reconciliation_decisions_updated_at", source_versions)
         self.assertEqual(connection.fetch_one_calls[0][1], ("2026-04-01",))
@@ -752,39 +714,7 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         ]
         self.assertTrue(any("已完成" in sql for sql in oa_queries))
 
-    def test_rebuild_keeps_open_reconciliation_decision_unlinked(self) -> None:
-        repository = CaptureWorkbenchRelationRepository()
-        connection = CandidateDecisionRelationProjectionConnection()
-        builder = WorkbenchRelationSqlProjectionBuilder(
-            connection=connection,
-            read_model_repository=repository,
-        )
 
-        result = builder.rebuild_workbench_relation_read_model_scope("2026-01")
-
-        self.assertEqual(result["group_count"], 0)
-        saved = repository.saved[0]
-        self.assertEqual(saved["groups"], [])
-        rows_by_id = {row["row_id"]: row for row in saved["rows"]}
-        self.assertEqual(rows_by_id["txn-tian-196"]["relation_status"], "unlinked")
-        self.assertEqual(rows_by_id["txn-tian-196"]["group_ids"], [])
-        self.assertEqual(rows_by_id["txn-unlinked"]["relation_status"], "unlinked")
-
-    def test_rebuild_excludes_candidate_decisions_using_in_progress_oa_claimed_bank_rows(self) -> None:
-        repository = CaptureWorkbenchRelationRepository()
-        connection = PendingClaimedCandidateDecisionProjectionConnection()
-        builder = WorkbenchRelationSqlProjectionBuilder(
-            connection=connection,
-            read_model_repository=repository,
-        )
-
-        result = builder.rebuild_workbench_relation_read_model_scope("2026-01")
-
-        self.assertEqual(result["group_count"], 0)
-        self.assertEqual(repository.saved[0]["groups"], [])
-        rows_by_id = {row["row_id"]: row for row in repository.saved[0]["rows"]}
-        self.assertNotIn("txn-tian-196", rows_by_id)
-        self.assertEqual(rows_by_id["txn-unlinked"]["relation_status"], "unlinked")
 
     def test_rebuild_skips_unchanged_scope_without_scanning_or_resaving_distribution(self) -> None:
         repository = CaptureWorkbenchRelationRepository()

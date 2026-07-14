@@ -174,7 +174,6 @@ class WorkbenchWriteFacade:
         exception_service: Any,
         exception_case_service: Any,
         override_service: Any,
-        candidate_match_service: Any,
         next_case_id: Callable[[], str],
         normalize_row_ids: Callable[[list[object]], list[str]],
         resolved_row_types_for_row_ids: Callable[..., list[str]],
@@ -198,12 +197,10 @@ class WorkbenchWriteFacade:
         save_exception_cases_snapshot: Callable[[], None],
         persist_pair_relations: Callable[..., None],
         save_overrides_snapshot: Callable[..., None],
-        persist_candidate_matches_best_effort: Callable[..., None],
         restore_exception_write_snapshots: Callable[..., None],
         restore_exception_override_snapshots: Callable[..., None],
         restore_exception_pair_snapshots: Callable[..., None],
         schedule_pair_relation_persist: Callable[..., None],
-        consume_reconciliation_decisions: Callable[..., int],
         restore_pair_relation_snapshot: Callable[..., None],
         execute_derived_data_lifecycle_event: Callable[..., None],
         schedule_read_model_persist: Callable[..., None],
@@ -212,20 +209,17 @@ class WorkbenchWriteFacade:
         cancel_link_uow: Any | None = None,
         withdraw_link_uow: Any | None = None,
         persist_pair_relations_in_transaction: Callable[..., None] | None = None,
-        consume_reconciliation_decisions_in_transaction: Callable[..., int] | None = None,
         bank_transaction_category_codes_for_row_ids: Callable[[list[str]], dict[str, str]] | None = None,
         bank_flow_rule_tag_rules_payload: Callable[[], dict[str, object]] | None = None,
         submit_internal_transfer_rows_from_workbench: Callable[..., dict[str, object]] | None = None,
         relation_command_service: Any | None = None,
         relation_command_service_factory: Callable[..., Any] | None = None,
-        reconciliation_decision_store: Any | None = None,
     ) -> None:
         self._relation_read_snapshot_port = relation_read_snapshot_port
         self._relation_special_metadata_mutation_port = relation_special_metadata_mutation_port
         self._exception_service = exception_service
         self._exception_case_service = exception_case_service
         self._override_service = override_service
-        self._candidate_match_service = candidate_match_service
         self._next_case_id = next_case_id
         self._normalize_row_ids = normalize_row_ids
         self._resolved_row_types_for_row_ids = resolved_row_types_for_row_ids
@@ -249,12 +243,10 @@ class WorkbenchWriteFacade:
         self._save_exception_cases_snapshot = save_exception_cases_snapshot
         self._persist_pair_relations = persist_pair_relations
         self._save_overrides_snapshot = save_overrides_snapshot
-        self._persist_candidate_matches_best_effort = persist_candidate_matches_best_effort
         self._restore_exception_write_snapshots = restore_exception_write_snapshots
         self._restore_exception_override_snapshots = restore_exception_override_snapshots
         self._restore_exception_pair_snapshots = restore_exception_pair_snapshots
         self._schedule_pair_relation_persist = schedule_pair_relation_persist
-        self._consume_reconciliation_decisions = consume_reconciliation_decisions
         self._restore_pair_relation_snapshot = restore_pair_relation_snapshot
         self._execute_derived_data_lifecycle_event = execute_derived_data_lifecycle_event
         self._schedule_read_model_persist = schedule_read_model_persist
@@ -263,13 +255,11 @@ class WorkbenchWriteFacade:
         self._cancel_link_uow = cancel_link_uow
         self._withdraw_link_uow = withdraw_link_uow
         self._persist_pair_relations_in_transaction = persist_pair_relations_in_transaction
-        self._consume_reconciliation_decisions_in_transaction = consume_reconciliation_decisions_in_transaction
         self._bank_transaction_category_codes_for_row_ids = bank_transaction_category_codes_for_row_ids
         self._bank_flow_rule_tag_rules_payload = bank_flow_rule_tag_rules_payload
         self._submit_internal_transfer_rows_from_workbench = submit_internal_transfer_rows_from_workbench
         self._relation_command_service = relation_command_service
         self._relation_command_service_factory = relation_command_service_factory
-        self._reconciliation_decision_store = reconciliation_decision_store
 
     def preview_confirm_link(self, payload: dict[str, object]) -> dict[str, object]:
         try:
@@ -607,10 +597,6 @@ class WorkbenchWriteFacade:
                     request_id=request_id,
                     action_name=action_name,
                 )
-                self._consume_reconciliation_decisions(
-                    row_ids=row_ids,
-                    relation_id=resolved_case_id,
-                )
             except Exception:
                 self._restore_pair_relation_snapshot(
                     previous_pair_snapshot,
@@ -759,17 +745,6 @@ class WorkbenchWriteFacade:
                 started_at=pair_relation_started_at,
                 detail=f"case_id={resolved_case_id}",
             )
-            if self._consume_reconciliation_decisions_in_transaction is not None:
-                self._consume_reconciliation_decisions_in_transaction(
-                    transaction=transaction,
-                    row_ids=row_ids,
-                    relation_id=resolved_case_id,
-                )
-            else:
-                self._consume_reconciliation_decisions(
-                    row_ids=row_ids,
-                    relation_id=resolved_case_id,
-                )
             return {
                 "success": True,
                 "action": action_name,
@@ -985,47 +960,12 @@ class WorkbenchWriteFacade:
             "special_metadata": dict(paired_policy_metadata or {}),
         }
         after_groups = self._relation_groups([after_relation], selected_rows=selected_rows)
-        if self._confirm_link_projection_is_paired(
-            row_types=row_types,
-            amount_check=amount_check,
-            special_metadata=after_relation["special_metadata"],
-        ):
-            paired_groups = after_groups
-            open_groups: list[dict[str, object]] = []
-        else:
-            paired_groups = []
-            open_groups = after_groups
         return {
             "after": {
-                "paired_groups": paired_groups,
-                "open_groups": open_groups,
+                "paired_groups": after_groups,
+                "unpaired_groups": [],
             }
         }
-
-    @staticmethod
-    def _confirm_link_projection_is_paired(
-        *,
-        row_types: list[str],
-        amount_check: dict[str, object],
-        special_metadata: dict[str, object] | None = None,
-    ) -> bool:
-        normalized_types = {
-            str(row_type or "").strip()
-            for row_type in list(row_types or [])
-            if str(row_type or "").strip()
-        }
-        if "bank" in normalized_types:
-            metadata = special_metadata if isinstance(special_metadata, dict) else {}
-            requires_oa = bool(metadata.get("requires_oa", True))
-            requires_invoice = bool(metadata.get("requires_invoice", True))
-            return (
-                (not requires_oa or "oa" in normalized_types)
-                and (not requires_invoice or "invoice" in normalized_types)
-            )
-        if {"oa", "bank", "invoice"}.issubset(normalized_types):
-            return True
-        external_etc_batch_id = str((amount_check or {}).get("external_etc_batch_id") or "").strip()
-        return bool(external_etc_batch_id and {"oa", "bank"}.issubset(normalized_types))
 
     def _bank_transaction_paired_policy_metadata(
         self,
@@ -1691,7 +1631,7 @@ class WorkbenchWriteFacade:
             return None
         row_id = str(row.get("id") or "")
         active_relation = self._relation_read_snapshot_port.active_relation_by_row_id(row_id)
-        current_row_status = "confirmed" if isinstance(active_relation, dict) else "open"
+        current_row_status = "confirmed" if isinstance(active_relation, dict) else "unpaired"
         try:
             assert_workbench_stale_preconditions(
                 _WorkbenchWritePreconditionCommand(
@@ -2294,7 +2234,7 @@ class WorkbenchWriteFacade:
         return {
             "after": {
                 "paired_groups": [],
-                "open_groups": list(after.get("groups") or []),
+                "unpaired_groups": list(after.get("groups") or []),
             }
         }
 
@@ -3646,7 +3586,6 @@ class WorkbenchWriteFacade:
     ) -> dict[str, object]:
         previous_exception_snapshot = self._exception_case_service.snapshot()
         previous_pair_snapshot = self._relation_read_snapshot_port.snapshot()
-        previous_candidate_snapshot = self._candidate_match_service.snapshot()
         previous_override_snapshot = self._override_service.snapshot()
         try:
             result = self._exception_service.apply(payload, actor=actor)
@@ -3654,7 +3593,6 @@ class WorkbenchWriteFacade:
             self._restore_exception_write_snapshots(
                 previous_exception_snapshot=previous_exception_snapshot,
                 previous_pair_snapshot=previous_pair_snapshot,
-                previous_candidate_snapshot=previous_candidate_snapshot,
                 previous_override_snapshot=previous_override_snapshot,
             )
             raise
@@ -3689,12 +3627,10 @@ class WorkbenchWriteFacade:
                     changed_case_ids=[str(relation.get("case_id") or "")],
                 )
             self._save_overrides_snapshot(changed_row_ids=row_ids)
-            self._persist_candidate_matches_best_effort(operation=action_name)
         except Exception as exc:
             self._restore_exception_write_snapshots(
                 previous_exception_snapshot=previous_exception_snapshot,
                 previous_pair_snapshot=previous_pair_snapshot,
-                previous_candidate_snapshot=previous_candidate_snapshot,
                 previous_override_snapshot=previous_override_snapshot,
             )
             raise _WorkbenchWritePersistenceError("工作台状态暂时无法保存，请稍后重试。") from exc

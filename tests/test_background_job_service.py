@@ -163,7 +163,7 @@ class BackgroundJobServiceTests(unittest.TestCase):
             )
             partial_job = service.create_job(
                 job_type="workbench_matching",
-                label="生成关联台候选",
+                label="生成正式配对关系",
                 owner_user_id="user-001",
                 visibility="system",
             )
@@ -172,7 +172,7 @@ class BackgroundJobServiceTests(unittest.TestCase):
             failed = service.fail_job(failed_job.job_id, "数据重置失败。", "boom")
             partial = service.succeed_job(
                 partial_job.job_id,
-                "关联台候选部分完成。",
+                "正式配对关系部分完成。",
                 status="partial_success",
             )
             active_before_ack = service.list_active_jobs("another-user")
@@ -219,11 +219,11 @@ class BackgroundJobServiceTests(unittest.TestCase):
             )
             second = service.create_job(
                 job_type="workbench_matching",
-                label="生成关联台候选",
+                label="生成正式配对关系",
                 owner_user_id="user-001",
             )
             service.fail_job(first.job_id, "银行流水导入失败。", "boom")
-            service.succeed_job(second.job_id, "关联台候选部分完成。", status="partial_success")
+            service.succeed_job(second.job_id, "正式配对关系部分完成。", status="partial_success")
 
             acknowledged = service.acknowledge_jobs([first.job_id, second.job_id], "user-001")
             attention_jobs = service.list_attention_jobs("user-001")

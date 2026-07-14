@@ -16,10 +16,10 @@ COMPANY_SUFFIXES = (
 )
 TEXT_NORMALIZE_RE = re.compile(r"[\s,，()（）【】\[\]]+")
 SUPPORTED_SCOPES = {"all", "oa", "bank", "invoice"}
-SUPPORTED_STATUSES = {"paired", "open", "ignored", "processed_exception"}
+SUPPORTED_STATUSES = {"paired", "unpaired", "ignored", "processed_exception"}
 STATUS_LABELS = {
     "paired": "已配对",
-    "open": "未配对",
+    "unpaired": "未配对",
     "ignored": "已忽略",
     "processed_exception": "已处理异常",
 }
@@ -193,7 +193,7 @@ class SearchService:
             project_names_by_row_id = self._project_names_by_row_id(raw_payload)
             index = {"oa": [], "bank": [], "invoice": []}
 
-            for section in ("paired", "open"):
+            for section in ("paired", "unpaired"):
                 section_payload = raw_payload.get(section, {})
                 if not isinstance(section_payload, dict):
                     continue
@@ -231,7 +231,7 @@ class SearchService:
     ) -> dict[str, list[dict[str, Any]]]:
         index: dict[str, list[dict[str, Any]]] = {"oa": [], "bank": [], "invoice": []}
 
-        for section in ("paired", "open"):
+        for section in ("paired", "unpaired"):
             section_payload = grouped_payload.get(section, {})
             if not isinstance(section_payload, dict):
                 continue
@@ -322,7 +322,7 @@ class SearchService:
         case_project_names: dict[str, set[str]] = defaultdict(set)
         case_row_ids: dict[str, set[str]] = defaultdict(set)
 
-        for section in ("paired", "open"):
+        for section in ("paired", "unpaired"):
             section_payload = raw_payload.get(section, {})
             if not isinstance(section_payload, dict):
                 continue
@@ -391,8 +391,8 @@ class SearchService:
         try:
             payload = loader(month)
         except KeyError:
-            return {"month": month, "paired": {"oa": [], "bank": [], "invoice": []}, "open": {"oa": [], "bank": [], "invoice": []}}
-        return payload if isinstance(payload, dict) else {"month": month, "paired": {"oa": [], "bank": [], "invoice": []}, "open": {"oa": [], "bank": [], "invoice": []}}
+            return {"month": month, "paired": {"oa": [], "bank": [], "invoice": []}, "unpaired": {"oa": [], "bank": [], "invoice": []}}
+        return payload if isinstance(payload, dict) else {"month": month, "paired": {"oa": [], "bank": [], "invoice": []}, "unpaired": {"oa": [], "bank": [], "invoice": []}}
 
     @staticmethod
     def _safe_load_rows(loader: Callable[[str], list[dict[str, Any]]], month: str) -> list[dict[str, Any]]:
@@ -408,7 +408,7 @@ class SearchService:
             return "ignored"
         if bool(row.get("handled_exception")):
             return "processed_exception"
-        return "paired" if section == "paired" else "open"
+        return "paired" if section == "paired" else "unpaired"
 
     @staticmethod
     def _match_indexed_row(indexed_row: dict[str, Any], normalized_query: str) -> str | None:

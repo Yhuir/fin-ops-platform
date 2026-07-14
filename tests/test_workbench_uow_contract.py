@@ -123,7 +123,6 @@ class _RecordingRepositoryFactory:
             pair_relations=_RepositoryPort("pair_relations", transaction),
             exception_cases=_RepositoryPort("exception_cases", transaction),
             row_overrides=_RepositoryPort("row_overrides", transaction),
-            candidate_matches=_RepositoryPort("candidate_matches", transaction),
         )
 
 
@@ -778,7 +777,7 @@ class WorkbenchUoWContractTests(unittest.TestCase):
         self.assertEqual(connection.commits, 0)
         self.assertEqual(connection.rollbacks, 1)
 
-    def test_exception_apply_commits_case_override_candidate_dirty_scope_and_outbox_in_one_transaction(self) -> None:
+    def test_exception_apply_commits_case_override_dirty_scope_and_outbox_in_one_transaction(self) -> None:
         connection = _RecordingConnection()
         writer = _RecordingDirtyOutboxWriter()
         uow = self._new_uow(connection=connection, read_model_writer=writer)
@@ -786,7 +785,6 @@ class WorkbenchUoWContractTests(unittest.TestCase):
         def handler(ctx: object) -> dict[str, object]:
             ctx.exception_cases.record("save_case", case_id="EX-1")
             ctx.row_overrides.record("save_override", row_id="bank-1")
-            ctx.candidate_matches.record("replace_best_effort", row_id="bank-1")
             return {"case_id": "EX-1", "affected_scope_keys": ["2026-05"]}
 
         result = self._run_uow(

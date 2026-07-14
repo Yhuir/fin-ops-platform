@@ -904,7 +904,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         settings = RecordingBankFlowRuleSettings()
         service = object.__new__(BankFlowRuleBatchApplicationService)
         service._app_settings_service = settings
-        service._workbench_matching_source_versions_provider = lambda: {"workbench_matching_rules_version": "rules-v1"}
+        service._workbench_matching_source_versions_provider = lambda: {"workbench_formal_relation_rule_version": "rules-v1"}
         service._bank_transaction_category_service = SimpleNamespace(snapshot=lambda: {"version": 3})
         service._effective_category_provider = SimpleNamespace(last_source_versions={})
         service._relation_facade = SimpleNamespace(last_source_versions={})
@@ -963,7 +963,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         relation_facade = RelationFacade()
         service = object.__new__(BankFlowRuleBatchApplicationService)
         service._app_settings_service = settings
-        service._workbench_matching_source_versions_provider = lambda: {"workbench_matching_rules_version": "rules-v1"}
+        service._workbench_matching_source_versions_provider = lambda: {"workbench_formal_relation_rule_version": "rules-v1"}
         service._bank_transaction_category_service = SimpleNamespace(snapshot=lambda: {"version": 3})
         service._effective_category_provider = provider
         service._relation_facade = relation_facade
@@ -1038,7 +1038,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         relation_facade = RelationFacade()
         service = object.__new__(BankFlowRuleBatchApplicationService)
         service._app_settings_service = settings
-        service._workbench_matching_source_versions_provider = lambda: {"workbench_matching_rules_version": "rules-v1"}
+        service._workbench_matching_source_versions_provider = lambda: {"workbench_formal_relation_rule_version": "rules-v1"}
         service._bank_transaction_category_service = SimpleNamespace(
             snapshot=lambda: {"version": 3},
             tag_dictionary_payload=lambda: {
@@ -1255,7 +1255,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
             state_store=StateStore(),
             read_model_persistence=persistence,
             queue_repository=queue,
-            workbench_matching_source_versions_provider=lambda: {"workbench_matching_rules_version": "rules-v1"},
+            workbench_matching_source_versions_provider=lambda: {"workbench_formal_relation_rule_version": "rules-v1"},
             relation_facade=RelationFacade(),
         )
 

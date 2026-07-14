@@ -272,7 +272,7 @@ export type InputInvoiceUsageOaReverseInvoice = {
   totalWithTax: string;
   paymentStatusLabel: string;
   targetApplicantName?: string;
-  oaRelationStatus?: "linked" | "candidate" | "unlinked" | string;
+  oaRelationStatus?: "linked" | "unlinked" | string;
 };
 
 export type InputInvoiceUsageOaReverseRejectedInvoice = {
@@ -283,7 +283,7 @@ export type InputInvoiceUsageOaReverseRejectedInvoice = {
   issueDate?: string | null;
   totalWithTax?: string | null;
   paymentStatusLabel?: string | null;
-  oaRelationStatus?: "linked" | "candidate" | "unlinked" | string;
+  oaRelationStatus?: "linked" | "unlinked" | string;
   reasonCode?: string | null;
   reason: string;
 };

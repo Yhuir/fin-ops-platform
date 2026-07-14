@@ -2,16 +2,13 @@ from __future__ import annotations
 
 from collections import defaultdict
 from copy import deepcopy
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from typing import Any
 
 from fin_ops_platform.services.object_identity_policy import FinancialObjectIdentityPolicy, ObjectIdentity
 
 
 HARD_INVOICE_IDENTITY_KINDS = frozenset({"digital_invoice_no", "invoice_code_no"})
-CLAIMED_RELATION_CODES = frozenset(
-    {"fully_linked", "automatic_match", "manual_confirmed", "auto_closed", "processed_exception", "ignored"}
-)
 
 
 class WorkbenchObjectIdentityArbitrationService:
@@ -44,7 +41,7 @@ class WorkbenchObjectIdentityArbitrationService:
                     identity_key=identity_key,
                     rows=rows,
                     row_type="invoice",
-                    collapse_open_duplicates=True,
+                    collapse_unpaired_duplicates=True,
                 )
             )
         for identity_key, rows in bank_rows_by_key.items():
@@ -54,7 +51,7 @@ class WorkbenchObjectIdentityArbitrationService:
                     identity_key=identity_key,
                     rows=rows,
                     row_type="bank",
-                    collapse_open_duplicates=False,
+                    collapse_unpaired_duplicates=False,
                 )
             )
 
@@ -68,19 +65,21 @@ class WorkbenchObjectIdentityArbitrationService:
         source_kind = _text(row.get("source_kind"))
         if row_type == "invoice":
             if source_kind == "oa_attachment_invoice":
-                return self._identity_policy.identify_oa_attachment_invoice(
+                identity = self._identity_policy.identify_oa_attachment_invoice(
                     row,
                     source_kind=source_kind,
                     source_row_id=row_id,
                 )
-            return self._identity_policy.identify_invoice_mapping(
-                row,
-                source_kind=source_kind,
-                source_row_id=row_id,
-                object_type="invoice",
-            )
+            else:
+                identity = self._identity_policy.identify_invoice_mapping(
+                    row,
+                    source_kind=source_kind,
+                    source_row_id=row_id,
+                    object_type="invoice",
+                )
+            return self._with_source_row_fallback(identity, row_type=row_type, row_id=row_id)
         if row_type == "bank":
-            return self._identity_policy.identify_bank_transaction_mapping(
+            identity = self._identity_policy.identify_bank_transaction_mapping(
                 {
                     **row,
                     "counterparty_name": row.get("counterparty_name") or row.get("counterparty_name_raw"),
@@ -88,6 +87,7 @@ class WorkbenchObjectIdentityArbitrationService:
                 source_kind=source_kind,
                 source_row_id=row_id,
             )
+            return self._with_source_row_fallback(identity, row_type=row_type, row_id=row_id)
         if row_type == "oa":
             return ObjectIdentity(
                 object_type="oa",
@@ -102,6 +102,22 @@ class WorkbenchObjectIdentityArbitrationService:
                 },
             )
         return None
+
+    @staticmethod
+    def _with_source_row_fallback(
+        identity: ObjectIdentity,
+        *,
+        row_type: str,
+        row_id: str,
+    ) -> ObjectIdentity:
+        if identity.canonical_key:
+            return identity
+        return replace(
+            identity,
+            canonical_key=f"{row_type}:source_row:{row_id}",
+            canonical_key_kind="source_row_id",
+            confidence="source",
+        )
 
     @staticmethod
     def _apply_identity_payload(row: dict[str, Any], identity: ObjectIdentity) -> None:
@@ -124,12 +140,12 @@ class WorkbenchObjectIdentityArbitrationService:
         identity_key: str,
         rows: list[dict[str, Any]],
         row_type: str,
-        collapse_open_duplicates: bool,
+        collapse_unpaired_duplicates: bool,
     ) -> list[str]:
         if len(rows) < 2:
             return []
         claimed_rows = [row for row in rows if self._is_claimed_row(row)]
-        if not claimed_rows and not collapse_open_duplicates:
+        if not claimed_rows and not collapse_unpaired_duplicates:
             self._mark_duplicate_identity_warning(rows, identity_key=identity_key, row_type=row_type)
             return []
 
@@ -191,23 +207,7 @@ class WorkbenchObjectIdentityArbitrationService:
 
     @staticmethod
     def _is_claimed_row(row: dict[str, Any]) -> bool:
-        status = _text(row.get("status"))
-        if status == "paired":
-            return True
-        if _text(row.get("case_id")):
-            return True
-        for key in ("oa_bank_relation", "invoice_relation", "invoice_bank_relation", "relation"):
-            relation = row.get(key)
-            if isinstance(relation, dict) and _text(relation.get("code")) in CLAIMED_RELATION_CODES:
-                return True
-        exception_case = row.get("exception_case")
-        if isinstance(exception_case, dict) and _text(exception_case.get("case_id")):
-            return True
-        return bool(
-            row.get("ignored")
-            or row.get("exception_case_id")
-            or row.get("auto_close_suppressed")
-        )
+        return _text(row.get("status")) == "paired"
 
 
 def _primary_sort_key(row: dict[str, Any]) -> tuple[int, int, str]:

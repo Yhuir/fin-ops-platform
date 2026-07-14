@@ -33,6 +33,10 @@ function stringValue(value: unknown) {
   return typeof value === "string" ? value : value == null ? "" : String(value);
 }
 
+function formalRelationStatus(value: unknown): "linked" | "unlinked" {
+  return stringValue(value).trim() === "linked" ? "linked" : "unlinked";
+}
+
 function booleanValue(value: unknown) {
   return value === true;
 }
@@ -261,7 +265,7 @@ function mapBank(rawValue: unknown): OutputInvoiceCollectionRowsResponse["rows"]
     summary: stringValue(raw.summary),
     remark: stringValue(raw.remark),
     relationCaseId: stringValue(camelOrSnake(raw, "relationCaseId", "relation_case_id")),
-    relationStatus: stringValue(camelOrSnake(raw, "relationStatus", "relation_status")),
+    relationStatus: formalRelationStatus(camelOrSnake(raw, "relationStatus", "relation_status")),
     relationSource: stringValue(camelOrSnake(raw, "relationSource", "relation_source")),
     detailAvailable: id !== "",
   };
@@ -285,7 +289,7 @@ function mapOa(rawValue: unknown): OutputInvoiceCollectionRowsResponse["rows"][n
     amount,
     status: stringValue(raw.status),
     relationCaseId: stringValue(camelOrSnake(raw, "relationCaseId", "relation_case_id")),
-    relationStatus: stringValue(camelOrSnake(raw, "relationStatus", "relation_status")),
+    relationStatus: formalRelationStatus(camelOrSnake(raw, "relationStatus", "relation_status")),
     relationSource: stringValue(camelOrSnake(raw, "relationSource", "relation_source")),
     detailAvailable: booleanValue(camelOrSnake(raw, "detailAvailable", "detail_available")) || id !== "",
   };
@@ -310,7 +314,7 @@ function mapRelatedInvoice(rawValue: unknown): OutputInvoiceCollectionRowsRespon
     totalWithTax,
     taxableItemName: stringValue(camelOrSnake(raw, "taxableItemName", "taxable_item_name")),
     relationCaseId: stringValue(camelOrSnake(raw, "relationCaseId", "relation_case_id")),
-    relationStatus: stringValue(camelOrSnake(raw, "relationStatus", "relation_status")),
+    relationStatus: formalRelationStatus(camelOrSnake(raw, "relationStatus", "relation_status")),
     relationSource: stringValue(camelOrSnake(raw, "relationSource", "relation_source")),
   };
 }

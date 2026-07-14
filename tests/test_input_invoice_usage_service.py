@@ -635,7 +635,7 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
                 {
                     "row_id": invoice.id,
                     "row_type": "input_invoice",
-                    "relation_status": "candidate",
+                    "relation_status": "unlinked",
                     "group_ids": ["decision-open-candidate"],
                     "linked_oa": [],
                     "linked_bank_transactions": [],
@@ -647,8 +647,8 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
                 {
                     "group_id": "decision-open-candidate",
                     "scope_month": "2026-05",
-                    "relation_source": "automatic_decision",
-                    "relation_status": "candidate",
+                    "relation_source": "unlinked_evidence",
+                    "relation_status": "unlinked",
                     "oa_row_ids": ["oa-candidate"],
                     "bank_transaction_ids": [bank.id],
                     "input_invoice_ids": [invoice.id],
@@ -657,8 +657,8 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
                         "group_id": "decision-open-candidate",
                         "row_ids": ["oa-candidate", bank.id, invoice.id],
                         "row_types": ["oa", "bank", "invoice"],
-                        "relation_mode": "automatic_decision",
-                        "relation_status": "candidate",
+                        "relation_mode": "unlinked_evidence",
+                        "relation_status": "unlinked",
                         "amount_check": {"matched": True},
                     },
                 }
@@ -785,10 +785,10 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
                 {
                     "row_id": "oa-att-inv-deyizhilai",
                     "row_type": "input_invoice",
-                    "relation_status": "candidate",
+                    "relation_status": "unlinked",
                     "group_ids": ["decision-oa-attachment-source"],
                     "linked_oa": [],
-                    "linked_bank_transactions": [{"id": bank.id, "relation_status": "candidate"}],
+                    "linked_bank_transactions": [{"id": bank.id, "relation_status": "unlinked"}],
                     "linked_input_invoices": [],
                     "linked_output_invoices": [],
                 }
@@ -797,8 +797,8 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
                 {
                     "group_id": "decision-oa-attachment-source",
                     "scope_month": "2026-05",
-                    "relation_source": "automatic_decision",
-                    "relation_status": "candidate",
+                    "relation_source": "unlinked_evidence",
+                    "relation_status": "unlinked",
                     "oa_row_ids": ["oa-deyizhilai"],
                     "bank_transaction_ids": [bank.id],
                     "input_invoice_ids": ["oa-att-inv-deyizhilai"],
@@ -807,8 +807,8 @@ class InputInvoiceUsageQueryServiceTests(unittest.TestCase):
                         "group_id": "decision-oa-attachment-source",
                         "row_ids": ["oa-deyizhilai", bank.id, "oa-att-inv-deyizhilai"],
                         "row_types": ["oa", "bank", "invoice"],
-                        "relation_mode": "automatic_decision",
-                        "relation_status": "candidate",
+                        "relation_mode": "unlinked_evidence",
+                        "relation_status": "unlinked",
                         "amount_check": {"matched": True},
                     },
                 }

@@ -177,7 +177,7 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
             missing_read_model_error=lambda _error: False,
         )
 
-        result = facade.group_detail("all", zone="open", group_id="case:1")
+        result = facade.group_detail("all", zone="unpaired", group_id="case:1")
 
         self.assertEqual(result.status_code, HTTPStatus.NOT_FOUND)
         self.assertEqual(result.payload["read_model_status"], "stale")
@@ -211,7 +211,7 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
             missing_read_model_error=lambda _error: False,
         )
 
-        result = facade.group_detail("all", zone="open", group_id="case:1")
+        result = facade.group_detail("all", zone="unpaired", group_id="case:1")
 
         self.assertEqual(result.status_code, HTTPStatus.NOT_FOUND)
         self.assertEqual(result.payload["read_model_status"], "refreshing")
@@ -254,7 +254,7 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
                         "bank_count": 0,
                         "invoice_count": 0,
                         "paired_count": 0,
-                        "open_count": 0,
+                        "unpaired_count": 0,
                         "exception_count": 0,
                     },
                     "read_model_status": "stale",
@@ -292,7 +292,7 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
                 cache_key: {
                     "payload": {
                         "month": "all",
-                        "zone": "open",
+                        "zone": "unpaired",
                         "groups": [{"group_id": "cached"}],
                     }
                 }
@@ -310,7 +310,7 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
             groups_cache_key_from_version=lambda **_kwargs: cache_key,
         )
 
-        result = facade.groups("all", zone="open")
+        result = facade.groups("all", zone="unpaired")
 
         self.assertEqual(result.status_code, HTTPStatus.OK)
         self.assertEqual(result.payload["groups"][0]["group_id"], "cached")
@@ -329,7 +329,7 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
             def get_workbench_groups_page(self, **_kwargs: object) -> dict[str, object]:
                 return {
                     "month": "all",
-                    "zone": "open",
+                    "zone": "unpaired",
                     "groups": [{"group_id": "fresh-db"}],
                     "read_model_status": "fresh",
                     "source_versions": {"builder": "v1"},
@@ -345,7 +345,7 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
             missing_read_model_error=lambda _error: False,
         )
 
-        result = facade.groups("all", zone="open")
+        result = facade.groups("all", zone="unpaired")
 
         self.assertEqual(result.status_code, HTTPStatus.OK)
         self.assertEqual(result.payload["groups"][0]["group_id"], "fresh-db")
@@ -359,7 +359,7 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
             def get_workbench_groups_page(self, **_kwargs: object) -> dict[str, object]:
                 return {
                     "month": "all",
-                    "zone": "open",
+                    "zone": "unpaired",
                     "groups": [{"group_id": "fresh-db"}],
                     "read_model_status": "fresh",
                     "source_versions": {"builder": "v1"},
@@ -372,7 +372,7 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
                 cache_key: {
                     "payload": {
                         "month": "all",
-                        "zone": "open",
+                        "zone": "unpaired",
                         "groups": [{"group_id": "stale-cached"}],
                     }
                 }
@@ -393,7 +393,7 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
             groups_redis_ttl_seconds=lambda: 600,
         )
 
-        result = facade.groups("all", zone="open")
+        result = facade.groups("all", zone="unpaired")
 
         self.assertEqual(result.status_code, HTTPStatus.OK)
         self.assertEqual(result.payload["groups"][0]["group_id"], "fresh-db")
@@ -421,7 +421,7 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
             transient_read_model_error=lambda error: "statement timeout" in str(error).lower(),
         )
 
-        result = facade.groups("all", zone="open")
+        result = facade.groups("all", zone="unpaired")
 
         self.assertEqual(result.status_code, HTTPStatus.SERVICE_UNAVAILABLE)
         self.assertEqual(result.payload["error"], "read_model_temporarily_unavailable")
@@ -505,7 +505,7 @@ class WorkbenchGroupsPageCacheWarmerTests(unittest.TestCase):
         self.assertEqual(result["warmed_pages"], 2)
         self.assertEqual(result["skipped_pages"], 0)
         self.assertEqual(redis.set_text_calls, [("workbench:groups:version:all", "gen-active", 120)])
-        self.assertEqual([call["zone"] for call in repository.page_calls], ["paired", "open"])
+        self.assertEqual([call["zone"] for call in repository.page_calls], ["paired", "unpaired"])
         for call in repository.page_calls:
             self.assertEqual(call["page"], 1)
             self.assertEqual(call["page_size"], 200)
@@ -526,7 +526,7 @@ class WorkbenchGroupsPageCacheWarmerTests(unittest.TestCase):
                 sort=None,
                 detail_level="summary",
             )
-            for zone in ("paired", "open")
+            for zone in ("paired", "unpaired")
         ]
         self.assertEqual([call[0] for call in redis.set_json_calls], expected_keys)
         self.assertEqual([call[2] for call in redis.set_json_calls], [120, 120])

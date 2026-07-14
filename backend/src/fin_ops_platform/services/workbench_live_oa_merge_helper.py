@@ -23,17 +23,17 @@ class WorkbenchLiveOaMergeHelper:
             merged = {}
         merged["oa_status"] = self._serialize_value(oa_payload.get("oa_status") or {"code": "ready", "message": "OA 已同步"})
         paired = merged.setdefault("paired", {})
-        open_rows = merged.setdefault("open", {})
+        unpaired_rows = merged.setdefault("unpaired", {})
         if not isinstance(paired, dict):
             paired = {}
             merged["paired"] = paired
-        if not isinstance(open_rows, dict):
-            open_rows = {}
-            merged["open"] = open_rows
+        if not isinstance(unpaired_rows, dict):
+            unpaired_rows = {}
+            merged["unpaired"] = unpaired_rows
         oa_paired = oa_payload.get("paired") if isinstance(oa_payload.get("paired"), dict) else {}
-        oa_open = oa_payload.get("open") if isinstance(oa_payload.get("open"), dict) else {}
+        oa_unpaired = oa_payload.get("unpaired") if isinstance(oa_payload.get("unpaired"), dict) else {}
         paired["oa"] = self._serialize_value(oa_paired.get("oa", []))
-        open_rows["oa"] = self._serialize_value(oa_open.get("oa", []))
+        unpaired_rows["oa"] = self._serialize_value(oa_unpaired.get("oa", []))
         paired["invoice"] = self.dedupe_rows_by_id_preferring_last([
             *self._as_list(self._serialize_value(paired.get("invoice", []))),
             *[
@@ -42,11 +42,11 @@ class WorkbenchLiveOaMergeHelper:
                 if isinstance(row, dict) and str(row.get("source_kind", "")) == "oa_attachment_invoice"
             ],
         ])
-        open_rows["invoice"] = self.dedupe_rows_by_id_preferring_last([
-            *self._as_list(self._serialize_value(open_rows.get("invoice", []))),
+        unpaired_rows["invoice"] = self.dedupe_rows_by_id_preferring_last([
+            *self._as_list(self._serialize_value(unpaired_rows.get("invoice", []))),
             *[
                 row
-                for row in self._as_list(self._serialize_value(oa_open.get("invoice", [])))
+                for row in self._as_list(self._serialize_value(oa_unpaired.get("invoice", [])))
                 if isinstance(row, dict) and str(row.get("source_kind", "")) == "oa_attachment_invoice"
             ],
         ])

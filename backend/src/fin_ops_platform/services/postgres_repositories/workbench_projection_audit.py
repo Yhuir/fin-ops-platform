@@ -5,7 +5,7 @@ from typing import Any
 from fin_ops_platform.services.oa_attachment_invoice_cache import attachment_invoice_cache_parser_version
 from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
 from fin_ops_platform.services.postgres_repositories.audit_report import AuditIssue
-from fin_ops_platform.services.workbench_matching_rules import WORKBENCH_MATCHING_RULES_VERSION
+from fin_ops_platform.services.workbench_free_matching_engine import RULE_VERSION as WORKBENCH_FORMAL_RELATION_RULE_VERSION
 from fin_ops_platform.services.workbench_sql_projection import WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
 
 
@@ -14,7 +14,7 @@ def _sql_text(value: str) -> str:
 
 
 _MONTH_BUILDER = _sql_text(WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION)
-_MATCHING_RULES = _sql_text(WORKBENCH_MATCHING_RULES_VERSION)
+_FORMAL_RELATION_RULE = _sql_text(WORKBENCH_FORMAL_RELATION_RULE_VERSION)
 _OA_SYNC = _sql_text(OA_PROJECTION_SYNC_VERSION)
 _ATTACHMENT_PARSER = _sql_text(attachment_invoice_cache_parser_version())
 
@@ -312,7 +312,7 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
               and scope_key ~ '^[0-9]{4}-[0-9]{2}$'
             order by scope_key, activated_at desc nulls last, updated_at desc
         ),
-        projected_candidates as (
+        projected_representations as (
             select row.row_id, generation.scope_key, row.payload, 0 as representation_rank
             from active_months generation
             join read_model.workbench_rows row
@@ -336,7 +336,7 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
         ),
         projected as (
             select distinct on (row_id) row_id, scope_key, payload
-            from projected_candidates
+            from projected_representations
             where nullif(row_id, '') is not null
             order by row_id, representation_rank, scope_key desc
         ),
@@ -361,13 +361,7 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
               and not (
                     field.value = 'null'::jsonb
                 and projected.payload is not null
-                and (
-                     projected.payload->field.key is null
-                     or (
-                          field.key = 'case_id'
-                      and coalesce(projected.payload->>field.key, '') like 'candidate:%%'
-                     )
-                )
+                and projected.payload->field.key is null
               )
               and projected.payload->field.key is distinct from field.value
         ),
@@ -434,13 +428,13 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
         select generation.generation_id as subject_id, generation.scope_key,
                generation.source_versions,
                {_MONTH_BUILDER} as expected_builder,
-               {_MATCHING_RULES} as expected_matching_rules,
+               {_FORMAL_RELATION_RULE} as expected_formal_relation_rule,
                {_OA_SYNC} as expected_oa_projection_sync,
                {_ATTACHMENT_PARSER} as expected_attachment_parser
         from active_generations generation
         left join current_settings settings on true
         where coalesce(generation.source_versions->>'builder', '') <> {_MONTH_BUILDER}
-           or coalesce(generation.source_versions->>'workbench_matching_rules_version', '') <> {_MATCHING_RULES}
+           or coalesce(generation.source_versions->>'workbench_formal_relation_rule_version', '') <> {_FORMAL_RELATION_RULE}
            or coalesce(generation.source_versions->>'oa_projection_sync_version', '') <> {_OA_SYNC}
            or coalesce(generation.source_versions->>'oa_attachment_invoice_parser_version', '')
               <> {_ATTACHMENT_PARSER}
@@ -814,7 +808,7 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
         recalculated as (
             select generation.generation_id, generation.scope_key,
                    count(distinct group_row.group_id) filter (where group_row.zone = 'paired')::integer as paired_count,
-                   count(distinct group_row.group_id) filter (where group_row.zone = 'open')::integer as open_count,
+                   count(distinct group_row.group_id) filter (where group_row.zone = 'unpaired')::integer as unpaired_count,
                    count(distinct (member.pane, member.row_id)) filter (
                        where member.row_role <> 'summary' and member.pane = 'oa'
                    )::integer as oa_count,
@@ -837,7 +831,7 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
         )
         select recalculated.generation_id as subject_id, recalculated.scope_key,
                summary.summary as stored_summary,
-               recalculated.paired_count, recalculated.open_count,
+               recalculated.paired_count, recalculated.unpaired_count,
                recalculated.oa_count, recalculated.bank_count, recalculated.invoice_count
         from recalculated
         left join read_model.workbench_summary summary
@@ -846,8 +840,8 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
         where summary.generation_id is null
            or case when coalesce(summary.summary->>'paired_count', '') ~ '^[0-9]+$'
                    then (summary.summary->>'paired_count')::integer else -1 end <> recalculated.paired_count
-           or case when coalesce(summary.summary->>'open_count', '') ~ '^[0-9]+$'
-                   then (summary.summary->>'open_count')::integer else -1 end <> recalculated.open_count
+           or case when coalesce(summary.summary->>'unpaired_count', '') ~ '^[0-9]+$'
+                   then (summary.summary->>'unpaired_count')::integer else -1 end <> recalculated.unpaired_count
            or case when coalesce(summary.summary->>'oa_count', '') ~ '^[0-9]+$'
                    then (summary.summary->>'oa_count')::integer else -1 end <> recalculated.oa_count
            or case when coalesce(summary.summary->>'bank_count', '') ~ '^[0-9]+$'

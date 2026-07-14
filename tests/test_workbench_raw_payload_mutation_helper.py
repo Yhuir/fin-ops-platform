@@ -10,7 +10,7 @@ class WorkbenchRawPayloadMutationHelperTests(unittest.TestCase):
     def test_replace_row_serializes_replacement_in_all_sections(self) -> None:
         payload: dict[str, object] = {
             "paired": {"invoice": [{"id": "invoice-1", "old": True}]},
-            "open": {"invoice": [{"id": "invoice-1", "old": True}]},
+            "unpaired": {"invoice": [{"id": "invoice-1", "old": True}]},
         }
         helper = WorkbenchRawPayloadMutationHelper(
             serialize_value=lambda value: {**value, "serialized": True} if isinstance(value, dict) else value,
@@ -24,7 +24,7 @@ class WorkbenchRawPayloadMutationHelperTests(unittest.TestCase):
 
         self.assertTrue(replaced)
         self.assertEqual(payload["paired"]["invoice"][0]["serialized"], True)
-        self.assertEqual(payload["open"]["invoice"][0]["serialized"], True)
+        self.assertEqual(payload["unpaired"]["invoice"][0]["serialized"], True)
 
     def test_replace_row_returns_false_without_matching_or_valid_id(self) -> None:
         helper = WorkbenchRawPayloadMutationHelper(serialize_value=lambda value: value)
@@ -32,7 +32,7 @@ class WorkbenchRawPayloadMutationHelperTests(unittest.TestCase):
         self.assertFalse(helper.replace_row({"paired": {"invoice": []}}, row_type="invoice", replacement={}))
         self.assertFalse(
             helper.replace_row(
-                {"paired": {"invoice": [{"id": "other"}]}, "open": {"invoice": []}},
+                {"paired": {"invoice": [{"id": "other"}]}, "unpaired": {"invoice": []}},
                 row_type="invoice",
                 replacement={"id": "invoice-1"},
             )
@@ -41,13 +41,13 @@ class WorkbenchRawPayloadMutationHelperTests(unittest.TestCase):
     def test_dedupe_rows_by_id_keeps_first_seen_and_passthrough_rows(self) -> None:
         payload: dict[str, object] = {
             "paired": {"invoice": [{"id": "invoice-1"}, {"id": "invoice-2"}]},
-            "open": {"invoice": [{"id": "invoice-1", "duplicate": True}, "passthrough", {"id": ""}]},
+            "unpaired": {"invoice": [{"id": "invoice-1", "duplicate": True}, "passthrough", {"id": ""}]},
         }
 
         WorkbenchRawPayloadMutationHelper.dedupe_rows_by_id(payload, row_type="invoice")
 
         self.assertEqual(payload["paired"]["invoice"], [{"id": "invoice-1"}, {"id": "invoice-2"}])
-        self.assertEqual(payload["open"]["invoice"], ["passthrough", {"id": ""}])
+        self.assertEqual(payload["unpaired"]["invoice"], ["passthrough", {"id": ""}])
 
     def test_refresh_summary_counts_rows_and_open_danger_relations(self) -> None:
         payload: dict[str, object] = {
@@ -56,7 +56,7 @@ class WorkbenchRawPayloadMutationHelperTests(unittest.TestCase):
                 "bank": [{"id": "bank-paired"}],
                 "invoice": [{"id": "invoice-paired"}],
             },
-            "open": {
+            "unpaired": {
                 "oa": [{"id": "oa-open", "oa_bank_relation": {"tone": "danger"}}],
                 "bank": [{"id": "bank-open", "invoice_relation": {"tone": "danger"}}],
                 "invoice": [{"id": "invoice-open", "invoice_bank_relation": {"tone": "warn"}}],
@@ -72,7 +72,7 @@ class WorkbenchRawPayloadMutationHelperTests(unittest.TestCase):
                 "bank_count": 2,
                 "invoice_count": 2,
                 "paired_count": 3,
-                "open_count": 3,
+                "unpaired_count": 3,
                 "exception_count": 2,
             },
         )

@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 from collections import Counter
-from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from fin_ops_platform.domain.enums import MatchingConfidence, MatchingResultType, TransactionDirection
+from fin_ops_platform.domain.enums import TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction, Invoice, MatchingResult
 from fin_ops_platform.services.bank_account_resolver import BankAccountResolver
-from fin_ops_platform.services.bank_internal_transfer_detector import INTERNAL_TRANSFER_MATCH_WINDOW
 from fin_ops_platform.services.bank_transaction_category_service import BANK_TRANSACTION_CATEGORY_LABELS
 from fin_ops_platform.services.import_file_service import is_company_identity
 from fin_ops_platform.services.imports import ImportNormalizationService
@@ -18,8 +16,6 @@ from fin_ops_platform.services.matching import MatchingEngineService
 ZERO = Decimal("0.00")
 DEFAULT_COMPANY_NAME = "溯源科技有限公司"
 LEGACY_DEMO_TRANSACTION_SOURCES = {"bank_transaction.json"}
-INTERNAL_TRANSFER_COMPANY_NAME = "云南溯源科技有限公司"
-SALARY_AUTO_MATCH_RULE_CODE = "salary_personal_auto_match"
 INTERNAL_TRANSFER_RULE_CODE = "internal_transfer_pair"
 DEFAULT_BANK_TEXT_FIELD_LABELS = ("摘要", "备注", "用途", "交易用途", "客户附言", "附言")
 
@@ -59,27 +55,27 @@ class LiveWorkbenchService:
         self._rebuild_cache(month=month)
 
         paired: dict[str, list[dict[str, Any]]] = {"oa": [], "bank": [], "invoice": []}
-        open_rows: dict[str, list[dict[str, Any]]] = {"oa": [], "bank": [], "invoice": []}
+        unpaired: dict[str, list[dict[str, Any]]] = {"oa": [], "bank": [], "invoice": []}
 
         for row in self._detail_rows_by_id.values():
             row_month = row.get("_month")
             if month != "all" and row_month != month:
                 continue
-            (paired if row["_section"] == "paired" else open_rows)[row["type"]].append(self._serialize_row(row))
+            (paired if row["_section"] == "paired" else unpaired)[row["type"]].append(self._serialize_row(row))
 
-        month_rows = [*paired["bank"], *paired["invoice"], *open_rows["bank"], *open_rows["invoice"]]
+        month_rows = [*paired["bank"], *paired["invoice"], *unpaired["bank"], *unpaired["invoice"]]
         return {
             "month": month,
             "summary": {
                 "oa_count": 0,
-                "bank_count": len(paired["bank"]) + len(open_rows["bank"]),
-                "invoice_count": len(paired["invoice"]) + len(open_rows["invoice"]),
+                "bank_count": len(paired["bank"]) + len(unpaired["bank"]),
+                "invoice_count": len(paired["invoice"]) + len(unpaired["invoice"]),
                 "paired_count": len(paired["bank"]) + len(paired["invoice"]),
-                "open_count": len(open_rows["bank"]) + len(open_rows["invoice"]),
+                "unpaired_count": len(unpaired["bank"]) + len(unpaired["invoice"]),
                 "exception_count": sum(1 for row in month_rows if row.get("invoice_relation", row.get("invoice_bank_relation", {})).get("tone") == "danger"),
             },
             "paired": paired,
-            "open": open_rows,
+            "unpaired": unpaired,
         }
 
     def get_row_detail(self, row_id: str) -> dict[str, Any]:
@@ -145,23 +141,6 @@ class LiveWorkbenchService:
         category = self._category_for_transaction(transaction)
         return self._build_bank_row(transaction, result_by_object_id.get(row_id), category=category)
 
-    def list_auto_pair_candidates(self, month: str = "all") -> list[MatchingResult]:
-        results_by_object_id = self._existing_results_by_object_id()
-        auto_results = [
-            *self._build_internal_transfer_results(results_by_object_id),
-            *self._build_salary_auto_match_results(results_by_object_id),
-        ]
-        if month == "all":
-            return auto_results
-        return [
-            result
-            for result in auto_results
-            if any(
-                (transaction.txn_date or "").startswith(month)
-                for transaction in self._transactions_for_result(result)
-            )
-        ]
-
     @staticmethod
     def _serialize_row(row: dict[str, Any]) -> dict[str, Any]:
         return {key: value for key, value in row.items() if not key.startswith("_")}
@@ -173,8 +152,8 @@ class LiveWorkbenchService:
         *,
         category: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        relation = relation_from_result(result)
-        section = "paired" if result and result.result_type == MatchingResultType.AUTOMATIC_MATCH else "open"
+        relation = unlinked_relation_payload()
+        section = "unpaired"
         payment_account_label = self._bank_account_resolver.resolve_label(
             transaction.account_no,
             transaction.account_name,
@@ -190,7 +169,7 @@ class LiveWorkbenchService:
         return {
             "id": transaction.id,
             "type": "bank",
-            "case_id": result.id if result else None,
+            "case_id": None,
             "direction": direction_label,
             "account_no": transaction.account_no,
             "account_name": transaction.account_name,
@@ -248,14 +227,14 @@ class LiveWorkbenchService:
         }
 
     def _build_invoice_row(self, invoice: Invoice, result: MatchingResult | None) -> dict[str, Any]:
-        relation = relation_from_result(result)
-        section = "paired" if result and result.result_type == MatchingResultType.AUTOMATIC_MATCH else "open"
+        relation = unlinked_relation_payload()
+        section = "unpaired"
         seller_name, buyer_name = self._resolve_invoice_parties(invoice)
         seller_tax_no, buyer_tax_no = self._resolve_invoice_tax_nos(invoice)
         return {
             "id": invoice.id,
             "type": "invoice",
-            "case_id": result.id if result else None,
+            "case_id": None,
             "seller_tax_no": seller_tax_no,
             "seller_name": seller_name,
             "buyer_tax_no": buyer_tax_no,
@@ -352,109 +331,6 @@ class LiveWorkbenchService:
             for transaction_id in result.transaction_ids:
                 result_by_object_id[transaction_id] = result
         return result_by_object_id
-
-    def _build_internal_transfer_results(self, existing_results_by_object_id: dict[str, MatchingResult]) -> list[MatchingResult]:
-        available_transactions = [
-            transaction
-            for transaction in self._import_service.list_transactions()
-            if self._is_internal_transfer_candidate(transaction)
-            and (
-                existing_results_by_object_id.get(transaction.id) is None
-                or existing_results_by_object_id[transaction.id].result_type != MatchingResultType.AUTOMATIC_MATCH
-            )
-        ]
-        inflows = sorted(
-            (transaction for transaction in available_transactions if transaction.txn_direction == TransactionDirection.INFLOW),
-            key=self._internal_transfer_sort_key,
-        )
-        outflows = sorted(
-            (transaction for transaction in available_transactions if transaction.txn_direction == TransactionDirection.OUTFLOW),
-            key=self._internal_transfer_sort_key,
-        )
-        used_ids: set[str] = set()
-        results: list[MatchingResult] = []
-
-        for outflow in outflows:
-            if outflow.id in used_ids:
-                continue
-            outflow_time = self._parse_transaction_time(outflow)
-            if outflow_time is None:
-                continue
-
-            best_match: tuple[timedelta, BankTransaction] | None = None
-            for inflow in inflows:
-                if inflow.id in used_ids or inflow.amount != outflow.amount:
-                    continue
-                if not self._internal_transfer_bank_accounts_are_distinct(outflow, inflow):
-                    continue
-                inflow_time = self._parse_transaction_time(inflow)
-                if inflow_time is None:
-                    continue
-                delta = abs(inflow_time - outflow_time)
-                if delta > INTERNAL_TRANSFER_MATCH_WINDOW:
-                    continue
-                if best_match is None or delta < best_match[0]:
-                    best_match = (delta, inflow)
-
-            if best_match is None:
-                continue
-
-            inflow = best_match[1]
-            used_ids.add(outflow.id)
-            used_ids.add(inflow.id)
-            ordered_ids = sorted([outflow.id, inflow.id])
-            results.append(
-                MatchingResult(
-                    id=f"internal_transfer_{ordered_ids[0]}_{ordered_ids[1]}",
-                    run_id="internal_transfer",
-                    result_type=MatchingResultType.AUTOMATIC_MATCH,
-                    confidence=MatchingConfidence.HIGH,
-                    rule_code=INTERNAL_TRANSFER_RULE_CODE,
-                    explanation="Detected matched internal transfer between company accounts with equal amount and close timestamps.",
-                    invoice_ids=[],
-                    transaction_ids=ordered_ids,
-                    amount=outflow.amount,
-                    difference_amount=ZERO,
-                    counterparty_name=INTERNAL_TRANSFER_COMPANY_NAME,
-                )
-            )
-
-        return results
-
-    def _build_salary_auto_match_results(self, existing_results_by_object_id: dict[str, MatchingResult]) -> list[MatchingResult]:
-        results: list[MatchingResult] = []
-        for transaction in self._import_service.list_transactions():
-            existing_result = existing_results_by_object_id.get(transaction.id)
-            if existing_result is not None and existing_result.result_type == MatchingResultType.AUTOMATIC_MATCH:
-                continue
-            if not self._is_salary_personal_candidate(transaction):
-                continue
-            results.append(
-                MatchingResult(
-                    id=f"salary_auto_{transaction.id}",
-                    run_id="salary_auto_match",
-                    result_type=MatchingResultType.AUTOMATIC_MATCH,
-                    confidence=MatchingConfidence.HIGH,
-                    rule_code=SALARY_AUTO_MATCH_RULE_CODE,
-                    explanation="Detected salary payment to an individual counterparty from bank remark or summary.",
-                    invoice_ids=[],
-                    transaction_ids=[transaction.id],
-                    amount=transaction.amount,
-                    difference_amount=ZERO,
-                    counterparty_name=transaction.counterparty_name_raw or "",
-                )
-            )
-        return results
-
-    def _transactions_for_result(self, result: MatchingResult) -> list[BankTransaction]:
-        transaction_ids = set(result.transaction_ids)
-        if not transaction_ids:
-            return []
-        return [
-            transaction
-            for transaction in self._import_service.list_transactions()
-            if transaction.id in transaction_ids
-        ]
 
     def _build_bank_remark(self, transaction: BankTransaction, result: MatchingResult | None) -> str:
         base_remark = (transaction.remark or transaction.summary or "").strip()
@@ -667,51 +543,6 @@ class LiveWorkbenchService:
             compact_label = compact_label.replace(marker, " ")
         return " ".join(compact_label.split())
 
-    @staticmethod
-    def _is_internal_transfer_candidate(transaction: BankTransaction) -> bool:
-        return is_company_identity(None, transaction.account_name) and is_company_identity(None, transaction.counterparty_name_raw)
-
-    @staticmethod
-    def _internal_transfer_bank_accounts_are_distinct(outflow: BankTransaction, inflow: BankTransaction) -> bool:
-        outflow_account = clean_account_no(outflow.account_no)
-        inflow_account = clean_account_no(inflow.account_no)
-        return bool(outflow_account and inflow_account and outflow_account != inflow_account)
-
-    @staticmethod
-    def _is_salary_personal_candidate(transaction: BankTransaction) -> bool:
-        if transaction.txn_direction != TransactionDirection.OUTFLOW:
-            return False
-        remarks = " ".join(
-            part.strip()
-            for part in (transaction.remark or "", transaction.summary or "")
-            if isinstance(part, str) and part.strip()
-        )
-        if "工资" not in remarks:
-            return False
-        counterparty_name = (transaction.counterparty_name_raw or "").strip()
-        if not counterparty_name:
-            return False
-        return not is_company_identity(None, counterparty_name)
-
-    @staticmethod
-    def _internal_transfer_sort_key(transaction: BankTransaction) -> tuple[datetime, str]:
-        parsed = LiveWorkbenchService._parse_transaction_time(transaction)
-        if parsed is None:
-            parsed = datetime.min
-        return parsed, transaction.id
-
-    @staticmethod
-    def _parse_transaction_time(transaction: BankTransaction) -> datetime | None:
-        for value in (transaction.pay_receive_time, transaction.trade_time):
-            parsed = _parse_datetime(value)
-            if parsed is not None:
-                return parsed
-        if transaction.txn_date:
-            parsed_date = _parse_date_only(transaction.txn_date)
-            if parsed_date is not None:
-                return parsed_date
-        return None
-
     def _excluded_transaction_batch_ids(self) -> set[str]:
         return {
             preview.id
@@ -757,10 +588,10 @@ class LiveWorkbenchService:
     @staticmethod
     def _available_actions(row_type: str, section: str) -> list[str]:
         if row_type == "bank":
-            if section == "open":
+            if section == "unpaired":
                 return ["detail", "view_relation", "cancel_link", "handle_exception"]
             return ["detail"]
-        if row_type == "invoice" and section == "open":
+        if row_type == "invoice" and section == "unpaired":
             return ["detail", "confirm_link", "mark_exception", "ignore"]
         return ["detail"]
 
@@ -769,18 +600,8 @@ class LiveWorkbenchService:
         return getattr(invoice, "workbench_visibility", "visible") != "hidden_after_etc_submission"
 
 
-def relation_from_result(result: MatchingResult | None) -> dict[str, str]:
-    if result is None:
-        return {"code": "pending_match", "label": "待匹配", "tone": "warn"}
-    if result.rule_code == INTERNAL_TRANSFER_RULE_CODE:
-        return {"code": "internal_transfer_pair", "label": "已匹配：内部往来款", "tone": "success"}
-    if result.rule_code == SALARY_AUTO_MATCH_RULE_CODE:
-        return {"code": SALARY_AUTO_MATCH_RULE_CODE, "label": "已匹配：工资", "tone": "success"}
-    if result.result_type == MatchingResultType.AUTOMATIC_MATCH:
-        return {"code": "automatic_match", "label": "自动匹配", "tone": "success"}
-    if result.result_type == MatchingResultType.SUGGESTED_MATCH:
-        return {"code": "suggested_match", "label": "待人工确认", "tone": "warn"}
-    return {"code": "manual_review", "label": "待人工核查", "tone": "danger"}
+def unlinked_relation_payload() -> dict[str, str]:
+    return {"code": "unlinked", "label": "未配对", "tone": "warn"}
 
 
 def format_decimal(value: Decimal | None) -> str:
@@ -794,33 +615,3 @@ def payload_from_cache_row(row: dict[str, Any]) -> dict[str, Any]:
     payload["summary_fields"] = dict(row["_summary_fields"])
     payload["detail_fields"] = dict(row["_detail_fields"])
     return payload
-
-
-def clean_account_no(value: str | None) -> str:
-    return "".join(char for char in str(value or "").strip() if char.isalnum())
-
-
-def _parse_datetime(value: str | None) -> datetime | None:
-    if not value or not isinstance(value, str):
-        return None
-    text = value.strip()
-    if not text:
-        return None
-    for pattern in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
-        try:
-            return datetime.strptime(text, pattern)
-        except ValueError:
-            continue
-    return None
-
-
-def _parse_date_only(value: str | None) -> datetime | None:
-    if not value or not isinstance(value, str):
-        return None
-    text = value.strip()
-    if not text:
-        return None
-    try:
-        return datetime.strptime(text, "%Y-%m-%d")
-    except ValueError:
-        return None

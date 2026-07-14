@@ -115,6 +115,7 @@ EXPECTED_MIGRATION_FILES = [
     "0101_phase19_audit_contract_boundaries.sql",
     "0102_workbench_idempotency_runtime_evidence_grant.sql",
     "0103_etc_reconciliation_task_timestamps.sql",
+    "0104_drop_legacy_workbench_relation_states.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (
@@ -133,8 +134,9 @@ TEST_TABLES = (
     "read_model.workbench_group_rows",
     "read_model.workbench_summary",
     "read_model.workbench_snapshots",
-    "read_model.workbench_candidate_matches",
-    "read_model.workbench_reconciliation_decisions",
+    "read_model.workbench_relation_scopes",
+    "read_model.workbench_relation_groups",
+    "read_model.workbench_relation_rows",
     "read_model.search_index_rows",
     "read_model.pending_invoice_rows",
     "read_model.pending_invoice_scopes",

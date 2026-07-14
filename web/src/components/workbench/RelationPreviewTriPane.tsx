@@ -2,19 +2,19 @@ import { memo, useMemo, useRef } from "react";
 
 import { getWorkbenchColumns, getWorkbenchPaneGridStyle } from "../../features/workbench/tableConfig";
 import type {
-  WorkbenchCandidateGroup,
+  WorkbenchRelationGroup,
   WorkbenchColumnLayouts,
   WorkbenchRecord,
   WorkbenchRecordType,
 } from "../../features/workbench/types";
 import type { WorkbenchRowState } from "../../hooks/useWorkbenchSelection";
-import CandidateGroupCell from "./CandidateGroupCell";
+import RelationGroupCell from "./RelationGroupCell";
 import type { WorkbenchInlineAction } from "./RowActions";
 
 export type RelationPreviewTriPaneProps = {
   title: string;
   testId?: string;
-  groups: WorkbenchCandidateGroup[];
+  groups: WorkbenchRelationGroup[];
   totals: {
     oaTotal: string;
     bankTotal: string;
@@ -44,7 +44,7 @@ const PREVIEW_STATUS_LABELS = {
   pending: "金额待核对",
 } as const;
 
-const noopSelectRow = (_row: WorkbenchRecord, _zoneId: "paired" | "open") => undefined;
+const noopSelectRow = (_row: WorkbenchRecord, _zoneId: "paired" | "unpaired") => undefined;
 const noopOpenDetail = (_row: WorkbenchRecord) => undefined;
 const noopRowAction = (_row: WorkbenchRecord, _action: WorkbenchInlineAction) => undefined;
 const getReadOnlyRowState = (): WorkbenchRowState => "idle";
@@ -215,7 +215,7 @@ function RelationPreviewTriPane({
             >
               {PREVIEW_PANES.map((pane) => (
                 <div key={`${group.id}-${pane.id}`} className="candidate-group-pane-slot candidate-group-pane-slot-sheet">
-                  <CandidateGroupCell
+                  <RelationGroupCell
                     columnGridStyle={paneGridStyleByPane[pane.id]}
                     columns={columnsByPane[pane.id]}
                     getRowState={getReadOnlyRowState}
@@ -266,7 +266,7 @@ function RelationPreviewTriPane({
 
 export default memo(RelationPreviewTriPane);
 
-function normalizePreviewGroups(groups: WorkbenchCandidateGroup[], title: string): WorkbenchCandidateGroup[] {
+function normalizePreviewGroups(groups: WorkbenchRelationGroup[], title: string): WorkbenchRelationGroup[] {
   if (groups.length > 0) {
     return groups;
   }
@@ -274,7 +274,7 @@ function normalizePreviewGroups(groups: WorkbenchCandidateGroup[], title: string
   return [
     {
       id: `empty-${title}`,
-      groupType: "open",
+      groupType: "unpaired",
       rawGroupType: "relation_preview_empty",
       matchConfidence: "medium",
       reason: "relation_preview_empty",

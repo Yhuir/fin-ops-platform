@@ -892,16 +892,6 @@ describe("Input invoice usage workflow drawers", () => {
           reasonCode: "already_has_active_oa",
           reason: "发票已有 active OA 关系",
           oaRelationStatus: "linked",
-        }, {
-          invoiceId: "inv-candidate-oa",
-          invoiceNumber: "SD-INV-CANDIDATE",
-          sellerName: "候选供应商",
-          issueDate: "2026-05-04",
-          totalWithTax: "109.00",
-          paymentStatusLabel: "待处理",
-          reasonCode: "already_has_candidate_oa",
-          reason: "发票已有待确认 OA 候选关系",
-          oaRelationStatus: "candidate",
         }],
       }],
     }));
@@ -919,13 +909,11 @@ describe("Input invoice usage workflow drawers", () => {
 
     expect(await screen.findByText("SD-INV-001")).toBeInTheDocument();
     expect(screen.getByText("SD-INV-LINKED")).toBeInTheDocument();
-    expect(screen.getByText("SD-INV-CANDIDATE")).toBeInTheDocument();
     expect(screen.getAllByText("未关联oa").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("已关联oa")).toBeInTheDocument();
     expect(screen.queryByText("候选oa")).not.toBeInTheDocument();
     expect(screen.queryByText("目标 OA 分组")).not.toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "已关联 OA 发票 SD-INV-LINKED 不可选择" })).toBeDisabled();
-    expect(screen.getByRole("checkbox", { name: "未关联 OA 发票 SD-INV-CANDIDATE 不可选择" })).toBeDisabled();
     await waitFor(() => {
       expect(screen.getByRole("checkbox", { name: "选择候选发票 SD-INV-001" })).toBeChecked();
       expect(screen.getByText((_content, node) => node?.textContent === "已选 1 张")).toBeInTheDocument();
@@ -941,11 +929,11 @@ describe("Input invoice usage workflow drawers", () => {
     await user.click(screen.getByRole("menuitemradio", { name: "未关联oa" }));
     expect(screen.getByText("SD-INV-001")).toBeInTheDocument();
     expect(screen.queryByText("SD-INV-LINKED")).not.toBeInTheDocument();
-    expect(screen.getByText("SD-INV-CANDIDATE")).toBeInTheDocument();
+    expect(screen.queryByText("SD-INV-CANDIDATE")).not.toBeInTheDocument();
 
     await user.type(screen.getByRole("searchbox", { name: "搜索候选发票" }), "候选供应商");
     expect(screen.queryByText("SD-INV-001")).not.toBeInTheDocument();
-    expect(screen.getByText("SD-INV-CANDIDATE")).toBeInTheDocument();
+    expect(screen.queryByText("SD-INV-CANDIDATE")).not.toBeInTheDocument();
   });
 
   test("OA reverse drawer lets the backend target applicant list drive preview and batch target", async () => {

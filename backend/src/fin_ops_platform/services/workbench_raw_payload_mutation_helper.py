@@ -24,7 +24,7 @@ class WorkbenchRawPayloadMutationHelper:
         if not replacement_id:
             return False
         replaced = False
-        for section_name in ("paired", "open"):
+        for section_name in ("paired", "unpaired"):
             section_payload = payload.get(section_name)
             if not isinstance(section_payload, dict):
                 continue
@@ -40,7 +40,7 @@ class WorkbenchRawPayloadMutationHelper:
     @staticmethod
     def dedupe_rows_by_id(payload: dict[str, object], *, row_type: str) -> None:
         seen_row_ids: set[str] = set()
-        for section_name in ("paired", "open"):
+        for section_name in ("paired", "unpaired"):
             section_payload = payload.get(section_name)
             if not isinstance(section_payload, dict):
                 continue
@@ -63,19 +63,19 @@ class WorkbenchRawPayloadMutationHelper:
     @staticmethod
     def refresh_summary(payload: dict[str, object]) -> None:
         paired = payload.get("paired") if isinstance(payload.get("paired"), dict) else {}
-        open_rows = payload.get("open") if isinstance(payload.get("open"), dict) else {}
+        unpaired_rows = payload.get("unpaired") if isinstance(payload.get("unpaired"), dict) else {}
         payload["summary"] = {
-            "oa_count": len(list(paired.get("oa") or [])) + len(list(open_rows.get("oa") or [])),
-            "bank_count": len(list(paired.get("bank") or [])) + len(list(open_rows.get("bank") or [])),
-            "invoice_count": len(list(paired.get("invoice") or [])) + len(list(open_rows.get("invoice") or [])),
+            "oa_count": len(list(paired.get("oa") or [])) + len(list(unpaired_rows.get("oa") or [])),
+            "bank_count": len(list(paired.get("bank") or [])) + len(list(unpaired_rows.get("bank") or [])),
+            "invoice_count": len(list(paired.get("invoice") or [])) + len(list(unpaired_rows.get("invoice") or [])),
             "paired_count": sum(len(list(paired.get(row_type) or [])) for row_type in ("oa", "bank", "invoice")),
-            "open_count": sum(len(list(open_rows.get(row_type) or [])) for row_type in ("oa", "bank", "invoice")),
+            "unpaired_count": sum(len(list(unpaired_rows.get(row_type) or [])) for row_type in ("oa", "bank", "invoice")),
             "exception_count": sum(
                 1
                 for row in [
-                    *list(open_rows.get("oa") or []),
-                    *list(open_rows.get("bank") or []),
-                    *list(open_rows.get("invoice") or []),
+                    *list(unpaired_rows.get("oa") or []),
+                    *list(unpaired_rows.get("bank") or []),
+                    *list(unpaired_rows.get("invoice") or []),
                 ]
                 if isinstance(row, dict)
                 and str(

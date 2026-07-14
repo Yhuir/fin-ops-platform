@@ -11,7 +11,7 @@ class WorkbenchApiPayloadAssemblerTests(unittest.TestCase):
 
         def read_model_provider(month: str, **kwargs: object) -> dict[str, object]:
             calls.append(("read_model", {"month": month, **kwargs}))
-            return {"payload": {"open": {"groups": [{"group_id": "g1", "invoice_rows": []}]}}}
+            return {"payload": {"unpaired": {"groups": [{"group_id": "g1", "invoice_rows": []}]}}}
 
         def apply_oa_retention(payload: dict[str, object]) -> dict[str, object]:
             calls.append(("retention", payload))
@@ -50,7 +50,6 @@ class WorkbenchApiPayloadAssemblerTests(unittest.TestCase):
             {
                 "month": "2026-05",
                 "visibility_key": "user-a",
-                "ensure_candidate_matches": True,
             },
         )
 

@@ -43,7 +43,7 @@ export type OaReverseRejectedInvoice = {
   reason: string;
 };
 
-type OaRelationStatus = "linked" | "candidate" | "unlinked";
+type OaRelationStatus = "linked" | "unlinked";
 type OaRelationFilter = "all" | "linked" | "unlinked";
 
 type OaReverseDisplayInvoice = InputInvoiceUsageOaReverseInvoice & {
@@ -672,7 +672,7 @@ function oaRelationDisabledLabel(value: OaRelationStatus) {
 }
 
 function normalizeOaRelationStatus(value: unknown): OaRelationStatus {
-  return value === "linked" || value === "candidate" ? value : "unlinked";
+  return value === "linked" ? value : "unlinked";
 }
 
 function oaRelationBusinessStatus(value: OaRelationStatus): OaRelationFilter {
@@ -761,9 +761,7 @@ function invoicesFromPreview(preview: OaReversePreviewPayload) {
   };
   const putNonSelectableRejected = (invoice: OaReverseRejectedInvoice, targetApplicantName?: string) => {
     const invoiceNumber = invoice.displayNo || invoice.invoiceNumber || invoice.invoiceId;
-    const relationStatus = normalizeOaRelationStatus(
-      invoice.oaRelationStatus || (invoice.reasonCode === "already_has_candidate_oa" ? "candidate" : "linked"),
-    );
+    const relationStatus = normalizeOaRelationStatus(invoice.oaRelationStatus || "linked");
     byId.set(invoice.invoiceId, {
       invoiceId: invoice.invoiceId,
       invoiceNumber: String(invoice.invoiceNumber || invoiceNumber || ""),
@@ -785,7 +783,7 @@ function invoicesFromPreview(preview: OaReversePreviewPayload) {
     putSelectable(invoice);
   }
   for (const invoice of preview.rejectedInvoices ?? []) {
-    if (invoice.reasonCode === "already_has_active_oa" || invoice.reasonCode === "already_has_candidate_oa") {
+    if (invoice.reasonCode === "already_has_active_oa") {
       putNonSelectableRejected(invoice, preview.targetApplicantName);
     }
   }
@@ -817,7 +815,7 @@ function invoicesFromPreview(preview: OaReversePreviewPayload) {
       }
     }
     for (const invoice of group.rejectedInvoices ?? []) {
-      if (invoice.reasonCode !== "already_has_active_oa" && invoice.reasonCode !== "already_has_candidate_oa") {
+      if (invoice.reasonCode !== "already_has_active_oa") {
         continue;
       }
       putNonSelectableRejected(invoice, group.targetApplicantName);

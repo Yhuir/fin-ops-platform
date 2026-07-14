@@ -155,7 +155,7 @@ def audit_object_identity(
         + len(blocking_invoice_key_mismatches)
         + len(all_bank_key_mismatches)
         + int(workbench_summary.get("cross_zone_identity_duplicate_group_count") or 0)
-        + int(workbench_summary.get("open_visible_owner_duplicate_group_count") or 0)
+        + int(workbench_summary.get("unpaired_visible_owner_duplicate_group_count") or 0)
         + int(workbench_summary.get("orphan_relation_group_count") or 0)
     )
     return {
@@ -200,8 +200,8 @@ def audit_object_identity(
             "workbench_cross_zone_identity_duplicate_group_count": workbench_summary.get(
                 "cross_zone_identity_duplicate_group_count", 0
             ),
-            "workbench_open_visible_owner_duplicate_group_count": workbench_summary.get(
-                "open_visible_owner_duplicate_group_count", 0
+            "workbench_unpaired_visible_owner_duplicate_group_count": workbench_summary.get(
+                "unpaired_visible_owner_duplicate_group_count", 0
             ),
             "workbench_oa_alias_group_count": workbench_summary.get("oa_alias_group_count", 0),
             "workbench_orphan_relation_group_count": workbench_summary.get("orphan_relation_group_count", 0),
@@ -267,9 +267,9 @@ def _audit_workbench_object_identity(connection: Any, *, scope_key: str, example
                  and gen.scope_key = gr.scope_key
                 where gr.row_role <> 'summary'
                   and gr.object_identity_key is not null
-                  and gr.zone in ('paired', 'open')
+                  and gr.zone in ('paired', 'unpaired')
                 group by gr.scope_key, gr.pane, gr.object_identity_key, gr.object_identity_kind
-                having bool_or(gr.zone = 'paired') and bool_or(gr.zone = 'open')
+                having bool_or(gr.zone = 'paired') and bool_or(gr.zone = 'unpaired')
             )
             select duplicate_rows.*, count(*) over ()::bigint as total_count
             from duplicate_rows
@@ -282,7 +282,7 @@ def _audit_workbench_object_identity(connection: Any, *, scope_key: str, example
     except Exception as exc:  # pragma: no cover - depends on pre-migration production databases
         return {"summary": {"status": "unavailable", "error": str(exc)}}
 
-    open_visible_owner_duplicates = connection.fetch_all(
+    unpaired_visible_owner_duplicates = connection.fetch_all(
         f"""
         with active_generations as (
             select tenant_id, scope_key, generation_id
@@ -306,7 +306,7 @@ def _audit_workbench_object_identity(connection: Any, *, scope_key: str, example
               on gen.generation_id = gr.generation_id
              and gen.scope_key = gr.scope_key
             where gr.row_role <> 'summary'
-              and gr.zone = 'open'
+              and gr.zone = 'unpaired'
               and gr.row_id is not null
             union all
             select
@@ -323,7 +323,7 @@ def _audit_workbench_object_identity(connection: Any, *, scope_key: str, example
               on gen.generation_id = gr.generation_id
              and gen.scope_key = gr.scope_key
             where gr.row_role <> 'summary'
-              and gr.zone = 'open'
+              and gr.zone = 'unpaired'
               and gr.pane = 'invoice'
               and gr.object_identity_kind in ('digital_invoice_no', 'invoice_code_no')
               and gr.object_identity_key is not null
@@ -411,12 +411,12 @@ def _audit_workbench_object_identity(connection: Any, *, scope_key: str, example
             "status": "available",
             "scope_key": normalized_scope,
             "cross_zone_identity_duplicate_group_count": _workbench_audit_total_count(cross_zone_duplicates),
-            "open_visible_owner_duplicate_group_count": _workbench_audit_total_count(open_visible_owner_duplicates),
+            "unpaired_visible_owner_duplicate_group_count": _workbench_audit_total_count(unpaired_visible_owner_duplicates),
             "oa_alias_group_count": len(oa_alias_groups),
             "orphan_relation_group_count": len(orphan_relation_groups),
         },
         "cross_zone_identity_duplicates": cross_zone_duplicates,
-        "open_visible_owner_duplicates": open_visible_owner_duplicates,
+        "unpaired_visible_owner_duplicates": unpaired_visible_owner_duplicates,
         "oa_alias_groups": oa_alias_groups,
         "orphan_relation_groups": orphan_relation_groups,
     }
