@@ -42,6 +42,7 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | ETC ticket/batch payload | 前端页面 | API response shape 稳定，business batch payload 包含用户可见 `title` |
+| Worker 持久化后的查询可见性 | ETC 票据/导入页面 | PostgreSQL 模式的 task、business batch、invoice 查询在读取前重载正式 snapshot，保证独立 import worker 的完成结果无需 API 重启即可见；file/memory backend 保持原有进程内语义 |
 | ETC 发票合并 PDF | 浏览器下载 | `application/pdf`、RFC 5987 UTF-8 文件名、`private, no-store`；按开票日期/发票号/ID 稳定排序，每张发票恰好贡献一页；任一来源不可读、损坏、hash 不一致或不是单页时整包失败；成功记录 `etc_invoice_pdf_bundle_downloaded` 审计，不新增批次状态或 read model |
 | linked reconciliation task title | ETC 发票导入 ready task 下拉 | business batch title 更新后同步 task title，导入页下拉展示最新批次标题 |
 | 关联候选/关系影响 | workbench relation/lifecycle | 不直接写下游 read model |
@@ -57,6 +58,7 @@
 - ETC 导入完成消费会额外等待 `tax_offset`、`input_invoice_usage`、`pending_invoice`、`oa_pending_payment`、`cost_statistics` 等 job result targets。
 - Worker：通过 import/runtime handler、derived lifecycle 和 registered workers 扇出。
 - PostgreSQL formal file rows：active task 每次保存时把不再存在于 task `source_files` 的 `app.etc_reconciliation_files` 行标记为 `deleted`；仍存在的文件继续 upsert 为 `stored`。formal rows 不得让已删除来源在重启后复活。
+- PostgreSQL query consistency：`EtcService` 与 `EtcReconciliationTaskService` 的页面只读入口必须从 state store 重载 worker 最新写入；进程内 snapshot 不是跨进程事实源。
 
 ## 文件范围
 

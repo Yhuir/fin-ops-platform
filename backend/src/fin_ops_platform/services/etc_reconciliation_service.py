@@ -96,6 +96,7 @@ class EtcReconciliationTaskService:
         return replace(task)
 
     def get_task(self, task_id: str) -> EtcReconciliationTask:
+        self._reload_from_state_store()
         task = self._get_active_task_mutable(task_id)
         return _copy_task(task)
 
@@ -119,12 +120,14 @@ class EtcReconciliationTaskService:
         return _copy_task(task)
 
     def list_tasks(self) -> list[EtcReconciliationTask]:
+        self._reload_from_state_store()
         return [
             _copy_task(task)
             for task in sorted(self._active_tasks(), key=lambda item: item.created_at, reverse=True)
         ]
 
     def list_ready_for_import_tasks(self) -> list[EtcReconciliationTask]:
+        self._reload_from_state_store()
         return [
             _copy_task(task)
             for task in sorted(self._active_tasks(), key=lambda item: item.updated_at, reverse=True)
@@ -1195,6 +1198,12 @@ class EtcReconciliationTaskService:
         with self._state_path.open("rb") as handle:
             loaded = pickle.load(handle)  # noqa: S301 - trusted local application state
         return loaded if isinstance(loaded, dict) else {}
+
+    def _reload_from_state_store(self) -> None:
+        if str(getattr(self._state_store, "storage_backend", "") or "").strip() != "postgres":
+            return
+        with self._source_parse_commit_lock:
+            self._hydrate(self._load_snapshot())
 
     def _persist(self) -> None:
         if self._state_store is not None and hasattr(self._state_store, "save_etc_reconciliation_state"):

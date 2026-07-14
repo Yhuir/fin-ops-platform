@@ -5,7 +5,8 @@
 - 生产 job `job_20260714_091414_65dc66a3` 在 `0/68` 即失败，错误为 `Object storage is not configured for PostgreSQL file access.`；PostgreSQL task/business batch 均未产生半写。API preview 通过 `build_state_store` 注入了对象存储，但 `ImportRuntimeProcessorFactory` 独立构造 `PostgresStateStore` 时漏掉同一依赖，worker 无法读取 durable session 的 `minio://` archive ref。
 - 修复只在 import worker state-store 组装边界复用既有 `ObjectStorageSettings.from_env()` 与 `S3ObjectStorageRepository`；不改 session、queue、API 或存储协议，也不增加本地 fallback。
 - ETC preview 页面原来展示 `importable_count`，对 reconciliation allowlist 中已存在但仍可确认关联的记录会显示为 0；改为展示既有合同字段 `confirmable_count`，确认文案同步使用同一数字。
-- 回归覆盖 worker 对象存储注入、前端组件与 Chromium flow。发布后复用原失败 session 重试，验证真实 PostgreSQL + MinIO worker drain 与 business batch 落库。
+- 首次发布后复用原失败 session，真实 worker 已完成 68/68（新增 64、重复 4、失败 0），但 API 查询仍返回进程启动时快照；根因是 `EtcService` 与 `EtcReconciliationTaskService` 只在构造时 hydrate。修复在 PostgreSQL 只读查询入口重载正式 snapshot，使独立 worker 写入无需重启 API 即可见；file/memory backend 行为保持不变。
+- 回归覆盖 worker 对象存储注入、跨 service 实例的 PostgreSQL 查询可见性、前端组件与 Chromium flow。发布后复用原失败 session 验证真实 PostgreSQL + MinIO worker drain，并在第二次发布后用同一 task/business batch 做只读可见性 smoke。
 
 ## 2026-07-14：真实 59 ZIP 二次 504 与全局组合候选边界
 

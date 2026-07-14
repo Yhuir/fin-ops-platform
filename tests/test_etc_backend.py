@@ -37,6 +37,7 @@ from fin_ops_platform.services.etc_service import (
 from fin_ops_platform.services.etc_business_batch_application_service import EtcBusinessBatchActor
 from fin_ops_platform.services.etc_document_parsers import CcbCreditCardStatementParser, SupplementEvidenceParser, TicketRootPdfTextParser
 from fin_ops_platform.services.etc_reconciliation_models import FileParseResult, SourceFileKind
+from fin_ops_platform.services.etc_reconciliation_service import EtcReconciliationTaskService
 from fin_ops_platform.services.historical_etc_repair_service import (
     HistoricalEtcRepairBatchSpec,
     HistoricalEtcRepairService,
@@ -1470,6 +1471,46 @@ class EtcServiceTests(unittest.TestCase):
 
 
 class EtcApiTests(unittest.TestCase):
+    def test_etc_query_services_reload_worker_writes_from_postgres_state_store(self) -> None:
+        class SharedPostgresEtcStateStore(MemoryEtcStateStore):
+            storage_backend = "postgres"
+
+            def __init__(self, data_dir: Path) -> None:
+                super().__init__(data_dir)
+                self.reconciliation_snapshot: dict[str, object] = {}
+
+            def load_etc_reconciliation_state(self) -> dict[str, object]:
+                return dict(self.reconciliation_snapshot)
+
+            def save_etc_reconciliation_state(self, snapshot: dict[str, object]) -> None:
+                self.reconciliation_snapshot = dict(snapshot)
+
+        with TemporaryDirectory() as temp_dir:
+            store = SharedPostgresEtcStateStore(Path(temp_dir))
+            api_task_service = EtcReconciliationTaskService(state_store=store)
+            api_etc_service = EtcService(state_store=store)
+            worker_task_service = EtcReconciliationTaskService(state_store=store)
+            worker_etc_service = EtcService(state_store=store)
+
+            task = worker_task_service.create_task(title="worker imported ETC", created_by="worker")
+            batch = worker_etc_service.create_business_batch(task_id=task.task_id, title=task.title)
+            worker_etc_service.import_zips([
+                UploadedEtcZipFile(
+                    "worker.zip",
+                    zip_bytes({
+                        "xml/ETC-WORKER-001.xml": etc_xml("ETC-WORKER-001"),
+                        "pdf/ETC-WORKER-001.pdf": fake_pdf("ETC-WORKER-001"),
+                    }),
+                )
+            ])
+
+            invoices, total, _counts = api_etc_service.list_invoices()
+
+        self.assertEqual(api_task_service.get_task(task.task_id).task_id, task.task_id)
+        self.assertEqual(api_etc_service.get_business_batch(batch.business_batch_id).business_batch_id, batch.business_batch_id)
+        self.assertEqual(total, 1)
+        self.assertEqual(invoices[0].invoice_number, "ETC-WORKER-001")
+
     def _wait_for_job(self, app, job_id: str, *, timeout: float = 2.0) -> dict[str, object]:
         app._test_import_queue.process_all(raise_errors=False)
         deadline = time.monotonic() + timeout

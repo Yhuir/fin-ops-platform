@@ -779,6 +779,7 @@ class EtcService:
         task_id: str | None = None,
         status: str | None = None,
     ) -> list[EtcBusinessBatch]:
+        self._reload_from_state_store()
         normalized_task_id = str(task_id or "").strip()
         normalized_status = str(status or "").strip()
         batches = [
@@ -791,6 +792,7 @@ class EtcService:
         return [self._copy_business_batch(batch) for batch in sorted(batches, key=lambda item: item.created_at, reverse=True)]
 
     def get_business_batch(self, business_batch_id: str) -> EtcBusinessBatch:
+        self._reload_from_state_store()
         batch = self._get_business_batch_mutable(business_batch_id)
         if batch.status == EtcBusinessBatchStatus.DELETED.value:
             raise EtcBusinessBatchNotFoundError(f"ETC business batch not found: {business_batch_id}")
@@ -1634,6 +1636,7 @@ class EtcService:
         page: int = 1,
         page_size: int = 50,
     ) -> tuple[list[EtcInvoice], int, dict[str, int]]:
+        self._reload_from_state_store()
         resolved_status = _coerce_invoice_status(status) if status else None
         normalized_import_batch_id = str(import_batch_id or "").strip()
         all_invoices = list(self._invoices.values())
@@ -2265,6 +2268,12 @@ class EtcService:
         with self._state_path.open("rb") as handle:
             loaded = pickle.load(handle)  # noqa: S301 - trusted local application state
         return loaded if isinstance(loaded, dict) else {}
+
+    def _reload_from_state_store(self) -> None:
+        if str(getattr(self._state_store, "storage_backend", "") or "").strip() != "postgres":
+            return
+        with self._business_batch_lock:
+            self._hydrate(self._load_snapshot())
 
     def _persist(self) -> None:
         if self._state_store is not None and hasattr(self._state_store, "save_etc_state"):
