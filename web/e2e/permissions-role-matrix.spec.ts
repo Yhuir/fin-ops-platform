@@ -222,13 +222,17 @@ async function expectWorkbenchColumnDragDisabled(page: Page) {
 
 async function selectWorkbenchGroupRows(page: Page, zone: "unpaired" | "paired") {
   const zoneLocator = page.getByTestId(`zone-${zone}`);
-  const group = page.getByTestId(`candidate-group-${zone}-case:CASE-202603-101`);
+  const group = page.getByTestId(
+    zone === "paired"
+      ? "candidate-group-paired-case:CASE-202603-101"
+      : "candidate-group-unpaired-row:oa-o-202603-001",
+  );
   await expect(zoneLocator).toBeVisible();
   await expect(group).toBeVisible();
 
-  await group.getByRole("row", { name: /陈涛.*智能工厂设备商/ }).click();
-  await group.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }).click();
-  await group.getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ }).click();
+  await zoneLocator.getByRole("row", { name: /陈涛.*智能工厂设备商/ }).click();
+  await zoneLocator.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }).click();
+  await zoneLocator.getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ }).click();
   await expect(zoneLocator.getByText("已选 3")).toBeVisible();
 
   return { zoneLocator, group };
@@ -250,7 +254,7 @@ const readExportDynamicWriteControlOpeners: DynamicWriteControlOpener[] = [
       await expect(unpairedGroup.getByRole("button", { name: "详情" }).first()).toBeVisible();
       await expect(unpairedZone.getByRole("button", { name: "确认关联" })).toBeDisabled();
       await expect(unpairedZone.getByRole("button", { name: "异常处理" })).toBeDisabled();
-      await expect(unpairedZone.getByRole("button", { name: "撤回关联" })).toBeDisabled();
+      await expect(unpairedZone.getByRole("button", { name: "撤回关联" })).toHaveCount(0);
       await expect(unpairedGroup.getByRole("button", { name: "忽略", exact: true })).toHaveCount(0);
       await expect(unpairedGroup.getByRole("button", { name: "标记异常" })).toHaveCount(0);
       await expect(unpairedGroup.getByRole("button", { name: "异常处理" })).toHaveCount(0);
@@ -407,7 +411,7 @@ const readExportDynamicWriteControlOpeners: DynamicWriteControlOpener[] = [
       const workflow = page.getByLabel("以发票反提 OA 工作流", { exact: true });
       await expect(workflow).toBeVisible();
       await expect(page.getByLabel("以发票反提 OA 提示").getByText("当前账户或预览状态暂不允许创建 OA 草稿。")).toBeVisible();
-      await expect(workflow.getByRole("table", { name: "反提 OA 无发票清单" })).toBeVisible();
+      await expect(workflow.getByRole("table", { name: "反提 OA 候选发票清单" })).toBeVisible();
       await expect(workflow.getByRole("button", { name: "创建 OA 草稿" })).toBeDisabled();
       await expectNoEnabledWriteControlCandidates(page, [/^全选候选$/, /^清空选择$/]);
       await page.getByRole("button", { name: "关闭以发票反提 OA 工作流" }).click();

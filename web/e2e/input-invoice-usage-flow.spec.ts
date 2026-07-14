@@ -408,7 +408,7 @@ test.describe("input invoice usage browser flow", () => {
     const workflow = page.getByLabel("以发票反提 OA 工作流", { exact: true });
     await expect(workflow).toBeVisible();
     await expect(page.getByLabel("以发票反提 OA 提示").getByText("当前账户或预览状态暂不允许创建 OA 草稿。")).toBeVisible();
-    await expect(workflow.getByRole("table", { name: "反提 OA 无发票清单" })).toBeVisible();
+    await expect(workflow.getByRole("table", { name: "反提 OA 候选发票清单" })).toBeVisible();
     await expect(workflow.getByRole("button", { name: "创建 OA 草稿" })).toBeDisabled();
 
     expect(api.count("GET /api/input-invoice-usage/export-preview")).toBe(1);
@@ -866,20 +866,20 @@ test.describe("input invoice usage browser flow", () => {
       await page.getByRole("button", { name: "以发票反提 OA" }).click();
       expect((await mark("apiLatencyMs", previewResponsePromise)).status()).toBe(200);
       await mark("firstVisibleResponseLatencyMs", expect(workflow).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(workflow.getByRole("table", { name: "反提 OA 无发票清单" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(workflow.getByRole("table", { name: "反提 OA 候选发票清单" })).toBeVisible());
     });
     await expect(workflow).toBeVisible();
     await expect(page.getByRole("tab", { name: "待处理" })).toHaveAttribute("aria-selected", "true");
-    await expect(workflow.getByRole("table", { name: "反提 OA 无发票清单" })).toBeVisible();
-    await expect(workflow.getByLabel("选择无发票 SD-INV-E2E-001")).toBeChecked();
-    await expect(workflow.getByLabel("选择无发票 SD-INV-E2E-002")).toBeChecked();
+    await expect(workflow.getByRole("table", { name: "反提 OA 候选发票清单" })).toBeVisible();
+    await expect(workflow.getByLabel("选择候选发票 SD-INV-E2E-001")).toBeChecked();
+    await expect(workflow.getByLabel("选择候选发票 SD-INV-E2E-002")).toBeChecked();
 
     await recordLatency({
       operationId: "input-invoice-usage.unselect-oa-reverse-candidate",
-      visibleLabel: "选择无发票 SD-INV-E2E-002",
+      visibleLabel: "选择候选发票 SD-INV-E2E-002",
       actionType: "click",
     }, async (mark) => {
-      await workflow.getByLabel("选择无发票 SD-INV-E2E-002").uncheck();
+      await workflow.getByLabel("选择候选发票 SD-INV-E2E-002").uncheck();
       await mark("finalSettledLatencyMs", expect(workflow.getByText("已选 1 张")).toBeVisible());
     });
     await expect(workflow.getByText("已选 1 张")).toBeVisible();

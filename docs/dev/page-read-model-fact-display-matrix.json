@@ -13,11 +13,11 @@
       "deterministic_evidence": [
         {
           "path": "web/e2e/fixtures/workbenchFlow.ts",
-          "required_markers": ["candidate-group-unpaired-case:CASE-202603-101", "candidate-group-paired-case:CASE-202603-101", "/api/operation-barrier/status"]
+          "required_markers": ["candidate-group-unpaired-row:oa-o-202603-001", "candidate-group-unpaired-row:bk-o-202603-001", "candidate-group-unpaired-row:iv-o-202603-001", "candidate-group-paired-case:CASE-202603-101", "/api/operation-barrier/status"]
         },
         {
           "path": "web/e2e/workbench-withdraw-flow.spec.ts",
-          "required_markers": ["withdraw_relation:CASE-202603-101", "expected_versions", "candidate-group-unpaired-case:CASE-202603-101"]
+          "required_markers": ["withdraw_relation:CASE-202603-101", "expected_versions", "candidate-group-unpaired-row:oa-o-202603-001", "candidate-group-unpaired-row:bk-o-202603-001", "candidate-group-unpaired-row:iv-o-202603-001"]
         }
       ],
       "production_readonly_gates": ["http_slo_probe:workbench_summary_all", "http_slo_probe:workbench_groups_all_paired"]
@@ -202,7 +202,7 @@
         },
         {
           "path": "web/e2e/input-invoice-usage-flow.spec.ts",
-          "required_markers": ["read model refreshing diagnostics", "反提 OA 无发票清单"]
+          "required_markers": ["read model refreshing diagnostics", "反提 OA 候选发票清单"]
         }
       ],
       "production_readonly_gates": ["http_slo_probe:input_invoice_usage_rows", "http_slo_probe:input_invoice_usage_filter_options", "http_slo_probe:input_invoice_usage_payment_status_rules"]

@@ -40,6 +40,7 @@
 - 超过六个成员和 2:2:2 均能在有界唯一闭合时形成一条正式关系。
 - UoW 失败时 relation、history、idempotency 和 outbox 不得半写入。
 - source payload 即使把无 active relation 的 row 放在旧 paired section，最终也必须降级为 unpaired singleton。
+- E2E mock 不得用共享历史 `case_id` 构造未配对组；搜索只过滤对应 pane，不得把其他 pane 的独立 canonical facts 隐藏。
 
 ## 验证命令
 

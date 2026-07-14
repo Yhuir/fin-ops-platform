@@ -263,7 +263,7 @@
       "target_read_model_keys": ["workbench", "workbench_relation"],
       "target_page_keys": ["reconciliation-workbench"],
       "production_gate": {"slo_audit_profile": "workbench_relation_confirm", "apply_policy": "audit_profile_only"},
-      "deterministic_evidence": [{"path": "web/e2e/fixtures/workbenchFlow.ts", "required_markers": ["candidate-group-unpaired-case:CASE-202603-101", "candidate-group-paired-case:CASE-202603-101"]}]
+      "deterministic_evidence": [{"path": "web/e2e/fixtures/workbenchFlow.ts", "required_markers": ["candidate-group-unpaired-row:oa-o-202603-001", "candidate-group-unpaired-row:bk-o-202603-001", "candidate-group-unpaired-row:iv-o-202603-001", "candidate-group-paired-case:CASE-202603-101"]}]
     },
     {
       "operation": "workbench_relation_withdraw",
@@ -323,7 +323,7 @@
       "target_read_model_keys": ["bank_detail", "cost_statistics", "input_invoice_usage", "invoice_lifecycle", "oa_pending_payment", "output_invoice_collection", "pending_invoice", "search", "workbench", "workbench_relation"],
       "target_page_keys": ["reconciliation-workbench", "bank-details", "pending-invoices", "input-invoice-usage", "oa-pending-payments", "cost-statistics"],
       "production_gate": {"slo_audit_profile": "workbench_relation_withdraw_cross_page", "apply_policy": "audit_profile_only"},
-      "deterministic_evidence": [{"path": "web/e2e/workbench-withdraw-flow.spec.ts", "required_markers": ["withdraw_relation:CASE-202603-101", "candidate-group-unpaired-case:CASE-202603-101"]}]
+      "deterministic_evidence": [{"path": "web/e2e/workbench-withdraw-flow.spec.ts", "required_markers": ["withdraw_relation:CASE-202603-101", "candidate-group-unpaired-row:oa-o-202603-001", "candidate-group-unpaired-row:bk-o-202603-001", "candidate-group-unpaired-row:iv-o-202603-001"]}]
     },
     {
       "operation": "workbench_relation_confirm_bank_invoice_cross_page",

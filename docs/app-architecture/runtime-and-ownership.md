@@ -89,12 +89,12 @@ React 启动时由 `SessionProvider` 调用 `fetchSessionMe()`，通过 `Session
 
 ### 关联台 automatic decision 显示边界
 
-关联台未配对区的“撤回关联”只允许撤销 active relation，不再兼容自动候选拆分：
+关联台的“撤回关联”只出现在已配对区并且只撤销 active relation；未配对区不提供撤回动作，也不兼容自动候选拆分：
 
 1. route / facade 通过 `WorkbenchRelationCommandService` 预览 canonical active relation 撤回；只有存在 active relation 时才返回 `withdraw_relation`。
-2. 若没有 active relation，preview/submit 必须返回 relation not found 或 invalid operation，不能回退到 legacy candidate、`read_model.workbench_reconciliation_decisions` 或 `WorkbenchReconciliationDecisionStore` 去 suppress 内部建议。
-3. automatic decision/candidate 是内部匹配建议，不是配对关系事实源；它不得投影为 Workbench 可见同组 linked 行，不得驱动 pending invoice、input invoice usage、OA pending、cost statistics 等 linked-only 下游状态。
-4. Workbench active generation、all-scope aggregate、groups page 和 `audit_workbench_relation_display` 必须共同保证旧 `case:decision:*` / `relation_mode=automatic_decision` 可见组不会继续污染页面。
+2. 若没有 active relation，preview/submit 必须返回 relation not found 或 invalid operation，不能回退到任何 legacy candidate/decision 表、store 或 snapshot。
+3. 自动匹配只允许在内存中生成可原子提交的 `FormalRelationPlan`；无法满足确定性安全规则的结果不持久化、不合并未配对事实，也不得驱动 pending invoice、input invoice usage、OA pending、cost statistics 等 linked-only 下游状态。
+4. Workbench active generation、all-scope aggregate、groups page 和 `audit_workbench_relation_display` 必须共同保证旧 `case:decision:*`、`automatic_decision` / `automatic_match` payload 不会继续污染页面。Release A 仅为应用回滚暂留旧物理表，但运行时必须保持零访问；Release B 通过独立 migration 删除。
 
 ### 成本统计全期间 read model
 

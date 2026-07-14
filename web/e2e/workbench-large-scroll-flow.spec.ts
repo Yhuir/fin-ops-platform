@@ -52,7 +52,7 @@ test.describe("workbench large dataset browser flow", () => {
 
     const openZone = page.getByTestId("zone-unpaired");
     await expect(openZone.getByText("已加载 200 / 205")).toBeVisible();
-    await expect(page.getByTestId("candidate-group-unpaired-case:CASE-LARGE-202603-001")).toBeVisible();
+    await expect(page.getByTestId("candidate-group-unpaired-row:oa-large-202603-001")).toBeVisible();
 
     await openZone.locator(".candidate-grid-body").evaluate((element) => {
       element.scrollTop = element.scrollHeight;
@@ -65,14 +65,20 @@ test.describe("workbench large dataset browser flow", () => {
 
     await openZone.getByRole("button", { name: "搜索 银行流水" }).click();
     await page.getByRole("searchbox", { name: "搜索 银行流水" }).fill("长列表供应商065");
-    const targetGroup = page.getByTestId("candidate-group-unpaired-case:CASE-LARGE-202603-065");
+    const targetGroup = page.getByTestId("candidate-group-unpaired-row:bk-large-202603-065");
     await expect(targetGroup).toBeVisible();
-    await expect(openZone.getByText("已加载 1 / 1")).toBeVisible();
-    await expect(page.getByTestId("candidate-group-unpaired-case:CASE-LARGE-202603-001")).toHaveCount(0);
+    await expect(openZone.getByText("已加载 1 / 205")).toBeVisible();
+    await expect(page.getByTestId("candidate-group-unpaired-row:oa-large-202603-001")).toBeVisible();
 
-    await targetGroup.getByRole("row", { name: /大数据申请人065/ }).click();
+    await targetGroup.getByRole("row", { name: /长列表供应商065/ }).click();
     await expect(openZone.getByText("已选 1")).toBeVisible();
-    await expect(openZone.getByText("带入 2")).toBeVisible();
+    await expect(openZone.getByText(/带入/)).toHaveCount(0);
+    await openZone.getByRole("button", { name: /搜索 银行流水，当前关键词 长列表供应商065/ }).click();
+    await openZone.getByRole("button", { name: "清空搜索 银行流水" }).click();
+    await expect(openZone.getByText("已加载 200 / 205")).toBeVisible();
+    await page.getByTestId("candidate-group-unpaired-row:oa-large-202603-064").getByRole("row").click();
+    await page.getByTestId("candidate-group-unpaired-row:iv-large-202603-066").getByRole("row").click();
+    await expect(openZone.getByText("已选 3")).toBeVisible();
     const confirmButton = openZone.getByRole("button", { name: "确认关联" });
     await expect(confirmButton).toBeEnabled();
     await expectVisibleAndUncovered(confirmButton, "open zone confirm button after filtering");
@@ -85,13 +91,13 @@ test.describe("workbench large dataset browser flow", () => {
     await detailDrawer.getByRole("button", { name: "关闭详情抽屉" }).click();
     await expect(detailDrawer).toHaveCount(0);
     await expect(page.locator(".finance-drawer__content")).toHaveCount(0);
-    await expect(openZone.getByText("已选 1")).toBeVisible();
-    await expect(openZone.getByText("带入 2")).toBeVisible();
+    await expect(openZone.getByText("已选 3")).toBeVisible();
+    await expect(openZone.getByText(/带入/)).toHaveCount(0);
     await expect(confirmButton).toBeEnabled();
 
     const bankFooter = page.getByTestId("pane-scrollbar-unpaired-bank");
     const bankHeader = page.getByTestId("pane-scroll-head-unpaired-bank");
-    const bankRow = page.getByTestId("candidate-scroll-unpaired-case:CASE-LARGE-202603-065-bank");
+    const bankRow = page.getByTestId("candidate-scroll-unpaired-row:bk-large-202603-065-bank");
     const scrollLeft = await scrollPaneHorizontally(bankFooter);
     await expect.poll(() => bankHeader.evaluate((element) => element.scrollLeft)).toBe(scrollLeft);
     await expect.poll(() => bankRow.evaluate((element) => element.scrollLeft)).toBe(scrollLeft);

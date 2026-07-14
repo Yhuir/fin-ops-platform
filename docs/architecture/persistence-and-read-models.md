@@ -37,7 +37,8 @@ PostgreSQL 中的业务唯一真相、owner matrix、允许写入口和跨模块
 - `app.workbench_pair_relations`：确认关联、免 OA 批次等关系事实。
 - `read_model.workbench_snapshots`：工作台 scope 级页面快照和版本元数据。
 - `read_model.workbench_rows`：工作台行级 read model，支持按 scope/month/filter/page 查询。
-- `read_model.workbench_candidate_matches`：自动匹配候选；生产读取不再 fallback 到 `state:workbench_candidate_matches`。
+- `read_model.workbench_generations`、`read_model.workbench_groups`、`read_model.workbench_group_rows`：关联台 active generation、正式关系组和独立未配对事实投影。
+- `read_model.workbench_relation_*`：下游页面的 `linked` / `unlinked` 关系分发，不是写事实源。
 - `job.read_model_dirty_scopes`：read model 待重算范围。
 - `job.background_jobs`：后台任务。
 - `audit.app_health_alerts`：健康告警。
@@ -89,8 +90,8 @@ PostgreSQL store 不再读取 legacy GridFS reference；production API 读取文
 - `read_model.workbench_rows` 提供 `page`、`page_size`、`status`、`source_kind`、`search` 的行级查询 DTO，返回在 `rows_page`；新写入的 `payload` 不再保存 nested `object_identity`。
 - `job.read_model_dirty_scopes` 提供 stale/refreshing 状态。API miss 或 dirty scope 未完成时只 enqueue `workbench.read_model.refresh`，不会在请求路径调用旧 `_build_raw_workbench_payload()`。
 - production PostgreSQL runtime 如果未配置 workbench SQL read repository，会返回 `read_model_unavailable` 并尝试 enqueue refresh，不会退回旧同步 builder。local pickle 和显式 legacy bootstrap 仍可用于旧测试/迁移验证。
-- standalone worker 用 `python3 -m fin_ops_platform.app.worker --enable-workbench-read-model-refresh` claim PostgreSQL durable queue 后重建对应 scope，并写回 `read_model.workbench_snapshots`、`read_model.workbench_rows` 和 candidate tables。
-- Pair relations、row overrides、exception cases 等写路径只标记受影响 scope dirty，并由 worker 收敛；生产读取不再使用 `state:workbench_read_models` 或 `state:workbench_candidate_matches` fallback。
+- standalone worker 用 `python3 -m fin_ops_platform.app.worker --enable-workbench-read-model-refresh` claim PostgreSQL durable queue 后重建对应 scope，并原子发布 `read_model.workbench_generations`、groups/group rows、snapshots/rows 和正式关系分发。
+- Pair relations、row overrides、exception cases 等写路径只标记受影响 scope dirty，并由 worker 收敛；生产读取不再使用 `state:workbench_read_models` 或任何 candidate/decision state fallback。
 
 工作台 generation 发布契约：
 
@@ -106,8 +107,8 @@ PostgreSQL store 不再读取 legacy GridFS reference；production API 读取文
 
 OA、银行流水、进项发票、销项发票之间的两两/三栏关系上下文统一由 `workbench_relation` read model 分发：
 
-- confirmed relation 事实源仍是 `app.workbench_pair_relations`。确定性自动匹配结果先写入 `read_model.workbench_reconciliation_decisions`，满足正式化条件的 paired decision 必须通过 `WorkbenchRelationCommandService.confirm_relation(...)` 写成 active relation 后，才进入 `workbench_relation` 下游分发；open/proposed 或未消费 decision 只属于自动匹配内部过程，不作为下游关系上下文。
-- distribution 只向下游页面表达 `relation_status='linked'` 或 `relation_status='unlinked'` 的业务口径：linked 表示可作为已确认关系读取的上下文；unlinked 表示没有 active relation。历史 `relation_status='candidate'` 只能作为旧 payload 兼容值归入 unlinked，不得作为 confirmed write fact、支付完成证明、row 独占关系或用户筛选状态。
+- confirmed relation 事实源仍是 `app.workbench_pair_relations`。确定性匹配引擎只在内存中产出可提交的 `FormalRelationPlan`；满足安全规则的计划必须在同一 UoW 中经 `WorkbenchRelationCommandService` 写成 active relation、history、幂等记录和 durable outbox。模糊、冲突、资源超限或不安全的计算结果不持久化为 candidate/decision，也不改变事实的未配对显示。
+- distribution 只向下游页面表达 `relation_status='linked'` 或 `relation_status='unlinked'`：linked 表示 active 正式关系；unlinked 表示没有 active relation。不得新增或输出 `candidate` 关系状态。
 - 标准表是 `read_model.workbench_relation_scopes`、`read_model.workbench_relation_groups` 和 `read_model.workbench_relation_rows`。groups 保存一组关系，rows 给每个 OA/流水/发票对象一行。
 - `WorkbenchRelationReadFacade` 是下游页面唯一读取入口。待找发票、OA 待付款、进项发票使用、销项发票收款、银行明细关系标签等页面不得再直接 join `app.workbench_pair_relations`、`app.invoices`、OA projection 或 OA 附件票缓存来拼关系。
 - 分发 rows 必须覆盖无关联对象：`relation_status='unlinked'`、`group_ids=[]`、`linked_*=[]`。页面需要显示空 OA/空发票时直接消费空数组，不再自行补空。

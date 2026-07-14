@@ -4,12 +4,12 @@ import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 
 async function openConfirmRelationPreview(page: Page) {
   const openZone = page.getByTestId("zone-unpaired");
-  const openGroup = page.getByTestId("candidate-group-unpaired-case:CASE-202603-101");
+  const openGroup = page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001");
   await expect(openZone).toBeVisible();
   await expect(openGroup).toBeVisible();
-  await openGroup.getByRole("row", { name: /陈涛.*智能工厂设备商/ }).click();
-  await openGroup.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }).click();
-  await openGroup.getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ }).click();
+  await openZone.getByRole("row", { name: /陈涛.*智能工厂设备商/ }).click();
+  await openZone.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }).click();
+  await openZone.getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ }).click();
   await expect(openZone.getByText("已选 3")).toBeVisible();
   await openZone.getByRole("button", { name: "确认关联" }).click();
   const previewDialog = page.getByRole("dialog", { name: "关联预览" });
@@ -30,13 +30,14 @@ test.describe("workbench stale and error browser flow", () => {
 
     await expect(page.getByRole("status", { name: /关联台待刷新/ })).toBeVisible();
     const openZone = page.getByTestId("zone-unpaired");
-    const openGroup = page.getByTestId("candidate-group-unpaired-case:CASE-202603-101");
+    const openGroup = page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001");
     await expect(openGroup).toBeVisible();
 
     await openGroup.getByRole("row", { name: /陈涛.*智能工厂设备商/ }).click();
+    await openZone.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }).click();
     await expect(openZone.getByRole("button", { name: "确认关联" })).toBeEnabled();
     await expect(openZone.getByRole("button", { name: "异常处理" })).toBeEnabled();
-    await expect(openZone.getByRole("button", { name: "撤回关联" })).toBeEnabled();
+    await expect(openZone.getByRole("button", { name: "撤回关联" })).toHaveCount(0);
   });
 
   test("shows workbench refreshing status without globally disabling selected group actions", async ({ page }) => {
@@ -53,13 +54,14 @@ test.describe("workbench stale and error browser flow", () => {
     await expect(page.getByText("当前没有可展示的 OA / 银行流水 / 发票记录。")).toHaveCount(0);
 
     const openZone = page.getByTestId("zone-unpaired");
-    const openGroup = page.getByTestId("candidate-group-unpaired-case:CASE-202603-101");
+    const openGroup = page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001");
     await expect(openGroup).toBeVisible();
     await openGroup.getByRole("row", { name: /陈涛.*智能工厂设备商/ }).click();
+    await openZone.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }).click();
 
     await expect(openZone.getByRole("button", { name: "确认关联" })).toBeEnabled();
     await expect(openZone.getByRole("button", { name: "异常处理" })).toBeEnabled();
-    await expect(openZone.getByRole("button", { name: "撤回关联" })).toBeEnabled();
+    await expect(openZone.getByRole("button", { name: "撤回关联" })).toHaveCount(0);
   });
 
   test("does not present stale empty payload as a true empty workbench", async ({ page }) => {
@@ -77,7 +79,7 @@ test.describe("workbench stale and error browser flow", () => {
     await expect(page.getByText("当前没有可展示的 OA / 银行流水 / 发票记录。")).toHaveCount(0);
     await expect(page.getByTestId("zone-unpaired").getByText("未配对 0 项").first()).toBeVisible();
     await expect(page.getByTestId("zone-paired").getByText("已配对 0 项").first()).toBeVisible();
-    await expect(page.getByTestId("candidate-group-unpaired-case:CASE-202603-101")).toHaveCount(0);
+    await expect(page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001")).toHaveCount(0);
   });
 
   test("blocks Workbench writes while OA sync is dirty", async ({ page }) => {
@@ -91,13 +93,13 @@ test.describe("workbench stale and error browser flow", () => {
 
     await expect(page.getByRole("status", { name: /关联台待刷新/ })).toBeVisible();
     const openZone = page.getByTestId("zone-unpaired");
-    const openGroup = page.getByTestId("candidate-group-unpaired-case:CASE-202603-101");
+    const openGroup = page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001");
     await expect(openGroup).toBeVisible();
 
     await openGroup.getByRole("row", { name: /陈涛.*智能工厂设备商/ }).click();
     await expect(openZone.getByRole("button", { name: "确认关联" })).toBeDisabled();
     await expect(openZone.getByRole("button", { name: "异常处理" })).toBeDisabled();
-    await expect(openZone.getByRole("button", { name: "撤回关联" })).toBeDisabled();
+    await expect(openZone.getByRole("button", { name: "撤回关联" })).toHaveCount(0);
     expect(api.count("POST /api/workbench/actions/confirm-link/preview")).toBe(0);
     expect(api.count("POST /api/workbench/actions/withdraw-link/preview")).toBe(0);
   });
@@ -113,13 +115,13 @@ test.describe("workbench stale and error browser flow", () => {
 
     await expect(page.getByRole("status", { name: /OA 正在同步/ })).toBeVisible();
     const openZone = page.getByTestId("zone-unpaired");
-    const openGroup = page.getByTestId("candidate-group-unpaired-case:CASE-202603-101");
+    const openGroup = page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001");
     await expect(openGroup).toBeVisible();
 
     await openGroup.getByRole("row", { name: /陈涛.*智能工厂设备商/ }).click();
     await expect(openZone.getByRole("button", { name: "确认关联" })).toBeDisabled();
     await expect(openZone.getByRole("button", { name: "异常处理" })).toBeDisabled();
-    await expect(openZone.getByRole("button", { name: "撤回关联" })).toBeDisabled();
+    await expect(openZone.getByRole("button", { name: "撤回关联" })).toHaveCount(0);
     expect(api.count("POST /api/workbench/actions/confirm-link/preview")).toBe(0);
     expect(api.count("POST /api/workbench/actions/withdraw-link/preview")).toBe(0);
   });
@@ -135,10 +137,11 @@ test.describe("workbench stale and error browser flow", () => {
 
     await expect(page.getByRole("status", { name: /关联台刷新失败/ })).toBeVisible();
     const openZone = page.getByTestId("zone-unpaired");
-    const openGroup = page.getByTestId("candidate-group-unpaired-case:CASE-202603-101");
+    const openGroup = page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001");
     await expect(openGroup).toBeVisible();
 
     await openGroup.getByRole("row", { name: /陈涛.*智能工厂设备商/ }).click();
+    await openZone.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }).click();
     await expect(openZone.getByRole("button", { name: "确认关联" })).toBeEnabled();
   });
 
@@ -150,14 +153,7 @@ test.describe("workbench stale and error browser flow", () => {
 
     await page.goto("/");
 
-    const openZone = page.getByTestId("zone-unpaired");
-    const openGroup = page.getByTestId("candidate-group-unpaired-case:CASE-202603-101");
-    await expect(openGroup).toBeVisible();
-    await openGroup.getByRole("row", { name: /陈涛.*智能工厂设备商/ }).click();
-
-    await openZone.getByRole("button", { name: "确认关联" }).click();
-    const previewDialog = page.getByRole("dialog", { name: "关联预览" });
-    await expect(previewDialog.getByText("确认关联预览")).toBeVisible();
+    const { openGroup, previewDialog } = await openConfirmRelationPreview(page);
     await previewDialog.getByRole("button", { name: "确认关联" }).click();
 
     await expect(previewDialog.getByRole("alert")).toContainText("browser confirm failed");

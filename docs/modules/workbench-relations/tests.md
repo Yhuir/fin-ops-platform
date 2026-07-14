@@ -36,6 +36,7 @@
 - 下游只把 active relation 视为 linked。
 - old candidate/decision 表、service、state key 和 API 不存在生产调用。
 - Release A 静态 guard 证明运行时不再访问旧状态；Release B 的 migration 0104 contract 必须证明只删除派生旧状态，不删除 canonical facts/relations/history。
+- browser deterministic mocks 即使保留相同历史 `case_id` metadata，也必须把无 active relation 的 OA、流水和发票输出为三个 `row:<typed-id>` singleton；确认后才合并为 relation，撤回后恢复三个 singleton。
 
 ## 验证命令
 

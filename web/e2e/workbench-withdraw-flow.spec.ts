@@ -26,7 +26,7 @@ test.describe("workbench withdraw browser flow", () => {
     const openZone = page.getByTestId("zone-unpaired");
     const pairedGroup = page.getByTestId("candidate-group-paired-case:CASE-202603-101");
     await expect(pairedGroup).toBeVisible();
-    await expect(page.getByTestId("candidate-group-unpaired-case:CASE-202603-101")).toHaveCount(0);
+    await expect(page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001")).toHaveCount(0);
 
     await pairedGroup.getByRole("row", { name: /陈涛.*智能工厂设备商/ }).click();
     await pairedGroup.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }).click();
@@ -58,14 +58,12 @@ test.describe("workbench withdraw browser flow", () => {
     await expect(previewDialog.getByRole("button", { name: "关闭关联预览" })).toBeDisabled();
     await expect(previewDialog.getByRole("textbox", { name: "备注" })).toBeDisabled();
     await expect(pairedGroup).toBeVisible();
-    await expect(page.getByTestId("candidate-group-unpaired-case:CASE-202603-101")).toHaveCount(0);
+    await expect(page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001")).toHaveCount(0);
 
     await expect(page.getByRole("dialog", { name: "关联预览" })).toHaveCount(0);
-    const restoredOpenGroup = page.getByTestId("candidate-group-unpaired-case:CASE-202603-101");
-    await expect(restoredOpenGroup).toBeVisible();
-    await expect(restoredOpenGroup.getByRole("row", { name: /陈涛.*智能工厂设备商/ })).toBeVisible();
-    await expect(restoredOpenGroup.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeVisible();
-    await expect(restoredOpenGroup.getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ })).toBeVisible();
+    await expect(page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001")).toBeVisible();
+    await expect(page.getByTestId("candidate-group-unpaired-row:bk-o-202603-001")).toBeVisible();
+    await expect(page.getByTestId("candidate-group-unpaired-row:iv-o-202603-001")).toBeVisible();
     await expect(page.getByTestId("candidate-group-paired-case:CASE-202603-101")).toHaveCount(0);
     await expect(openZone.getByText("已选 0")).toBeVisible();
 

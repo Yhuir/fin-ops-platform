@@ -768,17 +768,17 @@ function linkedWorkbenchRows(includeCashSpecialActions = false) {
   };
 }
 
-function buildWorkbenchGroup(zone: WorkbenchZone, linked: boolean, includeCashSpecialActions = false) {
-  const rows = linked ? linkedWorkbenchRows(includeCashSpecialActions) : workbenchRows();
+function buildPairedWorkbenchGroup(includeCashSpecialActions = false) {
+  const rows = linkedWorkbenchRows(includeCashSpecialActions);
   return {
     group_id: "case:CASE-202603-101",
-    group_type: zone === "paired" ? "relation" : "unpaired",
-    match_confidence: zone === "paired" ? "high" : "medium",
+    group_type: "relation",
+    match_confidence: "high",
     reason: "browser_e2e_relation_fanout",
     oa_rows: [rows.oa],
     bank_rows: [rows.bank],
     invoice_rows: [rows.invoice],
-    can_withdraw: zone === "paired",
+    can_withdraw: true,
     amount_check: {
       status: "matched",
       direction: "payment",
@@ -788,6 +788,29 @@ function buildWorkbenchGroup(zone: WorkbenchZone, linked: boolean, includeCashSp
       requires_note: false,
     },
   };
+}
+
+function buildUnpairedWorkbenchGroup(
+  rowType: "oa" | "bank" | "invoice",
+  row: ReturnType<typeof workbenchRows>["oa" | "bank" | "invoice"],
+) {
+  return {
+    group_id: `row:${row.id}`,
+    group_type: "unpaired",
+    reason: "browser_e2e_canonical_unpaired_fact",
+    oa_rows: rowType === "oa" ? [row] : [],
+    bank_rows: rowType === "bank" ? [row] : [],
+    invoice_rows: rowType === "invoice" ? [row] : [],
+    can_withdraw: false,
+  };
+}
+
+function buildUnpairedWorkbenchGroups(rows = workbenchRows()) {
+  return [
+    buildUnpairedWorkbenchGroup("oa", rows.oa),
+    buildUnpairedWorkbenchGroup("bank", rows.bank),
+    buildUnpairedWorkbenchGroup("invoice", rows.invoice),
+  ];
 }
 
 function bankFlowRuleSourceRow(
@@ -1035,15 +1058,19 @@ function buildLargeWorkbenchGroup(index: number, zone: WorkbenchZone = "unpaired
       },
     },
   };
+  if (zone === "unpaired") {
+    const rowType = (["oa", "bank", "invoice"] as const)[(index - 1) % 3];
+    return buildUnpairedWorkbenchGroup(rowType, rows[rowType]);
+  }
   return {
     group_id: `case:${caseId}`,
-    group_type: zone === "paired" ? "relation" : "unpaired",
-    match_confidence: zone === "paired" ? "high" : "medium",
+    group_type: "relation",
+    match_confidence: "high",
     reason: `browser_e2e_large_dataset_${suffix}`,
     oa_rows: [rows.oa],
     bank_rows: [rows.bank],
     invoice_rows: [rows.invoice],
-    can_withdraw: zone === "paired",
+    can_withdraw: true,
     amount_check: {
       status: "matched",
       direction: "payment",
@@ -1119,12 +1146,8 @@ function buildProcessedExceptionGroup() {
   };
 }
 
-function buildUnpairedGroupWithoutIgnoredInvoice() {
-  const group = buildWorkbenchGroup("unpaired", false);
-  return {
-    ...group,
-    invoice_rows: [],
-  };
+function buildUnpairedGroupsWithoutIgnoredInvoice() {
+  return buildUnpairedWorkbenchGroups().filter((group) => group.invoice_rows.length === 0);
 }
 
 function ignoredWorkbenchRows(rowIgnored: boolean) {
@@ -1156,15 +1179,15 @@ function workbenchGroups(
     return largeWorkbenchGroups(zone);
   }
   if (zone === "paired") {
-    return relationConfirmed ? [buildWorkbenchGroup("paired", true, includeCashSpecialActions)] : [];
+    return relationConfirmed ? [buildPairedWorkbenchGroup(includeCashSpecialActions)] : [];
   }
   if (exceptionApplied) {
     return [buildProcessedExceptionGroup()];
   }
   if (rowIgnored) {
-    return [buildUnpairedGroupWithoutIgnoredInvoice()];
+    return buildUnpairedGroupsWithoutIgnoredInvoice();
   }
-  return relationConfirmed ? [] : [buildWorkbenchGroup("unpaired", false)];
+  return relationConfirmed ? [] : buildUnpairedWorkbenchGroups();
 }
 
 function countWorkbenchRows(groups: Array<{ oa_rows: unknown[]; bank_rows: unknown[]; invoice_rows: unknown[] }>) {
@@ -6018,8 +6041,8 @@ function confirmPreviewPayload() {
     can_submit: true,
     requires_note: false,
     message: "确认后将把 1 条 OA、1 条流水和 1 条发票闭环。",
-    before: { groups: [buildWorkbenchGroup("unpaired", false)] },
-    after: { groups: [buildWorkbenchGroup("paired", true)] },
+    before: { groups: buildUnpairedWorkbenchGroups() },
+    after: { groups: [buildPairedWorkbenchGroup()] },
     amount_summary: amountSummary(),
   };
 }
@@ -6041,7 +6064,7 @@ function confirmResultPayload() {
     ],
     operation_projection: {
       after: {
-        paired_groups: [buildWorkbenchGroup("paired", true)],
+        paired_groups: [buildPairedWorkbenchGroup()],
         unpaired_groups: [],
       },
     },
@@ -6063,8 +6086,8 @@ function withdrawPreviewPayload() {
       version: 1,
       row_ids: ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"],
     },
-    before: { groups: [buildWorkbenchGroup("paired", true)] },
-    after: { groups: [buildWorkbenchGroup("unpaired", false)] },
+    before: { groups: [buildPairedWorkbenchGroup()] },
+    after: { groups: buildUnpairedWorkbenchGroups() },
     amount_summary: amountSummary(),
   };
 }
@@ -6087,7 +6110,7 @@ function withdrawResultPayload() {
     operation_projection: {
       after: {
         paired_groups: [],
-        unpaired_groups: [buildWorkbenchGroup("unpaired", false)],
+        unpaired_groups: buildUnpairedWorkbenchGroups(),
       },
     },
     message: "已撤回 3 条记录关联。",
@@ -6221,7 +6244,7 @@ function workbenchCashSpecialResultPayload(action: WorkbenchCashSpecialAction) {
     ],
     operation_projection: {
       after: {
-        paired_groups: [buildWorkbenchGroup("paired", true, true)],
+        paired_groups: [buildPairedWorkbenchGroup(true)],
         unpaired_groups: [],
       },
     },

@@ -4,6 +4,8 @@
 
 本文件是 `PF-P001 - Architecture Inventory / Dynamic Call Chain Discovery` 的产物，用于把当前 Python 后端按 API、文件、外部依赖、Read Model 和运行时序做宏观分拣。它不是单模块最终设计，也不包含业务代码改动。
 
+> 2026-07-14 rebaseline：本文中 Workbench candidate/decision、candidate store、special reconciliation 和 matching dirty fallback 的文件级描述是历史盘点，已被 Phase 21 正式关系架构取代，不再是当前实现或后续设计输入。当前事实源是 `docs/product-specs/reconciliation-and-workbench.md`、`docs/modules/reconciliation-workbench/boundary-io.md` 与 `docs/modules/workbench-relations/boundary-io.md`；新代码禁止恢复旧 candidate/decision 运行时链路。
+
 扫描范围：
 
 - `backend/src/fin_ops_platform/app/**/*.py`
