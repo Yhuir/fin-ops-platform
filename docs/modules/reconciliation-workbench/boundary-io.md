@@ -55,7 +55,8 @@
 
 - `workbench` 使用 active-generation scoped publish；月分片发布必须原子。
 - `month=all` 查询组合 active 月分片，并在分页前做唯一 canonical owner 仲裁。
-- schema/version 由 `workbench_read_model_version.py` 统一提供；旧 generation 版本不得冒充 fresh。
+- schema/version 由 `workbench_read_model_version.py` 统一提供，groups page cache 必须复用同一 projection schema；旧 generation 或旧 Redis page payload 不得冒充 fresh。
+- collapsed-summary 是展示形态而不是第三种关系状态：repository 必须分别物化 `summary_row` 与全部 `collapsed_rows`；未配对 ETC summary 仍是一个 canonical singleton owner，旧 candidate/decision `case_id` 或 relation mode 不得泄漏为关系归属。
 - matching scope、workbench scope 和 workbench_relation scope 都以 PostgreSQL durable queue/state 为事实源；Redis 只缓存 fresh payload，RabbitMQ 只做可选唤醒。
 - Release A 上线后先执行一次全量 Workbench rehydrate，使旧 `open`/candidate/decision generation 被新的 paired/unpaired generation 原子替换；不得原地修改旧 active generation。Release B 的 0104 只在 A 的零访问和数据安全证据通过后执行。
 

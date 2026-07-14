@@ -9393,6 +9393,7 @@ class PostgresReadModelRepository:
                         continue
                     for row in values:
                         add_row(row, zone=zone)
+            add_row(group.get("summary_row"), zone=zone)
 
         for direct_key in ("rows", "ignored_rows"):
             value = payload.get(direct_key)
@@ -11046,7 +11047,7 @@ def _compact_workbench_group_for_summary_page(group: dict[str, Any]) -> dict[str
 
 
 def _compact_workbench_row_for_summary_page(row: dict[str, Any]) -> dict[str, Any]:
-    compact_source = _normalize_workbench_invoice_display_fields(row)
+    compact_source = _normalize_workbench_invoice_display_fields(_sanitize_workbench_row_for_read_model(row))
     compact = without_keys(
         compact_source,
         {
@@ -11068,7 +11069,6 @@ def _compact_workbench_row_for_summary_page(row: dict[str, Any]) -> dict[str, An
             "object_identity_source",
             "object_identity_confidence",
             "candidate_ids",
-            "workbench_reconciliation_decision",
             "reconciliation_decision",
             "group_metadata",
         },
@@ -11363,10 +11363,16 @@ def _workbench_group_row_records(group: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _workbench_row_payload_for_write(row: dict[str, Any]) -> dict[str, Any]:
-    payload = dict(row)
+    payload = _sanitize_workbench_row_for_read_model(row)
     for key in WORKBENCH_ROW_PAYLOAD_PRUNED_KEYS:
         payload.pop(key, None)
     return serialize_value(payload)
+
+
+def _sanitize_workbench_row_for_read_model(row: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(row)
+    payload.pop("workbench_reconciliation_decision", None)
+    return payload
 
 
 def _workbench_group_payload_for_rows(group: dict[str, Any], *, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -11553,6 +11559,18 @@ def _iter_typed_group_rows_with_metadata(group: dict[str, Any]) -> list[tuple[st
                 for index, row in enumerate(value)
                 if isinstance(row, dict)
             )
+    summary_row = group.get("summary_row")
+    if isinstance(summary_row, dict):
+        pane = text(summary_row.get("type"))
+        summary_row_id = text(summary_row.get("id") or summary_row.get("row_id"))
+        already_present = any(
+            existing_pane == pane
+            and text(existing_row.get("id") or existing_row.get("row_id")) == summary_row_id
+            for existing_pane, _role, _index, existing_row in rows
+        )
+        if pane in WORKBENCH_PANES and summary_row_id is not None and not already_present:
+            row_index = sum(1 for existing_pane, _role, _index, _row in rows if existing_pane == pane)
+            rows.append((pane, "summary", row_index, summary_row))
     collapsed_rows = group.get("collapsed_rows")
     if isinstance(collapsed_rows, dict):
         for row_type, value in collapsed_rows.items():

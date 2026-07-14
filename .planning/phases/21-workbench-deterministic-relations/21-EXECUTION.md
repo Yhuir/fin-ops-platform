@@ -1,7 +1,7 @@
 # Phase 21 执行与闭环状态
 
 日期：2026-07-15
-状态：本地实现与自动化验证完成；生产 cutover 未执行
+状态：v2 生产审计 hotfix 本地全量验证完成；生产保持已验证旧 release，重新 cutover 待远程精确 SHA 门禁
 
 ## 已锁定产品合同
 
@@ -51,13 +51,16 @@
 - lint、docs 和旧链路静态 guard 通过。
 - 全量门禁首次运行发现两处历史 E2E 证据锚点仍引用旧候选语义；修正后在 clean commit `a4b9e6276` 从头复跑并全部通过。
 - CI 稳定化后的统一门禁曾捕获 file import confirm 先 enqueue Workbench matching、后 `save_import_delta` 的真实 I/O 竞态：后台状态写入可把 durable session 从 `confirmed` 覆盖回 `preview_ready`，独立 worker 也可能在 canonical facts 提交前消费 scope。`ImportProcessingService` 现严格执行 durable delta → tax/read-model invalidation → matching enqueue；持久化失败时下游发布为零。重启集成用例连续 50 次通过，最终 `verify.sh all` 再次零失败。
+- main `1f1ec5324bc7dde9987b51f79d4d2a6ebe502841` 首次重新激活并完成受控 rehydrate 后，page Audit 捕获 51 个 ETC summary/detail equality mismatch 和 2 个 override/candidate ownership mismatch；freshness/queue 正常但 integrity 阻断，因此立即回滚并重新 rehydrate `etc-import-e5d6e6a4e-20260714-visibility`。旧 release 恢复 219 active relations、19 active generation scopes、876 relation row ids、1296 group rows、零问题；migration 仍为 0001–0103，0104 未执行。
+- v2 hotfix 将 collapsed summary/detail 变换保留在纯 grouping 边界、独立 summary/detail 物化保留在 repository 边界、retired decision decoration 保留在既有 read-model sanitation 边界；projection/all-scope/Redis cache schema 同步升级。未恢复 candidate/decision runtime、第三种状态或 fallback。
+- v2 本地门禁：受影响面 660 tests + 33 subtests；`bash scripts/verify.sh all` 为 backend 4190 passed / 33 explicit environment-gated skipped、frontend 71 files / 835 tests、production build、Chromium 177/177；lint、docs、旧链路 guard 和 diff check 均通过。
 
 ## 未完成的生产门
 
 - 当前环境未设置 `FIN_OPS_TEST_DATABASE_URL`，因此没有执行真实 disposable PostgreSQL migration/catalog/data-hash 集成；Release A 不包含 schema 变更，Release B 在补齐真实 0001–0104 disposable PostgreSQL 证据前不得发布。
 - Release A 已隔离到干净 `codex/workbench-formal-relations-release-a` 分支；0104 保留在独立 Release B 候选提交，不进入 A。
-- 2026-07-14 对当前生产 release 的只读复核仍显示 520 group 为 unpaired；production migration、rehydrate、worker drain、System Audit 和 13 个真实 identities 的恢复证据尚未执行。
-- 本轮没有执行任何生产写入、migration、read-model rebuild 或部署。
+- 当前生产运行已回滚的 `etc-import-e5d6e6a4e-20260714-visibility`，其 Workbench rehydrate/page Audit 已恢复通过；v2 hotfix 尚未 commit/remote CI/合并/部署。
+- 本轮两次激活均未执行新 migration 或 canonical/relation 写入；受控 rehydrate 只原子发布 read-model generation。重新 cutover 后仍必须完成 worker drain、page/System Audit、520 与 13 个真实 identities 的恢复证据。
 
 ## 生产闭环门
 
