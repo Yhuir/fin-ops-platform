@@ -274,7 +274,7 @@ class CostStatisticsSqlProjectionBuilder:
         payload = source_versions_for_scope_keys(
             [month],
             require_fresh=True,
-            reason="cost_statistics_bank_tag_source_versions",
+            reason="downstream_bank_tag_read",
         )
         if not isinstance(payload, dict) or str(payload.get("status") or "").strip().lower() != "fresh":
             raise RuntimeError("bank_detail_read_model_not_fresh")

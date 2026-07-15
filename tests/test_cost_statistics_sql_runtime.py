@@ -1435,16 +1435,18 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
 
     def test_cost_statistics_sql_projection_defers_when_bank_detail_tags_are_not_fresh(self) -> None:
         repository = CostStatisticsSaveRecorder()
+        tag_facade = CostStatisticsBankTagFacade(status="refreshing")
         builder = CostStatisticsSqlProjectionBuilder(
             connection=CostStatisticsProjectionConnection(),
             read_model_repository=repository,
-            bank_transaction_tag_read_facade=CostStatisticsBankTagFacade(status="refreshing"),
+            bank_transaction_tag_read_facade=tag_facade,
         )
 
         with self.assertRaisesRegex(RuntimeError, "bank_detail_read_model_not_fresh"):
             builder.rebuild_cost_statistics_read_model_scope("active:2026-05")
 
         self.assertEqual(repository.saved, [])
+        self.assertEqual(tag_facade.source_version_calls[0][1]["reason"], "downstream_bank_tag_read")
 
     def test_cost_statistics_expected_source_versions_include_bank_detail_scope_versions(self) -> None:
         app = object.__new__(Application)
