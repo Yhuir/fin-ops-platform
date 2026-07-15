@@ -33,7 +33,7 @@
 | 关联支出流水候选查询 | `GET /api/oa-pending-payments/bank-transaction-candidates` | `oa_row_ids` 只作为后续提交关联的目标 OA 上下文；候选读取全部支出流水，不按 OA 月份收敛 |
 | 已支付写回/银行关联 | command service | 写操作必须审计并触发 read model scopes；逐行写回只能由 `writeback-paid` 触发，且后端必须重新校验已存在的 Workbench active relation 或 in-progress active pending relation、outflow、金额合计和 `flow_id`；`link-bank-transactions` 成功创建关系后仍可自动写回 |
 | OA projection sync | OA sync/projection services | 输入必须带 source version |
-| Refresh scope | `oa_pending_payment` manifest | month or `all`；`all` 是 fan-out command；SQL all 读取跨月物理行时必须按 `row_id` 去重后再计算 rows/summary；`summary.viewCounts` 按去重行 payload 中的唯一 OA ID 计算，不按配对组行数计算 |
+| Refresh scope | `oa_pending_payment` manifest | month or `all`；`all` 是 fan-out command；SQL all 读取跨月物理行时必须按 `row_id` 去重后再计算 rows/summary；`summary.viewCounts` 按去重行 payload 中的唯一 OA ID 计算，不按配对组行数计算。显式运维 `force_refresh=true` 必须传播到 month shard 并绕过 unchanged fast path，但仍只重建 admission/read model 边界，不改 OA 或 shared relation 事实 |
 | Shared relation source proof | Workbench relation writer | 任一 shared Workbench relation 变化都必须刷新对应月份 `oa_pending_payment`，即使本次关系输入不含 OA；当前 projection source version 使用全局 relation 版本，不能让页面业务行暂时不变却保留旧证明 |
 
 ## 输出 I/O

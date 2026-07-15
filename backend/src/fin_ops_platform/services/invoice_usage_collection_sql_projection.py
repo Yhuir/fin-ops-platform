@@ -113,7 +113,12 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
         self._oa_pending_payment_admission_repository.prune_scopes(current_scope_keys)
         self._oa_pending_payment_read_model_repository.prune_oa_pending_payment_scope_shards(current_scope_keys)
 
-    def rebuild_input_invoice_usage_read_model_scope(self, scope_key: str) -> dict[str, object]:
+    def rebuild_input_invoice_usage_read_model_scope(
+        self,
+        scope_key: str,
+        *,
+        force_refresh: bool = False,
+    ) -> dict[str, object]:
         normalized_scope_key = self._month_scope(scope_key)
         self._require_fresh_workbench_relation_scope(normalized_scope_key)
         source_versions = input_invoice_usage_source_versions(
@@ -122,12 +127,14 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
         relation_source_versions = self._workbench_relation_source_versions_for_scope(normalized_scope_key)
         if relation_source_versions:
             source_versions["workbench_relation_source_versions"] = relation_source_versions
-        unchanged = self._unchanged_scope_result(
-            self._input_invoice_usage_read_model_repository,
-            "list_input_invoice_usage_rows",
-            scope_key=normalized_scope_key,
-            source_versions=source_versions,
-        )
+        unchanged = None
+        if not force_refresh:
+            unchanged = self._unchanged_scope_result(
+                self._input_invoice_usage_read_model_repository,
+                "list_input_invoice_usage_rows",
+                scope_key=normalized_scope_key,
+                source_versions=source_versions,
+            )
         if unchanged is not None:
             return unchanged
         service = self._input_service()
@@ -149,19 +156,26 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
         )
         return {"scope_key": normalized_scope_key, "row_count": len(rows), "source_versions": source_versions}
 
-    def rebuild_output_invoice_collection_read_model_scope(self, scope_key: str) -> dict[str, object]:
+    def rebuild_output_invoice_collection_read_model_scope(
+        self,
+        scope_key: str,
+        *,
+        force_refresh: bool = False,
+    ) -> dict[str, object]:
         normalized_scope_key = self._month_scope(scope_key)
         self._require_fresh_workbench_relation_scope(normalized_scope_key)
         source_versions = output_invoice_collection_source_versions()
         relation_source_versions = self._workbench_relation_source_versions_for_scope(normalized_scope_key)
         if relation_source_versions:
             source_versions["workbench_relation_source_versions"] = relation_source_versions
-        unchanged = self._unchanged_scope_result(
-            self._output_invoice_collection_read_model_repository,
-            "list_output_invoice_collection_rows",
-            scope_key=normalized_scope_key,
-            source_versions=source_versions,
-        )
+        unchanged = None
+        if not force_refresh:
+            unchanged = self._unchanged_scope_result(
+                self._output_invoice_collection_read_model_repository,
+                "list_output_invoice_collection_rows",
+                scope_key=normalized_scope_key,
+                source_versions=source_versions,
+            )
         if unchanged is not None:
             return unchanged
         service = self._output_service()
@@ -183,7 +197,12 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
         )
         return {"scope_key": normalized_scope_key, "row_count": len(rows), "source_versions": source_versions}
 
-    def rebuild_oa_pending_payment_read_model_scope(self, scope_key: str) -> dict[str, object]:
+    def rebuild_oa_pending_payment_read_model_scope(
+        self,
+        scope_key: str,
+        *,
+        force_refresh: bool = False,
+    ) -> dict[str, object]:
         normalized_scope_key = self._month_scope(scope_key)
         payment_statuses_by_flow_id: dict[str, Any] | None = None
         in_progress_projection = self._oa_pending_payment_projection(
@@ -218,12 +237,14 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
         relation_source_versions = self._workbench_relation_source_versions_for_scope(normalized_scope_key)
         if relation_source_versions:
             source_versions["workbench_relation_source_versions"] = relation_source_versions
-        unchanged = self._unchanged_scope_result(
-            self._oa_pending_payment_read_model_repository,
-            "list_oa_pending_payment_rows",
-            scope_key=normalized_scope_key,
-            source_versions=source_versions,
-        )
+        unchanged = None
+        if not force_refresh:
+            unchanged = self._unchanged_scope_result(
+                self._oa_pending_payment_read_model_repository,
+                "list_oa_pending_payment_rows",
+                scope_key=normalized_scope_key,
+                source_versions=source_versions,
+            )
         if unchanged is not None:
             return unchanged
         completed_rows = service._build_rows(

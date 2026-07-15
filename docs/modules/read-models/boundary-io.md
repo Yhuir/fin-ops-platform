@@ -1,6 +1,6 @@
 # Read Model 模块边界与 I/O
 
-日期：2026-07-10
+日期：2026-07-15
 
 ## 模块化状态
 
@@ -37,7 +37,7 @@
 
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
-| Refresh request | 页面 service、writer、worker、API force refresh | 非事务入口必须经 `ReadModelRefreshGateway` normalize/validate/dedupe；显式 force 只允许以安全 metadata `force_refresh=true` 进入 worker，普通写请求不得默认 force |
+| Refresh request | 页面 service、writer、worker、API force refresh | 非事务入口必须经 `ReadModelRefreshGateway` normalize/validate/dedupe；显式 force 只允许以安全 metadata `force_refresh=true` 进入 worker，普通写请求不得默认 force。`invoice-usage-collection` handler 必须消费 event 顶层或 `metadata.force_refresh`，对 `all` fan-out 原样传给 month shards，并让进项使用、销项收款和 OA 待付款 projection 绕过 `source_versions_unchanged`；禁止出现工具已接受 force、worker 却静默按普通 refresh 跳过的断链 |
 | Scope key | manifest/scope policy | 必须符合注册 scope policy |
 | Query freshness request | API/read facade | 必须返回 fresh/stale/refreshing 或等价状态 |
 | Write response target envelope | 页面写 API/service | 会影响 read model 的成功写入必须返回或透出 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets` 和 `operation_barrier_targets`；缺少/未知前端 read model status 必须保持非 fresh |

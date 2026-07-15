@@ -22,6 +22,7 @@ class InvoiceUsageCollectionReadModelRefreshService:
     def handle_runtime_event(self, event: RuntimeQueueEvent) -> dict[str, Any]:
         scope_type = str(event.scope_type or event.payload.get("scope_type") or "").strip()
         scope_key = str(event.scope_key or event.payload.get("scope_key") or event.aggregate_id or "").strip()
+        force_refresh = _event_force_refresh(event)
         if event.event_type == "input_invoice_usage.read_model.refresh":
             if scope_type != "input_invoice_usage" or not scope_key:
                 raise ValueError("Input invoice usage refresh requires scope_type='input_invoice_usage' and scope_key.")
@@ -47,6 +48,7 @@ class InvoiceUsageCollectionReadModelRefreshService:
                     empty_method_name="mark_input_invoice_usage_scope_empty",
                     prune_method_name="prune_input_invoice_usage_scope_shards",
                     shard_reason="input_invoice_usage_month_shard",
+                    force_refresh=force_refresh,
                 )
                 if shard_result is not None:
                     return shard_result
@@ -76,6 +78,7 @@ class InvoiceUsageCollectionReadModelRefreshService:
                     empty_method_name="mark_output_invoice_collection_scope_empty",
                     prune_method_name="prune_output_invoice_collection_scope_shards",
                     shard_reason="output_invoice_collection_month_shard",
+                    force_refresh=force_refresh,
                 )
                 if shard_result is not None:
                     return shard_result
@@ -105,6 +108,7 @@ class InvoiceUsageCollectionReadModelRefreshService:
                     empty_method_name="mark_oa_pending_payment_scope_empty",
                     prune_method_name="prune_oa_pending_payment_scope_shards",
                     shard_reason="oa_pending_payment_month_shard",
+                    force_refresh=force_refresh,
                 )
                 if shard_result is not None:
                     return shard_result
@@ -113,7 +117,7 @@ class InvoiceUsageCollectionReadModelRefreshService:
             raise ValueError(f"Unsupported invoice relation read model event type: {event.event_type}")
         if not callable(rebuild):
             raise RuntimeError(f"Projection builder does not expose rebuild method for {scope_type}.")
-        result = rebuild(scope_key)
+        result = rebuild(scope_key, force_refresh=force_refresh)
         payload = result if isinstance(result, dict) else {"scope_key": scope_key}
         self._complete_dirty_scope(event, scope_type=scope_type, scope_key=scope_key)
         return payload
@@ -128,6 +132,7 @@ class InvoiceUsageCollectionReadModelRefreshService:
         empty_method_name: str,
         prune_method_name: str,
         shard_reason: str,
+        force_refresh: bool,
     ) -> dict[str, Any] | None:
         list_shards = getattr(self._projection_builder, list_method_name, None)
         refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
@@ -141,7 +146,12 @@ class InvoiceUsageCollectionReadModelRefreshService:
             mark_empty = getattr(self._projection_builder, empty_method_name, None)
             if callable(mark_empty):
                 mark_empty(scope_key)
-        enqueued_scope_keys = refresh_gateway.enqueue_many(scope_type, shard_keys, reason=shard_reason)
+        enqueued_scope_keys = refresh_gateway.enqueue_many(
+            scope_type,
+            shard_keys,
+            reason=shard_reason,
+            metadata={"force_refresh": True} if force_refresh else None,
+        )
         self._complete_dirty_scope(event, scope_type=scope_type, scope_key=scope_key)
         return {"scope_key": scope_key, "enqueued_scope_keys": enqueued_scope_keys, "row_count": 0}
 
@@ -178,3 +188,10 @@ class InvoiceUsageCollectionReadModelRefreshService:
 
 def _invoice_scope_requires_expansion(scope_key: str) -> bool:
     return not MONTH_SCOPE_RE.match(str(scope_key or "").strip())
+
+
+def _event_force_refresh(event: RuntimeQueueEvent) -> bool:
+    if event.payload.get("force_refresh") is True:
+        return True
+    metadata = event.payload.get("metadata")
+    return isinstance(metadata, dict) and metadata.get("force_refresh") is True
