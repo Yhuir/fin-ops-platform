@@ -39,10 +39,19 @@ from fin_ops_platform.services.workbench_pair_relation_service import WorkbenchP
 class QueueRecorder:
     def __init__(self) -> None:
         self.refreshes: list[tuple[str, str, str]] = []
+        self.refresh_metadata: list[dict[str, object] | None] = []
         self.completed: list[tuple[str, str, str, int | None]] = []
 
-    def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
+    def enqueue_read_model_refresh(
+        self,
+        *,
+        scope_type: str,
+        scope_key: str,
+        reason: str,
+        metadata: dict[str, object] | None = None,
+    ) -> None:
         self.refreshes.append((scope_type, scope_key, reason))
+        self.refresh_metadata.append(dict(metadata) if isinstance(metadata, dict) else None)
 
     def complete_read_model_refresh(
         self,
@@ -2507,6 +2516,48 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(result["source_versions"], expected_source_versions)
         self.assertIsNone(read_repository.saved_input)
 
+    def test_projection_builder_force_refresh_bypasses_unchanged_invoice_relation_scopes(self) -> None:
+        read_repository = RecordingInvoiceRelationReadRepository()
+        expected_oa_source_versions = {
+            **oa_pending_payment_source_versions(),
+            "completed_oa_signature": oa_pending_payment_records_signature([]),
+            "in_progress_admission_signature": oa_pending_payment_records_signature([]),
+            "in_progress_admission_count": 0,
+        }
+        read_repository.existing_source_versions_by_method.update(
+            {
+                "list_input_invoice_usage_rows": input_invoice_usage_source_versions(),
+                "list_output_invoice_collection_rows": output_invoice_collection_source_versions(),
+                "list_oa_pending_payment_rows": expected_oa_source_versions,
+            }
+        )
+        builder = InvoiceUsageCollectionSqlProjectionBuilder(
+            connection=EmptyTransactionConnection(),
+            workbench_relation_read_facade=FreshEmptyWorkbenchRelationFacade(),
+        )
+        builder._core_repository = ProjectionCoreRepository(
+            invoices=[
+                self._invoice("input-invoice-1", InvoiceType.INPUT),
+                self._invoice("output-invoice-1", InvoiceType.OUTPUT),
+            ]
+        )
+        builder._oa_projection_repository = EmptyOAProjectionRepository()
+        builder._read_repository = read_repository
+        builder._input_invoice_usage_read_model_repository = read_repository
+        builder._output_invoice_collection_read_model_repository = read_repository
+        builder._oa_pending_payment_read_model_repository = read_repository
+
+        input_result = builder.rebuild_input_invoice_usage_read_model_scope("2026-05", force_refresh=True)
+        output_result = builder.rebuild_output_invoice_collection_read_model_scope("2026-05", force_refresh=True)
+        oa_result = builder.rebuild_oa_pending_payment_read_model_scope("2026-05", force_refresh=True)
+
+        self.assertNotIn("skip_reason", input_result)
+        self.assertNotIn("skip_reason", output_result)
+        self.assertNotIn("skip_reason", oa_result)
+        self.assertIsNotNone(read_repository.saved_input)
+        self.assertIsNotNone(read_repository.saved_output)
+        self.assertIsNotNone(read_repository.saved_oa)
+
     def test_invoice_page_projections_defer_until_relation_scope_is_fresh(self) -> None:
         read_repository = RecordingInvoiceRelationReadRepository()
         builder = InvoiceUsageCollectionSqlProjectionBuilder(
@@ -2971,6 +3022,82 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
             ],
         )
         self.assertEqual(queue.completed, [("tenant-a", "input_invoice_usage", "all", 7)])
+
+    def test_refresh_handler_propagates_force_refresh_to_month_rebuild(self) -> None:
+        class FakeBuilder:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, bool]] = []
+
+            def rebuild_input_invoice_usage_read_model_scope(
+                self,
+                scope_key: str,
+                *,
+                force_refresh: bool = False,
+            ) -> dict[str, object]:
+                self.calls.append((scope_key, force_refresh))
+                return {"scope_key": scope_key, "row_count": 1}
+
+        queue = QueueRecorder()
+        builder = FakeBuilder()
+        service = InvoiceUsageCollectionReadModelRefreshService(
+            projection_builder=builder,
+            queue_repository=queue,
+        )
+        event = RuntimeQueueEvent(
+            event_id="event-force-month",
+            tenant_id="default",
+            event_type="input_invoice_usage.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id="2025-04",
+            scope_type="input_invoice_usage",
+            scope_key="2025-04",
+            dedupe_key=None,
+            payload={"scope_key": "2025-04", "metadata": {"force_refresh": True}},
+            attempts=1,
+            status="processing",
+            source_version=11,
+        )
+
+        result = service.handle_runtime_event(event)
+
+        self.assertEqual(result, {"scope_key": "2025-04", "row_count": 1})
+        self.assertEqual(builder.calls, [("2025-04", True)])
+        self.assertEqual(queue.completed, [("default", "input_invoice_usage", "2025-04", 11)])
+
+    def test_refresh_handler_propagates_force_refresh_to_all_scope_shards(self) -> None:
+        class FakeBuilder:
+            @staticmethod
+            def list_input_invoice_usage_scope_shards(_scope_key: str) -> list[str]:
+                return ["2025-04", "2025-12"]
+
+            @staticmethod
+            def prune_input_invoice_usage_scope_shards(_scope_keys: list[str]) -> None:
+                return None
+
+        queue = QueueRecorder()
+        service = InvoiceUsageCollectionReadModelRefreshService(
+            projection_builder=FakeBuilder(),
+            queue_repository=queue,
+        )
+        event = RuntimeQueueEvent(
+            event_id="event-force-all",
+            tenant_id="default",
+            event_type="input_invoice_usage.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id="all",
+            scope_type="input_invoice_usage",
+            scope_key="all",
+            dedupe_key=None,
+            payload={"scope_key": "all", "metadata": {"force_refresh": True}},
+            attempts=1,
+            status="processing",
+            source_version=12,
+        )
+
+        result = service.handle_runtime_event(event)
+
+        self.assertEqual(result["enqueued_scope_keys"], ["2025-04", "2025-12"])
+        self.assertEqual(queue.refresh_metadata, [{"force_refresh": True}, {"force_refresh": True}])
 
     def test_refresh_handler_requires_projection_builder_boundary(self) -> None:
         with self.assertRaisesRegex(ValueError, "projection_builder is required"):
