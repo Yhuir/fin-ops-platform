@@ -25,6 +25,7 @@
 | canonical rows | OA / bank / invoice repositories | 每行必须有稳定 `id`、`type`、`object_identity_key`；重复 typed identity fail fast |
 | OA projection rows | PostgreSQL OA projection repository | 读取边界把持久化历史值 `section=open` 和缺失值归一化为 `unpaired`；只有 `paired|unpaired` 可进入 Workbench core，未知值 fail fast |
 | active relations | workbench-relations | 只接受 `status=active` 的正式关系；row ids 必须存在且不可跨 case 重叠 |
+| row overrides / exception cases | workbench control repositories | 仅对没有 active formal relation ownership 的 row 生效；优先级为 formal relation > override > exception，projection 与 Page Audit 必须共用该合同 |
 | list query | Workbench API | `month`、zone=`paired|unpaired`、分页、搜索、排序、generation/source versions |
 | row/group detail | Workbench read repository | 必须固定到同一 active generation；miss 不得合成占位行或回退旧 snapshot |
 | confirm/withdraw command | Workbench action route | canonical row ids、actor、tenant、idempotency、expected versions、preview identity |
@@ -86,6 +87,8 @@ Release A 已删除运行时链路且禁止恢复；旧表物理存储只为短�
 | Tests | `tests/test_workbench_*.py`、`web/src/test/RelationGroupGrid.test.tsx`、`web/src/test/Workbench*.test.*`、`web/e2e/workbench-*.spec.ts` |
 
 `WorkbenchRelationGroupingService` 只接收 canonical rows 与 active formal relations，并输出页面 `paired/unpaired` 精确分区；`WorkbenchRelationPreviewGroupingService` 只接收写操作预览所需的 formal relations、selected rows 和显式 ungrouped mode，并输出预览 groups。二者都是无 I/O 的纯投影边界；route/server 只负责组装依赖，不能重新实现 membership、隐藏未分组行或读取 repository/HTTP 状态。
+
+正式关系是关系 ownership 的唯一事实源。projection builder 必须在读取 override/exception 前先从已经加载的 active relations 计算 member row ids，并从 control I/O 集合排除这些成员；不能先把旧 candidate/exception ownership 写入正式成员，再依靠字段覆盖或 Audit 豁免掩盖冲突。未配对 row 仍按 active override > active exception 投影，两个查询继续由既有 repository SQL 边界批量完成。
 
 ## 数据恢复与回滚
 

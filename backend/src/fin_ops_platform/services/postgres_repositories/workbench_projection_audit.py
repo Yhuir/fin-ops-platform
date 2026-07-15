@@ -304,7 +304,13 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
     (
         r"""
         /* check: workbench_override_exception_fields */
-        with active_months as (
+        with active_relation_members as (
+            select distinct member.row_id
+            from app.workbench_pair_relations relation
+            join lateral unnest(relation.row_ids) member(row_id) on true
+            where relation.status = 'active'
+        ),
+        active_months as (
             select distinct on (scope_key) generation_id, scope_key
             from read_model.workbench_generations
             where tenant_id = %s
@@ -357,6 +363,11 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
             )
             left join projected on projected.row_id = override.row_id
             where override.status = 'active'
+              and not exists (
+                  select 1
+                  from active_relation_members relation_member
+                  where relation_member.row_id = override.row_id
+              )
               and projected.payload is not null
               and not (
                     field.value = 'null'::jsonb
@@ -371,6 +382,11 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
             from app.workbench_exception_cases exception
             join lateral unnest(exception.row_ids) member(row_id) on true
             where exception.status in ('open', 'ignored', 'reopened', 'legacy_confirmed', 'confirmed')
+              and not exists (
+                  select 1
+                  from active_relation_members relation_member
+                  where relation_member.row_id = member.row_id
+              )
               and not exists (
                   select 1 from app.workbench_row_overrides override
                   where override.row_id = member.row_id and override.status = 'active'

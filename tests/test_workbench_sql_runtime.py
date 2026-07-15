@@ -7768,6 +7768,88 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(row["relation_mode"], "pending_input_invoice")
         self.assertNotIn("exception_case_id", row)
 
+    def test_sql_projection_formal_relation_wins_over_legacy_row_controls(self) -> None:
+        candidate_case_id = "candidate:025bf390496affde60b984e7a06785ae174cb0d13fc052559b005a71380dcaf4"
+        recorder = ReadModelSnapshotRecorder()
+        connection = WorkbenchProjectionSettingsConnection(
+            overrides=[
+                {
+                    "row_id": row_id,
+                    "override_payload": {
+                        "case_id": None,
+                        "relation_mode": "pending_input_invoice",
+                        "ignored": True,
+                        "handled_exception": False,
+                    },
+                }
+                for row_id in ("oa-pay-1982", "txn_imported_1258")
+            ],
+            exception_cases=[
+                {
+                    "case_id": candidate_case_id,
+                    "raw_payload": {
+                        "case_id": candidate_case_id,
+                        "status": "confirmed",
+                        "exception_code": "pending_input_invoice",
+                        "exception_label": "待找进项发票",
+                        "category": "oa_bank",
+                        "row_ids": ["oa-pay-1982", "txn_imported_1258"],
+                        "row_types": ["oa", "bank"],
+                        "scope_months": ["2026-01"],
+                    },
+                }
+            ],
+        )
+        builder = WorkbenchSqlProjectionBuilder(connection=connection, read_model_repository=recorder)
+        rows_by_id = {
+            "oa-pay-1982": {
+                "id": "oa-pay-1982",
+                "type": "oa",
+                "source_kind": "oa",
+                "amount": "100.00",
+            },
+            "txn_imported_1258": {
+                "id": "txn_imported_1258",
+                "type": "bank",
+                "source_kind": "bank_transaction",
+                "debit_amount": "100.00",
+            },
+            "inv_imported_0208": {
+                "id": "inv_imported_0208",
+                "type": "invoice",
+                "source_kind": "invoice",
+                "total_with_tax": "100.00",
+            },
+        }
+        relation = {
+            "case_id": candidate_case_id,
+            "relation_mode": "manual_confirmed",
+            "row_ids": ["oa-pay-1982", "txn_imported_1258", "inv_imported_0208"],
+            "row_types": ["oa", "bank", "invoice"],
+        }
+
+        payload = builder._group_payload("2026-01", with_test_object_identities(rows_by_id), [relation])
+
+        group = payload["paired"]["groups"][0]
+        self.assertEqual(group["case_id"], candidate_case_id)
+        self.assertEqual(group["relation_mode"], "manual_confirmed")
+        member_rows = [*group["oa_rows"], *group["bank_rows"], *group["invoice_rows"]]
+        self.assertEqual({row["case_id"] for row in member_rows}, {candidate_case_id})
+        self.assertEqual({row["relation_mode"] for row in member_rows}, {"manual_confirmed"})
+        for row in member_rows:
+            self.assertNotIn("exception_case_id", row)
+            self.assertNotIn("ignored", row)
+            self.assertNotIn("handled_exception", row)
+        persisted_rows = {
+            row["id"]: _workbench_row_payload_for_write(row)
+            for row in PostgresReadModelRepository._iter_workbench_rows(payload)
+        }
+        for row_id in ("oa-pay-1982", "txn_imported_1258"):
+            self.assertEqual(persisted_rows[row_id]["case_id"], candidate_case_id)
+            self.assertEqual(persisted_rows[row_id]["relation_mode"], "manual_confirmed")
+            self.assertNotIn("ignored", persisted_rows[row_id])
+            self.assertNotIn("handled_exception", persisted_rows[row_id])
+
 
 if __name__ == "__main__":
     unittest.main()

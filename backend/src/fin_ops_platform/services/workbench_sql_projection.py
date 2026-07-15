@@ -719,7 +719,16 @@ class WorkbenchSqlProjectionBuilder:
         relations: list[dict[str, Any]],
     ) -> dict[str, Any]:
         working_rows_by_id = {row_id: dict(row) for row_id, row in rows_by_id.items()}
-        self._apply_workbench_overrides_and_exceptions(working_rows_by_id)
+        formal_relation_row_ids = {
+            normalized_row_id
+            for relation in relations
+            for row_id in list(relation.get("row_ids") or [])
+            if (normalized_row_id := str(row_id).strip())
+        }
+        self._apply_workbench_overrides_and_exceptions(
+            working_rows_by_id,
+            formal_relation_row_ids=formal_relation_row_ids,
+        )
         etc_summary_rows_by_external_batch_id = self._etc_invoice_summary_rows_for_relations(relations)
         for relation in relations:
             relation_row_ids = [row_id for row_id in list(relation.get("row_ids") or []) if row_id in working_rows_by_id]
@@ -841,10 +850,17 @@ class WorkbenchSqlProjectionBuilder:
         )
         return _int_value(row.get("source_version") if isinstance(row, dict) else None, 0)
 
-    def _apply_workbench_overrides_and_exceptions(self, rows_by_id: dict[str, dict[str, Any]]) -> None:
+    def _apply_workbench_overrides_and_exceptions(
+        self,
+        rows_by_id: dict[str, dict[str, Any]],
+        *,
+        formal_relation_row_ids: set[str] | None = None,
+    ) -> None:
         if not rows_by_id:
             return
-        row_ids = set(rows_by_id)
+        row_ids = set(rows_by_id) - set(formal_relation_row_ids or ())
+        if not row_ids:
+            return
         row_overrides = self._row_overrides_for_rows(row_ids)
         exception_cases = self._active_exception_cases_for_rows(row_ids)
         if not row_overrides and not exception_cases:
@@ -862,7 +878,7 @@ class WorkbenchSqlProjectionBuilder:
             case_row_ids = [
                 str(row_id).strip()
                 for row_id in list(case_payload.get("row_ids") or [])
-                if str(row_id).strip() in rows_by_id
+                if str(row_id).strip() in row_ids
                 and str(row_id).strip() not in override_row_ids
             ]
             if not case_row_ids:
