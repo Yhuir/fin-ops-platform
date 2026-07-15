@@ -273,7 +273,7 @@ class CostStatisticsSqlProjectionBuilder:
             return None
         payload = source_versions_for_scope_keys(
             [month],
-            require_fresh=True,
+            require_fresh=False,
             reason="downstream_bank_tag_read",
         )
         if not isinstance(payload, dict) or str(payload.get("status") or "").strip().lower() != "fresh":
@@ -520,7 +520,7 @@ class CostStatisticsSqlProjectionBuilder:
             return []
         payload = list_by_month(
             month,
-            require_fresh=True,
+            require_fresh=False,
             reason="downstream_bank_tag_read",
         )
         if not isinstance(payload, dict) or str(payload.get("status") or "").strip().lower() != "fresh":
@@ -566,8 +566,8 @@ class CostStatisticsSqlProjectionBuilder:
 
     def _bank_tag_contexts_for_rows(self, bank_rows: list[dict[str, Any]], *, month: str) -> dict[str, dict[str, Any]]:
         facade = self._bank_transaction_tag_read_facade
-        category_records_by_transaction_ids = getattr(facade, "category_records_by_transaction_ids", None)
-        if not callable(category_records_by_transaction_ids):
+        get_by_transaction_ids = getattr(facade, "get_by_transaction_ids", None)
+        if not callable(get_by_transaction_ids):
             return {}
         transaction_ids = []
         seen: set[str] = set()
@@ -578,19 +578,23 @@ class CostStatisticsSqlProjectionBuilder:
                 seen.add(transaction_id)
         if not transaction_ids:
             return {}
-        records = category_records_by_transaction_ids(
+        payload = get_by_transaction_ids(
             transaction_ids,
-            require_fresh=True,
+            require_fresh=False,
             reason="downstream_bank_tag_read",
             month_hint=month,
             scope_keys_hint=[month],
         )
-        if not isinstance(records, dict):
+        if not isinstance(payload, dict):
             return {}
+        if str(payload.get("status") or "").strip().lower() != "fresh":
+            raise RuntimeError("bank_detail_read_model_not_fresh")
         return {
-            str(transaction_id): bank_tag_context_from_row(record)
-            for transaction_id, record in records.items()
-            if isinstance(record, dict)
+            transaction_id: bank_tag_context_from_row(row)
+            for row in list(payload.get("rows") or [])
+            if isinstance(row, dict)
+            for transaction_id in [str(row.get("transaction_id") or row.get("id") or "").strip()]
+            if transaction_id
         }
 
     def _cost_entries_from_materialized_shards(

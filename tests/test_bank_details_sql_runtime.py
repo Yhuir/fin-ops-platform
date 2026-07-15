@@ -741,6 +741,43 @@ class BankTransactionTagReadFacadeTests(unittest.TestCase):
         self.assertFalse(payload["refresh_enqueued"])
         self.assertEqual(repository.month_calls[0]["category_codes"], [])
 
+    def test_non_fresh_dependency_reads_do_not_enqueue_when_projection_owns_retry_boundary(self) -> None:
+        queue = CaptureRuntimeQueueRepository()
+        non_fresh_payload = {
+            "read_model_status": "refreshing",
+            "rows": [bank_detail_projected_row("txn-001")["payload"]],
+            "source_versions": {"bank_detail": 8},
+            "read_model_scope_keys": ["2026-05"],
+            "read_model_scope_signatures": {
+                "2026-05": {"schema_version": BANK_DETAIL_READ_MODEL_SCHEMA_VERSION}
+            },
+        }
+        repository = FakeBankTaggedReadRepository(
+            by_ids_payload=non_fresh_payload,
+            scope_summary_payload=non_fresh_payload,
+        )
+        facade = BankTransactionTagReadFacade(
+            read_model_repository=repository,
+            queue_repository=queue,
+        )
+
+        by_ids = facade.get_by_transaction_ids(
+            ["txn-001"],
+            require_fresh=False,
+            reason="downstream_bank_tag_read",
+            month_hint="2026-05",
+            scope_keys_hint=["2026-05"],
+        )
+        source_versions = facade.source_versions_for_scope_keys(
+            ["2026-05"],
+            require_fresh=False,
+            reason="downstream_bank_tag_read",
+        )
+
+        self.assertEqual(by_ids["status"], "refreshing")
+        self.assertEqual(source_versions["status"], "refreshing")
+        self.assertEqual(queue.enqueued, [])
+
 
 class BankDetailSqlRepositoryTests(unittest.TestCase):
     def test_bank_detail_read_model_port_excludes_unrelated_read_model_methods(self) -> None:

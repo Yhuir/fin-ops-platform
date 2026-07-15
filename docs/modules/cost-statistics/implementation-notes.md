@@ -32,6 +32,15 @@
 
 ## 历史记录
 
+## 2026-07-15 - 银行明细 dependency read 纯读边界
+
+- 生产证据：v6 精确 SHA `920a5a27a08afa23743c811248e591b7dfe702b2` 部署和 Workbench 重建成功，但约 38 秒时两个成本月份事件已达 22 attempts；近 15 分钟指标记录 357 次 bank-detail 完成和 173 次 cost-statistics 完成，bank-detail p95 仅约 434ms，排除“单次银行投影耗时过长”。release 已立即回滚，旧 Workbench 重建后 queue/dirty scope 排空并延迟复核稳定。
+- 最终根因：active coalescing 只能看 enqueue 时刻是否仍有 pending/processing outbox，无法原子覆盖“cost 在 T1 读到 refreshing、bank worker 在 T2 完成并 ack、cost 在 T3 基于过时读结果 enqueue”的 TOCTOU 窗口。reason 统一只能缩小竞态，不能消除读侧写 I/O。
+- 修复：三个 cost projection bank-detail 读取统一使用 `require_fresh=False`；projection 自己检查 `status=fresh` 并 fail-closed，`RuntimeWorker` 成为唯一 dependency refresh 调度 owner。transaction tag 路径改用 facade 的 `get_by_transaction_ids(...)` 读取完整 status envelope，再从同一 fresh payload 归一化标签。
+- 边界：不改 API、业务金额、read model schema、repository、gateway、worker 状态机、数据库或 migration；删除的是 projection read 隐含 enqueue 行为，不新增兼容 fallback。
+- 测试：完整月份投影锁定三个 pure-read 参数与金额/标签输出；非 fresh projection 不写成本 read model；真实 facade 锁定 non-fresh diagnostic reads 不写 queue。
+- 生产门禁：main 精确 SHA CI 后重新部署，必须证明 bank-detail/cost sample 不再异常放大，durable queue 首次排空后延迟复核仍为空，再执行 Workbench、bank-details、cost-statistics Audit 和 520 关系验证。
+
 ## 2026-07-15 - 银行明细三个 fresh read gate 完整收敛
 
 - 生产证据：v5 部署后 Workbench 重建成功，但 `cost_statistics active/all:2026-07` 在约 110 秒内达到 140 attempts；新 release 已立即回滚，旧 release 重建后恢复 `pass/fresh/drained` 和空 durable queue。
