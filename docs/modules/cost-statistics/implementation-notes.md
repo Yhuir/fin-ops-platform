@@ -32,10 +32,20 @@
 
 ## 历史记录
 
+## 2026-07-15 - 单次跨月银行明细快照边界
+
+- 生产证据：v7 精确 main SHA `a62393663f5fd38a0bd150689e61e7c92a985179` 的 branch/main CI 与官方部署、19-scope Workbench rehydrate 均成功，520 元 OA/发票正式关系可见且 Workbench 无完整性问题；但两个 `2026-07` 成本事件在约 52 秒已达 18/17 attempts，约 71 秒升至 48/47，证明三个无写副作用的 bank-detail 读取仍会在一次 projection 内观察到不同 freshness 时点。release 已立即回滚到 `etc-import-e5d6e6a4e-20260714-visibility`，旧 Workbench 重建后 queue/dirty scope 全部排空，failed job 为 0。
+- 根因：v7 消除了 read-side enqueue TOCTOU，但 cost month 仍依次读取 source versions、正式关系流水标签和目标月全流水。并发 fan-out 下三个独立 status gate 不能组成一个一致性依赖快照，runtime worker 因而持续 defer 同一成本事件。
+- 修复：先从 Workbench active generation 读取正式 paired groups 和关系流水 ID，再通过 `BankTransactionTagReadFacade.snapshot_for_month(...)` 进行唯一一次 dependency I/O。repository 在 `REPEATABLE READ READ ONLY` transaction 内返回目标月 rows、关系引用的跨月 rows、全部涉及 scope 的 freshness/signatures；projection 纯内存拆分，目标月 rows 生成全流水统计，完整 rows 只补关系标签。
+- 跨月边界：正式关系可把其他月份的成员补入当前 Workbench shard；快照因此必须接收关系流水 ID，禁止只读目标月后把合法跨月成员静默降为未分类。同时跨月补充 rows 不得进入目标月 `bank_flow_time_rows`，避免污染月份统计。成本 source-version fresh gate 仍绑定目标月 bank-detail signature，保持现有 API/Audit 合同不变。
+- 旧链路删除：cost projection 不再调用 `source_versions_for_scope_keys(...)`、`get_by_transaction_ids(...)` 或 `list_by_month(...)`；三次独立读取和旧 cost-specific enqueue reason 均不属于新链路。现有 facade 方法可继续服务其他 owner，不是成本统计兼容 fallback。
+- 测试：成本 projection 锁定唯一 snapshot call、跨月标签可用、跨月补充行不进入目标月全流水、非 fresh 不保存；facade/repository 测试锁定一次快照 I/O、目标月/跨月 rows 分离、全部 scope freshness 与无 read-side enqueue。
+- 生产门禁：v8 exact-SHA branch/main CI 后只允许官方部署；Workbench rehydrate 后 durable queue 首次排空还必须延迟至少 120 秒复核仍为空，再执行 Workbench、bank-details、cost-statistics Audit、520 关系和 ETC/migration/data count 复验。任一 cost attempts 持续增长或 queue 不收敛立即回滚。
+
 ## 2026-07-15 - 银行明细 dependency read 纯读边界
 
 - 生产证据：v6 精确 SHA `920a5a27a08afa23743c811248e591b7dfe702b2` 部署和 Workbench 重建成功，但约 38 秒时两个成本月份事件已达 22 attempts；近 15 分钟指标记录 357 次 bank-detail 完成和 173 次 cost-statistics 完成，bank-detail p95 仅约 434ms，排除“单次银行投影耗时过长”。release 已立即回滚，旧 Workbench 重建后 queue/dirty scope 排空并延迟复核稳定。
-- 最终根因：active coalescing 只能看 enqueue 时刻是否仍有 pending/processing outbox，无法原子覆盖“cost 在 T1 读到 refreshing、bank worker 在 T2 完成并 ack、cost 在 T3 基于过时读结果 enqueue”的 TOCTOU 窗口。reason 统一只能缩小竞态，不能消除读侧写 I/O。
+- v7 根因结论：active coalescing 只能看 enqueue 时刻是否仍有 pending/processing outbox，无法原子覆盖“cost 在 T1 读到 refreshing、bank worker 在 T2 完成并 ack、cost 在 T3 基于过时读结果 enqueue”的 TOCTOU 窗口。reason 统一只能缩小竞态，不能消除读侧写 I/O；v7 生产进一步证明，纯读之后三个独立 snapshot 时点仍不足以保证一次 projection 收敛。
 - 修复：三个 cost projection bank-detail 读取统一使用 `require_fresh=False`；projection 自己检查 `status=fresh` 并 fail-closed，`RuntimeWorker` 成为唯一 dependency refresh 调度 owner。transaction tag 路径改用 facade 的 `get_by_transaction_ids(...)` 读取完整 status envelope，再从同一 fresh payload 归一化标签。
 - 边界：不改 API、业务金额、read model schema、repository、gateway、worker 状态机、数据库或 migration；删除的是 projection read 隐含 enqueue 行为，不新增兼容 fallback。
 - 测试：完整月份投影锁定三个 pure-read 参数与金额/标签输出；非 fresh projection 不写成本 read model；真实 facade 锁定 non-fresh diagnostic reads 不写 queue。

@@ -474,6 +474,7 @@ class CostStatisticsBankTagFacade:
         self.source_version_calls: list[tuple[list[str], dict[str, object]]] = []
         self.category_calls: list[tuple[list[str], dict[str, object]]] = []
         self.month_calls: list[tuple[str, dict[str, object]]] = []
+        self.snapshot_calls: list[tuple[str, dict[str, object]]] = []
 
     def source_versions_for_scope_keys(self, scope_keys: list[str], **kwargs: object) -> dict[str, object]:
         self.source_version_calls.append((list(scope_keys), dict(kwargs)))
@@ -501,34 +502,61 @@ class CostStatisticsBankTagFacade:
 
     def list_by_month(self, month: str, **kwargs: object) -> dict[str, object]:
         self.month_calls.append((month, dict(kwargs)))
+        return self._snapshot_payload()
+
+    def snapshot_for_month(self, month: str, **kwargs: object) -> dict[str, object]:
+        self.snapshot_calls.append((month, dict(kwargs)))
+        return self._snapshot_payload()
+
+    def _snapshot_payload(self) -> dict[str, object]:
+        month_rows = [
+            {
+                "transaction_id": "bank-expense",
+                "trade_time": "2026-05-04 10:00:00",
+                "direction": "expense",
+                "amount": "20.00",
+                "counterparty_name": "供应商",
+                "bank_name": "工商银行",
+                "account_last4": "0001",
+                "summary": "采购",
+                "effective_category_code": "project_material",
+                "effective_category_label": "设备材料",
+            },
+            {
+                "transaction_id": "bank-income",
+                "trade_time": "2026-05-05 10:00:00",
+                "direction": "income",
+                "amount": "30.00",
+                "counterparty_name": "客户",
+                "bank_name": "工商银行",
+                "account_last4": "0001",
+                "summary": "回款",
+                "effective_category_code": "project_collection",
+                "effective_category_label": "项目回款",
+            },
+        ]
         return {
             "status": self.status,
+            "source_versions": {
+                "2026-04": {"bank_detail_scope_version": "bank-detail-v1"},
+                "2026-05": {"bank_detail_scope_version": "bank-detail-v2"},
+            },
+            "read_model_scope_signatures": {
+                "2026-04": {"source_versions": {"bank_detail_scope_version": "bank-detail-v1"}},
+                "2026-05": {"source_versions": {"bank_detail_scope_version": "bank-detail-v2"}},
+            },
             "rows": [
                 {
-                    "transaction_id": "bank-expense",
-                    "trade_time": "2026-05-04 10:00:00",
-                    "direction": "expense",
-                    "amount": "20.00",
-                    "counterparty_name": "供应商",
-                    "bank_name": "工商银行",
-                    "account_last4": "0001",
-                    "summary": "采购",
+                    "transaction_id": "bank-1",
                     "effective_category_code": "project_material",
                     "effective_category_label": "设备材料",
+                    "effective_category_primary_label": "项目开销",
+                    "effective_category_sub_label": "设备材料",
+                    "effective_category_label_path": ["项目开销", "设备材料"],
                 },
-                {
-                    "transaction_id": "bank-income",
-                    "trade_time": "2026-05-05 10:00:00",
-                    "direction": "income",
-                    "amount": "30.00",
-                    "counterparty_name": "客户",
-                    "bank_name": "工商银行",
-                    "account_last4": "0001",
-                    "summary": "回款",
-                    "effective_category_code": "project_collection",
-                    "effective_category_label": "项目回款",
-                },
+                *month_rows,
             ],
+            "month_rows": month_rows,
         }
 
 
@@ -1384,21 +1412,20 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(payload["bank_flow_summary"]["expense_amount"], "20.00")
         self.assertEqual(payload["bank_flow_summary"]["income_amount"], "30.00")
-        self.assertNotIn("direction", tag_facade.month_calls[0][1])
+        self.assertNotIn("direction", tag_facade.snapshot_calls[0][1])
         self.assertEqual([row["transaction_id"] for row in payload["time_rows"]], ["bank-1"])
         self.assertEqual(payload["time_rows"][0]["group_id"], "group-1")
         self.assertEqual(payload["time_rows"][0]["project_id"], "P-A")
         self.assertEqual(payload["time_rows"][0]["bank_tag_primary_label"], "项目开销")
         self.assertEqual(payload["time_rows"][0]["bank_tag_sub_label"], "设备材料")
         self.assertEqual(payload["time_rows"][0]["bank_tag_label_path"], ["项目开销", "设备材料"])
-        self.assertEqual(tag_facade.source_version_calls[0][0], ["2026-05"])
-        self.assertEqual(tag_facade.category_calls[0][0], ["bank-1"])
-        self.assertEqual(tag_facade.source_version_calls[0][1]["reason"], "downstream_bank_tag_read")
-        self.assertEqual(tag_facade.category_calls[0][1]["reason"], "downstream_bank_tag_read")
-        self.assertEqual(tag_facade.month_calls[0][1]["reason"], "downstream_bank_tag_read")
-        self.assertEqual(tag_facade.source_version_calls[0][1]["require_fresh"], False)
-        self.assertEqual(tag_facade.category_calls[0][1]["require_fresh"], False)
-        self.assertEqual(tag_facade.month_calls[0][1]["require_fresh"], False)
+        self.assertEqual(tag_facade.source_version_calls, [])
+        self.assertEqual(tag_facade.category_calls, [])
+        self.assertEqual(tag_facade.month_calls, [])
+        self.assertEqual(len(tag_facade.snapshot_calls), 1)
+        self.assertEqual(tag_facade.snapshot_calls[0][1]["include_transaction_ids"], ["bank-1"])
+        self.assertEqual(tag_facade.snapshot_calls[0][1]["reason"], "downstream_bank_tag_read")
+        self.assertEqual(tag_facade.snapshot_calls[0][1]["require_fresh"], False)
         self.assertEqual(
             snapshot["read_models"]["active:2026-05"]["source_versions"]["bank_detail_source_versions"],
             {"bank_detail_scope_version": "bank-detail-v2"},
@@ -1450,12 +1477,19 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
             bank_transaction_tag_read_facade=tag_facade,
         )
 
-        with self.assertRaisesRegex(RuntimeError, "bank_detail_read_model_not_fresh"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "bank_detail_read_model_not_fresh: operation=month_snapshot status=refreshing scope_keys=2026-05",
+        ):
             builder.rebuild_cost_statistics_read_model_scope("active:2026-05")
 
         self.assertEqual(repository.saved, [])
-        self.assertEqual(tag_facade.source_version_calls[0][1]["reason"], "downstream_bank_tag_read")
-        self.assertEqual(tag_facade.source_version_calls[0][1]["require_fresh"], False)
+        self.assertEqual(tag_facade.source_version_calls, [])
+        self.assertEqual(tag_facade.category_calls, [])
+        self.assertEqual(tag_facade.month_calls, [])
+        self.assertEqual(len(tag_facade.snapshot_calls), 1)
+        self.assertEqual(tag_facade.snapshot_calls[0][1]["reason"], "downstream_bank_tag_read")
+        self.assertEqual(tag_facade.snapshot_calls[0][1]["require_fresh"], False)
 
     def test_cost_statistics_expected_source_versions_include_bank_detail_scope_versions(self) -> None:
         app = object.__new__(Application)

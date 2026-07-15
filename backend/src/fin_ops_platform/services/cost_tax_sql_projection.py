@@ -85,7 +85,12 @@ class CostStatisticsSqlProjectionBuilder:
             project_scope, month = _parse_cost_scope_key(scope_key)
             if month == "all":
                 raise ValueError("month scope rebuild requires a concrete YYYY-MM scope.")
-            source_versions = self._source_versions(month)
+            workbench_groups = self._cost_groups_from_workbench(month)
+            bank_detail_payload = self._bank_detail_snapshot_payload(
+                month,
+                include_transaction_ids=_bank_transaction_ids_from_groups(workbench_groups),
+            )
+            source_versions = self._source_versions(month, bank_detail_payload=bank_detail_payload)
             unchanged = self._unchanged_cost_statistics_scope_result(
                 scope_key=f"{project_scope}:{month}",
                 month=month,
@@ -95,7 +100,12 @@ class CostStatisticsSqlProjectionBuilder:
             )
             if unchanged is not None:
                 return unchanged
-            payload = self._build_explorer_payload(month, project_scope=project_scope)
+            payload = self._build_explorer_payload(
+                month,
+                project_scope=project_scope,
+                workbench_groups=workbench_groups,
+                bank_detail_payload=bank_detail_payload,
+            )
             return self._publish_cost_statistics_scope(
                 month=month,
                 project_scope=project_scope,
@@ -246,7 +256,12 @@ class CostStatisticsSqlProjectionBuilder:
             "refresh_kind": refresh_kind,
         }
 
-    def _source_versions(self, month: str) -> dict[str, Any]:
+    def _source_versions(
+        self,
+        month: str,
+        *,
+        bank_detail_payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         settings_payload = self._settings_payload()
         source_versions = {
             "cost_statistics_read_model_schema_version": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
@@ -261,23 +276,49 @@ class CostStatisticsSqlProjectionBuilder:
             workbench_source_versions = self._workbench_source_versions(month)
             if workbench_source_versions:
                 source_versions["workbench_source_versions"] = workbench_source_versions
-            bank_detail_source_versions = self._bank_detail_source_versions(month)
+            bank_detail_source_versions = self._bank_detail_source_versions(
+                bank_detail_payload,
+                scope_key=month,
+            )
             if bank_detail_source_versions is not None:
                 source_versions["bank_detail_source_versions"] = bank_detail_source_versions
         return source_versions
 
-    def _bank_detail_source_versions(self, month: str) -> dict[str, Any] | None:
+    def _bank_detail_snapshot_payload(
+        self,
+        month: str,
+        *,
+        include_transaction_ids: list[str],
+    ) -> dict[str, Any] | None:
         facade = self._bank_transaction_tag_read_facade
-        source_versions_for_scope_keys = getattr(facade, "source_versions_for_scope_keys", None)
-        if not callable(source_versions_for_scope_keys) or month == "all":
+        snapshot_for_month = getattr(facade, "snapshot_for_month", None)
+        if not callable(snapshot_for_month) or month == "all":
             return None
-        payload = source_versions_for_scope_keys(
-            [month],
+        payload = snapshot_for_month(
+            month,
+            include_transaction_ids=include_transaction_ids,
             require_fresh=False,
             reason="downstream_bank_tag_read",
         )
         if not isinstance(payload, dict) or str(payload.get("status") or "").strip().lower() != "fresh":
-            raise RuntimeError("bank_detail_read_model_not_fresh")
+            raise RuntimeError(_bank_detail_not_fresh_error(payload, operation="month_snapshot", month=month))
+        return payload
+
+    @staticmethod
+    def _bank_detail_source_versions(
+        payload: dict[str, Any] | None,
+        *,
+        scope_key: str,
+    ) -> dict[str, Any] | None:
+        if not isinstance(payload, dict):
+            return None
+        scope_signatures = payload.get("read_model_scope_signatures")
+        if isinstance(scope_signatures, dict):
+            scope_signature = scope_signatures.get(scope_key)
+            if isinstance(scope_signature, dict):
+                scope_source_versions = scope_signature.get("source_versions")
+                if isinstance(scope_source_versions, dict):
+                    return dict(scope_source_versions)
         source_versions = payload.get("source_versions")
         return dict(source_versions) if isinstance(source_versions, dict) else {}
 
@@ -318,9 +359,31 @@ class CostStatisticsSqlProjectionBuilder:
             "skip_reason": "source_versions_unchanged",
         }
 
-    def _build_explorer_payload(self, month: str, *, project_scope: str) -> dict[str, Any]:
-        entries = self._cost_entries_from_workbench(month, project_scope=project_scope)
-        bank_flow_entries = self._bank_flow_entries_from_bank_detail(month)
+    def _build_explorer_payload(
+        self,
+        month: str,
+        *,
+        project_scope: str,
+        workbench_groups: list[dict[str, Any]],
+        bank_detail_payload: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        bank_detail_rows = [
+            row
+            for row in list((bank_detail_payload or {}).get("rows") or [])
+            if isinstance(row, dict)
+        ]
+        entries = self._cost_entries_from_workbench(
+            workbench_groups,
+            project_scope=project_scope,
+            bank_detail_rows=bank_detail_rows,
+        )
+        bank_flow_entries = self._bank_flow_entries_from_bank_detail_rows(
+            [
+                row
+                for row in list((bank_detail_payload or {}).get("month_rows") or [])
+                if isinstance(row, dict)
+            ]
+        )
         return self._build_explorer_payload_from_entries(
             entries,
             month=month,
@@ -391,7 +454,10 @@ class CostStatisticsSqlProjectionBuilder:
             ],
         }
 
-    def _cost_entries_from_workbench(self, month: str, *, project_scope: str) -> list[dict[str, Any]]:
+    def _cost_groups_from_workbench(
+        self,
+        month: str,
+    ) -> list[dict[str, Any]]:
         member_rows = self._connection.fetch_all(
             """
             with active_generation as (
@@ -464,15 +530,24 @@ class CostStatisticsSqlProjectionBuilder:
                 member_payload.setdefault("row_id", row_id)
             member_payload.setdefault("type", pane)
             group_payload.setdefault(f"{pane}_rows", []).append(member_payload)
-        groups = [group for group in groups_by_id.values() if group.get("zone") == "paired"]
+        return [group for group in groups_by_id.values() if group.get("zone") == "paired"]
+
+    def _cost_entries_from_workbench(
+        self,
+        groups: list[dict[str, Any]],
+        *,
+        project_scope: str,
+        bank_detail_rows: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
         bank_tag_contexts = self._bank_tag_contexts_for_rows(
             [
                 row
                 for group in groups
+                if list(group.get("oa_rows") or []) and list(group.get("bank_rows") or [])
                 for row in list(group.get("bank_rows") or [])
                 if isinstance(row, dict)
             ],
-            month=month,
+            bank_detail_rows=bank_detail_rows,
         )
         active_projects = self._active_project_names() if project_scope == "active" else None
         entries: list[dict[str, Any]] = []
@@ -511,22 +586,12 @@ class CostStatisticsSqlProjectionBuilder:
                 )
         return entries
 
-    def _bank_flow_entries_from_bank_detail(self, month: str) -> list[dict[str, Any]]:
-        if month == "all":
-            return []
-        facade = self._bank_transaction_tag_read_facade
-        list_by_month = getattr(facade, "list_by_month", None)
-        if not callable(list_by_month):
-            return []
-        payload = list_by_month(
-            month,
-            require_fresh=False,
-            reason="downstream_bank_tag_read",
-        )
-        if not isinstance(payload, dict) or str(payload.get("status") or "").strip().lower() != "fresh":
-            raise RuntimeError("bank_detail_read_model_not_fresh")
+    def _bank_flow_entries_from_bank_detail_rows(
+        self,
+        bank_detail_rows: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
         entries: list[dict[str, Any]] = []
-        for index, row in enumerate(list(payload.get("rows") or [])):
+        for index, row in enumerate(bank_detail_rows):
             if not isinstance(row, dict):
                 continue
             direction = _bank_flow_direction(row)
@@ -564,37 +629,23 @@ class CostStatisticsSqlProjectionBuilder:
             )
         return entries
 
-    def _bank_tag_contexts_for_rows(self, bank_rows: list[dict[str, Any]], *, month: str) -> dict[str, dict[str, Any]]:
-        facade = self._bank_transaction_tag_read_facade
-        get_by_transaction_ids = getattr(facade, "get_by_transaction_ids", None)
-        if not callable(get_by_transaction_ids):
-            return {}
-        transaction_ids = []
-        seen: set[str] = set()
-        for row in list(bank_rows or []):
-            transaction_id = str(row.get("id") or row.get("transaction_id") or row.get("row_id") or "").strip()
-            if transaction_id and transaction_id not in seen:
-                transaction_ids.append(transaction_id)
-                seen.add(transaction_id)
-        if not transaction_ids:
-            return {}
-        payload = get_by_transaction_ids(
-            transaction_ids,
-            require_fresh=False,
-            reason="downstream_bank_tag_read",
-            month_hint=month,
-            scope_keys_hint=[month],
-        )
-        if not isinstance(payload, dict):
-            return {}
-        if str(payload.get("status") or "").strip().lower() != "fresh":
-            raise RuntimeError("bank_detail_read_model_not_fresh")
+    def _bank_tag_contexts_for_rows(
+        self,
+        bank_rows: list[dict[str, Any]],
+        *,
+        bank_detail_rows: list[dict[str, Any]],
+    ) -> dict[str, dict[str, Any]]:
+        requested_ids = {
+            transaction_id
+            for row in bank_rows
+            for transaction_id in [str(row.get("id") or row.get("transaction_id") or row.get("row_id") or "").strip()]
+            if transaction_id
+        }
         return {
             transaction_id: bank_tag_context_from_row(row)
-            for row in list(payload.get("rows") or [])
-            if isinstance(row, dict)
+            for row in bank_detail_rows
             for transaction_id in [str(row.get("transaction_id") or row.get("id") or "").strip()]
-            if transaction_id
+            if transaction_id in requested_ids
         }
 
     def _cost_entries_from_materialized_shards(
@@ -1043,6 +1094,48 @@ def _bank_detail_payment_account_label(row: dict[str, Any]) -> str:
     if bank_name and account_last4:
         return f"{bank_name} 账户 {account_last4}"
     return bank_name or account_last4
+
+
+def _bank_transaction_ids_from_groups(groups: list[dict[str, Any]]) -> list[str]:
+    transaction_ids: list[str] = []
+    seen: set[str] = set()
+    for group in groups:
+        if not list(group.get("oa_rows") or []) or not list(group.get("bank_rows") or []):
+            continue
+        for row in list(group.get("bank_rows") or []):
+            if not isinstance(row, dict):
+                continue
+            transaction_id = str(row.get("id") or row.get("transaction_id") or row.get("row_id") or "").strip()
+            if transaction_id and transaction_id not in seen:
+                transaction_ids.append(transaction_id)
+                seen.add(transaction_id)
+    return transaction_ids
+
+
+def _bank_detail_not_fresh_error(
+    payload: dict[str, Any] | None,
+    *,
+    operation: str,
+    month: str,
+) -> str:
+    if not isinstance(payload, dict):
+        return f"bank_detail_read_model_not_fresh: operation={operation} status=invalid_payload scope_keys={month}"
+    status = str(payload.get("status") or "missing").strip().lower() or "missing"
+    scope_keys = [str(value).strip() for value in list(payload.get("scope_keys") or []) if str(value).strip()]
+    stale_reasons = [
+        str(value).strip()
+        for value in list(payload.get("stale_reasons") or [])
+        if str(value).strip()
+    ]
+    return " ".join(
+        [
+            "bank_detail_read_model_not_fresh:",
+            f"operation={operation}",
+            f"status={status}",
+            f"scope_keys={','.join(scope_keys or [month])}",
+            f"stale_reasons={','.join(stale_reasons) or 'unknown'}",
+        ]
+    )
 
 
 def _tax_invoice_item(row: dict[str, Any], *, output: bool) -> dict[str, Any]:

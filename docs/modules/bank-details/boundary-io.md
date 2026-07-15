@@ -36,6 +36,7 @@
 | 关系标签投影 | `BankDetailsRelationTagProjectionService` -> `WorkbenchRelationReadFacade.get_by_row_ids(...)` | 只允许按银行流水 row id 读取 relation distribution；可作为展示标签降级读，但不得作为写前事实源、freshness proof 或 raw Workbench payload fallback |
 | Worker 关系源端快路径 | `WorkbenchRelationReadModelRepositoryPort` | `bank-detail` SQL projection v10 可通过 `list_active_workbench_relation_source_rows(...)` / `workbench_relation_source_summary_from_source(...)` 读取 active relation source summary，用于关系标签投影和 source-version proof；行读取与 source summary 必须同时携带该月银行流水 legacy row id 与 canonical UUID，summary 以 `month_scope == month OR row_ids overlap` 纳入跨月 relation，保证跨月关系新增、替换和删除都改变 stable source versions；投影边界再归一回页面 row id。该身份/成员语义变化必须提升 read-model schema version，禁止被 unchanged-scope 优化跳过；SQL owner 仍归 workbench-relations repository，下游不得直接读 relation 表，也不得用该快路径做 relation 写前判断 |
 | 可用月份 scope 枚举 | `BankDetailAvailableMonthScopeProvider` | PostgreSQL read-model runtime 下只从 `BankDetailReadModelRepositoryPort.bank_detail_scope_keys_for_range(...)` 读取 scope；只有非 SQL/local runtime 才允许回退导入服务扫描，生产/API 页面读不得使用导入扫描证明 fresh |
+| 下游月度一致性快照 | `BankTransactionTagReadFacade.snapshot_for_month(...)` -> `BankDetailReadModelRepositoryPort.get_bank_detail_tagged_snapshot(...)` | 输入为目标 `YYYY-MM` 和可选关系成员流水 ID；repository 在一个 `REPEATABLE READ READ ONLY` transaction 内读取目标月全部 tagged rows、跨月补充 ID、涉及 scope 的 freshness/signature/source versions。输出必须分别暴露完整 `rows` 与仅目标月 `month_rows`，使下游既能补齐跨月关系标签，又不会把跨月补充行计入目标月全流水。该 port 是纯读，不写 queue/readiness/read model。 |
 | 自动分类候选推断 | `BankDetailAutoCategorySuggestionProvider` | 作为显式 provider 注入 `BankDetailsApplicationService`；应用服务本身不直接读取 import service 或 `BankDetailsService.auto_category_input_row(...)` |
 | Refresh scope | `bank_detail` manifest | month or `all`；`all` 只允许 fan-out 到 month shards；受控 `force_refresh` 必须由 handler 继续传递给所有 month shard，并由 projection builder 绕过 unchanged-scope fast-path 后重算，不得被当作普通刷新静默忽略 |
 
@@ -49,6 +50,7 @@
 | 标签/分类事实写入 | canonical store | `BankDetailsApplicationService` 只依赖显式 `BankTransactionCategoryStorePort.save_bank_transaction_categories(...)`；禁止通过宽 `state_store` 在业务 service 内散写 |
 | 标签副作用 | relation/downstream read models | 通过 lifecycle/gateway 传播；`bank-flow-rule-batches` 只能读取 active 标签并维护自身 OA/发票规则 |
 | 自动标签规则/分类下游刷新 | cost_statistics / workbench matching | `bank_auto_tag_rules_changed` 和银行明细分类变化必须入队 `workbench_matching` 和 `cost_statistics.read_model.refresh`；成本统计 worker 只能通过 `BankTransactionTagReadFacade` 读取 fresh `bank_detail` scoped read model 后写入 `time_rows.bank_tag_*`，成本统计页面不得直接读取银行明细 API 或规则表 |
+| Tagged snapshot payload | cost_statistics 等下游 projection | `rows` 是目标月 + 指定跨月 ID 的去重集合，`month_rows` 仅属于目标月；同时返回全部涉及 scope 的 status/signatures 供一次性 fail-closed。缺失指定 ID 通过 `missing_transaction_ids` 显式报告，不得从 canonical 表或旧页面 payload 隐式 fallback。 |
 | 关系标签展示 | 银行明细列表/下游展示 | 只输出 relation chip/status；不发布 relation 事实、不触发 relation 写入、不绕过 `workbench-relations` freshness/command 边界 |
 | 导出文件 | 用户下载 | 复用当前查询边界，不绕过权限 |
 

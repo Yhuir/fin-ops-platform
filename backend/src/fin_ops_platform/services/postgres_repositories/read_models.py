@@ -1883,6 +1883,67 @@ class PostgresBankReadModelRepository:
         }
 
 
+    def get_bank_detail_tagged_snapshot(
+        self,
+        month: str,
+        *,
+        include_transaction_ids: list[str] | None = None,
+        tenant_id: str = "default",
+    ) -> dict[str, Any] | None:
+        normalized_month = text(month)
+        if not normalized_month or not MONTH_SCOPE_RE.match(normalized_month):
+            raise ValueError("bank detail tagged snapshot month must be YYYY-MM.")
+        normalized_ids = _dedupe_preserve_order(
+            text(transaction_id)
+            for transaction_id in list(include_transaction_ids or [])
+            if text(transaction_id)
+        )
+        with self._connection.transaction() as connection:
+            connection.execute("set transaction isolation level repeatable read read only")
+            rows = connection.fetch_all(
+                """
+                select payload, raw_payload, summary, purpose, scope_key, source_versions
+                from read_model.bank_detail_rows
+                where tenant_id = %s
+                  and (
+                    scope_month = %s::date
+                    or transaction_id = any(%s)
+                    or payload->>'id' = any(%s)
+                    or payload->>'transaction_id' = any(%s)
+                  )
+                order by trade_time_sort desc, transaction_id desc
+                """,
+                (tenant_id, month_start(normalized_month), normalized_ids, normalized_ids, normalized_ids),
+            )
+            payload_rows = [_bank_detail_row_payload(row) for row in rows]
+            payload_by_id: dict[str, dict[str, Any]] = {}
+            for source_row, payload_row in zip(rows, payload_rows, strict=True):
+                for row_identity in (payload_row.get("transaction_id"), payload_row.get("id")):
+                    if transaction_id := text(row_identity):
+                        payload_by_id.setdefault(transaction_id, payload_row)
+            target_scope_transaction_ids = _dedupe_preserve_order(
+                text(payload_row.get("transaction_id") or payload_row.get("id"))
+                for source_row, payload_row in zip(rows, payload_rows, strict=True)
+                if text(source_row.get("scope_key")) == normalized_month
+            )
+            missing_ids = [transaction_id for transaction_id in normalized_ids if transaction_id not in payload_by_id]
+            scope_keys = _dedupe_preserve_order(
+                [normalized_month, *[text(row.get("scope_key")) for row in rows if text(row.get("scope_key"))]]
+            )
+            scope_summary = self.bank_detail_scope_summary(
+                scope_keys=scope_keys,
+                tenant_id=tenant_id,
+                connection=connection,
+            )
+        return {
+            "rows": payload_rows,
+            "target_scope_transaction_ids": target_scope_transaction_ids,
+            "missing_transaction_ids": missing_ids,
+            "source_versions": _source_versions_from_scope_summary(scope_summary),
+            **scope_summary,
+        }
+
+
     def list_bank_detail_tagged_rows_by_month(
         self,
         month: str,
@@ -5612,6 +5673,9 @@ class PostgresReadModelRepository:
 
     def get_bank_detail_tagged_rows_by_transaction_ids(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
         return self._bank_read_model_repository.get_bank_detail_tagged_rows_by_transaction_ids(*args, **kwargs)
+
+    def get_bank_detail_tagged_snapshot(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        return self._bank_read_model_repository.get_bank_detail_tagged_snapshot(*args, **kwargs)
 
     def list_bank_detail_tagged_rows_by_month(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
         return self._bank_read_model_repository.list_bank_detail_tagged_rows_by_month(*args, **kwargs)
