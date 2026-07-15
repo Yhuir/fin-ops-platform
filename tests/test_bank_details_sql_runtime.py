@@ -122,6 +122,25 @@ class _UnderlyingBankDetailReadModelRepository:
         )
         return {"rows": [{"transaction_id": "txn-1"}], "read_model_status": "fresh"}
 
+    def get_bank_detail_tagged_snapshot(
+        self,
+        month: str,
+        *,
+        include_transaction_ids: list[str] | None = None,
+        tenant_id: str = "default",
+    ) -> dict[str, object]:
+        self.calls.append(
+            (
+                "get_bank_detail_tagged_snapshot",
+                {
+                    "month": month,
+                    "include_transaction_ids": list(include_transaction_ids or []),
+                    "tenant_id": tenant_id,
+                },
+            )
+        )
+        return {"rows": [{"transaction_id": "txn-1"}], "read_model_status": "fresh"}
+
     def list_bank_detail_tagged_rows_by_month(
         self,
         month: str,
@@ -272,13 +291,16 @@ class FakeBankTaggedReadRepository:
         *,
         by_ids_payload: dict[str, object] | None = None,
         by_month_payload: dict[str, object] | None = None,
+        snapshot_payload: dict[str, object] | None = None,
         scope_summary_payload: dict[str, object] | None = None,
     ) -> None:
         self.by_ids_payload = by_ids_payload
         self.by_month_payload = by_month_payload
+        self.snapshot_payload = snapshot_payload
         self.scope_summary_payload = scope_summary_payload
         self.id_calls: list[list[str]] = []
         self.month_calls: list[dict[str, object]] = []
+        self.snapshot_calls: list[dict[str, object]] = []
         self.scope_summary_calls: list[dict[str, object]] = []
 
     def get_bank_detail_tagged_rows_by_transaction_ids(
@@ -307,6 +329,22 @@ class FakeBankTaggedReadRepository:
             }
         )
         return self.by_month_payload
+
+    def get_bank_detail_tagged_snapshot(
+        self,
+        month: str,
+        *,
+        include_transaction_ids: list[str] | None = None,
+        tenant_id: str = "default",
+    ) -> dict[str, object] | None:
+        self.snapshot_calls.append(
+            {
+                "month": month,
+                "include_transaction_ids": list(include_transaction_ids or []),
+                "tenant_id": tenant_id,
+            }
+        )
+        return self.snapshot_payload
 
     def bank_detail_scope_summary(
         self,
@@ -423,6 +461,57 @@ class BankTransactionEffectiveCategoryProviderTests(unittest.TestCase):
 
 
 class BankTransactionTagReadFacadeTests(unittest.TestCase):
+    def test_snapshot_for_month_returns_target_month_rows_and_cross_month_relation_rows_in_one_read(self) -> None:
+        repository = FakeBankTaggedReadRepository(
+            snapshot_payload={
+                "read_model_status": "fresh",
+                "rows": [
+                    bank_detail_projected_row("txn-month", scope_key="2026-05")["payload"],
+                    bank_detail_projected_row("txn-cross-month", scope_key="2026-04")["payload"],
+                ],
+                "target_scope_transaction_ids": ["txn-month"],
+                "missing_transaction_ids": [],
+                "source_versions": {
+                    "2026-04": {"source_version": 2},
+                    "2026-05": {"source_version": 3},
+                },
+                "read_model_scope_keys": ["2026-05", "2026-04"],
+                "read_model_scope_signatures": {
+                    "2026-05": {"schema_version": BANK_DETAIL_READ_MODEL_SCHEMA_VERSION},
+                    "2026-04": {"schema_version": BANK_DETAIL_READ_MODEL_SCHEMA_VERSION},
+                },
+            }
+        )
+        facade = BankTransactionTagReadFacade(read_model_repository=repository)
+
+        payload = facade.snapshot_for_month(
+            "2026-05",
+            include_transaction_ids=["txn-cross-month"],
+            require_fresh=False,
+        )
+
+        self.assertEqual(payload["status"], "fresh")
+        self.assertEqual(
+            [row["transaction_id"] for row in payload["rows"]],
+            ["txn-month", "txn-cross-month"],
+        )
+        self.assertEqual(
+            [row["transaction_id"] for row in payload["month_rows"]],
+            ["txn-month"],
+        )
+        self.assertEqual(
+            repository.snapshot_calls,
+            [
+                {
+                    "month": "2026-05",
+                    "include_transaction_ids": ["txn-cross-month"],
+                    "tenant_id": "default",
+                }
+            ],
+        )
+        self.assertEqual(repository.id_calls, [])
+        self.assertEqual(repository.month_calls, [])
+
     def test_get_by_transaction_ids_returns_standardized_fresh_tagged_rows(self) -> None:
         queue = CaptureRuntimeQueueRepository()
         repository = FakeBankTaggedReadRepository(
@@ -754,6 +843,10 @@ class BankTransactionTagReadFacadeTests(unittest.TestCase):
         }
         repository = FakeBankTaggedReadRepository(
             by_ids_payload=non_fresh_payload,
+            snapshot_payload={
+                **non_fresh_payload,
+                "target_scope_transaction_ids": ["txn-001"],
+            },
             scope_summary_payload=non_fresh_payload,
         )
         facade = BankTransactionTagReadFacade(
@@ -773,9 +866,17 @@ class BankTransactionTagReadFacadeTests(unittest.TestCase):
             require_fresh=False,
             reason="downstream_bank_tag_read",
         )
+        snapshot = facade.snapshot_for_month(
+            "2026-05",
+            include_transaction_ids=["txn-001"],
+            require_fresh=False,
+            reason="downstream_bank_tag_read",
+        )
 
         self.assertEqual(by_ids["status"], "refreshing")
         self.assertEqual(source_versions["status"], "refreshing")
+        self.assertEqual(snapshot["status"], "refreshing")
+        self.assertEqual([row["transaction_id"] for row in snapshot["month_rows"]], ["txn-001"])
         self.assertEqual(queue.enqueued, [])
 
 
@@ -803,6 +904,13 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             "txn-1",
         )
         self.assertEqual(
+            port.get_bank_detail_tagged_snapshot(
+                "2026-05",
+                include_transaction_ids=["txn-1"],
+            )["rows"][0]["transaction_id"],
+            "txn-1",
+        )
+        self.assertEqual(
             port.list_bank_detail_tagged_rows_by_month("2026-05", direction="expense", category_codes=["fee"])["rows"][0][
                 "transaction_id"
             ],
@@ -818,6 +926,7 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
                 "list_bank_detail_transactions",
                 "list_bank_detail_accounts",
                 "get_bank_detail_tagged_rows_by_transaction_ids",
+                "get_bank_detail_tagged_snapshot",
                 "list_bank_detail_tagged_rows_by_month",
             ],
         )
@@ -1017,6 +1126,58 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         sql_text = " ".join(" ".join(call[1].lower().split()) for call in connection.calls)
         self.assertIn("payload->>'id' = any", sql_text)
         self.assertIn("payload->>'transaction_id' = any", sql_text)
+
+    def test_get_tagged_snapshot_reads_target_month_and_cross_month_ids_in_one_repeatable_read_snapshot(self) -> None:
+        connection = FakeConnection(
+            rows=[
+                [
+                    bank_detail_projected_row("txn-month", scope_key="2026-05"),
+                    bank_detail_projected_row("txn-cross-month", scope_key="2026-04"),
+                ],
+                [
+                    scope_row("2026-05", source_version=3, source_versions={"source_version": 3}),
+                    scope_row("2026-04", source_version=2, source_versions={"source_version": 2}),
+                ],
+            ]
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.get_bank_detail_tagged_snapshot(
+            "2026-05",
+            include_transaction_ids=["txn-cross-month", "txn-missing"],
+        )
+
+        self.assertIsNotNone(payload)
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual(
+            [row["transaction_id"] for row in payload["rows"]],
+            ["txn-month", "txn-cross-month"],
+        )
+        self.assertEqual(payload["target_scope_transaction_ids"], ["txn-month"])
+        self.assertEqual(payload["missing_transaction_ids"], ["txn-missing"])
+        self.assertEqual(payload["read_model_scope_keys"], ["2026-05", "2026-04"])
+        self.assertEqual(
+            payload["source_versions"],
+            {
+                "2026-05": {"source_version": 3},
+                "2026-04": {"source_version": 2},
+            },
+        )
+        execute_sql = [
+            " ".join(sql.lower().split())
+            for method, sql, _params in connection.calls
+            if method == "execute"
+        ]
+        self.assertIn("set transaction isolation level repeatable read read only", execute_sql)
+        row_query = next(
+            " ".join(sql.lower().split())
+            for method, sql, _params in connection.calls
+            if method == "fetch_all" and "from read_model.bank_detail_rows" in sql.lower()
+        )
+        self.assertIn("scope_month = %s::date", row_query)
+        self.assertIn("transaction_id = any", row_query)
+        self.assertIn("payload->>'id' = any", row_query)
+        self.assertNotIn("from app.bank_transactions", row_query)
 
     def test_list_tagged_rows_by_month_uses_direction_and_effective_category_filters(self) -> None:
         connection = FakeConnection(

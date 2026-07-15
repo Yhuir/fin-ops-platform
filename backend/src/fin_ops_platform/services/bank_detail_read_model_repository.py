@@ -66,6 +66,20 @@ class BankDetailReadModelRepositoryPort:
         )
         return dict(payload) if isinstance(payload, dict) else None
 
+    def get_bank_detail_tagged_snapshot(
+        self,
+        month: str,
+        *,
+        include_transaction_ids: list[str] | None = None,
+        tenant_id: str = "default",
+    ) -> dict[str, object] | None:
+        payload = self._repository.get_bank_detail_tagged_snapshot(
+            month,
+            include_transaction_ids=list(include_transaction_ids or []),
+            tenant_id=tenant_id,
+        )
+        return dict(payload) if isinstance(payload, dict) else None
+
     def list_bank_detail_tagged_rows_by_month(
         self,
         month: str,

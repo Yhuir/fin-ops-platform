@@ -18,10 +18,10 @@ updated: "2026-07-15"
 
 ## Current Focus
 
-- hypothesis: v6 生产失败是 read-side enqueue 的 TOCTOU，而非遗漏第三个 reason 或 bank-detail 单次重建过慢。
-- test: 让 cost projection 三个 bank-detail dependency read 全部成为 `require_fresh=False` 的纯读；projection 显式 fail-closed，只有 runtime worker 在异常边界 enqueue。锁定 pure-read 参数、非 fresh 不写 queue、金额与标签输出不变。
-- expecting: Workbench 保持零问题并显示 520 正式关系；bank-detail 不再被过时 refreshing 读结果反复重建；cost month/parent scope 收敛且 queue 延迟复核仍为空。
-- next_action: 提交 v7 并通过 branch/main exact-SHA CI，再重复官方部署、rehydrate、queue/Audit/520 数据门禁。
+- hypothesis: v7 已消除 read-side enqueue，但三个独立 pure read 仍让同一 cost projection 观察到不同 bank-detail freshness 时点；剩余故障是缺少一次性依赖快照，而不是业务数据、migration 或 Workbench 关系损坏。
+- test: 先读取 Workbench 正式 groups 和关系流水 ID，再通过一个 `REPEATABLE READ READ ONLY` bank-detail snapshot 同时取得目标月 rows、跨月关系 rows 和全部涉及 scope signatures。锁定唯一 facade/repository I/O、跨月标签、目标月全流水隔离、非 fresh fail-closed 和无 read-side enqueue。
+- expecting: Workbench 保持零问题并显示 520 正式关系；cost month/parent scope 在一次一致性依赖观察后收敛；durable queue 首次排空后延迟至少 120 秒复核仍为空。
+- next_action: 提交 v8 PR 并通过 branch/main exact-SHA CI，再重复官方部署、rehydrate、queue/Audit/520/ETC 数据门禁。
 
 ## Evidence
 
@@ -46,6 +46,11 @@ updated: "2026-07-15"
 - 2026-07-15: v6 main SHA `920a5a27a08afa23743c811248e591b7dfe702b2` exact-SHA CI passed and release `main-920a5a27a-workbench-audit-v6-20260715135956` deployed with migrations still exactly 0001-0103. Workbench rehydrate was fresh, but cost attempts reached 22 in about 38 seconds and 15-minute metrics showed 357 bank-detail vs 173 cost completions while bank-detail p95 was about 434ms. The release was immediately rolled back; old Workbench rehydrated and queue/dirty scopes reached zero with a delayed stable check.
 - 2026-07-15: CodeGraph plus runtime evidence identified the remaining race: status is read before `ReadModelRefreshGateway` checks active outbox. If the dependency completes between those operations, a stale `refreshing` result recreates the event after ack. Active coalescing cannot make those two operations atomic.
 - 2026-07-15: v7 local verification passed: focused read-model suites 133/133, full `bash scripts/verify.sh all` exit 0, frontend 835/835, production build, Chromium 177/177, lint, docs and `git diff --check`. The repository still contains migrations exactly through 0103; v7 adds no migration, schema or dependency.
+- 2026-07-15: v7 branch CI run `29394641242` and main CI run `29395517717` passed exact SHA; PR #10 merged as main `a62393663f5fd38a0bd150689e61e7c92a985179`. Official release `main-a62393663-workbench-audit-v7-20260715151144` deployed and rehydrated 19 Workbench scopes fresh, with 219 formal relations, 876 formal relation row identities, zero Workbench Audit issues, and the 520 formal pair visible.
+- 2026-07-15: v7 failed the production convergence gate. At about 52 seconds the two `2026-07` cost events had 18/17 attempts; at about 71 seconds they reached 48/47 while cost stale count was 4. No failed jobs or canonical data damage occurred, but the sustained attempt growth proved a hot defer loop.
+- 2026-07-15: production was immediately reactivated to `etc-import-e5d6e6a4e-20260714-visibility`; activation waited for the normal worker lease, old Workbench rehydrated, and the durable queue reached `outbox={}`, dirty scopes `{done: 528123}`, active/pending/failed counts all zero. Migrations remained exactly 0001-0103 and no manual SQL/data mutation was performed.
+- 2026-07-15: Workbench scope SQL confirms formal cross-month relations can be selected when any OA/bank/invoice member belongs to the target month and then supplement all missing relation members. Therefore a target-month-only bank-detail read would silently lose valid cross-month tag context; v8 snapshot must accept relation member transaction IDs while keeping those supplemental rows out of target-month bank-flow totals.
+- 2026-07-15: v8 focused bank-detail/cost/gateway/worker suites passed 135/135. Full `bash scripts/verify.sh all` exited 0, including complete backend verification, frontend tests/build, and Chromium 177/177; lint, docs and `git diff --check` also passed. CodeGraph impact confines the new snapshot consumer to cost projection plus its facade/repository/test boundary. No 0104 migration, HTTP API shape or frontend source change exists.
 
 ## Eliminated
 
@@ -56,6 +61,6 @@ updated: "2026-07-15"
 ## Resolution
 
 - root_cause: The new pure partitioner initially lost detached/collapsed ETC display members. Its v2 sanitation then used the formal relation-mode registry as a row-control allowlist, deleting legitimate active override modes. v3 fixed override-over-exception precedence for unpaired rows, but did not define active formal relation ownership above both legacy controls; two formally paired rows therefore remained subject to stale override/exception audit expectations.
-- fix: Keep grouping pure and two-state, with one precedence contract at projection and Audit boundaries: active formal relation > active row override > active exception. Exclude formal members before the existing batched control reads, preserve override-over-exception only for unpaired rows, and keep repository sanitation limited to retired decision decoration. Bump projection/all-scope/cache schema together to v4. For downstream convergence, cost projection dependency reads are pure (`require_fresh=False`) and fail closed; runtime worker exclusively owns dependency enqueue, eliminating read-side TOCTOU rather than attempting more coalescing reasons.
-- verification: v5 proved source-version-only reason repair insufficient; v6 proved all-reason active coalescing still cannot close the status-read/ack race. Both were safely rolled back with data/read-model integrity restored. v7 focused and full local gates pass; exact-SHA CI and final production Workbench/bank-details/cost-statistics proofs remain required.
-- files_changed: v4 Workbench grouping/repository/version/cache boundary; v7 `cost_tax_sql_projection.py`, focused cost/bank-detail tests, and the affected module/worker documentation.
+- fix: Keep grouping pure and two-state, with one precedence contract at projection and Audit boundaries: active formal relation > active row override > active exception. Exclude formal members before the existing batched control reads, preserve override-over-exception only for unpaired rows, and keep repository sanitation limited to retired decision decoration. Bump projection/all-scope/cache schema together to v4. For downstream convergence, v8 replaces the three cost projection bank-detail reads with one pure repeatable-read snapshot covering the target month and formal cross-month member IDs; runtime worker remains the only dependency enqueue owner.
+- verification: v5 proved source-version-only reason repair insufficient; v6 proved active coalescing cannot close read-status/ack TOCTOU; v7 proved three independent pure reads still do not form a coherent projection dependency snapshot. All failed releases were safely rolled back without data or migration damage. v8 focused and full local gates pass; exact-SHA CI and final production Workbench/bank-details/cost-statistics proofs remain required.
+- files_changed: v4 Workbench grouping/repository/version/cache boundary; v8 cost projection, bank-detail snapshot facade/port/repository, focused tests, and affected module/worker documentation.

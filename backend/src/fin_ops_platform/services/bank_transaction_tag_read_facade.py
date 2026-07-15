@@ -96,6 +96,47 @@ class BankTransactionTagReadFacade:
         self._last_result = result
         return result
 
+    def snapshot_for_month(
+        self,
+        month: str,
+        *,
+        include_transaction_ids: list[str] | None = None,
+        require_fresh: bool = True,
+        reason: str = "downstream_bank_tag_read",
+    ) -> dict[str, Any]:
+        normalized_month = text(month) or ""
+        normalized_ids = _dedupe_preserve_order(
+            text(value) for value in list(include_transaction_ids or [])
+        )
+        reader = getattr(self._read_model_repository, "get_bank_detail_tagged_snapshot", None)
+        if not callable(reader) or not normalized_month:
+            return self._non_fresh_result(
+                status="unavailable",
+                scope_keys=[normalized_month] if normalized_month else [],
+                require_fresh=require_fresh,
+                reason=reason,
+                stale_reasons=["repository_method_unavailable" if not callable(reader) else "month_required"],
+            )
+        payload = reader(
+            normalized_month,
+            include_transaction_ids=normalized_ids,
+            tenant_id=self._tenant_id,
+        )
+        result = self._result_from_repository_payload(
+            payload,
+            require_fresh=require_fresh,
+            reason=reason,
+            fallback_scope_keys=[normalized_month],
+        )
+        target_scope_ids = set(text_list((payload or {}).get("target_scope_transaction_ids")))
+        result["month_rows"] = [
+            row
+            for row in list(result.get("rows") or [])
+            if isinstance(row, dict) and text(row.get("transaction_id")) in target_scope_ids
+        ]
+        self._last_result = result
+        return result
+
     def bulk_get_for_rows(self, bank_rows: list[Any]) -> dict[str, dict[str, Any]]:
         transaction_ids = [_transaction_id_for_row(row) for row in list(bank_rows or [])]
         return self.category_records_by_transaction_ids(
