@@ -18,10 +18,10 @@ updated: "2026-07-15"
 
 ## Current Focus
 
-- hypothesis: v4 Workbench visibility is correct; the remaining deployment failure is a downstream refresh livelock because cost statistics uses a non-coalesced bank-detail dependency reason while the target scope is already pending/processing.
-- test: replace the ad-hoc cost dependency reason with the existing `downstream_bank_tag_read` ensure/wakeup reason, prove active gateway coalescing locally, then repeat exact-SHA CI and production Workbench/bank-details/cost-statistics audits.
-- expecting: Workbench remains zero-issue with the 520 relation visible; bank-detail refresh completes once, cost month/parent scopes converge, and durable outbox/dirty scopes drain without source-version chasing.
-- next_action: commit the locally verified one-line v5 reason fix, require branch/main exact-SHA CI, then deploy, rehydrate and require all three production Audits to pass before leaving the release active.
+- hypothesis: v4 Workbench visibility is correct; v5 fixed only the cost source-version read, while two later bank-detail fresh read gates still use non-coalesced cost-specific reasons and can recreate the moving target.
+- test: make all three cost bank-detail fresh reads use `downstream_bank_tag_read`, lock every facade call reason in the full month projection test, then repeat exact-SHA CI and production Workbench/bank-details/cost-statistics audits.
+- expecting: Workbench remains zero-issue with the 520 relation visible; bank-detail refresh completes once, cost month/parent scopes converge without high attempts, and durable outbox/dirty scopes remain drained after a delay.
+- next_action: commit the locally verified two-line v6 reason cleanup, require branch/main exact-SHA CI, then deploy, rehydrate and require all three production Audits to pass before leaving the release active.
 
 ## Evidence
 
@@ -39,6 +39,10 @@ updated: "2026-07-15"
 - 2026-07-15: v4 downstream cost-statistics Audit did not converge. Two cost month events retried hundreds of times while repeatedly recreating `bank_detail:2026-07` pending work; `bank-details` itself passed `pass/fresh/drained`, proving an enqueue livelock rather than data corruption.
 - 2026-07-15: production was rolled back to `etc-import-e5d6e6a4e-20260714-visibility`, old Workbench rehydrated, release consistency and `pass/fresh/drained` restored, and the durable queue fully drained. Migrations remained exactly 0001-0103.
 - 2026-07-15: v5 local verification passed: focused read-model suites 132/132, backend 4193 passed with 33 explicit environment-gated skips, frontend 835/835, production build, Chromium 177/177, lint, docs and `git diff --check`.
+- 2026-07-15: v5 branch/main exact-SHA CI passed and release `main-4d3c029e2-workbench-audit-v5-20260715125058` deployed cleanly with migrations still 0001-0103. Workbench rehydrate was fresh, but the two 2026-07 cost events reached 140 attempts in about 110 seconds, so the release failed the queue-convergence gate.
+- 2026-07-15: v5 was immediately rolled back to `etc-import-e5d6e6a4e-20260714-visibility`; after the 300-second claim timeout and normal downstream fan-out, queue/dirty scopes drained and old Workbench Audit returned `pass/fresh/drained`, 219 relations, 19 scopes, 876 relation rows, 1296 group rows and zero issues.
+- 2026-07-15: whole-repo caller/reason scan found the missed paths in `_bank_tag_contexts_for_rows` and `_bank_flow_entries_from_bank_detail`: `cost_statistics_bank_tag_read` and `cost_statistics_bank_flow_rows`. Other fresh production consumers already use registered ensure reasons; non-coalesced server source reads use `require_fresh=False` and cannot enqueue.
+- 2026-07-15: v6 local verification passed: three direct contracts, focused read-model suites 132/132, backend 4193 passed with 33 explicit environment-gated skips, frontend 835/835, production build, Chromium 177/177, lint, docs and `git diff --check`.
 
 ## Eliminated
 
@@ -49,6 +53,6 @@ updated: "2026-07-15"
 ## Resolution
 
 - root_cause: The new pure partitioner initially lost detached/collapsed ETC display members. Its v2 sanitation then used the formal relation-mode registry as a row-control allowlist, deleting legitimate active override modes. v3 fixed override-over-exception precedence for unpaired rows, but did not define active formal relation ownership above both legacy controls; two formally paired rows therefore remained subject to stale override/exception audit expectations.
-- fix: Keep grouping pure and two-state, with one precedence contract at projection and Audit boundaries: active formal relation > active row override > active exception. Exclude formal members before the existing batched control reads, preserve override-over-exception only for unpaired rows, and keep repository sanitation limited to retired decision decoration. Bump projection/all-scope/cache schema together to v4. For downstream convergence, reuse the existing `downstream_bank_tag_read` ensure/wakeup reason so active bank-detail refreshes coalesce instead of creating a moving source-version target.
-- verification: v4 Workbench production proof passed, but downstream cost-statistics queue convergence failed and the release was safely rolled back. v5 reuses the existing coalesced `downstream_bank_tag_read` boundary; focused/full local gates pass. Exact-SHA CI and final production Workbench/bank-details/cost-statistics proofs remain required.
+- fix: Keep grouping pure and two-state, with one precedence contract at projection and Audit boundaries: active formal relation > active row override > active exception. Exclude formal members before the existing batched control reads, preserve override-over-exception only for unpaired rows, and keep repository sanitation limited to retired decision decoration. Bump projection/all-scope/cache schema together to v4. For downstream convergence, all three cost bank-detail fresh reads reuse the existing `downstream_bank_tag_read` ensure/wakeup reason so no cost-specific path can create a moving source-version target.
+- verification: v5 production proved that source-version-only coalescing is insufficient and was safely rolled back with data/read-model integrity restored. v6 removes the two remaining cost-specific reasons; focused/full local gates pass. Exact-SHA CI and final production Workbench/bank-details/cost-statistics proofs remain required.
 - files_changed: `workbench_relation_grouping.py`, `postgres_repositories/read_models.py`, `workbench_read_model_version.py`, `workbench_groups_page_cache.py`, focused tests, and the affected module/read-model documentation.

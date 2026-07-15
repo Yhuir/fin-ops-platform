@@ -1391,6 +1391,9 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["time_rows"][0]["bank_tag_label_path"], ["项目开销", "设备材料"])
         self.assertEqual(tag_facade.source_version_calls[0][0], ["2026-05"])
         self.assertEqual(tag_facade.category_calls[0][0], ["bank-1"])
+        self.assertEqual(tag_facade.source_version_calls[0][1]["reason"], "downstream_bank_tag_read")
+        self.assertEqual(tag_facade.category_calls[0][1]["reason"], "downstream_bank_tag_read")
+        self.assertEqual(tag_facade.month_calls[0][1]["reason"], "downstream_bank_tag_read")
         self.assertEqual(
             snapshot["read_models"]["active:2026-05"]["source_versions"]["bank_detail_source_versions"],
             {"bank_detail_scope_version": "bank-detail-v2"},

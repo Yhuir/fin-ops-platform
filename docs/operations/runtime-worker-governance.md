@@ -864,7 +864,8 @@ PYTHONPATH="$release_src/backend/src" \
 
 `dependency_not_fresh`、`api_*`、`pending_invoice_sql_projection`、`bank_detail_relation_tags_read`、
 `workbench_relation_write_precondition`、`downstream_bank_tag_read` 属于 ensure/wakeup 类刷新请求。成本统计读取
-`bank_detail` source versions 时必须复用 `downstream_bank_tag_read`，不能另造绕过 active coalescing 的 reason。它们只能确保目标
+`bank_detail` source versions、transaction tags 或 month rows 时必须统一复用 `downstream_bank_tag_read`，不能另造绕过
+active coalescing 的 reason。它们只能确保目标
 read model 有 refresh 在跑；当同一 `tenant_id + scope_type + scope_key` 已经 `pending` 或 `processing` 时，
 `ReadModelRefreshGateway` 必须 coalesce，不应 bump `source_version`，否则 downstream projection 会追逐移动目标。
 上述 coalesce 仅适用于普通 ensure/wakeup；显式 `force_refresh=true` 必须保留独立 durable event 语义。

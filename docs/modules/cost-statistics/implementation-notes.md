@@ -32,6 +32,14 @@
 
 ## 历史记录
 
+## 2026-07-15 - 银行明细三个 fresh read gate 完整收敛
+
+- 生产证据：v5 部署后 Workbench 重建成功，但 `cost_statistics active/all:2026-07` 在约 110 秒内达到 140 attempts；新 release 已立即回滚，旧 release 重建后恢复 `pass/fresh/drained` 和空 durable queue。
+- 遗漏根因：v5 只收敛 source-version read；同一 projection 的 transaction tag read 与 month row read 仍使用 `cost_statistics_bank_tag_read`、`cost_statistics_bank_flow_rows`，可在并发 fan-out 窗口绕过 active coalescing。
+- 修复：删除两个 cost-specific reason；三个要求 fresh 的银行明细读 I/O 统一复用 `downstream_bank_tag_read`。不改 gateway、worker、repository、状态、migration 或业务数据。
+- 测试：完整 month projection 锁定三个 facade 调用 reason；既有 gateway 测试继续证明 active `bank_detail` scope 不重复写 dirty/outbox。
+- 生产门禁：Workbench、`bank-details`、`cost-statistics` Audit 必须 `pass/fresh/drained`，durable queue 延迟复核仍为空，否则立即回滚。
+
 ## 2026-07-15 - 银行明细依赖 active coalescing
 
 - 目标：修复 Workbench schema 切换后成本月份 shard 等待同一 `bank_detail` scope 时，成本 worker 与银行 worker 互相制造下一条 pending event 的不收敛循环。
