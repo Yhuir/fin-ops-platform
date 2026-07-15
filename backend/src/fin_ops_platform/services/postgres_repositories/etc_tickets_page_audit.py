@@ -34,6 +34,8 @@ ACTIVE_BATCH_STATUSES = frozenset(
 SUBMITTED_BATCH_STATUSES = frozenset({"oa_submitted", "manually_marked_submitted", "closed"})
 VISIBLE_BATCH_STATUSES = ACTIVE_BATCH_STATUSES | SUBMITTED_BATCH_STATUSES
 ACTIVE_IMPORT_JOB_STATUSES = frozenset({"pending", "processing"})
+COVERED_IMPORT_TASK_STATUSES = frozenset({"imported", "closed"})
+TERMINAL_IMPORT_JOB_STATUSES = frozenset({"failed", "dead_lettered"})
 
 
 def audit_etc_tickets_page(
@@ -97,6 +99,12 @@ def _audit_etc_tickets_snapshot(
                 1 for row in invoice_links if _text(row.get("link_status")) == "active"
             ),
             "etc_import_job_count": len(import_jobs),
+            "covered_failed_import_job_count": sum(
+                1
+                for row in import_jobs
+                if _text(row.get("status")) in TERMINAL_IMPORT_JOB_STATUSES
+                and _text(row.get("task_status")) in COVERED_IMPORT_TASK_STATUSES
+            ),
             **evaluation.summary,
         },
         "issues": evaluation.issue_samples,
@@ -776,7 +784,8 @@ def _import_job_issues(rows: list[dict[str, Any]]) -> list[AuditIssue]:
         subject = _text(row.get("job_id"))
         attempt_count = _integer(row.get("attempt_count"))
         max_attempts = max(_integer(row.get("max_attempts")), 1)
-        if status in ACTIVE_IMPORT_JOB_STATUSES or (status == "failed" and attempt_count < max_attempts):
+        task_status = _text(row.get("task_status"))
+        if status in ACTIVE_IMPORT_JOB_STATUSES:
             issues.append(
                 AuditIssue(
                     "error",
@@ -784,15 +793,31 @@ def _import_job_issues(rows: list[dict[str, Any]]) -> list[AuditIssue]:
                     "ETC import durable queue 尚未排空。",
                     subject,
                     "etc_invoice_import.confirm",
-                    {"status": status, "attempt_count": attempt_count, "max_attempts": max_attempts},
+                    {
+                        "status": status,
+                        "attempt_count": attempt_count,
+                        "max_attempts": max_attempts,
+                        "import_session_id": row.get("import_session_id"),
+                        "task_id": row.get("task_id"),
+                        "task_status": task_status,
+                    },
                 )
             )
-        elif status == "failed":
+        elif status in TERMINAL_IMPORT_JOB_STATUSES and task_status not in COVERED_IMPORT_TASK_STATUSES:
             issues.append(
                 _issue(
                     "etc_import_job_terminal_failure",
                     subject,
-                    {"attempt_count": attempt_count, "max_attempts": max_attempts, "last_error": row.get("last_error")},
+                    {
+                        "status": status,
+                        "attempt_count": attempt_count,
+                        "max_attempts": max_attempts,
+                        "last_error": row.get("last_error"),
+                        "import_session_id": row.get("import_session_id"),
+                        "session_status": row.get("session_status"),
+                        "task_id": row.get("task_id"),
+                        "task_status": task_status,
+                    },
                 )
             )
     return issues
@@ -972,4 +997,15 @@ _ETC_INVOICE_SQL = """select etc.etc_invoice_id, etc.invoice_no, etc.invoice_cod
 _IMPORT_BATCH_SQL = """select batch_id, status, to_char(scope_month, 'YYYY-MM') as scope_month, invoice_count, raw_payload from app.etc_import_batches where coalesce(legacy_mongo_id, '') !~ '^current_state:' order by batch_id"""
 _SUBMISSION_BATCH_SQL = """select submission_batch_id, status, to_char(scope_month, 'YYYY-MM') as scope_month, invoice_ids, submitted_by, submitted_at, version, raw_payload from app.etc_submission_batches where coalesce(legacy_mongo_id, '') !~ '^current_state:' order by submission_batch_id"""
 _INVOICE_LINK_SQL = """select link.business_batch_id, link.etc_invoice_id, link.invoice_id::text as invoice_id, link.identity_key, link.invoice_no, link.invoice_code, link.digital_invoice_no, link.invoice_date::text as invoice_date, link.link_status, link.link_source, link.confidence, (invoice.id is not null and invoice.status <> 'deleted') as canonical_invoice_exists from app.etc_batch_invoice_links link left join app.invoices invoice on invoice.id = link.invoice_id where link.tenant_id = %s order by link.business_batch_id, link.identity_key"""
-_IMPORT_JOB_SQL = """select id::text as job_id, import_type, import_session_id, source_file_id, status, stage, attempt_count, max_attempts, last_error, available_at, updated_at from job.import_jobs where tenant_id = %s and import_type = 'etc_invoice_import.confirm' order by created_at, id"""
+_IMPORT_JOB_SQL = """
+select job.id::text as job_id, job.import_type, job.import_session_id, job.source_file_id,
+       job.status, job.stage, job.attempt_count, job.max_attempts, job.last_error,
+       job.available_at, job.updated_at,
+       session.status as session_status, session.task_id, task.status as task_status
+from job.import_jobs job
+left join app.etc_import_sessions session on session.session_id = job.import_session_id
+left join app.etc_reconciliation_tasks task on task.task_id = session.task_id
+where job.tenant_id = %s
+  and job.import_type = 'etc_invoice_import.confirm'
+order by job.created_at, job.id
+"""
