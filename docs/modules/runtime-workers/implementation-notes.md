@@ -512,3 +512,11 @@
 - 边界：批量入队仍使用相同 source_version bump、pending dedupe key、priority、trace_id 和 JSON payload 合同；它不是新的状态事实源，也不允许绕过 scope policy/target planner。`Application._workbench_uow_repository_factory(...)` 继续注入 `PostgresWorkbenchRelationRepository(transaction, enqueue_refreshes=False)`，避免 repository hidden fan-out 回到生产主链路。
 - 本地保护：`tests/test_runtime_queue.py::RuntimeQueueRepositoryTests::test_enqueue_read_model_refreshes_in_transaction_batches_dirty_scope_and_outbox_writes`、`tests/test_workbench_uow_contract.py::WorkbenchUoWContractTests::test_read_model_refresh_writer_uses_batch_repository_interface_when_available`、`test_relation_write_uow_uses_batch_read_model_refresh_writer_when_available`。
 - 未闭合：本地测试证明 I/O 合同与 UoW wiring；必须发布后用固定 `/opt/fin-ops/runtime-smoke/write-operation-e2e-scenarios.json` 与 `FINOPS-WRITE-SMOKE-STANDING-20260702` 复跑 Workbench withdraw 写操作 SLO，才能确认生产 POST/outbox 可见耗时降到目标内。
+
+## 2026-07-15 - 未注册 worker 实例发布收敛
+
+- 目标：修复生产残留 WIP secondary worker 不在当前 registry、env 已缺失但仍被 systemd 持续重启的问题。
+- 影响范围：runtime worker manifest、release activate 控制脚本、部署合同测试与 worker 运维文档；不改变 event、scope、queue、read model、API 或数据库结构。
+- 关键决策：registry 是唯一允许运行实例集合。激活 release 时只对已启用、运行或失败的未注册 `fin-ops-worker@*.service` 执行 stop/disable；不删除 env，保持回滚可逆。禁止把历史/WIP 实例重新登记为正式 worker 来掩盖配置缺失。
+- 生产验收：发布后所有未注册实例必须为 disabled/inactive，注册 required worker 必须 active，durable queue 与 dirty scope 必须 drained，readiness 必须 ready。
+- 测试覆盖：`RuntimeWorkerRegistryTests.test_manifest_cli_lists_required_instances_and_env_examples`、`DeployRuntimeExampleTests.test_deploy_control_retires_unregistered_worker_instances_before_restart`。

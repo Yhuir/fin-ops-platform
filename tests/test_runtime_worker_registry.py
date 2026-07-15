@@ -240,6 +240,16 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
     def test_manifest_cli_lists_required_instances_and_env_examples(self) -> None:
         stdout = io.StringIO()
 
+        exit_code = runtime_worker_manifest.main(["--instances"], stdout=stdout)
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            tuple(stdout.getvalue().split()),
+            tuple(registration.instance_name for registration in worker_registrations()),
+        )
+
+        stdout = io.StringIO()
+
         exit_code = runtime_worker_manifest.main(["--required-instances"], stdout=stdout)
 
         self.assertEqual(exit_code, 0)

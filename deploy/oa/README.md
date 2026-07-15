@@ -383,7 +383,9 @@ python -m fin_ops_platform.app.worker \
   - `/usr/local/sbin/finops-deploy-control check-release <release-name>`
   - `/usr/local/sbin/finops-deploy-control activate <release-name>`
 - `activate` 会先用 `/etc/fin-ops/fin-ops.postgres-migrator.env` 执行 PostgreSQL schema migration，
-  成功后才激活 API、RabbitMQ worker 和 dispatcher 指向该 release
+  成功后才激活 API、RabbitMQ worker 和 dispatcher 指向该 release；重启前还会以 release registry
+  为白名单 stop/disable 已启用、运行或失败的未注册 `fin-ops-worker@*.service`，避免历史/WIP unit
+  继续消费队列或 crash-loop。该动作不删除实例 env，保留受控回滚能力
 - API 和 dispatcher release drop-in 会先清空基础 unit 继承的 `EnvironmentFile`，再加载
   `/etc/fin-ops/fin-ops.common.env` 和 `/etc/fin-ops/fin-ops.secrets.env`，避免历史
   `/opt/fin-ops/fin-ops.env` 覆盖 release `PYTHONPATH` 导致新服务仍导入 `/opt/fin-ops/current`
