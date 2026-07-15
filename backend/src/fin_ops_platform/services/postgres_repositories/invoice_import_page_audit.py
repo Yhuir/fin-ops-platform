@@ -10,6 +10,7 @@ from fin_ops_platform.services.import_preview_audit import (
     ImportPreviewAuditRow,
     build_import_preview_session_audit,
 )
+from fin_ops_platform.services.import_file_service import aggregate_invoice_line_rows
 from fin_ops_platform.services.postgres_repositories.audit_report import (
     AuditIssue,
     AuditSnapshot,
@@ -444,6 +445,7 @@ def _canonical_invoice_issues(
     invoice_by_id = {_text(row.get("invoice_id")): row for row in invoices}
     expected_edges: set[tuple[str, str, str]] = set()
     expected_invoice_ids: set[str] = set()
+    linked_rows: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
 
     for row in rows:
         batch_id = _text(row.get("batch_id"))
@@ -462,9 +464,18 @@ def _canonical_invoice_issues(
                 issues.append(_issue("invoice_import_row_identity_missing", row_id, None))
             expected_edges.add((linked_id, batch_id, source_id))
             expected_invoice_ids.add(linked_id)
-            issues.extend(_invoice_field_issues(row, invoice, batch_type=_batch_type(batches, batch_id)))
+            linked_rows[(batch_id, linked_id)].append(row)
         elif linked_id or _text(row.get("linked_object_type")):
             issues.append(_issue("invoice_import_nonlinked_decision_has_invoice", row_id, {"decision": decision, "linked_object_id": linked_id}))
+
+    for (batch_id, invoice_id), component_rows in linked_rows.items():
+        issues.extend(
+            _invoice_component_field_issues(
+                component_rows,
+                invoice_by_id[invoice_id],
+                batch_type=_batch_type(batches, batch_id),
+            )
+        )
 
     actual_edges: set[tuple[str, str, str]] = set()
     for invoice in invoices:
@@ -551,6 +562,37 @@ def _invoice_field_issues(row: dict[str, Any], invoice: dict[str, Any], *, batch
     if _text(row.get("source_unique_key")) and _text(invoice.get("data_fingerprint")):
         mismatches["data_fingerprint"] = {"row": "canonical_identity_present", "invoice": invoice.get("data_fingerprint")}
     return [_issue("invoice_import_invoice_field_mismatch", _text(row.get("row_id")), {"fields": mismatches})] if mismatches else []
+
+
+def _invoice_component_field_issues(
+    rows: list[dict[str, Any]],
+    invoice: dict[str, Any],
+    *,
+    batch_type: str,
+) -> list[AuditIssue]:
+    if len(rows) == 1:
+        return _invoice_field_issues(rows[0], invoice, batch_type=batch_type)
+    normalized_rows = [_normalized_row(row) for row in rows]
+    try:
+        aggregated_rows = aggregate_invoice_line_rows(normalized_rows)
+    except ValueError as exc:
+        return [
+            _issue(
+                "invoice_import_component_field_conflict",
+                _text(invoice.get("invoice_id")),
+                {"reason": str(exc)},
+            )
+        ]
+    if len(aggregated_rows) != 1:
+        return _invoice_field_issues(rows[0], invoice, batch_type=batch_type)
+    aggregate = dict(aggregated_rows[0])
+    aggregate["signed_amount"] = str(
+        sum((Decimal(_decimal_text(row.get("signed_amount")) or "0") for row in normalized_rows), Decimal("0"))
+    )
+    synthetic = dict(rows[0])
+    synthetic["row_id"] = f"{_text(rows[0].get('batch_id'))}:{_text(invoice.get('invoice_id'))}"
+    synthetic["raw_payload"] = {"normalized_payload": {"normalized_row": aggregate}}
+    return _invoice_field_issues(synthetic, invoice, batch_type=batch_type)
 
 
 def _invoice_formal_payload_issues(invoice: dict[str, Any]) -> list[AuditIssue]:

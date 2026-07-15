@@ -73,7 +73,8 @@ confirm 的 I/O 顺序必须是 `save_import_delta` 成功提交在先，tax/rea
 | Frontend feature | `web/src/features/imports/api.ts`、`types.ts`、`importRoutes.ts` |
 | Backend route | import endpoints in `backend/src/fin_ops_platform/app/server.py` |
 | Backend service | `import_file_service.py`、`imports.py`、`import_processing_service.py`、`import_job_queue.py`、`import_preview_audit.py` |
-| Audit owner | `services/postgres_repositories/bank_transaction_import_page_audit.py`、`services/page_audit_registry.py` |
+| Audit owner | `services/postgres_repositories/bank_transaction_import_page_audit.py`、`services/postgres_repositories/import_audit_repair.py`、`services/page_audit_registry.py` |
+| Controlled repair | `services/import_audit_repair_service.py` 输出纯 plan；`tools/import_audit_repair_ops.py` 仅编排 dry-run/execute I/O |
 | Worker/lifecycle | `runtime_worker_handlers.py`、`derived_data_lifecycle_service.py`、`app_status_job_registry.py` |
 | Tests | `tests/test_import*.py`、`web/src/test/ImportsApi.test.ts`、`web/e2e/imports-bank-transactions-flow.spec.ts` |
 
@@ -102,6 +103,8 @@ confirm 的 I/O 顺序必须是 `save_import_delta` 成功提交在先，tax/rea
 - 旧 JSON import API 及其 `general_import.confirm` worker 链已删除；测试造数只能调用保留的 service-level normalization ports，HTTP 行为必须走 file/session API。
 - 删除任何 file/session snapshot 持久化前，必须先提供 import worker 跨进程恢复替代方案；不能把 `FileImportService.snapshot/from_snapshot` 误判为旧 full snapshot fallback。
 - Audit pass 只证明已登记 App 内部事实闭包；外部银行 control evidence 与下游受影响页面各自的 Audit 仍是独立 gate。
+- `app.import_batch_rows.legacy_mongo_id` 必须是 `batch_row:<batch_id>:<row_no>`；repository upsert 只能更新同一 `legacy_batch_id` 的行。任何跨 batch 冲突必须回滚整个事务，禁止恢复 process-global row counter 或 `ON CONFLICT` 重挂 owner 的旧逻辑。
+- 历史严格合同银行批次的 row evidence 只能由已登记 import file payload 与 canonical transaction owner 共同恢复；受控工具必须先做 repeatable-read dry-run、输出 fingerprint/rollback manifest，再在 serializable advisory-lock 事务内执行。
 
 ## Canonical facts ownership
 

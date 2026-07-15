@@ -212,3 +212,7 @@
 - 验证命令：见 `tests.md` 和 `docs/dev/testing-closure-state.md` 最近验证命令。
 - 未测风险：真实大 zip/票根网/PDF/XML 混合包、真实对象存储、真实 OA 草稿、真实 Postgres/RabbitMQ/Redis/systemd import worker drain、Nginx 代理和大数据浏览器 smoke。
 - 后续事项：后续模块处理 `output-invoice-collections`；另行专项校准共享 `import.process.requested` App Status affected domain。
+## 2026-07-15 ETC 历史 session 覆盖语义
+
+- ETC 票据页已将“failed job + exact task imported/closed”视为后续正式结果覆盖；导入页此前仍将同一 session/job 阻断，造成页面 Audit 口径冲突。
+- 导入页现复用同一覆盖状态集合；只降级已被正式 task 证明覆盖的历史失败，活动任务、缺证和关系不一致保持阻断。

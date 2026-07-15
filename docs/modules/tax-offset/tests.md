@@ -129,3 +129,8 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_worker_manifest
 - 本地测试不连接真实税局认证 XLSX 大样本、真实 OA 附件发票缓存或真实 ETC 生产数据；真实数据格式变化需要发布前样本 smoke。
 - 本地测试不跑真实 RabbitMQ/Redis/systemd `tax-offset` worker drain；dirty/outbox 到 projection 的真实收敛需要 staging 或夜间 CI/生产前 smoke。
 - 前端 Vitest 与 deterministic Playwright 覆盖交互、job polling、真实 Chromium modal confirm/刷新闭环和 non-fresh read model gate；仍不覆盖真实浏览器下载、超大表格性能、真实网络中断恢复和真实税局文件差异。
+
+## 2026-07-15 全局 invoice source version 回归
+
+- `tests/test_tax_offset_sql_runtime.py` 证明 canonical invoice 变化会清除全部已存在月份，并将“旧月份 + 新受影响月份”全部通过 durable refresh gateway 入队。
+- 同文件保留“本地没有缓存 projection 也必须为显式受影响月份入队”的回归，避免 clear 缺失时静默漏刷新。

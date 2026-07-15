@@ -168,3 +168,7 @@
   - `bash scripts/verify.sh docs`
 - 未测风险：真实银行大文件/历史模板、真实 Postgres/RabbitMQ/Redis/systemd import worker drain、worker crash/retry、下游最终页面展示仍需 staging/发布前 smoke；`import.process.requested` App Status job affected domain 与银行导入 domain 声明存在 P1 文档化风险。
 - 后续事项：若修改共享 `ImportWorkflowPage` 或 `/imports/files/*` contract，必须同时评估 `imports-invoices` 与 `imports-etc-invoices`。
+## 2026-07-15 Audit import fact 修复
+
+- 根因：旧 `batch_row_00001` 由 process-global counter 生成，多进程/多文件会重用；PostgreSQL upsert 又允许同 ID 跨 batch 更新 owner，后续发票预览因此覆盖了 153 条银行导入 row evidence，但 79 条 canonical bank transaction 未丢失。
+- 决策：runtime 改为 `batch_row:<batch_id>:<row_no>` 并在 repository 拒绝跨 batch re-parent；历史恢复走固定 dry-run/fingerprint 工具，不在 API/service 增加 fallback。

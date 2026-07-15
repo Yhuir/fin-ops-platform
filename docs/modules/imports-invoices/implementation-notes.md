@@ -209,3 +209,7 @@
 - 验证命令：见 `tests.md` 和 `docs/dev/testing-closure-state.md` 最近验证命令。
 - 未测风险：真实发票大文件/历史模板、真实 Postgres/RabbitMQ/Redis/systemd worker drain、worker crash/retry、下游真实浏览器大数据和导出 smoke。
 - 后续事项：后续模块处理 `imports-etc-invoices`；另行专项校准共享 `import.process.requested` App Status affected domain。
+## 2026-07-15 税局导出明细行整票化
+
+- 根因：税局导出是一票多行，旧 parser 将每一物理行作为独立 invoice import row；首行创建 canonical invoice，后续明细成为 duplicate，造成 9 张发票合计缺少 15 条明细/折扣金额。
+- 决策：同文件按发票强身份聚合不同明细；完全相同重复行保留，部分重复冲突 fail closed。历史严格合同 Audit 与受控 repair 使用同一聚合规则。

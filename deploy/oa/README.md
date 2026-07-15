@@ -446,9 +446,15 @@ sudo /usr/local/sbin/finops-deploy-control api-request-timing <request-id>
 sudo /usr/local/sbin/finops-deploy-control read-model-refresh <release-name> \
   --scope tax_offset=all --scope turnover_ledger=all --dry-run
 sudo /usr/local/sbin/finops-deploy-control settings-normalize <release-name> --dry-run
+sudo /usr/local/sbin/finops-deploy-control import-audit-repair <release-name> --dry-run
 sudo /usr/local/sbin/finops-deploy-control runtime-queue-resolve-covered <release-name> \
   --limit 100 --dry-run
 ```
+
+`import-audit-repair` 只用于恢复已登记严格合同 import facts：先运行 `--dry-run` 保存
+`source_fingerprint` 与 rollback manifest；确认期间数据未变化后，使用
+`--execute --expected-fingerprint <source_fingerprint>`。fingerprint 不一致、batch owner 冲突、
+来源明细冲突或 canonical owner 变化都会在事务写入前失败；禁止跳过 dry-run。
 
 `workbench-rehydrate` 会调用 release 内的 `scripts/rehydrate-workbench-read-models.py`，
 按月份 shard 重建 Workbench SQL read model，再发布 `all` 聚合；`workbench-audit-identity`

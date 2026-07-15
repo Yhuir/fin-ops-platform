@@ -61,6 +61,7 @@ file/session confirm 必须先通过 `save_import_delta` 持久化所选 session
 | Frontend feature | `web/src/features/imports/api.ts`、`types.ts`、`importRoutes.ts` |
 | Backend route | import endpoints in `backend/src/fin_ops_platform/app/server.py` |
 | Backend service | `import_file_service.py`、`imports.py`、`import_processing_service.py`、`import_job_queue.py`、`import_preview_audit.py` |
+| Controlled repair | `services/import_audit_repair_service.py`（纯 plan）、`services/postgres_repositories/import_audit_repair.py`（SQL I/O）、`tools/import_audit_repair_ops.py`（CLI 编排） |
 | Lifecycle/worker | `derived_data_lifecycle_service.py`、`runtime_worker_handlers.py` |
 | Tests | `tests/test_import*.py`、`tests/test_invoice_*.py`、`web/e2e/imports-invoices-flow.spec.ts` |
 
@@ -101,3 +102,6 @@ file/session confirm 必须先通过 `save_import_delta` 持久化所选 session
 - migration 0101 为新 `app.import_files` 设置 `audit_contract_revision=import-page-audit.v1` 默认值，但不回填历史行。
 - 当前 revision 的新导入严格证明 file object/hash/session/batch/row/canonical invoice 与 source link；税率按语义归一化比较，例如 `1% == 0.01`。
 - revision 为 NULL 的 pre-contract 历史保留明确 warning，不伪造来源证据；canonical 发票、展示字段和 relation 完整性由对应业务页面 Audit 阻断证明。
+- 税局导出的一张发票可以包含多条商品/服务/折扣明细。preview 在同一文件内按数电票号或代码+号码聚合互不重复的明细金额、税额和价税合计；完全相同的重复行仍保留给 duplicate audit；“部分重复 + 部分不同”或表头身份冲突必须 fail closed。
+- 当前严格合同 Audit 对历史多行发票按同一 batch + canonical invoice 重算合计后比较；不得把第一条物理明细误当整票金额，也不得把完全相同的重复行二次加总。
+- 历史金额恢复只能更新 source batch 仍一致的 canonical invoice，并由 repeatable-read dry-run fingerprint、serializable transaction 和 rollback manifest 约束；运行时导入链不调用该修复工具。

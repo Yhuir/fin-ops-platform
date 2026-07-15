@@ -726,7 +726,6 @@ class PostgresCoreRepository:
         transaction_objects = [self._transaction_from_row(row) for row in transactions]
         return {
             "batch_counter": self._max_suffix(preview_map),
-            "row_counter": sum(len(rows) for rows in row_results_by_batch.values()),
             "invoice_counter": len(invoice_objects),
             "txn_counter": len(transaction_objects),
             "counterparty_counter": len({invoice.counterparty.id for invoice in invoice_objects}),
@@ -774,6 +773,35 @@ class PostgresCoreRepository:
         else:
             for invoice in serialized_invoices:
                 self._update_invoice_etc_metadata(connection, invoice)
+
+    def repair_imported_invoice_totals(self, connection: Any, updates: list[dict[str, Any]]) -> None:
+        for update in updates:
+            affected = connection.execute(
+                """
+                update app.invoices
+                set amount = %s,
+                    signed_amount = %s,
+                    tax_amount = %s,
+                    total_with_tax = %s,
+                    tax_rate = %s,
+                    raw_payload = %s,
+                    updated_at = now()
+                where coalesce(legacy_mongo_id, id::text) = %s
+                  and legacy_source_batch_id = %s
+                """,
+                (
+                    update["amount"],
+                    update["signed_amount"],
+                    update["tax_amount"],
+                    update["total_with_tax"],
+                    update["tax_rate"],
+                    _jsonb(update["raw_payload"]),
+                    update["invoice_id"],
+                    update["source_batch_id"],
+                ),
+            )
+            if affected != 1:
+                raise RuntimeError(f"Invoice {update['invoice_id']} changed after the repair plan was built.")
 
     def repair_submitted_etc_invoice_overlap(
         self,
@@ -1005,7 +1033,7 @@ class PostgresCoreRepository:
                 continue
             normalized = normalized_list[index] if index < len(normalized_list) and isinstance(normalized_list[index], dict) else {}
             raw_payload = {**payload, "normalized_row": normalized}
-            connection.execute(
+            affected = connection.execute(
                 """
                 insert into app.import_batch_rows(
                     legacy_mongo_id, import_batch_id, legacy_batch_id, row_no, source_record_type,
@@ -1036,6 +1064,7 @@ class PostgresCoreRepository:
                     amount = excluded.amount,
                     counterparty_name = excluded.counterparty_name,
                     raw_payload = excluded.raw_payload
+                where app.import_batch_rows.legacy_batch_id = excluded.legacy_batch_id
                 """,
                 (
                     row_id,
@@ -1059,6 +1088,10 @@ class PostgresCoreRepository:
                     _jsonb({"normalized_payload": raw_payload}),
                 ),
             )
+            if affected == 0:
+                raise RuntimeError(
+                    f"Import batch row id {row_id} is already owned by another batch; refusing to re-parent it."
+                )
 
     def _save_invoice(self, connection: Any, invoice: dict[str, Any]) -> None:
         invoice_id = self._text(invoice.get("id"))

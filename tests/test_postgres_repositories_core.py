@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 from fin_ops_platform.domain.enums import BatchStatus, BatchType, ImportDecision, InvoiceStatus, InvoiceType, TransactionDirection
-from fin_ops_platform.domain.models import BankTransaction, Counterparty, Invoice
+from fin_ops_platform.domain.models import BankTransaction, Counterparty, ImportedBatchRowResult, Invoice
 from fin_ops_platform.services.import_file_service import FileImportService
 from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
@@ -814,3 +814,58 @@ def test_save_imports_does_not_emit_import_fact_refresh_from_full_snapshot() -> 
     assert "workbench_relation" not in repr(dirty_params).lower()
     assert "pending_invoice" not in repr(dirty_params).lower()
     assert "2026-05" not in repr(dirty_params)
+
+
+def test_import_batch_row_upsert_refuses_cross_batch_reparent() -> None:
+    class ConflictConnection:
+        def execute(self, sql: str, _params: tuple = ()) -> int:
+            return 0 if "insert into app.import_batch_rows" in sql else 1
+
+    repository = PostgresCoreRepository(ConflictConnection())
+    row = ImportedBatchRowResult(
+        id="batch_row:batch_import_0002:00001",
+        batch_id="batch_import_0002",
+        row_no=1,
+        source_record_type="invoice",
+        source_unique_key="invoice-key",
+        data_fingerprint=None,
+        decision=ImportDecision.CREATED,
+        decision_reason="new",
+    )
+
+    try:
+        repository._save_batch_rows(ConflictConnection(), "batch_import_0002", [row], [{}])
+    except RuntimeError as exc:
+        assert "refusing to re-parent" in str(exc)
+    else:
+        raise AssertionError("Cross-batch import row ownership conflict must fail closed.")
+
+
+def test_imported_invoice_total_repair_requires_unchanged_source_batch_owner() -> None:
+    class ChangedOwnerConnection:
+        def execute(self, _sql: str, _params: tuple = ()) -> int:
+            return 0
+
+    connection = ChangedOwnerConnection()
+    repository = PostgresCoreRepository(connection)
+
+    try:
+        repository.repair_imported_invoice_totals(
+            connection,
+            [
+                {
+                    "invoice_id": "invoice-1",
+                    "source_batch_id": "batch-1",
+                    "amount": "37.81",
+                    "signed_amount": "37.81",
+                    "tax_amount": "4.92",
+                    "total_with_tax": "42.73",
+                    "tax_rate": "13%",
+                    "raw_payload": {"normalized_payload": {"amount": "37.81"}},
+                }
+            ],
+        )
+    except RuntimeError as exc:
+        assert "changed after the repair plan" in str(exc)
+    else:
+        raise AssertionError("Invoice repair must fail when source batch ownership changed.")

@@ -156,3 +156,9 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_aud
 - Browser e2e 当前覆盖 deterministic mock 下的发票上传、方向选择、预览审计、慢预览动作锁定、损坏文件混合、确认、Workbench refresh，以及销项收款/进项使用/税金抵扣/待找发票/OA 待付款/成本统计的 fresh read model 展示；search、真实 worker drain、下游真实浏览器大数据表格、长分页、导出下载和网络恢复 smoke 仍是 `documented-risk`。
 - `import.process.requested` 是 file confirm 唯一 durable processing event，不是 inline fallback；具体发票 job 通过 session + selected file ids + batch type 精确归属于发票页，银行/发票任务和 outbox 不得互相阻断 Audit。
 - `tests/test_audit_invoice_import_page.py` 覆盖 direct-canonical expected-set、关键字段、manual source-link 双向 equality、file hash、job/outbox 和一次性 PostgreSQL 0001–0097 破坏性反证；`tests/test_platform_runtime_boundary_guards.py` 防止 inline/revert/import-file batch-column 旧链回流。
+
+## 2026-07-15 多明细发票回归
+
+- `tests/test_import_file_service.py`：不同商品/折扣行合并为一张整票；完全相同重复行仍进入 duplicate audit。
+- `tests/test_audit_invoice_import_page.py`：历史 component rows 按整票合计比较；完全相同重复行不二次加总。
+- `tests/test_import_audit_repair_ops.py`：canonical 金额恢复、source batch guard、dry-run plan 幂等和 rollback manifest。

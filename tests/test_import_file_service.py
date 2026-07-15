@@ -7,7 +7,13 @@ import unittest
 
 from openpyxl import Workbook, load_workbook
 
-from fin_ops_platform.services.import_file_service import FileImportService, UploadedImportFile, is_company_identity
+from fin_ops_platform.domain.enums import BatchType
+from fin_ops_platform.services.import_file_service import (
+    FileImportService,
+    UploadedImportFile,
+    aggregate_invoice_line_rows,
+    is_company_identity,
+)
 from fin_ops_platform.services.imports import ImportNormalizationService
 
 TESTS_DIR = Path(__file__).resolve().parent
@@ -95,6 +101,66 @@ class FailingSubmittedEtcIdentityRepository:
 
 
 class ImportFileServiceTests(unittest.TestCase):
+    def test_invoice_export_aggregates_distinct_lines_and_discount_into_one_invoice(self) -> None:
+        header = {
+            "digital_invoice_no": "26117000001052654674",
+            "invoice_no": "1052654674",
+            "seller_tax_no": "915300000000000001",
+            "buyer_tax_no": "915300007194052520",
+            "seller_name": "供应商",
+            "buyer_name": "云南溯源科技有限公司",
+            "invoice_date": "2026-07-01",
+            "invoice_status_from_source": "正常",
+        }
+
+        rows = aggregate_invoice_line_rows(
+            [
+                {**header, "taxable_item_name": "服务", "amount": "39.58", "tax_amount": "5.15", "total_with_tax": "44.73", "tax_rate": "13%"},
+                {**header, "taxable_item_name": "折扣", "amount": "-1.77", "tax_amount": "-0.23", "total_with_tax": "-2.00", "tax_rate": "13%"},
+            ]
+        )
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["amount"], "37.81")
+        self.assertEqual(rows[0]["tax_amount"], "4.92")
+        self.assertEqual(rows[0]["total_with_tax"], "42.73")
+        self.assertEqual(rows[0]["source_line_count"], 2)
+
+    def test_invoice_export_keeps_identical_repeated_rows_for_duplicate_audit(self) -> None:
+        row = {
+            "digital_invoice_no": "26117000001052654674",
+            "taxable_item_name": "服务",
+            "amount": "39.58",
+            "tax_amount": "5.15",
+            "total_with_tax": "44.73",
+            "tax_rate": "13%",
+        }
+
+        self.assertEqual(aggregate_invoice_line_rows([row, dict(row)]), [row, row])
+
+    def test_import_rows_use_batch_scoped_ids_without_legacy_counter_state(self) -> None:
+        service = ImportNormalizationService.from_snapshot({"batch_counter": 54, "row_counter": 999})
+
+        preview = service.preview_import(
+            batch_type=BatchType.INPUT_INVOICE,
+            source_name="invoice.xlsx",
+            imported_by="tester",
+            rows=[
+                {
+                    "digital_invoice_no": "26117000001052654674",
+                    "counterparty_name": "供应商",
+                    "seller_name": "供应商",
+                    "invoice_date": "2026-07-01",
+                    "amount": "42.73",
+                    "tax_amount": "4.92",
+                    "total_with_tax": "42.73",
+                }
+            ],
+        )
+
+        self.assertEqual(preview.row_results[0].id, "batch_row:batch_import_0055:00001")
+        self.assertNotIn("row_counter", service.snapshot())
+
     def test_confirmed_session_persistence_payload_excludes_unrelated_fact_domains_and_sessions(self) -> None:
         import_service = ImportNormalizationService(id_registry=FakeImportEntityRegistry())
         service = FileImportService(import_service)

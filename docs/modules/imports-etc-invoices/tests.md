@@ -158,3 +158,8 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_aud
 - 真实 OA 草稿创建、人工提交确认、Nginx `/api/` 和 `/fin-ops-api/` 代理路径仍需发布后 smoke。
 - Browser e2e 当前覆盖 deterministic mock 下的 ready task zip preview/confirm job feedback、ETC 票据批次、税金抵扣和成本统计下游 fresh read model；大数据 ETC business batch 列表、真实 worker 完成后的 Workbench/search/historical repair 展示、长任务源文件、真实浏览器导出/删除/网络恢复仍是 `documented-risk`。
 - 共享 `import.process.requested` 仍是多导入域 fallback；具体 ETC confirm job 通过 `etc_invoice_import.source` 精确指向 ETC 导入页和 ETC 票据域。
+
+## 2026-07-15 历史失败覆盖证明
+
+- `tests/test_audit_etc_import_page.py` 同时覆盖：failed session/job 的精确 task 已 `imported` 时只报告 covered warning；task 未正式完成时仍返回 blocking integrity issue。
+- 覆盖判定复用 ETC 票据 Audit 常量，防止两个页面对同一 job/session 得出相反结果。

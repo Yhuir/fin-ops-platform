@@ -8184,7 +8184,6 @@ class Application:
         import_service = getattr(self, "_import_service", None)
         return (
             f"batches:{getattr(import_service, '_batch_counter', 0)}|"
-            f"rows:{getattr(import_service, '_row_counter', 0)}|"
             f"invoices:{getattr(import_service, '_invoice_counter', 0)}"
         )
 
@@ -12932,7 +12931,13 @@ class Application:
         *,
         reason: str = "",
     ) -> list[str]:
-        return self._tax_offset_runtime_for_read_model().invalidate_read_model_scopes(scope_keys, reason=reason)
+        if not scope_keys:
+            return []
+        # Tax-offset scopes share one global invoice-fact source version.
+        return self._tax_offset_runtime_for_read_model().invalidate_read_models(
+            scope_keys=scope_keys,
+            reason=reason,
+        )
 
     def _enqueue_tax_offset_refresh_for_months(self, months: list[str], *, reason: str) -> bool:
         return self._tax_offset_runtime_for_read_model().enqueue_refresh_for_months(months, reason=reason)

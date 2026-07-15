@@ -80,3 +80,7 @@
   - 本轮模块验证命令见 `docs/modules/deploy/tests.md` 和 `docs/dev/testing-closure-state.md`。
 - 未测风险：真实远端 GitHub Actions 是否启用、SSH/sudo/root-owned helper、systemd restart、PostgreSQL migration/PITR、Nginx live config、Redis/RabbitMQ 真连接、OA iframe cookie 和真实浏览器缓存。
 - 后续事项：发布前执行 staging release smoke；所有模块闭环后进入完成审计。
+## 2026-07-15 import Audit 受控恢复入口
+
+- `finops-deploy-control import-audit-repair` 固定调用 release 内 module，不开放任意 SQL/shell。
+- dry-run 为 repeatable-read read-only snapshot；execute 要求相同 SHA-256 fingerprint，并在 serializable advisory-lock 事务内只写 import rows 与 source-batch 一致的 invoice totals。

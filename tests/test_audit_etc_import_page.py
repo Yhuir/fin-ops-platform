@@ -141,6 +141,48 @@ class FakeConnection(EtcTicketsFakeConnection):
 
 
 class EtcImportPageAuditTests(unittest.TestCase):
+    def test_failed_session_and_job_are_non_blocking_only_after_formal_task_completion(self) -> None:
+        connection = FakeConnection()
+        connection.tasks[0]["status"] = "imported"
+        connection.tasks[0]["raw_payload"]["normalized_payload"]["status"] = "imported"
+        connection.sessions[0]["status"] = "failed"
+        connection.sessions[0]["last_error"] = "worker acknowledgement failed"
+        session_payload = connection.sessions[0]["raw_payload"]["normalized_payload"]
+        session_payload["status"] = "failed"
+        session_payload["last_error"] = "worker acknowledgement failed"
+        connection.import_jobs = [
+            {
+                "job_id": "job-1",
+                "import_session_id": "session-1",
+                "status": "failed",
+                "attempt_count": 1,
+                "max_attempts": 5,
+                "task_status": "imported",
+            }
+        ]
+
+        report = etc_import_page_audit.audit_etc_import_page(connection)
+
+        self.assertEqual(report["overall_status"], "pass")
+        self.assertEqual(report["summary"]["covered_session_count"], 1)
+        self.assertIn(
+            "etc_import_session_failure_covered",
+            report["summary"]["issue_sample_counts_by_code"],
+        )
+
+    def test_failed_session_remains_blocking_without_formal_task_completion(self) -> None:
+        connection = FakeConnection()
+        connection.sessions[0]["status"] = "failed"
+        connection.sessions[0]["raw_payload"]["normalized_payload"]["status"] = "failed"
+
+        report = etc_import_page_audit.audit_etc_import_page(connection)
+
+        self.assertEqual(report["audit_status"]["integrity"], "issues_found")
+        self.assertIn(
+            "etc_import_session_terminal_failure",
+            report["summary"]["issue_sample_counts_by_code"],
+        )
+
     def test_clean_registered_preview_passes(self) -> None:
         report = etc_import_page_audit.audit_etc_import_page(FakeConnection())
 

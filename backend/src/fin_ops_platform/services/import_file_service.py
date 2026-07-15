@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from decimal import Decimal, InvalidOperation
 from io import BytesIO
 from copy import deepcopy
 import re
@@ -896,7 +897,107 @@ def parse_invoice_rows(rows: list[list[str]]) -> list[dict[str, Any]]:
                 "remark": mapped.get("备注"),
             }
         )
-    return data_rows
+    return aggregate_invoice_line_rows(data_rows)
+
+
+def aggregate_invoice_line_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[tuple[str, ...], list[dict[str, Any]]] = {}
+    order: list[tuple[str, ...]] = []
+    for index, row in enumerate(rows):
+        digital_no = clean(row.get("digital_invoice_no"))
+        invoice_code = clean(row.get("invoice_code"))
+        invoice_no = clean(row.get("invoice_no"))
+        identity = (
+            ("digital", digital_no)
+            if digital_no
+            else ("code_no", invoice_code, invoice_no)
+            if invoice_code and invoice_no
+            else ("row", str(index))
+        )
+        if identity not in grouped:
+            grouped[identity] = []
+            order.append(identity)
+        grouped[identity].append(row)
+
+    aggregated: list[dict[str, Any]] = []
+    for identity in order:
+        line_rows = grouped[identity]
+        if len(line_rows) == 1:
+            aggregated.append(line_rows[0])
+            continue
+        line_signatures = [_invoice_line_signature(row) for row in line_rows]
+        if len(set(line_signatures)) == 1:
+            aggregated.extend(line_rows)
+            continue
+        if len(set(line_signatures)) != len(line_signatures):
+            raise ValueError("同一发票同时包含重复行和不同明细行，无法安全判断合计金额。")
+        for field_name in (
+            "digital_invoice_no",
+            "invoice_code",
+            "invoice_no",
+            "seller_tax_no",
+            "seller_name",
+            "buyer_tax_no",
+            "buyer_name",
+            "invoice_date",
+            "invoice_status_from_source",
+        ):
+            values = {clean(row.get(field_name)) for row in line_rows if clean(row.get(field_name))}
+            if len(values) > 1:
+                raise ValueError(f"同一发票的 {field_name} 不一致，无法安全合并明细行。")
+        try:
+            amount = sum((_invoice_line_decimal(row.get("amount")) for row in line_rows), Decimal("0"))
+            tax_amount = sum((_invoice_line_decimal(row.get("tax_amount")) for row in line_rows), Decimal("0"))
+            total_with_tax = sum(
+                (_invoice_line_decimal(row.get("total_with_tax")) for row in line_rows),
+                Decimal("0"),
+            )
+        except InvalidOperation:
+            aggregated.extend(line_rows)
+            continue
+        merged = dict(line_rows[0])
+        merged.update(
+            {
+                "amount": _invoice_line_decimal_text(amount),
+                "tax_amount": _invoice_line_decimal_text(tax_amount),
+                "total_with_tax": _invoice_line_decimal_text(total_with_tax),
+                "source_line_count": len(line_rows),
+                "source_line_items": [dict(row) for row in line_rows],
+            }
+        )
+        tax_rates = {clean(row.get("tax_rate")) for row in line_rows if clean(row.get("tax_rate"))}
+        merged["tax_rate"] = next(iter(tax_rates)) if len(tax_rates) == 1 else "mixed"
+        aggregated.append(merged)
+    return aggregated
+
+
+def _invoice_line_decimal(value: Any) -> Decimal:
+    text = clean(value).replace(",", "")
+    if not text:
+        return Decimal("0")
+    return Decimal(text)
+
+
+def _invoice_line_decimal_text(value: Decimal) -> str:
+    return format(value.quantize(Decimal("0.01")), "f")
+
+
+def _invoice_line_signature(row: dict[str, Any]) -> tuple[str, ...]:
+    return tuple(
+        clean(row.get(field_name))
+        for field_name in (
+            "tax_classification_code",
+            "taxable_item_name",
+            "specification_model",
+            "unit",
+            "quantity",
+            "unit_price",
+            "amount",
+            "tax_rate",
+            "tax_amount",
+            "total_with_tax",
+        )
+    )
 
 
 def is_invoice_summary_footer(mapped: dict[str, str]) -> bool:

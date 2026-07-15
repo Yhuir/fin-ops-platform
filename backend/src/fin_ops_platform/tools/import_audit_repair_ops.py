@@ -1,0 +1,54 @@
+from __future__ import annotations
+
+import argparse
+from collections.abc import Sequence
+import json
+import sys
+from typing import TextIO
+
+from fin_ops_platform.services.import_audit_repair_service import (
+    build_import_audit_repair_plan,
+    public_repair_report,
+)
+from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
+from fin_ops_platform.services.postgres_repositories.import_audit_repair import (
+    apply_import_audit_repair,
+    load_import_audit_repair_snapshot,
+)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Repair strict import Audit facts from durable App evidence.")
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--dry-run", action="store_true")
+    mode.add_argument("--execute", action="store_true")
+    parser.add_argument("--expected-fingerprint")
+    return parser
+
+
+def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> int:
+    stdout = stdout or sys.stdout
+    args = build_parser().parse_args(argv)
+    if args.execute and not args.expected_fingerprint:
+        raise SystemExit("--execute requires --expected-fingerprint from a dry run")
+    connection = PostgresConnection(PostgresSettings.from_env())
+    if args.dry_run:
+        with connection.transaction() as transaction:
+            transaction.execute("set transaction isolation level repeatable read read only")
+            plan = build_import_audit_repair_plan(load_import_audit_repair_snapshot(transaction))
+        report = public_repair_report(plan, mode="dry_run", written=False)
+    else:
+        with connection.transaction() as transaction:
+            transaction.execute("set transaction isolation level serializable")
+            transaction.fetch_one("select pg_advisory_xact_lock(hashtext('fin_ops_import_audit_repair'))")
+            plan = build_import_audit_repair_plan(load_import_audit_repair_snapshot(transaction))
+            if plan["source_fingerprint"] != args.expected_fingerprint:
+                raise RuntimeError("Import repair source changed after dry-run; rerun dry-run before execute.")
+            apply_import_audit_repair(transaction, plan)
+        report = public_repair_report(plan, mode="execute", written=True)
+    print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True), file=stdout)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

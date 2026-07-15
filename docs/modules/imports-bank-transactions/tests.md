@@ -143,3 +143,9 @@ Nightly CI 通过 `scripts/verify.sh all` 执行后端、前端、Playwright bro
 - 本地已覆盖 240 行合成 ICBC 重复组；它不替代真实银行多模板、加密文件、异常编码、超大 Excel 内存/耗时和历史生产样本 smoke。
 - 真实 PostgreSQL + RabbitMQ + Redis + systemd import worker drain、job retry、worker crash/restart、幂等重复确认仍需环境验证；`write_operation_slo_audit --operation bank_import_confirmed` 已有本地契约测试，并要求真实银行确认样本产生 recent `bank_account_balance` outbox rows，但仍需要 staging 中真实 recent outbox rows 和账户余额 API fresh gate 证据。
 - 下游页面最终展示依赖银行明细、关联台、成本统计等模块自己的 fresh/read model 回归；本模块 Browser e2e 已覆盖银行明细小样本导入行和成本统计 fresh read model 导入证据，不覆盖真实 worker drain、关联台/search 最终显示或大文件性能。
+
+## 2026-07-15 import row owner 回归
+
+- `tests/test_import_file_service.py`：batch-scoped row id 不再依赖进程级 counter。
+- `tests/test_postgres_repositories_core.py`：同一 row id 若已属于其它 batch，repository fail closed，不重挂 owner。
+- `tests/test_import_audit_repair_ops.py`：registered file evidence + canonical owner 恢复、重复执行幂等、legacy row id/owner 冲突拒绝。

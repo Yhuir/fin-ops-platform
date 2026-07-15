@@ -13,6 +13,7 @@ from fin_ops_platform.services.postgres_repositories.audit_report import (
     use_audit_snapshot,
 )
 from fin_ops_platform.services.postgres_repositories.etc_tickets_page_audit import (
+    COVERED_IMPORT_TASK_STATUSES,
     collect_etc_tickets_integrity,
 )
 
@@ -63,12 +64,34 @@ def _audit_etc_import_snapshot(
     strict_session_ids = {_text(row.get("session_id")) for row in strict_sessions}
     strict_files = [row for row in files if _text(row.get("session_id")) in strict_session_ids]
     legacy_sessions = [row for row in sessions if row not in strict_sessions]
+    task_status_by_id = {
+        _text(row.get("task_id")): _text(row.get("status"))
+        for row in facts["tasks"]
+    }
+    covered_session_ids = {
+        _text(row.get("session_id"))
+        for row in strict_sessions
+        if _text(row.get("status")) in {"preview_ready", "failed"}
+        and task_status_by_id.get(_text(row.get("task_id"))) in COVERED_IMPORT_TASK_STATUSES
+    }
     jobs = [row for row in facts["import_jobs"] if _text(row.get("import_session_id")) in strict_session_ids]
     job_ids = [str(row.get("job_id") or "") for row in jobs if row.get("job_id")]
     outbox = connection.fetch_all(_OUTBOX_SQL, (job_ids,)) if job_ids else []
 
-    issues.extend(_session_contract_issues(sessions=strict_sessions, files=strict_files))
-    issues.extend(_session_task_edge_issues(sessions=strict_sessions, facts=facts))
+    issues.extend(
+        _session_contract_issues(
+            sessions=strict_sessions,
+            files=strict_files,
+            covered_session_ids=covered_session_ids,
+        )
+    )
+    issues.extend(
+        _session_task_edge_issues(
+            sessions=strict_sessions,
+            facts=facts,
+            covered_session_ids=covered_session_ids,
+        )
+    )
     issues.extend(_session_job_issues(sessions=strict_sessions, jobs=jobs, outbox=outbox))
     if legacy_sessions:
         issues.append(
@@ -97,6 +120,7 @@ def _audit_etc_import_snapshot(
             "terminal_session_count": sum(
                 1 for row in strict_sessions if _text(row.get("status")) in TERMINAL_SESSION_STATUSES
             ),
+            "covered_session_count": len(covered_session_ids),
             "import_job_count": len(jobs),
             "outbox_event_count": len(outbox),
             "reconciliation_task_count": len(facts["tasks"]),
@@ -169,8 +193,10 @@ def _session_contract_issues(
     *,
     sessions: list[dict[str, Any]],
     files: list[dict[str, Any]],
+    covered_session_ids: set[str] | None = None,
 ) -> list[AuditIssue]:
     issues: list[AuditIssue] = []
+    covered = covered_session_ids or set()
     files_by_session: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in files:
         files_by_session[_text(row.get("session_id"))].append(row)
@@ -208,11 +234,34 @@ def _session_contract_issues(
         if _text(row.get("status")) not in KNOWN_SESSION_STATUSES:
             issues.append(_issue("etc_import_session_status_invalid", session_id, {"status": row.get("status")}))
         if _text(row.get("status")) == "failed":
+            if session_id in covered:
+                issues.append(
+                    AuditIssue(
+                        "warning",
+                        "etc_import_session_failure_covered",
+                        "A later formal task state covers this historical failed ETC import session.",
+                        session_id,
+                        "imports.etc-invoices",
+                        {"last_error": row.get("last_error")},
+                    )
+                )
+            else:
+                issues.append(
+                    _issue(
+                        "etc_import_session_terminal_failure",
+                        session_id,
+                        {"last_error": row.get("last_error")},
+                    )
+                )
+        elif _text(row.get("status")) == "preview_ready" and session_id in covered:
             issues.append(
-                _issue(
-                    "etc_import_session_terminal_failure",
+                AuditIssue(
+                    "warning",
+                    "etc_import_preview_superseded",
+                    "The task reached a formal terminal state after this preview session.",
                     session_id,
-                    {"last_error": row.get("last_error")},
+                    "imports.etc-invoices",
+                    None,
                 )
             )
         required = (
@@ -359,8 +408,10 @@ def _session_task_edge_issues(
     *,
     sessions: list[dict[str, Any]],
     facts: dict[str, list[dict[str, Any]]],
+    covered_session_ids: set[str] | None = None,
 ) -> list[AuditIssue]:
     issues: list[AuditIssue] = []
+    covered = covered_session_ids or set()
     task_by_id = {_text(row.get("task_id")): row for row in facts["tasks"]}
     session_by_id = {_text(row.get("session_id")): row for row in sessions}
     attempt_edges: dict[str, list[tuple[str, dict[str, Any]]]] = defaultdict(list)
@@ -388,7 +439,7 @@ def _session_task_edge_issues(
             continue
         status = _text(session.get("status"))
         task_payload = _payload(task.get("raw_payload"))
-        if status in {"preview_ready", "failed"}:
+        if status in {"preview_ready", "failed"} and session_id not in covered:
             if (
                 _text(task.get("status")) != "ready_for_import"
                 or _integer(task.get("version")) != _integer(session.get("task_version"))
@@ -483,7 +534,10 @@ def _session_job_issues(
                     {"status": job.get("status"), "session_id": session_id},
                 )
             )
-        if _text(job.get("status")) in {"failed", "dead_lettered"}:
+        if (
+            _text(job.get("status")) in {"failed", "dead_lettered"}
+            and _text(job.get("task_status")) not in COVERED_IMPORT_TASK_STATUSES
+        ):
             issues.append(_issue("etc_import_job_terminal_failure", _text(job.get("job_id")), job))
     job_ids = {_text(row.get("job_id")) for row in jobs}
     for event in outbox:

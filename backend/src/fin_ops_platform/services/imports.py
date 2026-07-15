@@ -122,7 +122,6 @@ class ImportNormalizationService:
         dedup_decision_service: ObjectDedupDecisionService | None = None,
     ) -> None:
         self._batch_counter = 0
-        self._row_counter = 0
         self._invoice_counter = len(existing_invoices or [])
         self._txn_counter = len(existing_transactions or [])
         self._counterparty_counter = 0
@@ -183,7 +182,6 @@ class ImportNormalizationService:
         if not snapshot:
             return service
         service._batch_counter = int(snapshot.get("batch_counter", 0))
-        service._row_counter = int(snapshot.get("row_counter", 0))
         service._invoice_counter = int(snapshot.get("invoice_counter", service._invoice_counter))
         service._txn_counter = int(snapshot.get("txn_counter", service._txn_counter))
         service._counterparty_counter = int(snapshot.get("counterparty_counter", service._counterparty_counter))
@@ -193,7 +191,6 @@ class ImportNormalizationService:
     def snapshot(self, *, include_facts: bool = True) -> dict[str, Any]:
         snapshot = {
             "batch_counter": self._batch_counter,
-            "row_counter": self._row_counter,
             "invoice_counter": self._invoice_counter,
             "txn_counter": self._txn_counter,
             "counterparty_counter": self._counterparty_counter,
@@ -227,7 +224,6 @@ class ImportNormalizationService:
                     transaction_ids.add(linked_id)
         return {
             "batch_counter": self._batch_counter,
-            "row_counter": self._row_counter,
             "invoice_counter": self._invoice_counter,
             "txn_counter": self._txn_counter,
             "counterparty_counter": self._counterparty_counter,
@@ -900,7 +896,7 @@ class ImportNormalizationService:
         data_fingerprint = normalized.get("data_fingerprint")
         if errors:
             return ImportedBatchRowResult(
-                id=self._next_row_id(),
+                id=self._row_id(batch_id, row_no),
                 batch_id=batch_id,
                 row_no=row_no,
                 source_record_type="invoice",
@@ -921,7 +917,7 @@ class ImportNormalizationService:
             normalized["previous_source_batch_id"] = existing.source_batch_id
 
         return ImportedBatchRowResult(
-            id=self._next_row_id(),
+            id=self._row_id(batch_id, row_no),
             batch_id=batch_id,
             row_no=row_no,
             source_record_type="invoice",
@@ -1018,7 +1014,7 @@ class ImportNormalizationService:
 
         if errors:
             return normalized, ImportedBatchRowResult(
-                id=self._next_row_id(),
+                id=self._row_id(batch_id, row_no),
                 batch_id=batch_id,
                 row_no=row_no,
                 source_record_type="bank_transaction",
@@ -1036,7 +1032,7 @@ class ImportNormalizationService:
         reason = dedup_decision.decision_reason
 
         return normalized, ImportedBatchRowResult(
-            id=self._next_row_id(),
+            id=self._row_id(batch_id, row_no),
             batch_id=batch_id,
             row_no=row_no,
             source_record_type="bank_transaction",
@@ -1784,9 +1780,9 @@ class ImportNormalizationService:
             if batch_id not in self._batches and not self._registry_has("import_batch_exists", batch_id):
                 return batch_id
 
-    def _next_row_id(self) -> str:
-        self._row_counter += 1
-        return f"batch_row_{self._row_counter:05d}"
+    @staticmethod
+    def _row_id(batch_id: str, row_no: int) -> str:
+        return f"batch_row:{batch_id}:{int(row_no):05d}"
 
     def _next_invoice_id(self) -> str:
         while True:

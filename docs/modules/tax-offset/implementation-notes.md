@@ -309,3 +309,7 @@
 - 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_tax_offset_service tests.test_tax_certified_import_service tests.test_tax_offset_read_model_service -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_tax_offset_api tests.test_import_job_queue -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_tax_offset_sql_runtime tests.test_read_model_refresh_gateway tests.test_runtime_worker_read_model_refresh_scopes -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_derived_data_lifecycle_service tests.test_app_status_overview_service tests.test_postgres_state_store tests.test_postgres_migrations -v`；`cd web && npm test -- --run src/test/TaxOffsetPage.test.tsx src/test/TaxApi.test.ts src/test/AppStatusIndicator.test.tsx`。
 - 未测风险：未连接真实税局认证 XLSX 大样本、真实 OA 附件发票缓存或真实 ETC 生产数据；未跑真实 RabbitMQ/Redis/systemd tax-offset worker drain；未做超大表格性能和真实网络中断恢复 smoke。
 - 后续事项：下一轮处理 `pending-invoices`，重点审计规则、人工发票、attach existing、income status 与 invoice lifecycle fan-out。
+## 2026-07-15 全局来源版本失效边界
+
+- invoice fact source version 是全局值，不是月份值；旧链只失效本次导入月份，使其它 25 个已有月份继续保存旧版本。
+- invoice 写后改为清除全部已存在 tax_offset scope，并通过正式 refresh gateway 重建已存在月份与本次月份的并集。

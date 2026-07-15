@@ -879,7 +879,7 @@ class ApplicationStateStore:
     @classmethod
     def _merge_import_snapshot(cls, current: Any, delta: dict[str, Any]) -> dict[str, Any]:
         merged = dict(current) if isinstance(current, dict) else {}
-        for counter in ("batch_counter", "row_counter", "invoice_counter", "txn_counter", "counterparty_counter"):
+        for counter in ("batch_counter", "invoice_counter", "txn_counter", "counterparty_counter"):
             if counter in delta:
                 merged[counter] = max(int(merged.get(counter) or 0), int(delta.get(counter) or 0))
         batches = delta.get("batches")

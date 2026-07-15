@@ -255,6 +255,58 @@ class FakeConnection:
 
 
 class InvoiceImportPageAuditTests(unittest.TestCase):
+    def test_distinct_line_components_are_compared_as_one_invoice_total(self) -> None:
+        connection = FakeConnection()
+        first = connection.rows[0]
+        first_normalized = first["raw_payload"]["normalized_payload"]["normalized_row"]
+        first_normalized.update(
+            {
+                "taxable_item_name": "服务",
+                "amount": "39.58",
+                "signed_amount": "39.58",
+                "tax_amount": "5.15",
+                "total_with_tax": "44.73",
+            }
+        )
+        second = deepcopy(first)
+        second["row_id"] = "row-2"
+        second["row_no"] = 2
+        second_normalized = second["raw_payload"]["normalized_payload"]["normalized_row"]
+        second_normalized.update(
+            {
+                "taxable_item_name": "折扣",
+                "amount": "-1.77",
+                "signed_amount": "-1.77",
+                "tax_amount": "-0.23",
+                "total_with_tax": "-2.00",
+            }
+        )
+        invoice = connection.invoices[0]
+        invoice.update({"amount": "37.81", "signed_amount": "37.81", "tax_amount": "4.92", "total_with_tax": "42.73"})
+
+        issues = invoice_import_page_audit._invoice_component_field_issues(
+            [first, second],
+            invoice,
+            batch_type="input_invoice",
+        )
+
+        self.assertEqual(issues, [])
+
+    def test_identical_duplicate_lines_are_not_added_to_canonical_invoice_total(self) -> None:
+        connection = FakeConnection()
+        first = connection.rows[0]
+        second = deepcopy(first)
+        second["row_id"] = "row-2"
+        second["row_no"] = 2
+
+        issues = invoice_import_page_audit._invoice_component_field_issues(
+            [first, second],
+            connection.invoices[0],
+            batch_type="input_invoice",
+        )
+
+        self.assertEqual(issues, [])
+
     def test_clean_direct_canonical_chain_passes_and_other_page_queue_is_ignored(self) -> None:
         connection = FakeConnection()
 

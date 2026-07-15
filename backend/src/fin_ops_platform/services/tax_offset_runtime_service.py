@@ -142,22 +142,25 @@ class TaxOffsetRuntimeService:
         cached_payload = cached_read_model.get("payload")
         return dict(cached_payload) if isinstance(cached_payload, dict) else None
 
-    def invalidate_read_models(self) -> list[str]:
+    def invalidate_read_models(self, *, scope_keys: list[str] | None = None, reason: str = "") -> list[str]:
         self._clear_month_cache(None)
         read_model_service = self._read_model_service
         clear = getattr(read_model_service, "clear", None)
         snapshot = getattr(read_model_service, "snapshot", None)
-        if not callable(clear) or not callable(snapshot):
-            return []
-        deleted_scope_keys = clear()
-        self._persist(
-            snapshot=snapshot(),
-            changed_scope_keys=deleted_scope_keys,
-            operation="invalidate_tax_offset_read_models",
-        )
-        warmup_months = self.warmup_months_from_scope_keys(deleted_scope_keys) or self.default_warmup_months()
-        if not self.enqueue_refresh_for_months(warmup_months, reason="tax_offset_read_model_invalidated"):
-            self._schedule_warmup(warmup_months, "tax_offset_read_model_invalidated")
+        deleted_scope_keys: list[str] = []
+        if callable(clear) and callable(snapshot):
+            deleted_scope_keys = clear()
+            self._persist(
+                snapshot=snapshot(),
+                changed_scope_keys=deleted_scope_keys,
+                operation="invalidate_tax_offset_read_models",
+            )
+        warmup_months = sorted(
+            self.months_from_scope_keys([*deleted_scope_keys, *(scope_keys or [])])
+        ) or self.default_warmup_months()
+        refresh_reason = reason or "tax_offset_read_model_invalidated"
+        if not self.enqueue_refresh_for_months(warmup_months, reason=refresh_reason):
+            self._schedule_warmup(warmup_months, refresh_reason)
         return deleted_scope_keys
 
     def invalidate_read_model_scopes(self, scope_keys: list[str], *, reason: str = "") -> list[str]:

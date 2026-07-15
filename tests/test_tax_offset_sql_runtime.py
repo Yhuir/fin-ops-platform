@@ -9,7 +9,10 @@ from fin_ops_platform.services.cost_tax_sql_projection import TaxOffsetSqlProjec
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 from fin_ops_platform.services.tax_offset_read_model_repository import TaxOffsetReadModelRepositoryPort
-from fin_ops_platform.services.tax_offset_read_model_service import TAX_OFFSET_READ_MODEL_SCHEMA_VERSION
+from fin_ops_platform.services.tax_offset_read_model_service import (
+    TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
+    TaxOffsetReadModelService,
+)
 from fin_ops_platform.services.tax_offset_read_model_refresh import TaxOffsetReadModelRefreshService
 
 
@@ -761,6 +764,38 @@ class TaxOffsetSqlRuntimeTests(unittest.TestCase):
         self.assertIn("tax_offset:month:2026-05", redis.deletes)
         self.assertIn("tax_offset:summary:2026-05", redis.deletes)
         self.assertTrue(any(f":schema:{TAX_OFFSET_READ_MODEL_SCHEMA_VERSION}:sources:" in key for key in redis.deletes))
+
+    def test_invoice_change_invalidates_all_tax_scopes_because_source_version_is_global(self) -> None:
+        read_models = TaxOffsetReadModelService()
+        for month in ("2026-04", "2026-06"):
+            read_models.upsert_read_model(
+                month,
+                tax_payload(month),
+                generated_at="2026-07-01T00:00:00+00:00",
+            )
+        queue = QueueRecorder()
+        app = object.__new__(Application)
+        app._runtime_repositories = type(
+            "RuntimeRepos",
+            (),
+            {"queue_repository": queue, "redis_helper": RedisRecorder()},
+        )()
+        app._tax_offset_service = type("TaxOffsetService", (), {"clear_month_cache": lambda *_args: None})()
+        app._tax_offset_read_model_service = read_models
+        app._persist_tax_offset_read_models_best_effort = lambda **_kwargs: None
+        app._schedule_tax_offset_cache_warmup = lambda *_args, **_kwargs: None
+
+        deleted = app._invalidate_tax_offset_read_model_scopes(["2026-05"], reason="invoice_import_confirmed")
+
+        self.assertEqual(deleted, ["2026-04", "2026-06"])
+        self.assertEqual(
+            queue.refreshes,
+            [
+                ("tax_offset", "2026-04", "invoice_import_confirmed"),
+                ("tax_offset", "2026-05", "invoice_import_confirmed"),
+                ("tax_offset", "2026-06", "invoice_import_confirmed"),
+            ],
+        )
 
     def test_tax_offset_invalidation_ignores_redis_delete_timeout(self) -> None:
         queue = QueueRecorder()
