@@ -186,12 +186,28 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
 
         self.assertEqual(plan["invoice_updates"], [])
 
-    def test_plan_fails_closed_when_created_bank_owner_does_not_match_batch(self) -> None:
+    def test_plan_fails_closed_when_registered_counts_conflict_with_canonical_bank_owner(self) -> None:
         snapshot = _snapshot()
         snapshot["bank_transactions"][0]["source_batch_id"] = "different-batch"
 
-        with self.assertRaisesRegex(ValueError, "owner mismatch"):
+        with self.assertRaisesRegex(ValueError, "decision counts"):
             build_import_audit_repair_plan(snapshot)
+
+    def test_plan_resolves_preview_created_duplicate_from_canonical_batch_ownership(self) -> None:
+        snapshot = _snapshot()
+        bank_file = snapshot["bank_files"][0]
+        payload = bank_file["raw_payload"]["normalized_payload"]
+        payload["row_results"].append(deepcopy(payload["row_results"][0]))
+        payload["normalized_rows"].append(deepcopy(payload["normalized_rows"][0]))
+        bank_file.update({"row_count": 2, "success_count": 1, "duplicate_count": 1})
+
+        plan = build_import_audit_repair_plan(snapshot)
+
+        self.assertEqual([row["decision"] for row in plan["bank_rows"]], ["created", "duplicate_skipped"])
+        self.assertEqual(
+            [row["linked_object_id"] for row in plan["bank_rows"]],
+            ["transaction-1", "transaction-1"],
+        )
 
     def test_plan_fails_closed_on_legacy_existing_bank_row_ids(self) -> None:
         snapshot = _snapshot()

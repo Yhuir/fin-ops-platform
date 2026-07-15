@@ -60,9 +60,13 @@ def _bank_row_plan(
     if len(existing_by_id) != len(existing_rows):
         raise ValueError("Duplicate strict bank import row ids prevent deterministic repair.")
     desired_row_ids: set[str] = set()
+    planned_batch_ids: set[str] = set()
     planned: list[dict[str, Any]] = []
     for file in files:
         batch_id = _text(file.get("batch_id"))
+        if not batch_id or batch_id in planned_batch_ids:
+            raise ValueError(f"Strict bank import batch ownership is not one-file-to-one-batch: {batch_id}")
+        planned_batch_ids.add(batch_id)
         payload = _payload(file.get("raw_payload"))
         row_results = [dict(row) for row in list(payload.get("row_results") or []) if isinstance(row, dict)]
         normalized_rows = [dict(row) for row in list(payload.get("normalized_rows") or []) if isinstance(row, dict)]
@@ -70,16 +74,23 @@ def _bank_row_plan(
             raise ValueError(f"Bank import file {file.get('file_id')} row evidence is incomplete.")
         desired_batch_rows: list[dict[str, Any]] = []
         new_batch_rows: list[dict[str, Any]] = []
+        owned_source_keys: set[str] = set()
         for row_no, (row_result, normalized) in enumerate(zip(row_results, normalized_rows, strict=True), start=1):
             source_key = _text(row_result.get("source_unique_key") or normalized.get("source_unique_key"))
-            decision = _text(row_result.get("decision"))
-            if decision not in {"created", "status_updated", "duplicate_skipped", "suspected_duplicate", "error"}:
+            preview_decision = _text(row_result.get("decision"))
+            if preview_decision not in {"created", "status_updated", "duplicate_skipped", "suspected_duplicate", "error"}:
                 raise ValueError(f"Bank import {batch_id} row {row_no} has an unknown registered decision.")
             transaction = transactions_by_key.get(source_key)
-            if decision in {"created", "status_updated", "duplicate_skipped"} and transaction is None:
+            if preview_decision in {"created", "status_updated", "duplicate_skipped"} and transaction is None:
                 raise ValueError(f"Canonical bank transaction is missing for {batch_id} row {row_no}.")
-            if decision in {"created", "status_updated"} and _text(transaction.get("source_batch_id")) != batch_id:
-                raise ValueError(f"Canonical bank transaction owner mismatch for {batch_id} row {row_no}.")
+            decision = preview_decision
+            if transaction is not None and preview_decision in {"created", "status_updated", "duplicate_skipped"}:
+                canonical_owner = _text(transaction.get("source_batch_id"))
+                if canonical_owner != batch_id or source_key in owned_source_keys:
+                    decision = "duplicate_skipped"
+                else:
+                    owned_source_keys.add(source_key)
+                    decision = "status_updated" if preview_decision == "status_updated" else "created"
             linked_object_id = (
                 transaction["transaction_id"]
                 if transaction is not None and decision in {"created", "status_updated", "duplicate_skipped"}
@@ -96,7 +107,7 @@ def _bank_row_plan(
                 "source_unique_key": source_key,
                 "decision": decision,
                 "decision_reason": (
-                    _text(row_result.get("decision_reason"))
+                    _text(row_result.get("decision_reason")) if decision == preview_decision else ""
                     or "Recovered from registered import evidence."
                 ),
                 "linked_object_type": "bank_transaction" if linked_object_id else None,

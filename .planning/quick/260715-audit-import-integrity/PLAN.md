@@ -56,3 +56,9 @@
 - [ ] commit/push。
 - [ ] 生产发布、指纹锁定的 dry-run/execute 数据恢复。
 - [ ] settings normalization、read model 收敛、system Audit 两次连续通过与 520 关系回归。
+
+### 生产 dry-run 反馈
+
+- 首次 release `main-6ff1e40d-20260715232536` 的只读 dry-run 在写入前按设计 fail closed：`batch_import_0046` 的 file payload 保留了 preview 时两条 `created`，而 confirm 时按同一 identity 落为一条 `created` + 一条 `duplicate_skipped`。
+- 修复计划不盲信 stale preview decision；对已落 canonical 的银行流水，由 `source_unique_key + canonical source_batch_id + batch 内首次出现顺序` 恢复最终 decision，仍以正式 batch counts 作 fail-closed 终局门禁。
+- 首次 dry-run 未执行任何数据写入；补齐生产历史格式回归测试后需重新走 commit/push/deploy/dry-run。
