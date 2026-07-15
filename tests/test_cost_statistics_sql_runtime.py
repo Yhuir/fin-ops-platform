@@ -483,18 +483,20 @@ class CostStatisticsBankTagFacade:
             "scope_keys": list(scope_keys),
         }
 
-    def category_records_by_transaction_ids(self, transaction_ids: list[str], **kwargs: object) -> dict[str, dict[str, object]]:
+    def get_by_transaction_ids(self, transaction_ids: list[str], **kwargs: object) -> dict[str, object]:
         self.category_calls.append((list(transaction_ids), dict(kwargs)))
-        if self.status != "fresh":
-            raise RuntimeError("bank_detail_read_model_not_fresh")
         return {
-            "bank-1": {
-                "effective_category_code": "project_material",
-                "effective_category_label": "设备材料",
-                "effective_category_primary_label": "项目开销",
-                "effective_category_sub_label": "设备材料",
-                "effective_category_label_path": ["项目开销", "设备材料"],
-            }
+            "status": self.status,
+            "rows": [
+                {
+                    "transaction_id": "bank-1",
+                    "effective_category_code": "project_material",
+                    "effective_category_label": "设备材料",
+                    "effective_category_primary_label": "项目开销",
+                    "effective_category_sub_label": "设备材料",
+                    "effective_category_label_path": ["项目开销", "设备材料"],
+                }
+            ],
         }
 
     def list_by_month(self, month: str, **kwargs: object) -> dict[str, object]:
@@ -1394,6 +1396,9 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(tag_facade.source_version_calls[0][1]["reason"], "downstream_bank_tag_read")
         self.assertEqual(tag_facade.category_calls[0][1]["reason"], "downstream_bank_tag_read")
         self.assertEqual(tag_facade.month_calls[0][1]["reason"], "downstream_bank_tag_read")
+        self.assertEqual(tag_facade.source_version_calls[0][1]["require_fresh"], False)
+        self.assertEqual(tag_facade.category_calls[0][1]["require_fresh"], False)
+        self.assertEqual(tag_facade.month_calls[0][1]["require_fresh"], False)
         self.assertEqual(
             snapshot["read_models"]["active:2026-05"]["source_versions"]["bank_detail_source_versions"],
             {"bank_detail_scope_version": "bank-detail-v2"},
@@ -1450,6 +1455,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual(repository.saved, [])
         self.assertEqual(tag_facade.source_version_calls[0][1]["reason"], "downstream_bank_tag_read")
+        self.assertEqual(tag_facade.source_version_calls[0][1]["require_fresh"], False)
 
     def test_cost_statistics_expected_source_versions_include_bank_detail_scope_versions(self) -> None:
         app = object.__new__(Application)

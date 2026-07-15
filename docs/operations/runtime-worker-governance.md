@@ -212,6 +212,10 @@ sudo -n /usr/local/sbin/finops-deploy-control read-model-refresh <release-name> 
 如果 downstream refresh handler 抛出 `*_read_model_not_fresh` / `read_model_not_fresh`，runtime worker
 会调用 `RuntimeQueueRepository.defer_event(...)`，把该 outbox event 短延迟放回 `pending`，生产模板默认 0.25 秒后
 重新 claim。这只用于依赖顺序竞态，不写 fresh readiness、不缓存 payload，也不进入 failed/dead-letter。
+`cost-statistics` downstream projection 在抛出该异常前只能做无队列副作用的 bank-detail dependency read，并显式检查返回的 freshness；不得让
+read facade 在该 projection 内部因 `require_fresh=True` 自动 enqueue。同一读取同时承担 status check 和 enqueue 会产生
+TOCTOU：dependency event 可在状态读取后、enqueue active-check 前完成/ack，随后过时的 non-fresh 结果又创建同 scope
+event。依赖 enqueue 必须由 runtime worker 的异常边界单点负责；API/query miss 的正常 refresh enqueue 合同不受此限制。
 
 ### Runtime queue history retention
 
