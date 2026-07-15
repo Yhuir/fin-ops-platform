@@ -84,6 +84,9 @@ class AuditWorkbenchRelationDisplayToolTests(unittest.TestCase):
         self.assertIn("where member.row_id = oa.row_id", queried_sql)
         self.assertIn("group_row.zone = 'paired'", queried_sql)
         self.assertIn("group_row.zone = 'unpaired'", queried_sql)
+        self.assertIn("from active_relation_members relation_member", queried_sql)
+        self.assertIn("where relation_member.row_id = override.row_id", queried_sql)
+        self.assertIn("where relation_member.row_id = member.row_id", queried_sql)
         self.assertNotIn("candidate:%%", queried_sql)
 
     def test_relation_display_can_be_clean_while_canonical_object_is_missing(self) -> None:

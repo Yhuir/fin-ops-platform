@@ -1077,3 +1077,10 @@
 - v3 修复：未配对 grouping 只清除与 `candidate:` / `decision:` / `temp:` case ownership 绑定的 mode/amount 装饰，不对白名单外 override 字段做推断；projection 在 exception 成员集合中排除 active override row，使唯一 control owner 与 Audit SQL 一致。没有增加 I/O、fallback、第三种状态或新持久化路径。
 - 版本：month projection 升级为 `2026-07-15-formal-relation-partition-v3`，all-scope builder 升级为 `workbench_sql_projection.composed_active_month_shards.formal_relation_partition.v3`，Redis groups cache 继续直接复用同一 month schema。仍无 schema migration，0104 不进入本 release。
 - 回归保护：新增 `pending_input_invoice` active override 保留测试，以及 row override 与 exception case 同时命中时 override 胜出的 service 测试；生产必须再次通过完整本地/远端双 CI、受控 rehydrate 和零阻断 Audit 才能保持 active。
+
+## 2026-07-15 - v3 生产审计三次回滚与 v4 正式关系优先级修复
+
+- 生产证据：PR #6 merge SHA `427f8efac75d1dfbfa2d1d3f433a078c3afabe39` 的 branch/main 精确 SHA CI 均通过；release `main-427f8efac-workbench-audit-v3-20260715083006` 激活并完成 19-month rehydrate 后，51 个 ETC mismatch 与 3 个合法 override mode mismatch 均归零，但 Page Audit 仍阻断 `oa-pay-1982`、`txn_imported_1258` 两个 `case_id` mismatch。生产立即回滚并 rehydrate `etc-import-e5d6e6a4e-20260714-visibility`，恢复 `pass/fresh/drained`、219 relations、19 scopes、876 relation rows、1296 group rows和零问题；migration 仍只到 0103。
+- 完整根因：这两个 row 已是同一 active formal relation 的成员，同时保留历史 active override/exception。v3 正确建立了未配对控制优先级，但 projection 仍在识别 formal members 前读取旧 controls，随后 relation enrichment 只覆盖部分 ownership 字段；Page Audit 又无条件把 override 当最高事实，因而把正式关系 case id 错报为应等于旧 override null。问题不在 repository JSON 持久化，而是 formal relation 与 legacy control 的边界优先级缺失。
+- v4 修复：builder 从本次已经加载的 active relations 计算 member row ids，并在既有批量查询前从 override/exception 输入集合排除；Page Audit 同样从 active formal relation members 排除 control equality。统一优先级为 formal relation > override > exception，未配对 override/exception 行为不变。没有新增 SQL round trip、表、worker、fallback、第三种状态或 canonical 写入。
+- 版本与验证：month projection 升级为 `2026-07-15-formal-relation-partition-v4`，all-scope builder 升级为 `workbench_sql_projection.composed_active_month_shards.formal_relation_partition.v4`。新增生产 identity 形状的 formal-relation/override/exception 冲突测试，并验证最终 repository row payload 不含旧 control decoration；Page Audit SQL 测试锁定同一 precedence。0104 仍不进入本 release。
