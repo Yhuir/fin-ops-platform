@@ -47,6 +47,10 @@ invoice usage/output collection backfill、App Health/workbench performance 和 
   `self-update` 时仍需要一次 root bootstrap。`/usr/local/sbin/finops-ensure-runtime-workers`
   仍是预安装的 root helper；release deploy 只校验该 helper 的合同并通过 `finops-deploy-control activate`
   间接调用它，不在发布链路中覆盖该 runtime worker helper。
+- 当前 release 的 worker registry 同时是生产实例白名单。`activate` 在重启服务前枚举全部已加载
+  `fin-ops-worker@*.service`，对已启用、运行或失败但不在 registry 中的实例执行 stop/disable；不删除实例 env，
+  因而可通过恢复含该 registration 的 release 受控回滚。禁止把 WIP 性能 worker 或手工 systemd 实例留在
+  registry 外长期运行，也禁止通过给未知实例补空参数来绕过 registration contract。
 - PostgreSQL durable queue worker 的 idle poll 基线是 `0.05s`；`workbench` 月分片热 lane 为 `0.01s`，`workbench-aggregate` 为 `0.05s` 且每轮最多 drain 4 个显式 all-scope 维护 event。普通 high/urgent 月分片发布后不再自动投递 `workbench:all` 聚合；relation 写入产生的 `workbench_relation_changed` 必须让具体月份和 relation/downstream read model 收敛，`month=all` 页面由 query-composed active 月分片立即读取最新可见数据。只有 rebuild/repair/backfill 显式设置 `publish_all_aggregate=true` 时才进入 `workbench-aggregate` lane。新增 read model / 写后 fan-out worker 不能把
   `--poll-interval-seconds 2`、`0.25`、`0.1` 或 `5` 作为默认值；`workbench-matching` 是独立脏 scope 批处理例外，
   可保留显式 5s poll。发布 helper 会把已有 env 中精确命中的历史 `--poll-interval-seconds 2|0.25|0.1|0.05`
@@ -90,6 +94,9 @@ PYTHONPATH="$release_src/backend/src" \
 ```bash
 # required worker instance 列表
 python -m fin_ops_platform.tools.runtime_worker_manifest --required-instances
+
+# 全部允许运行的 worker instance 列表
+python -m fin_ops_platform.tools.runtime_worker_manifest --instances
 
 # 某个 worker 的 env 模板名
 python -m fin_ops_platform.tools.runtime_worker_manifest --env-example workbench

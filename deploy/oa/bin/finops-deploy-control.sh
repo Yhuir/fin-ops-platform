@@ -87,6 +87,43 @@ active_worker_services() {
     | sort -u || true
 }
 
+all_worker_services() {
+  systemctl list-units --type=service --all --no-legend 'fin-ops-worker@*.service' \
+    | awk '{print $1}' \
+    | grep -E '^fin-ops-worker@[-A-Za-z0-9_.]+\.service$' \
+    | sort -u || true
+}
+
+registered_worker_instances() {
+  local src="$1"
+  PYTHONPATH="$src/backend/src${PYTHONPATH:+:$PYTHONPATH}" \
+    "$WORKER_PYTHON" -m fin_ops_platform.tools.runtime_worker_manifest --instances
+}
+
+retire_unregistered_worker_services() {
+  local src="$1"
+  local registered_workers service instance
+  registered_workers=" $(registered_worker_instances "$src") "
+
+  while IFS= read -r service; do
+    [[ -n "$service" ]] || continue
+    instance="${service#fin-ops-worker@}"
+    instance="${instance%.service}"
+    if [[ "$registered_workers" == *" $instance "* ]]; then
+      continue
+    fi
+    if ! systemctl is-enabled --quiet "$service" \
+      && ! systemctl is-active --quiet "$service" \
+      && ! systemctl is-failed --quiet "$service"; then
+      continue
+    fi
+    printf 'retiring unregistered runtime worker: %s\n' "$service"
+    systemctl disable "$service" >/dev/null 2>&1 || true
+    systemctl stop "$service"
+    systemctl reset-failed "$service" >/dev/null 2>&1 || true
+  done < <(all_worker_services)
+}
+
 assert_runtime_env_contract() {
   [[ -f "$COMMON_ENV" ]] || die "missing common runtime env: $COMMON_ENV"
   [[ -f "$SECRETS_ENV" ]] || die "missing secret runtime env: $SECRETS_ENV"
@@ -629,6 +666,7 @@ case "$cmd" in
     write_worker_dropin "$src"
     write_dispatcher_dropin "$src"
     ensure_runtime_workers "$src"
+    retire_unregistered_worker_services "$src"
     install_workbench_generation_retention "$src"
     install_runtime_queue_history_retention "$src"
     install_oa_sync_enqueue_timer "$src"

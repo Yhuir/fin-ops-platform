@@ -19,6 +19,7 @@ from fin_ops_platform.services.runtime_worker_registry import (
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Print fin-ops runtime worker registry metadata.")
     parser.add_argument("--json", action="store_true", help="Print full worker registry as JSON.")
+    parser.add_argument("--instances", action="store_true", help="Print all registered worker instance names.")
     parser.add_argument("--required-instances", action="store_true", help="Print required worker instance names.")
     parser.add_argument("--env-example", help="Print env example filename for a worker instance.")
     parser.add_argument("--worker-check-command", help="Print app.worker --check args for a worker instance.")
@@ -29,6 +30,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None, *, stdout: TextIO = sys.stdout) -> int:
     args = build_parser().parse_args(list(argv or sys.argv[1:]))
+    if args.instances:
+        print(" ".join(registration.instance_name for registration in worker_registrations()), file=stdout)
+        return 0
     if args.required_instances:
         print(" ".join(required_worker_instance_names()), file=stdout)
         return 0

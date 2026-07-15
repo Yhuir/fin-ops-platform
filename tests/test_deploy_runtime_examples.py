@@ -138,6 +138,19 @@ class DeployRuntimeExampleTests(unittest.TestCase):
             self.assertNotIn("| `worker-", content, doc_path.name)
             self.assertNotIn("file migration", content.lower(), doc_path.name)
 
+    def test_deploy_control_retires_unregistered_worker_instances_before_restart(self) -> None:
+        deploy_control = DEPLOY_CONTROL.read_text(encoding="utf-8")
+
+        self.assertIn("runtime_worker_manifest --instances", deploy_control)
+        self.assertIn("retire_unregistered_worker_services", deploy_control)
+        self.assertIn('registered_workers=" $(registered_worker_instances "$src") "', deploy_control)
+        self.assertIn('systemctl disable "$service"', deploy_control)
+        self.assertIn('systemctl stop "$service"', deploy_control)
+        self.assertLess(
+            deploy_control.rindex('retire_unregistered_worker_services "$src"'),
+            deploy_control.rindex("restart_services\n"),
+        )
+
     def test_workbench_workers_split_month_shards_from_all_scope_aggregate(self) -> None:
         helper = ENSURE_RUNTIME_WORKERS.read_text(encoding="utf-8")
         workbench_env = (WORKER_ENV_DIR / "fin-ops.worker.workbench.env.example").read_text(encoding="utf-8")

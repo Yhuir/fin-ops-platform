@@ -136,6 +136,8 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_
 bash scripts/verify.sh docs
 ```
 
+部署合同回归还必须证明：manifest `--instances` 返回 registry 全集，且 release 激活会在重启前停用/禁用不在该集合中的历史或 WIP systemd worker；不得只检查 required readiness 而让未知实例继续 crash-loop。
+
 统一真实基础设施 gate：
 
 ```bash
