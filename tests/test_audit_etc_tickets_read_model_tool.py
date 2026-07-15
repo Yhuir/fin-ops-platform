@@ -190,6 +190,7 @@ class EtcTicketsPageAuditTests(unittest.TestCase):
                 "status": "processing",
                 "attempt_count": 1,
                 "max_attempts": 5,
+                "task_status": "imported",
             }
         ]
 
@@ -199,15 +200,69 @@ class EtcTicketsPageAuditTests(unittest.TestCase):
         self.assertEqual(report["audit_status"]["freshness"], "not_fresh")
         self.assertEqual(report["audit_status"]["queue"], "backlog")
 
-    def test_terminal_import_failure_blocks_integrity(self) -> None:
+    def test_failed_import_job_is_terminal_before_max_attempts(self) -> None:
         connection = FakeConnection()
         connection.import_jobs = [
             {
                 "job_id": "job-1",
                 "status": "failed",
+                "attempt_count": 1,
+                "max_attempts": 5,
+                "last_error": "parse failed",
+                "import_session_id": "session-1",
+                "session_status": "failed",
+                "task_id": "task-1",
+                "task_status": "ready_for_import",
+            }
+        ]
+
+        report = etc_tickets_page_audit.audit_etc_tickets_page(connection)
+
+        self.assertEqual(report["audit_status"]["integrity"], "issues_found")
+        self.assertEqual(report["audit_status"]["queue"], "drained")
+        self.assertIn(
+            "etc_import_job_terminal_failure",
+            report["summary"]["issue_sample_counts_by_code"],
+        )
+
+    def test_failed_import_job_is_covered_by_imported_task(self) -> None:
+        connection = FakeConnection()
+        connection.import_jobs = [
+            {
+                "job_id": "job-1",
+                "status": "failed",
+                "attempt_count": 1,
+                "max_attempts": 5,
+                "last_error": "worker acknowledgement failed",
+                "import_session_id": "session-1",
+                "session_status": "succeeded",
+                "task_id": "task-1",
+                "task_status": "imported",
+            }
+        ]
+
+        report = etc_tickets_page_audit.audit_etc_tickets_page(connection)
+
+        self.assertEqual(report["overall_status"], "pass")
+        self.assertEqual(
+            report["audit_status"],
+            {"integrity": "pass", "freshness": "fresh", "queue": "drained"},
+        )
+        self.assertEqual(report["summary"]["covered_failed_import_job_count"], 1)
+
+    def test_dead_lettered_import_job_without_completed_task_blocks_integrity(self) -> None:
+        connection = FakeConnection()
+        connection.import_jobs = [
+            {
+                "job_id": "job-1",
+                "status": "dead_lettered",
                 "attempt_count": 5,
                 "max_attempts": 5,
                 "last_error": "parse failed",
+                "import_session_id": "session-1",
+                "session_status": "failed",
+                "task_id": "task-1",
+                "task_status": "ready_for_import",
             }
         ]
 

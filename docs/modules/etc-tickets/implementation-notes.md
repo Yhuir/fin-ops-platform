@@ -28,6 +28,16 @@
 
 ## 历史记录
 
+## 2026-07-15 - ETC 页面 Audit import job 终态语义修复
+
+- 目标：修复 `failed` import job 被 `attempt_count < max_attempts` 错误判定为 durable queue backlog，避免已完成 ETC 任务长期显示“仍在排队”。
+- 影响范围：ETC 页面只读 Audit repository、定向测试和 Audit 合同文档；不写业务数据，不修改导入 worker、repository、API、schema、read model 或前端。
+- 关键决策：import job repository 只允许 `pending/processing` 被 worker 领取，因此只有这两种状态是 backlog；`failed/dead_lettered` 一律是终态。终态 job 仅在其 `import_session_id -> session.task_id` 精确关联的 task 已 `imported/closed` 时作为已被正式业务事实覆盖，并在 summary 单独计数；否则立即报告 terminal integrity failure，不依赖 `max_attempts` 伪造可重试状态。
+- 文档影响：更新 ETC boundary、测试矩阵和统一页面 Audit API 合同；API 仅新增 additive summary 字段。
+- 测试覆盖：覆盖 active job + completed task 仍 backlog、低 attempt failed job 终态失败、imported task 覆盖 failed job、未覆盖 dead-lettered job 阻断。
+- 验证命令：见本轮最终执行记录。
+- 未测风险：App 内部 Audit 不证明外部 ETC 归档文件或 OA 系统完整性；这些仍属于外部 evidence gate。
+
 ## 2026-07-14 - OA 草稿后 ETC 发票 PDF 合并下载
 
 - 目标：OA 草稿创建成功后，在 ETC 票据页一次下载当前业务批次的全部 ETC 发票 PDF；68 张发票输出一份 68 页文件，每页一张。
