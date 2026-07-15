@@ -1,7 +1,7 @@
 # Phase 21 执行与闭环状态
 
 日期：2026-07-15
-状态：v2 生产审计 hotfix 本地全量验证完成；生产保持已验证旧 release，重新 cutover 待远程精确 SHA 门禁
+状态：v3 生产审计 hotfix 本地全量验证完成；生产保持已验证旧 release，重新 cutover 待远程精确 SHA 门禁
 
 ## 已锁定产品合同
 
@@ -54,12 +54,15 @@
 - main `1f1ec5324bc7dde9987b51f79d4d2a6ebe502841` 首次重新激活并完成受控 rehydrate 后，page Audit 捕获 51 个 ETC summary/detail equality mismatch 和 2 个 override/candidate ownership mismatch；freshness/queue 正常但 integrity 阻断，因此立即回滚并重新 rehydrate `etc-import-e5d6e6a4e-20260714-visibility`。旧 release 恢复 219 active relations、19 active generation scopes、876 relation row ids、1296 group rows、零问题；migration 仍为 0001–0103，0104 未执行。
 - v2 hotfix 将 collapsed summary/detail 变换保留在纯 grouping 边界、独立 summary/detail 物化保留在 repository 边界、retired decision decoration 保留在既有 read-model sanitation 边界；projection/all-scope/Redis cache schema 同步升级。未恢复 candidate/decision runtime、第三种状态或 fallback。
 - v2 本地门禁：受影响面 660 tests + 33 subtests；`bash scripts/verify.sh all` 为 backend 4190 passed / 33 explicit environment-gated skipped、frontend 71 files / 835 tests、production build、Chromium 177/177；lint、docs、旧链路 guard 和 diff check 均通过。
+- v2 已通过 PR #5 合并到 main `a127c58c7d3cdfc8fd0a34216eb9cf1523f30bef`，分支/main 精确 SHA CI 均成功。生产 rehydrate 后 51 个 ETC mismatch 归零，但出现 5 个 override mismatch；release 当场回滚，旧版本重新 rehydrate 后恢复零问题。
+- v3 只修复两个已由生产证据确认的边界：active row override 优先于同 row exception projection；未配对 grouping 不得用正式 relation-mode registry 删除合法 override 字段。projection/all-scope/cache schema 升级到 v3，仍不含 0104。
+- v3 本地全量门禁：`bash scripts/verify.sh all` 为 backend 4192 passed / 33 explicit environment-gated skipped、frontend 71 files / 835 tests、production build succeeded、Chromium 177/177；lint、docs 与 diff check 均通过。
 
 ## 未完成的生产门
 
 - 当前环境未设置 `FIN_OPS_TEST_DATABASE_URL`，因此没有执行真实 disposable PostgreSQL migration/catalog/data-hash 集成；Release A 不包含 schema 变更，Release B 在补齐真实 0001–0104 disposable PostgreSQL 证据前不得发布。
 - Release A 已隔离到干净 `codex/workbench-formal-relations-release-a` 分支；0104 保留在独立 Release B 候选提交，不进入 A。
-- 当前生产运行已回滚的 `etc-import-e5d6e6a4e-20260714-visibility`，其 Workbench rehydrate/page Audit 已恢复通过；v2 hotfix 尚未 commit/remote CI/合并/部署。
+- 当前生产运行已回滚的 `etc-import-e5d6e6a4e-20260714-visibility`，其 Workbench rehydrate/page Audit 已再次恢复通过；v3 targeted 与全量本地门禁均已通过，commit/remote CI/合并/部署仍待执行。
 - 本轮两次激活均未执行新 migration 或 canonical/relation 写入；受控 rehydrate 只原子发布 read-model generation。重新 cutover 后仍必须完成 worker drain、page/System Audit、520 与 13 个真实 identities 的恢复证据。
 
 ## 生产闭环门

@@ -9,7 +9,7 @@ updated: "2026-07-15"
 
 ## Symptoms
 
-- Expected: the release remains active after rehydrate with `pass/fresh/drained`, 219 formal relations, 1296 active group rows, and no canonical/read-model mismatch.
+- Expected: the release remains active after rehydrate with `pass/fresh/drained`, 219 formal relations, 876 formal-relation row identities, and exact canonical/read-model equality. The group-row total may legitimately fall when retired candidate-only ownership is removed, so it is evidence, not a fixed acceptance threshold.
 - Actual: the new runtime reported 53 blocking issues after rehydrate: 51 `workbench_etc_summary_details_mismatch` and 2 `workbench_override_exception_fields_mismatch`; active group rows fell to 1291.
 - Error evidence: ETC summary members existed canonically but were absent from the new query-composed projection; two relation members retained a candidate `case_id` while canonical override ownership was null.
 - Timeline: the exact main SHA passed local and remote CI, then reproduced only after the 2026-07-15 production activation and full Workbench rehydrate.
@@ -31,6 +31,8 @@ updated: "2026-07-15"
 - 2026-07-15: Migrations 0001 through 0103 remained applied/checksum-accepted; no 0104 or new DDL ran during rollback.
 - 2026-07-15: Deterministic regression tests reproduced all three broken invariants before the fix: stale candidate ownership remained, unpaired ETC summary details were absent, and detached paired ETC summary rows were not materialized.
 - 2026-07-15: Minimal boundary fix made the three new tests pass; the focused Workbench/matcher/API/migration/Audit set passed 439 tests and 28 subtests.
+- 2026-07-15: v2 exact main SHA `a127c58c7d3cdfc8fd0a34216eb9cf1523f30bef` passed branch and main CI. Production release `main-a127c58c7-workbench-audit-v2-20260715072607` eliminated all 51 ETC mismatches but still reported five override mismatches: three legal `pending_input_invoice` modes were removed and two active null overrides were overwritten by candidate exception projection.
+- 2026-07-15: v2 was immediately rolled back. The rollback rehydrate restored `pass/fresh/drained`, 219 active relations, 19 scopes, 876 relation rows, 1296 group rows and zero issues; migrations remained 0001-0103 with no 0104.
 
 ## Eliminated
 
@@ -40,7 +42,7 @@ updated: "2026-07-15"
 
 ## Resolution
 
-- root_cause: The new pure partitioner did not translate unpaired ETC summary details into collapsed display rows, while repository materialization ignored a group-level detached summary row. Separately, an unowned canonical row could retain retired candidate ownership decorations, so the read model disagreed with canonical override controls.
-- fix: Keep grouping pure and two-state: normalize unpaired ownership against the current formal-mode registry, preserve ETC details as collapsed rows in either zone, sanitize retired decision decoration only at the repository read-model boundary, materialize detached summaries in both row and group-row stores, and bump the projection/all-scope/cache schema together.
-- verification: Targeted reproductions pass; the affected regression set passes 660 tests and 33 subtests. Full local verification passes 4190 backend tests with 33 explicit environment-gated skips, 835 frontend tests, production build, and 177 Chromium flows. Remote exact-SHA CI and production rehydrate/Audit are still required.
+- root_cause: The new pure partitioner initially lost detached/collapsed ETC display members. Its v2 sanitation then used the formal relation-mode registry as a row-control allowlist, deleting legitimate active override modes. Independently, SQL projection reapplied an exception projection after an active row override even though the canonical Audit contract excludes override-owned rows from exception ownership.
+- fix: Keep grouping pure and two-state: preserve ETC details and detached summaries, clear only ownership decorations attached to legacy candidate case ids, preserve active override fields verbatim, and exclude override-owned rows from exception projection. Repository read-model sanitation remains the only boundary that strips the retired decision decoration. Bump projection/all-scope/cache schema together to v3.
+- verification: v2 failed its production Audit and was safely rolled back. The two v3 targeted reproductions pass, and the full local gate is green: backend 4192 passed / 33 explicit environment-gated skipped, frontend 835 passed, production build succeeded, and Chromium 177 passed. Remote exact-SHA CI and production rehydrate/Audit remain required.
 - files_changed: `workbench_relation_grouping.py`, `postgres_repositories/read_models.py`, `workbench_read_model_version.py`, `workbench_groups_page_cache.py`, focused tests, and the affected module/read-model documentation.

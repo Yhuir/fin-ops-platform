@@ -9,12 +9,6 @@ from fin_ops_platform.services.no_oa_bank_batch_service import (
     BANK_FLOW_RULE_BATCH_RELATION_MODE,
     NO_OA_BANK_BATCH_RELATION_MODE,
 )
-from fin_ops_platform.services.workbench_relation_modes import (
-    DISPLAY_ONLY_WORKBENCH_RELATION_MODES,
-    VALID_WORKBENCH_RELATION_MODES,
-)
-
-
 ROW_TYPES = ("oa", "bank", "invoice")
 DISPLAY_ROLES = frozenset({"summary", "collapsed_summary"})
 LEGACY_CANDIDATE_CASE_PREFIXES = ("candidate:", "decision:", "temp:")
@@ -217,13 +211,6 @@ class WorkbenchRelationGroupingService:
         case_id = str(resolved.get("case_id") or "").strip()
         if case_id.startswith(LEGACY_CANDIDATE_CASE_PREFIXES):
             resolved.pop("case_id", None)
-            resolved.pop("relation_mode", None)
-            resolved.pop("relation_amount_check", None)
-        relation_mode = str(resolved.get("relation_mode") or "").strip()
-        if relation_mode and relation_mode not in {
-            *VALID_WORKBENCH_RELATION_MODES,
-            *DISPLAY_ONLY_WORKBENCH_RELATION_MODES,
-        }:
             resolved.pop("relation_mode", None)
             resolved.pop("relation_amount_check", None)
         return resolved
