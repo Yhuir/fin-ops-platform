@@ -521,7 +521,7 @@ class CostStatisticsSqlProjectionBuilder:
         payload = list_by_month(
             month,
             require_fresh=True,
-            reason="cost_statistics_bank_flow_rows",
+            reason="downstream_bank_tag_read",
         )
         if not isinstance(payload, dict) or str(payload.get("status") or "").strip().lower() != "fresh":
             raise RuntimeError("bank_detail_read_model_not_fresh")
@@ -581,7 +581,7 @@ class CostStatisticsSqlProjectionBuilder:
         records = category_records_by_transaction_ids(
             transaction_ids,
             require_fresh=True,
-            reason="cost_statistics_bank_tag_read",
+            reason="downstream_bank_tag_read",
             month_hint=month,
             scope_keys_hint=[month],
         )
