@@ -32,6 +32,15 @@
 
 ## 历史记录
 
+## 2026-07-15 - 银行明细依赖 active coalescing
+
+- 目标：修复 Workbench schema 切换后成本月份 shard 等待同一 `bank_detail` scope 时，成本 worker 与银行 worker 互相制造下一条 pending event 的不收敛循环。
+- 根因：成本 projection 使用未登记的 `cost_statistics_bank_tag_source_versions` reason，绕过统一 gateway 已有的 ensure/wakeup active coalescing；不是业务数据、projection rows 或 migration 损坏。
+- 关键决策：删除该专用 reason，复用既有 `downstream_bank_tag_read`；不新增状态、队列逻辑、repository、worker、fallback 或 migration。
+- 测试覆盖：成本 projection 锁定 reason；gateway 锁定 active `bank_detail` scope 不重复写 dirty/outbox。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_cost_statistics_sql_runtime.CostStatisticsSqlRuntimeTests.test_cost_statistics_sql_projection_defers_when_bank_detail_tags_are_not_fresh tests.test_read_model_refresh_gateway.ReadModelRefreshGatewayTests.test_ensure_refresh_reason_does_not_bump_active_scope -v`。
+- 生产门禁：部署后 Workbench 与 `bank-details`、`cost-statistics` 页面 Audit 都必须 `pass/fresh/drained`，并确认 durable queue/dirty scopes 最终为空。
+
 ## 2026-07-14 - 成本统计紧凑账本式排版
 
 - 目标：提升五种成本统计视图的金额比较效率、标题区信息密度和三栏下钻扫读体验，避免大卡片和独立时间列挤占宽度。
