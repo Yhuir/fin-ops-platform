@@ -1,5 +1,13 @@
 # 成本统计 实施记录
 
+## 2026-07-17 - 生产 explorer facet 百分比 placeholder 修复
+
+- 生产证据：精确 release 的多视图只读探针中，`time` 与 `bank_tag` 均为 `200/fresh`，但 `project`、`bank`、`expense_type` 的 `scope=all` 50/50 返回 500；正式 request-id 日志统一报告 psycopg 拒绝裸 `%` placeholder。
+- 根因：三个 facet 共用的百分比 SQL 在参数化 statement 内使用了裸百分号字符串；本地 fake connection 只记录 SQL，没有执行 psycopg placeholder 解析，因此旧测试未捕获。
+- 修复：只在 `_cost_statistics_percentage_sql()` 的传输 SQL 中把 `%` 转义为 `%%`；PostgreSQL 最终业务值仍是单个百分号，聚合、排序、分页、scope、read model 和 API shape 均不变。
+- 隔离性：只有成本 explorer 的 project/bank/expense_type facets 受影响；time/bank_tag、Audit、其它页面和共享 read model 不变。没有新增 fallback、缓存、endpoint 或兼容分支。
+- 测试责任：现有单 statement repository 测试新增 psycopg 百分号转义断言；发布前还必须在真实临时 PostgreSQL 上执行五种 explorer view，发布后复跑生产 200/fresh 与 p95/p99 门槛。
+
 
 ## 2026-07-17 - 生产 Cost Audit 宽 payload 物化移除
 

@@ -11696,8 +11696,8 @@ def _pending_invoice_order_sql(*, sort_field: str | None, sort_direction: str | 
 def _cost_statistics_percentage_sql() -> str:
     return """
         case
-            when coalesce(sum(sum(amount)) over (), 0) = 0 then '0.0%'
-            else round(sum(amount) * 100 / sum(sum(amount)) over (), 1)::text || '%'
+            when coalesce(sum(sum(amount)) over (), 0) = 0 then '0.0%%'
+            else round(sum(amount) * 100 / sum(sum(amount)) over (), 1)::text || '%%'
         end
     """
 

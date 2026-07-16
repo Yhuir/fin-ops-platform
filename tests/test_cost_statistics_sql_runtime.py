@@ -1452,6 +1452,8 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertIn("from read_model.cost_statistics_rows", sql.lower())
         self.assertIn("with available_years as materialized", sql.lower())
         self.assertIn("raw_base as materialized", sql.lower())
+        self.assertIn("then '0.0%%'", sql)
+        self.assertIn("::text || '%%'", sql)
         self.assertEqual(params[:2], ("active", "active"))
         self.assertEqual([row["transaction_id"] for row in payload["rows"]], ["txn-2"])
         self.assertEqual(payload["next_cursor_values"], ("2026-05-02", "2026-05-02 10:00:00", "txn-2", "txn-2:0"))
