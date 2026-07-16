@@ -262,11 +262,6 @@ class BankDetailReadModelFixture:
         }
 
 class WorkbenchV2ApiTests(unittest.TestCase):
-    def setUp(self) -> None:
-        cost_warmup_patcher = patch.object(Application, "_schedule_cost_statistics_cache_warmup")
-        self.addCleanup(cost_warmup_patcher.stop)
-        cost_warmup_patcher.start()
-
     def _install_workbench_query_service(self, app: Application, query_service: WorkbenchQueryService) -> None:
         app._workbench_query_service = query_service
         app._invalidate_workbench_read_models(invalidate_cost_statistics=False)

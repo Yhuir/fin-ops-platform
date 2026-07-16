@@ -15,40 +15,25 @@ class CostStatisticsDerivedLifecycleExecutor:
         self._runtime_service = runtime_service
         self._enqueue_refresh = enqueue_refresh
 
-    def execute(self, domain_plan: dict[str, object], *, schedule_warmup: bool) -> dict[str, object]:
+    def execute(self, domain_plan: dict[str, object]) -> dict[str, object]:
         scope_keys = self._domain_plan_scope_keys(domain_plan)
         reason = str(domain_plan.get("reason") or "derived_lifecycle_cost_statistics")
-        if "all" in scope_keys:
-            deleted_scope_keys = self._runtime_service.invalidate_read_models(
-                schedule_warmup=schedule_warmup,
-            )
-        else:
-            deleted_scope_keys = self._runtime_service.invalidate_read_model_scopes(
-                scope_keys,
-                reason=reason,
-                schedule_warmup=schedule_warmup,
-            )
-
-        enqueued_jobs: list[str] = []
-        if not schedule_warmup:
-            target_scope_keys = ["all"] if "all" in scope_keys else scope_keys
-            enqueued = self._enqueue_refresh(
-                target_scope_keys or ["all"],
-                reason=reason,
-                metadata=self._read_model_refresh_metadata(domain_plan),
-            )
-            if enqueued:
-                enqueued_jobs.append("cost_statistics.read_model.refresh")
-                deleted_scope_keys = self._runtime_service.refresh_scope_keys_from_scope_keys(
-                    list(target_scope_keys or ["all"])
-                )
-        elif deleted_scope_keys:
-            enqueued_jobs.append("cost_statistics.read_model.refresh")
+        target_scope_keys = ["all"] if "all" in scope_keys else scope_keys
+        enqueued = self._enqueue_refresh(
+            target_scope_keys or ["all"],
+            reason=reason,
+            metadata=self._read_model_refresh_metadata(domain_plan),
+        )
+        deleted_scope_keys = (
+            self._runtime_service.refresh_scope_keys_from_scope_keys(list(target_scope_keys or ["all"]))
+            if enqueued
+            else []
+        )
 
         return {
             "deleted_counts": {"cost_statistics_read_models": len(deleted_scope_keys)},
             "invalidated_scopes": deleted_scope_keys,
-            "enqueued_jobs": enqueued_jobs,
+            "enqueued_jobs": ["cost_statistics.read_model.refresh"] if enqueued else [],
         }
 
     @staticmethod

@@ -14,7 +14,6 @@ DEFAULT_OPERATION_ENDPOINTS = (
     "GET /api/workbench/groups",
     "GET /api/search",
     "GET /api/pending-invoices/rows",
-    "GET /api/cost-statistics",
     "GET /api/cost-statistics/explorer",
     "GET /api/tax-offset",
     "GET /api/app-health",

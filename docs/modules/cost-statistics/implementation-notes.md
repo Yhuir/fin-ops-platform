@@ -1,6 +1,18 @@
 # 成本统计 实施记录
 
 
+## 2026-07-16 - 统一发布准备闭环：删除 warmup 与旧 HTTP/full-view
+
+- 目标：关闭成本统计最后两个本地发布阻断项，使模块达到 `READY_FOR_UNIFIED_DEPLOYMENT`，同时保持 `DEPLOYMENT_HOLD`，不部署、不操作生产 migration/queue/worker/业务数据。
+- 删除门证据：系统 owner 明确认定不存在旧成本 root/project HTTP contract 的已知脚本、RPA、BI 或第三方 consumer，且该 contract 从未作为公共集成合同承诺；使用现有生产 admin token 只读查询 `/api/background-jobs/active`，`cost_statistics_cache_warmup` 的 active、attention 与 jobs 均为 0。
+- 旧链删除：删除 server warmup recovery/retry/schedule/run、runtime/background-job dependency、derived lifecycle 双路径、App Health/runtime/frontend registry、旧 root/project route、query full/month/project 方法、repository full-view port/SQL/facade/manifest、projection Redis兼容构造参数、HTTP SLO旧summary probe、前后端 mocks与只保护旧链的测试。未保留 fallback、shim、第二 endpoint、第二 worker或兼容 job。
+- 当前边界：页面只走 explorer page、export page、transaction point lookup 与 tag-rules；所有读取先过 dependency-bound PostgreSQL fresh gate，non-fresh 只通过现有 `ReadModelRefreshGateway` 入队正式 durable event。
+- 隔离：未改成本业务口径、schema/migration、其他页面 API/read model、共享 relation事实、税金 worker或生产数据；共享生命周期调用点只删除已失效的 warmup布尔参数，仍走原有 cost executor/gateway。
+- 测试：成本 SQL/API/runtime/projection、route/manifest/architecture guards、App Health/background job通用策略、frontend mock与交互、HTTP probe、全量 backend/frontend/E2E/docs及 migration验证全部通过。无外部 PostgreSQL 时后端为 `4078 passed, 35 skipped`；显式临时 PostgreSQL 实际应用 `0001–0107` 后为 `4104 passed, 6 skipped`，临时库已自动删除；前端 `72 files / 855 tests`、production build、Playwright `179/179`、lint、docs 与 `git diff --check` 全通过。生产源码、前端 client、E2E mock、脚本和部署文件对旧 warmup、旧 root/project HTTP、full-view repository/query 与 projection Redis兼容参数的扫描均为零。
+- 验证校准：首次 PostgreSQL 命令因临时 URL 缺少显式 host 被 migration 安全阀拒绝；仅修正命令连接串后重跑，没有修改代码、测试或安全断言。production build 仅保留既有第三方 CSS minify/chunk warning。
+- 状态：`READY_FOR_UNIFIED_DEPLOYMENT / DEPLOYMENT_HOLD`。统一部署窗口仍需执行备份、旧 lane drain、migrations、rehydrate、Page Audit、canary、真实生产性能和三页面混合负载隔离性验证；这些是生产执行门，不恢复已删除旧链，也不阻止当前发布准备判定。
+
+
 ## 2026-07-16 - GSD 05-20 删除 cost/tax 混合 projection owner
 
 - 目标：删除 `cost_tax_sql_projection.py`，让成本和税金 projection 各自拥有明确文件边界，不保留 re-export、shim或 fallback。
@@ -21,11 +33,11 @@
 - 成本统计 export-preview/export 是同步生成路径；time、month、project、expense_type 导出超过 20,000 行时必须返回 `cost_statistics_export_row_limit_exceeded`，不能继续生成大预览或 XLSX。
 - 成本统计月份 shard 的 Workbench 输入来自 active generation 的 `workbench_group_rows + workbench_rows` 结构化成员，不再读取 `workbench_groups.payload` 里的 `oa_rows/bank_rows` 旧 JSON 成员数组。
 - v9 成本 read model 的 OA 配对行与全银行收支行分别持久化到 `read_model.cost_statistics_rows` 和 `read_model.cost_statistics_bank_flow_rows`；parent metadata 不保存 `time_rows` / `bank_flow_time_rows`，也不保留 JSON fallback。transaction detail 经 fresh gate 后直接按 identity index 点查。
-- 成本统计模块边界已 closed：query service 只读 SQL read model/Redis fresh cache；miss/stale 不同步 rebuild；runtime 不持有 live explorer loader；历史 warmup job 只作兼容桥接。legacy `CostStatisticsService` module/class/test/import、live export helper 和 `ProjectDetailExportService` 均已删除；业务归集只由 SQL projection owner 负责。
+- 成本统计模块边界已达到 `READY_FOR_UNIFIED_DEPLOYMENT / DEPLOYMENT_HOLD`：query service 只读 SQL read model/Redis fresh cache；miss/stale 不同步 rebuild；runtime 不持有 live explorer loader或background job依赖。legacy live service、本地 read model、warmup job、旧 root/project HTTP/full-view、live export helper 和 `ProjectDetailExportService` 均已删除；业务归集只由 SQL projection owner 负责。
 - 05-13 已删除 `CostStatisticsReadModelService` module/class/test、Application startup snapshot/field/local persist callback，以及 runtime 的 local clear/invalidate/persist dependency。projection 直接发布单 scope repository write model；invalidation 只有 durable gateway 接受后才报告成功。正式 PostgreSQL table/repository 不属于被删除的本地 owner。
-- 05-14 已删除成本 repository/state-store/protocol/manifest 的全量 load 与无条件 save 合同。启动/全状态 snapshot 不再扫描或携带成本 read model，broad save 不再识别成本 key；正式写 I/O 只剩 source-version conditional publish，读取只剩 scoped gate/page/view/transaction 接口。
+- 05-14 已删除成本 repository/state-store/protocol/manifest 的全量 load 与无条件 save 合同。启动/全状态 snapshot 不再扫描或携带成本 read model，broad save 不再识别成本 key；正式写 I/O 只剩 source-version conditional publish，当前读取只剩 scoped gate/page/export/transaction 接口。
 - 05-15 已把 bulk export-preview/export 从完整 explorer payload 迁到 cost-owned `get_cost_statistics_export_page(...)`。preview 只取 SQL summary + 8 行；download 门槛通过后每批最多 1,000 行并写入 write-only XLSX。文件生成后重新比较 schema/source versions/published version，中途变化时丢弃 bytes 并返回既有 409。旧 `_filtered_entries_from_read_model`、普通 bulk workbook 和全量 entries/rows list 已删除；transaction point export 不变。
-- 05-19 已把 projection unchanged 判定从 full-view loader 迁到 `get_cost_statistics_scope_metadata(...)`。它只按 scope 点查 parent `entry_count/source_versions`；完全相等才 skip，missing/mismatch 重建。worker 不再读取 payload、两张明细表或页面 dependency gate。full-view 仅剩旧 month/project HTTP合同，等待生产 access-log/owner 证据后删除。
+- 05-19 已把 projection unchanged 判定迁到 `get_cost_statistics_scope_metadata(...)`。它只按 scope 点查 parent `entry_count/source_versions`；完全相等才 skip，missing/mismatch 重建。worker 不读取 payload、两张明细表或页面 dependency gate；统一发布准备收口已在 owner 证明后删除旧 month/project HTTP合同和 full-view loader。
 - cost projection 不再写或删除旧 `cost_statistics:explorer:{scope}` 无版本 Redis key；Redis payload 只属于 query gateway 的 gate-after-read versioned cache。
 - 页面 Audit 的 paired-cost canonical expected-set 读取 active Workbench generation 的结构化 group/member payload，严格遵循 builder 的 candidate/linked-open 判断、完整 OA context tuple 和 bank payload 方向/金额语义；禁止退回 `app.bank_transactions` 近似 Workbench 成员，或用 group 列值替代 payload 业务状态。
 - 成本 Audit 的唯一 owner 是 `postgres_repositories/cost_statistics_page_audit.py`；统一 page key、只读 CLI 与 System Audit 直接分派并透传 caller-owned snapshot。共享 `page_business_audit.py` 不保留成本合同/SQL/fallback；05-18 后成本 owner 的 queue/readiness、source-version、exact-set、business-values 固定为四组集合 SQL，active-relation 23-query 总预算只保护当前 I/O 上限，不能作为生产 `<=5s` 结论。

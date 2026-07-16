@@ -24,9 +24,6 @@ class CapturedThread:
 
 class WorkbenchPersistSchedulerTests(unittest.TestCase):
     def setUp(self) -> None:
-        cost_warmup_patcher = patch.object(Application, "_schedule_cost_statistics_cache_warmup")
-        self.addCleanup(cost_warmup_patcher.stop)
-        cost_warmup_patcher.start()
         CapturedThread.started_kwargs = []
 
     def test_pair_relation_scheduler_coalesces_case_ids_when_stale_workers_are_skipped(self) -> None:

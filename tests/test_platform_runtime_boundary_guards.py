@@ -2620,7 +2620,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append(f"server.py still owns removed cost statistics lifecycle executor {removed_helper}")
         if "CostStatisticsDerivedLifecycleExecutor(" not in server_source:
             violations.append("server.py does not build the explicit cost statistics lifecycle executor")
-        if '"cost_statistics_read_model": lambda domain_plan: self._cost_statistics_derived_lifecycle_executor().execute' not in server_source:
+        if '"cost_statistics_read_model": self._cost_statistics_derived_lifecycle_executor().execute' not in server_source:
             violations.append("derived lifecycle registry does not use the explicit cost statistics executor")
         if "class CostStatisticsDerivedLifecycleExecutor" not in executor_source:
             violations.append("cost statistics lifecycle executor service is missing")
@@ -2629,7 +2629,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             'reason = str(domain_plan.get("reason") or "derived_lifecycle_cost_statistics")',
             "runtime_service: CostStatisticsRuntimeService",
             '"deleted_counts": {"cost_statistics_read_models": len(deleted_scope_keys)}',
-            '"enqueued_jobs": enqueued_jobs',
+            '"enqueued_jobs": ["cost_statistics.read_model.refresh"] if enqueued else []',
             '"cost_statistics.read_model.refresh"',
         ):
             if snippet not in executor_source:
@@ -2650,11 +2650,9 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         if "def route(" not in route_source:
             violations.append("CostStatisticsApiRoutes does not own route dispatch")
         for snippet in (
-            'route_path == "/api/cost-statistics"',
             'route_path == "/api/cost-statistics/explorer"',
             'route_path == "/api/cost-statistics/export-preview"',
             'route_path == "/api/cost-statistics/export"',
-            'route_path.startswith("/api/cost-statistics/projects/")',
             'route_path.startswith("/api/cost-statistics/transactions/")',
             "CostStatisticsReadModelNotFreshError",
             "self._optional_bool_parser(",
@@ -2662,6 +2660,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             if snippet not in route_source:
                 violations.append(f"CostStatisticsApiRoutes is missing route-owner behavior {snippet}")
         for forbidden_snippet in (
+            'route_path == "/api/cost-statistics"',
+            'route_path.startswith("/api/cost-statistics/projects/")',
             "self._cost_statistics_service.get_project_statistics",
             "self._cost_statistics_service.get_transaction_detail",
             "self._cost_statistics_service.get_export_preview",
@@ -2693,9 +2693,27 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         read_model_service_test_path = REPO_ROOT / "tests" / "test_cost_statistics_read_model_service.py"
         removed_export_service_path = SERVICES_ROOT / "project_detail_export_service.py"
         server_path = APP_ROOT / "server.py"
+        route_path = APP_ROOT / "routes_cost_statistics.py"
+        repository_port_path = SERVICES_ROOT / "cost_statistics_read_model_repository.py"
+        postgres_repository_path = SERVICES_ROOT / "postgres_repositories/read_models.py"
+        projection_path = SERVICES_ROOT / "cost_statistics_sql_projection.py"
+        worker_path = APP_ROOT / "worker.py"
+        job_registry_path = SERVICES_ROOT / "app_status_job_registry.py"
+        domain_registry_path = SERVICES_ROOT / "app_status_domain_registry.py"
+        runtime_policy_path = SERVICES_ROOT / "runtime_state_policy.py"
+        frontend_job_types_path = REPO_ROOT / "web/src/features/backgroundJobs/types.ts"
         query_source = query_path.read_text(encoding="utf-8")
         runtime_source = runtime_path.read_text(encoding="utf-8")
         server_source = server_path.read_text(encoding="utf-8")
+        route_source = route_path.read_text(encoding="utf-8")
+        repository_port_source = repository_port_path.read_text(encoding="utf-8")
+        postgres_repository_source = postgres_repository_path.read_text(encoding="utf-8")
+        projection_source = projection_path.read_text(encoding="utf-8")
+        worker_source = worker_path.read_text(encoding="utf-8")
+        registry_sources = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in (job_registry_path, domain_registry_path, runtime_policy_path, frontend_job_types_path)
+        )
         violations: list[str] = []
 
         if service_path.exists():
@@ -2715,6 +2733,11 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "upsert_cost_statistics_explorer_read_model",
             "schedule_cache_warmup",
             "requires_sql_read_model_runtime",
+            "def get_month_statistics(",
+            "def get_project_statistics(",
+            "get_cost_statistics_view",
+            "def _refreshing_explorer_payload(",
+            "def _refreshing_month_payload(",
         ):
             if forbidden in query_source:
                 violations.append(f"CostStatisticsQueryService still has legacy fallback input {forbidden}")
@@ -2731,9 +2754,33 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "read_model_service",
             "persist_read_models",
             "_persist_read_models",
+            "cost_statistics_cache_warmup",
+            "schedule_warmup",
         ):
             if forbidden in runtime_source:
                 violations.append(f"CostStatisticsRuntimeService still has legacy writer path {forbidden}")
+        for forbidden in (
+            'route_path == "/api/cost-statistics"',
+            'route_path.startswith("/api/cost-statistics/projects/")',
+            "def handle_month(",
+            "def handle_project(",
+        ):
+            if forbidden in route_source:
+                violations.append(f"CostStatisticsApiRoutes still has removed HTTP contract {forbidden}")
+        for source_name, source in (
+            ("repository port", repository_port_source),
+            ("PostgreSQL repository", postgres_repository_source),
+        ):
+            if "def get_cost_statistics_view(" in source:
+                violations.append(f"{source_name} still exposes removed full-view loader")
+        if "redis_helper" in projection_source:
+            violations.append("CostStatisticsSqlProjectionBuilder still accepts or uses Redis")
+        cost_worker_start = worker_source.index("    if args.enable_cost_statistics_read_model_refresh:")
+        cost_worker_end = worker_source.index("    if args.enable_tax_offset_read_model_refresh:", cost_worker_start)
+        if "redis_helper" in worker_source[cost_worker_start:cost_worker_end]:
+            violations.append("cost statistics worker assembly still injects Redis into projection")
+        if "cost_statistics_cache_warmup" in registry_sources:
+            violations.append("runtime/App Health/frontend registries still expose removed cost warmup job")
         if removed_export_service_path.exists():
             violations.append("project_detail_export_service.py still exists")
         for forbidden in (
@@ -2749,6 +2796,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "_cost_statistics_read_model_service",
             "_persist_cost_statistics_read_models_best_effort",
             "tag_selection_provider=getattr(self, \"_app_settings_service\", None)",
+            "cost_statistics_cache_warmup",
+            "_schedule_cost_statistics_cache_warmup",
         ):
             if forbidden in server_source:
                 violations.append(f"server.py still wires legacy CostStatisticsService via {forbidden}")

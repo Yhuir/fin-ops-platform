@@ -258,7 +258,7 @@ class _MemoryCostStatisticsSqlRepository:
         return read_model
 
     def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object] | None:
-        view = self.get_cost_statistics_view(scope_key=scope_key)
+        view = self._stored_view(scope_key=scope_key)
         if not isinstance(view, dict):
             return None
         gate_snapshot = self._gate_snapshot_provider(scope_key)
@@ -276,7 +276,7 @@ class _MemoryCostStatisticsSqlRepository:
             "stale_reasons": [],
         }
 
-    def get_cost_statistics_view(self, *, scope_key: str) -> dict[str, object] | None:
+    def _stored_view(self, *, scope_key: str) -> dict[str, object] | None:
         read_model = self.read_models.get(scope_key)
         if not isinstance(read_model, dict):
             return None
@@ -314,7 +314,7 @@ class _MemoryCostStatisticsSqlRepository:
     ) -> dict[str, object] | None:
         del selected_tag_codes, cursor_values
         scope_month = scope_value if scope_kind == "month" else "all"
-        stored = self.get_cost_statistics_view(scope_key=f"{project_scope}:{scope_month}")
+        stored = self._stored_view(scope_key=f"{project_scope}:{scope_month}")
         payload = stored.get("payload") if isinstance(stored, dict) else None
         if not isinstance(payload, dict):
             return None
@@ -381,7 +381,7 @@ class _MemoryCostStatisticsSqlRepository:
         include_summary: bool,
     ) -> dict[str, object] | None:
         scope_month = month if month != "all" else "all"
-        stored = self.get_cost_statistics_view(scope_key=f"{project_scope}:{scope_month}")
+        stored = self._stored_view(scope_key=f"{project_scope}:{scope_month}")
         payload = stored.get("payload") if isinstance(stored, dict) else None
         if not isinstance(payload, dict):
             return None
@@ -504,7 +504,7 @@ class _MemoryCostStatisticsSqlRepository:
         project_scope: str,
         transaction_id: str,
     ) -> dict[str, object] | None:
-        view = self.get_cost_statistics_view(scope_key=f"{project_scope}:all")
+        view = self._stored_view(scope_key=f"{project_scope}:all")
         if not isinstance(view, dict):
             return None
         payload = view.get("payload")
@@ -595,21 +595,13 @@ class CostStatisticsApiTests(unittest.TestCase):
         payload = json.loads(response.body)
         self.assertEqual(payload["rows"][0]["transaction_id"], "cached-sentinel")
 
-    def test_cost_statistics_route_owner_delegates_month_and_explorer_to_query_service(self) -> None:
+    def test_cost_statistics_route_owner_delegates_explorer_to_query_service(self) -> None:
         from fin_ops_platform.app.routes_cost_statistics import CostStatisticsApiRoutes
         from fin_ops_platform.app.server import Response
 
         calls: list[tuple[str, str, str]] = []
 
         class QueryService:
-            def get_month_statistics(self, month: str, project_scope: str):
-                calls.append(("month", month, project_scope))
-                return {
-                    "month": month,
-                    "summary": {"row_count": 0, "transaction_count": 0, "total_amount": "0.00"},
-                    "rows": [],
-                }, False
-
             def get_explorer_page(self, **kwargs: object):
                 calls.append(("explorer", str(kwargs["scope"]), str(kwargs["project_scope"])))
                 return {
@@ -631,20 +623,14 @@ class CostStatisticsApiTests(unittest.TestCase):
             file_response=lambda _filename, _content: Response(status_code=200, body=b""),
         )
 
-        month_response = routes.route(
-            "GET",
-            "/api/cost-statistics",
-            {"month": ["2026-03"], "project_scope": ["active"]},
-        )
         explorer_response = routes.route(
             "GET",
             "/api/cost-statistics/explorer",
             {"scope": ["2026-04"], "view": ["time"], "project_scope": ["all"]},
         )
 
-        self.assertEqual(month_response.status_code, 200)
         self.assertEqual(explorer_response.status_code, 200)
-        self.assertEqual(calls, [("month", "2026-03", "active"), ("explorer", "2026-04", "all")])
+        self.assertEqual(calls, [("explorer", "2026-04", "all")])
 
     def test_cost_statistics_secondary_read_routes_delegate_to_query_service_and_fail_closed(self) -> None:
         from fin_ops_platform.app.routes_cost_statistics import CostStatisticsApiRoutes
@@ -654,10 +640,6 @@ class CostStatisticsApiTests(unittest.TestCase):
         calls: list[tuple[str, object]] = []
 
         class QueryService:
-            def get_project_statistics(self, month: str, project_name: str, *, project_scope: str) -> dict[str, object]:
-                calls.append(("project", (month, project_name, project_scope)))
-                return {"month": month, "project_name": project_name, "summary": {}, "rows": []}
-
             def get_export_preview(self, **kwargs: object) -> dict[str, object]:
                 calls.append(("preview", kwargs.get("project_scope")))
                 return {"view": kwargs.get("view"), "summary": {}, "rows": []}
@@ -683,11 +665,6 @@ class CostStatisticsApiTests(unittest.TestCase):
             file_response=lambda filename, content: Response(status_code=200, body=content, headers={"X-Filename": filename}),
         )
 
-        project_response = routes.route(
-            "GET",
-            f"/api/cost-statistics/projects/{quote('云南溯源科技', safe='')}",
-            {"month": ["2026-03"], "project_scope": ["active"]},
-        )
         preview_response = routes.route(
             "GET",
             "/api/cost-statistics/export-preview",
@@ -704,7 +681,6 @@ class CostStatisticsApiTests(unittest.TestCase):
             {"project_scope": ["active"]},
         )
 
-        self.assertEqual(project_response.status_code, 200)
         self.assertEqual(preview_response.status_code, 200)
         self.assertEqual(export_response.status_code, 200)
         self.assertEqual(transaction_response.status_code, 409)
@@ -713,7 +689,6 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertEqual(
             calls,
             [
-                ("project", ("2026-03", "云南溯源科技", "active")),
                 ("preview", "all"),
                 ("export", "all"),
                 ("transaction", "active"),
@@ -854,39 +829,6 @@ class CostStatisticsApiTests(unittest.TestCase):
             ],
         )
 
-    def test_legacy_cost_statistics_warmup_job_retry_closes_old_job_and_enqueues_refresh(self) -> None:
-        queue = self._install_queue_recorder()
-        job = self.app._background_job_service.create_job(
-            job_type="cost_statistics_cache_warmup",
-            label="预热成本统计缓存",
-            owner_user_id="system",
-            visibility="system",
-            affected_months=["2026-03"],
-            source={"reason": "cost_statistics_scope_invalidated", "months": ["2026-03"]},
-        )
-        self.app._background_job_service.fail_job(
-            job.job_id,
-            "服务重启，任务已中断，请重新执行。",
-            "interrupted_by_restart",
-        )
-
-        response = self.app.handle_request("POST", f"/api/background-jobs/{job.job_id}/retry", body="{}")
-
-        payload = json.loads(response.body)
-        old_job = self.app._background_job_service.get_job(job.job_id, "system")
-
-        self.assertEqual(response.status_code, 202)
-        self.assertEqual(payload["retry_mode"], "cost_statistics.read_model.refresh")
-        self.assertIsNone(payload["job"])
-        self.assertEqual(old_job.status, "acknowledged")
-        self.assertEqual(
-            queue.refreshes,
-            [
-                ("cost_statistics", "active:2026-03", "retry:cost_statistics_scope_invalidated"),
-                ("cost_statistics", "all:2026-03", "retry:cost_statistics_scope_invalidated"),
-            ],
-        )
-
     def test_get_cost_statistics_routes_return_expected_shapes(self) -> None:
         from fin_ops_platform.domain.enums import BatchType
 
@@ -911,19 +853,15 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.app._import_service.confirm_import(preview.id)
         self._prime_cost_statistics_read_model()
 
-        payload = json.loads(self.app.handle_request("GET", "/api/cost-statistics?month=2026-03").body)
-        self.assertEqual(payload["month"], "2026-03")
-        self.assertEqual(payload["summary"]["row_count"], 1)
-        self.assertEqual(payload["rows"][0]["project_name"], "云南溯源科技")
-        self.assertEqual(payload["rows"][0]["expense_type"], "设备货款及材料费")
-
-        project_name = quote("云南溯源科技", safe="")
-        project_payload = json.loads(
-            self.app.handle_request("GET", f"/api/cost-statistics/projects/{project_name}?month=2026-03").body
+        time_payload = json.loads(
+            self.app.handle_request("GET", "/api/cost-statistics/explorer?scope=2026-03&view=time").body
         )
-        self.assertEqual(project_payload["project_name"], "云南溯源科技")
-        self.assertEqual(project_payload["rows"][0]["expense_content"], "PLC 模块采购")
-        transaction_id = project_payload["rows"][0]["transaction_id"]
+        self.assertEqual(time_payload["scope"], "2026-03")
+        self.assertEqual(time_payload["summary"]["transaction_count"], 1)
+        self.assertEqual(time_payload["rows"][0]["project_name"], "未配对OA")
+        self.assertEqual(time_payload["rows"][0]["expense_type"], "未分类")
+        self.assertEqual(time_payload["rows"][0]["expense_content"], "PLC 模块采购")
+        transaction_id = time_payload["rows"][0]["transaction_id"]
 
         detail_payload = json.loads(
             self.app.handle_request("GET", f"/api/cost-statistics/transactions/{transaction_id}").body
@@ -1529,8 +1467,18 @@ class CostStatisticsApiTests(unittest.TestCase):
             generated_at="2026-07-05T00:00:00",
             source_versions=_cost_statistics_gate_snapshot(app, "active:2026-03")["source_versions"],
         )
-        payload = json.loads(app.handle_request("GET", "/api/cost-statistics?month=2026-03").body)
-        self.assertEqual(payload["summary"]["row_count"], 1)
+        project_name = quote("云南溯源科技", safe="")
+        expense_type = quote("设备货款及材料费", safe="")
+        payload = json.loads(
+            app.handle_request(
+                "GET",
+                (
+                    "/api/cost-statistics/explorer?scope=2026-03&view=project"
+                    f"&project_name={project_name}&expense_type={expense_type}"
+                ),
+            ).body
+        )
+        self.assertEqual(payload["row_count"], 1)
         self.assertEqual(payload["rows"][0]["project_name"], "云南溯源科技")
         self.assertEqual(payload["rows"][0]["expense_type"], "设备货款及材料费")
         self.assertEqual(payload["rows"][0]["expense_content"], "PLC 模块采购")

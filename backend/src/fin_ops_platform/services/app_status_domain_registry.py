@@ -60,7 +60,7 @@ APP_STATUS_DOMAIN_REGISTRY: tuple[AppStatusDomainDefinition, ...] = (
         route="/cost-statistics",
         read_model_keys=("cost_statistics",),
         worker_instances=("cost-statistics",),
-        job_types=("cost_statistics.read_model.refresh", "cost_statistics_cache_warmup"),
+        job_types=("cost_statistics.read_model.refresh",),
     ),
     AppStatusDomainDefinition(
         key="bank_details",

@@ -44,7 +44,6 @@ class HttpSloProbeTests(unittest.TestCase):
             "output_invoice_collections_rows",
             "output_invoice_collections_filter_options",
             "cost_statistics_explorer_all",
-            "cost_statistics_summary_all",
             "bank_flow_rule_batches",
             "batch_accounting",
             "turnover_ledger_grouped",
@@ -75,7 +74,6 @@ class HttpSloProbeTests(unittest.TestCase):
         self.assertIn("scope=2026-03", probe_paths["cost_statistics_explorer_all"])
         self.assertIn("view=time", probe_paths["cost_statistics_explorer_all"])
         self.assertIn("project_scope=active", probe_paths["cost_statistics_explorer_all"])
-        self.assertIn("project_scope=active", probe_paths["cost_statistics_summary_all"])
         self.assertIn("bucket=unsubmitted", probe_paths["bank_flow_rule_batches"])
         self.assertIn("page=1", probe_paths["bank_flow_rule_batches"])
         self.assertIn("page_size=200", probe_paths["bank_flow_rule_batches"])

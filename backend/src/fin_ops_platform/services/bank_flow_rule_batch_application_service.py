@@ -265,7 +265,6 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                     "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE,
                     **({"action_name": normalized_action_name} if normalized_action_name else {}),
                 },
-                schedule_cost_warmup=False,
             )
         if persist:
             self.persist_mutation(

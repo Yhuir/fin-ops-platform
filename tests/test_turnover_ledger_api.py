@@ -289,11 +289,6 @@ class _RecordingTurnoverLedgerUow:
 
 
 class TurnoverLedgerApiTests(unittest.TestCase):
-    def setUp(self) -> None:
-        cost_warmup_patcher = patch.object(Application, "_schedule_cost_statistics_cache_warmup")
-        self.addCleanup(cost_warmup_patcher.stop)
-        cost_warmup_patcher.start()
-
     def test_postgres_dirty_outbox_writer_normalizes_cost_statistics_scopes_in_transaction(self) -> None:
         queue = _PostgresQueueRecorder()
         transaction = _PostgresFakeTransaction()

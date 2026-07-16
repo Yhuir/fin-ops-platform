@@ -581,7 +581,7 @@ Batch Accounting 是独立模块，但需要在 Workbench query/read-model 边�
 - `GET /api/batch-accounting`
 - `GET /api/search`
 - `GET /api/tax-offset`
-- `GET /api/cost-statistics`
+- `GET /api/cost-statistics/explorer`
 
 优化检查：
 

@@ -9,10 +9,6 @@ class CostStatisticsReadModelRepositoryPort:
     def __init__(self, repository: Any) -> None:
         self._repository = repository
 
-    def get_cost_statistics_view(self, *, scope_key: str) -> dict[str, Any] | None:
-        payload = self._repository.get_cost_statistics_view(scope_key=scope_key)
-        return dict(payload) if isinstance(payload, dict) else None
-
     def get_cost_statistics_scope_metadata(self, *, scope_key: str) -> dict[str, Any] | None:
         payload = self._repository.get_cost_statistics_scope_metadata(scope_key=scope_key)
         return dict(payload) if isinstance(payload, dict) else None

@@ -329,7 +329,6 @@ READ_MODEL_MANIFEST: dict[str, ReadModelManifestEntry] = {
             "get_cost_statistics_freshness_gate",
             "get_cost_statistics_page",
             "get_cost_statistics_export_page",
-            "get_cost_statistics_view",
             "get_cost_statistics_transaction",
             "active_workbench_source_versions",
             "publish_cost_statistics_read_models",

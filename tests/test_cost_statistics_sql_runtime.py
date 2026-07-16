@@ -91,12 +91,6 @@ class CostStatisticsRuntimeStub:
     def request_scope_key(self, month: str, project_scope: str) -> str:
         return f"{project_scope}:{month}"
 
-    def redis_cache_key(self, scope_key: str, *, source_versions: dict[str, object]) -> str:
-        return f"explorer:{scope_key}:{json.dumps(source_versions, sort_keys=True)}"
-
-    def month_redis_cache_key(self, scope_key: str, *, source_versions: dict[str, object]) -> str:
-        return f"month:{scope_key}:{json.dumps(source_versions, sort_keys=True)}"
-
     def page_redis_cache_key(
         self,
         scope_key: str,
@@ -132,16 +126,6 @@ class CostStatisticsSqlReadRepositoryStub:
             source_versions=self.source_versions,
             source_settings=self.source_settings,
         )
-
-    def get_cost_statistics_view(self, *, scope_key: str) -> dict[str, object]:
-        return {
-            "scope_key": scope_key,
-            "payload": self.payload,
-            "refresh_status": "fresh",
-            "schema_version": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
-            "generated_at": "2026-05-21T09:00:00+00:00",
-            "source_versions": self.source_versions,
-        }
 
     def get_cost_statistics_transaction(
         self,
@@ -240,7 +224,7 @@ def redis_fresh_payload(
 
 
 class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
-    def test_all_query_entrypoints_use_exactly_one_cost_gate_and_stop_before_payload_io_when_nonfresh(self) -> None:
+    def test_page_and_detail_use_exactly_one_cost_gate_and_stop_before_payload_io_when_nonfresh(self) -> None:
         runtime = CostStatisticsRuntimeStub()
 
         class Repository:
@@ -254,9 +238,6 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
                     source_versions=test_cost_statistics_source_versions(scope_key),
                     refresh_status="refreshing",
                 )
-
-            def get_cost_statistics_view(self, **_kwargs: object) -> dict[str, object]:
-                raise AssertionError("non-fresh gate must stop full/month payload I/O")
 
             def get_cost_statistics_page(self, **_kwargs: object) -> dict[str, object]:
                 raise AssertionError("non-fresh gate must stop page payload I/O")
@@ -279,14 +260,12 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
             cursor=None,
             page_size=50,
         )
-        service.get_explorer("2026-05", "active")
-        service.get_month_statistics("2026-05", "active")
         with self.assertRaises(CostStatisticsReadModelNotFreshError):
             service.get_transaction_detail("txn-1", project_scope="active")
 
         self.assertEqual(
             repository.gate_calls,
-            ["active:2026-05", "active:2026-05", "active:2026-05", "active:all"],
+            ["active:2026-05", "active:all"],
         )
 
     def test_current_settings_change_locks_old_cost_snapshot_without_loading_rows(self) -> None:
@@ -306,7 +285,7 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
                     source_settings=current_settings,
                 )
 
-            def get_cost_statistics_view(self, **_kwargs: object) -> dict[str, object]:
+            def get_cost_statistics_page(self, **_kwargs: object) -> dict[str, object]:
                 raise AssertionError("settings mismatch must stop payload I/O")
 
         service = CostStatisticsQueryService(
@@ -315,13 +294,20 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
             tag_selection_mapper=AppSettingsService.cost_statistics_tag_selection_payload_from_settings,
         )
 
-        payload, cache_hit = service.get_explorer("2026-05", "active")
+        payload, cache_hit, _etag, _not_modified = service.get_explorer_page(
+            scope="2026-05",
+            view="time",
+            project_scope="active",
+            filters={},
+            cursor=None,
+            page_size=50,
+        )
 
         self.assertFalse(cache_hit)
         self.assertEqual(payload["read_model_status"], "refreshing")
         self.assertIn("bank_auto_tag_rules_version_mismatch", payload["read_model_stale_reasons"])
 
-    def test_tag_rules_filter_oa_and_bank_flow_totals_with_separate_contracts(self) -> None:
+    def test_tag_rules_filter_transaction_detail(self) -> None:
         runtime = CostStatisticsRuntimeStub()
         source_versions = test_cost_statistics_source_versions("active:2026-05")
         payload = {
@@ -450,20 +436,6 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
             tag_selection_mapper=tag_selection_mapper,
         )
 
-        explorer, _cache_hit = service.get_explorer("2026-05", "active")
-
-        self.assertEqual([row["transaction_id"] for row in explorer["time_rows"]], ["oa-fee"])
-        self.assertEqual(explorer["summary"]["total_amount"], "100.00")
-        self.assertEqual(explorer["project_rows"][0]["total_amount"], "100.00")
-        self.assertEqual(explorer["expense_type_rows"][0]["total_amount"], "100.00")
-        self.assertEqual(
-            [row["transaction_id"] for row in explorer["bank_flow_time_rows"]],
-            ["oa-fee", "flow-fee", "income-fee"],
-        )
-        self.assertEqual(explorer["bank_flow_summary"]["expense_amount"], "150.00")
-        self.assertEqual(explorer["bank_flow_summary"]["income_amount"], "200.00")
-        self.assertEqual(explorer["bank_flow_summary"]["expense_transaction_count"], 2)
-        self.assertEqual(explorer["bank_flow_summary"]["income_transaction_count"], 1)
         detail_source_versions = test_cost_statistics_source_versions("active:all")
         detail_service = CostStatisticsQueryService(
             runtime_service=runtime,
@@ -486,9 +458,6 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
 
             def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
                 return cost_statistics_fresh_gate(scope_key=scope_key, source_versions=source_versions)
-
-            def get_cost_statistics_view(self, *, scope_key: str) -> dict[str, object]:
-                raise AssertionError(f"detail point lookup must not load explorer payload: {scope_key}")
 
             def get_cost_statistics_transaction(
                 self,
@@ -567,9 +536,6 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
                     published_source_version=7,
                 )
 
-            def get_cost_statistics_view(self, **_kwargs: object) -> dict[str, object]:
-                raise AssertionError("export preview must not load the full read-model payload")
-
             def get_cost_statistics_export_page(self, **query: object) -> dict[str, object]:
                 self.export_calls.append(dict(query))
                 rows = [
@@ -634,9 +600,6 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
                     source_versions=source_versions,
                     published_source_version=7,
                 )
-
-            def get_cost_statistics_view(self, **_kwargs: object) -> dict[str, object]:
-                raise AssertionError("bulk export must not load the full read-model payload")
 
             def get_cost_statistics_export_page(self, **query: object) -> dict[str, object]:
                 self.export_calls.append(dict(query))
@@ -1287,9 +1250,6 @@ class UnchangedCostStatisticsSaveRecorder(CostStatisticsSaveRecorder):
 class CostStatisticsReadModelRepositoryPortTests(unittest.TestCase):
     def test_port_excludes_unrelated_read_model_methods(self) -> None:
         class Repository:
-            def get_cost_statistics_view(self, *, scope_key: str) -> dict[str, object]:
-                return {"scope_key": scope_key, "payload": {}}
-
             def get_cost_statistics_scope_metadata(self, *, scope_key: str) -> dict[str, object]:
                 return {"scope_key": scope_key, "entry_count": 1, "source_versions": {"proof": "v1"}}
 
@@ -1336,7 +1296,6 @@ class CostStatisticsReadModelRepositoryPortTests(unittest.TestCase):
 
         port = CostStatisticsReadModelRepositoryPort(Repository())
 
-        self.assertEqual(port.get_cost_statistics_view(scope_key="active:2026-05")["scope_key"], "active:2026-05")
         self.assertEqual(
             port.get_cost_statistics_scope_metadata(scope_key="active:2026-05"),
             {"scope_key": "active:2026-05", "entry_count": 1, "source_versions": {"proof": "v1"}},
@@ -1738,7 +1697,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(params, ("active:2026-05",))
         self.assertEqual(connection.fetch_all_calls, [])
 
-    def test_repository_reads_cost_statistics_freshness_before_full_payload(self) -> None:
+    def test_repository_reads_cost_statistics_freshness_with_one_gate_query(self) -> None:
         connection = CostStatisticsReadConnection(
             read_model_row={
                 "scope_key": "active:2026-05",
@@ -1768,23 +1727,17 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         repository = PostgresReadModelRepository(connection)
 
         gate = repository.get_cost_statistics_freshness_gate(scope_key="active:2026-05")
-        view = repository.get_cost_statistics_view(scope_key="active:2026-05")
-
         self.assertEqual(gate["refresh_status"], "refreshing")
         self.assertEqual(gate["published_source_version"], 7)
         self.assertEqual(gate["dirty_source_version"], 8)
-        self.assertEqual(view["payload"]["time_rows"][0]["transaction_id"], "txn-1")
-        self.assertEqual(view["schema_version"], COST_STATISTICS_READ_MODEL_SCHEMA_VERSION)
-        self.assertNotIn("refresh_status", view)
         gate_sql = connection.fetch_one_calls[0][0]
         self.assertIn("left join lateral", gate_sql)
         self.assertIn("order by source_version desc", gate_sql)
         self.assertIn("from app.app_settings", gate_sql)
         self.assertIn("from read_model.workbench_generations", gate_sql)
         self.assertIn("from read_model.bank_detail_scopes", gate_sql)
-        self.assertEqual(len(connection.fetch_one_calls), 2)
-        full_view_sql = connection.fetch_one_calls[1][0]
-        self.assertNotIn("job.read_model_dirty_scopes", full_view_sql)
+        self.assertEqual(len(connection.fetch_one_calls), 1)
+        self.assertEqual(connection.fetch_all_calls, [])
 
     def test_repository_cost_statistics_gate_handles_done_failed_mismatch_and_pruned_history(self) -> None:
         cases = (
@@ -1854,101 +1807,6 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
 
                 self.assertEqual(gate["refresh_status"], expected_status)
                 self.assertIn(expected_reason, gate["stale_reasons"])
-
-    def test_repository_reads_cost_statistics_schema_version_from_payload_not_table_column(self) -> None:
-        connection = CostStatisticsReadConnection(
-            read_model_row={
-                "scope_key": "active:2026-05",
-                "project_scope": "active",
-                "scope_month": "2026-05-01",
-                "generated_at": "2026-05-21T09:00:00+00:00",
-                "entry_count": 1,
-                "payload": {
-                    "schema_version": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
-                    "month": "2026-05",
-                    "time_rows": [{"transaction_id": "txn-1"}],
-                },
-            },
-        )
-        repository = PostgresReadModelRepository(connection)
-
-        view = repository.get_cost_statistics_view(scope_key="active:2026-05")
-
-        self.assertEqual(view["schema_version"], COST_STATISTICS_READ_MODEL_SCHEMA_VERSION)
-        self.assertEqual(view["payload"]["time_rows"], [])
-        parent_sql = next(
-            sql
-            for sql, _params in connection.fetch_one_calls
-            if "from read_model.cost_statistics_read_models" in sql
-        )
-        self.assertNotIn("schema_version", parent_sql)
-
-    def test_repository_prefers_cost_statistics_row_table_over_snapshot_payload(self) -> None:
-        connection = CostStatisticsReadConnection(
-            read_model_row={
-                "scope_key": "active:2026-05",
-                "project_scope": "active",
-                "scope_month": "2026-05-01",
-                "generated_at": "2026-05-21T09:00:00+00:00",
-                "entry_count": 1,
-                "schema_version": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
-                "payload": {
-                    "month": "2026-05",
-                    "time_rows": [{"transaction_id": "stale-json"}],
-                    "bank_flow_time_rows": [{"transaction_id": "stale-bank-json"}],
-                    "bank_accounts": [
-                        {
-                            "bank_name": "工商银行",
-                            "account_last4": "0001",
-                            "payment_account_label": "工商银行 账户 0001",
-                            "source": "settings",
-                        }
-                    ],
-                },
-            },
-            cost_rows=[
-                {
-                    "scope_key": "active:2026-05",
-                    "project_scope": "active",
-                    "scope_month": "2026-05-01",
-                    "row_key": "txn-1:0",
-                    "transaction_id": "txn-1",
-                    "trade_time_text": "2026-05-02 10:00:00",
-                    "project_name": "项目A",
-                    "expense_type": "材料",
-                    "expense_content": "钢材",
-                    "amount": "10.00",
-                    "payload": {"transaction_id": "txn-1", "project_name": "项目A"},
-                }
-            ],
-            bank_flow_rows=[
-                {
-                    "scope_key": "active:2026-05",
-                    "project_scope": "active",
-                    "scope_month": "2026-05-01",
-                    "row_key": "bank-1:0",
-                    "transaction_id": "bank-1",
-                    "trade_time_text": "2026-05-03 10:00:00",
-                    "direction": "支出",
-                    "project_name": "未配对OA",
-                    "expense_type": "材料",
-                    "amount": "20.00",
-                    "bank_tag_code": "project_material",
-                    "bank_tag_label_path": ["项目开销", "设备材料"],
-                    "payload": {"transaction_id": "bank-1"},
-                }
-            ],
-        )
-        repository = PostgresReadModelRepository(connection)
-
-        view = repository.get_cost_statistics_view(scope_key="active:2026-05")
-
-        self.assertEqual(view["payload"]["time_rows"][0]["transaction_id"], "txn-1")
-        self.assertEqual(view["payload"]["bank_accounts"][0]["payment_account_label"], "工商银行 账户 0001")
-        self.assertEqual(view["payload"]["summary"]["total_amount"], "10.00")
-        self.assertEqual(view["payload"]["project_rows"][0]["expense_type_count"], 1)
-        self.assertEqual(view["payload"]["bank_flow_time_rows"][0]["transaction_id"], "bank-1")
-        self.assertEqual(view["payload"]["bank_flow_summary"]["expense_amount"], "20.00")
 
     def test_repository_gets_cost_statistics_transaction_by_indexed_identity(self) -> None:
         connection = CostStatisticsReadConnection(
@@ -2238,100 +2096,6 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["read_model_status"], "refreshing")
         self.assertEqual(payload["refresh_reason"], "api_page_sql_repository_unavailable")
         self.assertEqual(queue.refreshes, [("cost_statistics", "active:2026-05", "api_page_sql_repository_unavailable")])
-
-    def test_cost_statistics_month_summary_miss_enqueues_refresh_without_sync_build(self) -> None:
-        queue = QueueRecorder()
-        redis = RedisRecorder()
-        app = object.__new__(Application)
-        app._app_settings_service = CostStatisticsAppSettingsStub()
-        app._runtime_repositories = type(
-            "RuntimeRepos",
-            (),
-            {"queue_repository": queue, "redis_helper": redis},
-        )()
-        app._cost_statistics_sql_read_repository = type(
-            "SqlCostStats",
-            (),
-            {
-                "get_cost_statistics_freshness_gate": lambda *_args, **_kwargs: None,
-                "get_cost_statistics_view": lambda *_args, **_kwargs: (_ for _ in ()).throw(
-                    AssertionError("missing gate must not load full payload")
-                ),
-            },
-        )()
-        response = app._cost_statistics_routes().route(
-            "GET",
-            "/api/cost-statistics",
-            {"month": ["2026-05"], "project_scope": ["active"]},
-        )
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
-        self.assertEqual(payload["read_model_status"], "refreshing")
-        self.assertEqual(payload["rows"], [])
-        self.assertEqual(queue.refreshes, [("cost_statistics", "active:2026-05", "api_month_miss")])
-
-    def test_cost_statistics_month_summary_reads_sql_aggregate_and_populates_redis(self) -> None:
-        redis = RedisRecorder()
-        app = object.__new__(Application)
-        app._app_settings_service = CostStatisticsAppSettingsStub()
-        app._runtime_repositories = type(
-            "RuntimeRepos",
-            (),
-            {"queue_repository": QueueRecorder(), "redis_helper": redis},
-        )()
-        app._cost_statistics_sql_read_repository = type(
-            "SqlCostStats",
-            (),
-            {
-                "get_cost_statistics_freshness_gate": lambda _self, *, scope_key: cost_statistics_fresh_gate(
-                    scope_key=scope_key,
-                    source_versions=test_cost_statistics_source_versions(scope_key),
-                ),
-                "get_cost_statistics_view": lambda *_args, **_kwargs: {
-                    "payload": {
-                        "month": "2026-05",
-                        "time_rows": [
-                            {
-                                "transaction_id": "txn-1",
-                                "project_name": "项目A",
-                                "expense_type": "材料",
-                                "expense_content": "钢材",
-                                "amount": "10.00",
-                            },
-                            {
-                                "transaction_id": "txn-2",
-                                "project_name": "项目A",
-                                "expense_type": "材料",
-                                "expense_content": "钢材",
-                                "amount": "5.50",
-                            },
-                        ],
-                    },
-                    "refresh_status": "fresh",
-                    "schema_version": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
-                    "generated_at": "2026-05-21T09:00:00+00:00",
-                    "source_versions": test_cost_statistics_source_versions("active:2026-05"),
-                }
-            },
-        )()
-        response = app._cost_statistics_routes().route(
-            "GET",
-            "/api/cost-statistics",
-            {"month": ["2026-05"], "project_scope": ["active"]},
-        )
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, int(HTTPStatus.OK))
-        self.assertEqual(payload["summary"]["total_amount"], "15.50")
-        self.assertEqual(payload["summary"]["transaction_count"], 2)
-        self.assertEqual(payload["rows"][0]["amount"], "15.50")
-        self.assertTrue(
-            redis.sets[0][0].startswith(
-                f"cost_statistics:month:active:2026-05:schema:{COST_STATISTICS_READ_MODEL_SCHEMA_VERSION}:sources:"
-            )
-        )
-        self.assertLessEqual(redis.sets[0][2], 120)
 
     def test_cost_statistics_api_reads_sql_and_populates_short_redis_cache(self) -> None:
         redis = RedisRecorder()
@@ -2683,13 +2447,11 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         ]
         self.assertEqual(len(settings_reads), 1)
 
-    def test_cost_statistics_sql_projection_does_not_cache_rejected_publish(self) -> None:
+    def test_cost_statistics_sql_projection_reports_rejected_publish(self) -> None:
         repository = CostStatisticsSaveRecorder(publish_result=False)
-        redis = RedisRecorder()
         builder = CostStatisticsSqlProjectionBuilder(
             connection=CostStatisticsProjectionConnection(),
             read_model_repository=repository,
-            redis_helper=redis,
             bank_transaction_tag_read_facade=CostStatisticsBankTagFacade(),
         )
 
@@ -2702,27 +2464,15 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertFalse(result["published"])
         self.assertEqual(result["skip_reason"], "stale_source_version_at_publish")
         self.assertEqual(repository.saved, [])
-        self.assertEqual(redis.sets, [])
 
-    def test_cost_statistics_sql_projection_does_not_write_legacy_unversioned_redis_after_publish(self) -> None:
-        repository = CostStatisticsSaveRecorder()
-        redis = RedisRecorder()
-        builder = CostStatisticsSqlProjectionBuilder(
-            connection=CostStatisticsProjectionConnection(),
-            read_model_repository=repository,
-            redis_helper=redis,
-            bank_transaction_tag_read_facade=CostStatisticsBankTagFacade(),
-        )
-
-        result = builder.rebuild_cost_statistics_read_model_scope(
-            "active:2026-05",
-            tenant_id="default",
-            source_version=7,
-        )
-
-        self.assertTrue(result["published"])
-        self.assertEqual(redis.sets, [])
-        self.assertEqual(redis.deletes, [])
+    def test_cost_statistics_sql_projection_rejects_legacy_redis_dependency(self) -> None:
+        with self.assertRaises(TypeError):
+            CostStatisticsSqlProjectionBuilder(
+                connection=CostStatisticsProjectionConnection(),
+                read_model_repository=CostStatisticsSaveRecorder(),
+                redis_helper=RedisRecorder(),
+                bank_transaction_tag_read_facade=CostStatisticsBankTagFacade(),
+            )
 
     def test_cost_statistics_sql_projection_defers_when_bank_detail_tags_are_not_fresh(self) -> None:
         repository = CostStatisticsSaveRecorder()
@@ -3154,9 +2904,6 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
             (),
             {"queue_repository": queue, "redis_helper": redis},
         )()
-        app._schedule_cost_statistics_cache_warmup = lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("SQL runtime invalidation should enqueue durable refresh when queue exists")
-        )
 
         invalidated = app._invalidate_cost_statistics_read_model_scopes(["2026-05"], reason="unit_test")
 

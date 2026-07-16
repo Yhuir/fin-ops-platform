@@ -53,7 +53,6 @@ class PendingInvoiceLifecycleService:
             action,
             months=affected_months,
             metadata={"source": source, **dict(event)},
-            schedule_cost_warmup=False,
         )
         if self._relation_tag_projection_service is not None:
             try:

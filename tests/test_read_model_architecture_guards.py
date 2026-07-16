@@ -246,32 +246,12 @@ SHARED_SOURCE_VERSION_COMPARATORS = {
 DIRECT_REFRESH_ENQUEUE_ALLOWLIST: dict[tuple[str, str], str] = {
     (
         "backend/src/fin_ops_platform/app/server.py",
-        "Application._enqueue_cost_statistics_read_model_refresh",
-    ): "legacy HTTP/app wrapper delegates to CostStatisticsRuntimeService, which uses ReadModelRefreshGateway.",
-    (
-        "backend/src/fin_ops_platform/app/server.py",
         "Application._enqueue_tax_offset_read_model_refresh",
     ): "legacy HTTP/app wrapper delegates to TaxOffsetRuntimeService, which uses ReadModelRefreshGateway.",
     (
         "backend/src/fin_ops_platform/services/cost_statistics_query_service.py",
-        "CostStatisticsQueryService._refreshing_explorer_payload",
-    ): "production SQL explorer miss delegates to CostStatisticsRuntimeService gateway wrapper.",
-    (
-        "backend/src/fin_ops_platform/services/cost_statistics_query_service.py",
-        "CostStatisticsQueryService._refreshing_month_payload",
-    ): "production SQL month miss delegates to CostStatisticsRuntimeService gateway wrapper.",
-    (
-        "backend/src/fin_ops_platform/services/cost_statistics_query_service.py",
         "CostStatisticsQueryService._cost_statistics_non_fresh_gate_payload",
     ): "dependency-bound cost gate mismatch delegates to the same runtime gateway before any payload read.",
-    (
-        "backend/src/fin_ops_platform/services/cost_statistics_runtime_service.py",
-        "CostStatisticsRuntimeService.enqueue_refresh_for_months",
-    ): "runtime month expansion delegates to the cost refresh gateway without owning local read-model state.",
-    (
-        "backend/src/fin_ops_platform/services/cost_statistics_runtime_service.py",
-        "CostStatisticsRuntimeService.enqueue_refresh_for_scope_keys",
-    ): "legacy warmup bridge normalizes scope keys and delegates to the cost refresh gateway.",
     (
         "backend/src/fin_ops_platform/services/cost_statistics_runtime_service.py",
         "CostStatisticsRuntimeService._enqueue_invalidation_scopes",

@@ -9139,24 +9139,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       ));
     }
 
-    if (path === "/api/cost-statistics") {
-      return json(route, {
-        month: url.searchParams.get("month") ?? "all",
-        summary: costStatisticsExplorerPayload(
-          url.searchParams.get("month") ?? "all",
-          url.searchParams.get("project_scope") ?? "active",
-          relationConfirmed || outputInvoiceDownstreamConfirmed,
-          Boolean(options.costStatisticsRelationFanout) || outputInvoiceDownstreamConfirmed,
-          invoiceImportDownstreamConfirmed,
-          etcImportDownstreamConfirmed,
-          bankImportDownstreamConfirmed,
-          bankFlowRuleCostConfirmed,
-          turnoverCostConfirmed,
-        ).summary,
-        rows: [],
-      });
-    }
-
     if (path === "/api/bank-flow-rule-batches/tag-rules" && request.method() === "PUT") {
       const body = parseJsonBody(request.postData()) as {
         rules?: Array<{ tag_code?: string; requires_oa?: boolean; requires_invoice?: boolean }>;

@@ -957,7 +957,6 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
                         "source": "no_oa_bank_batch",
                         "action_name": "no_oa_bank_batch_withdraw",
                     },
-                    "schedule_cost_warmup": False,
                 }
             ],
         )

@@ -27,7 +27,7 @@
       "page_key": "cost-statistics",
       "route": "/cost-statistics",
       "read_model_keys": ["cost_statistics", "workbench_relation"],
-      "freshness_probe_names": ["cost_statistics_explorer_all", "cost_statistics_summary_all"],
+      "freshness_probe_names": ["cost_statistics_explorer_all"],
       "fact_sources": ["app.bank_transactions", "app.invoices", "app.cost_projects", "read_model.cost_statistics"],
       "pairing_relation_fact_sources": ["app.workbench_pair_relations", "read_model.workbench_relation_rows"],
       "deterministic_evidence": [
@@ -40,7 +40,7 @@
           "required_markers": ["read_model_status", "active:2026-03"]
         }
       ],
-      "production_readonly_gates": ["http_slo_probe:cost_statistics_explorer_all", "http_slo_probe:cost_statistics_summary_all"]
+      "production_readonly_gates": ["http_slo_probe:cost_statistics_explorer_all"]
     },
     {
       "module": "bank-details",

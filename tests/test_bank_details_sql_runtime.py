@@ -1726,7 +1726,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
                     "scope_keys": ["all"],
                     "include_all": True,
                     "metadata": {"reason": "bank_auto_tag_rules_changed", "new_version": 12},
-                    "schedule_cost_warmup": False,
                 }
             ],
         )

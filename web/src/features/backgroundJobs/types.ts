@@ -16,8 +16,7 @@ export type BackgroundJobType =
   | "workbench_matching"
   | "workbench_rebuild"
   | "tax_certified_import"
-  | "etc_oa_draft"
-  | "cost_statistics_cache_warmup";
+  | "etc_oa_draft";
 
 export type BackgroundJob = {
   jobId: string;

@@ -1,6 +1,6 @@
 # 成本统计高性能、鲜度与轻量锁定遮罩设计
 
-> 状态：本地实现闭环；05-20 `READY_FOR_COORDINATED_DEPLOY`，`DEPLOYMENT_HOLD`
+> 状态：`READY_FOR_UNIFIED_DEPLOYMENT`，`DEPLOYMENT_HOLD`
 > 日期：2026-07-16
 > 范围：`/cost-statistics` 页面、`cost_statistics` read model / worker / query / Audit 链路，以及直接影响该 read model 的发布后 fan-out
 > 本文是唯一主设计与实施校准文档；已落地内容和剩余门禁必须在此区分，不以设计项冒充完成项。
@@ -15,7 +15,7 @@
 2. `cost_statistics` worker 使用现有 durable queue 的 `source_version` 做原子条件发布和条件完成，禁止旧任务覆盖新事实。
 3. 页面在数据未确认 fresh 时进入成本页局部锁定状态；用户能看到旧页面轮廓，但不能把旧值当作可操作的新数据。
 4. Audit 从通用大文件中拆回成本统计边界，以少量集合 SQL 在同一 `REPEATABLE READ READ ONLY` snapshot 内完成。
-5. 已有完整 caller 证据的旧 live service、本地 read model、全量 payload、无版本缓存、未使用 API client 和 cost/tax 混合 owner 均已删除，不保留 fallback；warmup bridge 与旧 summary/project HTTP 合同仍按生产证据门禁隔离保留，不能冒充已删。
+5. 旧 live service、本地 read model、全量 payload、无版本缓存、未使用 API client、cost/tax 混合 owner、warmup bridge、旧 summary/project HTTP contract 与 full-view loader 均已删除，不保留 fallback。
 
 遮罩采用 Impeccable 的 `Ledger Calm` 产品设计语言：约 80% 透明、无弹窗、无实色卡片、无大阴影、无背景模糊。它是页面内的轻量交互锁，不是 modal。
 
@@ -40,9 +40,10 @@
 | 05-16 | 完成 | 五类业务值/summary/account proof由 5 次往返合为 1 次集合查询；独立 limit/code/details不变；active-relation固定预算由30降至26 | exact-set剩余查询、真实 PostgreSQL plan/生产 `<=5s`、mismatch与连续 pass |
 | 05-17 | 完成 | 删除成本 Audit 最后 3 处 parent JSON bank-flow array 读取；canonical set、字段和 summary proof 只读结构化 bank-flow rows，parent 按 month rows 逻辑 rollup；0001–0107 本地 PostgreSQL clean cost Audit 通过 | exact-set 剩余查询、真实数据 plan/生产 `<=5s`、mismatch 与连续 pass |
 | 05-18 | 完成 | scope count、missing scope、duplicate identity、canonical expected-set 四个入口合为 1 次集合查询；四分支独立 bounded；删除旧四 helper 与无调用 proof helper；active-relation预算由26降至23 | 真实数据 plan/生产 `<=5s`、mismatch与连续 pass |
-| 05-19 | 完成 | worker unchanged 判定改为 parent `scope_key/entry_count/source_versions` 单次点查；删除 projection/full-view 调用与旧 fixture，不读 payload/明细 rows/dependency gate | 旧 month/project HTTP合同的生产 access-log/owner删除门禁；真实 worker/写后鲜度 SLO |
-| 05-20 | 完成 | 成本与税金 SQL projection 拆为两个明确 owner；删除 `cost_tax_sql_projection.py`、全部 current import与混合 helper，不留 re-export/shim/fallback | 生产 worker实跑、旧 warmup active-job=0 与旧HTTP access-log/owner证据 |
-| 整体任务 | 进行中 | 本地正确性基础已建立 | 未部署、未跑生产 migration/rebuild/EXPLAIN/SLO；不得标记完成 |
+| 05-19 | 完成 | worker unchanged 判定改为 parent `scope_key/entry_count/source_versions` 单次点查；删除 projection/full-view 调用与旧 fixture，不读 payload/明细 rows/dependency gate | 真实 worker/写后鲜度 SLO |
+| 05-20 | 完成 | 成本与税金 SQL projection 拆为两个明确 owner；删除 `cost_tax_sql_projection.py`、全部 current import与混合 helper，不留 re-export/shim/fallback | 生产 worker实跑；warmup/旧HTTP证据已由后续统一发布准备收口关闭 |
+| 统一发布准备收口 | 完成 | owner 明确认定无旧 HTTP 外部 consumer且从未公开承诺；生产只读 active/attention warmup job 均为0；删除 warmup、旧HTTP/full-view及所有 registry/mock/compat I/O | 只剩统一部署窗口的生产执行与性能/Audit验证 |
+| 整体任务 | `READY_FOR_UNIFIED_DEPLOYMENT` | 本地实现、旧链删除、回归与发布前证据闭环 | 未部署；生产 migration/rehydrate/EXPLAIN/SLO/Audit按统一部署窗口执行 |
 
 ## 2. 已确认的验收门槛
 
@@ -474,17 +475,17 @@ cursor 必须绑定 scope、view、稳定排序键和 published source version�
 | --- | --- | --- |
 | `CostStatisticsReadModelService` 及 `cost_statistics_read_model_service.py` | **已删除（05-13）**；projection 直接提交单 scope repository write model，Application/runtime/API fixture 均无本地 owner | 静态 guard 禁止 module/class/import/server field/local persistence或测试替身回归 |
 | `CostStatisticsService` 及 `cost_statistics_service.py` | **已删除（05-11）**；导出限制归 query owner，业务规则与测试归唯一 SQL projection owner | 静态 guard 禁止 module、class、import、`_cost_statistics_service` 测试替身或兼容 shim 回归 |
-| `CostStatisticsRuntimeService` 中 local read model / background job / persist dependencies | **local/persist 已删除（05-13）**；仅 `background_job_service` 为历史 warmup job终结桥保留 | production active-job=0 后与 warmup job type/delegates一并删除；不得恢复 local owner |
+| `CostStatisticsRuntimeService` 中 local read model / background job / persist dependencies | **已删除**；runtime 只保留 durable refresh gateway 与规范 scope helper | 静态 guard 禁止 local owner、background job 或 persist dependency 回归 |
 | repository/state-store 全量 load 与无版本 save | **已删除（05-14）**；port/manifest 只登记 scoped reads 与 conditional publish，broad load/save 不再携带成本 key | static guard 禁止旧方法、snapshot key、facade delegate、protocol method 或 direct-save test fixture 回归 |
 | 请求时 expected source-version / tag-selection 读取 | **已删除（05-12）**；current settings/Workbench/Bank Detail 与 cost metadata 由单次 gate statement 读取，query 只做纯映射 | 静态 guard 禁止 server wrappers、runtime provider/expected method、query tag-selection provider 和 request-time settings/source reads 回归 |
-| `cost_statistics_cache_warmup` | server retry/recover/schedule/run、App Health registry、runtime policy、前端 type 和 tests 仍识别 | 发布前确认历史 active jobs 为 0 或转为 terminal；随后全量删除，不保留兼容 retry |
-| Application warmup delegates | `_recover/_schedule/_run/_retry_cost_statistics_cache_warmup*` 仍存在 | 删除方法、route 分支、patch tests 和依赖注入 |
+| 旧成本 warmup job | **已删除**；生产只读 `/api/background-jobs/active` 证明 active/attention 均为0 | 静态 guard 禁止 server retry/recover/schedule/run、App Health/runtime registry、前端 type/mock 与 tests fixture 回归 |
+| Application warmup delegates | **已删除**；derived lifecycle 直接经现有 gateway 入队 `cost_statistics.read_model.refresh` | 禁止恢复兼容 retry 或第二 job type |
 | unversioned Redis keys | 05-04 已删除 projection 的 `cost_statistics:explorer:{scope}` set/delete；query gateway 使用 versioned key | 本地代码已完成；统一部署窗口只需确认历史 key 由 TTL/受控清理退出，禁止恢复 writer |
 | `cost_tax_sql_projection.py` 的混合所有权 | **已删除（05-20）**；成本与税金 builder 已迁到各自 owner，生产 worker直接 import两者 | 静态 guard 禁止旧文件、旧 import、跨 owner class或兼容 re-export回归；税金行为不变 |
 | parent JSON full arrays | 05-04 已让 v9 metadata snapshot 剥离 `time_rows` / `bank_flow_time_rows`，view/parent 只读结构化行 | 本地代码已完成；生产 migration 后必须全 scope rebuild 并证明旧 JSON 不再被读 |
 | `get_transaction_detail` 的 `all` scan | 05-04 已删除两次线性扫描，改为 gate 后 repository identity lookup | 本地代码已完成；生产用 EXPLAIN 和 detail SLO 复验 |
 | projection unchanged 的 full-view scan | **已删除（05-19）**；只用 `get_cost_statistics_scope_metadata(...)` 点查 parent 三字段，fixture/静态 guard禁止 full-view/payload 回归 | 本地代码已完成；统一部署后验证真实 worker skip 与 write-to-fresh p99 |
-| 旧 summary/project API route | `/api/cost-statistics`、`/projects/{name}` 仍有 contract 和 client | 检查覆盖至少一个正常财务业务周期的生产 access log，或取得所有 owner 的显式确认；迁移真实调用方后删除 route、DTO、tests，不保留 fallback |
+| 旧 summary/project API route | **已删除**；系统 owner 确认无已知脚本、RPA、BI或第三方 consumer，且从未作为公共集成合同承诺 | 静态 guard 与全仓生产扫描禁止 route、DTO、client/mock、full-view loader 或 fallback 回归 |
 
 ### 9.2 前端删除
 
@@ -516,7 +517,7 @@ cursor 必须绑定 scope、view、稳定排序键和 published source version�
 7. **生产重建**：schema version 升级使旧 scope fail-closed；优先重建当前业务月，再收敛 parent scopes。页面在此期间显示 lock，不走旧读路径。
 8. **验收**：性能、Audit、worker race、跨用户 freshness、其他页面回归全部通过后才结束发布。
 
-当前执行状态：worker correctness、PostgreSQL-first dependency gate、结构化 rows、详情点查、view-specific cursor、bounded/write-only导出、cost-local lock、成本 Audit唯一 owner与四组 cost-owned 集合 SQL，以及 legacy live/local read-model owner、repository/state-store全量load/无条件save和 cost/tax混合 projection owner删除均已本地完成。页面没有新旧 response/non-fresh UI双读；Audit没有新旧 executor双路；projection没有混合 module或兼容 import。未新增索引，必须等待统一部署窗口的真实 `EXPLAIN (ANALYZE, BUFFERS)` 决定。剩余 warmup、旧HTTP/full-view、生产 mismatch、连续 pass与SLO均有明确生产证据门禁，当前进入协调部署等待。
+当前执行状态：worker correctness、PostgreSQL-first dependency gate、结构化 rows、详情点查、view-specific cursor、bounded/write-only导出、cost-local lock、成本 Audit唯一 owner与四组 cost-owned 集合 SQL，以及 legacy live/local read-model owner、repository/state-store全量load/无条件save、cost/tax混合 owner、warmup 和旧 HTTP/full-view删除均已本地完成。页面没有新旧 response/non-fresh UI双读；Audit没有新旧 executor双路；projection没有混合 module或兼容 import。未新增索引，必须等待统一部署窗口的真实 `EXPLAIN (ANALYZE, BUFFERS)` 决定。当前是 `READY_FOR_UNIFIED_DEPLOYMENT / DEPLOYMENT_HOLD`，只剩生产执行、mismatch修复、连续 pass与SLO验证。
 
 ### 10.2 无双读迁移
 
@@ -575,7 +576,7 @@ cursor 必须绑定 scope、view、稳定排序键和 published source version�
 - 当前月与 `active:all` freshness 正确收敛；
 - 新旧 writer/read path 静态 guard 通过；
 - 其他关键页面 p95、错误率和 read model 状态不回退；
-- 生产没有 active `cost_statistics_cache_warmup` job、无 legacy Redis key 命中、无旧 endpoint 真实调用方。
+- 发布候选中不存在 warmup job/旧 HTTP/full-view production path；历史 Redis key 不存在 writer，只能自然 TTL 或按统一部署 runbook 受控清理。
 
 ## 13. 过度设计复审
 
@@ -620,7 +621,7 @@ cursor 必须绑定 scope、view、稳定排序键和 published source version�
 - 静态默认月份；
 - 父 scope exact shard 收敛；
 - Audit 性能和真实 mismatch 的分离处理；
-- 旧 class、Redis key、client、混合 projection owner 与可本地证明 caller 归零的 tests/current docs 删除；warmup job和旧 route由生产 active-job/access-log证据门禁后再删；
+- 旧 class、Redis key、client、混合 projection owner、warmup job、旧 route/full-view 与对应 tests/current docs 全量删除；
 - 无双读迁移、生产重建和外部 consumer 预检；
 - additive schema rollback；
 - 七类测试、可观测性、其他页面不回退门禁。

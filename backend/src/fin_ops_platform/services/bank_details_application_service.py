@@ -369,7 +369,6 @@ class BankDetailsApplicationService:
                 "reason": "bank_auto_tag_rules_changed",
                 "new_version": event.get("new_version"),
             },
-            schedule_cost_warmup=False,
         )
 
     def _accounts_from_sql_read_model(self, *, date_from: str | None, date_to: str | None) -> dict[str, object] | None:

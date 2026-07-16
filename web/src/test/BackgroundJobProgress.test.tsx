@@ -24,17 +24,17 @@ const runningEtcJob = {
   finished_at: null,
 };
 
-const failedCostWarmupJob = {
-  job_id: "job_cost_warmup_failed",
-  type: "cost_statistics_cache_warmup",
-  label: "成本统计缓存预热",
-  short_label: "成本统计缓存预热失败",
+const failedWorkbenchMatchingJob = {
+  job_id: "job_workbench_matching_failed",
+  type: "workbench_matching",
+  label: "关联台匹配",
+  short_label: "关联台匹配失败",
   status: "failed",
   phase: "failed",
   current: 2,
   total: 4,
   percent: 50,
-  message: "成本统计缓存预热失败。",
+  message: "关联台匹配失败。",
   result_summary: {
     warmed: 2,
     failed: 2,
@@ -98,21 +98,21 @@ describe("global background job page header", () => {
     expect(await screen.findByTestId("background-progress-block")).toHaveTextContent("正在导入 ETC发票 3/31");
   });
 
-  test("renders a retry action for retryable cost warmup attention jobs", async () => {
+  test("renders a retry action for retryable attention jobs", async () => {
     const fetchMock = installMockApiFetch({
       backgroundJobs: [
-        failedCostWarmupJob,
+        failedWorkbenchMatchingJob,
       ],
     });
     renderAppAt("/");
 
-    expect(await screen.findByTestId("background-progress-block")).toHaveTextContent("成本统计缓存预热失败");
+    expect(await screen.findByTestId("background-progress-block")).toHaveTextContent("关联台匹配失败");
 
     await userEvent.click(screen.getByRole("button", { name: "重新执行" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining("/api/background-jobs/job_cost_warmup_failed/retry"),
+        expect.stringContaining("/api/background-jobs/job_workbench_matching_failed/retry"),
         expect.objectContaining({ method: "POST" }),
       );
     });
@@ -120,33 +120,33 @@ describe("global background job page header", () => {
 
   test("shows operation feedback when retry fails instead of appearing unresponsive", async () => {
     installMockApiFetch({
-      backgroundJobs: [failedCostWarmupJob],
+      backgroundJobs: [failedWorkbenchMatchingJob],
       backgroundJobRetryStatus: 409,
-      backgroundJobRetryBody: { message: "成本统计缓存预热任务缺少重新执行所需的范围。" },
+      backgroundJobRetryBody: { message: "关联台匹配任务缺少重新执行所需的范围。" },
     });
     renderAppAt("/");
 
-    expect(await screen.findByTestId("background-progress-block")).toHaveTextContent("成本统计缓存预热失败");
+    expect(await screen.findByTestId("background-progress-block")).toHaveTextContent("关联台匹配失败");
 
     await userEvent.click(screen.getByRole("button", { name: "重新执行" }));
 
-    expect(await screen.findByText("成本统计缓存预热任务缺少重新执行所需的范围。")).toBeInTheDocument();
+    expect(await screen.findByText("关联台匹配任务缺少重新执行所需的范围。")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "重新执行" })).toBeEnabled();
   });
 
   test("acknowledges known attention jobs from the global progress header", async () => {
     const fetchMock = installMockApiFetch({
-      backgroundJobs: [failedCostWarmupJob],
+      backgroundJobs: [failedWorkbenchMatchingJob],
     });
     renderAppAt("/");
 
-    expect(await screen.findByTestId("background-progress-block")).toHaveTextContent("成本统计缓存预热失败");
+    expect(await screen.findByTestId("background-progress-block")).toHaveTextContent("关联台匹配失败");
 
     await userEvent.click(screen.getByRole("button", { name: "确认已知" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining("/api/background-jobs/job_cost_warmup_failed/acknowledge"),
+        expect.stringContaining("/api/background-jobs/job_workbench_matching_failed/acknowledge"),
         expect.objectContaining({ method: "POST" }),
       );
     });

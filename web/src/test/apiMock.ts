@@ -3655,15 +3655,6 @@ function applyCertifiedImportToTaxOffsetPayload(
   return nextPayload;
 }
 
-type CostSummaryRow = {
-  project_name: string;
-  expense_type: string;
-  expense_content: string;
-  amount: string;
-  transaction_count: number;
-  sample_transaction_ids: string[];
-};
-
 type CostProjectRow = {
   transaction_id: string;
   trade_time: string;
@@ -3697,45 +3688,6 @@ type CostTransactionDetail = {
     summary_fields: Record<string, string>;
     detail_fields: Record<string, string>;
   };
-};
-
-const costStatisticsMonthRows: Record<string, CostSummaryRow[]> = {
-  "2026-03": [
-    {
-      project_name: "云南溯源科技",
-      expense_type: "设备货款及材料费",
-      expense_content: "PLC 模块采购",
-      amount: "12,500.00",
-      transaction_count: 2,
-      sample_transaction_ids: ["cost-txn-001", "cost-txn-002"],
-    },
-    {
-      project_name: "云南溯源科技",
-      expense_type: "交通费",
-      expense_content: "项目现场往返交通",
-      amount: "860.00",
-      transaction_count: 1,
-      sample_transaction_ids: ["cost-txn-003"],
-    },
-    {
-      project_name: "昭通卷烟厂2025-2028年度能源集中监控平台系统维护采购项目",
-      expense_type: "人工费/劳务费/服务费",
-      expense_content: "现场调试服务",
-      amount: "5,200.00",
-      transaction_count: 1,
-      sample_transaction_ids: ["cost-txn-004"],
-    },
-  ],
-  "2026-04": [
-    {
-      project_name: "昆明卷烟厂动力设备控制系统升级改造项目",
-      expense_type: "经营/办公费用",
-      expense_content: "项目办公室租赁",
-      amount: "9,600.00",
-      transaction_count: 2,
-      sample_transaction_ids: ["cost-txn-101", "cost-txn-102"],
-    },
-  ],
 };
 
 const completedCostProjectNames = new Set([
@@ -4024,22 +3976,6 @@ function sumCostAmounts(rows: Array<{ amount: string }>) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
-}
-
-function buildCostStatisticsMonthPayload(month: string, projectScope = "active") {
-  const rows = (costStatisticsMonthRows[month] ?? []).filter((row) =>
-    isCostProjectVisibleForScope(row.project_name, projectScope),
-  );
-  return {
-    month,
-    read_model_status: "fresh",
-    summary: {
-      row_count: rows.length,
-      transaction_count: rows.reduce((sum, row) => sum + row.transaction_count, 0),
-      total_amount: sumCostAmounts(rows),
-    },
-    rows,
-  };
 }
 
 function buildAllCostProjectRows() {
@@ -4383,24 +4319,6 @@ function buildCostStatisticsExplorerPagePayload(
     next_cursor: readModelStatus === "fresh" && nextOffset < matchedRows.length ? `mock:${nextOffset}` : null,
     read_model_status: readModelStatus,
     read_model_scope_key: `${url.searchParams.get("project_scope") ?? "active"}:${scope.startsWith("year:") ? "all" : scope}`,
-  };
-}
-
-function buildCostStatisticsProjectPayload(month: string, projectName: string, projectScope = "active") {
-  const rows = isCostProjectVisibleForScope(projectName, projectScope)
-    ? month === "all"
-      ? buildAllCostProjectRows()[projectName] ?? []
-      : (costStatisticsProjectRows[month]?.[projectName] ?? [])
-    : [];
-  return {
-    month,
-    project_name: projectName,
-    summary: {
-      row_count: rows.length,
-      transaction_count: rows.length,
-      total_amount: sumCostAmounts(rows),
-    },
-    rows,
   };
 }
 
@@ -5710,14 +5628,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           },
         },
       };
-    },
-    "/api/cost-statistics": ({ url }) => {
-      const month = url.searchParams.get("month") ?? "";
-      const projectScope = url.searchParams.get("project_scope") ?? "active";
-      if (options.costErrorMonths?.includes(month)) {
-        return { status: 500, body: { message: "cost statistics failed" } };
-      }
-      return { body: buildCostStatisticsMonthPayload(month, projectScope) };
     },
     "/api/cost-statistics/tag-rules": ({ init, jsonBody }) => {
       const selectedCodes = Array.isArray(jsonBody?.selected_tag_codes)
@@ -7744,12 +7654,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
 
     if (url.pathname.startsWith("/api/workbench/rows/")) {
       return jsonResponse({ body: buildWorkbenchDetail(url.pathname.split("/").pop() ?? "") });
-    }
-    if (url.pathname.startsWith("/api/cost-statistics/projects/")) {
-      const projectName = decodeURIComponent(url.pathname.split("/").pop() ?? "");
-      const month = url.searchParams.get("month") ?? "";
-      const projectScope = url.searchParams.get("project_scope") ?? "active";
-      return jsonResponse({ body: buildCostStatisticsProjectPayload(month, projectName, projectScope) });
     }
     if (url.pathname.startsWith("/api/cost-statistics/transactions/")) {
       const transactionId = url.pathname.split("/").pop() ?? "";

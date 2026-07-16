@@ -5801,95 +5801,6 @@ class PostgresSummaryReadModelRepository:
             ),
         }
 
-    def get_cost_statistics_view(self, *, scope_key: str) -> dict[str, Any] | None:
-        normalized_scope_key = str(scope_key or "").strip()
-        if not normalized_scope_key:
-            return None
-        row = self._connection.fetch_one(
-            """
-            select
-                scope_key, project_scope, scope_month, generated_at, entry_count,
-                source_versions, payload, raw_payload
-            from read_model.cost_statistics_read_models
-            where scope_key = %s
-            limit 1
-            """,
-            (normalized_scope_key,),
-        )
-        if row is None:
-            return None
-        stored_payload = _read_model_payload(row)
-        if not isinstance(stored_payload, dict):
-            stored_payload = {}
-        model_payload = stored_payload.get("payload") if isinstance(stored_payload.get("payload"), dict) else stored_payload
-        project_scope, scope_month_text = _parse_cost_statistics_scope_parts(
-            normalized_scope_key,
-            payload=model_payload,
-        )
-        if scope_month_text == "all":
-            where_sql = "project_scope = %s and scope_key <> %s and scope_month is not null"
-            row_params: tuple[Any, ...] = (project_scope, normalized_scope_key)
-        else:
-            where_sql = "scope_key = %s"
-            row_params = (normalized_scope_key,)
-        row_items = self._connection.fetch_all(
-            f"""
-            select
-                scope_key, project_scope, scope_month::text as scope_month, row_key, transaction_id,
-                group_id, trade_time_text, trade_date::text as trade_date, counterparty_name,
-                payment_account_label, direction, remark, project_id, project_name, expense_type,
-                expense_content, amount::text as amount, oa_applicant, source_versions,
-                generated_at::text as generated_at, cache_status, payload, raw_payload
-            from read_model.cost_statistics_rows
-            where {where_sql}
-            order by trade_date desc nulls last, trade_time_text desc, transaction_id, row_key
-            """,
-            row_params,
-        )
-        bank_flow_items = self._connection.fetch_all(
-            f"""
-            select
-                scope_key, project_scope, scope_month::text as scope_month, row_key, transaction_id,
-                group_id, trade_time_text, trade_date::text as trade_date, counterparty_name,
-                payment_account_label, direction, remark, project_id, project_name, expense_type,
-                expense_content, amount::text as amount, oa_applicant,
-                bank_tag_code, bank_tag_label, bank_tag_primary_label, bank_tag_sub_label,
-                bank_tag_label_path, source_versions, generated_at::text as generated_at,
-                cache_status, payload, raw_payload
-            from read_model.cost_statistics_bank_flow_rows
-            where {where_sql}
-            order by trade_date desc nulls last, trade_time_text desc, transaction_id, row_key
-            """,
-            row_params,
-        )
-        payload = _cost_statistics_payload_from_rows(
-            scope_key=normalized_scope_key,
-            parent_payload=stored_payload,
-            parent_row=row,
-            rows=row_items,
-            bank_flow_rows=bank_flow_items,
-        )
-        return {
-            "scope_key": normalized_scope_key,
-            "project_scope": text(row.get("project_scope") or payload.get("project_scope")),
-            "payload": payload,
-            "schema_version": text(row.get("schema_version") or stored_payload.get("schema_version") or payload.get("schema_version")),
-            "generated_at": text(row.get("generated_at") or stored_payload.get("generated_at") or payload.get("generated_at")),
-            "source_versions": (
-                row.get("source_versions")
-                if isinstance(row.get("source_versions"), dict)
-                else stored_payload.get("source_versions")
-                if isinstance(stored_payload.get("source_versions"), dict)
-                else {}
-            ),
-            "entry_count": int_value(
-                row.get("entry_count")
-                or payload.get("entry_count")
-                or ((payload.get("summary") if isinstance(payload.get("summary"), dict) else {}).get("row_count")),
-                0,
-            ),
-        }
-
     def get_cost_statistics_transaction(
         self,
         *,
@@ -6879,9 +6790,6 @@ class PostgresReadModelRepository:
             bank_detail_scope_summary=self.bank_detail_scope_summary,
             workbench_relation_source_summary_from_source=self.workbench_relation_source_summary_from_source,
         )
-
-    def get_cost_statistics_view(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
-        return self._summary_read_model_repository.get_cost_statistics_view(*args, **kwargs)
 
     def get_cost_statistics_scope_metadata(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
         return self._summary_read_model_repository.get_cost_statistics_scope_metadata(*args, **kwargs)
@@ -12009,102 +11917,6 @@ def _cost_statistics_row_payload(db_row: dict[str, Any], *, fallback_index: int)
             db_row.get("bank_tag_sub_label") or row_payload_value.get("bank_tag_sub_label")
         ),
         "bank_tag_label_path": deepcopy(label_path) if isinstance(label_path, list) else [],
-    }
-
-
-def _cost_statistics_payload_from_rows(
-    *,
-    scope_key: str,
-    parent_payload: dict[str, Any],
-    parent_row: dict[str, Any],
-    rows: list[dict[str, Any]],
-    bank_flow_rows: list[dict[str, Any]],
-) -> dict[str, Any]:
-    parent_model_payload = parent_payload.get("payload") if isinstance(parent_payload.get("payload"), dict) else parent_payload
-    bank_accounts = parent_model_payload.get("bank_accounts")
-    project_scope, scope_month_text = _parse_cost_statistics_scope_parts(scope_key, payload=parent_model_payload)
-    if scope_month_text != "all":
-        if rows:
-            scope_month_text = text(rows[0].get("scope_month")) or scope_month_text
-        elif bank_flow_rows:
-            scope_month_text = text(bank_flow_rows[0].get("scope_month")) or scope_month_text
-    month = scope_month_text[:7] if scope_month_text and scope_month_text != "all" else text(parent_model_payload.get("month")) or scope_month_text
-    time_rows: list[dict[str, Any]] = []
-    project_groups: dict[str, dict[str, Any]] = {}
-    expense_groups: dict[str, dict[str, Any]] = {}
-    total_amount = Decimal("0")
-    for index, db_row in enumerate(rows):
-        normalized_row = _cost_statistics_row_payload(db_row, fallback_index=index)
-        amount = _decimal_or_zero(normalized_row.get("amount"))
-        total_amount += amount
-        project_name = text(normalized_row.get("project_name")) or "未归集项目"
-        expense_type = text(normalized_row.get("expense_type")) or "未分类"
-        time_rows.append(normalized_row)
-        project_bucket = project_groups.setdefault(
-            project_name,
-            {"project_name": project_name, "total_amount": Decimal("0"), "transaction_count": 0, "expense_types": set()},
-        )
-        project_bucket["total_amount"] += amount
-        project_bucket["transaction_count"] += 1
-        project_bucket["expense_types"].add(expense_type)
-        expense_bucket = expense_groups.setdefault(
-            expense_type,
-            {"expense_type": expense_type, "total_amount": Decimal("0"), "transaction_count": 0, "projects": set()},
-        )
-        expense_bucket["total_amount"] += amount
-        expense_bucket["transaction_count"] += 1
-        expense_bucket["projects"].add(project_name)
-    bank_flow_time_rows = [
-        _cost_statistics_row_payload(db_row, fallback_index=index)
-        for index, db_row in enumerate(bank_flow_rows)
-    ]
-    expense_bank_flow_rows = [row for row in bank_flow_time_rows if text(row.get("direction")) == "支出"]
-    income_bank_flow_rows = [row for row in bank_flow_time_rows if text(row.get("direction")) == "收入"]
-    bank_flow_total = sum((_decimal_or_zero(row.get("amount")) for row in bank_flow_time_rows), start=Decimal("0"))
-    bank_flow_summary = {
-        "row_count": len(bank_flow_time_rows),
-        "transaction_count": len(bank_flow_time_rows),
-        "total_amount": _format_decimal(bank_flow_total),
-        "expense_amount": _format_decimal(
-            sum((_decimal_or_zero(row.get("amount")) for row in expense_bank_flow_rows), start=Decimal("0"))
-        ),
-        "income_amount": _format_decimal(
-            sum((_decimal_or_zero(row.get("amount")) for row in income_bank_flow_rows), start=Decimal("0"))
-        ),
-        "expense_transaction_count": len(expense_bank_flow_rows),
-        "income_transaction_count": len(income_bank_flow_rows),
-    }
-    return {
-        "month": month,
-        "project_scope": project_scope,
-        "summary": {
-            "row_count": len(time_rows),
-            "transaction_count": len(time_rows),
-            "total_amount": _format_decimal(total_amount),
-        },
-        "time_rows": time_rows,
-        "bank_flow_summary": bank_flow_summary,
-        "bank_flow_time_rows": bank_flow_time_rows,
-        "bank_accounts": deepcopy(bank_accounts) if isinstance(bank_accounts, list) else [],
-        "project_rows": [
-            {
-                "project_name": bucket["project_name"],
-                "total_amount": _format_decimal(bucket["total_amount"]),
-                "transaction_count": bucket["transaction_count"],
-                "expense_type_count": len(bucket["expense_types"]),
-            }
-            for bucket in sorted(project_groups.values(), key=lambda item: (-item["total_amount"], item["project_name"]))
-        ],
-        "expense_type_rows": [
-            {
-                "expense_type": bucket["expense_type"],
-                "total_amount": _format_decimal(bucket["total_amount"]),
-                "transaction_count": bucket["transaction_count"],
-                "project_count": len(bucket["projects"]),
-            }
-            for bucket in sorted(expense_groups.values(), key=lambda item: (-item["total_amount"], item["expense_type"]))
-        ],
-        "generated_at": text(parent_row.get("generated_at") or parent_payload.get("generated_at")),
     }
 
 

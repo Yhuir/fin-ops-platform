@@ -823,7 +823,6 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                         "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE,
                         "action_name": "bank_flow_rule_batch_tag_rules_changed",
                     },
-                    "schedule_cost_warmup": False,
                 }
             ],
         )

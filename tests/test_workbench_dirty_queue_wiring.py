@@ -172,7 +172,6 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
             months=["2026-05"],
             include_all=False,
             metadata={"reason": "invoice_import_confirm"},
-            schedule_cost_warmup=False,
         )
 
         self.assertEqual(
@@ -200,14 +199,12 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
             scope_keys=["2026-05"],
             include_all=False,
             metadata={"reason": "confirm_link"},
-            schedule_cost_warmup=False,
         )
         app._execute_derived_data_lifecycle_event(
             "exception_case_changed",
             scope_keys=["2026-04"],
             include_all=False,
             metadata={"reason": "cancel_exception"},
-            schedule_cost_warmup=False,
         )
 
         self.assertEqual(
@@ -225,7 +222,6 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
             scope_keys=["2026-05"],
             include_all=False,
             metadata={"action_name": "withdraw_link"},
-            schedule_cost_warmup=False,
         )
 
         workbench_relation_calls = [
@@ -259,7 +255,6 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
                 "invoice_usage_scope_types": ["input_invoice_usage"],
                 "pending_invoice_scope_keys": ["expense:all:2026-05"],
             },
-            schedule_cost_warmup=False,
         )
 
         refreshes = [(call.get("scope_type"), call.get("scope_key")) for call in queue.calls]

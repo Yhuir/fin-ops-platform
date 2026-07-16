@@ -21,31 +21,13 @@ class CostStatisticsRuntimeService:
     def __init__(
         self,
         *,
-        background_job_service: Any | None = None,
         queue_repository: Any | None = None,
     ) -> None:
-        self._background_job_service = background_job_service
         self._queue_repository = queue_repository
 
     @staticmethod
     def request_scope_key(month: str, project_scope: str) -> str:
         return f"{str(project_scope or 'active').strip().lower()}:{str(month or 'all').strip() or 'all'}"
-
-    def redis_cache_key(self, scope_key: str, *, source_versions: dict[str, Any] | None = None) -> str:
-        return self.read_model_redis_cache_key(
-            "cost_statistics:explorer",
-            scope_key,
-            schema_version=COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
-            source_versions=source_versions,
-        )
-
-    def month_redis_cache_key(self, scope_key: str, *, source_versions: dict[str, Any] | None = None) -> str:
-        return self.read_model_redis_cache_key(
-            "cost_statistics:month",
-            scope_key,
-            schema_version=COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
-            source_versions=source_versions,
-        )
 
     def page_redis_cache_key(
         self,
@@ -101,19 +83,6 @@ class CostStatisticsRuntimeService:
         )
         return bool(enqueued_scope_keys)
 
-    def read_model_scope_key(
-        self,
-        month: str,
-        project_scope: str,
-        *,
-        read_model: dict[str, Any] | None = None,
-    ) -> str:
-        if isinstance(read_model, dict):
-            scope_key = str(read_model.get("scope_key", "")).strip()
-            if scope_key:
-                return scope_key
-        return self.request_scope_key(month, project_scope)
-
     @staticmethod
     def months_from_workbench_scope_keys(scope_keys: list[str]) -> set[str]:
         months: set[str] = set()
@@ -128,21 +97,9 @@ class CostStatisticsRuntimeService:
                     break
         return months
 
-    def warmup_months_from_read_model_scope_keys(self, scope_keys: list[str]) -> list[str]:
-        months = self.months_from_workbench_scope_keys(scope_keys)
-        specific_months = sorted(month for month in months if month != "all")
-        if specific_months:
-            return specific_months
-        if "all" in months:
-            return ["all"]
-        return []
-
-    def invalidate_read_models(self, *, schedule_warmup: bool = True) -> list[str]:
-        target_scope_keys = ["active:all", "all:all"]
-        if not schedule_warmup:
-            return []
+    def invalidate_read_models(self) -> list[str]:
         return self._enqueue_invalidation_scopes(
-            target_scope_keys,
+            ["active:all", "all:all"],
             reason="cost_statistics_read_model_invalidated",
         )
 
@@ -151,11 +108,8 @@ class CostStatisticsRuntimeService:
         scope_keys: list[str],
         *,
         reason: str = "",
-        schedule_warmup: bool = True,
     ) -> list[str]:
         target_scope_keys = self.refresh_scope_keys_from_scope_keys(scope_keys)
-        if not schedule_warmup:
-            return []
         return self._enqueue_invalidation_scopes(
             target_scope_keys,
             reason=reason or "cost_statistics_scope_invalidated",
@@ -168,153 +122,11 @@ class CostStatisticsRuntimeService:
             if self.enqueue_read_model_refresh(scope_key, reason=reason)
         ]
 
-    def enqueue_refresh_for_months(self, months: list[str], *, reason: str) -> bool:
-        enqueued = False
-        for target in self.warmup_targets(months=months, project_scopes=["active", "all"]):
-            scope_key = target["scope_key"]
-            enqueued = self.enqueue_read_model_refresh(scope_key, reason=reason) or enqueued
-        return enqueued
-
-    def enqueue_refresh_for_scope_keys(self, scope_keys: list[str], *, reason: str) -> bool:
-        enqueued = False
-        for scope_key in self.normalize_scope_keys(scope_keys):
-            enqueued = self.enqueue_read_model_refresh(scope_key, reason=reason) or enqueued
-        return enqueued
-
-    def recover_interrupted_cache_warmup_jobs(self) -> None:
-        list_attention_jobs = getattr(self._background_job_service, "list_attention_jobs", None)
-        if not callable(list_attention_jobs):
-            return
-        try:
-            attention_jobs = list_attention_jobs("system", include_system=True)
-        except Exception:
-            return
-        for job in attention_jobs:
-            if getattr(job, "type", None) != "cost_statistics_cache_warmup":
-                continue
-            if getattr(job, "error", None) != "interrupted_by_restart":
-                continue
-            target_scope_keys = self.retry_warmup_scope_keys(job)
-            if target_scope_keys:
-                self.enqueue_refresh_for_scope_keys(target_scope_keys, reason="startup_recovery")
-            self.close_replaced_warmup_job(job, "system", None)
-
-    def find_reusable_warmup_job(self, target_scope_keys: list[str], *, exclude_job_id: str | None = None):
-        return None
-
-    def close_replaced_warmup_job(self, old_job: Any, owner_user_id: str, replacement_job: Any) -> None:
-        if self._background_job_service is None:
-            return
-        if replacement_job is None:
-            self._background_job_service.acknowledge_job(old_job.job_id, owner_user_id)
-            return
-        supersede_job = getattr(self._background_job_service, "supersede_job", None)
-        if callable(supersede_job):
-            supersede_job(
-                old_job.job_id,
-                owner_user_id,
-                superseded_by_job_id=replacement_job.job_id,
-            )
-            return
-        self._background_job_service.acknowledge_job(old_job.job_id, owner_user_id)
-
-    def schedule_cache_warmup(
-        self,
-        months: list[str],
-        reason: str,
-        *,
-        target_scope_keys: list[str] | None = None,
-    ):
-        if target_scope_keys is not None:
-            self.enqueue_refresh_for_scope_keys(target_scope_keys, reason=reason)
-        else:
-            self.enqueue_refresh_for_months(months, reason=reason)
-        return None
-
-    def run_cache_warmup_job(
-        self,
-        running_job: Any,
-        *,
-        months: list[str] | None = None,
-        project_scopes: list[str] | None = None,
-        targets: list[dict[str, str]] | None = None,
-    ) -> dict[str, Any]:
-        if self._background_job_service is None:
-            return self.warmup_result_summary(
-                target_scope_keys=[],
-                warmed_scope_keys=[],
-                failed_scope_keys=[],
-                remaining_scope_keys=[],
-            )
-        resolved_targets = (
-            list(targets or [])
-            if targets is not None
-            else self.warmup_targets(
-                months=months or [],
-                project_scopes=project_scopes or ["active", "all"],
-            )
-        )
-        target_scope_keys = [target["scope_key"] for target in resolved_targets]
-        self.enqueue_refresh_for_scope_keys(target_scope_keys, reason="legacy_cost_statistics_refresh_bridge")
-        result_summary = self.warmup_result_summary(
-            target_scope_keys=target_scope_keys,
-            warmed_scope_keys=[],
-            failed_scope_keys=target_scope_keys,
-            remaining_scope_keys=[],
-        )
-        self._background_job_service.succeed_job(
-            running_job.job_id,
-            "成本统计缓存预热旧路径已停用，请等待 cost_statistics.read_model.refresh。",
-            result_summary=result_summary,
-            status="partial_success" if target_scope_keys else "succeeded",
-        )
-        return result_summary
-
     def rebuild_read_model_scope(self, scope_key: str) -> dict[str, Any]:
         parsed = self.parse_scope_key(scope_key)
         if parsed is None:
             raise ValueError("cost statistics read model scope_key must be project_scope:month.")
         raise RuntimeError("cost statistics read model refresh must use CostStatisticsReadModelRefreshService.")
-
-    def warmup_targets(
-        self,
-        *,
-        months: list[str],
-        project_scopes: list[str],
-        target_scope_keys: list[str] | None = None,
-    ) -> list[dict[str, str]]:
-        if target_scope_keys is not None:
-            targets: list[dict[str, str]] = []
-            for scope_key in self.normalize_scope_keys(target_scope_keys):
-                parsed = self.parse_scope_key(scope_key)
-                if parsed is None:
-                    continue
-                project_scope, month = parsed
-                targets.append({"month": month, "project_scope": project_scope, "scope_key": scope_key})
-            return targets
-
-        normalized_months = {
-            str(month).strip()
-            for month in list(months or [])
-            if str(month).strip()
-        }
-        ordered_months = sorted((month for month in normalized_months if month != "all"), reverse=True)
-        if "all" in normalized_months:
-            ordered_months.append("all")
-        deduped_months = list(dict.fromkeys(ordered_months))
-        normalized_project_scopes = [
-            str(project_scope).strip()
-            for project_scope in list(project_scopes or [])
-            if str(project_scope).strip() in PROJECT_SCOPES
-        ]
-        targets = []
-        for month in deduped_months:
-            if month != "all" and not MONTH_RE.match(month):
-                continue
-            for project_scope in normalized_project_scopes:
-                scope_key = self.read_model_scope_key(month, project_scope)
-                targets.append({"month": month, "project_scope": project_scope, "scope_key": scope_key})
-        return targets
 
     def normalize_scope_keys(self, scope_keys: list[str]) -> list[str]:
         normalized: list[str] = []
@@ -324,7 +136,7 @@ class CostStatisticsRuntimeService:
             if parsed is None:
                 continue
             project_scope, month = parsed
-            resolved_scope_key = self.read_model_scope_key(month, project_scope)
+            resolved_scope_key = self.request_scope_key(month, project_scope)
             if resolved_scope_key not in normalized:
                 normalized.append(resolved_scope_key)
         return normalized
@@ -375,115 +187,3 @@ class CostStatisticsRuntimeService:
         if month != "all" and not MONTH_RE.match(month):
             return None
         return project_scope, month
-
-    def job_target_scope_keys(self, job: Any) -> list[str]:
-        result_summary = job.result_summary if isinstance(job.result_summary, dict) else {}
-        target_scope_keys = self._result_summary_scope_keys(result_summary, "target_scope_keys")
-        if target_scope_keys:
-            return self.normalize_scope_keys(target_scope_keys)
-        affected_scope_keys = [
-            str(scope_key).strip()
-            for scope_key in list(getattr(job, "affected_scopes", []) or [])
-            if str(scope_key).strip()
-        ]
-        if affected_scope_keys:
-            return self.normalize_scope_keys(affected_scope_keys)
-        months = self.retry_warmup_months(job)
-        return [
-            target["scope_key"]
-            for target in self.warmup_targets(months=months, project_scopes=["active", "all"])
-        ]
-
-    def retry_warmup_scope_keys(self, job: Any) -> list[str]:
-        result_summary = job.result_summary if isinstance(job.result_summary, dict) else {}
-        failed_scope_keys = self._result_summary_scope_keys(result_summary, "failed_scope_keys")
-        remaining_scope_keys = self._result_summary_scope_keys(result_summary, "remaining_scope_keys")
-        if getattr(job, "status", None) == "partial_success" and failed_scope_keys:
-            return self.normalize_scope_keys(failed_scope_keys)
-        if getattr(job, "error", None) == "interrupted_by_restart" and remaining_scope_keys:
-            return self.normalize_scope_keys([*remaining_scope_keys, *failed_scope_keys])
-        derived_remaining_scope_keys = self.derive_remaining_warmup_scope_keys(job)
-        if getattr(job, "error", None) == "interrupted_by_restart" and derived_remaining_scope_keys:
-            return self.normalize_scope_keys([*derived_remaining_scope_keys, *failed_scope_keys])
-        target_scope_keys = self._result_summary_scope_keys(result_summary, "target_scope_keys")
-        if target_scope_keys:
-            return self.normalize_scope_keys(target_scope_keys)
-        affected_scope_keys = [
-            str(scope_key).strip()
-            for scope_key in list(getattr(job, "affected_scopes", []) or [])
-            if str(scope_key).strip()
-        ]
-        if affected_scope_keys:
-            return self.normalize_scope_keys(affected_scope_keys)
-        months = self.retry_warmup_months(job)
-        return [
-            target["scope_key"]
-            for target in self.warmup_targets(months=months, project_scopes=["active", "all"])
-        ]
-
-    def derive_remaining_warmup_scope_keys(self, job: Any) -> list[str]:
-        result_summary = job.result_summary if isinstance(job.result_summary, dict) else {}
-        target_scope_keys = self._result_summary_scope_keys(result_summary, "target_scope_keys")
-        if not target_scope_keys:
-            return []
-        completed_scope_keys = set(
-            self.normalize_scope_keys(
-                [
-                    *self._result_summary_scope_keys(result_summary, "warmed_scope_keys"),
-                    *self._result_summary_scope_keys(result_summary, "failed_scope_keys"),
-                ]
-            )
-        )
-        return [
-            scope_key
-            for scope_key in self.normalize_scope_keys(target_scope_keys)
-            if scope_key not in completed_scope_keys
-        ]
-
-    @staticmethod
-    def retry_warmup_months(job: Any) -> list[str]:
-        source = job.source if isinstance(job.source, dict) else {}
-        candidates = [
-            getattr(job, "affected_months", []),
-            source.get("affected_months"),
-            source.get("months"),
-            source.get("month"),
-        ]
-        months: list[str] = []
-        for candidate in candidates:
-            values = candidate if isinstance(candidate, (list, tuple, set)) else [candidate]
-            for value in values:
-                month = str(value or "").strip()
-                if not month:
-                    continue
-                if month == "all" or MONTH_RE.match(month):
-                    months.append(month)
-        return list(dict.fromkeys(months))
-
-    @staticmethod
-    def warmup_result_summary(
-        *,
-        target_scope_keys: list[str],
-        warmed_scope_keys: list[str],
-        failed_scope_keys: list[str],
-        remaining_scope_keys: list[str],
-    ) -> dict[str, Any]:
-        return {
-            "target_scope_keys": list(target_scope_keys),
-            "warmed_scope_keys": list(warmed_scope_keys),
-            "failed_scope_keys": list(failed_scope_keys),
-            "remaining_scope_keys": list(remaining_scope_keys),
-            "warmed": len(warmed_scope_keys),
-            "failed": len(failed_scope_keys),
-            "total": len(target_scope_keys),
-        }
-
-    @staticmethod
-    def _result_summary_scope_keys(result_summary: object, field: str) -> list[str]:
-        if not isinstance(result_summary, dict):
-            return []
-        return [
-            str(scope_key).strip()
-            for scope_key in list(result_summary.get(field) or [])
-            if str(scope_key).strip()
-        ]

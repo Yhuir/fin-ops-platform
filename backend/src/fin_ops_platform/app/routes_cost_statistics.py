@@ -4,7 +4,6 @@ from datetime import datetime
 from http import HTTPStatus
 from time import monotonic
 from typing import Any, Callable
-from urllib.parse import unquote
 
 from fin_ops_platform.app.auth import OARequestSession, actor_id_for_session
 from fin_ops_platform.services.app_settings_service import AppSettingsValidationError
@@ -57,8 +56,6 @@ class CostStatisticsApiRoutes:
         body: str | bytes | None = None,
         headers: dict[str, str] | None = None,
     ) -> Any | None:
-        if method == "GET" and route_path == "/api/cost-statistics":
-            return self.handle_month(query.get("month", [None])[0], query.get("project_scope", [None])[0])
         if method == "GET" and route_path == "/api/cost-statistics/tag-rules":
             return self.handle_tag_rules(headers)
         if method == "PUT" and route_path == "/api/cost-statistics/tag-rules":
@@ -112,9 +109,6 @@ class CostStatisticsApiRoutes:
                 sort_by=query.get("sort_by", [None])[0],
                 project_scope=query.get("project_scope", [None])[0],
             )
-        if method == "GET" and route_path.startswith("/api/cost-statistics/projects/"):
-            project_name = unquote(route_path.rsplit("/", 1)[-1])
-            return self.handle_project(query.get("month", [None])[0], project_name, query.get("project_scope", [None])[0])
         if method == "GET" and route_path.startswith("/api/cost-statistics/transactions/"):
             transaction_id = route_path.rsplit("/", 1)[-1]
             return self.handle_transaction(transaction_id, query.get("project_scope", [None])[0])
@@ -162,20 +156,6 @@ class CostStatisticsApiRoutes:
             )
         )
         return self._json_response(HTTPStatus.OK, result)
-
-    def handle_month(self, month: str | None, project_scope: str | None) -> Any:
-        current_month = month or self._now_provider().strftime("%Y-%m")
-        try:
-            normalized_project_scope = self._normalize_project_scope(project_scope)
-            payload, _cache_hit = self._query_service.get_month_statistics(current_month, normalized_project_scope)
-        except ValueError as error:
-            return self._project_scope_error_response(error)
-        status = (
-            HTTPStatus.ACCEPTED
-            if payload.get("read_model_status") == "refreshing" and not payload.get("rows")
-            else HTTPStatus.OK
-        )
-        return self._json_response(status, payload)
 
     def handle_explorer(
         self,
@@ -232,21 +212,6 @@ class CostStatisticsApiRoutes:
             return self._json_response(HTTPStatus.NOT_MODIFIED, {}, response_headers)
         status = HTTPStatus.ACCEPTED if payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
         return self._json_response(status, payload, response_headers)
-
-    def handle_project(self, month: str | None, project_name: str, project_scope: str | None) -> Any:
-        current_month = month or self._now_provider().strftime("%Y-%m")
-        try:
-            normalized_project_scope = self._normalize_project_scope(project_scope)
-            payload = self._query_service.get_project_statistics(
-                current_month,
-                project_name,
-                project_scope=normalized_project_scope,
-            )
-        except ValueError as error:
-            return self._project_scope_error_response(error)
-        except CostStatisticsReadModelNotFreshError as error:
-            return self._json_response(HTTPStatus.CONFLICT, error.payload)
-        return self._json_response(HTTPStatus.OK, payload)
 
     def handle_export(
         self,

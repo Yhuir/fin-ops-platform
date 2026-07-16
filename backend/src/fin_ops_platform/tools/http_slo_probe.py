@@ -163,11 +163,6 @@ DEFAULT_API_PROBES: tuple[HttpProbe, ...] = (
         expected_statuses=(200, 202),
     ),
     HttpProbe(
-        "cost_statistics_summary_all",
-        f"/api/cost-statistics?month={DEFAULT_BUSINESS_MONTH}&project_scope=active",
-        expected_statuses=(200, 202),
-    ),
-    HttpProbe(
         "bank_flow_rule_batches",
         f"/api/bank-flow-rule-batches?month={_current_month()}&bucket=unsubmitted&page=1&page_size=200",
         expected_statuses=(200, 202),

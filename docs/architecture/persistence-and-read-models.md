@@ -119,14 +119,15 @@ OA、银行流水、进项发票、销项发票之间的两两/三栏关系上�
 
 ## 成本统计 SQL read model 边界
 
-`/api/cost-statistics/explorer` 和 `/api/cost-statistics` month summary 的生产读取边界是 `read_model.cost_statistics_read_models`：
+`/api/cost-statistics/explorer`、export 和 transaction detail 的生产读取边界是 `read_model.cost_statistics_read_models` metadata 与两张结构化行表：
 
-- API 先读 Redis 短 TTL 热点缓存，miss 后读 PostgreSQL read model；Redis 清空不影响已构建结果返回。month summary 由已构建 explorer `time_rows` 聚合成原有 response shape，不单独在请求里重算事实。
-- PostgreSQL miss 或 dirty scope pending 时只 enqueue `cost_statistics.read_model.refresh`，不会在 API 请求里同步调用 `CostStatisticsService.get_explorer()` 重算大范围统计。
+- API 先执行 PostgreSQL dependency-bound freshness gate；只有 fresh 后才允许 ETag、versioned Redis page cache 或窄 SQL query。Redis 清空不影响已构建 SQL read model。
+- explorer cache miss 通过 `get_cost_statistics_page(...)` 的单次 set-based SQL 返回完整筛选 summary、小型 facets 与 bounded rows；export 使用 bounded export page，transaction 使用 identity point lookup。不存在 root month summary、project route 或 full-view payload loader。
+- PostgreSQL miss 或 dirty scope pending 时只 enqueue `cost_statistics.read_model.refresh`，不会在 API 请求里同步重算大范围统计。
 - production PostgreSQL runtime 未配置成本统计 SQL repository 时同样返回 `read_model_unavailable` / `refreshing`，不回落到内存 read model 或同步计算。
-- standalone worker 用 `python3 -m fin_ops_platform.app.worker --enable-cost-statistics-read-model-refresh` claim durable queue 后，从发票、银行流水、关系事实和现有工作台读模型口径构建 explorer payload，并写回 `read_model.cost_statistics_read_models`。
+- standalone worker 用 `python3 -m fin_ops_platform.app.worker --enable-cost-statistics-read-model-refresh` claim durable queue 后，从 Workbench active generation 和 Bank Detail fresh snapshot 构建月份 shard，再条件发布 parent metadata 与结构化成本/银行流水 rows。
 - 成本统计从 Workbench 月份 active generation 的 `workbench_group_rows + workbench_rows` materialize 成本关系输入，不能再通过 `jsonb_path_exists(read_model.workbench_groups.payload, ...)` 读取旧 group JSON 成员行。
-- 发票、银行流水、pair relation、row override、exception case 等影响成本口径的写路径必须标记 `cost_statistics` dirty scope，并失效 `cost_statistics:explorer:{project_scope}:{month}` 与 `cost_statistics:month:{project_scope}:{month}` Redis key。
+- 发票、银行流水、pair relation、row override、exception case 等影响成本口径的写路径必须通过 `ReadModelRefreshGateway` 标记规范 `cost_statistics` dirty scope。缓存 key 绑定发布版本与 source versions，不需要写路径删除无版本 key。
 
 旧 `reconcile_cost_statistics_read_model` 工具已删除。成本统计 read model 不再通过 `Application._cost_statistics_service.get_explorer(...)` legacy 对照链路验证；验证应走 cost-statistics 模块测试、worker refresh/fresh gate 和生产只读 SLO evidence。
 

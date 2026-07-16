@@ -359,24 +359,6 @@ class AppHealthService:
                     source.get("scope_month"),
                 )
             )
-        if job_type == "cost_statistics_cache_warmup":
-            result_summary = getattr(job, "result_summary", {})
-            if not isinstance(result_summary, dict):
-                result_summary = {}
-            return any(
-                cls._has_values(value)
-                for value in (
-                    result_summary.get("failed_scope_keys"),
-                    result_summary.get("remaining_scope_keys"),
-                    result_summary.get("target_scope_keys"),
-                    getattr(job, "affected_months", []),
-                    getattr(job, "affected_scopes", []),
-                    source.get("affected_months"),
-                    source.get("months"),
-                    source.get("month"),
-                    source.get("target_scope_keys"),
-                )
-            )
         return False
 
     @staticmethod

@@ -22,7 +22,7 @@
 - 工作台 dirty scopes。
 - 后台任务状态。
 - Runtime durable queue backlog、failed outbox event、stale read model dirty scopes。
-- 成本统计缓存预热。
+- 成本统计 durable refresh backlog、失败事件与 scope readiness。
 - Mongo 连接错误。
 - 导入和重置任务失败。
 

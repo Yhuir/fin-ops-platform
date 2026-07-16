@@ -602,7 +602,6 @@ class Application:
         if self._bootstrap_mode == "lightweight":
             return
         self._initialize_runtime_services(self._runtime_bootstrap_state())
-        self._recover_interrupted_cost_statistics_cache_warmup_jobs()
         if _truthy_env("FIN_OPS_STARTUP_WORKBENCH_MATCHING_STALE_SCAN_ENABLED"):
             self._schedule_startup_workbench_matching_stale_scan()
         if (
@@ -1370,7 +1369,6 @@ class Application:
     def _configure_cost_statistics_application_services(self) -> None:
         runtime_repositories = getattr(self, "_runtime_repositories", None)
         self._cost_statistics_runtime_service = CostStatisticsRuntimeService(
-            background_job_service=getattr(self, "_background_job_service", None),
             queue_repository=getattr(runtime_repositories, "queue_repository", None),
         )
         self._cost_statistics_query_service = CostStatisticsQueryService(
@@ -1397,7 +1395,6 @@ class Application:
     def _cost_statistics_current_dependency_key(self) -> tuple[int | None, ...]:
         return (
             id(getattr(self, "_cost_statistics_sql_read_repository", None)) if getattr(self, "_cost_statistics_sql_read_repository", None) is not None else None,
-            id(getattr(self, "_background_job_service", None)) if getattr(self, "_background_job_service", None) is not None else None,
             id(getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None))
             if getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None) is not None
             else None,
@@ -1960,7 +1957,7 @@ class Application:
             tax_offset_response = self._tax_offset_routes().route(method, route_path, query, body, headers)
             if tax_offset_response is not None:
                 return tax_offset_response
-        if route_path == "/api/cost-statistics" or route_path.startswith("/api/cost-statistics/"):
+        if route_path.startswith("/api/cost-statistics/"):
             cost_statistics_response = self._cost_statistics_routes().route(method, route_path, query, body, headers)
             if cost_statistics_response is not None:
                 return cost_statistics_response
@@ -2198,11 +2195,9 @@ class Application:
                 "/api/tax-offset/certified-imports",
                 "/api/tax-offset/calculate",
                 "/api/tax-offset/plans",
-                "/api/cost-statistics",
                 "/api/cost-statistics/explorer",
                 "/api/cost-statistics/export-preview",
                 "/api/cost-statistics/export",
-                "/api/cost-statistics/projects/{project_name}",
                 "/api/cost-statistics/transactions/{transaction_id}",
                 "/integrations/oa",
                 "/integrations/oa/sync",
@@ -4614,7 +4609,6 @@ class Application:
             self._invalidate_workbench_read_model_scopes(
                 sorted(set(changed_months)),
                 invalidate_cost_statistics=False,
-                schedule_cost_statistics_warmup=False,
             )
         return sorted(set(changed_months))
 
@@ -4873,8 +4867,6 @@ class Application:
             )
         if job.type == "file_import":
             return self._retry_file_import_background_job(job, owner_user_id)
-        if job.type == "cost_statistics_cache_warmup":
-            return self._retry_cost_statistics_cache_warmup_background_job(job, owner_user_id)
         return self._json_response(
             HTTPStatus.BAD_REQUEST,
             {"error": "background_job_retry_not_supported", "message": "当前后台任务没有可用的重新执行入口。"},
@@ -4955,52 +4947,6 @@ class Application:
                 "retry_mode": "file_preview",
             },
         )
-
-    def _retry_cost_statistics_cache_warmup_background_job(self, job, owner_user_id: str) -> Response:
-        target_scope_keys = self._retry_cost_statistics_warmup_scope_keys(job)
-        if not target_scope_keys:
-            return self._json_response(
-                HTTPStatus.BAD_REQUEST,
-                {
-                    "error": "background_job_retry_not_supported",
-                    "message": "成本统计缓存预热任务缺少重新执行所需的范围。",
-                },
-            )
-        source = job.source if isinstance(job.source, dict) else {}
-        reason = str(source.get("reason") or "cost_statistics_read_model_refresh_retry").strip()
-        self._schedule_cost_statistics_cache_warmup(
-            [],
-            reason=f"retry:{reason}",
-            target_scope_keys=target_scope_keys,
-        )
-        self._close_replaced_cost_statistics_warmup_job(job, owner_user_id, None)
-        return self._json_response(
-            HTTPStatus.ACCEPTED,
-            {
-                "job": None,
-                "retry_mode": "cost_statistics.read_model.refresh",
-            },
-        )
-
-    @staticmethod
-    def _result_summary_scope_keys(result_summary: object, field: str) -> list[str]:
-        if not isinstance(result_summary, dict):
-            return []
-        return [
-            str(scope_key).strip()
-            for scope_key in list(result_summary.get(field) or [])
-            if str(scope_key).strip()
-        ]
-
-    def _retry_cost_statistics_warmup_scope_keys(self, job) -> list[str]:
-        return self._cost_statistics_runtime().retry_warmup_scope_keys(job)
-
-    def _derive_remaining_cost_statistics_warmup_scope_keys(self, job) -> list[str]:
-        return self._cost_statistics_runtime().derive_remaining_warmup_scope_keys(job)
-
-    @staticmethod
-    def _retry_cost_statistics_warmup_months(job) -> list[str]:
-        return CostStatisticsRuntimeService.retry_warmup_months(job)
 
     def _resolve_background_job_owner(self, headers: dict[str, str] | None) -> str:
         try:
@@ -7018,7 +6964,6 @@ class Application:
             "pending_invoice_rules_changed",
             scope_keys=["all"],
             include_all=True,
-            schedule_cost_warmup=False,
             metadata={
                 "reason": "pending_invoice_rules_changed",
                 "direction": "both",
@@ -7168,7 +7113,6 @@ class Application:
             "settings_reset_completed",
             include_all=True,
             metadata={"action": action},
-            schedule_cost_warmup=False,
         )
         if action == RESET_OA_AND_REBUILD_ACTION:
             workbench_lifecycle_errors = [
@@ -7459,88 +7403,6 @@ class Application:
         return WorkbenchRowDetailApiRoutes(
             query_facade_provider=self._workbench_query_facade,
         )
-
-    def _get_or_build_cost_statistics_explorer(
-        self,
-        month: str,
-        project_scope: str,
-    ) -> tuple[dict[str, object], bool]:
-        return self._cost_statistics_query().get_explorer(month, project_scope)
-
-    def _get_cost_statistics_explorer_from_sql_read_model(
-        self,
-        month: str,
-        project_scope: str,
-    ) -> tuple[dict[str, object], bool] | None:
-        return self._cost_statistics_query().get_explorer_from_sql_read_model(month, project_scope)
-
-    def _get_cost_statistics_month_from_sql_read_model(
-        self,
-        month: str,
-        project_scope: str,
-    ) -> tuple[dict[str, object], bool] | None:
-        return self._cost_statistics_query().get_month_from_sql_read_model(month, project_scope)
-
-    def _cost_statistics_month_payload_from_explorer_payload(
-        self,
-        month: str,
-        explorer_payload: dict[str, object],
-    ) -> dict[str, object]:
-        return CostStatisticsQueryService.month_payload_from_explorer_payload(month, explorer_payload)
-
-    @staticmethod
-    def _cost_statistics_request_scope_key(month: str, project_scope: str) -> str:
-        return CostStatisticsRuntimeService.request_scope_key(month, project_scope)
-
-    def _cost_statistics_redis_cache_key(
-        self,
-        scope_key: str,
-        *,
-        source_versions: dict[str, object] | None = None,
-    ) -> str:
-        return self._cost_statistics_runtime().redis_cache_key(scope_key, source_versions=source_versions)
-
-    def _cost_statistics_month_redis_cache_key(
-        self,
-        scope_key: str,
-        *,
-        source_versions: dict[str, object] | None = None,
-    ) -> str:
-        return self._cost_statistics_runtime().month_redis_cache_key(scope_key, source_versions=source_versions)
-
-    def _read_model_redis_cache_key(
-        self,
-        prefix: str,
-        scope_key: str,
-        *,
-        schema_version: str,
-        source_versions: dict[str, object] | None,
-    ) -> str:
-        return CostStatisticsRuntimeService.read_model_redis_cache_key(
-            prefix,
-            scope_key,
-            schema_version=schema_version,
-            source_versions=source_versions,
-        )
-
-    @staticmethod
-    def _cost_statistics_redis_ttl_seconds() -> int:
-        return CostStatisticsRuntimeService.redis_ttl_seconds()
-
-    def _enqueue_cost_statistics_read_model_refresh(self, scope_key: str, *, reason: str) -> bool:
-        return self._cost_statistics_runtime().enqueue_read_model_refresh(scope_key, reason=reason)
-
-    @staticmethod
-    def _empty_cost_statistics_explorer_payload(month: str) -> dict[str, object]:
-        return CostStatisticsQueryService.empty_explorer_payload(month)
-
-    @staticmethod
-    def _empty_cost_statistics_month_payload(month: str) -> dict[str, object]:
-        return CostStatisticsQueryService.empty_month_payload(month)
-
-    @staticmethod
-    def _cost_statistics_explorer_entry_count(payload: dict[str, object]) -> int:
-        return CostStatisticsQueryService.explorer_entry_count(payload)
 
     def _emit_cost_statistics_explorer_metric(
         self,
@@ -8697,7 +8559,6 @@ class Application:
             "pending_invoice_rules_changed",
             scope_keys=["all"],
             include_all=True,
-            schedule_cost_warmup=False,
             metadata={
                 "reason": "pending_invoice_rules_changed",
                 "direction": event.get("direction"),
@@ -10802,7 +10663,6 @@ class Application:
         scope_keys: list[str] | None = None,
         include_all: bool = True,
         metadata: dict[str, object] | None = None,
-        schedule_cost_warmup: bool = True,
         excluded_domains: set[str] | list[str] | tuple[str, ...] | None = None,
         executor_overrides: dict[str, object] | None = None,
         domain_scope_keys: dict[str, list[str]] | None = None,
@@ -10854,10 +10714,7 @@ class Application:
             "workbench_relation_read_model": self._workbench_relation_derived_lifecycle_executor().execute,
             "workbench_matching_dirty_scopes": self._derived_lifecycle_dirty_scopes_executor,
             "invoice_lifecycle_read_model": self._invoice_lifecycle_derived_lifecycle_executor().execute,
-            "cost_statistics_read_model": lambda domain_plan: self._cost_statistics_derived_lifecycle_executor().execute(
-                domain_plan,
-                schedule_warmup=schedule_cost_warmup,
-            ),
+            "cost_statistics_read_model": self._cost_statistics_derived_lifecycle_executor().execute,
             "tax_offset_read_model": self._tax_offset_derived_lifecycle_executor().execute_read_model,
             "tax_offset_month_cache": self._tax_offset_derived_lifecycle_executor().execute_month_cache,
             "pending_invoice_read_model": self._derived_lifecycle_pending_invoice_executor,
@@ -11234,7 +11091,6 @@ class Application:
         scope_keys: list[str],
         *,
         invalidate_cost_statistics: bool = True,
-        schedule_cost_statistics_warmup: bool = True,
         metadata: dict[str, object] | None = None,
     ) -> list[str]:
         normalized_scope_keys = {
@@ -11250,7 +11106,6 @@ class Application:
             self._invalidate_cost_statistics_read_model_scopes(
                 list(normalized_scope_keys),
                 reason="workbench_scope_invalidated",
-                schedule_warmup=schedule_cost_statistics_warmup,
             )
             self._invalidate_tax_offset_read_model_scopes(
                 list(normalized_scope_keys),
@@ -11311,123 +11166,18 @@ class Application:
                 invalidated.append(f"oa_pending_payment:{scope_key}")
         return invalidated
 
-    def _invalidate_cost_statistics_read_models(
-        self,
-        *,
-        schedule_warmup: bool = True,
-    ) -> list[str]:
-        return self._cost_statistics_runtime().invalidate_read_models(
-            schedule_warmup=schedule_warmup,
-        )
+    def _invalidate_cost_statistics_read_models(self) -> list[str]:
+        return self._cost_statistics_runtime().invalidate_read_models()
 
     def _invalidate_cost_statistics_read_model_scopes(
         self,
         scope_keys: list[str],
         *,
         reason: str = "",
-        schedule_warmup: bool = True,
     ) -> list[str]:
         return self._cost_statistics_runtime().invalidate_read_model_scopes(
             scope_keys,
             reason=reason,
-            schedule_warmup=schedule_warmup,
-        )
-
-    def _enqueue_cost_statistics_refresh_for_months(self, months: list[str], *, reason: str) -> bool:
-        return self._cost_statistics_runtime().enqueue_refresh_for_months(months, reason=reason)
-
-    @staticmethod
-    def _cost_statistics_months_from_workbench_scope_keys(scope_keys: list[str]) -> set[str]:
-        return CostStatisticsRuntimeService.months_from_workbench_scope_keys(scope_keys)
-
-    def _cost_statistics_warmup_months_from_read_model_scope_keys(self, scope_keys: list[str]) -> list[str]:
-        return self._cost_statistics_runtime().warmup_months_from_read_model_scope_keys(scope_keys)
-
-    def _cost_statistics_read_model_scope_key(
-        self,
-        month: str,
-        project_scope: str,
-        *,
-        read_model: dict[str, object] | None = None,
-    ) -> str:
-        return self._cost_statistics_runtime().read_model_scope_key(month, project_scope, read_model=read_model)
-
-    def _recover_interrupted_cost_statistics_cache_warmup_jobs(self) -> None:
-        self._cost_statistics_runtime().recover_interrupted_cache_warmup_jobs()
-
-    def _find_reusable_cost_statistics_warmup_job(self, target_scope_keys: list[str], *, exclude_job_id: str | None = None):
-        return self._cost_statistics_runtime().find_reusable_warmup_job(
-            target_scope_keys,
-            exclude_job_id=exclude_job_id,
-        )
-
-    def _cost_statistics_job_target_scope_keys(self, job) -> list[str]:
-        return self._cost_statistics_runtime().job_target_scope_keys(job)
-
-    def _close_replaced_cost_statistics_warmup_job(self, old_job, owner_user_id: str, replacement_job) -> None:
-        self._cost_statistics_runtime().close_replaced_warmup_job(old_job, owner_user_id, replacement_job)
-
-    def _schedule_cost_statistics_cache_warmup(
-        self,
-        months: list[str],
-        reason: str,
-        *,
-        target_scope_keys: list[str] | None = None,
-    ):
-        return self._cost_statistics_runtime().schedule_cache_warmup(
-            months,
-            reason,
-            target_scope_keys=target_scope_keys,
-        )
-
-    def _run_cost_statistics_cache_warmup_job(
-        self,
-        running_job,
-        *,
-        months: list[str] | None = None,
-        project_scopes: list[str] | None = None,
-        targets: list[dict[str, str]] | None = None,
-    ) -> dict[str, object]:
-        return self._cost_statistics_runtime().run_cache_warmup_job(
-            running_job,
-            months=months,
-            project_scopes=project_scopes,
-            targets=targets,
-        )
-
-    def _cost_statistics_warmup_targets(
-        self,
-        *,
-        months: list[str],
-        project_scopes: list[str],
-        target_scope_keys: list[str] | None = None,
-    ) -> list[dict[str, str]]:
-        return self._cost_statistics_runtime().warmup_targets(
-            months=months,
-            project_scopes=project_scopes,
-            target_scope_keys=target_scope_keys,
-        )
-
-    def _normalize_cost_statistics_scope_keys(self, scope_keys: list[str]) -> list[str]:
-        return self._cost_statistics_runtime().normalize_scope_keys(scope_keys)
-
-    @staticmethod
-    def _parse_cost_statistics_scope_key(scope_key: str) -> tuple[str, str] | None:
-        return CostStatisticsRuntimeService.parse_scope_key(scope_key)
-
-    @staticmethod
-    def _cost_statistics_warmup_result_summary(
-        *,
-        target_scope_keys: list[str],
-        warmed_scope_keys: list[str],
-        failed_scope_keys: list[str],
-        remaining_scope_keys: list[str],
-    ) -> dict[str, object]:
-        return CostStatisticsRuntimeService.warmup_result_summary(
-            target_scope_keys=target_scope_keys,
-            warmed_scope_keys=warmed_scope_keys,
-            failed_scope_keys=failed_scope_keys,
-            remaining_scope_keys=remaining_scope_keys,
         )
 
     def _invalidate_tax_offset_read_models(self) -> list[str]:

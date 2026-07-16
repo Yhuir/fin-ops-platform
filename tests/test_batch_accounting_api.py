@@ -389,11 +389,6 @@ def relation_command_service_for(pair_relation_service: WorkbenchPairRelationSer
 
 
 class BatchAccountingApiTests(unittest.TestCase):
-    def setUp(self) -> None:
-        cost_warmup_patcher = patch.object(Application, "_schedule_cost_statistics_cache_warmup")
-        self.addCleanup(cost_warmup_patcher.stop)
-        cost_warmup_patcher.start()
-
     def _grouped_payload(self) -> dict[str, object]:
         eligible_bank = {
             "id": "txn_imported_202601_batch_001",

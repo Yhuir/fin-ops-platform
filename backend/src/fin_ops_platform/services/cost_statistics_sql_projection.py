@@ -34,16 +34,12 @@ class CostStatisticsSqlProjectionBuilder:
         *,
         connection: Any,
         read_model_repository: Any | None = None,
-        redis_helper: Any | None = None,
         bank_transaction_tag_read_facade: Any | None = None,
     ) -> None:
         self._connection = connection
         self._read_model_repository = CostStatisticsReadModelRepositoryPort(
             read_model_repository or PostgresReadModelRepository(connection)
         )
-        # Kept in the assembly contract until the remaining constructor callers
-        # migrate, but cost-statistics projection publication is PostgreSQL-only.
-        _ = redis_helper
         self._bank_transaction_tag_read_facade = bank_transaction_tag_read_facade
         self._settings_payload_cache: dict[str, Any] | None = None
 

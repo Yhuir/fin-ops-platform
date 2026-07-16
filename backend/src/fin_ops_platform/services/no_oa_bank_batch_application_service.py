@@ -1746,7 +1746,6 @@ class NoOaBankBatchApplicationService:
                 ),
                 **({"action_name": str(action_name).strip()} if str(action_name or "").strip() else {}),
             },
-            schedule_cost_warmup=False,
         )
         if persist:
             self.persist_mutation(

@@ -340,7 +340,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.enable_cost_statistics_read_model_refresh:
         projection_builder = CostStatisticsSqlProjectionBuilder(
             connection=connection,
-            redis_helper=redis_helper,
             bank_transaction_tag_read_facade=bank_transaction_tag_read_facade,
         )
         refresh_service = CostStatisticsReadModelRefreshService(

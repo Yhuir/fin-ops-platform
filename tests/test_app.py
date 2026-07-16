@@ -33,7 +33,7 @@ class AppTests(unittest.TestCase):
         self.assertIn("/api/session/me", payload["entrypoints"])
         self.assertIn("/api/tax-offset", payload["entrypoints"])
         self.assertIn("/api/tax-offset/calculate", payload["entrypoints"])
-        self.assertIn("/api/cost-statistics", payload["entrypoints"])
+        self.assertIn("/api/cost-statistics/explorer", payload["entrypoints"])
         self.assertIn("/api/cost-statistics/export", payload["entrypoints"])
         self.assertIn("/api/search", payload["entrypoints"])
         self.assertIn("/api/pending-invoices/rows", payload["entrypoints"])

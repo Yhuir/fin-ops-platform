@@ -642,11 +642,6 @@ def _json_response(response: object) -> dict[str, object]:
 class WorkbenchIdempotencyApiCompatibilityTests(unittest.TestCase):
     READ_MODEL_VERSION = "idempotency-test-generation-1"
 
-    def setUp(self) -> None:
-        cost_warmup_patcher = patch.object(Application, "_schedule_cost_statistics_cache_warmup")
-        self.addCleanup(cost_warmup_patcher.stop)
-        cost_warmup_patcher.start()
-
     def _build_app(self) -> Application:
         app = build_application()
         app._emit_workbench_action_timing = lambda **kwargs: None

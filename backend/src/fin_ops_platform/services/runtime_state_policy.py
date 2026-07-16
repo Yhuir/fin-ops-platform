@@ -26,7 +26,6 @@ BACKGROUND_JOB_REBUILDABLE_TYPES = {
     "workbench_rebuild",
     "workbench_read_model_rebuild",
     "oa_sync_workbench_rebuild",
-    "cost_statistics_cache_warmup",
     "tax_offset_cache_warmup",
     "historical_etc_reconcile",
 }
@@ -38,7 +37,6 @@ BACKGROUND_JOB_KNOWN_TYPES = BACKGROUND_JOB_REBUILDABLE_TYPES | {
 BACKGROUND_JOB_RETRYABLE_TYPES = {
     "file_import",
     "workbench_matching",
-    "cost_statistics_cache_warmup",
     "tax_offset_cache_warmup",
 }
 

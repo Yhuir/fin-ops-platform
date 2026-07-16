@@ -17,11 +17,6 @@ from fin_ops_platform.domain.enums import BatchType
 
 
 class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
-    def setUp(self) -> None:
-        cost_warmup_patcher = patch.object(Application, "_schedule_cost_statistics_cache_warmup")
-        self.addCleanup(cost_warmup_patcher.stop)
-        cost_warmup_patcher.start()
-
     @contextmanager
     def _temporary_app(self):
         with TemporaryDirectory() as temp_dir:

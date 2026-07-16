@@ -328,7 +328,6 @@ class _RuntimeWorkerDerivedLifecycle:
         scope_keys: list[str] | None = None,
         include_all: bool = True,
         metadata: dict[str, object] | None = None,
-        schedule_cost_warmup: bool = True,
     ) -> dict[str, object]:
         plan = self._lifecycle.plan_event(
             event,

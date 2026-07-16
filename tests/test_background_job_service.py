@@ -235,15 +235,15 @@ class BackgroundJobServiceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             service = self._service(temp_dir)
             old_job = service.create_job(
-                job_type="cost_statistics_cache_warmup",
-                label="预热成本统计缓存",
+                job_type="workbench_matching",
+                label="生成正式配对关系",
                 owner_user_id="system",
                 visibility="system",
                 affected_months=["2026-05"],
             )
             new_job = service.create_job(
-                job_type="cost_statistics_cache_warmup",
-                label="预热成本统计缓存",
+                job_type="workbench_matching",
+                label="生成正式配对关系",
                 owner_user_id="system",
                 visibility="system",
                 affected_months=["2026-05"],
@@ -508,16 +508,16 @@ class BackgroundJobServiceTests(unittest.TestCase):
         self.assertEqual(second_ack_payload["job"]["acknowledged_at"], ack_payload["job"]["acknowledged_at"])
         self.assertEqual(active_after_ack["jobs"], [])
 
-    def test_background_job_api_includes_retry_and_acknowledge_policy_for_failed_cost_warmup(self) -> None:
+    def test_background_job_api_includes_retry_and_acknowledge_policy_for_failed_matching(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             job = app._background_job_service.create_job(
-                job_type="cost_statistics_cache_warmup",
-                label="预热成本统计缓存",
+                job_type="workbench_matching",
+                label="生成正式配对关系",
                 owner_user_id="system",
                 visibility="system",
                 affected_months=["2026-03"],
-                source={"reason": "cost_statistics_scope_invalidated", "months": ["2026-03"]},
+                source={"reason": "workbench_matching", "months": ["2026-03"]},
             )
             app._background_job_service.fail_job(
                 job.job_id,
