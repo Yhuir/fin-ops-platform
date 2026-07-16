@@ -1,6 +1,6 @@
 # OA 待付款核对模块边界与 I/O
 
-日期：2026-07-16
+日期：2026-07-17
 
 ## 模块化状态
 
@@ -29,7 +29,7 @@
 | 输入 | Owner | 合同 |
 | --- | --- | --- |
 | 页面 rows query / `If-None-Match` | OA 页面/API | 只进入 `OaPendingPaymentReadModelService.conditional_rows`；认证 tenant、query contract、fresh gate 先于 `304` |
-| OA completed / in-progress / payment status | OA integration sync | 外部读取完整成功后，一次 PostgreSQL 事务提交 completed projection、admission、payment-status snapshot、watermark，并按精确月份先写 `workbench_relation` 依赖 dirty/outbox、再写 `oa_pending_payment` dirty/outbox；两者与 canonical snapshot 同事务 |
+| OA completed / in-progress / payment status | OA integration sync | 外部读取完整成功后，一次 PostgreSQL 事务提交 completed projection、admission、payment-status snapshot、watermark；completed/status/admission 与旧 snapshot 相同时不更新时间戳、不 replace admission、不 enqueue 页面 refresh。只有真实变化月份才先写 `workbench_relation` 依赖 dirty/outbox、再写 `oa_pending_payment` dirty/outbox；两者与 canonical snapshot 同事务 |
 | Workbench/pending relation | 对应 relation owner | read model projector 只读 PostgreSQL；owner version 和关系成员决定消费方 OA 月份 |
 | 银行/进项发票 canonical facts | core/invoice owner | 通过现有 relation/source-version 合同进入月份投影；本模块不直接写其事实或 read model |
 | `writeback-paid` / `link-bank-transactions` | command service | 复核权限、active relation、outflow、金额和 flow id；外部 MySQL 成功后必须幂等 reconcile PostgreSQL payment snapshot |
@@ -40,8 +40,8 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| rows 聚合响应 | OA 页面 | `200` fresh payload + `ETag`；`304` 空 body；`202` 不含旧 rows且带精确 barrier targets |
-| `filterConfig` / `filterOptions` | OA 页面 | 随 rows 同响应 set-based 计算；不存在第二个 filter API |
+| rows 聚合响应 | OA 页面 | `200` fresh payload + `ETag`；`304` 空 body；`202` 不含旧 rows且带精确 barrier targets。列表 DTO 只返回前端声明字段，不返回 read-model 内部 `searchText` 或逐行 `sourceVersions`；版本证明只在顶层返回，详情继续走现有惰性 detail API |
+| `filterConfig` / `filterOptions` | OA 页面 | 随 rows 同响应 set-based 计算；summary/facet CTE 只 materialize 聚合需要的 typed columns，不读取 `payload/raw_payload`；不存在第二个 filter API |
 | read model publish | `read_model.oa_pending_payment_*` | 月份原子 replace、source vector、event source version 和 CAS；月份 rows 只能含同月 OA 主行，relation group row identity 必须含 month scope，使 all-scope 的 row-id 去重不会吞掉跨月 relation 的月份成员；旧 event 不得清新 dirty |
 | dirty/outbox | runtime queue | canonical snapshot 同事务批量 enqueue 精确月份 `workbench_relation` 与 `oa_pending_payment`，依赖 target 排在 consumer target 前；后续 OA lifecycle fan-out 允许 dedupe 同一 pending target，不得产生第二条旧链 |
 | write result | 前端/operation barrier | 返回受影响 scope 和 freshness targets；重复命令幂等，部分外部成功时明确可重试 |

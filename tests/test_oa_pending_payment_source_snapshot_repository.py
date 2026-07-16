@@ -67,6 +67,7 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
         self.assertIn("delete from app.oa_pending_payment_status_snapshots", executed_sql)
         self.assertIn("insert into app.oa_pending_payment_status_snapshots", executed_sql)
         self.assertIn("(item.scope_month || '-01')::date", executed_sql)
+        self.assertIn("is distinct from", executed_sql)
         self.assertIn("delete from app.oa_pending_payment_admissions", executed_sql)
         self.assertIn("insert into app.oa_pending_payment_admissions", executed_sql)
         self.assertIn("insert into app.oa_sync_watermarks", executed_sql)

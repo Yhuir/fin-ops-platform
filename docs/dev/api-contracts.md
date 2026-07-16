@@ -772,7 +772,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 
 - 该接口是 Workbench 唯一首屏读入口，在一个 PostgreSQL `REPEATABLE READ READ ONLY` 快照内返回 freshness/version、summary 和 paired/unpaired 各首页。
 - summary 与两区 groups 必须共用同一 generation-set version；缺失或混合 version 必须 fail closed。
-- 默认无筛选首屏固定 `page=1`、`page_size=200`、`detail_level=summary`；仅该 shape 可在 fresh/stable gate 后进入按 version 隔离的 Redis read-through cache。
+- 默认无筛选首屏固定 `page=1`、`page_size=50`、`detail_level=summary`；仅该 shape 可在 fresh/stable gate 后进入按 version 隔离的 Redis read-through cache。paired/unpaired 的剩余数据继续使用既有 `/api/workbench/groups` 分页接口。
 - 搜索、筛选、后续分页和详情使用已有窄接口，并必须携带 `expected_read_model_version`。
 - 旧独立 summary HTTP 不是公开 API；内部 summary repository I/O 仅用于组合上述同快照响应。
 

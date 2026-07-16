@@ -1,5 +1,14 @@
 # OA待付款核对 实施记录
 
+## 2026-07-17 - 周期同步刷新风暴与 rows 热路径收敛
+
+- 生产证据：fresh 首屏 `page_size=20` 的 12 次浏览器等价 gzip 请求 `p95=859.634ms`，且周期性 `oa.sync` 期间反复返回 `202/refreshing`；相同 ETag 的公网条件请求仍返回完整 `200`。同期混合负载使 OA、Workbench、成本统计同时进入 refreshing，证明瓶颈不只是页面渲染。
+- 根因：OA projection 对相同 completed records 仍无条件更新 `synced_at/updated_at`、删除重插 item/attachment；status/admission snapshot 也无条件 rewrite；sync service 再根据全部扫描 records 无条件 fan-out。rows aggregate 又把 `payload/raw_payload` 带入 materialized CTE，列表响应把 read-model 内部 `searchText` 和逐行 `sourceVersions` 一并返回。
+- 修复：projection/status 使用 `IS DISTINCT FROM` 条件更新，未变化 record 不改子表；admission 只 replace 真实变化 scope；sync service 只消费 authoritative snapshot 的 `affected_scope_keys`，空集合不 fan-out。rows summary/facets 只 materialize typed columns，page SQL 在数据库侧移除内部 search/version 字段，顶层 source version 与惰性 detail API 合同不变。
+- 隔离：没有新增 cache、worker、API、表、索引或共享 gateway；成本统计、Workbench 和其它页面只会少收到无业务变化的错误 refresh，真实 OA 变化仍按精确月份通过原 owner fan-out。
+- 验证：相关后端 246 tests 通过；隔离真实 PostgreSQL 应用 0001–0108 后，重复同一 canonical commit 证明第二次 `affected_scope_keys=()`、`upserted_completed_count=0`，application/status `updated_at` 与 outbox count 均保持不变。
+- 待生产门：发布后重跑 fresh 200/304、周期 sync 稳定窗口、三页面混合负载和 Page Audit；公网 `If-None-Match` 转发仍需用 live Nginx 配置证据闭合，不能用应用层自定义 query fallback。
+
 ## 2026-07-17 - 生产 rows freshness Port 装配修复
 
 - 生产证据：OA Page Audit 已返回 `pass/fresh/drained`，但相同发布版本的 `/api/oa-pending-payments/rows` 持续返回 `202/refreshing`，且 payload 没有 stale reasons；因此不是 source version、dirty/outbox 或 worker 未收敛。

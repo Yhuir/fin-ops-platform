@@ -12,6 +12,7 @@ import {
   previewWorkbenchWithdrawLink,
   refreshManualOaImportAttachments,
   removeManualOaImport,
+  WORKBENCH_GROUP_PAGE_SIZE,
 } from "../features/workbench/api";
 import {
   buildWorkbenchServerPageQuery,
@@ -23,6 +24,10 @@ import {
 import type { WorkbenchRelationGroup, WorkbenchRecord, WorkbenchRecordType } from "../features/workbench/types";
 
 const workbenchPanes: WorkbenchRecordType[] = ["oa", "bank", "invoice"];
+
+test("keeps the combined initial and subsequent group pages at a 50-group first screen", () => {
+  expect(WORKBENCH_GROUP_PAGE_SIZE).toBe(50);
+});
 
 function createWorkbenchRow(paneId: WorkbenchRecordType, id: string, counterparty: string): WorkbenchRecord {
   return {

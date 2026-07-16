@@ -42,6 +42,14 @@ class DeployOANginxConfigTests(unittest.TestCase):
         self.assertIn("rewrite ^/fin-ops/api/(.*)$ /api/$1 break;", config)
         self.assertIn("proxy_pass http://fin_ops_api;", config)
 
+    def test_api_proxies_forward_conditional_request_etags(self) -> None:
+        config = NGINX_CONFIG_PATH.read_text(encoding="utf-8")
+
+        self.assertEqual(
+            config.count("proxy_set_header If-None-Match $http_if_none_match;"),
+            4,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,6 +1,6 @@
 # OA 集成模块边界与 I/O
 
-日期：2026-07-03
+日期：2026-07-17
 
 ## 模块化状态
 
@@ -37,7 +37,7 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| OA projection rows | repositories/read models | 带 source version；完成态 workflow status 由 OA projection 边界统一归一/识别，必须兼容 canonical `completed` 和历史完成态别名（如 `已完成`、`approved`、`2`），下游 read model 不得各自实现完成态判断。projection 成功写入后必须通过 `ReadModelRefreshGateway` 按受影响月份 fan-out `workbench_relation` 及其直接页面 consumers（bank detail、invoice lifecycle、input/output invoice、turnover、no-OA/bank-flow batch）；`workbench`、search、OA pending、pending invoice 保持各自现有 producer/gateway，cost statistics 由 Workbench 发布后的 owner fan-out。禁止只刷新 Workbench 却让嵌入 relation source_versions 的页面保留旧 OA projection 版本并标记 fresh。 |
+| OA projection rows | repositories/read models | 带 source version；完成态 workflow status 由 OA projection 边界统一归一/识别，必须兼容 canonical `completed` 和历史完成态别名（如 `已完成`、`approved`、`2`），下游 read model 不得各自实现完成态判断。repository 以业务列与规范 JSON 的 `IS DISTINCT FROM` 判定真实变化；相同 snapshot 不更新 `app.oa_applications.updated_at`，不重写 item/attachment。只有 authoritative snapshot 返回的真实变化月份、实际删除月份或 relation promotion 月份才通过既有 gateway/producer fan-out；无变化 run 记录 sync run/watermark，但不创建页面 dirty/outbox。变化时继续覆盖 `workbench_relation` 及其直接页面 consumers（bank detail、invoice lifecycle、input/output invoice、turnover、no-OA/bank-flow batch）；`workbench`、search、OA pending、pending invoice 保持各自 owner，cost statistics 由 Workbench 发布后的 owner fan-out。 |
 | OA sync status/run facts | AppHealth/AppStatus/operations dashboard | `app.oa_sync_runs(sync_type='oa_projection')` 是上一次读取 Mongo/projection run 的事实源；`job.outbox_events` 和 worker heartbeat 表示 refreshing/error，不得使用进程内内存状态或行级 `app.oa_applications.synced_at` 覆盖运行事实 |
 | OA session/permission payload | frontend session | 不泄露 secret |
 | Attachment invoice result | invoice/ETC/input usage modules | 经 service 边界传递 |
@@ -48,7 +48,7 @@
 
 - Own read model：无单一页面 read model；影响 `oa_pending_payment`、`input_invoice_usage`、`invoice_lifecycle` 等。
 - OA manual import/create/refresh/remove 影响 `workbench`、`workbench_relation`、`invoice_lifecycle`、`tax_offset`、`search` 和 `cost_statistics`；返回 target envelope 后由页面等待 operation barrier。
-- OA projection sync 由 runtime worker 读取 Mongo、写 `app.oa_*` projection、记录 `app.oa_sync_runs` / `app.oa_sync_watermarks`，再通过 read model refresh gateway 标记 downstream dirty scopes。
+- OA projection sync 由 runtime worker 读取 Mongo、条件写 `app.oa_*` projection、记录 `app.oa_sync_runs` / `app.oa_sync_watermarks`，再按 snapshot 的 changed scopes 通过 read model refresh gateway 标记 downstream dirty scopes；周期性相同输入必须是零 projection rewrite、零 downstream fan-out。
 - External system：OA Mongo / OA app。
 - Repository：`postgres_repositories/oa_projection.py`、`oa_applicant_credentials.py`。
 

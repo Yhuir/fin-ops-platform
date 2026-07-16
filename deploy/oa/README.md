@@ -476,6 +476,11 @@ apply 的 Admin Token 与 approval ticket 只从 stdin 的前两行读取，固�
 `api-request-timing` 使用同一 request ID，只返回最近两小时最多 32 条结构化
 `workbench_action_timing` 记录；它不返回业务 payload，也不开放时间窗或 journal 参数。
 
+Nginx 的 `/fin-ops-api/`、`/api/` 和兼容 `/fin-ops/api/` location 必须显式转发
+`If-None-Match`。OA 待付款等页面依赖标准 ETag/304 快路径；若公网相同 ETag 仍返回
+完整 `200`、而本机 API 返回 `304`，先对照 `nginx.fin-ops.conf.example` 修正 live location
+并执行 `nginx -t` 后 reload，禁止在应用层增加自定义 query ETag 或旧 payload cache fallback。
+
 说明：
 
 - 这套脚本只发布 `fin-ops` 自己的前后端

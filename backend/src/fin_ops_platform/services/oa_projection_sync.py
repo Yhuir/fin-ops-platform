@@ -130,9 +130,15 @@ class OAProjectionSyncService:
         record_sync_run = getattr(self._projection_repository, "record_sync_run", None)
         if callable(record_sync_run):
             record_sync_run(result)
+        changed_scope_keys = (
+            list(getattr(source_snapshot_result, "affected_scope_keys", ()))
+            if source_snapshot_result is not None
+            else None
+        )
         self._mark_downstream_dirty(
             scope_key,
             records,
+            changed_scope_keys=changed_scope_keys,
             extra_months=[*pruned_months, *list(promotion_result.get("affected_months") or [])],
         )
         return result
@@ -340,16 +346,22 @@ class OAProjectionSyncService:
         scope_key: str,
         records: list[OAApplicationRecord],
         *,
+        changed_scope_keys: list[str] | None = None,
         extra_months: list[str] | None = None,
     ) -> None:
-        months = {
-            str(record.month).strip()
-            for record in list(records or [])
-            if str(getattr(record, "month", "")).strip()
-        }
+        if changed_scope_keys is None:
+            months = {
+                str(record.month).strip()
+                for record in list(records or [])
+                if str(getattr(record, "month", "")).strip()
+            }
+            if scope_key != "all" and scope_key:
+                months.add(scope_key)
+        else:
+            months = {str(value).strip() for value in changed_scope_keys if str(value).strip()}
         months.update(month for month in list(extra_months or []) if month)
-        if scope_key != "all" and scope_key:
-            months.add(scope_key)
+        if not months:
+            return
         target_scopes = sorted({month for month in months if month and month != "all"})
         if target_scopes:
             target_scopes.append("all")

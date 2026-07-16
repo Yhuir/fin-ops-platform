@@ -67,7 +67,7 @@ export type WorkbenchBootstrapProgress = {
   indeterminate: boolean;
 };
 
-export const WORKBENCH_GROUP_PAGE_SIZE = 200;
+export const WORKBENCH_GROUP_PAGE_SIZE = 50;
 
 type ApiRelation = {
   code: string;

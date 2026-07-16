@@ -166,7 +166,8 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
                 }
 
             changed_scopes = _changed_status_scopes(old_statuses, new_statuses)
-            changed_scopes.update(_changed_admission_scopes(old_admissions, new_admissions))
+            changed_admission_scopes = _changed_admission_scopes(old_admissions, new_admissions)
+            changed_scopes.update(changed_admission_scopes)
             touched_scopes = set(replaced_scopes)
             if normalized_scope_key != "all":
                 touched_scopes.add(normalized_scope_key)
@@ -212,7 +213,7 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
             self._replace_admissions(
                 transaction,
                 tenant_id=normalized_tenant_id,
-                replaced_scopes=replaced_scopes,
+                replaced_scopes=replaced_scopes.intersection(changed_admission_scopes),
                 admissions=new_admissions,
             )
 
@@ -525,6 +526,15 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
                 source_signature = excluded.source_signature,
                 synced_at = now(),
                 updated_at = now()
+            where (
+                app.oa_pending_payment_status_snapshots.pay_status,
+                app.oa_pending_payment_status_snapshots.scope_month,
+                app.oa_pending_payment_status_snapshots.source_signature
+            ) is distinct from (
+                excluded.pay_status,
+                excluded.scope_month,
+                excluded.source_signature
+            )
             """,
             (tenant_id, jsonb(rows)),
         )

@@ -619,7 +619,7 @@ class RepeatableReadWorkbenchInitialPageConnection(ActiveWorkbenchGenerationConn
 class DefaultInitialBatchWorkbenchConnection(RepeatableReadWorkbenchInitialPageConnection):
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
         normalized = " ".join(sql.lower().split())
-        if "partition by g.zone" in normalized and "ranked.zone_rank <= 201" in normalized:
+        if "partition by g.zone" in normalized and "ranked.zone_rank <= 51" in normalized:
             self.fetch_all_calls.append((normalized, params))
             return [
                 {
@@ -2349,10 +2349,10 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(payload["read_model_version"], COMPOSED_ALL_VERSION)
         self.assertEqual(payload["paired"]["page"], 1)
-        self.assertEqual(payload["paired"]["page_size"], 200)
+        self.assertEqual(payload["paired"]["page_size"], 50)
         self.assertEqual(payload["paired"]["detail_level"], "summary")
         self.assertEqual(payload["unpaired"]["page"], 1)
-        self.assertEqual(payload["unpaired"]["page_size"], 200)
+        self.assertEqual(payload["unpaired"]["page_size"], 50)
         self.assertEqual(payload["unpaired"]["detail_level"], "summary")
         page_queries = [
             (sql, params)
@@ -2364,8 +2364,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         _unpaired_sql, unpaired_params = page_queries[1]
         self.assertIn("bank_sort_max desc nulls last", paired_sql)
         self.assertIn("%云南%", unpaired_params)
-        self.assertEqual(paired_params[-2:], (201, 0))
-        self.assertEqual(unpaired_params[-2:], (201, 0))
+        self.assertEqual(paired_params[-2:], (51, 0))
+        self.assertEqual(unpaired_params[-2:], (51, 0))
 
     def test_repository_default_all_initial_batches_both_zones_with_bounded_statement_count(self) -> None:
         connection = DefaultInitialBatchWorkbenchConnection()
@@ -2387,7 +2387,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         statement_count = len(connection.execute_calls) + len(connection.fetch_one_calls) + len(connection.fetch_all_calls)
         self.assertLessEqual(statement_count, 10)
         self.assertEqual(
-            sum("partition by g.zone" in sql and "ranked.zone_rank <= 201" in sql for sql, _params in connection.fetch_all_calls),
+            sum("partition by g.zone" in sql and "ranked.zone_rank <= 51" in sql for sql, _params in connection.fetch_all_calls),
             1,
         )
         self.assertEqual(

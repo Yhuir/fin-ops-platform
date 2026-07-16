@@ -1,5 +1,13 @@
 # OA 集成 实施记录
 
+## 2026-07-17 - 相同 OA snapshot 零写与 change-driven fan-out
+
+- 目标：消除周期性 `oa.sync` 在源数据未变化时更新 projection 时间戳、重写子表并让 OA/Workbench/成本统计等页面反复 refreshing 的写放大。
+- 边界：`PostgresOAProjectionRepository` 是 completed OA diff/write owner；`PostgresOaPendingPaymentSourceSnapshotRepository` 是 status/admission diff owner；`OAProjectionSyncService` 只依据 snapshot `affected_scope_keys`、真实删除 scope 和 promotion scope 编排既有 producer/gateway。
+- 关键决策：相同业务列和规范 JSON 使用 PostgreSQL `IS DISTINCT FROM` 判定 no-op；no-op 仍记录 sync run/运维 watermark，但不改变业务 projection/status/admission 时间戳、不重写 item/attachment、不生成 downstream dirty/outbox。没有增加 fallback、双路 projection 或通用 diff abstraction。
+- 测试：unit/SQL tests 覆盖 changed/no-op 两支；真实 PostgreSQL integration 覆盖重复 commit 的 application/status 时间戳和 outbox count 不变；legacy 无 snapshot 的测试 fake 继续保留原 fan-out 语义，不影响生产 authoritative snapshot 路径。
+- 待生产门：发布后观察至少一个完整周期 sync 窗口，确认无业务变化时三页面始终 fresh；真实变化仍必须按 exact month 收敛并通过各页面 Audit。
+
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 

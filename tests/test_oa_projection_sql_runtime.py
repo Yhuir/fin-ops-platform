@@ -155,6 +155,12 @@ class OAProjectionWriteConnection(OAProjectionConnection):
         return None
 
 
+class OAProjectionNoChangeConnection(OAProjectionWriteConnection):
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+        self.executed.append((" ".join(sql.lower().split()), params))
+        return None
+
+
 class OAProjectionSqlRuntimeTests(unittest.TestCase):
     def test_postgres_oa_projection_repository_lists_records_by_month(self) -> None:
         from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository
@@ -248,6 +254,33 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(len(attachment_inserts), 2)
         app_insert = [params for sql, params in connection.executed if "insert into app.oa_applications" in sql]
         self.assertEqual(app_insert[0][6], "completed")
+
+    def test_postgres_oa_projection_repository_does_not_rewrite_identical_records(self) -> None:
+        from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository
+
+        connection = OAProjectionNoChangeConnection()
+        repository = PostgresOAProjectionRepository(connection)
+
+        count = repository.upsert_application_records(
+            [oa_record_with_structured_attachments()],
+            scope_key="2026-05",
+        )
+
+        self.assertEqual(count, 0)
+        executed_sql = "\n".join(sql for sql, _params in connection.executed)
+        self.assertIn("is distinct from", executed_sql)
+        self.assertFalse(
+            any(sql.startswith("delete from app.oa_application_items where") for sql, _params in connection.executed)
+        )
+        self.assertFalse(
+            any(sql.startswith("insert into app.oa_application_items") for sql, _params in connection.executed)
+        )
+        self.assertFalse(
+            any(sql.startswith("delete from app.oa_attachments where") for sql, _params in connection.executed)
+        )
+        self.assertFalse(
+            any(sql.startswith("insert into app.oa_attachments") for sql, _params in connection.executed)
+        )
 
     def test_postgres_oa_projection_repository_writes_attachment_files_as_structured_attachments(self) -> None:
         from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository

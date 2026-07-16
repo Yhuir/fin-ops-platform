@@ -1,6 +1,6 @@
 # 关联台模块边界与 I/O
 
-日期：2026-07-16
+日期：2026-07-17
 
 ## 职责
 
@@ -37,7 +37,7 @@
 | --- | --- | --- |
 | `paired.groups` | 前端 | 每组恰好对应一条 active formal relation，`group_type=relation` |
 | `unpaired.groups` | 前端 | 每组恰好一个未被 active relation 占用的 canonical fact，`group_type=unpaired` |
-| combined initial | 前端/App Health | `GET /api/workbench` 在同一 active generation-set 快照返回 summary 与 paired/unpaired 各首页；summary 含 `paired_count`、`unpaired_count`、OA/流水/发票事实数与 exception count |
+| combined initial | 前端/App Health | `GET /api/workbench` 在同一 active generation-set 快照返回 summary 与 paired/unpaired 各 50 组首页；summary 含 `paired_count`、`unpaired_count`、OA/流水/发票事实数与 exception count；其余组只通过既有 `/groups` 分页读取 |
 | formal relation write result | caller | before/after、version、affected months、audit、outbox ids、barrier targets |
 | matching summary | worker/App Health | planned/created/extended/preserved/ambiguous/resource-limited/unsafe counts；不输出候选 rows |
 | read model generation | Workbench query | 新 generation 完整写入并校验后原子激活；building/failed 不可读为 fresh |
@@ -58,7 +58,7 @@
 
 - `workbench` 使用 active-generation scoped publish；月分片发布必须原子。
 - `month=all` 查询组合 active 月分片，并在分页前做唯一 canonical owner 仲裁。
-- 默认 `month=all` combined initial 在同一个 repeatable-read 事务中只读取一次 active generation/source/freshness context，复用 canonical summary 的 zone counts，并批量读取 paired/unpaired 两区首页与可见成员；包括事务设置在内最多 10 条数据库语句。带搜索、筛选或排序的请求继续走既有窄 `/groups` 查询，不得为了快路径复制筛选 SQL 或忽略查询条件。
+- 默认 `month=all` combined initial 在同一个 repeatable-read 事务中只读取一次 active generation/source/freshness context，复用 canonical summary 的 zone counts，并批量读取 paired/unpaired 两区各 50 组首页与可见成员；包括事务设置在内最多 10 条数据库语句。带搜索、筛选或排序的首屏同样固定 50 组并走既有窄 `/groups` 查询；后续分页保持 `expected_read_model_version` 绑定，不复制筛选 SQL或忽略查询条件。
 - schema/version 由 `workbench_read_model_version.py` 统一提供，groups page cache 必须复用同一 projection schema；旧 generation 或旧 Redis page payload 不得冒充 fresh。
 - Workbench worker 不预热 page cache。默认首屏缓存只由 `WorkbenchQueryFacade` 在 fresh gate 后按 active generation version read-through；cache miss/down 回同一 SQL repository cold path，不影响 generation 发布或 dirty scope 完成。
 - 对外不存在独立 Workbench summary HTTP 合同。`PostgresReadModelRepository.get_workbench_summary(...)` 只是 combined initial 同快照组合所需的内部窄 I/O，不得重新从 route/facade 公开。

@@ -183,6 +183,37 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
         self.assertEqual(result["pending_payment_admission_count"], 1)
         self.assertEqual(result["pending_payment_affected_scope_keys"], ["2026-06"])
         self.assertNotIn(("oa_pending_payment", "2026-06", "oa_projection_sync"), queue_repository.refreshes)
+        self.assertIn(("workbench", "2026-06", "oa_projection_sync"), queue_repository.refreshes)
+        self.assertIn(("workbench", "all", "oa_projection_sync"), queue_repository.refreshes)
+
+    def test_identical_authoritative_snapshot_does_not_fan_out_downstream_refreshes(self) -> None:
+        records = [_oa("oa-pay-completed", "2026-06", workflow_status="completed")]
+        queue_repository = FakeQueueRepository()
+
+        class UnchangedSnapshotRepository(FakePendingPaymentSourceSnapshotRepository):
+            def commit_authoritative_snapshot(self, **kwargs: object) -> OaPendingPaymentSourceSnapshotResult:
+                self.calls.append(dict(kwargs))
+                return OaPendingPaymentSourceSnapshotResult(
+                    affected_scope_keys=(),
+                    payment_status_count=0,
+                    admission_count=0,
+                    source_signatures={},
+                    upserted_completed_count=0,
+                )
+
+        service = OAProjectionSyncService(
+            source_adapter=FakeSourceAdapter(months=["2026-06"], records_by_month={"2026-06": records}),
+            projection_repository=FakeProjectionRepository(),
+            queue_repository=queue_repository,
+            payment_status_repository=FakePaymentStatusRepository({}),
+            pending_payment_source_snapshot_repository=UnchangedSnapshotRepository(),
+        )
+
+        result = service.handle_runtime_event(_event("2026-06"))
+
+        self.assertEqual(result["upserted_count"], 0)
+        self.assertEqual(result["pending_payment_affected_scope_keys"], [])
+        self.assertEqual(queue_repository.refreshes, [])
 
     def test_external_payment_status_failure_prevents_any_postgres_projection_write(self) -> None:
         projection_repository = FakeProjectionRepository()

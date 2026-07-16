@@ -1,6 +1,6 @@
 # OA 待付款核对测试责任
 
-日期：2026-07-16
+日期：2026-07-17
 
 ## 风险模型
 
@@ -31,6 +31,7 @@
 覆盖：
 
 - OA sync 一次 PG 事务提交 completed projection、admission、payment status、watermark、outbox。
+- 相同 canonical snapshot 第二次提交必须保持 application/status `updated_at`、item/attachment 和 outbox count 不变，且 sync service 不 fan-out 任何页面 refresh；真实变化仍精确覆盖 changed month 与 `all` 聚合 consumers。
 - OA canonical snapshot 变化时，同一事务批量写入 `workbench_relation:<month>` 与 `oa_pending_payment:<month>`，且依赖 target 排在 consumer target 前；queue 失败整体回滚。纯 payment-status writeback 不额外污染 relation target。
 - snapshot replace/delete、空集合、非法 status、queue 失败全回滚。
 - 页面 paid writeback 增量更新 PG snapshot/watermark/精确月份 outbox；already-paid 修复；缺初始化 watermark fail fast。
@@ -39,12 +40,15 @@
 
 入口：`tests/test_oa_projection_sync_service.py`、`tests/test_oa_pending_payment_source_snapshot_repository.py`、`tests/test_oa_pending_payment_relation_repository.py`、`tests/test_oa_pending_payment_command_service.py`。
 
+真实 PostgreSQL：`tests/test_oa_pending_payment_postgres_integration.py` 同时覆盖 canonical commit -> durable worker -> fresh/ETag 与 identical commit 零写/零 outbox。
+
 ### 3. API contract：适用
 
 覆盖：
 
 - rows `200` shape 包含 rows/pagination/summary/filterConfig/filterOptions/freshness proof。
 - ETag、`If-None-Match -> 304`、空 body、`Cache-Control`、`Vary`。
+- rows aggregate/facets 只能扫描 typed columns，page SQL 不读 `raw_payload`，公开 row DTO 不含内部 `searchText` / 逐行 `sourceVersions`。
 - dirty/missing/mismatch -> `202`，无旧 rows，精确 `operationBarrierTargets`。
 - 权限和 query validation 先于条件响应。
 - 旧 `/api/oa-pending-payments/filter-options` 不存在。

@@ -79,7 +79,10 @@ class PostgresOAProjectionRepository:
             self._record_watermark(scope_key=scope_key, status="succeeded", upserted_count=0)
             return 0
 
+        changed_count = 0
+
         def write(connection: Any) -> None:
+            nonlocal changed_count
             for record in normalized_records:
                 payload = serialize_value(record)
                 application_row = connection.fetch_one(
@@ -107,6 +110,37 @@ class PostgresOAProjectionRepository:
                         raw_payload = excluded.raw_payload,
                         synced_at = now(),
                         updated_at = now()
+                    where (
+                        app.oa_applications.oa_source_id,
+                        app.oa_applications.form_id,
+                        app.oa_applications.form_type,
+                        app.oa_applications.workflow_no,
+                        app.oa_applications.status,
+                        app.oa_applications.workflow_status,
+                        app.oa_applications.applicant,
+                        app.oa_applications.application_date,
+                        app.oa_applications.project_name,
+                        app.oa_applications.amount,
+                        app.oa_applications.currency,
+                        app.oa_applications.scope_month,
+                        app.oa_applications.normalized_payload,
+                        app.oa_applications.raw_payload
+                    ) is distinct from (
+                        excluded.oa_source_id,
+                        excluded.form_id,
+                        excluded.form_type,
+                        excluded.workflow_no,
+                        excluded.status,
+                        excluded.workflow_status,
+                        excluded.applicant,
+                        excluded.application_date,
+                        excluded.project_name,
+                        excluded.amount,
+                        excluded.currency,
+                        excluded.scope_month,
+                        excluded.normalized_payload,
+                        excluded.raw_payload
+                    )
                     returning id::text as application_id
                     """,
                     (
@@ -129,7 +163,8 @@ class PostgresOAProjectionRepository:
                 )
                 application_id = text((application_row or {}).get("application_id"))
                 if not application_id:
-                    raise RuntimeError(f"OA projection upsert did not return application id for {record.id}.")
+                    continue
+                changed_count += 1
                 self._replace_application_items(connection, application_id=application_id, record=record)
                 self._replace_application_attachments(connection, application_id=application_id, record=record)
             self._migrate_legacy_row_references(connection, self._legacy_row_id_alias_pairs(normalized_records))
@@ -141,12 +176,12 @@ class PostgresOAProjectionRepository:
             self._record_watermark(
                 scope_key=scope_key,
                 status="succeeded",
-                upserted_count=len(normalized_records),
+                upserted_count=changed_count,
                 connection=connection,
             )
 
         run_in_transaction(self._connection, write)
-        return len(normalized_records)
+        return changed_count
 
     def _delete_scope_records_not_in(
         self,

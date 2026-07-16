@@ -50,6 +50,65 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
         self.read_repository = PostgresReadModelRepository(self.connection)
         self.pending_relations = PostgresOaPendingPaymentRelationRepository(self.connection)
 
+    def test_identical_canonical_commit_keeps_projection_and_status_rows_unchanged(self) -> None:
+        source_snapshot = PostgresOaPendingPaymentSourceSnapshotRepository(
+            self.connection,
+            queue_repository=self.queue,
+            pending_relation_repository=self.pending_relations,
+        )
+        payment_statuses = {
+            "flow-integration-1": OAPaymentStatusRecord(
+                flow_id="flow-integration-1",
+                pay_status=0,
+            )
+        }
+
+        first = source_snapshot.commit_authoritative_snapshot(
+            scope_key="2026-05",
+            tenant_id="default",
+            records=[_record()],
+            payment_statuses=payment_statuses,
+        )
+        before = self.connection.fetch_one(
+            """
+            select
+                application.updated_at as application_updated_at,
+                status.updated_at as status_updated_at,
+                (select count(*) from job.outbox_events) as outbox_count
+            from app.oa_applications application
+            join app.oa_pending_payment_status_snapshots status
+              on status.tenant_id = 'default'
+             and status.flow_id = 'flow-integration-1'
+            where application.row_id = 'oa-integration-1'
+            """
+        )
+
+        second = source_snapshot.commit_authoritative_snapshot(
+            scope_key="2026-05",
+            tenant_id="default",
+            records=[_record()],
+            payment_statuses=payment_statuses,
+        )
+        after = self.connection.fetch_one(
+            """
+            select
+                application.updated_at as application_updated_at,
+                status.updated_at as status_updated_at,
+                (select count(*) from job.outbox_events) as outbox_count
+            from app.oa_applications application
+            join app.oa_pending_payment_status_snapshots status
+              on status.tenant_id = 'default'
+             and status.flow_id = 'flow-integration-1'
+            where application.row_id = 'oa-integration-1'
+            """
+        )
+
+        self.assertEqual(first.affected_scope_keys, ("2026-05",))
+        self.assertEqual(first.upserted_completed_count, 1)
+        self.assertEqual(second.affected_scope_keys, ())
+        self.assertEqual(second.upserted_completed_count, 0)
+        self.assertEqual(after, before)
+
     def test_canonical_commit_reaches_fresh_rows_and_etag_through_durable_worker_chain(self) -> None:
         self.read_repository.mark_workbench_relation_scope_empty(
             scope_key="2026-05",

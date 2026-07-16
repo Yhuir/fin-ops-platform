@@ -753,7 +753,23 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
         summary_row = self._connection.fetch_one(
             f"""
             with base_rows as materialized (
-                select *
+                select
+                    oa_amount,
+                    bank_paid_total,
+                    bank_amount,
+                    oa_id,
+                    oa_ids,
+                    oa_workflow_status,
+                    payment_status,
+                    payment_status_label,
+                    oa_applicant,
+                    oa_application_type,
+                    oa_project_name,
+                    bank_name,
+                    bank_account,
+                    bank_direction,
+                    bank_counterparty_name,
+                    seller_name
                 from {rows_source_sql}
                 where {base_where_sql}
             ),
@@ -855,7 +871,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
             )
             rows = self._connection.fetch_all(
                 f"""
-                select payload, raw_payload
+                select payload - 'searchText' - 'sourceVersions' - 'source_versions' as payload
                 from {rows_source_sql}
                 where {where_sql}
                 order by {order_sql}
@@ -8102,7 +8118,7 @@ class PostgresReadModelRepository:
                 from {canonical_groups_sql}
                 where g.zone in ('paired', 'unpaired')
             ) ranked
-            where ranked.zone_rank <= 201
+            where ranked.zone_rank <= 51
             order by
                 case when ranked.zone = 'paired' then 0 else 1 end,
                 ranked.zone_rank
@@ -8116,7 +8132,7 @@ class PostgresReadModelRepository:
         visible_rows = [
             row
             for zone in ("paired", "unpaired")
-            for row in rows_by_zone[zone][:200]
+            for row in rows_by_zone[zone][:50]
         ]
         materialized_rows = self._materialize_workbench_group_payloads(visible_rows)
         groups_by_zone: dict[str, list[dict[str, Any]]] = {"paired": [], "unpaired": []}
@@ -8139,11 +8155,11 @@ class PostgresReadModelRepository:
                 "scope_key": "all",
                 "zone": zone,
                 "page": 1,
-                "page_size": 200,
+                "page_size": 50,
                 "detail_level": "summary",
                 "total": int_value(counts.get("groups"), 0),
                 "row_counts": _normalize_workbench_row_counts(counts, _empty_workbench_row_counts()),
-                "has_more": len(rows_by_zone[zone]) > 200,
+                "has_more": len(rows_by_zone[zone]) > 50,
                 "groups": groups_by_zone[zone],
                 "read_model_status": read_model_status,
                 "source_versions": source_versions,
@@ -8346,7 +8362,7 @@ class PostgresReadModelRepository:
                     scope_key=normalized_scope_key,
                     zone="paired",
                     page=1,
-                    page_size=200,
+                    page_size=50,
                     detail_level="summary",
                     **paired_page_query,
                 )
@@ -8354,7 +8370,7 @@ class PostgresReadModelRepository:
                     scope_key=normalized_scope_key,
                     zone="unpaired",
                     page=1,
-                    page_size=200,
+                    page_size=50,
                     detail_level="summary",
                     **unpaired_page_query,
                 )

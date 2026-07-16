@@ -1,5 +1,13 @@
 # 关联台 实施记录
 
+## 2026-07-17 - combined initial 首屏 payload 收敛
+
+- 生产证据：`GET /api/workbench?month=all` fresh 响应解压后约 `2.84MB`、gzip 约 `171KB`，浏览器等价单次请求约 `1059ms`；现有 combined initial 每区返回 200 groups，传输、JSON 解析和可见成员物化成为首屏固定成本。
+- 决策：保持同一 `WorkbenchQueryFacade -> PostgresReadModelRepository`、repeatable-read、active generation version、Redis read-through 和 `/groups` 分页合同；只把 paired/unpaired 首屏固定为各 50 groups，并同步前端默认 page size。summary total、`has_more` 与后续 `expected_read_model_version` 分页保持完整。
+- 隔离：不改 projection、worker、relation write、其它页面 read model、cache owner、表或索引；不新增 preload/prefetch 或第二首屏 API。
+- 测试：SQL shape 锁定单次双区查询 `zone_rank <= 51`、两区 `page_size=50`、筛选首屏 limit 51 和最多 10 statements；相关后端与前端 Workbench tests 通过。
+- 待生产门：发布后复测 combined initial p95，并在 confirm/withdraw 后等待 exact barrier、重读 fresh 页面和 Page Audit；若仍超 1 秒，先用请求/SQL证据定位，不恢复 200-group 首屏或叠加缓存层。
+
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 

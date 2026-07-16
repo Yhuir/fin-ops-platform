@@ -124,8 +124,15 @@ class OaPendingPaymentReadModelQueryTests(unittest.TestCase):
         self.assertEqual(len(connection.fetch_all_calls), 1)
         aggregate_sql = connection.fetch_one_calls[0][0].lower()
         self.assertIn("with base_rows as materialized", aggregate_sql)
+        self.assertNotIn("raw_payload", aggregate_sql)
+        base_rows_sql = aggregate_sql.split("filtered_rows as materialized", 1)[0]
+        self.assertNotIn("select *", base_rows_sql)
+        self.assertNotIn("payload", base_rows_sql)
         self.assertIn("cross join lateral unnest", aggregate_sql)
         self.assertNotIn("jsonb_array_elements", aggregate_sql)
+        page_sql = connection.fetch_all_calls[0][0]
+        self.assertIn("payload - 'searchText' - 'sourceVersions' - 'source_versions'", page_sql)
+        self.assertNotIn("select payload, raw_payload", page_sql.lower())
 
     def test_read_snapshot_sets_repeatable_read_before_any_query(self) -> None:
         connection = SnapshotConnection()
