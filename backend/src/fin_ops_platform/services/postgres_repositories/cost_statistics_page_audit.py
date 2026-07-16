@@ -200,7 +200,10 @@ def _fetch_summary_and_runtime_issues(
     row = connection.fetch_one(
         f"""
         /* check: summary */
-        with dirty_scope_rows as materialized (
+        with audit_session_settings as materialized (
+            select set_config('jit', 'off', true) as jit
+        ),
+        dirty_scope_rows as materialized (
             select scope_type, scope_key, status, updated_at::text as updated_at, last_error
             from job.read_model_dirty_scopes
             where tenant_id = %s
@@ -216,6 +219,7 @@ def _fetch_summary_and_runtime_issues(
               and status in ('pending', 'processing', 'failed', 'dead_lettered')
         )
         select
+            (select jit from audit_session_settings) as audit_jit_setting,
             (select count(*) from app.bank_transactions where status <> 'deleted')::integer
                 as source_fact_count,
             (select count(*) from read_model.cost_statistics_rows)::integer

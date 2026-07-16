@@ -251,6 +251,8 @@ class CostStatisticsPageAuditTests(unittest.TestCase):
         )
         self.assertEqual(len(connection.fetch_one_calls), 1)
         summary_sql = connection.fetch_one_calls[0][0]
+        self.assertIn("set_config('jit', 'off', true)", summary_sql)
+        self.assertIn("(select jit from audit_session_settings)", summary_sql)
         self.assertIn("dirty_scope_rows as materialized", summary_sql)
         self.assertIn("outbox_backlog_rows as materialized", summary_sql)
         self.assertFalse(

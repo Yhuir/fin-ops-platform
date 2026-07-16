@@ -1,6 +1,15 @@
 # 成本统计 实施记录
 
 
+## 2026-07-17 - 生产 Cost Audit 事务级 JIT 隔离
+
+- 生产证据：统一 release `main-e0535b71d-cost-audit-final-20260717` 上，成本 Page Audit 正确性连续通过时总耗时约 `8.69–9.61s`，其中 `exact_set` 为 `6849.833–7242.085ms`；OA repair 触发下游竞争时同组一度达到 `21968.227ms`。当前数据仅约 989 条 canonical bank facts、306 条成本行和 271 个 linked relation groups，耗时与数据量不成比例。
+- 根因判断：`cost_exact_set_proofs` 是单条超大复合 SQL；现有 identity 索引化后仍有数秒级稳定基线，表现符合 PostgreSQL 对高 planner-cost 表达式树进行 JIT 编译的固定 CPU 成本，而不是缺少新的业务索引。先用可逆的 cost-only transaction setting 在生产复测该判断，不以猜测新增 migration/index。
+- 修复：在成本 Audit 已有 summary statement 中用 `set_config('jit', 'off', true)` 关闭当前 caller-owned read-only transaction 的 JIT；后续 exact-set/source-version/business-value/dependency proof 在同一 snapshot 中复用该设置。设置随事务结束自动恢复，不新增 SQL round trip，也不放宽 23-query budget、issue contract、snapshot 或 `<=5s` 门槛。
+- 隔离：不修改全局 PostgreSQL/连接池配置，不影响成本页面读 API、其他页面 Audit/read model、worker、schema、索引、缓存或业务数据；没有 fallback、feature flag、第二 executor 或新抽象。
+- 验证：12 个成本 Audit owner 单测通过；临时真实 PostgreSQL 实际应用 0001–0108 后，v9 parent/no-row-array 完整 Audit 通过，临时数据库已删除。生产连续 Page Audit、三页面 HTTP/混合负载与精确 SHA CI 仍须在本修复发布后复验，未达 `<=5s` 则本判断被证伪并继续基于新 timing 收口。
+
+
 ## 2026-07-16 - 生产 Cost Audit exact-set 索引化身份解析
 
 - 生产证据：统一 release 上连续两次只读 Page Audit 的 `exact_set` 分别为 `9538.201ms`、`9402.896ms`，而 queue/source-version/business-values/Workbench/Bank Detail 其余 proof 合计约 `2.1s`；正确性均为 pass，慢点被限定在成本私有 canonical exact-set SQL。
