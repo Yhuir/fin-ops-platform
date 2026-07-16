@@ -46,6 +46,7 @@
 - 最终性能：浏览器等价持久连接 isolated 500 次为 `500/500 200/fresh`、`p50=127.936ms / p95=217.272ms / p99=262.054ms / max=393.551ms`；同一生产进程包含 mixed 样本的 rolling server profile 为 `p95=207.831ms / p99=272.479ms`，DB `p95=85.465ms`、连接获取 `p95=0.183ms`、固定 7 queries，达到服务端 `250/500ms` 门槛。
 - simultaneous 隔离：三页每页一个并发请求、50 轮共 150 次全部 `200/fresh`；成本与关联台公网持久连接通过各自门槛。OA 公网客户端为 `p95=357.947ms / p99=379.540ms`，但同窗服务端仍在 `250/500ms` 内；差值来自同一探针同时传输关联台大 payload 的 WAN/client 竞争，不是 DB pool、query count 或跨页 read model 污染。不得为该探针差值扩大共享池或修改关联台合同。
 - 操作后 Audit：test-owned turnover relation 通过正式 API confirm，旧 2026-07-13 场景的成本 query 参数/关联台数组位置和隔离页瞬时 202 已漂移，runner 因 post-probe 失败跳过自动撤回；随后复用确认的幂等响应取得精确 relation ID，并通过正式 turnover withdraw API恢复 `inactive`，未写 SQL。恢复后两轮三页 Audit 均为 `pass/fresh/drained`、`issues=0`、`database_snapshot=true`；OA Audit 约 `0.419s` 与 `0.374s`。
+- 尚未关闭的代理门：公网首个 gzip 响应返回弱 ETag，但携带同一 `If-None-Match` 的持久连接请求仍返回完整 `200`、`99,958` bytes、约 `136ms`；live `/www/server/nginx/conf/nginx.conf` 的 `/fin-ops-api/` location 缺少模板已声明的 `proxy_set_header If-None-Match $http_if_none_match;`。应用弱比较已经正确，禁止添加应用 fallback。当前 `finops-deploy` sudo 白名单没有 Nginx test/reload 权限，因此 full `200` 的 `250/500ms` 门槛已通过，`304 p95<=30ms` 仍需 root/Nginx owner 同步一行配置、`nginx -t` 和 reload 后复验。
 
 ## 2026-07-17 - 生产 rows freshness Port 装配修复
 

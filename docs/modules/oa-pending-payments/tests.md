@@ -149,6 +149,7 @@
 - isolated 浏览器等价持久连接：500 次全部 `200/fresh`，`p50=127.936ms / p95=217.272ms / p99=262.054ms / max=393.551ms`；服务端 512-window 为 `p95=207.831ms / p99=272.479ms`。
 - 三页 simultaneous 50 轮：150/150 `200/fresh`；OA 公网 client `p95=357.947ms`，同窗服务端 `p95=207.831ms`，DB `p95=85.465ms`、connection acquire `p95=0.183ms`、query count 固定 7。服务端门槛与模块/数据库隔离通过；公网客户端差值按 WAN/同探针大 payload 竞争单列，不把它伪装成 OA SQL SLO，也不改共享资源修复。
 - 部署后基线与正式 confirm -> withdraw 恢复后两轮 Page Audit 均为 `pass/fresh/drained`、`issues=0`、`database_snapshot=true`。
+- 公网条件请求仍为完整 `200`、`99,958` bytes、约 `136ms`；live Nginx `/fin-ops-api/` 未同步仓库模板的显式 `If-None-Match` 转发。应用端 weak ETag contract 已通过测试且 full-response SLO 已通过，但 `304 p95<=30ms` 必须在 root owner 修正并 reload Nginx 后复测，当前不得标记该子门完成。
 
 ## 本地验证命令
 
