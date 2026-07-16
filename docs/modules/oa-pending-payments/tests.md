@@ -119,7 +119,7 @@
 - 200次canonical mutation：commit返回到fresh API为`p50 403.675ms / p95 544.178ms / p99 593.683ms / max 650.951ms`，错误率0；200/200次在worker收敛前返回202且rows为空。分段为queue claim `p95 1.567ms`、projector build+CAS publish `p95 435.400ms`、queue complete `p95 1.534ms`、最终fresh API `p95 131.274ms`。canonical commit本身另计`p95 292.530ms`；冷启动commit返回到fresh为`282.284ms`。
 - SQL `EXPLAIN (ANALYZE, BUFFERS)`：freshness gate execution `0.090ms`/10 shared hit blocks；aggregate+facets `5.755ms`/128 hits；bounded page 20行 `0.306ms`/128 hits；三者physical read和temp read/write均为0。fresh路径为1个gate加2个有界数据statement，符合查询预算，无新增索引证据。
 - 结论：本地服务端分段性能门通过。该harness没有真实浏览器500ms条件检测、React render、真实网络、真实worker进程调度、当前生产峰值或其它页面延迟对照，因此不能用`544.178ms`宣称生产commit-to-visible已通过；这些仍属于统一部署后硬门。
-- 可重复集成保护：`tests/test_oa_pending_payment_postgres_integration.py`在配置`FIN_OPS_TEST_DATABASE_URL`时验证canonical snapshot/date、outbox、202、专属projector、CAS、queue complete、source vector、fresh 200和304完整链路。
+- 可重复集成保护：`tests/test_oa_pending_payment_postgres_integration.py`在配置`FIN_OPS_TEST_DATABASE_URL`时验证 canonical snapshot/date、依赖 relation outbox/worker 先完成、OA outbox/worker 后完成、202、专属 projector、CAS、queue complete、source vector、fresh 200 和 304 完整链路。
 
 ### 本地验证结果
 
