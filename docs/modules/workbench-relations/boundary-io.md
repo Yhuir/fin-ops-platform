@@ -21,6 +21,7 @@ Release A 已移除旧 `read_model.workbench_candidate_matches`、`read_model.wo
 | current snapshot | relation repository | active + relevant historical facts，必须在 UoW transaction 中加载 |
 | withdraw command | owner API | active case identity、preview id、expected versions、reason |
 | read request | downstream facade | scope keys、row ids、`require_fresh`、source version contract |
+| OA canonical snapshot changed | OA integration transactional writer | 只允许在提交 OA canonical snapshot 的同一事务中按精确月份标记 `workbench_relation` dirty/outbox；该 target 必须先于同事务的 `oa_pending_payment` consumer target，使 OA worker 对旧 relation fail-closed。它不写 relation fact，也不改变本模块 owner。 |
 
 ## 输出 I/O
 

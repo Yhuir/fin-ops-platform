@@ -198,6 +198,52 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         self.assertEqual(row["bankTransaction"]["relationCount"], 4)
         self.assertEqual(row["bankTransaction"]["detailMode"], "list")
 
+    def test_month_shard_excludes_related_oa_members_from_other_months(self) -> None:
+        bank = self._bank("bank-cross-month-group", "100.00")
+        may_record = self._oa("oa-cross-month-may", "测试申请人", "100.00")
+        june_record = self._oa(
+            "oa-cross-month-june",
+            "测试申请人",
+            "200.00",
+            month="2026-06",
+        )
+        pair_service = WorkbenchPairRelationService()
+        self._relation(
+            pair_service,
+            "case-cross-month-group",
+            [may_record.id, june_record.id, bank.id],
+            matched=True,
+        )
+        service = self._service(
+            oa_records=[may_record, june_record],
+            transactions=[bank],
+            pair_service=pair_service,
+        )
+
+        rows = service._build_rows(  # noqa: SLF001 - protects exact month-shard membership.
+            month="2026-05",
+            context=service._query_context(),  # noqa: SLF001 - uses the production relation context.
+        )
+        june_rows = service._build_rows(  # noqa: SLF001 - compares the adjacent month shard.
+            month="2026-06",
+            context=service._query_context(),  # noqa: SLF001 - uses the production relation context.
+        )
+
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual(row["oa"]["amount"], "100.00")
+        self.assertEqual(row["oa"]["relationCount"], 1)
+        self.assertEqual(
+            [summary["oaId"] for summary in row["oa"]["summaries"]],
+            ["oa-cross-month-may"],
+        )
+        self.assertEqual(len(june_rows), 1)
+        self.assertEqual(
+            [summary["oaId"] for summary in june_rows[0]["oa"]["summaries"]],
+            ["oa-cross-month-june"],
+        )
+        self.assertNotEqual(row["id"], june_rows[0]["id"])
+
     def test_active_relation_group_returns_one_row_with_aggregated_totals(self) -> None:
         bank_group = self._bank("bank-group", "4450.00")
         invoice_group = self._invoice("inv-group", "SD-GROUP", "住宿供应商", "4450.00")
@@ -714,6 +760,7 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         applicant: str,
         amount: str,
         *,
+        month: str = "2026-05",
         project_name: str = "测试项目",
         apply_type: str = "报销",
         workflow_status: str | None = "completed",
@@ -723,7 +770,7 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
     ) -> OAApplicationRecord:
         return OAApplicationRecord(
             id=oa_id,
-            month="2026-05",
+            month=month,
             section="审批通过",
             case_id=None,
             applicant=applicant,

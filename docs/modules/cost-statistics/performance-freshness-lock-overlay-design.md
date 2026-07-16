@@ -455,6 +455,8 @@ cursor 必须绑定 scope、view、稳定排序键和 published source version�
 
 每组记录 `duration_ms`、row count、sample count 和 timeout。单组 statement timeout 不能代替总 SLO；整体 p95 必须 `<=5s`。
 
+2026-07-16 生产校准：第一版 cost-local 诊断以不新增 SQL 为硬约束，先在响应中输出四组 owner proof 与两个 dependency collector 的 `duration_ms` / `issue_count`。底层 statement timeout 继续由 caller-owned Audit snapshot 和现有错误 envelope fail-closed；在没有 SQL 自身返回扫描行数的情况下不伪造 row count。取得慢组证据后，若需要 SQL 级 row/plan 数据，只对该组走受控 `EXPLAIN (ANALYZE, BUFFERS)`，不把通用 profiling 框架扩散到其它页面。
+
 ### 8.3 当前 mismatch 的修复判定
 
 `cost_statistics_upstream_source_versions_mismatch` 只有在以下条件全部满足后才能关闭：

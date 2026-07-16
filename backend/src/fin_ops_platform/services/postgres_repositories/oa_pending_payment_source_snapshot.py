@@ -277,6 +277,7 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
                     transaction,
                     tenant_id=normalized_tenant_id,
                     scope_key=scope,
+                    include_workbench_relation=True,
                 )
 
             return OaPendingPaymentSourceSnapshotResult(
@@ -649,7 +650,42 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
             ),
         )
 
-    def _enqueue_refresh(self, transaction: Any, *, tenant_id: str, scope_key: str) -> None:
+    def _enqueue_refresh(
+        self,
+        transaction: Any,
+        *,
+        tenant_id: str,
+        scope_key: str,
+        include_workbench_relation: bool = False,
+    ) -> None:
+        if include_workbench_relation and scope_key != "all":
+            enqueue_many = getattr(
+                self._queue_repository,
+                "enqueue_read_model_refreshes_in_transaction",
+                None,
+            )
+            if not callable(enqueue_many):
+                raise RuntimeError(
+                    "queue_repository must expose enqueue_read_model_refreshes_in_transaction()."
+                )
+            enqueue_many(
+                transaction=transaction,
+                tenant_id=tenant_id,
+                priority="normal",
+                refreshes=[
+                    {
+                        "scope_type": "workbench_relation",
+                        "scope_key": scope_key,
+                        "reason": "oa_pending_payment_source_snapshot_changed",
+                    },
+                    {
+                        "scope_type": "oa_pending_payment",
+                        "scope_key": scope_key,
+                        "reason": "oa_pending_payment_source_snapshot_changed",
+                    },
+                ],
+            )
+            return
         enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh_in_transaction", None)
         if not callable(enqueue):
             raise RuntimeError("queue_repository must expose enqueue_read_model_refresh_in_transaction().")

@@ -96,6 +96,25 @@ class CostStatisticsPageAuditTests(unittest.TestCase):
         self.assertEqual(report["overall_status"], "pass")
         self.assertEqual(report["audit_status"], {"integrity": "pass", "freshness": "fresh", "queue": "drained"})
         self.assertEqual(
+            [timing["proof"] for timing in report["proof_timings"]],
+            [
+                "queue_readiness",
+                "exact_set",
+                "source_version_parent",
+                "business_values",
+                "dependency_workbench",
+                "dependency_bank_details",
+            ],
+        )
+        self.assertTrue(
+            all(
+                isinstance(timing["duration_ms"], float)
+                and timing["duration_ms"] >= 0
+                and timing["issue_count"] == 0
+                for timing in report["proof_timings"]
+            )
+        )
+        self.assertEqual(
             len(connection.fetch_one_calls) + len(connection.fetch_all_calls),
             COST_STATISTICS_AUDIT_QUERY_BUDGET,
         )

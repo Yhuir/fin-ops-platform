@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 import json
+from time import monotonic
 from typing import Any
 
 from fin_ops_platform.services.postgres_repositories.audit_report import (
@@ -71,18 +72,42 @@ def _audit_cost_statistics_snapshot(
     snapshot_consistency: str,
     database_snapshot: bool,
 ) -> dict[str, Any]:
+    proof_timings: list[dict[str, Any]] = []
+    started_at = monotonic()
     summary, issues = _fetch_summary_and_runtime_issues(
         connection,
         tenant_id=tenant_id,
         limit=limit + 1,
     )
-    for check in (
-        _exact_set_issues,
-        _read_model_source_version_mismatch_issues,
-        _key_display_field_issues,
-        _upstream_dependency_issues,
+    proof_timings.append(
+        _proof_timing(
+            "queue_readiness",
+            started_at=started_at,
+            issue_count=len(issues),
+        )
+    )
+    for proof, check in (
+        ("exact_set", _exact_set_issues),
+        ("source_version_parent", _read_model_source_version_mismatch_issues),
+        ("business_values", _key_display_field_issues),
     ):
-        issues.extend(check(connection, tenant_id, limit + 1))
+        started_at = monotonic()
+        proof_issues = check(connection, tenant_id, limit + 1)
+        issues.extend(proof_issues)
+        proof_timings.append(
+            _proof_timing(
+                proof,
+                started_at=started_at,
+                issue_count=len(proof_issues),
+            )
+        )
+    upstream_issues, upstream_timings = _upstream_dependency_issues(
+        connection,
+        tenant_id,
+        limit + 1,
+    )
+    issues.extend(upstream_issues)
+    proof_timings.extend(upstream_timings)
 
     evaluation = evaluate_audit_issues(issues, sample_limit=limit)
     summary.update(evaluation.summary)
@@ -95,6 +120,7 @@ def _audit_cost_statistics_snapshot(
         "audit_status": evaluation.audit_status,
         "summary": summary,
         "issues": evaluation.issue_samples,
+        "proof_timings": proof_timings,
         "audit_contract": {
             "source_tables": [
                 "app.bank_transactions",
@@ -1611,17 +1637,29 @@ def _upstream_dependency_issues(
     connection: Any,
     tenant_id: str,
     limit: int,
-) -> list[AuditIssue]:
+) -> tuple[list[AuditIssue], list[dict[str, Any]]]:
+    workbench_started_at = monotonic()
     workbench_issues, _summary = collect_workbench_page_integrity_issues(
         connection,
         tenant_id=tenant_id,
         limit=limit,
         include_summary=False,
     )
+    workbench_timing = _proof_timing(
+        "dependency_workbench",
+        started_at=workbench_started_at,
+        issue_count=len(workbench_issues),
+    )
+    bank_details_started_at = monotonic()
     bank_issues = collect_bank_detail_projection_integrity_issues(
         connection,
         tenant_id=tenant_id,
         limit=limit,
+    )
+    bank_details_timing = _proof_timing(
+        "dependency_bank_details",
+        started_at=bank_details_started_at,
+        issue_count=len(bank_issues),
     )
     mapped_workbench_issues: list[AuditIssue] = []
     for issue in workbench_issues:
@@ -1639,10 +1677,27 @@ def _upstream_dependency_issues(
                 )
             )
         mapped_workbench_issues.append(_dependency_issue(issue, dependency="workbench"))
-    return mapped_workbench_issues + [
-        _dependency_issue(issue, dependency="bank_details")
-        for issue in bank_issues
-    ]
+    return (
+        mapped_workbench_issues
+        + [
+            _dependency_issue(issue, dependency="bank_details")
+            for issue in bank_issues
+        ],
+        [workbench_timing, bank_details_timing],
+    )
+
+
+def _proof_timing(
+    proof: str,
+    *,
+    started_at: float,
+    issue_count: int,
+) -> dict[str, Any]:
+    return {
+        "proof": proof,
+        "duration_ms": round(max(0.0, (monotonic() - started_at) * 1000), 3),
+        "issue_count": max(0, int(issue_count)),
+    }
 
 
 def _dependency_issue(issue: AuditIssue, *, dependency: str) -> AuditIssue:

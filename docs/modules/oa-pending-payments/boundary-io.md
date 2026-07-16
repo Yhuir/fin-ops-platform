@@ -29,7 +29,7 @@
 | 输入 | Owner | 合同 |
 | --- | --- | --- |
 | 页面 rows query / `If-None-Match` | OA 页面/API | 只进入 `OaPendingPaymentReadModelService.conditional_rows`；认证 tenant、query contract、fresh gate 先于 `304` |
-| OA completed / in-progress / payment status | OA integration sync | 外部读取完整成功后，一次 PostgreSQL 事务提交 completed projection、admission、payment-status snapshot、watermark 和精确月份 outbox |
+| OA completed / in-progress / payment status | OA integration sync | 外部读取完整成功后，一次 PostgreSQL 事务提交 completed projection、admission、payment-status snapshot、watermark，并按精确月份先写 `workbench_relation` 依赖 dirty/outbox、再写 `oa_pending_payment` dirty/outbox；两者与 canonical snapshot 同事务 |
 | Workbench/pending relation | 对应 relation owner | read model projector 只读 PostgreSQL；owner version 和关系成员决定消费方 OA 月份 |
 | 银行/进项发票 canonical facts | core/invoice owner | 通过现有 relation/source-version 合同进入月份投影；本模块不直接写其事实或 read model |
 | `writeback-paid` / `link-bank-transactions` | command service | 复核权限、active relation、outflow、金额和 flow id；外部 MySQL 成功后必须幂等 reconcile PostgreSQL payment snapshot |
@@ -42,8 +42,8 @@
 | --- | --- | --- |
 | rows 聚合响应 | OA 页面 | `200` fresh payload + `ETag`；`304` 空 body；`202` 不含旧 rows且带精确 barrier targets |
 | `filterConfig` / `filterOptions` | OA 页面 | 随 rows 同响应 set-based 计算；不存在第二个 filter API |
-| read model publish | `read_model.oa_pending_payment_*` | 月份原子 replace、source vector、event source version 和 CAS；旧 event 不得清新 dirty |
-| dirty/outbox | runtime queue | canonical snapshot 同事务精确月份 enqueue；gateway normalize/validate/dedupe |
+| read model publish | `read_model.oa_pending_payment_*` | 月份原子 replace、source vector、event source version 和 CAS；月份 rows 只能含同月 OA 主行，relation group row identity 必须含 month scope，使 all-scope 的 row-id 去重不会吞掉跨月 relation 的月份成员；旧 event 不得清新 dirty |
+| dirty/outbox | runtime queue | canonical snapshot 同事务批量 enqueue 精确月份 `workbench_relation` 与 `oa_pending_payment`，依赖 target 排在 consumer target 前；后续 OA lifecycle fan-out 允许 dedupe 同一 pending target，不得产生第二条旧链 |
 | write result | 前端/operation barrier | 返回受影响 scope 和 freshness targets；重复命令幂等，部分外部成功时明确可重试 |
 | Audit status | OA 标题附件 | 中文状态与去重样本；内部 code 仅作次级诊断，外部 sync lag 不冒充 integrity pass |
 
@@ -72,7 +72,7 @@
 
 | 事实变化 | 支持写入口 | OA 版本/刷新责任 |
 | --- | --- | --- |
-| external completed OA、admission、payment status | `OAProjectionSyncService` + `PostgresOaPendingPaymentSourceSnapshotRepository.commit_authoritative_snapshot` | 同事务 completed projection + snapshot + watermark + 精确月份 dirty/outbox；外部读取失败整轮不提交 |
+| external completed OA、admission、payment status | `OAProjectionSyncService` + `PostgresOaPendingPaymentSourceSnapshotRepository.commit_authoritative_snapshot` | 同事务 completed projection + snapshot + watermark + 精确月份 `workbench_relation` 依赖 dirty/outbox + OA dirty/outbox；OA worker即使先 claim，也必须因依赖 dirty 而 fail-closed；外部读取失败整轮不提交 |
 | 页面 MySQL paid 写回 | `OaPendingPaymentCommandService` + `record_paid_statuses` | MySQL 幂等写后，同事务更新 PG status、月份 watermark、精确月份 dirty/outbox；PG 失败返回安全重试错误 |
 | in-progress pending relation create/cancel/promote | `PostgresOaPendingPaymentRelationRepository` / promotion service | 同事务增加 `oa_pending_payment_relation:<tenant>:<month>` 版本并 enqueue 消费方月份 |
 | completed Workbench relation | Workbench relation owner | owner source version/dirty fan-out；OA projector读取同月 fresh Workbench relation proof |

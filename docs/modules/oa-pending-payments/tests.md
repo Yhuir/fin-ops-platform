@@ -20,6 +20,7 @@
 
 - `paymentStatus` 仅 `paid` / `unpaid`；候选、非 outflow、金额差异不能绕过写回校验。
 - completed/in-progress 主行身份、flow id 解析、duplicate/empty/invalid input。
+- 精确月份 shard 即使命中跨月 relation，也只聚合该月份 OA 主行；其它月份成员不能污染当前 shard。
 - writeback relation、金额、方向、幂等和 already-paid 重试。
 - filters、sort、paging、view mode contract。
 
@@ -30,6 +31,7 @@
 覆盖：
 
 - OA sync 一次 PG 事务提交 completed projection、admission、payment status、watermark、outbox。
+- OA canonical snapshot 变化时，同一事务批量写入 `workbench_relation:<month>` 与 `oa_pending_payment:<month>`，且依赖 target 排在 consumer target 前；queue 失败整体回滚。纯 payment-status writeback 不额外污染 relation target。
 - snapshot replace/delete、空集合、非法 status、queue 失败全回滚。
 - 页面 paid writeback 增量更新 PG snapshot/watermark/精确月份 outbox；already-paid 修复；缺初始化 watermark fail fast。
 - external MySQL 已成功而 PG 失败时返回可重试错误；重复命令不丢修复机会。

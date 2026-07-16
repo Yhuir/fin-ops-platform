@@ -413,7 +413,13 @@ class OaPendingPaymentQueryService:
                 relation_id = _relation_row_identity(relation)
                 if not relation_id or relation_id in emitted_relation_ids:
                     continue
-                relation_records = self._relation_oa_records(relation, oa_by_id, context=context, view_mode=view_mode)
+                relation_records = self._relation_oa_records(
+                    relation,
+                    oa_by_id,
+                    context=context,
+                    view_mode=view_mode,
+                    month=month,
+                )
                 if not relation_records or record.id not in {item.id for item in relation_records}:
                     continue
                 row = self._relation_group_row(
@@ -422,6 +428,7 @@ class OaPendingPaymentQueryService:
                     bank_by_id=bank_by_id,
                     invoices_by_id=invoices_by_id,
                     payment_statuses_by_flow_id=payment_statuses_by_flow_id,
+                    scope_key=month,
                 )
                 rows.append(row)
                 emitted_relation_ids.add(relation_id)
@@ -483,6 +490,7 @@ class OaPendingPaymentQueryService:
         bank_by_id: dict[str, BankTransaction],
         invoices_by_id: dict[str, Invoice],
         payment_statuses_by_flow_id: dict[str, Any] | None = None,
+        scope_key: str | None = None,
     ) -> dict[str, Any]:
         oa_payload = self._oa_group_payload(records, relation)
         oa_amount = _parse_decimal(oa_payload.get("amount")) or ZERO
@@ -491,7 +499,10 @@ class OaPendingPaymentQueryService:
         invoice_payload = self._invoice_relation_payload(None, relations=relations, invoices_by_id=invoices_by_id, oa_amount=oa_amount)
         payment_status = self._payment_status_for_amount(oa_payload.get("amount"), bank_payload)
         row = {
-            "id": _relation_row_id(_relation_row_identity(relation)),
+            "id": _relation_row_id(
+                _relation_row_identity(relation),
+                scope_key=scope_key,
+            ),
             "oa": oa_payload,
             "paymentStatus": payment_status,
             "oaPaymentWriteback": self._oa_payment_writeback_status(
@@ -513,6 +524,7 @@ class OaPendingPaymentQueryService:
         *,
         context: DistributedInvoiceRelationContext,
         view_mode: str,
+        month: str | None,
     ) -> list[OAApplicationRecord]:
         oa_ids: list[str] = []
         for row_id, row_type in DistributedInvoiceRelationContext.typed_relation_rows(relation):
@@ -522,11 +534,17 @@ class OaPendingPaymentQueryService:
                 oa_ids.append(row_id)
         relation_records_by_id = dict(oa_by_id)
         relation_records_by_id.update(context.oa_records_by_id(oa_ids))
+        normalized_month = str(month or "").strip()
         return [
             record
             for oa_id in oa_ids
             if (record := relation_records_by_id.get(oa_id)) is not None
             and OaPendingPaymentQueryService._record_matches_view_mode(record, view_mode)
+            and (
+                not normalized_month
+                or normalized_month == "all"
+                or str(record.month or "").startswith(normalized_month[:7])
+            )
         ]
 
     @staticmethod
@@ -1154,8 +1172,14 @@ def _relation_row_identity(relation: dict[str, Any]) -> str:
     return "|".join(typed_rows)
 
 
-def _relation_row_id(identity: str) -> str:
-    return "oa_pending_payment_relation_" + sha1(str(identity).encode("utf-8")).hexdigest()[:16]
+def _relation_row_id(identity: str, *, scope_key: str | None = None) -> str:
+    normalized_scope_key = str(scope_key or "").strip()
+    scoped_identity = (
+        f"{identity}:{normalized_scope_key[:7]}"
+        if normalized_scope_key and normalized_scope_key != "all"
+        else str(identity)
+    )
+    return "oa_pending_payment_relation_" + sha1(scoped_identity.encode("utf-8")).hexdigest()[:16]
 
 
 def _parse_decimal(value: Any) -> Decimal | None:

@@ -31,10 +31,18 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
         self.assertEqual(result.admission_count, 1)
         self.assertTrue(connection.committed)
         self.assertFalse(connection.rolled_back)
-        self.assertEqual(len(queue.calls), 1)
+        self.assertEqual(len(queue.calls), 2)
         self.assertIs(queue.calls[0]["transaction"], connection.transaction_handle)
-        self.assertEqual(queue.calls[0]["scope_type"], "oa_pending_payment")
-        self.assertEqual(queue.calls[0]["scope_key"], "2026-06")
+        self.assertEqual(
+            [(call["scope_type"], call["scope_key"]) for call in queue.calls],
+            [
+                ("workbench_relation", "2026-06"),
+                ("oa_pending_payment", "2026-06"),
+            ],
+        )
+        self.assertTrue(
+            all(call["transaction"] is connection.transaction_handle for call in queue.calls)
+        )
         self.assertEqual(pending_relations.calls[0]["admitted_oa_row_ids"], ["oa-pay-row-1"])
         self.assertIs(pending_relations.calls[0]["transaction"], connection.transaction_handle)
         self.assertEqual(len(pending_relations.ensure_calls), 1)
@@ -83,7 +91,13 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
         self.assertEqual(result.affected_scope_keys, ("2026-05",))
         self.assertEqual(result.payment_status_count, 0)
         self.assertEqual(result.admission_count, 0)
-        self.assertEqual([call["scope_key"] for call in queue.calls], ["2026-05"])
+        self.assertEqual(
+            [(call["scope_type"], call["scope_key"]) for call in queue.calls],
+            [
+                ("workbench_relation", "2026-05"),
+                ("oa_pending_payment", "2026-05"),
+            ],
+        )
 
     def test_queue_failure_rolls_back_snapshot_watermark_and_outbox_transaction(self) -> None:
         connection = FakeConnection()
@@ -333,6 +347,22 @@ class FakeTransactionalQueue:
 
     def enqueue_read_model_refresh_in_transaction(self, **kwargs: object) -> None:
         self.calls.append(dict(kwargs))
+        if self.error is not None:
+            raise self.error
+
+    def enqueue_read_model_refreshes_in_transaction(self, **kwargs: object) -> None:
+        transaction = kwargs.get("transaction")
+        tenant_id = kwargs.get("tenant_id")
+        priority = kwargs.get("priority")
+        for refresh in list(kwargs.get("refreshes") or []):
+            self.calls.append(
+                {
+                    "transaction": transaction,
+                    "tenant_id": tenant_id,
+                    "priority": priority,
+                    **dict(refresh),
+                }
+            )
         if self.error is not None:
             raise self.error
 
