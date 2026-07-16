@@ -720,7 +720,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
         scope_key = _invoice_relation_scope_key(month)
         page_number = max(int_value(page, 1), 1)
         page_limit = min(max(int_value(page_size, 50), 1), 200)
-        rows_source_sql = self._oa_pending_payment_rows_source_sql(scope_key)
+        rows_source_sql = "read_model.oa_pending_payment_rows"
         base_where: list[str] = []
         base_params: list[Any] = []
         view_mode_clause = _oa_pending_payment_view_mode_clause(view_mode)
@@ -963,6 +963,16 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                 relation_scope.source_versions as relation_source_versions,
                 latest_dirty.status as dirty_status,
                 latest_dirty.source_version as dirty_source_version,
+                case
+                    when requested.scope_key = 'all' then exists (
+                        select 1
+                        from read_model.oa_pending_payment_rows duplicate_row
+                        group by duplicate_row.row_id
+                        having count(*) > 1
+                        limit 1
+                    )
+                    else false
+                end as duplicate_row_identity,
                 exists (
                     select 1
                     from job.outbox_events outbox
@@ -972,6 +982,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                       and outbox.status in ('pending', 'processing', 'failed', 'dead_lettered')
                 ) as outbox_blocking
             from target_scopes target
+            cross join requested
             left join read_model.oa_pending_payment_scopes scope
               on scope.scope_key = target.scope_key
             left join app.oa_sync_watermarks source_watermark
@@ -1007,6 +1018,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
         state_rows = [dict(row) for row in rows if isinstance(row, dict)]
         month_rows = [row for row in state_rows if MONTH_SCOPE_RE.match(text(row.get("scope_key")) or "")]
         control_rows = [row for row in state_rows if text(row.get("scope_key")) == "all"]
+        duplicate_row_identity = any(bool(row.get("duplicate_row_identity")) for row in state_rows)
         blocking_scope_keys: set[str] = set()
         stale_reasons: list[str] = []
         actual_versions_by_scope: dict[str, dict[str, Any]] = {}
@@ -1071,9 +1083,16 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                     "actual_source_versions": actual_versions,
                     "dirty_status": text(row.get("dirty_status")),
                     "dirty_source_version": int_value(row.get("dirty_source_version"), -1),
+                    "duplicate_row_identity": bool(row.get("duplicate_row_identity")),
                     "outbox_blocking": bool(row.get("outbox_blocking")),
                 }
             )
+
+        if duplicate_row_identity:
+            blocking_scope_keys.update(row["scope_key"] for row in month_rows if text(row.get("scope_key")))
+            if not month_rows:
+                blocking_scope_keys.add(normalized_scope_key)
+            stale_reasons.append("all:duplicate_row_identity")
 
         control_blocking = any(
             text(row.get("dirty_status")) in {"pending", "processing", "failed"} or bool(row.get("outbox_blocking"))
@@ -1129,18 +1148,6 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
             "source_versions_by_scope": actual_versions_by_scope,
             "expected_source_versions_by_scope": expected_versions_by_scope,
         }
-
-    @staticmethod
-    def _oa_pending_payment_rows_source_sql(scope_key: str) -> str:
-        if scope_key != "all":
-            return "read_model.oa_pending_payment_rows"
-        return """
-            (
-                select distinct on (row_id) *
-                from read_model.oa_pending_payment_rows
-                order by row_id, generated_at desc, scope_key desc
-            ) deduped_oa_pending_payment_rows
-        """
 
     def save_oa_pending_payment_rows(
         self,

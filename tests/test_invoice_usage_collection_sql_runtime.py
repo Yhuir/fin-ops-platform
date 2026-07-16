@@ -551,18 +551,8 @@ class InvoiceReadModelConnection:
 
     def _oa_rows_for_sql(self, normalized_sql: str, *, apply_view_mode: bool = True) -> list[dict]:
         rows = list(self.oa_rows)
-        if "deduped_oa_pending_payment_rows" not in normalized_sql:
-            deduped_rows = rows
-        else:
-            rows_by_id: dict[str, dict] = {}
-            for row in rows:
-                row_id = self._oa_row_id(row)
-                if row_id:
-                    rows_by_id[row_id] = row
-            deduped_rows = list(rows_by_id.values())
         if not apply_view_mode:
-            return deduped_rows
-        rows = deduped_rows
+            return rows
         if "completed_count" in normalized_sql or "in_progress_count" in normalized_sql:
             return rows
         if "oa_workflow_status = 'in_progress'" in normalized_sql:
@@ -573,11 +563,6 @@ class InvoiceReadModelConnection:
         ):
             return [row for row in rows if self._oa_workflow_status(row) != "in_progress"]
         return rows
-
-    @staticmethod
-    def _oa_row_id(row: dict) -> str:
-        payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
-        return str(row.get("row_id") or payload.get("id") or "").strip()
 
     @staticmethod
     def _oa_row_decimal(row: dict, section: str, key: str) -> Decimal:
@@ -1570,7 +1555,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         executed_sql = " ".join(sql for sql, _params in connection.fetch_all_calls + connection.fetch_one_calls)
         self.assertNotIn("from read_model.oa_pending_payment_scopes", executed_sql)
 
-    def test_oa_repository_all_scope_dedupes_cross_scope_relation_rows(self) -> None:
+    def test_oa_repository_all_scope_does_not_hide_cross_scope_duplicate_rows(self) -> None:
         source_versions = oa_pending_payment_source_versions()
         duplicate_payload = {
             "id": "oa_pending_payment_relation_cross_month",
@@ -1616,14 +1601,18 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
 
         payload = repository.list_oa_pending_payment_rows(month=None, page=1, page_size=50, view_mode="completed")
 
-        self.assertEqual(payload["pagination"]["total"], 1)
-        self.assertEqual(payload["summary"]["rowCount"], 1)
-        self.assertEqual(payload["summary"]["oaAmountTotal"], "270000.00")
-        self.assertEqual(payload["summary"]["bankPaidTotal"], "270000.00")
+        self.assertEqual(payload["pagination"]["total"], 2)
+        self.assertEqual(payload["summary"]["rowCount"], 2)
+        self.assertEqual(payload["summary"]["oaAmountTotal"], "540000.00")
+        self.assertEqual(payload["summary"]["bankPaidTotal"], "540000.00")
         self.assertEqual(payload["summary"]["viewCounts"], {"completed": 3, "in_progress": 0})
-        self.assertEqual([row["id"] for row in payload["rows"]], ["oa_pending_payment_relation_cross_month"])
+        self.assertEqual(
+            [row["id"] for row in payload["rows"]],
+            ["oa_pending_payment_relation_cross_month", "oa_pending_payment_relation_cross_month"],
+        )
         executed_sql = " ".join(sql for sql, _params in connection.fetch_all_calls + connection.fetch_one_calls)
-        self.assertIn("deduped_oa_pending_payment_rows", executed_sql)
+        self.assertNotIn("deduped_oa_pending_payment_rows", executed_sql)
+        self.assertNotIn("distinct on (row_id)", executed_sql.lower())
 
     def test_oa_repository_save_persists_source_versions_and_bank_total(self) -> None:
         connection = WriteRecordingConnection()

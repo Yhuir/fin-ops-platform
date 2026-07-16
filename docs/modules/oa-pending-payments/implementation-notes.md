@@ -15,6 +15,13 @@
 - `oa_pending_payment_query_state` 的 `all` target inventory 原先把该 event type 的全部历史 outbox scope（包括 `done`）做 UNION。修复后只保留当前 blocking queue 状态；canonical watermark 与现存 projection scope 仍完整覆盖 fresh inventory，pending/processing/failed/dead-lettered 继续 fail closed。
 - 该修复不新增表、索引、cache、worker 或 API，也不改变其它页面 query state；已完成历史仍保留在 durable queue 供审计/retention owner 使用，只是不再污染 OA 页面热路径。
 
+### 生产三次根因：`all` rows 仍执行隐藏跨月去重
+
+- freshness inventory 修复发布后，100 次公网 fresh 首屏为 `p50=172.319ms / p95=281.562ms / p99=332.722ms`；同一时段月分片 40 次为 `p95=148.708–157.301ms`，`all` 40 次为 `p95=264.499ms`，瓶颈限定在 OA 私有 `all` 读取。生产 7 个月份分片行数之和为 236，`all` 也是 236，当前没有跨 scope 重复。
+- 旧链是 `all` rows 每次执行 `DISTINCT ON(row_id)`，用排序静默吞掉跨月重复；但 relation row identity 已包含月份，OA 主 row identity 稳定，重复应当作为 projection 错误暴露，而不是页面兼容行为。
+- 修复删除 `deduped_oa_pending_payment_rows` 和 helper；fresh rows 直接读月份 projection。`oa_pending_payment_query_state` 在同一 set-based freshness statement 中检查跨 scope 重复并返回 `202`，Page Audit 改为按全局 `row_id` 报告涉及 scopes。没有新增缓存、索引、endpoint、read model、worker 或兼容分支。
+- 隔离性：只改变 OA repository/freshness/Audit owner；成本统计、关联台、共享 read model、全局 PostgreSQL 配置和其它页面 response shape 不变。发布后仍以 100 次 fresh HTTP、三页混合负载和写后连续 Audit 作为最终门禁。
+
 ## 2026-07-17 - 生产 rows freshness Port 装配修复
 
 - 生产证据：OA Page Audit 已返回 `pass/fresh/drained`，但相同发布版本的 `/api/oa-pending-payments/rows` 持续返回 `202/refreshing`，且 payload 没有 stale reasons；因此不是 source version、dirty/outbox 或 worker 未收敛。

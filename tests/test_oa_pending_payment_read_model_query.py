@@ -79,7 +79,30 @@ class OaPendingPaymentReadModelQueryTests(unittest.TestCase):
             "outbox.status in ('pending', 'processing', 'failed', 'dead_lettered')",
             target_inventory_sql,
         )
+        self.assertIn("group by duplicate_row.row_id", state_sql)
+        self.assertIn("having count(*) > 1", state_sql)
         self.assertIn("'dead_lettered'", state_sql)
+
+    def test_all_scope_query_state_fails_closed_on_cross_scope_duplicate_row_identity(self) -> None:
+        base_versions = {"schema": 1}
+        duplicate_row = _fresh_state_row(
+            scope_key="2026-05",
+            base_versions=base_versions,
+            snapshot_version=3,
+            event_source_version=7,
+        )
+        duplicate_row["duplicate_row_identity"] = True
+        repository = PostgresInvoiceUsageCollectionReadModelRepository(QueryStateConnection([duplicate_row]))
+
+        payload = repository.oa_pending_payment_query_state(
+            scope_key="all",
+            tenant_id="default",
+            base_source_versions=base_versions,
+        )
+
+        self.assertEqual(payload["status"], "refreshing")
+        self.assertEqual(payload["blocking_scope_keys"], ["2026-05"])
+        self.assertIn("all:duplicate_row_identity", payload["stale_reasons"])
 
     def test_all_scope_query_state_returns_only_versions_common_to_every_month(self) -> None:
         base_versions = {"schema": 1, "projection": "oa-v3"}

@@ -810,6 +810,14 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertIn("relation_scope.source_versions as relation_source_versions", fresh_gate_sql)
         self.assertIn("dead_lettered", fresh_gate_sql)
         self.assertNotIn("select relation_scope.scope_key", target_inventory_sql)
+        duplicate_sql, _params = next(
+            (sql, params)
+            for sql, params in connection.fetch_all_calls
+            if "duplicate_read_model_identity" in sql
+        )
+        self.assertIn("group by row_id", duplicate_sql)
+        self.assertIn("array_agg(distinct scope_key order by scope_key)", duplicate_sql)
+        self.assertNotIn("group by scope_key, row_id", duplicate_sql)
         base_versions = page_business_audit.oa_pending_payment_base_source_versions()
         self.assertIn("oa_pending_payment_postgres_projector_version", base_versions)
         self.assertEqual(report["label"], "OA 待付款核对")

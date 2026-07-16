@@ -1124,11 +1124,15 @@ def _duplicate_read_model_identity_issues(
     elif domain == "oa_pending_payments":
         sql = """
         /* check: duplicate_read_model_identity */
-        select scope_key || ':' || row_id as subject_id, scope_key, count(*)::integer as row_count
+        select
+            row_id as subject_id,
+            min(scope_key) as scope_key,
+            count(*)::integer as row_count,
+            array_agg(distinct scope_key order by scope_key) as scope_keys
         from read_model.oa_pending_payment_rows
-        group by scope_key, row_id
+        group by row_id
         having count(*) > 1
-        order by scope_key, row_id
+        order by row_id
         limit %s
         """
         params = (limit,)
