@@ -44,7 +44,10 @@ class OaPendingPaymentReadModelService:
         queue_repository: Any | None = None,
         source_versions_provider: SourceVersionsProvider | None = None,
     ) -> None:
-        self._repository = OaPendingPaymentReadModelRepositoryPort(repository) if repository is not None else None
+        if repository is None or isinstance(repository, OaPendingPaymentReadModelRepositoryPort):
+            self._repository = repository
+        else:
+            self._repository = OaPendingPaymentReadModelRepositoryPort(repository)
         self._queue_repository = queue_repository
         self._source_versions_provider = source_versions_provider
 

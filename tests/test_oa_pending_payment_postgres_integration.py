@@ -73,7 +73,7 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
             },
         )
         service = OaPendingPaymentReadModelService(
-            repository=self.read_repository,
+            repository=OaPendingPaymentReadModelRepositoryPort(self.read_repository),
             queue_repository=self.queue,
             source_versions_provider=oa_pending_payment_base_source_versions,
         )

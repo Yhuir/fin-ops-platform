@@ -1,5 +1,13 @@
 # OA待付款核对 实施记录
 
+## 2026-07-17 - 生产 rows freshness Port 装配修复
+
+- 生产证据：OA Page Audit 已返回 `pass/fresh/drained`，但相同发布版本的 `/api/oa-pending-payments/rows` 持续返回 `202/refreshing`，且 payload 没有 stale reasons；因此不是 source version、dirty/outbox 或 worker 未收敛。
+- 根因：`PostgresStateStore` 已按模块边界提供 `OaPendingPaymentReadModelRepositoryPort`，`OaPendingPaymentReadModelService` 构造时又把它包装为第二层同类型 Port。外层无法发现内层底层 repository 的 snapshot/freshness 方法，固定进入 `api_freshness_proof_unavailable` fail-closed 分支。
+- 修复：service 构造器保留已经是目标窄 Port 的依赖，只对原始 repository 做一次包装；没有增加 fallback、双读、缓存、兼容 API 或新抽象。
+- 隔离性：只改变 OA rows query service 的依赖归一化；API shape、read model、worker、queue、scope、其它页面 repository 和共享 Page Audit 均不变。
+- 测试责任：新增 API/service 回归，使用生产相同的预包装 Port 装配并锁定 freshness gate 与 rows query 各执行一次、结果为 `200/fresh`。
+
 
 ## 2026-07-16 - 生产 all fan-out 补齐 empty month scope inventory
 

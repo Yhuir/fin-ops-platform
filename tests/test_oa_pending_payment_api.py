@@ -251,6 +251,25 @@ class FakeRelationCommandService:
 
 
 class OaPendingPaymentApiTests(unittest.TestCase):
+    def test_rows_service_preserves_pre_wrapped_repository_port(self) -> None:
+        repository = ConditionalOaRowsRepository()
+        service = OaPendingPaymentReadModelService(
+            repository=OaPendingPaymentReadModelRepositoryPort(repository),
+            queue_repository=QueueRecorder(),
+            source_versions_provider=oa_pending_payment_source_versions,
+        )
+
+        result = service.conditional_rows(
+            {"page": ["1"], "page_size": ["20"]},
+            tenant_id="default",
+            if_none_match=None,
+        )
+
+        self.assertEqual(result.status, HTTPStatus.OK)
+        self.assertEqual(result.payload["read_model_status"], "fresh")
+        self.assertEqual(repository.state_calls, 1)
+        self.assertEqual(repository.data_calls, 1)
+
     def test_rows_conditional_get_uses_freshness_fast_path_and_private_etag(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
