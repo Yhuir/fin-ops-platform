@@ -43,6 +43,7 @@
 | rows 聚合响应 | OA 页面 | `200` fresh payload + `ETag`；`304` 空 body；`202` 不含旧 rows且带精确 barrier targets。列表 DTO 只返回前端声明字段，不返回 read-model 内部 `searchText` 或逐行 `sourceVersions`；版本证明只在顶层返回，详情继续走现有惰性 detail API。freshness gate 后在同一 repeatable-read snapshot 内用一个有界 data statement 返回 summary/facets + 当前页，禁止恢复第二次 page roundtrip |
 | `filterConfig` / `filterOptions` | OA 页面 | 随 rows 同响应 set-based 计算；summary/facet CTE 只 materialize 聚合需要的 typed columns，不读取 `payload/raw_payload`；page CTE 只读取 bounded payload 并在 SQL 内移除内部字段；不存在第二个 filter API |
 | read model publish | `read_model.oa_pending_payment_*` | 月份原子 replace、source vector、event source version 和 CAS；月份 rows 只能含同月 OA 主行，relation group row identity 必须含 month scope。`all` freshness gate 与 Page Audit 都把跨 scope 重复 `row_id` 作为阻断错误，列表不得用 `DISTINCT ON` 或 Python 去重隐藏错误；旧 event 不得清新 dirty |
+| latest dirty index | `job.read_model_dirty_scopes` | 只索引 `scope_type='oa_pending_payment'`，键顺序与 gate 的 `(tenant, scope type, scope, source version DESC, updated_at DESC, id DESC)` 完全一致；不得扩大 predicate 让其它页面承担该索引写入或存储成本 |
 | dirty/outbox | runtime queue | canonical snapshot 同事务批量 enqueue 精确月份 `workbench_relation` 与 `oa_pending_payment`，依赖 target 排在 consumer target 前；后续 OA lifecycle fan-out 允许 dedupe 同一 pending target，不得产生第二条旧链 |
 | write result | 前端/operation barrier | 返回受影响 scope 和 freshness targets；重复命令幂等，部分外部成功时明确可重试 |
 | Audit status | OA 标题附件 | 中文状态与去重样本；内部 code 仅作次级诊断，外部 sync lag 不冒充 integrity pass |

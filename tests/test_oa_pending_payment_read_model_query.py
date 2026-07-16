@@ -82,6 +82,10 @@ class OaPendingPaymentReadModelQueryTests(unittest.TestCase):
         self.assertIn("group by duplicate_row.row_id", state_sql)
         self.assertIn("having count(*) > 1", state_sql)
         self.assertIn("'dead_lettered'", state_sql)
+        self.assertIn(
+            "order by dirty.source_version desc, dirty.updated_at desc, dirty.id desc",
+            state_sql,
+        )
 
     def test_all_scope_query_state_fails_closed_on_cross_scope_duplicate_row_identity(self) -> None:
         base_versions = {"schema": 1}

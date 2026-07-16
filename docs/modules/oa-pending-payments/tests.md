@@ -125,6 +125,7 @@
 - SQL `EXPLAIN (ANALYZE, BUFFERS)`：freshness gate execution `0.090ms`/10 shared hit blocks；aggregate+facets逻辑段 `5.755ms`/128 hits；bounded page 20行逻辑段 `0.306ms`/128 hits；三者physical read和temp read/write均为0。2026-07-17 根据生产 profile 把后两段合并为同一个有界 data statement，fresh路径现在是1个gate加1个data statement；无新增索引证据。
 - 结论：本地服务端分段性能门通过。该harness没有真实浏览器500ms条件检测、React render、真实网络、真实worker进程调度、当前生产峰值或其它页面延迟对照，因此不能用`544.178ms`宣称生产commit-to-visible已通过；这些仍属于统一部署后硬门。
 - 可重复集成保护：`tests/test_oa_pending_payment_postgres_integration.py`在配置`FIN_OPS_TEST_DATABASE_URL`时验证 canonical snapshot/date、依赖 relation outbox/worker 先完成、OA outbox/worker 后完成、202、专属 projector、CAS、queue complete、source vector、fresh 200 和 304 完整链路。
+- 生产 latest-dirty 长尾保护：migration contract 锁定 OA-only partial index 的 predicate 与 `(tenant_id, scope_type, scope_key, source_version DESC, updated_at DESC, id DESC)` 顺序；query contract 锁定 freshness gate 使用同一 latest-version order，避免索引与业务语义漂移。
 
 ### 本地验证结果
 

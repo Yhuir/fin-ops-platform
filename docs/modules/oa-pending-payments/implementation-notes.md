@@ -29,6 +29,13 @@
 - 不引入 cache、索引、cursor、第二 API、worker、schema 或共享抽象；只减少 OA repository 的一次 client/server roundtrip。真实 PostgreSQL canonical commit -> dependency worker -> OA worker -> fresh rows/ETag 集成测试通过，并由 SQL contract test 锁定单次有界 data statement。
 - 最终门禁：精确 SHA 发布后重新采集 OA 100 次 isolated fresh HTTP；只有 `p95 <= 250ms`、`p99 <= 500ms`，且三页 mixed load、操作后连续 Audit 仍通过，才关闭生产性能任务。
 
+### 生产五次根因：freshness gate latest dirty lookup 缺少同形索引
+
+- 单 data statement 发布后，isolated 100 次为 `p50=160.674ms / p95=255.847ms / p99=336.651ms`；扩大到 500 次为 `p50=162.569ms / p95=290.028ms / p99=359.906ms`，500/500 均为 `200/fresh`，证明正确性稳定但 `p95` 仍未达标。
+- 进程 rolling 512 样本为服务端 `p95=214.470ms`、数据库 `p95=110.519ms`、固定 7 queries；internal `304` 与 full `200` 对照进一步证明 freshness gate 占主要长尾。gate 对每个月份按 `source_version DESC, updated_at DESC, id DESC` 读取 latest dirty state，但现有通用索引只以 `updated_at DESC` 结尾。
+- 修复只新增 `scope_type='oa_pending_payment'` 的 partial index，使索引顺序与 fail-closed latest-version 语义完全一致；不修改 SQL 判断、source vector、API、read model、cache、worker 或其它 scope_type 的索引行。该模式与成本统计已上线的 scope-private latest-version index 一致。
+- 该索引发布后仍必须重新跑 isolated 500 次、三页 mixed load、Page Audit 和安全可逆操作后 Audit；不能仅凭索引存在宣称性能闭环。
+
 ## 2026-07-17 - 生产 rows freshness Port 装配修复
 
 - 生产证据：OA Page Audit 已返回 `pass/fresh/drained`，但相同发布版本的 `/api/oa-pending-payments/rows` 持续返回 `202/refreshing`，且 payload 没有 stale reasons；因此不是 source version、dirty/outbox 或 worker 未收敛。

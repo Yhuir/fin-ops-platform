@@ -228,6 +228,7 @@ detail endpoints 继续按用户打开 drawer 时惰性读取，不合并进首�
 - rows、sort、filter 和 facet aggregation 优先复用现有 native projection columns；禁止在每次请求中对全量 payload 做无界 `jsonb_array_elements`。
 - `all` 查询直接组合月份 shards；跨 scope 重复 `row_id` 由 freshness gate 与 Page Audit fail closed，列表禁止用 `DISTINCT ON` 或 Python 去重静默隐藏 projection 错误。
 - 只有执行计划证明需要时，才添加 OA read model 私有索引；禁止为该页面修改共享表或其它页面的索引合同。
+- freshness gate 的生产 500 样本、server/DB 分段和 internal `304/200` 对照若共同证明 latest dirty lookup 是主长尾，可在共享 dirty 表上增加仅覆盖 `scope_type='oa_pending_payment'` 的 partial index；键顺序必须与 latest source-version 查询一致，predicate 不得覆盖其它页面。
 - 继续保留现有 page/offset pagination；当前数据量和功能不证明需要 cursor pagination，不为此增加第二套合同。
 - 不新增 Redis payload cache。当前 fresh 请求已经接近目标，先消除重复扫描和外部 I/O；缓存只在 DB-only 路径仍不能达标且有生产证据时再评估，并且仍必须位于 fresh gate 之后。
 

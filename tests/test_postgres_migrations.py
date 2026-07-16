@@ -122,6 +122,7 @@ EXPECTED_MIGRATIONS = [
     "0106_oa_pending_payment_native_oa_ids.sql",
     "0107_cost_statistics_structured_bank_flow_rows.sql",
     "0108_cost_statistics_bank_flow_runtime_grant.sql",
+    "0109_oa_pending_payment_freshness_gate_hot_path.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -284,7 +285,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 109)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 110)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -1358,6 +1359,20 @@ class PostgresMigrationSqlTests(unittest.TestCase):
                 f"read_model.cost_statistics_bank_flow_rows to {role}",
                 normalized_sql,
             )
+
+    def test_oa_pending_payment_freshness_gate_has_scope_private_latest_version_index(self) -> None:
+        sql = strip_sql_comments(
+            (MIGRATIONS_DIR / "0109_oa_pending_payment_freshness_gate_hot_path.sql").read_text(encoding="utf-8")
+        ).lower()
+        normalized_sql = " ".join(sql.split())
+
+        self.assertIn("read_model_dirty_scopes_oa_latest_version_idx", normalized_sql)
+        self.assertIn(
+            "tenant_id, scope_type, scope_key, source_version desc, updated_at desc, id desc",
+            normalized_sql,
+        )
+        self.assertIn("where scope_type = 'oa_pending_payment'", normalized_sql)
+        self.assertNotIn("where scope_type in", normalized_sql)
 
     def test_oa_pending_payment_source_snapshot_is_tenant_scoped_and_runtime_writable(self) -> None:
         sql = strip_sql_comments(
