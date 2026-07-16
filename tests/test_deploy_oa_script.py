@@ -156,7 +156,7 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("runtime worker ensure helper is missing or not executable", remote_script)
         self.assertIn("runtime worker ensure helper does not use runtime worker manifest", remote_script)
         self.assertIn("runtime worker ensure helper does not refresh worker unit templates", remote_script)
-        self.assertIn("runtime worker ensure helper does not migrate Workbench scope split", remote_script)
+        self.assertNotIn("runtime worker ensure helper does not migrate Workbench scope split", remote_script)
         self.assertIn("runtime worker ensure helper does not validate worker registrations", remote_script)
         self.assertNotIn('sudo -n /usr/local/sbin/finops-ensure-runtime-workers "$RELEASE_DIR/src"', remote_script)
         self.assertIn("wait_finops_backend_ready", remote_script)

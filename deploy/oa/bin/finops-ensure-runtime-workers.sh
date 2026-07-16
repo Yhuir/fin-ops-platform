@@ -90,6 +90,17 @@ migrate_rabbitmq_worker_drain_interval() {
   fi
 }
 
+migrate_invoice_usage_collection_oa_split() {
+  local worker="$1"
+  local target_file="$env_dir/fin-ops.worker.invoice-usage-collection.env"
+  [ "$worker" = "invoice-usage-collection" ] || return 0
+  [ -f "$target_file" ] || return 0
+  sed -i -E \
+    -e 's/[[:space:]]+--enable-oa-pending-payment-read-model-refresh//g' \
+    -e 's/[[:space:]]+--event-type[[:space:]]+oa_pending_payment\.read_model\.refresh//g' \
+    "$target_file"
+}
+
 check_worker_registration() {
   local worker="$1"
   local check_args
@@ -140,6 +151,7 @@ fi
 for worker in $required_workers $optional_workers; do
   ensure_worker_env "$worker"
   migrate_legacy_worker_poll_interval "$worker"
+  migrate_invoice_usage_collection_oa_split "$worker"
 done
 
 if [ ! -f "$env_dir/fin-ops.common.env" ]; then

@@ -119,6 +119,7 @@ EXPECTED_MIGRATION_FILES = [
     "0105_cost_statistics_freshness_gate.sql",
     "0106_oa_pending_payment_native_oa_ids.sql",
     "0107_cost_statistics_structured_bank_flow_rows.sql",
+    "0108_cost_statistics_bank_flow_runtime_grant.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (

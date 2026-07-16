@@ -121,6 +121,7 @@ EXPECTED_MIGRATIONS = [
     "0105_cost_statistics_freshness_gate.sql",
     "0106_oa_pending_payment_native_oa_ids.sql",
     "0107_cost_statistics_structured_bank_flow_rows.sql",
+    "0108_cost_statistics_bank_flow_runtime_grant.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -283,7 +284,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 108)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 109)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -1344,6 +1345,19 @@ class PostgresMigrationSqlTests(unittest.TestCase):
         self.assertIn("read_model_dirty_scopes_cost_latest_version_idx", normalized_sql)
         self.assertIn("source_version desc, updated_at desc, id desc", normalized_sql)
         self.assertIn("where scope_type = 'cost_statistics'", normalized_sql)
+
+    def test_cost_statistics_structured_bank_flow_rows_are_runtime_writable(self) -> None:
+        sql = strip_sql_comments(
+            (MIGRATIONS_DIR / "0108_cost_statistics_bank_flow_runtime_grant.sql").read_text(encoding="utf-8")
+        ).lower()
+        normalized_sql = " ".join(sql.split())
+
+        for role in ("fin_ops_app_runtime", "fin_ops_app"):
+            self.assertIn(
+                "grant select, insert, update, delete on "
+                f"read_model.cost_statistics_bank_flow_rows to {role}",
+                normalized_sql,
+            )
 
     def test_oa_pending_payment_source_snapshot_is_tenant_scoped_and_runtime_writable(self) -> None:
         sql = strip_sql_comments(

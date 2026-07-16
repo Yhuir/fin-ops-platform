@@ -130,6 +130,20 @@ class DeployRuntimeExampleTests(unittest.TestCase):
         self.assertIn("--poll-interval-seconds ${source_poll}", helper)
         self.assertIn("--poll-interval-seconds 0.01", workbench_env)
 
+    def test_runtime_worker_env_install_removes_retired_oa_handler_from_shared_invoice_worker(self) -> None:
+        helper = ENSURE_RUNTIME_WORKERS.read_text(encoding="utf-8")
+        invoice_env = (WORKER_ENV_DIR / "fin-ops.worker.invoice-usage-collection.env.example").read_text(
+            encoding="utf-8"
+        )
+        deploy_builder = (REPO_ROOT / "scripts/deploy_oa.py").read_text(encoding="utf-8")
+
+        self.assertIn("migrate_invoice_usage_collection_oa_split", helper)
+        self.assertIn("--enable-oa-pending-payment-read-model-refresh", helper)
+        self.assertIn("oa_pending_payment\\.read_model\\.refresh", helper)
+        self.assertNotIn("--enable-oa-pending-payment-read-model-refresh", invoice_env)
+        self.assertNotIn("oa_pending_payment.read_model.refresh", invoice_env)
+        self.assertNotIn("migrate_workbench_scope_split", deploy_builder)
+
     def test_runtime_worker_docs_use_registry_manifest_instead_of_manual_matrix(self) -> None:
         for doc_path in (DEPLOYMENT_DOC, OA_DEPLOY_README):
             content = doc_path.read_text(encoding="utf-8")

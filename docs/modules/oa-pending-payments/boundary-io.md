@@ -97,7 +97,7 @@
 | Frontend | `web/src/pages/OaPendingPaymentsPage.tsx`、`web/src/components/oaPendingPayments/*`、`web/src/features/oaPendingPayments/*` |
 | API/query | `routes_oa_pending_payments.py`、`oa_pending_payment_query_contract.py`、`oa_pending_payment_read_model_service.py`、`oa_pending_payment_read_model_repository.py` |
 | Command | `oa_pending_payment_command_service.py`、`oa_pending_payment_relation_promotion_service.py` |
-| Projection/worker | `oa_pending_payment_sql_projection.py`、`oa_pending_payment_read_model_refresh.py`、`app/worker.py` |
+| Projection/worker | `oa_pending_payment_sql_projection.py`、`oa_pending_payment_read_model_refresh.py`、`app/worker.py`、`deploy/oa/bin/finops-ensure-runtime-workers.sh` |
 | Persistence | `postgres_repositories/oa_pending_payment_source_snapshot.py`、`oa_pending_payment_relation.py`、`oa_pending_payment_admission.py`、`read_models.py` |
 | Audit | `postgres_repositories/page_business_audit.py`、`OaPendingPaymentAuditIcon.tsx` |
 
@@ -106,7 +106,7 @@
 - 旧 `/api/oa-pending-payments/filter-options` 必须保持 404/无 route；负向 contract test 和 boundary guard 可以保留该字符串。
 - 禁止恢复 `all_rows()`、Python 分页全扫、live fallback、state-store/pickle snapshot 或 `_workbench_query_service._oa_adapter` 页面依赖。
 - 禁止普通月份同时 enqueue `oa_pending_payment:all`；all 只能由显式运维/初始化触发。
-- 禁止共享 invoice worker重新注册 OA handler。
+- 禁止共享 invoice worker重新注册 OA handler；release helper 必须从既有 shared worker env 精确迁移已退役的 OA flag/event，不能只更新示例文件。
 - 数据库 migration、历史实施记录和负向测试不是可执行旧链路，不删除。
 
 ## 统一部署顺序（本任务不执行）
