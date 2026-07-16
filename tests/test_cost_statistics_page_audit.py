@@ -203,6 +203,7 @@ class CostStatisticsPageAuditTests(unittest.TestCase):
         self.assertIn("source.id = case", proof_sql)
         self.assertIn("source.legacy_mongo_id = bank_identity.transaction_id", proof_sql)
         self.assertIn("source.id is distinct from case", proof_sql)
+        self.assertIn("member_payloads as not materialized", proof_sql)
         self.assertNotIn("group_payload", proof_sql)
 
         source = COST_PAGE_AUDIT_PATH.read_text(encoding="utf-8")
@@ -251,8 +252,7 @@ class CostStatisticsPageAuditTests(unittest.TestCase):
         )
         self.assertEqual(len(connection.fetch_one_calls), 1)
         summary_sql = connection.fetch_one_calls[0][0]
-        self.assertIn("set_config('jit', 'off', true)", summary_sql)
-        self.assertIn("(select jit from audit_session_settings)", summary_sql)
+        self.assertNotIn("set_config('jit'", summary_sql)
         self.assertIn("dirty_scope_rows as materialized", summary_sql)
         self.assertIn("outbox_backlog_rows as materialized", summary_sql)
         self.assertFalse(

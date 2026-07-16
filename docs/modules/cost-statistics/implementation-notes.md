@@ -1,13 +1,13 @@
 # 成本统计 实施记录
 
 
-## 2026-07-17 - 生产 Cost Audit 事务级 JIT 隔离
+## 2026-07-17 - 生产 Cost Audit 宽 payload 物化移除
 
-- 生产证据：统一 release `main-e0535b71d-cost-audit-final-20260717` 上，成本 Page Audit 正确性连续通过时总耗时约 `8.69–9.61s`，其中 `exact_set` 为 `6849.833–7242.085ms`；OA repair 触发下游竞争时同组一度达到 `21968.227ms`。当前数据仅约 989 条 canonical bank facts、306 条成本行和 271 个 linked relation groups，耗时与数据量不成比例。
-- 根因判断：`cost_exact_set_proofs` 是单条超大复合 SQL；现有 identity 索引化后仍有数秒级稳定基线，表现符合 PostgreSQL 对高 planner-cost 表达式树进行 JIT 编译的固定 CPU 成本，而不是缺少新的业务索引。先用可逆的 cost-only transaction setting 在生产复测该判断，不以猜测新增 migration/index。
-- 修复：在成本 Audit 已有 summary statement 中用 `set_config('jit', 'off', true)` 关闭当前 caller-owned read-only transaction 的 JIT；后续 exact-set/source-version/business-value/dependency proof 在同一 snapshot 中复用该设置。设置随事务结束自动恢复，不新增 SQL round trip，也不放宽 23-query budget、issue contract、snapshot 或 `<=5s` 门槛。
-- 隔离：不修改全局 PostgreSQL/连接池配置，不影响成本页面读 API、其他页面 Audit/read model、worker、schema、索引、缓存或业务数据；没有 fallback、feature flag、第二 executor 或新抽象。
-- 验证：12 个成本 Audit owner 单测通过；临时真实 PostgreSQL 实际应用 0001–0108 后，v9 parent/no-row-array 完整 Audit 通过，临时数据库已删除。生产连续 Page Audit、三页面 HTTP/混合负载与精确 SHA CI 仍须在本修复发布后复验，未达 `<=5s` 则本判断被证伪并继续基于新 timing 收口。
+- 生产证据：统一 release `main-535474753-cost-audit-jit-20260717` 上，成本 Page Audit 仍为 `pass/fresh/drained`，但总耗时 `8.83s`、`exact_set=6849.942ms`；事务级关闭 JIT 没有改善，因而该假设已被生产证伪，相关代码直接删除，不保留无效配置。
+- 根因：`member_payloads` 被 group facts、OA context 和 bank member 三个下游 CTE 复用，PostgreSQL 默认将它物化；该中间集保留 Workbench 成员完整 JSON payload，生产宽 OA payload 会导致 TOAST 解压与 temp I/O，而成本证明最终只消费有限标量字段。
+- 修复：仅将成本 Audit 私有 SQL 的 `member_payloads` 声明为 `NOT MATERIALIZED`，允许 planner 把 OA/bank pane 过滤下推，避免宽 JSON 中间集落到 temp；所有分支仍在同一 repeatable-read read-only snapshot 内从同一 canonical/read-model 事实重算，issue contract、query budget 和 `<=5s` 门槛不变。
+- 量化验证：真实 PostgreSQL 0001–0108 上构造 300 个 paired groups、600 个 Workbench members、每个 50KB payload；原 SQL 执行 `2771.833–2859.864ms`、root temp read blocks `2,212,294`，`NOT MATERIALIZED` 为 `262.030–321.771ms`、temp read/write 均为 `0`，约快 9–10 倍。临时数据库已删除。
+- 隔离：不改全局 PostgreSQL、schema/index/migration、成本页面读 API、read model/worker、其他页面 Audit 或业务数据；没有 fallback、feature flag、第二 executor 或新抽象。生产连续 Page Audit、三页面 HTTP/混合负载与精确 SHA CI 仍须在本修复发布后闭环。
 
 
 ## 2026-07-16 - 生产 Cost Audit exact-set 索引化身份解析
