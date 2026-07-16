@@ -78,7 +78,7 @@
 | completed Workbench relation | Workbench relation owner | owner source version/dirty fan-out；OA projector读取同月 fresh Workbench relation proof |
 | 银行导入/更正 | bank lifecycle/UoW owner | Workbench relation source vector包含 bank `updated_at`；有 OA consumer 的月份由既有 lifecycle fan-out |
 | 进项发票导入/更正 | invoice lifecycle owner | Workbench relation source vector包含 invoice `updated_at`；有 OA consumer 的月份由既有 lifecycle fan-out |
-| 显式初始化/修复 | `runtime_queue_ops enqueue-read-model-refresh --scope oa_pending_payment:all` | 低优先级 all fan-out；不用于普通单月写入 |
+| 显式初始化/修复 | `runtime_queue_ops enqueue-read-model-refresh --scope oa_pending_payment:all` | 低优先级 all fan-out；月份 inventory 只读取当前 tenant 的 `oa_pending_payment_source:<tenant>:<month>` watermarks，因此有事实快照但零 OA rows 的月份也必须发布 empty fresh shard；不从 completed/admission rows 猜月份，不用于普通单月写入 |
 
 禁止直接 SQL 改 canonical facts后不更新 owner version/outbox。生产权限、boundary guard 和 Audit 共同防止越界写入。
 

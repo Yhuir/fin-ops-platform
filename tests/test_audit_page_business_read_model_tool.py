@@ -621,7 +621,10 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertIn("member.member_payload->>'project_id'", canonical_sql)
         self.assertIn("member.member_payload->>'applicant'", canonical_sql)
         self.assertIn("member.member_payload->>'debit_amount'", canonical_sql)
-        self.assertIn("join app.bank_transactions bank_source", canonical_sql)
+        self.assertIn("left join lateral", canonical_sql)
+        self.assertIn("source.id = case", canonical_sql)
+        self.assertIn("source.legacy_mongo_id = bank_identity.transaction_id", canonical_sql)
+        self.assertNotIn("bank_source.id::text =", canonical_sql)
         self.assertIn("expected_fields", canonical_sql)
         self.assertIn("projected_fields", canonical_sql)
         expected_bank_flow_sql = canonical_sql.split("expected_bank_flow as", 1)[1].split("projected_bank_flow as", 1)[0]

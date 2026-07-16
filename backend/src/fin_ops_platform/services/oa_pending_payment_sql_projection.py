@@ -15,6 +15,7 @@ from fin_ops_platform.services.postgres_repositories.oa_pending_payment_relation
 )
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_snapshot import (
     PostgresOaPendingPaymentStatusSnapshotReader,
+    oa_pending_payment_source_scope_keys,
     oa_pending_payment_source_versions_from_snapshot,
 )
 from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository
@@ -41,19 +42,13 @@ class OaPendingPaymentSqlProjectionBuilder:
         self._read_model_repository = read_model_repository or PostgresReadModelRepository(connection)
         self._read_model_port = OaPendingPaymentReadModelRepositoryPort(self._read_model_repository)
 
-    def list_scope_shards(self, scope_key: str) -> list[str]:
+    def list_scope_shards(self, scope_key: str, *, tenant_id: str = "default") -> list[str]:
         normalized_scope_key = str(scope_key or "").strip()
         if MONTH_SCOPE_RE.match(normalized_scope_key):
             return [normalized_scope_key]
-        completed = PostgresOAProjectionRepository(self._connection).list_available_months()
-        admitted = PostgresOaPendingPaymentAdmissionRepository(self._connection).list_available_months()
-        return sorted(
-            {
-                month
-                for month in [*completed, *admitted]
-                if MONTH_SCOPE_RE.match(str(month or ""))
-            },
-            reverse=True,
+        return oa_pending_payment_source_scope_keys(
+            self._connection,
+            tenant_id=tenant_id,
         )
 
     def prune_scope_shards(self, current_scope_keys: list[str]) -> None:

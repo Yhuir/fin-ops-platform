@@ -66,7 +66,7 @@ class OaPendingPaymentReadModelRefreshService:
         shard_keys = sorted(
             {
                 str(item or "").strip()
-                for item in list(list_shards(scope_key) or [])
+                for item in list(list_shards(scope_key, tenant_id=event.tenant_id) or [])
                 if MONTH_SCOPE_RE.match(str(item or "").strip())
             }
         )

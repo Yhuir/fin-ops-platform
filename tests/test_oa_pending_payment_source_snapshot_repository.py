@@ -6,10 +6,25 @@ from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRecord
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_snapshot import (
     PostgresOaPendingPaymentSourceSnapshotRepository,
+    oa_pending_payment_source_scope_keys,
 )
 
 
 class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
+    def test_source_scope_inventory_is_tenant_scoped_and_keeps_empty_month_watermarks(self) -> None:
+        connection = ScopeInventoryConnection()
+
+        scopes = oa_pending_payment_source_scope_keys(connection, tenant_id="tenant-a")
+
+        self.assertEqual(scopes, ["2026-06", "2026-05"])
+        self.assertEqual(
+            connection.params,
+            (
+                "oa_pending_payment_source:tenant-a:",
+                "oa_pending_payment_source:tenant-a:%",
+            ),
+        )
+
     def test_complete_snapshot_replaces_status_and_admission_then_enqueues_in_same_transaction(self) -> None:
         connection = FakeConnection()
         queue = FakeTransactionalQueue()
@@ -338,6 +353,22 @@ class FakeConnection:
     def transaction(self) -> FakeTransactionContext:
         self.transaction_count += 1
         return FakeTransactionContext(self)
+
+
+class ScopeInventoryConnection:
+    def __init__(self) -> None:
+        self.params: tuple[object, ...] | None = None
+
+    def fetch_all(self, sql: str, params: tuple[object, ...]) -> list[dict[str, object]]:
+        self.params = params
+        if "from app.oa_sync_watermarks" not in sql:
+            raise AssertionError(f"Unexpected query: {sql}")
+        return [
+            {"scope_key": "2026-05"},
+            {"scope_key": "all"},
+            {"scope_key": "2026-06"},
+            {"scope_key": "invalid"},
+        ]
 
 
 class FakeTransactionalQueue:

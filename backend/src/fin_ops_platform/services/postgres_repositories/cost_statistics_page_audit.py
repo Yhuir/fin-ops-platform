@@ -734,11 +734,7 @@ def _exact_set_issues(
     ),
     expected_cost_members as (
         select group_row.scope_key, group_row.group_id,
-               coalesce(
-                   nullif(member.member_payload->>'id', ''),
-                   nullif(member.member_payload->>'row_id', ''),
-                   member.row_id
-               ) as transaction_id,
+               bank_identity.transaction_id,
                group_row.project_name,
                group_row.project_id,
                group_row.expense_type,
@@ -792,20 +788,39 @@ def _exact_set_issues(
          and member.scope_key = group_row.scope_key
          and member.group_id = group_row.group_id
          and member.pane = 'bank'
-        left join app.bank_transactions bank_source
-          on (
-                bank_source.id::text = coalesce(
-                    nullif(member.member_payload->>'id', ''),
-                    nullif(member.member_payload->>'row_id', ''),
-                    member.row_id
-                )
-             or bank_source.legacy_mongo_id = coalesce(
-                    nullif(member.member_payload->>'id', ''),
-                    nullif(member.member_payload->>'row_id', ''),
-                    member.row_id
-                )
-             )
-         and bank_source.status <> 'deleted'
+        cross join lateral (
+            select coalesce(
+                       nullif(member.member_payload->>'id', ''),
+                       nullif(member.member_payload->>'row_id', ''),
+                       member.row_id
+                   ) as transaction_id
+        ) bank_identity
+        left join lateral (
+            select source.id
+            from app.bank_transactions source
+            where source.id = case
+                      when bank_identity.transaction_id ~* (
+                          '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-'
+                          '[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+                      )
+                      then bank_identity.transaction_id::uuid
+                      else null::uuid
+                  end
+              and source.status <> 'deleted'
+            union all
+            select source.id
+            from app.bank_transactions source
+            where source.legacy_mongo_id = bank_identity.transaction_id
+              and source.status <> 'deleted'
+              and source.id is distinct from case
+                      when bank_identity.transaction_id ~* (
+                          '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-'
+                          '[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+                      )
+                      then bank_identity.transaction_id::uuid
+                      else null::uuid
+                  end
+        ) bank_source on true
         left join bank_tag_contexts tag
           on tag.transaction_id = bank_source.id::text
     ),

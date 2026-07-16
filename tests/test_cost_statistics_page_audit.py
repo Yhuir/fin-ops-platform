@@ -198,6 +198,11 @@ class CostStatisticsPageAuditTests(unittest.TestCase):
             self.assertEqual(proof_sql.count(marker), 1)
         self.assertEqual(proof_sql.count("limit %s"), 4)
         self.assertEqual(proof_params, (51, 51, 51, "default", "default", 51))
+        self.assertNotIn("bank_source.id::text =", proof_sql)
+        self.assertNotIn("or bank_source.legacy_mongo_id", proof_sql)
+        self.assertIn("source.id = case", proof_sql)
+        self.assertIn("source.legacy_mongo_id = bank_identity.transaction_id", proof_sql)
+        self.assertIn("source.id is distinct from case", proof_sql)
 
         source = COST_PAGE_AUDIT_PATH.read_text(encoding="utf-8")
         for retired_helper in (

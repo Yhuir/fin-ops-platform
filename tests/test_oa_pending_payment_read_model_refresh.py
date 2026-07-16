@@ -32,6 +32,7 @@ class OaPendingPaymentReadModelRefreshTests(unittest.TestCase):
             },
         )
         self.assertEqual(builder.pruned, ["2026-05"])
+        self.assertEqual(builder.list_scope_calls, [("all", "tenant-a")])
         self.assertEqual(queue.refreshes, [("oa_pending_payment", "2026-05", "oa_pending_payment_month_shard")])
         self.assertEqual(queue.completed, [("tenant-a", "oa_pending_payment", "all", 9)])
 
@@ -225,8 +226,10 @@ class FakeProjector:
         self.published = published
         self.pruned: list[str] = []
         self.rebuilds: list[tuple[str, str, int, bool]] = []
+        self.list_scope_calls: list[tuple[str, str]] = []
 
-    def list_scope_shards(self, _scope_key: str) -> list[str]:
+    def list_scope_shards(self, scope_key: str, *, tenant_id: str) -> list[str]:
+        self.list_scope_calls.append((scope_key, tenant_id))
         return list(self.shards)
 
     def prune_scope_shards(self, scope_keys: list[str]) -> None:

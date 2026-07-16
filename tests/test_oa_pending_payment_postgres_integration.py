@@ -25,6 +25,12 @@ from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_s
 )
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
+from fin_ops_platform.services.workbench_relation_read_model_refresh import (
+    WorkbenchRelationReadModelRefreshService,
+)
+from fin_ops_platform.services.workbench_relation_sql_projection import (
+    WorkbenchRelationSqlProjectionBuilder,
+)
 from tests.postgres_test_utils import (
     apply_test_migrations,
     require_postgres_test_database_url,
@@ -83,6 +89,27 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(
             non_fresh.payload["operationBarrierTargets"],
             [{"readModelKey": "oa_pending_payment", "scopeKey": "2026-05"}],
+        )
+
+        relation_event = self.queue.claim_next(
+            "workbench-relation-integration",
+            event_types=["workbench_relation.read_model.refresh"],
+        )
+        self.assertIsNotNone(relation_event)
+        assert relation_event is not None
+        relation_result = WorkbenchRelationReadModelRefreshService(
+            projection_builder=WorkbenchRelationSqlProjectionBuilder(
+                connection=self.connection,
+                read_model_repository=self.read_repository,
+            ),
+            queue_repository=self.queue,
+        ).handle_runtime_event(relation_event)
+        self.assertTrue(
+            self.queue.complete(
+                relation_event.event_id,
+                "workbench-relation-integration",
+                result_payload=relation_result,
+            )
         )
 
         event = self.queue.claim_next(

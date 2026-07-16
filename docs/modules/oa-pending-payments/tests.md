@@ -58,7 +58,7 @@
 
 - dynamic expected/actual source vector、dirty/outbox gate、month/all token。
 - PG-only projector，批量读取，空 scope清理，原子 publish。
-- stale event在读取源前 skip，CAS lost不清新 dirty，all仅低优先级 fan-out。
+- stale event在读取源前 skip，CAS lost不清新 dirty，all仅低优先级 fan-out；all 的 shard inventory 按 event tenant 读取 source watermarks，覆盖合法 empty month，禁止回退为 completed/admission 非空月份枚举。
 - `oa-pending-payment` worker claim隔离；shared `invoice-usage-collection` 不含 OA handler。
 - source snapshot/migration/permission/schema contract。
 - 未使用 OA Redis payload cache，因此 cache invalidation 测试不适用；需证明不存在该 cache 路径。

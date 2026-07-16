@@ -1,6 +1,15 @@
 # 成本统计 实施记录
 
 
+## 2026-07-16 - 生产 Cost Audit exact-set 索引化身份解析
+
+- 生产证据：统一 release 上连续两次只读 Page Audit 的 `exact_set` 分别为 `9538.201ms`、`9402.896ms`，而 queue/source-version/business-values/Workbench/Bank Detail 其余 proof 合计约 `2.1s`；正确性均为 pass，慢点被限定在成本私有 canonical exact-set SQL。
+- 根因：Workbench bank member 到 canonical `app.bank_transactions` 的连接使用 `id::text = key OR legacy_mongo_id = key`；UUID cast 到 text 不能直接使用主键，OR 又阻碍两个现有唯一索引形成稳定 equality probes。
+- 修复：成本 Audit 私有 SQL 先解析 member transaction identity，再分别通过 UUID 主键和 `legacy_mongo_id` 唯一键做 lateral equality probe；同一 canonical 行只保留一次，不同 canonical 行的双身份冲突仍全部进入 exact-set，因此没有弱化完整性证明。
+- 隔离：未新增 migration/共享索引、缓存、read model、API 字段或 fallback；不修改成本页面读链、其他页面查询和任何业务写入。
+- 验证责任：结构测试禁止旧 `id::text OR` 回流并锁定两个 indexed probe；真实 PostgreSQL Audit 与生产连续 `<=5s` 仍是发布后硬门禁。
+
+
 ## 2026-07-16 - 统一发布准备闭环：删除 warmup 与旧 HTTP/full-view
 
 - 目标：关闭成本统计最后两个本地发布阻断项，使模块达到 `READY_FOR_UNIFIED_DEPLOYMENT`，同时保持 `DEPLOYMENT_HOLD`，不部署、不操作生产 migration/queue/worker/业务数据。

@@ -748,6 +748,32 @@ class PostgresOaPendingPaymentStatusSnapshotReader:
         return OAPaymentStatusRecord(flow_id=normalized_flow_id, pay_status=int(row.get("pay_status") or 0))
 
 
+def oa_pending_payment_source_scope_keys(
+    connection: Any,
+    *,
+    tenant_id: str = "default",
+) -> list[str]:
+    normalized_tenant_id = text(tenant_id) or "default"
+    source_prefix = f"oa_pending_payment_source:{normalized_tenant_id}:"
+    rows = connection.fetch_all(
+        """
+        select substring(sync_key from length(%s) + 1) as scope_key
+        from app.oa_sync_watermarks
+        where sync_key like %s
+        order by sync_key
+        """,
+        (source_prefix, f"{source_prefix}%"),
+    )
+    return sorted(
+        {
+            month
+            for row in list(rows or [])
+            if isinstance(row, dict) and (month := _month(row.get("scope_key")))
+        },
+        reverse=True,
+    )
+
+
 def oa_pending_payment_source_versions_from_snapshot(
     connection: Any,
     *,

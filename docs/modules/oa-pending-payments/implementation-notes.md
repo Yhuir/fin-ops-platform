@@ -1,6 +1,15 @@
 # OA待付款核对 实施记录
 
 
+## 2026-07-16 - 生产 all fan-out 补齐 empty month scope inventory
+
+- 生产证据：跨月 row 修复发布后，受影响的 33 个 canonical expected-set mismatch 已归零；显式 `oa_pending_payment=all --force-refresh` 后仍只有 7 个 read model scopes，而 dynamic fresh gate 从当前 tenant source watermarks 正确识别出 37 个月份，留下 37 个 `scope_missing/source_versions_mismatch`。
+- 根因：projector 的 `list_scope_shards(all)` 从 completed/admission 非空数据枚举月份，遗漏已经有权威 source watermark 但 OA rows 为零的月份；query/readiness owner 则正确以 watermarks 为 scope inventory，两个 owner 不一致。
+- 修复：all fan-out 显式接收 event tenant，并只从 `oa_pending_payment_source:<tenant>:<month>` watermarks 枚举月份；普通精确月份、month rebuild、CAS、prune 和 durable queue 语义不变。
+- 旧链删除：all fan-out 不再调用 completed/admission `list_available_months()` 猜 scope；没有保留 union、fallback 或第二 inventory。
+- 验证责任：repository test 锁定 tenant prefix 与 empty month；refresh service test 锁定 tenant 透传；发布后必须由同一正式 all force-refresh 自动生成全部月份并取得 OA Page Audit pass/fresh/drained。
+
+
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 
 ## 2026-07-16 - 高性能、freshness 与 Audit 本地闭环

@@ -31,7 +31,7 @@
 ## 2026-07-16 - GSD 05-18 成本 Audit exact-set 单语句收敛
 
 - 影响范围：仅 `cost_statistics_page_audit.py`、成本 Audit 直接测试与模块文档；不改 API、read-model 发布、worker、前端、共享 Audit、Workbench/Bank Detail proof owner 或其他页面。
-- Business/service：`test_exact_set_proofs_use_one_query_and_preserve_each_issue_contract` 锁定 scope row count、missing scope、duplicate identity、canonical expected-set 四类 issue code/details、四个独立 `limit`、精确参数顺序与唯一 `cost_exact_set_proofs` I/O。
+- Business/service：`test_exact_set_proofs_use_one_query_and_preserve_each_issue_contract` 锁定 scope row count、missing scope、duplicate identity、canonical expected-set 四类 issue code/details、四个独立 `limit`、精确参数顺序与唯一 `cost_exact_set_proofs` I/O；同时禁止恢复 `bank_transactions.id::text OR legacy_mongo_id` 旧扫描，并锁定 UUID 主键/legacy 唯一键 equality probes 与同一行去重条件。
 - 性能/旧代码：`test_clean_audit_preserves_contract_and_active_relation_query_budget` 把 active-relation 固定总预算锁定为 23；静态断言禁止四个旧 per-query helper 和无调用 `_proof_query_issues` 回归，不保留 wrapper/fallback。
 - Contract/integration：caller-owned snapshot、只读行为、registry/CLI/operations/System envelope 和共享上游 proof 保持；一次性本地 PostgreSQL 0001–0107 migration 后完整成本 Audit clean-pass，证明合并 statement 的 syntax/列解析。
 - 七类决策：1 exact-set business proof、2 service I/O、3 Audit/API envelope 回归、4 read-model 只读、6 page/CLI/System + PostgreSQL 集成、7 existing regression 适用；5 frontend 不适用，因为页面与遮罩未改。
