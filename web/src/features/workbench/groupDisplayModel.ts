@@ -568,7 +568,7 @@ function matchesWorkbenchRow(
       return selectedValues.every((value) => rowValues.includes(value));
     }
     const currentValue = row.tableValues[columnKey] ?? "";
-    return selectedValues.every((value) => value === currentValue);
+    return selectedValues.some((value) => value === currentValue);
   });
 }
 

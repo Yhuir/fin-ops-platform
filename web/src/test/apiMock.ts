@@ -2202,7 +2202,10 @@ function mockWorkbenchRowMatchesPaneFilters(
         continue;
       }
       const rowValues = mockWorkbenchColumnValues(row, pane, columnKey);
-      if (!selectedValues.every((value) => rowValues.includes(value))) {
+      const matchesSelectedValues = pane === "bank" && columnKey === "amount"
+        ? selectedValues.every((value) => rowValues.includes(value))
+        : selectedValues.some((value) => rowValues.includes(value));
+      if (!matchesSelectedValues) {
         return false;
       }
     }

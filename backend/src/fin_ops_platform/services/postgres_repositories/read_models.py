@@ -12418,7 +12418,8 @@ def _workbench_group_row_match_sql(
                 value_match_clauses.append("r.column_values @> %s::jsonb")
                 row_params.append(json.dumps({column_key: value}, ensure_ascii=False))
         if value_match_clauses:
-            row_clauses.append("(" + " and ".join(value_match_clauses) + ")")
+            operator = " and " if pane == "bank" and column_key == "amount" else " or "
+            row_clauses.append("(" + operator.join(value_match_clauses) + ")")
     if pane_time_filter:
         start_date, end_date = _workbench_time_filter_date_range(pane_time_filter)
         if start_date and end_date:
@@ -12693,7 +12694,7 @@ def _workbench_payload_row_matches_preview_criteria(
                 return False
         else:
             current_value = column_values.get(column_key)
-            if not all(value == current_value for value in selected_values):
+            if not any(value == current_value for value in selected_values):
                 return False
 
     pane_time_filter = time_filters.get(pane)

@@ -289,7 +289,9 @@ describe("Workbench pane display model", () => {
     fireEvent.click(within(menu).getByRole("button", { name: "全选" }));
     await waitFor(() => {
       expect(within(unpairedZone).getAllByText("陈涛").length).toBeGreaterThan(0);
-      expect(within(unpairedZone).queryByTestId("candidate-group-unpaired-row:oa-o-202603-002")).not.toBeInTheDocument();
+      within(menu).getAllByRole("checkbox").forEach((checkbox) => {
+        expect(checkbox).toBeChecked();
+      });
     });
 
     fireEvent.click(within(menu).getByRole("button", { name: "清空" }));
@@ -484,5 +486,50 @@ describe("Workbench pane display model", () => {
 
     expect(displayGroups.map((group) => group.id)).toEqual(["same-bank-filter-values"]);
     expect(displayGroups[0].rows.bank.map((row) => row.id)).toEqual(["bank-expense-ccb"]);
+  });
+
+  test("matches any selected value within an ordinary scalar column", () => {
+    const groups: WorkbenchRelationGroup[] = [
+      {
+        id: "oa-chen",
+        groupType: "unpaired",
+        matchConfidence: "medium",
+        reason: "test",
+        rows: {
+          oa: [buildRow("oa-chen-row", "oa", { applicant: "陈涛" })],
+          bank: [],
+          invoice: [],
+        },
+      },
+      {
+        id: "oa-sun",
+        groupType: "unpaired",
+        matchConfidence: "medium",
+        reason: "test",
+        rows: {
+          oa: [buildRow("oa-sun-row", "oa", { applicant: "孙敏" })],
+          bank: [],
+          invoice: [],
+        },
+      },
+      {
+        id: "oa-lin",
+        groupType: "unpaired",
+        matchConfidence: "medium",
+        reason: "test",
+        rows: {
+          oa: [buildRow("oa-lin-row", "oa", { applicant: "林晨" })],
+          bank: [],
+          invoice: [],
+        },
+      },
+    ];
+    const state = createEmptyWorkbenchZoneDisplayState();
+    state.activePaneId = "oa";
+    state.filtersByPaneAndColumn.oa = {
+      applicant: ["陈涛", "孙敏"],
+    };
+
+    expect(buildWorkbenchDisplayGroups(groups, state).map((group) => group.id)).toEqual(["oa-chen", "oa-sun"]);
   });
 });

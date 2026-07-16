@@ -125,7 +125,7 @@ def build_workbench_groups_redis_cache_key_from_version(
         "detail_level": normalize_workbench_group_detail_level(detail_level),
         "column_filters": stable_json_value(column_filters or {}),
         "time_filters": stable_json_value(time_filters or {}),
-        "filter_semantics": "linked_context_v1",
+        "filter_semantics": "linked_context_scalar_multiselect_or_v2",
     }
     digest = hashlib.sha256(json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:16]
     return f"workbench:{version_token}:groups:{digest}"

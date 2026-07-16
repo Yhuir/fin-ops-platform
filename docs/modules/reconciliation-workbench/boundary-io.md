@@ -1,6 +1,6 @@
 # 关联台模块边界与 I/O
 
-日期：2026-07-14
+日期：2026-07-16
 
 ## 职责
 
@@ -26,7 +26,7 @@
 | OA projection rows | PostgreSQL OA projection repository | 读取边界把持久化历史值 `section=open` 和缺失值归一化为 `unpaired`；只有 `paired|unpaired` 可进入 Workbench core，未知值 fail fast |
 | active relations | workbench-relations | 只接受 `status=active` 的正式关系；row ids 必须存在且不可跨 case 重叠 |
 | row overrides / exception cases | workbench control repositories | 仅对没有 active formal relation ownership 的 row 生效；优先级为 formal relation > override > exception，projection 与 Page Audit 必须共用该合同 |
-| list query | Workbench API | `month`、zone=`paired|unpaired`、分页、搜索、排序、generation/source versions |
+| list query | Workbench API | `month`、zone=`paired|unpaired`、分页、搜索、排序、generation/source versions；普通标量列同列多选按 OR，不同列/不同 pane 按 AND；银行金额表头的方向+付款账号复合筛选继续按 AND |
 | row/group detail | Workbench read repository | 必须固定到同一 active generation；miss 不得合成占位行或回退旧 snapshot |
 | confirm/withdraw command | Workbench action route | canonical row ids、actor、tenant、idempotency、expected versions、preview identity |
 | matching scope | durable matching dirty queue | 合法 `YYYY-MM`；repository 读取 ±365 日组合窗口，显式引用可补载全部保留历史 |

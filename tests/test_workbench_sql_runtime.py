@@ -16,6 +16,7 @@ from fin_ops_platform.services.postgres_repositories.read_models import (
     WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION,
     PostgresReadModelRepository,
     _workbench_group_row_records,
+    _workbench_payload_row_matches_preview_criteria,
     _workbench_row_payload_for_write,
 )
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
@@ -2908,7 +2909,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             )
         )
 
-    def test_repository_requires_all_selected_filter_values_in_structured_group_row_sql(self) -> None:
+    def test_repository_requires_all_selected_bank_amount_values_in_structured_group_row_sql(self) -> None:
         connection = WorkbenchSummaryGroupsConnection()
         repository = PostgresReadModelRepository(connection)
 
@@ -2930,6 +2931,58 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                 and '"direction": "支出"' in str(params)
                 and '"paymentAccount": "建行 8106"' in str(params)
                 for sql, params in group_row_queries
+            )
+        )
+
+    def test_repository_matches_any_selected_value_in_scalar_column_sql(self) -> None:
+        connection = WorkbenchSummaryGroupsConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.get_workbench_groups_page(
+            scope_key="all",
+            zone="unpaired",
+            page=1,
+            page_size=25,
+            column_filters={"oa": {"applicant": ["陈涛", "孙敏"]}},
+        )
+
+        all_queries = [*connection.fetch_one_calls, *connection.fetch_all_calls]
+        group_row_queries = [(sql, params) for sql, params in all_queries if "read_model.workbench_group_rows" in sql]
+        self.assertTrue(group_row_queries)
+        self.assertTrue(
+            any(
+                "(r.column_values @> %s::jsonb or r.column_values @> %s::jsonb)" in sql
+                and '"applicant": "陈涛"' in str(params)
+                and '"applicant": "孙敏"' in str(params)
+                for sql, params in group_row_queries
+            )
+        )
+
+    def test_repository_preview_matches_any_selected_value_in_scalar_column(self) -> None:
+        criteria = {
+            "pane": "oa",
+            "column_filters": {"oa": {"applicant": ["陈涛", "孙敏"]}},
+            "time_filters": {},
+            "search_by_pane": {},
+            "fallback_search": None,
+        }
+
+        self.assertTrue(
+            _workbench_payload_row_matches_preview_criteria(
+                {"type": "oa", "applicant": "陈涛"},
+                **criteria,
+            )
+        )
+        self.assertTrue(
+            _workbench_payload_row_matches_preview_criteria(
+                {"type": "oa", "applicant": "孙敏"},
+                **criteria,
+            )
+        )
+        self.assertFalse(
+            _workbench_payload_row_matches_preview_criteria(
+                {"type": "oa", "applicant": "林晨"},
+                **criteria,
             )
         )
 
