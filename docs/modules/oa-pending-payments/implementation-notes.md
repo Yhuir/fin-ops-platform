@@ -36,6 +36,13 @@
 - 修复只新增 `scope_type='oa_pending_payment'` 的 partial index，使索引顺序与 fail-closed latest-version 语义完全一致；不修改 SQL 判断、source vector、API、read model、cache、worker 或其它 scope_type 的索引行。该模式与成本统计已上线的 scope-private latest-version index 一致。
 - 该索引发布后仍必须重新跑 isolated 500 次、三页 mixed load、Page Audit 和安全可逆操作后 Audit；不能仅凭索引存在宣称性能闭环。
 
+### 生产六次根因：active OA outbox 证明缺少私有覆盖索引
+
+- latest-dirty 私有索引发布后，isolated 500 次已达到 `p50=133.444ms / p95=218.414ms / p99=293.654ms`；成本统计和关联台各自 isolated 也达标，三页基线 Audit 均为 `pass/fresh/drained`。但 OA 单页面 3 并发 150 次为 `p50=310.866ms / p95=441.414ms / p99=508.731ms`，证明剩余长尾属于 OA 自身 freshness gate，并非另两页串扰。
+- gate 同一 statement 既从 active OA outbox 枚举目标 scope，又为每个 scope 执行 blocking `exists`。现有 outbox 索引服务全局 App Status、worker claim 或历史指标，均包含其它 event type/status；没有与 OA 页面精确 predicate 同形的私有索引。
+- 修复新增 migration `0110`，只索引 `event_type='oa_pending_payment.read_model.refresh'` 且 status 为 `pending/processing/failed/dead_lettered` 的 `(tenant_id, scope_key)`；`done` 历史和其它 read model 不进入索引。它同时覆盖 target inventory 与 blocking probe，不改变 SQL、freshness 语义、API、queue、worker、连接池或其它页面 read model。
+- 50,000 条已完成 OA 历史加 1 条 active envelope 的隔离 PostgreSQL 计划为 `Index Only Scan`，执行 `0.026ms`、2 个 shared buffer、索引 `16kB`；0001–0110 全迁移和 canonical -> durable queue -> worker -> fresh rows/ETag 集成测试通过。发布后仍以三页 simultaneous mixed load 与操作后 Audit 作为关闭门，不用 isolated 成绩替代隔离性证据。
+
 ## 2026-07-17 - 生产 rows freshness Port 装配修复
 
 - 生产证据：OA Page Audit 已返回 `pass/fresh/drained`，但相同发布版本的 `/api/oa-pending-payments/rows` 持续返回 `202/refreshing`，且 payload 没有 stale reasons；因此不是 source version、dirty/outbox 或 worker 未收敛。

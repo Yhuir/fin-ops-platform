@@ -384,6 +384,7 @@ Page Audit 只证明同一 PostgreSQL snapshot 内部一致性。外部来源健
 - 旧filter route/client、`all_rows`/filter全扫、snapshot relation、本地state-store relation snapshot、shared worker OA分支和server private adapter fallback已删除；负向测试/历史记录中的旧名称不属于可执行路径。
 - 本地in-process HTTP/ETag守门各1000次且错误率0：fresh 200 `p95 5.874ms`、304 `p95 5.755ms`；304不执行rows aggregation。该测试未连接PostgreSQL，不替代生产等量级SQL和部署后API采样。
 - 隔离真实PG闭环发现并修复`YYYY-MM` snapshot date cast和组合repository漏暴露OA freshness/snapshot两个生产阻断缺口；新增真实PG集成测试覆盖canonical commit到fresh 200/304。
+- 生产并发证据将剩余长尾限定在 OA freshness statement；新增两个 OA 私有 partial index，分别匹配 dirty latest-version 顺序和 active outbox blocking predicate。outbox 索引在 50,000 条 completed 历史样本上为 `Index Only Scan`、执行 `0.026ms`、2 shared buffers、16kB，且不会索引其它 event type 或 completed history。
 - 单月500行本地PG门：fresh 200顺序1000次`p95 9.938ms`，8并发1000次`p95 33.243ms`，304 1000次`p95 0.520ms`；200次mutation从commit返回到fresh API `p95 544.178ms`，projector `p95 435.400ms`，最终fresh API `p95 131.274ms`，错误率均为0且200次均在收敛前返回202。500行相对历史生产总量210行是2.381倍，但当前生产峰值未知，不能视为当前生产等量结论。
 - SQL计划为gate `0.090ms`、aggregate/facets `5.755ms`、bounded page `0.306ms`，无physical/temp I/O；304只执行gate。现有SQL和索引已满足本地证据，不新增cache/index/partition。
 
@@ -391,7 +392,7 @@ Writer inventory以 `boundary-io.md` 为准。当前支持入口覆盖 external 
 
 尚未完成且本任务不执行：
 
-- migration/release部署、OA sync全量backfill、`oa_pending_payment:all`低优先级重建、真实worker drain和生产Audit。
+- migration `0110` 发布、三页同时负载复验，以及安全可逆生产操作后的连续 Audit。
 - 当前生产等量级SQL EXPLAIN、部署后真实HTTP/API与浏览器1000次采样、200次mutation `T0 -> T1`、当前峰值并发和其它页面延迟对照。
 
 因此本地实现可以进入统一部署，但在上述证据完成前不得宣称 `p95 <= 1s` 或 `p95 <= 250ms` 已在生产达标，也不得把当前 `/goal` 标记complete。

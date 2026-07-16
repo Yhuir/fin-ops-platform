@@ -44,6 +44,14 @@
 
 ## 历史记录
 
+## 2026-07-17 - OA freshness active-outbox 私有热路径
+
+- 目标：修复 OA 待付款 isolated 已达标、但单页面 3 并发仍超过 `250ms` p95 的 freshness gate 长尾。
+- 影响范围：仅新增 migration `0110_oa_pending_payment_outbox_freshness_hot_path.sql` 及 migration pinning；不改变 queue/read model/API/worker、全局连接池或其它页面 SQL。
+- 关键决策：索引 predicate 精确限定 OA refresh event 的 active/failed 状态，键只保留 gate 需要的 tenant/scope；completed history 与其它 event type 不进入索引。隔离 PG 50,000 条 completed 历史计划为 `Index Only Scan`、`0.026ms`、2 shared buffers、16kB。
+- 测试覆盖：migration contract/pinning、0001–0110 空库应用、OA canonical -> durable queue -> dependency/OA worker -> fresh rows/ETag 两条真实 PG 集成均通过。
+- 未测风险：必须部署后重跑 OA 3 并发和三页 simultaneous gate；索引存在本身不等于生产 SLO 闭环。
+
 ## 2026-07-16 - Cost statistics broad state I/O removal
 
 - 目标：删除无 production caller 的成本全表 load、无条件 save、StateStore snapshot key 与 protocol/manifest 旧合同。

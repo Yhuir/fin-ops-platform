@@ -123,6 +123,7 @@ EXPECTED_MIGRATIONS = [
     "0107_cost_statistics_structured_bank_flow_rows.sql",
     "0108_cost_statistics_bank_flow_runtime_grant.sql",
     "0109_oa_pending_payment_freshness_gate_hot_path.sql",
+    "0110_oa_pending_payment_outbox_freshness_hot_path.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -285,7 +286,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 110)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 111)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -1373,6 +1374,19 @@ class PostgresMigrationSqlTests(unittest.TestCase):
         )
         self.assertIn("where scope_type = 'oa_pending_payment'", normalized_sql)
         self.assertNotIn("where scope_type in", normalized_sql)
+
+    def test_oa_pending_payment_freshness_gate_has_scope_private_active_outbox_index(self) -> None:
+        sql = strip_sql_comments(
+            (MIGRATIONS_DIR / "0110_oa_pending_payment_outbox_freshness_hot_path.sql").read_text(encoding="utf-8")
+        ).lower()
+        normalized_sql = " ".join(sql.split())
+
+        self.assertIn("outbox_events_oa_pending_payment_freshness_idx", normalized_sql)
+        self.assertIn("on job.outbox_events (tenant_id, scope_key)", normalized_sql)
+        self.assertIn("where event_type = 'oa_pending_payment.read_model.refresh'", normalized_sql)
+        self.assertIn("status in ('pending', 'processing', 'failed', 'dead_lettered')", normalized_sql)
+        self.assertIn("scope_key is not null", normalized_sql)
+        self.assertNotIn("event_type like", normalized_sql)
 
     def test_oa_pending_payment_source_snapshot_is_tenant_scoped_and_runtime_writable(self) -> None:
         sql = strip_sql_comments(

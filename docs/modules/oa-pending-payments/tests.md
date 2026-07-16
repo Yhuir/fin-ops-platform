@@ -142,6 +142,7 @@
 - 普通 canonical mutation：至少 200 次完整 `T0 -> T1`，包含失败/202样本；`p95 <= 1s`。
 - `500ms` 是挑战目标，只有真实样本通过后才能提升为承诺。
 - 同时记录 queue pickup、build、CAS publish、API、browser render、DB连接和其它页面 latency，证明隔离性。
+- 三页 simultaneous gate 使用每页一个并发请求、至少 50 轮；每页仍按各自页面门槛判断，不能用总吞吐或 isolated 结果替代。更高并发压力结果作为容量证据单独报告，不通过扩大共享连接池修复 OA 私有瓶颈。
 
 ## 本地验证命令
 
