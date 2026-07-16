@@ -113,7 +113,7 @@
 ### 本地门槛
 
 - 证明 `304` path 不执行 rows/facet aggregation。
-- 证明 rows query 是有界 set-based 调用，不存在 `all_rows()` 每 200 行循环。
+- 证明 rows query 是一个有界 set-based data statement，同时返回 summary/facets 与 bounded page；不存在第二次 page roundtrip，也不存在 `all_rows()` 每 200 行循环。
 - 关键 SQL 在生产等量级副本保存 `EXPLAIN (ANALYZE, BUFFERS)`；没有数据证据不新增索引。
 
 ### 2026-07-16 本地真实 PostgreSQL 证据
@@ -122,7 +122,7 @@
 - fresh `200`：顺序1000次，`p50 8.710ms / p95 9.938ms / p99 11.300ms / max 109.441ms`；8并发1000次，`p50 22.484ms / p95 33.243ms / p99 45.531ms / max 53.749ms`；错误率均为0。
 - ETag `304`：1000次，`p50 0.361ms / p95 0.520ms / p99 0.629ms / max 1.038ms`，错误率0。statement recorder证明只有repeatable-read setup和1个freshness gate query，没有aggregate、facet或page query。
 - 200次canonical mutation：commit返回到fresh API为`p50 403.675ms / p95 544.178ms / p99 593.683ms / max 650.951ms`，错误率0；200/200次在worker收敛前返回202且rows为空。分段为queue claim `p95 1.567ms`、projector build+CAS publish `p95 435.400ms`、queue complete `p95 1.534ms`、最终fresh API `p95 131.274ms`。canonical commit本身另计`p95 292.530ms`；冷启动commit返回到fresh为`282.284ms`。
-- SQL `EXPLAIN (ANALYZE, BUFFERS)`：freshness gate execution `0.090ms`/10 shared hit blocks；aggregate+facets `5.755ms`/128 hits；bounded page 20行 `0.306ms`/128 hits；三者physical read和temp read/write均为0。fresh路径为1个gate加2个有界数据statement，符合查询预算，无新增索引证据。
+- SQL `EXPLAIN (ANALYZE, BUFFERS)`：freshness gate execution `0.090ms`/10 shared hit blocks；aggregate+facets逻辑段 `5.755ms`/128 hits；bounded page 20行逻辑段 `0.306ms`/128 hits；三者physical read和temp read/write均为0。2026-07-17 根据生产 profile 把后两段合并为同一个有界 data statement，fresh路径现在是1个gate加1个data statement；无新增索引证据。
 - 结论：本地服务端分段性能门通过。该harness没有真实浏览器500ms条件检测、React render、真实网络、真实worker进程调度、当前生产峰值或其它页面延迟对照，因此不能用`544.178ms`宣称生产commit-to-visible已通过；这些仍属于统一部署后硬门。
 - 可重复集成保护：`tests/test_oa_pending_payment_postgres_integration.py`在配置`FIN_OPS_TEST_DATABASE_URL`时验证 canonical snapshot/date、依赖 relation outbox/worker 先完成、OA outbox/worker 后完成、202、专属 projector、CAS、queue complete、source vector、fresh 200 和 304 完整链路。
 

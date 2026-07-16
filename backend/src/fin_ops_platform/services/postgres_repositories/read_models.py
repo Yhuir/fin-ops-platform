@@ -750,6 +750,11 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
             f"nullif(btrim(({_invoice_relation_option_label_expression(field, expression)})::text), ''))"
             for field, (expression, _mode, _operators) in OA_PENDING_PAYMENT_OPTION_FIELDS.items()
         )
+        order_sql = _invoice_relation_order_sql(
+            sort_field=sort_field,
+            sort_direction=sort_direction,
+            sort_expressions=OA_PENDING_PAYMENT_SORT_EXPRESSIONS,
+        )
         summary_row = self._connection.fetch_one(
             f"""
             with base_rows as materialized (
@@ -841,6 +846,22 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
             filter_options as (
                 select coalesce(jsonb_object_agg(field, options), '{{}}'::jsonb) as payload
                 from options_by_field
+            ),
+            paged_rows as materialized (
+                select
+                    payload - 'searchText' - 'sourceVersions' - 'source_versions' as payload,
+                    row_number() over (order by {order_sql}) as row_order
+                from {rows_source_sql}
+                where {where_sql}
+                order by {order_sql}
+                limit %s offset %s
+            ),
+            page_rows as (
+                select coalesce(
+                    jsonb_agg(jsonb_build_object('payload', payload) order by row_order),
+                    '[]'::jsonb
+                ) as payload
+                from paged_rows
             )
             select
                 summary.count,
@@ -849,36 +870,22 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                 view_counts.completed_count,
                 view_counts.in_progress_count,
                 status_counts.payload as status_counts,
-                filter_options.payload as filter_options
+                filter_options.payload as filter_options,
+                page_rows.payload as rows
             from summary
             cross join view_counts
             cross join status_counts
             cross join filter_options
+            cross join page_rows
             """,
-            tuple(base_params),
+            tuple([*base_params, *params, page_limit, (page_number - 1) * page_limit]),
         )
         view_counts = {
             "completed": int_value(summary_row.get("completed_count") if isinstance(summary_row, dict) else 0, 0),
             "in_progress": int_value(summary_row.get("in_progress_count") if isinstance(summary_row, dict) else 0, 0),
         }
         total = int_value(summary_row.get("count") if isinstance(summary_row, dict) else 0, 0)
-        rows: list[dict[str, Any]] = []
-        if total:
-            order_sql = _invoice_relation_order_sql(
-                sort_field=sort_field,
-                sort_direction=sort_direction,
-                sort_expressions=OA_PENDING_PAYMENT_SORT_EXPRESSIONS,
-            )
-            rows = self._connection.fetch_all(
-                f"""
-                select payload - 'searchText' - 'sourceVersions' - 'source_versions' as payload
-                from {rows_source_sql}
-                where {where_sql}
-                order by {order_sql}
-                limit %s offset %s
-                """,
-                tuple([*params, page_limit, (page_number - 1) * page_limit]),
-            )
+        rows = list(summary_row.get("rows") or []) if isinstance(summary_row, dict) else []
         payload_rows = [_read_model_payload(row) for row in rows]
         filter_options = summary_row.get("filter_options") if isinstance(summary_row, dict) else {}
         normalized_filter_options = {

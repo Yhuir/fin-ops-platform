@@ -22,6 +22,13 @@
 - 修复删除 `deduped_oa_pending_payment_rows` 和 helper；fresh rows 直接读月份 projection。`oa_pending_payment_query_state` 在同一 set-based freshness statement 中检查跨 scope 重复并返回 `202`，Page Audit 改为按全局 `row_id` 报告涉及 scopes。没有新增缓存、索引、endpoint、read model、worker 或兼容分支。
 - 隔离性：只改变 OA repository/freshness/Audit owner；成本统计、关联台、共享 read model、全局 PostgreSQL 配置和其它页面 response shape 不变。发布后仍以 100 次 fresh HTTP、三页混合负载和写后连续 Audit 作为最终门禁。
 
+### 生产四次根因：summary/facets 与 bounded page 的数据库往返
+
+- 隐藏去重删除后，100 次公网 fresh 首屏为 `p50=181.964ms / p95=265.130ms / p99=354.795ms`；正确率、freshness 和 Audit 均通过，但 `p95` 仍比 `250ms` 硬门高 `15.130ms`。同批服务端 profile 显示固定 8 个 query、数据库 `p95=124.852ms`，剩余瓶颈是 OA 私有读取编排，不是前端 render、共享连接池或其它页面 read model。
+- 收敛方案：保留独立 freshness gate 和只读 repeatable-read snapshot，把 summary/facets 与 bounded page 合并为一个 repository data statement；typed summary CTE 仍不 materialize `payload/raw_payload`，page 仍按原 sort/filter 做 `limit/offset`，数据库直接移除内部 search/version 字段，response shape 不变。
+- 不引入 cache、索引、cursor、第二 API、worker、schema 或共享抽象；只减少 OA repository 的一次 client/server roundtrip。真实 PostgreSQL canonical commit -> dependency worker -> OA worker -> fresh rows/ETag 集成测试通过，并由 SQL contract test 锁定单次有界 data statement。
+- 最终门禁：精确 SHA 发布后重新采集 OA 100 次 isolated fresh HTTP；只有 `p95 <= 250ms`、`p99 <= 500ms`，且三页 mixed load、操作后连续 Audit 仍通过，才关闭生产性能任务。
+
 ## 2026-07-17 - 生产 rows freshness Port 装配修复
 
 - 生产证据：OA Page Audit 已返回 `pass/fresh/drained`，但相同发布版本的 `/api/oa-pending-payments/rows` 持续返回 `202/refreshing`，且 payload 没有 stale reasons；因此不是 source version、dirty/outbox 或 worker 未收敛。

@@ -183,7 +183,7 @@ OA 专属 worker 领取月份事件 `N` 后：
 - read model status、scope 和 source-version proof。
 - `operationBarrierTargets`：non-fresh 时列出当前登录 tenant 下的精确 month blocking scopes；tenant 由服务端认证上下文确定，不在前端猜测或透传。默认“全部”视图不得优先等待控制 scope `all`。
 
-查询在同一个只读 repeatable-read snapshot 中完成 expected versions、dirty/outbox、scope metadata、分页数据和聚合元数据判断，并用不超过两个有界、set-based 数据 SQL statements 返回 payload；禁止 Python 分页遍历全量 rows。是否合并成一个数据 SQL statement 由 `EXPLAIN (ANALYZE, BUFFERS)` 决定，不预先追求“单 SQL”。
+查询先用独立 freshness statement 完成 expected versions、dirty/outbox 和 scope metadata 判断；fresh 后在同一个只读 repeatable-read snapshot 中，用一个有界、set-based 数据 statement 返回 summary/facets 和当前页 payload，禁止 Python 分页遍历全量 rows。该合并由生产 profile 证明两次 repository data roundtrip 是剩余热路径后实施，不改变 freshness gate 或 API DTO。
 
 fresh gate 检查 dirty、outbox、scope existence 和动态 version vector。任何一项无法证明都返回 `202 refreshing`，不返回旧 rows。
 
@@ -226,7 +226,7 @@ detail endpoints 继续按用户打开 drawer 时惰性读取，不合并进首�
 - filter options 由 repository 使用 set-based aggregation 计算，保持现有筛选语义。
 - freshness/version/ETag fast path 只能查询 scope/version/dirty/outbox 的索引记录；`304` 路径不能执行 count、JSON expansion、sort 或 filter aggregation。
 - rows、sort、filter 和 facet aggregation 优先复用现有 native projection columns；禁止在每次请求中对全量 payload 做无界 `jsonb_array_elements`。
-- `all` 查询继续按 `row_id` 选择最新月份物理行并去重，但先用生产 `EXPLAIN (ANALYZE, BUFFERS)` 证明瓶颈。
+- `all` 查询直接组合月份 shards；跨 scope 重复 `row_id` 由 freshness gate 与 Page Audit fail closed，列表禁止用 `DISTINCT ON` 或 Python 去重静默隐藏 projection 错误。
 - 只有执行计划证明需要时，才添加 OA read model 私有索引；禁止为该页面修改共享表或其它页面的索引合同。
 - 继续保留现有 page/offset pagination；当前数据量和功能不证明需要 cursor pagination，不为此增加第二套合同。
 - 不新增 Redis payload cache。当前 fresh 请求已经接近目标，先消除重复扫描和外部 I/O；缓存只在 DB-only 路径仍不能达标且有生产证据时再评估，并且仍必须位于 fresh gate 之后。

@@ -473,7 +473,20 @@ class InvoiceReadModelConnection:
                 return row
             if "with base_rows as materialized" in normalized:
                 base_rows = self._oa_rows_for_sql(normalized, apply_view_mode=False)
-                filtered_rows = self._oa_rows_for_sql(normalized)
+                filtered_rows = list(base_rows)
+                filtered_rows_clause = normalized.split("filtered_rows as materialized", 1)[1].split(")", 1)[0]
+                if "oa_workflow_status = 'in_progress'" in filtered_rows_clause:
+                    filtered_rows = [row for row in filtered_rows if self._oa_workflow_status(row) == "in_progress"]
+                elif "oa_workflow_status is null" in filtered_rows_clause:
+                    filtered_rows = [row for row in filtered_rows if self._oa_workflow_status(row) != "in_progress"]
+                page_limit = int(params[-2])
+                page_offset = int(params[-1])
+                page_rows = []
+                for row in filtered_rows[page_offset : page_offset + page_limit]:
+                    payload = dict(row.get("payload") or {})
+                    for internal_key in ("searchText", "sourceVersions", "source_versions"):
+                        payload.pop(internal_key, None)
+                    page_rows.append({"payload": payload})
                 completed_oa_ids: set[str] = set()
                 in_progress_oa_ids: set[str] = set()
                 for row in base_rows:
@@ -505,6 +518,7 @@ class InvoiceReadModelConnection:
                     "in_progress_count": len(in_progress_oa_ids),
                     "status_counts": status_counts,
                     "filter_options": {},
+                    "rows": page_rows,
                 }
             if "completed_count" in normalized or "in_progress_count" in normalized:
                 completed_oa_ids: set[str] = set()

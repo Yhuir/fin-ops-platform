@@ -134,7 +134,7 @@ class OaPendingPaymentReadModelQueryTests(unittest.TestCase):
         self.assertEqual(payload["source_versions"], base_versions)
         self.assertEqual(set(payload["source_versions_by_scope"]), {"2026-04", "2026-05"})
 
-    def test_rows_use_one_set_based_aggregate_and_one_bounded_page_query(self) -> None:
+    def test_rows_use_one_statement_for_set_based_aggregate_and_bounded_page(self) -> None:
         connection = AggregateConnection()
         repository = PostgresInvoiceUsageCollectionReadModelRepository(connection)
 
@@ -149,7 +149,7 @@ class OaPendingPaymentReadModelQueryTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["statusCounts"], {"paid": 1})
         self.assertEqual(payload["filterOptions"]["bank_direction"][0]["label"], "支出")
         self.assertEqual(len(connection.fetch_one_calls), 1)
-        self.assertEqual(len(connection.fetch_all_calls), 1)
+        self.assertEqual(len(connection.fetch_all_calls), 0)
         aggregate_sql = connection.fetch_one_calls[0][0].lower()
         self.assertIn("with base_rows as materialized", aggregate_sql)
         self.assertNotIn("raw_payload", aggregate_sql)
@@ -158,9 +158,12 @@ class OaPendingPaymentReadModelQueryTests(unittest.TestCase):
         self.assertNotIn("payload", base_rows_sql)
         self.assertIn("cross join lateral unnest", aggregate_sql)
         self.assertNotIn("jsonb_array_elements", aggregate_sql)
-        page_sql = connection.fetch_all_calls[0][0]
-        self.assertIn("payload - 'searchText' - 'sourceVersions' - 'source_versions'", page_sql)
-        self.assertNotIn("select payload, raw_payload", page_sql.lower())
+        self.assertIn("paged_rows as materialized", aggregate_sql)
+        self.assertIn("limit %s offset %s", aggregate_sql)
+        self.assertIn("jsonb_agg(jsonb_build_object('payload', payload) order by row_order)", aggregate_sql)
+        self.assertIn("payload - 'searchtext' - 'sourceversions' - 'source_versions'", aggregate_sql)
+        self.assertNotIn("select payload, raw_payload", aggregate_sql)
+        self.assertEqual(connection.fetch_one_calls[0][1][-2:], (20, 0))
 
     def test_read_snapshot_sets_repeatable_read_before_any_query(self) -> None:
         connection = SnapshotConnection()
@@ -268,6 +271,7 @@ class AggregateConnection:
             "filter_options": {
                 "bank_direction": [{"value": "outflow", "label": "outflow", "count": 1}],
             },
+            "rows": [{"payload": {"id": "row-1"}}],
         }
 
     def fetch_all(self, sql: str, params: tuple[object, ...]) -> list[dict[str, object]]:
