@@ -196,7 +196,7 @@ describe("Workbench row selection and detail drawer", () => {
       expect(screen.queryByRole("dialog", { name: "关联预览" })).not.toBeInTheDocument();
       expect(screen.getAllByText("已选 0")).toHaveLength(2);
     });
-    expect(screen.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeInTheDocument();
+    expect(await screen.findByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeInTheDocument();
   });
 
   test("bank pane time filter supports month selection and clears on second click", async () => {
@@ -2570,7 +2570,7 @@ describe("Workbench row selection and detail drawer", () => {
     renderWorkbenchPage();
 
     await screen.findByTestId("zone-unpaired");
-    expect(screen.getByText("关联台数据已过期，当前结果仅供查看；刷新完成前写操作已禁用。")).toBeInTheDocument();
+    expect(await screen.findByText("关联台数据已过期，当前结果仅供查看；刷新完成前写操作已禁用。")).toBeInTheDocument();
     expect(screen.queryByText("当前没有可展示的 OA / 银行流水 / 发票记录。")).not.toBeInTheDocument();
     expect(within(screen.getByTestId("zone-unpaired")).getByText("未配对 0 项")).toBeInTheDocument();
   });

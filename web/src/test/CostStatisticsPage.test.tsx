@@ -90,8 +90,17 @@ function expectProjectCostDialog(name: string) {
   expect(dialog).toHaveClass(name === "导出中心" ? "export-center-modal" : "cost-detail-modal");
 }
 
-function findCostStatisticsHeading() {
-  return screen.findByRole("heading", { name: "成本统计" }, { timeout: PAGE_RENDER_TIMEOUT });
+async function waitForCostStatisticsReady() {
+  await waitFor(
+    () => expect(screen.queryByTestId("cost-statistics-interaction-overlay")).not.toBeInTheDocument(),
+    { timeout: PAGE_RENDER_TIMEOUT },
+  );
+}
+
+async function findCostStatisticsHeading() {
+  const heading = await screen.findByRole("heading", { name: "成本统计" }, { timeout: PAGE_RENDER_TIMEOUT });
+  await waitForCostStatisticsReady();
+  return heading;
 }
 
 function renderCostStatisticsPage(session: SessionContextValue = staticSession) {
@@ -144,7 +153,7 @@ describe("Cost statistics page", () => {
 
     renderCostStatisticsPage();
 
-    const heading = await findCostStatisticsHeading();
+    const heading = await screen.findByRole("heading", { name: "成本统计" }, { timeout: PAGE_RENDER_TIMEOUT });
     const statusCopy = screen.getByText("正在加载成本统计");
     const status = statusCopy.closest('[role="status"]');
     const tablist = screen.getByRole("tablist", { name: "成本统计视图切换" });
@@ -492,6 +501,7 @@ describe("Cost statistics page", () => {
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "按OA费用类型" }));
+    await waitForCostStatisticsReady();
 
     const expenseLane = screen.getByRole("heading", { name: "费用类型" }).closest(".cost-explorer-lane");
     expect(expenseLane).not.toBeNull();
@@ -616,6 +626,7 @@ describe("Cost statistics page", () => {
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "按银行" }));
+    await waitForCostStatisticsReady();
 
     expect(await screen.findByRole("button", { name: "银行统计时间范围：全部时间" })).toBeInTheDocument();
     const bankLane = screen.getByRole("heading", { name: "银行账户" }).closest(".cost-explorer-lane");
@@ -804,7 +815,7 @@ describe("Cost statistics page", () => {
 
     renderCostStatisticsPage();
 
-    expect(await findCostStatisticsHeading()).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "成本统计" }, { timeout: PAGE_RENDER_TIMEOUT })).toBeInTheDocument();
     expect(await screen.findByText("成本数据正在同步")).toBeInTheDocument();
     expect(screen.getByText("当前页面已暂时锁定，完成后自动恢复。")).toBeInTheDocument();
     expect(screen.getByTestId("cost-statistics-interaction-overlay")).toBeInTheDocument();

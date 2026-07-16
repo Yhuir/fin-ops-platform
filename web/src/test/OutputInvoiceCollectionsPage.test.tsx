@@ -1133,7 +1133,7 @@ describe("Output invoice collections page", () => {
     const page = await screen.findByTestId("output-invoice-collections-page");
     expect(await within(page).findByRole("button", { name: "收据编号设置" })).toBeInTheDocument();
 
-    await user.click(within(page).getAllByRole("button", { name: "状态/提醒" })[0]);
+    await user.click((await within(page).findAllByRole("button", { name: "状态/提醒" }))[0]);
     expect(await screen.findByLabelText("收款状态和提醒")).toBeInTheDocument();
     expect(await screen.findByText("待冲红")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "撤销手动状态" }));

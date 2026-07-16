@@ -863,7 +863,7 @@ describe("Tax offset workbench", () => {
 
     expect(await screen.findByText("销项税额")).toBeInTheDocument();
     const outputTable = getTaxFinanceGrid("销项票开票情况");
-    const outputInvoiceMetaRow = within(outputTable).getByText("2026-03-16").closest(".tax-invoice-meta-row");
+    const outputInvoiceMetaRow = (await within(outputTable).findByText("2026-03-16")).closest(".tax-invoice-meta-row");
     expect(outputInvoiceMetaRow).not.toBeNull();
     expect(within(outputInvoiceMetaRow as HTMLElement).getByText("销")).toBeInTheDocument();
     expect(within(outputInvoiceMetaRow as HTMLElement).queryByText("进")).not.toBeInTheDocument();

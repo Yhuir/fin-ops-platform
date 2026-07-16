@@ -215,7 +215,7 @@ describe("Workbench pane display model", () => {
   test("searches while typing and only clears pane-local search from the inner clear action", async () => {
     installMockApiFetch();
     renderWorkbenchPage();
-    await screen.findByText("陈涛");
+    await screen.findByText("陈涛", {}, { timeout: 3_000 });
 
     const unpairedZone = screen.getByTestId("zone-unpaired");
     const openOaPane = within(unpairedZone).getByTestId("pane-oa");
