@@ -648,8 +648,12 @@ describe("Cost statistics page", () => {
     await user.click(within(projectLane as HTMLElement).getByRole("button", { name: /云南溯源科技/ }));
     const transactionTable = screen.getByRole("grid", { name: "银行对应流水表" });
     expectProjectCostTable("银行对应流水表");
-    expect(within(transactionTable).getByRole("button", { name: "查看流水 cost-txn-001" })).toBeInTheDocument();
-    expect(within(transactionTable).getByRole("button", { name: "查看流水 cost-txn-002" })).toBeInTheDocument();
+    expect(
+      await within(transactionTable).findByRole("button", { name: "查看流水 cost-txn-001" }),
+    ).toBeInTheDocument();
+    expect(
+      await within(transactionTable).findByRole("button", { name: "查看流水 cost-txn-002" }),
+    ).toBeInTheDocument();
     expect(within(transactionTable).getByText("2026-03-10 21:27:55")).toHaveClass("cost-transaction-time-chip");
     expect(within(transactionTable).queryByRole("columnheader", { name: "时间" })).not.toBeInTheDocument();
 
