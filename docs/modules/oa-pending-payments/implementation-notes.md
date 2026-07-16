@@ -9,6 +9,12 @@
 - 验证：相关后端 246 tests 通过；隔离真实 PostgreSQL 应用 0001–0108 后，重复同一 canonical commit 证明第二次 `affected_scope_keys=()`、`upserted_completed_count=0`，application/status `updated_at` 与 outbox count 均保持不变。
 - 待生产门：发布后重跑 fresh 200/304、周期 sync 稳定窗口、三页面混合负载和 Page Audit；公网 `If-None-Match` 转发仍需用 live Nginx 配置证据闭合，不能用应用层自定义 query fallback。
 
+### 生产二次根因：freshness inventory 扫描已完成历史
+
+- 首轮发布后 100 次 fresh 首屏中 OA `p95=839.898ms`、`p99=927.939ms`；同机直连条件请求 30/30 返回 `304`，但 `p95=613.221ms`，证明瓶颈位于 ETag 前的 freshness gate，而非 rows/summary/传输。
+- `oa_pending_payment_query_state` 的 `all` target inventory 原先把该 event type 的全部历史 outbox scope（包括 `done`）做 UNION。修复后只保留当前 blocking queue 状态；canonical watermark 与现存 projection scope 仍完整覆盖 fresh inventory，pending/processing/failed/dead-lettered 继续 fail closed。
+- 该修复不新增表、索引、cache、worker 或 API，也不改变其它页面 query state；已完成历史仍保留在 durable queue 供审计/retention owner 使用，只是不再污染 OA 页面热路径。
+
 ## 2026-07-17 - 生产 rows freshness Port 装配修复
 
 - 生产证据：OA Page Audit 已返回 `pass/fresh/drained`，但相同发布版本的 `/api/oa-pending-payments/rows` 持续返回 `202/refreshing`，且 payload 没有 stale reasons；因此不是 source version、dirty/outbox 或 worker 未收敛。

@@ -74,6 +74,11 @@ class OaPendingPaymentReadModelQueryTests(unittest.TestCase):
         state_sql = connection.calls[0][0]
         target_inventory_sql = state_sql.split("select\n                target.scope_key", 1)[0]
         self.assertNotIn("select relation_scope.scope_key", target_inventory_sql)
+        self.assertIn("dirty.status in ('pending', 'processing', 'failed')", target_inventory_sql)
+        self.assertIn(
+            "outbox.status in ('pending', 'processing', 'failed', 'dead_lettered')",
+            target_inventory_sql,
+        )
         self.assertIn("'dead_lettered'", state_sql)
 
     def test_all_scope_query_state_returns_only_versions_common_to_every_month(self) -> None:

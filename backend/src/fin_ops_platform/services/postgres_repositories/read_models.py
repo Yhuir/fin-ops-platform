@@ -938,6 +938,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                 where requested.scope_key = 'all'
                   and dirty.tenant_id = requested.tenant_id
                   and dirty.scope_type = 'oa_pending_payment'
+                  and dirty.status in ('pending', 'processing', 'failed')
                 union
                 select outbox.scope_key
                 from job.outbox_events outbox, requested
@@ -945,6 +946,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                   and outbox.tenant_id = requested.tenant_id
                   and outbox.event_type = 'oa_pending_payment.read_model.refresh'
                   and outbox.scope_key is not null
+                  and outbox.status in ('pending', 'processing', 'failed', 'dead_lettered')
             )
             select
                 target.scope_key,

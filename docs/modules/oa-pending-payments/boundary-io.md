@@ -56,6 +56,7 @@
 - pending relation / bank claim：`app.oa_pending_payment_bank_relations`、`app.bank_transaction_relation_claims` 及事件表。
 - read model：OA 专属月份 rows/scopes；只由 `OaPendingPaymentSqlProjectionBuilder` 发布。
 - durable refresh truth：`job.outbox_events` 与 `job.read_model_dirty_scopes`；Redis/RabbitMQ 不能替代状态事实源。
+- `all` scope freshness inventory 只组合 canonical source watermark、现存 OA scope，以及当前 `pending/processing/failed/dead_lettered` queue scope；已 `done` 的 outbox 历史不属于当前 freshness I/O，不得进入页面热路径或改变 version token。
 
 ## 动态 freshness vector
 
