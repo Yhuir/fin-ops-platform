@@ -42,6 +42,10 @@
 - gate 同一 statement 既从 active OA outbox 枚举目标 scope，又为每个 scope 执行 blocking `exists`。现有 outbox 索引服务全局 App Status、worker claim 或历史指标，均包含其它 event type/status；没有与 OA 页面精确 predicate 同形的私有索引。
 - 修复新增 migration `0110`，只索引 `event_type='oa_pending_payment.read_model.refresh'` 且 status 为 `pending/processing/failed/dead_lettered` 的 `(tenant_id, scope_key)`；`done` 历史和其它 read model 不进入索引。它同时覆盖 target inventory 与 blocking probe，不改变 SQL、freshness 语义、API、queue、worker、连接池或其它页面 read model。
 - 50,000 条已完成 OA 历史加 1 条 active envelope 的隔离 PostgreSQL 计划为 `Index Only Scan`，执行 `0.026ms`、2 个 shared buffer、索引 `16kB`；0001–0110 全迁移和 canonical -> durable queue -> worker -> fresh rows/ETag 集成测试通过。发布后仍以三页 simultaneous mixed load 与操作后 Audit 作为关闭门，不用 isolated 成绩替代隔离性证据。
+- 生产发布：精确 SHA `d3fc16026` 的 Nightly CI 成功，release `main-d3fc16026-oa-outbox-index-20260717` 完成激活；0110 应用 `248ms`，API、dispatcher、22 workers、readiness、前端 hash 和公网 session route 全部通过。
+- 最终性能：浏览器等价持久连接 isolated 500 次为 `500/500 200/fresh`、`p50=127.936ms / p95=217.272ms / p99=262.054ms / max=393.551ms`；同一生产进程包含 mixed 样本的 rolling server profile 为 `p95=207.831ms / p99=272.479ms`，DB `p95=85.465ms`、连接获取 `p95=0.183ms`、固定 7 queries，达到服务端 `250/500ms` 门槛。
+- simultaneous 隔离：三页每页一个并发请求、50 轮共 150 次全部 `200/fresh`；成本与关联台公网持久连接通过各自门槛。OA 公网客户端为 `p95=357.947ms / p99=379.540ms`，但同窗服务端仍在 `250/500ms` 内；差值来自同一探针同时传输关联台大 payload 的 WAN/client 竞争，不是 DB pool、query count 或跨页 read model 污染。不得为该探针差值扩大共享池或修改关联台合同。
+- 操作后 Audit：test-owned turnover relation 通过正式 API confirm，旧 2026-07-13 场景的成本 query 参数/关联台数组位置和隔离页瞬时 202 已漂移，runner 因 post-probe 失败跳过自动撤回；随后复用确认的幂等响应取得精确 relation ID，并通过正式 turnover withdraw API恢复 `inactive`，未写 SQL。恢复后两轮三页 Audit 均为 `pass/fresh/drained`、`issues=0`、`database_snapshot=true`；OA Audit 约 `0.419s` 与 `0.374s`。
 
 ## 2026-07-17 - 生产 rows freshness Port 装配修复
 

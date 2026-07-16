@@ -44,6 +44,13 @@
 
 ## 历史记录
 
+## 2026-07-17 - 三页统一发布与可逆写后审计
+
+- 精确 SHA `d3fc16026` 经 Nightly CI 成功后部署；0110 生产 migration `248ms`，全部 runtime units 指向同一 release。
+- test-owned turnover relation confirm 已提交，12 个精确 durable events 全部 done；旧 2026-07-13 scenario 的 post-probe contract 已漂移，导致 runner 在撤回前失败。没有把失败隐藏为 pass：复用 committed idempotency response 取得精确 relation ID，走正式 withdraw API恢复 inactive，不执行 SQL或手工状态修改。
+- 恢复后成本统计、OA 待付款、关联台连续两轮 Page Audit 均 `pass/fresh/drained`、零 issues、同一数据库快照；三个页面 isolated 和服务端 simultaneous profile 均通过各自门槛。
+- 旧 `/tmp` scenario 仅是一次性生产测试输入，不属于 release 合同；后续写 smoke 必须从当前 `write_operation_scenario_discovery` 重新生成，禁止复用旧数组位置或旧成本 query 参数。
+
 ## 2026-07-17 - OA freshness active-outbox 私有热路径
 
 - 目标：修复 OA 待付款 isolated 已达标、但单页面 3 并发仍超过 `250ms` p95 的 freshness gate 长尾。

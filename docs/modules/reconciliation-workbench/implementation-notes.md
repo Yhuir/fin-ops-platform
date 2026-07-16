@@ -1,5 +1,12 @@
 # 关联台 实施记录
 
+## 2026-07-17 - 统一生产部署与写后验证闭环
+
+- 发布：精确 SHA `d3fc16026` 的 Nightly CI 成功后，生产 release `main-d3fc16026-oa-outbox-index-20260717` 完成 migration、API/dispatcher/22 workers、readiness、前端 hash 与公网 session route 门禁。
+- 性能：浏览器等价持久连接 isolated 100 次均为 `200/fresh`，combined initial 为 `p50=455.076ms / p95=607.207ms / p99=679.595ms`；三页 simultaneous 50 轮为 `p95=689.027ms / p99=725.643ms`，通过 `1000/1500ms` 门槛。
+- 写后正确性：test-owned turnover relation 经正式 API confirm 后由正式 withdraw API恢复为 `inactive`；撤回后的两轮关联台 Page Audit 均为 `pass/fresh/drained`、`issues=0`、`database_snapshot=true`，约 `1.560s` 与 `1.414s`。
+- 隔离：dashboard rolling profile 保持固定 13 queries、连接获取 p95 低于 1ms；没有修改 Workbench read model、连接池或响应合同来迁就 OA 页面性能。
+
 ## 2026-07-17 - combined initial 首屏 payload 收敛
 
 - 生产证据：`GET /api/workbench?month=all` fresh 响应解压后约 `2.84MB`、gzip 约 `171KB`，浏览器等价单次请求约 `1059ms`；现有 combined initial 每区返回 200 groups，传输、JSON 解析和可见成员物化成为首屏固定成本。

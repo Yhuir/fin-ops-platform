@@ -1,5 +1,12 @@
 # 成本统计 实施记录
 
+## 2026-07-17 - 统一生产部署与写后验证闭环
+
+- 发布：精确 SHA `d3fc16026` 通过 Nightly CI 后部署为 `main-d3fc16026-oa-outbox-index-20260717`；migration 0110 在生产应用耗时 `248ms`，API、dispatcher、22 个 worker、readiness、前端 hash 和公网 session route 全部通过。
+- 性能：浏览器等价持久连接 isolated 100 次均为 `200/fresh`，成本 explorer 为 `p50=62.776ms / p95=81.029ms / p99=152.244ms`；三页 simultaneous 50 轮仍为 `p95=228.575ms / p99=254.969ms`，通过 `300/500ms` 页面门槛。
+- Audit：部署后基线和可逆 turnover relation 正式 confirm + withdraw 后两轮 Page Audit 均为 `pass/fresh/drained`、`issues=0`、`database_snapshot=true`；写后两轮 Audit 分别约 `2.123s` 与 `2.250s`，低于 5 秒证明门槛。
+- 隔离：生产 dashboard 中成本 explorer 固定 3 queries，包含 simultaneous 样本的 rolling p95 为 `166.241ms`；未新增缓存、共享池改动或其它页面 read model 依赖。
+
 ## 2026-07-17 - 生产 explorer facet 百分比 placeholder 修复
 
 - 生产证据：精确 release 的多视图只读探针中，`time` 与 `bank_tag` 均为 `200/fresh`，但 `project`、`bank`、`expense_type` 的 `scope=all` 50/50 返回 500；正式 request-id 日志统一报告 psycopg 拒绝裸 `%` placeholder。
