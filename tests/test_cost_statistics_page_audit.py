@@ -203,6 +203,7 @@ class CostStatisticsPageAuditTests(unittest.TestCase):
         self.assertIn("source.id = case", proof_sql)
         self.assertIn("source.legacy_mongo_id = bank_identity.transaction_id", proof_sql)
         self.assertIn("source.id is distinct from case", proof_sql)
+        self.assertNotIn("group_payload", proof_sql)
 
         source = COST_PAGE_AUDIT_PATH.read_text(encoding="utf-8")
         for retired_helper in (

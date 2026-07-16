@@ -546,22 +546,7 @@ def _exact_set_issues(
         order by scope_key, activated_at desc nulls last, updated_at desc
     ),
     scoped_groups as (
-        select generation.generation_id, generation.scope_key, group_row.group_id, group_row.zone,
-               case
-                   when group_row.payload is not null then
-                       case
-                           when jsonb_typeof(group_row.payload->'normalized_payload') = 'object'
-                           then coalesce(group_row.payload->'normalized_payload', '{}'::jsonb)
-                           else group_row.payload
-                       end
-                   when group_row.raw_payload is not null then
-                       case
-                           when jsonb_typeof(group_row.raw_payload->'normalized_payload') = 'object'
-                           then coalesce(group_row.raw_payload->'normalized_payload', '{}'::jsonb)
-                           else group_row.raw_payload
-                       end
-                   else '{}'::jsonb
-               end as group_payload
+        select generation.generation_id, generation.scope_key, group_row.group_id, group_row.zone
         from active_generations generation
         join read_model.workbench_groups group_row
           on group_row.generation_id = generation.generation_id
@@ -571,7 +556,7 @@ def _exact_set_issues(
     ),
     member_payloads as (
         select group_row.generation_id, group_row.scope_key, group_row.group_id,
-               group_row.zone, group_row.group_payload,
+               group_row.zone,
                member.pane, member.row_id,
                case
                    when source.payload is not null then
@@ -613,11 +598,11 @@ def _exact_set_issues(
          and source.row_id = member.row_id
     ),
     group_facts as (
-        select generation_id, scope_key, group_id, zone, group_payload,
+        select generation_id, scope_key, group_id, zone,
                bool_or(pane = 'oa') as has_oa,
                bool_or(pane = 'bank') as has_bank
         from member_payloads
-        group by generation_id, scope_key, group_id, zone, group_payload
+        group by generation_id, scope_key, group_id, zone
     ),
     eligible_groups as (
         select generation_id, scope_key, group_id, zone
