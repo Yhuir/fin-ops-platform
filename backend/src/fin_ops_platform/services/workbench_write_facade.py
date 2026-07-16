@@ -179,7 +179,6 @@ class WorkbenchWriteFacade:
         resolved_row_types_for_row_ids: Callable[..., list[str]],
         can_confirm_link_row_types: Callable[..., bool],
         expand_confirm_link_row_ids_for_existing_context: Callable[..., list[str]],
-        amount_check_for_row_ids: Callable[..., dict[str, object]],
         resolve_rows_for_amount_check: Callable[..., list[dict[str, object]]],
         merge_relation_snapshots: Callable[..., list[dict[str, object]]],
         synthetic_existing_case_relations: Callable[..., list[dict[str, object]]],
@@ -187,13 +186,11 @@ class WorkbenchWriteFacade:
         scope_keys_for_row_ids: Callable[..., set[str]],
         scope_keys_for_rows: Callable[..., list[str]],
         resolve_live_rows_direct: Callable[..., list[dict[str, object]]],
-        resolve_live_row: Callable[..., dict[str, object]],
         relation_groups: Callable[..., list[dict[str, object]]],
         withdraw_rows_and_after_relations: Callable[..., tuple[list[dict[str, object]], list[dict[str, object]], list[str]]],
         amount_check_for_rows_by_type: Callable[[dict[str, list[dict[str, object]]]], dict[str, object]],
         transaction_amount_for_row_id: Callable[[str], object],
-        build_workbench_payload: Callable[..., dict[str, object]],
-        build_ignored_rows_payload: Callable[..., list[dict[str, object]]],
+        list_ignored_rows: Callable[..., list[dict[str, object]]],
         save_exception_cases_snapshot: Callable[[], None],
         persist_pair_relations: Callable[..., None],
         save_overrides_snapshot: Callable[..., None],
@@ -225,7 +222,6 @@ class WorkbenchWriteFacade:
         self._resolved_row_types_for_row_ids = resolved_row_types_for_row_ids
         self._can_confirm_link_row_types = can_confirm_link_row_types
         self._expand_confirm_link_row_ids_for_existing_context = expand_confirm_link_row_ids_for_existing_context
-        self._amount_check_for_row_ids = amount_check_for_row_ids
         self._resolve_rows_for_amount_check = resolve_rows_for_amount_check
         self._merge_relation_snapshots = merge_relation_snapshots
         self._synthetic_existing_case_relations = synthetic_existing_case_relations
@@ -233,13 +229,11 @@ class WorkbenchWriteFacade:
         self._scope_keys_for_row_ids = scope_keys_for_row_ids
         self._scope_keys_for_rows = scope_keys_for_rows
         self._resolve_live_rows_direct = resolve_live_rows_direct
-        self._resolve_live_row = resolve_live_row
         self._relation_groups = relation_groups
         self._withdraw_rows_and_after_relations = withdraw_rows_and_after_relations
         self._amount_check_for_rows_by_type = amount_check_for_rows_by_type
         self._transaction_amount_for_row_id = transaction_amount_for_row_id
-        self._build_workbench_payload = build_workbench_payload
-        self._build_ignored_rows_payload = build_ignored_rows_payload
+        self._list_ignored_rows = list_ignored_rows
         self._save_exception_cases_snapshot = save_exception_cases_snapshot
         self._persist_pair_relations = persist_pair_relations
         self._save_overrides_snapshot = save_overrides_snapshot
@@ -273,7 +267,7 @@ class WorkbenchWriteFacade:
             raise ValueError("confirm link requires rows from at least two panes.")
         row_ids = self._expand_confirm_link_row_ids_for_existing_context(row_ids, month=month)
         row_types = self._resolved_row_types_for_row_ids(row_ids, month=month)
-        rows = self._resolve_rows_for_amount_check(row_ids, month=month, allow_direct=True)
+        rows = self._resolve_rows_for_amount_check(row_ids, month=month)
         rows_by_type = self._rows_by_type(rows)
         amount_check = self._amount_check_for_rows_by_type(rows_by_type)
         before_relations = self._relation_read_snapshot_port.active_relations_for_row_ids(row_ids)
@@ -440,7 +434,7 @@ class WorkbenchWriteFacade:
 
         resolve_rows_started_at = monotonic()
         try:
-            selected_rows = self._resolve_rows_for_amount_check(row_ids, month=month, allow_direct=True)
+            selected_rows = self._resolve_rows_for_amount_check(row_ids, month=month)
             rows_by_type = self._rows_by_type(selected_rows)
             requested_row_types = self._row_types_from_rows(row_ids, selected_rows, month=month)
             amount_check = self._amount_check_for_rows_by_type(rows_by_type)
@@ -454,7 +448,7 @@ class WorkbenchWriteFacade:
                 )
             row_ids = self._expand_confirm_link_row_ids_for_existing_context(row_ids, month=month)
             if set(row_ids) != {str(row.get("id") or "") for row in selected_rows}:
-                selected_rows = self._resolve_rows_for_amount_check(row_ids, month=month, allow_direct=True)
+                selected_rows = self._resolve_rows_for_amount_check(row_ids, month=month)
                 rows_by_type = self._rows_by_type(selected_rows)
                 amount_check = self._amount_check_for_rows_by_type(rows_by_type)
             row_types = self._row_types_from_rows(row_ids, selected_rows, month=month)
@@ -3129,10 +3123,9 @@ class WorkbenchWriteFacade:
                 {"error": "invalid_ignore_row_request", "message": str(exc)},
             )
 
-        grouped_payload = self._build_workbench_payload(month)
         try:
-            row = self._resolve_live_row(grouped_payload, row_id)
-        except KeyError:
+            row = self._resolve_live_rows_direct([row_id], month_hint=month)[0]
+        except (IndexError, KeyError):
             return WorkbenchWriteResult(
                 HTTPStatus.NOT_FOUND,
                 {"error": "workbench_row_not_found", "message": row_id},
@@ -3200,7 +3193,7 @@ class WorkbenchWriteFacade:
 
         ignored_rows = {
             str(row["id"]): row
-            for row in self._build_ignored_rows_payload(month)
+            for row in self._list_ignored_rows(month)
         }
         row = ignored_rows.get(row_id)
         if row is None:

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 from http import HTTPStatus
 import unittest
 
+from fin_ops_platform.app.server import Application
 from fin_ops_platform.app.routes_workbench import (
     WorkbenchGroupDetailApiRoutes,
     WorkbenchReadApiRoutes,
@@ -44,8 +46,8 @@ class FakeWorkbenchQueryFacade:
         )
         return self.result
 
-    def summary(self, month: str | None) -> WorkbenchQueryResult:
-        self.calls.append({"endpoint": "summary", "month": month})
+    def initial_page(self, month: str | None, **kwargs: object) -> WorkbenchQueryResult:
+        self.calls.append({"endpoint": "initial", "month": month, **kwargs})
         return WorkbenchQueryResult(HTTPStatus.OK, {"month": month, "read_model_status": "fresh"})
 
     def refresh_status(self, month: str | None) -> WorkbenchQueryResult:
@@ -56,8 +58,8 @@ class FakeWorkbenchQueryFacade:
         self.calls.append({"endpoint": "groups", "month": month, **kwargs})
         return WorkbenchQueryResult(HTTPStatus.OK, {"month": month, "groups": [], "read_model_status": "fresh"})
 
-    def row_detail(self, month: str | None, *, row_id: str) -> WorkbenchQueryResult:
-        self.calls.append({"endpoint": "row_detail", "month": month, "row_id": row_id})
+    def row_detail(self, month: str | None, *, row_id: str, **kwargs: object) -> WorkbenchQueryResult:
+        self.calls.append({"endpoint": "row_detail", "month": month, "row_id": row_id, **kwargs})
         return WorkbenchQueryResult(
             HTTPStatus.OK,
             {
@@ -71,17 +73,7 @@ class FakeWorkbenchQueryFacade:
 class WorkbenchRowDetailApiRoutesTests(unittest.TestCase):
     def test_row_detail_delegates_all_month_to_query_facade_in_sql_runtime(self) -> None:
         facade = FakeWorkbenchQueryFacade()
-        routes = WorkbenchRowDetailApiRoutes(
-            etc_summary_row_detail=lambda _row_id: None,
-            live_row_detail=lambda row_id: (_ for _ in ()).throw(AssertionError(f"live fallback: {row_id}")),
-            row_month_scope_from_row_id=lambda _row_id: None,
-            cached_rows_resolver=lambda _row_ids, **_kwargs: {},
-            query_facade_provider=lambda: facade,
-            looks_like_oa_row_id=lambda _row_id: False,
-            legacy_row_detail=lambda row_id: (_ for _ in ()).throw(AssertionError(f"legacy fallback: {row_id}")),
-            requires_sql_read_model_runtime=lambda: True,
-            apply_row_override=lambda row: row,
-        )
+        routes = WorkbenchRowDetailApiRoutes(query_facade_provider=lambda: facade)
 
         payload = routes.get_payload("txn_imported_0396", month="all")
 
@@ -138,15 +130,41 @@ class WorkbenchGroupDetailApiRoutesTests(unittest.TestCase):
 
 
 class WorkbenchReadApiRoutesTests(unittest.TestCase):
-    def test_summary_delegates_to_query_facade(self) -> None:
+    def test_initial_whitelists_pane_queries_and_delegates_to_facade(self) -> None:
         facade = FakeWorkbenchQueryFacade()
         routes = WorkbenchReadApiRoutes(query_facade_provider=lambda: facade)
 
-        status, payload = routes.summary("2026-05")
+        status, payload = routes.initial(
+            "2026-05",
+            paired_query='{"sort":"bank:desc","search_by_pane":{"bank":"建行"}}',
+            unpaired_query='{"search":"供应商","search_mode":"linked_context"}',
+        )
 
         self.assertEqual(status, HTTPStatus.OK)
         self.assertEqual(payload, {"month": "2026-05", "read_model_status": "fresh"})
-        self.assertEqual(facade.calls, [{"endpoint": "summary", "month": "2026-05"}])
+        self.assertEqual(
+            facade.calls,
+            [
+                {
+                    "endpoint": "initial",
+                    "month": "2026-05",
+                    "paired_query": {"search_by_pane": {"bank": "建行"}, "sort": "bank:desc"},
+                    "unpaired_query": {"search": "供应商", "search_mode": "linked_context"},
+                }
+            ],
+        )
+
+    def test_initial_rejects_unknown_or_wrong_typed_fields_without_calling_facade(self) -> None:
+        for query in ('{"page":2}', '{"search":123}', '{"search_mode":"global"}'):
+            with self.subTest(query=query):
+                facade = FakeWorkbenchQueryFacade()
+                routes = WorkbenchReadApiRoutes(query_facade_provider=lambda: facade)
+
+                status, payload = routes.initial("all", paired_query=query)
+
+                self.assertEqual(status, HTTPStatus.BAD_REQUEST)
+                self.assertEqual(payload["error"], "invalid_workbench_initial_query")
+                self.assertEqual(facade.calls, [])
 
     def test_refresh_status_delegates_to_query_facade(self) -> None:
         facade = FakeWorkbenchQueryFacade()
@@ -224,6 +242,67 @@ class WorkbenchReadApiRoutesTests(unittest.TestCase):
             {"error": "invalid_workbench_groups_query", "message": "column_filters must be a JSON object."},
         )
         self.assertEqual(facade.calls, [])
+
+    def test_groups_forwards_expected_read_model_version(self) -> None:
+        facade = FakeWorkbenchQueryFacade()
+        routes = WorkbenchReadApiRoutes(query_facade_provider=lambda: facade)
+
+        status, _payload = routes.groups(
+            "all",
+            zone="paired",
+            expected_read_model_version=" generation-set-7 ",
+        )
+
+        self.assertEqual(status, HTTPStatus.OK)
+        self.assertEqual(facade.calls[0]["expected_read_model_version"], "generation-set-7")
+
+
+class WorkbenchActionGenerationGateTests(unittest.TestCase):
+    def test_every_workbench_preview_and_write_handler_stops_at_generation_gate(self) -> None:
+        handler_cases = {
+            "_handle_api_workbench_exception_preview": {},
+            "_handle_api_workbench_exception_apply": {"request_id": "req-1"},
+            "_handle_api_workbench_confirm_link": {"request_id": "req-1", "headers": {}},
+            "_handle_api_workbench_confirm_link_preview": {},
+            "_handle_api_workbench_mark_exception": {},
+            "_handle_api_workbench_cancel_link": {"request_id": "req-1", "headers": {}},
+            "_handle_api_workbench_withdraw_link_preview": {},
+            "_handle_api_workbench_withdraw_link": {"request_id": "req-1", "headers": {}},
+            "_handle_api_workbench_confirm_cash_pass_through": {"request_id": "req-1"},
+            "_handle_api_workbench_confirm_cash_ticket_purchase": {"request_id": "req-1"},
+            "_handle_api_workbench_cancel_cash_special": {"request_id": "req-1"},
+            "_handle_api_workbench_update_bank_exception": {},
+            "_handle_api_workbench_oa_bank_exception": {},
+            "_handle_api_workbench_confirm_personal_advance_repayment": {"request_id": "req-1"},
+            "_handle_api_workbench_cancel_exception": {},
+            "_handle_api_workbench_ignore_row": {},
+            "_handle_api_workbench_unignore_row": {},
+        }
+        request_payload = {
+            "month": "all",
+            "row_ids": ["bank-1"],
+            "expected_read_model_version": "generation-set-1",
+        }
+
+        for handler_name, kwargs in handler_cases.items():
+            with self.subTest(handler=handler_name):
+                app = object.__new__(Application)
+                guarded_payloads: list[dict[str, object]] = []
+                sentinel = Application._json_response(
+                    HTTPStatus.CONFLICT,
+                    {"error": "workbench_read_model_not_fresh"},
+                )
+
+                def guard(payload: dict[str, object]):
+                    guarded_payloads.append(dict(payload))
+                    return sentinel
+
+                app._workbench_write_freshness_guard = guard
+
+                response = getattr(app, handler_name)(json.dumps(request_payload), **kwargs)
+
+                self.assertIs(response, sentinel)
+                self.assertEqual(guarded_payloads, [request_payload])
 
 
 if __name__ == "__main__":

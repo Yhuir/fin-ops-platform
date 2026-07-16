@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any
 
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
+from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRecord
 from fin_ops_platform.services.postgres_repositories.oa_projection import is_completed_workflow_status
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
@@ -36,12 +37,20 @@ class OAProjectionSyncService:
         retention_cutoff_date_provider: Any | None = None,
         pending_payment_relation_promoter: Any | None = None,
         search_read_model_refresh_producer: Any | None = None,
+        payment_status_repository: Any | None = None,
+        pending_payment_source_snapshot_repository: Any | None = None,
     ) -> None:
+        if (payment_status_repository is None) != (pending_payment_source_snapshot_repository is None):
+            raise ValueError(
+                "payment_status_repository and pending_payment_source_snapshot_repository must be configured together."
+            )
         self._source_adapter = source_adapter
         self._projection_repository = projection_repository
         self._queue_repository = queue_repository
         self._retention_cutoff_date_provider = retention_cutoff_date_provider
         self._pending_payment_relation_promoter = pending_payment_relation_promoter
+        self._payment_status_repository = payment_status_repository
+        self._pending_payment_source_snapshot_repository = pending_payment_source_snapshot_repository
         self._search_read_model_refresh_producer = (
             search_read_model_refresh_producer
             or SearchReadModelRefreshProducer(
@@ -53,15 +62,39 @@ class OAProjectionSyncService:
         scope_key = self._event_scope_key(event)
         cutoff_month = self._retention_cutoff_month()
         records = self._sanitized_records(self._load_records(scope_key))
+        payment_statuses = self._load_payment_statuses()
         completed_records = [record for record in records if _is_completed_workflow(record)]
-        upserted_count = self._projection_repository.upsert_application_records(completed_records, scope_key=scope_key)
-        removed_stale_completed_count = self._delete_stale_completed_projection_records(
-            scope_key=scope_key,
-            completed_records=completed_records,
-            scanned_records=records,
-        )
-        removed_non_completed_count = self._delete_non_completed_projection_records(scope_key=scope_key, records=records)
-        pruned_months = self._prune_before_cutoff(scope_key, cutoff_month)
+        if self._pending_payment_source_snapshot_repository is not None:
+            source_snapshot_result = self._commit_pending_payment_source_snapshot(
+                scope_key=scope_key,
+                records=records,
+                payment_statuses=payment_statuses,
+                cutoff_month=cutoff_month,
+            )
+            upserted_count = int(getattr(source_snapshot_result, "upserted_completed_count", 0))
+            removed_stale_completed_count = int(
+                getattr(source_snapshot_result, "removed_stale_completed_count", 0)
+            )
+            removed_non_completed_count = int(
+                getattr(source_snapshot_result, "removed_non_completed_count", 0)
+            )
+            pruned_months = list(getattr(source_snapshot_result, "pruned_scope_keys", ()))
+        else:
+            upserted_count = self._projection_repository.upsert_application_records(
+                completed_records,
+                scope_key=scope_key,
+            )
+            removed_stale_completed_count = self._delete_stale_completed_projection_records(
+                scope_key=scope_key,
+                completed_records=completed_records,
+                scanned_records=records,
+            )
+            removed_non_completed_count = self._delete_non_completed_projection_records(
+                scope_key=scope_key,
+                records=records,
+            )
+            pruned_months = self._prune_before_cutoff(scope_key, cutoff_month)
+            source_snapshot_result = None
         promotion_result = self._promote_completed_pending_payment_relations(completed_records)
         result = {
             "sync_type": "oa_projection",
@@ -78,6 +111,21 @@ class OAProjectionSyncService:
             "pending_payment_relation_promotion_error_count": int(promotion_result.get("error_count") or 0),
             "pending_payment_relation_promotion_errors": list(promotion_result.get("errors") or []),
             "error_count": int(promotion_result.get("error_count") or 0),
+            "pending_payment_source_snapshot_count": (
+                int(getattr(source_snapshot_result, "payment_status_count", 0))
+                if source_snapshot_result is not None
+                else 0
+            ),
+            "pending_payment_admission_count": (
+                int(getattr(source_snapshot_result, "admission_count", 0))
+                if source_snapshot_result is not None
+                else 0
+            ),
+            "pending_payment_affected_scope_keys": (
+                list(getattr(source_snapshot_result, "affected_scope_keys", ()))
+                if source_snapshot_result is not None
+                else []
+            ),
         }
         record_sync_run = getattr(self._projection_repository, "record_sync_run", None)
         if callable(record_sync_run):
@@ -88,6 +136,41 @@ class OAProjectionSyncService:
             extra_months=[*pruned_months, *list(promotion_result.get("affected_months") or [])],
         )
         return result
+
+    def _load_payment_statuses(self) -> dict[str, OAPaymentStatusRecord] | None:
+        repository = self._payment_status_repository
+        if repository is None:
+            return None
+        list_statuses = getattr(repository, "list_payment_statuses", None)
+        if not callable(list_statuses):
+            raise RuntimeError("payment_status_repository must expose list_payment_statuses().")
+        statuses = list_statuses()
+        if not isinstance(statuses, dict):
+            raise RuntimeError("OA payment status source did not return a complete mapping.")
+        return statuses
+
+    def _commit_pending_payment_source_snapshot(
+        self,
+        *,
+        scope_key: str,
+        records: list[OAApplicationRecord],
+        payment_statuses: dict[str, OAPaymentStatusRecord] | None,
+        cutoff_month: str | None,
+    ) -> Any:
+        repository = self._pending_payment_source_snapshot_repository
+        commit_snapshot = getattr(repository, "commit_authoritative_snapshot", None)
+        if not callable(commit_snapshot):
+            raise RuntimeError(
+                "pending_payment_source_snapshot_repository must expose commit_authoritative_snapshot()."
+            )
+        if payment_statuses is None:
+            raise RuntimeError("A complete OA payment status mapping is required before snapshot replacement.")
+        return commit_snapshot(
+            scope_key=scope_key,
+            records=records,
+            payment_statuses=payment_statuses,
+            retention_cutoff_month=cutoff_month,
+        )
 
     @staticmethod
     def _event_scope_key(event: RuntimeQueueEvent) -> str:
@@ -277,7 +360,8 @@ class OAProjectionSyncService:
             return
         refresh_gateway.enqueue_many("workbench", target_scopes, reason="oa_projection_sync")
         self._search_read_model_refresh_producer.enqueue(target_scopes, reason="oa_projection_sync")
-        refresh_gateway.enqueue_many("oa_pending_payment", target_scopes, reason="oa_projection_sync")
+        if self._pending_payment_source_snapshot_repository is None:
+            refresh_gateway.enqueue_many("oa_pending_payment", target_scopes, reason="oa_projection_sync")
         refresh_gateway.enqueue_many("pending_invoice", ["expense:all", "income:all"], reason="oa_projection_sync")
         concrete_month_scopes = [scope for scope in target_scopes if scope != "all"] or ["all"]
         for read_model_key in OA_PROJECTION_SCOPED_READ_MODEL_DEPENDENTS:

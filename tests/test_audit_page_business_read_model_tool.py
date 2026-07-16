@@ -6,6 +6,7 @@ import unittest
 
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories import page_business_audit
+from fin_ops_platform.services.postgres_repositories.cost_statistics_page_audit import audit_cost_statistics_page
 from fin_ops_platform.tools import audit_page_business_read_model
 from tests.postgres_test_utils import (
     apply_test_migrations,
@@ -41,7 +42,10 @@ class FakeConnection:
 
     def fetch_all(self, sql: str, params: tuple[object, ...] = ()) -> list[dict[str, object]]:
         self.fetch_all_calls.append((sql, params))
-        return [dict(row) for row in self.rows_by_check.get(_check_name(sql), [])]
+        check_name = _check_name(sql)
+        if check_name == "oa_pending_payment_query_state" and check_name not in self.rows_by_check:
+            return [_fresh_oa_pending_payment_query_state_row()]
+        return [dict(row) for row in self.rows_by_check.get(check_name, [])]
 
     def execute(self, sql: str, params: tuple[object, ...] = ()) -> int:
         self.executed.append((sql, params))
@@ -593,9 +597,8 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
     def test_cost_statistics_expected_set_does_not_treat_ready_rows_as_missing(self) -> None:
         connection = FakeConnection()
 
-        audit_page_business_read_model.audit_page_business_read_model(
+        audit_cost_statistics_page(
             connection,
-            domain_key="cost_statistics",
         )
 
         canonical_sql = next(sql for sql, _params in connection.fetch_all_calls if "canonical_expected_set" in sql)
@@ -605,9 +608,8 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
     def test_cost_statistics_expected_set_uses_builder_payload_eligibility_contract(self) -> None:
         connection = FakeConnection()
 
-        audit_page_business_read_model.audit_page_business_read_model(
+        audit_cost_statistics_page(
             connection,
-            domain_key="cost_statistics",
         )
 
         canonical_sql = next(sql for sql, _params in connection.fetch_all_calls if "canonical_expected_set" in sql)
@@ -628,7 +630,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertNotIn("read_model.bank_detail_rows", expected_bank_flow_sql)
 
     def test_cost_statistics_reuses_workbench_integrity_proof_in_same_snapshot(self) -> None:
-        report = audit_page_business_read_model.audit_page_business_read_model(
+        report = audit_cost_statistics_page(
             FakeConnection(
                 rows_by_check={
                     "workbench_canonical_object_set": [
@@ -640,7 +642,6 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
                     ]
                 }
             ),
-            domain_key="cost_statistics",
         )
 
         self.assertEqual(report["audit_status"]["integrity"], "issues_found")
@@ -653,28 +654,31 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
     def test_cost_statistics_binds_month_upstream_versions_and_parent_shards(self) -> None:
         connection = FakeConnection(
             rows_by_check={
-                "cost_upstream_source_versions": [
+                "cost_source_version_proofs": [
                     {
+                        "issue_code": "cost_statistics_upstream_source_versions_mismatch",
                         "subject_id": "all:2026-06",
                         "scope_key": "all:2026-06",
-                        "embedded_workbench_source_versions": {"generation": "old"},
-                        "current_workbench_source_versions": {"generation": "new"},
-                    }
-                ],
-                "cost_parent_source_shards": [
+                        "details": {
+                            "embedded_workbench_source_versions": {"generation": "old"},
+                            "current_workbench_source_versions": {"generation": "new"},
+                        },
+                    },
                     {
+                        "issue_code": "cost_statistics_parent_source_shards_mismatch",
                         "subject_id": "all:all",
                         "scope_key": "all:all",
-                        "expected_shard_count": 2,
-                        "present_shard_count": 1,
-                    }
-                ],
+                        "details": {
+                            "expected_shard_count": 2,
+                            "present_shard_count": 1,
+                        },
+                    },
+                ]
             }
         )
 
-        report = audit_page_business_read_model.audit_page_business_read_model(
+        report = audit_cost_statistics_page(
             connection,
-            domain_key="cost_statistics",
         )
 
         self.assertEqual(report["audit_status"]["integrity"], "issues_found")
@@ -694,9 +698,8 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
     def test_cost_statistics_recalculates_bank_flow_and_group_summaries(self) -> None:
         connection = FakeConnection()
 
-        audit_page_business_read_model.audit_page_business_read_model(
+        audit_cost_statistics_page(
             connection,
-            domain_key="cost_statistics",
         )
 
         queried_sql = " ".join(sql for sql, _params in connection.fetch_all_calls)
@@ -707,6 +710,8 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertIn("bank_tag_label_path", queried_sql)
         self.assertIn("bank_flow_summary", queried_sql)
         self.assertIn("select project_scope || ':all', row_key, amount", queried_sql)
+        self.assertIn("read_model.cost_statistics_bank_flow_rows", queried_sql)
+        self.assertNotIn("bank_flow_time_rows", queried_sql)
         self.assertIn("expected_sub_label", queried_sql)
         self.assertIn("cost_group_summaries", queried_sql)
         self.assertIn("expected_projects", queried_sql)
@@ -715,22 +720,24 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertIn("bank_account_mappings", queried_sql)
 
     def test_cost_statistics_bank_account_mapping_gap_is_blocking(self) -> None:
-        report = audit_page_business_read_model.audit_page_business_read_model(
+        report = audit_cost_statistics_page(
             FakeConnection(
                 rows_by_check={
-                    "cost_bank_accounts": [
+                    "cost_business_value_proofs": [
                         {
+                            "issue_code": "cost_statistics_bank_accounts_mismatch",
                             "subject_id": "all:2026-06:建设银行:8106",
                             "scope_key": "all:2026-06",
-                            "bank_name": "建设银行",
-                            "account_last4": "8106",
-                            "expected_source": "settings",
-                            "projected_source": None,
+                            "details": {
+                                "bank_name": "建设银行",
+                                "account_last4": "8106",
+                                "expected_source": "settings",
+                                "projected_source": None,
+                            },
                         }
                     ]
                 }
             ),
-            domain_key="cost_statistics",
         )
 
         self.assertEqual(report["audit_status"]["integrity"], "issues_found")
@@ -780,6 +787,70 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertIn("consumer_relation_edge_equality", report["audit_contract"]["proof_checks"])
         self.assertIn("registered page consumer summaries", report["audit_contract"]["relation_edge_equality"])
 
+    def test_oa_pending_payment_audit_uses_the_same_dynamic_freshness_contract_as_the_page(self) -> None:
+        connection = FakeConnection()
+
+        report = audit_page_business_read_model.audit_page_business_read_model(
+            connection,
+            domain_key="oa_pending_payments",
+        )
+
+        fresh_gate_sql, _params = next(
+            (sql, params)
+            for sql, params in connection.fetch_all_calls
+            if "oa_pending_payment_query_state" in sql
+        )
+        target_inventory_sql = fresh_gate_sql.split("select\n                target.scope_key", 1)[0]
+        self.assertIn("source_watermark.version as source_snapshot_version", fresh_gate_sql)
+        self.assertIn("pending_relation_watermark.version as pending_relation_version", fresh_gate_sql)
+        self.assertIn("latest_dirty.source_version as dirty_source_version", fresh_gate_sql)
+        self.assertIn("relation_scope.source_versions as relation_source_versions", fresh_gate_sql)
+        self.assertIn("dead_lettered", fresh_gate_sql)
+        self.assertNotIn("select relation_scope.scope_key", target_inventory_sql)
+        base_versions = page_business_audit.oa_pending_payment_base_source_versions()
+        self.assertIn("oa_pending_payment_postgres_projector_version", base_versions)
+        self.assertEqual(report["label"], "OA 待付款核对")
+
+    def test_oa_pending_payment_dynamic_version_gap_is_freshness_not_false_integrity(self) -> None:
+        report = audit_page_business_read_model.audit_page_business_read_model(
+            FakeConnection(
+                rows_by_check={
+                    "oa_pending_payment_query_state": [
+                        {
+                            "scope_key": "2026-06",
+                            "actual_source_versions": {"version": 1},
+                            "expected_source_versions": {"version": 2},
+                        }
+                    ]
+                }
+            ),
+            domain_key="oa_pending_payments",
+        )
+
+        self.assertEqual(report["audit_status"]["integrity"], "pass")
+        self.assertEqual(report["audit_status"]["freshness"], "not_fresh")
+        self.assertEqual(report["audit_status"]["queue"], "drained")
+        self.assertEqual(
+            report["summary"]["issue_sample_counts_by_code"],
+            {"read_model_scope_not_fresh": 1},
+        )
+
+    def test_oa_pending_payment_expected_set_uses_native_ids_and_exact_month_membership(self) -> None:
+        connection = FakeConnection()
+
+        audit_page_business_read_model.audit_page_business_read_model(
+            connection,
+            domain_key="oa_pending_payments",
+        )
+
+        canonical_sql = next(sql for sql, _params in connection.fetch_all_calls if "canonical_expected_set" in sql)
+        orphan_sql = next(sql for sql, _params in connection.fetch_all_calls if "orphan_read_model_row" in sql)
+        self.assertIn("unnest(row.oa_ids)", canonical_sql)
+        self.assertNotIn("jsonb_array_elements", canonical_sql)
+        self.assertIn("projected.scope_key = canonical.scope_key", canonical_sql)
+        self.assertIn("source.scope_key = projected.scope_key", canonical_sql)
+        self.assertIn("unnest(row.oa_ids)", orphan_sql)
+
     def test_oa_pending_payment_shared_edge_missing_from_consumer_is_blocking(self) -> None:
         report = audit_page_business_read_model.audit_page_business_read_model(
             FakeConnection(
@@ -825,9 +896,8 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
     def test_cost_statistics_bank_flow_recalculation_uses_bank_detail_scope_owner(self) -> None:
         connection = FakeConnection()
 
-        audit_page_business_read_model.audit_page_business_read_model(
+        audit_cost_statistics_page(
             connection,
-            domain_key="cost_statistics",
         )
 
         bank_flow_sql = next(
@@ -888,25 +958,24 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
     def test_unregistered_consumer_contract_does_not_claim_consumer_equality(self) -> None:
         connection = FakeConnection()
 
-        report = audit_page_business_read_model.audit_page_business_read_model(
+        report = audit_cost_statistics_page(
             connection,
-            domain_key="cost_statistics",
         )
 
         queried_sql = " ".join(sql for sql, _params in connection.fetch_all_calls)
         self.assertNotIn("consumer_relation_edge_equality", queried_sql)
         self.assertNotIn("consumer_relation_edge_equality", report["audit_contract"]["proof_checks"])
 
-    def test_formatted_display_amounts_are_normalized_before_numeric_proof(self) -> None:
+    def test_numeric_proofs_use_typed_bank_rows_and_normalize_json_summaries(self) -> None:
         connection = FakeConnection()
 
-        audit_page_business_read_model.audit_page_business_read_model(
+        audit_cost_statistics_page(
             connection,
-            domain_key="cost_statistics",
         )
 
         queried_sql = " ".join(sql for sql, _params in connection.fetch_all_calls)
-        self.assertIn("replace(member.value->>'amount', ',', '')", queried_sql)
+        self.assertNotIn("replace(member.value->>'amount', ',', '')", queried_sql)
+        self.assertIn("sum(abs(row.amount))", queried_sql)
         self.assertIn("replace(row.payload->>'amount', ',', '')", queried_sql)
         self.assertIn("model.payload->'payload'->'summary'->>'total_amount'", queried_sql)
 
@@ -1022,6 +1091,43 @@ def _check_name(sql: str) -> str:
     if marker not in sql:
         return ""
     return sql.split(marker, 1)[1].split("*/", 1)[0].strip()
+
+
+def _fresh_oa_pending_payment_query_state_row() -> dict[str, object]:
+    base_versions = page_business_audit.oa_pending_payment_base_source_versions()
+    expected_versions = {
+        **base_versions,
+        "oa_pending_payment_source_snapshot_version": 1,
+        "completed_oa_signature": "completed",
+        "in_progress_admission_signature": "admission",
+        "payment_status_signature": "payment",
+        "oa_pending_payment_source_signature": "source",
+        "oa_pending_payment_relation_version": 1,
+        "oa_pending_payment_event_source_version": 1,
+        "workbench_relation_source_versions": {"relation": 1},
+    }
+    return {
+        "scope_key": "2026-06",
+        "row_count": 1,
+        "generated_at": "2026-07-16T00:00:00Z",
+        "cache_status": "fresh",
+        "actual_source_versions": expected_versions,
+        "source_status": "success",
+        "source_snapshot_version": 1,
+        "source_payload": {
+            "completed_oa_signature": "completed",
+            "admission_signature": "admission",
+            "payment_status_signature": "payment",
+            "source_signature": "source",
+        },
+        "pending_relation_version": 1,
+        "relation_scope_exists": True,
+        "relation_cache_status": "fresh",
+        "relation_source_versions": {"relation": 1},
+        "dirty_status": "done",
+        "dirty_source_version": 1,
+        "outbox_blocking": False,
+    }
 
 
 if __name__ == "__main__":

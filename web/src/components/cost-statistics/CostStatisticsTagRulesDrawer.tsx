@@ -13,6 +13,7 @@ type CostStatisticsTagRulesDrawerProps = {
   selectedCodes: string[];
   loading: boolean;
   saving: boolean;
+  interactionLocked: boolean;
   error: string | null;
   syncMessage: string | null;
   canSave: boolean;
@@ -48,6 +49,7 @@ export default function CostStatisticsTagRulesDrawer({
   selectedCodes,
   loading,
   saving,
+  interactionLocked,
   error,
   syncMessage,
   canSave,
@@ -66,21 +68,21 @@ export default function CostStatisticsTagRulesDrawer({
 
   return (
     <AppDrawer
-      ariaBusy={saving || loading}
+      ariaBusy={saving || loading || interactionLocked}
       className="cost-tag-rules-drawer"
       closeDisabled={saving}
       footer={(
-        <div className="cost-tag-rules-footer">
+        <div className="cost-tag-rules-footer" inert={interactionLocked ? true : undefined}>
           <div className="cost-tag-rules-footer-status" role="status">
             {syncMessage || (rules ? `已选 ${selectedCount} / ${tagCount}` : "")}
           </div>
           <div className="cost-tag-rules-footer-actions">
-            <button className="cost-drawer-secondary-button" disabled={saving} onClick={onClose} type="button">
+            <button className="cost-drawer-secondary-button" disabled={saving || interactionLocked} onClick={onClose} type="button">
               取消
             </button>
             <button
               className="cost-drawer-primary-button"
-              disabled={!rules || loading || saving || !canSave}
+              disabled={!rules || loading || saving || interactionLocked || !canSave}
               onClick={onSave}
               type="button"
             >
@@ -95,46 +97,48 @@ export default function CostStatisticsTagRulesDrawer({
       title="成本统计标签规则"
       width={460}
     >
-      {loading ? <div className="cost-tag-rules-state">正在加载标签规则...</div> : null}
-      {error ? <div className="cost-tag-rules-state error">{error}</div> : null}
-      {!loading && rules ? (
-        <div className="cost-tag-rules-list" role="group" aria-label="成本统计标签选择">
-          {groups.map((group) => {
-            const codes = group.tags.map((tag) => tag.code);
-            const checkedCount = codes.filter((code) => selectedSet.has(code)).length;
-            const checked = checkedCount === codes.length && codes.length > 0;
-            const indeterminate = checkedCount > 0 && checkedCount < codes.length;
-            return (
-              <section className="cost-tag-rules-group" key={group.key}>
-                <label className="cost-tag-rules-main">
-                  <input
-                    checked={checked}
-                    data-indeterminate={indeterminate ? "true" : undefined}
-                    disabled={saving}
-                    onChange={(event) => onToggleGroup(codes, event.currentTarget.checked)}
-                    type="checkbox"
-                  />
-                  <span>{group.label}</span>
-                  <em>{checkedCount}/{codes.length}</em>
-                </label>
-                <div className="cost-tag-rules-children">
-                  {group.tags.map((tag) => (
-                    <label className="cost-tag-rules-child" key={tag.code}>
-                      <input
-                        checked={selectedSet.has(tag.code)}
-                        disabled={saving}
-                        onChange={() => onToggleCode(tag.code)}
-                        type="checkbox"
-                      />
-                      <span>{tagLeafLabel(tag)}</span>
-                    </label>
-                  ))}
-                </div>
-              </section>
-            );
-          })}
-        </div>
-      ) : null}
+      <div className="cost-tag-rules-body" inert={interactionLocked ? true : undefined}>
+        {loading ? <div className="cost-tag-rules-state">正在加载标签规则...</div> : null}
+        {error ? <div className="cost-tag-rules-state error">{error}</div> : null}
+        {!loading && rules ? (
+          <div className="cost-tag-rules-list" role="group" aria-label="成本统计标签选择">
+            {groups.map((group) => {
+              const codes = group.tags.map((tag) => tag.code);
+              const checkedCount = codes.filter((code) => selectedSet.has(code)).length;
+              const checked = checkedCount === codes.length && codes.length > 0;
+              const indeterminate = checkedCount > 0 && checkedCount < codes.length;
+              return (
+                <section className="cost-tag-rules-group" key={group.key}>
+                  <label className="cost-tag-rules-main">
+                    <input
+                      checked={checked}
+                      data-indeterminate={indeterminate ? "true" : undefined}
+                      disabled={saving || interactionLocked}
+                      onChange={(event) => onToggleGroup(codes, event.currentTarget.checked)}
+                      type="checkbox"
+                    />
+                    <span>{group.label}</span>
+                    <em>{checkedCount}/{codes.length}</em>
+                  </label>
+                  <div className="cost-tag-rules-children">
+                    {group.tags.map((tag) => (
+                      <label className="cost-tag-rules-child" key={tag.code}>
+                        <input
+                          checked={selectedSet.has(tag.code)}
+                          disabled={saving || interactionLocked}
+                          onChange={() => onToggleCode(tag.code)}
+                          type="checkbox"
+                        />
+                        <span>{tagLeafLabel(tag)}</span>
+                      </label>
+                    ))}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+        ) : null}
+      </div>
     </AppDrawer>
   );
 }

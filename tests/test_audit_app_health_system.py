@@ -10,6 +10,8 @@ from fin_ops_platform.services.api_performance_metrics import ApiPerformanceReco
 from fin_ops_platform.services.app_settings_service import AppSettingsService
 from fin_ops_platform.services.external_control_evidence import ExternalControlEvidenceService
 from fin_ops_platform.services.operations_dashboard import OperationsDashboardService
+from fin_ops_platform.services.oa_pending_payment_read_model_refresh import OaPendingPaymentReadModelRefreshService
+from fin_ops_platform.services.oa_pending_payment_sql_projection import OaPendingPaymentSqlProjectionBuilder
 from fin_ops_platform.services.page_audit_registry import PAGE_AUDIT_REGISTRY
 from fin_ops_platform.services.app_status_read_model_registry import APP_STATUS_READ_MODEL_REGISTRY
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
@@ -20,6 +22,12 @@ from fin_ops_platform.services.postgres_repositories.external_control_evidence i
     PostgresExternalControlEvidenceRepository,
 )
 from fin_ops_platform.services.postgres_repositories.operations_audit import PostgresOperationsAuditRepository
+from fin_ops_platform.services.postgres_repositories.oa_pending_payment_relation import PostgresOaPendingPaymentRelationRepository
+from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_snapshot import (
+    PostgresOaPendingPaymentSourceSnapshotRepository,
+)
+from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
+from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
 from fin_ops_platform.services.runtime_worker_registry import worker_registrations
 from postgres_test_utils import apply_test_migrations, require_postgres_test_database_url, truncate_test_database
 from tests.external_evidence_test_support import manifest_payload
@@ -381,8 +389,15 @@ class AppHealthSystemAuditPostgresTests(unittest.TestCase):
         parent_payload = {
             "payload": {
                 "summary": {"row_count": 0, "transaction_count": 0, "total_amount": "0"},
-                "bank_flow_summary": {"row_count": 0, "transaction_count": 0, "total_amount": "0"},
-                "bank_flow_time_rows": [],
+                "bank_flow_summary": {
+                    "row_count": 0,
+                    "transaction_count": 0,
+                    "total_amount": "0",
+                    "expense_amount": "0",
+                    "income_amount": "0",
+                    "expense_transaction_count": 0,
+                    "income_transaction_count": 0,
+                },
                 "bank_accounts": [],
                 "projects": [],
                 "expense_types": [],
@@ -422,6 +437,38 @@ class AppHealthSystemAuditPostgresTests(unittest.TestCase):
                     json.dumps({"normalized_payload": payload}),
                 ),
             )
+        queue = RuntimeQueueRepository(self.connection)
+        read_models = PostgresReadModelRepository(self.connection)
+        read_models.mark_workbench_relation_scope_empty(
+            scope_key="all",
+            tenant_id="default",
+            source_versions={"system_audit_seed": 1},
+        )
+        PostgresOaPendingPaymentSourceSnapshotRepository(
+            self.connection,
+            queue_repository=queue,
+            pending_relation_repository=PostgresOaPendingPaymentRelationRepository(self.connection),
+        ).commit_authoritative_snapshot(
+            scope_key="all",
+            tenant_id="default",
+            records=[],
+            payment_statuses={},
+        )
+        event = queue.claim_next(
+            "system-audit-test",
+            event_types=["oa_pending_payment.read_model.refresh"],
+        )
+        if event is None:
+            raise AssertionError("OA pending payment clean-system seed did not enqueue a refresh event.")
+        result = OaPendingPaymentReadModelRefreshService(
+            projection_builder=OaPendingPaymentSqlProjectionBuilder(
+                connection=self.connection,
+                read_model_repository=read_models,
+            ),
+            queue_repository=queue,
+        ).handle_runtime_event(event)
+        if not queue.complete(event.event_id, "system-audit-test", result_payload=result):
+            raise AssertionError("OA pending payment clean-system seed did not complete its refresh event.")
 
     @staticmethod
     def _dashboard(connection: object) -> dict[str, object]:

@@ -1,30 +1,30 @@
-# OA待付款核对 Spec-first Browser E2E 合同
+# OA 待付款核对 Spec-first E2E
 
-本文定义 `/oa-pending-payments` 的浏览器端验收合同。测试必须从 OA 申请、支出流水、进项发票、Workbench relation 和 read model freshness 的业务流程出发。
+日期：2026-07-16
 
-## 页面不变量
+## 全局合同
 
-- 页面进入 `/oa-pending-payments` 后必须出现 `oa-pending-payments-page` 和 `OA待付款核对表格`，不能停在 route loading。
-- rows、filter-options 和 detail 必须经过 `oa_pending_payment` read model fresh/source-version gate；非 fresh 只能展示 refreshing/unavailable 语义，不能用旧 rows 伪装 fresh。
-- `paymentStatus` 由后端 lifecycle/read model 给出，前端不得按金额字段自行推断。
-- 只有 Workbench active linked relation 或 OA 待付款 active pending relation 才能驱动已支付状态和 OA MySQL 写回；未正式化的自动匹配 decision 或历史 candidate 兼容值不得展示为第三种关系状态。
-- 表格在真实浏览器中不能出现横向溢出遮挡关键操作；详情 drawer、筛选菜单和规则 drawer 必须可打开/关闭。
+- 首屏只请求 `GET /api/oa-pending-payments/rows`；旧 filter endpoint请求次数必须为 0。
+- `200` 只展示 fresh payload；`202` 立即隐藏旧 rows，等待精确 operation barrier 后重读；不得 stale-while-revalidate。
+- 页面可见时每 500ms 最多一个 `If-None-Match` 条件请求；隐藏时暂停，恢复可见立即检查。
+- `304` 不改变页面；query变化不得复用旧 ETag，晚到响应不得覆盖新 query。
+- `paymentStatus` 由后端给出且只有 paid/unpaid；页面不得按金额推断。
+- Audit只显示 OA 专属中文状态，不影响其它页面共享组件。
 
-## Spec ID
+## 场景
 
-| Spec ID | 用户流程 | 必须断言 |
+| Spec ID | 场景 | 验收 |
 | --- | --- | --- |
-| `OA-PENDING-E2E-001` | 打开 completed 视图 | 页面 ready；表格显示 OA、支付状态、流水、发票四组；首屏 rows/filter-options 请求成功；无横向滚动遮挡。 |
-| `OA-PENDING-E2E-002` | 搜索、筛选、排序 | 搜索关键字、支付状态、项目、发票方筛选和交易时间排序都进入 rows query；分页大小保持有界。 |
-| `OA-PENDING-E2E-003` | 打开 OA/流水/发票详情和规则抽屉 | 三类详情 drawer 展示对应事实；规则 drawer 请求待找发票规则；规则保存成功后必须等待 `oa_pending_payment` operation barrier fresh 再读取 rows；关闭后页面恢复。 |
-| `OA-PENDING-E2E-004` | 未正式化 decision 负面语义 | 未正式化自动匹配 decision 或历史 candidate 兼容值不能驱动 `已支付`，不能触发自动写回 mutation；页面只把 active linked relation 当作已关联证据。 |
-| `OA-PENDING-E2E-005` | Workbench confirm -> OA pending linked fan-out | 关联台确认 OA+银行流水+进项发票后，返回 OA 待付款重新请求 rows；目标行从 `未支付` 变为 `已支付`，候选标记消失，显示 `关联台已确认`、支出流水、发票号和金额。 |
-| `OA-PENDING-E2E-006` | in-progress OA 已支付未写回逐行写回 | 页面进入后不得自动调用写接口；已存在 active pending relation、支付状态为 `已支付` 且写回状态为 `未写回` 的行必须显示行内“写回”按钮；点击后调用 `writeback-paid`，成功后刷新为 `已写回` 并隐藏按钮；失败时保留 `未写回` 且显示错误，不允许半写。 |
-| `OA-PENDING-E2E-007` | in-progress OA 人工关联支出流水并自动写回 | 从已选 OA 打开抽屉时，候选请求必须携带 `oa_row_ids`，候选池返回全部支出流水并支持全部、未配对、已配对、已关联进行中 OA 分类筛选和分页浏览；已配对/已关联进行中 OA 行禁选；提交创建 OA 待付款独立 pending relation 和 bank claim，不写 Workbench active relation，并在后端校验通过时自动写回 OA MySQL pay status；成功后等待 `oa_pending_payment` operation barrier fresh 再刷新 rows。 |
-| `OA-PENDING-E2E-008` | read model/detail 非 fresh | rows/detail refreshing/stale 时显示诊断或详情暂不可用；不能把空 rows 当真实空态。 |
+| `OA-PENDING-E2E-001` | fresh首屏 | 一次 rows聚合请求；四分组表格、summary、filters和分页正确；无旧 filter请求 |
+| `OA-PENDING-E2E-002` | 搜索/筛选/排序/分页/view mode | 所有条件进入同一 rows query；新 query取消旧检查并使用自己的 ETag |
+| `OA-PENDING-E2E-003` | OA/银行/发票/relation detail | 用户打开 drawer时惰性读取；non-fresh detail明确不可用，不访问 live source |
+| `OA-PENDING-E2E-004` | 可见页无变化 | 500ms条件请求返回304；rows不闪烁，最多一个in-flight |
+| `OA-PENDING-E2E-005` | 页面保持打开时 source变化 | 条件请求返回202后旧 rows立即消失；barrier fresh后一次200显示新版本，无人工刷新 |
+| `OA-PENDING-E2E-006` | writeback-paid | 首屏不自动写；合法行单次命令；成功后隐藏旧 rows、等待barrier并显示written；409/503明确且不伪成功 |
+| `OA-PENDING-E2E-007` | in-progress link-bank | 候选携带 oa_row_ids；只允许未占用outflow；创建pending relation，金额匹配时写回；barrier后新rows，不污染Workbench active relation |
+| `OA-PENDING-E2E-008` | tab隐藏/恢复 | 隐藏期间无条件请求；恢复时立即检查；unmount不replay |
+| `OA-PENDING-E2E-009` | Audit | pass/checking/integrity fail/timeout/unavailable文案正确，issue samples去重且不显示内部拼接文案 |
 
-## Read Model / Worker 合同
+## 基础设施边界
 
-- Browser mock 必须显式表达 linked/unlinked、fresh/refreshing/stale 语义；历史 candidate 兼容样例必须按 unlinked 负面路径覆盖。
-- 后端/API 测试必须覆盖 `oa_pending_payment.read_model.refresh` dirty scope、source version、all -> month fan-out、worker stale event skip 和 App Status。
-- 本地 Browser E2E 使用 deterministic mock；真实 OA Mongo/MySQL、PostgreSQL、RabbitMQ/Redis/systemd worker drain 仍需 staging 或运维 smoke。
+本地 Playwright使用 deterministic mock，只证明浏览器合同。真实 OA Mongo/MySQL、PostgreSQL snapshot/outbox、RabbitMQ/systemd专属 worker、生产数据量和 `T0 -> T1` 性能必须在统一部署后单独验收。

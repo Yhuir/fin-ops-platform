@@ -1,5 +1,15 @@
 # 批量账务 实施记录
 
+## 2026-07-16 - 删除 generic Workbench full-page fallback
+
+- 目标：让批量账务未提交列表、submit/withdraw 窄上下文、已提交银行上下文只读取各自现有 SQL I/O，消除 wiring 缺失时同步构建 Workbench 全页 payload 的慢链路。
+- 影响范围：`BatchAccountingService` loader contract、`Application._batch_accounting_service(...)` wiring、API error mapping、Batch API/边界测试和模块文档。
+- 关键决策：不新增 read model、projection、gateway、adapter 或缓存。复用 `load_batch_accounting_workbench_payload`、`load_batch_accounting_submit_workbench_payload`、`load_batch_accounting_submitted_bank_workbench_payload`；每个操作只要求自己的 loader。
+- 旧链路删除：移除 constructor 的 `grouped_workbench_loader` 和 `_build_workbench_row_context(...)` 对 Workbench full-page builder 的 fallback；测试 fixture 也不再 patch `_build_api_workbench_payload`。
+- 失败合同：对应 loader 缺失或返回非 dict 时返回 `503 batch_accounting_workbench_read_model_unavailable`；不得用空 rows 伪成功，也不得跨用另一类 loader。旧 relation 缺 scope metadata 时仍只尝试 submit 窄 loader，失败后按 relation 自带 month/all 既有合同回退，不读取全页。
+- 测试覆盖：新增 unsubmitted/submit 缺 loader 503、submitted 不跨用 unsubmitted loader；扩展 runtime boundary guard 锁定三个专属 loader 并禁止 generic/full builder 回归。
+- 未测风险：真实 PostgreSQL 大年份查询计划、worker drain 和生产 p95 等所有 thread 完成后统一部署再验证；本轮不部署。
+
 ## 2026-07-05 - 模块化 close 与旧 submitted/repair 链路删除
 
 - 目标：完成批量账务页面模块化 close，确保页面/API/service/read model 依赖边界清晰，旧读写链路不再污染当前批量账务链路。

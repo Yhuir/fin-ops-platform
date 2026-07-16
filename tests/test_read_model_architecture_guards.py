@@ -5,7 +5,6 @@ import re
 import unittest
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_ROOT = REPO_ROOT / "backend" / "src" / "fin_ops_platform"
 WEB_SOURCE_ROOT = REPO_ROOT / "web" / "src"
@@ -73,12 +72,7 @@ DIRECT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
         "read_model_status=fresh",
     ): (1, "worker rebuild publishes a freshly generated payload before writing a fresh cache envelope."),
     (
-        "backend/src/fin_ops_platform/services/cost_tax_sql_projection.py",
-        "CostStatisticsSqlProjectionBuilder._publish_cost_statistics_scope",
-        "dict read_model_status=fresh",
-    ): (1, "projection builder publishes the read model it just rebuilt."),
-    (
-        "backend/src/fin_ops_platform/services/cost_tax_sql_projection.py",
+        "backend/src/fin_ops_platform/services/tax_offset_sql_projection.py",
         "TaxOffsetSqlProjectionBuilder.rebuild_tax_offset_read_model_scope",
         "dict read_model_status=fresh",
     ): (1, "projection builder publishes the read model it just rebuilt."),
@@ -134,34 +128,14 @@ DIRECT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
     ): (2, "read-model rows are source-version checked; legacy live fallback is not a read-model projection."),
     (
         "backend/src/fin_ops_platform/services/oa_pending_payment_read_model_service.py",
-        "OaPendingPaymentReadModelService.rows",
+        "OaPendingPaymentReadModelService.conditional_rows",
         "read_model_status=fresh",
     ): (1, "service checks refresh_status and source versions before marking rows fresh."),
     (
         "backend/src/fin_ops_platform/services/oa_pending_payment_read_model_service.py",
-        "OaPendingPaymentReadModelService.rows",
+        "OaPendingPaymentReadModelService.conditional_rows",
         "readModelStatus=fresh",
     ): (1, "camelCase alias for the same fresh-gated rows payload."),
-    (
-        "backend/src/fin_ops_platform/services/oa_pending_payment_read_model_service.py",
-        "OaPendingPaymentReadModelService.all_rows",
-        "dict read_model_status=fresh",
-    ): (1, "all-rows helper returns fresh only after each page is fresh."),
-    (
-        "backend/src/fin_ops_platform/services/oa_pending_payment_read_model_service.py",
-        "OaPendingPaymentReadModelService.all_rows",
-        "dict readModelStatus=fresh",
-    ): (1, "camelCase alias for the same fresh-gated all-rows payload."),
-    (
-        "backend/src/fin_ops_platform/services/oa_pending_payment_read_model_service.py",
-        "OaPendingPaymentReadModelService.filter_options",
-        "read_model_status=fresh",
-    ): (1, "filter options are derived only after all_rows returned fresh."),
-    (
-        "backend/src/fin_ops_platform/services/oa_pending_payment_read_model_service.py",
-        "OaPendingPaymentReadModelService.filter_options",
-        "readModelStatus=fresh",
-    ): (1, "camelCase alias for the same fresh-gated filter-options payload."),
     (
         "backend/src/fin_ops_platform/services/oa_pending_payment_read_model_service.py",
         "OaPendingPaymentReadModelService._detail",
@@ -287,13 +261,21 @@ DIRECT_REFRESH_ENQUEUE_ALLOWLIST: dict[tuple[str, str], str] = {
         "CostStatisticsQueryService._refreshing_month_payload",
     ): "production SQL month miss delegates to CostStatisticsRuntimeService gateway wrapper.",
     (
+        "backend/src/fin_ops_platform/services/cost_statistics_query_service.py",
+        "CostStatisticsQueryService._cost_statistics_non_fresh_gate_payload",
+    ): "dependency-bound cost gate mismatch delegates to the same runtime gateway before any payload read.",
+    (
         "backend/src/fin_ops_platform/services/cost_statistics_runtime_service.py",
         "CostStatisticsRuntimeService.enqueue_refresh_for_months",
-    ): "runtime cache invalidation wrapper calls same-service gateway boundary after deleting fresh-gated cache.",
+    ): "runtime month expansion delegates to the cost refresh gateway without owning local read-model state.",
     (
         "backend/src/fin_ops_platform/services/cost_statistics_runtime_service.py",
         "CostStatisticsRuntimeService.enqueue_refresh_for_scope_keys",
-    ): "runtime scope invalidation wrapper normalizes scope keys and calls same-service gateway boundary after deleting fresh-gated cache.",
+    ): "legacy warmup bridge normalizes scope keys and delegates to the cost refresh gateway.",
+    (
+        "backend/src/fin_ops_platform/services/cost_statistics_runtime_service.py",
+        "CostStatisticsRuntimeService._enqueue_invalidation_scopes",
+    ): "cost invalidation records only gateway-accepted durable dirty scopes and owns no local read-model state.",
     (
         "backend/src/fin_ops_platform/services/tax_offset_query_service.py",
         "TaxOffsetQueryService.get_month_payload",
@@ -415,7 +397,8 @@ class ReadModelArchitectureGuardTests(unittest.TestCase):
         self.assertNotIn("_cost_statistics_read_model_service.snapshot()", helper_body)
         self.assertNotIn("tax_offset_read_models", helper_body)
         self.assertNotIn("_tax_offset_read_model_service.snapshot()", helper_body)
-        self.assertIn("def _persist_cost_statistics_read_models_best_effort(", server_source)
+        self.assertNotIn("def _persist_cost_statistics_read_models_best_effort(", server_source)
+        self.assertNotIn("_cost_statistics_read_model_service", server_source)
         self.assertIn("def _persist_tax_offset_read_models_best_effort(", server_source)
 
     def test_broad_state_persist_does_not_write_import_canonical_or_session_facts(self) -> None:

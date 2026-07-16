@@ -1,7 +1,5 @@
 import unittest
 
-from fin_ops_platform.services.cost_statistics_read_model_service import COST_STATISTICS_READ_MODEL_SCHEMA_VERSION
-
 
 class QueueRecorder:
     def __init__(self) -> None:
@@ -11,43 +9,16 @@ class QueueRecorder:
         self.refreshes.append((scope_type, scope_key, reason))
 
 
-class RedisRecorder:
-    def __init__(self) -> None:
-        self.deletes: list[str] = []
-
-    def delete(self, key: str) -> bool:
-        self.deletes.append(key)
-        return True
-
-
-class EmptyCostReadModelService:
-    def invalidate_months(self, *_args, **_kwargs) -> list[str]:
-        return []
-
-    def snapshot(self) -> dict[str, object]:
-        return {"read_models": {}}
-
-    def scope_key(self, month: str, project_scope: str) -> str:
-        return f"{project_scope}:{month}"
-
-
 class CostStatisticsRuntimeServiceTests(unittest.TestCase):
-    def test_invalidating_scope_marks_dirty_even_when_no_cached_model_exists(self) -> None:
+    def test_invalidating_scope_only_marks_durable_scopes_dirty(self) -> None:
         from fin_ops_platform.services.cost_statistics_runtime_service import CostStatisticsRuntimeService
 
         queue = QueueRecorder()
-        redis = RedisRecorder()
-        service = CostStatisticsRuntimeService(
-            read_model_service=EmptyCostReadModelService(),
-            queue_repository=queue,
-            redis_helper=redis,
-            persist_read_models=lambda **_kwargs: None,
-            source_versions_provider=lambda scope_key: {"scope": scope_key},
-        )
+        service = CostStatisticsRuntimeService(queue_repository=queue)
 
-        deleted = service.invalidate_read_model_scopes(["2026-05"], reason="unit_test")
+        invalidated = service.invalidate_read_model_scopes(["2026-05"], reason="unit_test")
 
-        self.assertEqual(deleted, [])
+        self.assertEqual(invalidated, ["active:2026-05", "all:2026-05"])
         self.assertEqual(
             queue.refreshes,
             [
@@ -55,9 +26,6 @@ class CostStatisticsRuntimeServiceTests(unittest.TestCase):
                 ("cost_statistics", "all:2026-05", "unit_test"),
             ],
         )
-        self.assertIn("cost_statistics:explorer:active:2026-05", redis.deletes)
-        self.assertIn("cost_statistics:month:active:2026-05", redis.deletes)
-        self.assertTrue(any(f":schema:{COST_STATISTICS_READ_MODEL_SCHEMA_VERSION}:sources:" in key for key in redis.deletes))
 
     def test_enqueue_read_model_refresh_normalizes_legacy_month_scope(self) -> None:
         from fin_ops_platform.services.cost_statistics_runtime_service import CostStatisticsRuntimeService
@@ -79,11 +47,22 @@ class CostStatisticsRuntimeServiceTests(unittest.TestCase):
     def test_scope_key_normalization_rejects_unknown_project_scopes(self) -> None:
         from fin_ops_platform.services.cost_statistics_runtime_service import CostStatisticsRuntimeService
 
-        service = CostStatisticsRuntimeService(read_model_service=EmptyCostReadModelService())
+        service = CostStatisticsRuntimeService()
 
         self.assertEqual(
             service.normalize_scope_keys(["active:2026-05", "all:2026-05", "finished:2026-05", "active:202605"]),
             ["active:2026-05", "all:2026-05"],
+        )
+
+    def test_invalidation_without_durable_queue_does_not_claim_success(self) -> None:
+        from fin_ops_platform.services.cost_statistics_runtime_service import CostStatisticsRuntimeService
+
+        service = CostStatisticsRuntimeService()
+
+        self.assertEqual(service.invalidate_read_models(), [])
+        self.assertEqual(
+            service.invalidate_read_model_scopes(["2026-05"], reason="unit_test"),
+            [],
         )
 
 

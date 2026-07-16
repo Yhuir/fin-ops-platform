@@ -3,6 +3,21 @@
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 
+## 2026-07-16 - 高性能、freshness 与 Audit 本地闭环
+
+- 目标：将 OA 待付款首屏和刷新链路收敛为 PostgreSQL-only、精确月份、无 stale 展示的独立 read model 链路；目标 fresh API `p95 <= 250ms`、PostgreSQL commit-to-visible `p95 <= 1s`，500ms作为挑战目标。
+- 架构：OA sync在一次PG事务中提交completed projection、in-progress admission、payment-status snapshot、source watermark和durable outbox；OA专属projector/worker只访问PostgreSQL。页面首屏只用rows聚合API，filter options随rows返回；500ms条件GET使用ETag/304，202立即隐藏旧rows并等待operation barrier。
+- 写回一致性：`writeback-paid`和匹配成功的link-bank在MySQL成功后调用窄PG writer，同事务更新status snapshot、月份watermark和精确月份outbox。若MySQL已paid也继续尝试PG reconcile，解决“事实源已变但页面仍旧”的重试死角；PG失败返回可安全重试错误，下一次OA sync也可恢复。
+- Audit：新增OA页面专属wrapper，输出“App内部数据一致 / 新数据正在生成 / 发现N个一致性问题 / Read model未在时限内更新 / 无法完成”五态中文文案；共享`PageAuditIcon`默认行为不变。
+- 旧代码删除：移除旧filter route/client、`all_rows`和Python全量filter扫描、shared invoice worker OA分支、projector Mongo/MySQL I/O、snapshot relation/state-store fallback、server private OA adapter fallback；普通命令不再enqueue OA `all`。
+- 测试：新增/更新snapshot原子提交和rollback、paid增量reconcile/idempotent retry、ETag 200/304/202、source-version/CAS、worker隔离、前端条件检查/202/barrier/Audit、旧路径guard和E2E请求计数。完整矩阵见`tests.md`。
+- 本地性能守门：in-process test adapter各采集1000次，fresh 200为`p50 4.960ms / p95 5.874ms / p99 7.086ms`，ETag 304为`p50 4.807ms / p95 5.755ms / p99 7.484ms`，错误率均为0；304不执行rows aggregation。该结果未连接PostgreSQL，只证明HTTP/ETag编排开销，不作为生产SLO证据。
+- 真实PostgreSQL闭环复核：隔离临时数据库执行全部107个migration后，发现并修复两个会阻断生产的窄缺口：snapshot writer把`YYYY-MM`直接cast为date，以及组合式`PostgresReadModelRepository`漏暴露OA的repeatable-read snapshot/freshness gate。修复后canonical commit、durable outbox、专属projector、CAS publish、queue complete、expected/actual vector、fresh rows和ETag/304全链通过，并固化为`test_oa_pending_payment_postgres_integration.py`。
+- 本地真实PG性能门：在单月500行、连接池上限12、合成8并发下，fresh `200` 1000次为`p50 8.710ms / p95 9.938ms / p99 11.300ms`，8并发1000次为`p50 22.484ms / p95 33.243ms / p99 45.531ms`，304 1000次为`p50 0.361ms / p95 0.520ms / p99 0.629ms`，错误率均为0。200次canonical mutation从commit返回到fresh API为`p50 403.675ms / p95 544.178ms / p99 593.683ms`，200次均先fail-closed返回202，错误率0；projector `p95 435.400ms`，最终fresh API `p95 131.274ms`。冷启动commit返回到fresh为`282.284ms`。500行是2026-06-17文档所记历史生产总量210行的2.381倍，但当前生产峰值、浏览器500ms检测和render未测，因此只证明本地服务端性能门，不证明当前生产T0到T1 SLO。
+- SQL证据：500行scope的`EXPLAIN (ANALYZE, BUFFERS)`为freshness gate `0.090ms`、aggregate/facets `5.755ms`、bounded page `0.306ms`；均为shared-buffer hit，无physical/temp read/write。fresh路径是1个gate加2个有界数据statement；304只有gate，不执行aggregate/page。没有性能证据要求新增索引、缓存或分区。
+- 验证结果：OA后端/service/API/read-model/worker/manifest/边界目标矩阵`266/266`通过；真实PG集成`1/1`通过；OA组件测试`40/40`、OA Chromium链路`8/8`、全量前端`72 files / 849 tests`和production build通过；lint、docs、diff-check通过；隔离PG runtime-check返回`ready`且schema version 107。全量backend discovery运行4273 tests，因并行Workbench SQL initial-page测试夹具和Cost Statistics共享guard漂移仍为`125 failures / 55 errors / 34 skipped`；这些失败不在OA目标矩阵内，本任务未修改或放宽其断言。
+- 状态：本地为`READY_FOR_UNIFIED_DEPLOYMENT`。按用户要求未部署、未访问生产、未执行migration/backfill/refresh。统一部署时必须先`oa.sync:all`建立canonical snapshot，再低优先级`oa_pending_payment:all`重建，最后采集1000次API/304和200次mutation样本；在此之前不宣称生产SLO已达标。
+
 ## 2026-07-07 - 付款状态二态化
 
 - 目标：OA 待付款核对页只展示 `已支付` / `未支付`，移除 `待核对`、`支付少了` 等付款状态。
@@ -99,10 +114,10 @@
 ## 2026-06-24 - read model freshness / operation barrier audit
 
 - 目标：审计 OA 待付款 read model fresh gate、force refresh、`all` fan-out/month proof、source-version proof 和写后 operation barrier 行为。
-- 发现：后端命令响应已返回具体月份 scope 与 `all`，例如 `["2026-05", "all"]`；但前端默认 all 视图会优先等待 `oa_pending_payment:all`，容易把 fan-out-only control scope 当作写后可见性证明。
+- 当时发现：后端命令响应会返回具体月份 scope 与 `all`，例如 `["2026-05", "all"]`；但前端默认 all 视图会优先等待 `oa_pending_payment:all`，容易把 fan-out-only control scope 当作写后可见性证明。该历史契约已在 2026-07-16 被 exact-month-only 写后响应与 barrier 契约替代，当前响应不得再暴露 `all`。
 - 改动：`OaPendingPaymentsPage` 在当前视图为 `all` 且 mutation 响应包含具体月份时，改为等待具体 `oa_pending_payment:<YYYY-MM>` barrier target；只有没有具体 scope 时才 fallback 到 `all`。
 - 保持不变：OA 支付状态语义、OA MySQL 写回、payment-admitted source adapter、pending relation promotion、command service、API response shape、worker event semantics 不变。
-- 测试覆盖：更新 `web/src/test/OaPendingPaymentsPage.test.tsx`，锁定 auto-reconcile 与 link-bank 成功后，`scopeKeys: ["2026-05", "all"]` 会请求 `oa_pending_payment:2026-05` barrier，而不是优先请求 `all`。
+- 当时测试覆盖：更新 `web/src/test/OaPendingPaymentsPage.test.tsx`，锁定 auto-reconcile 与 link-bank 成功后，历史响应中的 `scopeKeys: ["2026-05", "all"]` 会请求 `oa_pending_payment:2026-05` barrier，而不是优先请求 `all`；2026-07-16 起当前测试直接锁定响应只含 exact month。
 - 后续事项：继续执行 `read-models:oa-pending-payment-local-implementation-closure-audit`，确认是否还有本地非 Go 实现缺口，并记录真实生产 PostgreSQL/worker/App Status/high-row/browser evidence defer。
 
 ## 2026-06-23 - 右侧抽屉候选流水按已选 OA 月份收敛
@@ -274,7 +289,7 @@
 - OA pending `all` scope 的 source version 判定优先从 `read_model.oa_pending_payment_rows` 的实际行聚合；只有完全没有实际行时才退回 scope 表，避免历史空月份 scope 把默认视图误判为 stale。
 - 2026-06-17 生产已通过 release `main-e8de2711-20260617182353` 更新/重启服务器 `invoice-usage-collection` worker；后续不得只用本地手工 rebuild 代替标准 release/worker helper。
 - 生产 OA MySQL 支付状态写回必须显式配置 `FIN_OPS_OA_PAYMENT_STATUS_*`。2026-06-17 已创建最小权限 MySQL 账号 `finops_oa_payment_status` 并写入 root-only 生产 env；该账号仅有 `smart_oa.t_payment_simple` 的 `SELECT`、`INSERT(flow_id, pay_status)`、`UPDATE(pay_status)` 权限。
-- pending invoice rules 对 OA 待付款的刷新当前由 `pending_invoice_rules_changed` lifecycle event 显式列出 `oa_pending_payment_read_model`，并由 `tests/test_pending_invoice_api.py` 与 `tests/test_derived_data_lifecycle_service.py` 回归保护；不得恢复 workbench invalidation 的隐藏副作用。
+- pending invoice rules 不参与 OA 待付款判定，`pending_invoice_rules_changed` 不投递 `oa_pending_payment_read_model`；OA freshness 只由本模块 boundary 声明的 source vector 与 writer fan-out 驱动，不得恢复 workbench invalidation 的隐藏副作用。
 
 ## 记录模板
 

@@ -167,9 +167,6 @@ def main() -> int:
         report["timings"].append({"step": "scope", "scope_key": scope_key, **scope_timings})
         report["rebuilt"].append({"scope_key": scope_key, "result": result, "status": status, "timings": scope_timings})
 
-    all_started_at = perf_counter()
-    all_result = builder.refresh_workbench_all_scope_from_active_shards("all")
-    all_duration_ms = _duration_ms(all_started_at)
     all_status_started_at = perf_counter()
     all_status = repository.get_workbench_refresh_status(scope_key="all")
     all_status_duration_ms = _duration_ms(all_status_started_at)
@@ -185,11 +182,10 @@ def main() -> int:
         completed_all_dirty_scope = True
         report["completed_dirty_scopes"].append("all")
     complete_all_duration_ms = _duration_ms(complete_all_started_at)
-    report["all"] = all_result
+    report["all"] = {"scope_key": "all", "fan_out": True, "status": all_status}
     report["timings"].append(
         {
             "step": "all",
-            "rebuild_ms": all_duration_ms,
             "status_ms": all_status_duration_ms,
             "complete_dirty_scope_ms": complete_all_duration_ms,
             "completed_dirty_scope": completed_all_dirty_scope,
@@ -629,7 +625,6 @@ def _install_internal_profiling(builder: Any, repository: Any, timings: list[dic
         "_supplement_missing_relation_rows",
         "_group_payload",
         "_current_bank_auto_tag_rules_version",
-        "refresh_workbench_all_scope_from_active_shards",
     ):
         _wrap_timed_method(builder, attr, f"builder.{attr}", timings)
     for attr in (

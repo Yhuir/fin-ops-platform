@@ -107,67 +107,45 @@ class SearchServiceTests(unittest.TestCase):
                 "企业流水号": "SERIAL-EX-001",
             },
         }
-        self.raw_payloads = {
-            "2026-03": {
-                "month": "2026-03",
-                "paired": {"oa": [], "bank": [], "invoice": []},
-                "unpaired": {
-                    "oa": [self.oa_row],
-                    "bank": [self.bank_row],
-                    "invoice": [self.invoice_row],
+        self.workbench_rows = {
+            "2026-03": [
+                {
+                    "row": self.oa_row,
+                    "zone_hint": "unpaired",
+                    "group_id": "case:CASE-SEARCH-001",
+                    "project_names": ["智能工厂项目"],
                 },
-            },
-            "2026-04": {
-                "month": "2026-04",
-                "paired": {"oa": [], "bank": [], "invoice": []},
-                "unpaired": {
-                    "oa": [],
-                    "bank": [self.processed_bank_row],
-                    "invoice": [self.ignored_invoice_row],
+                {
+                    "row": self.bank_row,
+                    "zone_hint": "unpaired",
+                    "group_id": "case:CASE-SEARCH-001",
+                    "project_names": ["智能工厂项目"],
                 },
-            },
-        }
-        self.grouped_payloads = {
-            "2026-03": {
-                "month": "2026-03",
-                "summary": {},
-                "paired": {"groups": []},
-                "unpaired": {
-                    "groups": [
-                        {
-                            "group_id": "case:CASE-SEARCH-001",
-                            "group_type": "candidate",
-                            "match_confidence": "medium",
-                            "reason": "test",
-                            "oa_rows": [self.oa_row],
-                            "bank_rows": [self.bank_row],
-                            "invoice_rows": [self.invoice_row],
-                        }
-                    ]
+                {
+                    "row": self.invoice_row,
+                    "zone_hint": "unpaired",
+                    "group_id": "case:CASE-SEARCH-001",
+                    "project_names": ["智能工厂项目"],
                 },
-            },
-            "2026-04": {
-                "month": "2026-04",
-                "summary": {},
-                "paired": {"groups": []},
-                "unpaired": {
-                    "groups": [
-                        {
-                            "group_id": "group:processed",
-                            "group_type": "candidate",
-                            "match_confidence": "medium",
-                            "reason": "exception",
-                            "oa_rows": [],
-                            "bank_rows": [self.processed_bank_row],
-                            "invoice_rows": [],
-                        }
-                    ]
+            ],
+            "2026-04": [
+                {
+                    "row": self.processed_bank_row,
+                    "zone_hint": "processed_exception",
+                    "group_id": "group:processed",
+                    "project_names": [],
                 },
-            },
+                {
+                    "row": self.ignored_invoice_row,
+                    "zone_hint": "ignored",
+                    "group_id": "",
+                    "project_names": [],
+                },
+            ],
         }
         self.service = SearchService(
             known_months_loader=lambda: ["2026-03", "2026-04"],
-            raw_workbench_loader=lambda month: self.raw_payloads[month],
+            workbench_rows_loader=lambda month: self.workbench_rows[month],
         )
 
     def test_search_finds_oa_rows_by_keyword_and_builds_jump_target(self) -> None:
@@ -221,34 +199,16 @@ class SearchServiceTests(unittest.TestCase):
                 "withdrawable": True,
             },
         }
-        grouped_payloads = {
-            "2026-03": {
-                "month": "2026-03",
-                "summary": {},
-                "paired": {
-                    "groups": [
-                        {
-                            "group_id": "case:no_oa_batch_fee_search",
-                            "group_type": "manual_confirmed",
-                            "match_confidence": "high",
-                            "reason": "existing_case_group",
-                            "relation_mode": "no_oa_bank_batch",
-                            "display_mode": "collapsed_summary",
-                            "default_collapsed": True,
-                            "summary_row": summary_row,
-                            "oa_rows": [],
-                            "bank_rows": [summary_row],
-                            "invoice_rows": [],
-                            "collapsed_rows": {"bank": [original_bank_row]},
-                        }
-                    ]
-                },
-                "unpaired": {"groups": []},
-            }
-        }
         service = SearchService(
             known_months_loader=lambda: ["2026-03"],
-            grouped_workbench_loader=lambda month: grouped_payloads[month],
+            workbench_rows_loader=lambda _month: [
+                {
+                    "row": original_bank_row,
+                    "zone_hint": "paired",
+                    "group_id": "case:no_oa_batch_fee_search",
+                    "project_names": [],
+                }
+            ],
         )
 
         payload = service.search(q="NO-OA-COLLAPSED-SERIAL", month="2026-03", scope="bank")
@@ -260,6 +220,54 @@ class SearchServiceTests(unittest.TestCase):
         self.assertEqual(result["zone_hint"], "paired")
         self.assertEqual(result["group_id"], "case:no_oa_batch_fee_search")
         self.assertEqual(result["jump_target"]["group_id"], "case:no_oa_batch_fee_search")
+
+    def test_narrow_workbench_rows_preserve_project_status_group_and_cache_semantics(self) -> None:
+        load_calls: list[str] = []
+        service = SearchService(
+            known_months_loader=lambda: ["2026-03"],
+            workbench_rows_loader=lambda month: load_calls.append(month)
+            or [
+                {
+                    "row": self.bank_row,
+                    "zone_hint": "paired",
+                    "group_id": "case:CASE-SEARCH-001",
+                    "project_names": ["智能工厂项目"],
+                },
+                {
+                    "row": self.ignored_invoice_row,
+                    "zone_hint": "ignored",
+                    "group_id": "",
+                    "project_names": [],
+                },
+            ],
+        )
+
+        first = service.search(
+            q="SERIAL-001",
+            month="2026-03",
+            scope="bank",
+            project_name="智能工厂项目",
+            status="paired",
+        )
+        second = service.search(
+            q="SERIAL-001",
+            month="2026-03",
+            scope="bank",
+            project_name="智能工厂项目",
+            status="paired",
+        )
+        ignored = service.search(q="INV-IGN-001", month="2026-03", status="ignored")
+
+        self.assertEqual(load_calls, ["2026-03"])
+        self.assertEqual(first, second)
+        self.assertEqual(first["bank_results"][0]["group_id"], "case:CASE-SEARCH-001")
+        self.assertEqual(first["bank_results"][0]["zone_hint"], "paired")
+        self.assertEqual(ignored["invoice_results"][0]["zone_hint"], "ignored")
+
+        service.clear_cache()
+        service.search(q="SERIAL-001", month="2026-03", scope="bank")
+
+        self.assertEqual(load_calls, ["2026-03", "2026-03"])
 
     def test_search_matches_invoice_rows_by_invoice_number_company_and_tax_no(self) -> None:
         invoice_no_payload = self.service.search(q="INV-001", month="2026-03", scope="invoice")
@@ -297,14 +305,13 @@ class SearchServiceTests(unittest.TestCase):
                 "企业流水号": "SERIAL-001",
             },
         }
-        raw_payloads = {
-            "2026-05": {"month": "2026-05", "paired": {"oa": [], "bank": [], "invoice": []}, "unpaired": {"oa": [], "bank": [matching_bank_row], "invoice": []}},
-            "2026-04": {"month": "2026-04", "paired": {"oa": [], "bank": [], "invoice": []}, "unpaired": {"oa": [], "bank": [matching_bank_row], "invoice": []}},
-            "2026-03": {"month": "2026-03", "paired": {"oa": [], "bank": [], "invoice": []}, "unpaired": {"oa": [], "bank": [matching_bank_row], "invoice": []}},
+        rows_by_month = {
+            month: [{"row": matching_bank_row, "zone_hint": "unpaired", "group_id": "", "project_names": []}]
+            for month in ("2026-05", "2026-04", "2026-03")
         }
         service = SearchService(
             known_months_loader=lambda: ["2026-05", "2026-04", "2026-03"],
-            raw_workbench_loader=lambda month: load_calls.append(month) or raw_payloads[month],
+            workbench_rows_loader=lambda month: load_calls.append(month) or rows_by_month[month],
         )
 
         payload = service.search(q="建设科技", month="all", scope="bank", limit=1)
@@ -323,7 +330,7 @@ class SearchServiceTests(unittest.TestCase):
 
         service = SearchService(
             known_months_loader=load_months,
-            raw_workbench_loader=lambda month: month_calls.append(month) or self.raw_payloads[month],
+            workbench_rows_loader=lambda month: month_calls.append(month) or self.workbench_rows[month],
         )
 
         first_payload = service.search(q="建设科技", month="all", scope="bank")
@@ -339,7 +346,7 @@ class SearchServiceTests(unittest.TestCase):
 
         service = SearchService(
             known_months_loader=lambda: ["2026-03"],
-            raw_workbench_loader=lambda month: month_calls.append(month) or self.raw_payloads[month],
+            workbench_rows_loader=lambda month: month_calls.append(month) or self.workbench_rows[month],
         )
 
         service.search(q="建设科技", month="all", scope="bank")

@@ -1,12 +1,10 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
-  clearCostStatisticsExplorerCache,
   exportCostStatisticsView,
-  fetchCostStatisticsExplorer,
+  fetchCostStatisticsExplorerPage,
   fetchCostStatisticsExportPreview,
   fetchCostStatisticsTagRules,
-  getCachedCostStatisticsExplorer,
   saveCostStatisticsTagRules,
 } from "../features/cost-statistics/api";
 
@@ -14,7 +12,6 @@ const originalFetch = global.fetch;
 
 afterEach(() => {
   global.fetch = originalFetch;
-  clearCostStatisticsExplorerCache();
   vi.restoreAllMocks();
 });
 
@@ -56,21 +53,31 @@ describe("Cost statistics export API", () => {
     })).rejects.toThrow("导出结果超过 20000 行，请缩小筛选范围后重试。");
   });
 
-  test("passes project scope to explorer, export preview, and export requests", async () => {
+  test("passes the isolated cursor-page contract and project scope to explorer, preview, and export requests", async () => {
     global.fetch = vi.fn(async (input) => {
       const url = String(input);
       if (url.startsWith("/api/cost-statistics/explorer")) {
         return new Response(JSON.stringify({
-          month: "all",
+          scope: "all",
+          view: "project",
           summary: {
             row_count: 0,
             transaction_count: 0,
             total_amount: "0.00",
           },
-          time_rows: [],
-          bank_accounts: [],
-          project_rows: [],
-          expense_type_rows: [],
+          available_years: ["2026", "2025"],
+          facets: {
+            projects: [{
+              project_name: "云南溯源科技",
+              total_amount: "100.00",
+              transaction_count: 1,
+              expense_type_count: 1,
+              percentage_label: "100.0%",
+            }],
+          },
+          rows: [],
+          row_count: 0,
+          next_cursor: "cursor-2",
         }), { status: 200 });
       }
       if (url.startsWith("/api/cost-statistics/export-preview")) {
@@ -97,7 +104,13 @@ describe("Cost statistics export API", () => {
       });
     }) as typeof fetch;
 
-    await fetchCostStatisticsExplorer("all", undefined, "all");
+    const page = await fetchCostStatisticsExplorerPage({
+      scope: "all",
+      view: "project",
+      projectScope: "all",
+      projectName: "云南溯源科技",
+      pageSize: 50,
+    });
     await fetchCostStatisticsExportPreview({
       month: "all",
       view: "time",
@@ -110,7 +123,7 @@ describe("Cost statistics export API", () => {
     });
 
     expect(global.fetch).toHaveBeenCalledWith(
-      "/api/cost-statistics/explorer?month=all&project_scope=all",
+      `/api/cost-statistics/explorer?scope=all&view=project&project_scope=all&project_name=${encodeURIComponent("云南溯源科技")}&page_size=50`,
       expect.any(Object),
     );
     expect(global.fetch).toHaveBeenCalledWith(
@@ -121,21 +134,45 @@ describe("Cost statistics export API", () => {
       "/api/cost-statistics/export?month=all&view=time&project_scope=all",
       expect.any(Object),
     );
+    expect(page.availableYears).toEqual(["2026", "2025"]);
+    expect(page.facets.projects[0]).toMatchObject({
+      projectName: "云南溯源科技",
+      totalAmount: "100.00",
+    });
+    expect(page.nextCursor).toBe("cursor-2");
   });
 
-  test("maps read model status metadata from explorer payloads", async () => {
+  test("maps freshness metadata and bank-tag fields from page rows", async () => {
     global.fetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
-        month: "2026-03",
+        scope: "2026-03",
+        view: "time",
         summary: {
-          row_count: 0,
-          transaction_count: 0,
-          total_amount: "0.00",
+          row_count: 1,
+          transaction_count: 1,
+          total_amount: "145.00",
         },
-        time_rows: [],
-        bank_accounts: [],
-        project_rows: [],
-        expense_type_rows: [],
+        available_years: ["2026"],
+        facets: {},
+        rows: [{
+          transaction_id: "cost-txn-145",
+          trade_time: "2026-03-18 17:02:09",
+          direction: "支出",
+          project_name: "云南溯源科技",
+          expense_type: "交通费",
+          expense_content: "项目现场往返交通",
+          amount: "145.00",
+          counterparty_name: "陈佳玉",
+          payment_account_label: "建行 8106",
+          remark: "报销",
+          bank_tag_code: "travel_transport",
+          bank_tag_label: "交通费",
+          bank_tag_primary_label: "差旅交通",
+          bank_tag_sub_label: "交通费",
+          bank_tag_label_path: ["差旅交通", "交通费"],
+        }],
+        row_count: 1,
+        next_cursor: null,
         read_model_status: "refreshing",
         read_model_scope_key: "active:2026-03",
         read_model_generated_at: "2026-06-01T00:00:00",
@@ -143,163 +180,23 @@ describe("Cost statistics export API", () => {
       }), { status: 202 }),
     ) as typeof fetch;
 
-    const payload = await fetchCostStatisticsExplorer("2026-03", undefined, "active");
+    const payload = await fetchCostStatisticsExplorerPage({
+      scope: "2026-03",
+      view: "time",
+      projectScope: "active",
+    });
 
     expect(payload.readModelStatus).toBe("refreshing");
     expect(payload.readModelScopeKey).toBe("active:2026-03");
     expect(payload.readModelGeneratedAt).toBe("2026-06-01T00:00:00");
     expect(payload.readModelStaleReasons).toEqual(["workbench_scope_key"]);
-  });
-
-  test("maps bank tag fields from explorer time rows", async () => {
-    global.fetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
-        month: "2026-03",
-        summary: {
-          row_count: 1,
-          transaction_count: 1,
-          total_amount: "145.00",
-        },
-        time_rows: [
-          {
-            transaction_id: "cost-txn-145",
-            trade_time: "2026-03-18 17:02:09",
-            direction: "支出",
-            project_name: "云南溯源科技",
-            expense_type: "交通费",
-            expense_content: "项目现场往返交通",
-            amount: "145.00",
-            counterparty_name: "陈佳玉",
-            payment_account_label: "建行 8106",
-            remark: "报销",
-            bank_tag_code: "travel_transport",
-            bank_tag_label: "交通费",
-            bank_tag_primary_label: "差旅交通",
-            bank_tag_sub_label: "交通费",
-            bank_tag_label_path: ["差旅交通", "交通费"],
-          },
-        ],
-        bank_accounts: [
-          {
-            bank_name: "民生银行",
-            account_last4: "9486",
-            payment_account_label: "民生银行 账户 9486",
-            source: "settings",
-          },
-        ],
-        project_rows: [],
-        expense_type_rows: [],
-      }), { status: 200 }),
-    ) as typeof fetch;
-
-    const payload = await fetchCostStatisticsExplorer("2026-03", undefined, "active");
-
-    expect(payload.timeRows[0]).toMatchObject({
+    expect(payload.rows[0]).toMatchObject({
       bankTagCode: "travel_transport",
       bankTagLabel: "交通费",
       bankTagPrimaryLabel: "差旅交通",
       bankTagSubLabel: "交通费",
       bankTagLabelPath: ["差旅交通", "交通费"],
     });
-    expect(payload.bankAccounts).toEqual([
-      {
-        paymentAccountLabel: "民生银行 账户 9486",
-        bankName: "民生银行",
-        accountLast4: "9486",
-        source: "settings",
-      },
-    ]);
-  });
-
-  test("maps bank flow time rows separately from OA paired time rows", async () => {
-    global.fetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
-        month: "2026-03",
-        summary: {
-          row_count: 1,
-          transaction_count: 1,
-          total_amount: "100.00",
-        },
-        time_rows: [
-          {
-            transaction_id: "oa-fee",
-            trade_time: "2026-03-18 17:02:09",
-            direction: "支出",
-            project_name: "云南溯源科技",
-            expense_type: "材料",
-            expense_content: "设备",
-            amount: "100.00",
-            counterparty_name: "供应商",
-            payment_account_label: "建行 8106",
-            remark: "",
-            bank_tag_code: "fee",
-          },
-        ],
-        bank_flow_summary: {
-          row_count: 3,
-          transaction_count: 3,
-          total_amount: "330.00",
-          expense_amount: "130.00",
-          income_amount: "200.00",
-          expense_transaction_count: 2,
-          income_transaction_count: 1,
-        },
-        bank_flow_time_rows: [
-          {
-            transaction_id: "oa-fee",
-            trade_time: "2026-03-18 17:02:09",
-            direction: "支出",
-            project_name: "云南溯源科技",
-            expense_type: "材料",
-            expense_content: "设备",
-            amount: "100.00",
-            counterparty_name: "供应商",
-            payment_account_label: "建行 8106",
-            remark: "",
-            bank_tag_code: "fee",
-          },
-          {
-            transaction_id: "income-fee",
-            trade_time: "2026-03-20 09:00:00",
-            direction: "收入",
-            project_name: "未配对OA",
-            expense_type: "退款",
-            expense_content: "供应商退款",
-            amount: "200.00",
-            counterparty_name: "供应商",
-            payment_account_label: "建行 8106",
-            remark: "",
-            bank_tag_code: "income_refund",
-          },
-          {
-            transaction_id: "flow-fee",
-            trade_time: "2026-03-19 09:00:00",
-            direction: "支出",
-            project_name: "未配对OA",
-            expense_type: "材料",
-            expense_content: "耗材",
-            amount: "30.00",
-            counterparty_name: "供应商",
-            payment_account_label: "建行 8106",
-            remark: "",
-            bank_tag_code: "fee",
-          },
-        ],
-        bank_accounts: [],
-        project_rows: [],
-        expense_type_rows: [],
-      }), { status: 200 }),
-    ) as typeof fetch;
-
-    const payload = await fetchCostStatisticsExplorer("2026-03", undefined, "active");
-
-    expect(payload.summary.totalAmount).toBe("100.00");
-    expect(payload.bankFlowSummary.expenseAmount).toBe("130.00");
-    expect(payload.bankFlowSummary.incomeAmount).toBe("200.00");
-    expect(payload.bankFlowSummary.expenseTransactionCount).toBe(2);
-    expect(payload.bankFlowSummary.incomeTransactionCount).toBe(1);
-    expect(payload.timeRows.map((row) => row.transactionId)).toEqual(["oa-fee"]);
-    expect(payload.bankFlowTimeRows.map((row) => row.transactionId)).toEqual(["oa-fee", "income-fee", "flow-fee"]);
   });
 
   test("loads and saves cost statistics tag rules with operation barrier targets", async () => {
@@ -388,26 +285,28 @@ describe("Cost statistics export API", () => {
     );
   });
 
-  test("caches explorer payloads by month and project scope for fast page re-entry", async () => {
-    global.fetch = vi.fn().mockResolvedValue(
+  test("does not retain explorer payloads in module memory", async () => {
+    global.fetch = vi.fn().mockImplementation(async () =>
       new Response(JSON.stringify({
-        month: "2026-03",
+        scope: "2026-03",
+        view: "time",
         summary: {
           row_count: 0,
           transaction_count: 0,
           total_amount: "0.00",
         },
-        time_rows: [],
-        bank_accounts: [],
-        project_rows: [],
-        expense_type_rows: [],
+        available_years: ["2026"],
+        facets: {},
+        rows: [],
+        row_count: 0,
+        next_cursor: null,
+        read_model_status: "fresh",
       }), { status: 200 }),
     ) as typeof fetch;
 
-    expect(getCachedCostStatisticsExplorer("2026-03", "active")).toBeNull();
-    const payload = await fetchCostStatisticsExplorer("2026-03", undefined, "active");
+    await fetchCostStatisticsExplorerPage({ scope: "2026-03", view: "time", projectScope: "active" });
+    await fetchCostStatisticsExplorerPage({ scope: "2026-03", view: "time", projectScope: "active" });
 
-    expect(getCachedCostStatisticsExplorer("2026-03", "active")).toEqual(payload);
-    expect(getCachedCostStatisticsExplorer("2026-03", "all")).toBeNull();
+    expect(global.fetch).toHaveBeenCalledTimes(2);
   });
 });

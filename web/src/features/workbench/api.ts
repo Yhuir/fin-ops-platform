@@ -198,6 +198,12 @@ type ApiWorkbenchGroupsPayload = {
   groups: ApiWorkbenchGroup[];
 };
 
+type ApiWorkbenchInitialPayload = ApiWorkbenchSummaryPayload & {
+  active_generation_id?: string | null;
+  paired: ApiWorkbenchGroupsPayload;
+  unpaired: ApiWorkbenchGroupsPayload;
+};
+
 type ApiWorkbenchInvoiceInventory = {
   system_total?: number | null;
   manual_import_total?: number | null;
@@ -650,6 +656,7 @@ type ApiWorkbenchExceptionApplyResult = {
 type ConfirmLinkPayload = {
   month: string;
   rowIds: string[];
+  expectedReadModelVersion: string;
   caseId?: string;
   note?: string;
 };
@@ -657,6 +664,7 @@ type ConfirmLinkPayload = {
 type WithdrawLinkPayload = {
   month: string;
   rowIds: string[];
+  expectedReadModelVersion: string;
   note?: string;
   operationType?: "withdraw_relation";
   previewId?: string;
@@ -666,6 +674,7 @@ type WithdrawLinkPayload = {
 type MarkExceptionPayload = {
   month: string;
   rowId: string;
+  expectedReadModelVersion: string;
   exceptionCode: string;
   comment?: string;
 };
@@ -673,12 +682,14 @@ type MarkExceptionPayload = {
 type CancelLinkPayload = {
   month: string;
   rowId: string;
+  expectedReadModelVersion: string;
   comment?: string;
 };
 
 type UpdateBankExceptionPayload = {
   month: string;
   rowId: string;
+  expectedReadModelVersion: string;
   relationCode: string;
   relationLabel: string;
   comment?: string;
@@ -687,29 +698,34 @@ type UpdateBankExceptionPayload = {
 type ConfirmPersonalAdvanceRepaymentPayload = {
   month: string;
   rowIds: string[];
+  expectedReadModelVersion: string;
   note?: string;
 };
 
 type IgnoreRowPayload = {
   month: string;
   rowId: string;
+  expectedReadModelVersion: string;
   comment?: string;
 };
 
 type UnignoreRowPayload = {
   month: string;
   rowId: string;
+  expectedReadModelVersion: string;
 };
 
 type CancelExceptionPayload = {
   month: string;
   rowIds: string[];
+  expectedReadModelVersion: string;
   comment?: string;
 };
 
 type ConfirmCashPassThroughPayload = {
   month: string;
   rowIds: string[];
+  expectedReadModelVersion: string;
   cashAmount?: string;
   note?: string;
 };
@@ -717,6 +733,7 @@ type ConfirmCashPassThroughPayload = {
 type ConfirmCashTicketPurchasePayload = {
   month: string;
   rowIds: string[];
+  expectedReadModelVersion: string;
   cashAmount: string;
   ticketCostAmount: string;
   projectId?: string;
@@ -729,6 +746,7 @@ type ConfirmCashTicketPurchasePayload = {
 type CancelCashSpecialPayload = {
   month: string;
   rowIds: string[];
+  expectedReadModelVersion: string;
   note?: string;
 };
 
@@ -1993,7 +2011,10 @@ async function requestJson<T>(url: string, init: RequestInit = {}) {
     return await apiRequestJson<T>(url, init);
   } catch (error) {
     if (error instanceof ApiClientError) {
-      throw new Error(resolveWorkbenchApiErrorMessage(error.payload, error.responseText || error.message));
+      throw Object.assign(
+        new Error(resolveWorkbenchApiErrorMessage(error.payload, error.responseText || error.message)),
+        { status: error.status, code: error.code },
+      );
     }
     throw error;
   }
@@ -2291,6 +2312,7 @@ function workbenchGroupsUrl(
   page: number,
   pageSize: number,
   query: WorkbenchGroupsPageQuery = {},
+  expectedReadModelVersion?: string,
 ) {
   const params = new URLSearchParams({
     month,
@@ -2334,7 +2356,47 @@ function workbenchGroupsUrl(
   if (timeFilters) {
     params.set("time_filters", timeFilters);
   }
+  if (expectedReadModelVersion?.trim()) {
+    params.set("expected_read_model_version", expectedReadModelVersion.trim());
+  }
   return `/api/workbench/groups?${params.toString()}`;
+}
+
+function workbenchInitialZoneQuery(query: WorkbenchGroupsPageQuery = {}) {
+  const payload: Record<string, unknown> = {};
+  const search = String(query.search ?? "").trim();
+  const status = String(query.status ?? "").trim();
+  const sourceKind = String(query.sourceKind ?? "").trim();
+  const sort = String(query.sort ?? "").trim();
+  if (search) payload.search = search;
+  if (query.searchMode === "linked_context") payload.search_mode = "linked_context";
+  if (query.searchByPane && Object.keys(query.searchByPane).length > 0) payload.search_by_pane = query.searchByPane;
+  if (status) payload.status = status;
+  if (sourceKind) payload.source_kind = sourceKind;
+  if (sort) payload.sort = sort;
+  if (query.filtersByPaneAndColumn && Object.keys(query.filtersByPaneAndColumn).length > 0) {
+    payload.column_filters = query.filtersByPaneAndColumn;
+  }
+  if (query.timeFilterByPane && Object.keys(query.timeFilterByPane).length > 0) {
+    payload.time_filters = query.timeFilterByPane;
+  }
+  return stableJsonValue(payload) as Record<string, unknown>;
+}
+
+function workbenchInitialUrl(
+  month: string,
+  zoneQueries: Partial<Record<WorkbenchZoneId, WorkbenchGroupsPageQuery>>,
+) {
+  const params = new URLSearchParams({ month });
+  const pairedQuery = workbenchInitialZoneQuery(zoneQueries.paired);
+  const unpairedQuery = workbenchInitialZoneQuery(zoneQueries.unpaired);
+  if (Object.keys(pairedQuery).length > 0) {
+    params.set("paired_query", JSON.stringify(pairedQuery));
+  }
+  if (Object.keys(unpairedQuery).length > 0) {
+    params.set("unpaired_query", JSON.stringify(unpairedQuery));
+  }
+  return `/api/workbench?${params.toString()}`;
 }
 
 function stableJsonQueryParam(value: unknown) {
@@ -2374,11 +2436,12 @@ export async function fetchWorkbenchGroupsPage(
   pageSize = WORKBENCH_GROUP_PAGE_SIZE,
   signal?: AbortSignal,
   query: WorkbenchGroupsPageQuery = {},
+  expectedReadModelVersion?: string,
 ): Promise<WorkbenchGroupsPageResult> {
-  const payload = await requestJson<ApiWorkbenchGroupsPayload>(workbenchGroupsUrl(month, zone, page, pageSize, query), {
-    method: "GET",
-    signal,
-  });
+  const payload = await requestJson<ApiWorkbenchGroupsPayload>(
+    workbenchGroupsUrl(month, zone, page, pageSize, query, expectedReadModelVersion),
+    { method: "GET", signal },
+  );
   return {
     zone: payload.zone,
     groups: payload.groups.map((group) => mapGroup(group, payload.zone)),
@@ -2415,33 +2478,30 @@ export async function fetchWorkbenchInitialPage(
   zoneQueries: Partial<Record<WorkbenchZoneId, WorkbenchGroupsPageQuery>> = {},
 ): Promise<WorkbenchInitialPageResult> {
   onProgress?.({
-    label: "加载工作台汇总",
+    label: "加载关联台首屏",
     loadedBytes: 0,
     totalBytes: 0,
     percent: 20,
     indeterminate: false,
   });
-  const summary = await requestJson<ApiWorkbenchSummaryPayload>(`/api/workbench/summary?month=${month}`, {
+  const payload = await requestJson<ApiWorkbenchInitialPayload>(workbenchInitialUrl(month, zoneQueries), {
     method: "GET",
     signal,
   });
-  onProgress?.({
-    label: "加载首屏关系分组",
-    loadedBytes: 0,
-    totalBytes: 0,
-    percent: 55,
-    indeterminate: false,
-  });
-  const [pairedPage, unpairedPage] = await Promise.all([
-    fetchWorkbenchGroupsPage(month, "paired", 1, WORKBENCH_GROUP_PAGE_SIZE, signal, {
-      ...zoneQueries.paired,
-      detailLevel: "summary",
-    }),
-    fetchWorkbenchGroupsPage(month, "unpaired", 1, WORKBENCH_GROUP_PAGE_SIZE, signal, {
-      ...zoneQueries.unpaired,
-      detailLevel: "summary",
-    }),
-  ]);
+  const readModelVersion = payload.read_model_version ?? payload.active_generation_id ?? null;
+  const readModelStatus = mapReadModelStatus(payload.read_model_status);
+  const pairedPayload: ApiWorkbenchGroupsPayload = {
+    ...payload.paired,
+    zone: "paired",
+    read_model_status: payload.paired.read_model_status ?? readModelStatus,
+    read_model_version: payload.paired.read_model_version ?? readModelVersion,
+  };
+  const unpairedPayload: ApiWorkbenchGroupsPayload = {
+    ...payload.unpaired,
+    zone: "unpaired",
+    read_model_status: payload.unpaired.read_model_status ?? readModelStatus,
+    read_model_version: payload.unpaired.read_model_version ?? readModelVersion,
+  };
   onProgress?.({
     label: "关联台数据已加载完成",
     loadedBytes: 0,
@@ -2452,20 +2512,20 @@ export async function fetchWorkbenchInitialPage(
 
   return {
     data: {
-      month: summary.month,
-      oaStatus: mapOaStatus(summary.oa_status),
-      summary: mapSummaryCounts(summary.summary),
-      invoiceInventory: mapInvoiceInventory(summary.invoice_inventory),
+      month: payload.month,
+      oaStatus: mapOaStatus(payload.oa_status),
+      summary: mapSummaryCounts(payload.summary),
+      invoiceInventory: mapInvoiceInventory(payload.invoice_inventory),
       paired: {
-        groups: pairedPage.groups,
+        groups: pairedPayload.groups.map((group) => mapGroup(group, "paired")),
       },
       unpaired: {
-        groups: unpairedPage.groups,
+        groups: unpairedPayload.groups.map((group) => mapGroup(group, "unpaired")),
       },
     },
     pages: {
-      paired: pairedPage.page,
-      unpaired: unpairedPage.page,
+      paired: mapWorkbenchZonePage(pairedPayload),
+      unpaired: mapWorkbenchZonePage(unpairedPayload),
     },
   };
 }
@@ -2949,13 +3009,16 @@ export async function deleteWorkbenchSettingsProject(projectId: string): Promise
 
 export async function fetchWorkbenchRowDetail(
   rowId: string,
-  options: AbortSignal | { month?: string; signal?: AbortSignal } = {},
+  options: AbortSignal | { month?: string; signal?: AbortSignal; expectedReadModelVersion?: string } = {},
 ): Promise<WorkbenchRecord> {
   const signal = options instanceof AbortSignal ? options : options.signal;
   const month = options instanceof AbortSignal ? "" : options.month?.trim() ?? "";
   const params = new URLSearchParams();
   if (month) {
     params.set("month", month);
+  }
+  if (!(options instanceof AbortSignal) && options.expectedReadModelVersion?.trim()) {
+    params.set("expected_read_model_version", options.expectedReadModelVersion.trim());
   }
   const query = params.toString();
   const payload = await requestJson<{ row: ApiWorkbenchRow }>(
@@ -2972,11 +3035,13 @@ export async function confirmWorkbenchLink(payload: ConfirmLinkPayload): Promise
   const requestBody: {
     month: string;
     row_ids: string[];
+    expected_read_model_version: string;
     case_id?: string;
     note?: string;
   } = {
     month: payload.month,
     row_ids: payload.rowIds,
+    expected_read_model_version: payload.expectedReadModelVersion,
     case_id: payload.caseId,
   };
   if (payload.note?.trim()) {
@@ -2997,6 +3062,7 @@ export async function previewWorkbenchConfirmLink(payload: ConfirmLinkPayload): 
     body: JSON.stringify({
       month: payload.month,
       row_ids: payload.rowIds,
+      expected_read_model_version: payload.expectedReadModelVersion,
       case_id: payload.caseId,
     }),
   });
@@ -3010,6 +3076,7 @@ export async function previewWorkbenchWithdrawLink(payload: WithdrawLinkPayload)
     body: JSON.stringify({
       month: payload.month,
       row_ids: payload.rowIds,
+      expected_read_model_version: payload.expectedReadModelVersion,
     }),
   });
   return mapRelationPreview(result);
@@ -3024,6 +3091,7 @@ export async function previewWorkbenchException(
     body: JSON.stringify({
       month: payload.month,
       row_ids: payload.rowIds,
+      expected_read_model_version: payload.expectedReadModelVersion,
     }),
   });
   return mapWorkbenchExceptionPreview(result);
@@ -3040,6 +3108,7 @@ export async function applyWorkbenchException(
       body: JSON.stringify({
         month: payload.month,
         row_ids: payload.rowIds,
+        expected_read_model_version: payload.expectedReadModelVersion,
         scenario_code: payload.scenarioCode,
         action_code: payload.actionCode,
         payload: payload.payload,
@@ -3054,6 +3123,7 @@ export async function withdrawWorkbenchLink(payload: WithdrawLinkPayload): Promi
   const requestBody: {
     month: string;
     row_ids: string[];
+    expected_read_model_version: string;
     note?: string;
     operation_type?: "withdraw_relation";
     preview_id?: string;
@@ -3061,6 +3131,7 @@ export async function withdrawWorkbenchLink(payload: WithdrawLinkPayload): Promi
   } = {
     month: payload.month,
     row_ids: payload.rowIds,
+    expected_read_model_version: payload.expectedReadModelVersion,
   };
   if (payload.note?.trim()) {
     requestBody.note = payload.note.trim();
@@ -3089,6 +3160,7 @@ export async function markWorkbenchException(payload: MarkExceptionPayload): Pro
     body: JSON.stringify({
       month: payload.month,
       row_id: payload.rowId,
+      expected_read_model_version: payload.expectedReadModelVersion,
       exception_code: payload.exceptionCode,
       comment: payload.comment,
     }),
@@ -3103,6 +3175,7 @@ export async function cancelWorkbenchLink(payload: CancelLinkPayload): Promise<W
     body: JSON.stringify({
       month: payload.month,
       row_id: payload.rowId,
+      expected_read_model_version: payload.expectedReadModelVersion,
       comment: payload.comment,
     }),
   });
@@ -3116,6 +3189,7 @@ export async function updateWorkbenchBankException(payload: UpdateBankExceptionP
     body: JSON.stringify({
       month: payload.month,
       row_id: payload.rowId,
+      expected_read_model_version: payload.expectedReadModelVersion,
       relation_code: payload.relationCode,
       relation_label: payload.relationLabel,
       comment: payload.comment,
@@ -3131,6 +3205,7 @@ export async function confirmWorkbenchPersonalAdvanceRepayment(payload: ConfirmP
     body: JSON.stringify({
       month: payload.month,
       row_ids: payload.rowIds,
+      expected_read_model_version: payload.expectedReadModelVersion,
       note: payload.note,
     }),
   });
@@ -3144,6 +3219,7 @@ export async function ignoreWorkbenchRow(payload: IgnoreRowPayload): Promise<Wor
     body: JSON.stringify({
       month: payload.month,
       row_id: payload.rowId,
+      expected_read_model_version: payload.expectedReadModelVersion,
       comment: payload.comment,
     }),
   });
@@ -3157,6 +3233,7 @@ export async function unignoreWorkbenchRow(payload: UnignoreRowPayload): Promise
     body: JSON.stringify({
       month: payload.month,
       row_id: payload.rowId,
+      expected_read_model_version: payload.expectedReadModelVersion,
     }),
   });
   return mapWorkbenchActionResult(result);
@@ -3169,6 +3246,7 @@ export async function cancelWorkbenchException(payload: CancelExceptionPayload):
     body: JSON.stringify({
       month: payload.month,
       row_ids: payload.rowIds,
+      expected_read_model_version: payload.expectedReadModelVersion,
       comment: payload.comment,
     }),
   });
@@ -3182,6 +3260,7 @@ export async function confirmWorkbenchCashPassThrough(payload: ConfirmCashPassTh
     body: JSON.stringify({
       month: payload.month,
       row_ids: payload.rowIds,
+      expected_read_model_version: payload.expectedReadModelVersion,
       cash_amount: payload.cashAmount,
       note: payload.note,
     }),
@@ -3196,6 +3275,7 @@ export async function confirmWorkbenchCashTicketPurchase(payload: ConfirmCashTic
     body: JSON.stringify({
       month: payload.month,
       row_ids: payload.rowIds,
+      expected_read_model_version: payload.expectedReadModelVersion,
       cash_amount: payload.cashAmount,
       ticket_cost_amount: payload.ticketCostAmount,
       project_id: payload.projectId,
@@ -3215,6 +3295,7 @@ export async function cancelWorkbenchCashSpecial(payload: CancelCashSpecialPaylo
     body: JSON.stringify({
       month: payload.month,
       row_ids: payload.rowIds,
+      expected_read_model_version: payload.expectedReadModelVersion,
       note: payload.note,
     }),
   });

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from typing import Any
 
 
@@ -37,6 +38,32 @@ class OaPendingPaymentReadModelRepositoryPort:
         )
         return dict(payload) if isinstance(payload, dict) else None
 
+    @contextmanager
+    def read_snapshot(self):
+        snapshot = getattr(self._repository, "oa_pending_payment_read_snapshot", None)
+        if not callable(snapshot):
+            yield self
+            return
+        with snapshot() as repository:
+            yield OaPendingPaymentReadModelRepositoryPort(repository)
+
+    def query_state(
+        self,
+        *,
+        scope_key: str,
+        tenant_id: str,
+        base_source_versions: dict[str, object],
+    ) -> dict[str, object] | None:
+        loader = getattr(self._repository, "oa_pending_payment_query_state", None)
+        if not callable(loader):
+            return None
+        payload = loader(
+            scope_key=scope_key,
+            tenant_id=tenant_id,
+            base_source_versions=base_source_versions,
+        )
+        return dict(payload) if isinstance(payload, dict) else None
+
     def get_oa_pending_payment_row_by_row_id(self, row_id: str) -> dict[str, object] | None:
         payload = self._repository.get_oa_pending_payment_row_by_row_id(row_id)
         return dict(payload) if isinstance(payload, dict) else None
@@ -64,6 +91,32 @@ class OaPendingPaymentReadModelRepositoryPort:
             scope_key=scope_key,
             rows=rows,
             source_versions=source_versions,
+        )
+
+    def publish_oa_pending_payment_rows(
+        self,
+        *,
+        tenant_id: str,
+        scope_key: str,
+        source_version: int,
+        rows: list[dict[str, object]],
+        source_versions: dict[str, object] | None = None,
+    ) -> bool:
+        publish = getattr(self._repository, "publish_oa_pending_payment_rows", None)
+        if not callable(publish):
+            raise RuntimeError("OA pending payment repository does not support atomic CAS publish.")
+        published_source_versions = {
+            **dict(source_versions or {}),
+            "oa_pending_payment_event_source_version": source_version,
+        }
+        return bool(
+            publish(
+                tenant_id=tenant_id,
+                scope_key=scope_key,
+                source_version=source_version,
+                rows=rows,
+                source_versions=published_source_versions,
+            )
         )
 
     def mark_oa_pending_payment_scope(

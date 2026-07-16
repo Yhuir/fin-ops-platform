@@ -31,6 +31,26 @@ DISPATCHER_ENV = ENV_DIR / "fin-ops.rabbitmq-dispatcher.env.example"
 
 
 class RuntimeWorkerRegistryTests(unittest.TestCase):
+    def test_oa_pending_payment_has_a_dedicated_worker_and_is_not_claimed_by_invoice_usage(self) -> None:
+        registrations = registration_by_instance_name()
+
+        self.assertEqual(
+            registrations["oa-pending-payment"].event_types,
+            ("oa_pending_payment.read_model.refresh",),
+        )
+        self.assertEqual(
+            registrations["oa-pending-payment"].handler_flags,
+            ("--enable-oa-pending-payment-read-model-refresh",),
+        )
+        self.assertNotIn(
+            "oa_pending_payment.read_model.refresh",
+            registrations["invoice-usage-collection"].event_types,
+        )
+        self.assertNotIn(
+            "--enable-oa-pending-payment-read-model-refresh",
+            registrations["invoice-usage-collection"].handler_flags,
+        )
+
     def test_required_workers_match_deploy_helper_defaults(self) -> None:
         script = ENSURE_WORKERS_SCRIPT.read_text(encoding="utf-8")
         self.assertNotRegex(script, r"required_workers=\"\\$\\{FINOPS_REQUIRED_WORKERS:-")
@@ -70,8 +90,6 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
                 "--enable-workbench-read-model-refresh",
                 "--event-type",
                 "workbench.read_model.refresh",
-                "--exclude-claim-scope-key",
-                "all",
             ),
         )
         self.assertEqual(
@@ -85,21 +103,18 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
             ),
         )
 
-    def test_workbench_aggregate_registration_claims_only_all_scope(self) -> None:
+    def test_workbench_registration_claims_month_and_all_scopes(self) -> None:
         workbench = registration_by_instance_name()["workbench"]
-        aggregate = registration_by_instance_name()["workbench-aggregate"]
 
-        self.assertEqual(workbench.exclude_claim_scope_keys, ("all",))
-        self.assertEqual(aggregate.claim_scope_keys, ("all",))
-        self.assertEqual(aggregate.event_types, ("workbench.read_model.refresh",))
+        self.assertEqual(workbench.claim_scope_keys, ())
+        self.assertEqual(workbench.exclude_claim_scope_keys, ())
+        self.assertNotIn("workbench-aggregate", registration_by_instance_name())
         self.assertEqual(
-            worker_command_args(aggregate, transport="postgres"),
+            worker_command_args(workbench, transport="postgres"),
             (
                 "--enable-workbench-read-model-refresh",
                 "--event-type",
                 "workbench.read_model.refresh",
-                "--claim-scope-key",
-                "all",
             ),
         )
 
@@ -231,7 +246,7 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
         self.assertEqual(payload["event_types"], ["workbench.read_model.refresh"])
         self.assertEqual(payload["handlers"], ["workbench.read_model.refresh"])
         self.assertEqual(payload["registration"]["instance_name"], "workbench")
-        self.assertEqual(payload["registration"]["exclude_claim_scope_keys"], ["all"])
+        self.assertEqual(payload["registration"]["exclude_claim_scope_keys"], [])
 
     def test_unknown_worker_registration_fails_fast(self) -> None:
         with self.assertRaises(SystemExit):

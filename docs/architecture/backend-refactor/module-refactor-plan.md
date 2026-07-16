@@ -386,7 +386,8 @@ PF-P190 已对 Bankdetail / No OA Batch 做 Micro-JIT discovery，专项文档�
 - `app/routes_tax.py`
 - `services/tax_offset_*`
 - `services/cost_statistics_*`
-- `services/cost_tax_sql_projection.py`
+- `services/tax_offset_sql_projection.py`
+- `services/cost_statistics_sql_projection.py`
 - `services/etc_*`
 - `services/project_costing.py`
 

@@ -1,6 +1,6 @@
 # Search 模块边界与 I/O
 
-日期：2026-07-03
+日期：2026-07-16
 
 ## 模块化状态
 
@@ -8,7 +8,7 @@
 - 当前边界可信度：high
 - 目标边界：搜索索引由 `search` read model 投影，页面/API 查询只读 fresh-gated index。
 - 当前缺口：search 与 pending invoice 共用 worker/投影链路，scope 变更必须同步两个模块。
-- 旧代码删除条件：旧搜索即时查询路径不再被 `/api/search` 或前端引用。
+- 旧代码删除条件：Search 不得再通过 Workbench page/full payload 或旧 read-model snapshot 构建索引输入；非 PostgreSQL 本地即时查询只能读取单月 active generation 的窄 row context。
 
 ## 职责边界
 
@@ -31,6 +31,7 @@
 | 搜索请求 | 前端/API | 查询 read model index |
 | Refresh scope | `search` manifest | month or `all`；`all` 是 fan-out command |
 | 业务对象变化 | lifecycle/producer | 产生 search scope refresh |
+| 本地即时查询输入 | Workbench repository | 仅允许 `list_workbench_search_rows(scope_key=YYYY-MM)`；返回 active generation 的 row/zone/group/project context，不得构建 Workbench 页面 payload；生产查询不走该路径 |
 
 ## 输出 I/O
 
@@ -66,6 +67,7 @@
 - 允许依赖：read model repository, pending invoice projection, runtime queue。
 - 必须通过：search read model freshness service/API。
 - 禁止绕过：页面直查源业务表作为搜索结果；business service 直接写 index 表。
+- 非 PostgreSQL 本地兼容路径只允许复用 Workbench repository 的单月 active-generation 窄查询；repository 缺失必须 fail fast，不得回退 `_build_api_workbench_payload`、raw payload 或 snapshot。
 
 ## 测试与验证
 
@@ -79,4 +81,4 @@
 ## 当前缺口和删除条件
 
 - 如拆出 route owner，必须同步本文件和 module README。
-- 删除旧查询前必须验证 pending invoice/search fan-out。
+- Search 的生产 SQL read model、pending invoice/search fan-out、结果 DTO、排序/过滤和缓存失效合同保持不变；后续删除整个本地即时查询前仍须单独验证这些合同。

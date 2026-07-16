@@ -54,12 +54,13 @@
 - 允许流转：
   - admin 输入确认密码后创建 job。
   - 页面重进后可恢复 active running job。
-  - reset OA 可以按 OA retention cutoff 重建并复用缓存附件发票。
+  - reset OA 清理完成并可靠登记 lifecycle 后返回 `rebuild_status=pending`；下游按 OA retention cutoff 重建并复用缓存附件发票。
 - 禁止流转：
   - 密码缺失/错误或 verification service 失败时清理数据。
   - job payload、错误、日志保存 OA password。
   - 删除 protected targets。
   - reset 后让旧 read model/cache 显示为 fresh。
+  - reset 请求/job 线程同步读取 Workbench 全页 payload、OA 行投影或 OCR，并把该结果当成重建完成证明。
 
 ## UI 状态
 
@@ -75,7 +76,7 @@
 
 - 设置事实本身不作为 read model，但它会触发或清理多个 read model。
 - refresh 触发来源：
-  - `pending_invoice_rules_changed`：待找发票、发票 lifecycle、关联台、进项/销项/OA 待付款、税金、成本、搜索。
+  - `pending_invoice_rules_changed`：待找发票、发票 lifecycle、关联台、进项/销项、税金、成本、搜索；OA 待付款不消费该规则。
   - `bank_auto_tag_rules_changed` / bank tag settings：银行明细、免 OA、关联台候选、往来款、成本、搜索。
   - `project_scope_changed`：成本统计、搜索。
   - `settings_reset_completed`：多数 read model、cache、dirty scope、App Status readiness。

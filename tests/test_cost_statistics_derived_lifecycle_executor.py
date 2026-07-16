@@ -14,10 +14,8 @@ class _RuntimeRecorder:
         self.invalidate_all_result = ["active:all", "all:all"]
         self.invalidate_scopes_result = ["active:2026-05", "all:2026-05"]
 
-    def invalidate_read_models(self, *, schedule_warmup: bool = True, persist_empty: bool = True) -> list[str]:
-        self.invalidate_all_calls.append(
-            {"schedule_warmup": schedule_warmup, "persist_empty": persist_empty}
-        )
+    def invalidate_read_models(self, *, schedule_warmup: bool = True) -> list[str]:
+        self.invalidate_all_calls.append({"schedule_warmup": schedule_warmup})
         return list(self.invalidate_all_result)
 
     def invalidate_read_model_scopes(
@@ -26,17 +24,21 @@ class _RuntimeRecorder:
         *,
         reason: str = "",
         schedule_warmup: bool = True,
-        persist_empty: bool = True,
     ) -> list[str]:
         self.invalidate_scope_calls.append(
             {
                 "scope_keys": list(scope_keys),
                 "reason": reason,
                 "schedule_warmup": schedule_warmup,
-                "persist_empty": persist_empty,
             }
         )
         return list(self.invalidate_scopes_result)
+
+    @staticmethod
+    def refresh_scope_keys_from_scope_keys(scope_keys: list[str]) -> list[str]:
+        from fin_ops_platform.services.cost_statistics_runtime_service import CostStatisticsRuntimeService
+
+        return CostStatisticsRuntimeService.refresh_scope_keys_from_scope_keys(scope_keys)
 
 
 class CostStatisticsDerivedLifecycleExecutorTests(unittest.TestCase):
@@ -48,7 +50,6 @@ class CostStatisticsDerivedLifecycleExecutorTests(unittest.TestCase):
             enqueue_refresh=lambda scope_keys, **kwargs: enqueued.append(
                 {"scope_keys": list(scope_keys), **dict(kwargs)}
             ) or True,
-            can_enqueue_refresh=lambda: True,
         )
 
         result = executor.execute(
@@ -67,7 +68,6 @@ class CostStatisticsDerivedLifecycleExecutorTests(unittest.TestCase):
                     "scope_keys": ["active:2026-05", "all:2026-05"],
                     "reason": "invoice_import_confirmed",
                     "schedule_warmup": True,
-                    "persist_empty": True,
                 }
             ],
         )
@@ -90,7 +90,6 @@ class CostStatisticsDerivedLifecycleExecutorTests(unittest.TestCase):
             enqueue_refresh=lambda scope_keys, **kwargs: enqueued.append(
                 {"scope_keys": list(scope_keys), **dict(kwargs)}
             ) or True,
-            can_enqueue_refresh=lambda: False,
         )
 
         result = executor.execute(
@@ -117,7 +116,6 @@ class CostStatisticsDerivedLifecycleExecutorTests(unittest.TestCase):
                     "scope_keys": ["active:2026-06"],
                     "reason": "pending_invoice_rules_changed",
                     "schedule_warmup": False,
-                    "persist_empty": False,
                 }
             ],
         )
@@ -149,10 +147,10 @@ class CostStatisticsDerivedLifecycleExecutorTests(unittest.TestCase):
 
     def test_execute_all_scope_uses_all_invalidation_without_warmup_fallback_when_gateway_unavailable(self) -> None:
         runtime = _RuntimeRecorder()
+        runtime.invalidate_all_result = []
         executor = CostStatisticsDerivedLifecycleExecutor(
             runtime_service=runtime,
             enqueue_refresh=lambda _scope_keys, **_kwargs: False,
-            can_enqueue_refresh=lambda: False,
         )
 
         result = executor.execute(
@@ -162,14 +160,14 @@ class CostStatisticsDerivedLifecycleExecutorTests(unittest.TestCase):
 
         self.assertEqual(
             runtime.invalidate_all_calls,
-            [{"schedule_warmup": True, "persist_empty": True}],
+            [{"schedule_warmup": True}],
         )
         self.assertEqual(runtime.invalidate_scope_calls, [])
         self.assertEqual(
             result,
             {
-                "deleted_counts": {"cost_statistics_read_models": 2},
-                "invalidated_scopes": ["active:all", "all:all"],
+                "deleted_counts": {"cost_statistics_read_models": 0},
+                "invalidated_scopes": [],
                 "enqueued_jobs": [],
             },
         )
@@ -183,7 +181,6 @@ class CostStatisticsDerivedLifecycleExecutorTests(unittest.TestCase):
             enqueue_refresh=lambda scope_keys, **kwargs: enqueued.append(
                 {"scope_keys": list(scope_keys), **dict(kwargs)}
             ) or False,
-            can_enqueue_refresh=lambda: True,
         )
 
         result = executor.execute({}, schedule_warmup=False)
@@ -195,7 +192,6 @@ class CostStatisticsDerivedLifecycleExecutorTests(unittest.TestCase):
                     "scope_keys": [],
                     "reason": "derived_lifecycle_cost_statistics",
                     "schedule_warmup": False,
-                    "persist_empty": True,
                 }
             ],
         )
@@ -206,8 +202,8 @@ class CostStatisticsDerivedLifecycleExecutorTests(unittest.TestCase):
         self.assertEqual(
             result,
             {
-                "deleted_counts": {"cost_statistics_read_models": 1},
-                "invalidated_scopes": ["all"],
+                "deleted_counts": {"cost_statistics_read_models": 0},
+                "invalidated_scopes": [],
                 "enqueued_jobs": [],
             },
         )

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
 import unittest
+from pathlib import Path
 
 from fin_ops_platform.services.runtime_state_policy import (
     BLOCKED_UNKNOWN,
@@ -154,7 +154,8 @@ class RuntimeStatePolicyTests(unittest.TestCase):
             repository_root / "backend/src/fin_ops_platform/services/tax_offset_read_model_refresh.py",
             repository_root / "backend/src/fin_ops_platform/services/search_pending_read_model_refresh.py",
             repository_root / "backend/src/fin_ops_platform/services/workbench_sql_projection.py",
-            repository_root / "backend/src/fin_ops_platform/services/cost_tax_sql_projection.py",
+            repository_root / "backend/src/fin_ops_platform/services/cost_statistics_sql_projection.py",
+            repository_root / "backend/src/fin_ops_platform/services/tax_offset_sql_projection.py",
             repository_root / "backend/src/fin_ops_platform/services/search_pending_sql_projection.py",
         ]
         forbidden_tokens = (

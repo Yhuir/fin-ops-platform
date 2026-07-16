@@ -47,7 +47,7 @@ test.describe("workbench withdraw browser flow", () => {
     expect(previewBody.row_ids).toHaveLength(workbenchRowIds.length);
 
     const barrierCallsBeforeWithdraw = api.count("POST /api/operation-barrier/status");
-    const workbenchGroupCallsBeforeWithdraw = api.count("GET /api/workbench/groups");
+    const workbenchLoadsBeforeWithdraw = api.count("GET /api/workbench");
     await previewDialog.getByRole("textbox", { name: "备注" }).fill("浏览器撤回主链路回归");
     await previewDialog.getByRole("button", { name: "确认撤回" }).click();
 
@@ -80,7 +80,7 @@ test.describe("workbench withdraw browser flow", () => {
     expect(api.count("POST /api/workbench/actions/withdraw-link/preview")).toBe(1);
     expect(api.count("POST /api/workbench/actions/withdraw-link")).toBe(1);
     expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(barrierCallsBeforeWithdraw);
-    expect(api.count("GET /api/workbench/groups")).toBeGreaterThan(workbenchGroupCallsBeforeWithdraw);
+    expect(api.count("GET /api/workbench")).toBeGreaterThan(workbenchLoadsBeforeWithdraw);
 
     await page.getByRole("link", { name: "银行明细" }).click();
     const bankRow = page.getByRole("row", { name: /智能工厂设备商/ });

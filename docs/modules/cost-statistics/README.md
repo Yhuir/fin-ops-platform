@@ -20,28 +20,44 @@
 - `backend/src/fin_ops_platform/app/routes_cost_statistics.py`
 - `backend/src/fin_ops_platform/services/cost_statistics_query_service.py`
 - `backend/src/fin_ops_platform/services/cost_statistics_runtime_service.py`
-- `backend/src/fin_ops_platform/services/cost_statistics_service.py`
-- `backend/src/fin_ops_platform/services/cost_statistics_read_model_service.py`
+- `backend/src/fin_ops_platform/services/cost_statistics_source_versions.py`
 - `backend/src/fin_ops_platform/services/cost_statistics_read_model_refresh.py`
 - `backend/src/fin_ops_platform/services/cost_statistics_derived_lifecycle_executor.py`
 - `backend/src/fin_ops_platform/services/cost_statistics_bank_tags.py`
+- `backend/src/fin_ops_platform/services/postgres_repositories/cost_statistics_page_audit.py`
 - `backend/src/fin_ops_platform/services/postgres_repositories/read_models.py`
-- `backend/src/fin_ops_platform/services/cost_tax_sql_projection.py`
+- `backend/src/fin_ops_platform/services/cost_statistics_sql_projection.py`
 - `backend/src/fin_ops_platform/services/runtime_worker_registry.py`
 
 ## 当前边界
 
 关注项目范围、费用归因、导出 shape、成本统计标签规则、cost read model freshness 和 query/runtime I/O。成本统计 read model refresh scope 必须是 `active:YYYY-MM`、`all:YYYY-MM`、`active:all` 或 `all:all`；旧的裸月份/裸 `all` 只能在统一 read model refresh scope gateway 中归一化，不能直接进入 durable queue。生产旧 readiness、dirty scope 或 outbox 中残留的裸 scope 使用 `scripts/check-read-model-scope-contracts.py` 检查和受控清理。
 
-模块状态为 `closed`：API/query miss 只返回 `refreshing` 并入队 `cost_statistics.read_model.refresh`，不再同步调用 live `CostStatisticsService` 或本地 read model fallback；live export helper 和 `ProjectDetailExportService` 已删除。历史 `cost_statistics_cache_warmup` job type 仅作为兼容识别入口，不得写成本统计 read model。
+模块状态为 `closed`：API/query miss 只返回 `refreshing` 并入队 `cost_statistics.read_model.refresh`，不再同步调用 live builder 或本地 read model fallback；legacy `CostStatisticsService`、live export helper 和 `ProjectDetailExportService` 已删除。成本归集规则只由 `CostStatisticsSqlProjectionBuilder` 构建并写入 SQL read model，API 测试也不再以旧 live service 生成 fixture。历史 `cost_statistics_cache_warmup` job type 仅作为兼容识别入口，不得写成本统计 read model。
 
 生产刷新由专用 `cost-statistics` RabbitMQ consumer 承担独立性能 lane；旧 `cost-tax` 成本统计兼容消费者已移除，`cost-tax` 只保留税金抵扣兼容链路。当前 P2/P3 closure 按首屏 API 或 direct refresh p95 <= 1000ms 验收，写操作链路还要求 operation-to-fresh p99 <= 3000ms。`cost_statistics` freshness 仍以 PostgreSQL dirty scope/outbox/readiness 为事实源，不能为了达标把 stale 伪装成 fresh。
 
-月度 scope projection 只能消费对应 `read_model.workbench_generations` 的 active generation，并必须把 active generation 的 `source_versions` 纳入自身 `source_versions`。禁止直接按 `scope_key` 扫描 `read_model.workbench_groups` / `workbench_rows` 的历史 generation；父 scope shard 枚举也只能来自 active `workbench_generations`。当 SQL read model 已经 fresh 且 `source_versions` 完全一致时，worker 可以返回 `skipped/source_versions_unchanged`，不得扫描 Workbench groups 或重写 payload；缺少读取接口或版本不一致时必须按 active generation 重建。
+月度 scope projection 只能消费对应 `read_model.workbench_generations` 的 active generation，并必须把 active generation 的 `source_versions` 纳入自身 `source_versions`。禁止直接按 `scope_key` 扫描 `read_model.workbench_groups` / `workbench_rows` 的历史 generation；父 scope shard 枚举也只能来自 active `workbench_generations`。当 SQL read model 的 `source_versions` 完全一致时，worker 可以返回 `skipped/source_versions_unchanged`，不得扫描 Workbench groups 或重写 payload；该判定只允许通过 `get_cost_statistics_scope_metadata(...)` 按 scope 读取 parent `entry_count + source_versions`，不得调用 full-view loader、读取两张明细表或页面 dependency gate。缺少 metadata 接口或版本不一致时必须按 active generation 重建。
 
-2026-07-13 后成本统计页面有两组统计口径：`按项目`、`按银行`、`按OA费用类型` 是 OA 配对支出流水统计，只消费规则选中后的 `time_rows`；`按标签`、`按时间` 是全银行收支流水统计，消费规则选中后的全部收入与支出 `bank_flow_time_rows`。全流水视图不显示收入与支出的合并总金额：页面顶部、主标签和子标签均分别显示正数绝对值的“支出金额 / 收入金额”，同时分别显示笔数；收入使用绿色，支出使用橘色，流水明细保留资金方向和该笔金额。成本统计标签规则由右侧紧凑抽屉维护，收入与支出标签都可选择；旧显式选择在 selection schema v2 归一化时保留原支出选择并一次性加入当前有效收入标签。保存规则只持久化 app settings，不触发 read model rebuild。
+2026-07-13 后成本统计页面有两组统计口径：`按项目`、`按银行`、`按OA费用类型` 是 OA 配对支出流水统计；`按标签`、`按时间` 是全银行收支流水统计。2026-07-16 起页面不再接收两类完整 row arrays，而是通过原 explorer endpoint 的 `scope/view/filter/cursor` 合同读取服务端 summary/facets 和 bounded rows；统计口径不变。全流水视图不显示收入与支出的合并总金额：页面顶部、主标签和子标签均分别显示正数绝对值的“支出金额 / 收入金额”，同时分别显示笔数；收入使用绿色，支出使用橘色，流水明细保留资金方向和该笔金额。成本统计标签规则由右侧紧凑抽屉维护，收入与支出标签都可选择；旧显式选择在 selection schema v2 归一化时保留原支出选择并一次性加入当前有效收入标签。保存规则只持久化 app settings，不触发 read model rebuild。
 
 2026-07-14 起五个统计分类与“成本统计”标题同排，当前视图的时间范围和金额摘要位于下一行且范围控件固定在最左。OA 配对三类汇总和列表金额统一显式标注“支出”；按标签的收支标签左对齐、金额右对齐。项目、银行、OA 费用类型和标签四种下钻表不再保留独立“时间”列，而是在“对方户名”或“项目名”下方显示时间 chip；桌面端 explorer 各栏共享同一高度并独立滚动。`按时间`主表仍保留独立时间列，因为时间是该视图的主维度。
+
+2026-07-16 起成本页用唯一 `effectiveCostPageState` 合并当前 explorer lifecycle、explorer freshness envelope、App Status 中精确 `cost_statistics + active scope` 和标签规则 operation barrier。只有明确 `fresh` 才开放成本业务操作；loading/refreshing/stale/unavailable/error 使用页面内内联状态轨、原生 `inert` 和约 80% 透明的 cost-local 拦截层。它不是 dialog，没有实色 card、背景模糊或任何遮罩/状态装饰动画；标题、Audit、App Shell 和导航始终在锁定边界外。进入锁定会关闭成本页自有详情/导出 portal，标签规则抽屉保留草稿但锁定 body/footer；focus、visibility 与 BFCache 返回都会先重校验。
+
+2026-07-16 起成本页面 Audit 的唯一 owner 是 `cost_statistics_page_audit.py`。统一 page key、通用只读 CLI 与 System Audit 都直接分派给该 owner，并继续复用 caller-owned repeatable-read read-only snapshot；共享 `page_business_audit.py` 不再包含成本合同、SQL、issue mapping 或 dependency dispatch。05-09 已把 summary/dirty/outbox 合为一次查询，复用 Workbench collector 已执行的 relation equality，并跳过成本调用后会丢弃的 Workbench generation summary I/O；05-10 又把 row/scope、月度上游和 parent shard 三类 source-version 证明从三次往返合为一次集合 SQL。05-16 将关键字段、bank-flow 字段、scope summary、project/expense summary 和 bank accounts 五类业务值证明合为一个 `cost_business_value_proofs` statement；每个分支仍独立 limit 并保留原 issue contract。05-17 删除 canonical expected-set、bank-flow 字段和 scope summary 中最后 3 处 parent JSON bank-flow array 读取；投影完整性、字段和父级汇总证明现在只读 `cost_statistics_bank_flow_rows` 的类型化字段，父 scope 按 concrete month rows 逻辑 rollup。05-18 又把 scope row count、missing scope、duplicate identity 和 canonical expected-set 四个入口合为一个 `cost_exact_set_proofs` statement，四分支仍各自 bounded，并删除旧四 helper 与无调用通用 proof helper。成本 owner 现在只有 queue/readiness、source-version、exact-set、business-values 四组集合 SQL；包含 active relation、会真实触发 group-row proof 的固定本地总预算由旧实现的 36 依次降到 32、30、26、23。该预算仍只是防回退门禁；真实 PostgreSQL plan、生产 `<=5s`、mismatch 修复与连续 pass 仍待统一部署验证。
+
+2026-07-16 的 05-12 将页面读时的多 owner expected-source 链路收敛到一个成本专属 PostgreSQL gate statement：同一 MVCC snapshot 读取成本 metadata/current dirty、App Settings 成本片段、月份 Workbench active generation/current dirty 与 Bank Detail scope/current dirty。query 以纯 helper 从该快照生成业务 source versions 和标签筛选 token；settings、Workbench、Bank Detail 不再由 Application/runtime provider 串行二次读取。依赖缺失、非法 JSON、pending/failed、schema/source version 漂移都会在 Redis/ETag/rows 前 fail-closed。旧 Application 四个 source wrapper、runtime source provider/expected method、query tag-selection provider 和按当前 expected key 删除 Redis 的旧逻辑均已删除；生产 EXPLAIN 与 p95/p99 仍等待统一部署窗口。
+
+2026-07-16 的 05-13 又删除了 `CostStatisticsReadModelService` module/class/test 及 Application 的启动 snapshot、field 和显式 local persistence callback。projection 直接向既有 repository port 提交单 scope write model；runtime invalidation 不再清理进程内 dict，而只把规范 scope 写入 durable refresh gateway，queue 不可用时不得报告已失效。PostgreSQL read-model table/repository 仍是正式边界，不属于被删除的本地 service。历史 `cost_statistics_cache_warmup` job 识别/终结桥仍等待统一部署窗口确认 active job 为零后再独立删除。
+
+2026-07-16 的 05-14 删除了成本 repository port、共享 PostgreSQL repository、`PostgresStateStore`、本地 `ApplicationStateStore`、`StateStoreProtocol` 与 manifest 中残留的全量 load / 无条件 save 合同。应用启动/全状态快照不再扫描或携带成本 read model，broad `save(payload)` 也不再接受该 key；正式写入只允许带 `tenant_id + scope_key + source_version` 的 conditional publish，正式读取只保留 scoped freshness/page/view/transaction 与 Workbench source-version I/O。该删除只收窄成本边界，不改变其他页面 read model、API、worker event、表结构或前端行为。
+
+2026-07-16 的 05-15 将 bulk `export-preview` / `export` 从完整 explorer payload 迁到成本专属 `get_cost_statistics_export_page(...)`。preview 只取 SQL 汇总与最多 8 行；同步 XLSX 在 20,000 行门槛通过后按每批最多 1,000 行读取，并直接写 openpyxl write-only worksheet。下载生成后再次校验同一 schema、业务 source versions 与 `published_source_version`；中途发布变化时丢弃文件并返回既有 non-fresh 409。transaction 单笔导出继续走 freshness gate + identity 点查。HTTP、筛选、文件名、sheet 和权限合同未改变，也未把导出抽象扩散到其他页面。
+
+2026-07-16 的 05-19 将 projection 的 `source_versions_unchanged` 判定从 `get_cost_statistics_view(...)` 迁到 cost-local `get_cost_statistics_scope_metadata(...)`。该 I/O 是一次 parent scope point query，只返回 `scope_key/entry_count/source_versions`，不读取 payload、结构化 cost/bank-flow rows、dirty queue、Workbench、Bank Detail 或 App Settings。full-view loader 现在只剩旧 month/project HTTP 合同调用；必须等统一部署后的生产 access-log/owner 证据再删除，不允许恢复到 worker、页面、详情或 bulk export。
+
+2026-07-16 的 05-20 删除了混合 owner `cost_tax_sql_projection.py`。成本 builder 与全部成本私有 helper 现在只属于 `cost_statistics_sql_projection.py`；税金 builder 迁到 `tax_offset_sql_projection.py`。生产 worker 直接 import 两个 owner，旧 module、re-export、compat shim 和 fallback 均不存在；税金行为、API、read model、queue 与 worker event 未改变。
 
 ## 维护触发器
 
@@ -55,6 +71,7 @@
 
 ## 本目录文件
 
+- `performance-freshness-lock-overlay-design.md`：本轮高性能、freshness、Audit、轻量锁和旧链路删除的唯一主设计与实施校准文档。
 - `state-machine.md`：维护当前有效状态和状态流转；不适用时写明原因。
 - `tests.md`：维护七类测试适用性、现有测试入口、验证命令和回归范围。
 - `e2e-spec.md`：维护成本统计页面 Spec-first Browser E2E 验收合同。

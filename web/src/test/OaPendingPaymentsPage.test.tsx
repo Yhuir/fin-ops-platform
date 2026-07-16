@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
@@ -460,10 +460,34 @@ const rowsPayload = {
       operators: ["between", "equals"],
     },
   ],
+  filterOptions: {
+    oa_applicant: [{ value: "张三", label: "张三", count: 1 }],
+    oa_application_type: [{ value: "报销", label: "报销", count: 1 }],
+    payment_status: [{ value: "paid", label: "已支付", count: 3 }],
+    oa_project_name: [{
+      value: "红河卷烟厂能源管理系统运维服务",
+      label: "红河卷烟厂能源管理系统运维服务",
+      count: 1,
+    }],
+    bank_counterparty_name: [{
+      value: "中招国际招标有限公司云南分公司",
+      label: "中招国际招标有限公司云南分公司",
+      count: 1,
+    }],
+    bank_account: [{ value: "建设银行 1234", label: "建设银行 1234", count: 1 }],
+    bank_direction: [{ value: "outflow", label: "支出", count: 2 }],
+    seller_name: [{ value: "云南恒昆机电设备有限公司", label: "云南恒昆机电设备有限公司", count: 1 }],
+  },
 };
 
 function installOaPendingPaymentsFetch(overrides?: {
   rowsPayload?: Record<string, unknown>;
+  rowsResponses?: Array<{
+    status: number;
+    payload?: Record<string, unknown>;
+    etag?: string;
+    delay?: Promise<void>;
+  }>;
   detailPayloads?: Record<string, { status: number; payload: Record<string, unknown> }>;
   operationBarrierDelay?: Promise<void>;
   rulesCanSave?: boolean;
@@ -472,6 +496,7 @@ function installOaPendingPaymentsFetch(overrides?: {
   bankCandidatesPayload?: (url: URL) => Record<string, unknown>;
 }) {
   const writebackPaidResponses = [...(overrides?.writebackPaidResponses ?? [])];
+  const rowsResponses = [...(overrides?.rowsResponses ?? [])];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
     const detailPayload = overrides?.detailPayloads?.[url.pathname];
@@ -482,11 +507,24 @@ function installOaPendingPaymentsFetch(overrides?: {
       });
     }
     if (url.pathname === "/api/oa-pending-payments/rows") {
+      const scriptedResponse = rowsResponses.shift();
+      await scriptedResponse?.delay;
+      if (scriptedResponse?.status === 304) {
+        return new Response(null, {
+          status: 304,
+          headers: scriptedResponse.etag ? { ETag: scriptedResponse.etag } : undefined,
+        });
+      }
       const payload: Record<string, unknown> = overrides?.rowsPayload ?? rowsPayload;
-      const readModelStatus = payload.readModelStatus ?? payload.read_model_status;
-      return new Response(JSON.stringify(payload), {
-        status: readModelStatus === "refreshing" ? 202 : 200,
-        headers: { "Content-Type": "application/json" },
+      const responsePayload = scriptedResponse?.payload ?? payload;
+      const readModelStatus = responsePayload.readModelStatus ?? responsePayload.read_model_status;
+      const headers = new Headers({ "Content-Type": "application/json" });
+      if (scriptedResponse?.etag) {
+        headers.set("ETag", scriptedResponse.etag);
+      }
+      return new Response(JSON.stringify(responsePayload), {
+        status: scriptedResponse?.status ?? (readModelStatus === "refreshing" ? 202 : 200),
+        headers,
       });
     }
     if (url.pathname === "/api/operation-barrier/status") {
@@ -498,7 +536,7 @@ function installOaPendingPaymentsFetch(overrides?: {
           {
             read_model_key: "oa_pending_payment",
             scope_type: "oa_pending_payment",
-            scope_key: "all",
+            scope_key: "2026-05",
             status: "fresh",
             fresh: true,
             blocking: false,
@@ -521,7 +559,7 @@ function installOaPendingPaymentsFetch(overrides?: {
         oaRowIds: [],
         writebackCount: 0,
         oaPaymentWritebacks: [],
-        readModelRefresh: { scopeKeys: ["all"], enqueued: false, targetSeconds: 2 },
+        readModelRefresh: { scopeKeys: [], enqueued: false, targetSeconds: 0 },
       }), {
         status,
         headers: { "Content-Type": "application/json" },
@@ -568,98 +606,9 @@ function installOaPendingPaymentsFetch(overrides?: {
         relation: { status: "confirmed" },
         autoWriteback: { code: "written", label: "已写回", matched: true, writebackCount: 1 },
         oaPaymentWritebacks: [{ code: "written", label: "已写回", flowId: "proc-candidate", syncStatus: "ready" }],
-        readModelRefresh: { scopeKeys: ["2026-05", "all"], enqueued: true, targetSeconds: 2 },
+        readModelRefresh: { scopeKeys: ["2026-05"], enqueued: true, targetSeconds: 1 },
       }), {
         status: init?.method === "POST" ? 200 : 405,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-    if (url.pathname === "/api/oa-pending-payments/filter-options") {
-      return new Response(JSON.stringify({
-        fields: [
-          {
-            field: "oa_applicant",
-            label: "OA申请人",
-            mode: "enum_multi",
-            sortable: true,
-            operators: ["in"],
-            options: [{ value: "张三", label: "张三", count: 1 }],
-          },
-          {
-            field: "oa_application_type",
-            label: "类型",
-            mode: "enum_multi",
-            sortable: false,
-            operators: ["in"],
-            options: [{ value: "报销", label: "报销", count: 1 }],
-          },
-          {
-            field: "payment_status",
-            label: "支付状态",
-            mode: "enum_multi",
-            sortable: true,
-            operators: ["in"],
-            options: [{ value: "paid", label: "已支付", count: 3 }],
-          },
-          {
-            field: "oa_project_name",
-            label: "项目名称",
-            mode: "enum_multi",
-            sortable: true,
-            operators: ["in"],
-            options: [{ value: "红河卷烟厂能源管理系统运维服务", label: "红河卷烟厂能源管理系统运维服务", count: 1 }],
-          },
-          {
-            field: "bank_counterparty_name",
-            label: "对方户名",
-            mode: "enum_multi",
-            sortable: true,
-            operators: ["in"],
-            options: [{ value: "中招国际招标有限公司云南分公司", label: "中招国际招标有限公司云南分公司", count: 1 }],
-          },
-          {
-            field: "bank_trade_time",
-            label: "交易时间",
-            mode: "date",
-            sortable: true,
-            operators: ["between", "equals"],
-            options: [],
-          },
-          {
-            field: "bank_account",
-            label: "银行账户",
-            mode: "enum_multi",
-            sortable: false,
-            operators: ["in"],
-            options: [{ value: "建设银行 1234", label: "建设银行 1234", count: 1 }],
-          },
-          {
-            field: "bank_direction",
-            label: "收支",
-            mode: "enum_multi",
-            sortable: false,
-            operators: ["in"],
-            options: [{ value: "outflow", label: "支出", count: 2 }],
-          },
-          {
-            field: "seller_name",
-            label: "发票方",
-            mode: "enum_multi",
-            sortable: true,
-            operators: ["in"],
-            options: [{ value: "云南恒昆机电设备有限公司", label: "云南恒昆机电设备有限公司", count: 1 }],
-          },
-          {
-            field: "invoice_date",
-            label: "开票日期",
-            mode: "date",
-            sortable: true,
-            operators: ["between", "equals"],
-            options: [],
-          },
-        ],
-      }), {
-        status: 200,
         headers: { "Content-Type": "application/json" },
       });
     }
@@ -791,6 +740,10 @@ function cssRule(source: string, selector: string) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    value: "visible",
+  });
 });
 
 describe("OA pending payments page", () => {
@@ -1262,7 +1215,7 @@ describe("OA pending payments page", () => {
         oaPaymentWritebacks: [
           { code: "written", label: "已写回", flowIds: ["flow-003"], syncStatus: "ready" },
         ],
-        readModelRefresh: { scopeKeys: ["2026-05", "all"], enqueued: true, targetSeconds: 2 },
+        readModelRefresh: { scopeKeys: ["2026-05"], enqueued: true, targetSeconds: 1 },
       },
     });
 
@@ -1311,7 +1264,7 @@ describe("OA pending payments page", () => {
             oaPaymentWritebacks: [
               { code: "written", label: "已写回", flowIds: ["flow-003"], syncStatus: "ready" },
             ],
-            readModelRefresh: { scopeKeys: [], enqueued: false, targetSeconds: 2 },
+            readModelRefresh: { scopeKeys: [], enqueued: false, targetSeconds: 0 },
           },
         },
       ],
@@ -1454,11 +1407,9 @@ describe("OA pending payments page", () => {
     })).toBe(true);
   });
 
-  test("waits for OA pending payment barrier before reloading after rule save", async () => {
+  test("does not invalidate OA pending payment after unrelated pending-invoice rule save", async () => {
     const user = userEvent.setup();
-    const gate = deferred();
     const fetchMock = installOaPendingPaymentsFetch({
-      operationBarrierDelay: gate.promise,
       rulesCanSave: true,
     });
 
@@ -1473,14 +1424,9 @@ describe("OA pending payments page", () => {
     await user.click(screen.getByRole("button", { name: "保存规则" }));
 
     await waitFor(() => expect(rulesSaveRequests(fetchMock)).toHaveLength(1));
-    await waitFor(() => expect(operationBarrierRequests(fetchMock)).toHaveLength(1));
-    expect(JSON.parse(String(operationBarrierRequests(fetchMock)[0][1]?.body))).toEqual({
-      targets: [{ read_model_key: "oa_pending_payment", scope_key: "all" }],
-    });
+    expect(await within(page).findByText("规则已保存。")).toBeInTheDocument();
+    expect(operationBarrierRequests(fetchMock)).toHaveLength(0);
     expect(rowsRequests(fetchMock)).toHaveLength(initialRowsRequests);
-
-    gate.resolve();
-    await waitFor(() => expect(rowsRequests(fetchMock).length).toBeGreaterThan(initialRowsRequests));
   });
 
   test("keeps pending invoice rules drawer stable during parent query refresh", async () => {
@@ -1503,6 +1449,174 @@ describe("OA pending payments page", () => {
       expect(rowsRequests(fetchMock).length).toBeGreaterThan(initialRowsRequestCount);
     });
     expect(rulesRequests(fetchMock)).toHaveLength(1);
+  });
+
+  test("uses the ETag for a 500ms conditional check and applies a changed read model", async () => {
+    const changedPayload = {
+      ...rowsPayload,
+      rows: [
+        {
+          ...rowsPayload.rows[0],
+          oa: { ...rowsPayload.rows[0].oa, applicantName: "新模型申请人" },
+        },
+      ],
+      pagination: { page: 1, pageSize: 20, total: 1 },
+      summary: { rowCount: 1, viewCounts: { completed: 1, in_progress: 0 } },
+    };
+    const fetchMock = installOaPendingPaymentsFetch({
+      rowsResponses: [
+        { status: 200, payload: rowsPayload, etag: '"oa-v1"' },
+        { status: 200, payload: changedPayload, etag: '"oa-v2"' },
+      ],
+    });
+
+    renderAuthenticatedAppAt("/oa-pending-payments");
+
+    const page = await screen.findByTestId("oa-pending-payments-page");
+    expect(await within(page).findByText("张三")).toBeInTheDocument();
+    await waitFor(() => expect(within(page).getByText("新模型申请人")).toBeInTheDocument(), { timeout: 1_500 });
+    expect(rowsRequests(fetchMock)).toHaveLength(2);
+    const conditionalCall = fetchMock.mock.calls.filter(([input]) => {
+      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+      return url.pathname === "/api/oa-pending-payments/rows";
+    })[1];
+    expect(new Headers(conditionalCall?.[1]?.headers).get("If-None-Match")).toBe('"oa-v1"');
+  });
+
+  test("pauses conditional checks while hidden and checks immediately when visible", async () => {
+    let visibilityState: DocumentVisibilityState = "hidden";
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => visibilityState,
+    });
+    const fetchMock = installOaPendingPaymentsFetch({
+      rowsResponses: [
+        { status: 200, payload: rowsPayload, etag: '"oa-v1"' },
+        { status: 304, etag: '"oa-v1"' },
+      ],
+    });
+
+    renderAuthenticatedAppAt("/oa-pending-payments");
+
+    const page = await screen.findByTestId("oa-pending-payments-page");
+    expect(await within(page).findByText("张三")).toBeInTheDocument();
+    await new Promise((resolve) => window.setTimeout(resolve, 550));
+    expect(rowsRequests(fetchMock)).toHaveLength(1);
+
+    visibilityState = "visible";
+    document.dispatchEvent(new Event("visibilitychange"));
+    await waitFor(() => expect(rowsRequests(fetchMock)).toHaveLength(2));
+  });
+
+  test("keeps at most one conditional request in flight", async () => {
+    const slowConditional = deferred();
+    const fetchMock = installOaPendingPaymentsFetch({
+      rowsResponses: [
+        { status: 200, payload: rowsPayload, etag: '"oa-v1"' },
+        { status: 304, etag: '"oa-v1"', delay: slowConditional.promise },
+      ],
+    });
+
+    renderAuthenticatedAppAt("/oa-pending-payments");
+
+    const page = await screen.findByTestId("oa-pending-payments-page");
+    expect(await within(page).findByText("张三")).toBeInTheDocument();
+    await waitFor(() => expect(rowsRequests(fetchMock)).toHaveLength(2), { timeout: 1_500 });
+    await new Promise((resolve) => window.setTimeout(resolve, 550));
+    expect(rowsRequests(fetchMock)).toHaveLength(2);
+    await act(async () => {
+      slowConditional.resolve();
+      await slowConditional.promise;
+    });
+  });
+
+  test("does not let a late response overwrite a newer query", async () => {
+    const lateResponse = deferred();
+    const payloadWithApplicant = (applicantName: string) => ({
+      ...rowsPayload,
+      rows: [{
+        ...rowsPayload.rows[0],
+        oa: { ...rowsPayload.rows[0].oa, applicantName },
+      }],
+      pagination: { page: 1, pageSize: 20, total: 1 },
+      summary: { rowCount: 1, viewCounts: { completed: 1, in_progress: 0 } },
+    });
+    const fetchMock = installOaPendingPaymentsFetch({
+      rowsResponses: [
+        { status: 200, payload: rowsPayload },
+        { status: 200, payload: payloadWithApplicant("迟到旧查询"), delay: lateResponse.promise },
+        { status: 200, payload: payloadWithApplicant("最新查询") },
+      ],
+    });
+
+    renderAuthenticatedAppAt("/oa-pending-payments");
+
+    const page = await screen.findByTestId("oa-pending-payments-page");
+    expect(await within(page).findByText("张三")).toBeInTheDocument();
+    fireEvent.change(within(page).getByLabelText("选择月份"), { target: { value: "2026-04" } });
+    await waitFor(() => expect(rowsRequests(fetchMock)).toHaveLength(2));
+    await userEvent.click(within(page).getByRole("button", { name: "全部" }));
+    expect(await within(page).findByText("最新查询")).toBeInTheDocument();
+
+    lateResponse.resolve();
+    await waitFor(() => expect(within(page).queryByText("迟到旧查询")).not.toBeInTheDocument());
+    expect(within(page).getByText("最新查询")).toBeInTheDocument();
+  });
+
+  test("clears the old model on 202, waits exact barriers, then loads one fresh model", async () => {
+    const barrier = deferred();
+    const changedPayload = {
+      ...rowsPayload,
+      rows: [
+        {
+          ...rowsPayload.rows[0],
+          oa: { ...rowsPayload.rows[0].oa, applicantName: "屏障后新数据" },
+        },
+      ],
+      pagination: { page: 1, pageSize: 20, total: 1 },
+      summary: { rowCount: 1, viewCounts: { completed: 1, in_progress: 0 } },
+    };
+    const fetchMock = installOaPendingPaymentsFetch({
+      operationBarrierDelay: barrier.promise,
+      rowsResponses: [
+        { status: 200, payload: rowsPayload, etag: '"oa-v1"' },
+        {
+          status: 202,
+          payload: {
+            rows: [],
+            pagination: { page: 1, pageSize: 20, total: 0 },
+            summary: { rowCount: 0 },
+            filterConfig: [],
+            filterOptions: {},
+            readModelStatus: "refreshing",
+            operationBarrierTargets: [
+              { readModelKey: "oa_pending_payment", scopeKey: "2026-06", scopeType: "oa_pending_payment" },
+            ],
+          },
+          etag: '"oa-refreshing"',
+        },
+        { status: 200, payload: changedPayload, etag: '"oa-v2"' },
+      ],
+    });
+
+    renderAuthenticatedAppAt("/oa-pending-payments");
+
+    const page = await screen.findByTestId("oa-pending-payments-page");
+    expect(await within(page).findByText("张三")).toBeInTheDocument();
+    await waitFor(() => expect(operationBarrierRequests(fetchMock)).toHaveLength(1), { timeout: 1_500 });
+    expect(within(page).queryByText("张三")).not.toBeInTheDocument();
+    expect(within(page).getByText("OA 待付款核对数据正在刷新")).toBeInTheDocument();
+    expect(JSON.parse(String(operationBarrierRequests(fetchMock)[0][1]?.body))).toEqual({
+      targets: [{
+        read_model_key: "oa_pending_payment",
+        scope_key: "2026-06",
+        scope_type: "oa_pending_payment",
+      }],
+    });
+
+    barrier.resolve();
+    expect(await within(page).findByText("屏障后新数据")).toBeInTheDocument();
+    expect(rowsRequests(fetchMock)).toHaveLength(3);
   });
 
   test("shows a neutral refreshing state instead of a true empty state while rows read model refreshes", async () => {

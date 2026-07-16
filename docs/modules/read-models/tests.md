@@ -30,6 +30,22 @@
 
 ## 场景覆盖清单
 
+## 2026-07-16 - cost statistics bounded export read contract
+
+- 变更类型：成本 read-model port 新增 cost-owned export-page read I/O；不改变其他 read model、worker、queue、schema、权限或前端。
+- 覆盖证据：preview 最多 8 行；download repository page 最大 1,000；首批完整 summary、后续无重复 summary；non-fresh 零 export rows；文件结束时发布版本变化 fail-closed。
+- 新增/更新测试：`tests/test_cost_statistics_sql_runtime.py`、`tests/test_cost_statistics_api.py`、`tests/test_read_model_manifest.py`、`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_cost_statistics_bulk_export_does_not_reload_full_explorer_payload`。
+- 七类测试决策：business、service、API、read model、local integration、regression 适用；frontend 无行为变化。
+- 未测风险：真实 PostgreSQL planner、大数据 memory/latency 与生产并发发布留到统一部署后；本轮未部署。
+
+## 2026-07-16 - cost statistics broad state I/O removal
+
+- 变更类型：成本 read-model repository/state-store contract 收窄；不改变其他 read model、HTTP contract、worker event、queue schema、schema migration、权限或前端。
+- 覆盖证据：成本 port/manifest 不再暴露全量 load 或无 source-version save；Postgres/local state store 不再携带成本 snapshot key；原 row persistence 测试改走带 dirty source version 的 conditional publish。
+- 新增/更新测试：`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_cost_statistics_does_not_retain_full_snapshot_load_or_unconditional_save_io`、`tests/test_postgres_state_store.py::PostgresStateStoreTests::test_postgres_full_state_snapshot_omits_cost_statistics_read_model`、`tests/test_cost_statistics_sql_runtime.py`、`tests/test_postgres_repositories_boundaries.py`、`tests/test_read_model_manifest.py`。
+- 七类测试决策：service-layer、read model/cache/background job、projection→publish→query integration、existing regression 适用并覆盖；business core、frontend 不适用，API 仅复跑既有合同回归。
+- 未测风险：真实 PostgreSQL planner、worker drain 与生产 p95/p99 留到统一部署后的 evidence gate；本轮未部署。
+
 ## 2026-07-13 - committed write SLO miss 恢复收敛门禁
 
 - 变更类型：生产 write-operation E2E recovery orchestration；不改变业务关系状态机、HTTP response shape、read model scope、worker event、queue schema、权限或前端行为。

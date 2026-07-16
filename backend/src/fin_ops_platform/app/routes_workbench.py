@@ -9,94 +9,33 @@ from fin_ops_platform.services.workbench_groups_page_cache import (
     normalize_workbench_group_search_mode,
     stable_json_value,
 )
-from fin_ops_platform.services.workbench_query_service import WorkbenchQueryService
 
 
 class WorkbenchRowDetailApiRoutes:
-    """Read-only owner for Workbench row detail fallback orchestration."""
+    """Read-only owner for Workbench row detail request mapping."""
 
-    def __init__(
-        self,
-        *,
-        etc_summary_row_detail: Callable[[str], dict[str, object] | None],
-        live_row_detail: Callable[[str], dict[str, object]],
-        row_month_scope_from_row_id: Callable[[str], str | None],
-        cached_rows_resolver: Callable[..., dict[str, dict[str, object]]],
-        query_facade_provider: Callable[[], Any | None],
-        looks_like_oa_row_id: Callable[[str], bool],
-        legacy_row_detail: Callable[[str], dict[str, object]],
-        requires_sql_read_model_runtime: Callable[[], bool],
-        apply_row_override: Callable[[dict[str, object]], dict[str, object]],
-    ) -> None:
-        self._etc_summary_row_detail = etc_summary_row_detail
-        self._live_row_detail = live_row_detail
-        self._row_month_scope_from_row_id = row_month_scope_from_row_id
-        self._cached_rows_resolver = cached_rows_resolver
+    def __init__(self, *, query_facade_provider: Callable[[], Any]) -> None:
         self._query_facade_provider = query_facade_provider
-        self._looks_like_oa_row_id = looks_like_oa_row_id
-        self._legacy_row_detail = legacy_row_detail
-        self._requires_sql_read_model_runtime = requires_sql_read_model_runtime
-        self._apply_row_override = apply_row_override
 
     def get_payload(self, row_id: str, *, month: str | None = None) -> dict[str, object]:
-        etc_summary_row = self._etc_summary_row_detail(row_id)
-        if etc_summary_row is not None:
-            return {"row": self._apply_row_override(etc_summary_row)}
-
-        month_hint = str(month).strip() if month not in (None, "") else self._row_month_scope_from_row_id(row_id)
-        fallback_allowed = self._legacy_route_fallback_allowed(row_id)
-        live_checked = False
-        if month_hint is None and fallback_allowed:
-            live_checked = True
-            try:
-                return {"row": self._apply_row_override(self._live_row_detail(row_id))}
-            except KeyError:
-                pass
-
-        cached_rows = self._cached_rows_resolver([row_id], month_hint=month_hint)
-        if row_id in cached_rows:
-            payload = {"row": cached_rows[row_id]}
-        elif query_facade_row := self._row_detail_from_query_facade(row_id, month_hint=month_hint):
-            payload = {"row": query_facade_row}
-        elif month_hint is None and self._looks_like_oa_row_id(row_id):
+        status_code, payload = self.get_result(row_id, month=month)
+        if status_code != HTTPStatus.OK:
             raise KeyError(row_id)
-        elif fallback_allowed:
-            if live_checked:
-                payload = self._legacy_row_detail(row_id)
-            else:
-                try:
-                    payload = {"row": self._live_row_detail(row_id)}
-                except KeyError:
-                    payload = self._legacy_row_detail(row_id)
-        else:
-            raise KeyError(row_id)
-        row = payload.get("row")
-        if not isinstance(row, dict):
-            raise KeyError(row_id)
-        payload["row"] = self._apply_row_override(row)
         return payload
 
-    def _row_detail_from_query_facade(
+    def get_result(
         self,
         row_id: str,
         *,
-        month_hint: str | None,
-    ) -> dict[str, object] | None:
-        facade = self._query_facade_provider()
-        if facade is None:
-            return None
-        try:
-            result = facade.row_detail(month_hint, row_id=row_id)
-        except AttributeError:
-            return None
-        if result.status_code != HTTPStatus.OK:
-            return None
-        payload = result.payload if isinstance(result.payload, dict) else {}
-        row = payload.get("row")
-        return row if isinstance(row, dict) else None
-
-    def _legacy_route_fallback_allowed(self, row_id: str) -> bool:
-        return not self._requires_sql_read_model_runtime()
+        month: str | None = None,
+        expected_read_model_version: str | None = None,
+    ) -> tuple[HTTPStatus, dict[str, object]]:
+        kwargs: dict[str, object] = {"row_id": row_id}
+        expected_version = str(expected_read_model_version or "").strip()
+        if expected_version:
+            kwargs["expected_read_model_version"] = expected_version
+        result = self._query_facade_provider().row_detail(month or "all", **kwargs)
+        return result.status_code, result.payload
 
 
 class WorkbenchGroupDetailApiRoutes:
@@ -136,17 +75,35 @@ class WorkbenchGroupDetailApiRoutes:
 
 
 class WorkbenchReadApiRoutes:
-    """Read-only owner for Workbench summary and grouped list request mapping."""
+    """Read-only owner for Workbench initial page and grouped list request mapping."""
 
     def __init__(self, *, query_facade_provider: Callable[[], Any]) -> None:
         self._query_facade_provider = query_facade_provider
 
-    def summary(self, month: str | None) -> tuple[HTTPStatus, dict[str, object]]:
-        result = self._query_facade_provider().summary(month)
-        return result.status_code, result.payload
-
     def refresh_status(self, month: str | None) -> tuple[HTTPStatus, dict[str, object]]:
         result = self._query_facade_provider().refresh_status(month)
+        return result.status_code, result.payload
+
+    def initial(
+        self,
+        month: str | None,
+        *,
+        paired_query: str | None = None,
+        unpaired_query: str | None = None,
+    ) -> tuple[HTTPStatus, dict[str, object]]:
+        try:
+            normalized_paired_query = self._normalize_initial_query_param(paired_query, "paired_query")
+            normalized_unpaired_query = self._normalize_initial_query_param(unpaired_query, "unpaired_query")
+        except ValueError as error:
+            return (
+                HTTPStatus.BAD_REQUEST,
+                {"error": "invalid_workbench_initial_query", "message": str(error)},
+            )
+        result = self._query_facade_provider().initial_page(
+            month,
+            paired_query=normalized_paired_query,
+            unpaired_query=normalized_unpaired_query,
+        )
         return result.status_code, result.payload
 
     def groups(
@@ -165,6 +122,7 @@ class WorkbenchReadApiRoutes:
         detail_level: str | None = None,
         column_filters: str | None = None,
         time_filters: str | None = None,
+        expected_read_model_version: str | None = None,
     ) -> tuple[HTTPStatus, dict[str, object]]:
         current_month = month or "all"
         normalized_zone = str(zone or "").strip()
@@ -182,22 +140,48 @@ class WorkbenchReadApiRoutes:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_workbench_groups_query", "message": str(error)},
             )
-        result = self._query_facade_provider().groups(
-            current_month,
-            zone=normalized_zone,
-            page=page,
-            page_size=page_size,
-            status=status,
-            source_kind=source_kind,
-            search=search,
-            search_mode=normalize_workbench_group_search_mode(search_mode),
-            search_by_pane=normalized_search_by_pane,
-            sort=sort,
-            detail_level=normalize_workbench_group_detail_level(detail_level),
-            column_filters=normalized_column_filters,
-            time_filters=normalized_time_filters,
-        )
+        kwargs: dict[str, object] = {
+            "zone": normalized_zone,
+            "page": page,
+            "page_size": page_size,
+            "status": status,
+            "source_kind": source_kind,
+            "search": search,
+            "search_mode": normalize_workbench_group_search_mode(search_mode),
+            "search_by_pane": normalized_search_by_pane,
+            "sort": sort,
+            "detail_level": normalize_workbench_group_detail_level(detail_level),
+            "column_filters": normalized_column_filters,
+            "time_filters": normalized_time_filters,
+        }
+        expected_version = str(expected_read_model_version or "").strip()
+        if expected_version:
+            kwargs["expected_read_model_version"] = expected_version
+        result = self._query_facade_provider().groups(current_month, **kwargs)
         return result.status_code, result.payload
+
+    @staticmethod
+    def _normalize_initial_query_param(value: str | None, name: str) -> dict[str, object]:
+        normalized = WorkbenchReadApiRoutes._normalize_json_query_param(value, name)
+        allowed_string_fields = {"status", "source_kind", "search", "search_mode", "sort"}
+        allowed_object_fields = {"search_by_pane", "column_filters", "time_filters"}
+        unknown_fields = sorted(set(normalized) - allowed_string_fields - allowed_object_fields)
+        if unknown_fields:
+            raise ValueError(f"{name} contains unsupported fields: {', '.join(unknown_fields)}.")
+        for field_name in allowed_string_fields:
+            field_value = normalized.get(field_name)
+            if field_value is not None and not isinstance(field_value, str):
+                raise ValueError(f"{name}.{field_name} must be a string.")
+        for field_name in allowed_object_fields:
+            field_value = normalized.get(field_name)
+            if field_value is not None and not isinstance(field_value, dict):
+                raise ValueError(f"{name}.{field_name} must be a JSON object.")
+        search_mode = str(normalized.get("search_mode") or "").strip().lower()
+        if search_mode and search_mode not in {"pane", "linked_context"}:
+            raise ValueError(f"{name}.search_mode must be pane or linked_context.")
+        if search_mode:
+            normalized["search_mode"] = search_mode
+        return normalized
 
     @staticmethod
     def _normalize_json_query_param(value: str | None, name: str) -> dict[str, object]:
@@ -272,14 +256,3 @@ class WorkbenchEventsApiRoutes:
                 "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
             },
         )
-
-
-class WorkbenchApiRoutes:
-    def __init__(self, query_service: WorkbenchQueryService) -> None:
-        self._query_service = query_service
-
-    def get_workbench(self, month: str) -> dict[str, object]:
-        return self._query_service.get_workbench(month)
-
-    def get_row_detail(self, row_id: str) -> dict[str, object]:
-        return {"row": self._query_service.get_row_detail(row_id)}

@@ -119,7 +119,7 @@ test.describe("OA pending payments browser flow", () => {
     await expect(row).toContainText("8000.00");
     await expect(row).toContainText("12000.00");
     expect(api.count("GET /api/oa-pending-payments/rows")).toBeGreaterThanOrEqual(1);
-    expect(api.count("GET /api/oa-pending-payments/filter-options")).toBeGreaterThanOrEqual(1);
+    expect(api.count("GET /api/oa-pending-payments/filter-options")).toBe(0);
 
     const searchRequest = page.waitForRequest((request) => {
       const url = new URL(request.url());

@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.services.app_settings_service import (
+    AppSettingsService,
     AppSettingsValidationError,
     BankAutoTagRulesValidationError,
     COST_STATISTICS_UNCATEGORIZED_TAG_CODE,
@@ -320,6 +321,24 @@ class AppSettingsServiceTests(unittest.TestCase):
                     actor_id="cost-owner",
                 )
             self.assertEqual(context.exception.error_code, "unknown_cost_statistics_tag")
+
+    def test_cost_statistics_tag_selection_mapper_uses_only_the_supplied_gate_snapshot(self) -> None:
+        payload = AppSettingsService.cost_statistics_tag_selection_payload_from_settings(
+            {
+                "bank_transaction_tags": {
+                    "version": 7,
+                    "definitions": [self._custom_auto_rule("fee", "手续费")],
+                },
+                "cost_statistics_tag_selection": {
+                    "version": 2,
+                    "selected_tag_codes": ["fee"],
+                },
+            }
+        )
+
+        self.assertEqual(payload["version"], 2)
+        self.assertEqual(payload["effective_selected_tag_codes"], ["fee"])
+        self.assertFalse(payload["can_save"])
 
     def test_cost_statistics_tag_selection_migrates_legacy_explicit_selection_with_income_tags(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

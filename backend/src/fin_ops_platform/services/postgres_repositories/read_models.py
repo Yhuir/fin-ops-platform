@@ -5,6 +5,7 @@ import json
 import logging
 import re
 from collections.abc import Mapping
+from contextlib import contextmanager
 from copy import deepcopy
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
@@ -14,6 +15,7 @@ from uuid import uuid4
 
 from fin_ops_platform.services.bank_transaction_category_service import BANK_TRANSACTION_CATEGORY_COUNT_KEYS
 from fin_ops_platform.services.pending_invoice_status import pending_invoice_filter_status_codes
+from fin_ops_platform.services.read_model_freshness import normalize_source_versions
 from fin_ops_platform.services.postgres_repositories.common import (
     decimal_text,
     int_value,
@@ -53,18 +55,65 @@ WORKBENCH_ROW_PAYLOAD_PRUNED_KEYS = {"object_identity"}
 LOGGER = logging.getLogger(__name__)
 
 
-def _workbench_active_month_groups_sql() -> str:
-    return """
+def _workbench_active_month_groups_sql(*, include_aggregated_metadata: bool = True) -> str:
+    logical_group_id_sql = _workbench_all_logical_group_id_sql("g.group_id", "g.scope_key")
+    if include_aggregated_metadata:
+        ranked_groups_sql = """
+            , canonical_candidates as (
+                select active_groups.*
+                from active_groups
+                join canonical_owners
+                  on canonical_owners.all_scope_group_id = active_groups.all_scope_group_id
+                 and canonical_owners.zone = active_groups.zone
+            ), ranked_groups as (
+                select
+                    canonical_candidates.*,
+                    row_number() over (
+                        partition by canonical_candidates.all_scope_group_id
+                        order by
+                            canonical_candidates.scope_month desc nulls last,
+                            canonical_candidates.updated_at desc,
+                            canonical_candidates.group_id
+                    ) as logical_rank,
+                    min(canonical_candidates.oa_sort_min) over logical_window as logical_oa_sort_min,
+                    max(canonical_candidates.oa_sort_max) over logical_window as logical_oa_sort_max,
+                    min(canonical_candidates.bank_sort_min) over logical_window as logical_bank_sort_min,
+                    max(canonical_candidates.bank_sort_max) over logical_window as logical_bank_sort_max,
+                    min(canonical_candidates.invoice_sort_min) over logical_window as logical_invoice_sort_min,
+                    max(canonical_candidates.invoice_sort_max) over logical_window as logical_invoice_sort_max,
+                    string_agg(canonical_candidates.searchable_text, ' ') over logical_window
+                        as logical_searchable_text
+                from canonical_candidates
+                window logical_window as (partition by canonical_candidates.all_scope_group_id)
+            )
+        """
+        searchable_text_sql = "ranked_groups.logical_searchable_text"
+        oa_sort_min_sql = "ranked_groups.logical_oa_sort_min"
+        oa_sort_max_sql = "ranked_groups.logical_oa_sort_max"
+        bank_sort_min_sql = "ranked_groups.logical_bank_sort_min"
+        bank_sort_max_sql = "ranked_groups.logical_bank_sort_max"
+        invoice_sort_min_sql = "ranked_groups.logical_invoice_sort_min"
+        invoice_sort_max_sql = "ranked_groups.logical_invoice_sort_max"
+    else:
+        ranked_groups_sql = """
+            , ranked_groups as (
+                select canonical_owners.*, 1::bigint as logical_rank
+                from canonical_owners
+            )
+        """
+        searchable_text_sql = "ranked_groups.searchable_text"
+        oa_sort_min_sql = "ranked_groups.oa_sort_min"
+        oa_sort_max_sql = "ranked_groups.oa_sort_max"
+        bank_sort_min_sql = "ranked_groups.bank_sort_min"
+        bank_sort_max_sql = "ranked_groups.bank_sort_max"
+        invoice_sort_min_sql = "ranked_groups.invoice_sort_min"
+        invoice_sort_max_sql = "ranked_groups.invoice_sort_max"
+    return f"""
         (
             with active_groups as (
                 select
                     g.*,
-                    case
-                        when left(g.group_id, 5) = 'case:'
-                          or left(g.group_id, 9) = 'unpaired:'
-                            then g.group_id
-                        else 'scope:' || g.scope_key || ':' || g.group_id
-                    end as all_scope_group_id
+                    {logical_group_id_sql} as all_scope_group_id
                 from read_model.workbench_groups g
                 join read_model.workbench_generations gen
                   on gen.tenant_id = 'default'
@@ -72,23 +121,17 @@ def _workbench_active_month_groups_sql() -> str:
                  and gen.generation_id = g.generation_id
                  and gen.status = 'active'
                 where g.scope_key <> 'all'
-            ), ranked_groups as (
-                select
-                    active_groups.*,
-                    row_number() over (
-                        partition by active_groups.zone, active_groups.all_scope_group_id
-                        order by active_groups.scope_month desc nulls last, active_groups.updated_at desc
-                    ) as logical_rank,
-                    min(active_groups.oa_sort_min) over logical_window as logical_oa_sort_min,
-                    max(active_groups.oa_sort_max) over logical_window as logical_oa_sort_max,
-                    min(active_groups.bank_sort_min) over logical_window as logical_bank_sort_min,
-                    max(active_groups.bank_sort_max) over logical_window as logical_bank_sort_max,
-                    min(active_groups.invoice_sort_min) over logical_window as logical_invoice_sort_min,
-                    max(active_groups.invoice_sort_max) over logical_window as logical_invoice_sort_max,
-                    string_agg(active_groups.searchable_text, ' ') over logical_window as logical_searchable_text
+            ), canonical_owners as (
+                select distinct on (active_groups.all_scope_group_id) active_groups.*
                 from active_groups
-                window logical_window as (partition by active_groups.zone, active_groups.all_scope_group_id)
+                order by
+                    active_groups.all_scope_group_id,
+                    case when active_groups.zone = 'paired' then 0 else 1 end,
+                    active_groups.scope_month desc nulls last,
+                    active_groups.updated_at desc,
+                    active_groups.group_id
             )
+            {ranked_groups_sql}
             select
                 ranked_groups.generation_id,
                 ranked_groups.all_scope_group_id as group_id,
@@ -100,13 +143,13 @@ def _workbench_active_month_groups_sql() -> str:
                 ranked_groups.group_type,
                 ranked_groups.source_kinds,
                 ranked_groups.row_count,
-                ranked_groups.logical_searchable_text as searchable_text,
-                ranked_groups.logical_oa_sort_min as oa_sort_min,
-                ranked_groups.logical_oa_sort_max as oa_sort_max,
-                ranked_groups.logical_bank_sort_min as bank_sort_min,
-                ranked_groups.logical_bank_sort_max as bank_sort_max,
-                ranked_groups.logical_invoice_sort_min as invoice_sort_min,
-                ranked_groups.logical_invoice_sort_max as invoice_sort_max,
+                {searchable_text_sql} as searchable_text,
+                {oa_sort_min_sql} as oa_sort_min,
+                {oa_sort_max_sql} as oa_sort_max,
+                {bank_sort_min_sql} as bank_sort_min,
+                {bank_sort_max_sql} as bank_sort_max,
+                {invoice_sort_min_sql} as invoice_sort_min,
+                {invoice_sort_max_sql} as invoice_sort_max,
                 ranked_groups.source_versions,
                 ranked_groups.generated_at,
                 ranked_groups.cache_status,
@@ -297,11 +340,35 @@ OA_PENDING_PAYMENT_SORT_EXPRESSIONS = {
     field: expression
     for field, (expression, _mode, _operators) in OA_PENDING_PAYMENT_FILTER_FIELDS.items()
 }
+OA_PENDING_PAYMENT_OPTION_FIELDS = {
+    field: OA_PENDING_PAYMENT_FILTER_FIELDS[field]
+    for field in (
+        "oa_applicant",
+        "oa_application_type",
+        "oa_project_name",
+        "payment_status",
+        "bank_name",
+        "bank_account",
+        "bank_direction",
+        "bank_counterparty_name",
+        "seller_name",
+    )
+}
 
 
 class PostgresInvoiceUsageCollectionReadModelRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
+
+    @contextmanager
+    def oa_pending_payment_read_snapshot(self):
+        transaction_factory = getattr(self._connection, "transaction", None)
+        if not callable(transaction_factory):
+            yield self
+            return
+        with transaction_factory() as transaction:
+            transaction.execute("set transaction isolation level repeatable read read only")
+            yield PostgresInvoiceUsageCollectionReadModelRepository(transaction)
 
     def _refresh_status(self, *, scope_type: str, scope_key: str, connection: Any | None = None) -> str:
         executor = connection or self._connection
@@ -653,15 +720,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
         scope_key = _invoice_relation_scope_key(month)
         page_number = max(int_value(page, 1), 1)
         page_limit = min(max(int_value(page_size, 50), 1), 200)
-        rows_source_sql = "read_model.oa_pending_payment_rows"
-        if scope_key == "all":
-            rows_source_sql = """
-                (
-                    select distinct on (row_id) *
-                    from read_model.oa_pending_payment_rows
-                    order by row_id, generated_at desc, scope_key desc
-                ) deduped_oa_pending_payment_rows
-            """
+        rows_source_sql = self._oa_pending_payment_rows_source_sql(scope_key)
         base_where: list[str] = []
         base_params: list[Any] = []
         view_mode_clause = _oa_pending_payment_view_mode_clause(view_mode)
@@ -686,80 +745,134 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
             where.append(view_mode_clause)
         where_sql = " and ".join(where) if where else "true"
         base_where_sql = " and ".join(base_where) if base_where else "true"
+        option_values_sql = ",\n                        ".join(
+            f"('{field}', nullif(btrim(({expression})::text), ''), "
+            f"nullif(btrim(({_invoice_relation_option_label_expression(field, expression)})::text), ''))"
+            for field, (expression, _mode, _operators) in OA_PENDING_PAYMENT_OPTION_FIELDS.items()
+        )
         summary_row = self._connection.fetch_one(
             f"""
-            select
-                count(*) as count,
-                coalesce(sum(oa_amount), 0) as oa_amount_total,
-                coalesce(sum(coalesce(bank_paid_total, bank_amount)), 0) as bank_paid_total
-            from {rows_source_sql}
-            where {where_sql}
-            """,
-            tuple(params),
-        )
-        view_counts_row = self._connection.fetch_one(
-            f"""
-            select
-                count(distinct oa_id) filter (where view_mode = 'completed') as completed_count,
-                count(distinct oa_id) filter (where view_mode = 'in_progress') as in_progress_count
-            from (
-                select
-                    case when oa_workflow_status = 'in_progress' then 'in_progress' else 'completed' end as view_mode,
-                    nullif(btrim(coalesce(
-                        oa_summary.value->>'oaId',
-                        oa_summary.value->>'id',
-                        payload->'oa'->>'id',
-                        oa_id
-                    )), '') as oa_id
+            with base_rows as materialized (
+                select *
                 from {rows_source_sql}
-                left join lateral jsonb_array_elements(
-                    case
-                        when jsonb_typeof(payload->'oa'->'summaries') = 'array'
-                            and jsonb_array_length(payload->'oa'->'summaries') > 0
-                        then payload->'oa'->'summaries'
-                        else jsonb_build_array(jsonb_build_object('oaId', coalesce(payload->'oa'->>'id', oa_id)))
-                    end
-                ) as oa_summary(value) on true
                 where {base_where_sql}
-            ) view_count_oa_ids
+            ),
+            filtered_rows as materialized (
+                select *
+                from base_rows
+                where {view_mode_clause or 'true'}
+            ),
+            summary as (
+                select
+                    count(*) as count,
+                    coalesce(sum(oa_amount), 0) as oa_amount_total,
+                    coalesce(sum(coalesce(bank_paid_total, bank_amount)), 0) as bank_paid_total
+                from filtered_rows
+            ),
+            view_counts as (
+                select
+                    count(distinct oa_id_value) filter (
+                        where oa_workflow_status is null
+                           or oa_workflow_status = ''
+                           or oa_workflow_status = 'completed'
+                    ) as completed_count,
+                    count(distinct oa_id_value) filter (
+                        where oa_workflow_status = 'in_progress'
+                    ) as in_progress_count
+                from base_rows
+                cross join lateral unnest(
+                    case
+                        when cardinality(oa_ids) > 0 then oa_ids
+                        when oa_id is not null and oa_id <> '' then array[oa_id]
+                        else array[]::text[]
+                    end
+                ) as expanded_oa(oa_id_value)
+            ),
+            status_counts as (
+                select coalesce(jsonb_object_agg(payment_status, status_count), '{{}}'::jsonb) as payload
+                from (
+                    select payment_status, count(*)::integer as status_count
+                    from filtered_rows
+                    where payment_status is not null and payment_status <> ''
+                    group by payment_status
+                ) grouped_statuses
+            ),
+            option_values(field, value, label) as (
+                select option_value.field, option_value.value, option_value.label
+                from filtered_rows
+                cross join lateral (
+                    values
+                        {option_values_sql}
+                ) as option_value(field, value, label)
+            ),
+            options_by_field as (
+                select field, jsonb_agg(
+                    jsonb_build_object(
+                        'value', value,
+                        'label', coalesce(label, value),
+                        'count', option_count
+                    )
+                    order by value
+                ) as options
+                from (
+                    select field, value, max(label) as label, count(*)::integer as option_count
+                    from option_values
+                    where value is not null
+                    group by field, value
+                ) option_counts
+                group by field
+            ),
+            filter_options as (
+                select coalesce(jsonb_object_agg(field, options), '{{}}'::jsonb) as payload
+                from options_by_field
+            )
+            select
+                summary.count,
+                summary.oa_amount_total,
+                summary.bank_paid_total,
+                view_counts.completed_count,
+                view_counts.in_progress_count,
+                status_counts.payload as status_counts,
+                filter_options.payload as filter_options
+            from summary
+            cross join view_counts
+            cross join status_counts
+            cross join filter_options
             """,
             tuple(base_params),
         )
         view_counts = {
-            "completed": int_value(view_counts_row.get("completed_count") if isinstance(view_counts_row, dict) else 0, 0),
-            "in_progress": int_value(view_counts_row.get("in_progress_count") if isinstance(view_counts_row, dict) else 0, 0),
+            "completed": int_value(summary_row.get("completed_count") if isinstance(summary_row, dict) else 0, 0),
+            "in_progress": int_value(summary_row.get("in_progress_count") if isinstance(summary_row, dict) else 0, 0),
         }
         total = int_value(summary_row.get("count") if isinstance(summary_row, dict) else 0, 0)
-        refresh_status = self._invoice_relation_refresh_status(scope_type="oa_pending_payment", scope_key=scope_key)
-        scope_row = self._invoice_relation_scope_row(scope_table_name="read_model.oa_pending_payment_scopes", scope_key=scope_key)
-        source_versions = self._oa_pending_payment_scope_source_versions(scope_key=scope_key, scope_row=scope_row)
-        if total == 0:
-            if scope_row is None and sum(view_counts.values()) == 0:
-                return None
-            return {
-                "rows": [],
-                "pagination": {"page": page_number, "pageSize": page_limit, "total": 0},
-                "summary": {"rowCount": 0, "oaAmountTotal": "0.00", "bankPaidTotal": "0.00", "viewCounts": view_counts},
-                "refresh_status": refresh_status,
-                "source_versions": source_versions,
-                "read_model_scope_key": scope_key,
-            }
-        order_sql = _invoice_relation_order_sql(
-            sort_field=sort_field,
-            sort_direction=sort_direction,
-            sort_expressions=OA_PENDING_PAYMENT_SORT_EXPRESSIONS,
-        )
-        rows = self._connection.fetch_all(
-            f"""
-            select payload, raw_payload
-            from {rows_source_sql}
-            where {where_sql}
-            order by {order_sql}
-            limit %s offset %s
-            """,
-            tuple([*params, page_limit, (page_number - 1) * page_limit]),
-        )
+        rows: list[dict[str, Any]] = []
+        if total:
+            order_sql = _invoice_relation_order_sql(
+                sort_field=sort_field,
+                sort_direction=sort_direction,
+                sort_expressions=OA_PENDING_PAYMENT_SORT_EXPRESSIONS,
+            )
+            rows = self._connection.fetch_all(
+                f"""
+                select payload, raw_payload
+                from {rows_source_sql}
+                where {where_sql}
+                order by {order_sql}
+                limit %s offset %s
+                """,
+                tuple([*params, page_limit, (page_number - 1) * page_limit]),
+            )
         payload_rows = [_read_model_payload(row) for row in rows]
+        filter_options = summary_row.get("filter_options") if isinstance(summary_row, dict) else {}
+        normalized_filter_options = {
+            field: [dict(option) for option in list(options or []) if isinstance(option, dict)]
+            for field, options in dict(filter_options or {}).items()
+            if field in OA_PENDING_PAYMENT_OPTION_FIELDS
+        }
+        for option in normalized_filter_options.get("bank_direction", []):
+            value = text(option.get("value")) or ""
+            option["label"] = "支出" if value == "outflow" else "收入" if value == "inflow" else value
         return {
             "rows": [row for row in payload_rows if isinstance(row, dict)],
             "pagination": {"page": page_number, "pageSize": page_limit, "total": total},
@@ -767,35 +880,249 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                 "rowCount": total,
                 "oaAmountTotal": decimal_text(summary_row.get("oa_amount_total") if isinstance(summary_row, dict) else None) or "0.00",
                 "bankPaidTotal": decimal_text(summary_row.get("bank_paid_total") if isinstance(summary_row, dict) else None) or "0.00",
+                "statusCounts": dict(summary_row.get("status_counts") or {}) if isinstance(summary_row, dict) else {},
                 "viewCounts": view_counts,
             },
-            "refresh_status": refresh_status,
-            "source_versions": source_versions,
+            "filterOptions": normalized_filter_options,
             "read_model_scope_key": scope_key,
         }
 
-    def _oa_pending_payment_scope_source_versions(
+    def oa_pending_payment_query_state(
         self,
         *,
         scope_key: str,
-        scope_row: dict[str, Any] | None,
+        tenant_id: str,
+        base_source_versions: dict[str, object],
     ) -> dict[str, Any]:
-        if scope_key == "all":
-            rows = self._connection.fetch_all(
-                """
-                select distinct scope_key, source_versions
-                from read_model.oa_pending_payment_rows
+        normalized_scope_key = _invoice_relation_scope_key(scope_key)
+        normalized_tenant_id = text(tenant_id) or "default"
+        source_prefix = f"oa_pending_payment_source:{normalized_tenant_id}:"
+        pending_relation_prefix = f"oa_pending_payment_relation:{normalized_tenant_id}:"
+        rows = self._connection.fetch_all(
+            """
+            /* check: oa_pending_payment_query_state */
+            with requested as (
+                select %s::text as scope_key, %s::text as tenant_id
+            ), target_scopes as (
+                select scope_key
+                from requested
                 where scope_key <> 'all'
-                order by scope_key desc
-                """
+                union
+                select substring(watermark.sync_key from length(%s) + 1)
+                from app.oa_sync_watermarks watermark, requested
+                where requested.scope_key = 'all'
+                  and watermark.sync_key like %s
+                union
+                select scope.scope_key
+                from read_model.oa_pending_payment_scopes scope, requested
+                where requested.scope_key = 'all'
+                union
+                select dirty.scope_key
+                from job.read_model_dirty_scopes dirty, requested
+                where requested.scope_key = 'all'
+                  and dirty.tenant_id = requested.tenant_id
+                  and dirty.scope_type = 'oa_pending_payment'
+                union
+                select outbox.scope_key
+                from job.outbox_events outbox, requested
+                where requested.scope_key = 'all'
+                  and outbox.tenant_id = requested.tenant_id
+                  and outbox.event_type = 'oa_pending_payment.read_model.refresh'
+                  and outbox.scope_key is not null
             )
-            if rows:
-                return self._common_source_versions([dict(row) for row in rows if isinstance(row, dict)])
-        return (
-            scope_row.get("source_versions")
-            if isinstance(scope_row, dict) and isinstance(scope_row.get("source_versions"), dict)
-            else {}
+            select
+                target.scope_key,
+                scope.row_count,
+                scope.generated_at,
+                scope.cache_status,
+                scope.source_versions as actual_source_versions,
+                source_watermark.status as source_status,
+                source_watermark.version as source_snapshot_version,
+                source_watermark.payload as source_payload,
+                pending_relation_watermark.version as pending_relation_version,
+                relation_scope.scope_key is not null as relation_scope_exists,
+                relation_scope.cache_status as relation_cache_status,
+                relation_scope.source_versions as relation_source_versions,
+                latest_dirty.status as dirty_status,
+                latest_dirty.source_version as dirty_source_version,
+                exists (
+                    select 1
+                    from job.outbox_events outbox
+                    where outbox.tenant_id = %s
+                      and outbox.event_type = 'oa_pending_payment.read_model.refresh'
+                      and outbox.scope_key = target.scope_key
+                      and outbox.status in ('pending', 'processing', 'failed', 'dead_lettered')
+                ) as outbox_blocking
+            from target_scopes target
+            left join read_model.oa_pending_payment_scopes scope
+              on scope.scope_key = target.scope_key
+            left join app.oa_sync_watermarks source_watermark
+              on source_watermark.sync_key = %s || target.scope_key
+            left join app.oa_sync_watermarks pending_relation_watermark
+              on pending_relation_watermark.sync_key = %s || target.scope_key
+            left join read_model.workbench_relation_scopes relation_scope
+              on relation_scope.tenant_id = %s
+             and relation_scope.scope_key = target.scope_key
+            left join lateral (
+                select dirty.status, dirty.source_version
+                from job.read_model_dirty_scopes dirty
+                where dirty.tenant_id = %s
+                  and dirty.scope_type = 'oa_pending_payment'
+                  and dirty.scope_key = target.scope_key
+                order by dirty.source_version desc, dirty.updated_at desc, dirty.id desc
+                limit 1
+            ) latest_dirty on true
+            order by target.scope_key
+            """,
+            (
+                normalized_scope_key,
+                normalized_tenant_id,
+                source_prefix,
+                f"{source_prefix}%",
+                normalized_tenant_id,
+                source_prefix,
+                pending_relation_prefix,
+                normalized_tenant_id,
+                normalized_tenant_id,
+            ),
         )
+        state_rows = [dict(row) for row in rows if isinstance(row, dict)]
+        month_rows = [row for row in state_rows if MONTH_SCOPE_RE.match(text(row.get("scope_key")) or "")]
+        control_rows = [row for row in state_rows if text(row.get("scope_key")) == "all"]
+        blocking_scope_keys: set[str] = set()
+        stale_reasons: list[str] = []
+        actual_versions_by_scope: dict[str, dict[str, Any]] = {}
+        expected_versions_by_scope: dict[str, dict[str, Any]] = {}
+        token_rows: list[dict[str, Any]] = []
+
+        for row in month_rows:
+            row_scope_key = text(row.get("scope_key")) or ""
+            source_payload = row.get("source_payload") if isinstance(row.get("source_payload"), dict) else {}
+            relation_versions = (
+                row.get("relation_source_versions")
+                if isinstance(row.get("relation_source_versions"), dict)
+                else {}
+            )
+            expected_versions: dict[str, Any] = {
+                **dict(base_source_versions),
+                "oa_pending_payment_source_snapshot_version": int_value(row.get("source_snapshot_version"), 0),
+                "completed_oa_signature": text(source_payload.get("completed_oa_signature")) or "",
+                "in_progress_admission_signature": text(source_payload.get("admission_signature")) or "",
+                "payment_status_signature": text(source_payload.get("payment_status_signature")) or "",
+                "oa_pending_payment_source_signature": text(source_payload.get("source_signature")) or "",
+                "oa_pending_payment_relation_version": int_value(row.get("pending_relation_version"), 0),
+                "oa_pending_payment_event_source_version": int_value(row.get("dirty_source_version"), -1),
+            }
+            if relation_versions:
+                expected_versions["workbench_relation_source_versions"] = dict(relation_versions)
+            actual_versions = (
+                dict(row.get("actual_source_versions"))
+                if isinstance(row.get("actual_source_versions"), dict)
+                else {}
+            )
+            actual_versions_by_scope[row_scope_key] = actual_versions
+            expected_versions_by_scope[row_scope_key] = expected_versions
+            reasons: list[str] = []
+            if not isinstance(row.get("actual_source_versions"), dict):
+                reasons.append("scope_missing")
+            if text(row.get("cache_status")) not in {"fresh"}:
+                reasons.append("scope_not_fresh")
+            if text(row.get("source_status")) not in {"success", "succeeded"} or not text(
+                source_payload.get("source_signature")
+            ):
+                reasons.append("source_snapshot_missing")
+            if int_value(row.get("pending_relation_version"), 0) < 1:
+                reasons.append("pending_relation_version_missing")
+            if not bool(row.get("relation_scope_exists")) or text(row.get("relation_cache_status")) not in {"fresh"}:
+                reasons.append("workbench_relation_scope_not_fresh")
+            if text(row.get("dirty_status")) in {"pending", "processing", "failed"}:
+                reasons.append(f"dirty_{text(row.get('dirty_status'))}")
+            if bool(row.get("outbox_blocking")):
+                reasons.append("outbox_blocking")
+            if normalize_source_versions(actual_versions) != normalize_source_versions(expected_versions):
+                reasons.append("source_versions_mismatch")
+            if reasons:
+                blocking_scope_keys.add(row_scope_key)
+                stale_reasons.extend(f"{row_scope_key}:{reason}" for reason in reasons)
+            token_rows.append(
+                {
+                    "scope_key": row_scope_key,
+                    "row_count": int_value(row.get("row_count"), 0),
+                    "generated_at": serialize_value(row.get("generated_at")),
+                    "expected_source_versions": expected_versions,
+                    "actual_source_versions": actual_versions,
+                    "dirty_status": text(row.get("dirty_status")),
+                    "dirty_source_version": int_value(row.get("dirty_source_version"), -1),
+                    "outbox_blocking": bool(row.get("outbox_blocking")),
+                }
+            )
+
+        control_blocking = any(
+            text(row.get("dirty_status")) in {"pending", "processing", "failed"} or bool(row.get("outbox_blocking"))
+            for row in control_rows
+        )
+        if control_blocking:
+            blocking_scope_keys.update(row["scope_key"] for row in month_rows if text(row.get("scope_key")))
+            if not month_rows:
+                blocking_scope_keys.add("all")
+            stale_reasons.append("all:control_scope_blocking")
+        if normalized_scope_key == "all" and not month_rows:
+            empty_source_ready = any(
+                text(row.get("source_status")) in {"success", "succeeded"}
+                and isinstance(row.get("source_payload"), dict)
+                and bool(text(row["source_payload"].get("source_signature")))
+                for row in control_rows
+            )
+            if not empty_source_ready:
+                blocking_scope_keys.add("all")
+                stale_reasons.append("all:canonical_scope_inventory_missing")
+        if normalized_scope_key != "all" and not month_rows:
+            blocking_scope_keys.add(normalized_scope_key)
+            stale_reasons.append(f"{normalized_scope_key}:scope_inventory_missing")
+
+        version_material = {
+            "tenant_id": normalized_tenant_id,
+            "scope_key": normalized_scope_key,
+            "scopes": token_rows,
+            "control": [
+                {
+                    "dirty_status": text(row.get("dirty_status")),
+                    "dirty_source_version": int_value(row.get("dirty_source_version"), -1),
+                    "outbox_blocking": bool(row.get("outbox_blocking")),
+                    "source_snapshot_version": int_value(row.get("source_snapshot_version"), 0),
+                    "source_payload": row.get("source_payload") if isinstance(row.get("source_payload"), dict) else {},
+                }
+                for row in control_rows
+            ],
+        }
+        version_token = hashlib.sha256(
+            json.dumps(serialize_value(version_material), ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        common_actual_versions = self._common_source_versions(
+            [{"source_versions": versions} for versions in actual_versions_by_scope.values()]
+        )
+        return {
+            "status": "refreshing" if blocking_scope_keys else "fresh",
+            "scope_key": normalized_scope_key,
+            "blocking_scope_keys": sorted(blocking_scope_keys),
+            "stale_reasons": sorted(set(stale_reasons)),
+            "version_token": version_token,
+            "source_versions": common_actual_versions,
+            "source_versions_by_scope": actual_versions_by_scope,
+            "expected_source_versions_by_scope": expected_versions_by_scope,
+        }
+
+    @staticmethod
+    def _oa_pending_payment_rows_source_sql(scope_key: str) -> str:
+        if scope_key != "all":
+            return "read_model.oa_pending_payment_rows"
+        return """
+            (
+                select distinct on (row_id) *
+                from read_model.oa_pending_payment_rows
+                order by row_id, generated_at desc, scope_key desc
+            ) deduped_oa_pending_payment_rows
+        """
 
     def save_oa_pending_payment_rows(
         self,
@@ -803,6 +1130,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
         scope_key: str,
         rows: list[dict[str, Any]],
         source_versions: dict[str, Any] | None = None,
+        transaction: Any | None = None,
     ) -> None:
         normalized_scope_key = _invoice_relation_scope_key(scope_key)
         rows_to_save = list(rows or [])
@@ -822,7 +1150,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                 connection,
                 """
                     insert into read_model.oa_pending_payment_rows(
-                        row_id, scope_key, scope_month, oa_id, oa_applicant, oa_application_type,
+                        row_id, scope_key, scope_month, oa_id, oa_ids, oa_applicant, oa_application_type,
                         oa_workflow_status, oa_project_name, oa_amount, payment_status, payment_status_label,
                         bank_transaction_id, bank_trade_time, bank_amount, bank_paid_total, bank_name, bank_account, bank_direction,
                         bank_counterparty_name, bank_summary, invoice_id, invoice_no,
@@ -830,7 +1158,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                         source_versions, payload, raw_payload
                     )
                     values (
-                        %(row_id)s, %(scope_key)s, %(scope_month)s::date, %(oa_id)s, %(oa_applicant)s,
+                        %(row_id)s, %(scope_key)s, %(scope_month)s::date, %(oa_id)s, %(oa_ids)s, %(oa_applicant)s,
                         %(oa_application_type)s, %(oa_workflow_status)s, %(oa_project_name)s, %(oa_amount)s, %(payment_status)s,
                         %(payment_status_label)s, %(bank_transaction_id)s, %(bank_trade_time)s::timestamptz,
                         %(bank_amount)s, %(bank_paid_total)s, %(bank_name)s, %(bank_account)s, %(bank_direction)s,
@@ -842,6 +1170,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                     on conflict (row_id, scope_key) do update set
                         scope_month = excluded.scope_month,
                         oa_id = excluded.oa_id,
+                        oa_ids = excluded.oa_ids,
                         oa_applicant = excluded.oa_applicant,
                         oa_application_type = excluded.oa_application_type,
                         oa_workflow_status = excluded.oa_workflow_status,
@@ -880,7 +1209,52 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                 source_versions=normalized_source_versions,
             )
 
+        if transaction is not None:
+            write(transaction)
+            return
         run_in_transaction(self._connection, write)
+
+    def publish_oa_pending_payment_rows(
+        self,
+        *,
+        tenant_id: str,
+        scope_key: str,
+        source_version: int,
+        rows: list[dict[str, Any]],
+        source_versions: dict[str, Any] | None = None,
+    ) -> bool:
+        normalized_tenant_id = text(tenant_id)
+        normalized_scope_key = _invoice_relation_scope_key(scope_key)
+        if not normalized_tenant_id:
+            raise ValueError("tenant_id is required for OA pending payment publish.")
+        if isinstance(source_version, bool) or not isinstance(source_version, int) or source_version < 0:
+            raise ValueError("source_version must be a non-negative integer for OA pending payment publish.")
+
+        def publish(connection: Any) -> bool:
+            current = connection.fetch_one(
+                """
+                select source_version
+                from job.read_model_dirty_scopes
+                where tenant_id = %s
+                  and scope_type = 'oa_pending_payment'
+                  and scope_key = %s
+                order by source_version desc, updated_at desc, id desc
+                limit 1
+                for update
+                """,
+                (normalized_tenant_id, normalized_scope_key),
+            )
+            if current is None or int_value(current.get("source_version"), -1) != source_version:
+                return False
+            self.save_oa_pending_payment_rows(
+                scope_key=normalized_scope_key,
+                rows=rows,
+                source_versions=source_versions,
+                transaction=connection,
+            )
+            return True
+
+        return run_in_transaction(self._connection, publish)
 
     def mark_oa_pending_payment_scope(
         self,
@@ -4709,11 +5083,723 @@ class PostgresSummaryReadModelRepository:
             return "fresh"
         return "refreshing" if text(dirty_row.get("status")) in {"pending", "processing"} else "stale"
 
-    def load_cost_statistics_read_models(self) -> dict[str, Any]:
-        return self._load_table_map(
-            "select scope_key as key, payload, raw_payload from read_model.cost_statistics_read_models order by scope_key",
-            "read_models",
+    def get_cost_statistics_scope_metadata(self, *, scope_key: str) -> dict[str, Any] | None:
+        normalized_scope_key = str(scope_key or "").strip()
+        if not normalized_scope_key:
+            return None
+        row = self._connection.fetch_one(
+            """
+            select scope_key, entry_count, source_versions
+            from read_model.cost_statistics_read_models
+            where scope_key = %s
+            limit 1
+            """,
+            (normalized_scope_key,),
         )
+        if not isinstance(row, dict):
+            return None
+        return {
+            "scope_key": normalized_scope_key,
+            "entry_count": max(int_value(row.get("entry_count"), 0), 0),
+            "source_versions": row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {},
+        }
+
+    def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, Any] | None:
+        normalized_scope_key = str(scope_key or "").strip()
+        if not normalized_scope_key:
+            return None
+        row = self._connection.fetch_one(
+            """
+            select
+                model.scope_key,
+                model.generated_at,
+                model.source_versions,
+                model.published_source_version,
+                coalesce(
+                    model.payload #> '{payload,bank_accounts}',
+                    model.payload->'bank_accounts',
+                    '[]'::jsonb
+                ) as bank_accounts,
+                coalesce(
+                    nullif(model.payload->>'schema_version', ''),
+                    nullif(model.raw_payload #>> '{normalized_payload,schema_version}', '')
+                ) as schema_version,
+                dirty.source_version as dirty_source_version,
+                dirty.status as dirty_status,
+                dirty.updated_at as dirty_updated_at,
+                dirty.last_error as dirty_last_error,
+                settings.source_settings,
+                workbench.source_versions as workbench_source_versions,
+                workbench_dirty.source_version as workbench_dirty_source_version,
+                workbench_dirty.status as workbench_dirty_status,
+                bank_detail.schema_version as bank_detail_schema_version,
+                bank_detail.status as bank_detail_status,
+                bank_detail.source_version as bank_detail_source_version,
+                bank_detail.source_versions as bank_detail_source_versions,
+                bank_detail_dirty.source_version as bank_detail_dirty_source_version,
+                bank_detail_dirty.status as bank_detail_dirty_status
+            from read_model.cost_statistics_read_models model
+            left join lateral (
+                select source_version, status, updated_at, last_error
+                from job.read_model_dirty_scopes
+                where tenant_id = 'default'
+                  and scope_type = 'cost_statistics'
+                  and scope_key = model.scope_key
+                order by source_version desc, updated_at desc, id desc
+                limit 1
+            ) dirty on true
+            left join lateral (
+                select jsonb_build_object(
+                    'bank_transaction_tags', coalesce(settings_payload->'bank_transaction_tags', '{}'::jsonb),
+                    'bank_account_mappings', coalesce(settings_payload->'bank_account_mappings', '[]'::jsonb),
+                    'cost_statistics_tag_selection',
+                        coalesce(settings_payload->'cost_statistics_tag_selection', '{}'::jsonb)
+                ) as source_settings
+                from app.app_settings
+                where settings_key = 'app_settings'
+                limit 1
+            ) settings on true
+            left join lateral (
+                select source_versions
+                from read_model.workbench_generations
+                where tenant_id = 'default'
+                  and scope_key = split_part(model.scope_key, ':', 2)
+                  and status = 'active'
+                  and split_part(model.scope_key, ':', 2) <> 'all'
+                order by activated_at desc nulls last,
+                         completed_at desc nulls last,
+                         updated_at desc
+                limit 1
+            ) workbench on true
+            left join lateral (
+                select source_version, status
+                from job.read_model_dirty_scopes
+                where tenant_id = 'default'
+                  and scope_type = 'workbench'
+                  and scope_key = split_part(model.scope_key, ':', 2)
+                  and split_part(model.scope_key, ':', 2) <> 'all'
+                order by source_version desc, updated_at desc, id desc
+                limit 1
+            ) workbench_dirty on true
+            left join lateral (
+                select schema_version, status, source_version, source_versions
+                from read_model.bank_detail_scopes
+                where tenant_id = 'default'
+                  and scope_type = 'bank_detail'
+                  and scope_key = split_part(model.scope_key, ':', 2)
+                  and split_part(model.scope_key, ':', 2) <> 'all'
+                limit 1
+            ) bank_detail on true
+            left join lateral (
+                select source_version, status
+                from job.read_model_dirty_scopes
+                where tenant_id = 'default'
+                  and scope_type = 'bank_detail'
+                  and scope_key = split_part(model.scope_key, ':', 2)
+                  and split_part(model.scope_key, ':', 2) <> 'all'
+                order by source_version desc, updated_at desc, id desc
+                limit 1
+            ) bank_detail_dirty on true
+            where model.scope_key = %s
+            limit 1
+            """,
+            (normalized_scope_key,),
+        )
+        if row is None:
+            return None
+        published_source_version = (
+            int_value(row.get("published_source_version"), -1)
+            if row.get("published_source_version") is not None
+            else None
+        )
+        dirty_source_version = (
+            int_value(row.get("dirty_source_version"), -1)
+            if row.get("dirty_source_version") is not None
+            else None
+        )
+        dirty_status = text(row.get("dirty_status"))
+        refresh_status = "fresh" if published_source_version is not None else "stale"
+        stale_reasons: list[str] = []
+        if published_source_version is None:
+            stale_reasons.append("published_source_version_missing")
+        if dirty_status in {"pending", "processing"}:
+            refresh_status = "refreshing"
+        elif dirty_status == "failed":
+            refresh_status = "failed"
+            stale_reasons.append("dirty_scope_failed")
+        elif published_source_version is not None and dirty_status is not None and (
+            dirty_status != "done" or dirty_source_version != published_source_version
+        ):
+            refresh_status = "stale"
+            stale_reasons.append("published_source_version_mismatch")
+        source_settings = row.get("source_settings") if isinstance(row.get("source_settings"), dict) else None
+        if source_settings is not None and not (
+            isinstance(source_settings.get("bank_transaction_tags"), dict)
+            and isinstance(source_settings.get("bank_account_mappings"), list)
+            and isinstance(source_settings.get("cost_statistics_tag_selection"), dict)
+        ):
+            source_settings = None
+        if source_settings is None:
+            refresh_status = "stale" if refresh_status == "fresh" else refresh_status
+            stale_reasons.append("cost_statistics_source_settings_missing")
+
+        scope_month = normalized_scope_key.split(":", 1)[1] if ":" in normalized_scope_key else ""
+        workbench_source_versions = (
+            row.get("workbench_source_versions")
+            if isinstance(row.get("workbench_source_versions"), dict)
+            else {}
+        )
+        bank_detail_source_versions = (
+            row.get("bank_detail_source_versions")
+            if isinstance(row.get("bank_detail_source_versions"), dict)
+            else {}
+        )
+        if scope_month != "all":
+            dependency_statuses = {
+                text(row.get("workbench_dirty_status")),
+                text(row.get("bank_detail_dirty_status")),
+            }
+            if "failed" in dependency_statuses:
+                refresh_status = "failed"
+                stale_reasons.append("cost_statistics_dependency_dirty_scope_failed")
+            elif dependency_statuses.intersection({"pending", "processing"}) and refresh_status != "failed":
+                refresh_status = "refreshing"
+                stale_reasons.append("cost_statistics_dependency_refreshing")
+            if not workbench_source_versions:
+                refresh_status = "stale" if refresh_status == "fresh" else refresh_status
+                stale_reasons.append("workbench_source_versions_missing")
+            elif (
+                row.get("workbench_dirty_source_version") is not None
+                and int_value(workbench_source_versions.get("source_version"), -1)
+                != int_value(row.get("workbench_dirty_source_version"), -1)
+            ):
+                refresh_status = "stale" if refresh_status == "fresh" else refresh_status
+                stale_reasons.append("workbench_published_source_version_mismatch")
+            bank_detail_schema_version = int_value(row.get("bank_detail_schema_version"), 0)
+            bank_detail_status = text(row.get("bank_detail_status"))
+            if bank_detail_schema_version == 0:
+                refresh_status = "stale" if refresh_status == "fresh" else refresh_status
+                stale_reasons.append("bank_detail_scope_missing")
+            elif bank_detail_schema_version != BANK_DETAIL_READ_MODEL_SCHEMA_VERSION:
+                refresh_status = "stale" if refresh_status == "fresh" else refresh_status
+                stale_reasons.append("bank_detail_schema_version_mismatch")
+            if not bank_detail_source_versions:
+                refresh_status = "stale" if refresh_status == "fresh" else refresh_status
+                stale_reasons.append("bank_detail_source_versions_missing")
+            if (
+                row.get("bank_detail_dirty_source_version") is not None
+                and int_value(row.get("bank_detail_source_version"), -1)
+                != int_value(row.get("bank_detail_dirty_source_version"), -1)
+            ):
+                refresh_status = "stale" if refresh_status == "fresh" else refresh_status
+                stale_reasons.append("bank_detail_published_source_version_mismatch")
+            if bank_detail_status != "fresh":
+                refresh_status = "stale" if refresh_status == "fresh" else refresh_status
+                stale_reasons.append("bank_detail_scope_not_fresh")
+        return {
+            "scope_key": normalized_scope_key,
+            "schema_version": text(row.get("schema_version")),
+            "generated_at": text(row.get("generated_at")),
+            "source_versions": row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {},
+            "source_settings": source_settings or {},
+            "workbench_source_versions": workbench_source_versions,
+            "bank_detail_source_versions": bank_detail_source_versions,
+            "bank_accounts": row.get("bank_accounts") if isinstance(row.get("bank_accounts"), list) else [],
+            "published_source_version": published_source_version,
+            "dirty_source_version": dirty_source_version,
+            "refresh_status": refresh_status,
+            "stale_reasons": stale_reasons,
+            "dirty_scope": (
+                {
+                    "source_version": dirty_source_version,
+                    "status": dirty_status,
+                    "updated_at": row.get("dirty_updated_at"),
+                    "last_error": row.get("dirty_last_error"),
+                }
+                if dirty_status is not None
+                else None
+            ),
+        }
+
+    def get_cost_statistics_page(
+        self,
+        *,
+        project_scope: str,
+        scope_kind: str,
+        scope_value: str | None,
+        view: str,
+        filters: dict[str, str],
+        selected_tag_codes: list[str] | None,
+        cursor_values: tuple[str, str, str, str] | None,
+        page_size: int,
+    ) -> dict[str, Any] | None:
+        normalized_project_scope = text(project_scope)
+        if normalized_project_scope not in {"active", "all"}:
+            return None
+        if view not in {"time", "project", "bank", "expense_type", "bank_tag"}:
+            return None
+
+        table_name = (
+            "read_model.cost_statistics_bank_flow_rows"
+            if view in {"time", "bank_tag"}
+            else "read_model.cost_statistics_rows"
+        )
+        if table_name.endswith("bank_flow_rows"):
+            tag_columns = """
+                bank_tag_code,
+                bank_tag_label,
+                bank_tag_primary_label,
+                bank_tag_sub_label,
+                bank_tag_label_path
+            """
+        else:
+            tag_columns = """
+                nullif(payload->>'bank_tag_code', '') as bank_tag_code,
+                nullif(payload->>'bank_tag_label', '') as bank_tag_label,
+                nullif(payload->>'bank_tag_primary_label', '') as bank_tag_primary_label,
+                nullif(payload->>'bank_tag_sub_label', '') as bank_tag_sub_label,
+                coalesce(payload->'bank_tag_label_path', '[]'::jsonb) as bank_tag_label_path
+            """
+
+        base_params: list[Any] = [normalized_project_scope]
+        scope_sql = ""
+        if scope_kind == "month":
+            scope_sql = "and scope_month = %s::date"
+            base_params.append(f"{scope_value}-01")
+        elif scope_kind == "year":
+            year = int(scope_value or 0)
+            scope_sql = "and scope_month >= %s::date and scope_month < %s::date"
+            base_params.extend((f"{year:04d}-01-01", f"{year + 1:04d}-01-01"))
+        elif scope_kind != "all":
+            return None
+
+        tag_filter_sql = ""
+        if selected_tag_codes is not None:
+            tag_filter_sql = (
+                "and coalesce(nullif(bank_tag_code, ''), %s) = any(%s)"
+            )
+            base_params.extend(("__uncategorized__", selected_tag_codes))
+
+        primary_facet_sql = "'[]'::jsonb"
+        secondary_facet_sql = "'[]'::jsonb"
+        row_filter_sql = "false"
+        row_filter_params: list[Any] = []
+        facet_params: list[Any] = []
+        project_name = text(filters.get("project_name"))
+        expense_type = text(filters.get("expense_type"))
+        payment_account_label = text(filters.get("payment_account_label"))
+        tag_primary = text(filters.get("bank_tag_primary_label"))
+        tag_sub = text(filters.get("bank_tag_sub_label"))
+
+        if view == "time":
+            row_filter_sql = "true"
+        elif view == "project":
+            primary_facet_sql = _cost_statistics_project_facets_sql()
+            if project_name:
+                secondary_facet_sql = _cost_statistics_expense_facets_sql("project_name = %s")
+                facet_params.append(project_name)
+            if project_name and expense_type:
+                row_filter_sql = "project_name = %s and expense_type = %s"
+                row_filter_params.extend((project_name, expense_type))
+        elif view == "bank":
+            primary_facet_sql = _cost_statistics_bank_facets_sql()
+            if payment_account_label:
+                secondary_facet_sql = _cost_statistics_project_facets_sql("payment_account_label = %s")
+                facet_params.append(payment_account_label)
+            if payment_account_label and project_name:
+                row_filter_sql = "payment_account_label = %s and project_name = %s"
+                row_filter_params.extend((payment_account_label, project_name))
+        elif view == "expense_type":
+            primary_facet_sql = _cost_statistics_expense_facets_sql()
+            if expense_type:
+                row_filter_sql = "expense_type = %s"
+                row_filter_params.append(expense_type)
+        elif view == "bank_tag":
+            primary_facet_sql = _cost_statistics_bank_tag_primary_facets_sql()
+            if tag_primary:
+                secondary_facet_sql = _cost_statistics_bank_tag_sub_facets_sql()
+                facet_params.append(tag_primary)
+            if tag_primary and tag_sub:
+                row_filter_sql = "tag_primary_label = %s and tag_sub_label = %s"
+                row_filter_params.extend((tag_primary, tag_sub))
+
+        cursor_sql = ""
+        cursor_params: list[Any] = []
+        if cursor_values is not None:
+            cursor_sql = """
+                where
+                    sort_date < %s::date
+                    or (sort_date = %s::date and sort_time < %s)
+                    or (sort_date = %s::date and sort_time = %s and (transaction_id, row_key) > (%s, %s))
+            """
+            cursor_date, cursor_time, cursor_transaction_id, cursor_row_key = cursor_values
+            cursor_params.extend(
+                (
+                    cursor_date,
+                    cursor_date,
+                    cursor_time,
+                    cursor_date,
+                    cursor_time,
+                    cursor_transaction_id,
+                    cursor_row_key,
+                )
+            )
+        query_params = [
+            normalized_project_scope,
+            *base_params,
+            *row_filter_params,
+            *cursor_params,
+            page_size + 1,
+            *facet_params,
+        ]
+
+        row = self._connection.fetch_one(
+            f"""
+            with available_years as materialized (
+                select distinct to_char(scope_month, 'YYYY') as scope_year
+                from {table_name}
+                where project_scope = %s
+                  and scope_month is not null
+            ), raw_base as materialized (
+                select
+                    scope_key,
+                    project_scope,
+                    scope_month,
+                    row_key,
+                    transaction_id,
+                    group_id,
+                    trade_time_text,
+                    trade_date,
+                    coalesce(trade_date, date '0001-01-01') as sort_date,
+                    coalesce(trade_time_text, '') as sort_time,
+                    counterparty_name,
+                    payment_account_label,
+                    direction,
+                    remark,
+                    project_id,
+                    project_name,
+                    expense_type,
+                    expense_content,
+                    amount,
+                    oa_applicant,
+                    {tag_columns}
+                from {table_name}
+                where project_scope = %s
+                  {scope_sql}
+            ), base as materialized (
+                select
+                    raw_base.*,
+                    coalesce(nullif(bank_tag_primary_label, ''), nullif(bank_tag_label, ''), '未标记')
+                        as tag_primary_label,
+                    coalesce(nullif(bank_tag_sub_label, ''), nullif(bank_tag_label, ''), '未标记')
+                        as tag_sub_label
+                from raw_base
+                where true {tag_filter_sql}
+            ), row_matches as materialized (
+                select * from base where {row_filter_sql}
+            ), paged as (
+                select *
+                from row_matches
+                {cursor_sql}
+                order by sort_date desc, sort_time desc, transaction_id, row_key
+                limit %s
+            )
+            select jsonb_build_object(
+                'summary', (
+                    select jsonb_build_object(
+                        'row_count', count(*),
+                        'transaction_count', count(distinct transaction_id),
+                        'total_amount', coalesce(sum(amount), 0)::text,
+                        'expense_amount', coalesce(sum(amount) filter (where direction = '支出'), 0)::text,
+                        'income_amount', coalesce(sum(amount) filter (where direction = '收入'), 0)::text,
+                        'expense_transaction_count', count(*) filter (where direction = '支出'),
+                        'income_transaction_count', count(*) filter (where direction = '收入')
+                    ) from base
+                ),
+                'available_years', (
+                    select coalesce(jsonb_agg(scope_year order by scope_year desc), '[]'::jsonb)
+                    from available_years
+                ),
+                'primary_facets', {primary_facet_sql},
+                'secondary_facets', {secondary_facet_sql},
+                'row_count', (select count(*) from row_matches),
+                'rows', (
+                    select coalesce(
+                        jsonb_agg(
+                            jsonb_build_object(
+                                'transaction_id', transaction_id,
+                                'group_id', group_id,
+                                'month', to_char(scope_month, 'YYYY-MM'),
+                                'trade_time', trade_time_text,
+                                'direction', direction,
+                                'project_name', project_name,
+                                'project_id', project_id,
+                                'expense_type', expense_type,
+                                'expense_content', expense_content,
+                                'amount', amount::text,
+                                'counterparty_name', counterparty_name,
+                                'payment_account_label', payment_account_label,
+                                'remark', remark,
+                                'oa_applicant', oa_applicant,
+                                'bank_tag_code', bank_tag_code,
+                                'bank_tag_label', bank_tag_label,
+                                'bank_tag_primary_label', bank_tag_primary_label,
+                                'bank_tag_sub_label', bank_tag_sub_label,
+                                'bank_tag_label_path', bank_tag_label_path,
+                                '_cursor_date', sort_date::text,
+                                '_cursor_time', sort_time,
+                                '_cursor_transaction_id', transaction_id,
+                                '_cursor_row_key', row_key
+                            ) order by sort_date desc, sort_time desc, transaction_id, row_key
+                        ),
+                        '[]'::jsonb
+                    ) from paged
+                )
+            ) as payload
+            """,
+            tuple(query_params),
+        )
+        payload = row.get("payload") if isinstance(row, dict) else None
+        if not isinstance(payload, dict):
+            return None
+        raw_rows = [dict(item) for item in list(payload.get("rows") or []) if isinstance(item, dict)]
+        has_more = len(raw_rows) > page_size
+        page_rows = raw_rows[:page_size]
+        next_cursor_values: tuple[str, str, str, str] | None = None
+        if has_more and page_rows:
+            last_row = page_rows[-1]
+            next_cursor_values = (
+                str(last_row.get("_cursor_date") or "0001-01-01"),
+                str(last_row.get("_cursor_time") or ""),
+                str(last_row.get("_cursor_transaction_id") or ""),
+                str(last_row.get("_cursor_row_key") or ""),
+            )
+        for item in page_rows:
+            for key in ("_cursor_date", "_cursor_time", "_cursor_transaction_id", "_cursor_row_key"):
+                item.pop(key, None)
+        payload["rows"] = page_rows
+        payload["next_cursor_values"] = next_cursor_values
+        return payload
+
+    def get_cost_statistics_export_page(
+        self,
+        *,
+        project_scope: str,
+        month: str,
+        start_month: str | None,
+        end_month: str | None,
+        start_date: str | None,
+        end_date: str | None,
+        project_names: list[str],
+        expense_types: list[str],
+        selected_tag_codes: list[str] | None,
+        row_shape: str,
+        offset: int,
+        page_size: int,
+        include_summary: bool,
+    ) -> dict[str, Any] | None:
+        normalized_project_scope = text(project_scope)
+        normalized_month = text(month) or "all"
+        normalized_row_shape = text(row_shape)
+        if normalized_project_scope not in {"active", "all"}:
+            return None
+        if normalized_row_shape not in {"raw_bank", "raw_cost", "project_month", "project_year", "month_summary"}:
+            return None
+        normalized_offset = max(int_value(offset, 0), 0)
+        normalized_page_size = int_value(page_size, 0)
+        if normalized_page_size < 1 or normalized_page_size > 1000:
+            return None
+
+        if start_month and end_month and start_month > end_month:
+            start_month, end_month = end_month, start_month
+        if start_date and end_date and start_date > end_date:
+            start_date, end_date = end_date, start_date
+
+        table_name = (
+            "read_model.cost_statistics_bank_flow_rows"
+            if normalized_row_shape == "raw_bank"
+            else "read_model.cost_statistics_rows"
+        )
+        bank_tag_code_sql = (
+            "bank_tag_code"
+            if normalized_row_shape == "raw_bank"
+            else "nullif(payload->>'bank_tag_code', '')"
+        )
+        bank_tag_label_sql = (
+            "bank_tag_label"
+            if normalized_row_shape == "raw_bank"
+            else "nullif(payload->>'bank_tag_label', '')"
+        )
+        bank_tag_primary_sql = (
+            "bank_tag_primary_label"
+            if normalized_row_shape == "raw_bank"
+            else "nullif(payload->>'bank_tag_primary_label', '')"
+        )
+        bank_tag_sub_sql = (
+            "bank_tag_sub_label"
+            if normalized_row_shape == "raw_bank"
+            else "nullif(payload->>'bank_tag_sub_label', '')"
+        )
+        bank_tag_path_sql = (
+            "bank_tag_label_path"
+            if normalized_row_shape == "raw_bank"
+            else "coalesce(payload->'bank_tag_label_path', '[]'::jsonb)"
+        )
+
+        where_parts = ["project_scope = %s"]
+        params: list[Any] = [normalized_project_scope]
+        if normalized_month.lower() != "all":
+            if not MONTH_SCOPE_RE.fullmatch(normalized_month):
+                return None
+            where_parts.append("scope_month = %s::date")
+            params.append(f"{normalized_month}-01")
+        if start_month:
+            if not MONTH_SCOPE_RE.fullmatch(start_month):
+                return None
+            where_parts.append("scope_month >= %s::date")
+            params.append(f"{start_month}-01")
+        if end_month:
+            if not MONTH_SCOPE_RE.fullmatch(end_month):
+                return None
+            where_parts.append("scope_month < (%s::date + interval '1 month')")
+            params.append(f"{end_month}-01")
+        if start_date:
+            where_parts.append("trade_date >= %s::date")
+            params.append(start_date)
+        if end_date:
+            where_parts.append("trade_date <= %s::date")
+            params.append(end_date)
+        normalized_project_names = sorted({text(item) for item in project_names if text(item)})
+        if normalized_project_names:
+            where_parts.append("project_name = any(%s)")
+            params.append(normalized_project_names)
+        normalized_expense_types = sorted({text(item) for item in expense_types if text(item)})
+        if normalized_expense_types:
+            where_parts.append("expense_type = any(%s)")
+            params.append(normalized_expense_types)
+        if selected_tag_codes is not None:
+            where_parts.append(f"coalesce({bank_tag_code_sql}, %s) = any(%s)")
+            params.extend(("__uncategorized__", list(selected_tag_codes)))
+
+        where_sql = " and ".join(where_parts)
+        base_sql = f"""
+            select
+                scope_month,
+                row_key,
+                transaction_id,
+                group_id,
+                trade_time_text,
+                trade_date,
+                counterparty_name,
+                payment_account_label,
+                direction,
+                remark,
+                project_id,
+                project_name,
+                expense_type,
+                expense_content,
+                amount,
+                oa_applicant,
+                {bank_tag_code_sql} as bank_tag_code,
+                {bank_tag_label_sql} as bank_tag_label,
+                {bank_tag_primary_sql} as bank_tag_primary_label,
+                {bank_tag_sub_sql} as bank_tag_sub_label,
+                {bank_tag_path_sql} as bank_tag_label_path
+            from {table_name}
+            where {where_sql}
+        """
+        if normalized_row_shape == "project_month":
+            result_sql = """
+                select
+                    to_char(trade_date, 'YYYY-MM') as period_label,
+                    project_name,
+                    expense_type,
+                    expense_content,
+                    sum(amount)::text as amount,
+                    count(*)::bigint as transaction_count
+                from base
+                group by to_char(trade_date, 'YYYY-MM'), project_name, expense_type, expense_content
+            """
+            order_sql = "period_label, project_name, expense_type, expense_content"
+        elif normalized_row_shape == "project_year":
+            result_sql = """
+                select
+                    to_char(trade_date, 'YYYY') as period_label,
+                    project_name,
+                    expense_type,
+                    expense_content,
+                    sum(amount)::text as amount,
+                    count(*)::bigint as transaction_count
+                from base
+                group by to_char(trade_date, 'YYYY'), project_name, expense_type, expense_content
+            """
+            order_sql = "period_label, project_name, expense_type, expense_content"
+        elif normalized_row_shape == "month_summary":
+            result_sql = """
+                select
+                    project_name,
+                    expense_type,
+                    expense_content,
+                    sum(amount)::text as amount,
+                    count(*)::bigint as transaction_count
+                from base
+                group by project_name, expense_type, expense_content
+            """
+            order_sql = "project_name, expense_type, expense_content"
+        else:
+            result_sql = "select * from base"
+            order_sql = (
+                "coalesce(trade_date, date '0001-01-01') desc, "
+                "coalesce(trade_time_text, '') desc, transaction_id, row_key"
+            )
+
+        summary: dict[str, Any] | None = None
+        if include_summary:
+            summary_row = self._connection.fetch_one(
+                f"""
+                with base as materialized ({base_sql}), result_rows as materialized ({result_sql})
+                select
+                    (select count(*) from base)::bigint as source_row_count,
+                    (select count(*) from result_rows)::bigint as row_count,
+                    (select count(distinct transaction_id) from base)::bigint as transaction_count,
+                    (select coalesce(sum(amount), 0)::text from base) as total_amount,
+                    (select coalesce(sum(amount) filter (where direction = '支出'), 0)::text from base)
+                        as expense_amount,
+                    (select coalesce(sum(amount) filter (where direction = '收入'), 0)::text from base)
+                        as income_amount,
+                    (select count(*) filter (where direction = '支出') from base)::bigint
+                        as expense_transaction_count,
+                    (select count(*) filter (where direction = '收入') from base)::bigint
+                        as income_transaction_count,
+                    (select count(distinct expense_type) from base)::bigint as expense_type_count
+                """,
+                tuple(params),
+            )
+            if not isinstance(summary_row, dict):
+                return None
+            summary = dict(summary_row)
+
+        rows = self._connection.fetch_all(
+            f"""
+            with base as materialized ({base_sql}), result_rows as ({result_sql})
+            select *
+            from result_rows
+            order by {order_sql}
+            offset %s
+            limit %s
+            """,
+            (*params, normalized_offset, normalized_page_size),
+        )
+        page_rows = [dict(row) for row in rows if isinstance(row, dict)]
+        return {
+            "summary": summary,
+            "rows": page_rows,
+            "next_offset": (
+                normalized_offset + len(page_rows)
+                if len(page_rows) == normalized_page_size
+                else None
+            ),
+        }
 
     def get_cost_statistics_view(self, *, scope_key: str) -> dict[str, Any] | None:
         normalized_scope_key = str(scope_key or "").strip()
@@ -4721,7 +5807,9 @@ class PostgresSummaryReadModelRepository:
             return None
         row = self._connection.fetch_one(
             """
-            select scope_key, project_scope, scope_month, generated_at, entry_count, source_versions, payload, raw_payload
+            select
+                scope_key, project_scope, scope_month, generated_at, entry_count,
+                source_versions, payload, raw_payload
             from read_model.cost_statistics_read_models
             where scope_key = %s
             limit 1
@@ -4733,8 +5821,19 @@ class PostgresSummaryReadModelRepository:
         stored_payload = _read_model_payload(row)
         if not isinstance(stored_payload, dict):
             stored_payload = {}
+        model_payload = stored_payload.get("payload") if isinstance(stored_payload.get("payload"), dict) else stored_payload
+        project_scope, scope_month_text = _parse_cost_statistics_scope_parts(
+            normalized_scope_key,
+            payload=model_payload,
+        )
+        if scope_month_text == "all":
+            where_sql = "project_scope = %s and scope_key <> %s and scope_month is not null"
+            row_params: tuple[Any, ...] = (project_scope, normalized_scope_key)
+        else:
+            where_sql = "scope_key = %s"
+            row_params = (normalized_scope_key,)
         row_items = self._connection.fetch_all(
-            """
+            f"""
             select
                 scope_key, project_scope, scope_month::text as scope_month, row_key, transaction_id,
                 group_id, trade_time_text, trade_date::text as trade_date, counterparty_name,
@@ -4742,36 +5841,34 @@ class PostgresSummaryReadModelRepository:
                 expense_content, amount::text as amount, oa_applicant, source_versions,
                 generated_at::text as generated_at, cache_status, payload, raw_payload
             from read_model.cost_statistics_rows
-            where scope_key = %s
+            where {where_sql}
             order by trade_date desc nulls last, trade_time_text desc, transaction_id, row_key
             """,
-            (normalized_scope_key,),
+            row_params,
         )
-        if row_items:
-            payload = _cost_statistics_payload_from_rows(
-                scope_key=normalized_scope_key,
-                parent_payload=stored_payload,
-                parent_row=row,
-                rows=row_items,
-            )
-        else:
-            payload = stored_payload.get("payload") if isinstance(stored_payload.get("payload"), dict) else stored_payload
-        dirty_row = self._connection.fetch_one(
-            """
-            select status, updated_at, last_error
-            from job.read_model_dirty_scopes
-            where tenant_id = 'default'
-              and scope_type = 'cost_statistics'
-              and scope_key = %s
-              and status in ('pending', 'processing', 'failed')
-            order by updated_at desc
-            limit 1
+        bank_flow_items = self._connection.fetch_all(
+            f"""
+            select
+                scope_key, project_scope, scope_month::text as scope_month, row_key, transaction_id,
+                group_id, trade_time_text, trade_date::text as trade_date, counterparty_name,
+                payment_account_label, direction, remark, project_id, project_name, expense_type,
+                expense_content, amount::text as amount, oa_applicant,
+                bank_tag_code, bank_tag_label, bank_tag_primary_label, bank_tag_sub_label,
+                bank_tag_label_path, source_versions, generated_at::text as generated_at,
+                cache_status, payload, raw_payload
+            from read_model.cost_statistics_bank_flow_rows
+            where {where_sql}
+            order by trade_date desc nulls last, trade_time_text desc, transaction_id, row_key
             """,
-            (normalized_scope_key,),
+            row_params,
         )
-        refresh_status = "fresh"
-        if dirty_row is not None:
-            refresh_status = "refreshing" if text(dirty_row.get("status")) in {"pending", "processing"} else "stale"
+        payload = _cost_statistics_payload_from_rows(
+            scope_key=normalized_scope_key,
+            parent_payload=stored_payload,
+            parent_row=row,
+            rows=row_items,
+            bank_flow_rows=bank_flow_items,
+        )
         return {
             "scope_key": normalized_scope_key,
             "project_scope": text(row.get("project_scope") or payload.get("project_scope")),
@@ -4791,34 +5888,149 @@ class PostgresSummaryReadModelRepository:
                 or ((payload.get("summary") if isinstance(payload.get("summary"), dict) else {}).get("row_count")),
                 0,
             ),
-            "refresh_status": refresh_status,
-            "dirty_scope": dict(dirty_row) if isinstance(dirty_row, dict) else None,
         }
 
-    def save_cost_statistics_read_models(self, snapshot: dict[str, Any], *, changed_scope_keys: set[str] | None = None) -> None:
-        def write(connection: Any) -> None:
-            self._save_generic_read_model_snapshots(
+    def get_cost_statistics_transaction(
+        self,
+        *,
+        project_scope: str,
+        transaction_id: str,
+    ) -> dict[str, Any] | None:
+        normalized_project_scope = text(project_scope)
+        normalized_transaction_id = text(transaction_id)
+        if normalized_project_scope not in {"active", "all"} or normalized_transaction_id is None:
+            return None
+        row = self._connection.fetch_one(
+            """
+            select *
+            from (
+                select
+                    0 as row_priority, 'cost' as row_kind,
+                    scope_key, project_scope, scope_month::text as scope_month, row_key, transaction_id,
+                    group_id, trade_time_text, trade_date::text as trade_date, counterparty_name,
+                    payment_account_label, direction, remark, project_id, project_name, expense_type,
+                    expense_content, amount::text as amount, oa_applicant,
+                    null::text as bank_tag_code, null::text as bank_tag_label,
+                    null::text as bank_tag_primary_label, null::text as bank_tag_sub_label,
+                    '[]'::jsonb as bank_tag_label_path, payload, raw_payload
+                from read_model.cost_statistics_rows
+                where project_scope = %s and transaction_id = %s
+                union all
+                select
+                    1 as row_priority, 'bank_flow' as row_kind,
+                    scope_key, project_scope, scope_month::text as scope_month, row_key, transaction_id,
+                    group_id, trade_time_text, trade_date::text as trade_date, counterparty_name,
+                    payment_account_label, direction, remark, project_id, project_name, expense_type,
+                    expense_content, amount::text as amount, oa_applicant,
+                    bank_tag_code, bank_tag_label, bank_tag_primary_label, bank_tag_sub_label,
+                    bank_tag_label_path, payload, raw_payload
+                from read_model.cost_statistics_bank_flow_rows
+                where project_scope = %s and transaction_id = %s
+            ) candidate
+            order by row_priority, scope_month desc, row_key
+            limit 1
+            """,
+            (
+                normalized_project_scope,
+                normalized_transaction_id,
+                normalized_project_scope,
+                normalized_transaction_id,
+            ),
+        )
+        if row is None:
+            return None
+        return _cost_statistics_row_payload(row, fallback_index=0)
+
+    def publish_cost_statistics_read_models(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        tenant_id: str,
+        scope_key: str,
+        source_version: int,
+        changed_scope_keys: set[str] | None = None,
+    ) -> bool:
+        normalized_tenant_id = text(tenant_id)
+        normalized_scope_key = text(scope_key)
+        if normalized_tenant_id is None or normalized_scope_key is None:
+            raise ValueError("tenant_id and scope_key are required for cost statistics publish.")
+        if isinstance(source_version, bool) or not isinstance(source_version, int) or source_version < 0:
+            raise ValueError("source_version must be a non-negative integer for cost statistics publish.")
+
+        def publish(connection: Any) -> bool:
+            current = connection.fetch_one(
+                """
+                select source_version
+                from job.read_model_dirty_scopes
+                where tenant_id = %s
+                  and scope_type = 'cost_statistics'
+                  and scope_key = %s
+                  and status in ('pending', 'processing')
+                for update
+                """,
+                (normalized_tenant_id, normalized_scope_key),
+            )
+            if current is None or int_value(current.get("source_version"), -1) != source_version:
+                return False
+            self._write_cost_statistics_read_models(
                 connection,
                 snapshot,
-                table="read_model.cost_statistics_read_models",
                 changed_scope_keys=changed_scope_keys,
-                default_project_scope="all",
+                published_source_version=source_version,
             )
-            read_models = snapshot.get("read_models") if isinstance(snapshot, dict) else None
-            if changed_scope_keys is not None:
-                present_scope_keys = {scope_key for scope_key, _ in iter_mapping(read_models)}
-                for scope_key in sorted(set(changed_scope_keys) - present_scope_keys):
-                    connection.execute("delete from read_model.cost_statistics_rows where scope_key = %s", (scope_key,))
-            for scope_key, payload in iter_mapping(read_models):
-                if changed_scope_keys is not None and scope_key not in changed_scope_keys:
-                    continue
-                model_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
-                if _is_cost_statistics_parent_scope(scope_key, payload=model_payload):
-                    connection.execute("delete from read_model.cost_statistics_rows where scope_key = %s", (scope_key,))
-                    continue
-                self._replace_cost_statistics_rows(connection, scope_key=scope_key, payload=payload)
+            return True
 
-        run_in_transaction(self._connection, write)
+        return run_in_transaction(self._connection, publish)
+
+    def _write_cost_statistics_read_models(
+        self,
+        connection: Any,
+        snapshot: dict[str, Any],
+        *,
+        changed_scope_keys: set[str] | None,
+        published_source_version: int | None = None,
+    ) -> None:
+        self._save_generic_read_model_snapshots(
+            connection,
+            _cost_statistics_metadata_snapshot(snapshot),
+            table="read_model.cost_statistics_read_models",
+            changed_scope_keys=changed_scope_keys,
+            default_project_scope="all",
+        )
+        read_models = snapshot.get("read_models") if isinstance(snapshot, dict) else None
+        if published_source_version is not None:
+            for published_scope_key, _payload in iter_mapping(read_models):
+                if changed_scope_keys is not None and published_scope_key not in changed_scope_keys:
+                    continue
+                connection.execute(
+                    """
+                    update read_model.cost_statistics_read_models
+                    set published_source_version = %s
+                    where scope_key = %s
+                    """,
+                    (published_source_version, published_scope_key),
+                )
+        if changed_scope_keys is not None:
+            present_scope_keys = {scope_key for scope_key, _ in iter_mapping(read_models)}
+            for scope_key in sorted(set(changed_scope_keys) - present_scope_keys):
+                connection.execute("delete from read_model.cost_statistics_rows where scope_key = %s", (scope_key,))
+                connection.execute(
+                    "delete from read_model.cost_statistics_bank_flow_rows where scope_key = %s",
+                    (scope_key,),
+                )
+        for scope_key, payload in iter_mapping(read_models):
+            if changed_scope_keys is not None and scope_key not in changed_scope_keys:
+                continue
+            model_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
+            if _is_cost_statistics_parent_scope(scope_key, payload=model_payload):
+                connection.execute("delete from read_model.cost_statistics_rows where scope_key = %s", (scope_key,))
+                connection.execute(
+                    "delete from read_model.cost_statistics_bank_flow_rows where scope_key = %s",
+                    (scope_key,),
+                )
+                continue
+            self._replace_cost_statistics_rows(connection, scope_key=scope_key, payload=payload)
+            self._replace_cost_statistics_bank_flow_rows(connection, scope_key=scope_key, payload=payload)
 
     def load_tax_offset_read_models(self) -> dict[str, Any]:
         return self._load_table_map(
@@ -5360,6 +6572,117 @@ class PostgresSummaryReadModelRepository:
             row_params,
         )
 
+    def _replace_cost_statistics_bank_flow_rows(
+        self,
+        connection: Any,
+        *,
+        scope_key: str,
+        payload: dict[str, Any],
+    ) -> None:
+        connection.execute(
+            "delete from read_model.cost_statistics_bank_flow_rows where scope_key = %s",
+            (scope_key,),
+        )
+        model_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
+        bank_flow_rows = model_payload.get("bank_flow_time_rows") if isinstance(model_payload, dict) else None
+        if not isinstance(bank_flow_rows, list):
+            return
+        source_versions = payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}
+        project_scope, scope_month_text = _parse_cost_statistics_scope_parts(scope_key, payload=model_payload)
+        if scope_month_text == "all":
+            raise ValueError("cost_statistics_bank_flow_rows only supports concrete month scopes.")
+        scope_month = month_start(model_payload.get("scope_month") or model_payload.get("month") or scope_month_text)
+        if scope_month is None:
+            raise ValueError("cost_statistics_bank_flow_rows requires a concrete scope_month.")
+        generated_at = text(payload.get("generated_at") or model_payload.get("generated_at"))
+        cache_status = text(payload.get("cache_status") or model_payload.get("cache_status") or "fresh") or "fresh"
+        row_params: list[tuple[Any, ...]] = []
+        for index, item in enumerate(bank_flow_rows):
+            if not isinstance(item, dict):
+                continue
+            row = serialize_value(item)
+            transaction_id = text(row.get("transaction_id")) or f"row-{index}"
+            row_key = text(row.get("row_key") or f"{transaction_id}:{index}") or f"row-{index}"
+            row_params.append(
+                (
+                    scope_key,
+                    project_scope,
+                    scope_month,
+                    row_key,
+                    transaction_id,
+                    text(row.get("group_id")),
+                    text(row.get("trade_time")),
+                    _date_text(row.get("trade_date") or row.get("trade_time")),
+                    text(row.get("counterparty_name")),
+                    text(row.get("payment_account_label")),
+                    text(row.get("direction")),
+                    text(row.get("remark")),
+                    text(row.get("project_id")),
+                    text(row.get("project_name")) or "未配对OA",
+                    text(row.get("expense_type")) or "未分类",
+                    text(row.get("expense_content")),
+                    decimal_text(str(row.get("amount") or "").replace(",", "")) or "0",
+                    text(row.get("oa_applicant")),
+                    text(row.get("bank_tag_code")),
+                    text(row.get("bank_tag_label")),
+                    text(row.get("bank_tag_primary_label")),
+                    text(row.get("bank_tag_sub_label")),
+                    jsonb(row.get("bank_tag_label_path") if isinstance(row.get("bank_tag_label_path"), list) else []),
+                    jsonb(source_versions),
+                    generated_at,
+                    cache_status,
+                    jsonb(row),
+                    jsonb({"normalized_payload": row}),
+                )
+            )
+        _execute_many(
+            connection,
+            """
+            insert into read_model.cost_statistics_bank_flow_rows(
+                scope_key, project_scope, scope_month, row_key, transaction_id, group_id,
+                trade_time_text, trade_date, counterparty_name, payment_account_label, direction,
+                remark, project_id, project_name, expense_type, expense_content, amount,
+                oa_applicant, bank_tag_code, bank_tag_label, bank_tag_primary_label,
+                bank_tag_sub_label, bank_tag_label_path, source_versions, generated_at,
+                cache_status, payload, raw_payload
+            )
+            values (
+                %s, %s, %s::date, %s, %s, %s, %s, %s::date, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, coalesce(%s::timestamptz, now()),
+                %s, %s, %s
+            )
+            on conflict (scope_key, row_key) do update set
+                project_scope = excluded.project_scope,
+                scope_month = excluded.scope_month,
+                transaction_id = excluded.transaction_id,
+                group_id = excluded.group_id,
+                trade_time_text = excluded.trade_time_text,
+                trade_date = excluded.trade_date,
+                counterparty_name = excluded.counterparty_name,
+                payment_account_label = excluded.payment_account_label,
+                direction = excluded.direction,
+                remark = excluded.remark,
+                project_id = excluded.project_id,
+                project_name = excluded.project_name,
+                expense_type = excluded.expense_type,
+                expense_content = excluded.expense_content,
+                amount = excluded.amount,
+                oa_applicant = excluded.oa_applicant,
+                bank_tag_code = excluded.bank_tag_code,
+                bank_tag_label = excluded.bank_tag_label,
+                bank_tag_primary_label = excluded.bank_tag_primary_label,
+                bank_tag_sub_label = excluded.bank_tag_sub_label,
+                bank_tag_label_path = excluded.bank_tag_label_path,
+                source_versions = excluded.source_versions,
+                generated_at = excluded.generated_at,
+                cache_status = excluded.cache_status,
+                payload = excluded.payload,
+                raw_payload = excluded.raw_payload,
+                updated_at = now()
+            """,
+            row_params,
+        )
+
     def _replace_tax_offset_items(self, connection: Any, *, scope_key: str, payload: dict[str, Any]) -> None:
         connection.execute("delete from read_model.tax_offset_items where scope_key = %s", (scope_key,))
         model_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
@@ -5557,11 +6880,23 @@ class PostgresReadModelRepository:
             workbench_relation_source_summary_from_source=self.workbench_relation_source_summary_from_source,
         )
 
-    def load_cost_statistics_read_models(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return self._summary_read_model_repository.load_cost_statistics_read_models(*args, **kwargs)
-
     def get_cost_statistics_view(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
         return self._summary_read_model_repository.get_cost_statistics_view(*args, **kwargs)
+
+    def get_cost_statistics_scope_metadata(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        return self._summary_read_model_repository.get_cost_statistics_scope_metadata(*args, **kwargs)
+
+    def get_cost_statistics_freshness_gate(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        return self._summary_read_model_repository.get_cost_statistics_freshness_gate(*args, **kwargs)
+
+    def get_cost_statistics_page(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        return self._summary_read_model_repository.get_cost_statistics_page(*args, **kwargs)
+
+    def get_cost_statistics_export_page(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        return self._summary_read_model_repository.get_cost_statistics_export_page(*args, **kwargs)
+
+    def get_cost_statistics_transaction(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        return self._summary_read_model_repository.get_cost_statistics_transaction(*args, **kwargs)
 
     def active_workbench_source_versions(self, *, scope_key: str) -> dict[str, Any]:
         normalized_scope_key = str(scope_key or "").strip()
@@ -5572,8 +6907,8 @@ class PostgresReadModelRepository:
             scope_key=normalized_scope_key,
         )
 
-    def save_cost_statistics_read_models(self, *args: Any, **kwargs: Any) -> None:
-        self._summary_read_model_repository.save_cost_statistics_read_models(*args, **kwargs)
+    def publish_cost_statistics_read_models(self, *args: Any, **kwargs: Any) -> bool:
+        return self._summary_read_model_repository.publish_cost_statistics_read_models(*args, **kwargs)
 
     def load_tax_offset_read_models(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         return self._summary_read_model_repository.load_tax_offset_read_models(*args, **kwargs)
@@ -5731,8 +7066,17 @@ class PostgresReadModelRepository:
     def list_oa_pending_payment_rows(self, **kwargs: Any) -> dict[str, Any] | None:
         return self._invoice_usage_collection_repository.list_oa_pending_payment_rows(**kwargs)
 
+    def oa_pending_payment_read_snapshot(self):
+        return self._invoice_usage_collection_repository.oa_pending_payment_read_snapshot()
+
+    def oa_pending_payment_query_state(self, **kwargs: Any) -> dict[str, Any]:
+        return self._invoice_usage_collection_repository.oa_pending_payment_query_state(**kwargs)
+
     def save_oa_pending_payment_rows(self, **kwargs: Any) -> None:
         self._invoice_usage_collection_repository.save_oa_pending_payment_rows(**kwargs)
+
+    def publish_oa_pending_payment_rows(self, **kwargs: Any) -> bool:
+        return self._invoice_usage_collection_repository.publish_oa_pending_payment_rows(**kwargs)
 
     def mark_oa_pending_payment_scope(self, **kwargs: Any) -> None:
         self._invoice_usage_collection_repository.mark_oa_pending_payment_scope(**kwargs)
@@ -5908,11 +7252,21 @@ class PostgresReadModelRepository:
             order by scope_key, generation_id
             """,
         )
+        return PostgresReadModelRepository._workbench_active_month_generation_version_from_rows(rows)
+
+    @staticmethod
+    def _workbench_active_month_generation_version_from_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
         generation_set = [
             {
                 "scope_key": text(row.get("scope_key")),
                 "generation_id": text(row.get("generation_id")),
-                "source_versions": row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {},
+                "source_versions": (
+                    row.get("source_versions")
+                    if isinstance(row.get("source_versions"), dict)
+                    else row.get("generation_source_versions")
+                    if isinstance(row.get("generation_source_versions"), dict)
+                    else {}
+                ),
             }
             for row in rows
             if isinstance(row, dict) and text(row.get("scope_key")) and text(row.get("generation_id"))
@@ -6487,99 +7841,6 @@ class PostgresReadModelRepository:
             ),
         )
 
-    def get_workbench_view(
-        self,
-        *,
-        scope_key: str,
-        page: int | str | None = None,
-        page_size: int | str | None = None,
-        status: str | None = None,
-        source_kind: str | None = None,
-        search: str | None = None,
-    ) -> dict[str, Any] | None:
-        normalized_scope_key = str(scope_key or "").strip() or "all"
-        if normalized_scope_key == "all":
-            return self._load_all_workbench_view(
-                page=page,
-                page_size=page_size,
-                status=status,
-                source_kind=source_kind,
-                search=search,
-            )
-        active_generation_id = self._active_workbench_generation_id(self._connection, scope_key=normalized_scope_key)
-        if active_generation_id:
-            row = self._connection.fetch_one(
-                """
-                select generation_id, scope_key, payload, raw_payload, cache_status, generated_at, source_versions, row_count
-                from read_model.workbench_snapshots
-                where scope_key = %s
-                  and generation_id = %s
-                limit 1
-                """,
-                (normalized_scope_key, active_generation_id),
-            )
-        else:
-            row = self._connection.fetch_one(
-                """
-                select generation_id, scope_key, payload, raw_payload, cache_status, generated_at, source_versions, row_count
-                from read_model.workbench_snapshots
-                where scope_key = %s
-                order by generated_at desc
-                limit 1
-                """,
-                (normalized_scope_key,),
-            )
-        if row is None:
-            return None
-        payload = _read_model_payload(row)
-        if not isinstance(payload, dict):
-            payload = {}
-        dirty_row = self._connection.fetch_one(
-            """
-            select status, updated_at, last_error
-            from job.read_model_dirty_scopes
-            where tenant_id = 'default'
-              and scope_type = 'workbench'
-              and scope_key = %s
-              and status in ('pending', 'processing', 'failed')
-            order by updated_at desc
-            limit 1
-            """,
-            (normalized_scope_key,),
-        )
-        refresh_status = "fresh"
-        if dirty_row is not None:
-            refresh_status = "refreshing" if text(dirty_row.get("status")) in {"pending", "processing"} else "stale"
-        payload_source_versions = payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}
-        row_source_versions = row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}
-        view_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
-        if isinstance(view_payload, dict) and _workbench_snapshot_payload_requires_group_materialization(view_payload):
-            view_payload = self._load_workbench_groups_payload(
-                scope_key=normalized_scope_key,
-                generation_id=text(row.get("generation_id")) or active_generation_id,
-                payload=view_payload,
-            )
-        result = {
-            "scope_key": normalized_scope_key,
-            "payload": view_payload,
-            "cache_status": text(row.get("cache_status") or payload.get("cache_status")) or "fresh",
-            "generated_at": text(row.get("generated_at") or payload.get("generated_at")),
-            "source_versions": payload_source_versions or row_source_versions,
-            "row_count": int_value(row.get("row_count"), 0),
-            "refresh_status": refresh_status,
-            "dirty_scope": dict(dirty_row) if isinstance(dirty_row, dict) else None,
-        }
-        if page is not None or page_size is not None or status or source_kind or search:
-            result["rows_page"] = self._load_workbench_rows_page(
-                scope_key=normalized_scope_key,
-                page=page,
-                page_size=page_size,
-                status=status,
-                source_kind=source_kind,
-                search=search,
-            )
-        return result
-
     def _load_workbench_groups_payload(
         self,
         *,
@@ -6826,8 +8087,8 @@ class PostgresReadModelRepository:
             materialized.append(_materialize_workbench_group_payload(group, rows_by_group.get(key, [])))
         return materialized
 
-    def _get_workbench_all_summary_from_active_month_shards(self) -> dict[str, Any] | None:
-        rows = self._connection.fetch_all(
+    def _workbench_active_month_summary_rows(self) -> list[dict[str, Any]]:
+        return list(self._connection.fetch_all(
             """
             select
                 gen.scope_key,
@@ -6846,18 +8107,30 @@ class PostgresReadModelRepository:
               and gen.scope_key ~ '^[0-9]{4}-[0-9]{2}$'
             order by gen.scope_key desc
             """,
-        )
+        ))
+
+    def _get_workbench_all_summary_from_active_month_shards(self) -> dict[str, Any] | None:
+        rows = self._workbench_active_month_summary_rows()
         if not rows:
             return None
-        summary = {
-            "oa_count": 0,
-            "bank_count": 0,
-            "invoice_count": 0,
-            "paired_count": 0,
-            "unpaired_count": 0,
-            "exception_count": 0,
-            "zone_counts": _empty_workbench_zone_counts(),
-        }
+        summary = self._get_workbench_all_canonical_summary_counts()
+        read_model_status = self._workbench_summary_read_model_status(scope_key="all")
+        active_month_version = self._workbench_active_month_generation_version_from_rows(rows)
+        return self._compose_workbench_all_summary_payload(
+            rows=rows,
+            summary=summary,
+            read_model_status=read_model_status,
+            active_month_version=active_month_version,
+        )
+
+    @staticmethod
+    def _compose_workbench_all_summary_payload(
+        *,
+        rows: list[dict[str, Any]],
+        summary: dict[str, Any],
+        read_model_status: str,
+        active_month_version: dict[str, Any],
+    ) -> dict[str, Any]:
         invoice_inventory: dict[str, int] = {}
         generated_at = ""
         complete_summary_count = 0
@@ -6870,18 +8143,6 @@ class PostgresReadModelRepository:
             if not isinstance(payload, dict) or not isinstance(payload.get("summary"), dict):
                 continue
             complete_summary_count += 1
-            row_summary = _normalize_workbench_summary_counts(payload["summary"])
-            for key in ("oa_count", "bank_count", "invoice_count", "paired_count", "unpaired_count", "exception_count"):
-                summary[key] += int_value(row_summary.get(key), 0)
-            zone_counts = row_summary.get("zone_counts")
-            if isinstance(zone_counts, dict):
-                for zone in ("paired", "unpaired"):
-                    zone_payload = zone_counts.get(zone)
-                    if not isinstance(zone_payload, dict):
-                        continue
-                    target = summary["zone_counts"][zone]
-                    for key in ("groups", "oa", "bank", "invoice", "rows"):
-                        target[key] += int_value(zone_payload.get(key), 0)
             inventory = payload.get("invoice_inventory")
             if isinstance(inventory, dict):
                 for key, value in inventory.items():
@@ -6889,10 +8150,8 @@ class PostgresReadModelRepository:
             row_generated_at = text(row.get("generated_at")) or ""
             if row_generated_at > generated_at:
                 generated_at = row_generated_at
-        read_model_status = self._workbench_summary_read_model_status(scope_key="all")
         if complete_summary_count < len(rows):
             read_model_status = "stale"
-        active_month_version = self._workbench_active_month_generation_version(self._connection)
         return {
             "month": "all",
             "scope_key": "all",
@@ -6903,6 +8162,195 @@ class PostgresReadModelRepository:
             "source_versions": _workbench_composed_all_source_versions(source_version_rows),
             "active_generation_id": active_month_version.get("version"),
             "read_model_version": active_month_version.get("version"),
+        }
+
+    def _get_workbench_default_all_initial_group_pages(
+        self,
+        *,
+        summary: dict[str, Any],
+        read_model_status: str,
+        read_model_version: str,
+        source_versions: dict[str, Any],
+    ) -> dict[str, dict[str, Any]]:
+        canonical_groups_sql = _workbench_active_month_groups_sql(include_aggregated_metadata=False)
+        rows = self._connection.fetch_all(
+            f"""
+            select
+                ranked.group_id,
+                ranked.source_group_id,
+                ranked.zone,
+                ranked.payload,
+                ranked.raw_payload,
+                ranked.scope_key,
+                ranked.generation_id,
+                ranked.zone_rank
+            from (
+                select
+                    g.*,
+                    row_number() over (
+                        partition by g.zone
+                        order by g.scope_month desc nulls last, g.updated_at desc, g.group_id
+                    ) as zone_rank
+                from {canonical_groups_sql}
+                where g.zone in ('paired', 'unpaired')
+            ) ranked
+            where ranked.zone_rank <= 201
+            order by
+                case when ranked.zone = 'paired' then 0 else 1 end,
+                ranked.zone_rank
+            """,
+        )
+        rows_by_zone: dict[str, list[dict[str, Any]]] = {"paired": [], "unpaired": []}
+        for row in rows:
+            zone = text(row.get("zone"))
+            if zone in rows_by_zone:
+                rows_by_zone[zone].append(row)
+        visible_rows = [
+            row
+            for zone in ("paired", "unpaired")
+            for row in rows_by_zone[zone][:200]
+        ]
+        materialized_rows = self._materialize_workbench_group_payloads(visible_rows)
+        groups_by_zone: dict[str, list[dict[str, Any]]] = {"paired": [], "unpaired": []}
+        for row, materialized_group in zip(visible_rows, materialized_rows, strict=False):
+            zone = text(row.get("zone"))
+            if zone not in groups_by_zone:
+                continue
+            group = materialized_group if isinstance(materialized_group, dict) else {
+                "group_id": text(row.get("group_id"))
+            }
+            group = _with_workbench_group_counts(_sanitize_workbench_group_invoice_rows(group))
+            groups_by_zone[zone].append(_compact_workbench_group_for_summary_page(group))
+
+        summary_zone_counts = summary.get("zone_counts") if isinstance(summary.get("zone_counts"), dict) else {}
+        pages: dict[str, dict[str, Any]] = {}
+        for zone in ("paired", "unpaired"):
+            counts = summary_zone_counts.get(zone) if isinstance(summary_zone_counts.get(zone), dict) else {}
+            pages[zone] = {
+                "month": "all",
+                "scope_key": "all",
+                "zone": zone,
+                "page": 1,
+                "page_size": 200,
+                "detail_level": "summary",
+                "total": int_value(counts.get("groups"), 0),
+                "row_counts": _normalize_workbench_row_counts(counts, _empty_workbench_row_counts()),
+                "has_more": len(rows_by_zone[zone]) > 200,
+                "groups": groups_by_zone[zone],
+                "read_model_status": read_model_status,
+                "source_versions": source_versions,
+                "active_generation_id": read_model_version,
+                "read_model_version": read_model_version,
+            }
+        return pages
+
+    def _get_workbench_all_canonical_summary_counts(self) -> dict[str, Any]:
+        canonical_groups_sql = _workbench_active_month_groups_sql(include_aggregated_metadata=False)
+        physical_group_id_sql = _workbench_all_logical_group_id_sql("physical_group.group_id", "physical_group.scope_key")
+        row = self._connection.fetch_one(
+            f"""
+            with canonical_groups as (
+                select group_id, zone, payload
+                from {canonical_groups_sql}
+            ), physical_groups as (
+                select
+                    physical_group.scope_key,
+                    physical_group.generation_id,
+                    physical_group.zone,
+                    physical_group.group_id,
+                    {physical_group_id_sql} as logical_group_id
+                from read_model.workbench_groups physical_group
+                join read_model.workbench_generations physical_generation
+                  on physical_generation.tenant_id = 'default'
+                 and physical_generation.scope_key = physical_group.scope_key
+                 and physical_generation.generation_id = physical_group.generation_id
+                 and physical_generation.status = 'active'
+                where physical_group.scope_key <> 'all'
+            ), canonical_members as (
+                select distinct
+                    canonical_groups.zone,
+                    canonical_groups.group_id,
+                    member.pane,
+                    coalesce(nullif(member.object_identity_key, ''), member.row_id) as object_identity_key
+                from canonical_groups
+                join physical_groups
+                  on physical_groups.logical_group_id = canonical_groups.group_id
+                 and physical_groups.zone = canonical_groups.zone
+                join read_model.workbench_group_rows member
+                  on member.scope_key = physical_groups.scope_key
+                 and member.generation_id = physical_groups.generation_id
+                 and member.zone = physical_groups.zone
+                 and member.group_id = physical_groups.group_id
+                where coalesce(member.row_role, '') <> 'summary'
+            )
+            select
+                count(distinct canonical_groups.group_id) filter (
+                    where canonical_groups.zone = 'paired'
+                )::bigint as paired_count,
+                count(distinct canonical_groups.group_id) filter (
+                    where canonical_groups.zone = 'unpaired'
+                )::bigint as unpaired_count,
+                count(distinct (canonical_members.pane, canonical_members.object_identity_key)) filter (
+                    where canonical_members.pane = 'oa'
+                )::bigint as oa_count,
+                count(distinct (canonical_members.pane, canonical_members.object_identity_key)) filter (
+                    where canonical_members.pane = 'bank'
+                )::bigint as bank_count,
+                count(distinct (canonical_members.pane, canonical_members.object_identity_key)) filter (
+                    where canonical_members.pane = 'invoice'
+                )::bigint as invoice_count,
+                count(distinct canonical_groups.group_id) filter (
+                    where canonical_groups.zone = 'unpaired'
+                      and (
+                        coalesce(canonical_groups.payload->>'match_confidence', '') = 'danger'
+                        or jsonb_path_exists(
+                            coalesce(canonical_groups.payload, '{{}}'::jsonb),
+                            '$.** ? (@.tone == "danger")'
+                        )
+                      )
+                )::bigint as exception_count,
+                count(distinct (canonical_members.pane, canonical_members.object_identity_key)) filter (
+                    where canonical_members.zone = 'paired' and canonical_members.pane = 'oa'
+                )::bigint as paired_oa_count,
+                count(distinct (canonical_members.pane, canonical_members.object_identity_key)) filter (
+                    where canonical_members.zone = 'paired' and canonical_members.pane = 'bank'
+                )::bigint as paired_bank_count,
+                count(distinct (canonical_members.pane, canonical_members.object_identity_key)) filter (
+                    where canonical_members.zone = 'paired' and canonical_members.pane = 'invoice'
+                )::bigint as paired_invoice_count,
+                count(distinct (canonical_members.pane, canonical_members.object_identity_key)) filter (
+                    where canonical_members.zone = 'unpaired' and canonical_members.pane = 'oa'
+                )::bigint as unpaired_oa_count,
+                count(distinct (canonical_members.pane, canonical_members.object_identity_key)) filter (
+                    where canonical_members.zone = 'unpaired' and canonical_members.pane = 'bank'
+                )::bigint as unpaired_bank_count,
+                count(distinct (canonical_members.pane, canonical_members.object_identity_key)) filter (
+                    where canonical_members.zone = 'unpaired' and canonical_members.pane = 'invoice'
+                )::bigint as unpaired_invoice_count
+            from canonical_groups
+            left join canonical_members
+              on canonical_members.zone = canonical_groups.zone
+             and canonical_members.group_id = canonical_groups.group_id
+            """,
+        )
+        if not isinstance(row, dict):
+            raise RuntimeError("Workbench all-scope canonical summary query returned no result.")
+
+        zone_counts = _empty_workbench_zone_counts()
+        for zone in ("paired", "unpaired"):
+            target = zone_counts[zone]
+            target["groups"] = int_value(row.get(f"{zone}_count"), 0)
+            for pane in WORKBENCH_PANES:
+                target[pane] = int_value(row.get(f"{zone}_{pane}_count"), 0)
+            target["rows"] = target["oa"] + target["bank"] + target["invoice"]
+        return {
+            "oa_count": int_value(row.get("oa_count"), 0),
+            "bank_count": int_value(row.get("bank_count"), 0),
+            "invoice_count": int_value(row.get("invoice_count"), 0),
+            "paired_count": int_value(row.get("paired_count"), 0),
+            "unpaired_count": int_value(row.get("unpaired_count"), 0),
+            "exception_count": int_value(row.get("exception_count"), 0),
+            "zone_counts": zone_counts,
         }
 
     def _workbench_all_active_source_versions(self) -> dict[str, Any]:
@@ -6920,6 +8368,119 @@ class PostgresReadModelRepository:
         return _workbench_composed_all_source_versions(
             [row for row in rows if isinstance(row, dict)]
         )
+
+    def get_workbench_initial_page(
+        self,
+        *,
+        scope_key: str,
+        paired_query: dict[str, Any] | None = None,
+        unpaired_query: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        normalized_scope_key = str(scope_key or "").strip() or "all"
+        transaction_factory = getattr(self._connection, "transaction", None)
+        if not callable(transaction_factory):
+            raise RuntimeError("Workbench initial page requires PostgreSQL transaction support.")
+
+        def page_query(value: dict[str, Any] | None) -> dict[str, Any]:
+            source = value if isinstance(value, dict) else {}
+            return {
+                key: source.get(key)
+                for key in (
+                    "status",
+                    "source_kind",
+                    "search",
+                    "search_mode",
+                    "search_by_pane",
+                    "sort",
+                    "column_filters",
+                    "time_filters",
+                )
+                if key in source
+            }
+
+        with transaction_factory() as transaction:
+            transaction.execute("set transaction isolation level repeatable read read only")
+            transaction.execute("set local statement_timeout = '2s'")
+            snapshot_repository = PostgresReadModelRepository(transaction)
+            paired_page_query = page_query(paired_query)
+            unpaired_page_query = page_query(unpaired_query)
+            if normalized_scope_key == "all" and not paired_page_query and not unpaired_page_query:
+                summary_rows = snapshot_repository._workbench_active_month_summary_rows()
+                if not summary_rows:
+                    return None
+                active_month_version = snapshot_repository._workbench_active_month_generation_version_from_rows(
+                    summary_rows
+                )
+                read_model_version = text(active_month_version.get("version"))
+                if not read_model_version:
+                    return None
+                summary = snapshot_repository._get_workbench_all_canonical_summary_counts()
+                read_model_status = snapshot_repository._workbench_summary_read_model_status(scope_key="all")
+                summary_payload = snapshot_repository._compose_workbench_all_summary_payload(
+                    rows=summary_rows,
+                    summary=summary,
+                    read_model_status=read_model_status,
+                    active_month_version=active_month_version,
+                )
+                initial_pages = snapshot_repository._get_workbench_default_all_initial_group_pages(
+                    summary=dict(summary_payload.get("summary") or {}),
+                    read_model_status=text(summary_payload.get("read_model_status")) or "fresh",
+                    read_model_version=read_model_version,
+                    source_versions=dict(summary_payload.get("source_versions") or {}),
+                )
+                paired_page = initial_pages["paired"]
+                unpaired_page = initial_pages["unpaired"]
+            else:
+                summary_payload = snapshot_repository.get_workbench_summary(scope_key=normalized_scope_key)
+                if not isinstance(summary_payload, dict):
+                    return None
+                paired_page = snapshot_repository.get_workbench_groups_page(
+                    scope_key=normalized_scope_key,
+                    zone="paired",
+                    page=1,
+                    page_size=200,
+                    detail_level="summary",
+                    **paired_page_query,
+                )
+                unpaired_page = snapshot_repository.get_workbench_groups_page(
+                    scope_key=normalized_scope_key,
+                    zone="unpaired",
+                    page=1,
+                    page_size=200,
+                    detail_level="summary",
+                    **unpaired_page_query,
+                )
+            if not isinstance(summary_payload, dict):
+                return None
+
+            versions = [
+                text(payload.get("read_model_version") or payload.get("active_generation_id"))
+                for payload in (summary_payload, paired_page, unpaired_page)
+            ]
+            if any(version is None for version in versions) or len(set(versions)) != 1:
+                raise RuntimeError("Workbench initial page components resolved different read model versions.")
+            read_model_version = versions[0]
+            status_values = {
+                text(payload.get("read_model_status")) or "fresh"
+                for payload in (summary_payload, paired_page, unpaired_page)
+            }
+            read_model_status = next(
+                (status for status in ("failed", "refreshing", "stale", "fresh") if status in status_values),
+                "fresh",
+            )
+            return {
+                "month": normalized_scope_key,
+                "scope_key": normalized_scope_key,
+                "summary": dict(summary_payload.get("summary") or {}),
+                "invoice_inventory": dict(summary_payload.get("invoice_inventory") or {}),
+                "paired": paired_page,
+                "unpaired": unpaired_page,
+                "read_model_status": read_model_status,
+                "generated_at": summary_payload.get("generated_at"),
+                "source_versions": dict(summary_payload.get("source_versions") or {}),
+                "active_generation_id": read_model_version,
+                "read_model_version": read_model_version,
+            }
 
     def get_workbench_summary(self, *, scope_key: str) -> dict[str, Any] | None:
         normalized_scope_key = str(scope_key or "").strip() or "all"
@@ -7325,21 +8886,155 @@ class PostgresReadModelRepository:
             },
         }
 
+    def list_workbench_search_rows(self, *, scope_key: str) -> list[dict[str, Any]]:
+        normalized_scope_key = str(scope_key or "").strip()
+        if not MONTH_SCOPE_RE.match(normalized_scope_key):
+            raise ValueError("Workbench search rows require a month scope key YYYY-MM.")
+        rows = self._connection.fetch_all(
+            """
+            with active_generation as (
+                select generation_id, scope_key
+                from read_model.workbench_generations
+                where tenant_id = 'default'
+                  and scope_key = %s
+                  and status = 'active'
+                limit 1
+            ), active_rows as (
+                select rows.*
+                from read_model.workbench_rows rows
+                join active_generation generation
+                  on generation.generation_id = rows.generation_id
+                 and generation.scope_key = rows.scope_key
+            ), ranked_memberships as (
+                select
+                    members.row_id,
+                    members.zone,
+                    members.group_id,
+                    members.row_role,
+                    members.row_index,
+                    groups.updated_at as group_updated_at,
+                    row_number() over (
+                        partition by members.row_id
+                        order by
+                            case when members.zone = 'paired' then 0 else 1 end,
+                            groups.updated_at desc nulls last,
+                            members.group_id,
+                            members.row_role,
+                            members.row_index
+                    ) as membership_rank
+                from read_model.workbench_group_rows members
+                join active_generation generation
+                  on generation.generation_id = members.generation_id
+                 and generation.scope_key = members.scope_key
+                left join read_model.workbench_groups groups
+                  on groups.generation_id = members.generation_id
+                 and groups.scope_key = members.scope_key
+                 and groups.zone = members.zone
+                 and groups.group_id = members.group_id
+            ), group_project_names as (
+                select
+                    members.zone,
+                    members.group_id,
+                    array_agg(
+                        distinct coalesce(
+                            nullif(btrim(oa_rows.project_name), ''),
+                            nullif(btrim(oa_rows.payload->>'project_name'), '')
+                        )
+                    ) filter (
+                        where coalesce(
+                            nullif(btrim(oa_rows.project_name), ''),
+                            nullif(btrim(oa_rows.payload->>'project_name'), '')
+                        ) is not null
+                    ) as project_names
+                from read_model.workbench_group_rows members
+                join active_generation generation
+                  on generation.generation_id = members.generation_id
+                 and generation.scope_key = members.scope_key
+                join active_rows oa_rows
+                  on oa_rows.row_id = members.row_id
+                 and members.pane = 'oa'
+                group by members.zone, members.group_id
+            )
+            select
+                rows.row_id,
+                rows.source_kind,
+                rows.status,
+                rows.payload,
+                rows.raw_payload,
+                membership.zone as group_zone,
+                membership.group_id,
+                membership.group_updated_at,
+                membership.row_role,
+                membership.row_index,
+                projects.project_names
+            from active_rows rows
+            left join ranked_memberships membership
+              on membership.row_id = rows.row_id
+             and membership.membership_rank = 1
+            left join group_project_names projects
+              on projects.zone = membership.zone
+             and projects.group_id = membership.group_id
+            order by
+                case
+                    when rows.status = 'ignored' then 2
+                    when membership.zone = 'paired' then 0
+                    else 1
+                end,
+                membership.group_updated_at desc nulls last,
+                membership.group_id,
+                membership.row_role,
+                membership.row_index,
+                rows.row_id
+            """,
+            (normalized_scope_key,),
+        )
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            payload = _read_model_payload(row)
+            if not isinstance(payload, dict):
+                continue
+            row_type = text(payload.get("type")) or text(row.get("source_kind"))
+            if row_type not in WORKBENCH_PANES:
+                continue
+            payload["id"] = text(payload.get("id")) or text(row.get("row_id")) or ""
+            payload["type"] = row_type
+            status = text(row.get("status"))
+            if status == "ignored" or bool(payload.get("ignored")):
+                zone_hint = "ignored"
+            elif status == "processed_exception" or bool(payload.get("handled_exception")):
+                zone_hint = "processed_exception"
+            else:
+                zone_hint = text(row.get("group_zone")) or status or "unpaired"
+            result.append(
+                {
+                    "row": payload,
+                    "zone_hint": zone_hint,
+                    "group_id": text(row.get("group_id")) or "",
+                    "project_names": sorted(text_list(row.get("project_names"))),
+                }
+            )
+        return result
+
     def list_workbench_ignored_rows(self, *, scope_key: str) -> list[dict[str, Any]]:
         normalized_scope_key = str(scope_key or "").strip() or "all"
         if normalized_scope_key == "all":
-            scope_clause = "scope_key <> 'all'"
+            scope_clause = "rows.scope_key <> 'all'"
             params: list[Any] = []
         else:
-            scope_clause = "scope_key = %s"
+            scope_clause = "rows.scope_key = %s"
             params = [normalized_scope_key]
         rows = self._connection.fetch_all(
             f"""
-            select row_id, payload, raw_payload
-            from read_model.workbench_rows
+            select rows.row_id, rows.payload, rows.raw_payload
+            from read_model.workbench_rows rows
+            join read_model.workbench_generations generation
+              on generation.tenant_id = 'default'
+             and generation.scope_key = rows.scope_key
+             and generation.generation_id = rows.generation_id
+             and generation.status = 'active'
             where {scope_clause}
-              and status = 'ignored'
-            order by generated_at desc, updated_at desc, row_id
+              and rows.status = 'ignored'
+            order by rows.generated_at desc, rows.updated_at desc, rows.row_id
             """,
             tuple(params),
         )
@@ -7368,6 +9063,7 @@ class PostgresReadModelRepository:
         detail_level: str | None = None,
         column_filters: Any = None,
         time_filters: Any = None,
+        expected_read_model_version: str | None = None,
     ) -> dict[str, Any]:
         normalized_scope_key = str(scope_key or "").strip() or "all"
         normalized_zone = str(zone or "").strip()
@@ -7377,7 +9073,6 @@ class PostgresReadModelRepository:
         offset = (normalized_page - 1) * normalized_page_size
         composed_all_scope = normalized_scope_key == "all"
         if composed_all_scope:
-            groups_from_sql = _workbench_active_month_groups_sql()
             scope_params: list[Any] = []
             active_month_version = self._workbench_active_month_generation_version(self._connection)
             active_generation_id = text(active_month_version.get("version"))
@@ -7391,6 +9086,9 @@ class PostgresReadModelRepository:
                 scope_key=normalized_scope_key,
                 generation_id=active_generation_id,
             )
+        expected_version = text(expected_read_model_version)
+        if expected_version and expected_version != active_generation_id:
+            raise WorkbenchReadModelVersionConflictError(expected=expected_version, current=active_generation_id)
         group_scope_clause = "true" if composed_all_scope else f"g.{scope_where}"
         group_row_join_id_sql = "coalesce(g.source_group_id, g.group_id)" if composed_all_scope else "g.group_id"
         group_select_sql = (
@@ -7402,6 +9100,20 @@ class PostgresReadModelRepository:
         normalized_time_filters = _normalize_workbench_time_filters(time_filters)
         normalized_search_by_pane = _normalize_workbench_search_by_pane(search_by_pane)
         normalized_search_mode = _normalize_workbench_search_mode(search_mode)
+        if composed_all_scope:
+            requires_aggregated_metadata = bool(
+                text(sort)
+                or (
+                    text(search)
+                    and normalized_search_mode != "linked_context"
+                    and not normalized_search_by_pane
+                    and not normalized_column_filters
+                    and not normalized_time_filters
+                )
+            )
+            groups_from_sql = _workbench_active_month_groups_sql(
+                include_aggregated_metadata=requires_aggregated_metadata
+            )
         clauses = ["g.zone = %s"] if composed_all_scope else [f"g.{scope_where}", "g.zone = %s"]
         params = [*scope_params, normalized_zone]
         if active_generation_id and not composed_all_scope:
@@ -7626,7 +9338,7 @@ class PostgresReadModelRepository:
             return None
         composed_all_scope = normalized_scope_key == "all"
         if composed_all_scope:
-            groups_from_sql = _workbench_active_month_groups_sql()
+            groups_from_sql = _workbench_active_month_groups_sql(include_aggregated_metadata=False)
             scope_where, scope_params = "true", []
             active_generation_id = text(self._workbench_active_month_generation_version(self._connection).get("version"))
         else:
@@ -7693,11 +9405,27 @@ class PostgresReadModelRepository:
         result["read_model_status"] = self._workbench_read_model_status_for_groups_page(scope_key=result["scope_key"])
         return result
 
-    def get_workbench_row_detail(self, *, scope_key: str, row_id: str) -> dict[str, Any] | None:
+    def get_workbench_row_detail(
+        self,
+        *,
+        scope_key: str,
+        row_id: str,
+        expected_read_model_version: str | None = None,
+    ) -> dict[str, Any] | None:
         normalized_scope_key = str(scope_key or "").strip() or "all"
         normalized_row_id = text(row_id)
         if not normalized_row_id:
             return None
+        if normalized_scope_key == "all":
+            active_generation_id = text(self._workbench_active_month_generation_version(self._connection).get("version"))
+        else:
+            active_generation_id = self._active_workbench_generation_id(
+                self._connection,
+                scope_key=normalized_scope_key,
+            )
+        expected_version = text(expected_read_model_version)
+        if expected_version and expected_version != active_generation_id:
+            raise WorkbenchReadModelVersionConflictError(expected=expected_version, current=active_generation_id)
         if normalized_scope_key == "all":
             row_scope_clause = "true"
             group_row_scope_clause = "true"
@@ -7785,8 +9513,8 @@ class PostgresReadModelRepository:
                     "row": payload,
                     "scope_key": resolved_scope_key,
                     "source_versions": row.get("source_versions"),
-                    "active_generation_id": row.get("generation_id"),
-                    "read_model_version": row.get("generation_id"),
+                    "active_generation_id": active_generation_id,
+                    "read_model_version": active_generation_id,
                     "read_model_status": self._workbench_read_model_status_for_groups_page(scope_key=resolved_scope_key),
                 }
         if not isinstance(row, dict):
@@ -7799,8 +9527,8 @@ class PostgresReadModelRepository:
             "row": payload,
             "scope_key": resolved_scope_key,
             "source_versions": row.get("source_versions"),
-            "active_generation_id": row.get("generation_id"),
-            "read_model_version": row.get("generation_id"),
+            "active_generation_id": active_generation_id,
+            "read_model_version": active_generation_id,
             "read_model_status": self._workbench_read_model_status_for_groups_page(scope_key=resolved_scope_key),
         }
 
@@ -7854,7 +9582,111 @@ class PostgresReadModelRepository:
         return "fresh"
 
     def get_workbench_groups_freshness_status(self, *, scope_key: str | None = None) -> dict[str, Any]:
-        return self._get_workbench_refresh_status(scope_key=scope_key, include_consistency=False)
+        normalized_scope_key = str(scope_key or "all").strip() or "all"
+        scope_clause = "" if normalized_scope_key == "all" else "and scope_key = %s"
+        params = () if normalized_scope_key == "all" else (normalized_scope_key,)
+        dirty_rows = self._connection.fetch_all(
+            f"""
+            select scope_key, status, updated_at::text as updated_at, last_error, source_version
+            from job.read_model_dirty_scopes
+            where tenant_id = 'default'
+              and scope_type = 'workbench'
+              and status in ('pending', 'processing', 'failed')
+              {scope_clause}
+            order by updated_at desc
+            limit 50
+            """,
+            params,
+        )
+        if normalized_scope_key == "all":
+            active_version = self._workbench_active_month_generation_version(self._connection)
+            generation_set = [
+                item
+                for item in list(active_version.get("generation_set") or [])
+                if isinstance(item, dict)
+            ]
+            active_generation_id = text(active_version.get("version"))
+            generated_at = text(active_version.get("generated_at"))
+            active_source_versions = _workbench_composed_all_source_versions(
+                [{"source_versions": item.get("source_versions")} for item in generation_set]
+            )
+            source_version_by_scope = {
+                text(item.get("scope_key")): _source_version_value(item.get("source_versions")) or 0
+                for item in generation_set
+                if text(item.get("scope_key"))
+            }
+        else:
+            active_row = self._connection.fetch_one(
+                """
+                select
+                    generation_id,
+                    source_versions,
+                    coalesce(activated_at, completed_at, updated_at)::text as generated_at
+                from read_model.workbench_generations
+                where tenant_id = 'default'
+                  and scope_key = %s
+                  and status = 'active'
+                order by activated_at desc nulls last, completed_at desc nulls last, updated_at desc
+                limit 1
+                """,
+                (normalized_scope_key,),
+            )
+            active_generation_id = text((active_row or {}).get("generation_id"))
+            generated_at = text((active_row or {}).get("generated_at"))
+            raw_source_versions = (active_row or {}).get("source_versions")
+            active_source_versions = dict(raw_source_versions) if isinstance(raw_source_versions, dict) else {}
+            source_version_by_scope = {
+                normalized_scope_key: _source_version_value(active_source_versions) or 0,
+            }
+
+        dirty_scopes = [
+            {
+                "scope_key": text(row.get("scope_key")),
+                "status": text(row.get("status")),
+                "updated_at": text(row.get("updated_at")),
+                "last_error": text(row.get("last_error")),
+                "source_version": int_value(row.get("source_version"), 0),
+            }
+            for row in dirty_rows
+            if isinstance(row, dict)
+        ]
+        active_source_version = max(source_version_by_scope.values(), default=0)
+        pending_scopes = [
+            scope
+            for scope in dirty_scopes
+            if scope.get("status") in {"pending", "processing"}
+            and (
+                int_value(scope.get("source_version"), 0) <= 0
+                or int_value(scope.get("source_version"), 0)
+                > source_version_by_scope.get(text(scope.get("scope_key")), active_source_version)
+            )
+        ]
+        failed_scopes = [scope for scope in dirty_scopes if scope.get("status") == "failed"]
+        schema_status = self._workbench_groups_schema_status(scope_key=normalized_scope_key)
+        read_model_status = "fresh"
+        stale_reasons: list[str] = []
+        if not active_generation_id:
+            read_model_status = "unavailable"
+            stale_reasons.append("active_generation_missing")
+        elif pending_scopes:
+            read_model_status = "refreshing"
+        elif failed_scopes:
+            read_model_status = "stale"
+            stale_reasons.append("refresh_failed")
+        elif schema_status != "fresh":
+            read_model_status = "stale"
+            stale_reasons.append("builder_schema_mismatch")
+        return {
+            "scope_key": normalized_scope_key,
+            "read_model_status": read_model_status,
+            "active_generation_id": active_generation_id,
+            "read_model_version": active_generation_id,
+            "generated_at": generated_at,
+            "source_versions": active_source_versions,
+            "dirty_scopes": dirty_scopes,
+            "read_model_stale_reasons": stale_reasons,
+            "last_error": next((scope.get("last_error") for scope in failed_scopes if scope.get("last_error")), None),
+        }
 
     def get_workbench_refresh_status(self, *, scope_key: str | None = None) -> dict[str, Any]:
         return self._get_workbench_refresh_status(scope_key=scope_key, include_consistency=True)
@@ -8224,123 +10056,6 @@ class PostgresReadModelRepository:
     def _workbench_scope_filter(scope_key: str) -> tuple[str, list[Any]]:
         normalized_scope_key = str(scope_key or "").strip() or "all"
         return "scope_key = %s", [normalized_scope_key]
-
-    def _load_active_workbench_snapshot_view(self, *, scope_key: str) -> dict[str, Any] | None:
-        normalized_scope_key = str(scope_key or "").strip() or "all"
-        active_generation_id = self._active_workbench_generation_id(self._connection, scope_key=normalized_scope_key)
-        if not active_generation_id:
-            return None
-        row = self._connection.fetch_one(
-            """
-            select scope_key, generation_id, payload, raw_payload, cache_status, generated_at, source_versions, row_count
-            from read_model.workbench_snapshots
-            where scope_key = %s
-              and generation_id = %s
-            order by generated_at desc
-            limit 1
-            """,
-            (normalized_scope_key, active_generation_id),
-        )
-        if row is None:
-            return None
-        payload = _read_model_payload(row)
-        if not isinstance(payload, dict):
-            payload = {}
-        dirty_row = self._connection.fetch_one(
-            """
-            select status, updated_at, last_error
-            from job.read_model_dirty_scopes
-            where tenant_id = 'default'
-              and scope_type = 'workbench'
-              and scope_key = %s
-              and status in ('pending', 'processing', 'failed')
-            order by updated_at desc
-            limit 1
-            """,
-            (normalized_scope_key,),
-        )
-        refresh_status = "fresh"
-        if dirty_row is not None:
-            refresh_status = "refreshing" if text(dirty_row.get("status")) in {"pending", "processing"} else "stale"
-        payload_source_versions = payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}
-        row_source_versions = row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}
-        return {
-            "scope_key": normalized_scope_key,
-            "payload": payload.get("payload") if isinstance(payload.get("payload"), dict) else payload,
-            "cache_status": text(row.get("cache_status") or payload.get("cache_status")) or "fresh",
-            "generated_at": text(row.get("generated_at") or payload.get("generated_at")),
-            "source_versions": payload_source_versions or row_source_versions,
-            "row_count": int_value(row.get("row_count"), 0),
-            "refresh_status": refresh_status,
-            "dirty_scope": dict(dirty_row) if isinstance(dirty_row, dict) else None,
-            "active_generation_id": active_generation_id,
-            "read_model_version": active_generation_id,
-        }
-
-    def _load_all_workbench_view(
-        self,
-        *,
-        page: int | str | None,
-        page_size: int | str | None,
-        status: str | None,
-        source_kind: str | None,
-        search: str | None,
-    ) -> dict[str, Any] | None:
-        if page is not None or page_size is not None or status or source_kind or search:
-            return self._load_all_workbench_rows_page_view(
-                page=page,
-                page_size=page_size,
-                status=status,
-                source_kind=source_kind,
-                search=search,
-            )
-        return self._load_active_workbench_snapshot_view(scope_key="all")
-
-    def _load_all_workbench_rows_page_view(
-        self,
-        *,
-        page: int | str | None,
-        page_size: int | str | None,
-        status: str | None,
-        source_kind: str | None,
-        search: str | None,
-    ) -> dict[str, Any] | None:
-        summary_payload = self.get_workbench_summary(scope_key="all")
-        if isinstance(summary_payload, dict) and text(summary_payload.get("active_generation_id")):
-            summary = summary_payload.get("summary") if isinstance(summary_payload.get("summary"), dict) else {}
-            rows_page = self._load_workbench_rows_page(
-                scope_key="all",
-                page=page,
-                page_size=page_size,
-                status=status,
-                source_kind=source_kind,
-                search=search,
-            )
-            source_versions = (
-                summary_payload.get("source_versions") if isinstance(summary_payload.get("source_versions"), dict) else {}
-            )
-            combined = {
-                "month": "all",
-                "summary": _normalize_workbench_summary_counts(summary),
-                "paired": {"groups": []},
-                "unpaired": {"groups": []},
-                "read_model_scope_key": "all",
-                "page_mode": "sql_rows",
-            }
-            return {
-                "scope_key": "all",
-                "payload": combined,
-                "cache_status": "fresh",
-                "generated_at": text(summary_payload.get("generated_at")),
-                "source_versions": source_versions,
-                "row_count": int_value(rows_page.get("total") if isinstance(rows_page, dict) else None, 0),
-                "refresh_status": text(summary_payload.get("read_model_status")) or "fresh",
-                "dirty_scope": None,
-                "active_generation_id": text(summary_payload.get("active_generation_id")),
-                "read_model_version": text(summary_payload.get("read_model_version")),
-                "rows_page": rows_page,
-            }
-        return None
 
     def load_workbench_read_models(self) -> dict[str, Any]:
         rows = self._connection.fetch_all("select scope_key as key, payload, raw_payload from read_model.workbench_snapshots order by scope_key")
@@ -8719,90 +10434,6 @@ class PostgresReadModelRepository:
                 deleted_count,
                 ",".join(normalized_scope_keys),
             )
-
-    def _load_workbench_rows_page(
-        self,
-        *,
-        scope_key: str,
-        page: int | str | None,
-        page_size: int | str | None,
-        status: str | None,
-        source_kind: str | None,
-        search: str | None,
-    ) -> dict[str, Any]:
-        normalized_page = max(1, int_value(page, 1))
-        normalized_page_size = min(200, max(1, int_value(page_size, 100)))
-        offset = (normalized_page - 1) * normalized_page_size
-        if scope_key == "all":
-            row_source_sql = """
-                (
-                    select distinct on (r.row_id)
-                        r.row_id, r.source_kind, r.status, r.payload, r.raw_payload,
-                        r.project_name, r.counterparty_name, r.updated_at
-                    from read_model.workbench_rows r
-                    join read_model.workbench_generations gen
-                      on gen.tenant_id = 'default'
-                     and gen.scope_key = r.scope_key
-                     and gen.generation_id = r.generation_id
-                     and gen.status = 'active'
-                    where r.scope_key <> 'all'
-                    order by r.row_id, r.updated_at desc nulls last
-                ) r
-            """
-            clauses: list[str] = []
-            params: list[Any] = []
-        else:
-            row_source_sql = "read_model.workbench_rows r"
-            active_generation_id = self._active_workbench_generation_id(self._connection, scope_key=scope_key)
-            clauses = ["r.scope_key = %s"]
-            params = [scope_key]
-            if active_generation_id:
-                clauses.append("r.generation_id = %s")
-                params.append(active_generation_id)
-        if not clauses:
-            clauses.append("true")
-        if normalized := text(status):
-            clauses.append("r.status = %s")
-            params.append(normalized)
-        if normalized := text(source_kind):
-            clauses.append("r.source_kind = %s")
-            params.append(normalized)
-        if normalized := text(search):
-            clauses.append("(r.project_name ilike %s or r.counterparty_name ilike %s or r.row_id ilike %s)")
-            pattern = f"%{normalized}%"
-            params.extend([pattern, pattern, pattern])
-        where_sql = " and ".join(clauses)
-        count_row = self._connection.fetch_one(
-            f"""
-            select count(*) as total_count
-            from {row_source_sql}
-            where {where_sql}
-            """,
-            tuple(params),
-        )
-        params.extend([normalized_page_size + 1, offset])
-        rows = self._connection.fetch_all(
-            f"""
-            select row_id, source_kind, status, payload, raw_payload
-            from {row_source_sql}
-            where {where_sql}
-            order by r.updated_at desc, r.row_id
-            limit %s offset %s
-            """,
-            tuple(params),
-        )
-        visible_rows = rows[:normalized_page_size]
-        payload_rows = [
-            _read_model_payload(row) if isinstance(_read_model_payload(row), dict) else {"id": text(row.get("row_id"))}
-            for row in visible_rows
-        ]
-        return {
-            "page": normalized_page,
-            "page_size": normalized_page_size,
-            "total": int_value((count_row or {}).get("total_count"), 0),
-            "has_more": len(rows) > normalized_page_size,
-            "rows": payload_rows,
-        }
 
     def load_batch_accounting_workbench_payload(self, *, bank_year: str) -> dict[str, Any] | None:
         return self._load_batch_accounting_workbench_payload(
@@ -9858,6 +11489,14 @@ def _output_invoice_collection_read_model_record(row: dict[str, Any], scope_key:
 def _oa_pending_payment_read_model_record(row: dict[str, Any], scope_key: str) -> dict[str, Any]:
     payload = serialize_value(row.get("payload") if isinstance(row.get("payload"), dict) else row)
     oa = payload.get("oa") if isinstance(payload.get("oa"), dict) else {}
+    oa_ids = _dedupe_preserve_order(
+        [
+            text(summary.get("oaId") or summary.get("id"))
+            for summary in list(oa.get("summaries") or [])
+            if isinstance(summary, dict)
+        ]
+        + [text(oa.get("id"))]
+    )
     payment = payload.get("paymentStatus") if isinstance(payload.get("paymentStatus"), dict) else {}
     bank = payload.get("bankTransaction") if isinstance(payload.get("bankTransaction"), dict) else {}
     invoice = payload.get("invoice") if isinstance(payload.get("invoice"), dict) else {}
@@ -9869,6 +11508,7 @@ def _oa_pending_payment_read_model_record(row: dict[str, Any], scope_key: str) -
         "scope_key": scope_key,
         "scope_month": scope_month,
         "oa_id": text(oa.get("id")),
+        "oa_ids": oa_ids,
         "oa_applicant": text(oa.get("applicantName")),
         "oa_application_type": text(oa.get("applicationType")),
         "oa_workflow_status": text(oa.get("workflowStatus")),
@@ -10145,6 +11785,157 @@ def _pending_invoice_order_sql(*, sort_field: str | None, sort_direction: str | 
     return f"{expression} {direction} nulls last, row_id"
 
 
+def _cost_statistics_percentage_sql() -> str:
+    return """
+        case
+            when coalesce(sum(sum(amount)) over (), 0) = 0 then '0.0%'
+            else round(sum(amount) * 100 / sum(sum(amount)) over (), 1)::text || '%'
+        end
+    """
+
+
+def _cost_statistics_project_facets_sql(where_sql: str = "true") -> str:
+    return f"""(
+        select coalesce(
+            jsonb_agg(
+                jsonb_build_object(
+                    'project_name', facet.project_name,
+                    'total_amount', facet.total_amount::text,
+                    'transaction_count', facet.transaction_count,
+                    'expense_type_count', facet.expense_type_count,
+                    'percentage_label', facet.percentage_label
+                ) order by facet.total_amount desc, facet.project_name
+            ),
+            '[]'::jsonb
+        )
+        from (
+            select
+                project_name,
+                sum(amount) as total_amount,
+                count(*) as transaction_count,
+                count(distinct expense_type) as expense_type_count,
+                {_cost_statistics_percentage_sql()} as percentage_label
+            from base
+            where {where_sql}
+            group by project_name
+        ) facet
+    )"""
+
+
+def _cost_statistics_expense_facets_sql(where_sql: str = "true") -> str:
+    return f"""(
+        select coalesce(
+            jsonb_agg(
+                jsonb_build_object(
+                    'expense_type', facet.expense_type,
+                    'total_amount', facet.total_amount::text,
+                    'transaction_count', facet.transaction_count,
+                    'project_count', facet.project_count,
+                    'percentage_label', facet.percentage_label
+                ) order by facet.total_amount desc, facet.expense_type
+            ),
+            '[]'::jsonb
+        )
+        from (
+            select
+                expense_type,
+                sum(amount) as total_amount,
+                count(*) as transaction_count,
+                count(distinct project_name) as project_count,
+                {_cost_statistics_percentage_sql()} as percentage_label
+            from base
+            where {where_sql}
+            group by expense_type
+        ) facet
+    )"""
+
+
+def _cost_statistics_bank_facets_sql() -> str:
+    return f"""(
+        select coalesce(
+            jsonb_agg(
+                jsonb_build_object(
+                    'payment_account_label', facet.payment_account_label,
+                    'total_amount', facet.total_amount::text,
+                    'transaction_count', facet.transaction_count,
+                    'project_count', facet.project_count,
+                    'percentage_label', facet.percentage_label
+                ) order by facet.total_amount desc, facet.payment_account_label
+            ),
+            '[]'::jsonb
+        )
+        from (
+            select
+                coalesce(nullif(payment_account_label, ''), '未识别账户') as payment_account_label,
+                sum(amount) as total_amount,
+                count(*) as transaction_count,
+                count(distinct project_name) as project_count,
+                {_cost_statistics_percentage_sql()} as percentage_label
+            from base
+            group by coalesce(nullif(payment_account_label, ''), '未识别账户')
+        ) facet
+    )"""
+
+
+def _cost_statistics_bank_tag_primary_facets_sql() -> str:
+    return """(
+        select coalesce(
+            jsonb_agg(
+                jsonb_build_object(
+                    'primary_label', facet.primary_label,
+                    'expense_amount', facet.expense_amount::text,
+                    'income_amount', facet.income_amount::text,
+                    'expense_transaction_count', facet.expense_transaction_count,
+                    'income_transaction_count', facet.income_transaction_count,
+                    'sub_tag_count', facet.sub_tag_count
+                ) order by (facet.expense_amount + facet.income_amount) desc, facet.primary_label
+            ),
+            '[]'::jsonb
+        )
+        from (
+            select
+                tag_primary_label as primary_label,
+                coalesce(sum(amount) filter (where direction = '支出'), 0) as expense_amount,
+                coalesce(sum(amount) filter (where direction = '收入'), 0) as income_amount,
+                count(*) filter (where direction = '支出') as expense_transaction_count,
+                count(*) filter (where direction = '收入') as income_transaction_count,
+                count(distinct tag_sub_label) as sub_tag_count
+            from base
+            group by tag_primary_label
+        ) facet
+    )"""
+
+
+def _cost_statistics_bank_tag_sub_facets_sql() -> str:
+    return """(
+        select coalesce(
+            jsonb_agg(
+                jsonb_build_object(
+                    'primary_label', facet.primary_label,
+                    'sub_label', facet.sub_label,
+                    'expense_amount', facet.expense_amount::text,
+                    'income_amount', facet.income_amount::text,
+                    'expense_transaction_count', facet.expense_transaction_count,
+                    'income_transaction_count', facet.income_transaction_count
+                ) order by (facet.expense_amount + facet.income_amount) desc, facet.sub_label
+            ),
+            '[]'::jsonb
+        )
+        from (
+            select
+                tag_primary_label as primary_label,
+                tag_sub_label as sub_label,
+                coalesce(sum(amount) filter (where direction = '支出'), 0) as expense_amount,
+                coalesce(sum(amount) filter (where direction = '收入'), 0) as income_amount,
+                count(*) filter (where direction = '支出') as expense_transaction_count,
+                count(*) filter (where direction = '收入') as income_transaction_count
+            from base
+            where tag_primary_label = %s
+            group by tag_primary_label, tag_sub_label
+        ) facet
+    )"""
+
+
 def _parse_cost_statistics_scope_parts(scope_key: str, *, payload: dict[str, Any]) -> tuple[str, str]:
     raw = str(scope_key or "").strip()
     if ":" in raw:
@@ -10164,49 +11955,90 @@ def _is_cost_statistics_parent_scope(scope_key: str, *, payload: dict[str, Any])
     return month == "all"
 
 
+def _cost_statistics_metadata_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+    storage_snapshot = deepcopy(snapshot if isinstance(snapshot, dict) else {})
+    read_models = storage_snapshot.get("read_models")
+    if not isinstance(read_models, dict):
+        return storage_snapshot
+    for read_model in read_models.values():
+        if not isinstance(read_model, dict):
+            continue
+        model_payload = read_model.get("payload")
+        if isinstance(model_payload, dict):
+            model_payload.pop("time_rows", None)
+            model_payload.pop("bank_flow_time_rows", None)
+    return storage_snapshot
+
+
+def _cost_statistics_row_payload(db_row: dict[str, Any], *, fallback_index: int) -> dict[str, Any]:
+    payload = _read_model_payload(db_row)
+    row_payload_value = deepcopy(payload) if isinstance(payload, dict) else {}
+    transaction_id = text(db_row.get("transaction_id") or row_payload_value.get("transaction_id")) or f"row-{fallback_index}"
+    amount = _decimal_or_zero(db_row.get("amount") or row_payload_value.get("amount"))
+    label_path = db_row.get("bank_tag_label_path")
+    if not isinstance(label_path, list):
+        label_path = row_payload_value.get("bank_tag_label_path")
+    return {
+        **row_payload_value,
+        "transaction_id": transaction_id,
+        "group_id": text(db_row.get("group_id") or row_payload_value.get("group_id")),
+        "month": text(db_row.get("scope_month") or row_payload_value.get("month")),
+        "trade_time": text(
+            db_row.get("trade_time_text")
+            or row_payload_value.get("trade_time")
+            or db_row.get("trade_date")
+        ),
+        "direction": text(db_row.get("direction") or row_payload_value.get("direction")),
+        "project_name": text(db_row.get("project_name") or row_payload_value.get("project_name")) or "未归集项目",
+        "project_id": text(db_row.get("project_id") or row_payload_value.get("project_id")),
+        "expense_type": text(db_row.get("expense_type") or row_payload_value.get("expense_type")) or "未分类",
+        "expense_content": text(db_row.get("expense_content") or row_payload_value.get("expense_content")),
+        "amount": _format_decimal(amount),
+        "counterparty_name": text(db_row.get("counterparty_name") or row_payload_value.get("counterparty_name")),
+        "payment_account_label": text(
+            db_row.get("payment_account_label") or row_payload_value.get("payment_account_label")
+        ),
+        "remark": text(db_row.get("remark") or row_payload_value.get("remark")),
+        "oa_applicant": text(db_row.get("oa_applicant") or row_payload_value.get("oa_applicant")),
+        "bank_tag_code": text(db_row.get("bank_tag_code") or row_payload_value.get("bank_tag_code")),
+        "bank_tag_label": text(db_row.get("bank_tag_label") or row_payload_value.get("bank_tag_label")),
+        "bank_tag_primary_label": text(
+            db_row.get("bank_tag_primary_label") or row_payload_value.get("bank_tag_primary_label")
+        ),
+        "bank_tag_sub_label": text(
+            db_row.get("bank_tag_sub_label") or row_payload_value.get("bank_tag_sub_label")
+        ),
+        "bank_tag_label_path": deepcopy(label_path) if isinstance(label_path, list) else [],
+    }
+
+
 def _cost_statistics_payload_from_rows(
     *,
     scope_key: str,
     parent_payload: dict[str, Any],
     parent_row: dict[str, Any],
     rows: list[dict[str, Any]],
+    bank_flow_rows: list[dict[str, Any]],
 ) -> dict[str, Any]:
     parent_model_payload = parent_payload.get("payload") if isinstance(parent_payload.get("payload"), dict) else parent_payload
     bank_accounts = parent_model_payload.get("bank_accounts")
-    bank_flow_time_rows = parent_model_payload.get("bank_flow_time_rows")
-    bank_flow_summary = parent_model_payload.get("bank_flow_summary")
     project_scope, scope_month_text = _parse_cost_statistics_scope_parts(scope_key, payload=parent_model_payload)
-    if rows:
-        scope_month_text = text(rows[0].get("scope_month")) or scope_month_text
+    if scope_month_text != "all":
+        if rows:
+            scope_month_text = text(rows[0].get("scope_month")) or scope_month_text
+        elif bank_flow_rows:
+            scope_month_text = text(bank_flow_rows[0].get("scope_month")) or scope_month_text
     month = scope_month_text[:7] if scope_month_text and scope_month_text != "all" else text(parent_model_payload.get("month")) or scope_month_text
     time_rows: list[dict[str, Any]] = []
     project_groups: dict[str, dict[str, Any]] = {}
     expense_groups: dict[str, dict[str, Any]] = {}
     total_amount = Decimal("0")
     for index, db_row in enumerate(rows):
-        payload = _read_model_payload(db_row)
-        row_payload_value = deepcopy(payload) if isinstance(payload, dict) else {}
-        amount = _decimal_or_zero(db_row.get("amount") or row_payload_value.get("amount"))
+        normalized_row = _cost_statistics_row_payload(db_row, fallback_index=index)
+        amount = _decimal_or_zero(normalized_row.get("amount"))
         total_amount += amount
-        project_name = text(db_row.get("project_name") or row_payload_value.get("project_name")) or "未归集项目"
-        expense_type = text(db_row.get("expense_type") or row_payload_value.get("expense_type")) or "未分类"
-        transaction_id = text(db_row.get("transaction_id") or row_payload_value.get("transaction_id")) or f"row-{index}"
-        normalized_row = {
-            **row_payload_value,
-            "transaction_id": transaction_id,
-            "group_id": text(db_row.get("group_id") or row_payload_value.get("group_id")),
-            "trade_time": text(db_row.get("trade_time_text") or row_payload_value.get("trade_time") or db_row.get("trade_date")),
-            "direction": text(db_row.get("direction") or row_payload_value.get("direction")),
-            "project_name": project_name,
-            "project_id": text(db_row.get("project_id") or row_payload_value.get("project_id")),
-            "expense_type": expense_type,
-            "expense_content": text(db_row.get("expense_content") or row_payload_value.get("expense_content")),
-            "amount": _format_decimal(amount),
-            "counterparty_name": text(db_row.get("counterparty_name") or row_payload_value.get("counterparty_name")),
-            "payment_account_label": text(db_row.get("payment_account_label") or row_payload_value.get("payment_account_label")),
-            "remark": text(db_row.get("remark") or row_payload_value.get("remark")),
-            "oa_applicant": text(db_row.get("oa_applicant") or row_payload_value.get("oa_applicant")),
-        }
+        project_name = text(normalized_row.get("project_name")) or "未归集项目"
+        expense_type = text(normalized_row.get("expense_type")) or "未分类"
         time_rows.append(normalized_row)
         project_bucket = project_groups.setdefault(
             project_name,
@@ -10222,6 +12054,26 @@ def _cost_statistics_payload_from_rows(
         expense_bucket["total_amount"] += amount
         expense_bucket["transaction_count"] += 1
         expense_bucket["projects"].add(project_name)
+    bank_flow_time_rows = [
+        _cost_statistics_row_payload(db_row, fallback_index=index)
+        for index, db_row in enumerate(bank_flow_rows)
+    ]
+    expense_bank_flow_rows = [row for row in bank_flow_time_rows if text(row.get("direction")) == "支出"]
+    income_bank_flow_rows = [row for row in bank_flow_time_rows if text(row.get("direction")) == "收入"]
+    bank_flow_total = sum((_decimal_or_zero(row.get("amount")) for row in bank_flow_time_rows), start=Decimal("0"))
+    bank_flow_summary = {
+        "row_count": len(bank_flow_time_rows),
+        "transaction_count": len(bank_flow_time_rows),
+        "total_amount": _format_decimal(bank_flow_total),
+        "expense_amount": _format_decimal(
+            sum((_decimal_or_zero(row.get("amount")) for row in expense_bank_flow_rows), start=Decimal("0"))
+        ),
+        "income_amount": _format_decimal(
+            sum((_decimal_or_zero(row.get("amount")) for row in income_bank_flow_rows), start=Decimal("0"))
+        ),
+        "expense_transaction_count": len(expense_bank_flow_rows),
+        "income_transaction_count": len(income_bank_flow_rows),
+    }
     return {
         "month": month,
         "project_scope": project_scope,
@@ -10231,16 +12083,8 @@ def _cost_statistics_payload_from_rows(
             "total_amount": _format_decimal(total_amount),
         },
         "time_rows": time_rows,
-        "bank_flow_summary": deepcopy(bank_flow_summary) if isinstance(bank_flow_summary, dict) else {
-            "row_count": 0,
-            "transaction_count": 0,
-            "total_amount": "0.00",
-            "expense_amount": "0.00",
-            "income_amount": "0.00",
-            "expense_transaction_count": 0,
-            "income_transaction_count": 0,
-        },
-        "bank_flow_time_rows": deepcopy(bank_flow_time_rows) if isinstance(bank_flow_time_rows, list) else [],
+        "bank_flow_summary": bank_flow_summary,
+        "bank_flow_time_rows": bank_flow_time_rows,
         "bank_accounts": deepcopy(bank_accounts) if isinstance(bank_accounts, list) else [],
         "project_rows": [
             {
@@ -11602,10 +13446,6 @@ def _workbench_snapshot_payload_for_write(
         "payload": payload,
         "source_versions": serialize_value(source_versions),
     }
-
-
-def _workbench_snapshot_payload_requires_group_materialization(payload: dict[str, Any]) -> bool:
-    return payload.get("workbench_groups_materialized") is True
 
 
 def _iter_typed_group_rows_with_metadata(group: dict[str, Any]) -> list[tuple[str, str, int, dict[str, Any]]]:

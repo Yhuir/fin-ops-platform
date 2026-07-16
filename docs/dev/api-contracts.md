@@ -33,15 +33,19 @@
 
 `GET /api/cost-statistics/explorer`
 
-- `time_rows` 是 OA 配对支出事实集，供项目、银行和 OA 费用类型视图使用。
-- `bank_flow_time_rows` 是全银行收入与支出事实集，每行必须输出规范化 `direction=收入|支出` 和 `bank_tag_*` 字段，供按时间、按标签视图使用。
-- `bank_flow_summary` 保留兼容字段 `total_amount`，但页面不得将其显示为总金额；正式方向合同是 `expense_amount`、`income_amount`、`expense_transaction_count`、`income_transaction_count`。
+- 页面合同必须携带 `scope=YYYY-MM|year:YYYY|all`、`view=time|project|bank|expense_type|bank_tag` 和 `project_scope=active|all`；`page_size` 默认 50、最大 100，`cursor` 是绑定当前 query 与已发布 read-model version 的 opaque token。
+- 响应只返回当前 scope/view 的 `summary`、`available_years`、必要的 bounded `facets`、当前层级 `rows`、`row_count`、`next_cursor` 与 freshness metadata。不得恢复完整 `time_rows` / `bank_flow_time_rows` explorer DTO，也不得在缺少 `view` 时回退旧 shape。
+- `time|bank_tag` 的 summary/rows 使用全银行收入与支出口径；`project|bank|expense_type` 使用 OA 配对支出口径。summary/facets 由完整筛选集合在 SQL 中计算，cursor 只分页 rows，页面不得用当前页重算总额、笔数、百分比或完整 facets。
+- 每次请求先过 PostgreSQL durable freshness gate；non-fresh 返回 `202` 和空 rows/facets，不能读取旧 Redis/rows。fresh 响应使用 `ETag`、`Cache-Control: private, no-cache`、`Vary: Authorization, Cookie`；条件命中可返回 `304` 且跳过 page SQL。
+- `year:YYYY` 复用 `project_scope:all` parent gate 后过滤结构化月份 rows，不新增 year read-model scope。稳定排序为交易日期/时间降序，再按 transaction/row identity；read-model version 变化后旧 cursor 必须拒绝。
 
 `GET /api/cost-statistics/export-preview` 与 `GET /api/cost-statistics/export`
 
 - `view=time` 和 `view=bank_tag` 均导出全银行收入与支出；`bank_tag` 工作表包含主标签、子标签、资金方向和金额。
 - preview 的 `summary` 返回分方向金额和笔数。`view=project|expense_type|transaction` 继续使用 OA 配对支出口径。
 - read model 非 fresh 时返回 `409 cost_statistics_read_model_not_fresh`，route 不回退 live scan。
+- preview 的业务 shape 不变，但服务端只读取完整筛选 summary 与最多 8 行；download 在 20,000 行门槛通过后按最多 1,000 行批次生成 write-only XLSX，不读取完整 explorer payload。
+- download 绑定初始 fresh gate 的 schema、业务 source versions 与 published source version；生成期间任一证明变化时丢弃文件并返回同一 non-fresh 409，不能返回混合版本 workbook。
 
 `GET|PUT /api/cost-statistics/tag-rules`
 
@@ -87,26 +91,22 @@
 
 `read_model_status` 的优先级按后端聚合：`unavailable > schema_mismatch > missing > failed > stale > refreshing > fresh`。接口仍返回当前可用 payload；前端需要展示刷新/陈旧状态并避免在非 fresh 时把缺失关系误解释成真实未提交。
 
-列表读取 relation distribution 必须通过现有 `workbench_relation` read facade freshness 边界请求 fresh payload；`missing`/`stale` scope 由 facade/gateway 负责 normalize、validate、dedupe 和入队，GET 不同步 rebuild，也不直接写 durable queue。`unsubmitted` bucket 只能把批量账务银行候选和日常报销 OA 候选作为 relation lookup 输入，`summary.submitted_count` 通过年份级 count I/O 读取；不能为未提交首屏扫描 12 个月 submitted relation 明细。`submitted` bucket 仍可读取完整 submitted relation DTO，因为页面需要渲染已提交关系详情。
+列表读取 relation distribution 必须通过现有 `workbench_relation` read facade freshness 边界请求 fresh payload；`missing`/`stale` scope 由 facade/gateway 负责 normalize、validate、dedupe 和入队，GET 不同步 rebuild，也不直接写 durable queue。`unsubmitted` bucket 只从专属年份 SQL loader 取得批量账务银行候选和日常报销 OA 候选，再将候选 row ids 用作 relation lookup；`summary.submitted_count` 通过年份级 count I/O 读取。`submitted` bucket 的银行上下文只读专属年份 SQL loader，关系详情读取年份级 submitted relation DTO。任一专属 loader 缺失或返回无效 payload 时返回 `503 batch_accounting_workbench_read_model_unavailable`，不得跨用其它 loader、返回假空数据或回退 Workbench full-page builder。
 
 `POST /api/batch-accounting/submit`
 
 `POST /api/batch-accounting/{relation_id}/withdraw`
 
-写操作在业务校验和持久化前必须按本次操作 row ids 再次校验 `workbench_relation` read model fresh，避免页面加载后到点击提交/撤回之间发生 stale/missing race；不得因为整页普通 relation distribution 追赶中而阻断无关 rows 的提交。非 fresh 时返回 `400`：
+写操作在业务校验和持久化前通过 `bank_row_id + oa_row_ids` 专属 SQL loader 取得本次 row context，并由 canonical `WorkbenchRelationCommandService` 按本次 row ids 校验 active relation/version/idempotency/owner 状态；不得因为整页普通 relation distribution 追赶中而阻断无关 rows 的提交。专属 loader 不可用时返回 503；canonical version conflict 返回 409。
 
 ```json
 {
-  "error": "batch_accounting_read_model_not_fresh",
-  "message": "关联台关系读模型 stale，请刷新后再处理。",
-  "read_model_status": "stale",
-  "read_model_stale_reasons": ["dirty_scope:2026-01"],
-  "read_model_scope_keys": ["2026-01"],
-  "refresh_enqueued": true
+  "error": "batch_accounting_workbench_read_model_unavailable",
+  "message": "批量账务关联台读模型不可用，请稍后重试。"
 }
 ```
 
-前端必须优先展示 `message`，并附带 `read_model_stale_reasons` 与 `read_model_scope_keys`；不能只靠按钮禁用作为唯一保护。
+前端必须优先展示 `message`，不能把 503 显示成普通空态或继续提交；GET 成功但 relation distribution non-fresh 时，仍按响应中的 `read_model_stale_reasons` 与 `read_model_scope_keys` 展示读侧诊断。
 
 ## 待找发票规则 API
 
@@ -768,6 +768,14 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 
 工作台 DTO 必须保留稳定的分页、summary、group、relation、exception、read model status 和 source version 字段。新增字段只能向后兼容添加；删除、重命名或改变含义需要同步更新前端 DTO、测试和本文档。
 
+`GET /api/workbench?month=...`
+
+- 该接口是 Workbench 唯一首屏读入口，在一个 PostgreSQL `REPEATABLE READ READ ONLY` 快照内返回 freshness/version、summary 和 paired/unpaired 各首页。
+- summary 与两区 groups 必须共用同一 generation-set version；缺失或混合 version 必须 fail closed。
+- 默认无筛选首屏固定 `page=1`、`page_size=200`、`detail_level=summary`；仅该 shape 可在 fresh/stable gate 后进入按 version 隔离的 Redis read-through cache。
+- 搜索、筛选、后续分页和详情使用已有窄接口，并必须携带 `expected_read_model_version`。
+- 旧独立 summary HTTP 不是公开 API；内部 summary repository I/O 仅用于组合上述同快照响应。
+
 关系分区只允许 `paired` / `unpaired`：
 
 - `paired.groups[*]` 必须一一对应 active 正式关系，完整包含该 relation 在当前查询范围内的 OA、银行流水和发票成员，`group_type=relation`。
@@ -844,16 +852,19 @@ Workbench row payload 还可包含可选来源 OA 字段：`source_oa_id`、`sou
 
 契约要求：
 
-- rows、filter-options 和详情接口使用同一 SQL read model 或同一 query service 事实源。
-- rows 和 filter-options 接受 `view_mode=completed|in_progress`，默认 `completed`。`completed` 读取普通 `app.oa_applications` / completed OA projection 中已完成或历史未知 workflow status 的 OA；`in_progress` 才由 OA 待付款专用 payment-admitted projection 提供，先由 OA MySQL `t_payment_simple.flow_id` 准入，再匹配 OA Mongo `form_data._id`。未匹配到准入 flow_id 的进行中 OA 不进入正常列表。
+- 首屏唯一聚合入口是 `GET /api/oa-pending-payments/rows`；旧 `GET /api/oa-pending-payments/filter-options` 不存在。`filterConfig` 和全局 `filterOptions` 随 fresh rows 响应返回，前端不得根据当前页 rows 推导。
+- rows 和详情只读取 PostgreSQL `oa_pending_payment` read model。`view_mode=completed|in_progress`，默认 `completed`；completed 主行来自 `app.oa_applications`，in-progress 主行来自 OA integration sync 已写入的 `app.oa_pending_payment_admissions`。页面/API/read model worker 不得直接读取 Mongo/MySQL。
+- `200` rows 返回 rows、pagination、summary、`filterConfig`、`filterOptions`、`read_model_status=fresh` 和 `ETag`；响应使用 `Cache-Control: private, no-cache` 与 `Vary: Authorization, Cookie`。
+- 客户端可发送 `If-None-Match`。认证、query parsing 和 metadata-only fresh gate 通过且版本未变时返回 `304` 空 body，不执行 rows/count/sort/facet aggregation。
+- dirty/outbox活跃、scope missing或expected/actual source mismatch时返回 `202`，不得返回旧 rows；payload含 `read_model_status=refreshing` 和当前tenant的精确月份 `operationBarrierTargets`。
 - `t_payment_simple.id` 不是 OA ID，不能作为 OA 匹配 key；OA 匹配和写回 key 必须使用 `flow_id` 对应的 OA Mongo 文档 ID。
-- 响应必须表达 `read_model_status`、stale/refreshing 详情和必要的 refresh job。
+- 响应必须表达 `read_model_status`、refreshing详情和必要的refresh/barrier targets；禁止 stale payload 与 refreshing 提示同时返回。
 - rows `summary` 必须包含 `viewCounts.completed/in_progress`，用于页面展示切换按钮数量；该统计使用同一搜索、月份、交易日期和 column filters，但不受当前 `view_mode` 限制。
 - rows 中 `oa` 必须携带 `workflowStatus`；`oa`、`bankTransaction`、`invoice` 都可以携带 `relationCount`、`detailMode` 和 `summaries`；同一 Workbench active relation 下多条 OA、支出流水或进项发票必须聚合为一条核对行，金额字段展示各自合计。
-- `paymentStatus` 不返回 `overpaid` 或 `merged_paid`；支出流水合计大于 OA 合计时返回 `pending_review`，多 OA 合并付款按 relation group 合计后判定。
+- `paymentStatus` 只返回 `paid` 或 `unpaid`。active linked付款关系驱动 `paid`；金额差异、缺失银行事实或非支出边保留在reason/amount/writeback校验中，不产生 `pending_review`、`partially_paid`、`overpaid` 或 `merged_paid`。
 - rows 可返回 `oaPaymentWriteback`，用于表达 OA MySQL `t_payment_simple` 写回状态。`oaPaymentWriteback.code` 至少支持 `written` / `not_written`，`syncStatus` 表达 `ready`、`unavailable`、`flow_id_missing` 或 `not_required` 等同步语义。
 - 详情接口返回 OA、付款流水、发票、正式关系和异常原因；`/rows/{row_id}/relation-details` 支持 `kind=oa|bank|invoice`。
-- `filterConfig`/`filter-options` 至少包含 OA 申请人、项目名称、支付状态、对方户名、银行账户、收支、发票方和开票日期等表头筛选/排序字段；银行账户字段使用“银行名称 + 账号后四位”，收支字段使用 `outflow`/`inflow` 值并显示“支出”/“收入”。
+- `filterConfig`/`filterOptions` 至少包含 OA 申请人、项目名称、支付状态、对方户名、银行账户、收支、发票方和开票日期等表头筛选/排序字段；银行账户字段使用“银行名称 + 账号后四位”，收支字段使用 `outflow`/`inflow` 值并显示“支出”/“收入”。
 - 外部依赖或 read model 不可用时返回明确业务错误或 stale 状态，不返回 HTML 或空 body。
 
 ### OA 已支付行写回
@@ -875,8 +886,9 @@ Workbench row payload 还可包含可选来源 OA 字段：`source_oa_id`、`sou
 - 该接口不做自动匹配，不创建 OA-bank relation，不读取候选流水池；它只处理已经存在有效 relation 的 OA。
 - completed 行必须存在 Workbench active 支出流水 relation；in-progress 行必须存在 OA 待付款 active pending relation。候选流水、自动 decision、未确认 relation 或收入流水都不能触发写回。
 - 写回前必须校验银行流水存在且方向为支出、支出合计等于 OA 金额、可解析 OA Mongo 文档 ID，并将 `t_payment_simple.flow_id` 对应记录写成 `pay_status=1`；缺记录时可插入一条已支付记录。Flowable 流程实例 ID 和流程请求 ID 不作为 `t_payment_simple.flow_id` 写回 key。
-- 成功响应返回 `success`、`action=oa_pending_payment_writeback_paid`、`oaRowIds`、`writebackCount`、`oaPaymentWriteback` 或 `oaPaymentWritebacks` 和 `readModelRefresh`；refresh 至少覆盖 `oa_pending_payment`，目标刷新窗口为 2 秒级。
-- 失败时返回可展示业务错误；金额、方向或 `flow_id` 校验失败不得半写 `t_payment_simple`。
+- MySQL成功后，命令必须调用PG snapshot writer幂等更新payment-status snapshot、月份source watermark和精确月份dirty/outbox；即使MySQL此前已paid也不能跳过PG修复。PG三项写入同事务。
+- 成功响应返回 `success`、`action=oa_pending_payment_writeback_paid`、`oaRowIds`、`writebackCount`、`oaPaymentWriteback` 或 `oaPaymentWritebacks`、`readModelRefresh`和operation barrier targets；OA普通刷新只覆盖精确月份，目标commit-to-visible窗口为1秒。
+- 金额、方向或flow id校验失败不得写MySQL。若MySQL已成功但PG snapshot提交失败，返回 `oa_payment_status_snapshot_write_failed` / 503和可安全重试语义，不得声称页面已fresh；下一次幂等重试或OA sync负责恢复。
 
 `GET /api/oa-pending-payments/bank-transaction-candidates`
 

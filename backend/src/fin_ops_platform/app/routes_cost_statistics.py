@@ -8,8 +8,10 @@ from urllib.parse import unquote
 
 from fin_ops_platform.app.auth import OARequestSession, actor_id_for_session
 from fin_ops_platform.services.app_settings_service import AppSettingsValidationError
-from fin_ops_platform.services.cost_statistics_query_service import CostStatisticsReadModelNotFreshError
-from fin_ops_platform.services.cost_statistics_service import CostStatisticsExportLimitError
+from fin_ops_platform.services.cost_statistics_query_service import (
+    CostStatisticsExportLimitError,
+    CostStatisticsReadModelNotFreshError,
+)
 from fin_ops_platform.services.read_model_write_targets import write_target_envelope
 
 ReadSessionResolver = Callable[[dict[str, str] | None], tuple[OARequestSession | None, Any | None]]
@@ -22,7 +24,7 @@ class CostStatisticsApiRoutes:
         self,
         *,
         query_service: Any,
-        json_response: Callable[[HTTPStatus, dict[str, Any]], Any],
+        json_response: Callable[..., Any],
         file_response: Callable[[str, bytes], Any],
         metric_emitter: Callable[..., None] | None = None,
         entry_count: Callable[[dict[str, Any]], int] | None = None,
@@ -62,7 +64,19 @@ class CostStatisticsApiRoutes:
         if method == "PUT" and route_path == "/api/cost-statistics/tag-rules":
             return self.handle_update_tag_rules(body, headers)
         if method == "GET" and route_path == "/api/cost-statistics/explorer":
-            return self.handle_explorer(query.get("month", [None])[0], query.get("project_scope", [None])[0])
+            return self.handle_explorer(
+                scope=query.get("scope", [None])[0],
+                view=query.get("view", [None])[0],
+                project_scope=query.get("project_scope", [None])[0],
+                project_name=query.get("project_name", [None])[0],
+                expense_type=query.get("expense_type", [None])[0],
+                payment_account_label=query.get("payment_account_label", [None])[0],
+                bank_tag_primary_label=query.get("bank_tag_primary_label", [None])[0],
+                bank_tag_sub_label=query.get("bank_tag_sub_label", [None])[0],
+                cursor=query.get("cursor", [None])[0],
+                page_size=query.get("page_size", [None])[0],
+                if_none_match=_header(headers, "if-none-match"),
+            )
         if method == "GET" and route_path == "/api/cost-statistics/export-preview":
             return self.handle_export_preview(
                 month=query.get("month", [None])[0],
@@ -163,29 +177,61 @@ class CostStatisticsApiRoutes:
         )
         return self._json_response(status, payload)
 
-    def handle_explorer(self, month: str | None, project_scope: str | None) -> Any:
-        current_month = month or self._now_provider().strftime("%Y-%m")
+    def handle_explorer(
+        self,
+        *,
+        scope: str | None,
+        view: str | None,
+        project_scope: str | None,
+        project_name: str | None,
+        expense_type: str | None,
+        payment_account_label: str | None,
+        bank_tag_primary_label: str | None,
+        bank_tag_sub_label: str | None,
+        cursor: str | None,
+        page_size: str | None,
+        if_none_match: str | None,
+    ) -> Any:
+        current_scope = scope or self._now_provider().strftime("%Y-%m")
         started_at = monotonic()
         cache_hit = False
         try:
             normalized_project_scope = self._normalize_project_scope(project_scope)
-            payload, cache_hit = self._query_service.get_explorer(current_month, normalized_project_scope)
+            payload, cache_hit, etag, not_modified = self._query_service.get_explorer_page(
+                scope=current_scope,
+                view=str(view or ""),
+                project_scope=normalized_project_scope,
+                filters={
+                    "project_name": project_name,
+                    "expense_type": expense_type,
+                    "payment_account_label": payment_account_label,
+                    "bank_tag_primary_label": bank_tag_primary_label,
+                    "bank_tag_sub_label": bank_tag_sub_label,
+                },
+                cursor=cursor,
+                page_size=int(page_size or 50),
+                if_none_match=if_none_match,
+            )
         except ValueError as error:
-            return self._project_scope_error_response(error)
+            return self._page_query_error_response(error)
         if self._metric_emitter is not None:
             self._metric_emitter(
-                month=current_month,
+                month=current_scope,
                 project_scope=normalized_project_scope,
                 cache_hit=cache_hit,
                 duration_ms=self._duration_ms(started_at),
                 entry_count=self._entry_count(payload),
             )
-        status = (
-            HTTPStatus.ACCEPTED
-            if payload.get("read_model_status") == "refreshing" and not payload.get("time_rows")
-            else HTTPStatus.OK
-        )
-        return self._json_response(status, payload)
+        response_headers = {
+            "Cache-Control": "private, no-cache",
+            "Vary": "Authorization, Cookie",
+        }
+        if etag:
+            response_headers["ETag"] = etag
+        if not_modified:
+            return self._json_response(HTTPStatus.NOT_MODIFIED, {}, response_headers)
+        status = HTTPStatus.ACCEPTED if payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
+        return self._json_response(status, payload, response_headers)
 
     def handle_project(self, month: str | None, project_name: str, project_scope: str | None) -> Any:
         current_month = month or self._now_provider().strftime("%Y-%m")
@@ -381,8 +427,18 @@ class CostStatisticsApiRoutes:
             },
         )
 
+    def _page_query_error_response(self, error: ValueError) -> Any:
+        message = str(error)
+        if "project_scope" in message:
+            return self._project_scope_error_response(error)
+        error_code = "invalid_cost_statistics_cursor" if "cursor" in message else "invalid_cost_statistics_query"
+        return self._json_response(HTTPStatus.BAD_REQUEST, {"error": error_code, "message": message})
+
 
 def _explorer_entry_count(payload: dict[str, Any]) -> int:
+    rows = payload.get("rows")
+    if isinstance(rows, list):
+        return len(rows)
     time_rows = payload.get("time_rows")
     if isinstance(time_rows, list):
         return len(time_rows)
@@ -405,3 +461,11 @@ def _parse_optional_bool_default_true(value: str | None) -> bool:
     if normalized in {"1", "true", "yes", "on"}:
         return True
     return True
+
+
+def _header(headers: dict[str, str] | None, name: str) -> str | None:
+    normalized_name = name.strip().lower()
+    for key, value in (headers or {}).items():
+        if str(key).strip().lower() == normalized_name:
+            return str(value)
+    return None

@@ -41,7 +41,7 @@
 - `missing_required_worker_count > 0` 或 `stale_required_worker_count > 0`。required worker 清单来自 `runtime_worker_registry`；例如 `search` / `pending-invoice` worker 缺失会导致搜索或待找发票 read model 长时间 refreshing。
 - `read_model_refresh_duration_ms.p95/p99` 持续升高。
 - `read_model_refresh_enqueue_to_fresh_ms.p95/p99` 持续升高。该指标从 durable outbox `created_at -> processed_at` 计算，表示真实 enqueue-to-fresh latency，不等同于单次 worker handler duration。
-- `/api/workbench/summary` 或 `/api/workbench/groups` 的 `workbench_api_metric.duration_ms` p95 超过页面 SLO。
+- `/api/workbench` 或 `/api/workbench/groups` 的 `workbench_api_metric.duration_ms` p95 超过页面 SLO。
 - `/api/workbench/refresh-status` 长时间返回 `refreshing`、`stale`、`failed` 或 `unavailable`。
 - `/api/workbench/refresh-status.consistency_status=failed`，或 `read_model.workbench_generation_consistency` 中存在 active inconsistent generation。该状态表示 read model 发布契约被阻断，不能靠浏览器刷新恢复。
 - `/health.api_performance.endpoints[*].duration_ms.p95` 持续超过页面 SLO。
@@ -408,7 +408,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.http_slo_probe \
   `--page-path`。
 - `/api/session/me`、`/api/app-health`、`/api/operations/app-health-dashboard`。
 - 工作台 summary/groups/settings、银行明细账户/流水/规则、待找发票 rows/filter-options/rules、进项发票使用
-  rows/filter-options/rules、OA 待付款 rows/filter-options、销项收款 rows/filter-options/rules、税金抵扣、
+  rows/filter-options/rules、OA 待付款单一 rows 聚合/ETag 条件读取、销项收款 rows/filter-options/rules、税金抵扣、
   成本统计、免 OA、批量账务、往来款、ETC、导入 facts、后台任务和搜索首屏 API。
   `pending-invoices/filter-options` 是历史慢接口，默认必须覆盖。
 - 工作台 groups probe 必须使用前端首屏同口径的 `detail_level=summary`；不带 `detail_level` 的 full payload 只用于兼容或调试，不作为页面首屏 SLO 证据。
@@ -417,6 +417,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.http_slo_probe \
 
 - 默认目标是每个 probe p95 `<= 1000ms`；可用 `--target-ms` 调整单次阶段验收阈值。
 - read model API 可接受 `200` 或 `202`，但必须记录响应中的 `read_model_status`、`cache_status` 和 `refresh_enqueued`，用于区分 fresh snapshot、refreshing 和后台追赶。
+- OA 待付款还必须单独统计条件 `304` 的 p50/p95/p99 和 `200/202/304` 比例；`304` body为空且不得执行rows/filter聚合，`202`不得携带旧rows。生产验收目标为fresh rows p95 `<=250ms`、p99 `<=500ms`，304 p95 `<=30ms`；未完成1000次样本前不得宣称达标。
 - 工具默认要求真实认证；没有 `FIN_OPS_HTTP_SLO_ADMIN_TOKEN`、`FIN_OPS_HTTP_SLO_BEARER_TOKEN`、`FIN_OPS_HTTP_SLO_COOKIE` 或 CLI auth 参数时返回 `auth_missing`，不能作为生产页面 SLO 证据。
 - 工具默认发送 `Accept-Encoding: gzip`，用于对齐真实浏览器经过 Nginx 的传输口径；JSON/HTML 解析会先解压 gzip body，`response_bytes` 记录压缩后的网络传输字节数。生产公网性能判断应使用该默认口径，避免用未压缩的大 JSON 传输时间误判浏览器首屏 SLO。
 - API probe 如果拿到 `text/html` 或 HTML 文档体，即使 HTTP status 是 200，也按 `html_response_for_api_probe` 失败处理。这通常表示 API prefix、Nginx fallback 或路径配置错误；例如 `www.yn-sourcing.com/health/ready` 会落到前端页面壳，生产 readiness 应使用 `/fin-ops-api/health/ready`。
@@ -744,13 +745,13 @@ runner 结束后删除远端临时 scenario；禁止把 token 放入命令参数
 
 生产和 staging 的工作台列表页使用分层契约，不再把完整 group payload 当作首屏数据：
 
+- `/api/workbench?month=...`：唯一首屏入口，在同一 active generation-set 快照内返回 summary 与 paired/unpaired 各首页；不应扫描 canonical facts 或全量 group rows 来现算诊断数据。
 - `/api/workbench/groups?...&detail_level=summary`：列表和分页使用，响应不得包含行级 `detail_fields`、`raw_payload`、OCR 正文或附件全文。
 - `/api/workbench/groups/detail?...&group_id=...`：单个 group 的完整详情，按用户动作懒加载。
-- Redis page cache key 必须包含 `detail_level`，避免 summary 和 full payload 互相污染。
-- Redis page cache key 必须随 active generation 变化而失效；如果页面显示旧数据，先看 `active_generation_id/read_model_version/generated_at` 是否变化，再看 Redis hit/miss 和版本 key。
-- `worker-workbench` 默认不把 Redis page-cache warmup 放进 refresh ack 前热路径；页面仍从 fresh SQL read model 读取，API 读路径只在 fresh gate 后写 Redis payload。只有显式设置 `FIN_OPS_WORKBENCH_GROUPS_SYNC_CACHE_WARMUP_ENABLED=1` 时才同步预热首屏 `paired/unpaired` page 1 summary 和 Redis version key。若首个用户承担冷启动，按顺序检查 Redis `set_text/set_json` 错误、`FIN_OPS_WORKBENCH_GROUPS_REDIS_TTL_SECONDS`、`redis_miss_count` 和 page cache key 的 generation version。
+- Redis 只缓存 fresh/stable gate 后的默认首屏 payload，cache key 必须包含 active generation-set version；搜索、筛选、后续分页和详情不进入该缓存。
+- `worker-workbench` 不查询或预热 Redis page cache；generation 发布、下游 fan-out 与 dirty completion 热路径不承担页面 SQL/Redis I/O。页面仍从 fresh SQL read model 读取，只有 API query owner 在 fresh gate 后执行默认首屏 read-through cache。若首个用户承担冷启动，按顺序检查 Redis write 错误、首屏 TTL、`redis_miss_count` 和 cache key 的 generation version。
 - 普通 read model 的 Redis fresh-cache 必须使用 `ReadModelQueryGateway` 的 fresh-gate envelope：`payload` 之外必须有 `fresh_gate.scope_key`、`fresh_gate.read_model_status=fresh`、`fresh_gate.schema_version` 和 `fresh_gate.source_versions`。命中时 gateway 会按当前 expected source versions 校验；旧格式或 source version 不匹配的 payload 只能 fail closed 回 SQL read model，不能被当作 fresh 返回。
-- `/api/workbench/summary` 不应在热路径查询 `app.bank_transactions` 或全量扫描 `read_model.workbench_group_rows` 来修复 counts/diagnostics；summary p95 变慢时先查 `read_model.workbench_summary` active generation 是否缺失，再查 refresh worker 发布失败原因。
+- `/api/workbench` 不应在热路径查询 `app.bank_transactions` 或全量扫描 `read_model.workbench_group_rows` 来修复 counts/diagnostics；首屏 p95 变慢时先查 active month generation 与内部 `read_model.workbench_summary` 是否缺失，再查 refresh worker 发布失败原因。
 - `read_model.workbench_generations` 中同一 `scope_key` 只能有一个 `status='active'`。如果存在 `building_generation_id` 但页面仍显示旧数据，这是正常刷新中；如果存在 `failed_generation_id`，页面仍读取 active generation，同时运维需要处理 `last_error`。
 - `read_model.workbench_generations` 的非 active generation 应受 retention 控制。建议告警阈值：总 generation 数超过 300、`read_model.workbench_*` 总大小超过 10GB、根分区可用空间低于 20GB 或 `pg_wal` 异常增长。先检查 `finops-prune-workbench-generations.timer`、自动 retention 日志和 worker 是否持续重复发布同一 scope。
 - `/api/workbench/groups` 不带 `detail_level` 时保持 `full`，只作为兼容契约，不作为前端首屏路径。
@@ -787,7 +788,7 @@ sudo -n /usr/local/sbin/finops-deploy-control workbench-rehydrate <release-name>
 # 1. 在真实 PostgreSQL/Redis 配置下启动 API，并确认 psycopg_pool 已加载。
 PYTHONPATH=backend/src python3 -m fin_ops_platform.app.server
 
-# 2. 分别压测 summary、groups summary、group detail、search/cost/tax。
+# 2. 分别压测 combined initial、groups summary、group detail、search/cost/tax。
 # 记录每个 endpoint 的 p50/p95、平均响应体大小和错误率。
 
 # 3. 读取 /health.api_performance，按 endpoint 对比：
@@ -795,7 +796,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.app.server
 
 # 4. 对慢 SQL 单独跑 EXPLAIN (ANALYZE, BUFFERS)，再用 pg_stat_statements 看生产 top SQL。
 
-# 5. 验证同一 generation 下 summary 和 groups 计数稳定，不再随刷新漂移。
+# 5. 验证 combined initial 与 groups 固定同一 generation version，计数不随刷新漂移。
 PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.validate_workbench_generation_convergence \
   --base-url http://localhost:8000 \
   --month all \
@@ -806,7 +807,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.validate_workbench_gene
 
 是否进入 Go read API sidecar 只按结果判断。第一阶段和 Phase 1.5 后同时满足以下任意 2 到 3 条，才进入 sidecar 设计：
 
-- `/api/workbench/summary`、`/api/workbench/groups?detail_level=summary`、search/cost/tax 的核心只读 p95 仍高于 300 到 500ms。
+- `/api/workbench`、`/api/workbench/groups?detail_level=summary`、search/cost/tax 的核心只读 p95 仍高于 300 到 500ms。
 - `connection_acquire_ms + sql_execute_fetch_ms` 低于总耗时 30% 到 40%，但整体 p95 仍高。
 - Python worker/进程 CPU 持续 70% 到 90% 以上，且 Redis/read model 命中后仍不下降。
 - summary 物化和 groups summary 命中后仍慢，瓶颈落在对象构造、JSON 序列化、请求调度或连接并发。

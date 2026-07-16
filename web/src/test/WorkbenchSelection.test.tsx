@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 import { waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, vi } from "vitest";
@@ -67,8 +67,8 @@ function jsonResponse(payload: unknown, status = 200) {
   return new Response(JSON.stringify(payload), { status, headers: { "Content-Type": "application/json" } });
 }
 
-function isWorkbenchSummaryRequest(input: RequestInfo | URL) {
-  return fetchPath(input).startsWith("/api/workbench/summary?");
+function isWorkbenchInitialRequest(input: RequestInfo | URL) {
+  return fetchPath(input).startsWith("/api/workbench?");
 }
 
 describe("Workbench row selection and detail drawer", () => {
@@ -97,6 +97,106 @@ describe("Workbench row selection and detail drawer", () => {
     await user.click(row);
 
     expect(row).toHaveAttribute("data-row-state", "idle");
+  });
+
+  test("atomically clears selection and detail state when a background reload publishes a new generation", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch({
+      workbenchReadModelVersions: ["generation-v1", "generation-v2"],
+    });
+    renderWorkbenchPage();
+
+    const selectedRow = await screen.findByRole("row", {
+      name: /2026-03-28.*智能工厂设备商/,
+    });
+    await user.click(selectedRow);
+    expect(selectedRow).toHaveAttribute("data-row-state", "selected");
+
+    const detailRow = screen.getByRole("row", {
+      name: /2026-03-25 14:22.*华东设备供应商/,
+    });
+    await user.click(within(detailRow).getByRole("button", { name: /查看银行流水 .* 详情/ }));
+    expect(await screen.findByRole("dialog", { name: "银行流水详情" })).toBeInTheDocument();
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("turnoverRelationUpdated"));
+    });
+
+    await waitFor(() => {
+      const initialRequests = fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input as RequestInfo | URL));
+      expect(initialRequests).toHaveLength(2);
+      expect(screen.queryByRole("dialog", { name: "银行流水详情" })).not.toBeInTheDocument();
+      expect(screen.getAllByText("已选 0")).toHaveLength(2);
+    });
+  });
+
+  test("preserves selection and detail state when a background reload keeps the same generation", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch({
+      workbenchReadModelVersions: ["generation-v1", "generation-v1"],
+    });
+    renderWorkbenchPage();
+
+    const selectedRow = await screen.findByRole("row", {
+      name: /2026-03-28.*智能工厂设备商/,
+    });
+    await user.click(selectedRow);
+    expect(selectedRow).toHaveAttribute("data-row-state", "selected");
+
+    const detailRow = screen.getByRole("row", {
+      name: /2026-03-25 14:22.*华东设备供应商/,
+    });
+    await user.click(within(detailRow).getByRole("button", { name: /查看银行流水 .* 详情/ }));
+    expect(await screen.findByRole("dialog", { name: "银行流水详情" })).toBeInTheDocument();
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("turnoverRelationUpdated"));
+    });
+
+    await waitFor(() => {
+      const initialRequests = fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input as RequestInfo | URL));
+      expect(initialRequests).toHaveLength(2);
+    });
+    expect(screen.getByRole("dialog", { name: "银行流水详情" })).toBeInTheDocument();
+    expect(screen.getByText("已选 1")).toBeInTheDocument();
+  });
+
+  test("stops a relation write and reloads when the active generation changes after preview", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch({
+      workbenchReadModelVersions: ["generation-v1", "generation-v2"],
+    });
+    const defaultFetch = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      if (fetchPath(input) === "/api/workbench/actions/confirm-link") {
+        return Promise.resolve(jsonResponse({
+          error: "workbench_read_model_version_conflict",
+          message: "关联台数据版本已更新，请重新确认。",
+          read_model_status: "fresh",
+          read_model_version: "generation-v2",
+        }, 409));
+      }
+      if (!defaultFetch) {
+        throw new Error("Mock API fetch is not installed.");
+      }
+      return defaultFetch(input, init);
+    });
+    renderWorkbenchPage();
+
+    await user.click(await screen.findByRole("row", { name: /2026-03-28.*智能工厂设备商/ }));
+    await user.click(screen.getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ }));
+    await user.click(screen.getByRole("button", { name: "确认关联" }));
+
+    const preview = await screen.findByRole("dialog", { name: "关联预览" });
+    await user.click(within(preview).getByRole("button", { name: "确认关联" }));
+
+    await waitFor(() => {
+      const initialRequests = fetchMock.mock.calls.filter(([input]) => isWorkbenchInitialRequest(input as RequestInfo | URL));
+      expect(initialRequests).toHaveLength(2);
+      expect(screen.queryByRole("dialog", { name: "关联预览" })).not.toBeInTheDocument();
+      expect(screen.getAllByText("已选 0")).toHaveLength(2);
+    });
+    expect(screen.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeInTheDocument();
   });
 
   test("bank pane time filter supports month selection and clears on second click", async () => {
@@ -150,7 +250,10 @@ describe("Workbench row selection and detail drawer", () => {
     expect(within(dialog).getByText("支出")).toHaveClass("direction-tag");
     expect(oaRow).toHaveAttribute("data-row-state", "related");
     expect(bankRow).toHaveAttribute("data-row-state", "related");
-    expect(fetchMock).toHaveBeenCalledWith("/api/workbench/rows/bk-p-202603-001?month=all", expect.any(Object));
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/workbench/rows/bk-p-202603-001?month=all&expected_read_model_version=mock-workbench-generation-1",
+      expect.any(Object),
+    );
   });
 
   test("detail drawer opens before the row detail request resolves", async () => {
@@ -176,7 +279,10 @@ describe("Workbench row selection and detail drawer", () => {
 
     const dialog = screen.getByRole("dialog", { name: "银行流水详情" });
     expect(within(dialog).getByText("正在加载详情...")).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith("/api/workbench/rows/bk-p-202603-001?month=all", expect.any(Object));
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/workbench/rows/bk-p-202603-001?month=all&expected_read_model_version=mock-workbench-generation-1",
+      expect.any(Object),
+    );
   });
 
   test("OA applicant column keeps the detail icon on the first line and time chip on the second line", async () => {
@@ -199,7 +305,10 @@ describe("Workbench row selection and detail drawer", () => {
 
     const dialog = await screen.findByRole("dialog", { name: "OA详情" });
     expect(within(dialog).getByText("OA详情")).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith("/api/workbench/rows/oa-p-202603-001?month=all", expect.any(Object));
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/workbench/rows/oa-p-202603-001?month=all&expected_read_model_version=mock-workbench-generation-1",
+      expect.any(Object),
+    );
   });
 
   test("drawer can be closed after opening from row action", async () => {
@@ -319,6 +428,7 @@ describe("Workbench row selection and detail drawer", () => {
         body: JSON.stringify({
           month: "all",
           row_ids: ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"],
+          expected_read_model_version: "mock-workbench-generation-1",
         }),
       }),
     );
@@ -337,6 +447,7 @@ describe("Workbench row selection and detail drawer", () => {
           body: JSON.stringify({
             month: "all",
             row_ids: ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"],
+            expected_read_model_version: "mock-workbench-generation-1",
           }),
         }),
       );
@@ -655,6 +766,7 @@ describe("Workbench row selection and detail drawer", () => {
           body: JSON.stringify({
             month: "all",
             row_ids: ["bk-o-202603-001", "iv-o-202603-001"],
+            expected_read_model_version: "mock-workbench-generation-1",
           }),
         }),
       );
@@ -703,6 +815,7 @@ describe("Workbench row selection and detail drawer", () => {
         body: JSON.stringify({
           month: "all",
           row_ids: ["oa-o-202604-001", "bk-o-202604-001"],
+          expected_read_model_version: "mock-workbench-generation-1",
         }),
       }),
     );
@@ -740,6 +853,7 @@ describe("Workbench row selection and detail drawer", () => {
         body: JSON.stringify({
           month: "all",
           row_ids: ["oa-o-202603-001", "bk-o-202603-001"],
+          expected_read_model_version: "mock-workbench-generation-1",
         }),
       }),
     );
@@ -779,6 +893,7 @@ describe("Workbench row selection and detail drawer", () => {
         body: JSON.stringify({
           month: "all",
           row_ids: ["oa-p-202603-001", "bk-p-202603-001", "iv-p-202603-001"],
+          expected_read_model_version: "mock-workbench-generation-1",
         }),
       }),
     );
@@ -819,6 +934,7 @@ describe("Workbench row selection and detail drawer", () => {
         body: JSON.stringify({
           month: "all",
           row_ids: ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"],
+          expected_read_model_version: "mock-workbench-generation-1",
         }),
       }),
     );
@@ -835,6 +951,7 @@ describe("Workbench row selection and detail drawer", () => {
           body: JSON.stringify({
             month: "all",
             row_ids: ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"],
+            expected_read_model_version: "mock-workbench-generation-1",
             scenario_code: "expense_oa_bank_invoice_equal",
             action_code: "wait_input_invoice",
             payload: {
@@ -848,7 +965,7 @@ describe("Workbench row selection and detail drawer", () => {
     const calledPaths = fetchMock.mock.calls.map(([input]) => fetchPath(input));
     const applyIndex = calledPaths.findIndex((path) => path === "/api/workbench/exception/apply");
     expect(applyIndex).toBeGreaterThanOrEqual(0);
-    expect(calledPaths.slice(applyIndex + 1)).toContain("/api/workbench/summary?month=all");
+    expect(calledPaths.slice(applyIndex + 1)).toContain("/api/workbench?month=all");
   });
 
   test("unpaired zone exception action accepts OA 2035 attachment payment receipt selections from the backend group", async () => {
@@ -884,6 +1001,7 @@ describe("Workbench row selection and detail drawer", () => {
         body: JSON.stringify({
           month: "all",
           row_ids: ["oa-exp-2035", "pay-oa-2035-fuel-200"],
+          expected_read_model_version: "mock-workbench-generation-1",
         }),
       }),
     );
@@ -1052,7 +1170,7 @@ describe("Workbench row selection and detail drawer", () => {
     });
   });
 
-  test("confirm link applies operation projection even when the main workbench generation is still refreshing", async () => {
+  test("disables relation writes while the workbench generation is refreshing", async () => {
     const user = userEvent.setup();
     installMockApiFetch({
       actionDelayMs: 20,
@@ -1060,8 +1178,7 @@ describe("Workbench row selection and detail drawer", () => {
     });
     renderWorkbenchPage();
 
-    const unpairedZone = await screen.findByTestId("zone-unpaired");
-    const pairedZone = await screen.findByTestId("zone-paired");
+    await screen.findByTestId("zone-unpaired");
     const openBankRow = await screen.findByRole("row", {
       name: /2026-03-28.*智能工厂设备商/,
     });
@@ -1071,24 +1188,9 @@ describe("Workbench row selection and detail drawer", () => {
 
     await user.click(openBankRow);
     await user.click(openInvoiceRow);
-    await user.click(screen.getByRole("button", { name: "确认关联" }));
-    const preview = await screen.findByRole("dialog", { name: "关联预览" });
-    await user.click(within(preview).getByRole("button", { name: "确认关联" }));
-
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: "关联预览" })).not.toBeInTheDocument();
-    }, { timeout: 2_000 });
-    expect(screen.queryByText(/关联台刷新未完成/)).not.toBeInTheDocument();
-    expect(
-      within(unpairedZone).queryByRole("row", {
-        name: /2026-03-28.*智能工厂设备商/,
-      }),
-    ).not.toBeInTheDocument();
-    expect(
-      within(pairedZone).getByRole("row", {
-        name: /2026-03-28.*智能工厂设备商/,
-      }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "确认关联" })).toBeDisabled();
+    expect(screen.getByText("关联台正在刷新，当前显示上一版稳定数据；刷新完成前写操作已禁用。")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "关联预览" })).not.toBeInTheDocument();
   });
 
   test("initial workbench rows render before slow ignored and settings requests finish", async () => {
@@ -2183,6 +2285,7 @@ describe("Workbench row selection and detail drawer", () => {
           body: JSON.stringify({
             month: "all",
             row_ids: ["oa-p-202603-001", "bk-p-202603-001", "iv-p-202603-001"],
+            expected_read_model_version: "mock-workbench-generation-1",
             operation_type: "withdraw_relation",
           }),
         }),
@@ -2231,6 +2334,7 @@ describe("Workbench row selection and detail drawer", () => {
         body: JSON.stringify({
           month: "all",
           row_ids: ["oa-o-202603-001", "bk-o-202603-001"],
+          expected_read_model_version: "mock-workbench-generation-1",
         }),
       }),
     );
@@ -2248,6 +2352,7 @@ describe("Workbench row selection and detail drawer", () => {
           body: JSON.stringify({
             month: "all",
             row_ids: ["oa-o-202603-001", "bk-o-202603-001"],
+            expected_read_model_version: "mock-workbench-generation-1",
             scenario_code: "expense_oa_bank_invoice_equal",
             action_code: "wait_input_invoice",
             payload: {
@@ -2264,7 +2369,7 @@ describe("Workbench row selection and detail drawer", () => {
       }),
     );
     const workbenchRefreshCalls = fetchMock.mock.calls.filter(([input]) => {
-      return isWorkbenchSummaryRequest(input as RequestInfo | URL);
+      return isWorkbenchInitialRequest(input as RequestInfo | URL);
     });
     expect(workbenchRefreshCalls.length).toBeGreaterThan(0);
   });
@@ -2364,6 +2469,7 @@ describe("Workbench row selection and detail drawer", () => {
           body: JSON.stringify({
             month: "all",
             row_ids: ["oa-o-202603-001"],
+            expected_read_model_version: "mock-workbench-generation-1",
             comment: "由已处理异常弹窗撤回异常处理",
           }),
         }),
@@ -2420,7 +2526,7 @@ describe("Workbench row selection and detail drawer", () => {
     });
     await waitFor(() => {
       const workbenchRefreshCalls = fetchMock.mock.calls.filter(([input]) => {
-        return isWorkbenchSummaryRequest(input as RequestInfo | URL);
+        return isWorkbenchInitialRequest(input as RequestInfo | URL);
       });
       expect(workbenchRefreshCalls.length).toBeGreaterThan(0);
     });
@@ -2439,7 +2545,7 @@ describe("Workbench row selection and detail drawer", () => {
     installMockApiFetch({ workbenchErrorMonths: ["all"] });
     renderWorkbenchPage();
 
-    expect(await screen.findByText("workbench summary failed")).toBeInTheDocument();
+    expect(await screen.findByText("workbench failed")).toBeInTheDocument();
     expect(screen.queryByText("工作台数据加载失败，请稍后重试。")).not.toBeInTheDocument();
   });
 
@@ -2464,7 +2570,7 @@ describe("Workbench row selection and detail drawer", () => {
     renderWorkbenchPage();
 
     await screen.findByTestId("zone-unpaired");
-    expect(screen.queryByText("关联台待刷新，当前结果可能不是完整最新数据。")).not.toBeInTheDocument();
+    expect(screen.getByText("关联台数据已过期，当前结果仅供查看；刷新完成前写操作已禁用。")).toBeInTheDocument();
     expect(screen.queryByText("当前没有可展示的 OA / 银行流水 / 发票记录。")).not.toBeInTheDocument();
     expect(within(screen.getByTestId("zone-unpaired")).getByText("未配对 0 项")).toBeInTheDocument();
   });

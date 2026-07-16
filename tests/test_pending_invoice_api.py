@@ -808,9 +808,9 @@ class PendingInvoiceApiTests(unittest.TestCase):
                 "cost_statistics",
                 "input_invoice_usage",
                 "output_invoice_collection",
-                "oa_pending_payment",
             }.issubset(scope_types)
         )
+        self.assertNotIn("oa_pending_payment", scope_types)
         self.assertNotIn("turnover_ledger", scope_types)
         self.assertNotIn("no_oa_bank_batch", scope_types)
         self.assertNotIn("bank_account_balance", scope_types)

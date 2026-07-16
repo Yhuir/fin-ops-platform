@@ -24,10 +24,8 @@ TOOLS_ROOT = SOURCE_ROOT / "tools"
 SCRIPTS_ROOT = REPO_ROOT / "scripts"
 WEB_SRC_ROOT = REPO_ROOT / "web" / "src"
 
-
 def _relative(path: Path) -> str:
     return path.relative_to(REPO_ROOT).as_posix()
-
 
 def _python_files(*roots: Path) -> list[Path]:
     files: list[Path] = []
@@ -35,10 +33,8 @@ def _python_files(*roots: Path) -> list[Path]:
         files.extend(path for path in root.rglob("*.py") if path.is_file())
     return sorted(files)
 
-
 def _parse(path: Path) -> ast.Module:
     return ast.parse(path.read_text(encoding="utf-8"), filename=_relative(path))
-
 
 def _imported_modules(tree: ast.Module) -> set[str]:
     modules: set[str] = set()
@@ -49,7 +45,6 @@ def _imported_modules(tree: ast.Module) -> set[str]:
             modules.add(node.module or "")
     return modules
 
-
 def _imports_name_from_module(tree: ast.Module, *, module: str, name: str) -> bool:
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.module == module:
@@ -57,14 +52,12 @@ def _imports_name_from_module(tree: ast.Module, *, module: str, name: str) -> bo
                 return True
     return False
 
-
 def _attribute_calls(tree: ast.Module, names: set[str]) -> list[str]:
     calls: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in names:
             calls.append(node.func.attr)
     return calls
-
 
 def _parses_http_auth_headers_or_cookies(tree: ast.Module) -> bool:
     imported_modules = _imported_modules(tree)
@@ -90,7 +83,6 @@ def _parses_http_auth_headers_or_cookies(tree: ast.Module) -> bool:
                 return True
     return False
 
-
 def _attribute_chain(node: ast.AST) -> str:
     if isinstance(node, ast.Name):
         return node.id
@@ -99,20 +91,17 @@ def _attribute_chain(node: ast.AST) -> str:
         return f"{prefix}.{node.attr}" if prefix else node.attr
     return ""
 
-
 def _function_source(tree: ast.Module, source: str, function_name: str) -> str:
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == function_name:
             return ast.get_source_segment(source, node) or ""
     return ""
 
-
 def _class_source(tree: ast.Module, source: str, class_name: str) -> str:
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef) and node.name == class_name:
             return ast.get_source_segment(source, node) or ""
     return ""
-
 
 class _ForbiddenRelationReadVisitor(ast.NodeVisitor):
     def __init__(self, *, path: Path) -> None:
@@ -188,7 +177,6 @@ class _ForbiddenRelationReadVisitor(ast.NodeVisitor):
             "backend/src/fin_ops_platform/services/state_store.py",
         }
 
-
 def _sql_write_table_references(source: str) -> list[str]:
     normalized = " ".join(source.lower().split())
     patterns = (
@@ -201,7 +189,6 @@ def _sql_write_table_references(source: str) -> list[str]:
     )
     return [pattern for pattern in patterns if re.search(pattern, normalized)]
 
-
 class RuntimeRepositorySummary:
     def summary(self) -> dict[str, object]:
         return {
@@ -211,7 +198,6 @@ class RuntimeRepositorySummary:
             "object_storage_backend": "local",
             "object_storage_enabled": False,
         }
-
 
 class Store:
     def __init__(self, *, backend: str) -> None:
@@ -229,7 +215,6 @@ class Store:
     def mongo_database_name(self) -> str | None:
         return None
 
-
 def _bare_application(*, backend: str = "postgres", bootstrap_mode: str = "production") -> server_module.Application:
     app = object.__new__(server_module.Application)
     app._bootstrap_mode = bootstrap_mode
@@ -237,7 +222,6 @@ def _bare_application(*, backend: str = "postgres", bootstrap_mode: str = "produ
     app._runtime_repositories = RuntimeRepositorySummary()
     app._seed_payload = {}
     return app
-
 
 class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
     def test_file_import_has_one_durable_confirm_path_and_removed_revert_fallbacks(self) -> None:
@@ -804,21 +788,14 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_application_state_store_oa_pending_payment_bank_relations_do_not_use_app_mongo(self) -> None:
+    def test_application_state_store_does_not_expose_oa_pending_payment_relation_snapshot(self) -> None:
         path = SERVICES_ROOT / "state_store.py"
         source = path.read_text(encoding="utf-8")
         class_source = _class_source(_parse(path), source, "ApplicationStateStore")
-        class_tree = ast.parse(class_source)
-        method_names = ("load_oa_pending_payment_bank_relations", "save_oa_pending_payment_bank_relations")
-        violations: list[str] = []
 
-        for method_name in method_names:
-            method_source = _function_source(class_tree, class_source, method_name)
-            for forbidden in ("_mongo_database", "MONGO_ONLY_STORAGE_MODE", "self.load()", "self.save("):
-                if forbidden in method_source:
-                    violations.append(f"{method_name} contains {forbidden}")
-
-        self.assertEqual(violations, [])
+        self.assertNotIn("load_oa_pending_payment_bank_relations", class_source)
+        self.assertNotIn("save_oa_pending_payment_bank_relations", class_source)
+        self.assertNotIn('"oa_pending_payment_bank_relations"', class_source)
 
     def test_application_state_store_tax_imports_do_not_use_app_mongo(self) -> None:
         path = SERVICES_ROOT / "state_store.py"
@@ -930,14 +907,12 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_application_state_store_cost_and_tax_read_models_do_not_use_app_mongo(self) -> None:
+    def test_application_state_store_tax_read_models_do_not_use_app_mongo(self) -> None:
         path = SERVICES_ROOT / "state_store.py"
         source = path.read_text(encoding="utf-8")
         class_source = _class_source(_parse(path), source, "ApplicationStateStore")
         class_tree = ast.parse(class_source)
         method_names = (
-            "load_cost_statistics_read_models",
-            "save_cost_statistics_read_models",
             "load_tax_offset_read_models",
             "save_tax_offset_read_models",
             "load_background_jobs",
@@ -957,15 +932,84 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "COST_STATISTICS_READ_MODELS_COLLECTION",
             "TAX_OFFSET_READ_MODELS_META_COLLECTION",
             "TAX_OFFSET_READ_MODELS_COLLECTION",
-            "_load_cost_statistics_read_models_detailed_payload",
+            "_load_" + "cost_statistics_read_models_detailed_payload",
             "_load_tax_offset_read_models_detailed_payload",
-            "_save_cost_statistics_read_models_detailed",
+            "_save_" + "cost_statistics_read_models_detailed",
             "_save_tax_offset_read_models_detailed",
         ):
             if forbidden in source:
                 violations.append(f"state_store.py contains {forbidden}")
 
         self.assertEqual(violations, [])
+
+    def test_cost_statistics_does_not_retain_full_snapshot_load_or_unconditional_save_io(self) -> None:
+        legacy_methods = (
+            "load_" + "cost_statistics_read_models",
+            "save_" + "cost_statistics_read_models",
+        )
+        paths = (
+            SERVICES_ROOT / "cost_statistics_read_model_repository.py",
+            SERVICES_ROOT / "postgres_repositories/read_models.py",
+            SERVICES_ROOT / "postgres_state_store.py",
+            SERVICES_ROOT / "state_store.py",
+            SERVICES_ROOT / "state_store_protocol.py",
+        )
+        violations: list[str] = []
+
+        for path in paths:
+            source = path.read_text(encoding="utf-8")
+            for method_name in legacy_methods:
+                if f"def {method_name}(" in source:
+                    violations.append(f"{path.name} retains {method_name}")
+        postgres_state_store_source = (SERVICES_ROOT / "postgres_state_store.py").read_text(encoding="utf-8")
+        local_state_store_source = (SERVICES_ROOT / "state_store.py").read_text(encoding="utf-8")
+        self.assertNotIn('"cost_statistics_read_models": self.', postgres_state_store_source)
+        self.assertNotIn('current_payload["cost_statistics_read_models"]', local_state_store_source)
+        self.assertEqual(violations, [])
+
+    def test_cost_statistics_bulk_export_does_not_reload_full_explorer_payload(self) -> None:
+        query_source = (SERVICES_ROOT / "cost_statistics_query_service.py").read_text(encoding="utf-8")
+        repository_source = (SERVICES_ROOT / "postgres_repositories/read_models.py").read_text(encoding="utf-8")
+
+        self.assertNotIn("def _filtered_entries_from_read_model(", query_source)
+        self.assertIn("def get_cost_statistics_export_page(", repository_source)
+        self.assertIn("COST_STATISTICS_EXPORT_BATCH_SIZE = 1000", query_source)
+        self.assertIn("Workbook(write_only=True)", query_source)
+        self.assertIn("normalized_page_size > 1000", repository_source)
+
+        export_start = query_source.index("    def _export_view_from_read_model(")
+        export_end = query_source.index("    def _load_export_first_page(", export_start)
+        export_source = query_source[export_start:export_end]
+        self.assertNotIn("_require_fresh_explorer", export_source)
+        self.assertNotIn("_entries_from_explorer_payload", export_source)
+        self.assertNotIn("get_cost_statistics_view", export_source)
+
+    def test_cost_statistics_projection_unchanged_check_reads_scope_metadata_only(self) -> None:
+        projection_source = (SERVICES_ROOT / "cost_statistics_sql_projection.py").read_text(encoding="utf-8")
+        method_start = projection_source.index("    def _unchanged_cost_statistics_scope_result(")
+        method_end = projection_source.index("    def _build_explorer_payload(", method_start)
+        method_source = projection_source[method_start:method_end]
+
+        self.assertIn("get_cost_statistics_scope_metadata", method_source)
+        self.assertNotIn("get_cost_statistics_view", method_source)
+        self.assertNotIn("payload", method_source)
+
+    def test_cost_and_tax_sql_projection_owners_are_split_without_legacy_module(self) -> None:
+        legacy_path = SERVICES_ROOT / "cost_tax_sql_projection.py"
+        cost_source = (SERVICES_ROOT / "cost_statistics_sql_projection.py").read_text(encoding="utf-8")
+        tax_source = (SERVICES_ROOT / "tax_offset_sql_projection.py").read_text(encoding="utf-8")
+        worker_source = (REPO_ROOT / "backend/src/fin_ops_platform/app/worker.py").read_text(encoding="utf-8")
+
+        self.assertFalse(legacy_path.exists())
+        self.assertIn("class CostStatisticsSqlProjectionBuilder", cost_source)
+        self.assertNotIn("TaxOffsetSqlProjectionBuilder", cost_source)
+        self.assertNotIn("tax_offset_", cost_source)
+        self.assertIn("class TaxOffsetSqlProjectionBuilder", tax_source)
+        self.assertNotIn("CostStatisticsSqlProjectionBuilder", tax_source)
+        self.assertNotIn("cost_statistics_", tax_source)
+        self.assertIn("services.cost_statistics_sql_projection import CostStatisticsSqlProjectionBuilder", worker_source)
+        self.assertIn("services.tax_offset_sql_projection import TaxOffsetSqlProjectionBuilder", worker_source)
+        self.assertNotIn("cost_tax_sql_projection", worker_source)
 
     def test_application_state_store_workbench_read_models_do_not_use_app_mongo(self) -> None:
         path = SERVICES_ROOT / "state_store.py"
@@ -1100,8 +1144,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "save_workbench_overrides",
             "load_workbench_exception_cases",
             "save_workbench_exception_cases",
-            "load_cost_statistics_read_models",
-            "save_cost_statistics_read_models",
             "load_tax_offset_read_models",
             "save_tax_offset_read_models",
             "load_etc_state",
@@ -1338,8 +1380,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             },
             "routes_workbench.py": {
                 "module": "fin_ops_platform.app.routes_workbench",
-                "class": "WorkbenchApiRoutes",
-                "server_markers": ("_workbench_api_routes = WorkbenchApiRoutes(", "_workbench_api_routes."),
+                "class": "WorkbenchReadApiRoutes",
+                "server_markers": ("def _workbench_read_routes", "_workbench_read_routes()."),
             },
             "routes_workbench_actions.py": {
                 "module": "fin_ops_platform.app.routes_workbench_actions",
@@ -1615,7 +1657,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         handler_source = _function_source(server_tree, server_source, "_handle_api_workbench_exception_apply")
         if "_workbench_action_api_routes.exception_apply(payload, request_id=request_id)" not in handler_source:
             violations.append("server.py exception apply wrapper does not delegate to the route owner")
-        if "_workbench_write_freshness_guard()" not in handler_source:
+        if "_workbench_write_freshness_guard(payload)" not in handler_source:
             violations.append("server.py exception apply wrapper no longer preserves the freshness guard")
         if "_workbench_write_response(result)" not in handler_source:
             violations.append("server.py exception apply wrapper no longer preserves write response mapping")
@@ -1687,7 +1729,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         wrapper_source = _function_source(server_tree, server_source, "_handle_api_workbench_confirm_link")
         for marker in (
-            "_workbench_write_freshness_guard()",
+            "_workbench_write_freshness_guard(payload)",
             "_workbench_write_auth_context(headers)",
             "_handle_live_workbench_confirm_link(",
             "request_id=request_id",
@@ -1726,7 +1768,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         wrapper_source = _function_source(server_tree, server_source, "_handle_api_workbench_mark_exception")
         for marker in (
-            "_workbench_write_freshness_guard()",
+            "_workbench_write_freshness_guard(payload)",
             "_handle_live_workbench_mark_exception(payload)",
         ):
             if marker not in wrapper_source:
@@ -1764,7 +1806,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         wrapper_source = _function_source(server_tree, server_source, "_handle_api_workbench_cancel_link")
         for marker in (
-            "_workbench_write_freshness_guard()",
+            "_workbench_write_freshness_guard(payload)",
             "_workbench_write_auth_context(headers)",
             "_handle_live_workbench_cancel_link(",
             "request_id=request_id",
@@ -1806,7 +1848,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         wrapper_source = _function_source(server_tree, server_source, "_handle_api_workbench_withdraw_link")
         for marker in (
-            "_workbench_write_freshness_guard()",
+            "_workbench_write_freshness_guard(payload)",
             "_workbench_write_auth_context(headers)",
             "_workbench_action_api_routes.withdraw_link(",
             "request_id=request_id",
@@ -1891,7 +1933,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             handler_source = _function_source(server_tree, server_source, handler_name)
             for marker in (
                 "_load_json_body(body)",
-                "_workbench_write_freshness_guard()",
+                "_workbench_write_freshness_guard(payload)",
                 f"_workbench_action_api_routes.{route_method}(payload, request_id=request_id)",
                 "_workbench_write_response(result)",
             ):
@@ -1922,7 +1964,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         wrapper_source = _function_source(server_tree, server_source, "_handle_api_workbench_update_bank_exception")
         for marker in (
             "_load_json_body(body)",
-            "_workbench_write_freshness_guard()",
+            "_workbench_write_freshness_guard(payload)",
             "_workbench_action_api_routes.update_bank_exception(payload)",
             "_workbench_write_response(result)",
         ):
@@ -1961,7 +2003,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         wrapper_source = _function_source(server_tree, server_source, "_handle_api_workbench_oa_bank_exception")
         for marker in (
             "_load_json_body(body)",
-            "_workbench_write_freshness_guard()",
+            "_workbench_write_freshness_guard(payload)",
             "_workbench_action_api_routes.oa_bank_exception(payload)",
             "_workbench_write_response(result)",
         ):
@@ -2005,7 +2047,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         )
         for marker in (
             "_load_json_body(body)",
-            "_workbench_write_freshness_guard()",
+            "_workbench_write_freshness_guard(payload)",
             "_workbench_action_api_routes.confirm_personal_advance_repayment(payload, request_id=request_id)",
             "_workbench_write_response(result)",
         ):
@@ -2044,7 +2086,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         wrapper_source = _function_source(server_tree, server_source, "_handle_api_workbench_cancel_exception")
         for marker in (
             "_load_json_body(body)",
-            "_workbench_write_freshness_guard()",
+            "_workbench_write_freshness_guard(payload)",
             "_handle_live_workbench_cancel_exception(payload)",
         ):
             if marker not in wrapper_source:
@@ -2084,7 +2126,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         wrapper_source = _function_source(server_tree, server_source, "_handle_api_workbench_ignore_row")
         for marker in (
             "_load_json_body(body)",
-            "_workbench_write_freshness_guard()",
+            "_workbench_write_freshness_guard(payload)",
             "_handle_workbench_ignore_row_payload(payload)",
         ):
             if marker not in wrapper_source:
@@ -2122,7 +2164,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         wrapper_source = _function_source(server_tree, server_source, "_handle_api_workbench_unignore_row")
         for marker in (
             "_load_json_body(body)",
-            "_workbench_write_freshness_guard()",
+            "_workbench_write_freshness_guard(payload)",
             "_handle_workbench_unignore_row_payload(payload)",
         ):
             if marker not in wrapper_source:
@@ -2195,35 +2237,27 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_legacy_workbench_api_routes_are_read_only_and_action_service_deleted(self) -> None:
+    def test_legacy_workbench_api_routes_and_action_service_stay_deleted(self) -> None:
         route_path = APP_ROOT / "routes_workbench.py"
         service_path = SERVICES_ROOT / "workbench_action_service.py"
         server_path = APP_ROOT / "server.py"
         route_source = route_path.read_text(encoding="utf-8")
         server_source = server_path.read_text(encoding="utf-8")
-        route_tree = _parse(route_path)
-        route_class = _class_source(route_tree, route_source, "WorkbenchApiRoutes")
         violations: list[str] = []
 
         if service_path.exists():
             violations.append("legacy workbench_action_service.py must stay deleted")
-
-        for required in ("def get_workbench(", "def get_row_detail("):
-            if required not in route_class:
-                violations.append(f"legacy WorkbenchApiRoutes lost required read compat method {required}")
-
-        for old_action in ("confirm_link", "mark_exception", "cancel_link", "update_bank_exception"):
-            if f"def {old_action}(" in route_class:
-                violations.append(f"legacy WorkbenchApiRoutes resurrected unused action {old_action}")
-
         for forbidden in (
+            "WorkbenchApiRoutes",
+            "_workbench_api_routes",
+            "def get_workbench(",
             "WorkbenchActionService",
             "workbench_action_service",
             "_workbench_action_service",
             "_action_service",
         ):
             if forbidden in route_source:
-                violations.append(f"legacy WorkbenchApiRoutes still references {forbidden}")
+                violations.append(f"routes_workbench.py resurrected legacy surface {forbidden}")
             if forbidden in server_source:
                 violations.append(f"Application runtime still references {forbidden}")
 
@@ -2593,7 +2627,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         for snippet in (
             "def execute(",
             'reason = str(domain_plan.get("reason") or "derived_lifecycle_cost_statistics")',
-            'persist_empty = reason != "pending_invoice_rules_changed"',
             "runtime_service: CostStatisticsRuntimeService",
             '"deleted_counts": {"cost_statistics_read_models": len(deleted_scope_keys)}',
             '"enqueued_jobs": enqueued_jobs',
@@ -2655,13 +2688,24 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         query_path = SERVICES_ROOT / "cost_statistics_query_service.py"
         runtime_path = SERVICES_ROOT / "cost_statistics_runtime_service.py"
         service_path = SERVICES_ROOT / "cost_statistics_service.py"
+        read_model_service_path = SERVICES_ROOT / "cost_statistics_read_model_service.py"
+        service_test_path = REPO_ROOT / "tests" / "test_cost_statistics_service.py"
+        read_model_service_test_path = REPO_ROOT / "tests" / "test_cost_statistics_read_model_service.py"
         removed_export_service_path = SERVICES_ROOT / "project_detail_export_service.py"
         server_path = APP_ROOT / "server.py"
         query_source = query_path.read_text(encoding="utf-8")
         runtime_source = runtime_path.read_text(encoding="utf-8")
-        service_source = service_path.read_text(encoding="utf-8")
         server_source = server_path.read_text(encoding="utf-8")
         violations: list[str] = []
+
+        if service_path.exists():
+            violations.append("legacy cost_statistics_service.py still exists")
+        if service_test_path.exists():
+            violations.append("legacy test_cost_statistics_service.py still exists")
+        if read_model_service_path.exists():
+            violations.append("legacy cost_statistics_read_model_service.py still exists")
+        if read_model_service_test_path.exists():
+            violations.append("legacy test_cost_statistics_read_model_service.py still exists")
 
         for forbidden in (
             "_cost_statistics_service",
@@ -2681,22 +2725,45 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "_cache_fresh_explorer_payload",
             "worker_cost_statistics_read_model_refresh",
             "build_fresh_cache_envelope",
+            "source_versions_provider",
+            "expected_source_versions",
+            "delete_redis_cache",
+            "read_model_service",
+            "persist_read_models",
+            "_persist_read_models",
         ):
             if forbidden in runtime_source:
                 violations.append(f"CostStatisticsRuntimeService still has legacy writer path {forbidden}")
-        for forbidden in (
-            "ProjectDetailExportService",
-            "project_detail_export_service",
-            "def get_export_preview(",
-            "def export_view(",
-            "raw_workbench_loader",
-        ):
-            if forbidden in service_source:
-                violations.append(f"CostStatisticsService still owns legacy export path {forbidden}")
         if removed_export_service_path.exists():
             violations.append("project_detail_export_service.py still exists")
-        if "raw_workbench_loader=self._build_raw_workbench_payload" in server_source:
-            violations.append("server.py still injects raw workbench loader into CostStatisticsService")
+        for forbidden in (
+            "CostStatisticsService(",
+            "self._cost_statistics_service =",
+            "grouped_workbench_loader=self._build_api_workbench_payload",
+            "raw_workbench_loader=self._build_raw_workbench_payload",
+            "_cost_statistics_expected_source_versions",
+            "_cost_statistics_source_versions",
+            "_cost_statistics_workbench_source_versions",
+            "_cost_statistics_bank_detail_source_versions",
+            "_delete_cost_statistics_redis_cache",
+            "_cost_statistics_read_model_service",
+            "_persist_cost_statistics_read_models_best_effort",
+            "tag_selection_provider=getattr(self, \"_app_settings_service\", None)",
+        ):
+            if forbidden in server_source:
+                violations.append(f"server.py still wires legacy CostStatisticsService via {forbidden}")
+        for path in _python_files(SOURCE_ROOT):
+            source = path.read_text(encoding="utf-8")
+            for forbidden in (
+                "CostStatisticsService",
+                "cost_statistics_service",
+                "_cost_statistics_service",
+                "CostStatisticsReadModelService",
+                "cost_statistics_read_model_service",
+                "_cost_statistics_read_model_service",
+            ):
+                if forbidden in source:
+                    violations.append(f"{_relative(path)} still references removed {forbidden}")
 
         self.assertEqual(violations, [])
 
@@ -3021,17 +3088,24 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
     def test_oa_pending_payment_routes_use_route_owner(self) -> None:
         server_path = APP_ROOT / "server.py"
         route_path = APP_ROOT / "routes_oa_pending_payments.py"
+        query_service_path = SERVICES_ROOT / "oa_pending_payment_service.py"
+        command_service_path = SERVICES_ROOT / "oa_pending_payment_command_service.py"
+        read_model_service_path = SERVICES_ROOT / "oa_pending_payment_read_model_service.py"
+        relation_repository_path = SERVICES_ROOT / "postgres_repositories" / "oa_pending_payment_relation.py"
         server_source = server_path.read_text(encoding="utf-8")
         server_tree = _parse(server_path)
         route_source = route_path.read_text(encoding="utf-8")
         route_tree = _parse(route_path)
         route_class = _class_source(route_tree, route_source, "OaPendingPaymentApiRoutes")
+        query_service_source = query_service_path.read_text(encoding="utf-8")
+        command_service_source = command_service_path.read_text(encoding="utf-8")
+        read_model_service_source = read_model_service_path.read_text(encoding="utf-8")
+        relation_repository_source = relation_repository_path.read_text(encoding="utf-8")
         violations: list[str] = []
 
         for required in (
             "def route(",
             "/api/oa-pending-payments/rows",
-            "/api/oa-pending-payments/filter-options",
             "/api/oa-pending-payments/bank-transaction-candidates",
             "/api/oa-pending-payments/oa/",
             "/api/oa-pending-payments/bank-transactions/",
@@ -3049,6 +3123,10 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         if "_oa_pending_payment_routes().route(method, route_path, query, body, headers)" not in server_source:
             violations.append("Application does not dispatch OA pending payment routes through route owner")
         for forbidden_fallback in (
+            "/api/oa-pending-payments/filter-options",
+            "def filter_options(",
+            "def all_rows(",
+            "self._query_service",
             "return self._query_service.",
             "payload = self._query_service.",
             "self._query_service.list_rows",
@@ -3060,6 +3138,38 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if forbidden_fallback in route_class:
                 violations.append(f"OA pending payment route owner still has live read fallback {forbidden_fallback}")
+        for forbidden_service_symbol in (
+            "def all_rows(",
+            "def filter_options(",
+            "def filter_options_for_rows(",
+        ):
+            if forbidden_service_symbol in query_service_source or forbidden_service_symbol in read_model_service_source:
+                violations.append(f"OA pending payment service still exposes retired symbol {forbidden_service_symbol}")
+        if "SnapshotOaPendingPaymentRelationRepository" in relation_repository_source:
+            violations.append("OA pending payment relation repository still exposes the snapshot fallback")
+        source_projection = _function_source(server_tree, server_source, "_oa_pending_payment_source_projection")
+        if "_oa_adapter" in source_projection:
+            violations.append("OA pending payment source projection still falls back to Workbench's private OA adapter")
+        relation_repository = _function_source(server_tree, server_source, "_oa_pending_payment_relation_repository")
+        if "load_oa_pending_payment_bank_relations" in relation_repository or "save_oa_pending_payment_bank_relations" in relation_repository:
+            violations.append("OA pending payment relation composition still falls back to local snapshot persistence")
+        command_composition = _function_source(server_tree, server_source, "_oa_pending_payment_command_service")
+        if "payment_status_snapshot_writer=self._oa_pending_payment_source_snapshot_repository()" not in command_composition:
+            violations.append("OA payment command does not compose the canonical PostgreSQL status snapshot writer")
+        paid_snapshot_write = _function_source(
+            _parse(command_service_path),
+            command_service_source,
+            "_record_paid_statuses",
+        )
+        if "record_paid_statuses" not in paid_snapshot_write:
+            violations.append("OA payment command does not reconcile successful external writes into PostgreSQL")
+        enqueue_refreshes = _function_source(
+            _parse(command_service_path),
+            command_service_source,
+            "_enqueue_refreshes_for_records",
+        )
+        if 'scope_key != "all"' not in enqueue_refreshes:
+            violations.append("OA payment command can still enqueue ordinary oa_pending_payment:all refreshes")
         for removed_write_path in (
             "/api/oa-pending-payments/confirm-paid",
             "/api/oa-pending-payments/auto-reconcile-bank-transactions",
@@ -3102,8 +3212,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             SERVICES_ROOT / "batch_accounting_service.py",
             SERVICES_ROOT / "no_oa_bank_batch_application_service.py",
             SERVICES_ROOT / "no_oa_bank_batch_service.py",
-            SERVICES_ROOT / "cost_tax_sql_projection.py",
-            SERVICES_ROOT / "cost_statistics_service.py",
+            SERVICES_ROOT / "cost_statistics_sql_projection.py",
         }
         forbidden_snippets = {
             "from app.workbench_pair_relations",
@@ -4118,6 +4227,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         service_source = service_path.read_text(encoding="utf-8")
         service_tree = _parse(service_path)
         submitted_relations_source = _function_source(service_tree, service_source, "_submitted_relations")
+        workbench_context_source = _function_source(service_tree, service_source, "_build_workbench_row_context")
+        service_factory_source = _function_source(tree, source, "_batch_accounting_service")
 
         violations: list[str] = []
         if "def _repair_batch_accounting_relation_case_ids" in source:
@@ -4147,6 +4258,20 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("submitted batch accounting list no longer uses the year-level relation DTO boundary")
         if "list_by_month" in submitted_relations_source:
             violations.append("submitted batch accounting list keeps legacy 12-month relation scan fallback")
+        for forbidden in ("grouped_workbench_loader", "_build_api_workbench_payload"):
+            if forbidden in service_source:
+                violations.append(f"BatchAccountingService keeps full Workbench payload fallback {forbidden}")
+            if forbidden in service_factory_source:
+                violations.append(f"Application batch accounting wiring keeps full Workbench payload fallback {forbidden}")
+        if "batch_accounting_workbench_read_model_unavailable" not in workbench_context_source:
+            violations.append("BatchAccountingService does not fail closed when its dedicated Workbench loader is unavailable")
+        for required_loader in (
+            "load_batch_accounting_workbench_payload",
+            "load_batch_accounting_submit_workbench_payload",
+            "load_batch_accounting_submitted_bank_workbench_payload",
+        ):
+            if required_loader not in service_factory_source:
+                violations.append(f"Application batch accounting wiring is missing dedicated loader {required_loader}")
 
         mutation_handlers = (
             (
@@ -4267,13 +4392,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         port_source = (SERVICES_ROOT / "workbench_payload_relation_read_port.py").read_text(encoding="utf-8")
 
         checked_sources = {
-            method_name: _function_source(tree, source, method_name)
-            for method_name in (
-                "_apply_pair_relations_to_payload",
-                "_supplement_missing_active_pair_relation_rows",
-                "_relation_for_group",
-                "_resolve_live_rows_direct",
-            )
+            "_resolve_live_rows_direct": _function_source(tree, source, "_resolve_live_rows_direct")
         }
         violations: list[str] = []
         if "class WorkbenchPayloadRelationReadPort" not in port_source:
@@ -4287,9 +4406,10 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"{method_name} still reads broad pair relation service directly")
             if "_workbench_payload_relation_read_port()" not in method_source:
                 violations.append(f"{method_name} does not use Workbench payload relation read port")
-        for required in ("get_active_relation_by_row_id", "list_active_relations"):
-            if required not in port_source:
-                violations.append(f"WorkbenchPayloadRelationReadPort is missing {required}")
+        if "get_active_relation_by_row_id" not in port_source:
+            violations.append("WorkbenchPayloadRelationReadPort is missing get_active_relation_by_row_id")
+        if "list_active_relations" in port_source:
+            violations.append("WorkbenchPayloadRelationReadPort retains unused broad list_active_relations I/O")
 
         self.assertEqual(violations, [])
 
@@ -4478,159 +4598,30 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_server_active_relation_repairs_use_relation_command_boundary(self) -> None:
-        path = APP_ROOT / "server.py"
-        source = path.read_text(encoding="utf-8")
-        tree = _parse(path)
-        sync_source = _function_source(tree, source, "_sync_oa_invoice_offset_auto_pair_relations")
-        repair_source = _function_source(tree, source, "_repair_active_relations_with_oa_attachment_context")
-        sync_executor_source = (SERVICES_ROOT / "workbench_oa_invoice_offset_sync_executor.py").read_text(
-            encoding="utf-8"
-        )
-        repair_executor_source = (SERVICES_ROOT / "workbench_oa_attachment_repair_context_executor.py").read_text(
-            encoding="utf-8"
-        )
-
-        violations: list[str] = []
-        if "_workbench_oa_invoice_offset_sync_executor().sync(" not in sync_source:
-            violations.append("_sync_oa_invoice_offset_auto_pair_relations does not delegate to sync executor")
-        if "_workbench_oa_attachment_repair_context_executor().repair(" not in repair_source:
-            violations.append("_repair_active_relations_with_oa_attachment_context does not delegate to repair context executor")
-        for marker in ("confirm_relation(", "cancel_relation("):
-            if marker not in sync_executor_source:
-                violations.append(f"WorkbenchOaInvoiceOffsetSyncExecutor does not delegate through command service {marker}")
-        if "confirm_relation(**repair.confirm_kwargs)" not in repair_executor_source:
-            violations.append("WorkbenchOaAttachmentRepairContextExecutor does not delegate through command service confirm_relation")
-        for method_name, method_source in (
-            ("_repair_active_relations_with_oa_attachment_context", repair_source),
-            ("_sync_oa_invoice_offset_auto_pair_relations", sync_source),
-        ):
-            for forbidden in (
-                "_workbench_pair_relation_service.create_active_relation",
-                "_workbench_pair_relation_service.cancel_relation",
-                "_workbench_pair_relation_service.record_history",
-            ):
-                if forbidden in method_source:
-                    violations.append(f"{method_name} keeps direct pair relation write {forbidden}")
-
-        self.assertEqual(violations, [])
-
-    def test_server_oa_invoice_offset_sync_uses_relation_read_port(self) -> None:
-        path = APP_ROOT / "server.py"
-        source = path.read_text(encoding="utf-8")
-        tree = _parse(path)
-        method_source = _function_source(tree, source, "_sync_oa_invoice_offset_auto_pair_relations")
-        factory_source = _function_source(tree, source, "_workbench_oa_invoice_offset_sync_executor")
-        executor_source = (SERVICES_ROOT / "workbench_oa_invoice_offset_sync_executor.py").read_text(encoding="utf-8")
-        port_source = (SERVICES_ROOT / "workbench_oa_invoice_offset_relation_read_port.py").read_text(encoding="utf-8")
-
-        violations: list[str] = []
-        if "class WorkbenchOaInvoiceOffsetRelationReadPort" not in port_source:
-            violations.append("Workbench OA invoice offset relation read port is missing")
-        if "def active_relations_for_mode" not in port_source:
-            violations.append("WorkbenchOaInvoiceOffsetRelationReadPort does not expose active_relations_for_mode")
-        if "_workbench_pair_relation_service.list_active_relations" in method_source:
-            violations.append("_sync_oa_invoice_offset_auto_pair_relations still reads broad pair service directly")
-        if "_workbench_oa_invoice_offset_sync_executor().sync(" not in method_source:
-            violations.append("_sync_oa_invoice_offset_auto_pair_relations does not delegate to sync executor")
-        if "_workbench_oa_invoice_offset_relation_read_port().active_relations_for_mode" not in factory_source:
-            violations.append("OA invoice offset sync executor factory does not use relation read port")
-        if "relation_mode=OA_INVOICE_OFFSET_AUTO_MATCH_MODE" not in factory_source:
-            violations.append("OA invoice offset sync executor factory does not constrain relation mode")
-        if "active_relations_for_mode(self._relation_mode)" not in executor_source:
-            violations.append("WorkbenchOaInvoiceOffsetSyncExecutor does not constrain active relation reads by mode")
-
-        self.assertEqual(violations, [])
-
-    def test_server_oa_attachment_repair_uses_relation_read_port(self) -> None:
-        path = APP_ROOT / "server.py"
-        source = path.read_text(encoding="utf-8")
-        tree = _parse(path)
-        method_source = _function_source(tree, source, "_repair_active_relations_with_oa_attachment_context")
-        factory_source = _function_source(tree, source, "_workbench_oa_attachment_repair_context_executor")
-        executor_source = (SERVICES_ROOT / "workbench_oa_attachment_repair_context_executor.py").read_text(
-            encoding="utf-8"
-        )
-        port_source = (SERVICES_ROOT / "workbench_oa_attachment_repair_relation_read_port.py").read_text(encoding="utf-8")
-
-        violations: list[str] = []
-        if "class WorkbenchOaAttachmentRepairRelationReadPort" not in port_source:
-            violations.append("Workbench OA attachment repair relation read port is missing")
-        if "def list_active_relations" not in port_source:
-            violations.append("WorkbenchOaAttachmentRepairRelationReadPort does not expose list_active_relations")
-        if "_workbench_pair_relation_service.list_active_relations" in method_source:
-            violations.append("_repair_active_relations_with_oa_attachment_context still reads broad pair service directly")
-        if "_workbench_oa_attachment_repair_context_executor().repair(" not in method_source:
-            violations.append("_repair_active_relations_with_oa_attachment_context does not delegate to repair context executor")
-        if "_workbench_oa_attachment_repair_relation_read_port().list_active_relations" not in factory_source:
-            violations.append("OA attachment repair context executor factory does not use relation read port")
-        for marker in (
-            "confirm_relation(**repair.confirm_kwargs)",
-            "replace_existing",
-            "before_relations",
-            "repair_missing_oa_attachment_context",
-            "repair_active_relations_with_oa_attachment_context",
-            "persist_pair_relations",
-            "execute_lifecycle_event",
-        ):
-            if marker not in executor_source:
-                violations.append(f"WorkbenchOaAttachmentRepairContextExecutor missing repair marker {marker}")
-        for forbidden in (
-            "Response",
-            "HTTPStatus",
-            "_json_response",
-            "ReadModelRefreshGateway",
-            "app.auth",
-            "server.py",
-            "MongoOAAdapter",
-        ):
-            if forbidden in executor_source:
-                violations.append(f"WorkbenchOaAttachmentRepairContextExecutor gained forbidden dependency: {forbidden}")
-
-        self.assertEqual(violations, [])
-
     def test_workbench_oa_attachment_context_row_index_extraction_stays_local(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")
         server_tree = _parse(server_path)
         index_source = (SERVICES_ROOT / "workbench_oa_attachment_context_row_index.py").read_text(encoding="utf-8")
-        method_sources = {
-            method_name: _function_source(server_tree, server_source, method_name)
-            for method_name in (
-                "_raw_workbench_payload_rows_by_id",
-                "_raw_workbench_payload_row_ids",
-                "_oa_attachment_context_row_ids_by_oa_id",
-                "_invoice_row_is_oa_attachment_context",
-                "_oa_id_from_attachment_invoice_id",
-            )
-        }
+        context_source = _function_source(
+            server_tree,
+            server_source,
+            "_cached_oa_attachment_context_row_ids",
+        )
         factory_source = _function_source(server_tree, server_source, "_workbench_oa_attachment_context_row_index")
-        analysis_source = (
-            REPO_ROOT
-            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-oa-attachment-context-row-index-extraction-2026-06-25.md"
-        ).read_text(encoding="utf-8")
         violations: list[str] = []
 
-        for method_name, method_source in method_sources.items():
-            if "_workbench_oa_attachment_context_row_index()" not in method_source:
-                violations.append(f"Application {method_name} does not delegate to OA attachment context row index")
-        combined_method_source = "\n".join(method_sources.values())
-        for forbidden in (
-            "source_kind",
-            "oa_attachment_invoice",
-            "derived_from_oa_id",
-            "oa_attachment_parent_oa_id",
-            "oa_attachment_matches_oa",
-            "oa_attachment_row_id_matches_oa",
-            "for section_name in",
-            "for pane in",
+        for marker in (
+            "_workbench_oa_attachment_context_row_index()",
+            "grouped_payload_rows_by_id(payload)",
+            "attachment_row_ids_by_oa_id(rows_by_id)",
+            "invoice_row_is_attachment_context",
         ):
-            if forbidden in combined_method_source:
-                violations.append(f"Application still owns OA attachment context row-index detail: {forbidden}")
+            if marker not in context_source:
+                violations.append(f"Confirm-link OA attachment context lookup missing marker: {marker}")
         for marker in (
             "class WorkbenchOaAttachmentContextRowIndex",
-            "def raw_payload_rows_by_id(",
-            "def raw_payload_row_ids(",
+            "def grouped_payload_rows_by_id(",
             "def attachment_row_ids_by_oa_id(",
             "def invoice_row_is_attachment_context(",
             "def oa_id_from_attachment_invoice_id(",
@@ -4644,6 +4635,13 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if marker not in index_source:
                 violations.append(f"WorkbenchOaAttachmentContextRowIndex missing marker: {marker}")
+        for forbidden in (
+            "def raw_payload_rows_by_id(",
+            "def raw_payload_row_ids(",
+            "def _raw_payload_sections(",
+        ):
+            if forbidden in index_source:
+                violations.append(f"WorkbenchOaAttachmentContextRowIndex retains raw payload surface: {forbidden}")
         for marker in (
             "WorkbenchOaAttachmentContextRowIndex(",
             "attachment_parent_oa_id=oa_attachment_parent_oa_id",
@@ -4668,14 +4666,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if forbidden in index_source:
                 violations.append(f"WorkbenchOaAttachmentContextRowIndex gained forbidden dependency: {forbidden}")
-        for marker in (
-            "server-py:workbench-oa-attachment-context-row-index-extraction",
-            "WorkbenchOaAttachmentContextRowIndex",
-            "raw payload row indexing",
-            "attachment invoice id fallback matching",
-        ):
-            if marker not in analysis_source:
-                violations.append(f"Workbench OA attachment context row index analysis missing marker: {marker}")
 
         self.assertEqual(violations, [])
 
@@ -4701,84 +4691,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("_expand_confirm_link_row_ids_for_existing_context no longer preserves cached existing context expansion")
         if "_confirm_link_context_row_ids_to_preserve" not in method_source:
             violations.append("_expand_confirm_link_row_ids_for_existing_context no longer preserves context row-id filter")
-
-        self.assertEqual(violations, [])
-
-    def test_server_auto_pair_conflict_uses_relation_read_port(self) -> None:
-        path = APP_ROOT / "server.py"
-        source = path.read_text(encoding="utf-8")
-        tree = _parse(path)
-        method_source = _function_source(tree, source, "_auto_pair_conflicts_with_manual_relation")
-        port_source = (SERVICES_ROOT / "workbench_auto_pair_conflict_relation_read_port.py").read_text(encoding="utf-8")
-
-        violations: list[str] = []
-        if "class WorkbenchAutoPairConflictRelationReadPort" not in port_source:
-            violations.append("Workbench auto-pair conflict relation read port is missing")
-        if "def get_active_relation_by_row_id" not in port_source:
-            violations.append("WorkbenchAutoPairConflictRelationReadPort does not expose get_active_relation_by_row_id")
-        if "_workbench_pair_relation_service.get_active_relation_by_row_id" in method_source:
-            violations.append("_auto_pair_conflicts_with_manual_relation still reads broad pair service directly")
-        if "_workbench_auto_pair_conflict_relation_read_port()" not in method_source:
-            violations.append("_auto_pair_conflicts_with_manual_relation does not use auto-pair conflict relation read port")
-        if "SYSTEM_AUTO_PAIR_RELATION_MODES" not in method_source:
-            violations.append("_auto_pair_conflicts_with_manual_relation no longer preserves system auto-pair mode allowlist")
-        if "return True" not in method_source or "return False" not in method_source:
-            violations.append("_auto_pair_conflicts_with_manual_relation no longer returns boolean conflict result")
-
-        self.assertEqual(violations, [])
-
-    def test_server_retained_oa_supplemental_uses_relation_read_port(self) -> None:
-        path = APP_ROOT / "server.py"
-        source = path.read_text(encoding="utf-8")
-        tree = _parse(path)
-        method_source = _function_source(tree, source, "_supplemental_retained_oa_row_ids")
-        builder_source = _function_source(tree, source, "_workbench_supplemental_retained_oa_row_selector")
-        port_source = (SERVICES_ROOT / "workbench_retained_oa_supplemental_relation_read_port.py").read_text(encoding="utf-8")
-        selector_source = (SERVICES_ROOT / "workbench_supplemental_retained_oa_row_selector.py").read_text(encoding="utf-8")
-
-        violations: list[str] = []
-        if "class WorkbenchRetainedOaSupplementalRelationReadPort" not in port_source:
-            violations.append("Workbench retained-OA supplemental relation read port is missing")
-        if "def list_active_relations" not in port_source:
-            violations.append("WorkbenchRetainedOaSupplementalRelationReadPort does not expose list_active_relations")
-        if "_workbench_pair_relation_service.list_active_relations" in source:
-            violations.append("_supplemental_retained_oa_row_ids still reads broad pair service directly")
-        if "return self._workbench_supplemental_retained_oa_row_selector().select(cutoff_date)" not in method_source:
-            violations.append("_supplemental_retained_oa_row_ids does not delegate to selector")
-        for marker in (
-            "manual_retained_oa_row_ids=self._manual_retained_oa_row_ids",
-            "relation_read_port=self._workbench_retained_oa_supplemental_relation_read_port()",
-            "resolve_live_rows=lambda bank_row_ids: self._resolve_live_rows_direct(bank_row_ids, month_hint=\"all\")",
-            "row_is_on_or_after=self._row_is_on_or_after",
-        ):
-            if marker not in builder_source:
-                violations.append(f"supplemental retained OA selector builder missing {marker}")
-        for marker in (
-            "class WorkbenchSupplementalRetainedOaRowSelector",
-            "def select(",
-            "retained_row_ids: set[str] = set(self._manual_retained_oa_row_ids())",
-            "list_active_relations",
-            "self._resolve_live_rows(bank_row_ids)",
-            "self._row_is_on_or_after(row, cutoff_date, row_type=\"bank\")",
-            "return sorted(retained_row_ids)",
-        ):
-            if marker not in selector_source:
-                violations.append(f"WorkbenchSupplementalRetainedOaRowSelector missing {marker}")
-        for forbidden in (
-            "Response",
-            "HTTPStatus",
-            "_json_response",
-            "ReadModelRefreshGateway",
-            "outbox",
-            "readiness",
-            "clear_cache",
-            "set_cached",
-            "save_workbench",
-            "app.auth",
-            "server.py",
-        ):
-            if forbidden in selector_source:
-                violations.append(f"WorkbenchSupplementalRetainedOaRowSelector gained forbidden dependency: {forbidden}")
 
         self.assertEqual(violations, [])
 
@@ -5956,17 +5868,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_workbench_row_detail_route_owner_extraction_updates_queue(self) -> None:
-        queue_source = (
-            REPO_ROOT / ".planning/refactors/modular-io-boundaries/autonomous/MODULE-QUEUE.md"
-        ).read_text(encoding="utf-8")
-        next_prompt_source = (
-            REPO_ROOT / ".planning/refactors/modular-io-boundaries/autonomous/NEXT-PROMPT.md"
-        ).read_text(encoding="utf-8")
-        analysis_source = (
-            REPO_ROOT
-            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-row-detail-route-owner-extraction.md"
-        ).read_text(encoding="utf-8")
+    def test_workbench_row_detail_route_owner_uses_generation_query_facade_only(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")
         server_tree = _parse(server_path)
@@ -5974,102 +5876,64 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         routes_source = routes_path.read_text(encoding="utf-8")
         routes_tree = _parse(routes_path)
         row_detail_route_source = _class_source(routes_tree, routes_source, "WorkbenchRowDetailApiRoutes")
-        wrapper_source = _function_source(server_tree, server_source, "_get_api_workbench_row_detail_payload")
+        handler_source = _function_source(server_tree, server_source, "_handle_api_workbench_row_detail")
+        builder_source = _function_source(server_tree, server_source, "_build_workbench_row_detail_api_routes")
         violations: list[str] = []
 
-        if (
-            "| 215 | `server-py:workbench-row-detail-route-owner-extraction` | implementation-closed"
-            not in queue_source
-        ):
-            violations.append("Workbench row detail route-owner extraction is not closed as implementation")
-        if (
-            "| 216 | `server-py:workbench-group-detail-route-owner-audit`"
-            not in queue_source
-        ):
-            violations.append("Workbench row detail extraction no longer records group detail audit follow-up")
-        if "class WorkbenchRowDetailApiRoutes" not in routes_source:
-            violations.append("WorkbenchRowDetailApiRoutes is missing")
-        if "self._workbench_row_detail_routes().get_payload(row_id, month=month)" not in wrapper_source:
-            violations.append("Application row detail payload helper is not a thin route-owner delegate")
-        for removed_helper in (
-            "def _workbench_row_detail_from_query_facade",
-            "def _workbench_row_detail_route_fallback_allowed",
-            "def _workbench_row_detail_route_query_service",
-        ):
-            if removed_helper in server_source:
-                violations.append(f"Application still owns row detail fallback helper: {removed_helper}")
         for marker in (
+            "class WorkbenchRowDetailApiRoutes",
+            "query_facade_provider",
+            "def get_result(",
+            "expected_read_model_version",
+            ".row_detail(",
+        ):
+            if marker not in row_detail_route_source:
+                violations.append(f"WorkbenchRowDetailApiRoutes missing generation-query marker: {marker}")
+        for marker in (
+            "_workbench_row_detail_routes().get_result(",
+            "expected_read_model_version=expected_read_model_version",
+        ):
+            if marker not in handler_source:
+                violations.append(f"Application row-detail HTTP handler missing marker: {marker}")
+        if "WorkbenchRowDetailApiRoutes(" not in builder_source or "query_facade_provider=self._workbench_query_facade" not in builder_source:
+            violations.append("Application row-detail route builder does not inject only the query facade")
+        for forbidden in (
             "etc_summary_row_detail",
             "live_row_detail",
             "cached_rows_resolver",
-            "query_facade_provider",
             "legacy_row_detail",
             "_legacy_route_fallback_allowed",
             "_row_detail_from_query_facade",
             "apply_row_override",
-        ):
-            if marker not in row_detail_route_source:
-                violations.append(f"WorkbenchRowDetailApiRoutes missing fallback marker: {marker}")
-        for forbidden in (
-            "WorkbenchRelationCommandService",
+            "WorkbenchQueryService",
+            "_records_by_id",
             "ReadModelRefreshGateway",
-            "enqueue_read_model",
-            "dirty_scope",
             "outbox",
             "save_workbench",
         ):
-            if forbidden in row_detail_route_source:
-                violations.append(f"WorkbenchRowDetailApiRoutes should stay read-only but contains {forbidden}")
-        if "WorkbenchRowDetailApiRoutes" not in analysis_source:
-            violations.append("Row detail extraction analysis does not record the new route owner")
+            if forbidden in row_detail_route_source or forbidden in builder_source:
+                violations.append(f"row-detail route resurrected non-generation fallback: {forbidden}")
+        if "def _get_api_workbench_row_detail_payload" in server_source:
+            violations.append("Application resurrected the internal legacy row-detail payload helper")
 
         self.assertEqual(violations, [])
 
-    def test_legacy_contamination_surfaces_stay_quarantined(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        routes_path = APP_ROOT / "routes_workbench.py"
-        routes_source = routes_path.read_text(encoding="utf-8")
-        routes_tree = _parse(routes_path)
-        row_detail_route_source = _class_source(routes_tree, routes_source, "WorkbenchRowDetailApiRoutes")
-        row_detail_builder_source = _function_source(server_tree, server_source, "_build_workbench_row_detail_api_routes")
+    def test_legacy_contamination_surfaces_stay_deleted(self) -> None:
+        server_source = (APP_ROOT / "server.py").read_text(encoding="utf-8")
+        routes_source = (APP_ROOT / "routes_workbench.py").read_text(encoding="utf-8")
         batch_service_source = (SERVICES_ROOT / "batch_accounting_service.py").read_text(encoding="utf-8")
-        handoff_source = (
-            REPO_ROOT
-            / ".planning/refactors/modular-io-boundaries/parallel/handoffs/T5-legacy-contamination.md"
-        ).read_text(encoding="utf-8")
         violations: list[str] = []
 
-        legacy_row_detail_call_count = server_source.count("legacy_row_detail=self._workbench_api_routes.get_row_detail")
-        if legacy_row_detail_call_count != 1:
-            violations.append(
-                "legacy row-detail fallback must have exactly one owner wiring through WorkbenchRowDetailApiRoutes"
-            )
-        if "legacy_row_detail=self._workbench_api_routes.get_row_detail" not in row_detail_builder_source:
-            violations.append("legacy row-detail fallback is not confined to the row-detail route builder")
-        if server_source.count("legacy_row_detail=") != 1:
-            violations.append("server.py gained another legacy_row_detail route wiring")
-        if routes_source.count("_legacy_route_fallback_allowed") != 2:
-            violations.append("row-detail fallback guard should have exactly one method and one call site")
         for forbidden in (
-            "WorkbenchRelationCommandService",
-            "ReadModelRefreshGateway",
-            "enqueue_read_model",
-            "dirty_scope",
-            "outbox",
-            "readiness",
-            "AppStatus",
-            "clear_cache",
-            "set_cached",
-            "save_workbench",
-            "route_query_service_provider",
-            "query_service_provider",
-            "_records_by_id",
+            "legacy_row_detail",
+            "_legacy_route_fallback_allowed",
+            "_row_detail_from_query_facade",
+            "WorkbenchApiRoutes",
+            "_workbench_api_routes",
+            "_get_api_workbench_row_detail_payload",
         ):
-            if forbidden in row_detail_route_source:
-                violations.append(f"row-detail legacy fallback quarantine gained write/runtime side effect: {forbidden}")
-
+            if forbidden in server_source or forbidden in routes_source:
+                violations.append(f"legacy Workbench contamination resurfaced: {forbidden}")
         if "def repair_legacy_case_id_collisions" in batch_service_source:
             violations.append("batch accounting legacy repair method still exists after removal")
         active_repair_callers: list[str] = []
@@ -6084,13 +5948,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 "batch accounting legacy repair gained active app/service caller(s): "
                 + ", ".join(active_repair_callers)
             )
-        for marker in (
-            "WorkbenchRowDetailApiRoutes.legacy_row_detail",
-            "CodeGraph caller evidence",
-            "Stop condition",
-        ):
-            if marker not in handoff_source:
-                violations.append(f"T5 legacy contamination handoff missing marker: {marker}")
 
         self.assertEqual(violations, [])
 
@@ -6159,7 +6016,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         routes_tree = _parse(routes_path)
         read_route_source = _class_source(routes_tree, routes_source, "WorkbenchReadApiRoutes")
         groups_handler_source = _function_source(server_tree, server_source, "_handle_api_workbench_groups")
-        summary_handler_source = _function_source(server_tree, server_source, "_handle_api_workbench_summary")
         refresh_status_handler_source = _function_source(
             server_tree,
             server_source,
@@ -6172,7 +6028,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         violations: list[str] = []
 
         for marker in (
-            "def summary(",
+            "def initial(",
             "def refresh_status(",
             "def groups(",
             "normalize_workbench_group_search_mode",
@@ -6182,6 +6038,12 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if marker not in read_route_source:
                 violations.append(f"WorkbenchReadApiRoutes missing marker: {marker}")
+        if "def summary(" in read_route_source:
+            violations.append("WorkbenchReadApiRoutes still exposes the deleted summary endpoint")
+        if "_handle_api_workbench_summary" in server_source:
+            violations.append("server.py still defines the deleted Workbench summary handler")
+        if 'route_path == "/api/workbench/summary"' in server_source:
+            violations.append("server.py still routes the deleted Workbench summary endpoint")
         for forbidden in (
             "_normalize_workbench_group_json_query_param",
             "_normalize_workbench_group_search_mode",
@@ -6195,8 +6057,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"server.py groups handler still owns route mapping: {forbidden}")
         if "_workbench_read_routes().groups(" not in groups_handler_source:
             violations.append("server.py groups handler does not delegate to WorkbenchReadApiRoutes")
-        if "_workbench_read_routes().summary(" not in summary_handler_source:
-            violations.append("server.py summary handler does not delegate to WorkbenchReadApiRoutes")
         if "_workbench_read_routes().refresh_status(" not in refresh_status_handler_source:
             violations.append("server.py refresh-status handler does not delegate to WorkbenchReadApiRoutes")
         if "_workbench_query_facade().refresh_status" in refresh_status_handler_source:
@@ -6215,7 +6075,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"WorkbenchReadApiRoutes gained write/runtime side effect: {forbidden}")
         for marker in (
             "server-py:workbench-groups-read-route-owner-extraction",
-            "GET /api/workbench/summary",
             "GET /api/workbench/groups",
             "WorkbenchReadApiRoutes",
             "SSE events",
@@ -6491,85 +6350,17 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_workbench_legacy_api_sql_read_provider_extraction_stays_local(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        provider_source = (SERVICES_ROOT / "workbench_legacy_api_sql_read_provider.py").read_text(encoding="utf-8")
-        api_handler_source = _function_source(server_tree, server_source, "_handle_api_workbench")
-        provider_builder_source = _function_source(server_tree, server_source, "_workbench_legacy_api_sql_read_provider")
-        analysis_source = (
-            REPO_ROOT
-            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-legacy-api-sql-read-provider-extraction-2026-06-25.md"
-        ).read_text(encoding="utf-8")
-        violations: list[str] = []
+    def test_workbench_legacy_api_sql_read_provider_stays_deleted(self) -> None:
+        server_source = (APP_ROOT / "server.py").read_text(encoding="utf-8")
+        provider_path = SERVICES_ROOT / "workbench_legacy_api_sql_read_provider.py"
 
+        self.assertFalse(provider_path.exists())
         for forbidden in (
-            "def _handle_api_workbench_from_sql_read_model",
-            "_handle_api_workbench_from_sql_read_model(",
-        ):
-            if forbidden in server_source:
-                violations.append(f"Application still owns Workbench legacy SQL read handler: {forbidden}")
-        for marker in (
-            "class WorkbenchLegacyApiSqlReadProvider",
-            "class WorkbenchLegacyApiSqlReadResult",
-            "def read(",
-            "get_workbench_view",
-            "api_miss",
-            "api_stale",
-            "read_model_refresh_reason",
-            "rows_page",
-        ):
-            if marker not in provider_source:
-                violations.append(f"WorkbenchLegacyApiSqlReadProvider missing marker: {marker}")
-        for marker in (
-            "sql_result = self._workbench_legacy_api_sql_read_provider().read(",
-            "return self._json_response(sql_result.status_code, sql_result.payload)",
-            "if self._requires_sql_read_model_runtime():",
-            "\"error\": \"read_model_unavailable\"",
-            "self._build_api_workbench_payload(current_month)",
-        ):
-            if marker not in api_handler_source:
-                violations.append(f"Application legacy workbench handler missing delegation marker: {marker}")
-        sql_runtime_guard_index = api_handler_source.find("if self._requires_sql_read_model_runtime():")
-        raw_builder_index = api_handler_source.find("self._build_api_workbench_payload(current_month)")
-        if sql_runtime_guard_index < 0 or raw_builder_index < 0 or sql_runtime_guard_index > raw_builder_index:
-            violations.append("legacy /api/workbench raw payload builder is not behind the production SQL runtime guard")
-        for marker in (
-            "WorkbenchLegacyApiSqlReadProvider(",
-            "repository_provider=lambda: getattr(self, \"_workbench_sql_read_repository\", None)",
-            "scope_key_for_month=self._workbench_read_model_scope_key",
-            "enqueue_workbench_refresh=self._enqueue_workbench_read_model_refresh",
-            "stale_reasons=self._workbench_sql_read_model_stale_reasons",
-            "oa_sync_refresh_reason=self._workbench_sql_view_oa_sync_refresh_reason",
-            "enqueue_oa_projection_sync=self._enqueue_oa_projection_sync_refresh",
-        ):
-            if marker not in provider_builder_source:
-                violations.append(f"Application legacy SQL provider builder missing explicit dependency: {marker}")
-        for forbidden in (
-            "Response",
-            "_json_response",
-            "ReadModelRefreshGateway",
-            "outbox",
-            "readiness",
-            "clear_cache",
-            "set_cached",
-            "save_workbench",
-            "app.auth",
-            "server.py",
-        ):
-            if forbidden in provider_source:
-                violations.append(f"WorkbenchLegacyApiSqlReadProvider gained forbidden dependency: {forbidden}")
-        for marker in (
-            "server-py:workbench-legacy-api-sql-read-provider-extraction",
             "WorkbenchLegacyApiSqlReadProvider",
-            "legacy `/api/workbench` SQL fallback",
-            "raw payload builder",
+            "_workbench_legacy_api_sql_read_provider",
+            "_handle_api_workbench_from_sql_read_model",
         ):
-            if marker not in analysis_source:
-                violations.append(f"Workbench legacy SQL provider analysis missing marker: {marker}")
-
-        self.assertEqual(violations, [])
+            self.assertNotIn(forbidden, server_source)
 
     def test_workbench_full_payload_fetcher_stays_deleted_from_frontend_runtime(self) -> None:
         violations: list[str] = []
@@ -6592,1284 +6383,120 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_workbench_api_payload_assembler_extraction_stays_local(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        assembler_source = (SERVICES_ROOT / "workbench_api_payload_assembler.py").read_text(encoding="utf-8")
-        build_payload_source = _function_source(server_tree, server_source, "_build_api_workbench_payload")
-        assembler_builder_source = _function_source(server_tree, server_source, "_workbench_api_payload_assembler")
-        analysis_source = (
-            REPO_ROOT
-            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-api-payload-assembler-extraction-2026-06-25.md"
-        ).read_text(encoding="utf-8")
-        violations: list[str] = []
+    def test_workbench_api_full_payload_assembler_stays_deleted(self) -> None:
+        server_source = (APP_ROOT / "server.py").read_text(encoding="utf-8")
+        repository_source = (SERVICES_ROOT / "postgres_repositories" / "read_models.py").read_text(encoding="utf-8")
+        deleted_service_modules = (
+            "workbench_api_payload_assembler.py",
+            "workbench_cache_read_payload_helper.py",
+            "workbench_canonical_oa_attachment_invoice_row_builder.py",
+            "workbench_canonical_oa_attachment_raw_payload_repairer.py",
+            "workbench_group_row_payload_helper.py",
+            "workbench_legacy_api_sql_read_provider.py",
+            "workbench_live_oa_merge_helper.py",
+            "workbench_live_payload_builder.py",
+            "workbench_oa_attachment_repair_context_executor.py",
+            "workbench_oa_attachment_repair_relation_read_port.py",
+            "workbench_oa_attachment_source_link_resolver.py",
+            "workbench_oa_invoice_offset_desired_relation_builder.py",
+            "workbench_oa_invoice_offset_rebuild_helper.py",
+            "workbench_oa_invoice_offset_relation_read_port.py",
+            "workbench_oa_invoice_offset_sync_executor.py",
+            "workbench_oa_payload_builder.py",
+            "workbench_oa_raw_payload_signal_month_helper.py",
+            "workbench_raw_payload_assembler.py",
+            "workbench_raw_payload_mutation_helper.py",
+            "workbench_retained_all_oa_payload_builder.py",
+            "workbench_retained_oa_supplemental_relation_read_port.py",
+            "workbench_selected_scope_raw_oa_payload_builder.py",
+            "workbench_supplemental_retained_oa_row_selector.py",
+            "workbench_auto_pair_conflict_relation_read_port.py",
+        )
 
+        for module_name in deleted_service_modules:
+            with self.subTest(module_name=module_name):
+                self.assertFalse((SERVICES_ROOT / module_name).exists())
         for forbidden in (
-            "_get_or_build_workbench_read_model(",
-            "_apply_oa_retention_to_grouped_payload(",
-            "_append_etc_invoice_summary_rows(",
-            "_build_invoice_inventory_payload(",
-            "_derive_tags_for_grouped_payload(",
-        ):
-            if forbidden in build_payload_source:
-                violations.append(f"Application _build_api_workbench_payload still owns assembler step: {forbidden}")
-        if "return self._workbench_api_payload_assembler().build(month, visibility_key=visibility_key)" not in build_payload_source:
-            violations.append("Application _build_api_workbench_payload does not delegate to WorkbenchApiPayloadAssembler")
-        for marker in (
-            "class WorkbenchApiPayloadAssembler",
-            "read_model_provider",
-            "apply_oa_retention",
-            "append_etc_invoice_summary_rows",
-            "build_invoice_inventory",
-            "derive_tags",
-            "retained[\"invoice_inventory\"]",
-        ):
-            if marker not in assembler_source:
-                violations.append(f"WorkbenchApiPayloadAssembler missing marker: {marker}")
-        for marker in (
-            "WorkbenchApiPayloadAssembler(",
-            "read_model_provider=self._get_or_build_workbench_read_model",
-            "apply_oa_retention=self._apply_oa_retention_to_grouped_payload",
-            "append_etc_invoice_summary_rows=self._append_etc_invoice_summary_rows",
-            "build_invoice_inventory=self._build_invoice_inventory_payload",
-            "derive_tags=self._derive_tags_for_grouped_payload",
-        ):
-            if marker not in assembler_builder_source:
-                violations.append(f"Application assembler builder missing explicit dependency: {marker}")
-        for forbidden in (
-            "Response",
-            "HTTPStatus",
-            "_json_response",
-            "ReadModelRefreshGateway",
-            "outbox",
-            "readiness",
-            "clear_cache",
-            "set_cached",
-            "save_workbench",
-            "app.auth",
-            "server.py",
-        ):
-            if forbidden in assembler_source:
-                violations.append(f"WorkbenchApiPayloadAssembler gained forbidden dependency: {forbidden}")
-        for marker in (
-            "server-py:workbench-api-payload-assembler-extraction",
             "WorkbenchApiPayloadAssembler",
-            "raw payload builder",
+            "_workbench_api_payload_assembler",
+            "_build_api_workbench_payload",
+            "_build_invoice_inventory_payload",
+            "InvoiceInventoryStatsService",
+            "_get_persisted_workbench_read_model",
+            "_get_or_build_workbench_read_model",
             "_build_raw_workbench_payload",
-        ):
-            if marker not in analysis_source:
-                violations.append(f"Workbench API payload assembler analysis missing marker: {marker}")
-
-        self.assertEqual(violations, [])
-
-    def test_workbench_raw_payload_assembler_extraction_stays_local(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        assembler_source = (SERVICES_ROOT / "workbench_raw_payload_assembler.py").read_text(encoding="utf-8")
-        build_raw_source = _function_source(server_tree, server_source, "_build_raw_workbench_payload")
-        assembler_builder_source = _function_source(server_tree, server_source, "_workbench_raw_payload_assembler")
-        analysis_source = (
-            REPO_ROOT
-            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-raw-payload-assembler-extraction-2026-06-25.md"
-        ).read_text(encoding="utf-8")
-        violations: list[str] = []
-
-        for forbidden in (
-            "_live_workbench_service.has_rows_for_month",
-            "_sync_live_auto_pair_relations(",
-            "_build_live_workbench_row_payload(",
-            "_build_oa_workbench_row_payload(",
-            "_sync_oa_invoice_offset_auto_pair_relations(",
-            "_repair_active_relations_with_oa_attachment_context(",
-            "_apply_pair_relations_to_payload(",
-            "_workbench_override_service.apply_to_payload(",
-        ):
-            if forbidden in build_raw_source:
-                violations.append(f"Application _build_raw_workbench_payload still owns raw assembler step: {forbidden}")
-        if "return self._workbench_raw_payload_assembler().build(" not in build_raw_source:
-            violations.append("Application _build_raw_workbench_payload does not delegate to WorkbenchRawPayloadAssembler")
-        for marker in (
-            "class WorkbenchRawPayloadAssembler",
-            "has_live_rows_for_month",
-            "build_live_workbench_row_payload",
-            "build_oa_workbench_row_payload",
-            "sync_oa_invoice_offset_auto_pair_relations",
-            "repair_active_relations_with_oa_attachment_context",
-            "apply_pair_relations_to_payload",
-            "apply_overrides_to_payload",
-            "supplement_missing_rows=supplement_missing_pair_relation_rows",
-        ):
-            if marker not in assembler_source:
-                violations.append(f"WorkbenchRawPayloadAssembler missing marker: {marker}")
-        for marker in (
-            "WorkbenchRawPayloadAssembler(",
-            "has_live_rows_for_month=lambda month: self._live_workbench_service.has_rows_for_month(month)",
-            "build_live_workbench_row_payload=self._build_live_workbench_row_payload",
-            "build_oa_workbench_row_payload=self._build_oa_workbench_row_payload",
-            "sync_oa_invoice_offset_auto_pair_relations=self._sync_oa_invoice_offset_auto_pair_relations",
-            "repair_active_relations_with_oa_attachment_context=self._repair_active_relations_with_oa_attachment_context",
-            "apply_pair_relations_to_payload=self._apply_pair_relations_to_payload",
-            "apply_overrides_to_payload=lambda payload: self._workbench_override_service.apply_to_payload(payload)",
-        ):
-            if marker not in assembler_builder_source:
-                violations.append(f"Application raw assembler builder missing explicit dependency: {marker}")
-        for forbidden in (
-            "Response",
-            "HTTPStatus",
-            "_json_response",
-            "ReadModelRefreshGateway",
-            "outbox",
-            "readiness",
-            "clear_cache",
-            "set_cached",
-            "save_workbench",
-            "app.auth",
-            "server.py",
-        ):
-            if forbidden in assembler_source:
-                violations.append(f"WorkbenchRawPayloadAssembler gained forbidden dependency: {forbidden}")
-        for marker in (
-            "server-py:workbench-raw-payload-assembler-extraction",
+            "_workbench_raw_payload_assembler",
             "WorkbenchRawPayloadAssembler",
-            "_build_raw_workbench_payload",
-            "OA retention internals",
+            "WorkbenchCacheReadPayloadHelper",
+            "_workbench_cache_read_payload_helper",
+            "_apply_pair_relations_to_payload",
+            "_supplement_missing_active_pair_relation_rows",
+            "_sync_oa_invoice_offset_auto_pair_relations",
+            "_repair_active_relations_with_oa_attachment_context",
+            "_raw_workbench_payload_rows_by_id",
+            "_raw_workbench_payload_row_ids",
+            "_oa_invoice_offset_desired_relations",
+            "_auto_pair_conflicts_with_manual_relation",
+            "SYSTEM_AUTO_PAIR_RELATION_MODES",
+            "_append_etc_invoice_summary_rows",
+            "_etc_invoice_summary_rows_by_external_batch_id",
+            "_etc_invoice_summary_row_detail",
+            "_derive_tags_for_grouped_payload",
+            "_relation_for_group",
+            "_apply_grouped_row_overrides",
+            "_resolve_live_group",
+            "_workbench_sql_view_oa_sync_refresh_reason",
+            "_enqueue_oa_attachment_parser_resync",
+            "_handle_api_workbench_action",
+            "_persist_workbench_override_change",
+            "_workbench_persistence_unavailable_response",
+            "_rebuild_workbench_matching_dirty_scopes_once",
+            "_workbench_matching_scope_months_for_import_preview",
+            "_is_workbench_read_model_rebuild_job",
         ):
-            if marker not in analysis_source:
-                violations.append(f"Workbench raw payload assembler analysis missing marker: {marker}")
-
-        self.assertEqual(violations, [])
-
-    def test_workbench_live_payload_builder_extraction_stays_local(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        builder_source = (SERVICES_ROOT / "workbench_live_payload_builder.py").read_text(encoding="utf-8")
-        live_method_source = _function_source(server_tree, server_source, "_build_live_workbench_row_payload")
-        builder_source_in_app = _function_source(server_tree, server_source, "_workbench_live_payload_builder")
-        analysis_source = (
-            REPO_ROOT
-            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-live-payload-builder-extraction-2026-06-25.md"
-        ).read_text(encoding="utf-8")
-        violations: list[str] = []
-
+            self.assertNotIn(forbidden, server_source)
         for forbidden in (
-            "_live_workbench_service.get_workbench(",
-            "_build_oa_workbench_row_payload(",
-            "_merge_live_workbench_with_oa_rows(",
-            "_serialize_value(",
+            "def get_workbench_view(",
+            "def _load_all_workbench_view(",
+            "def _load_workbench_rows_page(",
         ):
-            if forbidden in live_method_source:
-                violations.append(f"Application _build_live_workbench_row_payload still owns live builder step: {forbidden}")
-        if "return self._workbench_live_payload_builder().build(month)" not in live_method_source:
-            violations.append("Application _build_live_workbench_row_payload does not delegate to WorkbenchLivePayloadBuilder")
-        for marker in (
-            "class WorkbenchLivePayloadBuilder",
-            "get_live_workbench",
-            "build_oa_workbench_row_payload",
-            "merge_live_with_oa_rows",
-            "serialize_value",
-            "def build(",
-        ):
-            if marker not in builder_source:
-                violations.append(f"WorkbenchLivePayloadBuilder missing marker: {marker}")
-        for marker in (
-            "WorkbenchLivePayloadBuilder(",
-            "get_live_workbench=lambda month: self._live_workbench_service.get_workbench(month)",
-            "build_oa_workbench_row_payload=self._build_oa_workbench_row_payload",
-            "merge_live_with_oa_rows=self._merge_live_workbench_with_oa_rows",
-            "serialize_value=self._serialize_value",
-        ):
-            if marker not in builder_source_in_app:
-                violations.append(f"Application live builder missing explicit dependency: {marker}")
-        for forbidden in (
-            "Response",
-            "HTTPStatus",
-            "_json_response",
-            "ReadModelRefreshGateway",
-            "outbox",
-            "readiness",
-            "clear_cache",
-            "set_cached",
-            "save_workbench",
-            "app.auth",
-            "server.py",
-        ):
-            if forbidden in builder_source:
-                violations.append(f"WorkbenchLivePayloadBuilder gained forbidden dependency: {forbidden}")
-        for marker in (
-            "server-py:workbench-live-payload-builder-extraction",
-            "WorkbenchLivePayloadBuilder",
-            "_build_oa_workbench_row_payload",
-            "retained all-OA",
-        ):
-            if marker not in analysis_source:
-                violations.append(f"Workbench live payload builder analysis missing marker: {marker}")
+            self.assertNotIn(forbidden, repository_source)
 
-        self.assertEqual(violations, [])
-
-    def test_workbench_oa_payload_builder_extraction_stays_local(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        builder_source = (SERVICES_ROOT / "workbench_oa_payload_builder.py").read_text(encoding="utf-8")
-        oa_method_source = _function_source(server_tree, server_source, "_build_oa_workbench_row_payload")
-        builder_source_in_app = _function_source(server_tree, server_source, "_workbench_oa_payload_builder")
-        analysis_source = (
-            REPO_ROOT
-            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-oa-payload-builder-extraction-2026-06-25.md"
-        ).read_text(encoding="utf-8")
-        violations: list[str] = []
-
-        for forbidden in (
-            "_build_retained_all_oa_row_payload(",
-            "_workbench_api_routes.get_workbench(",
-            "_promote_oa_attachment_invoices_to_canonical(",
-            "_append_canonical_oa_attachment_invoice_rows(",
-            "MongoOAAdapter",
-            "SEARCH_MONTH_RE",
-        ):
-            if forbidden in oa_method_source:
-                violations.append(f"Application _build_oa_workbench_row_payload still owns OA builder step: {forbidden}")
-        if "return self._workbench_oa_payload_builder().build(month)" not in oa_method_source:
-            violations.append("Application _build_oa_workbench_row_payload does not delegate to WorkbenchOaPayloadBuilder")
-        for marker in (
-            "class WorkbenchOaPayloadBuilder",
-            "use_retained_all_payload",
-            "build_retained_all_oa_row_payload",
-            "get_workbench_payload",
-            "serialize_value",
-            "is_month_scope",
-            "promote_oa_attachment_invoices_to_canonical",
-            "append_canonical_oa_attachment_invoice_rows",
-        ):
-            if marker not in builder_source:
-                violations.append(f"WorkbenchOaPayloadBuilder missing marker: {marker}")
-        for marker in (
-            "WorkbenchOaPayloadBuilder(",
-            "use_retained_all_payload=lambda month: month == \"all\"",
-            "self._app_settings_service.get_oa_retention_cutoff_date()",
-            "build_retained_all_oa_row_payload=self._build_retained_all_oa_row_payload",
-            "get_workbench_payload=lambda month: self._workbench_api_routes.get_workbench(month)",
-            "serialize_value=self._serialize_value",
-            "is_month_scope=lambda month: bool(SEARCH_MONTH_RE.match(month))",
-            "promote_oa_attachment_invoices_to_canonical=self._promote_oa_attachment_invoices_to_canonical",
-            "append_canonical_oa_attachment_invoice_rows=self._append_canonical_oa_attachment_invoice_rows",
-        ):
-            if marker not in builder_source_in_app:
-                violations.append(f"Application OA builder missing explicit dependency: {marker}")
-        for forbidden in (
-            "Response",
-            "HTTPStatus",
-            "_json_response",
-            "ReadModelRefreshGateway",
-            "outbox",
-            "readiness",
-            "clear_cache",
-            "set_cached",
-            "save_workbench",
-            "app.auth",
-            "server.py",
-            "MongoOAAdapter",
-        ):
-            if forbidden in builder_source:
-                violations.append(f"WorkbenchOaPayloadBuilder gained forbidden dependency: {forbidden}")
-        for marker in (
-            "server-py:workbench-oa-payload-builder-extraction",
-            "WorkbenchOaPayloadBuilder",
-            "_build_retained_all_oa_row_payload",
-            "retained all-OA",
-        ):
-            if marker not in analysis_source:
-                violations.append(f"Workbench OA payload builder analysis missing marker: {marker}")
-
-        self.assertEqual(violations, [])
-
-    def test_workbench_retained_all_oa_payload_builder_extraction_stays_local(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        builder_source = (SERVICES_ROOT / "workbench_retained_all_oa_payload_builder.py").read_text(encoding="utf-8")
-        retained_method_source = _function_source(server_tree, server_source, "_build_retained_all_oa_row_payload")
-        builder_source_in_app = _function_source(server_tree, server_source, "_workbench_retained_all_oa_payload_builder")
-        analysis_source = (
-            REPO_ROOT
-            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-retained-all-oa-payload-builder-extraction-2026-06-25.md"
-        ).read_text(encoding="utf-8")
-        violations: list[str] = []
-
-        for forbidden in (
-            "_parse_oa_retention_date(",
-            "_workbench_api_routes.get_workbench(\"all\")",
-            "_promote_oa_attachment_invoices_to_canonical(",
-            "_retained_oa_months_for_all_scope(",
-            "_supplemental_retained_oa_row_ids(",
-            "_sync_oa_rows(",
-            "sync_oa_row_ids(",
-            "_raw_oa_payload_for_selected_scope(",
-        ):
-            if forbidden in retained_method_source:
-                violations.append(f"Application _build_retained_all_oa_row_payload still owns retained-all step: {forbidden}")
-        if "return self._workbench_retained_all_oa_payload_builder().build()" not in retained_method_source:
-            violations.append("Application _build_retained_all_oa_row_payload does not delegate to retained all-OA builder")
-        for marker in (
-            "class WorkbenchRetainedAllOaPayloadBuilder",
-            "retention_cutoff_date",
-            "get_all_workbench_payload",
-            "raw_payload_has_oa_attachment_invoice_signal",
-            "oa_months_from_raw_workbench_payload",
-            "retained_oa_months_for_all_scope",
-            "supplemental_retained_oa_row_ids",
-            "raw_oa_payload_for_selected_scope",
-            "is_month_scope",
-        ):
-            if marker not in builder_source:
-                violations.append(f"WorkbenchRetainedAllOaPayloadBuilder missing marker: {marker}")
-        for marker in (
-            "WorkbenchRetainedAllOaPayloadBuilder(",
-            "retention_cutoff_date=lambda: self._parse_oa_retention_date(",
-            "get_all_workbench_payload=lambda: self._workbench_api_routes.get_workbench(\"all\")",
-            "serialize_value=self._serialize_value",
-            "retained_oa_months_for_all_scope=self._retained_oa_months_for_all_scope",
-            "supplemental_retained_oa_row_ids=self._supplemental_retained_oa_row_ids",
-            "suppress_attachment_invoice_background_parse=self._workbench_suppress_attachment_invoice_background_parse",
-            "raw_oa_payload_for_selected_scope=self._raw_oa_payload_for_selected_scope",
-            "is_month_scope=lambda scope_key: bool(SEARCH_MONTH_RE.match(scope_key))",
-        ):
-            if marker not in builder_source_in_app:
-                violations.append(f"Application retained all-OA builder missing explicit dependency: {marker}")
-        for forbidden in (
-            "Response",
-            "HTTPStatus",
-            "_json_response",
-            "ReadModelRefreshGateway",
-            "outbox",
-            "readiness",
-            "clear_cache",
-            "set_cached",
-            "save_workbench",
-            "app.auth",
-            "server.py",
-            "MongoOAAdapter",
-        ):
-            if forbidden in builder_source:
-                violations.append(f"WorkbenchRetainedAllOaPayloadBuilder gained forbidden dependency: {forbidden}")
-        for marker in (
-            "server-py:workbench-retained-all-oa-payload-builder-extraction",
-            "WorkbenchRetainedAllOaPayloadBuilder",
-            "supplemental retained OA row selection",
-            "selected-scope raw OA payload",
-        ):
-            if marker not in analysis_source:
-                violations.append(f"Workbench retained all-OA builder analysis missing marker: {marker}")
-
-        self.assertEqual(violations, [])
-
-    def test_workbench_selected_scope_raw_oa_payload_builder_extraction_stays_local(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        builder_source = (SERVICES_ROOT / "workbench_selected_scope_raw_oa_payload_builder.py").read_text(encoding="utf-8")
-        raw_scope_method_source = _function_source(server_tree, server_source, "_raw_oa_payload_for_selected_scope")
-        builder_source_in_app = _function_source(server_tree, server_source, "_workbench_selected_scope_raw_oa_payload_builder")
-        analysis_source = (
-            REPO_ROOT
-            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-selected-scope-raw-oa-payload-builder-extraction-2026-06-25.md"
-        ).read_text(encoding="utf-8")
-        violations: list[str] = []
-
-        for forbidden in (
-            "list_record_snapshots(",
-            "serialize_row(",
-            "oa_status_payload(",
-            "_manual_retained_oa_row_ids(",
-            "retained_oa_row_ids",
-            "section_payload",
-            "exception_count",
-        ):
-            if forbidden in raw_scope_method_source:
-                violations.append(f"Application _raw_oa_payload_for_selected_scope still owns selected-scope step: {forbidden}")
-        if "return self._workbench_selected_scope_raw_oa_payload_builder().build(" not in raw_scope_method_source:
-            violations.append("Application _raw_oa_payload_for_selected_scope does not delegate to selected-scope builder")
-        for marker in (
-            "class WorkbenchSelectedScopeRawOaPayloadBuilder",
-            "manual_retained_oa_row_ids",
-            "record_snapshots",
-            "serialize_row",
-            "oa_status_payload",
-            "retained_oa_row_ids",
-            "section_payload",
-            "exception_count",
-            "\"month\": \"all\"",
-        ):
-            if marker not in builder_source:
-                violations.append(f"WorkbenchSelectedScopeRawOaPayloadBuilder missing marker: {marker}")
-        for marker in (
-            "WorkbenchSelectedScopeRawOaPayloadBuilder(",
-            "manual_retained_oa_row_ids=self._manual_retained_oa_row_ids",
-            "record_snapshots=lambda: self._workbench_query_service.list_record_snapshots()",
-            "serialize_row=self._workbench_query_service.serialize_row",
-            "oa_status_payload=self._workbench_query_service.oa_status_payload",
-        ):
-            if marker not in builder_source_in_app:
-                violations.append(f"Application selected-scope builder missing explicit dependency: {marker}")
-        for forbidden in (
-            "Response",
-            "HTTPStatus",
-            "_json_response",
-            "ReadModelRefreshGateway",
-            "outbox",
-            "readiness",
-            "clear_cache",
-            "set_cached",
-            "save_workbench",
-            "app.auth",
-            "server.py",
-            "MongoOAAdapter",
-        ):
-            if forbidden in builder_source:
-                violations.append(f"WorkbenchSelectedScopeRawOaPayloadBuilder gained forbidden dependency: {forbidden}")
-        for marker in (
-            "server-py:workbench-selected-scope-raw-oa-payload-builder-extraction",
-            "WorkbenchSelectedScopeRawOaPayloadBuilder",
-            "record snapshot filtering",
-            "summary construction",
-        ):
-            if marker not in analysis_source:
-                violations.append(f"Workbench selected-scope builder analysis missing marker: {marker}")
-
-        self.assertEqual(violations, [])
-
-    def test_workbench_oa_retention_date_parser_extraction_stays_local(self) -> None:
+    def test_workbench_oa_retention_parser_remains_narrow(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")
         server_tree = _parse(server_path)
         parser_source = (SERVICES_ROOT / "workbench_oa_retention_date_parser.py").read_text(encoding="utf-8")
-        parse_source = _function_source(server_tree, server_source, "_parse_oa_retention_date")
-        row_candidates_source = _function_source(server_tree, server_source, "_row_date_candidates")
-        row_after_source = _function_source(server_tree, server_source, "_row_is_on_or_after")
-        row_parseable_source = _function_source(server_tree, server_source, "_row_has_parseable_retention_date")
-        analysis_source = (
-            REPO_ROOT
-            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-oa-retention-date-parser-extraction-2026-06-25.md"
-        ).read_text(encoding="utf-8")
-        violations: list[str] = []
+        delegate_source = _function_source(server_tree, server_source, "_parse_oa_retention_date")
 
-        for method_name, method_source in (
-            ("_parse_oa_retention_date", parse_source),
-            ("_row_date_candidates", row_candidates_source),
-            ("_row_is_on_or_after", row_after_source),
-            ("_row_has_parseable_retention_date", row_parseable_source),
-        ):
-            if "WorkbenchOaRetentionDateParser." not in method_source:
-                violations.append(f"Application {method_name} does not delegate to retention date parser")
+        self.assertIn("return WorkbenchOaRetentionDateParser.parse(value)", delegate_source)
+        self.assertEqual(parser_source.count("    def "), 1)
+        self.assertIn("def parse(value: object) -> datetime | None:", parser_source)
         for forbidden in (
-            "datetime.strptime",
-            "application_date",
-            "trade_time",
-            "申请日期",
-            "交易时间",
-            "ValueError",
+            "raw_payload",
+            "grouped_payload",
+            "row_date_candidates",
+            "row_is_on_or_after",
+            "row_has_parseable_retention_date",
         ):
-            combined_method_source = "\n".join(
-                [parse_source, row_candidates_source, row_after_source, row_parseable_source]
-            )
-            if forbidden in combined_method_source:
-                violations.append(f"Application still owns OA retention date parsing detail: {forbidden}")
-        for marker in (
-            "class WorkbenchOaRetentionDateParser",
-            "def parse(",
-            "def row_is_on_or_after(",
-            "def row_has_parseable_retention_date(",
-            "def row_date_candidates(",
-            "datetime.strptime(text[:10], \"%Y-%m-%d\")",
-            "application_date",
-            "trade_time",
-            "申请日期",
-            "交易时间",
-        ):
-            if marker not in parser_source:
-                violations.append(f"WorkbenchOaRetentionDateParser missing marker: {marker}")
-        for forbidden in (
-            "Response",
-            "HTTPStatus",
-            "_json_response",
-            "ReadModelRefreshGateway",
-            "outbox",
-            "readiness",
-            "clear_cache",
-            "set_cached",
-            "save_workbench",
-            "app.auth",
-            "server.py",
-            "MongoOAAdapter",
-        ):
-            if forbidden in parser_source:
-                violations.append(f"WorkbenchOaRetentionDateParser gained forbidden dependency: {forbidden}")
-        for marker in (
-            "server-py:workbench-oa-retention-date-parser-extraction",
-            "WorkbenchOaRetentionDateParser",
-            "row date candidates",
-            "invalid cutoff behavior",
-        ):
-            if marker not in analysis_source:
-                violations.append(f"Workbench OA retention date parser analysis missing marker: {marker}")
+            self.assertNotIn(forbidden, parser_source)
 
-        self.assertEqual(violations, [])
-
-    def test_workbench_canonical_oa_attachment_raw_payload_repairer_extraction_stays_local(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        repairer_source = (SERVICES_ROOT / "workbench_canonical_oa_attachment_raw_payload_repairer.py").read_text(encoding="utf-8")
-        append_source = _function_source(server_tree, server_source, "_append_canonical_oa_attachment_invoice_rows")
-        builder_source_in_app = _function_source(server_tree, server_source, "_workbench_canonical_oa_attachment_raw_payload_repairer")
-        analysis_source = (
-            REPO_ROOT
-            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-canonical-oa-attachment-raw-payload-repairer-extraction-2026-06-25.md"
-        ).read_text(encoding="utf-8")
-        violations: list[str] = []
+    def test_workbench_sync_page_cache_warmer_stays_deleted(self) -> None:
+        worker_source = (APP_ROOT / "worker.py").read_text(encoding="utf-8")
+        refresh_source = (SERVICES_ROOT / "workbench_read_model_refresh.py").read_text(encoding="utf-8")
+        cache_source = (SERVICES_ROOT / "workbench_groups_page_cache.py").read_text(encoding="utf-8")
 
         for forbidden in (
-            "oa_rows_by_id",
-            "existing_invoice_row_ids",
-            "list_invoices(",
-            "_replace_raw_workbench_row(",
-            "_dedupe_raw_workbench_rows_by_id(",
-            "_refresh_raw_workbench_payload_summary(",
+            "WorkbenchGroupsPageCacheWarmer",
+            "workbench_groups_sync_cache_warmup_enabled_from_env",
+            "FIN_OPS_WORKBENCH_GROUPS_SYNC_CACHE_WARMUP_ENABLED",
+            "post_refresh_warmer",
+            'payload["cache_warmup"]',
         ):
-            if forbidden in append_source:
-                violations.append(f"Application _append_canonical_oa_attachment_invoice_rows still owns repair step: {forbidden}")
-        if "self._workbench_canonical_oa_attachment_raw_payload_repairer().repair(payload)" not in append_source:
-            violations.append("Application _append_canonical_oa_attachment_invoice_rows does not delegate to repairer")
-        for marker in (
-            "class WorkbenchCanonicalOaAttachmentRawPayloadRepairer",
-            "def repair(",
-            "oa_rows_by_id",
-            "existing_invoice_row_ids",
-            "source_link_for_invoice",
-            "source_oa_id_for_attachment_link",
-            "canonical_oa_attachment_invoice_row",
-            "replace_raw_workbench_row",
-            "dedupe_raw_workbench_rows_by_id",
-            "refresh_raw_workbench_payload_summary",
-        ):
-            if marker not in repairer_source:
-                violations.append(f"WorkbenchCanonicalOaAttachmentRawPayloadRepairer missing marker: {marker}")
-        for marker in (
-            "WorkbenchCanonicalOaAttachmentRawPayloadRepairer(",
-            "list_invoices=lambda: self._import_service.list_invoices()",
-            "source_link_for_invoice=self._oa_attachment_source_link_for_invoice",
-            "source_oa_id_for_attachment_link=self._source_oa_id_for_attachment_link",
-            "canonical_oa_attachment_invoice_row=self._canonical_oa_attachment_invoice_workbench_row",
-            "replace_raw_workbench_row=self._replace_raw_workbench_row",
-            "dedupe_raw_workbench_rows_by_id=self._dedupe_raw_workbench_rows_by_id",
-            "refresh_raw_workbench_payload_summary=self._refresh_raw_workbench_payload_summary",
-        ):
-            if marker not in builder_source_in_app:
-                violations.append(f"Application canonical OA attachment repairer missing explicit dependency: {marker}")
-        for forbidden in (
-            "Response",
-            "HTTPStatus",
-            "_json_response",
-            "ReadModelRefreshGateway",
-            "outbox",
-            "readiness",
-            "clear_cache",
-            "set_cached",
-            "save_workbench",
-            "app.auth",
-            "server.py",
-            "MongoOAAdapter",
-        ):
-            if forbidden in repairer_source:
-                violations.append(f"WorkbenchCanonicalOaAttachmentRawPayloadRepairer gained forbidden dependency: {forbidden}")
-        for marker in (
-            "server-py:workbench-canonical-oa-attachment-raw-payload-repairer-extraction",
-            "WorkbenchCanonicalOaAttachmentRawPayloadRepairer",
-            "payload repair orchestration",
-            "canonical row construction",
-        ):
-            if marker not in analysis_source:
-                violations.append(f"Workbench canonical OA attachment repairer analysis missing marker: {marker}")
-
-        self.assertEqual(violations, [])
-
-    def test_workbench_oa_attachment_source_link_resolver_extraction_stays_local(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        resolver_source = (SERVICES_ROOT / "workbench_oa_attachment_source_link_resolver.py").read_text(encoding="utf-8")
-        source_link_source = _function_source(server_tree, server_source, "_oa_attachment_source_link_for_invoice")
-        source_oa_id_source = _function_source(server_tree, server_source, "_source_oa_id_for_attachment_link")
-        analysis_source = (
-            REPO_ROOT
-            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-oa-attachment-source-link-resolver-extraction-2026-06-25.md"
-        ).read_text(encoding="utf-8")
-        violations: list[str] = []
-
-        for method_name, method_source in (
-            ("_oa_attachment_source_link_for_invoice", source_link_source),
-            ("_source_oa_id_for_attachment_link", source_oa_id_source),
-        ):
-            if "WorkbenchOaAttachmentSourceLinkResolver." not in method_source:
-                violations.append(f"Application {method_name} does not delegate to source-link resolver")
-        for forbidden in (
-            "source_links",
-            "source_type",
-            "oa_attachment_best_source_link",
-            "oa_attachment_matches_oa",
-            "source_workbench_row_id",
-            "source_expense_item_id",
-        ):
-            combined_method_source = "\n".join([source_link_source, source_oa_id_source])
-            if forbidden in combined_method_source:
-                violations.append(f"Application still owns OA attachment source-link detail: {forbidden}")
-        for marker in (
-            "class WorkbenchOaAttachmentSourceLinkResolver",
-            "def source_link_for_invoice(",
-            "def source_oa_id_for_attachment_link(",
-            "oa_attachment_best_source_link",
-            "oa_attachment_matches_oa",
-            "source_workbench_row_id",
-            "source_expense_item_id",
-        ):
-            if marker not in resolver_source:
-                violations.append(f"WorkbenchOaAttachmentSourceLinkResolver missing marker: {marker}")
-        for forbidden in (
-            "Response",
-            "HTTPStatus",
-            "_json_response",
-            "ReadModelRefreshGateway",
-            "outbox",
-            "readiness",
-            "clear_cache",
-            "set_cached",
-            "save_workbench",
-            "app.auth",
-            "server.py",
-            "MongoOAAdapter",
-        ):
-            if forbidden in resolver_source:
-                violations.append(f"WorkbenchOaAttachmentSourceLinkResolver gained forbidden dependency: {forbidden}")
-        for marker in (
-            "server-py:workbench-oa-attachment-source-link-resolver-extraction",
-            "WorkbenchOaAttachmentSourceLinkResolver",
-            "source link normalization",
-            "oa_attachment_best_source_link",
-        ):
-            if marker not in analysis_source:
-                violations.append(f"Workbench OA attachment source-link resolver analysis missing marker: {marker}")
-
-        self.assertEqual(violations, [])
-
-    def test_workbench_canonical_oa_attachment_invoice_row_builder_extraction_stays_local(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        builder_source = (SERVICES_ROOT / "workbench_canonical_oa_attachment_invoice_row_builder.py").read_text(encoding="utf-8")
-        row_method_source = _function_source(server_tree, server_source, "_canonical_oa_attachment_invoice_workbench_row")
-        builder_source_in_app = _function_source(server_tree, server_source, "_workbench_canonical_oa_attachment_invoice_row_builder")
-        analysis_source = (
-            REPO_ROOT
-            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-canonical-oa-attachment-invoice-row-builder-extraction-2026-06-25.md"
-        ).read_text(encoding="utf-8")
-        violations: list[str] = []
-
-        for forbidden in (
-            "detail_fields",
-            "summary_fields",
-            "invoice_bank_relation",
-            "source_expense_item_id",
-            "人工导入",
-            "OA附件",
-            "InvoiceType.OUTPUT.value",
-        ):
-            if forbidden in row_method_source:
-                violations.append(f"Application canonical OA attachment row method still owns field mapping: {forbidden}")
-        if "return self._workbench_canonical_oa_attachment_invoice_row_builder().build(" not in row_method_source:
-            violations.append("Application canonical OA attachment row method does not delegate to row builder")
-        for marker in (
-            "class WorkbenchCanonicalOaAttachmentInvoiceRowBuilder",
-            "def build(",
-            "detail_fields",
-            "summary_fields",
-            "invoice_bank_relation",
-            "source_expense_item_id",
-            "人工导入",
-            "OA附件",
-            "first_month_from_oa_row",
-        ):
-            if marker not in builder_source:
-                violations.append(f"WorkbenchCanonicalOaAttachmentInvoiceRowBuilder missing marker: {marker}")
-        for marker in (
-            "WorkbenchCanonicalOaAttachmentInvoiceRowBuilder(",
-            "money_text=self._workbench_invoice_money_text",
-            "first_month_from_oa_row=self._first_month_from_oa_row",
-            "output_invoice_type_value=InvoiceType.OUTPUT.value",
-        ):
-            if marker not in builder_source_in_app:
-                violations.append(f"Application canonical OA attachment row builder missing explicit dependency: {marker}")
-        for removed in ("def _append_unique_text", "def _oa_display_number_for_attachment_invoice"):
-            if removed in server_source:
-                violations.append(f"Application retained dead canonical row helper: {removed}")
-        for forbidden in (
-            "Response",
-            "HTTPStatus",
-            "_json_response",
-            "ReadModelRefreshGateway",
-            "outbox",
-            "readiness",
-            "clear_cache",
-            "set_cached",
-            "save_workbench",
-            "app.auth",
-            "server.py",
-            "MongoOAAdapter",
-        ):
-            if forbidden in builder_source:
-                violations.append(f"WorkbenchCanonicalOaAttachmentInvoiceRowBuilder gained forbidden dependency: {forbidden}")
-        for marker in (
-            "server-py:workbench-canonical-oa-attachment-invoice-row-builder-extraction",
-            "WorkbenchCanonicalOaAttachmentInvoiceRowBuilder",
-            "invoice field mapping",
-            "relation payload construction",
-        ):
-            if marker not in analysis_source:
-                violations.append(f"Workbench canonical OA attachment invoice row builder analysis missing marker: {marker}")
-
-        self.assertEqual(violations, [])
-
-    def test_workbench_raw_payload_mutation_helper_extraction_stays_local(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        helper_source = (SERVICES_ROOT / "workbench_raw_payload_mutation_helper.py").read_text(encoding="utf-8")
-        replace_source = _function_source(server_tree, server_source, "_replace_raw_workbench_row")
-        dedupe_source = _function_source(server_tree, server_source, "_dedupe_raw_workbench_rows_by_id")
-        summary_source = _function_source(server_tree, server_source, "_refresh_raw_workbench_payload_summary")
-        analysis_source = (
-            REPO_ROOT
-            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-raw-payload-mutation-helper-extraction-2026-06-25.md"
-        ).read_text(encoding="utf-8")
-        violations: list[str] = []
-
-        for method_name, method_source in (
-            ("_replace_raw_workbench_row", replace_source),
-            ("_dedupe_raw_workbench_rows_by_id", dedupe_source),
-            ("_refresh_raw_workbench_payload_summary", summary_source),
-        ):
-            if "WorkbenchRawPayloadMutationHelper" not in method_source:
-                violations.append(f"Application {method_name} does not delegate to raw payload mutation helper")
-        combined_method_source = "\n".join([replace_source, dedupe_source, summary_source])
-        for forbidden in (
-            "for section_name in (\"paired\", \"unpaired\")",
-            "seen_row_ids",
-            "deduped_rows",
-            "exception_count",
-            "rows[index]",
-            "payload[\"summary\"]",
-        ):
-            if forbidden in combined_method_source:
-                violations.append(f"Application still owns raw payload mutation detail: {forbidden}")
-        for marker in (
-            "class WorkbenchRawPayloadMutationHelper",
-            "def replace_row(",
-            "def dedupe_rows_by_id(",
-            "def refresh_summary(",
-            "for section_name in (\"paired\", \"unpaired\")",
-            "seen_row_ids",
-            "exception_count",
-            "serialize_value",
-        ):
-            if marker not in helper_source:
-                violations.append(f"WorkbenchRawPayloadMutationHelper missing marker: {marker}")
-        for forbidden in (
-            "Response",
-            "HTTPStatus",
-            "_json_response",
-            "ReadModelRefreshGateway",
-            "outbox",
-            "readiness",
-            "clear_cache",
-            "set_cached",
-            "save_workbench",
-            "app.auth",
-            "server.py",
-            "MongoOAAdapter",
-        ):
-            if forbidden in helper_source:
-                violations.append(f"WorkbenchRawPayloadMutationHelper gained forbidden dependency: {forbidden}")
-        for marker in (
-            "server-py:workbench-raw-payload-mutation-helper-extraction",
-            "WorkbenchRawPayloadMutationHelper",
-            "replace/dedupe/summary",
-            "OA raw payload signal/month helpers",
-        ):
-            if marker not in analysis_source:
-                violations.append(f"Workbench raw payload mutation helper analysis missing marker: {marker}")
-
-        self.assertEqual(violations, [])
-
-    def test_workbench_oa_raw_payload_signal_month_helper_extraction_stays_local(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        helper_source = (SERVICES_ROOT / "workbench_oa_raw_payload_signal_month_helper.py").read_text(encoding="utf-8")
-        months_source = _function_source(server_tree, server_source, "_oa_months_from_raw_workbench_payload")
-        signal_source = _function_source(server_tree, server_source, "_raw_payload_has_oa_attachment_invoice_signal")
-        first_month_source = _function_source(server_tree, server_source, "_first_month_from_oa_row")
-        builder_source_in_app = _function_source(server_tree, server_source, "_workbench_oa_raw_payload_signal_month_helper")
-        analysis_source = (
-            REPO_ROOT
-            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-oa-raw-payload-signal-month-helper-extraction-2026-06-25.md"
-        ).read_text(encoding="utf-8")
-        violations: list[str] = []
-
-        for method_name, method_source in (
-            ("_oa_months_from_raw_workbench_payload", months_source),
-            ("_raw_payload_has_oa_attachment_invoice_signal", signal_source),
-            ("_first_month_from_oa_row", first_month_source),
-        ):
-            if "WorkbenchOaRawPayloadSignalMonthHelper" not in method_source and "_workbench_oa_raw_payload_signal_month_helper()" not in method_source:
-                violations.append(f"Application {method_name} does not delegate to OA raw payload signal/month helper")
-        combined_method_source = "\n".join([months_source, signal_source, first_month_source])
-        for forbidden in (
-            "附件发票数量",
-            "附件证据数量",
-            "附件发票明细",
-            "申请日期",
-            "审批完成时间",
-            "for section_name in (\"paired\", \"open\")",
-        ):
-            if forbidden in combined_method_source:
-                violations.append(f"Application still owns OA raw payload signal/month detail: {forbidden}")
-        for marker in (
-            "class WorkbenchOaRawPayloadSignalMonthHelper",
-            "def months_from_raw_payload(",
-            "def has_oa_attachment_invoice_signal(",
-            "def first_month_from_oa_row(",
-            "附件发票数量",
-            "附件证据数量",
-            "附件发票明细",
-            "申请日期",
-            "审批完成时间",
-            "is_month_prefix",
-        ):
-            if marker not in helper_source:
-                violations.append(f"WorkbenchOaRawPayloadSignalMonthHelper missing marker: {marker}")
-        if "is_month_prefix=lambda value: bool(SEARCH_MONTH_RE.match(value))" not in builder_source_in_app:
-            violations.append("Application OA raw payload signal/month helper missing SEARCH_MONTH_RE dependency injection")
-        for forbidden in (
-            "Response",
-            "HTTPStatus",
-            "_json_response",
-            "ReadModelRefreshGateway",
-            "outbox",
-            "readiness",
-            "clear_cache",
-            "set_cached",
-            "save_workbench",
-            "app.auth",
-            "server.py",
-            "MongoOAAdapter",
-        ):
-            if forbidden in helper_source:
-                violations.append(f"WorkbenchOaRawPayloadSignalMonthHelper gained forbidden dependency: {forbidden}")
-        for marker in (
-            "server-py:workbench-oa-raw-payload-signal-month-helper-extraction",
-            "WorkbenchOaRawPayloadSignalMonthHelper",
-            "signal/month extraction",
-            "live/OA merge helper",
-        ):
-            if marker not in analysis_source:
-                violations.append(f"Workbench OA raw payload signal/month helper analysis missing marker: {marker}")
-
-        self.assertEqual(violations, [])
-
-    def test_workbench_live_oa_merge_helper_extraction_stays_local(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        helper_source = (SERVICES_ROOT / "workbench_live_oa_merge_helper.py").read_text(encoding="utf-8")
-        merge_rows_source = _function_source(server_tree, server_source, "_merge_live_workbench_with_oa_rows")
-        dedupe_source = _function_source(server_tree, server_source, "_dedupe_workbench_rows_by_id_preferring_last")
-        grouped_merge_source = _function_source(server_tree, server_source, "_merge_live_workbench_with_oa")
-        analysis_source = (
-            REPO_ROOT
-            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-live-oa-merge-helper-extraction-2026-06-25.md"
-        ).read_text(encoding="utf-8")
-        violations: list[str] = []
-
-        for method_name, method_source in (
-            ("_merge_live_workbench_with_oa_rows", merge_rows_source),
-            ("_dedupe_workbench_rows_by_id_preferring_last", dedupe_source),
-        ):
-            if "WorkbenchLiveOaMergeHelper" not in method_source:
-                violations.append(f"Application {method_name} does not delegate to live/OA merge helper")
-        for forbidden in (
-            "source_kind",
-            "oa_attachment_invoice",
-            "row_ids_in_order",
-            "passthrough_rows",
-            "rows_by_id:",
-            "merged[\"paired\"][\"oa\"]",
-        ):
-            combined_method_source = "\n".join([merge_rows_source, dedupe_source])
-            if forbidden in combined_method_source:
-                violations.append(f"Application still owns live/OA merge detail: {forbidden}")
-        if "_group_row_payload(Application._merge_live_workbench_with_oa_rows(live_payload, oa_payload))" not in grouped_merge_source:
-            violations.append("Application grouped live/OA merge no longer preserves group-row compatibility path")
-        for marker in (
-            "class WorkbenchLiveOaMergeHelper",
-            "def merge_rows(",
-            "def dedupe_rows_by_id_preferring_last(",
-            "source_kind",
-            "oa_attachment_invoice",
-            "row_ids_in_order",
-            "passthrough_rows",
-            "serialize_value",
-        ):
-            if marker not in helper_source:
-                violations.append(f"WorkbenchLiveOaMergeHelper missing marker: {marker}")
-        for forbidden in (
-            "Response",
-            "HTTPStatus",
-            "_json_response",
-            "ReadModelRefreshGateway",
-            "outbox",
-            "readiness",
-            "clear_cache",
-            "set_cached",
-            "save_workbench",
-            "app.auth",
-            "server.py",
-            "MongoOAAdapter",
-        ):
-            if forbidden in helper_source:
-                violations.append(f"WorkbenchLiveOaMergeHelper gained forbidden dependency: {forbidden}")
-        for marker in (
-            "server-py:workbench-live-oa-merge-helper-extraction",
-            "WorkbenchLiveOaMergeHelper",
-            "grouped merge boundaries",
-            "group row payload",
-        ):
-            if marker not in analysis_source:
-                violations.append(f"Workbench live/OA merge helper analysis missing marker: {marker}")
-
-        self.assertEqual(violations, [])
-
-    def test_workbench_group_row_payload_helper_extraction_stays_local(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        helper_source = (SERVICES_ROOT / "workbench_group_row_payload_helper.py").read_text(encoding="utf-8")
-        group_source = _function_source(server_tree, server_source, "_group_row_payload")
-        analysis_source = (
-            REPO_ROOT
-            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-group-row-payload-helper-extraction-2026-06-25.md"
-        ).read_text(encoding="utf-8")
-        violations: list[str] = []
-
-        if "WorkbenchGroupRowPayloadHelper(" not in group_source:
-            violations.append("Application _group_row_payload does not delegate to group row payload helper")
-        for marker in (
-            "grouping_service=WorkbenchRelationGroupingService()",
-            "serialize_value=Application._serialize_value",
-            ").group(payload, turnover_relations=turnover_relations)",
-        ):
-            if marker not in group_source:
-                violations.append(f"Application group row helper missing explicit dependency: {marker}")
-        for forbidden in (
-            "oa_rows =",
-            "bank_rows =",
-            "invoice_rows =",
-            "group_payload(",
-            "row.get(\"ignored\")",
-            "grouped[\"oa_status\"]",
-        ):
-            if forbidden in group_source:
-                violations.append(f"Application still owns group row payload detail: {forbidden}")
-        for marker in (
-            "class WorkbenchGroupRowPayloadHelper",
-            "def group(",
-            "def _active_rows(",
-            "group_payload",
-            "turnover_relations",
-            "row.get(\"ignored\")",
-            "serialize_value",
-            "oa_status",
-        ):
-            if marker not in helper_source:
-                violations.append(f"WorkbenchGroupRowPayloadHelper missing marker: {marker}")
-        for forbidden in (
-            "Response",
-            "HTTPStatus",
-            "_json_response",
-            "ReadModelRefreshGateway",
-            "outbox",
-            "readiness",
-            "clear_cache",
-            "set_cached",
-            "save_workbench",
-            "app.auth",
-            "server.py",
-            "MongoOAAdapter",
-        ):
-            if forbidden in helper_source:
-                violations.append(f"WorkbenchGroupRowPayloadHelper gained forbidden dependency: {forbidden}")
-        for marker in (
-            "server-py:workbench-group-row-payload-helper-extraction",
-            "WorkbenchGroupRowPayloadHelper",
-            "ignored-row filtering",
-            "cache/read payload helpers",
-        ):
-            if marker not in analysis_source:
-                violations.append(f"Workbench group row payload helper analysis missing marker: {marker}")
-
-        self.assertEqual(violations, [])
-
-    def test_workbench_cache_read_payload_helper_extraction_stays_local(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        helper_source = (SERVICES_ROOT / "workbench_cache_read_payload_helper.py").read_text(encoding="utf-8")
-        can_use_source = _function_source(server_tree, server_source, "_can_use_cached_workbench_payload")
-        persist_source = _function_source(server_tree, server_source, "_can_persist_workbench_payload")
-        fallback_source = _function_source(server_tree, server_source, "_can_fallback_to_stale_workbench_payload")
-        status_source = _function_source(server_tree, server_source, "_oa_status_is_ready_for_cache")
-        builder_source = _function_source(server_tree, server_source, "_workbench_cache_read_payload_helper")
-        analysis_source = (
-            REPO_ROOT
-            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-cache-read-payload-helper-extraction-2026-06-25.md"
-        ).read_text(encoding="utf-8")
-        violations: list[str] = []
-
-        for method_name, method_source in (
-            ("_can_use_cached_workbench_payload", can_use_source),
-            ("_can_persist_workbench_payload", persist_source),
-            ("_can_fallback_to_stale_workbench_payload", fallback_source),
-            ("_oa_status_is_ready_for_cache", status_source),
-        ):
-            if "_workbench_cache_read_payload_helper()" not in method_source:
-                violations.append(f"Application {method_name} does not delegate to cache read payload helper")
-        combined_method_source = "\n".join([can_use_source, persist_source, fallback_source, status_source])
-        for forbidden in (
-            "WORKBENCH_READ_MODEL_SCHEMA_VERSION",
-            "oa_attachment_invoice_parser_version",
-            "summary",
-            "payload.get(\"oa_status\")",
-        ):
-            if forbidden in combined_method_source:
-                violations.append(f"Application still owns cache/read payload detail: {forbidden}")
-        for marker in (
-            "class WorkbenchCacheReadPayloadHelper",
-            "def can_use_cached_payload(",
-            "def can_persist_payload(",
-            "def can_fallback_to_stale_payload(",
-            "def oa_status_is_ready_for_cache(",
-            "workbench_read_model_schema_version",
-            "oa_attachment_invoice_parser_version",
-        ):
-            if marker not in helper_source:
-                violations.append(f"WorkbenchCacheReadPayloadHelper missing marker: {marker}")
-        for marker in (
-            "WorkbenchCacheReadPayloadHelper(",
-            "is_mongo_oa_adapter=self._workbench_cache_uses_strict_oa_source_gates",
-            "cached_payload_needs_oa_invoice_offset_rebuild=self._cached_payload_needs_oa_invoice_offset_rebuild",
-            "current_oa_attachment_invoice_parser_version=self._current_oa_attachment_invoice_parser_version",
-            "workbench_read_model_schema_version=WORKBENCH_READ_MODEL_SCHEMA_VERSION",
-        ):
-            if marker not in builder_source:
-                violations.append(f"Application cache helper missing explicit dependency: {marker}")
-        for forbidden in (
-            "Response",
-            "HTTPStatus",
-            "_json_response",
-            "ReadModelRefreshGateway",
-            "outbox",
-            "clear_cache",
-            "set_cached",
-            "save_workbench",
-            "app.auth",
-            "server.py",
-            "MongoOAAdapter",
-        ):
-            if forbidden in helper_source:
-                violations.append(f"WorkbenchCacheReadPayloadHelper gained forbidden dependency: {forbidden}")
-        for marker in (
-            "server-py:workbench-cache-read-payload-helper-extraction",
-            "WorkbenchCacheReadPayloadHelper",
-            "OA invoice offset rebuild",
-            "offset rebuild helper",
-        ):
-            if marker not in analysis_source:
-                violations.append(f"Workbench cache read payload helper analysis missing marker: {marker}")
-
-        self.assertEqual(violations, [])
-
-    def test_workbench_oa_invoice_offset_rebuild_helper_extraction_stays_local(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        helper_source = (SERVICES_ROOT / "workbench_oa_invoice_offset_rebuild_helper.py").read_text(
-            encoding="utf-8"
-        )
-        rebuild_source = _function_source(server_tree, server_source, "_cached_payload_needs_oa_invoice_offset_rebuild")
-        attachment_source = _function_source(server_tree, server_source, "_oa_attachment_invoice_rows_for_oa")
-        builder_source = _function_source(server_tree, server_source, "_workbench_oa_invoice_offset_rebuild_helper")
-        analysis_source = (
-            REPO_ROOT
-            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-oa-invoice-offset-rebuild-helper-extraction-2026-06-25.md"
-        ).read_text(encoding="utf-8")
-        violations: list[str] = []
-
-        if "_workbench_oa_invoice_offset_rebuild_helper()" not in rebuild_source:
-            violations.append("Application cache rebuild gate does not delegate to OA invoice offset rebuild helper")
-        if "_workbench_oa_invoice_offset_rebuild_helper()" not in attachment_source:
-            violations.append("Application attachment invoice row matcher does not delegate to OA invoice offset rebuild helper")
-        for forbidden in (
-            "get_oa_invoice_offset_applicant_names",
-            "OA_INVOICE_OFFSET_TAG not in tags",
-            "cost_excluded",
-            "source_kind",
-            "\"oa_attachment_invoice\"",
-            "oa_attachment_matches_oa(",
-            "section == \"unpaired\"",
-        ):
-            if forbidden in "\n".join([rebuild_source, attachment_source]):
-                violations.append(f"Application still owns OA invoice offset rebuild detail: {forbidden}")
-        for marker in (
-            "class WorkbenchOaInvoiceOffsetRebuildHelper",
-            "def cached_payload_needs_rebuild(",
-            "def attachment_invoice_rows_for_oa(",
-            "applicant_names_provider",
-            "attachment_matches_oa",
-            "offset_tag",
-            "section == \"unpaired\"",
-            "cost_excluded",
-            "oa_attachment_invoice",
-        ):
-            if marker not in helper_source:
-                violations.append(f"WorkbenchOaInvoiceOffsetRebuildHelper missing marker: {marker}")
-        for marker in (
-            "WorkbenchOaInvoiceOffsetRebuildHelper(",
-            "applicant_names_provider=self._app_settings_service.get_oa_invoice_offset_applicant_names",
-            "attachment_matches_oa=oa_attachment_matches_oa",
-            "offset_tag=OA_INVOICE_OFFSET_TAG",
-        ):
-            if marker not in builder_source:
-                violations.append(f"Application OA invoice offset rebuild helper missing explicit dependency: {marker}")
-        for forbidden in (
-            "Response",
-            "HTTPStatus",
-            "_json_response",
-            "ReadModelRefreshGateway",
-            "outbox",
-            "clear_cache",
-            "set_cached",
-            "save_workbench",
-            "app.auth",
-            "server.py",
-            "MongoOAAdapter",
-        ):
-            if forbidden in helper_source:
-                violations.append(f"WorkbenchOaInvoiceOffsetRebuildHelper gained forbidden dependency: {forbidden}")
-        for marker in (
-            "server-py:workbench-oa-invoice-offset-rebuild-helper-extraction",
-            "WorkbenchOaInvoiceOffsetRebuildHelper",
-            "cached payload rebuild",
-            "attachment invoice rows",
-        ):
-            if marker not in analysis_source:
-                violations.append(f"Workbench OA invoice offset rebuild helper analysis missing marker: {marker}")
-
-        self.assertEqual(violations, [])
-
-    def test_workbench_oa_invoice_offset_desired_relation_builder_extraction_stays_local(self) -> None:
-        server_path = APP_ROOT / "server.py"
-        server_source = server_path.read_text(encoding="utf-8")
-        server_tree = _parse(server_path)
-        builder_source = (
-            SERVICES_ROOT / "workbench_oa_invoice_offset_desired_relation_builder.py"
-        ).read_text(encoding="utf-8")
-        desired_source = _function_source(server_tree, server_source, "_oa_invoice_offset_desired_relations")
-        builder_factory_source = _function_source(
-            server_tree,
-            server_source,
-            "_workbench_oa_invoice_offset_desired_relation_builder",
-        )
-        analysis_source = (
-            REPO_ROOT
-            / ".planning/refactors/modular-io-boundaries/analysis/server-py-workbench-oa-invoice-offset-desired-relation-builder-extraction-2026-06-25.md"
-        ).read_text(encoding="utf-8")
-        violations: list[str] = []
-
-        if "_workbench_oa_invoice_offset_desired_relation_builder()" not in desired_source:
-            violations.append("Application desired relation method does not delegate to builder")
-        for forbidden in (
-            "get_oa_invoice_offset_applicant_names",
-            "CASE-OA-OFFSET",
-            "row_types",
-            "month_scope",
-            "_auto_pair_conflicts_with_manual_relation",
-            "attachment_invoice_rows",
-            "section in (\"paired\", \"open\")",
-        ):
-            if forbidden in desired_source:
-                violations.append(f"Application still owns OA invoice offset desired relation detail: {forbidden}")
-        for marker in (
-            "class WorkbenchOaInvoiceOffsetDesiredRelationBuilder",
-            "def build(",
-            "applicant_names_provider",
-            "serialize_value",
-            "attachment_invoice_rows_for_oa",
-            "auto_pair_conflicts_with_manual_relation",
-            "month_scope_for_relation",
-            "CASE-OA-OFFSET",
-            "row_types",
-            "month_scope",
-        ):
-            if marker not in builder_source:
-                violations.append(f"WorkbenchOaInvoiceOffsetDesiredRelationBuilder missing marker: {marker}")
-        for marker in (
-            "WorkbenchOaInvoiceOffsetDesiredRelationBuilder(",
-            "applicant_names_provider=self._app_settings_service.get_oa_invoice_offset_applicant_names",
-            "serialize_value=self._serialize_value",
-            "attachment_invoice_rows_for_oa=self._oa_attachment_invoice_rows_for_oa",
-            "auto_pair_conflicts_with_manual_relation=self._auto_pair_conflicts_with_manual_relation",
-            "month_scope_for_relation=self._month_scope_for_oa_invoice_offset_relation",
-        ):
-            if marker not in builder_factory_source:
-                violations.append(f"Application desired relation builder missing explicit dependency: {marker}")
-        for forbidden in (
-            "Response",
-            "HTTPStatus",
-            "_json_response",
-            "ReadModelRefreshGateway",
-            "outbox",
-            "clear_cache",
-            "set_cached",
-            "save_workbench",
-            "app.auth",
-            "server.py",
-            "MongoOAAdapter",
-            "confirm_relation",
-            "cancel_relation",
-        ):
-            if forbidden in builder_source:
-                violations.append(f"WorkbenchOaInvoiceOffsetDesiredRelationBuilder gained forbidden dependency: {forbidden}")
-        for marker in (
-            "server-py:workbench-oa-invoice-offset-desired-relation-builder-extraction",
-            "WorkbenchOaInvoiceOffsetDesiredRelationBuilder",
-            "desired relation construction",
-            "relation sync side effects remain deferred",
-        ):
-            if marker not in analysis_source:
-                violations.append(f"Workbench OA invoice offset desired relation builder analysis missing marker: {marker}")
-
-        self.assertEqual(violations, [])
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, worker_source)
+                self.assertNotIn(forbidden, refresh_source)
+                self.assertNotIn(forbidden, cache_source)
 
     def test_no_oa_legacy_repairs_have_no_direct_pair_write_fallback(self) -> None:
         checks = {
@@ -9011,7 +7638,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-
 class RuntimeWorkerEtcImportLinkExistingTests(unittest.TestCase):
     def test_existing_invoice_link_service_uses_import_items_to_load_existing_invoices(self) -> None:
         upserted: list[object] = []
@@ -9229,7 +7855,6 @@ class RuntimeWorkerEtcImportLinkExistingTests(unittest.TestCase):
 
         self.assertEqual(months, ["2026-04"])
         self.assertEqual(forbidden_calls, [])
-
 
 if __name__ == "__main__":
     unittest.main()

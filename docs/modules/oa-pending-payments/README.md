@@ -1,78 +1,92 @@
-# OA待付款核对 模块维护入口
+# OA 待付款核对模块维护入口
 
-
-- Module key: `oa-pending-payments`
-- 类型: 页面模块
-- Route: `/oa-pending-payments`
-- Page key: `oa-pending-payments`
+- Module key：`oa-pending-payments`
+- Route：`/oa-pending-payments`
+- Page key：`oa-pending-payments`
+- 当前状态：本地实现已闭环，等待统一部署、回填和生产性能验收
 
 ## 修改前必读
 
-- `docs/architecture/oa-integration.md`
-- `docs/product-specs/invoice-lifecycle.md`
-- `docs/app-architecture/runtime-and-ownership.md`
-- `docs/app-architecture/pages.md`
-- `docs/dev/api-contracts.md`
+- `docs/modules/oa-pending-payments/boundary-io.md`
+- `docs/modules/oa-pending-payments/state-machine.md`
+- `docs/modules/oa-pending-payments/tests.md`
+- `docs/modules/oa-pending-payments/performance-integrity-design.md`
+- `docs/architecture/module-boundaries/read-model-contracts.md`
 - `docs/operations/runtime-worker-governance.md`
 
 ## 代码入口
 
-- `web/src/pages/OaPendingPaymentsPage.tsx`
-- `web/src/components/oaPendingPayments/*`
-- `web/src/features/oaPendingPayments/api.ts`
-- `backend/src/fin_ops_platform/app/routes_oa_pending_payments.py`
-- `backend/src/fin_ops_platform/services/oa_pending_payment_service.py`
-- `backend/src/fin_ops_platform/services/oa_pending_payment_command_service.py`
-- `backend/src/fin_ops_platform/services/oa_pending_payment_relation_promotion_service.py`
-- `backend/src/fin_ops_platform/services/oa_pending_payment_read_model_service.py`
-- `backend/src/fin_ops_platform/services/oa_pending_payment_read_model_details.py`
-- `backend/src/fin_ops_platform/services/oa_payment_admitted_projection.py`
-- `backend/src/fin_ops_platform/services/oa_payment_status_service.py`
-- `backend/src/fin_ops_platform/services/postgres_repositories/oa_pending_payment_relation.py`
-- `backend/src/fin_ops_platform/services/mongo_oa_adapter.py`
-- `backend/src/fin_ops_platform/services/invoice_usage_collection_sql_projection.py`
-- `backend/src/fin_ops_platform/services/invoice_usage_collection_read_model_refresh.py`
-- `backend/src/fin_ops_platform/services/invoice_usage_collection_source_versions.py`
+- 前端：`web/src/pages/OaPendingPaymentsPage.tsx`、`web/src/components/oaPendingPayments/*`、`web/src/features/oaPendingPayments/*`
+- API：`backend/src/fin_ops_platform/app/routes_oa_pending_payments.py`
+- 查询合同：`oa_pending_payment_query_contract.py`、`oa_pending_payment_read_model_service.py`、`oa_pending_payment_read_model_repository.py`
+- 投影：`oa_pending_payment_sql_projection.py`、`oa_pending_payment_read_model_refresh.py`
+- 命令：`oa_pending_payment_command_service.py`、`oa_pending_payment_relation_promotion_service.py`
+- PostgreSQL owner：`postgres_repositories/oa_pending_payment_source_snapshot.py`、`postgres_repositories/oa_pending_payment_relation.py`、`postgres_repositories/oa_pending_payment_admission.py`
+- OA integration：`oa_projection_sync.py`、`mongo_oa_adapter.py`、`oa_payment_status_service.py`
+- Audit：`postgres_repositories/page_business_audit.py`、`web/src/components/oaPendingPayments/OaPendingPaymentAuditIcon.tsx`
 
-## 当前边界
+## 当前有效链路
 
-关注 OA 单据、支出银行流水、进项发票、Workbench relation、SQL read model、invoice lifecycle 分发、OA MySQL 支付状态写回、详情 drawer 和异常反馈。OA 待付款以 OA 申请为主行，`paymentStatus` 由 `InvoiceLifecyclePolicy` / `OaPendingPaymentQueryService` 或等价 lifecycle read boundary 判定；页面不得自行定义付款状态。
+```text
+OA Mongo / t_payment_simple
+  -> OA integration sync
+  -> PostgreSQL completed OA + admission + payment-status snapshot + source watermark
+  -> 同事务 oa_pending_payment:<month> dirty/outbox
+  -> oa-pending-payment 专属 worker（仅 PostgreSQL）
+  -> 月份 read model 原子发布/CAS
+  -> fresh gate
+  -> 单一 rows 聚合 API（rows + summary + filterOptions + ETag）
+  -> 页面 500ms 条件检查 / 202 barrier / fresh 重读
+```
 
-页面支持 `view_mode=completed|in_progress`：
+页面热路径和 read model worker 都不得访问 Mongo/MySQL。外部系统变化尚未进入 PostgreSQL 时，属于 OA sync lag；一旦 PostgreSQL canonical snapshot 已提交，dirty/outbox、动态 source version、CAS 和 fresh gate 必须阻止旧 rows 被伪装成 fresh。
 
-- `completed` 视图读取普通 `app.oa_applications` / OA completed projection；这是统一事实源中的已完成/历史未知 OA，不受 OA MySQL `t_payment_simple` 准入表限制。
-- `in_progress` 视图的准入事实源才是 OA MySQL `t_payment_simple.flow_id`。页面/read model 先读取该表的有效 `flow_id`，再用 `flow_id` 匹配 OA Mongo `form_data._id`；只有匹配成功且当前仍进行中的 OA 才进入进行中表格。
-- `t_payment_simple.id` 只是支付状态记录 ID，可作为诊断/内部记录 ID，不是 OA ID；OA 匹配和写回必须使用 `flow_id`。
-- `in_progress` 不得用 completed projection 的金额、对方、项目、事由等业务字段做反向排除；业务允许同项目、同供应商、同金额、同事由发起多张不同 OA。不同 `flow_id` 是不同付款申请，是否展示只由 `t_payment_simple.flow_id` 准入和当前 workflow status 决定。
-- `completed` 是原 OA 待付款视图，只展示统一 OA projection 中当前已完成或历史未带 workflow status 的 OA，并继续展示 OA、支付状态、支出流水和进项发票 relation 证据。
-- `in_progress` 只展示已进入 `t_payment_simple` 且 OA 系统当前仍为进行中的支付申请/日常报销。表格 UI 与 `completed` 使用同一套 OA、支付状态、流水、发票四分组结构；页面不再提供“自动匹配写回”入口。支付状态为“已支付”且 `oaPaymentWriteback` 仍为“未写回”的行才显示逐行“写回”按钮；点击后只调用已支付写回命令，不自动创建 OA-bank relation。
-- `in_progress` 仍保留“关联支出流水”右侧抽屉，用于显式创建进行中 OA 与支出流水的关系。抽屉从已选 OA 打开时必须携带 `oa_row_ids`，候选接口返回全部支出流水，不按 OA 月份收敛；`oa_row_ids` 只作为提交关联的目标 OA 上下文。抽屉可按全部、未配对、已配对、已关联进行中 OA 筛选，并通过分页浏览超过首屏的候选流水；只有没有 Workbench active relation、也没有 active pending bank claim 的支出流水可选择。该关联成功后同样触发自动写回：支出流水合计等于 OA 金额且可解析 `flow_id` 时，把 `t_payment_simple.pay_status` 写成已支付，并让表格 chip 从“未写回”刷新为“已写回”。
-- `completed` 视图的 OA/流水 relation 证据来自关联台 `app.workbench_pair_relations` / `workbench_relation` distribution；`in_progress` 视图的 OA/流水 relation 证据来自 OA 待付款独立关系表和 bank claim。两者共享“同一条流水只能被一个 active 关系占用”的 bank claim/Workbench active relation 排除规则，但进行中 OA 的配对关系不进入关联台。
-- 当 OA sync 发现已有关联流水的进行中 OA 变成已完成时，`OaPendingPaymentRelationPromotionService` 会把 active pending relation promotion 为普通 Workbench active relation，并把原 pending relation 标记为 `promoted`、释放 bank claim、刷新 Workbench/OA 待付款 read model；迁移前残留的 `special_metadata.origin=oa_pending_payment_in_progress` Workbench active relation 由 migration `0073_oa_pending_payment_bank_relations.sql` 撤回并迁移到独立 pending relation。
-- `completed` 和 `in_progress` 只要已经存在有效支出流水 active relation 或 active pending relation 且支出合计等于 OA 金额，都可由逐行“写回”命令写回 `t_payment_simple.pay_status=1`；页面首屏读路径不得自动发起写命令，前端和后端都不再提供人工“确认已支付并写回”/`confirm-paid` 入口，也不再提供旧的 `auto-reconcile-bank-transactions` 写入口。
-- `summary.viewCounts.completed/in_progress` 分别按 completed 统一 OA projection 与 in-progress payment-admitted projection 中的唯一 OA ID 计算；筛选和搜索条件会同步作用于该数量。表格多张 OA 被同一配对组折叠到一行时，`viewCounts` 仍按 `oa.summaries` 内的 OA 数计数，`pagination.total` / `summary.rowCount` 才按表格行数计数。
-- 普通 `app.oa_applications` 投影只服务已完成/历史未知 OA；本页面的 completed 视图读取该统一 projection，in-progress 视图通过 `PaymentAdmittedOAProjectionAdapter` 以 `t_payment_simple.flow_id` 为准入表，精确读取 OA Mongo 当前记录后再按 `view_mode` 过滤。OA 系统里未进入 `t_payment_simple` 的重复/异常进行中流程不展示。
-- 进行中 OA 视图中的 OA 写回状态来自 `t_payment_simple.flow_id`。2026-06-17 实机验证显示该字段对应 OA Mongo `form_data._id`，平台用 Mongo OA detail fields 中的 `Mongo文档ID` 或 `oa-pay-/oa-exp-` 行 ID 后缀解析；流程实例 ID 和流程请求 ID 只保留为详情/诊断字段。
-- 应用正常运行时通过 MySQL 连接配置写回 OA 支付状态，不要求应用进程登录服务器 SSH；SSH 只属于人工运维/排障通道。
+## 页面合同
 
-生产读路径必须先经过 `OaPendingPaymentReadModelService` 的 freshness/source-version gate。rows、filter-options、OA detail、bank detail、invoice detail 和 relation detail 在 read model missing/stale/source mismatch 时只能返回 refreshing/unavailable 语义并入队 `oa_pending_payment.read_model.refresh`，不能同步 live scan 旧事实并伪装 fresh。
+- 页面只有 `GET /api/oa-pending-payments/rows` 一个首屏聚合入口；旧 `filter-options` endpoint 已删除。
+- `200` 返回 rows、pagination、summary、`filterConfig`、`filterOptions`、freshness proof 和 `ETag`。
+- 同一 normalized query 在版本未变且仍 fresh 时返回 `304`，不得执行 rows/facet 聚合。
+- dirty、source mismatch、scope missing 或 queue 活跃时返回 `202` 和精确月份 `operationBarrierTargets`，不返回旧 rows。
+- 可见页面每 500ms 最多发起一个条件 GET；tab 隐藏时停止，恢复可见时立即检查。收到 `202` 后立即隐藏旧 rows，等待 barrier fresh 再完整读取一次。
+- `paymentStatus` 只有 `paid` / `unpaid`，由后端 lifecycle/read model 判定；页面不得按金额或候选关系自行推断。
 
-`oa_pending_payment:all` 在 refresh 链路中是 fan-out 到月份 shard 的控制 scope；页面默认 all 查询的 freshness 证明来自实际 rows/month scopes 和 active dirty/outbox 状态。month scope 必须继续严格比对对应月份 `workbench_relation` source versions；all 查询不能直接使用全局 `workbench_relation:all` source versions 作为 expected contract，否则会把已 fresh 的月份 shard 误判为 stale 并反复显示“正在刷新”。
+## Completed 与 in-progress
 
-## 维护触发器
+- `completed` 主行来自 `app.oa_applications` completed/legacy projection。
+- `in_progress` 主行来自 integration sync 已写入 `app.oa_pending_payment_admissions` 的准入快照；准入身份是 `t_payment_simple.flow_id` 对应的 OA Mongo `form_data._id`，不是 `t_payment_simple.id`。
+- completed relation 证据来自 Workbench active relation；in-progress relation 证据来自 OA 待付款 active pending relation。pending relation promotion 前不得写入 Workbench active relation。
+- 银行流水和发票是 relation evidence，不替代 OA 主行；付款写回仍须后端复核 active relation、outflow、金额相等和 flow id。
 
-发生以下变化时，更新本目录对应维护文档，并按影响范围同步长期事实源：
+## 写回一致性
 
-- 页面入口、路由、侧栏、筛选、排序、分页、导出、drawer/dialog 或权限显示变化。
-- API contract、DTO shape、错误字段、权限校验、状态值或响应 freshness 字段变化。
-- 业务状态、UI 状态、read model 状态、worker 状态或状态流转变化。
-- 跨页面刷新、domain event、derived lifecycle、dirty scope、outbox 或缓存边界变化。
-- 测试入口、回归范围、验证命令或未测风险变化。
+`writeback-paid` 和金额匹配后的 `link-bank-transactions` 先完成幂等 MySQL `pay_status=1` 写回，再通过窄 PostgreSQL snapshot writer 更新对应 flow 的支付状态、月份 source watermark 和精确月份 outbox。PostgreSQL 三项写入同事务；失败时命令返回可安全重试错误，重试即使发现 MySQL 已经是 paid，也必须继续修复 PostgreSQL snapshot。
+
+Mongo/MySQL 与 PostgreSQL 之间不做分布式事务。若外部写成功而 PostgreSQL 提交失败，页面继续基于最后一个可证明的 PostgreSQL snapshot，不把外部状态猜成 fresh；幂等重试或下一次 OA sync 完成修复。
+
+## Audit 文案
+
+OA 页面通过专属 wrapper 隔离共享 `PageAuditIcon`，其它页面文案不变：
+
+- `Audit 通过 · App 内部数据一致`
+- `Audit 校验中 · 新数据正在生成`
+- `Audit 未通过 · 发现 N 个一致性问题`
+- `Audit 未通过 · Read model 未在时限内更新`
+- `Audit 无法完成 · 请查看诊断`
+
+禁止展示 `integrity issues_found`、`blocking samples` 等内部枚举拼接文案。Audit 只证明同一 PostgreSQL repeatable-read snapshot 内部一致性；外部同步 lag 单独表达。
+
+## 明确不做
+
+- 不新增 CDC、通用 event bus、SSE/WebSocket、Redis 页面 payload cache或新 worker framework。
+- 不增加 stale-while-revalidate、live fallback、兼容 filter endpoint 或双读路径。
+- 不修改其它页面 read model、共享 Page Audit 默认文案或 input/output invoice worker 责任。
+- 不在没有生产 `EXPLAIN` 和压测证据时增加索引、分区、cursor pagination 或 worker pool。
 
 ## 本目录文件
 
-- `e2e-spec.md`：维护 Spec-first Browser E2E 用户流程和验收合同。
-- `e2e-coverage.md`：维护 Spec ID 到 Playwright/API/integration 覆盖的映射和缺口。
-- `state-machine.md`：维护当前有效状态和状态流转；不适用时写明原因。
-- `tests.md`：维护七类测试适用性、现有测试入口、验证命令和回归范围。
-- `implementation-notes.md`：维护提炼后的决策和验收记录；不保存原始 prompt。
+- `performance-integrity-design.md`：性能、一致性、删除和统一部署验收设计。
+- `boundary-io.md`：模块边界、I/O、事实所有权和 writer inventory。
+- `state-machine.md`：业务、UI、read model、worker 和 Audit 状态机。
+- `tests.md`：七类测试责任、命令和剩余生产风险。
+- `e2e-spec.md` / `e2e-coverage.md`：浏览器合同与覆盖映射。
+- `implementation-notes.md`：提炼后的实施记录，不保存原始 prompt。

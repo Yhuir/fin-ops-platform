@@ -98,6 +98,8 @@ type ApiMockOptions = {
   batchAccountingReadModelStatuses?: BatchAccountingReadModelMockStatus[];
   costStatisticsExportDownloadSuccess?: boolean;
   costStatisticsExportReadModelStatus?: CostStatisticsReadModelMockStatus;
+  costStatisticsAppStatusReadModelStatus?: CostStatisticsReadModelMockStatus;
+  costStatisticsAppStatusScopeKey?: string;
   costStatisticsExplorerFailOnce?: boolean;
   costStatisticsExplorerFailuresBeforeSuccess?: number;
   costStatisticsLargeDataset?: boolean;
@@ -288,6 +290,40 @@ function appStatusWorkbenchDomain(status: WorkbenchHealthMockStatus = "ready") {
   };
 }
 
+function appStatusCostStatisticsDomain(
+  status: CostStatisticsReadModelMockStatus,
+  scopeKey = "active:2026-03",
+) {
+  const level = status === "fresh"
+    ? "ok"
+    : status === "failed" || status === "unavailable"
+      ? "blocked"
+      : "busy";
+  return {
+    key: "cost-statistics",
+    label: "成本统计",
+    route: "/cost-statistics",
+    level,
+    status,
+    reason: status === "fresh" ? "成本统计已同步" : "成本统计需要刷新",
+    details: [],
+    read_models: ["cost_statistics"],
+    read_model_scopes: [
+      {
+        read_model_key: "cost_statistics",
+        scope_type: "project_month",
+        scope_key: scopeKey,
+        status,
+        last_error: status === "failed" ? "browser cost statistics refresh failed" : "",
+        updated_at: "2026-06-17T01:00:00Z",
+      },
+    ],
+    workers: ["cost-statistics-read-model"],
+    job_ids: [],
+    updated_at: "2026-06-17T01:00:00Z",
+  };
+}
+
 function appStatusOverall(options: ApiMockOptions = {}) {
   const writeSafety = appStatusWriteSafety(options.appHealthWriteSafetyBlocked === true);
   if (options.appHealthWriteSafetyBlocked) {
@@ -345,11 +381,17 @@ function appStatusOverall(options: ApiMockOptions = {}) {
 }
 
 function appStatusOverview(options: ApiMockOptions = {}) {
+  const costStatisticsDomain = options.costStatisticsAppStatusReadModelStatus
+    ? [appStatusCostStatisticsDomain(
+        options.costStatisticsAppStatusReadModelStatus,
+        options.costStatisticsAppStatusScopeKey,
+      )]
+    : [];
   return {
     version: 1,
     generated_at: "2026-06-17T01:00:00Z",
     overall: appStatusOverall(options),
-    domains: [appStatusWorkbenchDomain(options.workbenchHealthStatus)],
+    domains: [appStatusWorkbenchDomain(options.workbenchHealthStatus), ...costStatisticsDomain],
     background_tasks: [],
     alerts: [],
   };
@@ -1242,32 +1284,6 @@ function workbenchSummary(
   };
 }
 
-function workbenchSummaryPayload(
-  relationConfirmed: boolean,
-  exceptionApplied = false,
-  rowIgnored = false,
-  pageStatus: WorkbenchPageMockStatus = "fresh",
-  pageEmpty = false,
-  largeDataset = false,
-) {
-  return {
-    month: "all",
-    summary: workbenchSummary(relationConfirmed, exceptionApplied, rowIgnored, pageEmpty, largeDataset),
-    oa_status: { code: "ready", message: "OA 已同步" },
-    invoice_inventory: {
-      system_total: largeDataset ? 210 : 1,
-      manual_import_total: 0,
-      workbench_visible_total: largeDataset ? 210 : 1,
-      hidden_submitted_etc_total: 0,
-      extra_etc_total: 0,
-      etc_summary_batch_count: 0,
-      oa_attachment_total: largeDataset ? 210 : 1,
-    },
-    read_model_status: pageStatus,
-    generated_at: "2026-06-17T01:00:00Z",
-  };
-}
-
 function workbenchGroupsPayload(
   zone: WorkbenchZone,
   relationConfirmed: boolean,
@@ -1281,6 +1297,9 @@ function workbenchGroupsPayload(
   pageSize = 50,
   search = "",
 ) {
+  const readModelVersion = relationConfirmed || exceptionApplied || rowIgnored
+    ? "workbench-generation-e2e-002"
+    : "workbench-generation-e2e-001";
   const allGroups = pageEmpty
     ? []
     : workbenchGroups(
@@ -1309,6 +1328,42 @@ function workbenchGroupsPayload(
     has_more: start + pageGroups.length < groups.length,
     groups: pageGroups,
     read_model_status: pageStatus,
+    read_model_version: readModelVersion,
+    active_generation_id: readModelVersion,
+  };
+}
+
+function bankFlowRuleWorkbenchGroupsPayload(
+  zone: WorkbenchZone,
+  relationConfirmed: boolean,
+  page = 1,
+  pageSize = 200,
+  search = "",
+) {
+  const allGroups = bankFlowRuleWorkbenchGroups(zone, relationConfirmed);
+  const normalizedSearch = search.trim().toLowerCase();
+  const groups = normalizedSearch
+    ? allGroups.filter((group) => JSON.stringify(group).toLowerCase().includes(normalizedSearch))
+    : allGroups;
+  const boundedPage = Math.max(1, page);
+  const boundedPageSize = Math.max(1, pageSize);
+  const start = (boundedPage - 1) * boundedPageSize;
+  const pageGroups = groups.slice(start, start + boundedPageSize);
+  const readModelVersion = relationConfirmed
+    ? "workbench-generation-e2e-002"
+    : "workbench-generation-e2e-001";
+  return {
+    month: "all",
+    zone,
+    page: boundedPage,
+    page_size: boundedPageSize,
+    total: groups.length,
+    row_counts: countWorkbenchRows(groups),
+    has_more: start + pageGroups.length < groups.length,
+    groups: pageGroups,
+    read_model_status: "fresh",
+    read_model_version: readModelVersion,
+    active_generation_id: readModelVersion,
   };
 }
 
@@ -1401,7 +1456,7 @@ function workbenchSettingsPayload(
   };
 }
 
-function legacyWorkbenchPayload(
+function workbenchInitialPayload(
   relationConfirmed: boolean,
   exceptionApplied = false,
   rowIgnored = false,
@@ -1409,7 +1464,11 @@ function legacyWorkbenchPayload(
   pageEmpty = false,
   largeDataset = false,
   includeCashSpecialActions = false,
+  zoneSearch: Partial<Record<WorkbenchZone, string>> = {},
 ) {
+  const readModelVersion = relationConfirmed || exceptionApplied || rowIgnored
+    ? "workbench-generation-e2e-002"
+    : "workbench-generation-e2e-001";
   return {
     month: "all",
     summary: workbenchSummary(relationConfirmed, exceptionApplied, rowIgnored, pageEmpty, largeDataset),
@@ -1423,20 +1482,35 @@ function legacyWorkbenchPayload(
       etc_summary_batch_count: 0,
       oa_attachment_total: largeDataset ? 210 : 1,
     },
-    paired: {
-      groups: pageEmpty
-        ? []
-        : workbenchGroups(
-          "paired",
-          relationConfirmed,
-          exceptionApplied,
-          rowIgnored,
-          largeDataset,
-          includeCashSpecialActions,
-        ),
-    },
-    unpaired: { groups: pageEmpty ? [] : workbenchGroups("unpaired", relationConfirmed, exceptionApplied, rowIgnored, largeDataset) },
+    paired: workbenchGroupsPayload(
+      "paired",
+      relationConfirmed,
+      exceptionApplied,
+      rowIgnored,
+      pageStatus,
+      pageEmpty,
+      largeDataset,
+      includeCashSpecialActions,
+      1,
+      200,
+      zoneSearch.paired ?? "",
+    ),
+    unpaired: workbenchGroupsPayload(
+      "unpaired",
+      relationConfirmed,
+      exceptionApplied,
+      rowIgnored,
+      pageStatus,
+      pageEmpty,
+      largeDataset,
+      includeCashSpecialActions,
+      1,
+      200,
+      zoneSearch.unpaired ?? "",
+    ),
     read_model_status: pageStatus,
+    read_model_version: readModelVersion,
+    active_generation_id: readModelVersion,
     generated_at: "2026-06-17T01:00:00Z",
   };
 }
@@ -1824,6 +1898,20 @@ function importSessionPayload(
   options: { corruptBankFile?: boolean; corruptInvoiceFile?: boolean; noBankAccountConflict?: boolean } = {},
 ) {
   const sessionId = importSessionIds[scenario];
+  const operationBarrierTargets = imported
+    ? scenario === "bank"
+      ? [
+        { read_model_key: "bank_detail", scope_key: "2026-06" },
+        { read_model_key: "bank_account_balance", scope_key: "all" },
+        { read_model_key: "cost_statistics", scope_key: "active:2026-06" },
+      ]
+      : [
+        { read_model_key: "tax_offset", scope_key: "2026-06" },
+        { read_model_key: "input_invoice_usage", scope_key: "2026-06" },
+        { read_model_key: "output_invoice_collection", scope_key: "2026-06" },
+        { read_model_key: "workbench_relation", scope_key: "2026-06" },
+      ]
+    : [];
   return {
     session: {
       id: sessionId,
@@ -1845,6 +1933,7 @@ function importSessionPayload(
         manual_review_count: 0,
       }
       : undefined,
+    operation_barrier_targets: operationBarrierTargets,
   };
 }
 
@@ -3656,6 +3745,7 @@ function oaPendingPaymentRowsPayload(includeInvoiceImportEvidence = false) {
       bankPaidTotal: includeInvoiceImportEvidence ? "26320.00" : "8000.00",
       statusCounts: { paid: includeInvoiceImportEvidence ? 2 : 1 },
     },
+    filterOptions: oaPendingPaymentFilterOptions(),
     filterConfig: [
       { field: "oa_applicant", label: "OA申请人", mode: "enum_multi", sortable: true, operators: ["in"] },
       { field: "oa_project_name", label: "项目名称", mode: "enum_multi", sortable: true, operators: ["in"] },
@@ -3753,6 +3843,7 @@ function oaPendingPaymentWritebackPaidRowsPayload(confirmed: boolean) {
       statusCounts: { paid: 1 },
       viewCounts: { completed: 1, in_progress: 1 },
     },
+    filterOptions: oaPendingPaymentFilterOptions(),
     filterConfig: [
       { field: "oa_applicant", label: "OA申请人", mode: "enum_multi", sortable: true, operators: ["in"] },
       { field: "oa_project_name", label: "项目名称", mode: "enum_multi", sortable: true, operators: ["in"] },
@@ -3892,6 +3983,7 @@ function oaPendingPaymentBankLinkRowsPayload(linked: boolean) {
       statusCounts: linked ? { paid: 1 } : { unpaid: 1 },
       viewCounts: { completed: 1, in_progress: 1 },
     },
+    filterOptions: oaPendingPaymentFilterOptions(),
     filterConfig: [
       { field: "oa_applicant", label: "OA申请人", mode: "enum_multi", sortable: true, operators: ["in"] },
       { field: "oa_project_name", label: "项目名称", mode: "enum_multi", sortable: true, operators: ["in"] },
@@ -4057,6 +4149,7 @@ function oaPendingPaymentRelationFanoutRowsPayload(relationConfirmed: boolean) {
       bankPaidTotal: relationConfirmed ? "58000.00" : "0.00",
       statusCounts: relationConfirmed ? { paid: 1 } : { unpaid: 1 },
     },
+    filterOptions: oaPendingPaymentFilterOptions(),
     filterConfig: [
       { field: "oa_applicant", label: "OA申请人", mode: "enum_multi", sortable: true, operators: ["in"] },
       { field: "oa_project_name", label: "项目名称", mode: "enum_multi", sortable: true, operators: ["in"] },
@@ -4090,9 +4183,8 @@ function oaPendingPaymentNonFreshRowsPayload(readModelStatus: OaPendingPaymentRe
   };
 }
 
-function oaPendingPaymentFilterOptionsPayload(readModelStatus: OaPendingPaymentReadModelMockStatus = "fresh") {
-  return {
-    fields: [
+function oaPendingPaymentFilterOptions() {
+  const fields = [
       {
         field: "oa_applicant",
         label: "OA申请人",
@@ -4151,12 +4243,8 @@ function oaPendingPaymentFilterOptionsPayload(readModelStatus: OaPendingPaymentR
         options: [{ value: "浏览器待付款供应商", label: "浏览器待付款供应商", count: 1 }],
       },
       { field: "invoice_date", label: "开票日期", mode: "date", sortable: true, operators: ["between", "equals"], options: [] },
-    ],
-    readModelStatus,
-    read_model_status: readModelStatus,
-    read_model_stale_reasons: readModelStatus === "fresh" ? [] : ["oa_pending_payment_source_version_missing"],
-    read_model_scope_key: "all",
-  };
+  ];
+  return Object.fromEntries(fields.map((field) => [field.field, field.options]));
 }
 
 function oaPendingPaymentUnavailableDetailPayload() {
@@ -4790,6 +4878,181 @@ function costStatisticsExplorerPayload(
     read_model_status: readModelStatus,
     read_model_scope_key: `${projectScope ?? "active"}:${month}`,
     read_model_generated_at: "2026-06-17T09:30:00+08:00",
+    read_model_stale_reasons: readModelStatus === "fresh" ? [] : [`cost_statistics_${readModelStatus}`],
+  };
+}
+
+function costStatisticsExplorerPagePayload(
+  url: URL,
+  payload: ReturnType<typeof costStatisticsExplorerPayload>,
+  readModelStatus: CostStatisticsReadModelMockStatus,
+) {
+  const scope = url.searchParams.get("scope") ?? "all";
+  const view = url.searchParams.get("view") ?? "time";
+  const pageSize = Math.max(1, Math.min(100, Number(url.searchParams.get("page_size") ?? 50) || 50));
+  const cursorOffset = Number((url.searchParams.get("cursor") ?? "").replace(/^mock:/, "")) || 0;
+  const projectName = url.searchParams.get("project_name") ?? "";
+  const expenseType = url.searchParams.get("expense_type") ?? "";
+  const paymentAccountLabel = url.searchParams.get("payment_account_label") ?? "";
+  const primaryLabel = url.searchParams.get("bank_tag_primary_label") ?? "";
+  const subLabel = url.searchParams.get("bank_tag_sub_label") ?? "";
+  const inScope = <Row extends { trade_time: string }>(rows: Row[]) => rows.filter((row) => (
+    scope === "all"
+    || (scope.startsWith("year:") ? row.trade_time.startsWith(`${scope.slice(5)}-`) : row.trade_time.startsWith(scope))
+  ));
+  const costRows = inScope(payload.time_rows);
+  const bankFlowRows = inScope(payload.bank_flow_time_rows);
+  const amount = (value: string) => Number(value.replace(/,/g, "")) || 0;
+  const formatAmount = (value: number) => value.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  const percentage = (value: number, total: number) => `${((value / (total || 1)) * 100).toFixed(1)}%`;
+
+  const projectGroups = new Map<string, { rows: typeof costRows; total: number; expenseTypes: Set<string> }>();
+  const expenseGroups = new Map<string, { rows: typeof costRows; total: number; projects: Set<string> }>();
+  const bankGroups = new Map<string, { rows: typeof costRows; total: number; projects: Set<string> }>();
+  for (const row of costRows) {
+    const project = projectGroups.get(row.project_name) ?? { rows: [], total: 0, expenseTypes: new Set<string>() };
+    project.rows.push(row);
+    project.total += amount(row.amount);
+    project.expenseTypes.add(row.expense_type);
+    projectGroups.set(row.project_name, project);
+    const expense = expenseGroups.get(row.expense_type) ?? { rows: [], total: 0, projects: new Set<string>() };
+    expense.rows.push(row);
+    expense.total += amount(row.amount);
+    expense.projects.add(row.project_name);
+    expenseGroups.set(row.expense_type, expense);
+    const account = bankGroups.get(row.payment_account_label) ?? { rows: [], total: 0, projects: new Set<string>() };
+    account.rows.push(row);
+    account.total += amount(row.amount);
+    account.projects.add(row.project_name);
+    bankGroups.set(row.payment_account_label, account);
+  }
+  for (const account of payload.bank_accounts) {
+    if (!bankGroups.has(account.payment_account_label)) {
+      bankGroups.set(account.payment_account_label, { rows: [], total: 0, projects: new Set<string>() });
+    }
+  }
+  const total = costRows.reduce((sum, row) => sum + amount(row.amount), 0);
+  const projects = Array.from(projectGroups.entries()).map(([name, group]) => ({
+    project_name: name,
+    total_amount: formatAmount(group.total),
+    transaction_count: group.rows.length,
+    expense_type_count: group.expenseTypes.size,
+    percentage_label: percentage(group.total, total),
+  })).sort((left, right) => amount(right.total_amount) - amount(left.total_amount));
+  const expenseTypes = Array.from(expenseGroups.entries()).map(([name, group]) => ({
+    expense_type: name,
+    total_amount: formatAmount(group.total),
+    transaction_count: group.rows.length,
+    project_count: group.projects.size,
+    percentage_label: percentage(group.total, total),
+  })).sort((left, right) => amount(right.total_amount) - amount(left.total_amount));
+  const bankAccounts = Array.from(bankGroups.entries()).map(([label, group]) => ({
+    payment_account_label: label,
+    total_amount: formatAmount(group.total),
+    transaction_count: group.rows.length,
+    project_count: group.projects.size,
+    percentage_label: percentage(group.total, total),
+  })).sort((left, right) => amount(right.total_amount) - amount(left.total_amount));
+
+  const selectedProjectRows = projectGroups.get(projectName)?.rows ?? [];
+  const selectedProjectTotal = selectedProjectRows.reduce((sum, row) => sum + amount(row.amount), 0);
+  const projectExpenseTypes = Array.from(new Set(selectedProjectRows.map((row) => row.expense_type))).map((name) => {
+    const rows = selectedProjectRows.filter((row) => row.expense_type === name);
+    const rowTotal = rows.reduce((sum, row) => sum + amount(row.amount), 0);
+    return {
+      expense_type: name,
+      total_amount: formatAmount(rowTotal),
+      transaction_count: rows.length,
+      project_count: 1,
+      percentage_label: percentage(rowTotal, selectedProjectTotal),
+    };
+  }).sort((left, right) => amount(right.total_amount) - amount(left.total_amount));
+  const selectedBankRows = bankGroups.get(paymentAccountLabel)?.rows ?? [];
+  const selectedBankTotal = selectedBankRows.reduce((sum, row) => sum + amount(row.amount), 0);
+  const bankProjects = Array.from(new Set(selectedBankRows.map((row) => row.project_name))).map((name) => {
+    const rows = selectedBankRows.filter((row) => row.project_name === name);
+    const rowTotal = rows.reduce((sum, row) => sum + amount(row.amount), 0);
+    return {
+      project_name: name,
+      total_amount: formatAmount(rowTotal),
+      transaction_count: rows.length,
+      expense_type_count: new Set(rows.map((row) => row.expense_type)).size,
+      percentage_label: percentage(rowTotal, selectedBankTotal),
+    };
+  }).sort((left, right) => amount(right.total_amount) - amount(left.total_amount));
+
+  const directionFacet = (rows: typeof bankFlowRows) => ({
+    expense_amount: sumCostAmounts(rows.filter((row) => row.direction === "支出")),
+    income_amount: sumCostAmounts(rows.filter((row) => row.direction === "收入")),
+    expense_transaction_count: rows.filter((row) => row.direction === "支出").length,
+    income_transaction_count: rows.filter((row) => row.direction === "收入").length,
+  });
+  const tagGroups = new Map<string, typeof bankFlowRows>();
+  for (const row of bankFlowRows) {
+    const label = row.bank_tag_primary_label || row.bank_tag_label || "未标记";
+    tagGroups.set(label, [...(tagGroups.get(label) ?? []), row]);
+  }
+  const bankTagPrimary = Array.from(tagGroups.entries()).map(([label, rows]) => ({
+    primary_label: label,
+    ...directionFacet(rows),
+    sub_tag_count: new Set(rows.map((row) => row.bank_tag_sub_label || row.bank_tag_label || label)).size,
+  }));
+  const primaryRows = tagGroups.get(primaryLabel) ?? [];
+  const bankTagSub = Array.from(new Set(primaryRows.map((row) => row.bank_tag_sub_label || row.bank_tag_label || primaryLabel)))
+    .map((label) => ({
+      primary_label: primaryLabel,
+      sub_label: label,
+      ...directionFacet(primaryRows.filter((row) => (row.bank_tag_sub_label || row.bank_tag_label || primaryLabel) === label)),
+    }));
+
+  let matchedRows = view === "time" ? bankFlowRows : [];
+  if (view === "project" && projectName && expenseType) {
+    matchedRows = costRows.filter((row) => row.project_name === projectName && row.expense_type === expenseType);
+  } else if (view === "bank" && paymentAccountLabel && projectName) {
+    matchedRows = costRows.filter((row) => row.payment_account_label === paymentAccountLabel && row.project_name === projectName);
+  } else if (view === "expense_type" && expenseType) {
+    matchedRows = costRows.filter((row) => row.expense_type === expenseType);
+  } else if (view === "bank_tag" && primaryLabel && subLabel) {
+    matchedRows = bankFlowRows.filter((row) => (
+      (row.bank_tag_primary_label || row.bank_tag_label || "未标记") === primaryLabel
+      && (row.bank_tag_sub_label || row.bank_tag_label || primaryLabel) === subLabel
+    ));
+  }
+  const summaryRows = view === "time" || view === "bank_tag" ? bankFlowRows : costRows;
+  const expenseRows = summaryRows.filter((row) => row.direction === "支出");
+  const incomeRows = summaryRows.filter((row) => row.direction === "收入");
+  const rows = readModelStatus === "fresh" ? matchedRows.slice(cursorOffset, cursorOffset + pageSize) : [];
+  const nextOffset = cursorOffset + rows.length;
+  return {
+    scope,
+    view,
+    summary: {
+      row_count: summaryRows.length,
+      transaction_count: summaryRows.length,
+      total_amount: sumCostAmounts(summaryRows),
+      expense_amount: sumCostAmounts(expenseRows),
+      income_amount: sumCostAmounts(incomeRows),
+      expense_transaction_count: expenseRows.length,
+      income_transaction_count: incomeRows.length,
+    },
+    available_years: Array.from(new Set([...payload.time_rows, ...payload.bank_flow_time_rows]
+      .map((row) => row.trade_time.slice(0, 4)))).sort().reverse(),
+    facets: readModelStatus === "fresh" ? {
+      projects: view === "project" ? projects : view === "bank" && paymentAccountLabel ? bankProjects : [],
+      expense_types: view === "expense_type" ? expenseTypes : view === "project" && projectName ? projectExpenseTypes : [],
+      bank_accounts: view === "bank" ? bankAccounts : [],
+      bank_tag_primary: view === "bank_tag" ? bankTagPrimary : [],
+      bank_tag_sub: view === "bank_tag" ? bankTagSub : [],
+    } : { projects: [], expense_types: [], bank_accounts: [], bank_tag_primary: [], bank_tag_sub: [] },
+    rows,
+    row_count: readModelStatus === "fresh" ? matchedRows.length : 0,
+    next_cursor: readModelStatus === "fresh" && nextOffset < matchedRows.length ? `mock:${nextOffset}` : null,
+    read_model_status: readModelStatus,
+    read_model_scope_key: `${url.searchParams.get("project_scope") ?? "active"}:${scope.startsWith("year:") ? "all" : scope}`,
+    read_model_generated_at: payload.read_model_generated_at,
     read_model_stale_reasons: readModelStatus === "fresh" ? [] : [`cost_statistics_${readModelStatus}`],
   };
 }
@@ -8617,15 +8880,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       return json(route, oaPendingPaymentRowsPayload(invoiceImportDownstreamConfirmed));
     }
 
-    if (path === "/api/oa-pending-payments/filter-options") {
-      const readModelStatus = options.oaPendingPaymentReadModelStatus ?? "fresh";
-      return json(
-        route,
-        oaPendingPaymentFilterOptionsPayload(readModelStatus),
-        readModelStatus === "refreshing" ? 202 : 200,
-      );
-    }
-
     if (path === "/api/oa-pending-payments/bank-transaction-candidates") {
       return json(route, oaPendingPaymentBankCandidatesPayload(url.searchParams.get("relation_status") ?? "all"));
     }
@@ -8655,7 +8909,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         oaPaymentWritebacks: [
           { code: "written", label: "已写回", flowIds: ["flow-bank-link-e2e-001"], syncStatus: "ready" },
         ],
-        readModelRefresh: { scopeKeys: ["oa_pending_payment:in_progress", "workbench:all"], enqueued: true, targetSeconds: 2 },
+        readModelRefresh: { scopeKeys: ["2026-05"], enqueued: true, targetSeconds: 1 },
       });
     }
 
@@ -8685,7 +8939,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
               syncStatus: "ready",
             },
           ],
-          readModelRefresh: { scopeKeys: ["all"], enqueued: true, targetSeconds: 2 },
+          readModelRefresh: { scopeKeys: ["2026-05"], enqueued: true, targetSeconds: 1 },
         });
       }
       return json(route, {
@@ -8694,7 +8948,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         oaRowIds: [],
         writebackCount: 0,
         oaPaymentWritebacks: [],
-        readModelRefresh: { scopeKeys: ["all"], enqueued: false, targetSeconds: 2 },
+        readModelRefresh: { scopeKeys: [], enqueued: false, targetSeconds: 0 },
       });
     }
 
@@ -8773,9 +9027,9 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     }
 
     if (path === "/api/cost-statistics/explorer") {
-      const explorerMonth = url.searchParams.get("month") ?? "all";
+      const explorerScope = url.searchParams.get("scope") ?? "all";
       const explorerProjectScope = url.searchParams.get("project_scope") ?? "active";
-      if (costStatisticsExplorerFailuresRemaining > 0 && explorerMonth !== "all") {
+      if (costStatisticsExplorerFailuresRemaining > 0 && explorerScope !== "all") {
         costStatisticsExplorerFailuresRemaining -= 1;
         return json(route, {
           error: "cost_statistics_explorer_temporarily_unavailable",
@@ -8784,7 +9038,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       }
       const readModelStatus = options.costStatisticsReadModelStatus ?? "fresh";
       const payload = costStatisticsExplorerPayload(
-        explorerMonth,
+        "all",
         explorerProjectScope,
         relationConfirmed || outputInvoiceDownstreamConfirmed,
         Boolean(options.costStatisticsRelationFanout) || outputInvoiceDownstreamConfirmed,
@@ -8797,13 +9051,11 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         costCompletedProjectNames,
         Boolean(options.costStatisticsLargeDataset),
       );
-      if (readModelStatus !== "fresh") {
-        payload.summary = { row_count: 0, transaction_count: 0, total_amount: "0.00" };
-        payload.time_rows = [];
-        payload.project_rows = [];
-        payload.expense_type_rows = [];
-      }
-      return json(route, payload, readModelStatus === "refreshing" ? 202 : 200);
+      return json(
+        route,
+        costStatisticsExplorerPagePayload(url, payload, readModelStatus),
+        readModelStatus === "refreshing" ? 202 : 200,
+      );
     }
 
     if (path === "/api/cost-statistics/export-preview") {
@@ -9236,9 +9488,28 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     }
 
     if (path === "/api/workbench") {
+      if (options.workbenchFreshRefetchError && (relationConfirmed || workbenchExceptionApplied)) {
+        return json(route, {
+          error: "browser_workbench_refetch_failed",
+          message: "browser workbench refetch failed",
+        }, 500);
+      }
+      const initialZoneSearch = (zone: WorkbenchZone) => {
+        const rawQuery = url.searchParams.get(`${zone}_query`);
+        if (!rawQuery) {
+          return "";
+        }
+        try {
+          const query = JSON.parse(rawQuery) as { search?: unknown };
+          return typeof query.search === "string" ? query.search : "";
+        } catch {
+          return "";
+        }
+      };
       if (options.workbenchBankFlowRuleBatchScenario) {
-        const pairedGroups = bankFlowRuleWorkbenchGroups("paired", relationConfirmed);
-        const unpairedGroups = bankFlowRuleWorkbenchGroups("unpaired", relationConfirmed);
+        const readModelVersion = relationConfirmed
+          ? "workbench-generation-e2e-002"
+          : "workbench-generation-e2e-001";
         return json(route, {
           month: "all",
           summary: {
@@ -9260,13 +9531,27 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
             etc_summary_batch_count: 0,
             oa_attachment_total: 0,
           },
-          paired: { groups: pairedGroups },
-          unpaired: { groups: unpairedGroups },
+          paired: bankFlowRuleWorkbenchGroupsPayload(
+            "paired",
+            relationConfirmed,
+            1,
+            200,
+            initialZoneSearch("paired"),
+          ),
+          unpaired: bankFlowRuleWorkbenchGroupsPayload(
+            "unpaired",
+            relationConfirmed,
+            1,
+            200,
+            initialZoneSearch("unpaired"),
+          ),
           read_model_status: "fresh",
+          read_model_version: readModelVersion,
+          active_generation_id: readModelVersion,
           generated_at: "2026-06-17T01:00:00Z",
         });
       }
-      return json(route, legacyWorkbenchPayload(
+      return json(route, workbenchInitialPayload(
         relationConfirmed,
         workbenchExceptionApplied,
         workbenchRowIgnored,
@@ -9274,6 +9559,10 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         options.workbenchPageEmpty === true,
         options.workbenchLargeDataset === true,
         options.workbenchCashSpecialActions === true,
+        {
+          paired: initialZoneSearch("paired"),
+          unpaired: initialZoneSearch("unpaired"),
+        },
       ));
     }
 
@@ -9388,43 +9677,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       });
     }
 
-    if (path === "/api/workbench/summary") {
-      if (options.workbenchBankFlowRuleBatchScenario) {
-        return json(route, {
-          month: "all",
-          summary: {
-            oa_count: 0,
-            bank_count: 5,
-            invoice_count: relationConfirmed ? 1 : 0,
-            paired_count: relationConfirmed ? 2 : 1,
-            unpaired_count: relationConfirmed ? 0 : 1,
-            exception_count: 0,
-            ignored_count: 0,
-          },
-          oa_status: { code: "ready", message: "OA 已同步" },
-          invoice_inventory: {
-            system_total: 0,
-            manual_import_total: 0,
-            workbench_visible_total: 0,
-            hidden_submitted_etc_total: 0,
-            extra_etc_total: 0,
-            etc_summary_batch_count: 0,
-            oa_attachment_total: 0,
-          },
-          read_model_status: "fresh",
-          generated_at: "2026-06-17T01:00:00Z",
-        });
-      }
-      return json(route, workbenchSummaryPayload(
-        relationConfirmed,
-        workbenchExceptionApplied,
-        workbenchRowIgnored,
-        workbenchPageStatus,
-        options.workbenchPageEmpty === true,
-        options.workbenchLargeDataset === true,
-      ));
-    }
-
     if (path === "/api/workbench/groups") {
       if (options.workbenchFreshRefetchError && (relationConfirmed || workbenchExceptionApplied)) {
         return json(route, {
@@ -9436,22 +9688,13 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       const requestedPage = Number.parseInt(url.searchParams.get("page") ?? "1", 10);
       const requestedPageSize = Number.parseInt(url.searchParams.get("page_size") ?? "50", 10);
       if (options.workbenchBankFlowRuleBatchScenario) {
-        const allGroups = bankFlowRuleWorkbenchGroups(zone, relationConfirmed);
-        const boundedPage = Math.max(1, Number.isFinite(requestedPage) ? requestedPage : 1);
-        const boundedPageSize = Math.max(1, Number.isFinite(requestedPageSize) ? requestedPageSize : 50);
-        const start = (boundedPage - 1) * boundedPageSize;
-        const pageGroups = allGroups.slice(start, start + boundedPageSize);
-        return json(route, {
-          month: "all",
+        return json(route, bankFlowRuleWorkbenchGroupsPayload(
           zone,
-          page: boundedPage,
-          page_size: boundedPageSize,
-          total: allGroups.length,
-          row_counts: countWorkbenchRows(allGroups),
-          has_more: start + pageGroups.length < allGroups.length,
-          groups: pageGroups,
-          read_model_status: "fresh",
-        });
+          relationConfirmed,
+          Number.isFinite(requestedPage) ? requestedPage : 1,
+          Number.isFinite(requestedPageSize) ? requestedPageSize : 50,
+          url.searchParams.get("search") ?? "",
+        ));
       }
       return json(route, workbenchGroupsPayload(
         zone,

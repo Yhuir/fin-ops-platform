@@ -164,7 +164,6 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
                 "pending_invoice_read_model",
                 "input_invoice_usage_read_model",
                 "output_invoice_collection_read_model",
-                "oa_pending_payment_read_model",
                 "tax_offset_read_model",
                 "tax_offset_month_cache",
                 "cost_statistics_read_model",
@@ -173,6 +172,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         )
         self.assertNotIn("turnover_ledger", domains)
         self.assertNotIn("no_oa_bank_batch_read_model", domains)
+        self.assertNotIn("oa_pending_payment_read_model", domains)
         self.assertNotIn("bank_account_balance_read_model", domains)
         self.assertIn("workbench_matching", plan["will_enqueue_jobs"])
         self.assertIn("tax_offset_cache_warmup", plan["will_enqueue_jobs"])

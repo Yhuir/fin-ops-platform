@@ -355,21 +355,7 @@ class PostgresWorkbenchRelationRepository:
                     metadata=refresh_metadata,
                 )
             if "all" in workbench_scope_keys:
-                if workbench_month_scope_keys:
-                    _append_read_model_refresh(
-                        refreshes,
-                        scope_type="workbench",
-                        scope_key="all",
-                        reason="workbench_relation_changed",
-                        priority="high",
-                        payload_extra={
-                            "aggregate_only": True,
-                            "parent_scope_keys": workbench_month_scope_keys,
-                        },
-                        dedupe_kind="aggregate",
-                        metadata=refresh_metadata,
-                    )
-                else:
+                if not workbench_month_scope_keys:
                     _append_read_model_refresh(
                         refreshes,
                         scope_type="workbench",

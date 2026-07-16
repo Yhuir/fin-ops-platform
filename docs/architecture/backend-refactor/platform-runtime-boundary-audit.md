@@ -449,7 +449,7 @@ PF-P003 已把本文档中的平台风险转成可运行的机械门禁：
 
 Known violations / allowlist 说明：
 
-- `services/cost_tax_sql_projection.py` 仍通过 `MongoOAAdapter` 使用 parser version / pure utility 语义。PF-P003 不迁移业务代码，后续 Tax / Cost / ETC Micro-JIT 应把这类纯函数/版本常量迁出到 shared/domain utility。
+- 原 `services/cost_tax_sql_projection.py` known violation 已关闭：05-20 将成本与税金 builder 拆到各自 owner并删除旧混合 module；税金 owner只从 `oa_attachment_invoice_cache` 读取 parser-version 纯函数，不依赖 `MongoOAAdapter`。
 - `app/server.py` 仍是 App Shell 和 legacy/type-check 最大耦合点。PF-P003 只锁门禁，不拆 handler；后续模块 Micro-JIT 必须逐步迁出业务逻辑。
 - 多个 SQL projection、runtime monitoring、ops/backfill、repository 文件仍直接执行 raw SQL。PF-P003 将它们分类为允许边界；后续业务模块不得新增未分类 raw SQL。
 

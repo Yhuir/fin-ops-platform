@@ -141,7 +141,7 @@ outbox/durable queue event
 
 ### Workbench
 
-- `GET /api/workbench/summary`
+- `GET /api/workbench` combined initial
 - `GET /api/workbench/groups`
 - `GET /api/workbench/group-rows`
 - pair relation confirm/cancel。
@@ -158,13 +158,13 @@ outbox/durable queue event
 
 PF-P004 已补充 Workbench `query/read-model` 子域事实链路，完整计划见 `workbench-read-model-query-plan.md`：
 
-- `GET /api/workbench/summary` 由 `_handle_api_workbench_summary` 读取 `PostgresReadModelRepository.get_workbench_summary(scope_key)`；missing 或 source_version stale 时 enqueue `workbench.read_model.refresh`，不在请求线程同步 rebuild。
+- `GET /api/workbench` 由 `_handle_api_workbench` 委托 `WorkbenchReadApiRoutes.initial(...) -> WorkbenchQueryFacade.initial_page(...) -> PostgresReadModelRepository.get_workbench_initial_page(...)`，在同一只读快照内读取内部 summary 与 paired/unpaired 各首页，并固定同一 generation-set version。独立 summary HTTP handler/route 已删除；missing/stale 通过现有 freshness 合同显式返回，不在请求线程同步 rebuild。
 - `GET /api/workbench/groups` 由 `_handle_api_workbench_groups` 读取 refresh status，fresh 时才允许使用 Redis versioned page cache；cache miss 后读取 `get_workbench_groups_page(...)`，底层 pin active generation 并读结构化 `workbench_groups` / `workbench_group_rows`。
 - `GET /api/workbench/groups/detail` 由 `_handle_api_workbench_group_detail` 读取 `get_workbench_group_detail(...)`；当前 stale/missing 语义不如 summary/groups 明确，后续必须先补 characterization tests。
 - `GET /api/workbench/refresh-status` 聚合 dirty scope、source_version、outbox backlog、worker heartbeat、active/building/failed generation 和 consistency 状态。
 - `GET /api/workbench/events` 是 SSE status polling，不是 Redis PubSub；已经设置 `X-Accel-Buffering: no`，但断连退出、线程占用和 heartbeat event 契约需要测试锁定。
-- 兼容期 `GET /api/workbench` 仍可能在 SQL read model unavailable 时 fallback legacy builder；这是高风险读路径，后续必须先锁定 response contract 再收口。
-- Row detail 当前存在 `LiveWorkbenchService`、cached read model、`WorkbenchQueryService` route 多级 fallback；后续不得直接重写，必须先锁定 fallback 顺序、字段完整度和 override 应用顺序。
+- `GET /api/workbench` 只读 SQL active generation，SQL read model unavailable 时 fail closed，不存在 legacy full-payload builder fallback。
+- Row detail 只走 `WorkbenchRowDetailApiRoutes -> WorkbenchQueryFacade -> active generation repository`，不存在 live/cached/opaque OA 或旧 query service 多级 fallback。
 - Worker refresh 由 `app/worker.py` 在启用 `--enable-workbench-read-model-refresh` 时注册 `workbench.read_model.refresh` handler，`RuntimeQueueRepository.enqueue_read_model_refresh` 同步维护 dirty scope source_version 和 outbox event，`WorkbenchReadModelRefreshService` 调用 `WorkbenchSqlProjectionBuilder` 写 building generation，验证后切 active generation。
 - `all` scope 只能从 active month shards 聚合；`YYYY-MM` scope 负责当月 facts 到 rows/groups/summary 的生成。
 

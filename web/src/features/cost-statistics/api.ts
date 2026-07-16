@@ -1,14 +1,15 @@
 import type {
+  CostBankExplorerRow,
+  CostBankTagPrimaryExplorerRow,
+  CostBankTagSubExplorerRow,
   CostExpenseTypeExplorerRow,
-  CostBankAccount,
   CostProjectScope,
   CostProjectExplorerRow,
   CostStatisticsExportPreview,
-  CostStatisticsExplorer,
+  CostStatisticsExplorerPage,
+  CostStatisticsExplorerPageRequest,
   CostStatisticsTagRules,
   CostStatisticsTagRuleTag,
-  CostMonthStatistics,
-  CostProjectStatistics,
   CostTimeRow,
   CostTransactionDetail,
   SaveCostStatisticsTagRulesRequest,
@@ -23,21 +24,6 @@ type ApiCostSummary = {
   income_amount?: string | null;
   expense_transaction_count?: number | null;
   income_transaction_count?: number | null;
-};
-
-type ApiCostMonthSummaryRow = {
-  project_name: string;
-  expense_type: string;
-  expense_content: string;
-  amount: string;
-  transaction_count: number;
-  sample_transaction_ids: string[];
-};
-
-type ApiCostMonthStatistics = {
-  month: string;
-  summary: ApiCostSummary;
-  rows: ApiCostMonthSummaryRow[];
 };
 
 type ApiCostTimeRow = {
@@ -63,6 +49,7 @@ type ApiCostProjectExplorerRow = {
   total_amount: string;
   transaction_count: number;
   expense_type_count: number;
+  percentage_label?: string | null;
 };
 
 type ApiCostExpenseTypeExplorerRow = {
@@ -70,46 +57,54 @@ type ApiCostExpenseTypeExplorerRow = {
   total_amount: string;
   transaction_count: number;
   project_count: number;
+  percentage_label: string;
 };
 
-type ApiCostBankAccount = {
+type ApiCostBankExplorerRow = {
   payment_account_label: string;
-  bank_name?: string | null;
-  account_last4?: string | null;
-  source?: string | null;
+  total_amount: string;
+  transaction_count: number;
+  project_count: number;
+  percentage_label: string;
 };
 
-type ApiCostStatisticsExplorer = {
-  month: string;
+type ApiCostBankTagPrimaryExplorerRow = {
+  primary_label: string;
+  expense_amount: string;
+  income_amount: string;
+  expense_transaction_count: number;
+  income_transaction_count: number;
+  sub_tag_count: number;
+};
+
+type ApiCostBankTagSubExplorerRow = {
+  primary_label: string;
+  sub_label: string;
+  expense_amount: string;
+  income_amount: string;
+  expense_transaction_count: number;
+  income_transaction_count: number;
+};
+
+type ApiCostStatisticsExplorerPage = {
+  scope: string;
+  view: CostStatisticsExplorerPage["view"];
   summary: ApiCostSummary;
-  time_rows: ApiCostTimeRow[];
-  bank_flow_summary?: ApiCostSummary | null;
-  bank_flow_time_rows?: ApiCostTimeRow[] | null;
-  bank_accounts?: ApiCostBankAccount[] | null;
-  project_rows: ApiCostProjectExplorerRow[];
-  expense_type_rows: ApiCostExpenseTypeExplorerRow[];
+  available_years?: string[] | null;
+  facets?: {
+    projects?: ApiCostProjectExplorerRow[] | null;
+    expense_types?: ApiCostExpenseTypeExplorerRow[] | null;
+    bank_accounts?: ApiCostBankExplorerRow[] | null;
+    bank_tag_primary?: ApiCostBankTagPrimaryExplorerRow[] | null;
+    bank_tag_sub?: ApiCostBankTagSubExplorerRow[] | null;
+  } | null;
+  rows?: ApiCostTimeRow[] | null;
+  row_count: number;
+  next_cursor?: string | null;
   read_model_status?: string | null;
   read_model_scope_key?: string | null;
   read_model_generated_at?: string | null;
   read_model_stale_reasons?: unknown[] | null;
-};
-
-type ApiCostProjectRow = {
-  transaction_id: string;
-  trade_time: string;
-  direction: string;
-  expense_type: string;
-  expense_content: string;
-  amount: string;
-  counterparty_name: string;
-  payment_account_label: string;
-};
-
-type ApiCostProjectStatistics = {
-  month: string;
-  project_name: string;
-  summary: ApiCostSummary;
-  rows: ApiCostProjectRow[];
 };
 
 type ApiCostTransactionDetail = {
@@ -172,14 +167,6 @@ type ApiCostStatisticsTagRules = {
   freshness_targets?: unknown;
 };
 
-type ExplorerCacheEntry = {
-  payload: CostStatisticsExplorer;
-  cachedAt: number;
-};
-
-const COST_EXPLORER_CACHE_TTL_MS = 5 * 60 * 1000;
-const costExplorerCache = new Map<string, ExplorerCacheEntry>();
-
 function mapSummary(summary: ApiCostSummary) {
   return {
     rowCount: summary.row_count,
@@ -219,15 +206,6 @@ function bankTagFields(row: {
     bankTagPrimaryLabel: primaryLabel,
     bankTagSubLabel: subLabel,
     bankTagLabelPath: labelPath.length > 0 ? labelPath : primaryLabel === subLabel ? [primaryLabel] : [primaryLabel, subLabel],
-  };
-}
-
-function mapBankAccount(row: ApiCostBankAccount): CostBankAccount {
-  return {
-    paymentAccountLabel: row.payment_account_label,
-    bankName: optionalString(row.bank_name),
-    accountLast4: optionalString(row.account_last4),
-    source: optionalString(row.source),
   };
 }
 
@@ -287,102 +265,81 @@ function buildScopedUrl(path: string, params: Record<string, string | undefined>
   return `${path}?${query.toString()}`;
 }
 
-function buildExplorerCacheKey(month: string, projectScope: CostProjectScope) {
-  return `${projectScope}:${month}`;
-}
-
-export function getCachedCostStatisticsExplorer(
-  month: string,
-  projectScope: CostProjectScope = "active",
-): CostStatisticsExplorer | null {
-  const entry = costExplorerCache.get(buildExplorerCacheKey(month, projectScope));
-  if (!entry) {
-    return null;
-  }
-  if (Date.now() - entry.cachedAt > COST_EXPLORER_CACHE_TTL_MS) {
-    costExplorerCache.delete(buildExplorerCacheKey(month, projectScope));
-    return null;
-  }
-  return entry.payload;
-}
-
-export function clearCostStatisticsExplorerCache() {
-  costExplorerCache.clear();
-}
-
-export async function fetchCostStatisticsMonth(
-  month: string,
-  signal?: AbortSignal,
-  projectScope: CostProjectScope = "active",
-): Promise<CostMonthStatistics> {
-  const payload = await requestJson<ApiCostMonthStatistics>(buildScopedUrl("/api/cost-statistics", {
-    month,
-    project_scope: projectScope,
-  }), {
-    method: "GET",
-    signal,
-  });
-
-  return {
-    month: payload.month,
-    summary: mapSummary(payload.summary),
-    rows: payload.rows.map((row) => ({
-      projectName: row.project_name,
-      expenseType: row.expense_type,
-      expenseContent: row.expense_content,
-      amount: row.amount,
-      transactionCount: row.transaction_count,
-      sampleTransactionIds: row.sample_transaction_ids,
-    })),
-  };
-}
-
-export async function fetchCostStatisticsExplorer(
-  month: string,
-  signal?: AbortSignal,
-  projectScope: CostProjectScope = "active",
-): Promise<CostStatisticsExplorer> {
-  const payload = await requestJson<ApiCostStatisticsExplorer>(
+export async function fetchCostStatisticsExplorerPage(
+  request: CostStatisticsExplorerPageRequest,
+): Promise<CostStatisticsExplorerPage> {
+  const payload = await requestJson<ApiCostStatisticsExplorerPage>(
     buildScopedUrl("/api/cost-statistics/explorer", {
-      month,
-      project_scope: projectScope,
+      scope: request.scope,
+      view: request.view,
+      project_scope: request.projectScope ?? "active",
+      project_name: request.projectName,
+      expense_type: request.expenseType,
+      payment_account_label: request.paymentAccountLabel,
+      bank_tag_primary_label: request.bankTagPrimaryLabel,
+      bank_tag_sub_label: request.bankTagSubLabel,
+      cursor: request.cursor,
+      page_size: request.pageSize ? String(request.pageSize) : undefined,
     }),
     {
       method: "GET",
-      signal,
+      signal: request.signal,
     },
   );
 
-  const timeRows = payload.time_rows.map<CostTimeRow>(mapCostTimeRow);
-  const mappedPayload = {
-    month: payload.month,
+  const facets = payload.facets ?? {};
+  return {
+    scope: payload.scope,
+    view: payload.view,
     summary: mapSummary(payload.summary),
-    timeRows,
-    bankFlowSummary: mapSummary(payload.bank_flow_summary ?? payload.summary),
-    bankFlowTimeRows: (payload.bank_flow_time_rows ?? payload.time_rows).map<CostTimeRow>(mapCostTimeRow),
-    bankAccounts: (payload.bank_accounts ?? []).map(mapBankAccount),
-    projectRows: payload.project_rows.map<CostProjectExplorerRow>((row) => ({
-      projectName: row.project_name,
-      totalAmount: row.total_amount,
-      transactionCount: row.transaction_count,
-      expenseTypeCount: row.expense_type_count,
-    })),
-    expenseTypeRows: payload.expense_type_rows.map<CostExpenseTypeExplorerRow>((row) => ({
-      expenseType: row.expense_type,
-      totalAmount: row.total_amount,
-      transactionCount: row.transaction_count,
-      projectCount: row.project_count,
-    })),
-    readModelStatus: optionalString(payload.read_model_status) as CostStatisticsExplorer["readModelStatus"],
+    availableYears: stringList(payload.available_years) ?? [],
+    facets: {
+      projects: (facets.projects ?? []).map<CostProjectExplorerRow>((row) => ({
+        projectName: row.project_name,
+        totalAmount: row.total_amount,
+        transactionCount: row.transaction_count,
+        expenseTypeCount: row.expense_type_count,
+        percentageLabel: optionalString(row.percentage_label),
+      })),
+      expenseTypes: (facets.expense_types ?? []).map<CostExpenseTypeExplorerRow>((row) => ({
+        expenseType: row.expense_type,
+        totalAmount: row.total_amount,
+        transactionCount: row.transaction_count,
+        projectCount: row.project_count,
+        percentageLabel: row.percentage_label,
+      })),
+      bankAccounts: (facets.bank_accounts ?? []).map<CostBankExplorerRow>((row) => ({
+        paymentAccountLabel: row.payment_account_label,
+        totalAmount: row.total_amount,
+        transactionCount: row.transaction_count,
+        projectCount: row.project_count,
+        percentageLabel: row.percentage_label,
+      })),
+      bankTagPrimary: (facets.bank_tag_primary ?? []).map<CostBankTagPrimaryExplorerRow>((row) => ({
+        primaryLabel: row.primary_label,
+        expenseAmount: row.expense_amount,
+        incomeAmount: row.income_amount,
+        expenseTransactionCount: row.expense_transaction_count,
+        incomeTransactionCount: row.income_transaction_count,
+        subTagCount: row.sub_tag_count,
+      })),
+      bankTagSub: (facets.bank_tag_sub ?? []).map<CostBankTagSubExplorerRow>((row) => ({
+        primaryLabel: row.primary_label,
+        subLabel: row.sub_label,
+        expenseAmount: row.expense_amount,
+        incomeAmount: row.income_amount,
+        expenseTransactionCount: row.expense_transaction_count,
+        incomeTransactionCount: row.income_transaction_count,
+      })),
+    },
+    rows: (payload.rows ?? []).map(mapCostTimeRow),
+    rowCount: payload.row_count,
+    nextCursor: optionalString(payload.next_cursor),
+    readModelStatus: optionalString(payload.read_model_status) as CostStatisticsExplorerPage["readModelStatus"],
     readModelScopeKey: optionalString(payload.read_model_scope_key),
     readModelGeneratedAt: optionalString(payload.read_model_generated_at),
     readModelStaleReasons: stringList(payload.read_model_stale_reasons),
   };
-  costExplorerCache.set(buildExplorerCacheKey(month, projectScope), {
-    payload: mappedPayload,
-    cachedAt: Date.now(),
-  });
-  return mappedPayload;
 }
 
 export async function fetchCostStatisticsTagRules(signal?: AbortSignal): Promise<CostStatisticsTagRules> {
@@ -423,41 +380,6 @@ export async function saveCostStatisticsTagRules(
         return { readModelKey, scopeKey, ...(scopeType ? { scopeType } : {}) };
       })
       .filter((target): target is { readModelKey: string; scopeKey: string; scopeType?: string } => target !== null),
-  };
-}
-
-export async function fetchProjectCostStatistics(
-  month: string,
-  projectName: string,
-  signal?: AbortSignal,
-  projectScope: CostProjectScope = "active",
-): Promise<CostProjectStatistics> {
-  const payload = await requestJson<ApiCostProjectStatistics>(
-    buildScopedUrl(`/api/cost-statistics/projects/${encodeURIComponent(projectName)}`, {
-      month,
-      project_scope: projectScope,
-    }),
-    {
-      method: "GET",
-      signal,
-    },
-  );
-
-  return {
-    month: payload.month,
-    projectName: payload.project_name,
-    summary: mapSummary(payload.summary),
-    rows: payload.rows.map((row) => ({
-      transactionId: row.transaction_id,
-      tradeTime: row.trade_time,
-      direction: row.direction,
-      projectName: projectName,
-      expenseType: row.expense_type,
-      expenseContent: row.expense_content,
-      amount: row.amount,
-      counterpartyName: row.counterparty_name,
-      paymentAccountLabel: row.payment_account_label,
-    })),
   };
 }
 

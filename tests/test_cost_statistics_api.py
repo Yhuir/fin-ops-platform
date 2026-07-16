@@ -1,16 +1,41 @@
 import json
 import unittest
 from dataclasses import replace
+from decimal import Decimal
 from io import BytesIO
 from unittest.mock import patch
 from urllib.parse import quote
 
-from fin_ops_platform.app.routes_workbench import WorkbenchApiRoutes
-from fin_ops_platform.services.cost_statistics_read_model_service import COST_STATISTICS_READ_MODEL_SCHEMA_VERSION
+from fin_ops_platform.services.cost_statistics_source_versions import (
+    COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+    cost_statistics_source_versions,
+)
+from fin_ops_platform.services.cost_statistics_sql_projection import CostStatisticsSqlProjectionBuilder
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
+from fin_ops_platform.services.workbench_object_identity_arbitration import (
+    WorkbenchObjectIdentityArbitrationService,
+)
+from fin_ops_platform.services.workbench_relation_grouping import WorkbenchRelationGroupingService
 from openpyxl import load_workbook
 
 from tests.app_test_support import build_local_state_application as build_application
+
+
+def _cost_statistics_gate_snapshot(app, scope_key: str) -> dict[str, object]:
+    _project_scope, month = str(scope_key).split(":", 1)
+    source_settings = app._app_settings_service.get_cost_statistics_source_settings_payload()
+    dependency_versions = {"source_version": 1} if month != "all" else None
+    return {
+        "source_settings": source_settings,
+        "workbench_source_versions": dict(dependency_versions or {}),
+        "bank_detail_source_versions": dict(dependency_versions or {}),
+        "source_versions": cost_statistics_source_versions(
+            month=month,
+            settings_payload=source_settings,
+            workbench_source_versions=dependency_versions,
+            bank_detail_source_versions=dependency_versions,
+        ),
+    }
 
 
 class _CostStatsOAAdapter:
@@ -79,21 +104,64 @@ def _confirm_active_cost_relation(
     bank_row_id: str,
     case_id: str,
 ) -> None:
-    app._build_api_workbench_payload(month)
-    response = app.handle_request(
-        "POST",
-        "/api/workbench/actions/confirm-link",
-        json.dumps(
-            {
-                "month": month,
-                "row_ids": [oa_row_id, bank_row_id],
-                "case_id": case_id,
-                "note": "cost statistics active relation fixture",
-            }
-        ),
+    rows = app._resolve_live_rows_direct([oa_row_id, bank_row_id], month_hint=month)
+    rows_by_id = {str(row["id"]): row for row in rows}
+    app._workbench_pair_relation_service.create_active_relation(
+        case_id=case_id,
+        row_ids=[oa_row_id, bank_row_id],
+        row_types=[str(rows_by_id[row_id]["type"]) for row_id in (oa_row_id, bank_row_id)],
+        relation_mode="manual_confirmed",
+        created_by="cost_statistics_test",
+        month_scope=month,
+        note="cost statistics active relation fixture",
     )
-    if response.status_code != 200:
-        raise AssertionError(response.body)
+
+
+def _grouped_cost_workbench_payload(app, month: str) -> dict[str, object]:
+    relations = [
+        relation
+        for relation in app._workbench_pair_relation_service.list_active_relations()
+        if month == "all" or str(relation.get("month_scope") or "all") in {"all", month}
+    ]
+    row_ids = [
+        str(row_id)
+        for relation in relations
+        for row_id in list(relation.get("row_ids") or [])
+        if str(row_id).strip()
+    ]
+    rows = app._resolve_live_rows_direct(row_ids, month_hint=month) if row_ids else []
+    rows_by_id = {str(row["id"]): row for row in rows}
+    WorkbenchObjectIdentityArbitrationService().arbitrate_rows(rows_by_id)
+    return WorkbenchRelationGroupingService().group_payload(
+        month,
+        rows_by_id=rows_by_id,
+        active_relations=relations,
+    )
+
+
+class _CostStatisticsProjectionFixtureConnection:
+    def __init__(self, settings_payload: dict[str, object]) -> None:
+        self._settings_payload = settings_payload
+
+    def fetch_one(self, sql: str, _params: tuple = ()) -> dict[str, object] | None:
+        if "from app.app_settings" in " ".join(sql.lower().split()):
+            return {"settings_payload": self._settings_payload}
+        return None
+
+
+def _project_cost_statistics_payload(app, month: str, project_scope: str) -> dict[str, object]:
+    grouped_payload = _grouped_cost_workbench_payload(app, month)
+    groups = list(((grouped_payload.get("paired") or {}).get("groups") or []))
+    builder = CostStatisticsSqlProjectionBuilder(
+        connection=_CostStatisticsProjectionFixtureConnection(app._app_settings_service.get_settings_payload()),
+        read_model_repository=object(),
+    )
+    return builder._build_explorer_payload(
+        month,
+        project_scope=project_scope,
+        workbench_groups=groups,
+        bank_detail_payload={"rows": [], "month_rows": []},
+    )
 
 
 def _canonical_bank_flow_projection(app, month: str) -> tuple[list[dict[str, object]], dict[str, object]]:
@@ -146,26 +214,16 @@ def _canonical_bank_flow_projection(app, month: str) -> tuple[list[dict[str, obj
     }
 
 
-class _MemoryCostStatisticsReadModelService:
-    def __init__(self) -> None:
+class _MemoryCostStatisticsSqlRepository:
+    def __init__(
+        self,
+        gate_snapshot_provider,
+    ) -> None:
         self.read_models: dict[str, dict[str, object]] = {}
+        self._gate_snapshot_provider = gate_snapshot_provider
 
-    @classmethod
-    def from_snapshot(cls, snapshot: dict[str, object] | None):
-        service = cls()
-        if isinstance(snapshot, dict):
-            read_models = snapshot.get("read_models")
-            if isinstance(read_models, dict):
-                service.read_models = {str(key): dict(value) for key, value in read_models.items()}
-        return service
-
-    def snapshot(self) -> dict[str, object]:
-        return {"read_models": {key: dict(value) for key, value in self.read_models.items()}}
-
-    def snapshot_scope_keys(self, scope_keys: list[str]) -> dict[str, object]:
-        return {"read_models": {key: dict(self.read_models[key]) for key in scope_keys if key in self.read_models}}
-
-    def scope_key(self, month: str, project_scope: str) -> str:
+    @staticmethod
+    def scope_key(month: str, project_scope: str) -> str:
         return f"{project_scope}:{month}"
 
     def get_read_model(self, month: str, project_scope: str) -> dict[str, object] | None:
@@ -199,57 +257,27 @@ class _MemoryCostStatisticsReadModelService:
         self.read_models[scope_key] = read_model
         return read_model
 
-    def invalidate_months(
-        self,
-        months: list[str],
-        project_scopes: list[str] | None = None,
-        include_all: bool = True,
-    ) -> list[str]:
-        scopes = list(project_scopes or ["active", "all"])
-        targets = set()
-        for month in months:
-            for scope in scopes:
-                targets.add(self.scope_key(str(month), str(scope)))
-        if include_all:
-            for scope in scopes:
-                targets.add(self.scope_key("all", str(scope)))
-        deleted = []
-        for scope_key in sorted(targets):
-            if scope_key in self.read_models:
-                deleted.append(scope_key)
-                del self.read_models[scope_key]
-        return deleted
-
-    def clear(self) -> list[str]:
-        deleted = sorted(self.read_models)
-        self.read_models.clear()
-        return deleted
-
-    def list_scope_keys(self) -> list[str]:
-        return sorted(self.read_models)
-
-    def list_read_model_metadata(self) -> list[dict[str, object]]:
-        return [
-            {key: value for key, value in read_model.items() if key != "payload"}
-            for read_model in self.read_models.values()
-        ]
-
-
-class _MemoryCostStatisticsSqlRepository:
-    def __init__(
-        self,
-        read_model_service: _MemoryCostStatisticsReadModelService,
-        source_versions_provider,
-    ) -> None:
-        self._read_model_service = read_model_service
-        self._source_versions_provider = source_versions_provider
+    def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object] | None:
+        view = self.get_cost_statistics_view(scope_key=scope_key)
+        if not isinstance(view, dict):
+            return None
+        gate_snapshot = self._gate_snapshot_provider(scope_key)
+        return {
+            "scope_key": scope_key,
+            "schema_version": view.get("schema_version"),
+            "generated_at": view.get("generated_at"),
+            "source_versions": view.get("source_versions") if isinstance(view.get("source_versions"), dict) else {},
+            "source_settings": dict(gate_snapshot["source_settings"]),
+            "workbench_source_versions": dict(gate_snapshot["workbench_source_versions"]),
+            "bank_detail_source_versions": dict(gate_snapshot["bank_detail_source_versions"]),
+            "published_source_version": int(view.get("published_source_version") or 0),
+            "dirty_source_version": None,
+            "refresh_status": view.get("refresh_status") or "fresh",
+            "stale_reasons": [],
+        }
 
     def get_cost_statistics_view(self, *, scope_key: str) -> dict[str, object] | None:
-        read_models = getattr(self._read_model_service, "read_models", None)
-        read_model = read_models.get(scope_key) if isinstance(read_models, dict) else None
-        if not isinstance(read_model, dict):
-            get_by_scope_key = getattr(self._read_model_service, "get_read_model_by_scope_key", None)
-            read_model = get_by_scope_key(scope_key) if callable(get_by_scope_key) else None
+        read_model = self.read_models.get(scope_key)
         if not isinstance(read_model, dict):
             return None
         payload = read_model.get("payload")
@@ -257,7 +285,7 @@ class _MemoryCostStatisticsSqlRepository:
             return None
         source_versions = read_model.get("source_versions")
         if not isinstance(source_versions, dict) or not source_versions:
-            source_versions = self._source_versions_provider(scope_key)
+            source_versions = self._gate_snapshot_provider(scope_key)["source_versions"]
         return {
             "scope_key": scope_key,
             "project_scope": read_model.get("project_scope"),
@@ -269,7 +297,224 @@ class _MemoryCostStatisticsSqlRepository:
             "source_versions": dict(source_versions or {}),
             "schema_version": read_model.get("schema_version") or COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
             "refresh_status": read_model.get("refresh_status") or "fresh",
+            "published_source_version": int(read_model.get("published_source_version") or 0),
         }
+
+    def get_cost_statistics_page(
+        self,
+        *,
+        project_scope: str,
+        scope_kind: str,
+        scope_value: str | None,
+        view: str,
+        filters: dict[str, str],
+        selected_tag_codes: list[str] | None,
+        cursor_values: tuple[str, str, str, str] | None,
+        page_size: int,
+    ) -> dict[str, object] | None:
+        del selected_tag_codes, cursor_values
+        scope_month = scope_value if scope_kind == "month" else "all"
+        stored = self.get_cost_statistics_view(scope_key=f"{project_scope}:{scope_month}")
+        payload = stored.get("payload") if isinstance(stored, dict) else None
+        if not isinstance(payload, dict):
+            return None
+        rows_key = "bank_flow_time_rows" if view in {"time", "bank_tag"} else "time_rows"
+        rows = [dict(row) for row in list(payload.get(rows_key) or payload.get("time_rows") or []) if isinstance(row, dict)]
+        if filters.get("project_name"):
+            rows = [row for row in rows if row.get("project_name") == filters["project_name"]]
+        if filters.get("expense_type"):
+            rows = [row for row in rows if row.get("expense_type") == filters["expense_type"]]
+        if filters.get("payment_account_label"):
+            rows = [row for row in rows if row.get("payment_account_label") == filters["payment_account_label"]]
+        if filters.get("bank_tag_primary_label"):
+            rows = [row for row in rows if row.get("bank_tag_primary_label") == filters["bank_tag_primary_label"]]
+        if filters.get("bank_tag_sub_label"):
+            rows = [row for row in rows if row.get("bank_tag_sub_label") == filters["bank_tag_sub_label"]]
+        if view == "project" and not (filters.get("project_name") and filters.get("expense_type")):
+            rows = []
+        if view == "bank" and not (filters.get("payment_account_label") and filters.get("project_name")):
+            rows = []
+        if view == "expense_type" and not filters.get("expense_type"):
+            rows = []
+        if view == "bank_tag" and not (
+            filters.get("bank_tag_primary_label") and filters.get("bank_tag_sub_label")
+        ):
+            rows = []
+        return {
+            "summary": (
+                payload.get("bank_flow_summary") or payload.get("summary")
+                if view in {"time", "bank_tag"}
+                else payload.get("summary")
+            ),
+            "available_years": sorted(
+                {str(row.get("trade_time") or "")[:4] for row in rows if str(row.get("trade_time") or "")[:4]},
+                reverse=True,
+            ),
+            "primary_facets": (
+                payload.get("project_rows")
+                if view == "project"
+                else payload.get("expense_type_rows")
+                if view == "expense_type"
+                else []
+            ),
+            "secondary_facets": payload.get("expense_type_rows") if view == "project" and filters.get("project_name") else [],
+            "rows": rows[:page_size],
+            "row_count": len(rows),
+            "next_cursor_values": None,
+        }
+
+    def get_cost_statistics_export_page(
+        self,
+        *,
+        project_scope: str,
+        month: str,
+        start_month: str | None,
+        end_month: str | None,
+        start_date: str | None,
+        end_date: str | None,
+        project_names: list[str],
+        expense_types: list[str],
+        selected_tag_codes: list[str] | None,
+        row_shape: str,
+        offset: int,
+        page_size: int,
+        include_summary: bool,
+    ) -> dict[str, object] | None:
+        scope_month = month if month != "all" else "all"
+        stored = self.get_cost_statistics_view(scope_key=f"{project_scope}:{scope_month}")
+        payload = stored.get("payload") if isinstance(stored, dict) else None
+        if not isinstance(payload, dict):
+            return None
+        rows_key = "bank_flow_time_rows" if row_shape == "raw_bank" else "time_rows"
+        rows = [dict(row) for row in list(payload.get(rows_key) or []) if isinstance(row, dict)]
+        if start_month and end_month and start_month > end_month:
+            start_month, end_month = end_month, start_month
+        if start_date and end_date and start_date > end_date:
+            start_date, end_date = end_date, start_date
+        filtered: list[dict[str, object]] = []
+        for row in rows:
+            trade_time = str(row.get("trade_time") or "")
+            row_month = str(row.get("month") or "")[:7] or trade_time[:7]
+            trade_date = trade_time[:10]
+            tag_code = str(row.get("bank_tag_code") or "").strip() or "__uncategorized__"
+            if start_month and row_month < start_month:
+                continue
+            if end_month and row_month > end_month:
+                continue
+            if start_date and trade_date < start_date:
+                continue
+            if end_date and trade_date > end_date:
+                continue
+            if project_names and row.get("project_name") not in project_names:
+                continue
+            if expense_types and row.get("expense_type") not in expense_types:
+                continue
+            if selected_tag_codes is not None and tag_code not in selected_tag_codes:
+                continue
+            filtered.append(row)
+
+        result_rows: list[dict[str, object]]
+        if row_shape in {"project_month", "project_year", "month_summary"}:
+            grouped: dict[tuple[str, ...], dict[str, object]] = {}
+            for row in filtered:
+                trade_time = str(row.get("trade_time") or "")
+                if row_shape == "project_month":
+                    key = (
+                        trade_time[:7],
+                        str(row.get("project_name") or ""),
+                        str(row.get("expense_type") or ""),
+                        str(row.get("expense_content") or ""),
+                    )
+                elif row_shape == "project_year":
+                    key = (
+                        trade_time[:4],
+                        str(row.get("project_name") or ""),
+                        str(row.get("expense_type") or ""),
+                        str(row.get("expense_content") or ""),
+                    )
+                else:
+                    key = (
+                        str(row.get("project_name") or ""),
+                        str(row.get("expense_type") or ""),
+                        str(row.get("expense_content") or ""),
+                    )
+                bucket = grouped.setdefault(key, {"amount": Decimal("0.00"), "transaction_count": 0})
+                bucket["amount"] = Decimal(str(bucket["amount"])) + Decimal(str(row.get("amount") or "0").replace(",", ""))
+                bucket["transaction_count"] = int(bucket["transaction_count"]) + 1
+            result_rows = []
+            for key, bucket in sorted(grouped.items()):
+                if row_shape in {"project_month", "project_year"}:
+                    period_label, project_name, expense_type, expense_content = key
+                    result_rows.append(
+                        {
+                            "period_label": period_label,
+                            "project_name": project_name,
+                            "expense_type": expense_type,
+                            "expense_content": expense_content,
+                            "amount": str(bucket["amount"]),
+                            "transaction_count": bucket["transaction_count"],
+                        }
+                    )
+                else:
+                    project_name, expense_type, expense_content = key
+                    result_rows.append(
+                        {
+                            "project_name": project_name,
+                            "expense_type": expense_type,
+                            "expense_content": expense_content,
+                            "amount": str(bucket["amount"]),
+                            "transaction_count": bucket["transaction_count"],
+                        }
+                    )
+        else:
+            result_rows = sorted(
+                filtered,
+                key=lambda row: (str(row.get("trade_time") or ""), str(row.get("transaction_id") or "")),
+                reverse=True,
+            )
+        page_rows = result_rows[offset : offset + page_size]
+        total_amount = sum(
+            (Decimal(str(row.get("amount") or "0").replace(",", "")) for row in filtered),
+            start=Decimal("0.00"),
+        )
+        expense_rows = [row for row in filtered if row.get("direction") == "支出"]
+        income_rows = [row for row in filtered if row.get("direction") == "收入"]
+        summary = None
+        if include_summary:
+            summary = {
+                "source_row_count": len(filtered),
+                "row_count": len(result_rows),
+                "transaction_count": len({str(row.get("transaction_id") or "") for row in filtered}),
+                "total_amount": str(total_amount),
+                "expense_amount": str(sum((Decimal(str(row.get("amount") or "0").replace(",", "")) for row in expense_rows), start=Decimal("0.00"))),
+                "income_amount": str(sum((Decimal(str(row.get("amount") or "0").replace(",", "")) for row in income_rows), start=Decimal("0.00"))),
+                "expense_transaction_count": len(expense_rows),
+                "income_transaction_count": len(income_rows),
+                "expense_type_count": len({str(row.get("expense_type") or "") for row in filtered}),
+            }
+        return {
+            "summary": summary,
+            "rows": page_rows,
+            "next_offset": offset + len(page_rows) if len(page_rows) == page_size else None,
+        }
+
+    def get_cost_statistics_transaction(
+        self,
+        *,
+        project_scope: str,
+        transaction_id: str,
+    ) -> dict[str, object] | None:
+        view = self.get_cost_statistics_view(scope_key=f"{project_scope}:all")
+        if not isinstance(view, dict):
+            return None
+        payload = view.get("payload")
+        if not isinstance(payload, dict):
+            return None
+        for rows_key in ("time_rows", "bank_flow_time_rows"):
+            for row in list(payload.get(rows_key) or []):
+                if isinstance(row, dict) and row.get("transaction_id") == transaction_id:
+                    return dict(row)
+        return None
 
 
 class _CostStatisticsQueueRecorder:
@@ -286,20 +531,11 @@ class _CostStatisticsQueueRecorder:
 class CostStatisticsApiTests(unittest.TestCase):
     def setUp(self) -> None:
         self.app = build_application()
-        self.app._cost_statistics_read_model_service = _MemoryCostStatisticsReadModelService()
         self.app._workbench_query_service = self.app._workbench_query_service.__class__(oa_adapter=_CostStatsOAAdapter())
-        self.app._workbench_api_routes = WorkbenchApiRoutes(self.app._workbench_query_service)
-        from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
-
-        self.app._cost_statistics_service = CostStatisticsService(
-            self.app._import_service,
-            grouped_workbench_loader=self.app._build_api_workbench_payload,
-            project_active_checker=self.app._app_settings_service.is_project_active,
+        self.cost_repository = _MemoryCostStatisticsSqlRepository(
+            lambda scope_key: _cost_statistics_gate_snapshot(self.app, scope_key),
         )
-        self.app._cost_statistics_sql_read_repository = _MemoryCostStatisticsSqlRepository(
-            self.app._cost_statistics_read_model_service,
-            self.app._cost_statistics_source_versions,
-        )
+        self.app._cost_statistics_sql_read_repository = self.cost_repository
 
     def _install_queue_recorder(self) -> _CostStatisticsQueueRecorder:
         queue = _CostStatisticsQueueRecorder()
@@ -326,18 +562,18 @@ class CostStatisticsApiTests(unittest.TestCase):
             months.append("all")
         for scope in project_scopes:
             for target_month in months:
-                payload = self.app._cost_statistics_service.get_explorer(target_month, project_scope=scope)
+                payload = _project_cost_statistics_payload(self.app, target_month, scope)
                 bank_flow_rows, bank_flow_summary = _canonical_bank_flow_projection(self.app, target_month)
                 payload["bank_flow_time_rows"] = bank_flow_rows
                 payload["bank_flow_summary"] = bank_flow_summary
-                scope_key = self.app._cost_statistics_read_model_service.scope_key(target_month, scope)
-                self.app._cost_statistics_read_model_service.upsert_read_model(
+                scope_key = self.cost_repository.scope_key(target_month, scope)
+                self.cost_repository.upsert_read_model(
                     target_month,
                     scope,
                     payload,
                     generated_at="2026-07-05T00:00:00",
                     source_scope_keys=[target_month],
-                    source_versions=self.app._cost_statistics_source_versions(scope_key),
+                    source_versions=_cost_statistics_gate_snapshot(self.app, scope_key)["source_versions"],
                     schema_version=COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
                     refresh_status="fresh",
                 )
@@ -351,18 +587,13 @@ class CostStatisticsApiTests(unittest.TestCase):
             "project_rows": [],
             "expense_type_rows": [],
         }
-        self.app._cost_statistics_read_model_service.upsert_read_model("2026-03", "active", cached_payload)
+        self.cost_repository.upsert_read_model("2026-03", "active", cached_payload)
 
-        with patch.object(
-            self.app._cost_statistics_service,
-            "get_explorer",
-            side_effect=AssertionError("should not rebuild cached explorer"),
-        ):
-            response = self.app.handle_request("GET", "/api/cost-statistics/explorer?month=2026-03")
+        response = self.app.handle_request("GET", "/api/cost-statistics/explorer?scope=2026-03&view=time")
 
         self.assertEqual(response.status_code, 200)
         payload = json.loads(response.body)
-        self.assertEqual(payload["time_rows"][0]["transaction_id"], "cached-sentinel")
+        self.assertEqual(payload["rows"][0]["transaction_id"], "cached-sentinel")
 
     def test_cost_statistics_route_owner_delegates_month_and_explorer_to_query_service(self) -> None:
         from fin_ops_platform.app.routes_cost_statistics import CostStatisticsApiRoutes
@@ -379,20 +610,24 @@ class CostStatisticsApiTests(unittest.TestCase):
                     "rows": [],
                 }, False
 
-            def get_explorer(self, month: str, project_scope: str):
-                calls.append(("explorer", month, project_scope))
+            def get_explorer_page(self, **kwargs: object):
+                calls.append(("explorer", str(kwargs["scope"]), str(kwargs["project_scope"])))
                 return {
-                    "month": month,
+                    "scope": kwargs["scope"],
+                    "view": kwargs["view"],
                     "summary": {"row_count": 0, "transaction_count": 0, "total_amount": "0.00"},
-                    "time_rows": [],
-                    "bank_accounts": [],
-                    "project_rows": [],
-                    "expense_type_rows": [],
-                }, False
+                    "available_years": [],
+                    "facets": {},
+                    "rows": [],
+                    "row_count": 0,
+                    "next_cursor": None,
+                }, False, '"etag"', False
 
         routes = CostStatisticsApiRoutes(
             query_service=QueryService(),
-            json_response=lambda status, payload: Response(status_code=int(status), body=json.dumps(payload)),
+            json_response=lambda status, payload, headers=None: Response(
+                status_code=int(status), body=json.dumps(payload), headers=headers or {}
+            ),
             file_response=lambda _filename, _content: Response(status_code=200, body=b""),
         )
 
@@ -404,7 +639,7 @@ class CostStatisticsApiTests(unittest.TestCase):
         explorer_response = routes.route(
             "GET",
             "/api/cost-statistics/explorer",
-            {"month": ["2026-04"], "project_scope": ["all"]},
+            {"scope": ["2026-04"], "view": ["time"], "project_scope": ["all"]},
         )
 
         self.assertEqual(month_response.status_code, 200)
@@ -495,28 +730,21 @@ class CostStatisticsApiTests(unittest.TestCase):
             "expense_type_rows": [],
         }
         scope_key = "active:2026-03"
-        self.app._cost_statistics_read_model_service.upsert_read_model(
+        self.cost_repository.upsert_read_model(
             "2026-03",
             "active",
             cached_payload,
             generated_at="2026-07-05T00:00:00",
-            source_versions=self.app._cost_statistics_source_versions(scope_key),
+            source_versions=_cost_statistics_gate_snapshot(self.app, scope_key)["source_versions"],
         )
 
-        with (
-            patch.object(
-                self.app._cost_statistics_service,
-                "get_explorer",
-                side_effect=AssertionError("API must not sync rebuild explorer"),
-            ),
-            patch("builtins.print") as print_mock,
-        ):
-            first_response = self.app.handle_request("GET", "/api/cost-statistics/explorer?month=2026-03")
-            second_response = self.app.handle_request("GET", "/api/cost-statistics/explorer?month=2026-03")
+        with patch("builtins.print") as print_mock:
+            first_response = self.app.handle_request("GET", "/api/cost-statistics/explorer?scope=2026-03&view=time")
+            second_response = self.app.handle_request("GET", "/api/cost-statistics/explorer?scope=2026-03&view=time")
 
         self.assertEqual(first_response.status_code, 200)
         self.assertEqual(second_response.status_code, 200)
-        self.assertEqual(json.loads(second_response.body)["time_rows"], cached_payload["time_rows"])
+        self.assertEqual(json.loads(second_response.body)["rows"], cached_payload["time_rows"])
         metric_payloads = [
             json.loads(call.args[0])
             for call in print_mock.call_args_list
@@ -528,53 +756,44 @@ class CostStatisticsApiTests(unittest.TestCase):
     def test_cost_statistics_explorer_miss_returns_refreshing_without_warmup_job(self) -> None:
         queue = self._install_queue_recorder()
         with (
-            patch.object(
-                self.app._cost_statistics_service,
-                "get_explorer",
-                side_effect=AssertionError("API miss must not sync rebuild explorer"),
-            ),
             patch.object(self.app._background_job_service, "create_or_get_idempotent_job_with_created") as create_job,
             patch.object(self.app._background_job_service, "run_job") as run_job,
         ):
-            response = self.app.handle_request("GET", "/api/cost-statistics/explorer?month=2026-03")
+            response = self.app.handle_request("GET", "/api/cost-statistics/explorer?scope=2026-03&view=time")
 
         payload = json.loads(response.body)
         self.assertEqual(response.status_code, 202)
         self.assertEqual(payload["read_model_status"], "refreshing")
-        self.assertEqual(payload["refresh_reason"], "api_miss")
-        self.assertEqual(payload["time_rows"], [])
-        self.assertEqual(queue.refreshes, [("cost_statistics", "active:2026-03", "api_miss")])
+        self.assertEqual(payload["refresh_reason"], "api_page_miss")
+        self.assertEqual(payload["rows"], [])
+        self.assertEqual(payload["facets"]["projects"], [])
+        self.assertEqual(queue.refreshes, [("cost_statistics", "active:2026-03", "api_page_miss")])
         create_job.assert_not_called()
         run_job.assert_not_called()
 
     def test_cost_statistics_all_month_miss_returns_refreshing_without_warmup_job(self) -> None:
         queue = self._install_queue_recorder()
         with (
-            patch.object(
-                self.app._cost_statistics_service,
-                "get_explorer",
-                side_effect=AssertionError("all miss must not sync rebuild explorer"),
-            ),
             patch.object(self.app._background_job_service, "create_or_get_idempotent_job_with_created") as create_job,
             patch.object(self.app._background_job_service, "run_job") as run_job,
         ):
-            response = self.app.handle_request("GET", "/api/cost-statistics/explorer?month=all&project_scope=active")
+            response = self.app.handle_request("GET", "/api/cost-statistics/explorer?scope=all&view=time&project_scope=active")
 
         payload = json.loads(response.body)
         self.assertEqual(response.status_code, 202)
-        self.assertEqual(payload["month"], "all")
+        self.assertEqual(payload["scope"], "all")
         self.assertEqual(payload["read_model_status"], "refreshing")
-        self.assertEqual(payload["refresh_reason"], "api_miss")
-        self.assertEqual(queue.refreshes, [("cost_statistics", "active:all", "api_miss")])
+        self.assertEqual(payload["refresh_reason"], "api_page_miss")
+        self.assertEqual(queue.refreshes, [("cost_statistics", "active:all", "api_page_miss")])
         create_job.assert_not_called()
         run_job.assert_not_called()
 
-    def test_workbench_scope_invalidation_deletes_cost_statistics_models_and_enqueues_refresh(self) -> None:
+    def test_workbench_scope_invalidation_only_enqueues_durable_cost_refresh(self) -> None:
         queue = self._install_queue_recorder()
-        service = self.app._cost_statistics_read_model_service
+        repository = self.cost_repository
         for month in ("2026-03", "all"):
             for project_scope in ("active", "all"):
-                service.upsert_read_model(
+                repository.upsert_read_model(
                     month,
                     project_scope,
                     {
@@ -594,10 +813,8 @@ class CostStatisticsApiTests(unittest.TestCase):
             deleted_workbench_scopes = self.app._invalidate_workbench_read_model_scopes(["2026-03"])
 
         self.assertEqual(deleted_workbench_scopes, ["2026-03"])
-        self.assertIsNone(service.get_read_model("2026-03", "active"))
-        self.assertIsNone(service.get_read_model("2026-03", "all"))
-        self.assertIsNone(service.get_read_model("all", "active"))
-        self.assertIsNone(service.get_read_model("all", "all"))
+        self.assertIsNotNone(repository.get_read_model("2026-03", "active"))
+        self.assertIsNotNone(repository.get_read_model("2026-03", "all"))
         cost_refreshes = [refresh for refresh in queue.refreshes if refresh[0] == "cost_statistics"]
         self.assertEqual(
             cost_refreshes,
@@ -610,7 +827,7 @@ class CostStatisticsApiTests(unittest.TestCase):
         run_job.assert_not_called()
 
         for project_scope in ("active", "all"):
-            service.upsert_read_model(
+            repository.upsert_read_model(
                 "all",
                 project_scope,
                 {
@@ -626,8 +843,8 @@ class CostStatisticsApiTests(unittest.TestCase):
 
         self.app._invalidate_workbench_read_model_scopes(["all"])
 
-        self.assertIsNone(service.get_read_model("all", "active"))
-        self.assertIsNone(service.get_read_model("all", "all"))
+        self.assertIsNotNone(repository.get_read_model("all", "active"))
+        self.assertIsNotNone(repository.get_read_model("all", "all"))
         cost_refreshes = [refresh for refresh in queue.refreshes if refresh[0] == "cost_statistics"]
         self.assertEqual(
             cost_refreshes,
@@ -715,16 +932,16 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertEqual(detail_payload["transaction"]["project_name"], "云南溯源科技")
         self.assertEqual(detail_payload["transaction"]["expense_type"], "设备货款及材料费")
 
-        explorer_payload = json.loads(self.app.handle_request("GET", "/api/cost-statistics/explorer?month=2026-03").body)
-        self.assertEqual(explorer_payload["month"], "2026-03")
+        explorer_payload = json.loads(
+            self.app.handle_request("GET", "/api/cost-statistics/explorer?scope=2026-03&view=project").body
+        )
+        self.assertEqual(explorer_payload["scope"], "2026-03")
         self.assertEqual(explorer_payload["summary"]["transaction_count"], 1)
-        self.assertEqual(explorer_payload["time_rows"][0]["project_name"], "云南溯源科技")
-        self.assertEqual(explorer_payload["project_rows"][0]["project_name"], "云南溯源科技")
-        self.assertEqual(explorer_payload["expense_type_rows"][0]["expense_type"], "设备货款及材料费")
+        self.assertEqual(explorer_payload["rows"], [])
+        self.assertEqual(explorer_payload["facets"]["projects"][0]["project_name"], "云南溯源科技")
 
     def test_project_scope_defaults_active_allows_all_and_rejects_invalid_scope(self) -> None:
         from fin_ops_platform.domain.enums import BatchType
-        from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
 
         preview = self.app._import_service.preview_import(
             batch_type=BatchType.BANK_TRANSACTION,
@@ -758,18 +975,15 @@ class CostStatisticsApiTests(unittest.TestCase):
             readonly_export_usernames=[],
             admin_usernames=[],
         )
-        self.app._cost_statistics_service = CostStatisticsService(
-            self.app._import_service,
-            grouped_workbench_loader=self.app._build_api_workbench_payload,
-            project_active_checker=self.app._app_settings_service.is_project_active,
-        )
         self._prime_cost_statistics_read_model("2026-03")
 
         default_payload = json.loads(
-            self.app.handle_request("GET", "/api/cost-statistics/explorer?month=2026-03").body
+            self.app.handle_request("GET", "/api/cost-statistics/explorer?scope=2026-03&view=project").body
         )
         all_payload = json.loads(
-            self.app.handle_request("GET", "/api/cost-statistics/explorer?month=2026-03&project_scope=all").body
+            self.app.handle_request(
+                "GET", "/api/cost-statistics/explorer?scope=2026-03&view=project&project_scope=all"
+            ).body
         )
         preview_payload = json.loads(
             self.app.handle_request(
@@ -779,7 +993,7 @@ class CostStatisticsApiTests(unittest.TestCase):
         )
         invalid_response = self.app.handle_request(
             "GET",
-            "/api/cost-statistics/explorer?month=2026-03&project_scope=finished",
+            "/api/cost-statistics/explorer?scope=2026-03&view=time&project_scope=finished",
         )
         invalid_payload = json.loads(invalid_response.body)
 
@@ -914,7 +1128,7 @@ class CostStatisticsApiTests(unittest.TestCase):
     def test_cost_statistics_export_limit_returns_structured_error(self) -> None:
         from fin_ops_platform.app.routes_cost_statistics import CostStatisticsApiRoutes
         from fin_ops_platform.app.server import Response
-        from fin_ops_platform.services.cost_statistics_service import (
+        from fin_ops_platform.services.cost_statistics_query_service import (
             COST_STATISTICS_EXPORT_ROW_LIMIT,
             CostStatisticsExportLimitError,
         )
@@ -1295,19 +1509,10 @@ class CostStatisticsApiTests(unittest.TestCase):
     def test_cost_statistics_uses_oa_detail_fields_after_manual_confirm_link(self) -> None:
         app = build_application()
         app._workbench_query_service = app._workbench_query_service.__class__(oa_adapter=_FallbackCostStatsOAAdapter())
-        workbench_routes = WorkbenchApiRoutes(app._workbench_query_service)
-        app._workbench_api_routes = workbench_routes
-        from fin_ops_platform.services.cost_statistics_service import CostStatisticsService
-
-        app._cost_statistics_service = CostStatisticsService(
-            app._import_service,
-            grouped_workbench_loader=app._build_api_workbench_payload,
-            project_active_checker=app._app_settings_service.is_project_active,
+        cost_repository = _MemoryCostStatisticsSqlRepository(
+            lambda scope_key: _cost_statistics_gate_snapshot(app, scope_key),
         )
-        app._cost_statistics_sql_read_repository = _MemoryCostStatisticsSqlRepository(
-            app._cost_statistics_read_model_service,
-            app._cost_statistics_source_versions,
-        )
+        app._cost_statistics_sql_read_repository = cost_repository
 
         _confirm_active_cost_relation(
             app,
@@ -1317,12 +1522,12 @@ class CostStatisticsApiTests(unittest.TestCase):
             case_id="CASE-COST-FALLBACK",
         )
 
-        app._cost_statistics_read_model_service.upsert_read_model(
+        cost_repository.upsert_read_model(
             "2026-03",
             "active",
-            app._cost_statistics_service.get_explorer("2026-03", project_scope="active"),
+            _project_cost_statistics_payload(app, "2026-03", "active"),
             generated_at="2026-07-05T00:00:00",
-            source_versions=app._cost_statistics_source_versions("active:2026-03"),
+            source_versions=_cost_statistics_gate_snapshot(app, "active:2026-03")["source_versions"],
         )
         payload = json.loads(app.handle_request("GET", "/api/cost-statistics?month=2026-03").body)
         self.assertEqual(payload["summary"]["row_count"], 1)

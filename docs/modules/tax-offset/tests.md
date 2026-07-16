@@ -2,6 +2,12 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+## 2026-07-16 projection owner 隔离回归
+
+- `TaxOffsetSqlProjectionBuilder` 已从旧混合 module迁到 `tax_offset_sql_projection.py`；SQL、payload、Redis和read-model写入逻辑保持。
+- `tests/test_tax_offset_sql_runtime.py` 继续覆盖 builder save/source-version、all fan-out、fresh gate和cache；成本 rules/SQL/API同轮回归，防止机械迁移污染任一页面。
+- `test_cost_and_tax_sql_projection_owners_are_split_without_legacy_module` 静态禁止旧 module、兼容 import、跨 owner class与成本/税金模块前缀互相污染。
+
 ## 修改前影响面清单
 
 税金抵扣横跨进项/销项发票、税局认证结果、ETC/OA 附件发票、计划保存、read model freshness 和 App Status。任何改动都要先按下表做影响面评估：

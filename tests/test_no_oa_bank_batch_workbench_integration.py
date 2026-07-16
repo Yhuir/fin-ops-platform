@@ -1,7 +1,11 @@
 import json
 import unittest
 
-from tests.app_test_support import build_local_state_application as build_application
+from tests.app_test_support import (
+    build_grouped_workbench_projection as _build_grouped_workbench_projection,
+    build_local_state_application as build_application,
+    install_fresh_workbench_write_gate,
+)
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.no_oa_bank_batch_service import NoOaBankBatchService
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
@@ -13,6 +17,10 @@ def flatten_groups(groups: list[dict[str, object]], row_type: str) -> list[dict[
         for group in groups
         for row in group[f"{row_type}_rows"]
     ]
+
+
+def build_grouped_workbench_projection(app: object, month: str) -> dict[str, object]:
+    return _build_grouped_workbench_projection(app, month, include_query_rows=False)
 
 
 class PairSnapshotRelationFacade:
@@ -200,6 +208,7 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
         return app, row_ids
 
     def _post_confirm_link(self, app: object, row_ids: list[str]):
+        read_model_version = install_fresh_workbench_write_gate(app)
         return app.handle_request(
             "POST",
             "/api/workbench/actions/confirm-link",
@@ -209,6 +218,7 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
                     "row_ids": row_ids,
                     "case_id": "CASE-WORKBENCH-INTERNAL-TRANSFER",
                     "note": "关联台确认内部往来",
+                    "expected_read_model_version": read_model_version,
                 }
             ),
         )
@@ -244,8 +254,7 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
             any(set(batch.get("row_ids") or []).intersection(row_ids) for batch in unsubmitted)
         )
 
-        app._invalidate_workbench_read_models()
-        payload = json.loads(app.handle_request("GET", "/api/workbench?month=all").body)
+        payload = build_grouped_workbench_projection(app, "all")
         paired_group = next(
             group for group in payload["paired"]["groups"]
             if group.get("relation_mode") == "no_oa_bank_batch"
@@ -361,8 +370,7 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
             ],
         )
 
-        app._invalidate_workbench_read_models()
-        workbench_payload = json.loads(app.handle_request("GET", "/api/workbench?month=all").body)
+        workbench_payload = build_grouped_workbench_projection(app, "all")
         paired_group = next(
             group for group in workbench_payload["paired"]["groups"]
             if group.get("relation_mode") == "bank_flow_rule_batch"
@@ -662,9 +670,7 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
         app._import_service.confirm_import(preview.id)
         salary_row_id = app._import_service.list_transactions()[0].id
 
-        response = app.handle_request("GET", "/api/workbench?month=all")
-        payload = json.loads(response.body)
-        self.assertEqual(response.status_code, 200)
+        payload = build_grouped_workbench_projection(app, "all")
         self.assertEqual(payload["summary"]["paired_count"], 0)
         self.assertEqual([row["id"] for row in flatten_groups(payload["unpaired"]["groups"], "bank")], [salary_row_id])
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id(salary_row_id))
@@ -713,9 +719,7 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
             note="确认工资",
         )
         submitted = submit_result["batch"]
-        app._invalidate_workbench_read_models()
-        paired_response = app.handle_request("GET", "/api/workbench?month=all")
-        paired_payload = json.loads(paired_response.body)
+        paired_payload = build_grouped_workbench_projection(app, "all")
         paired_group = paired_payload["paired"]["groups"][0]
         paired_row = paired_group["bank_rows"][0]
 
@@ -740,9 +744,7 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
             expected_version=int(submitted["version"]),
             reason="误提交",
         )
-        app._invalidate_workbench_read_models()
-        open_response = app.handle_request("GET", "/api/workbench?month=all")
-        open_payload = json.loads(open_response.body)
+        open_payload = build_grouped_workbench_projection(app, "all")
 
         self.assertEqual(open_payload["summary"]["paired_count"], 0)
         self.assertEqual([row["id"] for row in flatten_groups(open_payload["unpaired"]["groups"], "bank")], [salary_row_id])
@@ -795,8 +797,7 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
             note="确认手续费",
         )
         submitted = submit_result["batch"]
-        app._invalidate_workbench_read_models()
-        workbench_payload = json.loads(app.handle_request("GET", "/api/workbench?month=all").body)
+        workbench_payload = build_grouped_workbench_projection(app, "all")
         paired_group = workbench_payload["paired"]["groups"][0]
         summary_row = paired_group["summary_row"]
 
@@ -835,8 +836,7 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
             note="确认内部往来",
         )
         submitted = submit_result["batch"]
-        app._invalidate_workbench_read_models()
-        paired_payload = json.loads(app.handle_request("GET", "/api/workbench?month=all").body)
+        paired_payload = build_grouped_workbench_projection(app, "all")
         paired_group = paired_payload["paired"]["groups"][0]
 
         self.assertEqual(paired_payload["summary"]["paired_count"], 1)
@@ -858,8 +858,7 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
             expected_version=int(submitted["version"]),
             reason="误提交",
         )
-        app._invalidate_workbench_read_models()
-        open_payload = json.loads(app.handle_request("GET", "/api/workbench?month=all").body)
+        open_payload = build_grouped_workbench_projection(app, "all")
 
         self.assertEqual(open_payload["summary"]["paired_count"], 0)
         self.assertCountEqual([row["id"] for row in flatten_groups(open_payload["unpaired"]["groups"], "bank")], row_ids)
@@ -912,8 +911,7 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
             for batch in app._no_oa_bank_batch_service.list_batches({"bucket": "submitted"})
             if batch["batch_type"] == "salary"
         ]
-        app._invalidate_workbench_read_models()
-        workbench_payload = json.loads(app.handle_request("GET", "/api/workbench?month=all").body)
+        workbench_payload = build_grouped_workbench_projection(app, "all")
         paired_group = workbench_payload["paired"]["groups"][0]
         active_relations = app._workbench_pair_relation_service.list_active_relations()
 
@@ -1028,8 +1026,7 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
             for batch in app._no_oa_bank_batch_service.list_batches({"bucket": "submitted"})
             if batch["batch_type"] == "salary"
         ]
-        app._invalidate_workbench_read_models()
-        workbench_payload = json.loads(app.handle_request("GET", "/api/workbench?month=all").body)
+        workbench_payload = build_grouped_workbench_projection(app, "all")
         paired_group = workbench_payload["paired"]["groups"][0]
         active_relations = app._workbench_pair_relation_service.list_active_relations()
 
@@ -1128,7 +1125,7 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
             batch["batch_type"]: batch
             for batch in app._no_oa_bank_batch_service.list_batches({"bucket": "submitted"})
         }
-        payload = json.loads(app.handle_request("GET", "/api/workbench?month=all").body)
+        payload = build_grouped_workbench_projection(app, "all")
         paired_groups = payload["paired"]["groups"]
         active_modes = [
             relation["relation_mode"]

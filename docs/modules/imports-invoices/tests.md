@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | 页面入口 | `web/src/pages/imports/ImportInvoicesPage.tsx` | 只传 `mode="invoice"`，共享工作流改动会同时影响银行流水和 ETC 导入 |
 | 共享工作流 | `web/src/components/imports/ImportWorkflowPage.tsx` | 每文件票据方向、preview stale、重复审计、session restore、route unmount cleanup、job feedback、read-only 导入门禁 |
-| Browser e2e | `web/e2e/imports-invoices-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | 真实 Chromium 上传两份发票、选择销项/进项方向、慢预览期间预览/清空/确认动作锁定且只提交一次 preview、预览 audit/重复明细/未导入项/需复核文案、损坏文件混合上传 file-level error 且 confirm 只提交正常文件 ID、确认后触发 Workbench refresh 并清空草稿；confirm 后继续打开销项收款、进项使用、税金抵扣、待找发票、OA 待付款和成本统计并断言下游 `read_model_status=fresh` 与导入影响行；导入页和下游成功节点检查没有导入失败/后台导入失败/read model 失败可见残留；`preview_stale` 和 confirm failure 必须错误可见、无 success、无 Workbench refresh；read-only 用户不能上传/预览/确认导入 |
+| Browser e2e | `web/e2e/imports-invoices-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | 真实 Chromium 上传两份发票、选择销项/进项方向、慢预览动作锁定、预览 audit/重复明细/未导入项/需复核文案、损坏文件混合上传和有效文件确认；确认后只等待显式 operation barrier targets、零 Workbench 页面请求并清空草稿；随后打开销项收款、进项使用、税金抵扣、待找发票、OA 待付款和成本统计并断言各自 `read_model_status=fresh` 与导入影响行；`preview_stale` 和 confirm failure 必须错误可见、无 success、零 barrier/零 Workbench 页面请求；read-only 用户不能上传/预览/确认导入 |
 | 前端 API mapper | `web/src/features/imports/api.ts` | multipart `file_overrides`、`batch_type`、snake_case/camelCase、`preview_stale` 错误映射、job/session shape |
 | HTTP routes | `server.py` `/imports/files/preview`、`/imports/files/confirm`、`/imports/files/retry`、`/imports/files/sessions/{session_id}` | file/session API 是唯一 HTTP 写入合同；confirm 必须防 stale、unknown selected ids 和重复提交 |
 | File import service | `FileImportService` | 损坏 Excel file-level error、模板识别、session/file/batch id、selected files confirm、预览审计 |
@@ -20,12 +20,12 @@
 ## 场景覆盖清单
 
 - 发票导入页必须发送每文件方向：`input_invoice` / `output_invoice`。
-- Browser e2e 必须覆盖发票导入页真实选择控件、预览按钮禁用/启用、慢预览 in-flight 动作锁定、审计汇总、重复项明细、未导入项明细、确认导入和 Workbench refresh 调用。
+- Browser e2e 必须覆盖发票导入页真实选择控件、预览按钮禁用/启用、慢预览 in-flight 动作锁定、审计汇总、重复项明细、未导入项明细、确认导入、显式 operation barrier 等待和零 Workbench 页面请求。
 - read_export_only 用户必须能打开发票导入页但不能选择文件、预览或确认导入。
 - 预览必须显示重复审计 counts、duplicate groups 和 review copy。
 - 路由切换、卸载、重挂载、sessionStorage 恢复时不能丢失已选文件、预览结果或 in-flight preview 结果。
-- `preview_stale` 必须映射为重新预览提示，不能继续确认旧结果，不能展示“已确认导入”，不能刷新 Workbench 或下游页面。
-- confirm API/worker 入队失败必须错误可见，不能展示“已确认导入”，不能刷新 Workbench 或下游页面。
+- `preview_stale` 必须映射为重新预览提示，不能继续确认旧结果，不能展示“已确认导入”，不能调用 operation barrier 或 Workbench 页面 API。
+- confirm API/worker 入队失败必须错误可见，不能展示“已确认导入”，不能调用 operation barrier 或 Workbench 页面 API。
 - 损坏 Excel 必须是 file-level `unrecognized_template`，不能让整个 preview 请求崩溃。
 - 发票 `信息汇总表` 模板必须识别 `数电号码`、`购方企业名称`、`购方税号`、`销方企业名称`、`销方税号`、`商品名称` 等表头别名，并跳过末尾 `份数：...金额：...` 汇总页脚。
 - 服务器 PostgreSQL runtime 下，发票 preview/full snapshot persistence 不得直接写 import fact dirty/outbox 旁路；确认后的刷新必须通过 import processing、derived lifecycle 和 read model gateway 边界收敛。
@@ -48,7 +48,7 @@
 | 3. API contract tests | 适用 | `tests/test_import_api.py`、`tests/test_import_file_api.py`、`tests/test_workbench_v2_api.py`、`tests/test_tax_offset_api.py`、`tests/test_input_invoice_usage_api.py`、`tests/test_oa_pending_payment_api.py`、`tests/test_output_invoice_collection_api.py` | 覆盖 import API shape、`batch_type`、`preview_stale`、job payload、下游 read model status/source version 字段。 |
 | 4. Read model/cache/background job tests | 适用 | `tests/test_import_job_queue.py`、`tests/test_derived_data_lifecycle_service.py`、`tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py`、`tests/test_invoice_lifecycle_page_integration.py`、`tests/test_tax_offset_api.py`、`tests/test_write_operation_slo_audit.py` | 覆盖 import worker、invoice lifecycle 顺序、tax month cache invalidation、App Status/readiness，并用 `invoice_import_confirmed` write-operation profile 防止真实发票确认少刷新下游 read model 时仍被判定闭环。 |
 | 5. Frontend component and interaction tests | 适用 | `web/src/test/ImportCenterPage.test.tsx`、`web/src/test/ImportsApi.test.ts`、`web/src/test/AppStatusIndicator.test.tsx`、`web/e2e/imports-invoices-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | 覆盖每文件方向、预览审计、慢预览动作锁定、重复明细、未导入项明细、错误提示、session restore、route unmount、API mapper、全局 status popover，以及真实浏览器中的上传/选择/确认交互、损坏文件混合、preview stale/confirm failure、下游页面 fresh read model 展示、成功后无导入失败/后台导入失败/read model 失败可见残留和 read-only 导入门禁。 |
-| 6. End-to-end business-flow integration tests | 适用 | `tests/test_workbench_v2_api.py`、`tests/test_tax_offset_api.py`、`tests/test_invoice_lifecycle_page_integration.py`、`web/e2e/imports-invoices-flow.spec.ts` | 覆盖 import confirm -> stale protection -> workbench/tax/invoice lifecycle 下游刷新；Browser e2e 覆盖 confirm 后 Workbench refresh、销项收款/进项使用/税金抵扣/待找发票/OA 待付款/成本统计 fresh read model 和导入影响行，损坏文件混合时只提交正常文件 ID，也覆盖失败时不刷新 Workbench；导入页和各下游成功节点都会检查无错误残留。真实 worker drain 和 search 外层 UI 仍需 staging/后续 smoke。 |
+| 6. End-to-end business-flow integration tests | 适用 | `tests/test_workbench_v2_api.py`、`tests/test_tax_offset_api.py`、`tests/test_invoice_lifecycle_page_integration.py`、`web/src/test/ImportCenterPage.test.tsx`、`web/e2e/imports-invoices-flow.spec.ts` | 覆盖 import confirm -> stale protection -> workbench/tax/invoice lifecycle 下游刷新；前端只等待声明的 targets，零 Workbench 页面请求，targets 为空时直接完成；Browser e2e 继续验证销项收款/进项使用/税金抵扣/待找发票/OA 待付款/成本统计自身 fresh read model 和导入影响行，也覆盖失败时零 barrier/零 Workbench 页面请求。真实 worker drain 和 search 外层 UI 仍需 staging/后续 smoke。 |
 | 7. Existing feature regression tests | 适用 | 上述全部，以及下游模块测试矩阵、`web/e2e/imports-invoices-flow.spec.ts` | 每次改 shared import、invoice fact、lifecycle、read model 或 App Status 时，都必须回归发票导入和下游页面旧行为。 |
 
 ## 历史 bug 回归库
@@ -68,8 +68,8 @@
 | 损坏发票文件导致整个 preview 崩溃，或 confirm 误提交不可导入文件 | `web/e2e/imports-invoices-flow.spec.ts` 的 corrupt mixed Browser 回归，断言 file-level error、未导入项明细和 `selected_file_ids` 只包含正常文件 |
 | 发票导入确认后下游页面读取 stale read model 却显示导入成功 | `web/e2e/imports-invoices-flow.spec.ts` 的 downstream fresh Browser 回归，断言销项收款、进项使用、税金抵扣、待找发票、OA 待付款和成本统计 API 返回 `read_model_status=fresh` 且页面展示导入影响行 |
 | 发票导入确认或下游 fresh 成功后页面仍残留导入失败/read model 失败提示 | `web/e2e/imports-invoices-flow.spec.ts` 的 success visible-error guard，断言导入页和六个下游成功节点没有导入失败、后台导入失败或 read model 失败等可见错误残留 |
-| 发票导入 `preview_stale` 仍显示成功或刷新下游 | `web/e2e/imports-invoices-flow.spec.ts` 的 preview stale Browser 回归，断言错误可见、无 success、无 Workbench refresh |
-| 发票导入 confirm 失败后显示成功或刷新下游 | `web/e2e/imports-invoices-flow.spec.ts` 的 confirm failure Browser 回归，断言错误可见、无 success、无 Workbench refresh |
+| 发票导入 `preview_stale` 仍显示成功或触发后续探测 | `web/e2e/imports-invoices-flow.spec.ts` 的 preview stale Browser 回归，断言错误可见、无 success、零 operation barrier、零 Workbench 页面请求 |
+| 发票导入 confirm 失败后显示成功或触发后续探测 | `web/e2e/imports-invoices-flow.spec.ts` 的 confirm failure Browser 回归，断言错误可见、无 success、零 operation barrier、零 Workbench 页面请求 |
 | 发票导入后 read model 队列长期同步中 | `tests/test_runtime_queue.py::RuntimeQueueRepositoryTests::test_defer_event_does_not_let_older_done_event_cover_newer_processing_event`、`tests/test_postgres_repositories_core.py::test_save_imports_does_not_emit_import_fact_refresh_from_full_snapshot`、`tests/test_import_processing_service.py::test_file_import_confirm_job_returns_import_write_targets`、`tests/test_import_job_queue.py::ImportJobRepositoryTests::test_import_fact_changed_handler_completes_matching_dirty_scope`、`tests/test_import_job_queue.py::ImportJobRepositoryTests::test_invoice_relation_scope_helpers_split_input_and_output_file_months`、`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_import_state_invalidation_enqueues_workbench_month_scopes_before_all_aggregate`、`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_import_state_invalidation_skips_unaffected_invoice_relation_read_models` |
 | 发票导入 preview/confirm 因逐行 DB 查重和 preview 重型持久化变慢 | `tests/test_import_service.py::ImportNormalizationServiceTests::test_preview_import_preloads_invoice_identity_in_bulk`、`tests/test_import_service.py::ImportNormalizationServiceTests::test_confirm_import_refreshes_invoice_identity_in_bulk`、`tests/test_postgres_repositories_core.py::test_find_invoices_by_identity_keys_uses_single_bulk_lookup`、`tests/test_import_file_api.py::ImportFileApiTests::test_preview_files_uses_lightweight_import_preview_persistence` |
 | 发票文件确认 background job 在 App Status 中落到泛化导入域 | `tests/test_import_file_api.py::ImportFileApiTests::test_confirm_files_imports_only_selected_files_from_session` 断言 `affected_domains=["imports_invoices"]`、route `/imports/invoices`；`tests/test_app_status_overview_service.py` 覆盖泛化 import fallback |
@@ -83,11 +83,11 @@
 - Runtime queue drain smoke：真实发票确认后只读核对本次导入时间窗内 `job.outbox_events` 不存在 stuck `processing/pending/dead-lettered`，`job.read_model_dirty_scopes` 中本次发票导入涉及的 `import_state_changed` / `invoice_file_import_confirm` scope 均已 `done`；发票导入不应新增 `import_facts_changed` 旁路，且 pending invoice 使用 `:<YYYY-MM>` 月级 scope 而不是仅有 `expense:all/income:all` 全量 aggregate。
 - 发票 `信息汇总表` Excel 上传 -> 选择进项/销项 -> 表头别名归一 -> 预览行数排除末尾汇总页脚 -> 明细行进入重复审计和确认。
 - 真实 PostgreSQL runtime smoke：5 个真实发票 Excel 上传 -> preview 返回 200 -> `preview_ready` 391 行 -> `app.import_batches`、`app.import_batch_rows`、`app.import_files` 和 `app.file_objects` 均成功写入；确认后通过真实 `*.read_model.refresh` 而不是 `import.fact.changed` 旁路收敛。
-- Browser e2e smoke：两份发票 XLSX 上传 -> 分别选择销项/进项 -> 预览 audit/重复明细/需复核文案 -> 确认导入 -> `/api/workbench` refresh -> 草稿清空 -> 无导入失败/后台导入失败/read model 失败可见残留。
+- Browser e2e smoke：两份发票 XLSX 上传 -> 分别选择销项/进项 -> 预览 audit/重复明细/需复核文案 -> 确认导入 -> 等待响应声明的 operation barrier targets -> 草稿清空 -> 零 Workbench 页面请求 -> 无错误残留。
 - Browser downstream fresh smoke：发票导入确认 -> 打开销项收款、进项使用、税金抵扣、待找发票、OA 待付款和成本统计 -> 每个页面 API 返回 `read_model_status=fresh` -> 页面展示导入影响行 -> 无导入失败/后台导入失败/read model 失败可见残留。
 - Browser slow-preview smoke：两份发票 XLSX 上传 -> 分别选择销项/进项 -> preview request in-flight -> 预览/清空/确认按钮禁用 -> 请求完成后恢复，且只提交一次 preview。
-- Browser corrupt-file smoke：损坏发票文件 + 正常发票文件混合上传 -> 损坏文件作为 file-level error 进入未导入项 -> confirm 只提交正常文件 ID -> Workbench refresh。
-- Browser negative smoke：两份发票 XLSX 上传 -> 预览 -> confirm 返回 `preview_stale` 或 500 -> 错误可见 -> 无“已确认导入” -> 不刷新 `/api/workbench`。
+- Browser corrupt-file smoke：损坏发票文件 + 正常发票文件混合上传 -> 损坏文件作为 file-level error 进入未导入项 -> confirm 只提交正常文件 ID -> 等待显式 operation barrier targets，零 Workbench 页面请求。
+- Browser negative smoke：两份发票 XLSX 上传 -> 预览 -> confirm 返回 `preview_stale` 或 500 -> 错误可见 -> 无“已确认导入” -> 零 operation barrier、零 Workbench 页面请求。
 - 240 行同文件重复发票 -> preview audit 只保留一个 confirmable representative -> duplicate group 展示 240 行，skipped count 为 239。
 - 预览后手工导入或另一个导入批次改变发票事实 -> 当前 confirm 返回 `preview_stale` -> 前端要求重新预览。
 - 发票导入确认 -> 关联台 read model invalidation -> matching/candidate 重新生成，不使用旧 cache。
@@ -153,7 +153,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_aud
 
 - 本地已覆盖 240 行合成发票重复组；真实客户发票 Excel 大文件、历史模板变体、异常编码、超大重复组内存/耗时和真实浏览器上传仍需 staging/manual smoke。
 - 真实 Postgres/RabbitMQ/Redis/systemd import worker drain、worker crash/retry、RabbitMQ transport wakeup 未由本地单测完全证明；`write_operation_slo_audit --operation invoice_import_confirmed` 已有本地契约测试，但仍需要 staging 中真实发票确认样本产生 recent outbox rows 才能证明真实 write-flow。
-- Browser e2e 当前覆盖 deterministic mock 下的发票上传、方向选择、预览审计、慢预览动作锁定、损坏文件混合、确认、Workbench refresh，以及销项收款/进项使用/税金抵扣/待找发票/OA 待付款/成本统计的 fresh read model 展示；search、真实 worker drain、下游真实浏览器大数据表格、长分页、导出下载和网络恢复 smoke 仍是 `documented-risk`。
+- Browser e2e 当前覆盖 deterministic mock 下的发票上传、方向选择、预览审计、慢预览动作锁定、损坏文件混合、确认、显式 operation barrier 等待和零 Workbench 页面请求，以及销项收款/进项使用/税金抵扣/待找发票/OA 待付款/成本统计自身的 fresh read model 展示；search、真实 worker drain、下游真实浏览器大数据表格、长分页、导出下载和网络恢复 smoke 仍是 `documented-risk`。
 - `import.process.requested` 是 file confirm 唯一 durable processing event，不是 inline fallback；具体发票 job 通过 session + selected file ids + batch type 精确归属于发票页，银行/发票任务和 outbox 不得互相阻断 Audit。
 - `tests/test_audit_invoice_import_page.py` 覆盖 direct-canonical expected-set、关键字段、manual source-link 双向 equality、file hash、job/outbox 和一次性 PostgreSQL 0001–0097 破坏性反证；`tests/test_platform_runtime_boundary_guards.py` 防止 inline/revert/import-file batch-column 旧链回流。
 

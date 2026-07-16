@@ -40,7 +40,7 @@ test.describe("workbench stale and error browser flow", () => {
     await expect(openZone.getByRole("button", { name: "撤回关联" })).toHaveCount(0);
   });
 
-  test("shows workbench refreshing status without globally disabling selected group actions", async ({ page }) => {
+  test("shows workbench refreshing status and blocks writes against a non-fresh generation", async ({ page }) => {
     await installDeterministicApiMocks(page, {
       sessionMode: "full_access",
       workbenchHealthStatus: "rebuilding",
@@ -59,8 +59,8 @@ test.describe("workbench stale and error browser flow", () => {
     await openGroup.getByRole("row", { name: /陈涛.*智能工厂设备商/ }).click();
     await openZone.getByRole("row", { name: /2026-03-28.*智能工厂设备商/ }).click();
 
-    await expect(openZone.getByRole("button", { name: "确认关联" })).toBeEnabled();
-    await expect(openZone.getByRole("button", { name: "异常处理" })).toBeEnabled();
+    await expect(openZone.getByRole("button", { name: "确认关联" })).toBeDisabled();
+    await expect(openZone.getByRole("button", { name: "异常处理" })).toBeDisabled();
     await expect(openZone.getByRole("button", { name: "撤回关联" })).toHaveCount(0);
   });
 
@@ -200,7 +200,7 @@ test.describe("workbench stale and error browser flow", () => {
     await page.goto("/");
 
     const { openGroup, previewDialog } = await openConfirmRelationPreview(page);
-    const groupCallsBeforeSubmit = api.count("GET /api/workbench/groups");
+    const workbenchLoadsBeforeSubmit = api.count("GET /api/workbench");
     await previewDialog.getByRole("button", { name: "确认关联" }).click();
 
     await expect(previewDialog).toHaveCount(0);
@@ -208,6 +208,6 @@ test.describe("workbench stale and error browser flow", () => {
     await expect(page.getByTestId("candidate-group-paired-case:CASE-202603-101")).toBeVisible();
     expect(api.count("POST /api/workbench/actions/confirm-link")).toBe(1);
     expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(0);
-    expect(api.count("GET /api/workbench/groups")).toBeGreaterThan(groupCallsBeforeSubmit);
+    expect(api.count("GET /api/workbench")).toBeGreaterThan(workbenchLoadsBeforeSubmit);
   });
 });

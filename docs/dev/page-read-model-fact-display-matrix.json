@@ -7,7 +7,7 @@
       "page_key": "reconciliation-workbench",
       "route": "/",
       "read_model_keys": ["workbench", "workbench_relation"],
-      "freshness_probe_names": ["workbench_summary_all", "workbench_groups_all_paired"],
+      "freshness_probe_names": ["workbench_initial_all", "workbench_groups_all_paired"],
       "fact_sources": ["app.bank_transactions", "app.oa_applications", "app.invoices", "read_model.workbench_generations"],
       "pairing_relation_fact_sources": ["app.workbench_pair_relations", "read_model.workbench_relation_rows"],
       "deterministic_evidence": [
@@ -20,7 +20,7 @@
           "required_markers": ["withdraw_relation:CASE-202603-101", "expected_versions", "candidate-group-unpaired-row:oa-o-202603-001", "candidate-group-unpaired-row:bk-o-202603-001", "candidate-group-unpaired-row:iv-o-202603-001"]
         }
       ],
-      "production_readonly_gates": ["http_slo_probe:workbench_summary_all", "http_slo_probe:workbench_groups_all_paired"]
+      "production_readonly_gates": ["http_slo_probe:workbench_initial_all", "http_slo_probe:workbench_groups_all_paired"]
     },
     {
       "module": "cost-statistics",
@@ -67,7 +67,7 @@
       "page_key": "oa-pending-payments",
       "route": "/oa-pending-payments",
       "read_model_keys": ["oa_pending_payment", "workbench_relation"],
-      "freshness_probe_names": ["oa_pending_payments_rows", "oa_pending_payments_filter_options"],
+      "freshness_probe_names": ["oa_pending_payments_rows"],
       "fact_sources": ["app.oa_applications", "app.bank_transactions", "read_model.oa_pending_payment"],
       "pairing_relation_fact_sources": ["app.workbench_pair_relations", "read_model.workbench_relation_rows"],
       "deterministic_evidence": [
@@ -76,7 +76,7 @@
           "required_markers": ["未支付", "已支付", "关联台已确认", "12561048"]
         }
       ],
-      "production_readonly_gates": ["http_slo_probe:oa_pending_payments_rows", "http_slo_probe:oa_pending_payments_filter_options"]
+      "production_readonly_gates": ["http_slo_probe:oa_pending_payments_rows"]
     },
     {
       "module": "bank-flow-rule-batches",

@@ -143,7 +143,7 @@ class OperationsDashboardServiceTests(unittest.TestCase):
         recorder = ApiPerformanceRecorder()
         recorder.record_request(
             method="GET",
-            route_path="/api/workbench/summary",
+            route_path="/api/workbench",
             status_code=200,
             duration_ms=640.0,
             database_duration_ms=310.0,
@@ -184,8 +184,8 @@ class OperationsDashboardServiceTests(unittest.TestCase):
         self.assertNotIn("oa_attachment", [row["source_key"] for row in import_events])
         self.assertNotIn("oa_records", [row["source_key"] for row in import_events])
         endpoints = {row["endpoint"]: row for row in payload["request_performance"]["endpoints"]}
-        self.assertEqual(endpoints["GET /api/workbench/summary"]["duration_ms"]["p95"], 640.0)
-        self.assertEqual(endpoints["GET /api/workbench/summary"]["database_duration_ms"]["p99"], 310.0)
+        self.assertEqual(endpoints["GET /api/workbench"]["duration_ms"]["p95"], 640.0)
+        self.assertEqual(endpoints["GET /api/workbench"]["database_duration_ms"]["p99"], 310.0)
         self.assertEqual(endpoints["GET /api/search"]["duration_ms"]["p95"], None)
         self.assertEqual(payload["runtime_performance"]["outbox"]["pending_count"], 3)
         self.assertEqual(payload["runtime_performance"]["queues"][0]["status"], "unknown")

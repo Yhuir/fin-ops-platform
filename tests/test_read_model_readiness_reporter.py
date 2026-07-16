@@ -254,7 +254,7 @@ class ReadModelReadinessReporterTests(unittest.TestCase):
             "handlers[INVOICE_LIFECYCLE_REFRESH_EVENT_TYPE] = _read_model_handler",
             'handlers["input_invoice_usage.read_model.refresh"] = _read_model_handler',
             'handlers["output_invoice_collection.read_model.refresh"] = _read_model_handler',
-            'handlers["oa_pending_payment.read_model.refresh"] = _read_model_handler',
+            "handlers[OA_PENDING_PAYMENT_REFRESH_EVENT_TYPE] = _read_model_handler",
         )
         for assignment in expected_assignments:
             self.assertIn(assignment, worker_source)

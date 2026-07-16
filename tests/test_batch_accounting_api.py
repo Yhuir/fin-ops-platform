@@ -609,12 +609,33 @@ class BatchAccountingApiTests(unittest.TestCase):
             },
         }
 
-    def _app_with_grouped_payload(self) -> tuple[Application, patch]:
+    def _app_with_grouped_payload(self, payload: dict[str, object] | None = None) -> tuple[Application, object]:
+        payload = payload or self._grouped_payload()
+
+        class StaticBatchAccountingReadModel:
+            def load_batch_accounting_workbench_payload(self, *, bank_year: str) -> dict[str, object]:
+                return payload
+
+            def load_batch_accounting_submit_workbench_payload(
+                self,
+                *,
+                bank_year: str,
+                bank_row_id: str,
+                oa_row_ids: list[str],
+            ) -> dict[str, object]:
+                return payload
+
+            def load_batch_accounting_submitted_bank_workbench_payload(
+                self,
+                *,
+                bank_year: str,
+            ) -> dict[str, object]:
+                return payload
+
         app = build_application()
-        payload_patcher = patch.object(app, "_build_api_workbench_payload", return_value=self._grouped_payload())
-        payload_patcher.start()
-        self.addCleanup(payload_patcher.stop)
-        return app, payload_patcher
+        read_model = StaticBatchAccountingReadModel()
+        app._workbench_sql_read_repository = read_model
+        return app, read_model
 
     def test_unsubmitted_list_uses_sql_read_model_loader_when_available(self) -> None:
         class SqlReadModel:
@@ -629,9 +650,6 @@ class BatchAccountingApiTests(unittest.TestCase):
         app = build_application()
         sql_read_model = SqlReadModel(self._grouped_payload())
         app._workbench_sql_read_repository = sql_read_model
-        payload_patcher = patch.object(app, "_build_api_workbench_payload", side_effect=AssertionError("full workbench loader must not run"))
-        payload_patcher.start()
-        self.addCleanup(payload_patcher.stop)
 
         response = app.handle_request("GET", "/api/batch-accounting?bank_year=2026&bucket=unsubmitted")
         payload = json.loads(response.body)
@@ -643,6 +661,43 @@ class BatchAccountingApiTests(unittest.TestCase):
             [row["id"] for row in payload["oa_rows"]],
             ["oa-exp-ba-001", "oa-exp-ba-002", "oa-exp-ba-003", "oa-exp-ba-2025", "oa-exp-ba-2025b"],
         )
+
+    def test_unsubmitted_list_fails_closed_without_sql_workbench_loader(self) -> None:
+        app = build_application()
+
+        response = app.handle_request("GET", "/api/batch-accounting?bank_year=2026&bucket=unsubmitted")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 503, response.body)
+        self.assertEqual(payload["error"], "batch_accounting_workbench_read_model_unavailable")
+
+    def test_unsubmitted_list_fails_closed_for_invalid_sql_workbench_payload(self) -> None:
+        class InvalidReadModel:
+            def load_batch_accounting_workbench_payload(self, *, bank_year: str) -> None:
+                return None
+
+        app = build_application()
+        app._workbench_sql_read_repository = InvalidReadModel()
+
+        response = app.handle_request("GET", "/api/batch-accounting?bank_year=2026&bucket=unsubmitted")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 503, response.body)
+        self.assertEqual(payload["error"], "batch_accounting_workbench_read_model_unavailable")
+
+    def test_submitted_list_does_not_fallback_to_unsubmitted_loader(self) -> None:
+        class ListOnlyReadModel:
+            def load_batch_accounting_workbench_payload(self, *, bank_year: str) -> dict[str, object]:
+                raise AssertionError("submitted bucket must not call the unsubmitted list loader")
+
+        app = build_application()
+        app._workbench_sql_read_repository = ListOnlyReadModel()
+
+        response = app.handle_request("GET", "/api/batch-accounting?bank_year=2026&bucket=submitted")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 503, response.body)
+        self.assertEqual(payload["error"], "batch_accounting_workbench_read_model_unavailable")
 
     def test_submit_uses_sql_read_model_loader_when_available(self) -> None:
         class SqlReadModel:
@@ -670,9 +725,6 @@ class BatchAccountingApiTests(unittest.TestCase):
         app = build_application()
         sql_read_model = SqlReadModel(self._grouped_payload())
         app._workbench_sql_read_repository = sql_read_model
-        payload_patcher = patch.object(app, "_build_api_workbench_payload", side_effect=AssertionError("full workbench loader must not run"))
-        payload_patcher.start()
-        self.addCleanup(payload_patcher.stop)
 
         response = app.handle_request(
             "POST",
@@ -702,11 +754,30 @@ class BatchAccountingApiTests(unittest.TestCase):
         )
         self.assertEqual(payload["relation_id"], "CASE-BATCH-txn_imported_202601_batch_001")
 
+    def test_submit_fails_closed_without_sql_narrow_loader(self) -> None:
+        app = build_application()
+
+        response = app.handle_request(
+            "POST",
+            "/api/batch-accounting/submit",
+            json.dumps(
+                {
+                    "year": "2026",
+                    "bank_row_id": "txn_imported_202601_batch_001",
+                    "oa_row_ids": ["oa-exp-ba-001"],
+                }
+            ),
+        )
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 503, response.body)
+        self.assertEqual(payload["error"], "batch_accounting_workbench_read_model_unavailable")
+
     def test_submit_checks_active_relations_only_for_selected_rows_without_relation_read_model_gate(self) -> None:
         facade = RowsBatchRelationFacade([])
         relation_command = RecordingBatchRelationCommandService()
         service = BatchAccountingService(
-            grouped_workbench_loader=lambda _month: self._large_batch_accounting_payload(),
+            batch_submit_workbench_loader=lambda **_kwargs: self._large_batch_accounting_payload(),
             relation_facade=facade,
             relation_command_service=relation_command,
         )
@@ -724,10 +795,7 @@ class BatchAccountingApiTests(unittest.TestCase):
         self.assertEqual(relation_command.active_relation_calls, [selected_row_ids])
 
     def test_unsubmitted_list_explicit_pagination_protects_first_screen_slo(self) -> None:
-        app = build_application()
-        payload_patcher = patch.object(app, "_build_api_workbench_payload", return_value=self._large_batch_accounting_payload())
-        payload_patcher.start()
-        self.addCleanup(payload_patcher.stop)
+        app, _read_model = self._app_with_grouped_payload(self._large_batch_accounting_payload())
 
         first_response = app.handle_request(
             "GET",
@@ -788,7 +856,7 @@ class BatchAccountingApiTests(unittest.TestCase):
             ],
         )
         service = BatchAccountingService(
-            grouped_workbench_loader=lambda _month: self._grouped_payload(),
+            batch_workbench_loader=lambda **_kwargs: self._grouped_payload(),
             relation_facade=facade,
         )
 
@@ -851,7 +919,7 @@ class BatchAccountingApiTests(unittest.TestCase):
         }
         facade = RowsBatchRelationFacade([])
         service = BatchAccountingService(
-            grouped_workbench_loader=lambda _month: payload,
+            batch_workbench_loader=lambda **_kwargs: payload,
             relation_facade=facade,
         )
 
@@ -906,9 +974,6 @@ class BatchAccountingApiTests(unittest.TestCase):
         app = build_application()
         sql_read_model = SqlReadModel()
         app._workbench_sql_read_repository = sql_read_model
-        payload_patcher = patch.object(app, "_build_api_workbench_payload", side_effect=AssertionError("SQL loader should be used"))
-        payload_patcher.start()
-        self.addCleanup(payload_patcher.stop)
 
         response = app.handle_request("GET", "/api/batch-accounting?year=2026&bucket=unsubmitted")
         payload = json.loads(response.body)
@@ -1111,7 +1176,7 @@ class BatchAccountingApiTests(unittest.TestCase):
     def test_submitted_list_fails_closed_without_year_relation_reader(self) -> None:
         facade = SubmittedMonthOnlyBatchRelationFacade()
         service = BatchAccountingService(
-            grouped_workbench_loader=lambda _month: self._grouped_payload(),
+            batch_submitted_workbench_loader=lambda **_kwargs: self._grouped_payload(),
             relation_facade=facade,
         )
 
@@ -1194,7 +1259,7 @@ class BatchAccountingApiTests(unittest.TestCase):
         pair_service = WriteBlockingPairRelationService()
         relation_command = RecordingBatchRelationCommandService(pair_service)
         service = BatchAccountingService(
-            grouped_workbench_loader=lambda _month: self._grouped_payload(),
+            batch_submit_workbench_loader=lambda **_kwargs: self._grouped_payload(),
             relation_facade=RowsBatchRelationFacade([]),
             relation_command_service=relation_command,
         )
@@ -1222,7 +1287,7 @@ class BatchAccountingApiTests(unittest.TestCase):
         pair_service = WorkbenchPairRelationService()
         relation_command = RecordingBatchRelationCommandService(pair_service)
         service = BatchAccountingService(
-            grouped_workbench_loader=lambda _month: payload,
+            batch_submit_workbench_loader=lambda **_kwargs: payload,
             relation_facade=RowsBatchRelationFacade([]),
             relation_command_service=relation_command,
         )
@@ -1244,7 +1309,7 @@ class BatchAccountingApiTests(unittest.TestCase):
     def test_submit_requires_relation_command_service_without_direct_pair_fallback(self) -> None:
         pair_service = WriteBlockingPairRelationService()
         service = BatchAccountingService(
-            grouped_workbench_loader=lambda _month: self._grouped_payload(),
+            batch_submit_workbench_loader=lambda **_kwargs: self._grouped_payload(),
             relation_facade=FakeBatchRelationFacade(),
         )
 
@@ -1562,7 +1627,7 @@ class BatchAccountingApiTests(unittest.TestCase):
         }
         facade = FakeBatchRelationFacade(relation)
         service = BatchAccountingService(
-            grouped_workbench_loader=lambda _month: self._grouped_payload(),
+            batch_submitted_workbench_loader=lambda **_kwargs: self._grouped_payload(),
             relation_facade=facade,
         )
 
@@ -1677,7 +1742,6 @@ class BatchAccountingApiTests(unittest.TestCase):
         )
         relation_command = RecordingBatchRelationCommandService(pair_service)
         service = BatchAccountingService(
-            grouped_workbench_loader=lambda _month: self._grouped_payload(),
             relation_facade=FakeBatchRelationFacade(),
             relation_command_service=relation_command,
         )
@@ -1792,7 +1856,6 @@ class BatchAccountingApiTests(unittest.TestCase):
         )
         relation_command = RecordingBatchRelationCommandService(pair_service)
         service = BatchAccountingService(
-            grouped_workbench_loader=lambda _month: payload,
             batch_submit_workbench_loader=lambda **_kwargs: payload,
             relation_facade=FakeBatchRelationFacade(),
             relation_command_service=relation_command,
@@ -1849,14 +1912,6 @@ class BatchAccountingApiTests(unittest.TestCase):
                 "bank_year": "2026",
             },
         )
-        full_loader_patcher = patch.object(
-            app,
-            "_build_api_workbench_payload",
-            side_effect=AssertionError("withdraw scope backfill must use the narrow SQL read port"),
-        )
-        full_loader_patcher.start()
-        self.addCleanup(full_loader_patcher.stop)
-
         response = app.handle_request(
             "POST",
             "/api/batch-accounting/CASE-BATCH-txn_imported_202601_batch_001/withdraw",
@@ -1894,7 +1949,6 @@ class BatchAccountingApiTests(unittest.TestCase):
             },
         )
         service = BatchAccountingService(
-            grouped_workbench_loader=lambda _month: self._grouped_payload(),
             relation_facade=FakeBatchRelationFacade(),
         )
 

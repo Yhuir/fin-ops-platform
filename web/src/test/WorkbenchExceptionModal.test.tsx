@@ -50,6 +50,7 @@ describe("WorkbenchExceptionModal", () => {
         expect(init?.body).toBe(JSON.stringify({
           month: "all",
           row_ids: ["oa-1", "bank-1", "invoice-1"],
+          expected_read_model_version: "generation-set-1",
         }));
         return previewPromise;
       }
@@ -148,6 +149,7 @@ describe("WorkbenchExceptionModal", () => {
           body: JSON.stringify({
             month: "all",
             row_ids: ["bank-1", "invoice-1"],
+            expected_read_model_version: "generation-set-1",
             scenario_code: "expense_bank_invoice_missing_oa",
             action_code: "manual_oa_exempt",
             payload: {
@@ -209,6 +211,7 @@ describe("WorkbenchExceptionModal", () => {
           body: JSON.stringify({
             month: "all",
             row_ids: ["oa-1", "bank-1", "invoice-1"],
+            expected_read_model_version: "generation-set-1",
             scenario_code: "expense_all_equal_closed",
             action_code: "confirm_closed",
             payload: {},
@@ -302,6 +305,7 @@ function renderModal({
         <WorkbenchExceptionModal
           month="all"
           rows={rows}
+          expectedReadModelVersion="generation-set-1"
           onApplied={onApplied}
           onClose={onClose}
         />

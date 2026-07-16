@@ -50,28 +50,28 @@ def validate(args: argparse.Namespace) -> int:
     failures: list[str] = []
     seen_by_version: dict[str, dict[str, Any]] = {}
     for index in range(max(1, int(args.iterations))):
-        summary_url = f"{base_url}/api/workbench/summary?{urlencode({'month': args.month})}"
-        groups_query = urlencode(
-            {
-                "month": args.month,
-                "zone": args.zone,
-                "page": 1,
-                "page_size": args.page_size,
-                "detail_level": "summary",
-            }
-        )
-        groups_url = f"{base_url}/api/workbench/groups?{groups_query}"
+        initial_url = f"{base_url}/api/workbench?{urlencode({'month': args.month})}"
         started_at = time.perf_counter()
-        summary_payload = _get_json(summary_url, timeout_seconds=args.timeout_seconds)
+        initial_payload = _get_json(initial_url, timeout_seconds=args.timeout_seconds)
+        version = _version(initial_payload)
+        groups_params: dict[str, Any] = {
+            "month": args.month,
+            "zone": args.zone,
+            "page": 1,
+            "page_size": args.page_size,
+            "detail_level": "summary",
+        }
+        if version != "unknown":
+            groups_params["expected_read_model_version"] = version
+        groups_url = f"{base_url}/api/workbench/groups?{urlencode(groups_params)}"
         groups_payload = _get_json(groups_url, timeout_seconds=args.timeout_seconds)
         duration_ms = round((time.perf_counter() - started_at) * 1000, 3)
-        version = _version(groups_payload) if _version(groups_payload) != "unknown" else _version(summary_payload)
         observation = {
             "iteration": index + 1,
             "version": version,
-            "summary_status": summary_payload.get("read_model_status"),
+            "initial_status": initial_payload.get("read_model_status"),
             "groups_status": groups_payload.get("read_model_status"),
-            "summary_counts": _summary_counts(summary_payload),
+            "summary_counts": _summary_counts(initial_payload),
             "groups_counts": _groups_counts(groups_payload),
             "duration_ms": duration_ms,
         }

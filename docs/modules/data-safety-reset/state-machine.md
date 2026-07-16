@@ -12,7 +12,8 @@
 | `password_verified` | `_validate_settings_data_reset_request` | 仅表示当前请求可继续，不持久化密码 |
 | `reset_queued` | `BackgroundJobService.create_job(type="settings_data_reset")` | 异步重置排队，`source/result_summary` 只能保存 action 等非敏感字段 |
 | `reset_running` | background job `status=running` + progress | UI 可离开后恢复；同 owner 再提交必须返回 `409 settings_data_reset_job_running` |
-| `reset_succeeded` | job `succeeded` / serialized `completed` | 删除和派生生命周期执行完成；仍需依赖 App Status/read model 验证最终 fresh |
+| `reset_succeeded` | job `succeeded` / serialized `completed` | 删除和 durable 派生生命周期登记完成；仍需依赖 App Status/read model 验证最终 fresh |
+| `rebuild_pending` | OA reset result `rebuild_status=pending` | 关联台重建已经可靠入队但尚未证明 fresh；不得同步查询全页 payload 后改成 completed |
 | `reset_failed` | job `failed` 或同步 API structured error | 必须进入 App Health attention；保留错误但不泄露密码 |
 | `reset_partial` | result `status=partial` 或 `rebuild_status=failed` | 按 failed job 处理；用户需要运维检查 affected scopes 和 rebuild status |
 | `protected_target_skipped` | `protected_targets` payload + service 删除规则 | 受保护目标不应被删除；新增目标必须补测试 |
@@ -20,6 +21,7 @@
 ## 允许流转
 
 - `impact_preview` -> `password_pending` -> `password_verified` -> `reset_queued` -> `reset_running` -> `reset_succeeded`
+- OA reset 的下游状态独立流转：`rebuild_pending` -> read model `refreshing` -> `fresh`，或 -> `failed`。
 - `impact_preview` -> `password_pending` -> `password_failed`
 - `reset_running` -> `reset_failed`
 - `reset_running` -> `reset_partial`
@@ -31,6 +33,8 @@
 - `reset_running` 时同一 owner 创建第二个 data reset job。
 - 删除 `protected_targets` 中任意目标。
 - 重置后把旧 read model/cache 标成 `fresh`。
+- reset 请求/job 线程调用 Workbench 全页 query、OA 行投影或 OCR，并据此把 `rebuild_status` 标成 `completed`。
+- 在 `settings_reset_completed` lifecycle 已登记 matching dirty scopes 后再走一条重复 enqueue 路径。
 - 在 job payload、error、audit summary、App Health payload、前端 state 中保存或回显 `oa_password`。
 - OA reset 删除纯银行+发票 relation，或绕过 OA 保留月份策略全量扫描/重建。
 
@@ -60,7 +64,7 @@
 ## refresh 触发来源
 
 - `settings_reset_completed` lifecycle event，`include_all=True`。
-- `reset_oa_and_rebuild` 后的 Workbench matching dirty scope reset/rebuild。
+- `reset_oa_and_rebuild` 复用 `settings_reset_completed` 的 Workbench read model refresh 与 matching dirty scope；不得额外重复 enqueue。
 - 发票或 OA reset 后的 historical ETC repair。
 - 后续 read model query miss/stale enqueue。
 - `startup_stale_scan` 默认关闭；启用时只标记 stale workbench matching dirty scopes；reset 主链路仍由 `settings_reset_completed` 和 reset job 显式清理/重建 read model。
@@ -77,4 +81,5 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-07-16 | OA reset 改为 durable lifecycle 后返回 `rebuild_status=pending` | 删除同步 Workbench 全页 completion probe 与重复 matching enqueue，区分 reset job 完成和 read model fresh | `tests.test_settings_data_reset_service` |
 | 2026-06-11 | 补齐 data-safety-reset 状态机 | 明确密码校验、job、protected target、read model/worker 和 UI 状态 | 待本轮模块验证 |

@@ -11,6 +11,11 @@ type PageAuditIconProps = {
   runAudit: (signal?: AbortSignal) => Promise<PageAuditPayload>;
   successText?: string;
   notFreshText?: string;
+  formatMessage?: (
+    payload: PageAuditPayload,
+    readModelStatus: string | undefined,
+  ) => { tone: "success" | "warning" | "danger"; text: string };
+  formatError?: (error: unknown) => string;
 };
 
 function normalizeStatus(status: string | undefined) {
@@ -92,6 +97,8 @@ export default function PageAuditIcon({
   runAudit,
   successText = "Audit 通过 · 此数据库快照内已登记 App 内部合同一致 · 已登记配对证明一致 · 外部来源未证明 · Fresh",
   notFreshText = "Audit 完整性通过 · 已登记 App 内部合同 · Not fresh",
+  formatMessage,
+  formatError,
 }: PageAuditIconProps) {
   const [payload, setPayload] = useState<PageAuditPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -107,14 +114,16 @@ export default function PageAuditIcon({
     try {
       setPayload(await runAudit(controller.signal));
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Audit failed");
+      setError(formatError?.(caught) ?? "Audit 失败");
       setPayload(null);
     } finally {
       setIsLoading(false);
     }
-  }, [isLoading, runAudit]);
+  }, [formatError, isLoading, runAudit]);
 
-  const message = auditMessage(payload, readModelStatus, successText, notFreshText);
+  const message = payload && formatMessage
+    ? formatMessage(payload, readModelStatus)
+    : auditMessage(payload, readModelStatus, successText, notFreshText);
 
   return (
     <span className="page-audit-control">
@@ -142,7 +151,7 @@ export default function PageAuditIcon({
       ) : null}
       {error ? (
         <span className="page-audit-status" data-tone="danger" role="alert">
-          Audit 失败
+          {error}
         </span>
       ) : null}
     </span>

@@ -32,6 +32,8 @@ class WorkbenchQueryFacade:
         groups_cache_key: Callable[..., str | None] | None = None,
         groups_cache_version_from_key: Callable[[str], str | None] | None = None,
         groups_redis_ttl_seconds: Callable[[], int] | None = None,
+        initial_cache_key_from_version: Callable[..., str | None] | None = None,
+        is_default_initial_query: Callable[..., bool] | None = None,
         oa_status_provider: Callable[[], object] | None = None,
         serialize_value: Callable[[object], object] | None = None,
     ) -> None:
@@ -50,16 +52,24 @@ class WorkbenchQueryFacade:
         self._groups_cache_key = groups_cache_key
         self._groups_cache_version_from_key = groups_cache_version_from_key
         self._groups_redis_ttl_seconds = groups_redis_ttl_seconds or (lambda: 600)
+        self._initial_cache_key_from_version = initial_cache_key_from_version
+        self._is_default_initial_query = is_default_initial_query
         self._oa_status_provider = oa_status_provider
         self._serialize_value = serialize_value or (lambda value: value)
 
-    def summary(self, month: str | None) -> WorkbenchQueryResult:
+    def initial_page(
+        self,
+        month: str | None,
+        *,
+        paired_query: dict[str, object] | None = None,
+        unpaired_query: dict[str, object] | None = None,
+    ) -> WorkbenchQueryResult:
         current_month = month or "all"
         scope_key = self._scope_key_for_month(current_month)
-        get_summary = getattr(self._repository, "get_workbench_summary", None)
-        if not callable(get_summary):
+        get_initial_page = getattr(self._repository, "get_workbench_initial_page", None)
+        if not callable(get_initial_page):
             self._emit_status_metric(
-                endpoint="/api/workbench/summary",
+                endpoint="/api/workbench",
                 scope_key=scope_key,
                 read_model_status="unavailable",
                 reason="repository_unavailable",
@@ -70,15 +80,68 @@ class WorkbenchQueryFacade:
                     "error": "read_model_unavailable",
                     "read_model_status": "unavailable",
                     "scope_key": scope_key,
-                    "message": "Workbench SQL summary repository is not configured.",
+                    "message": "Workbench SQL initial page repository is not configured.",
                 },
             )
+        cacheable_query = bool(
+            callable(self._is_default_initial_query)
+            and self._is_default_initial_query(paired_query, unpaired_query)
+        )
+        refresh_status_payload: dict[str, object] | None = None
+        if cacheable_query:
+            try:
+                refresh_status_payload = self._groups_refresh_status_payload(scope_key)
+            except Exception as error:
+                if not self._transient_read_model_error(error):
+                    raise
+        refresh_status = (
+            str(refresh_status_payload.get("read_model_status") or "fresh")
+            if isinstance(refresh_status_payload, dict)
+            else ""
+        )
+        cache_version = (
+            str(
+                refresh_status_payload.get("read_model_version")
+                or refresh_status_payload.get("active_generation_id")
+                or ""
+            ).strip()
+            if isinstance(refresh_status_payload, dict)
+            else ""
+        )
+        cache_key = (
+            self._initial_cache_key_from_version(cache_version=cache_version, scope_key=scope_key)
+            if cacheable_query and cache_version and callable(self._initial_cache_key_from_version)
+            else None
+        )
+        payload: object = None
+        loaded_from_cache = False
+        if cache_key and refresh_status in {"fresh", "refreshing"}:
+            get_cached = getattr(self._redis_helper, "get_json", None)
+            if callable(get_cached):
+                try:
+                    cached = get_cached(cache_key)
+                except Exception:
+                    cached = None
+                cached_payload = cached.get("payload") if isinstance(cached, dict) else None
+                cached_version = (
+                    str(cached_payload.get("read_model_version") or "").strip()
+                    if isinstance(cached_payload, dict)
+                    else ""
+                )
+                if isinstance(cached_payload, dict) and cached_version == cache_version:
+                    payload = dict(cached_payload)
+                    loaded_from_cache = True
         try:
-            payload = get_summary(scope_key=scope_key)
+            if not loaded_from_cache:
+                payload = get_initial_page(
+                    scope_key=scope_key,
+                    paired_query=paired_query,
+                    unpaired_query=unpaired_query,
+                )
         except Exception as error:
             if self._missing_read_model_error(error):
                 self._emit_status_metric(
-                    endpoint="/api/workbench/summary",
+                    endpoint="/api/workbench",
                     scope_key=scope_key,
                     read_model_status="unavailable",
                     reason="migration_missing",
@@ -89,17 +152,22 @@ class WorkbenchQueryFacade:
                         "error": "read_model_unavailable",
                         "read_model_status": "unavailable",
                         "scope_key": scope_key,
-                        "message": "Workbench SQL groups read model table is not migrated.",
+                        "message": "Workbench SQL read model tables are not migrated.",
                     },
+                )
+            if self._transient_read_model_error(error):
+                return self._read_model_temporarily_unavailable_result(
+                    endpoint="/api/workbench",
+                    scope_key=scope_key,
                 )
             raise
         if not isinstance(payload, dict):
-            self._enqueue_refresh(scope_key, reason="api_summary_miss")
+            self._enqueue_refresh(scope_key, reason="api_initial_page_miss")
             self._emit_status_metric(
-                endpoint="/api/workbench/summary",
+                endpoint="/api/workbench",
                 scope_key=scope_key,
                 read_model_status="refreshing",
-                reason="api_summary_miss",
+                reason="api_initial_page_miss",
             )
             return WorkbenchQueryResult(
                 HTTPStatus.ACCEPTED,
@@ -114,31 +182,57 @@ class WorkbenchQueryFacade:
                         "unpaired_count": 0,
                         "exception_count": 0,
                     },
+                    "paired": {"groups": [], "total": 0, "has_more": False},
+                    "unpaired": {"groups": [], "total": 0, "has_more": False},
                     "read_model_status": "refreshing",
                     "generated_at": None,
                 },
             )
         payload = dict(payload)
+        payload["read_model_scope_key"] = scope_key
+        payload_version = str(payload.get("read_model_version") or "").strip()
+        if refresh_status_payload and cache_version == payload_version and refresh_status in {"refreshing", "stale"}:
+            payload["read_model_status"] = refresh_status
+            context_stale_reasons = refresh_status_payload.get("read_model_stale_reasons")
+            if isinstance(context_stale_reasons, list) and context_stale_reasons:
+                payload["read_model_stale_reasons"] = list(context_stale_reasons)
         stale_reasons = self._stale_reasons(payload.get("source_versions"), scope_key=scope_key)
-        refresh_enqueued = False
         if stale_reasons:
             payload["read_model_status"] = "stale"
             payload["read_model_stale_reasons"] = [
-                *list(payload.get("read_model_stale_reasons") if isinstance(payload.get("read_model_stale_reasons"), list) else []),
+                *list(
+                    payload.get("read_model_stale_reasons")
+                    if isinstance(payload.get("read_model_stale_reasons"), list)
+                    else []
+                ),
                 *stale_reasons,
             ]
-            self._enqueue_refresh(scope_key, reason="api_summary_source_versions_stale")
-            refresh_enqueued = True
+        initial_status = str(payload.get("read_model_status") or "fresh")
+        if not loaded_from_cache and cacheable_query and initial_status == "fresh":
+            resolved_cache_key = (
+                self._initial_cache_key_from_version(cache_version=payload_version, scope_key=scope_key)
+                if payload_version and callable(self._initial_cache_key_from_version)
+                else None
+            )
+            set_cached = getattr(self._redis_helper, "set_json", None)
+            if resolved_cache_key and callable(set_cached):
+                try:
+                    set_cached(
+                        resolved_cache_key,
+                        {"payload": dict(payload)},
+                        ttl_seconds=self._groups_redis_ttl_seconds(),
+                    )
+                except Exception:
+                    pass
         if "oa_status" not in payload and callable(self._oa_status_provider):
             payload["oa_status"] = self._serialize_value(self._oa_status_provider())
-        summary_status = str(payload.get("read_model_status") or "fresh")
-        if summary_status != "fresh":
-            if summary_status == "stale" and not refresh_enqueued:
-                self._enqueue_refresh(scope_key, reason="api_summary_stale")
+        if initial_status != "fresh":
+            if refresh_status not in {"refreshing", "stale"}:
+                self._enqueue_refresh(scope_key, reason="api_initial_page_stale")
             self._emit_status_metric(
-                endpoint="/api/workbench/summary",
+                endpoint="/api/workbench",
                 scope_key=scope_key,
-                read_model_status=summary_status,
+                read_model_status=initial_status,
                 reason="sql_status",
             )
         return WorkbenchQueryResult(HTTPStatus.OK, payload)
@@ -159,6 +253,7 @@ class WorkbenchQueryFacade:
         detail_level: str | None = None,
         column_filters: dict[str, object] | None = None,
         time_filters: dict[str, object] | None = None,
+        expected_read_model_version: str | None = None,
     ) -> WorkbenchQueryResult:
         current_month = month or "all"
         scope_key = self._scope_key_for_month(current_month)
@@ -188,6 +283,27 @@ class WorkbenchQueryFacade:
                     scope_key=scope_key,
                 )
             raise
+        expected_version = str(expected_read_model_version or "").strip()
+        current_version = (
+            str(
+                refresh_status_payload.get("read_model_version")
+                or refresh_status_payload.get("active_generation_id")
+                or ""
+            ).strip()
+            if isinstance(refresh_status_payload, dict)
+            else ""
+        )
+        if expected_version and current_version and expected_version != current_version:
+            return WorkbenchQueryResult(
+                HTTPStatus.CONFLICT,
+                {
+                    "error": "workbench_read_model_version_conflict",
+                    "scope_key": scope_key,
+                    "zone": zone,
+                    "expected_read_model_version": expected_version,
+                    "read_model_version": current_version,
+                },
+            )
         get_cached = getattr(self._redis_helper, "get_json", None)
         get_text = getattr(self._redis_helper, "get_text", None)
         set_text = getattr(self._redis_helper, "set_text", None)
@@ -247,9 +363,23 @@ class WorkbenchQueryFacade:
         )
         if cached_result is not None:
             return cached_result
+        repository_kwargs = dict(cache_kwargs)
+        if expected_version:
+            repository_kwargs["expected_read_model_version"] = expected_version
         try:
-            payload = get_groups_page(**cache_kwargs)
+            payload = get_groups_page(**repository_kwargs)
         except Exception as error:
+            if isinstance(error, WorkbenchReadModelVersionConflictError):
+                return WorkbenchQueryResult(
+                    HTTPStatus.CONFLICT,
+                    {
+                        "error": "workbench_read_model_version_conflict",
+                        "scope_key": scope_key,
+                        "zone": zone,
+                        "expected_read_model_version": error.expected,
+                        "read_model_version": error.current,
+                    },
+                )
             if self._missing_read_model_error(error):
                 self._emit_status_metric(
                     endpoint="/api/workbench/groups",
@@ -444,7 +574,13 @@ class WorkbenchQueryFacade:
             },
         )
 
-    def row_detail(self, month: str | None, *, row_id: str) -> WorkbenchQueryResult:
+    def row_detail(
+        self,
+        month: str | None,
+        *,
+        row_id: str,
+        expected_read_model_version: str | None = None,
+    ) -> WorkbenchQueryResult:
         current_month = month or "all"
         scope_key = self._scope_key_for_month(current_month)
         normalized_row_id = str(row_id or "").strip()
@@ -470,17 +606,27 @@ class WorkbenchQueryFacade:
                 HTTPStatus.NOT_FOUND,
                 {"error": "workbench_row_not_found", "scope_key": scope_key, "row_id": normalized_row_id},
             )
+        repository_kwargs: dict[str, object] = {
+            "scope_key": scope_key,
+            "row_id": normalized_row_id,
+        }
+        expected_version = str(expected_read_model_version or "").strip()
+        if expected_version:
+            repository_kwargs["expected_read_model_version"] = expected_version
         try:
-            payload = get_row_detail(scope_key=scope_key, row_id=normalized_row_id)
-            if current_month == "all" and (
-                not isinstance(payload, dict) or not isinstance(payload.get("row"), dict)
-            ):
-                find_scope_key = getattr(self._repository, "find_workbench_row_scope_key", None)
-                if callable(find_scope_key):
-                    resolved_scope_key = str(find_scope_key(row_id=normalized_row_id) or "").strip()
-                    if resolved_scope_key and resolved_scope_key != scope_key:
-                        payload = get_row_detail(scope_key=resolved_scope_key, row_id=normalized_row_id)
+            payload = get_row_detail(**repository_kwargs)
         except Exception as error:
+            if isinstance(error, WorkbenchReadModelVersionConflictError):
+                return WorkbenchQueryResult(
+                    HTTPStatus.CONFLICT,
+                    {
+                        "error": "workbench_read_model_version_conflict",
+                        "scope_key": scope_key,
+                        "row_id": normalized_row_id,
+                        "expected_read_model_version": error.expected,
+                        "read_model_version": error.current,
+                    },
+                )
             if self._missing_read_model_error(error):
                 self._emit_status_metric(
                     endpoint="/api/workbench/rows/{row_id}",
@@ -530,6 +676,97 @@ class WorkbenchQueryFacade:
         result.setdefault("scope_key", scope_key)
         result.setdefault("read_model_status", "fresh")
         return WorkbenchQueryResult(HTTPStatus.OK, result)
+
+    def write_precondition(
+        self,
+        month: str | None,
+        *,
+        expected_read_model_version: object,
+    ) -> WorkbenchQueryResult:
+        scope_key = self._scope_key_for_month(month or "all")
+        expected_version = str(expected_read_model_version or "").strip()
+        if not expected_version:
+            return WorkbenchQueryResult(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "expected_read_model_version_required",
+                    "message": "expected_read_model_version is required.",
+                    "scope_key": scope_key,
+                },
+            )
+        try:
+            status_payload = self._groups_refresh_status_payload(scope_key)
+        except Exception as error:
+            if self._transient_read_model_error(error):
+                return self._read_model_temporarily_unavailable_result(
+                    endpoint="/api/workbench/actions",
+                    scope_key=scope_key,
+                )
+            raise
+        if not isinstance(status_payload, dict):
+            return WorkbenchQueryResult(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": "workbench_read_model_unavailable",
+                    "message": "Workbench read model status is unavailable.",
+                    "read_model_status": "unavailable",
+                    "scope_key": scope_key,
+                    "retryable": True,
+                },
+            )
+
+        read_model_status = str(status_payload.get("read_model_status") or "unavailable").strip()
+        read_model_version = str(
+            status_payload.get("read_model_version")
+            or status_payload.get("active_generation_id")
+            or ""
+        ).strip()
+        response_context = {
+            "read_model_status": read_model_status,
+            "read_model_version": read_model_version or None,
+            "scope_key": scope_key,
+        }
+        if not read_model_version:
+            return WorkbenchQueryResult(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": "workbench_read_model_unavailable",
+                    "message": "Workbench active generation version is unavailable.",
+                    **response_context,
+                    "retryable": True,
+                },
+            )
+        if read_model_version != expected_version:
+            return WorkbenchQueryResult(
+                HTTPStatus.CONFLICT,
+                {
+                    "error": "workbench_read_model_version_conflict",
+                    "message": "Workbench read model version changed; reload and retry.",
+                    **response_context,
+                    "retryable": True,
+                },
+            )
+        if read_model_status in {"refreshing", "stale"}:
+            return WorkbenchQueryResult(
+                HTTPStatus.CONFLICT,
+                {
+                    "error": "workbench_read_model_not_fresh",
+                    "message": "Workbench read model is not fresh; reload after refresh completes.",
+                    **response_context,
+                    "retryable": True,
+                },
+            )
+        if read_model_status != "fresh":
+            return WorkbenchQueryResult(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {
+                    "error": "workbench_read_model_unavailable",
+                    "message": "Workbench read model is unavailable.",
+                    **response_context,
+                    "retryable": True,
+                },
+            )
+        return WorkbenchQueryResult(HTTPStatus.OK, response_context)
 
     def refresh_status(self, month: str | None) -> WorkbenchQueryResult:
         scope_key = self._scope_key_for_month(month or "all")
@@ -588,17 +825,17 @@ class WorkbenchQueryFacade:
         self._emit_status_metric(
             endpoint=endpoint,
             scope_key=scope_key,
-            read_model_status="refreshing",
+            read_model_status="unavailable",
             reason="query_timeout",
         )
         return WorkbenchQueryResult(
             HTTPStatus.SERVICE_UNAVAILABLE,
             {
-                "error": "read_model_temporarily_unavailable",
-                "read_model_status": "refreshing",
+                "error": "query_timeout",
+                "read_model_status": "unavailable",
                 "retryable": True,
                 "scope_key": scope_key,
-                "message": "Workbench SQL read model query timed out; retry after refresh.",
+                "message": "Workbench SQL query timed out; retry the request later.",
             },
         )
 

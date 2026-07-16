@@ -113,4 +113,30 @@ describe("operation barrier API", () => {
     expect(caught).toBeInstanceOf(OperationBarrierBlockedError);
     expect((caught as Error).message).toBe("操作同步等待超时，待处理发票（expense:all）仍在同步，请稍后刷新后重试。");
   });
+
+  test("aborts an in-flight freshness wait without issuing another poll", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(async () => jsonResponse({
+      status: "refreshing",
+      fresh: false,
+      targets: [],
+      blocked_targets: [],
+      refreshing_targets: [],
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+
+    const result = waitForOperationFreshness(
+      [{ readModelKey: "oa_pending_payment", scopeKey: "2026-06" }],
+      { intervalMs: 300, signal: controller.signal },
+    ).catch((caught: unknown) => caught);
+    await vi.advanceTimersByTimeAsync(1);
+    controller.abort();
+    await vi.runAllTimersAsync();
+
+    const caught = await result;
+    expect(caught).toBeInstanceOf(DOMException);
+    expect((caught as DOMException).name).toBe("AbortError");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });

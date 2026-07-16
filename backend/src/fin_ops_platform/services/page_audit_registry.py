@@ -107,11 +107,10 @@ PAGE_AUDIT_REGISTRY: dict[str, PageAuditRegistration] = {
     "cost-statistics": _ready(
         "cost-statistics",
         "成本统计",
-        "page_business",
+        "cost_statistics",
         ("cost_statistics", "bank_detail", "workbench_relation"),
         external_source_boundary="OA, bank, and invoice completeness before App registration",
         external_evidence_keys=("bank", "oa", "invoice", "etc"),
-        executor_domain_key="cost_statistics",
     ),
     "bank-details": _ready(
         "bank-details",

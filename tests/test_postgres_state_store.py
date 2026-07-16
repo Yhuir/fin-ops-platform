@@ -746,17 +746,31 @@ class PostgresStateStoreTests(unittest.TestCase):
 
         self.assertEqual(snapshot, {})
 
-    def test_postgres_cost_statistics_read_models_do_not_fallback_to_runtime_snapshot_when_sql_empty(self) -> None:
+    def test_postgres_full_state_snapshot_omits_cost_statistics_read_model(self) -> None:
         with TemporaryDirectory() as temp_dir:
             connection = FakePostgresConnection()
-            connection.settings["state:cost_statistics_read_models"] = {
-                "read_models": {"active:2026-05": {"scope_key": "active:2026-05", "payload": {"legacy": True}}},
-            }
             store = PostgresStateStore(data_dir=Path(temp_dir), connection=connection)
 
-            snapshot = store.load_cost_statistics_read_models()
+            snapshot = store.load()
+            store.save(
+                {
+                    "cost_statistics_read_models": {
+                        "read_models": {
+                            "active:2026-05": {
+                                "scope_key": "active:2026-05",
+                                "payload": {"legacy": True},
+                            }
+                        }
+                    }
+                }
+            )
 
-        self.assertEqual(snapshot, {})
+        self.assertNotIn("cost_statistics_read_models", snapshot)
+        self.assertNotIn("read_model.cost_statistics_read_models", "\n".join(connection.queries).lower())
+        self.assertNotIn(
+            "read_model.cost_statistics_read_models",
+            "\n".join(sql for sql, _params in connection.executed).lower(),
+        )
 
     def test_postgres_tax_offset_read_models_do_not_fallback_to_runtime_snapshot_when_sql_empty(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -769,18 +783,6 @@ class PostgresStateStoreTests(unittest.TestCase):
             snapshot = store.load_tax_offset_read_models()
 
         self.assertEqual(snapshot, {})
-
-    def test_postgres_save_cost_statistics_read_models_does_not_write_runtime_snapshot(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            connection = FakePostgresConnection()
-            store = PostgresStateStore(data_dir=Path(temp_dir), connection=connection)
-
-            store.save_cost_statistics_read_models(
-                {"read_models": {"active:2026-05": {"scope_key": "active:2026-05", "payload": {"rows": []}}}},
-                changed_scope_keys={"active:2026-05"},
-            )
-
-        self.assertNotIn("state:cost_statistics_read_models", connection.settings)
 
     def test_postgres_save_tax_offset_read_models_does_not_write_runtime_snapshot(self) -> None:
         with TemporaryDirectory() as temp_dir:

@@ -31,6 +31,23 @@
 
 ## 历史记录
 
+## 2026-07-16 - 删除 Workbench worker 同步 cache warmer
+
+- 目标：让 Workbench worker 只负责 generation 发布、下游 fan-out 和 durable dirty completion，不承担页面查询与 Redis 写入。
+- 影响范围：worker construction、Workbench refresh handler、page-cache helper、测试与 monitoring 文档。
+- 关键决策：删除同步 warmer 和 env gate；保留 API query owner 的 fresh-gated versioned read-through cache，不新增后台预热任务。
+- 测试覆盖：worker/refresh deletion guard、无 warmup publish 行为，以及现有 query facade cache hit/miss/down 合同。
+- 未测风险：未部署、未操作真实 Redis 或 worker；统一发布后再做 cold/warm API 与 handler p95 验证。
+
+## 2026-07-16 - Workbench worker 收口为单 lane
+
+- 目标：让 registry、systemd env 和 handler 回到一个明确 owner，消除只服务已废弃全局聚合的独立 worker。
+- 影响范围：`runtime_worker_registry.py`、Workbench worker env、runtime worker deploy helper、refresh handler 和相关合同测试。
+- 关键决策：单一 `workbench` registration claim 全部 `workbench.read_model.refresh`；月份执行 active generation 发布，`all` 执行 bounded month fan-out。queue scope filter 能力保留给其它确有隔离需求的 event type，但 Workbench 不再使用。
+- 旧逻辑清理：删除独立聚合 registration/env、旧 env 迁移函数和 aggregate drain 配置；部署激活仍由 registry 白名单自动 stop/disable 未登记实例。
+- 测试覆盖：registry、deploy example、durable queue、relation producer 与 Workbench refresh handler 定向回归。
+- 未测风险：按用户要求未部署，未验证真实 systemd 收敛和 PostgreSQL queue pickup latency。
+
 ## 2026-07-05 - Runtime Worker boundary close
 
 - 目标：把 Runtime Worker 模块从 partial 收口为 closed，确认 worker 入口、queue、registry、deployment manifest、RabbitMQ transport 和 App Health readiness 的 I/O 边界都由当前 registry/durable queue 合同驱动。

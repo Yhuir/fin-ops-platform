@@ -34,6 +34,46 @@ class PostgresOaPendingPaymentRelationRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
 
+    def source_versions(self, *, scope_key: str, tenant_id: str = "default") -> dict[str, object]:
+        normalized_scope_key = (month_start(scope_key) or "")[:7]
+        if not normalized_scope_key:
+            return {}
+        row = self._connection.fetch_one(
+            """
+            select version
+            from app.oa_sync_watermarks
+            where sync_key = %s
+            """,
+            (f"oa_pending_payment_relation:{text(tenant_id) or 'default'}:{normalized_scope_key}",),
+        )
+        if not isinstance(row, dict):
+            return {}
+        return {"oa_pending_payment_relation_version": int_value(row.get("version"), 0)}
+
+    def ensure_scope_source_version(
+        self,
+        *,
+        scope_key: str,
+        tenant_id: str = "default",
+        transaction: Any | None = None,
+    ) -> None:
+        normalized_scope_key = (month_start(scope_key) or "")[:7]
+        if not normalized_scope_key:
+            raise ValueError("scope_key must be a YYYY-MM month for OA pending payment relation versioning.")
+
+        def write(connection: Any) -> None:
+            self._touch_scope_source_version(
+                connection,
+                scope_key=normalized_scope_key,
+                tenant_id=tenant_id,
+                increment=False,
+            )
+
+        if transaction is not None:
+            write(transaction)
+            return
+        run_in_transaction(self._connection, write)
+
     def create_active_relation(
         self,
         *,
@@ -158,6 +198,12 @@ class PostgresOaPendingPaymentRelationRepository:
                 actor_id=actor,
                 before_payload={},
                 after_payload=relation_payload,
+            )
+            self._touch_scope_source_version(
+                connection,
+                scope_key=normalized_month_scope,
+                tenant_id="default",
+                increment=True,
             )
             relation = _public_relation(relation_payload)
             return {
@@ -345,6 +391,14 @@ class PostgresOaPendingPaymentRelationRepository:
                 before_payload=before,
                 after_payload=after,
             )
+            promoted_scope = text(after.get("month_scope")) or text(before.get("month_scope"))
+            if promoted_scope:
+                self._touch_scope_source_version(
+                    connection,
+                    scope_key=promoted_scope,
+                    tenant_id="default",
+                    increment=True,
+                )
             return {
                 "status": "promoted",
                 "relation": _public_relation(after),
@@ -362,6 +416,7 @@ class PostgresOaPendingPaymentRelationRepository:
         admitted_oa_row_ids: list[str],
         actor_id: str,
         cancellation_reason: str = "oa_pending_payment_admission_missing",
+        transaction: Any | None = None,
     ) -> dict[str, Any]:
         resolved_month = month_start(month_scope)
         if not resolved_month:
@@ -474,6 +529,13 @@ class PostgresOaPendingPaymentRelationRepository:
                 )
                 changed_relation_ids.append(relation_id)
                 cancelled_relations.append(_public_relation(after))
+            if changed_relation_ids:
+                self._touch_scope_source_version(
+                    connection,
+                    scope_key=normalized_month_scope,
+                    tenant_id="default",
+                    increment=True,
+                )
             return {
                 "status": "cancelled",
                 "changed_relation_ids": changed_relation_ids,
@@ -481,7 +543,42 @@ class PostgresOaPendingPaymentRelationRepository:
                 "relations": cancelled_relations,
             }
 
+        if transaction is not None:
+            return write(transaction)
         return run_in_transaction(self._connection, write)
+
+    @staticmethod
+    def _touch_scope_source_version(
+        connection: Any,
+        *,
+        scope_key: str,
+        tenant_id: str,
+        increment: bool,
+    ) -> None:
+        normalized_scope_key = (month_start(scope_key) or "")[:7]
+        if not normalized_scope_key:
+            raise ValueError("scope_key must be a YYYY-MM month for OA pending payment relation versioning.")
+        normalized_tenant_id = text(tenant_id) or "default"
+        connection.execute(
+            f"""
+            insert into app.oa_sync_watermarks(
+                sync_key, status, version, last_success_at, payload, raw_payload, updated_at
+            )
+            values (%s, 'success', 1, now(), %s, %s, now())
+            on conflict (sync_key) do update set
+                status = 'success',
+                version = app.oa_sync_watermarks.version {"+ 1" if increment else ""},
+                last_success_at = now(),
+                payload = excluded.payload,
+                raw_payload = excluded.raw_payload,
+                updated_at = now()
+            """,
+            (
+                f"oa_pending_payment_relation:{normalized_tenant_id}:{normalized_scope_key}",
+                jsonb({"tenant_id": normalized_tenant_id, "scope_key": normalized_scope_key}),
+                jsonb({"tenant_id": normalized_tenant_id, "scope_key": normalized_scope_key}),
+            ),
+        )
 
     def _load_relation_by_id(self, connection: Any, relation_id: str) -> dict[str, Any] | None:
         row = connection.fetch_one(
@@ -812,288 +909,6 @@ def _public_relation(payload: dict[str, Any]) -> dict[str, Any]:
         "created_at": text(payload.get("created_at")) or "",
         "updated_at": text(payload.get("updated_at")) or "",
     }
-
-
-class SnapshotOaPendingPaymentRelationRepository:
-    def __init__(self, *, load_snapshot: Any, save_snapshot: Any) -> None:
-        self._load_snapshot = load_snapshot
-        self._save_snapshot = save_snapshot
-
-    def create_active_relation(
-        self,
-        *,
-        oa_row_ids: list[str],
-        bank_transaction_ids: list[str],
-        actor_id: str,
-        month_scope: str,
-        note: str | None = None,
-        amount_check: dict[str, Any] | None = None,
-        source_action: str = "oa_pending_payment_relation",
-        idempotency_key: str | None = None,
-        relation_id: str | None = None,
-        writeback_status: dict[str, Any] | None = None,
-        raw_payload: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        normalized_oa_ids = _dedupe_text(oa_row_ids)
-        normalized_bank_ids = _dedupe_text(bank_transaction_ids)
-        if not normalized_oa_ids:
-            raise OaPendingPaymentRelationRepositoryError("oa_row_ids_required", "At least one OA row is required.")
-        if not normalized_bank_ids:
-            raise OaPendingPaymentRelationRepositoryError(
-                "bank_transaction_ids_required",
-                "At least one bank transaction is required.",
-            )
-        resolved_relation_id = text(relation_id) or _relation_id(normalized_oa_ids, normalized_bank_ids, idempotency_key)
-        snapshot = self._normalized_snapshot()
-        relations = snapshot.setdefault("relations", {})
-        claims = snapshot.setdefault("claims", {})
-        existing = relations.get(resolved_relation_id)
-        if isinstance(existing, dict) and text(existing.get("status")) == "active":
-            return {
-                "status": "confirmed",
-                "relation": _public_relation(existing),
-                "changed_relation_ids": [resolved_relation_id],
-                "affected_months": [text(existing.get("month_scope")) or "all"],
-                "idempotent_replay": True,
-            }
-        oa_conflicts = [
-            relation_id
-            for relation_id, relation in relations.items()
-            if isinstance(relation, dict)
-            and text(relation.get("status")) == "active"
-            and relation_id != resolved_relation_id
-            and set(text_list(relation.get("oa_row_ids"))) & set(normalized_oa_ids)
-        ]
-        if oa_conflicts:
-            raise OaPendingPaymentRelationRepositoryError(
-                "oa_pending_payment_relation_active_oa_conflict",
-                "One or more OA rows already have an active pending payment relation.",
-                payload={"conflicting_relation_ids": oa_conflicts, "oa_row_ids": normalized_oa_ids},
-            )
-        claim_conflicts = [
-            {
-                "bank_transaction_id": bank_id,
-                "owner_type": text((claim := claims.get(bank_id) or {}).get("owner_type")) or "",
-                "owner_id": text(claim.get("owner_id")) or "",
-            }
-            for bank_id in normalized_bank_ids
-            if isinstance(claim := claims.get(bank_id), dict)
-            and text(claim.get("status")) == "active"
-            and not (
-                text(claim.get("owner_type")) == "oa_pending_payment_relation"
-                and text(claim.get("owner_id")) == resolved_relation_id
-            )
-        ]
-        if claim_conflicts:
-            raise OaPendingPaymentRelationRepositoryError(
-                "bank_transaction_active_relation_claim_conflict",
-                "One or more bank transactions are already claimed by another relation.",
-                payload={"conflicts": claim_conflicts, "bank_transaction_ids": normalized_bank_ids},
-            )
-        normalized_month = (month_start(month_scope) or "")[:7] or text(month_scope) or "all"
-        relation_payload = {
-            **(deepcopy(raw_payload or {})),
-            "relation_id": resolved_relation_id,
-            "status": "active",
-            "version": int_value((existing or {}).get("version") if isinstance(existing, dict) else None, 0) + 1,
-            "month_scope": normalized_month,
-            "oa_row_ids": normalized_oa_ids,
-            "bank_transaction_ids": normalized_bank_ids,
-            "source_action": text(source_action) or "oa_pending_payment_relation",
-            "note": text(note),
-            "amount_check": deepcopy(amount_check or {}),
-            "writeback_status": deepcopy(writeback_status or {}),
-            "created_by": text(actor_id) or "system",
-        }
-        relations[resolved_relation_id] = relation_payload
-        for bank_id, claim in list(claims.items()):
-            if isinstance(claim, dict) and text(claim.get("owner_id")) == resolved_relation_id and bank_id not in normalized_bank_ids:
-                claim["status"] = "released"
-        for bank_id in normalized_bank_ids:
-            claims[bank_id] = {
-                "bank_transaction_id": bank_id,
-                "owner_type": "oa_pending_payment_relation",
-                "owner_id": resolved_relation_id,
-                "status": "active",
-                "scope_month": normalized_month,
-            }
-        self._save_snapshot(deepcopy(snapshot))
-        return {
-            "status": "confirmed",
-            "relation": _public_relation(relation_payload),
-            "changed_relation_ids": [resolved_relation_id],
-            "affected_months": [normalized_month],
-            "idempotent_replay": False,
-        }
-
-    def active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, Any]]:
-        normalized_row_ids = set(_dedupe_text(row_ids))
-        if not normalized_row_ids:
-            return []
-        relations = self._normalized_snapshot().get("relations", {})
-        return [
-            _public_relation(relation)
-            for relation in relations.values()
-            if isinstance(relation, dict)
-            and text(relation.get("status")) == "active"
-            and (
-                set(text_list(relation.get("oa_row_ids"))) & normalized_row_ids
-                or set(text_list(relation.get("bank_transaction_ids"))) & normalized_row_ids
-            )
-        ]
-
-    def active_relation_status_by_bank_ids(self, bank_transaction_ids: list[str]) -> dict[str, dict[str, Any]]:
-        normalized_bank_ids = _dedupe_text(bank_transaction_ids)
-        if not normalized_bank_ids:
-            return {}
-        result: dict[str, dict[str, Any]] = {}
-        for relation in self.active_relations_for_row_ids(normalized_bank_ids):
-            for bank_id in text_list(relation.get("bank_transaction_ids")) or text_list(relation.get("bankTransactionIds")):
-                if bank_id in normalized_bank_ids:
-                    result[bank_id] = {
-                        "status": "linked_in_progress",
-                        "caseId": text(relation.get("case_id") or relation.get("relation_id")) or "",
-                        "relationId": text(relation.get("relation_id") or relation.get("case_id")) or "",
-                        "oaRowIds": text_list(relation.get("oa_row_ids")) or text_list(relation.get("oaRowIds")),
-                    }
-        return result
-
-    def mark_relation_promoted(
-        self,
-        *,
-        relation_id: str,
-        workbench_case_id: str,
-        actor_id: str,
-    ) -> dict[str, Any]:
-        resolved_relation_id = text(relation_id)
-        resolved_case_id = text(workbench_case_id)
-        if not resolved_relation_id:
-            raise OaPendingPaymentRelationRepositoryError(
-                "oa_pending_payment_relation_id_required",
-                "Pending payment relation id is required.",
-            )
-        if not resolved_case_id:
-            raise OaPendingPaymentRelationRepositoryError(
-                "workbench_case_id_required",
-                "Workbench case id is required for pending payment relation promotion.",
-            )
-        snapshot = self._normalized_snapshot()
-        relations = snapshot.setdefault("relations", {})
-        claims = snapshot.setdefault("claims", {})
-        relation = relations.get(resolved_relation_id)
-        if not isinstance(relation, dict):
-            raise OaPendingPaymentRelationRepositoryError(
-                "oa_pending_payment_relation_not_found",
-                "Pending payment relation was not found.",
-                payload={"relation_id": resolved_relation_id},
-            )
-        if text(relation.get("status")) == "promoted":
-            return {
-                "status": "promoted",
-                "relation": _public_relation(relation),
-                "changed_relation_ids": [resolved_relation_id],
-                "affected_months": [text(relation.get("month_scope"))] if text(relation.get("month_scope")) else [],
-                "idempotent_replay": True,
-            }
-        if text(relation.get("status")) != "active":
-            raise OaPendingPaymentRelationRepositoryError(
-                "oa_pending_payment_relation_not_active",
-                "Pending payment relation is not active.",
-                payload={"relation_id": resolved_relation_id, "status": text(relation.get("status"))},
-            )
-        promoted = {
-            **deepcopy(relation),
-            "status": "promoted",
-            "version": int_value(relation.get("version"), 1) + 1,
-            "promoted_workbench_case_id": resolved_case_id,
-            "updated_by": text(actor_id) or "system",
-        }
-        relations[resolved_relation_id] = promoted
-        for claim in claims.values():
-            if (
-                isinstance(claim, dict)
-                and text(claim.get("owner_type")) == "oa_pending_payment_relation"
-                and text(claim.get("owner_id")) == resolved_relation_id
-                and text(claim.get("status")) == "active"
-            ):
-                claim["status"] = "released"
-                claim["release_reason"] = "promoted_to_workbench_relation"
-                claim["released_by"] = text(actor_id) or "system"
-        self._save_snapshot(deepcopy(snapshot))
-        return {
-            "status": "promoted",
-            "relation": _public_relation(promoted),
-            "changed_relation_ids": [resolved_relation_id],
-            "affected_months": [text(promoted.get("month_scope"))] if text(promoted.get("month_scope")) else [],
-            "idempotent_replay": False,
-        }
-
-    def cancel_active_relations_missing_oa_admission(
-        self,
-        *,
-        month_scope: str,
-        admitted_oa_row_ids: list[str],
-        actor_id: str,
-        cancellation_reason: str = "oa_pending_payment_admission_missing",
-    ) -> dict[str, Any]:
-        normalized_month = (month_start(month_scope) or "")[:7] or text(month_scope) or "all"
-        admitted = set(_dedupe_text(admitted_oa_row_ids))
-        actor = text(actor_id) or "system"
-        reason = text(cancellation_reason) or "oa_pending_payment_admission_missing"
-        snapshot = self._normalized_snapshot()
-        relations = snapshot.setdefault("relations", {})
-        claims = snapshot.setdefault("claims", {})
-        changed_relation_ids: list[str] = []
-        cancelled_relations: list[dict[str, Any]] = []
-        for relation_id, relation in list(relations.items()):
-            if not isinstance(relation, dict):
-                continue
-            if text(relation.get("status")) != "active":
-                continue
-            if (text(relation.get("month_scope")) or "all") != normalized_month:
-                continue
-            if admitted and set(text_list(relation.get("oa_row_ids"))) & admitted:
-                continue
-            cancelled = {
-                **deepcopy(relation),
-                "status": "cancelled",
-                "version": int_value(relation.get("version"), 1) + 1,
-                "cancellation_reason": reason,
-                "cancelled_by": actor,
-            }
-            relations[str(relation_id)] = cancelled
-            for claim in claims.values():
-                if (
-                    isinstance(claim, dict)
-                    and text(claim.get("owner_type")) == "oa_pending_payment_relation"
-                    and text(claim.get("owner_id")) == str(relation_id)
-                    and text(claim.get("status")) == "active"
-                ):
-                    claim["status"] = "released"
-                    claim["release_reason"] = reason
-                    claim["released_by"] = actor
-            changed_relation_ids.append(str(relation_id))
-            cancelled_relations.append(_public_relation(cancelled))
-        if changed_relation_ids:
-            self._save_snapshot(deepcopy(snapshot))
-        return {
-            "status": "cancelled",
-            "changed_relation_ids": changed_relation_ids,
-            "affected_months": [normalized_month] if changed_relation_ids else [],
-            "relations": cancelled_relations,
-        }
-
-    def _normalized_snapshot(self) -> dict[str, Any]:
-        snapshot = self._load_snapshot()
-        if not isinstance(snapshot, dict):
-            return {"relations": {}, "claims": {}}
-        relations = snapshot.get("relations")
-        claims = snapshot.get("claims")
-        return {
-            **snapshot,
-            "relations": dict(relations) if isinstance(relations, dict) else {},
-            "claims": dict(claims) if isinstance(claims, dict) else {},
-        }
 
 
 def _dedupe_text(values: list[str] | tuple[str, ...] | set[str] | None) -> list[str]:

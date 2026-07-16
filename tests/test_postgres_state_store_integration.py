@@ -43,7 +43,7 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
     def setUp(self) -> None:
         truncate_test_database(self.database_url)
         self._temp_dir = TemporaryDirectory()
-        self.connection = PostgresConnection(PostgresSettings(database_url=self.database_url))
+        self.connection = PostgresConnection(PostgresSettings(database_url=self.database_url, pool_enabled=False))
         self.store = PostgresStateStore(data_dir=Path(self._temp_dir.name), connection=self.connection)
 
     def tearDown(self) -> None:
@@ -51,7 +51,8 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
 
     def test_migrations_health_summary_and_transaction_rollback(self) -> None:
         versions = fetch_scalar(self.database_url, "select string_agg(version, ',' order by version) from public.schema_migrations;")
-        self.assertEqual(versions, "0001,0002,0003,0004,0005,0006,0007,0008")
+        expected_versions = [migration.version for migration in migrate.discover_migrations()]
+        self.assertEqual(versions.split(","), expected_versions)
 
         health = self.connection.health_summary()
         self.assertEqual(health["postgres_status"], "ready")
@@ -182,15 +183,12 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
             }
         )
         self.store.save_turnover_ledger_extras({"extras": {"ledger-1": {"scope_month": "2026-03", "note": "checked"}}})
-        self.store.save_cost_statistics_read_models(
-            {"read_models": {"cost-2026-03": {"scope_month": "2026-03", "entries": [{"id": "entry-1"}]}}}
-        )
         self.store.save_tax_offset_read_models(
             {"read_models": {"tax-2026-03": {"scope_month": "2026-03", "entries": [{"id": "entry-1"}]}}}
         )
 
         expected_counts = {
-            "app.app_settings": 10,
+            "app.app_settings": 1,
             "job.background_jobs": 1,
             "audit.app_health_alerts": 1,
             "app.workbench_pair_relations": 1,
@@ -203,7 +201,6 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
             "app.turnover_relations": 1,
             "app.turnover_relation_events": 1,
             "app.turnover_ledger_extras": 1,
-            "read_model.cost_statistics_read_models": 1,
             "read_model.tax_offset_read_models": 1,
             "app.pending_invoice_manual_invoice_commands": 1,
         }

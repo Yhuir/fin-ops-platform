@@ -4,9 +4,9 @@ import hashlib
 import json
 import os
 import re
-from typing import Any, Callable
+from typing import Any
 
-from fin_ops_platform.services.cost_statistics_read_model_service import (
+from fin_ops_platform.services.cost_statistics_source_versions import (
     COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
 )
 from fin_ops_platform.services.read_model_freshness import normalize_source_versions
@@ -21,32 +21,15 @@ class CostStatisticsRuntimeService:
     def __init__(
         self,
         *,
-        read_model_service: Any | None = None,
         background_job_service: Any | None = None,
         queue_repository: Any | None = None,
-        redis_helper: Any | None = None,
-        source_versions_provider: Callable[[str], dict[str, Any]] | None = None,
-        persist_read_models: Callable[..., None] | None = None,
     ) -> None:
-        self._read_model_service = read_model_service
         self._background_job_service = background_job_service
         self._queue_repository = queue_repository
-        self._redis_helper = redis_helper
-        self._source_versions_provider = source_versions_provider
-        self._persist_read_models = persist_read_models
 
     @staticmethod
     def request_scope_key(month: str, project_scope: str) -> str:
         return f"{str(project_scope or 'active').strip().lower()}:{str(month or 'all').strip() or 'all'}"
-
-    def expected_source_versions(self, scope_key: str) -> dict[str, Any]:
-        if callable(self._source_versions_provider):
-            return dict(self._source_versions_provider(scope_key) or {})
-        _project_scope, month = str(scope_key or "active:all").split(":", 1)
-        return {
-            "cost_statistics_read_model_schema_version": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
-            "workbench_scope_key": month,
-        }
 
     def redis_cache_key(self, scope_key: str, *, source_versions: dict[str, Any] | None = None) -> str:
         return self.read_model_redis_cache_key(
@@ -59,6 +42,20 @@ class CostStatisticsRuntimeService:
     def month_redis_cache_key(self, scope_key: str, *, source_versions: dict[str, Any] | None = None) -> str:
         return self.read_model_redis_cache_key(
             "cost_statistics:month",
+            scope_key,
+            schema_version=COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+            source_versions=source_versions,
+        )
+
+    def page_redis_cache_key(
+        self,
+        scope_key: str,
+        query_fingerprint: str,
+        *,
+        source_versions: dict[str, Any] | None = None,
+    ) -> str:
+        return self.read_model_redis_cache_key(
+            f"cost_statistics:page:{query_fingerprint}",
             scope_key,
             schema_version=COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
             source_versions=source_versions,
@@ -104,16 +101,6 @@ class CostStatisticsRuntimeService:
         )
         return bool(enqueued_scope_keys)
 
-    def delete_redis_cache(self, scope_key: str) -> None:
-        delete = getattr(self._redis_helper, "delete", None)
-        if not callable(delete):
-            return
-        source_versions = self.expected_source_versions(scope_key)
-        delete(self.redis_cache_key(scope_key, source_versions=source_versions))
-        delete(self.month_redis_cache_key(scope_key, source_versions=source_versions))
-        delete(f"cost_statistics:explorer:{scope_key}")
-        delete(f"cost_statistics:month:{scope_key}")
-
     def read_model_scope_key(
         self,
         month: str,
@@ -125,9 +112,6 @@ class CostStatisticsRuntimeService:
             scope_key = str(read_model.get("scope_key", "")).strip()
             if scope_key:
                 return scope_key
-        scope_key = getattr(self._read_model_service, "scope_key", None)
-        if callable(scope_key):
-            return str(scope_key(month, project_scope))
         return self.request_scope_key(month, project_scope)
 
     @staticmethod
@@ -153,25 +137,14 @@ class CostStatisticsRuntimeService:
             return ["all"]
         return []
 
-    def invalidate_read_models(self, *, schedule_warmup: bool = True, persist_empty: bool = True) -> list[str]:
-        if self._read_model_service is None:
-            return []
-        clear = getattr(self._read_model_service, "clear", None)
-        snapshot = getattr(self._read_model_service, "snapshot", None)
-        if not callable(clear) or not callable(snapshot):
-            return []
-        deleted_scope_keys = clear()
-        if deleted_scope_keys or persist_empty:
-            self._persist(
-                snapshot=snapshot(),
-                changed_scope_keys=deleted_scope_keys,
-                operation="invalidate_cost_statistics_read_models",
-            )
+    def invalidate_read_models(self, *, schedule_warmup: bool = True) -> list[str]:
+        target_scope_keys = ["active:all", "all:all"]
         if not schedule_warmup:
-            return deleted_scope_keys
-        warmup_months = self.warmup_months_from_read_model_scope_keys(deleted_scope_keys) or ["all"]
-        self.enqueue_refresh_for_months(warmup_months, reason="cost_statistics_read_model_invalidated")
-        return deleted_scope_keys
+            return []
+        return self._enqueue_invalidation_scopes(
+            target_scope_keys,
+            reason="cost_statistics_read_model_invalidated",
+        )
 
     def invalidate_read_model_scopes(
         self,
@@ -179,57 +152,32 @@ class CostStatisticsRuntimeService:
         *,
         reason: str = "",
         schedule_warmup: bool = True,
-        persist_empty: bool = True,
     ) -> list[str]:
-        if self._read_model_service is None:
+        target_scope_keys = self.refresh_scope_keys_from_scope_keys(scope_keys)
+        if not schedule_warmup:
             return []
-        months = self.months_from_workbench_scope_keys(scope_keys)
-        if not months:
-            return []
-        specific_months = sorted(month for month in months if month != "all")
-        invalidate_months = getattr(self._read_model_service, "invalidate_months", None)
-        snapshot = getattr(self._read_model_service, "snapshot", None)
-        if not callable(invalidate_months) or not callable(snapshot):
-            return []
-        if specific_months:
-            deleted_scope_keys = invalidate_months(
-                specific_months,
-                project_scopes=["active", "all"],
-                include_all=True,
-            )
-            warmup_months = specific_months
-        else:
-            deleted_scope_keys = invalidate_months(
-                [],
-                project_scopes=["active", "all"],
-                include_all=True,
-            )
-            warmup_months = ["all"]
-        if deleted_scope_keys or persist_empty:
-            self._persist(
-                snapshot=snapshot(),
-                changed_scope_keys=deleted_scope_keys,
-                operation=reason or "invalidate_cost_statistics_read_model_scopes",
-            )
-        if schedule_warmup:
-            self.enqueue_refresh_for_months(
-                warmup_months,
-                reason=reason or "cost_statistics_scope_invalidated",
-            )
-        return deleted_scope_keys
+        return self._enqueue_invalidation_scopes(
+            target_scope_keys,
+            reason=reason or "cost_statistics_scope_invalidated",
+        )
+
+    def _enqueue_invalidation_scopes(self, scope_keys: list[str], *, reason: str) -> list[str]:
+        return [
+            scope_key
+            for scope_key in self.normalize_scope_keys(scope_keys)
+            if self.enqueue_read_model_refresh(scope_key, reason=reason)
+        ]
 
     def enqueue_refresh_for_months(self, months: list[str], *, reason: str) -> bool:
         enqueued = False
         for target in self.warmup_targets(months=months, project_scopes=["active", "all"]):
             scope_key = target["scope_key"]
-            self.delete_redis_cache(scope_key)
             enqueued = self.enqueue_read_model_refresh(scope_key, reason=reason) or enqueued
         return enqueued
 
     def enqueue_refresh_for_scope_keys(self, scope_keys: list[str], *, reason: str) -> bool:
         enqueued = False
         for scope_key in self.normalize_scope_keys(scope_keys):
-            self.delete_redis_cache(scope_key)
             enqueued = self.enqueue_read_model_refresh(scope_key, reason=reason) or enqueued
         return enqueued
 
@@ -539,12 +487,3 @@ class CostStatisticsRuntimeService:
             for scope_key in list(result_summary.get(field) or [])
             if str(scope_key).strip()
         ]
-
-    def _persist(self, *, snapshot: dict[str, Any], changed_scope_keys: list[str] | None, operation: str) -> None:
-        if self._persist_read_models is None:
-            return
-        self._persist_read_models(
-            snapshot=snapshot,
-            changed_scope_keys=changed_scope_keys,
-            operation=operation,
-        )

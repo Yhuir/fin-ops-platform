@@ -9,7 +9,10 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from fin_ops_platform.app.server import Application
-from tests.app_test_support import build_local_state_application as build_application
+from tests.app_test_support import (
+    build_grouped_workbench_projection,
+    build_local_state_application as build_application,
+)
 from fin_ops_platform.domain.enums import BatchType
 
 
@@ -187,14 +190,12 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
 
     @staticmethod
     def _workbench_unpaired_groups(app: Application) -> list[dict[str, object]]:
-        response = app.handle_request("GET", "/api/workbench?month=2026-03")
-        payload = json.loads(response.body)
+        payload = build_grouped_workbench_projection(app, "2026-03", include_query_rows=False)
         return list(payload["unpaired"]["groups"])
 
     @staticmethod
     def _workbench_paired_groups(app: Application) -> list[dict[str, object]]:
-        response = app.handle_request("GET", "/api/workbench?month=2026-03")
-        payload = json.loads(response.body)
+        payload = build_grouped_workbench_projection(app, "2026-03", include_query_rows=False)
         return list(payload["paired"]["groups"])
 
     @staticmethod

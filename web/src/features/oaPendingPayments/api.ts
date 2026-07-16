@@ -1,9 +1,8 @@
-import { apiRequestJson } from "../apiClient";
+import { ApiClientError, apiFetch, apiRequestJson, looksLikeHtmlResponse } from "../apiClient";
 import type {
   OaPendingPaymentDetailResponse,
   OaPendingPaymentDetailTarget,
   OaPendingPaymentFilter,
-  OaPendingPaymentFilterOptionsResponse,
   OaPendingPaymentQuery,
   OaPendingPaymentRowsResponse,
   OaPendingPaymentSortDirection,
@@ -19,10 +18,15 @@ type FetchRowsRequest = Pick<
   OaPendingPaymentQuery,
   "page" | "pageSize" | "keyword" | "month" | "tradeDateFrom" | "tradeDateTo" | "filters" | "sortField" | "sortDirection" | "viewMode"
 > & {
+  etag?: string;
   signal?: AbortSignal;
 };
 
-type FetchFilterOptionsRequest = Pick<
+export type OaPendingPaymentRowsFetchResult =
+  | { status: "not_modified"; etag: string | null }
+  | { status: "ready" | "refreshing"; etag: string | null; payload: OaPendingPaymentRowsResponse };
+
+type FetchContextRequest = Pick<
   OaPendingPaymentQuery,
   "keyword" | "month" | "tradeDateFrom" | "tradeDateTo" | "filters" | "viewMode"
 > & {
@@ -40,24 +44,55 @@ export function nextOaPendingPaymentSortDirection(
   return currentDirection === "desc" ? "asc" : "desc";
 }
 
-export async function fetchOaPendingPaymentRows(request: FetchRowsRequest): Promise<OaPendingPaymentRowsResponse> {
+export async function fetchOaPendingPaymentRows(request: FetchRowsRequest): Promise<OaPendingPaymentRowsFetchResult> {
   const params = new URLSearchParams();
   appendRowsQuery(params, request);
-  return apiRequestJson<OaPendingPaymentRowsResponse>(`/api/oa-pending-payments/rows?${params.toString()}`, {
+  const path = `/api/oa-pending-payments/rows?${params.toString()}`;
+  const response = await apiFetch(path, {
     method: "GET",
+    headers: request.etag ? { "If-None-Match": request.etag } : undefined,
     signal: request.signal,
   });
-}
+  const etag = response.headers.get("ETag");
+  if (response.status === 304) {
+    return { status: "not_modified", etag: etag ?? request.etag ?? null };
+  }
 
-export async function fetchOaPendingPaymentFilterOptions(
-  request: FetchFilterOptionsRequest,
-): Promise<OaPendingPaymentFilterOptionsResponse> {
-  const params = new URLSearchParams();
-  appendContextQuery(params, request);
-  return apiRequestJson<OaPendingPaymentFilterOptionsResponse>(`/api/oa-pending-payments/filter-options?${params.toString()}`, {
-    method: "GET",
-    signal: request.signal,
-  });
+  const rawText = await response.text();
+  const contentType = response.headers.get("Content-Type") ?? "";
+  if (rawText.trim() && looksLikeHtmlResponse(rawText, contentType)) {
+    throw new ApiClientError("OA 待付款核对接口返回了 HTML 页面。", {
+      status: response.status,
+      responseText: rawText,
+      url: path,
+    });
+  }
+  let payload = {} as OaPendingPaymentRowsResponse;
+  if (rawText.trim()) {
+    try {
+      payload = JSON.parse(rawText) as OaPendingPaymentRowsResponse;
+    } catch {
+      throw new ApiClientError("OA 待付款核对接口返回的不是合法 JSON。", {
+        status: response.status,
+        responseText: rawText,
+        url: path,
+      });
+    }
+  }
+  if (!response.ok) {
+    const errorPayload = payload as OaPendingPaymentRowsResponse & { error?: unknown; message?: unknown };
+    const message = [errorPayload.message, errorPayload.error]
+      .find((value) => typeof value === "string" && value.trim());
+    throw new ApiClientError(
+      typeof message === "string" ? message : "OA 待付款核对加载失败。",
+      { status: response.status, payload, responseText: rawText, url: path },
+    );
+  }
+  return {
+    status: response.status === 202 ? "refreshing" : "ready",
+    etag,
+    payload,
+  };
 }
 
 export async function fetchOaPendingPaymentDetail(
@@ -149,7 +184,7 @@ function appendRowsQuery(params: URLSearchParams, request: FetchRowsRequest) {
   }
 }
 
-function appendContextQuery(params: URLSearchParams, request: FetchFilterOptionsRequest) {
+function appendContextQuery(params: URLSearchParams, request: FetchContextRequest) {
   if (request.keyword.trim()) {
     params.set("keyword", request.keyword.trim());
   }

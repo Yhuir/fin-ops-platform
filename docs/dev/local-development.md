@@ -90,8 +90,8 @@ RabbitMQ 相关变量当前只作为未来投递通道边界预留；本地同�
 ./scripts/check-local-runtime.sh --require-backend
 ```
 
-完整检查会验证 `/health` 使用 PostgreSQL runtime、Redis 和对象存储可用，并确认 `/api/workbench/summary` 与 `/api/workbench/groups` 能从 SQL read model 返回非空数据。
-工作台首屏使用 split summary/groups endpoint。不要用机器上残留的 `127.0.0.1:8000` 旧 `backend.api.main:app` 进程判断本项目状态；本仓库默认后端端口是 `8001`，前端 Vite proxy 也默认指向 `http://127.0.0.1:8001`。
+完整检查会验证 `/health` 使用 PostgreSQL runtime、Redis 和对象存储可用，并确认 `/api/workbench` 组合首屏与 `/api/workbench/groups` 能从 SQL read model 返回非空数据。
+工作台首屏只使用一个 combined initial endpoint，`/api/workbench/groups` 只用于后续搜索、筛选和分页。不要用机器上残留的 `127.0.0.1:8000` 旧 `backend.api.main:app` 进程判断本项目状态；本仓库默认后端端口是 `8001`，前端 Vite proxy 也默认指向 `http://127.0.0.1:8001`。
 
 没有 PostgreSQL 连接配置时，脚本仍保留本地 legacy mode 兼容路径；本地和服务器同构验收必须使用 PostgreSQL runtime。
 

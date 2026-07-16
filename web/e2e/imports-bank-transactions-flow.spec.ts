@@ -58,10 +58,10 @@ function waitForImportConfirm(page: Page) {
       && responsePathMatches(response.url(), "/imports/files/confirm"));
 }
 
-function waitForWorkbenchRefresh(page: Page) {
+function waitForImportOperationBarrier(page: Page) {
   return page.waitForResponse((response) =>
-    response.request().method() === "GET"
-      && responsePathMatches(response.url(), "/api/workbench/summary"));
+    response.request().method() === "POST"
+      && responsePathMatches(response.url(), "/api/operation-barrier/status"));
 }
 
 async function expectFreshReadModelResponse(responsePromise: Promise<{ json(): Promise<unknown> }>) {
@@ -207,16 +207,16 @@ test.describe("bank transaction import browser flow", () => {
       actionType: "click",
     }, async (mark) => {
       const confirmResponse = waitForImportConfirm(page);
-      const workbenchResponse = waitForWorkbenchRefresh(page);
+      const barrierResponse = waitForImportOperationBarrier(page);
       await conflictDialog.getByRole("button", { name: "仍按所选账户 建设银行 8826 导入" }).click();
       await mark("apiLatencyMs", confirmResponse);
-      await mark("operationBarrierLatencyMs", workbenchResponse);
+      await mark("operationBarrierLatencyMs", barrierResponse);
       await mark("finalSettledLatencyMs", expect(page.getByText("已确认导入")).toBeVisible());
     });
 
     await expect(page.getByText("已确认导入")).toBeVisible();
     expect(api.count("POST /imports/files/confirm")).toBe(1);
-    expect(api.count("GET /api/workbench/summary")).toBeGreaterThan(0);
+    expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(0);
 
     let accountBalanceResponsePayload: { json(): Promise<unknown> } | undefined;
     await recordLatency({
@@ -261,10 +261,10 @@ test.describe("bank transaction import browser flow", () => {
       actionType: "click",
     }, async (mark) => {
       const confirmResponse = waitForImportConfirm(page);
-      const workbenchResponse = waitForWorkbenchRefresh(page);
+      const barrierResponse = waitForImportOperationBarrier(page);
       await page.getByRole("button", { name: "确认导入" }).click();
       await mark("apiLatencyMs", confirmResponse);
-      await mark("operationBarrierLatencyMs", workbenchResponse);
+      await mark("operationBarrierLatencyMs", barrierResponse);
       await mark("finalSettledLatencyMs", expect(page.getByText("已确认导入")).toBeVisible());
     });
 
@@ -366,7 +366,7 @@ test.describe("bank transaction import browser flow", () => {
     await expect(page.getByText("已确认导入")).toHaveCount(0);
     await expect(page.getByRole("grid", { name: "导入预览结果" })).toBeVisible();
     expect(api.count("POST /imports/files/confirm")).toBe(0);
-    expect(api.count("GET /api/workbench/summary")).toBe(0);
+    expect(api.count("POST /api/operation-barrier/status")).toBe(0);
 
     await recordLatency({
       operationId: "imports-bank-transactions.reopen-account-conflict-after-cancel",
@@ -383,16 +383,16 @@ test.describe("bank transaction import browser flow", () => {
       actionType: "click",
     }, async (mark) => {
       const confirmResponse = waitForImportConfirm(page);
-      const workbenchResponse = waitForWorkbenchRefresh(page);
+      const barrierResponse = waitForImportOperationBarrier(page);
       await conflictDialog.getByRole("button", { name: "仍按所选账户 建设银行 8826 导入" }).click();
       await mark("apiLatencyMs", confirmResponse);
-      await mark("operationBarrierLatencyMs", workbenchResponse);
+      await mark("operationBarrierLatencyMs", barrierResponse);
       await mark("finalSettledLatencyMs", expect(page.getByText("已确认导入")).toBeVisible());
     });
     await expect(page.getByText("已确认导入")).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(api.count("POST /imports/files/confirm")).toBe(1);
-    expect(api.count("GET /api/workbench/summary")).toBeGreaterThan(0);
+    expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(0);
     expect(unexpectedRuntimeErrors(browserErrors)).toEqual([]);
   });
 
@@ -433,10 +433,10 @@ test.describe("bank transaction import browser flow", () => {
       actionType: "click",
     }, async (mark) => {
       const confirmResponse = waitForImportConfirm(page);
-      const workbenchResponse = waitForWorkbenchRefresh(page);
+      const barrierResponse = waitForImportOperationBarrier(page);
       await page.getByRole("button", { name: "确认导入" }).click();
       await mark("apiLatencyMs", confirmResponse);
-      await mark("operationBarrierLatencyMs", workbenchResponse);
+      await mark("operationBarrierLatencyMs", barrierResponse);
       await mark("finalSettledLatencyMs", expect(page.getByText("已确认导入")).toBeVisible());
     });
 
@@ -446,7 +446,7 @@ test.describe("bank transaction import browser flow", () => {
     expect(api.lastBody("POST /imports/files/confirm")).toMatchObject({
       selected_file_ids: ["import_file_e2e_2"],
     });
-    expect(api.count("GET /api/workbench/summary")).toBeGreaterThan(0);
+    expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(0);
     expect(unexpectedRuntimeErrors(browserErrors)).toEqual([]);
   });
 
@@ -510,7 +510,7 @@ test.describe("bank transaction import browser flow", () => {
     await expect(page.getByText("预览后数据已变化，请重新预览后再确认。")).toBeVisible();
     await expect(page.getByText("已确认导入")).toHaveCount(0);
     expect(api.count("POST /imports/files/confirm")).toBe(1);
-    expect(api.count("GET /api/workbench/summary")).toBe(0);
+    expect(api.count("POST /api/operation-barrier/status")).toBe(0);
     expect(unexpectedRuntimeErrors(browserErrors, [/409/])).toEqual([]);
   });
 
@@ -538,7 +538,7 @@ test.describe("bank transaction import browser flow", () => {
     await expect(page.getByText("导入任务创建失败，请稍后重试。")).toBeVisible();
     await expect(page.getByText("已确认导入")).toHaveCount(0);
     expect(api.count("POST /imports/files/confirm")).toBe(1);
-    expect(api.count("GET /api/workbench/summary")).toBe(0);
+    expect(api.count("POST /api/operation-barrier/status")).toBe(0);
     expect(unexpectedRuntimeErrors(browserErrors, [/500/])).toEqual([]);
   });
 });

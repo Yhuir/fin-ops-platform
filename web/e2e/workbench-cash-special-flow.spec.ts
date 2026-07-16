@@ -5,7 +5,7 @@ import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions"
 
 const pairedGroupTestId = "candidate-group-paired-case:CASE-202603-101";
 const operationBarrierPath = "POST /api/operation-barrier/status";
-const workbenchGroupsPath = "GET /api/workbench/groups";
+const workbenchLoadPath = "GET /api/workbench";
 const passThroughPath = "/api/workbench/actions/confirm-cash-pass-through";
 const ticketPurchasePath = "/api/workbench/actions/confirm-cash-ticket-purchase";
 const cancelCashSpecialPath = "/api/workbench/actions/cancel-cash-special";
@@ -46,7 +46,7 @@ test.describe("workbench cash special browser flow", () => {
     await expect(page.getByTestId(pairedGroupTestId)).toBeVisible();
 
     const barrierCallsBeforePassThrough = api.count(operationBarrierPath);
-    const groupsCallsBeforePassThrough = api.count(workbenchGroupsPath);
+    const workbenchLoadsBeforePassThrough = api.count(workbenchLoadPath);
     await openPairedBankRowMenu(page);
     const passThroughResponse = waitForWorkbenchPost(page, passThroughPath);
     await page.getByRole("menuitem", { name: "确认为过账" }).click();
@@ -62,7 +62,7 @@ test.describe("workbench cash special browser flow", () => {
     });
     expectWorkbenchRowIds(passThroughBody);
     expect(api.count(operationBarrierPath)).toBeGreaterThan(barrierCallsBeforePassThrough);
-    expect(api.count(workbenchGroupsPath)).toBeGreaterThanOrEqual(groupsCallsBeforePassThrough);
+    expect(api.count(workbenchLoadPath)).toBeGreaterThan(workbenchLoadsBeforePassThrough);
     await expectNoUnexpectedSuccessUiErrors(page);
 
     const barrierCallsBeforeTicket = api.count(operationBarrierPath);

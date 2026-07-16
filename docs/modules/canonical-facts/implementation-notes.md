@@ -305,6 +305,8 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_platform_runtime_boundary_
 
 结果：通过。
 
+后续收窄：2026-07-16 的成本统计 GSD 05-14 已删除本节当时保留的 cost statistics 本地 pickle load/save、Postgres broad snapshot key 和 repository 无条件 save；tax offset 本地 I/O 不变。当前成本 read model 只允许 scoped reads 与 source-version conditional publish。
+
 ## 2026-06-29 - Wave 5 ApplicationStateStore Turnover facts Mongo branch 删除
 
 目标：

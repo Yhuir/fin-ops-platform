@@ -215,10 +215,6 @@ class RuntimeBootstrapTests(unittest.TestCase):
         app._state_store = type("PostgresStore", (), {"storage_backend": "postgres"})()
         app._workbench_sql_read_repository = None
         app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": None})()
-        app._build_api_workbench_payload = lambda _month: (_ for _ in ()).throw(
-            AssertionError("production PostgreSQL workbench API must not synchronously build payload")
-        )
-
         response = app._handle_api_workbench("2026-05")
 
         self.assertEqual(response.status_code, 503)
@@ -380,7 +376,6 @@ class RuntimeBootstrapTests(unittest.TestCase):
             Path("backend/src/fin_ops_platform/services/input_invoice_usage_service.py"),
             Path("backend/src/fin_ops_platform/services/output_invoice_collection_service.py"),
             Path("backend/src/fin_ops_platform/services/oa_pending_payment_service.py"),
-            Path("backend/src/fin_ops_platform/services/cost_statistics_service.py"),
             Path("backend/src/fin_ops_platform/services/project_costing.py"),
         ]
         violations = [

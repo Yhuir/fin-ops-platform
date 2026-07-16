@@ -29,7 +29,7 @@
 | `bank-details` | `/bank-details` | `web/src/pages/BankDetailsPage.tsx` | `web/src/features/bankDetails/api.ts` | `routes_bank_details.py`、`server.py` `/api/bank-details*` | `bank_detail`、`bank_account_balance`、`bank-detail`、`bank-account-balance` | `tests/test_bank_details_*`、`tests/test_bankdetail_*`、`web/src/test/BankDetails*.test.tsx` |
 | `pending-invoices` | `/pending-invoices` | `web/src/pages/PendingInvoicesPage.tsx` | `web/src/features/pendingInvoices/api.ts` | `routes_pending_invoices.py`、`server.py` `/api/pending-invoices*` | `pending_invoice`、`search`、`invoice_lifecycle`、`search-pending`、`invoice-lifecycle` | `tests/test_pending_invoice_*`、`web/src/test/PendingInvoices*.test.tsx` |
 | `input-invoice-usage` | `/input-invoice-usage` | `web/src/pages/InputInvoiceUsagePage.tsx` | `web/src/features/inputInvoiceUsage/api.ts` | `server.py` `/api/input-invoice-usage*` | `input_invoice_usage`、`invoice_lifecycle`、`invoice-usage-collection` | `tests/test_input_invoice_usage_*`、`tests/test_invoice_usage_collection_*`、`web/src/test/InputInvoiceUsage*.test.tsx`、`web/e2e/input-invoice-usage-flow.spec.ts` |
-| `oa-pending-payments` | `/oa-pending-payments` | `web/src/pages/OaPendingPaymentsPage.tsx` | `web/src/features/oaPendingPayments/api.ts` | `routes_oa_pending_payments.py`、`server.py` `/api/oa-pending-payments*` | `oa_pending_payment`、`invoice_lifecycle`、`invoice-usage-collection`、`oa-sync` | `tests/test_oa_pending_payment_*`、`web/src/test/OaPendingPaymentsPage.test.tsx`、`web/e2e/oa-pending-payments-flow.spec.ts` |
+| `oa-pending-payments` | `/oa-pending-payments` | `web/src/pages/OaPendingPaymentsPage.tsx` | `web/src/features/oaPendingPayments/api.ts` | `routes_oa_pending_payments.py`、`server.py` `/api/oa-pending-payments*` | `oa_pending_payment`、`oa-pending-payment`、`oa-sync` | `tests/test_oa_pending_payment_*`、`web/src/test/OaPendingPaymentsPage.test.tsx`、`web/e2e/oa-pending-payments-flow.spec.ts` |
 | `output-invoice-collections` | `/output-invoice-collections` | `web/src/pages/OutputInvoiceCollectionsPage.tsx` | `web/src/features/outputInvoiceCollections/api.ts` | `routes_output_invoice_collections.py`、`server.py` `/api/output-invoice-collections*` | `output_invoice_collection`、`invoice_lifecycle`、`invoice-usage-collection` | `tests/test_output_invoice_collection_*`、`web/src/test/OutputInvoiceCollectionsPage.test.tsx`、`web/e2e/output-invoice-collections-flow.spec.ts`、`web/e2e/output-invoice-red-relation-fanout.spec.ts` |
 | `bank-flow-rule-batches` | `/bank-flow-rule-batches` | `web/src/pages/BankFlowRuleBatchPage.tsx` | `web/src/features/bankFlowRuleBatches/api.ts` | `routes_bank_flow_rule_batches.py`、`server.py` `/api/bank-flow-rule-batches*` | `bank_flow_rule_batch`、`bank-flow-rule-batch` | `tests/test_bank_flow_rule_batch_*`、`web/src/test/BankFlowRuleBatch*.test.tsx`、`web/e2e/bank-flow-rule-batches-flow.spec.ts` |
 | `no-oa-bank-batches` | legacy `/api/no-oa-bank-batches/*` | 无当前页面 | 无当前 no-OA feature；当前页面归 `bank-flow-rule-batches` | `routes_no_oa_bank_batches.py`、`server.py` `/api/no-oa-bank-batches*` | `no_oa_bank_batch`、`no-oa-bank-batch` | `tests/test_no_oa_bank_batch_*`、legacy no-OA regression via bank-flow/workbench tests |
@@ -50,7 +50,7 @@
 | --- | --- | --- |
 | Frontend page | `web/src/pages/CostStatisticsPage.tsx` | time/project/bank/expenseType 视图、project scope、范围选择、drilldown、详情 modal、export center 和 read model refreshing/empty/error 状态不能漂移。 |
 | Frontend API mapper | `web/src/features/cost-statistics/api.ts` | explorer/export-preview/export/transaction detail 的 query 参数、project scope、read model status、错误 JSON message 和缓存 key 不能漂移。 |
-| API/service/read model | `/api/cost-statistics*`、`CostStatisticsService`、`CostStatisticsReadModelService` | project scope、export row-limit、parent/shard readiness、scope normalization 和 worker enqueue 必须保持一致。 |
+| API/service/read model | `/api/cost-statistics*`、`CostStatisticsQueryService`、`CostStatisticsRuntimeService`、`CostStatisticsSqlProjectionBuilder`、`CostStatisticsReadModelRepositoryPort` | project scope、export row-limit、归集规则、parent/shard readiness、scope normalization、durable invalidation 和 worker enqueue 必须保持一致；不得恢复进程内 read model owner。 |
 | Export center | `ExportCenterModal` | preview 与 download 必须携带当前 view/project scope/filter；结构化后端错误必须展示给用户，不得误当文件下载。 |
 
 当前 Browser e2e：
@@ -82,10 +82,10 @@
 
 | 层级 | 当前入口 | 回归风险 |
 | --- | --- | --- |
-| Frontend page | `web/src/pages/OaPendingPaymentsPage.tsx` | rows/filter-options 并行加载、read model refreshing/empty、搜索、表头筛选、排序、详情 drawer 和规则 drawer 不能漂移。 |
+| Frontend page | `web/src/pages/OaPendingPaymentsPage.tsx` | 单一rows加载、ETag/304、500ms条件检查、202隐藏旧rows、barrier恢复、搜索/筛选/排序/详情drawer和Audit不能漂移。 |
 | Grouped table | `web/src/components/oaPendingPayments/OaPendingPaymentsTable.tsx` | OA 主行、支出流水、进项发票、付款状态、金额/方向 chip、空值和 `+N` 关系展开必须稳定。 |
 | Frontend API mapper | `web/src/features/oaPendingPayments/api.ts` | rows/filter/detail query 参数、detail target kind、filters JSON encoding、camelCase/snake_case response shape 不能漂移。 |
-| API/service/read model | `/api/oa-pending-payments*`、`OaPendingPaymentApiRoutes`、`OaPendingPaymentQueryService`、`OaPendingPaymentReadModelService` | rows/filter/detail fresh gate、非法参数、detail unavailable、read model enqueue 和权限必须保持一致。 |
+| API/service/read model | `/api/oa-pending-payments*`、`OaPendingPaymentApiRoutes`、`OaPendingPaymentReadModelService` | rows聚合/filterOptions/ETag fresh gate、非法参数、detail unavailable、精确scope enqueue和权限必须保持一致；旧filter route不存在。 |
 
 当前 Browser e2e：
 
@@ -714,7 +714,7 @@
 | `invoice_lifecycle` | `invoice_lifecycle` | `invoice-lifecycle` | `invoice_lifecycle.read_model.refresh` | 待找发票、税金、进项/销项/OA 待付款 | 必须先于下游发票页面刷新 |
 | `input_invoice_usage` | `input_invoice_usage` | `invoice-usage-collection` | `input_invoice_usage.read_model.refresh` | 进项发票使用 | all scope source_versions 聚合、OA reverse 状态 |
 | `output_invoice_collection` | `output_invoice_collection` | `invoice-usage-collection` | `output_invoice_collection.read_model.refresh` | 销项收款 | 收款/红冲/提醒状态 shape |
-| `oa_pending_payment` | `oa_pending_payment` | `invoice-usage-collection` | `oa_pending_payment.read_model.refresh` | OA 待付款 | OA/bank/invoice 三类 detail shape |
+| `oa_pending_payment` | `oa_pending_payment` | `oa-pending-payment` | `oa_pending_payment.read_model.refresh` | OA 待付款 | PG-only projector、ETag/202、OA/bank/invoice detail shape |
 | `cost_statistics` | `cost_statistics` | `cost-statistics` | `cost_statistics.read_model.refresh` | 成本统计 | all 父 scope 与 month shard readiness |
 | `tax_offset` | `tax_offset` | `cost-tax` | `tax_offset.read_model.refresh` | 税金抵扣 | 已认证发票、ETC、税金缓存 |
 | `no_oa_bank_batch` | `no_oa_bank_batch` | `no-oa-bank-batch` | `no_oa_bank_batch.read_model.refresh` | 免 OA 批次 | stale polling、规则版本 |

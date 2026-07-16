@@ -1,23 +1,36 @@
 from __future__ import annotations
 
+import base64
 from decimal import Decimal
+import hashlib
 from io import BytesIO
-from typing import Any
+import json
+import re
+from typing import Any, Callable
 
 from openpyxl import Workbook
 
 from fin_ops_platform.services.app_settings_service import COST_STATISTICS_UNCATEGORIZED_TAG_CODE
-from fin_ops_platform.services.cost_statistics_read_model_service import (
+from fin_ops_platform.services.cost_statistics_source_versions import (
     COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+    cost_statistics_source_versions,
 )
-from fin_ops_platform.services.cost_statistics_service import (
-    COST_STATISTICS_EXPORT_ROW_LIMIT,
-    CostStatisticsExportLimitError,
-)
+from fin_ops_platform.services.read_model_freshness import resolve_read_model_freshness
 from fin_ops_platform.services.read_model_query_gateway import (
     ReadModelQueryGateway,
     ReadModelRefreshQueueAdapter,
 )
+
+COST_STATISTICS_EXPORT_ROW_LIMIT = 20000
+COST_STATISTICS_EXPORT_BATCH_SIZE = 1000
+COST_STATISTICS_EXPORT_PREVIEW_SIZE = 8
+
+
+class CostStatisticsExportLimitError(ValueError):
+    def __init__(self, *, view: str, total: int, limit: int = COST_STATISTICS_EXPORT_ROW_LIMIT) -> None:
+        super().__init__(f"当前筛选命中 {total} 行，超过 {limit} 行导出上限，请缩小筛选范围。")
+        self.error_code = "cost_statistics_export_row_limit_exceeded"
+        self.details = {"view": view, "total": total, "limit": limit}
 
 
 class CostStatisticsReadModelNotFreshError(RuntimeError):
@@ -39,11 +52,11 @@ class CostStatisticsQueryService:
         runtime_service: Any,
         redis_helper: Any | None = None,
         sql_read_repository: Any | None = None,
-        tag_selection_provider: Any | None = None,
+        tag_selection_mapper: Callable[[dict[str, Any]], dict[str, Any]],
     ) -> None:
         self._runtime_service = runtime_service
         self._sql_read_repository = sql_read_repository
-        self._tag_selection_provider = tag_selection_provider
+        self._tag_selection_mapper = tag_selection_mapper
         self._read_model_query_gateway = ReadModelQueryGateway(
             queue_repository=ReadModelRefreshQueueAdapter(
                 scope_type="cost_statistics",
@@ -73,6 +86,133 @@ class CostStatisticsQueryService:
             normalized_project_scope,
             reason="api_sql_repository_unavailable",
         ), False
+
+    def get_explorer_page(
+        self,
+        *,
+        scope: str,
+        view: str,
+        project_scope: str,
+        filters: dict[str, str | None],
+        cursor: str | None,
+        page_size: int,
+        if_none_match: str | None = None,
+    ) -> tuple[dict[str, Any], bool, str, bool]:
+        normalized_project_scope = self._normalize_project_scope(project_scope)
+        scope_kind, scope_value, normalized_scope = self._normalize_page_scope(scope)
+        normalized_view, normalized_filters = self._normalize_page_query(view, filters)
+        normalized_page_size = self._normalize_page_size(page_size)
+        gate_scope_month = scope_value if scope_kind == "month" else "all"
+        gate_scope_key = self._runtime_service.request_scope_key(gate_scope_month, normalized_project_scope)
+        get_page = getattr(self._sql_read_repository, "get_cost_statistics_page", None)
+        get_freshness_gate = getattr(self._sql_read_repository, "get_cost_statistics_freshness_gate", None)
+        empty_payload = lambda: self.empty_explorer_page_payload(normalized_scope, normalized_view)
+        if not callable(get_page) or not callable(get_freshness_gate):
+            payload = self._cost_statistics_non_fresh_gate_payload(
+                scope_key=gate_scope_key,
+                empty_payload_factory=empty_payload,
+                refresh_reason="api_page_sql_repository_unavailable",
+                stale_reasons=(),
+            )
+            return payload, False, "", False
+
+        gate, expected_source_versions, non_fresh_payload = self._cost_statistics_freshness_gate(
+            scope_key=gate_scope_key,
+            get_freshness_gate=get_freshness_gate,
+            empty_payload_factory=empty_payload,
+            missing_reason="api_page_miss",
+            stale_reason="api_page_stale",
+            source_mismatch_reason="api_page_source_versions_stale",
+        )
+        if non_fresh_payload is not None:
+            return non_fresh_payload, False, "", False
+        if gate is None or expected_source_versions is None:
+            return empty_payload(), False, "", False
+
+        tag_selection_payload = self._cost_tag_selection_payload_from_gate(gate)
+        selected_codes = self._selected_bank_tag_codes(tag_selection_payload)
+        query_binding = self._page_query_binding(
+            scope=normalized_scope,
+            view=normalized_view,
+            filters=normalized_filters,
+            page_size=normalized_page_size,
+        )
+        cursor_values = self._decode_page_cursor(
+            cursor,
+            query_binding=query_binding,
+            published_source_version=int(gate["published_source_version"]),
+        )
+        query_fingerprint = self._page_query_fingerprint(query_binding, cursor)
+        tag_token = self._cost_tag_selection_cache_token(tag_selection_payload)
+        etag = self._page_etag(
+            scope_key=gate_scope_key,
+            published_source_version=int(gate["published_source_version"]),
+            query_fingerprint=query_fingerprint,
+            tag_token=tag_token,
+        )
+        if self._etag_matches(if_none_match, etag):
+            return {}, False, etag, True
+
+        def load_page_view() -> dict[str, Any] | None:
+            raw_page = get_page(
+                project_scope=normalized_project_scope,
+                scope_kind=scope_kind,
+                scope_value=scope_value,
+                view=normalized_view,
+                filters=normalized_filters,
+                selected_tag_codes=sorted(selected_codes) if selected_codes is not None else None,
+                cursor_values=cursor_values,
+                page_size=normalized_page_size,
+            )
+            if not isinstance(raw_page, dict):
+                return None
+            payload = self._normalize_explorer_page_payload(
+                raw_page,
+                scope=normalized_scope,
+                view=normalized_view,
+                query_binding=query_binding,
+                published_source_version=int(gate["published_source_version"]),
+                bank_accounts=list(gate.get("bank_accounts") or []),
+            )
+            payload["cost_statistics_tag_selection_version"] = (
+                int(tag_selection_payload.get("version") or 1)
+                if isinstance(tag_selection_payload, dict)
+                else 1
+            )
+            return {
+                "payload": payload,
+                "source_versions": dict(gate.get("source_versions") or {}),
+                "schema_version": gate.get("schema_version"),
+                "generated_at": gate.get("generated_at"),
+                "refresh_status": "fresh",
+            }
+
+        cache_key = self._runtime_service.page_redis_cache_key(
+            gate_scope_key,
+            query_fingerprint,
+            source_versions={
+                **expected_source_versions,
+                "cost_statistics_published_source_version": gate["published_source_version"],
+                "cost_statistics_tag_selection": tag_token,
+            },
+        )
+        result = self._read_model_query_gateway.load(
+            scope_type="cost_statistics",
+            scope_key=gate_scope_key,
+            expected_schema_version=COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+            expected_source_versions=expected_source_versions,
+            load_view=load_page_view,
+            empty_payload_factory=empty_payload,
+            payload_validator=self._is_explorer_page_payload,
+            cache_key=cache_key,
+            cache_ttl_seconds=self._runtime_service.redis_ttl_seconds(),
+            missing_reason="api_page_miss",
+            stale_reason="api_page_stale",
+            source_mismatch_reason="api_page_source_versions_stale",
+            payload_invalid_reason="api_page_payload_shape_invalid",
+        )
+        payload = self._empty_non_fresh_payload(result.payload, empty_payload)
+        return payload, result.cache_hit, etag, False
 
     def get_project_statistics(
         self,
@@ -121,55 +261,83 @@ class CostStatisticsQueryService:
         project_scope: str,
     ) -> dict[str, Any]:
         normalized_project_scope = self._normalize_project_scope(project_scope)
-        payload = self._require_fresh_explorer("all", normalized_project_scope)
         normalized_transaction_id = str(transaction_id or "").strip()
-        entries = self._entries_from_explorer_payload(payload)
-        entry = next(
-            (
-                candidate
-                for candidate in entries
-                if candidate["transaction_id"] == normalized_transaction_id
-            ),
-            None,
-        )
-        if entry is None:
-            bank_flow_entries = self._entries_from_explorer_payload(payload, rows_key="bank_flow_time_rows")
-            entry = next(
-                (
-                    candidate
-                    for candidate in bank_flow_entries
-                    if candidate["transaction_id"] == normalized_transaction_id
-                ),
-                None,
+        get_transaction = getattr(self._sql_read_repository, "get_cost_statistics_transaction", None)
+        get_freshness_gate = getattr(self._sql_read_repository, "get_cost_statistics_freshness_gate", None)
+        scope_key = self._runtime_service.request_scope_key("all", normalized_project_scope)
+        if not callable(get_transaction) or not callable(get_freshness_gate):
+            payload = self._cost_statistics_non_fresh_gate_payload(
+                scope_key=scope_key,
+                empty_payload_factory=lambda: self.empty_explorer_payload("all"),
+                refresh_reason="api_detail_sql_repository_unavailable",
+                stale_reasons=(),
             )
-        if entry is None:
+            raise CostStatisticsReadModelNotFreshError(
+                payload,
+                message="成本统计数据正在刷新，请稍后重试。",
+            )
+        gate, _expected_source_versions, non_fresh_payload = self._cost_statistics_freshness_gate(
+            scope_key=scope_key,
+            get_freshness_gate=get_freshness_gate,
+            empty_payload_factory=lambda: self.empty_explorer_payload("all"),
+            missing_reason="api_detail_miss",
+            stale_reason="api_detail_stale",
+            source_mismatch_reason="api_detail_source_versions_stale",
+        )
+        if non_fresh_payload is not None:
+            raise CostStatisticsReadModelNotFreshError(
+                non_fresh_payload,
+                message="成本统计数据正在刷新，请稍后重试。",
+            )
+        if gate is None:
+            raise CostStatisticsReadModelNotFreshError(
+                self._cost_statistics_non_fresh_gate_payload(
+                    scope_key=scope_key,
+                    empty_payload_factory=lambda: self.empty_explorer_payload("all"),
+                    refresh_reason="api_detail_miss",
+                    stale_reasons=(),
+                ),
+                message="成本统计数据正在刷新，请稍后重试。",
+            )
+        row = get_transaction(
+            project_scope=normalized_project_scope,
+            transaction_id=normalized_transaction_id,
+        )
+        if not isinstance(row, dict):
             raise KeyError(transaction_id)
-        month = entry["month"] or (entry["trade_time"] or "")[:7] or "all"
+        selected_codes = self._selected_bank_tag_codes(self._cost_tag_selection_payload_from_gate(gate))
+        bank_tag_code = str(row.get("bank_tag_code") or "").strip() or COST_STATISTICS_UNCATEGORIZED_TAG_CODE
+        if selected_codes is not None and bank_tag_code not in selected_codes:
+            raise KeyError(transaction_id)
+        trade_time = str(row.get("trade_time") or "").strip()
+        stored_month = str(row.get("month") or "").strip()
+        month = stored_month[:7] or trade_time[:7] or "all"
+        label_path = row.get("bank_tag_label_path")
         return {
             "month": month,
             "transaction": {
                 "id": normalized_transaction_id,
-                "project_name": entry["project_name"],
-                "expense_type": entry["expense_type"],
-                "expense_content": entry["expense_content"],
-                "trade_time": entry["trade_time"],
-                "direction": entry["direction"],
-                "amount": _plain_money(entry["amount_decimal"]),
-                "counterparty_name": entry["counterparty_name"],
-                "payment_account_label": entry["payment_account_label"],
-                "remark": entry["remark"],
-                "oa_applicant": entry["oa_applicant"],
+                "project_name": str(row.get("project_name") or ""),
+                "expense_type": str(row.get("expense_type") or ""),
+                "expense_content": str(row.get("expense_content") or ""),
+                "trade_time": trade_time,
+                "direction": str(row.get("direction") or ""),
+                "amount": _plain_money(_decimal_from_value(row.get("amount")) or Decimal("0.00")),
+                "counterparty_name": str(row.get("counterparty_name") or ""),
+                "payment_account_label": str(row.get("payment_account_label") or ""),
+                "remark": str(row.get("remark") or ""),
+                "oa_applicant": str(row.get("oa_applicant") or ""),
                 "summary_fields": {},
                 "detail_fields": {},
                 "relation_status": "read_model",
                 "relation_case_ids": [],
                 "linked_oa_count": 0,
                 "linked_invoice_count": 0,
-                "bank_tag_code": entry["bank_tag_code"],
-                "bank_tag_label": entry["bank_tag_label"],
-                "bank_tag_primary_label": entry["bank_tag_primary_label"],
-                "bank_tag_sub_label": entry["bank_tag_sub_label"],
-                "bank_tag_label_path": list(entry["bank_tag_label_path"]),
+                "bank_tag_code": str(row.get("bank_tag_code") or ""),
+                "bank_tag_label": str(row.get("bank_tag_label") or ""),
+                "bank_tag_primary_label": str(row.get("bank_tag_primary_label") or ""),
+                "bank_tag_sub_label": str(row.get("bank_tag_sub_label") or ""),
+                "bank_tag_label_path": list(label_path) if isinstance(label_path, list) else [],
             },
             "relation_context": {
                 "row_id": normalized_transaction_id,
@@ -210,15 +378,28 @@ class CostStatisticsQueryService:
         project_scope: str,
     ) -> tuple[dict[str, Any], bool] | None:
         get_view = getattr(self._sql_read_repository, "get_cost_statistics_view", None)
-        if not callable(get_view):
+        get_freshness_gate = getattr(self._sql_read_repository, "get_cost_statistics_freshness_gate", None)
+        if not callable(get_view) or not callable(get_freshness_gate):
             return None
         scope_key = self._runtime_service.request_scope_key(month, project_scope)
-        expected_source_versions = self._runtime_service.expected_source_versions(scope_key)
-        tag_selection_payload = self._cost_tag_selection_payload()
+        gate, expected_source_versions, non_fresh_payload = self._cost_statistics_freshness_gate(
+            scope_key=scope_key,
+            get_freshness_gate=get_freshness_gate,
+            empty_payload_factory=lambda: self.empty_explorer_payload(month),
+            missing_reason="api_miss",
+            stale_reason="api_stale",
+            source_mismatch_reason="api_source_versions_stale",
+        )
+        if non_fresh_payload is not None:
+            return non_fresh_payload, False
+        if gate is None or expected_source_versions is None:
+            return None
+        tag_selection_payload = self._cost_tag_selection_payload_from_gate(gate)
         cache_key = self._runtime_service.redis_cache_key(
             scope_key,
             source_versions={
                 **expected_source_versions,
+                "cost_statistics_published_source_version": gate["published_source_version"],
                 "cost_statistics_tag_selection": self._cost_tag_selection_cache_token(tag_selection_payload),
             },
         )
@@ -248,15 +429,28 @@ class CostStatisticsQueryService:
         project_scope: str,
     ) -> tuple[dict[str, Any], bool] | None:
         get_view = getattr(self._sql_read_repository, "get_cost_statistics_view", None)
-        if not callable(get_view):
+        get_freshness_gate = getattr(self._sql_read_repository, "get_cost_statistics_freshness_gate", None)
+        if not callable(get_view) or not callable(get_freshness_gate):
             return None
         scope_key = self._runtime_service.request_scope_key(month, project_scope)
-        expected_source_versions = self._runtime_service.expected_source_versions(scope_key)
-        tag_selection_payload = self._cost_tag_selection_payload()
+        gate, expected_source_versions, non_fresh_payload = self._cost_statistics_freshness_gate(
+            scope_key=scope_key,
+            get_freshness_gate=get_freshness_gate,
+            empty_payload_factory=lambda: self.empty_month_payload(month),
+            missing_reason="api_month_miss",
+            stale_reason="api_month_stale",
+            source_mismatch_reason="api_month_source_versions_stale",
+        )
+        if non_fresh_payload is not None:
+            return non_fresh_payload, False
+        if gate is None or expected_source_versions is None:
+            return None
+        tag_selection_payload = self._cost_tag_selection_payload_from_gate(gate)
         cache_key = self._runtime_service.month_redis_cache_key(
             scope_key,
             source_versions={
                 **expected_source_versions,
+                "cost_statistics_published_source_version": gate["published_source_version"],
                 "cost_statistics_tag_selection": self._cost_tag_selection_cache_token(tag_selection_payload),
             },
         )
@@ -282,6 +476,100 @@ class CostStatisticsQueryService:
         )
         return self._empty_non_fresh_payload(result.payload, lambda: self.empty_month_payload(month)), result.cache_hit
 
+    def _cost_statistics_freshness_gate(
+        self,
+        *,
+        scope_key: str,
+        get_freshness_gate: Any,
+        empty_payload_factory: Any,
+        missing_reason: str,
+        stale_reason: str,
+        source_mismatch_reason: str,
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
+        gate = get_freshness_gate(scope_key=scope_key)
+        if not isinstance(gate, dict):
+            return None, None, self._cost_statistics_non_fresh_gate_payload(
+                scope_key=scope_key,
+                empty_payload_factory=empty_payload_factory,
+                refresh_reason=missing_reason,
+                stale_reasons=(),
+            )
+
+        gate_status = str(gate.get("refresh_status") or "stale").strip().lower()
+        gate_reasons = tuple(
+            str(reason).strip()
+            for reason in list(gate.get("stale_reasons") or [])
+            if str(reason).strip()
+        )
+        if gate_status != "fresh":
+            return gate, None, self._cost_statistics_non_fresh_gate_payload(
+                scope_key=scope_key,
+                empty_payload_factory=empty_payload_factory,
+                refresh_reason=stale_reason,
+                stale_reasons=gate_reasons,
+            )
+
+        scope_month = str(scope_key).split(":", 1)[1] if ":" in str(scope_key) else ""
+        expected_source_versions = cost_statistics_source_versions(
+            month=scope_month,
+            settings_payload=(
+                gate.get("source_settings")
+                if isinstance(gate.get("source_settings"), dict)
+                else {}
+            ),
+            workbench_source_versions=(
+                gate.get("workbench_source_versions")
+                if isinstance(gate.get("workbench_source_versions"), dict)
+                else None
+            ),
+            bank_detail_source_versions=(
+                gate.get("bank_detail_source_versions")
+                if isinstance(gate.get("bank_detail_source_versions"), dict)
+                else None
+            ),
+        )
+        freshness = resolve_read_model_freshness(
+            expected_schema_version=COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+            actual_schema_version=gate.get("schema_version"),
+            expected_source_versions=expected_source_versions,
+            actual_source_versions=gate.get("source_versions")
+            if isinstance(gate.get("source_versions"), dict)
+            else {},
+        )
+        if freshness.status == "fresh":
+            return gate, expected_source_versions, None
+        refresh_reason = (
+            source_mismatch_reason
+            if any(reason.endswith("_missing") or reason.endswith("_mismatch") for reason in freshness.stale_reasons)
+            else stale_reason
+        )
+        return gate, expected_source_versions, self._cost_statistics_non_fresh_gate_payload(
+            scope_key=scope_key,
+            empty_payload_factory=empty_payload_factory,
+            refresh_reason=refresh_reason,
+            stale_reasons=freshness.stale_reasons,
+        )
+
+    def _cost_statistics_non_fresh_gate_payload(
+        self,
+        *,
+        scope_key: str,
+        empty_payload_factory: Any,
+        refresh_reason: str,
+        stale_reasons: tuple[str, ...],
+    ) -> dict[str, Any]:
+        payload = dict(empty_payload_factory())
+        payload["read_model_status"] = "refreshing"
+        payload["read_model_scope_key"] = scope_key
+        if stale_reasons:
+            payload["read_model_stale_reasons"] = list(stale_reasons)
+        payload["refresh_reason"] = refresh_reason
+        payload["refresh_enqueued"] = self._runtime_service.enqueue_read_model_refresh(
+            scope_key,
+            reason=refresh_reason,
+        )
+        return payload
+
     @staticmethod
     def _empty_non_fresh_payload(payload: dict[str, Any], empty_payload_factory: Any) -> dict[str, Any]:
         if str(payload.get("read_model_status") or "").strip().lower() == "fresh":
@@ -301,18 +589,12 @@ class CostStatisticsQueryService:
                 replacement[key] = payload[key]
         return replacement
 
-    def _cost_tag_selection_payload(self) -> dict[str, Any] | None:
-        provider = self._tag_selection_provider
-        if provider is None:
-            return None
-        if callable(provider):
-            payload = provider()
-        else:
-            get_payload = getattr(provider, "get_cost_statistics_tag_selection_payload", None)
-            if not callable(get_payload):
-                return None
-            payload = get_payload(can_save=False)
-        return payload if isinstance(payload, dict) else None
+    def _cost_tag_selection_payload_from_gate(self, gate: dict[str, Any]) -> dict[str, Any]:
+        settings_payload = gate.get("source_settings") if isinstance(gate.get("source_settings"), dict) else {}
+        payload = self._tag_selection_mapper(settings_payload)
+        if not isinstance(payload, dict):
+            raise RuntimeError("cost statistics tag selection mapper must return a mapping")
+        return payload
 
     @staticmethod
     def _cost_tag_selection_cache_token(payload: dict[str, Any] | None) -> str:
@@ -548,6 +830,259 @@ class CostStatisticsQueryService:
         }
 
     @staticmethod
+    def _normalize_page_scope(scope: str) -> tuple[str, str | None, str]:
+        normalized = str(scope or "").strip().lower()
+        if normalized == "all":
+            return "all", None, "all"
+        year_match = re.fullmatch(r"year:(\d{4})", normalized)
+        if year_match:
+            return "year", year_match.group(1), f"year:{year_match.group(1)}"
+        month_match = re.fullmatch(r"(\d{4})-(\d{2})", normalized)
+        if month_match and 1 <= int(month_match.group(2)) <= 12:
+            return "month", normalized, normalized
+        raise ValueError("cost statistics scope must be YYYY-MM, year:YYYY, or all")
+
+    @staticmethod
+    def _normalize_page_size(page_size: int) -> int:
+        try:
+            normalized = int(page_size)
+        except (TypeError, ValueError) as error:
+            raise ValueError("cost statistics page_size must be an integer") from error
+        if not 1 <= normalized <= 100:
+            raise ValueError("cost statistics page_size must be between 1 and 100")
+        return normalized
+
+    @staticmethod
+    def _normalize_page_query(
+        view: str,
+        filters: dict[str, str | None],
+    ) -> tuple[str, dict[str, str]]:
+        normalized_view = str(view or "").strip().lower()
+        allowed_filters = {
+            "time": set(),
+            "project": {"project_name", "expense_type"},
+            "bank": {"payment_account_label", "project_name"},
+            "expense_type": {"expense_type"},
+            "bank_tag": {"bank_tag_primary_label", "bank_tag_sub_label"},
+        }
+        if normalized_view not in allowed_filters:
+            raise ValueError("unsupported cost statistics view")
+        normalized_filters = {
+            key: str(value or "").strip()
+            for key, value in filters.items()
+            if str(value or "").strip()
+        }
+        unexpected = set(normalized_filters) - allowed_filters[normalized_view]
+        if unexpected:
+            raise ValueError(f"unsupported filters for {normalized_view}: {', '.join(sorted(unexpected))}")
+        if normalized_view == "project" and normalized_filters.get("expense_type") and not normalized_filters.get("project_name"):
+            raise ValueError("project_name is required when expense_type is selected")
+        if normalized_view == "bank" and normalized_filters.get("project_name") and not normalized_filters.get("payment_account_label"):
+            raise ValueError("payment_account_label is required when project_name is selected")
+        if normalized_view == "bank_tag" and normalized_filters.get("bank_tag_sub_label") and not normalized_filters.get("bank_tag_primary_label"):
+            raise ValueError("bank_tag_primary_label is required when bank_tag_sub_label is selected")
+        return normalized_view, normalized_filters
+
+    @staticmethod
+    def _page_query_binding(
+        *,
+        scope: str,
+        view: str,
+        filters: dict[str, str],
+        page_size: int,
+    ) -> str:
+        return json.dumps(
+            {
+                "scope": scope,
+                "view": view,
+                "filters": filters,
+                "page_size": page_size,
+                "schema": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    @staticmethod
+    def _page_query_fingerprint(query_binding: str, cursor: str | None) -> str:
+        return hashlib.sha256(f"{query_binding}|cursor:{str(cursor or '')}".encode("utf-8")).hexdigest()[:24]
+
+    @staticmethod
+    def _encode_page_cursor(
+        values: tuple[str, str, str, str],
+        *,
+        query_binding: str,
+        published_source_version: int,
+    ) -> str:
+        cursor_payload = {
+            "v": 1,
+            "q": hashlib.sha256(query_binding.encode("utf-8")).hexdigest(),
+            "p": published_source_version,
+            "s": list(values),
+        }
+        encoded = base64.urlsafe_b64encode(
+            json.dumps(cursor_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).decode("ascii")
+        return encoded.rstrip("=")
+
+    @staticmethod
+    def _decode_page_cursor(
+        cursor: str | None,
+        *,
+        query_binding: str,
+        published_source_version: int,
+    ) -> tuple[str, str, str, str] | None:
+        normalized = str(cursor or "").strip()
+        if not normalized:
+            return None
+        try:
+            padding = "=" * (-len(normalized) % 4)
+            payload = json.loads(base64.urlsafe_b64decode(f"{normalized}{padding}").decode("utf-8"))
+        except Exception as error:
+            raise ValueError("cost_statistics_cursor_invalid") from error
+        expected_query = hashlib.sha256(query_binding.encode("utf-8")).hexdigest()
+        sort_values = payload.get("s") if isinstance(payload, dict) else None
+        if (
+            not isinstance(payload, dict)
+            or payload.get("v") != 1
+            or payload.get("q") != expected_query
+            or payload.get("p") != published_source_version
+            or not isinstance(sort_values, list)
+            or len(sort_values) != 4
+            or any(not isinstance(value, str) for value in sort_values)
+        ):
+            raise ValueError("cost_statistics_cursor_stale_or_mismatched")
+        return tuple(sort_values)  # type: ignore[return-value]
+
+    @staticmethod
+    def _page_etag(
+        *,
+        scope_key: str,
+        published_source_version: int,
+        query_fingerprint: str,
+        tag_token: str,
+    ) -> str:
+        digest = hashlib.sha256(
+            f"{scope_key}|{published_source_version}|{query_fingerprint}|{tag_token}".encode("utf-8")
+        ).hexdigest()[:32]
+        return f'"cost-statistics-{digest}"'
+
+    @staticmethod
+    def _etag_matches(if_none_match: str | None, etag: str) -> bool:
+        candidates = {item.strip() for item in str(if_none_match or "").split(",") if item.strip()}
+        return "*" in candidates or etag in candidates or f"W/{etag}" in candidates
+
+    @classmethod
+    def _normalize_explorer_page_payload(
+        cls,
+        payload: dict[str, Any],
+        *,
+        scope: str,
+        view: str,
+        query_binding: str,
+        published_source_version: int,
+        bank_accounts: list[Any],
+    ) -> dict[str, Any]:
+        primary = [dict(item) for item in list(payload.get("primary_facets") or []) if isinstance(item, dict)]
+        secondary = [dict(item) for item in list(payload.get("secondary_facets") or []) if isinstance(item, dict)]
+        facets = {
+            "projects": [],
+            "expense_types": [],
+            "bank_accounts": [],
+            "bank_tag_primary": [],
+            "bank_tag_sub": [],
+        }
+        if view == "project":
+            facets["projects"] = primary
+            facets["expense_types"] = secondary
+        elif view == "bank":
+            facets["bank_accounts"] = cls._merge_bank_account_facets(primary, bank_accounts)
+            facets["projects"] = secondary
+        elif view == "expense_type":
+            facets["expense_types"] = primary
+        elif view == "bank_tag":
+            facets["bank_tag_primary"] = primary
+            facets["bank_tag_sub"] = secondary
+        next_values = payload.get("next_cursor_values")
+        next_cursor = None
+        if isinstance(next_values, (list, tuple)) and len(next_values) == 4:
+            next_cursor = cls._encode_page_cursor(
+                tuple(str(value or "") for value in next_values),  # type: ignore[arg-type]
+                query_binding=query_binding,
+                published_source_version=published_source_version,
+            )
+        return {
+            "scope": scope,
+            "view": view,
+            "summary": dict(payload.get("summary") or {}),
+            "available_years": [str(value) for value in list(payload.get("available_years") or []) if str(value)],
+            "facets": facets,
+            "rows": [dict(item) for item in list(payload.get("rows") or []) if isinstance(item, dict)],
+            "row_count": int(payload.get("row_count") or 0),
+            "next_cursor": next_cursor,
+        }
+
+    @staticmethod
+    def _merge_bank_account_facets(observed: list[dict[str, Any]], configured: list[Any]) -> list[dict[str, Any]]:
+        rows = [dict(item) for item in observed]
+        seen = {str(item.get("payment_account_label") or "").strip() for item in rows}
+        for raw_account in configured:
+            if not isinstance(raw_account, dict):
+                continue
+            label = str(raw_account.get("payment_account_label") or "").strip()
+            if not label or label in seen:
+                continue
+            seen.add(label)
+            rows.append(
+                {
+                    "payment_account_label": label,
+                    "total_amount": "0.00",
+                    "transaction_count": 0,
+                    "project_count": 0,
+                    "percentage_label": "0.0%",
+                }
+            )
+        return rows
+
+    @staticmethod
+    def empty_explorer_page_payload(scope: str, view: str) -> dict[str, Any]:
+        return {
+            "scope": scope,
+            "view": view,
+            "summary": {
+                "row_count": 0,
+                "transaction_count": 0,
+                "total_amount": "0.00",
+                "expense_amount": "0.00",
+                "income_amount": "0.00",
+                "expense_transaction_count": 0,
+                "income_transaction_count": 0,
+            },
+            "available_years": [],
+            "facets": {
+                "projects": [],
+                "expense_types": [],
+                "bank_accounts": [],
+                "bank_tag_primary": [],
+                "bank_tag_sub": [],
+            },
+            "rows": [],
+            "row_count": 0,
+            "next_cursor": None,
+        }
+
+    @staticmethod
+    def _is_explorer_page_payload(payload: dict[str, Any]) -> bool:
+        return (
+            isinstance(payload.get("summary"), dict)
+            and isinstance(payload.get("available_years"), list)
+            and isinstance(payload.get("facets"), dict)
+            and isinstance(payload.get("rows"), list)
+            and payload.get("view") in {"time", "project", "bank", "expense_type", "bank_tag"}
+        )
+
+    @staticmethod
     def empty_explorer_payload(month: str) -> dict[str, Any]:
         return {
             "month": month,
@@ -623,7 +1158,7 @@ class CostStatisticsQueryService:
     def _build_export_preview_from_read_model(self, **kwargs: Any) -> dict[str, Any]:
         view = str(kwargs.get("view") or "").strip()
         month = str(kwargs.get("month") or "all")
-        project_scope = str(kwargs.get("project_scope") or "active")
+        project_scope = self._normalize_project_scope(str(kwargs.get("project_scope") or "active"))
         project_names = self._normalize_text_set(
             kwargs.get("project_names") or ([kwargs.get("project_name")] if kwargs.get("project_name") else [])
         )
@@ -631,15 +1166,21 @@ class CostStatisticsQueryService:
         aggregate_by = self._normalize_project_aggregate_by(kwargs.get("aggregate_by"))
         range_kwargs = self._range_kwargs(kwargs)
         if view == "time":
-            entries = self._filtered_entries_from_read_model(
+            gate_scope_key, gate, first_page, query = self._load_export_first_page(
+                view=view,
                 month=month,
                 project_scope=project_scope,
-                rows_key="bank_flow_time_rows",
+                project_names=set(),
+                expense_types=set(),
+                row_shape="raw_bank",
+                page_size=COST_STATISTICS_EXPORT_PREVIEW_SIZE,
                 **range_kwargs,
             )
-            self._ensure_export_row_limit(view=view, total=len(entries))
+            del gate_scope_key, gate, query
+            summary = self._export_page_summary(first_page)
+            self._ensure_export_row_limit(view=view, total=int(summary["source_row_count"]))
+            entries = [self._export_entry_from_row(row) for row in list(first_page.get("rows") or [])]
             scope_label = self._build_scope_label(month=month, **range_kwargs)
-            directional_summary = self._directional_summary_from_entries(entries)
             return self._preview_payload(
                 view=view,
                 file_name=self._build_filename(month=scope_label, view=view),
@@ -659,17 +1200,24 @@ class CostStatisticsQueryService:
                     ]
                     for entry in entries
                 ],
-                total_amount=_plain_money(sum((entry["amount_decimal"] for entry in entries), start=Decimal("0.00"))),
-                summary_extra=directional_summary,
+                total_count=int(summary["source_row_count"]),
+                total_amount=_plain_money(_decimal_from_value(summary.get("total_amount")) or Decimal("0.00")),
+                summary_extra=self._directional_summary_from_export_summary(summary),
             )
         if view == "bank_tag":
-            entries = self._filtered_entries_from_read_model(
+            _scope_key, _gate, first_page, _query = self._load_export_first_page(
+                view=view,
                 month=month,
                 project_scope=project_scope,
-                rows_key="bank_flow_time_rows",
+                project_names=set(),
+                expense_types=set(),
+                row_shape="raw_bank",
+                page_size=COST_STATISTICS_EXPORT_PREVIEW_SIZE,
                 **range_kwargs,
             )
-            self._ensure_export_row_limit(view=view, total=len(entries))
+            summary = self._export_page_summary(first_page)
+            self._ensure_export_row_limit(view=view, total=int(summary["source_row_count"]))
+            entries = [self._export_entry_from_row(row) for row in list(first_page.get("rows") or [])]
             scope_label = self._build_scope_label(month=month, **range_kwargs)
             return self._preview_payload(
                 view=view,
@@ -678,22 +1226,27 @@ class CostStatisticsQueryService:
                 sheet_names=["按标签统计"],
                 columns=["时间", "主标签", "子标签", "资金方向", "金额", "费用内容", "对方户名", "支付账户"],
                 rows=[self._bank_tag_row_from_entry(entry) for entry in entries],
-                total_amount=_plain_money(sum((entry["amount_decimal"] for entry in entries), start=Decimal("0.00"))),
-                summary_extra=self._directional_summary_from_entries(entries),
+                total_count=int(summary["source_row_count"]),
+                total_amount=_plain_money(_decimal_from_value(summary.get("total_amount")) or Decimal("0.00")),
+                summary_extra=self._directional_summary_from_export_summary(summary),
             )
         if view == "project":
             if not project_names:
                 raise ValueError("project_name is required for project export preview")
             if aggregate_by is not None or len(project_names) > 1:
-                entries = self._filtered_entries_from_read_model(
+                _scope_key, _gate, first_page, _query = self._load_export_first_page(
+                    view=view,
                     month="all",
                     project_scope=project_scope,
                     project_names=project_names,
                     expense_types=expense_types,
+                    row_shape="project_month" if (aggregate_by or "month") == "month" else "project_year",
+                    page_size=COST_STATISTICS_EXPORT_PREVIEW_SIZE,
                     **range_kwargs,
                 )
-                self._ensure_export_row_limit(view=view, total=len(entries))
-                rows = self._project_aggregate_rows(entries, aggregate_by=aggregate_by or "month")
+                summary = self._export_page_summary(first_page)
+                self._ensure_export_row_limit(view=view, total=int(summary["source_row_count"]))
+                rows = [self._export_entry_from_row(row) for row in list(first_page.get("rows") or [])]
                 scope_label = self._build_scope_label(month="all", **range_kwargs)
                 return self._preview_payload(
                     view=view,
@@ -717,17 +1270,23 @@ class CostStatisticsQueryService:
                         ]
                         for row in rows
                     ],
-                    total_amount=_plain_money(sum((row["amount_decimal"] for row in rows), start=Decimal("0.00"))),
+                    total_count=int(summary["source_row_count"]),
+                    total_amount=_plain_money(_decimal_from_value(summary.get("total_amount")) or Decimal("0.00")),
                 )
             project_name = sorted(project_names)[0]
-            entries = self._filtered_entries_from_read_model(
+            _scope_key, _gate, first_page, _query = self._load_export_first_page(
+                view=view,
                 month=month,
                 project_scope=project_scope,
                 project_names={project_name},
                 expense_types=expense_types,
+                row_shape="raw_cost",
+                page_size=COST_STATISTICS_EXPORT_PREVIEW_SIZE,
                 **range_kwargs,
             )
-            self._ensure_export_row_limit(view=view, total=len(entries))
+            summary = self._export_page_summary(first_page)
+            self._ensure_export_row_limit(view=view, total=int(summary["source_row_count"]))
+            entries = [self._export_entry_from_row(row) for row in list(first_page.get("rows") or [])]
             scope_label = self._build_scope_label(month=month, **range_kwargs)
             return self._preview_payload(
                 view=view,
@@ -753,18 +1312,25 @@ class CostStatisticsQueryService:
                     ]
                     for entry in entries
                 ],
-                total_amount=_plain_money(sum((entry["amount_decimal"] for entry in entries), start=Decimal("0.00"))),
+                total_count=int(summary["source_row_count"]),
+                total_amount=_plain_money(_decimal_from_value(summary.get("total_amount")) or Decimal("0.00")),
             )
         if view == "expense_type":
             if not expense_types:
                 raise ValueError("expense_type is required for expense_type export preview")
-            entries = self._filtered_entries_from_read_model(
+            _scope_key, _gate, first_page, _query = self._load_export_first_page(
+                view=view,
                 month=month,
                 project_scope=project_scope,
+                project_names=set(),
                 expense_types=expense_types,
+                row_shape="raw_cost",
+                page_size=COST_STATISTICS_EXPORT_PREVIEW_SIZE,
                 **range_kwargs,
             )
-            self._ensure_export_row_limit(view=view, total=len(entries))
+            summary = self._export_page_summary(first_page)
+            self._ensure_export_row_limit(view=view, total=int(summary["source_row_count"]))
+            entries = [self._export_entry_from_row(row) for row in list(first_page.get("rows") or [])]
             scope_label = self._build_scope_label(month=month, **range_kwargs)
             expense_label = self._build_expense_type_label(expense_types)
             return self._preview_payload(
@@ -785,164 +1351,21 @@ class CostStatisticsQueryService:
                     ]
                     for entry in entries
                 ],
-                total_amount=_plain_money(sum((entry["amount_decimal"] for entry in entries), start=Decimal("0.00"))),
+                total_count=int(summary["source_row_count"]),
+                total_amount=_plain_money(_decimal_from_value(summary.get("total_amount")) or Decimal("0.00")),
             )
         raise ValueError("view must be time, bank_tag, project, or expense_type.")
 
     def _export_view_from_read_model(self, **kwargs: Any) -> tuple[str, bytes]:
         view = str(kwargs.get("view") or "").strip()
         month = str(kwargs.get("month") or "all")
-        project_scope = str(kwargs.get("project_scope") or "active")
+        project_scope = self._normalize_project_scope(str(kwargs.get("project_scope") or "active"))
         project_names = self._normalize_text_set(
             kwargs.get("project_names") or ([kwargs.get("project_name")] if kwargs.get("project_name") else [])
         )
         expense_types = self._normalize_text_set(kwargs.get("expense_types"))
         aggregate_by = self._normalize_project_aggregate_by(kwargs.get("aggregate_by"))
         range_kwargs = self._range_kwargs(kwargs)
-        if view == "time":
-            entries = self._filtered_entries_from_read_model(
-                month=month,
-                project_scope=project_scope,
-                rows_key="bank_flow_time_rows",
-                **range_kwargs,
-            )
-            self._ensure_export_row_limit(view=view, total=len(entries))
-            rows = [self._time_row_from_entry(entry) for entry in entries]
-            workbook = self._table_workbook(
-                "按时间统计",
-                ["时间", "项目名称", "费用类型", "金额", "费用内容", "资金方向", "对方户名", "支付账户"],
-                rows,
-            )
-            return (
-                self._build_filename(month=self._build_scope_label(month=month, **range_kwargs), view=view),
-                self._serialize_workbook(workbook),
-            )
-        if view == "bank_tag":
-            entries = self._filtered_entries_from_read_model(
-                month=month,
-                project_scope=project_scope,
-                rows_key="bank_flow_time_rows",
-                **range_kwargs,
-            )
-            self._ensure_export_row_limit(view=view, total=len(entries))
-            workbook = self._table_workbook(
-                "按标签统计",
-                ["时间", "主标签", "子标签", "资金方向", "金额", "费用内容", "对方户名", "支付账户"],
-                [self._bank_tag_row_from_entry(entry) for entry in entries],
-            )
-            return (
-                self._build_filename(month=self._build_scope_label(month=month, **range_kwargs), view=view),
-                self._serialize_workbook(workbook),
-            )
-        if view == "month":
-            payload = self.month_payload_from_explorer_payload(
-                month,
-                self._require_fresh_explorer(month, project_scope, message="成本统计数据正在刷新，请稍后重试导出。"),
-            )
-            self._ensure_export_row_limit(view=view, total=int((payload.get("summary") or {}).get("row_count") or 0))
-            rows = [
-                [row["project_name"], row["expense_type"], row["amount"], row["expense_content"], row["transaction_count"]]
-                for row in list(payload.get("rows") or [])
-                if isinstance(row, dict)
-            ]
-            workbook = self._table_workbook("月份汇总", ["项目名称", "费用类型", "金额", "费用内容", "支出笔数"], rows)
-            return self._build_filename(month=month, view=view), self._serialize_workbook(workbook)
-        if view == "project":
-            if not project_names:
-                raise ValueError("project_name is required for project export")
-            if aggregate_by is not None or len(project_names) > 1:
-                entries = self._filtered_entries_from_read_model(
-                    month="all",
-                    project_scope=project_scope,
-                    project_names=project_names,
-                    expense_types=expense_types,
-                    **range_kwargs,
-                )
-                self._ensure_export_row_limit(view=view, total=len(entries))
-                rows = self._project_aggregate_rows(entries, aggregate_by=aggregate_by or "month")
-                workbook = self._table_workbook(
-                    "按项目统计",
-                    ["统计周期", "项目名称", "费用类型", "金额", "费用内容", "支出笔数"],
-                    [
-                        [
-                            row["period_label"],
-                            row["project_name"],
-                            row["expense_type"],
-                            row["amount"],
-                            row["expense_content"],
-                            row["transaction_count"],
-                        ]
-                        for row in rows
-                    ],
-                )
-                filename = self._build_filename(
-                    month=self._build_scope_label(month="all", **range_kwargs),
-                    view=view,
-                    project_names=sorted(project_names),
-                    aggregate_by=aggregate_by or "month",
-                )
-                return filename, self._serialize_workbook(workbook)
-            project_name = sorted(project_names)[0]
-            entries = self._filtered_entries_from_read_model(
-                month=month,
-                project_scope=project_scope,
-                project_names={project_name},
-                expense_types=expense_types,
-                **range_kwargs,
-            )
-            self._ensure_export_row_limit(view=view, total=len(entries))
-            workbook = self._project_detail_workbook(
-                month=month,
-                project_name=project_name,
-                entries=entries,
-                include_oa_details=bool(kwargs.get("include_oa_details", True)),
-                include_invoice_details=bool(kwargs.get("include_invoice_details", True)),
-                include_exception_rows=bool(kwargs.get("include_exception_rows", True)),
-                include_ignored_rows=bool(kwargs.get("include_ignored_rows", True)),
-                include_expense_content_summary=bool(kwargs.get("include_expense_content_summary", True)),
-                scope_label=self._build_scope_label(month=month, **range_kwargs),
-            )
-            return (
-                self._build_filename(
-                    month=self._build_scope_label(month=month, **range_kwargs),
-                    view=view,
-                    project_name=project_name,
-                ),
-                self._serialize_workbook(workbook),
-            )
-        if view == "expense_type":
-            if not expense_types:
-                raise ValueError("expense_type is required for expense_type export")
-            entries = self._filtered_entries_from_read_model(
-                month=month,
-                project_scope=project_scope,
-                expense_types=expense_types,
-                **range_kwargs,
-            )
-            self._ensure_export_row_limit(view=view, total=len(entries))
-            rows = [
-                [
-                    entry["trade_time"],
-                    entry["project_name"],
-                    _plain_money(entry["amount_decimal"]),
-                    entry["expense_content"],
-                    entry["direction"],
-                    entry["counterparty_name"],
-                    entry["payment_account_label"],
-                ]
-                for entry in entries
-            ]
-            workbook = self._table_workbook(
-                "按费用类型统计",
-                ["时间", "项目名称", "金额", "费用内容", "资金方向", "对方户名", "支付账户"],
-                rows,
-            )
-            filename = self._build_filename(
-                month=self._build_scope_label(month=month, **range_kwargs),
-                view=view,
-                expense_type=self._build_expense_type_label(expense_types),
-            )
-            return filename, self._serialize_workbook(workbook)
         if view == "transaction":
             transaction_id = str(kwargs.get("transaction_id") or "").strip()
             if not transaction_id:
@@ -956,45 +1379,312 @@ class CostStatisticsQueryService:
                 transaction_id=transaction_id,
             )
             return filename, self._serialize_workbook(workbook)
-        raise ValueError(f"unsupported export view: {view}")
 
-    def _filtered_entries_from_read_model(
+        export_month = month
+        row_shape = "raw_cost"
+        if view in {"time", "bank_tag"}:
+            row_shape = "raw_bank"
+        elif view == "month":
+            row_shape = "month_summary"
+        elif view == "project":
+            if not project_names:
+                raise ValueError("project_name is required for project export")
+            if aggregate_by is not None or len(project_names) > 1:
+                export_month = "all"
+                row_shape = "project_month" if (aggregate_by or "month") == "month" else "project_year"
+        elif view == "expense_type":
+            if not expense_types:
+                raise ValueError("expense_type is required for expense_type export")
+        else:
+            raise ValueError(f"unsupported export view: {view}")
+
+        gate_scope_key, gate, first_page, query = self._load_export_first_page(
+            view=view,
+            month=export_month,
+            project_scope=project_scope,
+            project_names=project_names if view == "project" else set(),
+            expense_types=expense_types,
+            row_shape=row_shape,
+            page_size=COST_STATISTICS_EXPORT_BATCH_SIZE,
+            **range_kwargs,
+        )
+        summary = self._export_page_summary(first_page)
+        limit_total = int(summary["row_count"] if view == "month" else summary["source_row_count"])
+        self._ensure_export_row_limit(view=view, total=limit_total)
+
+        if view == "time":
+            workbook = self._table_workbook(
+                "按时间统计",
+                ["时间", "项目名称", "费用类型", "金额", "费用内容", "资金方向", "对方户名", "支付账户"],
+                (self._time_row_from_entry(entry) for entry in self._iter_export_entries(first_page, query)),
+            )
+            filename = self._build_filename(month=self._build_scope_label(month=month, **range_kwargs), view=view)
+        elif view == "bank_tag":
+            workbook = self._table_workbook(
+                "按标签统计",
+                ["时间", "主标签", "子标签", "资金方向", "金额", "费用内容", "对方户名", "支付账户"],
+                (self._bank_tag_row_from_entry(entry) for entry in self._iter_export_entries(first_page, query)),
+            )
+            filename = self._build_filename(month=self._build_scope_label(month=month, **range_kwargs), view=view)
+        elif view == "month":
+            workbook = self._table_workbook(
+                "月份汇总",
+                ["项目名称", "费用类型", "金额", "费用内容", "支出笔数"],
+                (
+                    [entry["project_name"], entry["expense_type"], entry["amount"], entry["expense_content"], entry["transaction_count"]]
+                    for entry in self._iter_export_entries(first_page, query)
+                ),
+            )
+            filename = self._build_filename(month=month, view=view)
+        elif view == "project":
+            if aggregate_by is not None or len(project_names) > 1:
+                workbook = self._table_workbook(
+                    "按项目统计",
+                    ["统计周期", "项目名称", "费用类型", "金额", "费用内容", "支出笔数"],
+                    (
+                        [
+                            row["period_label"],
+                            row["project_name"],
+                            row["expense_type"],
+                            row["amount"],
+                            row["expense_content"],
+                            row["transaction_count"],
+                        ]
+                        for row in self._iter_export_entries(first_page, query)
+                    ),
+                )
+                filename = self._build_filename(
+                    month=self._build_scope_label(month="all", **range_kwargs),
+                    view=view,
+                    project_names=sorted(project_names),
+                    aggregate_by=aggregate_by or "month",
+                )
+            else:
+                project_name = sorted(project_names)[0]
+                workbook = self._project_detail_workbook_from_export_pages(
+                    month=month,
+                    project_name=project_name,
+                    entries=self._iter_export_entries(first_page, query),
+                    include_oa_details=bool(kwargs.get("include_oa_details", True)),
+                    include_invoice_details=bool(kwargs.get("include_invoice_details", True)),
+                    include_exception_rows=bool(kwargs.get("include_exception_rows", True)),
+                    include_ignored_rows=bool(kwargs.get("include_ignored_rows", True)),
+                    include_expense_content_summary=bool(kwargs.get("include_expense_content_summary", True)),
+                    scope_label=self._build_scope_label(month=month, **range_kwargs),
+                )
+                filename = self._build_filename(
+                    month=self._build_scope_label(month=month, **range_kwargs),
+                    view=view,
+                    project_name=project_name,
+                )
+        elif view == "expense_type":
+            workbook = self._table_workbook(
+                "按费用类型统计",
+                ["时间", "项目名称", "金额", "费用内容", "资金方向", "对方户名", "支付账户"],
+                (
+                    [
+                        entry["trade_time"],
+                        entry["project_name"],
+                        _plain_money(entry["amount_decimal"]),
+                        entry["expense_content"],
+                        entry["direction"],
+                        entry["counterparty_name"],
+                        entry["payment_account_label"],
+                    ]
+                    for entry in self._iter_export_entries(first_page, query)
+                ),
+            )
+            filename = self._build_filename(
+                month=self._build_scope_label(month=month, **range_kwargs),
+                view=view,
+                expense_type=self._build_expense_type_label(expense_types),
+            )
+
+        content = self._serialize_workbook(workbook)
+        self._assert_export_gate_unchanged(scope_key=gate_scope_key, initial_gate=gate)
+        return filename, content
+
+    def _load_export_first_page(
         self,
         *,
+        view: str,
         month: str,
         project_scope: str,
+        row_shape: str,
+        page_size: int,
         start_month: str | None = None,
         end_month: str | None = None,
         start_date: str | None = None,
         end_date: str | None = None,
         project_names: set[str] | None = None,
         expense_types: set[str] | None = None,
-        rows_key: str = "time_rows",
-    ) -> list[dict[str, Any]]:
-        payload = self._require_fresh_explorer(month, project_scope, message="成本统计数据正在刷新，请稍后重试导出。")
-        entries = self._entries_from_explorer_payload(payload, rows_key=rows_key)
-        if start_month and end_month and start_month > end_month:
-            start_month, end_month = end_month, start_month
-        if start_date and end_date and start_date > end_date:
-            start_date, end_date = end_date, start_date
-        filtered: list[dict[str, Any]] = []
-        for entry in entries:
-            entry_month = entry["month"] or (entry["trade_time"] or "")[:7]
-            trade_date = (entry["trade_time"] or "")[:10]
-            if start_month and entry_month < start_month:
-                continue
-            if end_month and entry_month > end_month:
-                continue
-            if start_date and (not trade_date or trade_date < start_date):
-                continue
-            if end_date and (not trade_date or trade_date > end_date):
-                continue
-            if project_names and entry["project_name"] not in project_names:
-                continue
-            if expense_types and entry["expense_type"] not in expense_types:
-                continue
-            filtered.append(entry)
-        return sorted(filtered, key=lambda item: (item["trade_time"], item["transaction_id"]), reverse=True)
+    ) -> tuple[str, dict[str, Any], dict[str, Any], dict[str, Any]]:
+        get_export_page = getattr(self._sql_read_repository, "get_cost_statistics_export_page", None)
+        get_freshness_gate = getattr(self._sql_read_repository, "get_cost_statistics_freshness_gate", None)
+        gate_month = month if re.fullmatch(r"\d{4}-\d{2}", month) else "all"
+        scope_key = self._runtime_service.request_scope_key(gate_month, project_scope)
+        if not callable(get_export_page) or not callable(get_freshness_gate):
+            payload = self._cost_statistics_non_fresh_gate_payload(
+                scope_key=scope_key,
+                empty_payload_factory=lambda: self.empty_explorer_payload(gate_month),
+                refresh_reason="api_export_sql_repository_unavailable",
+                stale_reasons=(),
+            )
+            raise CostStatisticsReadModelNotFreshError(payload, message="成本统计数据正在刷新，请稍后重试导出。")
+        gate, _expected_source_versions, non_fresh_payload = self._cost_statistics_freshness_gate(
+            scope_key=scope_key,
+            get_freshness_gate=get_freshness_gate,
+            empty_payload_factory=lambda: self.empty_explorer_payload(gate_month),
+            missing_reason="api_export_miss",
+            stale_reason="api_export_stale",
+            source_mismatch_reason="api_export_source_versions_stale",
+        )
+        if non_fresh_payload is not None or gate is None:
+            raise CostStatisticsReadModelNotFreshError(
+                non_fresh_payload or self.empty_explorer_payload(gate_month),
+                message="成本统计数据正在刷新，请稍后重试导出。",
+            )
+        selected_codes = self._selected_bank_tag_codes(self._cost_tag_selection_payload_from_gate(gate))
+        query = {
+            "project_scope": project_scope,
+            "month": month,
+            "start_month": start_month,
+            "end_month": end_month,
+            "start_date": start_date,
+            "end_date": end_date,
+            "project_names": sorted(project_names or set()),
+            "expense_types": sorted(expense_types or set()),
+            "selected_tag_codes": sorted(selected_codes) if selected_codes is not None else None,
+            "row_shape": row_shape,
+            "page_size": page_size,
+            "get_export_page": get_export_page,
+            "view": view,
+            "scope_key": scope_key,
+        }
+        first_page = get_export_page(
+            **{key: value for key, value in query.items() if key not in {"get_export_page", "view", "scope_key"}},
+            offset=0,
+            include_summary=True,
+        )
+        if not isinstance(first_page, dict) or not isinstance(first_page.get("summary"), dict):
+            raise CostStatisticsReadModelNotFreshError(
+                {
+                    "read_model_status": "unavailable",
+                    "read_model_scope_key": scope_key,
+                    "read_model_stale_reasons": ["export_query_unavailable"],
+                },
+                message="成本统计数据正在刷新，请稍后重试导出。",
+            )
+        return scope_key, gate, first_page, query
+
+    def _iter_export_entries(self, first_page: dict[str, Any], query: dict[str, Any]) -> Any:
+        page = first_page
+        while True:
+            for row in list(page.get("rows") or []):
+                if isinstance(row, dict):
+                    yield self._export_entry_from_row(row)
+            next_offset = page.get("next_offset")
+            if next_offset is None:
+                return
+            get_export_page = query["get_export_page"]
+            page = get_export_page(
+                **{
+                    key: value
+                    for key, value in query.items()
+                    if key not in {"get_export_page", "view", "scope_key"}
+                },
+                offset=int(next_offset),
+                include_summary=False,
+            )
+            if not isinstance(page, dict):
+                raise CostStatisticsReadModelNotFreshError(
+                    {
+                        "read_model_status": "unavailable",
+                        "read_model_scope_key": query["scope_key"],
+                        "read_model_stale_reasons": ["export_page_unavailable"],
+                    },
+                    message="成本统计数据正在刷新，请稍后重试导出。",
+                )
+
+    def _assert_export_gate_unchanged(self, *, scope_key: str, initial_gate: dict[str, Any]) -> None:
+        get_freshness_gate = getattr(self._sql_read_repository, "get_cost_statistics_freshness_gate", None)
+        if not callable(get_freshness_gate):
+            raise CostStatisticsReadModelNotFreshError(
+                {"read_model_status": "unavailable", "read_model_scope_key": scope_key},
+                message="成本统计数据正在刷新，请稍后重试导出。",
+            )
+        gate, _expected_source_versions, non_fresh_payload = self._cost_statistics_freshness_gate(
+            scope_key=scope_key,
+            get_freshness_gate=get_freshness_gate,
+            empty_payload_factory=lambda: self.empty_explorer_payload(scope_key.split(":", 1)[-1]),
+            missing_reason="api_export_final_miss",
+            stale_reason="api_export_final_stale",
+            source_mismatch_reason="api_export_final_source_versions_stale",
+        )
+        initial_proof = (
+            initial_gate.get("schema_version"),
+            initial_gate.get("published_source_version"),
+            initial_gate.get("source_versions"),
+        )
+        final_proof = (
+            gate.get("schema_version") if isinstance(gate, dict) else None,
+            gate.get("published_source_version") if isinstance(gate, dict) else None,
+            gate.get("source_versions") if isinstance(gate, dict) else None,
+        )
+        if non_fresh_payload is not None or gate is None or final_proof != initial_proof:
+            raise CostStatisticsReadModelNotFreshError(
+                non_fresh_payload
+                or {
+                    "read_model_status": "stale",
+                    "read_model_scope_key": scope_key,
+                    "read_model_stale_reasons": ["export_snapshot_changed"],
+                },
+                message="成本统计数据已更新，请重新导出。",
+            )
+
+    @staticmethod
+    def _export_page_summary(page: dict[str, Any]) -> dict[str, Any]:
+        summary = page.get("summary")
+        if not isinstance(summary, dict):
+            return {
+                "source_row_count": 0,
+                "row_count": 0,
+                "transaction_count": 0,
+                "total_amount": "0.00",
+            }
+        return summary
+
+    @staticmethod
+    def _export_entry_from_row(raw_row: dict[str, Any]) -> dict[str, Any]:
+        trade_time = str(raw_row.get("trade_time") or raw_row.get("trade_time_text") or "")
+        amount = _decimal_from_value(raw_row.get("amount")) or Decimal("0.00")
+        primary = str(raw_row.get("bank_tag_primary_label") or raw_row.get("bank_tag_label") or "").strip() or "未标记"
+        sub = str(raw_row.get("bank_tag_sub_label") or raw_row.get("bank_tag_label") or "").strip() or primary
+        label_path = [str(item).strip() for item in list(raw_row.get("bank_tag_label_path") or []) if str(item).strip()]
+        if not label_path:
+            label_path = [primary] if primary == sub else [primary, sub]
+        return {
+            "transaction_id": str(raw_row.get("transaction_id") or "").strip(),
+            "month": str(raw_row.get("month") or raw_row.get("scope_month") or "")[:7] or trade_time[:7],
+            "trade_time": trade_time,
+            "direction": str(raw_row.get("direction") or "支出"),
+            "project_name": str(raw_row.get("project_name") or "").strip(),
+            "expense_type": str(raw_row.get("expense_type") or "").strip(),
+            "expense_content": str(raw_row.get("expense_content") or "").strip(),
+            "amount_decimal": amount,
+            "amount": _plain_money(amount),
+            "counterparty_name": str(raw_row.get("counterparty_name") or "").strip(),
+            "payment_account_label": str(raw_row.get("payment_account_label") or "").strip(),
+            "remark": str(raw_row.get("remark") or "").strip(),
+            "oa_applicant": str(raw_row.get("oa_applicant") or "—").strip() or "—",
+            "bank_tag_code": str(raw_row.get("bank_tag_code") or "").strip(),
+            "bank_tag_label": str(raw_row.get("bank_tag_label") or sub).strip() or sub,
+            "bank_tag_primary_label": primary,
+            "bank_tag_sub_label": sub,
+            "bank_tag_label_path": label_path,
+            "period_label": str(raw_row.get("period_label") or "—"),
+            "transaction_count": int(raw_row.get("transaction_count") or 0),
+        }
 
     @staticmethod
     def _single_month_from_range(
@@ -1126,6 +1816,7 @@ class CostStatisticsQueryService:
         sheet_names: list[str],
         columns: list[str],
         rows: list[list[Any]],
+        total_count: int,
         total_amount: str,
         summary_extra: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -1134,8 +1825,8 @@ class CostStatisticsQueryService:
             "file_name": file_name,
             "scope_label": scope_label,
             "summary": {
-                "row_count": len(rows),
-                "transaction_count": len(rows),
+                "row_count": total_count,
+                "transaction_count": total_count,
                 "total_amount": total_amount,
                 "sheet_count": len(sheet_names),
                 **dict(summary_extra or {}),
@@ -1172,46 +1863,13 @@ class CostStatisticsQueryService:
         ]
 
     @staticmethod
-    def _directional_summary_from_entries(entries: list[dict[str, Any]]) -> dict[str, Any]:
-        expense_entries = [entry for entry in entries if entry.get("direction") == "支出"]
-        income_entries = [entry for entry in entries if entry.get("direction") == "收入"]
+    def _directional_summary_from_export_summary(summary: dict[str, Any]) -> dict[str, Any]:
         return {
-            "expense_amount": _plain_money(
-                sum((entry["amount_decimal"] for entry in expense_entries), start=Decimal("0.00"))
-            ),
-            "income_amount": _plain_money(
-                sum((entry["amount_decimal"] for entry in income_entries), start=Decimal("0.00"))
-            ),
-            "expense_transaction_count": len(expense_entries),
-            "income_transaction_count": len(income_entries),
+            "expense_amount": _plain_money(_decimal_from_value(summary.get("expense_amount")) or Decimal("0.00")),
+            "income_amount": _plain_money(_decimal_from_value(summary.get("income_amount")) or Decimal("0.00")),
+            "expense_transaction_count": int(summary.get("expense_transaction_count") or 0),
+            "income_transaction_count": int(summary.get("income_transaction_count") or 0),
         }
-
-    @staticmethod
-    def _project_aggregate_rows(entries: list[dict[str, Any]], *, aggregate_by: str) -> list[dict[str, Any]]:
-        buckets: dict[tuple[str, str, str, str], dict[str, Any]] = {}
-        for entry in entries:
-            period_label = (entry["trade_time"] or "")[:7] if aggregate_by == "month" else (entry["trade_time"] or "")[:4]
-            key = (period_label, entry["project_name"], entry["expense_type"], entry["expense_content"])
-            bucket = buckets.setdefault(
-                key,
-                {
-                    "period_label": period_label or "—",
-                    "project_name": entry["project_name"],
-                    "expense_type": entry["expense_type"],
-                    "expense_content": entry["expense_content"],
-                    "amount_decimal": Decimal("0.00"),
-                    "transaction_count": 0,
-                },
-            )
-            bucket["amount_decimal"] = bucket["amount_decimal"] + entry["amount_decimal"]
-            bucket["transaction_count"] = int(bucket["transaction_count"]) + 1
-        return [
-            {**bucket, "amount": _plain_money(bucket["amount_decimal"])}
-            for bucket in sorted(
-                buckets.values(),
-                key=lambda item: (item["period_label"], item["project_name"], item["expense_type"], item["expense_content"]),
-            )
-        ]
 
     @staticmethod
     def _build_expense_type_label(expense_types: set[str]) -> str:
@@ -1244,10 +1902,9 @@ class CostStatisticsQueryService:
         return sheet_names
 
     @staticmethod
-    def _table_workbook(title: str, headers: list[str], rows: list[list[Any]]) -> Workbook:
-        workbook = Workbook()
-        sheet = workbook.active
-        sheet.title = title
+    def _table_workbook(title: str, headers: list[str], rows: Any) -> Workbook:
+        workbook = Workbook(write_only=True)
+        sheet = workbook.create_sheet(title)
         sheet.append(headers)
         for row in rows:
             sheet.append(row)
@@ -1255,12 +1912,12 @@ class CostStatisticsQueryService:
             sheet.column_dimensions[chr(64 + index)].width = 18
         return workbook
 
-    def _project_detail_workbook(
+    def _project_detail_workbook_from_export_pages(
         self,
         *,
         month: str,
         project_name: str,
-        entries: list[dict[str, Any]],
+        entries: Any,
         include_oa_details: bool,
         include_invoice_details: bool,
         include_exception_rows: bool,
@@ -1268,9 +1925,8 @@ class CostStatisticsQueryService:
         include_expense_content_summary: bool,
         scope_label: str,
     ) -> Workbook:
-        workbook = Workbook()
-        intro_sheet = workbook.active
-        intro_sheet.title = "导出说明"
+        workbook = Workbook(write_only=True)
+        intro_sheet = workbook.create_sheet("导出说明")
         self._fill_key_value_sheet(
             intro_sheet,
             [
@@ -1281,44 +1937,43 @@ class CostStatisticsQueryService:
                 ("导出结构", "项目汇总、费用类型汇总、流水明细"),
             ],
         )
-        total_amount = sum((entry["amount_decimal"] for entry in entries), start=Decimal("0.00"))
         summary_sheet = workbook.create_sheet("项目汇总")
-        self._fill_key_value_sheet(
-            summary_sheet,
-            [
-                ("项目名称", project_name),
-                ("统计期间", scope_label),
-                ("总支出金额", _plain_money(total_amount)),
-                ("支出流水笔数", len(entries)),
-                ("费用类型数", len({entry["expense_type"] for entry in entries})),
-                ("已关联OA笔数", 0),
-                ("已关联发票笔数", 0),
-                ("已处理异常笔数", 0),
-                ("已忽略笔数", 0),
-            ],
-        )
-        expense_type_rows, expense_content_rows = self._project_summary_rows(entries)
-        self._append_table_sheet(
-            workbook.create_sheet("按费用类型汇总"),
-            ["费用类型", "金额", "占比", "笔数", "费用内容数"],
-            [
-                [row["expense_type"], row["total_amount"], row["percentage"], row["transaction_count"], row["expense_content_count"]]
-                for row in expense_type_rows
-            ],
-        )
-        if include_expense_content_summary:
-            self._append_table_sheet(
-                workbook.create_sheet("按费用内容汇总"),
-                ["费用类型", "费用内容", "金额", "笔数"],
-                [
-                    [row["expense_type"], row["expense_content"], row["total_amount"], row["transaction_count"]]
-                    for row in expense_content_rows
-                ],
+        expense_type_sheet = workbook.create_sheet("按费用类型汇总")
+        expense_content_sheet = workbook.create_sheet("按费用内容汇总") if include_expense_content_summary else None
+        detail_sheet = workbook.create_sheet("流水明细")
+        detail_headers = ["时间", "交易流水ID", "资金方向", "对方户名", "支付账户", "金额", "备注", "项目名称", "费用类型", "费用内容", "OA单号", "关联组ID"]
+        detail_sheet.append(detail_headers)
+        for index in range(1, len(detail_headers) + 1):
+            detail_sheet.column_dimensions[chr(64 + index)].width = 18
+        if include_oa_details:
+            self._append_table_sheet(workbook.create_sheet("OA关联明细"), ["OA单号", "申请人", "项目名称", "费用类型", "费用内容", "OA金额", "关联组ID"], [])
+        if include_invoice_details:
+            self._append_table_sheet(workbook.create_sheet("发票关联明细"), ["发票号码", "销方名称", "购方名称", "发票金额", "税额", "项目名称", "关联状态", "关联组ID"], [])
+        if include_exception_rows or include_ignored_rows:
+            self._append_table_sheet(workbook.create_sheet("异常与未闭环"), ["记录类型", "记录ID", "项目名称", "费用类型", "金额", "状态", "备注"], [])
+
+        total_amount = Decimal("0.00")
+        transaction_count = 0
+        type_buckets: dict[str, dict[str, Any]] = {}
+        content_buckets: dict[tuple[str, str], dict[str, Any]] = {}
+        for entry in entries:
+            total_amount += entry["amount_decimal"]
+            transaction_count += 1
+            type_bucket = type_buckets.setdefault(
+                entry["expense_type"],
+                {"amount_decimal": Decimal("0.00"), "transaction_count": 0, "expense_contents": set()},
             )
-        self._append_table_sheet(
-            workbook.create_sheet("流水明细"),
-            ["时间", "交易流水ID", "资金方向", "对方户名", "支付账户", "金额", "备注", "项目名称", "费用类型", "费用内容", "OA单号", "关联组ID"],
-            [
+            type_bucket["amount_decimal"] += entry["amount_decimal"]
+            type_bucket["transaction_count"] += 1
+            type_bucket["expense_contents"].add(entry["expense_content"])
+            content_key = (entry["expense_type"], entry["expense_content"])
+            content_bucket = content_buckets.setdefault(
+                content_key,
+                {"amount_decimal": Decimal("0.00"), "transaction_count": 0},
+            )
+            content_bucket["amount_decimal"] += entry["amount_decimal"]
+            content_bucket["transaction_count"] += 1
+            detail_sheet.append(
                 [
                     entry["trade_time"],
                     entry["transaction_id"],
@@ -1333,70 +1988,53 @@ class CostStatisticsQueryService:
                     "—",
                     "—",
                 ]
-                for entry in entries
+            )
+
+        self._fill_key_value_sheet(
+            summary_sheet,
+            [
+                ("项目名称", project_name),
+                ("统计期间", scope_label),
+                ("总支出金额", _plain_money(total_amount)),
+                ("支出流水笔数", transaction_count),
+                ("费用类型数", len(type_buckets)),
+                ("已关联OA笔数", 0),
+                ("已关联发票笔数", 0),
+                ("已处理异常笔数", 0),
+                ("已忽略笔数", 0),
             ],
         )
-        if include_oa_details:
-            self._append_table_sheet(workbook.create_sheet("OA关联明细"), ["OA单号", "申请人", "项目名称", "费用类型", "费用内容", "OA金额", "关联组ID"], [])
-        if include_invoice_details:
-            self._append_table_sheet(workbook.create_sheet("发票关联明细"), ["发票号码", "销方名称", "购方名称", "发票金额", "税额", "项目名称", "关联状态", "关联组ID"], [])
-        if include_exception_rows or include_ignored_rows:
-            self._append_table_sheet(workbook.create_sheet("异常与未闭环"), ["记录类型", "记录ID", "项目名称", "费用类型", "金额", "状态", "备注"], [])
+        self._append_table_sheet(
+            expense_type_sheet,
+            ["费用类型", "金额", "占比", "笔数", "费用内容数"],
+            (
+                [
+                    expense_type,
+                    _plain_money(bucket["amount_decimal"]),
+                    _percentage(bucket["amount_decimal"], total_amount),
+                    bucket["transaction_count"],
+                    len(bucket["expense_contents"]),
+                ]
+                for expense_type, bucket in sorted(
+                    type_buckets.items(),
+                    key=lambda item: (-item[1]["amount_decimal"], item[0]),
+                )
+            ),
+        )
+        if include_expense_content_summary:
+            assert expense_content_sheet is not None
+            self._append_table_sheet(
+                expense_content_sheet,
+                ["费用类型", "费用内容", "金额", "笔数"],
+                [
+                    [expense_type, expense_content, _plain_money(bucket["amount_decimal"]), bucket["transaction_count"]]
+                    for (expense_type, expense_content), bucket in sorted(
+                        content_buckets.items(),
+                        key=lambda item: (-item[1]["amount_decimal"], item[0][0], item[0][1]),
+                    )
+                ],
+            )
         return workbook
-
-    @staticmethod
-    def _project_summary_rows(entries: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        total_amount = sum((entry["amount_decimal"] for entry in entries), start=Decimal("0.00"))
-        type_buckets: dict[str, dict[str, Any]] = {}
-        content_buckets: dict[tuple[str, str], dict[str, Any]] = {}
-        for entry in entries:
-            type_bucket = type_buckets.setdefault(
-                entry["expense_type"],
-                {
-                    "expense_type": entry["expense_type"],
-                    "amount_decimal": Decimal("0.00"),
-                    "transaction_count": 0,
-                    "expense_contents": set(),
-                },
-            )
-            type_bucket["amount_decimal"] = type_bucket["amount_decimal"] + entry["amount_decimal"]
-            type_bucket["transaction_count"] = int(type_bucket["transaction_count"]) + 1
-            type_bucket["expense_contents"].add(entry["expense_content"])
-            content_key = (entry["expense_type"], entry["expense_content"])
-            content_bucket = content_buckets.setdefault(
-                content_key,
-                {
-                    "expense_type": entry["expense_type"],
-                    "expense_content": entry["expense_content"],
-                    "amount_decimal": Decimal("0.00"),
-                    "transaction_count": 0,
-                },
-            )
-            content_bucket["amount_decimal"] = content_bucket["amount_decimal"] + entry["amount_decimal"]
-            content_bucket["transaction_count"] = int(content_bucket["transaction_count"]) + 1
-        type_rows = [
-            {
-                "expense_type": bucket["expense_type"],
-                "total_amount": _plain_money(bucket["amount_decimal"]),
-                "percentage": _percentage(bucket["amount_decimal"], total_amount),
-                "transaction_count": bucket["transaction_count"],
-                "expense_content_count": len(bucket["expense_contents"]),
-            }
-            for bucket in sorted(type_buckets.values(), key=lambda item: (-item["amount_decimal"], item["expense_type"]))
-        ]
-        content_rows = [
-            {
-                "expense_type": bucket["expense_type"],
-                "expense_content": bucket["expense_content"],
-                "total_amount": _plain_money(bucket["amount_decimal"]),
-                "transaction_count": bucket["transaction_count"],
-            }
-            for bucket in sorted(
-                content_buckets.values(),
-                key=lambda item: (-item["amount_decimal"], item["expense_type"], item["expense_content"]),
-            )
-        ]
-        return type_rows, content_rows
 
     @staticmethod
     def _transaction_workbook(payload: dict[str, Any]) -> Workbook:
@@ -1433,7 +2071,7 @@ class CostStatisticsQueryService:
         sheet.column_dimensions["B"].width = 52
 
     @staticmethod
-    def _append_table_sheet(sheet: Any, headers: list[str], rows: list[list[Any]]) -> None:
+    def _append_table_sheet(sheet: Any, headers: list[str], rows: Any) -> None:
         sheet.append(headers)
         for row in rows:
             sheet.append(row)

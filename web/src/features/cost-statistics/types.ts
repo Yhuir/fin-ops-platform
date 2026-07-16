@@ -28,11 +28,12 @@ export type CostTimeRow = {
   bankTagLabelPath: string[];
 };
 
-export type CostBankAccount = {
+export type CostBankExplorerRow = {
   paymentAccountLabel: string;
-  bankName?: string;
-  accountLast4?: string;
-  source?: string;
+  totalAmount: string;
+  transactionCount: number;
+  projectCount: number;
+  percentageLabel: string;
 };
 
 export type CostProjectExplorerRow = {
@@ -48,55 +49,62 @@ export type CostExpenseTypeExplorerRow = {
   totalAmount: string;
   transactionCount: number;
   projectCount: number;
+  percentageLabel: string;
 };
 
-export type CostStatisticsExplorer = {
-  month: string;
+export type CostBankTagPrimaryExplorerRow = {
+  primaryLabel: string;
+  expenseAmount: string;
+  incomeAmount: string;
+  expenseTransactionCount: number;
+  incomeTransactionCount: number;
+  subTagCount: number;
+};
+
+export type CostBankTagSubExplorerRow = {
+  primaryLabel: string;
+  subLabel: string;
+  expenseAmount: string;
+  incomeAmount: string;
+  expenseTransactionCount: number;
+  incomeTransactionCount: number;
+};
+
+export type CostStatisticsView = "time" | "project" | "bank" | "expense_type" | "bank_tag";
+
+export type CostStatisticsExplorerPage = {
+  scope: string;
+  view: CostStatisticsView;
   summary: CostSummary;
-  timeRows: CostTimeRow[];
-  bankFlowSummary: CostSummary;
-  bankFlowTimeRows: CostTimeRow[];
-  bankAccounts: CostBankAccount[];
-  projectRows: CostProjectExplorerRow[];
-  expenseTypeRows: CostExpenseTypeExplorerRow[];
+  availableYears: string[];
+  facets: {
+    projects: CostProjectExplorerRow[];
+    expenseTypes: CostExpenseTypeExplorerRow[];
+    bankAccounts: CostBankExplorerRow[];
+    bankTagPrimary: CostBankTagPrimaryExplorerRow[];
+    bankTagSub: CostBankTagSubExplorerRow[];
+  };
+  rows: CostTimeRow[];
+  rowCount: number;
+  nextCursor?: string;
   readModelStatus?: "fresh" | "refreshing" | "stale" | "unavailable" | (string & {});
   readModelScopeKey?: string;
   readModelGeneratedAt?: string;
   readModelStaleReasons?: string[];
 };
 
-export type CostMonthSummaryRow = {
-  projectName: string;
-  expenseType: string;
-  expenseContent: string;
-  amount: string;
-  transactionCount: number;
-  sampleTransactionIds: string[];
-};
-
-export type CostMonthStatistics = {
-  month: string;
-  summary: CostSummary;
-  rows: CostMonthSummaryRow[];
-};
-
-export type CostProjectRow = {
-  transactionId: string;
-  tradeTime: string;
-  direction?: string;
+export type CostStatisticsExplorerPageRequest = {
+  scope: string;
+  view: CostStatisticsView;
+  projectScope?: CostProjectScope;
   projectName?: string;
-  expenseType: string;
-  expenseContent: string;
-  amount: string;
-  counterpartyName: string;
-  paymentAccountLabel: string;
-};
-
-export type CostProjectStatistics = {
-  month: string;
-  projectName: string;
-  summary: CostSummary;
-  rows: CostProjectRow[];
+  expenseType?: string;
+  paymentAccountLabel?: string;
+  bankTagPrimaryLabel?: string;
+  bankTagSubLabel?: string;
+  cursor?: string;
+  pageSize?: number;
+  signal?: AbortSignal;
 };
 
 export type CostTransactionDetail = {

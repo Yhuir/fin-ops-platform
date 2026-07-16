@@ -1,25 +1,23 @@
-# OA待付款核对 Spec-first E2E Coverage
+# OA 待付款核对 E2E Coverage
 
-本文件把 `e2e-spec.md` 的 OA 待付款 Browser 合同映射到自动化覆盖。
+日期：2026-07-16
 
-| Spec ID | 状态 | 当前覆盖 | 缺口/说明 |
+| Spec ID | 状态 | 自动化入口 | 说明 |
 | --- | --- | --- | --- |
-| `OA-PENDING-E2E-001` | `covered` | `web/e2e/oa-pending-payments-flow.spec.ts`、`web/src/test/OaPendingPaymentsPage.test.tsx` | Browser 已覆盖 completed 视图首屏、四分组表格、无横向滚动和基本数据展示；也覆盖 rows 首屏暂时 503 时错误 alert、错误态空行、普通空态消失、显式刷新后 rows/pagination 恢复。 |
-| `OA-PENDING-E2E-002` | `covered` | `web/e2e/oa-pending-payments-flow.spec.ts`、后端/API tests | Browser 已覆盖搜索、支付状态筛选、项目筛选、发票方筛选和交易时间排序进入 rows query。 |
-| `OA-PENDING-E2E-003` | `covered` | `web/e2e/oa-pending-payments-flow.spec.ts`、`web/src/test/OaPendingPaymentsPage.test.tsx` | Browser 已覆盖 OA/流水/发票详情 drawer 和规则 drawer；Vitest 覆盖规则保存成功后等待 `oa_pending_payment` operation barrier，再刷新 rows。 |
-| `OA-PENDING-E2E-004` | `covered` | `web/e2e/workbench-relations-oa-pending-fanout.spec.ts`、`tests/test_oa_pending_payment_api.py` | Browser/后端回归已证明只有 active linked relation 会进入已关联付款证据，非正式输入不能驱动 `已支付` 或自动写回。 |
-| `OA-PENDING-E2E-005` | `covered` | `web/e2e/workbench-relations-oa-pending-fanout.spec.ts`、`web/e2e/fixtures/apiMocks.ts` | Browser 已证明 Workbench confirm 后返回 OA 待付款重新请求 rows，目标行变为 `已支付`，候选消失并显示 `关联台已确认`。 |
-| `OA-PENDING-E2E-006` | `covered` | `web/e2e/oa-pending-payments-confirm-paid-flow.spec.ts`、`web/src/test/OaPendingPaymentsPage.test.tsx`、`tests/test_oa_pending_payment_command_service.py`、`tests/test_oa_pending_payment_api.py` | Browser 已覆盖进行中 OA 切换、首屏不自动写、支付状态为 `已支付` 且写回状态为 `未写回` 时显示行内“写回”、点击后单次 `writeback-paid` 请求、rows/read model 重新请求后 `已写回` 并隐藏按钮、后端 409 失败可见且不半写；Vitest 锁定写回成功后等待 `oa_pending_payment` operation barrier 再刷新 rows。真实 OA MySQL/worker drain 仍归入 staging documented-risk。 |
-| `OA-PENDING-E2E-007` | `covered` | `web/e2e/oa-pending-payments-bank-link-flow.spec.ts`、`web/src/test/OaPendingPaymentsPage.test.tsx`、`tests/test_oa_pending_payment_command_service.py`、`tests/test_oa_pending_payment_api.py`、`tests/test_workbench_sql_runtime.py`、`tests/test_workbench_relation_sql_projection.py` | Browser 已覆盖进行中 OA 勾选、关联支出流水抽屉已配对/已关联进行中 OA 禁选、relation_status 筛选、提交 body、rows/read model 重新请求后 `已写回`、无人工写回按钮，以及 409 失败可见且不半写；Vitest/API/command 测试锁定抽屉候选请求携带已选 `oa_row_ids`，后端返回全部支出流水候选池并按全部、未配对、已配对、已关联进行中 OA 分类筛选；Vitest 锁定候选超过首屏时可分页浏览且翻页不丢 `oa_row_ids` / relation status；后端测试锁定 link-bank 创建 OA 待付款独立 pending relation 和 bank claim，不写 Workbench active relation，并锁定 Workbench active generation 和 relation projection 排除 active pending bank claim；Vitest 锁定 link-bank 成功后等待 `oa_pending_payment` operation barrier 再刷新 rows。真实 worker drain 仍归入 staging documented-risk。 |
-| `OA-PENDING-E2E-008` | `covered` | `web/e2e/oa-pending-payments-nonfresh-flow.spec.ts`、`web/e2e/oa-pending-payments-flow.spec.ts`、`web/src/test/OaPendingPaymentsPage.test.tsx`、`tests/test_oa_pending_payment_api.py`、`tests/test_invoice_usage_collection_sql_runtime.py` | Browser 已覆盖 rows `refreshing` 不显示真实空态、不泄露 stale reason，以及 detail 202 时 drawer 显示“详情暂不可用”；也覆盖 rows 暂时 503 时错误态不伪空态、手动刷新恢复 fresh rows。真实 worker drain 仍归入 staging documented-risk。 |
+| `OA-PENDING-E2E-001` | covered | `oa-pending-payments-flow.spec.ts`、`OaPendingPaymentsPage.test.tsx` | 单一 rows首屏、四分组、summary/filter/paging；旧 filter请求为0 |
+| `OA-PENDING-E2E-002` | covered | `oa-pending-payments-flow.spec.ts`、API/query tests | 搜索、筛选、排序、分页、view mode进入同一query |
+| `OA-PENDING-E2E-003` | covered | `oa-pending-payments-flow.spec.ts`、`oa-pending-payments-nonfresh-flow.spec.ts` | details惰性加载与non-fresh不可用 |
+| `OA-PENDING-E2E-004` | covered by component/API | `OaPendingPaymentsPage.test.tsx`、`test_oa_pending_payment_read_model_query.py` | 500ms检查、304、one-in-flight、query取消；Playwright网络计数为补充证据 |
+| `OA-PENDING-E2E-005` | covered locally | `oa-pending-payments-nonfresh-flow.spec.ts`、`OaPendingPaymentsPage.test.tsx` | 202隐藏旧rows、barrier、fresh重读；真实worker链待统一部署 |
+| `OA-PENDING-E2E-006` | covered locally | `oa-pending-payments-confirm-paid-flow.spec.ts`、command/API/component tests | 写回成功/409失败、barrier、新rows；真实MySQL+PG reconcile待统一部署 |
+| `OA-PENDING-E2E-007` | covered locally | `oa-pending-payments-bank-link-flow.spec.ts`、command/relation/Workbench tests | pending relation、候选限制、自动写回、Workbench隔离 |
+| `OA-PENDING-E2E-008` | covered by component | `OaPendingPaymentsPage.test.tsx` | visibility pause/resume、unmount/query cancellation |
+| `OA-PENDING-E2E-009` | covered by component/API | `OaPendingPaymentAuditIcon.test.tsx`、Audit repository/API tests | OA专属五态文案、issue samples、共享组件隔离 |
 
-## Operation latency baseline
+## 尚未完成的生产证据
 
-本轮已为 `web/e2e/oa-pending-payments-flow.spec.ts`、`web/e2e/oa-pending-payments-confirm-paid-flow.spec.ts`、`web/e2e/oa-pending-payments-bank-link-flow.spec.ts`、`web/e2e/oa-pending-payments-nonfresh-flow.spec.ts` 和 `web/e2e/workbench-relations-oa-pending-fanout.spec.ts` 接入 Playwright `operation-latency-*.json` 附件。
+- 真实 `PostgreSQL T0 -> durable queue -> oa-pending-payment worker -> browser T1` 至少200次样本。
+- 1000次fresh API和1000次304样本，以及生产数据量 `EXPLAIN (ANALYZE, BUFFERS)`。
+- OA sync全量回填、MySQL成功/PG失败故障演练、Page Audit最终pass。
 
-当前记录的操作覆盖：rows 加载失败后的刷新重试、搜索、支付状态/项目/发票方筛选打开和应用、交易时间排序、OA/流水/发票详情打开关闭、规则 drawer 打开、切换进行中 OA、逐行写回成功/失败、进行中 OA 勾选、关联支出流水 drawer、候选 relation_status 筛选、候选勾选、确认关联成功/失败、失败后关闭 drawer、rows/detail non-fresh 诊断页面打开、detail unavailable 打开，以及 Workbench confirm 后回到 OA 待付款刷新。
-
-## 下一轮补测建议
-
-1. 补真实基础设施 smoke：真实 OA Mongo/MySQL、PostgreSQL、RabbitMQ/Redis 和 `invoice-usage-collection` worker drain 下的 rows/detail non-fresh 恢复、逐行 `writeback-paid` 写回、link-bank 自动写回闭环。
-2. 继续补真实生产大数据、mutation 网络恢复和像素级视觉 smoke；本地 rows 首屏暂时失败恢复已覆盖。
+这些证据因用户要求“所有 task 完成后统一部署”而有意延后；本地mock结果不能替代生产SLO。

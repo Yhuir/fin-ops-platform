@@ -151,7 +151,7 @@ _CONSUMER_PATHS = {
     "input-invoice-usage": "/api/input-invoice-usage/rows?page=1&page_size=20",
     "output-invoice-collections": "/api/output-invoice-collections/rows?page=1&page_size=20",
     "oa-pending-payments": "/api/oa-pending-payments/rows?page=1&page_size=20",
-    "cost-statistics": "/api/cost-statistics/explorer?month=2026-07",
+    "cost-statistics": "/api/cost-statistics/explorer?scope=2026-07&view=time",
     "tax-offset": "/api/tax-offset?month=2026-07",
     "turnover-ledger": "/api/turnover-ledger?view=grouped&page=1&page_size=20",
 }

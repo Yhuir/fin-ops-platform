@@ -324,9 +324,13 @@ class ReadModelManifestTests(unittest.TestCase):
 
     def test_summary_read_model_physical_sql_owner_is_split_from_shared_repository(self) -> None:
         owned_methods = {
-            "load_cost_statistics_read_models",
+            "get_cost_statistics_scope_metadata",
+            "get_cost_statistics_freshness_gate",
+            "get_cost_statistics_page",
+            "get_cost_statistics_export_page",
             "get_cost_statistics_view",
-            "save_cost_statistics_read_models",
+            "get_cost_statistics_transaction",
+            "publish_cost_statistics_read_models",
             "load_tax_offset_read_models",
             "get_tax_offset_view",
             "save_tax_offset_read_models",
@@ -354,7 +358,7 @@ class ReadModelManifestTests(unittest.TestCase):
     def test_workbench_manifest_preserves_active_generation_exception(self) -> None:
         entry = READ_MODEL_MANIFEST["workbench"]
         required_active_generation_ports = {
-            "get_workbench_view",
+            "get_workbench_initial_page",
             "get_workbench_summary",
             "get_workbench_groups_page",
             "get_workbench_group_detail",
@@ -520,9 +524,14 @@ class ReadModelManifestTests(unittest.TestCase):
         tax_offset = READ_MODEL_MANIFEST["tax_offset"]
         turnover_ledger = READ_MODEL_MANIFEST["turnover_ledger"]
         required_cost_ports = {
-            "load_cost_statistics_read_models",
+            "get_cost_statistics_scope_metadata",
+            "get_cost_statistics_freshness_gate",
+            "get_cost_statistics_page",
+            "get_cost_statistics_export_page",
             "get_cost_statistics_view",
-            "save_cost_statistics_read_models",
+            "get_cost_statistics_transaction",
+            "active_workbench_source_versions",
+            "publish_cost_statistics_read_models",
         }
         required_tax_ports = {
             "load_tax_offset_read_models",

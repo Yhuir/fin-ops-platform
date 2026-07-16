@@ -51,6 +51,7 @@ class ReadModelApiContractHarnessTests(unittest.TestCase):
     def test_default_api_probes_expose_sanitized_local_envelopes(self) -> None:
         with self._default_test_auth(enabled=True), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
+            app._search_service._workbench_rows_loader = lambda _month: []  # noqa: SLF001
 
             required_keys_by_probe = {
                 "session_me": ("user", "allowed", "can_access_app"),

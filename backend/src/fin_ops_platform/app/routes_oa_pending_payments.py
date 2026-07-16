@@ -6,12 +6,13 @@ from urllib.parse import unquote
 
 from fin_ops_platform.services.oa_pending_payment_read_model_service import OaPendingPaymentReadModelService
 from fin_ops_platform.services.oa_pending_payment_command_service import OaPendingPaymentCommandService
-from fin_ops_platform.services.oa_pending_payment_service import OaPendingPaymentError, OaPendingPaymentQueryService
+from fin_ops_platform.services.oa_pending_payment_query_contract import OaPendingPaymentError
 
 
 ReadSessionResolver = Callable[[dict[str, str] | None], tuple[Any | None, Any | None]]
+ReadTenantResolver = Callable[[Any], str]
 WriteAuthContext = Callable[[dict[str, str] | None], tuple[str, str] | Any]
-JsonResponse = Callable[[HTTPStatus, object], Any]
+JsonResponse = Callable[..., Any]
 JsonBodyLoader = Callable[[str | bytes | None], tuple[dict[str, Any], Any | None]]
 ErrorResponse = Callable[[OaPendingPaymentError], Any]
 
@@ -19,20 +20,20 @@ ErrorResponse = Callable[[OaPendingPaymentError], Any]
 class OaPendingPaymentApiRoutes:
     def __init__(
         self,
-        query_service: OaPendingPaymentQueryService,
         *,
         read_model_service: OaPendingPaymentReadModelService | None = None,
         command_service: OaPendingPaymentCommandService | None = None,
         resolve_read_session: ReadSessionResolver | None = None,
+        resolve_read_tenant: ReadTenantResolver | None = None,
         write_auth_context: WriteAuthContext | None = None,
         json_response: JsonResponse | None = None,
         load_json_body: JsonBodyLoader | None = None,
         error_response: ErrorResponse | None = None,
     ) -> None:
-        self._query_service = query_service
         self._read_model_service = read_model_service
         self._command_service = command_service
         self._resolve_read_session = resolve_read_session
+        self._resolve_read_tenant = resolve_read_tenant
         self._write_auth_context = write_auth_context
         self._json_response = json_response
         self._load_json_body = load_json_body
@@ -42,12 +43,14 @@ class OaPendingPaymentApiRoutes:
         self,
         *,
         resolve_read_session: ReadSessionResolver,
+        resolve_read_tenant: ReadTenantResolver,
         write_auth_context: WriteAuthContext,
         json_response: JsonResponse,
         load_json_body: JsonBodyLoader,
         error_response: ErrorResponse,
     ) -> "OaPendingPaymentApiRoutes":
         self._resolve_read_session = resolve_read_session
+        self._resolve_read_tenant = resolve_read_tenant
         self._write_auth_context = write_auth_context
         self._json_response = json_response
         self._load_json_body = load_json_body
@@ -63,23 +66,28 @@ class OaPendingPaymentApiRoutes:
         headers: dict[str, str] | None,
     ) -> Any | None:
         if method == "GET" and route_path == "/api/oa-pending-payments/rows":
-            return self._json_read(headers, lambda: self.rows(query))
-        if method == "GET" and route_path == "/api/oa-pending-payments/filter-options":
-            return self._json_read(headers, lambda: self.filter_options(query))
+            return self._json_read(
+                headers,
+                lambda session: self._conditional_rows(
+                    query,
+                    tenant_id=self._tenant_id(session),
+                    if_none_match=_header(headers, "if-none-match"),
+                ),
+            )
         if method == "GET" and route_path == "/api/oa-pending-payments/bank-transaction-candidates":
-            return self._json_read(headers, lambda: (HTTPStatus.OK, self.bank_transaction_candidates(query)))
+            return self._json_read(headers, lambda _session: (HTTPStatus.OK, self.bank_transaction_candidates(query)))
         if method == "GET" and route_path.startswith("/api/oa-pending-payments/oa/") and route_path.endswith("/detail"):
             oa_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._json_read(headers, lambda: self._detail_response(self.oa_detail(oa_id)))
+            return self._json_read(headers, lambda _session: self._detail_response(self.oa_detail(oa_id)))
         if method == "GET" and route_path.startswith("/api/oa-pending-payments/bank-transactions/") and route_path.endswith("/detail"):
             bank_transaction_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._json_read(headers, lambda: self._detail_response(self.bank_transaction_detail(bank_transaction_id)))
+            return self._json_read(headers, lambda _session: self._detail_response(self.bank_transaction_detail(bank_transaction_id)))
         if method == "GET" and route_path.startswith("/api/oa-pending-payments/invoices/") and route_path.endswith("/detail"):
             invoice_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._json_read(headers, lambda: self._detail_response(self.invoice_detail(invoice_id)))
+            return self._json_read(headers, lambda _session: self._detail_response(self.invoice_detail(invoice_id)))
         if method == "GET" and route_path.startswith("/api/oa-pending-payments/rows/") and route_path.endswith("/relation-details"):
             row_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._json_read(headers, lambda: self._detail_response(self.relation_details(row_id, query)))
+            return self._json_read(headers, lambda _session: self._detail_response(self.relation_details(row_id, query)))
         if method == "POST" and route_path == "/api/oa-pending-payments/writeback-paid":
             return self._json_write(body, headers, lambda payload, actor_id: self.writeback_paid(payload, actor_id=actor_id))
         if method == "POST" and route_path == "/api/oa-pending-payments/link-bank-transactions":
@@ -87,11 +95,32 @@ class OaPendingPaymentApiRoutes:
         return None
 
     def rows(self, query: dict[str, list[str]]) -> tuple[HTTPStatus, dict[str, Any]]:
-        payload = self._read_model_service_required().rows(query)
-        return _read_model_status_code(payload), payload
+        read = self._read_model_service_required().conditional_rows(
+            query,
+            tenant_id="default",
+            if_none_match=None,
+        )
+        return read.status, read.payload
 
-    def filter_options(self, query: dict[str, list[str]]) -> tuple[HTTPStatus, dict[str, Any]]:
-        return self._read_model_service_required().filter_options(query)
+    def _conditional_rows(
+        self,
+        query: dict[str, list[str]],
+        *,
+        tenant_id: str,
+        if_none_match: str | None,
+    ) -> tuple[HTTPStatus, dict[str, Any], dict[str, str]]:
+        read = self._read_model_service_required().conditional_rows(
+            query,
+            tenant_id=tenant_id,
+            if_none_match=if_none_match,
+        )
+        response_headers = {
+            "Cache-Control": "private, no-cache",
+            "Vary": "Authorization, Cookie",
+        }
+        if read.etag:
+            response_headers["ETag"] = read.etag
+        return read.status, read.payload, response_headers
 
     def oa_detail(self, oa_id: str) -> dict[str, Any]:
         return self._read_model_service_required().oa_detail(oa_id)
@@ -120,17 +149,19 @@ class OaPendingPaymentApiRoutes:
             raise RuntimeError("OA pending payment command service is not configured.")
         return self._command_service.bank_transaction_candidates(query)
 
-    def _json_read(self, headers: dict[str, str] | None, action: Callable[[], tuple[HTTPStatus, dict[str, Any]]]) -> Any:
-        _session, auth_error = self._read_session(headers)
+    def _json_read(self, headers: dict[str, str] | None, action: Callable[[Any], tuple[Any, ...]]) -> Any:
+        session, auth_error = self._read_session(headers)
         if auth_error is not None:
             return auth_error
         try:
-            status_code, payload = action()
+            result = action(session)
+            status_code, payload = result[:2]
+            response_headers = result[2] if len(result) > 2 and isinstance(result[2], dict) else None
         except OaPendingPaymentError as exc:
             return self._error(exc)
         except RuntimeError as exc:
             return self._command_unavailable(exc)
-        return self._json(status_code, payload)
+        return self._json(status_code, payload, response_headers=response_headers)
 
     def _json_write(
         self,
@@ -160,6 +191,11 @@ class OaPendingPaymentApiRoutes:
             return None, None
         return self._resolve_read_session(headers)
 
+    def _tenant_id(self, session: Any) -> str:
+        if not callable(self._resolve_read_tenant):
+            return "default"
+        return str(self._resolve_read_tenant(session) or "default").strip() or "default"
+
     def _write_auth(self, headers: dict[str, str] | None) -> tuple[str, str] | Any:
         if not callable(self._write_auth_context):
             raise RuntimeError("OA pending payment write auth is not configured.")
@@ -173,9 +209,17 @@ class OaPendingPaymentApiRoutes:
             raise RuntimeError("OA pending payment read model service is not configured.")
         return self._read_model_service
 
-    def _json(self, status_code: HTTPStatus, payload: object) -> Any:
+    def _json(
+        self,
+        status_code: HTTPStatus,
+        payload: object,
+        *,
+        response_headers: dict[str, str] | None = None,
+    ) -> Any:
         if not callable(self._json_response):
-            return status_code, payload
+            return (status_code, payload, response_headers) if response_headers else (status_code, payload)
+        if response_headers:
+            return self._json_response(status_code, payload, response_headers)
         return self._json_response(status_code, payload)
 
     def _error(self, exc: OaPendingPaymentError) -> Any:
@@ -198,3 +242,11 @@ class OaPendingPaymentApiRoutes:
 
 def _read_model_status_code(payload: dict[str, Any]) -> HTTPStatus:
     return HTTPStatus.ACCEPTED if payload.get("read_model_status") == "refreshing" else HTTPStatus.OK
+
+
+def _header(headers: dict[str, str] | None, name: str) -> str | None:
+    normalized_name = name.lower()
+    for key, value in dict(headers or {}).items():
+        if str(key).lower() == normalized_name:
+            return str(value)
+    return None

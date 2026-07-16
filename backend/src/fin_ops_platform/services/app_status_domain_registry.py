@@ -91,7 +91,7 @@ APP_STATUS_DOMAIN_REGISTRY: tuple[AppStatusDomainDefinition, ...] = (
         label="OA待付款核对",
         route="/oa-pending-payments",
         read_model_keys=("oa_pending_payment", "invoice_lifecycle"),
-        worker_instances=("invoice-usage-collection", "invoice-lifecycle", "invoice-lifecycle-secondary", "oa-sync"),
+        worker_instances=("oa-pending-payment", "invoice-lifecycle", "invoice-lifecycle-secondary", "oa-sync"),
         job_types=("oa_pending_payment.read_model.refresh", "invoice_lifecycle.read_model.refresh", "oa.sync"),
         dependencies=("oa_sync",),
     ),

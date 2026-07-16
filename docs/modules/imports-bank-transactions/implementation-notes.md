@@ -128,7 +128,7 @@
 - 影响范围：`web/e2e/imports-bank-transactions-flow.spec.ts`、`web/e2e/fixtures/apiMocks.ts`、`docs/modules/imports-bank-transactions/e2e-spec.md`、`e2e-coverage.md`、`tests.md`、本实施记录和全局 Spec-first inventory/closure state。
 - 关键决策：只加固 deterministic Browser E2E 和 mock，不改后端导入业务逻辑；mock 新增无账户冲突模式用于精确模拟 stale/失败，成功流仍保留账户冲突弹窗。
 - 文档影响：新增 `e2e-spec.md` 和 `e2e-coverage.md`，更新 README、tests 和本实施记录，并同步全局 Spec-first 文档。
-- 测试覆盖：`web/e2e/imports-bank-transactions-flow.spec.ts` 从 1 条扩展到 3 条，覆盖成功预览/冲突/下游银行明细、重复项明细、`preview_stale` 无 job/无 Workbench refresh、confirm 失败错误可见且不显示成功。
+- 测试覆盖：`web/e2e/imports-bank-transactions-flow.spec.ts` 覆盖成功预览/冲突/下游银行明细、重复项明细、显式 operation barrier 等待、零 Workbench 页面请求，以及 `preview_stale`/confirm 失败时零 barrier 且不显示成功；`ImportCenterPage.test.tsx` 另覆盖空 targets 直接完成。
 - 验证命令：`cd web && npx playwright test e2e/imports-bank-transactions-flow.spec.ts --project=chromium`。
 - 未测风险：真实银行大文件、真实 PostgreSQL/RabbitMQ/Redis/systemd import worker drain、job retry/crash、真实 Workbench matching 和下游 read model fresh 仍需 staging/生产只读 smoke。
 - 后续事项：补真实 worker drain smoke；继续给 `imports-invoices` 和 `imports-etc-invoices` 建立同等 Spec-first E2E coverage。

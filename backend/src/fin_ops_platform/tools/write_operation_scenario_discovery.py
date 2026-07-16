@@ -605,7 +605,7 @@ def _bank_relation_fanout_probes(month: str) -> list[dict[str, Any]]:
         },
         {
             "name": "cost_statistics_explorer",
-            "path": f"/api/cost-statistics/explorer?month={quote(month_scope, safe='')}&project_scope=active",
+            "path": f"/api/cost-statistics/explorer?scope={quote(month_scope, safe='')}&view=time&project_scope=active",
             "expected_statuses": [200, 202],
             "target_ms": 1000,
         },

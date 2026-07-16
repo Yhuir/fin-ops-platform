@@ -369,7 +369,31 @@ function workbenchReadModelStatusMessage(status: string | null, lastError?: stri
   if (status === "unavailable") {
     return "关联台读模型不可用";
   }
+  if (status === "refreshing") {
+    return "关联台正在刷新，当前显示上一版稳定数据；刷新完成前写操作已禁用。";
+  }
+  if (status === "stale") {
+    return "关联台数据已过期，当前结果仅供查看；刷新完成前写操作已禁用。";
+  }
   return null;
+}
+
+function workbenchActiveReadModelVersion(pages: Record<"paired" | "unpaired", WorkbenchZonePageInfo>) {
+  const pairedVersion = String(pages.paired.readModelVersion ?? "").trim();
+  const unpairedVersion = String(pages.unpaired.readModelVersion ?? "").trim();
+  return pairedVersion && pairedVersion === unpairedVersion ? pairedVersion : "";
+}
+
+function isWorkbenchReadModelRejected(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const code = String((error as { code?: unknown }).code ?? "").trim();
+  return (
+    code === "workbench_read_model_version_conflict"
+    || code === "workbench_read_model_not_fresh"
+    || code === "workbench_stale"
+  );
 }
 
 function delayWorkbenchOperationPoll() {
@@ -399,7 +423,6 @@ export default function ReconciliationWorkbenchPage() {
   const { canAdminAccess, canMutateData } = useSessionPermissions();
   const { active } = useOptionalPageActivation("reconciliation-workbench");
   const isOaSyncWriteBlocked = healthStatus.sources.oaSync === "dirty" || healthStatus.sources.oaSync === "refreshing";
-  const canWriteWorkbench = canMutateData && canMutateWithHealth && !isOaSyncWriteBlocked;
   const {
     detailRow,
     getRowState,
@@ -425,6 +448,13 @@ export default function ReconciliationWorkbenchPage() {
     unpaired: [],
   });
   const [zonePages, setZonePages] = useState<Record<"paired" | "unpaired", WorkbenchZonePageInfo>>(() => createInitialZonePages());
+  const workbenchPageReadModelStatus = workbenchZonePagesReadModelStatus(zonePages);
+  const activeWorkbenchReadModelVersion = workbenchActiveReadModelVersion(zonePages);
+  const canWriteWorkbench = canMutateData
+    && canMutateWithHealth
+    && !isOaSyncWriteBlocked
+    && workbenchPageReadModelStatus === "fresh"
+    && Boolean(activeWorkbenchReadModelVersion);
   const [loadingMoreZone, setLoadingMoreZone] = useState<"paired" | "unpaired" | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -440,6 +470,8 @@ export default function ReconciliationWorkbenchPage() {
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const detailRequestSeqRef = useRef(0);
+  const loadRequestSeqRef = useRef(0);
+  const activeWorkbenchReadModelVersionRef = useRef("");
   const [lastActionMessage, setLastActionMessage] = useState<string | null>(null);
   const [expandedZoneId, setExpandedZoneId] = useState<"paired" | "unpaired" | null>(null);
   const [actionDialog, setActionDialog] = useState<ActionDialogState | null>(null);
@@ -819,6 +851,23 @@ export default function ReconciliationWorkbenchPage() {
     workbenchPayload: WorkbenchInitialPageResult,
     resolvedZoneQueries: Record<"paired" | "unpaired", WorkbenchGroupsPageQuery>,
   ) {
+    const nextVersion = workbenchActiveReadModelVersion(workbenchPayload.pages);
+    const previousVersion = activeWorkbenchReadModelVersionRef.current;
+    if (previousVersion && nextVersion && previousVersion !== nextVersion) {
+      detailRequestSeqRef.current += 1;
+      clearSelection();
+      closeDetail();
+      setDetailError(null);
+      setIsDetailLoading(false);
+      setSelectionSourceGroups({ paired: [], unpaired: [] });
+      setExpandedZoneId(null);
+      setActionDialog(null);
+      setRelationPreviewDialog(null);
+      setWorkbenchExceptionDialog(null);
+      setCashTicketPurchaseDialog(null);
+      setCancelProcessedExceptionDialog(null);
+    }
+    activeWorkbenchReadModelVersionRef.current = nextVersion;
     setWorkbenchData(workbenchPayload.data);
     setLoadedZoneServerPageQueryKeys(createWorkbenchZoneServerPageQueryKeys(resolvedZoneQueries));
     setZonePages(workbenchPayload.pages);
@@ -835,6 +884,8 @@ export default function ReconciliationWorkbenchPage() {
       deferStateApply?: boolean;
     },
   ): Promise<WorkbenchInitialPageResult | null> {
+    const requestSeq = loadRequestSeqRef.current + 1;
+    loadRequestSeqRef.current = requestSeq;
     const background = options?.background ?? false;
     const includeAuxiliary = options?.includeAuxiliary ?? false;
     const deferStateApply = options?.deferStateApply ?? false;
@@ -863,7 +914,7 @@ export default function ReconciliationWorkbenchPage() {
         },
         resolvedZoneQueries,
       );
-      if (signal?.aborted) {
+      if (signal?.aborted || loadRequestSeqRef.current !== requestSeq) {
         return null;
       }
       if (!deferStateApply) {
@@ -880,7 +931,7 @@ export default function ReconciliationWorkbenchPage() {
       }
       return workbenchPayload;
     } catch (error) {
-      if (signal?.aborted) {
+      if (signal?.aborted || loadRequestSeqRef.current !== requestSeq) {
         return null;
       }
       const normalizedError = error instanceof Error && error.message
@@ -888,6 +939,7 @@ export default function ReconciliationWorkbenchPage() {
         : new Error("工作台数据加载失败，请稍后重试。");
       if (!background) {
         setWorkbenchData(null);
+        activeWorkbenchReadModelVersionRef.current = "";
         setLoadedZoneServerPageQueryKeys(null);
         setZonePages(createInitialZonePages());
         setIgnoredData({ month, rows: [] });
@@ -967,6 +1019,11 @@ export default function ReconciliationWorkbenchPage() {
     if (!workbenchData || !pageInfo.hasMore || loadingMoreZone) {
       return;
     }
+    const expectedReadModelVersion = activeWorkbenchReadModelVersionRef.current;
+    if (!expectedReadModelVersion) {
+      setLastActionMessage("数据版本尚未就绪，请刷新后重试。");
+      return;
+    }
     setLoadingMoreZone(zone);
     try {
       const result = await fetchWorkbenchGroupsPage(
@@ -976,7 +1033,19 @@ export default function ReconciliationWorkbenchPage() {
         pageInfo.pageSize,
         undefined,
         { ...zoneServerPageQueries[zone], detailLevel: "summary" },
+        expectedReadModelVersion,
       );
+      if (
+        activeWorkbenchReadModelVersionRef.current !== expectedReadModelVersion
+        || result.page.readModelVersion !== expectedReadModelVersion
+      ) {
+        await loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
+          background: true,
+          includeAuxiliary: false,
+          zoneQueries: zoneServerPageQueries,
+        });
+        return;
+      }
       setWorkbenchData((current) => {
         if (!current) {
           return current;
@@ -992,8 +1061,17 @@ export default function ReconciliationWorkbenchPage() {
         ...current,
         [zone]: result.page,
       }));
-    } catch {
-      setLastActionMessage("加载更多关系分组失败，请稍后重试。");
+    } catch (error) {
+      if (isWorkbenchReadModelRejected(error)) {
+        await loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
+          background: true,
+          includeAuxiliary: false,
+          zoneQueries: zoneServerPageQueries,
+        });
+        setLastActionMessage("关联台数据版本已更新，页面已重新加载。");
+      } else {
+        setLastActionMessage("加载更多关系分组失败，请稍后重试。");
+      }
     } finally {
       setLoadingMoreZone(null);
     }
@@ -1004,7 +1082,7 @@ export default function ReconciliationWorkbenchPage() {
     if (!normalizedGroupId) {
       return;
     }
-    const expectedReadModelVersion = zonePages[zone].readModelVersion;
+    const expectedReadModelVersion = activeWorkbenchReadModelVersionRef.current;
     if (!expectedReadModelVersion) {
       setLastActionMessage("数据版本尚未就绪，请刷新后重试。");
       return;
@@ -1016,6 +1094,9 @@ export default function ReconciliationWorkbenchPage() {
         normalizedGroupId,
         expectedReadModelVersion,
       );
+      if (activeWorkbenchReadModelVersionRef.current !== expectedReadModelVersion) {
+        return;
+      }
       setWorkbenchData((current) => {
         if (!current) {
           return current;
@@ -1029,7 +1110,16 @@ export default function ReconciliationWorkbenchPage() {
           },
         };
       });
-    } catch {
+    } catch (error) {
+      if (isWorkbenchReadModelRejected(error)) {
+        await loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
+          background: true,
+          includeAuxiliary: false,
+          zoneQueries: zoneServerPageQueries,
+        });
+        setLastActionMessage("关联台数据版本已更新，页面已重新加载。");
+        return;
+      }
       setLastActionMessage("加载完整明细失败，请稍后重试。");
       throw new Error("workbench_group_detail_load_failed");
     }
@@ -1396,16 +1486,37 @@ export default function ReconciliationWorkbenchPage() {
     setDetailError(null);
     setIsDetailLoading(true);
     openDetail(row);
+    const expectedReadModelVersion = activeWorkbenchReadModelVersionRef.current;
+    if (!expectedReadModelVersion) {
+      setDetailError("数据版本尚未就绪，请刷新后重试。");
+      setIsDetailLoading(false);
+      return;
+    }
 
-    void fetchWorkbenchRowDetail(row.id, { month: WORKBENCH_VIEW_MONTH })
+    void fetchWorkbenchRowDetail(row.id, {
+      month: WORKBENCH_VIEW_MONTH,
+      expectedReadModelVersion,
+    })
       .then((detailedRow) => {
-        if (detailRequestSeqRef.current === requestSeq) {
+        if (
+          detailRequestSeqRef.current === requestSeq
+          && activeWorkbenchReadModelVersionRef.current === expectedReadModelVersion
+        ) {
           replaceDetailRow(detailedRow);
         }
       })
-      .catch(() => {
+      .catch((error) => {
         if (detailRequestSeqRef.current === requestSeq) {
-          setDetailError("详情加载失败，请稍后重试。");
+          if (isWorkbenchReadModelRejected(error)) {
+            void loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
+              background: true,
+              includeAuxiliary: false,
+              zoneQueries: zoneServerPageQueries,
+            });
+            setDetailError("关联台数据版本已更新，页面正在重新加载。");
+          } else {
+            setDetailError("详情加载失败，请稍后重试。");
+          }
         }
       })
       .finally(() => {
@@ -1413,7 +1524,7 @@ export default function ReconciliationWorkbenchPage() {
           setIsDetailLoading(false);
         }
       });
-  }, [openDetail, replaceDetailRow]);
+  }, [openDetail, replaceDetailRow, zoneServerPageQueries]);
 
   const handleCloseDetail = useCallback(() => {
     detailRequestSeqRef.current += 1;
@@ -1614,12 +1725,32 @@ export default function ReconciliationWorkbenchPage() {
     });
     if (outcome.status === "success") {
       setLastActionMessage(outcome.value);
+    } else if (isWorkbenchReadModelRejected(outcome.error)) {
+      await loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
+        background: true,
+        includeAuxiliary: false,
+        zoneQueries: zoneServerPageQueries,
+      });
+      setLastActionMessage("关联台数据版本已更新，页面已重新加载。");
     }
-  }, [executeWorkbenchActionWithFreshness, handleCloseDetail, runOperation]);
+  }, [executeWorkbenchActionWithFreshness, handleCloseDetail, loadWorkbenchData, runOperation, zoneServerPageQueries]);
+
+  const refreshAfterReadModelRejection = useCallback((error: unknown) => {
+    if (!isWorkbenchReadModelRejected(error)) {
+      return;
+    }
+    void loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
+      background: true,
+      includeAuxiliary: false,
+      zoneQueries: zoneServerPageQueries,
+    });
+    setLastActionMessage("关联台数据版本已更新，页面正在重新加载。");
+  }, [loadWorkbenchData, zoneServerPageQueries]);
 
   const openRelationPreviewErrorDialog = useCallback((error: unknown) => {
+    refreshAfterReadModelRejection(error);
     openActionResultDialog(actionErrorMessage(error), "操作失败");
-  }, [openActionResultDialog]);
+  }, [openActionResultDialog, refreshAfterReadModelRejection]);
 
   const handleWorkbenchExceptionApplied = useCallback(async (
     result: WorkbenchExceptionApplyResult,
@@ -1689,6 +1820,7 @@ export default function ReconciliationWorkbenchPage() {
           const result = await ignoreWorkbenchRow({
             month: WORKBENCH_VIEW_MONTH,
             rowId: row.id,
+            expectedReadModelVersion: activeWorkbenchReadModelVersionRef.current,
             comment: `由关联台忽略发票：${row.id}`,
           });
           return result;
@@ -1706,6 +1838,7 @@ export default function ReconciliationWorkbenchPage() {
           const result = await confirmWorkbenchCashPassThrough({
             month: WORKBENCH_VIEW_MONTH,
             rowIds,
+            expectedReadModelVersion: activeWorkbenchReadModelVersionRef.current,
             note: "由关联台确认现金往来过账",
           });
           return result;
@@ -1730,6 +1863,7 @@ export default function ReconciliationWorkbenchPage() {
           const result = await cancelWorkbenchCashSpecial({
             month: WORKBENCH_VIEW_MONTH,
             rowIds,
+            expectedReadModelVersion: activeWorkbenchReadModelVersionRef.current,
             note: "由关联台取消现金往来特殊处理",
           });
           return result;
@@ -1808,6 +1942,7 @@ export default function ReconciliationWorkbenchPage() {
         const result = await confirmWorkbenchCashTicketPurchase({
           month: WORKBENCH_VIEW_MONTH,
           rowIds,
+          expectedReadModelVersion: activeWorkbenchReadModelVersionRef.current,
           cashAmount,
           ticketCostAmount,
           projectName,
@@ -1838,6 +1973,7 @@ export default function ReconciliationWorkbenchPage() {
     const preview = await previewWorkbenchConfirmLink({
       month: WORKBENCH_VIEW_MONTH,
       rowIds,
+      expectedReadModelVersion: activeWorkbenchReadModelVersionRef.current,
     });
     setRelationPreviewDialog({ preview, rowIds });
   };
@@ -1847,6 +1983,7 @@ export default function ReconciliationWorkbenchPage() {
     const preview = await previewWorkbenchWithdrawLink({
       month: WORKBENCH_VIEW_MONTH,
       rowIds,
+      expectedReadModelVersion: activeWorkbenchReadModelVersionRef.current,
     });
     setRelationPreviewDialog({ preview, rowIds, caseId: resolveSelectedCaseId(rows) });
   };
@@ -1869,6 +2006,7 @@ export default function ReconciliationWorkbenchPage() {
           const result = await confirmWorkbenchLink({
             month: WORKBENCH_VIEW_MONTH,
             rowIds,
+            expectedReadModelVersion: activeWorkbenchReadModelVersionRef.current,
             caseId,
             note,
           });
@@ -1906,6 +2044,7 @@ export default function ReconciliationWorkbenchPage() {
         const result = await withdrawWorkbenchLink({
           month: WORKBENCH_VIEW_MONTH,
           rowIds,
+          expectedReadModelVersion: activeWorkbenchReadModelVersionRef.current,
           note,
           operationType: "withdraw_relation",
           previewId: preview.previewId,
@@ -2033,6 +2172,7 @@ export default function ReconciliationWorkbenchPage() {
         const result = await unignoreWorkbenchRow({
           month: WORKBENCH_VIEW_MONTH,
           rowId: row.id,
+          expectedReadModelVersion: activeWorkbenchReadModelVersionRef.current,
         });
         return result;
       },
@@ -2059,6 +2199,7 @@ export default function ReconciliationWorkbenchPage() {
         const result = await cancelWorkbenchException({
           month: WORKBENCH_VIEW_MONTH,
           rowIds: rows.map((row) => row.id),
+          expectedReadModelVersion: activeWorkbenchReadModelVersionRef.current,
           comment: "由已处理异常弹窗撤回异常处理",
         });
         return result;
@@ -2120,7 +2261,6 @@ export default function ReconciliationWorkbenchPage() {
     [handleOpenIgnoredModal, handleOpenProcessedExceptionsModal, ignoredData.rows.length, processedExceptionRows.length],
   );
 
-  const workbenchPageReadModelStatus = workbenchZonePagesReadModelStatus(zonePages);
   const isWorkbenchPageFresh = workbenchPageReadModelStatus === "fresh";
   const isEmpty = (workbenchData?.summary.totalCount ?? 0) === 0;
   const oaStatus = workbenchData?.oaStatus ?? null;
@@ -2233,6 +2373,11 @@ export default function ReconciliationWorkbenchPage() {
           </div>
         </header>
         {loadError ? <div className="state-panel error">{loadError}</div> : null}
+        {!loadError && !isLoading && !isWorkbenchPageFresh ? (
+          <div className={`state-panel${["failed", "unavailable"].includes(workbenchPageReadModelStatus) ? " error" : ""}`}>
+            {workbenchReadModelStatusMessage(workbenchPageReadModelStatus) ?? "关联台数据当前不可写，请等待刷新完成。"}
+          </div>
+        ) : null}
         {!loadError && oaStatusPanelMessage ? (
           <div className={`state-panel${oaStatus?.code === "error" ? " error" : ""}`}>{oaStatusPanelMessage}</div>
         ) : null}
@@ -2262,6 +2407,7 @@ export default function ReconciliationWorkbenchPage() {
           preview={relationPreviewDialog.preview}
           columnLayouts={workbenchSettings?.workbenchColumnLayouts}
           onClose={() => setRelationPreviewDialog(null)}
+          onReadModelRejected={refreshAfterReadModelRejection}
           onSubmit={handleSubmitRelationPreview}
         />
       ) : null}
@@ -2311,8 +2457,10 @@ export default function ReconciliationWorkbenchPage() {
         <WorkbenchExceptionModal
           month={WORKBENCH_VIEW_MONTH}
           rows={workbenchExceptionDialog.rows}
+          expectedReadModelVersion={activeWorkbenchReadModelVersionRef.current}
           onApplied={handleWorkbenchExceptionApplied}
           onClose={handleCloseWorkbenchExceptionDialog}
+          onReadModelRejected={refreshAfterReadModelRejection}
         />
       ) : null}
       {cashTicketPurchaseDialog ? (
@@ -2469,11 +2617,13 @@ function RelationPreviewDialog({
   preview,
   columnLayouts,
   onClose,
+  onReadModelRejected,
   onSubmit,
 }: {
   preview: WorkbenchRelationPreview;
   columnLayouts?: WorkbenchSettings["workbenchColumnLayouts"];
   onClose: () => void;
+  onReadModelRejected: (error: unknown) => void;
   onSubmit: (note: string, onProgress: WorkbenchActionProgressHandler) => Promise<void>;
 }) {
   const [note, setNote] = useState("");
@@ -2508,6 +2658,9 @@ function RelationPreviewDialog({
     try {
       await onSubmit(note.trim(), setProgress);
     } catch (error) {
+      if (isWorkbenchReadModelRejected(error)) {
+        onReadModelRejected(error);
+      }
       const message = actionErrorMessage(error);
       const retryable = !committed && isRelationPreviewRetryableSubmitError(message);
       setSubmitState({

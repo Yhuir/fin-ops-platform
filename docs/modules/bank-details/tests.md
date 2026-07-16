@@ -31,7 +31,7 @@
 
 - 变更类型：旧代码删除 / 模块边界收口。
 - 新增/更新测试：`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests.test_bank_details_relation_tags_only_read_relation_distribution_facade`。
-- 覆盖点：银行明细关系标签投影只能读取 `WorkbenchRelationReadFacade.get_by_row_ids(...)` 的 relation distribution，不允许恢复 `Application._bank_details_relation_tag_workbench_read_model(...)` 或 `_build_raw_workbench_payload(...)` 作为 raw Workbench fallback。
+- 覆盖点：银行明细关系标签投影只能读取 `WorkbenchRelationReadFacade.get_by_row_ids(...)` 的 relation distribution，不允许恢复 Application 私有整页 Workbench 读取作为 fallback。
 - 验证命令：见本轮最终说明。
 
 ## 2026-07-02 - category store port 与可用月份 read model provider

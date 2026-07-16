@@ -1,6 +1,6 @@
 # 设置模块边界与 I/O
 
-日期：2026-07-13
+日期：2026-07-16
 
 ## 模块化状态
 
@@ -39,7 +39,7 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | 设置 payload/result | 前端页面 | 不泄露 secret |
-| Reset job | process-owned `BackgroundJobService` / app health | 可查询、可恢复；OA reset 的 runtime service reload 必须复用同一 background-job owner，禁止在任务执行中替换实例、双写同一 job store 或把当前任务误标为进程重启中断。只有应用进程首次启动/真正重启才创建 owner 并执行 interrupted-job recovery。 |
+| Reset job | process-owned `BackgroundJobService` / app health | 可查询、可恢复；OA reset 的 runtime service reload 必须复用同一 background-job owner，禁止在任务执行中替换实例、双写同一 job store 或把当前任务误标为进程重启中断。只有应用进程首次启动/真正重启才创建 owner 并执行 interrupted-job recovery。job `completed` 只证明清理和 durable lifecycle 登记完成；OA `rebuild_status` 在下游 fresh 前必须是 `pending`。 |
 | Dirty scope/lifecycle | runtime queue | 设置影响 read model 时必须显式触发 |
 | OA manual import target envelope | operation barrier/frontend refresh | OA 手工导入、附件刷新、删除导入标记返回的 `operation_barrier_targets` 必须被设置页等待后再展示最终 fresh 状态 |
 | 银行账户映射只读 payload | cost_statistics projection/query source version | `AppSettingsService.get_cost_statistics_source_settings_payload()` 可一次性输出 `bank_account_mappings` 与 `bank_transaction_tags`，供成本统计计算 `bank_accounts` 和 source version；下游不得直接读取设置页前端状态 |
@@ -72,7 +72,7 @@
 
 - 允许依赖：settings/data reset service, credential repository, background job service。
 - 必须通过：settings service and explicit reset job API。
-- 禁止绕过：前端直接保存 secret；settings API 直接清库或直接写 read model。
+- 禁止绕过：前端直接保存 secret；settings API 直接清库、直接写/同步查询 read model、调用 Workbench 全页 builder 或重复入队 matching dirty scope。
 
 ## 测试与验证
 

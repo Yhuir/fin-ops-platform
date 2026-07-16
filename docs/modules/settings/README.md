@@ -55,7 +55,7 @@
 
 | 设置动作 | 后端事实 / event | 受影响模块 |
 | --- | --- | --- |
-| 待找发票规则保存 | `pending_invoice_rules_changed`，规则 version 递增 | 待找发票、关联台、发票 lifecycle、进项/销项/OA 待付款、税金、成本、搜索 |
+| 待找发票规则保存 | `pending_invoice_rules_changed`，规则 version 递增 | 待找发票、关联台、发票 lifecycle、进项/销项、税金、成本、搜索；OA 待付款不消费该规则 |
 | 银行标签/自动标签保存 | 仅由银行明细 `自动标签规则` API 触发 `bank_auto_tag_rules_changed` / bank auto tag rules audit；`/api/workbench/settings` 携带 `bank_transaction_tags` 必须拒绝；settings service 不提供该写参数 | 银行明细、免 OA、关联台候选、往来款、成本、搜索 |
 | 项目范围变化 | `project_scope_changed` 或等价 dirty scope | 成本统计、搜索、关联台项目展示 |
 | 访问控制变化 | state store + OA role sync | 页面可见性、写入权限、导出权限、数据重置权限 |

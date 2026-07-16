@@ -28,13 +28,15 @@
 - `backend/src/fin_ops_platform/services/tax_certified_import_service.py`
 - `backend/src/fin_ops_platform/services/tax_certified_import_application_service.py`
 - `backend/src/fin_ops_platform/services/tax_certified_import_job_service.py`
-- `backend/src/fin_ops_platform/services/cost_tax_sql_projection.py`
+- `backend/src/fin_ops_platform/services/tax_offset_sql_projection.py`
 
 ## 当前边界
 
 关注发票认证、可抵扣试算、已认证导入、计划保存、read model freshness 和认证导入结果。发票生命周期状态由 `InvoiceLifecyclePolicy` / `invoice_lifecycle` read boundary 分发，税金抵扣页面不私有定义认证状态。
 
 生产刷新由专用 `tax-offset` RabbitMQ consumer 承担独立性能 lane；旧 `cost-tax` combined worker 保留为兼容消费者，不再是唯一性能 lane。当前 P2/P3 closure 按首屏 API 或 direct refresh p95 <= 1000ms 验收，写操作链路还要求 operation-to-fresh p99 <= 3000ms。`invoice_lifecycle` 另有 `invoice-lifecycle-secondary` 并发消费者用于多月份 scope 收敛；所有 read model freshness 仍以 durable queue/readiness 为事实源。
+
+2026-07-16 起税金 SQL projection 的唯一 owner 是 `tax_offset_sql_projection.py`。旧混合 `cost_tax_sql_projection.py` 已删除；成本 builder 位于独立的成本模块，生产 worker 只做两个明确 import。该所有权拆分不改变税金 SQL、payload、Redis、read model、queue、worker event 或页面/API。
 
 ## 维护触发器
 

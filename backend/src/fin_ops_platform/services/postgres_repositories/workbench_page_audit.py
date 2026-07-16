@@ -154,10 +154,15 @@ def collect_workbench_page_integrity_issues(
     *,
     tenant_id: str,
     limit: int,
+    include_summary: bool = True,
 ) -> tuple[list[AuditIssue], dict[str, Any]]:
     """Collect Workbench integrity proof inside the caller-owned read-only snapshot."""
     relations = [_normalize_relation(row) for row in _fetch_active_relations(connection)]
-    active_generations = _fetch_active_generations(connection, tenant_id=tenant_id)
+    active_generations = (
+        _fetch_active_generations(connection, tenant_id=tenant_id)
+        if include_summary
+        else []
+    )
     relation_row_ids = sorted(
         {
             row_id

@@ -1,5 +1,7 @@
 # Workbench Read Model Query 发现与边界计划
 
+> 历史发现归档：本文记录 2026-06 兼容期链路，不是当前运行时事实源。当前 Workbench 合同以 `docs/modules/reconciliation-workbench/`、`docs/architecture/module-boundaries/read-model-contracts.md` 和 `docs/dev/api-contracts.md` 为准；文中 legacy provider/full-payload fallback 已在 2026-07-16 删除。
+
 状态：PF-P004 `verified`；PF-P005 `verified`；PF-P005-MG `verified`；PF-P006 `verified`；PF-P006-MG `verified`；PF-P007 `verified`；PF-P007-MG `verified`；PF-P008 `verified`；PF-P009 `verified`；PF-P009-MG `verified`；PF-P010 `verified`；PF-P010-MG `verified`
 
 对应 prompt：`PF-P004 - Workbench Read Model Query Discovery / Boundary Plan`

@@ -122,7 +122,7 @@ describe("AppHealthOperationsPage", () => {
     expectProjectSection(requests);
     expect(requests).toHaveTextContent("请求");
     expect(within(requests).getByRole("grid", { name: "请求性能" })).toBeInTheDocument();
-    expect(requests).toHaveTextContent("GET /api/workbench/summary");
+    expect(requests).toHaveTextContent("GET /api/workbench");
     expect(requests).toHaveTextContent("640 ms");
     expect(requests).toHaveTextContent("260 ms");
     expect(within(requests).getByText("640 ms").closest("td")).toHaveAttribute("data-tone", "yellow");

@@ -8,7 +8,6 @@ import { AppChromeProvider } from "../contexts/AppChromeContext";
 import { PageSessionStateProvider } from "../contexts/PageSessionStateContext";
 import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
 import type { SessionPayload } from "../features/session/api";
-import { clearCostStatisticsExplorerCache } from "../features/cost-statistics/api";
 import CostStatisticsPage from "../pages/CostStatisticsPage";
 import { installMockApiFetch } from "./apiMock";
 
@@ -52,7 +51,6 @@ beforeAll(() => {
 });
 
 afterEach(() => {
-  clearCostStatisticsExplorerCache();
   vi.mocked(URL.createObjectURL).mockClear();
   vi.mocked(URL.revokeObjectURL).mockClear();
 });
@@ -130,9 +128,108 @@ describe("Cost statistics page", () => {
     expect(css).toMatch(/\.cost-explorer-grid\.bank-tag\s*{[^}]*grid-template-columns:\s*minmax\(180px,\s*1fr\) minmax\(180px,\s*1fr\) minmax\(420px,\s*2fr\)/s);
     expect(css).toMatch(/\.cost-explorer-grid\.project,[\s\S]*height:\s*max\(560px,\s*calc\(100dvh - 240px\)\)/s);
     expect(css).toMatch(/\.cost-view-scope-heading \.cost-section-heading-actions\s*{[^}]*order:\s*-1/s);
+    expect(css).toMatch(/\.cost-lock-target\.is-locked\s*{[^}]*opacity:\s*0\.62/s);
+    expect(css).toMatch(/\.cost-lock-overlay\s*{[^}]*background:\s*color-mix\(in srgb, var\(--fp-page\) 20%, transparent\)[^}]*pointer-events:\s*auto/s);
+    expect(css).not.toMatch(/\.cost-lock-overlay\s*{[^}]*backdrop-filter/s);
+    expect(css).not.toMatch(/\.cost-lock-overlay\s*{[^}]*animation:/s);
+    expect(css).not.toContain("cost-lock-breathe");
     expect(css).toMatch(/\.cost-direction-amount--aligned\s*{[^}]*grid-template-columns:\s*auto minmax\(82px,\s*max-content\)/s);
     expect(css).toMatch(/\.export-center-modal\s*{[^}]*border-radius:\s*var\(--fp-radius-lg\)/s);
     expect(css).toMatch(/\.cost-detail-modal\s*{[^}]*border-radius:\s*var\(--fp-radius-lg\)/s);
+  });
+
+  test("uses a lightweight inline interaction lock instead of a dialog while initial data is unverified", async () => {
+    window.history.pushState({}, "", "/cost-statistics");
+    installMockApiFetch({ costExplorerDelayMs: 50 });
+
+    renderCostStatisticsPage();
+
+    const heading = await findCostStatisticsHeading();
+    const statusCopy = screen.getByText("正在加载成本统计");
+    const status = statusCopy.closest('[role="status"]');
+    const tablist = screen.getByRole("tablist", { name: "成本统计视图切换" });
+    const overlay = screen.getByTestId("cost-statistics-interaction-overlay");
+
+    expect(status).toHaveClass("cost-lock-status--loading");
+    expect(status).toHaveAttribute("aria-live", "polite");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(overlay).toHaveClass("cost-lock-overlay");
+    expect(tablist.closest("[inert]")).not.toBeNull();
+    expect(heading.closest("[inert]")).toBeNull();
+
+    expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
+    expect(screen.queryByTestId("cost-statistics-interaction-overlay")).not.toBeInTheDocument();
+    expect(tablist.closest("[inert]")).toBeNull();
+  });
+
+  test("moves focus to the inline status while locked and restores the triggering control when fresh", async () => {
+    window.history.pushState({}, "", "/cost-statistics");
+    const user = userEvent.setup();
+    installMockApiFetch({ costExplorerDelayMs: 50 });
+
+    renderCostStatisticsPage();
+
+    expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
+    const bankViewButton = screen.getByRole("button", { name: "按银行" });
+    bankViewButton.focus();
+    await user.click(bankViewButton);
+
+    const status = screen.getByText("正在加载成本统计").closest('[role="status"]');
+    await waitFor(() => expect(status).toHaveFocus());
+    expect(await screen.findByRole("heading", { name: "按银行统计" })).toBeInTheDocument();
+    await waitFor(() => expect(bankViewButton).toHaveFocus());
+  });
+
+  test("closes cost-owned portals and locks an open tag drawer on a domain refresh", async () => {
+    window.history.pushState({}, "", "/cost-statistics");
+    const user = userEvent.setup();
+    installMockApiFetch({ costExplorerDelayMs: 50 });
+
+    renderCostStatisticsPage();
+
+    expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "导出中心" }));
+    expect(await screen.findByRole("dialog", { name: "导出中心" })).toBeInTheDocument();
+
+    fireEvent(window, new CustomEvent("workbenchRelationUpdated", { detail: { affectedMonths: ["2026-03"] } }));
+
+    expect(await screen.findByText("正在加载成本统计")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "导出中心" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("cost-statistics-interaction-overlay")).toBeInTheDocument();
+    expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "成本统计标签规则" }));
+    const drawer = await screen.findByRole("dialog", { name: "成本统计标签规则" });
+    fireEvent(window, new CustomEvent("workbenchRelationUpdated", { detail: { affectedMonths: ["2026-03"] } }));
+
+    expect(await screen.findByText("正在加载成本统计")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "成本统计标签规则" })).toBeInTheDocument();
+    expect(drawer.querySelector(".cost-tag-rules-body")).toHaveAttribute("inert");
+    expect(drawer.querySelector(".cost-tag-rules-footer")).toHaveAttribute("inert");
+    expect(within(drawer).getByRole("button", { name: "关闭抽屉" })).toBeEnabled();
+  });
+
+  test("revalidates and locks the page when restored from the back-forward cache", async () => {
+    window.history.pushState({}, "", "/cost-statistics");
+    const fetchMock = installMockApiFetch({ costExplorerDelayMs: 50 });
+
+    renderCostStatisticsPage();
+
+    expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
+    const explorerCallsBeforeRestore = fetchMock.mock.calls.filter(([request]) => (
+      String(request).startsWith("/api/cost-statistics/explorer?")
+    )).length;
+    const pageShowEvent = new Event("pageshow") as PageTransitionEvent;
+    Object.defineProperty(pageShowEvent, "persisted", { value: true });
+    fireEvent(window, pageShowEvent);
+
+    expect(await screen.findByText("正在加载成本统计")).toBeInTheDocument();
+    expect(screen.getByRole("tablist", { name: "成本统计视图切换" }).closest("[inert]")).not.toBeNull();
+    expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
+    const explorerCallsAfterRestore = fetchMock.mock.calls.filter(([request]) => (
+      String(request).startsWith("/api/cost-statistics/explorer?")
+    )).length;
+    expect(explorerCallsAfterRestore).toBeGreaterThan(explorerCallsBeforeRestore);
   });
 
   test("defaults to time view and loads month-aware transaction rows", async () => {
@@ -165,7 +262,11 @@ describe("Cost statistics page", () => {
     expect(within(timeGrid).getByText("2,000.00").closest(".money-cell-value")).toHaveClass("cost-flow-amount--income");
     expect(screen.getByRole("button", { name: "时间统计时间范围：2026年3月" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/cost-statistics/explorer?month=2026-03&project_scope=active",
+      "/api/cost-statistics/explorer?scope=2026-03&view=time&project_scope=active&page_size=50",
+      expect.any(Object),
+    );
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/cost-statistics/explorer?scope=all&view=project&project_scope=active&page_size=1",
       expect.any(Object),
     );
 
@@ -175,7 +276,10 @@ describe("Cost statistics page", () => {
     expectProjectCostTable("按时间统计表");
     expect(within(nextTimeGrid).getByRole("button", { name: "查看流水 cost-txn-102" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "时间统计时间范围：2026年4月" })).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith("/api/cost-statistics/explorer?month=2026-04&project_scope=active", expect.any(Object));
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/cost-statistics/explorer?scope=2026-04&view=time&project_scope=active&page_size=50",
+      expect.any(Object),
+    );
   });
 
   test("keeps tag rules drawer open until cost statistics read model is fresh after save", async () => {
@@ -208,7 +312,7 @@ describe("Cost statistics page", () => {
       expect.objectContaining({ method: "POST" }),
     );
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/cost-statistics/explorer?month=2026-03&project_scope=active",
+      "/api/cost-statistics/explorer?scope=2026-03&view=time&project_scope=active&page_size=50",
       expect.any(Object),
     );
   });
@@ -261,7 +365,10 @@ describe("Cost statistics page", () => {
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "按项目" }));
     expect(await screen.findByRole("button", { name: "项目统计时间范围：全部时间" })).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith("/api/cost-statistics/explorer?month=all&project_scope=active", expect.any(Object));
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/cost-statistics/explorer?scope=all&view=project&project_scope=active&page_size=50",
+      expect.any(Object),
+    );
     expect(screen.getByText("昆明卷烟厂动力设备控制系统升级改造项目")).toBeInTheDocument();
     expect(screen.queryByText("昭通卷烟厂2025-2028年度能源集中监控平台系统维护采购项目")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /项目范围：/ })).not.toBeInTheDocument();
@@ -354,26 +461,25 @@ describe("Cost statistics page", () => {
     await user.click(screen.getByRole("button", { name: "按项目" }));
 
     expect(await screen.findByRole("button", { name: "项目统计时间范围：全部时间" })).toBeInTheDocument();
-    const projectLane = screen.getByRole("heading", { name: "项目名" }).closest(".cost-explorer-lane");
-    expect(projectLane).not.toBeNull();
-    expect(within(projectLane as HTMLElement).getByText("云南溯源科技")).toBeInTheDocument();
-    expect(within(projectLane as HTMLElement).getByText("昆明卷烟厂动力设备控制系统升级改造项目")).toBeInTheDocument();
-    expect(within(projectLane as HTMLElement).queryByText("昭通卷烟厂2025-2028年度能源集中监控平台系统维护采购项目")).not.toBeInTheDocument();
+    const projectLane = () => screen.getByRole("heading", { name: "项目名" }).closest(".cost-explorer-lane") as HTMLElement;
+    expect(within(projectLane()).getByText("云南溯源科技")).toBeInTheDocument();
+    expect(within(projectLane()).getByText("昆明卷烟厂动力设备控制系统升级改造项目")).toBeInTheDocument();
+    expect(within(projectLane()).queryByText("昭通卷烟厂2025-2028年度能源集中监控平台系统维护采购项目")).not.toBeInTheDocument();
 
     await chooseScopeOption(user, "项目统计时间范围：全部时间", "2026年");
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
-    expect(within(projectLane as HTMLElement).getByText("云南溯源科技")).toBeInTheDocument();
+    expect(await within(projectLane()).findByText("云南溯源科技")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "项目统计时间范围：2026年" })).toBeInTheDocument();
 
     await chooseScopeOption(user, "项目统计时间范围：2026年", "四月");
     expect(screen.getByRole("button", { name: "项目统计时间范围：2026年4月" })).toBeInTheDocument();
 
-    expect(await within(projectLane as HTMLElement).findByText("昆明卷烟厂动力设备控制系统升级改造项目")).toBeInTheDocument();
-    expect(within(projectLane as HTMLElement).queryByText("云南溯源科技")).not.toBeInTheDocument();
+    expect(await within(projectLane()).findByText("昆明卷烟厂动力设备控制系统升级改造项目")).toBeInTheDocument();
+    expect(within(projectLane()).queryByText("云南溯源科技")).not.toBeInTheDocument();
 
     await chooseScopeOption(user, "项目统计时间范围：2026年4月", "全部时间");
-    expect(await within(projectLane as HTMLElement).findByText("云南溯源科技")).toBeInTheDocument();
-    expect(await within(projectLane as HTMLElement).findByText("昆明卷烟厂动力设备控制系统升级改造项目")).toBeInTheDocument();
+    expect(await within(projectLane()).findByText("云南溯源科技")).toBeInTheDocument();
+    expect(await within(projectLane()).findByText("昆明卷烟厂动力设备控制系统升级改造项目")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "项目统计时间范围：全部时间" })).toBeInTheDocument();
   });
 
@@ -538,15 +644,19 @@ describe("Cost statistics page", () => {
 
     await chooseScopeOption(user, "银行统计时间范围：全部时间", "2026年");
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
-    expect(within(bankLane as HTMLElement).getByText("平安银行 账户 8821")).toBeInTheDocument();
+    const yearBankLane = screen.getByRole("heading", { name: "银行账户" }).closest(".cost-explorer-lane");
+    expect(yearBankLane).not.toBeNull();
+    expect(within(yearBankLane as HTMLElement).getByText("平安银行 账户 8821")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "银行统计时间范围：2026年" })).toBeInTheDocument();
 
     await chooseScopeOption(user, "银行统计时间范围：2026年", "四月");
     expect(screen.getByRole("button", { name: "银行统计时间范围：2026年4月" })).toBeInTheDocument();
 
-    expect(await within(bankLane as HTMLElement).findByText("平安银行 账户 8821")).toBeInTheDocument();
-    expect(within(bankLane as HTMLElement).getByText("工商银行 账户 0001")).toBeInTheDocument();
-    expect(within(bankLane as HTMLElement).getByText("民生银行 账户 9486")).toBeInTheDocument();
+    const monthBankLane = screen.getByRole("heading", { name: "银行账户" }).closest(".cost-explorer-lane");
+    expect(monthBankLane).not.toBeNull();
+    expect(await within(monthBankLane as HTMLElement).findByText("平安银行 账户 8821")).toBeInTheDocument();
+    expect(within(monthBankLane as HTMLElement).getByText("工商银行 账户 0001")).toBeInTheDocument();
+    expect(within(monthBankLane as HTMLElement).getByText("民生银行 账户 9486")).toBeInTheDocument();
     expect(screen.getByLabelText("支出金额 9,600.00")).toBeInTheDocument();
   });
 
@@ -614,10 +724,10 @@ describe("Cost statistics page", () => {
     expect(screen.queryByRole("button", { name: "三月" })).not.toBeInTheDocument();
   });
 
-  test("keeps current content visible while switching views or ranges that trigger background refresh", async () => {
+  test("removes the prior scope from interaction while the next scope is loading", async () => {
     window.history.pushState({}, "", "/cost-statistics");
     const user = userEvent.setup();
-    installMockApiFetch();
+    installMockApiFetch({ costExplorerDelayMs: 50 });
 
     renderCostStatisticsPage();
 
@@ -626,8 +736,11 @@ describe("Cost statistics page", () => {
 
     await user.click(screen.getByRole("button", { name: "按银行" }));
 
-    expect(screen.queryByText("正在加载成本统计数据...")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "按银行统计" })).toBeInTheDocument();
+    expect(screen.getByText("正在加载成本统计")).toBeInTheDocument();
+    expect(screen.getByRole("tablist", { name: "成本统计视图切换" }).closest("[inert]")).not.toBeNull();
+    expect(screen.queryByRole("grid", { name: "按时间统计表" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "按银行统计" })).toBeInTheDocument();
+    expect(screen.getByRole("tablist", { name: "成本统计视图切换" }).closest("[inert]")).toBeNull();
     expect(screen.getByRole("button", { name: "银行统计时间范围：全部时间" })).toBeInTheDocument();
   });
 
@@ -654,14 +767,15 @@ describe("Cost statistics page", () => {
     expect(await screen.findByText("成本统计数据加载暂时失败，请刷新后重试。")).toBeInTheDocument();
     expect(screen.queryByText("当前时间范围没有可用于成本统计的支出流水。")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "导出中心" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "刷新成本统计" }).closest("[inert]")).not.toBeNull();
 
-    await user.click(screen.getByRole("button", { name: "刷新成本统计" }));
+    await user.click(screen.getByRole("button", { name: "重新检查" }));
 
     expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
     expect(screen.queryByText("成本统计数据加载暂时失败，请刷新后重试。")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "导出中心" })).toBeEnabled();
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/cost-statistics/explorer?month=2026-03&project_scope=active",
+      "/api/cost-statistics/explorer?scope=2026-03&view=time&project_scope=active&page_size=50",
       expect.any(Object),
     );
   });
@@ -691,7 +805,10 @@ describe("Cost statistics page", () => {
     renderCostStatisticsPage();
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
-    expect(await screen.findByText("成本统计读模型正在刷新，当前结果生成后会自动更新。")).toBeInTheDocument();
+    expect(await screen.findByText("成本数据正在同步")).toBeInTheDocument();
+    expect(screen.getByText("当前页面已暂时锁定，完成后自动恢复。")).toBeInTheDocument();
+    expect(screen.getByTestId("cost-statistics-interaction-overlay")).toBeInTheDocument();
+    expect(screen.getByRole("tablist", { name: "成本统计视图切换" }).closest("[inert]")).not.toBeNull();
     expect(document.querySelector(".cost-page .stat-card")).toBeNull();
     expect(screen.queryByText("当前时间范围没有可用于成本统计的支出流水。")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "导出中心" })).toBeDisabled();
@@ -714,6 +831,10 @@ describe("Cost statistics page", () => {
     const dialog = await screen.findByRole("dialog", { name: "导出中心" });
     expectProjectCostDialog("导出中心");
     expect(within(dialog).getByRole("button", { name: "按时间" })).toHaveClass("active");
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/cost-statistics/explorer?scope=all&view=project&project_scope=active&page_size=1",
+      expect.any(Object),
+    );
     expect(within(dialog).getByLabelText("自定义月份")).toBeChecked();
     expect(within(dialog).getByRole("button", { name: "统计月份" })).toBeInTheDocument();
     await user.click(within(dialog).getByLabelText("自定义时间区间（精确到日）"));
@@ -741,6 +862,45 @@ describe("Cost statistics page", () => {
       expect.any(Object),
     );
     expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
+  });
+
+  test("loads all-scope export options only when an open export center switches to project mode", async () => {
+    window.history.pushState({}, "", "/cost-statistics");
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch();
+
+    renderCostStatisticsPage();
+
+    expect(await findCostStatisticsHeading()).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "导出中心" }));
+    const dialog = await screen.findByRole("dialog", { name: "导出中心" });
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/cost-statistics/explorer?scope=all&view=project&project_scope=active&page_size=1",
+      expect.any(Object),
+    );
+
+    await user.click(within(dialog).getByRole("button", { name: "按项目" }));
+
+    await waitFor(() => expect(within(dialog).getByLabelText("云南溯源科技")).toBeChecked());
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/cost-statistics/explorer?scope=all&view=project&project_scope=active&page_size=1",
+      expect.any(Object),
+    );
+  });
+
+  test("keeps export center closed while all-scope export options are refreshing", async () => {
+    window.history.pushState({}, "", "/cost-statistics");
+    const user = userEvent.setup();
+    installMockApiFetch({ costRefreshingMonths: ["all"] });
+
+    renderCostStatisticsPage();
+
+    expect(await findCostStatisticsHeading()).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "按OA费用类型" }));
+    await user.click(screen.getByRole("button", { name: "导出中心" }));
+
+    expect(await screen.findByText("导出筛选数据正在刷新，请稍后重试。")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "导出中心" })).not.toBeInTheDocument();
   });
 
   test("shows backend export failure messages inside the export center", async () => {
@@ -774,8 +934,9 @@ describe("Cost statistics page", () => {
     const dialog = await screen.findByRole("dialog", { name: "导出中心" });
     expectProjectCostDialog("导出中心");
     expect(within(dialog).getByRole("button", { name: "按项目" })).toHaveClass("active");
-    expect(within(dialog).getByLabelText("云南溯源科技")).toBeChecked();
+    await waitFor(() => expect(within(dialog).getByLabelText("云南溯源科技")).toBeChecked());
     await user.click(within(dialog).getByLabelText("交通费"));
+    await user.click(within(dialog).getByLabelText("经营/办公费用"));
     await user.click(within(dialog).getByRole("button", { name: "仅预览" }));
 
     expect(await within(dialog).findByText("预览结果")).toBeInTheDocument();
@@ -802,9 +963,17 @@ describe("Cost statistics page", () => {
 
     expect(await findCostStatisticsHeading()).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "按OA费用类型" }));
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/cost-statistics/explorer?scope=all&view=project&project_scope=active&page_size=1",
+      expect.any(Object),
+    );
     await user.click(screen.getByRole("button", { name: "导出中心" }));
 
     const dialog = await screen.findByRole("dialog", { name: "导出中心" });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/cost-statistics/explorer?scope=all&view=expense_type&project_scope=active&page_size=1",
+      expect.any(Object),
+    );
     expectProjectCostDialog("导出中心");
     expect(within(dialog).getByRole("button", { name: "按费用类型" })).toHaveClass("active");
     expect(within(dialog).getByLabelText("自定义月份")).toBeChecked();

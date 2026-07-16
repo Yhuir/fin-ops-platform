@@ -56,11 +56,13 @@ export type WorkbenchExceptionPreview = {
 export type WorkbenchExceptionPreviewPayload = {
   month: string;
   rowIds: string[];
+  expectedReadModelVersion: string;
 };
 
 export type WorkbenchExceptionApplyPayload = {
   month: string;
   rowIds: string[];
+  expectedReadModelVersion: string;
   scenarioCode: string;
   actionCode: string;
   payload: Record<string, unknown>;

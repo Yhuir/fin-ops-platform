@@ -270,7 +270,6 @@ PF-P190 后推荐下一步：
 | `services/app_settings_service.py` | 65KB | Platform / Ops | 配置和权限口径 |
 | `services/workbench_free_matching_engine.py` | 62KB | Workbench Matching Engine 候选 | 匹配算法输入输出相对稳定 |
 | `services/postgres_state_store.py` | 61KB | Platform / Ops | PostgreSQL state store / legacy fallback |
-| `services/cost_statistics_service.py` | 61KB | Tax / Cost / ETC | 成本统计读模型和聚合 |
 | `services/import_file_service.py` | 55KB | Imports | 文件对象和导入任务 |
 | `services/turnover_ledger_service.py` | 54KB | Turnover Ledger | 读路径可能同步 rebuild |
 | `services/workbench_matching_rules.py` | 53KB | Workbench Matching Engine 候选 | 匹配规则口径 |
@@ -346,7 +345,7 @@ PF-P190 后推荐下一步：
 
 ## Tax / Cost / ETC Deep Inventory
 
-本模块存在多个超过 20KB 的核心文件。后续 Tax / Cost / ETC Micro-JIT 不能只读取 `etc_service.py`、`tax_offset_service.py` 或 `cost_statistics_service.py`，必须显式覆盖 ETC 对账、ZIP/文件过滤和项目明细导出。
+本模块存在多个超过 20KB 的核心文件。后续 Tax / Cost / ETC Micro-JIT 不能只读取 `etc_service.py`、`tax_offset_service.py`、`cost_statistics_sql_projection.py` 或 `tax_offset_sql_projection.py`，必须显式覆盖 ETC 对账、ZIP/文件过滤和项目明细导出。legacy `cost_statistics_service.py` 与混合 `cost_tax_sql_projection.py` 已删除，不能恢复为第二成本归集事实源或共享 owner。
 
 | 文件 | 子域 | 归属判断 |
 | --- | --- | --- |
@@ -354,10 +353,10 @@ PF-P190 后推荐下一步：
 | `services/etc_reconciliation_service.py` | ETC reconciliation | ETC 对账核心业务逻辑，约 77KB，必须单独做调用链和 characterization tests |
 | `services/etc_reconciliation_zip_filter.py` | ETC import/file filter | ZIP/文件过滤逻辑，Tax / Cost / ETC primary，Imports secondary |
 | `services/etc_document_parsers.py` | ETC parsing | 文档解析，需与 Imports 文件边界隔离 |
-| `services/cost_statistics_service.py` | cost statistics | 成本统计聚合与 read model 边界 |
+| `services/cost_statistics_sql_projection.py` | cost statistics | 成本统计归集、特殊关系规则与 read model 构建边界；不得恢复 live service |
 | `services/project_detail_export_service.py` | project cost export | 项目明细导出，归 Tax / Cost / ETC，不能遗漏在导出工具外 |
 | `services/tax_offset_*` | tax offset | 税金抵扣 read model、refresh、Redis cache |
-| `services/cost_tax_sql_projection.py` | SQL projection | Tax/Cost SQL projection 共享层，需防止继续膨胀 |
+| `services/tax_offset_sql_projection.py` | tax offset SQL projection | 税金 projection 独立 owner；不得重新 import 成本模块或恢复混合层 |
 | `services/postgres_repositories/ops_tax_etc.py` | SQL repository | Tax/Cost/ETC repository，后续按子域拆分 |
 
 ## Search / Pending Query Inventory
@@ -574,7 +573,7 @@ Batch Accounting 是独立模块，但需要在 Workbench query/read-model 边�
 
 候选路径：
 
-- `GET /api/workbench/summary`
+- `GET /api/workbench` combined initial
 - `GET /api/workbench/groups`
 - `GET /api/workbench/group-rows`
 - `GET /api/bank-details/transactions`

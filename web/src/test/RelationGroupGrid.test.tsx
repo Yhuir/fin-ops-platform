@@ -671,20 +671,30 @@ describe("Workbench candidate grouping layout", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = new URL(String(input), "http://localhost");
       if (url.pathname === "/api/workbench") {
-        return new Response(JSON.stringify(payload), { status: 200 });
-      }
-      if (url.pathname === "/api/workbench/summary") {
-        return new Response(
-          JSON.stringify({
+        const zonePage = (zone: "paired" | "unpaired") => {
+          const groups = payload[zone].groups;
+          return {
             month: payload.month,
-            summary: payload.summary,
-            oa_status: payload.oa_status,
-            invoice_inventory: payload.invoice_inventory,
+            zone,
+            page: 1,
+            page_size: 200,
+            total: groups.length,
+            row_counts: zone === "paired"
+              ? { oa: 0, bank: 3, invoice: 0, rows: 3 }
+              : { oa: 0, bank: 0, invoice: 0, rows: 0 },
+            has_more: false,
+            groups,
             read_model_status: "fresh",
-            generated_at: "2026-05-22T09:30:00+08:00",
-          }),
-          { status: 200 },
-        );
+            read_model_version: "mock-workbench-generation-1",
+          };
+        };
+        return new Response(JSON.stringify({
+          ...payload,
+          paired: zonePage("paired"),
+          unpaired: zonePage("unpaired"),
+          read_model_status: "fresh",
+          read_model_version: "mock-workbench-generation-1",
+        }), { status: 200 });
       }
       if (url.pathname === "/api/workbench/groups") {
         const zone = url.searchParams.get("zone") === "unpaired" ? "unpaired" : "paired";
@@ -777,7 +787,7 @@ describe("Workbench candidate grouping layout", () => {
   function countInitialWorkbenchPageRequests(fetchMock: ReturnType<typeof mockWorkbenchPageFetch>) {
     return fetchMock.mock.calls.filter(([input]) => {
       const url = new URL(String(input), "http://localhost");
-      return url.pathname === "/api/workbench/summary" || url.pathname === "/api/workbench/groups";
+      return url.pathname === "/api/workbench";
     }).length;
   }
 

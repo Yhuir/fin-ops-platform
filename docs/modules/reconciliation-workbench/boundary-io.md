@@ -37,10 +37,12 @@
 | --- | --- | --- |
 | `paired.groups` | 前端 | 每组恰好对应一条 active formal relation，`group_type=relation` |
 | `unpaired.groups` | 前端 | 每组恰好一个未被 active relation 占用的 canonical fact，`group_type=unpaired` |
-| summary | 前端/App Health | `paired_count`、`unpaired_count`、OA/流水/发票事实数与 exception count |
+| combined initial | 前端/App Health | `GET /api/workbench` 在同一 active generation-set 快照返回 summary 与 paired/unpaired 各首页；summary 含 `paired_count`、`unpaired_count`、OA/流水/发票事实数与 exception count |
 | formal relation write result | caller | before/after、version、affected months、audit、outbox ids、barrier targets |
 | matching summary | worker/App Health | planned/created/extended/preserved/ambiguous/resource-limited/unsafe counts；不输出候选 rows |
 | read model generation | Workbench query | 新 generation 完整写入并校验后原子激活；building/failed 不可读为 fresh |
+| Search row context | 非 PostgreSQL 本地 Search | `list_workbench_search_rows(YYYY-MM)` 只返回 active generation 的 row/zone/group/project context；禁止复用 Workbench page/full payload |
+| ignored rows | Workbench ignored API / write command | `list_workbench_ignored_rows(scope_key)` 只读取 active generation；repository 缺失时公开 API 返回 unavailable、写命令 fail fast，禁止回退旧 snapshot |
 
 ## 依赖方向
 
@@ -56,10 +58,14 @@
 
 - `workbench` 使用 active-generation scoped publish；月分片发布必须原子。
 - `month=all` 查询组合 active 月分片，并在分页前做唯一 canonical owner 仲裁。
+- 默认 `month=all` combined initial 在同一个 repeatable-read 事务中只读取一次 active generation/source/freshness context，复用 canonical summary 的 zone counts，并批量读取 paired/unpaired 两区首页与可见成员；包括事务设置在内最多 10 条数据库语句。带搜索、筛选或排序的请求继续走既有窄 `/groups` 查询，不得为了快路径复制筛选 SQL 或忽略查询条件。
 - schema/version 由 `workbench_read_model_version.py` 统一提供，groups page cache 必须复用同一 projection schema；旧 generation 或旧 Redis page payload 不得冒充 fresh。
+- Workbench worker 不预热 page cache。默认首屏缓存只由 `WorkbenchQueryFacade` 在 fresh gate 后按 active generation version read-through；cache miss/down 回同一 SQL repository cold path，不影响 generation 发布或 dirty scope 完成。
+- 对外不存在独立 Workbench summary HTTP 合同。`PostgresReadModelRepository.get_workbench_summary(...)` 只是 combined initial 同快照组合所需的内部窄 I/O，不得重新从 route/facade 公开。
 - collapsed-summary 是展示形态而不是第三种关系状态：repository 必须分别物化 `summary_row` 与全部 `collapsed_rows`；未配对 ETC summary 仍是一个 canonical singleton owner，旧 candidate/decision `case_id` 或 relation mode 不得泄漏为关系归属。
 - matching scope、workbench scope 和 workbench_relation scope 都以 PostgreSQL durable queue/state 为事实源；Redis 只缓存 fresh payload，RabbitMQ 只做可选唤醒。
-- Release A 上线后先执行一次全量 Workbench rehydrate，使旧 `open`/candidate/decision generation 被新的 paired/unpaired generation 原子替换；不得原地修改旧 active generation。Release B 的 0104 只在 A 的零访问和数据安全证据通过后执行。
+- Search 本地即时查询与 ignored rows 是 repository 窄读接口，不是新的 read model/projection/cache；它们必须固定到 active generation，且不能反向依赖页面 assembler。
+- Release A 上线后先执行一次全量 Workbench rehydrate，使旧 `open`/candidate/decision generation 被新的 paired/unpaired generation 原子替换；不得原地修改旧 active generation。Release B 的旧状态 drop migration 只在 A 的零访问和数据安全证据通过后创建，并使用届时下一个可用版本；不得复用已被 OA 使用的 0104。
 
 ## 旧链路删除合同
 
@@ -71,6 +77,9 @@ Release A 已删除运行时链路且禁止恢复；旧表物理存储只为短�
 - in-memory matching dirty-scope fallback 作为生产状态源。
 - `CandidateGroupGrid` / `CandidateGroupCell` 组件和候选取消写入口。
 - 仅凭 `case:decision:*`、row `case_id` 或旧 section 判断显示归属。
+- legacy `GET /api/workbench` provider/API assembler 与所有跨页面 full-payload consumer；当前首屏只走 `WorkbenchQueryFacade.initial_page(...)`，Search、ignored、Batch Accounting、Cost Statistics 和 Settings 各自使用既有专属窄 I/O。
+- 旧独立 summary HTTP handler/route/facade 与其 metric owner；运维 probe 和页面只能使用 combined initial 或已有窄查询。
+- on-demand raw/live/OA/retained payload builders、read-time OA invoice-offset relation sync/repair executors、ETC summary DTO 重拼装、legacy `WorkbenchApiRoutes` 和 row-detail fallback；当前详情只走 `WorkbenchRowDetailApiRoutes -> WorkbenchQueryFacade -> active generation repository`，确认关联所需 OA 附件上下文只读取同 generation grouped rows。
 
 保留但隔离的同名概念必须属于其他业务域，例如银行自动标签候选、待找发票搜索结果或异常分类 evidence；它们不能进入 Workbench relation membership。
 
@@ -93,7 +102,7 @@ Release A 已删除运行时链路且禁止恢复；旧表物理存储只为短�
 ## 数据恢复与回滚
 
 - 发布前备份 relation facts、history、active generation metadata 和 queue 状态；candidate/decision 表是派生旧状态，不进入业务备份恢复源。
-- Release B 的 migration 0104 只做 forward drop 和旧 app-setting 清理，不改 canonical facts；Release A 不携带 0104。
+- Release B 的旧状态 drop migration 只做 forward drop 和旧 app-setting 清理，不改 canonical facts；Release A 不携带该 migration，也不提前预留空版本。
 - 发布后运行 `scripts/rehydrate-workbench-read-models.py`，等待 matching/workbench/workbench_relation scopes fresh，再运行页面 Audit。
 - 回滚应用版本不得重新创建旧 candidate/decision 表；若必须回退展示代码，只能继续读取 active formal relations 和 paired/unpaired generation。
 - 修复验收必须证明 520 关系进入 paired、13 张合计 1709.49 的发票各自 unpaired、canonical count 未减少、active relation/history 未损坏。

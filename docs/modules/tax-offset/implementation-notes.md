@@ -1,5 +1,12 @@
 # 税金抵扣 实施记录
 
+## 2026-07-16 - 税金 SQL projection 独立 owner
+
+- 目标：关闭旧 `cost_tax_sql_projection.py` 的成本/税金混合所有权，不改变 Tax Offset业务或I/O。
+- 变更：`TaxOffsetSqlProjectionBuilder` 及其私有税金 helper原样迁入 `tax_offset_sql_projection.py`；worker改为直接 import该 owner，旧 module不保留 re-export或fallback。
+- 隔离验证：税金 SQL runtime、worker bootstrap、read-model architecture和双 owner静态 guard通过；成本 rules/SQL/API也通过，证明两页行为隔离。
+- 未测风险：真实 PostgreSQL/Redis/RabbitMQ/systemd worker仍待协调部署后复验；本轮未部署、未访问生产。
+
 ## 2026-07-13 - `all` 受控强制重建透传闭环
 
 - 生产证据：正式 gateway enqueue `tax_offset=all --force-refresh` 后父事件与 queue 均完成，但 17 个现有月份仍保留旧 `invoice_fact_source_version`；单独 force-refresh `2026-07` 后该 scope 立即收敛。首轮透传修复发布后，10 个当前 canonical 月份在 23:39 被重建，剩余 16 个历史 projection 月份仍未更新，机械证明存在两个独立缺口。

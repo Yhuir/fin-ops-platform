@@ -4,9 +4,10 @@ import tempfile
 import time
 import unittest
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from threading import Event
-from unittest.mock import call, patch
+from unittest.mock import patch
 
 from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.domain.enums import BatchType
@@ -86,6 +87,24 @@ class RecordingWorkbenchMatchingDirtyQueue:
             }
         )
         return list(dict.fromkeys(months))
+
+
+class RecordingReadModelRefreshQueue:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, str]] = []
+
+    def enqueue_read_model_refresh(
+        self,
+        *,
+        scope_type: str,
+        scope_key: str,
+        reason: str,
+        **_kwargs: object,
+    ) -> None:
+        self.calls.append((scope_type, scope_key, reason))
+
+    def read_model_refresh_is_active(self, **_kwargs: object) -> bool:
+        return False
 
 
 class SettingsDataResetServiceTests(unittest.TestCase):
@@ -266,12 +285,7 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                 return_value={"status": "ok", "message": "ok", "batches": []},
             ) as repair:
                 invoice_result = app._execute_settings_data_reset(RESET_INVOICES_ACTION)
-                with patch.object(app, "_run_workbench_auto_matching_for_scopes"), patch.object(
-                    app,
-                    "_build_api_workbench_payload",
-                    return_value={"summary": {}, "paired": {"groups": []}, "unpaired": {"groups": []}},
-                ):
-                    oa_result = app._execute_settings_data_reset(RESET_OA_AND_REBUILD_ACTION)
+                oa_result = app._execute_settings_data_reset(RESET_OA_AND_REBUILD_ACTION)
             reasons = [
                 call_item.kwargs["reason"]
                 for call_item in repair.call_args_list
@@ -279,6 +293,7 @@ class SettingsDataResetServiceTests(unittest.TestCase):
 
         self.assertEqual(invoice_result["status"], "completed")
         self.assertEqual(oa_result["status"], "completed")
+        self.assertEqual(oa_result["rebuild_status"], "pending")
         self.assertEqual(
             reasons,
             [
@@ -287,7 +302,7 @@ class SettingsDataResetServiceTests(unittest.TestCase):
             ],
         )
 
-    def test_execute_data_reset_clears_cost_statistics_read_models(self) -> None:
+    def test_execute_data_reset_enqueues_cost_statistics_rebuild_without_local_snapshot(self) -> None:
         for action in (
             RESET_BANK_TRANSACTIONS_ACTION,
             RESET_INVOICES_ACTION,
@@ -296,33 +311,62 @@ class SettingsDataResetServiceTests(unittest.TestCase):
             with self.subTest(action=action), tempfile.TemporaryDirectory() as temp_dir:
                 app = build_application(data_dir=Path(temp_dir))
                 self._install_workbench_matching_dirty_queue(app)
-                app._cost_statistics_read_model_service.upsert_read_model(
-                    "2026-03",
-                    "active",
-                    {"summary": {"transaction_count": 1}, "time_rows": []},
-                )
-                app._state_store.save_cost_statistics_read_models(
-                    app._cost_statistics_read_model_service.snapshot()
+                queue = RecordingReadModelRefreshQueue()
+                app._runtime_repositories = replace(
+                    app._runtime_repositories,
+                    queue_repository=queue,
                 )
                 with patch.object(
                     app,
                     "_maybe_reconcile_historical_etc_repair",
                     return_value={"status": "ok", "message": "ok", "batches": []},
-                ), patch.object(app, "_run_workbench_auto_matching_for_scopes"), patch.object(
-                    app,
-                    "_build_api_workbench_payload",
-                    return_value={"summary": {}, "paired": {"groups": []}, "unpaired": {"groups": []}},
                 ):
                     result = app._execute_settings_data_reset(action)
 
                 self.assertEqual(result["status"], "completed")
+                self.assertEqual(
+                    result["rebuild_status"],
+                    "pending" if action == RESET_OA_AND_REBUILD_ACTION else "not_applicable",
+                )
                 lifecycle_summary = result["derived_data_lifecycle"]
                 self.assertEqual(lifecycle_summary["event"], "settings_reset_completed")
                 self.assertIn("cost_statistics_read_models", lifecycle_summary["deleted_counts"])
                 self.assertIn("tax_offset_read_models", lifecycle_summary["deleted_counts"])
                 self.assertIn("file_import_sessions", lifecycle_summary["skipped"])
-                self.assertEqual(app._cost_statistics_read_model_service.snapshot(), {"read_models": {}})
-                self.assertEqual(app._state_store.load_cost_statistics_read_models(), {"read_models": {}})
+                self.assertFalse(hasattr(app, "_cost_statistics_read_model_service"))
+                self.assertEqual(
+                    [call for call in queue.calls if call[0] == "cost_statistics"],
+                    [
+                        ("cost_statistics", "active:all", "settings_reset_completed"),
+                        ("cost_statistics", "all:all", "settings_reset_completed"),
+                    ],
+                )
+
+    def test_execute_oa_reset_reports_failed_when_workbench_lifecycle_enqueue_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            with patch.object(
+                app,
+                "_execute_derived_data_lifecycle_event",
+                return_value={
+                    "event": "settings_reset_completed",
+                    "errors": [
+                        {
+                            "domain": "workbench_read_model",
+                            "error": "durable queue unavailable",
+                        }
+                    ],
+                },
+            ), patch.object(
+                app,
+                "_maybe_reconcile_historical_etc_repair",
+                return_value={"status": "ok", "message": "ok", "batches": []},
+            ):
+                result = app._execute_settings_data_reset(RESET_OA_AND_REBUILD_ACTION)
+
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["rebuild_status"], "failed")
+        self.assertIn("后台重建入队失败", result["message"])
 
     def test_reset_api_requires_admin_access(self) -> None:
         with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
@@ -720,7 +764,7 @@ class SettingsDataResetServiceTests(unittest.TestCase):
         self.assertIs(app._background_job_service, background_job_service)
         self.assertEqual(job_payload["status"], "completed")
         self.assertEqual(job_payload["percent"], 100)
-        self.assertEqual(job_payload["result"]["rebuild_status"], "completed")
+        self.assertEqual(job_payload["result"]["rebuild_status"], "pending")
 
     def test_reset_api_allows_local_dev_admin_with_local_dev_password(self) -> None:
         with self._without_default_test_auth(), self._temporary_env(
@@ -750,10 +794,10 @@ class SettingsDataResetServiceTests(unittest.TestCase):
         self.assertEqual(payload["action"], RESET_BANK_TRANSACTIONS_ACTION)
         self.assertNotIn("local-reset-password", response.body)
 
-    def test_reset_oa_api_uses_mode_b_and_rebuilds_with_oa_retention_cutoff(self) -> None:
+    def test_reset_oa_api_queues_rebuild_without_sync_full_payload_read(self) -> None:
         with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
-            self._install_workbench_matching_dirty_queue(app)
+            matching_dirty_queue = self._install_workbench_matching_dirty_queue(app)
             app._app_settings_service.update_settings(
                 completed_project_ids=[],
                 bank_account_mappings=[],
@@ -796,34 +840,23 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                 row={"id": "oa-stale", "type": "oa"},
                 exception_code="manual_review",
             )
-            raw_payload = _build_retention_raw_payload(
-                oa_rows=[
-                    _build_retention_oa_row("oa-before-cutoff", "CASE-BEFORE", "2026-01-20"),
-                    _build_retention_oa_row("oa-after-cutoff", "CASE-AFTER", "2026-02-02"),
-                ],
-                bank_rows=[],
-                invoice_rows=[],
+            response = app.handle_request(
+                "POST",
+                "/api/workbench/settings/data-reset",
+                body=json.dumps(
+                    {
+                        "action": RESET_OA_AND_REBUILD_ACTION,
+                        "oa_password": "correct-password",
+                    }
+                ),
+                headers={"Authorization": "Bearer admin-token"},
             )
-
-            with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload) as raw_builder:
-                response = app.handle_request(
-                    "POST",
-                    "/api/workbench/settings/data-reset",
-                    body=json.dumps(
-                        {
-                            "action": RESET_OA_AND_REBUILD_ACTION,
-                            "oa_password": "correct-password",
-                        }
-                    ),
-                    headers={"Authorization": "Bearer admin-token"},
-                )
             payload = json.loads(response.body)
-            rebuilt_payload = app._build_api_workbench_payload("all")
             retained_attachment_cache_entry = app._state_store.load_oa_attachment_invoice_cache_entry("cache-oa-old")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["action"], RESET_OA_AND_REBUILD_ACTION)
-        self.assertEqual(payload["rebuild_status"], "completed")
+        self.assertEqual(payload["rebuild_status"], "pending")
         self.assertEqual(
             payload["cleared_collections"],
             [
@@ -840,10 +873,8 @@ class SettingsDataResetServiceTests(unittest.TestCase):
         self.assertEqual(retained_attachment_cache_entry["invoice_no"], "INV-OLD")
         self.assertEqual(app._workbench_pair_relation_service.snapshot()["pair_relations"], {})
         self.assertEqual(app._workbench_override_service.snapshot()["row_overrides"], {})
-        self.assertIn(call("all"), raw_builder.call_args_list)
-        rebuilt_oa_ids = _flatten_group_rows(rebuilt_payload, "oa")
-        self.assertNotIn("oa-before-cutoff", rebuilt_oa_ids)
-        self.assertIn("oa-after-cutoff", rebuilt_oa_ids)
+        self.assertIn("all", payload["derived_data_lifecycle"]["invalidated_scopes"])
+        self.assertEqual(len(matching_dirty_queue.calls), 1)
 
     def test_reset_oa_and_rebuild_preserves_pure_bank_invoice_pair_relation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -906,7 +937,7 @@ class SettingsDataResetServiceTests(unittest.TestCase):
         self.assertEqual(result.deleted_counts["workbench_preserved_non_oa_pair_relations"], 0)
         self.assertNotIn("CASE-OA-ATTACHMENT-INVOICE", persisted["workbench_pair_relations"]["pair_relations"])
 
-    def test_reset_oa_and_rebuild_imports_only_configured_oa_form_types_and_statuses(self) -> None:
+    def test_reset_oa_and_rebuild_does_not_build_oa_rows_synchronously(self) -> None:
         with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir)
             (data_dir / "oa_mongo_config.json").write_text(
@@ -1046,17 +1077,13 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                     ),
                     headers={"Authorization": "Bearer admin-token"},
                 )
-                rebuilt_payload = app._build_api_workbench_payload("all")
             payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["rebuild_status"], "completed")
-        rebuilt_oa_ids = _flatten_group_rows(rebuilt_payload, "oa")
-        self.assertEqual(rebuilt_oa_ids, ["oa-pay-2047"])
-        self.assertNotIn("oa-pay-2048", rebuilt_oa_ids)
-        self.assertFalse(any(form_id == "32" for form_id, _month in load_calls))
+        self.assertEqual(payload["rebuild_status"], "pending")
+        self.assertEqual(load_calls, [("2", None)])
 
-    def test_reset_oa_and_rebuild_reuses_cached_attachment_invoices_without_reparsing(self) -> None:
+    def test_reset_oa_and_rebuild_preserves_attachment_cache_without_synchronous_reparse(self) -> None:
         with self._without_default_test_auth(), tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir)
             (data_dir / "oa_mongo_config.json").write_text(
@@ -1202,25 +1229,14 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                     ),
                     headers={"Authorization": "Bearer admin-token"},
                 )
-                rebuilt_payload = app._build_api_workbench_payload("all")
             payload = json.loads(response.body)
+            retained_cache_entry = app._state_store.load_oa_attachment_invoice_cache_entry(cache_key)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["rebuild_status"], "completed")
+        self.assertEqual(payload["rebuild_status"], "pending")
         parse_files.assert_not_called()
-        rebuilt_invoice_ids = _flatten_group_rows(rebuilt_payload, "invoice")
-        self.assertEqual(
-            rebuilt_invoice_ids,
-            ["oa-att-inv-oa-exp-exp-attach-001-e932b5c147bf4f20"],
-        )
-        invoice_rows = _flatten_group_payload_rows(rebuilt_payload, "invoice")
-        attachment_row = next(
-            row
-            for row in invoice_rows
-            if row["id"] == "oa-att-inv-oa-exp-exp-attach-001-e932b5c147bf4f20"
-        )
-        self.assertEqual(attachment_row["source_kind"], "oa_attachment_invoice")
-        self.assertEqual(attachment_row["detail_fields"]["发票号码"], "40512344")
+        self.assertIsNotNone(retained_cache_entry)
+        self.assertEqual(retained_cache_entry["invoices"], [parsed_invoice])
 
     def test_reset_oa_attachment_parse_is_limited_to_retained_months(self) -> None:
         class CaptureParseAdapter:
@@ -1416,11 +1432,7 @@ class SettingsDataResetServiceTests(unittest.TestCase):
                 },
             )
 
-            with patch.object(app._settings_data_reset_service, "execute") as execute_reset, patch.object(
-                app,
-                "_build_api_workbench_payload",
-                side_effect=AssertionError("should not rebuild OA when password verification fails"),
-            ):
+            with patch.object(app._settings_data_reset_service, "execute") as execute_reset:
                 response = app.handle_request(
                     "POST",
                     "/api/workbench/settings/data-reset",
@@ -1480,16 +1492,6 @@ def _build_retention_oa_row(row_id: str, case_id: str, application_date: str) ->
         "summary_fields": {"申请人": "测试申请人"},
         "detail_fields": {"申请日期": application_date},
     }
-
-
-def _flatten_group_rows(payload: dict[str, object], row_type: str) -> list[str]:
-    return [str(row["id"]) for row in _flatten_group_payload_rows(payload, row_type)]
-
-
-def _flatten_group_payload_rows(payload: dict[str, object], row_type: str) -> list[dict[str, object]]:
-    row_key = f"{row_type}_rows"
-    groups = [*list(payload["paired"]["groups"]), *list(payload["unpaired"]["groups"])]
-    return [row for group in groups for row in list(group.get(row_key, []))]
 
 
 if __name__ == "__main__":

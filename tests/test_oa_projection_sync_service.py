@@ -3,12 +3,25 @@ from __future__ import annotations
 import unittest
 
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
+from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRecord
 from fin_ops_platform.services.oa_projection_sync import OAProjectionSyncService
+from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_snapshot import (
+    OaPendingPaymentSourceSnapshotResult,
+)
 from fin_ops_platform.services.postgres_repositories.oa_projection import _record_application_date
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
 
 class OaProjectionSyncServiceTests(unittest.TestCase):
+    def test_payment_status_source_and_postgres_snapshot_must_be_configured_together(self) -> None:
+        with self.assertRaisesRegex(ValueError, "must be configured together"):
+            OAProjectionSyncService(
+                source_adapter=FakeSourceAdapter(months=[], records_by_month={}),
+                projection_repository=FakeProjectionRepository(),
+                queue_repository=FakeQueueRepository(),
+                payment_status_repository=FakePaymentStatusRepository({}),
+            )
+
     def test_projection_application_date_uses_record_detail_date_not_month_start(self) -> None:
         record = _oa("oa-pay-application-date", "2026-01", workflow_status="completed")
         record.detail_fields["申请日期"] = "2026-01-14 14:04:00"
@@ -145,6 +158,54 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
         self.assertIn(("workbench", "2026-02", "oa_projection_sync"), queue_repository.refreshes)
         self.assertIn(("oa_pending_payment", "2026-02", "oa_projection_sync"), queue_repository.refreshes)
 
+    def test_oa_sync_replaces_payment_status_and_admission_snapshot_after_complete_external_reads(self) -> None:
+        records = [
+            _oa("oa-pay-completed", "2026-06", workflow_status="completed"),
+            _oa("oa-pay-progress", "2026-06", workflow_status="in_progress"),
+        ]
+        payment_statuses = {"progress": OAPaymentStatusRecord(flow_id="progress", pay_status=0)}
+        snapshot_repository = FakePendingPaymentSourceSnapshotRepository()
+        queue_repository = FakeQueueRepository()
+        service = OAProjectionSyncService(
+            source_adapter=FakeSourceAdapter(months=["2026-06"], records_by_month={"2026-06": records}),
+            projection_repository=FakeProjectionRepository(),
+            queue_repository=queue_repository,
+            payment_status_repository=FakePaymentStatusRepository(payment_statuses),
+            pending_payment_source_snapshot_repository=snapshot_repository,
+        )
+
+        result = service.handle_runtime_event(_event("2026-06"))
+
+        self.assertEqual(snapshot_repository.calls[0]["scope_key"], "2026-06")
+        self.assertEqual(snapshot_repository.calls[0]["records"], records)
+        self.assertEqual(snapshot_repository.calls[0]["payment_statuses"], payment_statuses)
+        self.assertEqual(result["pending_payment_source_snapshot_count"], 1)
+        self.assertEqual(result["pending_payment_admission_count"], 1)
+        self.assertEqual(result["pending_payment_affected_scope_keys"], ["2026-06"])
+        self.assertNotIn(("oa_pending_payment", "2026-06", "oa_projection_sync"), queue_repository.refreshes)
+
+    def test_external_payment_status_failure_prevents_any_postgres_projection_write(self) -> None:
+        projection_repository = FakeProjectionRepository()
+        snapshot_repository = FakePendingPaymentSourceSnapshotRepository()
+        service = OAProjectionSyncService(
+            source_adapter=FakeSourceAdapter(
+                months=["2026-06"],
+                records_by_month={"2026-06": [_oa("oa-pay-progress", "2026-06", workflow_status="in_progress")]},
+            ),
+            projection_repository=projection_repository,
+            queue_repository=FakeQueueRepository(),
+            payment_status_repository=FakePaymentStatusRepository(error=RuntimeError("incomplete mysql read")),
+            pending_payment_source_snapshot_repository=snapshot_repository,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "incomplete mysql read"):
+            service.handle_runtime_event(_event("2026-06"))
+
+        self.assertEqual(projection_repository.saved_records, [])
+        self.assertEqual(projection_repository.stale_completed_scopes, [])
+        self.assertEqual(projection_repository.non_completed_scopes, [])
+        self.assertEqual(snapshot_repository.calls, [])
+
 
 class FakeSourceAdapter:
     def __init__(self, *, months: list[str], records_by_month: dict[str, list[OAApplicationRecord]]) -> None:
@@ -223,6 +284,43 @@ class FakePendingPaymentRelationPromoter:
         self.completed_records = list(records)
         self.actor_id = actor_id
         return dict(self.result)
+
+
+class FakePaymentStatusRepository:
+    def __init__(
+        self,
+        statuses: dict[str, OAPaymentStatusRecord] | None = None,
+        *,
+        error: Exception | None = None,
+    ) -> None:
+        self._statuses = dict(statuses or {})
+        self._error = error
+
+    def list_payment_statuses(self) -> dict[str, OAPaymentStatusRecord]:
+        if self._error is not None:
+            raise self._error
+        return dict(self._statuses)
+
+
+class FakePendingPaymentSourceSnapshotRepository:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def commit_authoritative_snapshot(self, **kwargs: object) -> OaPendingPaymentSourceSnapshotResult:
+        self.calls.append(dict(kwargs))
+        statuses = kwargs.get("payment_statuses") if isinstance(kwargs.get("payment_statuses"), dict) else {}
+        records = kwargs.get("records") if isinstance(kwargs.get("records"), list) else []
+        admission_count = sum(1 for record in records if getattr(record, "workflow_status", "") == "in_progress")
+        completed_count = sum(1 for record in records if getattr(record, "workflow_status", "") == "completed")
+        non_completed_count = len(records) - completed_count
+        return OaPendingPaymentSourceSnapshotResult(
+            affected_scope_keys=(str(kwargs.get("scope_key") or "all"),),
+            payment_status_count=len(statuses),
+            admission_count=admission_count,
+            source_signatures={str(kwargs.get("scope_key") or "all"): "signature"},
+            upserted_completed_count=completed_count,
+            removed_non_completed_count=non_completed_count,
+        )
 
 
 def _oa(row_id: str, month: str, *, workflow_status: str) -> OAApplicationRecord:

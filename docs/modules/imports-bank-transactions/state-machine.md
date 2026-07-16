@@ -48,7 +48,7 @@
 | conflict dialog | 文件识别账号与用户选择账号冲突时，确认前弹出冲突确认。 |
 | confirming | 确认按钮 loading；App Health `blocksMutations` 时禁止确认并提示重新进入。 |
 | job queued | 返回 `job` 时显示“已开始后台导入”，不立即宣称下游刷新完成。 |
-| success | inline 完成时可提示导入完成，并刷新 Workbench 状态；后台 job 由 App Status/Health 展示进度。 |
+| success | inline 完成时提示导入完成；仅当响应声明 `operation_barrier_targets` 时等待这些 targets，禁止请求 Workbench 页面探测刷新。后台 job 由 App Status/Health 展示进度。 |
 | error | preview/confirm/retry/session fetch 失败展示错误；`preview_stale` 使用固定“重新预览”提示。 |
 | session restore | 支持通过 session id 恢复 preview；离开/返回页面不能保留 in-flight 请求。 |
 | permission disabled/hidden | 当前页面通过 App Health `blocksMutations` 做系统不可用防护；若后续接入细粒度权限，需补 API 403 和前端 disabled/hidden。 |

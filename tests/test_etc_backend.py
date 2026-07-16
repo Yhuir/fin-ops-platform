@@ -3352,67 +3352,6 @@ class EtcApiTests(unittest.TestCase):
             self.assertEqual(payload["total"], 1)
             self.assertEqual([item["externalEtcBatchId"] for item in payload["items"]], [expected_external_batch_id])
 
-    def test_etc_business_manual_submitted_creates_open_workbench_summary_with_reported_amount(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            app._etc_service.oa_client = FakeEtcOAClient()
-
-            task_id, preview_response, preview_payload = self._preview_task_zip(app, ["ETC001", "ETC002"])
-            self.assertEqual(preview_response.status_code, 200)
-            confirm_response = app.handle_request(
-                "POST",
-                "/api/etc/import/confirm",
-                json.dumps({"sessionId": preview_payload["sessionId"], "taskId": task_id}),
-            )
-            self._wait_for_job(app, json.loads(confirm_response.body)["job"]["job_id"])
-            business_batch = json.loads(
-                app.handle_request("GET", f"/api/etc/business-batches?taskId={task_id}").body
-            )["data"]["items"][0]
-            draft_response = app.handle_request(
-                "POST",
-                f"/api/etc/business-batches/{business_batch['businessBatchId']}/oa-draft",
-                json.dumps({"expectedVersion": business_batch["version"]}),
-            )
-            drafted = json.loads(draft_response.body)["data"]["businessBatch"]
-            submission_batch = app._etc_service._batches[str(drafted["submissionBatchId"])]
-            submission_batch.total_amount = Decimal("1673.30")
-            submission_batch.oa_total_amount = Decimal("1673.30")
-            submission_batch.etc_invoice_amount = Decimal("27.14")
-            submission_batch.etc_invoice_count = 2
-            submission_batch.display_count_text = "ETC票 2 + 补充凭证 0"
-
-            manual_response = app.handle_request(
-                "POST",
-                f"/api/etc/business-batches/{drafted['businessBatchId']}/manual-oa-status",
-                json.dumps({
-                    "decision": "submitted",
-                    "reason": "用户确认 OA 草稿已提交。",
-                    "expectedVersion": drafted["version"],
-                }),
-            )
-            workbench_payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-02").body)
-            open_invoice_rows = [
-                row
-                for group in workbench_payload["unpaired"]["groups"]
-                for row in group["invoice_rows"]
-            ]
-            summary_rows = [row for row in open_invoice_rows if row.get("source_kind") == "etc_invoice_summary"]
-            scattered_etc_rows = [row for row in open_invoice_rows if row.get("source_kind") == "etc_invoice"]
-
-        self.assertEqual(manual_response.status_code, 200)
-        self.assertEqual(scattered_etc_rows, [])
-        self.assertEqual(len(summary_rows), 1)
-        summary_row = summary_rows[0]
-        self.assertEqual(summary_row["total_with_tax"], "27.14")
-        self.assertEqual(summary_row["amount"], "27.14")
-        self.assertEqual(summary_row["etc_invoice_count"], 2)
-        self.assertEqual(summary_row["invoice_bank_relation"]["code"], "pending_oa_bank_match")
-        detail_response = app.handle_request("GET", f"/api/workbench/rows/{summary_row['id']}")
-        detail_payload = json.loads(detail_response.body)
-        self.assertEqual(detail_response.status_code, 200)
-        self.assertIn("ETC001", detail_payload["row"]["detail_fields"]["发票清单"])
-        self.assertIn("ETC002", detail_payload["row"]["detail_fields"]["发票清单"])
-
     def test_submitted_etc_business_batch_delete_releases_summary_and_deletes_local_task(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -3451,13 +3390,6 @@ class EtcApiTests(unittest.TestCase):
                 }),
             )
             manual_payload = json.loads(manual_response.body)["data"]["businessBatch"]
-            before_workbench = json.loads(app.handle_request("GET", "/api/workbench?month=2026-02").body)
-            before_rows = [
-                row
-                for group in before_workbench["unpaired"]["groups"]
-                for row in group["invoice_rows"]
-            ]
-
             delete_response = app.handle_request(
                 "DELETE",
                 f"/api/etc/business-batches/{manual_payload['businessBatchId']}",
@@ -3466,12 +3398,6 @@ class EtcApiTests(unittest.TestCase):
                     "reason": "用户删除已提交 ETC 批次并释放发票。",
                 }),
             )
-            after_workbench = json.loads(app.handle_request("GET", "/api/workbench?month=2026-02").body)
-            after_rows = [
-                row
-                for group in after_workbench["unpaired"]["groups"]
-                for row in group["invoice_rows"]
-            ]
             submitted_batches = json.loads(app.handle_request("GET", "/api/etc/business-batches?status=submitted").body)["data"]
             active_batches = json.loads(app.handle_request("GET", "/api/etc/business-batches?status=active").body)["data"]
             task_response = app.handle_request("GET", f"/api/etc/reconciliation-tasks/{task_id}")
@@ -3479,7 +3405,6 @@ class EtcApiTests(unittest.TestCase):
             etc_invoices = app._etc_service.list_invoices_by_ids(["etc_invoice_0001", "etc_invoice_0002"])
 
         self.assertEqual(manual_response.status_code, 200)
-        self.assertEqual(len([row for row in before_rows if row.get("source_kind") == "etc_invoice_summary"]), 1)
         self.assertEqual(delete_response.status_code, 200)
         delete_payload = json.loads(delete_response.body)["data"]
         self.assertEqual(delete_payload["kind"], "submitted_business_batch_reset")
@@ -3487,9 +3412,6 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(submitted_batches["total"], 0)
         self.assertEqual(active_batches["total"], 0)
         self.assertEqual(task_response.status_code, 404)
-        self.assertEqual([row for row in after_rows if row.get("source_kind") == "etc_invoice_summary"], [])
-        scattered_etc_rows = [row for row in after_rows if row.get("source_kind") == "etc_invoice"]
-        self.assertEqual(scattered_etc_rows, [])
         self.assertEqual(canonical_invoices, {})
         self.assertEqual({invoice.status for invoice in etc_invoices}, {EtcInvoiceStatus.UNSUBMITTED})
         self.assertEqual({invoice.current_batch_id for invoice in etc_invoices}, {None})
@@ -3532,13 +3454,7 @@ class EtcApiTests(unittest.TestCase):
                 }),
             )
             manual_payload = json.loads(manual_response.body)["data"]["businessBatch"]
-            before_workbench = json.loads(app.handle_request("GET", "/api/workbench?month=2026-02").body)
-            before_rows = [
-                row
-                for group in before_workbench["unpaired"]["groups"]
-                for row in group["invoice_rows"]
-            ]
-            summary_row = next(row for row in before_rows if row.get("source_kind") == "etc_invoice_summary")
+            summary_row_id = app._etc_invoice_summary_row_id(manual_payload["externalEtcBatchId"])
             app._workbench_pair_relation_service.create_active_relation(
                 case_id="CASE-ETC-DELETE-OLD",
                 row_ids=["oa-etc-delete", "txn-etc-delete"],
@@ -3550,7 +3466,7 @@ class EtcApiTests(unittest.TestCase):
             )
             app._workbench_pair_relation_service.replace_with_confirmed_relation(
                 case_id="CASE-ETC-DELETE",
-                row_ids=["oa-etc-delete", "txn-etc-delete", str(summary_row["id"])],
+                row_ids=["oa-etc-delete", "txn-etc-delete", summary_row_id],
                 row_types=["oa", "bank", "invoice"],
                 relation_mode="manual_confirmed",
                 created_by="finance",
@@ -3573,13 +3489,7 @@ class EtcApiTests(unittest.TestCase):
                     "reason": "用户删除已提交 ETC 批次并取消三栏配对。",
                 }),
             )
-            after_workbench = json.loads(app.handle_request("GET", "/api/workbench?month=2026-02").body)
-            after_rows = [
-                row
-                for group in after_workbench["unpaired"]["groups"]
-                for row in group["invoice_rows"]
-            ]
-            relation_for_summary = app._workbench_pair_relation_service.get_active_relation_by_row_id(str(summary_row["id"]))
+            relation_for_summary = app._workbench_pair_relation_service.get_active_relation_by_row_id(summary_row_id)
             relation_for_oa = app._workbench_pair_relation_service.get_active_relation_by_row_id("oa-etc-delete")
             history = app._workbench_pair_relation_service.list_history()
 
@@ -3587,8 +3497,6 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(delete_response.status_code, 200)
         self.assertIsNone(relation_for_summary)
         self.assertIsNone(relation_for_oa)
-        self.assertEqual([row for row in after_rows if row.get("source_kind") == "etc_invoice_summary"], [])
-        self.assertEqual([row for row in after_rows if row.get("source_kind") == "etc_invoice"], [])
         self.assertTrue(any(entry.get("operation_type") == "etc_summary_unmerged" for entry in history))
 
     def test_etc_summary_relation_cancel_delegates_to_workbench_relation_command_service(self) -> None:
@@ -3769,13 +3677,7 @@ class EtcApiTests(unittest.TestCase):
             )
             manual_payload = json.loads(manual_response.body)["data"]["businessBatch"]
             task_payload = json.loads(app.handle_request("GET", f"/api/etc/reconciliation-tasks/{task_id}").body)
-            before_workbench = json.loads(app.handle_request("GET", "/api/workbench?month=2026-02").body)
-            before_rows = [
-                row
-                for group in before_workbench["unpaired"]["groups"]
-                for row in group["invoice_rows"]
-            ]
-            summary_row = next(row for row in before_rows if row.get("source_kind") == "etc_invoice_summary")
+            summary_row_id = app._etc_invoice_summary_row_id(manual_payload["externalEtcBatchId"])
             app._workbench_pair_relation_service.create_active_relation(
                 case_id="CASE-ETC-TASK-DELETE-OLD",
                 row_ids=["oa-etc-task-delete", "txn-etc-task-delete"],
@@ -3787,7 +3689,7 @@ class EtcApiTests(unittest.TestCase):
             )
             app._workbench_pair_relation_service.replace_with_confirmed_relation(
                 case_id="CASE-ETC-TASK-DELETE",
-                row_ids=["oa-etc-task-delete", "txn-etc-task-delete", str(summary_row["id"])],
+                row_ids=["oa-etc-task-delete", "txn-etc-task-delete", summary_row_id],
                 row_types=["oa", "bank", "invoice"],
                 relation_mode="manual_confirmed",
                 created_by="finance",
@@ -3808,13 +3710,7 @@ class EtcApiTests(unittest.TestCase):
                 json.dumps({"expectedVersion": task_payload["version"]}),
             )
             missing_response = app.handle_request("GET", f"/api/etc/reconciliation-tasks/{task_id}")
-            after_workbench = json.loads(app.handle_request("GET", "/api/workbench?month=2026-02").body)
-            after_rows = [
-                row
-                for group in after_workbench["unpaired"]["groups"]
-                for row in group["invoice_rows"]
-            ]
-            relation_for_summary = app._workbench_pair_relation_service.get_active_relation_by_row_id(str(summary_row["id"]))
+            relation_for_summary = app._workbench_pair_relation_service.get_active_relation_by_row_id(summary_row_id)
             relation_for_oa = app._workbench_pair_relation_service.get_active_relation_by_row_id("oa-etc-task-delete")
             history = app._workbench_pair_relation_service.list_history()
 
@@ -3823,8 +3719,6 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(missing_response.status_code, 404)
         self.assertIsNone(relation_for_summary)
         self.assertIsNone(relation_for_oa)
-        self.assertEqual([row for row in after_rows if row.get("source_kind") == "etc_invoice_summary"], [])
-        self.assertEqual([row for row in after_rows if row.get("source_kind") == "etc_invoice"], [])
         self.assertTrue(any(entry.get("operation_type") == "etc_summary_unmerged" for entry in history))
 
     def test_reconciliation_task_delete_removes_orphan_submission_metadata_link(self) -> None:
@@ -5026,197 +4920,6 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(submitted_batches, [])
         self.assertIsNone(relation)
 
-    def test_existing_etc_batch_link_extends_active_oa_bank_relation_and_renders_summary(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            app = build_application(data_dir=Path(temp_dir))
-            manual_preview = app._import_service.preview_import(
-                batch_type=BatchType.INPUT_INVOICE,
-                source_name="manual-etc.xlsx",
-                imported_by="finance",
-                rows=[
-                    {
-                        "digital_invoice_no": "ETC001",
-                        "invoice_no": "ETC001",
-                        "counterparty_name": "云南高速公路联网收费管理有限公司",
-                        "seller_name": "云南高速公路联网收费管理有限公司",
-                        "seller_tax_no": "915300007194052520",
-                        "buyer_name": "云南溯源科技有限公司",
-                        "buyer_tax_no": "915300007194052521",
-                        "amount": "12.68",
-                        "total_with_tax": "13.07",
-                        "tax_amount": "0.39",
-                        "invoice_date": "2026-02-27",
-                    },
-                    {
-                        "digital_invoice_no": "ETC002",
-                        "invoice_no": "ETC002",
-                        "counterparty_name": "云南高速公路联网收费管理有限公司",
-                        "seller_name": "云南高速公路联网收费管理有限公司",
-                        "seller_tax_no": "915300007194052520",
-                        "buyer_name": "云南溯源科技有限公司",
-                        "buyer_tax_no": "915300007194052521",
-                        "amount": "12.68",
-                        "total_with_tax": "13.07",
-                        "tax_amount": "0.39",
-                        "invoice_date": "2026-02-28",
-                    },
-                ],
-            )
-            app._import_service.confirm_import(manual_preview.id)
-            app._workbench_pair_relation_service.create_active_relation(
-                case_id="CASE-EXISTING-ETC",
-                row_ids=["txn-existing-etc", "oa-existing-etc"],
-                row_types=["bank", "oa"],
-                relation_mode="manual_confirmed",
-                created_by="system",
-                month_scope="2026-02",
-                note="existing OA-bank relation",
-                amount_check={
-                    "status": "matched",
-                    "direction": "expense",
-                    "oa_amount": "30.00",
-                    "bank_amount": "30.00",
-                    "amount_delta": "0.00",
-                },
-            )
-            original_update_relation_metadata = app._workbench_pair_relation_service.update_relation_metadata_for_case_id
-
-            def forbidden_direct_relation_metadata_update(*_args: object, **_kwargs: object) -> None:
-                raise AssertionError("existing ETC batch link must update relation metadata via command service.")
-
-            app._workbench_pair_relation_service.update_relation_metadata_for_case_id = forbidden_direct_relation_metadata_update
-
-            class RecordingRelationCommandService:
-                def __init__(self) -> None:
-                    self.metadata_calls: list[dict[str, object]] = []
-
-                def get_active_relation_by_case_id(self, case_id: str) -> dict[str, object] | None:
-                    return app._workbench_pair_relation_service.get_active_relation_by_case_id(case_id)
-
-                def update_relation_metadata_for_case_id(self, **kwargs: object) -> dict[str, object]:
-                    self.metadata_calls.append(dict(kwargs))
-                    pair_kwargs = {
-                        key: value
-                        for key, value in kwargs.items()
-                        if key not in {"actor_id", "history_operation_type"}
-                    }
-                    pair_kwargs["updated_by"] = kwargs["actor_id"]
-                    pair_kwargs["operation_type"] = kwargs["history_operation_type"]
-                    relation, history = original_update_relation_metadata(**pair_kwargs)
-                    return {
-                        "status": "updated",
-                        "relation": relation,
-                        "history": history,
-                        "changed_case_ids": [str(kwargs["case_id"])],
-                        "affected_months": ["2026-02"],
-                        "read_model_status": "fresh",
-                        "read_model_stale_reasons": [],
-                        "read_model_scope_keys": ["2026-02"],
-                        "refresh_enqueued": False,
-                    }
-
-            relation_command_service = RecordingRelationCommandService()
-            service = ExistingEtcBatchLinkService(
-                etc_service=app._etc_service,
-                import_service=app._import_service,
-                relation_command_service=relation_command_service,
-                link_import_result_to_existing_invoices=app._link_etc_import_result_to_existing_invoices,
-                link_etc_invoices_to_existing_invoices=app._link_etc_invoices_to_existing_invoices,
-                refresh_after_etc_invoice_link=lambda months, reason: None,
-                persist_pair_relations=lambda case_ids: app._persist_workbench_pair_relations(
-                    changed_case_ids=case_ids,
-                ),
-                invalidate_workbench_scopes=app._invalidate_workbench_read_model_scopes,
-                persist_etc_state=lambda: app._state_store.save_etc_state(app._etc_service.snapshot()),
-            )
-
-            result = service.link_existing_invoices(
-                ExistingEtcBatchLinkSpec(
-                    label="测试 ETC 批次",
-                    case_id="CASE-EXISTING-ETC",
-                    external_batch_id="ETC-EXISTING-2026-02",
-                    oa_row_id="oa-existing-etc",
-                    bank_row_id="txn-existing-etc",
-                    oa_amount=Decimal("30.00"),
-                    bank_amount=Decimal("30.00"),
-                    invoice_numbers=("ETC001", "ETC002"),
-                    note="把现有 ETC 发票补充到已配对 OA-银行批次",
-                )
-            )
-            relation = app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-EXISTING-ETC")
-            invoices = {invoice.invoice_no: invoice for invoice in app._import_service.list_invoices()}
-            raw_payload = {
-                "month": "2026-02",
-                "summary": {
-                    "oa_count": 1,
-                    "bank_count": 1,
-                    "invoice_count": 0,
-                    "paired_count": 0,
-                    "unpaired_count": 1,
-                    "exception_count": 0,
-                },
-                "paired": {"oa": [], "bank": [], "invoice": []},
-                "unpaired": {
-                    "oa": [
-                        {
-                            "id": "oa-existing-etc",
-                            "type": "oa",
-                            "case_id": "",
-                            "applicant": "张三",
-                            "apply_type": "支付申请",
-                            "amount": "30.00",
-                            "counterparty_name": "云南高速通行费",
-                            "reason": "ETC通行费",
-                            "oa_bank_relation": {"code": "pending_match", "label": "待找流水", "tone": "warn"},
-                            "available_actions": ["detail"],
-                        }
-                    ],
-                    "bank": [
-                        {
-                            "id": "txn-existing-etc",
-                            "type": "bank",
-                            "trade_time": "2026-02-15 09:04:01",
-                            "direction": "支出",
-                            "debit_amount": "30.00",
-                            "credit_amount": "",
-                            "counterparty_name": "批量账务集中处理",
-                            "invoice_relation": {"code": "pending_invoice_match", "label": "待关联发票", "tone": "warn"},
-                            "available_actions": ["detail"],
-                        }
-                    ],
-                    "invoice": [],
-                },
-            }
-            with patch.object(app, "_build_raw_workbench_payload", return_value=raw_payload):
-                payload = json.loads(app.handle_request("GET", "/api/workbench?month=2026-02").body)
-            invoice_rows = [
-                row
-                for group in payload["paired"]["groups"]
-                for row in group["invoice_rows"]
-            ]
-
-        self.assertEqual(result.status, "ok")
-        self.assertEqual(result.invoice_count, 2)
-        self.assertEqual(result.invoice_total, Decimal("26.14"))
-        self.assertEqual(result.delta, Decimal("3.86"))
-        self.assertIsNotNone(relation)
-        assert relation is not None
-        self.assertEqual(relation["case_id"], "CASE-EXISTING-ETC")
-        self.assertEqual(relation["relation_mode"], "manual_confirmed")
-        self.assertEqual(relation["row_ids"], ["txn-existing-etc", "oa-existing-etc"])
-        self.assertEqual(relation["amount_check"]["status"], "mismatch")
-        self.assertEqual(relation["amount_check"]["invoice_total"], "26.14")
-        self.assertEqual(relation["amount_check"]["delta"], "3.86")
-        self.assertEqual(relation["amount_check"]["external_etc_batch_id"], "ETC-EXISTING-2026-02")
-        self.assertEqual(relation_command_service.metadata_calls[-1]["case_id"], "CASE-EXISTING-ETC")
-        self.assertEqual(relation_command_service.metadata_calls[-1]["history_operation_type"], "link_existing_etc_batch")
-        self.assertEqual(invoices["ETC001"].workbench_visibility, "hidden_after_etc_submission")
-        self.assertEqual(invoices["ETC001"].etc_submission_status, "submitted")
-        self.assertEqual(invoices["ETC002"].workbench_visibility, "hidden_after_etc_submission")
-        self.assertEqual(len(invoice_rows), 1)
-        self.assertEqual(invoice_rows[0]["source_kind"], "etc_invoice_summary")
-        self.assertEqual(invoice_rows[0]["seller_name"], "ETC发票 2 张")
-        self.assertEqual(invoice_rows[0]["total_with_tax"], "26.14")
 
     def test_existing_etc_batch_link_requires_relation_command_service_before_local_writes(self) -> None:
         with TemporaryDirectory() as temp_dir:

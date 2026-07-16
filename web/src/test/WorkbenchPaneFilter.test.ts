@@ -325,12 +325,11 @@ describe("Workbench pane display model", () => {
     await waitFor(() => {
       expect(fetchMock.mock.calls.some(([input]) => {
         const url = new URL(String(input), "http://localhost");
-        return (
-          url.pathname === "/api/workbench/groups"
-          && url.searchParams.get("search_by_pane") === JSON.stringify({ bank: "智能工厂" })
-          && !url.searchParams.has("search")
-          && !url.searchParams.has("search_mode")
-        );
+        const unpairedQuery = JSON.parse(url.searchParams.get("unpaired_query") ?? "{}") as Record<string, unknown>;
+        return url.pathname === "/api/workbench"
+          && JSON.stringify(unpairedQuery.search_by_pane) === JSON.stringify({ bank: "智能工厂" })
+          && !("search" in unpairedQuery)
+          && !("search_mode" in unpairedQuery);
       })).toBe(true);
     }, { timeout: 3000 });
   });

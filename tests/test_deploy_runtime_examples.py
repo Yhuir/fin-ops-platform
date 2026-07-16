@@ -124,7 +124,7 @@ class DeployRuntimeExampleTests(unittest.TestCase):
 
         self.assertIn("install_if_missing", helper)
         self.assertIn("migrate_legacy_worker_poll_interval", helper)
-        self.assertIn("migrate_workbench_aggregate_drain", helper)
+        self.assertNotIn("migrate_workbench_aggregate_drain", helper)
         self.assertIn('source_poll="$(grep -oE -- "--poll-interval-seconds [0-9.]+"', helper)
         self.assertIn("--poll-interval-seconds (2|0\\\\.25|0\\\\.1|0\\\\.05)([^0-9.]|$)", helper)
         self.assertIn("--poll-interval-seconds ${source_poll}", helper)
@@ -151,22 +151,16 @@ class DeployRuntimeExampleTests(unittest.TestCase):
             deploy_control.rindex("restart_services\n"),
         )
 
-    def test_workbench_workers_split_month_shards_from_all_scope_aggregate(self) -> None:
+    def test_main_workbench_worker_owns_month_and_all_fan_out_scopes(self) -> None:
         helper = ENSURE_RUNTIME_WORKERS.read_text(encoding="utf-8")
         workbench_env = (WORKER_ENV_DIR / "fin-ops.worker.workbench.env.example").read_text(encoding="utf-8")
-        aggregate_env = (WORKER_ENV_DIR / "fin-ops.worker.workbench-aggregate.env.example").read_text(
-            encoding="utf-8"
-        )
         required = {registration.instance_name: registration for registration in RUNTIME_WORKER_REGISTRY if registration.required}
 
-        self.assertIn("workbench-aggregate", required)
-        self.assertIn("--exclude-claim-scope-key all", workbench_env)
-        self.assertIn("--claim-scope-key all", aggregate_env)
-        self.assertIn("--poll-interval-seconds 0.05", aggregate_env)
-        self.assertIn("FIN_OPS_WORKER_MAX_EVENTS_PER_ITERATION=4", aggregate_env)
-        self.assertIn("migrate_workbench_scope_split", helper)
-        self.assertIn("migrate_workbench_aggregate_drain", helper)
-        self.assertIn("--exclude-claim-scope-key all", helper)
+        self.assertNotIn("workbench-aggregate", required)
+        self.assertNotIn("--exclude-claim-scope-key all", workbench_env)
+        self.assertNotIn("--claim-scope-key all", workbench_env)
+        self.assertNotIn("migrate_workbench_scope_split", helper)
+        self.assertNotIn("migrate_workbench_aggregate_drain", helper)
 
     def test_rabbitmq_dispatcher_env_includes_invoice_usage_collection_events(self) -> None:
         env_example = DISPATCHER_ENV.read_text()

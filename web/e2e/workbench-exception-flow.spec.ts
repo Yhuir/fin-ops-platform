@@ -42,7 +42,7 @@ test.describe("workbench exception browser flow", () => {
     await exceptionDialog.getByRole("textbox", { name: "备注" }).fill("浏览器异常备注");
 
     const barrierCallsBeforeApply = api.count("POST /api/operation-barrier/status");
-    const groupCallsBeforeApply = api.count("GET /api/workbench/groups");
+    const workbenchLoadsBeforeApply = api.count("GET /api/workbench");
     await exceptionDialog.getByRole("button", { name: "提交处理" }).click();
 
     await expect(exceptionDialog).toHaveAttribute("aria-busy", "true");
@@ -75,7 +75,7 @@ test.describe("workbench exception browser flow", () => {
     expect(api.count("POST /api/workbench/exception/preview")).toBeGreaterThanOrEqual(1);
     expect(api.count("POST /api/workbench/exception/apply")).toBe(1);
     expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(barrierCallsBeforeApply);
-    expect(api.count("GET /api/workbench/groups")).toBeGreaterThan(groupCallsBeforeApply);
+    expect(api.count("GET /api/workbench")).toBeGreaterThan(workbenchLoadsBeforeApply);
     await expectNoUnexpectedSuccessUiErrors(page);
 
     await openZone.getByRole("button", { name: /已处理异常3项/ }).click();
@@ -85,7 +85,7 @@ test.describe("workbench exception browser flow", () => {
     await expect(processedModal.getByText("浏览器异常备注").first()).toBeVisible();
 
     const barrierCallsBeforeCancel = api.count("POST /api/operation-barrier/status");
-    const groupCallsBeforeCancel = api.count("GET /api/workbench/groups");
+    const workbenchLoadsBeforeCancel = api.count("GET /api/workbench");
     await processedModal.getByRole("button", { name: "取消异常处理" }).first().click();
 
     const cancelModal = page.getByRole("dialog", { name: "取消异常处理确认弹窗" });
@@ -106,7 +106,7 @@ test.describe("workbench exception browser flow", () => {
     expect(cancelBody.row_ids).toHaveLength(workbenchRowIds.length);
     expect(api.count("POST /api/workbench/actions/cancel-exception")).toBe(1);
     expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(barrierCallsBeforeCancel);
-    expect(api.count("GET /api/workbench/groups")).toBeGreaterThan(groupCallsBeforeCancel);
+    expect(api.count("GET /api/workbench")).toBeGreaterThan(workbenchLoadsBeforeCancel);
     await expectNoUnexpectedSuccessUiErrors(page);
   });
 
@@ -122,7 +122,7 @@ test.describe("workbench exception browser flow", () => {
     await expect(invoiceRow).toBeVisible();
 
     const barrierCallsBeforeIgnore = api.count("POST /api/operation-barrier/status");
-    const groupCallsBeforeIgnore = api.count("GET /api/workbench/groups");
+    const workbenchLoadsBeforeIgnore = api.count("GET /api/workbench");
     await invoiceRow.getByRole("button", { name: "忽略" }).click();
 
     await expect(openGroup.getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ })).toHaveCount(0);
@@ -134,7 +134,7 @@ test.describe("workbench exception browser flow", () => {
       comment: "由关联台忽略发票：iv-o-202603-001",
     });
     expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(barrierCallsBeforeIgnore);
-    expect(api.count("GET /api/workbench/groups")).toBeGreaterThan(groupCallsBeforeIgnore);
+    expect(api.count("GET /api/workbench")).toBeGreaterThan(workbenchLoadsBeforeIgnore);
     await expectNoUnexpectedSuccessUiErrors(page);
 
     await openZone.getByRole("button", { name: /已忽略1项/ }).click();
@@ -143,7 +143,7 @@ test.describe("workbench exception browser flow", () => {
     await expect(ignoredModal.getByText("智能工厂设备商")).toBeVisible();
 
     const barrierCallsBeforeUnignore = api.count("POST /api/operation-barrier/status");
-    const groupCallsBeforeUnignore = api.count("GET /api/workbench/groups");
+    const workbenchLoadsBeforeUnignore = api.count("GET /api/workbench");
     await ignoredModal.getByRole("button", { name: "撤回忽略" }).click();
 
     await expect(openGroup.getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ })).toBeVisible();
@@ -154,7 +154,7 @@ test.describe("workbench exception browser flow", () => {
       row_id: "iv-o-202603-001",
     });
     expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(barrierCallsBeforeUnignore);
-    expect(api.count("GET /api/workbench/groups")).toBeGreaterThan(groupCallsBeforeUnignore);
+    expect(api.count("GET /api/workbench")).toBeGreaterThan(workbenchLoadsBeforeUnignore);
     await expectNoUnexpectedSuccessUiErrors(page);
   });
 });

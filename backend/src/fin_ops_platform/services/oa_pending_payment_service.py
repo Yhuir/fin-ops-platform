@@ -25,6 +25,14 @@ from fin_ops_platform.services.oa_payment_status_service import (
     OAPaymentStatusRepository,
     PAY_STATUS_PAID,
 )
+from fin_ops_platform.services.oa_pending_payment_query_contract import (
+    FILTER_CONFIG,
+    SORT_FIELDS,
+    VIEW_MODE_COMPLETED,
+    VIEW_MODE_IN_PROGRESS,
+    OaPendingPaymentError,
+    parse_positive_int as _parse_positive_int,
+)
 from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRelationReadFacade
 
 
@@ -32,8 +40,6 @@ ZERO = Decimal("0.00")
 CENT = Decimal("0.01")
 SOURCE_VERSION = "oa-pending-payment:complete-relation-edge-proof-v6"
 READ_MODEL_STATUS = "live_query"
-VIEW_MODE_COMPLETED = "completed"
-VIEW_MODE_IN_PROGRESS = "in_progress"
 VIEW_MODES = {VIEW_MODE_COMPLETED, VIEW_MODE_IN_PROGRESS}
 OA_APPLICATION_TIME_FIELDS = (
     "审批完成时间",
@@ -50,42 +56,6 @@ OA_APPLICATION_TIME_FIELDS = (
     "createdAt",
     "created_at",
 )
-
-
-FILTER_CONFIG: dict[str, dict[str, Any]] = {
-    "oa_applicant": {"label": "OA申请人", "mode": "enum_multi", "operators": {"in", "contains"}, "sortable": True},
-    "oa_application_type": {"label": "类型", "mode": "enum_multi", "operators": {"in", "equals"}, "sortable": True},
-    "oa_project_name": {"label": "项目名称", "mode": "enum_multi", "operators": {"in", "contains"}, "sortable": True},
-    "oa_amount": {"label": "金额", "mode": "money", "operators": {"between", "equals"}, "sortable": True},
-    "payment_status": {"label": "支付状态", "mode": "enum_multi", "operators": {"in"}, "sortable": True},
-    "bank_trade_time": {"label": "交易时间", "mode": "date", "operators": {"between", "equals"}, "sortable": True},
-    "bank_name": {"label": "支出银行", "mode": "enum_multi", "operators": {"in", "contains"}, "sortable": True},
-    "bank_account": {"label": "银行账户", "mode": "enum_multi", "operators": {"in"}, "sortable": False},
-    "bank_direction": {"label": "收支", "mode": "enum_multi", "operators": {"in"}, "sortable": False},
-    "bank_counterparty_name": {"label": "对方户名", "mode": "enum_multi", "operators": {"in", "contains"}, "sortable": True},
-    "bank_summary": {"label": "摘要", "mode": "text", "operators": {"contains"}, "sortable": True},
-    "invoice_no": {"label": "数电发票号码", "mode": "text", "operators": {"contains", "equals"}, "sortable": True},
-    "seller_name": {"label": "进项发票方名称", "mode": "enum_multi", "operators": {"in", "contains"}, "sortable": True},
-    "invoice_date": {"label": "开票日期", "mode": "date", "operators": {"between", "equals"}, "sortable": True},
-    "invoice_total_with_tax": {"label": "价税合计", "mode": "money", "operators": {"between", "equals"}, "sortable": True},
-}
-
-SORT_FIELDS = {field for field, config in FILTER_CONFIG.items() if config["sortable"]}
-
-
-class OaPendingPaymentError(ValueError):
-    def __init__(
-        self,
-        error_code: str,
-        message: str,
-        *,
-        status_code: HTTPStatus = HTTPStatus.BAD_REQUEST,
-        details: dict[str, Any] | None = None,
-    ) -> None:
-        super().__init__(message)
-        self.error_code = error_code
-        self.status_code = status_code
-        self.details = details or {}
 
 
 class OaPendingPaymentQueryService:
@@ -180,79 +150,6 @@ class OaPendingPaymentQueryService:
             "readModelStatus": READ_MODEL_STATUS,
             "source_versions": self.source_versions(),
             "sourceVersions": self.source_versions(),
-        }
-
-    def filter_options(
-        self,
-        *,
-        keyword: str | None = None,
-        month: str | None = None,
-        trade_date_from: str | None = None,
-        trade_date_to: str | None = None,
-        filters: str | list[dict[str, Any]] | None = None,
-        view_mode: str | None = None,
-    ) -> dict[str, Any]:
-        normalized_view_mode = self._parse_view_mode(view_mode)
-        parsed_filters = self._parse_filters(filters)
-        payment_statuses_by_flow_id = self._payment_statuses_by_flow_id()
-        rows = self._filtered_sorted_rows(
-            context=self._query_context(),
-            keyword=keyword,
-            month=month,
-            trade_date_from=trade_date_from,
-            trade_date_to=trade_date_to,
-            filters=parsed_filters,
-            sort_field="bank_trade_time",
-            sort_direction="desc",
-            view_mode=normalized_view_mode,
-            payment_statuses_by_flow_id=payment_statuses_by_flow_id,
-        )
-        return self.filter_options_for_rows(
-            rows=rows,
-            keyword=keyword,
-            month=month,
-            trade_date_from=trade_date_from,
-            trade_date_to=trade_date_to,
-            filters=parsed_filters,
-            view_mode=normalized_view_mode,
-        )
-
-    def filter_options_for_rows(
-        self,
-        *,
-        rows: list[dict[str, Any]],
-        keyword: str | None = None,
-        month: str | None = None,
-        trade_date_from: str | None = None,
-        trade_date_to: str | None = None,
-        filters: str | list[dict[str, Any]] | None = None,
-        view_mode: str | None = None,
-    ) -> dict[str, Any]:
-        parsed_filters = self._parse_filters(filters)
-        normalized_view_mode = self._parse_view_mode(view_mode)
-        typed_rows = [row for row in list(rows or []) if isinstance(row, dict)]
-        fields = []
-        for field, config in FILTER_CONFIG.items():
-            fields.append(
-                {
-                    "field": field,
-                    "label": config["label"],
-                    "mode": config["mode"],
-                    "operators": sorted(config["operators"]),
-                    "sortable": bool(config["sortable"]),
-                    "options": self._options_for_field(typed_rows, field),
-                }
-            )
-        return {
-            "fields": fields,
-            "context": {
-                "keyword": keyword or "",
-                "month": month,
-                "tradeDateFrom": trade_date_from,
-                "tradeDateTo": trade_date_to,
-                "filters": parsed_filters,
-                "viewMode": normalized_view_mode,
-            },
         }
 
     def row_by_id(self, row_id: str) -> dict[str, Any] | None:
@@ -1200,25 +1097,6 @@ class OaPendingPaymentQueryService:
         }
         return values.get(field)
 
-    def _options_for_field(self, rows: list[dict[str, Any]], field: str) -> list[dict[str, Any]]:
-        if FILTER_CONFIG[field]["mode"] in {"date", "money", "text"}:
-            return []
-        counts: dict[str, int] = {}
-        labels: dict[str, str] = {}
-        for row in rows:
-            value = self._field_value(row, field)
-            if value in (None, ""):
-                continue
-            key = str(value)
-            counts[key] = counts.get(key, 0) + 1
-            if field == "payment_status":
-                labels[key] = row["paymentStatus"]["label"]
-            elif field == "bank_direction":
-                labels[key] = _bank_direction_option_label(key)
-            else:
-                labels[key] = key
-        return [{"value": value, "label": labels[value], "count": counts[value]} for value in sorted(counts)]
-
     @staticmethod
     def _summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         status_counts: dict[str, int] = {}
@@ -1239,18 +1117,6 @@ class OaPendingPaymentQueryService:
                 if row["id"] == normalized_row_id:
                     return row
         return None
-
-
-def _parse_positive_int(value: int | str | None, field: str, *, maximum: int | None = None) -> int:
-    try:
-        number = int(value if value not in (None, "") else 1)
-    except (TypeError, ValueError) as exc:
-        raise OaPendingPaymentError("invalid_paging", f"{field} must be a positive integer.") from exc
-    if number < 1:
-        raise OaPendingPaymentError("invalid_paging", f"{field} must be a positive integer.")
-    if maximum is not None and number > maximum:
-        raise OaPendingPaymentError("invalid_paging", f"{field} must be <= {maximum}.")
-    return number
 
 
 def _status(code: str, label: str, reason: str) -> dict[str, str]:

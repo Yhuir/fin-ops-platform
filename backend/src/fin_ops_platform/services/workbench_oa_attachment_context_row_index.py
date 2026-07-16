@@ -4,7 +4,7 @@ from typing import Callable
 
 
 class WorkbenchOaAttachmentContextRowIndex:
-    """Indexes raw Workbench rows and maps OA attachment invoice rows to OA rows."""
+    """Indexes grouped Workbench rows and maps OA attachment invoice rows to OA rows."""
 
     def __init__(
         self,
@@ -18,30 +18,6 @@ class WorkbenchOaAttachmentContextRowIndex:
         self._attachment_matches_oa = attachment_matches_oa
         self._attachment_row_id_matches_oa = attachment_row_id_matches_oa
         self._oa_source_ids = oa_source_ids
-
-    def raw_payload_rows_by_id(self, payload: dict[str, object]) -> dict[str, dict[str, object]]:
-        rows_by_id: dict[str, dict[str, object]] = {}
-        for section_name in ("paired", "unpaired"):
-            section_payload = payload.get(section_name)
-            if not isinstance(section_payload, dict):
-                continue
-            for pane in ("oa", "bank", "invoice"):
-                for row in list(section_payload.get(pane) or []):
-                    if not isinstance(row, dict):
-                        continue
-                    row_id = str(row.get("id") or "").strip()
-                    if row_id:
-                        rows_by_id[row_id] = row
-        return rows_by_id
-
-    def raw_payload_row_ids(self, payload: dict[str, object]) -> set[str]:
-        row_ids: set[str] = set()
-        for section_payload in self._raw_payload_sections(payload):
-            for pane in ("oa", "bank", "invoice"):
-                for row in list(section_payload.get(pane, [])):
-                    if isinstance(row, dict) and str(row.get("id", "")).strip():
-                        row_ids.add(str(row.get("id", "")).strip())
-        return row_ids
 
     def grouped_payload_rows_by_id(self, payload: dict[str, object]) -> dict[str, dict[str, object]]:
         rows_by_id: dict[str, dict[str, object]] = {}
@@ -110,12 +86,3 @@ class WorkbenchOaAttachmentContextRowIndex:
             if self._attachment_row_id_matches_oa(invoice_id, oa_row_id):
                 return oa_row_id
         return None
-
-    @staticmethod
-    def _raw_payload_sections(payload: dict[str, object]) -> list[dict[str, object]]:
-        sections: list[dict[str, object]] = []
-        for section_name in ("paired", "unpaired"):
-            section_payload = payload.get(section_name)
-            if isinstance(section_payload, dict):
-                sections.append(section_payload)
-        return sections

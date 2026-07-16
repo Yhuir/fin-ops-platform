@@ -371,6 +371,7 @@ def _new_facade(
     withdraw_uow: object | None = None,
     relation_command_service: object | None = None,
     exception_case_service: object | None = None,
+    override_service: object | None = None,
     lifecycle_calls: list[dict[str, object]] | None = None,
     live_rows: list[dict[str, object]] | None = None,
     relation_groups: object | None = None,
@@ -383,6 +384,7 @@ def _new_facade(
     pair_relation_service: object | None = None,
     bank_transaction_category_codes_for_row_ids: object | None = None,
     bank_flow_rule_tag_rules_payload: object | None = None,
+    list_ignored_rows: object | None = None,
 ) -> WorkbenchWriteFacade:
     resolved_pair_relation_service = pair_relation_service or _PairRelationService()
     return WorkbenchWriteFacade(
@@ -392,7 +394,7 @@ def _new_facade(
         ),
         exception_service=object(),
         exception_case_service=exception_case_service or object(),
-        override_service=object(),
+        override_service=override_service or object(),
         next_case_id=lambda: "CASE-NEW",
         normalize_row_ids=lambda values: [str(value) for value in values],
         resolved_row_types_for_row_ids=resolved_row_types_for_row_ids or (
@@ -400,7 +402,6 @@ def _new_facade(
         ),
         can_confirm_link_row_types=lambda **_: True,
         expand_confirm_link_row_ids_for_existing_context=lambda row_ids, **_: list(row_ids),
-        amount_check_for_row_ids=lambda *_, **__: {},
         resolve_rows_for_amount_check=resolve_rows_for_amount_check or (lambda row_ids, **_: [{"id": row_id} for row_id in row_ids]),
         merge_relation_snapshots=lambda before, synthetic: list(before) + list(synthetic),
         synthetic_existing_case_relations=lambda *_, **__: [],
@@ -408,13 +409,11 @@ def _new_facade(
         scope_keys_for_row_ids=scope_keys_for_row_ids or (lambda **_: {"2026-05"}),
         scope_keys_for_rows=scope_keys_for_rows or (lambda rows, **_: ["2026-05"]),
         resolve_live_rows_direct=resolve_live_rows_direct or (lambda *_, **__: list(live_rows or [])),
-        resolve_live_row=lambda row_id, **_: {"id": row_id},
         relation_groups=relation_groups or (lambda *_, **__: []),
         withdraw_rows_and_after_relations=withdraw_rows_and_after_relations or (lambda *_, **__: ([], [], [])),
         amount_check_for_rows_by_type=lambda _: {},
         transaction_amount_for_row_id=lambda _: 0,
-        build_workbench_payload=lambda *_, **__: {},
-        build_ignored_rows_payload=lambda *_, **__: [],
+        list_ignored_rows=list_ignored_rows or (lambda *_, **__: []),
         save_exception_cases_snapshot=lambda: None,
         persist_pair_relations=lambda **_: None,
         save_overrides_snapshot=lambda **_: None,
@@ -460,6 +459,85 @@ def _session() -> OARequestSession:
 
 
 class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
+    def test_ignore_row_resolves_one_canonical_row_without_building_page_payload(self) -> None:
+        resolver_calls: list[dict[str, object]] = []
+
+        class ExceptionCases:
+            @staticmethod
+            def snapshot() -> dict[str, object]:
+                return {}
+
+            @staticmethod
+            def ignore_row(row: dict[str, object], *, comment: str | None = None) -> dict[str, object]:
+                return {"id": "EX-1", "row_id": row["id"], "comment": comment}
+
+        class Overrides:
+            @staticmethod
+            def snapshot() -> dict[str, object]:
+                return {}
+
+            @staticmethod
+            def ignore_row(
+                *,
+                row: dict[str, object],
+                comment: str | None = None,
+                exception_case_id: str | None = None,
+            ) -> dict[str, object]:
+                return {**row, "ignored": True, "comment": comment, "exception_case_id": exception_case_id}
+
+        def resolve_rows(row_ids: list[str], *, month_hint: str | None = None) -> list[dict[str, object]]:
+            resolver_calls.append({"row_ids": row_ids, "month_hint": month_hint})
+            return [{"id": row_ids[0], "type": "invoice", "issue_date": "2026-05-01"}]
+
+        facade = _new_facade(
+            exception_case_service=ExceptionCases(),
+            override_service=Overrides(),
+            resolve_live_rows_direct=resolve_rows,
+        )
+
+        result = facade.ignore_row({"month": "2026-05", "row_id": "invoice-1", "comment": "test"})
+
+        self.assertEqual(result.status_code, HTTPStatus.OK)
+        self.assertEqual(result.payload["affected_row_ids"], ["invoice-1"])
+        self.assertEqual(resolver_calls, [{"row_ids": ["invoice-1"], "month_hint": "2026-05"}])
+
+    def test_unignore_row_uses_injected_narrow_ignored_row_loader(self) -> None:
+        loader_calls: list[str] = []
+
+        class ExceptionCases:
+            @staticmethod
+            def snapshot() -> dict[str, object]:
+                return {}
+
+            @staticmethod
+            def unignore_row(row: dict[str, object]) -> dict[str, object]:
+                return {"id": "EX-1", "row_id": row["id"]}
+
+        class Overrides:
+            @staticmethod
+            def snapshot() -> dict[str, object]:
+                return {}
+
+            @staticmethod
+            def unignore_row(*, row: dict[str, object]) -> dict[str, object]:
+                return {**row, "ignored": False}
+
+        def list_ignored_rows(month: str) -> list[dict[str, object]]:
+            loader_calls.append(month)
+            return [{"id": "invoice-1", "type": "invoice", "issue_date": "2026-05-01"}]
+
+        facade = _new_facade(
+            exception_case_service=ExceptionCases(),
+            override_service=Overrides(),
+            list_ignored_rows=list_ignored_rows,
+        )
+
+        result = facade.unignore_row({"month": "2026-05", "row_id": "invoice-1"})
+
+        self.assertEqual(result.status_code, HTTPStatus.OK)
+        self.assertEqual(result.payload["affected_row_ids"], ["invoice-1"])
+        self.assertEqual(loader_calls, ["2026-05"])
+
     def test_confirm_link_command_uses_explicit_actor_and_tenant_context(self) -> None:
         uow = _RecordingUoW()
         facade = _new_facade(confirm_uow=uow)
@@ -1371,6 +1449,63 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         self.assertEqual(call["amount_check"]["status"], "matched")
         self.assertEqual(result.payload["case_id"], "CASE-ADV-1")
 
+    def test_personal_advance_repayment_rejects_unbalanced_canonical_rows(self) -> None:
+        rows = _personal_advance_rows()
+        rows[-1]["credit_amount"] = "999.99"
+        facade = _new_facade(
+            relation_command_service=_RecordingRelationCommandService(),
+            exception_case_service=_RecordingExceptionCaseService(),
+            live_rows=rows,
+        )
+
+        result = facade.confirm_personal_advance_repayment(
+            {"month": "2026-05", "row_ids": [str(row["id"]) for row in rows]},
+            request_id="req-personal-advance-unbalanced",
+        )
+
+        self.assertEqual(result.status_code, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(result.payload["error"], "invalid_personal_advance_repayment_request")
+        self.assertEqual(result.payload["amount_summary"]["bank_credit_total"], "999.99")
+
+    def test_personal_advance_repayment_requires_both_bank_directions(self) -> None:
+        for removed_row_id, expected_message in (
+            ("bank-advance-in", "bank credit"),
+            ("bank-advance-out", "bank debit"),
+        ):
+            with self.subTest(removed_row_id=removed_row_id):
+                rows = [row for row in _personal_advance_rows() if row["id"] != removed_row_id]
+                facade = _new_facade(
+                    relation_command_service=_RecordingRelationCommandService(),
+                    exception_case_service=_RecordingExceptionCaseService(),
+                    live_rows=rows,
+                )
+
+                result = facade.confirm_personal_advance_repayment(
+                    {"month": "2026-05", "row_ids": [str(row["id"]) for row in rows]},
+                    request_id=f"req-personal-advance-{removed_row_id}",
+                )
+
+                self.assertEqual(result.status_code, HTTPStatus.BAD_REQUEST)
+                self.assertIn(expected_message, str(result.payload["message"]))
+
+    def test_personal_advance_repayment_rejects_invoice_canonical_row(self) -> None:
+        rows = [*_personal_advance_rows(), {"id": "invoice-advance-1", "type": "invoice", "amount": "1000.00"}]
+        row_types = {str(row["id"]): str(row["type"]) for row in rows}
+        facade = _new_facade(
+            relation_command_service=_RecordingRelationCommandService(),
+            exception_case_service=_RecordingExceptionCaseService(),
+            live_rows=rows,
+            resolved_row_types_for_row_ids=lambda row_ids, **_: [row_types[str(row_id)] for row_id in row_ids],
+        )
+
+        result = facade.confirm_personal_advance_repayment(
+            {"month": "2026-05", "row_ids": [str(row["id"]) for row in rows]},
+            request_id="req-personal-advance-invoice",
+        )
+
+        self.assertEqual(result.status_code, HTTPStatus.BAD_REQUEST)
+        self.assertIn("invoice rows", str(result.payload["message"]))
+
     def test_personal_advance_repayment_fails_fast_without_relation_command_service(self) -> None:
         exception_cases = _RecordingExceptionCaseService()
         rows = _personal_advance_rows()
@@ -1398,7 +1533,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         app._oa_identity_service = object()
         app._access_control_service = object()
         app._load_json_body = lambda body: ({"month": "2026-05"}, None)
-        app._workbench_write_freshness_guard = lambda: None
+        app._workbench_write_freshness_guard = lambda _payload: None
 
         def live_confirm(payload: dict[str, object], *, request_id: str | None = None, actor_id: str | None = None, tenant_id: str | None = None) -> Response:
             captured["confirm"] = {"actor_id": actor_id, "tenant_id": tenant_id, "request_id": request_id}

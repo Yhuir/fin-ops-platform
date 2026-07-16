@@ -78,6 +78,7 @@ Refresh 触发来源：
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-07-16 | 删除 generic Workbench full-page fallback | 三类 Batch Accounting SQL loader 成为各自操作的唯一 Workbench 输入；缺失/无效 payload 返回 503，不再高耗时兜底 | Batch API 503 回归、route boundary guard |
 | 2026-07-05 | 删除 service-level legacy repair 入口与 submitted 12 个月 relation scan fallback | 旧 case-id repair 不再是页面模块内置能力；已提交 bucket 缺少年份级 relation reader 时 fail closed 为 unavailable；业务/UI/read model/worker 主状态定义不变 | `test_batch_accounting_legacy_repair_entrypoint_is_removed`、`test_submitted_list_fails_closed_without_year_relation_reader`、route boundary guard |
 | 2026-06-24 | 删除无调用者的 app-level repair helper：`Application._repair_batch_accounting_relation_case_ids(...)` 不再存在；service-level repair 当时临时保留，已于 2026-07-05 删除 | 移除 unused legacy write wrapper；业务/UI/read model/worker 状态定义不变 | 静态 route/repair guard、GET 只读回归 |
 | 2026-06-24 | Submit/withdraw route owner 抽取：mutation session/JSON 仍在 `server.py`，DTO/service/error mapping 与写后 scope/lifecycle/read model persist orchestration 进入 `BatchAccountingApiRoutes` 显式 callback 边界 | route ownership 变化；业务/UI/read model/worker 状态定义不变 | `tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_batch_accounting_route_handlers_do_not_bypass_service_boundaries`、批量账务 submit/withdraw API 回归 |

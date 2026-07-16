@@ -84,7 +84,7 @@ test.describe("workbench network recovery and duplicate submit browser flow", ()
     expect(api.count("POST /api/workbench/actions/confirm-link")).toBe(1);
     expect(api.count("POST /api/operation-barrier/status")).toBe(0);
 
-    const workbenchGroupCallsBeforeRetry = api.count("GET /api/workbench/groups");
+    const workbenchLoadsBeforeRetry = api.count("GET /api/workbench");
     await previewDialog.getByRole("button", { name: "重试" }).click();
 
     await expect(page.getByRole("dialog", { name: "关联预览" })).toHaveCount(0);
@@ -92,7 +92,7 @@ test.describe("workbench network recovery and duplicate submit browser flow", ()
     await expect(page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001")).toHaveCount(0);
     expect(api.count("POST /api/workbench/actions/confirm-link")).toBe(2);
     expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(0);
-    expect(api.count("GET /api/workbench/groups")).toBeGreaterThan(workbenchGroupCallsBeforeRetry);
+    expect(api.count("GET /api/workbench")).toBeGreaterThan(workbenchLoadsBeforeRetry);
     await expectNoUnexpectedSuccessUiErrors(page);
   });
 

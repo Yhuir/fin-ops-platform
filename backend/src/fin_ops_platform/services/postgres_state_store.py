@@ -839,15 +839,6 @@ class PostgresStateStore:
     def save_turnover_ledger_extras(self, snapshot: dict[str, Any]) -> None:
         self._workbench_repository.save_turnover_ledger_extras(snapshot)
 
-    def load_cost_statistics_read_models(self) -> dict[str, Any]:
-        snapshot = self._read_model_repository.load_cost_statistics_read_models()
-        if snapshot:
-            return snapshot
-        return {}
-
-    def save_cost_statistics_read_models(self, snapshot: dict[str, Any], *, changed_scope_keys: set[str] | None = None) -> None:
-        self._read_model_repository.save_cost_statistics_read_models(snapshot, changed_scope_keys=changed_scope_keys)
-
     def load_tax_offset_read_models(self) -> dict[str, Any]:
         snapshot = self._tax_offset_read_model_repository.load_tax_offset_read_models()
         if snapshot:
@@ -986,7 +977,6 @@ class PostgresStateStore:
             "no_oa_bank_batches": self.load_no_oa_bank_batches(),
             "turnover_relations": self.load_turnover_relations(),
             "turnover_ledger_extras": self.load_turnover_ledger_extras(),
-            "cost_statistics_read_models": self.load_cost_statistics_read_models(),
             "tax_offset_read_models": self.load_tax_offset_read_models(),
             "app_health_alerts": self.load_app_health_alerts(),
             "pending_invoice_commands": self.load_pending_invoice_commands(),
@@ -1017,8 +1007,6 @@ class PostgresStateStore:
             self.save_turnover_relations(normalized.get("turnover_relations") or {})
         if "turnover_ledger_extras" in normalized:
             self.save_turnover_ledger_extras(normalized.get("turnover_ledger_extras") or {})
-        if "cost_statistics_read_models" in normalized:
-            self.save_cost_statistics_read_models(normalized.get("cost_statistics_read_models") or {})
         if "tax_offset_read_models" in normalized:
             self.save_tax_offset_read_models(normalized.get("tax_offset_read_models") or {})
         if "app_health_alerts" in normalized:

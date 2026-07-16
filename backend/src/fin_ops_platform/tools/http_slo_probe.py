@@ -123,7 +123,7 @@ DEFAULT_API_PROBES: tuple[HttpProbe, ...] = (
     HttpProbe("app_health", "/api/app-health"),
     HttpProbe("background_jobs_active", "/api/background-jobs/active"),
     HttpProbe("operations_app_health_dashboard", "/api/operations/app-health-dashboard", auth_scope="admin"),
-    HttpProbe("workbench_summary_all", "/api/workbench/summary?month=all", expected_statuses=(200, 202)),
+    HttpProbe("workbench_initial_all", "/api/workbench?month=all", expected_statuses=(200, 202)),
     HttpProbe("workbench_groups_all_paired", "/api/workbench/groups?month=all&zone=paired&page=1&page_size=50&detail_level=summary", expected_statuses=(200, 202)),
     HttpProbe("workbench_settings", "/api/workbench/settings", expected_statuses=(200, 202)),
     HttpProbe(
@@ -152,7 +152,6 @@ DEFAULT_API_PROBES: tuple[HttpProbe, ...] = (
     HttpProbe("input_invoice_usage_filter_options", "/api/input-invoice-usage/filter-options", expected_statuses=(200, 202)),
     HttpProbe("input_invoice_usage_payment_status_rules", "/api/input-invoice-usage/payment-status-rules", expected_statuses=(200, 202)),
     HttpProbe("oa_pending_payments_rows", "/api/oa-pending-payments/rows?page=1&page_size=20", expected_statuses=(200, 202)),
-    HttpProbe("oa_pending_payments_filter_options", "/api/oa-pending-payments/filter-options", expected_statuses=(200, 202)),
     HttpProbe("output_invoice_collections_rows", "/api/output-invoice-collections/rows?page=1&page_size=20", expected_statuses=(200, 202)),
     HttpProbe("output_invoice_collections_filter_options", "/api/output-invoice-collections/filter-options", expected_statuses=(200, 202)),
     HttpProbe("output_invoice_collections_status_rules", "/api/output-invoice-collections/status-rules", expected_statuses=(200, 202)),
@@ -160,7 +159,7 @@ DEFAULT_API_PROBES: tuple[HttpProbe, ...] = (
     HttpProbe("tax_offset_rows", f"/api/tax-offset?month={DEFAULT_BUSINESS_MONTH}", expected_statuses=(200, 202)),
     HttpProbe(
         "cost_statistics_explorer_all",
-        f"/api/cost-statistics/explorer?month={DEFAULT_BUSINESS_MONTH}&project_scope=active",
+        f"/api/cost-statistics/explorer?scope={DEFAULT_BUSINESS_MONTH}&view=time&project_scope=active",
         expected_statuses=(200, 202),
     ),
     HttpProbe(

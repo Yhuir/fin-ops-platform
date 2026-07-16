@@ -1,5 +1,13 @@
 # 关联台关系事实源 实施记录
 
+## 2026-07-16 - 删除 read-time relation repair 与 legacy row-detail 兼容链
+
+当前 Workbench 页面读取只消费 active generation 中已经发布的 canonical rows + active formal relations。此前 raw/full-payload 读取时执行的 OA invoice-offset 自动配对、OA 附件 relation repair、缺行补齐、grouped payload 二次关系/标签修补和 legacy row-detail fallback 已全部删除；它们不能再作为 relation 事实写入或展示 owner。
+
+OA 附件上下文仍在两个明确边界内保留：projection/matching 发布 canonical relation facts；用户确认关联时，`WorkbenchOaAttachmentContextRowIndex` 只索引同一 active generation 的 grouped rows 以扩展父 OA/附件 row ids。Settings reset 只复用窄 retention date/month parser。历史记录中关于保留 `WorkbenchApiRoutes` fallback、raw repair executor 或对应 read port 的描述均已由本条取代，不再是当前合同。
+
+负向架构 guard 证明旧 service 文件、Application wrapper、legacy route class、raw row-index surface 和 read-time relation repair symbol 不得回流；当前 relation command、write facade、SQL projection、ETC relation cleanup 与其他页面共享 relation consumer 行为不变。
+
 ## 2026-07-13 - 写前 freshness 支持跨月精确 scope hints
 
 `WorkbenchRelationCommandService.assert_write_precondition(...)` 现在可接收已知 `scope_keys_hint`。多月关系仍可用 `month_scope=all` 表达聚合关系，但 freshness proof 必须逐个校验调用方已知月份，使 open/unlinked rows 在对应 scope fresh 时得到 fresh empty context；未知 scope 才保持原有 fail-closed missing/enqueue 行为。
@@ -2108,7 +2116,7 @@ PYTHONPATH=backend/src python -m pytest tests/test_platform_runtime_boundary_gua
 
 验证：
 
-- `PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_relation_read_facade.py tests/test_workbench_relation_sql_projection.py tests/test_input_invoice_usage_service.py tests/test_input_invoice_usage_api.py tests/test_invoice_usage_collection_sql_runtime.py tests/test_oa_pending_payment_api.py tests/test_output_invoice_collection_service.py tests/test_bank_details_service.py tests/test_pending_invoice_service.py tests/test_search_pending_sql_runtime.py tests/test_cost_statistics_service.py tests/test_cost_statistics_sql_runtime.py -q`
+- `PYTHONPATH=backend/src python3 -m pytest tests/test_workbench_relation_read_facade.py tests/test_workbench_relation_sql_projection.py tests/test_input_invoice_usage_service.py tests/test_input_invoice_usage_api.py tests/test_invoice_usage_collection_sql_runtime.py tests/test_oa_pending_payment_api.py tests/test_output_invoice_collection_service.py tests/test_bank_details_service.py tests/test_pending_invoice_service.py tests/test_search_pending_sql_runtime.py tests/test_cost_statistics_sql_projection_rules.py tests/test_cost_statistics_sql_runtime.py -q`
 - `PYTHONPATH=backend/src python3 -m pytest tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_downstream_relation_read_models_use_workbench_relation_distribution tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_bank_details_relation_tags_only_read_relation_distribution_facade -q`
 - `cd web && npm test -- --run src/test/BankDetailsApi.test.ts src/test/BankDetailsPage.test.tsx src/test/OaPendingPaymentsPage.test.tsx src/test/OutputInvoiceCollectionsPage.test.tsx src/test/PendingInvoicesApi.test.ts`
 - `cd web && npm test -- --run src/test/PendingInvoicesPage.test.tsx`

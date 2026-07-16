@@ -35,7 +35,7 @@ function waitForCostStatisticsExplorer(page: Page, month = "2026-03", projectSco
     const url = new URL(response.url());
     return response.request().method() === "GET"
       && url.pathname.endsWith("/api/cost-statistics/explorer")
-      && url.searchParams.get("month") === month
+      && url.searchParams.get("scope") === month
       && url.searchParams.get("project_scope") === projectScope;
   });
 }
@@ -151,12 +151,35 @@ test.describe("cost statistics browser flow", () => {
     await expect(page.getByText("当前时间范围没有可用于成本统计的支出流水。")).toHaveCount(0);
     await expect(page.getByRole("grid", { name: "按时间统计表" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "导出中心" })).toBeDisabled();
+    const interactionOverlay = page.getByTestId("cost-statistics-interaction-overlay");
+    await expect(interactionOverlay).toBeVisible();
+    await expect(page.locator(".cost-analysis-toolbar")).toHaveAttribute("inert", "");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    const overlayVisual = await interactionOverlay.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        animationName: style.animationName,
+        backdropFilter: style.backdropFilter,
+        backgroundColor: style.backgroundColor,
+        pointerEvents: style.pointerEvents,
+        touchAction: style.touchAction,
+      };
+    });
+    expect(overlayVisual.backgroundColor).toMatch(/0\.2|20%/);
+    expect(overlayVisual).toMatchObject({
+      animationName: "none",
+      backdropFilter: "none",
+      pointerEvents: "auto",
+      touchAction: "none",
+    });
+    await expect(page.locator(".cost-lock-status")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    await expect(page.locator(".cost-lock-target.is-locked").first()).toHaveCSS("opacity", "0.62");
     expect(api.count("GET /api/cost-statistics/explorer")).toBeGreaterThanOrEqual(1);
 
     let recovered = false;
     for (let attempt = 0; attempt < 3 && !recovered; attempt += 1) {
       const responsePromise = waitForCostStatisticsExplorer(page);
-      await page.getByRole("button", { name: "刷新成本统计" }).click();
+      await page.getByRole("button", { name: "重新检查" }).click();
       recovered = (await responsePromise).status() === 200;
     }
     expect(recovered).toBe(true);
@@ -172,15 +195,15 @@ test.describe("cost statistics browser flow", () => {
   for (const scenario of [
     {
       status: "refreshing" as const,
-      message: "成本统计读模型正在刷新，当前结果生成后会自动更新。",
+      message: "成本数据正在同步",
     },
     {
       status: "stale" as const,
-      message: "成本统计读模型不是最新，当前结果刷新完成后会自动更新。",
+      message: "正在更新至最新数据",
     },
     {
       status: "failed" as const,
-      message: "成本统计数据暂不可用，请等待后台刷新完成后重试。",
+      message: "成本数据暂未就绪",
     },
   ]) {
     test(`does not treat ${scenario.status} read model payloads as final empty cost data`, async ({ page }) => {
@@ -207,6 +230,11 @@ test.describe("cost statistics browser flow", () => {
       await page.goto("/cost-statistics");
       await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
       await expect(page.getByRole("status").filter({ hasText: scenario.message })).toBeVisible();
+      await expect(page.getByTestId("cost-statistics-interaction-overlay")).toBeVisible();
+      await expect(page.locator(".cost-analysis-toolbar")).toHaveAttribute("inert", "");
+      await expect(page.locator(".cost-content-shell")).toHaveAttribute("inert", "");
+      await expect(page.getByRole("heading", { name: "成本统计" }).locator("xpath=ancestor::*[@inert]")).toHaveCount(0);
+      await expect(page.getByRole("dialog")).toHaveCount(0);
       await expect(page.locator(".cost-page .stat-card")).toHaveCount(0);
       await expect(page.getByText("当前时间范围没有可用于成本统计的支出流水。")).toHaveCount(0);
       await expect(page.getByText("云南溯源科技")).toHaveCount(0);
@@ -215,6 +243,40 @@ test.describe("cost statistics browser flow", () => {
       expect(browserErrors).toEqual([]);
     });
   }
+
+  test("locks only when AppStatus reports the exact active cost scope as non-fresh", async ({ page }) => {
+    await installDeterministicApiMocks(page, {
+      costStatisticsAppStatusReadModelStatus: "stale",
+      costStatisticsAppStatusScopeKey: "active:2026-03",
+      costStatisticsReadModelStatus: "fresh",
+      sessionMode: "full_access",
+    });
+
+    await page.goto("/cost-statistics");
+
+    await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: "正在更新至最新数据" })).toBeVisible();
+    await expect(page.getByTestId("cost-statistics-interaction-overlay")).toBeVisible();
+    await expect(page.locator(".cost-analysis-toolbar")).toHaveAttribute("inert", "");
+    await expect(page.getByRole("grid", { name: "按时间统计表" })).toBeVisible();
+  });
+
+  test("does not lock the active page for an unrelated AppStatus cost scope", async ({ page }) => {
+    const appHealthResponse = page.waitForResponse(getResponse("/api/app-health"));
+    await installDeterministicApiMocks(page, {
+      costStatisticsAppStatusReadModelStatus: "stale",
+      costStatisticsAppStatusScopeKey: "active:2026-02",
+      costStatisticsReadModelStatus: "fresh",
+      sessionMode: "full_access",
+    });
+
+    await page.goto("/cost-statistics");
+    await appHealthResponse;
+
+    await expect(page.getByRole("grid", { name: "按时间统计表" })).toBeVisible();
+    await expect(page.getByTestId("cost-statistics-interaction-overlay")).toHaveCount(0);
+    await expect(page.locator(".cost-analysis-toolbar")).not.toHaveAttribute("inert", "");
+  });
 
   test("downloads the current time-view cost rows with request filters and cost fields", async ({ page }, testInfo) => {
     const browserErrors: string[] = [];
@@ -734,7 +796,7 @@ test.describe("cost statistics browser flow", () => {
       const url = new URL(response.url());
       return response.request().method() === "GET"
         && url.pathname.endsWith("/api/cost-statistics/explorer")
-        && url.searchParams.get("month") === "2026-03"
+        && url.searchParams.get("scope") === "2026-03"
         && url.searchParams.get("project_scope") === "active";
     });
     await page.goto("/cost-statistics");
@@ -747,6 +809,12 @@ test.describe("cost statistics browser flow", () => {
     await expectVisibleAndUncovered(page.getByRole("button", { name: "导出中心" }), "narrow export center button");
     const timeGrid = page.getByRole("grid", { name: "按时间统计表" });
     await expect(timeGrid).toBeVisible();
+    const loadMore = page.getByRole("button", { name: /加载更多/ });
+    await expect(loadMore).toHaveText(/50 \/ /);
+    await loadMore.click();
+    await expect(loadMore).toHaveText(/100 \/ /);
+    await loadMore.click();
+    await expect(loadMore).toBeHidden();
     await expect(timeGrid).toContainText("大型成本流水费用内容 120");
     await expect(timeGrid).toContainText("大型成本浏览器稳定性项目");
 
@@ -759,7 +827,7 @@ test.describe("cost statistics browser flow", () => {
       const url = new URL(response.url());
       return response.request().method() === "GET"
         && url.pathname.endsWith("/api/cost-statistics/explorer")
-        && url.searchParams.get("month") === "all"
+        && url.searchParams.get("scope") === "all"
         && url.searchParams.get("project_scope") === "active";
     });
     await page.getByRole("button", { name: "按项目" }).click();

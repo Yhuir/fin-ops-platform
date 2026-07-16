@@ -9,7 +9,11 @@ from typing import Any, Callable
 from unittest.mock import patch
 
 from fin_ops_platform.app.server import Application
-from tests.app_test_support import build_local_state_application as build_application
+from tests.app_test_support import (
+    build_grouped_workbench_projection,
+    build_local_state_application as build_application,
+    install_fresh_workbench_write_gate,
+)
 
 from tests.test_workbench_uow_contract import (
     _Command,
@@ -636,6 +640,8 @@ def _json_response(response: object) -> dict[str, object]:
 
 
 class WorkbenchIdempotencyApiCompatibilityTests(unittest.TestCase):
+    READ_MODEL_VERSION = "idempotency-test-generation-1"
+
     def setUp(self) -> None:
         cost_warmup_patcher = patch.object(Application, "_schedule_cost_statistics_cache_warmup")
         self.addCleanup(cost_warmup_patcher.stop)
@@ -644,12 +650,11 @@ class WorkbenchIdempotencyApiCompatibilityTests(unittest.TestCase):
     def _build_app(self) -> Application:
         app = build_application()
         app._emit_workbench_action_timing = lambda **kwargs: None
+        install_fresh_workbench_write_gate(app, version=self.READ_MODEL_VERSION)
         return app
 
     def _workbench_payload(self, app: Application, month: str = "2026-03") -> dict[str, object]:
-        response = app.handle_request("GET", f"/api/workbench?month={month}")
-        self.assertEqual(response.status_code, 200, response.body)
-        return _json_response(response)
+        return build_grouped_workbench_projection(app, month)
 
     def _default_open_row_ids(self, app: Application) -> list[str]:
         payload = self._workbench_payload(app)
@@ -685,6 +690,7 @@ class WorkbenchIdempotencyApiCompatibilityTests(unittest.TestCase):
                     "idempotency_key": "confirm:compat-1",
                     "request_idempotency_key": "confirm:compat-1",
                     "note": "idempotency compatibility covers documented mismatch path",
+                    "expected_read_model_version": self.READ_MODEL_VERSION,
                 },
             )
 

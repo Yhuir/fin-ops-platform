@@ -48,7 +48,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.postgres apply
 ./scripts/check-local-runtime.sh --require-backend
 ```
 
-确认 `/health`、PostgreSQL、Redis、MinIO/S3、`/api/workbench/summary` 和 `/api/workbench/groups` 都正常。前端首屏使用 split summary/groups 接口；如果本地 `8000` 上还残留旧 `backend.api.main:app` 进程，应停止它并使用 `./scripts/start-backend.sh` 默认的 `8001` 入口。
+确认 `/health`、PostgreSQL、Redis、MinIO/S3、`/api/workbench` combined initial 和 `/api/workbench/groups` 都正常。前端首屏只读 combined initial，groups 只用于后续搜索、筛选和分页；如果本地 `8000` 上还残留旧 `backend.api.main:app` 进程，应停止它并使用 `./scripts/start-backend.sh` 默认的 `8001` 入口。
 
 ## 测试
 

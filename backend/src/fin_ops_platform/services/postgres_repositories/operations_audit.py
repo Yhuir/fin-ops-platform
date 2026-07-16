@@ -11,6 +11,7 @@ from fin_ops_platform.services.postgres_repositories.app_health_system_audit imp
     audit_app_health_system_snapshot,
 )
 from fin_ops_platform.services.postgres_repositories.audit_report import AuditSnapshot, read_only_audit_snapshot
+from fin_ops_platform.services.postgres_repositories.cost_statistics_page_audit import audit_cost_statistics_page
 from fin_ops_platform.services.postgres_repositories.input_invoice_usage_audit import (
     audit_input_invoice_usage_read_model,
 )
@@ -108,6 +109,13 @@ class PostgresOperationsAuditRepository:
     ) -> dict[str, Any]:
         if registration.executor == "workbench":
             payload = audit_workbench_relation_display(
+                self._connection,
+                tenant_id=tenant_id,
+                example_limit=sample_limit,
+                audit_snapshot=audit_snapshot,
+            )
+        elif registration.executor == "cost_statistics":
+            payload = audit_cost_statistics_page(
                 self._connection,
                 tenant_id=tenant_id,
                 example_limit=sample_limit,

@@ -83,36 +83,6 @@ class InvoiceUsageCollectionReadModelRefreshService:
                 if shard_result is not None:
                     return shard_result
             rebuild = getattr(self._projection_builder, "rebuild_output_invoice_collection_read_model_scope", None)
-        elif event.event_type == "oa_pending_payment.read_model.refresh":
-            if scope_type != "oa_pending_payment" or not scope_key:
-                raise ValueError("OA pending payment refresh requires scope_type='oa_pending_payment' and scope_key.")
-            source_version = event.source_version or event.payload.get("source_version")
-            if not self._event_source_version_is_current(
-                event,
-                scope_type=scope_type,
-                scope_key=scope_key,
-                source_version=source_version,
-            ):
-                return {
-                    "scope_key": scope_key,
-                    "skipped": True,
-                    "skip_reason": "stale_source_version",
-                    "source_version": source_version,
-                }
-            if _invoice_scope_requires_expansion(scope_key):
-                shard_result = self._enqueue_scope_shards(
-                    event,
-                    scope_type=scope_type,
-                    scope_key=scope_key,
-                    list_method_name="list_oa_pending_payment_scope_shards",
-                    empty_method_name="mark_oa_pending_payment_scope_empty",
-                    prune_method_name="prune_oa_pending_payment_scope_shards",
-                    shard_reason="oa_pending_payment_month_shard",
-                    force_refresh=force_refresh,
-                )
-                if shard_result is not None:
-                    return shard_result
-            rebuild = getattr(self._projection_builder, "rebuild_oa_pending_payment_read_model_scope", None)
         else:
             raise ValueError(f"Unsupported invoice relation read model event type: {event.event_type}")
         if not callable(rebuild):

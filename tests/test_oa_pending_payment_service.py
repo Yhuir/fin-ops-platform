@@ -364,10 +364,6 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["oa"]["id"], "oa-1")
         self.assertEqual(payload["summary"]["rowCount"], 2)
         self.assertEqual(payload["sort"], {"field": "oa_amount", "direction": "desc"})
-        filter_fields = [field["field"] for field in service.filter_options()["fields"]]
-        self.assertIn("oa_applicant", filter_fields)
-        self.assertIn("payment_status", filter_fields)
-
         with self.assertRaises(OaPendingPaymentError) as field_error:
             service.list_rows(filters='[{"field":"bad","operator":"equals","value":"x"}]')
         with self.assertRaises(OaPendingPaymentError) as sort_error:
@@ -387,15 +383,11 @@ class OaPendingPaymentQueryServiceTests(unittest.TestCase):
 
         default_payload = service.list_rows(page_size=20)
         progress_payload = service.list_rows(page_size=20, view_mode="in_progress")
-        filter_payload = service.filter_options(view_mode="in_progress")
-
         self.assertEqual([row["oa"]["id"] for row in default_payload["rows"]], ["oa-completed", "oa-legacy"])
         self.assertEqual(default_payload["viewMode"], "completed")
         self.assertEqual([row["oa"]["id"] for row in progress_payload["rows"]], ["oa-progress"])
         self.assertEqual(progress_payload["rows"][0]["oa"]["workflowStatus"], "in_progress")
         self.assertEqual(progress_payload["viewMode"], "in_progress")
-        self.assertEqual(filter_payload["context"]["viewMode"], "in_progress")
-
         with self.assertRaises(OaPendingPaymentError) as context:
             service.list_rows(view_mode="bad")
         self.assertEqual(context.exception.error_code, "invalid_view_mode")

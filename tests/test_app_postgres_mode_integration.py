@@ -23,6 +23,8 @@ def postgres_app_env(database_url: str):
         "FIN_OPS_TEST_DEFAULT_AUTH": "1",
         "FIN_OPS_DISABLE_STARTUP_HISTORICAL_ETC_REPAIR": "1",
         "FIN_OPS_WORKBENCH_MATCHING_DIRTY_WORKER_ENABLED": "0",
+        "FIN_OPS_POSTGRES_POOL_ENABLED": "0",
+        "FIN_OPS_POSTGRES_READ_POOL_ENABLED": "0",
     }
     removed = {
         "FIN_OPS_OA_MONGO_URI",
@@ -86,8 +88,11 @@ class AppPostgresModeIntegrationTests(unittest.TestCase):
         app_health_response = app.handle_request("GET", "/api/app-health")
         app_health_payload = json.loads(app_health_response.body)
         self.assertEqual(app_health_response.status_code, 200)
-        self.assertIn(app_health_payload["status"], {"ok", "busy"})
+        self.assertEqual(app_health_payload["status"], "blocked")
         self.assertIn("dependencies", app_health_payload)
+        self.assertEqual(app_health_payload["dependencies"]["oa_sync"]["status"], "unavailable")
+        self.assertEqual(app_health_payload["dependencies"]["oa_mongo"]["status"], "unavailable")
+        self.assertNotIn("postgresql://", json.dumps(app_health_payload).lower())
 
     def test_workbench_settings_round_trip_survives_app_rebuild(self) -> None:
         app = self._build_app()
@@ -114,7 +119,7 @@ class AppPostgresModeIntegrationTests(unittest.TestCase):
         self.assertNotIn("password", serialized.lower())
         self.assertNotIn("postgresql://", serialized.lower())
 
-    def test_import_preview_confirm_persists_to_postgres_and_survives_rebuild(self) -> None:
+    def test_import_preview_confirm_persists_to_postgres_formal_tables(self) -> None:
         app = self._build_app()
         with patch.object(app, "_run_workbench_auto_matching_for_scopes", return_value=None):
             preview, confirmed_batch = seed_confirmed_import(
@@ -135,89 +140,58 @@ class AppPostgresModeIntegrationTests(unittest.TestCase):
             )
         batch_id = preview.id
         self.assertEqual(confirmed_batch.status.value, "completed")
-
-        rebuilt_app = self._build_app()
-        batch_response = rebuilt_app.handle_request("GET", f"/imports/batches/{batch_id}")
-        batch_payload = json.loads(batch_response.body)
-
-        self.assertEqual(batch_response.status_code, 200, batch_response.body)
-        self.assertEqual(batch_payload["batch"]["id"], batch_id)
-        self.assertEqual(batch_payload["row_results"][0]["linked_object_type"], "invoice")
-
-        rebuilt_app._workbench_read_model_service.upsert_read_model(
-            scope_key="2026-03",
-            payload={
-                "month": "2026-03",
-                "summary": {"oa_count": 0, "bank_count": 1, "invoice_count": 0, "paired_count": 0, "unpaired_count": 1, "exception_count": 0},
-                "paired": {"groups": []},
-                "unpaired": {
-                    "groups": [
-                        {
-                            "group_id": "case:no_oa_stage09",
-                            "oa_rows": [],
-                            "bank_rows": [
-                                {
-                                    "id": "bk-no-oa-stage09-001",
-                                    "type": "bank",
-                                    "source_kind": "no_oa_bank_batch_summary",
-                                    "label": "免OA · 手续费",
-                                    "counterparty_name": "阶段09无OA银行行",
-                                    "amount": "88.00",
-                                    "trade_time": "2026-03-01",
-                                    "detail_fields": {"企业流水号": "NO-OA-STAGE09-SERIAL"},
-                                }
-                            ],
-                            "invoice_rows": [],
-                        }
-                    ]
-                },
+        app._persist_confirmed_import_delta_with_read_model_invalidation(
+            import_state_payload={
+                "imports": app._import_service.persistence_snapshot_for_batches([batch_id]),
             },
-            generated_at="2026-03-02T00:00:00+00:00",
+            invalidate_cost_statistics=False,
         )
-        rebuilt_app._persist_workbench_read_models_best_effort(
-            snapshot=rebuilt_app._workbench_read_model_service.snapshot_scope_keys(["2026-03"]),
-            changed_scope_keys=["2026-03"],
-            operation="stage09_search_smoke",
+
+        self.assertEqual(
+            fetch_scalar(
+                self.database_url,
+                f"select status from app.import_batches where legacy_mongo_id = '{batch_id}';",
+            ),
+            "completed",
         )
-        search_app = self._build_app()
-        search_response = search_app.handle_request("GET", "/api/search?q=NO-OA-STAGE09-SERIAL&scope=bank&month=all")
-        search_payload = json.loads(search_response.body)
-        self.assertEqual(search_response.status_code, 200, search_response.body)
-        self.assertGreaterEqual(search_payload["summary"]["total"], 1)
-        self.assertIn("NO-OA-STAGE09-SERIAL", json.dumps(search_payload, ensure_ascii=False))
+        self.assertEqual(
+            fetch_scalar(
+                self.database_url,
+                f"select linked_object_type from app.import_batch_rows where legacy_batch_id = '{batch_id}';",
+            ),
+            "invoice",
+        )
+        self.assertEqual(
+            fetch_scalar(self.database_url, "select count(*) from app.invoices where invoice_no = 'INV-STAGE07-001';"),
+            "1",
+        )
 
-        invalid_search_response = search_app.handle_request("GET", "/api/search?q=NO-OA-STAGE09-SERIAL&scope=invalid&month=all")
-        self.assertEqual(invalid_search_response.status_code, 400)
-        self.assertEqual(json.loads(invalid_search_response.body)["error"], "invalid_search_request")
-
-    def test_pending_invoice_command_log_persists_to_formal_postgres_table(self) -> None:
+    def test_pending_invoice_attach_existing_command_log_persists_to_formal_postgres_table(self) -> None:
         app = self._build_app()
         transaction_id = self._create_bank_transaction(app, counterparty_name="Vendor Postgres Recoverable")
-        payload = {
-            "bank_transaction_id": transaction_id,
-            "invoice_no": "PG-MAN-RECOVER",
-            "issue_date": "2026-05-20",
-            "total_with_tax": "118.00",
-            "seller_name": "Vendor Postgres Recoverable",
-            "buyer_name": "云南溯源科技有限公司",
-        }
-        preview = json.loads(
-            app.handle_request(
-                "POST",
-                "/api/pending-invoices/manual-invoices/preview",
-                body=json.dumps(payload),
-            ).body
+        invoice_id = self._create_input_invoice(
+            app,
+            seller_name="Vendor Postgres Recoverable",
+            invoice_no="PG-ATTACH-RECOVER",
         )
+        payload = {"invoice_id": invoice_id}
+        preview_response = app.handle_request(
+            "POST",
+            f"/api/pending-invoices/rows/{transaction_id}/attach-existing-invoice/preview",
+            body=json.dumps(payload),
+        )
+        preview = json.loads(preview_response.body)
+        self.assertEqual(preview_response.status_code, 200, preview_response.body)
         app._pending_invoice_application_service._fault_injector = (
             lambda phase, _command: (_ for _ in ()).throw(RuntimeError("boom"))
-            if phase == "after_invoice_created"
+            if phase == "after_relation_created"
             else None
         )
 
         with self.assertRaises(RuntimeError):
             app.handle_request(
                 "POST",
-                "/api/pending-invoices/manual-invoices",
+                f"/api/pending-invoices/rows/{transaction_id}/attach-existing-invoice",
                 body=json.dumps({**payload, "preview_id": preview["preview_id"], "request_id": "pg-recoverable"}),
             )
 
@@ -228,61 +202,62 @@ class AppPostgresModeIntegrationTests(unittest.TestCase):
             ),
             "1",
         )
-        rebuilt_app = self._build_app()
-        command = rebuilt_app._pending_invoice_commands["pg-recoverable"]
-        self.assertEqual(command["status"], "failed_recoverable")
-        self.assertEqual(command["last_successful_status"], "invoice_created")
-
-    def test_bank_transaction_tags_and_pending_invoice_tag_groups_round_trip_in_postgres_mode(self) -> None:
-        app = self._build_app()
-        settings = app._app_settings_service.get_settings_payload()
-
-        update_response = app.handle_request(
-            "POST",
-            "/api/workbench/settings",
-            body=json.dumps(
-                {
-                    "completed_project_ids": [],
-                    "bank_account_mappings": settings["bank_account_mappings"],
-                    "allowed_usernames": settings["access_control"]["allowed_usernames"],
-                    "readonly_export_usernames": settings["access_control"]["readonly_export_usernames"],
-                    "admin_usernames": settings["access_control"]["admin_usernames"],
-                    "workbench_column_layouts": settings["workbench_column_layouts"],
-                    "oa_retention": settings["oa_retention"],
-                    "oa_import": settings["oa_import"],
-                    "oa_invoice_offset": settings["oa_invoice_offset"],
-                    "bank_transaction_tags": {
-                        "version": settings["bank_transaction_tags"]["version"],
-                        "definitions": [
-                            {
-                                "code": "custom_ads_invoice",
-                                "label": "广告票",
-                                "path": ["自定义", "广告"],
-                                "source": "custom",
-                                "status": "active",
-                            }
-                        ],
-                    },
-                    "pending_invoice_tag_groups": {
-                        "version": 4,
-                        "groups": {
-                            "requires_invoice": {"tag_codes": ["custom_ads_invoice"]},
-                            "bank_statement_as_invoice": {"tag_codes": []},
-                            "no_invoice_required": {"tag_codes": []},
-                        },
-                    },
-                }
+        self.assertEqual(
+            fetch_scalar(
+                self.database_url,
+                "select status from app.pending_invoice_manual_invoice_commands where command_id = 'pg-recoverable';",
             ),
+            "failed_recoverable",
         )
-        self.assertEqual(update_response.status_code, 200, update_response.body)
+        self.assertEqual(
+            fetch_scalar(
+                self.database_url,
+                "select last_successful_status from app.pending_invoice_manual_invoice_commands "
+                "where command_id = 'pg-recoverable';",
+            ),
+            "relation_created",
+        )
+
+    def test_bank_auto_tag_rules_and_pending_invoice_rules_round_trip_through_their_owners(self) -> None:
+        app = self._build_app()
+        auto_rules = app._app_settings_service.get_bank_auto_tag_rules_payload()
+        active_rules = [
+            {**rule, "direction": "expense"} if rule["code"] == "fee" else rule
+            for rule in auto_rules["active_rules"]
+        ]
+        auto_rules_response = app.handle_request(
+            "PUT",
+            "/api/bank-details/auto-tag-rules",
+            body=json.dumps({
+                "expected_version": auto_rules["version"],
+                "active_rules": active_rules,
+                "archived_rules": auto_rules["archived_rules"],
+            }),
+        )
+        self.assertEqual(auto_rules_response.status_code, 200, auto_rules_response.body)
+
+        pending_rules = app._app_settings_service.get_pending_invoice_settings_payload()
+        pending_rules_response = app.handle_request(
+            "PUT",
+            "/api/pending-invoices/rules",
+            body=json.dumps({
+                "version": pending_rules["pending_invoice_tag_groups"]["version"],
+                "groups": {
+                    "bank_statement_as_invoice": {"tag_codes": ["fee"]},
+                    "no_invoice_required": {"tag_codes": ["salary"]},
+                },
+            }),
+        )
+        self.assertEqual(pending_rules_response.status_code, 200, pending_rules_response.body)
 
         rebuilt_app = self._build_app()
-        get_response = rebuilt_app.handle_request("GET", "/api/workbench/settings")
-        payload = json.loads(get_response.body)
-        self.assertEqual(get_response.status_code, 200, get_response.body)
-        definitions_by_code = {definition["code"]: definition for definition in payload["bank_transaction_tags"]["definitions"]}
-        self.assertIn("custom_ads_invoice", definitions_by_code)
-        self.assertEqual(payload["pending_invoice_tag_groups"]["groups"]["requires_invoice"]["tag_codes"], ["custom_ads_invoice"])
+        reloaded_auto_rules = rebuilt_app._app_settings_service.get_bank_auto_tag_rules_payload()
+        reloaded_pending_rules = rebuilt_app._app_settings_service.get_pending_invoice_settings_payload()
+        self.assertEqual(next(rule for rule in reloaded_auto_rules["active_rules"] if rule["code"] == "fee")["direction"], "expense")
+        self.assertEqual(
+            reloaded_pending_rules["pending_invoice_tag_groups"]["groups"]["bank_statement_as_invoice"]["tag_codes"],
+            ["fee"],
+        )
 
     @staticmethod
     def _create_bank_transaction(app: object, *, counterparty_name: str, credit: bool = False) -> str:
@@ -301,6 +276,28 @@ class AppPostgresModeIntegrationTests(unittest.TestCase):
                     "bank_serial_no": f"SERIAL-{counterparty_name}",
                     "selected_bank_name": "工商银行",
                     "selected_bank_last4": "1234",
+                }
+            ],
+        )
+        app._import_service.confirm_import(preview.id)
+        app._persist_state()
+        return str(preview.row_results[0].linked_object_id)
+
+    @staticmethod
+    def _create_input_invoice(app: object, *, seller_name: str, invoice_no: str) -> str:
+        preview = app._import_service.preview_import(
+            batch_type=BatchType.INPUT_INVOICE,
+            source_name="postgres-pending-invoice-input.json",
+            imported_by="api-test",
+            rows=[
+                {
+                    "counterparty_name": seller_name,
+                    "seller_name": seller_name,
+                    "invoice_no": invoice_no,
+                    "invoice_date": "2026-05-20",
+                    "amount": "111.32",
+                    "tax_amount": "6.68",
+                    "total_with_tax": "118.00",
                 }
             ],
         )

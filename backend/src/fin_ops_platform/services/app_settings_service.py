@@ -829,9 +829,28 @@ class AppSettingsService:
 
     def get_cost_statistics_tag_selection_payload(self, *, can_save: bool = True) -> dict[str, Any]:
         self._refresh_snapshot_from_state_store()
-        payload = self._public_cost_statistics_tag_selection(
-            self._snapshot["cost_statistics_tag_selection"],
-            bank_transaction_tags=self._snapshot["bank_transaction_tags"],
+        return self.cost_statistics_tag_selection_payload_from_settings(
+            self._snapshot,
+            can_save=can_save,
+        )
+
+    @staticmethod
+    def cost_statistics_tag_selection_payload_from_settings(
+        settings_payload: dict[str, Any],
+        *,
+        can_save: bool = False,
+    ) -> dict[str, Any]:
+        """Map an already-read settings snapshot without performing repository I/O."""
+
+        payload = AppSettingsService._public_cost_statistics_tag_selection(
+            settings_payload.get("cost_statistics_tag_selection")
+            if isinstance(settings_payload.get("cost_statistics_tag_selection"), dict)
+            else {},
+            bank_transaction_tags=(
+                settings_payload.get("bank_transaction_tags")
+                if isinstance(settings_payload.get("bank_transaction_tags"), dict)
+                else {}
+            ),
         )
         payload["can_save"] = bool(can_save)
         return payload

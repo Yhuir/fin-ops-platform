@@ -112,10 +112,8 @@ describe("Finance operations shell", () => {
     expect(screen.getByRole("button", { name: "年月选择" })).toBeInTheDocument();
     expect(screen.getByRole("spinbutton", { name: "年份" })).toHaveAttribute("aria-valuenow", "2026");
     expect(screen.getByRole("spinbutton", { name: "月份" })).toHaveAttribute("aria-valuenow", "3");
-    expect(fetchMock).toHaveBeenCalledWith("/api/workbench/summary?month=all", expect.any(Object));
-    expect(fetchMock.mock.calls.some(([input]) => String(input).startsWith("/api/workbench/groups?month=all&zone=paired"))).toBe(true);
-    expect(fetchMock.mock.calls.some(([input]) => String(input).startsWith("/api/workbench/groups?month=all&zone=unpaired"))).toBe(true);
-    expect(fetchMock.mock.calls.some(([input]) => String(input).startsWith("/api/workbench?"))).toBe(false);
+    expect(fetchMock).toHaveBeenCalledWith("/api/workbench?month=all", expect.any(Object));
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).startsWith("/api/workbench?"))).toHaveLength(1);
     expect(fetchMock).toHaveBeenCalledWith("/api/tax-offset?month=2026-03", expect.any(Object));
   });
 
@@ -173,7 +171,7 @@ describe("Finance operations shell", () => {
     expect(await screen.findByText("赵华", {}, { timeout: WORKBENCH_RENDER_TIMEOUT })).toBeInTheDocument();
     const before = fetchMock.mock.calls.filter(([input]) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      return url.pathname === "/api/workbench/summary";
+      return url.pathname === "/api/workbench";
     }).length;
 
     act(() => {
@@ -183,7 +181,7 @@ describe("Finance operations shell", () => {
     await waitFor(() => {
       const after = fetchMock.mock.calls.filter(([input]) => {
         const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-        return url.pathname === "/api/workbench/summary";
+        return url.pathname === "/api/workbench";
       }).length;
       expect(after).toBeGreaterThan(before);
     });

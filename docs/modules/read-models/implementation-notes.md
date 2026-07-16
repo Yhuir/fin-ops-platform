@@ -22,6 +22,8 @@
 - RabbitMQ real consumers 只负责 transport/wakeup；`job.outbox_events`、`job.read_model_dirty_scopes` 与 `read_model.app_status_readiness` 仍是 read model 状态事实源。Redis payload 只能在 fresh gate 后缓存。
 - App Status read model registry、runtime worker registry、migration storage contract、critical SLO smoke 和 deploy env 模板必须通过本地测试交叉约束；新增 read model 不能只登记一个 registry。
 - `cost_statistics` 的 refresh worker owner 是 `cost-statistics`；旧 `cost-tax` 只保留 `tax_offset` 辅助 worker 职责，不再消费 `cost_statistics.read_model.refresh`。
+- `cost_statistics` 不再进入 Postgres/local broad state snapshot，也不再暴露 repository 全量 load 或无 source-version save；正式 port 只保留 scoped reads 与 conditional publish。该收窄不套用到其他 read model。
+- `cost_statistics` bulk export 不再调用 full view；正式 port 以单一 `get_cost_statistics_export_page(...)` 输出完整筛选 summary 与有界 rows。preview 上限 8，download 每批上限 1,000，write-only workbook 完成后再次验证发布 proof。该 cost-local I/O 不套用到其他页面，也不新增共享 export framework。
 - authenticated HTTP SLO gate 的当前 P2/P3 默认目标是首屏 API p95 <= 1000ms，并且必须同时满足 HTTP status、latency 和 freshness：任何 `read_model_status != fresh` 或 `refresh_enqueued=true` 都算失败，不能把快速返回的 refreshing 当作“已同步”。read model enqueue-to-fresh 采用分层生产目标：轻量 read model p95 <= 3000ms；Workbench/Search/Cost/Turnover 等重型或聚合 read model 的 bounded apply smoke 目标 <= 5000ms，除非后续基线被明确收紧。写操作同步门禁仍按具体 runbook/safety ticket 记录 operation-to-fresh 目标。
 - `bank_detail:all` 不是可读 freshness scope，而是 fan-out 控制 scope；真实 readiness 和 downstream dependency 应以具体月份 shard 或明确 read model status 为准。
 
@@ -41,6 +43,23 @@
 ```
 
 ## 历史记录
+
+## 2026-07-16 - Cost statistics broad state I/O removal
+
+- 目标：删除无 production caller 的成本全表 load、无条件 save、StateStore snapshot key 与 protocol/manifest 旧合同。
+- 影响范围：成本 repository port、共享 PostgreSQL repository 的成本专属方法、Postgres/local state store、protocol、manifest、直接测试/docs；不改变其他 read model、API、worker、queue、schema 或 UI。
+- 关键决策：成本 worker 的唯一写边界是 source-version conditional publish；成本页面/query 只使用 scoped read I/O。broad state load/save 明确排除成本 read model，历史 local pickle key 不做兼容迁移。
+- 旧代码：删除全量 loader、无条件 saver、facade delegates、StateStore methods/key/branch 和旧测试 fixture；static guard 阻止回归。
+- 验证与风险：见 `.planning/phases/05-cost-statistics-improvements/05-14-SUMMARY.md`；无部署，真实 PostgreSQL/worker/SLO 证据递延。
+
+## 2026-07-16 - Workbench `all` 收口为 fan-out command
+
+- 目标：删除无页面 consumer 的 materialized `workbench:all`，只保留 active month generations 与 query-composed all。
+- 影响范围：Workbench refresh handler、projection/repository port、rehydrate 工具、relation producer、read-model/worker 合同与测试。
+- 关键决策：`all` 不是可查询 projection，也不发布 generation；它只列出月份 scopes，通过统一 gateway normalize/validate/dedupe 后投递，并在 fan-out 接受后完成 durable dirty command。月份 projection commit 后仍先投递对应成本统计再完成 Workbench dirty scope。
+- 一致性：页面 fresh 数据始终来自各 active month generation；不存在事实源变化后仍读取旧 materialized all 的窗口。fan-out 失败使 handler 失败并重试，不能伪装完成。
+- 旧逻辑清理：删除 aggregate projection、queue helper、aggregate handler 状态机与显式 repair/backfill 分支，不引入新 projection 或 cache。
+- 未测风险：真实数据量下的 fan-out 数量、queue pickup 与月份 rebuild p95 需要统一发布后验证；本轮不部署。
 
 ## 2026-07-06 - no-OA legacy 从当前页面 SLO 移除
 
@@ -409,9 +428,9 @@
 
 - 目标：执行 `read-models:cost-statistics-full-state-read-model-snapshot-quarantine`，移除 broad `_persist_state(...)` 对 `cost_statistics_read_models` 的旧全状态写入。
 - 影响范围：`Application._persist_state(...)`、read model architecture guard、modular IO state；不改变成本统计业务/API/UI/worker event/queue/Redis 合同。
-- 关键决策：`_persist_state(...)` 不再 serializes `cost_statistics_read_models`，避免 broad full-state snapshot 成为 read model 第二写入路径。显式 `_persist_cost_statistics_read_models_best_effort(...)` 仍作为 runtime/query persistence dependency 保留；`CostStatisticsReadModelService.from_snapshot(...)` 仍作为 local compatibility load path 保留。
+- 关键决策：`_persist_state(...)` 不再 serializes `cost_statistics_read_models`，避免 broad full-state snapshot 成为 read model 第二写入路径。当时显式 persistence 和 startup compatibility load 暂时保留；两者已由 2026-07-16 的成本统计 05-13 删除，本条仅记录迁移过程。
 - 文档影响：新增 full-state snapshot quarantine analysis，更新 autonomous queue/state/journal/next prompt、主控 prompt、read-models/cost-statistics 实施记录和测试矩阵。
-- 测试覆盖：扩展 `tests/test_read_model_architecture_guards.py`，证明 `_persist_state(...)` 不再包含 `cost_statistics_read_models` / `_cost_statistics_read_model_service.snapshot()`，同时继续证明 broad full-state writer 不写 `tax_offset_read_models`。
+- 测试覆盖：当时扩展 `tests/test_read_model_architecture_guards.py`，证明 broad full-state writer 不写成本或税金 read model；当前 guard 已进一步禁止成本进程内 service、startup field 和显式 persistence helper 回归。
 - 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-statistics-full-state-read-model-snapshot-quarantine.md`。
 - 未测风险：真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍 deferred；下一轮必须执行 post-full-state local closure audit，不能直接进入 Go admission。
 - 后续事项：执行 `read-models:cost-statistics-post-full-state-local-implementation-closure-audit`；Go admission 继续 blocked。
@@ -453,7 +472,7 @@
 
 - 目标：执行 `read-models:cost-statistics-repository-port-extraction`，为成本统计建立窄 read model repository port。
 - 影响范围：`CostStatisticsReadModelRepositoryPort`、`CostStatisticsSqlProjectionBuilder`、`PostgresStateStore.cost_statistics_sql_read_repository`、成本统计 SQL runtime/state-store tests、modular IO state；不改变成本归因、API、UI、worker event、queue、Redis 合同或 parent aggregate 语义。
-- 关键决策：新增 port 只暴露 `load_cost_statistics_read_models`、`get_cost_statistics_view`、`save_cost_statistics_read_models`。SQL/table knowledge 继续留在 `PostgresReadModelRepository`；projection builder 和 SQL read wiring 只持有窄 port。
+- 关键决策（历史，已由 2026-07-16 的成本 broad state I/O removal 收窄）：当时新增 port 并保留全量 load、单 scope view 与无条件 save；当前 port 已删除全量 load/无条件 save，只保留 scoped reads 与 source-version conditional publish。SQL/table knowledge 继续留在 `PostgresReadModelRepository`。
 - 文档影响：新增 repository port extraction analysis，更新 autonomous queue/state/journal/next prompt 和主控 prompt。
 - 测试覆盖：新增 cost statistics port guard，扩展 PostgresStateStore optional read connection 测试；复跑目标 SQL projection parent/month tests。
 - 验证命令：见 `.planning/refactors/modular-io-boundaries/analysis/read-model-cost-statistics-repository-port-extraction.md`。
@@ -1012,7 +1031,7 @@
 - 目标：把生产 critical read model apply gate 从 dry-run 推进到真实 enqueue-to-fresh 复验，并处理发现的 `cost_statistics` direct refresh 5 秒 SLO 失败。
 - 影响范围：生产 release `main-33a150e7-write-e2e-approval-gate-20260619151922` 到 `main-3d88ce99-coststats-batch-20260619170500` 的 critical read model apply gate、`PostgresReadModelRepository._replace_cost_statistics_rows(...)`、repository boundary tests；不改成本归因业务规则、scope contract、payload shape、API response 或前端。
 - 生产证据：`read_model_slo_smoke --critical-only --apply --target-ms 5000 --timeout-seconds 120` 中 15 个 critical scope 均达到 dirty/outbox `done` 且 readiness `fresh` 或 `dirty_done`，证明 worker drain 和 read model 最新状态可以收敛；但 `invoice_lifecycle:2026-04` enqueue-to-fresh 约 5286.961ms、`cost_statistics:active:2026-04` 约 6459.019ms，整体 `status=fail`。随后只重跑两个失败 scope，`invoice_lifecycle` 约 2336.86ms 通过，`cost_statistics:active:2026-04` 仍约 7003.227ms 失败；公网 `health_ready_payload_probe` 仍通过，`runtime_blocker_count=0`。
-- 根因调查：`cost_statistics` 失败不是数据不 fresh，而是 handler duration/row 写入尾延迟超过目标。代码路径为 `CostStatisticsSqlProjectionBuilder._publish_cost_statistics_scope(...)` -> `PostgresReadModelRepository.save_cost_statistics_read_models(...)` -> `_replace_cost_statistics_rows(...)`；该方法在删除 scope rows 后对每条 `time_rows` 调用一次 `connection.execute(...)`，仍是逐行 insert/upsert，和此前 invoice lifecycle 慢点同类。
+- 根因调查（历史）：当时成本发布路径中的旧无条件 save 调用 `_replace_cost_statistics_rows(...)`，删除 scope rows 后对每条 `time_rows` 执行一次 insert/upsert，导致 handler 尾延迟；批量写修复后来被 conditional publish 复用，旧无条件 save 入口已于 2026-07-16 删除。
 - 修复与发布：新增 RED 测试 `tests/test_postgres_repositories_boundaries.py::test_cost_statistics_rows_are_saved_in_batch`，先证明当前 `executed_many` 为 0；随后把 `_replace_cost_statistics_rows(...)` 改为构造 params 列表并调用 `_execute_many(...)`，保持同一事务、delete、字段、`on conflict (scope_key, row_key)` 更新语义不变。为避免混入主工作区大量未提交变更，基于生产 commit `33a150e7` 创建隔离 clean worktree，提交 `3d88ce99 Optimize cost statistics read model row saves`，通过 release `main-3d88ce99-coststats-batch-20260619170500` 发布激活。
 - 发布后复验：新 release 上公网 `health_ready_payload_probe` 通过，`elapsed_ms=104.986`、`runtime_release.consistent=true`、`runtime_blocker_count=0`；`read_model_slo_smoke --critical-only --apply --target-ms 5000 --timeout-seconds 120` 15/15 pass，summary p50 约 490.393ms、p95/max 约 3176.5ms，`cost_statistics:active:2026-04` 降至约 3176.5ms，`invoice_lifecycle:2026-04` 约 1400.792ms。
 - 文档影响：更新本实施记录、`docs/modules/cost-statistics/implementation-notes.md` 和 `docs/dev/testing-closure-state.md`；长期架构边界不变。

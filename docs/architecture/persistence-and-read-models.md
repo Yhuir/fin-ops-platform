@@ -84,12 +84,12 @@ PostgreSQL store 不再读取 legacy GridFS reference；production API 读取文
 
 ## 工作台 SQL read model 边界
 
-`/api/workbench` 的生产读取边界是 `PostgresReadModelRepository.get_workbench_view()`：
+`/api/workbench` 的生产读取边界是 `WorkbenchQueryFacade.initial_page(...)` 与 `PostgresReadModelRepository.get_workbench_initial_page(...)`；summary、groups、group detail、row detail 使用同一 repository 的对应窄查询：
 
 - `read_model.workbench_snapshots` 只提供兼容旧 `/api/workbench` 的 metadata/summary shell 和 `generated_at` / `source_versions` / `cache_status` 元数据；`read_model.workbench_groups.payload` 只拥有组级 metadata/sort/count/marker，不再拥有成员行数组；成员关系 owner 是 `read_model.workbench_group_rows` 的结构化 membership/filter/search/object-identity 列，行详情 owner 是 `read_model.workbench_rows.payload`，但 nested `object_identity` 仲裁对象不属于 row payload，canonical identity 由 `workbench_rows` / `workbench_group_rows` 的结构化 `object_identity_*` 列和行 payload 顶层字段承载；`workbench_group_rows.payload` / `raw_payload` / `source_versions` 新写入为空对象。旧 `/api/workbench` 或 groups/detail API 需要完整组 payload 时，从同一 active generation 的 `workbench_group_rows + workbench_rows` 重建，禁止在 refresh 写路径继续复制整页 grouped payload 到 snapshot、把成员行复制到 group payload、把整行详情或 nested identity 复制到 group_rows，或把 member payload/source_versions 写回 group_rows；rows/groups 遍历阶段不得 eager serialize 整行/整组，序列化只发生在最终 JSON 写入 helper。
-- `read_model.workbench_rows` 提供 `page`、`page_size`、`status`、`source_kind`、`search` 的行级查询 DTO，返回在 `rows_page`；新写入的 `payload` 不再保存 nested `object_identity`。
-- `job.read_model_dirty_scopes` 提供 stale/refreshing 状态。API miss 或 dirty scope 未完成时只 enqueue `workbench.read_model.refresh`，不会在请求路径调用旧 `_build_raw_workbench_payload()`。
-- production PostgreSQL runtime 如果未配置 workbench SQL read repository，会返回 `read_model_unavailable` 并尝试 enqueue refresh，不会退回旧同步 builder。local pickle 和显式 legacy bootstrap 仍可用于旧测试/迁移验证。
+- `read_model.workbench_rows` 提供 active generation 的行详情与结构化 identity；新写入的 `payload` 不再保存 nested `object_identity`。页面分页、筛选和搜索由 groups/member 窄查询负责，不再存在 generic full-view `rows_page` adapter。
+- `job.read_model_dirty_scopes` 提供 stale/refreshing 状态。API miss 或 dirty scope 未完成时只 enqueue `workbench.read_model.refresh`；请求路径不存在同步扫描事实源并拼装整页 payload 的 fallback。
+- production PostgreSQL runtime 如果未配置 workbench SQL read repository，会返回 `read_model_unavailable` 并尝试 enqueue refresh，不会退回旧同步 builder。测试也必须直接使用当前 facade/repository contract，不再读取 generic full-view DTO。
 - standalone worker 用 `python3 -m fin_ops_platform.app.worker --enable-workbench-read-model-refresh` claim PostgreSQL durable queue 后重建对应 scope，并原子发布 `read_model.workbench_generations`、groups/group rows、snapshots/rows 和正式关系分发。
 - Pair relations、row overrides、exception cases 等写路径只标记受影响 scope dirty，并由 worker 收敛；生产读取不再使用 `state:workbench_read_models` 或任何 candidate/decision state fallback。
 
@@ -98,10 +98,10 @@ PostgreSQL store 不再读取 legacy GridFS reference；production API 读取文
 - 每个 scope 只有一个 active generation；页面和 Redis page cache 都以 active `generation_id` 作为版本边界。
 - active generation 的 metadata 必须和 `workbench_groups` / `workbench_group_rows` / `workbench_summary` 中同 generation 的实际数据一致。
 - 旧兼容 snapshot 的 `changed_scope_keys` 不能触发按 `scope_key` 删除 active generation 底层数据。缺失 scope 表示未提供新 payload，不表示可以清空已发布 generation。
-- `all` scope 只能从一致的 active month shards 聚合；任一 parent shard 不一致时，新 all generation 进入 failed，旧 active all 继续服务读请求。
+- `month=all` 查询只组合一致的 active month generations，不创建或读取 materialized all generation；不同月份的 canonical owner 在分页前完成唯一仲裁。
 - `read_model.workbench_generation_consistency` 是生产健康检查和运维排障的事实入口。
 
-旧 `reconcile_workbench_read_model` 工具已删除。工作台 read model 一致性不再把旧 `_build_raw_workbench_payload()` 当 oracle；验证应通过 worker refresh、`read_model.workbench_generation_consistency`、模块回归测试和生产只读证据完成。
+旧 `reconcile_workbench_read_model` 工具已删除。工作台 read model 一致性不再把同步整页 builder 当 oracle；验证应通过 worker refresh、`read_model.workbench_generation_consistency`、模块回归测试和生产只读证据完成。
 
 ## 工作台关系分发 read model 边界
 

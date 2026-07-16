@@ -1,5 +1,13 @@
 # Search 实施记录
 
+## 2026-07-16 - Workbench full-payload dependency removal
+
+- 目标：在不改变 Search read model、worker、scope、结果 DTO、过滤/排序和缓存失效语义的前提下，移除本地 Search 对 Workbench 完整页面 payload 与 ignored snapshot fallback 的依赖。
+- 改动：`SearchService` 增加具体的 `workbench_rows_loader` 输入；Application 只注入 `PostgresReadModelRepository.list_workbench_search_rows(scope_key=YYYY-MM)`。该 SQL 一次读取 Workbench 单月 active generation 的 row、zone、group 和项目上下文；没有新增 port、projection、cache、gateway 或通用 adapter。
+- ignored 合同：`/api/workbench/ignored` 只调用现有 `list_workbench_ignored_rows(...)`；repository 缺失返回 `503/read_model_unavailable`，不再回退到同步整页 Workbench 读取。ignored SQL 同步增加 active-generation join，避免历史 generation 污染。
+- 保持不变：生产 `/api/search` 仍通过 `SearchQueryFreshnessService` 读取 fresh-gated Search SQL read model；Search worker/fan-out/source versions、API shape、权限和前端行为不变。
+- 测试覆盖：SearchService 窄 rows 的 project/status/group/cache characterization、Search API 三类结果与 ignored filter、repository active-generation SQL、ignored API fail-closed 和 SQL narrow path。
+
 ## 2026-06-24 - selected as next modular IO read model pilot
 
 - 目标：在 no-OA bank batch 本地支持 accounted 后，选择下一个非 Go read model pilot。

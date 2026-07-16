@@ -15,12 +15,19 @@ from fin_ops_platform.services.postgres_repositories.page_business_audit import 
     PAGE_AUDIT_CONTRACTS,
     audit_page_business_read_model,
 )
+from fin_ops_platform.services.postgres_repositories.cost_statistics_page_audit import (
+    COST_STATISTICS_AUDIT_DOMAIN_KEY,
+    audit_cost_statistics_page,
+)
 from fin_ops_platform.tools.cli_reports import postgres_configuration_missing_report
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Read-only page business read-model audit.")
-    parser.add_argument("domain_key", choices=sorted(PAGE_AUDIT_CONTRACTS))
+    parser.add_argument(
+        "domain_key",
+        choices=sorted((*PAGE_AUDIT_CONTRACTS, COST_STATISTICS_AUDIT_DOMAIN_KEY)),
+    )
     parser.add_argument("--json", action="store_true", help="Print JSON output. This tool is read-only either way.")
     parser.add_argument("--fail-on-issues", action="store_true", help="Return exit code 1 when blocking issues exist.")
     parser.add_argument("--tenant-id", default="default")
@@ -50,12 +57,19 @@ def main(
         ]
         print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True, default=str), file=stdout)
         return 2
-    report = audit_page_business_read_model(
-        active_connection,
-        domain_key=str(args.domain_key),
-        tenant_id=str(args.tenant_id or "default"),
-        example_limit=max(int(args.limit or 50), 1),
-    )
+    if args.domain_key == COST_STATISTICS_AUDIT_DOMAIN_KEY:
+        report = audit_cost_statistics_page(
+            active_connection,
+            tenant_id=str(args.tenant_id or "default"),
+            example_limit=max(int(args.limit or 50), 1),
+        )
+    else:
+        report = audit_page_business_read_model(
+            active_connection,
+            domain_key=str(args.domain_key),
+            tenant_id=str(args.tenant_id or "default"),
+            example_limit=max(int(args.limit or 50), 1),
+        )
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True, default=str), file=stdout)
     if args.fail_on_issues and int(report["summary"].get("blocking_issue_sample_count") or 0):
         return 1

@@ -1,6 +1,6 @@
 # Read Model 模块边界与 I/O
 
-日期：2026-07-15
+日期：2026-07-16
 
 ## 模块化状态
 
@@ -37,12 +37,12 @@
 
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
-| Refresh request | 页面 service、writer、worker、API force refresh | 非事务入口必须经 `ReadModelRefreshGateway` normalize/validate/dedupe；显式 force 只允许以安全 metadata `force_refresh=true` 进入 worker，普通写请求不得默认 force。`invoice-usage-collection` handler 必须消费 event 顶层或 `metadata.force_refresh`，对 `all` fan-out 原样传给 month shards，并让进项使用、销项收款和 OA 待付款 projection 绕过 `source_versions_unchanged`；禁止出现工具已接受 force、worker 却静默按普通 refresh 跳过的断链 |
+| Refresh request | 页面 service、writer、worker、API force refresh | 非事务入口必须经 `ReadModelRefreshGateway` normalize/validate/dedupe；显式 force 只允许以安全 metadata `force_refresh=true` 进入 worker，普通写请求不得默认 force。`invoice-usage-collection` 只负责进项使用/销项收款并传播其 force；`oa-pending-payment` 专属 handler 独立传播 OA `all -> month` force。禁止工具已接受 force、worker 却静默按普通 refresh 跳过，也禁止 shared invoice worker 重新 claim OA 事件 |
 | Scope key | manifest/scope policy | 必须符合注册 scope policy |
-| Query freshness request | API/read facade | 必须返回 fresh/stale/refreshing 或等价状态 |
+| Query freshness request | API/read facade | 必须返回 fresh/stale/refreshing 或等价状态。`cost_statistics` 是 cost-local opt-in gate：query owner 必须先通过 repository port 执行 metadata-only PostgreSQL gate，只有 fresh 才进入共享 `ReadModelQueryGateway` 的 Redis/full-payload 路径；不得修改共享 gateway 默认顺序影响其他页面 |
 | Write response target envelope | 页面写 API/service | 会影响 read model 的成功写入必须返回或透出 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets` 和 `operation_barrier_targets`；缺少/未知前端 read model status 必须保持非 fresh |
 | Transactional refresh targets | `WorkbenchWriteUnitOfWork` 等事务 writer | 事务 writer 可以在业务事务内直接写 dirty scope/outbox，但必须使用等价 scope contract。Workbench confirm/withdraw/cancel 的 target source 是 `refresh_metadata.downstream_scope_types`、`pending_invoice_scope_keys` 与操作级 `row_ids` / `case_ids`，并通过 scope policy registry normalize/validate/dedupe；禁止依赖 repository 隐式 SQL 扫描来补 downstream scope。同 scope pending event 被 dedupe 合并时必须合并并去重 row/case metadata，让小集合继续局部投影；超过 bounded metadata 上限时必须清空 row/case metadata，让 worker 降级 full rebuild，不能用最后一次操作或截断后的 row ids 伪装覆盖所有变更。active pending outbox 合并必须重置 `created_at`/`updated_at`，SLO 仍以 `available_at -> processed_at` 计算 |
-| Projection source versions | Worker/projection/upstream read model | 必须包含 own projection schema version 和依赖 source_versions；行为变更必须 bump version |
+| Projection source versions | Worker/projection/upstream read model | 必须包含 own projection schema version 和依赖 source_versions；行为变更必须 bump version。runtime event 的 dirty `source_version` 是发布竞态令牌，不得混入业务 projection `source_versions`：`cost_statistics` 必须用它在 repository 内锁定唯一 active dirty row 并精确比较，条件发布后再用同一版本条件完成 |
 | Query-time read model filters | 页面 query service / settings owner | 只允许在 fresh payload 之后做不会改变 projection source fact 的过滤，例如成本统计标签规则；这类 filter 必须进入 query cache key，但不得写 dirty scope/outbox 或伪装成 read model source version |
 | Parent/shard freshness | Repository/API fresh gate | 父 scope 不能在子 scope dirty/missing dependency 时返回 fresh；`pending_invoice` 父 scope 必须聚合子月份 dirty status |
 | Workbench pending OA claim lookup | `app.bank_transaction_relation_claims` | Workbench 月投影排除 OA 待付款进行中认领的银行流水时，必须使用 active `oa_pending_payment_relation` + `scope_month` + `bank_transaction_id` 的窄索引合同；该 I/O 只影响投影读取计划，不改变正式关系业务语义 |
@@ -60,6 +60,10 @@
 | Workbench pending claim hot path index | PostgreSQL migration | `0087_oa_pending_payment_claim_hot_path.sql` 保留 `bank_transaction_relation_claims_active_oa_scope_bank_idx`，覆盖 active OA 认领按月份读取和按 `bank_transaction_id` 排序；禁止用 handler sleep、页面补丁或 broad query fallback 掩盖该查询慢点 |
 | Relation source fast path for downstream workers | `WorkbenchRelationReadModelRepositoryPort` | 下游 worker 如 `bank-detail`、`search-pending` 只能通过 workbench-relations repository port 读取 active relation source rows/source summary，用于 source-version proof 和投影上下文；禁止下游 projection 直接 SQL 读取 `app.workbench_pair_relations`，也禁止把该快路径伪装成页面 fresh payload |
 | Source-version proof | Scope rows / API fresh gate | `source_versions_unchanged` 只能在 own schema version 与依赖版本都匹配时跳过重建 |
+| Cost statistics conditional publish/read gate | `CostStatisticsReadModelRepositoryPort` / runtime worker / query owner | 月份与 parent snapshot 只有在 event `source_version` 等于当前唯一 `pending` / `processing` dirty 版本时才可写；snapshot/rows、父级过期月份删除与独立 parent metadata `published_source_version` 同事务。读请求用单条 cost-only SQL 比较 published version 与最高 durable dirty version/status，metadata `NULL` 或 non-fresh 时禁止 Redis/full rows；旧 completion history 不回填 proof，必须经新版 rebuild。full payload loader 不再拥有 dirty 查询。runtime version 不进入业务 `source_versions`。拒绝发布不写 Redis、不完成 dirty、不 fan-out；发布后条件完成失败也保持 `refreshing`，保护新 dirty 版本 |
+| Cost statistics broad state exclusion | `PostgresStateStore` / `ApplicationStateStore` / manifest | 成本 read model 不属于应用全状态 snapshot：启动 load 不扫描整张成本 metadata 表，broad save 不识别成本 key，protocol/manifest 不暴露全量 load 或无 source-version save。正式 PostgreSQL 表继续由成本 repository 拥有，读取只走 scoped gate/page/export-page/view/transaction，写入只走 conditional publish；bulk export-page 只能返回 SQL summary 与最多 1,000 行，不得用 local pickle、full payload、facade delegate 或兼容 shim 恢复旧入口 |
+| Cost statistics structured row storage | `CostStatisticsReadModelRepositoryPort` / PostgreSQL migration `0107` | OA 配对成本行与全银行收支行分别归属 `cost_statistics_rows` / `cost_statistics_bank_flow_rows`；parent metadata 不保存两类 arrays，full DTO/parent rollup 不得回退 JSON。transaction detail 按 identity index 点查。cost projection 无 Redis writer，query gateway 仍只在上述 fresh gate 后缓存 versioned payload。该边界只影响成本统计，不改变其他 read model 的表、cache 或 query 顺序 |
+| Cost statistics invalidation | `CostStatisticsRuntimeService` / `ReadModelRefreshGateway` | 只把规范 scope 写入 PostgreSQL durable queue，并只返回 gateway 已接受的 scope。queue 不可用时返回空；不得恢复进程内 read model service、startup snapshot、local clear 或显式 persistence callback。旧 SQL rows 由 fresh gate 阻断，不能在请求线程删除 |
 | Queue history retention | Runtime worker ops | 只回收 `done` 历史，不改变 pending/processing/failed/dead-lettered freshness 事实源 |
 
 ## 持久化与投影
@@ -79,7 +83,7 @@
 | Scope/freshness | `read_model_scope_policy.py`、`read_model_scope_contract.py`、`read_model_freshness.py`、`operation_freshness_barrier.py` |
 | Write target envelope | `read_model_write_targets.py` 与页面/service 本地 target mapper，当前已覆盖 batch/no-OA/OA pending/pending invoice/turnover、bank-detail、input-invoice-usage OA reverse、output-invoice-collections、tax-offset plan/certified import、workbench relation action、general/file import、ETC import job completion、OA manual import/create/refresh/remove；pending_invoice import fan-out 使用 `pending_invoice_scope_planner.py` |
 | Repository | `postgres_repositories/read_models.py`、`postgres_repositories/read_model_scope_contracts.py` |
-| Worker | `runtime_worker_registry.py`、`runtime_worker.py`、`runtime_worker_handlers.py`；`workbench` 月份 shard 使用普通写后可见性主 lane，`workbench-aggregate` all-scope lane 仅服务显式 rebuild/repair/backfill |
+| Worker | `runtime_worker_registry.py`、`runtime_worker.py`、`runtime_worker_handlers.py`；单一 `workbench` lane 同时处理月份 shard 与 `all` fan-out command，`all` 不发布 generation |
 | Frontend | `web/src/features/operationBarrier/api.ts` |
 | Scripts | `scripts/check-read-model-scope-contracts.py` |
 | Production evidence | `docs/operations/read-model-production-evidence-runbook.md`、`.planning/refactors/modular-io-boundaries/analysis/read-model-main-final-closure-report-2026-06-28.md`、`.planning/refactors/modular-io-boundaries/analysis/read-model-main-production-evidence-2026-06-28.md` |
@@ -109,6 +113,6 @@
 - `pending_invoice` 的 `filter=all` freshness dependency 月份必须来自 canonical `app.bank_transactions`，父 scope refresh_status 必须上卷子月份 dirty scope，防止新导入事实源已增加但页面仍显示旧 rows 且标记 fresh。
 - `workbench_relation` 的 `rows` 索引是 scope 内唯一，不是 row 全局唯一；跨月 relation 必须在每个受影响 scope 写入所有成员 row 索引，禁止恢复旧的 `(tenant_id, row_id)` 覆盖模型。
 - `workbench_relation` 操作级局部投影必须通过 `WorkbenchRelationReadModelRepositoryPort.save_workbench_relation_distribution_rows(...)` 进入 repository；service/projection 不得直接写 SQL。repository 必须按受影响 row overlap 删除旧 groups、删除/写回受影响 rows、同步 scope source_versions 并重算 row/group count。
-- `workbench` 保留 active generation 原子发布；ordinary write 后只要求受影响月份 shard 发布。`month=all` 查询组合 active 月度 generation，不再依赖写后 `workbench:all` 全量 aggregate；`workbench-aggregate` lane 只保留显式 rebuild/repair/backfill，不能作为普通 relation 写入可见性、freshness gate 或 operation barrier 的必要条件。
+- `workbench` 保留 active generation 原子发布；ordinary write 后只要求受影响月份 shard 发布。`month=all` 查询组合 active 月度 generation；显式 `all` refresh 只是由同一 worker 投递月份 shard 的 command，不写全局 generation，也不成为 relation 写入可见性、freshness gate 或 operation barrier 的必要条件。
 - legacy compat path 删除不是当前 PSCIP-L4 blocker；它必须继续保持生产 fail-closed、不能绕过 fresh gate，也不能新增未登记 dirty/outbox/readiness 写入。
 - Search 高行数 refresh latency 仍需在后续生产 evidence sweep 中观察；单次高延迟不是当前 stale-as-fresh 或 readiness blocker。

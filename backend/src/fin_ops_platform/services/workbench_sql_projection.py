@@ -206,31 +206,6 @@ class WorkbenchSqlProjectionBuilder:
                 return 1
         return 1
 
-    def refresh_workbench_all_scope_from_active_shards(
-        self,
-        scope_key: str = "all",
-        *,
-        source_version: int | str | None = None,
-    ) -> dict[str, object]:
-        normalized_scope = str(scope_key or "").strip() or "all"
-        if normalized_scope != "all":
-            raise ValueError("workbench all-scope aggregation requires scope_key='all'.")
-        status = self._read_model_repository.get_workbench_refresh_status(scope_key="all")
-        if str(status.get("read_model_status") or "").strip() == "failed":
-            raise RuntimeError(str(status.get("last_error") or "Workbench all-scope aggregation failed."))
-        return {
-            "scope_key": "all",
-            "base_scope_key": "all",
-            "projection": "sql",
-            "aggregate_only": True,
-            "source_version": source_version,
-            "read_model_status": status.get("read_model_status") or "fresh",
-            "active_generation_id": status.get("active_generation_id"),
-            "aggregate_published": bool(str(status.get("active_generation_id") or "").strip()),
-            "row_count": 0,
-            "ignored_row_count": 0,
-        }
-
     def _workbench_rows_for_month(
         self,
         month: str,

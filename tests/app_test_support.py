@@ -10,6 +10,10 @@ from fin_ops_platform.app.server import build_application as _build_application
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.import_job_queue import IMPORT_PROCESS_REQUESTED_EVENT, ImportJob
 from fin_ops_platform.services.state_store import ApplicationStateStore
+from fin_ops_platform.services.workbench_object_identity_arbitration import (
+    WorkbenchObjectIdentityArbitrationService,
+)
+from fin_ops_platform.services.workbench_relation_grouping import WorkbenchRelationGroupingService
 
 
 def build_local_state_application(*args, **kwargs):
@@ -55,6 +59,94 @@ def seed_confirmed_import(
     batch = application._import_service.confirm_import(preview.id)  # noqa: SLF001
     application._persist_import_preview_state()  # noqa: SLF001
     return preview, batch
+
+
+def build_grouped_workbench_projection(
+    application: Application,
+    month: str,
+    *,
+    include_query_rows: bool = True,
+) -> dict[str, object]:
+    """Project local test facts through the current pure Workbench grouping boundary.
+
+    Local-state tests do not have the production PostgreSQL active-generation repository.
+    They must inspect canonical facts and formal relations directly instead of restoring the
+    removed full-page runtime fallback.
+    """
+
+    normalized_month = str(month or "").strip() or "all"
+    rows_by_id: dict[str, dict[str, object]] = {}
+    if include_query_rows:
+        source_payload = application._workbench_query_service.get_workbench(normalized_month)  # noqa: SLF001
+        for zone in ("paired", "unpaired"):
+            zone_payload = source_payload.get(zone)
+            if not isinstance(zone_payload, dict):
+                continue
+            for row_type in ("oa", "bank", "invoice"):
+                for raw_row in list(zone_payload.get(row_type) or []):
+                    if not isinstance(raw_row, dict):
+                        continue
+                    row = dict(raw_row)
+                    row_id = str(row.get("id") or "").strip()
+                    if row_id:
+                        rows_by_id[row_id] = row
+
+    fact_ids = [
+        str(fact.id)
+        for fact in [
+            *application._import_service.list_transactions(month=normalized_month),  # noqa: SLF001
+            *application._import_service.list_invoices(month=normalized_month),  # noqa: SLF001
+        ]
+        if str(getattr(fact, "id", "")).strip()
+    ]
+    if fact_ids:
+        for row in application._resolve_live_rows_direct(fact_ids, month_hint=normalized_month):  # noqa: SLF001
+            rows_by_id[str(row["id"])] = dict(row)
+
+    active_relations = [
+        dict(relation)
+        for relation in application._workbench_pair_relation_service.list_active_relations()  # noqa: SLF001
+        if normalized_month == "all"
+        or str(relation.get("month_scope") or "all") in {"all", normalized_month}
+    ]
+    missing_relation_row_ids = [
+        str(row_id)
+        for relation in active_relations
+        for row_id in list(relation.get("row_ids") or [])
+        if str(row_id).strip() and str(row_id) not in rows_by_id
+    ]
+    if missing_relation_row_ids:
+        for row in application._resolve_live_rows_direct(  # noqa: SLF001
+            list(dict.fromkeys(missing_relation_row_ids)),
+            month_hint=normalized_month,
+        ):
+            rows_by_id[str(row["id"])] = dict(row)
+
+    WorkbenchObjectIdentityArbitrationService().arbitrate_rows(rows_by_id)
+    return WorkbenchRelationGroupingService().group_payload(
+        normalized_month,
+        rows_by_id=rows_by_id,
+        active_relations=active_relations,
+    )
+
+
+class FreshWorkbenchWriteGateRepository:
+    def __init__(self, version: str) -> None:
+        self.version = str(version)
+
+    def get_workbench_groups_freshness_status(self, **_kwargs: object) -> dict[str, object]:
+        return {
+            "read_model_status": "fresh",
+            "read_model_version": self.version,
+        }
+
+
+def install_fresh_workbench_write_gate(application: Application, *, version: str = "test-generation-1") -> str:
+    """Install only the generation precondition I/O required by local write-contract tests."""
+
+    application._workbench_sql_read_repository = FreshWorkbenchWriteGateRepository(version)  # noqa: SLF001
+    application._workbench_sql_read_model_stale_reasons = lambda *_args, **_kwargs: []  # noqa: SLF001
+    return str(version)
 
 
 class DurableImportQueueHarness:

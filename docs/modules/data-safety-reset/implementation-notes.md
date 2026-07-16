@@ -13,6 +13,15 @@
 
 ## 历史记录
 
+## 2026-07-16 - OA reset completion 与关联台 fresh 解耦
+
+- 目标：移除 OA reset 请求/job 线程中的 Workbench 全页 completion probe，避免重置接口同步执行昂贵查询并误报重建完成。
+- 影响范围：`Application._execute_settings_data_reset(...)`、Settings data reset API/job contract、关联台 lifecycle dirty scope、模块测试与状态机。
+- 关键决策：复用现有 `settings_reset_completed` durable lifecycle；成功登记后返回 `rebuild_status=pending`，登记 Workbench refresh/matching dirty scope 失败则返回 `status=partial`、`rebuild_status=failed`。不新增 projection、queue、poller 或兼容 fallback。
+- 旧链路删除：删除 reset 内 `_build_api_workbench_payload("all")` 同步全页读取和第二次 `_schedule_or_run_workbench_auto_matching_for_scopes(...)`；Settings 测试不再调用旧 full builder 证明重建结果。
+- 测试覆盖：reset service/API 覆盖 pending、lifecycle enqueue 失败、只登记一次 matching dirty scope、不同步构建 OA/Workbench rows、附件缓存保留且不在 reset 中 OCR；OA 过滤和缓存投影本身继续由 `tests/test_mongo_oa_adapter.py` 负责。
+- 未测风险：真实 durable queue、worker drain、最终 active generation fresh 和大生产库耗时必须等所有 thread 合并并统一部署后验证；本轮不部署、不操作生产队列。
+
 ## 2026-07-05 - 模块边界 close 与旧 reset job path 删除
 
 - 目标：完成 data-safety-reset 模块边界 close，确认危险重置入口只有 `SettingsDataResetService` + `BackgroundJobService`，并删除旧模块代码对新链路的污染。

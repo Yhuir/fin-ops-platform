@@ -180,64 +180,6 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertNotIn("payload", event.to_envelope())
         self.assertEqual(event.attempt_count, 2)
 
-    def test_workbench_all_aggregate_enqueue_coalesces_pending_parent_scopes(self) -> None:
-        transaction = FakeTransaction(
-            rows=[
-                event_row(
-                    event_type="workbench.read_model.refresh",
-                    aggregate_type="read_model",
-                    aggregate_id="all",
-                    scope_type="workbench",
-                    scope_key="all",
-                    dedupe_key="workbench.read_model.refresh:workbench:all:aggregate",
-                    payload={"aggregate_only": True, "parent_scope_keys": ["2026-04", "2026-05"]},
-                    source_version=8,
-                    priority="low",
-                )
-            ]
-        )
-        repository = RuntimeQueueRepository(FakeConnection(transaction))
-
-        event = repository.enqueue_workbench_all_aggregate_refresh(
-            tenant_id="tenant-a",
-            parent_scope_keys=["2026-05", "2026-04", "2026-05"],
-            source_version=8,
-            reason="workbench_relation_changed",
-            priority="low",
-            delay_seconds=3.0,
-            trace_id="trace-a",
-        )
-
-        self.assertEqual(event.dedupe_key, "workbench.read_model.refresh:workbench:all:aggregate")
-        method, sql, params = transaction.calls[0]
-        self.assertEqual(method, "fetch_one")
-        self.assertIn("jsonb_array_elements_text", sql)
-        self.assertIn("available_at = case", sql)
-        self.assertEqual(params[1], "workbench.read_model.refresh:workbench:all:aggregate")
-        payload = getattr(params[2], "obj", params[2])
-        self.assertEqual(payload["parent_scope_keys"], ["2026-04", "2026-05"])
-        self.assertEqual(payload["aggregate_only"], True)
-        self.assertEqual(payload["reason"], "workbench_relation_changed")
-        self.assertEqual(params[4], 3.0)
-
-    def test_workbench_all_aggregate_high_priority_coalesce_pulls_available_at_forward(self) -> None:
-        transaction = FakeTransaction(rows=[event_row(priority="high")])
-        repository = RuntimeQueueRepository(FakeConnection(transaction))
-
-        repository.enqueue_workbench_all_aggregate_refresh(
-            tenant_id="tenant-a",
-            parent_scope_keys=["2026-05"],
-            reason="workbench_relation_changed",
-            priority="high",
-            delay_seconds=0.0,
-        )
-
-        _, sql, params = transaction.calls[0]
-        normalized_sql = " ".join(sql.lower().split())
-        self.assertIn("when excluded.priority in ('urgent', 'high')", normalized_sql)
-        self.assertIn("then least(job.outbox_events.available_at, excluded.available_at)", normalized_sql)
-        self.assertEqual(params[6], "high")
-
     def test_enqueue_inserts_runtime_event_fields_and_returns_event(self) -> None:
         available_at = datetime(2026, 5, 21, 12, 0, tzinfo=timezone.utc)
         transaction = FakeTransaction(rows=[event_row()])

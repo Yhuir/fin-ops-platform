@@ -41,7 +41,6 @@ class HttpSloProbeTests(unittest.TestCase):
             "pending_invoices_filter_options",
             "input_invoice_usage_filter_options",
             "oa_pending_payments_rows",
-            "oa_pending_payments_filter_options",
             "output_invoice_collections_rows",
             "output_invoice_collections_filter_options",
             "cost_statistics_explorer_all",
@@ -73,7 +72,8 @@ class HttpSloProbeTests(unittest.TestCase):
         self.assertIn("page=1", probe_paths["output_invoice_collections_rows"])
         self.assertIn("page_size=20", probe_paths["output_invoice_collections_rows"])
         self.assertIn("month=2026-03", probe_paths["tax_offset_rows"])
-        self.assertIn("month=2026-03", probe_paths["cost_statistics_explorer_all"])
+        self.assertIn("scope=2026-03", probe_paths["cost_statistics_explorer_all"])
+        self.assertIn("view=time", probe_paths["cost_statistics_explorer_all"])
         self.assertIn("project_scope=active", probe_paths["cost_statistics_explorer_all"])
         self.assertIn("project_scope=active", probe_paths["cost_statistics_summary_all"])
         self.assertIn("bucket=unsubmitted", probe_paths["bank_flow_rule_batches"])
@@ -154,7 +154,7 @@ class HttpSloProbeTests(unittest.TestCase):
         report = http_slo_probe.collect_http_slo(
             base_url="https://example.test",
             api_prefix="/fin-ops-api",
-            probes=[http_slo_probe.HttpProbe("workbench", "/api/workbench/summary?month=all")],
+            probes=[http_slo_probe.HttpProbe("workbench", "/api/workbench?month=all")],
             headers={"Authorization": "Bearer secret-token"},
             iterations=2,
             warmup=1,
@@ -163,7 +163,7 @@ class HttpSloProbeTests(unittest.TestCase):
 
         self.assertEqual(report["status"], "pass")
         self.assertEqual(report["summary"]["sample_count"], 2)
-        self.assertEqual(observed[0][0], "https://example.test/fin-ops-api/api/workbench/summary?month=all")
+        self.assertEqual(observed[0][0], "https://example.test/fin-ops-api/api/workbench?month=all")
         self.assertEqual(observed[0][1]["Accept-Encoding"], "gzip")
         self.assertTrue(report["auth_configured"])
         self.assertNotIn("secret-token", json.dumps(report))
@@ -182,7 +182,7 @@ class HttpSloProbeTests(unittest.TestCase):
 
         report = http_slo_probe.collect_http_slo(
             base_url="https://example.test",
-            probes=[http_slo_probe.HttpProbe("workbench", "/api/workbench/summary?month=all")],
+            probes=[http_slo_probe.HttpProbe("workbench", "/api/workbench?month=all")],
             headers={"Authorization": "Bearer secret-token"},
             iterations=1,
             warmup=0,

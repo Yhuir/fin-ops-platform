@@ -645,17 +645,6 @@ class ApplicationStateStore:
             current_payload["workbench_pair_relations"] = merged_snapshot
         self._save_local_pickle(current_payload)
 
-    def load_oa_pending_payment_bank_relations(self) -> dict[str, Any]:
-        current_payload = self._load_local_pickle()
-        snapshot = current_payload.get("oa_pending_payment_bank_relations")
-        return snapshot if isinstance(snapshot, dict) else {}
-
-    def save_oa_pending_payment_bank_relations(self, snapshot: dict[str, Any]) -> None:
-        normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
-        current_payload = self._load_local_pickle()
-        current_payload["oa_pending_payment_bank_relations"] = normalized_snapshot
-        self._save_local_pickle(current_payload)
-
     def load_no_oa_bank_batches(self) -> dict[str, Any]:
         if not self._no_oa_bank_batches_path.exists():
             return {}
@@ -800,22 +789,6 @@ class ApplicationStateStore:
         normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
         current_payload = self._load_local_pickle()
         current_payload["turnover_ledger_extras"] = normalized_snapshot
-        self._save_local_pickle(current_payload)
-
-    def load_cost_statistics_read_models(self) -> dict[str, Any]:
-        current_payload = self._load_local_pickle()
-        snapshot = current_payload.get("cost_statistics_read_models")
-        return snapshot if isinstance(snapshot, dict) else {}
-
-    def save_cost_statistics_read_models(
-        self,
-        snapshot: dict[str, Any],
-        *,
-        changed_scope_keys: list[str] | None = None,
-    ) -> None:
-        normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
-        current_payload = self._load_local_pickle()
-        current_payload["cost_statistics_read_models"] = normalized_snapshot
         self._save_local_pickle(current_payload)
 
     def load_tax_offset_read_models(self) -> dict[str, Any]:
@@ -1116,7 +1089,6 @@ class ApplicationStateStore:
                 "no_oa_bank_batches",
                 "turnover_relations",
                 "turnover_ledger_extras",
-                "cost_statistics_read_models",
                 "tax_offset_read_models",
                 "app_health_alerts",
             )

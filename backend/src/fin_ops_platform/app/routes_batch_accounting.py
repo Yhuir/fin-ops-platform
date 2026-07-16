@@ -138,7 +138,12 @@ class BatchAccountingApiRoutes:
 
     @staticmethod
     def _batch_accounting_error_response(exc: BatchAccountingError) -> tuple[HTTPStatus, dict[str, Any]]:
-        status = HTTPStatus.CONFLICT if exc.code == "batch_accounting_version_conflict" else HTTPStatus.BAD_REQUEST
+        if exc.code == "batch_accounting_version_conflict":
+            status = HTTPStatus.CONFLICT
+        elif exc.code == "batch_accounting_workbench_read_model_unavailable":
+            status = HTTPStatus.SERVICE_UNAVAILABLE
+        else:
+            status = HTTPStatus.BAD_REQUEST
         payload: dict[str, Any] = {"error": exc.code, "message": str(exc)}
         payload.update(exc.payload)
         return status, payload

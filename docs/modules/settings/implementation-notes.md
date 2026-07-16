@@ -28,6 +28,15 @@
 
 ## 历史记录
 
+## 2026-07-16 - OA reset 改为 pending durable rebuild
+
+- 目标：让 Settings data reset 的完成语义与关联台 read model 的最终 fresh 状态严格分离，消除同步全页读取的性能和可靠性问题。
+- 影响范围：Settings data reset runtime executor、API/background-job result、data-safety-reset 边界与测试。
+- 关键决策：Settings 只负责权限、清理、job 与 `settings_reset_completed` lifecycle；OA reset 成功登记 durable refresh 后返回 `rebuild_status=pending`，不拥有 Workbench query/projection/OCR，也不重复入队 matching dirty scope。
+- 文档影响：同步更新 Settings/data-safety-reset boundary、状态机、测试矩阵和实施记录。
+- 测试覆盖：`tests/test_settings_data_reset_service.py` 覆盖 pending、enqueue failure、single enqueue、no synchronous full payload/OA row build、cache retention。
+- 未测风险：最终 fresh 与真实性能只能在所有并行 thread 完成、统一部署后通过 worker drain 与生产性能 gate 验证；本轮明确不部署。
+
 ## 2026-07-05 - Settings route owner 与旧链路删除 close
 
 - 目标：完成设置模块 HTTP I/O 边界收口，移除 `server.py` 中 `/api/workbench/settings*` 旧 handler 和 settings 持久化内存 fallback。

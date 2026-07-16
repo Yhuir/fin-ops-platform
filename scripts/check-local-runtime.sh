@@ -184,10 +184,10 @@ if mode in {"--all", "--require-backend"}:
         fail(f"Backend health check failed: {exc}")
 
     try:
-        workbench_summary = http_json(f"{base_url}/api/workbench/summary?month=all", timeout=15)
-        summary = workbench_summary.get("summary") or {}
-        paired_page = http_json(f"{base_url}/api/workbench/groups?month=all&zone=paired&page=1&page_size=5", timeout=15)
-        unpaired_page = http_json(f"{base_url}/api/workbench/groups?month=all&zone=unpaired&page=1&page_size=5", timeout=15)
+        workbench_initial = http_json(f"{base_url}/api/workbench?month=all", timeout=15)
+        summary = workbench_initial.get("summary") or {}
+        paired_page = workbench_initial.get("paired") or {}
+        unpaired_page = workbench_initial.get("unpaired") or {}
         unpaired_groups = unpaired_page.get("groups") or []
         paired_groups = paired_page.get("groups") or []
         total_count = int(
@@ -202,16 +202,16 @@ if mode in {"--all", "--require-backend"}:
         )
         visible_groups = len(unpaired_groups) + len(paired_groups)
         if total_count <= 0 and visible_groups <= 0:
-            fail("Workbench summary/groups API returned an empty read model for month=all.")
+            fail("Workbench initial-page API returned an empty read model for month=all.")
         else:
             ok(
-                "Workbench summary/groups API ready "
+                "Workbench initial-page API ready "
                 f"(total={total_count}, first_page_groups={visible_groups}, "
-                f"open_total={open_page.get('total')}, paired_total={paired_page.get('total')})"
+                f"unpaired_total={unpaired_page.get('total')}, paired_total={paired_page.get('total')})"
             )
     except Exception as exc:  # noqa: BLE001
         fail(
-            "Workbench summary/groups API check failed. "
+            "Workbench initial-page API check failed. "
             "Verify that scripts/start-backend.sh is running fin_ops_platform.app.main on FIN_OPS_BACKEND_PORT, "
             f"not a legacy ASGI stub: {exc}"
         )

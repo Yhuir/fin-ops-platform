@@ -12,7 +12,6 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import Postgr
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_relation import (
     PostgresOaPendingPaymentRelationRepository,
-    SnapshotOaPendingPaymentRelationRepository,
 )
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
@@ -28,7 +27,6 @@ __all__ = [
     "audit_external_control_evidence",
     "PostgresOpsTaxEtcRepository",
     "PostgresOaPendingPaymentRelationRepository",
-    "SnapshotOaPendingPaymentRelationRepository",
     "PostgresReadModelRepository",
     "PostgresWorkbenchRepository",
     "PostgresWorkbenchIdempotencyRepository",

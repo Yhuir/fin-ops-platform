@@ -105,7 +105,7 @@
 
 - 目标：完成 `/imports/invoices` 本地 Spec-first E2E Audit 校准，把剩余 `IMPORT-INVOICE-E2E-008` 从 partial 收敛为 covered，并把真实 worker drain 保留在 `IMPORT-INVOICE-E2E-009` external-risk。
 - 影响范围：发票导入 Spec-first 覆盖矩阵、全局 Spec-first inventory、testing closure state 和本实施记录；不改产品逻辑。
-- 关键决策：当前 Browser 已覆盖上传/预览/慢预览锁定、重复与未导入明细、损坏文件混合、preview stale、confirm 失败、权限 gate、Workbench refresh，以及销项收款、进项使用、税金抵扣、待找发票、OA 待付款和成本统计 downstream fresh read model 与导入影响行。search 当前无独立前端 route，由 API/runtime 证据覆盖；真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain、真实信息汇总表和大文件仍归 `IMPORT-INVOICE-E2E-009`。
+- 关键决策：当前 Browser 已覆盖上传/预览/慢预览锁定、重复与未导入明细、损坏文件混合、preview stale、confirm 失败、权限 gate、显式 operation barrier 等待和零 Workbench 页面请求，以及销项收款、进项使用、税金抵扣、待找发票、OA 待付款和成本统计自身的 fresh read model 与导入影响行。search 当前无独立前端 route，由 API/runtime 证据覆盖；真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain、真实信息汇总表和大文件仍归 `IMPORT-INVOICE-E2E-009`。
 - 文档影响：`IMPORT-INVOICE-E2E-008` 标记为 `covered`；全局 inventory 和 testing closure state 可将 `imports-invoices` 从 `partial` 校准为 `covered`。
 - 测试覆盖：未新增测试；基于现有 `web/e2e/imports-invoices-flow.spec.ts`、`permissions-role-matrix`、导入 API/service/lifecycle/read model 和 write-operation SLO audit contract 证据校准。
 - 验证命令：待本轮运行三类导入 Playwright specs、`bash scripts/verify.sh docs` 和 `git diff --check`。
@@ -129,7 +129,7 @@
 - 影响范围：deterministic Playwright mock、`web/e2e/imports-invoices-flow.spec.ts`、发票导入模块 Spec-first E2E 文档和全局测试闭环状态。
 - 关键决策：不改产品逻辑；复用共享导入工作流和现有 API mapper 的 `preview_stale` 文案，只在 mock 中增加发票导入专用失败开关。mock confirm 成功不等同于真实 worker drain，真实 PostgreSQL/RabbitMQ/Redis/systemd worker 和下游 read model freshness 仍作为 `external-risk` 记录。
 - 文档影响：新增 `e2e-spec.md`、`e2e-coverage.md`，更新 `README.md`、`tests.md`、全局 Spec-first inventory、测试说明和闭环状态。
-- 测试覆盖：Browser E2E 覆盖真实 file input、每文件进/销项方向、preview audit、重复项明细、confirm 成功刷新 Workbench、`preview_stale` 无 success/无 Workbench refresh、confirm 500 无 success/无 Workbench refresh。
+- 测试覆盖：Browser E2E 覆盖真实 file input、每文件进/销项方向、preview audit、重复项明细、confirm 成功等待显式 targets 且零 Workbench 页面请求、`preview_stale`/confirm 500 无 success 且零 barrier；组件测试覆盖 targets 为空时直接完成且零 Workbench 请求。
 - 验证命令：见本轮最终交付说明。
 - 未测风险：真实发票 Excel、大文件、真实 import worker drain、derived lifecycle worker、下游 pending invoices/tax/input-output/OA/cost/search read model 最终 fresh 仍需 staging 或生产只读 smoke。
 - 后续事项：继续补真实基础设施 worker drain smoke，或补发票导入后的下游多页面 Browser fan-out。

@@ -2882,7 +2882,7 @@ PF-P002 已由用户确认 verified。PF-P003 已生成并审查，目标是把 
 - 在 `Application.readiness_summary()` 增加 `production_runtime_guard`，当 release runtime 或 `FIN_OPS_PRODUCTION_RUNTIME_GUARD=1` 时，若 storage backend 不是 `postgres`、bootstrap mode 是 `legacy`、或 `FIN_OPS_ENABLE_POSTGRES_FULL_STATE_SNAPSHOT` 启用，则 readiness `status=not_ready`。
 - 新增 `tests/test_platform_runtime_boundary_guards.py`，固化 8 类平台机械门禁：production runtime、legacy snapshot/pickle、auth context、outbox/dirty scope、Redis/RabbitMQ direct import、OA Mongo adapter direct use、external OA MySQL / `pymysql`、handler/usecase raw SQL boundary。
 - 静态测试采用 allowlist + known violation 机制，防止 PF-P003 扩大到业务模块迁移。
-- `cost_tax_sql_projection.py` 仍作为 `MongoOAAdapter` parser version / pure utility 依赖的 known violation，后续 Tax / Cost / ETC Micro-JIT 中应迁出到 shared/domain utility。
+- 历史记录：`cost_tax_sql_projection.py` 曾作为 `MongoOAAdapter` parser version / pure utility 依赖的 known violation；05-20 已拆为成本/税金两个 owner并删除旧 module，税金 owner改为读取独立 parser-version 纯函数，该 violation 已关闭。
 - raw SQL 当前按 repository、projection、runtime、ops/backfill 分类通过；业务模块 Micro-JIT 必须逐步把未归入 repository 的 SQL 收口。
 
 #### 下一条 Prompt 上下文

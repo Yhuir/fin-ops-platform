@@ -11,27 +11,22 @@ class CostStatisticsDerivedLifecycleExecutor:
         *,
         runtime_service: CostStatisticsRuntimeService,
         enqueue_refresh: Callable[..., bool],
-        can_enqueue_refresh: Callable[[], bool],
     ) -> None:
         self._runtime_service = runtime_service
         self._enqueue_refresh = enqueue_refresh
-        self._can_enqueue_refresh = can_enqueue_refresh
 
     def execute(self, domain_plan: dict[str, object], *, schedule_warmup: bool) -> dict[str, object]:
         scope_keys = self._domain_plan_scope_keys(domain_plan)
         reason = str(domain_plan.get("reason") or "derived_lifecycle_cost_statistics")
-        persist_empty = reason != "pending_invoice_rules_changed"
         if "all" in scope_keys:
             deleted_scope_keys = self._runtime_service.invalidate_read_models(
                 schedule_warmup=schedule_warmup,
-                persist_empty=persist_empty,
             )
         else:
             deleted_scope_keys = self._runtime_service.invalidate_read_model_scopes(
                 scope_keys,
                 reason=reason,
                 schedule_warmup=schedule_warmup,
-                persist_empty=persist_empty,
             )
 
         enqueued_jobs: list[str] = []
@@ -44,11 +39,11 @@ class CostStatisticsDerivedLifecycleExecutor:
             )
             if enqueued:
                 enqueued_jobs.append("cost_statistics.read_model.refresh")
-            if not deleted_scope_keys:
-                deleted_scope_keys = list(target_scope_keys or ["all"])
-        else:
-            if self._can_enqueue_refresh():
-                enqueued_jobs.append("cost_statistics.read_model.refresh")
+                deleted_scope_keys = self._runtime_service.refresh_scope_keys_from_scope_keys(
+                    list(target_scope_keys or ["all"])
+                )
+        elif deleted_scope_keys:
+            enqueued_jobs.append("cost_statistics.read_model.refresh")
 
         return {
             "deleted_counts": {"cost_statistics_read_models": len(deleted_scope_keys)},

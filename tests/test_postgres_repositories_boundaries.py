@@ -134,6 +134,14 @@ class WorkbenchRelationWriteConnection(RecordingConnection):
         return {"source_version": 3}
 
 
+class CostStatisticsPublishConnection(RecordingConnection):
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+        self.fetched_one.append((" ".join(sql.split()), params))
+        if "from job.read_model_dirty_scopes" in sql.lower():
+            return {"source_version": 7}
+        return None
+
+
 def _workbench_relation_batch_refresh_rows(connection: WorkbenchRelationWriteConnection) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     for sql, params in connection.fetched_all:
@@ -1023,10 +1031,10 @@ def test_pending_invoice_rows_save_updates_scope_inside_transaction() -> None:
 
 
 def test_cost_statistics_rows_are_saved_in_batch() -> None:
-    connection = RecordingConnection()
+    connection = CostStatisticsPublishConnection()
     repository = PostgresReadModelRepository(connection)
 
-    repository.save_cost_statistics_read_models(
+    published = repository.publish_cost_statistics_read_models(
         {
             "read_models": {
                 "active:2026-04": {
@@ -1062,9 +1070,13 @@ def test_cost_statistics_rows_are_saved_in_batch() -> None:
                 }
             }
         },
+        tenant_id="default",
+        scope_key="active:2026-04",
+        source_version=7,
         changed_scope_keys={"active:2026-04"},
     )
 
+    assert published is True
     assert connection.transaction_enters == 1
     assert connection.transaction_exits == 1
     executed_sql = [sql for sql, _ in connection.executed]
@@ -1279,7 +1291,6 @@ def test_read_model_loaders_strip_export_only_rebuildable_marker() -> None:
     repository = PostgresReadModelRepository(ReadModelReadConnection())
 
     assert "rebuildable" not in repository.load_workbench_read_models()["read_models"]["2026-05"]
-    assert "rebuildable" not in repository.load_cost_statistics_read_models()["read_models"]["2026-05"]
     assert "rebuildable" not in repository.load_tax_offset_read_models()["read_models"]["2026-05"]
 
 

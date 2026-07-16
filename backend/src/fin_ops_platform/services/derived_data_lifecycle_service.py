@@ -254,7 +254,6 @@ class DerivedDataLifecycleService:
             "pending_invoice_read_model",
             "input_invoice_usage_read_model",
             "output_invoice_collection_read_model",
-            "oa_pending_payment_read_model",
             "tax_offset_read_model",
             "tax_offset_month_cache",
             "cost_statistics_read_model",

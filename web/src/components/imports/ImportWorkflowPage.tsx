@@ -25,7 +25,7 @@ import {
   resolveImportApiErrorMessage,
 } from "../../features/imports/api";
 import { confirmEtcImportSession, fetchReadyEtcReconciliationTasks, previewEtcZipFiles } from "../../features/etc/api";
-import { fetchWorkbenchInitialPage, fetchWorkbenchSettings } from "../../features/workbench/api";
+import { fetchWorkbenchSettings } from "../../features/workbench/api";
 import { waitForOperationFreshness } from "../../features/operationBarrier/api";
 import type {
   ImportBatchType,
@@ -84,8 +84,6 @@ type EtcPreviewRow = EtcImportItem & {
   statusLabel: string;
   filterStatusLabel: string;
 };
-
-const WORKBENCH_VIEW_MONTH = "all";
 
 const BATCH_TYPE_LABELS: Record<ImportBatchType, string> = {
   input_invoice: "进项发票",
@@ -1246,18 +1244,18 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     }
   }
 
-  async function refreshWorkbenchStatus(payload: ImportSessionPayload) {
+  async function completeImportFeedback(payload: ImportSessionPayload) {
     const confirmedCount = payload.files.filter((file) => file.status === "confirmed").length;
-    setProgress({ tone: "loading", label: `已导入 ${confirmedCount} 个文件，正在刷新关联台。` });
+    if (payload.operationBarrierTargets.length === 0) {
+      setProgress({ tone: "success", label: `已导入 ${confirmedCount} 个文件。` });
+      return;
+    }
+    setProgress({ tone: "loading", label: `已导入 ${confirmedCount} 个文件，正在同步受影响页面。` });
     try {
-      if (payload.operationBarrierTargets.length > 0) {
-        await waitForOperationFreshness(payload.operationBarrierTargets);
-      } else {
-        await fetchWorkbenchInitialPage(WORKBENCH_VIEW_MONTH);
-      }
+      await waitForOperationFreshness(payload.operationBarrierTargets);
       setProgress({ tone: "success", label: `已导入 ${confirmedCount} 个文件。` });
     } catch {
-      setProgress({ tone: "error", label: "导入已提交，关联台刷新失败。" });
+      setProgress({ tone: "error", label: "导入已提交，受影响页面同步失败。" });
     }
   }
 
@@ -1306,7 +1304,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
         resetDraft();
         if (payload.job.status === "succeeded" || payload.job.status === "partial_success") {
           setFeedbackMessage("已确认导入");
-          void refreshWorkbenchStatus(payload);
+          void completeImportFeedback(payload);
         } else {
           setFeedbackMessage("已开始后台导入");
         }
@@ -1314,7 +1312,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
       }
       resetDraft();
       setFeedbackMessage("已确认导入");
-      void refreshWorkbenchStatus(payload);
+      void completeImportFeedback(payload);
     } catch (error) {
       setErrorMessage(resolveImportApiErrorMessage(error, "确认导入失败，请稍后重试。"));
     } finally {

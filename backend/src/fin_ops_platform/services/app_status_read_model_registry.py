@@ -72,7 +72,7 @@ APP_STATUS_READ_MODEL_REGISTRY: dict[str, AppStatusReadModelDefinition] = {
     "oa_pending_payment": AppStatusReadModelDefinition(
         key="oa_pending_payment",
         scope_type="oa_pending_payment",
-        worker_instance="invoice-usage-collection",
+        worker_instance="oa-pending-payment",
         refresh_event_type="oa_pending_payment.read_model.refresh",
     ),
     "cost_statistics": AppStatusReadModelDefinition(

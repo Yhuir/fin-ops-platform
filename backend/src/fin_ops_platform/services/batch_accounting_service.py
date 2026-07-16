@@ -103,7 +103,6 @@ class BatchAccountingService:
     def __init__(
         self,
         *,
-        grouped_workbench_loader: Callable[[str], dict[str, Any]],
         batch_workbench_loader: Callable[..., dict[str, Any] | None] | None = None,
         batch_submit_workbench_loader: Callable[..., dict[str, Any] | None] | None = None,
         batch_submitted_workbench_loader: Callable[..., dict[str, Any] | None] | None = None,
@@ -111,7 +110,6 @@ class BatchAccountingService:
         relation_facade: Any | None = None,
         relation_command_service: Any | None = None,
     ) -> None:
-        self._grouped_workbench_loader = grouped_workbench_loader
         self._batch_workbench_loader = batch_workbench_loader
         self._batch_submit_workbench_loader = batch_submit_workbench_loader
         self._batch_submitted_workbench_loader = batch_submitted_workbench_loader
@@ -516,7 +514,10 @@ class BatchAccountingService:
 
     def _build_list_context(self, *, bank_year: str) -> _WorkbenchContext:
         return self._context_with_relation_distribution(
-            self._build_workbench_row_context(bank_year=bank_year),
+            self._build_workbench_row_context(
+                bank_year=bank_year,
+                payload_loader=self._batch_workbench_loader,
+            ),
             bank_year=bank_year,
         )
 
@@ -533,29 +534,38 @@ class BatchAccountingService:
         bank_row_id: str,
         oa_row_ids: list[str],
     ) -> _WorkbenchContext:
-        if self._batch_submit_workbench_loader is not None:
-            return self._build_workbench_row_context(
-                bank_year=bank_year,
-                payload_loader=lambda *, bank_year: self._batch_submit_workbench_loader(
-                    bank_year=bank_year,
-                    bank_row_id=bank_row_id,
-                    oa_row_ids=list(oa_row_ids),
-                ),
+        submit_loader = self._batch_submit_workbench_loader
+        if submit_loader is None:
+            raise BatchAccountingError(
+                "batch_accounting_workbench_read_model_unavailable",
+                "批量账务关联台读模型不可用，请稍后重试。",
             )
-        return self._build_workbench_row_context(bank_year=bank_year)
+        return self._build_workbench_row_context(
+            bank_year=bank_year,
+            payload_loader=lambda *, bank_year: submit_loader(
+                bank_year=bank_year,
+                bank_row_id=bank_row_id,
+                oa_row_ids=list(oa_row_ids),
+            ),
+        )
 
     def _build_workbench_row_context(
         self,
         *,
         bank_year: str,
-        payload_loader: Callable[..., dict[str, Any] | None] | None = None,
+        payload_loader: Callable[..., dict[str, Any] | None] | None,
     ) -> _WorkbenchContext:
-        payload = None
-        resolved_loader = payload_loader or self._batch_workbench_loader
-        if resolved_loader is not None:
-            payload = resolved_loader(bank_year=bank_year)
+        if payload_loader is None:
+            raise BatchAccountingError(
+                "batch_accounting_workbench_read_model_unavailable",
+                "批量账务关联台读模型不可用，请稍后重试。",
+            )
+        payload = payload_loader(bank_year=bank_year)
         if not isinstance(payload, dict):
-            payload = self._grouped_workbench_loader("all")
+            raise BatchAccountingError(
+                "batch_accounting_workbench_read_model_unavailable",
+                "批量账务关联台读模型不可用，请稍后重试。",
+            )
         groups = self._groups_from_payload(payload)
         rows_by_id: dict[str, dict[str, Any]] = {}
         bank_rows: list[dict[str, Any]] = []

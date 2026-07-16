@@ -9,7 +9,6 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from fin_ops_platform.services.cost_statistics_read_model_service import COST_STATISTICS_READ_MODEL_SCHEMA_VERSION
 from fin_ops_platform.services.import_file_service import FileImportPreviewItem
 from fin_ops_platform.services.runtime_paths import default_data_dir
 from fin_ops_platform.services.state_store import ApplicationStateStore
@@ -462,25 +461,6 @@ class StateStoreTests(unittest.TestCase):
             self.assertEqual(reloaded.load_no_oa_bank_batches(), no_oa_snapshot)
             self.assertEqual(reloaded.load_bank_flow_rule_batches(), bank_flow_snapshot)
 
-    def test_oa_pending_payment_bank_relations_persist_locally_across_store_instances(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            data_dir = Path(temp_dir)
-            snapshot = {
-                "relations": {
-                    "relation-1": {
-                        "relation_id": "relation-1",
-                        "status": "confirmed",
-                    }
-                }
-            }
-
-            store = ApplicationStateStore(data_dir)
-            store.save_oa_pending_payment_bank_relations(snapshot)
-
-            reloaded = ApplicationStateStore(data_dir)
-
-            self.assertEqual(reloaded.load_oa_pending_payment_bank_relations(), snapshot)
-
     def test_tax_imports_and_offset_plan_persist_locally(self) -> None:
         with TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir)
@@ -684,63 +664,6 @@ class StateStoreTests(unittest.TestCase):
             loaded = ApplicationStateStore(data_dir).load_workbench_read_models()
 
         self.assertEqual(loaded, snapshot)
-
-    def test_save_cost_statistics_read_models_persists_locally_across_store_instances(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            data_dir = Path(temp_dir)
-            snapshot = {
-                "read_models": {
-                    "active:2026-05": {
-                        "scope_key": "active:2026-05",
-                        "scope_type": "month",
-                        "schema_version": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
-                        "month": "2026-05",
-                        "project_scope": "active",
-                        "generated_at": "2026-05-04T12:00:00+00:00",
-                        "cache_status": "ready",
-                        "entry_count": 3,
-                        "payload": {"summary": {"transaction_count": 3}},
-                        "source_scope_keys": ["workbench:2026-05"],
-                    }
-                }
-            }
-            store = ApplicationStateStore(data_dir)
-            store.save_cost_statistics_read_models(snapshot)
-
-            reloaded = ApplicationStateStore(data_dir)
-            loaded = reloaded.load_cost_statistics_read_models()
-
-        self.assertEqual(loaded, snapshot)
-
-    def test_save_cost_statistics_read_models_accepts_changed_scopes_for_local_snapshot(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            data_dir = Path(temp_dir)
-            store = ApplicationStateStore(data_dir)
-            snapshot = {
-                "read_models": {
-                    "active:2026-04": {
-                        "scope_key": "active:2026-04",
-                        "payload": {"summary": {"transaction_count": 1}},
-                    },
-                    "active:2026-05": {
-                        "scope_key": "active:2026-05",
-                        "scope_type": "month",
-                        "schema_version": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
-                        "month": "2026-05",
-                        "project_scope": "active",
-                        "generated_at": "2026-05-04T12:00:00+00:00",
-                        "cache_status": "ready",
-                        "entry_count": 9,
-                        "payload": {"summary": {"transaction_count": 9}},
-                    },
-                }
-            }
-
-            store.save_cost_statistics_read_models(snapshot, changed_scope_keys=["active:2026-05"])
-            loaded = ApplicationStateStore(data_dir).load_cost_statistics_read_models()
-
-            self.assertEqual(loaded, snapshot)
-            self.assertEqual(loaded["read_models"]["active:2026-05"]["entry_count"], 9)
 
     def test_save_tax_offset_read_models_persists_locally_across_store_instances(self) -> None:
         with TemporaryDirectory() as temp_dir:

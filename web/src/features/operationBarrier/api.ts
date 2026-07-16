@@ -58,6 +58,7 @@ type WaitForOperationFreshnessOptions = {
   timeoutMs?: number;
   intervalMs?: number;
   onStatus?: (status: OperationBarrierStatus) => void;
+  signal?: AbortSignal;
 };
 
 const READ_MODEL_LABELS: Record<string, string> = {
@@ -92,7 +93,10 @@ export class OperationBarrierTimeoutError extends OperationBarrierBlockedError {
   }
 }
 
-export async function fetchOperationBarrierStatus(targets: OperationBarrierTarget[]): Promise<OperationBarrierStatus> {
+export async function fetchOperationBarrierStatus(
+  targets: OperationBarrierTarget[],
+  signal?: AbortSignal,
+): Promise<OperationBarrierStatus> {
   const payload = await apiRequestJson<ApiOperationBarrierStatus>(
     "/api/operation-barrier/status",
     {
@@ -105,6 +109,7 @@ export async function fetchOperationBarrierStatus(targets: OperationBarrierTarge
           ...(target.scopeType ? { scope_type: target.scopeType } : {}),
         })),
       }),
+      signal,
     },
     { defaultErrorMessage: "操作同步状态检查失败" },
   );
@@ -117,6 +122,7 @@ export async function waitForOperationFreshness(
     timeoutMs = 10_000,
     intervalMs = 300,
     onStatus,
+    signal,
   }: WaitForOperationFreshnessOptions = {},
 ): Promise<OperationBarrierStatus> {
   if (targets.length === 0) {
@@ -131,7 +137,8 @@ export async function waitForOperationFreshness(
   const startedAt = Date.now();
   let latest: OperationBarrierStatus | null = null;
   while (Date.now() - startedAt <= timeoutMs) {
-    latest = await fetchOperationBarrierStatus(targets);
+    throwIfAborted(signal);
+    latest = await fetchOperationBarrierStatus(targets, signal);
     onStatus?.(latest);
     if (latest.fresh || latest.status === "fresh") {
       return latest;
@@ -139,7 +146,7 @@ export async function waitForOperationFreshness(
     if (latest.status === "blocked" || latest.blockedTargets.length > 0) {
       throw new OperationBarrierBlockedError(operationBarrierMessage(latest, "操作同步被阻断"), latest);
     }
-    await delay(intervalMs);
+    await delay(intervalMs, signal);
   }
   throw new OperationBarrierTimeoutError(operationBarrierMessage(latest, "操作同步等待超时"), latest ?? {
     status: "refreshing",
@@ -205,10 +212,33 @@ function mapTargetStatus(payload: ApiOperationBarrierTargetStatus): OperationBar
   };
 }
 
-function delay(ms: number) {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, ms);
+function delay(ms: number, signal?: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => {
+      signal?.removeEventListener("abort", handleAbort);
+      resolve();
+    }, ms);
+    const handleAbort = () => {
+      window.clearTimeout(timeoutId);
+      signal?.removeEventListener("abort", handleAbort);
+      reject(abortError());
+    };
+    if (signal?.aborted) {
+      handleAbort();
+      return;
+    }
+    signal?.addEventListener("abort", handleAbort, { once: true });
   });
+}
+
+function throwIfAborted(signal?: AbortSignal) {
+  if (signal?.aborted) {
+    throw abortError();
+  }
+}
+
+function abortError() {
+  return new DOMException("The operation was aborted.", "AbortError");
 }
 
 function list<T>(value: T[] | undefined): T[] {

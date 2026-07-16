@@ -51,7 +51,7 @@
 | 3. API contract tests | 适用 | `tests/test_import_file_api.py`、`tests/test_import_api.py`、`web/src/test/ImportsApi.test.ts`、`tests/test_platform_runtime_boundary_guards.py` | 覆盖 `/imports/files/preview`、`confirm`、`retry`、`sessions`、legacy preview/confirm、错误 shape 和 mapper；boundary guard 锁定银行流水前端不调用旧 JSON API。 |
 | 4. Read model/cache/background job tests | 适用 | `tests/test_import_job_queue.py`、`tests/test_derived_data_lifecycle_service.py`、`tests/test_bank_account_balance_read_model.py`、`tests/test_bank_details_sql_runtime.py`、`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_import_state_invalidation_enqueues_bank_detail_for_transaction_month_scopes`、`tests/test_app_status_overview_service.py`、`tests/test_write_operation_slo_audit.py` | 覆盖 import worker、dirty fan-out、银行余额/明细 projection、App Status，并用 `bank_import_confirmed` write-operation profile 防止真实银行确认少刷新通用下游 read model、银行账户余额 `bank_account_balance.read_model.refresh` 或银行明细真实 `bank_detail.read_model.refresh` 时仍被判定闭环；进项/销项发票方向页未命中时允许 `skipped`，账户余额 API fresh gate 仍需 staging/browser smoke 观察。 |
 | 5. Frontend component and interaction tests | 适用 | `web/src/test/ImportCenterPage.test.tsx`、`web/src/test/AppStatusIndicator.test.tsx`、`web/e2e/imports-bank-transactions-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | 覆盖独立路由、上传/预览/确认、错误、session restore、job feedback、App Status popover；Browser e2e 覆盖真实文件 input、账户 select、慢预览期间禁用预览/清空/确认动作、audit/重复明细、损坏文件 file-level error、未导入项明细、冲突 dialog、取消冲突零提交、preview stale、confirm 失败、确认后 dialog close、银行明细账户余额 fresh gate、成本统计下游 fresh read model、成功后无导入失败/后台导入失败/read model 失败可见残留和 read-only 禁用上传/预览/确认。 |
-| 6. End-to-end business-flow integration tests | 适用 | `tests/test_import_formalization_api.py`、`tests/test_workbench_v2_api.py`、`web/src/test/ImportCenterPage.test.tsx`、`web/e2e/imports-bank-transactions-flow.spec.ts` | 覆盖 preview -> confirm -> persisted import -> Workbench refresh / stale preview；Browser e2e 覆盖慢预览单次提交且预览中不能清空或确认、confirm 后刷新 Workbench、进入银行明细看到账户余额 fresh gate 和导入行，并进入成本统计以 fresh read model 看到导入流水成本证据，也覆盖损坏文件不阻断正常文件确认、冲突取消不提交、preview stale / confirm 失败时不刷新 Workbench、不误报成功；confirm、银行明细和成本统计成功节点都会检查无错误残留。真实 worker drain 仍是 documented-risk。 |
+| 6. End-to-end business-flow integration tests | 适用 | `tests/test_import_formalization_api.py`、`tests/test_workbench_v2_api.py`、`web/src/test/ImportCenterPage.test.tsx`、`web/e2e/imports-bank-transactions-flow.spec.ts` | 覆盖 preview -> confirm -> persisted import -> declared operation barrier / stale preview；Browser e2e 覆盖慢预览单次提交、confirm 后只等待显式 targets 且零 Workbench 页面请求、银行明细账户余额 fresh gate 和导入行、成本统计自身 fresh read model，以及损坏文件、冲突取消、preview stale / confirm 失败时零 barrier/零 Workbench 请求且不误报成功。组件测试另覆盖 targets 为空时直接完成。真实 worker drain 仍是 documented-risk。 |
 | 7. Existing feature regression tests | 适用 | `tests/test_import_file_service.py`、`tests/test_workbench_v2_api.py`、`tests/test_derived_data_lifecycle_service.py`、`tests/test_platform_runtime_boundary_guards.py`、`web/src/test/ImportCenterPage.test.tsx`、`web/e2e/imports-bank-transactions-flow.spec.ts` | 覆盖旧 JSON import 兼容、文件导入、发票/ETC 共享工作流、损坏文件 file-level error、下游页面 refresh、preview stale、confirm 失败、旧 wrapper 删除防回归，以及冲突确认弹窗取消不提交、成功提交后不会继续挡住导航。 |
 
 ## 历史 Bug 回归库
@@ -69,17 +69,17 @@
 | 2026-07-05 边界 close | 银行流水页面不得回退旧 `/imports/preview`、`/imports/confirm` JSON API；`server.py` 不得重新拥有 import confirm processor wrapper | fixed by `tests/test_platform_runtime_boundary_guards.py` |
 | 大重复组 | 合成 240 行同文件银行流水重复组必须只产生一个 confirmable representative，避免大文件 preview 把重复项全部当作可确认 | fixed 2026-06-16 |
 | 2026-06-17 Browser e2e | 银行账户冲突弹窗里确认导入成功后未关闭，modal backdrop 阻塞用户导航到银行明细或其他页面。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |
-| 2026-06-19 Browser e2e | 银行账户冲突弹窗取消必须只关闭弹窗，不能提交 confirm、不能刷新 Workbench、不能显示导入成功；用户随后仍可重新确认导入。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |
+| 2026-06-19 Browser e2e | 银行账户冲突弹窗取消必须只关闭弹窗，不能提交 confirm、不能调用 operation barrier 或 Workbench 页面 API、不能显示导入成功；用户随后仍可重新确认导入。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |
 | 2026-06-19 Browser e2e | 损坏银行流水文件与正常文件混合上传时，页面必须保留正常文件 preview，不整批失败，确认时不得提交损坏文件 ID。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |
 | 2026-06-19 Browser e2e | 银行流水预览耗时较长时，用户不能重复点击预览、清空文件或提前确认，避免多个 `/imports/files/preview` 请求或半状态。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |
 | 2026-06-19 Browser e2e | 银行流水导入确认后不能只证明银行明细刷新，还要证明成本统计以 fresh read model 显示导入流水成本证据。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |
-| preview stale Browser 回归 | 预览后底层事实变化时，前端不得创建 import job、不得刷新 Workbench、不得显示成功。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |
+| preview stale Browser 回归 | 预览后底层事实变化时，前端不得创建 import job、不得调用 operation barrier 或 Workbench 页面 API、不得显示成功。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |
 | confirm 失败 Browser 回归 | 导入任务创建失败时，页面必须显示错误并保留 preview，不能误报“已确认导入”。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |
 
 ## 关键 Smoke Flows
 
 1. 上传银行流水 XLS/XLSX -> 为每个文件选择银行账户 -> 预览成功 -> 展示 audit counts、重复组和跳过明细；240 行合成重复组本地回归只允许一个 confirmable representative。Browser smoke 覆盖两份 XLSX 文件、小样本重复审计、慢预览防重复提交、重复项明细、银行账户冲突弹窗、取消冲突零提交和重新确认。
-2. 预览后底层数据变化 -> 确认返回 `preview_stale` -> 前端提示重新预览，不创建导入 job，不刷新 Workbench。
+2. 预览后底层数据变化 -> 确认返回 `preview_stale` -> 前端提示重新预览，不创建导入 job，不调用 operation barrier 或 Workbench 页面 API。
 3. 确认可导入银行流水文件 -> 创建 background `file_import` job，`affected_domains=["imports_bank_transactions"]`、`route="/imports/bank-transactions"` -> import worker event -> worker confirm -> Workbench matching 入队 -> 银行明细和关联台后续 fresh。
 4. 损坏文件 + 正常文件混合上传 -> 损坏文件显示 file-level error 和未导入项明细 -> 正常文件仍可确认，confirm body 只包含正常文件 ID。
 5. 导入完成后进入银行明细和成本统计，确认 `bank_account_balance`、`bank_detail` 和 `cost_statistics` 不显示 stale 为 fresh。Browser smoke 当前覆盖导入后进入银行明细等待账户余额 fresh gate 并看到导入行，并在成本统计等待 fresh read model 后看到导入流水成本证据；confirm、银行明细和成本统计成功节点都会检查无导入失败/后台导入失败/read model 失败可见残留。关联台最终显示仍由后端 integration/staging smoke 保护。
@@ -135,7 +135,7 @@ FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS=bank_import_confirmed bash scripts/veri
 
 ## Nightly CI 覆盖
 
-Nightly CI 通过 `scripts/verify.sh all` 执行后端、前端、Playwright browser smoke 和文档校验。Browser smoke 当前包含 `web/e2e/imports-bank-transactions-flow.spec.ts` 和 `web/e2e/permissions-role-matrix.spec.ts`，保护银行流水导入页真实文件上传、预览、慢预览防重复提交、重复项明细、损坏文件混合上传 file-level error、账户冲突取消零提交、账户冲突确认、preview stale、confirm 失败、confirm 后 Workbench refresh、银行明细账户余额 fresh gate、银行明细下游行、成本统计下游 fresh read model、成功后无导入失败/后台导入失败/read model 失败可见残留，以及 read-only 用户不能上传/预览/确认导入。银行流水导入变更优先运行本模块窄范围命令；如果改动触及共享 `ImportWorkflowPage`，还要同时评估 `imports-invoices` 和 `imports-etc-invoices` 模块测试。
+Nightly CI 通过 `scripts/verify.sh all` 执行后端、前端、Playwright browser smoke 和文档校验。Browser smoke 当前包含 `web/e2e/imports-bank-transactions-flow.spec.ts` 和 `web/e2e/permissions-role-matrix.spec.ts`，保护银行流水导入页真实文件上传、预览、慢预览防重复提交、重复项明细、损坏文件混合上传 file-level error、账户冲突取消零提交、账户冲突确认、preview stale、confirm 失败、confirm 后只等待显式 operation barrier targets 且零 Workbench 页面请求、银行明细账户余额 fresh gate、银行明细下游行、成本统计下游 fresh read model、成功后无错误残留，以及 read-only 用户不能上传/预览/确认导入。银行流水导入变更优先运行本模块窄范围命令；如果改动触及共享 `ImportWorkflowPage`，还要同时评估 `imports-invoices` 和 `imports-etc-invoices` 模块测试。
 
 ## 未测风险
 

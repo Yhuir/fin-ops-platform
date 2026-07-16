@@ -17,36 +17,26 @@ class WorkbenchOaAttachmentContextRowIndexTests(unittest.TestCase):
             oa_source_ids=oa_row_source_ids,
         )
 
-    def test_raw_payload_rows_by_id_indexes_rows_from_paired_and_unpaired_sections(self) -> None:
+    def test_grouped_payload_rows_by_id_indexes_rows_from_paired_and_unpaired_groups(self) -> None:
         payload = {
             "paired": {
-                "oa": [{"id": "oa-1", "type": "oa"}],
-                "bank": [{"id": "bk-1", "type": "bank"}],
-                "invoice": [{"id": "", "type": "invoice"}, "bad"],
+                "groups": [
+                    {
+                        "oa_rows": [{"id": "oa-1", "type": "oa"}],
+                        "bank_rows": [{"id": "bk-1", "type": "bank"}],
+                        "invoice_rows": [{"id": "", "type": "invoice"}, "bad"],
+                    }
+                ],
             },
             "unpaired": {
-                "invoice": [{"id": "inv-1", "type": "invoice"}],
+                "groups": [{"invoice_rows": [{"id": "inv-1", "type": "invoice"}]}],
             },
         }
 
-        rows_by_id = self._index().raw_payload_rows_by_id(payload)
+        rows_by_id = self._index().grouped_payload_rows_by_id(payload)
 
         self.assertEqual(set(rows_by_id), {"oa-1", "bk-1", "inv-1"})
         self.assertEqual(rows_by_id["oa-1"]["type"], "oa")
-
-    def test_raw_payload_row_ids_returns_normalized_ids_from_all_panes(self) -> None:
-        payload = {
-            "paired": {
-                "oa": [{"id": " oa-1 "}],
-                "bank": [{"id": "bk-1"}],
-                "invoice": [{"id": ""}, "bad"],
-            },
-            "unpaired": {
-                "invoice": [{"id": "inv-1"}],
-            },
-        }
-
-        self.assertEqual(self._index().raw_payload_row_ids(payload), {"oa-1", "bk-1", "inv-1"})
 
     def test_attachment_row_ids_by_oa_id_matches_derived_parent_matcher_and_invoice_id_fallback(self) -> None:
         rows_by_id = {

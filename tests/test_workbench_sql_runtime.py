@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+from contextlib import contextmanager
 from decimal import Decimal
 from http import HTTPStatus
 from io import StringIO
@@ -240,109 +241,6 @@ class WorkbenchSqlReadConnection:
         return []
 
 
-class LightweightWorkbenchSnapshotConnection(WorkbenchSqlReadConnection):
-    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
-        normalized = " ".join(sql.lower().split())
-        self.fetch_one_calls.append((normalized, params))
-        if "from read_model.workbench_generations" in normalized and "status = 'active'" in normalized:
-            return {"generation_id": "gen-lightweight"}
-        if "from read_model.workbench_snapshots" in normalized:
-            return {
-                "generation_id": "gen-lightweight",
-                "scope_key": "2026-05",
-                "payload": {
-                    "scope_key": "2026-05",
-                    "payload": {
-                        "month": "2026-05",
-                        "summary": {
-                            "oa_count": 1,
-                            "bank_count": 1,
-                            "invoice_count": 0,
-                            "paired_count": 0,
-                            "unpaired_count": 1,
-                            "exception_count": 0,
-                        },
-                        "paired": {"groups": []},
-                        "unpaired": {"groups": []},
-                        "workbench_groups_materialized": True,
-                    },
-                    "source_versions": {"source_version": 12},
-                },
-                "cache_status": "fresh",
-                "generated_at": "2026-05-22T10:00:00+00:00",
-                "source_versions": {"source_version": 12},
-                "row_count": 1,
-            }
-        if "from job.read_model_dirty_scopes" in normalized:
-            return None
-        return None
-
-    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
-        normalized = " ".join(sql.lower().split())
-        self.fetch_all_calls.append((normalized, params))
-        if "from read_model.workbench_groups" in normalized:
-            return [
-                {
-                    "scope_key": "2026-05",
-                    "generation_id": "gen-lightweight",
-                    "zone": "unpaired",
-                    "group_id": "case:LIGHT-1",
-                    "payload": {
-                        "group_id": "case:LIGHT-1",
-                        "group_type": "candidate",
-                        "row_count": 2,
-                        "workbench_group_rows_materialized": True,
-                    },
-                }
-            ]
-        if "join read_model.workbench_group_rows" in normalized:
-            return [
-                {
-                    "scope_key": "2026-05",
-                    "generation_id": "gen-lightweight",
-                    "zone": "unpaired",
-                    "group_id": "case:LIGHT-1",
-                    "pane": "oa",
-                    "row_id": "oa-light-1",
-                    "row_role": "normal",
-                    "row_index": 0,
-                    "source_kind": "oa_payment",
-                    "status": "unpaired",
-                    "row_payload": {
-                        "id": "oa-light-1",
-                        "type": "oa",
-                        "detail_fields": {"项目名称": "轻量项目"},
-                    },
-                    "member_payload": {
-                        "row_id": "oa-light-1",
-                        "type": "oa",
-                    },
-                },
-                {
-                    "scope_key": "2026-05",
-                    "generation_id": "gen-lightweight",
-                    "zone": "unpaired",
-                    "group_id": "case:LIGHT-1",
-                    "pane": "bank",
-                    "row_id": "bank-light-1",
-                    "row_role": "normal",
-                    "row_index": 1,
-                    "source_kind": "bank_transaction",
-                    "status": "unpaired",
-                    "row_payload": {
-                        "id": "bank-light-1",
-                        "type": "bank",
-                        "available_actions": ["cancel_link"],
-                    },
-                    "member_payload": {
-                        "row_id": "bank-light-1",
-                        "type": "bank",
-                    },
-                },
-            ]
-        return []
-
-
 class InvoiceRowsSqlCaptureConnection:
     def __init__(self) -> None:
         self.fetch_all_calls: list[tuple[str, tuple]] = []
@@ -433,174 +331,12 @@ class EtcSummaryBusinessOwnerConnection:
         return []
 
 
-class ActiveAllWorkbenchSnapshotConnection(WorkbenchSqlReadConnection):
-    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
-        normalized = " ".join(sql.lower().split())
-        self.fetch_one_calls.append((normalized, params))
-        if "from read_model.workbench_generations" in normalized and "status = 'active'" in normalized:
-            return {"generation_id": "gen-all-active"}
-        if "from read_model.workbench_snapshots" in normalized and "generation_id = %s" in normalized:
-            return {
-                "scope_key": "all",
-                "generation_id": "gen-all-active",
-                "cache_status": "fresh",
-                "generated_at": "2026-05-22T10:00:00+00:00",
-                "source_versions": {"source_version": 17, "workbench_formal_relation_rule_version": "rules-v2"},
-                "row_count": 3,
-                "payload": {
-                    "month": "all",
-                    "scope_key": "all",
-                    "summary": {
-                        "oa_count": 1,
-                        "bank_count": 1,
-                        "invoice_count": 1,
-                        "paired_count": 1,
-                        "unpaired_count": 0,
-                        "exception_count": 0,
-                    },
-                    "unpaired": {"groups": []},
-                    "paired": {
-                        "groups": [
-                            {
-                                "group_id": "case:active-all",
-                                "oa_rows": [{"id": "oa-active-all"}],
-                                "bank_rows": [{"id": "bank-active-all"}],
-                                "invoice_rows": [{"id": "invoice-active-all"}],
-                            }
-                        ]
-                    },
-                },
-            }
-        if "from job.read_model_dirty_scopes" in normalized:
-            return None
-        return None
-
-    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
-        normalized = " ".join(sql.lower().split())
-        self.fetch_all_calls.append((normalized, params))
-        if "from read_model.workbench_snapshots" in normalized and "scope_key <> 'all'" in normalized:
-            return [
-                {
-                    "scope_key": "2026-04",
-                    "row_count": 99,
-                    "generated_at": "2026-05-21T09:00:00+00:00",
-                    "payload": {
-                        "payload": {
-                            "summary": {
-                                "oa_count": 99,
-                                "bank_count": 0,
-                                "invoice_count": 0,
-                                "paired_count": 0,
-                                "unpaired_count": 99,
-                            },
-                            "unpaired": {"groups": [{"oa_rows": [{"id": "legacy-month"}], "bank_rows": [], "invoice_rows": []}]},
-                            "paired": {"groups": []},
-                        }
-                    },
-                }
-            ]
-        return super().fetch_all(sql, params)
-
-
 class ReadModelRefreshTransactionConnection:
     def __init__(self) -> None:
         self.fetch_all_params: list[tuple] = []
 
     def fetch_all(self, _sql: str, params: tuple = ()) -> list[dict]:
         self.fetch_all_params.append(params)
-        return []
-
-
-class WorkbenchAllRowsPageConnection(WorkbenchSqlReadConnection):
-    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
-        normalized = " ".join(sql.lower().split())
-        self.fetch_one_calls.append((normalized, params))
-        if "count(*) as total_count" in normalized:
-            return {"total_count": 1}
-        return super().fetch_one(sql, params)
-
-    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
-        normalized = " ".join(sql.lower().split())
-        self.fetch_all_calls.append((normalized, params))
-        if "from read_model.workbench_snapshots" in normalized:
-            if "payload, raw_payload" in normalized:
-                raise AssertionError("all-scope filtered rows_page must not load full grouped workbench snapshots")
-            return [
-                {
-                    "scope_key": "2026-05",
-                    "row_count": 100,
-                    "generated_at": "2026-05-21T09:00:00+00:00",
-                    "cache_status": "fresh",
-                    "summary": {"oa_count": 1, "bank_count": 2, "invoice_count": 3, "paired_count": 4, "unpaired_count": 5},
-                },
-                {
-                    "scope_key": "2026-04",
-                    "row_count": 10,
-                    "generated_at": "2026-05-21T08:00:00+00:00",
-                    "cache_status": "fresh",
-                    "summary": {"oa_count": 10, "bank_count": 20, "invoice_count": 30, "paired_count": 40, "unpaired_count": 50},
-                },
-            ]
-        if "from read_model.workbench_rows" in normalized:
-            return [
-                {
-                    "row_id": "oa-att-inv-1",
-                    "source_kind": "oa_attachment_invoice",
-                    "status": "paired",
-                    "payload": {"id": "oa-att-inv-1", "source_kind": "oa_attachment_invoice"},
-                }
-            ]
-        return []
-
-
-class ActiveAllRowsPageConnection(WorkbenchAllRowsPageConnection):
-    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
-        normalized = " ".join(sql.lower().split())
-        self.fetch_one_calls.append((normalized, params))
-        if "from read_model.workbench_generations" in normalized and "status = 'active'" in normalized:
-            return {"generation_id": "gen-all-active"}
-        if "from read_model.workbench_summary" in normalized:
-            return {
-                "scope_key": "all",
-                "generation_id": "gen-all-active",
-                "payload": {
-                    "month": "all",
-                    "scope_key": "all",
-                    "summary": {
-                        "oa_count": 1,
-                        "bank_count": 1,
-                        "invoice_count": 1,
-                        "paired_count": 1,
-                        "unpaired_count": 0,
-                        "exception_count": 0,
-                    },
-                    "generated_at": "2026-05-22T10:00:00+00:00",
-                },
-                "generated_at": "2026-05-22T10:00:00+00:00",
-                "source_versions": {"source_version": 17, "workbench_formal_relation_rule_version": "rules-v2"},
-            }
-        if "count(*) as total_count" in normalized:
-            return {"total_count": 1}
-        if "from job.read_model_dirty_scopes" in normalized:
-            return None
-        return None
-
-    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
-        normalized = " ".join(sql.lower().split())
-        self.fetch_all_calls.append((normalized, params))
-        if "from read_model.workbench_snapshots" in normalized and "scope_key <> 'all'" in normalized:
-            raise AssertionError("active all-scope rows_page must use active all summary instead of month snapshots")
-        if "from job.read_model_dirty_scopes" in normalized:
-            return []
-        if "from read_model.workbench_rows" in normalized:
-            return [
-                {
-                    "row_id": "oa-att-inv-1",
-                    "source_kind": "oa_attachment_invoice",
-                    "status": "paired",
-                    "payload": {"id": "oa-att-inv-1", "source_kind": "oa_attachment_invoice"},
-                }
-            ]
         return []
 
 
@@ -799,6 +535,22 @@ class MaterializedWorkbenchSummaryConnection(WorkbenchSummaryGroupsConnection):
 class ActiveWorkbenchGenerationConnection(WorkbenchSummaryGroupsConnection):
     def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
         normalized = " ".join(sql.lower().split())
+        if "with canonical_groups as" in normalized and "canonical_members as" in normalized:
+            self.fetch_one_calls.append((normalized, params))
+            return {
+                "paired_count": 4,
+                "unpaired_count": 5,
+                "oa_count": 1,
+                "bank_count": 2,
+                "invoice_count": 3,
+                "exception_count": 0,
+                "paired_oa_count": 1,
+                "paired_bank_count": 1,
+                "paired_invoice_count": 1,
+                "unpaired_oa_count": 0,
+                "unpaired_bank_count": 1,
+                "unpaired_invoice_count": 2,
+            }
         if "count(*)::bigint as scope_count" in normalized and "from read_model.workbench_generations" in normalized:
             self.fetch_one_calls.append((normalized, params))
             return {
@@ -842,6 +594,114 @@ class ActiveWorkbenchGenerationConnection(WorkbenchSummaryGroupsConnection):
                     "row_count": 100,
                     "group_count": 20,
                     "build_metadata": {},
+                }
+            ]
+        return super().fetch_all(sql, params)
+
+
+class RepeatableReadWorkbenchInitialPageConnection(ActiveWorkbenchGenerationConnection):
+    def __init__(self) -> None:
+        super().__init__()
+        self.execute_calls: list[tuple[str, tuple]] = []
+        self.transaction_count = 0
+
+    @contextmanager
+    def transaction(self):
+        self.transaction_count += 1
+        yield self
+
+    def execute(self, sql: str, params: tuple = ()) -> int:
+        self.execute_calls.append((" ".join(sql.lower().split()), params))
+        return 0
+
+
+class DefaultInitialBatchWorkbenchConnection(RepeatableReadWorkbenchInitialPageConnection):
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        if "partition by g.zone" in normalized and "ranked.zone_rank <= 201" in normalized:
+            self.fetch_all_calls.append((normalized, params))
+            return [
+                {
+                    "group_id": "case:paired",
+                    "source_group_id": "case:paired",
+                    "scope_key": "2026-05",
+                    "generation_id": "gen-active",
+                    "zone": "paired",
+                    "payload": {
+                        "group_id": "case:paired",
+                        "zone": "paired",
+                        "group_type": "relation",
+                        "workbench_group_rows_materialized": True,
+                    },
+                    "raw_payload": {},
+                    "zone_rank": 1,
+                },
+                {
+                    "group_id": "unpaired:oa-1",
+                    "source_group_id": "unpaired:oa-1",
+                    "scope_key": "2026-05",
+                    "generation_id": "gen-active",
+                    "zone": "unpaired",
+                    "payload": {
+                        "group_id": "unpaired:oa-1",
+                        "zone": "unpaired",
+                        "group_type": "unpaired",
+                        "workbench_group_rows_materialized": True,
+                    },
+                    "raw_payload": {},
+                    "zone_rank": 1,
+                },
+            ]
+        if "with target_groups as" in normalized and "ranked_members as" in normalized:
+            self.fetch_all_calls.append((normalized, params))
+            return [
+                {
+                    "scope_key": "all",
+                    "generation_id": "all-active-shards",
+                    "zone": "paired",
+                    "group_id": "case:paired",
+                    "pane": "bank",
+                    "row_id": "bank-1",
+                    "row_role": "normal",
+                    "row_index": 0,
+                    "source_kind": "bank",
+                    "status": "paired",
+                    "row_payload": {"id": "bank-1", "type": "bank"},
+                },
+                {
+                    "scope_key": "all",
+                    "generation_id": "all-active-shards",
+                    "zone": "unpaired",
+                    "group_id": "unpaired:oa-1",
+                    "pane": "oa",
+                    "row_id": "oa-1",
+                    "row_role": "normal",
+                    "row_index": 0,
+                    "source_kind": "oa",
+                    "status": "unpaired",
+                    "row_payload": {"id": "oa-1", "type": "oa"},
+                },
+            ]
+        return super().fetch_all(sql, params)
+
+
+class VersionDriftWorkbenchInitialPageConnection(RepeatableReadWorkbenchInitialPageConnection):
+    def __init__(self) -> None:
+        super().__init__()
+        self.version_reads = 0
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        if "select scope_key, generation_id, source_versions" in normalized:
+            self.fetch_all_calls.append((normalized, params))
+            self.version_reads += 1
+            generation_id = "gen-active" if self.version_reads == 1 else "gen-next"
+            return [
+                {
+                    "scope_key": "2026-05",
+                    "generation_id": generation_id,
+                    "source_versions": {"source_version": 12},
+                    "generated_at": "2026-05-28T09:00:00+00:00",
                 }
             ]
         return super().fetch_all(sql, params)
@@ -1639,109 +1499,6 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         versions = app._workbench_sql_read_model_source_versions("all")
 
         self.assertEqual(versions["builder"], WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION)
-
-    def test_workbench_api_queues_oa_sync_when_sql_snapshot_parser_version_is_stale(self) -> None:
-        app = object.__new__(Application)
-        queue = QueueRecorder()
-        app._runtime_repositories = SimpleNamespace(queue_repository=queue)
-        app._workbench_query_service = SimpleNamespace(_oa_adapter=object())
-        app._workbench_sql_read_repository = PostgresReadModelRepository(
-            WorkbenchSqlReadConnection(
-                snapshot_row={
-                    "scope_key": "2026-03",
-                    "scope_month": "2026-03-01",
-                    "source_versions": {
-                        "builder": "old-builder",
-                        "oa_attachment_invoice_parser_version": "old-parser",
-                        "oa_projection_sync_version": app._current_oa_projection_sync_version(),
-                    },
-                    "generated_at": "2026-05-28T10:00:00+08:00",
-                    "cache_status": "fresh",
-                    "row_count": 1,
-                    "payload": {
-                        "month": "2026-03",
-                        "oa_status": {"code": "ready", "message": "OA projection ready"},
-                        "summary": {
-                            "oa_count": 1,
-                            "bank_count": 0,
-                            "invoice_count": 0,
-                            "paired_count": 0,
-                            "unpaired_count": 1,
-                            "exception_count": 0,
-                        },
-                        "paired": {"groups": []},
-                        "unpaired": {"groups": []},
-                    },
-                }
-            )
-        )
-
-        response = app._handle_api_workbench("2026-03")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
-        self.assertEqual(payload["read_model_status"], "refreshing")
-        self.assertEqual(payload["read_model_refresh_reason"], "oa_attachment_invoice_parser_version_changed")
-        self.assertEqual(queue.refreshes, [])
-        self.assertEqual(len(queue.enqueued), 1)
-        event = queue.enqueued[0]
-        expected_parser_version = app._current_oa_attachment_invoice_parser_version()
-        self.assertEqual(event["event_type"], "oa.sync")
-        self.assertEqual(event["scope_key"], "2026-03")
-        self.assertEqual(event["dedupe_key"], f"oa.sync:2026-03:attachment-parser:{expected_parser_version}")
-        expected_projection_version = app._current_oa_projection_sync_version()
-        self.assertEqual(
-            event["payload"],
-            {
-                "scope_key": "2026-03",
-                "triggered_by": "system",
-                "reason": "oa_attachment_invoice_parser_version_changed",
-                "oa_attachment_invoice_parser_version": expected_parser_version,
-                "oa_projection_sync_version": expected_projection_version,
-            },
-        )
-
-    def test_workbench_api_queues_oa_sync_when_sql_snapshot_projection_sync_version_is_stale(self) -> None:
-        app = object.__new__(Application)
-        queue = QueueRecorder()
-        app._runtime_repositories = SimpleNamespace(queue_repository=queue)
-        app._workbench_query_service = SimpleNamespace(_oa_adapter=object())
-        app._workbench_sql_read_repository = PostgresReadModelRepository(
-            WorkbenchSqlReadConnection(
-                snapshot_row={
-                    "scope_key": "2026-03",
-                    "scope_month": "2026-03-01",
-                    "source_versions": {
-                        "oa_attachment_invoice_parser_version": app._current_oa_attachment_invoice_parser_version(),
-                        "oa_projection_sync_version": "old-projection-sync",
-                    },
-                    "generated_at": "2026-05-28T10:00:00+08:00",
-                    "cache_status": "fresh",
-                    "row_count": 1,
-                    "payload": {
-                        "month": "2026-03",
-                        "oa_status": {"code": "ready", "message": "OA projection ready"},
-                        "summary": {"oa_count": 2, "bank_count": 0, "invoice_count": 1, "paired_count": 1, "unpaired_count": 2, "exception_count": 0},
-                        "paired": {"groups": []},
-                        "unpaired": {"groups": []},
-                    },
-                }
-            )
-        )
-
-        response = app._handle_api_workbench("2026-03")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
-        self.assertEqual(payload["read_model_status"], "refreshing")
-        self.assertEqual(payload["read_model_refresh_reason"], "oa_projection_sync_version_changed")
-        self.assertEqual(len(queue.enqueued), 1)
-        event = queue.enqueued[0]
-        expected_projection_version = app._current_oa_projection_sync_version()
-        self.assertEqual(event["event_type"], "oa.sync")
-        self.assertEqual(event["dedupe_key"], f"oa.sync:2026-03:projection:{expected_projection_version}")
-        self.assertEqual(event["payload"]["reason"], "oa_projection_sync_version_changed")
-        self.assertEqual(event["payload"]["oa_projection_sync_version"], expected_projection_version)
 
     def test_sql_projection_manual_invoice_rows_include_tax_meta_for_amount_cell(self) -> None:
         connection = InvoiceRowsProjectionConnection()
@@ -2545,136 +2302,6 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(params[5], 37)
         self.assertEqual(params[6], "1673.30")
 
-    def test_repository_reads_workbench_snapshot_and_dirty_status_without_state_fallback(self) -> None:
-        connection = WorkbenchSqlReadConnection(
-            snapshot_row={
-                "scope_key": "2026-05",
-                "cache_status": "fresh",
-                "generated_at": "2026-05-21T09:00:00+00:00",
-                "payload": {"unpaired": {"groups": []}},
-                "raw_payload": {},
-            },
-            dirty=True,
-        )
-        repository = PostgresReadModelRepository(connection)
-
-        view = repository.get_workbench_view(scope_key="2026-05")
-
-        self.assertEqual(view["payload"], {"unpaired": {"groups": []}})
-        self.assertEqual(view["refresh_status"], "refreshing")
-        self.assertTrue(all("app_settings" not in sql for sql, _params in connection.fetch_one_calls))
-
-    def test_repository_reads_paginated_workbench_rows_from_sql_read_model(self) -> None:
-        connection = WorkbenchSqlReadConnection(
-            snapshot_row={
-                "scope_key": "2026-05",
-                "cache_status": "fresh",
-                "generated_at": "2026-05-21T09:00:00+00:00",
-                "payload": {"unpaired": {"groups": []}},
-                "row_count": 1,
-            }
-        )
-        repository = PostgresReadModelRepository(connection)
-
-        view = repository.get_workbench_view(
-            scope_key="2026-05",
-            page=2,
-            page_size=25,
-            status="unpaired",
-            source_kind="bank_transaction",
-            search="供应商",
-        )
-
-        self.assertEqual(view["rows_page"]["page"], 2)
-        self.assertEqual(view["rows_page"]["page_size"], 25)
-        self.assertEqual(view["rows_page"]["rows"], [{"id": "bank-row-1"}])
-        self.assertTrue(any("from read_model.workbench_rows" in sql for sql, _params in connection.fetch_all_calls))
-
-
-    def test_repository_reads_all_scope_view_from_active_generation_snapshot(self) -> None:
-        connection = ActiveAllWorkbenchSnapshotConnection()
-        repository = PostgresReadModelRepository(connection)
-
-        view = repository.get_workbench_view(scope_key="all")
-
-        all_queries = [*connection.fetch_one_calls, *connection.fetch_all_calls]
-        self.assertEqual(view["active_generation_id"], "gen-all-active")
-        self.assertEqual(view["read_model_version"], "gen-all-active")
-        self.assertEqual(view["row_count"], 3)
-        self.assertEqual(view["source_versions"]["workbench_formal_relation_rule_version"], "rules-v2")
-        self.assertEqual(view["payload"]["paired"]["groups"][0]["group_id"], "case:active-all")
-        self.assertFalse(
-            any(
-                "from read_model.workbench_snapshots" in sql and "scope_key <> 'all'" in sql
-                for sql, _params in all_queries
-            )
-        )
-
-
-
-    def test_repository_fails_closed_when_all_scope_active_generation_is_missing(self) -> None:
-        connection = WorkbenchAllRowsPageConnection()
-        repository = PostgresReadModelRepository(connection)
-
-        view = repository.get_workbench_view(
-            scope_key="all",
-            page=1,
-            page_size=50,
-            source_kind="oa_attachment_invoice",
-        )
-
-        self.assertIsNone(view)
-        self.assertFalse(
-            any(
-                "from read_model.workbench_snapshots" in sql and "scope_key <> 'all'" in sql
-                for sql, _params in connection.fetch_all_calls
-            )
-        )
-
-    def test_repository_reads_all_scope_filtered_page_from_active_all_summary(self) -> None:
-        connection = ActiveAllRowsPageConnection()
-        repository = PostgresReadModelRepository(connection)
-
-        view = repository.get_workbench_view(
-            scope_key="all",
-            page=1,
-            page_size=50,
-            source_kind="oa_attachment_invoice",
-        )
-
-        self.assertEqual(view["payload"]["summary"]["oa_count"], 1)
-        self.assertEqual(view["source_versions"]["workbench_formal_relation_rule_version"], "rules-v2")
-        self.assertEqual(view["refresh_status"], "fresh")
-        self.assertEqual(view["rows_page"]["rows"][0]["id"], "oa-att-inv-1")
-        self.assertFalse(
-            any(
-                "from read_model.workbench_snapshots" in sql and "scope_key <> 'all'" in sql
-                for sql, _params in connection.fetch_all_calls
-            )
-        )
-
-    def test_repository_materializes_legacy_workbench_view_from_groups_when_snapshot_is_lightweight(self) -> None:
-        connection = LightweightWorkbenchSnapshotConnection()
-        repository = PostgresReadModelRepository(connection)
-
-        view = repository.get_workbench_view(scope_key="2026-05")
-
-        self.assertEqual(view["source_versions"]["source_version"], 12)
-        self.assertEqual(view["payload"]["summary"]["oa_count"], 1)
-        self.assertEqual(view["payload"]["unpaired"]["groups"][0]["group_id"], "case:LIGHT-1")
-        self.assertEqual(view["payload"]["unpaired"]["groups"][0]["oa_rows"][0]["id"], "oa-light-1")
-        self.assertEqual(view["payload"]["unpaired"]["groups"][0]["bank_rows"][0]["id"], "bank-light-1")
-        self.assertNotIn("workbench_group_rows_materialized", view["payload"]["unpaired"]["groups"][0])
-        all_queries = [*connection.fetch_one_calls, *connection.fetch_all_calls]
-        self.assertTrue(
-            any(
-                "from read_model.workbench_groups" in sql
-                and params == ("2026-05", "gen-lightweight")
-                for sql, params in all_queries
-            )
-        )
-        self.assertTrue(any("join read_model.workbench_group_rows" in sql for sql, _params in all_queries))
-
     def test_repository_reads_workbench_summary_without_full_snapshot_payloads(self) -> None:
         connection = MaterializedWorkbenchSummaryConnection()
         repository = PostgresReadModelRepository(connection)
@@ -2698,6 +2325,90 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                 for sql, _params in connection.fetch_all_calls
             )
         )
+
+    def test_repository_reads_initial_page_in_one_repeatable_read_snapshot(self) -> None:
+        connection = RepeatableReadWorkbenchInitialPageConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.get_workbench_initial_page(
+            scope_key="all",
+            paired_query={"sort": "bank:desc", "page_size": 999},
+            unpaired_query={"search": "云南", "detail_level": "full"},
+        )
+
+        self.assertIsNotNone(payload)
+        assert payload is not None
+        self.assertEqual(connection.transaction_count, 1)
+        self.assertEqual(
+            [sql for sql, _params in connection.execute_calls],
+            [
+                "set transaction isolation level repeatable read read only",
+                "set local statement_timeout = '2s'",
+            ],
+        )
+        self.assertEqual(payload["read_model_version"], COMPOSED_ALL_VERSION)
+        self.assertEqual(payload["paired"]["page"], 1)
+        self.assertEqual(payload["paired"]["page_size"], 200)
+        self.assertEqual(payload["paired"]["detail_level"], "summary")
+        self.assertEqual(payload["unpaired"]["page"], 1)
+        self.assertEqual(payload["unpaired"]["page_size"], 200)
+        self.assertEqual(payload["unpaired"]["detail_level"], "summary")
+        page_queries = [
+            (sql, params)
+            for sql, params in connection.fetch_all_calls
+            if "select group_id, source_group_id, zone, payload, raw_payload" in sql
+        ]
+        self.assertEqual(len(page_queries), 2)
+        paired_sql, paired_params = page_queries[0]
+        _unpaired_sql, unpaired_params = page_queries[1]
+        self.assertIn("bank_sort_max desc nulls last", paired_sql)
+        self.assertIn("%云南%", unpaired_params)
+        self.assertEqual(paired_params[-2:], (201, 0))
+        self.assertEqual(unpaired_params[-2:], (201, 0))
+
+    def test_repository_default_all_initial_batches_both_zones_with_bounded_statement_count(self) -> None:
+        connection = DefaultInitialBatchWorkbenchConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.get_workbench_initial_page(scope_key="all")
+
+        self.assertIsNotNone(payload)
+        assert payload is not None
+        self.assertEqual(payload["read_model_version"], COMPOSED_ALL_VERSION)
+        self.assertEqual([group["group_id"] for group in payload["paired"]["groups"]], ["case:paired"])
+        self.assertEqual(
+            [group["group_id"] for group in payload["unpaired"]["groups"]],
+            ["unpaired:oa-1"],
+        )
+        self.assertEqual(payload["paired"]["row_counts"], {"oa": 1, "bank": 1, "invoice": 1, "rows": 3})
+        self.assertEqual(payload["unpaired"]["row_counts"], {"oa": 0, "bank": 1, "invoice": 2, "rows": 3})
+        self.assertEqual(connection.transaction_count, 1)
+        statement_count = len(connection.execute_calls) + len(connection.fetch_one_calls) + len(connection.fetch_all_calls)
+        self.assertLessEqual(statement_count, 10)
+        self.assertEqual(
+            sum("partition by g.zone" in sql and "ranked.zone_rank <= 201" in sql for sql, _params in connection.fetch_all_calls),
+            1,
+        )
+        self.assertEqual(
+            sum("with target_groups as" in sql and "ranked_members as" in sql for sql, _params in connection.fetch_all_calls),
+            1,
+        )
+        self.assertFalse(any("count(*) as total_count" in sql for sql, _params in connection.fetch_one_calls))
+        self.assertFalse(
+            any(
+                "select source_versions" in sql and "from read_model.workbench_generations" in sql
+                for sql, _params in connection.fetch_all_calls
+            )
+        )
+
+    def test_repository_initial_page_fails_closed_when_component_versions_drift(self) -> None:
+        repository = PostgresReadModelRepository(VersionDriftWorkbenchInitialPageConnection())
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Workbench initial page components resolved different read model versions",
+        ):
+            repository.get_workbench_initial_page(scope_key="all", paired_query={"sort": "bank:desc"})
 
     def test_repository_missing_workbench_summary_does_not_repair_from_group_rows(self) -> None:
         connection = WorkbenchSummaryGroupsConnection(dirty_status="processing")
@@ -2754,6 +2465,9 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(page["groups"][0]["group_id"], "case:1")
         self.assertTrue(any("from read_model.workbench_groups" in sql for sql, _params in connection.fetch_all_calls))
         self.assertTrue(any("bank_sort_max desc nulls last" in sql for sql, _params in connection.fetch_all_calls))
+        self.assertTrue(
+            any("string_agg(canonical_candidates.searchable_text" in sql for sql, _params in connection.fetch_all_calls)
+        )
         self.assertFalse(
             any(
                 "from read_model.workbench_snapshots" in sql and "payload, raw_payload" in sql
@@ -2850,6 +2564,32 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(
             summary["source_versions"],
             {"builder": WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION, "source_version": 12},
+        )
+
+    def test_repository_all_summary_uses_canonical_group_and_member_owners(self) -> None:
+        connection = ActiveWorkbenchGenerationConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        summary = repository.get_workbench_summary(scope_key="all")
+
+        self.assertEqual(summary["summary"]["paired_count"], 4)
+        self.assertEqual(summary["summary"]["unpaired_count"], 5)
+        self.assertEqual(summary["summary"]["oa_count"], 1)
+        self.assertEqual(summary["summary"]["bank_count"], 2)
+        self.assertEqual(summary["summary"]["invoice_count"], 3)
+        canonical_query = next(
+            sql for sql, _params in connection.fetch_one_calls if "with canonical_groups as" in sql
+        )
+        self.assertIn("select distinct on (active_groups.all_scope_group_id)", canonical_query)
+        self.assertIn("case when active_groups.zone = 'paired' then 0 else 1 end", canonical_query)
+        self.assertIn("physical_groups.zone = canonical_groups.zone", canonical_query)
+        self.assertIn(
+            "count(distinct (canonical_members.pane, canonical_members.object_identity_key))",
+            canonical_query,
+        )
+        self.assertNotIn(
+            "partition by active_groups.zone, active_groups.all_scope_group_id",
+            canonical_query,
         )
 
     def test_repository_composed_all_groups_counts_without_materialized_generation_stats(self) -> None:
@@ -2997,8 +2737,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.SERVICE_UNAVAILABLE))
-        self.assertEqual(payload["error"], "read_model_temporarily_unavailable")
-        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(payload["error"], "query_timeout")
+        self.assertEqual(payload["read_model_status"], "unavailable")
         self.assertEqual(payload["scope_key"], "all")
         self.assertEqual(payload["retryable"], True)
 
@@ -3332,6 +3072,30 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                 "join read_model.workbench_generations gen" in sql
                 and "g.scope_key <> 'all'" in sql
                 and "gen.status = 'active'" in sql
+                for sql, _params in group_queries
+            )
+        )
+        self.assertTrue(
+            any("select distinct on (active_groups.all_scope_group_id)" in sql for sql, _params in group_queries)
+        )
+        self.assertTrue(
+            any(
+                "case when active_groups.zone = 'paired' then 0 else 1 end" in sql
+                for sql, _params in group_queries
+            )
+        )
+        self.assertFalse(
+            any(
+                "partition by active_groups.zone, active_groups.all_scope_group_id" in sql
+                for sql, _params in group_queries
+            )
+        )
+        self.assertFalse(
+            any("string_agg(canonical_candidates.searchable_text" in sql for sql, _params in group_queries)
+        )
+        self.assertFalse(
+            any(
+                "row_number() over ( partition by canonical_candidates.all_scope_group_id" in sql
                 for sql, _params in group_queries
             )
         )
@@ -4014,6 +3778,15 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                 self.fetch_all_calls.append((normalized, params))
                 if "actual_group_count" in normalized and "from read_model.workbench_generations" in normalized:
                     return []
+                if "scope_key <> 'all'" in normalized and "generation_id" in normalized:
+                    return [
+                        {
+                            "scope_key": "2026-03",
+                            "generation_id": "gen-2026-03-active",
+                            "source_versions": {"source_version": 19},
+                            "generated_at": "2026-07-03T10:00:00+08:00",
+                        }
+                    ]
                 if "from read_model.workbench_generations" in normalized:
                     return [
                         {
@@ -4383,117 +4156,75 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
     def test_workbench_api_returns_sql_read_model_without_sync_build(self) -> None:
         app = object.__new__(Application)
         queue = QueueRecorder()
-        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue, "redis_helper": None})()
         app._workbench_sql_read_repository = type(
             "SqlWorkbench",
             (),
             {
-	                "get_workbench_view": lambda _self, **_kwargs: {
-	                    "payload": {"unpaired": {"groups": []}},
-	                    "refresh_status": "fresh",
-	                    "source_versions": fresh_workbench_sql_source_versions(app),
-	                }
-	            },
-	        )()
-
-        def explode_builder(_month: str):
-            raise AssertionError("API request path must not synchronously build workbench payload")
-
-        app._build_raw_workbench_payload = explode_builder
+                "get_workbench_initial_page": lambda _self, **_kwargs: {
+                    "month": "2026-05",
+                    "summary": {"oa_count": 0},
+                    "paired": {"groups": [], "total": 0},
+                    "unpaired": {"groups": [], "total": 0},
+                    "read_model_status": "fresh",
+                    "read_model_version": "gen-1",
+                    "source_versions": fresh_workbench_sql_source_versions(app, "2026-05"),
+                }
+            },
+        )()
 
         response = app._handle_api_workbench("2026-05")
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.OK))
-        self.assertEqual(payload["unpaired"], {"groups": []})
+        self.assertEqual(payload["unpaired"], {"groups": [], "total": 0})
         self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual(payload["read_model_version"], "gen-1")
         self.assertEqual(queue.refreshes, [])
 
     def test_workbench_api_sql_contract_preserves_backend_only_fields(self) -> None:
         app = object.__new__(Application)
         queue = QueueRecorder()
-        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue, "redis_helper": None})()
         app._workbench_sql_read_repository = type(
             "SqlWorkbench",
             (),
             {
-                "get_workbench_view": lambda _self, **_kwargs: {
-                    "payload": {
-                        "month": "2026-05",
-                        "unpaired": {"groups": []},
-                        "diagnostics": {"read_model_source": "sql"},
-                        "invoice_inventory": {"system_total": 9},
-                        # TODO: PF-P006 verify safe to remove.
-                        "active_generation_id": "gen-sql-1",
-                        "read_model_version": 17,
-                    },
-                    "refresh_status": "fresh",
+                "get_workbench_initial_page": lambda _self, **_kwargs: {
+                    "month": "2026-05",
+                    "summary": {"oa_count": 9},
+                    "paired": {"groups": [], "total": 0},
+                    "unpaired": {"groups": [], "total": 0},
+                    "invoice_inventory": {"system_total": 9},
+                    "active_generation_id": "gen-sql-1",
+                    "read_model_version": "gen-sql-1",
+                    "read_model_status": "fresh",
                     "generated_at": "2026-05-22T09:30:00+00:00",
-                    "source_versions": fresh_workbench_sql_source_versions(app),
-                    "rows_page": {
-                        "page": 1,
-                        "page_size": 50,
-                        "rows": [{"id": "bank-row-1", "source_kind": "bank_transaction"}],
-                        "has_more": False,
-                    },
+                    "source_versions": fresh_workbench_sql_source_versions(app, "2026-05"),
                 }
             },
         )()
-        app._build_api_workbench_payload = lambda _month: (_ for _ in ()).throw(
-            AssertionError("SQL read model hit must not fallback to legacy builder")
-        )
-
         response = app._handle_api_workbench("2026-05")
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.OK))
         self.assertEqual(payload["read_model_status"], "fresh")
         self.assertEqual(payload["read_model_scope_key"], "2026-05")
-        self.assertEqual(payload["read_model_generated_at"], "2026-05-22T09:30:00+00:00")
-        self.assertEqual(payload["diagnostics"], {"read_model_source": "sql"})
+        self.assertEqual(payload["generated_at"], "2026-05-22T09:30:00+00:00")
         self.assertEqual(payload["invoice_inventory"], {"system_total": 9})
         self.assertEqual(payload["active_generation_id"], "gen-sql-1")
-        self.assertEqual(payload["read_model_version"], 17)
-        self.assertEqual(payload["rows_page"]["rows"][0]["id"], "bank-row-1")
+        self.assertEqual(payload["read_model_version"], "gen-sql-1")
+        self.assertNotIn("rows_page", payload)
+        self.assertNotIn("diagnostics", payload)
         self.assertEqual(queue.refreshes, [])
-
-    def test_workbench_api_legacy_endpoint_falls_back_when_sql_runtime_not_required(self) -> None:
-        app = object.__new__(Application)
-        app._bootstrap_mode = "legacy"
-        app._workbench_sql_read_repository = None
-        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": QueueRecorder()})()
-        builder_calls: list[str] = []
-
-        def legacy_builder(month: str) -> dict[str, object]:
-            builder_calls.append(month)
-            return {
-                "month": month,
-                "summary": {"oa_count": 1},
-                "unpaired": {"groups": []},
-                # TODO: PF-P006 verify safe to remove.
-                "diagnostics": {"legacy_builder": True},
-            }
-
-        app._build_api_workbench_payload = legacy_builder
-
-        response = app._handle_api_workbench("2026-05")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, int(HTTPStatus.OK))
-        self.assertEqual(builder_calls, ["2026-05"])
-        self.assertEqual(payload["diagnostics"], {"legacy_builder": True})
 
     def test_workbench_api_production_runtime_without_sql_repository_returns_unavailable(self) -> None:
         app = object.__new__(Application)
         queue = QueueRecorder()
         app._bootstrap_mode = "production"
         app._state_store = SimpleNamespace(storage_backend="postgres")
-        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue, "redis_helper": None})()
         app._workbench_sql_read_repository = None
-        app._build_api_workbench_payload = lambda _month: (_ for _ in ()).throw(
-            AssertionError("PostgreSQL production runtime must not fallback to legacy builder")
-        )
-
         response = app._handle_api_workbench("2026-05")
         payload = json.loads(response.body)
 
@@ -4501,137 +4232,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["error"], "read_model_unavailable")
         self.assertEqual(payload["read_model_status"], "unavailable")
         self.assertEqual(payload["scope_key"], "2026-05")
-        self.assertEqual(queue.refreshes, [("workbench", "2026-05", "api_sql_repository_unavailable")])
-
-    def test_workbench_summary_api_uses_sql_summary_contract(self) -> None:
-        app = object.__new__(Application)
-        queue = QueueRecorder()
-        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue, "redis_helper": None})()
-        app._workbench_sql_read_repository = type(
-            "SqlWorkbench",
-            (),
-            {
-	                "get_workbench_summary": lambda _self, **_kwargs: {
-	                    "month": "all",
-	                    "summary": {"oa_count": 1, "bank_count": 2, "invoice_count": 3, "paired_count": 4, "unpaired_count": 5, "exception_count": 0},
-	                    "read_model_status": "fresh",
-	                    "generated_at": "2026-05-22T09:30:00+00:00",
-	                    "source_versions": fresh_workbench_sql_source_versions(app, "all"),
-	                }
-	            },
-	        )()
-        app._build_raw_workbench_payload = lambda _month: (_ for _ in ()).throw(
-            AssertionError("summary API must not build full workbench payload")
-        )
-
-        response = app._handle_api_workbench_summary("all")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, int(HTTPStatus.OK))
-        self.assertEqual(payload["summary"]["bank_count"], 2)
-        self.assertEqual(payload["read_model_status"], "fresh")
         self.assertEqual(queue.refreshes, [])
-
-    def test_workbench_summary_api_missing_payload_enqueues_refreshing_contract(self) -> None:
-        app = object.__new__(Application)
-        queue = QueueRecorder()
-        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue, "redis_helper": None})()
-        app._workbench_sql_read_repository = type(
-            "SqlWorkbench",
-            (),
-            {"get_workbench_summary": lambda _self, **_kwargs: None},
-        )()
-
-        response = app._handle_api_workbench_summary("all")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
-        self.assertEqual(payload["month"], "all")
-        self.assertEqual(payload["scope_key"], "all")
-        self.assertEqual(payload["summary"]["oa_count"], 0)
-        self.assertEqual(payload["summary"]["bank_count"], 0)
-        self.assertEqual(payload["read_model_status"], "refreshing")
-        self.assertIsNone(payload["generated_at"])
-        self.assertEqual(queue.refreshes, [("workbench", "all", "api_summary_miss")])
-
-    def test_workbench_summary_api_stale_source_versions_preserves_backend_only_fields(self) -> None:
-        app = object.__new__(Application)
-        queue = QueueRecorder()
-        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue, "redis_helper": None})()
-        app._workbench_query_service = type(
-            "WorkbenchQueryService",
-            (),
-            {"oa_status_payload": lambda _self: {"code": "ready", "message": "OA projection ready"}},
-        )()
-        app._workbench_sql_read_repository = type(
-            "SqlWorkbench",
-            (),
-            {
-                "get_workbench_summary": lambda _self, **_kwargs: {
-                    "month": "all",
-                    "scope_key": "all",
-                    "summary": {"oa_count": 1, "bank_count": 2, "invoice_count": 3, "paired_count": 4, "unpaired_count": 5, "exception_count": 0},
-                    "read_model_status": "fresh",
-                    "generated_at": "2026-05-22T09:30:00+00:00",
-                    "diagnostics": {"bank_detail_reconciliation_status": "stale"},
-                    "invoice_inventory": {"system_total": 9},
-                    # TODO: PF-P006 verify safe to remove.
-                    "active_generation_id": "gen-summary-1",
-                    "source_versions": {"builder": "old-builder"},
-                }
-            },
-        )()
-
-        response = app._handle_api_workbench_summary("all")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, int(HTTPStatus.OK))
-        self.assertEqual(payload["read_model_status"], "stale")
-        self.assertIn("builder_mismatch", payload["read_model_stale_reasons"])
-        self.assertIn("bank_auto_tag_rules_version_missing", payload["read_model_stale_reasons"])
-        self.assertEqual(payload["diagnostics"], {"bank_detail_reconciliation_status": "stale"})
-        self.assertEqual(payload["invoice_inventory"], {"system_total": 9})
-        self.assertEqual(payload["active_generation_id"], "gen-summary-1")
-        self.assertEqual(payload["oa_status"], {"code": "ready", "message": "OA projection ready"})
-        self.assertEqual(queue.refreshes, [("workbench", "all", "api_summary_source_versions_stale")])
-
-    def test_workbench_summary_api_reports_missing_groups_table_as_unavailable(self) -> None:
-        app = object.__new__(Application)
-        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": QueueRecorder(), "redis_helper": None})()
-        app._workbench_sql_read_repository = type(
-            "SqlWorkbench",
-            (),
-            {
-                "get_workbench_summary": lambda _self, **_kwargs: (_ for _ in ()).throw(
-                    RuntimeError('relation "read_model.workbench_groups" does not exist')
-                )
-            },
-        )()
-
-        response = app._handle_api_workbench_summary("all")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, int(HTTPStatus.SERVICE_UNAVAILABLE))
-        self.assertEqual(payload["error"], "read_model_unavailable")
-        self.assertEqual(payload["read_model_status"], "unavailable")
-
-    def test_workbench_summary_api_logs_stale_unavailable_status_metric(self) -> None:
-        app = object.__new__(Application)
-        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": QueueRecorder(), "redis_helper": None})()
-        app._workbench_sql_read_repository = None
-
-        with patch("builtins.print") as print_mock:
-            response = app._handle_api_workbench_summary("all")
-
-        self.assertEqual(response.status_code, int(HTTPStatus.SERVICE_UNAVAILABLE))
-        metric_payloads = [
-            json.loads(call.args[0])
-            for call in print_mock.call_args_list
-            if call.args and json.loads(call.args[0]).get("kind") == "workbench_read_model_status_metric"
-        ]
-        self.assertEqual(metric_payloads[0]["metric"], "workbench.read_model.status.count")
-        self.assertEqual(metric_payloads[0]["endpoint"], "/api/workbench/summary")
-        self.assertEqual(metric_payloads[0]["read_model_status"], "unavailable")
 
     def test_workbench_groups_api_uses_sql_groups_contract(self) -> None:
         app = object.__new__(Application)
@@ -4658,10 +4259,6 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
         app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue, "redis_helper": None})()
         app._workbench_sql_read_repository = SqlWorkbench()
-        app._build_raw_workbench_payload = lambda _month: (_ for _ in ()).throw(
-            AssertionError("groups API must not build full workbench payload")
-        )
-
         response = app._handle_api_workbench_groups(
             "all",
             zone="unpaired",
@@ -5250,292 +4847,64 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
     def test_workbench_api_miss_enqueues_refresh_and_returns_refreshing(self) -> None:
         app = object.__new__(Application)
         queue = QueueRecorder()
-        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue, "redis_helper": None})()
         app._workbench_sql_read_repository = type(
             "SqlWorkbench",
             (),
-            {"get_workbench_view": lambda _self, **_kwargs: None},
+            {"get_workbench_initial_page": lambda _self, **_kwargs: None},
         )()
-        app._build_raw_workbench_payload = lambda _month: (_ for _ in ()).throw(
-            AssertionError("API request path must not synchronously build workbench payload")
-        )
-
         response = app._handle_api_workbench("2026-05")
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.ACCEPTED))
         self.assertEqual(payload["read_model_status"], "refreshing")
-        self.assertEqual(queue.refreshes, [("workbench", "2026-05", "api_miss")])
+        self.assertEqual(queue.refreshes, [("workbench", "2026-05", "api_initial_page_miss")])
 
-    def test_workbench_api_passes_page_and_filter_to_sql_read_model(self) -> None:
+    def test_workbench_api_passes_whitelisted_pane_queries_to_initial_repository(self) -> None:
         app = object.__new__(Application)
         queue = QueueRecorder()
         calls: list[dict[str, object]] = []
 
         class SqlWorkbench:
-            def get_workbench_view(self, **kwargs):
+            def get_workbench_initial_page(self, **kwargs):
                 calls.append(kwargs)
                 return {
-                    "payload": {"unpaired": {"groups": []}},
-                    "refresh_status": "fresh",
-                    "source_versions": {
-                        "oa_attachment_invoice_parser_version": app._current_oa_attachment_invoice_parser_version(),
-                        "oa_projection_sync_version": app._current_oa_projection_sync_version(),
-                    },
-                    "rows_page": {"page": 3, "page_size": 10, "rows": [{"id": "bank-row-1"}], "has_more": False},
+                    "summary": {"oa_count": 0},
+                    "paired": {"groups": [], "total": 0},
+                    "unpaired": {"groups": [], "total": 0},
+                    "read_model_status": "fresh",
+                    "read_model_version": "gen-1",
+                    "source_versions": fresh_workbench_sql_source_versions(app, "2026-05"),
                 }
 
-        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue, "redis_helper": None})()
         app._workbench_sql_read_repository = SqlWorkbench()
-        app._build_raw_workbench_payload = lambda _month: (_ for _ in ()).throw(
-            AssertionError("API request path must not synchronously build workbench payload")
-        )
-
         response = app._handle_api_workbench(
             "2026-05",
-            page="3",
-            page_size="10",
-            status="unpaired",
-            source_kind="bank_transaction",
-            search="供应商",
+            paired_query='{"sort":"bank:desc"}',
+            unpaired_query='{"status":"unpaired","source_kind":"bank_transaction","search":"供应商"}',
         )
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.OK))
-        self.assertEqual(payload["rows_page"]["rows"], [{"id": "bank-row-1"}])
+        self.assertEqual(payload["read_model_version"], "gen-1")
         self.assertEqual(
             calls,
             [
                 {
                     "scope_key": "2026-05",
-                    "page": "3",
-                    "page_size": "10",
-                    "status": "unpaired",
-                    "source_kind": "bank_transaction",
-                    "search": "供应商",
+                    "paired_query": {"sort": "bank:desc"},
+                    "unpaired_query": {
+                        "search": "供应商",
+                        "source_kind": "bank_transaction",
+                        "status": "unpaired",
+                    },
                 }
             ],
         )
 
-    def test_row_detail_prefers_live_service_and_applies_override_without_fallback(self) -> None:
+    def test_row_detail_route_uses_query_facade_as_its_only_runtime_owner(self) -> None:
         app = object.__new__(Application)
-        app._etc_invoice_summary_row_detail = lambda _row_id: None
-        app._live_workbench_service = type(
-            "LiveWorkbench",
-            (),
-            {"get_row_detail": lambda _self, row_id: {"id": row_id, "source": "live"}},
-        )()
-        app._resolve_rows_from_cached_read_models = lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("live row detail hit must not read cached read models")
-        )
-        app._workbench_api_routes = type(
-            "Routes",
-            (),
-            {
-                "get_row_detail": lambda _self, _row_id: (_ for _ in ()).throw(
-                    AssertionError("live row detail hit must not fallback to route service")
-                )
-            },
-        )()
-        override_calls: list[str] = []
-
-        def apply_live_override(row: dict[str, object]) -> dict[str, object]:
-            override_calls.append(str(row["id"]))
-            return {**row, "override_applied": True}
-
-        app._workbench_override_service = type(
-            "Overrides",
-            (),
-            {"apply_to_row": lambda _self, row: apply_live_override(row)},
-        )()
-
-        payload = app._get_api_workbench_row_detail_payload("bank-row-live")
-
-        self.assertEqual(payload["row"], {"id": "bank-row-live", "source": "live", "override_applied": True})
-        self.assertEqual(override_calls, ["bank-row-live"])
-
-    def test_row_detail_route_fallback_applies_override_after_live_and_cache_miss(self) -> None:
-        app = object.__new__(Application)
-        live_calls: list[str] = []
-        cache_calls: list[tuple[list[str], str | None]] = []
-        route_calls: list[str] = []
-        override_calls: list[str] = []
-        app._etc_invoice_summary_row_detail = lambda _row_id: None
-
-        def live_miss(row_id: str) -> dict[str, object]:
-            live_calls.append(row_id)
-            raise KeyError(row_id)
-
-        app._live_workbench_service = type(
-            "LiveWorkbench",
-            (),
-            {"get_row_detail": lambda _self, row_id: live_miss(row_id)},
-        )()
-        app._row_month_scope_from_row_id = lambda _row_id: None
-
-        def cached_miss(row_ids: list[str], *, month_hint: str | None = None) -> dict[str, dict[str, object]]:
-            cache_calls.append((list(row_ids), month_hint))
-            return {}
-
-        app._resolve_rows_from_cached_read_models = cached_miss
-        app._workbench_query_service = SimpleNamespace(_looks_like_oa_row_id=lambda _row_id: False)
-
-        def route_detail(row_id: str) -> dict[str, object]:
-            route_calls.append(row_id)
-            return {"row": {"id": row_id, "source": "route"}}
-
-        app._workbench_api_routes = SimpleNamespace(get_row_detail=route_detail)
-
-        def apply_override(row: dict[str, object]) -> dict[str, object]:
-            override_calls.append(str(row["id"]))
-            return {**row, "override_applied": True}
-
-        app._workbench_override_service = SimpleNamespace(apply_to_row=apply_override)
-
-        payload = app._get_api_workbench_row_detail_payload("bank-row-route")
-
-        self.assertEqual(live_calls, ["bank-row-route"])
-        self.assertEqual(cache_calls, [(["bank-row-route"], None)])
-        self.assertEqual(route_calls, ["bank-row-route"])
-        self.assertEqual(override_calls, ["bank-row-route"])
-        self.assertEqual(payload["row"], {"id": "bank-row-route", "source": "route", "override_applied": True})
-
-    def test_row_detail_production_sql_runtime_blocks_route_fallback_after_live_and_cache_miss(self) -> None:
-        app = object.__new__(Application)
-        app._bootstrap_mode = "production"
-        app._state_store = SimpleNamespace(storage_backend="postgres")
-        app._etc_invoice_summary_row_detail = lambda _row_id: None
-        app._live_workbench_service = SimpleNamespace(
-            get_row_detail=lambda row_id: (_ for _ in ()).throw(KeyError(row_id))
-        )
-        app._row_month_scope_from_row_id = lambda _row_id: None
-        app._resolve_rows_from_cached_read_models = lambda _row_ids, **_kwargs: {}
-        app._workbench_query_service = SimpleNamespace(
-            _looks_like_oa_row_id=lambda _row_id: False,
-            _records_by_id={},
-        )
-        route_calls: list[str] = []
-
-        def route_detail(row_id: str) -> dict[str, object]:
-            route_calls.append(row_id)
-            return {"row": {"id": row_id, "source": "route"}}
-
-        app._workbench_api_routes = SimpleNamespace(get_row_detail=route_detail)
-        app._workbench_override_service = SimpleNamespace(
-            apply_to_row=lambda row: (_ for _ in ()).throw(
-                AssertionError("production SQL runtime route fallback must not produce a row")
-            )
-        )
-
-        response = app._handle_api_workbench_row_detail("bank-row-route")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, int(HTTPStatus.NOT_FOUND))
-        self.assertEqual(payload, {"error": "workbench_row_not_found", "row_id": "bank-row-route"})
-        self.assertEqual(route_calls, [])
-
-    def test_row_detail_production_sql_runtime_blocks_route_fallback_even_with_in_memory_record(self) -> None:
-        app = object.__new__(Application)
-        app._bootstrap_mode = "production"
-        app._state_store = SimpleNamespace(storage_backend="postgres")
-        app._etc_invoice_summary_row_detail = lambda _row_id: None
-        app._live_workbench_service = SimpleNamespace(
-            get_row_detail=lambda row_id: (_ for _ in ()).throw(KeyError(row_id))
-        )
-        app._row_month_scope_from_row_id = lambda _row_id: None
-        app._resolve_rows_from_cached_read_models = lambda _row_ids, **_kwargs: {}
-        app._workbench_query_service = SimpleNamespace(
-            _looks_like_oa_row_id=lambda _row_id: False,
-            _records_by_id={"bank-row-route": {"id": "bank-row-route", "source": "legacy-memory"}},
-        )
-        route_calls: list[str] = []
-
-        def route_detail(row_id: str) -> dict[str, object]:
-            route_calls.append(row_id)
-            return {"row": {"id": row_id, "source": "route"}}
-
-        app._workbench_api_routes = SimpleNamespace(
-            _query_service=app._workbench_query_service,
-            get_row_detail=route_detail,
-        )
-        app._workbench_override_service = SimpleNamespace(
-            apply_to_row=lambda row: (_ for _ in ()).throw(
-                AssertionError("production SQL runtime must not apply legacy route fallback rows")
-            )
-        )
-
-        response = app._handle_api_workbench_row_detail("bank-row-route")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, int(HTTPStatus.NOT_FOUND))
-        self.assertEqual(payload, {"error": "workbench_row_not_found", "row_id": "bank-row-route"})
-        self.assertEqual(route_calls, [])
-
-    def test_row_detail_production_sql_runtime_ignores_stale_cached_read_model_row(self) -> None:
-        app = object.__new__(Application)
-        app._bootstrap_mode = "production"
-        app._state_store = SimpleNamespace(storage_backend="postgres")
-        app._etc_invoice_summary_row_detail = lambda _row_id: None
-        app._live_workbench_service = SimpleNamespace(
-            get_row_detail=lambda row_id: (_ for _ in ()).throw(KeyError(row_id))
-        )
-        app._row_month_scope_from_row_id = lambda _row_id: "2026-05"
-        app._workbench_read_model_service = SimpleNamespace(
-            get_read_model=lambda _scope_key: {
-                "scope_key": "2026-05",
-                "source_versions": {"builder": "old-builder"},
-                "payload": {
-                    "unpaired": {
-                        "groups": [
-                            {
-                                "bank_rows": [
-                                    {"id": "bank-row-stale", "source_kind": "bank_transaction", "amount": "100.00"}
-                                ]
-                            }
-                        ]
-                    }
-                },
-            },
-            list_scope_keys=lambda: ["2026-05"],
-        )
-        app._workbench_sql_read_model_stale_reasons = lambda _source_versions, **_kwargs: ["builder_mismatch"]
-        app._workbench_query_service = SimpleNamespace(
-            _looks_like_oa_row_id=lambda _row_id: False,
-            _records_by_id={},
-        )
-        app._workbench_api_routes = SimpleNamespace(
-            get_row_detail=lambda row_id: (_ for _ in ()).throw(
-                AssertionError(f"stale cached row must not fallback to route detail: {row_id}")
-            )
-        )
-        app._workbench_override_service = SimpleNamespace(apply_to_row=lambda row: row)
-
-        response = app._handle_api_workbench_row_detail("bank-row-stale")
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, int(HTTPStatus.NOT_FOUND))
-        self.assertEqual(payload, {"error": "workbench_row_not_found", "row_id": "bank-row-stale"})
-
-    def test_row_detail_sql_runtime_uses_query_facade_for_opaque_oa_after_live_and_cache_miss(self) -> None:
-        app = object.__new__(Application)
-        app._bootstrap_mode = "production"
-        app._state_store = SimpleNamespace(storage_backend="postgres")
-        app._etc_invoice_summary_row_detail = lambda _row_id: None
-        app._live_workbench_service = SimpleNamespace(
-            get_row_detail=lambda row_id: (_ for _ in ()).throw(KeyError(row_id))
-        )
-        app._row_month_scope_from_row_id = lambda _row_id: None
-        app._resolve_rows_from_cached_read_models = lambda _row_ids, **_kwargs: {}
-        app._workbench_query_service = SimpleNamespace(
-            _looks_like_oa_row_id=lambda row_id: str(row_id).startswith("oa-"),
-            _records_by_id={},
-        )
-        app._workbench_api_routes = SimpleNamespace(
-            get_row_detail=lambda row_id: (_ for _ in ()).throw(
-                AssertionError(f"opaque OA detail must not fallback to legacy route: {row_id}")
-            )
-        )
-        app._workbench_override_service = SimpleNamespace(apply_to_row=lambda row: row)
         facade_calls: list[tuple[str | None, str]] = []
 
         class Facade:
@@ -5561,29 +4930,214 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, int(HTTPStatus.OK))
         self.assertEqual(payload["row"]["id"], "oa-pay-1976")
-        self.assertEqual(facade_calls, [(None, "oa-pay-1976")])
+        self.assertEqual(facade_calls, [("all", "oa-pay-1976")])
 
-    def test_amount_check_row_resolution_sql_runtime_skips_live_bank_fallback(self) -> None:
+    def test_row_detail_not_found_does_not_fall_back_to_live_cache_or_legacy_routes(self) -> None:
         app = object.__new__(Application)
-        app._requires_sql_read_model_runtime = lambda: True
-        app._resolve_rows_from_cached_read_models = lambda _row_ids, **_kwargs: {}
-        app._row_types_for_row_ids = lambda row_ids: ["bank" for _row_id in row_ids]
-        app._resolve_live_rows_direct = lambda row_ids, **_kwargs: (_ for _ in ()).throw(
-            AssertionError(f"sql runtime must not use live bank fallback: {row_ids}")
+
+        class Facade:
+            @staticmethod
+            def row_detail(_month: str | None, *, row_id: str):
+                return SimpleNamespace(
+                    status_code=HTTPStatus.NOT_FOUND,
+                    payload={"error": "workbench_row_not_found", "scope_key": "all", "row_id": row_id},
+                )
+
+        app._workbench_query_facade = lambda: Facade()
+
+        response = app._handle_api_workbench_row_detail("bank-row-missing")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.NOT_FOUND))
+        self.assertEqual(
+            payload,
+            {"error": "workbench_row_not_found", "scope_key": "all", "row_id": "bank-row-missing"},
         )
-        detail_calls: list[dict[str, object]] = []
 
-        def row_detail(row_id: str, *, month: str | None = None) -> dict[str, object]:
-            detail_calls.append({"row_id": row_id, "month": month})
-            return {"row": {"id": row_id, "type": "bank"}}
+    def test_row_detail_forwards_expected_read_model_version(self) -> None:
+        app = object.__new__(Application)
+        calls: list[dict[str, object]] = []
 
-        app._get_api_workbench_row_detail_payload = row_detail
-        app._serialize_value = lambda value: value
+        class Facade:
+            @staticmethod
+            def row_detail(month: str | None, **kwargs: object):
+                calls.append({"month": month, **kwargs})
+                return SimpleNamespace(
+                    status_code=HTTPStatus.CONFLICT,
+                    payload={"error": "workbench_read_model_version_conflict", "read_model_version": "new"},
+                )
 
-        rows = app._resolve_rows_for_amount_check(["txn_imported_0396"], month="all", allow_direct=True)
+        app._workbench_query_facade = lambda: Facade()
+
+        response = app._handle_api_workbench_row_detail(
+            "bank-row-1",
+            month="2026-05",
+            expected_read_model_version="old",
+        )
+
+        self.assertEqual(response.status_code, int(HTTPStatus.CONFLICT))
+        self.assertEqual(
+            calls,
+            [
+                {
+                    "month": "2026-05",
+                    "row_id": "bank-row-1",
+                    "expected_read_model_version": "old",
+                }
+            ],
+        )
+
+    def test_amount_check_row_resolution_uses_canonical_batch_resolver_without_page_detail(self) -> None:
+        app = object.__new__(Application)
+        resolver_calls: list[dict[str, object]] = []
+
+        def resolve_rows(row_ids: list[str], *, month_hint: str | None = None) -> list[dict[str, object]]:
+            resolver_calls.append({"row_ids": row_ids, "month_hint": month_hint})
+            return [{"id": row_ids[0], "type": "bank"}]
+
+        app._resolve_live_rows_direct = resolve_rows
+
+        rows = app._resolve_rows_for_amount_check(["txn_imported_0396"], month="all")
 
         self.assertEqual(rows, [{"id": "txn_imported_0396", "type": "bank"}])
-        self.assertEqual(detail_calls, [{"row_id": "txn_imported_0396", "month": "all"}])
+        self.assertEqual(
+            resolver_calls,
+            [{"row_ids": ["txn_imported_0396"], "month_hint": "all"}],
+        )
+
+    def test_workbench_search_row_loader_requires_narrow_sql_repository(self) -> None:
+        app = object.__new__(Application)
+        app._workbench_sql_read_repository = None
+
+        with self.assertRaisesRegex(RuntimeError, "search-row repository is not configured"):
+            app._list_workbench_search_rows("2026-05")
+
+    def test_workbench_search_row_loader_uses_narrow_repository_query(self) -> None:
+        calls: list[str] = []
+
+        class Repository:
+            @staticmethod
+            def list_workbench_search_rows(*, scope_key: str) -> list[dict[str, object]]:
+                calls.append(scope_key)
+                return [{"row": {"id": "bank-1", "type": "bank"}, "zone_hint": "paired"}]
+
+        app = object.__new__(Application)
+        app._workbench_sql_read_repository = Repository()
+
+        rows = app._list_workbench_search_rows("2026-05")
+
+        self.assertEqual(rows, [{"row": {"id": "bank-1", "type": "bank"}, "zone_hint": "paired"}])
+        self.assertEqual(calls, ["2026-05"])
+
+    def test_repository_lists_search_rows_from_active_generation_with_group_context(self) -> None:
+        class Connection:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, tuple]] = []
+
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:
+                self.calls.append((" ".join(sql.lower().split()), params))
+                return [
+                    {
+                        "row_id": "bank-1",
+                        "source_kind": "bank",
+                        "status": "unpaired",
+                        "payload": {"id": "bank-1", "type": "bank", "counterparty_name": "供应商"},
+                        "group_zone": "paired",
+                        "group_id": "case:SEARCH-1",
+                        "project_names": ["项目乙", "项目甲"],
+                    },
+                    {
+                        "row_id": "invoice-ignored",
+                        "source_kind": "invoice",
+                        "status": "ignored",
+                        "payload": {"id": "invoice-ignored", "type": "invoice"},
+                        "group_zone": None,
+                        "group_id": None,
+                        "project_names": None,
+                    },
+                ]
+
+        connection = Connection()
+        repository = PostgresReadModelRepository(connection)
+
+        rows = repository.list_workbench_search_rows(scope_key="2026-05")
+
+        self.assertEqual(connection.calls[0][1], ("2026-05",))
+        self.assertIn("from read_model.workbench_generations", connection.calls[0][0])
+        self.assertIn("status = 'active'", connection.calls[0][0])
+        self.assertIn("from read_model.workbench_group_rows", connection.calls[0][0])
+        self.assertEqual(
+            rows[0],
+            {
+                "row": {"id": "bank-1", "type": "bank", "counterparty_name": "供应商"},
+                "zone_hint": "paired",
+                "group_id": "case:SEARCH-1",
+                "project_names": ["项目乙", "项目甲"],
+            },
+        )
+        self.assertEqual(rows[1]["zone_hint"], "ignored")
+
+    def test_repository_rejects_unbounded_workbench_search_scope(self) -> None:
+        repository = PostgresReadModelRepository(type("Connection", (), {})())
+
+        with self.assertRaisesRegex(ValueError, "month scope key"):
+            repository.list_workbench_search_rows(scope_key="all")
+
+    def test_workbench_ignored_api_fails_closed_without_sql_repository(self) -> None:
+        app = object.__new__(Application)
+        app._workbench_sql_read_repository = None
+
+        response = app._handle_api_workbench_ignored("2026-05")
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, int(HTTPStatus.SERVICE_UNAVAILABLE))
+        self.assertEqual(payload["error"], "read_model_unavailable")
+        self.assertEqual(payload["read_model_status"], "unavailable")
+        self.assertEqual(payload["scope_key"], "2026-05")
+
+    def test_repository_ignored_rows_only_reads_active_generations(self) -> None:
+        class Connection:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, tuple]] = []
+
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:
+                self.calls.append((" ".join(sql.lower().split()), params))
+                return [{"row_id": "invoice-1", "payload": {"id": "invoice-1", "type": "invoice"}}]
+
+        connection = Connection()
+        repository = PostgresReadModelRepository(connection)
+
+        rows = repository.list_workbench_ignored_rows(scope_key="2026-05")
+
+        self.assertEqual(rows, [{"id": "invoice-1", "type": "invoice"}])
+        self.assertEqual(connection.calls[0][1], ("2026-05",))
+        self.assertIn("join read_model.workbench_generations", connection.calls[0][0])
+        self.assertIn("generation.status = 'active'", connection.calls[0][0])
+
+    def test_workbench_write_ignored_row_loader_requires_sql_repository(self) -> None:
+        app = object.__new__(Application)
+        app._workbench_sql_read_repository = None
+
+        with self.assertRaisesRegex(RuntimeError, "ignored-row repository is not configured"):
+            app._list_workbench_ignored_rows_for_write("2026-05")
+
+    def test_workbench_write_ignored_row_loader_uses_narrow_repository_query(self) -> None:
+        calls: list[str] = []
+
+        class Repository:
+            @staticmethod
+            def list_workbench_ignored_rows(*, scope_key: str) -> list[dict[str, object]]:
+                calls.append(scope_key)
+                return [{"id": "invoice-1", "type": "invoice"}]
+
+        app = object.__new__(Application)
+        app._workbench_sql_read_repository = Repository()
+        app._serialize_value = lambda value: value
+
+        rows = app._list_workbench_ignored_rows_for_write("2026-05")
+
+        self.assertEqual(rows, [{"id": "invoice-1", "type": "invoice"}])
+        self.assertEqual(calls, ["2026-05"])
 
     def test_repository_persists_workbench_rows_alongside_snapshot(self) -> None:
         connection = WorkbenchWriteConnection()
@@ -5823,6 +5377,15 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
             def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
                 self.fetch_all_calls.append((" ".join(sql.lower().split()), params))
+                if "scope_key <> 'all'" in self.fetch_all_calls[-1][0]:
+                    return [
+                        {
+                            "scope_key": "2026-05",
+                            "generation_id": "gen-2026-05-active",
+                            "source_versions": {"builder": "workbench-sql:v1"},
+                            "generated_at": "2026-07-03T10:00:00+08:00",
+                        }
+                    ]
                 if "from job.read_model_dirty_scopes" in self.fetch_all_calls[-1][0]:
                     return []
                 return []
@@ -5870,6 +5433,15 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
             def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
                 self.fetch_all_calls.append((" ".join(sql.lower().split()), params))
+                if "scope_key <> 'all'" in self.fetch_all_calls[-1][0]:
+                    return [
+                        {
+                            "scope_key": "2026-05",
+                            "generation_id": "gen-2026-05-active",
+                            "source_versions": {"builder": "workbench-sql:v1"},
+                            "generated_at": "2026-07-03T10:00:00+08:00",
+                        }
+                    ]
                 if "from job.read_model_dirty_scopes" in self.fetch_all_calls[-1][0]:
                     return []
                 return []
@@ -5884,7 +5456,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["row"]["id"], "oa-pay-legacy")
         self.assertEqual(payload["row"]["amount"], "1500.00")
         self.assertEqual(payload["scope_key"], "2026-05")
-        self.assertEqual(payload["active_generation_id"], "gen-2026-05-active")
+        self.assertTrue(str(payload["active_generation_id"]).startswith("workbench:all:active-generation-set:"))
         self.assertTrue(any("from read_model.workbench_group_rows gr" in sql for sql, _params in connection.fetch_one_calls))
 
     def test_repository_does_not_synthesize_row_detail_from_empty_group_member_payload(self) -> None:
@@ -6180,10 +5752,6 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         app._workbench_read_model_service = FakeWorkbenchReadModelService()
         app._expand_workbench_read_model_scope_keys_for_base_scopes = lambda scope_keys: scope_keys
         app._invalidate_cost_statistics_read_model_scopes = lambda *_args, **_kwargs: []
-        app._build_raw_workbench_payload = lambda _month: (_ for _ in ()).throw(
-            AssertionError("Invalidation must only enqueue refresh, not rebuild synchronously")
-        )
-
         changed = app._invalidate_workbench_read_model_scopes(["2026-05"], invalidate_cost_statistics=False)
 
         self.assertEqual(changed, ["2026-05"])
@@ -6294,262 +5862,9 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             },
         )
 
-    def test_workbench_refresh_handler_runs_all_aggregate_after_shard_publish_even_if_all_scope_source_is_newer(self) -> None:
-        class FakeBuilder:
-            def __init__(self) -> None:
-                self.calls: list[tuple[str, object]] = []
 
-            def refresh_workbench_all_scope_from_active_shards(
-                self,
-                scope_key: str,
-                *,
-                source_version: object = None,
-            ) -> dict[str, object]:
-                self.calls.append((scope_key, source_version))
-                return {
-                    "scope_key": scope_key,
-                    "aggregate_only": True,
-                    "read_model_status": "fresh",
-                    "active_generation_id": "gen-all-clean",
-                }
 
-        class FakeQueue:
-            def __init__(self) -> None:
-                self.current_checks: list[tuple[str, str, str, object]] = []
-                self.completed: list[tuple[str, str, str, object]] = []
 
-            def read_model_refresh_is_current(
-                self,
-                *,
-                tenant_id: str,
-                scope_type: str,
-                scope_key: str,
-                source_version: object,
-            ) -> bool:
-                self.current_checks.append((tenant_id, scope_type, scope_key, source_version))
-                return False
-
-            def complete_read_model_refresh(
-                self,
-                *,
-                tenant_id: str,
-                scope_type: str,
-                scope_key: str,
-                source_version: object = None,
-            ) -> None:
-                self.completed.append((tenant_id, scope_type, scope_key, source_version))
-
-        builder = FakeBuilder()
-        queue = FakeQueue()
-        service = WorkbenchReadModelRefreshService(projection_builder=builder, queue_repository=queue)
-        event = RuntimeQueueEvent(
-            event_id="event-all-aggregate-after-shard",
-            tenant_id="tenant-a",
-            event_type="workbench.read_model.refresh",
-            aggregate_type="read_model",
-            aggregate_id="all",
-            scope_type="workbench",
-            scope_key="all",
-            dedupe_key=None,
-            payload={"scope_key": "all", "aggregate_only": True, "source_version": 1147, "parent_scope_keys": ["2026-02"]},
-            attempts=1,
-            status="processing",
-        )
-
-        result = service.handle_runtime_event(event)
-
-        self.assertEqual(queue.current_checks, [])
-        self.assertEqual(builder.calls, [("all", 1147)])
-        self.assertEqual(queue.completed, [("tenant-a", "workbench", "all", 1147)])
-        self.assertEqual(result["active_generation_id"], "gen-all-clean")
-
-    def test_workbench_refresh_handler_defers_all_aggregate_while_parent_scope_refreshing(self) -> None:
-        class FakeBuilder:
-            def refresh_workbench_all_scope_from_active_shards(
-                self,
-                scope_key: str,
-                *,
-                source_version: object = None,
-            ) -> dict[str, object]:
-                raise AssertionError(f"parent scope should refresh before aggregate {scope_key}:{source_version}")
-
-        class FakeQueue:
-            def __init__(self) -> None:
-                self.active_checks: list[tuple[str, str, str]] = []
-                self.completed: list[tuple[str, str, str, object]] = []
-
-            def read_model_refresh_is_active(
-                self,
-                *,
-                tenant_id: str,
-                scope_type: str,
-                scope_key: str,
-            ) -> bool:
-                self.active_checks.append((tenant_id, scope_type, scope_key))
-                return scope_key == "2026-02"
-
-            def complete_read_model_refresh(
-                self,
-                *,
-                tenant_id: str,
-                scope_type: str,
-                scope_key: str,
-                source_version: object = None,
-            ) -> None:
-                self.completed.append((tenant_id, scope_type, scope_key, source_version))
-
-        queue = FakeQueue()
-        service = WorkbenchReadModelRefreshService(projection_builder=FakeBuilder(), queue_repository=queue)
-        event = RuntimeQueueEvent(
-            event_id="event-all-aggregate-parent-refreshing",
-            tenant_id="tenant-a",
-            event_type="workbench.read_model.refresh",
-            aggregate_type="read_model",
-            aggregate_id="all",
-            scope_type="workbench",
-            scope_key="all",
-            dedupe_key=None,
-            payload={
-                "scope_key": "all",
-                "aggregate_only": True,
-                "source_version": 1148,
-                "parent_scope_keys": ["2026-02"],
-            },
-            attempts=1,
-            status="processing",
-        )
-
-        with self.assertRaisesRegex(RuntimeError, "workbench_read_model_not_fresh"):
-            service.handle_runtime_event(event)
-
-        self.assertEqual(queue.active_checks, [("tenant-a", "workbench", "2026-02")])
-        self.assertEqual(queue.completed, [])
-
-    def test_workbench_refresh_handler_defers_all_aggregate_while_parent_scope_failed(self) -> None:
-        class FakeBuilder:
-            def refresh_workbench_all_scope_from_active_shards(
-                self,
-                scope_key: str,
-                *,
-                source_version: object = None,
-            ) -> dict[str, object]:
-                raise AssertionError(f"failed parent scope should refresh before aggregate {scope_key}:{source_version}")
-
-        class FakeQueue:
-            def __init__(self) -> None:
-                self.active_checks: list[tuple[str, str, str]] = []
-                self.fresh_checks: list[tuple[str, str, str]] = []
-                self.completed: list[tuple[str, str, str, object]] = []
-
-            def read_model_refresh_is_active(
-                self,
-                *,
-                tenant_id: str,
-                scope_type: str,
-                scope_key: str,
-            ) -> bool:
-                self.active_checks.append((tenant_id, scope_type, scope_key))
-                return False
-
-            def read_model_refresh_is_fresh(
-                self,
-                *,
-                tenant_id: str,
-                scope_type: str,
-                scope_key: str,
-            ) -> bool:
-                self.fresh_checks.append((tenant_id, scope_type, scope_key))
-                return False
-
-            def complete_read_model_refresh(
-                self,
-                *,
-                tenant_id: str,
-                scope_type: str,
-                scope_key: str,
-                source_version: object = None,
-            ) -> None:
-                self.completed.append((tenant_id, scope_type, scope_key, source_version))
-
-        queue = FakeQueue()
-        service = WorkbenchReadModelRefreshService(projection_builder=FakeBuilder(), queue_repository=queue)
-        event = RuntimeQueueEvent(
-            event_id="event-all-aggregate-parent-failed",
-            tenant_id="tenant-a",
-            event_type="workbench.read_model.refresh",
-            aggregate_type="read_model",
-            aggregate_id="all",
-            scope_type="workbench",
-            scope_key="all",
-            dedupe_key=None,
-            payload={
-                "scope_key": "all",
-                "aggregate_only": True,
-                "source_version": 1149,
-                "parent_scope_keys": ["2026-02"],
-            },
-            attempts=1,
-            status="processing",
-        )
-
-        with self.assertRaisesRegex(RuntimeError, "workbench_read_model_not_fresh"):
-            service.handle_runtime_event(event)
-
-        self.assertEqual(queue.active_checks, [("tenant-a", "workbench", "2026-02")])
-        self.assertEqual(queue.fresh_checks, [("tenant-a", "workbench", "2026-02")])
-        self.assertEqual(queue.completed, [])
-
-    def test_workbench_refresh_handler_does_not_enqueue_all_aggregate_after_month_publish_by_default(self) -> None:
-        class FakeBuilder:
-            def rebuild_workbench_read_model_scope(
-                self,
-                scope_key: str,
-                *,
-                source_version: object = None,
-            ) -> dict[str, object]:
-                return {"scope_key": scope_key, "active_generation_id": "gen-2026-05", "source_version": source_version}
-
-        class FakeQueue:
-            def __init__(self) -> None:
-                self.completed: list[tuple[str, str, str, object]] = []
-                self.enqueued: list[dict[str, object]] = []
-
-            def complete_read_model_refresh(
-                self,
-                *,
-                tenant_id: str,
-                scope_type: str,
-                scope_key: str,
-                source_version: object = None,
-            ) -> None:
-                self.completed.append((tenant_id, scope_type, scope_key, source_version))
-
-            def enqueue(self, **kwargs: object) -> None:
-                self.enqueued.append(dict(kwargs))
-
-        queue = FakeQueue()
-        service = WorkbenchReadModelRefreshService(projection_builder=FakeBuilder(), queue_repository=queue)
-        event = RuntimeQueueEvent(
-            event_id="event-month",
-            tenant_id="tenant-a",
-            event_type="workbench.read_model.refresh",
-            aggregate_type="read_model",
-            aggregate_id="2026-05",
-            scope_type="workbench",
-            scope_key="2026-05",
-            dedupe_key=None,
-            payload={"scope_key": "2026-05", "source_version": 19},
-            attempts=1,
-            status="processing",
-            priority="high",
-            trace_id="trace-workbench-month",
-        )
-
-        result = service.handle_runtime_event(event)
-
-        self.assertEqual(queue.completed, [("tenant-a", "workbench", "2026-05", 19)])
-        self.assertNotIn("aggregate_enqueued", result)
-        self.assertEqual(queue.enqueued, [])
 
     def test_workbench_month_publish_enqueues_cost_statistics_after_projection_commit(self) -> None:
         calls: list[str] = []
@@ -6625,225 +5940,9 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             ],
         )
 
-    def test_workbench_all_aggregate_does_not_enqueue_cost_statistics(self) -> None:
-        class FakeBuilder:
-            def refresh_workbench_all_scope_from_active_shards(
-                self,
-                scope_key: str,
-                *,
-                source_version: object = None,
-            ) -> dict[str, object]:
-                return {
-                    "scope_key": scope_key,
-                    "active_generation_id": "gen-all",
-                    "read_model_status": "fresh",
-                    "source_version": source_version,
-                }
 
-        class FakeQueue:
-            def __init__(self) -> None:
-                self.refreshes: list[dict[str, object]] = []
 
-            def enqueue_read_model_refresh(self, **kwargs: object) -> None:
-                self.refreshes.append(dict(kwargs))
 
-            def complete_read_model_refresh(self, **_kwargs: object) -> None:
-                return None
-
-        queue = FakeQueue()
-        service = WorkbenchReadModelRefreshService(projection_builder=FakeBuilder(), queue_repository=queue)
-        event = RuntimeQueueEvent(
-            event_id="event-all-no-cost-fanout",
-            tenant_id="default",
-            event_type="workbench.read_model.refresh",
-            aggregate_type="read_model",
-            aggregate_id="all",
-            scope_type="workbench",
-            scope_key="all",
-            dedupe_key=None,
-            payload={"scope_key": "all", "aggregate_only": True},
-            attempts=1,
-            status="processing",
-        )
-
-        result = service.handle_runtime_event(event)
-
-        self.assertNotIn("cost_statistics_enqueued_scope_keys", result)
-        self.assertEqual(queue.refreshes, [])
-
-    def test_workbench_refresh_handler_uses_coalescing_all_aggregate_enqueue_when_available(self) -> None:
-        class FakeBuilder:
-            def rebuild_workbench_read_model_scope(
-                self,
-                scope_key: str,
-                *,
-                source_version: object = None,
-            ) -> dict[str, object]:
-                return {"scope_key": scope_key, "active_generation_id": f"gen-{scope_key}", "source_version": source_version}
-
-        class FakeQueue:
-            def __init__(self) -> None:
-                self.completed: list[tuple[str, str, str, object]] = []
-                self.enqueued: list[dict[str, object]] = []
-                self.aggregate_enqueued: list[dict[str, object]] = []
-
-            def complete_read_model_refresh(
-                self,
-                *,
-                tenant_id: str,
-                scope_type: str,
-                scope_key: str,
-                source_version: object = None,
-            ) -> None:
-                self.completed.append((tenant_id, scope_type, scope_key, source_version))
-
-            def enqueue(self, **kwargs: object) -> None:
-                self.enqueued.append(dict(kwargs))
-
-            def enqueue_workbench_all_aggregate_refresh(self, **kwargs: object) -> None:
-                self.aggregate_enqueued.append(dict(kwargs))
-
-        queue = FakeQueue()
-        service = WorkbenchReadModelRefreshService(projection_builder=FakeBuilder(), queue_repository=queue)
-        event = RuntimeQueueEvent(
-            event_id="event-month",
-            tenant_id="tenant-a",
-            event_type="workbench.read_model.refresh",
-            aggregate_type="read_model",
-            aggregate_id="2026-05",
-            scope_type="workbench",
-            scope_key="2026-05",
-            dedupe_key=None,
-            payload={"scope_key": "2026-05", "source_version": 19, "publish_all_aggregate": True},
-            attempts=1,
-            status="processing",
-            priority="high",
-            trace_id="trace-workbench-month",
-        )
-
-        result = service.handle_runtime_event(event)
-
-        self.assertEqual(queue.completed, [("tenant-a", "workbench", "2026-05", 19)])
-        self.assertEqual(result["aggregate_enqueued"], True)
-        self.assertEqual(queue.enqueued, [])
-        self.assertEqual(
-            queue.aggregate_enqueued,
-            [
-                {
-                    "tenant_id": "tenant-a",
-                    "parent_scope_keys": ["2026-05"],
-                    "source_version": 19,
-                    "reason": "workbench_shard_published",
-                    "priority": "high",
-                    "delay_seconds": 0.0,
-                    "trace_id": "trace-workbench-month",
-                }
-            ],
-        )
-
-    def test_workbench_relation_refresh_does_not_enqueue_all_aggregate_for_write_visibility(self) -> None:
-        class FakeBuilder:
-            def rebuild_workbench_read_model_scope(
-                self,
-                scope_key: str,
-                *,
-                source_version: object = None,
-            ) -> dict[str, object]:
-                return {"scope_key": scope_key, "active_generation_id": f"gen-{scope_key}", "source_version": source_version}
-
-        class FakeQueue:
-            def __init__(self) -> None:
-                self.completed: list[tuple[str, str, str, object]] = []
-                self.aggregate_enqueued: list[dict[str, object]] = []
-
-            def complete_read_model_refresh(
-                self,
-                *,
-                tenant_id: str,
-                scope_type: str,
-                scope_key: str,
-                source_version: object = None,
-            ) -> None:
-                self.completed.append((tenant_id, scope_type, scope_key, source_version))
-
-            def enqueue_workbench_all_aggregate_refresh(self, **kwargs: object) -> None:
-                self.aggregate_enqueued.append(dict(kwargs))
-
-        queue = FakeQueue()
-        service = WorkbenchReadModelRefreshService(projection_builder=FakeBuilder(), queue_repository=queue)
-        event = RuntimeQueueEvent(
-            event_id="event-relation-month",
-            tenant_id="tenant-a",
-            event_type="workbench.read_model.refresh",
-            aggregate_type="read_model",
-            aggregate_id="2026-05",
-            scope_type="workbench",
-            scope_key="2026-05",
-            dedupe_key=None,
-            payload={
-                "scope_key": "2026-05",
-                "source_version": 19,
-                "reason": "workbench_relation_changed",
-                "metadata": {
-                    "action_name": "withdraw_link",
-                    "row_ids": ["oa-1", "bank-1"],
-                    "case_ids": ["CASE-1"],
-                },
-            },
-            attempts=1,
-            status="processing",
-            priority="high",
-            trace_id="trace-workbench-relation-month",
-        )
-
-        result = service.handle_runtime_event(event)
-
-        self.assertEqual(queue.completed, [("tenant-a", "workbench", "2026-05", 19)])
-        self.assertNotIn("aggregate_enqueued", result)
-        self.assertEqual(queue.aggregate_enqueued, [])
-
-    def test_workbench_refresh_handler_can_enqueue_aggregate_without_legacy_enqueue_method(self) -> None:
-        class FakeBuilder:
-            def rebuild_workbench_read_model_scope(
-                self,
-                scope_key: str,
-                *,
-                source_version: object = None,
-            ) -> dict[str, object]:
-                return {"scope_key": scope_key, "active_generation_id": f"gen-{scope_key}", "source_version": source_version}
-
-        class FakeQueue:
-            def __init__(self) -> None:
-                self.aggregate_enqueued: list[dict[str, object]] = []
-
-            def complete_read_model_refresh(self, **_kwargs: object) -> None:
-                return None
-
-            def enqueue_workbench_all_aggregate_refresh(self, **kwargs: object) -> None:
-                self.aggregate_enqueued.append(dict(kwargs))
-
-        queue = FakeQueue()
-        service = WorkbenchReadModelRefreshService(projection_builder=FakeBuilder(), queue_repository=queue)
-        event = RuntimeQueueEvent(
-            event_id="event-month",
-            tenant_id="tenant-a",
-            event_type="workbench.read_model.refresh",
-            aggregate_type="read_model",
-            aggregate_id="2026-05",
-            scope_type="workbench",
-            scope_key="2026-05",
-            dedupe_key=None,
-            payload={"scope_key": "2026-05", "source_version": 19, "publish_all_aggregate": True},
-            attempts=1,
-            status="processing",
-        )
-
-        result = service.handle_runtime_event(event)
-
-        self.assertEqual(result["aggregate_enqueued"], True)
-        self.assertEqual(queue.aggregate_enqueued[0]["parent_scope_keys"], ["2026-05"])
-        self.assertEqual(queue.aggregate_enqueued[0]["priority"], "low")
-        self.assertEqual(queue.aggregate_enqueued[0]["delay_seconds"], 3.0)
 
     def test_workbench_refresh_handler_expands_all_into_month_shards(self) -> None:
         class FakeBuilder:
@@ -6859,9 +5958,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
         class FakeQueue:
             def __init__(self) -> None:
-                self.refreshes: list[tuple[str, str, str, str, str | None]] = []
+                self.refreshes: list[dict[str, object]] = []
                 self.completed: list[tuple[str, str, str, object]] = []
-                self.enqueued: list[dict[str, object]] = []
 
             def enqueue_read_model_refresh(
                 self,
@@ -6869,14 +5967,22 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                 scope_type: str,
                 scope_key: str,
                 reason: str,
+                tenant_id: str = "default",
                 priority: str = "normal",
                 trace_id: str | None = None,
-                **_kwargs: object,
+                metadata: dict[str, object] | None = None,
             ) -> None:
-                self.refreshes.append((scope_type, scope_key, reason, priority, trace_id))
-
-            def enqueue(self, **kwargs):
-                self.enqueued.append(dict(kwargs))
+                self.refreshes.append(
+                    {
+                        "scope_type": scope_type,
+                        "scope_key": scope_key,
+                        "reason": reason,
+                        "tenant_id": tenant_id,
+                        "priority": priority,
+                        "trace_id": trace_id,
+                        "metadata": metadata,
+                    }
+                )
 
             def complete_read_model_refresh(
                 self,
@@ -6900,9 +6006,10 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             scope_type="workbench",
             scope_key="all",
             dedupe_key=None,
-            payload={"scope_key": "all"},
+            payload={"scope_key": "all", "metadata": {"force_refresh": True}},
             attempts=1,
             status="processing",
+            source_version=24,
             priority="high",
             trace_id="trace-workbench-all",
         )
@@ -6915,177 +6022,39 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             {
                 "scope_key": "all",
                 "enqueued_scope_keys": ["2026-05", "2026-04"],
-                "aggregate_enqueued": True,
+                "fan_out": True,
                 "row_count": 0,
             },
         )
         self.assertEqual(
             queue.refreshes,
             [
-                ("workbench", "2026-05", "workbench_all_shard", "high", "trace-workbench-all"),
-                ("workbench", "2026-04", "workbench_all_shard", "high", "trace-workbench-all"),
+                {
+                    "scope_type": "workbench",
+                    "scope_key": "2026-05",
+                    "reason": "workbench_all_shard",
+                    "tenant_id": "tenant-a",
+                    "priority": "high",
+                    "trace_id": "trace-workbench-all",
+                    "metadata": {"force_refresh": True},
+                },
+                {
+                    "scope_type": "workbench",
+                    "scope_key": "2026-04",
+                    "reason": "workbench_all_shard",
+                    "tenant_id": "tenant-a",
+                    "priority": "high",
+                    "trace_id": "trace-workbench-all",
+                    "metadata": {"force_refresh": True},
+                },
             ],
         )
-        self.assertEqual(queue.completed, [])
-        self.assertEqual(len(queue.enqueued), 1)
-        self.assertEqual(queue.enqueued[0]["scope_key"], "all")
-        self.assertEqual(queue.enqueued[0]["payload"]["aggregate_only"], True)
-        self.assertEqual(queue.enqueued[0]["priority"], "high")
-        self.assertEqual(queue.enqueued[0]["trace_id"], "trace-workbench-all")
+        self.assertEqual(queue.completed, [("tenant-a", "workbench", "all", 24)])
 
-    def test_workbench_refresh_handler_completes_all_after_aggregate_only_event(self) -> None:
-        class FakeBuilder:
-            def __init__(self) -> None:
-                self.calls: list[tuple[str, object]] = []
 
-            def refresh_workbench_all_scope_from_active_shards(
-                self,
-                scope_key: str,
-                *,
-                source_version: object = None,
-            ) -> dict[str, object]:
-                self.calls.append((scope_key, source_version))
-                return {"scope_key": scope_key, "aggregate_only": True, "active_generation_id": "gen-all"}
 
-        class FakeQueue:
-            def __init__(self) -> None:
-                self.completed: list[tuple[str, str, str, object]] = []
 
-            def complete_read_model_refresh(
-                self,
-                *,
-                tenant_id: str,
-                scope_type: str,
-                scope_key: str,
-                source_version: object = None,
-            ) -> None:
-                self.completed.append((tenant_id, scope_type, scope_key, source_version))
-
-        builder = FakeBuilder()
-        queue = FakeQueue()
-        service = WorkbenchReadModelRefreshService(projection_builder=builder, queue_repository=queue)
-        event = RuntimeQueueEvent(
-            event_id="event-all-aggregate",
-            tenant_id="tenant-a",
-            event_type="workbench.read_model.refresh",
-            aggregate_type="read_model",
-            aggregate_id="all",
-            scope_type="workbench",
-            scope_key="all",
-            dedupe_key=None,
-            payload={"scope_key": "all", "aggregate_only": True, "source_version": 9},
-            attempts=1,
-            status="processing",
-        )
-
-        result = service.handle_runtime_event(event)
-
-        self.assertEqual(builder.calls, [("all", 9)])
-        self.assertEqual(queue.completed, [("tenant-a", "workbench", "all", 9)])
-        self.assertEqual(result["active_generation_id"], "gen-all")
-
-    def test_workbench_refresh_handler_does_not_complete_dirty_scope_when_all_aggregate_did_not_publish(self) -> None:
-        class FakeBuilder:
-            def refresh_workbench_all_scope_from_active_shards(
-                self,
-                scope_key: str,
-                *,
-                source_version: object = None,
-            ) -> dict[str, object]:
-                return {
-                    "scope_key": scope_key,
-                    "aggregate_only": True,
-                    "read_model_status": "refreshing",
-                    "active_generation_id": None,
-                }
-
-        class FakeQueue:
-            def __init__(self) -> None:
-                self.completed: list[tuple[str, str, str, object]] = []
-
-            def complete_read_model_refresh(
-                self,
-                *,
-                tenant_id: str,
-                scope_type: str,
-                scope_key: str,
-                source_version: object = None,
-            ) -> None:
-                self.completed.append((tenant_id, scope_type, scope_key, source_version))
-
-        queue = FakeQueue()
-        service = WorkbenchReadModelRefreshService(projection_builder=FakeBuilder(), queue_repository=queue)
-        event = RuntimeQueueEvent(
-            event_id="event-all-aggregate-miss",
-            tenant_id="tenant-a",
-            event_type="workbench.read_model.refresh",
-            aggregate_type="read_model",
-            aggregate_id="all",
-            scope_type="workbench",
-            scope_key="all",
-            dedupe_key=None,
-            payload={"scope_key": "all", "aggregate_only": True, "source_version": 9},
-            attempts=1,
-            status="processing",
-        )
-
-        with self.assertRaisesRegex(RuntimeError, "workbench_all_scope_aggregate_not_published"):
-            service.handle_runtime_event(event)
-
-        self.assertEqual(queue.completed, [])
-
-    def test_workbench_refresh_handler_completes_all_when_aggregate_publish_is_confirmed_despite_self_dirty_status(self) -> None:
-        class FakeBuilder:
-            def refresh_workbench_all_scope_from_active_shards(
-                self,
-                scope_key: str,
-                *,
-                source_version: object = None,
-            ) -> dict[str, object]:
-                return {
-                    "scope_key": scope_key,
-                    "aggregate_only": True,
-                    "aggregate_published": True,
-                    "read_model_status": "refreshing",
-                    "active_generation_id": "workbench:all:published",
-                }
-
-        class FakeQueue:
-            def __init__(self) -> None:
-                self.completed: list[tuple[str, str, str, object]] = []
-
-            def complete_read_model_refresh(
-                self,
-                *,
-                tenant_id: str,
-                scope_type: str,
-                scope_key: str,
-                source_version: object = None,
-            ) -> None:
-                self.completed.append((tenant_id, scope_type, scope_key, source_version))
-
-        queue = FakeQueue()
-        service = WorkbenchReadModelRefreshService(projection_builder=FakeBuilder(), queue_repository=queue)
-        event = RuntimeQueueEvent(
-            event_id="event-all-aggregate-self-dirty",
-            tenant_id="tenant-a",
-            event_type="workbench.read_model.refresh",
-            aggregate_type="read_model",
-            aggregate_id="all",
-            scope_type="workbench",
-            scope_key="all",
-            dedupe_key=None,
-            payload={"scope_key": "all", "aggregate_only": True, "source_version": 9},
-            attempts=1,
-            status="processing",
-        )
-
-        result = service.handle_runtime_event(event)
-
-        self.assertEqual(result["active_generation_id"], "workbench:all:published")
-        self.assertEqual(queue.completed, [("tenant-a", "workbench", "all", 9)])
-
-    def test_workbench_refresh_handler_warms_homepage_pages_after_publish(self) -> None:
+    def test_workbench_refresh_handler_returns_publish_without_sync_cache_warmup(self) -> None:
         class FakeBuilder:
             def rebuild_workbench_read_model_scope(
                 self,
@@ -7095,6 +6064,9 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             ) -> dict[str, object]:
                 return {"scope_key": scope_key, "active_generation_id": "gen-2026-05", "source_version": source_version}
 
+            def get_workbench_groups_page(self, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("refresh publish must not query Workbench pages")
+
         class FakeQueue:
             def __init__(self) -> None:
                 self.completed: list[tuple[str, str, str, object]] = []
@@ -7109,14 +6081,13 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             ) -> None:
                 self.completed.append((tenant_id, scope_type, scope_key, source_version))
 
-        warmed: list[str] = []
+        queue = FakeQueue()
         service = WorkbenchReadModelRefreshService(
             projection_builder=FakeBuilder(),
-            queue_repository=FakeQueue(),
-            post_refresh_warmer=lambda scope_key: warmed.append(scope_key) or {"warmed": True},
+            queue_repository=queue,
         )
         event = RuntimeQueueEvent(
-            event_id="event-month-warm",
+            event_id="event-month-no-warmup",
             tenant_id="tenant-a",
             event_type="workbench.read_model.refresh",
             aggregate_type="read_model",
@@ -7131,8 +6102,10 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
         result = service.handle_runtime_event(event)
 
-        self.assertEqual(warmed, ["2026-05"])
-        self.assertEqual(result["cache_warmup"], {"warmed": True})
+        self.assertEqual(queue.completed, [("tenant-a", "workbench", "2026-05", 17)])
+        self.assertEqual(result["active_generation_id"], "gen-2026-05")
+        self.assertNotIn("cache_warmup", result)
+
 
     def test_import_state_invalidation_enqueues_workbench_month_scopes_before_all_aggregate(self) -> None:
         class FakeQueue:
@@ -7288,58 +6261,6 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             bank_account_balance_calls,
             [{"scope_type": "bank_account_balance", "scope_key": "all", "reason": "import_state_changed"}],
         )
-
-    def test_workbench_refresh_handler_reports_warmup_error_without_failing_publish(self) -> None:
-        class FakeBuilder:
-            def refresh_workbench_all_scope_from_active_shards(
-                self,
-                scope_key: str,
-                *,
-                source_version: object = None,
-            ) -> dict[str, object]:
-                return {"scope_key": scope_key, "aggregate_only": True, "active_generation_id": "gen-all"}
-
-        class FakeQueue:
-            def __init__(self) -> None:
-                self.completed: list[tuple[str, str, str, object]] = []
-
-            def complete_read_model_refresh(
-                self,
-                *,
-                tenant_id: str,
-                scope_type: str,
-                scope_key: str,
-                source_version: object = None,
-            ) -> None:
-                self.completed.append((tenant_id, scope_type, scope_key, source_version))
-
-        queue = FakeQueue()
-        service = WorkbenchReadModelRefreshService(
-            projection_builder=FakeBuilder(),
-            queue_repository=queue,
-            post_refresh_warmer=lambda _scope_key: (_ for _ in ()).throw(RuntimeError("redis unavailable")),
-        )
-        event = RuntimeQueueEvent(
-            event_id="event-all-warm-error",
-            tenant_id="tenant-a",
-            event_type="workbench.read_model.refresh",
-            aggregate_type="read_model",
-            aggregate_id="all",
-            scope_type="workbench",
-            scope_key="all",
-            dedupe_key=None,
-            payload={"scope_key": "all", "aggregate_only": True, "source_version": 18},
-            attempts=1,
-            status="processing",
-        )
-
-        result = service.handle_runtime_event(event)
-
-        self.assertEqual(queue.completed, [("tenant-a", "workbench", "all", 18)])
-        self.assertEqual(result["active_generation_id"], "gen-all")
-        self.assertEqual(result["cache_warmup"], {"status": "failed", "error": "redis unavailable"})
-
-
 
     def test_sql_projection_prevents_same_invoice_identity_in_paired_and_open_zones(self) -> None:
         builder = WorkbenchSqlProjectionBuilder(

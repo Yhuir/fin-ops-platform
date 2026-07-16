@@ -1,6 +1,6 @@
 # 税金抵扣模块边界与 I/O
 
-日期：2026-06-26
+日期：2026-07-16
 
 ## 模块化状态
 
@@ -17,7 +17,7 @@
 
 - 税金抵扣页面查询、认证导入、抵扣计划、税金 read model。
 - `tax_offset` scoped incremental projection。
-- 与成本统计共享 cost/tax projection worker 时保持独立 scope。
+- 税金 projection 由 `tax_offset_sql_projection.py` 独立拥有；兼容 `cost-tax` worker 只组装税金 builder，不共享成本投影代码或 scope。
 - 抵扣计划保存和认证导入直接确认路径返回 `tax_offset` write target envelope，前端保存/导入后优先等待服务端返回的 operation barrier targets。
 
 ### 不负责
@@ -65,13 +65,13 @@
 | Backend route | `backend/src/fin_ops_platform/app/routes_tax.py` |
 | Backend service | `tax_offset_service.py`、`tax_offset_query_service.py`、`tax_offset_runtime_service.py`、`tax_offset_plan_service.py`、`tax_offset_read_model_service.py` |
 | Import services | `tax_certified_import_service.py`、`tax_certified_import_application_service.py`、`tax_certified_import_job_service.py` |
-| Repository / SQL | `tax_offset_read_model_repository.py`、`cost_tax_sql_projection.py`、`postgres_repositories/tax_offset_page_audit.py` |
+| Repository / SQL | `tax_offset_read_model_repository.py`、`tax_offset_sql_projection.py`、`postgres_repositories/tax_offset_page_audit.py` |
 | Worker/read model | `tax_offset_read_model_refresh.py`、`tax_offset_derived_lifecycle_executor.py`、`tax_offset_cache_warmup_executor.py`、`tax_offset_worker_rebuild_executor.py` |
 | Tests | `tests/test_tax_offset*.py`、`web/src/test/Tax*.test.*`、`web/e2e/tax-offset-flow.spec.ts` |
 
 ## 依赖方向
 
-- 允许依赖：cost/tax projection, read model query gateway, certified import job service。
+- 允许依赖：tax-offset projection、read model query gateway、certified import job service。
 - 必须通过：TaxOffsetQueryService for reads, application/import service for writes。
 - 禁止绕过：直接 SQL 写 read model；把成本统计 parent aggregate 当成税金事实源。
 - 禁止污染：relation command/UoW/repository 不得把 `tax_offset` 当作 relation downstream；页面不得从 relation 状态推断发票是否应进入税金计划。

@@ -1,5 +1,7 @@
 # 2026-06-12 生产同步 Repair 执行报告
 
+> 历史归档：本文只记录 2026-06-12 当时的生产执行事实，不是当前运行时合同。文中旧 Workbench 全局聚合函数及 lane 已于 2026-07-16 删除；当前合同以 `docs/operations/runtime-worker-governance.md` 和 `docs/architecture/module-boundaries/read-model-contracts.md` 为准。
+
 ## 范围
 
 - 目标：记录 2026-06-12 生产同步闭环执行过程，从 legacy scope repair 到 RabbitMQ real consumers 切换。

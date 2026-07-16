@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict, fields, is_dataclass
 import hashlib
 import json
 from typing import Any
 
+from fin_ops_platform.services.oa_adapter import OAApplicationRecord, OAReadStatus
 from fin_ops_platform.services.postgres_repositories.common import (
     decimal_text,
     jsonb,
@@ -16,6 +17,8 @@ from fin_ops_platform.services.postgres_repositories.common import (
 
 class PostgresOaPendingPaymentAdmissionRepository:
     """Durable App boundary for externally admitted in-progress OA records."""
+
+    payment_admission_filtered = True
 
     def __init__(self, connection: Any) -> None:
         self._connection = connection
@@ -63,6 +66,73 @@ class PostgresOaPendingPaymentAdmissionRepository:
                 )
 
         run_in_transaction(self._connection, write)
+
+    def list_application_records(self, month: str, *, tenant_id: str = "default") -> list[OAApplicationRecord]:
+        normalized_scope_key = str(month or "").strip()
+        if len(normalized_scope_key) != 7 or normalized_scope_key[4] != "-":
+            raise ValueError("OA pending payment admission scope must be YYYY-MM.")
+        rows = self._connection.fetch_all(
+            """
+            select source_payload
+            from app.oa_pending_payment_admissions
+            where tenant_id = %s and scope_key = %s
+            order by oa_id
+            """,
+            (tenant_id, normalized_scope_key),
+        )
+        return _application_records(rows)
+
+    def list_all_application_records(self, *, tenant_id: str = "default") -> list[OAApplicationRecord]:
+        rows = self._connection.fetch_all(
+            """
+            select source_payload
+            from app.oa_pending_payment_admissions
+            where tenant_id = %s
+            order by scope_key desc, oa_id
+            """,
+            (tenant_id,),
+        )
+        return _application_records(rows)
+
+    def list_available_months(self, *, tenant_id: str = "default") -> list[str]:
+        rows = self._connection.fetch_all(
+            """
+            select distinct scope_key
+            from app.oa_pending_payment_admissions
+            where tenant_id = %s
+            order by scope_key desc
+            """,
+            (tenant_id,),
+        )
+        return [
+            scope_key
+            for row in list(rows or [])
+            if isinstance(row, dict) and (scope_key := str(row.get("scope_key") or "").strip())
+        ]
+
+    def list_application_records_by_row_ids(
+        self,
+        row_ids: list[str],
+        *,
+        tenant_id: str = "default",
+    ) -> list[OAApplicationRecord]:
+        normalized_row_ids = sorted({str(row_id or "").strip() for row_id in row_ids if str(row_id or "").strip()})
+        if not normalized_row_ids:
+            return []
+        rows = self._connection.fetch_all(
+            """
+            select source_payload
+            from app.oa_pending_payment_admissions
+            where tenant_id = %s and oa_id = any(%s::text[])
+            order by scope_key desc, oa_id
+            """,
+            (tenant_id, normalized_row_ids),
+        )
+        return _application_records(rows)
+
+    @staticmethod
+    def get_read_status() -> OAReadStatus:
+        return OAReadStatus(code="ready", message="PostgreSQL OA pending payment admission snapshot ready")
 
     def prune_scopes(self, current_scope_keys: list[str], *, tenant_id: str = "default") -> None:
         normalized_scope_keys: list[str] = []
@@ -115,3 +185,18 @@ def _record_payload(record: object) -> dict[str, Any]:
 def _payload_signature(payload: object) -> str:
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _application_records(rows: list[dict[str, Any]] | None) -> list[OAApplicationRecord]:
+    field_names = {field.name for field in fields(OAApplicationRecord)}
+    records: list[OAApplicationRecord] = []
+    for row in list(rows or []):
+        payload = row.get("source_payload") if isinstance(row, dict) else None
+        if not isinstance(payload, dict):
+            continue
+        values = {name: payload.get(name) for name in field_names if name in payload}
+        try:
+            records.append(OAApplicationRecord(**values))
+        except (TypeError, ValueError):
+            continue
+    return records

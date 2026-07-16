@@ -58,7 +58,7 @@
 - read model refresh 的事实源是 durable queue / `workbench_relation.read_model.refresh`，不是前端事件。
 - 批量账务 GET 必须保持只读；不能在列表读取路径执行 legacy relation repair。
 - 批量账务显式分页的 `page_size` 上限为 200，超限必须返回 `invalid_paging`，不能为了首屏性能静默全量返回或把 stale relation distribution 伪装成 fresh。
-- 批量账务 SQL 读路径分三类 I/O：未提交列表可用全量候选 loader；submit command 只能用 `bank_row_id + oa_row_ids` 窄 loader；已提交 bucket 必须用年份级 batch-accounting relation DTO 和银行行窄 payload。三者不能相互复用来图省事，否则会重新引入全量扫描、12 个月循环和读侧刷新竞争；缺少年份级 submitted relation reader 时必须 fail closed 为 unavailable，不能回退 `list_by_month`。
+- 批量账务 SQL 读路径分三类 I/O：未提交列表只用年份候选 loader；submit command 只用 `bank_row_id + oa_row_ids` 窄 loader；已提交 bucket 只用年份级 batch-accounting relation DTO 和银行行窄 payload。三者不能相互复用，也不能回退 Workbench full-page builder；缺少对应 loader/reader 时必须 fail closed 为 unavailable。
 
 ## 影响面清单
 

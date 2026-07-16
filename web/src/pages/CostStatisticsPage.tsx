@@ -14,17 +14,16 @@ import CostStatisticsTable, {
 } from "../components/cost-statistics/CostStatisticsTable";
 import CostTransactionDetailModal from "../components/cost-statistics/CostTransactionDetailModal";
 import { useAppChrome } from "../contexts/AppChromeContext";
+import { useAppStatusOverview } from "../contexts/AppHealthStatusContext";
 import { DEFAULT_MONTH } from "../contexts/MonthContext";
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
 import {
   exportCostStatisticsView,
-  fetchCostStatisticsExplorer,
+  fetchCostStatisticsExplorerPage,
   fetchCostStatisticsTagRules,
   fetchCostStatisticsExportPreview,
   fetchCostTransactionDetail,
-  getCachedCostStatisticsExplorer,
-  clearCostStatisticsExplorerCache,
   saveCostStatisticsTagRules,
   type CostExportParams,
   type PreviewCostExportParams,
@@ -35,11 +34,14 @@ import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEven
 import { importWorkflowPath } from "../features/imports/importRoutes";
 import { waitForOperationFreshness, type OperationBarrierTarget } from "../features/operationBarrier/api";
 import type {
-  CostBankAccount,
+  CostBankExplorerRow,
+  CostBankTagPrimaryExplorerRow,
+  CostBankTagSubExplorerRow,
   CostExpenseTypeExplorerRow,
   CostProjectScope,
   CostProjectExplorerRow,
-  CostStatisticsExplorer,
+  CostStatisticsExplorerPage,
+  CostStatisticsExplorerPageRequest,
   CostStatisticsExportPreview,
   CostStatisticsTagRules,
   CostTimeRow,
@@ -50,6 +52,17 @@ type CostViewMode = "time" | "project" | "bank" | "expenseType" | "bankTag";
 type RangeScopeMode = "all" | "year" | "month";
 type ExplorerScopeMode = RangeScopeMode;
 type ScopePickerPanel = "scope";
+type EffectiveCostPageState = "fresh" | "loading" | "refreshing" | "stale" | "unavailable" | "error";
+
+type LoadedCostStatisticsExplorer = {
+  requestKey: string;
+  payload: CostStatisticsExplorerPage;
+};
+
+type CostStatisticsExportReferenceData = {
+  projects: CostProjectExplorerRow[];
+  expenseTypes: CostExpenseTypeExplorerRow[];
+};
 
 type CostStatisticsPageSession = {
   viewMode: CostViewMode;
@@ -68,43 +81,6 @@ type CostStatisticsPageSession = {
   bankTagScopeMode: ExplorerScopeMode;
   bankTagScopeYear: string;
   bankTagScopeMonth: string;
-};
-
-type ProjectExpenseTypeRow = {
-  expenseType: string;
-  totalAmount: string;
-  transactionCount: number;
-  percentageLabel: string;
-};
-
-type ExpenseTypeExplorerDisplayRow = CostExpenseTypeExplorerRow & {
-  percentageLabel: string;
-};
-
-type CostBankExplorerRow = {
-  paymentAccountLabel: string;
-  totalAmount: string;
-  transactionCount: number;
-  projectCount: number;
-  percentageLabel: string;
-};
-
-type CostBankTagPrimaryRow = {
-  primaryLabel: string;
-  expenseAmount: string;
-  incomeAmount: string;
-  expenseTransactionCount: number;
-  incomeTransactionCount: number;
-  subTagCount: number;
-};
-
-type CostBankTagSubRow = {
-  primaryLabel: string;
-  subLabel: string;
-  expenseAmount: string;
-  incomeAmount: string;
-  expenseTransactionCount: number;
-  incomeTransactionCount: number;
 };
 
 type ScopeRangePickerProps = {
@@ -147,48 +123,6 @@ function getCostTimeRowRenderKey(row: CostTimeRow, index: number) {
     row.amount,
     String(index),
   ].join("|");
-}
-
-function moneyToNumber(value: string) {
-  const parsed = Number(String(value || "0").replace(/,/g, ""));
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function formatMoney(value: number) {
-  return value.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
-
-function sumCostTimeRows(rows: CostTimeRow[]) {
-  return rows.reduce((sum, row) => sum + moneyToNumber(row.amount), 0);
-}
-
-function isIncomeRow(row: CostTimeRow) {
-  return row.direction.trim() === "收入";
-}
-
-function summarizeDirectionAmounts(rows: CostTimeRow[]) {
-  let expenseAmount = 0;
-  let incomeAmount = 0;
-  let expenseTransactionCount = 0;
-  let incomeTransactionCount = 0;
-  for (const row of rows) {
-    if (isIncomeRow(row)) {
-      incomeAmount += moneyToNumber(row.amount);
-      incomeTransactionCount += 1;
-    } else {
-      expenseAmount += moneyToNumber(row.amount);
-      expenseTransactionCount += 1;
-    }
-  }
-  return {
-    expenseAmount: formatMoney(expenseAmount),
-    incomeAmount: formatMoney(incomeAmount),
-    expenseTransactionCount,
-    incomeTransactionCount,
-  };
 }
 
 function formatCostTradeTime(value: string) {
@@ -237,28 +171,6 @@ function TransactionIdentity({ label, tradeTime }: { label: string; tradeTime: s
   );
 }
 
-function groupProjectExpenseTypes(rows: CostTimeRow[]) {
-  const grouped = new Map<string, { totalAmount: number; transactionCount: number }>();
-  const projectTotalAmount = rows.reduce((sum, row) => sum + Number(row.amount.replace(/,/g, "")), 0);
-  for (const row of rows) {
-    const bucket = grouped.get(row.expenseType) ?? { totalAmount: 0, transactionCount: 0 };
-    bucket.totalAmount += Number(row.amount.replace(/,/g, ""));
-    bucket.transactionCount += 1;
-    grouped.set(row.expenseType, bucket);
-  }
-  return Array.from(grouped.entries())
-    .map<ProjectExpenseTypeRow>(([expenseType, bucket]) => ({
-      expenseType,
-      totalAmount: bucket.totalAmount.toLocaleString("en-US", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }),
-      transactionCount: bucket.transactionCount,
-      percentageLabel: `${((bucket.totalAmount / (projectTotalAmount || 1)) * 100).toFixed(1)}%`,
-    }))
-    .sort((left, right) => Number(right.totalAmount.replace(/,/g, "")) - Number(left.totalAmount.replace(/,/g, "")));
-}
-
 function buildMonthDateBounds(month: string) {
   const [yearText, monthText] = month.split("-");
   const year = Number(yearText);
@@ -273,183 +185,11 @@ function normalizeDateRange(startDate: string, endDate: string) {
   return startDate <= endDate ? { startDate, endDate } : { startDate: endDate, endDate: startDate };
 }
 
-function buildProjectRowsFromTimeRows(rows: CostTimeRow[]) {
-  const grouped = new Map<string, { totalAmount: number; transactionCount: number; expenseTypes: Set<string> }>();
-  const totalAmount = rows.reduce((sum, row) => sum + Number(row.amount.replace(/,/g, "")), 0);
-
-  for (const row of rows) {
-    const bucket = grouped.get(row.projectName) ?? {
-      totalAmount: 0,
-      transactionCount: 0,
-      expenseTypes: new Set<string>(),
-    };
-    bucket.totalAmount += Number(row.amount.replace(/,/g, ""));
-    bucket.transactionCount += 1;
-    bucket.expenseTypes.add(row.expenseType);
-    grouped.set(row.projectName, bucket);
-  }
-
-  return Array.from(grouped.entries())
-    .map<CostProjectExplorerRow>(([projectName, bucket]) => ({
-      projectName,
-      totalAmount: bucket.totalAmount.toLocaleString("en-US", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }),
-      transactionCount: bucket.transactionCount,
-      expenseTypeCount: bucket.expenseTypes.size,
-      percentageLabel: `${((bucket.totalAmount / (totalAmount || 1)) * 100).toFixed(1)}%`,
-    }))
-    .sort((left, right) => Number(right.totalAmount.replace(/,/g, "")) - Number(left.totalAmount.replace(/,/g, "")));
-}
-
-function buildBankRowsFromTimeRowsAndAccounts(rows: CostTimeRow[], accounts: CostBankAccount[]) {
-  const grouped = new Map<
-    string,
-    { totalAmount: number; transactionCount: number; projects: Set<string> }
-  >();
-  const totalAmount = sumCostTimeRows(rows);
-
-  for (const account of accounts) {
-    const label = account.paymentAccountLabel.trim();
-    if (!label || grouped.has(label)) {
-      continue;
-    }
-    grouped.set(label, {
-      totalAmount: 0,
-      transactionCount: 0,
-      projects: new Set<string>(),
-    });
-  }
-
-  for (const row of rows) {
-    const label = row.paymentAccountLabel.trim() || "未识别账户";
-    const bucket = grouped.get(label) ?? {
-      totalAmount: 0,
-      transactionCount: 0,
-      projects: new Set<string>(),
-    };
-    bucket.totalAmount += moneyToNumber(row.amount);
-    bucket.transactionCount += 1;
-    bucket.projects.add(row.projectName);
-    grouped.set(label, bucket);
-  }
-
-  return Array.from(grouped.entries())
-    .map<CostBankExplorerRow>(([paymentAccountLabel, bucket]) => ({
-      paymentAccountLabel,
-      totalAmount: formatMoney(bucket.totalAmount),
-      transactionCount: bucket.transactionCount,
-      projectCount: bucket.projects.size,
-      percentageLabel: `${((bucket.totalAmount / (totalAmount || 1)) * 100).toFixed(1)}%`,
-    }))
-    .sort((left, right) => {
-      const amountDelta = moneyToNumber(right.totalAmount) - moneyToNumber(left.totalAmount);
-      if (amountDelta !== 0) {
-        return amountDelta;
-      }
-      return left.paymentAccountLabel.localeCompare(right.paymentAccountLabel, "zh-CN");
-    });
-}
-
-function bankTagPrimaryLabel(row: CostTimeRow) {
-  return row.bankTagPrimaryLabel || row.bankTagLabelPath[0] || row.bankTagLabel || "未标记";
-}
-
-function bankTagSubLabel(row: CostTimeRow) {
-  return row.bankTagSubLabel || row.bankTagLabelPath[1] || row.bankTagLabel || bankTagPrimaryLabel(row);
-}
-
-function buildBankTagPrimaryRowsFromTimeRows(rows: CostTimeRow[]) {
-  const grouped = new Map<string, { rows: CostTimeRow[]; subTags: Set<string> }>();
-
-  for (const row of rows) {
-    const primaryLabel = bankTagPrimaryLabel(row);
-    const bucket = grouped.get(primaryLabel) ?? {
-      rows: [],
-      subTags: new Set<string>(),
-    };
-    bucket.rows.push(row);
-    bucket.subTags.add(bankTagSubLabel(row));
-    grouped.set(primaryLabel, bucket);
-  }
-
-  return Array.from(grouped.entries())
-    .map<CostBankTagPrimaryRow>(([primaryLabel, bucket]) => ({
-      primaryLabel,
-      ...summarizeDirectionAmounts(bucket.rows),
-      subTagCount: bucket.subTags.size,
-    }))
-    .sort((left, right) => (
-      moneyToNumber(right.expenseAmount) + moneyToNumber(right.incomeAmount)
-      - moneyToNumber(left.expenseAmount) - moneyToNumber(left.incomeAmount)
-    ));
-}
-
-function buildBankTagSubRowsFromTimeRows(rows: CostTimeRow[]) {
-  const grouped = new Map<string, CostTimeRow[]>();
-
-  for (const row of rows) {
-    const primaryLabel = bankTagPrimaryLabel(row);
-    const subLabel = bankTagSubLabel(row);
-    const groupKey = `${primaryLabel}\u0000${subLabel}`;
-    const bucket = grouped.get(groupKey) ?? [];
-    bucket.push(row);
-    grouped.set(groupKey, bucket);
-  }
-
-  return Array.from(grouped.entries())
-    .map<CostBankTagSubRow>(([groupKey, bucket]) => {
-      const [primaryLabel, subLabel] = groupKey.split("\u0000");
-      return {
-        primaryLabel,
-        subLabel,
-        ...summarizeDirectionAmounts(bucket),
-      };
-    })
-    .sort((left, right) => (
-      moneyToNumber(right.expenseAmount) + moneyToNumber(right.incomeAmount)
-      - moneyToNumber(left.expenseAmount) - moneyToNumber(left.incomeAmount)
-    ));
-}
-
-function filterScopeTimeRows(
-  rows: CostTimeRow[],
-  mode: ExplorerScopeMode,
-  year: string,
-  month: string,
-) {
-  if (mode === "all") {
-    return rows;
-  }
-  if (mode === "year") {
-    return rows.filter((row) => row.tradeTime.startsWith(`${year}-`));
-  }
-  if (mode === "month") {
-    return rows.filter((row) => row.tradeTime.startsWith(month));
-  }
-  return rows;
-}
-
-function getExplorerRowsDateRange(rows: CostTimeRow[]) {
-  const dates = rows
-    .map((row) => row.tradeTime.slice(0, 10))
-    .filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value))
-    .sort((left, right) => left.localeCompare(right, "zh-CN"));
-  if (dates.length === 0) {
-    return buildMonthDateBounds(DEFAULT_MONTH);
-  }
-  return {
-    startDate: dates[0],
-    endDate: dates[dates.length - 1],
-  };
-}
-
 function getScopeDateRange(
-  rows: CostTimeRow[],
   mode: ExplorerScopeMode,
   year: string,
   month: string,
+  availableYears: string[],
 ) {
   if (mode === "month") {
     return buildMonthDateBounds(month);
@@ -460,37 +200,11 @@ function getScopeDateRange(
       endDate: `${year}-12-31`,
     };
   }
-  return getExplorerRowsDateRange(rows);
-}
-
-function buildExpenseTypeRowsFromTimeRows(rows: CostTimeRow[]) {
-  const grouped = new Map<string, { totalAmount: number; transactionCount: number; projects: Set<string> }>();
-  const totalAmount = rows.reduce((sum, row) => sum + Number(row.amount.replace(/,/g, "")), 0);
-
-  for (const row of rows) {
-    const bucket = grouped.get(row.expenseType) ?? {
-      totalAmount: 0,
-      transactionCount: 0,
-      projects: new Set<string>(),
-    };
-    bucket.totalAmount += Number(row.amount.replace(/,/g, ""));
-    bucket.transactionCount += 1;
-    bucket.projects.add(row.projectName);
-    grouped.set(row.expenseType, bucket);
+  const years = availableYears.filter((value) => /^\d{4}$/.test(value)).sort();
+  if (years.length === 0) {
+    return buildMonthDateBounds(DEFAULT_MONTH);
   }
-
-  return Array.from(grouped.entries())
-    .map<ExpenseTypeExplorerDisplayRow>(([expenseType, bucket]) => ({
-      expenseType,
-      totalAmount: bucket.totalAmount.toLocaleString("en-US", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }),
-      transactionCount: bucket.transactionCount,
-      projectCount: bucket.projects.size,
-      percentageLabel: `${((bucket.totalAmount / (totalAmount || 1)) * 100).toFixed(1)}%`,
-    }))
-    .sort((left, right) => Number(right.totalAmount.replace(/,/g, "")) - Number(left.totalAmount.replace(/,/g, "")));
+  return { startDate: `${years[0]}-01-01`, endDate: `${years[years.length - 1]}-12-31` };
 }
 
 function getCostStatisticsLoadErrorMessage(error: unknown) {
@@ -514,32 +228,6 @@ function getCostStatisticsActionErrorMessage(error: unknown) {
     }
   }
   return "成本统计规则保存失败，请稍后重试。";
-}
-
-function localCostTransactionDetailFromRow(row: CostTimeRow, month: string): CostTransactionDetail {
-  return {
-    month: row.tradeTime.slice(0, 7) || month,
-    transaction: {
-      id: row.transactionId,
-      projectName: row.projectName || "未配对OA",
-      expenseType: row.expenseType,
-      expenseContent: row.expenseContent,
-      tradeTime: row.tradeTime,
-      direction: row.direction,
-      amount: row.amount,
-      counterpartyName: row.counterpartyName,
-      paymentAccountLabel: row.paymentAccountLabel,
-      oaApplicant: "—",
-      remark: row.remark,
-      summaryFields: {},
-      detailFields: {},
-      bankTagCode: row.bankTagCode,
-      bankTagLabel: row.bankTagLabel,
-      bankTagPrimaryLabel: row.bankTagPrimaryLabel,
-      bankTagSubLabel: row.bankTagSubLabel,
-      bankTagLabelPath: row.bankTagLabelPath,
-    },
-  };
 }
 
 function ScopeRangePicker({
@@ -677,6 +365,7 @@ function isCostStatisticsPageSession(value: unknown): value is CostStatisticsPag
 export default function CostStatisticsPage() {
   const navigate = useNavigate();
   const { setWorkbenchHeaderActions } = useAppChrome();
+  const appStatusOverview = useAppStatusOverview();
   const { canAdminAccess, canMutateData } = useSessionPermissions();
   const defaultMonthBounds = buildMonthDateBounds(DEFAULT_MONTH);
   const costPageSession = usePageSessionState<CostStatisticsPageSession>({
@@ -728,14 +417,12 @@ export default function CostStatisticsPage() {
   const timeScopeMonth = costSession.timeScopeMonth;
   const setTimeScopeMonth = (value: SetStateAction<string>) => setCostSessionField("timeScopeMonth", value);
 
-  const [explorerData, setExplorerData] = useState<CostStatisticsExplorer | null>(() =>
-    getCachedCostStatisticsExplorer(DEFAULT_MONTH, "active"),
-  );
-  const [exportReferenceData, setExportReferenceData] = useState<CostStatisticsExplorer | null>(() =>
-    getCachedCostStatisticsExplorer("all", "active"),
-  );
+  const [loadedExplorer, setLoadedExplorer] = useState<LoadedCostStatisticsExplorer | null>(null);
+  const [exportReferenceData, setExportReferenceData] = useState<CostStatisticsExportReferenceData | null>(null);
   const [transactionDetail, setTransactionDetail] = useState<CostTransactionDetail | null>(null);
   const [isExplorerLoading, setIsExplorerLoading] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [isExportReferenceLoading, setIsExportReferenceLoading] = useState(false);
   const [detailLoadingMessage, setDetailLoadingMessage] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
@@ -809,6 +496,17 @@ export default function CostStatisticsPage() {
   const [selectedBankTagSubLabel, setSelectedBankTagSubLabel] = useState<string | null>(null);
   const [selectedBankTagTransactionId, setSelectedBankTagTransactionId] = useState<string | null>(null);
   const scopeControlsRef = useRef<HTMLDivElement | null>(null);
+  const pageTitleRef = useRef<HTMLHeadingElement | null>(null);
+  const headerControlsRef = useRef<HTMLDivElement | null>(null);
+  const headerActionsRef = useRef<HTMLDivElement | null>(null);
+  const contentShellRef = useRef<HTMLElement | null>(null);
+  const lockStatusRef = useRef<HTMLDivElement | null>(null);
+  const lastLockedFocusRef = useRef<HTMLElement | null>(null);
+  const shouldRestoreFocusRef = useRef(false);
+  const observedAppStatusRef = useRef<{ scopeKey: string; status: string } | null>(null);
+  const exportReferenceRequestRef = useRef<AbortController | null>(null);
+  const loadMoreRequestRef = useRef<AbortController | null>(null);
+  const detailRequestRef = useRef<AbortController | null>(null);
 
   useLayoutEffect(() => {
     setWorkbenchHeaderActions({
@@ -821,38 +519,166 @@ export default function CostStatisticsPage() {
     };
   }, [canMutateData, navigate, setWorkbenchHeaderActions]);
 
-  const explorerMonth =
-    viewMode === "project" || viewMode === "bank"
-      ? "all"
-      : viewMode === "time"
-        ? timeScopeMode === "month"
-          ? timeScopeMonth
-          : "all"
-        : viewMode === "bankTag"
-          ? bankTagScopeMode === "month"
-            ? bankTagScopeMonth
-            : "all"
-        : expenseTypeScopeMode === "month"
+  const activeScopeMode = viewMode === "time"
+    ? timeScopeMode
+    : viewMode === "project"
+      ? projectScopeMode
+      : viewMode === "bank"
+        ? bankScopeMode
+        : viewMode === "expenseType"
+          ? expenseTypeScopeMode
+          : bankTagScopeMode;
+  const activeScopeYear = viewMode === "time"
+    ? timeScopeYear
+    : viewMode === "project"
+      ? projectScopeYear
+      : viewMode === "bank"
+        ? bankScopeYear
+        : viewMode === "expenseType"
+          ? expenseTypeScopeYear
+          : bankTagScopeYear;
+  const activeScopeMonth = viewMode === "time"
+    ? timeScopeMonth
+    : viewMode === "project"
+      ? projectScopeMonth
+      : viewMode === "bank"
+        ? bankScopeMonth
+        : viewMode === "expenseType"
           ? expenseTypeScopeMonth
-          : "all";
-  const currentCostStatisticsScopeKey = `${costProjectScope}:${explorerMonth}`;
-  function resetDetailSelection() {
+          : bankTagScopeMonth;
+  const explorerScope = activeScopeMode === "all"
+    ? "all"
+    : activeScopeMode === "year"
+      ? `year:${activeScopeYear}`
+      : activeScopeMonth;
+  const explorerView = viewMode === "expenseType"
+    ? "expense_type"
+    : viewMode === "bankTag"
+      ? "bank_tag"
+      : viewMode;
+  const explorerRequest: CostStatisticsExplorerPageRequest = {
+    scope: explorerScope,
+    view: explorerView,
+    projectScope: costProjectScope,
+    pageSize: 50,
+    ...(viewMode === "project" && selectedProjectName ? { projectName: selectedProjectName } : {}),
+    ...(viewMode === "project" && selectedProjectExpenseType ? { expenseType: selectedProjectExpenseType } : {}),
+    ...(viewMode === "bank" && selectedBankAccountLabel ? { paymentAccountLabel: selectedBankAccountLabel } : {}),
+    ...(viewMode === "bank" && selectedBankProjectName ? { projectName: selectedBankProjectName } : {}),
+    ...(viewMode === "expenseType" && selectedExpenseType ? { expenseType: selectedExpenseType } : {}),
+    ...(viewMode === "bankTag" && selectedBankTagPrimaryLabel
+      ? { bankTagPrimaryLabel: selectedBankTagPrimaryLabel }
+      : {}),
+    ...(viewMode === "bankTag" && selectedBankTagSubLabel ? { bankTagSubLabel: selectedBankTagSubLabel } : {}),
+  };
+  const explorerRequestKey = JSON.stringify(explorerRequest);
+  const currentCostStatisticsScopeKey = `${costProjectScope}:${activeScopeMode === "month" ? activeScopeMonth : "all"}`;
+  const appStatusCostScope = appStatusOverview?.domains
+    .flatMap((domain) => domain.readModelScopes)
+    .find((scope) => (
+      scope.readModelKey === "cost_statistics"
+      && scope.scopeKey === currentCostStatisticsScopeKey
+    ));
+  const appStatusReadModelStatus = appStatusCostScope?.status.trim().toLowerCase() ?? "";
+  const explorerData = loadedExplorer?.requestKey === explorerRequestKey
+    ? loadedExplorer.payload
+    : null;
+
+  const invalidateExportReferenceData = useCallback(() => {
+    exportReferenceRequestRef.current?.abort();
+    exportReferenceRequestRef.current = null;
+    loadMoreRequestRef.current?.abort();
+    loadMoreRequestRef.current = null;
+    setExportReferenceData(null);
+    setIsExportReferenceLoading(false);
+  }, []);
+
+  const resetDetailSelection = useCallback(() => {
+    detailRequestRef.current?.abort();
+    detailRequestRef.current = null;
     setTransactionDetail(null);
     setSelectedTimeTransactionId(null);
     setSelectedProjectTransactionId(null);
     setSelectedBankTransactionId(null);
     setSelectedExpenseTransactionId(null);
     setSelectedBankTagTransactionId(null);
-  }
+    setDetailLoadingMessage(null);
+  }, []);
 
   const handleDomainMutation = useCallback(() => {
-    clearCostStatisticsExplorerCache();
+    setLoadedExplorer(null);
+    invalidateExportReferenceData();
     setDomainRefreshNonce((current) => current + 1);
-  }, []);
+  }, [invalidateExportReferenceData]);
   const handleManualRefresh = useCallback(() => {
-    clearCostStatisticsExplorerCache();
+    setLoadedExplorer(null);
+    invalidateExportReferenceData();
     setDomainRefreshNonce((current) => current + 1);
-  }, []);
+  }, [invalidateExportReferenceData]);
+
+  useEffect(() => {
+    const observation = appStatusReadModelStatus
+      ? { scopeKey: currentCostStatisticsScopeKey, status: appStatusReadModelStatus }
+      : null;
+    const previous = observedAppStatusRef.current;
+    observedAppStatusRef.current = observation;
+    if (
+      observation
+      && previous
+      && previous.scopeKey === observation.scopeKey
+      && previous.status !== observation.status
+    ) {
+      handleDomainMutation();
+    }
+  }, [appStatusReadModelStatus, currentCostStatisticsScopeKey, handleDomainMutation]);
+
+  useEffect(() => {
+    let shouldRevalidate = false;
+    let lastRevalidationAt = 0;
+
+    const revalidate = () => {
+      const now = Date.now();
+      if (now - lastRevalidationAt < 500) {
+        return;
+      }
+      lastRevalidationAt = now;
+      shouldRevalidate = false;
+      handleManualRefresh();
+    };
+    const handleBlur = () => {
+      shouldRevalidate = true;
+    };
+    const handleFocus = () => {
+      if (shouldRevalidate) {
+        revalidate();
+      }
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        shouldRevalidate = true;
+        return;
+      }
+      if (shouldRevalidate) {
+        revalidate();
+      }
+    };
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) {
+        revalidate();
+      }
+    };
+
+    window.addEventListener("blur", handleBlur);
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("pageshow", handlePageShow);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.removeEventListener("blur", handleBlur);
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("pageshow", handlePageShow);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [handleManualRefresh]);
   const openTagRulesDrawer = useCallback(() => {
     setTagRulesError(null);
     setTagRulesSyncMessage(null);
@@ -927,6 +753,7 @@ export default function CostStatisticsPage() {
     setIsTagRulesSaving(true);
     setTagRulesError(null);
     setTagRulesSyncMessage("正在保存规则...");
+    invalidateExportReferenceData();
     try {
       const result = await saveCostStatisticsTagRules({
         expectedVersion: tagRules.version,
@@ -935,7 +762,6 @@ export default function CostStatisticsPage() {
       });
       setTagRules(result);
       setTagRuleDraftCodes(result.effectiveSelectedTagCodes);
-      clearCostStatisticsExplorerCache();
       const targets: OperationBarrierTarget[] = result.operationBarrierTargets.length > 0
         ? result.operationBarrierTargets
         : [{ readModelKey: "cost_statistics", scopeKey: currentCostStatisticsScopeKey, scopeType: "cost_statistics" }];
@@ -947,11 +773,8 @@ export default function CostStatisticsPage() {
           setTagRulesSyncMessage(status.fresh ? "成本统计已同步，正在刷新页面..." : "规则已保存，正在等待成本统计同步...");
         },
       });
-      const explorerPayload = await fetchCostStatisticsExplorer(explorerMonth, undefined, costProjectScope);
-      setExplorerData(explorerPayload);
-      if (explorerMonth === "all") {
-        setExportReferenceData(explorerPayload);
-      }
+      setLoadedExplorer(null);
+      setDomainRefreshNonce((current) => current + 1);
       setTagRulesSyncMessage(null);
       setIsTagRulesDrawerOpen(false);
     } catch (caught) {
@@ -963,7 +786,7 @@ export default function CostStatisticsPage() {
   }, [
     costProjectScope,
     currentCostStatisticsScopeKey,
-    explorerMonth,
+    invalidateExportReferenceData,
     isTagRulesSaving,
     tagRuleDraftCodes,
     tagRules,
@@ -973,36 +796,20 @@ export default function CostStatisticsPage() {
     const controller = new AbortController();
 
     async function loadExplorer() {
-      const cachedPayload = getCachedCostStatisticsExplorer(explorerMonth, costProjectScope);
-      const hasVisibleData = Boolean(explorerData || cachedPayload);
-
+      loadMoreRequestRef.current?.abort();
+      loadMoreRequestRef.current = null;
+      setIsLoadingMore(false);
       setLoadError(null);
       setExportFeedback(null);
-      setSelectedProjectName(null);
-      setSelectedProjectExpenseType(null);
-      setSelectedBankAccountLabel(null);
-      setSelectedBankProjectName(null);
-      setSelectedExpenseType(null);
-      setSelectedBankTagPrimaryLabel(null);
-      setSelectedBankTagSubLabel(null);
       resetDetailSelection();
-
-      if (cachedPayload) {
-        setExplorerData(cachedPayload);
-        setIsExplorerLoading(false);
-      } else if (hasVisibleData) {
-        setIsExplorerLoading(false);
-      } else {
-        setIsExplorerLoading(true);
-      }
+      setLoadedExplorer(null);
+      setIsExplorerLoading(true);
 
       try {
-        const payload = await fetchCostStatisticsExplorer(explorerMonth, controller.signal, costProjectScope);
+        const request = JSON.parse(explorerRequestKey) as CostStatisticsExplorerPageRequest;
+        const payload = await fetchCostStatisticsExplorerPage({ ...request, signal: controller.signal });
         if (!controller.signal.aborted) {
-          setExplorerData(payload);
-          if (explorerMonth === "all") {
-            setExportReferenceData(payload);
-          }
+          setLoadedExplorer({ requestKey: explorerRequestKey, payload });
         }
       } catch (caught) {
         if (!controller.signal.aborted) {
@@ -1017,33 +824,55 @@ export default function CostStatisticsPage() {
 
     void loadExplorer();
     return () => controller.abort();
-  }, [costProjectScope, domainRefreshNonce, explorerMonth]);
+  }, [domainRefreshNonce, explorerRequestKey]);
 
-  useEffect(() => {
-    const cachedPayload = getCachedCostStatisticsExplorer("all", costProjectScope);
-    if (cachedPayload) {
-      setExportReferenceData(cachedPayload);
-      return undefined;
+  async function loadMoreExplorerRows() {
+    if (!explorerData?.nextCursor || isLoadingMore) {
+      return;
     }
-
+    loadMoreRequestRef.current?.abort();
     const controller = new AbortController();
-
-    async function loadExportReferenceData() {
-      try {
-        const payload = await fetchCostStatisticsExplorer("all", controller.signal, costProjectScope);
-        if (!controller.signal.aborted) {
-          setExportReferenceData(payload);
-        }
-      } catch {
-        if (!controller.signal.aborted) {
-          setExportReferenceData(null);
-        }
+    loadMoreRequestRef.current = controller;
+    setIsLoadingMore(true);
+    setLoadError(null);
+    try {
+      const request = JSON.parse(explorerRequestKey) as CostStatisticsExplorerPageRequest;
+      const nextPage = await fetchCostStatisticsExplorerPage({
+        ...request,
+        cursor: explorerData.nextCursor,
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted) {
+        return;
+      }
+      setLoadedExplorer((current) => current?.requestKey === explorerRequestKey
+        ? {
+            requestKey: explorerRequestKey,
+            payload: {
+              ...current.payload,
+              rows: [...current.payload.rows, ...nextPage.rows],
+              nextCursor: nextPage.nextCursor,
+              rowCount: nextPage.rowCount,
+            },
+          }
+        : current);
+    } catch (caught) {
+      if (!controller.signal.aborted) {
+        setLoadError(getCostStatisticsLoadErrorMessage(caught));
+      }
+    } finally {
+      if (loadMoreRequestRef.current === controller) {
+        loadMoreRequestRef.current = null;
+        setIsLoadingMore(false);
       }
     }
+  }
 
-    void loadExportReferenceData();
-    return () => controller.abort();
-  }, [costProjectScope]);
+  useEffect(() => () => {
+    exportReferenceRequestRef.current?.abort();
+    loadMoreRequestRef.current?.abort();
+    detailRequestRef.current?.abort();
+  }, []);
 
 	  useEffect(() => {
 	    if (viewMode !== "time") {
@@ -1097,126 +926,28 @@ export default function CostStatisticsPage() {
 	    setTransactionDetail(null);
 	  }, [viewMode, bankTagScopeMode, bankTagScopeYear, bankTagScopeMonth]);
 
-  const timeRows = explorerData?.timeRows ?? [];
-  const bankFlowRows = explorerData?.bankFlowTimeRows ?? timeRows;
-  const availableScopeYears = useMemo(
-    () =>
-      Array.from(new Set([...timeRows, ...bankFlowRows].map((row) => row.tradeTime.slice(0, 4)).filter(Boolean))).sort(
-        (left, right) => right.localeCompare(left, "zh-CN"),
-      ),
-    [bankFlowRows, timeRows],
-  );
-  const filteredTimeRows = useMemo(
-    () =>
-      filterScopeTimeRows(
-        bankFlowRows,
-	        timeScopeMode,
-	        timeScopeYear,
-	        timeScopeMonth,
-	      ),
-	    [bankFlowRows, timeScopeMode, timeScopeYear, timeScopeMonth],
-	  );
-  const timeDirectionSummary = useMemo(() => summarizeDirectionAmounts(filteredTimeRows), [filteredTimeRows]);
-  const filteredProjectTimeRows = useMemo(
-    () =>
-      filterScopeTimeRows(
-        timeRows,
-	        projectScopeMode,
-	        projectScopeYear,
-	        projectScopeMonth,
-	      ),
-	    [projectScopeMode, projectScopeYear, projectScopeMonth, timeRows],
-	  );
-  const projectTotalAmount = useMemo(() => formatMoney(sumCostTimeRows(filteredProjectTimeRows)), [filteredProjectTimeRows]);
-  const projectRows = useMemo(() => buildProjectRowsFromTimeRows(filteredProjectTimeRows), [filteredProjectTimeRows]);
-  const filteredBankTimeRows = useMemo(
-    () =>
-      filterScopeTimeRows(
-        timeRows,
-	        bankScopeMode,
-	        bankScopeYear,
-	        bankScopeMonth,
-	      ),
-	    [bankScopeMode, bankScopeYear, bankScopeMonth, timeRows],
-	  );
-  const bankRows = useMemo(
-    () => buildBankRowsFromTimeRowsAndAccounts(filteredBankTimeRows, explorerData?.bankAccounts ?? []),
-    [explorerData, filteredBankTimeRows],
-  );
-  const bankTotalAmount = useMemo(() => formatMoney(sumCostTimeRows(filteredBankTimeRows)), [filteredBankTimeRows]);
-  const filteredExpenseTypeRows = useMemo(
-    () =>
-      filterScopeTimeRows(
-        timeRows,
-	        expenseTypeScopeMode,
-	        expenseTypeScopeYear,
-	        expenseTypeScopeMonth,
-	      ),
-	    [
-	      expenseTypeScopeMode,
-	      expenseTypeScopeYear,
-	      expenseTypeScopeMonth,
-	      timeRows,
-	    ],
-	  );
-  const expenseTypeTotalAmount = useMemo(() => formatMoney(sumCostTimeRows(filteredExpenseTypeRows)), [filteredExpenseTypeRows]);
-  const expenseTypeRows = useMemo(
-    () => buildExpenseTypeRowsFromTimeRows(filteredExpenseTypeRows),
-    [filteredExpenseTypeRows],
-  );
-  const filteredBankTagRows = useMemo(
-    () =>
-      filterScopeTimeRows(
-        bankFlowRows,
-	        bankTagScopeMode,
-	        bankTagScopeYear,
-	        bankTagScopeMonth,
-	      ),
-	    [bankFlowRows, bankTagScopeMode, bankTagScopeYear, bankTagScopeMonth],
-	  );
-  const bankTagDirectionSummary = useMemo(() => summarizeDirectionAmounts(filteredBankTagRows), [filteredBankTagRows]);
-  const bankTagPrimaryRows = useMemo(
-    () => buildBankTagPrimaryRowsFromTimeRows(filteredBankTagRows),
-    [filteredBankTagRows],
-  );
-
-  const selectedProjectRows = useMemo(
-    () => filteredProjectTimeRows.filter((row) => row.projectName === selectedProjectName),
-    [filteredProjectTimeRows, selectedProjectName],
-  );
-  const projectExpenseTypeRows = useMemo(() => groupProjectExpenseTypes(selectedProjectRows), [selectedProjectRows]);
-  const selectedProjectTransactionRows = useMemo(
-    () =>
-      selectedProjectExpenseType
-        ? selectedProjectRows.filter((row) => row.expenseType === selectedProjectExpenseType)
-        : [],
-    [selectedProjectExpenseType, selectedProjectRows],
-  );
-  const selectedExpenseTypeRows = useMemo(
-    () => filteredExpenseTypeRows.filter((row) => row.expenseType === selectedExpenseType),
-    [filteredExpenseTypeRows, selectedExpenseType],
-  );
-  const selectedBankRows = useMemo(
-    () => filteredBankTimeRows.filter((row) => row.paymentAccountLabel === selectedBankAccountLabel),
-    [filteredBankTimeRows, selectedBankAccountLabel],
-  );
-  const bankProjectRows = useMemo(() => buildProjectRowsFromTimeRows(selectedBankRows), [selectedBankRows]);
-  const selectedBankProjectRows = useMemo(
-    () => selectedBankRows.filter((row) => row.projectName === selectedBankProjectName),
-    [selectedBankRows, selectedBankProjectName],
-  );
-  const selectedBankTagPrimaryRows = useMemo(
-    () => filteredBankTagRows.filter((row) => bankTagPrimaryLabel(row) === selectedBankTagPrimaryLabel),
-    [filteredBankTagRows, selectedBankTagPrimaryLabel],
-  );
-  const bankTagSubRows = useMemo(
-    () => buildBankTagSubRowsFromTimeRows(selectedBankTagPrimaryRows),
-    [selectedBankTagPrimaryRows],
-  );
-  const selectedBankTagSubRows = useMemo(
-    () => selectedBankTagPrimaryRows.filter((row) => bankTagSubLabel(row) === selectedBankTagSubLabel),
-    [selectedBankTagPrimaryRows, selectedBankTagSubLabel],
-  );
+  const pageRows = explorerData?.rows ?? [];
+  const availableScopeYears = explorerData?.availableYears ?? [];
+  const filteredTimeRows = pageRows;
+  const projectRows = explorerData?.facets.projects ?? [];
+  const projectExpenseTypeRows = explorerData?.facets.expenseTypes ?? [];
+  const bankRows = explorerData?.facets.bankAccounts ?? [];
+  const bankProjectRows = explorerData?.facets.projects ?? [];
+  const expenseTypeRows = explorerData?.facets.expenseTypes ?? [];
+  const bankTagPrimaryRows = explorerData?.facets.bankTagPrimary ?? [];
+  const bankTagSubRows = explorerData?.facets.bankTagSub ?? [];
+  const selectedProjectTransactionRows = selectedProjectName && selectedProjectExpenseType ? pageRows : [];
+  const selectedBankProjectRows = selectedBankAccountLabel && selectedBankProjectName ? pageRows : [];
+  const selectedExpenseTypeRows = selectedExpenseType ? pageRows : [];
+  const selectedBankTagSubRows = selectedBankTagPrimaryLabel && selectedBankTagSubLabel ? pageRows : [];
+  const timeDirectionSummary = {
+    expenseAmount: explorerData?.summary.expenseAmount ?? "0.00",
+    incomeAmount: explorerData?.summary.incomeAmount ?? "0.00",
+  };
+  const bankTagDirectionSummary = timeDirectionSummary;
+  const projectTotalAmount = explorerData?.summary.totalAmount ?? "0.00";
+  const bankTotalAmount = explorerData?.summary.totalAmount ?? "0.00";
+  const expenseTypeTotalAmount = explorerData?.summary.totalAmount ?? "0.00";
 
   useEffect(() => {
     if (availableScopeYears.length === 0) {
@@ -1264,53 +995,149 @@ export default function CostStatisticsPage() {
   }, [availableScopeYears, bankTagScopeYear]);
 
   const exportProjectOptions = useMemo(
-    () => (exportReferenceData?.projectRows ?? []).map((row) => row.projectName),
+    () => (exportReferenceData?.projects ?? []).map((row) => row.projectName),
     [exportReferenceData],
   );
   const allExpenseTypeOptions = useMemo(
-    () => (exportReferenceData?.expenseTypeRows ?? []).map((row) => row.expenseType),
+    () => (exportReferenceData?.expenseTypes ?? []).map((row) => row.expenseType),
     [exportReferenceData],
   );
 
-  const projectExpenseTypeOptions = useMemo(() => {
-    if (projectExportNames.length === 0) {
-      return [];
-    }
-    const rows = exportReferenceData?.timeRows ?? [];
-    return Array.from(
-      new Set(rows.filter((row) => projectExportNames.includes(row.projectName)).map((row) => row.expenseType)),
-    ).sort((left, right) => left.localeCompare(right, "zh-CN"));
-  }, [exportReferenceData, projectExportNames]);
+  const projectExpenseTypeOptions = projectExportNames.length > 0 ? allExpenseTypeOptions : [];
 
-  const readModelStatus = explorerData?.readModelStatus?.trim().toLowerCase();
-  const isReadModelRefreshing = readModelStatus === "refreshing";
-  const isReadModelStale = readModelStatus === "stale";
+  const readModelStatus = explorerData?.readModelStatus?.trim().toLowerCase() ?? "";
+  const isReadModelRefreshing = readModelStatus === "refreshing"
+    || readModelStatus === "loading"
+    || readModelStatus === "pending"
+    || readModelStatus === "processing";
+  const isReadModelStale = readModelStatus === "stale"
+    || readModelStatus === "schema_mismatch"
+    || readModelStatus === "source_mismatch";
   const isReadModelUnavailable = readModelStatus === "unavailable"
     || readModelStatus === "failed"
-    || readModelStatus === "missing"
-    || readModelStatus === "schema_mismatch";
-  const isReadModelNonFresh = Boolean(readModelStatus && readModelStatus !== "fresh");
-  const readModelStatusMessage = isReadModelRefreshing
-    ? "成本统计读模型正在刷新，当前结果生成后会自动更新。"
-    : isReadModelStale
-      ? "成本统计读模型不是最新，当前结果刷新完成后会自动更新。"
-      : isReadModelUnavailable
-        ? "成本统计数据暂不可用，请等待后台刷新完成后重试。"
-        : null;
+    || readModelStatus === "missing";
+  const isReadModelNonFresh = Boolean(explorerData && readModelStatus !== "fresh");
+  const isAppStatusRefreshing = appStatusReadModelStatus === "loading"
+    || appStatusReadModelStatus === "pending"
+    || appStatusReadModelStatus === "processing"
+    || appStatusReadModelStatus === "refreshing";
+  const isAppStatusStale = appStatusReadModelStatus === "stale"
+    || appStatusReadModelStatus === "schema_mismatch"
+    || appStatusReadModelStatus === "source_mismatch";
+  const isAppStatusUnavailable = appStatusReadModelStatus === "failed"
+    || appStatusReadModelStatus === "unavailable"
+    || appStatusReadModelStatus === "missing";
+  const hasExplorerLoadError = Boolean(loadError) && !explorerData;
+  const effectiveCostPageState: EffectiveCostPageState = hasExplorerLoadError
+    ? "error"
+    : isReadModelUnavailable || isAppStatusUnavailable
+      ? "unavailable"
+      : isReadModelStale || isAppStatusStale
+        ? "stale"
+        : isReadModelRefreshing || isAppStatusRefreshing || isTagRulesSaving
+          ? "refreshing"
+          : isExplorerLoading || !explorerData
+            ? "loading"
+            : readModelStatus === "fresh"
+              ? "fresh"
+              : "stale";
+  const interactionLocked = effectiveCostPageState !== "fresh";
+  const lockStatusCopy = effectiveCostPageState === "error"
+    ? {
+        title: "无法确认成本数据状态",
+        detail: loadError || "网络恢复前页面保持锁定。",
+      }
+    : effectiveCostPageState === "unavailable"
+      ? {
+          title: "成本数据暂未就绪",
+          detail: "页面保持锁定，请重新检查或稍后再试。",
+        }
+      : effectiveCostPageState === "stale"
+        ? {
+            title: "正在更新至最新数据",
+            detail: "检测到事实已变化，旧数据暂不可操作。",
+          }
+        : effectiveCostPageState === "refreshing"
+          ? {
+              title: "成本数据正在同步",
+              detail: "当前页面已暂时锁定，完成后自动恢复。",
+            }
+          : {
+              title: "正在加载成本统计",
+              detail: "数据就绪后将自动开放操作。",
+            };
+  const lockStatusCanRetry = effectiveCostPageState === "error" || effectiveCostPageState === "unavailable";
+
+  useEffect(() => {
+    if (interactionLocked) {
+      const activeElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      const lockedRegions = [headerControlsRef.current, headerActionsRef.current, contentShellRef.current];
+      const ownsActiveFocus = Boolean(activeElement && (
+        lockedRegions.some((region) => region?.contains(activeElement))
+        || activeElement.closest(".cost-detail-modal, .export-center-modal, .cost-tag-rules-drawer")
+      ));
+      if (activeElement && ownsActiveFocus) {
+        lastLockedFocusRef.current = activeElement;
+        shouldRestoreFocusRef.current = true;
+        queueMicrotask(() => lockStatusRef.current?.focus());
+      }
+      setIsExportCenterOpen(false);
+      setExportPreview(null);
+      setTimeScopePanel(null);
+      setProjectScopePanel(null);
+      setBankScopePanel(null);
+      setExpenseTypeScopePanel(null);
+      setBankTagScopePanel(null);
+      invalidateExportReferenceData();
+      resetDetailSelection();
+      return;
+    }
+
+    if (!shouldRestoreFocusRef.current) {
+      return;
+    }
+    const currentFocus = document.activeElement;
+    if (
+      currentFocus instanceof HTMLElement
+      && currentFocus !== document.body
+      && !lockStatusRef.current?.contains(currentFocus)
+    ) {
+      shouldRestoreFocusRef.current = false;
+      lastLockedFocusRef.current = null;
+      return;
+    }
+    const previousFocus = lastLockedFocusRef.current;
+    shouldRestoreFocusRef.current = false;
+    lastLockedFocusRef.current = null;
+    queueMicrotask(() => {
+      if (
+        previousFocus?.isConnected
+        && !previousFocus.matches(":disabled")
+        && !previousFocus.closest("[inert]")
+      ) {
+        previousFocus.focus();
+        return;
+      }
+      pageTitleRef.current?.focus();
+    });
+  }, [interactionLocked, invalidateExportReferenceData, resetDetailSelection]);
 
   const isRootEmpty = !isExplorerLoading && !loadError && explorerData && !isReadModelNonFresh
     ? viewMode === "time"
-      ? filteredTimeRows.length === 0
+      ? explorerData.rowCount === 0
       : viewMode === "project"
-        ? filteredProjectTimeRows.length === 0
+        ? projectRows.length === 0
         : viewMode === "bank"
           ? bankRows.length === 0
           : viewMode === "bankTag"
-            ? filteredBankTagRows.length === 0
-          : filteredExpenseTypeRows.length === 0
+            ? bankTagPrimaryRows.length === 0
+          : expenseTypeRows.length === 0
     : false;
 
   async function openTransactionDetail(row: CostTimeRow, source: "time" | "project" | "bank" | "expenseType" | "bankTag") {
+    detailRequestRef.current?.abort();
+    const controller = new AbortController();
+    detailRequestRef.current = controller;
     setLoadError(null);
     setExportFeedback(null);
     setDetailLoadingMessage(`正在加载流水 ${row.transactionId} 的详情...`);
@@ -1329,23 +1156,27 @@ export default function CostStatisticsPage() {
     if (source === "bankTag") {
       setSelectedBankTagTransactionId(row.transactionId);
     }
-    const hasOaPairedRow = timeRows.some((candidate) => candidate.transactionId === row.transactionId);
-    if ((source === "time" || source === "bankTag") && !hasOaPairedRow) {
-      setTransactionDetail(localCostTransactionDetailFromRow(row, explorerData?.month ?? explorerMonth));
-      setDetailLoadingMessage(null);
-      return;
-    }
     try {
-      const payload = await fetchCostTransactionDetail(row.transactionId, undefined, costProjectScope);
-      setTransactionDetail(payload);
+      const payload = await fetchCostTransactionDetail(row.transactionId, controller.signal, costProjectScope);
+      if (!controller.signal.aborted) {
+        setTransactionDetail(payload);
+      }
     } catch {
-      setLoadError("流水详情加载失败，请稍后重试。");
+      if (!controller.signal.aborted) {
+        setLoadError("流水详情加载失败，请稍后重试。");
+      }
     } finally {
-      setDetailLoadingMessage(null);
+      if (detailRequestRef.current === controller) {
+        detailRequestRef.current = null;
+        setDetailLoadingMessage(null);
+      }
     }
   }
 
   function handleViewModeChange(nextViewMode: CostViewMode) {
+    exportReferenceRequestRef.current?.abort();
+    exportReferenceRequestRef.current = null;
+    setIsExportReferenceLoading(false);
     setLoadError(null);
     setExportFeedback(null);
     resetDetailSelection();
@@ -1396,38 +1227,99 @@ export default function CostStatisticsPage() {
     return () => document.removeEventListener("mousedown", handlePointerDown);
   }, [viewMode, timeScopePanel, projectScopePanel, bankScopePanel, expenseTypeScopePanel, bankTagScopePanel]);
 
-  function updateProjectExportSelection(projectNames: string[]) {
+  function updateProjectExportSelection(
+    projectNames: string[],
+    referenceData: CostStatisticsExportReferenceData | null = exportReferenceData,
+  ) {
     setProjectExportNames(projectNames);
-    const nextExpenseTypes = Array.from(
-      new Set(
-        (exportReferenceData?.timeRows ?? [])
-          .filter((row) => projectNames.includes(row.projectName))
-          .map((row) => row.expenseType),
-      ),
-    ).sort((left, right) => left.localeCompare(right, "zh-CN"));
+    const nextExpenseTypes = projectNames.length > 0
+      ? (referenceData?.expenseTypes ?? []).map((row) => row.expenseType)
+      : [];
     setProjectExpenseTypes(nextExpenseTypes);
   }
 
-  function openExportCenter() {
+  async function loadExportReferenceData(): Promise<CostStatisticsExportReferenceData | null> {
+    if (exportReferenceData) {
+      return exportReferenceData;
+    }
+
+    exportReferenceRequestRef.current?.abort();
+    const controller = new AbortController();
+    exportReferenceRequestRef.current = controller;
+    setIsExportReferenceLoading(true);
+    try {
+      const [projectPage, expenseTypePage] = await Promise.all([
+        fetchCostStatisticsExplorerPage({
+          scope: "all",
+          view: "project",
+          projectScope: costProjectScope,
+          pageSize: 1,
+          signal: controller.signal,
+        }),
+        fetchCostStatisticsExplorerPage({
+          scope: "all",
+          view: "expense_type",
+          projectScope: costProjectScope,
+          pageSize: 1,
+          signal: controller.signal,
+        }),
+      ]);
+      if (controller.signal.aborted) {
+        return null;
+      }
+      if ([projectPage, expenseTypePage].some((page) => page.readModelStatus?.trim().toLowerCase() !== "fresh")) {
+        setExportFeedback({ tone: "error", message: "导出筛选数据正在刷新，请稍后重试。" });
+        return null;
+      }
+      const referenceData = {
+        projects: projectPage.facets.projects,
+        expenseTypes: expenseTypePage.facets.expenseTypes,
+      };
+      setExportReferenceData(referenceData);
+      return referenceData;
+    } catch (caught) {
+      if (!controller.signal.aborted) {
+        setExportFeedback({
+          tone: "error",
+          message: `导出筛选数据加载失败：${getCostStatisticsLoadErrorMessage(caught)}`,
+        });
+      }
+      return null;
+    } finally {
+      if (exportReferenceRequestRef.current === controller) {
+        exportReferenceRequestRef.current = null;
+        setIsExportReferenceLoading(false);
+      }
+    }
+  }
+
+  async function openExportCenter() {
     setExportFeedback(null);
     setExportPreview(null);
+    const referenceData = viewMode === "project" || viewMode === "expenseType"
+      ? await loadExportReferenceData()
+      : null;
+    if ((viewMode === "project" || viewMode === "expenseType") && !referenceData) {
+      return;
+    }
     if (viewMode === "project") {
       setExportCenterMode("project");
+      const projectOptions = (referenceData?.projects ?? []).map((row) => row.projectName);
       const nextProjectNames =
         projectExportNames.length > 0
           ? projectExportNames
           : selectedProjectName
             ? [selectedProjectName]
-            : exportProjectOptions.slice(0, 1);
-      updateProjectExportSelection(nextProjectNames);
+            : projectOptions.slice(0, 1);
+      updateProjectExportSelection(nextProjectNames, referenceData);
 	    } else if (viewMode === "expenseType") {
 	      setExportCenterMode("expense_type");
 	      const rangeMode = expenseTypeScopeMode === "month" ? "month" : "custom";
 	      const bounds = getScopeDateRange(
-	        timeRows,
 	        expenseTypeScopeMode,
 	        expenseTypeScopeYear,
 	        expenseTypeScopeMonth,
+          availableScopeYears,
 	      );
 	      setExpenseTypeRangeMode(rangeMode);
 	      setExpenseTypeMonth(expenseTypeScopeMonth);
@@ -1441,13 +1333,43 @@ export default function CostStatisticsPage() {
       const activeScopeYear = isBankTagExport ? bankTagScopeYear : timeScopeYear;
       const activeScopeMonth = isBankTagExport ? bankTagScopeMonth : timeScopeMonth;
 	      const rangeMode = activeScopeMode === "month" ? "month" : "custom";
-	      const bounds = getScopeDateRange(bankFlowRows, activeScopeMode, activeScopeYear, activeScopeMonth);
+	      const bounds = getScopeDateRange(activeScopeMode, activeScopeYear, activeScopeMonth, availableScopeYears);
 	      setTimeRangeMode(rangeMode);
 	      setTimeMonth(activeScopeMonth);
 	      setTimeStartDate(bounds.startDate);
       setTimeEndDate(bounds.endDate);
     }
     setIsExportCenterOpen(true);
+  }
+
+  async function handleExportCenterModeChange(mode: ExportCenterMode) {
+    setExportFeedback(null);
+    setExportPreview(null);
+    if (mode === "time" || mode === "bank_tag") {
+      exportReferenceRequestRef.current?.abort();
+      exportReferenceRequestRef.current = null;
+      setIsExportReferenceLoading(false);
+    }
+    const referenceData = mode === "project" || mode === "expense_type"
+      ? await loadExportReferenceData()
+      : null;
+    if ((mode === "project" || mode === "expense_type") && !referenceData) {
+      return;
+    }
+    setExportCenterMode(mode);
+    if (mode === "project") {
+      const projectOptions = (referenceData?.projects ?? []).map((row) => row.projectName);
+      const nextProjectNames =
+        projectExportNames.length > 0
+          ? projectExportNames
+          : selectedProjectName
+            ? [selectedProjectName]
+            : projectOptions.slice(0, 1);
+      updateProjectExportSelection(nextProjectNames, referenceData);
+    }
+    if (mode === "expense_type" && expenseTypeSelections.length === 0) {
+      setExpenseTypeSelections(selectedExpenseType ? [selectedExpenseType] : []);
+    }
   }
 
   function buildExportParamsFromState(): CostExportParams | null {
@@ -1651,14 +1573,13 @@ export default function CostStatisticsPage() {
     [viewMode],
   );
 
-  const hasExplorerLoadError = Boolean(loadError) && !explorerData;
   const activeTransactionId =
     selectedTimeTransactionId
     ?? selectedProjectTransactionId
     ?? selectedBankTransactionId
     ?? selectedExpenseTransactionId
     ?? selectedBankTagTransactionId;
-  const isExportActionBusy = isExporting || isPreviewLoading || Boolean(detailLoadingMessage);
+  const isExportActionBusy = isExportReferenceLoading || isExporting || isPreviewLoading || Boolean(detailLoadingMessage);
   const titleAccessory = canAdminAccess ? (
     <PageBusinessAuditIcon
       ariaLabel="Audit 成本统计"
@@ -1673,10 +1594,18 @@ export default function CostStatisticsPage() {
       <header className="page-header cost-page-header">
         <div className="cost-page-header-main">
           <div className="page-title-row">
-            <h1 className="page-title">成本统计</h1>
+            <h1 className="page-title" ref={pageTitleRef} tabIndex={-1}>成本统计</h1>
             {titleAccessory ? <div className="page-title-accessory">{titleAccessory}</div> : null}
           </div>
-          <div className="cost-analysis-toolbar">
+          <div
+            aria-busy={interactionLocked}
+            aria-describedby={interactionLocked ? "cost-statistics-lock-status" : undefined}
+            className={interactionLocked
+              ? "cost-analysis-toolbar cost-lock-target is-locked"
+              : "cost-analysis-toolbar cost-lock-target"}
+            inert={interactionLocked ? true : undefined}
+            ref={headerControlsRef}
+          >
             <div className="cost-view-switcher" role="tablist" aria-label="成本统计视图切换">
               <div className="cost-view-group">
                 <span className="cost-view-group-label">OA配对流水统计</span>
@@ -1723,7 +1652,15 @@ export default function CostStatisticsPage() {
             </div>
           </div>
         </div>
-        <div className="page-header-actions cost-header-actions">
+        <div
+          aria-busy={interactionLocked}
+          aria-describedby={interactionLocked ? "cost-statistics-lock-status" : undefined}
+          className={interactionLocked
+            ? "page-header-actions cost-header-actions cost-lock-target is-locked"
+            : "page-header-actions cost-header-actions cost-lock-target"}
+          inert={interactionLocked ? true : undefined}
+          ref={headerActionsRef}
+        >
           <button
             aria-label="刷新成本统计"
             className="cost-export-button cost-refresh-button"
@@ -1744,25 +1681,56 @@ export default function CostStatisticsPage() {
           <button
             className="cost-export-button"
             type="button"
-            disabled={isExplorerLoading || Boolean(detailLoadingMessage) || hasExplorerLoadError || isReadModelNonFresh}
-            onClick={openExportCenter}
+            disabled={isExplorerLoading || isExportReferenceLoading || Boolean(detailLoadingMessage) || hasExplorerLoadError || isReadModelNonFresh}
+            onClick={() => void openExportCenter()}
           >
-            导出中心
+	          {isExportReferenceLoading ? "正在准备导出..." : "导出中心"}
 	          </button>
 	        </div>
 	      </header>
 
-	      <section className="cost-content-shell">
-        {loadError ? <div className="state-panel error">{loadError}</div> : null}
-        {isExplorerLoading && !explorerData ? (
-          <div className="state-panel">正在加载成本统计数据...</div>
-        ) : null}
-        {detailLoadingMessage ? <div className="state-panel">{detailLoadingMessage}</div> : null}
-        {readModelStatusMessage ? (
-          <div className={`state-panel${isReadModelUnavailable ? " error" : ""}`} role="status">
-            {readModelStatusMessage}
+	      <div className="cost-lock-surface" data-lock-state={effectiveCostPageState}>
+        {interactionLocked ? (
+          <div
+            aria-atomic="true"
+            aria-live="polite"
+            className={`cost-lock-status cost-lock-status--${effectiveCostPageState}`}
+            id="cost-statistics-lock-status"
+            ref={lockStatusRef}
+            role="status"
+            tabIndex={-1}
+          >
+            <span className="cost-lock-status-indicator" aria-hidden="true" />
+            <span className="cost-lock-status-copy">
+              <strong>{lockStatusCopy.title}</strong>
+              <small>{lockStatusCopy.detail}</small>
+            </span>
+            {lockStatusCanRetry ? (
+              <button className="cost-lock-retry" type="button" onClick={handleManualRefresh}>
+                重新检查
+              </button>
+            ) : null}
           </div>
         ) : null}
+        <div className="cost-lock-content">
+	      <section
+          aria-busy={interactionLocked}
+          aria-describedby={interactionLocked ? "cost-statistics-lock-status" : undefined}
+          className={interactionLocked
+            ? "cost-content-shell cost-lock-target is-locked"
+            : "cost-content-shell cost-lock-target"}
+          inert={interactionLocked ? true : undefined}
+          ref={contentShellRef}
+        >
+        {interactionLocked && !explorerData ? (
+          <div className="cost-lock-skeleton" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </div>
+        ) : null}
+        {loadError && explorerData ? <div className="state-panel error">{loadError}</div> : null}
+        {detailLoadingMessage ? <div className="state-panel">{detailLoadingMessage}</div> : null}
         {exportFeedback && !isExportCenterOpen ? (
           <div className={`action-feedback ${exportFeedback.tone}`}>{exportFeedback.message}</div>
         ) : null}
@@ -1876,7 +1844,7 @@ export default function CostStatisticsPage() {
                       </div>
                     )}
                   />
-                  <CostExplorerList<ProjectExpenseTypeRow>
+                  <CostExplorerList<CostExpenseTypeExplorerRow>
                     title="费用类型"
                     count={projectExpenseTypeRows.length}
                     items={projectExpenseTypeRows}
@@ -1900,7 +1868,7 @@ export default function CostStatisticsPage() {
                   <section className="cost-explorer-lane cost-explorer-lane-table">
                     <header className="cost-explorer-lane-header">
                       <h2>对应流水</h2>
-                      <span>{selectedProjectTransactionRows.length}</span>
+                      <span>{explorerData?.rowCount ?? selectedProjectTransactionRows.length}</span>
                     </header>
                     {selectedProjectName && selectedProjectExpenseType ? (
                       <CostStatisticsTable
@@ -1993,7 +1961,7 @@ export default function CostStatisticsPage() {
                   <section className="cost-explorer-lane cost-explorer-lane-table">
                     <header className="cost-explorer-lane-header">
                       <h2>对应流水</h2>
-                      <span>{selectedBankProjectRows.length}</span>
+                      <span>{explorerData?.rowCount ?? selectedBankProjectRows.length}</span>
                     </header>
                     {selectedBankAccountLabel && selectedBankProjectName ? (
                       <CostStatisticsTable
@@ -2040,7 +2008,7 @@ export default function CostStatisticsPage() {
 	                  </div>
                 </div>
                 <div className="cost-explorer-grid expense">
-                  <CostExplorerList<ExpenseTypeExplorerDisplayRow>
+                  <CostExplorerList<CostExpenseTypeExplorerRow>
                     title="费用类型"
                     count={expenseTypeRows.length}
                     items={expenseTypeRows}
@@ -2064,7 +2032,7 @@ export default function CostStatisticsPage() {
                   <section className="cost-explorer-lane cost-explorer-lane-table">
                     <header className="cost-explorer-lane-header">
                       <h2>对应流水</h2>
-                      <span>{selectedExpenseTypeRows.length}</span>
+                      <span>{explorerData?.rowCount ?? selectedExpenseTypeRows.length}</span>
                     </header>
                     {selectedExpenseType ? (
                       <CostStatisticsTable
@@ -2114,7 +2082,7 @@ export default function CostStatisticsPage() {
                   </div>
                 </div>
                 <div className="cost-explorer-grid bank-tag">
-                  <CostExplorerList<CostBankTagPrimaryRow>
+                  <CostExplorerList<CostBankTagPrimaryExplorerRow>
                     title="主标签"
                     count={bankTagPrimaryRows.length}
                     items={bankTagPrimaryRows}
@@ -2138,7 +2106,7 @@ export default function CostStatisticsPage() {
                       </div>
                     )}
                   />
-                  <CostExplorerList<CostBankTagSubRow>
+                  <CostExplorerList<CostBankTagSubExplorerRow>
                     title="子标签"
                     count={bankTagSubRows.length}
                     items={bankTagSubRows}
@@ -2162,7 +2130,7 @@ export default function CostStatisticsPage() {
                   <section className="cost-explorer-lane cost-explorer-lane-table">
                     <header className="cost-explorer-lane-header">
                       <h2>对应流水</h2>
-                      <span>{selectedBankTagSubRows.length}</span>
+                      <span>{explorerData?.rowCount ?? selectedBankTagSubRows.length}</span>
                     </header>
                     {selectedBankTagPrimaryLabel && selectedBankTagSubLabel ? (
                       <CostStatisticsTable
@@ -2181,9 +2149,30 @@ export default function CostStatisticsPage() {
                 </div>
               </div>
             ) : null}
+            {explorerData.nextCursor ? (
+              <div className="cost-load-more">
+                <button
+                  className="cost-export-button"
+                  type="button"
+                  disabled={isLoadingMore}
+                  onClick={() => void loadMoreExplorerRows()}
+                >
+                  {isLoadingMore ? "正在加载更多..." : `加载更多（已显示 ${explorerData.rows.length} / ${explorerData.rowCount}）`}
+                </button>
+              </div>
+            ) : null}
           </>
         ) : null}
       </section>
+          {interactionLocked ? (
+            <div
+              aria-hidden="true"
+              className="cost-lock-overlay"
+              data-testid="cost-statistics-interaction-overlay"
+            />
+          ) : null}
+        </div>
+      </div>
 
       {transactionDetail && activeTransactionId ? (
         <CostTransactionDetailModal
@@ -2196,8 +2185,9 @@ export default function CostStatisticsPage() {
       ) : null}
 
       <CostStatisticsTagRulesDrawer
-        canSave={canMutateData && (tagRules?.canSave ?? true)}
+        canSave={canMutateData && !interactionLocked && (tagRules?.canSave ?? true)}
         error={tagRulesError}
+        interactionLocked={interactionLocked}
         loading={isTagRulesLoading}
         onClose={closeTagRulesDrawer}
         onSave={() => void saveTagRules()}
@@ -2233,22 +2223,7 @@ export default function CostStatisticsPage() {
           isExporting={isExporting}
           isBusy={isExportActionBusy}
           onClose={() => setIsExportCenterOpen(false)}
-          onModeChange={(mode) => {
-            setExportCenterMode(mode);
-            setExportPreview(null);
-            if (mode === "project") {
-              const nextProjectNames =
-                projectExportNames.length > 0
-                  ? projectExportNames
-                  : selectedProjectName
-                    ? [selectedProjectName]
-                    : exportProjectOptions.slice(0, 1);
-              updateProjectExportSelection(nextProjectNames);
-            }
-            if (mode === "expense_type" && expenseTypeSelections.length === 0) {
-              setExpenseTypeSelections(selectedExpenseType ? [selectedExpenseType] : []);
-            }
-          }}
+          onModeChange={(mode) => void handleExportCenterModeChange(mode)}
           onTimeRangeModeChange={(mode) => {
             setTimeRangeMode(mode);
             setExportPreview(null);

@@ -43,7 +43,7 @@ file/session confirm 必须先通过 `save_import_delta` 持久化所选 session
 | 导入文件事实列表 | `/api/import-facts/files`、HTTP SLO probe | 只返回分页文件摘要字段；不得输出完整 `raw_payload`、`row_results`、`normalized_rows`，预览明细只能走 `/imports/files/*` session/preview 边界 |
 | 导入结果 | state store/repository | 可审计、可幂等；确认异常必须回滚 import service 与 file session 内存状态 |
 | Dirty scope | derived lifecycle/runtime queue | invoice lifecycle/search/input/output/pending invoice |
-| Write target envelope | 前端导入页面/job result | 返回 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`；background job mapper 会标准化 result summary targets，消费 completed job 的页面必须先等待 targets |
+| Write target envelope | 前端导入页面/job result | 返回 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`；background job mapper 会标准化 result summary targets。前端只在 targets 非空时等待 operation barrier；targets 为空时直接完成反馈，禁止读取 Workbench 页面猜测刷新状态 |
 
 ## 持久化与投影
 

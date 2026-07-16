@@ -37,10 +37,11 @@ flowchart LR
 
 `/api/batch-accounting` 不拥有独立 read model。它的读边界由 `BatchAccountingService` 组合 Workbench active payload 与 `WorkbenchRelationReadFacade`：
 
-1. `unsubmitted` bucket 先从 Workbench payload 得到批量账务银行候选和日常报销 OA 候选，再只把这些候选 row ids 交给 `workbench_relation` facade；不能把 Workbench 全量 open OA rows 当作 relation lookup 输入。
+1. `unsubmitted` bucket 只从专属年份 SQL loader 得到批量账务银行候选和日常报销 OA 候选，再只把这些候选 row ids 交给 `workbench_relation` facade；不能调用 Workbench full-page builder，也不能把 Workbench 全量 open OA rows 当作 relation lookup 输入。
 2. `summary.submitted_count` 使用 `count_batch_accounting_relations_by_year(year)`，该 I/O 只返回年份级统计和 freshness 状态；未提交首屏不能为了统计扫描 12 个月完整 relation DTO。
-3. `submitted` bucket 需要渲染关系详情，可以读取完整 submitted relation DTO，并继续透出 relation read model freshness 诊断。
-4. submit/withdraw 写路径只按本次操作 row ids 做 relation readiness 校验，再交给 `WorkbenchRelationCommandService` 的 canonical write safety；不能因为整页普通 relation distribution 追赶中阻断无关 row 的写操作。
+3. `submitted` bucket 的银行上下文只读专属年份 SQL loader；关系详情读取完整 submitted relation DTO，并继续透出 relation read model freshness 诊断。
+4. submit/withdraw 写路径只用 `bank_row_id + oa_row_ids` 专属 SQL loader 取得本次 row context，再交给 `WorkbenchRelationCommandService` 的 canonical write safety；不能因为整页普通 relation distribution 追赶中阻断无关 row 的写操作。
+5. 任一专属 loader 缺失/无效时返回 `503 batch_accounting_workbench_read_model_unavailable`，不能跨用其它 loader、返回假空数据或回退 Workbench full-page builder。
 
 ## OA 会话启动边界
 
@@ -83,9 +84,9 @@ React 启动时由 `SessionProvider` 调用 `fetchSessionMe()`，通过 `Session
 2. `AppSettingsService.update_pending_invoice_rule_groups(...)` 校验当前 direction 的规则 `version`、归一化分组、递增对应规则版本并写审计。
 3. 保存事件返回 `event_type=pending_invoice_rules_changed`、`direction`、`old_version`、`new_version`、`affected_groups` 和 `actor_id`。
 4. API finalizer 只清必要内存 cache，并把 `pending_invoice_rules_changed` 交给 `DerivedDataLifecycleService`。
-5. lifecycle executor 通过 `ReadModelRefreshGateway` 或 workbench dirty queue 入队相关 read model refresh；API server 不同步重建发票生命周期、待找发票、成本、税金、OA 或关联台 read model。
+5. lifecycle executor 通过 `ReadModelRefreshGateway` 或 workbench dirty queue 入队相关 read model refresh；API server 不同步重建发票生命周期、待找发票、成本、税金或关联台 read model。
 
-该事件的影响域必须保持低耦合：刷新 `invoice_lifecycle`、`pending_invoice`、workbench、进项使用、OA 待付款、销项收款、税金抵扣、成本统计和 search；不刷新 `turnover_ledger`、`no_oa_bank_batch`、`bank_account_balance`。App Health 只根据这些 read model 的 readiness/dirty/outbox/worker 事实判定页面 busy 或 blocked，不能因为规则版本变化把无关页面标红。
+该事件的影响域必须保持低耦合：刷新 `invoice_lifecycle`、`pending_invoice`、workbench、进项使用、销项收款、税金抵扣、成本统计和 search；不刷新 `oa_pending_payment`、`turnover_ledger`、`no_oa_bank_batch`、`bank_account_balance`。OA 付款算法不读取待找发票规则，OA 页面保存规则后不得等待 OA barrier或重载rows。App Health 只根据实际受影响 read model 的 readiness/dirty/outbox/worker 事实判定页面 busy 或 blocked，不能因为规则版本变化把无关页面标红。
 
 ### 关联台 automatic decision 显示边界
 
@@ -148,7 +149,7 @@ flowchart LR
 
 Workbench active generation 在发布前执行对象身份仲裁。`WorkbenchObjectIdentityArbitrationService` 复用统一 identity policy，为 OA、流水、正式发票和 OA 附件发票写入 `object_identity_*` payload；正式发票与 OA 附件发票命中同一强发票 identity 时只能进入一个展示状态。`read_model.workbench_generation_consistency` 会把强发票 identity 或稳定银行 identity 横跨 `paired/open` 视为 inconsistent generation。`all` scope 从 active month shard 聚合时还必须执行展示归属权收敛：同一事实不能在多个 open group 中同时成为 visible/operable row；发票 open/open 使用强发票 identity 和 row id 收敛，银行 open/open 只按 row id 收敛以避免误折叠真实重复交易。
 
-Workbench 首屏读路径必须以 active generation 为边界。`/api/workbench/summary` 优先读取 `read_model.workbench_summary` 中已物化的 summary/stat payload，不在请求热路径扫描 `workbench_group_rows` 或执行银行明细 diagnostics；diagnostics 属于 health/deep health/operations。`/api/workbench/groups?detail_level=summary` 的 Redis page cache 只保存 fresh gate 后的 payload，cache key 使用 active generation version。`worker-workbench` 发布任一月 shard active generation 后，会低优先级 enqueue `all` aggregate-only refresh；`all` aggregate 发布成功后再预热首屏 `paired/open` page 1 summary 和 version key。导入等可判定月份的事件优先 dirty 具体月份，只有无法判定范围或真正跨期时才直接 dirty `all`。
+Workbench 首屏读路径必须以 active month generation set 为边界。`GET /api/workbench` 在一个 `REPEATABLE READ READ ONLY` 快照内组合返回已物化的 summary 与 paired/unpaired 各自首页，三者共用同一 generation-set version；repository 内部仍保留 summary 窄 I/O，但不再对外暴露独立 summary HTTP 合同。默认首屏 payload 只能在 fresh/stable gate 后按 generation version 进入 Redis read-through cache；cache miss/down 回到同一 PostgreSQL cold path，不预热、不入队、不伪装 fresh。后续搜索、筛选、分页和详情使用 `/api/workbench/groups` 等窄接口并固定 `expected_read_model_version`。`month=all` 只在查询时组合 active month generations 并仲裁唯一 canonical owner；不物化 `all` aggregate generation，不存在 aggregate-only worker lane 或 cache warmer。可判定月份的变更只 dirty 具体月份，无法判定范围或真正跨期时由现有 Workbench worker 把 `all` command fan-out 为月 shard。
 
 runtime snapshot 读取失败不能被解释成 ready。critical read model failed/unavailable、required worker missing/mismatch/stale、关键依赖 missing/unavailable 或 session 不可用会把全局状态升级到 blocked/red；readiness missing/refreshing/stale/schema_mismatch/source_mismatch、dirty scope、outbox backlog、后台任务 queued/running/attention 和非阻塞 stale 会保持 busy/yellow。状态判定必须只看 current-effective blocker：已被后续同 scope `done` 事件或 fresh readiness 覆盖的 outbox failed/dead-letter、以及成本统计 legacy scope `all` / 裸 `YYYY-MM`，只能作为历史诊断或 repair 对象，不能污染当前页面同步状态。成本统计是特例化的 scope 级聚合：月份 shard failed/unavailable 是局部风险，不能无条件污染已经 fresh 的父 scope。
 

@@ -8,9 +8,9 @@
 | `IMPORT-BANK-E2E-002` | 预览和 audit | 上传 XLS/XLSX 后调用 `/imports/files/preview`，带 `bank_transaction` 与每文件账户 mapping override；页面展示 audit counts、可导入数、重复数和 preview grid；慢预览期间预览按钮必须显示进行中状态，预览/清空/确认动作全部禁用，不能重复提交或中断成半状态。 |
 | `IMPORT-BANK-E2E-003` | 重复/未导入明细 | 文件内重复、跨文件重复、已存在、损坏文件、异常或需复核行必须进入明细表；页面不能把 skipped/duplicate/error 行展示成可确认导入；损坏文件 + 正常文件混合上传时，确认只能提交正常文件 ID。 |
 | `IMPORT-BANK-E2E-004` | 银行账户冲突 | 文件识别账号与所选账号不一致时，确认前必须弹出“银行账户冲突确认”；取消不提交，确认后仍按用户选择账户导入。 |
-| `IMPORT-BANK-E2E-005` | preview stale | 预览后底层事实变化时，confirm 返回 `preview_stale`；页面必须提示重新预览，不创建 import job，不刷新 Workbench 或下游页面。 |
-| `IMPORT-BANK-E2E-006` | confirm 失败 | confirm API/worker 入队失败时，页面必须显示错误，不展示“已确认导入”，不刷新 Workbench，也不把下游 read model 伪装成 fresh。 |
-| `IMPORT-BANK-E2E-007` | confirm 成功和下游刷新 | 可确认文件提交后显示确认反馈；若 inline 完成，页面可刷新 Workbench 状态；进入银行明细后能看到导入行；成本统计必须通过 fresh read model 展示导入流水证据。返回 `job` 时只能展示“已开始后台导入”，不能宣称下游 fresh。 |
+| `IMPORT-BANK-E2E-005` | preview stale | 预览后底层事实变化时，confirm 返回 `preview_stale`；页面必须提示重新预览，不创建 import job，也不调用 operation barrier 或 Workbench 页面 API。 |
+| `IMPORT-BANK-E2E-006` | confirm 失败 | confirm API/worker 入队失败时，页面必须显示错误，不展示“已确认导入”，不调用 operation barrier 或 Workbench 页面 API，也不把下游 read model 伪装成 fresh。 |
+| `IMPORT-BANK-E2E-007` | confirm 成功和下游刷新 | 可确认文件提交后显示确认反馈；只等待后端声明的 `operation_barrier_targets`，整个导入页不得读取 Workbench 页面探测刷新；进入银行明细后能看到导入行，成本统计必须通过自身 fresh read model 展示导入流水证据。返回 `job` 时只能展示“已开始后台导入”，不能宣称下游 fresh。 |
 | `IMPORT-BANK-E2E-008` | 权限和系统保护 | `read_export_only` 不能上传、预览或确认；系统 write-safety blocked 时不能执行确认。 |
 | `IMPORT-BANK-E2E-009` | 真实基础设施 worker drain | PostgreSQL/RabbitMQ/Redis/systemd import worker、Workbench matching、bank detail/account balance/read model freshness 必须在 staging 或生产只读 smoke 验证。 |
 

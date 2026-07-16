@@ -29,6 +29,72 @@
 
 ## 历史记录
 
+## 2026-07-16 - Release B 旧状态 migration 版本合同修正
+
+- 目标：修正 Workbench 文档把 Release B 旧状态 drop migration 固定为 0104 的版本冲突；当前 0104 已属于 OA 待付款 source snapshot。
+- 决策：Release A 不携带 Workbench 旧状态 drop migration。只有 Release A 的运行时零访问、数据哈希、freshness、queue 和 Audit 证据全部通过后，Release B 才使用届时下一个可用版本创建 forward-only drop migration；不提前预留空 migration。
+- 行为影响：仅修正文档与发布合同，不改变 runtime、schema、read model、worker、API 或其他页面。
+- 验证：migration discovery、docs check 和 architecture guard 纳入统一 release candidate 验证。
+
+## 2026-07-16 - 删除 raw/on-demand 失活后的旧 Workbench 级联链
+
+- 目标：在关联台页面读链已经收敛到 active generation 后，删除不再有生产调用者的 live/OA/raw/retention/grouping/ETC 兼容拼装链，防止旧 DTO owner 继续污染查询、写入和测试。
+- 影响范围：`server.py` 旧 wrapper/instance cache、24 个 test-only service module、旧 `WorkbenchApiRoutes` 读兼容壳、OA 附件 context row index 的 raw surface、架构 guard、Workbench/ETC/Cost 测试 fixture 与模块边界。
+- 关键决策：保留当前 SQL projection、`WorkbenchQueryFacade`、canonical row resolver、relation command/grouping、确认关联仍使用的 grouped OA attachment context index、Settings reset 的 retention month/date parser，以及 ETC relation cleanup 使用的稳定 summary row id。删除旧 read-time OA 冲账自动配对/修复，不新增替代 executor、projection、fallback 或兼容 API。
+- 旧逻辑清理：删除 live/OA/retained-all/selected-scope builders、raw mutation/canonical repair/live merge/group-row helper、read-time OA invoice-offset sync/desired/repair executors及其 read ports、旧 ETC summary DTO 拼装、grouped payload 二次 override/tag 链、legacy row-detail/action wrappers 和 `WorkbenchApiRoutes`。负向 guard 同时锁定文件和 server symbol 不得恢复。
+- I/O 结果：页面 initial/groups/group detail/row detail 只走 query facade -> active generation repository；写命令仍从明确 canonical/relation I/O 取事实；Redis、worker、其他页面 read model 与 DTO 均未新增 owner。
+- 测试覆盖：关联台 SQL/query/write/V2、ETC、Settings reset、OA projection 455 passed、4 skipped；完整 runtime boundary guard 202 passed；移除旧 route 后 Workbench V2 + Cost API 51 passed。Ruff 通过。
+- 未测风险：按用户要求未部署、未访问生产 token/队列；真实生产 cold/hot 与 worker/SLO 仍留待统一发布后验证。
+- 后续事项：继续按 Phase 04 主控检查 Import Workflow 解耦、legacy Cost service 最终删除、前端/E2E、受控性能报告和统一发布交接。
+
+## 2026-07-16 - 删除 on-demand Workbench 整页构建链
+
+- 目标：在 initial/groups/detail、Search、Batch Accounting、Settings、Cost fixture 和写入命令均已迁到 active generation 或窄 canonical I/O 后，删除请求内同步重建整页 Workbench 的最后入口。
+- 影响范围：Application on-demand build/cache gate、raw assembler、旧 cache-read helper、OA invoice-offset cache repair helper、Workbench/ETC/Cost 测试 fixture 与负向架构 guard。
+- 关键决策：生产查询只读现有 active generation；Redis 仍只缓存 fresh gate 后的版本化首屏。没有新增 projection、adapter、fallback、cache owner 或 worker。OA invoice-offset 当前 relation builder 保留，并直接使用已有 `oa_attachment_matches_oa(...)` 过滤附件发票。
+- 旧逻辑清理：删除同步 on-demand getter/raw assembler/cache gate 及三个专属 service module；旧 GET/cache/Mongo/row-detail fallback 测试直接删除。仍有价值的写入/UOW 测试改用 canonical row fixture，并显式隔离已由 query-facade 契约测试覆盖的 generation precondition；ETC 删除链改为断言 relation fact，不再读取旧整页 API。
+- 测试覆盖：canonical personal-advance 边界、Cost relation fixture、Workbench write/UOW、ETC relation cleanup、current V2 API、SQL/query/Search 与负向删除 guard。
+- 未测风险：按用户要求未部署、未访问生产数据或 token；生产 cold/hot p95/p99 留待统一发布后验证。
+- 后续事项：继续删除 raw assembler 失去调用者后暴露出的 test-only live/OA/retention/grouping helper cascade，再做全量零引用与性能闭环。
+
+## 2026-07-16 - 删除 repository generic Workbench full-view adapter
+
+- 目标：移除当前 initial/groups/detail API 已不调用的 `get_workbench_view(...)` 兼容 DTO，防止 repository 同时维护窄查询和旧整页/rows-page 两套 owner。
+- 影响范围：PostgreSQL Workbench repository、Application 无调用 persisted getter、SQL runtime tests、架构文档与删除 guard。
+- 关键决策：保留 current initial/summary/groups/group detail/row detail/search/ignored/Batch Accounting 窄 I/O，以及它们共用的结构化 group member materialization；只删除 generic full-view、materialized-all snapshot view 和旧 rows-page helpers。
+- 测试覆盖：删除只保护兼容 DTO 的六个测试/fakes；负向 guard 禁止 repository full-view 和 Application persisted getter 回流；current Workbench SQL/query tests 继续覆盖真实 owner。
+- 未测风险：本轮不改 projection/schema/worker，不需要数据迁移；统一发布前仍需完成完整当前链性能验证。
+
+## 2026-07-16 - 删除同步 Workbench page-cache warmer
+
+- 目标：从 generation 发布热路径移除两次首屏 page SQL、Redis version 写和 payload 写，避免可选缓存 I/O 放大 worker handler 尾延迟。
+- 影响范围：Workbench page-cache helper、worker wiring、refresh service、定向测试、监控与模块边界文档。
+- 关键决策：保留现有 `WorkbenchGroupsPageCache` key/TTL 与 `WorkbenchQueryFacade` query-time versioned read-through；删除 warmer class、同步 env 开关和 publish result 的 `cache_warmup` 字段，不新增异步 event/worker。
+- 一致性：Redis 仍不是 freshness 事实源；miss/down 继续读取同一 fresh SQL generation，旧 generation key 自动失效。worker publish/Cost fan-out/dirty completion 不依赖缓存。
+- 测试覆盖：refresh service 证明 publish 不查询 page 且结果无 warmup 字段；静态删除 guard 防止 class/env/injection 回流；query facade 既有 cache hit/miss/down 测试保持。
+- 未测风险：按用户要求未部署；真实冷 cache 首个 API 的 p95 留待统一发布后验证。
+
+## 2026-07-16 - 删除 Workbench 全局聚合 lane
+
+- 目标：删除已经不参与页面查询的全局 generation 聚合链路，避免维护第二个 worker、第二套发布函数和写后聚合调度。
+- 影响范围：Workbench refresh service、SQL projection repository port、runtime queue、worker registry/deploy env、relation refresh producer、rehydrate script、测试与 worker/read-model 文档。
+- 关键决策：保留现有 active month generation；`month=all` 继续 query-compose 月份 shard。单一 `workbench` worker 同时 claim 月份和 `all`，其中 `all` 只经现有 `ReadModelRefreshGateway` fan-out 到月份 scopes，并传播 tenant、priority、trace 与显式 force metadata；不新增 projection、aggregate lane、fallback 或兼容发布。
+- 旧逻辑清理：删除全局 aggregate builder、aggregate-only handler 分支、queue helper、独立 registry/env、deploy 迁移 helper 和对应测试。relation 已知具体月份时不再额外投递 `all`。
+- 测试覆盖：覆盖单 worker registry/deploy 合同、`all` fan-out 与 metadata 传播、dirty command 完成、月份发布后的成本统计 fan-out，以及旧 worker/函数删除 guard。
+- 未测风险：没有部署或操作生产队列；真实 worker pickup/handler p95 留待用户统一发布后按交接门禁验证。
+- 后续事项：删除页面 cache warmer，再完成 raw/on-demand 旧读链路收口。
+
+## 2026-07-16 - 删除零调用 Workbench full-payload API assembler
+
+- 目标：在 Search、ignored、Settings、Batch Accounting、Cost Statistics 和 Workbench write consumer 已解耦后，删除不再有生产调用者的 legacy full-page API builder。
+- 影响范围：`server.py`、legacy provider/API assembler/发票库存统计模块、对应测试与 runtime boundary guard。
+- 关键决策：删除 `_build_api_workbench_payload`、`WorkbenchApiPayloadAssembler`、`WorkbenchLegacyApiSqlReadProvider` 和只服务旧 DTO 的 `InvoiceInventoryStatsService`；不新增 facade/fallback，不触碰仍有 generation/write 调用的 raw/live/OA builders。
+- 文档影响：模块边界明确当前首屏只由 `WorkbenchQueryFacade.initial_page(...)` 和 active generation SQL owner 提供；其他页面继续使用各自窄 I/O。
+- 测试覆盖：旧实现细节单测删除；业务测试改为直接验证 active-generation/read-model 或 command 结果；删除 guard 防止 provider/assembler/wrapper 恢复。
+- 验证命令：见 Phase 04 执行状态与最终交接。
+- 未测风险：生产 external consumer/access-log 门禁按用户要求留到统一发布前执行；本轮不部署。
+- 后续事项：继续删除 raw/on-demand page build、伪 aggregate lane 和 cache warmer。
+
 ## 2026-07-05 - 详情抽屉即时打开链路收敛
 
 - 目标：修复关联台点击 OA 流水/发票详情 icon 时抽屉被详情请求耗时拖慢的问题，达到点击后立即从右侧出现、详情数据随后填充。
@@ -1058,7 +1124,7 @@
 - 决策：删除 candidate/decision 表、service、store、engine、API 与前端组件；纯 `WorkbenchFreeMatchingEngine` 只生成可直接提交的 `FormalRelationPlan`，由 orchestrator 在单 relation UoW 中创建或扩展 active 正式关系。
 - 安全规则：显式引用查全历史；组合证据 365 日；强证据图连通；币种、方向、各 pane 合计严格一致；支持有界任意 `N:M:K`；金额-only、模糊/date-only、竞争闭合、资源超限和无显式原始引用的红冲退款全部 fail closed。
 - 分组不变量：`paired = active relation members`、`unpaired = canonical facts - paired`；旧 `case_id`、candidate metadata、输入 section 与来源 provenance 不能改变 membership。
-- 迁移：0104 只 forward-drop 派生旧状态，不触碰 canonical facts/relation/history；发布后必须全量 rehydrate、等待 durable scopes fresh 并执行页面 Audit。
+- 迁移：未来 Release B 的旧状态 drop migration 只 forward-drop 派生旧状态，不触碰 canonical facts/relation/history；发布后必须全量 rehydrate、等待 durable scopes fresh 并执行页面 Audit。
 - 固定验收：云南立孚 520 发票/OA active case 必须 paired；13 张合计 1709.49 元但无唯一强证据的发票必须完整显示为 13 个 unpaired singleton。
 
 ## 2026-07-15 - Release A 生产投影审计回滚与 v2 修复
@@ -1075,7 +1141,7 @@
 - 生产证据：PR #5 merge SHA `a127c58c7d3cdfc8fd0a34216eb9cf1523f30bef` 的分支/main 全量 CI 均通过；release `main-a127c58c7-workbench-audit-v2-20260715072607` 激活和 19-month rehydrate 后，51 个 ETC summary mismatch 已归零，但 Audit 仍阻断 5 个 `workbench_override_exception_fields_mismatch`。其中 3 个 active override 的 `relation_mode=pending_input_invoice` 被投影成 null，2 个 active override 的 `case_id=null` 被同 row 的历史 candidate exception projection 覆盖。生产立即回滚并 rehydrate `etc-import-e5d6e6a4e-20260714-visibility`，再次恢复 `pass/fresh/drained`、219 relations、19 scopes、876 relation rows、1296 group rows和零问题。
 - 根因：纯 grouping 对所有未进入正式 mode registry 的 `relation_mode` 做了过宽删除，误伤 canonical active override；SQL projection 又先应用 row override、后应用 exception projection，而 page Audit 与 canonical 合同明确规定存在 active override 的 row 不再由 exception case 接管。
 - v3 修复：未配对 grouping 只清除与 `candidate:` / `decision:` / `temp:` case ownership 绑定的 mode/amount 装饰，不对白名单外 override 字段做推断；projection 在 exception 成员集合中排除 active override row，使唯一 control owner 与 Audit SQL 一致。没有增加 I/O、fallback、第三种状态或新持久化路径。
-- 版本：month projection 升级为 `2026-07-15-formal-relation-partition-v3`，all-scope builder 升级为 `workbench_sql_projection.composed_active_month_shards.formal_relation_partition.v3`，Redis groups cache 继续直接复用同一 month schema。仍无 schema migration，0104 不进入本 release。
+- 版本：month projection 升级为 `2026-07-15-formal-relation-partition-v3`，all-scope builder 升级为 `workbench_sql_projection.composed_active_month_shards.formal_relation_partition.v3`，Redis groups cache 继续直接复用同一 month schema。仍无 schema migration，Workbench 旧状态 drop migration 不进入本 release。
 - 回归保护：新增 `pending_input_invoice` active override 保留测试，以及 row override 与 exception case 同时命中时 override 胜出的 service 测试；生产必须再次通过完整本地/远端双 CI、受控 rehydrate 和零阻断 Audit 才能保持 active。
 
 ## 2026-07-15 - v3 生产审计三次回滚与 v4 正式关系优先级修复
@@ -1083,4 +1149,29 @@
 - 生产证据：PR #6 merge SHA `427f8efac75d1dfbfa2d1d3f433a078c3afabe39` 的 branch/main 精确 SHA CI 均通过；release `main-427f8efac-workbench-audit-v3-20260715083006` 激活并完成 19-month rehydrate 后，51 个 ETC mismatch 与 3 个合法 override mode mismatch 均归零，但 Page Audit 仍阻断 `oa-pay-1982`、`txn_imported_1258` 两个 `case_id` mismatch。生产立即回滚并 rehydrate `etc-import-e5d6e6a4e-20260714-visibility`，恢复 `pass/fresh/drained`、219 relations、19 scopes、876 relation rows、1296 group rows和零问题；migration 仍只到 0103。
 - 完整根因：这两个 row 已是同一 active formal relation 的成员，同时保留历史 active override/exception。v3 正确建立了未配对控制优先级，但 projection 仍在识别 formal members 前读取旧 controls，随后 relation enrichment 只覆盖部分 ownership 字段；Page Audit 又无条件把 override 当最高事实，因而把正式关系 case id 错报为应等于旧 override null。问题不在 repository JSON 持久化，而是 formal relation 与 legacy control 的边界优先级缺失。
 - v4 修复：builder 从本次已经加载的 active relations 计算 member row ids，并在既有批量查询前从 override/exception 输入集合排除；Page Audit 同样从 active formal relation members 排除 control equality。统一优先级为 formal relation > override > exception，未配对 override/exception 行为不变。没有新增 SQL round trip、表、worker、fallback、第三种状态或 canonical 写入。
-- 版本与验证：month projection 升级为 `2026-07-15-formal-relation-partition-v4`，all-scope builder 升级为 `workbench_sql_projection.composed_active_month_shards.formal_relation_partition.v4`。新增生产 identity 形状的 formal-relation/override/exception 冲突测试，并验证最终 repository row payload 不含旧 control decoration；Page Audit SQL 测试锁定同一 precedence。0104 仍不进入本 release。
+- 版本与验证：month projection 升级为 `2026-07-15-formal-relation-partition-v4`，all-scope builder 升级为 `workbench_sql_projection.composed_active_month_shards.formal_relation_partition.v4`。新增生产 identity 形状的 formal-relation/override/exception 冲突测试，并验证最终 repository row payload 不含旧 control decoration；Page Audit SQL 测试锁定同一 precedence。Workbench 旧状态 drop migration 仍不进入本 release。
+
+## 2026-07-16 - 默认 all-scope 首屏批量读取
+
+- 触发事实：可丢弃 PostgreSQL 受控数据集上，默认 combined initial 延迟虽低于本地门槛，但一次请求仍执行 20 条数据库语句；summary、paired、unpaired 重复读取 active generation/source/status，并分别执行两区 count/page/member 往返。
+- 决策：只在 `PostgresReadModelRepository.get_workbench_initial_page(...)` 的私有边界内增加默认 `month=all` 批量路径。它在同一个 repeatable-read 事务中读取一次 generation/source/freshness context，复用既有 canonical summary 与 groups SQL owner，一次读取两区首页、一次批量物化两区可见成员。带搜索、筛选或排序的请求仍走既有窄查询，因此没有第二套 filter SQL。
+- 复杂度约束：没有新增 projection、表、索引、缓存、worker、gateway、依赖或公共 repository port；独立 `/groups`、group detail、row detail 以及其他页面的 read model 合同不变。
+- 受控证据：默认首屏从 20 条降为固定 7 条语句（包含两条事务设置），形状测试把上限锁定为 10；同规模第二个合成 fixture 的 60 次样本 p50/p95/p99 为 58.581/70.962/109.974ms，payload 341,319 bytes，paired/unpaired 各 200 groups、summary counts 与 generation version 一致。对应 Workbench SQL/query/routes 回归 191 passed。
+- 证据边界：前后 fixture 结构相近但不逐字节相同，延迟对比只作方向性实现证据；数据为本机合成、单并发、未经过 Nginx/真实 Redis/浏览器，也未强制清空 PostgreSQL shared buffers，不能表述为生产 SLO 已通过。临时测试数据库已删除；按用户要求不部署、不访问生产，真实基数与并发性能在所有 thread 合并后统一发布验证。
+
+## 2026-07-16 - combined initial 测试合同收口与延期发布
+
+- 最终全量回归发现部分本地集成测试和 Playwright mock 仍依赖已删除的 full-payload/分区首屏行为：写后检查旧 `GET /api/workbench/groups`、combined initial 缺少 `page/page_size/total/row_counts/has_more/read_model_version`，并错误允许 `refreshing` generation 发起关系写入。
+- 修复只发生在测试边界：本地状态测试使用 canonical rows + active formal relations 驱动现有纯 `WorkbenchRelationGroupingService`；浏览器 mock 返回当前 combined initial 分页/generation 合同，写后刷新断言改为 `GET /api/workbench`，non-fresh generation 明确禁写。没有恢复 legacy route、runtime fallback、第二 payload owner或新增生产抽象。
+- 验证：Workbench SQL/query/routes 191 passed；前端全量测试与 production build 通过；全站 Playwright 179/179 passed；lint、docs、diff 校验通过。全仓后端 4073 个用例只剩 3 个可归属其他并行 thread 的 Pending Invoice、Cost Statistics 和 shared allowlist 失败，本模块/本目标失败为零。
+- 发布状态：`deployment_status: deferred_by_user`。本轮未部署、未访问生产、未操作 worker/queue、未执行 Git 打包。所有 thread 合并后必须重新全量验证，再完成 external consumer access log、备份、旧 all-lane drain、统一部署、canary、真实生产性能/隔离性和回滚门。
+
+## 2026-07-16 - unified release readiness 复审
+
+- 当前判定：`implementation_status: verified`，`deployment_status: READY_FOR_UNIFIED_DEPLOYMENT`。该状态只表示关联台可进入已协调的统一部署，不表示已部署或已通过生产性能验收。
+- 已闭合门禁：共享 `PlatformRuntimeBoundaryGuardTests` 201/201 通过，未放宽基线；`worker.py` 仅合并重复 import，运行时 service 数量和行为不变。Release A 不包含 Workbench 旧状态 drop migration；OA 专属 `0104_oa_pending_payment_source_snapshot.sql` 保持唯一 0104 owner，Workbench Release B 在证据齐全后使用当时下一个可用版本，不预留空 migration。
+- 合并验证：后端无 PostgreSQL 环境矩阵 4084 passed / 35 skipped；一次性本地 PostgreSQL 从空库实际应用 0001–0107 后 4110 passed / 6 skipped；前端 72 files / 855 tests 与 production build 通过；全站 Playwright 179/179 通过；lint、docs、`git diff --check` 通过。一次性数据库均已删除。
+- 验证资产修正：PostgreSQL 集成测试迁移到当前 import delta、银行自动标签 owner、Pending Invoice attach-existing owner 和 OA pending payment freshness 合同；删除混入 import 测试的旧 Workbench snapshot/search smoke。`truncate_test_database` 已覆盖迁移声明的全部正式表，防止跨测试 read model/queue/fact 泄漏。
+- External-consumer 门禁：已闭合。全仓当前生产代码、前端 client、脚本、probe、worker 和部署文件对旧 summary/full-payload 调用方扫描为零；系统 owner 于 2026-07-16 确认，除官方前端外没有已知脚本、RPA、BI 或第三方系统直接调用 `/api/workbench*`，且该 API 从未作为公共集成合同对外承诺。因旧 full-payload 与当前 combined-initial 共用 `GET /api/workbench?month=...`，单纯 Nginx URL 聚合无法区分新旧 response 期望，因此不再把 35 天 Nginx 日志当作唯一或必要门禁。若未来发现未登记 consumer，停止发布并迁移明确 owner，不恢复 fallback。
+- SHA 冻结：排除 `.planning/` 等非发布产物，将三页面的唯一 release commit 作为冻结 SHA；关联台只有在该精确 SHA 的后端、真实 PostgreSQL migrations、前端、E2E、lint、docs、architecture guard 全绿后才保持 `READY_FOR_UNIFIED_DEPLOYMENT`，任一门禁失败即撤回该状态。
+- 生产动作：未部署、未迁移生产库、未操作生产 queue/worker、未写生产数据。统一部署后的备份、old all-lane drain、rehydrate、Audit、canary、真实基数/并发性能和三页面混合负载隔离性仍属于部署执行门，不属于本次 READY 判定的本地实现证据。

@@ -7,7 +7,11 @@ from http import HTTPStatus
 from unittest.mock import patch
 
 from fin_ops_platform.app.server import Application
-from tests.app_test_support import build_local_state_application as build_application
+from tests.app_test_support import (
+    build_grouped_workbench_projection,
+    build_local_state_application as build_application,
+    install_fresh_workbench_write_gate,
+)
 
 
 def _flatten_groups(groups: list[dict[str, object]], record_type: str) -> list[dict[str, object]]:
@@ -22,6 +26,8 @@ def _json_response(response) -> dict[str, object]:
 
 
 class WorkbenchStaleWriteContractTests(unittest.TestCase):
+    READ_MODEL_VERSION = "stale-write-test-generation-1"
+
     def setUp(self) -> None:
         cost_warmup_patcher = patch.object(Application, "_schedule_cost_statistics_cache_warmup")
         self.addCleanup(cost_warmup_patcher.stop)
@@ -30,10 +36,11 @@ class WorkbenchStaleWriteContractTests(unittest.TestCase):
     def _build_app(self) -> Application:
         app = build_application()
         app._emit_workbench_action_timing = lambda **kwargs: None
+        install_fresh_workbench_write_gate(app, version=self.READ_MODEL_VERSION)
         return app
 
     def _default_open_row_ids(self, app: Application) -> list[str]:
-        payload = _json_response(app.handle_request("GET", "/api/workbench?month=2026-03"))
+        payload = build_grouped_workbench_projection(app, "2026-03")
         return [
             _flatten_groups(payload["unpaired"]["groups"], "oa")[0]["id"],
             _flatten_groups(payload["unpaired"]["groups"], "bank")[0]["id"],
@@ -59,6 +66,7 @@ class WorkbenchStaleWriteContractTests(unittest.TestCase):
                     "row_ids": row_ids,
                     "case_id": "CASE-WITHDRAW-COMPAT",
                     "note": "withdraw compatibility covers documented mismatch path",
+                    "expected_read_model_version": self.READ_MODEL_VERSION,
                 },
             )
             withdraw_response = self._post(
@@ -68,6 +76,7 @@ class WorkbenchStaleWriteContractTests(unittest.TestCase):
                     "month": "2026-03",
                     "row_ids": row_ids,
                     "expected_versions": {"relation:CASE-WITHDRAW-COMPAT": 1},
+                    "expected_read_model_version": self.READ_MODEL_VERSION,
                 },
             )
 
@@ -96,12 +105,17 @@ class WorkbenchStaleWriteContractTests(unittest.TestCase):
                     "row_ids": row_ids,
                     "case_id": "CASE-WITHDRAW-PREVIEW-VERSION",
                     "note": "withdraw preview covers documented mismatch path",
+                    "expected_read_model_version": self.READ_MODEL_VERSION,
                 },
             )
             preview_response = self._post(
                 app,
                 "/api/workbench/actions/withdraw-link/preview",
-                {"month": "2026-03", "row_ids": row_ids},
+                {
+                    "month": "2026-03",
+                    "row_ids": row_ids,
+                    "expected_read_model_version": self.READ_MODEL_VERSION,
+                },
             )
 
         self.assertEqual(confirm_response.status_code, int(HTTPStatus.OK), confirm_response.body)

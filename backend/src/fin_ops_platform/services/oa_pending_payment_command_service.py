@@ -38,6 +38,7 @@ class OaPendingPaymentCommandService:
         payment_status_repository: OAPaymentStatusRepository | None,
         pending_relation_service: Any | None = None,
         completed_oa_projection: Any | None = None,
+        payment_status_snapshot_writer: Any | None = None,
         enqueue_workbench_refresh: Callable[..., object] | None = None,
         enqueue_oa_pending_payment_refresh: Callable[..., object] | None = None,
     ) -> None:
@@ -47,6 +48,7 @@ class OaPendingPaymentCommandService:
         self._relation_command_service = relation_command_service
         self._pending_relation_service = pending_relation_service
         self._payment_status_repository = payment_status_repository
+        self._payment_status_snapshot_writer = payment_status_snapshot_writer
         self._enqueue_workbench_refresh = enqueue_workbench_refresh
         self._enqueue_oa_pending_payment_refresh = enqueue_oa_pending_payment_refresh
 
@@ -97,6 +99,8 @@ class OaPendingPaymentCommandService:
             source_action="link_bank_transactions",
         )
         writebacks = self._mark_oa_flow_ids_paid(flow_ids)
+        if flow_ids:
+            self._record_paid_statuses(records)
         refresh = self._enqueue_refreshes_for_records(records, reason="oa_pending_payment_link_bank_transactions")
         return {
             "success": True,
@@ -137,8 +141,16 @@ class OaPendingPaymentCommandService:
                 status_code=HTTPStatus.NOT_FOUND,
                 details={"oa_row_ids": missing},
             )
-        writeback_items = self._writeback_paid_relations(records)
-        changed_records = _dedupe_records([item["record"] for item in writeback_items if isinstance(item.get("record"), OAApplicationRecord)])
+        writeback_items, eligible_records = self._writeback_paid_relations(records)
+        snapshot_changed = self._record_paid_statuses(eligible_records)
+        changed_records = _dedupe_records(
+            [
+                item["record"]
+                for item in writeback_items
+                if isinstance(item.get("record"), OAApplicationRecord)
+            ]
+            + (eligible_records if snapshot_changed else [])
+        )
         refresh = (
             self._enqueue_refreshes_for_records(changed_records, reason="oa_pending_payment_writeback_paid")
             if changed_records
@@ -453,19 +465,47 @@ class OaPendingPaymentCommandService:
                     metadata=metadata,
                 )
                 refreshed.append(f"workbench:{scope_key}")
-            if callable(self._enqueue_oa_pending_payment_refresh):
+            if scope_key != "all" and callable(self._enqueue_oa_pending_payment_refresh):
                 self._enqueue_oa_pending_payment_refresh(
                     scope_key,
                     reason=reason,
                     metadata=metadata,
                 )
                 refreshed.append(f"oa_pending_payment:{scope_key}")
+        if callable(self._enqueue_workbench_refresh):
+            self._enqueue_workbench_refresh(
+                "all",
+                reason=reason,
+                metadata=metadata,
+            )
+            refreshed.append("workbench:all")
         return {
             "scopeKeys": scope_keys,
             "targets": refreshed,
             "enqueued": bool(refreshed),
-            "targetSeconds": 2,
+            "targetSeconds": 1,
         }
+
+    def _record_paid_statuses(self, records: list[OAApplicationRecord]) -> bool:
+        if not records:
+            return False
+        writer = getattr(self._payment_status_snapshot_writer, "record_paid_statuses", None)
+        if not callable(writer):
+            raise OaPendingPaymentError(
+                "oa_payment_status_snapshot_writer_unavailable",
+                "OA payment status snapshot writer is not configured.",
+                status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            )
+        try:
+            result = writer(records=records)
+        except (ValueError, RuntimeError) as exc:
+            raise OaPendingPaymentError(
+                "oa_payment_status_snapshot_write_failed",
+                "OA payment status was written externally but the page snapshot update failed; retry is safe.",
+                status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+                details={"oa_row_ids": [record.id for record in records]},
+            ) from exc
+        return bool(tuple(getattr(result, "affected_scope_keys", ()) or ()))
 
     def _relation_status_by_bank_id(self, bank_transaction_ids: list[str]) -> dict[str, dict[str, Any]]:
         if not bank_transaction_ids:
@@ -489,12 +529,16 @@ class OaPendingPaymentCommandService:
                 }
         return result
 
-    def _writeback_paid_relations(self, records: list[OAApplicationRecord]) -> list[dict[str, Any]]:
+    def _writeback_paid_relations(
+        self,
+        records: list[OAApplicationRecord],
+    ) -> tuple[list[dict[str, Any]], list[OAApplicationRecord]]:
         if not records:
-            return []
+            return [], []
         records_by_id = {record.id: record for record in records}
         relations = self._active_relations_for_row_ids(list(records_by_id))
         writebacks: list[dict[str, Any]] = []
+        eligible_records: list[OAApplicationRecord] = []
         matched_relation_found = False
         for relation in relations:
             relation_oa_ids = _relation_oa_ids([relation])
@@ -511,6 +555,7 @@ class OaPendingPaymentCommandService:
             for record in relation_records:
                 if record.id not in records_by_id:
                     continue
+                eligible_records.append(record)
                 flow_id = self._resolve_oa_flow_id(record)
                 writeback = self._mark_oa_paid_if_needed(flow_id)
                 if writeback is not None:
@@ -522,7 +567,7 @@ class OaPendingPaymentCommandService:
                 status_code=HTTPStatus.CONFLICT,
                 details={"oa_row_ids": list(records_by_id)},
             )
-        return writebacks
+        return writebacks, _dedupe_records(eligible_records)
 
     def _resolve_oa_flow_ids(self, records: list[OAApplicationRecord]) -> list[str]:
         return [self._resolve_oa_flow_id(record) for record in records]
@@ -676,19 +721,16 @@ def _empty_refresh_payload() -> dict[str, Any]:
         "scopeKeys": [],
         "targets": [],
         "enqueued": False,
-        "targetSeconds": 2,
+        "targetSeconds": 0,
     }
 
 
 def _oa_pending_payment_write_target_envelope(refresh: dict[str, Any]) -> dict[str, object]:
     scope_keys = _payload_list(refresh, "scopeKeys", "scope_keys")
-    if not scope_keys and not bool(refresh.get("enqueued")):
+    if not scope_keys:
         return write_target_envelope(scope_keys=[], targets=[])
-    targets: list[dict[str, str]] = []
-    for scope_key in scope_keys or ["all"]:
-        targets.append({"read_model_key": "oa_pending_payment", "scope_key": scope_key})
-        targets.append({"read_model_key": "workbench_relation", "scope_key": scope_key})
-    return write_target_envelope(scope_keys=scope_keys, targets=targets, fallback_scope_key="all")
+    targets = [{"read_model_key": "oa_pending_payment", "scope_key": scope_key} for scope_key in scope_keys]
+    return write_target_envelope(scope_keys=scope_keys, targets=targets)
 
 
 def _pending_payment_relation_id(oa_row_ids: list[str], bank_transaction_ids: list[str]) -> str:
@@ -708,13 +750,7 @@ def _relation_month_scope(records: list[OAApplicationRecord]) -> str:
 
 def _refresh_scope_keys(month: str | None) -> list[str]:
     normalized_month = clean_string(month or "")
-    scope_keys = [normalized_month[:7]] if len(normalized_month) >= 7 and normalized_month[4] == "-" else []
-    scope_keys.append("all")
-    deduped: list[str] = []
-    for scope_key in scope_keys:
-        if scope_key and scope_key not in deduped:
-            deduped.append(scope_key)
-    return deduped
+    return [normalized_month[:7]] if len(normalized_month) >= 7 and normalized_month[4] == "-" else []
 
 
 def _optional_decimal(value: Any) -> Decimal | None:

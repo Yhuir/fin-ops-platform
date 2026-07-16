@@ -63,10 +63,10 @@ function waitForImportConfirm(page: Page) {
       && responsePathMatches(response.url(), "/imports/files/confirm"));
 }
 
-function waitForWorkbenchRefresh(page: Page) {
+function waitForImportOperationBarrier(page: Page) {
   return page.waitForResponse((response) =>
-    response.request().method() === "GET"
-      && responsePathMatches(response.url(), "/api/workbench/summary"));
+    response.request().method() === "POST"
+      && responsePathMatches(response.url(), "/api/operation-barrier/status"));
 }
 
 async function expectFreshReadModelResponse(responsePromise: Promise<{ json(): Promise<unknown> }>) {
@@ -177,7 +177,7 @@ async function stageInvoiceFilesForPreview(page: Page, recordLatency?: Operation
 }
 
 test.describe("invoice import browser flow", () => {
-  test("previews and confirms input/output invoice files, then refreshes the workbench state", async ({ page }, testInfo) => {
+  test("previews and confirms input/output invoice files, then waits for declared targets", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
     const recordLatency = createInvoiceImportLatencyRecorder(page, testInfo);
@@ -194,10 +194,10 @@ test.describe("invoice import browser flow", () => {
       actionType: "click",
     }, async (mark) => {
       const confirmResponse = waitForImportConfirm(page);
-      const workbenchResponse = waitForWorkbenchRefresh(page);
+      const barrierResponse = waitForImportOperationBarrier(page);
       await page.getByRole("button", { name: "确认导入" }).click();
       await mark("apiLatencyMs", confirmResponse);
-      await mark("operationBarrierLatencyMs", workbenchResponse);
+      await mark("operationBarrierLatencyMs", barrierResponse);
       await mark("finalSettledLatencyMs", expect(page.getByText("当前还没有选择文件。")).toBeVisible());
     });
 
@@ -205,7 +205,7 @@ test.describe("invoice import browser flow", () => {
     await expect(page.getByText("当前还没有选择文件。")).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(api.count("POST /imports/files/confirm")).toBe(1);
-    expect(api.count("GET /api/workbench/summary")).toBeGreaterThan(0);
+    expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(0);
     expect(unexpectedRuntimeErrors(browserErrors)).toEqual([]);
   });
 
@@ -224,10 +224,10 @@ test.describe("invoice import browser flow", () => {
       actionType: "click",
     }, async (mark) => {
       const confirmResponse = waitForImportConfirm(page);
-      const workbenchResponse = waitForWorkbenchRefresh(page);
+      const barrierResponse = waitForImportOperationBarrier(page);
       await page.getByRole("button", { name: "确认导入" }).click();
       await mark("apiLatencyMs", confirmResponse);
-      await mark("operationBarrierLatencyMs", workbenchResponse);
+      await mark("operationBarrierLatencyMs", barrierResponse);
       await mark("finalSettledLatencyMs", expect(page.getByText("已确认导入")).toBeVisible());
     });
     await expect(page.getByText("已确认导入")).toBeVisible();
@@ -451,10 +451,10 @@ test.describe("invoice import browser flow", () => {
       actionType: "click",
     }, async (mark) => {
       const confirmResponse = waitForImportConfirm(page);
-      const workbenchResponse = waitForWorkbenchRefresh(page);
+      const barrierResponse = waitForImportOperationBarrier(page);
       await page.getByRole("button", { name: "确认导入" }).click();
       await mark("apiLatencyMs", confirmResponse);
-      await mark("operationBarrierLatencyMs", workbenchResponse);
+      await mark("operationBarrierLatencyMs", barrierResponse);
       await mark("finalSettledLatencyMs", expect(page.getByText("已确认导入")).toBeVisible());
     });
 
@@ -464,7 +464,7 @@ test.describe("invoice import browser flow", () => {
     expect(api.lastBody("POST /imports/files/confirm")).toMatchObject({
       selected_file_ids: ["invoice_import_file_e2e_2"],
     });
-    expect(api.count("GET /api/workbench/summary")).toBeGreaterThan(0);
+    expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(0);
     expect(unexpectedRuntimeErrors(browserErrors)).toEqual([]);
   });
 
@@ -527,7 +527,7 @@ test.describe("invoice import browser flow", () => {
     await expect(page.getByText("预览后数据已变化，请重新预览后再确认。")).toBeVisible();
     await expect(page.getByText("已确认导入")).toHaveCount(0);
     expect(api.count("POST /imports/files/confirm")).toBe(1);
-    expect(api.count("GET /api/workbench/summary")).toBe(0);
+    expect(api.count("POST /api/operation-barrier/status")).toBe(0);
     expect(unexpectedRuntimeErrors(browserErrors, [/409/])).toEqual([]);
   });
 
@@ -554,7 +554,7 @@ test.describe("invoice import browser flow", () => {
     await expect(page.getByText("发票导入任务创建失败，请稍后重试。")).toBeVisible();
     await expect(page.getByText("已确认导入")).toHaveCount(0);
     expect(api.count("POST /imports/files/confirm")).toBe(1);
-    expect(api.count("GET /api/workbench/summary")).toBe(0);
+    expect(api.count("POST /api/operation-barrier/status")).toBe(0);
     expect(unexpectedRuntimeErrors(browserErrors, [/500/])).toEqual([]);
   });
 });

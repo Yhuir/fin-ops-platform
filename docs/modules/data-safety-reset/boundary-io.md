@@ -1,6 +1,6 @@
 # 数据安全与重置模块边界与 I/O
 
-日期：2026-06-26
+日期：2026-07-16
 
 ## 模块化状态
 
@@ -15,7 +15,7 @@
 ### 负责
 
 - 设置页数据重置、reset job、进度查询和安全防护。
-- 重置后触发 derived lifecycle/read model rebuild。
+- 重置后只触发 derived lifecycle/read model rebuild 队列；不在 reset 请求或 job 线程中查询、投影或组装下游页面 payload。
 - 运维脚本和生产安全约束。
 
 ### 不负责
@@ -39,6 +39,7 @@
 | Reset job | `BackgroundJobService` | 可追踪、可失败恢复；禁止恢复 `DataResetJob` / `_data_reset_jobs` 内存 job path。 |
 | Lifecycle event | derived data lifecycle | `settings_reset_completed` 等显式事件 |
 | Read model invalidation | runtime queue/app status | 不留下伪 fresh |
+| OA rebuild status | reset API/job caller | durable lifecycle 成功登记后返回 `pending`；只有下游 worker/read model 自己能证明 fresh，reset 不得返回同步 `completed`。 |
 
 ## 持久化与投影
 
@@ -62,7 +63,7 @@
 
 - 允许依赖：`BackgroundJobService`、derived lifecycle service、app status、state store 的显式 save/load ports。
 - 必须通过：`SettingsDataResetService` 和 `BackgroundJobService`。
-- 禁止绕过：直接数据库清理；绕过权限/审计执行 reset；恢复旧内存 job；通过 broad state payload 清理 Workbench relation/read-model state。
+- 禁止绕过：直接数据库清理；绕过权限/审计执行 reset；恢复旧内存 job；通过 broad state payload 清理 Workbench relation/read-model state；调用 Workbench 全页 builder、同步读取页面 projection 或重复登记 matching dirty scope 来伪造重建完成。
 
 ## 测试与验证
 
@@ -73,3 +74,4 @@
 
 - 生产数据操作必须同步 operations 文档和回滚/备份策略。
 - 本地可执行边界已 close；真实基础设施恢复、worker drain 和大库最终 fresh 只能由 staging/production smoke 证明，作为运维风险跟踪。
+- OA reset job 的 `completed` 只证明清理与 durable lifecycle 登记完成；`rebuild_status=pending` 到最终 fresh 的收敛由关联台 worker/read model 状态负责。

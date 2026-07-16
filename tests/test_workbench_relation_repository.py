@@ -453,7 +453,7 @@ def test_relation_refresh_uses_full_workbench_all_only_when_scope_is_unknown() -
         if str(row["scope_type"]) == "workbench" and str(row["scope_key"]) == "all"
     ]
     assert workbench_all_outbox_payloads
-    assert "aggregate_only" not in workbench_all_outbox_payloads[-1]
+    assert workbench_all_outbox_payloads[-1]["reason"] == "workbench_relation_changed"
 
 
 def test_relation_downstream_refresh_uses_known_relation_month_when_oa_month_is_unresolved() -> None:

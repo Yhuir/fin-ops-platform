@@ -56,26 +56,26 @@
 
 将“外部往来款付款”等银行标签纳入 `no_invoice_required` 是合法的待找发票规则配置。它只改变待找发票/发票生命周期口径，不改变外部往来款台账准入，也不触发免 OA 批次重建。
 
-规则保存成功后发布 `pending_invoice_rules_changed`，刷新 `invoice_lifecycle`、待找发票、关联台、进项使用、OA 待付款、销项收款、税金抵扣、成本统计和搜索 read model。该事件不得刷新外部往来款台账、免 OA 批次或银行账户余额。
+规则保存成功后发布 `pending_invoice_rules_changed`，刷新 `invoice_lifecycle`、待找发票、关联台、进项使用、销项收款、税金抵扣、成本统计和搜索 read model。OA 待付款的 `InvoiceLifecyclePolicy.evaluate_oa_payment` 不读取待找发票规则，因此该事件不得刷新 `oa_pending_payment`；也不得刷新外部往来款台账、免 OA 批次或银行账户余额。
 
 ## OA 待付款核对
 
 OA 待付款核对页用于对齐 OA 单据、付款流水和进项发票，并通过页面内切换区分已完成 OA 与进行中 OA：
 
-- rows/read model 必须返回 payment、invoice、status、relation、refresh 状态；未正式化的自动匹配 decision 不作为 OA 待付款业务关系状态。
-- OA 范围以 OA MySQL `t_payment_simple.flow_id` 为准入事实源，不直接扫 OA Mongo 全量；`flow_id` 必须匹配 OA Mongo `form_data._id`，匹配成功后才进入本页面正常表格。
-- `view_mode=completed` 是原 OA 待付款核对视图，只展示已进入 `t_payment_simple` 且已完成或历史未带 workflow status 的 OA；`view_mode=in_progress` 只展示已进入 `t_payment_simple` 且 OA 系统仍为进行中的支付申请/日常报销。OA 后续完成后，下一次 OA sync/read model refresh 必须从进行中视图移除。
+- 唯一首屏 rows API 必须返回 payment、invoice、status、relation、refresh、filter options和ETag；未正式化的自动匹配 decision 不作为 OA 待付款业务关系状态，旧filter endpoint不存在。
+- 页面/read model worker只读取PostgreSQL。OA integration sync负责将外部OA/MySQL完整事实提交为completed projection、in-progress admission和payment-status snapshot；外部变化未进入PG时按sync lag处理，不能让页面live scan掩盖。
+- `view_mode=completed` 展示普通 `app.oa_applications` 中已完成或历史未带workflow status的OA，不受 `t_payment_simple` 准入限制；`view_mode=in_progress` 只展示已由 `t_payment_simple.flow_id` 准入、匹配OA Mongo `form_data._id` 且当前仍进行中的snapshot。OA完成后下一次OA sync必须从admission删除并进入completed projection。
 - `t_payment_simple.id` 不是 OA ID；支付状态展示和写回使用同一 `flow_id`。OA 系统中因网络波动重复提交、但未进入 `t_payment_simple` 的 OA 不展示。
 - rows summary 必须提供 `viewCounts.completed/in_progress`，用于“已完成 OA N条 / 进行中 OA N条”切换按钮；该数量与当前搜索/筛选条件一致，并按唯一 OA ID 计数，不按表格配对组行数计数。同一 relation 下多条 OA 折叠成一行时，`viewCounts` 计多条 OA，`pagination.total` / `summary.rowCount` 仍计一行。
-- 普通 `app.oa_applications` 投影只承载已完成/历史未知 OA，供关联台、待找发票等页面消费；OA 待付款核对使用专用 payment-admitted OA projection/read model：先读 `t_payment_simple.flow_id`，再按 flow_id 精确读取 OA Mongo 当前记录，并按当前 workflow status 分流到 `completed` / `in_progress`。
-- filter-options 需要与列表事实一致，不能前端自造枚举。
+- 普通 `app.oa_applications` 投影只承载已完成/历史未知OA；`app.oa_pending_payment_admissions`只承载已进入App的in-progress准入snapshot。二者与payment-status snapshot由OA sync原子提交，OA专属worker只在PG内分流/构建。
+- `filterOptions` 随同一fresh rows响应由后端set-based计算，不能前端自造枚举。
 - 关联关系必须来自关联台 Workbench active relation；同一 relation 下出现多条 OA、支出流水或进项发票时，OA 待付款只展示一条核对行，金额为各自合计，并通过明细展开所有 OA、流水或发票。
-- completed 与 in-progress 使用同一套 OA、支付状态、流水、发票四分组表格；进行中 OA 视图只把 Workbench active relation、OA 待付款独立 active pending relation 或自动匹配命令刚确认的 pending relation 当作付款证据，未正式化 decision 不能自动写回 OA。
-- 付款状态不展示“支付多了”或“已支付（多条OA合并支付）”；多 OA 合并付款先按 relation group 合计，支出流水合计大于 OA 合计时进入待核对。
-- 用户在进行中 OA 视图点击“确认已支付”后，后端必须校验 OA 仍为进行中、支出流水为 outflow、金额相等且能解析 OA Mongo 文档 ID，再确认 Workbench relation 并写回 OA MySQL `t_payment_simple.pay_status=1`。
+- completed 与 in-progress 使用同一套 OA、支付状态、流水、发票四分组表格。completed只认Workbench active relation；in-progress只认OA待付款active pending relation。未正式化decision不能自动写回OA。
+- 付款状态只有“已支付/未支付”。active linked relation驱动“已支付”；金额差异、缺失银行事实或非支出边只作为reason和写回阻断，不产生“待核对/支付多了/多条OA合并支付”等第三状态。
+- 用户点击逐行“写回”，或in-progress显式关联支出流水且金额匹配后，后端必须校验active relation、outflow、金额相等和flow id，再幂等写MySQL `pay_status=1`，并更新PG payment snapshot、月份watermark和精确月份outbox。MySQL已paid时仍要修复PG；PG失败返回可安全重试错误。
 - 实机验证显示 `t_payment_simple.flow_id` 对应 OA Mongo `form_data._id`，平台使用投影中的 `Mongo文档ID` 或 `oa-pay-/oa-exp-` 行 ID 后缀读写支付状态；Flowable 流程实例 ID 和流程请求 ID 只作为详情/诊断信息，不作为支付状态写回 key。
 - 详情 API 返回可解释的来源、匹配关系和异常原因；relation 明细必须支持 OA、支出流水和进项发票三类。
-- SQL read model 刷新失败时，页面必须展示 stale/refreshing 状态。
+- SQL read model non-fresh时返回202且不携带旧rows；页面立即隐藏旧数据并等待operation barrier。可见页每500ms使用原rows endpoint条件检查，304不重载payload。
 
 ## 发票关系影响
 

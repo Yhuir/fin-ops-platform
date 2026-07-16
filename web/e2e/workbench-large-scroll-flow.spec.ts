@@ -61,13 +61,13 @@ test.describe("workbench large dataset browser flow", () => {
     await expectVisibleAndUncovered(openZone.getByRole("button", { name: "加载更多" }), "open zone load-more button");
     await openZone.getByRole("button", { name: "加载更多" }).click();
     await expect(openZone.getByText("已加载 205 / 205")).toBeVisible();
-    expect(api.count("GET /api/workbench/groups")).toBeGreaterThanOrEqual(3);
+    expect(api.count("GET /api/workbench/groups")).toBe(1);
 
     await openZone.getByRole("button", { name: "搜索 银行流水" }).click();
     await page.getByRole("searchbox", { name: "搜索 银行流水" }).fill("长列表供应商065");
     const targetGroup = page.getByTestId("candidate-group-unpaired-row:bk-large-202603-065");
     await expect(targetGroup).toBeVisible();
-    await expect(openZone.getByText("已加载 1 / 205")).toBeVisible();
+    await expect(openZone.getByText("已加载 200 / 205")).toBeVisible();
     await expect(page.getByTestId("candidate-group-unpaired-row:oa-large-202603-001")).toBeVisible();
 
     await targetGroup.getByRole("row", { name: /长列表供应商065/ }).click();

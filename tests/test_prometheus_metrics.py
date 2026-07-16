@@ -102,7 +102,7 @@ class PrometheusMetricsTests(unittest.TestCase):
             },
             "api_performance": {
                 "endpoints": {
-                    "GET /api/workbench/summary": {
+                    "GET /api/workbench": {
                         "sample_count": 10,
                         "last_status_code": 200,
                         "duration_ms": {"p50": 50.0, "p95": 90.0, "p99": 100.0},
@@ -159,7 +159,7 @@ class PrometheusMetricsTests(unittest.TestCase):
             'finops_worker_heartbeat_lag_seconds{status="available",worker_instance="workbench",worker_kind="workbench-read-model"} 2.5',
             rendered,
         )
-        self.assertIn('finops_api_duration_ms{endpoint="GET /api/workbench/summary",quantile="0.95"} 90', rendered)
+        self.assertIn('finops_api_duration_ms{endpoint="GET /api/workbench",quantile="0.95"} 90', rendered)
         self.assertIn('finops_postgres_schema_version 68', rendered)
         self.assertIn('finops_redis_hit_total 3', rendered)
 

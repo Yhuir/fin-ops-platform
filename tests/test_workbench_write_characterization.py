@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import unittest
 from contextlib import contextmanager
+from http import HTTPStatus
 from unittest.mock import patch
 
 from fin_ops_platform.app.server import Application
@@ -14,6 +15,7 @@ from fin_ops_platform.services.workbench_matching_dirty_scope_worker import (
 )
 from fin_ops_platform.services.workbench_idempotency import InMemoryWorkbenchIdempotencyRepository
 from fin_ops_platform.services.workbench_idempotency import workbench_request_fingerprint
+from fin_ops_platform.services.workbench_query_facade import WorkbenchQueryResult
 from fin_ops_platform.services.workbench_uow import WorkbenchWriteUnitOfWork
 from tests.test_workbench_uow_contract import (
     _RecordingConnection,
@@ -21,14 +23,6 @@ from tests.test_workbench_uow_contract import (
     _RecordingIdempotencyStore,
     _RecordingRepositoryFactory,
 )
-
-
-def _flatten_groups(groups: list[dict[str, object]], record_type: str) -> list[dict[str, object]]:
-    key = f"{record_type}_rows"
-    rows: list[dict[str, object]] = []
-    for group in groups:
-        rows.extend(group[key])
-    return rows
 
 
 def _json_response(response) -> dict[str, object]:
@@ -72,34 +66,30 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
     def _build_app(self) -> Application:
         app = build_application()
         app._emit_workbench_action_timing = lambda **kwargs: None
+        query_facade = app._workbench_query_facade()
+        query_facade.write_precondition = lambda _month, expected_read_model_version: WorkbenchQueryResult(
+            HTTPStatus.OK,
+            {
+                "read_model_status": "fresh",
+                "read_model_version": str(expected_read_model_version),
+            },
+        )
+        app._workbench_query_facade = lambda: query_facade
         return app
 
-    def _workbench_payload(self, app: Application, month: str = "2026-03") -> dict[str, object]:
-        response = app.handle_request("GET", f"/api/workbench?month={month}")
-        self.assertEqual(response.status_code, 200, response.body)
-        return _json_response(response)
-
     def _default_open_row_ids(self, app: Application) -> list[str]:
-        payload = self._workbench_payload(app)
-        return [
-            _flatten_groups(payload["unpaired"]["groups"], "oa")[0]["id"],
-            _flatten_groups(payload["unpaired"]["groups"], "bank")[0]["id"],
-            _flatten_groups(payload["unpaired"]["groups"], "invoice")[0]["id"],
-        ]
+        rows = self._default_open_rows(app)
+        return [str(rows[row_type]["id"]) for row_type in ("oa", "bank", "invoice")]
 
     def _default_open_rows(self, app: Application) -> dict[str, dict[str, object]]:
-        payload = self._workbench_payload(app)
-        return {
-            "oa": _flatten_groups(payload["unpaired"]["groups"], "oa")[0],
-            "bank": _flatten_groups(payload["unpaired"]["groups"], "bank")[0],
-            "invoice": _flatten_groups(payload["unpaired"]["groups"], "invoice")[0],
-        }
+        rows = app._workbench_query_service.get_workbench("2026-03")["unpaired"]
+        return {row_type: dict(rows[row_type][0]) for row_type in ("oa", "bank", "invoice")}
 
     def _default_invoice_row_id(self, app: Application) -> str:
-        payload = self._workbench_payload(app)
-        return str(_flatten_groups(payload["unpaired"]["groups"], "invoice")[0]["id"])
+        return str(self._default_open_rows(app)["invoice"]["id"])
 
     def _post(self, app: Application, path: str, payload: dict[str, object]):
+        payload.setdefault("expected_read_model_version", "characterization-generation")
         if path == "/api/workbench/actions/confirm-link":
             self._ensure_documented_mismatch_confirm_note(payload)
         return app.handle_request("POST", path, json.dumps(payload))
@@ -443,6 +433,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
             "row_ids": row_ids,
             "case_id": "CASE-UOW-FAILED",
             "idempotency_key": "confirm:uow-idem-failed",
+            "expected_read_model_version": "characterization-generation",
         }
         self._ensure_documented_mismatch_confirm_note(request_payload)
         request_fingerprint = workbench_request_fingerprint(
@@ -670,6 +661,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
             "month": "2026-03",
             "row_id": "missing-row",
             "idempotency_key": "cancel:uow-idem-failed",
+            "expected_read_model_version": "characterization-generation",
         }
         request_fingerprint = workbench_request_fingerprint(
             tenant_id="default",
@@ -769,35 +761,6 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         self.assertEqual(pair_relation_persist.call_count, 0)
         self.assertEqual(read_model_persist.call_count, 0)
         self.assertIsNotNone(app._workbench_pair_relation_service.get_active_relation_by_case_id("CASE-CANCEL-STALE-NEW"))
-
-    def test_duplicate_ignore_and_unignore_current_behavior(self) -> None:
-        app = self._build_app()
-        invoice_row_id = self._default_invoice_row_id(app)
-
-        with self._suppress_background_persistence(app):
-            first_ignore = self._post(
-                app,
-                "/api/workbench/actions/ignore-row",
-                {"month": "2026-03", "row_id": invoice_row_id, "comment": "ignore once"},
-            )
-            second_ignore = self._post(
-                app,
-                "/api/workbench/actions/ignore-row",
-                {"month": "2026-03", "row_id": invoice_row_id, "comment": "ignore twice"},
-            )
-            first_unignore = self._post(app, "/api/workbench/actions/unignore-row", {"month": "2026-03", "row_id": invoice_row_id})
-            second_unignore = self._post(app, "/api/workbench/actions/unignore-row", {"month": "2026-03", "row_id": invoice_row_id})
-
-        self.assertEqual(first_ignore.status_code, 200, first_ignore.body)
-        self.assertEqual(second_ignore.status_code, 200, second_ignore.body)
-        first_ignore_payload = _json_response(first_ignore)
-        second_ignore_payload = _json_response(second_ignore)
-        self.assertEqual(first_ignore_payload["exception_case_id"], second_ignore_payload["exception_case_id"])
-        self.assertEqual(first_unignore.status_code, 200, first_unignore.body)
-        self.assertEqual(second_unignore.status_code, 404, second_unignore.body)
-        self.assertEqual(_json_response(second_unignore)["error"], "workbench_row_not_found")
-        case = app._workbench_exception_case_service.snapshot()["cases"][first_ignore_payload["exception_case_id"]]
-        self.assertEqual(case["status"], "cancelled")
 
     def test_duplicate_mark_exception_reuses_existing_case_and_replays_success(self) -> None:
         app = self._build_app()
@@ -1733,94 +1696,9 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
         self.assertIn(rows["oa"]["id"], app._workbench_override_service.snapshot()["row_overrides"])
         self.assertIn(rows["bank"]["id"], app._workbench_override_service.snapshot()["row_overrides"])
 
-    def test_duplicate_personal_advance_repayment_returns_not_found_after_first_settlement_current_behavior(self) -> None:
-        app = self._build_app()
-        row_ids = self._personal_advance_row_ids()
 
-        with patch.object(app, "_build_raw_workbench_payload", return_value=self._personal_advance_raw_payload()):
-            self._workbench_payload(app)
-            with self._suppress_background_persistence(app) as (pair_relation_persist, read_model_persist):
-                first_response = self._post(
-                    app,
-                    "/api/workbench/actions/confirm-personal-advance-repayment",
-                    {"month": "2026-03", "row_ids": row_ids, "note": "first settlement"},
-                )
-                second_response = self._post(
-                    app,
-                    "/api/workbench/actions/confirm-personal-advance-repayment",
-                    {"month": "2026-03", "row_ids": row_ids, "note": "second settlement"},
-                )
 
-        self.assertEqual(first_response.status_code, 200, first_response.body)
-        self.assertEqual(second_response.status_code, 404, second_response.body)
-        self.assertEqual(_json_response(second_response)["error"], "workbench_row_not_found")
-        self.assertEqual(len(app._workbench_exception_case_service.snapshot()["cases"]), 1)
-        self.assertEqual([relation["case_id"] for relation in app._workbench_pair_relation_service.list_active_relations()], ["CASE-WEX-000001"])
-        self.assertEqual(pair_relation_persist.call_count, 1)
-        self.assertEqual(read_model_persist.call_count, 1)
 
-    def test_stale_personal_advance_after_exception_returns_not_found_and_preserves_exception(self) -> None:
-        app = self._build_app()
-        row_ids = self._personal_advance_row_ids()
-
-        with patch.object(app, "_build_raw_workbench_payload", return_value=self._personal_advance_raw_payload()):
-            self._workbench_payload(app)
-            with patch.object(app, "_schedule_workbench_read_model_persist"):
-                exception_response = self._post(
-                    app,
-                    "/api/workbench/actions/mark-exception",
-                    {"month": "2026-03", "row_id": row_ids[0], "exception_code": "pending_collection"},
-                )
-            with self._suppress_background_persistence(app):
-                repayment_response = self._post(
-                    app,
-                    "/api/workbench/actions/confirm-personal-advance-repayment",
-                    {"month": "2026-03", "row_ids": row_ids},
-                )
-
-        self.assertEqual(exception_response.status_code, 200, exception_response.body)
-        self.assertEqual(repayment_response.status_code, 404, repayment_response.body)
-        self.assertEqual(_json_response(repayment_response)["error"], "workbench_row_not_found")
-        self.assertEqual(len(app._workbench_exception_case_service.snapshot()["cases"]), 1)
-        self.assertEqual(app._workbench_pair_relation_service.snapshot()["pair_relations"], {})
-
-    def test_personal_advance_persistence_failure_rolls_back_exception_case_and_relation(self) -> None:
-        app = self._build_app()
-        row_ids = self._personal_advance_row_ids()
-
-        with patch.object(app, "_build_raw_workbench_payload", return_value=self._personal_advance_raw_payload()):
-            self._workbench_payload(app)
-            with patch.object(app, "_save_workbench_exception_cases_snapshot", side_effect=RuntimeError("mock settlement persist failure")):
-                response = self._post(
-                    app,
-                    "/api/workbench/actions/confirm-personal-advance-repayment",
-                    {"month": "2026-03", "row_ids": row_ids},
-                )
-
-        self.assertEqual(response.status_code, 400, response.body)
-        self.assertEqual(_json_response(response)["error"], "invalid_personal_advance_repayment_request")
-        self.assertEqual(app._workbench_exception_case_service.snapshot()["cases"], {})
-        self.assertEqual(app._workbench_pair_relation_service.snapshot()["pair_relations"], {})
-
-    def test_personal_advance_scheduling_failure_propagates_after_case_and_relation_are_mutated(self) -> None:
-        app = self._build_app()
-        row_ids = self._personal_advance_row_ids()
-
-        with patch.object(app, "_build_raw_workbench_payload", return_value=self._personal_advance_raw_payload()):
-            self._workbench_payload(app)
-            with (
-                patch.object(app, "_schedule_workbench_pair_relation_persist"),
-                patch.object(app, "_schedule_workbench_read_model_persist", side_effect=RuntimeError("mock repayment schedule failure")),
-            ):
-                with self.assertRaisesRegex(RuntimeError, "mock repayment schedule failure"):
-                    self._post(
-                        app,
-                        "/api/workbench/actions/confirm-personal-advance-repayment",
-                        {"month": "2026-03", "row_ids": row_ids},
-                    )
-
-        self.assertEqual(len(app._workbench_exception_case_service.snapshot()["cases"]), 1)
-        self.assertEqual([relation["case_id"] for relation in app._workbench_pair_relation_service.list_active_relations()], ["CASE-WEX-000001"])
 
 
 class WorkbenchWriteWorkerTriggerCharacterizationTests(unittest.TestCase):

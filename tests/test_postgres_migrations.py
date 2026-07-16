@@ -117,6 +117,10 @@ EXPECTED_MIGRATIONS = [
     "0101_phase19_audit_contract_boundaries.sql",
     "0102_workbench_idempotency_runtime_evidence_grant.sql",
     "0103_etc_reconciliation_task_timestamps.sql",
+    "0104_oa_pending_payment_source_snapshot.sql",
+    "0105_cost_statistics_freshness_gate.sql",
+    "0106_oa_pending_payment_native_oa_ids.sql",
+    "0107_cost_statistics_structured_bank_flow_rows.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -195,6 +199,7 @@ EXPECTED_TABLES = [
     "app.bank_transaction_relation_claims",
     "app.oa_pending_payment_bank_relation_events",
     "app.oa_pending_payment_admissions",
+    "app.oa_pending_payment_status_snapshots",
     "read_model.workbench_rows",
     "read_model.workbench_groups",
     "read_model.workbench_group_rows",
@@ -221,6 +226,7 @@ EXPECTED_TABLES = [
     "read_model.bank_account_balances",
     "read_model.cost_statistics_read_models",
     "read_model.cost_statistics_rows",
+    "read_model.cost_statistics_bank_flow_rows",
     "read_model.tax_offset_read_models",
     "read_model.tax_offset_items",
     "read_model.no_oa_bank_batch_rows",
@@ -252,7 +258,11 @@ READ_MODEL_STORAGE_CONTRACTS = {
         "read_model.output_invoice_collection_scopes",
     ),
     "oa_pending_payment": ("read_model.oa_pending_payment_rows", "read_model.oa_pending_payment_scopes"),
-    "cost_statistics": ("read_model.cost_statistics_read_models", "read_model.cost_statistics_rows"),
+    "cost_statistics": (
+        "read_model.cost_statistics_read_models",
+        "read_model.cost_statistics_rows",
+        "read_model.cost_statistics_bank_flow_rows",
+    ),
     "tax_offset": ("read_model.tax_offset_read_models", "read_model.tax_offset_items"),
     "no_oa_bank_batch": ("read_model.no_oa_bank_batch_rows",),
     "bank_flow_rule_batch": ("read_model.bank_flow_rule_batch_rows",),
@@ -273,7 +283,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 104)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 108)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -1313,6 +1323,58 @@ class PostgresMigrationSqlTests(unittest.TestCase):
         )
         self.assertNotIn("updated_at = now()", normalized_sql)
         self.assertNotRegex(normalized_sql, r"\bset\s+(?:status|version|scope_month)\s*=")
+
+    def test_cost_statistics_freshness_gate_tracks_published_queue_version(self) -> None:
+        sql = strip_sql_comments(
+            (MIGRATIONS_DIR / "0105_cost_statistics_freshness_gate.sql").read_text(encoding="utf-8")
+        ).lower()
+        normalized_sql = " ".join(sql.split())
+
+        self.assertIn(
+            "alter table read_model.cost_statistics_read_models add column if not exists "
+            "published_source_version bigint",
+            normalized_sql,
+        )
+        self.assertIn(
+            "check (published_source_version is null or published_source_version >= 0)",
+            normalized_sql,
+        )
+        self.assertNotIn("update read_model.cost_statistics_read_models", normalized_sql)
+        self.assertNotIn("dirty.status = 'done'", normalized_sql)
+        self.assertIn("read_model_dirty_scopes_cost_latest_version_idx", normalized_sql)
+        self.assertIn("source_version desc, updated_at desc, id desc", normalized_sql)
+        self.assertIn("where scope_type = 'cost_statistics'", normalized_sql)
+
+    def test_oa_pending_payment_source_snapshot_is_tenant_scoped_and_runtime_writable(self) -> None:
+        sql = strip_sql_comments(
+            (MIGRATIONS_DIR / "0104_oa_pending_payment_source_snapshot.sql").read_text(encoding="utf-8")
+        ).lower()
+        normalized_sql = " ".join(sql.split())
+
+        self.assertIn("create table if not exists app.oa_pending_payment_status_snapshots", normalized_sql)
+        self.assertIn("unique (tenant_id, flow_id)", normalized_sql)
+        self.assertIn("on app.oa_pending_payment_status_snapshots (tenant_id, scope_month, flow_id)", normalized_sql)
+        self.assertIn(
+            "grant select, insert, update, delete on app.oa_pending_payment_status_snapshots to fin_ops_worker",
+            normalized_sql,
+        )
+        self.assertIn(
+            "grant select on app.oa_pending_payment_status_snapshots to fin_ops_api",
+            normalized_sql,
+        )
+
+    def test_oa_pending_payment_native_oa_ids_is_additive_and_non_nullable(self) -> None:
+        sql = strip_sql_comments(
+            (MIGRATIONS_DIR / "0106_oa_pending_payment_native_oa_ids.sql").read_text(encoding="utf-8")
+        ).lower()
+        normalized_sql = " ".join(sql.split())
+
+        self.assertIn("alter table read_model.oa_pending_payment_rows", normalized_sql)
+        self.assertIn(
+            "add column if not exists oa_ids text[] not null default array[]::text[]",
+            normalized_sql,
+        )
+        self.assertNotIn("update read_model.oa_pending_payment_rows", normalized_sql)
 
 
 

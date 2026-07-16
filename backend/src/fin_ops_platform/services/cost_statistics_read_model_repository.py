@@ -9,25 +9,57 @@ class CostStatisticsReadModelRepositoryPort:
     def __init__(self, repository: Any) -> None:
         self._repository = repository
 
-    def load_cost_statistics_read_models(self) -> dict[str, Any]:
-        payload = self._repository.load_cost_statistics_read_models()
-        return dict(payload) if isinstance(payload, dict) else {}
-
     def get_cost_statistics_view(self, *, scope_key: str) -> dict[str, Any] | None:
         payload = self._repository.get_cost_statistics_view(scope_key=scope_key)
+        return dict(payload) if isinstance(payload, dict) else None
+
+    def get_cost_statistics_scope_metadata(self, *, scope_key: str) -> dict[str, Any] | None:
+        payload = self._repository.get_cost_statistics_scope_metadata(scope_key=scope_key)
+        return dict(payload) if isinstance(payload, dict) else None
+
+    def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, Any] | None:
+        payload = self._repository.get_cost_statistics_freshness_gate(scope_key=scope_key)
+        return dict(payload) if isinstance(payload, dict) else None
+
+    def get_cost_statistics_page(self, **query: Any) -> dict[str, Any] | None:
+        payload = self._repository.get_cost_statistics_page(**query)
+        return dict(payload) if isinstance(payload, dict) else None
+
+    def get_cost_statistics_export_page(self, **query: Any) -> dict[str, Any] | None:
+        payload = self._repository.get_cost_statistics_export_page(**query)
+        return dict(payload) if isinstance(payload, dict) else None
+
+    def get_cost_statistics_transaction(
+        self,
+        *,
+        project_scope: str,
+        transaction_id: str,
+    ) -> dict[str, Any] | None:
+        payload = self._repository.get_cost_statistics_transaction(
+            project_scope=project_scope,
+            transaction_id=transaction_id,
+        )
         return dict(payload) if isinstance(payload, dict) else None
 
     def active_workbench_source_versions(self, *, scope_key: str) -> dict[str, Any]:
         payload = self._repository.active_workbench_source_versions(scope_key=scope_key)
         return dict(payload) if isinstance(payload, dict) else {}
 
-    def save_cost_statistics_read_models(
+    def publish_cost_statistics_read_models(
         self,
         snapshot: dict[str, Any],
         *,
+        tenant_id: str,
+        scope_key: str,
+        source_version: int,
         changed_scope_keys: set[str] | None = None,
-    ) -> None:
-        self._repository.save_cost_statistics_read_models(
-            snapshot,
-            changed_scope_keys=changed_scope_keys,
+    ) -> bool:
+        return bool(
+            self._repository.publish_cost_statistics_read_models(
+                snapshot,
+                tenant_id=tenant_id,
+                scope_key=scope_key,
+                source_version=source_version,
+                changed_scope_keys=changed_scope_keys,
+            )
         )

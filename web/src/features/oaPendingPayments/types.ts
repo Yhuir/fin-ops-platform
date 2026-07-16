@@ -176,18 +176,8 @@ export type OaPendingPaymentRowsResponse = {
   pagination: { page: number; pageSize: number; total: number };
   summary: OaPendingPaymentSummary;
   filterConfig: OaPendingPaymentFieldConfig[];
-  readModelStatus?: string;
-  read_model_status?: string;
-  read_model_stale_reasons?: string[];
-  read_model_scope_key?: string;
-  sourceVersions?: Record<string, unknown>;
-  source_versions?: Record<string, unknown>;
-  viewMode?: OaPendingPaymentViewMode;
-  view_mode?: OaPendingPaymentViewMode;
-};
-
-export type OaPendingPaymentFilterOptionsResponse = {
-  fields: Array<OaPendingPaymentFieldConfig & { options?: OaPendingPaymentFilterOption[] }>;
+  filterOptions?: Record<string, OaPendingPaymentFilterOption[]>;
+  operationBarrierTargets?: Array<{ readModelKey: string; scopeKey: string; scopeType?: string }>;
   readModelStatus?: string;
   read_model_status?: string;
   read_model_stale_reasons?: string[];

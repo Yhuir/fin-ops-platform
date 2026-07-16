@@ -11,7 +11,10 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from fin_ops_platform.services.postgres_repositories.operations_audit import PostgresOperationsAuditRepository
-from tests.app_test_support import build_local_state_application as build_application
+from tests.app_test_support import (
+    build_local_state_application as build_application,
+    install_fresh_workbench_write_gate,
+)
 
 
 class FakeOperationsDashboardConnection:
@@ -460,12 +463,19 @@ class AppHealthApiTests(unittest.TestCase):
 
     def test_dirty_oa_scopes_block_workbench_write_actions(self) -> None:
         app = build_application()
+        read_model_version = install_fresh_workbench_write_gate(app)
         inject_oa_sync_runtime_status(app, outbox_status="pending", scope_key="all")
 
         response = app.handle_request(
             "POST",
             "/api/workbench/actions/confirm-link",
-            body=json.dumps({"month": "all", "row_ids": ["oa-missing"]}),
+            body=json.dumps(
+                {
+                    "month": "all",
+                    "row_ids": ["oa-missing"],
+                    "expected_read_model_version": read_model_version,
+                }
+            ),
         )
         payload = json.loads(response.body)
 

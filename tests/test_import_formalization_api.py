@@ -8,7 +8,11 @@ import unittest
 
 from openpyxl import Workbook
 
-from tests.app_test_support import build_local_state_application as build_application, install_durable_import_queue
+from tests.app_test_support import (
+    build_grouped_workbench_projection,
+    build_local_state_application as build_application,
+    install_durable_import_queue,
+)
 from tests.mock_import_files import INVOICE_JAN, PINGAN_JAN, MockImportFile
 
 
@@ -118,9 +122,11 @@ class ImportFormalizationApiTests(unittest.TestCase):
             session_payload = json.loads(session_response.body)
             self.assertEqual(session_payload["session"]["status"], "confirmed")
 
-            workbench_response = restarted.handle_request("GET", "/api/workbench?month=2026-01")
-            self.assertEqual(workbench_response.status_code, 200)
-            workbench_payload = json.loads(workbench_response.body)
+            workbench_payload = build_grouped_workbench_projection(
+                restarted,
+                "2026-01",
+                include_query_rows=False,
+            )
             self.assertEqual(workbench_payload["month"], "2026-01")
             self.assertGreater(workbench_payload["summary"]["bank_count"], 0)
             self.assertGreater(workbench_payload["summary"]["invoice_count"], 0)

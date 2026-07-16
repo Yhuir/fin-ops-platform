@@ -360,7 +360,10 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
             },
         ]
 
-        with patch.object(app, "_resolve_live_rows_direct", return_value=rows):
+        with (
+            patch.object(app, "_resolve_live_rows_direct", return_value=rows),
+            patch.object(app, "_workbench_write_freshness_guard", return_value=None),
+        ):
             response = app.handle_request(
                 "POST",
                 "/api/workbench/exception/apply",
@@ -368,6 +371,7 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
                     {
                         "month": "2026-05",
                         "row_ids": ["oa-exc-api-001", "bank-exc-api-001", "invoice-exc-api-001"],
+                        "expected_read_model_version": "generation-test-1",
                         "scenario_code": "expense_all_equal",
                         "action_code": "confirm_closed",
                         "payload": {},

@@ -20,11 +20,13 @@ type MockApiOptions = {
   workbenchErrorMonths?: string[];
   workbenchEmptyPayload?: boolean;
   workbenchReadModelStatus?: "fresh" | "refreshing" | "stale" | "failed" | "unavailable";
+  workbenchReadModelVersions?: string[];
   workbenchRefreshStatus?: Record<string, unknown>;
   workbenchRefreshStatusSequence?: Array<Record<string, unknown>>;
   taxErrorMonths?: string[];
   costErrorMonths?: string[];
   costExplorerFailuresBeforeSuccess?: number;
+  costExplorerDelayMs?: number;
   costRefreshingMonths?: string[];
   costExportErrorViews?: string[];
   costDuplicateTransactionRows?: boolean;
@@ -44,6 +46,7 @@ type MockApiOptions = {
   importPreviewDelayMs?: number;
   etcImportPreviewDelayMs?: number;
   importConfirmPreviewStale?: boolean;
+  importConfirmOperationBarrierTargets?: Array<Record<string, string>>;
   etcImportConfirmPreviewStale?: boolean;
   etcImportConfirmStaleReconciliationTask?: boolean;
   etcImportBlockingIssues?: Array<Record<string, unknown>>;
@@ -4210,6 +4213,179 @@ function buildCostStatisticsExplorerPayload(
   };
 }
 
+function buildCostStatisticsExplorerPagePayload(
+  url: URL,
+  payload: ReturnType<typeof buildCostStatisticsExplorerPayload>,
+  readModelStatus = "fresh",
+) {
+  const scope = url.searchParams.get("scope") ?? "all";
+  const view = url.searchParams.get("view") ?? "time";
+  const pageSize = Math.max(1, Math.min(100, Number(url.searchParams.get("page_size") ?? 50) || 50));
+  const cursorOffset = Number((url.searchParams.get("cursor") ?? "").replace(/^mock:/, "")) || 0;
+  const projectName = url.searchParams.get("project_name") ?? "";
+  const expenseType = url.searchParams.get("expense_type") ?? "";
+  const paymentAccountLabel = url.searchParams.get("payment_account_label") ?? "";
+  const primaryLabel = url.searchParams.get("bank_tag_primary_label") ?? "";
+  const subLabel = url.searchParams.get("bank_tag_sub_label") ?? "";
+  const inScope = <Row extends { trade_time: string }>(rows: Row[]) => rows.filter((row) => (
+    scope === "all"
+    || (scope.startsWith("year:") ? row.trade_time.startsWith(`${scope.slice(5)}-`) : row.trade_time.startsWith(scope))
+  ));
+  const costRows = inScope(payload.time_rows);
+  const bankFlowRows = inScope(payload.bank_flow_time_rows);
+  const amountNumber = (value: string) => Number(value.replace(/,/g, "")) || 0;
+  const percentage = (amount: number, total: number) => `${((amount / (total || 1)) * 100).toFixed(1)}%`;
+
+  const projectGroups = new Map<string, { amount: number; rows: typeof costRows; expenseTypes: Set<string> }>();
+  const expenseGroups = new Map<string, { amount: number; rows: typeof costRows; projects: Set<string> }>();
+  const bankGroups = new Map<string, { amount: number; rows: typeof costRows; projects: Set<string> }>();
+  for (const row of costRows) {
+    const project = projectGroups.get(row.project_name) ?? { amount: 0, rows: [], expenseTypes: new Set<string>() };
+    project.amount += amountNumber(row.amount);
+    project.rows.push(row);
+    project.expenseTypes.add(row.expense_type);
+    projectGroups.set(row.project_name, project);
+    const expense = expenseGroups.get(row.expense_type) ?? { amount: 0, rows: [], projects: new Set<string>() };
+    expense.amount += amountNumber(row.amount);
+    expense.rows.push(row);
+    expense.projects.add(row.project_name);
+    expenseGroups.set(row.expense_type, expense);
+    const accountLabel = row.payment_account_label || "未识别账户";
+    const bank = bankGroups.get(accountLabel) ?? { amount: 0, rows: [], projects: new Set<string>() };
+    bank.amount += amountNumber(row.amount);
+    bank.rows.push(row);
+    bank.projects.add(row.project_name);
+    bankGroups.set(accountLabel, bank);
+  }
+  for (const account of payload.bank_accounts) {
+    if (!bankGroups.has(account.payment_account_label)) {
+      bankGroups.set(account.payment_account_label, { amount: 0, rows: [], projects: new Set<string>() });
+    }
+  }
+  const costTotal = costRows.reduce((sum, row) => sum + amountNumber(row.amount), 0);
+  const projectFacets = Array.from(projectGroups.entries()).map(([name, group]) => ({
+    project_name: name,
+    total_amount: group.amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+    transaction_count: group.rows.length,
+    expense_type_count: group.expenseTypes.size,
+    percentage_label: percentage(group.amount, costTotal),
+  })).sort((left, right) => amountNumber(right.total_amount) - amountNumber(left.total_amount));
+  const expenseFacets = Array.from(expenseGroups.entries()).map(([name, group]) => ({
+    expense_type: name,
+    total_amount: group.amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+    transaction_count: group.rows.length,
+    project_count: group.projects.size,
+    percentage_label: percentage(group.amount, costTotal),
+  })).sort((left, right) => amountNumber(right.total_amount) - amountNumber(left.total_amount));
+  const bankFacets = Array.from(bankGroups.entries()).map(([label, group]) => ({
+    payment_account_label: label,
+    total_amount: group.amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+    transaction_count: group.rows.length,
+    project_count: group.projects.size,
+    percentage_label: percentage(group.amount, costTotal),
+  })).sort((left, right) => amountNumber(right.total_amount) - amountNumber(left.total_amount));
+  const tagGroups = new Map<string, { rows: typeof bankFlowRows; subLabels: Set<string> }>();
+  for (const row of bankFlowRows) {
+    const label = row.bank_tag_primary_label || row.bank_tag_label || "未标记";
+    const group = tagGroups.get(label) ?? { rows: [], subLabels: new Set<string>() };
+    group.rows.push(row);
+    group.subLabels.add(row.bank_tag_sub_label || row.bank_tag_label || label);
+    tagGroups.set(label, group);
+  }
+  const directionFacet = (rows: typeof bankFlowRows) => ({
+    expense_amount: sumCostAmounts(rows.filter((row) => row.direction === "支出")),
+    income_amount: sumCostAmounts(rows.filter((row) => row.direction === "收入")),
+    expense_transaction_count: rows.filter((row) => row.direction === "支出").length,
+    income_transaction_count: rows.filter((row) => row.direction === "收入").length,
+  });
+  const bankTagPrimary = Array.from(tagGroups.entries()).map(([label, group]) => ({
+    primary_label: label,
+    ...directionFacet(group.rows),
+    sub_tag_count: group.subLabels.size,
+  }));
+  const bankTagSub = primaryLabel
+    ? Array.from(new Set((tagGroups.get(primaryLabel)?.rows ?? []).map((row) => row.bank_tag_sub_label || row.bank_tag_label || primaryLabel)))
+        .map((label) => {
+          const rows = (tagGroups.get(primaryLabel)?.rows ?? []).filter(
+            (row) => (row.bank_tag_sub_label || row.bank_tag_label || primaryLabel) === label,
+          );
+          return { primary_label: primaryLabel, sub_label: label, ...directionFacet(rows) };
+        })
+    : [];
+  const selectedProjectRows = projectGroups.get(projectName)?.rows ?? [];
+  const selectedProjectTotal = selectedProjectRows.reduce((sum, row) => sum + amountNumber(row.amount), 0);
+  const projectExpenseFacets = expenseFacets
+    .filter((item) => selectedProjectRows.some((row) => row.expense_type === item.expense_type))
+    .map((item) => ({
+      ...item,
+      percentage_label: percentage(amountNumber(item.total_amount), selectedProjectTotal),
+    }));
+  const selectedBankRows = bankGroups.get(paymentAccountLabel)?.rows ?? [];
+  const selectedBankTotal = selectedBankRows.reduce((sum, row) => sum + amountNumber(row.amount), 0);
+  const bankProjectFacets = Array.from(new Set(selectedBankRows.map((row) => row.project_name))).map((name) => {
+    const rows = selectedBankRows.filter((row) => row.project_name === name);
+    const amount = rows.reduce((sum, row) => sum + amountNumber(row.amount), 0);
+    return {
+      project_name: name,
+      total_amount: amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+      transaction_count: rows.length,
+      expense_type_count: new Set(rows.map((row) => row.expense_type)).size,
+      percentage_label: percentage(amount, selectedBankTotal),
+    };
+  }).sort((left, right) => amountNumber(right.total_amount) - amountNumber(left.total_amount));
+
+  let matchedRows = view === "time" ? bankFlowRows : [];
+  if (view === "project" && projectName && expenseType) {
+    matchedRows = costRows.filter((row) => row.project_name === projectName && row.expense_type === expenseType);
+  } else if (view === "bank" && paymentAccountLabel && projectName) {
+    matchedRows = costRows.filter(
+      (row) => row.payment_account_label === paymentAccountLabel && row.project_name === projectName,
+    );
+  } else if (view === "expense_type" && expenseType) {
+    matchedRows = costRows.filter((row) => row.expense_type === expenseType);
+  } else if (view === "bank_tag" && primaryLabel && subLabel) {
+    matchedRows = bankFlowRows.filter((row) => (
+      (row.bank_tag_primary_label || row.bank_tag_label || "未标记") === primaryLabel
+      && (row.bank_tag_sub_label || row.bank_tag_label || primaryLabel) === subLabel
+    ));
+  }
+  const summaryRows = view === "time" || view === "bank_tag" ? bankFlowRows : costRows;
+  const expenseRows = summaryRows.filter((row) => row.direction === "支出");
+  const incomeRows = summaryRows.filter((row) => row.direction === "收入");
+  const rows = readModelStatus === "fresh" ? matchedRows.slice(cursorOffset, cursorOffset + pageSize) : [];
+  const nextOffset = cursorOffset + rows.length;
+  return {
+    scope,
+    view,
+    summary: {
+      row_count: summaryRows.length,
+      transaction_count: summaryRows.length,
+      total_amount: sumCostAmounts(summaryRows),
+      expense_amount: sumCostAmounts(expenseRows),
+      income_amount: sumCostAmounts(incomeRows),
+      expense_transaction_count: expenseRows.length,
+      income_transaction_count: incomeRows.length,
+    },
+    available_years: Array.from(new Set([...payload.time_rows, ...payload.bank_flow_time_rows].map((row) => row.trade_time.slice(0, 4)))).sort().reverse(),
+    facets: readModelStatus === "fresh" ? {
+      projects: view === "project" ? projectFacets : view === "bank" && paymentAccountLabel
+        ? bankProjectFacets
+        : [],
+      expense_types: view === "expense_type" ? expenseFacets : view === "project" && projectName
+        ? projectExpenseFacets
+        : [],
+      bank_accounts: view === "bank" ? bankFacets : [],
+      bank_tag_primary: view === "bank_tag" ? bankTagPrimary : [],
+      bank_tag_sub: view === "bank_tag" ? bankTagSub : [],
+    } : { projects: [], expense_types: [], bank_accounts: [], bank_tag_primary: [], bank_tag_sub: [] },
+    rows,
+    row_count: readModelStatus === "fresh" ? matchedRows.length : 0,
+    next_cursor: readModelStatus === "fresh" && nextOffset < matchedRows.length ? `mock:${nextOffset}` : null,
+    read_model_status: readModelStatus,
+    read_model_scope_key: `${url.searchParams.get("project_scope") ?? "active"}:${scope.startsWith("year:") ? "all" : scope}`,
+  };
+}
+
 function buildCostStatisticsProjectPayload(month: string, projectName: string, projectScope = "active") {
   const rows = isCostProjectVisibleForScope(projectName, projectScope)
     ? month === "all"
@@ -4722,6 +4898,8 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
   const dataResetJobs = new Map<string, Record<string, unknown>>();
   let backgroundJobs = cloneJson(options.backgroundJobs ?? []);
   let workbenchOaSyncStatusIndex = 0;
+  let workbenchReadModelVersionIndex = 0;
+  let workbenchReadModelVersion = options.workbenchReadModelVersions?.[0] ?? "mock-workbench-generation-1";
   let appHealthDashboardIndex = 0;
 
   const handlers: Record<string, MockFetchHandler> = {
@@ -4796,23 +4974,50 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       if (options.workbenchErrorMonths?.includes(month)) {
         return { status: 500, body: { message: "workbench failed" } };
       }
-      return { body: toGroupedWorkbenchPayload(mockWorkbenchPayloadForMonth(workbenchStateStore, month, options), options.workbenchOaStatus) };
-    },
-    "/api/workbench/summary": ({ url }) => {
-      const month = url.searchParams.get("month") ?? "";
-      if (options.workbenchErrorMonths?.includes(month)) {
-        return { status: 500, body: { message: "workbench summary failed" } };
-      }
-      const payload = toGroupedWorkbenchPayload(mockWorkbenchPayloadForMonth(workbenchStateStore, month, options), options.workbenchOaStatus);
+      const versions = options.workbenchReadModelVersions?.length
+        ? options.workbenchReadModelVersions
+        : ["mock-workbench-generation-1"];
+      workbenchReadModelVersion = versions[Math.min(workbenchReadModelVersionIndex, versions.length - 1)];
+      workbenchReadModelVersionIndex += 1;
+      const payload = toGroupedWorkbenchPayload(
+        mockWorkbenchPayloadForMonth(workbenchStateStore, month, options),
+        options.workbenchOaStatus,
+      );
+      const pageForZone = (zone: "paired" | "unpaired") => {
+        const query = parseWorkbenchGroupJsonParam(url.searchParams.get(`${zone}_query`));
+        const groups = sortMockWorkbenchGroups(
+          payload[zone].groups.filter((group) => mockWorkbenchGroupMatchesQuery(
+            group,
+            String(query.search ?? "").trim(),
+            parseWorkbenchGroupJsonParam(JSON.stringify(query.search_by_pane ?? {})),
+            parseWorkbenchGroupJsonParam(JSON.stringify(query.column_filters ?? {})),
+            parseWorkbenchGroupJsonParam(JSON.stringify(query.time_filters ?? {})),
+          )),
+          String(query.sort ?? "").trim(),
+        );
+        return {
+          month: payload.month,
+          zone,
+          page: 1,
+          page_size: 200,
+          total: groups.length,
+          row_counts: countMockWorkbenchRows(groups),
+          has_more: groups.length > 200,
+          groups: groups.slice(0, 200),
+          read_model_status: options.workbenchReadModelStatus ?? "fresh",
+          read_model_version: workbenchReadModelVersion,
+        };
+      };
       return {
-          body: {
-            month: payload.month,
-            summary: payload.summary,
-            oa_status: payload.oa_status,
-            invoice_inventory: payload.invoice_inventory,
-            read_model_status: options.workbenchReadModelStatus ?? "fresh",
-            generated_at: "2026-05-22T09:30:00+08:00",
-          },
+        body: {
+          ...payload,
+          paired: pageForZone("paired"),
+          unpaired: pageForZone("unpaired"),
+          read_model_status: options.workbenchReadModelStatus ?? "fresh",
+          read_model_version: workbenchReadModelVersion,
+          active_generation_id: workbenchReadModelVersion,
+          generated_at: "2026-05-22T09:30:00+08:00",
+        },
       };
     },
     "/api/workbench/groups": ({ url }) => {
@@ -4824,6 +5029,17 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       const page = Math.max(1, Number(url.searchParams.get("page") ?? "1") || 1);
       const pageSize = Math.max(1, Number(url.searchParams.get("page_size") ?? "50") || 50);
       const payload = toGroupedWorkbenchPayload(mockWorkbenchPayloadForMonth(workbenchStateStore, month, options), options.workbenchOaStatus);
+      const expectedReadModelVersion = url.searchParams.get("expected_read_model_version");
+      if (expectedReadModelVersion && expectedReadModelVersion !== workbenchReadModelVersion) {
+        return {
+          status: 409,
+          body: {
+            error: "workbench_read_model_version_conflict",
+            expected_read_model_version: expectedReadModelVersion,
+            read_model_version: workbenchReadModelVersion,
+          },
+        };
+      }
       const search = String(url.searchParams.get("search") ?? "").trim();
       const searchByPane = parseWorkbenchGroupJsonParam(url.searchParams.get("search_by_pane"));
       const sort = String(url.searchParams.get("sort") ?? "").trim();
@@ -4846,6 +5062,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           has_more: offset + pageSize < groups.length,
           groups: groups.slice(offset, offset + pageSize),
           read_model_status: options.workbenchReadModelStatus ?? "fresh",
+          read_model_version: workbenchReadModelVersion,
         },
       };
     },
@@ -5055,7 +5272,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             window: { type: "process_rolling_window", sample_limit_per_endpoint: 512, reset_on_restart: true },
             endpoints: [
               {
-                endpoint: "GET /api/workbench/summary",
+                endpoint: "GET /api/workbench",
                 sample_count: 12,
                 last_status_code: 200,
                 duration_ms: { p50: 120, p95: 640, p99: 880 },
@@ -5558,7 +5775,8 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       };
     },
     "/api/cost-statistics/explorer": ({ url }) => {
-      const month = url.searchParams.get("month") ?? "";
+      const scope = url.searchParams.get("scope") ?? "all";
+      const month = scope.startsWith("year:") ? "all" : scope;
       const projectScope = url.searchParams.get("project_scope") ?? "active";
       if (costExplorerFailuresRemaining > 0 && month !== "all") {
         costExplorerFailuresRemaining -= 1;
@@ -5576,23 +5794,22 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       if (options.costRefreshingMonths?.includes(month)) {
         return {
           status: 202,
-          body: {
-            ...buildCostStatisticsExplorerPayload(month, projectScope, {
+          body: buildCostStatisticsExplorerPagePayload(
+            url,
+            buildCostStatisticsExplorerPayload(month, projectScope, {
               duplicateTransactionRows: options.costDuplicateTransactionRows,
             }),
-            summary: { row_count: 0, transaction_count: 0, total_amount: "0.00" },
-            time_rows: [],
-            project_rows: [],
-            expense_type_rows: [],
-            read_model_status: "refreshing",
-            read_model_scope_key: `${projectScope}:${month}`,
-          },
+            "refreshing",
+          ),
         };
       }
       return {
-        body: buildCostStatisticsExplorerPayload(month, projectScope, {
-          duplicateTransactionRows: options.costDuplicateTransactionRows,
-        }),
+        body: buildCostStatisticsExplorerPagePayload(
+          url,
+          buildCostStatisticsExplorerPayload(month, projectScope, {
+            duplicateTransactionRows: options.costDuplicateTransactionRows,
+          }),
+        ),
       };
     },
     "/api/cost-statistics/export-preview": ({ url }) => {
@@ -7278,6 +7495,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       return {
         body: {
           ...latestImportSession,
+          operation_barrier_targets: options.importConfirmOperationBarrierTargets ?? [],
           matching_run: {
             id: "match_run_0001",
             triggered_by: "import_session:import_session_0001",
@@ -7789,6 +8007,48 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       });
     }
 
+    const isWorkbenchActionRequest = (init?.method ?? "GET").toUpperCase() === "POST"
+      && (
+        url.pathname.startsWith("/api/workbench/actions/")
+        || url.pathname.startsWith("/api/workbench/exception/")
+      );
+    if (isWorkbenchActionRequest) {
+      const expectedVersion = String(jsonBody?.expected_read_model_version ?? "").trim();
+      if (!expectedVersion) {
+        return jsonResponse({
+          status: 400,
+          body: {
+            error: "expected_read_model_version_required",
+            message: "expected_read_model_version is required.",
+          },
+        });
+      }
+      if (expectedVersion !== workbenchReadModelVersion) {
+        return jsonResponse({
+          status: 409,
+          body: {
+            error: "workbench_read_model_version_conflict",
+            read_model_status: options.workbenchReadModelStatus ?? "fresh",
+            read_model_version: workbenchReadModelVersion,
+            retryable: true,
+          },
+        });
+      }
+      if ((options.workbenchReadModelStatus ?? "fresh") !== "fresh") {
+        return jsonResponse({
+          status: ["failed", "unavailable"].includes(options.workbenchReadModelStatus ?? "") ? 503 : 409,
+          body: {
+            error: (options.workbenchReadModelStatus === "failed" || options.workbenchReadModelStatus === "unavailable")
+              ? "workbench_read_model_unavailable"
+              : "workbench_read_model_not_fresh",
+            read_model_status: options.workbenchReadModelStatus,
+            read_model_version: workbenchReadModelVersion,
+            retryable: true,
+          },
+        });
+      }
+    }
+
     const handler = handlers[url.pathname];
     if (!handler) {
       throw new Error(`Unhandled fetch mock for ${url.pathname}`);
@@ -7804,16 +8064,16 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
     }
 
     const response = await handler({ url, init, jsonBody, formData });
+    if (options.costExplorerDelayMs && url.pathname === "/api/cost-statistics/explorer") {
+      await new Promise((resolve) => window.setTimeout(resolve, options.costExplorerDelayMs));
+    }
     const isWorkbenchReadPath =
       url.pathname === "/api/workbench"
-      || url.pathname === "/api/workbench/summary"
       || url.pathname === "/api/workbench/groups"
       || url.pathname === "/api/workbench/ignored"
       || url.pathname === "/api/workbench/settings";
     const workbenchSpecificDelay =
-      (url.pathname === "/api/workbench" || url.pathname === "/api/workbench/summary"
-        ? options.workbenchPrimaryDelayMs
-        : undefined)
+      (url.pathname === "/api/workbench" ? options.workbenchPrimaryDelayMs : undefined)
       ?? (url.pathname === "/api/workbench/ignored" ? options.workbenchIgnoredDelayMs : undefined)
       ?? (url.pathname === "/api/workbench/settings" ? options.workbenchSettingsDelayMs : undefined);
     const workbenchDelay =
