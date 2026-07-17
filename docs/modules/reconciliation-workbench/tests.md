@@ -9,7 +9,7 @@
 | 1. Business core | 是 | 确定性证据、365 日边界、N:M:K exact-sum、歧义/金额-only/红冲 fail-closed、撤回阻断指纹、paired/unpaired 精确分区 |
 | 2. Service layer | 是 | repository 输入、orchestrator 单 UoW、幂等、rollback、history、dirty/outbox、旧状态清理 |
 | 3. API contract | 是 | paired/unpaired shape、分页/search/detail、confirm/withdraw、版本冲突、权限、unknown state fail-fast |
-| 4. Read model/cache/worker | 是 | active generation 原子发布、freshness、all-scope 组合、bulk refresh、旧 generation 不冒充 fresh |
+| 4. Read model/cache/worker | 是 | active generation 原子发布、freshness、all-scope 组合、exact generation stats、stats 缺失/发布竞态 fail-closed、bulk refresh、旧 generation 不冒充 fresh |
 | 5. Frontend interaction | 是 | 两区渲染、singleton 未配对、选择/preview/撤回、loading/empty/error/stale、权限与分页 |
 | 6. End-to-end | 是 | canonical import/OA -> matching -> formal relation -> worker -> paired；withdraw -> singleton unpaired；跨页 relation fan-out |
 | 7. Regression | 是 | 520 样例、13 张发票、ETC/OA 附件、no-OA、batch accounting、turnover、cost/search/invoice lifecycle |
@@ -45,6 +45,8 @@
 - ETC collapsed-summary 必须同时物化 summary row 和全部 invoice detail rows；paired/unpaired 只改变 zone/status，不得丢失、重复或隐藏明细。
 - Workbench groups page cache schema 必须与 projection schema 同步，projection 行为升级后旧 Redis payload 必须自动失效。
 - combined initial 两区首屏必须各为 50 groups、`has_more` 保留真实 total，默认 batch SQL 每区读取最多 51 条用于判定后续页；后续 `/groups` 必须绑定同一 `expected_read_model_version`，不得为性能退回 200-group 首屏或全量 payload。
+- 默认无筛选 all-scope `/groups` 的 total/row_counts 必须来自当前 active-month generation-set digest 对应的两条 `workbench_generation_stats`；统计缺失或查询前后 digest 改变时返回 refreshing，不得执行旧的全量 distinct row count。月 generation 发布与该统计必须处于同一事务，多个 scope 同批发布只生成一次最终 digest 统计。
+- all-scope 搜索、来源、pane/列/时间筛选必须只 materialize active generation key，条件之间按既有 AND/OR 语义相交；total、row counts、matching group ids 在一条计数 SQL 中得到，分页只按 matching ids 读取 payload。测试必须断言 SQL 不读取 `g.*`/payload/raw payload，不 join 历史 physical all group，且不为 count/page 重复执行 member 条件。
 - 普通标量列的同列多选必须按 OR，`全选`不能把结果清空；不同列/不同 pane 继续按 AND，银行金额表头的方向+付款账号复合筛选继续要求同一行同时满足。前端本地过滤、HTTP mock、repository SQL 和 summary preview 必须使用同一合同。
 
 ## 验证命令
@@ -58,9 +60,14 @@ python3 -m pytest -q \
 
 python3 -m pytest -q \
   tests/test_workbench_sql_runtime.py \
+  tests/test_workbench_query_facade.py \
   tests/test_workbench_v2_api.py \
   tests/test_workbench_query_service.py \
   tests/test_postgres_migrations.py
+
+# 需设置一次性本地 FIN_OPS_TEST_DATABASE_URL
+python3 -m pytest -q \
+  tests/test_postgres_state_store_integration.py::PostgresStateStoreIntegrationTests::test_workbench_all_groups_use_exact_generation_stats_and_fail_closed_when_missing
 
 cd web && npm test -- --run \
   src/test/RelationGroupGrid.test.tsx \

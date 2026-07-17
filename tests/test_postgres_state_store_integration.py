@@ -19,6 +19,7 @@ from fin_ops_platform.services.etc_service import (
     EtcService,
 )
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
+from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.postgres_state_store import PostgresStateStore
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.import_file_service import FileImportPreviewItem, FileImportService, FileImportSession
@@ -75,6 +76,55 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
                 )
                 raise RuntimeError("force rollback")
         self.assertEqual(fetch_scalar(self.database_url, "select count(*) from app.app_settings where settings_key = 'tx-rollback';"), "0")
+
+    def test_workbench_all_groups_use_exact_generation_stats_and_fail_closed_when_missing(self) -> None:
+        self.store.save_workbench_read_models(
+            {
+                "read_models": {
+                    scope_key: {
+                        "scope_key": scope_key,
+                        "payload": {"paired": {"groups": []}, "unpaired": {"groups": []}},
+                        "source_versions": {"source_version": index},
+                    }
+                    for index, scope_key in enumerate(("2026-04", "2026-05"), start=1)
+                }
+            },
+            changed_scope_keys={"2026-04", "2026-05"},
+        )
+        repository = PostgresReadModelRepository(self.connection)
+
+        page = repository.get_workbench_groups_page(
+            scope_key="all",
+            zone="paired",
+            page=1,
+            page_size=50,
+            detail_level="summary",
+        )
+
+        self.assertIsNotNone(page)
+        assert page is not None
+        self.assertEqual(page["total"], 0)
+        self.assertEqual(page["row_counts"], {"oa": 0, "bank": 0, "invoice": 0, "rows": 0})
+        self.assertEqual(
+            fetch_scalar(
+                self.database_url,
+                "select count(*) from read_model.workbench_generation_stats where scope_key = 'all';",
+            ),
+            "2",
+        )
+
+        with self.connection.transaction() as transaction:
+            transaction.execute("delete from read_model.workbench_generation_stats where scope_key = 'all'")
+
+        self.assertIsNone(
+            repository.get_workbench_groups_page(
+                scope_key="all",
+                zone="paired",
+                page=1,
+                page_size=50,
+                detail_level="summary",
+            )
+        )
 
     def test_formal_table_writes_for_settings_jobs_workbench_and_read_models(self) -> None:
         self.store.save_app_settings({"admin_usernames": ["admin"], "manual_projects": []})

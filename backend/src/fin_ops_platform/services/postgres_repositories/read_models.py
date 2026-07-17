@@ -162,6 +162,112 @@ def _workbench_active_month_groups_sql(*, include_aggregated_metadata: bool = Tr
     """
 
 
+def _workbench_active_month_group_keys_sql(*, include_aggregated_searchable_text: bool) -> str:
+    """Return the canonical all-scope group fields required by filters and counts only."""
+    logical_group_id_sql = _workbench_all_logical_group_id_sql("g.group_id", "g.scope_key")
+    if include_aggregated_searchable_text:
+        canonical_projection_sql = """
+            , canonical_candidates as (
+                select active_groups.*
+                from active_groups
+                join canonical_owners
+                  on canonical_owners.all_scope_group_id = active_groups.all_scope_group_id
+                 and canonical_owners.zone = active_groups.zone
+            ), ranked_groups as (
+                select
+                    canonical_candidates.*,
+                    row_number() over (
+                        partition by canonical_candidates.all_scope_group_id
+                        order by
+                            canonical_candidates.scope_month desc nulls last,
+                            canonical_candidates.updated_at desc,
+                            canonical_candidates.group_id
+                    ) as logical_rank,
+                    string_agg(canonical_candidates.searchable_text, ' ') over (
+                        partition by canonical_candidates.all_scope_group_id
+                    ) as logical_searchable_text
+                from canonical_candidates
+            )
+            select
+                ranked_groups.all_scope_group_id as group_id,
+                ranked_groups.zone,
+                ranked_groups.status,
+                ranked_groups.logical_searchable_text as searchable_text
+            from ranked_groups
+            where ranked_groups.logical_rank = 1
+        """
+    else:
+        canonical_projection_sql = """
+            select
+                canonical_owners.all_scope_group_id as group_id,
+                canonical_owners.zone,
+                canonical_owners.status,
+                canonical_owners.searchable_text
+            from canonical_owners
+        """
+    return f"""
+        (
+            with active_groups as (
+                select
+                    g.scope_key,
+                    g.scope_month,
+                    g.zone,
+                    g.group_id,
+                    g.status,
+                    g.searchable_text,
+                    g.updated_at,
+                    {logical_group_id_sql} as all_scope_group_id
+                from read_model.workbench_groups g
+                join read_model.workbench_generations gen
+                  on gen.tenant_id = 'default'
+                 and gen.scope_key = g.scope_key
+                 and gen.generation_id = g.generation_id
+                 and gen.status = 'active'
+                where g.scope_key <> 'all'
+            ), canonical_owners as (
+                select distinct on (active_groups.all_scope_group_id) active_groups.*
+                from active_groups
+                order by
+                    active_groups.all_scope_group_id,
+                    case when active_groups.zone = 'paired' then 0 else 1 end,
+                    active_groups.scope_month desc nulls last,
+                    active_groups.updated_at desc,
+                    active_groups.group_id
+            )
+            {canonical_projection_sql}
+        ) g
+    """
+
+
+def _workbench_active_month_members_cte_sql() -> str:
+    logical_group_id_sql = _workbench_all_logical_group_id_sql("r.group_id", "r.scope_key")
+    return f"""
+        active_workbench_members as materialized (
+            select
+                r.scope_key,
+                r.generation_id,
+                r.zone,
+                r.group_id,
+                {logical_group_id_sql} as all_scope_group_id,
+                r.pane,
+                r.row_id,
+                r.row_role,
+                r.source_kind,
+                r.time_date,
+                r.column_values,
+                r.searchable_text,
+                r.object_identity_key
+            from read_model.workbench_group_rows r
+            join read_model.workbench_generations gen
+              on gen.tenant_id = 'default'
+             and gen.scope_key = r.scope_key
+             and gen.generation_id = r.generation_id
+             and gen.status = 'active'
+            where r.scope_key <> 'all'
+        )
+    """
+
+
 def _parse_postgres_timestamp(value: str | None) -> datetime | None:
     normalized = str(value or "").strip()
     if not normalized:
@@ -8441,7 +8547,7 @@ class PostgresReadModelRepository:
                     detail_level="summary",
                     **unpaired_page_query,
                 )
-            if not isinstance(summary_payload, dict):
+            if not all(isinstance(payload, dict) for payload in (summary_payload, paired_page, unpaired_page)):
                 return None
 
             versions = [
@@ -8828,25 +8934,36 @@ class PostgresReadModelRepository:
                 ),
             )
 
+    def _publish_workbench_all_generation_stats(self, connection: Any) -> None:
+        active_month_version = self._workbench_active_month_generation_version(connection)
+        generation_id = text(active_month_version.get("version"))
+        if not generation_id:
+            raise RuntimeError("Workbench all-scope generation stats require active month generations.")
+        transaction_repository = PostgresReadModelRepository(connection)
+        summary = transaction_repository._get_workbench_all_canonical_summary_counts()
+        self._upsert_workbench_generation_stats(
+            connection,
+            generation_id=generation_id,
+            scope_key="all",
+            summary_payload={"summary": summary},
+        )
+        connection.execute(
+            """
+            delete from read_model.workbench_generation_stats
+            where scope_key = 'all'
+              and generation_id <> %s
+            """,
+            (generation_id,),
+        )
+
     def _workbench_generation_stats_for_groups_page(
         self,
         *,
         scope_key: str,
         generation_id: str | None,
         zone: str,
-        status: str | None,
-        source_kind: str | None,
-        search: str | None,
-        search_mode: str | None,
-        search_by_pane: dict[str, Any],
-        column_filters: dict[str, Any],
-        time_filters: dict[str, Any],
     ) -> dict[str, Any] | None:
         if not generation_id:
-            return None
-        if text(status) or text(source_kind) or text(search):
-            return None
-        if search_mode == "linked_context" or search_by_pane or column_filters or time_filters:
             return None
         row = self._connection.fetch_one(
             """
@@ -9055,7 +9172,7 @@ class PostgresReadModelRepository:
         column_filters: Any = None,
         time_filters: Any = None,
         expected_read_model_version: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | None:
         normalized_scope_key = str(scope_key or "").strip() or "all"
         normalized_zone = str(zone or "").strip()
         normalized_detail_level = _normalize_workbench_group_detail_level(detail_level)
@@ -9091,22 +9208,23 @@ class PostgresReadModelRepository:
         normalized_time_filters = _normalize_workbench_time_filters(time_filters)
         normalized_search_by_pane = _normalize_workbench_search_by_pane(search_by_pane)
         normalized_search_mode = _normalize_workbench_search_mode(search_mode)
+        normalized_search = text(search)
+        requires_aggregated_searchable_text = bool(
+            normalized_search
+            and normalized_search_mode != "linked_context"
+            and not normalized_search_by_pane
+            and not normalized_column_filters
+            and not normalized_time_filters
+        )
         if composed_all_scope:
-            requires_aggregated_metadata = bool(
-                text(sort)
-                or (
-                    text(search)
-                    and normalized_search_mode != "linked_context"
-                    and not normalized_search_by_pane
-                    and not normalized_column_filters
-                    and not normalized_time_filters
-                )
-            )
+            requires_aggregated_metadata = bool(text(sort) or requires_aggregated_searchable_text)
             groups_from_sql = _workbench_active_month_groups_sql(
                 include_aggregated_metadata=requires_aggregated_metadata
             )
         clauses = ["g.zone = %s"] if composed_all_scope else [f"g.{scope_where}", "g.zone = %s"]
         params = [*scope_params, normalized_zone]
+        active_member_filter_joins: list[str] = []
+        active_member_filter_params: list[Any] = []
         if active_generation_id and not composed_all_scope:
             clauses.append("g.generation_id = %s")
             params.append(active_generation_id)
@@ -9114,13 +9232,18 @@ class PostgresReadModelRepository:
             clauses.append("g.status = %s")
             params.append(normalized)
         if normalized := text(source_kind):
-            clauses.append(
-                _workbench_all_active_member_exists_sql("r_source.source_kind = %s", row_alias="r_source")
-                if composed_all_scope
-                else "%s = any(g.source_kinds)"
-            )
-            params.append(normalized)
-        normalized_search = text(search)
+            if composed_all_scope:
+                active_member_filter_joins.append(
+                    _workbench_all_active_member_filter_join_sql(
+                        "r_source.source_kind = %s",
+                        row_alias="r_source",
+                        match_alias="source_match",
+                    )
+                )
+                active_member_filter_params.append(normalized)
+            else:
+                clauses.append("%s = any(g.source_kinds)")
+                params.append(normalized)
         if (
             normalized_search
             and normalized_search_mode != "linked_context"
@@ -9132,27 +9255,40 @@ class PostgresReadModelRepository:
             pattern = f"%{normalized_search}%"
             params.extend([pattern, pattern])
         if normalized_search and normalized_search_mode == "linked_context":
-            clauses.append(
-                _workbench_all_active_member_exists_sql(
-                    "r_linked_search.searchable_text ilike %s",
-                    row_alias="r_linked_search",
+            if composed_all_scope:
+                active_member_filter_joins.append(
+                    _workbench_all_active_member_filter_join_sql(
+                        "r_linked_search.searchable_text ilike %s",
+                        row_alias="r_linked_search",
+                        match_alias="linked_search_match",
+                    )
                 )
-                if composed_all_scope
-                else _workbench_linked_search_exists_sql(group_id_sql=group_row_join_id_sql)
+                active_member_filter_params.append(f"%{normalized_search}%")
+            else:
+                clauses.append(_workbench_linked_search_exists_sql(group_id_sql=group_row_join_id_sql))
+                params.append(f"%{normalized_search}%")
+        if composed_all_scope:
+            row_filter_joins, row_filter_params = _workbench_all_group_row_filter_joins_sql(
+                column_filters=normalized_column_filters,
+                time_filters=normalized_time_filters,
+                search_by_pane=normalized_search_by_pane,
+                fallback_search=None if normalized_search_mode == "linked_context" else normalized_search,
             )
-            params.append(f"%{normalized_search}%")
-        row_filter_sql, row_filter_params = _workbench_group_row_filter_exists_sql(
-            column_filters=normalized_column_filters,
-            time_filters=normalized_time_filters,
-            search_by_pane=normalized_search_by_pane,
-            fallback_search=None if normalized_search_mode == "linked_context" else normalized_search,
-            group_id_sql=group_row_join_id_sql,
-            composed_all_scope=composed_all_scope,
-        )
-        if row_filter_sql:
-            clauses.append(row_filter_sql)
-            params.extend(row_filter_params)
+            active_member_filter_joins.extend(row_filter_joins)
+            active_member_filter_params.extend(row_filter_params)
+        else:
+            row_filter_sql, row_filter_params = _workbench_group_row_filter_exists_sql(
+                column_filters=normalized_column_filters,
+                time_filters=normalized_time_filters,
+                search_by_pane=normalized_search_by_pane,
+                fallback_search=None if normalized_search_mode == "linked_context" else normalized_search,
+                group_id_sql=group_row_join_id_sql,
+            )
+            if row_filter_sql:
+                clauses.append(row_filter_sql)
+                params.extend(row_filter_params)
         where_sql = " and ".join(clauses)
+        active_member_filter_join_sql = "\n".join(active_member_filter_joins)
         order_by_sql = _workbench_groups_order_by(sort)
         oa_row_filter_sql, oa_row_filter_params = _workbench_group_row_count_filter_sql(
             "oa",
@@ -9175,47 +9311,94 @@ class PostgresReadModelRepository:
             search_by_pane=normalized_search_by_pane,
             fallback_search=None if normalized_search_mode == "linked_context" else normalized_search,
         )
-        materialized_counts = None
-        materialized_counts = self._workbench_generation_stats_for_groups_page(
-            scope_key=normalized_scope_key,
-            generation_id=None if composed_all_scope else active_generation_id,
-            zone=normalized_zone,
-            status=status,
-            source_kind=source_kind,
-            search=normalized_search,
-            search_mode=normalized_search_mode,
-            search_by_pane=normalized_search_by_pane,
-            column_filters=normalized_column_filters,
-            time_filters=normalized_time_filters,
-        )
-        if materialized_counts is None:
-            count_row = self._connection.fetch_one(
-                f"""
-                select count(*) as total_count
-                from {groups_from_sql}
-                where {where_sql}
-                """,
-                tuple(params),
+        generation_stats_eligible = bool(active_generation_id) and not any(
+            (
+                text(status),
+                text(source_kind),
+                normalized_search,
+                normalized_search_mode == "linked_context",
+                normalized_search_by_pane,
+                normalized_column_filters,
+                normalized_time_filters,
             )
+        )
+        materialized_counts = (
+            self._workbench_generation_stats_for_groups_page(
+                scope_key=normalized_scope_key,
+                generation_id=active_generation_id,
+                zone=normalized_zone,
+            )
+            if generation_stats_eligible
+            else None
+        )
+        if composed_all_scope and generation_stats_eligible and materialized_counts is None:
+            return None
+        matching_group_ids: list[str] | None = None
+        if materialized_counts is None:
             if composed_all_scope:
-                member_join_sql = f"""
-                left join read_model.workbench_groups physical_group
-                  on physical_group.zone = g.zone
-                 and {_workbench_all_logical_group_id_sql('physical_group.group_id', 'physical_group.scope_key')} = g.group_id
-                left join read_model.workbench_generations physical_generation
-                  on physical_generation.tenant_id = 'default'
-                 and physical_generation.scope_key = physical_group.scope_key
-                 and physical_generation.generation_id = physical_group.generation_id
-                 and physical_generation.status = 'active'
-                left join read_model.workbench_group_rows r
-                  on physical_generation.generation_id is not null
-                 and r.scope_key = physical_group.scope_key
-                 and r.generation_id = physical_group.generation_id
-                 and r.zone = physical_group.zone
-                 and r.group_id = physical_group.group_id
-                """
+                groups_for_counts_sql = _workbench_active_month_group_keys_sql(
+                    include_aggregated_searchable_text=requires_aggregated_searchable_text
+                )
                 distinct_row_sql = "(r.pane, coalesce(nullif(r.object_identity_key, ''), r.row_id))"
+                count_row = self._connection.fetch_one(
+                    f"""
+                    with {_workbench_active_month_members_cte_sql()},
+                    canonical_workbench_groups as materialized (
+                        select * from {groups_for_counts_sql}
+                    ), filtered_workbench_groups as materialized (
+                        select g.group_id, g.zone
+                        from canonical_workbench_groups g
+                        {active_member_filter_join_sql}
+                        where {where_sql}
+                    ), filtered_workbench_members as materialized (
+                        select r.*
+                        from active_workbench_members r
+                        join filtered_workbench_groups g
+                          on g.zone = r.zone
+                         and g.group_id = r.all_scope_group_id
+                    )
+                    select
+                        (
+                            select count(distinct g.group_id)
+                            from filtered_workbench_groups g
+                        )::bigint as total_count,
+                        (
+                            select coalesce(array_agg(distinct g.group_id), array[]::text[])
+                            from filtered_workbench_groups g
+                        ) as matching_group_ids,
+                        count(distinct {distinct_row_sql}) filter (
+                            where r.pane = 'oa'
+                              and coalesce(r.row_role, '') <> 'summary'
+                              {oa_row_filter_sql}
+                        )::bigint as oa_count,
+                        count(distinct {distinct_row_sql}) filter (
+                            where r.pane = 'bank'
+                              and coalesce(r.row_role, '') <> 'summary'
+                              and coalesce(r.source_kind, '') not in (
+                                  'no_oa_bank_batch_summary',
+                                  'bank_flow_rule_batch_summary'
+                              )
+                              {bank_row_filter_sql}
+                        )::bigint as bank_count,
+                        count(distinct {distinct_row_sql}) filter (
+                            where r.pane = 'invoice'
+                              and coalesce(r.row_role, '') <> 'summary'
+                              {invoice_row_filter_sql}
+                        )::bigint as invoice_count
+                    from filtered_workbench_members r
+                    """,
+                    tuple(
+                        [
+                            *active_member_filter_params,
+                            *params,
+                            *oa_row_filter_params,
+                            *bank_row_filter_params,
+                            *invoice_row_filter_params,
+                        ]
+                    ),
+                )
             else:
+                groups_for_counts_sql = groups_from_sql
                 member_join_sql = f"""
                 left join read_model.workbench_group_rows r
                   on r.scope_key = g.scope_key
@@ -9224,58 +9407,70 @@ class PostgresReadModelRepository:
                  and r.group_id = {group_row_join_id_sql}
                 """
                 distinct_row_sql = "r.row_id"
-            row_count_row = self._connection.fetch_one(
-                f"""
-                select
-                    count(distinct {distinct_row_sql}) filter (
-                        where r.pane = 'oa'
-                          and coalesce(r.row_role, '') <> 'summary'
-                          {oa_row_filter_sql}
-                    )::bigint as oa_count,
-                    count(distinct {distinct_row_sql}) filter (
-                        where r.pane = 'bank'
-                          and coalesce(r.row_role, '') <> 'summary'
-                          and coalesce(r.source_kind, '') not in (
-                              'no_oa_bank_batch_summary',
-                              'bank_flow_rule_batch_summary'
-                          )
-                          {bank_row_filter_sql}
-                    )::bigint as bank_count,
-                    count(distinct {distinct_row_sql}) filter (
-                        where r.pane = 'invoice'
-                          and coalesce(r.row_role, '') <> 'summary'
-                          {invoice_row_filter_sql}
-                    )::bigint as invoice_count
-                from {groups_from_sql}
-                {member_join_sql}
-                where {where_sql}
-                """,
-                tuple(
-                    [
-                        *oa_row_filter_params,
-                        *bank_row_filter_params,
-                        *invoice_row_filter_params,
-                        *params,
-                    ]
-                ),
-            )
+                count_row = self._connection.fetch_one(
+                    f"""
+                    select
+                        count(distinct g.group_id)::bigint as total_count,
+                        count(distinct {distinct_row_sql}) filter (
+                            where r.pane = 'oa'
+                              and coalesce(r.row_role, '') <> 'summary'
+                              {oa_row_filter_sql}
+                        )::bigint as oa_count,
+                        count(distinct {distinct_row_sql}) filter (
+                            where r.pane = 'bank'
+                              and coalesce(r.row_role, '') <> 'summary'
+                              and coalesce(r.source_kind, '') not in (
+                                  'no_oa_bank_batch_summary',
+                                  'bank_flow_rule_batch_summary'
+                              )
+                              {bank_row_filter_sql}
+                        )::bigint as bank_count,
+                        count(distinct {distinct_row_sql}) filter (
+                            where r.pane = 'invoice'
+                              and coalesce(r.row_role, '') <> 'summary'
+                              {invoice_row_filter_sql}
+                        )::bigint as invoice_count
+                    from {groups_for_counts_sql}
+                    {member_join_sql}
+                    where {where_sql}
+                    """,
+                    tuple(
+                        [
+                            *oa_row_filter_params,
+                            *bank_row_filter_params,
+                            *invoice_row_filter_params,
+                            *params,
+                        ]
+                    ),
+                )
             total = int_value((count_row or {}).get("total_count"), 0)
-            row_counts = _workbench_group_page_row_counts(row_count_row)
+            row_counts = _workbench_group_page_row_counts(count_row)
+            if composed_all_scope:
+                matching_group_ids = text_list((count_row or {}).get("matching_group_ids"))
         else:
             total = int_value(materialized_counts.get("total"), 0)
             row_counts = materialized_counts.get("row_counts")
             if not isinstance(row_counts, dict):
                 row_counts = _workbench_group_page_row_counts(None)
-        page_params = [*params, normalized_page_size + 1, offset]
-        rows = self._connection.fetch_all(
-            f"""
-            select {group_select_sql}
-            from {groups_from_sql}
-            where {where_sql}
-            order by {order_by_sql}
-            limit %s offset %s
-            """,
-            tuple(page_params),
+        if composed_all_scope and matching_group_ids is not None:
+            page_where_sql = "g.zone = %s and g.group_id = any(%s)"
+            page_params = [normalized_zone, matching_group_ids, normalized_page_size + 1, offset]
+        else:
+            page_where_sql = where_sql
+            page_params = [*params, normalized_page_size + 1, offset]
+        rows = (
+            self._connection.fetch_all(
+                f"""
+                select {group_select_sql}
+                from {groups_from_sql}
+                where {page_where_sql}
+                order by {order_by_sql}
+                limit %s offset %s
+                """,
+                tuple(page_params),
+            )
+            if matching_group_ids is None or matching_group_ids
+            else []
         )
         visible_rows = rows[:normalized_page_size]
         materialized_rows = self._materialize_workbench_group_payloads(visible_rows)
@@ -9296,6 +9491,12 @@ class PostgresReadModelRepository:
                 )
                 group = _compact_workbench_group_for_summary_page(group)
             groups.append(group)
+        if composed_all_scope:
+            current_generation_id = text(
+                self._workbench_active_month_generation_version(self._connection).get("version")
+            )
+            if current_generation_id != active_generation_id:
+                return None
         read_model_status = self._workbench_read_model_status_for_groups_page(scope_key=normalized_scope_key)
         return {
             "month": normalized_scope_key,
@@ -10368,6 +10569,8 @@ class PostgresReadModelRepository:
                     summary_count=1,
                 )
                 published_scope_keys.add(scope_key)
+            if published_scope_keys:
+                self._publish_workbench_all_generation_stats(connection)
         try:
             run_in_transaction(self._connection, write)
         except Exception as exc:
@@ -12373,19 +12576,18 @@ def _workbench_all_logical_group_id_sql(group_id_sql: str, scope_key_sql: str) -
     )
 
 
-def _workbench_all_active_member_exists_sql(predicate_sql: str, *, row_alias: str = "r") -> str:
-    logical_group_id_sql = _workbench_all_logical_group_id_sql(
-        f"{row_alias}.group_id",
-        f"{row_alias}.scope_key",
-    )
+def _workbench_all_active_member_filter_join_sql(
+    predicate_sql: str,
+    *,
+    row_alias: str,
+    match_alias: str,
+) -> str:
     return (
-        f"exists (select 1 from read_model.workbench_group_rows {row_alias} "
-        "join read_model.workbench_generations member_generation "
-        f"on member_generation.scope_key = {row_alias}.scope_key "
-        f"and member_generation.generation_id = {row_alias}.generation_id "
-        "and member_generation.tenant_id = 'default' and member_generation.status = 'active' "
-        f"where {row_alias}.scope_key <> 'all' and {row_alias}.zone = g.zone "
-        f"and {logical_group_id_sql} = g.group_id and {predicate_sql})"
+        "join ("
+        f"select distinct {row_alias}.zone, {row_alias}.all_scope_group_id "
+        f"from active_workbench_members {row_alias} where {predicate_sql}"
+        f") {match_alias} on {match_alias}.zone = g.zone "
+        f"and {match_alias}.all_scope_group_id = g.group_id"
     )
 
 
@@ -12408,7 +12610,6 @@ def _workbench_group_row_filter_exists_sql(
     search_by_pane: dict[str, str],
     fallback_search: str | None,
     group_id_sql: str = "g.group_id",
-    composed_all_scope: bool = False,
 ) -> tuple[str, list[Any]]:
     pane_exists: list[str] = []
     params: list[Any] = []
@@ -12423,23 +12624,51 @@ def _workbench_group_row_filter_exists_sql(
         )
         if not row_match_clauses:
             continue
-        if composed_all_scope:
-            pane_exists.append(_workbench_all_active_member_exists_sql(" and ".join(row_match_clauses)))
-        else:
-            row_clauses = [
-                "r.scope_key = g.scope_key",
-                "r.generation_id = g.generation_id",
-                "r.zone = g.zone",
-                f"r.group_id = {group_id_sql}",
-                *row_match_clauses,
-            ]
-            pane_exists.append(
-                "exists (select 1 from read_model.workbench_group_rows r where " + " and ".join(row_clauses) + ")"
-            )
+        row_clauses = [
+            "r.scope_key = g.scope_key",
+            "r.generation_id = g.generation_id",
+            "r.zone = g.zone",
+            f"r.group_id = {group_id_sql}",
+            *row_match_clauses,
+        ]
+        pane_exists.append(
+            "exists (select 1 from read_model.workbench_group_rows r where " + " and ".join(row_clauses) + ")"
+        )
         params.extend(row_match_params)
     if not pane_exists:
         return "", []
     return "(" + " and ".join(pane_exists) + ")", params
+
+
+def _workbench_all_group_row_filter_joins_sql(
+    *,
+    column_filters: dict[str, dict[str, list[str]]],
+    time_filters: dict[str, dict[str, str]],
+    search_by_pane: dict[str, str],
+    fallback_search: str | None,
+) -> tuple[list[str], list[Any]]:
+    joins: list[str] = []
+    params: list[Any] = []
+    for pane in WORKBENCH_PANES:
+        row_match_clauses, row_match_params = _workbench_group_row_match_sql(
+            pane,
+            column_filters=column_filters,
+            time_filters=time_filters,
+            search_by_pane=search_by_pane,
+            fallback_search=fallback_search,
+            include_pane=True,
+        )
+        if not row_match_clauses:
+            continue
+        joins.append(
+            _workbench_all_active_member_filter_join_sql(
+                " and ".join(row_match_clauses),
+                row_alias="r",
+                match_alias=f"{pane}_filter_match",
+            )
+        )
+        params.extend(row_match_params)
+    return joins, params
 
 
 def _workbench_group_row_count_filter_sql(

@@ -33,6 +33,22 @@ class FakePostgresConnection:
 
     def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
         self.queries.append(sql)
+        normalized = " ".join(sql.lower().split())
+        if "with canonical_groups as" in normalized and "canonical_members as" in normalized:
+            return {
+                "paired_count": 0,
+                "unpaired_count": 0,
+                "oa_count": 0,
+                "bank_count": 0,
+                "invoice_count": 0,
+                "exception_count": 0,
+                "paired_oa_count": 0,
+                "paired_bank_count": 0,
+                "paired_invoice_count": 0,
+                "unpaired_oa_count": 0,
+                "unpaired_bank_count": 0,
+                "unpaired_invoice_count": 0,
+            }
         if "from app.app_settings" in sql:
             payload = self.settings.get(params[0])
             return {"settings_payload": payload} if payload is not None else None
@@ -43,6 +59,23 @@ class FakePostgresConnection:
 
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
         self.queries.append(sql)
+        normalized = " ".join(sql.lower().split())
+        if "select scope_key, generation_id, source_versions" in normalized:
+            active_updates = [
+                update_params
+                for statement, update_params in self.executed
+                if "set status = 'active'" in " ".join(statement.lower().split())
+                and "status = 'building'" in " ".join(statement.lower().split())
+            ]
+            return [
+                {
+                    "scope_key": str(update_params[3]),
+                    "generation_id": str(update_params[4]),
+                    "source_versions": {},
+                    "generated_at": "2026-05-28T09:00:00+00:00",
+                }
+                for update_params in active_updates
+            ]
         if "from app.manual_oa_imports" in sql:
             return [
                 {

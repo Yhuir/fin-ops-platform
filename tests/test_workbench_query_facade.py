@@ -654,6 +654,33 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
         self.assertEqual(result.payload["groups"][0]["group_id"], "fresh-db")
         self.assertEqual(result.payload["read_model_status"], "fresh")
 
+    def test_groups_missing_exact_generation_stats_enqueues_refresh_and_returns_accepted(self) -> None:
+        class Repository:
+            @staticmethod
+            def get_workbench_groups_freshness_status(**_kwargs: object) -> dict[str, object]:
+                return {"read_model_status": "fresh", "scope_key": "all"}
+
+            @staticmethod
+            def get_workbench_groups_page(**_kwargs: object) -> None:
+                return None
+
+        queue = QueueRecorder()
+        facade = WorkbenchQueryFacade(
+            repository=Repository(),
+            redis_helper=None,
+            enqueue_refresh=queue.enqueue,
+            scope_key_for_month=scope_key_for_month,
+            stale_reasons=no_stale_reasons,
+            emit_status_metric=MetricRecorder().emit,
+            missing_read_model_error=lambda _error: False,
+        )
+
+        result = facade.groups("all", zone="paired")
+
+        self.assertEqual(result.status_code, HTTPStatus.ACCEPTED)
+        self.assertEqual(result.payload["read_model_status"], "refreshing")
+        self.assertEqual(queue.refreshes, [("all", "api_groups_miss")])
+
     def test_groups_version_conflict_is_rejected_before_cache_or_page_read(self) -> None:
         class Repository:
             @staticmethod
