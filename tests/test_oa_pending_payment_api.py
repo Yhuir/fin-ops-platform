@@ -24,8 +24,9 @@ from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRecord, PAY_STATUS_PAID, PAY_STATUS_PENDING
 from fin_ops_platform.services.oa_pending_payment_read_model_repository import OaPendingPaymentReadModelRepositoryPort
 from fin_ops_platform.services.oa_pending_payment_read_model_service import OaPendingPaymentReadModelService
+from fin_ops_platform.services.oa_pending_payment_projection_rows import build_oa_pending_payment_rows
+from fin_ops_platform.services.oa_pending_payment_query_contract import OaPendingPaymentError
 from fin_ops_platform.services.oa_pending_payment_sql_projection import OA_PENDING_PAYMENT_POSTGRES_PROJECTOR_VERSION
-from fin_ops_platform.services.oa_pending_payment_service import OaPendingPaymentError, OaPendingPaymentQueryService
 from fin_ops_platform.services.postgres_repositories.read_models import (
     OA_PENDING_PAYMENT_FILTER_FIELDS,
     _oa_pending_payment_read_model_record,
@@ -589,12 +590,8 @@ class OaPendingPaymentApiTests(unittest.TestCase):
             app._import_service = ImportNormalizationService(existing_transactions=[may_bank, june_bank])
             app._oa_payment_status_repository_instance = payment_repository
             app._postgres_oa_projection_repository = lambda: StaticOAProjection([])  # type: ignore[method-assign]
-            app._oa_pending_payment_query_service = OaPendingPaymentQueryService(
-                import_service=app._import_service,
-                oa_projection=StaticOAProjection([]),
-                in_progress_oa_projection=StaticOAProjection([target_oa]),
-                payment_status_repository=payment_repository,
-            )
+            app._oa_pending_payment_source_projection_override = StaticOAProjection([target_oa])
+            app._oa_pending_payment_projection_instance = None
             app._oa_pending_payment_command_service_instance = None
             app._oa_pending_payment_api_routes = None
 
@@ -638,9 +635,9 @@ class OaPendingPaymentApiTests(unittest.TestCase):
             txn_date="2026-05-21",
             trade_time="2026-05-21 10:00:00",
         )
-        service = OaPendingPaymentQueryService(
-            import_service=ImportNormalizationService(existing_transactions=[bank]),
-            relation_facade=FakeRelationFacade([
+        rows = build_oa_pending_payment_rows(
+            records=[self._oa("oa-candidate", "候选申请人", "100.00", detail_fields={"申请日期": "2026-05-20"})],
+            relations=[
                 {
                     "case_id": "candidate-oa-bank",
                     "row_ids": ["oa-candidate", "bank-candidate"],
@@ -649,13 +646,14 @@ class OaPendingPaymentApiTests(unittest.TestCase):
                     "relation_status": "unlinked",
                     "amount_check": {"matched": True},
                 }
-            ]),
-            oa_projection=StaticOAProjection([
-                self._oa("oa-candidate", "候选申请人", "100.00", detail_fields={"申请日期": "2026-05-20"}),
-            ]),
+            ],
+            bank_transactions=[bank],
+            invoices=[],
+            payment_statuses_by_flow_id={},
+            flow_id_resolver=lambda _record: None,
+            scope_key="2026-05",
         )
-
-        row = service.list_rows(page_size=20)["rows"][0]
+        row = rows[0]
 
         self.assertEqual(row["bankTransaction"]["relationCount"], 0)
         self.assertEqual(row["bankTransaction"]["summaries"], [])
@@ -800,49 +798,6 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         self.assertIn("2026-05:oa_pending_payment_source_version_missing", payload["read_model_stale_reasons"])
         self.assertEqual(queue.refreshes, [("oa_pending_payment", "2026-05", "api_freshness_gate_blocked")])
 
-    def test_production_rows_relation_source_version_stale_enqueues_refresh_without_stale_rows(self) -> None:
-        queue = QueueRecorder()
-        app = object.__new__(Application)
-        app._bootstrap_mode = "production"
-        app._state_store = type("StateStore", (), {"storage_backend": "postgres"})()
-        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
-        old_relation_versions = {"source_version": "1"}
-        current_relation_versions = {"source_version": "2"}
-        app._oa_pending_payment_sql_read_repository = type(
-            "OaRepo",
-            (),
-            {
-                "list_oa_pending_payment_rows": lambda *_args, **_kwargs: {
-                    "rows": [{"id": "stale-row", "oa": {}, "paymentStatus": {}, "bankTransaction": {}, "invoice": {}}],
-                    "pagination": {"page": 1, "pageSize": 50, "total": 1},
-                    "summary": {"rowCount": 1},
-                    "filterOptions": {},
-                    "refresh_status": "fresh",
-                    "source_versions": {
-                        **oa_pending_payment_source_versions(),
-                        "workbench_relation_source_versions": old_relation_versions,
-                    },
-                }
-            },
-        )()
-        app._oa_pending_payment_api_routes = _read_model_routes(
-            repository=app._oa_pending_payment_sql_read_repository,
-            queue=queue,
-            source_versions_provider=lambda: {
-                **oa_pending_payment_source_versions(),
-                "workbench_relation_source_versions": current_relation_versions,
-            },
-        )
-
-        response = _json_test_response(*app._oa_pending_payment_api_routes.rows({"month": ["2026-05"], "page": ["1"], "page_size": ["50"]}))
-        payload = json.loads(response.body)
-
-        self.assertEqual(response.status_code, 202)
-        self.assertEqual(payload["rows"], [])
-        self.assertEqual(payload["read_model_status"], "refreshing")
-        self.assertIn("2026-05:workbench_relation_source_versions_mismatch", payload["read_model_stale_reasons"])
-        self.assertEqual(queue.refreshes, [("oa_pending_payment", "2026-05", "api_freshness_gate_blocked")])
-
     def test_production_aggregate_rows_miss_enqueues_refresh_without_live_scan(self) -> None:
         queue = QueueRecorder()
         app = object.__new__(Application)
@@ -900,7 +855,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["id"], "oa-payment-row-api")
         self.assertEqual(queue.refreshes, [])
 
-    def test_production_all_scope_does_not_loop_on_relation_all_versions(self) -> None:
+    def test_production_all_scope_does_not_query_relation_read_model_versions(self) -> None:
         queue = QueueRecorder()
         base_versions = {
             **oa_pending_payment_source_versions(),
@@ -915,18 +870,9 @@ class OaPendingPaymentApiTests(unittest.TestCase):
                     "summary": {"rowCount": 1},
                     "filterOptions": {},
                     "refresh_status": "fresh",
-                    "source_versions": {
-                        **base_versions,
-                        "workbench_relation_source_versions": {
-                            "workbench_pair_relations_updated_at": "2026-06-21 15:00:00+08",
-                        },
-                    },
+                    "source_versions": base_versions,
                     "read_model_scope_key": "all",
                 }
-
-            def workbench_relation_source_versions(self, *, scope_key: str) -> dict[str, object]:
-                self.requested_scope_key = scope_key
-                return {"workbench_pair_relations_updated_at": "2026-06-21 16:00:00+08"}
 
         app = object.__new__(Application)
         app._bootstrap_mode = "production"
@@ -1236,7 +1182,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         versions = oa_pending_payment_source_versions()
 
         self.assertIn("oa_pending_payment_source_version", versions)
-        self.assertIn("oa_pending_payment_workbench_relation_schema_version", versions)
+        self.assertIn("oa_pending_payment_canonical_relation_schema_version", versions)
         self.assertIn("oa_pending_payment_bank_import_fact_schema_version", versions)
         self.assertIn("oa_pending_payment_input_invoice_import_fact_schema_version", versions)
         self.assertIn("oa_projection_sync_version", versions)

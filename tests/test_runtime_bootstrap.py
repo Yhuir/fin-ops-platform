@@ -375,7 +375,7 @@ class RuntimeBootstrapTests(unittest.TestCase):
             Path("backend/src/fin_ops_platform/services/reconciliation.py"),
             Path("backend/src/fin_ops_platform/services/input_invoice_usage_service.py"),
             Path("backend/src/fin_ops_platform/services/output_invoice_collection_service.py"),
-            Path("backend/src/fin_ops_platform/services/oa_pending_payment_service.py"),
+            Path("backend/src/fin_ops_platform/services/oa_pending_payment_projection_rows.py"),
             Path("backend/src/fin_ops_platform/services/project_costing.py"),
         ]
         violations = [

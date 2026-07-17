@@ -306,6 +306,7 @@ def _should_execute_many_values(sql: str) -> bool:
         or "insert into read_model.search_index_rows" in normalized
         or "insert into read_model.turnover_ledger_rows" in normalized
         or "insert into read_model.bank_account_balances" in normalized
+        or "insert into read_model.oa_pending_payment_rows" in normalized
     )
 
 
@@ -1071,9 +1072,6 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                 source_watermark.version as source_snapshot_version,
                 source_watermark.payload as source_payload,
                 pending_relation_watermark.version as pending_relation_version,
-                relation_scope.scope_key is not null as relation_scope_exists,
-                relation_scope.cache_status as relation_cache_status,
-                relation_scope.source_versions as relation_source_versions,
                 latest_dirty.status as dirty_status,
                 latest_dirty.source_version as dirty_source_version,
                 case
@@ -1102,9 +1100,6 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
               on source_watermark.sync_key = %s || target.scope_key
             left join app.oa_sync_watermarks pending_relation_watermark
               on pending_relation_watermark.sync_key = %s || target.scope_key
-            left join read_model.workbench_relation_scopes relation_scope
-              on relation_scope.tenant_id = %s
-             and relation_scope.scope_key = target.scope_key
             left join lateral (
                 select dirty.status, dirty.source_version
                 from job.read_model_dirty_scopes dirty
@@ -1125,7 +1120,6 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                 source_prefix,
                 pending_relation_prefix,
                 normalized_tenant_id,
-                normalized_tenant_id,
             ),
         )
         state_rows = [dict(row) for row in rows if isinstance(row, dict)]
@@ -1141,11 +1135,6 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
         for row in month_rows:
             row_scope_key = text(row.get("scope_key")) or ""
             source_payload = row.get("source_payload") if isinstance(row.get("source_payload"), dict) else {}
-            relation_versions = (
-                row.get("relation_source_versions")
-                if isinstance(row.get("relation_source_versions"), dict)
-                else {}
-            )
             expected_versions: dict[str, Any] = {
                 **dict(base_source_versions),
                 "oa_pending_payment_source_snapshot_version": int_value(row.get("source_snapshot_version"), 0),
@@ -1156,8 +1145,6 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                 "oa_pending_payment_relation_version": int_value(row.get("pending_relation_version"), 0),
                 "oa_pending_payment_event_source_version": int_value(row.get("dirty_source_version"), -1),
             }
-            if relation_versions:
-                expected_versions["workbench_relation_source_versions"] = dict(relation_versions)
             actual_versions = (
                 dict(row.get("actual_source_versions"))
                 if isinstance(row.get("actual_source_versions"), dict)
@@ -1176,8 +1163,6 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                 reasons.append("source_snapshot_missing")
             if int_value(row.get("pending_relation_version"), 0) < 1:
                 reasons.append("pending_relation_version_missing")
-            if not bool(row.get("relation_scope_exists")) or text(row.get("relation_cache_status")) not in {"fresh"}:
-                reasons.append("workbench_relation_scope_not_fresh")
             if text(row.get("dirty_status")) in {"pending", "processing", "failed"}:
                 reasons.append(f"dirty_{text(row.get('dirty_status'))}")
             if bool(row.get("outbox_blocking")):
@@ -1279,11 +1264,45 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                 connection.execute("delete from read_model.oa_pending_payment_rows")
             else:
                 connection.execute("delete from read_model.oa_pending_payment_rows where scope_key = %s", (normalized_scope_key,))
-            insert_rows: list[dict[str, Any]] = []
+            insert_rows: list[tuple[Any, ...]] = []
             for row in rows_to_save:
                 row_payload = dict(row) if isinstance(row, dict) else {}
                 row_payload["sourceVersions"] = normalized_source_versions
-                insert_rows.append(_oa_pending_payment_read_model_record(row_payload, normalized_scope_key))
+                record = _oa_pending_payment_read_model_record(row_payload, normalized_scope_key)
+                insert_rows.append(
+                    (
+                        record["row_id"],
+                        record["scope_key"],
+                        record["scope_month"],
+                        record["oa_id"],
+                        record["oa_ids"],
+                        record["oa_applicant"],
+                        record["oa_application_type"],
+                        record["oa_workflow_status"],
+                        record["oa_project_name"],
+                        record["oa_amount"],
+                        record["payment_status"],
+                        record["payment_status_label"],
+                        record["bank_transaction_id"],
+                        record["bank_trade_time"],
+                        record["bank_amount"],
+                        record["bank_paid_total"],
+                        record["bank_name"],
+                        record["bank_account"],
+                        record["bank_direction"],
+                        record["bank_counterparty_name"],
+                        record["bank_summary"],
+                        record["invoice_id"],
+                        record["invoice_no"],
+                        record["invoice_date"],
+                        record["seller_name"],
+                        record["invoice_total_with_tax"],
+                        record["searchable_text"],
+                        record["source_versions"],
+                        record["payload"],
+                        record["raw_payload"],
+                    )
+                )
             _execute_many(
                 connection,
                 """
@@ -1296,14 +1315,14 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                         source_versions, payload, raw_payload
                     )
                     values (
-                        %(row_id)s, %(scope_key)s, %(scope_month)s::date, %(oa_id)s, %(oa_ids)s, %(oa_applicant)s,
-                        %(oa_application_type)s, %(oa_workflow_status)s, %(oa_project_name)s, %(oa_amount)s, %(payment_status)s,
-                        %(payment_status_label)s, %(bank_transaction_id)s, %(bank_trade_time)s::timestamptz,
-                        %(bank_amount)s, %(bank_paid_total)s, %(bank_name)s, %(bank_account)s, %(bank_direction)s,
-                        %(bank_counterparty_name)s, %(bank_summary)s,
-                        %(invoice_id)s, %(invoice_no)s, %(invoice_date)s::date, %(seller_name)s,
-                        %(invoice_total_with_tax)s, %(searchable_text)s, %(source_versions)s,
-                        %(payload)s, %(raw_payload)s
+                        %s, %s, %s::date, %s, %s, %s,
+                        %s, %s, %s, %s, %s,
+                        %s, %s, %s::timestamptz,
+                        %s, %s, %s, %s, %s,
+                        %s, %s,
+                        %s, %s, %s::date, %s,
+                        %s, %s, %s,
+                        %s, %s
                     )
                     on conflict (row_id, scope_key) do update set
                         scope_month = excluded.scope_month,

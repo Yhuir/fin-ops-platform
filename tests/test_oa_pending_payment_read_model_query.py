@@ -21,7 +21,6 @@ class OaPendingPaymentReadModelQueryTests(unittest.TestCase):
             "oa_pending_payment_source_signature": "source-3",
             "oa_pending_payment_relation_version": 4,
             "oa_pending_payment_event_source_version": 7,
-            "workbench_relation_source_versions": {"relation": 2},
         }
         state_row = {
             "scope_key": "2026-05",
@@ -38,9 +37,6 @@ class OaPendingPaymentReadModelQueryTests(unittest.TestCase):
                 "source_signature": "source-3",
             },
             "pending_relation_version": 4,
-            "relation_scope_exists": True,
-            "relation_cache_status": "fresh",
-            "relation_source_versions": {"relation": 2},
             "dirty_status": "done",
             "dirty_source_version": 7,
             "outbox_blocking": False,
@@ -86,6 +82,7 @@ class OaPendingPaymentReadModelQueryTests(unittest.TestCase):
             "order by dirty.source_version desc, dirty.updated_at desc, dirty.id desc",
             state_sql,
         )
+        self.assertNotIn("read_model.workbench_relation_scopes", state_sql)
 
     def test_all_scope_query_state_fails_closed_on_cross_scope_duplicate_row_identity(self) -> None:
         base_versions = {"schema": 1}
@@ -227,7 +224,6 @@ def _fresh_state_row(
         "payment_status_signature": f"payment-{snapshot_version}",
         "source_signature": f"source-{snapshot_version}",
     }
-    relation_versions = {"relation": snapshot_version}
     actual_versions = {
         **base_versions,
         "oa_pending_payment_source_snapshot_version": snapshot_version,
@@ -237,7 +233,6 @@ def _fresh_state_row(
         "oa_pending_payment_source_signature": source_payload["source_signature"],
         "oa_pending_payment_relation_version": snapshot_version,
         "oa_pending_payment_event_source_version": event_source_version,
-        "workbench_relation_source_versions": relation_versions,
     }
     return {
         "scope_key": scope_key,
@@ -249,9 +244,6 @@ def _fresh_state_row(
         "source_snapshot_version": snapshot_version,
         "source_payload": source_payload,
         "pending_relation_version": snapshot_version,
-        "relation_scope_exists": True,
-        "relation_cache_status": "fresh",
-        "relation_source_versions": relation_versions,
         "dirty_status": "done",
         "dirty_source_version": event_source_version,
         "outbox_blocking": False,

@@ -90,7 +90,7 @@ query、分页、排序、筛选、view mode、认证或 contract revision 变�
 月份构建顺序：
 
 1. CAS 检查 event source version 仍为当前版本。
-2. 在 PostgreSQL 一致性事务中读取 completed OA、admission、payment status、bank/invoice canonical facts、fresh Workbench relation 和 pending relation。
+2. 在 PostgreSQL 一致性事务中读取 completed OA、admission、payment status、canonical Workbench relation、pending relation，以及关系成员对应的 bank/invoice canonical facts；不等待其它页面 read model。
 3. 批量构建 rows 与动态 source vector；不得 per-row I/O 或访问 Mongo/MySQL。
 4. 原子发布月份 rows/scope/source vector。
 5. 仅在 dirty 版本未前进时完成 event并清 dirty。

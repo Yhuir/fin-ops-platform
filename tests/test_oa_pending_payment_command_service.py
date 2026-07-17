@@ -10,7 +10,7 @@ from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRecord, PAY_STATUS_PAID, PAY_STATUS_PENDING
 from fin_ops_platform.services.oa_pending_payment_command_service import OaPendingPaymentCommandService
-from fin_ops_platform.services.oa_pending_payment_service import OaPendingPaymentError
+from fin_ops_platform.services.oa_pending_payment_query_contract import OaPendingPaymentError
 
 
 class StaticOAProjection:

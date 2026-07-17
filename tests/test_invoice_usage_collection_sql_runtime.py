@@ -1667,9 +1667,9 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         params = params_seq[0]
         self.assertIn("bank_paid_total", sql)
         self.assertIn("oa_workflow_status", sql)
-        self.assertEqual(params["oa_workflow_status"], "in_progress")
-        self.assertEqual(params["bank_paid_total"], "100.00")
-        self.assertEqual(params["source_versions"].obj, oa_pending_payment_source_versions())
+        self.assertEqual(params[7], "in_progress")
+        self.assertEqual(params[15], "100.00")
+        self.assertEqual(params[27].obj, oa_pending_payment_source_versions())
 
     def test_oa_repository_detail_lookups_use_native_columns(self) -> None:
         connection = InvoiceReadModelConnection(

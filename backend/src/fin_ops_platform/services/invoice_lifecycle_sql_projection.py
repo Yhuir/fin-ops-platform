@@ -18,7 +18,6 @@ from fin_ops_platform.services.invoice_usage_collection_source_versions import (
 )
 from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRepository
 from fin_ops_platform.services.oa_payment_admitted_projection import PaymentAdmittedOAProjectionAdapter
-from fin_ops_platform.services.oa_pending_payment_service import OaPendingPaymentQueryService
 from fin_ops_platform.services.output_invoice_collection_service import OutputInvoiceCollectionQueryService
 from fin_ops_platform.services.postgres_repositories import (
     PostgresCoreRepository,
@@ -234,31 +233,7 @@ class InvoiceLifecycleSqlProjectionBuilder:
                 for page_row in page_rows
                 if (row := self._oa_pending_payment_lifecycle_row(page_row, month)) is not None
             ]
-        service = OaPendingPaymentQueryService(
-            import_service=self._import_service(),
-            relation_facade=self._workbench_relation_read_facade,
-            oa_projection=self._oa_projection_repository,
-            in_progress_oa_projection=self._oa_pending_payment_projection(),
-            payment_status_repository=self._payment_status_repository,
-            lifecycle_policy=self._policy,
-            require_fresh_relations=True,
-        )
-        context = service._query_context(month_hint=month)
-        page_rows = service._filtered_sorted_rows(
-            context=context,
-            month=month,
-            keyword=None,
-            trade_date_from=None,
-            trade_date_to=None,
-            filters=[],
-            sort_field="bank_trade_time",
-            sort_direction="desc",
-        )
-        return [
-            row
-            for page_row in page_rows
-            if (row := self._oa_pending_payment_lifecycle_row(page_row, month)) is not None
-        ]
+        raise RuntimeError(f"oa_pending_payment_read_model_not_fresh:{month}")
 
     def _fresh_read_model_rows(
         self,

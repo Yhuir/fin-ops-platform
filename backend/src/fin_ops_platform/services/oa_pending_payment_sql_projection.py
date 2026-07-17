@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+from time import perf_counter
 from typing import Any
 
-from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.invoice_usage_collection_source_versions import oa_pending_payment_source_versions
+from fin_ops_platform.services.oa_pending_payment_projection_rows import (
+    build_oa_pending_payment_rows,
+    relation_member_ids,
+)
 from fin_ops_platform.services.oa_pending_payment_read_model_repository import OaPendingPaymentReadModelRepositoryPort
-from fin_ops_platform.services.oa_pending_payment_service import OaPendingPaymentQueryService
 from fin_ops_platform.services.postgres_repositories.common import run_in_transaction
+from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_admission import (
     PostgresOaPendingPaymentAdmissionRepository,
 )
@@ -20,11 +24,10 @@ from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_s
 )
 from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository
 from fin_ops_platform.services.postgres_repositories.read_models import MONTH_SCOPE_RE, PostgresReadModelRepository
-from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
-from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRelationReadFacade
+from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
 
 
-OA_PENDING_PAYMENT_POSTGRES_PROJECTOR_VERSION = "2026-07-16-pg-only-v1"
+OA_PENDING_PAYMENT_POSTGRES_PROJECTOR_VERSION = "2026-07-17-canonical-relation-v2"
 
 
 def oa_pending_payment_base_source_versions() -> dict[str, object]:
@@ -64,7 +67,7 @@ class OaPendingPaymentSqlProjectionBuilder:
     ) -> dict[str, object]:
         normalized_scope_key = _month_scope(scope_key)
         del force_refresh
-
+        started_at = perf_counter()
         build = run_in_transaction(
             self._connection,
             lambda transaction: self._build_scope_snapshot(
@@ -73,6 +76,7 @@ class OaPendingPaymentSqlProjectionBuilder:
                 tenant_id=tenant_id,
             ),
         )
+        publish_started_at = perf_counter()
         published = self._read_model_port.publish_oa_pending_payment_rows(
             tenant_id=tenant_id,
             scope_key=normalized_scope_key,
@@ -80,6 +84,7 @@ class OaPendingPaymentSqlProjectionBuilder:
             rows=build["rows"],
             source_versions=build["source_versions"],
         )
+        publish_ms = _elapsed_ms(publish_started_at)
         if not published:
             return {
                 "scope_key": normalized_scope_key,
@@ -87,6 +92,10 @@ class OaPendingPaymentSqlProjectionBuilder:
                 "skipped": True,
                 "skip_reason": "superseded_before_publish",
                 "published": False,
+                "load_ms": float(build.get("load_ms") or 0),
+                "assemble_ms": float(build.get("assemble_ms") or 0),
+                "publish_ms": publish_ms,
+                "total_ms": _elapsed_ms(started_at),
             }
         return {
             "scope_key": normalized_scope_key,
@@ -94,6 +103,11 @@ class OaPendingPaymentSqlProjectionBuilder:
             "row_count": len(build["rows"]),
             "source_versions": build["source_versions"],
             "published": True,
+            "load_ms": float(build.get("load_ms") or 0),
+            "assemble_ms": float(build.get("assemble_ms") or 0),
+            "publish_ms": publish_ms,
+            "total_ms": _elapsed_ms(started_at),
+            "refresh_mode": "full",
         }
 
     def _build_scope_snapshot(
@@ -103,70 +117,69 @@ class OaPendingPaymentSqlProjectionBuilder:
         scope_key: str,
         tenant_id: str,
     ) -> dict[str, Any]:
-        read_repository = PostgresReadModelRepository(connection)
-        relation_facade = WorkbenchRelationReadFacade(read_model_repository=read_repository)
-        relation_payload = relation_facade.list_by_month(
-            scope_key,
-            require_fresh=True,
-            reason="oa_pending_payment_sql_projection",
-        )
-        if not isinstance(relation_payload, dict) or str(relation_payload.get("status") or "") != "fresh":
-            raise RuntimeError("workbench_relation_read_model_not_fresh")
-
+        load_started_at = perf_counter()
         payment_status_repository = PostgresOaPendingPaymentStatusSnapshotReader(
             connection,
             scope_key=scope_key,
             tenant_id=tenant_id,
         )
         admission_repository = PostgresOaPendingPaymentAdmissionRepository(connection)
-        service = OaPendingPaymentQueryService(
-            import_service=ImportNormalizationService.from_snapshot(
-                None,
-                fact_repository=PostgresCoreRepository(connection),
-            ),
-            relation_facade=relation_facade,
-            pending_relation_service=PostgresOaPendingPaymentRelationRepository(connection),
-            oa_projection=PostgresOAProjectionRepository(connection),
-            in_progress_oa_projection=admission_repository,
-            payment_status_repository=payment_status_repository,
-            require_fresh_relations=True,
+        completed_records = PostgresOAProjectionRepository(connection).list_application_records(scope_key)
+        in_progress_records = [
+            record
+            for record in admission_repository.list_application_records(scope_key, tenant_id=tenant_id)
+            if str(record.workflow_status or "").strip() == "in_progress"
+        ]
+        payment_statuses = payment_status_repository.list_payment_statuses()
+
+        canonical_snapshot = PostgresWorkbenchRelationRepository(
+            connection,
+            enqueue_refreshes=False,
+        ).load_workbench_pair_relations_for_row_ids(
+            [record.id for record in completed_records],
         )
-        context = service._query_context(month_hint=scope_key)
-        payment_statuses = service._payment_statuses_by_flow_id()
-        completed_records = service._oa_records(
-            month=scope_key,
-            view_mode="completed",
-            payment_statuses_by_flow_id=payment_statuses,
+        canonical_relations = _active_relations(canonical_snapshot)
+        pending_relations = PostgresOaPendingPaymentRelationRepository(connection).active_relations_for_row_ids(
+            [record.id for record in in_progress_records]
         )
-        in_progress_records = service._oa_records(
-            month=scope_key,
-            view_mode="in_progress",
-            payment_statuses_by_flow_id=payment_statuses,
+        all_relations = [*canonical_relations, *pending_relations]
+        core_repository = PostgresCoreRepository(connection)
+        bank_transactions = core_repository.list_bank_transactions_by_ids(
+            relation_member_ids(all_relations, row_types={"bank", "bank_transaction"})
         )
+        invoices = core_repository.list_invoices_by_ids(
+            relation_member_ids(all_relations, row_types={"invoice"})
+        )
+        load_ms = _elapsed_ms(load_started_at)
+        assemble_started_at = perf_counter()
         rows = [
-            *service._build_rows(
-                month=scope_key,
-                context=context,
-                view_mode="completed",
-                payment_statuses_by_flow_id=payment_statuses,
+            *build_oa_pending_payment_rows(
                 records=completed_records,
-            ),
-            *service._build_rows(
-                month=scope_key,
-                context=context,
-                view_mode="in_progress",
+                relations=canonical_relations,
+                bank_transactions=bank_transactions,
+                invoices=invoices,
                 payment_statuses_by_flow_id=payment_statuses,
+                flow_id_resolver=payment_status_repository.resolve_flow_id,
+                scope_key=scope_key,
+            ),
+            *build_oa_pending_payment_rows(
                 records=in_progress_records,
+                relations=pending_relations,
+                bank_transactions=bank_transactions,
+                invoices=invoices,
+                payment_statuses_by_flow_id=payment_statuses,
+                flow_id_resolver=payment_status_repository.resolve_flow_id,
+                scope_key=scope_key,
             ),
         ]
         return {
             "rows": rows,
+            "load_ms": load_ms,
+            "assemble_ms": _elapsed_ms(assemble_started_at),
             "source_versions": self._expected_source_versions(
                 connection,
                 scope_key=scope_key,
                 tenant_id=tenant_id,
-                relation_facade=relation_facade,
-                read_repository=read_repository,
             ),
         }
 
@@ -176,8 +189,6 @@ class OaPendingPaymentSqlProjectionBuilder:
         *,
         scope_key: str,
         tenant_id: str,
-        relation_facade: WorkbenchRelationReadFacade | None = None,
-        read_repository: PostgresReadModelRepository | None = None,
     ) -> dict[str, object]:
         snapshot_versions = oa_pending_payment_source_versions_from_snapshot(
             connection,
@@ -186,16 +197,6 @@ class OaPendingPaymentSqlProjectionBuilder:
         )
         if not snapshot_versions or not snapshot_versions.get("oa_pending_payment_source_signature"):
             raise RuntimeError(f"oa_pending_payment_source_snapshot_missing:{scope_key}")
-        target_read_repository = read_repository or PostgresReadModelRepository(connection)
-        target_relation_facade = relation_facade or WorkbenchRelationReadFacade(
-            read_model_repository=target_read_repository,
-        )
-        load_relation_versions = getattr(target_read_repository, "workbench_relation_source_versions", None)
-        relation_versions = (
-            load_relation_versions(scope_key=scope_key)
-            if callable(load_relation_versions)
-            else dict(target_relation_facade.last_source_versions)
-        )
         pending_relation_versions = PostgresOaPendingPaymentRelationRepository(connection).source_versions(
             scope_key=scope_key,
             tenant_id=tenant_id,
@@ -206,12 +207,20 @@ class OaPendingPaymentSqlProjectionBuilder:
             **oa_pending_payment_base_source_versions(),
             **snapshot_versions,
             **pending_relation_versions,
-            **(
-                {"workbench_relation_source_versions": dict(relation_versions)}
-                if isinstance(relation_versions, dict) and relation_versions
-                else {}
-            ),
         }
+
+
+def _active_relations(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    relations = snapshot.get("pair_relations") if isinstance(snapshot, dict) else None
+    return [
+        dict(relation)
+        for relation in dict(relations or {}).values()
+        if isinstance(relation, dict) and str(relation.get("status") or "active").strip() == "active"
+    ]
+
+
+def _elapsed_ms(started_at: float) -> float:
+    return round((perf_counter() - started_at) * 1000, 3)
 
 def _month_scope(scope_key: str) -> str:
     normalized_scope_key = str(scope_key or "").strip()

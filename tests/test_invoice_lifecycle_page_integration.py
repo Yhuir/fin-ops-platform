@@ -10,7 +10,7 @@ from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.input_invoice_usage_payment_rules import AppSettingsInputInvoiceUsagePaymentRulesProvider
 from fin_ops_platform.services.input_invoice_usage_service import InputInvoiceUsageQueryService
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
-from fin_ops_platform.services.oa_pending_payment_service import OaPendingPaymentQueryService
+from fin_ops_platform.services.oa_pending_payment_projection_rows import build_oa_pending_payment_rows
 from fin_ops_platform.services.output_invoice_collection_service import OutputInvoiceCollectionQueryService
 from fin_ops_platform.services.pending_invoice_service import PendingInvoiceQueryService
 
@@ -124,16 +124,20 @@ class InvoiceLifecyclePageIntegrationTests(unittest.TestCase):
 
     def test_oa_pending_payment_rows_delegate_payment_status_to_lifecycle_policy(self) -> None:
         policy = FakeLifecyclePolicy()
-        service = OaPendingPaymentQueryService(
-            import_service=ImportNormalizationService(),
-            oa_projection=StaticOAProjection([_oa("oa-1", "88.00")]),
+        rows = build_oa_pending_payment_rows(
+            records=[_oa("oa-1", "88.00")],
+            relations=[],
+            bank_transactions=[],
+            invoices=[],
+            payment_statuses_by_flow_id={},
+            flow_id_resolver=lambda _record: None,
+            scope_key="2026-01",
             lifecycle_policy=policy,
         )
-
-        row = service.list_rows()["rows"][0]
+        row = rows[0]
 
         self.assertEqual(row["paymentStatus"]["code"], "policy_oa_payment")
-        self.assertEqual(policy.oa_calls, 2)
+        self.assertEqual(policy.oa_calls, 1)
 
 
 def _counterparty() -> Counterparty:

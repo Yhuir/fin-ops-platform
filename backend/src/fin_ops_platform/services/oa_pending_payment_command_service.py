@@ -14,7 +14,7 @@ from fin_ops_platform.services.oa_payment_status_service import (
     OAPaymentStatusRepository,
     PAY_STATUS_PAID,
 )
-from fin_ops_platform.services.oa_pending_payment_service import (
+from fin_ops_platform.services.oa_pending_payment_query_contract import (
     OaPendingPaymentError,
     VIEW_MODE_IN_PROGRESS,
 )

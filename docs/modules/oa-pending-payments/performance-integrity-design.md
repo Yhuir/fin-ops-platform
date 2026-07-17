@@ -147,7 +147,7 @@ payment-status snapshot 必须具备完整删除语义：
 - completed OA projection。
 - in-progress admission。
 - OA MySQL payment-status snapshot。
-- completed Workbench relation 与 in-progress pending relation。
+- completed canonical Workbench relation schema/event version与 in-progress pending relation scope version；OA freshness 不读取或等待 `workbench_relation` read model版本。
 - 被投影引用的银行流水和进项发票 canonical facts。
 - 影响付款状态/分类的规则版本（当前 `InvoiceLifecyclePolicy.evaluate_oa_payment` 不读取 input invoice payment rules，因此本轮明确为 N/A，不制造虚假依赖）。
 
@@ -272,6 +272,8 @@ Page Audit 只证明同一 PostgreSQL snapshot 内部一致性。外部来源健
 | `OaPendingPaymentReadModelService.filter_options()` 的全量扫描 | 删除；repository set-based aggregation 替代 | 高数据量测试无 per-page 查询放大 |
 | `OaPendingPaymentApiRoutes._query_service` 未使用依赖 | 删除字段和组装参数 | 构造函数只保留实际依赖 |
 | read model service 对完整 live `OaPendingPaymentQueryService` 的注入 | 只保留 read-model query parsing/filter contract；无 live source 依赖 | 依赖图无页面读到 live query service 的路径 |
+| `oa_pending_payment_service.py` live query/projector共享实现 | 提取无 I/O 的 `oa_pending_payment_projection_rows.py`，删除整个旧 service与专属测试 | whole-repo 生产代码无 import；纯业务规则由 projection rows测试接管 |
+| projector等待 `WorkbenchRelationReadFacade(require_fresh=True)` | 直接批量读取 canonical relation；移除 freshness SQL 的 Workbench RM join和嵌套 source versions | 关联操作可直接调度 OA 月份，不再 defer等待其它页面 read model |
 | `InvoiceUsageCollectionSqlProjectionBuilder` 中 OA constructor deps/methods | 移至 OA PostgreSQL-only projector，删除共享 builder OA 分支 | input/output builder 无 OA/Mongo/MySQL 依赖 |
 | `InvoiceUsageCollectionReadModelRefreshService` 和共享 registry/manifest 的 OA 分支 | 迁到 OA handler/专属 worker 配置 | 共享 worker 不 claim OA event |
 | projector 内 MySQL payment status、Mongo/OA adapter 读取 | 移到 OA integration sync | worker dependency test 证明只访问 PostgreSQL ports |

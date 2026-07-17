@@ -596,7 +596,7 @@
 - `tests/test_oa_applicant_credentials_service.py`、`tests/test_oa_applicant_credentials_api.py`、`tests/test_postgres_oa_applicant_credentials_repository.py` 保护凭据权限、脱敏和持久化。
 - `tests/test_target_oa_applicant_token_provider.py` 保护目标申请人登录 RSA、HTTP/network/JSON/token 失败和缺凭据不登录。
 - `tests/test_input_invoice_usage_oa_reverse_service.py`、`tests/test_input_invoice_usage_api.py`、`web/src/test/InputInvoiceUsage*.test.tsx` 保护进项 OA 反提状态机和 UI。
-- `tests/test_oa_pending_payment_service.py`、`tests/test_oa_pending_payment_api.py`、`web/src/test/OaPendingPaymentsPage.test.tsx` 保护 OA 待付款页面/API。
+- `tests/test_oa_pending_payment_projection_rows.py`、`tests/test_oa_pending_payment_api.py`、`web/src/test/OaPendingPaymentsPage.test.tsx` 保护 OA 待付款页面/API。
 - `tests/test_oa_manual_import_service.py`、`tests/test_oa_manual_import_api.py`、`web/src/test/SettingsOaManualSearchImportTable.test.tsx` 保护 OA 手动导入。
 - `tests/test_etc_backend.py`、`web/src/test/EtcApi.test.ts`、`web/src/test/EtcOaNavigation.test.ts` 保护 ETC OA 草稿与人工确认。
 - `tests/test_auth_guard.py`、`tests/test_session_api.py`、`web/src/test/SessionApi.test.ts`、`web/src/test/SessionGate.test.tsx` 保护 OA session 和权限。

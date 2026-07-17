@@ -807,7 +807,8 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertIn("source_watermark.version as source_snapshot_version", fresh_gate_sql)
         self.assertIn("pending_relation_watermark.version as pending_relation_version", fresh_gate_sql)
         self.assertIn("latest_dirty.source_version as dirty_source_version", fresh_gate_sql)
-        self.assertIn("relation_scope.source_versions as relation_source_versions", fresh_gate_sql)
+        self.assertNotIn("read_model.workbench_relation_scopes", fresh_gate_sql)
+        self.assertNotIn("relation_scope.source_versions as relation_source_versions", fresh_gate_sql)
         self.assertIn("dead_lettered", fresh_gate_sql)
         self.assertNotIn("select relation_scope.scope_key", target_inventory_sql)
         duplicate_sql, _params = next(
@@ -1115,7 +1116,6 @@ def _fresh_oa_pending_payment_query_state_row() -> dict[str, object]:
         "oa_pending_payment_source_signature": "source",
         "oa_pending_payment_relation_version": 1,
         "oa_pending_payment_event_source_version": 1,
-        "workbench_relation_source_versions": {"relation": 1},
     }
     return {
         "scope_key": "2026-06",
@@ -1132,9 +1132,6 @@ def _fresh_oa_pending_payment_query_state_row() -> dict[str, object]:
             "source_signature": "source",
         },
         "pending_relation_version": 1,
-        "relation_scope_exists": True,
-        "relation_cache_status": "fresh",
-        "relation_source_versions": {"relation": 1},
         "dirty_status": "done",
         "dirty_source_version": 1,
         "outbox_blocking": False,

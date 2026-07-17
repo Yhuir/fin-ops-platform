@@ -1,5 +1,14 @@
 # OA待付款核对 实施记录
 
+## 2026-07-17 - Workbench 关联后 OA 可见性热路径去串行依赖
+
+- 生产基线：正式关联操作后，OA 页面新数据约 `18.7s` 才可见；证据分解为 OA 事件首次 defer `1.510s`、等待约 `17.182s`、OA handler `12.180s`，另有约 `5s` queue 尾部。撤回同 scope 约 `2.106s`、handler `0.888s`，说明慢点不是页面查询，而是 OA projector串行等待 `workbench_relation` read model后又用 live query service做全量组装。
+- 根因修复：Workbench UoW继续在 canonical relation 同一业务事务内投递受影响 `oa_pending_payment:<month>`；OA 专属 worker直接从 `app.workbench_pair_relations` 读取 active canonical relation，并按 relation member id批量读取银行/发票事实，不再读取或等待 `read_model.workbench_relation_*`。in-progress 仍只读 OA 私有 pending relation，附件/OCR保持不解析。
+- 模块边界：新增 `oa_pending_payment_projection_rows.py` 作为无 I/O 的纯行组装边界；projector只负责 PostgreSQL repository I/O和编排；query/freshness gate只依赖 OA scope、source snapshot、pending relation和 event version。没有新增队列、缓存、worker、fallback或跨页面 invalidation。
+- 旧链删除：删除 1,340 行 `oa_pending_payment_service.py` 及其 live-query测试，移除 server bootstrap/private accessor、invoice-lifecycle live fallback、projector `WorkbenchRelationReadFacade`、freshness SQL 的 `workbench_relation_scopes` join和 `workbench_relation_source_versions`。边界 guard禁止这些符号回流。
+- 发布性能：月份 rows 由逐条 `executemany` 收敛为单次 values batch；projector输出 `load_ms/assemble_ms/publish_ms/total_ms`，便于统一部署后按 commit-to-fresh p95硬门验证。当前只完成本地实现和验证，未部署；生产 `<=1s` 只能在统一发布后用真实 confirm/withdraw样本确认。
+- 回滚：代码回滚整个 release并重新 enqueue `oa_pending_payment:all`；不恢复已删除的 live fallback，也不让页面把旧 rows冒充 fresh。
+
 ## 2026-07-17 - OA 模块重复鉴权 I/O 收敛
 
 - 生产证据：release `main-3f7acf70f-oa-cache-hit-gate-20260717` 已把 cache hit 的 read snapshot 删除；50 次公网 fresh `200` 仍为 `p50=178.343ms / p95=266.338ms / p99=273.771ms`。进程 rolling 样本显示 server `p95=177.431ms`、database `p95=65.394ms`，cache hit 固定 5 次数据库操作，严格 `p95<=250ms` 尚未闭合。

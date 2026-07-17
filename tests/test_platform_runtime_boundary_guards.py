@@ -3137,7 +3137,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
     def test_oa_pending_payment_routes_use_route_owner(self) -> None:
         server_path = APP_ROOT / "server.py"
         route_path = APP_ROOT / "routes_oa_pending_payments.py"
-        query_service_path = SERVICES_ROOT / "oa_pending_payment_service.py"
+        retired_query_service_path = SERVICES_ROOT / "oa_pending_payment_service.py"
         command_service_path = SERVICES_ROOT / "oa_pending_payment_command_service.py"
         read_model_service_path = SERVICES_ROOT / "oa_pending_payment_read_model_service.py"
         relation_repository_path = SERVICES_ROOT / "postgres_repositories" / "oa_pending_payment_relation.py"
@@ -3146,11 +3146,12 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         route_source = route_path.read_text(encoding="utf-8")
         route_tree = _parse(route_path)
         route_class = _class_source(route_tree, route_source, "OaPendingPaymentApiRoutes")
-        query_service_source = query_service_path.read_text(encoding="utf-8")
         command_service_source = command_service_path.read_text(encoding="utf-8")
         read_model_service_source = read_model_service_path.read_text(encoding="utf-8")
         relation_repository_source = relation_repository_path.read_text(encoding="utf-8")
         violations: list[str] = []
+        if retired_query_service_path.exists():
+            violations.append("retired OA live query service still exists")
 
         for required in (
             "def route(",
@@ -3192,7 +3193,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "def filter_options(",
             "def filter_options_for_rows(",
         ):
-            if forbidden_service_symbol in query_service_source or forbidden_service_symbol in read_model_service_source:
+            if forbidden_service_symbol in read_model_service_source:
                 violations.append(f"OA pending payment service still exposes retired symbol {forbidden_service_symbol}")
         if "SnapshotOaPendingPaymentRelationRepository" in relation_repository_source:
             violations.append("OA pending payment relation repository still exposes the snapshot fallback")
@@ -3254,7 +3255,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             SERVICES_ROOT / "invoice_relation_query_context.py",
             SERVICES_ROOT / "input_invoice_usage_service.py",
             SERVICES_ROOT / "output_invoice_collection_service.py",
-            SERVICES_ROOT / "oa_pending_payment_service.py",
             SERVICES_ROOT / "bank_detail_sql_projection.py",
             SERVICES_ROOT / "bank_details_relation_tag_projection_service.py",
             SERVICES_ROOT / "pending_invoice_service.py",
@@ -3289,7 +3289,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         downstream_query_service_paths = {
             SERVICES_ROOT / "pending_invoice_service.py",
             SERVICES_ROOT / "input_invoice_usage_service.py",
-            SERVICES_ROOT / "oa_pending_payment_service.py",
             SERVICES_ROOT / "output_invoice_collection_service.py",
             SERVICES_ROOT / "invoice_relation_query_context.py",
             SERVICES_ROOT / "bank_details_relation_tag_projection_service.py",

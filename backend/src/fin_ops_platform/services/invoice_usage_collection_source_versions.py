@@ -6,7 +6,9 @@ from fin_ops_platform.services.oa_attachment_invoice_cache import attachment_inv
 from fin_ops_platform.services.output_invoice_collection_service import (
     SOURCE_VERSION as OUTPUT_INVOICE_COLLECTION_SOURCE_VERSION,
 )
-from fin_ops_platform.services.oa_pending_payment_service import SOURCE_VERSION as OA_PENDING_PAYMENT_SOURCE_VERSION
+from fin_ops_platform.services.oa_pending_payment_projection_rows import (
+    OA_PENDING_PAYMENT_PROJECTION_RULES_VERSION,
+)
 from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
 
 
@@ -34,9 +36,9 @@ def output_invoice_collection_source_versions() -> dict[str, object]:
 
 def oa_pending_payment_source_versions() -> dict[str, object]:
     return {
-        "oa_pending_payment_source_version": OA_PENDING_PAYMENT_SOURCE_VERSION,
+        "oa_pending_payment_source_version": OA_PENDING_PAYMENT_PROJECTION_RULES_VERSION,
         "invoice_lifecycle_policy_schema_version": INVOICE_LIFECYCLE_POLICY_SCHEMA_VERSION,
-        "oa_pending_payment_workbench_relation_schema_version": 1,
+        "oa_pending_payment_canonical_relation_schema_version": 1,
         "oa_pending_payment_bank_import_fact_schema_version": 1,
         "oa_pending_payment_input_invoice_import_fact_schema_version": 1,
         "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,

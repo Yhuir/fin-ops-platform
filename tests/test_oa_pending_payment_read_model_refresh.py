@@ -85,7 +85,14 @@ class OaPendingPaymentReadModelRefreshTests(unittest.TestCase):
             if isinstance(node, ast.Import)
             for alias in node.names
         )
-        forbidden_fragments = ("mongo", "mysql", "oa_sync_source_adapter", "oa_payment_admitted_projection")
+        forbidden_fragments = (
+            "mongo",
+            "mysql",
+            "oa_sync_source_adapter",
+            "oa_payment_admitted_projection",
+            "oa_pending_payment_service",
+            "workbench_relation_read_facade",
+        )
 
         self.assertFalse(
             {
@@ -94,6 +101,15 @@ class OaPendingPaymentReadModelRefreshTests(unittest.TestCase):
                 if any(fragment in module.lower() for fragment in forbidden_fragments)
             }
         )
+
+    def test_oa_projector_has_no_workbench_read_model_freshness_dependency(self) -> None:
+        source = Path(
+            "backend/src/fin_ops_platform/services/oa_pending_payment_sql_projection.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertNotIn("WorkbenchRelationReadFacade", source)
+        self.assertNotIn("workbench_relation_read_model_not_fresh", source)
+        self.assertNotIn("workbench_relation_source_versions", source)
 
 
 class OaPendingPaymentSqlProjectionBuilderTests(unittest.TestCase):
@@ -158,6 +174,33 @@ class OaPendingPaymentSqlProjectionBuilderTests(unittest.TestCase):
         self.assertIn("delete from read_model.oa_pending_payment_rows where scope_key", executed_sql)
         self.assertIn("insert into read_model.oa_pending_payment_scopes", executed_sql)
 
+    def test_repository_publish_uses_one_values_batch_for_scope_rows(self) -> None:
+        connection = CasConnection(current_source_version=17)
+        repository = PostgresInvoiceUsageCollectionReadModelRepository(connection)
+
+        published = repository.publish_oa_pending_payment_rows(
+            tenant_id="tenant-a",
+            scope_key="2026-05",
+            source_version=17,
+            rows=[
+                {
+                    "id": "row-1",
+                    "oa": {"id": "oa-1", "month": "2026-05", "workflowStatus": "completed"},
+                    "paymentStatus": {"code": "unpaid", "label": "未支付"},
+                    "bankTransaction": {},
+                    "invoice": {},
+                }
+            ],
+            source_versions={"source": "new"},
+        )
+
+        self.assertTrue(published)
+        self.assertEqual(len(connection.batch_executions), 1)
+        batch_sql, batch_params = connection.batch_executions[0]
+        self.assertIn("insert into read_model.oa_pending_payment_rows", batch_sql)
+        self.assertEqual(len(batch_params), 1)
+        self.assertEqual(len(batch_params[0]), 30)
+
 
 class TestProjectionBuilder(OaPendingPaymentSqlProjectionBuilder):
     @staticmethod
@@ -166,10 +209,8 @@ class TestProjectionBuilder(OaPendingPaymentSqlProjectionBuilder):
         *,
         scope_key: str,
         tenant_id: str,
-        relation_facade: object | None = None,
-        read_repository: object | None = None,
     ) -> dict[str, object]:
-        del scope_key, tenant_id, relation_facade, read_repository
+        del scope_key, tenant_id
         return {"source": "new"}
 
     def _build_scope_snapshot(
@@ -210,6 +251,7 @@ class CasConnection(CallbackConnection):
     def __init__(self, *, current_source_version: int) -> None:
         self.current_source_version = current_source_version
         self.executions: list[tuple[str, tuple[object, ...]]] = []
+        self.batch_executions: list[tuple[str, list[tuple[object, ...]]]] = []
 
     def fetch_one(self, sql: str, _params: tuple[object, ...]) -> dict[str, object]:
         if "from job.read_model_dirty_scopes" in sql:
@@ -218,6 +260,10 @@ class CasConnection(CallbackConnection):
 
     def execute(self, sql: str, params: tuple[object, ...]) -> None:
         self.executions.append((sql, params))
+
+    def execute_many_values(self, sql: str, params: list[tuple[object, ...]]) -> int:
+        self.batch_executions.append((sql, params))
+        return len(params)
 
 
 class FakeProjector:

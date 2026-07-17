@@ -26,7 +26,7 @@
 - OA session / 权限：`backend/src/fin_ops_platform/app/auth.py`、`backend/src/fin_ops_platform/services/oa_identity_service.py`、`backend/src/fin_ops_platform/services/access_control_service.py`、`web/src/features/session/api.ts`
 - OA Mongo 只读 adapter：`backend/src/fin_ops_platform/services/mongo_oa_adapter.py`
 - OA 投影与同步：`backend/src/fin_ops_platform/services/oa_projection_sync.py`、`backend/src/fin_ops_platform/services/postgres_repositories/oa_projection.py`、`backend/src/fin_ops_platform/app/worker.py`
-- OA 待付款：`backend/src/fin_ops_platform/app/routes_oa_pending_payments.py`、`backend/src/fin_ops_platform/services/oa_pending_payment_service.py`
+- OA 待付款：`backend/src/fin_ops_platform/app/routes_oa_pending_payments.py`、`backend/src/fin_ops_platform/services/oa_pending_payment_projection_rows.py`、`backend/src/fin_ops_platform/services/oa_pending_payment_sql_projection.py`
 - OA 手动搜索/导入：`backend/src/fin_ops_platform/services/oa_manual_import_service.py`、`backend/src/fin_ops_platform/app/server.py`
 - OA 附件发票识别：`backend/src/fin_ops_platform/services/oa_attachment_invoice_service.py`、`backend/src/fin_ops_platform/services/invoice_attachment_recognition_service.py`
 - 目标申请人凭据：`backend/src/fin_ops_platform/services/oa_applicant_credentials.py`、`backend/src/fin_ops_platform/services/target_oa_applicant_token_provider.py`

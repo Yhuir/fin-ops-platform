@@ -235,10 +235,7 @@ from fin_ops_platform.services.output_invoice_collection_service import (
     OutputInvoiceCollectionError,
     OutputInvoiceCollectionQueryService,
 )
-from fin_ops_platform.services.oa_pending_payment_service import (
-    OaPendingPaymentError,
-    OaPendingPaymentQueryService,
-)
+from fin_ops_platform.services.oa_pending_payment_query_contract import OaPendingPaymentError
 from fin_ops_platform.services.oa_pending_payment_command_service import OaPendingPaymentCommandService
 from fin_ops_platform.services.oa_pending_payment_read_model_service import OaPendingPaymentReadModelService
 from fin_ops_platform.services.oa_pending_payment_sql_projection import oa_pending_payment_base_source_versions
@@ -1000,20 +997,6 @@ class Application:
             relation_facade=self._workbench_relation_read_facade(),
             oa_projection=oa_adapter,
             payment_rules_provider=self._input_invoice_usage_payment_rules_provider(),
-            lifecycle_policy=self._invoice_lifecycle_policy(),
-            require_fresh_relations=False,
-        )
-        oa_pending_payment_projection = self._oa_pending_payment_projection(
-            source_adapter=oa_adapter,
-            use_lazy_source=False,
-        )
-        self._oa_pending_payment_query_service = OaPendingPaymentQueryService(
-            import_service=self._import_service,
-            relation_facade=self._workbench_relation_read_facade(),
-            pending_relation_service=self._oa_pending_payment_relation_repository(),
-            oa_projection=oa_adapter,
-            in_progress_oa_projection=oa_pending_payment_projection,
-            payment_status_repository=self._oa_payment_status_repository(),
             lifecycle_policy=self._invoice_lifecycle_policy(),
             require_fresh_relations=False,
         )
@@ -6344,23 +6327,6 @@ class Application:
         }
         return self._json_response(exc.status_code, payload)
 
-    def _oa_pending_payment_service(self) -> OaPendingPaymentQueryService:
-        service = getattr(self, "_oa_pending_payment_query_service", None)
-        if isinstance(service, OaPendingPaymentQueryService):
-            return service
-        service = OaPendingPaymentQueryService(
-            import_service=self._import_service,
-            relation_facade=self._workbench_relation_read_facade(),
-            pending_relation_service=self._oa_pending_payment_relation_repository(),
-            oa_projection=self._oa_pending_payment_source_projection(),
-            in_progress_oa_projection=self._oa_pending_payment_projection(),
-            payment_status_repository=self._oa_payment_status_repository(),
-            lifecycle_policy=self._invoice_lifecycle_policy(),
-            require_fresh_relations=False,
-        )
-        self._oa_pending_payment_query_service = service
-        return service
-
     def _oa_pending_payment_routes(self) -> OaPendingPaymentApiRoutes:
         routes = getattr(self, "_oa_pending_payment_api_routes", None)
         if isinstance(routes, OaPendingPaymentApiRoutes):
@@ -6415,9 +6381,7 @@ class Application:
         return service
 
     def _oa_pending_payment_command_oa_projection(self) -> object | None:
-        if getattr(self, "_oa_pending_payment_source_projection_override", None) is not None:
-            return self._oa_pending_payment_projection()
-        return self._oa_pending_payment_service().in_progress_oa_projection()
+        return self._oa_pending_payment_projection()
 
     def _oa_pending_payment_relation_repository(self) -> object | None:
         override = getattr(self, "_oa_pending_payment_relation_repository_override", None)

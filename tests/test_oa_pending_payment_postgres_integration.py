@@ -299,11 +299,6 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(int(counts["admission_count"]), 0)
 
     def test_canonical_commit_reaches_fresh_rows_and_etag_through_durable_worker_chain(self) -> None:
-        self.read_repository.mark_workbench_relation_scope_empty(
-            scope_key="2026-05",
-            tenant_id="default",
-            source_versions={"integration_relation_version": 1},
-        )
         source_snapshot = PostgresOaPendingPaymentSourceSnapshotRepository(
             self.connection,
             queue_repository=self.queue,

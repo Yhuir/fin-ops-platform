@@ -410,6 +410,15 @@ class PostgresCoreRepository:
             (normalized_invoice_id, normalized_invoice_id),
         )
 
+    def list_invoices_by_ids(self, invoice_ids: list[str]) -> list[Invoice]:
+        normalized_ids = self._unique_texts(invoice_ids)
+        if not normalized_ids:
+            return []
+        return self._fetch_invoices_by_clause(
+            "legacy_mongo_id = any(%s::text[]) or id::text = any(%s::text[])",
+            (normalized_ids, normalized_ids),
+        )
+
     def list_submitted_etc_invoices(self) -> list[Invoice]:
         rows = self._connection.fetch_all(
             """
@@ -653,6 +662,26 @@ class PostgresCoreRepository:
             (normalized_transaction_id, normalized_transaction_id),
         )
         return self._transaction_from_row(row) if row else None
+
+    def list_bank_transactions_by_ids(self, transaction_ids: list[str]) -> list[BankTransaction]:
+        normalized_ids = self._unique_texts(transaction_ids)
+        if not normalized_ids:
+            return []
+        rows = self._connection.fetch_all(
+            """
+            select id::text as postgres_id, coalesce(legacy_mongo_id, id::text) as legacy_id,
+                   account_no, account_name, txn_direction, counterparty_name_raw,
+                   normalized_counterparty_name, amount, signed_amount, written_off_amount,
+                   txn_date, trade_time, pay_receive_time, bank_serial_no, source_unique_key,
+                   data_fingerprint, legacy_source_batch_id, counterparty_id, project_id, balance,
+                   currency, summary, remark, bank_text_fields, status, raw_payload
+            from app.bank_transactions
+            where legacy_mongo_id = any(%s::text[]) or id::text = any(%s::text[])
+            order by created_at, id
+            """,
+            (normalized_ids, normalized_ids),
+        )
+        return [self._transaction_from_row(row) for row in rows if isinstance(row, dict)]
 
     def load_imports(self) -> dict[str, Any]:
         batches = self._connection.fetch_all(

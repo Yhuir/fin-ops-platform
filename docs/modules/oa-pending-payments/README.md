@@ -20,6 +20,7 @@
 - API：`backend/src/fin_ops_platform/app/routes_oa_pending_payments.py`
 - 查询合同：`oa_pending_payment_query_contract.py`、`oa_pending_payment_read_model_service.py`、`oa_pending_payment_read_model_repository.py`
 - 投影：`oa_pending_payment_sql_projection.py`、`oa_pending_payment_read_model_refresh.py`
+- 纯行组装：`oa_pending_payment_projection_rows.py`
 - 命令：`oa_pending_payment_command_service.py`、`oa_pending_payment_relation_promotion_service.py`
 - PostgreSQL owner：`postgres_repositories/oa_pending_payment_source_snapshot.py`、`postgres_repositories/oa_pending_payment_relation.py`、`postgres_repositories/oa_pending_payment_admission.py`
 - OA integration：`oa_projection_sync.py`、`mongo_oa_adapter.py`、`oa_payment_status_service.py`
@@ -31,8 +32,10 @@
 OA Mongo / t_payment_simple
   -> OA integration sync
   -> PostgreSQL completed OA + admission + payment-status snapshot + source watermark
-  -> 同事务先写 workbench_relation:<month> 依赖 dirty/outbox，再写 oa_pending_payment:<month> dirty/outbox
-  -> oa-pending-payment 专属 worker（仅 PostgreSQL）
+Workbench confirm / withdraw
+  -> 同一业务事务提交 canonical relation + oa_pending_payment:<month> dirty/outbox
+  -> oa-pending-payment 专属 worker直接读取 canonical relation与关联银行/发票事实（仅 PostgreSQL）
+  -> 纯内存行组装 + 单批次月份发布
   -> 月份 read model 原子发布/CAS
   -> fresh gate
   -> 单一 rows 聚合 API（rows + summary + filterOptions + ETag）
@@ -56,7 +59,7 @@ OA Mongo / t_payment_simple
 
 - `completed` 主行来自 `app.oa_applications` completed/legacy projection。
 - `in_progress` 主行来自 integration sync 已写入 `app.oa_pending_payment_admissions` 的准入快照；准入身份是 `t_payment_simple.flow_id` 对应的 OA Mongo `form_data._id`，不是 `t_payment_simple.id`。
-- completed relation 证据来自 Workbench active relation；in-progress relation 证据来自 OA 待付款 active pending relation。pending relation promotion 前不得写入 Workbench active relation。
+- completed relation 证据直接来自 canonical Workbench active relation，不等待或读取 `workbench_relation` read model；in-progress relation 证据来自 OA 待付款 active pending relation。pending relation promotion 前不得写入 Workbench active relation。
 - 银行流水和发票是 relation evidence，不替代 OA 主行；付款写回仍须后端复核 active relation、outflow、金额相等和 flow id。
 
 ## 写回一致性
@@ -79,7 +82,7 @@ OA 页面通过专属 wrapper 隔离共享 `PageAuditIcon`，其它页面文案�
 
 ## 明确不做
 
-- 不新增 CDC、通用 event bus、SSE/WebSocket、Redis 页面 payload cache或新 worker framework。
+- 不新增 CDC、通用 event bus、SSE/WebSocket、新缓存层或新 worker framework。
 - 不增加 stale-while-revalidate、live fallback、兼容 filter endpoint 或双读路径。
 - 不修改其它页面 read model、共享 Page Audit 默认文案或 input/output invoice worker 责任。
 - 不在没有生产 `EXPLAIN` 和压测证据时增加索引、分区、cursor pagination 或 worker pool。

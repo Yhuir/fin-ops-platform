@@ -25,7 +25,7 @@
 - writeback relation、金额、方向、幂等和 already-paid 重试。
 - filters、sort、paging、view mode contract。
 
-入口：`tests/test_oa_pending_payment_service.py`、`tests/test_oa_pending_payment_command_service.py`、`tests/test_invoice_lifecycle_policy.py`。
+入口：`tests/test_oa_pending_payment_projection_rows.py`、`tests/test_oa_pending_payment_command_service.py`、`tests/test_invoice_lifecycle_policy.py`。
 
 ### 2. Service-layer：适用
 
@@ -66,7 +66,8 @@
 
 - dynamic expected/actual source vector、dirty/outbox gate、month/all token。
 - `all` freshness gate 对跨 scope 重复 `row_id` fail closed；Page Audit 按全局 `row_id` 返回涉及 scopes；rows SQL 不再包含旧 `deduped_oa_pending_payment_rows` / `DISTINCT ON(row_id)` 隐藏去重。
-- PG-only projector，批量读取，空 scope清理，原子 publish。
+- PG-only projector，按 relation member id 批量读取 canonical facts，纯函数组装，单次 values 批量写入，空 scope清理，原子 publish。
+- projector/freshness SQL 不包含 `WorkbenchRelationReadFacade`、`workbench_relation_read_model_not_fresh`、`workbench_relation_source_versions` 或 `read_model.workbench_relation_scopes`。
 - stale event在读取源前 skip，CAS lost不清新 dirty，all仅低优先级 fan-out；all 的 shard inventory 按 event tenant 读取 source watermarks，覆盖合法 empty month，禁止回退为 completed/admission 非空月份枚举。
 - `oa-pending-payment` worker claim隔离；shared `invoice-usage-collection` 不含 OA handler。
 - source snapshot/migration/permission/schema contract。
@@ -130,7 +131,7 @@
 - 200次canonical mutation：commit返回到fresh API为`p50 403.675ms / p95 544.178ms / p99 593.683ms / max 650.951ms`，错误率0；200/200次在worker收敛前返回202且rows为空。分段为queue claim `p95 1.567ms`、projector build+CAS publish `p95 435.400ms`、queue complete `p95 1.534ms`、最终fresh API `p95 131.274ms`。canonical commit本身另计`p95 292.530ms`；冷启动commit返回到fresh为`282.284ms`。
 - SQL `EXPLAIN (ANALYZE, BUFFERS)`：freshness gate execution `0.090ms`/10 shared hit blocks；aggregate+facets逻辑段 `5.755ms`/128 hits；bounded page 20行逻辑段 `0.306ms`/128 hits；三者physical read和temp read/write均为0。2026-07-17 根据生产 profile 把后两段合并为同一个有界 data statement，fresh路径现在是1个gate加1个data statement；无新增索引证据。
 - 结论：本地服务端分段性能门通过。该harness没有真实浏览器500ms条件检测、React render、真实网络、真实worker进程调度、当前生产峰值或其它页面延迟对照，因此不能用`544.178ms`宣称生产commit-to-visible已通过；这些仍属于统一部署后硬门。
-- 可重复集成保护：`tests/test_oa_pending_payment_postgres_integration.py`在配置`FIN_OPS_TEST_DATABASE_URL`时验证 canonical snapshot/date、依赖 relation outbox/worker 先完成、OA outbox/worker 后完成、202、专属 projector、CAS、queue complete、source vector、fresh 200 和 304 完整链路。
+- 可重复集成保护：`tests/test_oa_pending_payment_postgres_integration.py`在配置`FIN_OPS_TEST_DATABASE_URL`时验证 canonical snapshot/date、Workbench 写事务直接产生 OA target、OA worker无需先完成 relation read model即可投影、202、CAS、queue complete、source vector、fresh 200 和 304 完整链路。
 - 生产 latest-dirty 长尾保护：migration contract 锁定 OA-only partial index 的 predicate 与 `(tenant_id, scope_type, scope_key, source_version DESC, updated_at DESC, id DESC)` 顺序；query contract 锁定 freshness gate 使用同一 latest-version order，避免索引与业务语义漂移。
 
 ### 本地验证结果
@@ -162,7 +163,7 @@
 
 ```bash
 PYTHONPATH=backend/src python3 -m unittest -q \
-  tests.test_oa_pending_payment_service \
+  tests.test_oa_pending_payment_projection_rows \
   tests.test_oa_pending_payment_command_service \
   tests.test_oa_pending_payment_api \
   tests.test_oa_pending_payment_postgres_integration \
