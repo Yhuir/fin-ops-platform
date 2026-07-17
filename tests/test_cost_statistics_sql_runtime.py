@@ -252,6 +252,7 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
             "source_version": 10,
             "bank_detail_source_signature": "same-business-data",
             "bank_auto_tag_rules_version": 7,
+            "workbench_relation_source_versions": {"source_version": 20},
         }
 
         class Repository:
@@ -263,6 +264,7 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
                         "source_version": 11,
                         "bank_detail_source_signature": "same-business-data",
                         "bank_auto_tag_rules_version": 7,
+                        "workbench_relation_source_versions": {"source_version": 21},
                     },
                 )
 
@@ -3006,13 +3008,14 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertNotIn("workbench_source_versions", parent_source_versions)
         self.assertNotIn("bank_detail_source_versions", parent_source_versions)
 
-    def test_cost_statistics_semantic_versions_ignore_only_bank_detail_execution_counter(self) -> None:
+    def test_cost_statistics_semantic_versions_ignore_only_bank_detail_nonconsumed_provenance(self) -> None:
         first = cost_statistics_semantic_source_versions(
             {
                 "bank_detail_source_versions": {
                     "source_version": 10,
                     "bank_detail_source_signature": "same-business-data",
                     "bank_auto_tag_rules_version": 7,
+                    "workbench_relation_source_versions": {"source_version": 30},
                 },
                 "workbench_source_versions": {"source_version": 20},
             }
@@ -3023,6 +3026,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
                     "source_version": 11,
                     "bank_detail_source_signature": "same-business-data",
                     "bank_auto_tag_rules_version": 7,
+                    "workbench_relation_source_versions": {"source_version": 31},
                 },
                 "workbench_source_versions": {"source_version": 20},
             }
@@ -3030,6 +3034,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual(first, second)
         self.assertEqual(first["workbench_source_versions"]["source_version"], 20)
+        self.assertNotIn("workbench_relation_source_versions", first["bank_detail_source_versions"])
         self.assertNotEqual(
             first,
             cost_statistics_semantic_source_versions(

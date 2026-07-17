@@ -49,7 +49,7 @@ def cost_statistics_source_versions(
 
 
 def cost_statistics_semantic_source_versions(source_versions: dict[str, Any]) -> dict[str, Any]:
-    """Remove bank-detail execution counters that do not change Cost business data."""
+    """Remove Bank Detail provenance fields that Cost does not consume."""
 
     normalized = dict(source_versions or {})
     bank_detail = normalized.get("bank_detail_source_versions")
@@ -57,6 +57,6 @@ def cost_statistics_semantic_source_versions(source_versions: dict[str, Any]) ->
         normalized["bank_detail_source_versions"] = {
             key: value
             for key, value in bank_detail.items()
-            if key != "source_version"
+            if key not in {"source_version", "workbench_relation_source_versions"}
         }
     return normalized

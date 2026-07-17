@@ -417,6 +417,6 @@ PYTHONPATH=backend/src scripts/check-read-model-scope-contracts.py --help
 ## 2026-07-18 relation delta 完整性与语义 freshness 回归
 
 - `tests/test_cost_statistics_postgres_integration.py`：真实 PostgreSQL 验证 delta 事务在精准替换行后原子保存完整 summary/project/expense/bank-flow metadata；parent 聚合从当前 shard 结构化 rows 输出同一完整小型 payload，不加载旧 row arrays。
-- `tests/test_cost_statistics_sql_runtime.py`：repository 窄 aggregate port、parent 复用、直接月份 event id→parent trace、Bank Detail 仅执行计数变化仍 fresh，以及 Bank Detail 业务 signature 变化仍 mismatch；Workbench 版本不做归一化。
-- `tests/test_cost_statistics_page_audit.py`：Audit 的 Bank Detail upstream proof 只排除嵌套执行计数，保留其它 source-version equality 与既有全量业务/summary/group proof。
+- `tests/test_cost_statistics_sql_runtime.py`：repository 窄 aggregate port、parent 复用、直接月份 event id→parent trace、Bank Detail 执行计数/内部 relation lineage 变化但内容签名不变时仍 fresh，以及 Bank Detail 业务 signature 变化仍 mismatch；Cost 直接依赖的 Workbench 版本不做归一化。
+- `tests/test_cost_statistics_page_audit.py`：Audit 的 Bank Detail upstream proof 只排除嵌套执行计数和内部 relation lineage，保留其它 source-version equality、未知字段 fail-closed 与既有全量业务/summary/group proof。
 - 生产复验门禁：confirm 与 withdraw 分别证明 exact direct delta→`active:all` `<=3s`，Cost explorer `200/fresh` 且业务断言变化；每次操作的所有 consumer 收敛后，Cost/Workbench/OA 三页面必须各自 `pass/fresh/drained`。系统级其它页面的既有问题必须单独报告，不能拿来替代或掩盖三页面证据。

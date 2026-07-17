@@ -337,11 +337,13 @@ class CostStatisticsPageAuditTests(unittest.TestCase):
         self.assertNotIn("/* check: cost_upstream_source_versions */", proof_sql)
         self.assertNotIn("/* check: cost_parent_source_shards */", proof_sql)
         self.assertIn(
-            "source_versions->'bank_detail_source_versions', '{}'::jsonb) - 'source_version'",
+            "source_versions->'bank_detail_source_versions', '{}'::jsonb)\n"
+            "                  - 'source_version' - 'workbench_relation_source_versions'",
             proof_sql,
         )
         self.assertIn(
-            "current_bank_detail_source_versions, '{}'::jsonb) - 'source_version'",
+            "current_bank_detail_source_versions, '{}'::jsonb)\n"
+            "                  - 'source_version' - 'workbench_relation_source_versions'",
             proof_sql,
         )
 
