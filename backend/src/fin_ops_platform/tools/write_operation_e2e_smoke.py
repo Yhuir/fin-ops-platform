@@ -49,7 +49,7 @@ REVERSIBLE_RELATION_CONSUMER_CONTRACTS: dict[str, dict[str, object]] = {
     "oa-pending-payments": {"path": "/api/oa-pending-payments/rows", "business_roots": ("rows",)},
     "cost-statistics": {
         "path": "/api/cost-statistics/explorer",
-        "business_roots": ("time_rows", "bank_flow_time_rows", "project_rows", "expense_type_rows"),
+        "business_roots": ("rows",),
     },
     "tax-offset": {
         "path": "/api/tax-offset",

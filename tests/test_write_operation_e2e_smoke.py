@@ -229,7 +229,7 @@ def _raw_relation_checkpoint(
                         "pointer": (
                             "/input_plan_items"
                             if page_key == "tax-offset"
-                            else "/bank_flow_time_rows/0/transaction_id"
+                            else "/rows/0/transaction_id"
                             if page_key == "cost-statistics"
                             else "/groups/0/bank_rows/0/id"
                             if page_key == "reconciliation-workbench"
@@ -286,7 +286,7 @@ def _raw_bank_turnover_scenario(name: str, key_prefix: str) -> dict[str, object]
                     "pointer": (
                         "/rows"
                         if page_key == "input-invoice-usage"
-                        else "/bank_flow_time_rows/0/transaction_id"
+                        else "/rows/0/transaction_id"
                         if page_key == "cost-statistics"
                         else "/groups/0/bank_rows/0/id"
                         if page_key == "reconciliation-workbench"
@@ -2071,7 +2071,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                 payload = {
                     "read_model_status": "fresh",
                     "refresh_enqueued": False,
-                    "bank_flow_time_rows": [{"transaction_id": "turnover-bank-test-1"}],
+                    "rows": [{"transaction_id": "turnover-bank-test-1"}],
                 }
                 status = 200
             elif route.startswith("/api/input-invoice-usage/rows"):

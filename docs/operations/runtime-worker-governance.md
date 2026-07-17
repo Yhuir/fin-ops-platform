@@ -132,6 +132,9 @@ event 或 worker instance 时，必须先更新 registry，再让 deploy/preflig
 - Workbench relation 的 test-owned checkpoint 必须显式执行三步 I/O：先按目标月份读取
   `/api/workbench?month=...` 并捕获 `read_model_version`，再让 preview 与 mutation 同时携带该精确版本；
   confirm 后的 withdraw 必须重新读取版本，禁止复用上一个 generation、隐藏重试或省略写前置条件。
+- 成本统计 consumer 只使用当前 explorer 合同：query 为 `scope/view/project_scope/page_size`，业务行根为
+  `rows`。旧 `month` query 与 `time_rows` / `bank_flow_time_rows` / `project_rows` /
+  `expense_type_rows` response root 已退出生产合同，不得继续用于 write smoke 或作为兼容 fallback。
 - `finops-deploy-control write-operation-e2e-smoke ... --apply-stdin` 从 stdin 第一行读取 Admin Token、
   第二行读取 standing approval ticket；任一为空都在业务 mutation 前失败，避免把 root-owned env 漂移误判为已授权。
 - 同步写超过门禁仍判定为 SLO failure；如果 HTTP 结果已经证明 mutation committed，恢复步骤必须先按该响应的
