@@ -46,3 +46,17 @@ def cost_statistics_source_versions(
     if bank_detail_source_versions is not None:
         source_versions["bank_detail_source_versions"] = dict(bank_detail_source_versions)
     return source_versions
+
+
+def cost_statistics_semantic_source_versions(source_versions: dict[str, Any]) -> dict[str, Any]:
+    """Remove bank-detail execution counters that do not change Cost business data."""
+
+    normalized = dict(source_versions or {})
+    bank_detail = normalized.get("bank_detail_source_versions")
+    if isinstance(bank_detail, dict):
+        normalized["bank_detail_source_versions"] = {
+            key: value
+            for key, value in bank_detail.items()
+            if key != "source_version"
+        }
+    return normalized

@@ -76,7 +76,7 @@ class CostStatisticsReadModelRefreshService:
                 scope_key,
                 tenant_id=event.tenant_id,
                 priority=priority,
-                trace_id=event.trace_id,
+                trace_id=event.trace_id or event.event_id,
             )
         return payload
 

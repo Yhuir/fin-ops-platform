@@ -15,6 +15,7 @@ from fin_ops_platform.services.cost_statistics_read_model_refresh import CostSta
 from fin_ops_platform.services.cost_statistics_read_model_repository import CostStatisticsReadModelRepositoryPort
 from fin_ops_platform.services.cost_statistics_source_versions import (
     COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+    cost_statistics_semantic_source_versions,
     cost_statistics_source_versions,
 )
 from fin_ops_platform.services.cost_statistics_sql_projection import CostStatisticsSqlProjectionBuilder
@@ -244,6 +245,55 @@ def redis_fresh_payload(
 
 
 class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
+    def test_bank_detail_execution_counter_change_does_not_stale_unchanged_cost_business_data(self) -> None:
+        runtime = CostStatisticsRuntimeStub()
+        stored_versions = test_cost_statistics_source_versions("active:2026-05")
+        stored_versions["bank_detail_source_versions"] = {
+            "source_version": 10,
+            "bank_detail_source_signature": "same-business-data",
+            "bank_auto_tag_rules_version": 7,
+        }
+
+        class Repository:
+            def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
+                return cost_statistics_fresh_gate(
+                    scope_key=scope_key,
+                    source_versions=stored_versions,
+                    bank_detail_source_versions={
+                        "source_version": 11,
+                        "bank_detail_source_signature": "same-business-data",
+                        "bank_auto_tag_rules_version": 7,
+                    },
+                )
+
+            def get_cost_statistics_page(self, **_kwargs: object) -> dict[str, object]:
+                return {
+                    "summary": {"row_count": 0, "transaction_count": 0, "total_amount": "0.00"},
+                    "available_years": [],
+                    "primary_facets": [],
+                    "secondary_facets": [],
+                    "rows": [],
+                    "row_count": 0,
+                    "next_cursor_values": None,
+                }
+
+        service = CostStatisticsQueryService(
+            runtime_service=runtime,
+            sql_read_repository=Repository(),
+            tag_selection_mapper=AppSettingsService.cost_statistics_tag_selection_payload_from_settings,
+        )
+
+        payload, _cache_hit, _etag, _not_modified = service.get_explorer_page(
+            scope="2026-05",
+            view="time",
+            project_scope="active",
+            filters={},
+            cursor=None,
+            page_size=50,
+        )
+
+        self.assertEqual(payload["read_model_status"], "fresh", payload)
+
     def test_page_and_detail_use_exactly_one_cost_gate_and_stop_before_payload_io_when_nonfresh(self) -> None:
         runtime = CostStatisticsRuntimeStub()
 
@@ -1250,6 +1300,7 @@ class CostStatisticsSaveRecorder:
         self.publish_calls: list[tuple[str, str, int, set[str] | None]] = []
         self.acknowledge_calls: list[tuple[str, str, int, dict[str, object]]] = []
         self.relation_delta_calls: list[dict[str, object]] = []
+        self.aggregate_calls: list[dict[str, object]] = []
         self.publish_result = publish_result
         self.acknowledge_result = acknowledge_result
         self.workbench_source_versions: dict[str, object] = {}
@@ -1264,6 +1315,65 @@ class CostStatisticsSaveRecorder:
     def active_workbench_source_versions(self, *, scope_key: str) -> dict[str, object]:
         del scope_key
         return dict(self.workbench_source_versions)
+
+    def cost_statistics_aggregate_payload(
+        self,
+        *,
+        project_scope: str,
+        scope_keys: list[str],
+        bank_accounts: list[dict[str, object]],
+    ) -> dict[str, object]:
+        self.aggregate_calls.append(
+            {
+                "project_scope": project_scope,
+                "scope_keys": list(scope_keys),
+                "bank_accounts": list(bank_accounts),
+            }
+        )
+        return {
+            "month": "all",
+            "project_scope": project_scope,
+            "summary": {"row_count": 2, "transaction_count": 2, "total_amount": "15.50"},
+            "bank_flow_summary": {
+                "row_count": 1,
+                "transaction_count": 1,
+                "total_amount": "20.00",
+                "expense_amount": "20.00",
+                "income_amount": "0.00",
+                "expense_transaction_count": 1,
+                "income_transaction_count": 0,
+            },
+            "bank_accounts": list(bank_accounts),
+            "project_rows": [
+                {
+                    "project_name": "项目A",
+                    "total_amount": "10.00",
+                    "transaction_count": 1,
+                    "expense_type_count": 1,
+                },
+                {
+                    "project_name": "项目B",
+                    "total_amount": "5.50",
+                    "transaction_count": 1,
+                    "expense_type_count": 1,
+                },
+            ],
+            "expense_type_rows": [
+                {
+                    "expense_type": "材料",
+                    "total_amount": "10.00",
+                    "transaction_count": 1,
+                    "project_count": 1,
+                },
+                {
+                    "expense_type": "服务",
+                    "total_amount": "5.50",
+                    "transaction_count": 1,
+                    "project_count": 1,
+                },
+            ],
+            "source_scope_keys": list(scope_keys),
+        }
 
     def publish_cost_statistics_read_models(
         self,
@@ -1338,6 +1448,9 @@ class CostStatisticsReadModelRepositoryPortTests(unittest.TestCase):
             def active_workbench_source_versions(self, *, scope_key: str) -> dict[str, object]:
                 return {"scope_key": scope_key, "source_version": 42}
 
+            def cost_statistics_aggregate_payload(self, **kwargs: object) -> dict[str, object]:
+                return {"project_scope": kwargs["project_scope"], "summary": {"row_count": 1}}
+
             def publish_cost_statistics_read_models(
                 self,
                 snapshot: dict[str, object],
@@ -1396,6 +1509,14 @@ class CostStatisticsReadModelRepositoryPortTests(unittest.TestCase):
         self.assertEqual(
             port.active_workbench_source_versions(scope_key="2026-05"),
             {"scope_key": "2026-05", "source_version": 42},
+        )
+        self.assertEqual(
+            port.cost_statistics_aggregate_payload(
+                project_scope="active",
+                scope_keys=["active:2026-05"],
+                bank_accounts=[],
+            ),
+            {"project_scope": "active", "summary": {"row_count": 1}},
         )
         self.assertTrue(
             port.acknowledge_unchanged_cost_statistics_scope(
@@ -2175,7 +2296,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
                     "next_cursor": None,
                 },
                 scope_key="active:2026-05",
-                source_versions=source_versions,
+                source_versions=cost_statistics_semantic_source_versions(source_versions),
             )
         )
         redis_get_json = redis.get_json
@@ -2559,7 +2680,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
             attempts=1,
             status="processing",
             priority="high",
-            trace_id="trace-delta",
+            trace_id=None,
         )
 
         result = service.handle_runtime_event(event)
@@ -2580,6 +2701,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(result["refresh_kind"], "relation_delta")
         self.assertEqual(queue.completed, [("tenant-a", "cost_statistics", "active:2026-05", 8)])
         self.assertEqual(queue.refreshes, [("cost_statistics", "active:all", "cost_statistics_shard_converged")])
+        self.assertEqual(queue.refresh_details[0]["trace_id"], "event-delta")
 
     def test_cost_statistics_refresh_handler_does_not_guess_relation_state(self) -> None:
         class FakeBuilder:
@@ -2884,6 +3006,44 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertNotIn("workbench_source_versions", parent_source_versions)
         self.assertNotIn("bank_detail_source_versions", parent_source_versions)
 
+    def test_cost_statistics_semantic_versions_ignore_only_bank_detail_execution_counter(self) -> None:
+        first = cost_statistics_semantic_source_versions(
+            {
+                "bank_detail_source_versions": {
+                    "source_version": 10,
+                    "bank_detail_source_signature": "same-business-data",
+                    "bank_auto_tag_rules_version": 7,
+                },
+                "workbench_source_versions": {"source_version": 20},
+            }
+        )
+        second = cost_statistics_semantic_source_versions(
+            {
+                "bank_detail_source_versions": {
+                    "source_version": 11,
+                    "bank_detail_source_signature": "same-business-data",
+                    "bank_auto_tag_rules_version": 7,
+                },
+                "workbench_source_versions": {"source_version": 20},
+            }
+        )
+
+        self.assertEqual(first, second)
+        self.assertEqual(first["workbench_source_versions"]["source_version"], 20)
+        self.assertNotEqual(
+            first,
+            cost_statistics_semantic_source_versions(
+                {
+                    **second,
+                    "bank_detail_source_versions": {
+                        "source_version": 11,
+                        "bank_detail_source_signature": "changed-business-data",
+                        "bank_auto_tag_rules_version": 7,
+                    },
+                }
+            ),
+        )
+
     def test_cost_statistics_api_rejects_snapshot_built_from_old_workbench_generation(self) -> None:
         queue = QueueRecorder()
         app = object.__new__(Application)
@@ -3106,19 +3266,15 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["month"], "all")
         self.assertEqual(payload["summary"]["total_amount"], "15.50")
         self.assertEqual(payload["bank_flow_summary"]["total_amount"], "20.00")
+        self.assertEqual(len(payload["project_rows"]), 2)
+        self.assertEqual(len(payload["expense_type_rows"]), 2)
         self.assertEqual(payload["bank_accounts"][0]["payment_account_label"], "工商银行 账户 0001")
         self.assertEqual(snapshot["read_models"]["active:all"]["source_versions"]["source_shard_count"], 2)
         self.assertFalse(any("read_model.cost_statistics_rows" in sql for sql, _params in connection.fetch_all_calls))
         self.assertFalse(any("read_model.cost_statistics_bank_flow_rows" in sql for sql, _params in connection.fetch_all_calls))
-        aggregate_calls = [
-            (sql, params)
-            for sql, params in connection.fetch_one_calls
-            if "read_model.cost_statistics_rows" in sql or "read_model.cost_statistics_bank_flow_rows" in sql
-        ]
-        self.assertEqual(len(aggregate_calls), 2)
-        self.assertTrue(all("scope_key = any(%s::text[])" in sql for sql, _params in aggregate_calls))
-        self.assertTrue(
-            all(params[1] == ["active:2026-04", "active:2026-05"] for _sql, params in aggregate_calls)
+        self.assertEqual(
+            repository.aggregate_calls[0]["scope_keys"],
+            ["active:2026-04", "active:2026-05"],
         )
 
     def test_cost_statistics_relation_delta_replaces_only_affected_cost_rows(self) -> None:

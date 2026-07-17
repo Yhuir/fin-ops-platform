@@ -249,7 +249,7 @@ class CostStatisticsPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(bank_flow["source_versions"], {"proof": "bank-flow-old"})
         model = self.connection.fetch_one(
             """
-            select entry_count, source_versions, published_source_version
+            select entry_count, source_versions, published_source_version, payload
             from read_model.cost_statistics_read_models
             where scope_key = 'active:2026-05'
             """
@@ -257,6 +257,21 @@ class CostStatisticsPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(model["entry_count"], 2)
         self.assertEqual(model["source_versions"], {"proof": "delta-v8"})
         self.assertEqual(model["published_source_version"], 8)
+        stored_payload = model["payload"]["payload"]
+        self.assertEqual(stored_payload["summary"], {
+            "row_count": 2,
+            "transaction_count": 2,
+            "total_amount": "30.00",
+        })
+        self.assertEqual(
+            [row["project_name"] for row in stored_payload["project_rows"]],
+            ["保留项目", "新项目"],
+        )
+        self.assertEqual(
+            [row["expense_type"] for row in stored_payload["expense_type_rows"]],
+            ["服务", "材料"],
+        )
+        self.assertEqual(stored_payload["bank_flow_summary"]["total_amount"], "10.00")
 
     def test_parent_metadata_aggregate_reads_only_current_shards(self) -> None:
         self.connection.execute(
@@ -300,6 +315,22 @@ class CostStatisticsPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(payload["bank_flow_summary"]["total_amount"], "20.00")
         self.assertEqual(payload["bank_flow_summary"]["expense_transaction_count"], 1)
         self.assertEqual(payload["bank_flow_summary"]["income_transaction_count"], 0)
+        self.assertEqual(payload["project_rows"], [
+            {
+                "project_name": "当前项目",
+                "total_amount": "10.00",
+                "transaction_count": 1,
+                "expense_type_count": 1,
+            }
+        ])
+        self.assertEqual(payload["expense_type_rows"], [
+            {
+                "expense_type": "材料",
+                "total_amount": "10.00",
+                "transaction_count": 1,
+                "project_count": 1,
+            }
+        ])
 
     def test_relation_delta_point_reads_cross_month_rows_from_active_generations(self) -> None:
         self.connection.execute(

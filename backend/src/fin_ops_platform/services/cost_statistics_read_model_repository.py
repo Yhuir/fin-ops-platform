@@ -13,6 +13,20 @@ class CostStatisticsReadModelRepositoryPort:
         payload = self._repository.get_cost_statistics_scope_metadata(scope_key=scope_key)
         return dict(payload) if isinstance(payload, dict) else None
 
+    def cost_statistics_aggregate_payload(
+        self,
+        *,
+        project_scope: str,
+        scope_keys: list[str],
+        bank_accounts: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        payload = self._repository.cost_statistics_aggregate_payload(
+            project_scope=project_scope,
+            scope_keys=scope_keys,
+            bank_accounts=bank_accounts,
+        )
+        return dict(payload) if isinstance(payload, dict) else {}
+
     def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, Any] | None:
         payload = self._repository.get_cost_statistics_freshness_gate(scope_key=scope_key)
         return dict(payload) if isinstance(payload, dict) else None

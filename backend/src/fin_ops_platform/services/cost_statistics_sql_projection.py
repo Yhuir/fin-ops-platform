@@ -938,71 +938,13 @@ class CostStatisticsSqlProjectionBuilder:
         project_scope: str,
         scope_keys: list[str],
     ) -> dict[str, Any]:
-        if not scope_keys:
-            return {
-                "month": "all",
-                "project_scope": project_scope,
-                "summary": {"row_count": 0, "transaction_count": 0, "total_amount": "0.00"},
-                "bank_flow_summary": {
-                    "row_count": 0,
-                    "transaction_count": 0,
-                    "total_amount": "0.00",
-                    "expense_amount": "0.00",
-                    "income_amount": "0.00",
-                    "expense_transaction_count": 0,
-                    "income_transaction_count": 0,
-                },
-                "bank_accounts": self._bank_accounts_from_settings(),
-            }
-        row = self._connection.fetch_one(
-            """
-            select
-                count(*)::integer as row_count,
-                coalesce(sum(amount), 0)::text as total_amount
-            from read_model.cost_statistics_rows
-            where project_scope = %s
-              and scope_key = any(%s::text[])
-              and scope_month is not null
-            """,
-            (project_scope, scope_keys),
+        payload = self._read_model_repository.cost_statistics_aggregate_payload(
+            project_scope=project_scope,
+            scope_keys=scope_keys,
+            bank_accounts=self._bank_accounts_from_settings(),
         )
-        bank_flow = self._connection.fetch_one(
-            """
-            select
-                count(*)::integer as row_count,
-                coalesce(sum(amount), 0)::text as total_amount,
-                coalesce(sum(amount) filter (where direction = '支出'), 0)::text as expense_amount,
-                coalesce(sum(amount) filter (where direction = '收入'), 0)::text as income_amount,
-                count(*) filter (where direction = '支出')::integer as expense_transaction_count,
-                count(*) filter (where direction = '收入')::integer as income_transaction_count
-            from read_model.cost_statistics_bank_flow_rows
-            where project_scope = %s
-              and scope_key = any(%s::text[])
-              and scope_month is not null
-            """,
-            (project_scope, scope_keys),
-        )
-        cost_row = row if isinstance(row, dict) else {}
-        bank_row = bank_flow if isinstance(bank_flow, dict) else {}
-        return {
-            "month": "all",
-            "project_scope": project_scope,
-            "summary": {
-                "row_count": int(cost_row.get("row_count") or 0),
-                "transaction_count": int(cost_row.get("row_count") or 0),
-                "total_amount": format_decimal(_decimal(cost_row.get("total_amount")) or ZERO),
-            },
-            "bank_flow_summary": {
-                "row_count": int(bank_row.get("row_count") or 0),
-                "transaction_count": int(bank_row.get("row_count") or 0),
-                "total_amount": format_decimal(_decimal(bank_row.get("total_amount")) or ZERO),
-                "expense_amount": format_decimal(_decimal(bank_row.get("expense_amount")) or ZERO),
-                "income_amount": format_decimal(_decimal(bank_row.get("income_amount")) or ZERO),
-                "expense_transaction_count": int(bank_row.get("expense_transaction_count") or 0),
-                "income_transaction_count": int(bank_row.get("income_transaction_count") or 0),
-            },
-            "bank_accounts": self._bank_accounts_from_settings(),
-        }
+        payload["month"] = "all"
+        return payload
 
     def _workbench_payload(self, month: str) -> dict[str, Any]:
         row = self._connection.fetch_one(

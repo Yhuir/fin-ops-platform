@@ -13,6 +13,7 @@ from openpyxl import Workbook
 from fin_ops_platform.services.app_settings_service import COST_STATISTICS_UNCATEGORIZED_TAG_CODE
 from fin_ops_platform.services.cost_statistics_source_versions import (
     COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+    cost_statistics_semantic_source_versions,
     cost_statistics_source_versions,
 )
 from fin_ops_platform.services.read_model_freshness import resolve_read_model_freshness
@@ -159,7 +160,11 @@ class CostStatisticsQueryService:
             )
             return {
                 "payload": payload,
-                "source_versions": dict(gate.get("source_versions") or {}),
+                "source_versions": cost_statistics_semantic_source_versions(
+                    gate.get("source_versions")
+                    if isinstance(gate.get("source_versions"), dict)
+                    else {}
+                ),
                 "schema_version": gate.get("schema_version"),
                 "generated_at": gate.get("generated_at"),
                 "refresh_status": "fresh",
@@ -352,13 +357,15 @@ class CostStatisticsQueryService:
         freshness = resolve_read_model_freshness(
             expected_schema_version=COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
             actual_schema_version=gate.get("schema_version"),
-            expected_source_versions=expected_source_versions,
-            actual_source_versions=gate.get("source_versions")
-            if isinstance(gate.get("source_versions"), dict)
-            else {},
+            expected_source_versions=cost_statistics_semantic_source_versions(expected_source_versions),
+            actual_source_versions=cost_statistics_semantic_source_versions(
+                gate.get("source_versions")
+                if isinstance(gate.get("source_versions"), dict)
+                else {}
+            ),
         )
         if freshness.status == "fresh":
-            return gate, expected_source_versions, None
+            return gate, cost_statistics_semantic_source_versions(expected_source_versions), None
         refresh_reason = (
             source_mismatch_reason
             if any(reason.endswith("_missing") or reason.endswith("_mismatch") for reason in freshness.stale_reasons)

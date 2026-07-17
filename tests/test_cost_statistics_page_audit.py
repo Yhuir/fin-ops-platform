@@ -336,6 +336,14 @@ class CostStatisticsPageAuditTests(unittest.TestCase):
         self.assertNotIn("/* check: source_versions_mismatch */", proof_sql)
         self.assertNotIn("/* check: cost_upstream_source_versions */", proof_sql)
         self.assertNotIn("/* check: cost_parent_source_shards */", proof_sql)
+        self.assertIn(
+            "source_versions->'bank_detail_source_versions', '{}'::jsonb) - 'source_version'",
+            proof_sql,
+        )
+        self.assertIn(
+            "current_bank_detail_source_versions, '{}'::jsonb) - 'source_version'",
+            proof_sql,
+        )
 
     def test_business_value_proofs_use_one_query_and_preserve_each_issue_contract(self) -> None:
         issue_rows = [

@@ -413,3 +413,10 @@ PYTHONPATH=backend/src scripts/check-read-model-scope-contracts.py --help
 - `web/src/test/CostStatisticsPage.test.tsx`：all 视图收到重复 relation event 后只等待 `active:all`，等待前取消页面自有请求，barrier fresh 后只读取一次并解除既有 inert overlay。
 - `tests/test_write_operation_slo_audit.py`、`tests/test_write_operation_e2e_smoke.py`：relation receipt 必须包含 exact delta；Cost all 同时证明 fresh、source versions、业务断言和 delta month→`active:all` causal timeline，旧 release 只允许以 `workbench_shard_published` 作为兼容观测，不是新写入 fallback。
 - `tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_relation_cost_refresh_has_transactional_delta_and_publish_convergence_owners`：机械禁止 Cost projection 读取 canonical relation repository、旧无身份 direct reason、隐藏 scope expansion、第二 Cost 路径与前端退回通用 App Status。
+
+## 2026-07-18 relation delta 完整性与语义 freshness 回归
+
+- `tests/test_cost_statistics_postgres_integration.py`：真实 PostgreSQL 验证 delta 事务在精准替换行后原子保存完整 summary/project/expense/bank-flow metadata；parent 聚合从当前 shard 结构化 rows 输出同一完整小型 payload，不加载旧 row arrays。
+- `tests/test_cost_statistics_sql_runtime.py`：repository 窄 aggregate port、parent 复用、直接月份 event id→parent trace、Bank Detail 仅执行计数变化仍 fresh，以及 Bank Detail 业务 signature 变化仍 mismatch；Workbench 版本不做归一化。
+- `tests/test_cost_statistics_page_audit.py`：Audit 的 Bank Detail upstream proof 只排除嵌套执行计数，保留其它 source-version equality 与既有全量业务/summary/group proof。
+- 生产复验门禁：confirm 与 withdraw 分别证明 exact direct delta→`active:all` `<=3s`，Cost explorer `200/fresh` 且业务断言变化；每次操作的所有 consumer 收敛后，Cost/Workbench/OA 三页面必须各自 `pass/fresh/drained`。系统级其它页面的既有问题必须单独报告，不能拿来替代或掩盖三页面证据。

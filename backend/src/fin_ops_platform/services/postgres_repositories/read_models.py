@@ -5261,6 +5261,20 @@ class PostgresSummaryReadModelRepository:
             "source_versions": row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {},
         }
 
+    def cost_statistics_aggregate_payload(
+        self,
+        *,
+        project_scope: str,
+        scope_keys: list[str],
+        bank_accounts: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        return _cost_statistics_aggregate_payload(
+            self._connection,
+            project_scope=project_scope,
+            scope_keys=scope_keys,
+            bank_accounts=bank_accounts,
+        )
+
     def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, Any] | None:
         normalized_scope_key = str(scope_key or "").strip()
         if not normalized_scope_key:
@@ -6131,6 +6145,14 @@ class PostgresSummaryReadModelRepository:
             )
             entry_count = int_value((count_row or {}).get("row_count"), 0)
             metadata_model = dict(model)
+            metadata_model["payload"] = _cost_statistics_aggregate_payload(
+                connection,
+                project_scope=text(model.get("project_scope")) or normalized_scope_key.split(":", 1)[0],
+                scope_keys=[normalized_scope_key],
+                bank_accounts=list((model.get("payload") or {}).get("bank_accounts") or [])
+                if isinstance(model.get("payload"), dict)
+                else [],
+            )
             metadata_model["entry_count"] = entry_count
             self._save_generic_read_model_snapshots(
                 connection,
@@ -7104,6 +7126,9 @@ class PostgresReadModelRepository:
 
     def get_cost_statistics_scope_metadata(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
         return self._summary_read_model_repository.get_cost_statistics_scope_metadata(*args, **kwargs)
+
+    def cost_statistics_aggregate_payload(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return self._summary_read_model_repository.cost_statistics_aggregate_payload(*args, **kwargs)
 
     def get_cost_statistics_freshness_gate(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
         return self._summary_read_model_repository.get_cost_statistics_freshness_gate(*args, **kwargs)
@@ -12107,6 +12132,119 @@ def _pending_invoice_order_sql(*, sort_field: str | None, sort_direction: str | 
         raise ValueError("pending invoice sort direction must be asc or desc")
     expression = PENDING_INVOICE_SORT_EXPRESSIONS[field]
     return f"{expression} {direction} nulls last, row_id"
+
+
+def _cost_statistics_aggregate_payload(
+    connection: Any,
+    *,
+    project_scope: str,
+    scope_keys: list[str],
+    bank_accounts: list[dict[str, Any]],
+) -> dict[str, Any]:
+    normalized_scope_keys = sorted({value for item in scope_keys if (value := text(item))})
+    if normalized_scope_keys:
+        cost_row = connection.fetch_one(
+            """
+            with base as materialized (
+                select project_name, expense_type, amount
+                from read_model.cost_statistics_rows
+                where project_scope = %s
+                  and scope_key = any(%s::text[])
+                  and scope_month is not null
+            ), projects as (
+                select project_name, sum(amount) as total_amount,
+                       count(*)::integer as transaction_count,
+                       count(distinct expense_type)::integer as expense_type_count
+                from base
+                group by project_name
+            ), expenses as (
+                select expense_type, sum(amount) as total_amount,
+                       count(*)::integer as transaction_count,
+                       count(distinct project_name)::integer as project_count
+                from base
+                group by expense_type
+            )
+            select
+                (select count(*)::integer from base) as row_count,
+                (select coalesce(sum(amount), 0)::text from base) as total_amount,
+                coalesce(
+                    (
+                        select jsonb_agg(
+                            jsonb_build_object(
+                                'project_name', project_name,
+                                'total_amount', total_amount::text,
+                                'transaction_count', transaction_count,
+                                'expense_type_count', expense_type_count
+                            ) order by total_amount desc, project_name
+                        )
+                        from projects
+                    ),
+                    '[]'::jsonb
+                ) as project_rows,
+                coalesce(
+                    (
+                        select jsonb_agg(
+                            jsonb_build_object(
+                                'expense_type', expense_type,
+                                'total_amount', total_amount::text,
+                                'transaction_count', transaction_count,
+                                'project_count', project_count
+                            ) order by total_amount desc, expense_type
+                        )
+                        from expenses
+                    ),
+                    '[]'::jsonb
+                ) as expense_type_rows
+            """,
+            (project_scope, normalized_scope_keys),
+        ) or {}
+        bank_row = connection.fetch_one(
+            """
+            select
+                count(*)::integer as row_count,
+                coalesce(sum(abs(amount)), 0)::text as total_amount,
+                coalesce(sum(abs(amount)) filter (where direction = '支出'), 0)::text as expense_amount,
+                coalesce(sum(abs(amount)) filter (where direction = '收入'), 0)::text as income_amount,
+                count(*) filter (where direction = '支出')::integer as expense_transaction_count,
+                count(*) filter (where direction = '收入')::integer as income_transaction_count
+            from read_model.cost_statistics_bank_flow_rows
+            where project_scope = %s
+              and scope_key = any(%s::text[])
+              and scope_month is not null
+            """,
+            (project_scope, normalized_scope_keys),
+        ) or {}
+    else:
+        cost_row = {}
+        bank_row = {}
+
+    project_rows = [dict(row) for row in list(cost_row.get("project_rows") or []) if isinstance(row, dict)]
+    expense_type_rows = [dict(row) for row in list(cost_row.get("expense_type_rows") or []) if isinstance(row, dict)]
+    for row in [*project_rows, *expense_type_rows]:
+        row["total_amount"] = _format_decimal(_decimal_or_zero(row.get("total_amount")))
+    cost_count = int_value(cost_row.get("row_count"), 0)
+    bank_count = int_value(bank_row.get("row_count"), 0)
+    return {
+        "month": "all" if len(normalized_scope_keys) != 1 else normalized_scope_keys[0].split(":", 1)[-1],
+        "project_scope": project_scope,
+        "summary": {
+            "row_count": cost_count,
+            "transaction_count": cost_count,
+            "total_amount": _format_decimal(_decimal_or_zero(cost_row.get("total_amount"))),
+        },
+        "bank_flow_summary": {
+            "row_count": bank_count,
+            "transaction_count": bank_count,
+            "total_amount": _format_decimal(_decimal_or_zero(bank_row.get("total_amount"))),
+            "expense_amount": _format_decimal(_decimal_or_zero(bank_row.get("expense_amount"))),
+            "income_amount": _format_decimal(_decimal_or_zero(bank_row.get("income_amount"))),
+            "expense_transaction_count": int_value(bank_row.get("expense_transaction_count"), 0),
+            "income_transaction_count": int_value(bank_row.get("income_transaction_count"), 0),
+        },
+        "bank_accounts": [dict(row) for row in bank_accounts if isinstance(row, dict)],
+        "project_rows": project_rows,
+        "expense_type_rows": expense_type_rows,
+    }
 
 
 def _cost_statistics_percentage_sql() -> str:

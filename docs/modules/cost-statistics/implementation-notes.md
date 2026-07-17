@@ -1,11 +1,21 @@
 # 成本统计 实施记录
 
+## 2026-07-18 - relation delta 完整性与直接因果证明修正（生产复验待发布）
+
+- 首次生产试跑证明 direct Cost worker 本身已达到短链路：confirm 的月份 delta `863.994ms`、直接 parent 约 `302ms`，root→`active:all` 约 `1.011s`；withdraw 的月份 delta 最大 `275.028ms`、root→`active:all` 约 `0.34–0.39s`。此前报告的 confirm `19.35s` / withdraw `8.7s` 是 smoke 在等待所有其它 consumer 后才读取 Cost，并且 direct parent 没有 trace 时误选后续 Workbench convergence path，不是 Cost direct all 链路耗时。
+- 生产试跑同时否证了发布完整性：delta 把月份 payload 覆盖成只含 month/scope/accounts 的最小对象；parent 快聚合只重算 summary，遗漏 project/expense groups；Bank Detail 在业务签名不变时仅增长执行 `source_version`，Cost 仍被误判 upstream mismatch。这三项会让 Cost Audit 在操作后失败，因此该 release 不能作为闭环结果。
+- 修正边界：既有 Cost repository 在 delta 的同一事务完成目标行替换后，从最终 `cost_statistics_rows` 以一次 set-based aggregate 计算 summary/project/expense groups，再以一次 bank-flow aggregate 计算方向摘要，并原子保存完整月份 metadata。parent 复用同一个窄 repository I/O；删除 projection 内重复 SQL，不恢复全行 loader、Python group-by 或旧 JSON rows。
+- 依赖语义：Cost 只忽略嵌套 `bank_detail_source_versions.source_version` 这一执行计数；Bank Detail scope 必须仍为 fresh/drained，schema、业务 source signature、row count、标签规则与关系版本仍精确比较，Workbench 与其它 Cost source versions 继续精确比较。query/cache/Audit 使用同一 Cost-owned semantic helper/SQL 口径，不改变 Bank Detail 或其它页面的 read model 合同。
+- 因果证明：Cost 月份事件没有 caller trace 时，parent enqueue 使用 exact event id 作为 trace，使 production smoke 只能选择 direct delta→parent 链，不能以较慢的 Workbench 最终收敛链冒充 direct latency。
+- 隔离与旧链：无 migration、新表、索引、worker、queue、HTTP、前端、共享 freshness 或兼容 fallback；只修改 Cost query/projection/repository/Audit owner。旧 parent 内联聚合 SQL被删除，既有旧 full-row loader/row parser、HTTP consumer、无身份 direct rebuild 与第二队列保持为零。
+- 本地证据：Cost/query/API、relation UoW、queue、Workbench/周转写路径、架构 guard、SLO/smoke 共 `690 passed, 1 skipped`；真实 PostgreSQL 在临时空库应用 migrations 后，delta/parent 完整聚合与真实 Cost Audit SQL 共 `6/6` 通过，临时库已删除。`lint`、docs 与 `git diff --check` 通过；本轮无前端行为变化，不重复运行无关前端全量 CI。
+
 ## 2026-07-18 - relation 写后 all 可见性精准增量（生产验证待发布）
 
 - 生产否证：第一轮“只等 Workbench publish 再刷新 Cost”的 release 在真实 withdraw 中，Cost all 可见耗时 `18.624s`；约前 `12s` 消耗在 Workbench 全月 generation，Cost 月份与 parent 又消耗约 `6s`。因此下方第一轮的“Workbench 是唯一 relation-origin Cost owner”结论已失效，不能作为当前设计依据。
 - 当前边界：relation write transaction 在持久化业务关系的同一事务内，额外向既有 `cost_statistics` queue 投递一个 `active:YYYY-MM` 精准增量。唯一输入是按 `case_id` 分区的 `{status: active|cancelled, row_ids}`；Cost worker 不读 relation repository，不猜 relation 状态，也不修改其他页面 read model。行点读覆盖 Workbench 当前 active generations，并优先目标月份副本，因此跨月关系不必等待新 generation 才取得另一个月份的原生 row。成功且 current 的 Workbench 月 generation 仍投递 `workbench_shard_published`，但只承担最终收敛。
 - 并发与失败：同 scope 队列按 case 合并，最多 200 case；不同 case 独立，同 case 后写覆盖前写。非法、缺失或超限 delta 不执行不完整增量，而是走既有全月 Cost 重建。active delta 仅在目标 Workbench rows 已进入当前 active generation 时发布，否则保持未发布并等待 Workbench convergence；cancelled delta 删除目标关系成本行。
-- 发布 I/O：增量 repository 在同一事务锁定精确 dirty/source version，只删除/插入受影响的 `cost_statistics_rows`，标签从 Cost 自有 `cost_statistics_bank_flow_rows` 点查，并同步当前 scope 行版本证明与月份 metadata；不修改 bank-flow 业务行。成功月份发布才 fan-out parent。parent 不再加载全部月份行并构造大型 Python DTO，而是读取 shard metadata，再以两条 SQL 计算成本与 bank-flow summary。
+- 发布 I/O：增量 repository 在同一事务锁定精确 dirty/source version，只删除/插入受影响的 `cost_statistics_rows`，标签从 Cost 自有 `cost_statistics_bank_flow_rows` 点查，并同步当前 scope 行版本证明与完整月份 metadata；不修改 bank-flow 业务行。成功月份发布才 fan-out parent。parent 不再加载全部月份行并构造大型 Python DTO，而是读取 shard metadata，再以两条 SQL 计算成本 summary/project/expense groups 与 bank-flow summary。
 - 旧链删除：不恢复第一轮已删除的无身份 direct full rebuild、`workbench_relation_changed` / `turnover_relation_changed` 成本 reason、repository 隐藏 fan-out、HTTP consumer、第二 queue/worker、兼容 API 或 fallback；本轮继续删除 parent 的全行 loader/row parser。自动匹配和 lifecycle 不拥有 relation Cost delta。
 - 页面与证据：前端仍使用 Cost 私有 exact barrier 与既有轻量 inert overlay。生产通过条件是 relation receipt 包含 exact delta、delta month→`active:all` causal completion、explorer `200/fresh`、source versions 与业务断言变化，并在写后收敛状态对 Cost/Workbench/OA 三页面执行 `pass/fresh/drained` Audit。event done 不能冒充页面可见。
 - 本地验证：相关 backend/architecture/write-operation 回归 `811 passed, 1 skipped`；真实 PostgreSQL 空库实际应用全部 migrations 后，精准发布、不同 case JSONB 合并/同 case 覆盖、跨月 active-generation 点读、当前 shard parent aggregate 与既有 facet/unchanged 合同共 `6/6` 通过，临时库已删除。`lint`、docs、impact matrix JSON 与 `git diff --check` 通过；本轮未改前端，沿用已发布并覆盖的 Cost exact barrier/inert overlay。
