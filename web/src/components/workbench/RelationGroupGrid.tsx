@@ -182,10 +182,10 @@ function RelationGroupGrid({
     activeElement: HTMLElement | null;
     targetElement: HTMLElement | null;
   } | null>(null);
-  const scrollPositionsRef = useRef<Record<WorkbenchRecordType, number>>({
-    oa: 0,
-    bank: 0,
-    invoice: 0,
+  const scrollPositionsRef = useRef<Record<WorkbenchRecordType, { left: number; ratio: number | null }>>({
+    oa: { left: 0, ratio: null },
+    bank: { left: 0, ratio: null },
+    invoice: { left: 0, ratio: null },
   });
 
   useEffect(() => {
@@ -195,9 +195,12 @@ function RelationGroupGrid({
     }
 
     panes.forEach((pane) => {
-      const scrollLeft = scrollPositionsRef.current[pane.id];
+      const scrollPosition = scrollPositionsRef.current[pane.id];
       root.querySelectorAll<HTMLElement>(`[data-scroll-pane="${pane.id}"]`).forEach((element) => {
-        element.scrollLeft = scrollLeft;
+        const maxScrollLeft = Math.max(0, element.scrollWidth - element.clientWidth);
+        element.scrollLeft = scrollPosition.ratio === null
+          ? scrollPosition.left
+          : scrollPosition.ratio * maxScrollLeft;
       });
     });
   }, [groups, panes]);
@@ -228,7 +231,9 @@ function RelationGroupGrid({
   }, [groups, onEnsureGroupDetail, panes, zoneId]);
 
   const handleSyncScroll = (paneId: WorkbenchRecordType, element: HTMLDivElement) => {
-    scrollPositionsRef.current[paneId] = element.scrollLeft;
+    const maxScrollLeft = Math.max(0, element.scrollWidth - element.clientWidth);
+    const ratio = maxScrollLeft > 0 ? element.scrollLeft / maxScrollLeft : null;
+    scrollPositionsRef.current[paneId] = { left: element.scrollLeft, ratio };
     if (syncInFlightRef.current[paneId]) {
       return;
     }
@@ -241,7 +246,10 @@ function RelationGroupGrid({
     syncInFlightRef.current[paneId] = true;
     root.querySelectorAll<HTMLElement>(`[data-scroll-pane="${paneId}"]`).forEach((candidate) => {
       if (candidate !== element) {
-        candidate.scrollLeft = element.scrollLeft;
+        const candidateMaxScrollLeft = Math.max(0, candidate.scrollWidth - candidate.clientWidth);
+        candidate.scrollLeft = ratio === null
+          ? element.scrollLeft
+          : ratio * candidateMaxScrollLeft;
       }
     });
     queueMicrotask(() => {

@@ -1755,6 +1755,32 @@ describe("Workbench candidate grouping layout", () => {
     expect(groupScroll.scrollLeft).toBe(96);
   });
 
+  test("syncs pane scroll progress when header, row, and footer have different scroll widths", async () => {
+    installMockApiFetch();
+    renderWorkbenchPage();
+
+    const headerScroll = await screen.findByTestId("pane-scroll-head-unpaired-bank");
+    const footerScroll = await screen.findByTestId("pane-scrollbar-unpaired-bank");
+    const groupScroll = await screen.findByTestId("candidate-scroll-unpaired-row:bk-o-202603-001-bank");
+    Object.defineProperties(footerScroll, {
+      clientWidth: { configurable: true, value: 100 },
+      scrollWidth: { configurable: true, value: 300 },
+    });
+    Object.defineProperties(headerScroll, {
+      clientWidth: { configurable: true, value: 100 },
+      scrollWidth: { configurable: true, value: 280 },
+    });
+    Object.defineProperties(groupScroll, {
+      clientWidth: { configurable: true, value: 100 },
+      scrollWidth: { configurable: true, value: 260 },
+    });
+
+    fireEvent.scroll(footerScroll, { target: { scrollLeft: 100 } });
+
+    expect(headerScroll.scrollLeft).toBe(90);
+    expect(groupScroll.scrollLeft).toBe(80);
+  });
+
   test("keeps the synchronized bottom scrollbar thin instead of rendering a large visual band", () => {
     const footerRule = appStyles.match(/\.candidate-grid-footer\s*\{[^}]*\}/s)?.[0] ?? "";
     const footerScrollRule = appStyles.match(/\.candidate-pane-footer-scroll\s*\{[^}]*\}/s)?.[0] ?? "";

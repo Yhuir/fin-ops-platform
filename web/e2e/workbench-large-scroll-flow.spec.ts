@@ -98,9 +98,13 @@ test.describe("workbench large dataset browser flow", () => {
     const bankFooter = page.getByTestId("pane-scrollbar-unpaired-bank");
     const bankHeader = page.getByTestId("pane-scroll-head-unpaired-bank");
     const bankRow = page.getByTestId("candidate-scroll-unpaired-row:bk-large-202603-065-bank");
-    const scrollLeft = await scrollPaneHorizontally(bankFooter);
-    await expect.poll(() => bankHeader.evaluate((element) => element.scrollLeft)).toBe(scrollLeft);
-    await expect.poll(() => bankRow.evaluate((element) => element.scrollLeft)).toBe(scrollLeft);
+    await scrollPaneHorizontally(bankFooter);
+    await expect.poll(() => bankHeader.evaluate(
+      (element) => element.scrollWidth - element.clientWidth - element.scrollLeft,
+    )).toBe(0);
+    await expect.poll(() => bankRow.evaluate(
+      (element) => element.scrollWidth - element.clientWidth - element.scrollLeft,
+    )).toBe(0);
     await expectVisibleAndUncovered(confirmButton, "open zone confirm button after horizontal scroll");
   });
 });
