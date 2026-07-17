@@ -632,7 +632,14 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
                     "scope_type": "workbench",
                     "scope_key": "2026-05",
                     "reason": "workbench_relation_changed",
-                    "metadata": {"action_name": "withdraw_link", "row_ids": ["txn-1", "oa-1"], "ignored": "not persisted"},
+                    "metadata": {
+                        "action_name": "withdraw_link",
+                        "row_ids": ["txn-1", "oa-1"],
+                        "relation_deltas": {
+                            "CASE-1": {"status": "cancelled", "row_ids": ["txn-1", "oa-1"]},
+                        },
+                        "ignored": "not persisted",
+                    },
                 },
                 {
                     "scope_type": "workbench_relation",
@@ -658,6 +665,8 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIn("jsonb_array_elements_text", normalized_sql)
         self.assertIn("metadata,row_ids", normalized_sql)
         self.assertIn("metadata,case_ids", normalized_sql)
+        self.assertIn("metadata,relation_deltas", normalized_sql)
+        self.assertIn("jsonb_object_keys", normalized_sql)
         self.assertIn("when count(*) > 200 then '[]'::jsonb", normalized_sql)
         self.assertIn("clock_timestamp()", normalized_sql)
         self.assertIn("available_at = least(job.outbox_events.available_at, excluded.available_at)", normalized_sql)
@@ -665,7 +674,16 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertEqual(params[0:7], (0, "default", "workbench", "2026-05", "workbench_relation_changed", "high", "trace-batch"))
         first_payload = getattr(params[7], "obj", params[7])
         self.assertEqual(first_payload["action_name"], "withdraw_link")
-        self.assertEqual(first_payload["metadata"], {"action_name": "withdraw_link", "row_ids": ["txn-1", "oa-1"]})
+        self.assertEqual(
+            first_payload["metadata"],
+            {
+                "action_name": "withdraw_link",
+                "row_ids": ["txn-1", "oa-1"],
+                "relation_deltas": {
+                    "CASE-1": {"status": "cancelled", "row_ids": ["txn-1", "oa-1"]},
+                },
+            },
+        )
         self.assertNotIn("ignored", first_payload["metadata"])
         self.assertEqual(params[8:10], ("workbench.read_model.refresh", "workbench.read_model.refresh:workbench:2026-05"))
 
@@ -821,6 +839,9 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
                 "action_name": "confirm_relation",
                 "row_ids": ["txn-1", "txn-1", ""],
                 "case_ids": ["CASE-1"],
+                "relation_deltas": {
+                    "CASE-1": {"status": "active", "row_ids": ["txn-1"]},
+                },
                 "force_refresh": True,
                 "actor_id": "finance-user",
                 "cookie": "secret",
@@ -838,6 +859,9 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
                 "action_name": "confirm_relation",
                 "row_ids": ["txn-1"],
                 "case_ids": ["CASE-1"],
+                "relation_deltas": {
+                    "CASE-1": {"status": "active", "row_ids": ["txn-1"]},
+                },
                 "force_refresh": True,
             },
             "action_name": "confirm_relation",

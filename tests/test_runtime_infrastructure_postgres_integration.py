@@ -219,6 +219,53 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(row["publish_attempt_count"], 0)
         self.assertEqual(row["payload"]["source_version"], event.source_version)
 
+    def test_cost_relation_delta_dedupe_merges_cases_and_overwrites_same_case(self) -> None:
+        first = self.runtime_queue.enqueue_read_model_refresh(
+            scope_type="cost_statistics",
+            scope_key="active:2026-05",
+            reason="cost_statistics_relation_delta",
+            metadata={
+                "relation_deltas": {
+                    "CASE-A": {"status": "active", "row_ids": ["oa-a", "bank-a"]},
+                }
+            },
+        )
+        second = self.runtime_queue.enqueue_read_model_refresh(
+            scope_type="cost_statistics",
+            scope_key="active:2026-05",
+            reason="cost_statistics_relation_delta",
+            metadata={
+                "relation_deltas": {
+                    "CASE-B": {"status": "active", "row_ids": ["oa-b", "bank-b"]},
+                }
+            },
+        )
+        third = self.runtime_queue.enqueue_read_model_refresh(
+            scope_type="cost_statistics",
+            scope_key="active:2026-05",
+            reason="cost_statistics_relation_delta",
+            metadata={
+                "relation_deltas": {
+                    "CASE-A": {"status": "cancelled", "row_ids": ["oa-a", "bank-a"]},
+                }
+            },
+        )
+
+        self.assertEqual(second.event_id, first.event_id)
+        self.assertEqual(third.event_id, first.event_id)
+        row = self.connection.fetch_one(
+            "select source_version, payload from job.outbox_events where id = %s",
+            (first.event_id,),
+        )
+        self.assertEqual(row["source_version"], 2)
+        self.assertEqual(
+            row["payload"]["metadata"]["relation_deltas"],
+            {
+                "CASE-A": {"status": "cancelled", "row_ids": ["oa-a", "bank-a"]},
+                "CASE-B": {"status": "active", "row_ids": ["oa-b", "bank-b"]},
+            },
+        )
+
     def test_0009_backfills_attempts_from_preexisting_attempt_count(self) -> None:
         reset_test_database(self.database_url)
         apply_test_migrations_through(self.database_url, "0008")

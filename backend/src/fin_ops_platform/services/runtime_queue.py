@@ -2334,6 +2334,9 @@ def _safe_read_model_refresh_metadata(metadata: dict[str, object] | None) -> dic
     case_ids = _normalized_metadata_list(metadata.get("case_ids"))
     if case_ids:
         result["case_ids"] = case_ids
+    relation_deltas = _normalized_relation_deltas(metadata.get("relation_deltas"))
+    if relation_deltas:
+        result["relation_deltas"] = relation_deltas
     if metadata.get("force_refresh") is True:
         result["force_refresh"] = True
     return result
@@ -2344,13 +2347,18 @@ def _merge_refresh_payload_sql(existing_payload: str, incoming_payload: str) -> 
     return f"""
                 jsonb_set(
                     jsonb_set(
-                        {merged},
-                        '{{metadata,row_ids}}',
-                        {_merged_metadata_array_sql(existing_payload, incoming_payload, "row_ids")},
+                        jsonb_set(
+                            {merged},
+                            '{{metadata,row_ids}}',
+                            {_merged_metadata_array_sql(existing_payload, incoming_payload, "row_ids")},
+                            true
+                        ),
+                        '{{metadata,case_ids}}',
+                        {_merged_metadata_array_sql(existing_payload, incoming_payload, "case_ids")},
                         true
                     ),
-                    '{{metadata,case_ids}}',
-                    {_merged_metadata_array_sql(existing_payload, incoming_payload, "case_ids")},
+                    '{{metadata,relation_deltas}}',
+                    {_merged_metadata_object_sql(existing_payload, incoming_payload, "relation_deltas")},
                     true
                 )
             """.strip()
@@ -2381,6 +2389,41 @@ def _merged_metadata_array_sql(existing_payload: str, incoming_payload: str, nam
                             from merged_metadata
                         ), '[]'::jsonb)
                     """.strip()
+
+
+def _merged_metadata_object_sql(existing_payload: str, incoming_payload: str, name: str) -> str:
+    path = f"'{{metadata,{name}}}'"
+    return f"""
+                        coalesce((
+                            with merged_metadata(value) as (
+                                values (
+                                    coalesce({existing_payload} #> {path}, '{{}}'::jsonb)
+                                    || coalesce({incoming_payload} #> {path}, '{{}}'::jsonb)
+                                )
+                            )
+                            select case
+                                when (select count(*) from jsonb_object_keys(value)) > 200 then '{{}}'::jsonb
+                                else value
+                            end
+                            from merged_metadata
+                        ), '{{}}'::jsonb)
+                    """.strip()
+
+
+def _normalized_relation_deltas(value: object) -> dict[str, object]:
+    if not isinstance(value, dict) or len(value) > 200:
+        return {}
+    result: dict[str, object] = {}
+    for raw_case_id, raw_delta in value.items():
+        case_id = str(raw_case_id or "").strip()[:240]
+        if not case_id or not isinstance(raw_delta, dict):
+            continue
+        status = str(raw_delta.get("status") or "").strip().lower()
+        row_ids = _normalized_metadata_list(raw_delta.get("row_ids"))
+        if status not in {"active", "cancelled"} or not row_ids:
+            continue
+        result[case_id] = {"status": status, "row_ids": row_ids}
+    return result
 
 
 def _normalized_metadata_list(value: object) -> list[str]:

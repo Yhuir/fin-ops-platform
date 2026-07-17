@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from time import monotonic
 from typing import Any, Callable
@@ -311,6 +312,14 @@ def _refresh_targets_for(command: Any, handler_result: dict[str, Any]) -> list[W
         reason="workbench_pair_relation_changed",
         metadata=metadata,
     )
+    if isinstance(metadata.get("relation_deltas"), dict) and metadata["relation_deltas"]:
+        _extend_refresh_targets(
+            targets,
+            scope_type="cost_statistics",
+            scope_keys=_active_cost_statistics_scope_keys(scope_keys),
+            reason="cost_statistics_relation_delta",
+            metadata=metadata,
+        )
     downstream_scope_types = _metadata_text_set(metadata, "downstream_scope_types")
     for scope_type in (
         "bank_detail",
@@ -364,6 +373,14 @@ def _normalize_refresh_scope_keys(scope_type: str, scope_keys: list[str]) -> lis
     return DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY.normalize_and_validate(scope_type, scope_keys)
 
 
+def _active_cost_statistics_scope_keys(scope_keys: list[str]) -> list[str]:
+    return [
+        f"active:{scope_key}"
+        for scope_key in scope_keys
+        if re.fullmatch(r"\d{4}-\d{2}", str(scope_key or "").strip())
+    ]
+
+
 def _dedupe_refresh_targets(targets: list[WorkbenchReadModelRefreshTarget]) -> list[WorkbenchReadModelRefreshTarget]:
     result: list[WorkbenchReadModelRefreshTarget] = []
     seen: set[tuple[str, str, str]] = set()
@@ -405,6 +422,23 @@ def _refresh_metadata_for(
         metadata.update(result_metadata)
     if action_name:
         metadata["action_name"] = action_name
+    relation_status = (
+        "active"
+        if action_name == "confirm_link"
+        else "cancelled"
+        if action_name in {"withdraw_link", "cancel_link"}
+        else ""
+    )
+    case_ids = _metadata_text_list(metadata, "case_ids")
+    if not case_ids:
+        case_id = str(metadata.get("case_id") or "").strip()
+        case_ids = [case_id] if case_id else []
+    row_ids = _metadata_text_list(metadata, "row_ids")
+    if relation_status and case_ids and row_ids:
+        metadata["relation_deltas"] = {
+            case_id: {"status": relation_status, "row_ids": row_ids}
+            for case_id in case_ids
+        }
     return metadata or None
 
 

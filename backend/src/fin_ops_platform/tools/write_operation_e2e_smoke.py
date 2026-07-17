@@ -1643,53 +1643,84 @@ def _collect_cost_all_causal_timeline(
           select
             id::text as root_event_id,
             trace_id as root_trace_id,
-            created_at as root_created_at
+            scope_type as root_scope_type,
+            scope_key as root_scope_key,
+            coalesce(payload->>'reason', raw_payload->>'reason') as root_reason,
+            status as root_status,
+            created_at as root_created_at,
+            processed_at as root_processed_at
           from job.outbox_events
           where tenant_id = %s
             and id::text = any(%s)
-            and scope_type = 'workbench'
+        ), cost_events as (
+          select
+            roots.root_event_id,
+            roots.root_created_at,
+            roots.root_event_id as cost_event_id,
+            roots.root_scope_key as cost_scope_key,
+            roots.root_reason as cost_reason,
+            roots.root_status as cost_status,
+            roots.root_created_at as cost_created_at,
+            roots.root_processed_at as cost_processed_at
+          from roots
+          where roots.root_scope_type = 'cost_statistics'
+          union all
+          select
+            roots.root_event_id,
+            roots.root_created_at,
+            child.id::text as cost_event_id,
+            child.scope_key as cost_scope_key,
+            coalesce(child.payload->>'reason', child.raw_payload->>'reason') as cost_reason,
+            child.status as cost_status,
+            child.created_at as cost_created_at,
+            child.processed_at as cost_processed_at
+          from roots
+          join job.outbox_events child
+            on child.tenant_id = %s
+           and child.trace_id = coalesce(roots.root_trace_id, roots.root_event_id)
+           and child.id::text <> roots.root_event_id
+          where child.scope_type = 'cost_statistics'
         )
-        select
-          roots.root_event_id,
-          roots.root_created_at,
-          child.id::text as cost_event_id,
-          child.scope_key as cost_scope_key,
-          coalesce(child.payload->>'reason', child.raw_payload->>'reason') as cost_reason,
-          child.status as cost_status,
-          child.created_at as cost_created_at,
-          child.processed_at as cost_processed_at
-        from roots
-        join job.outbox_events child
-          on child.tenant_id = %s
-         and child.trace_id = coalesce(roots.root_trace_id, roots.root_event_id)
-        where child.scope_type = 'cost_statistics'
-        order by roots.root_created_at, child.created_at, child.id
+        select *
+        from cost_events
+        order by root_created_at, cost_created_at, cost_event_id
         """,
         (str(tenant_id or "default"), normalized_event_ids, str(tenant_id or "default")),
     )
     candidates: list[dict[str, Any]] = []
     for row in rows:
-        if str(row.get("cost_scope_key") or "") != "active:all":
+        if (
+            str(row.get("cost_scope_key") or "") != "active:all"
+            or str(row.get("cost_reason") or "") != "cost_statistics_shard_converged"
+        ):
             continue
         root_event_id = str(row.get("root_event_id") or "")
         root_created_at = row.get("root_created_at")
         parent_processed_at = row.get("cost_processed_at")
-        published_rows = [
+        month_rows = [
             candidate
             for candidate in rows
             if str(candidate.get("root_event_id") or "") == root_event_id
             and str(candidate.get("cost_scope_key") or "").startswith("active:")
             and str(candidate.get("cost_scope_key") or "") != "active:all"
-            and str(candidate.get("cost_reason") or "") == "workbench_shard_published"
+            and str(candidate.get("cost_reason") or "")
+            in {"cost_statistics_relation_delta", "workbench_shard_published"}
+            and str(candidate.get("cost_status") or "") == "done"
+            and candidate.get("cost_processed_at") is not None
         ]
-        published_at = min(
-            (candidate.get("cost_created_at") for candidate in published_rows if candidate.get("cost_created_at")),
+        month_row = min(
+            month_rows,
+            key=lambda candidate: (
+                0 if str(candidate.get("cost_reason") or "") == "cost_statistics_relation_delta" else 1,
+                candidate.get("cost_processed_at"),
+            ),
             default=None,
         )
+        month_processed_at = month_row.get("cost_processed_at") if isinstance(month_row, dict) else None
         if (
             str(row.get("cost_status") or "") != "done"
             or root_created_at is None
-            or published_at is None
+            or month_processed_at is None
             or parent_processed_at is None
         ):
             continue
@@ -1698,7 +1729,9 @@ def _collect_cost_all_causal_timeline(
                 "root_event_id": root_event_id,
                 "active_all_event_id": str(row.get("cost_event_id") or ""),
                 "root_created_at": root_created_at,
-                "workbench_published_at": published_at,
+                "cost_month_event_id": str((month_row or {}).get("cost_event_id") or ""),
+                "cost_month_reason": str((month_row or {}).get("cost_reason") or ""),
+                "cost_month_processed_at": month_processed_at,
                 "active_all_processed_at": parent_processed_at,
             }
         )
@@ -1710,12 +1743,14 @@ def _collect_cost_all_causal_timeline(
         "status": "pass",
         "root_event_id": selected["root_event_id"],
         "active_all_event_id": selected["active_all_event_id"],
+        "cost_month_event_id": selected["cost_month_event_id"],
+        "cost_month_reason": selected["cost_month_reason"],
         "target_scope_key": "active:all",
-        "commit_to_workbench_publish_ms": _datetime_elapsed_ms(
-            selected["root_created_at"], selected["workbench_published_at"]
+        "commit_to_cost_month_ms": _datetime_elapsed_ms(
+            selected["root_created_at"], selected["cost_month_processed_at"]
         ),
-        "workbench_publish_to_active_all_ms": _datetime_elapsed_ms(
-            selected["workbench_published_at"], selected["active_all_processed_at"]
+        "cost_month_to_active_all_ms": _datetime_elapsed_ms(
+            selected["cost_month_processed_at"], selected["active_all_processed_at"]
         ),
         "commit_to_active_all_ms": _datetime_elapsed_ms(
             selected["root_created_at"], selected["active_all_processed_at"]
@@ -1724,7 +1759,7 @@ def _collect_cost_all_causal_timeline(
             selected["root_created_at"], observed_at
         ),
         "root_created_at": _iso_datetime(selected["root_created_at"]),
-        "workbench_published_at": _iso_datetime(selected["workbench_published_at"]),
+        "cost_month_processed_at": _iso_datetime(selected["cost_month_processed_at"]),
         "active_all_processed_at": _iso_datetime(selected["active_all_processed_at"]),
         "api_business_value_observed_at": observed_at.isoformat(),
     }

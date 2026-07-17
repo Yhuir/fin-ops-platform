@@ -654,12 +654,13 @@ class WorkbenchUoWContractTests(unittest.TestCase):
             handler,
         )
 
-        self.assertEqual(result["outbox_event_ids"], ["event-1", "event-2", "event-3", "event-4", "event-5"])
+        self.assertEqual(result["outbox_event_ids"], ["event-1", "event-2", "event-3", "event-4", "event-5", "event-6"])
         self.assertEqual(
             [(call["scope_type"], call["scope_key"], call["reason"]) for call in writer.calls],
             [
                 ("workbench", "2026-05", "workbench_relation_changed"),
                 ("workbench_relation", "2026-05", "workbench_pair_relation_changed"),
+                ("cost_statistics", "active:2026-05", "cost_statistics_relation_delta"),
                 ("bank_detail", "2026-05", "workbench_relation_changed"),
                 ("search", "2026-05", "workbench_relation_changed"),
                 ("pending_invoice", "expense:all:2026-05", "workbench_relation_changed"),
@@ -674,6 +675,9 @@ class WorkbenchUoWContractTests(unittest.TestCase):
                 "row_ids": ["oa-1", "txn-1"],
                 "case_ids": ["CASE-1"],
                 "action_name": "confirm_link",
+                "relation_deltas": {
+                    "CASE-1": {"status": "active", "row_ids": ["oa-1", "txn-1"]},
+                },
                 "downstream_scope_types": ["bank_detail", "pending_invoice", "search"],
                 "invoice_usage_scope_types": ["input_invoice_usage"],
                 "pending_invoice_scope_keys": ["expense:all:2026-05"],
@@ -707,12 +711,13 @@ class WorkbenchUoWContractTests(unittest.TestCase):
             handler,
         )
 
-        self.assertEqual(result["outbox_event_ids"], ["event-1", "event-2", "event-3", "event-4"])
+        self.assertEqual(result["outbox_event_ids"], ["event-1", "event-2", "event-3", "event-4", "event-5"])
         self.assertEqual(
             [(call["scope_type"], call["scope_key"], call["reason"]) for call in writer.calls],
             [
                 ("workbench", "2026-05", "workbench_relation_changed"),
                 ("workbench_relation", "2026-05", "workbench_pair_relation_changed"),
+                ("cost_statistics", "active:2026-05", "cost_statistics_relation_delta"),
                 ("bank_detail", "2026-05", "workbench_relation_changed"),
                 ("search", "2026-05", "workbench_relation_changed"),
             ],
@@ -724,12 +729,15 @@ class WorkbenchUoWContractTests(unittest.TestCase):
                 "case_id": "CASE-WITHDRAW",
                 "row_ids": ["oa-1", "txn-1"],
                 "action_name": "withdraw_link",
+                "relation_deltas": {
+                    "CASE-WITHDRAW": {"status": "cancelled", "row_ids": ["oa-1", "txn-1"]},
+                },
                 "downstream_scope_types": ["bank_detail", "search"],
             },
         )
         self.assertEqual(writer.calls[3]["metadata"], writer.calls[0]["metadata"])
 
-    def test_confirm_link_relation_refresh_metadata_does_not_enqueue_cost_statistics_directly(self) -> None:
+    def test_confirm_link_without_row_identity_does_not_enqueue_cost_statistics_delta(self) -> None:
         writer = _RecordingDirtyOutboxWriter()
         uow = self._new_uow(read_model_writer=writer)
 
@@ -757,6 +765,25 @@ class WorkbenchUoWContractTests(unittest.TestCase):
                 ("workbench", "2026-05"),
                 ("workbench_relation", "2026-05"),
             ],
+        )
+
+    def test_confirm_link_with_row_ids_but_without_case_identity_does_not_enqueue_cost_delta(self) -> None:
+        writer = _RecordingDirtyOutboxWriter()
+        uow = self._new_uow(read_model_writer=writer)
+
+        def handler(ctx: object) -> dict[str, object]:
+            ctx.pair_relations.record("save_relation")
+            return {"affected_scope_keys": ["2026-05"], "row_ids": ["oa-1", "txn-1"]}
+
+        self._run_uow(
+            uow,
+            _Command(action_name="confirm_link", scope_keys=["2026-05"]),
+            handler,
+        )
+
+        self.assertEqual(
+            [(call["scope_type"], call["scope_key"]) for call in writer.calls],
+            [("workbench", "2026-05"), ("workbench_relation", "2026-05")],
         )
 
     def test_confirm_link_outbox_failure_rolls_back_pair_relation_and_history(self) -> None:

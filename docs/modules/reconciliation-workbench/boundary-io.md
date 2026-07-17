@@ -39,7 +39,7 @@
 | `unpaired.groups` | 前端 | 每组恰好一个未被 active relation 占用的 canonical fact，`group_type=unpaired` |
 | combined initial | 前端/App Health | `GET /api/workbench` 在同一 active generation-set 快照返回 summary 与 paired/unpaired 各 50 组首页；summary 含 `paired_count`、`unpaired_count`、OA/流水/发票事实数与 exception count；其余组只通过既有 `/groups` 分页读取 |
 | formal relation write result | caller | before/after、version、affected months、audit、outbox ids、barrier targets |
-| relation-origin Cost refresh | `cost_statistics` durable queue | relation transaction只发布 Workbench 及明确的直接 downstream；成本不属于 direct target。只有对应 Workbench 月 generation 精确版本成功发布后，Workbench worker 才以 `workbench_shard_published` 投递成本月份 scope；失败或 stale publish 不得投递。 |
+| relation-origin Cost refresh | `cost_statistics` durable queue | relation transaction 以现有队列额外发布 identity-bound `cost_statistics_relation_delta`（`active:YYYY-MM` + 按 case 的 status/row IDs），用于低延迟；Workbench 月 generation 成功且 current 后仍以 `workbench_shard_published` 发布 active/all 月份收敛事件。不得直接调用成本 repository、HTTP 或 worker。 |
 | matching summary | worker/App Health | planned/created/extended/preserved/ambiguous/resource-limited/unsafe counts；不输出候选 rows |
 | read model generation | Workbench query | 新 generation 完整写入并校验后原子激活；building/failed 不可读为 fresh |
 | all-scope generation stats | Workbench groups query | 每次月 generation 发布事务完成全部 active 切换后，只发布一组以 active-month generation-set digest 为 `generation_id` 的 paired/unpaired 统计；统计与月 generation 同事务可见，旧 digest 统计同事务删除 |
@@ -68,7 +68,7 @@
 - 对外不存在独立 Workbench summary HTTP 合同。`PostgresReadModelRepository.get_workbench_summary(...)` 只是 combined initial 同快照组合所需的内部窄 I/O，不得重新从 route/facade 公开。
 - collapsed-summary 是展示形态而不是第三种关系状态：repository 必须分别物化 `summary_row` 与全部 `collapsed_rows`；未配对 ETC summary 仍是一个 canonical singleton owner，旧 candidate/decision `case_id` 或 relation mode 不得泄漏为关系归属。
 - matching scope、workbench scope 和 workbench_relation scope 都以 PostgreSQL durable queue/state 为事实源；Redis 只缓存 fresh payload，RabbitMQ 只做可选唤醒。
-- relation writer、facade、repository、自动匹配命令和 relation lifecycle event 不直接拥有或声明 `cost_statistics` I/O。Workbench publish-derived cost enqueue 必须发生在 atomic generation publish 之后、Workbench dirty 完成之前；queue unavailable 时 fail closed。该成本链只影响成本模块，银行、发票、OA、Search 等既有 direct downstream 合同不变。
+- relation UoW/turnover writer 只拥有“事务内写入 bounded delta event”这一输出，不拥有成本计算或存储；repository、自动匹配命令和 lifecycle registry 不声明成本 I/O。Workbench publish-derived convergence enqueue 必须发生在 atomic generation publish 之后、Workbench dirty 完成之前；任一 queue unavailable 都 fail closed。该变化只增加成本模块 consumer，不改变银行、发票、OA、Search 的计算和存储边界。
 - Search 本地即时查询与 ignored rows 是 repository 窄读接口，不是新的 read model/projection/cache；它们必须固定到 active generation，且不能反向依赖页面 assembler。
 - Release A 上线后先执行一次全量 Workbench rehydrate，使旧 `open`/candidate/decision generation 被新的 paired/unpaired generation 原子替换；不得原地修改旧 active generation。Release B 的旧状态 drop migration 只在 A 的零访问和数据安全证据通过后创建，并使用届时下一个可用版本；不得复用已被 OA 使用的 0104。
 
@@ -85,7 +85,7 @@ Release A 已删除运行时链路且禁止恢复；旧表物理存储只为短�
 - legacy `GET /api/workbench` provider/API assembler 与所有跨页面 full-payload consumer；当前首屏只走 `WorkbenchQueryFacade.initial_page(...)`，Search、ignored、Batch Accounting、Cost Statistics 和 Settings 各自使用既有专属窄 I/O。
 - 旧独立 summary HTTP handler/route/facade 与其 metric owner；运维 probe 和页面只能使用 combined initial 或已有窄查询。
 - 默认无筛选 `month=all` groups 请求中的动态 `count(distinct workbench_group_rows...)` 旧慢路径及其把历史 materialized all generation join 回 active month shards 的污染；它不再作为 generation stats 缺失 fallback。带用户搜索/列筛选时重复执行 member `EXISTS`、分别计算 count/page、或把历史 physical groups join 回 active shards 的旧路径也已删除；精确条件计数只能使用当前 active key 集合。
-- relation UoW 的 direct cost target、facade 的 cost downstream scope、自动匹配命令 cost metadata、relation lifecycle cost domain/job、`PostgresWorkbenchRelationRepository` 的 cost-bearing/隐藏 scope expansion、`TurnoverLedgerWriteFacade` 的 direct cost request，以及 write SLO 中对 direct relation-origin cost receipt 的要求均已删除。成本只能从成功发布的 Workbench event 派生，禁止兼容分支或第二条 fan-out。
+- 已删除的旧链包括：无 row/case identity 的 direct full cost refresh、facade downstream-discovery 中的 cost scope、自动匹配/lifecycle cost domain/job、relation repository 隐藏 scope expansion，以及先等待完整 Workbench 再开始成本可见性计时的旧验收合同。当前 direct delta 与 publish convergence 共用一个正式 worker/repository，不得恢复兼容分支或第二套 fan-out。
 - on-demand raw/live/OA/retained payload builders、read-time OA invoice-offset relation sync/repair executors、ETC summary DTO 重拼装、legacy `WorkbenchApiRoutes` 和 row-detail fallback；当前详情只走 `WorkbenchRowDetailApiRoutes -> WorkbenchQueryFacade -> active generation repository`，确认关联所需 OA 附件上下文只读取同 generation grouped rows。
 
 保留但隔离的同名概念必须属于其他业务域，例如银行自动标签候选、待找发票搜索结果或异常分类 evidence；它们不能进入 Workbench relation membership。

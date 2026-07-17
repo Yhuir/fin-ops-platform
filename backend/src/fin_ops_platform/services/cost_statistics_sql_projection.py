@@ -130,6 +130,201 @@ class CostStatisticsSqlProjectionBuilder:
         finally:
             self._settings_payload_cache = None
 
+    def rebuild_cost_statistics_relation_delta(
+        self,
+        scope_key: str,
+        *,
+        tenant_id: str,
+        source_version: int,
+        relation_deltas: list[dict[str, object]],
+    ) -> dict[str, object]:
+        self._settings_payload_cache = None
+        try:
+            project_scope, month = _parse_cost_scope_key(scope_key)
+            if month == "all":
+                raise ValueError("relation delta requires a concrete YYYY-MM scope.")
+            normalized_deltas = _normalize_relation_deltas(relation_deltas)
+            if not normalized_deltas:
+                raise ValueError("relation delta requires at least one valid relation delta.")
+            affected_case_ids = [str(delta["case_id"]) for delta in normalized_deltas]
+            all_relation_row_ids = _dedupe_text(
+                [row_id for delta in normalized_deltas for row_id in list(delta["row_ids"])]
+            )
+            rows_by_id = self._active_workbench_rows_by_ids(
+                tenant_id=tenant_id,
+                month=month,
+                row_ids=all_relation_row_ids,
+            )
+            groups: list[dict[str, Any]] = []
+            affected_bank_ids: list[str] = []
+            for delta in normalized_deltas:
+                case_id = str(delta["case_id"])
+                delta_row_ids = [str(row_id) for row_id in list(delta["row_ids"])]
+                relation_status = str(delta["status"])
+                if relation_status == "active":
+                    missing_row_ids = [row_id for row_id in delta_row_ids if row_id not in rows_by_id]
+                    if missing_row_ids:
+                        return {
+                            "scope_key": scope_key,
+                            "month": month,
+                            "project_scope": project_scope,
+                            "published": False,
+                            "skip_reason": "workbench_rows_not_published",
+                            "missing_row_ids": missing_row_ids,
+                            "source_version": source_version,
+                            "refresh_kind": "relation_delta",
+                        }
+                bank_rows: list[dict[str, Any]] = []
+                oa_rows: list[dict[str, Any]] = []
+                for row_id in delta_row_ids:
+                    row = rows_by_id.get(row_id)
+                    row_type = _relation_delta_row_type("", row)
+                    if row_type == "bank":
+                        if row_id not in affected_bank_ids:
+                            affected_bank_ids.append(row_id)
+                        if row is not None:
+                            bank_rows.append(row)
+                    elif row_type == "oa" and row is not None:
+                        oa_rows.append(row)
+                if relation_status == "active" and oa_rows and bank_rows:
+                    groups.append(
+                        {
+                            "group_id": case_id,
+                            "oa_rows": oa_rows,
+                            "bank_rows": bank_rows,
+                            "special_metadata": {},
+                        }
+                    )
+
+            replacement_entries = self._cost_entries_from_workbench(
+                groups,
+                project_scope=project_scope,
+                bank_detail_rows=self._cost_bank_tag_rows(
+                    scope_key=scope_key,
+                    transaction_ids=affected_bank_ids,
+                ),
+            )
+            existing_metadata = self._read_model_repository.get_cost_statistics_scope_metadata(scope_key=scope_key) or {}
+            existing_source_versions = existing_metadata.get("source_versions")
+            existing_source_versions = existing_source_versions if isinstance(existing_source_versions, dict) else {}
+            source_versions = cost_statistics_source_versions(
+                month=month,
+                settings_payload=self._settings_payload(),
+                workbench_source_versions=self._workbench_source_versions(month),
+                bank_detail_source_versions=existing_source_versions.get("bank_detail_source_versions")
+                if isinstance(existing_source_versions.get("bank_detail_source_versions"), dict)
+                else {},
+            )
+            source_versions["cost_statistics_relation_delta"] = {
+                "source_version": source_version,
+                "row_ids": sorted(all_relation_row_ids),
+                "case_ids": sorted(affected_case_ids),
+                "relations": normalized_deltas,
+            }
+            generated_at = datetime.now(UTC).isoformat()
+            model = {
+                "scope_key": scope_key,
+                "scope_type": "month",
+                "schema_version": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+                "month": month,
+                "project_scope": project_scope,
+                "generated_at": generated_at,
+                "cache_status": "ready",
+                "payload": {
+                    "month": month,
+                    "project_scope": project_scope,
+                    "bank_accounts": self._bank_accounts_from_settings(),
+                },
+                "source_scope_keys": [month],
+                "source_versions": source_versions,
+            }
+            published = self._read_model_repository.publish_cost_statistics_relation_delta(
+                tenant_id=tenant_id,
+                scope_key=scope_key,
+                source_version=source_version,
+                model=model,
+                replacement_rows=[_serialize_cost_entry(entry) for entry in replacement_entries],
+                affected_transaction_ids=affected_bank_ids,
+                affected_group_ids=affected_case_ids,
+            )
+            return {
+                "scope_key": scope_key,
+                "month": month,
+                "project_scope": project_scope,
+                "entry_count": len(replacement_entries),
+                "row_count": len(replacement_entries),
+                "affected_row_count": len(all_relation_row_ids),
+                "source_version": source_version,
+                "refresh_kind": "relation_delta",
+                "published": published,
+                **({"skip_reason": "stale_source_version_at_publish"} if not published else {}),
+            }
+        finally:
+            self._settings_payload_cache = None
+
+    def _active_workbench_rows_by_ids(
+        self,
+        *,
+        tenant_id: str,
+        month: str,
+        row_ids: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        if not row_ids:
+            return {}
+        rows = self._connection.fetch_all(
+            """
+            with active_generation as (
+                select distinct on (scope_key)
+                       generation_id, scope_key, activated_at, completed_at, updated_at
+                from read_model.workbench_generations
+                where tenant_id = %s
+                  and status = 'active'
+                  and scope_key ~ '^[0-9]{4}-[0-9]{2}$'
+                order by scope_key, activated_at desc nulls last, completed_at desc nulls last, updated_at desc
+            )
+            select distinct on (row.row_id)
+                   row.row_id, row.source_kind, row.payload, row.raw_payload
+            from active_generation active
+            join read_model.workbench_rows row on row.generation_id = active.generation_id
+            where row.row_id = any(%s::text[])
+            order by row.row_id,
+                     (row.scope_key = %s) desc,
+                     active.activated_at desc nulls last,
+                     active.completed_at desc nulls last,
+                     active.updated_at desc
+            """,
+            (str(tenant_id or "default"), row_ids, month),
+        )
+        result: dict[str, dict[str, Any]] = {}
+        for item in rows:
+            row_id = str(item.get("row_id") or "").strip()
+            payload = row_payload(item, "payload", "raw_payload")
+            if not row_id or not isinstance(payload, dict):
+                continue
+            normalized = dict(payload)
+            normalized.setdefault("id", row_id)
+            normalized.setdefault("row_id", row_id)
+            normalized.setdefault("source_kind", item.get("source_kind"))
+            normalized.setdefault("type", item.get("source_kind"))
+            result[row_id] = normalized
+        return result
+
+    def _cost_bank_tag_rows(self, *, scope_key: str, transaction_ids: list[str]) -> list[dict[str, Any]]:
+        if not transaction_ids:
+            return []
+        return self._connection.fetch_all(
+            """
+            select transaction_id, bank_tag_code, bank_tag_label,
+                   bank_tag_primary_label, bank_tag_sub_label, bank_tag_label_path,
+                   payload, raw_payload
+            from read_model.cost_statistics_bank_flow_rows
+            where scope_key = %s
+              and transaction_id = any(%s::text[])
+            order by transaction_id, row_key
+            """,
+            (scope_key, transaction_ids),
+        )
+
     def rebuild_cost_statistics_parent_scope(
         self,
         scope_key: str,
@@ -143,12 +338,10 @@ class CostStatisticsSqlProjectionBuilder:
             if month != "all":
                 raise ValueError("parent scope rebuild requires an all scope.")
             obsolete_scope_keys = self._obsolete_cost_statistics_month_scopes(project_scope=project_scope)
-            entries, bank_flow_entries, shard_versions = self._cost_entries_from_materialized_shards(project_scope=project_scope)
-            payload = self._build_explorer_payload_from_entries(
-                entries,
-                month="all",
+            shard_versions = self._cost_statistics_shard_versions(project_scope=project_scope)
+            payload = self._cost_statistics_parent_metadata_payload(
                 project_scope=project_scope,
-                bank_flow_entries=bank_flow_entries,
+                scope_keys=list(shard_versions),
             )
             source_versions = {
                 **self._source_versions("all"),
@@ -237,6 +430,11 @@ class CostStatisticsSqlProjectionBuilder:
         obsolete_scope_keys: set[str] | None = None,
     ) -> dict[str, object]:
         warmed_scope_key = f"{project_scope}:{month}"
+        entry_count = int(
+            (payload.get("summary") or {}).get("row_count")
+            if month == "all" and isinstance(payload.get("summary"), dict)
+            else len(payload.get("time_rows") or [])
+        )
         snapshot = {
             "read_models": {
                 warmed_scope_key: {
@@ -247,7 +445,7 @@ class CostStatisticsSqlProjectionBuilder:
                     "project_scope": project_scope,
                     "generated_at": datetime.now(UTC).isoformat(),
                     "cache_status": "ready",
-                    "entry_count": len(payload.get("time_rows") or []),
+                    "entry_count": entry_count,
                     "payload": payload,
                     "source_scope_keys": [month],
                     "source_versions": source_versions,
@@ -276,8 +474,8 @@ class CostStatisticsSqlProjectionBuilder:
             "scope_key": warmed_scope_key,
             "month": month,
             "project_scope": project_scope,
-            "entry_count": len(payload.get("time_rows") or []),
-            "row_count": len(payload.get("time_rows") or []),
+            "entry_count": entry_count,
+            "row_count": entry_count,
             "source_shard_count": source_versions.get("source_shard_count"),
             "refresh_kind": refresh_kind,
             "source_version": source_version,
@@ -714,12 +912,8 @@ class CostStatisticsSqlProjectionBuilder:
             if transaction_id in requested_ids
         }
 
-    def _cost_entries_from_materialized_shards(
-        self,
-        *,
-        project_scope: str,
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
-        shard_rows = self._connection.fetch_all(
+    def _cost_statistics_shard_versions(self, *, project_scope: str) -> dict[str, Any]:
+        rows = self._connection.fetch_all(
             """
             select scope_key, source_versions
             from read_model.cost_statistics_read_models
@@ -731,58 +925,84 @@ class CostStatisticsSqlProjectionBuilder:
             """,
             (project_scope, f"{project_scope}:all", f"{project_scope}:%"),
         )
-        shard_versions = {
+        return {
             scope_key: row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}
-            for row in shard_rows
+            for row in rows
             for scope_key in [str(row.get("scope_key") or "").strip()]
             if scope_key
         }
-        rows = self._connection.fetch_all(
+
+    def _cost_statistics_parent_metadata_payload(
+        self,
+        *,
+        project_scope: str,
+        scope_keys: list[str],
+    ) -> dict[str, Any]:
+        if not scope_keys:
+            return {
+                "month": "all",
+                "project_scope": project_scope,
+                "summary": {"row_count": 0, "transaction_count": 0, "total_amount": "0.00"},
+                "bank_flow_summary": {
+                    "row_count": 0,
+                    "transaction_count": 0,
+                    "total_amount": "0.00",
+                    "expense_amount": "0.00",
+                    "income_amount": "0.00",
+                    "expense_transaction_count": 0,
+                    "income_transaction_count": 0,
+                },
+                "bank_accounts": self._bank_accounts_from_settings(),
+            }
+        row = self._connection.fetch_one(
             """
             select
-                scope_key, project_scope, scope_month::text as scope_month, row_key, transaction_id,
-                group_id, trade_time_text, trade_date::text as trade_date, counterparty_name,
-                payment_account_label, direction, remark, project_id, project_name, expense_type,
-                expense_content, amount::text as amount, oa_applicant, source_versions,
-                generated_at::text as generated_at, cache_status, payload, raw_payload
+                count(*)::integer as row_count,
+                coalesce(sum(amount), 0)::text as total_amount
             from read_model.cost_statistics_rows
             where project_scope = %s
-              and scope_key <> %s
-              and scope_key like %s
+              and scope_key = any(%s::text[])
               and scope_month is not null
-            order by trade_date desc nulls last, trade_time_text desc, transaction_id, row_key
             """,
-            (project_scope, f"{project_scope}:all", f"{project_scope}:%"),
+            (project_scope, scope_keys),
         )
-        entries: list[dict[str, Any]] = []
-        for index, row in enumerate(rows):
-            entry = _cost_entry_from_materialized_row(row, fallback_index=index)
-            entries.append(entry)
-        bank_flow_entries: list[dict[str, Any]] = []
-        bank_flow_rows = self._connection.fetch_all(
+        bank_flow = self._connection.fetch_one(
             """
             select
-                scope_key, project_scope, scope_month::text as scope_month, row_key, transaction_id,
-                group_id, trade_time_text, trade_date::text as trade_date, counterparty_name,
-                payment_account_label, direction, remark, project_id, project_name, expense_type,
-                expense_content, amount::text as amount, oa_applicant,
-                bank_tag_code, bank_tag_label, bank_tag_primary_label, bank_tag_sub_label,
-                bank_tag_label_path, source_versions, generated_at::text as generated_at,
-                cache_status, payload, raw_payload
+                count(*)::integer as row_count,
+                coalesce(sum(amount), 0)::text as total_amount,
+                coalesce(sum(amount) filter (where direction = '支出'), 0)::text as expense_amount,
+                coalesce(sum(amount) filter (where direction = '收入'), 0)::text as income_amount,
+                count(*) filter (where direction = '支出')::integer as expense_transaction_count,
+                count(*) filter (where direction = '收入')::integer as income_transaction_count
             from read_model.cost_statistics_bank_flow_rows
             where project_scope = %s
-              and scope_key <> %s
-              and scope_key like %s
+              and scope_key = any(%s::text[])
               and scope_month is not null
-            order by scope_key desc
             """,
-            (project_scope, f"{project_scope}:all", f"{project_scope}:%"),
+            (project_scope, scope_keys),
         )
-        for row_index, row in enumerate(bank_flow_rows):
-            bank_flow_entries.append(
-                _cost_entry_from_materialized_row(row, fallback_index=row_index)
-            )
-        return entries, bank_flow_entries, shard_versions
+        cost_row = row if isinstance(row, dict) else {}
+        bank_row = bank_flow if isinstance(bank_flow, dict) else {}
+        return {
+            "month": "all",
+            "project_scope": project_scope,
+            "summary": {
+                "row_count": int(cost_row.get("row_count") or 0),
+                "transaction_count": int(cost_row.get("row_count") or 0),
+                "total_amount": format_decimal(_decimal(cost_row.get("total_amount")) or ZERO),
+            },
+            "bank_flow_summary": {
+                "row_count": int(bank_row.get("row_count") or 0),
+                "transaction_count": int(bank_row.get("row_count") or 0),
+                "total_amount": format_decimal(_decimal(bank_row.get("total_amount")) or ZERO),
+                "expense_amount": format_decimal(_decimal(bank_row.get("expense_amount")) or ZERO),
+                "income_amount": format_decimal(_decimal(bank_row.get("income_amount")) or ZERO),
+                "expense_transaction_count": int(bank_row.get("expense_transaction_count") or 0),
+                "income_transaction_count": int(bank_row.get("income_transaction_count") or 0),
+            },
+            "bank_accounts": self._bank_accounts_from_settings(),
+        }
 
     def _workbench_payload(self, month: str) -> dict[str, Any]:
         row = self._connection.fetch_one(
@@ -841,6 +1061,43 @@ def _parse_cost_scope_key(scope_key: str) -> tuple[str, str]:
     if month != "all" and not MONTH_RE.match(month):
         raise ValueError("cost statistics month must be all or YYYY-MM.")
     return project_scope, month
+
+
+def _dedupe_text(values: list[object]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        normalized = str(value or "").strip()
+        if normalized and normalized not in result:
+            result.append(normalized)
+    return result
+
+
+def _normalize_relation_deltas(values: list[dict[str, object]]) -> list[dict[str, object]]:
+    result_by_case_id: dict[str, dict[str, object]] = {}
+    for value in list(values or []):
+        if not isinstance(value, dict):
+            continue
+        case_id = str(value.get("case_id") or "").strip()
+        status = str(value.get("status") or "").strip().lower()
+        raw_row_ids = value.get("row_ids")
+        row_ids = _dedupe_text(list(raw_row_ids) if isinstance(raw_row_ids, (list, tuple, set)) else [])
+        if case_id and status in {"active", "cancelled"} and row_ids:
+            result_by_case_id[case_id] = {"case_id": case_id, "status": status, "row_ids": row_ids}
+    return list(result_by_case_id.values())
+
+
+def _relation_delta_row_type(raw_type: object, row: dict[str, Any] | None) -> str:
+    normalized = str(raw_type or "").strip().lower()
+    if normalized in {"bank", "bank_transaction"}:
+        return "bank"
+    if normalized == "oa":
+        return "oa"
+    source_kind = str((row or {}).get("source_kind") or (row or {}).get("type") or "").strip().lower()
+    if source_kind in {"bank", "bank_transaction"}:
+        return "bank"
+    if source_kind == "oa":
+        return "oa"
+    return ""
 
 
 def _current_bank_auto_tag_rules_version(connection: Any) -> int:
@@ -1033,30 +1290,6 @@ def _serialize_cost_entry(entry: dict[str, Any]) -> dict[str, Any]:
         "remark": entry["remark"],
         "oa_applicant": entry["oa_applicant"],
         **bank_tag_context,
-    }
-
-
-def _cost_entry_from_materialized_row(row: dict[str, Any], *, fallback_index: int) -> dict[str, Any]:
-    payload = row_payload(row, "payload", "raw_payload")
-    if not isinstance(payload, dict):
-        payload = {}
-    amount = _decimal(row.get("amount") or payload.get("amount")) or ZERO
-    transaction_id = str(row.get("transaction_id") or payload.get("transaction_id") or f"row-{fallback_index}")
-    return {
-        "group_id": str(row.get("group_id") or payload.get("group_id") or ""),
-        "transaction_id": transaction_id,
-        "trade_time": str(row.get("trade_time_text") or payload.get("trade_time") or row.get("trade_date") or ""),
-        "counterparty_name": str(row.get("counterparty_name") or payload.get("counterparty_name") or ""),
-        "payment_account_label": str(row.get("payment_account_label") or payload.get("payment_account_label") or ""),
-        "direction": str(row.get("direction") or payload.get("direction") or "支出"),
-        "remark": str(row.get("remark") or payload.get("remark") or ""),
-        "project_name": str(row.get("project_name") or payload.get("project_name") or "未归集项目"),
-        "project_id": str(row.get("project_id") or payload.get("project_id") or ""),
-        "expense_type": str(row.get("expense_type") or payload.get("expense_type") or "未分类"),
-        "expense_content": str(row.get("expense_content") or payload.get("expense_content") or ""),
-        "oa_applicant": str(row.get("oa_applicant") or payload.get("oa_applicant") or "—"),
-        "amount_decimal": amount,
-        **bank_tag_context_from_row(payload),
     }
 
 

@@ -13,7 +13,7 @@ invoice usage/output collection backfill、App Health/workbench performance 和 
 
 - mutation 仍只走 Workbench action API → relation command → UoW；runner 不写 relation、outbox、dirty、readiness 或 read model。
 - mutation 与 worker 证据通过 durable idempotency committed record 的精确 event ID 集关联；`started_at` 只是下界，不能让同 profile 并发事件串入。合法 optional scope 可记录为 skipped/pass，未知 scope 或未匹配 event ID fail closed。
-- bank+invoice、bank+turnover closure、bank+OA+invoice 的可执行 profile pair、mutation contract 与 affected/non-consumer 页面由部署包内 `write_operation_e2e_smoke.REVERSIBLE_RELATION_*_CONTRACTS` 负责；`docs/dev/write-operation-impact-matrix.json` 是由测试机械约束的运维/架构镜像，不是运行时文件 I/O。bank+invoice 必须包含真实 `cost_statistics` affected consumer，但 relation receipt 不得直接包含 cost：成本只能由成功 Workbench publish 派生并以 exact consumer/causal timeline 证明；完整三方关系还必须包含 `oa_pending_payment`；税金抵扣是 Workbench relation 非消费者，不得产生 relation dirty/outbox。bank+turnover 只走正式 turnover closure confirm/withdraw，不得用 Workbench profile 反向伪造事件。
+- bank+invoice、bank+turnover closure、bank+OA+invoice 的可执行 profile pair、mutation contract 与 affected/non-consumer 页面由部署包内 `write_operation_e2e_smoke.REVERSIBLE_RELATION_*_CONTRACTS` 负责；`docs/dev/write-operation-impact-matrix.json` 是测试机械约束的运维/架构镜像。所有 relation receipt 必须包含 identity-bound `cost_statistics_relation_delta`，随后以 exact Cost consumer 与 month→`active:all` causal timeline 证明页面可见；成功 Workbench publish 仍负责最终收敛。完整三方关系还必须包含 `oa_pending_payment`；税金抵扣是非消费者，不得产生 relation dirty/outbox。bank+turnover 只走正式 turnover closure confirm/withdraw。
 - discovery 不再把普通生产 turnover/Workbench/no-OA 事实转换成可执行 relation mutation；只保留 read-only context。现有 bank-flow submit 仍由自己的正式 owner 生成场景。
 
 ## Hardening 基线
@@ -675,7 +675,7 @@ cd "$release_src"
 
 处理规则：
 
-- refresh `active:YYYY-MM` 或 `all:YYYY-MM` 时，worker 从对应工作台月份 read model 构建成本统计 shard。event 必须带非负整数 `source_version`；repository 复用现有 partial unique index，只有在单事务内锁定的唯一 `pending` / `processing` dirty row 版本精确相等时才发布，handler 再以同一版本条件完成。只有发布与完成均成功才重新入队同 project scope 的父 scope；任一竞态失败都保持 `refreshing`，不写 Redis、不完成新 dirty、不 fan-out。
+- refresh `active:YYYY-MM` 或 `all:YYYY-MM` 时，普通事件从对应 Workbench 月 read model 全量构建；带有效 `relation_deltas` 的 active 月事件只读取目标 Workbench rows 与成本自有 bank-flow 标签并替换目标成本行。queue 以 case-keyed object 合并并限制 200 case，非法/超限 metadata 回退普通全月路径。两种发布都要求同一非负 `source_version` CAS；成功完成后才入队 parent，竞态失败保持 refreshing，不写 Redis、不完成新 dirty、不 fan-out。
 - refresh `active:all` 或 `all:all` 时，worker 先检查对应月份 shard readiness。缺失、stale 或 failed 的 shard 通过 `ReadModelRefreshGateway` 入队，父 scope 记录 `refreshing`，不完成 dirty scope，不伪造 `fresh`。
 - 所有所需月份 shard fresh 后，worker 从 `read_model.cost_statistics_rows` 与 `read_model.cost_statistics_bank_flow_rows` 的月份 rows 聚合生成父 scope；parent metadata 不保存 `time_rows` / `bank_flow_time_rows`。parent snapshot 与过期月份 scope 的 metadata/两类 rows 删除必须在同一次 source-version 条件事务中发布，之后才用同一版本完成父 dirty scope。两张行表都只承载月份 shard 明细，不承载 `active:all` / `all:all` parent rows；禁止回读 child JSON arrays。
 - 成本 projection 发布成功或拒绝时都不得写/删 Redis；旧 `cost_statistics:explorer:{scope}` 无版本 writer 已删除。Redis 仅由 API query owner 在 PostgreSQL fresh gate 后写 versioned cache，不属于 worker/readiness 事实链路。

@@ -112,8 +112,11 @@ class TurnoverLedgerWriteUnitOfWork:
                 ]
             source_versions: dict[str, Any] = {}
             outbox_event_ids: list[Any] = []
+            result_refresh_metadata = _result_refresh_metadata(result)
             for refresh_request in refresh_requests:
                 request = dict(refresh_request)
+                request_metadata = request.get("metadata") if isinstance(request.get("metadata"), dict) else {}
+                refresh_metadata = _merge_refresh_metadata(request_metadata, result_refresh_metadata)
                 events = self._dirty_outbox_writer.enqueue_refresh(
                     transaction=transaction,
                     scope_type=str(request.get("scope_type") or "turnover_ledger"),
@@ -123,6 +126,7 @@ class TurnoverLedgerWriteUnitOfWork:
                         "tenant_id": getattr(command, "tenant_id", None),
                         "actor_id": getattr(command, "actor_id", None),
                         "action_name": getattr(command, "action_name", None),
+                        **refresh_metadata,
                     },
                 )
                 for event in list(events or []):
@@ -157,3 +161,60 @@ def _event_value(event: Any, name: str) -> Any:
     if isinstance(event, dict):
         return event.get(name)
     return getattr(event, name, None)
+
+
+def _result_refresh_metadata(result: Any) -> dict[str, object]:
+    if not isinstance(result, dict):
+        return {}
+    pair_relation = result.get("workbench_pair_relation")
+    pair_relation = pair_relation if isinstance(pair_relation, dict) else {}
+    relation = result.get("relation")
+    relation = relation if isinstance(relation, dict) else {}
+    row_ids = _metadata_text_list(
+        [
+            *_metadata_text_list(pair_relation.get("row_ids")),
+            *_metadata_text_list(relation.get("row_ids")),
+            *_metadata_text_list(relation.get("bank_row_ids")),
+        ]
+    )
+    case_id = str(pair_relation.get("case_id") or "").strip()
+    relation_status = str(pair_relation.get("status") or "").strip().lower()
+    relation_deltas = (
+        {case_id: {"status": relation_status, "row_ids": row_ids}}
+        if case_id and row_ids and relation_status in {"active", "cancelled"}
+        else {}
+    )
+    return {
+        **({"row_ids": row_ids} if row_ids else {}),
+        **({"case_ids": [case_id]} if case_id else {}),
+        **({"relation_deltas": relation_deltas} if relation_deltas else {}),
+    }
+
+
+def _merge_refresh_metadata(*items: object) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        for name in ("row_ids", "case_ids"):
+            merged = _metadata_text_list([*list(result.get(name) or []), *_metadata_text_list(item.get(name))])
+            if merged:
+                result[name] = merged
+        relation_deltas = item.get("relation_deltas")
+        if isinstance(relation_deltas, dict):
+            existing_deltas = result.get("relation_deltas")
+            result["relation_deltas"] = {
+                **(dict(existing_deltas) if isinstance(existing_deltas, dict) else {}),
+                **dict(relation_deltas),
+            }
+    return result
+
+
+def _metadata_text_list(value: object) -> list[str]:
+    raw_items = [value] if isinstance(value, str) else list(value) if isinstance(value, (list, tuple, set)) else []
+    result: list[str] = []
+    for item in raw_items:
+        normalized = str(item or "").strip()
+        if normalized and normalized not in result:
+            result.append(normalized)
+    return result

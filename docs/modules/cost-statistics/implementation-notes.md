@@ -1,13 +1,15 @@
 # 成本统计 实施记录
 
-## 2026-07-18 - relation 写后 all 可见性单链收口（生产验证待发布）
+## 2026-07-18 - relation 写后 all 可见性精准增量（生产验证待发布）
 
-- 基线：当前生产 release 的 test-owned confirm 样本中，写 API 约 `2.948s`，Workbench 事件约 `20.492s`，成本直接事件约 `15.202s`；旧证据中成本 all 新值约 `19.10s`、撤回约 `11.93s`。事件时间线证明 relation writer 的提前 direct cost fan-out 会在 Workbench 新 generation 发布前抢跑，并与发布后 fan-out 重复排队。
-- 单一边界：relation UoW/facade/repository 只提交 Workbench 与明确直接 downstream；成功发布且 source version 仍 current 的 Workbench 月 generation 是 relation-origin Cost refresh 的唯一 owner。它先 durable enqueue `workbench_shard_published`，enqueue 失败不完成 Workbench dirty；无 trace 时以 Workbench event id 建立 causal trace。
-- Cost 链：month→parent 与 parent→missing shard 全程保留 tenant、priority、trace。旧 Workbench/Turnover UoW cost target、自动匹配命令的 cost metadata、relation lifecycle 的 cost domain/job、facade/repository cost-bearing/hidden expansion、Cost dead `_enqueue_all_scope_shards` 和 write-SLO direct cost expectation 已删除；导入/标签/设置等非 relation 事件保持原合同，不保留 fallback、兼容 branch、新队列或新 worker。
-- 页面：`workbenchRelationUpdated` 使用 Cost 页面私有 exact barrier；month 等待 `active:YYYY-MM`，year/all 等待 `active:all`。等待时复用既有轻量 inert overlay，取消页面自有 explorer/detail/export 请求；fresh 后只读一次。通用 App Status 只作恢复，不再承担 relation 写后主轮询。
-- 验证工具：affected consumer 的业务断言可在 timeout 内等待；Cost all 还必须证明 source_versions 相对写前变化。报告以 original Workbench event 和 causal cost events 输出 commit→Workbench publish、Workbench publish→`active:all`、commit→API 业务值可见三段；中间 event done 不算页面可见。
-- 发布门禁：本地定向测试、完整 lint/build/docs/架构 guard、部署前旧 event drain、标准发布、test-owned confirm/withdraw、Cost Page Audit 和门槛性能尚需在本次提交后执行；未完成前不声明生产性能闭环。
+- 生产否证：第一轮“只等 Workbench publish 再刷新 Cost”的 release 在真实 withdraw 中，Cost all 可见耗时 `18.624s`；约前 `12s` 消耗在 Workbench 全月 generation，Cost 月份与 parent 又消耗约 `6s`。因此下方第一轮的“Workbench 是唯一 relation-origin Cost owner”结论已失效，不能作为当前设计依据。
+- 当前边界：relation write transaction 在持久化业务关系的同一事务内，额外向既有 `cost_statistics` queue 投递一个 `active:YYYY-MM` 精准增量。唯一输入是按 `case_id` 分区的 `{status: active|cancelled, row_ids}`；Cost worker 不读 relation repository，不猜 relation 状态，也不修改其他页面 read model。行点读覆盖 Workbench 当前 active generations，并优先目标月份副本，因此跨月关系不必等待新 generation 才取得另一个月份的原生 row。成功且 current 的 Workbench 月 generation 仍投递 `workbench_shard_published`，但只承担最终收敛。
+- 并发与失败：同 scope 队列按 case 合并，最多 200 case；不同 case 独立，同 case 后写覆盖前写。非法、缺失或超限 delta 不执行不完整增量，而是走既有全月 Cost 重建。active delta 仅在目标 Workbench rows 已进入当前 active generation 时发布，否则保持未发布并等待 Workbench convergence；cancelled delta 删除目标关系成本行。
+- 发布 I/O：增量 repository 在同一事务锁定精确 dirty/source version，只删除/插入受影响的 `cost_statistics_rows`，标签从 Cost 自有 `cost_statistics_bank_flow_rows` 点查，并同步当前 scope 行版本证明与月份 metadata；不修改 bank-flow 业务行。成功月份发布才 fan-out parent。parent 不再加载全部月份行并构造大型 Python DTO，而是读取 shard metadata，再以两条 SQL 计算成本与 bank-flow summary。
+- 旧链删除：不恢复第一轮已删除的无身份 direct full rebuild、`workbench_relation_changed` / `turnover_relation_changed` 成本 reason、repository 隐藏 fan-out、HTTP consumer、第二 queue/worker、兼容 API 或 fallback；本轮继续删除 parent 的全行 loader/row parser。自动匹配和 lifecycle 不拥有 relation Cost delta。
+- 页面与证据：前端仍使用 Cost 私有 exact barrier 与既有轻量 inert overlay。生产通过条件是 relation receipt 包含 exact delta、delta month→`active:all` causal completion、explorer `200/fresh`、source versions 与业务断言变化，并在写后收敛状态对 Cost/Workbench/OA 三页面执行 `pass/fresh/drained` Audit。event done 不能冒充页面可见。
+- 本地验证：相关 backend/architecture/write-operation 回归 `811 passed, 1 skipped`；真实 PostgreSQL 空库实际应用全部 migrations 后，精准发布、不同 case JSONB 合并/同 case 覆盖、跨月 active-generation 点读、当前 shard parent aggregate 与既有 facet/unchanged 合同共 `6/6` 通过，临时库已删除。`lint`、docs、impact matrix JSON 与 `git diff --check` 通过；本轮未改前端，沿用已发布并覆盖的 Cost exact barrier/inert overlay。
+- 剩余发布门禁：标准部署、真实 confirm/withdraw p99 `<=3s`、写后 Cost/Workbench/OA 三页面 `pass/fresh/drained` Audit 与非消费者隔离仍需完成；正确性和性能证据齐全前不声明生产闭环。
 
 ## 2026-07-17 - unchanged 版本确认闭环（生产验证待发布）
 

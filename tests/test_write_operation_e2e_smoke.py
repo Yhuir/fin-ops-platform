@@ -69,6 +69,7 @@ def _turnover_withdraw_rows() -> list[dict[str, object]]:
         _event(scope_type="turnover_ledger", reason="turnover_relation_changed", action_name="withdraw_relation"),
         _event(scope_type="workbench", reason="turnover_relation_changed", action_name="withdraw_relation"),
         _event(scope_type="workbench_relation", reason="turnover_relation_changed", action_name="withdraw_relation"),
+        _event(scope_type="cost_statistics", reason="cost_statistics_relation_delta", action_name="withdraw_relation"),
         _event(scope_type="search", reason="turnover_relation_changed", action_name="withdraw_relation"),
     ]
 
@@ -715,7 +716,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             observed[0][0], "https://example.test/fin-ops-api/api/turnover-ledger/relations/REL-1/withdraw"
         )
         self.assertEqual(report["results"][0]["write_slo"]["status"], "pass")
-        self.assertEqual(len(report["results"][0]["write_slo"]["results"]), 4)
+        self.assertEqual(len(report["results"][0]["write_slo"]["results"]), 5)
 
     def test_write_slo_event_sample_uses_effective_floor_when_scenario_limit_is_one(self) -> None:
         scenario = write_operation_e2e_smoke.WriteScenario(
@@ -738,6 +739,11 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                 _event(
                     scope_type="workbench_relation",
                     reason="workbench_pair_relation_changed",
+                    action_name="withdraw_link",
+                ),
+                _event(
+                    scope_type="cost_statistics",
+                    reason="cost_statistics_relation_delta",
                     action_name="withdraw_link",
                 ),
             ]
@@ -811,6 +817,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         rows = [
             _event(scope_type="workbench", reason="older_refresh", action_name="older_action"),
             _event(scope_type="workbench_relation", reason="older_relation_refresh", action_name="older_action"),
+            _event(scope_type="cost_statistics", reason="older_cost_refresh", action_name="older_action"),
         ]
 
         report = write_operation_e2e_smoke._wait_for_write_slo(
@@ -1593,7 +1600,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         )
         self.assertEqual(changed["status"], "pass")
 
-    def test_cost_all_causal_timeline_reports_exact_publish_and_parent_segments(self) -> None:
+    def test_cost_all_causal_timeline_reports_exact_delta_and_parent_segments(self) -> None:
         root_created_at = datetime(2026, 7, 18, 1, 0, 0, tzinfo=timezone.utc)
         workbench_published_at = root_created_at + timedelta(milliseconds=400)
         active_all_created_at = root_created_at + timedelta(milliseconds=650)
@@ -1601,17 +1608,17 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         connection = FakeConnection(
             [
                 {
-                    "root_event_id": "workbench-event-1",
+                    "root_event_id": "cost-delta-event-1",
                     "root_created_at": root_created_at,
                     "cost_event_id": "cost-month-1",
                     "cost_scope_key": "active:2026-07",
-                    "cost_reason": "workbench_shard_published",
+                    "cost_reason": "cost_statistics_relation_delta",
                     "cost_status": "done",
                     "cost_created_at": workbench_published_at,
                     "cost_processed_at": active_all_created_at,
                 },
                 {
-                    "root_event_id": "workbench-event-1",
+                    "root_event_id": "cost-delta-event-1",
                     "root_created_at": root_created_at,
                     "cost_event_id": "cost-all-1",
                     "cost_scope_key": "active:all",
@@ -1626,17 +1633,18 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         result = write_operation_e2e_smoke._collect_cost_all_causal_timeline(
             connection,
             tenant_id="default",
-            root_event_ids=["workbench-event-1"],
+            root_event_ids=["cost-delta-event-1"],
         )
 
         self.assertEqual(result["status"], "pass")
         self.assertEqual(result["target_scope_key"], "active:all")
-        self.assertEqual(result["commit_to_workbench_publish_ms"], 400.0)
-        self.assertEqual(result["workbench_publish_to_active_all_ms"], 500.0)
+        self.assertEqual(result["cost_month_reason"], "cost_statistics_relation_delta")
+        self.assertEqual(result["commit_to_cost_month_ms"], 650.0)
+        self.assertEqual(result["cost_month_to_active_all_ms"], 250.0)
         self.assertEqual(result["commit_to_active_all_ms"], 900.0)
         self.assertEqual(
             connection.fetch_all_calls[0][1],
-            ("default", ["workbench-event-1"], "default"),
+            ("default", ["cost-delta-event-1"], "default"),
         )
 
     def test_admin_system_audit_preflight_blocks_first_mutation(self) -> None:

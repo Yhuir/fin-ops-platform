@@ -86,6 +86,7 @@ class WorkbenchReadModelRefreshService:
             tenant_id=event.tenant_id,
             priority=str(event.priority or "normal").strip() or "normal",
             trace_id=event.trace_id or event.event_id,
+            metadata=_event_refresh_metadata(event),
         )
 
     def _enqueue_all_scope_shards(self, event: RuntimeQueueEvent) -> dict[str, Any]:
@@ -150,3 +151,14 @@ class WorkbenchReadModelRefreshService:
                 source_version=source_version,
             )
         )
+
+
+def _event_refresh_metadata(event: RuntimeQueueEvent) -> dict[str, object] | None:
+    metadata = event.payload.get("metadata")
+    if not isinstance(metadata, dict):
+        return None
+    return {
+        key: value
+        for key, value in metadata.items()
+        if key in {"action_name", "row_ids", "case_ids", "relation_deltas"} and value
+    } or None

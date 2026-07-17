@@ -1461,6 +1461,11 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                     "reason": "turnover_relation_changed",
                 },
                 {
+                    "scope_type": "cost_statistics",
+                    "scope_keys": ["active:2026-02", "active:2026-03"],
+                    "reason": "cost_statistics_relation_delta",
+                },
+                {
                     "scope_type": "search",
                     "scope_keys": ["2026-02", "2026-03"],
                     "reason": "turnover_relation_changed",
@@ -4247,6 +4252,8 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                 ("workbench", "2026-03", "turnover_relation_changed"),
                 ("workbench_relation", "2026-02", "turnover_relation_changed"),
                 ("workbench_relation", "2026-03", "turnover_relation_changed"),
+                ("cost_statistics", "active:2026-02", "cost_statistics_relation_delta"),
+                ("cost_statistics", "active:2026-03", "cost_statistics_relation_delta"),
                 ("search", "2026-02", "turnover_relation_changed"),
                 ("search", "2026-03", "turnover_relation_changed"),
             ],

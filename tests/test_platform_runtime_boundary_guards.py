@@ -2684,7 +2684,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_relation_cost_refresh_has_one_publish_derived_owner_and_exact_page_barrier(self) -> None:
+    def test_relation_cost_refresh_has_transactional_delta_and_publish_convergence_owners(self) -> None:
         uow_source = (SERVICES_ROOT / "workbench_uow.py").read_text(encoding="utf-8")
         facade_source = (SERVICES_ROOT / "workbench_write_facade.py").read_text(encoding="utf-8")
         relation_repository_source = (
@@ -2701,6 +2701,9 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         cost_refresh_source = (SERVICES_ROOT / "cost_statistics_read_model_refresh.py").read_text(
             encoding="utf-8"
         )
+        cost_projection_source = (SERVICES_ROOT / "cost_statistics_sql_projection.py").read_text(
+            encoding="utf-8"
+        )
         page_source = (REPO_ROOT / "web/src/pages/CostStatisticsPage.tsx").read_text(encoding="utf-8")
         violations: list[str] = []
 
@@ -2711,8 +2714,18 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         facade_downstream = facade_source[
             facade_start : facade_source.index("    def _relation_pending_invoice_scope_keys(", facade_start)
         ]
-        if 'scope_type="cost_statistics"' in uow_refresh_targets or '"cost_statistics"' in facade_downstream:
-            violations.append("relation UoW/facade still directly owns cost statistics fan-out")
+        for required in (
+            'scope_type="cost_statistics"',
+            'reason="cost_statistics_relation_delta"',
+            "_active_cost_statistics_scope_keys(scope_keys)",
+            'metadata["relation_deltas"]',
+            'if action_name == "confirm_link"',
+            'if action_name in {"withdraw_link", "cancel_link"}',
+        ):
+            if required not in uow_source:
+                violations.append(f"relation UoW is missing bounded cost delta contract {required}")
+        if '"cost_statistics"' in facade_downstream:
+            violations.append("relation facade downstream discovery still owns cost statistics fan-out")
         for forbidden in (
             "CostStatisticsRuntimeService",
             "_workbench_relation_downstream_scope_types",
@@ -2720,8 +2733,18 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if forbidden in relation_repository_source:
                 violations.append(f"relation repository still owns removed cost path {forbidden}")
-        if '"scope_type": "cost_statistics"' in turnover_write_source:
-            violations.append("turnover relation writer still directly owns cost statistics fan-out")
+        for required in (
+            '"scope_type": "cost_statistics"',
+            '"reason": "cost_statistics_relation_delta"',
+            "_active_cost_statistics_scope_keys(normalized_months)",
+        ):
+            if required not in turnover_write_source:
+                violations.append(f"turnover relation writer is missing bounded cost delta contract {required}")
+        if re.search(
+            r'"scope_type":\s*"cost_statistics"[\s\S]{0,180}"reason":\s*"turnover_relation_changed"',
+            turnover_write_source,
+        ):
+            violations.append("turnover relation writer still emits the removed full cost refresh reason")
         formal_command_start = matching_orchestrator_source.index("class WorkbenchFormalRelationCommand:")
         formal_command_end = matching_orchestrator_source.index("class WorkbenchMatchingOrchestrator:")
         if '"cost_statistics"' in matching_orchestrator_source[formal_command_start:formal_command_end]:
@@ -2748,14 +2771,31 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 if '"cost_statistics.read_model.refresh"' in lifecycle_source[job_start:job_end]:
                     violations.append(f"relation lifecycle event {event_name} still advertises a direct cost job")
         if workbench_refresh_source.count('reason="workbench_shard_published"') != 1:
-            violations.append("Workbench successful publish is not the unique relation-origin cost reason")
+            violations.append("Workbench successful publish does not retain one convergence refresh")
         for required in (
             '"cost_statistics",',
             "if payload.get(\"published\") is not True:",
             'trace_id=event.trace_id or event.event_id',
         ):
             if required not in workbench_refresh_source:
-                violations.append(f"Workbench publish-derived cost owner is missing {required}")
+                violations.append(f"Workbench publish-derived convergence owner is missing {required}")
+        for required in (
+            'relation_deltas=_event_relation_deltas(event)',
+            "if relation_deltas:",
+            'relation_deltas=relation_deltas',
+        ):
+            if required not in cost_refresh_source:
+                violations.append(f"Cost delta handler is missing explicit relation-state I/O {required}")
+        if "from app.workbench_pair_relations" in cost_projection_source:
+            violations.append("Cost projection still reads the relation module canonical table directly")
+        for required in (
+            "rebuild_cost_statistics_relation_delta",
+            "_active_workbench_rows_by_ids",
+            "publish_cost_statistics_relation_delta",
+            "_normalize_relation_deltas",
+        ):
+            if required not in cost_projection_source:
+                violations.append(f"Cost projection is missing isolated relation delta behavior {required}")
         for required in (
             "tenant_id=event.tenant_id",
             "priority=priority",

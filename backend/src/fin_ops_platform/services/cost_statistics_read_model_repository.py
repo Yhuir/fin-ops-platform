@@ -76,3 +76,26 @@ class CostStatisticsReadModelRepositoryPort:
                 changed_scope_keys=changed_scope_keys,
             )
         )
+
+    def publish_cost_statistics_relation_delta(
+        self,
+        *,
+        tenant_id: str,
+        scope_key: str,
+        source_version: int,
+        model: dict[str, Any],
+        replacement_rows: list[dict[str, Any]],
+        affected_transaction_ids: list[str],
+        affected_group_ids: list[str],
+    ) -> bool:
+        return bool(
+            self._repository.publish_cost_statistics_relation_delta(
+                tenant_id=tenant_id,
+                scope_key=scope_key,
+                source_version=source_version,
+                model=model,
+                replacement_rows=replacement_rows,
+                affected_transaction_ids=affected_transaction_ids,
+                affected_group_ids=affected_group_ids,
+            )
+        )

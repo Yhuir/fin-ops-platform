@@ -2055,6 +2055,14 @@ class TurnoverLedgerDirtyOutboxWriter:
             [str(scope_key or "all") for scope_key in list(scope_keys or ["all"])],
         )
         for scope_key in normalized_scope_keys:
+            refresh_metadata = {
+                "action_name": str((payload or {}).get("action_name") or "").strip(),
+                "row_ids": list((payload or {}).get("row_ids") or []),
+                "case_ids": list((payload or {}).get("case_ids") or []),
+                "relation_deltas": dict((payload or {}).get("relation_deltas") or {})
+                if isinstance((payload or {}).get("relation_deltas"), dict)
+                else {},
+            }
             events.append(
                 enqueue(
                     transaction=transaction,
@@ -2064,7 +2072,7 @@ class TurnoverLedgerDirtyOutboxWriter:
                     tenant_id=self._tenant_id,
                     priority=self._priority,
                     trace_id=self._trace_id,
-                    metadata={"action_name": str((payload or {}).get("action_name") or "").strip()},
+                    metadata={key: value for key, value in refresh_metadata.items() if value},
                 )
             )
         return events
@@ -2083,7 +2091,7 @@ class TurnoverLedgerLocalDirtyOutboxWriter:
         reason: str,
         payload: dict[str, object] | None = None,
     ) -> list[Any]:
-        _ = transaction, payload
+        _ = transaction
         refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
         if not refresh_gateway.can_enqueue():
             raise RuntimeError("queue_repository must expose enqueue_read_model_refresh.")
@@ -2096,6 +2104,18 @@ class TurnoverLedgerLocalDirtyOutboxWriter:
             scope_type,
             [str(scope_key or "all") for scope_key in list(scope_keys or ["all"])],
             reason=refresh_reason,
+            metadata={
+                key: value
+                for key, value in {
+                    "action_name": str((payload or {}).get("action_name") or "").strip(),
+                    "row_ids": list((payload or {}).get("row_ids") or []),
+                    "case_ids": list((payload or {}).get("case_ids") or []),
+                    "relation_deltas": dict((payload or {}).get("relation_deltas") or {})
+                    if isinstance((payload or {}).get("relation_deltas"), dict)
+                    else {},
+                }.items()
+                if value
+            },
         )
 
 

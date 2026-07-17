@@ -16,6 +16,10 @@ def _scoped_month_keys_or_all(months: list[str]) -> list[str]:
     return normalized or ["all"]
 
 
+def _active_cost_statistics_scope_keys(months: list[str]) -> list[str]:
+    return [f"active:{month}" for month in _scoped_month_keys_or_all(months) if month != "all"]
+
+
 @dataclass(frozen=True)
 class TurnoverLedgerWriteCommand:
     action_name: str
@@ -289,6 +293,7 @@ class TurnoverLedgerWriteFacade:
             )
         refresh_scope_keys = _scoped_month_keys_or_all(normalized_months)
         workbench_refresh_scope_keys = _scoped_month_keys_or_all(normalized_months)
+        cost_statistics_scope_keys = _active_cost_statistics_scope_keys(normalized_months)
         command = TurnoverLedgerWriteCommand(
             action_name=action_name,
             scope_keys=refresh_scope_keys,
@@ -308,6 +313,18 @@ class TurnoverLedgerWriteFacade:
                     "scope_keys": workbench_refresh_scope_keys,
                     "reason": "turnover_relation_changed",
                 },
+                *(
+                    [
+                        {
+                            "scope_type": "cost_statistics",
+                            "scope_keys": cost_statistics_scope_keys,
+                            "reason": "cost_statistics_relation_delta",
+                            "metadata": {"row_ids": list(normalized_bank_row_ids)},
+                        }
+                    ]
+                    if cost_statistics_scope_keys
+                    else []
+                ),
                 {
                     "scope_type": "search",
                     "scope_keys": refresh_scope_keys,
@@ -390,6 +407,7 @@ class TurnoverLedgerWriteFacade:
                 payload=dict(command_payload),
             )
         refresh_scope_keys = _scoped_month_keys_or_all(normalized_months)
+        cost_statistics_scope_keys = _active_cost_statistics_scope_keys(normalized_months)
         command = TurnoverLedgerWriteCommand(
             action_name=action_name,
             scope_keys=refresh_scope_keys,
@@ -410,6 +428,17 @@ class TurnoverLedgerWriteFacade:
                     "scope_keys": refresh_scope_keys,
                     "reason": "turnover_relation_changed",
                 },
+                *(
+                    [
+                        {
+                            "scope_type": "cost_statistics",
+                            "scope_keys": cost_statistics_scope_keys,
+                            "reason": "cost_statistics_relation_delta",
+                        }
+                    ]
+                    if cost_statistics_scope_keys
+                    else []
+                ),
                 {
                     "scope_type": "search",
                     "scope_keys": refresh_scope_keys,

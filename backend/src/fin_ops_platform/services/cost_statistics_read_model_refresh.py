@@ -43,6 +43,7 @@ class CostStatisticsReadModelRefreshService:
                 scope_key,
                 tenant_id=event.tenant_id,
                 source_version=source_version,
+                relation_deltas=_event_relation_deltas(event),
             )
         payload = result if isinstance(result, dict) else {"scope_key": scope_key}
         payload.setdefault("scope_key", scope_key)
@@ -79,7 +80,29 @@ class CostStatisticsReadModelRefreshService:
             )
         return payload
 
-    def _handle_month_scope(self, scope_key: str, *, tenant_id: str, source_version: int) -> dict[str, Any]:
+    def _handle_month_scope(
+        self,
+        scope_key: str,
+        *,
+        tenant_id: str,
+        source_version: int,
+        relation_deltas: list[dict[str, object]],
+    ) -> dict[str, Any]:
+        if relation_deltas:
+            rebuild_delta = getattr(self._projection_builder, "rebuild_cost_statistics_relation_delta", None)
+            if not callable(rebuild_delta):
+                raise RuntimeError("Projection builder does not expose rebuild_cost_statistics_relation_delta.")
+            result = rebuild_delta(
+                scope_key,
+                tenant_id=tenant_id,
+                source_version=source_version,
+                relation_deltas=relation_deltas,
+            )
+            payload = result if isinstance(result, dict) else {"scope_key": scope_key}
+            payload.setdefault("refresh_kind", "relation_delta")
+            if payload.get("published") is False:
+                payload["readiness_status"] = "refreshing"
+            return payload
         rebuild_month = getattr(self._projection_builder, "rebuild_cost_statistics_month_scope", None)
         if not callable(rebuild_month):
             raise RuntimeError("Projection builder does not expose rebuild_cost_statistics_month_scope.")
@@ -187,3 +210,27 @@ def _event_source_version(event: RuntimeQueueEvent) -> int:
     if source_version < 0 or str(value).strip() != str(source_version):
         raise ValueError("Cost statistics refresh requires a non-negative integer source_version.")
     return source_version
+
+
+def _event_relation_deltas(event: RuntimeQueueEvent) -> list[dict[str, object]]:
+    metadata = event.payload.get("metadata")
+    raw_deltas = metadata.get("relation_deltas") if isinstance(metadata, dict) else None
+    if not isinstance(raw_deltas, dict):
+        return []
+    result: list[dict[str, object]] = []
+    for raw_case_id, raw_delta in raw_deltas.items():
+        case_id = str(raw_case_id or "").strip()
+        if not case_id or not isinstance(raw_delta, dict):
+            continue
+        status = str(raw_delta.get("status") or "").strip().lower()
+        raw_row_ids = raw_delta.get("row_ids")
+        raw_items = list(raw_row_ids) if isinstance(raw_row_ids, (list, tuple, set)) else []
+        row_ids = [
+            normalized
+            for item in raw_items
+            for normalized in [str(item or "").strip()]
+            if normalized
+        ]
+        if status in {"active", "cancelled"} and row_ids:
+            result.append({"case_id": case_id, "status": status, "row_ids": list(dict.fromkeys(row_ids))})
+    return result

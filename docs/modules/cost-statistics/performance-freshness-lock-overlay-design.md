@@ -1,7 +1,7 @@
 # 成本统计高性能、鲜度与轻量锁定遮罩设计
 
-> 状态：`READY_FOR_UNIFIED_DEPLOYMENT`，`DEPLOYMENT_HOLD`
-> 日期：2026-07-16
+> 状态：relation 写后精准增量已实现，`PRODUCTION_VERIFICATION_PENDING`
+> 日期：2026-07-18
 > 范围：`/cost-statistics` 页面、`cost_statistics` read model / worker / query / Audit 链路，以及直接影响该 read model 的发布后 fan-out
 > 本文是唯一主设计与实施校准文档；已落地内容和剩余门禁必须在此区分，不以设计项冒充完成项。
 
@@ -16,6 +16,7 @@
 3. 页面在数据未确认 fresh 时进入成本页局部锁定状态；用户能看到旧页面轮廓，但不能把旧值当作可操作的新数据。
 4. Audit 从通用大文件中拆回成本统计边界，以少量集合 SQL 在同一 `REPEATABLE READ READ ONLY` snapshot 内完成。
 5. 旧 live service、本地 read model、全量 payload、无版本缓存、未使用 API client、cost/tax 混合 owner、warmup bridge、旧 summary/project HTTP contract 与 full-view loader 均已删除，不保留 fallback。
+6. relation 写后鲜度使用同一 durable queue 的两阶段 I/O：事务内按 case 投递 Cost 月份精准增量以满足低延迟，Workbench 成功发布后投递全月收敛；不新增表、worker、endpoint 或兼容链。parent 只读 shard metadata 并以 SQL aggregate 生成 summary，不再加载全部月份行构造大型 Python DTO。
 
 遮罩采用 Impeccable 的 `Ledger Calm` 产品设计语言：约 80% 透明、无弹窗、无实色卡片、无大阴影、无背景模糊。它是页面内的轻量交互锁，不是 modal。
 
@@ -43,7 +44,8 @@
 | 05-19 | 完成 | worker unchanged 判定改为 parent `scope_key/entry_count/source_versions` 单次点查；删除 projection/full-view 调用与旧 fixture，不读 payload/明细 rows/dependency gate | 真实 worker/写后鲜度 SLO |
 | 05-20 | 完成 | 成本与税金 SQL projection 拆为两个明确 owner；删除 `cost_tax_sql_projection.py`、全部 current import与混合 helper，不留 re-export/shim/fallback | 生产 worker实跑；warmup/旧HTTP证据已由后续统一发布准备收口关闭 |
 | 统一发布准备收口 | 完成 | owner 明确认定无旧 HTTP 外部 consumer且从未公开承诺；生产只读 active/attention warmup job 均为0；删除 warmup、旧HTTP/full-view及所有 registry/mock/compat I/O | 只剩统一部署窗口的生产执行与性能/Audit验证 |
-| 整体任务 | `READY_FOR_UNIFIED_DEPLOYMENT` | 本地实现、旧链删除、回归与发布前证据闭环 | 未部署；生产 migration/rehydrate/EXPLAIN/SLO/Audit按统一部署窗口执行 |
+| relation 写后精准增量 | 本地实现，生产验证待执行 | case-keyed delta、精确 CAS、Workbench convergence、parent metadata/SQL aggregate、旧 parent full-row loader 删除 | 真实 confirm/withdraw p99 `<=3s`、写后 Audit 与三页面隔离 |
+| 整体任务 | `PRODUCTION_VERIFICATION_PENDING` | 原首屏/Audit/旧链删除已发布闭环；本轮 relation 低延迟实现待验证 | 标准部署后的真实写后性能、Audit 与隔离证据 |
 
 ## 2. 已确认的验收门槛
 

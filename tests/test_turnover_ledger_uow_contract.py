@@ -755,6 +755,16 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         module = importlib.import_module("fin_ops_platform.services.turnover_ledger_extra_service")
         return getattr(module, "TurnoverLedgerExtraService")
 
+    def test_cost_statistics_relation_delta_requires_concrete_affected_month(self) -> None:
+        module = importlib.import_module("fin_ops_platform.services.turnover_ledger_write_facade")
+
+        self.assertEqual(module._active_cost_statistics_scope_keys([]), [])
+        self.assertEqual(module._active_cost_statistics_scope_keys(["all"]), [])
+        self.assertEqual(
+            module._active_cost_statistics_scope_keys(["2026-02", "2026-02"]),
+            ["active:2026-02"],
+        )
+
     def test_turnover_workbench_pair_port_delegates_manual_closure_to_relation_command_service(self) -> None:
         module = self._write_adapters_module()
 
@@ -1558,6 +1568,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
                 ("turnover_ledger", ["2026-02"], "turnover_relation_changed"),
                 ("workbench", ["2026-02"], "turnover_relation_changed"),
                 ("workbench_relation", ["2026-02"], "turnover_relation_changed"),
+                ("cost_statistics", ["active:2026-02"], "cost_statistics_relation_delta"),
                 ("search", ["2026-02"], "turnover_relation_changed"),
             ],
         )
@@ -1703,6 +1714,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
                     ("turnover_ledger", ["2026-02"], "turnover_relation_changed"),
                     ("workbench", ["2026-02"], "turnover_relation_changed"),
                     ("workbench_relation", ["2026-02"], "turnover_relation_changed"),
+                    ("cost_statistics", ["active:2026-02"], "cost_statistics_relation_delta"),
                     ("search", ["2026-02"], "turnover_relation_changed"),
                 ]
                 return handler(
@@ -1954,6 +1966,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
                     ("turnover_ledger", ["2026-02"], "turnover_relation_changed"),
                     ("workbench", ["2026-02"], "turnover_relation_changed"),
                     ("workbench_relation", ["2026-02"], "turnover_relation_changed"),
+                    ("cost_statistics", ["active:2026-02"], "cost_statistics_relation_delta"),
                     ("search", ["2026-02"], "turnover_relation_changed"),
                 ]
                 return handler(

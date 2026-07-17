@@ -1223,6 +1223,17 @@ class CostStatisticsParentAggregationConnection:
     def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
         normalized = " ".join(sql.lower().split())
         self.fetch_one_calls.append((normalized, params))
+        if "from read_model.cost_statistics_rows" in normalized:
+            return {"row_count": 2, "total_amount": "15.50"}
+        if "from read_model.cost_statistics_bank_flow_rows" in normalized:
+            return {
+                "row_count": 1,
+                "total_amount": "20.00",
+                "expense_amount": "20.00",
+                "income_amount": "0",
+                "expense_transaction_count": 1,
+                "income_transaction_count": 0,
+            }
         if "from app.app_settings" in normalized:
             return {
                 "settings_payload": {
@@ -1238,9 +1249,17 @@ class CostStatisticsSaveRecorder:
         self.saved: list[tuple[dict, set[str] | None]] = []
         self.publish_calls: list[tuple[str, str, int, set[str] | None]] = []
         self.acknowledge_calls: list[tuple[str, str, int, dict[str, object]]] = []
+        self.relation_delta_calls: list[dict[str, object]] = []
         self.publish_result = publish_result
         self.acknowledge_result = acknowledge_result
         self.workbench_source_versions: dict[str, object] = {}
+
+    def get_cost_statistics_scope_metadata(self, *, scope_key: str) -> dict[str, object]:
+        return {
+            "scope_key": scope_key,
+            "entry_count": 0,
+            "source_versions": {"bank_detail_source_versions": {"source_version": 3}},
+        }
 
     def active_workbench_source_versions(self, *, scope_key: str) -> dict[str, object]:
         del scope_key
@@ -1258,6 +1277,10 @@ class CostStatisticsSaveRecorder:
         self.publish_calls.append((tenant_id, scope_key, source_version, changed_scope_keys))
         if self.publish_result:
             self.saved.append((snapshot, changed_scope_keys))
+        return self.publish_result
+
+    def publish_cost_statistics_relation_delta(self, **kwargs: object) -> bool:
+        self.relation_delta_calls.append(dict(kwargs))
         return self.publish_result
 
     def acknowledge_unchanged_cost_statistics_scope(
@@ -1327,6 +1350,10 @@ class CostStatisticsReadModelRepositoryPortTests(unittest.TestCase):
                 self.published = (snapshot, tenant_id, scope_key, source_version, changed_scope_keys)
                 return True
 
+            def publish_cost_statistics_relation_delta(self, **kwargs: object) -> bool:
+                self.relation_delta = dict(kwargs)
+                return True
+
             def acknowledge_unchanged_cost_statistics_scope(
                 self,
                 *,
@@ -1385,6 +1412,17 @@ class CostStatisticsReadModelRepositoryPortTests(unittest.TestCase):
                 scope_key="active:2026-05",
                 source_version=7,
                 changed_scope_keys={"active:2026-05"},
+            )
+        )
+        self.assertTrue(
+            port.publish_cost_statistics_relation_delta(
+                tenant_id="default",
+                scope_key="active:2026-05",
+                source_version=8,
+                model={"scope_key": "active:2026-05"},
+                replacement_rows=[],
+                affected_transaction_ids=["txn-1"],
+                affected_group_ids=["CASE-1"],
             )
         )
         self.assertFalse(hasattr(port, "get_tax_offset_view"))
@@ -1616,6 +1654,83 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         raw_snapshot = parent_insert[8].obj["normalized_payload"]
         self.assertNotIn("time_rows", raw_snapshot["payload"])
         self.assertNotIn("bank_flow_time_rows", raw_snapshot["payload"])
+
+    def test_repository_relation_delta_replaces_only_target_rows_in_one_transaction(self) -> None:
+        connection = CostStatisticsWriteConnection(current_source_version=8)
+        repository = PostgresReadModelRepository(connection)
+
+        published = repository.publish_cost_statistics_relation_delta(
+            tenant_id="default",
+            scope_key="active:2026-05",
+            source_version=8,
+            model={
+                "scope_key": "active:2026-05",
+                "month": "2026-05",
+                "project_scope": "active",
+                "generated_at": "2026-07-18T03:00:00+00:00",
+                "source_versions": {"cost_statistics_relation_delta": {"source_version": 8}},
+                "payload": {"month": "2026-05", "project_scope": "active"},
+            },
+            replacement_rows=[
+                {
+                    "row_key": "txn-1:0",
+                    "transaction_id": "txn-1",
+                    "group_id": "CASE-1",
+                    "trade_time": "2026-05-02 10:00:00",
+                    "project_name": "项目A",
+                    "expense_type": "材料",
+                    "amount": "10.00",
+                }
+            ],
+            affected_transaction_ids=["txn-1"],
+            affected_group_ids=["CASE-1"],
+        )
+
+        self.assertTrue(published)
+        self.assertEqual(connection.transaction_count, 1)
+        delete_sql, delete_params = next(
+            (sql, params)
+            for sql, params in connection.executed
+            if "delete from read_model.cost_statistics_rows" in sql
+        )
+        self.assertIn("transaction_id = any", delete_sql)
+        self.assertIn("group_id = any", delete_sql)
+        self.assertEqual(delete_params, ("active:2026-05", ["txn-1"], ["CASE-1"]))
+        version_update_sql, version_update_params = next(
+            (sql, params)
+            for sql, params in connection.executed
+            if "update read_model.cost_statistics_rows" in sql
+        )
+        self.assertIn("set source_versions = %s::jsonb", version_update_sql)
+        self.assertEqual(version_update_params[0].obj, {"cost_statistics_relation_delta": {"source_version": 8}})
+        self.assertEqual(version_update_params[3], "active:2026-05")
+        self.assertTrue(any("insert into read_model.cost_statistics_rows" in sql for sql, _params in connection.executed))
+        self.assertTrue(any("insert into read_model.cost_statistics_read_models" in sql for sql, _params in connection.executed))
+        self.assertTrue(
+            any(
+                "set published_source_version = %s" in sql
+                and params == (8, 0, "active:2026-05")
+                for sql, params in connection.executed
+            )
+        )
+
+    def test_repository_rejects_stale_relation_delta_without_writing(self) -> None:
+        connection = CostStatisticsWriteConnection(current_source_version=9)
+        repository = PostgresReadModelRepository(connection)
+
+        published = repository.publish_cost_statistics_relation_delta(
+            tenant_id="default",
+            scope_key="active:2026-05",
+            source_version=8,
+            model={"month": "2026-05", "project_scope": "active", "payload": {"month": "2026-05"}},
+            replacement_rows=[],
+            affected_transaction_ids=["txn-1"],
+            affected_group_ids=["CASE-1"],
+        )
+
+        self.assertFalse(published)
+        self.assertEqual(connection.transaction_count, 1)
+        self.assertEqual(connection.executed, [])
 
     def test_repository_saves_parent_scope_snapshot_without_writing_month_rows(self) -> None:
         connection = CostStatisticsWriteConnection(current_source_version=7)
@@ -2406,6 +2521,112 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(result["entry_count"], 1)
 
+    def test_cost_statistics_refresh_handler_uses_relation_delta_when_row_metadata_is_present(self) -> None:
+        class FakeBuilder:
+            def __init__(self) -> None:
+                self.delta_calls: list[dict[str, object]] = []
+
+            def rebuild_cost_statistics_relation_delta(self, scope_key: str, **kwargs: object) -> dict[str, object]:
+                self.delta_calls.append({"scope_key": scope_key, **kwargs})
+                return {"scope_key": scope_key, "published": True, "row_count": 1}
+
+            def rebuild_cost_statistics_month_scope(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("relation delta must not execute the full month rebuild")
+
+        queue = QueueRecorder()
+        builder = FakeBuilder()
+        service = CostStatisticsReadModelRefreshService(projection_builder=builder, queue_repository=queue)
+        event = RuntimeQueueEvent(
+            event_id="event-delta",
+            tenant_id="tenant-a",
+            event_type="cost_statistics.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id="active:2026-05",
+            scope_type="cost_statistics",
+            scope_key="active:2026-05",
+            dedupe_key=None,
+            payload={
+                "scope_key": "active:2026-05",
+                "source_version": 8,
+                "metadata": {
+                    "row_ids": ["oa-1", "txn-1"],
+                    "case_ids": ["CASE-1"],
+                    "relation_deltas": {
+                        "CASE-1": {"status": "active", "row_ids": ["oa-1", "txn-1"]},
+                    },
+                },
+            },
+            attempts=1,
+            status="processing",
+            priority="high",
+            trace_id="trace-delta",
+        )
+
+        result = service.handle_runtime_event(event)
+
+        self.assertEqual(
+            builder.delta_calls,
+            [
+                {
+                    "scope_key": "active:2026-05",
+                    "tenant_id": "tenant-a",
+                    "source_version": 8,
+                    "relation_deltas": [
+                        {"case_id": "CASE-1", "status": "active", "row_ids": ["oa-1", "txn-1"]},
+                    ],
+                }
+            ],
+        )
+        self.assertEqual(result["refresh_kind"], "relation_delta")
+        self.assertEqual(queue.completed, [("tenant-a", "cost_statistics", "active:2026-05", 8)])
+        self.assertEqual(queue.refreshes, [("cost_statistics", "active:all", "cost_statistics_shard_converged")])
+
+    def test_cost_statistics_refresh_handler_does_not_guess_relation_state(self) -> None:
+        class FakeBuilder:
+            def __init__(self) -> None:
+                self.month_calls: list[tuple[str, str, int]] = []
+
+            def rebuild_cost_statistics_relation_delta(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("row identities without explicit relation state must not use delta mode")
+
+            def rebuild_cost_statistics_month_scope(
+                self,
+                scope_key: str,
+                *,
+                tenant_id: str,
+                source_version: int,
+            ) -> dict[str, object]:
+                self.month_calls.append((scope_key, tenant_id, source_version))
+                return {"scope_key": scope_key, "published": True, "row_count": 1}
+
+        queue = QueueRecorder()
+        builder = FakeBuilder()
+        service = CostStatisticsReadModelRefreshService(projection_builder=builder, queue_repository=queue)
+        event = RuntimeQueueEvent(
+            event_id="event-no-state",
+            tenant_id="tenant-a",
+            event_type="cost_statistics.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id="active:2026-05",
+            scope_type="cost_statistics",
+            scope_key="active:2026-05",
+            dedupe_key=None,
+            payload={
+                "scope_key": "active:2026-05",
+                "source_version": 10,
+                "metadata": {"row_ids": ["oa-1", "txn-1"], "case_ids": ["CASE-1"]},
+            },
+            attempts=1,
+            status="processing",
+            priority="normal",
+            trace_id="trace-no-state",
+        )
+
+        result = service.handle_runtime_event(event)
+
+        self.assertEqual(builder.month_calls, [("active:2026-05", "tenant-a", 10)])
+        self.assertEqual(result["refresh_kind"], "month")
+
     def test_cost_statistics_refresh_handler_rejects_invalid_source_versions(self) -> None:
         class FakeBuilder:
             def rebuild_cost_statistics_month_scope(self, *_args: object, **_kwargs: object) -> dict[str, object]:
@@ -2859,7 +3080,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertIsNone(result)
         self.assertEqual(repository.metadata_scopes, ["active:2026-05"])
 
-    def test_cost_statistics_sql_projection_rebuilds_active_all_from_materialized_shard_rows(self) -> None:
+    def test_cost_statistics_sql_projection_rebuilds_active_all_from_shard_metadata_without_loading_rows(self) -> None:
         repository = CostStatisticsSaveRecorder()
         connection = CostStatisticsParentAggregationConnection()
         builder = CostStatisticsSqlProjectionBuilder(
@@ -2884,16 +3105,208 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         payload = snapshot["read_models"]["active:all"]["payload"]
         self.assertEqual(payload["month"], "all")
         self.assertEqual(payload["summary"]["total_amount"], "15.50")
-        self.assertEqual(payload["project_rows"][0]["project_name"], "项目A")
-        self.assertEqual(payload["expense_type_rows"][0]["expense_type"], "材料")
-        self.assertEqual(payload["time_rows"][0]["bank_tag_primary_label"], "项目开销")
-        self.assertEqual(payload["time_rows"][0]["bank_tag_sub_label"], "设备材料")
-        self.assertEqual(payload["bank_flow_time_rows"][0]["transaction_id"], "bank-flow-1")
+        self.assertEqual(payload["bank_flow_summary"]["total_amount"], "20.00")
         self.assertEqual(payload["bank_accounts"][0]["payment_account_label"], "工商银行 账户 0001")
         self.assertEqual(snapshot["read_models"]["active:all"]["source_versions"]["source_shard_count"], 2)
+        self.assertFalse(any("read_model.cost_statistics_rows" in sql for sql, _params in connection.fetch_all_calls))
+        self.assertFalse(any("read_model.cost_statistics_bank_flow_rows" in sql for sql, _params in connection.fetch_all_calls))
+        aggregate_calls = [
+            (sql, params)
+            for sql, params in connection.fetch_one_calls
+            if "read_model.cost_statistics_rows" in sql or "read_model.cost_statistics_bank_flow_rows" in sql
+        ]
+        self.assertEqual(len(aggregate_calls), 2)
+        self.assertTrue(all("scope_key = any(%s::text[])" in sql for sql, _params in aggregate_calls))
         self.assertTrue(
-            any("read_model.cost_statistics_bank_flow_rows" in sql for sql, _params in connection.fetch_all_calls)
+            all(params[1] == ["active:2026-04", "active:2026-05"] for _sql, params in aggregate_calls)
         )
+
+    def test_cost_statistics_relation_delta_replaces_only_affected_cost_rows(self) -> None:
+        class Connection(CostStatisticsProjectionConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                if "join read_model.workbench_rows row" in normalized:
+                    self.fetch_all_calls.append((normalized, params))
+                    return [
+                        {
+                            "row_id": "oa-1",
+                            "source_kind": "oa",
+                            "payload": {
+                                "id": "oa-1",
+                                "type": "oa",
+                                "project_name": "项目A",
+                                "project_id": "P-A",
+                                "expense_type": "材料",
+                                "expense_content": "钢材",
+                                "applicant": "张三",
+                            },
+                        },
+                        {
+                            "row_id": "txn-1",
+                            "source_kind": "bank",
+                            "payload": {
+                                "id": "txn-1",
+                                "type": "bank",
+                                "trade_time": "2026-05-02 10:00:00",
+                                "direction": "支出",
+                                "amount": "10.00",
+                                "counterparty_name": "供应商A",
+                                "payment_account_label": "建行",
+                                "remark": "采购",
+                            },
+                        },
+                    ]
+                if "from read_model.cost_statistics_bank_flow_rows" in normalized:
+                    return [
+                        {
+                            "transaction_id": "txn-1",
+                            "bank_tag_code": "project_material",
+                            "bank_tag_label": "设备材料",
+                            "bank_tag_primary_label": "项目开销",
+                            "bank_tag_sub_label": "设备材料",
+                            "bank_tag_label_path": ["项目开销", "设备材料"],
+                        }
+                    ]
+                return super().fetch_all(sql, params)
+
+        repository = CostStatisticsSaveRecorder()
+        repository.workbench_source_versions = {"source_version": 42}
+        builder = CostStatisticsSqlProjectionBuilder(
+            connection=Connection(),
+            read_model_repository=repository,
+        )
+
+        result = builder.rebuild_cost_statistics_relation_delta(
+            "active:2026-05",
+            tenant_id="default",
+            source_version=8,
+            relation_deltas=[
+                {"case_id": "CASE-DELTA", "status": "active", "row_ids": ["oa-1", "txn-1"]},
+            ],
+        )
+
+        self.assertTrue(result["published"])
+        self.assertEqual(result["refresh_kind"], "relation_delta")
+        call = repository.relation_delta_calls[0]
+        self.assertEqual(call["scope_key"], "active:2026-05")
+        self.assertEqual(call["affected_transaction_ids"], ["txn-1"])
+        self.assertEqual(call["affected_group_ids"], ["CASE-DELTA"])
+        self.assertEqual(call["replacement_rows"][0]["transaction_id"], "txn-1")
+        self.assertEqual(call["replacement_rows"][0]["project_name"], "项目A")
+        self.assertEqual(call["replacement_rows"][0]["bank_tag_code"], "project_material")
+        workbench_call = next(
+            (sql, params)
+            for sql, params in builder._connection.fetch_all_calls
+            if "join read_model.workbench_rows row" in sql
+        )
+        self.assertIn("distinct on (row.row_id)", workbench_call[0])
+        self.assertNotIn("row.scope_key = %s and", workbench_call[0])
+        self.assertEqual(workbench_call[1], ("default", ["oa-1", "txn-1"], "2026-05"))
+
+    def test_cost_statistics_withdraw_delta_removes_affected_group_without_replacement(self) -> None:
+        class Connection(CostStatisticsProjectionConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                if "join read_model.workbench_rows row" in normalized:
+                    return [
+                        {
+                            "row_id": "txn-1",
+                            "source_kind": "bank",
+                            "payload": {"id": "txn-1", "type": "bank", "amount": "10.00"},
+                        }
+                    ]
+                return super().fetch_all(sql, params)
+
+        repository = CostStatisticsSaveRecorder()
+        builder = CostStatisticsSqlProjectionBuilder(
+            connection=Connection(),
+            read_model_repository=repository,
+        )
+
+        result = builder.rebuild_cost_statistics_relation_delta(
+            "active:2026-05",
+            tenant_id="default",
+            source_version=9,
+            relation_deltas=[
+                {"case_id": "CASE-DELTA", "status": "cancelled", "row_ids": ["txn-1"]},
+            ],
+        )
+
+        self.assertTrue(result["published"])
+        call = repository.relation_delta_calls[0]
+        self.assertEqual(call["affected_transaction_ids"], ["txn-1"])
+        self.assertEqual(call["affected_group_ids"], ["CASE-DELTA"])
+        self.assertEqual(call["replacement_rows"], [])
+
+    def test_cost_statistics_relation_delta_keeps_concurrent_case_states_isolated(self) -> None:
+        class Connection(CostStatisticsProjectionConnection):
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                if "join read_model.workbench_rows row" in normalized:
+                    return [
+                        {
+                            "row_id": "oa-active",
+                            "source_kind": "oa",
+                            "payload": {
+                                "id": "oa-active",
+                                "type": "oa",
+                                "project_name": "项目A",
+                                "expense_type": "材料",
+                                "expense_content": "采购",
+                            },
+                        },
+                        {
+                            "row_id": "txn-active",
+                            "source_kind": "bank",
+                            "payload": {
+                                "id": "txn-active",
+                                "type": "bank",
+                                "direction": "支出",
+                                "amount": "10.00",
+                            },
+                        },
+                        {
+                            "row_id": "txn-cancelled",
+                            "source_kind": "bank",
+                            "payload": {
+                                "id": "txn-cancelled",
+                                "type": "bank",
+                                "direction": "支出",
+                                "amount": "20.00",
+                            },
+                        },
+                    ]
+                return super().fetch_all(sql, params)
+
+        repository = CostStatisticsSaveRecorder()
+        builder = CostStatisticsSqlProjectionBuilder(
+            connection=Connection(),
+            read_model_repository=repository,
+        )
+
+        result = builder.rebuild_cost_statistics_relation_delta(
+            "active:2026-05",
+            tenant_id="default",
+            source_version=10,
+            relation_deltas=[
+                {
+                    "case_id": "CASE-ACTIVE",
+                    "status": "active",
+                    "row_ids": ["oa-active", "txn-active"],
+                },
+                {
+                    "case_id": "CASE-CANCELLED",
+                    "status": "cancelled",
+                    "row_ids": ["txn-cancelled"],
+                },
+            ],
+        )
+
+        self.assertTrue(result["published"])
+        call = repository.relation_delta_calls[0]
+        self.assertEqual(call["affected_group_ids"], ["CASE-ACTIVE", "CASE-CANCELLED"])
+        self.assertEqual(call["affected_transaction_ids"], ["txn-active", "txn-cancelled"])
+        self.assertEqual([row["group_id"] for row in call["replacement_rows"]], ["CASE-ACTIVE"])
 
     def test_cost_statistics_sql_projection_rebuilds_all_all_as_first_class_read_model(self) -> None:
         repository = CostStatisticsSaveRecorder()

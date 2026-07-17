@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
+from fin_ops_platform.services.cost_statistics_sql_projection import CostStatisticsSqlProjectionBuilder
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from tests.postgres_test_utils import (
     apply_test_migrations,
@@ -141,6 +142,203 @@ class CostStatisticsPostgresIntegrationTests(unittest.TestCase):
                 source_versions={"proof": "v2"},
             )
         )
+
+    def test_relation_delta_publish_replaces_only_target_and_keeps_bank_flow_unchanged(self) -> None:
+        self.connection.execute(
+            """
+            insert into read_model.cost_statistics_read_models(
+                scope_key, project_scope, scope_month, generated_at, entry_count,
+                source_versions, payload, published_source_version
+            )
+            values (
+                'active:2026-05', 'active', '2026-05-01', now(), 2,
+                '{"proof": "old"}'::jsonb, '{"payload": {"bank_accounts": []}}'::jsonb, 7
+            )
+            """
+        )
+        self.connection.execute(
+            """
+            insert into read_model.cost_statistics_rows(
+                scope_key, project_scope, scope_month, row_key, transaction_id, group_id,
+                trade_time_text, trade_date, direction, project_name, expense_type, amount,
+                source_versions
+            )
+            values
+                ('active:2026-05', 'active', '2026-05-01', 'target:0', 'target', 'CASE-A',
+                 '2026-05-02 10:00:00', '2026-05-02', '支出', '旧项目', '材料', 10,
+                 '{"proof": "old"}'::jsonb),
+                ('active:2026-05', 'active', '2026-05-01', 'keep:0', 'keep', 'CASE-KEEP',
+                 '2026-05-03 10:00:00', '2026-05-03', '支出', '保留项目', '服务', 20,
+                 '{"proof": "old"}'::jsonb)
+            """
+        )
+        self.connection.execute(
+            """
+            insert into read_model.cost_statistics_bank_flow_rows(
+                scope_key, project_scope, scope_month, row_key, transaction_id,
+                trade_time_text, trade_date, direction, project_name, expense_type,
+                amount, source_versions
+            )
+            values (
+                'active:2026-05', 'active', '2026-05-01', 'target:bank', 'target',
+                '2026-05-02 10:00:00', '2026-05-02', '支出', '未配对OA', '未分类', 10,
+                '{"proof": "bank-flow-old"}'::jsonb
+            )
+            """
+        )
+        self.connection.execute(
+            """
+            insert into job.read_model_dirty_scopes(
+                tenant_id, scope_type, scope_key, source_version, status
+            )
+            values ('default', 'cost_statistics', 'active:2026-05', 8, 'processing')
+            """
+        )
+
+        published = self.repository.publish_cost_statistics_relation_delta(
+            tenant_id="default",
+            scope_key="active:2026-05",
+            source_version=8,
+            model={
+                "scope_key": "active:2026-05",
+                "scope_type": "month",
+                "schema_version": "test-schema",
+                "month": "2026-05",
+                "project_scope": "active",
+                "generated_at": "2026-07-18T00:00:00+00:00",
+                "cache_status": "ready",
+                "payload": {"month": "2026-05", "project_scope": "active", "bank_accounts": []},
+                "source_scope_keys": ["2026-05"],
+                "source_versions": {"proof": "delta-v8"},
+            },
+            replacement_rows=[
+                {
+                    "group_id": "CASE-A",
+                    "transaction_id": "target",
+                    "trade_time": "2026-05-02 10:00:00",
+                    "direction": "支出",
+                    "project_name": "新项目",
+                    "expense_type": "材料",
+                    "amount": "10.00",
+                }
+            ],
+            affected_transaction_ids=["target"],
+            affected_group_ids=["CASE-A"],
+        )
+
+        self.assertTrue(published)
+        rows = self.connection.fetch_all(
+            """
+            select transaction_id, project_name, source_versions
+            from read_model.cost_statistics_rows
+            where scope_key = 'active:2026-05'
+            order by transaction_id
+            """
+        )
+        self.assertEqual([row["transaction_id"] for row in rows], ["keep", "target"])
+        self.assertEqual(rows[0]["project_name"], "保留项目")
+        self.assertEqual(rows[1]["project_name"], "新项目")
+        self.assertTrue(all(row["source_versions"] == {"proof": "delta-v8"} for row in rows))
+        bank_flow = self.connection.fetch_one(
+            """
+            select source_versions
+            from read_model.cost_statistics_bank_flow_rows
+            where scope_key = 'active:2026-05' and transaction_id = 'target'
+            """
+        )
+        self.assertEqual(bank_flow["source_versions"], {"proof": "bank-flow-old"})
+        model = self.connection.fetch_one(
+            """
+            select entry_count, source_versions, published_source_version
+            from read_model.cost_statistics_read_models
+            where scope_key = 'active:2026-05'
+            """
+        )
+        self.assertEqual(model["entry_count"], 2)
+        self.assertEqual(model["source_versions"], {"proof": "delta-v8"})
+        self.assertEqual(model["published_source_version"], 8)
+
+    def test_parent_metadata_aggregate_reads_only_current_shards(self) -> None:
+        self.connection.execute(
+            """
+            insert into read_model.cost_statistics_rows(
+                scope_key, project_scope, scope_month, row_key, transaction_id,
+                trade_time_text, trade_date, direction, project_name, expense_type, amount
+            )
+            values
+                ('active:2026-05', 'active', '2026-05-01', 'current:0', 'current',
+                 '2026-05-02', '2026-05-02', '支出', '当前项目', '材料', 10),
+                ('active:2026-04', 'active', '2026-04-01', 'obsolete:0', 'obsolete',
+                 '2026-04-02', '2026-04-02', '支出', '旧项目', '材料', 999)
+            """
+        )
+        self.connection.execute(
+            """
+            insert into read_model.cost_statistics_bank_flow_rows(
+                scope_key, project_scope, scope_month, row_key, transaction_id,
+                trade_time_text, trade_date, direction, project_name, expense_type, amount
+            )
+            values
+                ('active:2026-05', 'active', '2026-05-01', 'current:bank', 'current',
+                 '2026-05-02', '2026-05-02', '支出', '未配对OA', '未分类', 20),
+                ('active:2026-04', 'active', '2026-04-01', 'obsolete:bank', 'obsolete',
+                 '2026-04-02', '2026-04-02', '收入', '未配对OA', '未分类', 999)
+            """
+        )
+        builder = CostStatisticsSqlProjectionBuilder(
+            connection=self.connection,
+            read_model_repository=self.repository,
+        )
+
+        payload = builder._cost_statistics_parent_metadata_payload(
+            project_scope="active",
+            scope_keys=["active:2026-05"],
+        )
+
+        self.assertEqual(payload["summary"], {"row_count": 1, "transaction_count": 1, "total_amount": "10.00"})
+        self.assertEqual(payload["bank_flow_summary"]["row_count"], 1)
+        self.assertEqual(payload["bank_flow_summary"]["total_amount"], "20.00")
+        self.assertEqual(payload["bank_flow_summary"]["expense_transaction_count"], 1)
+        self.assertEqual(payload["bank_flow_summary"]["income_transaction_count"], 0)
+
+    def test_relation_delta_point_reads_cross_month_rows_from_active_generations(self) -> None:
+        self.connection.execute(
+            """
+            insert into read_model.workbench_generations(
+                generation_id, tenant_id, scope_key, status, completed_at, activated_at
+            )
+            values
+                ('generation-apr', 'default', '2026-04', 'active', now(), now()),
+                ('generation-may', 'default', '2026-05', 'active', now(), now())
+            """
+        )
+        self.connection.execute(
+            """
+            insert into read_model.workbench_rows(
+                generation_id, row_id, scope_month, scope_key, source_kind,
+                status, generated_at, payload
+            )
+            values
+                ('generation-apr', 'oa-apr', '2026-04-01', '2026-04', 'oa',
+                 'active', now(), '{"id": "oa-apr", "type": "oa"}'::jsonb),
+                ('generation-may', 'bank-may', '2026-05-01', '2026-05', 'bank',
+                 'active', now(), '{"id": "bank-may", "type": "bank"}'::jsonb)
+            """
+        )
+        builder = CostStatisticsSqlProjectionBuilder(
+            connection=self.connection,
+            read_model_repository=self.repository,
+        )
+
+        rows = builder._active_workbench_rows_by_ids(
+            tenant_id="default",
+            month="2026-05",
+            row_ids=["oa-apr", "bank-may"],
+        )
+
+        self.assertEqual(set(rows), {"oa-apr", "bank-may"})
+        self.assertEqual(rows["oa-apr"]["source_kind"], "oa")
+        self.assertEqual(rows["bank-may"]["source_kind"], "bank")
 
 
 if __name__ == "__main__":

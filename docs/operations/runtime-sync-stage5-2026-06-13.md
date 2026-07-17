@@ -24,7 +24,7 @@ read model refresh 事件。它不发起写操作，不同步重建 read model�
 
 | operation | reason / scope |
 | --- | --- |
-| `turnover_manual_closure_or_withdraw` | `turnover_relation_changed` direct receipt 必须覆盖 `turnover_ledger`、`workbench`、`workbench_relation`、`search`，且 action 为 `turnover_relation_zero_difference_closure` / `withdraw_relation` / `turnover_relation_withdraw`。自 2026-07-18 起成本统计不再是 direct receipt；它只由成功 Workbench publish 以 `workbench_shard_published` 派生，并由 write E2E 的 exact Cost consumer/causal timeline 验证。 |
+| `turnover_manual_closure_or_withdraw` | direct receipt 必须覆盖 `turnover_ledger`、`workbench`、`workbench_relation`、`search` 的 `turnover_relation_changed`，以及 `cost_statistics` 的 `cost_statistics_relation_delta`；action 为 `turnover_relation_zero_difference_closure` / `withdraw_relation` / `turnover_relation_withdraw`。Cost 页面由 exact delta receipt、`active:all` parent 和 API source-version/business assertion 共同验证；Workbench publish 的 `workbench_shard_published` 只承担最终收敛。 |
 | `turnover_relation_extra` | `turnover_relation_extra_changed` -> `turnover_ledger`，且 action 为 `relation_extra_update` / `turnover_relation_extra_update` |
 | `turnover_tag_selection` | `turnover_ledger_tag_selection_changed` -> `turnover_ledger`，且 action 为 `turnover_ledger_tag_selection_changed` / `turnover_ledger_tag_selection_update` |
 | `bank_row_tags_batch` | `bank_transaction_category_changed` -> `bank_detail`，`workbench_scope_invalidated` -> `workbench`，`turnover_relation_changed` -> `turnover_ledger`，且 action 为 `bank_row_tags_batch` / `turnover_bank_row_tags_batch` |
