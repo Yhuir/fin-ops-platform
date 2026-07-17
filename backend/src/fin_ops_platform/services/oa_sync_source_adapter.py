@@ -9,5 +9,5 @@ def build_oa_sync_source_adapter(
     *,
     settings: Any,
     attachment_invoice_cache: Any,
-) -> Any:
+) -> MongoOAAdapter:
     return MongoOAAdapter(settings=settings, attachment_invoice_cache=attachment_invoice_cache)

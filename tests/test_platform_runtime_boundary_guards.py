@@ -7190,6 +7190,34 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_oa_sync_admission_source_and_fanout_are_isolated(self) -> None:
+        adapter_source = (SERVICES_ROOT / "mongo_oa_adapter.py").read_text(encoding="utf-8")
+        sync_source = (SERVICES_ROOT / "oa_projection_sync.py").read_text(encoding="utf-8")
+        snapshot_source = (
+            SERVICES_ROOT / "postgres_repositories" / "oa_pending_payment_source_snapshot.py"
+        ).read_text(encoding="utf-8")
+        violations: list[str] = []
+
+        if "def load_sync_application_batch(" not in adapter_source:
+            violations.append("OA Mongo adapter no longer exposes the strict dual-view sync batch")
+        if "def poll_sync_fingerprints(" in adapter_source:
+            violations.append("OA Mongo adapter still exposes the unused legacy fingerprint polling path")
+        for legacy_call in (
+            ".list_available_months(",
+            ".list_application_records(",
+            ".list_all_application_records(",
+        ):
+            if legacy_call in sync_source:
+                violations.append(f"OAProjectionSyncService still uses legacy source path {legacy_call}")
+        if 'getattr(source_snapshot_result, "affected_scope_keys"' in sync_source:
+            violations.append("OAProjectionSyncService still fans out a mixed snapshot change set")
+        if "include_workbench_relation" in snapshot_source:
+            violations.append("OA pending source repository still owns legacy Workbench relation fan-out")
+        if '"scope_type": "workbench_relation"' in snapshot_source:
+            violations.append("OA pending source repository still enqueues Workbench relation refreshes")
+
+        self.assertEqual(violations, [])
+
     def test_server_direct_oa_mongo_adapter_legacy_bootstrap_builder_is_removed(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")

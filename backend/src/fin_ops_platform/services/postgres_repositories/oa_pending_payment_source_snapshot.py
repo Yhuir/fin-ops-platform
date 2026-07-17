@@ -20,7 +20,8 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import (
 
 @dataclass(slots=True, frozen=True)
 class OaPendingPaymentSourceSnapshotResult:
-    affected_scope_keys: tuple[str, ...]
+    completed_projection_changed_scopes: tuple[str, ...]
+    oa_pending_payment_changed_scopes: tuple[str, ...]
     payment_status_count: int
     admission_count: int
     source_signatures: dict[str, str]
@@ -62,14 +63,22 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
         self,
         *,
         scope_key: str,
-        records: list[OAApplicationRecord],
+        completed_projection_records: list[OAApplicationRecord],
+        admission_records: list[OAApplicationRecord],
         payment_statuses: dict[str, OAPaymentStatusRecord],
         tenant_id: str = "default",
         transaction: Any | None = None,
     ) -> OaPendingPaymentSourceSnapshotResult:
         normalized_scope_key = _scope_key(scope_key)
         normalized_tenant_id = text(tenant_id) or "default"
-        normalized_records = [record for record in list(records or []) if isinstance(record, OAApplicationRecord)]
+        normalized_completed_records = [
+            record
+            for record in list(completed_projection_records or [])
+            if isinstance(record, OAApplicationRecord) and is_completed_workflow_status(record.workflow_status)
+        ]
+        normalized_admission_records = [
+            record for record in list(admission_records or []) if isinstance(record, OAApplicationRecord)
+        ]
         normalized_statuses = _normalized_statuses(payment_statuses)
 
         def write(transaction: Any) -> OaPendingPaymentSourceSnapshotResult:
@@ -132,7 +141,7 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
                 )
             }
 
-            record_scope_by_flow = _record_scope_by_flow(normalized_records)
+            record_scope_by_flow = _record_scope_by_flow(normalized_admission_records)
             new_statuses: dict[str, dict[str, Any]] = {}
             for flow_id, status in normalized_statuses.items():
                 scope_month = record_scope_by_flow.get(flow_id) or _month(
@@ -145,11 +154,16 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
                 }
                 new_statuses[flow_id] = {**payload, "source_signature": _signature(payload)}
 
-            replaced_scopes = _replaced_scopes(normalized_scope_key, normalized_records, old_admissions)
+            replaced_scopes = _replaced_scopes(
+                normalized_scope_key,
+                normalized_admission_records,
+                old_admissions,
+                old_watermarks,
+            )
             new_admissions = dict(old_admissions) if normalized_scope_key != "all" else {}
             for key in [key for key in new_admissions if key[0] in replaced_scopes]:
                 new_admissions.pop(key, None)
-            for record in normalized_records:
+            for record in normalized_admission_records:
                 scope_month = _month(record.month)
                 flow_id = _record_flow_id(record)
                 if (
@@ -165,21 +179,22 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
                     "source_payload": payload,
                 }
 
-            changed_scopes = _changed_status_scopes(old_statuses, new_statuses)
+            oa_pending_payment_changed_scopes = _changed_status_scopes(old_statuses, new_statuses)
             changed_admission_scopes = _changed_admission_scopes(old_admissions, new_admissions)
-            changed_scopes.update(changed_admission_scopes)
+            oa_pending_payment_changed_scopes.update(changed_admission_scopes)
             touched_scopes = set(replaced_scopes)
             if normalized_scope_key != "all":
                 touched_scopes.add(normalized_scope_key)
             elif not touched_scopes and not old_watermarks:
                 touched_scopes.add("all")
 
-            completed_signatures = _completed_signatures(normalized_records)
+            completed_signatures = _completed_signatures(normalized_completed_records)
+            completed_projection_changed_scopes: set[str] = set()
             for scope in sorted(touched_scopes):
                 previous = old_watermarks.get(scope) or {}
-                completed_signature = completed_signatures.get(scope)
-                if completed_signature is None:
-                    completed_signature = text(previous.get("completed_oa_signature")) or _signature([])
+                completed_signature = completed_signatures.get(scope, _signature([]))
+                if (text(previous.get("completed_oa_signature")) or _signature([])) != completed_signature:
+                    completed_projection_changed_scopes.add(scope)
                 expected_payload = _watermark_payload(
                     scope_key=scope,
                     completed_oa_signature=completed_signature,
@@ -187,7 +202,7 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
                     admissions=new_admissions,
                 )
                 if _source_contract(previous) != _source_contract(expected_payload):
-                    changed_scopes.add(scope)
+                    oa_pending_payment_changed_scopes.add(scope)
 
             unknown_status_change = any(
                 not _month((old_statuses.get(flow_id) or {}).get("scope_month"))
@@ -203,7 +218,7 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
                 for flow_id in set(old_statuses) & set(new_statuses)
             )
             if unknown_status_change:
-                changed_scopes.add("all")
+                oa_pending_payment_changed_scopes.add("all")
 
             self._replace_payment_statuses(
                 transaction,
@@ -248,7 +263,16 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
                     actor_id="system:oa_pending_payment_source_sync",
                     transaction=transaction,
                 )
-                cleanup_results.append(dict(cleanup_result) if isinstance(cleanup_result, dict) else {})
+                normalized_cleanup_result = dict(cleanup_result) if isinstance(cleanup_result, dict) else {}
+                cleanup_results.append(normalized_cleanup_result)
+                cleanup_affected_scopes = {
+                    scope
+                    for value in list(normalized_cleanup_result.get("affected_months") or [])
+                    if (scope := _month(value))
+                }
+                if list(normalized_cleanup_result.get("changed_relation_ids") or []):
+                    cleanup_affected_scopes.add(replaced_scope)
+                oa_pending_payment_changed_scopes.update(cleanup_affected_scopes)
                 ensure_relation_scope_version(
                     scope_key=replaced_scope,
                     tenant_id=normalized_tenant_id,
@@ -256,11 +280,16 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
                 )
 
             source_signatures: dict[str, str] = {}
-            for scope in sorted(changed_scopes, key=lambda value: (value == "all", value)):
+            for scope in sorted(
+                oa_pending_payment_changed_scopes,
+                key=lambda value: (value == "all", value),
+            ):
                 previous = old_watermarks.get(scope) or {}
-                completed_signature = completed_signatures.get(scope)
-                if completed_signature is None:
-                    completed_signature = text(previous.get("completed_oa_signature")) or _signature([])
+                completed_signature = (
+                    completed_signatures.get(scope, _signature([]))
+                    if scope in touched_scopes
+                    else text(previous.get("completed_oa_signature")) or _signature([])
+                )
                 payload = _watermark_payload(
                     scope_key=scope,
                     completed_oa_signature=completed_signature,
@@ -278,11 +307,15 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
                     transaction,
                     tenant_id=normalized_tenant_id,
                     scope_key=scope,
-                    include_workbench_relation=True,
                 )
 
             return OaPendingPaymentSourceSnapshotResult(
-                affected_scope_keys=tuple(sorted(changed_scopes, key=lambda value: (value == "all", value))),
+                completed_projection_changed_scopes=tuple(
+                    sorted(completed_projection_changed_scopes, key=lambda value: (value == "all", value))
+                ),
+                oa_pending_payment_changed_scopes=tuple(
+                    sorted(oa_pending_payment_changed_scopes, key=lambda value: (value == "all", value))
+                ),
                 payment_status_count=len(new_statuses),
                 admission_count=len(new_admissions),
                 source_signatures=source_signatures,
@@ -297,15 +330,25 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
         self,
         *,
         scope_key: str,
-        records: list[OAApplicationRecord],
+        projection_records: list[OAApplicationRecord],
+        admission_records: list[OAApplicationRecord],
         payment_statuses: dict[str, OAPaymentStatusRecord],
         retention_cutoff_month: str | None = None,
         tenant_id: str = "default",
     ) -> OaPendingPaymentSourceSnapshotResult:
         """Commit completed OA facts and all pending-payment inputs as one PostgreSQL write."""
 
-        normalized_records = [record for record in list(records or []) if isinstance(record, OAApplicationRecord)]
-        completed_records = [record for record in normalized_records if is_completed_workflow_status(record.workflow_status)]
+        normalized_projection_records = [
+            record for record in list(projection_records or []) if isinstance(record, OAApplicationRecord)
+        ]
+        normalized_admission_records = [
+            record for record in list(admission_records or []) if isinstance(record, OAApplicationRecord)
+        ]
+        completed_records = [
+            record
+            for record in normalized_projection_records
+            if is_completed_workflow_status(record.workflow_status)
+        ]
 
         def write(transaction: Any) -> OaPendingPaymentSourceSnapshotResult:
             projection_repository = PostgresOAProjectionRepository(transaction)
@@ -314,14 +357,14 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
                 projection_repository.delete_stale_completed_application_records(
                     scope_key=scope_key,
                     records=completed_records,
-                    scanned_records=normalized_records,
+                    scanned_records=normalized_projection_records,
                 )
                 or []
             )
             removed_non_completed_count = len(
                 projection_repository.delete_non_completed_application_records(
                     scope_key=scope_key,
-                    records=normalized_records,
+                    records=normalized_admission_records,
                 )
                 or []
             )
@@ -332,13 +375,15 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
             )
             snapshot = self.replace_authoritative_snapshot(
                 scope_key=scope_key,
-                records=normalized_records,
+                completed_projection_records=completed_records,
+                admission_records=normalized_admission_records,
                 payment_statuses=payment_statuses,
                 tenant_id=tenant_id,
                 transaction=transaction,
             )
             return OaPendingPaymentSourceSnapshotResult(
-                affected_scope_keys=snapshot.affected_scope_keys,
+                completed_projection_changed_scopes=snapshot.completed_projection_changed_scopes,
+                oa_pending_payment_changed_scopes=snapshot.oa_pending_payment_changed_scopes,
                 payment_status_count=snapshot.payment_status_count,
                 admission_count=snapshot.admission_count,
                 source_signatures=snapshot.source_signatures,
@@ -377,7 +422,8 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
 
         if not paid_rows:
             return OaPendingPaymentSourceSnapshotResult(
-                affected_scope_keys=(),
+                completed_projection_changed_scopes=(),
+                oa_pending_payment_changed_scopes=(),
                 payment_status_count=0,
                 admission_count=0,
                 source_signatures={},
@@ -422,7 +468,8 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
 
             if not changed_rows:
                 return OaPendingPaymentSourceSnapshotResult(
-                    affected_scope_keys=(),
+                    completed_projection_changed_scopes=(),
+                    oa_pending_payment_changed_scopes=(),
                     payment_status_count=len(statuses),
                     admission_count=0,
                     source_signatures={},
@@ -482,7 +529,8 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
                 source_signatures[scope] = str(payload["source_signature"])
 
             return OaPendingPaymentSourceSnapshotResult(
-                affected_scope_keys=tuple(sorted(changed_scopes)),
+                completed_projection_changed_scopes=(),
+                oa_pending_payment_changed_scopes=tuple(sorted(changed_scopes)),
                 payment_status_count=len(statuses),
                 admission_count=sum(
                     int(watermarks[scope].get("admission_count") or 0)
@@ -666,36 +714,7 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
         *,
         tenant_id: str,
         scope_key: str,
-        include_workbench_relation: bool = False,
     ) -> None:
-        if include_workbench_relation and scope_key != "all":
-            enqueue_many = getattr(
-                self._queue_repository,
-                "enqueue_read_model_refreshes_in_transaction",
-                None,
-            )
-            if not callable(enqueue_many):
-                raise RuntimeError(
-                    "queue_repository must expose enqueue_read_model_refreshes_in_transaction()."
-                )
-            enqueue_many(
-                transaction=transaction,
-                tenant_id=tenant_id,
-                priority="normal",
-                refreshes=[
-                    {
-                        "scope_type": "workbench_relation",
-                        "scope_key": scope_key,
-                        "reason": "oa_pending_payment_source_snapshot_changed",
-                    },
-                    {
-                        "scope_type": "oa_pending_payment",
-                        "scope_key": scope_key,
-                        "reason": "oa_pending_payment_source_snapshot_changed",
-                    },
-                ],
-            )
-            return
         enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh_in_transaction", None)
         if not callable(enqueue):
             raise RuntimeError("queue_repository must expose enqueue_read_model_refresh_in_transaction().")
@@ -853,11 +872,13 @@ def _replaced_scopes(
     scope_key: str,
     records: list[OAApplicationRecord],
     old_admissions: dict[tuple[str, str], dict[str, Any]],
+    old_watermarks: dict[str, dict[str, Any]],
 ) -> set[str]:
     if scope_key != "all":
         return {scope_key}
     scopes = {_month(record.month) for record in records}
     scopes.update(key[0] for key in old_admissions)
+    scopes.update(_month(scope) for scope in old_watermarks)
     return {scope for scope in scopes if scope}
 
 

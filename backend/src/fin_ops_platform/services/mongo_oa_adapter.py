@@ -171,6 +171,12 @@ class MongoOASettings:
         )
 
 
+@dataclass(slots=True, frozen=True)
+class OASyncSourceBatch:
+    projection_records: tuple[OAApplicationRecord, ...]
+    admission_records: tuple[OAApplicationRecord, ...]
+
+
 class OAAttachmentInvoiceCache(Protocol):
     def load_oa_attachment_invoice_cache_entry(self, cache_key: str) -> dict[str, object] | None: ...
 
@@ -272,86 +278,6 @@ class MongoOAAdapter(OAAdapter):
         self._records_cache.pop("__all__", None)
         self._available_months_cache = None
 
-    def poll_sync_fingerprints(self) -> dict[str, str]:
-        self._sync_import_settings_cache()
-        if self._mongo_temporarily_unavailable():
-            self._set_read_status("error", "OA 连接失败")
-            return {}
-
-        documents_by_month: dict[str, list[dict[str, Any]]] = {}
-        enabled_forms = (
-            (self._settings.payment_request_form_id, OA_IMPORT_FORM_TYPE_PAYMENT),
-            (self._settings.expense_claim_form_id, OA_IMPORT_FORM_TYPE_EXPENSE),
-        )
-        for form_id, form_type in enabled_forms:
-            if not self._should_include_form_type(form_type):
-                continue
-            documents = self._find_documents(
-                self._build_form_query(form_id),
-                projection=self._polling_fingerprint_projection(),
-            )
-            if self._mongo_temporarily_unavailable():
-                self._set_read_status("error", "OA 连接失败")
-                return {}
-            for document in documents:
-                data = self._document_data(document)
-                if not self._should_include_document(form_type, data):
-                    continue
-                month = self._derive_month(data, document)
-                if not MONTH_RE.match(month):
-                    continue
-                fingerprint_document = self._polling_fingerprint_document(form_type, document)
-                documents_by_month.setdefault(month, []).append(fingerprint_document)
-
-        fingerprints = {
-            month: self._hash_polling_documents(documents)
-            for month, documents in documents_by_month.items()
-        }
-        all_documents = [
-            document
-            for month in sorted(documents_by_month)
-            for document in documents_by_month[month]
-        ]
-        fingerprints["all"] = self._hash_polling_documents(all_documents)
-        self._set_read_status("ready", "OA 已同步")
-        return fingerprints
-
-    @staticmethod
-    def _polling_fingerprint_projection() -> dict[str, int]:
-        return {
-            "_id": 1,
-            "form_id": 1,
-            "modifiedTime": 1,
-            "createdTime": 1,
-            "data": 1,
-        }
-
-    def _polling_fingerprint_document(self, form_type: str, document: dict[str, Any]) -> dict[str, Any]:
-        data = self._document_data(document)
-        return {
-            "_id": self._document_id(document),
-            "form_type": form_type,
-            "external_id": self._document_external_id(
-                self._settings.payment_request_form_id if form_type == OA_IMPORT_FORM_TYPE_PAYMENT else self._settings.expense_claim_form_id,
-                document,
-            ),
-            "month": self._derive_month(data, document),
-            "status": self._canonical_status_key(data),
-            "modifiedTime": self._datetime_string(document.get("modifiedTime")),
-            "createdTime": self._datetime_string(document.get("createdTime")),
-            "data": data,
-        }
-
-    @staticmethod
-    def _hash_polling_documents(documents: list[dict[str, Any]]) -> str:
-        normalized_payload = json.dumps(
-            sorted(documents, key=lambda item: (str(item.get("form_type")), str(item.get("external_id")), str(item.get("_id")))),
-            ensure_ascii=False,
-            sort_keys=True,
-            default=str,
-        )
-        return hashlib.sha256(normalized_payload.encode("utf-8")).hexdigest()
-
     @contextmanager
     def suppress_attachment_invoice_background_parse(self):
         self._attachment_invoice_parse_suppression_depth += 1
@@ -401,6 +327,64 @@ class MongoOAAdapter(OAAdapter):
         with self.force_attachment_invoice_sync_parse():
             for month in normalized_months:
                 self.list_application_records(month)
+
+    def load_sync_application_batch(self, scope_key: str) -> OASyncSourceBatch:
+        normalized_scope_key = clean_string(scope_key) or "all"
+        if normalized_scope_key != "all" and not MONTH_RE.match(normalized_scope_key):
+            raise ValueError("OA sync source scope must be YYYY-MM or all.")
+        self._sync_import_settings_cache()
+        self._require_sync_source_read_ready("before OA application read")
+        project_names = self._project_name_index()
+        self._require_sync_source_read_ready("after OA project read")
+
+        import_settings = self._current_import_settings()
+        enabled_form_types = set(import_settings["form_types"])
+        projection_statuses = set(import_settings["statuses"])
+        projection_records: list[OAApplicationRecord] = []
+        admission_records: list[OAApplicationRecord] = []
+        month = None if normalized_scope_key == "all" else normalized_scope_key
+        forms = (
+            (self._settings.payment_request_form_id, OA_IMPORT_FORM_TYPE_PAYMENT),
+            (self._settings.expense_claim_form_id, OA_IMPORT_FORM_TYPE_EXPENSE),
+        )
+        for form_id, form_type in forms:
+            if form_type not in enabled_form_types:
+                continue
+            documents = self._load_form_documents(form_id, month)
+            self._require_sync_source_read_ready(f"after {form_type} read")
+            for document in documents:
+                data = self._document_data(document)
+                status_key = self._canonical_status_key(data)
+                if status_key not in {OA_IMPORT_STATUS_COMPLETED, OA_IMPORT_STATUS_IN_PROGRESS}:
+                    continue
+                if form_type == OA_IMPORT_FORM_TYPE_PAYMENT:
+                    record = self._build_payment_request_record(
+                        document,
+                        project_names,
+                        respect_status_settings=False,
+                    )
+                    records = [record] if record is not None else []
+                else:
+                    records = self._build_expense_claim_records(
+                        document,
+                        project_names,
+                        respect_status_settings=False,
+                        parse_attachment_evidence=status_key == OA_IMPORT_STATUS_COMPLETED,
+                    )
+                if not records:
+                    raise RuntimeError(
+                        "OA sync source document failed required-field projection: "
+                        f"form_type={form_type}, document_id={self._document_id(document)}"
+                    )
+                admission_records.extend(records)
+                if status_key in projection_statuses:
+                    projection_records.extend(records)
+
+        self._set_read_status("ready", "OA 已同步")
+        return OASyncSourceBatch(
+            projection_records=tuple(sorted(projection_records, key=lambda item: (item.month, item.id))),
+            admission_records=tuple(sorted(admission_records, key=lambda item: (item.month, item.id))),
+        )
 
     def list_application_records(self, month: str) -> list[OAApplicationRecord]:
         if not MONTH_RE.match(month):
@@ -935,6 +919,7 @@ class MongoOAAdapter(OAAdapter):
         project_names: dict[str, str],
         *,
         respect_status_settings: bool = True,
+        parse_attachment_evidence: bool = True,
     ) -> list[OAApplicationRecord]:
         data = self._document_data(document)
         if not self._should_include_projection_document(
@@ -997,9 +982,13 @@ class MongoOAAdapter(OAAdapter):
                 source_expense_row_index=row_index,
                 source_expense_item_id=expense_item_id,
             )
-            item_attachment_pool = self._parse_attachment_evidence_pool(
-                contextual_attachment_files,
-                month=record_month,
+            item_attachment_pool = (
+                self._parse_attachment_evidence_pool(
+                    contextual_attachment_files,
+                    month=record_month,
+                )
+                if parse_attachment_evidence
+                else {"evidences": [], "invoices": [], "artifacts": []}
             )
             item_attachment_evidences = self._dedupe_attachment_evidences(
                 self._bind_attachment_evidences_to_expense_item(
@@ -1012,13 +1001,17 @@ class MongoOAAdapter(OAAdapter):
             item_attachment_invoices = self._dedupe_attachment_invoices(
                 self._attachment_invoices_from_evidences(item_attachment_evidences)
             )
-            item_attachment_artifacts = self._dedupe_attachment_artifacts(
-                self._bind_attachment_artifacts_to_expense_item(
-                    item_attachment_pool["artifacts"],
-                    attachment_files=contextual_attachment_files,
-                    source_expense_row_index=row_index,
-                    source_expense_item_id=expense_item_id,
+            item_attachment_artifacts = (
+                self._dedupe_attachment_artifacts(
+                    self._bind_attachment_artifacts_to_expense_item(
+                        item_attachment_pool["artifacts"],
+                        attachment_files=contextual_attachment_files,
+                        source_expense_row_index=row_index,
+                        source_expense_item_id=expense_item_id,
+                    )
                 )
+                if parse_attachment_evidence
+                else []
             )
             etc_sources.append(item)
             expense_items.append(
@@ -1031,7 +1024,12 @@ class MongoOAAdapter(OAAdapter):
                     "expense_content": expense_content or "—",
                     "reimbursement_date": reimbursement_date,
                     "attachment_file_count": str(len(item_attachment_files)),
-                    "attachment_files": [dict(file_entry) for file_entry in item_attachment_files],
+                    "attachment_files": [
+                        dict(file_entry)
+                        for file_entry in (
+                            item_attachment_files if parse_attachment_evidence else contextual_attachment_files
+                        )
+                    ],
                     "attachment_evidences": item_attachment_evidences,
                     "attachment_artifacts": item_attachment_artifacts,
                     "attachment_invoices": item_attachment_invoices,
@@ -2400,6 +2398,10 @@ class MongoOAAdapter(OAAdapter):
 
     def _set_read_status(self, code: str, message: str) -> None:
         self._last_read_status = OAReadStatus(code=code, message=message)
+
+    def _require_sync_source_read_ready(self, operation: str) -> None:
+        if self._mongo_temporarily_unavailable():
+            raise RuntimeError(f"OA Mongo source read failed {operation}.")
 
     @staticmethod
     def _month_scan_projection() -> dict[str, int]:

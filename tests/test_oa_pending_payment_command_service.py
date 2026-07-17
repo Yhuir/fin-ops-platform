@@ -70,7 +70,7 @@ class FakePaidStatusSnapshotWriter:
         self.calls.append(list(records))
         if self.error is not None:
             raise self.error
-        return SimpleNamespace(affected_scope_keys=self.affected_scope_keys)
+        return SimpleNamespace(oa_pending_payment_changed_scopes=self.affected_scope_keys)
 
 
 class FakeRelationCommandService:

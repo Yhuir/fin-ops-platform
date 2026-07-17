@@ -505,7 +505,7 @@ class OaPendingPaymentCommandService:
                 status_code=HTTPStatus.SERVICE_UNAVAILABLE,
                 details={"oa_row_ids": [record.id for record in records]},
             ) from exc
-        return bool(tuple(getattr(result, "affected_scope_keys", ()) or ()))
+        return bool(tuple(getattr(result, "oa_pending_payment_changed_scopes", ()) or ()))
 
     def _relation_status_by_bank_id(self, bank_transaction_ids: list[str]) -> dict[str, dict[str, Any]]:
         if not bank_transaction_ids:

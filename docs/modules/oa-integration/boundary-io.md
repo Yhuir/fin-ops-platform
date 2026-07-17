@@ -28,7 +28,7 @@
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | OA session/token | `auth.py`、session API | 权限和身份必须可校验 |
-| OA Mongo/query | `mongo_oa_adapter.py` | 外部数据进入 adapter/projection |
+| OA Mongo/query | `mongo_oa_adapter.py` | projection sync 只调用 `load_sync_application_batch(scope_key)`：每个启用 form/scope 单次读取后输出 `projection_records` 与 `admission_records` 两个不可变视图。前者遵守通用 OA form/status 配置；后者固定接纳 completed + in-progress，不受通用 status filter 污染。任一 form 读取或目标文档投影失败时整批 fail-closed，不得提交部分集合 |
 | OA sync event | `job.outbox_events(event_type='oa.sync')` / runtime worker | 手动同步、附件解析版本变化和 projection 版本变化都必须入 durable queue；HTTP 进程不得 inline sync 或自行轮询 Mongo |
 | OA attachment/import | OA attachment services | 识别结果必须审计和可追踪 |
 | OA source alias | `app.oa_source_aliases` | 仅 `active` alias 可参与 OA 附件票 duplicate canonicalization；不得按金额/申请人/项目自动合并 |
@@ -37,8 +37,9 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| OA projection rows | repositories/read models | 带 source version；完成态 workflow status 由 OA projection 边界统一归一/识别，必须兼容 canonical `completed` 和历史完成态别名（如 `已完成`、`approved`、`2`），下游 read model 不得各自实现完成态判断。repository 以业务列与规范 JSON 的 `IS DISTINCT FROM` 判定真实变化；相同 snapshot 不更新 `app.oa_applications.updated_at`，不重写 item/attachment。只有 authoritative snapshot 返回的真实变化月份、实际删除月份或 relation promotion 月份才通过既有 gateway/producer fan-out；无变化 run 记录 sync run/watermark，但不创建页面 dirty/outbox。变化时继续覆盖 `workbench_relation` 及其直接页面 consumers（bank detail、invoice lifecycle、input/output invoice、turnover、no-OA/bank-flow batch）；`workbench`、search、OA pending、pending invoice 保持各自 owner，cost statistics 由 Workbench 发布后的 owner fan-out。 |
-| OA sync status/run facts | AppHealth/AppStatus/operations dashboard | `app.oa_sync_runs(sync_type='oa_projection')` 是上一次读取 Mongo/projection run 的事实源；`job.outbox_events` 和 worker heartbeat 表示 refreshing/error，不得使用进程内内存状态或行级 `app.oa_applications.synced_at` 覆盖运行事实 |
+| OA projection rows | repositories/read models | 带 source version；完成态 workflow status 由 OA projection 边界统一归一/识别，必须兼容 canonical `completed` 和历史完成态别名（如 `已完成`、`approved`、`2`），下游 read model 不得各自实现完成态判断。repository 以业务列与规范 JSON 的 `IS DISTINCT FROM` 判定真实变化；相同 snapshot 不更新 `app.oa_applications.updated_at`，不重写 item/attachment。snapshot output 必须拆成 `completed_projection_changed_scopes` 与 `oa_pending_payment_changed_scopes`：admission/payment-status-only 变化只刷新 OA 待付款；completed canonical 真实新增、修改、删除才由 sync service 交给既有 shared owner fan-out。snapshot repository 不直接 enqueue Workbench/shared consumers。 |
+| OA sync status/run facts | AppHealth/AppStatus/operations dashboard | `app.oa_sync_runs(sync_type='oa_projection')` 是每次 Mongo/projection run 的事实源；成功、失败都必须落 run，失败不得提交部分 projection/snapshot。`job.outbox_events` 和 worker heartbeat 表示 refreshing/error，不得使用进程内内存状态或行级 `app.oa_applications.synced_at` 覆盖运行事实 |
+| in-progress attachment metadata | OA pending admission | 当前只传递原始/上下文化文件元数据，不执行附件证据解析、发票识别或 OCR，不产生 artifact/evidence/invoice。未来 OCR 必须作为独立版本化链路设计，不得在本同步热路径内隐式启用 |
 | OA session/permission payload | frontend session | 不泄露 secret |
 | Attachment invoice result | invoice/ETC/input usage modules | 经 service 边界传递 |
 | OA source alias canonicalization | object identity audit / downstream duplicate classifier | 只读消费 `active` alias，未批准 alias 仍按原 OA row/source 判定 |
@@ -48,7 +49,7 @@
 
 - Own read model：无单一页面 read model；影响 `oa_pending_payment`、`input_invoice_usage`、`invoice_lifecycle` 等。
 - OA manual import/create/refresh/remove 影响 `workbench`、`workbench_relation`、`invoice_lifecycle`、`tax_offset`、`search` 和 `cost_statistics`；返回 target envelope 后由页面等待 operation barrier。
-- OA projection sync 由 runtime worker 读取 Mongo、条件写 `app.oa_*` projection、记录 `app.oa_sync_runs` / `app.oa_sync_watermarks`，再按 snapshot 的 changed scopes 通过 read model refresh gateway 标记 downstream dirty scopes；周期性相同输入必须是零 projection rewrite、零 downstream fan-out。
+- OA projection sync 由 runtime worker 一次读取 dual-view source batch、条件写 `app.oa_*` projection、记录 `app.oa_sync_runs` / `app.oa_sync_watermarks`，再按明确 change cause 标记 downstream dirty scopes；周期性相同输入必须是零 projection rewrite、零 downstream fan-out。`all` 替换必须把旧 watermark scopes 纳入删除比较，不能漏掉最后一条 completed 被删除的月份。
 - External system：OA Mongo / OA app。
 - Repository：`postgres_repositories/oa_projection.py`、`oa_applicant_credentials.py`。
 
@@ -80,7 +81,7 @@
 ## 当前缺口和删除条件
 
 - OA token/credential 变更必须同步 permissions/security docs。
-- 删除旧 OA projection path 前必须验证 source version 和 downstream freshness。
+- sync service 的多次 list/month 扫描与 adapter fingerprint polling 已删除；架构 guard 禁止恢复第二套 Mongo 扫描、部分结果 fallback 或混合变化集合 fan-out。
 
 ## Canonical facts ownership
 
@@ -89,4 +90,4 @@
 - Allowed reads: OA projection adapters/read ports、OA integration APIs。
 - Downstream outputs: workbench、pending invoice、OA pending、invoice lifecycle、search dirty scopes 或 owner producer 输出。
 - Forbidden paths: production API 不得直接读 OA Mongo；HTTP 进程不得启动 OA polling、热重建 Workbench read model 或 fallback inline sync；OA cache 不得当作正式发票池；OA source alias 不得由弱业务指纹自动激活；OA credential 不得通过 settings snapshot fallback 写入。
-- Old code deletion: direct Mongo runtime adapter fallback、OA snapshot fallback、进程内 `OASyncService` polling/hot rebuild 和绕过 projection/queue 的 API 读取必须删除；migration/audit/rollback 工具保留不算 closure。
+- Old code deletion: direct Mongo runtime adapter fallback、OA snapshot fallback、进程内 `OASyncService` polling/hot rebuild、无调用方 fingerprint polling、sync service 多 list 扫描和绕过 projection/queue 的 API 读取必须删除；migration/audit/rollback 工具保留不算 closure。

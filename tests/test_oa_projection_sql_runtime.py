@@ -5,6 +5,7 @@ import os
 from dataclasses import asdict
 from datetime import datetime
 from http import HTTPStatus
+from types import SimpleNamespace
 from unittest.mock import patch
 import unittest
 
@@ -376,8 +377,9 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         from fin_ops_platform.services.oa_projection_sync import OAProjectionSyncService
 
         class SourceAdapter:
-            def list_application_records(self, month: str) -> list[OAApplicationRecord]:
-                return [oa_record(month=month)]
+            def load_sync_application_batch(self, scope_key: str) -> object:
+                records = [oa_record(month=scope_key)]
+                return SimpleNamespace(projection_records=records, admission_records=records)
 
         class ProjectionRepository:
             def __init__(self) -> None:
@@ -438,19 +440,16 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
 
         class SourceAdapter:
             def __init__(self) -> None:
-                self.listed_months: list[str] = []
-                self.list_all_called = False
+                self.loaded_scopes: list[str] = []
 
-            def list_available_months(self) -> list[str]:
-                return ["2025-12", "2026-01", "2026-02"]
-
-            def list_all_application_records(self) -> list[OAApplicationRecord]:
-                self.list_all_called = True
-                return [oa_record(row_id="oa-old", month="2025-12")]
-
-            def list_application_records(self, month: str) -> list[OAApplicationRecord]:
-                self.listed_months.append(month)
-                return [oa_record(row_id=f"oa-{month}", month=month)]
+            def load_sync_application_batch(self, scope_key: str) -> object:
+                self.loaded_scopes.append(scope_key)
+                records = [
+                    oa_record(row_id="oa-2025-12", month="2025-12"),
+                    oa_record(row_id="oa-2026-01", month="2026-01"),
+                    oa_record(row_id="oa-2026-02", month="2026-02"),
+                ]
+                return SimpleNamespace(projection_records=records, admission_records=records)
 
         class ProjectionRepository:
             def __init__(self) -> None:
@@ -484,8 +483,7 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
 
         result = service.handle_runtime_event(event)
 
-        self.assertFalse(source.list_all_called)
-        self.assertEqual(source.listed_months, ["2026-01", "2026-02"])
+        self.assertEqual(source.loaded_scopes, ["all"])
         self.assertEqual(result["scanned_count"], 2)
         self.assertEqual([record.month for record in repository.records], ["2026-01", "2026-02"])
 
@@ -493,11 +491,9 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         from fin_ops_platform.services.oa_projection_sync import OAProjectionSyncService
 
         class SourceAdapter:
-            def list_available_months(self) -> list[str]:
-                return ["2026-01"]
-
-            def list_application_records(self, month: str) -> list[OAApplicationRecord]:
-                return [oa_record(row_id="oa-2026-01", month=month)]
+            def load_sync_application_batch(self, _scope_key: str) -> object:
+                records = [oa_record(row_id="oa-2026-01", month="2026-01")]
+                return SimpleNamespace(projection_records=records, admission_records=records)
 
         class ProjectionRepository:
             def __init__(self) -> None:
@@ -575,8 +571,11 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         ]
 
         class SourceAdapter:
-            def list_application_records(self, month: str) -> list[OAApplicationRecord]:
-                return [source_record]
+            def load_sync_application_batch(self, _scope_key: str) -> object:
+                return SimpleNamespace(
+                    projection_records=[source_record],
+                    admission_records=[source_record],
+                )
 
         class ProjectionRepository:
             def __init__(self) -> None:

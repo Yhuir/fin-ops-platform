@@ -451,7 +451,8 @@ class AppHealthSystemAuditPostgresTests(unittest.TestCase):
         ).commit_authoritative_snapshot(
             scope_key="all",
             tenant_id="default",
-            records=[],
+            projection_records=[],
+            admission_records=[],
             payment_statuses={},
         )
         event = queue.claim_next(

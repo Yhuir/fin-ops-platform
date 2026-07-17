@@ -20,6 +20,7 @@
 
 - `paymentStatus` 仅 `paid` / `unpaid`；候选、非 outflow、金额差异不能绕过写回校验。
 - completed/in-progress 主行身份、flow id 解析、duplicate/empty/invalid input。
+- 双视图 source batch 在通用 status filter 仅含 completed 时仍接纳 in-progress；in-progress 不调用附件 parser/OCR，completed 保持现有附件处理。
 - 精确月份 shard 即使命中跨月 relation，也只聚合该月份 OA 主行；其它月份成员不能污染当前 shard。
 - writeback relation、金额、方向、幂等和 already-paid 重试。
 - filters、sort、paging、view mode contract。
@@ -30,9 +31,10 @@
 
 覆盖：
 
-- OA sync 一次 PG 事务提交 completed projection、admission、payment status、watermark、outbox。
+- OA sync 每个启用 form/scope 单次读取，一次 PG 事务提交 completed projection、admission、payment status、watermark、outbox；部分 form 失败必须零提交并记录 failed run。
 - 相同 canonical snapshot 第二次提交必须保持 application/status `updated_at`、item/attachment 和 outbox count 不变，且 sync service 不 fan-out 任何页面 refresh；真实变化仍精确覆盖 changed month 与 `all` 聚合 consumers。
-- OA canonical snapshot 变化时，同一事务批量写入 `workbench_relation:<month>` 与 `oa_pending_payment:<month>`，且依赖 target 排在 consumer target 前；queue 失败整体回滚。纯 payment-status writeback 不额外污染 relation target。
+- admission/payment-status-only 变化只写 `oa_pending_payment:<month>`；completed canonical 真实新增、修改或删除才由 sync service 触发 shared owner fan-out。snapshot repository 不直接写 `workbench_relation`；queue 失败整体回滚。
+- `all` 同步把旧 source watermark scopes 纳入删除比较，最后一条 completed 删除不能漏掉 shared change。
 - snapshot replace/delete、空集合、非法 status、queue 失败全回滚。
 - 页面 paid writeback 增量更新 PG snapshot/watermark/精确月份 outbox；already-paid 修复；缺初始化 watermark fail fast。
 - external MySQL 已成功而 PG 失败时返回可重试错误；重复命令不丢修复机会。
@@ -40,7 +42,7 @@
 
 入口：`tests/test_oa_projection_sync_service.py`、`tests/test_oa_pending_payment_source_snapshot_repository.py`、`tests/test_oa_pending_payment_relation_repository.py`、`tests/test_oa_pending_payment_command_service.py`。
 
-真实 PostgreSQL：`tests/test_oa_pending_payment_postgres_integration.py` 同时覆盖 canonical commit -> durable worker -> fresh/ETag 与 identical commit 零写/零 outbox。
+真实 PostgreSQL：`tests/test_oa_pending_payment_postgres_integration.py` 同时覆盖 canonical commit -> durable worker -> fresh/ETag 与 identical commit 零写/零 outbox。其中 admission-only 隔离用例保留稳定 completed canonical 行后再修改 in-progress admission，锁定 completed `updated_at` 不变、shared change set 为空、增量 outbox 只有 `oa_pending_payment:<month>`，随后 identical commit 再次零写入。
 
 ### 3. API contract：适用
 
@@ -102,6 +104,7 @@
 
 - input/output invoice worker和 read models不再被 OA event claim，原 API/rows仍正常。
 - Workbench relation、pending relation promotion、bank claim、bank/invoice detail不回归。
+- admission-only 同步前后 Workbench、成本统计及其它 shared dirty/outbox/source versions 不变；completed shared fact 变化仍保留合法 fan-out。
 - 共享 `PageAuditIcon`、其它页面文案和权限不改变。
 - server/runtime边界无 live fallback/private adapter/state-store snapshot。
 - 旧 API response shape中仍受支持的 rows/detail/write contracts不丢字段。
@@ -113,6 +116,7 @@
 ### 本地门槛
 
 - 证明 `304` path 不执行 rows/facet aggregation。
+- 证明 sync source 每个启用 form/scope 只读取一次，in-progress 跳过附件/OCR 热路径。
 - 证明 rows query 是一个有界 set-based data statement，同时返回 summary/facets 与 bounded page；不存在第二次 page roundtrip，也不存在 `all_rows()` 每 200 行循环。
 - 关键 SQL 在生产等量级副本保存 `EXPLAIN (ANALYZE, BUFFERS)`；没有数据证据不新增索引。
 
@@ -129,6 +133,7 @@
 
 ### 本地验证结果
 
+- 2026-07-17 dual-view/fan-out 隔离变更：全量 backend `4130 passed / 6 conditional skipped`；真实 PostgreSQL 0001–0110 `4 passed`；全量前端 `72 files / 857 tests`、production build、Playwright `179/179`、lint/docs/diff-check 全部通过。6 项 backend skip 仅为当前机器未提供的外部依赖条件；真实 PostgreSQL 链未跳过。
 - OA后端目标矩阵：266 tests passed；真实PG集成：1 passed。
 - OA前端组件：40 tests passed；OA Playwright：8 tests passed。
 - 全量前端：72 files / 849 tests passed，production build passed；构建仅保留既有CSS minify/chunk size warning。

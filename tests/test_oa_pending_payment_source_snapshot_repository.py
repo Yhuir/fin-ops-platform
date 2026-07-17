@@ -6,6 +6,7 @@ from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRecord
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_snapshot import (
     PostgresOaPendingPaymentSourceSnapshotRepository,
+    _signature,
     oa_pending_payment_source_scope_keys,
 )
 
@@ -37,23 +38,22 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
 
         result = repository.replace_authoritative_snapshot(
             scope_key="2026-06",
-            records=[_oa("oa-pay-row-1", "2026-06", workflow_status="in_progress", flow_id="flow-1")],
+            completed_projection_records=[],
+            admission_records=[_oa("oa-pay-row-1", "2026-06", workflow_status="in_progress", flow_id="flow-1")],
             payment_statuses={"flow-1": OAPaymentStatusRecord(flow_id="flow-1", pay_status=0)},
         )
 
-        self.assertEqual(result.affected_scope_keys, ("2026-06",))
+        self.assertEqual(result.completed_projection_changed_scopes, ())
+        self.assertEqual(result.oa_pending_payment_changed_scopes, ("2026-06",))
         self.assertEqual(result.payment_status_count, 1)
         self.assertEqual(result.admission_count, 1)
         self.assertTrue(connection.committed)
         self.assertFalse(connection.rolled_back)
-        self.assertEqual(len(queue.calls), 2)
+        self.assertEqual(len(queue.calls), 1)
         self.assertIs(queue.calls[0]["transaction"], connection.transaction_handle)
         self.assertEqual(
             [(call["scope_type"], call["scope_key"]) for call in queue.calls],
-            [
-                ("workbench_relation", "2026-06"),
-                ("oa_pending_payment", "2026-06"),
-            ],
+            [("oa_pending_payment", "2026-06")],
         )
         self.assertTrue(
             all(call["transaction"] is connection.transaction_handle for call in queue.calls)
@@ -100,19 +100,18 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
 
         result = repository.replace_authoritative_snapshot(
             scope_key="all",
-            records=[],
+            completed_projection_records=[],
+            admission_records=[],
             payment_statuses={},
         )
 
-        self.assertEqual(result.affected_scope_keys, ("2026-05",))
+        self.assertEqual(result.completed_projection_changed_scopes, ())
+        self.assertEqual(result.oa_pending_payment_changed_scopes, ("2026-05",))
         self.assertEqual(result.payment_status_count, 0)
         self.assertEqual(result.admission_count, 0)
         self.assertEqual(
             [(call["scope_type"], call["scope_key"]) for call in queue.calls],
-            [
-                ("workbench_relation", "2026-05"),
-                ("oa_pending_payment", "2026-05"),
-            ],
+            [("oa_pending_payment", "2026-05")],
         )
 
     def test_queue_failure_rolls_back_snapshot_watermark_and_outbox_transaction(self) -> None:
@@ -127,12 +126,90 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "outbox unavailable"):
             repository.replace_authoritative_snapshot(
                 scope_key="2026-06",
-                records=[_oa("oa-pay-row-1", "2026-06", workflow_status="in_progress", flow_id="flow-1")],
+                completed_projection_records=[],
+                admission_records=[_oa("oa-pay-row-1", "2026-06", workflow_status="in_progress", flow_id="flow-1")],
                 payment_statuses={"flow-1": OAPaymentStatusRecord(flow_id="flow-1", pay_status=0)},
             )
 
         self.assertFalse(connection.committed)
         self.assertTrue(connection.rolled_back)
+
+    def test_completed_projection_change_is_reported_separately_and_only_repository_owned_oa_refresh_is_enqueued(self) -> None:
+        connection = FakeConnection()
+        queue = FakeTransactionalQueue()
+        repository = PostgresOaPendingPaymentSourceSnapshotRepository(
+            connection,
+            queue_repository=queue,
+            pending_relation_repository=FakePendingRelationRepository(),
+        )
+        completed = _oa("oa-pay-row-1", "2026-06", workflow_status="completed", flow_id="flow-1")
+
+        result = repository.commit_authoritative_snapshot(
+            scope_key="2026-06",
+            projection_records=[completed],
+            admission_records=[completed],
+            payment_statuses={"flow-1": OAPaymentStatusRecord(flow_id="flow-1", pay_status=0)},
+        )
+
+        self.assertEqual(result.completed_projection_changed_scopes, ("2026-06",))
+        self.assertEqual(result.oa_pending_payment_changed_scopes, ("2026-06",))
+        self.assertEqual(
+            [(call["scope_type"], call["scope_key"]) for call in queue.calls],
+            [("oa_pending_payment", "2026-06")],
+        )
+
+    def test_payment_status_only_change_does_not_report_completed_projection_change(self) -> None:
+        connection = FakeConnection(
+            status_rows=[
+                {
+                    "flow_id": "flow-1",
+                    "pay_status": 0,
+                    "scope_month": "2026-06",
+                    "source_signature": "old-status",
+                }
+            ],
+            watermark_rows=[_watermark("2026-06", completed_signature=_signature([]))],
+        )
+        queue = FakeTransactionalQueue()
+        repository = PostgresOaPendingPaymentSourceSnapshotRepository(
+            connection,
+            queue_repository=queue,
+            pending_relation_repository=FakePendingRelationRepository(),
+        )
+
+        result = repository.replace_authoritative_snapshot(
+            scope_key="2026-06",
+            completed_projection_records=[],
+            admission_records=[],
+            payment_statuses={"flow-1": OAPaymentStatusRecord(flow_id="flow-1", pay_status=1)},
+        )
+
+        self.assertEqual(result.completed_projection_changed_scopes, ())
+        self.assertEqual(result.oa_pending_payment_changed_scopes, ("2026-06",))
+        self.assertEqual(
+            [(call["scope_type"], call["scope_key"]) for call in queue.calls],
+            [("oa_pending_payment", "2026-06")],
+        )
+
+    def test_removed_completed_only_scope_uses_old_watermark_and_reports_shared_projection_change(self) -> None:
+        connection = FakeConnection(watermark_rows=[_watermark("2026-05")])
+        queue = FakeTransactionalQueue()
+        repository = PostgresOaPendingPaymentSourceSnapshotRepository(
+            connection,
+            queue_repository=queue,
+            pending_relation_repository=FakePendingRelationRepository(),
+        )
+
+        result = repository.replace_authoritative_snapshot(
+            scope_key="all",
+            completed_projection_records=[],
+            admission_records=[],
+            payment_statuses={},
+        )
+
+        self.assertEqual(result.completed_projection_changed_scopes, ("2026-05",))
+        self.assertEqual(result.oa_pending_payment_changed_scopes, ("2026-05",))
+        self.assertEqual([call["scope_key"] for call in queue.calls], ["2026-05"])
 
     def test_canonical_commit_rolls_back_completed_projection_with_snapshot_when_outbox_fails(self) -> None:
         connection = FakeConnection()
@@ -145,7 +222,8 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "outbox unavailable"):
             repository.commit_authoritative_snapshot(
                 scope_key="2026-06",
-                records=[_oa("oa-pay-row-1", "2026-06", workflow_status="completed", flow_id="flow-1")],
+                projection_records=[_oa("oa-pay-row-1", "2026-06", workflow_status="completed", flow_id="flow-1")],
+                admission_records=[_oa("oa-pay-row-1", "2026-06", workflow_status="completed", flow_id="flow-1")],
                 payment_statuses={"flow-1": OAPaymentStatusRecord(flow_id="flow-1", pay_status=0)},
             )
 
@@ -178,7 +256,7 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
             records=[_oa("oa-pay-row-1", "2026-06", workflow_status="completed", flow_id="flow-1")]
         )
 
-        self.assertEqual(result.affected_scope_keys, ("2026-06",))
+        self.assertEqual(result.oa_pending_payment_changed_scopes, ("2026-06",))
         self.assertEqual([call["scope_key"] for call in queue.calls], ["2026-06"])
         self.assertIs(queue.calls[0]["transaction"], connection.transaction_handle)
         executed_sql = "\n".join(sql for sql, _params in connection.transaction_handle.executions)
@@ -210,7 +288,7 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
             records=[_oa("oa-pay-row-1", "2026-06", workflow_status="completed", flow_id="flow-1")]
         )
 
-        self.assertEqual(result.affected_scope_keys, ())
+        self.assertEqual(result.oa_pending_payment_changed_scopes, ())
         self.assertEqual(queue.calls, [])
         self.assertEqual(connection.transaction_handle.executions, [])
         self.assertTrue(connection.committed)
@@ -278,7 +356,8 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "invalid pay_status"):
             repository.replace_authoritative_snapshot(
                 scope_key="2026-06",
-                records=[],
+                completed_projection_records=[],
+                admission_records=[],
                 payment_statuses={"flow-1": {"flow_id": "flow-1", "pay_status": "bad"}},  # type: ignore[dict-item]
             )
 
@@ -432,12 +511,12 @@ def _oa(row_id: str, month: str, *, workflow_status: str, flow_id: str) -> OAApp
     )
 
 
-def _watermark(scope_key: str) -> dict[str, object]:
+def _watermark(scope_key: str, *, completed_signature: str = "completed-signature") -> dict[str, object]:
     return {
         "sync_key": f"oa_pending_payment_source:default:{scope_key}",
         "payload": {
             "scope_key": scope_key,
-            "completed_oa_signature": "completed-signature",
+            "completed_oa_signature": completed_signature,
             "admission_signature": "admission-signature",
             "payment_status_signature": "pending-status-signature",
             "source_signature": "source-signature",

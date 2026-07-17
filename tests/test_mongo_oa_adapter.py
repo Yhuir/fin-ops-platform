@@ -236,24 +236,6 @@ class QueryRecordingCollection:
         return []
 
 
-class MutableDocumentCollection:
-    def __init__(self, documents: list[dict]) -> None:
-        self.documents = documents
-        self.queries: list[dict] = []
-        self.projections: list[dict | None] = []
-
-    def find(self, query: dict, projection: dict | None = None) -> list[dict]:
-        self.queries.append(query)
-        self.projections.append(dict(projection) if isinstance(projection, dict) else None)
-        form_query = query.get("form_id")
-        allowed_form_ids = set(form_query.get("$in", [])) if isinstance(form_query, dict) else {form_query}
-        return [
-            dict(document)
-            for document in self.documents
-            if document.get("form_id") in allowed_form_ids
-        ]
-
-
 class FlakyMonthCollection:
     def __init__(self) -> None:
         self.call_count = 0
@@ -2468,6 +2450,154 @@ class MongoOAAdapterTests(unittest.TestCase):
         self.assertEqual([document["external_id"] for document in documents], ["2047"])
         self.assertEqual(months, ["2026-03"])
 
+    def test_sync_batch_keeps_projection_filter_but_always_admits_in_progress_without_attachment_parse(self) -> None:
+        adapter = CountingStubMongoOAAdapter(
+            form_documents={
+                "2": [
+                    {
+                        "_id": "payment-doc-completed",
+                        "form_id": "2",
+                        "data": {
+                            "applicationDate": "2026-03-16",
+                            "userName": "刘际涛",
+                            "amount": "199",
+                            "beneficiary": "供应商 A",
+                            "cause": "材料款",
+                            "flowRequestId": "2047",
+                            "processStatus": "2",
+                        },
+                    }
+                ],
+                "32": [
+                    {
+                        "_id": "expense-doc-in-progress",
+                        "form_id": "32",
+                        "data": {
+                            "ApplicationDate": "2026-03-18",
+                            "Reimbursement Personnel": "胡瑢",
+                            "flowRequestId": "3002",
+                            "processStatus": "1",
+                            "schedule": [
+                                {
+                                    "row_index": 0,
+                                    "detailReimbursementAmount": "88",
+                                    "feeContent": "交通费",
+                                    "detailReimbursementAttachment": {
+                                        "files": [{"fileId": "file-1", "fileName": "进行中附件.pdf"}]
+                                    },
+                                }
+                            ],
+                        },
+                    }
+                ],
+            },
+            project_documents=[],
+        )
+        adapter.set_import_settings_provider(
+            lambda: {"form_types": ["payment_request", "expense_claim"], "statuses": ["completed"]}
+        )
+
+        with patch.object(
+            adapter,
+            "_parse_attachment_evidence_pool",
+            side_effect=AssertionError("in-progress sync admission must not parse attachments"),
+        ):
+            batch = adapter.load_sync_application_batch("2026-03")
+
+        self.assertEqual([record.id for record in batch.projection_records], ["oa-pay-2047"])
+        self.assertEqual(
+            [record.id for record in batch.admission_records],
+            ["oa-exp-3002", "oa-pay-2047"],
+        )
+        in_progress = next(record for record in batch.admission_records if record.id == "oa-exp-3002")
+        self.assertEqual(in_progress.workflow_status, "in_progress")
+        self.assertEqual(in_progress.attachment_evidences, [])
+        self.assertEqual(in_progress.attachment_artifacts, [])
+        self.assertEqual(in_progress.attachment_invoices, [])
+        self.assertEqual(in_progress.expense_items[0]["attachment_files"][0]["fileId"], "file-1")
+        self.assertIn("_attachment_invoice_source_context", in_progress.expense_items[0]["attachment_files"][0])
+        self.assertEqual(adapter.form_load_calls, [("2", "2026-03"), ("32", "2026-03")])
+
+    def test_sync_batch_fails_closed_when_mongo_read_is_incomplete(self) -> None:
+        adapter = FailingMongoOAAdapter()
+
+        with self.assertRaisesRegex(RuntimeError, "OA Mongo source read failed"):
+            adapter.load_sync_application_batch("2026-03")
+
+    def test_sync_batch_fails_closed_after_one_form_succeeds_and_the_next_form_fails(self) -> None:
+        class PartialFailureAdapter(StubMongoOAAdapter):
+            def _load_form_documents(self, form_id: str, month: str | None = None) -> list[dict]:
+                if str(form_id) == "32":
+                    self._mongo_unavailable_until = float("inf")
+                    return []
+                return super()._load_form_documents(form_id, month)
+
+        adapter = PartialFailureAdapter(
+            form_documents={
+                "2": [
+                    {
+                        "_id": "payment-doc-completed",
+                        "form_id": "2",
+                        "data": {
+                            "applicationDate": "2026-03-16",
+                            "userName": "刘际涛",
+                            "amount": "199",
+                            "beneficiary": "供应商 A",
+                            "cause": "材料款",
+                            "flowRequestId": "2047",
+                            "processStatus": "2",
+                        },
+                    }
+                ],
+                "32": [],
+            },
+            project_documents=[],
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "after expense_claim read"):
+            adapter.load_sync_application_batch("2026-03")
+
+    def test_sync_batch_keeps_completed_expense_attachment_processing(self) -> None:
+        adapter = StubMongoOAAdapter(
+            form_documents={
+                "2": [],
+                "32": [
+                    {
+                        "_id": "expense-doc-completed",
+                        "form_id": "32",
+                        "data": {
+                            "ApplicationDate": "2026-03-18",
+                            "Reimbursement Personnel": "胡瑢",
+                            "flowRequestId": "3003",
+                            "processStatus": "2",
+                            "schedule": [
+                                {
+                                    "row_index": 0,
+                                    "detailReimbursementAmount": "88",
+                                    "feeContent": "交通费",
+                                    "detailReimbursementAttachment": {
+                                        "files": [{"fileId": "file-2", "fileName": "已完成附件.pdf"}]
+                                    },
+                                }
+                            ],
+                        },
+                    }
+                ],
+            },
+            project_documents=[],
+        )
+
+        with patch.object(
+            adapter,
+            "_parse_attachment_evidence_pool",
+            return_value={"evidences": [], "invoices": [], "artifacts": []},
+        ) as parse_pool:
+            batch = adapter.load_sync_application_batch("2026-03")
+
+        self.assertEqual([record.id for record in batch.projection_records], ["oa-exp-3003"])
+        self.assertEqual([record.id for record in batch.admission_records], ["oa-exp-3003"])
+        parse_pool.assert_called_once()
+
     def test_import_settings_filter_form_types_and_statuses(self) -> None:
         adapter = StubMongoOAAdapter(
             form_documents={
@@ -2746,51 +2876,6 @@ class MongoOAAdapterTests(unittest.TestCase):
         self.assertEqual(adapter.form_load_calls.count(("2", "2026-03")), 2)
         self.assertEqual(adapter.form_load_calls.count(("2", "2026-04")), 1)
         self.assertEqual(adapter.form_load_calls.count(("2", None)), 2)
-
-    def test_poll_sync_fingerprints_hashes_enabled_oa_documents_by_month_and_all(self) -> None:
-        collection = MutableDocumentCollection(
-            [
-                {
-                    "_id": "pay-1",
-                    "form_id": "2",
-                    "modifiedTime": "2026-03-18T10:00:00",
-                    "data": {
-                        "applicationDate": "2026-03-18",
-                        "amount": "100",
-                        "beneficiary": "供应商 A",
-                        "cause": "三月付款",
-                        "flowRequestId": "1001",
-                        "status": "已完成",
-                    },
-                },
-                {
-                    "_id": "exp-1",
-                    "form_id": "32",
-                    "modifiedTime": "2026-04-02T10:00:00",
-                    "data": {
-                        "ApplicationDate": "2026-04-02",
-                        "Amount": "200",
-                        "Reimbursement Personnel": "张三",
-                        "flowRequestId": "2001",
-                        "status": "已完成",
-                    },
-                },
-            ]
-        )
-        adapter = QueryRecordingMongoOAAdapter(collection)
-
-        first = adapter.poll_sync_fingerprints()
-        collection.documents[0]["data"]["amount"] = "101"
-        second = adapter.poll_sync_fingerprints()
-
-        self.assertCountEqual(first.keys(), ["2026-03", "2026-04", "all"])
-        self.assertEqual(first["2026-04"], second["2026-04"])
-        self.assertNotEqual(first["2026-03"], second["2026-03"])
-        self.assertNotEqual(first["all"], second["all"])
-        self.assertEqual(len(collection.projections), 4)
-        for projection in collection.projections:
-            self.assertIn("data", projection)
-            self.assertIn("modifiedTime", projection)
 
     def test_load_form_documents_pushes_month_filter_into_query(self) -> None:
         collection = QueryRecordingCollection()

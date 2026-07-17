@@ -52,6 +52,7 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | Dirty scope/outbox event | PostgreSQL durable queue | `job.outbox_events` 与 `job.read_model_dirty_scopes` 是事实源 |
+| OA sync change-cause fan-out | OA snapshot repository / `OAProjectionSyncService` | repository 只在 canonical 事务内写 OA 私有精确月份 refresh，并分别返回 `oa_pending_payment_changed_scopes` 与 `completed_projection_changed_scopes`。admission/payment-status-only 变化不得进入 shared fan-out；completed canonical 真实变化才由 sync service 交给既有 shared owner。禁止 repository hidden Workbench fan-out或混合 `affected scopes` |
 | Fresh payload | 页面 API/Redis | Redis 只能缓存 fresh gate 后 payload |
 | Readiness/status | app status/operation barrier | 页面不能伪装 fresh |
 | Parent readiness role | manifest / app status | `fan_out_command` 的 command-only `all` parent 不写 current readiness；旧记录只作 diagnostics。真实 month shard、`queryable_parent_aggregate`、`queryable_all_scope` 和 Workbench active generation 继续作为 current proof。当前 parent command 失败仍由 dirty/outbox 阻断，不能因旧 fresh readiness 被覆盖。 |

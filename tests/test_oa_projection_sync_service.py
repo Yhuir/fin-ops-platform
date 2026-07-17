@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRecord
@@ -177,7 +178,8 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
         result = service.handle_runtime_event(_event("2026-06"))
 
         self.assertEqual(snapshot_repository.calls[0]["scope_key"], "2026-06")
-        self.assertEqual(snapshot_repository.calls[0]["records"], records)
+        self.assertEqual(snapshot_repository.calls[0]["projection_records"], records)
+        self.assertEqual(snapshot_repository.calls[0]["admission_records"], records)
         self.assertEqual(snapshot_repository.calls[0]["payment_statuses"], payment_statuses)
         self.assertEqual(result["pending_payment_source_snapshot_count"], 1)
         self.assertEqual(result["pending_payment_admission_count"], 1)
@@ -194,7 +196,8 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
             def commit_authoritative_snapshot(self, **kwargs: object) -> OaPendingPaymentSourceSnapshotResult:
                 self.calls.append(dict(kwargs))
                 return OaPendingPaymentSourceSnapshotResult(
-                    affected_scope_keys=(),
+                    completed_projection_changed_scopes=(),
+                    oa_pending_payment_changed_scopes=(),
                     payment_status_count=0,
                     admission_count=0,
                     source_signatures={},
@@ -213,6 +216,41 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
 
         self.assertEqual(result["upserted_count"], 0)
         self.assertEqual(result["pending_payment_affected_scope_keys"], [])
+        self.assertEqual(queue_repository.refreshes, [])
+
+    def test_admission_only_change_does_not_fan_out_shared_read_models(self) -> None:
+        in_progress = _oa("oa-pay-progress", "2026-06", workflow_status="in_progress")
+        queue_repository = FakeQueueRepository()
+
+        class AdmissionOnlySnapshotRepository(FakePendingPaymentSourceSnapshotRepository):
+            def commit_authoritative_snapshot(self, **kwargs: object) -> OaPendingPaymentSourceSnapshotResult:
+                self.calls.append(dict(kwargs))
+                return OaPendingPaymentSourceSnapshotResult(
+                    completed_projection_changed_scopes=(),
+                    oa_pending_payment_changed_scopes=("2026-06",),
+                    payment_status_count=1,
+                    admission_count=1,
+                    source_signatures={"2026-06": "signature"},
+                )
+
+        service = OAProjectionSyncService(
+            source_adapter=FakeSourceAdapter(
+                months=["2026-06"],
+                records_by_month={"2026-06": [in_progress]},
+                projection_records_by_month={"2026-06": []},
+            ),
+            projection_repository=FakeProjectionRepository(),
+            queue_repository=queue_repository,
+            payment_status_repository=FakePaymentStatusRepository(
+                {"progress": OAPaymentStatusRecord(flow_id="progress", pay_status=0)}
+            ),
+            pending_payment_source_snapshot_repository=AdmissionOnlySnapshotRepository(),
+        )
+
+        result = service.handle_runtime_event(_event("2026-06"))
+
+        self.assertEqual(result["completed_projection_changed_scope_keys"], [])
+        self.assertEqual(result["pending_payment_affected_scope_keys"], ["2026-06"])
         self.assertEqual(queue_repository.refreshes, [])
 
     def test_external_payment_status_failure_prevents_any_postgres_projection_write(self) -> None:
@@ -237,17 +275,63 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
         self.assertEqual(projection_repository.non_completed_scopes, [])
         self.assertEqual(snapshot_repository.calls, [])
 
+    def test_source_batch_failure_records_failed_sync_run_without_projection_write(self) -> None:
+        projection_repository = FakeProjectionRepository()
+
+        class FailingSourceAdapter:
+            def load_sync_application_batch(self, _scope_key: str) -> object:
+                raise RuntimeError("partial mongo read")
+
+        service = OAProjectionSyncService(
+            source_adapter=FailingSourceAdapter(),
+            projection_repository=projection_repository,
+            queue_repository=FakeQueueRepository(),
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "partial mongo read"):
+            service.handle_runtime_event(_event("2026-06"))
+
+        self.assertEqual(projection_repository.saved_records, [])
+        self.assertEqual(projection_repository.sync_runs[0]["status"], "failed")
+        self.assertEqual(projection_repository.sync_runs[0]["error_count"], 1)
+
 
 class FakeSourceAdapter:
-    def __init__(self, *, months: list[str], records_by_month: dict[str, list[OAApplicationRecord]]) -> None:
+    def __init__(
+        self,
+        *,
+        months: list[str],
+        records_by_month: dict[str, list[OAApplicationRecord]],
+        projection_records_by_month: dict[str, list[OAApplicationRecord]] | None = None,
+    ) -> None:
         self._months = list(months)
         self._records_by_month = {month: list(records) for month, records in records_by_month.items()}
+        self._projection_records_by_month = (
+            {month: list(records) for month, records in projection_records_by_month.items()}
+            if projection_records_by_month is not None
+            else self._records_by_month
+        )
 
-    def list_available_months(self) -> list[str]:
-        return list(self._months)
-
-    def list_application_records(self, month: str) -> list[OAApplicationRecord]:
-        return list(self._records_by_month.get(month, []))
+    def load_sync_application_batch(self, scope_key: str) -> SimpleNamespace:
+        if scope_key == "all":
+            months = self._months or sorted(self._records_by_month)
+            records = [
+                record
+                for month in months
+                for record in self._records_by_month.get(month, [])
+            ]
+            projection_records = [
+                record
+                for month in months
+                for record in self._projection_records_by_month.get(month, [])
+            ]
+        else:
+            records = list(self._records_by_month.get(scope_key, []))
+            projection_records = list(self._projection_records_by_month.get(scope_key, []))
+        return SimpleNamespace(
+            projection_records=tuple(projection_records),
+            admission_records=tuple(records),
+        )
 
 
 class FakeProjectionRepository:
@@ -340,12 +424,22 @@ class FakePendingPaymentSourceSnapshotRepository:
     def commit_authoritative_snapshot(self, **kwargs: object) -> OaPendingPaymentSourceSnapshotResult:
         self.calls.append(dict(kwargs))
         statuses = kwargs.get("payment_statuses") if isinstance(kwargs.get("payment_statuses"), dict) else {}
-        records = kwargs.get("records") if isinstance(kwargs.get("records"), list) else []
-        admission_count = sum(1 for record in records if getattr(record, "workflow_status", "") == "in_progress")
-        completed_count = sum(1 for record in records if getattr(record, "workflow_status", "") == "completed")
-        non_completed_count = len(records) - completed_count
+        projection_records = (
+            kwargs.get("projection_records") if isinstance(kwargs.get("projection_records"), list) else []
+        )
+        admission_records = (
+            kwargs.get("admission_records") if isinstance(kwargs.get("admission_records"), list) else []
+        )
+        admission_count = sum(
+            1 for record in admission_records if getattr(record, "workflow_status", "") == "in_progress"
+        )
+        completed_count = sum(
+            1 for record in projection_records if getattr(record, "workflow_status", "") == "completed"
+        )
+        non_completed_count = len(admission_records) - completed_count
         return OaPendingPaymentSourceSnapshotResult(
-            affected_scope_keys=(str(kwargs.get("scope_key") or "all"),),
+            completed_projection_changed_scopes=(str(kwargs.get("scope_key") or "all"),),
+            oa_pending_payment_changed_scopes=(str(kwargs.get("scope_key") or "all"),),
             payment_status_count=len(statuses),
             admission_count=admission_count,
             source_signatures={str(kwargs.get("scope_key") or "all"): "signature"},

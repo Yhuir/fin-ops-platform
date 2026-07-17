@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from http import HTTPStatus
 import unittest
 
@@ -25,12 +26,6 @@ from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_s
 )
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
-from fin_ops_platform.services.workbench_relation_read_model_refresh import (
-    WorkbenchRelationReadModelRefreshService,
-)
-from fin_ops_platform.services.workbench_relation_sql_projection import (
-    WorkbenchRelationSqlProjectionBuilder,
-)
 from tests.postgres_test_utils import (
     apply_test_migrations,
     require_postgres_test_database_url,
@@ -66,7 +61,8 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
         first = source_snapshot.commit_authoritative_snapshot(
             scope_key="2026-05",
             tenant_id="default",
-            records=[_record()],
+            projection_records=[_record()],
+            admission_records=[_record()],
             payment_statuses=payment_statuses,
         )
         before = self.connection.fetch_one(
@@ -86,7 +82,8 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
         second = source_snapshot.commit_authoritative_snapshot(
             scope_key="2026-05",
             tenant_id="default",
-            records=[_record()],
+            projection_records=[_record()],
+            admission_records=[_record()],
             payment_statuses=payment_statuses,
         )
         after = self.connection.fetch_one(
@@ -103,11 +100,199 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
             """
         )
 
-        self.assertEqual(first.affected_scope_keys, ("2026-05",))
+        self.assertEqual(first.completed_projection_changed_scopes, ("2026-05",))
+        self.assertEqual(first.oa_pending_payment_changed_scopes, ("2026-05",))
         self.assertEqual(first.upserted_completed_count, 1)
-        self.assertEqual(second.affected_scope_keys, ())
+        self.assertEqual(second.completed_projection_changed_scopes, ())
+        self.assertEqual(second.oa_pending_payment_changed_scopes, ())
         self.assertEqual(second.upserted_completed_count, 0)
         self.assertEqual(after, before)
+
+    def test_admission_only_commit_preserves_stable_completed_fact_and_never_enqueues_shared_read_models(self) -> None:
+        source_snapshot = PostgresOaPendingPaymentSourceSnapshotRepository(
+            self.connection,
+            queue_repository=self.queue,
+            pending_relation_repository=self.pending_relations,
+        )
+        completed_record = _record()
+        record = _in_progress_record()
+        payment_statuses = {
+            "flow-integration-1": OAPaymentStatusRecord(
+                flow_id="flow-integration-1",
+                pay_status=0,
+            ),
+            "flow-in-progress-1": OAPaymentStatusRecord(
+                flow_id="flow-in-progress-1",
+                pay_status=0,
+            )
+        }
+
+        source_snapshot.commit_authoritative_snapshot(
+            scope_key="2026-05",
+            tenant_id="default",
+            projection_records=[completed_record],
+            admission_records=[completed_record, record],
+            payment_statuses=payment_statuses,
+        )
+        initial_event = self.queue.claim_next(
+            "oa-admission-isolation-integration",
+            event_types=["oa_pending_payment.read_model.refresh"],
+        )
+        self.assertIsNotNone(initial_event)
+        assert initial_event is not None
+        self.assertTrue(
+            self.queue.complete(
+                initial_event.event_id,
+                "oa-admission-isolation-integration",
+                result_payload={"published": True},
+            )
+        )
+        before = self.connection.fetch_one(
+            """
+            select
+                admission.updated_at as admission_updated_at,
+                status.updated_at as status_updated_at,
+                application.updated_at as application_updated_at,
+                (select count(*) from job.outbox_events) as outbox_count,
+                (select count(*) from app.oa_applications) as completed_projection_count
+            from app.oa_pending_payment_admissions admission
+            join app.oa_pending_payment_status_snapshots status
+              on status.tenant_id = admission.tenant_id
+             and status.flow_id = 'flow-in-progress-1'
+            join app.oa_applications application
+              on application.row_id = 'oa-integration-1'
+            where admission.tenant_id = 'default'
+              and admission.oa_id = 'oa-in-progress-1'
+            """
+        )
+        before_outbox_ids = {
+            str(row["id"])
+            for row in self.connection.fetch_all("select id from job.outbox_events")
+        }
+
+        changed_admission = replace(record, reason="进行中 OA admission 隔离（已更新）")
+        admission_only = source_snapshot.commit_authoritative_snapshot(
+            scope_key="2026-05",
+            tenant_id="default",
+            projection_records=[completed_record],
+            admission_records=[completed_record, changed_admission],
+            payment_statuses=payment_statuses,
+        )
+        after_admission_change = self.connection.fetch_one(
+            """
+            select
+                admission.updated_at as admission_updated_at,
+                status.updated_at as status_updated_at,
+                application.updated_at as application_updated_at,
+                (select count(*) from job.outbox_events) as outbox_count,
+                (select count(*) from app.oa_applications) as completed_projection_count
+            from app.oa_pending_payment_admissions admission
+            join app.oa_pending_payment_status_snapshots status
+              on status.tenant_id = admission.tenant_id
+             and status.flow_id = 'flow-in-progress-1'
+            join app.oa_applications application
+              on application.row_id = 'oa-integration-1'
+            where admission.tenant_id = 'default'
+              and admission.oa_id = 'oa-in-progress-1'
+            """
+        )
+        incremental_outbox_rows = [
+            row
+            for row in self.connection.fetch_all(
+                """
+                select id, event_type, scope_type, scope_key
+                from job.outbox_events
+                order by available_at, created_at, id
+                """,
+            )
+            if str(row["id"]) not in before_outbox_ids
+        ]
+
+        identical = source_snapshot.commit_authoritative_snapshot(
+            scope_key="2026-05",
+            tenant_id="default",
+            projection_records=[completed_record],
+            admission_records=[completed_record, changed_admission],
+            payment_statuses=payment_statuses,
+        )
+        after_identical = self.connection.fetch_one(
+            """
+            select
+                admission.updated_at as admission_updated_at,
+                status.updated_at as status_updated_at,
+                application.updated_at as application_updated_at,
+                (select count(*) from job.outbox_events) as outbox_count,
+                (select count(*) from app.oa_applications) as completed_projection_count
+            from app.oa_pending_payment_admissions admission
+            join app.oa_pending_payment_status_snapshots status
+              on status.tenant_id = admission.tenant_id
+             and status.flow_id = 'flow-in-progress-1'
+            join app.oa_applications application
+              on application.row_id = 'oa-integration-1'
+            where admission.tenant_id = 'default'
+              and admission.oa_id = 'oa-in-progress-1'
+            """
+        )
+
+        self.assertEqual(admission_only.completed_projection_changed_scopes, ())
+        self.assertEqual(admission_only.oa_pending_payment_changed_scopes, ("2026-05",))
+        self.assertEqual(identical.completed_projection_changed_scopes, ())
+        self.assertEqual(identical.oa_pending_payment_changed_scopes, ())
+        self.assertEqual(after_admission_change["application_updated_at"], before["application_updated_at"])
+        self.assertEqual(after_admission_change["status_updated_at"], before["status_updated_at"])
+        self.assertNotEqual(after_admission_change["admission_updated_at"], before["admission_updated_at"])
+        self.assertEqual(after_identical, after_admission_change)
+        self.assertEqual(int(before["completed_projection_count"]), 1)
+        self.assertEqual(
+            [
+                (row["event_type"], row["scope_type"], row["scope_key"])
+                for row in incremental_outbox_rows
+            ],
+            [("oa_pending_payment.read_model.refresh", "oa_pending_payment", "2026-05")],
+        )
+
+    def test_in_progress_to_completed_removes_admission_and_reports_shared_fact_change(self) -> None:
+        source_snapshot = PostgresOaPendingPaymentSourceSnapshotRepository(
+            self.connection,
+            queue_repository=self.queue,
+            pending_relation_repository=self.pending_relations,
+        )
+        in_progress = _in_progress_record()
+        completed = replace(in_progress, workflow_status="completed")
+        payment_statuses = {
+            "flow-in-progress-1": OAPaymentStatusRecord(
+                flow_id="flow-in-progress-1",
+                pay_status=0,
+            )
+        }
+        source_snapshot.commit_authoritative_snapshot(
+            scope_key="2026-05",
+            tenant_id="default",
+            projection_records=[],
+            admission_records=[in_progress],
+            payment_statuses=payment_statuses,
+        )
+
+        transitioned = source_snapshot.commit_authoritative_snapshot(
+            scope_key="2026-05",
+            tenant_id="default",
+            projection_records=[completed],
+            admission_records=[completed],
+            payment_statuses=payment_statuses,
+        )
+        counts = self.connection.fetch_one(
+            """
+            select
+                (select count(*) from app.oa_applications) as completed_projection_count,
+                (select count(*) from app.oa_pending_payment_admissions) as admission_count
+            """
+        )
+
+        self.assertEqual(transitioned.completed_projection_changed_scopes, ("2026-05",))
+        self.assertEqual(transitioned.oa_pending_payment_changed_scopes, ("2026-05",))
+        self.assertEqual(transitioned.admission_count, 0)
+        self.assertEqual(int(counts["completed_projection_count"]), 1)
+        self.assertEqual(int(counts["admission_count"]), 0)
 
     def test_canonical_commit_reaches_fresh_rows_and_etag_through_durable_worker_chain(self) -> None:
         self.read_repository.mark_workbench_relation_scope_empty(
@@ -123,7 +308,8 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
         source_snapshot.commit_authoritative_snapshot(
             scope_key="2026-05",
             tenant_id="default",
-            records=[_record()],
+            projection_records=[_record()],
+            admission_records=[_record()],
             payment_statuses={
                 "flow-integration-1": OAPaymentStatusRecord(
                     flow_id="flow-integration-1",
@@ -148,27 +334,6 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(
             non_fresh.payload["operationBarrierTargets"],
             [{"readModelKey": "oa_pending_payment", "scopeKey": "2026-05"}],
-        )
-
-        relation_event = self.queue.claim_next(
-            "workbench-relation-integration",
-            event_types=["workbench_relation.read_model.refresh"],
-        )
-        self.assertIsNotNone(relation_event)
-        assert relation_event is not None
-        relation_result = WorkbenchRelationReadModelRefreshService(
-            projection_builder=WorkbenchRelationSqlProjectionBuilder(
-                connection=self.connection,
-                read_model_repository=self.read_repository,
-            ),
-            queue_repository=self.queue,
-        ).handle_runtime_event(relation_event)
-        self.assertTrue(
-            self.queue.complete(
-                relation_event.event_id,
-                "workbench-relation-integration",
-                result_payload=relation_result,
-            )
         )
 
         event = self.queue.claim_next(
@@ -244,6 +409,29 @@ def _record() -> OAApplicationRecord:
         detail_fields={
             "Mongo文档ID": "flow-integration-1",
             "paymentFlowId": "flow-integration-1",
+        },
+    )
+
+
+def _in_progress_record() -> OAApplicationRecord:
+    return OAApplicationRecord(
+        id="oa-in-progress-1",
+        month="2026-05",
+        section="unpaired",
+        case_id=None,
+        applicant="集成测试进行中申请人",
+        project_name="集成测试项目",
+        apply_type="支付申请",
+        amount="88.00",
+        counterparty_name="集成测试供应商",
+        reason="进行中 OA admission 隔离",
+        relation_code="pending_match",
+        relation_label="待找流水与发票",
+        relation_tone="warn",
+        workflow_status="in_progress",
+        detail_fields={
+            "Mongo文档ID": "flow-in-progress-1",
+            "paymentFlowId": "flow-in-progress-1",
         },
     )
 

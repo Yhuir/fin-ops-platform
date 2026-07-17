@@ -1,6 +1,6 @@
 # OA 待付款核对状态机
 
-日期：2026-07-16
+日期：2026-07-17
 
 > 修改业务状态、UI 状态、read model、worker、Audit 或写回流程前必须读取本文件。页面不得自行推断付款状态或 freshness。
 
@@ -24,13 +24,16 @@
 
 | 状态 | 行为 |
 | --- | --- |
-| 外部读取中 | 不改变 PostgreSQL canonical snapshot，不删除旧记录 |
-| 外部读取失败/分页不完整/schema 非法 | 整轮失败；不得把未知集合解释为删除 |
-| 外部读取成功 | 同一 PostgreSQL 事务提交 completed projection、admission、payment-status snapshot、source watermark 和精确月份 dirty/outbox |
+| 外部读取中 | 每个启用 form/scope 只读一次并构造双视图；不改变 PostgreSQL canonical snapshot，不删除旧记录 |
+| 外部读取失败/部分 form 成功/schema 非法 | 整轮失败并记录 failed sync run；不得提交部分集合或把未知集合解释为删除 |
+| 外部读取成功 | `projection_records` 遵守通用导入配置，`admission_records` 固定包含 completed + in-progress；同一 PostgreSQL 事务提交 completed projection、admission、payment-status snapshot、source watermark 和 OA 精确月份 dirty/outbox |
 | PostgreSQL commit 失败 | 全部回滚；上一次 snapshot 继续是页面可证明事实 |
-| commit 成功 | `T0`；普通月份从此刻起进入 commit-to-visible 1 秒 SLO |
+| commit 成功且仅 admission/payment-status 变化 | `T0`；只刷新 OA 待付款精确月份，不触发 Workbench、成本统计或其它 shared consumers |
+| commit 成功且 completed canonical 变化 | `T0`；刷新 OA 待付款，并由 sync service 通过既有 shared owner fan-out 合法 consumers |
 
 Mongo/MySQL 变化尚未同步进 PostgreSQL 时属于 integration sync lag。页面和 read model worker 不允许直连外部系统掩盖该延迟。
+
+in-progress 同步当前只保留原始/上下文化附件文件元数据，不解析附件证据、发票或 OCR。completed 保持现有附件处理。未来启用 OCR 必须新增独立版本、队列、回填、失败和 Audit 合同，不能静默改变本状态机。
 
 ## 写回状态机
 
@@ -129,3 +132,4 @@ OA wrapper 只覆盖本页面文案和重跑行为；共享 `PageAuditIcon` 与�
 | 2026-07-16 | OA PG-only projector和专属 worker；shared invoice worker删除 OA branch | worker isolation、dependency guard、regression |
 | 2026-07-16 | 页面写回后幂等 reconcile PG snapshot；解决 MySQL 已变但页面仍旧 | command/service、rollback、retry regression |
 | 2026-07-16 | OA 专属 Audit 中文文案，隔离共享组件 | component、API/Audit、其它页面 regression |
+| 2026-07-17 | 双视图 source batch 隔离通用 status filter；admission-only 只刷新 OA，completed change 才共享 fan-out；in-progress 不解析附件/OCR | adapter/service/repository、fail-closed、真实 PG、架构 guard、三页面生产隔离 |

@@ -7,7 +7,7 @@
 - 状态：`READY_FOR_UNIFIED_DEPLOYMENT`；本地代码、测试和文档闭环，生产回填与性能证据待统一部署后完成。
 - 边界可信度：high。
 - 隔离目标：只改变 `oa_pending_payment` 页面、read model、专属 worker 和 integration snapshot；不改变其它页面 API/read model。
-- 旧路径状态：旧 filter endpoint/client、Python 全量 `all_rows`/filter scan、共享 invoice worker OA 分支、Mongo/MySQL projector I/O、snapshot relation fallback、本地 state-store relation snapshot、server private OA adapter fallback 均已从运行时链路删除。
+- 旧路径状态：旧 filter endpoint/client、Python 全量 `all_rows`/filter scan、共享 invoice worker OA 分支、Mongo/MySQL projector I/O、snapshot relation fallback、本地 state-store relation snapshot、server private OA adapter fallback、sync service 多 list 扫描和无调用方 fingerprint polling 均已从运行时链路删除。
 
 ## 职责
 
@@ -29,7 +29,7 @@
 | 输入 | Owner | 合同 |
 | --- | --- | --- |
 | 页面 rows query / `If-None-Match` | OA 页面/API | 只进入 `OaPendingPaymentReadModelService.conditional_rows`；认证 tenant、query contract、fresh gate 先于 `304` |
-| OA completed / in-progress / payment status | OA integration sync | 外部读取完整成功后，一次 PostgreSQL 事务提交 completed projection、admission、payment-status snapshot、watermark；completed/status/admission 与旧 snapshot 相同时不更新时间戳、不 replace admission、不 enqueue 页面 refresh。只有真实变化月份才先写 `workbench_relation` 依赖 dirty/outbox、再写 `oa_pending_payment` dirty/outbox；两者与 canonical snapshot 同事务 |
+| OA completed / in-progress / payment status | OA integration sync | 外部 adapter 每个启用 form/scope 只读一次并输出双视图：通用 `projection_records` 遵守配置，OA 私有 `admission_records` 固定包含 completed + in-progress。任一读取/投影失败整轮不提交并记录 failed run。成功后一次 PostgreSQL 事务提交 completed projection、admission、payment-status snapshot、watermark；相同 snapshot 不更新时间戳、不 replace admission、不 enqueue refresh。in-progress 只保留附件文件元数据，不解析附件、发票或 OCR |
 | Workbench/pending relation | 对应 relation owner | read model projector 只读 PostgreSQL；owner version 和关系成员决定消费方 OA 月份 |
 | 银行/进项发票 canonical facts | core/invoice owner | 通过现有 relation/source-version 合同进入月份投影；本模块不直接写其事实或 read model |
 | `writeback-paid` / `link-bank-transactions` | command service | 复核权限、active relation、outflow、金额和 flow id；外部 MySQL 成功后必须幂等 reconcile PostgreSQL payment snapshot |
@@ -44,7 +44,7 @@
 | `filterConfig` / `filterOptions` | OA 页面 | 随 rows 同响应 set-based 计算；summary/facet CTE 只 materialize 聚合需要的 typed columns，不读取 `payload/raw_payload`；page CTE 只读取 bounded payload 并在 SQL 内移除内部字段；不存在第二个 filter API |
 | read model publish | `read_model.oa_pending_payment_*` | 月份原子 replace、source vector、event source version 和 CAS；月份 rows 只能含同月 OA 主行，relation group row identity 必须含 month scope。`all` freshness gate 与 Page Audit 都把跨 scope 重复 `row_id` 作为阻断错误，列表不得用 `DISTINCT ON` 或 Python 去重隐藏错误；旧 event 不得清新 dirty |
 | latest dirty index | `job.read_model_dirty_scopes` | 只索引 `scope_type='oa_pending_payment'`，键顺序与 gate 的 `(tenant, scope type, scope, source version DESC, updated_at DESC, id DESC)` 完全一致；不得扩大 predicate 让其它页面承担该索引写入或存储成本 |
-| dirty/outbox | runtime queue | canonical snapshot 同事务批量 enqueue 精确月份 `workbench_relation` 与 `oa_pending_payment`，依赖 target 排在 consumer target 前；后续 OA lifecycle fan-out 允许 dedupe 同一 pending target，不得产生第二条旧链 |
+| dirty/outbox | runtime queue | snapshot repository 同事务只 enqueue 精确月份 `oa_pending_payment`。admission/payment-status-only 变化不得产生 Workbench/shared dirty；completed canonical 真实新增、修改或删除由 `OAProjectionSyncService` 按 `completed_projection_changed_scopes` 交给既有 shared owner fan-out。禁止 repository 隐式拥有 Workbench fan-out 或重新合并两个变化集合 |
 | write result | 前端/operation barrier | 返回受影响 scope 和 freshness targets；重复命令幂等，部分外部成功时明确可重试 |
 | Audit status | OA 标题附件 | 中文状态与去重样本；内部 code 仅作次级诊断，外部 sync lag 不冒充 integrity pass |
 
@@ -75,7 +75,7 @@
 
 | 事实变化 | 支持写入口 | OA 版本/刷新责任 |
 | --- | --- | --- |
-| external completed OA、admission、payment status | `OAProjectionSyncService` + `PostgresOaPendingPaymentSourceSnapshotRepository.commit_authoritative_snapshot` | 同事务 completed projection + snapshot + watermark + 精确月份 `workbench_relation` 依赖 dirty/outbox + OA dirty/outbox；OA worker即使先 claim，也必须因依赖 dirty 而 fail-closed；外部读取失败整轮不提交 |
+| external completed OA、admission、payment status | `OAProjectionSyncService` + `PostgresOaPendingPaymentSourceSnapshotRepository.commit_authoritative_snapshot` | 同事务 completed projection + snapshot + watermark + OA 精确月份 dirty/outbox。repository 分别返回 completed shared change 与 OA private change；service 只对 completed shared change执行既有 shared owner fan-out。外部读取失败整轮不提交并记录 failed run；`all` 同步把旧 watermark scopes 纳入 completed 删除比较 |
 | 页面 MySQL paid 写回 | `OaPendingPaymentCommandService` + `record_paid_statuses` | MySQL 幂等写后，同事务更新 PG status、月份 watermark、精确月份 dirty/outbox；PG 失败返回安全重试错误 |
 | in-progress pending relation create/cancel/promote | `PostgresOaPendingPaymentRelationRepository` / promotion service | 同事务增加 `oa_pending_payment_relation:<tenant>:<month>` 版本并 enqueue 消费方月份 |
 | completed Workbench relation | Workbench relation owner | owner source version/dirty fan-out；OA projector读取同月 fresh Workbench relation proof |
@@ -111,6 +111,7 @@
 - 禁止恢复 `deduped_oa_pending_payment_rows`、`DISTINCT ON(row_id)` 或其它只在 rows 响应中隐藏跨 scope 重复的兼容读取；重复身份必须在 freshness/Audit 边界 fail closed。
 - 禁止普通月份同时 enqueue `oa_pending_payment:all`；all 只能由显式运维/初始化触发。
 - 禁止共享 invoice worker重新注册 OA handler；release helper 必须从既有 shared worker env 精确迁移已退役的 OA flag/event，不能只更新示例文件。
+- 禁止恢复 sync service 的 `list_available_months` / `list_application_records` / `list_all_application_records` 多扫描、adapter fingerprint polling、partial-result fallback 或 snapshot repository 的 Workbench fan-out。
 - OA freshness hot-path 索引必须保持 event/scope 私有：dirty latest-version 只覆盖 `scope_type='oa_pending_payment'`，outbox blocking 只覆盖 OA refresh event 的 active/failed 状态；禁止用共享连接池或全 event history 索引改动掩盖页面瓶颈。
 - 数据库 migration、历史实施记录和负向测试不是可执行旧链路，不删除。
 
@@ -118,7 +119,7 @@
 
 1. 一次 release 部署 migrations、API、OA sync、专属 worker 和前端；不保留新旧读路径并行窗口。
 2. 确认 `oa-pending-payment` worker 已启动且 shared invoice worker 不 claim OA event。
-3. enqueue/run `oa.sync:all`，生成 completed/admission/payment-status canonical snapshot 和 watermarks。
+3. enqueue/run `oa.sync:all`，确认 run 成功并核对 `scanned_projection_count`、`scanned_completed_count`、`scanned_in_progress_count`，生成 completed/admission/payment-status canonical snapshot 和 watermarks。
 4. enqueue 低优先级 `oa_pending_payment:all`，等待所有月份 dirty/outbox drain。
 5. 验证 Page Audit pass、writer inventory、queue/worker health，再执行 1000 次 API 与 200 次 mutation 性能验收。
 6. 未达到门槛则回滚 release/worker 配置；新 additive 表可保留，但运行时不得启用旧 live fallback。

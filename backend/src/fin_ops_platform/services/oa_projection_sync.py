@@ -60,14 +60,24 @@ class OAProjectionSyncService:
 
     def handle_runtime_event(self, event: RuntimeQueueEvent) -> dict[str, Any]:
         scope_key = self._event_scope_key(event)
+        try:
+            return self._run_sync(scope_key)
+        except Exception as exc:
+            self._record_failed_sync_run(scope_key=scope_key, error=exc)
+            raise
+
+    def _run_sync(self, scope_key: str) -> dict[str, Any]:
         cutoff_month = self._retention_cutoff_month()
-        records = self._sanitized_records(self._load_records(scope_key))
+        source_batch = self._load_source_batch(scope_key, cutoff_month=cutoff_month)
+        projection_records = self._sanitized_records(list(source_batch["projection_records"]))
+        admission_records = self._sanitized_records(list(source_batch["admission_records"]))
         payment_statuses = self._load_payment_statuses()
-        completed_records = [record for record in records if _is_completed_workflow(record)]
+        completed_records = [record for record in projection_records if _is_completed_workflow(record)]
         if self._pending_payment_source_snapshot_repository is not None:
             source_snapshot_result = self._commit_pending_payment_source_snapshot(
                 scope_key=scope_key,
-                records=records,
+                projection_records=projection_records,
+                admission_records=admission_records,
                 payment_statuses=payment_statuses,
                 cutoff_month=cutoff_month,
             )
@@ -87,11 +97,11 @@ class OAProjectionSyncService:
             removed_stale_completed_count = self._delete_stale_completed_projection_records(
                 scope_key=scope_key,
                 completed_records=completed_records,
-                scanned_records=records,
+                scanned_records=projection_records,
             )
             removed_non_completed_count = self._delete_non_completed_projection_records(
                 scope_key=scope_key,
-                records=records,
+                records=admission_records,
             )
             pruned_months = self._prune_before_cutoff(scope_key, cutoff_month)
             source_snapshot_result = None
@@ -100,9 +110,16 @@ class OAProjectionSyncService:
             "sync_type": "oa_projection",
             "scope_key": scope_key,
             "status": "succeeded",
-            "scanned_count": len(records),
+            "scanned_count": len(admission_records),
+            "scanned_projection_count": len(projection_records),
+            "scanned_completed_count": sum(
+                1 for record in admission_records if _is_completed_workflow(record)
+            ),
+            "scanned_in_progress_count": sum(
+                1 for record in admission_records if not _is_completed_workflow(record)
+            ),
             "upserted_count": upserted_count,
-            "skipped_count": max(0, len(records) - upserted_count),
+            "skipped_count": max(0, len(projection_records) - upserted_count),
             "removed_stale_completed_count": removed_stale_completed_count,
             "removed_non_completed_count": removed_non_completed_count,
             "pruned_count": len(pruned_months),
@@ -122,7 +139,12 @@ class OAProjectionSyncService:
                 else 0
             ),
             "pending_payment_affected_scope_keys": (
-                list(getattr(source_snapshot_result, "affected_scope_keys", ()))
+                list(getattr(source_snapshot_result, "oa_pending_payment_changed_scopes", ()))
+                if source_snapshot_result is not None
+                else []
+            ),
+            "completed_projection_changed_scope_keys": (
+                list(getattr(source_snapshot_result, "completed_projection_changed_scopes", ()))
                 if source_snapshot_result is not None
                 else []
             ),
@@ -130,18 +152,41 @@ class OAProjectionSyncService:
         record_sync_run = getattr(self._projection_repository, "record_sync_run", None)
         if callable(record_sync_run):
             record_sync_run(result)
-        changed_scope_keys = (
-            list(getattr(source_snapshot_result, "affected_scope_keys", ()))
+        completed_projection_changed_scopes = (
+            list(getattr(source_snapshot_result, "completed_projection_changed_scopes", ()))
             if source_snapshot_result is not None
             else None
         )
+        promotion_scopes = list(promotion_result.get("affected_months") or [])
         self._mark_downstream_dirty(
             scope_key,
-            records,
-            changed_scope_keys=changed_scope_keys,
-            extra_months=[*pruned_months, *list(promotion_result.get("affected_months") or [])],
+            projection_records,
+            changed_scope_keys=completed_projection_changed_scopes,
+            extra_months=[*pruned_months, *promotion_scopes],
         )
+        if self._pending_payment_source_snapshot_repository is not None:
+            self._mark_oa_pending_payment_dirty([*pruned_months, *promotion_scopes])
         return result
+
+    def _record_failed_sync_run(self, *, scope_key: str, error: Exception) -> None:
+        record_sync_run = getattr(self._projection_repository, "record_sync_run", None)
+        if not callable(record_sync_run):
+            return
+        try:
+            record_sync_run(
+                {
+                    "sync_type": "oa_projection",
+                    "scope_key": scope_key,
+                    "status": "failed",
+                    "scanned_count": 0,
+                    "upserted_count": 0,
+                    "skipped_count": 0,
+                    "error_count": 1,
+                    "last_error": str(error),
+                }
+            )
+        except Exception:
+            return
 
     def _load_payment_statuses(self) -> dict[str, OAPaymentStatusRecord] | None:
         repository = self._payment_status_repository
@@ -159,7 +204,8 @@ class OAProjectionSyncService:
         self,
         *,
         scope_key: str,
-        records: list[OAApplicationRecord],
+        projection_records: list[OAApplicationRecord],
+        admission_records: list[OAApplicationRecord],
         payment_statuses: dict[str, OAPaymentStatusRecord] | None,
         cutoff_month: str | None,
     ) -> Any:
@@ -173,7 +219,8 @@ class OAProjectionSyncService:
             raise RuntimeError("A complete OA payment status mapping is required before snapshot replacement.")
         return commit_snapshot(
             scope_key=scope_key,
-            records=records,
+            projection_records=projection_records,
+            admission_records=admission_records,
             payment_statuses=payment_statuses,
             retention_cutoff_month=cutoff_month,
         )
@@ -183,40 +230,34 @@ class OAProjectionSyncService:
         payload_scope = event.payload.get("scope_key") if isinstance(event.payload, dict) else None
         return str(payload_scope or event.scope_key or event.aggregate_id or "all").strip() or "all"
 
-    def _load_records(self, scope_key: str) -> list[OAApplicationRecord]:
-        cutoff_month = self._retention_cutoff_month()
+    def _load_source_batch(self, scope_key: str, *, cutoff_month: str | None) -> dict[str, tuple[OAApplicationRecord, ...]]:
         if cutoff_month and scope_key != "all" and self._is_month_scope(scope_key) and scope_key < cutoff_month:
-            return []
+            return {"projection_records": (), "admission_records": ()}
+        load_batch = getattr(self._source_adapter, "load_sync_application_batch", None)
+        if not callable(load_batch):
+            raise RuntimeError("OA sync source adapter must expose load_sync_application_batch().")
         sync_parse = getattr(self._source_adapter, "force_attachment_invoice_sync_parse", None)
         context = sync_parse() if callable(sync_parse) else nullcontext()
         with context:
-            return self._load_records_with_attachment_parse(scope_key, cutoff_month=cutoff_month)
+            batch = load_batch(scope_key)
+        projection_records = getattr(batch, "projection_records", None)
+        admission_records = getattr(batch, "admission_records", None)
+        if not isinstance(projection_records, (list, tuple)) or not isinstance(admission_records, (list, tuple)):
+            raise RuntimeError("OA sync source adapter returned an incomplete source batch.")
 
-    def _load_records_with_attachment_parse(self, scope_key: str, *, cutoff_month: str | None) -> list[OAApplicationRecord]:
-        if scope_key != "all":
-            return list(self._source_adapter.list_application_records(scope_key))
-        list_months = getattr(self._source_adapter, "list_available_months", None)
-        months = [
-            month
-            for month in (list(list_months()) if callable(list_months) else [])
-            if self._is_month_scope(month) and (cutoff_month is None or month >= cutoff_month)
-        ]
-        if months:
-            records: list[OAApplicationRecord] = []
-            for month in months:
-                records.extend(self._source_adapter.list_application_records(month))
-            return records
-        list_all = getattr(self._source_adapter, "list_all_application_records", None)
-        if callable(list_all):
-            return [
+        def retained(records: list[OAApplicationRecord] | tuple[OAApplicationRecord, ...]) -> tuple[OAApplicationRecord, ...]:
+            return tuple(
                 record
-                for record in list(list_all())
-                if cutoff_month is None or not self._is_month_scope(str(record.month)) or str(record.month) >= cutoff_month
-            ]
-        records: list[OAApplicationRecord] = []
-        for month in months:
-            records.extend(self._source_adapter.list_application_records(month))
-        return records
+                for record in records
+                if cutoff_month is None
+                or not self._is_month_scope(str(getattr(record, "month", "")))
+                or str(record.month) >= cutoff_month
+            )
+
+        return {
+            "projection_records": retained(projection_records),
+            "admission_records": retained(admission_records),
+        }
 
     def _retention_cutoff_month(self) -> str | None:
         provider = self._retention_cutoff_date_provider
@@ -378,6 +419,24 @@ class OAProjectionSyncService:
         concrete_month_scopes = [scope for scope in target_scopes if scope != "all"] or ["all"]
         for read_model_key in OA_PROJECTION_SCOPED_READ_MODEL_DEPENDENTS:
             refresh_gateway.enqueue_many(read_model_key, concrete_month_scopes, reason="oa_projection_sync")
+
+    def _mark_oa_pending_payment_dirty(self, scope_keys: list[str]) -> None:
+        normalized_scope_keys = sorted(
+            {
+                str(scope_key).strip()
+                for scope_key in list(scope_keys or [])
+                if str(scope_key).strip() == "all" or self._is_month_scope(scope_key)
+            }
+        )
+        if not normalized_scope_keys:
+            return
+        refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
+        if refresh_gateway.can_enqueue():
+            refresh_gateway.enqueue_many(
+                "oa_pending_payment",
+                normalized_scope_keys,
+                reason="oa_projection_relation_or_prune_changed",
+            )
 
 
 def _is_invoice_attachment_payload(value: Any) -> bool:
