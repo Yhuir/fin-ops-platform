@@ -7370,6 +7370,7 @@ class PostgresReadModelRepository:
         ]
         if not generation_set:
             return {}
+        generation_set.sort(key=lambda item: (str(item["scope_key"]), str(item["generation_id"])))
         digest = hashlib.sha256(
             json.dumps(generation_set, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
         ).hexdigest()

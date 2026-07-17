@@ -2725,6 +2725,31 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             )
         )
 
+    def test_active_month_generation_version_is_independent_of_query_order(self) -> None:
+        rows = [
+            {
+                "scope_key": "2026-06",
+                "generation_id": "gen-june",
+                "source_versions": {"source_version": 2},
+                "generated_at": "2026-06-30T09:00:00+00:00",
+            },
+            {
+                "scope_key": "2026-05",
+                "generation_id": "gen-may",
+                "generation_source_versions": {"source_version": 1},
+                "generated_at": "2026-05-31T09:00:00+00:00",
+            },
+        ]
+
+        descending = PostgresReadModelRepository._workbench_active_month_generation_version_from_rows(rows)
+        ascending = PostgresReadModelRepository._workbench_active_month_generation_version_from_rows(list(reversed(rows)))
+
+        self.assertEqual(descending["version"], ascending["version"])
+        self.assertEqual(
+            [row["scope_key"] for row in descending["generation_set"]],
+            ["2026-05", "2026-06"],
+        )
+
     def test_repository_workbench_generation_retention_never_deletes_active_generations(self) -> None:
         connection = WorkbenchGenerationRetentionConnection()
         repository = PostgresReadModelRepository(connection)

@@ -112,7 +112,7 @@
 - 修改 projection 行为或 upstream dependency 合同时，必须 bump 对应 projection schema version，并新增回归测试证明旧 source_versions 不会触发 `source_versions_unchanged` 跳过。
 - 删除旧 read model 代码前，必须证明没有页面、API、worker、测试或生产脚本继续读取旧路径。
 - `workbench` 的 active generation 原子发布模型是明确例外，不允许机械迁移成普通 gateway 模型。
-- `workbench` 默认 combined initial 的 Redis/SQL payload version 必须等于同次查询 freshness gate 的 active generation-set version；version drift 必须 fail closed 为 `202 refreshing` 并使用现有 refresh gateway，禁止旧首屏伪装 fresh 或继续写入 cache。
+- `workbench` active generation-set digest 必须按 `(scope_key, generation_id)` 规范排序且与 SQL 返回顺序无关；默认 combined initial 的 Redis/SQL payload version 必须等于同次查询 freshness gate 的 active generation-set version。version drift 必须 fail closed 为 `202 refreshing` 并使用现有 refresh gateway，禁止旧首屏伪装 fresh 或继续写入 cache。
 - 所有非事务 refresh 请求必须通过 `ReadModelRefreshGateway` / scope policy registry normalize、validate、dedupe 后进入 `RuntimeQueueRepository.enqueue_read_model_refresh(...)`。
 - 生产人工重建同样只能使用 `finops-deploy-control read-model-refresh <release>`：每个 `--scope scope_type=scope_key` 先由正式 scope policy normalize/validate，再通过 `ReadModelRefreshGateway` 写 durable queue。dry-run 不写入，execute 不直接修改 projection/readiness；`cost_statistics=all` 由现有 policy 展开为 `active:all` 与 `all:all`，运维层不复制 scope 规则。
 - 事务内 writer 可以在同一业务事务内写 dirty scope/outbox，但必须承担等价 scope contract，并有测试覆盖；当一次业务写入会污染多个 target 时，必须先收集 refresh intents，再批量写 `job.read_model_dirty_scopes` 和 `job.outbox_events`，避免 per-target `fetch_one + execute` 放大提交耗时。
