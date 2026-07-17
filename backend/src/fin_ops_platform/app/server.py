@@ -5473,6 +5473,10 @@ class Application:
         return route_path.startswith(protected_prefixes)
 
     @staticmethod
+    def _route_has_module_owned_oa_access(route_path: str) -> bool:
+        return route_path == "/api/oa-pending-payments" or route_path.startswith("/api/oa-pending-payments/")
+
+    @staticmethod
     def _duration_ms(started_at: float) -> float:
         return round((monotonic() - started_at) * 1000, 3)
 
@@ -5879,6 +5883,8 @@ class Application:
         request_id: str | None = None,
         action_name: str | None = None,
     ) -> Response | None:
+        if self._route_has_module_owned_oa_access(route_path):
+            return None
         if not self._route_requires_oa_access(route_path):
             return None
         auth_started_at = monotonic()

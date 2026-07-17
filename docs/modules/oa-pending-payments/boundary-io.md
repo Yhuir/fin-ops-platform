@@ -14,13 +14,14 @@
 ### 本模块负责
 
 - OA 待付款页面查询、筛选、排序、详情和 OA 专属 Audit 展示。
+- `/api/oa-pending-payments` 下所有 read/write endpoint 的单次鉴权执行；route 只经显式 read-session/write-auth ports 调用共享 identity/policy owner，不重复经过全局前置 guard。
 - `oa_pending_payment` read model、freshness gate、ETag 条件读取和 operation barrier targets。
 - OA payment-status/admission integration snapshot、source watermark 和精确月份 refresh。
 - in-progress pending relation、bank claim、promotion 和付款状态写回编排。
 
 ### 本模块不负责
 
-- OA 登录、菜单权限和外部系统自身一致性。
+- OA identity 解析、access-tier/菜单权限策略和外部系统自身一致性；这些仍由共享 auth owner 提供，本模块只执行端点门禁。
 - Workbench、银行明细、发票、input/output invoice read model 的所有权。
 - 通用 worker framework、queue、operation barrier 或共享 Page Audit 默认文案。
 
@@ -28,6 +29,7 @@
 
 | 输入 | Owner | 合同 |
 | --- | --- | --- |
+| OA token/session | shared auth owner | `OaPendingPaymentApiRoutes` 对每个 owned read endpoint 调用一次 read-session port、对每个 owned write endpoint 调用一次 write-auth port；缺 token、过期、无页面权限或只读用户写入必须在业务/read-model I/O 前拒绝。全局 dispatcher 不得对同一路径再解析一次相同 session |
 | 页面 rows query / `If-None-Match` | OA 页面/API | 只进入 `OaPendingPaymentReadModelService.conditional_rows`；认证 tenant、query contract、fresh gate 先于 `304` |
 | OA completed / in-progress / payment status | OA integration sync | 外部 adapter 每个启用 form/scope 只读一次；`all` 接收 sync owner 的 retention cutoff，并在字段校验/附件解析前排除保留期外文档，再输出双视图：通用 `projection_records` 遵守配置，OA 私有 `admission_records` 固定包含 completed + in-progress。读取失败或保留期内 status/identity 不可判定时整轮不提交并记录 failed run；合法 in-progress 草稿尚未填写 amount/applicant/reason 时仍进入 admission，空金额为 `NULL`，保留期内 completed 缺既有必填字段仍 fail-closed。成功后一次 PostgreSQL 事务提交 completed projection、admission、payment-status snapshot、watermark；相同 snapshot 不更新时间戳、不 replace admission、不 enqueue refresh。in-progress 只保留附件文件元数据，不解析附件、发票或 OCR |
 | Workbench/pending relation | 对应 relation owner | read model projector 只读 PostgreSQL；owner version 和关系成员决定消费方 OA 月份 |
@@ -91,7 +93,7 @@
 - projector 只依赖 PostgreSQL repositories；禁止 Mongo adapter、MySQL payment repository、HTTP/Application。
 - `invoice-usage-collection` 只负责 input/output invoice，不注册或 claim OA refresh。
 - query service 只依赖窄 read-model repository、queue、expected source-version provider 与可选 Redis helper；Redis 只经共享 `ReadModelQueryGateway` 进入 gate 后的版本化 OA 私有 payload 路径，禁止完整 live `OaPendingPaymentQueryService`、共享页面 key 或主动跨页面失效。
-- route 只做认证、query/header 传递和 HTTP 映射；业务和 SQL 不进入 route。
+- route 只做一次认证、query/header 传递和 HTTP 映射；业务和 SQL 不进入 route。共享 auth policy 不复制到模块，global guard 也不重复包裹本模块路径。
 
 ## 文件范围
 
@@ -112,6 +114,7 @@
 - 禁止普通月份同时 enqueue `oa_pending_payment:all`；all 只能由显式运维/初始化触发。
 - 禁止共享 invoice worker重新注册 OA handler；release helper 必须从既有 shared worker env 精确迁移已退役的 OA flag/event，不能只更新示例文件。
 - 禁止恢复 sync service 的 `list_available_months` / `list_application_records` / `list_all_application_records` 多扫描、adapter fingerprint polling、partial-result fallback 或 snapshot repository 的 Workbench fan-out。
+- 禁止恢复 `/api/oa-pending-payments*` 的 global guard + module route 双重 session 解析；新增本模块端点必须进入 `OaPendingPaymentApiRoutes.route(...)` 的 read/write auth owner，并由全端点权限回归门保护。
 - OA freshness hot-path 索引必须保持 event/scope 私有：dirty latest-version 只覆盖 `scope_type='oa_pending_payment'`，outbox blocking 只覆盖 OA refresh event 的 active/failed 状态；禁止用共享连接池或全 event history 索引改动掩盖页面瓶颈。
 - 数据库 migration、历史实施记录和负向测试不是可执行旧链路，不删除。
 

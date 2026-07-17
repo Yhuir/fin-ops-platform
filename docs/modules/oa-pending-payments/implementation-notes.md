@@ -1,5 +1,13 @@
 # OA待付款核对 实施记录
 
+## 2026-07-17 - OA 模块重复鉴权 I/O 收敛
+
+- 生产证据：release `main-3f7acf70f-oa-cache-hit-gate-20260717` 已把 cache hit 的 read snapshot 删除；50 次公网 fresh `200` 仍为 `p50=178.343ms / p95=266.338ms / p99=273.771ms`。进程 rolling 样本显示 server `p95=177.431ms`、database `p95=65.394ms`，cache hit 固定 5 次数据库操作，严格 `p95<=250ms` 尚未闭合。
+- 根因：`Application._enforce_route_access(...)` 先调用一次共享 `resolve_oa_request_session(...)`，`OaPendingPaymentApiRoutes` 随后又通过 read-session/write-auth port 执行同一鉴权。`AccessControlService.evaluate(...)` 每次都读取动态 readonly/admin policy，因此 fresh cache hit 的 5 次数据库操作由两轮权限 I/O 加一条 OA 私有 freshness gate 构成；这不是 rows cache、projection 或另两个页面的负载。
+- 最小修复：仅把 `/api/oa-pending-payments` 精确路径树登记为 module-owned access control。全局 dispatcher 不再对该树执行重复 guard；模块现有每个 read endpoint 仍先执行 read-session，每个 write endpoint 仍执行 write-auth，identity service、access policy、错误码、tenant 和业务权限不变。
+- 隔离与旧链删除：不缓存 session、不绕过权限、不改共享 auth 算法，也不改变其它 route；删除的只有 OA 路径上的第二份等价前置鉴权 I/O。回归测试锁定一次 authenticated rows request 只解析 identity 一次、全部 8 个模块 endpoint 缺 token 均 `401`、无页面权限 read 均 `403`、read-only write 均 `403`。
+- 关闭门：相关/真实 PostgreSQL/全量 CI、精确 SHA 部署、rolling query count、1000 次公网 fresh `200`、三页面 mixed load 与负载后 Audit；只有权限门、p95/p99 和 Audit 同时通过才可完成。
+
 ## 2026-07-17 - 生产 cache-hit 门禁去事务化
 
 - 生产证据：release `main-4a6c20a9b-oa-rows-cache-20260717` 部署后，三页面 Audit 均为 `pass/fresh/drained/0 issues`；OA “进行中”公网 fresh `200` 采样 1000/1000 成功，`p50=174.569ms`、`p95=281.536ms`、`p99=424.983ms`。p99 通过但 p95 仍高于 `250ms`，不能声明性能闭环。

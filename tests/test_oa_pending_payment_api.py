@@ -5,10 +5,12 @@ from copy import deepcopy
 from decimal import Decimal
 from http import HTTPStatus
 import json
+import os
 from pathlib import Path
 import tempfile
 from typing import Any, Callable
 import unittest
+from unittest.mock import patch
 from urllib.parse import quote
 
 from fin_ops_platform.app.routes_oa_pending_payments import OaPendingPaymentApiRoutes
@@ -1037,6 +1039,100 @@ class OaPendingPaymentApiTests(unittest.TestCase):
 
         self.assertTrue(all(response.status_code == 403 for response in responses))
         self.assertTrue(all(json.loads(response.body)["error"] in {"forbidden", "permission_denied"} for response in responses))
+
+    def test_module_owned_access_control_resolves_identity_once(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            repository = ConditionalOaRowsRepository()
+            app._oa_pending_payment_api_routes = _read_model_routes(
+                repository=repository,
+                queue=QueueRecorder(),
+            )
+            identity_calls = 0
+
+            def resolve_identity(_token: str) -> OAUserIdentity:
+                nonlocal identity_calls
+                identity_calls += 1
+                return OAUserIdentity(
+                    user_id="oa-reader-id",
+                    username="OA_READER",
+                    nickname="OA读取用户",
+                    display_name="OA读取用户",
+                    roles=["finance"],
+                    permissions=[app._access_control_service.required_permission],
+                )
+
+            app._oa_identity_service.resolve_identity = resolve_identity
+            response = app.handle_request(
+                "GET",
+                "/api/oa-pending-payments/rows?page=1&page_size=20",
+                headers={"Authorization": "Bearer oa-reader-token"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(identity_calls, 1)
+
+    def test_all_module_endpoints_require_module_owned_authentication(self) -> None:
+        requests = [
+            ("GET", "/api/oa-pending-payments/rows", None),
+            ("GET", "/api/oa-pending-payments/bank-transaction-candidates", None),
+            ("GET", "/api/oa-pending-payments/oa/oa-api/detail", None),
+            ("GET", "/api/oa-pending-payments/bank-transactions/bank-api/detail", None),
+            ("GET", "/api/oa-pending-payments/invoices/inv-api/detail", None),
+            ("GET", "/api/oa-pending-payments/rows/row-api/relation-details?kind=bank", None),
+            (
+                "POST",
+                "/api/oa-pending-payments/link-bank-transactions",
+                {"oa_row_ids": ["oa-api"], "bank_transaction_ids": ["bank-api"]},
+            ),
+            ("POST", "/api/oa-pending-payments/writeback-paid", {"oa_row_ids": ["oa-api"]}),
+        ]
+        with patch.dict(os.environ, {"FIN_OPS_TEST_DEFAULT_AUTH": "0"}), tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            responses = [
+                app.handle_request(method, route, body=json.dumps(body) if body is not None else None)
+                for method, route, body in requests
+            ]
+
+        self.assertTrue(all(response.status_code == HTTPStatus.UNAUTHORIZED for response in responses))
+        self.assertTrue(all(json.loads(response.body)["error"] == "invalid_oa_session" for response in responses))
+
+    def test_module_owned_write_auth_rejects_readonly_user(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            app._app_settings_service.update_settings(
+                completed_project_ids=[],
+                bank_account_mappings=[],
+                allowed_usernames=["OA_READONLY"],
+                readonly_export_usernames=["OA_READONLY"],
+                admin_usernames=[],
+            )
+            app._oa_identity_service.resolve_identity = lambda _token: OAUserIdentity(
+                user_id="oa-readonly-id",
+                username="OA_READONLY",
+                nickname="OA只读用户",
+                display_name="OA只读用户",
+                roles=[],
+                permissions=[],
+            )
+            headers = {"Authorization": "Bearer oa-readonly-token"}
+            responses = [
+                app.handle_request(
+                    "POST",
+                    "/api/oa-pending-payments/link-bank-transactions",
+                    headers=headers,
+                    body=json.dumps({"oa_row_ids": ["oa-api"], "bank_transaction_ids": ["bank-api"]}),
+                ),
+                app.handle_request(
+                    "POST",
+                    "/api/oa-pending-payments/writeback-paid",
+                    headers=headers,
+                    body=json.dumps({"oa_row_ids": ["oa-api"]}),
+                ),
+            ]
+
+        self.assertTrue(all(response.status_code == HTTPStatus.FORBIDDEN for response in responses))
+        self.assertTrue(all(json.loads(response.body)["error"] == "permission_denied" for response in responses))
 
     def test_production_detail_routes_use_sql_read_model_without_live_scan(self) -> None:
         queue = QueueRecorder()

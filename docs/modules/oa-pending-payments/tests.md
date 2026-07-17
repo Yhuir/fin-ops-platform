@@ -54,6 +54,7 @@
 - rows aggregate/facets 只能扫描 typed columns，page SQL 不读 `raw_payload`，公开 row DTO 不含内部 `searchText` / 逐行 `sourceVersions`。
 - dirty/missing/mismatch -> `202`，无旧 rows，精确 `operationBarrierTargets`。
 - 权限和 query validation 先于条件响应。
+- OA 模块 auth owner：authenticated rows 每个请求只解析一次 identity；全部 read/write endpoint 缺 token 都返回 `401`，无页面权限的 read 返回 `403`，read-only 用户的 write 返回 `403`。global dispatcher 不得恢复第二次等价 session 解析。
 - 旧 `/api/oa-pending-payments/filter-options` 不存在。
 - write commands 的 200/409/503 shape、scope/barrier 和幂等。
 
