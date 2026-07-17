@@ -329,6 +329,7 @@ class ReadModelManifestTests(unittest.TestCase):
             "get_cost_statistics_page",
             "get_cost_statistics_export_page",
             "get_cost_statistics_transaction",
+            "acknowledge_unchanged_cost_statistics_scope",
             "publish_cost_statistics_read_models",
             "load_tax_offset_read_models",
             "get_tax_offset_view",
@@ -529,6 +530,7 @@ class ReadModelManifestTests(unittest.TestCase):
             "get_cost_statistics_export_page",
             "get_cost_statistics_transaction",
             "active_workbench_source_versions",
+            "acknowledge_unchanged_cost_statistics_scope",
             "publish_cost_statistics_read_models",
         }
         required_tax_ports = {

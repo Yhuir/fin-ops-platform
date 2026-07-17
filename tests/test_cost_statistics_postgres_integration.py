@@ -55,6 +55,93 @@ class CostStatisticsPostgresIntegrationTests(unittest.TestCase):
                 self.assertEqual(len(facets), 1)
                 self.assertTrue(facets[0]["percentage_label"].endswith("%"))
 
+    def test_unchanged_scope_acknowledgement_advances_only_exact_current_version(self) -> None:
+        self.connection.execute(
+            """
+            insert into read_model.cost_statistics_read_models(
+                scope_key,
+                project_scope,
+                scope_month,
+                generated_at,
+                entry_count,
+                source_versions,
+                payload,
+                raw_payload,
+                published_source_version
+            )
+            values (
+                'active:2026-05',
+                'active',
+                '2026-05-01',
+                now(),
+                1,
+                '{"proof": "v1"}'::jsonb,
+                '{"summary": {"total_amount": "10.00"}}'::jsonb,
+                '{"normalized_payload": {"proof": "keep"}}'::jsonb,
+                6
+            )
+            """
+        )
+        self.connection.execute(
+            """
+            insert into job.read_model_dirty_scopes(
+                tenant_id,
+                scope_type,
+                scope_key,
+                source_version,
+                status
+            )
+            values ('default', 'cost_statistics', 'active:2026-05', 7, 'processing')
+            """
+        )
+
+        acknowledged = self.repository.acknowledge_unchanged_cost_statistics_scope(
+            tenant_id="default",
+            scope_key="active:2026-05",
+            source_version=7,
+            source_versions={"proof": "v1"},
+        )
+
+        self.assertTrue(acknowledged)
+        row = self.connection.fetch_one(
+            """
+            select published_source_version, source_versions, payload, raw_payload
+            from read_model.cost_statistics_read_models
+            where scope_key = 'active:2026-05'
+            """
+        )
+        self.assertEqual(row["published_source_version"], 7)
+        self.assertEqual(row["source_versions"], {"proof": "v1"})
+        self.assertEqual(row["payload"], {"summary": {"total_amount": "10.00"}})
+        self.assertEqual(row["raw_payload"], {"normalized_payload": {"proof": "keep"}})
+
+        self.connection.execute(
+            """
+            update job.read_model_dirty_scopes
+            set source_version = 8
+            where tenant_id = 'default'
+              and scope_type = 'cost_statistics'
+              and scope_key = 'active:2026-05'
+              and status = 'processing'
+            """
+        )
+        self.assertFalse(
+            self.repository.acknowledge_unchanged_cost_statistics_scope(
+                tenant_id="default",
+                scope_key="active:2026-05",
+                source_version=7,
+                source_versions={"proof": "v1"},
+            )
+        )
+        self.assertFalse(
+            self.repository.acknowledge_unchanged_cost_statistics_scope(
+                tenant_id="default",
+                scope_key="active:2026-05",
+                source_version=8,
+                source_versions={"proof": "v2"},
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

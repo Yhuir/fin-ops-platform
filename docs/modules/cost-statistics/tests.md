@@ -2,6 +2,14 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+## 2026-07-17 - unchanged 版本确认与 month/parent 收敛
+
+- 生产故障：可逆 relation 写入后，成本月份内容来源版本已经与当前 Workbench/Bank Detail 一致，但旧 unchanged 路径返回通用 `skipped` 且没有推进 `published_source_version`；readiness 忽略该事件，parent 又因 month 非 fresh 反向补投，形成持续自激队列。
+- Service/业务状态：`test_cost_statistics_sql_projection_skips_unchanged_month_scope_without_workbench_scan` 与 processing 变体证明 exact source versions 只跳过重建，仍必须成功确认当前 event 版本并返回 `published=true/skipped_rebuild=true`；race 测试证明确认失败返回 unpublished，不能完成或 fan-out。
+- Repository/read model：新增成功与 dirty/source race 测试，锁定一事务内 dirty row `FOR UPDATE`、event 版本相等、parent JSONB source versions 精确相等，只更新发布版本且不执行 payload/row SQL。port/manifest/physical-owner 测试登记唯一成本专属 I/O。
+- 隔离/回归：read-model 与 platform architecture guards 全量证明未改共享 queue/readiness、其它页面 repository 或 API；无 migration、表、缓存、worker、HTTP/UI 变更。
+- 七类决策：1 状态竞态、2 service/repository、4 read model/worker、6 projection→repository→handler 现有集成、7 architecture regression 适用；3 API 与 5 frontend 不适用，因为 HTTP shape和 UI 未变。生产 queue drain、三页连续 Audit、混合负载与 p95/p99 属于发布后门禁。
+
 ## 2026-07-16 - 统一发布准备最终验证
 
 - 旧链门禁：`tests/test_platform_runtime_boundary_guards.py` 同时禁止旧 root/project route、full-view query/repository/manifest、warmup runtime/server/registry/type、projection Redis兼容参数和 worker注入回归；whole-repo生产路径扫描为零。

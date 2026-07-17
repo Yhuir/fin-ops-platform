@@ -1,5 +1,14 @@
 # 成本统计 实施记录
 
+## 2026-07-17 - unchanged 版本确认闭环（生产验证待发布）
+
+- 生产证据：正式 turnover relation confirm/withdraw 后，`active:2026-04` 与 `active:all` 的成本 payload 内 Workbench/Bank Detail 来源版本已经是当前值，但 parent `published_source_version` 停留在旧值；month/parent 每秒重复产生多组 `cost_statistics_all_shard` / `cost_statistics_shard_converged` event，Cost Audit 长期 refreshing。只读生产查询确认不是单条慢 SQL，而是持续收敛循环。
+- 根因：旧 `_unchanged_cost_statistics_scope_result(...)` 在业务 `source_versions` 相等时直接返回 `skipped=true`；readiness reporter 按合同忽略 skipped event，所以当前 dirty event 的发布版本从未被确认。month 完成后投递 parent，parent 又把 month 判为 non-fresh 并补投，形成闭环自激。
+- 决策：在既有成本 repository port 增加单一 `acknowledge_unchanged_cost_statistics_scope(...)`。它在同一事务锁定当前成本 dirty row，精确比较 tenant/scope/event source version，并用 JSONB equality 再验 parent 的完整业务 source versions；成功时只更新 `published_source_version/updated_at`，不重写 payload、两张结构化 rows 或 obsolete scopes。projection 返回 `published=true/skipped_rebuild=true` 让既有 readiness 正常记录；竞态失败保持 unpublished/refreshing。
+- 旧路径删除：删除“source versions 相等便直接通用 skipped、无需版本确认”的语义；不保留第二 worker、queue/readiness 特判、fallback 或兼容 API。
+- 隔离：改动只在 Cost Statistics projection、窄 port、成本 SQL owner 与 manifest；无 migration/schema、共享 queue/readiness、其它页面 read model、API、前端或缓存变更。
+- 测试：定向 304 tests 已覆盖 exact equality、processing、dirty/source race、零 payload/row rewrite、port/manifest 与跨模块 architecture guards。完整 backend/lint/docs/真实 PostgreSQL/CI、发布与生产队列/Audit/性能证据仍是本条目的发布门禁。
+
 ## 2026-07-17 - 统一生产部署与写后验证闭环
 
 - 发布：精确 SHA `d3fc16026` 通过 Nightly CI 后部署为 `main-d3fc16026-oa-outbox-index-20260717`；migration 0110 在生产应用耗时 `248ms`，API、dispatcher、22 个 worker、readiness、前端 hash 和公网 session route 全部通过。

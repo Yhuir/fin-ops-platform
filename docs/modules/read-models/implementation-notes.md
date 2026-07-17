@@ -1,5 +1,12 @@
 # Read Model 实施记录
 
+## 2026-07-17 - Cost Statistics unchanged CAS 隔离修复（生产验证待发布）
+
+- 生产根因：成本 projection 内容来源未变时旧逻辑只返回 `skipped`，没有把当前 dirty event version 写入 parent `published_source_version`；共享 readiness 按既有合同忽略 skipped，导致成本 month/parent 相互补投并持续 refreshing。
+- 边界决策：不修改共享 queue、readiness reporter、worker framework 或其它 read model。只给 `CostStatisticsReadModelRepositoryPort` 增加 cost-owned unchanged CAS：锁定当前 active dirty row，精确比较 event version 与 parent 业务 source versions，只推进成本 parent 发布标记；race 失败保持 refreshing。
+- 旧逻辑与隔离：旧“直接 skipped 即视为 unchanged 完成”的成本路径已移除；无新 migration、表、worker、API、cache、fallback 或其它页面依赖。
+- 验证：成本 runtime、manifest、read-model/platform architecture guards 304 tests 通过；完整 CI 与发布后队列停止增长、三页连续 Audit、混合负载仍待闭环。
+
 ## 2026-07-13 - committed SLO miss 的恢复前收敛
 
 - 真实原因：生产三方关系确认已提交，但 HTTP 用时 `5.270s` 超过同步写 5s 门禁；旧 runner 在记录 SLO failure 后立即读取恢复 checkpoint 的隔离页基线，正撞上 read model `202 refreshing`，因此没有执行撤回。

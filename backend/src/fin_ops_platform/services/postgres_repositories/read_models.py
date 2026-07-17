@@ -5925,6 +5925,54 @@ class PostgresSummaryReadModelRepository:
 
         return run_in_transaction(self._connection, publish)
 
+    def acknowledge_unchanged_cost_statistics_scope(
+        self,
+        *,
+        tenant_id: str,
+        scope_key: str,
+        source_version: int,
+        source_versions: dict[str, Any],
+    ) -> bool:
+        normalized_tenant_id = text(tenant_id)
+        normalized_scope_key = text(scope_key)
+        if normalized_tenant_id is None or normalized_scope_key is None:
+            raise ValueError("tenant_id and scope_key are required for cost statistics unchanged acknowledgement.")
+        if isinstance(source_version, bool) or not isinstance(source_version, int) or source_version < 0:
+            raise ValueError("source_version must be a non-negative integer for cost statistics unchanged acknowledgement.")
+        if not isinstance(source_versions, dict):
+            raise ValueError("source_versions must be an object for cost statistics unchanged acknowledgement.")
+
+        def acknowledge(connection: Any) -> bool:
+            current = connection.fetch_one(
+                """
+                select source_version
+                from job.read_model_dirty_scopes
+                where tenant_id = %s
+                  and scope_type = 'cost_statistics'
+                  and scope_key = %s
+                  and status in ('pending', 'processing')
+                for update
+                """,
+                (normalized_tenant_id, normalized_scope_key),
+            )
+            if current is None or int_value(current.get("source_version"), -1) != source_version:
+                return False
+            acknowledged = connection.fetch_one(
+                """
+                update read_model.cost_statistics_read_models
+                set published_source_version = %s,
+                    updated_at = now()
+                where scope_key = %s
+                  and source_versions = %s::jsonb
+                  and (published_source_version is null or published_source_version <= %s)
+                returning scope_key
+                """,
+                (source_version, normalized_scope_key, jsonb(source_versions), source_version),
+            )
+            return acknowledged is not None
+
+        return run_in_transaction(self._connection, acknowledge)
+
     def _write_cost_statistics_read_models(
         self,
         connection: Any,
@@ -6849,6 +6897,9 @@ class PostgresReadModelRepository:
 
     def publish_cost_statistics_read_models(self, *args: Any, **kwargs: Any) -> bool:
         return self._summary_read_model_repository.publish_cost_statistics_read_models(*args, **kwargs)
+
+    def acknowledge_unchanged_cost_statistics_scope(self, *args: Any, **kwargs: Any) -> bool:
+        return self._summary_read_model_repository.acknowledge_unchanged_cost_statistics_scope(*args, **kwargs)
 
     def load_tax_offset_read_models(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         return self._summary_read_model_repository.load_tax_offset_read_models(*args, **kwargs)

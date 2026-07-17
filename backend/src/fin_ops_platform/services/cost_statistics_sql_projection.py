@@ -107,6 +107,8 @@ class CostStatisticsSqlProjectionBuilder:
                 project_scope=project_scope,
                 source_versions=source_versions,
                 refresh_kind="month",
+                tenant_id=tenant_id,
+                source_version=source_version,
             )
             if unchanged is not None:
                 return unchanged
@@ -160,6 +162,8 @@ class CostStatisticsSqlProjectionBuilder:
                 project_scope=project_scope,
                 source_versions=source_versions,
                 refresh_kind="parent",
+                tenant_id=tenant_id,
+                source_version=source_version,
             )
             if unchanged is not None and not obsolete_scope_keys:
                 return unchanged
@@ -349,6 +353,8 @@ class CostStatisticsSqlProjectionBuilder:
         project_scope: str,
         source_versions: dict[str, Any],
         refresh_kind: str,
+        tenant_id: str,
+        source_version: int,
     ) -> dict[str, object] | None:
         try:
             metadata = self._read_model_repository.get_cost_statistics_scope_metadata(scope_key=scope_key)
@@ -360,6 +366,26 @@ class CostStatisticsSqlProjectionBuilder:
         if not isinstance(existing_source_versions, dict) or existing_source_versions != source_versions:
             return None
         entry_count = int(metadata.get("entry_count") or 0)
+        acknowledged = self._read_model_repository.acknowledge_unchanged_cost_statistics_scope(
+            tenant_id=tenant_id,
+            scope_key=scope_key,
+            source_version=source_version,
+            source_versions=source_versions,
+        )
+        if not acknowledged:
+            return {
+                "scope_key": scope_key,
+                "month": month,
+                "project_scope": project_scope,
+                "entry_count": entry_count,
+                "row_count": entry_count,
+                "source_versions": source_versions,
+                "source_version": source_version,
+                "refresh_kind": refresh_kind,
+                "published": False,
+                "skipped": True,
+                "skip_reason": "stale_source_version_at_unchanged_ack",
+            }
         return {
             "scope_key": scope_key,
             "month": month,
@@ -367,8 +393,10 @@ class CostStatisticsSqlProjectionBuilder:
             "entry_count": entry_count,
             "row_count": entry_count,
             "source_versions": source_versions,
+            "source_version": source_version,
             "refresh_kind": refresh_kind,
-            "skipped": True,
+            "published": True,
+            "skipped_rebuild": True,
             "skip_reason": "source_versions_unchanged",
         }
 

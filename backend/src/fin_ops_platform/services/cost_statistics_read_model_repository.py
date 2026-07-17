@@ -41,6 +41,23 @@ class CostStatisticsReadModelRepositoryPort:
         payload = self._repository.active_workbench_source_versions(scope_key=scope_key)
         return dict(payload) if isinstance(payload, dict) else {}
 
+    def acknowledge_unchanged_cost_statistics_scope(
+        self,
+        *,
+        tenant_id: str,
+        scope_key: str,
+        source_version: int,
+        source_versions: dict[str, Any],
+    ) -> bool:
+        return bool(
+            self._repository.acknowledge_unchanged_cost_statistics_scope(
+                tenant_id=tenant_id,
+                scope_key=scope_key,
+                source_version=source_version,
+                source_versions=source_versions,
+            )
+        )
+
     def publish_cost_statistics_read_models(
         self,
         snapshot: dict[str, Any],

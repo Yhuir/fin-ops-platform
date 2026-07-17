@@ -783,10 +783,16 @@ class CostStatisticsReadConnection:
 
 
 class CostStatisticsWriteConnection:
-    def __init__(self, *, current_source_version: int | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        current_source_version: int | None = None,
+        acknowledge_result: bool = True,
+    ) -> None:
         self.executed: list[tuple[str, tuple]] = []
         self.fetch_one_calls: list[tuple[str, tuple]] = []
         self.current_source_version = current_source_version
+        self.acknowledge_result = acknowledge_result
         self.transaction_count = 0
 
     def transaction(self):
@@ -804,6 +810,8 @@ class CostStatisticsWriteConnection:
         self.fetch_one_calls.append((normalized, params))
         if "from job.read_model_dirty_scopes" in normalized and self.current_source_version is not None:
             return {"source_version": self.current_source_version}
+        if "update read_model.cost_statistics_read_models" in normalized and self.acknowledge_result:
+            return {"scope_key": params[1]}
         return None
 
     def execute(self, sql: str, params: tuple = ()) -> int:
@@ -1206,10 +1214,12 @@ class CostStatisticsParentAggregationConnection:
 
 
 class CostStatisticsSaveRecorder:
-    def __init__(self, *, publish_result: bool = True) -> None:
+    def __init__(self, *, publish_result: bool = True, acknowledge_result: bool = True) -> None:
         self.saved: list[tuple[dict, set[str] | None]] = []
         self.publish_calls: list[tuple[str, str, int, set[str] | None]] = []
+        self.acknowledge_calls: list[tuple[str, str, int, dict[str, object]]] = []
         self.publish_result = publish_result
+        self.acknowledge_result = acknowledge_result
         self.workbench_source_versions: dict[str, object] = {}
 
     def active_workbench_source_versions(self, *, scope_key: str) -> dict[str, object]:
@@ -1230,10 +1240,21 @@ class CostStatisticsSaveRecorder:
             self.saved.append((snapshot, changed_scope_keys))
         return self.publish_result
 
+    def acknowledge_unchanged_cost_statistics_scope(
+        self,
+        *,
+        tenant_id: str,
+        scope_key: str,
+        source_version: int,
+        source_versions: dict[str, object],
+    ) -> bool:
+        self.acknowledge_calls.append((tenant_id, scope_key, source_version, dict(source_versions)))
+        return self.acknowledge_result
+
 
 class UnchangedCostStatisticsSaveRecorder(CostStatisticsSaveRecorder):
-    def __init__(self, *, refresh_status: str = "fresh") -> None:
-        super().__init__()
+    def __init__(self, *, refresh_status: str = "fresh", acknowledge_result: bool = True) -> None:
+        super().__init__(acknowledge_result=acknowledge_result)
         self.refresh_status = refresh_status
         self.source_versions: dict[str, object] = {}
         self.metadata_scopes: list[str] = []
@@ -1246,6 +1267,7 @@ class UnchangedCostStatisticsSaveRecorder(CostStatisticsSaveRecorder):
             "entry_count": 1,
             "source_versions": dict(self.source_versions),
         }
+
 
 class CostStatisticsReadModelRepositoryPortTests(unittest.TestCase):
     def test_port_excludes_unrelated_read_model_methods(self) -> None:
@@ -1285,6 +1307,17 @@ class CostStatisticsReadModelRepositoryPortTests(unittest.TestCase):
                 self.published = (snapshot, tenant_id, scope_key, source_version, changed_scope_keys)
                 return True
 
+            def acknowledge_unchanged_cost_statistics_scope(
+                self,
+                *,
+                tenant_id: str,
+                scope_key: str,
+                source_version: int,
+                source_versions: dict[str, object],
+            ) -> bool:
+                self.acknowledged = (tenant_id, scope_key, source_version, source_versions)
+                return True
+
             def get_tax_offset_view(self, *, scope_key: str) -> dict[str, object]:
                 raise AssertionError("tax offset should not be exposed through cost statistics port")
 
@@ -1316,6 +1349,14 @@ class CostStatisticsReadModelRepositoryPortTests(unittest.TestCase):
         self.assertEqual(
             port.active_workbench_source_versions(scope_key="2026-05"),
             {"scope_key": "2026-05", "source_version": 42},
+        )
+        self.assertTrue(
+            port.acknowledge_unchanged_cost_statistics_scope(
+                tenant_id="default",
+                scope_key="active:2026-05",
+                source_version=7,
+                source_versions={"proof": "v1"},
+            )
         )
         self.assertTrue(
             port.publish_cost_statistics_read_models(
@@ -1664,6 +1705,65 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
                 self.assertFalse(published)
                 self.assertEqual(connection.transaction_count, 1)
                 self.assertEqual(connection.executed, [])
+
+    def test_repository_acknowledges_unchanged_cost_scope_without_rewriting_rows_or_payload(self) -> None:
+        connection = CostStatisticsWriteConnection(current_source_version=7)
+        repository = PostgresReadModelRepository(connection)
+        source_versions = {"workbench_source_versions": {"source_version": 42}}
+
+        acknowledged = repository.acknowledge_unchanged_cost_statistics_scope(
+            tenant_id="default",
+            scope_key="active:2026-05",
+            source_version=7,
+            source_versions=source_versions,
+        )
+
+        self.assertTrue(acknowledged)
+        self.assertEqual(connection.transaction_count, 1)
+        self.assertEqual(connection.executed, [])
+        self.assertEqual(len(connection.fetch_one_calls), 2)
+        lock_sql, lock_params = connection.fetch_one_calls[0]
+        self.assertIn("from job.read_model_dirty_scopes", lock_sql)
+        self.assertIn("status in ('pending', 'processing')", lock_sql)
+        self.assertIn("for update", lock_sql)
+        self.assertEqual(lock_params, ("default", "active:2026-05"))
+        update_sql, update_params = connection.fetch_one_calls[1]
+        self.assertIn("update read_model.cost_statistics_read_models", update_sql)
+        self.assertIn("source_versions = %s::jsonb", update_sql)
+        self.assertIn("returning scope_key", update_sql)
+        self.assertEqual(update_params[0], 7)
+        self.assertEqual(update_params[1], "active:2026-05")
+        self.assertEqual(update_params[2].obj, source_versions)
+        self.assertEqual(update_params[3], 7)
+
+    def test_repository_rejects_unchanged_cost_ack_on_dirty_version_or_source_race(self) -> None:
+        cases = (
+            (8, True, 1),
+            (None, True, 1),
+            (7, False, 2),
+        )
+        for current_source_version, acknowledge_result, expected_fetches in cases:
+            with self.subTest(
+                current_source_version=current_source_version,
+                acknowledge_result=acknowledge_result,
+            ):
+                connection = CostStatisticsWriteConnection(
+                    current_source_version=current_source_version,
+                    acknowledge_result=acknowledge_result,
+                )
+                repository = PostgresReadModelRepository(connection)
+
+                acknowledged = repository.acknowledge_unchanged_cost_statistics_scope(
+                    tenant_id="default",
+                    scope_key="active:2026-05",
+                    source_version=7,
+                    source_versions={"proof": "v1"},
+                )
+
+                self.assertFalse(acknowledged)
+                self.assertEqual(connection.transaction_count, 1)
+                self.assertEqual(connection.executed, [])
+                self.assertEqual(len(connection.fetch_one_calls), expected_fetches)
 
     def test_repository_reads_cost_statistics_scope_metadata_without_payload_or_row_scans(self) -> None:
         connection = CostStatisticsReadConnection(
@@ -2632,7 +2732,13 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(result["scope_key"], "active:2026-05")
         self.assertEqual(result["row_count"], 1)
         self.assertEqual(result["skip_reason"], "source_versions_unchanged")
-        self.assertTrue(result["skipped"])
+        self.assertTrue(result["published"])
+        self.assertTrue(result["skipped_rebuild"])
+        self.assertNotIn("skipped", result)
+        self.assertEqual(
+            repository.acknowledge_calls,
+            [("default", "active:2026-05", 7, repository.source_versions)],
+        )
         self.assertEqual(result["source_versions"]["workbench_source_versions"]["workbench_generation"], "stable-v1")
 
     def test_cost_statistics_sql_projection_skips_unchanged_scope_while_dirty_scope_is_processing(self) -> None:
@@ -2665,7 +2771,37 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         )
 
         self.assertEqual(result["skip_reason"], "source_versions_unchanged")
+        self.assertTrue(result["published"])
+        self.assertTrue(result["skipped_rebuild"])
+        self.assertNotIn("skipped", result)
+        self.assertEqual(
+            repository.acknowledge_calls,
+            [("default", "active:2026-05", 7, repository.source_versions)],
+        )
+
+    def test_cost_statistics_sql_projection_rejects_unchanged_ack_after_dirty_version_race(self) -> None:
+        repository = UnchangedCostStatisticsSaveRecorder(acknowledge_result=False)
+        builder = CostStatisticsSqlProjectionBuilder(
+            connection=CostStatisticsProjectionConnection(),
+            read_model_repository=repository,
+        )
+        source_versions = {"proof": "v1"}
+        repository.source_versions = source_versions
+
+        result = builder._unchanged_cost_statistics_scope_result(
+            scope_key="active:2026-05",
+            month="2026-05",
+            project_scope="active",
+            source_versions=source_versions,
+            refresh_kind="month",
+            tenant_id="default",
+            source_version=7,
+        )
+
+        self.assertFalse(result["published"])
         self.assertTrue(result["skipped"])
+        self.assertEqual(result["skip_reason"], "stale_source_version_at_unchanged_ack")
+        self.assertEqual(repository.publish_calls, [])
 
     def test_cost_statistics_sql_projection_does_not_skip_mismatched_scope_metadata(self) -> None:
         repository = UnchangedCostStatisticsSaveRecorder()
@@ -2681,6 +2817,8 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
             project_scope="active",
             source_versions={"proof": "current-v2"},
             refresh_kind="month",
+            tenant_id="default",
+            source_version=7,
         )
 
         self.assertIsNone(result)
