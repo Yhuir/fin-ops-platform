@@ -1,6 +1,6 @@
 # 成本统计模块边界与 I/O
 
-日期：2026-07-16
+日期：2026-07-18
 
 ## 模块化状态
 
@@ -34,7 +34,7 @@
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | 页面筛选/月份/父级聚合查询 | `CostStatisticsPage.tsx`、`features/cost-statistics/api.ts` | 进入成本统计 API/query service；页面主时间范围只暴露单一按钮选择 `all` / `year` / `month`，不再暴露主页面自定义日期范围；精确日期范围只属于导出中心 |
-| 页面交互鲜度 | explorer request lifecycle + explorer freshness envelope + `AppHealthStatusContext` 的 App Status overview + operation barrier | 只精确匹配 `read_model_key=cost_statistics` 与当前 `active:month|all` scope；其他月份/其他 read model 不得锁当前页面。focus、hidden→visible 和 BFCache restore 只触发当前 explorer 重校验，不产生新的 freshness 事实或 cost-specific polling/SSE。 |
+| 页面交互鲜度 | explorer request lifecycle + explorer freshness envelope + `AppHealthStatusContext` 的 App Status overview + operation barrier | relation confirm/withdraw 事件必须立即进入成本页面私有 barrier，并只等待当前精确 `cost_statistics` scope：month=`active:YYYY-MM`，year/all=`active:all`。等待期间取消页面自有 explorer/detail/export 请求并保持 cost-local inert overlay；barrier fresh 后只发一次 explorer 读取。App Status 仅作异常恢复/状态展示，不能作为 relation 写后可见性的 5 秒轮询主路径；其他月份/其他 read model 不得锁当前页面。focus、hidden→visible 和 BFCache restore 只触发当前 explorer 重校验，不产生新的 freshness 事实或 cost-specific polling/SSE。 |
 | 页面只读 Audit | `PageBusinessAuditIcon` / AppHealth operations API / `cost_statistics_page_audit.py` | admin-only 调用 `page-audit?page=cost-statistics`；registry 使用唯一 `cost_statistics` executor，通用只读 CLI 与 System Audit 也只到达同一个成本 owner。该 owner 显式复用 caller-owned repeatable-read read-only snapshot、完整 Workbench integrity proof 与银行明细 canonical/字段/version proof。canonical paired-cost expected-set 从已证明的 Workbench active generation group/member payload 形成；full bank-flow identity/month/direction/amount expected-set 必须直接从 active `app.bank_transactions` 的收入与支出事实形成，不能由 `bank_detail_rows` 反推完整性。cost rows、project/expense summaries，以及 bank-flow 的收支金额与收支笔数必须重算一致；任一缺失、额外、旧版或字段漂移均 blocking；审计只读，不能触发 rebuild/export 或读取旧 live service。共享 `page_business_audit.py` 不再拥有任何成本 runtime 分支。05-09 后 summary/dirty/outbox 共用一次查询，relation equality 只由 Workbench 正式 owner 执行一次；05-10 后 row/scope、月度上游和 parent shard source-version proof 共用一次集合查询，三分支仍各自 bounded；05-16 后五类业务值/summary/account proof 共用一次 `fetch_all`，五分支仍各自 bounded；05-17 后 bank-flow canonical set、字段和 summary proof 只读 `cost_statistics_bank_flow_rows`，不展开 metadata 中的旧 row array，parent 按 month rows 逻辑 rollup；05-18 后 scope count、missing scope、duplicate identity 与 canonical set 由一次 `cost_exact_set_proofs` I/O 返回，四分支独立 bounded。成本 owner 现在固定为四组集合 SQL；active-relation 场景总 query budget 为 23，只用于防回退，不代表生产 SLO。响应的 cost-local `proof_timings` 只计量这四组与既有 Workbench/Bank Detail collector 的耗时和 issue count，不新增查询、不改变其它页面 envelope，也不能作为缓存绿色结论。 |
 | 银行账户全集 | `AppSettingsService.get_cost_statistics_source_settings_payload()` / `app.app_settings.bank_account_mappings` | 投影层读取 settings owner 输出并写入 explorer metadata；query gate 在同一 SQL statement 只读取成本所需 settings JSON 片段，用于当前 fingerprint 与 bank facets metadata，不再次调用 settings service。页面不得直接读取 settings API 或设置页面状态 |
 | 银行自动标签规则版本 | `AppSettingsService.get_cost_statistics_source_settings_payload()` / `app.app_settings.bank_transaction_tags` | 进入 `source_versions.bank_auto_tag_rules_version`；规则更新由 `bank_auto_tag_rules_changed` lifecycle 入队 `cost_statistics.read_model.refresh` |
@@ -45,7 +45,7 @@
 | 项目明细/流水详情/导出请求 | `routes_cost_statistics.py` | 只调用 `CostStatisticsQueryService`；read model 不 fresh 时返回 `409 cost_statistics_read_model_not_fresh`，不得同步扫描旧 live service 或读取完整 explorer payload 伪装成功。bulk preview 只读 SQL summary + 8 行，下载按最多 1,000 行批次读取；成本统计页面默认透传 `project_scope=active` |
 | Refresh scope | `cost_statistics` manifest | active/all month + parent aggregate |
 | Workbench 月度输入 | `read_model.workbench_generations` active generation + `read_model.workbench_groups` | 先定位 active generation，再按 `generation_id + scope_key` 读取 groups；禁止按裸 `scope_key` 扫描历史 generation |
-| 关系变更 | workbench relation/downstream lifecycle | 转换为受影响 cost_statistics scopes |
+| 关系变更 | `WorkbenchReadModelRefreshService` 成功发布的精确月份 generation | 只有 `published=true` 且 event source version 仍 current 后，才以 `workbench_shard_published` 投递该月份 `active/all` 成本 scope；UoW、relation facade/repository、自动匹配命令和 Turnover writer 不得提前或并行直投/声明成本事件。无上游 trace 时使用 Workbench event id 作为成本链 trace，month→parent 全程保留 tenant、priority、trace。 |
 | 导入确认 | import processing service/job result | 返回规范化后的 cost_statistics operation barrier targets，月份输入经 scope policy 展开为 active/all shards 与 parent aggregate |
 
 ## 输出 I/O
@@ -59,8 +59,8 @@
 | Source versions | read model/query gateway | 月份 scope 的业务 `source_versions` 必须包含当前 Workbench active generation 的完整 `workbench_source_versions`、`bank_detail_source_versions`、`bank_auto_tag_rules_version` 和 `bank_account_mappings_fingerprint`。projection 与 query 共用 `cost_statistics_source_versions(...)` 纯 helper；query 的当前依赖来自同一 gate SQL 的 settings/Workbench/Bank Detail snapshot，禁止 Application/runtime 逐个回调 owner。runtime dirty `source_version` 独立保存在 parent metadata 的 `published_source_version`，只作为发布竞态与 cache namespace token，不得混入业务 `source_versions`。任一上游变化都使旧 payload fail-closed 为 refreshing 并入队刷新，禁止只在 Audit 中识别漂移而让页面继续显示 fresh |
 | Project/detail/export payload | 前端页面 / 下载 | 页面 project 由 bounded page query 输出；bulk export-preview/export 经相同 PostgreSQL gate 后调用成本专属 `get_cost_statistics_export_page(...)`，从两张结构化行表执行同一组 month/range/project/expense/tag filters。preview 只返回完整 summary + 8 行；下载先判 20,000 行门槛，再以每批最多 1,000 行直接追加到 write-only workbook，禁止完整 entries/rows list。生成后再次校验 schema/source versions/published version，中途变化则丢弃并 409。time/bank-tag 导出不读取 `active:all`；transaction detail/export 保持 gate 后 identity 点查。filename/sheet/error/permission 合同不变。 |
 | Parent rollup | read model repository | scoped parent aggregate |
-| Dirty scope | runtime queue | Workbench 月分片 active generation 发布成功后，`WorkbenchReadModelRefreshService` 必须先经 `ReadModelRefreshGateway` 持久入队对应 active/all 成本月份 scope，再完成 Workbench dirty scope。成本 worker 必须携带 event 的非负整数 `source_version`：只有 repository 在同一事务内锁定的唯一 `pending` / `processing` dirty row 版本精确相等时才可发布或确认 unchanged；完成 dirty scope 也必须匹配该版本。月份发布/unchanged 确认和完成均成功后才 fan-out 对应 parent；任一版本竞态失败时保持 `refreshing`，不得写 Redis、完成新 dirty 或投递 parent。这样即使原业务事件同时投递 Workbench 与成本统计、成本先读到旧 generation，也会由发布后事件保证最终重算 |
-| Write target visibility | 导入/关系写 API | 上游写操作必须显式透出 `cost_statistics` targets，成本统计页面自身保持纯读面 |
+| Dirty scope | runtime queue | Workbench 月分片 active generation 发布成功后，`WorkbenchReadModelRefreshService` 必须先经 `ReadModelRefreshGateway` 持久入队对应 active/all 成本月份 scope，再完成 Workbench dirty scope；入队失败不得完成 Workbench dirty。成本 worker 必须携带 event 的非负整数 `source_version` 以及原 tenant/priority/trace：只有 repository 在同一事务内锁定的唯一 `pending` / `processing` dirty row版本精确相等时才可发布或确认 unchanged；完成 dirty scope 也必须匹配该版本。月份发布/unchanged 确认和完成均成功后才 fan-out 对应 parent；任一版本竞态失败时保持 `refreshing`，不得写 Redis、完成新 dirty 或投递 parent。relation writer 对成本的旧 direct target/隐藏 repository fan-out 已删除，禁止恢复。 |
+| Write-after-read proof | 生产 smoke / Cost explorer | relation mutation receipt 只证明 Workbench 与其直接 downstream；成本派生链必须以同一 causal trace 的 Workbench event、`workbench_shard_published` month event、`active:all` parent done，以及 explorer `200 + fresh + source_versions changed + business assertion changed` 共同证明。中间 event done 不得冒充页面可见。 |
 
 ## 持久化与投影
 
@@ -68,6 +68,7 @@
 - Projection：`partitioned_scoped_parent_rollup`
 - `all` 语义：`queryable_parent_aggregate`
 - Worker：`cost-statistics`；旧 `cost-tax` 成本统计消费链路已移除
+- Relation-origin 唯一入口：`WorkbenchReadModelRefreshService._enqueue_cost_statistics_after_publish(...)`。`WorkbenchWriteUnitOfWork`、`WorkbenchWriteFacade`、`PostgresWorkbenchRelationRepository` 和 `TurnoverLedgerWriteFacade` 不拥有成本 scope；旧 direct `workbench_relation_changed` / `turnover_relation_changed` 成本事件、cost-bearing 分支与 scope expansion 已删除，并由 architecture guard 阻止回归。
 - Query owner：`CostStatisticsQueryService`；项目明细、流水详情、export-preview、export 都归属该 owner。
 - Miss/stale owner：`CostStatisticsQueryService` 必须先经 `CostStatisticsReadModelRepositoryPort.get_cost_statistics_freshness_gate(...)` 执行一次 dependency-bound PostgreSQL gate；gate missing/non-fresh 时返回空的 `refreshing` envelope 并入队，禁止访问 Redis 或 full rows。只有 gate fresh 且同一 snapshot 的业务 source/schema 完全匹配后，才委托现有 `ReadModelQueryGateway` 处理 Redis 与 payload shape，禁止同步 rebuild。
 - 发布边界：`CostStatisticsReadModelRepositoryPort.publish_cost_statistics_read_models(...)` 是内容重建的唯一正式发布 I/O；`acknowledge_unchanged_cost_statistics_scope(...)` 是内容未变时唯一的版本确认 I/O。两者都复用现有 active-scope partial unique index，在一个事务内锁定唯一 `pending` / `processing` dirty row，避免扫描排序历史 terminal rows。重建路径只有 event 版本精确相等才写 snapshot/rows、`published_source_version` 和 parent obsolete deletes；unchanged 路径还要求 parent `source_versions` 与当前完整来源版本精确相等，只更新 `published_source_version/updated_at`，禁止重写 payload、两张结构化 rows 或 obsolete scopes。任一路径拒绝必须不完成 dirty、不 fan-out、不写 Redis。05-14 已删除旧无版本 save 及其 repository/state-store/protocol/manifest 表面；禁止以 shim、fallback 或 broad state payload 恢复。

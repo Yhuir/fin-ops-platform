@@ -210,7 +210,6 @@ class DerivedDataLifecycleService:
             "oa_pending_payment_read_model",
             "tax_offset_read_model",
             "tax_offset_month_cache",
-            "cost_statistics_read_model",
             "search_cache",
         ),
         "exception_case_changed": (
@@ -271,7 +270,6 @@ class DerivedDataLifecycleService:
             "oa_pending_payment_read_model",
             "tax_offset_read_model",
             "tax_offset_month_cache",
-            "cost_statistics_read_model",
             "search_cache",
         ),
         "pending_invoice_attach_existing_invoice_confirmed": (
@@ -286,7 +284,6 @@ class DerivedDataLifecycleService:
             "oa_pending_payment_read_model",
             "tax_offset_read_model",
             "tax_offset_month_cache",
-            "cost_statistics_read_model",
             "search_cache",
         ),
         "pending_invoice_income_status_override_confirmed": (
@@ -297,27 +294,23 @@ class DerivedDataLifecycleService:
             "no_oa_bank_batch_read_model",
             "workbench_read_model",
             "workbench_relation_read_model",
-            "cost_statistics_read_model",
             "search_cache",
         ),
         "bank_flow_rule_batch_changed": (
             "bank_flow_rule_batch_read_model",
             "workbench_read_model",
             "workbench_relation_read_model",
-            "cost_statistics_read_model",
             "search_cache",
         ),
         "batch_accounting_relation_changed": (
             "bank_detail_read_model",
             "workbench_read_model",
             "workbench_relation_read_model",
-            "cost_statistics_read_model",
             "search_cache",
         ),
         "turnover_relation_changed": (
             "workbench_read_model",
             "workbench_relation_read_model",
-            "cost_statistics_read_model",
             "search_cache",
         ),
         "tax_certified_import_confirmed": (
@@ -420,28 +413,14 @@ class DerivedDataLifecycleService:
         "pending_invoice_manual_invoice_confirmed": (
             "workbench_matching",
             "tax_offset_cache_warmup",
-            "cost_statistics.read_model.refresh",
         ),
         "pending_invoice_attach_existing_invoice_confirmed": (
             "workbench_matching",
             "tax_offset_cache_warmup",
-            "cost_statistics.read_model.refresh",
         ),
         "pending_invoice_rules_changed": (
             "workbench_matching",
             "tax_offset_cache_warmup",
-            "cost_statistics.read_model.refresh",
-        ),
-        "no_oa_bank_batch_changed": (
-            "cost_statistics.read_model.refresh",
-        ),
-        "bank_flow_rule_batch_changed": (
-            "cost_statistics.read_model.refresh",
-        ),
-        "batch_accounting_relation_changed": (
-            "cost_statistics.read_model.refresh",
-        ),
-        "turnover_relation_changed": (
             "cost_statistics.read_model.refresh",
         ),
         "tax_certified_import_confirmed": (

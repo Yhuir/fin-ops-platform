@@ -403,3 +403,13 @@ PYTHONPATH=backend/src scripts/check-read-model-scope-contracts.py --help
 - 本轮不连接真实生产 PostgreSQL 执行 `scripts/check-read-model-scope-contracts.py --apply`；发布前后需先 dry-run JSON 报告，再按 runbook 受控清理。
 - 本地测试不跑真实 RabbitMQ/Redis/cost-statistics worker drain；Workbench 成本关系确认后到 `cost_statistics` worker 的真实 enqueue-to-fresh 收敛、父 scope 与月份 shard 在真实多 worker 环境中的最终收敛，以及真实网络中断后的浏览器重试体验需要生产或 staging smoke。
 - 本地已覆盖成本统计超过 20,000 行同步导出 fail-closed、导出中心错误反馈，以及 120+ 行窄屏宽表滚动/控件可用性；真实浏览器文件打开、真实生产超大数据查询/下载耗时和生产视觉性能仍需 staging/manual smoke。
+
+## 2026-07-18 relation 写后 all 可见性门禁
+
+- `tests/test_workbench_uow_contract.py`、`tests/test_workbench_relation_repository.py`、`tests/test_turnover_ledger_uow_contract.py`、`tests/test_turnover_ledger_api.py`：Workbench/Turnover relation UoW/facade/repository 不再直投 `cost_statistics`；其他 direct downstream 保持原合同。
+- `tests/test_workbench_sql_runtime.py`：只有 Workbench exact-version publish 成功且仍 current 后才投递 `workbench_shard_published`；成本 enqueue 失败不得完成 Workbench dirty；无 trace 时以 Workbench event id 建立 causal trace。
+- `tests/test_derived_data_lifecycle_service.py`、`tests/test_workbench_matching_orchestrator.py`：关系类 lifecycle event/job 与自动匹配 metadata 不再声明 direct Cost，仍保留 Workbench 和其它既有 downstream。
+- `tests/test_cost_statistics_sql_runtime.py`：month→parent、parent→missing shard 保留 tenant、priority、trace，且不恢复旧 `_enqueue_all_scope_shards`。
+- `web/src/test/CostStatisticsPage.test.tsx`：all 视图收到重复 relation event 后只等待 `active:all`，等待前取消页面自有请求，barrier fresh 后只读取一次并解除既有 inert overlay。
+- `tests/test_write_operation_e2e_smoke.py`：affected consumer 的业务值未变化可在 timeout 内继续等待；Cost all 必须同时满足 fresh、source_versions 变化和业务断言变化，并输出 commit→Workbench publish、Workbench publish→`active:all`、commit→API 业务值可见时间线。
+- `tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_relation_cost_refresh_has_one_publish_derived_owner_and_exact_page_barrier`：机械禁止三个旧 cost 入口、causal metadata 丢失和前端退回通用 App Status 刷新路径。

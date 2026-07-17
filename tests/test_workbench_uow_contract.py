@@ -729,7 +729,7 @@ class WorkbenchUoWContractTests(unittest.TestCase):
         )
         self.assertEqual(writer.calls[3]["metadata"], writer.calls[0]["metadata"])
 
-    def test_confirm_link_relation_refresh_metadata_normalizes_cost_statistics_targets(self) -> None:
+    def test_confirm_link_relation_refresh_metadata_does_not_enqueue_cost_statistics_directly(self) -> None:
         writer = _RecordingDirtyOutboxWriter()
         uow = self._new_uow(read_model_writer=writer)
 
@@ -756,8 +756,6 @@ class WorkbenchUoWContractTests(unittest.TestCase):
             [
                 ("workbench", "2026-05"),
                 ("workbench_relation", "2026-05"),
-                ("cost_statistics", "active:2026-05"),
-                ("cost_statistics", "all:2026-05"),
             ],
         )
 

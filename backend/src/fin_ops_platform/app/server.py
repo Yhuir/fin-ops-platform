@@ -10950,7 +10950,6 @@ class Application:
             "oa_pending_payment_read_model": "oa_pending_payment",
             "tax_offset_read_model": "tax_offset",
             "tax_offset_month_cache": "tax_offset",
-            "cost_statistics_read_model": "cost_statistics",
             "search_cache": "search",
             "no_oa_bank_batch_read_model": "no_oa_bank_batch",
             "oa_adapter_records_cache": "oa",

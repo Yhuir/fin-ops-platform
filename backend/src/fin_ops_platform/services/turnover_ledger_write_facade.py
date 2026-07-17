@@ -309,11 +309,6 @@ class TurnoverLedgerWriteFacade:
                     "reason": "turnover_relation_changed",
                 },
                 {
-                    "scope_type": "cost_statistics",
-                    "scope_keys": refresh_scope_keys,
-                    "reason": "turnover_relation_changed",
-                },
-                {
                     "scope_type": "search",
                     "scope_keys": refresh_scope_keys,
                     "reason": "turnover_relation_changed",
@@ -416,11 +411,6 @@ class TurnoverLedgerWriteFacade:
                     "reason": "turnover_relation_changed",
                 },
                 {
-                    "scope_type": "cost_statistics",
-                    "scope_keys": refresh_scope_keys,
-                    "reason": "turnover_relation_changed",
-                },
-                {
                     "scope_type": "search",
                     "scope_keys": refresh_scope_keys,
                     "reason": "turnover_relation_changed",
@@ -511,11 +501,6 @@ class TurnoverLedgerWriteFacade:
                 },
                 {
                     "scope_type": "workbench_relation",
-                    "scope_keys": refresh_scope_keys,
-                    "reason": "turnover_relation_changed",
-                },
-                {
-                    "scope_type": "cost_statistics",
                     "scope_keys": refresh_scope_keys,
                     "reason": "turnover_relation_changed",
                 },

@@ -1,5 +1,14 @@
 # 成本统计 实施记录
 
+## 2026-07-18 - relation 写后 all 可见性单链收口（生产验证待发布）
+
+- 基线：当前生产 release 的 test-owned confirm 样本中，写 API 约 `2.948s`，Workbench 事件约 `20.492s`，成本直接事件约 `15.202s`；旧证据中成本 all 新值约 `19.10s`、撤回约 `11.93s`。事件时间线证明 relation writer 的提前 direct cost fan-out 会在 Workbench 新 generation 发布前抢跑，并与发布后 fan-out 重复排队。
+- 单一边界：relation UoW/facade/repository 只提交 Workbench 与明确直接 downstream；成功发布且 source version 仍 current 的 Workbench 月 generation 是 relation-origin Cost refresh 的唯一 owner。它先 durable enqueue `workbench_shard_published`，enqueue 失败不完成 Workbench dirty；无 trace 时以 Workbench event id 建立 causal trace。
+- Cost 链：month→parent 与 parent→missing shard 全程保留 tenant、priority、trace。旧 Workbench/Turnover UoW cost target、自动匹配命令的 cost metadata、relation lifecycle 的 cost domain/job、facade/repository cost-bearing/hidden expansion、Cost dead `_enqueue_all_scope_shards` 和 write-SLO direct cost expectation 已删除；导入/标签/设置等非 relation 事件保持原合同，不保留 fallback、兼容 branch、新队列或新 worker。
+- 页面：`workbenchRelationUpdated` 使用 Cost 页面私有 exact barrier；month 等待 `active:YYYY-MM`，year/all 等待 `active:all`。等待时复用既有轻量 inert overlay，取消页面自有 explorer/detail/export 请求；fresh 后只读一次。通用 App Status 只作恢复，不再承担 relation 写后主轮询。
+- 验证工具：affected consumer 的业务断言可在 timeout 内等待；Cost all 还必须证明 source_versions 相对写前变化。报告以 original Workbench event 和 causal cost events 输出 commit→Workbench publish、Workbench publish→`active:all`、commit→API 业务值可见三段；中间 event done 不算页面可见。
+- 发布门禁：本地定向测试、完整 lint/build/docs/架构 guard、部署前旧 event drain、标准发布、test-owned confirm/withdraw、Cost Page Audit 和门槛性能尚需在本次提交后执行；未完成前不声明生产性能闭环。
+
 ## 2026-07-17 - unchanged 版本确认闭环（生产验证待发布）
 
 - 生产证据：正式 turnover relation confirm/withdraw 后，`active:2026-04` 与 `active:all` 的成本 payload 内 Workbench/Bank Detail 来源版本已经是当前值，但 parent `published_source_version` 停留在旧值；month/parent 每秒重复产生多组 `cost_statistics_all_shard` / `cost_statistics_shard_converged` event，Cost Audit 长期 refreshing。只读生产查询确认不是单条慢 SQL，而是持续收敛循环。

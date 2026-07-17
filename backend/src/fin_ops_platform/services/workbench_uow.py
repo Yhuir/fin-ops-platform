@@ -330,14 +330,6 @@ def _refresh_targets_for(command: Any, handler_result: dict[str, Any]) -> list[W
                 reason=reason,
                 metadata=metadata,
             )
-    if "cost_statistics" in downstream_scope_types:
-        _extend_refresh_targets(
-            targets,
-            scope_type="cost_statistics",
-            scope_keys=scope_keys,
-            reason=reason,
-            metadata=metadata,
-        )
     if "pending_invoice" in downstream_scope_types:
         _extend_refresh_targets(
             targets,

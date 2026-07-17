@@ -212,7 +212,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         self.assertEqual([domain["domain"] for domain in plan["domains"]], ["workbench_matching_dirty_scopes"])
         self.assertEqual(plan["will_enqueue_jobs"], ["workbench_matching"])
 
-    def test_manual_invoice_confirmed_maps_invoice_workbench_tax_cost_pending_and_search_domains(self) -> None:
+    def test_manual_invoice_confirmed_maps_invoice_workbench_tax_pending_and_search_domains(self) -> None:
         service = DerivedDataLifecycleService()
 
         plan = service.plan_event("pending_invoice_manual_invoice_confirmed", months=["2026-05"])
@@ -233,13 +233,31 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
                 "oa_pending_payment_read_model",
                 "tax_offset_read_model",
                 "tax_offset_month_cache",
-                "cost_statistics_read_model",
                 "search_cache",
             ],
         )
         self.assertIn("tax_offset_cache_warmup", plan["will_enqueue_jobs"])
         self.assertEqual([domain["domain"] for domain in attach_plan["domains"]], [domain["domain"] for domain in plan["domains"]])
         self.assertEqual(attach_plan["will_enqueue_jobs"], plan["will_enqueue_jobs"])
+
+    def test_relation_events_derive_cost_only_after_workbench_publish(self) -> None:
+        service = DerivedDataLifecycleService()
+
+        for event in (
+            "pair_relation_changed",
+            "pending_invoice_manual_invoice_confirmed",
+            "pending_invoice_attach_existing_invoice_confirmed",
+            "no_oa_bank_batch_changed",
+            "bank_flow_rule_batch_changed",
+            "batch_accounting_relation_changed",
+            "turnover_relation_changed",
+        ):
+            with self.subTest(event=event):
+                plan = service.plan_event(event, months=["2026-05"])
+                domains = [domain["domain"] for domain in plan["domains"]]
+                self.assertIn("workbench_read_model", domains)
+                self.assertNotIn("cost_statistics_read_model", domains)
+                self.assertNotIn("cost_statistics.read_model.refresh", plan["will_enqueue_jobs"])
 
     def test_income_status_override_only_refreshes_pending_invoice_and_search_domains(self) -> None:
         service = DerivedDataLifecycleService()

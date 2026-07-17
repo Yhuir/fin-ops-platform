@@ -54,6 +54,13 @@ type ExplorerScopeMode = RangeScopeMode;
 type ScopePickerPanel = "scope";
 type EffectiveCostPageState = "fresh" | "loading" | "refreshing" | "stale" | "unavailable" | "error";
 
+function isAbortLikeError(caught: unknown) {
+  if (caught instanceof DOMException && caught.name === "AbortError") {
+    return true;
+  }
+  return caught instanceof Error && (caught.name === "AbortError" || /aborted|abort/i.test(caught.message));
+}
+
 type LoadedCostStatisticsExplorer = {
   requestKey: string;
   payload: CostStatisticsExplorerPage;
@@ -432,6 +439,7 @@ export default function CostStatisticsPage() {
   const [exportPreview, setExportPreview] = useState<CostStatisticsExportPreview | null>(null);
   const [exportCenterMode, setExportCenterMode] = useState<ExportCenterMode>("time");
   const [domainRefreshNonce, setDomainRefreshNonce] = useState(0);
+  const [isRelationRefreshWaiting, setIsRelationRefreshWaiting] = useState(false);
   const [isTagRulesDrawerOpen, setIsTagRulesDrawerOpen] = useState(false);
   const [tagRules, setTagRules] = useState<CostStatisticsTagRules | null>(null);
   const [tagRuleDraftCodes, setTagRuleDraftCodes] = useState<string[]>([]);
@@ -504,7 +512,12 @@ export default function CostStatisticsPage() {
   const lastLockedFocusRef = useRef<HTMLElement | null>(null);
   const shouldRestoreFocusRef = useRef(false);
   const observedAppStatusRef = useRef<{ scopeKey: string; status: string } | null>(null);
+  const suppressAppStatusRefreshScopeRef = useRef<string | null>(null);
+  const explorerRequestRef = useRef<AbortController | null>(null);
+  const relationBarrierRequestRef = useRef<AbortController | null>(null);
   const exportReferenceRequestRef = useRef<AbortController | null>(null);
+  const exportRequestRef = useRef<AbortController | null>(null);
+  const exportPreviewRequestRef = useRef<AbortController | null>(null);
   const loadMoreRequestRef = useRef<AbortController | null>(null);
   const detailRequestRef = useRef<AbortController | null>(null);
 
@@ -610,6 +623,63 @@ export default function CostStatisticsPage() {
     invalidateExportReferenceData();
     setDomainRefreshNonce((current) => current + 1);
   }, [invalidateExportReferenceData]);
+  const handleWorkbenchRelationMutation = useCallback(async () => {
+    relationBarrierRequestRef.current?.abort();
+    const controller = new AbortController();
+    relationBarrierRequestRef.current = controller;
+    explorerRequestRef.current?.abort();
+    explorerRequestRef.current = null;
+    exportRequestRef.current?.abort();
+    exportRequestRef.current = null;
+    exportPreviewRequestRef.current?.abort();
+    exportPreviewRequestRef.current = null;
+    setIsExporting(false);
+    setIsPreviewLoading(false);
+    invalidateExportReferenceData();
+    resetDetailSelection();
+    setLoadError(null);
+    setIsRelationRefreshWaiting(true);
+    try {
+      await waitForOperationFreshness(
+        [{
+          readModelKey: "cost_statistics",
+          scopeKey: currentCostStatisticsScopeKey,
+          scopeType: "cost_statistics",
+        }],
+        {
+          timeoutMs: 10_000,
+          intervalMs: 150,
+          signal: controller.signal,
+        },
+      );
+      if (controller.signal.aborted || relationBarrierRequestRef.current !== controller) {
+        return;
+      }
+      observedAppStatusRef.current = appStatusReadModelStatus
+        ? { scopeKey: currentCostStatisticsScopeKey, status: appStatusReadModelStatus }
+        : null;
+      suppressAppStatusRefreshScopeRef.current = currentCostStatisticsScopeKey;
+      setLoadedExplorer(null);
+      setDomainRefreshNonce((current) => current + 1);
+      setIsRelationRefreshWaiting(false);
+    } catch (caught) {
+      if (controller.signal.aborted || relationBarrierRequestRef.current !== controller || isAbortLikeError(caught)) {
+        return;
+      }
+      setLoadedExplorer(null);
+      setLoadError(getCostStatisticsActionErrorMessage(caught));
+      setIsRelationRefreshWaiting(false);
+    } finally {
+      if (relationBarrierRequestRef.current === controller) {
+        relationBarrierRequestRef.current = null;
+      }
+    }
+  }, [
+    appStatusReadModelStatus,
+    currentCostStatisticsScopeKey,
+    invalidateExportReferenceData,
+    resetDetailSelection,
+  ]);
   const handleManualRefresh = useCallback(() => {
     setLoadedExplorer(null);
     invalidateExportReferenceData();
@@ -617,11 +687,20 @@ export default function CostStatisticsPage() {
   }, [invalidateExportReferenceData]);
 
   useEffect(() => {
+    if (isRelationRefreshWaiting) {
+      return;
+    }
     const observation = appStatusReadModelStatus
       ? { scopeKey: currentCostStatisticsScopeKey, status: appStatusReadModelStatus }
       : null;
     const previous = observedAppStatusRef.current;
     observedAppStatusRef.current = observation;
+    if (observation && suppressAppStatusRefreshScopeRef.current === observation.scopeKey) {
+      if (observation.status === "fresh") {
+        suppressAppStatusRefreshScopeRef.current = null;
+      }
+      return;
+    }
     if (
       observation
       && previous
@@ -630,7 +709,7 @@ export default function CostStatisticsPage() {
     ) {
       handleDomainMutation();
     }
-  }, [appStatusReadModelStatus, currentCostStatisticsScopeKey, handleDomainMutation]);
+  }, [appStatusReadModelStatus, currentCostStatisticsScopeKey, handleDomainMutation, isRelationRefreshWaiting]);
 
   useEffect(() => {
     let shouldRevalidate = false;
@@ -712,7 +791,9 @@ export default function CostStatisticsPage() {
       return Array.from(next);
     });
   }, []);
-  useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, handleDomainMutation);
+  useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, () => {
+    void handleWorkbenchRelationMutation();
+  });
   useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.bankTransactionCategoryUpdated, handleDomainMutation);
   useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.turnoverRelationUpdated, handleDomainMutation);
   useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.invoiceFactUpdated, handleDomainMutation);
@@ -793,7 +874,9 @@ export default function CostStatisticsPage() {
   ]);
 
   useEffect(() => {
+    explorerRequestRef.current?.abort();
     const controller = new AbortController();
+    explorerRequestRef.current = controller;
 
     async function loadExplorer() {
       loadMoreRequestRef.current?.abort();
@@ -823,7 +906,12 @@ export default function CostStatisticsPage() {
     }
 
     void loadExplorer();
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      if (explorerRequestRef.current === controller) {
+        explorerRequestRef.current = null;
+      }
+    };
   }, [domainRefreshNonce, explorerRequestKey]);
 
   async function loadMoreExplorerRows() {
@@ -869,7 +957,11 @@ export default function CostStatisticsPage() {
   }
 
   useEffect(() => () => {
+    explorerRequestRef.current?.abort();
+    relationBarrierRequestRef.current?.abort();
     exportReferenceRequestRef.current?.abort();
+    exportRequestRef.current?.abort();
+    exportPreviewRequestRef.current?.abort();
     loadMoreRequestRef.current?.abort();
     detailRequestRef.current?.abort();
   }, []);
@@ -1034,7 +1126,7 @@ export default function CostStatisticsPage() {
       ? "unavailable"
       : isReadModelStale || isAppStatusStale
         ? "stale"
-        : isReadModelRefreshing || isAppStatusRefreshing || isTagRulesSaving
+        : isRelationRefreshWaiting || isReadModelRefreshing || isAppStatusRefreshing || isTagRulesSaving
           ? "refreshing"
           : isExplorerLoading || !explorerData
             ? "loading"
@@ -1443,12 +1535,18 @@ export default function CostStatisticsPage() {
   }
 
   async function runExport(params: CostExportParams) {
+    exportRequestRef.current?.abort();
+    const controller = new AbortController();
+    exportRequestRef.current = controller;
     setDetailLoadingMessage(null);
     setLoadError(null);
     setExportFeedback(null);
     setIsExporting(true);
     try {
-      const { blob, fileName } = await exportCostStatisticsView(params);
+      const { blob, fileName } = await exportCostStatisticsView(params, controller.signal);
+      if (controller.signal.aborted) {
+        return;
+      }
       const objectUrl = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = objectUrl;
@@ -1472,12 +1570,18 @@ export default function CostStatisticsPage() {
         message: `已导出 ${fileName}`,
       });
     } catch (caught) {
+      if (controller.signal.aborted || isAbortLikeError(caught)) {
+        return;
+      }
       setExportFeedback({
         tone: "error",
         message: caught instanceof Error ? caught.message : "成本统计导出失败，请稍后重试。",
       });
     } finally {
-      setIsExporting(false);
+      if (exportRequestRef.current === controller) {
+        exportRequestRef.current = null;
+        setIsExporting(false);
+      }
     }
   }
 
@@ -1490,18 +1594,30 @@ export default function CostStatisticsPage() {
       });
       return;
     }
+    exportPreviewRequestRef.current?.abort();
+    const controller = new AbortController();
+    exportPreviewRequestRef.current = controller;
     setExportFeedback(null);
     setIsPreviewLoading(true);
     try {
-      const payload = await fetchCostStatisticsExportPreview(params);
+      const payload = await fetchCostStatisticsExportPreview(params, controller.signal);
+      if (controller.signal.aborted) {
+        return;
+      }
       setExportPreview(payload);
     } catch (caught) {
+      if (controller.signal.aborted || isAbortLikeError(caught)) {
+        return;
+      }
       setExportFeedback({
         tone: "error",
         message: caught instanceof Error ? caught.message : "导出预览加载失败，请稍后重试。",
       });
     } finally {
-      setIsPreviewLoading(false);
+      if (exportPreviewRequestRef.current === controller) {
+        exportPreviewRequestRef.current = null;
+        setIsPreviewLoading(false);
+      }
     }
   }
 

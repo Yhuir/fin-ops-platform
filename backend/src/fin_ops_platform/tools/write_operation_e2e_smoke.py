@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+from hashlib import sha256
 import json
 from pathlib import Path
 from time import monotonic, sleep
@@ -771,8 +772,27 @@ def _run_checkpoint(
             mutation_ambiguous=False,
             post_api=isolation_baseline,
         )
+    causal_baseline = _capture_consumer_causal_baseline(
+        checkpoint,
+        base_url=base_url,
+        api_prefix=api_prefix,
+        headers=headers,
+        timeout_seconds=timeout_seconds,
+        request_fn=request_fn,
+        variables=variables,
+    )
+    if causal_baseline["status"] != "pass":
+        return _failed_checkpoint(
+            checkpoint,
+            started_at=started_at,
+            step_results=step_results,
+            mutation_committed=False,
+            mutation_ambiguous=False,
+            post_api=causal_baseline,
+        )
     mutation_committed = False
     mutation_ambiguous = False
+    mutation_commit_ack_monotonic: float | None = None
     idempotency_key: str | None = None
     for step in checkpoint.steps:
         try:
@@ -824,6 +844,13 @@ def _run_checkpoint(
         )
         step_results.append(executed.result)
         variables.update(executed.captures)
+        if (
+            resolved_step.mutation
+            and executed.committed
+            and executed.result.status == "pass"
+            and mutation_commit_ack_monotonic is None
+        ):
+            mutation_commit_ack_monotonic = monotonic()
         mutation_committed = mutation_committed or (resolved_step.mutation and executed.committed)
         mutation_ambiguous = mutation_ambiguous or (resolved_step.mutation and executed.ambiguous)
         if executed.result.status != "pass":
@@ -835,6 +862,8 @@ def _run_checkpoint(
                     step=resolved_step,
                     variables=variables,
                 )
+                if mutation_committed and mutation_commit_ack_monotonic is None:
+                    mutation_commit_ack_monotonic = monotonic()
             break
     if any(step.status != "pass" for step in step_results) or len(step_results) != len(checkpoint.steps):
         return _failed_checkpoint(
@@ -894,6 +923,8 @@ def _run_checkpoint(
         variables=variables,
         strict=strict,
         isolation_baseline=isolation_baseline.get("values", {}),
+        causal_baseline=causal_baseline.get("values", {}),
+        operation_commit_ack_monotonic=mutation_commit_ack_monotonic,
     )
     if post_api["status"] not in {"pass", "skipped"}:
         return _failed_checkpoint(
@@ -905,6 +936,25 @@ def _run_checkpoint(
             write_slo=write_slo,
             post_api=post_api,
         )
+    if _checkpoint_requires_cost_all_causal_proof(checkpoint, variables=variables):
+        causal_timeline = _collect_cost_all_causal_timeline(
+            connection,
+            tenant_id=tenant_id,
+            root_event_ids=list(event_ids or []),
+        )
+        post_api["causal_timeline"] = causal_timeline
+        if causal_timeline["status"] != "pass":
+            post_api["status"] = "fail"
+            post_api["error"] = "cost_all_causal_timeline_incomplete"
+            return _failed_checkpoint(
+                checkpoint,
+                started_at=started_at,
+                step_results=step_results,
+                mutation_committed=mutation_committed,
+                mutation_ambiguous=mutation_ambiguous,
+                write_slo=write_slo,
+                post_api=post_api,
+            )
     system_audit = _wait_for_system_audit(
         checkpoint,
         base_url=base_url,
@@ -1283,6 +1333,8 @@ def _collect_checkpoint_consumers(
     variables: Mapping[str, Any],
     strict: bool,
     isolation_baseline: Mapping[str, Any] | None = None,
+    causal_baseline: Mapping[str, Any] | None = None,
+    operation_commit_ack_monotonic: float | None = None,
 ) -> dict[str, Any]:
     if not checkpoint.consumers:
         return {"status": "skipped", "reason": "no_post_api_probes"}
@@ -1328,7 +1380,26 @@ def _collect_checkpoint_consumers(
                     _evaluate_json_assertion(assertion, payload=payload, variables=variables)
                     for assertion in consumer.assertions
                 ]
+                if _requires_cost_all_causal_proof(consumer, path=path):
+                    baseline_fingerprint = str((causal_baseline or {}).get(_consumer_causal_key(consumer, path)) or "")
+                    current_fingerprint = _cost_source_versions_fingerprint(payload)
+                    source_version_changed = bool(
+                        baseline_fingerprint and current_fingerprint != baseline_fingerprint
+                    )
+                    assertions.append(
+                        {
+                            "pointer": "/source_versions",
+                            "operator": "changed",
+                            "status": "pass" if source_version_changed else "fail",
+                            **(
+                                {"error": "consumer_source_version_unchanged"}
+                                if not source_version_changed
+                                else {}
+                            ),
+                        }
+                    )
             failed = [assertion for assertion in assertions if assertion["status"] != "pass"]
+            operation_commit_to_visible_ms = _operation_commit_to_visible_ms(operation_commit_ack_monotonic)
             results.append(
                 {
                     "name": consumer.probe.name,
@@ -1338,9 +1409,18 @@ def _collect_checkpoint_consumers(
                     "status": "fail" if failed else "pass",
                     "read_model_status": read_model_status,
                     "assertions": assertions,
+                    **(
+                        {
+                            "operation_commit_to_visible_ms": operation_commit_to_visible_ms,
+                            "operation_commit_clock": "successful_mutation_response_received",
+                        }
+                        if operation_commit_to_visible_ms is not None
+                        else {}
+                    ),
                 }
             )
         except Exception as exc:
+            operation_commit_to_visible_ms = _operation_commit_to_visible_ms(operation_commit_ack_monotonic)
             results.append(
                 {
                     "name": consumer.probe.name,
@@ -1348,6 +1428,14 @@ def _collect_checkpoint_consumers(
                     "role": consumer.role,
                     "status": "fail",
                     "error": str(exc) or exc.__class__.__name__,
+                    **(
+                        {
+                            "operation_commit_to_visible_ms": operation_commit_to_visible_ms,
+                            "operation_commit_clock": "successful_mutation_response_received",
+                        }
+                        if operation_commit_to_visible_ms is not None
+                        else {}
+                    ),
                 }
             )
     return {
@@ -1364,6 +1452,34 @@ _RETRYABLE_CONSUMER_ERRORS = {
 }
 
 
+def _operation_commit_to_visible_ms(operation_commit_ack_monotonic: float | None) -> float | None:
+    if operation_commit_ack_monotonic is None:
+        return None
+    return round(max(0.0, monotonic() - operation_commit_ack_monotonic) * 1000, 3)
+
+
+def _consumer_result_key(item: Mapping[str, Any]) -> tuple[str, str, str]:
+    return (
+        str(item.get("page_key") or ""),
+        str(item.get("name") or ""),
+        str(item.get("path") or ""),
+    )
+
+
+def _consumer_failure_is_retryable(item: Mapping[str, Any]) -> bool:
+    error = str(item.get("error") or "")
+    if error in _RETRYABLE_CONSUMER_ERRORS:
+        return True
+    if str(item.get("role") or "affected") != "affected":
+        return False
+    assertions = list(item.get("assertions") or [])
+    failed_assertions = [assertion for assertion in assertions if assertion.get("status") != "pass"]
+    return bool(failed_assertions) and all(
+        str(assertion.get("error") or "") in {"json_assertion_mismatch", "consumer_source_version_unchanged"}
+        for assertion in failed_assertions
+    )
+
+
 def _wait_for_checkpoint_consumers(
     checkpoint: WriteCheckpoint,
     *,
@@ -1376,8 +1492,11 @@ def _wait_for_checkpoint_consumers(
     variables: Mapping[str, Any],
     strict: bool,
     isolation_baseline: Mapping[str, Any] | None = None,
+    causal_baseline: Mapping[str, Any] | None = None,
+    operation_commit_ack_monotonic: float | None = None,
 ) -> dict[str, Any]:
     deadline = monotonic() + max(1.0, timeout_seconds)
+    first_visible_ms: dict[tuple[str, str, str], float] = {}
     while True:
         result = _collect_checkpoint_consumers(
             checkpoint,
@@ -1389,13 +1508,23 @@ def _wait_for_checkpoint_consumers(
             variables=variables,
             strict=strict,
             isolation_baseline=isolation_baseline,
+            causal_baseline=causal_baseline,
+            operation_commit_ack_monotonic=operation_commit_ack_monotonic,
         )
+        for item in list(result.get("results") or []):
+            elapsed = item.get("operation_commit_to_visible_ms")
+            if item.get("status") == "pass" and isinstance(elapsed, int | float):
+                first_visible_ms.setdefault(_consumer_result_key(item), float(elapsed))
         if result.get("status") in {"pass", "skipped"}:
+            for item in list(result.get("results") or []):
+                key = _consumer_result_key(item)
+                if key in first_visible_ms:
+                    item["operation_commit_to_visible_ms"] = first_visible_ms[key]
             return result
         failed = [item for item in list(result.get("results") or []) if item.get("status") != "pass"]
         if (
             not failed
-            or any(str(item.get("error") or "") not in _RETRYABLE_CONSUMER_ERRORS for item in failed)
+            or any(not _consumer_failure_is_retryable(item) for item in failed)
             or monotonic() >= deadline
         ):
             return result
@@ -1435,6 +1564,193 @@ def _capture_isolation_baseline(
     except Exception as exc:
         return {"status": "fail", "error": f"isolation_baseline_failed:{str(exc) or exc.__class__.__name__}"}
     return {"status": "pass", "values": values}
+
+
+def _capture_consumer_causal_baseline(
+    checkpoint: WriteCheckpoint,
+    *,
+    base_url: str,
+    api_prefix: str,
+    headers: Mapping[str, str],
+    timeout_seconds: float,
+    request_fn: RequestFn,
+    variables: Mapping[str, Any],
+) -> dict[str, Any]:
+    consumers = [
+        consumer
+        for consumer in checkpoint.consumers
+        if _requires_cost_all_causal_proof(
+            consumer,
+            path=str(_resolve_value(consumer.probe.path, variables)),
+        )
+    ]
+    if not consumers:
+        return {"status": "pass", "values": {}}
+    values: dict[str, str] = {}
+    try:
+        for consumer in consumers:
+            path, payload, _read_model_status = _request_fresh_consumer_payload(
+                consumer,
+                base_url=base_url,
+                api_prefix=api_prefix,
+                headers=headers,
+                timeout_seconds=timeout_seconds,
+                request_fn=request_fn,
+                variables=variables,
+            )
+            values[_consumer_causal_key(consumer, path)] = _cost_source_versions_fingerprint(payload)
+    except Exception as exc:
+        return {"status": "fail", "error": f"consumer_causal_baseline_failed:{str(exc) or exc.__class__.__name__}"}
+    return {"status": "pass", "values": values}
+
+
+def _requires_cost_all_causal_proof(consumer: ConsumerProbe, *, path: str) -> bool:
+    return (
+        consumer.role == "affected"
+        and consumer.page_key == "cost-statistics"
+        and "/api/cost-statistics/explorer" in path
+        and "scope=all" in path
+        and "project_scope=active" in path
+    )
+
+
+def _checkpoint_requires_cost_all_causal_proof(
+    checkpoint: WriteCheckpoint,
+    *,
+    variables: Mapping[str, Any],
+) -> bool:
+    return any(
+        _requires_cost_all_causal_proof(
+            consumer,
+            path=str(_resolve_value(consumer.probe.path, variables)),
+        )
+        for consumer in checkpoint.consumers
+    )
+
+
+def _collect_cost_all_causal_timeline(
+    connection: Any,
+    *,
+    tenant_id: str,
+    root_event_ids: Sequence[str],
+) -> dict[str, Any]:
+    normalized_event_ids = [str(event_id).strip() for event_id in root_event_ids if str(event_id).strip()]
+    if not normalized_event_ids:
+        return {"status": "fail", "error": "cost_causal_root_event_ids_missing"}
+    rows = connection.fetch_all(
+        """
+        with roots as (
+          select
+            id::text as root_event_id,
+            trace_id as root_trace_id,
+            created_at as root_created_at
+          from job.outbox_events
+          where tenant_id = %s
+            and id::text = any(%s)
+            and scope_type = 'workbench'
+        )
+        select
+          roots.root_event_id,
+          roots.root_created_at,
+          child.id::text as cost_event_id,
+          child.scope_key as cost_scope_key,
+          coalesce(child.payload->>'reason', child.raw_payload->>'reason') as cost_reason,
+          child.status as cost_status,
+          child.created_at as cost_created_at,
+          child.processed_at as cost_processed_at
+        from roots
+        join job.outbox_events child
+          on child.tenant_id = %s
+         and child.trace_id = coalesce(roots.root_trace_id, roots.root_event_id)
+        where child.scope_type = 'cost_statistics'
+        order by roots.root_created_at, child.created_at, child.id
+        """,
+        (str(tenant_id or "default"), normalized_event_ids, str(tenant_id or "default")),
+    )
+    candidates: list[dict[str, Any]] = []
+    for row in rows:
+        if str(row.get("cost_scope_key") or "") != "active:all":
+            continue
+        root_event_id = str(row.get("root_event_id") or "")
+        root_created_at = row.get("root_created_at")
+        parent_processed_at = row.get("cost_processed_at")
+        published_rows = [
+            candidate
+            for candidate in rows
+            if str(candidate.get("root_event_id") or "") == root_event_id
+            and str(candidate.get("cost_scope_key") or "").startswith("active:")
+            and str(candidate.get("cost_scope_key") or "") != "active:all"
+            and str(candidate.get("cost_reason") or "") == "workbench_shard_published"
+        ]
+        published_at = min(
+            (candidate.get("cost_created_at") for candidate in published_rows if candidate.get("cost_created_at")),
+            default=None,
+        )
+        if (
+            str(row.get("cost_status") or "") != "done"
+            or root_created_at is None
+            or published_at is None
+            or parent_processed_at is None
+        ):
+            continue
+        candidates.append(
+            {
+                "root_event_id": root_event_id,
+                "active_all_event_id": str(row.get("cost_event_id") or ""),
+                "root_created_at": root_created_at,
+                "workbench_published_at": published_at,
+                "active_all_processed_at": parent_processed_at,
+            }
+        )
+    if not candidates:
+        return {"status": "fail", "error": "cost_active_all_causal_events_missing_or_incomplete"}
+    selected = max(candidates, key=lambda item: item["active_all_processed_at"])
+    observed_at = datetime.now(UTC)
+    return {
+        "status": "pass",
+        "root_event_id": selected["root_event_id"],
+        "active_all_event_id": selected["active_all_event_id"],
+        "target_scope_key": "active:all",
+        "commit_to_workbench_publish_ms": _datetime_elapsed_ms(
+            selected["root_created_at"], selected["workbench_published_at"]
+        ),
+        "workbench_publish_to_active_all_ms": _datetime_elapsed_ms(
+            selected["workbench_published_at"], selected["active_all_processed_at"]
+        ),
+        "commit_to_active_all_ms": _datetime_elapsed_ms(
+            selected["root_created_at"], selected["active_all_processed_at"]
+        ),
+        "commit_to_api_business_value_observed_ms": _datetime_elapsed_ms(
+            selected["root_created_at"], observed_at
+        ),
+        "root_created_at": _iso_datetime(selected["root_created_at"]),
+        "workbench_published_at": _iso_datetime(selected["workbench_published_at"]),
+        "active_all_processed_at": _iso_datetime(selected["active_all_processed_at"]),
+        "api_business_value_observed_at": observed_at.isoformat(),
+    }
+
+
+def _datetime_elapsed_ms(started_at: Any, completed_at: Any) -> float:
+    if not isinstance(started_at, datetime) or not isinstance(completed_at, datetime):
+        raise ValueError("causal_timeline_timestamp_invalid")
+    return round(max(0.0, (completed_at - started_at).total_seconds()) * 1000, 3)
+
+
+def _iso_datetime(value: Any) -> str:
+    if not isinstance(value, datetime):
+        raise ValueError("causal_timeline_timestamp_invalid")
+    return value.isoformat()
+
+
+def _consumer_causal_key(consumer: ConsumerProbe, path: str) -> str:
+    return f"{consumer.page_key}\x1f{consumer.probe.name}\x1f{path}"
+
+
+def _cost_source_versions_fingerprint(payload: Any) -> str:
+    if not isinstance(payload, dict) or not isinstance(payload.get("source_versions"), dict):
+        raise ValueError("consumer_source_versions_missing")
+    serialized = json.dumps(payload["source_versions"], ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return sha256(serialized.encode("utf-8")).hexdigest()
 
 
 def _request_fresh_consumer_payload(

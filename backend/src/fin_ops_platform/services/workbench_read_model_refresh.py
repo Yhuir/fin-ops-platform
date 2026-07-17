@@ -53,6 +53,16 @@ class WorkbenchReadModelRefreshService:
         else:
             result = rebuild(scope_key)
         payload = result if isinstance(result, dict) else {"scope_key": scope_key}
+        if payload.get("published") is not True:
+            return payload
+        if not self._event_source_version_is_current(
+            event,
+            scope_key=scope_key,
+            source_version=source_version,
+        ):
+            payload["skipped"] = True
+            payload["skip_reason"] = "stale_source_version_after_publish"
+            return payload
         cost_statistics_scope_keys = self._enqueue_cost_statistics_after_publish(event, scope_key)
         self._complete_dirty_scope(event, scope_type=scope_type, scope_key=scope_key, source_version=source_version)
         if cost_statistics_scope_keys:
@@ -68,14 +78,14 @@ class WorkbenchReadModelRefreshService:
             return []
         refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
         if not refresh_gateway.can_enqueue():
-            return []
+            raise RuntimeError("Workbench publish requires the durable cost statistics refresh queue.")
         return refresh_gateway.enqueue_many(
             "cost_statistics",
             [scope_key],
             reason="workbench_shard_published",
             tenant_id=event.tenant_id,
             priority=str(event.priority or "normal").strip() or "normal",
-            trace_id=event.trace_id,
+            trace_id=event.trace_id or event.event_id,
         )
 
     def _enqueue_all_scope_shards(self, event: RuntimeQueueEvent) -> dict[str, Any]:

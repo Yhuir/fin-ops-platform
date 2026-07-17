@@ -1,5 +1,11 @@
 # 关联台关系事实源 实施记录
 
+## 2026-07-18 - 删除 relation → Cost Statistics 提前直投链
+
+当前合同由本条取代本文更早关于 relation repository/UoW 直接投递 `cost_statistics`、cost-bearing 分支、broad cost scope 和 direct cost write-SLO receipt 的历史描述。relation transaction 现在只投递 Workbench 与明确直接 downstream；Cost Statistics 只能在对应 Workbench 月 generation 精确版本成功发布后，由 `WorkbenchReadModelRefreshService` 以 `workbench_shard_published` 派生。该派生 enqueue 失败时 Workbench dirty 不得完成，确保不会把缺失成本更新伪装为已收敛。
+
+已删除 Workbench/Turnover UoW cost target、facade cost downstream、自动匹配命令 cost metadata、relation lifecycle cost domain/job、repository `CostStatisticsRuntimeService`/cost-bearing hidden expansion 和验证工具的旧 direct cost expectation；银行、发票、OA、pending invoice、Search 等现有 direct downstream 不变，导入/标签/设置等非 relation lifecycle 合同不变。architecture guard 对这些旧入口做 whole-source negative assertion，禁止以 fallback 或兼容 branch 恢复。
+
 ## 2026-07-16 - 删除 read-time relation repair 与 legacy row-detail 兼容链
 
 当前 Workbench 页面读取只消费 active generation 中已经发布的 canonical rows + active formal relations。此前 raw/full-payload 读取时执行的 OA invoice-offset 自动配对、OA 附件 relation repair、缺行补齐、grouped payload 二次关系/标签修补和 legacy row-detail fallback 已全部删除；它们不能再作为 relation 事实写入或展示 owner。

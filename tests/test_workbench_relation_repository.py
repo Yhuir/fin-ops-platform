@@ -264,7 +264,7 @@ def test_no_oa_relation_change_keeps_no_oa_read_model_in_downstream_scope() -> N
 
     assert dirty_by_scope_type["workbench_relation"]["priority"] == "high"
     assert dirty_by_scope_type["bank_detail"]["priority"] == "high"
-    assert dirty_by_scope_type["cost_statistics"]["priority"] == "high"
+    assert "cost_statistics" not in dirty_by_scope_type
     assert dirty_by_scope_type["search"]["priority"] == "high"
     assert dirty_by_scope_type["no_oa_bank_batch"]["priority"] == "high"
     assert dirty_by_scope_type["no_oa_bank_batch"]["payload"]["relation_mode"] == "no_oa_bank_batch"
@@ -306,7 +306,7 @@ def test_bank_flow_relation_change_enqueues_bank_flow_read_model_refresh() -> No
         "bank_flow_rule_batch.read_model.refresh:bank_flow_rule_batch:2026-05:bank_flow_rule_batch"
     )
     assert bank_flow_outbox_rows[-1]["payload"]["relation_mode"] == "bank_flow_rule_batch"
-    assert dirty_by_scope_type["cost_statistics"]["priority"] == "high"
+    assert "cost_statistics" not in dirty_by_scope_type
 
 
 def test_relation_refresh_fanout_uses_one_batch_queue_write() -> None:
@@ -503,7 +503,7 @@ def test_relation_downstream_refresh_enqueues_all_scope_when_invoice_month_is_un
     assert "tax_offset" not in scope_keys_by_type
 
 
-def test_relation_downstream_refresh_routes_cost_statistics_by_bank_month_for_cost_bearing_relation() -> None:
+def test_relation_downstream_refresh_never_routes_cost_statistics_directly() -> None:
     connection = RecordingConnection(
         bank_scope_keys=["2026-02"],
         oa_scope_keys=["2026-01"],
@@ -517,13 +517,7 @@ def test_relation_downstream_refresh_routes_cost_statistics_by_bank_month_for_co
     )
 
     dirty_rows = _dirty_refresh_rows(connection)
-    cost_scope_keys = {
-        str(row["scope_key"])
-        for row in dirty_rows
-        if str(row["scope_type"]) == "cost_statistics"
-    }
-
-    assert cost_scope_keys == {"active:2026-02", "all:2026-02"}
+    assert not [row for row in dirty_rows if str(row["scope_type"]) == "cost_statistics"]
 
 
 def test_relation_downstream_refresh_preserves_workbench_scope_fallback_for_legacy_rows() -> None:

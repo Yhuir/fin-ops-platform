@@ -123,6 +123,7 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
         self.assertEqual(relation["status"], "active")
         self.assertEqual(relation["created_by"], AUTO_RELATION_ACTOR)
         self.assertEqual(relation["special_metadata"]["formal_relation"]["origin"], "system_deterministic")
+        self.assertNotIn("cost_statistics", uow.calls[0].refresh_metadata["downstream_scope_types"])
 
     def test_no_plan_does_not_open_uow_or_write_history_outbox(self) -> None:
         fixture = FormalRelationFactBatch(

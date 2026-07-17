@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { MemoryRouter } from "react-router-dom";
@@ -216,6 +216,54 @@ describe("Cost statistics page", () => {
     expect(drawer.querySelector(".cost-tag-rules-body")).toHaveAttribute("inert");
     expect(drawer.querySelector(".cost-tag-rules-footer")).toHaveAttribute("inert");
     expect(within(drawer).getByRole("button", { name: "关闭抽屉" })).toBeEnabled();
+  });
+
+  test("waits for the active all-scope barrier before one explorer refresh and supersedes duplicate events", async () => {
+    window.history.pushState({}, "", "/cost-statistics");
+    const user = userEvent.setup();
+    let releaseBarrier = () => undefined;
+    const barrierDelay = new Promise<void>((resolve) => {
+      releaseBarrier = resolve;
+    });
+    const fetchMock = installMockApiFetch({ operationBarrierDelay: barrierDelay });
+
+    renderCostStatisticsPage();
+
+    expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
+    await chooseScopeOption(user, "时间统计时间范围：2026年3月", "全部时间");
+    await waitForCostStatisticsReady();
+    const explorerCallsBeforeEvent = fetchMock.mock.calls.filter(([request]) => (
+      String(request).startsWith("/api/cost-statistics/explorer?")
+    )).length;
+
+    fireEvent(window, new CustomEvent("workbenchRelationUpdated", { detail: { affectedMonths: ["2026-03"] } }));
+    fireEvent(window, new CustomEvent("workbenchRelationUpdated", { detail: { affectedMonths: ["2026-03"] } }));
+
+    expect(await screen.findByText("成本数据正在同步")).toBeInTheDocument();
+    expect(screen.getByTestId("cost-statistics-interaction-overlay")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([request]) => (
+      String(request).startsWith("/api/cost-statistics/explorer?")
+    ))).toHaveLength(explorerCallsBeforeEvent);
+    await waitFor(() => {
+      const barrierCalls = fetchMock.mock.calls.filter(([request]) => String(request) === "/api/operation-barrier/status");
+      expect(barrierCalls).toHaveLength(2);
+      for (const [, init] of barrierCalls) {
+        expect(JSON.parse(String(init?.body))).toEqual({
+          targets: [{
+            read_model_key: "cost_statistics",
+            scope_key: "active:all",
+            scope_type: "cost_statistics",
+          }],
+        });
+      }
+    });
+
+    await act(async () => releaseBarrier());
+
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([request]) => (
+      String(request).startsWith("/api/cost-statistics/explorer?")
+    ))).toHaveLength(explorerCallsBeforeEvent + 1));
+    await waitForCostStatisticsReady();
   });
 
   test("revalidates and locks the page when restored from the back-forward cache", async () => {

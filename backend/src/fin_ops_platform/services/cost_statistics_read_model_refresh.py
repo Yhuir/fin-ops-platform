@@ -28,12 +28,15 @@ class CostStatisticsReadModelRefreshService:
         if scope_type != "cost_statistics" or not scope_key:
             raise ValueError("Cost statistics refresh requires scope_type='cost_statistics' and scope_key.")
         source_version = _event_source_version(event)
+        priority = str(event.priority or "normal").strip() or "normal"
 
         if scope_key.endswith(":all"):
             result = self._handle_parent_scope(
                 scope_key,
                 tenant_id=event.tenant_id,
                 source_version=source_version,
+                priority=priority,
+                trace_id=event.trace_id,
             )
         else:
             result = self._handle_month_scope(
@@ -68,7 +71,12 @@ class CostStatisticsReadModelRefreshService:
             )
             return payload
         if not scope_key.endswith(":all"):
-            self._enqueue_parent_scope(scope_key)
+            self._enqueue_parent_scope(
+                scope_key,
+                tenant_id=event.tenant_id,
+                priority=priority,
+                trace_id=event.trace_id,
+            )
         return payload
 
     def _handle_month_scope(self, scope_key: str, *, tenant_id: str, source_version: int) -> dict[str, Any]:
@@ -83,10 +91,24 @@ class CostStatisticsReadModelRefreshService:
             return payload
         return payload
 
-    def _handle_parent_scope(self, scope_key: str, *, tenant_id: str, source_version: int) -> dict[str, Any]:
+    def _handle_parent_scope(
+        self,
+        scope_key: str,
+        *,
+        tenant_id: str,
+        source_version: int,
+        priority: str,
+        trace_id: str | None,
+    ) -> dict[str, Any]:
         missing_shards = self._missing_or_stale_shards(scope_key)
         if missing_shards:
-            enqueued_scope_keys = self._enqueue_scope_keys(missing_shards, reason="cost_statistics_all_shard")
+            enqueued_scope_keys = self._enqueue_scope_keys(
+                missing_shards,
+                reason="cost_statistics_all_shard",
+                tenant_id=tenant_id,
+                priority=priority,
+                trace_id=trace_id,
+            )
             return {
                 "scope_key": scope_key,
                 "refresh_kind": "parent_waiting_for_shards",
@@ -113,24 +135,45 @@ class CostStatisticsReadModelRefreshService:
             return []
         return [str(item).strip() for item in list(list_shards(scope_key) or []) if str(item).strip()]
 
-    def _enqueue_all_scope_shards(self, scope_key: str) -> list[str] | None:
-        list_shards = getattr(self._projection_builder, "list_cost_statistics_scope_shards", None)
-        if not callable(list_shards):
-            return None
-        shard_keys = [str(item).strip() for item in list(list_shards(scope_key) or []) if str(item).strip()]
-        return self._enqueue_scope_keys(shard_keys, reason="cost_statistics_all_shard")
-
-    def _enqueue_parent_scope(self, scope_key: str) -> None:
+    def _enqueue_parent_scope(
+        self,
+        scope_key: str,
+        *,
+        tenant_id: str,
+        priority: str,
+        trace_id: str | None,
+    ) -> None:
         project_scope = str(scope_key or "").split(":", 1)[0]
         if project_scope not in {"active", "all"}:
             return
-        self._enqueue_scope_keys([f"{project_scope}:all"], reason="cost_statistics_shard_converged")
+        self._enqueue_scope_keys(
+            [f"{project_scope}:all"],
+            reason="cost_statistics_shard_converged",
+            tenant_id=tenant_id,
+            priority=priority,
+            trace_id=trace_id,
+        )
 
-    def _enqueue_scope_keys(self, scope_keys: list[str], *, reason: str) -> list[str]:
+    def _enqueue_scope_keys(
+        self,
+        scope_keys: list[str],
+        *,
+        reason: str,
+        tenant_id: str,
+        priority: str,
+        trace_id: str | None,
+    ) -> list[str]:
         refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
         if not refresh_gateway.can_enqueue():
             return []
-        return refresh_gateway.enqueue_many("cost_statistics", scope_keys, reason=reason)
+        return refresh_gateway.enqueue_many(
+            "cost_statistics",
+            scope_keys,
+            reason=reason,
+            tenant_id=tenant_id,
+            priority=priority,
+            trace_id=trace_id,
+        )
 
 
 def _event_source_version(event: RuntimeQueueEvent) -> int:

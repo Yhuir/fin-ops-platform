@@ -3747,7 +3747,7 @@ class WorkbenchWriteFacade:
         if has_invoice:
             scope_types.update({"input_invoice_usage", "output_invoice_collection"})
         if has_bank or has_invoice or has_oa or unknown_row_types:
-            scope_types.update({"oa_pending_payment", "cost_statistics"})
+            scope_types.add("oa_pending_payment")
         return scope_types
 
     def _relation_pending_invoice_scope_keys(

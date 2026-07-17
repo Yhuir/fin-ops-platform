@@ -173,7 +173,7 @@ class WorkbenchSqlProjectionBuilder:
                 },
             }
         }
-        self._read_model_repository.save_workbench_read_models(
+        published_scope_keys = self._read_model_repository.save_workbench_read_models(
             snapshot,
             changed_scope_keys={normalized_scope},
         )
@@ -187,6 +187,7 @@ class WorkbenchSqlProjectionBuilder:
             "base_scope_key": normalized_scope,
             "row_count": row_count,
             "ignored_row_count": 0,
+            "published": normalized_scope in set(published_scope_keys or set()),
         }
 
     def _current_bank_auto_tag_rules_version(self) -> int:

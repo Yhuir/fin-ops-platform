@@ -64,7 +64,6 @@ class WorkbenchFormalRelationCommand:
         if "invoice" in row_types:
             downstream.update(
                 {
-                    "cost_statistics",
                     "input_invoice_usage",
                     "invoice_lifecycle",
                     "output_invoice_collection",

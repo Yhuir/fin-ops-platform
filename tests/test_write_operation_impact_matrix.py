@@ -84,7 +84,14 @@ class WriteOperationImpactMatrixTests(unittest.TestCase):
                 audit_scope_types_by_operation[operation],
                 operation,
             )
-            self.assertEqual(set(row["target_read_model_keys"]), set(row["expected_outbox_scope_types"]), operation)
+            direct_scope_types = set(row["expected_outbox_scope_types"])
+            derived_read_model_keys = set(row.get("derived_read_model_keys", []))
+            self.assertEqual(direct_scope_types & derived_read_model_keys, set(), operation)
+            self.assertEqual(
+                set(row["target_read_model_keys"]),
+                direct_scope_types | derived_read_model_keys,
+                operation,
+            )
 
     def test_slo_targets_match_runtime_write_operation_gates(self) -> None:
         slo = self.matrix["slo"]
@@ -101,8 +108,10 @@ class WriteOperationImpactMatrixTests(unittest.TestCase):
 
         for operation, row in self.rows_by_operation.items():
             target_read_model_keys = set(row["target_read_model_keys"])
+            derived_read_model_keys = set(row.get("derived_read_model_keys", []))
             direct_canonical_targets = set(row.get("direct_canonical_target_page_keys", []))
             self.assertEqual(target_read_model_keys - valid_read_model_keys, set(), operation)
+            self.assertEqual(derived_read_model_keys - valid_read_model_keys, set(), operation)
             self.assertEqual(direct_canonical_targets - set(row["target_page_keys"]), set(), operation)
 
             for page_key in row["source_page_keys"]:

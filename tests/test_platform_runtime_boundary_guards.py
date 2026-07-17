@@ -2684,6 +2684,102 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_relation_cost_refresh_has_one_publish_derived_owner_and_exact_page_barrier(self) -> None:
+        uow_source = (SERVICES_ROOT / "workbench_uow.py").read_text(encoding="utf-8")
+        facade_source = (SERVICES_ROOT / "workbench_write_facade.py").read_text(encoding="utf-8")
+        relation_repository_source = (
+            SERVICES_ROOT / "postgres_repositories" / "workbench_relation.py"
+        ).read_text(encoding="utf-8")
+        matching_orchestrator_source = (SERVICES_ROOT / "workbench_matching_orchestrator.py").read_text(
+            encoding="utf-8"
+        )
+        lifecycle_source = (SERVICES_ROOT / "derived_data_lifecycle_service.py").read_text(encoding="utf-8")
+        turnover_write_source = (SERVICES_ROOT / "turnover_ledger_write_facade.py").read_text(encoding="utf-8")
+        workbench_refresh_source = (SERVICES_ROOT / "workbench_read_model_refresh.py").read_text(
+            encoding="utf-8"
+        )
+        cost_refresh_source = (SERVICES_ROOT / "cost_statistics_read_model_refresh.py").read_text(
+            encoding="utf-8"
+        )
+        page_source = (REPO_ROOT / "web/src/pages/CostStatisticsPage.tsx").read_text(encoding="utf-8")
+        violations: list[str] = []
+
+        uow_refresh_targets = uow_source[
+            uow_source.index("def _refresh_targets_for(") : uow_source.index("def _extend_refresh_targets(")
+        ]
+        facade_start = facade_source.index("    def _relation_downstream_scope_types(")
+        facade_downstream = facade_source[
+            facade_start : facade_source.index("    def _relation_pending_invoice_scope_keys(", facade_start)
+        ]
+        if 'scope_type="cost_statistics"' in uow_refresh_targets or '"cost_statistics"' in facade_downstream:
+            violations.append("relation UoW/facade still directly owns cost statistics fan-out")
+        for forbidden in (
+            "CostStatisticsRuntimeService",
+            "_workbench_relation_downstream_scope_types",
+            '"cost_statistics"',
+        ):
+            if forbidden in relation_repository_source:
+                violations.append(f"relation repository still owns removed cost path {forbidden}")
+        if '"scope_type": "cost_statistics"' in turnover_write_source:
+            violations.append("turnover relation writer still directly owns cost statistics fan-out")
+        formal_command_start = matching_orchestrator_source.index("class WorkbenchFormalRelationCommand:")
+        formal_command_end = matching_orchestrator_source.index("class WorkbenchMatchingOrchestrator:")
+        if '"cost_statistics"' in matching_orchestrator_source[formal_command_start:formal_command_end]:
+            violations.append("formal relation command still advertises removed direct cost fan-out")
+        domain_registry_start = lifecycle_source.index("    _EVENT_DOMAINS:")
+        job_registry_start = lifecycle_source.index("    _EVENT_JOBS:")
+        for event_name in (
+            "pair_relation_changed",
+            "pending_invoice_manual_invoice_confirmed",
+            "pending_invoice_attach_existing_invoice_confirmed",
+            "no_oa_bank_batch_changed",
+            "bank_flow_rule_batch_changed",
+            "batch_accounting_relation_changed",
+            "turnover_relation_changed",
+        ):
+            domain_start = lifecycle_source.index(f'        "{event_name}": (', domain_registry_start)
+            domain_end = lifecycle_source.index("        ),", domain_start)
+            if '"cost_statistics_read_model"' in lifecycle_source[domain_start:domain_end]:
+                violations.append(f"relation lifecycle event {event_name} still directly invalidates cost statistics")
+            job_marker = f'        "{event_name}": ('
+            job_start = lifecycle_source.find(job_marker, job_registry_start)
+            if job_start >= 0:
+                job_end = lifecycle_source.index("        ),", job_start)
+                if '"cost_statistics.read_model.refresh"' in lifecycle_source[job_start:job_end]:
+                    violations.append(f"relation lifecycle event {event_name} still advertises a direct cost job")
+        if workbench_refresh_source.count('reason="workbench_shard_published"') != 1:
+            violations.append("Workbench successful publish is not the unique relation-origin cost reason")
+        for required in (
+            '"cost_statistics",',
+            "if payload.get(\"published\") is not True:",
+            'trace_id=event.trace_id or event.event_id',
+        ):
+            if required not in workbench_refresh_source:
+                violations.append(f"Workbench publish-derived cost owner is missing {required}")
+        for required in (
+            "tenant_id=event.tenant_id",
+            "priority=priority",
+            "trace_id=event.trace_id",
+        ):
+            if required not in cost_refresh_source:
+                violations.append(f"Cost shard/parent causal metadata propagation is missing {required}")
+
+        handler_start = page_source.index("  const handleWorkbenchRelationMutation = useCallback")
+        handler_end = page_source.index("  const handleManualRefresh", handler_start)
+        handler_source = page_source[handler_start:handler_end]
+        for required in (
+            "waitForOperationFreshness(",
+            "currentCostStatisticsScopeKey",
+            "setIsRelationRefreshWaiting(true)",
+            "setLoadedExplorer(null)",
+        ):
+            if required not in handler_source:
+                violations.append(f"Cost relation barrier is missing {required}")
+        if "handleDomainMutation" in handler_source:
+            violations.append("Cost relation barrier still delegates to the generic App Status refresh path")
+
+        self.assertEqual(violations, [])
+
     def test_cost_statistics_query_runtime_do_not_keep_legacy_live_fallbacks(self) -> None:
         query_path = SERVICES_ROOT / "cost_statistics_query_service.py"
         runtime_path = SERVICES_ROOT / "cost_statistics_runtime_service.py"

@@ -298,16 +298,16 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             transaction=transaction,
             scope_type="cost_statistics",
             scope_keys=["2026-02", "all"],
-            reason="turnover_relation_changed",
+            reason="import_state_changed",
         )
 
         self.assertEqual(
             [item[:3] for item in queue.transactional],
             [
-                ("cost_statistics", "active:2026-02", "turnover_relation_changed"),
-                ("cost_statistics", "all:2026-02", "turnover_relation_changed"),
-                ("cost_statistics", "active:all", "turnover_relation_changed"),
-                ("cost_statistics", "all:all", "turnover_relation_changed"),
+                ("cost_statistics", "active:2026-02", "import_state_changed"),
+                ("cost_statistics", "all:2026-02", "import_state_changed"),
+                ("cost_statistics", "active:all", "import_state_changed"),
+                ("cost_statistics", "all:all", "import_state_changed"),
             ],
         )
         self.assertEqual(
@@ -315,11 +315,11 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             ["active:2026-02", "all:2026-02", "active:all", "all:all"],
         )
         self.assertNotIn(
-            ("cost_statistics", "2026-02", "turnover_relation_changed", transaction),
+            ("cost_statistics", "2026-02", "import_state_changed", transaction),
             queue.transactional,
         )
         self.assertNotIn(
-            ("cost_statistics", "all", "turnover_relation_changed", transaction),
+            ("cost_statistics", "all", "import_state_changed", transaction),
             queue.transactional,
         )
 
@@ -1457,11 +1457,6 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                 },
                 {
                     "scope_type": "workbench_relation",
-                    "scope_keys": ["2026-02", "2026-03"],
-                    "reason": "turnover_relation_changed",
-                },
-                {
-                    "scope_type": "cost_statistics",
                     "scope_keys": ["2026-02", "2026-03"],
                     "reason": "turnover_relation_changed",
                 },
@@ -4252,10 +4247,6 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                 ("workbench", "2026-03", "turnover_relation_changed"),
                 ("workbench_relation", "2026-02", "turnover_relation_changed"),
                 ("workbench_relation", "2026-03", "turnover_relation_changed"),
-                ("cost_statistics", "active:2026-02", "turnover_relation_changed"),
-                ("cost_statistics", "all:2026-02", "turnover_relation_changed"),
-                ("cost_statistics", "active:2026-03", "turnover_relation_changed"),
-                ("cost_statistics", "all:2026-03", "turnover_relation_changed"),
                 ("search", "2026-02", "turnover_relation_changed"),
                 ("search", "2026-03", "turnover_relation_changed"),
             ],

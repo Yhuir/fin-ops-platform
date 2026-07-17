@@ -1558,7 +1558,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
                 ("turnover_ledger", ["2026-02"], "turnover_relation_changed"),
                 ("workbench", ["2026-02"], "turnover_relation_changed"),
                 ("workbench_relation", ["2026-02"], "turnover_relation_changed"),
-                ("cost_statistics", ["2026-02"], "turnover_relation_changed"),
                 ("search", ["2026-02"], "turnover_relation_changed"),
             ],
         )
@@ -1704,7 +1703,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
                     ("turnover_ledger", ["2026-02"], "turnover_relation_changed"),
                     ("workbench", ["2026-02"], "turnover_relation_changed"),
                     ("workbench_relation", ["2026-02"], "turnover_relation_changed"),
-                    ("cost_statistics", ["2026-02"], "turnover_relation_changed"),
                     ("search", ["2026-02"], "turnover_relation_changed"),
                 ]
                 return handler(
@@ -1956,7 +1954,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
                     ("turnover_ledger", ["2026-02"], "turnover_relation_changed"),
                     ("workbench", ["2026-02"], "turnover_relation_changed"),
                     ("workbench_relation", ["2026-02"], "turnover_relation_changed"),
-                    ("cost_statistics", ["2026-02"], "turnover_relation_changed"),
                     ("search", ["2026-02"], "turnover_relation_changed"),
                 ]
                 return handler(

@@ -637,9 +637,9 @@ function exportErrorMessageFromText(rawText: string, fallback: string) {
   }
 }
 
-export async function exportCostStatisticsView(params: CostExportParams) {
+export async function exportCostStatisticsView(params: CostExportParams, signal?: AbortSignal) {
   const query = buildCostStatisticsQuery(params, { includeProjectExportOptions: true });
-  const response = await apiFetch(`/api/cost-statistics/export?${query.toString()}`, { method: "GET" });
+  const response = await apiFetch(`/api/cost-statistics/export?${query.toString()}`, { method: "GET", signal });
   const contentType = typeof response.headers?.get === "function" ? response.headers.get("Content-Type") ?? "" : "";
 
   if (!response.ok) {

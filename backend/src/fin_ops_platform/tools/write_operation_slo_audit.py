@@ -83,12 +83,6 @@ DEFAULT_OPERATION_EXPECTATIONS: tuple[OperationExpectation, ...] = (
     ),
     OperationExpectation(
         "turnover_manual_closure_or_withdraw",
-        "cost_statistics",
-        "turnover_relation_changed",
-        ("turnover_relation_zero_difference_closure", "withdraw_relation", "turnover_relation_withdraw"),
-    ),
-    OperationExpectation(
-        "turnover_manual_closure_or_withdraw",
         "search",
         "turnover_relation_changed",
         ("turnover_relation_zero_difference_closure", "withdraw_relation", "turnover_relation_withdraw"),
@@ -148,7 +142,6 @@ DEFAULT_OPERATION_EXPECTATIONS: tuple[OperationExpectation, ...] = (
     OperationExpectation("workbench_relation_confirm_cross_page", "input_invoice_usage", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_confirm_cross_page", "output_invoice_collection", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_confirm_cross_page", "oa_pending_payment", "workbench_relation_changed"),
-    OperationExpectation("workbench_relation_confirm_cross_page", "cost_statistics", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_confirm_cross_page", "search", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_withdraw_cross_page", "workbench", "workbench_relation_changed"),
     OperationExpectation(
@@ -160,7 +153,6 @@ DEFAULT_OPERATION_EXPECTATIONS: tuple[OperationExpectation, ...] = (
     OperationExpectation("workbench_relation_withdraw_cross_page", "input_invoice_usage", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_withdraw_cross_page", "output_invoice_collection", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_withdraw_cross_page", "oa_pending_payment", "workbench_relation_changed"),
-    OperationExpectation("workbench_relation_withdraw_cross_page", "cost_statistics", "workbench_relation_changed"),
     OperationExpectation("workbench_relation_withdraw_cross_page", "search", "workbench_relation_changed"),
     OperationExpectation(
         "workbench_relation_confirm_bank_invoice_cross_page", "workbench", "workbench_relation_changed"
@@ -185,9 +177,6 @@ DEFAULT_OPERATION_EXPECTATIONS: tuple[OperationExpectation, ...] = (
     ),
     OperationExpectation(
         "workbench_relation_confirm_bank_invoice_cross_page", "oa_pending_payment", "workbench_relation_changed"
-    ),
-    OperationExpectation(
-        "workbench_relation_confirm_bank_invoice_cross_page", "cost_statistics", "workbench_relation_changed"
     ),
     OperationExpectation("workbench_relation_confirm_bank_invoice_cross_page", "search", "workbench_relation_changed"),
     OperationExpectation(
@@ -214,9 +203,6 @@ DEFAULT_OPERATION_EXPECTATIONS: tuple[OperationExpectation, ...] = (
     OperationExpectation(
         "workbench_relation_withdraw_bank_invoice_cross_page", "oa_pending_payment", "workbench_relation_changed"
     ),
-    OperationExpectation(
-        "workbench_relation_withdraw_bank_invoice_cross_page", "cost_statistics", "workbench_relation_changed"
-    ),
     OperationExpectation("workbench_relation_withdraw_bank_invoice_cross_page", "search", "workbench_relation_changed"),
     OperationExpectation(
         "turnover_relation_confirm_cross_page",
@@ -233,12 +219,6 @@ DEFAULT_OPERATION_EXPECTATIONS: tuple[OperationExpectation, ...] = (
     OperationExpectation(
         "turnover_relation_confirm_cross_page",
         "workbench_relation",
-        "turnover_relation_changed",
-        ("turnover_relation_zero_difference_closure",),
-    ),
-    OperationExpectation(
-        "turnover_relation_confirm_cross_page",
-        "cost_statistics",
         "turnover_relation_changed",
         ("turnover_relation_zero_difference_closure",),
     ),
@@ -263,12 +243,6 @@ DEFAULT_OPERATION_EXPECTATIONS: tuple[OperationExpectation, ...] = (
     OperationExpectation(
         "turnover_relation_withdraw_cross_page",
         "workbench_relation",
-        "turnover_relation_changed",
-        ("turnover_relation_withdraw",),
-    ),
-    OperationExpectation(
-        "turnover_relation_withdraw_cross_page",
-        "cost_statistics",
         "turnover_relation_changed",
         ("turnover_relation_withdraw",),
     ),
@@ -308,16 +282,12 @@ DEFAULT_OPERATION_EXPECTATIONS: tuple[OperationExpectation, ...] = (
     OperationExpectation(
         "pending_invoice_attach_existing_invoice_with_oa", "oa_pending_payment", "workbench_relation_changed"
     ),
-    OperationExpectation(
-        "pending_invoice_attach_existing_invoice_with_oa", "cost_statistics", "workbench_relation_changed"
-    ),
     OperationExpectation("pending_invoice_attach_existing_invoice_with_oa", "search", "workbench_relation_changed"),
     OperationExpectation("bank_flow_rule_batch_submit", "bank_flow_rule_batch", "workbench_relation_changed"),
     OperationExpectation("bank_flow_rule_batch_submit", "workbench", "workbench_relation_changed"),
     OperationExpectation("bank_flow_rule_batch_submit", "workbench_relation", "workbench_pair_relation_changed"),
     OperationExpectation("bank_flow_rule_batch_submit", "bank_detail", "workbench_relation_changed"),
     OperationExpectation("bank_flow_rule_batch_submit", "pending_invoice", "workbench_relation_changed"),
-    OperationExpectation("bank_flow_rule_batch_submit", "cost_statistics", "workbench_relation_changed"),
     OperationExpectation("bank_flow_rule_batch_submit", "search", "workbench_relation_changed"),
     OperationExpectation("invoice_import_confirmed", "workbench", "import_state_changed"),
     OperationExpectation("invoice_import_confirmed", "workbench_relation", "import_state_changed"),
@@ -355,9 +325,6 @@ DEFAULT_OPERATION_EXPECTATIONS: tuple[OperationExpectation, ...] = (
     ),
     OperationExpectation(
         "no_oa_bank_batch_withdraw", "workbench_relation", "no_oa_bank_batch_changed", ("no_oa_bank_batch_withdraw",)
-    ),
-    OperationExpectation(
-        "no_oa_bank_batch_withdraw", "cost_statistics", "no_oa_bank_batch_changed", ("no_oa_bank_batch_withdraw",)
     ),
     OperationExpectation(
         "no_oa_bank_batch_withdraw", "search", "no_oa_bank_batch_changed", ("no_oa_bank_batch_withdraw",)

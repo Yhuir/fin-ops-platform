@@ -25,11 +25,31 @@ from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 class QueueRecorder:
     def __init__(self, *, complete_result: bool = True) -> None:
         self.refreshes: list[tuple[str, str, str]] = []
+        self.refresh_details: list[dict[str, object]] = []
         self.completed: list[tuple[str, str, str, int]] = []
         self.complete_result = complete_result
 
-    def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
+    def enqueue_read_model_refresh(
+        self,
+        *,
+        scope_type: str,
+        scope_key: str,
+        reason: str,
+        tenant_id: str = "default",
+        priority: str = "normal",
+        trace_id: str | None = None,
+    ) -> None:
         self.refreshes.append((scope_type, scope_key, reason))
+        self.refresh_details.append(
+            {
+                "scope_type": scope_type,
+                "scope_key": scope_key,
+                "reason": reason,
+                "tenant_id": tenant_id,
+                "priority": priority,
+                "trace_id": trace_id,
+            }
+        )
 
     def complete_read_model_refresh(
         self,
@@ -2362,6 +2382,8 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
             payload={"scope_key": "active:2026-05", "source_version": 0},
             attempts=1,
             status="processing",
+            priority="high",
+            trace_id="trace-cost-month",
         )
 
         result = service.handle_runtime_event(event)
@@ -2369,6 +2391,19 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(builder.rebuilt, [("active:2026-05", "tenant-a", 0)])
         self.assertEqual(queue.completed, [("tenant-a", "cost_statistics", "active:2026-05", 0)])
         self.assertEqual(queue.refreshes, [("cost_statistics", "active:all", "cost_statistics_shard_converged")])
+        self.assertEqual(
+            queue.refresh_details,
+            [
+                {
+                    "scope_type": "cost_statistics",
+                    "scope_key": "active:all",
+                    "reason": "cost_statistics_shard_converged",
+                    "tenant_id": "tenant-a",
+                    "priority": "high",
+                    "trace_id": "trace-cost-month",
+                }
+            ],
+        )
         self.assertEqual(result["entry_count"], 1)
 
     def test_cost_statistics_refresh_handler_rejects_invalid_source_versions(self) -> None:
@@ -2970,6 +3005,8 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
             attempts=1,
             status="processing",
             source_version=7,
+            priority="high",
+            trace_id="trace-cost-parent",
         )
 
         result = service.handle_runtime_event(event)
@@ -2983,6 +3020,27 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
             ],
         )
         self.assertEqual(queue.completed, [])
+        self.assertEqual(
+            queue.refresh_details,
+            [
+                {
+                    "scope_type": "cost_statistics",
+                    "scope_key": "active:2026-05",
+                    "reason": "cost_statistics_all_shard",
+                    "tenant_id": "tenant-a",
+                    "priority": "high",
+                    "trace_id": "trace-cost-parent",
+                },
+                {
+                    "scope_type": "cost_statistics",
+                    "scope_key": "active:2026-04",
+                    "reason": "cost_statistics_all_shard",
+                    "tenant_id": "tenant-a",
+                    "priority": "high",
+                    "trace_id": "trace-cost-parent",
+                },
+            ],
+        )
         self.assertEqual(result["scope_key"], "active:all")
         self.assertEqual(result["readiness_status"], "refreshing")
         self.assertEqual(result["enqueued_scope_keys"], ["active:2026-05", "active:2026-04"])

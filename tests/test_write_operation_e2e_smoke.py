@@ -69,7 +69,6 @@ def _turnover_withdraw_rows() -> list[dict[str, object]]:
         _event(scope_type="turnover_ledger", reason="turnover_relation_changed", action_name="withdraw_relation"),
         _event(scope_type="workbench", reason="turnover_relation_changed", action_name="withdraw_relation"),
         _event(scope_type="workbench_relation", reason="turnover_relation_changed", action_name="withdraw_relation"),
-        _event(scope_type="cost_statistics", reason="turnover_relation_changed", action_name="withdraw_relation"),
         _event(scope_type="search", reason="turnover_relation_changed", action_name="withdraw_relation"),
     ]
 
@@ -716,7 +715,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             observed[0][0], "https://example.test/fin-ops-api/api/turnover-ledger/relations/REL-1/withdraw"
         )
         self.assertEqual(report["results"][0]["write_slo"]["status"], "pass")
-        self.assertEqual(len(report["results"][0]["write_slo"]["results"]), 5)
+        self.assertEqual(len(report["results"][0]["write_slo"]["results"]), 4)
 
     def test_write_slo_event_sample_uses_effective_floor_when_scenario_limit_is_one(self) -> None:
         scenario = write_operation_e2e_smoke.WriteScenario(
@@ -1348,7 +1347,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         self.assertEqual(audit["status"], "fail")
         self.assertEqual(audit["error"], "system_audit_snapshot_missing")
 
-    def test_consumer_wait_retries_refreshing_but_not_content_or_latency_failures(self) -> None:
+    def test_consumer_wait_retries_refreshing_and_affected_business_visibility(self) -> None:
         checkpoint = _strict_checkpoint("confirm", key="confirm-key", relation_state_after="active")
         attempts = 0
 
@@ -1389,7 +1388,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
 
         attempts = 0
 
-        def wrong_content(*_args) -> http_slo_probe.HttpProbeResponse:
+        def stale_business_value_then_visible(*_args) -> http_slo_probe.HttpProbeResponse:
             nonlocal attempts
             attempts += 1
             return http_slo_probe.HttpProbeResponse(
@@ -1399,26 +1398,32 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                     {
                         "read_model_status": "fresh",
                         "refresh_enqueued": False,
-                        "rows": [{"linked": False}],
+                        "rows": [{"linked": attempts > 1}],
                     }
                 ).encode(),
             )
 
-        failed = write_operation_e2e_smoke._wait_for_checkpoint_consumers(
-            checkpoint,
-            base_url="https://example.test",
-            api_prefix="/fin-ops-api",
-            headers={"Authorization": "Bearer token"},
-            timeout_seconds=1,
-            poll_interval_seconds=0.05,
-            request_fn=wrong_content,
-            variables={},
-            strict=True,
-        )
+        with patch("fin_ops_platform.tools.write_operation_e2e_smoke.sleep", return_value=None):
+            converged = write_operation_e2e_smoke._wait_for_checkpoint_consumers(
+                checkpoint,
+                base_url="https://example.test",
+                api_prefix="/fin-ops-api",
+                headers={"Authorization": "Bearer token"},
+                timeout_seconds=1,
+                poll_interval_seconds=0.05,
+                request_fn=stale_business_value_then_visible,
+                variables={},
+                strict=True,
+                operation_commit_ack_monotonic=write_operation_e2e_smoke.monotonic(),
+            )
 
-        self.assertEqual(failed["status"], "fail")
-        self.assertEqual(attempts, 1)
-        self.assertEqual(failed["results"][0]["assertions"][0]["error"], "json_assertion_mismatch")
+        self.assertEqual(converged["status"], "pass")
+        self.assertEqual(attempts, 2)
+        self.assertGreaterEqual(converged["results"][0]["operation_commit_to_visible_ms"], 0)
+        self.assertEqual(
+            converged["results"][0]["operation_commit_clock"],
+            "successful_mutation_response_received",
+        )
 
     def test_system_audit_waits_for_transient_queue_backlog_and_requires_new_snapshot(self) -> None:
         checkpoint = _strict_checkpoint("confirm", key="confirm-key", relation_state_after="active")
@@ -1509,6 +1514,130 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         self.assertEqual(baseline["status"], "pass")
         self.assertEqual(result["status"], "fail")
         self.assertEqual(result["results"][0]["assertions"][0]["error"], "non_consumer_changed")
+
+    def test_cost_all_consumer_requires_fresh_changed_source_versions_and_business_value(self) -> None:
+        checkpoint = write_operation_e2e_smoke.WriteCheckpoint(
+            name="cost-all-causal",
+            operations=("workbench_relation_confirm_cross_page",),
+            steps=(),
+            consumers=(
+                write_operation_e2e_smoke.ConsumerProbe(
+                    probe=http_slo_probe.HttpProbe(
+                        "cost-all",
+                        "/api/cost-statistics/explorer?scope=all&view=time&project_scope=active",
+                        target_ms=1000,
+                    ),
+                    assertions=(
+                        write_operation_e2e_smoke.JsonPointerAssertion("/rows/0/linked", "equals", True),
+                    ),
+                    page_key="cost-statistics",
+                    role="affected",
+                ),
+            ),
+        )
+        source_version = 1
+
+        def request_fn(*_args) -> http_slo_probe.HttpProbeResponse:
+            return http_slo_probe.HttpProbeResponse(
+                status_code=200,
+                headers={"content-type": "application/json"},
+                body=json.dumps(
+                    {
+                        "read_model_status": "fresh",
+                        "read_model_scope_key": "active:all",
+                        "refresh_enqueued": False,
+                        "source_versions": {"workbench": source_version},
+                        "rows": [{"linked": True}],
+                    }
+                ).encode(),
+            )
+
+        baseline = write_operation_e2e_smoke._capture_consumer_causal_baseline(
+            checkpoint,
+            base_url="https://example.test",
+            api_prefix="/fin-ops-api",
+            headers={"Authorization": "Bearer token"},
+            timeout_seconds=1,
+            request_fn=request_fn,
+            variables={},
+        )
+        unchanged = write_operation_e2e_smoke._collect_checkpoint_consumers(
+            checkpoint,
+            base_url="https://example.test",
+            api_prefix="/fin-ops-api",
+            headers={"Authorization": "Bearer token"},
+            timeout_seconds=1,
+            request_fn=request_fn,
+            variables={},
+            strict=True,
+            causal_baseline=baseline["values"],
+        )
+        source_version = 2
+        changed = write_operation_e2e_smoke._collect_checkpoint_consumers(
+            checkpoint,
+            base_url="https://example.test",
+            api_prefix="/fin-ops-api",
+            headers={"Authorization": "Bearer token"},
+            timeout_seconds=1,
+            request_fn=request_fn,
+            variables={},
+            strict=True,
+            causal_baseline=baseline["values"],
+        )
+
+        self.assertEqual(baseline["status"], "pass")
+        self.assertEqual(unchanged["status"], "fail")
+        self.assertEqual(
+            unchanged["results"][0]["assertions"][-1]["error"],
+            "consumer_source_version_unchanged",
+        )
+        self.assertEqual(changed["status"], "pass")
+
+    def test_cost_all_causal_timeline_reports_exact_publish_and_parent_segments(self) -> None:
+        root_created_at = datetime(2026, 7, 18, 1, 0, 0, tzinfo=timezone.utc)
+        workbench_published_at = root_created_at + timedelta(milliseconds=400)
+        active_all_created_at = root_created_at + timedelta(milliseconds=650)
+        active_all_processed_at = root_created_at + timedelta(milliseconds=900)
+        connection = FakeConnection(
+            [
+                {
+                    "root_event_id": "workbench-event-1",
+                    "root_created_at": root_created_at,
+                    "cost_event_id": "cost-month-1",
+                    "cost_scope_key": "active:2026-07",
+                    "cost_reason": "workbench_shard_published",
+                    "cost_status": "done",
+                    "cost_created_at": workbench_published_at,
+                    "cost_processed_at": active_all_created_at,
+                },
+                {
+                    "root_event_id": "workbench-event-1",
+                    "root_created_at": root_created_at,
+                    "cost_event_id": "cost-all-1",
+                    "cost_scope_key": "active:all",
+                    "cost_reason": "cost_statistics_shard_converged",
+                    "cost_status": "done",
+                    "cost_created_at": active_all_created_at,
+                    "cost_processed_at": active_all_processed_at,
+                },
+            ]
+        )
+
+        result = write_operation_e2e_smoke._collect_cost_all_causal_timeline(
+            connection,
+            tenant_id="default",
+            root_event_ids=["workbench-event-1"],
+        )
+
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["target_scope_key"], "active:all")
+        self.assertEqual(result["commit_to_workbench_publish_ms"], 400.0)
+        self.assertEqual(result["workbench_publish_to_active_all_ms"], 500.0)
+        self.assertEqual(result["commit_to_active_all_ms"], 900.0)
+        self.assertEqual(
+            connection.fetch_all_calls[0][1],
+            ("default", ["workbench-event-1"], "default"),
+        )
 
     def test_admin_system_audit_preflight_blocks_first_mutation(self) -> None:
         scenario = write_operation_e2e_smoke.WriteScenario(

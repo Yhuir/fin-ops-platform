@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from fin_ops_platform.services.cost_statistics_runtime_service import CostStatisticsRuntimeService
 from fin_ops_platform.services.postgres_repositories.common import (
     event_uuid,
     int_value,
@@ -26,7 +25,6 @@ WORKBENCH_RELATION_DOWNSTREAM_SCOPE_TYPES = (
     "output_invoice_collection",
     "oa_pending_payment",
     "search",
-    "cost_statistics",
     "no_oa_bank_batch",
     "bank_flow_rule_batch",
 )
@@ -448,13 +446,6 @@ def _workbench_relation_dirty_scope_keys(connection: Any, relation: dict[str, An
     )
 
 
-def _workbench_relation_downstream_scope_types(connection: Any, relation: dict[str, Any]) -> set[str]:
-    downstream_scope_types: set[str] = set()
-    for scope_types in _workbench_relation_downstream_scope_map(connection, relation).values():
-        downstream_scope_types.update(scope_types)
-    return downstream_scope_types
-
-
 def _workbench_relation_downstream_scope_map(
     connection: Any,
     relation: dict[str, Any],
@@ -502,13 +493,6 @@ def _workbench_relation_downstream_scope_map(
         add("output_invoice_collection", invoice_downstream_scope_keys)
     if has_bank or has_invoice or has_oa or unknown_row_types:
         add("oa_pending_payment", actual_oa_scope_keys or broad_scope_keys)
-    cost_scope_keys: set[str] = set()
-    if unknown_row_types:
-        cost_scope_keys = broad_scope_keys
-    elif has_bank and (has_oa or is_no_oa_batch or is_bank_flow_rule_batch or relation_mode == "turnover_manual_closure"):
-        cost_scope_keys = bank_scope_keys
-    if cost_scope_keys:
-        add("cost_statistics", cost_scope_keys)
     if relation_mode in _NO_OA_BATCH_READ_MODEL_RELATION_MODES:
         add("no_oa_bank_batch", bank_scope_keys)
     if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE:
@@ -735,20 +719,6 @@ def _append_read_model_refresh(
     dedupe_kind: str | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> None:
-    if scope_type == "cost_statistics":
-        for target_scope_key in CostStatisticsRuntimeService.refresh_scope_keys_from_scope_keys([scope_key]):
-            _append_single_read_model_refresh(
-                refreshes,
-                scope_type=scope_type,
-                scope_key=target_scope_key,
-                reason=reason,
-                tenant_id=tenant_id,
-                priority=priority,
-                payload_extra=payload_extra,
-                dedupe_kind=dedupe_kind,
-                metadata=metadata,
-            )
-        return
     _append_single_read_model_refresh(
         refreshes,
         scope_type=scope_type,

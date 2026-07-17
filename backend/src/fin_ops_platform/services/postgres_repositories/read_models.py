@@ -10280,7 +10280,7 @@ class PostgresReadModelRepository:
         snapshot: dict[str, Any],
         *,
         changed_scope_keys: set[str] | None = None,
-    ) -> None:
+    ) -> set[str]:
         started_generations: list[tuple[str, str, dict[str, Any]]] = []
         published_scope_keys: set[str] = set()
 
@@ -10617,6 +10617,7 @@ class PostgresReadModelRepository:
                     pass
             raise
         self._prune_workbench_generations_after_publish(published_scope_keys)
+        return set(published_scope_keys)
 
     def _prune_workbench_generations_after_publish(self, scope_keys: set[str]) -> None:
         normalized_scope_keys = [
