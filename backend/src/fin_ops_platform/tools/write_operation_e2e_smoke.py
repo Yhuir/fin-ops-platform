@@ -1970,11 +1970,12 @@ def _validate_canonical_relation_steps(
         if direction == "confirm"
         else (WITHDRAW_PREVIEW_PATH, WITHDRAW_MUTATION_PATH)
     )
-    if len(checkpoint.steps) != 2:
+    if len(checkpoint.steps) != 3:
         raise ValueError(
-            f"scenario {scenario_name!r} checkpoint {checkpoint.name!r} must contain exactly preview and mutation steps."
+            f"scenario {scenario_name!r} checkpoint {checkpoint.name!r} must contain exactly "
+            "read-version, preview, and mutation steps."
         )
-    preview, mutation = checkpoint.steps
+    read_version, preview, mutation = checkpoint.steps
     if (
         preview.mutation
         or preview.method != "POST"
@@ -1997,15 +1998,45 @@ def _validate_canonical_relation_steps(
         raise ValueError(
             f"scenario {scenario_name!r} checkpoint {checkpoint.name!r} preview and mutation month/row_ids must match."
         )
+    read_version_captures = [
+        name for name, pointer in read_version.captures if pointer == "/read_model_version"
+    ]
+    if (
+        len(read_version_captures) != 1
+        or read_version.mutation
+        or read_version.method != "GET"
+        or read_version.path != f"/api/workbench?month={preview_month}"
+        or read_version.json_body is not None
+        or read_version.expected_statuses != (200,)
+    ):
+        raise ValueError(
+            f"scenario {scenario_name!r} checkpoint {checkpoint.name!r} must read and capture the exact "
+            "Workbench read_model_version for its month before preview."
+        )
+    expected_read_model_version = f"${{{read_version_captures[0]}}}"
+    if (
+        (preview.json_body or {}).get("expected_read_model_version") != expected_read_model_version
+        or (mutation.json_body or {}).get("expected_read_model_version") != expected_read_model_version
+    ):
+        raise ValueError(
+            f"scenario {scenario_name!r} checkpoint {checkpoint.name!r} preview and mutation must consume "
+            "the captured Workbench read_model_version."
+        )
     if direction == "confirm":
         if (preview.json_body or {}).get("case_id") != (mutation.json_body or {}).get("case_id"):
             raise ValueError(
                 f"scenario {scenario_name!r} checkpoint {checkpoint.name!r} preview and mutation case_id must match."
             )
-        if set(preview.json_body or {}) - {"month", "row_ids", "case_id"} or set(mutation.json_body or {}) - {
+        if set(preview.json_body or {}) - {
             "month",
             "row_ids",
             "case_id",
+            "expected_read_model_version",
+        } or set(mutation.json_body or {}) - {
+            "month",
+            "row_ids",
+            "case_id",
+            "expected_read_model_version",
             "note",
             "comment",
             "idempotency_key",
@@ -2024,11 +2055,12 @@ def _validate_canonical_relation_steps(
         or mutation_body.get("preview_id") != f"${{{preview_id_names[0]}}}"
         or mutation_body.get("expected_versions") != f"${{{version_names[0]}}}"
         or mutation_body.get("operation_type") != "withdraw_relation"
-        or set(preview.json_body or {}) - {"month", "row_ids"}
+        or set(preview.json_body or {}) - {"month", "row_ids", "expected_read_model_version"}
         or set(mutation_body)
         - {
             "month",
             "row_ids",
+            "expected_read_model_version",
             "operation_type",
             "preview_id",
             "expected_versions",
