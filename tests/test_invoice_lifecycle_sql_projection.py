@@ -26,6 +26,14 @@ class FreshInvoiceUsageReadRepository:
         }
 
 
+class StaleInvoiceUsageReadRepository:
+    def list_input_invoice_usage_rows(self, **_kwargs: object) -> dict[str, object]:
+        return {"refresh_status": "refreshing", "rows": []}
+
+    def list_output_invoice_collection_rows(self, **_kwargs: object) -> dict[str, object]:
+        return {"refresh_status": "stale", "rows": []}
+
+
 class InvoiceLifecycleSkipConnection:
     def __init__(self) -> None:
         self.fetch_one_calls: list[tuple[str, tuple]] = []
@@ -193,6 +201,18 @@ class InvoiceLifecycleSqlProjectionTests(unittest.TestCase):
             },
         )
 
+    def test_invoice_lifecycle_fails_closed_without_live_input_or_output_rebuild(self) -> None:
+        builder = InvoiceLifecycleSqlProjectionBuilder(
+            connection=SimpleNamespace(),
+            read_model_repository=StaleInvoiceUsageReadRepository(),
+            workbench_relation_read_facade=SimpleNamespace(last_source_versions={}),
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "input_invoice_usage_read_model_not_fresh:2026-05"):
+            builder._input_invoice_lifecycle_rows("2026-05")
+        with self.assertRaisesRegex(RuntimeError, "output_invoice_collection_read_model_not_fresh:2026-05"):
+            builder._output_invoice_lifecycle_rows("2026-05")
+
     def test_invoice_lifecycle_sql_projection_skips_unchanged_scope_without_rebuild(self) -> None:
         connection = InvoiceLifecycleSkipConnection()
         read_repository = InvoiceLifecycleSkipReadRepository()
@@ -205,6 +225,7 @@ class InvoiceLifecycleSqlProjectionTests(unittest.TestCase):
         )
         builder._read_model_dependency_source_versions = builder._dependency_source_versions_for_scope("2026-05")
         invoice_repository.source_versions = builder._source_versions()
+        self.assertEqual(invoice_repository.source_versions["invoice_lifecycle_read_model_schema_version"], 2)
         read_repository.relation_calls = []
 
         result = builder.rebuild_invoice_lifecycle_read_model_scope("2026-05")

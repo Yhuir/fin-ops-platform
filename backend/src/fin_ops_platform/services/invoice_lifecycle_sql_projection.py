@@ -3,12 +3,10 @@ from __future__ import annotations
 from typing import Any
 
 from fin_ops_platform.domain.enums import InvoiceType
-from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.input_invoice_usage_payment_rules import (
     AppSettingsInputInvoiceUsagePaymentRulesProvider,
     PostgresInputInvoiceUsagePaymentRulesStateStore,
 )
-from fin_ops_platform.services.input_invoice_usage_service import InputInvoiceUsageQueryService
 from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecyclePolicy
 from fin_ops_platform.services.invoice_lifecycle_read_model_repository import InvoiceLifecycleReadModelRepositoryPort
 from fin_ops_platform.services.invoice_usage_collection_source_versions import (
@@ -18,17 +16,15 @@ from fin_ops_platform.services.invoice_usage_collection_source_versions import (
 )
 from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRepository
 from fin_ops_platform.services.oa_payment_admitted_projection import PaymentAdmittedOAProjectionAdapter
-from fin_ops_platform.services.output_invoice_collection_service import OutputInvoiceCollectionQueryService
 from fin_ops_platform.services.postgres_repositories import (
-    PostgresCoreRepository,
     PostgresOAProjectionRepository,
     PostgresReadModelRepository,
 )
-from fin_ops_platform.services.postgres_repositories.output_invoice_collection import (
-    build_output_invoice_collection_lifecycle_repository,
-)
 from fin_ops_platform.services.postgres_repositories.read_models import MONTH_SCOPE_RE
 from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRelationReadFacade
+
+
+INVOICE_LIFECYCLE_READ_MODEL_SCHEMA_VERSION = 2
 
 
 class InvoiceLifecycleSqlProjectionBuilder:
@@ -45,7 +41,6 @@ class InvoiceLifecycleSqlProjectionBuilder:
         invoice_lifecycle_read_model_repository: Any | None = None,
     ) -> None:
         self._connection = connection
-        self._core_repository = PostgresCoreRepository(connection)
         self._read_repository = read_model_repository or PostgresReadModelRepository(connection)
         self._invoice_lifecycle_read_model_repository = (
             invoice_lifecycle_read_model_repository
@@ -152,31 +147,8 @@ class InvoiceLifecycleSqlProjectionBuilder:
             sort_direction="desc",
             source_versions_key="input_invoice_usage_read_model_source_versions",
         )
-        if page_rows is not None:
-            return [
-                row
-                for page_row in page_rows
-                if (row := self._input_invoice_lifecycle_row(page_row, month)) is not None
-            ]
-        service = InputInvoiceUsageQueryService(
-            import_service=self._import_service(),
-            relation_facade=self._workbench_relation_read_facade,
-            oa_projection=self._oa_projection_repository,
-            payment_rules_provider=self._payment_rules_provider,
-            lifecycle_policy=self._policy,
-            require_fresh_relations=True,
-        )
-        context = service._query_context(month_hint=month)
-        page_rows = service._filtered_sorted_rows(
-            context=context,
-            month=month,
-            keyword=None,
-            invoice_date_from=None,
-            invoice_date_to=None,
-            filters=[],
-            sort_field="invoice_date",
-            sort_direction="desc",
-        )
+        if page_rows is None:
+            raise RuntimeError(f"input_invoice_usage_read_model_not_fresh:{month}")
         return [
             row
             for page_row in page_rows
@@ -191,30 +163,8 @@ class InvoiceLifecycleSqlProjectionBuilder:
             sort_direction="desc",
             source_versions_key="output_invoice_collection_read_model_source_versions",
         )
-        if page_rows is not None:
-            return [
-                row
-                for page_row in page_rows
-                if (row := self._output_invoice_lifecycle_row(page_row, month)) is not None
-            ]
-        service = OutputInvoiceCollectionQueryService(
-            import_service=self._import_service(),
-            relation_facade=self._workbench_relation_read_facade,
-            lifecycle_repository=build_output_invoice_collection_lifecycle_repository(self._connection),
-            lifecycle_policy=self._policy,
-            require_fresh_relations=True,
-        )
-        context = service._query_context(month_hint=month)
-        page_rows = service._filtered_sorted_rows(
-            context=context,
-            month=month,
-            keyword=None,
-            invoice_date_from=None,
-            invoice_date_to=None,
-            filters=[],
-            sort_field="invoice_date",
-            sort_direction="desc",
-        )
+        if page_rows is None:
+            raise RuntimeError(f"output_invoice_collection_read_model_not_fresh:{month}")
         return [
             row
             for page_row in page_rows
@@ -339,7 +289,7 @@ class InvoiceLifecycleSqlProjectionBuilder:
     def _source_versions(self) -> dict[str, object]:
         source_versions: dict[str, object] = {
             **self._policy.source_versions(),
-            "invoice_lifecycle_read_model_schema_version": 1,
+            "invoice_lifecycle_read_model_schema_version": INVOICE_LIFECYCLE_READ_MODEL_SCHEMA_VERSION,
             "input_invoice_usage_source_versions": input_invoice_usage_source_versions(
                 payment_status_rules_version=self._payment_rules_provider.rules_source_version(),
             ),
@@ -507,9 +457,6 @@ class InvoiceLifecycleSqlProjectionBuilder:
             "skipped": True,
             "skip_reason": "source_versions_unchanged",
         }
-
-    def _import_service(self) -> ImportNormalizationService:
-        return ImportNormalizationService.from_snapshot(None, fact_repository=self._core_repository)
 
     def _invoice_month_shards(self, *, invoice_type: InvoiceType) -> list[str]:
         rows = self._connection.fetch_all(

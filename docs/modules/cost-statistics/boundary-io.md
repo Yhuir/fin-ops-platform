@@ -89,7 +89,7 @@
 - 父 scope 正式重建会删除不再存在于 Workbench active month shard 集合中的旧 cost_statistics month scopes 及两张结构化行表记录；旧 shard 不得继续进入 Audit、parent rollup 或页面月份集合。projection 不再写删旧无版本 Redis key；scope 缺失/non-fresh 的 PostgreSQL gate 会阻止读取残留 query cache，versioned cache 由 namespace/TTL 自然淘汰。
 - `active:all` / `all:all` 的 summary 与 project/expense 聚合从当前 concrete `cost_statistics_rows` 重算，全流水摘要从 `cost_statistics_bank_flow_rows` 重算；父模型不重复物化 parent rows，也不保存两类 row array。Audit 必须使用同一 child-union 口径，不能以 parent row 表为空误报 summary。
 - 成本 bank-flow 字段证明按银行流水 canonical legacy/public transaction id 连接 `bank_detail_rows.transaction_id`；不得只用 PostgreSQL UUID 连接后把完整投影误报为缺失。
-- Read-model schema version：`2026-07-cost-statistics-structured-rows-v9`。物理存储是两张结构化行表，parent JSON 不含两类大数组；页面 explorer response 已独立收敛为 view-specific page shape。旧 schema 必须经 gate fail-closed 并重新投影，禁止 dual-read/JSON/HTTP-shape fallback。
+- Read-model schema version：`2026-07-cost-statistics-structured-rows-v10`。v10 固化 relation `case_id` 到 Workbench display `group_id=case:<case_id>` 的成员身份合同，并确保部署后触发一次真实重投影；物理存储是两张结构化行表，parent JSON 不含两类大数组。旧 schema 必须经 gate fail-closed 并重新投影，禁止 dual-read/JSON/HTTP-shape fallback。
 - Audit 重算结构化 bank-flow rows 时，bank-detail identity 必须同时接受 PostgreSQL UUID 与 legacy public transaction id；两者都只能归一到同一 canonical `app.bank_transactions` 对象。投影月份直接使用 `cost_statistics_bank_flow_rows.scope_month`，与 bank-detail 的 `scope_key` owner 比较（仅 bank-detail owner 缺失时回退 `trade_date`）；不得展开 parent metadata 中已禁止的 `bank_flow_time_rows`。禁止只按其中一种 ID 连接或只按可空日期字段校验而把完整投影误报为明细缺失。
 
 ## 文件范围

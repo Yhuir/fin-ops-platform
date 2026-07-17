@@ -7,7 +7,7 @@ from fin_ops_platform.services.cost_statistics_bank_accounts import (
     bank_auto_tag_rules_version_from_settings_payload,
 )
 
-COST_STATISTICS_READ_MODEL_SCHEMA_VERSION = "2026-07-cost-statistics-structured-rows-v9"
+COST_STATISTICS_READ_MODEL_SCHEMA_VERSION = "2026-07-cost-statistics-structured-rows-v10"
 
 
 def cost_statistics_source_versions(
