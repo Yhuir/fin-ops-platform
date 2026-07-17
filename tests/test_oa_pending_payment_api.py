@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from copy import deepcopy
 from decimal import Decimal
 from http import HTTPStatus
@@ -267,8 +268,9 @@ class OaPendingPaymentApiTests(unittest.TestCase):
 
         self.assertEqual(result.status, HTTPStatus.OK)
         self.assertEqual(result.payload["read_model_status"], "fresh")
-        self.assertEqual(repository.state_calls, 1)
+        self.assertEqual(repository.state_calls, 2)
         self.assertEqual(repository.data_calls, 1)
+        self.assertEqual(repository.snapshot_entries, 1)
 
     def test_rows_cache_keeps_freshness_gate_and_skips_repeated_payload_query(self) -> None:
         repository = ConditionalOaRowsRepository()
@@ -288,8 +290,9 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         self.assertEqual(first.status, HTTPStatus.OK)
         self.assertEqual(second.status, HTTPStatus.OK)
         self.assertEqual(not_modified.status, HTTPStatus.NOT_MODIFIED)
-        self.assertEqual(repository.state_calls, 3)
+        self.assertEqual(repository.state_calls, 4)
         self.assertEqual(repository.data_calls, 1)
+        self.assertEqual(repository.snapshot_entries, 1)
         self.assertEqual(len(redis.gets), 2)
         self.assertEqual(len(redis.sets), 1)
         self.assertEqual(first.payload, second.payload)
@@ -313,8 +316,9 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         repository.version_token = "read-model-version-8"
         service.conditional_rows(first_query, tenant_id="tenant-a", if_none_match=None)
 
-        self.assertEqual(repository.state_calls, 4)
+        self.assertEqual(repository.state_calls, 8)
         self.assertEqual(repository.data_calls, 4)
+        self.assertEqual(repository.snapshot_entries, 4)
         self.assertEqual(len(redis.values), 4)
         self.assertEqual(len(set(redis.values.keys())), 4)
 
@@ -333,9 +337,40 @@ class OaPendingPaymentApiTests(unittest.TestCase):
 
         self.assertEqual(first.status, HTTPStatus.OK)
         self.assertEqual(second.status, HTTPStatus.OK)
-        self.assertEqual(repository.state_calls, 2)
+        self.assertEqual(repository.state_calls, 4)
         self.assertEqual(repository.data_calls, 2)
+        self.assertEqual(repository.snapshot_entries, 2)
         self.assertEqual(first.payload, second.payload)
+
+    def test_rows_cache_miss_rejects_a_version_change_before_payload_read(self) -> None:
+        class RacingRepository(ConditionalOaRowsRepository):
+            def oa_pending_payment_query_state(self, **kwargs: object) -> dict[str, object]:
+                state = super().oa_pending_payment_query_state(**kwargs)
+                if self.state_calls > 1:
+                    state["version_token"] = "read-model-version-8"
+                return state
+
+        repository = RacingRepository()
+        redis = OaRowsRedisRecorder()
+        service = OaPendingPaymentReadModelService(
+            repository=repository,
+            queue_repository=QueueRecorder(),
+            redis_helper=redis,
+            source_versions_provider=oa_pending_payment_source_versions,
+        )
+
+        result = service.conditional_rows(
+            {"page": ["1"], "page_size": ["20"]},
+            tenant_id="default",
+            if_none_match=None,
+        )
+
+        self.assertEqual(result.status, HTTPStatus.ACCEPTED)
+        self.assertEqual(result.payload["read_model_status"], "refreshing")
+        self.assertEqual(repository.state_calls, 2)
+        self.assertEqual(repository.data_calls, 0)
+        self.assertEqual(repository.snapshot_entries, 1)
+        self.assertEqual(redis.sets, [])
 
     def test_production_service_wires_module_rows_cache_from_runtime_container(self) -> None:
         repository = ConditionalOaRowsRepository()
@@ -355,8 +390,9 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         service.conditional_rows({"page": ["1"]}, tenant_id="default", if_none_match=None)  # type: ignore[union-attr]
         service.conditional_rows({"page": ["1"]}, tenant_id="default", if_none_match=None)  # type: ignore[union-attr]
 
-        self.assertEqual(repository.state_calls, 2)
+        self.assertEqual(repository.state_calls, 3)
         self.assertEqual(repository.data_calls, 1)
+        self.assertEqual(repository.snapshot_entries, 1)
         self.assertEqual(len(redis.sets), 1)
 
     def test_rows_conditional_get_uses_freshness_fast_path_and_private_etag(self) -> None:
@@ -387,8 +423,9 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         self.assertEqual(second.status_code, 304)
         self.assertEqual(second.body, "")
         self.assertEqual(changed_query.status_code, 200)
-        self.assertEqual(repository.state_calls, 3)
+        self.assertEqual(repository.state_calls, 5)
         self.assertEqual(repository.data_calls, 2)
+        self.assertEqual(repository.snapshot_entries, 2)
 
     def test_rows_authentication_precedes_conditional_etag(self) -> None:
         repository = ConditionalOaRowsRepository()
@@ -1184,7 +1221,13 @@ class ConditionalOaRowsRepository:
     def __init__(self) -> None:
         self.state_calls = 0
         self.data_calls = 0
+        self.snapshot_entries = 0
         self.version_token = "read-model-version-7"
+
+    @contextmanager
+    def oa_pending_payment_read_snapshot(self):
+        self.snapshot_entries += 1
+        yield self
 
     def oa_pending_payment_query_state(self, **_kwargs: object) -> dict[str, object]:
         self.state_calls += 1

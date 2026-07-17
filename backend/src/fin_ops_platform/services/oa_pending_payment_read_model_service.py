@@ -85,53 +85,68 @@ class OaPendingPaymentReadModelService:
                 payload=self.refreshing_rows_payload(scope_key=scope_key, blocking_scope_keys=[scope_key]),
             )
 
-        with self._repository.read_snapshot() as repository:
-            state = repository.query_state(
-                scope_key=scope_key,
-                tenant_id=tenant_id,
-                base_source_versions=self.expected_source_versions(scope_key=scope_key),
+        base_source_versions = self.expected_source_versions(scope_key=scope_key)
+        state = self._repository.query_state(
+            scope_key=scope_key,
+            tenant_id=tenant_id,
+            base_source_versions=base_source_versions,
+        )
+        if not isinstance(state, dict):
+            self._enqueue_refresh(scope_key, reason="api_freshness_proof_unavailable")
+            return OaPendingPaymentRowsRead(
+                status=HTTPStatus.ACCEPTED,
+                payload=self.refreshing_rows_payload(scope_key=scope_key, blocking_scope_keys=[scope_key]),
             )
-            if not isinstance(state, dict):
-                self._enqueue_refresh(scope_key, reason="api_freshness_proof_unavailable")
-                return OaPendingPaymentRowsRead(
-                    status=HTTPStatus.ACCEPTED,
-                    payload=self.refreshing_rows_payload(scope_key=scope_key, blocking_scope_keys=[scope_key]),
-                )
-            blocking_scope_keys = [str(value) for value in list(state.get("blocking_scope_keys") or []) if str(value)]
-            stale_reasons = [str(value) for value in list(state.get("stale_reasons") or []) if str(value)]
-            if str(state.get("status") or "refreshing") != "fresh":
-                refresh_scope_keys = blocking_scope_keys or [scope_key]
-                for blocking_scope_key in refresh_scope_keys:
-                    self._enqueue_refresh(blocking_scope_key, reason="api_freshness_gate_blocked")
-                return OaPendingPaymentRowsRead(
-                    status=HTTPStatus.ACCEPTED,
-                    payload=self.refreshing_rows_payload(
-                        scope_key=scope_key,
-                        stale_reasons=stale_reasons,
-                        blocking_scope_keys=refresh_scope_keys,
-                    ),
-                )
-
-            etag = self._etag(
-                tenant_id=tenant_id,
-                normalized_query={
-                    "scopeKey": scope_key,
-                    "keyword": str(query.get("keyword", [""])[0] or "").strip(),
-                    "tradeDateFrom": query.get("trade_date_from", [None])[0],
-                    "tradeDateTo": query.get("trade_date_to", [None])[0],
-                    "filters": parsed_filters,
-                    "sortField": sort_field,
-                    "sortDirection": sort_direction,
-                    "page": page,
-                    "pageSize": page_size,
-                    "viewMode": view_mode,
-                },
-                version_token=str(state.get("version_token") or ""),
+        blocking_scope_keys = [str(value) for value in list(state.get("blocking_scope_keys") or []) if str(value)]
+        stale_reasons = [str(value) for value in list(state.get("stale_reasons") or []) if str(value)]
+        if str(state.get("status") or "refreshing") != "fresh":
+            refresh_scope_keys = blocking_scope_keys or [scope_key]
+            for blocking_scope_key in refresh_scope_keys:
+                self._enqueue_refresh(blocking_scope_key, reason="api_freshness_gate_blocked")
+            return OaPendingPaymentRowsRead(
+                status=HTTPStatus.ACCEPTED,
+                payload=self.refreshing_rows_payload(
+                    scope_key=scope_key,
+                    stale_reasons=stale_reasons,
+                    blocking_scope_keys=refresh_scope_keys,
+                ),
             )
-            if _etag_matches(if_none_match, etag):
-                return OaPendingPaymentRowsRead(status=HTTPStatus.NOT_MODIFIED, payload={}, etag=etag)
 
-            def load_rows_view() -> dict[str, Any] | None:
+        etag = self._etag(
+            tenant_id=tenant_id,
+            normalized_query={
+                "scopeKey": scope_key,
+                "keyword": str(query.get("keyword", [""])[0] or "").strip(),
+                "tradeDateFrom": query.get("trade_date_from", [None])[0],
+                "tradeDateTo": query.get("trade_date_to", [None])[0],
+                "filters": parsed_filters,
+                "sortField": sort_field,
+                "sortDirection": sort_direction,
+                "page": page,
+                "pageSize": page_size,
+                "viewMode": view_mode,
+            },
+            version_token=str(state.get("version_token") or ""),
+        )
+        if _etag_matches(if_none_match, etag):
+            return OaPendingPaymentRowsRead(status=HTTPStatus.NOT_MODIFIED, payload={}, etag=etag)
+
+        snapshot_state: dict[str, Any] | None = None
+
+        def load_rows_view() -> dict[str, Any] | None:
+            nonlocal snapshot_state
+            with self._repository.read_snapshot() as repository:
+                snapshot_state = repository.query_state(
+                    scope_key=scope_key,
+                    tenant_id=tenant_id,
+                    base_source_versions=base_source_versions,
+                )
+                if (
+                    not isinstance(snapshot_state, dict)
+                    or str(snapshot_state.get("status") or "refreshing") != "fresh"
+                    or str(snapshot_state.get("version_token") or "") != str(state.get("version_token") or "")
+                ):
+                    return None
                 rows_payload = repository.list_oa_pending_payment_rows(
                     month=query.get("month", [None])[0],
                     keyword=query.get("keyword", [None])[0],
@@ -148,40 +163,50 @@ class OaPendingPaymentReadModelService:
                     return None
                 return {
                     "payload": rows_payload,
-                    "source_versions": dict(state.get("source_versions") or {}),
+                    "source_versions": dict(snapshot_state.get("source_versions") or {}),
                     "schema_version": OA_PENDING_PAYMENT_ROWS_CACHE_SCHEMA_VERSION,
                     "refresh_status": "fresh",
                 }
 
-            try:
-                cached_read = self._read_model_query_gateway.load(
-                    scope_type="oa_pending_payment",
+        try:
+            cached_read = self._read_model_query_gateway.load(
+                scope_type="oa_pending_payment",
+                scope_key=scope_key,
+                expected_schema_version=OA_PENDING_PAYMENT_ROWS_CACHE_SCHEMA_VERSION,
+                expected_source_versions=dict(state.get("source_versions") or {}),
+                load_view=load_rows_view,
+                empty_payload_factory=lambda: self.refreshing_rows_payload(
                     scope_key=scope_key,
-                    expected_schema_version=OA_PENDING_PAYMENT_ROWS_CACHE_SCHEMA_VERSION,
-                    expected_source_versions=dict(state.get("source_versions") or {}),
-                    load_view=load_rows_view,
-                    empty_payload_factory=lambda: self.refreshing_rows_payload(
-                        scope_key=scope_key,
-                        blocking_scope_keys=[scope_key],
-                    ),
-                    payload_validator=self._is_rows_payload,
-                    cache_key=self._rows_cache_key(etag),
-                    cache_ttl_seconds=OA_PENDING_PAYMENT_ROWS_CACHE_TTL_SECONDS,
-                    missing_reason="api_read_model_payload_unavailable",
-                    stale_reason="api_read_model_payload_stale",
-                    source_mismatch_reason="api_read_model_payload_source_versions_stale",
-                    payload_invalid_reason="api_read_model_payload_invalid",
-                )
-            except OaPendingPaymentError:
-                raise
-            except ValueError as exc:
-                raise OaPendingPaymentError("invalid_oa_pending_payment_query", str(exc)) from exc
-            if cached_read.freshness_status != "fresh":
-                return OaPendingPaymentRowsRead(
-                    status=HTTPStatus.ACCEPTED,
-                    payload=self.refreshing_rows_payload(scope_key=scope_key, blocking_scope_keys=[scope_key]),
-                )
-            payload = cached_read.payload
+                    blocking_scope_keys=[scope_key],
+                ),
+                payload_validator=self._is_rows_payload,
+                cache_key=self._rows_cache_key(etag),
+                cache_ttl_seconds=OA_PENDING_PAYMENT_ROWS_CACHE_TTL_SECONDS,
+                missing_reason="api_read_model_payload_unavailable",
+                stale_reason="api_read_model_payload_stale",
+                source_mismatch_reason="api_read_model_payload_source_versions_stale",
+                payload_invalid_reason="api_read_model_payload_invalid",
+            )
+        except OaPendingPaymentError:
+            raise
+        except ValueError as exc:
+            raise OaPendingPaymentError("invalid_oa_pending_payment_query", str(exc)) from exc
+        if cached_read.freshness_status != "fresh":
+            failed_state = snapshot_state if isinstance(snapshot_state, dict) else {}
+            refresh_scope_keys = [
+                str(value) for value in list(failed_state.get("blocking_scope_keys") or []) if str(value)
+            ] or [scope_key]
+            for blocking_scope_key in refresh_scope_keys:
+                self._enqueue_refresh(blocking_scope_key, reason="api_freshness_gate_changed_during_read")
+            return OaPendingPaymentRowsRead(
+                status=HTTPStatus.ACCEPTED,
+                payload=self.refreshing_rows_payload(
+                    scope_key=scope_key,
+                    stale_reasons=[str(value) for value in list(failed_state.get("stale_reasons") or []) if str(value)],
+                    blocking_scope_keys=refresh_scope_keys,
+                ),
+            )
+        payload = cached_read.payload
 
         result = dict(payload)
         result.pop("read_model_schema_version", None)

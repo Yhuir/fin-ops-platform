@@ -50,7 +50,7 @@
 
 - rows `200` shape 包含 rows/pagination/summary/filterConfig/filterOptions/freshness proof。
 - ETag、`If-None-Match -> 304`、空 body、`Cache-Control`、`Vary`。
-- fresh rows 版本化 cache 命中不得改变公开 response shape；tenant、query 和 version token 必须生成不同 key，`304` 必须在 Redis/payload SQL 前返回。
+- fresh rows 版本化 cache 命中不得改变公开 response shape；tenant、query 和 version token 必须生成不同 key，`304` 必须在 Redis/payload SQL 前返回。命中路径只执行 statement 级 gate且不进入 read snapshot；miss 必须在 snapshot 内二次 gate，version race 返回 `202`且不得写旧 key。
 - rows aggregate/facets 只能扫描 typed columns，page SQL 不读 `raw_payload`，公开 row DTO 不含内部 `searchText` / 逐行 `sourceVersions`。
 - dirty/missing/mismatch -> `202`，无旧 rows，精确 `operationBarrierTargets`。
 - 权限和 query validation 先于条件响应。
@@ -69,7 +69,7 @@
 - stale event在读取源前 skip，CAS lost不清新 dirty，all仅低优先级 fan-out；all 的 shard inventory 按 event tenant 读取 source watermarks，覆盖合法 empty month，禁止回退为 completed/admission 非空月份枚举。
 - `oa-pending-payment` worker claim隔离；shared `invoice-usage-collection` 不含 OA handler。
 - source snapshot/migration/permission/schema contract。
-- OA 私有 rows cache 每次命中前仍执行 PostgreSQL freshness/version gate；同版本同 tenant/query 的重复 fresh `200` 跳过 payload SQL，版本、tenant 或 query 变化必须 cache miss。Redis 读写失败必须回退 PostgreSQL 且保持公开 contract；non-fresh 不得读取或回填 cache。key 已绑定 version token，因此不增加 writer invalidation/fan-out。
+- OA 私有 rows cache 每次命中前仍执行 PostgreSQL freshness/version gate；同版本同 tenant/query 的重复 fresh `200` 跳过 payload SQL和 read transaction，版本、tenant 或 query 变化必须 cache miss。miss/Redis 故障路径在 repeatable-read snapshot 内重跑 gate，只有 version token 不变才读取/回填 payload；读中 version/status 变化必须 `202` fail-closed。key 已绑定 version token，因此不增加 writer invalidation/fan-out。
 
 入口：`tests/test_oa_pending_payment_api.py`、`tests/test_read_model_query_gateway.py`、`tests/test_oa_pending_payment_read_model_refresh.py`、`tests/test_oa_pending_payment_read_model_query.py`、`tests/test_runtime_worker_registry.py`、`tests/test_read_model_architecture_guards.py`、`tests/test_postgres_migrations.py`。
 

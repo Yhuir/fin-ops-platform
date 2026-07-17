@@ -183,7 +183,7 @@ OA 专属 worker 领取月份事件 `N` 后：
 - read model status、scope 和 source-version proof。
 - `operationBarrierTargets`：non-fresh 时列出当前登录 tenant 下的精确 month blocking scopes；tenant 由服务端认证上下文确定，不在前端猜测或透传。默认“全部”视图不得优先等待控制 scope `all`。
 
-查询先用独立 freshness statement 完成 expected versions、dirty/outbox 和 scope metadata 判断；fresh 后在同一个只读 repeatable-read snapshot 中，用一个有界、set-based 数据 statement 返回 summary/facets 和当前页 payload，禁止 Python 分页遍历全量 rows。该合并由生产 profile 证明两次 repository data roundtrip 是剩余热路径后实施，不改变 freshness gate 或 API DTO。
+查询先用独立 freshness statement 完成 expected versions、dirty/outbox 和 scope metadata 判断。匹配 ETag 直接返回 `304`；versioned Redis hit 直接返回 fresh `200`，两者都不启动 read transaction。只有 cache miss 或 Redis fallback 才进入只读 repeatable-read snapshot，重新执行同一 gate并要求 `status=fresh`、version token 与外层完全相同，再用一个有界、set-based 数据 statement 返回 summary/facets 和当前页 payload；读中 version/status 变化 fail-closed 为 `202`且不缓存。该顺序不改变 freshness 事实源或 API DTO。
 
 fresh gate 检查 dirty、outbox、scope existence 和动态 version vector。任何一项无法证明都返回 `202 refreshing`，不返回旧 rows。
 
@@ -230,7 +230,7 @@ detail endpoints 继续按用户打开 drawer 时惰性读取，不合并进首�
 - 只有执行计划证明需要时，才添加 OA read model 私有索引；禁止为该页面修改共享表或其它页面的索引合同。
 - freshness gate 的生产 500 样本、server/DB 分段和 internal `304/200` 对照若共同证明 latest dirty lookup 是主长尾，可在共享 dirty 表上增加仅覆盖 `scope_type='oa_pending_payment'` 的 partial index；键顺序必须与 latest source-version 查询一致，predicate 不得覆盖其它页面。
 - 继续保留现有 page/offset pagination；当前数据量和功能不证明需要 cursor pagination，不为此增加第二套合同。
-- 不新增 Redis payload cache。当前 fresh 请求已经接近目标，先消除重复扫描和外部 I/O；缓存只在 DB-only 路径仍不能达标且有生产证据时再评估，并且仍必须位于 fresh gate 之后。
+- Redis payload cache 只在 2026-07-17 生产等量 1000 样本证明 DB-only 路径未达标后启用，并严格位于 fresh gate 之后。cache 仅复用现有 gateway、使用 OA 私有 versioned key，不增加 writer invalidation、共享失效或第二事实源；命中不得为 gate 额外启动 repeatable-read transaction。
 
 ### 6.2 Worker 隔离
 
@@ -386,8 +386,8 @@ Page Audit 只证明同一 PostgreSQL snapshot 内部一致性。外部来源健
 - 隔离真实PG闭环发现并修复`YYYY-MM` snapshot date cast和组合repository漏暴露OA freshness/snapshot两个生产阻断缺口；新增真实PG集成测试覆盖canonical commit到fresh 200/304。
 - 生产并发证据将剩余长尾限定在 OA freshness statement；新增两个 OA 私有 partial index，分别匹配 dirty latest-version 顺序和 active outbox blocking predicate。outbox 索引在 50,000 条 completed 历史样本上为 `Index Only Scan`、执行 `0.026ms`、2 shared buffers、16kB，且不会索引其它 event type 或 completed history。
 - 单月500行本地PG门：fresh 200顺序1000次`p95 9.938ms`，8并发1000次`p95 33.243ms`，304 1000次`p95 0.520ms`；200次mutation从commit返回到fresh API `p95 544.178ms`，projector `p95 435.400ms`，最终fresh API `p95 131.274ms`，错误率均为0且200次均在收敛前返回202。500行相对历史生产总量210行是2.381倍，但当前生产峰值未知，不能视为当前生产等量结论。
-- SQL计划为gate `0.090ms`、aggregate/facets `5.755ms`、bounded page `0.306ms`，无physical/temp I/O；304只执行gate。本地证据当时不支持新增 cache，但 2026-07-17 公网 1000 次 fresh `200` 的 `p95=292.945ms` 与进程 rolling DB `p95=87.450ms` 已补充生产等量证据：同版本重复 rows payload 改为 gate 后版本化 cache，仍不新增 index、partition、schema、worker或 API。
+- SQL计划为gate `0.090ms`、aggregate/facets `5.755ms`、bounded page `0.306ms`，无physical/temp I/O；304只执行gate。本地证据当时不支持新增 cache，但 2026-07-17 公网 1000 次 fresh `200` 的原基线 `p95=292.945ms` 与进程 rolling DB `p95=87.450ms` 已补充生产等量证据。版本化 cache release 部署后 1000/1000 fresh `200` 为 `p50=174.569ms`、`p95=281.536ms`、`p99=424.983ms`，只改善约 11ms；rolling 512 样本仍固定 6 次 DB 操作、DB `p95=81.148ms`，证明 cache hit 外围的 repeatable-read transaction 是剩余可删除 I/O。下一步仅去除 hit/304 的事务，miss 仍二次 gate，不新增 index、partition、schema、worker或 API。
 
 Writer inventory以 `boundary-io.md` 为准。当前支持入口覆盖 external OA sync、页面paid写回、pending relation、Workbench relation、银行和进项发票 lifecycle；input invoice payment rules当前不进入OA付款算法，明确不适用。
 
-2026-07-17 已完成 migration `0110` 发布、OA 双视图同步、幂等同步、三页面 Audit 和公网 1000 次 fresh `200` 基线；基线证明功能正确但严格 p95 尚未达标，因此新增上述 gate 后版本化 cache。cache 变更仍必须完成本地/CI/真实 PostgreSQL、精确 release 再部署、1000 次 cache-hit 采样、三页同时负载、安全可逆操作后连续 Audit；live Nginx `If-None-Match` 转发仍由 root owner 关闭。在这些证据完成前不得宣称 `p95 <= 250ms` 或把当前 `/goal` 标记 complete。
+2026-07-17 已完成 migration `0110`、OA 双视图同步/幂等隔离、版本化 cache release 与三页面部署后 Audit；功能正确且 p99 达标，但严格 p95 仍未达标。cache-hit 去事务修复仍必须完成本地/CI/真实 PostgreSQL、精确 release 再部署、1000 次采样、三页同时负载和安全可逆操作后连续 Audit；live Nginx `If-None-Match` 转发仍由 root owner 关闭。在这些证据完成前不得宣称 `p95 <= 250ms` 或把当前 `/goal` 标记 complete。

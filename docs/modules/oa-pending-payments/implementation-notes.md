@@ -1,5 +1,13 @@
 # OA待付款核对 实施记录
 
+## 2026-07-17 - 生产 cache-hit 门禁去事务化
+
+- 生产证据：release `main-4a6c20a9b-oa-rows-cache-20260717` 部署后，三页面 Audit 均为 `pass/fresh/drained/0 issues`；OA “进行中”公网 fresh `200` 采样 1000/1000 成功，`p50=174.569ms`、`p95=281.536ms`、`p99=424.983ms`。p99 通过但 p95 仍高于 `250ms`，不能声明性能闭环。
+- 真正热路径：versioned Redis 已把 payload SQL 从重复请求移除，但生产 rolling 512 样本仍显示 OA rows 的数据库 query count 固定为 6、DB `p95=81.148ms`。原因是 cache hit 仍进入 OA `repeatable read read only` snapshot，承担事务进入、`SET TRANSACTION`、freshness statement 和事务退出；cache 没有缩短 gate 外围的事务 I/O。
+- 最小修复：每次请求继续执行同一 OA 私有 PostgreSQL freshness/version statement；`202` 和 `304` 仍在 Redis/payload I/O 前返回。只有 cache miss/Redis fallback 才进入 repeatable-read snapshot，并在读取 rows 前重新执行 gate，要求 snapshot 内 `status=fresh` 且 `version_token` 与外层 gate 完全相同；竞态变化返回 `202`，不得把 payload 写入旧 version key。cache hit 因此只有一次 statement 级 PostgreSQL gate，不启动 snapshot transaction。
+- 隔离边界：不改 canonical、projection、repository SQL、schema/migration、queue/worker、API DTO、共享 `ReadModelQueryGateway` 或其它页面 read model。新增测试锁定 cache hit 不进入 snapshot、miss 二次 gate、version race fail-closed、Redis 故障回退和原有 tenant/query/version 隔离。
+- 待关闭门：相关/真实 PostgreSQL/全量测试、精确 SHA CI、部署后 rolling query count、1000 次公网 fresh `200`、三页面 mixed load 与负载后 Audit；只有 p95/p99 与 Audit 同时通过才可完成。
+
 ## 2026-07-17 - 生产 1000 样本后的 OA 私有 rows cache 收敛
 
 - 部署基线：release `main-1ce3bc8bf-oa-admission-cutoff-20260717` 完成 `oa.sync:all` 后，页面显示 `in_progress=88`；同步扫描 retained completed `244`、in-progress `151`，首次 OA 私有 affected scopes 为 6 个月，completed shared change 为空。第二次相同同步两个 change scope 集合均为空，三页面 Audit 均为 `pass/fresh/drained`。
