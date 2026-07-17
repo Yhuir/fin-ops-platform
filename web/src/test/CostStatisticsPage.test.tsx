@@ -451,7 +451,7 @@ describe("Cost statistics page", () => {
       await user.click(within(expenseLane as HTMLElement).getByRole("button", { name: /设备货款及材料费/ }));
 
       const transactionTable = screen.getByRole("grid", { name: "项目对应流水表" });
-      expect(within(transactionTable).getAllByRole("button", { name: "查看流水 cost-txn-001" })).toHaveLength(2);
+      expect(await within(transactionTable).findAllByRole("button", { name: "查看流水 cost-txn-001" })).toHaveLength(2);
       expect(within(transactionTable).getByText("PLC 模块采购追加成本")).toBeInTheDocument();
       expect(
         consoleError.mock.calls.some((call) => call.join(" ").includes("Encountered two children with the same key")),
