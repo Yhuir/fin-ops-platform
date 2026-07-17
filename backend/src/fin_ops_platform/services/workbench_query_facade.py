@@ -191,6 +191,36 @@ class WorkbenchQueryFacade:
         payload = dict(payload)
         payload["read_model_scope_key"] = scope_key
         payload_version = str(payload.get("read_model_version") or "").strip()
+        if cacheable_query and cache_version and payload_version != cache_version:
+            self._enqueue_refresh(scope_key, reason="api_initial_page_version_drift")
+            self._emit_status_metric(
+                endpoint="/api/workbench",
+                scope_key=scope_key,
+                read_model_status="refreshing",
+                reason="api_initial_page_version_drift",
+            )
+            return WorkbenchQueryResult(
+                HTTPStatus.ACCEPTED,
+                {
+                    "error": "workbench_initial_page_version_drift",
+                    "month": current_month,
+                    "scope_key": scope_key,
+                    "read_model_scope_key": scope_key,
+                    "read_model_status": "refreshing",
+                    "expected_read_model_version": cache_version,
+                    "read_model_version": payload_version or None,
+                    "summary": {
+                        "oa_count": 0,
+                        "bank_count": 0,
+                        "invoice_count": 0,
+                        "paired_count": 0,
+                        "unpaired_count": 0,
+                        "exception_count": 0,
+                    },
+                    "paired": {"groups": [], "total": 0, "has_more": False},
+                    "unpaired": {"groups": [], "total": 0, "has_more": False},
+                },
+            )
         if refresh_status_payload and cache_version == payload_version and refresh_status in {"refreshing", "stale"}:
             payload["read_model_status"] = refresh_status
             context_stale_reasons = refresh_status_payload.get("read_model_stale_reasons")

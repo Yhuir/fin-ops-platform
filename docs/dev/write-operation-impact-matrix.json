@@ -1,5 +1,5 @@
 {
-  "version": 3,
+  "version": 4,
   "slo": {
     "p95_enqueue_to_done_ms": 1000,
     "p99_enqueue_to_done_ms": 3000
@@ -23,7 +23,7 @@
     "input-invoice-usage": ["rows"],
     "output-invoice-collections": ["rows"],
     "oa-pending-payments": ["rows"],
-    "cost-statistics": ["time_rows", "bank_flow_time_rows", "project_rows", "expense_type_rows"],
+    "cost-statistics": ["rows"],
     "tax-offset": ["output_items", "input_plan_items", "certified_items"],
     "turnover-ledger": ["groups", "rows"]
   },

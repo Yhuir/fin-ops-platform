@@ -240,6 +240,53 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
         self.assertEqual(redis.set_json_calls[0][2], 120)
         self.assertEqual(redis.set_json_calls[0][1]["payload"]["read_model_version"], "generation-set-2")
 
+    def test_default_initial_page_version_drift_fails_closed_without_caching_old_payload(self) -> None:
+        class Repository:
+            @staticmethod
+            def get_workbench_groups_freshness_status(**_kwargs: object) -> dict[str, object]:
+                return {
+                    "scope_key": "all",
+                    "read_model_status": "fresh",
+                    "read_model_version": "generation-set-current",
+                }
+
+            @staticmethod
+            def get_workbench_initial_page(**_kwargs: object) -> dict[str, object]:
+                return {
+                    "month": "all",
+                    "scope_key": "all",
+                    "summary": {"oa_count": 7},
+                    "paired": {"groups": [{"group_id": "old-paired"}], "total": 1},
+                    "unpaired": {"groups": [{"group_id": "old-unpaired"}], "total": 1},
+                    "source_versions": {"builder": "old"},
+                    "read_model_status": "fresh",
+                    "read_model_version": "generation-set-old",
+                }
+
+        queue = QueueRecorder()
+        redis = RedisRecorder()
+        facade = WorkbenchQueryFacade(
+            repository=Repository(),
+            redis_helper=redis,
+            enqueue_refresh=queue.enqueue,
+            scope_key_for_month=scope_key_for_month,
+            stale_reasons=no_stale_reasons,
+            emit_status_metric=MetricRecorder().emit,
+            missing_read_model_error=lambda _error: False,
+            initial_cache_key_from_version=build_workbench_initial_redis_cache_key,
+            is_default_initial_query=is_default_workbench_initial_query,
+        )
+
+        result = facade.initial_page("all")
+
+        self.assertEqual(result.status_code, HTTPStatus.ACCEPTED)
+        self.assertEqual(result.payload["error"], "workbench_initial_page_version_drift")
+        self.assertEqual(result.payload["read_model_status"], "refreshing")
+        self.assertEqual(result.payload["paired"]["groups"], [])
+        self.assertEqual(result.payload["unpaired"]["groups"], [])
+        self.assertEqual(queue.refreshes, [("all", "api_initial_page_version_drift")])
+        self.assertEqual(redis.set_json_calls, [])
+
     def test_default_initial_page_redis_failure_degrades_to_same_cold_path(self) -> None:
         class Repository:
             @staticmethod
