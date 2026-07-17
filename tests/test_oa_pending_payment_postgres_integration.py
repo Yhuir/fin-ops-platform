@@ -115,7 +115,7 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
             pending_relation_repository=self.pending_relations,
         )
         completed_record = _record()
-        record = _in_progress_record()
+        record = replace(_in_progress_record(), amount="", applicant="", reason="")
         payment_statuses = {
             "flow-integration-1": OAPaymentStatusRecord(
                 flow_id="flow-integration-1",
@@ -151,6 +151,7 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
             """
             select
                 admission.updated_at as admission_updated_at,
+                admission.amount as admission_amount,
                 status.updated_at as status_updated_at,
                 application.updated_at as application_updated_at,
                 (select count(*) from job.outbox_events) as outbox_count,
@@ -182,6 +183,7 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
             """
             select
                 admission.updated_at as admission_updated_at,
+                admission.amount as admission_amount,
                 status.updated_at as status_updated_at,
                 application.updated_at as application_updated_at,
                 (select count(*) from job.outbox_events) as outbox_count,
@@ -219,6 +221,7 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
             """
             select
                 admission.updated_at as admission_updated_at,
+                admission.amount as admission_amount,
                 status.updated_at as status_updated_at,
                 application.updated_at as application_updated_at,
                 (select count(*) from job.outbox_events) as outbox_count,
@@ -242,6 +245,7 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(after_admission_change["status_updated_at"], before["status_updated_at"])
         self.assertNotEqual(after_admission_change["admission_updated_at"], before["admission_updated_at"])
         self.assertEqual(after_identical, after_admission_change)
+        self.assertIsNone(before["admission_amount"])
         self.assertEqual(int(before["completed_projection_count"]), 1)
         self.assertEqual(
             [

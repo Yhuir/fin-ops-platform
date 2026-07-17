@@ -26,7 +26,7 @@
 | --- | --- |
 | 外部读取中 | 每个启用 form/scope 只读一次并构造双视图；不改变 PostgreSQL canonical snapshot，不删除旧记录 |
 | 外部读取失败/部分 form 成功/schema 非法 | 整轮失败并记录 failed sync run；不得提交部分集合或把未知集合解释为删除 |
-| 外部读取成功 | `projection_records` 遵守通用导入配置，`admission_records` 固定包含 completed + in-progress；同一 PostgreSQL 事务提交 completed projection、admission、payment-status snapshot、source watermark 和 OA 精确月份 dirty/outbox |
+| 外部读取成功 | `projection_records` 遵守通用导入配置，`admission_records` 固定包含 completed + in-progress；合法 in-progress 草稿未填业务字段仍以稳定 identity 准入，空金额为 `NULL`；同一 PostgreSQL 事务提交 completed projection、admission、payment-status snapshot、source watermark 和 OA 精确月份 dirty/outbox |
 | PostgreSQL commit 失败 | 全部回滚；上一次 snapshot 继续是页面可证明事实 |
 | commit 成功且仅 admission/payment-status 变化 | `T0`；只刷新 OA 待付款精确月份，不触发 Workbench、成本统计或其它 shared consumers |
 | commit 成功且 completed canonical 变化 | `T0`；刷新 OA 待付款，并由 sync service 通过既有 shared owner fan-out 合法 consumers |

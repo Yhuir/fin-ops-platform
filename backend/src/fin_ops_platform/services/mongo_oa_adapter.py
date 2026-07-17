@@ -362,6 +362,7 @@ class MongoOAAdapter(OAAdapter):
                         document,
                         project_names,
                         respect_status_settings=False,
+                        allow_incomplete_business_fields=status_key == OA_IMPORT_STATUS_IN_PROGRESS,
                     )
                     records = [record] if record is not None else []
                 else:
@@ -370,6 +371,7 @@ class MongoOAAdapter(OAAdapter):
                         project_names,
                         respect_status_settings=False,
                         parse_attachment_evidence=status_key == OA_IMPORT_STATUS_COMPLETED,
+                        allow_incomplete_business_fields=status_key == OA_IMPORT_STATUS_IN_PROGRESS,
                     )
                 if not records:
                     raise RuntimeError(
@@ -850,6 +852,7 @@ class MongoOAAdapter(OAAdapter):
         project_names: dict[str, str],
         *,
         respect_status_settings: bool = True,
+        allow_incomplete_business_fields: bool = False,
     ) -> OAApplicationRecord | None:
         data = self._document_data(document)
         if not self._should_include_projection_document(
@@ -862,7 +865,7 @@ class MongoOAAdapter(OAAdapter):
         applicant = self._first_text(data, "userName", "applicant")
         reason = self._first_text(data, "cause")
         counterparty = self._first_text(data, "beneficiary")
-        if not amount or not applicant or not reason:
+        if not allow_incomplete_business_fields and (not amount or not applicant or not reason):
             return None
         project_id = self._first_text(data, "projectName")
         project_name = project_names.get(project_id, project_id or "--")
@@ -920,6 +923,7 @@ class MongoOAAdapter(OAAdapter):
         *,
         respect_status_settings: bool = True,
         parse_attachment_evidence: bool = True,
+        allow_incomplete_business_fields: bool = False,
     ) -> list[OAApplicationRecord]:
         data = self._document_data(document)
         if not self._should_include_projection_document(
@@ -929,7 +933,7 @@ class MongoOAAdapter(OAAdapter):
         ):
             return []
         applicant = self._first_text(data, "Reimbursement Personnel", "applicant", "userName")
-        if not applicant:
+        if not applicant and not allow_incomplete_business_fields:
             return []
         items = data.get("schedule")
         if not isinstance(items, list) or not items:
@@ -1041,7 +1045,7 @@ class MongoOAAdapter(OAAdapter):
         header_amount = self._parse_amount(header_amount_text)
         amount_source = "header" if header_amount is not None else "detail_sum"
         resolved_amount = header_amount_text if header_amount is not None else self._format_decimal(detail_sum)
-        if not resolved_amount:
+        if not resolved_amount and not allow_incomplete_business_fields:
             return []
 
         amount_mismatch: dict[str, str] | None = None

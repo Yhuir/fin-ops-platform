@@ -20,7 +20,7 @@
 
 - `paymentStatus` 仅 `paid` / `unpaid`；候选、非 outflow、金额差异不能绕过写回校验。
 - completed/in-progress 主行身份、flow id 解析、duplicate/empty/invalid input。
-- 双视图 source batch 在通用 status filter 仅含 completed 时仍接纳 in-progress；in-progress 不调用附件 parser/OCR，completed 保持现有附件处理。
+- 双视图 source batch 在通用 status filter 仅含 completed 时仍接纳 in-progress；合法草稿 amount/applicant/reason 未填仍准入且空金额落为 `NULL`，completed 缺既有必填字段仍 fail-closed；in-progress 不调用附件 parser/OCR，completed 保持现有附件处理。
 - 精确月份 shard 即使命中跨月 relation，也只聚合该月份 OA 主行；其它月份成员不能污染当前 shard。
 - writeback relation、金额、方向、幂等和 already-paid 重试。
 - filters、sort、paging、view mode contract。

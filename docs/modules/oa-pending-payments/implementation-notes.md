@@ -8,7 +8,8 @@
 - 隔离：snapshot repository 分别返回 `oa_pending_payment_changed_scopes` 与 `completed_projection_changed_scopes`，自身只 enqueue OA 私有 refresh。admission/payment-status-only 不再触发 Workbench/shared consumers；completed canonical 真实新增、修改或删除仍由 sync service 交给既有 shared owner fan-out。
 - 删除闭环：移除 sync service 的 months/list/all-list 旧编排和 adapter 无生产调用方的 fingerprint polling/helper/test；架构 guard 禁止这些旧链、混合 change set 与 repository Workbench fan-out 回流。
 - 边界补漏：`all` 同步把旧 source watermark scopes 纳入 completed 删除比较，覆盖“最后一条 completed 被删除”；相同 snapshot 继续零时间戳漂移、零 admission replace、零 downstream fan-out。
-- 本地验证：后端全量 `4130 passed / 6 conditional skipped`；真实 PostgreSQL 0001–0110 上 `4 passed`，其中稳定 completed canonical 与 admission-only 修改并存时，completed `updated_at` 不变、shared change set 为空、增量 outbox 只有 OA 私有精确月份；前端 `72 files / 857 tests`、production build、Playwright `179/179`、lint、docs 与 diff-check 全部通过。
+- 本地验证：修正合法草稿合同后，后端全量 `4132 passed / 6 conditional skipped`；真实 PostgreSQL 0001–0110 上 `4 passed`，其中空 amount/applicant/reason 的 in-progress 草稿以稳定 identity 准入、金额落为 `NULL`，completed `updated_at` 不变、shared change set 为空、增量 outbox 只有 OA 私有精确月份；completed 缺必填字段仍由 adapter 测试锁定为整轮失败。前端 `72 files / 857 tests`、production build、Playwright `179/179`、lint、docs 与 diff-check 全部通过。
+- 首次生产激活发现一条合法 in-progress payment 草稿尚未填写既有 completed 投影要求的业务字段，strict batch 将其误判为 projection failure 并安全保留旧 snapshot。release 随即回滚到 `main-d3fc16026-oa-outbox-index-20260717`，未产生部分 PostgreSQL 写入。修正后的合同只对 in-progress 放行空业务字段并把空金额持久化为 `NULL`；Mongo/form 读取失败、status/identity 不可判定及 completed 缺必填字段仍 fail-closed，不增加 fallback 或跳过记录。
 - 生产门：精确 SHA 部署后执行 `oa.sync:all`，核对 completed/in-progress 扫描计数、admission/status、水位和 queue drain；验证 OA 进行中数据、三页面 Audit、操作后 Audit、页面性能及 admission-only shared outbox/version 不变。结果未采集前不把本次修复标记为生产闭环。
 
 ## 2026-07-17 - 周期同步刷新风暴与 rows 热路径收敛

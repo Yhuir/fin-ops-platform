@@ -2524,6 +2524,77 @@ class MongoOAAdapterTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "OA Mongo source read failed"):
             adapter.load_sync_application_batch("2026-03")
 
+    def test_sync_batch_admits_legitimate_in_progress_drafts_with_unfilled_business_fields(self) -> None:
+        adapter = StubMongoOAAdapter(
+            form_documents={
+                "2": [
+                    {
+                        "_id": "payment-draft",
+                        "form_id": "2",
+                        "data": {
+                            "applicationDate": "2026-03-20",
+                            "processStatus": "1",
+                        },
+                    }
+                ],
+                "32": [
+                    {
+                        "_id": "expense-draft",
+                        "form_id": "32",
+                        "data": {
+                            "ApplicationDate": "2026-03-21",
+                            "processStatus": "1",
+                        },
+                    }
+                ],
+            },
+            project_documents=[],
+        )
+        adapter.set_import_settings_provider(
+            lambda: {"form_types": ["payment_request", "expense_claim"], "statuses": ["completed"]}
+        )
+
+        with patch.object(
+            adapter,
+            "_parse_attachment_evidence_pool",
+            side_effect=AssertionError("in-progress draft must not parse attachments"),
+        ):
+            batch = adapter.load_sync_application_batch("2026-03")
+
+        self.assertEqual(batch.projection_records, ())
+        self.assertEqual(
+            [record.id for record in batch.admission_records],
+            ["oa-exp-expense-draft", "oa-pay-payment-draft"],
+        )
+        for record in batch.admission_records:
+            self.assertEqual(record.workflow_status, "in_progress")
+            self.assertEqual(record.amount, "")
+            self.assertEqual(record.applicant, "")
+            self.assertEqual(record.attachment_evidences, [])
+            self.assertEqual(record.attachment_artifacts, [])
+            self.assertEqual(record.attachment_invoices, [])
+
+    def test_sync_batch_still_fails_closed_for_completed_document_missing_required_business_fields(self) -> None:
+        adapter = StubMongoOAAdapter(
+            form_documents={
+                "2": [
+                    {
+                        "_id": "payment-completed-invalid",
+                        "form_id": "2",
+                        "data": {
+                            "applicationDate": "2026-03-20",
+                            "processStatus": "2",
+                        },
+                    }
+                ],
+                "32": [],
+            },
+            project_documents=[],
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "document failed required-field projection"):
+            adapter.load_sync_application_batch("2026-03")
+
     def test_sync_batch_fails_closed_after_one_form_succeeds_and_the_next_form_fails(self) -> None:
         class PartialFailureAdapter(StubMongoOAAdapter):
             def _load_form_documents(self, form_id: str, month: str | None = None) -> list[dict]:

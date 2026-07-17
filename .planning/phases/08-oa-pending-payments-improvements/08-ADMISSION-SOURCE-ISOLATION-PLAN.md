@@ -23,7 +23,7 @@ Grill-me 复核补充四个不可省略的闭环条件：外部读取必须整�
 - `projection_records`：遵守通用 OA 导入的 form/status 配置，供共享 completed projection 使用。
 - `admission_records`：固定接纳 `completed + in_progress`，供 OA 待付款 admission/payment-status/watermark 使用，不受通用 status filter 污染。
 
-任一 form 查询失败、Mongo 进入 backoff 或可识别目标文档无法投影时，整轮失败且不提交 PostgreSQL。同步 service 记录 failed run，不把部分集合解释为删除。
+任一 form 查询失败、Mongo 进入 backoff，或目标文档缺少可稳定识别的 status/identity 时，整轮失败且不提交 PostgreSQL。同步 service 记录 failed run，不把部分集合解释为删除。合法 in-progress 草稿允许 amount/applicant/reason 等尚未填写的业务字段为空：仍以稳定 OA identity 进入 admission，金额落为 PostgreSQL `NULL`，不进入 completed projection；completed 文档缺少既有必填业务字段仍 fail-closed。
 
 snapshot repository 只负责同一事务内持久化 canonical facts、watermark 和 OA 私有 refresh，输出两个明确变化集合：
 
@@ -43,6 +43,7 @@ repository 禁止直接 enqueue Workbench/shared consumers；sync service 禁止
 ## 验收门
 
 - 通用 status filter 仅含 completed 时，admission batch 仍包含 in-progress。
+- in-progress 合法草稿业务字段未填写时仍进入 admission，空金额原子落为 `NULL`；completed 缺必填业务字段仍整轮失败。
 - in-progress 路径不调用附件 parser/OCR；completed 路径保持调用。
 - 部分外部读取失败：零 projection/snapshot/watermark/outbox commit，failed run 可见。
 - identical batch：零业务时间戳漂移、零 admission replace、零页面 fan-out。
