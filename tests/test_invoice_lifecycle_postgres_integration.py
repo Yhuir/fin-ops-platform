@@ -50,6 +50,33 @@ class InvoiceLifecyclePostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(payload["source_versions"], {"pending_invoice_signature": "expense-v1"})
         self.assertEqual([row["id"] for row in payload["rows"]], ["txn-1"])
 
+    def test_proves_missing_pending_scope_empty_from_fresh_bank_detail_month(self) -> None:
+        self.connection.execute(
+            """
+            insert into read_model.bank_detail_scopes(
+                tenant_id, scope_type, scope_key, scope_month, schema_version,
+                status, row_count, source_version, source_versions, generated_at
+            )
+            values (
+                'default', 'bank_detail', '2026-05', '2026-05-01', 10,
+                'fresh', 0, 7, '{"bank_detail_signature": "empty-v1"}'::jsonb, now()
+            )
+            """
+        )
+
+        payload = self.repository.list_pending_invoice_lifecycle_source_rows(
+            month="2026-05",
+            direction="income",
+        )
+
+        self.assertEqual(payload["scope_key"], "income:all:2026-05")
+        self.assertEqual(payload["refresh_status"], "fresh")
+        self.assertEqual(payload["rows"], [])
+        self.assertEqual(
+            payload["source_versions"]["pending_invoice_empty_month_direction"]["bank_detail_source_versions"],
+            {"bank_detail_signature": "empty-v1"},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

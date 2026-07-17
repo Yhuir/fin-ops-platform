@@ -3118,7 +3118,32 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
             )
             scope_row = self._pending_invoice_scope_row(scope_key, connection=connection)
             if scope_row is None:
-                return None
+                if refresh_status != "fresh":
+                    return {
+                        "scope_key": scope_key,
+                        "refresh_status": refresh_status,
+                        "source_versions": {},
+                        "rows": [],
+                    }
+                bank_detail_source_versions = self._empty_pending_invoice_month_source_versions(
+                    month=normalized_month,
+                    direction=normalized_direction,
+                    connection=connection,
+                )
+                if bank_detail_source_versions is None:
+                    return None
+                return {
+                    "scope_key": scope_key,
+                    "refresh_status": "fresh",
+                    "source_versions": {
+                        "pending_invoice_empty_month_direction": {
+                            "month": normalized_month,
+                            "direction": normalized_direction,
+                            "bank_detail_source_versions": bank_detail_source_versions,
+                        }
+                    },
+                    "rows": [],
+                }
             source_versions = scope_row.get("source_versions")
             if refresh_status != "fresh":
                 return {
@@ -3143,6 +3168,35 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
                 "source_versions": dict(source_versions) if isinstance(source_versions, dict) else {},
                 "rows": [payload for row in rows if isinstance(payload := _read_model_payload(row), dict)],
             }
+
+    def _empty_pending_invoice_month_source_versions(
+        self,
+        *,
+        month: str,
+        direction: str,
+        connection: Any,
+    ) -> dict[str, Any] | None:
+        scope_summary = self._bank_detail_scope_summary(
+            scope_keys=[month],
+            tenant_id="default",
+            connection=connection,
+        )
+        if not isinstance(scope_summary, dict) or str(scope_summary.get("read_model_status") or "") != "fresh":
+            return None
+        bank_row = connection.fetch_one(
+            """
+            select transaction_id
+            from read_model.bank_detail_rows
+            where tenant_id = 'default'
+              and scope_month = %s::date
+              and direction = %s
+            limit 1
+            """,
+            (month_start(month), direction),
+        )
+        if bank_row is not None:
+            return None
+        return _source_versions_from_scope_summary(scope_summary)
 
 
     def list_pending_invoice_filter_options(

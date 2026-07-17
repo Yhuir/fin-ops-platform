@@ -455,6 +455,8 @@ class SearchPendingConnection:
         pending_filter_option_rows: list[dict] | None = None,
         dirty: bool = False,
         pending_scope_exists: bool = True,
+        bank_detail_scope_exists: bool = False,
+        bank_detail_direction_exists: bool = False,
     ) -> None:
         self.search_rows = list(search_rows or [])
         self.pending_rows = list(pending_rows or [])
@@ -463,6 +465,8 @@ class SearchPendingConnection:
         self.pending_filter_option_rows = list(pending_filter_option_rows or [])
         self.dirty = dirty
         self.pending_scope_exists = pending_scope_exists
+        self.bank_detail_scope_exists = bank_detail_scope_exists
+        self.bank_detail_direction_exists = bank_detail_direction_exists
         self.fetch_all_calls: list[tuple[str, tuple]] = []
         self.fetch_one_calls: list[tuple[str, tuple]] = []
         self.transaction_count = 0
@@ -488,6 +492,20 @@ class SearchPendingConnection:
                     "source_versions": _pending_invoice_expected_source_versions(),
                 }
             ] if self.pending_scope_exists else []
+        if "from read_model.bank_detail_scopes" in normalized:
+            return [
+                {
+                    "scope_key": params[1][0],
+                    "scope_type": "bank_detail",
+                    "schema_version": 10,
+                    "status": "fresh",
+                    "row_count": 0,
+                    "source_version": 7,
+                    "source_versions": {"bank_detail_signature": "empty-v1"},
+                    "generated_at": "2026-05-21T09:00:00+00:00",
+                    "last_error": None,
+                }
+            ] if self.bank_detail_scope_exists else []
         if "from read_model.pending_invoice_rows" in normalized and "group by direction" in normalized:
             return [
                 {"direction": direction, "count": count}
@@ -502,6 +520,8 @@ class SearchPendingConnection:
         self.fetch_one_calls.append((normalized, params))
         if "from job.read_model_dirty_scopes" in normalized:
             return {"status": "pending", "updated_at": "2026-05-21T09:00:00+00:00"} if self.dirty else None
+        if "from read_model.bank_detail_rows" in normalized:
+            return {"transaction_id": "txn-bank-1"} if self.bank_detail_direction_exists else None
         if "count(*)" in normalized and "from read_model.search_index_rows" in normalized:
             versions = [
                 dict(row.get("source_versions"))
@@ -1628,6 +1648,41 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertFalse(
             any("from read_model.pending_invoice_rows" in sql for sql, _params in connection.fetch_all_calls)
         )
+
+    def test_invoice_lifecycle_accepts_missing_pending_scope_only_for_proven_empty_bank_direction(self) -> None:
+        connection = SearchPendingConnection(
+            pending_scope_exists=False,
+            bank_detail_scope_exists=True,
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.list_pending_invoice_lifecycle_source_rows(
+            month="2026-05",
+            direction="income",
+        )
+
+        self.assertEqual(payload["scope_key"], "income:all:2026-05")
+        self.assertEqual(payload["refresh_status"], "fresh")
+        self.assertEqual(payload["rows"], [])
+        self.assertEqual(
+            payload["source_versions"]["pending_invoice_empty_month_direction"]["bank_detail_source_versions"],
+            {"bank_detail_signature": "empty-v1"},
+        )
+
+    def test_invoice_lifecycle_rejects_missing_pending_scope_when_bank_direction_has_rows(self) -> None:
+        connection = SearchPendingConnection(
+            pending_scope_exists=False,
+            bank_detail_scope_exists=True,
+            bank_detail_direction_exists=True,
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.list_pending_invoice_lifecycle_source_rows(
+            month="2026-05",
+            direction="income",
+        )
+
+        self.assertIsNone(payload)
 
     def test_pending_invoice_repository_writes_canonical_payload_without_raw_payload_duplication(self) -> None:
         connection = SearchIndexBulkWriteConnection()
