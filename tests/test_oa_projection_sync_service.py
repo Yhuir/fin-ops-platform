@@ -63,6 +63,7 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
         result = service.handle_runtime_event(_event("all"))
 
         self.assertEqual(result["scanned_count"], 2)
+        self.assertEqual(source_adapter.last_retention_cutoff_month, "2026-01")
         self.assertEqual(result["upserted_count"], 1)
         self.assertEqual(result["removed_non_completed_count"], 1)
         self.assertEqual([record.workflow_status for record in projection_repository.saved_records], ["completed"])
@@ -279,7 +280,13 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
         projection_repository = FakeProjectionRepository()
 
         class FailingSourceAdapter:
-            def load_sync_application_batch(self, _scope_key: str) -> object:
+            def load_sync_application_batch(
+                self,
+                _scope_key: str,
+                *,
+                retention_cutoff_month: str | None = None,
+            ) -> object:
+                del retention_cutoff_month
                 raise RuntimeError("partial mongo read")
 
         service = OAProjectionSyncService(
@@ -311,8 +318,15 @@ class FakeSourceAdapter:
             if projection_records_by_month is not None
             else self._records_by_month
         )
+        self.last_retention_cutoff_month: str | None = None
 
-    def load_sync_application_batch(self, scope_key: str) -> SimpleNamespace:
+    def load_sync_application_batch(
+        self,
+        scope_key: str,
+        *,
+        retention_cutoff_month: str | None = None,
+    ) -> SimpleNamespace:
+        self.last_retention_cutoff_month = retention_cutoff_month
         if scope_key == "all":
             months = self._months or sorted(self._records_by_month)
             records = [

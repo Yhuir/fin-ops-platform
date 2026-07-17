@@ -239,7 +239,7 @@ class OAProjectionSyncService:
         sync_parse = getattr(self._source_adapter, "force_attachment_invoice_sync_parse", None)
         context = sync_parse() if callable(sync_parse) else nullcontext()
         with context:
-            batch = load_batch(scope_key)
+            batch = load_batch(scope_key, retention_cutoff_month=cutoff_month)
         projection_records = getattr(batch, "projection_records", None)
         admission_records = getattr(batch, "admission_records", None)
         if not isinstance(projection_records, (list, tuple)) or not isinstance(admission_records, (list, tuple)):

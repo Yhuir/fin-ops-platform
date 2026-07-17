@@ -328,10 +328,22 @@ class MongoOAAdapter(OAAdapter):
             for month in normalized_months:
                 self.list_application_records(month)
 
-    def load_sync_application_batch(self, scope_key: str) -> OASyncSourceBatch:
+    def load_sync_application_batch(
+        self,
+        scope_key: str,
+        *,
+        retention_cutoff_month: str | None = None,
+    ) -> OASyncSourceBatch:
         normalized_scope_key = clean_string(scope_key) or "all"
         if normalized_scope_key != "all" and not MONTH_RE.match(normalized_scope_key):
             raise ValueError("OA sync source scope must be YYYY-MM or all.")
+        normalized_cutoff_month = (
+            clean_string(retention_cutoff_month)
+            if retention_cutoff_month not in (None, "")
+            else ""
+        )
+        if normalized_cutoff_month and not MONTH_RE.match(normalized_cutoff_month):
+            raise ValueError("OA sync retention cutoff must be YYYY-MM.")
         self._sync_import_settings_cache()
         self._require_sync_source_read_ready("before OA application read")
         project_names = self._project_name_index()
@@ -354,6 +366,12 @@ class MongoOAAdapter(OAAdapter):
             self._require_sync_source_read_ready(f"after {form_type} read")
             for document in documents:
                 data = self._document_data(document)
+                if (
+                    normalized_scope_key == "all"
+                    and normalized_cutoff_month
+                    and self._derive_month(data, document) < normalized_cutoff_month
+                ):
+                    continue
                 status_key = self._canonical_status_key(data)
                 if status_key not in {OA_IMPORT_STATUS_COMPLETED, OA_IMPORT_STATUS_IN_PROGRESS}:
                     continue

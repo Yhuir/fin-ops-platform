@@ -18,7 +18,7 @@ Grill-me 复核补充四个不可省略的闭环条件：外部读取必须整�
 
 ## 边界与 I/O
 
-唯一外部入口是 `MongoOAAdapter.load_sync_application_batch(scope_key)`：每个启用 form/scope 只读一次，输出两个不可变视图：
+唯一外部入口是 `MongoOAAdapter.load_sync_application_batch(scope_key, retention_cutoff_month=...)`：每个启用 form/scope 只读一次；`all` 在任何字段校验或附件解析前排除 retention cutoff 以前的文档，再输出两个不可变视图：
 
 - `projection_records`：遵守通用 OA 导入的 form/status 配置，供共享 completed projection 使用。
 - `admission_records`：固定接纳 `completed + in_progress`，供 OA 待付款 admission/payment-status/watermark 使用，不受通用 status filter 污染。
@@ -43,7 +43,7 @@ repository 禁止直接 enqueue Workbench/shared consumers；sync service 禁止
 ## 验收门
 
 - 通用 status filter 仅含 completed 时，admission batch 仍包含 in-progress。
-- in-progress 合法草稿业务字段未填写时仍进入 admission，空金额原子落为 `NULL`；completed 缺必填业务字段仍整轮失败。
+- in-progress 合法草稿业务字段未填写时仍进入 admission，空金额原子落为 `NULL`；保留期内 completed 缺必填业务字段仍整轮失败，保留期外历史文档不进入校验、解析或 snapshot。
 - in-progress 路径不调用附件 parser/OCR；completed 路径保持调用。
 - 部分外部读取失败：零 projection/snapshot/watermark/outbox commit，failed run 可见。
 - identical batch：零业务时间戳漂移、零 admission replace、零页面 fan-out。

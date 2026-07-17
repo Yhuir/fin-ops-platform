@@ -377,7 +377,13 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         from fin_ops_platform.services.oa_projection_sync import OAProjectionSyncService
 
         class SourceAdapter:
-            def load_sync_application_batch(self, scope_key: str) -> object:
+            def load_sync_application_batch(
+                self,
+                scope_key: str,
+                *,
+                retention_cutoff_month: str | None = None,
+            ) -> object:
+                del retention_cutoff_month
                 records = [oa_record(month=scope_key)]
                 return SimpleNamespace(projection_records=records, admission_records=records)
 
@@ -442,7 +448,13 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
             def __init__(self) -> None:
                 self.loaded_scopes: list[str] = []
 
-            def load_sync_application_batch(self, scope_key: str) -> object:
+            def load_sync_application_batch(
+                self,
+                scope_key: str,
+                *,
+                retention_cutoff_month: str | None = None,
+            ) -> object:
+                del retention_cutoff_month
                 self.loaded_scopes.append(scope_key)
                 records = [
                     oa_record(row_id="oa-2025-12", month="2025-12"),
@@ -491,7 +503,13 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         from fin_ops_platform.services.oa_projection_sync import OAProjectionSyncService
 
         class SourceAdapter:
-            def load_sync_application_batch(self, _scope_key: str) -> object:
+            def load_sync_application_batch(
+                self,
+                _scope_key: str,
+                *,
+                retention_cutoff_month: str | None = None,
+            ) -> object:
+                del retention_cutoff_month
                 records = [oa_record(row_id="oa-2026-01", month="2026-01")]
                 return SimpleNamespace(projection_records=records, admission_records=records)
 
@@ -571,7 +589,13 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         ]
 
         class SourceAdapter:
-            def load_sync_application_batch(self, _scope_key: str) -> object:
+            def load_sync_application_batch(
+                self,
+                _scope_key: str,
+                *,
+                retention_cutoff_month: str | None = None,
+            ) -> object:
+                del retention_cutoff_month
                 return SimpleNamespace(
                     projection_records=[source_record],
                     admission_records=[source_record],

@@ -2595,6 +2595,52 @@ class MongoOAAdapterTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "document failed required-field projection"):
             adapter.load_sync_application_batch("2026-03")
 
+    def test_sync_batch_applies_all_scope_cutoff_before_completed_document_validation(self) -> None:
+        adapter = CountingStubMongoOAAdapter(
+            form_documents={
+                "2": [
+                    {
+                        "_id": "historical-invalid-completed",
+                        "form_id": "2",
+                        "data": {
+                            "applicationDate": "2023-07-01",
+                            "amount": "100",
+                            "cause": "历史单据",
+                            "processStatus": "2",
+                        },
+                    },
+                    {
+                        "_id": "retained-valid-completed",
+                        "form_id": "2",
+                        "data": {
+                            "applicationDate": "2026-03-20",
+                            "userName": "张三",
+                            "amount": "200",
+                            "cause": "当期单据",
+                            "processStatus": "2",
+                        },
+                    },
+                ],
+                "32": [],
+            },
+            project_documents=[],
+        )
+
+        batch = adapter.load_sync_application_batch(
+            "all",
+            retention_cutoff_month="2026-01",
+        )
+
+        self.assertEqual(
+            [record.id for record in batch.projection_records],
+            ["oa-pay-retained-valid-completed"],
+        )
+        self.assertEqual(
+            [record.id for record in batch.admission_records],
+            ["oa-pay-retained-valid-completed"],
+        )
+        self.assertEqual(adapter.form_load_calls, [("2", None), ("32", None)])
+
     def test_sync_batch_fails_closed_after_one_form_succeeds_and_the_next_form_fails(self) -> None:
         class PartialFailureAdapter(StubMongoOAAdapter):
             def _load_form_documents(self, form_id: str, month: str | None = None) -> list[dict]:

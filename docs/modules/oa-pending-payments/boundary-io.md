@@ -29,7 +29,7 @@
 | 输入 | Owner | 合同 |
 | --- | --- | --- |
 | 页面 rows query / `If-None-Match` | OA 页面/API | 只进入 `OaPendingPaymentReadModelService.conditional_rows`；认证 tenant、query contract、fresh gate 先于 `304` |
-| OA completed / in-progress / payment status | OA integration sync | 外部 adapter 每个启用 form/scope 只读一次并输出双视图：通用 `projection_records` 遵守配置，OA 私有 `admission_records` 固定包含 completed + in-progress。读取失败或 status/identity 不可判定时整轮不提交并记录 failed run；合法 in-progress 草稿尚未填写 amount/applicant/reason 时仍进入 admission，空金额为 `NULL`，completed 缺既有必填字段仍 fail-closed。成功后一次 PostgreSQL 事务提交 completed projection、admission、payment-status snapshot、watermark；相同 snapshot 不更新时间戳、不 replace admission、不 enqueue refresh。in-progress 只保留附件文件元数据，不解析附件、发票或 OCR |
+| OA completed / in-progress / payment status | OA integration sync | 外部 adapter 每个启用 form/scope 只读一次；`all` 接收 sync owner 的 retention cutoff，并在字段校验/附件解析前排除保留期外文档，再输出双视图：通用 `projection_records` 遵守配置，OA 私有 `admission_records` 固定包含 completed + in-progress。读取失败或保留期内 status/identity 不可判定时整轮不提交并记录 failed run；合法 in-progress 草稿尚未填写 amount/applicant/reason 时仍进入 admission，空金额为 `NULL`，保留期内 completed 缺既有必填字段仍 fail-closed。成功后一次 PostgreSQL 事务提交 completed projection、admission、payment-status snapshot、watermark；相同 snapshot 不更新时间戳、不 replace admission、不 enqueue refresh。in-progress 只保留附件文件元数据，不解析附件、发票或 OCR |
 | Workbench/pending relation | 对应 relation owner | read model projector 只读 PostgreSQL；owner version 和关系成员决定消费方 OA 月份 |
 | 银行/进项发票 canonical facts | core/invoice owner | 通过现有 relation/source-version 合同进入月份投影；本模块不直接写其事实或 read model |
 | `writeback-paid` / `link-bank-transactions` | command service | 复核权限、active relation、outflow、金额和 flow id；外部 MySQL 成功后必须幂等 reconcile PostgreSQL payment snapshot |
