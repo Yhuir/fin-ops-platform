@@ -1229,6 +1229,14 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_invoice_lifecycle_reuses_pending_invoice_read_model_without_live_rebuild(self) -> None:
+        source = (SERVICES_ROOT / "invoice_lifecycle_sql_projection.py").read_text(encoding="utf-8")
+
+        self.assertNotIn("SearchPendingSqlProjectionBuilder", source)
+        self.assertNotIn("._pending_invoice_rows(", source)
+        self.assertIn("list_pending_invoice_lifecycle_source_rows", source)
+        self.assertIn("pending_invoice_read_model_not_fresh", source)
+
     def test_server_no_longer_owns_import_confirm_processors(self) -> None:
         server_source = (APP_ROOT / "server.py").read_text(encoding="utf-8")
         service_source = (SERVICES_ROOT / "import_processing_service.py").read_text(encoding="utf-8")

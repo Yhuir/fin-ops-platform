@@ -3097,6 +3097,53 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
                 "source_versions": source_versions,
             }
 
+    def list_pending_invoice_lifecycle_source_rows(
+        self,
+        *,
+        month: str,
+        direction: str,
+    ) -> dict[str, Any] | None:
+        normalized_month = str(month or "").strip()
+        normalized_direction = str(direction or "").strip()
+        if not MONTH_SCOPE_RE.match(normalized_month):
+            raise ValueError("pending invoice lifecycle source month must be YYYY-MM.")
+        if normalized_direction not in {"expense", "income"}:
+            raise ValueError("pending invoice lifecycle source direction must be expense or income.")
+        scope_key = f"{normalized_direction}:all:{normalized_month}"
+        with self._connection.transaction() as connection:
+            refresh_status = self._refresh_status(
+                scope_type="pending_invoice",
+                scope_key=scope_key,
+                connection=connection,
+            )
+            scope_row = self._pending_invoice_scope_row(scope_key, connection=connection)
+            if scope_row is None:
+                return None
+            source_versions = scope_row.get("source_versions")
+            if refresh_status != "fresh":
+                return {
+                    "scope_key": scope_key,
+                    "refresh_status": refresh_status,
+                    "source_versions": dict(source_versions) if isinstance(source_versions, dict) else {},
+                    "rows": [],
+                }
+            rows = connection.fetch_all(
+                """
+                select payload, case when payload = '{}'::jsonb then raw_payload else null::jsonb end as raw_payload
+                from read_model.pending_invoice_rows
+                where direction = %s
+                  and scope_month = %s::date
+                order by trade_date desc nulls last, row_id
+                """,
+                (normalized_direction, month_start(normalized_month)),
+            )
+            return {
+                "scope_key": scope_key,
+                "refresh_status": refresh_status,
+                "source_versions": dict(source_versions) if isinstance(source_versions, dict) else {},
+                "rows": [payload for row in rows if isinstance(payload := _read_model_payload(row), dict)],
+            }
+
 
     def list_pending_invoice_filter_options(
         self,
@@ -7349,6 +7396,9 @@ class PostgresReadModelRepository:
 
     def list_pending_invoice_rows(self, **kwargs: Any) -> dict[str, Any] | None:
         return self._pending_invoice_lifecycle_repository.list_pending_invoice_rows(**kwargs)
+
+    def list_pending_invoice_lifecycle_source_rows(self, **kwargs: Any) -> dict[str, Any] | None:
+        return self._pending_invoice_lifecycle_repository.list_pending_invoice_lifecycle_source_rows(**kwargs)
 
     def list_pending_invoice_filter_options(self, **kwargs: Any) -> dict[str, Any]:
         return self._pending_invoice_lifecycle_repository.list_pending_invoice_filter_options(**kwargs)

@@ -1,5 +1,13 @@
 # 成本统计 实施记录
 
+## 2026-07-18 - 生产最终门修正：relation identity 与 invoice lifecycle 旧重算删除
+
+- 最终可逆 OA+银行+发票夹具证明 Cost direct 链已经达到目标：withdraw 在业务提交确认后 `906ms` 读到 `active:all` 的 `-1 行 / -5000`，confirm 在业务提交确认后 `1010ms` 读到 `+1 行 / +5000`。但最终 Audit 又发现 delta 把 Cost 行 `group_id` 写成裸 `case_id`，而 canonical Workbench 的正式展示 identity 是 `case:<case_id>`；金额和行数虽正确，exact-set 仍必须 fail closed。
+- 修复只复用 Workbench 已有 identity 合同：delta replacement rows 与 repository affected group IDs 统一使用 `case:<case_id>`，source metadata 继续保留原始 canonical `case_id`。不接受双 identity、fallback 或 Audit 放宽；受影响 transaction identity 仍保证旧错误行被原子替换。
+- 同一生产操作还暴露 OA Audit 的独立阻断：`invoice_lifecycle:2026-06` 已持有 fresh `pending_invoice` 月分片版本，却继续调用 `SearchPendingSqlProjectionBuilder._pending_invoice_rows(...)` 从 canonical 重新构建两种方向，造成 worker 长时间 processing。该旧重复 I/O 已删除；invoice lifecycle 现在经 `InvoiceLifecycleReadModelRepositoryPort` 只读两个 exact fresh shard `expense:all:YYYY-MM` / `income:all:YYYY-MM`，dirty/missing 时在读取 rows 前 fail closed，fresh 时以 `scope_month + direction` 索引读取既有 payload。
+- 边界保持不变：Cost 修复不写其它页面 read model；invoice lifecycle 只改变自身 upstream read I/O，不修改 pending-invoice payload、OA API/read model、Audit 合同、worker registry、queue、schema、业务状态或其它页面。输出 DTO/source vector 没有变化，因此不 bump projection schema；旧 live pending-invoice rebuild import/call 从 invoice lifecycle owner 中删除。
+- 发布门：本条在最终 release 部署、对两个 scope 强制受控重建、夹具恢复确认、三个页面 `pass/fresh/drained`、Cost 业务值变化与 read/operation latency 复验完成前不声明闭环。
+
 ## 2026-07-18 - relation delta 完整性与直接因果证明修正（生产复验待发布）
 
 - 首次生产试跑证明 direct Cost worker 本身已达到短链路：confirm 的月份 delta `863.994ms`、直接 parent 约 `302ms`，root→`active:all` 约 `1.011s`；withdraw 的月份 delta 最大 `275.028ms`、root→`active:all` 约 `0.34–0.39s`。此前报告的 confirm `19.35s` / withdraw `8.7s` 是 smoke 在等待所有其它 consumer 后才读取 Cost，并且 direct parent 没有 trace 时误选后续 Workbench convergence path，不是 Cost direct all 链路耗时。

@@ -1573,6 +1573,62 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
             },
         )
 
+    def test_invoice_lifecycle_reads_exact_pending_invoice_month_shard(self) -> None:
+        connection = SearchPendingConnection(
+            pending_rows=[
+                {
+                    "payload": {
+                        "id": "txn-1",
+                        "bank_transaction": {"id": "txn-1", "trade_time": "2026-05-20"},
+                        "invoice_acquisition_status": {"code": "missing_invoice"},
+                    },
+                    "raw_payload": None,
+                }
+            ],
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.list_pending_invoice_lifecycle_source_rows(
+            month="2026-05",
+            direction="expense",
+        )
+
+        self.assertEqual(payload["scope_key"], "expense:all:2026-05")
+        self.assertEqual(payload["refresh_status"], "fresh")
+        self.assertEqual([row["id"] for row in payload["rows"]], ["txn-1"])
+        self.assertEqual(connection.transaction_count, 1)
+        rows_query = next(
+            (sql, params)
+            for sql, params in connection.fetch_all_calls
+            if "from read_model.pending_invoice_rows" in sql
+        )
+        self.assertIn("scope_month = %s::date", rows_query[0])
+        self.assertEqual(rows_query[1], ("expense", "2026-05-01"))
+        dirty_query = next(
+            (sql, params)
+            for sql, params in connection.fetch_one_calls
+            if "from job.read_model_dirty_scopes" in sql
+        )
+        self.assertEqual(dirty_query[1], ("pending_invoice", "expense:all:2026-05"))
+
+    def test_invoice_lifecycle_does_not_read_stale_pending_invoice_rows(self) -> None:
+        connection = SearchPendingConnection(
+            pending_rows=[{"payload": {"id": "stale-txn"}}],
+            dirty=True,
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.list_pending_invoice_lifecycle_source_rows(
+            month="2026-05",
+            direction="expense",
+        )
+
+        self.assertEqual(payload["refresh_status"], "refreshing")
+        self.assertEqual(payload["rows"], [])
+        self.assertFalse(
+            any("from read_model.pending_invoice_rows" in sql for sql, _params in connection.fetch_all_calls)
+        )
+
     def test_pending_invoice_repository_writes_canonical_payload_without_raw_payload_duplication(self) -> None:
         connection = SearchIndexBulkWriteConnection()
         repository = PostgresReadModelRepository(connection)

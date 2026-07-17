@@ -22,6 +22,18 @@ class InvoiceLifecycleReadModelRepositoryPort:
             source_versions=source_versions,
         )
 
+    def list_pending_invoice_lifecycle_source_rows(
+        self,
+        *,
+        month: str,
+        direction: str,
+    ) -> dict[str, object] | None:
+        payload = self._repository.list_pending_invoice_lifecycle_source_rows(
+            month=month,
+            direction=direction,
+        )
+        return dict(payload) if isinstance(payload, dict) else None
+
     def mark_invoice_lifecycle_scope(
         self,
         *,

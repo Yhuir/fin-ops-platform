@@ -3351,7 +3351,8 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         call = repository.relation_delta_calls[0]
         self.assertEqual(call["scope_key"], "active:2026-05")
         self.assertEqual(call["affected_transaction_ids"], ["txn-1"])
-        self.assertEqual(call["affected_group_ids"], ["CASE-DELTA"])
+        self.assertEqual(call["affected_group_ids"], ["case:CASE-DELTA"])
+        self.assertEqual(call["replacement_rows"][0]["group_id"], "case:CASE-DELTA")
         self.assertEqual(call["replacement_rows"][0]["transaction_id"], "txn-1")
         self.assertEqual(call["replacement_rows"][0]["project_name"], "项目A")
         self.assertEqual(call["replacement_rows"][0]["bank_tag_code"], "project_material")
@@ -3396,7 +3397,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertTrue(result["published"])
         call = repository.relation_delta_calls[0]
         self.assertEqual(call["affected_transaction_ids"], ["txn-1"])
-        self.assertEqual(call["affected_group_ids"], ["CASE-DELTA"])
+        self.assertEqual(call["affected_group_ids"], ["case:CASE-DELTA"])
         self.assertEqual(call["replacement_rows"], [])
 
     def test_cost_statistics_relation_delta_keeps_concurrent_case_states_isolated(self) -> None:
@@ -3465,9 +3466,9 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
 
         self.assertTrue(result["published"])
         call = repository.relation_delta_calls[0]
-        self.assertEqual(call["affected_group_ids"], ["CASE-ACTIVE", "CASE-CANCELLED"])
+        self.assertEqual(call["affected_group_ids"], ["case:CASE-ACTIVE", "case:CASE-CANCELLED"])
         self.assertEqual(call["affected_transaction_ids"], ["txn-active", "txn-cancelled"])
-        self.assertEqual([row["group_id"] for row in call["replacement_rows"]], ["CASE-ACTIVE"])
+        self.assertEqual([row["group_id"] for row in call["replacement_rows"]], ["case:CASE-ACTIVE"])
 
     def test_cost_statistics_sql_projection_rebuilds_all_all_as_first_class_read_model(self) -> None:
         repository = CostStatisticsSaveRecorder()

@@ -28,7 +28,6 @@ from fin_ops_platform.services.postgres_repositories.output_invoice_collection i
     build_output_invoice_collection_lifecycle_repository,
 )
 from fin_ops_platform.services.postgres_repositories.read_models import MONTH_SCOPE_RE
-from fin_ops_platform.services.search_pending_sql_projection import SearchPendingSqlProjectionBuilder
 from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRelationReadFacade
 
 
@@ -107,15 +106,21 @@ class InvoiceLifecycleSqlProjectionBuilder:
         )
 
     def _pending_invoice_lifecycle_rows(self, month: str) -> list[dict[str, Any]]:
-        builder = SearchPendingSqlProjectionBuilder(
-            connection=self._connection,
-            read_model_repository=self._read_repository,
-            workbench_relation_read_facade=self._workbench_relation_read_facade,
-        )
         rows: list[dict[str, Any]] = []
-        fallback_source_versions: dict[str, object] = {}
+        source_versions_by_scope: dict[str, object] = {}
         for direction in ("expense", "income"):
-            for row in builder._pending_invoice_rows(direction=direction, filter_name="all", month=month):
+            payload = self._invoice_lifecycle_read_model_repository.list_pending_invoice_lifecycle_source_rows(
+                month=month,
+                direction=direction,
+            )
+            if not isinstance(payload, dict) or str(payload.get("refresh_status") or "") != "fresh":
+                raise RuntimeError(f"pending_invoice_read_model_not_fresh:{direction}:all:{month}")
+            source_versions = payload.get("source_versions")
+            if isinstance(source_versions, dict):
+                source_versions_by_scope[f"{direction}:all:{month}"] = dict(source_versions)
+            for row in list(payload.get("rows") or []):
+                if not isinstance(row, dict):
+                    continue
                 bank = row.get("bank_transaction") if isinstance(row.get("bank_transaction"), dict) else {}
                 status = row.get("invoice_acquisition_status") if isinstance(row.get("invoice_acquisition_status"), dict) else {}
                 subject_id = str(row.get("id") or bank.get("id") or "").strip()
@@ -134,10 +139,8 @@ class InvoiceLifecycleSqlProjectionBuilder:
                         "certification_status": {},
                     }
                 )
-            fallback_source_versions[f"{direction}:all:{month}"] = dict(builder._pending_invoice_source_versions())  # noqa: SLF001
         self._read_model_dependency_source_versions["pending_invoice_read_model_source_versions"] = (
-            self._pending_invoice_source_versions_for_month(month)
-            or fallback_source_versions
+            source_versions_by_scope
         )
         return rows
 

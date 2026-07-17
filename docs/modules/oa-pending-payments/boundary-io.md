@@ -36,7 +36,7 @@
 | 银行/进项发票 canonical facts | core/invoice owner | 通过现有 relation/source-version 合同进入月份投影；本模块不直接写其事实或 read model |
 | `writeback-paid` / `link-bank-transactions` | command service | 复核权限、active relation、outflow、金额和 flow id；外部 MySQL 成功后必须幂等 reconcile PostgreSQL payment snapshot |
 | refresh event | durable queue | `scope_type=oa_pending_payment`；普通业务变化只用 `YYYY-MM`，`all` 仅用于初始化、显式修复和统一部署回填 |
-| Page Audit | admin-only operations API | 同一只读 repeatable-read snapshot 内分别判断 integrity、freshness 和 queue；不得写或自动修复 |
+| Page Audit | admin-only operations API | 同一只读 repeatable-read snapshot 内分别判断 integrity、freshness 和 queue；不得写或自动修复。Audit 继续要求已登记的 `invoice_lifecycle` downstream consumer 收敛，但 OA rows/query 不读取该 read model；其 pending-invoice 输入优化不得反向污染 OA 页面运行时 I/O |
 
 ## 输出 I/O
 

@@ -147,6 +147,7 @@ class CostStatisticsSqlProjectionBuilder:
             if not normalized_deltas:
                 raise ValueError("relation delta requires at least one valid relation delta.")
             affected_case_ids = [str(delta["case_id"]) for delta in normalized_deltas]
+            affected_group_ids = [_workbench_relation_group_id(case_id) for case_id in affected_case_ids]
             all_relation_row_ids = _dedupe_text(
                 [row_id for delta in normalized_deltas for row_id in list(delta["row_ids"])]
             )
@@ -189,7 +190,7 @@ class CostStatisticsSqlProjectionBuilder:
                 if relation_status == "active" and oa_rows and bank_rows:
                     groups.append(
                         {
-                            "group_id": case_id,
+                            "group_id": _workbench_relation_group_id(case_id),
                             "oa_rows": oa_rows,
                             "bank_rows": bank_rows,
                             "special_metadata": {},
@@ -245,7 +246,7 @@ class CostStatisticsSqlProjectionBuilder:
                 model=model,
                 replacement_rows=[_serialize_cost_entry(entry) for entry in replacement_entries],
                 affected_transaction_ids=affected_bank_ids,
-                affected_group_ids=affected_case_ids,
+                affected_group_ids=affected_group_ids,
             )
             return {
                 "scope_key": scope_key,
@@ -1026,6 +1027,13 @@ def _normalize_relation_deltas(values: list[dict[str, object]]) -> list[dict[str
         if case_id and status in {"active", "cancelled"} and row_ids:
             result_by_case_id[case_id] = {"case_id": case_id, "status": status, "row_ids": row_ids}
     return list(result_by_case_id.values())
+
+
+def _workbench_relation_group_id(case_id: object) -> str:
+    normalized_case_id = str(case_id or "").strip()
+    if not normalized_case_id:
+        raise ValueError("Workbench relation group identity requires case_id.")
+    return f"case:{normalized_case_id}"
 
 
 def _relation_delta_row_type(raw_type: object, row: dict[str, Any] | None) -> str:

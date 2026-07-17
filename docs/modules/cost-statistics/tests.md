@@ -2,6 +2,13 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+## 2026-07-18 - relation identity 与 downstream lifecycle 最终门
+
+- Cost projection：`tests/test_cost_statistics_sql_runtime.py` 锁定 active/cancelled/mixed delta 的 affected group 与 replacement row 都使用 `case:<case_id>`，同时保留 transaction-target 原子替换、完整 metadata 和 parent fan-out 回归。
+- Invoice lifecycle：`tests/test_invoice_lifecycle_sql_projection.py` 证明只读取 expense/income exact fresh pending shards并传播对应 source versions；`tests/test_search_pending_sql_runtime.py` 证明查询使用 `scope_month + direction`、dirty 时不读取 rows；`tests/test_invoice_lifecycle_postgres_integration.py` 在真实 PostgreSQL 验证 scope/source/payload合同。
+- 旧链与隔离：`tests/test_platform_runtime_boundary_guards.py` 禁止 invoice lifecycle 重新 import/call `SearchPendingSqlProjectionBuilder._pending_invoice_rows(...)`，并要求窄 repository port 与 fail-closed marker。无 API、前端、schema、registry 或其它页面 read model 变化。
+- 七类决策：1 identity/invariant、2 projection/repository、4 read model/worker、6 relation→Cost/OA Audit生产流、7 architecture regression适用；3 API shape 与5 frontend未变，不新增对应测试。发布后仍须对三个页面执行操作前后 Audit 和生产 SLO。
+
 ## 2026-07-17 - unchanged 版本确认与 month/parent 收敛
 
 - 生产故障：可逆 relation 写入后，成本月份内容来源版本已经与当前 Workbench/Bank Detail 一致，但旧 unchanged 路径返回通用 `skipped` 且没有推进 `published_source_version`；readiness 忽略该事件，parent 又因 month 非 fresh 反向补投，形成持续自激队列。

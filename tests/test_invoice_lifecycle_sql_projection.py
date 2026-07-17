@@ -98,7 +98,53 @@ class FreshInvoiceLifecycleReadModelRepository:
         raise AssertionError("unchanged invoice lifecycle scope must not be rewritten")
 
 
+class PendingInvoiceLifecycleSourceRepository:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, str]] = []
+
+    def list_pending_invoice_lifecycle_source_rows(self, *, month: str, direction: str) -> dict[str, object]:
+        self.calls.append({"month": month, "direction": direction})
+        return {
+            "refresh_status": "fresh",
+            "source_versions": {"direction": direction, "version": 7},
+            "rows": [
+                {
+                    "id": f"txn-{direction}",
+                    "bank_transaction": {"id": f"txn-{direction}"},
+                    "invoice_acquisition_status": {"code": "missing_invoice"},
+                }
+            ],
+        }
+
+
 class InvoiceLifecycleSqlProjectionTests(unittest.TestCase):
+    def test_invoice_lifecycle_reuses_fresh_pending_invoice_month_rows(self) -> None:
+        invoice_repository = PendingInvoiceLifecycleSourceRepository()
+        builder = InvoiceLifecycleSqlProjectionBuilder(
+            connection=SimpleNamespace(),
+            read_model_repository=SimpleNamespace(),
+            workbench_relation_read_facade=SimpleNamespace(last_source_versions={}),
+            invoice_lifecycle_read_model_repository=invoice_repository,
+        )
+
+        rows = builder._pending_invoice_lifecycle_rows("2026-05")
+
+        self.assertEqual(
+            invoice_repository.calls,
+            [
+                {"month": "2026-05", "direction": "expense"},
+                {"month": "2026-05", "direction": "income"},
+            ],
+        )
+        self.assertEqual([row["subject_id"] for row in rows], ["txn-expense", "txn-income"])
+        self.assertEqual(
+            builder._read_model_dependency_source_versions["pending_invoice_read_model_source_versions"],
+            {
+                "expense:all:2026-05": {"direction": "expense", "version": 7},
+                "income:all:2026-05": {"direction": "income", "version": 7},
+            },
+        )
+
     def test_invoice_lifecycle_reuses_fresh_input_usage_read_model_rows(self) -> None:
         read_repository = FreshInvoiceUsageReadRepository()
         builder = InvoiceLifecycleSqlProjectionBuilder(
