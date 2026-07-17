@@ -173,7 +173,7 @@ class InvoiceLifecycleSqlProjectionBuilder:
 
     def _oa_pending_payment_lifecycle_rows(self, month: str) -> list[dict[str, Any]]:
         page_rows = self._fresh_read_model_rows(
-            "list_oa_pending_payment_rows",
+            "list_oa_pending_payment_lifecycle_source_rows",
             month=month,
             sort_field="bank_trade_time",
             sort_direction="desc",

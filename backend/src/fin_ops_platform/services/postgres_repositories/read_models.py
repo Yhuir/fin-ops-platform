@@ -1017,6 +1017,79 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
             "read_model_scope_key": scope_key,
         }
 
+    def list_oa_pending_payment_lifecycle_source_rows(
+        self,
+        *,
+        month: str,
+        page: int | str | None = 1,
+        page_size: int | str | None = 200,
+        sort_field: str | None = "bank_trade_time",
+        sort_direction: str | None = "desc",
+        view_mode: str | None = "completed",
+    ) -> dict[str, Any] | None:
+        with self.oa_pending_payment_read_snapshot() as snapshot:
+            return snapshot._list_oa_pending_payment_lifecycle_source_rows_in_snapshot(
+                month=month,
+                page=page,
+                page_size=page_size,
+                sort_field=sort_field,
+                sort_direction=sort_direction,
+                view_mode=view_mode,
+            )
+
+    def _list_oa_pending_payment_lifecycle_source_rows_in_snapshot(
+        self,
+        *,
+        month: str,
+        page: int | str | None,
+        page_size: int | str | None,
+        sort_field: str | None,
+        sort_direction: str | None,
+        view_mode: str | None,
+    ) -> dict[str, Any] | None:
+        scope_key = _invoice_relation_scope_key(month)
+        if scope_key == "all":
+            raise ValueError("OA pending payment lifecycle source month must be YYYY-MM.")
+        scope_row = self._invoice_relation_scope_row(
+            scope_table_name="read_model.oa_pending_payment_scopes",
+            scope_key=scope_key,
+        )
+        if scope_row is None:
+            return None
+        refresh_status = self._invoice_relation_refresh_status(
+            scope_type="oa_pending_payment",
+            scope_key=scope_key,
+        )
+        source_versions = (
+            dict(scope_row.get("source_versions"))
+            if isinstance(scope_row.get("source_versions"), dict)
+            else {}
+        )
+        if refresh_status != "fresh":
+            return {
+                "rows": [],
+                "pagination": {"page": max(int_value(page, 1), 1), "pageSize": min(max(int_value(page_size, 200), 1), 200), "total": 0},
+                "refresh_status": refresh_status,
+                "source_versions": source_versions,
+                "read_model_scope_key": scope_key,
+            }
+        payload = self.list_oa_pending_payment_rows(
+            month=scope_key,
+            sort_field=sort_field,
+            sort_direction=sort_direction,
+            page=page,
+            page_size=page_size,
+            view_mode=view_mode,
+        )
+        if not isinstance(payload, dict):
+            return None
+        return {
+            **payload,
+            "refresh_status": "fresh",
+            "source_versions": source_versions,
+            "read_model_scope_key": scope_key,
+        }
+
     def oa_pending_payment_query_state(
         self,
         *,
@@ -7416,6 +7489,9 @@ class PostgresReadModelRepository:
 
     def list_oa_pending_payment_rows(self, **kwargs: Any) -> dict[str, Any] | None:
         return self._invoice_usage_collection_repository.list_oa_pending_payment_rows(**kwargs)
+
+    def list_oa_pending_payment_lifecycle_source_rows(self, **kwargs: Any) -> dict[str, Any] | None:
+        return self._invoice_usage_collection_repository.list_oa_pending_payment_lifecycle_source_rows(**kwargs)
 
     def oa_pending_payment_read_snapshot(self):
         return self._invoice_usage_collection_repository.oa_pending_payment_read_snapshot()

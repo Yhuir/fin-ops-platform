@@ -34,6 +34,34 @@ class StaleInvoiceUsageReadRepository:
         return {"refresh_status": "stale", "rows": []}
 
 
+class FreshOaPendingLifecycleReadRepository:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def list_oa_pending_payment_lifecycle_source_rows(self, **kwargs: object) -> dict[str, object]:
+        self.calls.append(dict(kwargs))
+        return {
+            "refresh_status": "fresh",
+            "source_versions": {"oa_pending_payment_signature": "oa-v1"},
+            "pagination": {"page": 1, "pageSize": 200, "total": 1},
+            "rows": [
+                {
+                    "id": "oa-row-1",
+                    "oa": {"id": "oa-1"},
+                    "paymentStatus": {"code": "paid", "label": "已支付"},
+                }
+            ],
+        }
+
+
+class PageOnlyOaPendingReadRepository:
+    def list_oa_pending_payment_rows(self, **_kwargs: object) -> dict[str, object]:
+        return {
+            "pagination": {"page": 1, "pageSize": 200, "total": 0},
+            "rows": [],
+        }
+
+
 class InvoiceLifecycleSkipConnection:
     def __init__(self) -> None:
         self.fetch_one_calls: list[tuple[str, tuple]] = []
@@ -200,6 +228,45 @@ class InvoiceLifecycleSqlProjectionTests(unittest.TestCase):
                 }
             },
         )
+
+    def test_invoice_lifecycle_uses_oa_lifecycle_source_port_with_freshness_proof(self) -> None:
+        read_repository = FreshOaPendingLifecycleReadRepository()
+        builder = InvoiceLifecycleSqlProjectionBuilder(
+            connection=SimpleNamespace(),
+            read_model_repository=read_repository,
+            workbench_relation_read_facade=SimpleNamespace(last_source_versions={}),
+        )
+
+        rows = builder._oa_pending_payment_lifecycle_rows("2026-05")
+
+        self.assertEqual(
+            read_repository.calls,
+            [
+                {
+                    "month": "2026-05",
+                    "page": 1,
+                    "page_size": 200,
+                    "sort_field": "bank_trade_time",
+                    "sort_direction": "desc",
+                    "view_mode": "completed",
+                }
+            ],
+        )
+        self.assertEqual([row["subject_id"] for row in rows], ["oa-1"])
+        self.assertEqual(
+            builder._read_model_dependency_source_versions["oa_pending_payment_read_model_source_versions"],
+            {"oa_pending_payment_signature": "oa-v1"},
+        )
+
+    def test_invoice_lifecycle_rejects_page_only_oa_rows_without_freshness_proof(self) -> None:
+        builder = InvoiceLifecycleSqlProjectionBuilder(
+            connection=SimpleNamespace(),
+            read_model_repository=PageOnlyOaPendingReadRepository(),
+            workbench_relation_read_facade=SimpleNamespace(last_source_versions={}),
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "oa_pending_payment_read_model_not_fresh:2026-05"):
+            builder._oa_pending_payment_lifecycle_rows("2026-05")
 
     def test_invoice_lifecycle_fails_closed_without_live_input_or_output_rebuild(self) -> None:
         builder = InvoiceLifecycleSqlProjectionBuilder(

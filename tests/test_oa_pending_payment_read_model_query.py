@@ -166,6 +166,26 @@ class OaPendingPaymentReadModelQueryTests(unittest.TestCase):
         self.assertNotIn("select payload, raw_payload", aggregate_sql)
         self.assertEqual(connection.fetch_one_calls[0][1][-2:], (20, 0))
 
+    def test_lifecycle_source_rows_require_exact_fresh_month_scope(self) -> None:
+        connection = LifecycleSourceConnection()
+        repository = PostgresInvoiceUsageCollectionReadModelRepository(connection)
+
+        payload = repository.list_oa_pending_payment_lifecycle_source_rows(month="2026-05")
+
+        self.assertEqual(payload["refresh_status"], "fresh")
+        self.assertEqual(payload["source_versions"], {"oa_pending_payment_signature": "oa-v1"})
+        self.assertEqual(payload["read_model_scope_key"], "2026-05")
+        self.assertEqual(payload["rows"][0]["id"], "row-1")
+
+    def test_lifecycle_source_rows_reject_missing_month_scope(self) -> None:
+        connection = LifecycleSourceConnection(scope_exists=False)
+        repository = PostgresInvoiceUsageCollectionReadModelRepository(connection)
+
+        payload = repository.list_oa_pending_payment_lifecycle_source_rows(month="2026-05")
+
+        self.assertIsNone(payload)
+        self.assertEqual(len(connection.fetch_one_calls), 1)
+
     def test_read_snapshot_sets_repeatable_read_before_any_query(self) -> None:
         connection = SnapshotConnection()
         repository = PostgresInvoiceUsageCollectionReadModelRepository(connection)
@@ -273,6 +293,35 @@ class AggregateConnection:
     def fetch_all(self, sql: str, params: tuple[object, ...]) -> list[dict[str, object]]:
         self.fetch_all_calls.append((sql, params))
         return [{"payload": {"id": "row-1"}, "raw_payload": {}}]
+
+
+class LifecycleSourceConnection(AggregateConnection):
+    def __init__(self, *, scope_exists: bool = True) -> None:
+        super().__init__()
+        self.scope_exists = scope_exists
+
+    def fetch_one(self, sql: str, params: tuple[object, ...] = ()) -> dict[str, object] | None:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_one_calls.append((sql, params))
+        if "from read_model.oa_pending_payment_scopes" in normalized:
+            if not self.scope_exists:
+                return None
+            return {
+                "scope_key": "2026-05",
+                "source_versions": {"oa_pending_payment_signature": "oa-v1"},
+            }
+        if "from job.read_model_dirty_scopes" in normalized:
+            return None
+        return {
+            "count": 1,
+            "oa_amount_total": "100.00",
+            "bank_paid_total": "100.00",
+            "completed_count": 1,
+            "in_progress_count": 0,
+            "status_counts": {"paid": 1},
+            "filter_options": {},
+            "rows": [{"payload": {"id": "row-1"}}],
+        }
 
 
 class SnapshotTransaction:

@@ -77,6 +77,20 @@ class InvoiceLifecyclePostgresIntegrationTests(unittest.TestCase):
             {"bank_detail_signature": "empty-v1"},
         )
 
+    def test_reads_oa_lifecycle_rows_only_through_exact_fresh_month_scope(self) -> None:
+        self.repository.mark_oa_pending_payment_scope(
+            scope_key="2026-05",
+            row_count=0,
+            source_versions={"oa_pending_payment_signature": "oa-v1"},
+        )
+
+        payload = self.repository.list_oa_pending_payment_lifecycle_source_rows(month="2026-05")
+
+        self.assertEqual(payload["refresh_status"], "fresh")
+        self.assertEqual(payload["source_versions"], {"oa_pending_payment_signature": "oa-v1"})
+        self.assertEqual(payload["read_model_scope_key"], "2026-05")
+        self.assertEqual(payload["rows"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

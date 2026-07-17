@@ -8,6 +8,7 @@
 - 发布复核修正：projection 行成员 identity 已改变，必须把 Cost schema 从 v9 bump 到 `2026-07-cost-statistics-structured-rows-v10`，否则显式 refresh 仍会被 `source_versions_unchanged` 跳过并保留旧行。invoice lifecycle 同样把 own schema 从 1 bump 到 2，确保部署后真实重建；这两个 version 只失效各自 owner 的 projection，不修改表结构、API 或其它页面 read model。
 - 边界保持不变：Cost 修复不写其它页面 read model；invoice lifecycle 只改变自身 upstream read I/O，不修改 pending-invoice/input/output/OA payload、OA API/read model、Audit 合同、worker registry、queue、数据库 schema、业务状态或其它页面。除 pending-invoice 旧重算外，input/output invoice usage 的 live query fallback 也已删除；四类输入只读已发布且 fresh 的 upstream read model，缺失或 non-fresh 时快速 fail closed 并由既有 dependency refresh 机制处理。
 - 生产全量 schema 回填又暴露合法空方向：lifecycle 月份可由发票/OA 事实存在，但 pending-invoice 只为实际银行方向物化 scope。repository 现在只在同月 Bank Detail scope fresh 且对应方向零行时，把缺失 exact pending scope 证明为 fresh 空集，并把 Bank Detail source proof 纳入 lifecycle source vector；存在银行行、Bank Detail non-fresh 或 pending scope dirty 时仍 fail closed。没有 canonical/live I/O、空值猜测或通用 worker 特判。
+- 第二次生产回填定位到 OA dependency 端口错配：页面底层 `list_oa_pending_payment_rows` 把 freshness 交给 OA page service，因此它本身只返回 rows，不返回 worker 所需的 `refresh_status/source_versions`；lifecycle 旧调用把所有月份误判为 non-fresh 并持续 dependency defer。现改为 lifecycle 专用 exact-month source I/O，在读取 rows 前要求 OA 月 scope 存在且 fresh，并携带该 scope source versions。页面仍保留原 set-based 单 SQL热路径，worker 不读页面 HTTP、不执行 canonical rebuild，也不修改 OA read model。
 - 发布门：本条在最终 release 部署、对两个 scope 强制受控重建、夹具恢复确认、三个页面 `pass/fresh/drained`、Cost 业务值变化与 read/operation latency 复验完成前不声明闭环。
 
 ## 2026-07-18 - relation delta 完整性与直接因果证明修正（生产复验待发布）
