@@ -40,7 +40,7 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| rows 聚合响应 | OA 页面 | `200` fresh payload + `ETag`；`304` 空 body；`202` 不含旧 rows且带精确 barrier targets。列表 DTO 只返回前端声明字段，不返回 read-model 内部 `searchText` 或逐行 `sourceVersions`；版本证明只在顶层返回，详情继续走现有惰性 detail API。freshness gate 后在同一 repeatable-read snapshot 内用一个有界 data statement 返回 summary/facets + 当前页，禁止恢复第二次 page roundtrip |
+| rows 聚合响应 | OA 页面 | `200` fresh payload + `ETag`；`304` 空 body；`202` 不含旧 rows且带精确 barrier targets。列表 DTO 只返回前端声明字段，不返回 read-model 内部 `searchText`、逐行 `sourceVersions` 或 cache metadata；版本证明只在顶层返回，详情继续走现有惰性 detail API。每次请求先在 OA 私有 repeatable-read snapshot 内完成 PostgreSQL freshness/version gate，`304` 在 payload I/O 前返回；非条件 fresh `200` 才以包含 tenant、normalized query、contract revision 和 version token 的 ETag 读取共享 gateway 下的 OA 私有 Redis key。cache miss 用一个有界 data statement 返回 summary/facets + 当前页并缓存 300 秒；版本变化自然换 key，Redis 不可用时退回同一 PostgreSQL statement。禁止 cache 先于 gate、显式跨页面 invalidation、第二个 page roundtrip或返回旧版本 payload |
 | `filterConfig` / `filterOptions` | OA 页面 | 随 rows 同响应 set-based 计算；summary/facet CTE 只 materialize 聚合需要的 typed columns，不读取 `payload/raw_payload`；page CTE 只读取 bounded payload 并在 SQL 内移除内部字段；不存在第二个 filter API |
 | read model publish | `read_model.oa_pending_payment_*` | 月份原子 replace、source vector、event source version 和 CAS；月份 rows 只能含同月 OA 主行，relation group row identity 必须含 month scope。`all` freshness gate 与 Page Audit 都把跨 scope 重复 `row_id` 作为阻断错误，列表不得用 `DISTINCT ON` 或 Python 去重隐藏错误；旧 event 不得清新 dirty |
 | latest dirty index | `job.read_model_dirty_scopes` | 只索引 `scope_type='oa_pending_payment'`，键顺序与 gate 的 `(tenant, scope type, scope, source version DESC, updated_at DESC, id DESC)` 完全一致；不得扩大 predicate 让其它页面承担该索引写入或存储成本 |
@@ -56,7 +56,7 @@
 - source watermark：`app.oa_sync_watermarks` 的 `oa_pending_payment_source:<tenant>:<month>`。
 - pending relation / bank claim：`app.oa_pending_payment_bank_relations`、`app.bank_transaction_relation_claims` 及事件表。
 - read model：OA 专属月份 rows/scopes；只由 `OaPendingPaymentSqlProjectionBuilder` 发布。
-- durable refresh truth：`job.outbox_events` 与 `job.read_model_dirty_scopes`；Redis/RabbitMQ 不能替代状态事实源。
+- durable refresh truth：`job.outbox_events` 与 `job.read_model_dirty_scopes`；Redis/RabbitMQ 不能替代状态事实源。Redis 只保存通过当前请求 fresh gate 后的 OA 私有版本化 rows payload，不拥有 freshness、版本或失效事实。
 - `all` scope freshness inventory 只组合 canonical source watermark、现存 OA scope，以及当前 `pending/processing/failed/dead_lettered` queue scope；已 `done` 的 outbox 历史不属于当前 freshness I/O，不得进入页面热路径或改变 version token。
 - `all` scope 在同一个 freshness statement 中检查跨月份 `row_id` 唯一性；发现重复必须返回 `202/refreshing` 并由 Page Audit 给出跨 scope 样本。fresh 数据直接读取月份 projection，不保留会每次排序并静默吞错的旧 `DISTINCT ON(row_id)` 兼容链。
 
@@ -90,7 +90,7 @@
 - 专属 worker：`oa-pending-payment`，只 claim `oa_pending_payment.read_model.refresh`。
 - projector 只依赖 PostgreSQL repositories；禁止 Mongo adapter、MySQL payment repository、HTTP/Application。
 - `invoice-usage-collection` 只负责 input/output invoice，不注册或 claim OA refresh。
-- query service 只依赖窄 read-model repository、queue和 expected source-version provider；禁止完整 live `OaPendingPaymentQueryService`。
+- query service 只依赖窄 read-model repository、queue、expected source-version provider 与可选 Redis helper；Redis 只经共享 `ReadModelQueryGateway` 进入 gate 后的版本化 OA 私有 payload 路径，禁止完整 live `OaPendingPaymentQueryService`、共享页面 key 或主动跨页面失效。
 - route 只做认证、query/header 传递和 HTTP 映射；业务和 SQL 不进入 route。
 
 ## 文件范围

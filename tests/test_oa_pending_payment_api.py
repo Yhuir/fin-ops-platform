@@ -270,6 +270,95 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         self.assertEqual(repository.state_calls, 1)
         self.assertEqual(repository.data_calls, 1)
 
+    def test_rows_cache_keeps_freshness_gate_and_skips_repeated_payload_query(self) -> None:
+        repository = ConditionalOaRowsRepository()
+        redis = OaRowsRedisRecorder()
+        service = OaPendingPaymentReadModelService(
+            repository=repository,
+            queue_repository=QueueRecorder(),
+            redis_helper=redis,
+            source_versions_provider=oa_pending_payment_source_versions,
+        )
+        query = {"page": ["1"], "page_size": ["20"], "view_mode": ["in_progress"]}
+
+        first = service.conditional_rows(query, tenant_id="tenant-a", if_none_match=None)
+        second = service.conditional_rows(query, tenant_id="tenant-a", if_none_match=None)
+        not_modified = service.conditional_rows(query, tenant_id="tenant-a", if_none_match=first.etag)
+
+        self.assertEqual(first.status, HTTPStatus.OK)
+        self.assertEqual(second.status, HTTPStatus.OK)
+        self.assertEqual(not_modified.status, HTTPStatus.NOT_MODIFIED)
+        self.assertEqual(repository.state_calls, 3)
+        self.assertEqual(repository.data_calls, 1)
+        self.assertEqual(len(redis.gets), 2)
+        self.assertEqual(len(redis.sets), 1)
+        self.assertEqual(first.payload, second.payload)
+        self.assertNotIn("read_model_schema_version", second.payload)
+        self.assertNotIn("refresh_enqueued", second.payload)
+
+    def test_rows_cache_isolated_by_version_tenant_and_query(self) -> None:
+        repository = ConditionalOaRowsRepository()
+        redis = OaRowsRedisRecorder()
+        service = OaPendingPaymentReadModelService(
+            repository=repository,
+            queue_repository=QueueRecorder(),
+            redis_helper=redis,
+            source_versions_provider=oa_pending_payment_source_versions,
+        )
+        first_query = {"page": ["1"], "page_size": ["20"]}
+
+        service.conditional_rows(first_query, tenant_id="tenant-a", if_none_match=None)
+        service.conditional_rows(first_query, tenant_id="tenant-b", if_none_match=None)
+        service.conditional_rows({"page": ["2"], "page_size": ["20"]}, tenant_id="tenant-a", if_none_match=None)
+        repository.version_token = "read-model-version-8"
+        service.conditional_rows(first_query, tenant_id="tenant-a", if_none_match=None)
+
+        self.assertEqual(repository.state_calls, 4)
+        self.assertEqual(repository.data_calls, 4)
+        self.assertEqual(len(redis.values), 4)
+        self.assertEqual(len(set(redis.values.keys())), 4)
+
+    def test_rows_cache_failure_falls_back_to_postgres_without_changing_contract(self) -> None:
+        repository = ConditionalOaRowsRepository()
+        service = OaPendingPaymentReadModelService(
+            repository=repository,
+            queue_repository=QueueRecorder(),
+            redis_helper=FailingOaRowsRedis(),
+            source_versions_provider=oa_pending_payment_source_versions,
+        )
+        query = {"page": ["1"], "page_size": ["20"]}
+
+        first = service.conditional_rows(query, tenant_id="default", if_none_match=None)
+        second = service.conditional_rows(query, tenant_id="default", if_none_match=None)
+
+        self.assertEqual(first.status, HTTPStatus.OK)
+        self.assertEqual(second.status, HTTPStatus.OK)
+        self.assertEqual(repository.state_calls, 2)
+        self.assertEqual(repository.data_calls, 2)
+        self.assertEqual(first.payload, second.payload)
+
+    def test_production_service_wires_module_rows_cache_from_runtime_container(self) -> None:
+        repository = ConditionalOaRowsRepository()
+        redis = OaRowsRedisRecorder()
+        app = object.__new__(Application)
+        app._bootstrap_mode = "production"
+        app._state_store = type("StateStore", (), {"storage_backend": "postgres"})()
+        app._runtime_repositories = type(
+            "RuntimeRepos",
+            (),
+            {"queue_repository": QueueRecorder(), "redis_helper": redis},
+        )()
+        app._oa_pending_payment_sql_read_repository = repository
+
+        service = Application._oa_pending_payment_read_model_service(app)
+        self.assertIsNotNone(service)
+        service.conditional_rows({"page": ["1"]}, tenant_id="default", if_none_match=None)  # type: ignore[union-attr]
+        service.conditional_rows({"page": ["1"]}, tenant_id="default", if_none_match=None)  # type: ignore[union-attr]
+
+        self.assertEqual(repository.state_calls, 2)
+        self.assertEqual(repository.data_calls, 1)
+        self.assertEqual(len(redis.sets), 1)
+
     def test_rows_conditional_get_uses_freshness_fast_path_and_private_etag(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -655,6 +744,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
                     "rows": [{"id": "stale-row", "oa": {}, "paymentStatus": {}, "bankTransaction": {}, "invoice": {}}],
                     "pagination": {"page": 1, "pageSize": 50, "total": 1},
                     "summary": {"rowCount": 1},
+                    "filterOptions": {},
                     "refresh_status": "fresh",
                     "source_versions": {},
                 }
@@ -687,6 +777,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
                     "rows": [{"id": "stale-row", "oa": {}, "paymentStatus": {}, "bankTransaction": {}, "invoice": {}}],
                     "pagination": {"page": 1, "pageSize": 50, "total": 1},
                     "summary": {"rowCount": 1},
+                    "filterOptions": {},
                     "refresh_status": "fresh",
                     "source_versions": {
                         **oa_pending_payment_source_versions(),
@@ -749,6 +840,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
                     "rows": [_read_model_row()],
                     "pagination": {"page": 1, "pageSize": 50, "total": 1},
                     "summary": {"rowCount": 1},
+                    "filterOptions": {},
                     "refresh_status": "fresh",
                     "source_versions": oa_pending_payment_source_versions(),
                     "read_model_scope_key": "all",
@@ -782,6 +874,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
                     "rows": [_read_model_row()],
                     "pagination": {"page": 1, "pageSize": 50, "total": 1},
                     "summary": {"rowCount": 1},
+                    "filterOptions": {},
                     "refresh_status": "fresh",
                     "source_versions": {
                         **base_versions,
@@ -847,6 +940,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
                     "rows": [_read_model_row()],
                     "pagination": {"page": 1, "pageSize": 50, "total": 1},
                     "summary": {"rowCount": 1},
+                    "filterOptions": {},
                     "refresh_status": "fresh",
                     "source_versions": oa_pending_payment_source_versions(),
                 }
@@ -1060,10 +1154,37 @@ class QueueRecorder:
         self.refreshes.append((scope_type, scope_key, reason))
 
 
+class OaRowsRedisRecorder:
+    def __init__(self) -> None:
+        self.values: dict[str, dict[str, object]] = {}
+        self.gets: list[str] = []
+        self.sets: list[tuple[str, int]] = []
+
+    def get_json(self, key: str) -> dict[str, object] | None:
+        self.gets.append(key)
+        value = self.values.get(key)
+        return deepcopy(value) if value is not None else None
+
+    def set_json(self, key: str, value: dict[str, object], *, ttl_seconds: int) -> bool:
+        self.values[key] = deepcopy(value)
+        self.sets.append((key, ttl_seconds))
+        return True
+
+
+class FailingOaRowsRedis:
+    def get_json(self, _key: str) -> dict[str, object] | None:
+        raise RuntimeError("redis unavailable")
+
+    def set_json(self, _key: str, _value: dict[str, object], *, ttl_seconds: int) -> bool:
+        del ttl_seconds
+        raise RuntimeError("redis unavailable")
+
+
 class ConditionalOaRowsRepository:
     def __init__(self) -> None:
         self.state_calls = 0
         self.data_calls = 0
+        self.version_token = "read-model-version-7"
 
     def oa_pending_payment_query_state(self, **_kwargs: object) -> dict[str, object]:
         self.state_calls += 1
@@ -1072,7 +1193,7 @@ class ConditionalOaRowsRepository:
             "scope_key": "all",
             "blocking_scope_keys": [],
             "stale_reasons": [],
-            "version_token": "read-model-version-7",
+            "version_token": self.version_token,
             "source_versions": oa_pending_payment_source_versions(),
         }
 

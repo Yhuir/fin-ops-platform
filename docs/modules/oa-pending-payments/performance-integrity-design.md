@@ -362,7 +362,7 @@ Page Audit 只证明同一 PostgreSQL snapshot 内部一致性。外部来源健
 为避免过度设计，本阶段不做：
 
 - 新消息系统、通用 event bus、CDC 平台或新的 worker framework。
-- Redis 页面 payload cache。
+- 绕过 PostgreSQL fresh gate、无版本 key 或跨页面共享失效的 Redis 页面 payload cache；生产等量 1000 样本已证明重复 OA rows 聚合是热路径后，只允许复用现有 `ReadModelQueryGateway` 的 OA 私有版本化 payload cache。
 - SSE/WebSocket、新 freshness endpoint 或轮询完整 rows payload；开放页面只使用原 rows endpoint 的标准 ETag 条件请求。
 - Audit 历史数据库、自动修复或第二套 reconciliation engine。
 - per-row refresh、跨页面共享新 read model、其它页面 API 改造。
@@ -370,7 +370,7 @@ Page Audit 只证明同一 PostgreSQL snapshot 内部一致性。外部来源健
 - cursor pagination、预计算 filter-options 表和预建 worker pool；现有数据及负载尚不证明需要它们。
 - 新旧读路径并行、隐藏 fallback、兼容 endpoint 或 stale-while-revalidate。
 
-这份设计中的新增组件仍只有三项：一个必要的支付状态快照、一个从共享 builder 拆出的 OA projector、一个复用现有 RuntimeWorker 的 OA 专属进程。ETag、条件请求、现有 queue coalescing 和现有 operation barrier 都是既有平台/HTTP 能力，不增加新服务。三项新增组件分别解决外部 I/O、模块污染和延迟竞争，均有当前生产证据支撑。
+这份设计中的新增组件仍只有三项：一个必要的支付状态快照、一个从共享 builder 拆出的 OA projector、一个复用现有 RuntimeWorker 的 OA 专属进程。ETag、条件请求、现有 queue coalescing、operation barrier、Redis runtime 和 `ReadModelQueryGateway` 都是既有平台能力，不增加新服务。OA rows 只在自己的 fresh gate 后 opt in 到版本化 cache，不修改共享 gateway 或其它页面。三项新增组件分别解决外部 I/O、模块污染和延迟竞争，均有当前生产证据支撑。
 
 ## 14. 本地实施复核（2026-07-16）
 
@@ -386,13 +386,8 @@ Page Audit 只证明同一 PostgreSQL snapshot 内部一致性。外部来源健
 - 隔离真实PG闭环发现并修复`YYYY-MM` snapshot date cast和组合repository漏暴露OA freshness/snapshot两个生产阻断缺口；新增真实PG集成测试覆盖canonical commit到fresh 200/304。
 - 生产并发证据将剩余长尾限定在 OA freshness statement；新增两个 OA 私有 partial index，分别匹配 dirty latest-version 顺序和 active outbox blocking predicate。outbox 索引在 50,000 条 completed 历史样本上为 `Index Only Scan`、执行 `0.026ms`、2 shared buffers、16kB，且不会索引其它 event type 或 completed history。
 - 单月500行本地PG门：fresh 200顺序1000次`p95 9.938ms`，8并发1000次`p95 33.243ms`，304 1000次`p95 0.520ms`；200次mutation从commit返回到fresh API `p95 544.178ms`，projector `p95 435.400ms`，最终fresh API `p95 131.274ms`，错误率均为0且200次均在收敛前返回202。500行相对历史生产总量210行是2.381倍，但当前生产峰值未知，不能视为当前生产等量结论。
-- SQL计划为gate `0.090ms`、aggregate/facets `5.755ms`、bounded page `0.306ms`，无physical/temp I/O；304只执行gate。现有SQL和索引已满足本地证据，不新增cache/index/partition。
+- SQL计划为gate `0.090ms`、aggregate/facets `5.755ms`、bounded page `0.306ms`，无physical/temp I/O；304只执行gate。本地证据当时不支持新增 cache，但 2026-07-17 公网 1000 次 fresh `200` 的 `p95=292.945ms` 与进程 rolling DB `p95=87.450ms` 已补充生产等量证据：同版本重复 rows payload 改为 gate 后版本化 cache，仍不新增 index、partition、schema、worker或 API。
 
 Writer inventory以 `boundary-io.md` 为准。当前支持入口覆盖 external OA sync、页面paid写回、pending relation、Workbench relation、银行和进项发票 lifecycle；input invoice payment rules当前不进入OA付款算法，明确不适用。
 
-尚未完成且本任务不执行：
-
-- migration `0110` 发布、三页同时负载复验，以及安全可逆生产操作后的连续 Audit。
-- 当前生产等量级SQL EXPLAIN、部署后真实HTTP/API与浏览器1000次采样、200次mutation `T0 -> T1`、当前峰值并发和其它页面延迟对照。
-
-因此本地实现可以进入统一部署，但在上述证据完成前不得宣称 `p95 <= 1s` 或 `p95 <= 250ms` 已在生产达标，也不得把当前 `/goal` 标记complete。
+2026-07-17 已完成 migration `0110` 发布、OA 双视图同步、幂等同步、三页面 Audit 和公网 1000 次 fresh `200` 基线；基线证明功能正确但严格 p95 尚未达标，因此新增上述 gate 后版本化 cache。cache 变更仍必须完成本地/CI/真实 PostgreSQL、精确 release 再部署、1000 次 cache-hit 采样、三页同时负载、安全可逆操作后连续 Audit；live Nginx `If-None-Match` 转发仍由 root owner 关闭。在这些证据完成前不得宣称 `p95 <= 250ms` 或把当前 `/goal` 标记 complete。

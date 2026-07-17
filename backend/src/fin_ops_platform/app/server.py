@@ -6490,6 +6490,7 @@ class Application:
         service = OaPendingPaymentReadModelService(
             repository=getattr(self, "_oa_pending_payment_sql_read_repository", None),
             queue_repository=getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None),
+            redis_helper=getattr(getattr(self, "_runtime_repositories", None), "redis_helper", None),
             source_versions_provider=self._oa_pending_payment_expected_source_versions,
         )
         self._oa_pending_payment_read_model_service = service

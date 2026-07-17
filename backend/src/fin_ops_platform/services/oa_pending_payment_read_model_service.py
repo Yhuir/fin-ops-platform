@@ -22,11 +22,14 @@ from fin_ops_platform.services.oa_pending_payment_query_contract import (
 )
 from fin_ops_platform.services.oa_pending_payment_read_model_repository import OaPendingPaymentReadModelRepositoryPort
 from fin_ops_platform.services.read_model_freshness import require_expected_source_versions
+from fin_ops_platform.services.read_model_query_gateway import ReadModelQueryGateway
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 
 
 SourceVersionsProvider = Callable[[], dict[str, Any]]
 OA_PENDING_PAYMENT_ROWS_CONTRACT_REVISION = "oa-pending-payment-rows-v2"
+OA_PENDING_PAYMENT_ROWS_CACHE_SCHEMA_VERSION = "oa-pending-payment-rows-cache-v1"
+OA_PENDING_PAYMENT_ROWS_CACHE_TTL_SECONDS = 300
 
 
 @dataclass(slots=True, frozen=True)
@@ -42,6 +45,7 @@ class OaPendingPaymentReadModelService:
         *,
         repository: Any | None,
         queue_repository: Any | None = None,
+        redis_helper: Any | None = None,
         source_versions_provider: SourceVersionsProvider | None = None,
     ) -> None:
         if repository is None or isinstance(repository, OaPendingPaymentReadModelRepositoryPort):
@@ -49,6 +53,10 @@ class OaPendingPaymentReadModelService:
         else:
             self._repository = OaPendingPaymentReadModelRepositoryPort(repository)
         self._queue_repository = queue_repository
+        self._read_model_query_gateway = ReadModelQueryGateway(
+            queue_repository=queue_repository,
+            redis_helper=redis_helper,
+        )
         self._source_versions_provider = source_versions_provider
 
     def rows(self, query: dict[str, list[str]]) -> dict[str, Any]:
@@ -123,8 +131,8 @@ class OaPendingPaymentReadModelService:
             if _etag_matches(if_none_match, etag):
                 return OaPendingPaymentRowsRead(status=HTTPStatus.NOT_MODIFIED, payload={}, etag=etag)
 
-            try:
-                payload = repository.list_oa_pending_payment_rows(
+            def load_rows_view() -> dict[str, Any] | None:
+                rows_payload = repository.list_oa_pending_payment_rows(
                     month=query.get("month", [None])[0],
                     keyword=query.get("keyword", [None])[0],
                     trade_date_from=query.get("trade_date_from", [None])[0],
@@ -136,18 +144,48 @@ class OaPendingPaymentReadModelService:
                     page_size=page_size,
                     view_mode=view_mode,
                 )
+                if not isinstance(rows_payload, dict):
+                    return None
+                return {
+                    "payload": rows_payload,
+                    "source_versions": dict(state.get("source_versions") or {}),
+                    "schema_version": OA_PENDING_PAYMENT_ROWS_CACHE_SCHEMA_VERSION,
+                    "refresh_status": "fresh",
+                }
+
+            try:
+                cached_read = self._read_model_query_gateway.load(
+                    scope_type="oa_pending_payment",
+                    scope_key=scope_key,
+                    expected_schema_version=OA_PENDING_PAYMENT_ROWS_CACHE_SCHEMA_VERSION,
+                    expected_source_versions=dict(state.get("source_versions") or {}),
+                    load_view=load_rows_view,
+                    empty_payload_factory=lambda: self.refreshing_rows_payload(
+                        scope_key=scope_key,
+                        blocking_scope_keys=[scope_key],
+                    ),
+                    payload_validator=self._is_rows_payload,
+                    cache_key=self._rows_cache_key(etag),
+                    cache_ttl_seconds=OA_PENDING_PAYMENT_ROWS_CACHE_TTL_SECONDS,
+                    missing_reason="api_read_model_payload_unavailable",
+                    stale_reason="api_read_model_payload_stale",
+                    source_mismatch_reason="api_read_model_payload_source_versions_stale",
+                    payload_invalid_reason="api_read_model_payload_invalid",
+                )
             except OaPendingPaymentError:
                 raise
             except ValueError as exc:
                 raise OaPendingPaymentError("invalid_oa_pending_payment_query", str(exc)) from exc
-            if not isinstance(payload, dict):
-                self._enqueue_refresh(scope_key, reason="api_read_model_payload_unavailable")
+            if cached_read.freshness_status != "fresh":
                 return OaPendingPaymentRowsRead(
                     status=HTTPStatus.ACCEPTED,
                     payload=self.refreshing_rows_payload(scope_key=scope_key, blocking_scope_keys=[scope_key]),
                 )
+            payload = cached_read.payload
 
         result = dict(payload)
+        result.pop("read_model_schema_version", None)
+        result.pop("refresh_enqueued", None)
         result["filterConfig"] = filter_config()
         result["appliedFilters"] = {"filters": parsed_filters}
         result["sort"] = {"field": sort_field, "direction": sort_direction}
@@ -317,6 +355,19 @@ class OaPendingPaymentReadModelService:
         if not refresh_gateway.can_enqueue():
             return False
         return bool(refresh_gateway.enqueue_one("oa_pending_payment", scope_key, reason=reason))
+
+    @staticmethod
+    def _is_rows_payload(payload: dict[str, Any]) -> bool:
+        return (
+            isinstance(payload.get("rows"), list)
+            and isinstance(payload.get("pagination"), dict)
+            and isinstance(payload.get("summary"), dict)
+            and isinstance(payload.get("filterOptions"), dict)
+        )
+
+    @staticmethod
+    def _rows_cache_key(etag: str) -> str:
+        return "oa_pending_payment:rows:" + etag.strip('"')
 
     @staticmethod
     def _etag(*, tenant_id: str, normalized_query: dict[str, Any], version_token: str) -> str:

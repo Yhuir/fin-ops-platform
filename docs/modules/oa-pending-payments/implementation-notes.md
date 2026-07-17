@@ -1,5 +1,13 @@
 # OA待付款核对 实施记录
 
+## 2026-07-17 - 生产 1000 样本后的 OA 私有 rows cache 收敛
+
+- 部署基线：release `main-1ce3bc8bf-oa-admission-cutoff-20260717` 完成 `oa.sync:all` 后，页面显示 `in_progress=88`；同步扫描 retained completed `244`、in-progress `151`，首次 OA 私有 affected scopes 为 6 个月，completed shared change 为空。第二次相同同步两个 change scope 集合均为空，三页面 Audit 均为 `pass/fresh/drained`。
+- 性能事实：公网认证 in-progress fresh `200` 正式 1000 次为 `1000/1000` 成功且全部 fresh，`p50=183.030ms / p95=292.945ms / p99=424.546ms`；严格 `p95<=250ms` 未通过。相同进程 512 滚动样本为 server `p95=188.503ms`、database `p95=87.450ms`、固定 7 queries；重复 payload 聚合是当前可消除的 OA 私有 I/O，不能再用此前 500 次 isolated 成绩声明生产闭环。
+- 最小设计：不改 canonical、projection、queue、worker、schema、API 或其它页面。每次 rows 请求仍先执行 OA 私有 PostgreSQL freshness/version gate；`202` 和 `304` 均在 cache/payload SQL 前返回。只有非条件 fresh `200` 使用现有 `ReadModelQueryGateway`，以现有 ETag（tenant + normalized query + contract revision + version token）构成 OA 私有 Redis key；miss 执行现有单条聚合 SQL并缓存 300 秒，版本变化自动换 key，Redis 故障 fail-open 到 PostgreSQL但不绕 freshness gate。
+- 测试责任：新增同版本重复读取只执行一次 payload SQL、每次仍执行 fresh gate、`304` 不读 cache、tenant/query/version key 隔离、Redis 读写故障回退、生产 runtime Redis 装配和公开 response 不泄露 cache metadata；沿用 dirty/source mismatch `202`、ETag、真实 PostgreSQL与三页面回归门。
+- 待关闭门：本地/CI/真实 PostgreSQL全量验证、精确 SHA 再部署、cache hit 1000 次公网 fresh `200`、条件 `304`、三页面 simultaneous mixed load、同步/安全写操作后 Audit。live Nginx 未转发 `If-None-Match` 的既有 root-owner 门保持独立，禁止用应用 query fallback规避。
+
 ## 2026-07-17 - 进行中 OA 准入源与跨页面 fan-out 隔离
 
 - 真实根因：通用 OA 导入 `statuses` 同时控制 shared projection 与 OA 待付款 admission，生产配置只接纳 completed 时，in-progress 在进入 PostgreSQL 前已被过滤，页面因此稳定显示 0。旧 snapshot result 又把 completed/admission/payment-status 变化混成一个 scope 集合，repository 对任一变化都隐式 enqueue Workbench relation，无法证明 admission-only 不影响其它页面。
