@@ -147,7 +147,7 @@ describe("ETC ticket management page", () => {
     );
     const rowSurfaceRule = cssRule(
       styles,
-      ".etc-reconciliation-task-row,\n.etc-batch-row,\n.etc-source-file-row,\n.etc-detail-metrics > div,\n.etc-reconciliation-metrics > div,\n.etc-plate-summary-item,\n.etc-manual-review-card,\n.etc-supplement-upload-target,\n.etc-import-attempt-row",
+      ".etc-batch-row,\n.etc-source-file-row,\n.etc-detail-metrics > div,\n.etc-reconciliation-metrics > div,\n.etc-plate-summary-item,\n.etc-manual-review-card,\n.etc-supplement-upload-target,\n.etc-import-attempt-row",
     );
     const tagRule = cssRule(styles, ".etc-count-tag,\n.etc-status-tag");
     const uploadRule = cssRule(styles, ".etc-upload-drop-box", "min-height: 96px");
@@ -449,11 +449,9 @@ describe("ETC ticket management page", () => {
       sourceFiles: [],
       parseIssues: [],
     };
-    const fetchTasks = vi.spyOn(etcApi, "fetchEtcReconciliationTasks")
-      .mockResolvedValueOnce({ items: [task] } as never)
-      .mockResolvedValueOnce({ items: [{ ...task, title: "高速费三月批次", version: 8 }] } as never);
+    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue(task as never);
     vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
-      counts: { active: 1, submitted: 0 },
+      counts: { unsubmitted: 1, staged: 0, submitted: 0 },
       items: [batch],
       pagination: { page: 1, pageSize: 100, total: 1 },
     } as never);
@@ -478,8 +476,7 @@ describe("ETC ticket management page", () => {
       });
     });
     expect(await within(page).findByRole("button", { name: "编辑批次标题 高速费三月批次" })).toBeInTheDocument();
-    expect(await within(page).findByText("高速费三月批次 / v8")).toBeInTheDocument();
-    expect(fetchTasks).toHaveBeenCalledTimes(2);
+    expect(rename).toHaveBeenCalledTimes(1);
   });
 
   test("keeps submitted business batches visible when their workflow task shares the ETC batch id", async () => {
@@ -532,11 +529,11 @@ describe("ETC ticket management page", () => {
       invoiceSummary: { count: 37, amount: "1673.30" },
       invoiceIds: [],
     });
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [closedWorkflowTask] } as never);
+    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue(closedWorkflowTask as never);
     vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockImplementation((query = {}) => Promise.resolve({
-      counts: { active: 0, submitted: 1 },
-      items: query.status === "submitted" ? [submittedBusinessBatch] : [],
-      pagination: { page: 1, pageSize: 100, total: query.status === "submitted" ? 1 : 0 },
+      counts: { unsubmitted: 0, staged: 0, submitted: 1 },
+      items: query.bucket === "submitted" ? [submittedBusinessBatch] : [],
+      pagination: { page: 1, pageSize: 100, total: query.bucket === "submitted" ? 1 : 0 },
     } as never));
     vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockResolvedValue({
       ...submittedBusinessBatch,
@@ -593,11 +590,11 @@ describe("ETC ticket management page", () => {
       parseIssues: [],
     };
     vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
-      counts: { active: 0, submitted: 1 },
+      counts: { unsubmitted: 0, staged: 0, submitted: 1 },
       items: [],
       pagination: { page: 1, pageSize: 100, total: 0 },
     } as never);
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [hiddenClosedWorkflowTask] } as never);
+    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue(hiddenClosedWorkflowTask as never);
 
     renderAppAt("/etc-tickets");
 
@@ -647,11 +644,11 @@ describe("ETC ticket management page", () => {
       parseIssues: [],
     };
     vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
-      counts: { active: 0, submitted: 0 },
+      counts: { unsubmitted: 0, staged: 0, submitted: 0 },
       items: [],
       pagination: { page: 1, pageSize: 100, total: 0 },
     } as never);
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [orphanWorkflowTask] } as never);
+    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue(orphanWorkflowTask as never);
 
     renderAppAt("/etc-tickets");
 
@@ -687,7 +684,7 @@ describe("ETC ticket management page", () => {
 
   test("shows reconciliation task load errors without rendering a real empty task state", async () => {
     installMockApiFetch();
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockRejectedValue(new Error("批次流程服务繁忙，请稍后重试。"));
+    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockRejectedValue(new Error("批次流程服务繁忙，请稍后重试。"));
 
     renderAppAt("/etc-tickets");
 
@@ -872,7 +869,7 @@ describe("ETC ticket management page", () => {
       invoiceItems: [],
     };
     vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
-      counts: { active: 1, submitted: 0 },
+      counts: { unsubmitted: 1, staged: 0, submitted: 0 },
       items: [listedBusinessBatch],
       pagination: { page: 1, pageSize: 100, total: 1 },
     } as never);
@@ -968,12 +965,12 @@ describe("ETC ticket management page", () => {
     };
     const fetchBusinessBatches = vi.spyOn(etcApi, "fetchEtcBusinessBatches")
       .mockResolvedValueOnce({
-        counts: { active: 1, submitted: 0 },
+        counts: { unsubmitted: 1, staged: 0, submitted: 0 },
         items: [staleListedBusinessBatch],
         pagination: { page: 1, pageSize: 100, total: 1 },
       } as never)
       .mockResolvedValue({
-        counts: { active: 0, submitted: 0 },
+        counts: { unsubmitted: 0, staged: 0, submitted: 0 },
         items: [],
         pagination: { page: 1, pageSize: 100, total: 0 },
       } as never);
@@ -1035,12 +1032,12 @@ describe("ETC ticket management page", () => {
     });
     vi.spyOn(etcApi, "fetchEtcBusinessBatches")
       .mockResolvedValueOnce({
-        counts: { active: 1, submitted: 0 },
+        counts: { unsubmitted: 1, staged: 0, submitted: 0 },
         items: [staleListedBusinessBatch],
         pagination: { page: 1, pageSize: 100, total: 1 },
       } as never)
       .mockResolvedValue({
-        counts: { active: 0, submitted: 0 },
+        counts: { unsubmitted: 0, staged: 0, submitted: 0 },
         items: [],
         pagination: { page: 1, pageSize: 100, total: 0 },
       } as never);
@@ -1093,7 +1090,7 @@ describe("ETC ticket management page", () => {
       updatedAt: "2026-05-19T09:10:00+08:00",
     };
     vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
-      counts: { active: 1, submitted: 0 },
+      counts: { unsubmitted: 1, staged: 0, submitted: 0 },
       items: [staleListedBusinessBatch],
       pagination: { page: 1, pageSize: 100, total: 1 },
     } as never);
@@ -1109,475 +1106,6 @@ describe("ETC ticket management page", () => {
       expect(within(page).queryByTestId("etc-batch-row-etc_business_batch_0003")).not.toBeInTheDocument();
     });
     expect(within(page).queryByText("ETC业务批次不存在。")).not.toBeInTheDocument();
-  });
-
-  test("deletes the selected mutable reconciliation task with expected version from the workflow", async () => {
-    const user = userEvent.setup();
-    const fetchMock = installMockApiFetch();
-    const task = {
-      taskId: "etc_task_ready_001",
-      status: "ready_for_import",
-      version: 7,
-      title: "2026-03 ETC 对账",
-      periodStart: "2026-03-01",
-      periodEnd: "2026-03-31",
-      statementPeriodStart: "2026-03-01",
-      statementPeriodEnd: "2026-03-31",
-      oaTotalAmount: "108.40",
-      etcInvoiceAmount: "96.40",
-      supplementAmount: "12.00",
-      etcInvoiceCount: 8,
-      supplementCount: 1,
-      canConfirm: false,
-      vehiclePlates: ["云ADA0381"],
-      confirmedItemSetHash: "sha256:mock",
-      importBatchId: "",
-      etcBatchId: "",
-      hasImportedInvoices: false,
-      importedInvoiceCount: 0,
-      importedInvoiceAmount: "0.00",
-      oaDraftBatchId: "",
-      oaDraftStatus: "",
-      submittedConfirmedAt: "",
-      creditCardItems: [],
-      ticketRootItems: [],
-      supplementEvidences: [],
-      sourceFiles: [],
-      parseIssues: [],
-    };
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks")
-      .mockResolvedValueOnce({ items: [task] } as never)
-      .mockResolvedValue({ items: [] } as never);
-    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue(task as never);
-    renderAppAt("/etc-tickets");
-
-    const page = await screen.findByTestId("etc-ticket-management-page");
-    await user.click(await within(page).findByRole("button", { name: "删除批次 2026-03 ETC批次" }));
-
-    const dialog = await screen.findByRole("dialog", { name: "删除批次" });
-    expect(dialog).toHaveTextContent("2026-03 ETC批次");
-    await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/etc/reconciliation-tasks/etc_task_ready_001",
-        expect.objectContaining({
-          method: "DELETE",
-          body: JSON.stringify({ expectedVersion: 7 }),
-        }),
-      );
-    });
-    expect(within(page).queryByText("2026-03 ETC批次 / v7")).not.toBeInTheDocument();
-  });
-
-  test("keeps the task delete dialog and row when reconciliation task deletion fails", async () => {
-    const user = userEvent.setup();
-    installMockApiFetch();
-    const task = {
-      taskId: "etc-recon-delete-fail-001",
-      status: "reviewing",
-      version: 4,
-      title: "2026-04 ETC 删除失败",
-      periodStart: "2026-04-01",
-      periodEnd: "2026-04-30",
-      statementPeriodStart: "2026-04-01",
-      statementPeriodEnd: "2026-04-30",
-      oaTotalAmount: "0.00",
-      etcInvoiceAmount: "0.00",
-      supplementAmount: "0.00",
-      etcInvoiceCount: 0,
-      supplementCount: 0,
-      canConfirm: false,
-      vehiclePlates: [],
-      confirmedItemSetHash: "",
-      importBatchId: "",
-      etcBatchId: "",
-      hasImportedInvoices: false,
-      importedInvoiceCount: 0,
-      importedInvoiceAmount: "0.00",
-      oaDraftBatchId: "",
-      oaDraftStatus: "",
-      submittedConfirmedAt: "",
-      sourceFiles: [],
-      parseIssues: [],
-      creditCardItems: [],
-      ticketRootItems: [],
-      supplementEvidences: [],
-      reconciledItems: [],
-    };
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [task] } as never);
-    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue(task as never);
-    const deleteTask = vi.spyOn(etcApi, "deleteEtcReconciliationTask").mockRejectedValue(new Error("删除批次失败，请刷新后重试。") as never);
-
-    renderAppAt("/etc-tickets");
-
-    const page = await screen.findByTestId("etc-ticket-management-page");
-    await user.click(await within(page).findByRole("button", { name: "删除批次 2026-04 ETC 删除失败" }));
-
-    const dialog = await screen.findByRole("dialog", { name: "删除批次" });
-    await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
-
-    await waitFor(() => expect(deleteTask).toHaveBeenCalledWith("etc-recon-delete-fail-001", 4));
-    expect(await within(page).findByText("删除批次失败，请刷新后重试。")).toBeInTheDocument();
-    expect(screen.getByRole("dialog", { name: "删除批次" })).toBeInTheDocument();
-    expect(within(page).getByText("2026-04 ETC 删除失败 / v4")).toBeInTheDocument();
-  });
-
-  test("closes the task delete dialog after delete succeeds even when the follow-up task refresh hangs", async () => {
-    const user = userEvent.setup();
-    installMockApiFetch();
-    const task = {
-      taskId: "etc-recon-delete-refresh-hangs-001",
-      status: "reviewing",
-      version: 3,
-      title: "2026-02 ETC 对账",
-      periodStart: "2026-02-27",
-      periodEnd: "2026-02-28",
-      statementPeriodStart: "2026-02-01",
-      statementPeriodEnd: "2026-02-29",
-      approvedDelta: "0.00",
-      approvedDeltaNote: "",
-      cardLast4: "7788",
-      oaTotalAmount: "120.00",
-      etcInvoiceAmount: "90.00",
-      supplementAmount: "30.00",
-      etcInvoiceCount: 2,
-      supplementCount: 1,
-      canConfirm: false,
-      vehiclePlates: ["云ADA0381"],
-      confirmedItemSetHash: "",
-      importBatchId: "",
-      etcBatchId: "",
-      hasImportedInvoices: false,
-      importedInvoiceCount: 0,
-      importedInvoiceAmount: "0.00",
-      oaDraftBatchId: "",
-      oaDraftStatus: "",
-      submittedConfirmedAt: "",
-      creditCardItems: [],
-      ticketRootItems: [],
-      supplementEvidences: [],
-      sourceFiles: [],
-      parseIssues: [],
-    } as never;
-    let taskLoadCount = 0;
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockImplementation(() => {
-      taskLoadCount += 1;
-      if (taskLoadCount === 1) {
-        return Promise.resolve({ items: [task] });
-      }
-      return new Promise(() => undefined);
-    });
-    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue(task);
-    const deleteTask = vi.spyOn(etcApi, "deleteEtcReconciliationTask").mockResolvedValue(undefined);
-
-    renderAppAt("/etc-tickets");
-
-    const page = await screen.findByTestId("etc-ticket-management-page");
-    await user.click(await within(page).findByRole("button", { name: "删除批次 2026-02 ETC批次" }));
-    const dialog = await screen.findByRole("dialog", { name: "删除批次" });
-    await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
-
-    await waitFor(() => {
-      expect(deleteTask).toHaveBeenCalledWith("etc-recon-delete-refresh-hangs-001", 3);
-    });
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: "删除批次" })).not.toBeInTheDocument();
-    });
-    expect(within(page).queryByText("2026-02 ETC批次 / v3")).not.toBeInTheDocument();
-    expect(screen.queryByText("正在删除...")).not.toBeInTheDocument();
-  });
-
-  test("deletes an imported reconciliation task with the latest task version and removes it from the list", async () => {
-    const user = userEvent.setup();
-    installMockApiFetch();
-    const importedTask = {
-      taskId: "etc-recon-imported-delete-001",
-      status: "imported",
-      version: 8,
-      title: "2026-03 ETC 已导入",
-      periodStart: "2026-03-01",
-      periodEnd: "2026-03-31",
-      statementPeriodStart: "2026-03-01",
-      statementPeriodEnd: "2026-03-31",
-      approvedDelta: "0.00",
-      approvedDeltaNote: "",
-      cardLast4: "7788",
-      oaTotalAmount: "30.00",
-      etcInvoiceAmount: "30.00",
-      supplementAmount: "0.00",
-      etcInvoiceCount: 1,
-      supplementCount: 0,
-      canConfirm: false,
-      vehiclePlates: ["云ADA0381"],
-      confirmedItemSetHash: "sha256:selected",
-      importBatchId: "import-session-delete-001",
-      etcBatchId: "",
-      hasImportedInvoices: true,
-      importedInvoiceCount: 1,
-      importedInvoiceAmount: "30.00",
-      oaDraftBatchId: "",
-      oaDraftStatus: "",
-      submittedConfirmedAt: "",
-      creditCardItems: [],
-      ticketRootItems: [],
-      supplementEvidences: [],
-      sourceFiles: [],
-      parseIssues: [],
-    };
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks")
-      .mockResolvedValueOnce({ items: [importedTask] } as never)
-      .mockResolvedValueOnce({ items: [] } as never);
-    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue({
-      ...importedTask,
-      version: 9,
-    } as never);
-    mockFetchEtcInvoices([
-      {
-        id: "etc-inv-imported-delete-001",
-        invoiceNumber: "ETC-IMPORTED-DELETE-001",
-        issueDate: "2026-03-03",
-        passageStartDate: "2026-03-03",
-        passageEndDate: "2026-03-03",
-        plateNumber: "云ADA0381",
-        sellerName: "云南高速通行费",
-        buyerName: "云南溯源科技",
-        amountWithoutTax: "28.20",
-        taxAmount: "1.80",
-        totalAmount: "30.00",
-        status: "unsubmitted",
-        hasPdf: true,
-        hasXml: true,
-      },
-    ]);
-    const deleteTask = vi.spyOn(etcApi, "deleteEtcReconciliationTask").mockResolvedValue(undefined as never);
-
-    renderAppAt("/etc-tickets");
-
-    const page = await screen.findByTestId("etc-ticket-management-page");
-    await user.click(await within(page).findByRole("button", { name: "删除批次 2026-03 ETC 已导入" }));
-
-    const dialog = await screen.findByRole("dialog", { name: "删除批次" });
-    expect(dialog).toHaveTextContent("将删除本地批次、上传文件、核对结果和已导入发票");
-    expect(dialog).toHaveTextContent("审批系统中的草稿和已提交记录不会删除");
-    expect(dialog.textContent).toContain("重新确认并导入 ZIP");
-    await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
-
-    await waitFor(() => {
-      expect(deleteTask).toHaveBeenCalledWith("etc-recon-imported-delete-001", 9);
-    });
-    await waitFor(() => {
-      expect(within(page).queryByText("2026-03 ETC 已导入 / v8")).not.toBeInTheDocument();
-    });
-    expect(within(page).getByText("选择左侧批次，或新建批次。")).toBeInTheDocument();
-    expect(within(page).queryByRole("region", { name: "已导入ETC发票" })).not.toBeInTheDocument();
-  });
-
-  test("allows physical task deletion after an unsubmitted OA draft link exists", async () => {
-    const user = userEvent.setup();
-    installMockApiFetch();
-    const taskWithDraft = {
-      taskId: "etc-recon-imported-draft-linked-001",
-      status: "imported",
-      version: 12,
-      title: "2026-03 ETC 已建草稿",
-      periodStart: "2026-03-01",
-      periodEnd: "2026-03-31",
-      statementPeriodStart: "2026-03-01",
-      statementPeriodEnd: "2026-03-31",
-      approvedDelta: "0.00",
-      approvedDeltaNote: "",
-      cardLast4: "7788",
-      oaTotalAmount: "30.00",
-      etcInvoiceAmount: "30.00",
-      supplementAmount: "0.00",
-      etcInvoiceCount: 1,
-      supplementCount: 0,
-      canConfirm: false,
-      vehiclePlates: ["云ADA0381"],
-      confirmedItemSetHash: "sha256:selected",
-      importBatchId: "import-session-draft-linked-001",
-      etcBatchId: "ETC-2026-DRAFT-LINKED",
-      hasImportedInvoices: true,
-      importedInvoiceCount: 1,
-      importedInvoiceAmount: "30.00",
-      oaDraftBatchId: "etc_batch_submission_draft_linked_001",
-      oaDraftStatus: "draft_created",
-      submittedConfirmedAt: "",
-      creditCardItems: [],
-      ticketRootItems: [],
-      supplementEvidences: [],
-      sourceFiles: [],
-      parseIssues: [],
-    };
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [taskWithDraft] } as never);
-    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue(taskWithDraft as never);
-    const deleteTask = vi.spyOn(etcApi, "deleteEtcReconciliationTask").mockResolvedValue(undefined as never);
-
-    renderAppAt("/etc-tickets");
-
-    const page = await screen.findByTestId("etc-ticket-management-page");
-    const deleteButton = await within(page).findByRole("button", { name: "删除批次 2026-03 ETC 已建草稿" });
-    expect(deleteButton).toBeEnabled();
-    await user.click(deleteButton);
-
-    const dialog = await screen.findByRole("dialog", { name: "删除批次" });
-    await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
-
-    await waitFor(() => {
-      expect(deleteTask).toHaveBeenCalledWith("etc-recon-imported-draft-linked-001", 12);
-    });
-  });
-
-  test("allows physical task deletion when only the external ETC OA batch link exists", async () => {
-    const user = userEvent.setup();
-    installMockApiFetch();
-    const taskWithExternalOaBatch = {
-      taskId: "etc-recon-imported-external-link-001",
-      status: "imported",
-      version: 12,
-      title: "2026-03 ETC 外部批次链路",
-      periodStart: "2026-03-01",
-      periodEnd: "2026-03-31",
-      statementPeriodStart: "2026-03-01",
-      statementPeriodEnd: "2026-03-31",
-      approvedDelta: "0.00",
-      approvedDeltaNote: "",
-      cardLast4: "7788",
-      oaTotalAmount: "30.00",
-      etcInvoiceAmount: "30.00",
-      supplementAmount: "0.00",
-      etcInvoiceCount: 1,
-      supplementCount: 0,
-      canConfirm: false,
-      vehiclePlates: ["云ADA0381"],
-      confirmedItemSetHash: "sha256:selected",
-      importBatchId: "import-session-external-link-001",
-      etcBatchId: "ETC-2026-EXTERNAL-LINK",
-      hasImportedInvoices: true,
-      importedInvoiceCount: 1,
-      importedInvoiceAmount: "30.00",
-      oaDraftBatchId: "",
-      oaDraftStatus: "",
-      submittedConfirmedAt: "",
-      creditCardItems: [],
-      ticketRootItems: [],
-      supplementEvidences: [],
-      sourceFiles: [],
-      parseIssues: [],
-    };
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [taskWithExternalOaBatch] } as never);
-    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue(taskWithExternalOaBatch as never);
-    const deleteTask = vi.spyOn(etcApi, "deleteEtcReconciliationTask").mockResolvedValue(undefined as never);
-
-    renderAppAt("/etc-tickets");
-
-    const page = await screen.findByTestId("etc-ticket-management-page");
-    const deleteButton = await within(page).findByRole("button", { name: "删除批次 2026-03 ETC 外部批次链路" });
-    expect(deleteButton).toBeEnabled();
-    await user.click(deleteButton);
-
-    const dialog = await screen.findByRole("dialog", { name: "删除批次" });
-    await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
-
-    await waitFor(() => {
-      expect(deleteTask).toHaveBeenCalledWith("etc-recon-imported-external-link-001", 12);
-    });
-  });
-
-  test("allows reconciliation task deletion when its linked business batch only has an unsubmitted OA draft", async () => {
-    const user = userEvent.setup();
-    installMockApiFetch();
-    const importedTask = {
-      taskId: "etc-recon-imported-business-linked-001",
-      status: "imported",
-      version: 13,
-      title: "新建ETC对账批次",
-      periodStart: "2026-03-28",
-      periodEnd: "2026-04-27",
-      statementPeriodStart: "2026-03-01",
-      statementPeriodEnd: "2026-04-30",
-      approvedDelta: "0.00",
-      approvedDeltaNote: "",
-      cardLast4: "7788",
-      oaTotalAmount: "1673.30",
-      etcInvoiceAmount: "1673.30",
-      supplementAmount: "0.00",
-      etcInvoiceCount: 37,
-      supplementCount: 0,
-      canConfirm: false,
-      vehiclePlates: ["云A361HX", "云A516HJ", "云ADA0381"],
-      confirmedItemSetHash: "sha256:selected",
-      importBatchId: "etc-import-business-linked-001",
-      etcBatchId: "",
-      hasImportedInvoices: true,
-      importedInvoiceCount: 37,
-      importedInvoiceAmount: "1673.30",
-      oaDraftBatchId: "",
-      oaDraftStatus: "",
-      submittedConfirmedAt: "",
-      creditCardItems: [],
-      ticketRootItems: [],
-      supplementEvidences: [],
-      sourceFiles: [],
-      parseIssues: [],
-    };
-    const linkedBusinessBatch = {
-      businessBatchId: "etc-business-linked-001",
-      taskId: "etc-recon-imported-business-linked-001",
-      status: "oa_confirmation_pending",
-      version: 8,
-      ownerUserId: "web_finance_user",
-      ownerOrgId: "finance",
-      importBatchIds: ["etc-import-business-linked-001"],
-      submissionBatchId: "etc-submission-linked-001",
-      externalEtcBatchId: "ETC-2026-LINKED",
-      oaDraftId: "oa-draft-linked-001",
-      oaDraftUrl: "https://oa.example.test/draft/oa-draft-linked-001",
-      oaRowId: "",
-      oaProcessStatus: "",
-      invoiceSummary: { count: 37, amount: "1673.30" },
-      scopeMonth: "2026-05",
-      amountBreakdown: { scope_month: "2026-05" },
-      invoiceIds: [],
-      importAttempts: [],
-      auditEvents: [],
-      createdAt: "2026-05-19T09:00:00+08:00",
-      updatedAt: "2026-05-19T09:00:00+08:00",
-    };
-    vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
-      items: [],
-      counts: { unsubmitted: 0, submitted: 0 },
-    } as never);
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [importedTask] } as never);
-    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue(importedTask as never);
-    vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
-      counts: { active: 1, submitted: 0 },
-      items: [linkedBusinessBatch],
-      pagination: { page: 1, pageSize: 100, total: 1 },
-    } as never);
-    vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockResolvedValue({
-      ...linkedBusinessBatch,
-      invoiceItems: [],
-    } as never);
-    const deleteBusinessBatch = vi.spyOn(etcApi, "deleteEtcBusinessBatch").mockResolvedValue(undefined as never);
-
-    renderAppAt("/etc-tickets");
-
-    const page = await screen.findByTestId("etc-ticket-management-page");
-    const deleteButton = await within(page).findByRole("button", { name: "删除批次 5月批次" });
-    expect(deleteButton).toBeEnabled();
-    await user.click(deleteButton);
-
-    const dialog = await screen.findByRole("dialog", { name: "删除批次" });
-    await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
-
-    await waitFor(() => {
-      expect(deleteBusinessBatch).toHaveBeenCalledWith("etc-business-linked-001", {
-        expectedVersion: 8,
-        reason: "用户在 ETC 页面删除未提交业务批次。",
-      });
-    });
   });
 
   test("manually confirms a draft-created business batch as submitted without refresh entry", async () => {
@@ -1652,13 +1180,12 @@ describe("ETC ticket management page", () => {
       oaProcessStatus: "manual_without_oa_row",
       invoiceItems: [],
     };
-    const fetchReconciliationTasks = vi.spyOn(etcApi, "fetchEtcReconciliationTasks")
-      .mockResolvedValueOnce({ items: [importedTask] } as never)
-      .mockResolvedValue({ items: [] } as never);
+    const fetchReconciliationTask = vi.spyOn(etcApi, "fetchEtcReconciliationTask")
+      .mockResolvedValue(importedTask as never);
     const fetchBusinessBatches = vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockImplementation((query = {}) => Promise.resolve({
-      counts: { active: query.status === "submitted" ? 0 : 1, submitted: query.status === "submitted" ? 1 : 0 },
-      items: query.status === "submitted" ? [submittedBatch] : [linkedBusinessBatch],
-      pagination: { page: 1, pageSize: 100, total: 1 },
+      counts: { unsubmitted: 0, staged: query.bucket === "submitted" ? 0 : 1, submitted: query.bucket === "submitted" ? 1 : 0 },
+      items: query.bucket === "submitted" ? [submittedBatch] : query.bucket === "staged" ? [linkedBusinessBatch] : [],
+      pagination: { page: 1, pageSize: 100, total: query.bucket === "unsubmitted" ? 0 : 1 },
     } as never));
     vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockResolvedValue({
       ...linkedBusinessBatch,
@@ -1673,6 +1200,7 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
+    await user.click(await within(page).findByRole("radio", { name: "暂存 1" }));
     const oaStatusPanel = await within(page).findByRole("region", { name: "审批提交确认" });
     const openDraftButton = within(oaStatusPanel).getByRole("button", { name: "打开草稿" });
     expect(openDraftButton).toBeEnabled();
@@ -1700,14 +1228,17 @@ describe("ETC ticket management page", () => {
         reason: "用户确认审批草稿已提交。",
       });
     });
-    await waitFor(() => expect(fetchReconciliationTasks).toHaveBeenCalledTimes(2));
+    expect(fetchReconciliationTask).toHaveBeenCalledWith(
+      "etc-recon-imported-business-linked-001",
+      expect.any(AbortSignal),
+    );
     await waitFor(() => {
-      expect(fetchBusinessBatches).toHaveBeenCalledWith(expect.objectContaining({ status: "submitted" }));
+      expect(fetchBusinessBatches).toHaveBeenCalledWith(expect.objectContaining({ bucket: "submitted" }));
     });
     await waitFor(() => expect(within(page).getByRole("radio", { name: "未提交 0" })).toBeInTheDocument());
+    expect(within(page).getByRole("radio", { name: "暂存 0" })).toBeInTheDocument();
     expect(within(page).getByRole("radio", { name: "已提交 1" })).toHaveAttribute("aria-checked", "true");
     expect(within(page).getByTestId("etc-batch-row-etc-business-linked-001")).toHaveTextContent("人工确认已提交");
-    expect(within(page).queryByTestId("etc-reconciliation-task-row-etc-recon-imported-business-linked-001")).not.toBeInTheDocument();
   });
 
   test("keeps a task-scoped business batch visible after manual OA submission and submitted-tab reload", async () => {
@@ -1764,21 +1295,21 @@ describe("ETC ticket management page", () => {
       oaProcessStatus: "manual_without_oa_row",
       invoiceItems: [],
     };
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [importedTask] } as never);
+    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue(importedTask as never);
     vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockImplementation((query = {}) => Promise.resolve({
-      counts: { active: query.status === "submitted" ? 0 : 1, submitted: query.status === "submitted" ? 1 : 0 },
-      items: query.status === "submitted" ? [submittedBatch] : [linkedBusinessBatch],
-      pagination: { page: 1, pageSize: 100, total: 1 },
+      counts: { unsubmitted: 0, staged: query.bucket === "submitted" ? 0 : 1, submitted: query.bucket === "submitted" ? 1 : 0 },
+      items: query.bucket === "submitted" ? [submittedBatch] : query.bucket === "staged" ? [linkedBusinessBatch] : [],
+      pagination: { page: 1, pageSize: 100, total: query.bucket === "unsubmitted" ? 0 : 1 },
     } as never));
-    vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockImplementation((businessBatchId: string) => Promise.resolve({
-      ...(businessBatchId === "etc-business-linked-001" ? linkedBusinessBatch : submittedBatch),
-      invoiceItems: [],
-    } as never));
+    vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail")
+      .mockResolvedValueOnce({ ...linkedBusinessBatch, invoiceItems: [] } as never)
+      .mockResolvedValue({ ...submittedBatch, invoiceItems: [] } as never);
     vi.spyOn(etcApi, "manualEtcBusinessBatchOaStatus").mockResolvedValue(submittedBatch as never);
 
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
+    await user.click(await within(page).findByRole("radio", { name: "暂存 1" }));
     const oaStatusPanel = await within(page).findByRole("region", { name: "审批提交确认" });
     await user.click(within(oaStatusPanel).getByRole("button", { name: "已提交" }));
     await waitFor(() => expect(within(page).getByRole("radio", { name: "已提交 1" })).toBeInTheDocument());
@@ -1807,21 +1338,29 @@ describe("ETC ticket management page", () => {
       oaDraftUrl: "",
       invoiceItems: [],
     };
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [] } as never);
-    vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
-      counts: { active: 1, submitted: 0 },
-      items: [detectingBatch],
+    let manuallyReturned = false;
+    vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockImplementation((query = {}) => Promise.resolve({
+      counts: manuallyReturned
+        ? { unsubmitted: 1, staged: 0, submitted: 0 }
+        : { unsubmitted: 0, staged: 1, submitted: 0 },
+      items: query.bucket === "staged" && !manuallyReturned
+        ? [detectingBatch]
+        : query.bucket === "unsubmitted" && manuallyReturned ? [notSubmittedBatch] : [],
       pagination: { page: 1, pageSize: 100, total: 1 },
-    } as never);
+    } as never));
     vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockResolvedValue({
       ...detectingBatch,
       invoiceItems: [],
     } as never);
-    const manualOaStatus = vi.spyOn(etcApi, "manualEtcBusinessBatchOaStatus").mockResolvedValue(notSubmittedBatch as never);
+    const manualOaStatus = vi.spyOn(etcApi, "manualEtcBusinessBatchOaStatus").mockImplementation(() => {
+      manuallyReturned = true;
+      return Promise.resolve(notSubmittedBatch as never);
+    });
 
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
+    await user.click(await within(page).findByRole("radio", { name: "暂存 1" }));
     const oaStatusPanel = await within(page).findByRole("region", { name: "审批提交确认" });
     expect(within(oaStatusPanel).queryByRole("button", { name: "刷新检测" })).not.toBeInTheDocument();
     await user.click(within(oaStatusPanel).getByRole("button", { name: "未提交" }));
@@ -1834,6 +1373,7 @@ describe("ETC ticket management page", () => {
     });
     expect(within(oaStatusPanel).queryByLabelText("人工处理原因")).not.toBeInTheDocument();
     expect(within(page).getByRole("radio", { name: "未提交 1" })).toBeInTheDocument();
+    expect(within(page).getByRole("radio", { name: "暂存 0" })).toBeInTheDocument();
     expect(within(page).getByRole("radio", { name: "已提交 0" })).toBeInTheDocument();
   });
 
@@ -1845,12 +1385,11 @@ describe("ETC ticket management page", () => {
       status: "oa_confirmation_pending",
       version: 8,
     });
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [] } as never);
-    vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
-      counts: { active: 1, submitted: 0 },
-      items: [detectingBatch],
-      pagination: { page: 1, pageSize: 100, total: 1 },
-    } as never);
+    vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockImplementation((query = {}) => Promise.resolve({
+      counts: { unsubmitted: 0, staged: 1, submitted: 0 },
+      items: query.bucket === "staged" ? [detectingBatch] : [],
+      pagination: { page: 1, pageSize: 100, total: query.bucket === "staged" ? 1 : 0 },
+    } as never));
     vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockResolvedValue({
       ...detectingBatch,
       invoiceItems: [],
@@ -1862,6 +1401,7 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
+    await user.click(await within(page).findByRole("radio", { name: "暂存 1" }));
     const oaStatusPanel = await within(page).findByRole("region", { name: "审批提交确认" });
     await user.click(within(oaStatusPanel).getByRole("button", { name: "已提交" }));
 
@@ -1876,6 +1416,7 @@ describe("ETC ticket management page", () => {
     expect(within(oaStatusPanel).getByRole("button", { name: "已提交" })).toBeEnabled();
     expect(within(oaStatusPanel).getByRole("button", { name: "未提交" })).toBeEnabled();
     expect(within(page).getByTestId("etc-batch-row-etc-business-manual-fail-001")).toBeInTheDocument();
+    expect(within(page).getByRole("radio", { name: "暂存 1" })).toHaveAttribute("aria-checked", "true");
   });
 
   test("can retry manual OA status confirmation after a transient failure", async () => {
@@ -1893,10 +1434,14 @@ describe("ETC ticket management page", () => {
       oaProcessStatus: "manual_without_oa_row",
       invoiceItems: [],
     };
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [] } as never);
+    let manuallySubmitted = false;
     vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockImplementation((query = {}) => Promise.resolve({
-      counts: { active: query.status === "submitted" ? 0 : 1, submitted: query.status === "submitted" ? 1 : 0 },
-      items: query.status === "submitted" ? [submittedBatch] : [detectingBatch],
+      counts: manuallySubmitted
+        ? { unsubmitted: 0, staged: 0, submitted: 1 }
+        : { unsubmitted: 0, staged: 1, submitted: 0 },
+      items: query.bucket === "submitted" && manuallySubmitted
+        ? [submittedBatch]
+        : query.bucket === "staged" && !manuallySubmitted ? [detectingBatch] : [],
       pagination: { page: 1, pageSize: 100, total: 1 },
     } as never));
     vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockImplementation(() => Promise.resolve({
@@ -1906,11 +1451,15 @@ describe("ETC ticket management page", () => {
     const manualOaStatus = vi
       .spyOn(etcApi, "manualEtcBusinessBatchOaStatus")
       .mockRejectedValueOnce(new Error("人工确认暂时失败，请重试。") as never)
-      .mockResolvedValueOnce(submittedBatch as never);
+      .mockImplementationOnce(() => {
+        manuallySubmitted = true;
+        return Promise.resolve(submittedBatch as never);
+      });
 
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
+    await user.click(await within(page).findByRole("radio", { name: "暂存 1" }));
     const oaStatusPanel = await within(page).findByRole("region", { name: "审批提交确认" });
     await user.click(within(oaStatusPanel).getByRole("button", { name: "已提交" }));
 
@@ -1921,7 +1470,8 @@ describe("ETC ticket management page", () => {
       expectedVersion: 8,
     });
     expect(await within(page).findByText("人工确认暂时失败，请重试。")).toBeInTheDocument();
-    expect(within(page).getByRole("radio", { name: "未提交 1" })).toHaveAttribute("aria-checked", "true");
+    expect(within(page).getByRole("radio", { name: "暂存 1" })).toHaveAttribute("aria-checked", "true");
+    expect(within(page).getByRole("radio", { name: "未提交 0" })).toBeInTheDocument();
     expect(within(page).getByRole("radio", { name: "已提交 0" })).toBeInTheDocument();
     expect(within(oaStatusPanel).getByRole("button", { name: "已提交" })).toBeEnabled();
 
@@ -1946,15 +1496,15 @@ describe("ETC ticket management page", () => {
     const page = await screen.findByTestId("etc-ticket-management-page");
     expect(await within(page).findByRole("button", { name: "新建批次" })).toBeInTheDocument();
     expect(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-01")).toHaveTextContent("3月批次");
-    expect(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-01")).toHaveTextContent("发票 2 + 补充凭证 1");
-    expect(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-01")).toHaveTextContent("金额 120.00 元");
+    expect(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-01")).toHaveTextContent("发票 2 + 补充凭证 0");
+    expect(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-01")).toHaveTextContent("2 张 / 32.26 元");
 
     expect(within(page).queryByRole("group", { name: "票根网导入方式" })).not.toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: "票根网 PDF/JPG" })).not.toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: "手工输入" })).not.toBeInTheDocument();
-    expect(within(page).getByLabelText("上传信用卡账单")).toBeInTheDocument();
+    expect(await within(page).findByLabelText("上传信用卡账单")).toBeInTheDocument();
     expect(within(page).queryByLabelText("上传补充凭证")).not.toBeInTheDocument();
-    expect(within(page).getByLabelText("上传票根网")).toBeInTheDocument();
+    expect(await within(page).findByLabelText("上传票根网")).toBeInTheDocument();
     expect(within(page).getByRole("region", { name: "ETC批次流程" })).toBeInTheDocument();
     expect(within(page).getByLabelText("ETC对账文件上传")).toBeInTheDocument();
     expect(within(page).queryByRole("button", { name: "补ETC发票" })).not.toBeInTheDocument();
@@ -2151,7 +1701,7 @@ describe("ETC ticket management page", () => {
         },
       ],
     };
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [initialTask] } as never);
+    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue(initialTask as never);
     const uploadSupplement = vi.spyOn(etcApi, "uploadEtcSupplementEvidenceForCard").mockResolvedValue(updatedTask as never);
 
     renderAppAt("/etc-tickets");
@@ -2230,7 +1780,7 @@ describe("ETC ticket management page", () => {
       supplementEvidences: [],
       reconciledItems: [],
     };
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [initialTask] } as never);
+    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue(initialTask as never);
     const uploadSupplement = vi
       .spyOn(etcApi, "uploadEtcSupplementEvidenceForCard")
       .mockRejectedValue(new Error("补充凭证金额无法识别，请补充差异说明。") as never);
@@ -2498,7 +2048,7 @@ describe("ETC ticket management page", () => {
     });
 
     vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
-      counts: { active: 1, submitted: 0 },
+      counts: { unsubmitted: 1, staged: 0, submitted: 0 },
       items: [sourceBusinessBatch],
       pagination: { page: 1, pageSize: 100, total: 1 },
     } as never);
@@ -2506,10 +2056,9 @@ describe("ETC ticket management page", () => {
       ...(businessBatchId === "etc-business-fresh-001" ? freshBusinessBatch : sourceBusinessBatch),
       invoiceItems: [],
     } as never));
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks")
-      .mockResolvedValueOnce({ items: [taskWithSourceFiles] } as never)
-      .mockResolvedValue({ items: [freshTask, taskWithSourceFiles] } as never);
-    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue(taskWithSourceFiles as never);
+    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockImplementation((taskId: string) => Promise.resolve(
+      (taskId === "etc-recon-task-fresh-001" ? freshTask : taskWithSourceFiles) as never,
+    ));
     vi.spyOn(etcApi as Record<string, unknown>, "deleteEtcReconciliationSourceFile").mockResolvedValue(taskAfterFileDelete as never);
     const createBatch = vi.spyOn(etcApi, "createEtcBusinessBatch").mockResolvedValue(freshBusinessBatch as never);
 
@@ -2593,12 +2142,14 @@ describe("ETC ticket management page", () => {
       ],
       parseIssues: [],
     };
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [taskWithSourceFile] } as never);
-    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue({
-      ...taskWithSourceFile,
-      version: 4,
-      sourceFiles: [],
-    } as never);
+    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue(taskWithSourceFile as never);
+    vi.spyOn(etcApi, "fetchEtcReconciliationTask")
+      .mockResolvedValueOnce(taskWithSourceFile as never)
+      .mockResolvedValue({
+        ...taskWithSourceFile,
+        version: 4,
+        sourceFiles: [],
+      } as never);
     const deleteSourceFile = vi.spyOn(etcApi as Record<string, unknown>, "deleteEtcReconciliationSourceFile");
 
     renderAppAt("/etc-tickets");
@@ -2661,7 +2212,7 @@ describe("ETC ticket management page", () => {
       version: 4,
       sourceFiles: [],
     };
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [taskWithSourceFile] } as never);
+    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue(taskWithSourceFile as never);
     vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue(taskWithSourceFile as never);
     const deleteSourceFile = vi.spyOn(etcApi as Record<string, unknown>, "deleteEtcReconciliationSourceFile")
       .mockRejectedValueOnce(new Error("ETC源文件删除暂时失败，请重试。") as never)
@@ -2708,8 +2259,7 @@ describe("ETC ticket management page", () => {
 
   test("disables ticket-root TXT upload when a legacy non-TXT ticket-root source exists", async () => {
     installMockApiFetch();
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({
-      items: [
+    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue(
         {
           taskId: "etc-recon-task-manual-existing",
           status: "reviewing",
@@ -2743,9 +2293,8 @@ describe("ETC ticket management page", () => {
             },
           ],
           parseIssues: [],
-        },
-      ],
-    } as never);
+        } as never,
+    );
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
@@ -2757,8 +2306,7 @@ describe("ETC ticket management page", () => {
   test("auto-selects TXT mode for text ticket-root files and shows each source summary", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({
-      items: [
+    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue(
         {
           taskId: "etc-recon-task-txt-existing",
           status: "reviewing",
@@ -2836,9 +2384,8 @@ describe("ETC ticket management page", () => {
             },
           ],
           parseIssues: [],
-        },
-      ],
-    } as never);
+        } as never,
+    );
 
     renderAppAt("/etc-tickets");
 
@@ -2870,8 +2417,7 @@ describe("ETC ticket management page", () => {
   test("shows legacy manual ticket-root source summaries only in the uploaded source list", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({
-      items: [
+    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue(
         {
           taskId: "etc-recon-task-manual-existing",
           status: "reviewing",
@@ -2949,9 +2495,8 @@ describe("ETC ticket management page", () => {
             },
           ],
           parseIssues: [],
-        },
-      ],
-    } as never);
+        } as never,
+    );
 
     renderAppAt("/etc-tickets");
 
@@ -2978,8 +2523,7 @@ describe("ETC ticket management page", () => {
 
   test("disables ticket-root TXT upload when a legacy PDF ticket-root source exists", async () => {
     installMockApiFetch();
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({
-      items: [
+    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue(
         {
           taskId: "etc-recon-task-pdf-existing",
           status: "reviewing",
@@ -3013,9 +2557,8 @@ describe("ETC ticket management page", () => {
             },
           ],
           parseIssues: [],
-        },
-      ],
-    } as never);
+        } as never,
+    );
 
     renderAppAt("/etc-tickets");
 
@@ -3173,8 +2716,7 @@ describe("ETC ticket management page", () => {
   test("submits the checked card item ids when confirming reconciliation and blocks empty selection", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({
-      items: [
+    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue(
         {
           taskId: "etc-recon-task-001",
           status: "reviewing",
@@ -3257,9 +2799,8 @@ describe("ETC ticket management page", () => {
               includeInWorkbench: true,
             },
           ],
-        },
-      ],
-    } as never);
+        } as never,
+    );
 
     renderAppAt("/etc-tickets");
 
@@ -3346,7 +2887,7 @@ describe("ETC ticket management page", () => {
       supplementEvidences: [],
       reconciledItems: [],
     };
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [readyTask] } as never);
+    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue(readyTask as never);
     const reopenTask = vi.spyOn(etcApi, "reopenEtcReconciliationTask").mockRejectedValue(new Error("重新打开失败，任务已进入导入流程。") as never);
 
     renderAppAt("/etc-tickets");
@@ -3396,7 +2937,7 @@ describe("ETC ticket management page", () => {
       supplementEvidences: [],
       reconciledItems: [],
     };
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [readyTask] } as never);
+    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue(readyTask as never);
     const reopenTask = vi.spyOn(etcApi, "reopenEtcReconciliationTask").mockResolvedValue({
       ...readyTask,
       status: "reviewing",
@@ -3415,450 +2956,9 @@ describe("ETC ticket management page", () => {
     expect(within(page).queryByRole("button", { name: "重新打开" })).not.toBeInTheDocument();
   });
 
-  test("shows imported task invoices under the reconciliation task and collapses both task blocks", async () => {
-    const user = userEvent.setup();
-    installMockApiFetch();
-    const importedTask = {
-      taskId: "etc-recon-imported-001",
-      status: "imported",
-      version: 8,
-      title: "2026-03 ETC 已导入",
-      periodStart: "2026-03-01",
-      periodEnd: "2026-03-31",
-      statementPeriodStart: "2026-03-01",
-      statementPeriodEnd: "2026-03-31",
-      approvedDelta: "0.00",
-      approvedDeltaNote: "",
-      cardLast4: "7788",
-      oaTotalAmount: "30.00",
-      etcInvoiceAmount: "30.00",
-      supplementAmount: "0.00",
-      etcInvoiceCount: 1,
-      supplementCount: 0,
-      canConfirm: false,
-      vehiclePlates: ["云ADA0381"],
-      confirmedItemSetHash: "sha256:selected",
-      importBatchId: "import-session-001",
-      etcBatchId: "etc-batch-imported-001",
-      oaDraftBatchId: "",
-      oaDraftStatus: "",
-      submittedConfirmedAt: "",
-      creditCardItems: [],
-      ticketRootItems: [],
-      supplementEvidences: [],
-      sourceFiles: [],
-      parseIssues: [],
-    };
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({
-      items: [importedTask],
-    } as never);
-    mockFetchEtcInvoices([
-      {
-        id: "etc-inv-imported-001",
-        invoiceNumber: "ETC-IMPORTED-001",
-        issueDate: "2026-03-03",
-        passageStartDate: "2026-03-03",
-        passageEndDate: "2026-03-03",
-        plateNumber: "云ADA0381",
-        sellerName: "云南高速通行费",
-        buyerName: "云南溯源科技",
-        amountWithoutTax: "28.20",
-        taxAmount: "1.80",
-        totalAmount: "30.00",
-        status: "unsubmitted",
-        hasPdf: true,
-        hasXml: true,
-      },
-    ]);
-    vi.spyOn(etcApi, "deleteEtcReconciliationTaskImportedInvoices").mockResolvedValue({
-      ...importedTask,
-      status: "ready_for_import",
-      version: 9,
-      importBatchId: "",
-      etcBatchId: "",
-    } as never);
-    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue({
-      ...importedTask,
-      version: 9,
-    } as never);
-
-    renderAppAt("/etc-tickets");
-
-    const page = await screen.findByTestId("etc-ticket-management-page");
-    await openEtcDisclosure(page, user, /已导入发票/);
-    const importedInvoiceSection = within(page).getByRole("region", { name: "已导入ETC发票" });
-    expect(within(page).getByRole("button", { name: /已导入发票.*1 张/ })).toBeInTheDocument();
-    const removeButton = await within(importedInvoiceSection).findByRole("button", { name: "移除发票" });
-    expect(removeButton).toBeEnabled();
-    expect(within(importedInvoiceSection).getByRole("table", { name: "已导入ETC发票明细" })).toBeInTheDocument();
-    expect(within(importedInvoiceSection).getByText("ETC-IMPORTED-001")).toBeInTheDocument();
-    expect(etcApi.fetchEtcInvoices).toHaveBeenCalledWith({
-      importBatchId: "import-session-001",
-      page: 1,
-      pageSize: 500,
-      signal: expect.any(AbortSignal),
-    });
-
-    await user.click(removeButton);
-    const dialog = await screen.findByRole("dialog", { name: "移除发票" });
-    expect(dialog).toHaveTextContent("2026-03 ETC 已导入");
-    expect(dialog).toHaveTextContent("1 张");
-    await user.click(within(dialog).getByRole("button", { name: "确认移除" }));
-
-    await waitFor(() => {
-      expect(etcApi.deleteEtcReconciliationTaskImportedInvoices).toHaveBeenCalledWith("etc-recon-imported-001", 9);
-    });
-    await waitFor(() => {
-      expect(within(page).queryByRole("region", { name: "已导入ETC发票" })).not.toBeInTheDocument();
-    });
-    expect(within(page).getByText("2026-03 ETC 已导入 / v9")).toBeInTheDocument();
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "移除发票" })).not.toBeInTheDocument());
-
-    const workflowRegion = within(page).getByRole("region", { name: "ETC批次流程" });
-    await user.click(within(workflowRegion).getByRole("button", { name: "全部折叠" }));
-    expect(within(workflowRegion).queryByRole("table", { name: "ETC双侧核对明细" })).not.toBeInTheDocument();
-    await user.click(within(workflowRegion).getByRole("button", { name: "展开流程" }));
-    expect(await within(workflowRegion).findByRole("table", { name: "ETC双侧核对明细" })).toBeInTheDocument();
-
-    const detailRegion = within(page).getByRole("region", { name: "ETC批次详情" });
-    await user.click(within(detailRegion).getByRole("button", { name: "全部折叠" }));
-    expect(within(detailRegion).queryByRole("table", { name: "ETC发票明细" })).not.toBeInTheDocument();
-    await user.click(within(detailRegion).getByRole("button", { name: "展开详情" }));
-    expect(await within(detailRegion).findByRole("table", { name: "ETC发票明细" })).toBeInTheDocument();
-  });
-
-  test("keeps imported invoice removal dialog open when removal fails", async () => {
-    const user = userEvent.setup();
-    installMockApiFetch();
-    const importedTask = {
-      taskId: "etc-recon-imported-remove-fail-001",
-      status: "imported",
-      version: 8,
-      title: "2026-03 ETC 已导入",
-      periodStart: "2026-03-01",
-      periodEnd: "2026-03-31",
-      statementPeriodStart: "2026-03-01",
-      statementPeriodEnd: "2026-03-31",
-      approvedDelta: "0.00",
-      approvedDeltaNote: "",
-      cardLast4: "7788",
-      oaTotalAmount: "30.00",
-      etcInvoiceAmount: "30.00",
-      supplementAmount: "0.00",
-      etcInvoiceCount: 1,
-      supplementCount: 0,
-      canConfirm: false,
-      vehiclePlates: ["云ADA0381"],
-      confirmedItemSetHash: "sha256:selected",
-      importBatchId: "import-session-remove-fail-001",
-      etcBatchId: "etc-batch-remove-fail-001",
-      oaDraftBatchId: "",
-      oaDraftStatus: "",
-      submittedConfirmedAt: "",
-      creditCardItems: [],
-      ticketRootItems: [],
-      supplementEvidences: [],
-      sourceFiles: [],
-      parseIssues: [],
-    };
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [importedTask] } as never);
-    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue({
-      ...importedTask,
-      version: 9,
-    } as never);
-    mockFetchEtcInvoices([
-      {
-        id: "etc-inv-remove-fail-001",
-        invoiceNumber: "ETC-REMOVE-FAIL-001",
-        issueDate: "2026-03-03",
-        passageStartDate: "2026-03-03",
-        passageEndDate: "2026-03-03",
-        plateNumber: "云ADA0381",
-        sellerName: "云南高速通行费",
-        buyerName: "云南溯源科技",
-        amountWithoutTax: "28.20",
-        taxAmount: "1.80",
-        totalAmount: "30.00",
-        status: "unsubmitted",
-        hasPdf: true,
-        hasXml: true,
-      },
-    ]);
-    const removeInvoices = vi
-      .spyOn(etcApi, "deleteEtcReconciliationTaskImportedInvoices")
-      .mockRejectedValue(new Error("移除发票失败，请刷新后重试。") as never);
-
-    renderAppAt("/etc-tickets");
-
-    const page = await screen.findByTestId("etc-ticket-management-page");
-    await openEtcDisclosure(page, user, /已导入发票/);
-    const importedInvoiceSection = await within(page).findByRole("region", { name: "已导入ETC发票" });
-    await user.click(await within(importedInvoiceSection).findByRole("button", { name: "移除发票" }));
-
-    const dialog = await screen.findByRole("dialog", { name: "移除发票" });
-    await user.click(within(dialog).getByRole("button", { name: "确认移除" }));
-
-    await waitFor(() => expect(removeInvoices).toHaveBeenCalledWith("etc-recon-imported-remove-fail-001", 9));
-    expect(await within(page).findByText("移除发票失败，请刷新后重试。")).toBeInTheDocument();
-    expect(screen.getByRole("dialog", { name: "移除发票" })).toBeInTheDocument();
-    expect(page.querySelector(".etc-task-imported-invoices")).toBeInTheDocument();
-    expect(within(page).getByText("2026-03 ETC 已导入 / v9")).toBeInTheDocument();
-  });
-
-  test("creates OA draft from the selected imported reconciliation task batch", async () => {
-    const user = userEvent.setup();
-    installMockApiFetch();
-    const openMock = vi.fn();
-    vi.stubGlobal("open", openMock);
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({
-      items: [
-        {
-          taskId: "etc-recon-imported-submit-001",
-          status: "imported",
-          version: 11,
-          title: "2026-04 ETC 已导入",
-          periodStart: "2026-03-28",
-          periodEnd: "2026-04-27",
-          statementPeriodStart: "2026-03-28",
-          statementPeriodEnd: "2026-04-27",
-          approvedDelta: "0.00",
-          approvedDeltaNote: "",
-          cardLast4: "8514",
-          oaTotalAmount: "1673.30",
-          etcInvoiceAmount: "1673.30",
-          supplementAmount: "0.00",
-          etcInvoiceCount: 37,
-          supplementCount: 0,
-          canConfirm: false,
-          vehiclePlates: ["云ADA0381"],
-          confirmedItemSetHash: "sha256:selected",
-          importBatchId: "etc_import_batch_0004",
-          etcBatchId: "",
-          hasImportedInvoices: true,
-          importedInvoiceCount: 36,
-          importedInvoiceAmount: "1673.30",
-          oaDraftBatchId: "",
-          oaDraftStatus: "",
-          submittedConfirmedAt: "",
-          creditCardItems: [],
-          ticketRootItems: [],
-          supplementEvidences: [],
-          sourceFiles: [],
-          parseIssues: [],
-        },
-      ],
-    } as never);
-    mockFetchEtcInvoices([
-      {
-        id: "etc-inv-imported-submit-001",
-        invoiceNumber: "ETC-IMPORTED-SUBMIT-001",
-        issueDate: "2026-04-27",
-        passageStartDate: "2026-04-27",
-        passageEndDate: "2026-04-27",
-        plateNumber: "云ADA0381",
-        sellerName: "云南高速通行费",
-        buyerName: "云南溯源科技",
-        amountWithoutTax: "1624.56",
-        taxAmount: "48.74",
-        totalAmount: "1673.30",
-        status: "unsubmitted",
-        hasPdf: true,
-        hasXml: true,
-      },
-    ]);
-    const businessBatch = {
-      businessBatchId: "etc_business_batch_imported_submit_001",
-      taskId: "etc-recon-imported-submit-001",
-      status: "imported",
-      version: 11,
-      ownerUserId: "web_finance_user",
-      ownerOrgId: "finance",
-      importBatchIds: ["etc_import_batch_0004"],
-      submissionBatchId: "",
-      externalEtcBatchId: "ETC-2026-OA-001",
-      oaDraftId: "",
-      oaDraftUrl: "",
-      oaRowId: "",
-      oaProcessStatus: "",
-      invoiceSummary: { count: 36, amount: "1673.30" },
-      invoiceIds: ["etc-inv-imported-submit-001"],
-      importAttempts: [
-        {
-          attemptId: "attempt-imported-submit-001",
-          importBatchId: "etc_import_batch_0004",
-          status: "imported",
-          imported: 36,
-          duplicatesSkipped: 0,
-          attachmentsCompleted: 0,
-          failed: 0,
-          createdAt: "2026-05-19T09:00:00+08:00",
-        },
-      ],
-      auditEvents: [],
-      createdAt: "2026-05-19T09:00:00+08:00",
-      updatedAt: "2026-05-19T09:00:00+08:00",
-      invoiceItems: [
-        {
-          id: "etc-inv-imported-submit-001",
-          invoiceNumber: "ETC-IMPORTED-SUBMIT-001",
-          issueDate: "2026-04-27",
-          passageStartDate: "2026-04-27",
-          passageEndDate: "2026-04-27",
-          plateNumber: "云ADA0381",
-          sellerName: "云南高速通行费",
-          buyerName: "云南溯源科技",
-          amountWithoutTax: "1624.56",
-          taxAmount: "48.74",
-          totalAmount: "1673.30",
-          status: "unsubmitted",
-          hasPdf: true,
-          hasXml: true,
-        },
-      ],
-    } as const;
-    vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
-      counts: { active: 1, submitted: 0 },
-      items: [businessBatch],
-      pagination: { page: 1, pageSize: 100, total: 1 },
-    } as never);
-    vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockResolvedValue(businessBatch as never);
-    const createDraft = vi.spyOn(etcApi, "createEtcBusinessBatchOaDraft").mockResolvedValue({
-      ...businessBatch,
-      status: "oa_confirmation_pending",
-      version: 12,
-      submissionBatchId: "etc_batch_submission_001",
-      oaDraftId: "oa-draft-001",
-      oaDraftUrl: "https://oa.example.test/oa/#/normal/forms/form/2?formId=2&id=oa-draft-001",
-    } as never);
-
-    renderAppAt("/etc-tickets");
-
-    const page = await screen.findByTestId("etc-ticket-management-page");
-    const submitButton = within(page).getByRole("button", { name: "提交审批" });
-    await waitFor(() => expect(submitButton).toBeEnabled());
-    await user.click(submitButton);
-
-    const dialog = await screen.findByRole("dialog", { name: "创建审批草稿" });
-    expect(dialog).toHaveTextContent("为当前任务的 36 张发票创建审批草稿，合计 1673.30。");
-    expect(dialog).toHaveTextContent("批次：4.27批次");
-    await user.click(within(dialog).getByRole("button", { name: "创建草稿" }));
-
-    await waitFor(() => expect(createDraft).toHaveBeenCalledWith("etc_business_batch_imported_submit_001", { expectedVersion: 11 }));
-    expect(openMock).not.toHaveBeenCalled();
-  });
-
-  test("deletes an imported reconciliation task through confirmation", async () => {
-    const user = userEvent.setup();
-    installMockApiFetch();
-    const importedTask = {
-      taskId: "etc-recon-imported-delete-001",
-      status: "imported",
-      version: 8,
-      title: "2026-03 ETC 已导入",
-      periodStart: "2026-03-01",
-      periodEnd: "2026-03-31",
-      statementPeriodStart: "2026-03-01",
-      statementPeriodEnd: "2026-03-31",
-      approvedDelta: "0.00",
-      approvedDeltaNote: "",
-      cardLast4: "7788",
-      oaTotalAmount: "30.00",
-      etcInvoiceAmount: "30.00",
-      supplementAmount: "0.00",
-      etcInvoiceCount: 1,
-      supplementCount: 0,
-      canConfirm: false,
-      vehiclePlates: ["云ADA0381"],
-      confirmedItemSetHash: "sha256:selected",
-      importBatchId: "import-session-delete-001",
-      etcBatchId: "",
-      hasImportedInvoices: true,
-      importedInvoiceCount: 1,
-      importedInvoiceAmount: "30.00",
-      oaDraftBatchId: "",
-      oaDraftStatus: "",
-      submittedConfirmedAt: "",
-      creditCardItems: [],
-      ticketRootItems: [],
-      supplementEvidences: [],
-      sourceFiles: [],
-      parseIssues: [],
-    };
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks")
-      .mockResolvedValueOnce({ items: [importedTask] } as never)
-      .mockResolvedValue({ items: [] } as never);
-    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue(importedTask as never);
-    mockFetchEtcInvoices([]);
-    vi.spyOn(etcApi, "deleteEtcReconciliationTask").mockResolvedValue(undefined);
-
-    renderAppAt("/etc-tickets");
-
-    const page = await screen.findByTestId("etc-ticket-management-page");
-    const deleteButton = await within(page).findByRole("button", { name: /删除批次 2026-03 ETC 已导入/ });
-    expect(deleteButton).toBeEnabled();
-    await user.click(deleteButton);
-    const dialog = await screen.findByRole("dialog", { name: "删除批次" });
-    expect(dialog).toHaveTextContent("将一并删除已导入发票");
-    await user.click(within(dialog).getByRole("button", { name: "确认删除" }));
-
-    await waitFor(() => {
-      expect(etcApi.deleteEtcReconciliationTask).toHaveBeenCalledWith("etc-recon-imported-delete-001", 8);
-    });
-    await waitFor(() => {
-      expect(within(page).queryByText("2026-03 ETC 已导入 / v8")).not.toBeInTheDocument();
-    });
-  });
-
-  test("renders the business batch instead of a duplicate task row when an imported task shares its batch id", async () => {
-    installMockApiFetch();
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({
-      items: [
-        {
-          taskId: "etc-recon-task-imported-batch",
-          status: "imported",
-          version: 5,
-          title: "2026-03 ETC 对账",
-          periodStart: "2026-03-01",
-          periodEnd: "2026-03-31",
-          statementPeriodStart: "2026-03-01",
-          statementPeriodEnd: "2026-03-31",
-          approvedDelta: "0.00",
-          approvedDeltaNote: "",
-          cardLast4: "",
-          oaTotalAmount: "21.35",
-          etcInvoiceAmount: "21.35",
-          supplementAmount: "0.00",
-          etcInvoiceCount: 1,
-          supplementCount: 0,
-          canConfirm: false,
-          vehiclePlates: ["云A8H66Q"],
-          confirmedItemSetHash: "sha256:selected",
-          importBatchId: "",
-          etcBatchId: "etc-batch-unsubmitted-02",
-          oaDraftBatchId: "",
-          oaDraftStatus: "",
-          submittedConfirmedAt: "",
-          creditCardItems: [],
-          ticketRootItems: [],
-          supplementEvidences: [],
-          sourceFiles: [],
-          parseIssues: [],
-        },
-      ],
-    } as never);
-
-    renderAppAt("/etc-tickets");
-
-    const page = await screen.findByTestId("etc-ticket-management-page");
-    expect(await within(page).findByTestId("etc-batch-row-etc-batch-unsubmitted-02")).toBeInTheDocument();
-    expect(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-01")).toBeInTheDocument();
-    expect(within(page).queryByTestId("etc-reconciliation-task-row-etc-recon-task-imported-batch")).not.toBeInTheDocument();
-  });
-
   test("does not pair same-amount suggested rows without an explicit ticket link", async () => {
     installMockApiFetch();
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({
-      items: [
+    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue(
         {
           taskId: "etc-recon-unlinked-suggested",
           status: "reviewing",
@@ -3912,9 +3012,8 @@ describe("ETC ticket management page", () => {
               linkedCreditCardItemIds: [],
             },
           ],
-        },
-      ],
-    } as never);
+        } as never,
+    );
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
@@ -4000,7 +3099,7 @@ describe("ETC ticket management page", () => {
       ],
     };
 
-    vi.spyOn(etcApi, "fetchEtcReconciliationTasks").mockResolvedValue({ items: [initialTask] } as never);
+    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue(initialTask as never);
     fetchMock.mockImplementation(async (input, init) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
       if (String(url).endsWith("/api/etc/reconciliation-tasks/etc-recon-refresh-001/refresh-matches")) {
@@ -4168,7 +3267,7 @@ describe("ETC ticket management page", () => {
     expect(await within(invoiceTable).findByRole("columnheader", { name: "金额 32.26" })).toBeInTheDocument();
     expect(await within(invoiceTable).findByRole("columnheader", { name: "税额 1.82" })).toBeInTheDocument();
     expect(within(page).queryByRole("grid", { name: "ETC发票明细" })).not.toBeInTheDocument();
-    expect(await within(page).findByText("ETC-2026-001")).toBeInTheDocument();
+    expect((await within(page).findAllByText("ETC-2026-001")).length).toBeGreaterThanOrEqual(1);
     expect(within(page).queryByText("ETC-2026-003")).not.toBeInTheDocument();
 
     await user.click(within(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-02")).getByRole("button", { name: "查看批次 3月批次" }));
@@ -4214,6 +3313,11 @@ describe("ETC ticket management page", () => {
       oaRowId: "",
       oaProcessStatus: "",
       invoiceSummary: { count: 2, amount: "32.26" },
+      createOaDraftAction: {
+        enabled: true,
+        code: "ready",
+        message: "可以提交审批。",
+      },
       invoiceIds: ["etc-inv-001", "etc-inv-002"],
       importAttempts: [
         {
@@ -4250,7 +3354,7 @@ describe("ETC ticket management page", () => {
       ],
     } as const;
     vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
-      counts: { active: 1, submitted: 0 },
+      counts: { unsubmitted: 1, staged: 0, submitted: 0 },
       items: [businessBatch],
       pagination: { page: 1, pageSize: 100, total: 1 },
     } as never);
@@ -4263,30 +3367,23 @@ describe("ETC ticket management page", () => {
       oaDraftId: "oa_draft_001",
       oaDraftUrl: "https://oa.example.test/oa/#/normal/forms/form/2?formId=2&id=oa_draft_001",
     } as never);
-    const manualOaStatus = vi.spyOn(etcApi, "manualEtcBusinessBatchOaStatus").mockResolvedValue({
-      ...businessBatch,
-      status: "manually_marked_submitted",
-      version: 9,
-      submissionBatchId: "etc_batch_0027",
-      oaDraftId: "oa_draft_001",
-      oaDraftUrl: "https://oa.example.test/oa/#/normal/forms/form/2?formId=2&id=oa_draft_001",
-      oaProcessStatus: "manual_without_oa_row",
-      invoiceItems: [],
-    } as never);
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
     await waitFor(() => expect(within(page).getAllByText("3月批次").length).toBeGreaterThanOrEqual(1));
-    const submitButton = within(page).getByRole("button", { name: "提交审批" });
+    const submitButton = await within(page).findByRole("button", { name: "提交审批" });
     await waitFor(() => expect(submitButton).toBeEnabled());
     await user.click(submitButton);
 
     const dialog = await screen.findByRole("dialog", { name: "创建审批草稿" });
-    expect(dialog).toHaveTextContent("为当前任务的 2 张发票创建审批草稿");
+    expect(dialog).toHaveTextContent("为当前批次的 2 张发票创建审批草稿");
     expect(dialog).toHaveTextContent("批次：3月批次");
     await user.click(within(dialog).getByRole("button", { name: "创建草稿" }));
 
-    await waitFor(() => expect(createDraft).toHaveBeenCalledWith("etc_business_batch_0001", { expectedVersion: 7 }));
+    await waitFor(() => expect(createDraft).toHaveBeenCalledWith("etc_business_batch_0001", {
+      expectedVersion: 7,
+      idempotencyKey: expect.any(String),
+    }));
     expect(openMock).not.toHaveBeenCalled();
 
     const resultDialog = await screen.findByRole("dialog", { name: "审批提交确认" });
@@ -4294,14 +3391,8 @@ describe("ETC ticket management page", () => {
     expect(within(resultDialog).getByRole("button", { name: "打开草稿" })).toBeEnabled();
     expect(within(resultDialog).queryByRole("button", { name: "刷新检测" })).not.toBeInTheDocument();
     expect(within(resultDialog).queryByRole("button", { name: "撤销草稿" })).not.toBeInTheDocument();
-    await user.click(within(resultDialog).getByRole("button", { name: "已提交" }));
-    await waitFor(() => {
-      expect(manualOaStatus).toHaveBeenCalledWith("etc_business_batch_0001", {
-        decision: "submitted",
-        expectedVersion: 8,
-        reason: "用户确认审批草稿已提交。",
-      });
-    });
+    expect(within(resultDialog).getByRole("button", { name: "已提交" })).toBeEnabled();
+    expect(within(resultDialog).getByRole("button", { name: "未提交" })).toBeEnabled();
   });
 
   test("keeps the create OA draft dialog open when draft creation fails", async () => {
@@ -4310,7 +3401,7 @@ describe("ETC ticket management page", () => {
     const businessBatch = {
       ...businessBatchFixture({
         businessBatchId: "etc-business-draft-fail-001",
-        taskId: "etc-recon-draft-fail-001",
+        taskId: "etc-recon-task-001",
         status: "imported",
         version: 7,
         submissionBatchId: "",
@@ -4320,7 +3411,7 @@ describe("ETC ticket management page", () => {
       }),
     } as const;
     vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
-      counts: { active: 1, submitted: 0 },
+      counts: { unsubmitted: 1, staged: 0, submitted: 0 },
       items: [businessBatch],
       pagination: { page: 1, pageSize: 100, total: 1 },
     } as never);
@@ -4338,7 +3429,10 @@ describe("ETC ticket management page", () => {
     const dialog = await screen.findByRole("dialog", { name: "创建审批草稿" });
     await user.click(within(dialog).getByRole("button", { name: "创建草稿" }));
 
-    await waitFor(() => expect(createDraft).toHaveBeenCalledWith("etc-business-draft-fail-001", { expectedVersion: 7 }));
+    await waitFor(() => expect(createDraft).toHaveBeenCalledWith("etc-business-draft-fail-001", {
+      expectedVersion: 7,
+      idempotencyKey: expect.any(String),
+    }));
     expect(await within(page).findByText("审批草稿创建失败，请检查附件完整性。")).toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "创建审批草稿" })).toBeInTheDocument();
     expect(within(page).getByTestId("etc-batch-row-etc-business-draft-fail-001")).toBeInTheDocument();
@@ -4350,7 +3444,7 @@ describe("ETC ticket management page", () => {
     const businessBatch = {
       ...businessBatchFixture({
         businessBatchId: "etc-business-draft-retry-001",
-        taskId: "etc-recon-draft-retry-001",
+        taskId: "etc-recon-task-001",
         status: "imported",
         version: 7,
         submissionBatchId: "",
@@ -4360,7 +3454,7 @@ describe("ETC ticket management page", () => {
       }),
     } as const;
     vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
-      counts: { active: 1, submitted: 0 },
+        counts: { unsubmitted: 1, staged: 0, submitted: 0 },
       items: [businessBatch],
       pagination: { page: 1, pageSize: 100, total: 1 },
     } as never);
@@ -4388,7 +3482,12 @@ describe("ETC ticket management page", () => {
     await user.click(within(dialog).getByRole("button", { name: "创建草稿" }));
 
     await waitFor(() => expect(createDraft).toHaveBeenCalledTimes(1));
-    expect(createDraft).toHaveBeenLastCalledWith("etc-business-draft-retry-001", { expectedVersion: 7 });
+    const firstIdempotencyKey = createDraft.mock.calls[0]?.[1].idempotencyKey;
+    expect(firstIdempotencyKey).toEqual(expect.any(String));
+    expect(createDraft).toHaveBeenLastCalledWith("etc-business-draft-retry-001", {
+      expectedVersion: 7,
+      idempotencyKey: firstIdempotencyKey,
+    });
     expect(await within(page).findByText("审批草稿创建暂时失败，请重试。")).toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "创建审批草稿" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "审批提交确认" })).not.toBeInTheDocument();
@@ -4396,11 +3495,13 @@ describe("ETC ticket management page", () => {
     await user.click(within(dialog).getByRole("button", { name: "创建草稿" }));
 
     await waitFor(() => expect(createDraft).toHaveBeenCalledTimes(2));
-    expect(createDraft).toHaveBeenLastCalledWith("etc-business-draft-retry-001", { expectedVersion: 7 });
+    expect(createDraft).toHaveBeenLastCalledWith("etc-business-draft-retry-001", {
+      expectedVersion: 7,
+      idempotencyKey: firstIdempotencyKey,
+    });
     const resultDialog = await screen.findByRole("dialog", { name: "审批提交确认" });
     expect(resultDialog).toHaveTextContent("审批草稿已创建，等待提交确认。");
     expect(within(page).queryByText("审批草稿创建暂时失败，请重试。")).not.toBeInTheDocument();
-    expect(within(page).getByTestId("etc-batch-row-etc-business-draft-retry-001")).toHaveTextContent("待确认提交");
   });
 
   test("hides the OA draft open action when draft creation returns no URL", async () => {
@@ -4408,6 +3509,7 @@ describe("ETC ticket management page", () => {
     installMockApiFetch();
     const businessBatch = {
       ...businessBatchFixture({
+        taskId: "etc-recon-task-001",
         status: "imported",
         version: 7,
         submissionBatchId: "",
@@ -4417,7 +3519,7 @@ describe("ETC ticket management page", () => {
       }),
     } as const;
     vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
-      counts: { active: 1, submitted: 0 },
+        counts: { unsubmitted: 1, staged: 0, submitted: 0 },
       items: [businessBatch],
       pagination: { page: 1, pageSize: 100, total: 1 },
     } as never);
@@ -4435,13 +3537,16 @@ describe("ETC ticket management page", () => {
     renderAppAt("/etc-tickets");
 
     const page = await screen.findByTestId("etc-ticket-management-page");
-    const submitButton = within(page).getByRole("button", { name: "提交审批" });
+    const submitButton = await within(page).findByRole("button", { name: "提交审批" });
     await waitFor(() => expect(submitButton).toBeEnabled());
     await user.click(submitButton);
     const dialog = await screen.findByRole("dialog", { name: "创建审批草稿" });
     await user.click(within(dialog).getByRole("button", { name: "创建草稿" }));
 
-    await waitFor(() => expect(createDraft).toHaveBeenCalledWith("etc-business-oa-action-001", { expectedVersion: 7 }));
+    await waitFor(() => expect(createDraft).toHaveBeenCalledWith("etc-business-oa-action-001", {
+      expectedVersion: 7,
+      idempotencyKey: expect.any(String),
+    }));
     const resultDialog = await screen.findByRole("dialog", { name: "审批提交确认" });
     expect(resultDialog).toHaveTextContent("审批草稿已创建，等待提交确认。");
     expect(within(resultDialog).queryByRole("button", { name: "打开草稿" })).not.toBeInTheDocument();

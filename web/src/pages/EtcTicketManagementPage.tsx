@@ -977,7 +977,7 @@ export default function EtcTicketManagementPage() {
   );
   const importedInvoiceCount = businessBatchDetail?.invoiceSummary.count ?? selectedTask?.importedInvoiceCount ?? 0;
   const importedInvoiceAmount = businessBatchDetail?.invoiceSummary.amount ?? selectedTask?.importedInvoiceAmount ?? "0.00";
-  const showTaskImportedInvoices = Boolean(selectedTask && businessBatchDetail?.invoiceItems.length);
+  const showTaskImportedInvoices = Boolean(selectedTask && businessBatchDetail?.invoiceItems?.length);
 
   useEffect(() => {
     if (batches.length === 0 && selectedBatchId) {
