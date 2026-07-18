@@ -801,22 +801,22 @@ class PostgresOpsTaxEtcRepository:
                     end as bucket
                 from canonical
                 where (
-                    %s
+                    %s::boolean
                     or (
                         nullif(batch_payload->>'owner_user_id', '') is null
                         and nullif(batch_payload->>'owner_org_id', '') is null
                     )
-                    or nullif(batch_payload->>'owner_user_id', '') = any(%s)
-                    or nullif(batch_payload->>'owner_org_id', '') = %s
+                    or nullif(batch_payload->>'owner_user_id', '') = any(%s::text[])
+                    or nullif(batch_payload->>'owner_org_id', '') = %s::text
                 )
-                  and (%s is null or task_id = %s)
+                  and (%s::text is null or task_id = %s::text)
                   and (
-                    %s is null
-                    or scope_month = to_date(%s, 'YYYY-MM')
+                    %s::text is null
+                    or scope_month = to_date(%s::text, 'YYYY-MM')
                     or (scope_month is null and exists (
                         select 1 from app.etc_invoices invoice
                         where invoice.business_batch_id = canonical.business_batch_id
-                          and %s in (
+                          and %s::text in (
                               left(coalesce(invoice.invoice_date::text, ''), 7),
                               left(coalesce(invoice.raw_payload->'normalized_payload'->>'passage_start_date', ''), 7),
                               left(coalesce(invoice.raw_payload->'normalized_payload'->>'passage_end_date', ''), 7)
@@ -824,22 +824,22 @@ class PostgresOpsTaxEtcRepository:
                     ))
                   )
                   and (
-                    %s is null
+                    %s::text is null
                     or exists (
                         select 1 from app.etc_invoices invoice
                         where invoice.business_batch_id = canonical.business_batch_id
-                          and lower(coalesce(invoice.raw_payload->'normalized_payload'->>'plate_number', '')) like '%%' || lower(%s) || '%%'
+                          and lower(coalesce(invoice.raw_payload->'normalized_payload'->>'plate_number', '')) like '%%' || lower(%s::text) || '%%'
                     )
                   )
                   and (
-                    %s is null
-                    or lower(coalesce(batch_payload->>'title', '')) like '%%' || lower(%s) || '%%'
-                    or lower(canonical.business_batch_id) like '%%' || lower(%s) || '%%'
-                    or lower(coalesce(batch_payload->>'external_etc_batch_id', '')) like '%%' || lower(%s) || '%%'
+                    %s::text is null
+                    or lower(coalesce(batch_payload->>'title', '')) like '%%' || lower(%s::text) || '%%'
+                    or lower(canonical.business_batch_id) like '%%' || lower(%s::text) || '%%'
+                    or lower(coalesce(batch_payload->>'external_etc_batch_id', '')) like '%%' || lower(%s::text) || '%%'
                     or exists (
                         select 1 from app.etc_invoices invoice
                         where invoice.business_batch_id = canonical.business_batch_id
-                          and lower(coalesce(invoice.invoice_no, '')) like '%%' || lower(%s) || '%%'
+                          and lower(coalesce(invoice.invoice_no, '')) like '%%' || lower(%s::text) || '%%'
                     )
                   )
             )
@@ -860,9 +860,9 @@ class PostgresOpsTaxEtcRepository:
             + """
                 select batch_payload, task_payload, scope_month, invoice_count, total_amount
                 from scoped
-                where bucket = %s
+                where bucket = %s::text
                 order by created_at desc, business_batch_id desc
-                limit %s offset %s
+                limit %s::integer offset %s::integer
             """,
             repeated_params + (bucket, page_size, (page - 1) * page_size),
         )

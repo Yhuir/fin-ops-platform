@@ -3451,6 +3451,15 @@ class EtcApiTests(unittest.TestCase):
             can_admin_access=True,
         )
         list_query_count = len(fetch_all_calls) + len(fetch_one_calls)
+        list_count_sql = fetch_all_calls[0][0]
+        list_page_sql = fetch_all_calls[1][0]
+        self.assertIn("%s::boolean", list_count_sql)
+        self.assertIn("any(%s::text[])", list_count_sql)
+        self.assertIn("(%s::text is null or task_id = %s::text)", list_count_sql)
+        self.assertIn("scope_month = to_date(%s::text, 'YYYY-MM')", list_count_sql)
+        self.assertIn("lower(%s::text)", list_count_sql)
+        self.assertIn("where bucket = %s::text", list_page_sql)
+        self.assertIn("limit %s::integer offset %s::integer", list_page_sql)
         repository.get_etc_business_batch_record("ETC-BATCH-PERF-SQL")
         repository.list_etc_invoice_records_by_ids(invoice_ids)
         repository.get_etc_reconciliation_task_record("ETC-TASK-PERF-SQL")

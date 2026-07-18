@@ -28,6 +28,16 @@
 
 ## 历史记录
 
+## 2026-07-18 - 生产 ETC bucket 查询参数类型修复
+
+- 目标：修复 Phase 12 首次生产发布后 `/api/etc/business-batches` 三个 bucket 均因 PostgreSQL 无法推断空筛选参数类型而返回 `500`。
+- 影响范围：仅 ETC business batch summary repository SQL 及其查询合同测试；不改变状态机、API DTO、模块边界、read model、worker、对象存储或其它页面 I/O。
+- 关键决策：在既有窄查询内为 boolean、text/text[]、bucket 和分页参数声明 PostgreSQL 类型，保留固定 2 SQL、direct-canonical 和零对象存储探测预算；不新增 fallback、缓存或第二读取路径。
+- 文档影响：模块边界与长期 API 合同不变，仅记录生产缺陷、修复和复验责任。
+- 测试覆盖：65 张发票 I/O 预算测试同时锁定所有可空筛选参数的显式类型；既有 ETC 窄 repository 架构 guard 继续通过。
+- 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_etc_backend.py::EtcApiTests::test_etc_business_batch_list_and_detail_keep_fixed_io_budgets_for_65_invoices -q`、对应 architecture guard、`bash scripts/verify.sh lint` 和部署后真实三 bucket canary。
+- 未测风险：提交前本机没有 disposable `FIN_OPS_TEST_DATABASE_URL`；真实 PostgreSQL 证据由同一修复 SHA 部署后的三 bucket canary 补齐。历史 `oa_draft_creating` 批次仍须依据真实 OA 结果走管理员恢复，禁止代码自动猜测。
+
 ## 2026-07-18 - ETC Phase 12 评审收口
 
 - 目标：闭合暂存行错误 target、批次切换/异步筛选自动选择后的旧 task mutation、OA finalize 全量旧 snapshot 覆盖、task 元数据部分失败不可重放、Audit 假 freshness/历史成员复用误报和 recovery 宽松布尔等评审问题。
