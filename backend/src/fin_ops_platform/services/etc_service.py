@@ -170,10 +170,6 @@ class EtcOADraftOutcomeUnknownError(EtcServiceError):
         super().__init__(message)
 
 
-class EtcOADraftRecoveryPermissionError(EtcServiceError):
-    pass
-
-
 class _EtcOAClientTransportError(EtcOAClientError):
     pass
 

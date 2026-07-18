@@ -201,14 +201,31 @@ class EtcBusinessBatchApiRoutes:
         session: OARequestSession,
     ) -> tuple[HTTPStatus, dict[str, Any]]:
         try:
+            confirmed_not_created = self._required_boolean_alias(
+                payload,
+                "confirmedNotCreated",
+                "confirmed_not_created",
+            )
+            oa_draft_id = str(payload.get("draftId") or payload.get("draft_id") or "").strip() or None
+            oa_draft_url = str(payload.get("draftUrl") or payload.get("draft_url") or "").strip() or None
+            if confirmed_not_created and (oa_draft_id or oa_draft_url):
+                raise EtcBusinessBatchInvalidTransitionError(
+                    "确认未创建 OA 草稿时不能同时提交草稿编号或链接。",
+                    code="invalid_oa_draft_recovery_decision",
+                )
+            if not confirmed_not_created and (not oa_draft_id or not oa_draft_url):
+                raise EtcBusinessBatchInvalidTransitionError(
+                    "确认已创建 OA 草稿时必须同时提交草稿编号和链接。",
+                    code="invalid_oa_draft_recovery_decision",
+                )
             result = self._application_service.recover_oa_draft_payload(
                 business_batch_id,
                 expected_version=self._optional_int(payload.get("expectedVersion") or payload.get("expected_version")),
                 reason=str(payload.get("reason") or "").strip(),
                 evidence=str(payload.get("evidence") or "").strip(),
-                oa_draft_id=str(payload.get("draftId") or payload.get("draft_id") or "").strip() or None,
-                oa_draft_url=str(payload.get("draftUrl") or payload.get("draft_url") or "").strip() or None,
-                confirmed_not_created=bool(payload.get("confirmedNotCreated") or payload.get("confirmed_not_created")),
+                oa_draft_id=oa_draft_id,
+                oa_draft_url=oa_draft_url,
+                confirmed_not_created=confirmed_not_created,
                 actor=self._actor(session),
             )
         except Exception as exc:
@@ -285,6 +302,16 @@ class EtcBusinessBatchApiRoutes:
         if value in (None, ""):
             return None
         return int(value)
+
+    @staticmethod
+    def _required_boolean_alias(payload: dict[str, Any], camel_name: str, snake_name: str) -> bool:
+        supplied = [(name, payload[name]) for name in (camel_name, snake_name) if name in payload]
+        if len(supplied) != 1 or type(supplied[0][1]) is not bool:
+            raise EtcBusinessBatchInvalidTransitionError(
+                f"{camel_name} 必须且只能提供一次，并且必须是布尔值。",
+                code="invalid_oa_draft_recovery_decision",
+            )
+        return supplied[0][1]
 
     @staticmethod
     def _success(status: HTTPStatus, data: object) -> tuple[HTTPStatus, dict[str, Any]]:

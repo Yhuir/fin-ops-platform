@@ -511,7 +511,8 @@ def _batch_relation_issues(
                 )
             )
         for invoice_id in expected_invoice_ids:
-            linked_invoice_owners[invoice_id].add(subject)
+            if invoice_id in expected_owned_invoice_ids:
+                linked_invoice_owners[invoice_id].add(subject)
             if invoice_id not in invoice_by_id:
                 issues.append(
                     _issue("etc_business_batch_invoice_missing", subject, {"invoice_id": invoice_id})
@@ -778,7 +779,10 @@ def _business_batch_lifecycle_issues(
             if invoice is None:
                 continue
             invoice_payload = _payload(invoice)
-            if _text(invoice.get("business_batch_id")) or _text(invoice_payload.get("current_batch_id")):
+            if (
+                _text(invoice.get("business_batch_id")) == subject
+                or _text(invoice_payload.get("current_batch_id")) == subject
+            ):
                 occupied.append({"resource": invoice_id, "field": "batch_occupancy"})
             if _text(invoice.get("status")) != "unsubmitted":
                 occupied.append({"resource": invoice_id, "field": "status"})

@@ -224,6 +224,63 @@ class EtcTicketsPageAuditTests(unittest.TestCase):
         report = etc_tickets_page_audit.audit_etc_tickets_page(connection)
         self.assertIn("etc_not_submitted_occupancy_mismatch", report["summary"]["issue_sample_counts_by_code"])
 
+        connection.invoices[0]["business_batch_id"] = "batch-2"
+        connection.batches.append(
+            {
+                "business_batch_id": "batch-2",
+                "task_id": "task-2",
+                "status": "imported",
+                "scope_month": "2026-07",
+                "invoice_count": 1,
+                "total_amount": "100.00",
+                "version": 1,
+                "raw_payload": {
+                    "normalized_payload": {
+                        "business_batch_id": "batch-2",
+                        "task_id": "task-2",
+                        "title": "七月 ETC 新批次",
+                        "status": "imported",
+                        "version": 1,
+                        "task_active_key": "task-2:active",
+                        "invoice_ids": ["etc-invoice-1"],
+                        "invoice_summary": {"count": 1, "amount": "100.00"},
+                        "import_batch_ids": ["import-1"],
+                    }
+                },
+            }
+        )
+        connection.tasks.append(
+            {
+                "task_id": "task-2",
+                "status": "imported",
+                "scope_month": "2026-07",
+                "source_file_id": None,
+                "result_summary": {},
+                "version": 1,
+                "raw_payload": {
+                    "normalized_payload": {
+                        "task_id": "task-2",
+                        "status": "imported",
+                        "version": 1,
+                        "title": "七月 ETC 新批次",
+                        "source_files": [],
+                        "credit_card_items": [],
+                        "ticket_root_items": [],
+                        "supplement_evidences": [],
+                        "reconciled_items": [],
+                    }
+                },
+            }
+        )
+        invoice_payload = connection.invoices[0]["raw_payload"]["normalized_payload"]
+        invoice_payload["business_batch_id"] = "batch-2"
+        invoice_payload["current_batch_id"] = "batch-2"
+
+        report = etc_tickets_page_audit.audit_etc_tickets_page(connection)
+
+        self.assertNotIn("etc_invoice_multiple_business_batches", report["summary"]["issue_sample_counts_by_code"])
+        self.assertNotIn("etc_not_submitted_occupancy_mismatch", report["summary"]["issue_sample_counts_by_code"])
+
     def test_missing_batch_task_is_blocking(self) -> None:
         connection = FakeConnection()
         connection.tasks = []

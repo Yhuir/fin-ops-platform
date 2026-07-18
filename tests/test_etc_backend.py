@@ -36,7 +36,12 @@ from fin_ops_platform.services.etc_service import (
     UploadedEtcZipFile,
     parse_etc_xml,
 )
-from fin_ops_platform.services.etc_business_batch_application_service import EtcBusinessBatchActor
+from fin_ops_platform.app.routes_etc import EtcBusinessBatchApiRoutes
+from fin_ops_platform.services.etc_business_batch_application_service import (
+    EtcBusinessBatchActor,
+    EtcBusinessBatchApplicationService,
+    evaluate_etc_oa_draft_action,
+)
 from fin_ops_platform.services.etc_document_parsers import CcbCreditCardStatementParser, SupplementEvidenceParser, TicketRootPdfTextParser
 from fin_ops_platform.services.etc_reconciliation_models import FileParseResult, SourceFileKind
 from fin_ops_platform.services.etc_reconciliation_service import EtcReconciliationTaskService
@@ -322,6 +327,62 @@ class PostgresLikeReconciliationStateStore(ApplicationStateStore):
 
 
 class EtcServiceTests(unittest.TestCase):
+    def test_oa_draft_action_fails_closed_when_reconciliation_task_is_missing(self) -> None:
+        batch = EtcBusinessBatch(
+            business_batch_id="batch-missing-task",
+            task_id="task-missing",
+            status=EtcBusinessBatchStatus.IMPORTED.value,
+            invoice_ids=["invoice-1"],
+        )
+        actor = EtcBusinessBatchActor(can_mutate_data=True)
+
+        action = evaluate_etc_oa_draft_action(batch, None, actor)
+
+        self.assertEqual(action["enabled"], False)
+        self.assertEqual(action["code"], "reconciliation_task_missing")
+        with self.assertRaisesRegex(EtcBusinessBatchInvalidTransitionError, "缺少绑定") as raised:
+            EtcBusinessBatchApplicationService._assert_reconciliation_task_allows_oa_draft(None)
+        self.assertEqual(raised.exception.code, "reconciliation_task_missing")
+
+    def test_recovery_route_requires_a_real_boolean_and_exclusive_evidence(self) -> None:
+        class FakeApplicationService:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            def recover_oa_draft_payload(self, _batch_id: str, **payload: object) -> dict[str, object]:
+                self.calls.append(payload)
+                return {"status": "oa_confirmation_pending"}
+
+        application_service = FakeApplicationService()
+        routes = EtcBusinessBatchApiRoutes(
+            application_service,  # type: ignore[arg-type]
+            delete_service=None,  # type: ignore[arg-type]
+            load_json_body=lambda _body: ({}, None),
+            refresh_after_etc_invoice_link=lambda _months, _reason: None,
+            persist_state=lambda: None,
+        )
+        session = SimpleNamespace(
+            identity=SimpleNamespace(user_id="u-1", username="finance", dept_id="finance"),
+            can_admin_access=True,
+            can_mutate_data=True,
+        )
+
+        for invalid in ("false", 0, None):
+            status, payload = routes.recover_oa_draft(
+                "batch-1",
+                {"confirmedNotCreated": invalid},
+                session=session,  # type: ignore[arg-type]
+            )
+            self.assertEqual(status, 422)
+            self.assertEqual(payload["error"]["code"], "invalid_oa_draft_recovery_decision")  # type: ignore[index]
+        status, _payload = routes.recover_oa_draft(
+            "batch-1",
+            {"confirmedNotCreated": True, "draftId": "oa-1", "draftUrl": "https://oa.test/1"},
+            session=session,  # type: ignore[arg-type]
+        )
+        self.assertEqual(status, 422)
+        self.assertEqual(application_service.calls, [])
+
     def test_legacy_business_batch_pickle_drops_removed_oa_detection_status(self) -> None:
         current_batch_cls = etc_service_module.EtcBusinessBatch
         legacy_batch_cls = make_dataclass(

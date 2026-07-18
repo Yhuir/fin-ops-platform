@@ -61,13 +61,14 @@ def evaluate_etc_oa_draft_action(
         return {"enabled": False, "code": "invalid_batch_status", "message": "当前批次状态不能创建审批草稿。"}
     if not list(getattr(batch, "invoice_ids", []) or []):
         return {"enabled": False, "code": "empty_business_batch", "message": "当前批次尚未导入 ETC 发票。"}
-    if task is not None:
-        task_status = getattr(task, "status", None)
-        if isinstance(task, dict):
-            task_status = task.get("status")
-        task_status = getattr(task_status, "value", task_status)
-        if str(task_status or "") not in {"imported", "closed"}:
-            return {"enabled": False, "code": "invalid_reconciliation_task_status", "message": "ETC 对账任务尚未完成发票导入。"}
+    if task is None:
+        return {"enabled": False, "code": "reconciliation_task_missing", "message": "当前批次缺少绑定的 ETC 对账任务，请刷新或联系管理员。"}
+    task_status = getattr(task, "status", None)
+    if isinstance(task, dict):
+        task_status = task.get("status")
+    task_status = getattr(task_status, "value", task_status)
+    if str(task_status or "") not in {"imported", "closed"}:
+        return {"enabled": False, "code": "invalid_reconciliation_task_status", "message": "ETC 对账任务尚未完成发票导入。"}
     return {"enabled": True, "code": "ready", "message": "可以提交审批。"}
 
 
@@ -541,7 +542,10 @@ class EtcBusinessBatchApplicationService:
     @classmethod
     def _assert_reconciliation_task_allows_oa_draft(cls, reconciliation_task: object | None) -> None:
         if reconciliation_task is None:
-            return
+            raise EtcBusinessBatchInvalidTransitionError(
+                "当前批次缺少绑定的 ETC 对账任务，不能创建 OA 草稿。",
+                code="reconciliation_task_missing",
+            )
         status = cls._enum_value(getattr(reconciliation_task, "status", None))
         if status in {"imported", "closed"}:
             return
