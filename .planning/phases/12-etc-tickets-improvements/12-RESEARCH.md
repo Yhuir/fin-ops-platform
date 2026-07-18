@@ -128,4 +128,3 @@ ETC 页面数秒首屏不是单一 SQL 问题，而是四段叠加：首屏读�
 - 部署后先 read-only list/detail/Audit canary，再用可回滚测试批次验证两个暂存出口，最后跑混合负载；失败立即回滚代码并保留 canonical 业务数据。
 
 ## RESEARCH COMPLETE
-
