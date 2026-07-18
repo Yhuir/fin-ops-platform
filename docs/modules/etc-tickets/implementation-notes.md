@@ -33,8 +33,11 @@
 - 目标：移除 ETC 页面 full task/重复 detail 热路径，解决提交按钮无解释禁用和永久 creating，形成“未提交 -> 暂存 -> 已提交/退回未提交”的高性能闭环。
 - 影响范围：ETC business batch state store/repository/application service、页面/API mapper、OA draft command、ETC Page Audit、模块/API/运维文档和定向测试；不新增 read model、cache、worker、migration 或跨页面 I/O。
 - 关键决策：summary list 直接走 PostgreSQL 窄查询，选中 batch 后只读一次精确 detail/task；`oa_confirmation_pending` 是唯一暂存事实；OA command 使用 durable prepare、锁外 HTTP、CAS finalize 和管理员 evidence recovery；not-submitted 保留业务成员与核对数据但释放 OA 占用。
+- 暂存确认闭环：创建 OA 草稿成功后，页面在确认窗口内保留完整的服务端 batch detail/version 作为后续 `manual-oa-status` target；即使该批次已从未提交集合移入暂存集合，也不能因当前列表 selection 被清空而让“已提交/未提交”按钮静默失效。
 - 旧链删除：删除页面 full task list、双 selection owner、duplicate detail effect、task-row/task-delete 私有 UI/CSS 和旧 mocks；保留正式 reconciliation/import/source-file 后端 API。static guard 禁止旧首屏 consumer、task delete UI和全量 hydrate/object-store probe 回到热路径。
 - Audit：新增 15 分钟 creating stale、attempt 缺失、pending draft 缺失、三 bucket/active-key 错配、submitted/not-submitted 占用闭合检查；仍只承诺只读 PostgreSQL snapshot，不伪装 OA 外部状态已被证明。
+- 性能预算：固定 65 张发票 fixture 证明 summary 首屏不携带 `invoiceIds` 且 JSON 不超过 250 KB，list/detail 不读取或探测对象存储，PostgreSQL list 固定 2 条 SQL、detail 固定 3 条 SQL；时间型 p95/p99 不使用本地 mock 冒充生产证据。
+- 本地验证：ETC backend/API/Audit/architecture guard 354 项通过（4 项依赖本机真实票根样例的条件性 skip）；ETC/Import Center/关联台/成本统计/OA 待付款/税务前端定向回归 228 项通过；ETC 与 ETC 导入 Playwright 14 项通过；production build、lint、docs 和 diff check 通过。
 - 未测风险：真实 OA、对象存储、生产数据量下延迟和当前历史 creating 批次恢复必须留到统一部署后的受控验证门；本次不部署、不写生产。
 
 ## 2026-07-18 - ETC 高性能三 bucket 实施前证据门
