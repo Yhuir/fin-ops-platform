@@ -806,12 +806,13 @@ def _business_batch_lifecycle_issues(
             if invoice is None:
                 continue
             invoice_payload = _payload(invoice)
+            current_business_batch_id = _text(invoice.get("business_batch_id"))
             if (
-                _text(invoice.get("business_batch_id")) == subject
+                current_business_batch_id == subject
                 or _text(invoice_payload.get("current_batch_id")) == subject
             ):
                 occupied.append({"resource": invoice_id, "field": "batch_occupancy"})
-            if _text(invoice.get("status")) != "unsubmitted":
+            if not current_business_batch_id and _text(invoice.get("status")) != "unsubmitted":
                 occupied.append({"resource": invoice_id, "field": "status"})
         for import_id in sorted(expected_import_ids):
             import_row = import_by_id.get(import_id)

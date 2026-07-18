@@ -199,6 +199,8 @@ class EtcTicketsPageAuditTests(unittest.TestCase):
                 "etc_invoice_id": "etc-invoice-1",
                 "status": "unsubmitted",
                 "business_batch_id": None,
+                "batch_id": None,
+                "task_id": "task-1",
                 "amount": "100.00",
                 "tax_amount": "0.00",
                 "total_with_tax": "100.00",
@@ -210,6 +212,9 @@ class EtcTicketsPageAuditTests(unittest.TestCase):
                         "import_batch_id": "import-1",
                         "current_batch_id": None,
                         "business_batch_id": None,
+                        "amount_without_tax": "100.00",
+                        "tax_amount": "0.00",
+                        "total_amount": "100.00",
                     }
                 },
             }
@@ -241,7 +246,7 @@ class EtcTicketsPageAuditTests(unittest.TestCase):
             {
                 "business_batch_id": "batch-2",
                 "task_id": "task-2",
-                "status": "imported",
+                "status": "manually_marked_submitted",
                 "scope_month": "2026-07",
                 "invoice_count": 1,
                 "total_amount": "100.00",
@@ -251,12 +256,13 @@ class EtcTicketsPageAuditTests(unittest.TestCase):
                         "business_batch_id": "batch-2",
                         "task_id": "task-2",
                         "title": "七月 ETC 新批次",
-                        "status": "imported",
+                        "status": "manually_marked_submitted",
                         "version": 1,
-                        "task_active_key": "task-2:active",
+                        "task_active_key": None,
                         "invoice_ids": ["etc-invoice-1"],
                         "invoice_summary": {"count": 1, "amount": "100.00"},
                         "import_batch_ids": ["import-1"],
+                        "submission_batch_id": "submission-2",
                     }
                 },
             }
@@ -284,14 +290,28 @@ class EtcTicketsPageAuditTests(unittest.TestCase):
                 },
             }
         )
+        connection.submission_batches = [
+            {
+                "submission_batch_id": "submission-2",
+                "status": "submitted_confirmed",
+                "invoice_ids": ["etc-invoice-1"],
+                "raw_payload": {
+                    "normalized_payload": {
+                        "invoice_ids": ["etc-invoice-1"],
+                    }
+                },
+            }
+        ]
+        connection.invoices[0]["status"] = "submitted"
+        connection.invoices[0]["batch_id"] = "submission-2"
         invoice_payload = connection.invoices[0]["raw_payload"]["normalized_payload"]
+        invoice_payload["status"] = "submitted"
         invoice_payload["business_batch_id"] = "batch-2"
-        invoice_payload["current_batch_id"] = "batch-2"
+        invoice_payload["current_batch_id"] = "submission-2"
 
         report = etc_tickets_page_audit.audit_etc_tickets_page(connection)
 
-        self.assertNotIn("etc_invoice_multiple_business_batches", report["summary"]["issue_sample_counts_by_code"])
-        self.assertNotIn("etc_not_submitted_occupancy_mismatch", report["summary"]["issue_sample_counts_by_code"])
+        self.assertEqual(report["overall_status"], "pass", report)
 
     def test_missing_batch_task_is_blocking(self) -> None:
         connection = FakeConnection()
