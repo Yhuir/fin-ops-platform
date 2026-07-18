@@ -28,6 +28,16 @@
 
 ## 历史记录
 
+## 2026-07-18 - ETC 高性能三 bucket 实施前证据门
+
+- 目标：在改写页面读链和 OA 草稿命令前，锁定正式 consumer、旧链删除边界、外部 OA 能力和生产只读基线。
+- 调用方/处置结论：`/api/etc/reconciliation-tasks*` 仍由 ETC Import Center、对账 workflow、source-file 上传/删除、导入确认和对应测试正式使用，必须保留；`fetchEtcReconciliationTasks` 仅从 `EtcTicketManagementPage` 首屏删除，不删除 API client 的其他正式 consumer；`fetchEtcBusinessBatchDetail` 保留一条选中批次的精确详情读，删除页面内第二个 duplicate detail effect；旧 `/api/etc/batches*`、ETC `oa-status/refresh` 和 invoice-id 级回退已无生产 owner，继续由 architecture guard 禁止回归。
+- 符号结论：`UploadedEtcZipFile` 在 `etc_service.py` 只有一个生产定义，导入流程、历史 repair 脚本和测试仍有正式调用，不删除正式定义；仅删除扫描确认的重复或无调用方声明。
+- Owner attestation：结合全仓 production/frontend/script/probe/deploy/test/docs 扫描，business batch list/detail 是 ETC 页面 canonical 读合同；reconciliation task 合同仍归导入/对账 workflow owner；未发现新 ETC 页面之外依赖将被删除的两 bucket、双选择或 duplicate-detail 页面私有链。
+- OA 能力结论：**neither verified**。当前 `HttpEtcOAClient` 只实现附件上传和表单草稿 `POST`，未发送 idempotency key，也没有按 `business_batch_id/oa_marker` 查询的已验证 provider 合同；本轮不伪造 exactly-once，选用管理员显式核实/恢复门，结果未知时禁止自动重试。
+- 生产只读基线：business batch list 中位约 189 ms，最慢约 284 ms，约 3.5 KB；full reconciliation task list 中位约 399 ms，最慢约 1.96 s，约 556 KB；batch detail 中位约 779 ms，最慢约 1.57 s，约 99 KB；相同 detail 两次并发约 1.02 s并下载两份 payload。当前 64 张发票活动批次 task=`imported`、batch=`oa_draft_creating`、缺 draft ID/URL，但 ETC Page Audit 仍错误通过。
+- 安全声明：本证据门只读文档与代码扫描，没有部署、生产 mutation、创建 OA 草稿或修改历史卡死批次。
+
 ## 2026-07-15 - ETC 页面 Audit import job 终态语义修复
 
 - 目标：修复 `failed` import job 被 `attempt_count < max_attempts` 错误判定为 durable queue backlog，避免已完成 ETC 任务长期显示“仍在排队”。
