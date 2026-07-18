@@ -717,6 +717,13 @@ def _business_batch_lifecycle_issues(
             for event in audit_events or []
             if isinstance(event, dict)
         }
+        attempt_event_times = [
+            event_at
+            for event in audit_events or []
+            if isinstance(event, dict)
+            and _text(event.get("event_type")) in {"oa_draft_prepared", "oa_draft_outcome_unknown"}
+            and (event_at := _datetime(event.get("created_at"))) is not None
+        ]
         missing_fields = []
         if not submission_id or submission is None:
             missing_fields.append("submission_batch_id")
@@ -732,14 +739,14 @@ def _business_batch_lifecycle_issues(
                     {"missing": missing_fields},
                 )
             )
-        updated_at = _datetime(row.get("updated_at")) or _datetime(payload.get("updated_at"))
-        if updated_at is None or datetime.now(UTC) - updated_at > OA_DRAFT_CREATING_STALE_AFTER:
+        attempt_at = max(attempt_event_times, default=None) or _datetime(payload.get("updated_at"))
+        if attempt_at is None or datetime.now(UTC) - attempt_at > OA_DRAFT_CREATING_STALE_AFTER:
             issues.append(
                 _issue(
                     "etc_oa_draft_creating_stale",
                     subject,
                     {
-                        "updated_at": updated_at.isoformat() if updated_at else None,
+                        "attempt_at": attempt_at.isoformat() if attempt_at else None,
                         "stale_after_minutes": int(OA_DRAFT_CREATING_STALE_AFTER.total_seconds() // 60),
                     },
                 )

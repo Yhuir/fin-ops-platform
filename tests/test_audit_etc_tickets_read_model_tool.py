@@ -109,8 +109,13 @@ class EtcTicketsPageAuditTests(unittest.TestCase):
         connection.batches[0].update(
             {
                 "status": "oa_draft_creating",
-                "updated_at": datetime.now(UTC) - timedelta(minutes=16),
-                "audit_events": [{"event_type": "oa_draft_prepared"}],
+                "updated_at": datetime.now(UTC),
+                "audit_events": [
+                    {
+                        "event_type": "oa_draft_prepared",
+                        "created_at": datetime.now(UTC) - timedelta(minutes=16),
+                    }
+                ],
             }
         )
         payload = connection.batches[0]["raw_payload"]["normalized_payload"]
@@ -119,6 +124,7 @@ class EtcTicketsPageAuditTests(unittest.TestCase):
                 "status": "oa_draft_creating",
                 "submission_batch_id": "submission-1",
                 "oa_draft_idempotency_key": "oa-intent-1",
+                "updated_at": datetime.now(UTC) - timedelta(minutes=16),
             }
         )
         connection.submission_batches = [
@@ -135,7 +141,12 @@ class EtcTicketsPageAuditTests(unittest.TestCase):
         self.assertIn("etc_oa_draft_creating_stale", report["summary"]["issue_sample_counts_by_code"])
         self.assertNotIn("etc_oa_draft_attempt_missing", report["summary"]["issue_sample_counts_by_code"])
 
-        connection.batches[0]["updated_at"] = datetime.now(UTC)
+        connection.batches[0]["updated_at"] = datetime.now(UTC) + timedelta(minutes=1)
+        report = etc_tickets_page_audit.audit_etc_tickets_page(connection)
+        self.assertIn("etc_oa_draft_creating_stale", report["summary"]["issue_sample_counts_by_code"])
+
+        connection.batches[0]["audit_events"][0]["created_at"] = datetime.now(UTC)
+        payload["updated_at"] = datetime.now(UTC)
         report = etc_tickets_page_audit.audit_etc_tickets_page(connection)
         self.assertNotIn("etc_oa_draft_creating_stale", report["summary"]["issue_sample_counts_by_code"])
 
