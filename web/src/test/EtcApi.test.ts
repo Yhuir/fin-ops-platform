@@ -89,7 +89,7 @@ describe("etc api", () => {
           JSON.stringify({
             ok: true,
             data: {
-              counts: { active: 1, submitted: 0 },
+              counts: { unsubmitted: 0, staged: 1, submitted: 0 },
               items: [
                 {
                   id: "etc_business_batch_0001",
@@ -105,17 +105,11 @@ describe("etc api", () => {
                   oa_draft_url: "https://oa.example.test/draft/001",
                   invoice_count: 37,
                   total_amount: "1673.30",
-                  import_attempts: [
-                    {
-                      attempt_id: "attempt-001",
-                      import_batch_id: "etc_import_batch_0004",
-                      imported: 35,
-                      duplicates_skipped: 1,
-                      attachments_completed: 0,
-                      failed: 0,
-                      created_at: "2026-05-19T09:00:00+08:00",
-                    },
-                  ],
+                  create_oa_draft_action: {
+                    enabled: false,
+                    code: "oa_confirmation_pending",
+                    message: "审批草稿已创建，请先确认是否已在 OA 提交。",
+                  },
                 },
               ],
               pagination: { page: 1, page_size: 100, total: 1 },
@@ -129,13 +123,13 @@ describe("etc api", () => {
     });
     global.fetch = fetchMock as typeof fetch;
 
-    const result = await fetchEtcBusinessBatches({ status: "active", month: "2026-05", keyword: "001" });
+    const result = await fetchEtcBusinessBatches({ bucket: "staged", month: "2026-05", keyword: "001" });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/etc/business-batches?status=active&month=2026-05&keyword=001&page=1&page_size=100",
+      "/api/etc/business-batches?bucket=staged&month=2026-05&keyword=001&page=1&page_size=100",
       expect.objectContaining({ method: "GET", credentials: "include" }),
     );
-    expect(result.counts).toEqual({ active: 1, submitted: 0 });
+    expect(result.counts).toEqual({ unsubmitted: 0, staged: 1, submitted: 0 });
     expect(result.items[0]).toMatchObject({
       businessBatchId: "etc_business_batch_0001",
       taskId: "etc-recon-task-001",
@@ -149,13 +143,10 @@ describe("etc api", () => {
       oaDraftId: "oa-draft-001",
       oaDraftUrl: "https://oa.example.test/draft/001",
       invoiceSummary: { count: 37, amount: "1673.30" },
-      importAttempts: [
-        expect.objectContaining({
-          attemptId: "attempt-001",
-          importBatchId: "etc_import_batch_0004",
-          imported: 35,
-        }),
-      ],
+      createOaDraftAction: expect.objectContaining({
+        enabled: false,
+        code: "oa_confirmation_pending",
+      }),
     });
   });
 

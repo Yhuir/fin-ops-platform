@@ -95,8 +95,11 @@ export type EtcBatchDetail = EtcBatchSummary & {
 
 export type EtcBatchCounts = {
   unsubmitted: number;
+  staged: number;
   submitted: number;
 };
+
+export type EtcBusinessBatchBucket = "unsubmitted" | "staged" | "submitted";
 
 export type EtcBatchQuery = {
   status?: EtcBatchStatus;
@@ -132,12 +135,14 @@ export type EtcBatchListPayload = {
 };
 
 export type EtcBusinessBatchCounts = {
-  active: number;
+  unsubmitted: number;
+  staged: number;
   submitted: number;
 };
 
 export type EtcBusinessBatchQuery = {
-  status?: "active" | "submitted" | EtcBusinessBatchStatus;
+  bucket?: EtcBusinessBatchBucket;
+  status?: EtcBusinessBatchStatus;
   month?: string;
   plate?: string;
   keyword?: string;
@@ -171,6 +176,12 @@ export type EtcBusinessBatchAuditEvent = {
   createdAt: string;
 };
 
+export type EtcCreateOaDraftAction = {
+  enabled: boolean;
+  code: string;
+  message: string;
+};
+
 export type EtcBusinessBatchSummary = {
   businessBatchId: string;
   taskId: string;
@@ -188,14 +199,15 @@ export type EtcBusinessBatchSummary = {
   oaRowId: string;
   oaProcessStatus: string;
   invoiceSummary: EtcBusinessBatchInvoiceSummary;
-  invoiceIds: string[];
-  importAttempts: EtcBusinessBatchImportAttempt[];
-  auditEvents: EtcBusinessBatchAuditEvent[];
+  createOaDraftAction: EtcCreateOaDraftAction;
   createdAt: string;
   updatedAt: string;
 };
 
 export type EtcBusinessBatchDetail = EtcBusinessBatchSummary & {
+  invoiceIds: string[];
+  importAttempts: EtcBusinessBatchImportAttempt[];
+  auditEvents: EtcBusinessBatchAuditEvent[];
   invoiceItems: EtcInvoice[];
 };
 

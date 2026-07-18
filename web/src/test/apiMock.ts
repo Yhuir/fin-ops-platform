@@ -355,6 +355,14 @@ function createEtcInvoiceStore(options: Pick<MockApiOptions, "etcInvoiceStoreBat
   const businessBatchIsSubmitted = (batch: (typeof batches)[number]) =>
     ["oa_submitted", "manually_marked_submitted"].includes(businessStatusForBatch(batch));
 
+  const businessBatchBucket = (batch: (typeof batches)[number]) => {
+    const status = businessStatusForBatch(batch);
+    if (["oa_submitted", "manually_marked_submitted", "closed"].includes(status)) {
+      return "submitted";
+    }
+    return status === "oa_confirmation_pending" ? "staged" : "unsubmitted";
+  };
+
   const batchBusinessIds = (batch: (typeof batches)[number]) => {
     const rawBatch = batch as Record<string, unknown>;
     return new Set([
@@ -478,11 +486,14 @@ function createEtcInvoiceStore(options: Pick<MockApiOptions, "etcInvoiceStoreBat
       : typeof rawBatch.invoiceSummary === "object" && rawBatch.invoiceSummary !== null
         ? rawBatch.invoiceSummary as Record<string, unknown>
         : null;
+    const batchStatus = businessStatusForBatch(batch);
+    const canCreateDraft = ["imported", "oa_draft_failed", "not_submitted", "manually_marked_not_submitted"].includes(batchStatus)
+      && hydrated.invoice_count > 0;
     return {
       business_batch_id: businessBatchId,
       task_id: textField(rawBatch, "task_id", "taskId") || (batchId === "etc-batch-unsubmitted-01" ? "etc-recon-task-001" : ""),
       title: textField(rawBatch, "title", "name"),
-      status: businessStatusForBatch(batch),
+      status: batchStatus,
       version: numberField(rawBatch, 7, "version"),
       owner_user_id: "web_finance_user",
       owner_org_id: "finance",
@@ -502,28 +513,35 @@ function createEtcInvoiceStore(options: Pick<MockApiOptions, "etcInvoiceStoreBat
         count: numberField(invoiceSummary ?? {}, hydrated.invoice_count, "count"),
         amount: textField(invoiceSummary ?? {}, "amount") || hydrated.total_amount,
       },
+      create_oa_draft_action: {
+        enabled: canCreateDraft,
+        code: canCreateDraft ? "ready" : batchStatus === "oa_confirmation_pending" ? "oa_confirmation_pending" : "invalid_batch_status",
+        message: canCreateDraft ? "可以提交审批。" : batchStatus === "oa_confirmation_pending" ? "审批草稿已创建，请先确认是否已在 OA 提交。" : "当前批次状态不能创建审批草稿。",
+      },
       scope_month: scopeMonth,
       amount_breakdown: {
         ...amountBreakdown,
         scope_month: scopeMonth,
       },
-      invoice_ids: getBatchInvoiceIds(batch),
-      import_attempts: [
-        {
-          attempt_id: `${batchId}-attempt-001`,
-          import_batch_id: `${batchId}-import-001`,
-          status: "imported",
-          imported: hydrated.invoice_count,
-          duplicates_skipped: 0,
-          attachments_completed: 0,
-          failed: 0,
-          created_at: "2026-05-19T09:00:00+08:00",
-        },
-      ],
-      audit_events: [],
       created_at: "2026-05-19T09:00:00+08:00",
       updated_at: "2026-05-19T09:00:00+08:00",
-      ...(includeInvoices ? { invoice_items: hydrated.invoice_items } : {}),
+      ...(includeInvoices ? {
+        invoice_ids: getBatchInvoiceIds(batch),
+        import_attempts: [
+          {
+            attempt_id: `${batchId}-attempt-001`,
+            import_batch_id: `${batchId}-import-001`,
+            status: "imported",
+            imported: hydrated.invoice_count,
+            duplicates_skipped: 0,
+            attachments_completed: 0,
+            failed: 0,
+            created_at: "2026-05-19T09:00:00+08:00",
+          },
+        ],
+        audit_events: [],
+        invoice_items: hydrated.invoice_items,
+      } : {}),
     };
   };
 
@@ -564,8 +582,8 @@ function createEtcInvoiceStore(options: Pick<MockApiOptions, "etcInvoiceStoreBat
         },
       };
     },
-    listBusinessBatches({ status, month, plate, keyword }: { status?: string | null; month?: string | null; plate?: string | null; keyword?: string | null }) {
-      const normalizedStatus = status === "active" ? "unsubmitted" : status === "submitted" ? "submitted" : null;
+    listBusinessBatches({ bucket, month, plate, keyword }: { bucket?: string | null; month?: string | null; plate?: string | null; keyword?: string | null }) {
+      const normalizedBucket = ["unsubmitted", "staged", "submitted"].includes(String(bucket)) ? bucket : "unsubmitted";
       const normalizedKeyword = String(keyword ?? "").trim().toLowerCase();
       const normalizedPlate = String(plate ?? "").trim().toLowerCase();
       const filteredBatches = batches
@@ -597,11 +615,7 @@ function createEtcInvoiceStore(options: Pick<MockApiOptions, "etcInvoiceStoreBat
         });
       const rows = filteredBatches
         .filter((batch) => {
-          if (!normalizedStatus) {
-            return true;
-          }
-          const submitted = businessBatchIsSubmitted(batch);
-          return normalizedStatus === "submitted" ? submitted : !submitted;
+          return businessBatchBucket(batch) === normalizedBucket;
         })
         .map((batch) => hydrateBusinessBatch(batch))
         .filter(Boolean);
@@ -609,8 +623,9 @@ function createEtcInvoiceStore(options: Pick<MockApiOptions, "etcInvoiceStoreBat
         ok: true,
         data: {
           counts: {
-            active: filteredBatches.filter((batch) => !businessBatchIsSubmitted(batch)).length,
-            submitted: filteredBatches.filter((batch) => businessBatchIsSubmitted(batch)).length,
+            unsubmitted: filteredBatches.filter((batch) => businessBatchBucket(batch) === "unsubmitted").length,
+            staged: filteredBatches.filter((batch) => businessBatchBucket(batch) === "staged").length,
+            submitted: filteredBatches.filter((batch) => businessBatchBucket(batch) === "submitted").length,
           },
           items: cloneJson(rows),
           pagination: {
@@ -5841,7 +5856,7 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       }
       return {
         body: etcInvoiceStore.listBusinessBatches({
-          status: url.searchParams.get("status"),
+          bucket: url.searchParams.get("bucket"),
           month: url.searchParams.get("month"),
           plate: url.searchParams.get("plate"),
           keyword: url.searchParams.get("keyword"),

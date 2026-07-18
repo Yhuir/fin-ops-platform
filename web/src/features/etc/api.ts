@@ -235,6 +235,16 @@ type ApiEtcBusinessBatch = ApiEtcBatch & {
   created_at?: string | null;
   updatedAt?: string | null;
   updated_at?: string | null;
+  createOaDraftAction?: {
+    enabled?: boolean;
+    code?: string;
+    message?: string;
+  } | null;
+  create_oa_draft_action?: {
+    enabled?: boolean;
+    code?: string;
+    message?: string;
+  } | null;
 };
 
 type ApiEtcBusinessBatchPayload = {
@@ -242,6 +252,7 @@ type ApiEtcBusinessBatchPayload = {
     active?: number;
     submitted?: number;
     unsubmitted?: number;
+    staged?: number;
   };
   items?: ApiEtcBusinessBatch[];
   businessBatches?: ApiEtcBusinessBatch[];
@@ -901,6 +912,7 @@ function mapBusinessBatchSummary(batch: ApiEtcBusinessBatch): EtcBusinessBatchSu
     ?? batch.etc_batch_id
     ?? legacySummary.externalBatchId
     ?? "";
+  const createOaDraftAction = batch.createOaDraftAction ?? batch.create_oa_draft_action;
   return {
     businessBatchId,
     taskId: batch.taskId ?? batch.task_id ?? "",
@@ -921,9 +933,11 @@ function mapBusinessBatchSummary(batch: ApiEtcBusinessBatch): EtcBusinessBatchSu
       count: invoiceSummary?.count ?? batch.invoiceCount ?? batch.invoice_count ?? 0,
       amount: normalizeMoney(invoiceSummary?.amount ?? batch.totalAmount ?? batch.total_amount),
     },
-    invoiceIds: stringArray(batch.invoiceIds ?? batch.invoice_ids),
-    importAttempts: (batch.importAttempts ?? batch.import_attempts ?? []).map(mapBusinessBatchImportAttempt),
-    auditEvents: (batch.auditEvents ?? batch.audit_events ?? []).map(mapBusinessBatchAuditEvent),
+    createOaDraftAction: {
+      enabled: Boolean(createOaDraftAction?.enabled),
+      code: createOaDraftAction?.code ?? "action_unavailable",
+      message: createOaDraftAction?.message ?? "当前批次暂不能提交审批。",
+    },
     createdAt: batch.createdAt ?? batch.created_at ?? "",
     updatedAt: batch.updatedAt ?? batch.updated_at ?? "",
   };
@@ -937,6 +951,9 @@ function mapBusinessBatchDetail(batch: ApiEtcBusinessBatch): EtcBusinessBatchDet
   };
   return {
     ...mapBusinessBatchSummary(batchWithSummary),
+    invoiceIds: stringArray(batch.invoiceIds ?? batch.invoice_ids),
+    importAttempts: (batch.importAttempts ?? batch.import_attempts ?? []).map(mapBusinessBatchImportAttempt),
+    auditEvents: (batch.auditEvents ?? batch.audit_events ?? []).map(mapBusinessBatchAuditEvent),
     invoiceItems: (batch.invoiceItems ?? batch.invoice_items ?? batch.items ?? []).map(mapInvoice),
   };
 }
@@ -1458,7 +1475,9 @@ export async function fetchEtcInvoices(query: EtcInvoiceQuery = {}): Promise<Etc
 
 export async function fetchEtcBusinessBatches(query: EtcBusinessBatchQuery = {}): Promise<EtcBusinessBatchListPayload> {
   const params = new URLSearchParams();
-  if (query.status) {
+  if (query.bucket) {
+    params.set("bucket", query.bucket);
+  } else if (query.status) {
     params.set("status", query.status);
   }
   if (query.month) {
@@ -1484,7 +1503,8 @@ export async function fetchEtcBusinessBatches(query: EtcBusinessBatchQuery = {})
   const items = (payload.items ?? payload.businessBatches ?? payload.business_batches ?? []).map(mapBusinessBatchSummary);
   return {
     counts: {
-      active: payload.counts?.active ?? payload.counts?.unsubmitted ?? 0,
+      unsubmitted: payload.counts?.unsubmitted ?? 0,
+      staged: payload.counts?.staged ?? 0,
       submitted: payload.counts?.submitted ?? 0,
     },
     items,

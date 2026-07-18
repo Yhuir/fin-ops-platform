@@ -39,10 +39,12 @@ async function openEtcDisclosure(
 }
 
 function businessBatchFixture(overrides: Record<string, unknown> = {}) {
+  const status = String(overrides.status ?? "oa_confirmation_pending");
+  const actionEnabled = ["imported", "oa_draft_failed", "not_submitted", "manually_marked_not_submitted"].includes(status);
   return {
     businessBatchId: "etc-business-oa-action-001",
     taskId: "etc-recon-oa-action-001",
-    status: "oa_confirmation_pending",
+    status,
     version: 8,
     ownerUserId: "web_finance_user",
     ownerOrgId: "finance",
@@ -54,6 +56,11 @@ function businessBatchFixture(overrides: Record<string, unknown> = {}) {
     oaRowId: "",
     oaProcessStatus: "",
     invoiceSummary: { count: 2, amount: "32.26" },
+    createOaDraftAction: {
+      enabled: actionEnabled,
+      code: actionEnabled ? "ready" : status,
+      message: actionEnabled ? "可以提交审批。" : "当前批次状态不能创建审批草稿。",
+    },
     scopeMonth: "2026-05",
     amountBreakdown: { scope_month: "2026-05" },
     invoiceIds: ["etc-inv-oa-action-001", "etc-inv-oa-action-002"],
@@ -243,10 +250,7 @@ describe("ETC ticket management page", () => {
       const batchListCalls = fetchMock.mock.calls.filter(([url]) => String(url).startsWith("/api/etc/business-batches?"));
       expect(batchListCalls.length).toBeGreaterThanOrEqual(2);
     });
-    await waitFor(() => {
-      const taskCalls = fetchMock.mock.calls.filter(([url]) => String(url) === "/api/etc/reconciliation-tasks");
-      expect(taskCalls.length).toBeGreaterThanOrEqual(2);
-    });
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/etc/reconciliation-tasks")).toBe(false);
     const taskCreateCalls = fetchMock.mock.calls.filter(([url, init]) =>
       String(url) === "/api/etc/reconciliation-tasks" && init?.method === "POST"
     );
@@ -261,16 +265,17 @@ describe("ETC ticket management page", () => {
     expect(within(page).getByRole("heading", { name: "ETC票据" })).toBeInTheDocument();
     expect(within(page).getByRole("radiogroup", { name: "ETC批次状态" })).toBeInTheDocument();
     expect(await within(page).findByRole("radio", { name: "未提交 2" })).toBeInTheDocument();
+    expect(within(page).getByRole("radio", { name: "暂存 0" })).toBeInTheDocument();
     expect(within(page).getByRole("radio", { name: "已提交 1" })).toBeInTheDocument();
     expect(within(page).getByRole("region", { name: "ETC批次列表区" })).toBeInTheDocument();
     expect(within(page).getByRole("list", { name: "ETC批次列表" })).toBeInTheDocument();
     expect(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-01")).toHaveTextContent("3月批次");
     await waitFor(() => expect(within(page).getByRole("button", { name: "提交审批" })).toBeEnabled());
     expect(within(page).getAllByText("3月批次").length).toBeGreaterThanOrEqual(1);
-    expect(await within(page).findByText("ETC-2026-001")).toBeInTheDocument();
+    expect((await within(page).findAllByText("ETC-2026-001")).length).toBeGreaterThanOrEqual(1);
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/etc/business-batches?status=active&page=1&page_size=100",
+      "/api/etc/business-batches?bucket=unsubmitted&page=1&page_size=100",
       expect.objectContaining({ method: "GET" }),
     );
     expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/etc/invoices?"))).toBe(false);
@@ -317,7 +322,7 @@ describe("ETC ticket management page", () => {
       expect(within(page).getByRole("radio", { name: "未提交 2" })).toHaveAttribute("aria-checked", "true");
       expect(within(page).getByTestId("etc-batch-row-etc-batch-unsubmitted-01")).toHaveTextContent("3月批次");
     });
-    expect(await within(page).findByText("ETC-2026-001")).toBeInTheDocument();
+    expect((await within(page).findAllByText("ETC-2026-001")).length).toBeGreaterThanOrEqual(1);
 
     const businessBatchRequests = fetchMock.mock.calls.filter(([input, init]) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
@@ -343,7 +348,7 @@ describe("ETC ticket management page", () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/etc/business-batches?status=active&plate=%E4%BA%91ADA0381&keyword=ETC-2026&page=1&page_size=100",
+        "/api/etc/business-batches?bucket=unsubmitted&plate=%E4%BA%91ADA0381&keyword=ETC-2026&page=1&page_size=100",
         expect.objectContaining({ method: "GET" }),
       );
     });
@@ -352,7 +357,7 @@ describe("ETC ticket management page", () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/etc/business-batches?status=submitted&plate=%E4%BA%91ADA0381&keyword=ETC-2026&page=1&page_size=100",
+        "/api/etc/business-batches?bucket=submitted&plate=%E4%BA%91ADA0381&keyword=ETC-2026&page=1&page_size=100",
         expect.objectContaining({ method: "GET" }),
       );
     });
@@ -372,7 +377,7 @@ describe("ETC ticket management page", () => {
     expect(within(page).queryByLabelText("月份")).not.toBeInTheDocument();
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/etc/business-batches?status=active&page=1&page_size=100",
+        "/api/etc/business-batches?bucket=unsubmitted&page=1&page_size=100",
         expect.objectContaining({ method: "GET" }),
       );
     });
@@ -384,7 +389,7 @@ describe("ETC ticket management page", () => {
     await user.click(within(page).getByRole("radio", { name: "已提交 1" }));
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
-        "/api/etc/business-batches?status=submitted&page=1&page_size=100",
+        "/api/etc/business-batches?bucket=submitted&page=1&page_size=100",
         expect.objectContaining({ method: "GET" }),
       );
     });

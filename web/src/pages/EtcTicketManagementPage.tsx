@@ -28,15 +28,12 @@ import {
   createEtcBusinessBatchOaDraft,
   deleteEtcBusinessBatch,
   deleteEtcReconciliationTask,
-  deleteEtcReconciliationTaskImportedInvoices,
   deleteEtcReconciliationSourceFile,
   downloadEtcBusinessBatchInvoicePdf,
   fetchEtcBusinessBatchDetail,
   fetchEtcBusinessBatches,
-  fetchEtcInvoices,
   fetchEtcReconciliationTask,
   manualEtcBusinessBatchOaStatus,
-  fetchEtcReconciliationTasks,
   patchEtcReconciliationItem,
   refreshEtcReconciliationMatches,
   reopenEtcReconciliationTask,
@@ -52,6 +49,7 @@ import type {
   EtcBatchStatus,
   EtcBatchSummary,
   EtcBusinessBatchDetail,
+  EtcBusinessBatchBucket,
   EtcBusinessBatchStatus,
   EtcBusinessBatchSummary,
   EtcCreditCardItem,
@@ -65,6 +63,7 @@ import type {
 
 const initialCounts: EtcBatchCounts = {
   unsubmitted: 0,
+  staged: 0,
   submitted: 0,
 };
 
@@ -270,9 +269,12 @@ function isSubmittedBusinessStatus(status: EtcBusinessBatchStatus) {
   return status === "oa_submitted" || status === "manually_marked_submitted" || status === "closed";
 }
 
-function businessBatchListBucket(status: EtcBusinessBatchStatus): "unsubmitted" | "submitted" | null {
+function businessBatchListBucket(status: EtcBusinessBatchStatus): EtcBusinessBatchBucket | null {
   if (isSubmittedBusinessStatus(status)) {
     return "submitted";
+  }
+  if (status === "oa_confirmation_pending") {
+    return "staged";
   }
   if (status === "deleted" || status === "superseded") {
     return null;
@@ -280,10 +282,8 @@ function businessBatchListBucket(status: EtcBusinessBatchStatus): "unsubmitted" 
   return "unsubmitted";
 }
 
-function businessBatchBelongsToBatchStatus(status: EtcBusinessBatchStatus, activeStatus: EtcBatchStatus) {
-  const bucket = businessBatchListBucket(status);
-  const currentBucket = activeStatus === "submitted" ? "submitted" : "unsubmitted";
-  return bucket === currentBucket;
+function businessBatchBelongsToBatchStatus(status: EtcBusinessBatchStatus, activeStatus: EtcBusinessBatchBucket) {
+  return businessBatchListBucket(status) === activeStatus;
 }
 
 function transitionBusinessBatchCounts(
@@ -299,11 +299,15 @@ function transitionBusinessBatchCounts(
   const nextCounts = { ...counts };
   if (previousBucket === "submitted") {
     nextCounts.submitted = Math.max(0, nextCounts.submitted - 1);
+  } else if (previousBucket === "staged") {
+    nextCounts.staged = Math.max(0, nextCounts.staged - 1);
   } else if (previousBucket === "unsubmitted") {
     nextCounts.unsubmitted = Math.max(0, nextCounts.unsubmitted - 1);
   }
   if (nextBucket === "submitted") {
     nextCounts.submitted += 1;
+  } else if (nextBucket === "staged") {
+    nextCounts.staged += 1;
   } else if (nextBucket === "unsubmitted") {
     nextCounts.unsubmitted += 1;
   }
@@ -312,10 +316,6 @@ function transitionBusinessBatchCounts(
 
 function isOaConfirmationPendingStatus(status: EtcBusinessBatchStatus) {
   return status === "oa_confirmation_pending";
-}
-
-function canCreateOaDraft(status: EtcBusinessBatchStatus) {
-  return status === "imported" || status === "oa_draft_failed" || status === "not_submitted" || status === "manually_marked_not_submitted";
 }
 
 function batchOaLabel(batch: EtcBatchSummary) {
@@ -703,57 +703,6 @@ function businessBatchToBatchDetail(batch: EtcBusinessBatchDetail): EtcBatchDeta
   };
 }
 
-function taskImportInvoicesToBatchDetail(task: EtcReconciliationTask, invoiceItems: EtcInvoice[]): EtcBatchDetail {
-  const issueDates = invoiceItems.map((invoice) => invoice.issueDate).filter(Boolean).sort();
-  const passageDates = invoiceItems
-    .flatMap((invoice) => [invoice.passageStartDate, invoice.passageEndDate])
-    .filter((value): value is string => Boolean(value))
-    .sort();
-  const totalAmount = invoiceItems.length > 0 ? sumInvoiceTotalAmount(invoiceItems) : task.importedInvoiceAmount;
-  const plateCounts = new Map<string, { invoiceCount: number; totalAmount: number }>();
-  invoiceItems.forEach((invoice) => {
-    const plateNumber = invoice.plateNumber || "未识别车牌";
-    const current = plateCounts.get(plateNumber) ?? { invoiceCount: 0, totalAmount: 0 };
-    current.invoiceCount += 1;
-    const amount = Number(invoice.totalAmount);
-    current.totalAmount += Number.isFinite(amount) ? amount : 0;
-    plateCounts.set(plateNumber, current);
-  });
-  return {
-    id: task.importBatchId,
-    etcBatchId: task.etcBatchId || task.importBatchId,
-    externalBatchId: task.etcBatchId || task.importBatchId,
-    scopeMonth: "",
-    status: "unsubmitted",
-    sourceType: "etc_import_batch",
-    invoiceCount: task.importedInvoiceCount || invoiceItems.length,
-    totalAmount,
-    taxAmount: "0.00",
-    issueStartDate: issueDates[0] ?? null,
-    issueEndDate: issueDates[issueDates.length - 1] ?? null,
-    passageStartDate: passageDates[0] ?? null,
-    passageEndDate: passageDates[passageDates.length - 1] ?? null,
-    plateCount: plateCounts.size,
-    plateSummary: Array.from(plateCounts.entries()).map(([plateNumber, item]) => ({
-      plateNumber,
-      invoiceCount: item.invoiceCount,
-      totalAmount: item.totalAmount.toFixed(2),
-    })),
-    linkedOaRowId: task.oaDraftBatchId,
-    linkedOaCaseId: task.oaDraftBatchId,
-    linkedOaApplicant: "",
-    linkedOaApplyDate: "",
-    linkedOaAmount: task.oaTotalAmount,
-    amountDelta: "0.00",
-    etcInvoiceCount: task.etcInvoiceCount || invoiceItems.length,
-    supplementCount: task.supplementCount,
-    supplementAmount: task.supplementAmount,
-    displayCountText: `发票 ${task.etcInvoiceCount || invoiceItems.length} + 补充凭证 ${task.supplementCount}`,
-    note: task.title,
-    invoiceItems,
-  };
-}
-
 const DESCRIPTION_EXPANSION_UNITS = 12;
 
 function estimatedDescriptionUnits(text: string) {
@@ -827,7 +776,7 @@ function ReconciliationDescriptionCell({
 export default function EtcTicketManagementPage() {
   const { jobs } = useBackgroundJobProgress();
   const { canMutateData } = useSessionPermissions();
-  const [activeStatus, setActiveStatus] = useState<EtcBatchStatus>("unsubmitted");
+  const [activeStatus, setActiveStatus] = useState<EtcBusinessBatchBucket>("unsubmitted");
   const [plate, setPlate] = useState("");
   const [keyword, setKeyword] = useState("");
   const [counts, setCounts] = useState(initialCounts);
@@ -836,9 +785,8 @@ export default function EtcTicketManagementPage() {
   const [selectedBatchId, setSelectedBatchId] = useState("");
   const [batchDetail, setBatchDetail] = useState<EtcBatchDetail | null>(null);
   const [businessBatchDetail, setBusinessBatchDetail] = useState<EtcBusinessBatchDetail | null>(null);
-  const [taskImportBatchDetail, setTaskImportBatchDetail] = useState<EtcBatchDetail | null>(null);
-  const [reconciliationTasks, setReconciliationTasks] = useState<EtcReconciliationTask[]>([]);
-  const [selectedTaskId, setSelectedTaskId] = useState("");
+  const [detailReloadKey, setDetailReloadKey] = useState(0);
+  const [selectedTask, setSelectedTask] = useState<EtcReconciliationTask | null>(null);
   const [selectedCardItemId, setSelectedCardItemId] = useState("");
   const [selectedEvidenceRowId, setSelectedEvidenceRowId] = useState("");
   const [selectedReconciliationRowIds, setSelectedReconciliationRowIds] = useState<Set<string>>(() => new Set());
@@ -851,8 +799,6 @@ export default function EtcTicketManagementPage() {
   const [loading, setLoading] = useState(false);
   const [taskLoading, setTaskLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [taskImportDetailLoading, setTaskImportDetailLoading] = useState(false);
-  const [taskImportDetailError, setTaskImportDetailError] = useState<string | null>(null);
   const [batchListError, setBatchListError] = useState<string | null>(null);
   const [taskListError, setTaskListError] = useState<string | null>(null);
   const [batchDetailError, setBatchDetailError] = useState<string | null>(null);
@@ -860,10 +806,7 @@ export default function EtcTicketManagementPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [workflowExpandedKeys, setWorkflowExpandedKeys] = useState<Set<Key>>(() => new Set(["upload", "reconciliation"]));
   const [batchDetailExpandedKeys, setBatchDetailExpandedKeys] = useState<Set<Key>>(() => new Set(["summary", "invoices"]));
-  const [, setLocallySubmittedTaskIds] = useState<Set<string>>(() => new Set());
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
-  const [removeImportedInvoicesDialogOpen, setRemoveImportedInvoicesDialogOpen] = useState(false);
-  const [removeImportedInvoicesSubmitting, setRemoveImportedInvoicesSubmitting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
   const [draftCreating, setDraftCreating] = useState(false);
@@ -878,7 +821,7 @@ export default function EtcTicketManagementPage() {
 
   const loadBatches = useCallback(async (
     signal?: AbortSignal,
-    statusOverride?: "unsubmitted" | "submitted",
+    statusOverride?: EtcBusinessBatchBucket,
   ) => {
     setLoading(true);
     setBatchListError(null);
@@ -886,14 +829,14 @@ export default function EtcTicketManagementPage() {
     const effectiveStatus = statusOverride ?? activeStatus;
     try {
       const payload = await fetchEtcBusinessBatches({
-        status: effectiveStatus === "submitted" ? "submitted" : "active",
+        bucket: effectiveStatus,
         plate: plate.trim(),
         keyword: keyword.trim(),
         signal,
       });
       setBusinessBatches(payload.items);
       const visibleItems = payload.items.map(businessBatchToBatchSummary);
-      setCounts({ unsubmitted: payload.counts.active, submitted: payload.counts.submitted });
+      setCounts(payload.counts);
       setBatches(visibleItems);
       setSelectedBatchId((current) => {
         if (payload.items.some((batch) => batch.businessBatchId === current)) {
@@ -910,36 +853,6 @@ export default function EtcTicketManagementPage() {
     }
   }, [activeStatus, keyword, plate]);
 
-  const loadReconciliationTasks = useCallback(async (signal?: AbortSignal) => {
-    setTaskLoading(true);
-    setTaskListError(null);
-    try {
-      const payload = await fetchEtcReconciliationTasks(signal);
-      setReconciliationTasks(payload.items);
-      setLocallySubmittedTaskIds((current) => {
-        const next = new Set(current);
-        payload.items.forEach((task) => {
-          if (taskHasSubmittedConfirmation(task)) {
-            next.add(task.taskId);
-          }
-        });
-        return next;
-      });
-      setSelectedTaskId((current) => {
-        if (payload.items.some((task) => task.taskId === current)) {
-          return current;
-        }
-        return payload.items[0]?.taskId ?? "";
-      });
-    } catch (caught) {
-      if (!(caught instanceof DOMException && caught.name === "AbortError")) {
-        setTaskListError(formatEtcUiErrorMessage(caught, "ETC批次流程加载失败。"));
-      }
-    } finally {
-      setTaskLoading(false);
-    }
-  }, []);
-
   useEffect(() => {
     const controller = new AbortController();
     void loadBatches(controller.signal);
@@ -947,18 +860,10 @@ export default function EtcTicketManagementPage() {
   }, [loadBatches]);
 
   useEffect(() => {
-    if (activeStatus !== "unsubmitted") {
-      return undefined;
-    }
-    const controller = new AbortController();
-    void loadReconciliationTasks(controller.signal);
-    return () => controller.abort();
-  }, [activeStatus, loadReconciliationTasks]);
-
-  useEffect(() => {
     if (!selectedBatchId) {
       setBatchDetail(null);
       setBusinessBatchDetail(null);
+      setSelectedTask(null);
       setBatchDetailError(null);
       return undefined;
     }
@@ -972,6 +877,25 @@ export default function EtcTicketManagementPage() {
           setBatchDetailError(null);
           setBusinessBatchDetail(detail);
           setBatchDetail(businessBatchToBatchDetail(detail));
+          setTaskLoading(true);
+          setTaskListError(null);
+          void fetchEtcReconciliationTask(detail.taskId, controller.signal)
+            .then((task) => {
+              if (!controller.signal.aborted) {
+                setSelectedTask(task);
+              }
+            })
+            .catch((caught) => {
+              if (!(caught instanceof DOMException && caught.name === "AbortError")) {
+                setSelectedTask(null);
+                setTaskListError(formatEtcUiErrorMessage(caught, "ETC批次流程加载失败。"));
+              }
+            })
+            .finally(() => {
+              if (!controller.signal.aborted) {
+                setTaskLoading(false);
+              }
+            });
         }
       })
       .catch((caught) => {
@@ -998,7 +922,7 @@ export default function EtcTicketManagementPage() {
         }
       });
     return () => controller.abort();
-  }, [selectedBatchId]);
+  }, [detailReloadKey, selectedBatchId]);
 
   useEffect(() => {
     const completedImportJobs = jobs.filter(
@@ -1025,14 +949,12 @@ export default function EtcTicketManagementPage() {
           source: "etc_import_job_completed",
         });
         await loadBatches();
-        if (activeStatus === "unsubmitted") {
-          await loadReconciliationTasks();
-        }
+        setDetailReloadKey((current) => current + 1);
       } catch {
         setActionError("ETC发票导入已完成，但数据同步状态检查失败，请稍后刷新。");
       }
     })();
-  }, [activeStatus, jobs, loadBatches, loadReconciliationTasks]);
+  }, [jobs, loadBatches]);
 
   const selectedBatch = useMemo(
     () => batchDetail ?? batches.find((batch) => batch.id === selectedBatchId) ?? null,
@@ -1042,10 +964,6 @@ export default function EtcTicketManagementPage() {
     () => businessBatchDetail ?? businessBatches.find((batch) => batch.businessBatchId === selectedBatchId) ?? null,
     [businessBatchDetail, businessBatches, selectedBatchId],
   );
-  const selectedTask = useMemo(
-    () => reconciliationTasks.find((task) => task.taskId === selectedTaskId) ?? null,
-    [reconciliationTasks, selectedTaskId],
-  );
   const visibleBusinessBatchSummaries = useMemo(
     () => batches,
     [batches],
@@ -1054,81 +972,9 @@ export default function EtcTicketManagementPage() {
     () => visibleBusinessBatchSummaries,
     [visibleBusinessBatchSummaries],
   );
-  const visibleWorkflowTaskIds = useMemo(() => {
-    return new Set(reconciliationTasks.filter((task) => !taskHasSubmittedConfirmation(task)).map((task) => task.taskId));
-  }, [reconciliationTasks]);
-  useEffect(() => {
-    setSelectedTaskId((current) => {
-      if (!current || visibleWorkflowTaskIds.has(current)) {
-        return current;
-      }
-      return "";
-    });
-  }, [visibleWorkflowTaskIds]);
-  const selectedTaskBusinessBatch = useMemo(
-    () => selectedTask
-      ? businessBatches.find((batch) => batch.taskId === selectedTask.taskId) ?? null
-      : null,
-    [businessBatches, selectedTask],
-  );
-  const selectedTaskImportBatchId = selectedTaskBusinessBatch?.businessBatchId || selectedTask?.importBatchId || "";
-  const taskImportInvoiceItems = taskImportBatchDetail?.invoiceItems ?? [];
-  const importedInvoiceCount = taskImportBatchDetail
-    ? (taskImportBatchDetail.invoiceCount > 0 ? taskImportBatchDetail.invoiceCount : taskImportInvoiceItems.length)
-    : (selectedTask?.importedInvoiceCount ?? 0);
-  const importedInvoiceAmount = taskImportBatchDetail
-    ? (Number(taskImportBatchDetail.totalAmount) > 0 || taskImportInvoiceItems.length === 0
-      ? taskImportBatchDetail.totalAmount
-      : sumInvoiceTotalAmount(taskImportInvoiceItems))
-    : (selectedTask?.importedInvoiceAmount || "0.00");
-  const canRemoveImportedInvoices = Boolean(
-    selectedTask
-    && selectedTaskImportBatchId
-    && !selectedTaskBusinessBatch
-    && importedInvoiceCount > 0
-    && !taskHasOaDraftOrSubmittedLink(selectedTask),
-  );
-  const showTaskImportedInvoices = Boolean(selectedTask && selectedTaskImportBatchId && !selectedTaskBusinessBatch);
-
-  useEffect(() => {
-    if (!selectedTaskImportBatchId) {
-      setTaskImportBatchDetail(null);
-      setTaskImportDetailError(null);
-      setTaskImportDetailLoading(false);
-      return undefined;
-    }
-    const controller = new AbortController();
-    setTaskImportBatchDetail(null);
-    setTaskImportDetailError(null);
-    setTaskImportDetailLoading(true);
-    const detailLoader = selectedTaskBusinessBatch
-      ? fetchEtcBusinessBatchDetail(selectedTaskImportBatchId, controller.signal).then(businessBatchToBatchDetail)
-      : selectedTask
-        ? fetchEtcInvoices({
-          importBatchId: selectedTaskImportBatchId,
-          page: 1,
-          pageSize: 500,
-          signal: controller.signal,
-        }).then((payload) => taskImportInvoicesToBatchDetail(selectedTask, payload.items))
-        : Promise.resolve(null);
-    void detailLoader
-      .then((detail) => {
-        if (!controller.signal.aborted && detail) {
-          setTaskImportBatchDetail(detail);
-        }
-      })
-      .catch((caught) => {
-        if (!(caught instanceof DOMException && caught.name === "AbortError")) {
-          setTaskImportDetailError(formatEtcUiErrorMessage(caught, "已导入发票加载失败。"));
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) {
-          setTaskImportDetailLoading(false);
-        }
-      });
-    return () => controller.abort();
-  }, [selectedTask, selectedTaskBusinessBatch, selectedTaskImportBatchId]);
+  const importedInvoiceCount = businessBatchDetail?.invoiceSummary.count ?? selectedTask?.importedInvoiceCount ?? 0;
+  const importedInvoiceAmount = businessBatchDetail?.invoiceSummary.amount ?? selectedTask?.importedInvoiceAmount ?? "0.00";
+  const showTaskImportedInvoices = Boolean(selectedTask && businessBatchDetail?.invoiceItems.length);
 
   useEffect(() => {
     if (batches.length === 0 && selectedBatchId) {
@@ -1145,19 +991,6 @@ export default function EtcTicketManagementPage() {
     setBusinessBatchDetail(null);
     setSelectedBatchId(firstBusinessBatch?.id ?? "");
   }, [batches.length, selectedBatchId, visibleBatches]);
-
-  useEffect(() => {
-    if (!selectedTaskId) {
-      return;
-    }
-    if (activeStatus === "unsubmitted" && visibleWorkflowTaskIds.has(selectedTaskId)) {
-      return;
-    }
-    setSelectedTaskId("");
-    setTaskImportBatchDetail(null);
-    setTaskImportDetailError(null);
-    setTaskImportDetailLoading(false);
-  }, [activeStatus, selectedTaskId, visibleWorkflowTaskIds]);
 
   const ticketRootManualSources = useMemo(
     () => (selectedTask?.sourceFiles ?? []).filter(isManualTicketRootSource),
@@ -1199,7 +1032,7 @@ export default function EtcTicketManagementPage() {
     setSelectedReconciliationRowIds(new Set());
     setExpandedDescriptionRowIds(new Set());
     setReviewNote("");
-  }, [selectedTaskId]);
+  }, [selectedTask?.taskId]);
 
   const invoiceRows = batchDetail?.invoiceItems ?? [];
   function taskHasOaDraftOrSubmittedLink(task: EtcReconciliationTask) {
@@ -1207,28 +1040,7 @@ export default function EtcTicketManagementPage() {
   }
   const businessBatchDeleteBlockReason = (_batch: EtcBusinessBatchSummary) => canMutateData ? "" : "当前账号仅支持查看和导出，不能删除 ETC 批次。";
   const canDeleteBusinessBatch = (batch: EtcBusinessBatchSummary) => !businessBatchDeleteBlockReason(batch);
-  const taskLinkedBusinessBatch = (task: EtcReconciliationTask) => {
-    const importBatchId = task.importBatchId?.trim();
-    return businessBatches.find((batch) =>
-      batch.taskId === task.taskId
-      && (!importBatchId || batch.importBatchIds.includes(importBatchId))
-    ) ?? null;
-  };
-  const canRemoveImportedInvoicesFromTask = (task: EtcReconciliationTask) =>
-    canMutateData && task.status === "imported" && Boolean(task.importBatchId?.trim()) && !task.submittedConfirmedAt?.trim();
   const canDeleteTask = (_task: EtcReconciliationTask) => canMutateData;
-  const removeImportedInvoicesDisabledReason = (task: EtcReconciliationTask) => {
-    if (task.submittedConfirmedAt?.trim()) {
-      return "审批已提交，不能移除已导入发票";
-    }
-    if (task.status === "importing") {
-      return "导入中，不能移除已导入发票";
-    }
-    if (task.status === "closed") {
-      return "已关闭批次不能移除已导入发票";
-    }
-    return "当前任务不能移除已导入发票";
-  };
   const deleteTaskDescription = (task: EtcReconciliationTask) => {
     if (task.status === "imported") {
       return "将删除本地批次、上传文件、核对结果和已导入发票。审批系统中的草稿和已提交记录不会删除。";
@@ -1430,29 +1242,20 @@ export default function EtcTicketManagementPage() {
     };
   }, [reconciliationRows, selectedReconciliationRowIds]);
   const selectedConfirmedCreditCardItemIds = selectedReconciliationSummary.creditCardItemIds;
-  const selectedTaskImportBatchSelected = Boolean(selectedTask && selectedTaskImportBatchId);
-  const selectedTaskImportBatchCanSubmit = Boolean(
-    canMutateData
-    && selectedTask
-    && selectedTaskImportBatchId
-    && selectedTaskBusinessBatch
-    && canCreateOaDraft(selectedTaskBusinessBatch.status)
-    && importedInvoiceCount > 0
-    && !taskImportDetailLoading,
-  );
-  const currentBusinessBatch = selectedTaskImportBatchSelected
-    ? selectedTaskBusinessBatch
-    : selectedBusinessBatch;
+  const currentBusinessBatch = selectedBusinessBatch;
   const currentOaDraftBatchId = currentBusinessBatch?.businessBatchId ?? "";
   const currentOaDraftBatchLabel = selectedBatch ? batchDisplayTitle(selectedBatch) : "";
-  const currentOaDraftDescription = selectedTaskImportBatchSelected
-    ? `为当前任务的 ${importedInvoiceCount} 张发票创建审批草稿，合计 ${importedInvoiceAmount}。`
-    : "为当前批次创建审批草稿。";
+  const currentOaDraftDescription = `为当前批次的 ${importedInvoiceCount} 张发票创建审批草稿，合计 ${importedInvoiceAmount}。`;
   const canSubmitCurrentBatch = activeStatus === "unsubmitted"
     && canMutateData
-    && (selectedTaskImportBatchSelected
-      ? selectedTaskImportBatchCanSubmit
-      : currentBusinessBatch !== null && canCreateOaDraft(currentBusinessBatch.status) && !detailLoading);
+    && currentBusinessBatch !== null
+    && currentBusinessBatch.createOaDraftAction?.enabled === true
+    && !detailLoading;
+  const submitDisabledReason = !canMutateData
+    ? "当前账号仅支持查看和导出，不能创建审批草稿。"
+    : detailLoading
+      ? "正在加载批次详情。"
+      : currentBusinessBatch?.createOaDraftAction?.message || "当前批次缺少审批资格信息，请刷新后重试。";
   const currentOaActionBatch = useMemo(() => {
     if (draftResult?.batchId) {
       return businessBatches.find((batch) => batch.businessBatchId === draftResult.batchId) ?? currentBusinessBatch;
@@ -1491,14 +1294,7 @@ export default function EtcTicketManagementPage() {
   }, [visibleReconciliationRowIds]);
 
   const mergeReconciliationTask = useCallback((task: EtcReconciliationTask) => {
-    setReconciliationTasks((current) => {
-      const exists = current.some((item) => item.taskId === task.taskId);
-      if (!exists) {
-        return [task, ...current];
-      }
-      return current.map((item) => (item.taskId === task.taskId ? task : item));
-    });
-    setSelectedTaskId(task.taskId);
+    setSelectedTask(task);
   }, []);
 
   const mergeBusinessBatch = useCallback((
@@ -1539,7 +1335,7 @@ export default function EtcTicketManagementPage() {
     }
   }, [activeStatus, businessBatches]);
 
-  const handleStatusChange = (nextStatus: EtcBatchStatus) => {
+  const handleStatusChange = (nextStatus: EtcBusinessBatchBucket) => {
     if (nextStatus === activeStatus) {
       return;
     }
@@ -1589,7 +1385,7 @@ export default function EtcTicketManagementPage() {
       });
       mergeBusinessBatch(updatedBatch, businessBatch.status);
       cancelBusinessBatchTitleEdit();
-      await loadReconciliationTasks();
+      setDetailReloadKey((current) => current + 1);
     } catch (caught) {
       setActionError(formatEtcUiErrorMessage(caught, "批次标题保存失败。"));
     } finally {
@@ -1632,15 +1428,16 @@ export default function EtcTicketManagementPage() {
       if (bucket === "unsubmitted") {
         setCounts((current) => ({ ...current, unsubmitted: current.unsubmitted + 1 }));
         setActiveStatus("unsubmitted");
+      } else if (bucket === "staged") {
+        setCounts((current) => ({ ...current, staged: current.staged + 1 }));
+        setActiveStatus("staged");
       } else if (bucket === "submitted") {
         setCounts((current) => ({ ...current, submitted: current.submitted + 1 }));
         setActiveStatus("submitted");
       }
       setSelectedBatchId(businessBatch.businessBatchId);
-      if (businessBatch.taskId) {
-        setSelectedTaskId(businessBatch.taskId);
-      }
-      await loadReconciliationTasks();
+      setBusinessBatchDetail(businessBatch);
+      setBatchDetail(businessBatchToBatchDetail(businessBatch));
     } catch (caught) {
       setActionError(formatEtcUiErrorMessage(caught, "新建 ETC 批次失败，请稍后重试。"));
     } finally {
@@ -1839,36 +1636,6 @@ export default function EtcTicketManagementPage() {
     await runTaskAction(() => reopenEtcReconciliationTask(selectedTask.taskId, selectedTask.version));
   };
 
-  const handleRemoveImportedInvoices = async () => {
-    if (!selectedTask || !selectedTaskImportBatchId) {
-      return;
-    }
-    const removedBatchId = selectedTaskImportBatchId;
-    setRemoveImportedInvoicesSubmitting(true);
-    setActionError(null);
-    try {
-      const latestTask = await fetchEtcReconciliationTask(selectedTask.taskId);
-      mergeReconciliationTask(latestTask);
-      if (!canRemoveImportedInvoicesFromTask(latestTask)) {
-        throw new Error(removeImportedInvoicesDisabledReason(latestTask));
-      }
-      const task = await deleteEtcReconciliationTaskImportedInvoices(latestTask.taskId, latestTask.version);
-      setTaskImportBatchDetail(null);
-      setTaskImportDetailError(null);
-      setBatches((current) => current.filter((batch) =>
-        batch.id !== removedBatchId
-        && batch.etcBatchId !== removedBatchId
-        && batch.externalBatchId !== removedBatchId
-      ));
-      mergeReconciliationTask(task);
-      setRemoveImportedInvoicesDialogOpen(false);
-    } catch (caught) {
-      setActionError(formatEtcUiErrorMessage(caught, "移除发票失败。"));
-    } finally {
-      setRemoveImportedInvoicesSubmitting(false);
-    }
-  };
-
   const openDeleteTaskDialog = (task: EtcReconciliationTask, event?: MouseEvent<HTMLButtonElement>) => {
     event?.stopPropagation();
     if (!canDeleteTask(task)) {
@@ -1899,7 +1666,9 @@ export default function EtcTicketManagementPage() {
   const fetchLatestDeletableTask = async (task: EtcReconciliationTask) => {
     const latestTask = await fetchEtcReconciliationTask(task.taskId);
     mergeReconciliationTask(latestTask);
-    const linkedBusinessBatch = taskLinkedBusinessBatch(latestTask);
+    const linkedBusinessBatch = selectedBusinessBatch?.taskId === latestTask.taskId
+      ? selectedBusinessBatch
+      : null;
     if (linkedBusinessBatch) {
       const latestBusinessBatch = await fetchEtcBusinessBatchDetail(linkedBusinessBatch.businessBatchId);
       mergeBusinessBatch(latestBusinessBatch);
@@ -1967,13 +1736,9 @@ export default function EtcTicketManagementPage() {
       if (deleteTarget.kind === "task") {
         const latestTask = await fetchLatestDeletableTask(deleteTarget.item);
         const taskId = latestTask.taskId;
-        const wasSelectedTask = selectedTaskId === taskId;
+        const wasSelectedTask = selectedTask?.taskId === taskId;
         const removedBatchId = latestTask.etcBatchId || latestTask.importBatchId || "";
         await deleteEtcReconciliationTask(taskId, latestTask.version);
-        setReconciliationTasks((current) => current.filter((task) => task.taskId !== taskId));
-        setTaskImportBatchDetail(null);
-        setTaskImportDetailError(null);
-        setTaskImportDetailLoading(false);
         if (removedBatchId) {
           setBatches((current) => current.filter((batch) =>
             batch.id !== removedBatchId
@@ -1982,9 +1747,8 @@ export default function EtcTicketManagementPage() {
           ));
         }
         if (wasSelectedTask) {
-          setSelectedTaskId("");
+          setSelectedTask(null);
         }
-        void loadReconciliationTasks();
       } else if (deleteTarget.kind === "sourceFile") {
         const latestTask = await fetchEtcReconciliationTask(deleteTarget.task.taskId);
         mergeReconciliationTask(latestTask);
@@ -2100,31 +1864,13 @@ export default function EtcTicketManagementPage() {
       });
       mergeBusinessBatch(result, target.status);
       const nextStatus = decision === "submitted" ? "submitted" : "unsubmitted";
-      if (result.taskId) {
-        setLocallySubmittedTaskIds((current) => {
-          const next = new Set(current);
-          if (decision === "submitted") {
-            next.add(result.taskId);
-          } else {
-            next.delete(result.taskId);
-          }
-          return next;
-        });
-        if (decision === "submitted") {
-          setSelectedTaskId((current) => (current === result.taskId ? "" : current));
-        }
-      }
       emitEtcBusinessDomainUpdated({ source: "etc_business_batch_manual_oa_status" });
-      if (decision === "submitted") {
-        setActiveStatus("submitted");
-        setSelectedBatchId(result.businessBatchId);
-      }
+      setActiveStatus(nextStatus);
+      setSelectedBatchId(result.businessBatchId);
       setDraftResult(null);
       setCreateDialogOpen(false);
-      await Promise.all([
-        loadReconciliationTasks(),
-        loadBatches(undefined, nextStatus),
-      ]);
+      await loadBatches(undefined, nextStatus);
+      setDetailReloadKey((current) => current + 1);
     } catch (caught) {
       setActionError(formatEtcUiErrorMessage(caught, "人工处理失败。"));
     } finally {
@@ -2359,9 +2105,7 @@ export default function EtcTicketManagementPage() {
               isPending={loading}
               onPress={() => {
                 void loadBatches();
-                if (activeStatus === "unsubmitted") {
-                  void loadReconciliationTasks();
-                }
+                setDetailReloadKey((current) => current + 1);
               }}
               size="sm"
               variant="secondary"
@@ -2394,13 +2138,17 @@ export default function EtcTicketManagementPage() {
               size="sm"
               onSelectionChange={(keys) => {
                 const [next] = Array.from(keys);
-                if (next === "submitted" || next === "unsubmitted") {
+                if (next === "submitted" || next === "staged" || next === "unsubmitted") {
                   handleStatusChange(next);
                 }
               }}
             >
               <ToggleButton id="unsubmitted" className="etc-status-segmented__button">
                 未提交 {counts.unsubmitted}
+              </ToggleButton>
+              <ToggleButton id="staged" className="etc-status-segmented__button">
+                <ToggleButtonGroup.Separator />
+                暂存 {counts.staged}
               </ToggleButton>
               <ToggleButton id="submitted" className="etc-status-segmented__button">
                 <ToggleButtonGroup.Separator />
@@ -2428,12 +2176,16 @@ export default function EtcTicketManagementPage() {
                 className="etc-primary-action"
                 isDisabled={!canSubmitCurrentBatch || draftCreating}
                 isPending={draftCreating}
+                aria-label={canSubmitCurrentBatch ? "提交审批" : submitDisabledReason}
                 onPress={() => setCreateDialogOpen(true)}
                 size="sm"
                 variant="primary"
               >
                 提交审批
               </Button>
+            ) : null}
+            {activeStatus === "unsubmitted" && currentBusinessBatch && !canSubmitCurrentBatch ? (
+              <span className="etc-action-disabled-reason" role="status">{submitDisabledReason}</span>
             ) : null}
           </div>
 
@@ -2463,50 +2215,26 @@ export default function EtcTicketManagementPage() {
               {!loading && !batchListError && visibleBatches.length === 0 ? <StatePanel tone="empty" compact>无匹配批次。</StatePanel> : null}
               <ul className="etc-batch-list" aria-label="ETC批次列表">
                 {visibleBatches.map((batch) => {
-                  const taskRow = batch.sourceType === "reconciliation_task"
-                    ? reconciliationTasks.find((task) => task.taskId === batch.id) ?? null
-                    : null;
-                  const deletable = taskRow ? canDeleteTask(taskRow) : canDeleteBatch(batch);
+                  const deletable = canDeleteBatch(batch);
                   const businessBatch = businessBatches.find((item) => item.businessBatchId === batch.id);
-                  const rowLinkedTask = taskRow ?? (
-                    businessBatch?.taskId
-                      ? reconciliationTasks.find((task) => task.taskId === businessBatch.taskId) ?? null
-                      : null
-                  );
-                  const selected = taskRow ? selectedTaskId === taskRow.taskId : selectedBatchId === batch.id;
-                  const rowCountText = rowLinkedTask
-                    ? taskCountText(rowLinkedTask)
-                    : batch.displayCountText || taskCountText({ etcInvoiceCount: batch.etcInvoiceCount, supplementCount: batch.supplementCount });
-                  const rowAmount = rowLinkedTask && Number(rowLinkedTask.oaTotalAmount) > 0
-                    ? rowLinkedTask.oaTotalAmount
-                    : batch.totalAmount;
-                  const rowAmountText = rowLinkedTask
-                    ? `金额 ${formatMoney(rowAmount)} 元`
-                    : `${batch.invoiceCount} 张 / ${formatMoney(batch.totalAmount)} 元`;
+                  const selected = selectedBatchId === batch.id;
+                  const rowCountText = batch.displayCountText || taskCountText({ etcInvoiceCount: batch.etcInvoiceCount, supplementCount: batch.supplementCount });
+                  const rowAmountText = `${batch.invoiceCount} 张 / ${formatMoney(batch.totalAmount)} 元`;
                   const displayTitle = batchDisplayTitle(batch);
                   const rowExternalBatchId = businessBatch?.externalEtcBatchId || batch.externalBatchId;
                   const titleEditable = Boolean(canMutateData && activeStatus === "unsubmitted" && businessBatch);
                   const titleEditing = Boolean(businessBatch && editingBatchTitleId === businessBatch.businessBatchId);
                   const titleSaving = Boolean(businessBatch && titleSavingBatchId === businessBatch.businessBatchId);
                   const selectRow = () => {
-                    if (taskRow) {
-                      setSelectedTaskId(taskRow.taskId);
-                      setSelectedBatchId("");
-                      setBatchDetail(null);
-                      setBusinessBatchDetail(null);
-                      return;
-                    }
                     setBatchDetail(null);
+                    setBusinessBatchDetail(null);
                     setSelectedBatchId(batch.id);
-                    if (businessBatch?.taskId) {
-                      setSelectedTaskId(businessBatch.taskId);
-                    }
                   };
                   return (
                     <li
                       key={batch.id}
                       className={`etc-batch-row ${batch.status}`}
-                      data-testid={taskRow ? `etc-reconciliation-task-row-${taskRow.taskId}` : `etc-batch-row-${batch.id}`}
+                      data-testid={`etc-batch-row-${batch.id}`}
                     >
                       <div
                         role="button"
@@ -2579,7 +2307,7 @@ export default function EtcTicketManagementPage() {
                           {rowExternalBatchId ? <span>批次号 {rowExternalBatchId}</span> : null}
                           <span>{rowCountText}</span>
                           <span>{rowAmountText}</span>
-                          {businessBatch?.importAttempts.length ? <span>导入记录 {businessBatch.importAttempts.length} 次</span> : <span>{batch.plateCount} 个车牌</span>}
+                          <span>{batch.plateCount} 个车牌</span>
                           {batch.status === "submitted" && batchOaLabel(batch) ? <span>{batchOaLabel(batch)}</span> : null}
                         </span>
                       </div>
@@ -2590,10 +2318,6 @@ export default function EtcTicketManagementPage() {
                         title={deletable ? "删除批次" : deleteBatchDisabledReason(batch)}
                         disabled={!deletable || deleteSubmitting}
                         onClick={(event) => {
-                          if (taskRow) {
-                            openDeleteTaskDialog(taskRow, event);
-                            return;
-                          }
                           openDeleteBatchDialog(batch, event);
                         }}
                       >
@@ -2618,19 +2342,6 @@ export default function EtcTicketManagementPage() {
                       {selectedTask && selectedTask.status === "ready_for_import" ? (
                         <Button className="etc-secondary-action" isDisabled={taskActionLoading} onPress={handleReopenReconciliationTask} size="sm" variant="secondary">
                           重新打开
-                        </Button>
-                      ) : null}
-                      {selectedTask && !selectedTaskBusinessBatch ? (
-                        <Button
-                          className="etc-secondary-action"
-                          aria-label={`删除批次 ${formatTaskTitle(selectedTask)}`}
-                          isDisabled={!canDeleteTask(selectedTask) || deleteSubmitting}
-                          onPress={() => openDeleteTaskDialog(selectedTask)}
-                          size="sm"
-                          variant="secondary"
-                        >
-                          <Trash2 aria-hidden="true" size={16} />
-                          删除批次
                         </Button>
                       ) : null}
                       <Button
@@ -3027,41 +2738,22 @@ export default function EtcTicketManagementPage() {
                               meta={Number(importedInvoiceAmount) > 0 ? <StatusChip tone="success">合计 {importedInvoiceAmount}</StatusChip> : null}
                             >
                               <section className="etc-task-imported-invoices" aria-label="已导入ETC发票">
-                                <div className="etc-section-heading etc-section-heading--compact">
-                                  {canRemoveImportedInvoices ? (
-                                    <button
-                                      type="button"
-                                      className="etc-secondary-action etc-secondary-action--warning"
-                                      disabled={removeImportedInvoicesSubmitting || taskActionLoading}
-                                      onClick={() => setRemoveImportedInvoicesDialogOpen(true)}
-                                    >
-                                      <Trash2 aria-hidden="true" size={16} />
-                                      移除发票
-                                    </button>
-                                  ) : null}
-                                </div>
-                                {!selectedTaskImportBatchId ? (
-                                  <StatePanel tone="info" compact>确认后导入 ZIP。</StatePanel>
-                                ) : taskImportDetailError ? (
-                                  <StatePanel tone="error" compact>{taskImportDetailError}</StatePanel>
-                                ) : (
-                                  renderEtcInvoiceTable(
-                                    taskImportBatchDetail?.invoiceItems ?? [],
-                                    {
-                                      ariaLabel: "已导入ETC发票明细",
-                                      emptyText: "暂无明细。",
-                                      loadingText: taskImportDetailLoading ? "加载中。" : "",
-                                      tableKey: selectedTaskImportBatchId,
-                                    },
-                                  )
+                                {renderEtcInvoiceTable(
+                                  businessBatchDetail?.invoiceItems ?? [],
+                                  {
+                                    ariaLabel: "已导入ETC发票明细",
+                                    emptyText: "暂无明细。",
+                                    loadingText: detailLoading ? "加载中。" : "",
+                                    tableKey: selectedBusinessBatch?.businessBatchId ?? "",
+                                  },
                                 )}
                               </section>
                             </EtcDisclosureSection>
                           ) : null}
                         </DisclosureGroup>
 
-                        {selectedTaskBusinessBatch && isOaConfirmationPendingStatus(selectedTaskBusinessBatch.status)
-                          ? renderOaStatusPanel(selectedTaskBusinessBatch)
+                        {selectedBusinessBatch && isOaConfirmationPendingStatus(selectedBusinessBatch.status)
+                          ? renderOaStatusPanel(selectedBusinessBatch)
                           : null}
                       </div>
                     ) : !taskLoading && !taskListError ? (
@@ -3115,11 +2807,6 @@ export default function EtcTicketManagementPage() {
 
                   {selectedBusinessBatch
                     && isOaConfirmationPendingStatus(selectedBusinessBatch.status)
-                    && (
-                      activeStatus !== "unsubmitted"
-                      || !selectedTaskBusinessBatch
-                      || selectedTaskBusinessBatch.businessBatchId !== selectedBusinessBatch.businessBatchId
-                    )
                     ? renderOaStatusPanel(selectedBusinessBatch)
                     : null}
 
@@ -3185,16 +2872,16 @@ export default function EtcTicketManagementPage() {
                       )}
                     </EtcDisclosureSection>
 
-                    {selectedBusinessBatch?.importAttempts.length ? (
+                    {businessBatchDetail?.importAttempts.length ? (
                       <EtcDisclosureSection
                         id="attempts"
                         title="导入记录"
-                        summary={`${selectedBusinessBatch.importAttempts.length} 次`}
-                        meta={<CountChip>{selectedBusinessBatch.importAttempts.length} 次</CountChip>}
+                        summary={`${businessBatchDetail.importAttempts.length} 次`}
+                        meta={<CountChip>{businessBatchDetail.importAttempts.length} 次</CountChip>}
                       >
                         <section className="etc-import-attempts" aria-label="导入记录">
                           <div className="etc-import-attempt-list">
-                            {selectedBusinessBatch.importAttempts.map((attempt, index) => (
+                            {businessBatchDetail.importAttempts.map((attempt, index) => (
                               <div key={attempt.attemptId || `${attempt.importBatchId}-${index}`} className="etc-import-attempt-row">
                                 <strong>{attempt.importBatchId || `第 ${index + 1} 次导入`}</strong>
                                 <span>
@@ -3321,46 +3008,6 @@ export default function EtcTicketManagementPage() {
               <p>通行期间：{formatDateRange(deleteTarget.item.passageStartDate, deleteTarget.item.passageEndDate)}</p>
               <p>数量：{deleteTarget.item.displayCountText || taskCountText({ etcInvoiceCount: deleteTarget.item.etcInvoiceCount, supplementCount: deleteTarget.item.supplementCount })}</p>
               <p>金额：{formatMoney(deleteTarget.item.totalAmount)} 元</p>
-            </div>
-          ) : null}
-        </AppDialog>
-
-        <AppDialog
-          open={removeImportedInvoicesDialogOpen}
-          title="移除发票"
-          description="清空本批次下已导入发票，批次可重新导入。"
-          onClose={() => {
-            if (!removeImportedInvoicesSubmitting) {
-              setRemoveImportedInvoicesDialogOpen(false);
-            }
-          }}
-          actions={
-            <>
-              <button
-                type="button"
-                className="etc-secondary-action"
-                onClick={() => setRemoveImportedInvoicesDialogOpen(false)}
-                disabled={removeImportedInvoicesSubmitting}
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                className="etc-secondary-action etc-secondary-action--warning"
-                onClick={() => void handleRemoveImportedInvoices()}
-                disabled={removeImportedInvoicesSubmitting}
-              >
-                {removeImportedInvoicesSubmitting ? "正在移除..." : "确认移除"}
-              </button>
-            </>
-          }
-        >
-          {selectedTask ? (
-            <div className="etc-dialog-detail-list">
-              <p>批次：{formatTaskTitle(selectedTask)}</p>
-              <p>期间：{formatDateRange(selectedTask.periodStart, selectedTask.periodEnd)}</p>
-              <p>已导入：{importedInvoiceCount} 张</p>
-              <p>版本：v{selectedTask.version}</p>
             </div>
           ) : null}
         </AppDialog>
