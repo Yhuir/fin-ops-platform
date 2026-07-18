@@ -2218,6 +2218,11 @@ function etcBusinessBatchInvoiceItems() {
 function etcBusinessBatchPayload(status: EtcBusinessBatchStatus, includeItems = false) {
   const draftCreated = status !== "imported" && status !== "not_submitted";
   const submitted = status === "manually_marked_submitted";
+  const createOaDraftAction = status === "imported" || status === "not_submitted"
+    ? { enabled: true, code: "ready", message: "可以提交审批。" }
+    : status === "oa_confirmation_pending"
+      ? { enabled: false, code: "oa_confirmation_pending", message: "审批草稿已创建，请先确认是否已在 OA 提交。" }
+      : { enabled: false, code: "invalid_batch_status", message: "当前批次状态不能创建审批草稿。" };
   return {
     business_batch_id: "etc-business-e2e-001",
     task_id: "etc-recon-e2e-001",
@@ -2233,32 +2238,36 @@ function etcBusinessBatchPayload(status: EtcBusinessBatchStatus, includeItems = 
     oa_row_id: submitted ? "oa-etc-e2e-001" : "",
     oa_process_status: submitted ? "manual_without_oa_row" : "",
     invoice_summary: { count: 2, amount: "32.26" },
-    invoice_ids: ["etc-inv-e2e-001", "etc-inv-e2e-002"],
-    import_attempts: [
-      {
-        attempt_id: "etc-import-attempt-e2e-001",
-        import_batch_id: "etc-import-e2e-001",
-        status: "imported",
-        imported: 2,
-        duplicates_skipped: 0,
-        attachments_completed: 0,
-        failed: 0,
-        created_at: "2026-06-17T09:00:00+08:00",
-      },
-    ],
-    audit_events: [],
+    create_oa_draft_action: createOaDraftAction,
     created_at: "2026-06-17T09:00:00+08:00",
     updated_at: "2026-06-17T09:00:00+08:00",
-    ...(includeItems ? { invoice_items: etcBusinessBatchInvoiceItems() } : {}),
+    ...(includeItems ? {
+      invoice_ids: ["etc-inv-e2e-001", "etc-inv-e2e-002"],
+      import_attempts: [
+        {
+          attempt_id: "etc-import-attempt-e2e-001",
+          import_batch_id: "etc-import-e2e-001",
+          status: "imported",
+          imported: 2,
+          duplicates_skipped: 0,
+          attachments_completed: 0,
+          failed: 0,
+          created_at: "2026-06-17T09:00:00+08:00",
+        },
+      ],
+      audit_events: [],
+      invoice_items: etcBusinessBatchInvoiceItems(),
+    } : {}),
   };
 }
 
-function etcBusinessBatchListPayload(status: string | null, batchStatus: EtcBusinessBatchStatus, deleted = false) {
+function etcBusinessBatchListPayload(bucket: string | null, batchStatus: EtcBusinessBatchStatus, deleted = false) {
   if (deleted) {
     return {
       items: [],
       counts: {
-        active: 0,
+        unsubmitted: 0,
+        staged: 0,
         submitted: 0,
       },
       pagination: {
@@ -2268,14 +2277,19 @@ function etcBusinessBatchListPayload(status: string | null, batchStatus: EtcBusi
       },
     };
   }
-  const submitted = batchStatus === "manually_marked_submitted";
-  const wantsSubmitted = status === "submitted";
-  const visible = wantsSubmitted ? submitted : !submitted;
+  const batchBucket = batchStatus === "manually_marked_submitted"
+    ? "submitted"
+    : batchStatus === "oa_confirmation_pending"
+      ? "staged"
+      : "unsubmitted";
+  const requestedBucket = bucket ?? "unsubmitted";
+  const visible = requestedBucket === batchBucket;
   return {
     items: visible ? [etcBusinessBatchPayload(batchStatus, false)] : [],
     counts: {
-      active: submitted ? 0 : 1,
-      submitted: submitted ? 1 : 0,
+      unsubmitted: batchBucket === "unsubmitted" ? 1 : 0,
+      staged: batchBucket === "staged" ? 1 : 0,
+      submitted: batchBucket === "submitted" ? 1 : 0,
     },
     pagination: {
       page: 1,
@@ -8541,11 +8555,11 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       if (options.etcImportDownstreamFanout && !etcImportConfirmed) {
         return json(route, {
           items: [],
-          counts: { active: 0, submitted: 0 },
+          counts: { unsubmitted: 0, staged: 0, submitted: 0 },
           pagination: { page: 1, page_size: 100, total: 0 },
         });
       }
-      return json(route, etcBusinessBatchListPayload(url.searchParams.get("status"), etcBusinessBatchStatus, etcBusinessBatchDeleted));
+      return json(route, etcBusinessBatchListPayload(url.searchParams.get("bucket"), etcBusinessBatchStatus, etcBusinessBatchDeleted));
     }
 
     if (path === "/api/etc/business-batches/etc-business-e2e-001") {

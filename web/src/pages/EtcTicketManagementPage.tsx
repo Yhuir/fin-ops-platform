@@ -54,7 +54,6 @@ import type {
   EtcBusinessBatchSummary,
   EtcCreditCardItem,
   EtcInvoice,
-  EtcOaDraftPayload,
   EtcReconciliationTask,
   EtcSourceFile,
   EtcSupplementEvidence,
@@ -810,7 +809,7 @@ export default function EtcTicketManagementPage() {
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
   const [draftCreating, setDraftCreating] = useState(false);
   const [invoicePdfDownloadingBatchId, setInvoicePdfDownloadingBatchId] = useState("");
-  const [draftResult, setDraftResult] = useState<EtcOaDraftPayload | null>(null);
+  const [draftResult, setDraftResult] = useState<EtcBusinessBatchDetail | null>(null);
   const [oaActionLoading, setOaActionLoading] = useState(false);
   const [editingBatchTitleId, setEditingBatchTitleId] = useState("");
   const [editingBatchTitle, setEditingBatchTitle] = useState("");
@@ -1247,11 +1246,11 @@ export default function EtcTicketManagementPage() {
       ? "正在加载批次详情。"
       : currentBusinessBatch?.createOaDraftAction?.message || "当前批次缺少审批资格信息，请刷新后重试。";
   const currentOaActionBatch = useMemo(() => {
-    if (draftResult?.batchId) {
-      return businessBatches.find((batch) => batch.businessBatchId === draftResult.batchId) ?? currentBusinessBatch;
+    if (draftResult) {
+      return draftResult;
     }
     return currentBusinessBatch;
-  }, [businessBatches, currentBusinessBatch, draftResult?.batchId]);
+  }, [currentBusinessBatch, draftResult]);
   const taskIsMutable = Boolean(canMutateData && selectedTask && ["draft", "reviewing"].includes(selectedTask.status));
   const canConfirmSelectedTask = taskIsMutable && selectedConfirmedCreditCardItemIds.length > 0;
   const selectedCardItem = useMemo(
@@ -1744,12 +1743,7 @@ export default function EtcTicketManagementPage() {
       oaDraftIntentRef.current = null;
       mergeBusinessBatch(result);
       emitEtcBusinessDomainUpdated({ source: "etc_business_batch_oa_draft_create" });
-      setDraftResult({
-        batchId: result.businessBatchId,
-        etcBatchId: result.externalEtcBatchId,
-        oaDraftId: result.oaDraftId,
-        oaDraftUrl: result.oaDraftUrl,
-      });
+      setDraftResult(result);
     } catch (caught) {
       if (caught instanceof EtcApiError && caught.code !== "oa_draft_outcome_unknown") {
         oaDraftIntentRef.current = null;
@@ -1761,8 +1755,8 @@ export default function EtcTicketManagementPage() {
   };
 
   const resolveOaActionBatch = (batch?: EtcBusinessBatchDetail | EtcBusinessBatchSummary | null) => {
-    if (draftResult?.batchId) {
-      return businessBatches.find((item) => item.businessBatchId === draftResult.batchId) ?? batch ?? currentOaActionBatch;
+    if (draftResult) {
+      return draftResult;
     }
     return batch ?? currentOaActionBatch;
   };
