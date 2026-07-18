@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, vi } from "vitest";
 
@@ -706,6 +706,118 @@ describe("ETC ticket management page", () => {
     expect(within(detailRegion).queryByText("暂无明细。")).not.toBeInTheDocument();
   });
 
+  test("starts the exact workflow request without waiting for business detail", async () => {
+    installMockApiFetch();
+    const batch = businessBatchFixture({
+      businessBatchId: "etc-business-parallel-001",
+      taskId: "etc-recon-parallel-001",
+      status: "imported",
+      submissionBatchId: "",
+      oaDraftId: "",
+      oaDraftUrl: "",
+    });
+    let resolveDetail!: (value: unknown) => void;
+    vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
+      counts: { unsubmitted: 1, staged: 0, submitted: 0 },
+      items: [batch],
+      pagination: { page: 1, pageSize: 100, total: 1 },
+    } as never);
+    vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockImplementation(() => new Promise((resolvePromise) => {
+      resolveDetail = resolvePromise;
+    }) as never);
+    const fetchTask = vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockResolvedValue({
+      taskId: "etc-recon-parallel-001",
+      status: "imported",
+      version: 3,
+      creditCardItems: [],
+      ticketRootItems: [],
+      supplementEvidences: [],
+      reconciledItems: [],
+      sourceFiles: [],
+      parseIssues: [],
+    } as never);
+
+    renderAppAt("/etc-tickets");
+
+    await waitFor(() => expect(fetchTask).toHaveBeenCalledWith("etc-recon-parallel-001", expect.any(AbortSignal)));
+    await act(async () => {
+      resolveDetail({ ...batch, invoiceItems: [] });
+    });
+  });
+
+  test("invalidates the old task synchronously while a newly selected batch is still loading", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    const batchA = businessBatchFixture({
+      businessBatchId: "etc-business-switch-a",
+      taskId: "etc-recon-switch-a",
+      status: "imported",
+      submissionBatchId: "",
+      oaDraftId: "",
+      oaDraftUrl: "",
+    });
+    const batchB = businessBatchFixture({
+      businessBatchId: "etc-business-switch-b",
+      taskId: "etc-recon-switch-b",
+      status: "imported",
+      submissionBatchId: "",
+      oaDraftId: "",
+      oaDraftUrl: "",
+    });
+    let resolveDetailB!: (value: unknown) => void;
+    let resolveTaskB!: (value: unknown) => void;
+    vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
+      counts: { unsubmitted: 2, staged: 0, submitted: 0 },
+      items: [batchA, batchB],
+      pagination: { page: 1, pageSize: 100, total: 2 },
+    } as never);
+    vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockImplementation((batchId) => (
+      batchId === batchB.businessBatchId
+        ? new Promise((resolvePromise) => { resolveDetailB = resolvePromise; })
+        : Promise.resolve({ ...batchA, invoiceItems: [] })
+    ) as never);
+    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockImplementation((taskId) => (
+      taskId === batchB.taskId
+        ? new Promise((resolvePromise) => { resolveTaskB = resolvePromise; })
+        : Promise.resolve({
+          taskId: batchA.taskId,
+          status: "reviewing",
+          version: 3,
+          creditCardItems: [],
+          ticketRootItems: [],
+          supplementEvidences: [],
+          reconciledItems: [],
+          sourceFiles: [],
+          parseIssues: [],
+        })
+    ) as never);
+    const upload = vi.spyOn(etcApi, "uploadEtcCreditCardStatement");
+
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    expect(await within(page).findByLabelText("上传信用卡账单")).toBeInTheDocument();
+    await user.click(within(within(page).getByTestId("etc-batch-row-etc-business-switch-b")).getByRole("button", { name: /查看批次/ }));
+
+    await waitFor(() => expect(within(page).queryByLabelText("上传信用卡账单")).not.toBeInTheDocument());
+    expect(upload).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveDetailB({ ...batchB, invoiceItems: [] });
+      resolveTaskB({
+        taskId: batchB.taskId,
+        status: "reviewing",
+        version: 1,
+        creditCardItems: [],
+        ticketRootItems: [],
+        supplementEvidences: [],
+        reconciledItems: [],
+        sourceFiles: [],
+        parseIssues: [],
+      });
+    });
+  });
+
   test("surfaces new business batch errors and keeps the current batch list", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
@@ -1234,6 +1346,9 @@ describe("ETC ticket management page", () => {
     );
     await waitFor(() => {
       expect(fetchBusinessBatches).toHaveBeenCalledWith(expect.objectContaining({ bucket: "submitted" }));
+    });
+    await waitFor(() => {
+      expect(fetchBusinessBatches.mock.calls.filter(([query]) => query?.bucket === "submitted")).toHaveLength(1);
     });
     await waitFor(() => expect(within(page).getByRole("radio", { name: "未提交 0" })).toBeInTheDocument());
     expect(within(page).getByRole("radio", { name: "暂存 0" })).toBeInTheDocument();
@@ -3393,6 +3508,86 @@ describe("ETC ticket management page", () => {
     expect(within(resultDialog).queryByRole("button", { name: "撤销草稿" })).not.toBeInTheDocument();
     expect(within(resultDialog).getByRole("button", { name: "已提交" })).toBeEnabled();
     expect(within(resultDialog).getByRole("button", { name: "未提交" })).toBeEnabled();
+  });
+
+  test("uses the explicitly selected staged row instead of an older transient draft target", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch();
+    const importedA = businessBatchFixture({
+      businessBatchId: "etc-business-staged-a",
+      taskId: "etc-recon-staged-a",
+      status: "imported",
+      version: 7,
+      submissionBatchId: "",
+      oaDraftId: "",
+      oaDraftUrl: "",
+    });
+    const stagedA = businessBatchFixture({
+      ...importedA,
+      status: "oa_confirmation_pending",
+      version: 8,
+      submissionBatchId: "etc-submission-staged-a",
+      oaDraftId: "oa-draft-staged-a",
+      oaDraftUrl: "https://oa.example.test/draft/a",
+    });
+    const stagedB = businessBatchFixture({
+      businessBatchId: "etc-business-staged-b",
+      taskId: "etc-recon-staged-b",
+      status: "oa_confirmation_pending",
+      version: 12,
+      submissionBatchId: "etc-submission-staged-b",
+      oaDraftId: "oa-draft-staged-b",
+      oaDraftUrl: "https://oa.example.test/draft/b",
+    });
+    vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockImplementation((query = {}) => Promise.resolve({
+      counts: {
+        unsubmitted: query.bucket === "unsubmitted" ? 1 : 0,
+        staged: query.bucket === "unsubmitted" ? 1 : 2,
+        submitted: 0,
+      },
+      items: query.bucket === "staged" ? [stagedA, stagedB] : query.bucket === "unsubmitted" ? [importedA] : [],
+      pagination: { page: 1, pageSize: 100, total: query.bucket === "staged" ? 2 : 1 },
+    } as never));
+    vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockImplementation((batchId) => Promise.resolve({
+      ...(batchId === stagedB.businessBatchId ? stagedB : batchId === stagedA.businessBatchId ? stagedA : importedA),
+      invoiceItems: [],
+    } as never));
+    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockImplementation((taskId) => Promise.resolve({
+      taskId,
+      status: "imported",
+      version: 3,
+      creditCardItems: [],
+      ticketRootItems: [],
+      supplementEvidences: [],
+      reconciledItems: [],
+      sourceFiles: [],
+      parseIssues: [],
+    } as never));
+    vi.spyOn(etcApi, "createEtcBusinessBatchOaDraft").mockResolvedValue(stagedA as never);
+    const manualStatus = vi.spyOn(etcApi, "manualEtcBusinessBatchOaStatus").mockResolvedValue({
+      ...stagedB,
+      status: "manually_marked_submitted",
+      version: 13,
+    } as never);
+
+    renderAppAt("/etc-tickets");
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    await waitFor(() => expect(within(page).getByRole("button", { name: "提交审批" })).toBeEnabled());
+    await user.click(within(page).getByRole("button", { name: "提交审批" }));
+    await user.click(within(await screen.findByRole("dialog", { name: "创建审批草稿" })).getByRole("button", { name: "创建草稿" }));
+    const resultDialog = await screen.findByRole("dialog", { name: "审批提交确认" });
+    await user.click(within(resultDialog).getByRole("button", { name: "关闭" }));
+    await user.click(within(page).getByRole("radio", { name: "暂存 2" }));
+    const stagedBRow = await within(page).findByTestId("etc-batch-row-etc-business-staged-b");
+    await user.click(within(stagedBRow).getByRole("button", { name: /查看批次/ }));
+    const panel = await within(page).findByRole("region", { name: "审批提交确认" });
+    await user.click(within(panel).getByRole("button", { name: "已提交" }));
+
+    await waitFor(() => expect(manualStatus).toHaveBeenCalledWith("etc-business-staged-b", {
+      decision: "submitted",
+      expectedVersion: 12,
+      reason: "用户确认审批草稿已提交。",
+    }));
   });
 
   test("keeps the create OA draft dialog open when draft creation fails", async () => {

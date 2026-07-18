@@ -817,6 +817,9 @@ export default function EtcTicketManagementPage() {
   const refreshedImportJobIdsRef = useRef<Set<string>>(new Set());
   const oaDraftIntentRef = useRef<{ businessBatchId: string; idempotencyKey: string } | null>(null);
   const titleEditCancelRef = useRef(false);
+  const selectedBusinessBatchTaskId = businessBatches.find(
+    (batch) => batch.businessBatchId === selectedBatchId,
+  )?.taskId ?? "";
 
   const loadBatches = useCallback(async (
     signal?: AbortSignal,
@@ -870,34 +873,37 @@ export default function EtcTicketManagementPage() {
       return undefined;
     }
     const controller = new AbortController();
+    setSelectedTask(null);
     setDetailLoading(true);
+    setTaskLoading(Boolean(selectedBusinessBatchTaskId));
+    setTaskListError(selectedBusinessBatchTaskId ? null : "当前批次缺少绑定的 ETC 流程，请刷新后重试。");
     setBatchDetailError(null);
     setActionError(null);
+    if (selectedBusinessBatchTaskId) {
+      void fetchEtcReconciliationTask(selectedBusinessBatchTaskId, controller.signal)
+        .then((task) => {
+          if (!controller.signal.aborted) {
+            setSelectedTask(task);
+          }
+        })
+        .catch((caught) => {
+          if (!(caught instanceof DOMException && caught.name === "AbortError")) {
+            setSelectedTask(null);
+            setTaskListError(formatEtcUiErrorMessage(caught, "ETC批次流程加载失败。"));
+          }
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) {
+            setTaskLoading(false);
+          }
+        });
+    }
     void fetchEtcBusinessBatchDetail(selectedBatchId, controller.signal)
       .then((detail) => {
         if (!controller.signal.aborted) {
           setBatchDetailError(null);
           setBusinessBatchDetail(detail);
           setBatchDetail(businessBatchToBatchDetail(detail));
-          setTaskLoading(true);
-          setTaskListError(null);
-          void fetchEtcReconciliationTask(detail.taskId, controller.signal)
-            .then((task) => {
-              if (!controller.signal.aborted) {
-                setSelectedTask(task);
-              }
-            })
-            .catch((caught) => {
-              if (!(caught instanceof DOMException && caught.name === "AbortError")) {
-                setSelectedTask(null);
-                setTaskListError(formatEtcUiErrorMessage(caught, "ETC批次流程加载失败。"));
-              }
-            })
-            .finally(() => {
-              if (!controller.signal.aborted) {
-                setTaskLoading(false);
-              }
-            });
         }
       })
       .catch((caught) => {
@@ -924,7 +930,7 @@ export default function EtcTicketManagementPage() {
         }
       });
     return () => controller.abort();
-  }, [detailReloadKey, selectedBatchId]);
+  }, [detailReloadKey, selectedBatchId, selectedBusinessBatchTaskId]);
 
   useEffect(() => {
     const completedImportJobs = jobs.filter(
@@ -1251,7 +1257,8 @@ export default function EtcTicketManagementPage() {
     }
     return currentBusinessBatch;
   }, [currentBusinessBatch, draftResult]);
-  const taskIsMutable = Boolean(canMutateData && selectedTask && ["draft", "reviewing"].includes(selectedTask.status));
+  const taskMutationTarget = !taskLoading ? selectedTask : null;
+  const taskIsMutable = Boolean(canMutateData && taskMutationTarget && ["draft", "reviewing"].includes(taskMutationTarget.status));
   const canConfirmSelectedTask = taskIsMutable && selectedConfirmedCreditCardItemIds.length > 0;
   const selectedCardItem = useMemo(
     () => selectedTask?.creditCardItems.find((item) => item.itemId === selectedCardItemId) ?? null,
@@ -1435,24 +1442,24 @@ export default function EtcTicketManagementPage() {
   };
 
   const handleUploadCreditCardStatement = async (files: File[]) => {
-    if (!selectedTask || files.length === 0) {
+    if (!taskMutationTarget || files.length === 0) {
       return;
     }
-    await runTaskAction(() => uploadEtcCreditCardStatement(selectedTask.taskId, files[0], selectedTask.version));
+    await runTaskAction(() => uploadEtcCreditCardStatement(taskMutationTarget.taskId, files[0], taskMutationTarget.version));
   };
 
   const handleUploadTicketRootFiles = async (files: File[]) => {
-    if (!selectedTask || files.length === 0) {
+    if (!taskMutationTarget || files.length === 0) {
       return;
     }
-    await runTaskAction(() => uploadEtcTicketRootFiles(selectedTask.taskId, files, selectedTask.version));
+    await runTaskAction(() => uploadEtcTicketRootFiles(taskMutationTarget.taskId, files, taskMutationTarget.version));
   };
 
   const handleRefreshReconciliationMatches = async () => {
-    if (!selectedTask) {
+    if (!taskMutationTarget) {
       return;
     }
-    await runTaskAction(() => refreshEtcReconciliationMatches(selectedTask.taskId));
+    await runTaskAction(() => refreshEtcReconciliationMatches(taskMutationTarget.taskId));
   };
 
   const handleToggleReconciliationRow = (rowId: string) => {
@@ -1508,7 +1515,7 @@ export default function EtcTicketManagementPage() {
   };
 
   const handleUploadSupplementForCard = async () => {
-    if (!selectedTask || !supplementUploadCard || supplementUploadFiles.length === 0) {
+    if (!taskMutationTarget || !supplementUploadCard || supplementUploadFiles.length === 0) {
       setActionError("请先选择补充凭证文件。");
       return;
     }
@@ -1516,10 +1523,10 @@ export default function EtcTicketManagementPage() {
     setActionError(null);
     try {
       const task = await uploadEtcSupplementEvidenceForCard(
-        selectedTask.taskId,
+        taskMutationTarget.taskId,
         supplementUploadCard.itemId,
         supplementUploadFiles,
-        selectedTask.version,
+        taskMutationTarget.version,
         {
           evidenceKind: "non_etc_invoice",
           note: supplementUploadNote.trim(),
@@ -1538,11 +1545,11 @@ export default function EtcTicketManagementPage() {
   };
 
   const patchSelectedCard = async (payload: Parameters<typeof patchEtcReconciliationItem>[3]) => {
-    if (!selectedTask || !selectedCardItem) {
+    if (!taskMutationTarget || !selectedCardItem) {
       setActionError("请先选择一条信用卡账单明细。");
       return;
     }
-    await runTaskAction(() => patchEtcReconciliationItem(selectedTask.taskId, selectedCardItem.itemId, selectedTask.version, payload));
+    await runTaskAction(() => patchEtcReconciliationItem(taskMutationTarget.taskId, selectedCardItem.itemId, taskMutationTarget.version, payload));
   };
 
   const handleAcceptSuggestedTicket = async () => {
@@ -1589,7 +1596,7 @@ export default function EtcTicketManagementPage() {
   };
 
   const handleManualConfirmCard = async () => {
-    if (!selectedTask) {
+    if (!taskMutationTarget) {
       return;
     }
     const note = reviewNote.trim();
@@ -1604,7 +1611,7 @@ export default function EtcTicketManagementPage() {
   };
 
   const handleConfirmReconciliationTask = async () => {
-    if (!selectedTask) {
+    if (!taskMutationTarget) {
       return;
     }
     if (selectedConfirmedCreditCardItemIds.length === 0) {
@@ -1612,17 +1619,17 @@ export default function EtcTicketManagementPage() {
       return;
     }
     await runTaskAction(() => confirmEtcReconciliationTask(
-      selectedTask.taskId,
-      selectedTask.version,
+      taskMutationTarget.taskId,
+      taskMutationTarget.version,
       { confirmedCreditCardItemIds: selectedConfirmedCreditCardItemIds },
     ));
   };
 
   const handleReopenReconciliationTask = async () => {
-    if (!selectedTask) {
+    if (!taskMutationTarget) {
       return;
     }
-    await runTaskAction(() => reopenEtcReconciliationTask(selectedTask.taskId, selectedTask.version));
+    await runTaskAction(() => reopenEtcReconciliationTask(taskMutationTarget.taskId, taskMutationTarget.version));
   };
 
   const openDeleteBatchDialog = (batch: EtcBatchSummary, event: MouseEvent<HTMLButtonElement>) => {
@@ -1636,11 +1643,11 @@ export default function EtcTicketManagementPage() {
 
   const openDeleteSourceFileDialog = (sourceFile: EtcSourceFile, event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
-    if (!selectedTask || !taskIsMutable) {
+    if (!taskMutationTarget || !taskIsMutable) {
       return;
     }
     setActionError(null);
-    setDeleteTarget({ kind: "sourceFile", task: selectedTask, item: sourceFile });
+    setDeleteTarget({ kind: "sourceFile", task: taskMutationTarget, item: sourceFile });
   };
 
   const removeDeletedBatchFromState = (batchId: string) => {
@@ -1755,10 +1762,7 @@ export default function EtcTicketManagementPage() {
   };
 
   const resolveOaActionBatch = (batch?: EtcBusinessBatchDetail | EtcBusinessBatchSummary | null) => {
-    if (draftResult) {
-      return draftResult;
-    }
-    return batch ?? currentOaActionBatch;
+    return batch ?? draftResult ?? currentOaActionBatch;
   };
 
   const openOaDraftUrl = (draftUrl: string) => {
@@ -1820,7 +1824,6 @@ export default function EtcTicketManagementPage() {
       setSelectedBatchId(result.businessBatchId);
       setDraftResult(null);
       setCreateDialogOpen(false);
-      await loadBatches(undefined, nextStatus);
       setDetailReloadKey((current) => current + 1);
     } catch (caught) {
       setActionError(formatEtcUiErrorMessage(caught, "人工处理失败。"));
@@ -2179,6 +2182,9 @@ export default function EtcTicketManagementPage() {
                   const selectRow = () => {
                     setBatchDetail(null);
                     setBusinessBatchDetail(null);
+                    setSelectedTask(null);
+                    setTaskListError(null);
+                    setTaskLoading(true);
                     setSelectedBatchId(batch.id);
                   };
                   return (
@@ -2291,13 +2297,13 @@ export default function EtcTicketManagementPage() {
                     </div>
                     <div className="etc-section-actions">
                       {selectedTask && selectedTask.status === "ready_for_import" ? (
-                        <Button className="etc-secondary-action" isDisabled={taskActionLoading} onPress={handleReopenReconciliationTask} size="sm" variant="secondary">
+                        <Button className="etc-secondary-action" isDisabled={!taskMutationTarget || taskActionLoading} onPress={handleReopenReconciliationTask} size="sm" variant="secondary">
                           重新打开
                         </Button>
                       ) : null}
                       <Button
                         className="etc-primary-action"
-                        isDisabled={!selectedTask || !canConfirmSelectedTask || taskActionLoading}
+                        isDisabled={!taskMutationTarget || !canConfirmSelectedTask || taskActionLoading}
                         isPending={taskActionLoading}
                         onPress={handleConfirmReconciliationTask}
                         size="sm"
@@ -2588,7 +2594,7 @@ export default function EtcTicketManagementPage() {
                                   type="button"
                                   className="etc-secondary-action"
                                   title="重新计算匹配"
-                                  disabled={!selectedTask || taskActionLoading}
+                                  disabled={!taskMutationTarget || taskActionLoading}
                                   onClick={handleRefreshReconciliationMatches}
                                 >
                                   <RefreshCw aria-hidden="true" size={16} />
