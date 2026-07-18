@@ -194,6 +194,8 @@ class EtcTicketsPageAuditTests(unittest.TestCase):
                 "import_batch_ids": ["import-1"],
             }
         )
+        connection.tasks[0]["raw_payload"]["normalized_payload"]["oa_total_amount"] = "120.00"
+        connection.tasks[0]["result_summary"]["oa_total_amount"] = "120.00"
         connection.invoices = [
             {
                 "etc_invoice_id": "etc-invoice-1",
@@ -234,6 +236,7 @@ class EtcTicketsPageAuditTests(unittest.TestCase):
 
         report = etc_tickets_page_audit.audit_etc_tickets_page(connection)
 
+        self.assertEqual(report["overall_status"], "pass", report)
         self.assertNotIn("etc_business_batch_invoice_edge_mismatch", report["summary"]["issue_sample_counts_by_code"])
         self.assertNotIn("etc_not_submitted_occupancy_mismatch", report["summary"]["issue_sample_counts_by_code"])
 

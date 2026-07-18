@@ -126,6 +126,7 @@ test.describe("ETC ticket management browser flow", () => {
     });
     const api = await installDeterministicApiMocks(page, {
       etcTicketBusinessBatchesFailuresBeforeSuccess: 2,
+      etcTicketWorkflowTaskMatchesBusinessBatch: true,
       sessionMode: "full_access",
     });
     const recordLatency = createEtcLatencyRecorder(page, testInfo);
@@ -524,6 +525,7 @@ test.describe("ETC ticket management browser flow", () => {
     });
     const api = await installDeterministicApiMocks(page, {
       etcTicketOaDraftFailuresBeforeSuccess: 1,
+      etcTicketWorkflowTaskMatchesBusinessBatch: true,
       sessionMode: "full_access",
     });
     const recordLatency = createEtcLatencyRecorder(page, testInfo);
@@ -548,9 +550,9 @@ test.describe("ETC ticket management browser flow", () => {
     }, async (mark) => {
       await page.getByRole("button", { name: "提交审批" }).click();
       await mark("firstVisibleResponseLatencyMs", expect(createDialog).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(createDialog.getByText("为当前批次的 2 张发票创建审批草稿，合计 32.26。")).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(createDialog.getByText(/OA 草稿金额：120\.00 元/)).toBeVisible());
     });
-    await expect(createDialog.getByText("为当前批次的 2 张发票创建审批草稿，合计 32.26。")).toBeVisible();
+    await expect(createDialog.getByText(/OA 草稿金额：120\.00 元/)).toBeVisible();
 
     await recordLatency({
       operationId: "etc-tickets.create-oa-draft-failed",
@@ -569,7 +571,7 @@ test.describe("ETC ticket management browser flow", () => {
     expect(api.count("POST /api/etc/business-batches/etc-business-e2e-001/oa-draft")).toBe(1);
     await expect(page.getByText("审批草稿创建暂时失败，请重试。")).toBeVisible();
     await expect(page.getByRole("dialog", { name: "创建审批草稿" })).toBeVisible();
-    await expect(page.getByRole("dialog", { name: "审批提交确认" })).toHaveCount(0);
+    await expect(page.getByRole("dialog", { name: "确认 OA 草稿处理结果" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "提交审批" })).toBeEnabled();
 
     await recordLatency({
@@ -583,13 +585,13 @@ test.describe("ETC ticket management browser flow", () => {
       );
       await createDialog.getByRole("button", { name: "创建草稿" }).click();
       expect((await mark("apiLatencyMs", recoveredDraftResponse)).status()).toBe(200);
-      await mark("finalSettledLatencyMs", expect(page.getByRole("dialog", { name: "审批提交确认" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("dialog", { name: "确认 OA 草稿处理结果" })).toBeVisible());
     });
     expect(api.count("POST /api/etc/business-batches/etc-business-e2e-001/oa-draft")).toBe(2);
 
-    const resultDialog = page.getByRole("dialog", { name: "审批提交确认" });
+    const resultDialog = page.getByRole("dialog", { name: "确认 OA 草稿处理结果" });
     await expect(resultDialog).toBeVisible();
-    await expect(resultDialog.getByText("审批草稿已创建，等待提交确认。")).toBeVisible();
+    await expect(resultDialog.getByText("OA 草稿已创建。请根据你在 OA 系统中的实际操作选择结果。")).toBeVisible();
     await expect(page.getByText("审批草稿创建暂时失败，请重试。")).toHaveCount(0);
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(browserErrors).toEqual([]);
@@ -601,6 +603,7 @@ test.describe("ETC ticket management browser flow", () => {
     });
     const api = await installDeterministicApiMocks(page, {
       etcTicketManualStatusFailuresBeforeSuccess: 1,
+      etcTicketWorkflowTaskMatchesBusinessBatch: true,
       sessionMode: "full_access",
     });
     const recordLatency = createEtcLatencyRecorder(page, testInfo);
@@ -635,46 +638,46 @@ test.describe("ETC ticket management browser flow", () => {
     }, async (mark) => {
       await createDialog.getByRole("button", { name: "创建草稿" }).click();
       expect((await mark("apiLatencyMs", draftResponse)).status()).toBe(200);
-      await mark("finalSettledLatencyMs", expect(page.getByRole("dialog", { name: "审批提交确认" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("dialog", { name: "确认 OA 草稿处理结果" })).toBeVisible());
     });
 
-    const resultDialog = page.getByRole("dialog", { name: "审批提交确认" });
+    const resultDialog = page.getByRole("dialog", { name: "确认 OA 草稿处理结果" });
     await expect(resultDialog).toBeVisible();
-    await expect(resultDialog.getByText("审批草稿已创建，等待提交确认。")).toBeVisible();
+    await expect(resultDialog.getByText("OA 草稿已创建。请根据你在 OA 系统中的实际操作选择结果。")).toBeVisible();
 
     await recordLatency({
       operationId: "etc-tickets.manual-status-submitted-failed",
-      visibleLabel: "已提交",
+      visibleLabel: "我已在 OA 系统上完成 OA 草稿的提交",
       actionType: "click",
     }, async (mark) => {
       const failedManualStatusResponse = page.waitForResponse((response) =>
         response.url().includes("/api/etc/business-batches/etc-business-e2e-001/manual-oa-status")
           && response.request().method() === "POST",
       );
-      await resultDialog.getByRole("button", { name: "已提交" }).click();
+      await resultDialog.getByRole("button", { name: "我已在 OA 系统上完成 OA 草稿的提交" }).click();
       expect((await mark("apiLatencyMs", failedManualStatusResponse)).status()).toBe(503);
       await mark("firstVisibleResponseLatencyMs", expect(page.getByText("人工确认暂时失败，请重试。")).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(page.getByRole("dialog", { name: "审批提交确认" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("dialog", { name: "确认 OA 草稿处理结果" })).toBeVisible());
     });
     expect(api.count("POST /api/etc/business-batches/etc-business-e2e-001/manual-oa-status")).toBe(1);
     await expect(page.getByText("人工确认暂时失败，请重试。")).toBeVisible();
-    await expect(page.getByRole("dialog", { name: "审批提交确认" })).toBeVisible();
-    await expect(resultDialog.getByRole("button", { name: "已提交" })).toBeEnabled();
-    await expect(resultDialog.getByRole("button", { name: "未提交" })).toBeEnabled();
+    await expect(page.getByRole("dialog", { name: "确认 OA 草稿处理结果" })).toBeVisible();
+    await expect(resultDialog.getByRole("button", { name: "我已在 OA 系统上完成 OA 草稿的提交" })).toBeEnabled();
+    await expect(resultDialog.getByRole("button", { name: "我已在 OA 系统上删除该 OA 草稿" })).toBeEnabled();
     await expect(page.getByRole("radio", { name: "未提交 0" })).toHaveAttribute("aria-checked", "true");
     await expect(page.getByRole("radio", { name: "暂存 1" })).toBeVisible();
     await expect(page.getByRole("radio", { name: "已提交 0" })).toBeVisible();
 
     await recordLatency({
       operationId: "etc-tickets.manual-status-submitted-retry",
-      visibleLabel: "已提交",
+      visibleLabel: "我已在 OA 系统上完成 OA 草稿的提交",
       actionType: "click",
     }, async (mark) => {
       const recoveredManualStatusResponse = page.waitForResponse((response) =>
         response.url().includes("/api/etc/business-batches/etc-business-e2e-001/manual-oa-status")
           && response.request().method() === "POST",
       );
-      await resultDialog.getByRole("button", { name: "已提交" }).click();
+      await resultDialog.getByRole("button", { name: "我已在 OA 系统上完成 OA 草稿的提交" }).click();
       expect((await mark("apiLatencyMs", recoveredManualStatusResponse)).status()).toBe(200);
       await mark("finalSettledLatencyMs", expect(page.getByRole("radio", { name: "已提交 1" })).toHaveAttribute("aria-checked", "true"));
     });
@@ -691,7 +694,10 @@ test.describe("ETC ticket management browser flow", () => {
 
   test("creates an OA draft for an imported ETC batch and moves it to submitted history", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
-    const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
+    const api = await installDeterministicApiMocks(page, {
+      etcTicketWorkflowTaskMatchesBusinessBatch: true,
+      sessionMode: "full_access",
+    });
     const recordLatency = createEtcLatencyRecorder(page, testInfo);
 
     await recordLatency({
@@ -712,7 +718,7 @@ test.describe("ETC ticket management browser flow", () => {
     const row = page.getByTestId("etc-batch-row-etc-business-e2e-001");
     await expect(row).toBeVisible();
     await expect(row).toContainText("3月批次");
-    await expect(row).toContainText("发票 2 + 补充凭证 0");
+    await expect(row).toContainText("发票 2");
     await expect(page.getByRole("table", { name: "ETC发票明细" })).toBeVisible();
     await expect(page.getByRole("cell", { name: "ETC-E2E-001" })).toBeVisible();
 
@@ -727,9 +733,11 @@ test.describe("ETC ticket management browser flow", () => {
     }, async (mark) => {
       await submitButton.click();
       await mark("firstVisibleResponseLatencyMs", expect(createDialog).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(createDialog.getByText("为当前批次的 2 张发票创建审批草稿，合计 32.26。")).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(createDialog.getByText(/OA 草稿金额：120\.00 元/)).toBeVisible());
     });
-    await expect(createDialog.getByText("为当前批次的 2 张发票创建审批草稿，合计 32.26。")).toBeVisible();
+    await expect(createDialog.getByText(/OA 草稿金额：120\.00 元/)).toBeVisible();
+    await expect(createDialog.getByText("已导入 ETC 发票：2 张 / 32.26 元")).toBeVisible();
+    await expect(createDialog.getByText("两者相差 87.74 元；OA 草稿仍按对账任务金额创建。")).toBeVisible();
     await expect(createDialog.getByText("批次：3月批次")).toBeVisible();
 
     const draftResponse = page.waitForResponse((response) =>
@@ -743,14 +751,14 @@ test.describe("ETC ticket management browser flow", () => {
     }, async (mark) => {
       await createDialog.getByRole("button", { name: "创建草稿" }).click();
       expect((await mark("apiLatencyMs", draftResponse)).status()).toBe(200);
-      await mark("finalSettledLatencyMs", expect(page.getByRole("dialog", { name: "审批提交确认" })).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(page.getByRole("dialog", { name: "确认 OA 草稿处理结果" })).toBeVisible());
     });
     expect(api.count("POST /api/etc/business-batches/etc-business-e2e-001/oa-draft")).toBe(1);
 
-    const resultDialog = page.getByRole("dialog", { name: "审批提交确认" });
+    const resultDialog = page.getByRole("dialog", { name: "确认 OA 草稿处理结果" });
     await expect(resultDialog).toBeVisible();
-    await expect(resultDialog.getByText("审批草稿已创建，等待提交确认。")).toBeVisible();
-    await expect(resultDialog.getByRole("button", { name: "打开草稿" })).toBeEnabled();
+    await expect(resultDialog.getByText("OA 草稿已创建。请根据你在 OA 系统中的实际操作选择结果。")).toBeVisible();
+    await expect(resultDialog.getByRole("button", { name: "打开草稿" })).toHaveCount(0);
     await expectNoUnexpectedSuccessUiErrors(page);
 
     const manualStatusResponse = page.waitForResponse((response) =>
@@ -759,10 +767,10 @@ test.describe("ETC ticket management browser flow", () => {
     );
     await recordLatency({
       operationId: "etc-tickets.manual-status-submitted-happy-path",
-      visibleLabel: "已提交",
+      visibleLabel: "我已在 OA 系统上完成 OA 草稿的提交",
       actionType: "click",
     }, async (mark) => {
-      await resultDialog.getByRole("button", { name: "已提交" }).click();
+      await resultDialog.getByRole("button", { name: "我已在 OA 系统上完成 OA 草稿的提交" }).click();
       expect((await mark("apiLatencyMs", manualStatusResponse)).status()).toBe(200);
       await mark("finalSettledLatencyMs", expect(page.getByRole("radio", { name: "已提交 1" })).toHaveAttribute("aria-checked", "true"));
     });

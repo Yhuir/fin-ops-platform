@@ -5343,6 +5343,7 @@ class EtcApiTests(unittest.TestCase):
             _task_id, draft_payload = self._import_supplement_reconciliation_zip_and_create_draft(app)
 
         self.assertEqual(draft_payload["oaDraftId"], "oa-draft-001")
+        self.assertEqual(draft_payload["invoiceSummary"], {"count": 1, "amount": "13.07"})
         self.assertEqual(len(fake_oa.uploads), 2)
         self.assertEqual(Path(fake_oa.uploads[1]).name, "ETC-RECON-FILE-000001_supplement-ride.pdf")
         payload = fake_oa.draft_payloads[0]["payload"]

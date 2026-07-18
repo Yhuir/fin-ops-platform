@@ -899,3 +899,13 @@
 - 测试覆盖：本 slice 为 analysis-only；下一实现 slice 需要 static Guard 和 targeted business-batch DELETE API regressions。
 - 验证命令：只读审计 `server.py`、business route owner、legacy route owner、delete service、Guard 和 CodeGraph；未运行新增测试。
 - 未测风险：DELETE HTTP mapping 仍在 `Application`，等待 callback collapse。
+
+## 2026-07-19 - OA 草稿金额事实源与结果弹窗收口
+
+- 目标：确保 OA 草稿始终使用已完成对账任务金额，同时让业务批次发票汇总保持实际发票事实，并把草稿结果确认收敛为两个无歧义决定。
+- 影响范围：ETC 页面、ETC 前端 API/type 边界、business batch payload、ETC 页面 Audit 回归和模块文档；不改变共享 canonical invoice、其它页面 read model、worker、queue 或部署配置。
+- 关键决策：`oaTotalAmount` 是 OA 草稿金额唯一事实源；`invoiceSummary` 只按 business batch 的实际 `invoice_ids` 求和。金额不一致只显示差额，不阻断提交、不写回。结果弹窗不再提供“打开草稿/关闭/已提交/未提交”旧动作，只保留“完成 OA 草稿提交”和“删除 OA 草稿”两个完整语义按钮；打开草稿与 PDF 下载留在暂存区。
+- 旧逻辑删除：移除 business batch 到旧 `EtcBatchSummary/Detail` 的页面转换、旧 batch DTO/API mapper、伪造 `linkedOaAmount=invoiceSummary.amount` 与 `amountDelta=0`、草稿结果弹窗的旧打开/关闭/短标签动作，以及后端用 submission/OA 金额覆盖 `invoiceSummary` 的分支。
+- 性能与隔离：金额对比为浏览器内按分计算，状态决定复用既有单次 `manual-oa-status`；没有新增网络请求、缓存、read model、队列、后台任务或跨页面写入。
+- 测试覆盖：组件覆盖 3740.82 / 3686.36 / 54.46 口径、两按钮、失败重试和状态迁移；后端覆盖 OA 101.07 与实际发票 13.07 分离；Audit 覆盖两项金额不同仍通过；Playwright 更新完整可见链路。
+- 未测风险：真实 OA 系统收到的金额与真实生产页面性能仍需在后续部署窗口做只读/受控生产验证；本次未部署。

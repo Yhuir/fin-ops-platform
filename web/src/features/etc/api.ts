@@ -13,9 +13,6 @@ import type {
   EtcBusinessBatchSummary,
   EtcUpdateBusinessBatchTitlePayload,
   EtcBusinessBatchVersionedPayload,
-  EtcBatchDetail,
-  EtcBatchStatus,
-  EtcBatchSummary,
   EtcCreateBusinessBatchPayload,
   EtcImportConfirmResult,
   EtcImportItem,
@@ -81,15 +78,6 @@ type ApiEtcInvoicePayload = {
   };
 };
 
-type ApiEtcPlateSummary = {
-  plate_number?: string | null;
-  plateNumber?: string | null;
-  invoice_count?: number | null;
-  invoiceCount?: number | null;
-  total_amount?: string | number | null;
-  totalAmount?: string | number | null;
-};
-
 type ApiEtcBatch = {
   id?: string;
   batch_id?: string;
@@ -98,48 +86,13 @@ type ApiEtcBatch = {
   etcBatchId?: string;
   external_batch_id?: string;
   externalBatchId?: string;
-  status?: EtcBatchStatus | EtcBusinessBatchStatus;
-  source_type?: string | null;
-  sourceType?: string | null;
+  status?: EtcInvoiceStatus | EtcBusinessBatchStatus;
   invoice_count?: number | null;
   invoiceCount?: number | null;
   total_amount?: string | number | null;
   totalAmount?: string | number | null;
-  tax_amount?: string | number | null;
-  taxAmount?: string | number | null;
-  issue_start_date?: string | null;
-  issueStartDate?: string | null;
-  issue_end_date?: string | null;
-  issueEndDate?: string | null;
-  passage_start_date?: string | null;
-  passageStartDate?: string | null;
-  passage_end_date?: string | null;
-  passageEndDate?: string | null;
-  plate_count?: number | null;
-  plateCount?: number | null;
-  plate_summary?: ApiEtcPlateSummary[] | Record<string, unknown> | null;
-  plateSummary?: ApiEtcPlateSummary[] | Record<string, unknown> | null;
   linked_oa_row_id?: string | null;
   linkedOaRowId?: string | null;
-  linked_oa_case_id?: string | null;
-  linkedOaCaseId?: string | null;
-  linked_oa_applicant?: string | null;
-  linkedOaApplicant?: string | null;
-  linked_oa_apply_date?: string | null;
-  linkedOaApplyDate?: string | null;
-  linked_oa_amount?: string | number | null;
-  linkedOaAmount?: string | number | null;
-  amount_delta?: string | number | null;
-  amountDelta?: string | number | null;
-  etc_invoice_count?: number | null;
-  etcInvoiceCount?: number | null;
-  supplement_count?: number | null;
-  supplementCount?: number | null;
-  supplement_amount?: string | number | null;
-  supplementAmount?: string | number | null;
-  display_count_text?: string | null;
-  displayCountText?: string | null;
-  note?: string | null;
   invoice_items?: ApiEtcInvoice[];
   invoiceItems?: ApiEtcInvoice[];
   items?: ApiEtcInvoice[];
@@ -793,83 +746,6 @@ function mapInvoice(invoice: ApiEtcInvoice): EtcInvoice {
   };
 }
 
-function mapPlateSummary(input: ApiEtcBatch["plate_summary"] | ApiEtcBatch["plateSummary"]) {
-  if (Array.isArray(input)) {
-    return input.map((item) => ({
-      plateNumber: item.plateNumber ?? item.plate_number ?? "",
-      invoiceCount: item.invoiceCount ?? item.invoice_count ?? 0,
-      totalAmount: normalizeMoney(item.totalAmount ?? item.total_amount),
-    }));
-  }
-  if (input && typeof input === "object") {
-    return Object.entries(input).map(([plateNumber, value]) => {
-      if (value && typeof value === "object") {
-        const item = value as ApiEtcPlateSummary;
-        return {
-          plateNumber,
-          invoiceCount: item.invoiceCount ?? item.invoice_count ?? 0,
-          totalAmount: normalizeMoney(item.totalAmount ?? item.total_amount),
-        };
-      }
-      return {
-        plateNumber,
-        invoiceCount: 0,
-        totalAmount: normalizeMoney(typeof value === "number" || typeof value === "string" ? value : undefined),
-      };
-    });
-  }
-  return [];
-}
-
-function mapBatchSummary(batch: ApiEtcBatch): EtcBatchSummary {
-  const id = batch.id ?? batch.batchId ?? batch.batch_id ?? "";
-  const etcBatchId = batch.etcBatchId ?? batch.etc_batch_id ?? batch.externalBatchId ?? batch.external_batch_id ?? id;
-  const plateSummary = mapPlateSummary(batch.plateSummary ?? batch.plate_summary);
-  return {
-    id,
-    etcBatchId,
-    externalBatchId: batch.externalBatchId ?? batch.external_batch_id ?? etcBatchId,
-    scopeMonth: "",
-    status: (batch.status ?? "unsubmitted") as EtcBatchStatus,
-    sourceType: batch.sourceType ?? batch.source_type ?? "",
-    invoiceCount: batch.invoiceCount ?? batch.invoice_count ?? 0,
-    totalAmount: normalizeMoney(batch.totalAmount ?? batch.total_amount),
-    taxAmount: normalizeMoney(batch.taxAmount ?? batch.tax_amount),
-    issueStartDate: batch.issueStartDate ?? batch.issue_start_date ?? null,
-    issueEndDate: batch.issueEndDate ?? batch.issue_end_date ?? null,
-    passageStartDate: batch.passageStartDate ?? batch.passage_start_date ?? null,
-    passageEndDate: batch.passageEndDate ?? batch.passage_end_date ?? null,
-    plateCount: batch.plateCount ?? batch.plate_count ?? plateSummary.length,
-    plateSummary,
-    linkedOaRowId: batch.linkedOaRowId ?? batch.linked_oa_row_id ?? "",
-    linkedOaCaseId: batch.linkedOaCaseId ?? batch.linked_oa_case_id ?? "",
-    linkedOaApplicant: batch.linkedOaApplicant ?? batch.linked_oa_applicant ?? "",
-    linkedOaApplyDate: batch.linkedOaApplyDate ?? batch.linked_oa_apply_date ?? "",
-    linkedOaAmount: normalizeMoney(batch.linkedOaAmount ?? batch.linked_oa_amount),
-    amountDelta: normalizeMoney(batch.amountDelta ?? batch.amount_delta),
-    etcInvoiceCount: batch.etcInvoiceCount ?? batch.etc_invoice_count ?? batch.invoiceCount ?? batch.invoice_count ?? 0,
-    supplementCount: batch.supplementCount ?? batch.supplement_count ?? 0,
-    supplementAmount: normalizeMoney(batch.supplementAmount ?? batch.supplement_amount),
-    displayCountText:
-      batch.displayCountText
-      ?? batch.display_count_text
-      ?? `发票 ${batch.etcInvoiceCount ?? batch.etc_invoice_count ?? batch.invoiceCount ?? batch.invoice_count ?? 0} + 补充凭证 ${batch.supplementCount ?? batch.supplement_count ?? 0}`,
-    note: batch.note ?? "",
-  };
-}
-
-function mapBatchDetail(batch: ApiEtcBatch): EtcBatchDetail {
-  const summary = batch.summary && typeof batch.summary === "object" ? batch.summary : {};
-  const batchWithSummary = {
-    ...batch,
-    ...summary,
-  };
-  return {
-    ...mapBatchSummary(batchWithSummary),
-    invoiceItems: (batch.invoiceItems ?? batch.invoice_items ?? batch.items ?? []).map(mapInvoice),
-  };
-}
-
 function stringArray(value: string[] | null | undefined): string[] {
   return Array.isArray(value) ? value.filter((item) => typeof item === "string" && item.trim()) : [];
 }
@@ -899,7 +775,6 @@ function mapBusinessBatchAuditEvent(event: ApiEtcBusinessBatchAuditEvent): EtcBu
 }
 
 function mapBusinessBatchSummary(batch: ApiEtcBusinessBatch): EtcBusinessBatchSummary {
-  const legacySummary = mapBatchSummary(batch);
   const invoiceSummary = batch.invoiceSummary ?? batch.invoice_summary;
   const amountBreakdown = batch.amountBreakdown ?? batch.amount_breakdown ?? {};
   const businessBatchId = batch.businessBatchId ?? batch.business_batch_id ?? batch.id ?? batch.batchId ?? batch.batch_id ?? "";
@@ -910,7 +785,9 @@ function mapBusinessBatchSummary(batch: ApiEtcBusinessBatch): EtcBusinessBatchSu
     ?? batch.external_batch_id
     ?? batch.etcBatchId
     ?? batch.etc_batch_id
-    ?? legacySummary.externalBatchId
+    ?? batch.id
+    ?? batch.batchId
+    ?? batch.batch_id
     ?? "";
   const createOaDraftAction = batch.createOaDraftAction ?? batch.create_oa_draft_action;
   return {

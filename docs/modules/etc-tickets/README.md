@@ -57,6 +57,8 @@
 - 没有 active business batch 绑定的 task-only 记录不得进入左侧批次列表或 tab 计数；只可作为 workflow 内部状态、异常恢复线索或运维清理对象处理。
 - 旧 `/api/etc/batches*` 后端兼容入口、前端测试 mock 假后端、invoice-id 级 `/api/etc/invoices/revoke-submitted` 回退入口和 ETC `oa-status/refresh` 入口已删除；页面、测试和运维入口不得重新依赖它们。
 - ETC 专用 OA 自动检测链路已移除；创建 OA 草稿后只允许用户通过 `manual-oa-status` 人工确认 `submitted` 或 `not_submitted`，不得通过 invoice id 直接回退提交状态。
+- OA 草稿金额只取已完成对账任务的 `oaTotalAmount`；业务批次 `invoiceSummary` 只表示当前实际导入的 ETC 发票数量与含税金额。两者不一致时页面必须同时如实显示差额，但不得改写 OA 草稿金额或阻断提交；该对比只做前端纯计算，不增加 API/read model/worker I/O。
+- OA 草稿创建后的结果弹窗只提供两个状态决定：“我已在 OA 系统上完成 OA 草稿的提交”进入已提交，“我已在 OA 系统上删除该 OA 草稿”回到未提交。打开草稿与下载发票 PDF 只保留在暂存批次的常驻操作区，不混入结果决定弹窗。
 - OA 草稿创建拆为本地 prepare、锁外 OA I/O、CAS finalize；请求必须携带稳定 `idempotencyKey`。结果未知时保持 `oa_draft_creating` 并禁止盲重试，由管理员在核实 OA 后走显式 recovery command。确认“未创建/需修改”只把批次退回未提交并释放 OA 占用，保留业务批次、发票、上传文件和核对结果。
 - OA 草稿创建成功后，页面提供当前业务批次 ETC 发票 PDF 合并下载。批次 `invoice_ids` 是成员事实源，application service 负责范围校验与审计，PDF bundle service 只通过文件读取端口读取对象存储/本地字节并按开票日期、发票号、ID 稳定排序；每张来源必须恰好一页，任一缺失、损坏、hash 不一致或多页时整包失败，不允许静默漏票。
 - `submitted` 只表示 ETC 批次已人工确认提交，不等于关联台三项已配对；Workbench open 区必须生成折叠 `etc_invoice_summary`，等待 OA 和银行流水进入后通过普通配对闭环。

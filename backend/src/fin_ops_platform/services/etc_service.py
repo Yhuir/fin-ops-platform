@@ -1588,33 +1588,7 @@ class EtcService:
         invoices = [self._invoices[invoice_id] for invoice_id in list(batch.invoice_ids) if invoice_id in self._invoices]
         amount = sum((invoice.total_amount for invoice in invoices), Decimal("0.00")).quantize(Decimal("0.01"))
         invoice_count = len(invoices)
-        display_count_text: str | None = None
-        if batch.submission_batch_id and (submission_batch := self._batches.get(batch.submission_batch_id)) is not None:
-            self._ensure_batch_metadata_fields(submission_batch)
-            submission_amount = (
-                getattr(submission_batch, "oa_total_amount", None)
-                or getattr(submission_batch, "etc_invoice_amount", None)
-                or getattr(submission_batch, "total_amount", None)
-            )
-            if submission_amount not in (None, ""):
-                try:
-                    amount = Decimal(str(submission_amount)).quantize(Decimal("0.01"))
-                except (InvalidOperation, ValueError):
-                    amount = amount
-            submission_count = getattr(submission_batch, "etc_invoice_count", None) or getattr(
-                submission_batch,
-                "invoice_count",
-                None,
-            )
-            if submission_count not in (None, ""):
-                try:
-                    invoice_count = int(submission_count)
-                except (TypeError, ValueError):
-                    invoice_count = len(invoices)
-            display_count_text = str(getattr(submission_batch, "display_count_text", "") or "").strip() or None
         invoice_summary: dict[str, object] = {"count": invoice_count, "amount": amount}
-        if display_count_text:
-            invoice_summary["displayCountText"] = display_count_text
         return {
             "businessBatchId": batch.business_batch_id,
             "taskId": batch.task_id,

@@ -1,14 +1,6 @@
 import type { BackgroundJob } from "../backgroundJobs/types";
 import type { ImportPreviewAuditCounts } from "../imports/types";
 
-export type EtcBatchStatus =
-  | "unsubmitted"
-  | "draft_creating"
-  | "draft_created"
-  | "not_submitted"
-  | "failed"
-  | "submitted";
-
 export type EtcBusinessBatchStatus =
   | "draft"
   | "reviewing"
@@ -54,55 +46,10 @@ export type EtcInvoiceCounts = {
   submitted: number;
 };
 
-export type EtcPlateSummary = {
-  plateNumber: string;
-  invoiceCount: number;
-  totalAmount: string;
-};
-
-export type EtcBatchSummary = {
-  id: string;
-  etcBatchId: string;
-  externalBatchId: string;
-  scopeMonth: string;
-  status: EtcBatchStatus;
-  sourceType: string;
-  invoiceCount: number;
-  totalAmount: string;
-  taxAmount: string;
-  issueStartDate: string | null;
-  issueEndDate: string | null;
-  passageStartDate: string | null;
-  passageEndDate: string | null;
-  plateCount: number;
-  plateSummary: EtcPlateSummary[];
-  linkedOaRowId: string;
-  linkedOaCaseId: string;
-  linkedOaApplicant: string;
-  linkedOaApplyDate: string;
-  linkedOaAmount: string;
-  amountDelta: string;
-  etcInvoiceCount: number;
-  supplementCount: number;
-  supplementAmount: string;
-  displayCountText: string;
-  note: string;
-};
-
-export type EtcBatchDetail = EtcBatchSummary & {
-  invoiceItems: EtcInvoice[];
-};
-
-export type EtcBatchCounts = {
-  unsubmitted: number;
-  staged: number;
-  submitted: number;
-};
-
 export type EtcBusinessBatchBucket = "unsubmitted" | "staged" | "submitted";
 
-export type EtcBatchQuery = {
-  status?: EtcBatchStatus;
+export type EtcInvoiceQuery = {
+  status?: EtcInvoiceStatus;
   month?: string;
   plate?: string;
   keyword?: string;
@@ -112,21 +59,9 @@ export type EtcBatchQuery = {
   signal?: AbortSignal;
 };
 
-export type EtcInvoiceQuery = EtcBatchQuery;
-
 export type EtcInvoiceListPayload = {
   counts: EtcInvoiceCounts;
   items: EtcInvoice[];
-  pagination: {
-    page: number;
-    pageSize: number;
-    total: number;
-  };
-};
-
-export type EtcBatchListPayload = {
-  counts: EtcBatchCounts;
-  items: EtcBatchSummary[];
   pagination: {
     page: number;
     pageSize: number;

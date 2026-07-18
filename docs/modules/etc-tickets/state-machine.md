@@ -20,7 +20,7 @@
   - 创建 OA 草稿必须按 `prepare -> execute external -> finalize` 执行并使用稳定 `idempotencyKey`；外部 I/O 不得持 ETC 业务锁。明确失败进入 `oa_draft_failed`；结果未知保持 creating 并禁止盲重试，管理员核实 OA 后才能恢复。
   - 历史 `oa_draft_creating` 若缺 prepared submission/attempt，不允许采纳任何草稿 ID/URL；只有管理员提供权威 OA 主事实查询为零的 reason/evidence 后，才可将目标批次 CAS 为 `oa_draft_failed` 并回到未提交 bucket。不得补造 submission 或根据本地空字段自动恢复。
   - prepare/finalize/recovery 的 durable write 必须以目标 business batch 当前 version 为 CAS 前置条件，并只写当前 attempt 拥有的 business batch、submission batch 及确实发生变化的 invoice/import rows；不能回写全量旧 snapshot。business batch 已进入 `oa_confirmation_pending`、但 linked task OA 元数据写入失败时，相同 idempotency key 或相同 recovery 证据只执行修复写，禁止第二次调用 OA。
-  - 暂存批次选择“我已创建 OA”进入已提交；选择“我没有创建 OA/需要修改”进入 `not_submitted`，清空 submission/draft 占用但保留批次、发票成员、源文件和核对数据。
+  - 暂存批次选择“我已在 OA 系统上完成 OA 草稿的提交”进入已提交；选择“我已在 OA 系统上删除该 OA 草稿”进入 `not_submitted`，清空 submission/draft 占用但保留批次、发票成员、源文件和核对数据。
   - 创建 OA 草稿后只能由 `manual-oa-status` 人工确认 `submitted` 或 `not_submitted`。
   - OA 草稿创建成功后允许只读下载当前 business batch 关联的 ETC 发票合并 PDF；下载不改变批次状态。`invoice_ids` 决定成员，稳定排序后每张发票必须恰好贡献一页，任一来源异常时整包失败。
   - `submitted` 成功后，关联台 open 区生成一条 `source_kind=etc_invoice_summary` 折叠汇总发票行，金额取业务批次上报金额，等待未来 OA 和银行流水进入后普通配对。
@@ -42,6 +42,7 @@
 - empty：未提交或已提交 tab 下无批次时只显示该 bucket 的空态；一个业务批次在前端只出现一次。
 - initial load：页面进入和刷新只能读取已有业务批次/对账任务，不得自动创建空 ETC 对账任务；新建批次只能由用户点击“新建批次”触发。
 - batch list：左侧批次列表和 tab 计数只使用 `/api/etc/business-batches*` 的窄 summary 事实；页面不再提供月份选择器，默认展示全部用户可见批次并分“未提交/暂存/已提交”三个互斥 bucket；task-only active task 只允许出现在 workflow 内部状态或异常恢复入口，不得混入批次列表。
+- amount contract：创建 OA 草稿前同时显示对账任务 `oaTotalAmount` 与业务批次实际 `invoiceSummary`。OA 草稿始终使用前者；两者差额只做非阻断说明。创建结果弹窗只保留两个状态决定按钮，不提供打开草稿或关闭按钮；Escape/遮罩仍可退出，暂存区继续提供打开草稿与下载 PDF。
 - selection loading：用户切换批次时必须同步失效旧 task mutation target；新 batch 的精确 task 请求与 detail 请求并发发起。任一请求未完成时，旧 task 只能作为已清除状态，不能继续上传、删除、刷新匹配、确认或 reopen；人工状态变更由 active bucket effect 作为唯一 list reload owner。
 - title editing：未提交 business batch 行的标题可点击内联编辑，Enter 或失焦保存，Esc 取消；保存失败保留错误提示，不伪装为已保存。已提交 bucket 不展示标题编辑入口。
 - error：导入、创建草稿、人工确认、删除失败时显示本地化业务错误；内部对象 id、文件 id、旧检测码不作为主要用户文案。
@@ -64,6 +65,7 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-07-19 | 固定 OA 草稿金额来自对账任务，业务批次发票汇总恢复为实际发票事实；结果弹窗收敛为两个明确决定并删除旧 batch DTO/伪金额映射 | ETC 页面与 business batch payload；无共享 read model/worker/跨页面 I/O 变化 | `tests.test_etc_backend.EtcApiTests.test_reconciliation_backed_oa_draft_uploads_supplements_and_uses_oa_total`；`tests.test_audit_etc_tickets_read_model_tool`；`web/src/test/EtcTicketManagementPage.test.tsx`；`web/e2e/etc-tickets-flow.spec.ts` |
 | 2026-07-14 | OA 草稿成功后新增批次 ETC 发票 PDF 合并下载；成员按 business batch 事实、单票单页、全有或全无，并写下载审计 | ETC 页面审批确认区、business batch read API、对象存储读取端口、PyMuPDF 合并边界 | `tests/test_etc_invoice_pdf_bundle_service.py`；`web/src/test/EtcApi.test.ts`；`web/src/test/EtcTicketManagementPage.test.tsx`；`web/e2e/etc-tickets-flow.spec.ts` |
 | 2026-07-14 | 修复慢 OCR 与 source file 删除并发造成的孤儿解析结果；新增解析提交存在性校验、互斥、孤儿清理和 formal file row deleted 对账 | 信用卡/票根上传、source file 删除、对账任务 payload、PostgreSQL formal file 状态、409 错误合同 | `tests/test_etc_reconciliation_service.py`；`tests/test_etc_backend.py`；`tests/test_postgres_repositories_boundaries.py` |
 | 2026-07-05 | 删除 ETC invoice-id 级 `/api/etc/invoices/revoke-submitted` 回退入口、旧 `/api/etc/batches*` 前端测试 mock 假后端和 ETC `oa-status/refresh` mock | ETC invoice list route owner 变为只读 I/O；提交状态回退只允许走 business batch 状态机；测试 mock 不再支持线上已删除旧入口 | `tests.test_platform_runtime_boundary_guards`；`tests.test_etc_backend.EtcServiceTests.test_batch_status_mark_not_submitted_and_draft_creation_with_fake_oa_client`；`web/src/test/EtcApi.test.ts` |
