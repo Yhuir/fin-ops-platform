@@ -46,6 +46,7 @@ from fin_ops_platform.services.historical_etc_repair_service import (
 )
 from fin_ops_platform.services.object_storage import ObjectStorageWriteError
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
+from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
 from fin_ops_platform.services.existing_etc_batch_link_service import (
     ExistingEtcBatchLinkService,
     ExistingEtcBatchLinkSpec,
@@ -3030,6 +3031,141 @@ class EtcApiTests(unittest.TestCase):
         self.assertNotIn("oaDetectionNextRunAt", detail)
         self.assertNotIn("oaDetectionDeadlineAt", detail)
         self.assertNotIn("oaDetectionFinalRetryUntil", detail)
+
+    def test_etc_business_batch_list_and_detail_keep_fixed_io_budgets_for_65_invoices(self) -> None:
+        invoice_numbers = [f"ETC-PERF-{index:03d}" for index in range(65)]
+        with TemporaryDirectory() as temp_dir:
+            app = build_application(data_dir=Path(temp_dir))
+            try:
+                create_response = app.handle_request(
+                    "POST",
+                    "/api/etc/business-batches",
+                    json.dumps({"taskId": "ETC-TASK-PERF"}),
+                )
+                created = json.loads(create_response.body)["data"]["businessBatch"]
+                preview_body, preview_headers = multipart(
+                    {"invoices.zip": etc_zip(invoice_numbers)},
+                    {"expectedVersion": str(created["version"])},
+                )
+                preview_response = app.handle_request(
+                    "POST",
+                    f"/api/etc/business-batches/{created['businessBatchId']}/etc-import/preview",
+                    preview_body,
+                    preview_headers,
+                )
+                preview = json.loads(preview_response.body)["data"]
+                confirm_response = app.handle_request(
+                    "POST",
+                    f"/api/etc/business-batches/{created['businessBatchId']}/etc-import/confirm",
+                    json.dumps({
+                        "sessionId": preview["sessionId"],
+                        "expectedVersion": preview["businessBatch"]["version"],
+                    }),
+                )
+                with (
+                    patch.object(
+                        app._state_store,
+                        "read_etc_invoice_file",
+                        wraps=app._state_store.read_etc_invoice_file,
+                    ) as read_invoice_file,
+                    patch.object(
+                        app._state_store,
+                        "etc_invoice_file_exists",
+                        wraps=app._state_store.etc_invoice_file_exists,
+                    ) as invoice_file_exists,
+                ):
+                    list_response = app.handle_request(
+                        "GET",
+                        "/api/etc/business-batches?bucket=unsubmitted&page=1&page_size=100",
+                    )
+                    detail_response = app.handle_request(
+                        "GET",
+                        f"/api/etc/business-batches/{created['businessBatchId']}",
+                    )
+            finally:
+                app.shutdown_background_jobs()
+
+        self.assertEqual(create_response.status_code, 201)
+        self.assertEqual(preview_response.status_code, 200)
+        self.assertEqual(confirm_response.status_code, 200)
+        self.assertEqual(list_response.status_code, 200)
+        self.assertLessEqual(len(list_response.body.encode("utf-8")), 250 * 1024)
+        list_payload = json.loads(list_response.body)["data"]
+        self.assertEqual(list_payload["total"], 1)
+        self.assertEqual(list_payload["items"][0]["invoiceSummary"]["count"], 65)
+        self.assertNotIn("invoiceIds", list_payload["items"][0])
+        self.assertEqual(detail_response.status_code, 200)
+        detail_payload = json.loads(detail_response.body)["data"]["businessBatch"]
+        self.assertEqual(len(detail_payload["invoiceItems"]), 65)
+        read_invoice_file.assert_not_called()
+        invoice_file_exists.assert_not_called()
+
+        invoice_ids = [f"etc_invoice_{index:04d}" for index in range(1, 66)]
+        fetch_all_calls: list[tuple[str, tuple[object, ...]]] = []
+        fetch_one_calls: list[tuple[str, tuple[object, ...]]] = []
+        batch_payload = {
+            "business_batch_id": "ETC-BATCH-PERF-SQL",
+            "task_id": "ETC-TASK-PERF-SQL",
+            "status": "imported",
+            "invoice_ids": invoice_ids,
+            "title": "65 张 ETC 发票查询预算",
+            "created_at": "2026-07-18T00:00:00+00:00",
+            "version": 1,
+        }
+
+        def fetch_all(sql: str, params: tuple[object, ...] = ()) -> list[dict[str, object]]:
+            normalized_sql = " ".join(sql.split())
+            fetch_all_calls.append((normalized_sql, params))
+            if "group by bucket" in normalized_sql:
+                return [{"bucket": "unsubmitted", "count": 1}]
+            if "select batch_payload, task_payload" in normalized_sql:
+                return [{
+                    "batch_payload": batch_payload,
+                    "task_payload": {"task_id": "ETC-TASK-PERF-SQL", "status": "imported"},
+                    "scope_month": None,
+                    "invoice_count": 65,
+                    "total_amount": "849.55",
+                }]
+            if "from app.etc_invoices" in normalized_sql:
+                return [
+                    {
+                        "etc_invoice_id": invoice_id,
+                        "raw_payload": {
+                            "id": invoice_id,
+                            "invoice_number": invoice_number,
+                            "total_amount": "13.07",
+                        },
+                    }
+                    for invoice_id, invoice_number in zip(invoice_ids, invoice_numbers, strict=True)
+                ]
+            raise AssertionError(f"unexpected fetch_all SQL: {normalized_sql}")
+
+        def fetch_one(sql: str, params: tuple[object, ...] = ()) -> dict[str, object] | None:
+            normalized_sql = " ".join(sql.split())
+            fetch_one_calls.append((normalized_sql, params))
+            if "from app.etc_business_batches" in normalized_sql:
+                return {"raw_payload": batch_payload}
+            if "from app.etc_reconciliation_tasks" in normalized_sql:
+                return {"raw_payload": {"task_id": "ETC-TASK-PERF-SQL", "status": "imported"}}
+            raise AssertionError(f"unexpected fetch_one SQL: {normalized_sql}")
+
+        repository = PostgresOpsTaxEtcRepository(
+            SimpleNamespace(fetch_all=fetch_all, fetch_one=fetch_one),
+        )
+        repository.list_etc_business_batch_summaries(
+            bucket="unsubmitted",
+            page=1,
+            page_size=100,
+            can_admin_access=True,
+        )
+        list_query_count = len(fetch_all_calls) + len(fetch_one_calls)
+        repository.get_etc_business_batch_record("ETC-BATCH-PERF-SQL")
+        repository.list_etc_invoice_records_by_ids(invoice_ids)
+        repository.get_etc_reconciliation_task_record("ETC-TASK-PERF-SQL")
+        detail_query_count = len(fetch_all_calls) + len(fetch_one_calls) - list_query_count
+
+        self.assertEqual(list_query_count, 2)
+        self.assertEqual(detail_query_count, 3)
 
     def test_etc_business_batch_scope_uses_session_dept_id(self) -> None:
         with TemporaryDirectory() as temp_dir:

@@ -404,7 +404,10 @@ describe("etc api", () => {
     });
     global.fetch = fetchMock as typeof fetch;
 
-    const draftResult = await createEtcBusinessBatchOaDraft("etc_business_batch_001", { expectedVersion: 7 });
+    const draftResult = await createEtcBusinessBatchOaDraft("etc_business_batch_001", {
+      expectedVersion: 7,
+      idempotencyKey: "draft-delete-contract-1",
+    });
     await deleteEtcBusinessBatch("etc_business_batch_001", { expectedVersion: 8, reason: "测试删除" });
     await deleteEtcReconciliationTask("etc-recon-task-001", 3);
     await deleteEtcReconciliationTaskImportedInvoices("etc-recon-task-001", 4);
@@ -416,7 +419,7 @@ describe("etc api", () => {
       expect.objectContaining({
         method: "POST",
         credentials: "include",
-        body: JSON.stringify({ expectedVersion: 7 }),
+        body: JSON.stringify({ expectedVersion: 7, idempotencyKey: "draft-delete-contract-1" }),
       }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
@@ -461,7 +464,10 @@ describe("etc api", () => {
     ));
     global.fetch = fetchMock as typeof fetch;
 
-    await expect(createEtcBusinessBatchOaDraft("etc_business_batch_001")).rejects.toThrow("ETC 接口返回了 HTML 页面");
+    await expect(createEtcBusinessBatchOaDraft("etc_business_batch_001", {
+      expectedVersion: 7,
+      idempotencyKey: "draft-html-error-1",
+    })).rejects.toThrow("ETC 接口返回了 HTML 页面");
   });
 
   test("prefers API error messages over raw error codes", async () => {
@@ -507,7 +513,10 @@ describe("etc api", () => {
     });
     global.fetch = fetchMock as typeof fetch;
 
-    const draftResult = await createEtcBusinessBatchOaDraft("etc_business_batch_001");
+    const draftResult = await createEtcBusinessBatchOaDraft("etc_business_batch_001", {
+      expectedVersion: 7,
+      idempotencyKey: "draft-html-fallback-1",
+    });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
