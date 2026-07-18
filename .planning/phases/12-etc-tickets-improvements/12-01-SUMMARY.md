@@ -152,6 +152,16 @@ completed: 2026-07-18
 
 **Impact on plan:** 均直接服务既定三 bucket、性能预算和暂存闭环，没有新增架构层、依赖、schema、read model、worker 或跨页面行为。
 
+## Post-execution Review Closure
+
+- Standard code review 初审 24 个 source/test 文件，发现 5 Critical、5 Warning、1 Info；两轮修复后第三轮复审为 `clean`，最终 0 finding。
+- 前端对象归属与性能闭环：显式暂存行优先 transient target、自动/手动 selection 都会同步失效旧 task、所有 mutation owner-bound、business detail 与精确 task 并行、人工状态变更只触发一次列表请求。
+- OA durable 闭环：target-scoped PostgreSQL `FOR UPDATE + version` CAS 取代锁外等待后的全量 snapshot 保存；task metadata 半写可由同 idempotency key/recovery evidence 幂等补齐；local store persist 失败会回滚内存 task/version/metadata/audit，再次跨实例读取仍一致。
+- Audit 闭环：creating 超时使用 durable attempt 事件/业务 payload 时间；not-submitted retained membership 与 current owner 分离；新批次合法接管并 submitted 后整页 Audit 仍通过。
+- Review fix commits：`936d9a0af`、`1b8cc9c83`、`c599d86a7`、`b071b1d7f`、`40a5ed5c5`、`d89d9d651`、`49e8c40f6`。
+- Review 修复后最终组合门：backend 451 passed / 5 skipped / 34 subtests；frontend 12 files / 286 passed；Chromium ETC + ETC import 14/14；production build、lint、docs、ruff、diff-check 通过；schema drift=false。
+- 独立 verifier：6/6 requirements、7/7 must-have truths，判定 `READY_FOR_UNIFIED_DEPLOYMENT`。真实生产 p95/p99、真实 OA/对象存储/PostgreSQL contention、部署后 Audit 和混合负载仍是统一部署后的外部门禁。
+
 ## Issues Encountered
 
 - 4 个后端测试依赖仓库外真实票根样例，按既有条件性规则 skip；不影响本次业务合同，但真实样例解析仍需 staging/生产 smoke。

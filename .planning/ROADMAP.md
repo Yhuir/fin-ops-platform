@@ -247,11 +247,11 @@ Plans:
   2. Any implementation plan preserves `.planning/codebase/` as the global map and writes page-specific analysis only inside this phase directory.
   3. Tests and docs impact assessment are explicitly mapped before implementation starts.
 
-**Plans:** 0 plans
+**Plans:** 1 plan
 
 Plans:
 
-- [ ] TBD (run /gsd-plan-phase 12 to break down)
+- [x] 12-01-PLAN — Deliver the direct-canonical ETC page performance path, three-bucket OA lifecycle, recoverable scoped-CAS command flow, fail-closed Audit, legacy cleanup, and release verification.
 
 ### Phase 13: 完善设置页面：分析现状、风险、功能缺口和实施计划
 
@@ -386,7 +386,7 @@ Phase 0 is the shared baseline and must be completed before page implementation 
 | 9. 销项发票收款情况 | 0/0 | Not started | - |
 | 10. 免OA流水批量处理 | 0/0 | Not started | - |
 | 11. 批量账务 | 0/0 | Not started | - |
-| 12. ETC票据管理 | 0/0 | Not started | - |
+| 12. ETC票据管理 | 1/1 | Complete — READY_FOR_UNIFIED_DEPLOYMENT; production gates pending | 2026-07-18 |
 | 13. 设置 | 0/0 | Not started | - |
 | 14. 系统状态 | 0/0 | Not started | - |
 | 15. 银行流水导入 | 0/0 | Not started | - |
