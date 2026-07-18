@@ -100,6 +100,17 @@ class EtcReconciliationTaskService:
         task = self._get_active_task_mutable(task_id)
         return _copy_task(task)
 
+    def get_task_record(self, task_id: str) -> EtcReconciliationTask:
+        if self._state_store is None:
+            return self.get_task(task_id)
+        raw = self._state_store.get_etc_reconciliation_task_record(task_id)
+        if not isinstance(raw, dict):
+            raise KeyError(task_id)
+        task = _task_from_snapshot(raw)
+        if task.status == EtcReconciliationTaskStatus.DELETED:
+            raise KeyError(task_id)
+        return _copy_task(task)
+
     def update_task_title(self, *, task_id: str, title: str, actor: str) -> EtcReconciliationTask:
         task = self._get_active_task_mutable(task_id)
         normalized_title = str(title or "").strip()

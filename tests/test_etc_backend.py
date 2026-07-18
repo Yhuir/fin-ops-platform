@@ -3266,18 +3266,18 @@ class EtcApiTests(unittest.TestCase):
                 }),
             )
             april_payload = json.loads(
-                app.handle_request("GET", "/api/etc/business-batches?status=submitted&month=2026-04").body
+                app.handle_request("GET", "/api/etc/business-batches?bucket=submitted&month=2026-04").body
             )["data"]
             june_payload = json.loads(
-                app.handle_request("GET", "/api/etc/business-batches?status=submitted&month=2026-06").body
+                app.handle_request("GET", "/api/etc/business-batches?bucket=submitted&month=2026-06").body
             )["data"]
 
         self.assertEqual(preview_response.status_code, 200)
         self.assertEqual(manual_response.status_code, 200)
-        self.assertEqual(april_payload["counts"], {"active": 0, "submitted": 1})
+        self.assertEqual(april_payload["counts"], {"unsubmitted": 0, "staged": 0, "submitted": 1})
         self.assertEqual(april_payload["total"], 1)
         self.assertEqual(april_payload["items"][0]["businessBatchId"], business_batch["businessBatchId"])
-        self.assertEqual(june_payload["counts"], {"active": 0, "submitted": 0})
+        self.assertEqual(june_payload["counts"], {"unsubmitted": 0, "staged": 0, "submitted": 0})
         self.assertEqual(june_payload["total"], 0)
         self.assertEqual(june_payload["items"], [])
 
@@ -3341,14 +3341,14 @@ class EtcApiTests(unittest.TestCase):
 
             payloads = {
                 month: json.loads(
-                    app.handle_request("GET", f"/api/etc/business-batches?status=submitted&month={month}").body
+                    app.handle_request("GET", f"/api/etc/business-batches?bucket=submitted&month={month}").body
                 )["data"]
                 for month in expected_by_month
             }
 
         for month, payload in payloads.items():
             expected_external_batch_id = expected_by_month[month][0]
-            self.assertEqual(payload["counts"], {"active": 0, "submitted": 1})
+            self.assertEqual(payload["counts"], {"unsubmitted": 0, "staged": 0, "submitted": 1})
             self.assertEqual(payload["total"], 1)
             self.assertEqual([item["externalEtcBatchId"] for item in payload["items"]], [expected_external_batch_id])
 
@@ -4279,7 +4279,7 @@ class EtcApiTests(unittest.TestCase):
                 app.handle_request("GET", f"/api/etc/business-batches?taskId={confirmed.task_id}").body
             )
             active_business_batches = json.loads(
-                app.handle_request("GET", "/api/etc/business-batches?status=active&page=1&page_size=100").body
+                app.handle_request("GET", "/api/etc/business-batches?bucket=unsubmitted&page=1&page_size=100").body
             )
 
         self.assertEqual(preview_response.status_code, 200)
@@ -4300,7 +4300,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(business_batch["status"], "imported")
         self.assertEqual(business_batch["invoiceSummary"]["count"], 2)
         self.assertEqual(business_batch["importBatchIds"], ["etc_import_batch_0001"])
-        self.assertEqual(active_business_batches["data"]["counts"]["active"], 1)
+        self.assertEqual(active_business_batches["data"]["counts"]["unsubmitted"], 1)
         self.assertEqual(active_business_batches["data"]["total"], 1)
         self.assertEqual(active_business_batches["data"]["items"][0]["businessBatchId"], business_batch["businessBatchId"])
 

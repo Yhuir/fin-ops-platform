@@ -19,6 +19,16 @@ GRIDFS_REF_PREFIX = "gridfs://"
 BANK_FLOW_RULE_BATCH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
 
 
+def _etc_business_batch_bucket(status: str) -> str | None:
+    if status in {"oa_submitted", "manually_marked_submitted", "closed"}:
+        return "submitted"
+    if status == "oa_confirmation_pending":
+        return "staged"
+    if status in {"deleted", "superseded"}:
+        return None
+    return "unsubmitted"
+
+
 def _base_read_model_scope_key(scope_key: object) -> str:
     normalized = str(scope_key or "").strip()
     if normalized.startswith("visibility:"):
@@ -357,6 +367,109 @@ class ApplicationStateStore:
         with self._etc_state_path.open("rb") as handle:
             loaded = pickle.load(handle)  # noqa: S301 - trusted local application state
         return loaded if isinstance(loaded, dict) else {}
+
+    def list_etc_business_batch_summaries(self, **query: Any) -> dict[str, Any]:
+        snapshot = self.load_etc_state()
+        batches = [
+            self._serialize_value(value)
+            for value in dict(snapshot.get("business_batches") or {}).values()
+        ]
+        invoices = [
+            self._serialize_value(value)
+            for value in dict(snapshot.get("invoices") or {}).values()
+        ]
+        invoices_by_id = {
+            str(invoice.get("id") or ""): invoice
+            for invoice in invoices
+            if isinstance(invoice, dict) and str(invoice.get("id") or "")
+        }
+        task_records = dict(self.load_etc_reconciliation_state().get("tasks") or {})
+        normalized_task_id = str(query.get("task_id") or "").strip()
+        owner_user_ids = {str(value or "").strip() for value in query.get("owner_user_ids") or [] if str(value or "").strip()}
+        owner_org_id = str(query.get("owner_org_id") or "").strip()
+        can_admin_access = bool(query.get("can_admin_access"))
+        month = str(query.get("month") or "").strip()
+        plate = str(query.get("plate") or "").strip().lower()
+        keyword = str(query.get("keyword") or "").strip().lower()
+        visible: list[dict[str, Any]] = []
+        for raw_batch in batches:
+            if not isinstance(raw_batch, dict) or str(raw_batch.get("status") or "") in {"deleted", "superseded"}:
+                continue
+            if normalized_task_id and str(raw_batch.get("task_id") or "") != normalized_task_id:
+                continue
+            owner_user_id = str(raw_batch.get("owner_user_id") or "").strip()
+            batch_owner_org_id = str(raw_batch.get("owner_org_id") or "").strip()
+            if not can_admin_access and (owner_user_id or batch_owner_org_id):
+                if owner_user_id not in owner_user_ids and (not owner_org_id or batch_owner_org_id != owner_org_id):
+                    continue
+            batch_invoice_ids = {str(value) for value in raw_batch.get("invoice_ids") or []}
+            batch_invoices = [invoice for invoice in invoices if isinstance(invoice, dict) and str(invoice.get("id") or "") in batch_invoice_ids]
+            scope_month = str((raw_batch.get("amount_breakdown") or {}).get("scope_month") or "")[:7] if isinstance(raw_batch.get("amount_breakdown"), dict) else ""
+            if month:
+                month_matches = scope_month == month if scope_month else any(
+                    month in {
+                        str(invoice.get("issue_date") or "")[:7],
+                        str(invoice.get("passage_start_date") or "")[:7],
+                        str(invoice.get("passage_end_date") or "")[:7],
+                    }
+                    for invoice in batch_invoices
+                )
+                if not month_matches:
+                    continue
+            if plate and not any(plate in str(invoice.get("plate_number") or "").lower() for invoice in batch_invoices):
+                continue
+            if keyword:
+                haystack = " ".join(
+                    [
+                        str(raw_batch.get("business_batch_id") or ""),
+                        str(raw_batch.get("title") or ""),
+                        str(raw_batch.get("external_etc_batch_id") or ""),
+                        *(str(invoice.get("invoice_number") or "") for invoice in batch_invoices),
+                    ]
+                ).lower()
+                if keyword not in haystack:
+                    continue
+            visible.append(raw_batch)
+        visible.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
+        bucket = str(query.get("bucket") or "unsubmitted").strip()
+        counts = {name: sum(1 for item in visible if _etc_business_batch_bucket(str(item.get("status") or "")) == name) for name in ("unsubmitted", "staged", "submitted")}
+        bucket_items = [item for item in visible if _etc_business_batch_bucket(str(item.get("status") or "")) == bucket]
+        page = max(1, int(query.get("page") or 1))
+        page_size = max(1, min(500, int(query.get("page_size") or 100)))
+        start = (page - 1) * page_size
+        return {
+            "items": [
+                {
+                    "business_batch": item,
+                    "reconciliation_task": self._serialize_value(task_records.get(str(item.get("task_id") or ""))),
+                    "scope_month": (item.get("amount_breakdown") or {}).get("scope_month") if isinstance(item.get("amount_breakdown"), dict) else None,
+                    "invoice_count": len(item.get("invoice_ids") or []),
+                    "total_amount": str(sum((Decimal(str(invoices_by_id.get(str(invoice_id), {}).get("total_amount") or "0")) for invoice_id in item.get("invoice_ids") or []), Decimal("0"))),
+                }
+                for item in bucket_items[start : start + page_size]
+            ],
+            "counts": counts,
+            "total": len(bucket_items),
+        }
+
+    def get_etc_business_batch_record(self, business_batch_id: str) -> dict[str, Any] | None:
+        value = dict(self.load_etc_state().get("business_batches") or {}).get(str(business_batch_id or "").strip())
+        payload = self._serialize_value(value)
+        return payload if isinstance(payload, dict) else None
+
+    def list_etc_invoice_records_by_ids(self, invoice_ids: list[str]) -> list[dict[str, Any]]:
+        records = dict(self.load_etc_state().get("invoices") or {})
+        result: list[dict[str, Any]] = []
+        for invoice_id in invoice_ids:
+            payload = self._serialize_value(records.get(str(invoice_id)))
+            if isinstance(payload, dict):
+                result.append(payload)
+        return result
+
+    def get_etc_reconciliation_task_record(self, task_id: str) -> dict[str, Any] | None:
+        value = dict(self.load_etc_reconciliation_state().get("tasks") or {}).get(str(task_id or "").strip())
+        payload = self._serialize_value(value)
+        return payload if isinstance(payload, dict) else None
 
     def save_etc_state(self, snapshot: dict[str, Any]) -> None:
         normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}

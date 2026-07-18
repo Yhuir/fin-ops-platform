@@ -40,6 +40,38 @@ class EtcBusinessBatchScopeError(PermissionError):
     pass
 
 
+def evaluate_etc_oa_draft_action(
+    batch: EtcBusinessBatch,
+    task: object | None,
+    actor: EtcBusinessBatchActor,
+) -> dict[str, object]:
+    if not actor.can_mutate_data:
+        return {"enabled": False, "code": "read_only", "message": "当前账号仅支持查看和导出，不能提交审批。"}
+    status = str(getattr(batch, "status", "") or "")
+    if status == EtcBusinessBatchStatus.OA_DRAFT_CREATING.value:
+        return {"enabled": False, "code": "oa_draft_creating", "message": "审批草稿正在创建，请勿重复提交。"}
+    if status == EtcBusinessBatchStatus.OA_CONFIRMATION_PENDING.value:
+        return {"enabled": False, "code": "oa_confirmation_pending", "message": "审批草稿已创建，请先确认是否已在 OA 提交。"}
+    if status not in {
+        EtcBusinessBatchStatus.IMPORTED.value,
+        EtcBusinessBatchStatus.OA_DRAFT_FAILED.value,
+        EtcBusinessBatchStatus.NOT_SUBMITTED.value,
+        EtcBusinessBatchStatus.MANUALLY_MARKED_NOT_SUBMITTED.value,
+    }:
+        return {"enabled": False, "code": "invalid_batch_status", "message": "当前批次状态不能创建审批草稿。"}
+    if not list(getattr(batch, "invoice_ids", []) or []):
+        return {"enabled": False, "code": "empty_business_batch", "message": "当前批次尚未导入 ETC 发票。"}
+    if task is None:
+        return {"enabled": False, "code": "reconciliation_task_missing", "message": "未找到当前批次的 ETC 对账任务。"}
+    task_status = getattr(task, "status", None)
+    if isinstance(task, dict):
+        task_status = task.get("status")
+    task_status = getattr(task_status, "value", task_status)
+    if str(task_status or "") not in {"imported", "closed"}:
+        return {"enabled": False, "code": "invalid_reconciliation_task_status", "message": "ETC 对账任务尚未完成发票导入。"}
+    return {"enabled": True, "code": "ready", "message": "可以提交审批。"}
+
+
 class EtcBusinessBatchApplicationService:
     def __init__(
         self,
@@ -63,55 +95,42 @@ class EtcBusinessBatchApplicationService:
         self._record_invoice_pdf_download = record_invoice_pdf_download
 
     def list_batches_payload(self, query: dict[str, list[str]], *, actor: EtcBusinessBatchActor) -> dict[str, object]:
-        requested_status = str((query.get("status") or [None])[0] or "").strip()
+        requested_status = str((query.get("bucket") or query.get("status") or [None])[0] or "unsubmitted").strip()
+        if requested_status == "active":
+            requested_status = "unsubmitted"
         task_id = (query.get("taskId") or query.get("task_id") or [None])[0]
-        batches = [
-            batch
-            for batch in self._etc_service.list_business_batches(task_id=task_id)
-            if self._can_access_batch(actor, batch)
-        ]
         month = str((query.get("month") or [None])[0] or "").strip()
         plate = str((query.get("plate") or [None])[0] or "").strip().lower()
         keyword = str((query.get("keyword") or [None])[0] or "").strip().lower()
-        if month or plate or keyword:
-            batches = [batch for batch in batches if self._matches_list_filters(batch, month=month, plate=plate, keyword=keyword)]
-        active_statuses = {
-            EtcBusinessBatchStatus.DRAFT.value,
-            EtcBusinessBatchStatus.REVIEWING.value,
-            EtcBusinessBatchStatus.READY_FOR_IMPORT.value,
-            EtcBusinessBatchStatus.IMPORTING.value,
-            EtcBusinessBatchStatus.IMPORTED.value,
-            EtcBusinessBatchStatus.IMPORT_FAILED.value,
-            EtcBusinessBatchStatus.IMPORT_PARTIAL_FAILED.value,
-            EtcBusinessBatchStatus.OA_DRAFT_CREATING.value,
-            EtcBusinessBatchStatus.OA_DRAFT_FAILED.value,
-            EtcBusinessBatchStatus.OA_CONFIRMATION_PENDING.value,
-            EtcBusinessBatchStatus.NOT_SUBMITTED.value,
-            EtcBusinessBatchStatus.MANUALLY_MARKED_NOT_SUBMITTED.value,
-            EtcBusinessBatchStatus.MIGRATION_CONFLICT.value,
-            EtcBusinessBatchStatus.BUSINESS_BATCH_INVARIANT_BROKEN.value,
-        }
-        submitted_statuses = {
-            EtcBusinessBatchStatus.OA_SUBMITTED.value,
-            EtcBusinessBatchStatus.MANUALLY_MARKED_SUBMITTED.value,
-            EtcBusinessBatchStatus.CLOSED.value,
-        }
-        counts = {
-            "active": sum(1 for batch in batches if str(batch.status) in active_statuses),
-            "submitted": sum(1 for batch in batches if str(batch.status) in submitted_statuses),
-        }
-        if requested_status == "active":
-            batches = [batch for batch in batches if str(batch.status) in active_statuses]
-        elif requested_status == "submitted":
-            batches = [batch for batch in batches if str(batch.status) in submitted_statuses]
-        elif requested_status:
-            batches = [batch for batch in batches if str(batch.status) == requested_status]
         page = max(1, self._optional_int((query.get("page") or [1])[0]) or 1)
         page_size = max(1, min(500, self._optional_int((query.get("page_size") or query.get("pageSize") or [100])[0]) or 100))
-        total = len(batches)
-        start = (page - 1) * page_size
-        page_items = batches[start : start + page_size]
-        items = [self.business_batch_payload(batch) for batch in page_items]
+        result = self._etc_service.list_business_batch_summaries(
+            bucket=requested_status,
+            task_id=task_id,
+            month=month,
+            plate=plate,
+            keyword=keyword,
+            page=page,
+            page_size=page_size,
+            owner_user_ids=[actor.user_id, actor.username],
+            owner_org_id=actor.dept_id,
+            can_admin_access=actor.can_admin_access,
+        )
+        items = []
+        for item in list(result.get("items") or []):
+            if not isinstance(item, dict) or not isinstance(item.get("business_batch"), EtcBusinessBatch):
+                continue
+            batch = item["business_batch"]
+            payload = self._business_batch_summary_payload(
+                batch,
+                invoice_count=int(item.get("invoice_count") or len(batch.invoice_ids)),
+                total_amount=item.get("total_amount") or "0",
+                scope_month=item.get("scope_month"),
+            )
+            payload["createOaDraftAction"] = evaluate_etc_oa_draft_action(batch, item.get("reconciliation_task"), actor)
+            items.append(payload)
+        counts = dict(result.get("counts") or {})
+        total = int(result.get("total") or 0)
         return {
             "items": items,
             "counts": counts,
@@ -173,8 +192,23 @@ class EtcBusinessBatchApplicationService:
         return {"businessBatch": self.business_batch_payload(batch)}
 
     def detail_payload(self, business_batch_id: str, *, actor: EtcBusinessBatchActor) -> dict[str, object]:
-        batch = self._scoped_batch(business_batch_id, actor)
-        return {"businessBatch": self.business_batch_payload(batch, include_invoice_items=True)}
+        batch = self._scoped_batch_record(business_batch_id, actor)
+        task = self._get_reconciliation_task_record(batch.task_id)
+        invoices = self._etc_service.list_invoice_records_by_ids(list(batch.invoice_ids))
+        payload = self._business_batch_summary_payload(
+            batch,
+            invoice_count=len(invoices),
+            total_amount=sum((getattr(invoice, "total_amount", Decimal("0")) for invoice in invoices), Decimal("0")),
+            scope_month=(batch.amount_breakdown or {}).get("scope_month"),
+        )
+        payload.update({
+            "invoiceIds": list(batch.invoice_ids),
+            "importAttempts": list(batch.import_attempts),
+            "auditEvents": list(batch.audit_events),
+            "invoiceItems": [self._invoice_payload(invoice) for invoice in invoices],
+            "createOaDraftAction": evaluate_etc_oa_draft_action(batch, task, actor),
+        })
+        return {"businessBatch": payload}
 
     def invoice_pdf_bundle(self, business_batch_id: str, *, actor: EtcBusinessBatchActor) -> EtcInvoicePdfBundle:
         batch = self._scoped_batch(business_batch_id, actor)
@@ -342,6 +376,53 @@ class EtcBusinessBatchApplicationService:
             invoices = self._etc_service.list_invoices_by_ids(list(getattr(batch, "invoice_ids", []) or []))
             payload["invoiceItems"] = [self._invoice_payload(invoice) for invoice in invoices]
         return payload
+
+    @staticmethod
+    def _business_batch_summary_payload(
+        batch: EtcBusinessBatch,
+        *,
+        invoice_count: int,
+        total_amount: object,
+        scope_month: object,
+    ) -> dict[str, object]:
+        return {
+            "businessBatchId": batch.business_batch_id,
+            "taskId": batch.task_id,
+            "title": batch.title,
+            "status": batch.status,
+            "version": batch.version,
+            "idempotencyKey": batch.idempotency_key,
+            "isActive": batch.is_active,
+            "taskActiveKey": batch.task_active_key,
+            "ownerUserId": batch.owner_user_id,
+            "ownerOrgId": batch.owner_org_id,
+            "importBatchIds": list(batch.import_batch_ids),
+            "submissionBatchId": batch.submission_batch_id,
+            "externalEtcBatchId": batch.external_etc_batch_id,
+            "oaDraftId": batch.oa_draft_id,
+            "oaDraftUrl": batch.oa_draft_url,
+            "oaRowId": batch.oa_row_id,
+            "oaProcessStatus": batch.oa_process_status,
+            "invoiceSummary": {"count": invoice_count, "amount": str(total_amount or "0")},
+            "amountBreakdown": {**dict(batch.amount_breakdown or {}), **({"scope_month": str(scope_month)[:7]} if scope_month else {})},
+            "createdAt": batch.created_at,
+            "updatedAt": batch.updated_at,
+        }
+
+    def _scoped_batch_record(self, business_batch_id: str, actor: EtcBusinessBatchActor) -> EtcBusinessBatch:
+        batch = self._etc_service.get_business_batch_record(business_batch_id)
+        if not self._can_access_batch(actor, batch):
+            raise EtcBusinessBatchScopeError("当前账户不能访问该 ETC 业务批次。")
+        return batch
+
+    def _get_reconciliation_task_record(self, task_id: str | None) -> object | None:
+        normalized = str(task_id or "").strip()
+        if not normalized:
+            return None
+        try:
+            return self._reconciliation_task_service.get_task_record(normalized)
+        except KeyError:
+            return None
 
     def _scoped_batch(self, business_batch_id: str, actor: EtcBusinessBatchActor) -> EtcBusinessBatch:
         batch = self._etc_service.get_business_batch(business_batch_id)
@@ -519,11 +600,10 @@ class EtcBusinessBatchApplicationService:
         payload = self._serialize_value(invoice)
         if not isinstance(payload, dict):
             return {}
-        file_exists = getattr(self._etc_service, "_stored_invoice_file_exists", None)
         pdf_path = payload.get("pdf_file_path")
         xml_path = payload.get("xml_file_path")
-        payload["has_pdf"] = bool(callable(file_exists) and isinstance(pdf_path, str) and pdf_path and file_exists(pdf_path))
-        payload["has_xml"] = bool(callable(file_exists) and isinstance(xml_path, str) and xml_path and file_exists(xml_path))
+        payload["has_pdf"] = bool(isinstance(pdf_path, str) and pdf_path and payload.get("pdf_file_hash"))
+        payload["has_xml"] = bool(isinstance(xml_path, str) and xml_path and payload.get("xml_file_hash"))
         return payload
 
     @classmethod

@@ -791,6 +791,48 @@ class EtcService:
         ]
         return [self._copy_business_batch(batch) for batch in sorted(batches, key=lambda item: item.created_at, reverse=True)]
 
+    def list_business_batch_summaries(self, **query: object) -> dict[str, object]:
+        if self._state_store is None:
+            batches = self.list_business_batches(task_id=str(query.get("task_id") or "").strip() or None)
+            return {
+                "items": [{"business_batch": batch, "reconciliation_task": None} for batch in batches],
+                "counts": {},
+                "total": len(batches),
+            }
+        payload = self._state_store.list_etc_business_batch_summaries(**query)
+        items: list[dict[str, object]] = []
+        for item in list(payload.get("items") or []):
+            if not isinstance(item, dict):
+                continue
+            raw_batch = item.get("business_batch")
+            if not isinstance(raw_batch, (dict, EtcBusinessBatch)):
+                continue
+            items.append(
+                {
+                    "business_batch": _etc_business_batch_from_snapshot(raw_batch),
+                    "reconciliation_task": item.get("reconciliation_task"),
+                    "scope_month": item.get("scope_month"),
+                    "invoice_count": item.get("invoice_count"),
+                    "total_amount": item.get("total_amount"),
+                }
+            )
+        return {**payload, "items": items}
+
+    def get_business_batch_record(self, business_batch_id: str) -> EtcBusinessBatch:
+        if self._state_store is None:
+            return self.get_business_batch(business_batch_id)
+        raw = self._state_store.get_etc_business_batch_record(business_batch_id)
+        if not isinstance(raw, dict):
+            raise EtcBusinessBatchNotFoundError(f"ETC business batch not found: {business_batch_id}")
+        batch = _etc_business_batch_from_snapshot(raw)
+        self._ensure_business_batch_fields(batch)
+        return self._copy_business_batch(batch)
+
+    def list_invoice_records_by_ids(self, invoice_ids: list[str]) -> list[EtcInvoice]:
+        if self._state_store is None:
+            return self.list_invoices_by_ids(invoice_ids)
+        return [_etc_invoice_from_snapshot(raw) for raw in self._state_store.list_etc_invoice_records_by_ids(invoice_ids)]
+
     def get_business_batch(self, business_batch_id: str) -> EtcBusinessBatch:
         self._reload_from_state_store()
         batch = self._get_business_batch_mutable(business_batch_id)

@@ -760,6 +760,174 @@ class PostgresOpsTaxEtcRepository:
             "business_batches": business_batches,
         }
 
+    def list_etc_business_batch_summaries(self, **query: Any) -> dict[str, Any]:
+        bucket = str(query.get("bucket") or "unsubmitted").strip()
+        if bucket not in {"unsubmitted", "staged", "submitted"}:
+            raise ValueError("ETC business batch bucket must be unsubmitted, staged, or submitted.")
+        page = max(1, int(query.get("page") or 1))
+        page_size = max(1, min(500, int(query.get("page_size") or 100)))
+        owner_user_ids = [str(value).strip() for value in query.get("owner_user_ids") or [] if str(value).strip()]
+        params = (
+            bool(query.get("can_admin_access")),
+            owner_user_ids,
+            text(query.get("owner_org_id")),
+            text(query.get("task_id")),
+            text(query.get("month")),
+            text(query.get("plate")),
+            text(query.get("keyword")),
+        )
+        common_sql = """
+            with canonical as (
+                select
+                    batch.business_batch_id,
+                    batch.task_id,
+                    batch.status,
+                    batch.scope_month,
+                    batch.invoice_count,
+                    batch.total_amount,
+                    batch.created_at,
+                    coalesce(batch.raw_payload->'normalized_payload', batch.raw_payload) as batch_payload,
+                    coalesce(task.raw_payload->'normalized_payload', task.raw_payload) as task_payload
+                from app.etc_business_batches batch
+                left join app.etc_reconciliation_tasks task on task.task_id = batch.task_id
+                where coalesce(batch.legacy_mongo_id, '') !~ '^current_state:'
+                  and batch.status not in ('deleted', 'superseded')
+            ), scoped as (
+                select canonical.*,
+                    case
+                        when status in ('oa_submitted', 'manually_marked_submitted', 'closed') then 'submitted'
+                        when status = 'oa_confirmation_pending' then 'staged'
+                        else 'unsubmitted'
+                    end as bucket
+                from canonical
+                where (
+                    %s
+                    or (
+                        nullif(batch_payload->>'owner_user_id', '') is null
+                        and nullif(batch_payload->>'owner_org_id', '') is null
+                    )
+                    or nullif(batch_payload->>'owner_user_id', '') = any(%s)
+                    or nullif(batch_payload->>'owner_org_id', '') = %s
+                )
+                  and (%s is null or task_id = %s)
+                  and (
+                    %s is null
+                    or scope_month = to_date(%s, 'YYYY-MM')
+                    or (scope_month is null and exists (
+                        select 1 from app.etc_invoices invoice
+                        where invoice.business_batch_id = canonical.business_batch_id
+                          and %s in (
+                              left(coalesce(invoice.invoice_date::text, ''), 7),
+                              left(coalesce(invoice.raw_payload->'normalized_payload'->>'passage_start_date', ''), 7),
+                              left(coalesce(invoice.raw_payload->'normalized_payload'->>'passage_end_date', ''), 7)
+                          )
+                    ))
+                  )
+                  and (
+                    %s is null
+                    or exists (
+                        select 1 from app.etc_invoices invoice
+                        where invoice.business_batch_id = canonical.business_batch_id
+                          and lower(coalesce(invoice.raw_payload->'normalized_payload'->>'plate_number', '')) like '%%' || lower(%s) || '%%'
+                    )
+                  )
+                  and (
+                    %s is null
+                    or lower(coalesce(batch_payload->>'title', '')) like '%%' || lower(%s) || '%%'
+                    or lower(canonical.business_batch_id) like '%%' || lower(%s) || '%%'
+                    or lower(coalesce(batch_payload->>'external_etc_batch_id', '')) like '%%' || lower(%s) || '%%'
+                    or exists (
+                        select 1 from app.etc_invoices invoice
+                        where invoice.business_batch_id = canonical.business_batch_id
+                          and lower(coalesce(invoice.invoice_no, '')) like '%%' || lower(%s) || '%%'
+                    )
+                  )
+            )
+        """
+        repeated_params = (
+            params[0], params[1], params[2],
+            params[3], params[3],
+            params[4], params[4], params[4],
+            params[5], params[5],
+            params[6], params[6], params[6], params[6], params[6],
+        )
+        count_rows = self._connection.fetch_all(
+            common_sql + "select bucket, count(*)::int as count from scoped group by bucket",
+            repeated_params,
+        )
+        rows = self._connection.fetch_all(
+            common_sql
+            + """
+                select batch_payload, task_payload, scope_month, invoice_count, total_amount
+                from scoped
+                where bucket = %s
+                order by created_at desc, business_batch_id desc
+                limit %s offset %s
+            """,
+            repeated_params + (bucket, page_size, (page - 1) * page_size),
+        )
+        counts = {"unsubmitted": 0, "staged": 0, "submitted": 0}
+        for row in count_rows:
+            row_bucket = str(row.get("bucket") or "")
+            if row_bucket in counts:
+                counts[row_bucket] = int(row.get("count") or 0)
+        return {
+            "items": [
+                {
+                    "business_batch": row_payload(row, "batch_payload") or {},
+                    "reconciliation_task": row_payload(row, "task_payload") or None,
+                    "scope_month": row.get("scope_month"),
+                    "invoice_count": int(row.get("invoice_count") or 0),
+                    "total_amount": str(row.get("total_amount") or "0"),
+                }
+                for row in rows
+            ],
+            "counts": counts,
+            "total": counts[bucket],
+        }
+
+    def get_etc_business_batch_record(self, business_batch_id: str) -> dict[str, Any] | None:
+        row = self._connection.fetch_one(
+            """
+            select raw_payload
+            from app.etc_business_batches
+            where business_batch_id = %s
+              and coalesce(legacy_mongo_id, '') !~ '^current_state:'
+              and status not in ('deleted', 'superseded')
+            """,
+            (str(business_batch_id or "").strip(),),
+        )
+        payload = row_payload(row, "raw_payload")
+        return dict(payload) if isinstance(payload, dict) else None
+
+    def list_etc_invoice_records_by_ids(self, invoice_ids: list[str]) -> list[dict[str, Any]]:
+        normalized_ids = [str(value).strip() for value in invoice_ids if str(value).strip()]
+        if not normalized_ids:
+            return []
+        rows = self._connection.fetch_all(
+            """
+            select etc_invoice_id, raw_payload
+            from app.etc_invoices
+            where etc_invoice_id = any(%s)
+              and coalesce(legacy_mongo_id, '') !~ '^current_state:'
+            """,
+            (normalized_ids,),
+        )
+        by_id = {
+            str(row.get("etc_invoice_id")): dict(payload)
+            for row in rows
+            if isinstance((payload := row_payload(row, "raw_payload")), dict)
+        }
+        return [by_id[invoice_id] for invoice_id in normalized_ids if invoice_id in by_id]
+
+    def get_etc_reconciliation_task_record(self, task_id: str) -> dict[str, Any] | None:
+        row = self._connection.fetch_one(
+            "select raw_payload from app.etc_reconciliation_tasks where task_id = %s",
+            (str(task_id or "").strip(),),
+        )
+        payload = row_payload(row, "raw_payload")
+        return dict(payload) if isinstance(payload, dict) else None
+
     def save_etc_state(self, snapshot: dict[str, Any]) -> None:
         def write(connection: Any) -> None:
             normalized = serialize_value(snapshot)

@@ -383,6 +383,18 @@ class PostgresStateStore:
     def load_etc_state(self) -> dict[str, Any]:
         return self._ops_tax_etc_repository.load_etc_state()
 
+    def list_etc_business_batch_summaries(self, **query: Any) -> dict[str, Any]:
+        return self._ops_tax_etc_repository.list_etc_business_batch_summaries(**query)
+
+    def get_etc_business_batch_record(self, business_batch_id: str) -> dict[str, Any] | None:
+        return self._ops_tax_etc_repository.get_etc_business_batch_record(business_batch_id)
+
+    def list_etc_invoice_records_by_ids(self, invoice_ids: list[str]) -> list[dict[str, Any]]:
+        return self._ops_tax_etc_repository.list_etc_invoice_records_by_ids(invoice_ids)
+
+    def get_etc_reconciliation_task_record(self, task_id: str) -> dict[str, Any] | None:
+        return self._ops_tax_etc_repository.get_etc_reconciliation_task_record(task_id)
+
     def save_etc_state(self, snapshot: dict[str, Any]) -> None:
         self._ops_tax_etc_repository.save_etc_state(snapshot)
 
