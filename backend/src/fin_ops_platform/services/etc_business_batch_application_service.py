@@ -61,14 +61,13 @@ def evaluate_etc_oa_draft_action(
         return {"enabled": False, "code": "invalid_batch_status", "message": "当前批次状态不能创建审批草稿。"}
     if not list(getattr(batch, "invoice_ids", []) or []):
         return {"enabled": False, "code": "empty_business_batch", "message": "当前批次尚未导入 ETC 发票。"}
-    if task is None:
-        return {"enabled": False, "code": "reconciliation_task_missing", "message": "未找到当前批次的 ETC 对账任务。"}
-    task_status = getattr(task, "status", None)
-    if isinstance(task, dict):
-        task_status = task.get("status")
-    task_status = getattr(task_status, "value", task_status)
-    if str(task_status or "") not in {"imported", "closed"}:
-        return {"enabled": False, "code": "invalid_reconciliation_task_status", "message": "ETC 对账任务尚未完成发票导入。"}
+    if task is not None:
+        task_status = getattr(task, "status", None)
+        if isinstance(task, dict):
+            task_status = task.get("status")
+        task_status = getattr(task_status, "value", task_status)
+        if str(task_status or "") not in {"imported", "closed"}:
+            return {"enabled": False, "code": "invalid_reconciliation_task_status", "message": "ETC 对账任务尚未完成发票导入。"}
     return {"enabled": True, "code": "ready", "message": "可以提交审批。"}
 
 
@@ -96,8 +95,6 @@ class EtcBusinessBatchApplicationService:
 
     def list_batches_payload(self, query: dict[str, list[str]], *, actor: EtcBusinessBatchActor) -> dict[str, object]:
         requested_status = str((query.get("bucket") or query.get("status") or [None])[0] or "unsubmitted").strip()
-        if requested_status == "active":
-            requested_status = "unsubmitted"
         task_id = (query.get("taskId") or query.get("task_id") or [None])[0]
         month = str((query.get("month") or [None])[0] or "").strip()
         plate = str((query.get("plate") or [None])[0] or "").strip().lower()
@@ -266,6 +263,7 @@ class EtcBusinessBatchApplicationService:
         self,
         business_batch_id: str,
         *,
+        idempotency_key: str,
         expected_version: int | None,
         actor: EtcBusinessBatchActor,
         headers: dict[str, str] | None,
@@ -278,9 +276,13 @@ class EtcBusinessBatchApplicationService:
             actor=actor,
         )
         self._assert_reconciliation_task_allows_oa_draft(reconciliation_task)
+        action = evaluate_etc_oa_draft_action(current, reconciliation_task, actor)
+        if not bool(action["enabled"]):
+            raise EtcBusinessBatchInvalidTransitionError(str(action["message"]), code=str(action["code"]))
         oa_client = self._oa_client_factory(headers) if self._oa_client_factory is not None else None
         batch = self._etc_service.create_business_batch_oa_draft(
             business_batch_id,
+            idempotency_key=idempotency_key,
             expected_version=expected_version,
             oa_client=oa_client,
             reconciliation_task=reconciliation_task,
@@ -293,6 +295,43 @@ class EtcBusinessBatchApplicationService:
                 actor=actor.actor_id,
             )
         self._link_existing_canonical_invoices(batch, "etc_business_oa_draft_created")
+        return {"businessBatch": self.business_batch_payload(batch)}
+
+    def recover_oa_draft_payload(
+        self,
+        business_batch_id: str,
+        *,
+        expected_version: int | None,
+        reason: str,
+        evidence: str,
+        oa_draft_id: str | None,
+        oa_draft_url: str | None,
+        confirmed_not_created: bool,
+        actor: EtcBusinessBatchActor,
+    ) -> dict[str, object]:
+        if not actor.can_admin_access:
+            raise EtcBusinessBatchScopeError("只有管理员可以恢复结果未知的 ETC OA 草稿请求。")
+        current = self._scoped_batch(business_batch_id, actor)
+        if expected_version is None:
+            raise EtcBusinessBatchInvalidTransitionError("expectedVersion is required.", code="expected_version_required")
+        batch = self._etc_service.recover_business_batch_oa_draft(
+            business_batch_id,
+            expected_version=expected_version,
+            reason=reason,
+            evidence=evidence,
+            oa_draft_id=oa_draft_id,
+            oa_draft_url=oa_draft_url,
+            confirmed_not_created=confirmed_not_created,
+        )
+        if batch.status == EtcBusinessBatchStatus.OA_CONFIRMATION_PENDING.value and batch.submission_batch_id and batch.external_etc_batch_id:
+            reconciliation_task = self._get_reconciliation_task(current.task_id)
+            if reconciliation_task is not None:
+                self._reconciliation_task_service.record_oa_draft_created(
+                    task_id=str(getattr(reconciliation_task, "task_id")),
+                    oa_draft_batch_id=batch.submission_batch_id,
+                    etc_batch_id=batch.external_etc_batch_id,
+                    actor=actor.actor_id,
+                )
         return {"businessBatch": self.business_batch_payload(batch)}
 
     def revoke_oa_draft_payload(

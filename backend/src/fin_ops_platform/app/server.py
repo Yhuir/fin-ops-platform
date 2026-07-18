@@ -5255,6 +5255,12 @@ class Application:
                 return error
             status_code, result = routes.create_oa_draft(business_batch_id, payload, session=session, headers=headers)
             return self._json_response(status_code, result)
+        if method == "POST" and action == "oa-draft/recover":
+            payload, error = self._load_json_body(body)
+            if error is not None:
+                return error
+            status_code, result = routes.recover_oa_draft(business_batch_id, payload, session=session)
+            return self._json_response(status_code, result)
         if method == "POST" and action == "manual-oa-status":
             payload, error = self._load_json_body(body)
             if error is not None:

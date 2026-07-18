@@ -23,6 +23,7 @@ import { useBackgroundJobProgress } from "../features/backgroundJobs/BackgroundJ
 import { FINANCE_DOMAIN_EVENTS, emitFinanceDomainEvent } from "../features/domainEvents";
 import { waitForOperationFreshness, type OperationBarrierTarget } from "../features/operationBarrier/api";
 import {
+  EtcApiError,
   confirmEtcReconciliationTask,
   createEtcBusinessBatch,
   createEtcBusinessBatchOaDraft,
@@ -817,6 +818,7 @@ export default function EtcTicketManagementPage() {
   const [editingBatchTitle, setEditingBatchTitle] = useState("");
   const [titleSavingBatchId, setTitleSavingBatchId] = useState("");
   const refreshedImportJobIdsRef = useRef<Set<string>>(new Set());
+  const oaDraftIntentRef = useRef<{ businessBatchId: string; idempotencyKey: string } | null>(null);
   const titleEditCancelRef = useRef(false);
 
   const loadBatches = useCallback(async (
@@ -860,6 +862,9 @@ export default function EtcTicketManagementPage() {
   }, [loadBatches]);
 
   useEffect(() => {
+    if (oaDraftIntentRef.current?.businessBatchId !== selectedBatchId) {
+      oaDraftIntentRef.current = null;
+    }
     if (!selectedBatchId) {
       setBatchDetail(null);
       setBusinessBatchDetail(null);
@@ -1784,10 +1789,16 @@ export default function EtcTicketManagementPage() {
     }
     setActionError(null);
     setDraftCreating(true);
+    const intent = oaDraftIntentRef.current?.businessBatchId === currentOaDraftBatchId
+      ? oaDraftIntentRef.current
+      : { businessBatchId: currentOaDraftBatchId, idempotencyKey: crypto.randomUUID() };
+    oaDraftIntentRef.current = intent;
     try {
       const result = await createEtcBusinessBatchOaDraft(currentOaDraftBatchId, {
         expectedVersion: currentBusinessBatch.version,
+        idempotencyKey: intent.idempotencyKey,
       });
+      oaDraftIntentRef.current = null;
       mergeBusinessBatch(result);
       emitEtcBusinessDomainUpdated({ source: "etc_business_batch_oa_draft_create" });
       setDraftResult({
@@ -1797,6 +1808,9 @@ export default function EtcTicketManagementPage() {
         oaDraftUrl: result.oaDraftUrl,
       });
     } catch (caught) {
+      if (caught instanceof EtcApiError && caught.code !== "oa_draft_outcome_unknown") {
+        oaDraftIntentRef.current = null;
+      }
       setActionError(formatEtcUiErrorMessage(caught, "审批草稿创建失败。"));
     } finally {
       setDraftCreating(false);

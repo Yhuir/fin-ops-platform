@@ -16,6 +16,7 @@ from fin_ops_platform.services.etc_service import (
     EtcBusinessBatchNotFoundError,
     EtcBusinessBatchVersionConflictError,
     EtcDraftRequestError,
+    EtcOADraftOutcomeUnknownError,
     EtcOAClientError,
     EtcServiceError,
     UploadedEtcZipFile,
@@ -183,9 +184,32 @@ class EtcBusinessBatchApiRoutes:
         try:
             result = self._application_service.create_oa_draft_payload(
                 business_batch_id,
+                idempotency_key=str(payload.get("idempotencyKey") or payload.get("idempotency_key") or "").strip(),
                 expected_version=self._optional_int(payload.get("expectedVersion") or payload.get("expected_version")),
                 actor=self._actor(session),
                 headers=headers,
+            )
+        except Exception as exc:
+            return self._error_response(exc)
+        return self._success(HTTPStatus.OK, result)
+
+    def recover_oa_draft(
+        self,
+        business_batch_id: str,
+        payload: dict[str, Any],
+        *,
+        session: OARequestSession,
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        try:
+            result = self._application_service.recover_oa_draft_payload(
+                business_batch_id,
+                expected_version=self._optional_int(payload.get("expectedVersion") or payload.get("expected_version")),
+                reason=str(payload.get("reason") or "").strip(),
+                evidence=str(payload.get("evidence") or "").strip(),
+                oa_draft_id=str(payload.get("draftId") or payload.get("draft_id") or "").strip() or None,
+                oa_draft_url=str(payload.get("draftUrl") or payload.get("draft_url") or "").strip() or None,
+                confirmed_not_created=bool(payload.get("confirmedNotCreated") or payload.get("confirmed_not_created")),
+                actor=self._actor(session),
             )
         except Exception as exc:
             return self._error_response(exc)
@@ -314,6 +338,12 @@ class EtcBusinessBatchApiRoutes:
             return HTTPStatus.UNPROCESSABLE_ENTITY, cls._error(
                 getattr(exc, "code", "invalid_status_transition"),
                 str(exc),
+            )
+        if isinstance(exc, EtcOADraftOutcomeUnknownError):
+            return HTTPStatus.CONFLICT, cls._error(
+                "oa_draft_outcome_unknown",
+                str(exc),
+                details={"businessBatchId": exc.business_batch_id, "recoveryRequired": True},
             )
         if isinstance(exc, (EtcDraftRequestError, EtcOAClientError)):
             return HTTPStatus.BAD_REQUEST, cls._error("invalid_etc_draft_request", str(exc))

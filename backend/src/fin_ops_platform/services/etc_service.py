@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import MISSING, dataclass, field, fields, replace
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
@@ -163,6 +164,24 @@ class EtcOAClientError(RuntimeError):
     pass
 
 
+class EtcOADraftOutcomeUnknownError(EtcServiceError):
+    def __init__(self, message: str, *, business_batch_id: str | None = None) -> None:
+        self.business_batch_id = business_batch_id
+        super().__init__(message)
+
+
+class EtcOADraftRecoveryPermissionError(EtcServiceError):
+    pass
+
+
+class _EtcOAClientTransportError(EtcOAClientError):
+    pass
+
+
+class _EtcOAClientInvalidResponseError(EtcOAClientError):
+    pass
+
+
 @dataclass(frozen=True, slots=True)
 class EtcUploadedAttachment:
     name: str
@@ -176,6 +195,17 @@ class EtcOAClient(Protocol):
 
     def create_form_draft(self, *, form_id: int, payload: dict[str, object]) -> tuple[str, str]:
         raise NotImplementedError
+
+
+@dataclass(frozen=True, slots=True)
+class EtcBusinessBatchOADraftAttempt:
+    business_batch_id: str
+    submission_batch_id: str
+    idempotency_key: str
+    prepared_version: int
+    invoices: tuple[EtcInvoice, ...]
+    submission_batch: EtcBatch
+    reconciliation_task: object | None
 
 
 class NotConfiguredEtcOAClient:
@@ -266,17 +296,36 @@ class HttpEtcOAClient:
 
     def create_form_draft(self, *, form_id: int, payload: dict[str, object]) -> tuple[str, str]:
         path = self._settings.form_draft_path_template.format(form_id=form_id)
-        response_payload = self._send_json(
-            path,
-            method="POST",
-            body=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-            content_type="application/json;charset=utf-8",
-        )
-        draft_id = self._extract_draft_id(response_payload)
+        try:
+            response_payload = self._send_json(
+                path,
+                method="POST",
+                body=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                content_type="application/json;charset=utf-8",
+                outcome_unknown_after_send=True,
+            )
+        except (_EtcOAClientTransportError, _EtcOAClientInvalidResponseError) as exc:
+            raise EtcOADraftOutcomeUnknownError(
+                "OA 草稿请求结果未知；请先在 OA 核实，禁止直接重试。",
+            ) from exc
+        try:
+            draft_id = self._extract_draft_id(response_payload)
+        except EtcOAClientError as exc:
+            raise EtcOADraftOutcomeUnknownError(
+                "OA 草稿响应缺少可确认的草稿 ID；请先在 OA 核实，禁止直接重试。",
+            ) from exc
         draft_url = self._settings.draft_url_template.format(form_id=form_id, draft_id=quote(draft_id, safe=""))
         return draft_id, draft_url
 
-    def _send_json(self, path: str, *, method: str, body: bytes, content_type: str) -> dict[str, object]:
+    def _send_json(
+        self,
+        path: str,
+        *,
+        method: str,
+        body: bytes,
+        content_type: str,
+        outcome_unknown_after_send: bool = False,
+    ) -> dict[str, object]:
         assert self._settings.base_url is not None
         url = urljoin(f"{self._settings.base_url.rstrip('/')}/", path.lstrip("/"))
         request = Request(
@@ -295,14 +344,20 @@ class HttpEtcOAClient:
                 raw_body = response.read().decode("utf-8")
         except HTTPError as error:
             raw_body = error.read().decode("utf-8", errors="ignore")
+            if outcome_unknown_after_send and int(error.code) >= 500:
+                raise _EtcOAClientTransportError("OA 草稿请求返回服务端错误，结果未知。") from error
             raise EtcOAClientError(_extract_oa_error_message(raw_body) or f"OA request failed with HTTP {error.code}.") from error
         except URLError as error:
-            raise EtcOAClientError("Unable to connect to OA service.") from error
+            raise _EtcOAClientTransportError("Unable to connect to OA service.") from error
         try:
             payload = json.loads(raw_body) if raw_body.strip() else {}
         except json.JSONDecodeError as error:
+            if outcome_unknown_after_send:
+                raise _EtcOAClientInvalidResponseError("OA service returned invalid JSON.") from error
             raise EtcOAClientError("OA service returned invalid JSON.") from error
         if not isinstance(payload, dict):
+            if outcome_unknown_after_send:
+                raise _EtcOAClientInvalidResponseError("OA service returned an invalid response shape.")
             raise EtcOAClientError("OA service returned an invalid response shape.")
         code = payload.get("code", 200)
         if code not in {0, 200, "0", "200", None}:
@@ -426,6 +481,7 @@ class EtcBusinessBatch:
     status: str = EtcBusinessBatchStatus.DRAFT.value
     version: int = 1
     idempotency_key: str | None = None
+    oa_draft_idempotency_key: str | None = None
     owner_user_id: str | None = None
     owner_org_id: str | None = None
     task_active_key: str | None = None
@@ -976,14 +1032,59 @@ class EtcService:
         self,
         business_batch_id: str,
         *,
+        idempotency_key: str,
         expected_version: int | None = None,
         oa_client: EtcOAClient | None = None,
         reconciliation_task: object | None = None,
     ) -> EtcBusinessBatch:
+        attempt = self.prepare_business_batch_oa_draft(
+            business_batch_id,
+            idempotency_key=idempotency_key,
+            expected_version=expected_version,
+            reconciliation_task=reconciliation_task,
+        )
+        if attempt is None:
+            return self.get_business_batch(business_batch_id)
+        try:
+            draft = self.execute_business_batch_oa_draft(attempt, oa_client=oa_client)
+        except EtcOADraftOutcomeUnknownError as exc:
+            self.mark_business_batch_oa_draft_outcome_unknown(attempt, reason=str(exc))
+            exc.business_batch_id = business_batch_id
+            raise
+        except (EtcDraftRequestError, EtcOAClientError) as exc:
+            self.fail_business_batch_oa_draft(attempt, reason=str(exc))
+            if isinstance(exc, EtcDraftRequestError):
+                raise
+            raise EtcDraftRequestError(str(exc)) from exc
+        return self.complete_business_batch_oa_draft(attempt, draft)
+
+    def prepare_business_batch_oa_draft(
+        self,
+        business_batch_id: str,
+        *,
+        idempotency_key: str,
+        expected_version: int | None,
+        reconciliation_task: object | None,
+    ) -> EtcBusinessBatchOADraftAttempt | None:
+        normalized_key = str(idempotency_key or "").strip()
+        if not normalized_key:
+            raise EtcBusinessBatchInvalidTransitionError("idempotencyKey is required.", code="idempotency_key_required")
         with self._business_batch_lock:
             batch = self._get_business_batch_mutable(business_batch_id)
-            if batch.status == EtcBusinessBatchStatus.OA_CONFIRMATION_PENDING.value and batch.submission_batch_id:
-                return self._copy_business_batch(batch)
+            current_key = str(batch.oa_draft_idempotency_key or "").strip()
+            if current_key == normalized_key:
+                if batch.status == EtcBusinessBatchStatus.OA_CONFIRMATION_PENDING.value and batch.submission_batch_id:
+                    return None
+                if batch.status == EtcBusinessBatchStatus.OA_DRAFT_CREATING.value:
+                    raise EtcOADraftOutcomeUnknownError(
+                        "该审批创建请求仍在处理中或结果未知；请先核实 OA，禁止直接重试。",
+                        business_batch_id=batch.business_batch_id,
+                    )
+                if batch.status == EtcBusinessBatchStatus.OA_DRAFT_FAILED.value:
+                    raise EtcBusinessBatchInvalidTransitionError(
+                        "该审批创建请求已明确失败；如需重试，请发起新的用户操作。",
+                        code="oa_draft_attempt_failed",
+                    )
             self._assert_business_batch_version(batch, expected_version)
             if batch.status not in {
                 EtcBusinessBatchStatus.IMPORTED.value,
@@ -995,47 +1096,227 @@ class EtcService:
             invoice_ids = list(batch.invoice_ids)
             if not invoice_ids:
                 raise EtcBusinessBatchInvalidTransitionError("business batch has no ETC invoices.", code="empty_business_batch")
+            invoices = self._validate_oa_draft_prepare_invoices(invoice_ids)
             before_status = batch.status
-            batch.status = EtcBusinessBatchStatus.OA_DRAFT_CREATING.value
-            self._refresh_business_batch_active_key(batch)
-            self._persist()
-            try:
-                draft = self.create_oa_draft(
-                    invoice_ids,
-                    oa_client=oa_client,
+            submission_batch = (
+                self._batches.get(str(batch.submission_batch_id or ""))
+                if before_status == EtcBusinessBatchStatus.OA_DRAFT_FAILED.value
+                else None
+            )
+            if submission_batch is None:
+                submission_batch = self._create_batch(
+                    invoices,
                     reconciliation_task=reconciliation_task,
                     business_batch_id=batch.business_batch_id,
+                    persist=False,
                 )
-            except EtcDraftRequestError as exc:
-                batch.status = EtcBusinessBatchStatus.OA_DRAFT_FAILED.value
-                self._bump_business_batch_version(
-                    batch,
-                    event_type="oa_draft_failed",
-                    before_status=before_status,
-                    after_status=batch.status,
-                    reason=str(exc),
-                )
-                self._persist()
-                raise
-            now = datetime.now(UTC)
-            batch.submission_batch_id = draft.batch_id
-            batch.external_etc_batch_id = draft.etc_batch_id
-            batch.oa_draft_id = draft.oa_draft_id
-            batch.oa_draft_url = draft.oa_draft_url
-            batch.status = EtcBusinessBatchStatus.OA_CONFIRMATION_PENDING.value
+            else:
+                submission_batch.status = EtcBatchStatus.DRAFT_CREATING.value
+                submission_batch.error_message = None
+            batch.status = EtcBusinessBatchStatus.OA_DRAFT_CREATING.value
+            batch.submission_batch_id = submission_batch.id
+            batch.external_etc_batch_id = submission_batch.etc_batch_id
+            batch.oa_draft_id = None
+            batch.oa_draft_url = None
+            batch.oa_draft_idempotency_key = normalized_key
             for import_batch_id in list(batch.import_batch_ids):
                 import_batch = self._import_batches.get(import_batch_id)
                 if import_batch is not None:
-                    import_batch.submission_batch_id = draft.batch_id
-                    import_batch.updated_at = now
+                    import_batch.submission_batch_id = submission_batch.id
+                    import_batch.updated_at = datetime.now(UTC)
+            self._bump_business_batch_version(
+                batch,
+                event_type="oa_draft_prepared",
+                before_status=before_status,
+                after_status=batch.status,
+                submission_batch_id=submission_batch.id,
+            )
+            self._persist()
+            return EtcBusinessBatchOADraftAttempt(
+                business_batch_id=batch.business_batch_id,
+                submission_batch_id=submission_batch.id,
+                idempotency_key=normalized_key,
+                prepared_version=batch.version,
+                invoices=tuple(deepcopy(invoices)),
+                submission_batch=deepcopy(submission_batch),
+                reconciliation_task=deepcopy(reconciliation_task),
+            )
+
+    def execute_business_batch_oa_draft(
+        self,
+        attempt: EtcBusinessBatchOADraftAttempt,
+        *,
+        oa_client: EtcOAClient | None = None,
+    ) -> EtcDraftResult:
+        resolved_oa_client = oa_client or self.oa_client
+        try:
+            attachments = self._upload_batch_attachments(
+                list(attempt.invoices),
+                resolved_oa_client,
+                reconciliation_task=attempt.reconciliation_task,
+            )
+            payload = self._build_oa_draft_payload(attempt.submission_batch, attachments)
+            oa_draft_id, oa_draft_url = resolved_oa_client.create_form_draft(form_id=2, payload=payload)
+        except EtcOADraftOutcomeUnknownError:
+            raise
+        except EtcOAClientError as exc:
+            raise EtcDraftRequestError(str(exc)) from exc
+        return EtcDraftResult(
+            batch_id=attempt.submission_batch.id,
+            etc_batch_id=attempt.submission_batch.etc_batch_id,
+            oa_draft_id=oa_draft_id,
+            oa_draft_url=oa_draft_url,
+        )
+
+    def complete_business_batch_oa_draft(
+        self,
+        attempt: EtcBusinessBatchOADraftAttempt,
+        draft: EtcDraftResult,
+    ) -> EtcBusinessBatch:
+        with self._business_batch_lock:
+            batch, submission_batch = self._assert_current_oa_draft_attempt(attempt)
+            if draft.batch_id != submission_batch.id or draft.etc_batch_id != submission_batch.etc_batch_id:
+                raise EtcBusinessBatchInvalidTransitionError("OA draft result does not match the prepared attempt.", code="oa_draft_attempt_mismatch")
+            submission_batch.status = EtcBatchStatus.DRAFT_CREATED.value
+            submission_batch.oa_draft_id = draft.oa_draft_id
+            submission_batch.oa_draft_url = draft.oa_draft_url
+            submission_batch.error_message = None
+            now = datetime.now(UTC)
+            for invoice in (self._invoices.get(invoice_id) for invoice_id in submission_batch.invoice_ids):
+                if invoice is None:
+                    continue
+                invoice.current_batch_id = submission_batch.id
+                invoice.last_batch_id = submission_batch.id
+                invoice.updated_at = now
+            batch.oa_draft_id = draft.oa_draft_id
+            batch.oa_draft_url = draft.oa_draft_url
+            batch.status = EtcBusinessBatchStatus.OA_CONFIRMATION_PENDING.value
             self._bump_business_batch_version(
                 batch,
                 event_type="oa_draft_created",
-                before_status=before_status,
+                before_status=EtcBusinessBatchStatus.OA_DRAFT_CREATING.value,
                 after_status=batch.status,
+                submission_batch_id=submission_batch.id,
             )
             self._persist()
             return self._copy_business_batch(batch)
+
+    def fail_business_batch_oa_draft(
+        self,
+        attempt: EtcBusinessBatchOADraftAttempt,
+        *,
+        reason: str,
+    ) -> EtcBusinessBatch:
+        with self._business_batch_lock:
+            batch, submission_batch = self._assert_current_oa_draft_attempt(attempt)
+            submission_batch.status = EtcBatchStatus.FAILED.value
+            submission_batch.error_message = str(reason or "").strip()
+            batch.status = EtcBusinessBatchStatus.OA_DRAFT_FAILED.value
+            self._bump_business_batch_version(
+                batch,
+                event_type="oa_draft_failed",
+                before_status=EtcBusinessBatchStatus.OA_DRAFT_CREATING.value,
+                after_status=batch.status,
+                reason=submission_batch.error_message,
+                submission_batch_id=submission_batch.id,
+            )
+            self._persist()
+            return self._copy_business_batch(batch)
+
+    def mark_business_batch_oa_draft_outcome_unknown(
+        self,
+        attempt: EtcBusinessBatchOADraftAttempt,
+        *,
+        reason: str,
+    ) -> EtcBusinessBatch:
+        with self._business_batch_lock:
+            batch, submission_batch = self._assert_current_oa_draft_attempt(attempt)
+            submission_batch.error_message = str(reason or "").strip()
+            self._bump_business_batch_version(
+                batch,
+                event_type="oa_draft_outcome_unknown",
+                before_status=batch.status,
+                after_status=batch.status,
+                reason=submission_batch.error_message,
+                submission_batch_id=submission_batch.id,
+            )
+            self._persist()
+            return self._copy_business_batch(batch)
+
+    def recover_business_batch_oa_draft(
+        self,
+        business_batch_id: str,
+        *,
+        expected_version: int,
+        reason: str,
+        evidence: str,
+        oa_draft_id: str | None,
+        oa_draft_url: str | None,
+        confirmed_not_created: bool,
+    ) -> EtcBusinessBatch:
+        normalized_reason = str(reason or "").strip()
+        normalized_evidence = str(evidence or "").strip()
+        if not normalized_reason or not normalized_evidence:
+            raise EtcBusinessBatchInvalidTransitionError("reason and evidence are required.", code="recovery_evidence_required")
+        with self._business_batch_lock:
+            batch = self._get_business_batch_mutable(business_batch_id)
+            self._assert_business_batch_version(batch, expected_version)
+            if batch.status != EtcBusinessBatchStatus.OA_DRAFT_CREATING.value or not batch.submission_batch_id:
+                raise EtcBusinessBatchInvalidTransitionError("current batch has no recoverable OA draft attempt.", code="oa_draft_not_recoverable")
+            submission_batch = self._batches.get(batch.submission_batch_id)
+            if submission_batch is None:
+                raise EtcBusinessBatchInvalidTransitionError("prepared submission batch is missing.", code="oa_draft_attempt_missing")
+            normalized_draft_id = str(oa_draft_id or "").strip()
+            normalized_draft_url = str(oa_draft_url or "").strip()
+            if confirmed_not_created == bool(normalized_draft_id or normalized_draft_url):
+                raise EtcBusinessBatchInvalidTransitionError(
+                    "recovery must either adopt one OA draft or confirm no draft was created.",
+                    code="invalid_oa_draft_recovery_decision",
+                )
+            before_status = batch.status
+            if confirmed_not_created:
+                submission_batch.status = EtcBatchStatus.FAILED.value
+                submission_batch.error_message = normalized_reason
+                batch.status = EtcBusinessBatchStatus.OA_DRAFT_FAILED.value
+                event_type = "oa_draft_recovery_confirmed_not_created"
+            else:
+                if not normalized_draft_id or not normalized_draft_url:
+                    raise EtcBusinessBatchInvalidTransitionError("draftId and draftUrl are required for adoption.", code="oa_draft_recovery_draft_required")
+                submission_batch.status = EtcBatchStatus.DRAFT_CREATED.value
+                submission_batch.oa_draft_id = normalized_draft_id
+                submission_batch.oa_draft_url = normalized_draft_url
+                submission_batch.error_message = None
+                batch.oa_draft_id = normalized_draft_id
+                batch.oa_draft_url = normalized_draft_url
+                batch.status = EtcBusinessBatchStatus.OA_CONFIRMATION_PENDING.value
+                event_type = "oa_draft_recovery_adopted"
+            self._bump_business_batch_version(
+                batch,
+                event_type=event_type,
+                before_status=before_status,
+                after_status=batch.status,
+                reason=f"{normalized_reason}；核实证据：{normalized_evidence}",
+                submission_batch_id=submission_batch.id,
+            )
+            self._persist()
+            return self._copy_business_batch(batch)
+
+    def _assert_current_oa_draft_attempt(
+        self,
+        attempt: EtcBusinessBatchOADraftAttempt,
+    ) -> tuple[EtcBusinessBatch, EtcBatch]:
+        batch = self._get_business_batch_mutable(attempt.business_batch_id)
+        if (
+            batch.status != EtcBusinessBatchStatus.OA_DRAFT_CREATING.value
+            or batch.submission_batch_id != attempt.submission_batch_id
+            or batch.oa_draft_idempotency_key != attempt.idempotency_key
+            or batch.version != attempt.prepared_version
+        ):
+            raise EtcBusinessBatchInvalidTransitionError("OA draft attempt is no longer current.", code="oa_draft_attempt_conflict")
+        submission_batch = self._batches.get(attempt.submission_batch_id)
+        if submission_batch is None:
+            raise EtcBusinessBatchInvalidTransitionError("prepared submission batch is missing.", code="oa_draft_attempt_missing")
+        return batch, submission_batch
 
     def revoke_business_batch_oa_draft(
         self,
@@ -1079,6 +1360,7 @@ class EtcService:
             batch.external_etc_batch_id = None
             batch.oa_draft_id = None
             batch.oa_draft_url = None
+            batch.oa_draft_idempotency_key = None
             batch.status = EtcBusinessBatchStatus.NOT_SUBMITTED.value
             self._bump_business_batch_version(
                 batch,
@@ -2376,6 +2658,7 @@ class EtcService:
             "version": 1,
             "title": None,
             "idempotency_key": None,
+            "oa_draft_idempotency_key": None,
             "owner_user_id": None,
             "owner_org_id": None,
             "task_active_key": None,
@@ -2830,6 +3113,26 @@ class EtcService:
             raise EtcDraftRequestError(f"ETC OA 草稿附件不完整：{missing_text}.")
         return invoices
 
+    def _validate_oa_draft_prepare_invoices(self, invoice_ids: list[str]) -> list[EtcInvoice]:
+        if not invoice_ids:
+            raise EtcDraftRequestError("invoiceIds must not be empty.")
+        invoices = [self._get_invoice(invoice_id) for invoice_id in invoice_ids]
+        self._validate_complete_import_batches(invoices)
+        missing_attachments: list[str] = []
+        for invoice in invoices:
+            if invoice.status != EtcInvoiceStatus.UNSUBMITTED:
+                raise EtcDraftRequestError(f"ETC invoice {invoice.invoice_number} is already submitted.")
+            missing_parts: list[str] = []
+            if not invoice.pdf_file_path or not invoice.pdf_file_hash:
+                missing_parts.append("PDF")
+            if not invoice.xml_file_path or not invoice.xml_file_hash:
+                missing_parts.append("XML")
+            if missing_parts:
+                missing_attachments.append(f"{invoice.invoice_number} 缺少 {'/'.join(missing_parts)}")
+        if missing_attachments:
+            raise EtcDraftRequestError(f"ETC OA 草稿附件不完整：{'；'.join(missing_attachments)}.")
+        return invoices
+
     def _validate_complete_import_batches(self, invoices: list[EtcInvoice]) -> None:
         selected_ids = {invoice.id for invoice in invoices}
         for invoice in invoices:
@@ -2903,6 +3206,7 @@ class EtcService:
         *,
         reconciliation_task: object | None = None,
         business_batch_id: str | None = None,
+        persist: bool = True,
     ) -> EtcBatch:
         self._batch_counter += 1
         batch_id = f"etc_batch_{self._batch_counter:04d}"
@@ -2946,7 +3250,8 @@ class EtcService:
             batch.passage_start_date = _optional_text(reconciliation_metadata.get("period_start"))
             batch.passage_end_date = _optional_text(reconciliation_metadata.get("period_end"))
         self._batches[batch.id] = batch
-        self._persist()
+        if persist:
+            self._persist()
         return batch
 
     def _upload_batch_attachments(

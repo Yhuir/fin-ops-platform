@@ -8,6 +8,7 @@ import json
 import pickle
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from threading import Event, Thread
 import time
 from types import SimpleNamespace
 import unittest
@@ -30,6 +31,7 @@ from fin_ops_platform.services.etc_service import (
     HttpEtcOAClient,
     EtcOAClient,
     EtcOAClientError,
+    EtcOADraftOutcomeUnknownError,
     EtcService,
     UploadedEtcZipFile,
     parse_etc_xml,
@@ -232,6 +234,25 @@ class FakeEtcOAClient(EtcOAClient):
         return "oa-draft-001", "https://www.yn-sourcing.com/oa/#/normal/forms/form/2?formId=2&id=oa-draft-001"
 
 
+class UnknownOutcomeEtcOAClient(FakeEtcOAClient):
+    def create_form_draft(self, *, form_id: int, payload: dict[str, object]) -> tuple[str, str]:
+        self.draft_payloads.append({"form_id": form_id, "payload": payload})
+        raise EtcOADraftOutcomeUnknownError("OA result unknown")
+
+
+class BlockingEtcOAClient(FakeEtcOAClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = Event()
+        self.release = Event()
+
+    def create_form_draft(self, *, form_id: int, payload: dict[str, object]) -> tuple[str, str]:
+        self.started.set()
+        if not self.release.wait(timeout=3):
+            raise EtcOAClientError("test timeout")
+        return super().create_form_draft(form_id=form_id, payload=payload)
+
+
 class MemoryEtcStateStore:
     def __init__(self, data_dir: Path) -> None:
         self.data_dir = data_dir
@@ -426,7 +447,7 @@ class EtcServiceTests(unittest.TestCase):
             self.assertEqual(batch.import_batch_ids, ["etc_import_batch_0001", "etc_import_batch_0002"])
             self.assertEqual(batch.invoice_ids, ["etc_invoice_0001", "etc_invoice_0002"])
 
-            drafted = service.create_business_batch_oa_draft(batch.business_batch_id, expected_version=batch.version)
+            drafted = service.create_business_batch_oa_draft(batch.business_batch_id, idempotency_key="draft-merge-1", expected_version=batch.version)
             with self.assertRaises(EtcBusinessBatchInvalidTransitionError):
                 service.preview_business_batch_import_zips(
                     batch.business_batch_id,
@@ -470,8 +491,8 @@ class EtcServiceTests(unittest.TestCase):
                 expected_version=preview["businessBatch"]["version"],
             )
 
-            first = service.create_business_batch_oa_draft(batch.business_batch_id, expected_version=batch.version)
-            second = service.create_business_batch_oa_draft(first.business_batch_id, expected_version=first.version)
+            first = service.create_business_batch_oa_draft(batch.business_batch_id, idempotency_key="draft-idempotent-1", expected_version=batch.version)
+            second = service.create_business_batch_oa_draft(first.business_batch_id, idempotency_key="draft-idempotent-1", expected_version=first.version)
 
             self.assertEqual(first.submission_batch_id, second.submission_batch_id)
             self.assertEqual(first.oa_draft_id, "oa-draft-001")
@@ -479,6 +500,92 @@ class EtcServiceTests(unittest.TestCase):
             self.assertEqual(len(fake_oa.draft_payloads), 1)
             cause = str(fake_oa.draft_payloads[0]["payload"]["data"]["cause"])
             self.assertIn(f"business_batch_id={batch.business_batch_id}", cause)
+
+    def test_business_batch_oa_draft_unknown_outcome_requires_recovery_and_reuses_attempt(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            service = EtcService(data_dir=Path(temp_dir), oa_client=UnknownOutcomeEtcOAClient())
+            batch = service.create_business_batch(task_id="ETC-TASK-UNKNOWN")
+            preview = service.preview_business_batch_import_zips(
+                batch.business_batch_id,
+                [UploadedEtcZipFile("invoices.zip", etc_zip(["ETC001"]))],
+                expected_version=batch.version,
+            )
+            batch, _result = service.confirm_business_batch_import(
+                batch.business_batch_id,
+                str(preview["sessionId"]),
+                expected_version=preview["businessBatch"]["version"],
+            )
+
+            with self.assertRaises(EtcOADraftOutcomeUnknownError):
+                service.create_business_batch_oa_draft(
+                    batch.business_batch_id,
+                    idempotency_key="draft-unknown-1",
+                    expected_version=batch.version,
+                )
+            unknown = service.get_business_batch(batch.business_batch_id)
+            submission_batch_id = unknown.submission_batch_id
+            self.assertEqual(unknown.status, EtcBusinessBatchStatus.OA_DRAFT_CREATING.value)
+            with self.assertRaises(EtcOADraftOutcomeUnknownError):
+                service.create_business_batch_oa_draft(
+                    batch.business_batch_id,
+                    idempotency_key="draft-unknown-1",
+                    expected_version=unknown.version,
+                )
+
+            recovered = service.recover_business_batch_oa_draft(
+                batch.business_batch_id,
+                expected_version=unknown.version,
+                reason="管理员已核实 OA 无草稿",
+                evidence="OA 管理后台按 business_batch_id 查询为零",
+                oa_draft_id=None,
+                oa_draft_url=None,
+                confirmed_not_created=True,
+            )
+            service.oa_client = FakeEtcOAClient()
+            completed = service.create_business_batch_oa_draft(
+                batch.business_batch_id,
+                idempotency_key="draft-unknown-2",
+                expected_version=recovered.version,
+            )
+            self.assertEqual(completed.submission_batch_id, submission_batch_id)
+            self.assertEqual(len(service.list_batches()), 1)
+
+    def test_business_batch_oa_http_call_does_not_hold_business_lock(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            client = BlockingEtcOAClient()
+            service = EtcService(data_dir=Path(temp_dir), oa_client=client)
+            batch = service.create_business_batch(task_id="ETC-TASK-LOCK")
+            preview = service.preview_business_batch_import_zips(
+                batch.business_batch_id,
+                [UploadedEtcZipFile("invoices.zip", etc_zip(["ETC001"]))],
+                expected_version=batch.version,
+            )
+            batch, _result = service.confirm_business_batch_import(
+                batch.business_batch_id,
+                str(preview["sessionId"]),
+                expected_version=preview["businessBatch"]["version"],
+            )
+            errors: list[Exception] = []
+
+            def create_draft() -> None:
+                try:
+                    service.create_business_batch_oa_draft(
+                        batch.business_batch_id,
+                        idempotency_key="draft-lock-1",
+                        expected_version=batch.version,
+                    )
+                except Exception as exc:  # pragma: no cover - assertion reports captured errors
+                    errors.append(exc)
+
+            worker = Thread(target=create_draft)
+            worker.start()
+            self.assertTrue(client.started.wait(timeout=2))
+            self.assertTrue(service._business_batch_lock.acquire(timeout=0.2))
+            service._business_batch_lock.release()
+            client.release.set()
+            worker.join(timeout=3)
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(errors, [])
 
     def test_business_batch_revoke_is_idempotent_and_releases_invoices(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -494,7 +601,7 @@ class EtcServiceTests(unittest.TestCase):
                 str(preview["sessionId"]),
                 expected_version=preview["businessBatch"]["version"],
             )
-            drafted = service.create_business_batch_oa_draft(batch.business_batch_id, expected_version=batch.version)
+            drafted = service.create_business_batch_oa_draft(batch.business_batch_id, idempotency_key="draft-revoke-1", expected_version=batch.version)
 
             first = service.revoke_business_batch_oa_draft(
                 batch.business_batch_id,
@@ -532,7 +639,7 @@ class EtcServiceTests(unittest.TestCase):
                 str(preview["sessionId"]),
                 expected_version=preview["businessBatch"]["version"],
             )
-            drafted = service.create_business_batch_oa_draft(batch.business_batch_id, expected_version=batch.version)
+            drafted = service.create_business_batch_oa_draft(batch.business_batch_id, idempotency_key="draft-delete-submitted-1", expected_version=batch.version)
             submitted = service.manual_business_batch_oa_status(
                 batch.business_batch_id,
                 decision="submitted",
@@ -671,7 +778,7 @@ class EtcServiceTests(unittest.TestCase):
                 str(preview["sessionId"]),
                 expected_version=batch.version,
             )
-            drafted = service.create_business_batch_oa_draft(batch.business_batch_id, expected_version=batch.version)
+            drafted = service.create_business_batch_oa_draft(batch.business_batch_id, idempotency_key="draft-delete-1", expected_version=batch.version)
 
             deleted = service.delete_business_batch(
                 drafted.business_batch_id,
@@ -1727,7 +1834,7 @@ class EtcApiTests(unittest.TestCase):
         draft_response = app.handle_request(
             "POST",
             f"/api/etc/business-batches/{business_batch['businessBatchId']}/oa-draft",
-            json.dumps({"expectedVersion": business_batch["version"]}),
+            json.dumps({"expectedVersion": business_batch["version"], "idempotencyKey": "draft-supplement-helper"}),
         )
         return task_id, json.loads(draft_response.body)["data"]["businessBatch"]
 
@@ -2652,11 +2759,11 @@ class EtcApiTests(unittest.TestCase):
                 created = json.loads(create_response.body)["data"]["businessBatch"]
                 task_response = app.handle_request("GET", f"/api/etc/reconciliation-tasks/{created['taskId']}")
                 active_batches = json.loads(
-                    app.handle_request("GET", "/api/etc/business-batches?status=active").body
+                    app.handle_request("GET", "/api/etc/business-batches?bucket=unsubmitted").body
                 )["data"]
                 reloaded_app = build_application(data_dir=Path(temp_dir))
                 reloaded_batches = json.loads(
-                    reloaded_app.handle_request("GET", "/api/etc/business-batches?status=active").body
+                    reloaded_app.handle_request("GET", "/api/etc/business-batches?bucket=unsubmitted").body
                 )["data"]
 
         self.assertEqual(create_response.status_code, 201)
@@ -2858,7 +2965,7 @@ class EtcApiTests(unittest.TestCase):
             draft_response = app.handle_request(
                 "POST",
                 f"/api/etc/business-batches/{created['businessBatchId']}/oa-draft",
-                json.dumps({"expectedVersion": confirmed["version"]}),
+                json.dumps({"expectedVersion": confirmed["version"], "idempotencyKey": "draft-revoke-route"}),
             )
             drafted = json.loads(draft_response.body)["data"]["businessBatch"]
             revoke_response = app.handle_request(
@@ -3034,7 +3141,7 @@ class EtcApiTests(unittest.TestCase):
             draft_response = app.handle_request(
                 "POST",
                 f"/api/etc/business-batches/{created['businessBatchId']}/oa-draft",
-                json.dumps({"expectedVersion": confirmed["version"]}),
+                json.dumps({"expectedVersion": confirmed["version"], "idempotencyKey": "draft-manual-wait"}),
             )
             draft_payload = json.loads(draft_response.body)["data"]["businessBatch"]
             refresh_response = app.handle_request(
@@ -3138,6 +3245,7 @@ class EtcApiTests(unittest.TestCase):
                 )
                 drafted = app._etc_service.create_business_batch_oa_draft(
                     imported.business_batch_id,
+                    idempotency_key="draft-manual-state",
                     expected_version=imported.version,
                 )
 
@@ -3178,7 +3286,7 @@ class EtcApiTests(unittest.TestCase):
             draft_response = app.handle_request(
                 "POST",
                 f"/api/etc/business-batches/{business_batch['businessBatchId']}/oa-draft",
-                json.dumps({"expectedVersion": business_batch["version"]}),
+                json.dumps({"expectedVersion": business_batch["version"], "idempotencyKey": "draft-close-task"}),
             )
             drafted = json.loads(draft_response.body)["data"]["businessBatch"]
 
@@ -3193,8 +3301,8 @@ class EtcApiTests(unittest.TestCase):
             )
             manual_payload = json.loads(manual_response.body)["data"]["businessBatch"]
             task_payload = json.loads(app.handle_request("GET", f"/api/etc/reconciliation-tasks/{task_id}").body)
-            active_batches = json.loads(app.handle_request("GET", "/api/etc/business-batches?status=active").body)["data"]
-            submitted_batches = json.loads(app.handle_request("GET", "/api/etc/business-batches?status=submitted").body)["data"]
+            active_batches = json.loads(app.handle_request("GET", "/api/etc/business-batches?bucket=unsubmitted").body)["data"]
+            submitted_batches = json.loads(app.handle_request("GET", "/api/etc/business-batches?bucket=submitted").body)["data"]
 
         self.assertEqual(manual_response.status_code, 200)
         self.assertEqual(manual_payload["status"], "manually_marked_submitted")
@@ -3253,7 +3361,7 @@ class EtcApiTests(unittest.TestCase):
             draft_response = app.handle_request(
                 "POST",
                 f"/api/etc/business-batches/{business_batch['businessBatchId']}/oa-draft",
-                json.dumps({"expectedVersion": business_batch["version"]}),
+                json.dumps({"expectedVersion": business_batch["version"], "idempotencyKey": "draft-month-filter"}),
             )
             drafted = json.loads(draft_response.body)["data"]["businessBatch"]
             manual_response = app.handle_request(
@@ -3371,7 +3479,7 @@ class EtcApiTests(unittest.TestCase):
             draft_response = app.handle_request(
                 "POST",
                 f"/api/etc/business-batches/{business_batch['businessBatchId']}/oa-draft",
-                json.dumps({"expectedVersion": business_batch["version"]}),
+                json.dumps({"expectedVersion": business_batch["version"], "idempotencyKey": "draft-delete-summary"}),
             )
             drafted = json.loads(draft_response.body)["data"]["businessBatch"]
             submission_batch = app._etc_service._batches[str(drafted["submissionBatchId"])]
@@ -3398,8 +3506,8 @@ class EtcApiTests(unittest.TestCase):
                     "reason": "用户删除已提交 ETC 批次并释放发票。",
                 }),
             )
-            submitted_batches = json.loads(app.handle_request("GET", "/api/etc/business-batches?status=submitted").body)["data"]
-            active_batches = json.loads(app.handle_request("GET", "/api/etc/business-batches?status=active").body)["data"]
+            submitted_batches = json.loads(app.handle_request("GET", "/api/etc/business-batches?bucket=submitted").body)["data"]
+            active_batches = json.loads(app.handle_request("GET", "/api/etc/business-batches?bucket=unsubmitted").body)["data"]
             task_response = app.handle_request("GET", f"/api/etc/reconciliation-tasks/{task_id}")
             canonical_invoices = {invoice.digital_invoice_no: invoice for invoice in app._import_service.list_invoices()}
             etc_invoices = app._etc_service.list_invoices_by_ids(["etc_invoice_0001", "etc_invoice_0002"])
@@ -3435,7 +3543,7 @@ class EtcApiTests(unittest.TestCase):
             draft_response = app.handle_request(
                 "POST",
                 f"/api/etc/business-batches/{business_batch['businessBatchId']}/oa-draft",
-                json.dumps({"expectedVersion": business_batch["version"]}),
+                json.dumps({"expectedVersion": business_batch["version"], "idempotencyKey": "draft-delete-relation"}),
             )
             drafted = json.loads(draft_response.body)["data"]["businessBatch"]
             submission_batch = app._etc_service._batches[str(drafted["submissionBatchId"])]
@@ -3657,7 +3765,7 @@ class EtcApiTests(unittest.TestCase):
             draft_response = app.handle_request(
                 "POST",
                 f"/api/etc/business-batches/{business_batch['businessBatchId']}/oa-draft",
-                json.dumps({"expectedVersion": business_batch["version"]}),
+                json.dumps({"expectedVersion": business_batch["version"], "idempotencyKey": "draft-task-delete"}),
             )
             drafted = json.loads(draft_response.body)["data"]["businessBatch"]
             submission_batch = app._etc_service._batches[str(drafted["submissionBatchId"])]
@@ -3740,7 +3848,7 @@ class EtcApiTests(unittest.TestCase):
             draft_response = app.handle_request(
                 "POST",
                 f"/api/etc/business-batches/{business_batch['businessBatchId']}/oa-draft",
-                json.dumps({"expectedVersion": business_batch["version"]}),
+                json.dumps({"expectedVersion": business_batch["version"], "idempotencyKey": "draft-orphan-link"}),
             )
             drafted = json.loads(draft_response.body)["data"]["businessBatch"]
             submission_batch = app._etc_service._batches[str(drafted["submissionBatchId"])]
@@ -4336,6 +4444,7 @@ class EtcApiTests(unittest.TestCase):
 
                 draft_payload = app._etc_business_application_service().create_oa_draft_payload(
                     business_batch.business_batch_id,
+                    idempotency_key="draft-durable-restart",
                     expected_version=business_batch.version,
                     actor=EtcBusinessBatchActor(can_admin_access=True, can_mutate_data=True),
                     headers={},

@@ -1568,7 +1568,7 @@ export async function updateEtcBusinessBatchTitle(
 
 export async function createEtcBusinessBatchOaDraft(
   businessBatchId: string,
-  payload: EtcBusinessBatchVersionedPayload = {},
+  payload: EtcBusinessBatchVersionedPayload & { idempotencyKey: string },
 ): Promise<EtcBusinessBatchDetail> {
   const rawPayload = await requestJson<ApiEtcBusinessBatchSinglePayload | ApiEnvelope<ApiEtcBusinessBatchSinglePayload>>(
     `/api/etc/business-batches/${encodeURIComponent(businessBatchId)}/oa-draft`,
@@ -1579,7 +1579,7 @@ export async function createEtcBusinessBatchOaDraft(
       },
       body: JSON.stringify({
         ...(payload.expectedVersion !== undefined ? { expectedVersion: payload.expectedVersion } : {}),
-        ...(payload.idempotencyKey ? { idempotencyKey: payload.idempotencyKey } : {}),
+        idempotencyKey: payload.idempotencyKey,
       }),
     },
   );
