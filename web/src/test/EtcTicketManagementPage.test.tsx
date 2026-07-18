@@ -274,6 +274,11 @@ describe("ETC ticket management page", () => {
       expect.objectContaining({ method: "GET" }),
     );
     expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/etc/invoices?"))).toBe(false);
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/etc/reconciliation-tasks")).toBe(false);
+    const selectedDetailCalls = fetchMock.mock.calls.filter(([url]) =>
+      String(url) === "/api/etc/business-batches/etc-batch-unsubmitted-01"
+    );
+    expect(selectedDetailCalls).toHaveLength(1);
   });
 
   test("recovers business batches after a transient list failure when refreshed", async () => {

@@ -3939,6 +3939,18 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_etc_ticket_page_does_not_restore_full_task_or_dual_selection_hot_path(self) -> None:
+        page_source = (REPO_ROOT / "web" / "src" / "pages" / "EtcTicketManagementPage.tsx").read_text(encoding="utf-8")
+        forbidden_markers = (
+            "fetchEtcReconciliationTasks",
+            "loadReconciliationTasks",
+            "selectedTaskId",
+            "selectedTaskImportBatchId",
+            "selectedTaskImportBatchCanSubmit",
+        )
+
+        self.assertEqual([marker for marker in forbidden_markers if marker in page_source], [])
+
     def test_web_etc_test_mock_does_not_reintroduce_legacy_etc_routes(self) -> None:
         mock_source = (REPO_ROOT / "web" / "src" / "test" / "apiMock.ts").read_text(encoding="utf-8")
         forbidden_markers = (
