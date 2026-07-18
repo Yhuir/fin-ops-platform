@@ -57,11 +57,11 @@
 ## 2026-07-18 OA attempt 并发与页面 selection 回归增量
 
 - 类别 1（业务核心）：严格校验 recovery decision 是唯一 JSON boolean，已创建与未创建证据互斥；缺 linked reconciliation task 时 list/detail action 与 command 一律 fail closed。
-- 类别 2/4（service、持久化）：覆盖目标 business batch version lock/CAS、两个独立 service/store 实例下 finalize 不覆盖其它批次更新、linked task 元数据第一次持久化失败后同 key 重放不创建第二个 OA，以及 recovery adoption 的同证据修复重放。
+- 类别 2/4（service、持久化）：覆盖目标 business batch version lock/CAS、两个独立 service/store 实例下 finalize 不覆盖其它批次更新、linked task 元数据第一次持久化失败后同 key 重放不创建第二个 OA，以及 recovery adoption 的同证据修复重放；补充真实 `EtcReconciliationTaskService + ApplicationStateStore` 保存失败回滚，验证同实例恢复原 metadata/version/audit counter，重试后跨实例只有一次 durable `oa_draft_created`。
 - 类别 3（API）：覆盖非法 boolean/互斥 recovery payload 返回 422，合法 OA command 必须有 imported/closed linked task。
-- 类别 5（前端）：`EtcTicketManagementPage.test.tsx` 覆盖 detail/task 并发、切换批次立即失效旧 mutation target、显式暂存行优先于旧 draft result，以及 manual status 成功后目标 bucket list 只发起一次 GET。
+- 类别 5（前端）：`EtcTicketManagementPage.test.tsx` 覆盖 detail/task 并发、切换批次立即失效旧 mutation target、异步筛选列表自动选择新批次时同步失效旧 task 且旧 task mutation 请求为零、显式暂存行优先于旧 draft result，以及 manual status 成功后目标 bucket list 只发起一次 GET。
 - 类别 6（端到端）：真实 OA 和独立生产进程竞争仍留给部署后受控 smoke；本地 service/API 组合已覆盖不重复创建和 durable convergence。
-- 类别 7（回归）：ETC backend 全量与 70 项页面交互回归保护导入、OA、撤回、删除和列表既有行为；Audit 额外覆盖正式 row `updated_at` 被无关 upsert 刷新时仍以 durable attempt event/payload 时间判 stale，以及 not-submitted 历史成员被新批次合法复用时不计双 owner。
+- 类别 7（回归）：ETC backend 全量与 71 项页面交互回归保护导入、OA、撤回、删除和列表既有行为；Audit 额外覆盖正式 row `updated_at` 被无关 upsert 刷新时仍以 durable attempt event/payload 时间判 stale，以及 not-submitted 历史成员被另一个已提交批次合法复用、发票状态已为 submitted 时整页 Audit 仍通过。
 
 ## 2026-07-14 发票 PDF 合并下载回归增量
 

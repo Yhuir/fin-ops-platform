@@ -1063,19 +1063,26 @@ class EtcReconciliationTaskService:
             raise ValueError("oa_draft_metadata_conflict")
         if task.status not in {EtcReconciliationTaskStatus.IMPORTED, EtcReconciliationTaskStatus.CLOSED}:
             raise ValueError("invalid_reconciliation_task_status")
-        task.oa_draft_batch_id = oa_draft_batch_id
-        task.oa_draft_status = "draft_created"
-        task.etc_batch_id = etc_batch_id
-        self._touch(task)
-        task.audit_events.append(
-            self._new_audit_event(
-                task_id=task_id,
-                event_type="oa_draft_created",
-                actor=actor,
-                affected_item_ids=[oa_draft_batch_id],
+        previous_task = _copy_task(task)
+        previous_audit_counter = self._audit_counter
+        try:
+            task.oa_draft_batch_id = oa_draft_batch_id
+            task.oa_draft_status = "draft_created"
+            task.etc_batch_id = etc_batch_id
+            self._touch(task)
+            task.audit_events.append(
+                self._new_audit_event(
+                    task_id=task_id,
+                    event_type="oa_draft_created",
+                    actor=actor,
+                    affected_item_ids=[oa_draft_batch_id],
+                )
             )
-        )
-        self._persist()
+            self._persist()
+        except Exception:
+            self._tasks[task_id] = previous_task
+            self._audit_counter = previous_audit_counter
+            raise
         return _copy_task(task)
 
     def record_oa_submitted_confirmed(

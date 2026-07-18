@@ -954,6 +954,80 @@ class EtcReconciliationServiceTests(unittest.TestCase):
         self.assertEqual([result.file_id for result in current.parse_results], [source_file.file_id])
         self.assertEqual(len(current.ticket_root_items), 1)
 
+    def test_record_oa_draft_created_rolls_back_local_memory_when_persist_fails(self) -> None:
+        class FailOnceApplicationStateStore(ApplicationStateStore):
+            def __init__(self, data_dir: Path) -> None:
+                super().__init__(data_dir)
+                self.fail_next_save = False
+
+            def save_etc_reconciliation_state(self, snapshot: dict[str, object]) -> None:
+                if self.fail_next_save:
+                    self.fail_next_save = False
+                    raise RuntimeError("simulated local state write failure")
+                super().save_etc_reconciliation_state(snapshot)
+
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            store = FailOnceApplicationStateStore(data_dir)
+            task_id = "ETC-RECON-000001"
+            store.save_etc_reconciliation_state(
+                {
+                    "schema_version": 1,
+                    "task_counter": 1,
+                    "file_counter": 0,
+                    "audit_counter": 0,
+                    "tasks": {
+                        task_id: EtcReconciliationTask(
+                            task_id=task_id,
+                            status=EtcReconciliationTaskStatus.IMPORTED,
+                            version=7,
+                            title="ETC",
+                            import_batch_id="import-batch-1",
+                        )
+                    },
+                }
+            )
+            service = EtcReconciliationTaskService(state_store=store)
+            before = service.get_task(task_id)
+            store.fail_next_save = True
+
+            with self.assertRaisesRegex(RuntimeError, "simulated local state write failure"):
+                service.record_oa_draft_created(
+                    task_id=task_id,
+                    oa_draft_batch_id="oa-draft-1",
+                    etc_batch_id="etc-submission-1",
+                    actor="alice",
+                )
+
+            current = service.get_task(task_id)
+            self.assertEqual(current.version, before.version)
+            self.assertIsNone(current.oa_draft_batch_id)
+            self.assertIsNone(current.etc_batch_id)
+            self.assertIsNone(current.oa_draft_status)
+            self.assertEqual(current.audit_events, before.audit_events)
+            self.assertEqual(service.snapshot()["audit_counter"], 0)
+
+            retried = service.record_oa_draft_created(
+                task_id=task_id,
+                oa_draft_batch_id="oa-draft-1",
+                etc_batch_id="etc-submission-1",
+                actor="alice",
+            )
+            reloaded_service = EtcReconciliationTaskService(
+                state_store=ApplicationStateStore(data_dir)
+            )
+            durable = reloaded_service.get_task(task_id)
+
+        self.assertEqual(durable.oa_draft_batch_id, "oa-draft-1")
+        self.assertEqual(durable.etc_batch_id, "etc-submission-1")
+        self.assertEqual(durable.oa_draft_status, "draft_created")
+        self.assertEqual(durable.version, retried.version)
+        self.assertEqual(
+            [event.event_type for event in durable.audit_events],
+            ["oa_draft_created"],
+        )
+        self.assertEqual(durable.audit_events[0].event_id, "ETC-RECON-AUDIT-000001")
+
     def test_delete_source_file_requires_expected_version_mutable_status_and_known_file(self) -> None:
         service, task_id = self._parsed_task()
         task = service.get_task(task_id)

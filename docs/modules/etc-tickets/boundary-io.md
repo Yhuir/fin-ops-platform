@@ -28,7 +28,7 @@
 
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
-| 页面查询/操作 | `EtcTicketManagementPage.tsx`、`features/etc/api.ts` | 进入 ETC routes/services；批次列表只按 `unsubmitted/staged/submitted` bucket、车牌、关键词走 PostgreSQL 窄 summary 查询；选择一个 business batch 后只读取一次精确 batch detail 和绑定 task，不调用 full reconciliation task list，不把详情数组塞入列表 DTO |
+| 页面查询/操作 | `EtcTicketManagementPage.tsx`、`features/etc/api.ts` | 进入 ETC routes/services；批次列表只按 `unsubmitted/staged/submitted` bucket、车牌、关键词走 PostgreSQL 窄 summary 查询；选择一个 business batch 后只读取一次精确 batch detail 和绑定 task，不调用 full reconciliation task list，不把详情数组塞入列表 DTO。task mutation target 必须同时满足“已加载 task ID = 当前选中 business batch 的 task ID”；筛选响应自动迁移 selection 时必须同步失效旧 task，禁止旧 task I/O 泄漏到新批次 |
 | OA 草稿 command | `POST /api/etc/business-batches/{id}/oa-draft`、`.../oa-draft/recover` | create 请求携带稳定 idempotency key；prepare 在 ETC 锁内持久化 attempt，OA HTTP 在锁外执行，finalize 通过 `save_etc_oa_draft_attempt` 对单一 business batch 做 version CAS 并只合并该 attempt 改动的 business batch/submission/invoice/import 行；同 key 或同 recovery 结果重放只补齐 linked task 的 OA 元数据，不再次创建 OA 草稿。结果未知禁止自动重试；recover 仅管理员可用，布尔决定必须是严格 JSON boolean，并提供 reason/evidence 与互斥的采纳/未创建证据 |
 | 批次标题编辑 | `EtcTicketManagementPage.tsx`、`PATCH /api/etc/business-batches/{id}` | 只允许未提交 business batch 修改 `title`；请求带 `expectedVersion`，后端持久化 business batch title 并同步 linked reconciliation task title |
 | 信用卡账单 PDF | `POST /api/etc/reconciliation-tasks/{task_id}/credit-card-statement`、`CcbCreditCardStatementParser` | 先落 source file 元数据，再从可选文字解析交易行；无可用交易行时才按页渲染并用布局 OCR 重建表格行。OCR 结果附带人工核对 warning；两种路径都输出同一 `FileParseResult`/`CreditCardItem` 合同。解析提交与 source file 删除互斥；OCR 期间源文件已删除时返回 HTTP 409 / `source_file_deleted_during_parse`，不得生成孤儿明细。 |
@@ -54,13 +54,13 @@
 ## 持久化与投影
 
 - Own read model：无独立 manifest entry。
-- 页面 Audit：`etc-tickets` 是直接 canonical 页面，registry 的 `read_model_keys=()`；UI 只有在统一 Audit 返回 `integrity=pass / freshness=fresh / queue=drained`、正式数据库快照和 versioned ready contract 时才显示通过。Audit 额外证明三 bucket 互斥/计数同口径、creating attempt 完整且不超过 15 分钟、pending draft/submission 完整、submitted/not-submitted 占用闭合。只有 import job 的 `pending/processing` 属于 backlog；`failed/dead_lettered` 是终态，若其精确关联的 reconciliation task 已 `imported/closed`，页面审计把它计入 `covered_failed_import_job_count` 而不阻断，否则报告 terminal integrity failure。下游影响 read model 不得冒充页面消费模型。
+- 页面 Audit：`etc-tickets` 是直接 canonical 页面，registry 的 `read_model_keys=()`；UI 只有在统一 Audit 返回 `integrity=pass / freshness=fresh / queue=drained`、正式数据库快照和 versioned ready contract 时才显示通过。Audit 额外证明三 bucket 互斥/计数同口径、creating attempt 完整且不超过 15 分钟、pending draft/submission 完整、submitted/not-submitted 占用闭合。not-submitted 批次保留的是历史成员；发票已由另一个可见批次合法接管时，旧批次不再要求它保持 `unsubmitted`，当前 owner 自己的 submitted/owner/submission 规则负责闭合。只有 import job 的 `pending/processing` 属于 backlog；`failed/dead_lettered` 是终态，若其精确关联的 reconciliation task 已 `imported/closed`，页面审计把它计入 `covered_failed_import_job_count` 而不阻断，否则报告 terminal integrity failure。下游影响 read model 不得冒充页面消费模型。
 - 影响 read model：`workbench`、`workbench_relation`、`invoice_lifecycle`、`search` 等。
 - ETC 导入完成消费会额外等待 `tax_offset`、`input_invoice_usage`、`pending_invoice`、`oa_pending_payment`、`cost_statistics` 等 job result targets。
 - Worker：通过 import/runtime handler、derived lifecycle 和 registered workers 扇出。
 - PostgreSQL formal file rows：active task 每次保存时把不再存在于 task `source_files` 的 `app.etc_reconciliation_files` 行标记为 `deleted`；仍存在的文件继续 upsert 为 `stored`。formal rows 不得让已删除来源在重启后复活。
 - PostgreSQL query consistency：ETC 页面 list/detail 必须使用 state store/repository 的窄读合同直接读取 worker 最新正式行；不得在热路径调用 `load_etc_state/load_etc_reconciliation_state` 全量 hydrate，也不得在 list/detail 探测对象存储。file/memory backend 使用同一合同的现有 snapshot 实现。
-- OA attempt write consistency：OA prepare/finalize/fail/unknown/recover 只允许通过 state store 的 target-scoped CAS I/O 写目标 attempt；禁止用进程内全量 snapshot 覆盖其它批次或独立 worker 的更新。对账任务 OA 元数据是第二个明确 owner write；若它在 business batch 已提交后失败，相同 idempotency key/recovery evidence 必须可安全重放并收敛。
+- OA attempt write consistency：OA prepare/finalize/fail/unknown/recover 只允许通过 state store 的 target-scoped CAS I/O 写目标 attempt；禁止用进程内全量 snapshot 覆盖其它批次或独立 worker 的更新。对账任务 OA 元数据是第二个明确 owner write；若它在 business batch 已提交后失败，相同 idempotency key/recovery evidence 必须可安全重放并收敛。local state store 保存失败时，`record_oa_draft_created` 必须在抛错前回滚 task version、OA metadata、audit event 和 audit counter，重试成功后跨实例只能观察到一次 durable 审计。
 
 ## 文件范围
 
