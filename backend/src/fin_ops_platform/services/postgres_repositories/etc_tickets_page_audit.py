@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any, Iterable
 
@@ -32,7 +32,10 @@ ACTIVE_BATCH_STATUSES = frozenset(
     }
 )
 SUBMITTED_BATCH_STATUSES = frozenset({"oa_submitted", "manually_marked_submitted", "closed"})
+STAGED_BATCH_STATUSES = frozenset({"oa_confirmation_pending"})
+UNSUBMITTED_BATCH_STATUSES = ACTIVE_BATCH_STATUSES - STAGED_BATCH_STATUSES
 VISIBLE_BATCH_STATUSES = ACTIVE_BATCH_STATUSES | SUBMITTED_BATCH_STATUSES
+OA_DRAFT_CREATING_STALE_AFTER = timedelta(minutes=15)
 ACTIVE_IMPORT_JOB_STATUSES = frozenset({"pending", "processing"})
 COVERED_IMPORT_TASK_STATUSES = frozenset({"imported", "closed"})
 TERMINAL_IMPORT_JOB_STATUSES = frozenset({"failed", "dead_lettered"})
@@ -88,6 +91,12 @@ def _audit_etc_tickets_snapshot(
             "visible_business_batch_count": len(visible_batches),
             "active_business_batch_count": sum(
                 1 for row in visible_batches if _text(row.get("status")) in ACTIVE_BATCH_STATUSES
+            ),
+            "unsubmitted_business_batch_count": sum(
+                1 for row in visible_batches if _text(row.get("status")) in UNSUBMITTED_BATCH_STATUSES
+            ),
+            "staged_business_batch_count": sum(
+                1 for row in visible_batches if _text(row.get("status")) in STAGED_BATCH_STATUSES
             ),
             "submitted_business_batch_count": sum(
                 1 for row in visible_batches if _text(row.get("status")) in SUBMITTED_BATCH_STATUSES
@@ -195,7 +204,9 @@ def _etc_tickets_audit_contract(*, snapshot_consistency: str, database_snapshot:
             "proof_checks": [
                 "formal_column_to_registered_payload_equality",
                 "visible_batch_bucket_and_control_total_recalculation",
+                "oa_draft_attempt_timeout_and_pending_draft_closure",
                 "business_batch_task_invoice_import_submission_bidirectional_edges",
+                "not_submitted_and_submitted_resource_occupancy_closure",
                 "canonical_invoice_bridge_referential_integrity",
                 "task_file_bidirectional_membership",
                 "card_ticket_reconciled_supplement_reference_and_owner_closure",
@@ -483,14 +494,19 @@ def _batch_relation_issues(
             for invoice_id, invoice in invoice_by_id.items()
             if _text(invoice.get("business_batch_id")) == subject
         }
-        if expected_invoice_ids != actual_invoice_ids:
+        expected_owned_invoice_ids = (
+            set()
+            if status in {"not_submitted", "manually_marked_not_submitted"}
+            else expected_invoice_ids
+        )
+        if expected_owned_invoice_ids != actual_invoice_ids:
             issues.append(
                 _issue(
                     "etc_business_batch_invoice_edge_mismatch",
                     subject,
                     {
-                        "missing_from_invoice_owner": sorted(expected_invoice_ids - actual_invoice_ids),
-                        "unexpected_invoice_owner": sorted(actual_invoice_ids - expected_invoice_ids),
+                        "missing_from_invoice_owner": sorted(expected_owned_invoice_ids - actual_invoice_ids),
+                        "unexpected_invoice_owner": sorted(actual_invoice_ids - expected_owned_invoice_ids),
                     },
                 )
             )
@@ -521,6 +537,20 @@ def _batch_relation_issues(
 
         submission_id = _text(payload.get("submission_batch_id"))
         submission = submission_by_id.get(submission_id) if submission_id else None
+        issues.extend(
+            _business_batch_lifecycle_issues(
+                row=row,
+                payload=payload,
+                status=status,
+                subject=subject,
+                expected_invoice_ids=expected_invoice_ids,
+                invoice_by_id=invoice_by_id,
+                expected_import_ids=expected_import_ids,
+                import_by_id=import_by_id,
+                submission_id=submission_id,
+                submission=submission,
+            )
+        )
         expected_count, expected_total = _batch_controls(
             payload,
             _payload(submission) if submission is not None else {},
@@ -645,6 +675,160 @@ def _batch_relation_issues(
                 _issue("etc_invoice_link_duplicate", f"{business_id}:{identity}", {"count": count})
             )
     return issues
+
+
+def _business_batch_lifecycle_issues(
+    *,
+    row: dict[str, Any],
+    payload: dict[str, Any],
+    status: str,
+    subject: str,
+    expected_invoice_ids: set[str],
+    invoice_by_id: dict[str, dict[str, Any]],
+    expected_import_ids: set[str],
+    import_by_id: dict[str, dict[str, Any]],
+    submission_id: str,
+    submission: dict[str, Any] | None,
+) -> list[AuditIssue]:
+    issues: list[AuditIssue] = []
+    expected_active_key = f"{_text(row.get('task_id'))}:active" if status in ACTIVE_BATCH_STATUSES else ""
+    actual_active_key = _text(payload.get("task_active_key"))
+    if actual_active_key != expected_active_key:
+        issues.append(
+            _issue(
+                "etc_business_batch_bucket_mismatch",
+                subject,
+                {
+                    "status": status,
+                    "expected_bucket": _business_batch_bucket(status),
+                    "expected_task_active_key": expected_active_key or None,
+                    "actual_task_active_key": actual_active_key or None,
+                },
+            )
+        )
+
+    if status == "oa_draft_creating":
+        audit_events = row.get("audit_events")
+        if not isinstance(audit_events, list):
+            audit_events = payload.get("audit_events")
+        event_types = {
+            _text(event.get("event_type"))
+            for event in audit_events or []
+            if isinstance(event, dict)
+        }
+        missing_fields = []
+        if not submission_id or submission is None:
+            missing_fields.append("submission_batch_id")
+        if not _text(payload.get("oa_draft_idempotency_key")):
+            missing_fields.append("oa_draft_idempotency_key")
+        if "oa_draft_prepared" not in event_types:
+            missing_fields.append("oa_draft_prepared_audit")
+        if missing_fields:
+            issues.append(
+                _issue(
+                    "etc_oa_draft_attempt_missing",
+                    subject,
+                    {"missing": missing_fields},
+                )
+            )
+        updated_at = _datetime(row.get("updated_at")) or _datetime(payload.get("updated_at"))
+        if updated_at is None or datetime.now(UTC) - updated_at > OA_DRAFT_CREATING_STALE_AFTER:
+            issues.append(
+                _issue(
+                    "etc_oa_draft_creating_stale",
+                    subject,
+                    {
+                        "updated_at": updated_at.isoformat() if updated_at else None,
+                        "stale_after_minutes": int(OA_DRAFT_CREATING_STALE_AFTER.total_seconds() // 60),
+                    },
+                )
+            )
+
+    if status == "oa_confirmation_pending":
+        submission_payload = _payload(submission) if submission is not None else {}
+        missing_fields = []
+        if not submission_id or submission is None:
+            missing_fields.append("submission_batch_id")
+        if not _text(payload.get("oa_draft_id")):
+            missing_fields.append("oa_draft_id")
+        if not _text(payload.get("oa_draft_url")):
+            missing_fields.append("oa_draft_url")
+        if submission is not None and _text(submission.get("status")) != "draft_created":
+            missing_fields.append("submission_status=draft_created")
+        if submission is not None and not _text(submission_payload.get("oa_draft_id")):
+            missing_fields.append("submission_oa_draft_id")
+        if submission is not None and not _text(submission_payload.get("oa_draft_url")):
+            missing_fields.append("submission_oa_draft_url")
+        if missing_fields:
+            issues.append(
+                _issue(
+                    "etc_oa_confirmation_draft_missing",
+                    subject,
+                    {"missing": missing_fields},
+                )
+            )
+
+    if status in {"not_submitted", "manually_marked_not_submitted"}:
+        occupied: list[dict[str, str]] = []
+        for field in ("submission_batch_id", "external_etc_batch_id", "oa_draft_id", "oa_draft_url"):
+            if _text(payload.get(field)):
+                occupied.append({"resource": "business_batch", "field": field})
+        for invoice_id in sorted(expected_invoice_ids):
+            invoice = invoice_by_id.get(invoice_id)
+            if invoice is None:
+                continue
+            invoice_payload = _payload(invoice)
+            if _text(invoice.get("business_batch_id")) or _text(invoice_payload.get("current_batch_id")):
+                occupied.append({"resource": invoice_id, "field": "batch_occupancy"})
+            if _text(invoice.get("status")) != "unsubmitted":
+                occupied.append({"resource": invoice_id, "field": "status"})
+        for import_id in sorted(expected_import_ids):
+            import_row = import_by_id.get(import_id)
+            if import_row is not None and _text(_payload(import_row).get("submission_batch_id")):
+                occupied.append({"resource": import_id, "field": "submission_batch_id"})
+        if occupied:
+            issues.append(
+                _issue(
+                    "etc_not_submitted_occupancy_mismatch",
+                    subject,
+                    {"occupied": occupied},
+                )
+            )
+
+    if status in SUBMITTED_BATCH_STATUSES:
+        occupied: list[dict[str, str]] = []
+        if not submission_id or submission is None:
+            occupied.append({"resource": "business_batch", "field": "submission_batch_id"})
+        elif _text(submission.get("status")) != "submitted_confirmed":
+            occupied.append({"resource": submission_id, "field": "status"})
+        for invoice_id in sorted(expected_invoice_ids):
+            invoice = invoice_by_id.get(invoice_id)
+            if invoice is None:
+                continue
+            invoice_payload = _payload(invoice)
+            if _text(invoice.get("status")) != "submitted":
+                occupied.append({"resource": invoice_id, "field": "status"})
+            if _text(invoice.get("business_batch_id")) != subject:
+                occupied.append({"resource": invoice_id, "field": "business_batch_id"})
+            if submission_id and _text(invoice_payload.get("current_batch_id")) != submission_id:
+                occupied.append({"resource": invoice_id, "field": "current_batch_id"})
+        if occupied:
+            issues.append(
+                _issue(
+                    "etc_submitted_occupancy_mismatch",
+                    subject,
+                    {"occupied": occupied},
+                )
+            )
+    return issues
+
+
+def _business_batch_bucket(status: str) -> str:
+    if status in SUBMITTED_BATCH_STATUSES:
+        return "submitted"
+    if status in STAGED_BATCH_STATUSES:
+        return "staged"
+    return "unsubmitted"
 
 
 def _task_relation_issues(
@@ -964,6 +1148,19 @@ def _decimal(value: Any) -> Decimal | None:
         return None
 
 
+def _datetime(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value.astimezone(UTC) if value.tzinfo is not None else value.replace(tzinfo=UTC)
+    normalized = _text(value)
+    if not normalized:
+        return None
+    try:
+        parsed = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed.astimezone(UTC) if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+
+
 def _value_equal(left: Any, right: Any, *, money: bool = False) -> bool:
     if money:
         return _decimal(left) == _decimal(right)
@@ -990,7 +1187,7 @@ def _issue(code: str, subject_id: str, details: dict[str, Any] | None) -> AuditI
     )
 
 
-_BUSINESS_BATCH_SQL = """select business_batch_id, task_id, status, to_char(scope_month, 'YYYY-MM') as scope_month, invoice_count, total_amount, import_attempts, audit_events, version, raw_payload from app.etc_business_batches where coalesce(legacy_mongo_id, '') !~ '^current_state:' order by business_batch_id"""
+_BUSINESS_BATCH_SQL = """select business_batch_id, task_id, status, to_char(scope_month, 'YYYY-MM') as scope_month, invoice_count, total_amount, import_attempts, audit_events, version, updated_at, raw_payload from app.etc_business_batches where coalesce(legacy_mongo_id, '') !~ '^current_state:' order by business_batch_id"""
 _TASK_SQL = """select task_id, status, to_char(scope_month, 'YYYY-MM') as scope_month, source_file_id, result_summary, version, raw_payload from app.etc_reconciliation_tasks where coalesce(legacy_mongo_id, '') !~ '^current_state:' order by task_id"""
 _FILE_SQL = """select file.task_id, file.file_id, file.file_object_id::text as file_object_id, file.file_kind, file.status, file.file_path, file.file_sha256, file.raw_payload, (file.file_object_id is null or (object.id is not null and object.tombstoned_at is null and coalesce(object.object_key, object.storage_uri, '') <> '')) as file_object_registered from app.etc_reconciliation_files file left join app.file_objects object on object.id = file.file_object_id where coalesce(file.legacy_mongo_id, '') !~ '^current_state:' order by file.task_id, file.file_id"""
 _ETC_INVOICE_SQL = """select etc.etc_invoice_id, etc.invoice_no, etc.invoice_code, etc.invoice_date::text as invoice_date, to_char(etc.scope_month, 'YYYY-MM') as scope_month, etc.seller_name, etc.buyer_name, etc.amount, etc.tax_amount, etc.total_with_tax, etc.status, etc.batch_id, etc.task_id, etc.business_batch_id, etc.file_object_id::text as file_object_id, etc.file_path, etc.file_sha256, etc.version, etc.raw_payload, (etc.file_object_id is null or (object.id is not null and object.tombstoned_at is null and coalesce(object.object_key, object.storage_uri, '') <> '')) as file_object_registered from app.etc_invoices etc left join app.file_objects object on object.id = etc.file_object_id where coalesce(etc.legacy_mongo_id, '') !~ '^current_state:' order by etc.etc_invoice_id"""

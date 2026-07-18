@@ -23661,24 +23661,6 @@ body.column-layout-dragging {
   list-style: none;
 }
 
-.etc-reconciliation-task-list {
-  display: grid;
-  gap: 8px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid #e2e8f0;
-}
-
-.etc-reconciliation-task-row {
-  position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: stretch;
-  border: 1px solid #dbe3ef;
-  border-radius: 8px;
-  background: #f9fbfe;
-  overflow: hidden;
-}
-
 .etc-batch-row {
   position: relative;
   display: grid;
@@ -25012,7 +24994,6 @@ body.column-layout-dragging {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--fp-primary) 16%, transparent);
 }
 
-.etc-reconciliation-task-row,
 .etc-batch-row,
 .etc-source-file-row,
 .etc-detail-metrics > div,
@@ -25026,7 +25007,6 @@ body.column-layout-dragging {
   background: var(--fp-surface);
 }
 
-.etc-reconciliation-task-row,
 .etc-batch-row,
 .etc-source-file-row {
   transition:

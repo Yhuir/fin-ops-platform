@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from datetime import UTC, datetime, timedelta
 
 from fin_ops_platform.services.postgres_repositories import etc_tickets_page_audit
 
@@ -24,6 +25,7 @@ class FakeConnection:
                         "title": "七月 ETC",
                         "status": "draft",
                         "version": 1,
+                        "task_active_key": "task-1:active",
                         "invoice_ids": [],
                         "invoice_summary": {"count": 0, "amount": "0.00"},
                         "import_batch_ids": [],
@@ -98,7 +100,129 @@ class EtcTicketsPageAuditTests(unittest.TestCase):
         )
         self.assertEqual(report["audit_contract"]["read_model_tables"], [])
         self.assertIn("bidirectional equality", report["audit_contract"]["relation_edge_equality"])
+        self.assertEqual(report["summary"]["unsubmitted_business_batch_count"], 1)
+        self.assertEqual(report["summary"]["staged_business_batch_count"], 0)
         self.assertEqual(connection.executed, [])
+
+    def test_stale_creating_attempt_is_blocking_but_recent_complete_attempt_is_not(self) -> None:
+        connection = FakeConnection()
+        connection.batches[0].update(
+            {
+                "status": "oa_draft_creating",
+                "updated_at": datetime.now(UTC) - timedelta(minutes=16),
+                "audit_events": [{"event_type": "oa_draft_prepared"}],
+            }
+        )
+        payload = connection.batches[0]["raw_payload"]["normalized_payload"]
+        payload.update(
+            {
+                "status": "oa_draft_creating",
+                "submission_batch_id": "submission-1",
+                "oa_draft_idempotency_key": "oa-intent-1",
+            }
+        )
+        connection.submission_batches = [
+            {
+                "submission_batch_id": "submission-1",
+                "status": "draft_creating",
+                "invoice_ids": [],
+                "raw_payload": {"normalized_payload": {"invoice_ids": []}},
+            }
+        ]
+
+        report = etc_tickets_page_audit.audit_etc_tickets_page(connection)
+
+        self.assertIn("etc_oa_draft_creating_stale", report["summary"]["issue_sample_counts_by_code"])
+        self.assertNotIn("etc_oa_draft_attempt_missing", report["summary"]["issue_sample_counts_by_code"])
+
+        connection.batches[0]["updated_at"] = datetime.now(UTC)
+        report = etc_tickets_page_audit.audit_etc_tickets_page(connection)
+        self.assertNotIn("etc_oa_draft_creating_stale", report["summary"]["issue_sample_counts_by_code"])
+
+    def test_creating_without_durable_attempt_is_blocking(self) -> None:
+        connection = FakeConnection()
+        connection.batches[0]["status"] = "oa_draft_creating"
+        connection.batches[0]["updated_at"] = datetime.now(UTC)
+        payload = connection.batches[0]["raw_payload"]["normalized_payload"]
+        payload["status"] = "oa_draft_creating"
+
+        report = etc_tickets_page_audit.audit_etc_tickets_page(connection)
+
+        self.assertIn("etc_oa_draft_attempt_missing", report["summary"]["issue_sample_counts_by_code"])
+
+    def test_pending_without_persisted_draft_is_blocking_and_counted_only_as_staged(self) -> None:
+        connection = FakeConnection()
+        connection.batches[0]["status"] = "oa_confirmation_pending"
+        payload = connection.batches[0]["raw_payload"]["normalized_payload"]
+        payload.update({"status": "oa_confirmation_pending", "submission_batch_id": "submission-1"})
+        connection.submission_batches = [
+            {
+                "submission_batch_id": "submission-1",
+                "status": "draft_created",
+                "invoice_ids": [],
+                "raw_payload": {"normalized_payload": {"invoice_ids": []}},
+            }
+        ]
+
+        report = etc_tickets_page_audit.audit_etc_tickets_page(connection)
+
+        self.assertIn("etc_oa_confirmation_draft_missing", report["summary"]["issue_sample_counts_by_code"])
+        self.assertEqual(report["summary"]["unsubmitted_business_batch_count"], 0)
+        self.assertEqual(report["summary"]["staged_business_batch_count"], 1)
+
+    def test_not_submitted_preserves_membership_but_rejects_occupied_resources(self) -> None:
+        connection = FakeConnection()
+        connection.batches[0].update({"status": "not_submitted", "invoice_count": 1, "total_amount": "100.00"})
+        payload = connection.batches[0]["raw_payload"]["normalized_payload"]
+        payload.update(
+            {
+                "status": "not_submitted",
+                "invoice_ids": ["etc-invoice-1"],
+                "invoice_summary": {"count": 1, "amount": "100.00"},
+                "import_batch_ids": ["import-1"],
+            }
+        )
+        connection.invoices = [
+            {
+                "etc_invoice_id": "etc-invoice-1",
+                "status": "unsubmitted",
+                "business_batch_id": None,
+                "amount": "100.00",
+                "tax_amount": "0.00",
+                "total_with_tax": "100.00",
+                "raw_payload": {
+                    "normalized_payload": {
+                        "id": "etc-invoice-1",
+                        "status": "unsubmitted",
+                        "task_id": "task-1",
+                        "import_batch_id": "import-1",
+                        "current_batch_id": None,
+                        "business_batch_id": None,
+                    }
+                },
+            }
+        ]
+        connection.import_batches = [
+            {
+                "batch_id": "import-1",
+                "invoice_count": 1,
+                "raw_payload": {
+                    "normalized_payload": {
+                        "invoice_ids": ["etc-invoice-1"],
+                        "submission_batch_id": None,
+                    }
+                },
+            }
+        ]
+
+        report = etc_tickets_page_audit.audit_etc_tickets_page(connection)
+
+        self.assertNotIn("etc_business_batch_invoice_edge_mismatch", report["summary"]["issue_sample_counts_by_code"])
+        self.assertNotIn("etc_not_submitted_occupancy_mismatch", report["summary"]["issue_sample_counts_by_code"])
+
+        connection.invoices[0]["business_batch_id"] = "batch-1"
+        report = etc_tickets_page_audit.audit_etc_tickets_page(connection)
+        self.assertIn("etc_not_submitted_occupancy_mismatch", report["summary"]["issue_sample_counts_by_code"])
 
     def test_missing_batch_task_is_blocking(self) -> None:
         connection = FakeConnection()

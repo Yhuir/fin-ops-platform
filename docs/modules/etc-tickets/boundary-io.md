@@ -1,13 +1,13 @@
 # ETC票据管理模块边界与 I/O
 
-日期：2026-07-14
+日期：2026-07-18
 
 ## 模块化状态
 
 - 状态：close
 - 当前边界可信度：high
 - 目标边界：ETC 票据页面和导入/修复服务通过 ETC application/reconciliation services 处理业务，关联影响通过 workbench relation 和 derived lifecycle 扇出。
-- 当前缺口：页面/API 与 App 内部 Audit 证明主链路已闭环；对象存储文件字节、ETC 外部归档与真实 OA 草稿状态仍属于外部 gate。历史 repair/migration/backfill 工具作为显式运维入口保留，必须继续 dry-run/owner/allowlist 管控，不得进入常规页面链路。
+- 当前缺口：页面/API 与 App 内部 Audit 证明主链路已闭环；对象存储文件字节、ETC 外部归档与真实 OA 草稿状态仍属于外部 gate。结果未知的 OA 创建只能由管理员带核实证据恢复。历史 repair/migration/backfill 工具作为显式运维入口保留，必须继续 dry-run/owner/allowlist 管控，不得进入常规页面链路。
 - 旧代码删除条件：已删除 legacy `/api/etc/batches*`、ETC OA 自动检测 refresh、invoice-id 级 `/api/etc/invoices/revoke-submitted` 回退入口及测试 mock 假后端；历史 ETC migration/repair 工具在完成生产迁移职责且无生产/测试引用后再单独删除。
 
 ## 职责边界
@@ -28,7 +28,8 @@
 
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
-| 页面查询/操作 | `EtcTicketManagementPage.tsx`、`features/etc/api.ts` | 进入 ETC routes/services；批次列表不发送月份筛选，只按状态 bucket、车牌、关键词读取全部用户可见 business batches；已导入任务详情通过 `/api/etc/invoices?importBatchId=...` 读取 canonical ETC invoice list |
+| 页面查询/操作 | `EtcTicketManagementPage.tsx`、`features/etc/api.ts` | 进入 ETC routes/services；批次列表只按 `unsubmitted/staged/submitted` bucket、车牌、关键词走 PostgreSQL 窄 summary 查询；选择一个 business batch 后只读取一次精确 batch detail 和绑定 task，不调用 full reconciliation task list，不把详情数组塞入列表 DTO |
+| OA 草稿 command | `POST /api/etc/business-batches/{id}/oa-draft`、`.../oa-draft/recover` | create 请求携带稳定 idempotency key；prepare 在 ETC 锁内持久化 attempt，OA HTTP 在锁外执行，finalize 用 attempt/version CAS；结果未知禁止自动重试，recover 仅管理员可用且必须提供 reason/evidence 和明确采纳/未创建决定 |
 | 批次标题编辑 | `EtcTicketManagementPage.tsx`、`PATCH /api/etc/business-batches/{id}` | 只允许未提交 business batch 修改 `title`；请求带 `expectedVersion`，后端持久化 business batch title 并同步 linked reconciliation task title |
 | 信用卡账单 PDF | `POST /api/etc/reconciliation-tasks/{task_id}/credit-card-statement`、`CcbCreditCardStatementParser` | 先落 source file 元数据，再从可选文字解析交易行；无可用交易行时才按页渲染并用布局 OCR 重建表格行。OCR 结果附带人工核对 warning；两种路径都输出同一 `FileParseResult`/`CreditCardItem` 合同。解析提交与 source file 删除互斥；OCR 期间源文件已删除时返回 HTTP 409 / `source_file_deleted_during_parse`，不得生成孤儿明细。 |
 | ETC 发票导入/识别 | imports/services/parsers | 输出批次、任务、附件识别结果 |
@@ -41,7 +42,7 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| ETC ticket/batch payload | 前端页面 | API response shape 稳定，business batch payload 包含用户可见 `title` |
+| ETC ticket/batch payload | 前端页面 | summary DTO 只含列表展示、三 bucket counts 和统一 `createOaDraftAction`；不含 invoice IDs、import attempts、audit events 或 task 嵌套详情。detail DTO 才包含当前业务批次明细 |
 | Worker 持久化后的查询可见性 | ETC 票据/导入页面 | PostgreSQL 模式的 task、business batch、invoice 查询在读取前重载正式 snapshot，保证独立 import worker 的完成结果无需 API 重启即可见；file/memory backend 保持原有进程内语义 |
 | ETC 发票合并 PDF | 浏览器下载 | `application/pdf`、RFC 5987 UTF-8 文件名、`private, no-store`；按开票日期/发票号/ID 稳定排序，每张发票恰好贡献一页；任一来源不可读、损坏、hash 不一致或不是单页时整包失败；成功记录 `etc_invoice_pdf_bundle_downloaded` 审计，不新增批次状态或 read model |
 | linked reconciliation task title | ETC 发票导入 ready task 下拉 | business batch title 更新后同步 task title，导入页下拉展示最新批次标题 |
@@ -53,12 +54,12 @@
 ## 持久化与投影
 
 - Own read model：无独立 manifest entry。
-- 页面 Audit：`etc-tickets` 是直接 canonical 页面，registry 的 `read_model_keys=()`；UI 只有在统一 Audit 返回 `integrity=pass / freshness=fresh / queue=drained`、正式数据库快照和 versioned ready contract 时才显示通过。只有 import job 的 `pending/processing` 属于 backlog；`failed/dead_lettered` 是终态，若其精确关联的 reconciliation task 已 `imported/closed`，页面审计把它计入 `covered_failed_import_job_count` 而不阻断，否则报告 terminal integrity failure。下游影响 read model 不得冒充页面消费模型。
+- 页面 Audit：`etc-tickets` 是直接 canonical 页面，registry 的 `read_model_keys=()`；UI 只有在统一 Audit 返回 `integrity=pass / freshness=fresh / queue=drained`、正式数据库快照和 versioned ready contract 时才显示通过。Audit 额外证明三 bucket 互斥/计数同口径、creating attempt 完整且不超过 15 分钟、pending draft/submission 完整、submitted/not-submitted 占用闭合。只有 import job 的 `pending/processing` 属于 backlog；`failed/dead_lettered` 是终态，若其精确关联的 reconciliation task 已 `imported/closed`，页面审计把它计入 `covered_failed_import_job_count` 而不阻断，否则报告 terminal integrity failure。下游影响 read model 不得冒充页面消费模型。
 - 影响 read model：`workbench`、`workbench_relation`、`invoice_lifecycle`、`search` 等。
 - ETC 导入完成消费会额外等待 `tax_offset`、`input_invoice_usage`、`pending_invoice`、`oa_pending_payment`、`cost_statistics` 等 job result targets。
 - Worker：通过 import/runtime handler、derived lifecycle 和 registered workers 扇出。
 - PostgreSQL formal file rows：active task 每次保存时把不再存在于 task `source_files` 的 `app.etc_reconciliation_files` 行标记为 `deleted`；仍存在的文件继续 upsert 为 `stored`。formal rows 不得让已删除来源在重启后复活。
-- PostgreSQL query consistency：`EtcService` 与 `EtcReconciliationTaskService` 的页面只读入口必须从 state store 重载 worker 最新写入；进程内 snapshot 不是跨进程事实源。
+- PostgreSQL query consistency：ETC 页面 list/detail 必须使用 state store/repository 的窄读合同直接读取 worker 最新正式行；不得在热路径调用 `load_etc_state/load_etc_reconciliation_state` 全量 hydrate，也不得在 list/detail 探测对象存储。file/memory backend 使用同一合同的现有 snapshot 实现。
 
 ## 文件范围
 
@@ -106,7 +107,7 @@
 - Downstream outputs: workbench、workbench_relation、tax/cost/search dirty scopes 或 owner producer 输出。
 - Forbidden paths: legacy ETC batch pickle、OA detection metadata 或 ETC invoice rows 不得替代 canonical invoice pool；ETC repair 不得绕过 relation command service。
 - Audit I/O boundary: Audit repository 只允许只读查询和 repeatable-read transaction；不得调用 ETC service mutation、refresh gateway、worker ack/retry、对象存储下载或 Workbench relation refresh。`app.workbench_pair_relations` 不是 ETC 页自己的 pairing source。
-- Old code deletion: 生产主链路的 legacy `/api/etc/batches*` source-of-truth fallback、route owner、read facade、delete/lifecycle service、前端测试 mock 假后端和后端兼容测试已删除；页面已导入任务详情改走 `/api/etc/invoices?importBatchId=...`。ETC 专用 `oa-status/refresh` 和 invoice-id 级 `/api/etc/invoices/revoke-submitted` 回退入口已删除，并由 static guard 防回归。historical repair/backfill 工具保留不算页面/API closure 阻断，仍需按工具 owner/dry-run/deletion 条件单独收口。
+- Old code deletion: 生产主链路的 legacy `/api/etc/batches*` source-of-truth fallback、route owner、read facade、delete/lifecycle service、前端测试 mock 假后端和后端兼容测试已删除；页面 full task list、双 selection owner、重复 detail effect、task-row/task-delete UI 私链和对应 CSS 已删除。正式 reconciliation/import/source-file API 保留为 workflow 合同。ETC 专用 `oa-status/refresh` 和 invoice-id 级 `/api/etc/invoices/revoke-submitted` 回退入口已删除，并由 static guard 防回归。historical repair/backfill 工具保留不算页面/API closure 阻断，仍需按工具 owner/dry-run/deletion 条件单独收口。
 
 ## Phase 19 deterministic graph repair（2026-07-12）
 

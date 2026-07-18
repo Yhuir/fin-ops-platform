@@ -51,12 +51,13 @@
 当前事实边界：
 
 - 用户可见事实源是 `/api/etc/business-batches*` 与 `etc_business_batches`；`etc_reconciliation_tasks` 保留为导入、核对、source file 和 workflow 状态。
-- ETC 票据管理页不再提供月份选择器；左侧列表直接读取全部用户可见业务批次，只分“未提交”和“已提交”两个 bucket，并可按车牌和关键词过滤。后端 `month` 参数只作为兼容/运维筛选保留。
+- ETC 票据管理页不再提供月份选择器；左侧列表通过窄 `business-batches` summary 查询读取全部用户可见业务批次，分为互斥的“未提交 / 暂存 / 已提交”三个 bucket，并可按车牌和关键词过滤。`oa_confirmation_pending` 是唯一暂存事实；短时 `oa_draft_creating` 仍属于未提交操作态。后端 `month` 参数只作为兼容/运维筛选保留。
 - “新建批次”入口调用 `POST /api/etc/business-batches`；前端不直接把空 reconciliation task 当作批次展示，后端 application service 负责编排 task + active business batch 并返回统一 business batch payload。
 - 未提交业务批次标题由 business batch `title` 持久化；页面允许点击批次标题内联编辑，保存走 `PATCH /api/etc/business-batches/{id}` 并使用 `expectedVersion`。保存成功后必须同步 linked reconciliation task title，确保 `/imports/etc-invoices` ready task 下拉显示最新标题；已提交/closed 批次标题锁定。
 - 没有 active business batch 绑定的 task-only 记录不得进入左侧批次列表或 tab 计数；只可作为 workflow 内部状态、异常恢复线索或运维清理对象处理。
 - 旧 `/api/etc/batches*` 后端兼容入口、前端测试 mock 假后端、invoice-id 级 `/api/etc/invoices/revoke-submitted` 回退入口和 ETC `oa-status/refresh` 入口已删除；页面、测试和运维入口不得重新依赖它们。
 - ETC 专用 OA 自动检测链路已移除；创建 OA 草稿后只允许用户通过 `manual-oa-status` 人工确认 `submitted` 或 `not_submitted`，不得通过 invoice id 直接回退提交状态。
+- OA 草稿创建拆为本地 prepare、锁外 OA I/O、CAS finalize；请求必须携带稳定 `idempotencyKey`。结果未知时保持 `oa_draft_creating` 并禁止盲重试，由管理员在核实 OA 后走显式 recovery command。确认“未创建/需修改”只把批次退回未提交并释放 OA 占用，保留业务批次、发票、上传文件和核对结果。
 - OA 草稿创建成功后，页面提供当前业务批次 ETC 发票 PDF 合并下载。批次 `invoice_ids` 是成员事实源，application service 负责范围校验与审计，PDF bundle service 只通过文件读取端口读取对象存储/本地字节并按开票日期、发票号、ID 稳定排序；每张来源必须恰好一页，任一缺失、损坏、hash 不一致或多页时整包失败，不允许静默漏票。
 - `submitted` 只表示 ETC 批次已人工确认提交，不等于关联台三项已配对；Workbench open 区必须生成折叠 `etc_invoice_summary`，等待 OA 和银行流水进入后通过普通配对闭环。
 - ETC 发票本质上是进项发票；统一发票池只保留 `app.invoices` 内的正式进/销项发票。ETC 专用导入保存 ZIP 内命中本批次的 PDF/XML 和 ETC metadata，用于 OA 附件和 summary 展示；不得因为 ETC ZIP 中出现一张票就在统一发票池创建新发票。
@@ -67,7 +68,7 @@
 - source file 元数据、解析结果和派生明细必须共享同一个 `file_id` 生命周期；慢 OCR 的解析提交与删除必须互斥，源文件已删除时不得再提交解析结果。历史孤儿解析结果必须通过既有 source file 删除边界清理，不得由前端过滤掩盖。
 - 信用卡 PDF 上传先解析可选文字；只有未识别到交易行时才回退到按页渲染的布局 OCR。OCR 成功结果必须保留人工核对警告，不得把图像识别结果冒充为无风险的文本解析。
 - ETC 导入确认、业务批次提交/删除和历史迁移会影响关联台 summary、税金抵扣、成本统计、search、App Health 和 import/Workbench worker 状态；这些流程只允许关联或折叠已存在 canonical invoice，不允许旧 ETC 模块创建新的 canonical invoice。
-- ETC 页面自身没有 manifest read model；统一 Audit 直接在一个只读 repeatable-read PostgreSQL snapshot 内证明 business batch/task/file/ETC invoice/import/submission/canonical invoice bridge 与 import queue。Workbench、税金抵扣、成本统计和 invoice lifecycle 只是下游影响目标，不得登记成 ETC 页面已消费 read model；shared Workbench relation 由关联台 Audit 负责。
+- ETC 页面自身没有 manifest read model；统一 Audit 直接在一个只读 repeatable-read PostgreSQL snapshot 内证明 business batch/task/file/ETC invoice/import/submission/canonical invoice bridge 与 import queue，并阻断超过 15 分钟的 creating、缺失 durable attempt、无 draft 的 pending、bucket 错配和退回后占用未释放。Workbench、税金抵扣、成本统计和 invoice lifecycle 只是下游影响目标，不得登记成 ETC 页面已消费 read model；shared Workbench relation 由关联台 Audit 负责。
 
 ## 维护触发器
 

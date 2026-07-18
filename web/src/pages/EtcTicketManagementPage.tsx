@@ -28,7 +28,6 @@ import {
   createEtcBusinessBatch,
   createEtcBusinessBatchOaDraft,
   deleteEtcBusinessBatch,
-  deleteEtcReconciliationTask,
   deleteEtcReconciliationSourceFile,
   downloadEtcBusinessBatchInvoicePdf,
   fetchEtcBusinessBatchDetail,
@@ -637,7 +636,6 @@ type BatchDeletePlan =
 
 type DeleteTarget =
   | { kind: "batch"; item: EtcBatchSummary; plan: BatchDeletePlan }
-  | { kind: "task"; item: EtcReconciliationTask }
   | { kind: "sourceFile"; task: EtcReconciliationTask; item: EtcSourceFile };
 
 function businessBatchToBatchSummary(batch: EtcBusinessBatchSummary): EtcBatchSummary {
@@ -1040,21 +1038,8 @@ export default function EtcTicketManagementPage() {
   }, [selectedTask?.taskId]);
 
   const invoiceRows = batchDetail?.invoiceItems ?? [];
-  function taskHasOaDraftOrSubmittedLink(task: EtcReconciliationTask) {
-    return Boolean(task.oaDraftBatchId?.trim() || task.submittedConfirmedAt?.trim());
-  }
   const businessBatchDeleteBlockReason = (_batch: EtcBusinessBatchSummary) => canMutateData ? "" : "当前账号仅支持查看和导出，不能删除 ETC 批次。";
   const canDeleteBusinessBatch = (batch: EtcBusinessBatchSummary) => !businessBatchDeleteBlockReason(batch);
-  const canDeleteTask = (_task: EtcReconciliationTask) => canMutateData;
-  const deleteTaskDescription = (task: EtcReconciliationTask) => {
-    if (task.status === "imported") {
-      return "将删除本地批次、上传文件、核对结果和已导入发票。审批系统中的草稿和已提交记录不会删除。";
-    }
-    if (task.status === "ready_for_import") {
-      return "将删除本地批次、上传文件和核对结果。审批系统中的草稿和已提交记录不会删除。";
-    }
-    return "将删除本地批次、上传文件和核对结果。审批系统中的草稿和已提交记录不会删除。";
-  };
   const businessBatchForBatchSummary = (batch: EtcBatchSummary) => {
     const candidateIds = new Set(
       [batch.id, batch.etcBatchId, batch.externalBatchId]
@@ -1641,15 +1626,6 @@ export default function EtcTicketManagementPage() {
     await runTaskAction(() => reopenEtcReconciliationTask(selectedTask.taskId, selectedTask.version));
   };
 
-  const openDeleteTaskDialog = (task: EtcReconciliationTask, event?: MouseEvent<HTMLButtonElement>) => {
-    event?.stopPropagation();
-    if (!canDeleteTask(task)) {
-      return;
-    }
-    setActionError(null);
-    setDeleteTarget({ kind: "task", item: task });
-  };
-
   const openDeleteBatchDialog = (batch: EtcBatchSummary, event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
     if (!canDeleteBatch(batch)) {
@@ -1666,23 +1642,6 @@ export default function EtcTicketManagementPage() {
     }
     setActionError(null);
     setDeleteTarget({ kind: "sourceFile", task: selectedTask, item: sourceFile });
-  };
-
-  const fetchLatestDeletableTask = async (task: EtcReconciliationTask) => {
-    const latestTask = await fetchEtcReconciliationTask(task.taskId);
-    mergeReconciliationTask(latestTask);
-    const linkedBusinessBatch = selectedBusinessBatch?.taskId === latestTask.taskId
-      ? selectedBusinessBatch
-      : null;
-    if (linkedBusinessBatch) {
-      const latestBusinessBatch = await fetchEtcBusinessBatchDetail(linkedBusinessBatch.businessBatchId);
-      mergeBusinessBatch(latestBusinessBatch);
-      const linkedBusinessBatchReason = businessBatchDeleteBlockReason(latestBusinessBatch);
-      if (linkedBusinessBatchReason) {
-        throw new Error(linkedBusinessBatchReason);
-      }
-    }
-    return latestTask;
   };
 
   const removeDeletedBatchFromState = (batchId: string) => {
@@ -1738,23 +1697,7 @@ export default function EtcTicketManagementPage() {
     setDeleteSubmitting(true);
     setActionError(null);
     try {
-      if (deleteTarget.kind === "task") {
-        const latestTask = await fetchLatestDeletableTask(deleteTarget.item);
-        const taskId = latestTask.taskId;
-        const wasSelectedTask = selectedTask?.taskId === taskId;
-        const removedBatchId = latestTask.etcBatchId || latestTask.importBatchId || "";
-        await deleteEtcReconciliationTask(taskId, latestTask.version);
-        if (removedBatchId) {
-          setBatches((current) => current.filter((batch) =>
-            batch.id !== removedBatchId
-            && batch.etcBatchId !== removedBatchId
-            && batch.externalBatchId !== removedBatchId
-          ));
-        }
-        if (wasSelectedTask) {
-          setSelectedTask(null);
-        }
-      } else if (deleteTarget.kind === "sourceFile") {
+      if (deleteTarget.kind === "sourceFile") {
         const latestTask = await fetchEtcReconciliationTask(deleteTarget.task.taskId);
         mergeReconciliationTask(latestTask);
         if (!["draft", "reviewing"].includes(latestTask.status)) {
@@ -2977,10 +2920,8 @@ export default function EtcTicketManagementPage() {
 
         <AppDialog
           open={Boolean(deleteTarget)}
-          title={deleteTarget?.kind === "task" ? "删除批次" : deleteTarget?.kind === "sourceFile" ? "删除源文件" : "删除批次"}
-          description={deleteTarget?.kind === "task"
-            ? deleteTaskDescription(deleteTarget.item)
-            : deleteTarget?.kind === "sourceFile"
+          title={deleteTarget?.kind === "sourceFile" ? "删除源文件" : "删除批次"}
+          description={deleteTarget?.kind === "sourceFile"
               ? "将删除该上传源文件及其解析结果、解析错误和解析产物。"
               : deleteTarget?.kind === "batch"
                 ? deleteBatchDescription(deleteTarget)
@@ -2999,17 +2940,7 @@ export default function EtcTicketManagementPage() {
             </>
           }
         >
-          {deleteTarget?.kind === "task" ? (
-            <div className="etc-dialog-detail-list">
-              <p>批次：{formatTaskTitle(deleteTarget.item)}</p>
-              <p>期间：{formatDateRange(deleteTarget.item.periodStart, deleteTarget.item.periodEnd)}</p>
-              <p>数量：{taskCountText(deleteTarget.item)}</p>
-              {deleteTarget.item.status === "imported" || deleteTarget.item.hasImportedInvoices ? (
-                <p className="etc-dialog-warning">将一并删除已导入发票；如需恢复，需重新确认并导入 ZIP。</p>
-              ) : null}
-              <p>版本：v{deleteTarget.item.version}</p>
-            </div>
-          ) : deleteTarget?.kind === "sourceFile" ? (
+          {deleteTarget?.kind === "sourceFile" ? (
             <div className="etc-dialog-detail-list">
               <p>文件：{deleteTarget.item.originalName || deleteTarget.item.fileId}</p>
               <p>类型：{sourceKindLabel(deleteTarget.item.sourceKind)}</p>

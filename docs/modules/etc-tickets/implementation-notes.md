@@ -28,6 +28,15 @@
 
 ## 历史记录
 
+## 2026-07-18 - ETC 窄读、三 bucket 与 OA 草稿可恢复闭环
+
+- 目标：移除 ETC 页面 full task/重复 detail 热路径，解决提交按钮无解释禁用和永久 creating，形成“未提交 -> 暂存 -> 已提交/退回未提交”的高性能闭环。
+- 影响范围：ETC business batch state store/repository/application service、页面/API mapper、OA draft command、ETC Page Audit、模块/API/运维文档和定向测试；不新增 read model、cache、worker、migration 或跨页面 I/O。
+- 关键决策：summary list 直接走 PostgreSQL 窄查询，选中 batch 后只读一次精确 detail/task；`oa_confirmation_pending` 是唯一暂存事实；OA command 使用 durable prepare、锁外 HTTP、CAS finalize 和管理员 evidence recovery；not-submitted 保留业务成员与核对数据但释放 OA 占用。
+- 旧链删除：删除页面 full task list、双 selection owner、duplicate detail effect、task-row/task-delete 私有 UI/CSS 和旧 mocks；保留正式 reconciliation/import/source-file 后端 API。static guard 禁止旧首屏 consumer、task delete UI和全量 hydrate/object-store probe 回到热路径。
+- Audit：新增 15 分钟 creating stale、attempt 缺失、pending draft 缺失、三 bucket/active-key 错配、submitted/not-submitted 占用闭合检查；仍只承诺只读 PostgreSQL snapshot，不伪装 OA 外部状态已被证明。
+- 未测风险：真实 OA、对象存储、生产数据量下延迟和当前历史 creating 批次恢复必须留到统一部署后的受控验证门；本次不部署、不写生产。
+
 ## 2026-07-18 - ETC 高性能三 bucket 实施前证据门
 
 - 目标：在改写页面读链和 OA 草稿命令前，锁定正式 consumer、旧链删除边界、外部 OA 能力和生产只读基线。

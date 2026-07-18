@@ -3947,9 +3947,32 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "selectedTaskId",
             "selectedTaskImportBatchId",
             "selectedTaskImportBatchCanSubmit",
+            "deleteEtcReconciliationTask",
+            'kind: "task"',
         )
 
         self.assertEqual([marker for marker in forbidden_markers if marker in page_source], [])
+
+    def test_etc_business_batch_reads_stay_on_narrow_repository_contracts(self) -> None:
+        repository_path = SERVICES_ROOT / "postgres_repositories" / "ops_tax_etc.py"
+        repository_source = repository_path.read_text(encoding="utf-8")
+        repository_tree = _parse(repository_path)
+        application_path = SERVICES_ROOT / "etc_business_batch_application_service.py"
+        application_source = application_path.read_text(encoding="utf-8")
+        application_tree = _parse(application_path)
+        narrow_sources = [
+            _function_source(repository_tree, repository_source, "list_etc_business_batch_summaries"),
+            _function_source(repository_tree, repository_source, "get_etc_business_batch_record"),
+            _function_source(application_tree, application_source, "list_batches_payload"),
+            _function_source(application_tree, application_source, "detail_payload"),
+        ]
+        forbidden_markers = ("load_etc_state", "load_etc_reconciliation_state", "_stored_invoice_file_exists")
+
+        self.assertTrue(all(narrow_sources))
+        self.assertEqual(
+            [marker for source in narrow_sources for marker in forbidden_markers if marker in source],
+            [],
+        )
 
     def test_web_etc_test_mock_does_not_reintroduce_legacy_etc_routes(self) -> None:
         mock_source = (REPO_ROOT / "web" / "src" / "test" / "apiMock.ts").read_text(encoding="utf-8")

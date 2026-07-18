@@ -6,16 +6,19 @@
 ## 业务状态
 
 - 当前状态：
-  - `draft/imported`：ETC 发票已导入，业务批次仍在未提交链路。
-  - `oa_draft_created`：OA 草稿已创建，等待用户人工确认。
-  - `submitted_confirmed`：用户确认 OA 已提交，业务批次进入已提交口径，绑定的 ETC 对账任务同步闭环。
+  - `draft/.../imported/oa_draft_failed/not_submitted`：业务批次属于“未提交”。
+  - `oa_draft_creating`：内部短暂操作态，仍显示在未提交；prepare 已持久化，OA I/O 在业务锁外执行。超过 15 分钟由 Audit 报 recovery required，不自动重试。
+  - `oa_confirmation_pending`：OA 草稿 ID/URL 已持久化，唯一“暂存”状态，等待用户人工确认。
+  - `oa_submitted/manually_marked_submitted/closed`：用户确认 OA 已提交，业务批次进入“已提交”，绑定的 ETC 对账任务同步闭环。
   - `not_submitted`：用户确认 OA 未提交，释放本地 ETC 发票占用并回到未提交链路。
-  - `deleted`：用户可见业务批次被删除。删除来源可以是业务批次行或绑定的 ETC 对账任务行；删除只清理本地批次/导入事实，真实 OA 草稿和 OA 流程不删除。
+  - `deleted`：用户可见业务批次被删除。页面只从业务批次行发起删除；后端绑定 task 删除 API 仍作为正式 workflow/运维合同。删除只清理本地批次/导入事实，真实 OA 草稿和 OA 流程不删除。
 - 状态事实源：`etc_business_batches` 业务批次、绑定的 ETC 对账任务状态、ETC 提交批次及审计事件。
 - 允许流转：
   - 导入确认后创建或更新同一个业务批次，不在前端拆成“导入任务”和“对账任务”两个用户可见任务。
   - 用户点击“新建批次”时，由 `POST /api/etc/business-batches` 闭环编排创建 reconciliation task 和 active business batch，并返回统一业务批次 payload；前端不得先创建空 task 再把 task 当作批次显示。
   - 未提交业务批次允许通过 `PATCH /api/etc/business-batches/{id}` 修改 `title`，必须带 `expectedVersion` 防并发覆盖；标题更新写入业务批次审计，并同步 linked reconciliation task title。
+  - 创建 OA 草稿必须按 `prepare -> execute external -> finalize` 执行并使用稳定 `idempotencyKey`；外部 I/O 不得持 ETC 业务锁。明确失败进入 `oa_draft_failed`；结果未知保持 creating 并禁止盲重试，管理员核实 OA 后才能恢复。
+  - 暂存批次选择“我已创建 OA”进入已提交；选择“我没有创建 OA/需要修改”进入 `not_submitted`，清空 submission/draft 占用但保留批次、发票成员、源文件和核对数据。
   - 创建 OA 草稿后只能由 `manual-oa-status` 人工确认 `submitted` 或 `not_submitted`。
   - OA 草稿创建成功后允许只读下载当前 business batch 关联的 ETC 发票合并 PDF；下载不改变批次状态。`invoice_ids` 决定成员，稳定排序后每张发票必须恰好贡献一页，任一来源异常时整包失败。
   - `submitted` 成功后，关联台 open 区生成一条 `source_kind=etc_invoice_summary` 折叠汇总发票行，金额取业务批次上报金额，等待未来 OA 和银行流水进入后普通配对。
@@ -36,7 +39,7 @@
 - loading：页面加载业务批次、导入/草稿/人工确认或合并下载动作执行中时显示按钮级 loading，不展示后台英文状态码作为主文案。
 - empty：未提交或已提交 tab 下无批次时只显示该 bucket 的空态；一个业务批次在前端只出现一次。
 - initial load：页面进入和刷新只能读取已有业务批次/对账任务，不得自动创建空 ETC 对账任务；新建批次只能由用户点击“新建批次”触发。
-- batch list：左侧批次列表和 tab 计数只使用 `/api/etc/business-batches*` 事实；页面不再提供月份选择器，默认展示全部用户可见批次并只分“未提交/已提交”两个 bucket；task-only active task 只允许出现在 workflow 内部状态或异常恢复入口，不得混入批次列表。
+- batch list：左侧批次列表和 tab 计数只使用 `/api/etc/business-batches*` 的窄 summary 事实；页面不再提供月份选择器，默认展示全部用户可见批次并分“未提交/暂存/已提交”三个互斥 bucket；task-only active task 只允许出现在 workflow 内部状态或异常恢复入口，不得混入批次列表。
 - title editing：未提交 business batch 行的标题可点击内联编辑，Enter 或失焦保存，Esc 取消；保存失败保留错误提示，不伪装为已保存。已提交 bucket 不展示标题编辑入口。
 - error：导入、创建草稿、人工确认、删除失败时显示本地化业务错误；内部对象 id、文件 id、旧检测码不作为主要用户文案。
 - upload/delete conflict：上传仍在解析时若来源被并发删除，页面接收 HTTP 409 和“源文件在解析完成前已被删除，请重新上传”，不得显示上传成功；刷新后“已上传文件”和解析明细必须由同一组 source `file_id` 派生。

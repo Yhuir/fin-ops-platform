@@ -10,6 +10,7 @@
 - 如果 Mongo 支持 partial unique index，检查 `unique(task_id, active=true)` 已存在；如果不支持，检查 `task_active_key` 唯一索引已存在，且非 active 批次不会保留该 key。
 - 生产部署不得使用本地 state 文件模式承载该功能；如启动参数声明 `FINOPS_STORAGE_MODE=local_state`，只能用于单进程本地开发。
 - ETC 专用 OA 自动检测链路已移除；ETC 页面创建 OA 草稿后由用户手动确认“已提交”或“未提交”。
+- OA 草稿创建请求必须携带稳定 idempotency key；外部 OA I/O 不得持 ETC 业务锁。发布前确认管理员 recovery route 受权限保护，禁止对未知结果直接重试或手工 SQL 改状态。
 - 后端不得提供 ETC `oa-status/refresh` 入口，不得注册 ETC OA 检测 worker，不得在创建 OA 草稿或应用启动恢复时自动为 ETC 业务批次入队 `etc_business.oa_detection.refresh`。
 - 如果旧生产环境曾启用 `fin-ops-worker@etc-business-oa-detection.service`，发布后必须一次性 `disable --now` 该 unit；仓库部署样例不再包含 `etc-business-oa-detection` worker 或 `etc_business.oa_detection.refresh` dispatcher 事件。
 - 对象存储配置必须可供 PostgreSQL 文件写入链路识别 backend 和 bucket；上传信用卡账单、票根网文件和业务批次源文件前，先确认对象存储健康检查、bucket 权限和服务环境变量一致。
@@ -51,6 +52,7 @@ dry-run 报告保存到部署日志或 `docs/operations/` 下的发布记录。�
 - `GET /health` 返回健康。
 - `GET /api/session/me` 返回 JSON，不返回 HTML。
 - `GET /api/etc/business-batches` 返回 JSON envelope；无权限时返回结构化 403 JSON。
+- 分别请求 `bucket=unsubmitted|staged|submitted`，确认三组互斥且 `counts` 与筛选后的实际集合一致；首屏不得再请求 full `GET /api/etc/reconciliation-tasks`，选择一个批次只读取一次精确 detail。
 - `GET /api/etc/reconciliation-tasks` 与 `GET /api/etc/reconciliation-tasks/ready-for-import` 均返回 JSON，不得因历史任务和新任务混合排序返回 500；新建 business batch 后必须同时能读取单 task、任务列表和 ready task 列表。
 - `POST /api/etc/business-batches` 可省略 `taskId`，成功响应必须返回已绑定 `taskId` 和 `title` 的 business batch；随后 `GET /api/etc/business-batches?status=active` 能看到该批次，且 `/api/etc/reconciliation-tasks` 中的 task-only 记录不得额外混入 ETC 左侧批次列表。
 - `POST /api/etc/business-batches`、`PATCH /api/etc/business-batches/{id}`、`POST /api/etc/business-batches/{id}/etc-import/preview`、`POST /api/etc/business-batches/{id}/etc-import/confirm`、`POST /api/etc/business-batches/{id}/manual-oa-status` 和 `DELETE /api/etc/business-batches/{id}` 的代理路径都命中后端。
@@ -58,6 +60,7 @@ dry-run 报告保存到部署日志或 `docs/operations/` 下的发布记录。�
 - Nginx `/api/` 与 `/fin-ops-api/` 下的 GET、POST、DELETE 都不返回 HTML 502、官网 HTML 或 React shell。
 - 旧 `/api/etc/batches` 和 `/api/etc/invoices/revoke-submitted` 已删除；任何探针、脚本或前端回滚都不得依赖这些兼容/回退入口。
 - 生产日志可按 `requestId`、`businessBatchId`、`taskId`、`externalEtcBatchId` 和 `oaRowId` 检索。
+- 运行 ETC Page Audit：超过 15 分钟的 `oa_draft_creating`、缺 submission/idempotency/prepared audit、pending 缺 draft ID/URL/submission、bucket 错配或 not-submitted 仍占用提交资源时必须失败；Audit 只证明 PostgreSQL 内部事实，不证明 OA 外部真实状态。
 
 可用 curl 检查响应类型：
 
@@ -87,6 +90,12 @@ JSON API 响应 `Content-Type` 必须是 JSON 类型；`invoice-pdf` 必须是 `
 - 后端不保留 ETC 专用检测 refresh、worker 或 detector adapter；排查时不得再通过检测接口推进 ETC 业务批次。
 
 运维排查时优先按 `businessBatchId` 查业务批次状态、审计事件、提交批次和 manual status API `requestId`。
+
+若批次长期停在 `oa_draft_creating`，先在 OA 侧按业务标识人工核实，禁止重新点击创建或直接改回 imported：
+
+- 已存在唯一草稿：管理员调用 `POST /api/etc/business-batches/{id}/oa-draft/recover`，提供当前版本、原因、核实证据、完整 draft ID/URL。
+- 已确认未创建：同一管理员入口提供当前版本、原因、核实证据和 `confirmedNotCreated=true`，批次进入明确失败后才允许新的用户 intent。
+- 无法确认：保持 creating，Audit 继续失败并升级给 OA owner；不得用猜测结果换取绿色状态。
 
 ## 业务批次本地删除
 
