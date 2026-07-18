@@ -838,6 +838,53 @@ class EtcServiceTests(unittest.TestCase):
             self.assertEqual(completed.submission_batch_id, submission_batch_id)
             self.assertEqual(len(service.list_batches()), 1)
 
+    def test_legacy_creating_batch_without_attempt_can_only_recover_as_not_created(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            store = MemoryEtcStateStore(data_dir)
+            service = EtcService(data_dir=data_dir, state_store=store)
+            batch = service.create_business_batch(task_id="ETC-TASK-LEGACY-RECOVERY")
+            legacy_batch = service._business_batches[batch.business_batch_id]
+            legacy_batch.status = EtcBusinessBatchStatus.OA_DRAFT_CREATING.value
+            legacy_batch.version = 2
+            legacy_batch.submission_batch_id = None
+            legacy_batch.external_etc_batch_id = None
+            service._persist()
+
+            reloaded = EtcService(data_dir=data_dir, state_store=store)
+            with self.assertRaises(EtcBusinessBatchInvalidTransitionError) as adoption_error:
+                reloaded.recover_business_batch_oa_draft(
+                    batch.business_batch_id,
+                    expected_version=2,
+                    reason="管理员核实历史请求",
+                    evidence="OA 主集合按业务批次标记查询为零",
+                    oa_draft_id="unexpected-draft",
+                    oa_draft_url="https://oa.test/unexpected-draft",
+                    confirmed_not_created=False,
+                )
+            self.assertEqual(adoption_error.exception.code, "oa_draft_attempt_missing")
+
+            recovered = reloaded.recover_business_batch_oa_draft(
+                batch.business_batch_id,
+                expected_version=2,
+                reason="管理员核实历史请求",
+                evidence="OA 主集合按业务批次标记查询为零",
+                oa_draft_id=None,
+                oa_draft_url=None,
+                confirmed_not_created=True,
+            )
+
+            self.assertEqual(recovered.status, EtcBusinessBatchStatus.OA_DRAFT_FAILED.value)
+            self.assertEqual(recovered.version, 3)
+            self.assertIsNone(recovered.submission_batch_id)
+            self.assertEqual(
+                recovered.audit_events[-1]["event_type"],
+                "oa_draft_recovery_confirmed_not_created",
+            )
+            persisted = EtcService(data_dir=data_dir, state_store=store).get_business_batch(batch.business_batch_id)
+            self.assertEqual(persisted.status, EtcBusinessBatchStatus.OA_DRAFT_FAILED.value)
+            self.assertEqual(persisted.version, 3)
+
     def test_business_batch_oa_http_call_does_not_hold_business_lock(self) -> None:
         with TemporaryDirectory() as temp_dir:
             client = BlockingEtcOAClient()

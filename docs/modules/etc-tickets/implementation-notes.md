@@ -28,6 +28,16 @@
 
 ## 历史记录
 
+## 2026-07-18 - 生产 legacy creating 批次权威恢复
+
+- 目标：让首次部署验收发现的历史 `oa_draft_creating`、缺 prepared submission/attempt 批次在核实 OA 未创建后安全回到未提交 bucket，并消除 Page Audit 阻断。
+- 影响范围：ETC domain recovery、既有 target-scoped CAS 持久化和定向测试；不改成功 DTO、普通用户页面、OA 创建请求、其它页面、read model 或 worker。
+- 权威证据：OA `FormDataController` 对 `isDraft=true` 直接把原始 `data.cause` 保存到 `form_data_db.form_data`；该历史版本已在 cause 写入唯一 `business_batch_id`。生产 OA 主集合按 form 2 + 唯一 marker 查询为 0，因此本批次可确认“未创建”，不是依据 FinOps 本地空字段猜测。
+- 关键决策：legacy missing-attempt 分支仅允许管理员携带 reason/evidence 并选择 `confirmedNotCreated=true`；禁止采纳 draft ID/URL，也不创建伪 submission。恢复只把目标 batch CAS 到 `oa_draft_failed`（属于未提交 bucket）并写审计事件，保留业务批次、64 张发票、来源文件和核对数据。
+- 文档影响：同步收紧 boundary I/O、状态机和测试矩阵；三 bucket 产品口径不变。
+- 测试覆盖：新增跨 store reload 的 legacy fixture，证明草稿采纳被拒绝、确认未创建成功、version/audit 持久化；既有完整 attempt unknown-outcome 恢复/重试继续通过。
+- 未测风险：提交前本机没有 disposable PostgreSQL；真实 target CAS、恢复后 bucket、Audit 和性能由同一 SHA 的生产受控恢复复验补齐。
+
 ## 2026-07-18 - 生产 ETC bucket 查询参数类型修复
 
 - 目标：修复 Phase 12 首次生产发布后 `/api/etc/business-batches` 三个 bucket 均因 PostgreSQL 无法推断空筛选参数类型而返回 `500`。

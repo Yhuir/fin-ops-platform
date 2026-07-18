@@ -1275,11 +1275,8 @@ class EtcService:
         with self._business_batch_lock:
             batch = self._get_business_batch_mutable(business_batch_id)
             self._assert_business_batch_version(batch, expected_version)
-            if batch.status != EtcBusinessBatchStatus.OA_DRAFT_CREATING.value or not batch.submission_batch_id:
+            if batch.status != EtcBusinessBatchStatus.OA_DRAFT_CREATING.value:
                 raise EtcBusinessBatchInvalidTransitionError("current batch has no recoverable OA draft attempt.", code="oa_draft_not_recoverable")
-            submission_batch = self._batches.get(batch.submission_batch_id)
-            if submission_batch is None:
-                raise EtcBusinessBatchInvalidTransitionError("prepared submission batch is missing.", code="oa_draft_attempt_missing")
             normalized_draft_id = str(oa_draft_id or "").strip()
             normalized_draft_url = str(oa_draft_url or "").strip()
             if confirmed_not_created == bool(normalized_draft_id or normalized_draft_url):
@@ -1287,6 +1284,30 @@ class EtcService:
                     "recovery must either adopt one OA draft or confirm no draft was created.",
                     code="invalid_oa_draft_recovery_decision",
                 )
+            if not batch.submission_batch_id:
+                if not confirmed_not_created:
+                    raise EtcBusinessBatchInvalidTransitionError(
+                        "prepared submission batch is missing; an OA draft cannot be adopted.",
+                        code="oa_draft_attempt_missing",
+                    )
+                before_status = batch.status
+                batch.status = EtcBusinessBatchStatus.OA_DRAFT_FAILED.value
+                self._bump_business_batch_version(
+                    batch,
+                    event_type="oa_draft_recovery_confirmed_not_created",
+                    before_status=before_status,
+                    after_status=batch.status,
+                    reason=f"{normalized_reason}；核实证据：{normalized_evidence}",
+                )
+                self._persist_oa_draft_attempt(
+                    batch,
+                    None,
+                    expected_version=expected_version,
+                )
+                return self._copy_business_batch(batch)
+            submission_batch = self._batches.get(batch.submission_batch_id)
+            if submission_batch is None:
+                raise EtcBusinessBatchInvalidTransitionError("prepared submission batch is missing.", code="oa_draft_attempt_missing")
             before_status = batch.status
             if confirmed_not_created:
                 submission_batch.status = EtcBatchStatus.FAILED.value
@@ -2628,7 +2649,7 @@ class EtcService:
     def _persist_oa_draft_attempt(
         self,
         batch: EtcBusinessBatch,
-        submission_batch: EtcBatch,
+        submission_batch: EtcBatch | None,
         *,
         expected_version: int,
         include_invoices: bool = False,
@@ -2644,9 +2665,13 @@ class EtcService:
             "business_batch_counter": self._business_batch_counter,
             "batch_day_counters": deepcopy(self._batch_day_counters),
             "business_batches": {batch.business_batch_id: deepcopy(batch)},
-            "batches": {submission_batch.id: deepcopy(submission_batch)},
+            "batches": (
+                {submission_batch.id: deepcopy(submission_batch)}
+                if submission_batch is not None
+                else {}
+            ),
         }
-        if include_invoices:
+        if include_invoices and submission_batch is not None:
             snapshot["invoices"] = {
                 invoice_id: deepcopy(self._invoices[invoice_id])
                 for invoice_id in submission_batch.invoice_ids

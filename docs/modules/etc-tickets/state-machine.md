@@ -18,6 +18,7 @@
   - 用户点击“新建批次”时，由 `POST /api/etc/business-batches` 闭环编排创建 reconciliation task 和 active business batch，并返回统一业务批次 payload；前端不得先创建空 task 再把 task 当作批次显示。
   - 未提交业务批次允许通过 `PATCH /api/etc/business-batches/{id}` 修改 `title`，必须带 `expectedVersion` 防并发覆盖；标题更新写入业务批次审计，并同步 linked reconciliation task title。
   - 创建 OA 草稿必须按 `prepare -> execute external -> finalize` 执行并使用稳定 `idempotencyKey`；外部 I/O 不得持 ETC 业务锁。明确失败进入 `oa_draft_failed`；结果未知保持 creating 并禁止盲重试，管理员核实 OA 后才能恢复。
+  - 历史 `oa_draft_creating` 若缺 prepared submission/attempt，不允许采纳任何草稿 ID/URL；只有管理员提供权威 OA 主事实查询为零的 reason/evidence 后，才可将目标批次 CAS 为 `oa_draft_failed` 并回到未提交 bucket。不得补造 submission 或根据本地空字段自动恢复。
   - prepare/finalize/recovery 的 durable write 必须以目标 business batch 当前 version 为 CAS 前置条件，并只写当前 attempt 拥有的 business batch、submission batch 及确实发生变化的 invoice/import rows；不能回写全量旧 snapshot。business batch 已进入 `oa_confirmation_pending`、但 linked task OA 元数据写入失败时，相同 idempotency key 或相同 recovery 证据只执行修复写，禁止第二次调用 OA。
   - 暂存批次选择“我已创建 OA”进入已提交；选择“我没有创建 OA/需要修改”进入 `not_submitted`，清空 submission/draft 占用但保留批次、发票成员、源文件和核对数据。
   - 创建 OA 草稿后只能由 `manual-oa-status` 人工确认 `submitted` 或 `not_submitted`。
