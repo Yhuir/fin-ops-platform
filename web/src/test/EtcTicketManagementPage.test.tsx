@@ -72,6 +72,27 @@ function businessBatchFixture(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function mockSelectedBusinessBatchTask(taskId: string) {
+  const batch = businessBatchFixture({
+    businessBatchId: "etc-batch-unsubmitted-01",
+    taskId,
+    title: "3月批次",
+    status: "imported",
+    submissionBatchId: "",
+    oaDraftId: "",
+    oaDraftUrl: "",
+  });
+  vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockResolvedValue({
+    counts: { unsubmitted: 1, staged: 0, submitted: 0 },
+    items: [batch],
+    pagination: { page: 1, pageSize: 100, total: 1 },
+  } as never);
+  vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockResolvedValue({
+    ...batch,
+    invoiceItems: [],
+  } as never);
+}
+
 function mockFetchEtcInvoices(items: unknown[] = []) {
   return vi.spyOn(etcApi, "fetchEtcInvoices").mockResolvedValue({
     counts: { unsubmitted: items.length, submitted: 0 },
@@ -804,6 +825,93 @@ describe("ETC ticket management page", () => {
 
     await act(async () => {
       resolveDetailB({ ...batchB, invoiceItems: [] });
+      resolveTaskB({
+        taskId: batchB.taskId,
+        status: "reviewing",
+        version: 1,
+        creditCardItems: [],
+        ticketRootItems: [],
+        supplementEvidences: [],
+        reconciledItems: [],
+        sourceFiles: [],
+        parseIssues: [],
+      });
+    });
+  });
+
+  test("invalidates the old task when an asynchronous filtered list automatically selects another batch", async () => {
+    expect(readWebSource("src/pages/EtcTicketManagementPage.tsx")).toContain(
+      "selectedTask?.taskId === selectedBusinessBatchTaskId",
+    );
+    const user = userEvent.setup();
+    installMockApiFetch();
+    const batchA = businessBatchFixture({
+      businessBatchId: "etc-business-filter-a",
+      taskId: "etc-recon-filter-a",
+      status: "imported",
+      submissionBatchId: "",
+      oaDraftId: "",
+      oaDraftUrl: "",
+    });
+    const batchB = businessBatchFixture({
+      businessBatchId: "etc-business-filter-b",
+      taskId: "etc-recon-filter-b",
+      status: "imported",
+      submissionBatchId: "",
+      oaDraftId: "",
+      oaDraftUrl: "",
+    });
+    let resolveFilteredList!: (value: unknown) => void;
+    let resolveTaskB!: (value: unknown) => void;
+    vi.spyOn(etcApi, "fetchEtcBusinessBatches").mockImplementation((query = {}) => (
+      query.keyword
+        ? new Promise((resolvePromise) => { resolveFilteredList = resolvePromise; })
+        : Promise.resolve({
+          counts: { unsubmitted: 1, staged: 0, submitted: 0 },
+          items: [batchA],
+          pagination: { page: 1, pageSize: 100, total: 1 },
+        })
+    ) as never);
+    vi.spyOn(etcApi, "fetchEtcBusinessBatchDetail").mockImplementation((batchId) => Promise.resolve({
+      ...(batchId === batchB.businessBatchId ? batchB : batchA),
+      invoiceItems: [],
+    } as never));
+    vi.spyOn(etcApi, "fetchEtcReconciliationTask").mockImplementation((taskId) => (
+      taskId === batchB.taskId
+        ? new Promise((resolvePromise) => { resolveTaskB = resolvePromise; })
+        : Promise.resolve({
+          taskId: batchA.taskId,
+          status: "reviewing",
+          version: 3,
+          creditCardItems: [],
+          ticketRootItems: [],
+          supplementEvidences: [],
+          reconciledItems: [],
+          sourceFiles: [],
+          parseIssues: [],
+        })
+    ) as never);
+    const upload = vi.spyOn(etcApi, "uploadEtcCreditCardStatement");
+
+    renderAppAt("/etc-tickets");
+
+    const page = await screen.findByTestId("etc-ticket-management-page");
+    expect(await within(page).findByLabelText("上传信用卡账单")).toBeInTheDocument();
+    await user.type(within(page).getByLabelText("关键词"), "B");
+    await act(async () => {
+      resolveFilteredList({
+        counts: { unsubmitted: 1, staged: 0, submitted: 0 },
+        items: [batchB],
+        pagination: { page: 1, pageSize: 100, total: 1 },
+      });
+    });
+
+    const rowB = await within(page).findByTestId("etc-batch-row-etc-business-filter-b");
+    expect(within(rowB).getByRole("button", { name: /查看批次/ })).toHaveAttribute("aria-current", "true");
+    expect(within(page).queryByLabelText("上传信用卡账单")).not.toBeInTheDocument();
+    expect(upload).not.toHaveBeenCalled();
+
+    await act(async () => {
       resolveTaskB({
         taskId: batchB.taskId,
         status: "reviewing",
@@ -1726,6 +1834,7 @@ describe("ETC ticket management page", () => {
   test("uploads a supplement from an unmatched card row with a delta note", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
+    mockSelectedBusinessBatchTask("etc-recon-row-supplement-001");
     const initialTask = {
       taskId: "etc-recon-row-supplement-001",
       status: "reviewing",
@@ -1847,6 +1956,7 @@ describe("ETC ticket management page", () => {
   test("keeps the supplement upload dialog open when supplement upload fails", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
+    mockSelectedBusinessBatchTask("etc-recon-supplement-fail-001");
     const initialTask = {
       taskId: "etc-recon-supplement-fail-001",
       status: "reviewing",
@@ -2219,6 +2329,7 @@ describe("ETC ticket management page", () => {
   test("blocks source file deletion when the latest task no longer contains that file", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
+    mockSelectedBusinessBatchTask("etc-recon-task-source-stale-001");
     const taskWithSourceFile = {
       taskId: "etc-recon-task-source-stale-001",
       status: "reviewing",
@@ -2284,6 +2395,7 @@ describe("ETC ticket management page", () => {
   test("can retry source file deletion after a transient failure", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
+    mockSelectedBusinessBatchTask("etc-recon-task-source-retry-001");
     const taskWithSourceFile = {
       taskId: "etc-recon-task-source-retry-001",
       status: "reviewing",
@@ -2970,6 +3082,7 @@ describe("ETC ticket management page", () => {
   test("surfaces reopen errors and keeps a ready task ready for retry", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
+    mockSelectedBusinessBatchTask("etc-recon-ready-reopen-001");
     const readyTask = {
       taskId: "etc-recon-ready-reopen-001",
       status: "ready_for_import",
@@ -3020,6 +3133,7 @@ describe("ETC ticket management page", () => {
   test("reopens a ready reconciliation task and returns it to reviewing", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
+    mockSelectedBusinessBatchTask("etc-recon-ready-reopen-success-001");
     const readyTask = {
       taskId: "etc-recon-ready-reopen-success-001",
       status: "ready_for_import",
@@ -3148,6 +3262,7 @@ describe("ETC ticket management page", () => {
   test("refreshes reconciliation matches from the task API and rerenders explicit links", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
+    mockSelectedBusinessBatchTask("etc-recon-refresh-001");
     const baseFetch = fetchMock.getMockImplementation();
     const initialTask = {
       taskId: "etc-recon-refresh-001",

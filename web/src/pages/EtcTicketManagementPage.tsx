@@ -817,6 +817,8 @@ export default function EtcTicketManagementPage() {
   const refreshedImportJobIdsRef = useRef<Set<string>>(new Set());
   const oaDraftIntentRef = useRef<{ businessBatchId: string; idempotencyKey: string } | null>(null);
   const titleEditCancelRef = useRef(false);
+  const selectedBatchIdRef = useRef(selectedBatchId);
+  selectedBatchIdRef.current = selectedBatchId;
   const selectedBusinessBatchTaskId = businessBatches.find(
     (batch) => batch.businessBatchId === selectedBatchId,
   )?.taskId ?? "";
@@ -840,12 +842,17 @@ export default function EtcTicketManagementPage() {
       const visibleItems = payload.items.map(businessBatchToBatchSummary);
       setCounts(payload.counts);
       setBatches(visibleItems);
-      setSelectedBatchId((current) => {
-        if (payload.items.some((batch) => batch.businessBatchId === current)) {
-          return current;
-        }
-        return payload.items[0]?.businessBatchId ?? "";
-      });
+      const currentSelection = selectedBatchIdRef.current;
+      const nextSelection = payload.items.some((batch) => batch.businessBatchId === currentSelection)
+        ? currentSelection
+        : payload.items[0]?.businessBatchId ?? "";
+      if (nextSelection !== currentSelection) {
+        setSelectedTask(null);
+        setTaskListError(null);
+        setTaskLoading(Boolean(nextSelection));
+      }
+      selectedBatchIdRef.current = nextSelection;
+      setSelectedBatchId(nextSelection);
     } catch (caught) {
       if (!(caught instanceof DOMException && caught.name === "AbortError")) {
         setBatchListError(formatEtcUiErrorMessage(caught, "ETC业务批次加载失败。"));
@@ -1257,7 +1264,9 @@ export default function EtcTicketManagementPage() {
     }
     return currentBusinessBatch;
   }, [currentBusinessBatch, draftResult]);
-  const taskMutationTarget = !taskLoading ? selectedTask : null;
+  const taskMutationTarget = selectedTask?.taskId === selectedBusinessBatchTaskId && !taskLoading
+    ? selectedTask
+    : null;
   const taskIsMutable = Boolean(canMutateData && taskMutationTarget && ["draft", "reviewing"].includes(taskMutationTarget.status));
   const canConfirmSelectedTask = taskIsMutable && selectedConfirmedCreditCardItemIds.length > 0;
   const selectedCardItem = useMemo(
@@ -2185,6 +2194,7 @@ export default function EtcTicketManagementPage() {
                     setSelectedTask(null);
                     setTaskListError(null);
                     setTaskLoading(true);
+                    selectedBatchIdRef.current = batch.id;
                     setSelectedBatchId(batch.id);
                   };
                   return (
