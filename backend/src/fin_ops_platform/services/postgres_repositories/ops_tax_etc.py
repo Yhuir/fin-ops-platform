@@ -1081,6 +1081,25 @@ class PostgresOpsTaxEtcRepository:
 
         run_in_transaction(self._connection, write)
 
+    def save_etc_oa_draft_attempt(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        business_batch_id: str,
+        expected_version: int,
+    ) -> bool:
+        def write(connection: Any) -> bool:
+            row = connection.fetch_one(
+                "select version from app.etc_business_batches where business_batch_id = %s for update",
+                (business_batch_id,),
+            )
+            if int_value(row.get("version") if isinstance(row, dict) else None, 0) != int(expected_version):
+                return False
+            PostgresOpsTaxEtcRepository(connection).save_etc_state(snapshot)
+            return True
+
+        return run_in_transaction(self._connection, write)
+
     @staticmethod
     def _etc_business_batch_scope_month(
         payload: dict[str, Any],

@@ -271,6 +271,15 @@ class EtcBusinessBatchApplicationService:
     ) -> dict[str, object]:
         current = self._scoped_batch(business_batch_id, actor)
         reconciliation_task = self._get_reconciliation_task(current.task_id)
+        normalized_key = str(idempotency_key or "").strip()
+        if (
+            current.status == EtcBusinessBatchStatus.OA_CONFIRMATION_PENDING.value
+            and str(current.oa_draft_idempotency_key or "").strip() == normalized_key
+        ):
+            self._assert_reconciliation_task_allows_oa_draft(reconciliation_task)
+            self._ensure_reconciliation_task_oa_draft_metadata(current, reconciliation_task, actor=actor)
+            self._link_existing_canonical_invoices(current, "etc_business_oa_draft_created")
+            return {"businessBatch": self.business_batch_payload(current)}
         reconciliation_task = self._ensure_reconciliation_task_imported_for_batch(
             current,
             reconciliation_task,
@@ -288,13 +297,7 @@ class EtcBusinessBatchApplicationService:
             oa_client=oa_client,
             reconciliation_task=reconciliation_task,
         )
-        if reconciliation_task is not None and batch.submission_batch_id and batch.external_etc_batch_id:
-            self._reconciliation_task_service.record_oa_draft_created(
-                task_id=str(getattr(reconciliation_task, "task_id")),
-                oa_draft_batch_id=batch.submission_batch_id,
-                etc_batch_id=batch.external_etc_batch_id,
-                actor=actor.actor_id,
-            )
+        self._ensure_reconciliation_task_oa_draft_metadata(batch, reconciliation_task, actor=actor)
         self._link_existing_canonical_invoices(batch, "etc_business_oa_draft_created")
         return {"businessBatch": self.business_batch_payload(batch)}
 
@@ -315,6 +318,17 @@ class EtcBusinessBatchApplicationService:
         current = self._scoped_batch(business_batch_id, actor)
         if expected_version is None:
             raise EtcBusinessBatchInvalidTransitionError("expectedVersion is required.", code="expected_version_required")
+        if current.status == EtcBusinessBatchStatus.OA_CONFIRMATION_PENDING.value:
+            if confirmed_not_created or str(oa_draft_id or "").strip() != str(current.oa_draft_id or "").strip() or str(
+                oa_draft_url or ""
+            ).strip() != str(current.oa_draft_url or "").strip():
+                raise EtcBusinessBatchInvalidTransitionError(
+                    "恢复结果与已持久化的 OA 草稿不一致。",
+                    code="oa_draft_recovery_conflict",
+                )
+            reconciliation_task = self._get_reconciliation_task(current.task_id)
+            self._ensure_reconciliation_task_oa_draft_metadata(current, reconciliation_task, actor=actor)
+            return {"businessBatch": self.business_batch_payload(current)}
         batch = self._etc_service.recover_business_batch_oa_draft(
             business_batch_id,
             expected_version=expected_version,
@@ -326,14 +340,46 @@ class EtcBusinessBatchApplicationService:
         )
         if batch.status == EtcBusinessBatchStatus.OA_CONFIRMATION_PENDING.value and batch.submission_batch_id and batch.external_etc_batch_id:
             reconciliation_task = self._get_reconciliation_task(current.task_id)
-            if reconciliation_task is not None:
-                self._reconciliation_task_service.record_oa_draft_created(
-                    task_id=str(getattr(reconciliation_task, "task_id")),
-                    oa_draft_batch_id=batch.submission_batch_id,
-                    etc_batch_id=batch.external_etc_batch_id,
-                    actor=actor.actor_id,
-                )
+            self._ensure_reconciliation_task_oa_draft_metadata(batch, reconciliation_task, actor=actor)
         return {"businessBatch": self.business_batch_payload(batch)}
+
+    def _ensure_reconciliation_task_oa_draft_metadata(
+        self,
+        batch: EtcBusinessBatch,
+        reconciliation_task: object | None,
+        *,
+        actor: EtcBusinessBatchActor,
+    ) -> None:
+        self._assert_reconciliation_task_allows_oa_draft(reconciliation_task)
+        assert reconciliation_task is not None
+        expected = (
+            str(batch.submission_batch_id or "").strip(),
+            str(batch.external_etc_batch_id or "").strip(),
+            "draft_created",
+        )
+        if not expected[0] or not expected[1]:
+            raise EtcBusinessBatchInvalidTransitionError(
+                "OA 草稿批次元数据不完整。",
+                code="oa_draft_attempt_missing",
+            )
+        actual = (
+            str(getattr(reconciliation_task, "oa_draft_batch_id", "") or "").strip(),
+            str(getattr(reconciliation_task, "etc_batch_id", "") or "").strip(),
+            str(getattr(reconciliation_task, "oa_draft_status", "") or "").strip(),
+        )
+        if actual == expected:
+            return
+        if actual[0] or actual[2]:
+            raise EtcBusinessBatchInvalidTransitionError(
+                "ETC 对账任务已绑定到其它 OA 草稿。",
+                code="reconciliation_task_oa_draft_conflict",
+            )
+        self._reconciliation_task_service.record_oa_draft_created(
+            task_id=str(getattr(reconciliation_task, "task_id")),
+            oa_draft_batch_id=expected[0],
+            etc_batch_id=expected[1],
+            actor=actor.actor_id,
+        )
 
     def revoke_oa_draft_payload(
         self,

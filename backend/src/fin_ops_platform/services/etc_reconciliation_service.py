@@ -1051,6 +1051,16 @@ class EtcReconciliationTaskService:
         actor: str = "system",
     ) -> EtcReconciliationTask:
         task = self._get_active_task_mutable(task_id)
+        expected = (str(oa_draft_batch_id), str(etc_batch_id), "draft_created")
+        actual = (
+            str(task.oa_draft_batch_id or ""),
+            str(task.etc_batch_id or ""),
+            str(task.oa_draft_status or ""),
+        )
+        if actual == expected:
+            return _copy_task(task)
+        if actual[0] or actual[2]:
+            raise ValueError("oa_draft_metadata_conflict")
         if task.status not in {EtcReconciliationTaskStatus.IMPORTED, EtcReconciliationTaskStatus.CLOSED}:
             raise ValueError("invalid_reconciliation_task_status")
         task.oa_draft_batch_id = oa_draft_batch_id

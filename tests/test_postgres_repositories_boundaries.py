@@ -1120,6 +1120,49 @@ def test_ops_tax_etc_multi_table_saves_use_transactions() -> None:
     assert stale_file_update[1] == ("task-1", ["file-1"])
 
 
+def test_ops_tax_etc_oa_draft_save_locks_and_compares_the_target_version() -> None:
+    class VersionedConnection(RecordingConnection):
+        def __init__(self, version: int) -> None:
+            super().__init__()
+            self.version = version
+
+        def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+            self.fetched_one.append((" ".join(sql.split()), params))
+            if "from app.etc_business_batches" in sql:
+                return {"version": self.version}
+            return None
+
+    snapshot = {
+        "business_batches": {
+            "batch-1": {
+                "business_batch_id": "batch-1",
+                "task_id": "task-1",
+                "status": "oa_confirmation_pending",
+                "version": 8,
+            }
+        }
+    }
+    matching = VersionedConnection(version=7)
+    stale = VersionedConnection(version=8)
+
+    saved = PostgresOpsTaxEtcRepository(matching).save_etc_oa_draft_attempt(
+        snapshot,
+        business_batch_id="batch-1",
+        expected_version=7,
+    )
+    rejected = PostgresOpsTaxEtcRepository(stale).save_etc_oa_draft_attempt(
+        snapshot,
+        business_batch_id="batch-1",
+        expected_version=7,
+    )
+
+    assert saved is True
+    assert rejected is False
+    assert any("for update" in sql for sql, _params in matching.fetched_one)
+    assert any("insert into app.etc_business_batches" in sql for sql, _params in matching.executed)
+    assert stale.executed == []
+
+
 def test_ops_tax_etc_deleted_reconciliation_task_clears_formal_file_rows() -> None:
     connection = RecordingConnection()
     repository = PostgresOpsTaxEtcRepository(connection)

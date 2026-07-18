@@ -28,6 +28,16 @@
 
 ## 历史记录
 
+## 2026-07-18 - ETC Phase 12 评审收口
+
+- 目标：闭合暂存行错误 target、批次切换旧 task mutation、OA finalize 全量旧 snapshot 覆盖、task 元数据部分失败不可重放、Audit 假 freshness 和 recovery 宽松布尔等评审问题。
+- 影响范围：ETC 页面 selection/action owner、business batch application/service、state store/PostgreSQL repository 的 OA attempt 写口、reconciliation task OA 元数据、ETC Page Audit 和定向测试；未新增 schema、migration、read model、cache、queue、worker 或跨页面 I/O。
+- 关键决策：页面 detail/task 并发，切换时同步清空旧 task；显式 row batch 优先于旧 draft result；manual status 只保留 active bucket effect 一个 list reload owner。后端以 `save_etc_oa_draft_attempt` 对目标 business batch 做 version lock/CAS，只合并 attempt 改动的行；相同 idempotency key/recovery outcome 只修复 linked task 元数据。缺 task fail closed，recovery 只接受唯一 JSON boolean 与互斥证据。
+- Audit：creating stale 只读取 durable `oa_draft_prepared/oa_draft_outcome_unknown.created_at` 或 payload `updated_at`，不读取每次 upsert 都会刷新的 formal row `updated_at`；not-submitted retained membership 不算当前 owner；pending batch 必须与 task 的 draft metadata 精确一致。
+- 文档影响：同步更新 boundary I/O、状态机、测试矩阵和实施记录；产品三 bucket 口径与 API 成功 DTO 不变。
+- 测试覆盖：前端 70 项通过；ETC backend + Audit + target repository 共 145 项通过、4 项条件性 skip；新增独立 service/store 不丢更新、同 key/recovery 部分失败修复、strict recovery、缺 task、合法 invoice reuse、durable stale clock 和精确 target tests。
+- 未测风险：真实 PostgreSQL 多进程锁竞争、真实 OA 和生产延迟仍需统一部署后的受控验证；本轮不部署、不推送、不写生产。
+
 ## 2026-07-18 - ETC 窄读、三 bucket 与 OA 草稿可恢复闭环
 
 - 目标：移除 ETC 页面 full task/重复 detail 热路径，解决提交按钮无解释禁用和永久 creating，形成“未提交 -> 暂存 -> 已提交/退回未提交”的高性能闭环。

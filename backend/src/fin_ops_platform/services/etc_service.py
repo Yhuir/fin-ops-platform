@@ -1127,7 +1127,12 @@ class EtcService:
                 after_status=batch.status,
                 submission_batch_id=submission_batch.id,
             )
-            self._persist()
+            self._persist_oa_draft_attempt(
+                batch,
+                submission_batch,
+                expected_version=batch.version - 1,
+                include_import_batches=True,
+            )
             return EtcBusinessBatchOADraftAttempt(
                 business_batch_id=batch.business_batch_id,
                 submission_batch_id=submission_batch.id,
@@ -1194,7 +1199,12 @@ class EtcService:
                 after_status=batch.status,
                 submission_batch_id=submission_batch.id,
             )
-            self._persist()
+            self._persist_oa_draft_attempt(
+                batch,
+                submission_batch,
+                expected_version=attempt.prepared_version,
+                include_invoices=True,
+            )
             return self._copy_business_batch(batch)
 
     def fail_business_batch_oa_draft(
@@ -1216,7 +1226,11 @@ class EtcService:
                 reason=submission_batch.error_message,
                 submission_batch_id=submission_batch.id,
             )
-            self._persist()
+            self._persist_oa_draft_attempt(
+                batch,
+                submission_batch,
+                expected_version=attempt.prepared_version,
+            )
             return self._copy_business_batch(batch)
 
     def mark_business_batch_oa_draft_outcome_unknown(
@@ -1236,7 +1250,11 @@ class EtcService:
                 reason=submission_batch.error_message,
                 submission_batch_id=submission_batch.id,
             )
-            self._persist()
+            self._persist_oa_draft_attempt(
+                batch,
+                submission_batch,
+                expected_version=attempt.prepared_version,
+            )
             return self._copy_business_batch(batch)
 
     def recover_business_batch_oa_draft(
@@ -1294,7 +1312,11 @@ class EtcService:
                 reason=f"{normalized_reason}；核实证据：{normalized_evidence}",
                 submission_batch_id=submission_batch.id,
             )
-            self._persist()
+            self._persist_oa_draft_attempt(
+                batch,
+                submission_batch,
+                expected_version=expected_version,
+            )
             return self._copy_business_batch(batch)
 
     def _assert_current_oa_draft_attempt(
@@ -2602,6 +2624,54 @@ class EtcService:
         self._etc_dir.mkdir(parents=True, exist_ok=True)
         with self._state_path.open("wb") as handle:
             pickle.dump(self.snapshot(), handle)
+
+    def _persist_oa_draft_attempt(
+        self,
+        batch: EtcBusinessBatch,
+        submission_batch: EtcBatch,
+        *,
+        expected_version: int,
+        include_invoices: bool = False,
+        include_import_batches: bool = False,
+    ) -> None:
+        if self._state_store is None:
+            self._persist()
+            return
+        snapshot: dict[str, object] = {
+            "invoice_counter": self._invoice_counter,
+            "batch_counter": self._batch_counter,
+            "import_batch_counter": self._import_batch_counter,
+            "business_batch_counter": self._business_batch_counter,
+            "batch_day_counters": deepcopy(self._batch_day_counters),
+            "business_batches": {batch.business_batch_id: deepcopy(batch)},
+            "batches": {submission_batch.id: deepcopy(submission_batch)},
+        }
+        if include_invoices:
+            snapshot["invoices"] = {
+                invoice_id: deepcopy(self._invoices[invoice_id])
+                for invoice_id in submission_batch.invoice_ids
+                if invoice_id in self._invoices
+            }
+        if include_import_batches:
+            snapshot["import_batches"] = {
+                import_batch_id: deepcopy(self._import_batches[import_batch_id])
+                for import_batch_id in batch.import_batch_ids
+                if import_batch_id in self._import_batches
+            }
+        saved = self._state_store.save_etc_oa_draft_attempt(
+            snapshot,
+            business_batch_id=batch.business_batch_id,
+            expected_version=expected_version,
+        )
+        if saved:
+            return
+        self._hydrate(self._load_snapshot())
+        actual = self._business_batches.get(batch.business_batch_id)
+        raise EtcBusinessBatchVersionConflictError(
+            batch.business_batch_id,
+            expected_version,
+            int(getattr(actual, "version", 0) or 0),
+        )
 
     def _active_business_batch_for_task(self, task_id: str) -> EtcBusinessBatch | None:
         active = [

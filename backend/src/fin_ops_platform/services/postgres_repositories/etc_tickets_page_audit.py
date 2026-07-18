@@ -477,7 +477,8 @@ def _batch_relation_issues(
             issues.append(_issue("etc_business_batch_task_missing", subject, {"task_id": task_id}))
         else:
             linked_task_owners[task_id] += 1
-            task_title = _text(_payload(active_task_by_id[task_id]).get("title"))
+            task_payload = _payload(active_task_by_id[task_id])
+            task_title = _text(task_payload.get("title"))
             batch_title = _text(payload.get("title"))
             if task_title != batch_title:
                 issues.append(
@@ -487,6 +488,25 @@ def _batch_relation_issues(
                         {"batch_title": batch_title, "task_title": task_title},
                     )
                 )
+            if status == "oa_confirmation_pending":
+                expected_task_metadata = {
+                    "oa_draft_batch_id": _text(payload.get("submission_batch_id")),
+                    "etc_batch_id": _text(payload.get("external_etc_batch_id")),
+                    "oa_draft_status": "draft_created",
+                }
+                mismatched = {
+                    field: {"expected": expected, "actual": _text(task_payload.get(field))}
+                    for field, expected in expected_task_metadata.items()
+                    if _text(task_payload.get(field)) != expected
+                }
+                if mismatched:
+                    issues.append(
+                        _issue(
+                            "etc_reconciliation_task_oa_draft_mismatch",
+                            subject,
+                            {"task_id": task_id, "mismatched": mismatched},
+                        )
+                    )
 
         expected_invoice_ids = _text_set(payload.get("invoice_ids"))
         actual_invoice_ids = {

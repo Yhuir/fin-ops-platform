@@ -163,6 +163,14 @@ class ApplicationStateStoreProtocol(Protocol):
 
     def save_etc_state(self, snapshot: dict[str, Any]) -> None: ...
 
+    def save_etc_oa_draft_attempt(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        business_batch_id: str,
+        expected_version: int,
+    ) -> bool: ...
+
     def load_etc_reconciliation_state(self) -> dict[str, Any]: ...
 
     def save_etc_reconciliation_state(self, snapshot: dict[str, Any]) -> None: ...

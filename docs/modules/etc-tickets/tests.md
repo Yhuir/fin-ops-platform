@@ -54,6 +54,15 @@
 - 类别 5（前端）不新增测试：页面调用及 DTO 未变，根因在 PostgreSQL service 查询一致性；既有组件与 Chromium 导入 flow 已覆盖刷新后的用户可见行为。
 - 类别 6/7（端到端与回归）：真实 68 条生产任务用于 PostgreSQL + MinIO worker drain 与部署后 API 只读 smoke；后端完整 ETC 套件保护既有导入、对账、OA 与删除链路。
 
+## 2026-07-18 OA attempt 并发与页面 selection 回归增量
+
+- 类别 1（业务核心）：严格校验 recovery decision 是唯一 JSON boolean，已创建与未创建证据互斥；缺 linked reconciliation task 时 list/detail action 与 command 一律 fail closed。
+- 类别 2/4（service、持久化）：覆盖目标 business batch version lock/CAS、两个独立 service/store 实例下 finalize 不覆盖其它批次更新、linked task 元数据第一次持久化失败后同 key 重放不创建第二个 OA，以及 recovery adoption 的同证据修复重放。
+- 类别 3（API）：覆盖非法 boolean/互斥 recovery payload 返回 422，合法 OA command 必须有 imported/closed linked task。
+- 类别 5（前端）：`EtcTicketManagementPage.test.tsx` 覆盖 detail/task 并发、切换批次立即失效旧 mutation target、显式暂存行优先于旧 draft result，以及 manual status 成功后目标 bucket list 只发起一次 GET。
+- 类别 6（端到端）：真实 OA 和独立生产进程竞争仍留给部署后受控 smoke；本地 service/API 组合已覆盖不重复创建和 durable convergence。
+- 类别 7（回归）：ETC backend 全量与 70 项页面交互回归保护导入、OA、撤回、删除和列表既有行为；Audit 额外覆盖正式 row `updated_at` 被无关 upsert 刷新时仍以 durable attempt event/payload 时间判 stale，以及 not-submitted 历史成员被新批次合法复用时不计双 owner。
+
 ## 2026-07-14 发票 PDF 合并下载回归增量
 
 - 类别 1（业务核心）：适用。`tests/test_etc_invoice_pdf_bundle_service.py` 以真实 PDF 字节覆盖 68 张=68 页、稳定顺序、空批次/无草稿、缺失/损坏/hash 不一致/多页和资源上限。

@@ -1182,6 +1182,14 @@ class EtcReconciliationServiceTests(unittest.TestCase):
             etc_batch_id="etc-submission-1",
             actor="alice",
         )
+        linked_replay = linked_service.record_oa_draft_created(
+            task_id=linked_importing.task_id,
+            oa_draft_batch_id="oa-draft-1",
+            etc_batch_id="etc-submission-1",
+            actor="alice",
+        )
+        self.assertEqual(linked_replay.version, linked.version)
+        self.assertEqual(len(linked_replay.audit_events), len(linked.audit_events))
 
         deleted = linked_service.delete_task(
             task_id=linked_importing.task_id,

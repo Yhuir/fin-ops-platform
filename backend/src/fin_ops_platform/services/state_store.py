@@ -473,9 +473,41 @@ class ApplicationStateStore:
 
     def save_etc_state(self, snapshot: dict[str, Any]) -> None:
         normalized_snapshot = snapshot if isinstance(snapshot, dict) else {}
-        self._etc_state_path.parent.mkdir(parents=True, exist_ok=True)
-        with self._etc_state_path.open("wb") as handle:
-            pickle.dump(normalized_snapshot, handle)
+        with self._local_pickle_lock:
+            self._etc_state_path.parent.mkdir(parents=True, exist_ok=True)
+            with self._etc_state_path.open("wb") as handle:
+                pickle.dump(normalized_snapshot, handle)
+
+    def save_etc_oa_draft_attempt(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        business_batch_id: str,
+        expected_version: int,
+    ) -> bool:
+        with self._local_pickle_lock:
+            current = self.load_etc_state()
+            current_batch = dict(current.get("business_batches") or {}).get(business_batch_id)
+            current_version = (
+                current_batch.get("version")
+                if isinstance(current_batch, dict)
+                else getattr(current_batch, "version", None)
+            )
+            if int(current_version or 0) != int(expected_version):
+                return False
+            merged = dict(current)
+            for collection in ("invoices", "batches", "import_batches", "business_batches"):
+                values = dict(merged.get(collection) or {})
+                values.update(dict(snapshot.get(collection) or {}))
+                merged[collection] = values
+            for counter in ("invoice_counter", "batch_counter", "import_batch_counter", "business_batch_counter"):
+                merged[counter] = max(int(merged.get(counter, 0) or 0), int(snapshot.get(counter, 0) or 0))
+            day_counters = dict(merged.get("batch_day_counters") or {})
+            for day, value in dict(snapshot.get("batch_day_counters") or {}).items():
+                day_counters[str(day)] = max(int(day_counters.get(str(day), 0) or 0), int(value or 0))
+            merged["batch_day_counters"] = day_counters
+            self.save_etc_state(merged)
+            return True
 
     def load_etc_reconciliation_state(self) -> dict[str, Any]:
         if not self._etc_reconciliation_state_path.exists():

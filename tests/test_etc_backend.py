@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, make_dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -43,7 +44,11 @@ from fin_ops_platform.services.etc_business_batch_application_service import (
     evaluate_etc_oa_draft_action,
 )
 from fin_ops_platform.services.etc_document_parsers import CcbCreditCardStatementParser, SupplementEvidenceParser, TicketRootPdfTextParser
-from fin_ops_platform.services.etc_reconciliation_models import FileParseResult, SourceFileKind
+from fin_ops_platform.services.etc_reconciliation_models import (
+    EtcReconciliationTaskStatus,
+    FileParseResult,
+    SourceFileKind,
+)
 from fin_ops_platform.services.etc_reconciliation_service import EtcReconciliationTaskService
 from fin_ops_platform.services.historical_etc_repair_service import (
     HistoricalEtcRepairBatchSpec,
@@ -266,10 +271,39 @@ class MemoryEtcStateStore:
         self.files: dict[str, bytes] = {}
 
     def load_etc_state(self) -> dict[str, object]:
-        return dict(self.saved_snapshot or {})
+        return deepcopy(self.saved_snapshot or {})
 
     def save_etc_state(self, snapshot: dict[str, object]) -> None:
-        self.saved_snapshot = dict(snapshot)
+        self.saved_snapshot = deepcopy(snapshot)
+
+    def save_etc_oa_draft_attempt(
+        self,
+        snapshot: dict[str, object],
+        *,
+        business_batch_id: str,
+        expected_version: int,
+    ) -> bool:
+        current = dict(self.saved_snapshot or {})
+        current_batch = dict(current.get("business_batches") or {}).get(business_batch_id)
+        current_version = (
+            current_batch.get("version")
+            if isinstance(current_batch, dict)
+            else getattr(current_batch, "version", None)
+        )
+        if int(current_version or 0) != int(expected_version):
+            return False
+        for collection in ("invoices", "batches", "import_batches", "business_batches"):
+            merged = dict(current.get(collection) or {})
+            merged.update(dict(snapshot.get(collection) or {}))
+            current[collection] = merged
+        for counter in ("invoice_counter", "batch_counter", "import_batch_counter", "business_batch_counter"):
+            current[counter] = max(int(current.get(counter, 0) or 0), int(snapshot.get(counter, 0) or 0))
+        day_counters = dict(current.get("batch_day_counters") or {})
+        for day, value in dict(snapshot.get("batch_day_counters") or {}).items():
+            day_counters[str(day)] = max(int(day_counters.get(str(day), 0) or 0), int(value or 0))
+        current["batch_day_counters"] = day_counters
+        self.saved_snapshot = deepcopy(current)
+        return True
 
     def store_etc_invoice_file(self, *, invoice_number: str, file_name: str, content: bytes) -> str:
         ref = f"memory://etc_invoice/{invoice_number}/{file_name}"
@@ -562,6 +596,198 @@ class EtcServiceTests(unittest.TestCase):
             self.assertEqual(len(fake_oa.draft_payloads), 1)
             cause = str(fake_oa.draft_payloads[0]["payload"]["data"]["cause"])
             self.assertIn(f"business_batch_id={batch.business_batch_id}", cause)
+
+    def test_oa_draft_finalize_only_updates_its_target_batch(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            store = MemoryEtcStateStore(data_dir)
+            service_a = EtcService(data_dir=data_dir, state_store=store, oa_client=FakeEtcOAClient())
+
+            imported_batches: list[EtcBusinessBatch] = []
+            for task_id, invoice_number in (("ETC-TASK-A", "ETC-A"), ("ETC-TASK-B", "ETC-B")):
+                batch = service_a.create_business_batch(task_id=task_id, title=task_id)
+                preview = service_a.preview_business_batch_import_zips(
+                    batch.business_batch_id,
+                    [UploadedEtcZipFile(f"{invoice_number}.zip", etc_zip([invoice_number]))],
+                    expected_version=batch.version,
+                )
+                batch, _result = service_a.confirm_business_batch_import(
+                    batch.business_batch_id,
+                    str(preview["sessionId"]),
+                    expected_version=preview["businessBatch"]["version"],
+                )
+                imported_batches.append(batch)
+
+            target, independent = imported_batches
+            attempt = service_a.prepare_business_batch_oa_draft(
+                target.business_batch_id,
+                idempotency_key="target-scoped-finalize",
+                expected_version=target.version,
+                reconciliation_task=None,
+            )
+            self.assertIsNotNone(attempt)
+            assert attempt is not None
+            draft = service_a.execute_business_batch_oa_draft(attempt)
+
+            service_b = EtcService(data_dir=data_dir, state_store=store)
+            latest_independent = service_b.get_business_batch(independent.business_batch_id)
+            service_b.update_business_batch_title(
+                independent.business_batch_id,
+                title="independent worker update",
+                expected_version=latest_independent.version,
+            )
+
+            completed = service_a.complete_business_batch_oa_draft(attempt, draft)
+            reloaded = EtcService(data_dir=data_dir, state_store=store)
+
+            self.assertEqual(completed.status, EtcBusinessBatchStatus.OA_CONFIRMATION_PENDING.value)
+            self.assertEqual(
+                reloaded.get_business_batch(independent.business_batch_id).title,
+                "independent worker update",
+            )
+
+    def test_oa_draft_retry_repairs_task_metadata_without_creating_a_second_draft(self) -> None:
+        class FlakyTaskService:
+            def __init__(self, task_id: str) -> None:
+                self.task = SimpleNamespace(
+                    task_id=task_id,
+                    status=EtcReconciliationTaskStatus.IMPORTED,
+                    oa_draft_batch_id="",
+                    etc_batch_id="",
+                    oa_draft_status="",
+                )
+                self.record_calls = 0
+
+            def get_task(self, _task_id: str):
+                return self.task
+
+            def record_oa_draft_created(
+                self,
+                *,
+                task_id: str,
+                oa_draft_batch_id: str,
+                etc_batch_id: str,
+                actor: str,
+            ):
+                del task_id, actor
+                self.record_calls += 1
+                if self.record_calls == 1:
+                    raise RuntimeError("task metadata persistence failed")
+                self.task.oa_draft_batch_id = oa_draft_batch_id
+                self.task.etc_batch_id = etc_batch_id
+                self.task.oa_draft_status = "draft_created"
+                return self.task
+
+        with TemporaryDirectory() as temp_dir:
+            fake_oa = FakeEtcOAClient()
+            etc_service = EtcService(data_dir=Path(temp_dir), oa_client=fake_oa)
+            batch = etc_service.create_business_batch(task_id="ETC-TASK-REPAIR")
+            preview = etc_service.preview_business_batch_import_zips(
+                batch.business_batch_id,
+                [UploadedEtcZipFile("repair.zip", etc_zip(["ETC-REPAIR"]))],
+                expected_version=batch.version,
+            )
+            batch, _result = etc_service.confirm_business_batch_import(
+                batch.business_batch_id,
+                str(preview["sessionId"]),
+                expected_version=preview["businessBatch"]["version"],
+            )
+            task_service = FlakyTaskService(batch.task_id)
+            application = EtcBusinessBatchApplicationService(
+                etc_service=etc_service,
+                reconciliation_task_service=task_service,
+            )
+            actor = EtcBusinessBatchActor(can_admin_access=True, can_mutate_data=True)
+
+            with self.assertRaisesRegex(RuntimeError, "persistence failed"):
+                application.create_oa_draft_payload(
+                    batch.business_batch_id,
+                    idempotency_key="repair-task-metadata",
+                    expected_version=batch.version,
+                    actor=actor,
+                    headers=None,
+                )
+            pending = etc_service.get_business_batch(batch.business_batch_id)
+            replay = application.create_oa_draft_payload(
+                batch.business_batch_id,
+                idempotency_key="repair-task-metadata",
+                expected_version=batch.version,
+                actor=actor,
+                headers=None,
+            )
+
+            self.assertEqual(pending.status, EtcBusinessBatchStatus.OA_CONFIRMATION_PENDING.value)
+            self.assertEqual(replay["businessBatch"]["status"], EtcBusinessBatchStatus.OA_CONFIRMATION_PENDING.value)
+            self.assertEqual(task_service.record_calls, 2)
+            self.assertEqual(len(fake_oa.draft_payloads), 1)
+
+    def test_oa_recovery_replay_repairs_task_metadata_after_partial_failure(self) -> None:
+        class FlakyTaskService:
+            def __init__(self, task_id: str) -> None:
+                self.task = SimpleNamespace(
+                    task_id=task_id,
+                    status=EtcReconciliationTaskStatus.IMPORTED,
+                    oa_draft_batch_id="",
+                    etc_batch_id="",
+                    oa_draft_status="",
+                )
+                self.calls = 0
+
+            def get_task(self, _task_id: str):
+                return self.task
+
+            def record_oa_draft_created(self, **payload: object):
+                self.calls += 1
+                if self.calls == 1:
+                    raise RuntimeError("recovery metadata persistence failed")
+                self.task.oa_draft_batch_id = str(payload["oa_draft_batch_id"])
+                self.task.etc_batch_id = str(payload["etc_batch_id"])
+                self.task.oa_draft_status = "draft_created"
+                return self.task
+
+        with TemporaryDirectory() as temp_dir:
+            etc_service = EtcService(data_dir=Path(temp_dir))
+            batch = etc_service.create_business_batch(task_id="ETC-TASK-RECOVERY-REPLAY")
+            preview = etc_service.preview_business_batch_import_zips(
+                batch.business_batch_id,
+                [UploadedEtcZipFile("recovery.zip", etc_zip(["ETC-RECOVERY"]))],
+                expected_version=batch.version,
+            )
+            batch, _result = etc_service.confirm_business_batch_import(
+                batch.business_batch_id,
+                str(preview["sessionId"]),
+                expected_version=preview["businessBatch"]["version"],
+            )
+            attempt = etc_service.prepare_business_batch_oa_draft(
+                batch.business_batch_id,
+                idempotency_key="recovery-replay",
+                expected_version=batch.version,
+                reconciliation_task=None,
+            )
+            assert attempt is not None
+            unknown = etc_service.mark_business_batch_oa_draft_outcome_unknown(attempt, reason="timeout")
+            task_service = FlakyTaskService(batch.task_id)
+            application = EtcBusinessBatchApplicationService(
+                etc_service=etc_service,
+                reconciliation_task_service=task_service,
+            )
+            actor = EtcBusinessBatchActor(can_admin_access=True, can_mutate_data=True)
+            recovery = {
+                "expected_version": unknown.version,
+                "reason": "OA 已核实",
+                "evidence": "OA 草稿记录",
+                "oa_draft_id": "oa-recovered-1",
+                "oa_draft_url": "https://oa.test/recovered-1",
+                "confirmed_not_created": False,
+                "actor": actor,
+            }
+
+            with self.assertRaisesRegex(RuntimeError, "persistence failed"):
+                application.recover_oa_draft_payload(batch.business_batch_id, **recovery)
+            replay = application.recover_oa_draft_payload(batch.business_batch_id, **recovery)
+
+            self.assertEqual(replay["businessBatch"]["status"], EtcBusinessBatchStatus.OA_CONFIRMATION_PENDING.value)
+            self.assertEqual(task_service.calls, 2)
 
     def test_business_batch_oa_draft_unknown_outcome_requires_recovery_and_reuses_attempt(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -2997,11 +3223,16 @@ class EtcApiTests(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             app._etc_service.oa_client = FakeEtcOAClient()
+            task = app._etc_reconciliation_task_service.create_task(title="ETC-TASK-REVOKE", created_by="alice")
+            app._etc_reconciliation_task_service._get_active_task_mutable(task.task_id).status = (  # noqa: SLF001
+                EtcReconciliationTaskStatus.IMPORTED
+            )
+            app._etc_reconciliation_task_service._persist()  # noqa: SLF001
 
             create_response = app.handle_request(
                 "POST",
                 "/api/etc/business-batches",
-                json.dumps({"taskId": "ETC-TASK-REVOKE", "ownerUserId": "alice", "ownerOrgId": "finance"}),
+                json.dumps({"taskId": task.task_id, "ownerUserId": "alice", "ownerOrgId": "finance"}),
             )
             created = json.loads(create_response.body)["data"]["businessBatch"]
             preview_body, preview_headers = multipart(
@@ -3306,13 +3537,18 @@ class EtcApiTests(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             app._etc_service.oa_client = FakeEtcOAClient()
+            task = app._etc_reconciliation_task_service.create_task(title="ETC-TASK-QUEUE", created_by="alice")
+            app._etc_reconciliation_task_service._get_active_task_mutable(task.task_id).status = (  # noqa: SLF001
+                EtcReconciliationTaskStatus.IMPORTED
+            )
+            app._etc_reconciliation_task_service._persist()  # noqa: SLF001
             queue = QueueRecorder()
             object.__setattr__(app._runtime_repositories, "queue_repository", queue)
 
             create_response = app.handle_request(
                 "POST",
                 "/api/etc/business-batches",
-                json.dumps({"taskId": "ETC-TASK-QUEUE"}),
+                json.dumps({"taskId": task.task_id}),
             )
             created = json.loads(create_response.body)["data"]["businessBatch"]
             preview_body, preview_headers = multipart(
@@ -3514,11 +3750,16 @@ class EtcApiTests(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             app._etc_service.oa_client = FakeEtcOAClient()
+            task = app._etc_reconciliation_task_service.create_task(title="ETC passage month", created_by="alice")
+            app._etc_reconciliation_task_service._get_active_task_mutable(task.task_id).status = (  # noqa: SLF001
+                EtcReconciliationTaskStatus.IMPORTED
+            )
+            app._etc_reconciliation_task_service._persist()  # noqa: SLF001
 
             create_response = app.handle_request(
                 "POST",
                 "/api/etc/business-batches",
-                json.dumps({"taskId": "ETC-TASK-PASSAGE-MONTH", "ownerUserId": "alice", "ownerOrgId": "finance"}),
+                json.dumps({"taskId": task.task_id, "ownerUserId": "alice", "ownerOrgId": "finance"}),
             )
             self.assertEqual(create_response.status_code, 201)
             created = json.loads(create_response.body)["data"]["businessBatch"]

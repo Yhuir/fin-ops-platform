@@ -398,6 +398,19 @@ class PostgresStateStore:
     def save_etc_state(self, snapshot: dict[str, Any]) -> None:
         self._ops_tax_etc_repository.save_etc_state(snapshot)
 
+    def save_etc_oa_draft_attempt(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        business_batch_id: str,
+        expected_version: int,
+    ) -> bool:
+        return self._ops_tax_etc_repository.save_etc_oa_draft_attempt(
+            snapshot,
+            business_batch_id=business_batch_id,
+            expected_version=expected_version,
+        )
+
     def load_etc_reconciliation_state(self) -> dict[str, Any]:
         return self._ops_tax_etc_repository.load_etc_reconciliation_state()
 

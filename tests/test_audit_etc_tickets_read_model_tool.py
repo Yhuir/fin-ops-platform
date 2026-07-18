@@ -178,6 +178,7 @@ class EtcTicketsPageAuditTests(unittest.TestCase):
         report = etc_tickets_page_audit.audit_etc_tickets_page(connection)
 
         self.assertIn("etc_oa_confirmation_draft_missing", report["summary"]["issue_sample_counts_by_code"])
+        self.assertIn("etc_reconciliation_task_oa_draft_mismatch", report["summary"]["issue_sample_counts_by_code"])
         self.assertEqual(report["summary"]["unsubmitted_business_batch_count"], 0)
         self.assertEqual(report["summary"]["staged_business_batch_count"], 1)
 
