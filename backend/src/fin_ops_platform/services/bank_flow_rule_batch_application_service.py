@@ -84,7 +84,6 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         source_summary = source_summary if isinstance(source_summary, dict) else {}
         source_versions = source_summary.get("source_versions")
         source_versions = source_versions if isinstance(source_versions, dict) else {}
-        self.load_relation_source_versions_for_scope_keys(refresh_scope_keys)
         expected_source_versions = (
             self.read_model_scope_source_versions(
                 scope_key=refresh_scope_keys[0],
@@ -113,9 +112,28 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 reason=refresh_reason,
                 metadata=self._read_model_refresh_metadata_for_relation_mode(BANK_FLOW_RULE_BATCH_RELATION_MODE),
             )
-        batches = self.resolve_labels(self._public_batches(page_result.get("items")))
+        tag_dictionary = self._bank_transaction_category_service.tag_dictionary_payload()
+        definitions_by_code = {
+            str(definition.get("code") or "").strip(): dict(definition)
+            for definition in list(tag_dictionary.get("definitions") or [])
+            if isinstance(definition, dict) and str(definition.get("code") or "").strip()
+        }
+        tag_rules_payload = self._tag_rules_payload_for_relation_mode(BANK_FLOW_RULE_BATCH_RELATION_MODE)
+        eligible_tag_codes = {
+            str(tag.get("code") or "").strip()
+            for tag in list(tag_rules_payload.get("active_tags") or [])
+            if isinstance(tag, dict) and str(tag.get("code") or "").strip()
+        }
+        batches = self.resolve_labels(
+            self._public_batches(page_result.get("items")),
+            definitions_by_code=definitions_by_code,
+        )
         payload: dict[str, object] = {
-            "summary": self._summary_from_aggregates(page_result.get("aggregates")),
+            "summary": self._summary_from_aggregates(
+                page_result.get("aggregates"),
+                eligible_tag_codes=eligible_tag_codes,
+                definitions_by_code=definitions_by_code,
+            ),
             "batches": batches,
             **self._bank_flow_pagination_payload(
                 pagination,
@@ -148,18 +166,35 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
             }
         }
 
-    def _summary_from_aggregates(self, aggregates: object) -> dict[str, object]:
+    def _summary_from_aggregates(
+        self,
+        aggregates: object,
+        *,
+        eligible_tag_codes: set[str] | None = None,
+        definitions_by_code: dict[str, dict[str, object]] | None = None,
+    ) -> dict[str, object]:
         rows = [row for row in list(aggregates or []) if isinstance(row, dict)] if isinstance(aggregates, list) else []
         aggregate_codes = [str(row.get("batch_type") or "").strip() for row in rows]
         category_codes = self._dedupe_ordered(
-            [*sorted(self._eligible_tag_codes_for_relation_mode(BANK_FLOW_RULE_BATCH_RELATION_MODE)), *aggregate_codes]
+            [
+                *sorted(
+                    eligible_tag_codes
+                    if eligible_tag_codes is not None
+                    else self._eligible_tag_codes_for_relation_mode(BANK_FLOW_RULE_BATCH_RELATION_MODE)
+                ),
+                *aggregate_codes,
+            ]
         )
         counts = {"draft": 0, "submitted": 0, "withdrawn": 0, "conflict": 0, "stale": 0}
         categories: dict[str, dict[str, object]] = {}
         for code in category_codes:
             if not code:
                 continue
-            definition = self.bank_transaction_tag_definition_current(code)
+            definition = (
+                definitions_by_code.get(code)
+                if isinstance(definitions_by_code, dict)
+                else self.bank_transaction_tag_definition_current(code)
+            )
             categories[code] = {
                 "code": code,
                 "label": self.bank_transaction_tag_label_from_definition(code, definition),
@@ -590,7 +625,12 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         except Exception as exc:
             raise BankFlowRuleBatchPersistenceError(str(exc)) from exc
 
-    def resolve_labels(self, batches: list[dict[str, object]]) -> list[dict[str, object]]:
+    def resolve_labels(
+        self,
+        batches: list[dict[str, object]],
+        *,
+        definitions_by_code: dict[str, dict[str, object]] | None = None,
+    ) -> list[dict[str, object]]:
         resolved: list[dict[str, object]] = []
         for batch in list(batches or []):
             if not isinstance(batch, dict):
@@ -598,7 +638,11 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
             next_batch = self._presentation_batch(batch)
             batch_type = str(next_batch.get("batch_type") or "").strip()
             if batch_type:
-                definition = self.bank_transaction_tag_definition_current(batch_type)
+                definition = (
+                    definitions_by_code.get(batch_type)
+                    if isinstance(definitions_by_code, dict)
+                    else self.bank_transaction_tag_definition_current(batch_type)
+                )
                 label = self.bank_transaction_tag_label_from_definition(batch_type, definition)
                 next_batch["batch_label"] = label
                 next_batch["display_tags"] = ["流水规则", label]

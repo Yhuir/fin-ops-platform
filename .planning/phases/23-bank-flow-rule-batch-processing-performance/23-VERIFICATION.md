@@ -31,3 +31,10 @@
 - 可撤销安全样本的 submit/withdraw command、command-to-local-visible、month read model fresh、Audit/drain耗时。
 - reset 不在生产擅自执行全量业务操作；使用生产历史真实操作证据或显式安全窗口，必要时以真实 PostgreSQL生产规模 fixture补足。
 - bank-flow、Workbench、bank details、no-OA/turnover隔离 Audit以及 main/origin/main/工作树干净门禁。
+
+## 首轮生产结果与继续门禁
+
+- 已部署 SHA `a3a331b5577e892f4d47fd9f940b0a5f2bc3bf46` / release `main-a3a331b5-20260720030257`，runtime readiness `ready` 且 release identity 一致。
+- 20 次测量：页面壳 p95 `108.923ms` pass；all list p95 `539.327ms` fail；2026-07 list p95 `720.336ms` fail 并出现一次 stale/enqueue；Page Audit p95 `265.977ms` pass。
+- 因两个 list gate 未通过，本项未关闭。补充优化后目标测试 `103 passed`，`bash scripts/verify.sh lint` 通过；20,000 条 category 合成数据证明 canonical hash 相同，缓存命中从旧 copy+hash 约 `212.869ms` 降至约 `0.005ms`。
+- 下一门禁：提交/推送补充代码、部署唯一新 SHA，重复同一 probe；只有 all/month list p95 均 `<=500ms` 且全部 fresh/零 enqueue，才进入安全写验证。

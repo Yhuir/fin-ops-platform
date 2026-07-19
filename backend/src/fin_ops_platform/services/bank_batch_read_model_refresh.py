@@ -129,7 +129,10 @@ class BankBatchReadModelRefreshService:
             include_categories=False,
         )
         categories = self._application_service.effective_categories_for_rows(bank_rows)
-        self._application_service.load_relation_source_versions_for_bank_rows(bank_rows)
+        self._application_service.load_relation_source_versions_for_bank_rows(
+            bank_rows,
+            relation_mode=relation_mode,
+        )
         source_versions = (
             dict(precheck_source_versions)
             if isinstance(precheck_source_versions, dict) and precheck_source_versions

@@ -940,16 +940,29 @@ class BankBatchApplicationService:
     def active_relations_for_bank_rows(self, bank_rows: list[dict[str, object]]) -> list[dict[str, object]]:
         return self._workbench_relation_active_relations_for_bank_rows(bank_rows)
 
-    def load_relation_source_versions_for_bank_rows(self, bank_rows: list[dict[str, object]]) -> None:
+    def load_relation_source_versions_for_bank_rows(
+        self,
+        bank_rows: list[dict[str, object]],
+        *,
+        relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
+    ) -> None:
         if self._relation_facade is None:
             return
         load_source_versions = getattr(self._relation_facade, "source_versions_for_month", None)
         if not callable(load_source_versions):
             self._workbench_relation_active_relations_for_bank_rows(bank_rows)
             return
-        self.load_relation_source_versions_for_scope_keys(self._months_for_bank_rows(bank_rows))
+        self.load_relation_source_versions_for_scope_keys(
+            self._months_for_bank_rows(bank_rows),
+            relation_mode=relation_mode,
+        )
 
-    def load_relation_source_versions_for_scope_keys(self, scope_keys: list[str]) -> None:
+    def load_relation_source_versions_for_scope_keys(
+        self,
+        scope_keys: list[str],
+        *,
+        relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
+    ) -> None:
         if self._relation_facade is None:
             return
         load_source_versions = getattr(self._relation_facade, "source_versions_for_month", None)
@@ -963,7 +976,7 @@ class BankBatchApplicationService:
             load_source_versions(
                 month,
                 require_fresh=False,
-                reason="no_oa_bank_batch_source_version_precheck",
+                reason=self._source_version_precheck_reason(relation_mode),
             )
 
     def read_model_scope_source_versions(
@@ -974,11 +987,18 @@ class BankBatchApplicationService:
     ) -> dict[str, object]:
         normalized_scope_key = str(scope_key or "all").strip() or "all"
         scope_keys = [normalized_scope_key] if SEARCH_MONTH_RE.match(normalized_scope_key) else []
+        precheck_reason = self._source_version_precheck_reason(relation_mode)
         source_versions = self._bank_batch_base_source_versions(relation_mode=relation_mode)
-        bank_detail_source_versions = self._bank_detail_source_versions_for_scope_keys(scope_keys)
+        bank_detail_source_versions = self._bank_detail_source_versions_for_scope_keys(
+            scope_keys,
+            reason=precheck_reason,
+        )
         if bank_detail_source_versions:
             source_versions["bank_detail_source_versions"] = bank_detail_source_versions
-        workbench_relation_source_versions = self._workbench_relation_source_versions_for_scope_keys(scope_keys)
+        workbench_relation_source_versions = self._workbench_relation_source_versions_for_scope_keys(
+            scope_keys,
+            reason=precheck_reason,
+        )
         if workbench_relation_source_versions:
             source_versions["workbench_relation_source_versions"] = workbench_relation_source_versions
         return source_versions
@@ -998,7 +1018,12 @@ class BankBatchApplicationService:
         except (TypeError, ValueError):
             return 0
 
-    def _bank_detail_source_versions_for_scope_keys(self, scope_keys: list[str]) -> dict[str, object]:
+    def _bank_detail_source_versions_for_scope_keys(
+        self,
+        scope_keys: list[str],
+        *,
+        reason: str = "no_oa_bank_batch_source_version_precheck",
+    ) -> dict[str, object]:
         source_versions_loader = getattr(self._effective_category_provider, "source_versions_for_scope_keys", None)
         normalized_scope_keys = [
             str(scope_key).strip()
@@ -1010,14 +1035,19 @@ class BankBatchApplicationService:
         payload = source_versions_loader(
             normalized_scope_keys,
             require_fresh=False,
-            reason="no_oa_bank_batch_source_version_precheck",
+            reason=reason,
         )
         if not isinstance(payload, dict):
             return {}
         source_versions = payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}
         return _stable_dependency_source_versions(source_versions)
 
-    def _workbench_relation_source_versions_for_scope_keys(self, scope_keys: list[str]) -> dict[str, object]:
+    def _workbench_relation_source_versions_for_scope_keys(
+        self,
+        scope_keys: list[str],
+        *,
+        reason: str = "no_oa_bank_batch_source_version_precheck",
+    ) -> dict[str, object]:
         if self._relation_facade is None:
             return {}
         load_source_versions = getattr(self._relation_facade, "source_versions_for_month", None)
@@ -1033,7 +1063,7 @@ class BankBatchApplicationService:
             payload = load_source_versions(
                 scope_key,
                 require_fresh=False,
-                reason="no_oa_bank_batch_source_version_precheck",
+                reason=reason,
             )
             source_versions = payload.get("source_versions") if isinstance(payload, dict) else None
             if isinstance(source_versions, dict) and source_versions:
@@ -1042,6 +1072,12 @@ class BankBatchApplicationService:
             value = versions_by_scope.get(normalized_scope_keys[0])
             return dict(value) if isinstance(value, dict) else {}
         return versions_by_scope
+
+    @staticmethod
+    def _source_version_precheck_reason(relation_mode: str) -> str:
+        if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE:
+            return "bank_flow_rule_batch_source_version_precheck"
+        return "no_oa_bank_batch_source_version_precheck"
 
     def refresh_batches_from_prepared_rows(
         self,
@@ -1442,11 +1478,14 @@ class BankBatchApplicationService:
         relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
     ) -> dict[str, object]:
         tag_rules_payload = self._tag_rules_payload_for_relation_mode(relation_mode)
+        category_snapshot_version = getattr(self._bank_transaction_category_service, "snapshot_version", None)
         source_versions = {
             **_stable_dependency_source_versions(self._workbench_matching_source_versions_provider()),
             "bank_transaction_category_schema_version": BANK_TRANSACTION_CATEGORY_SCHEMA_VERSION,
-            "bank_transaction_category_snapshot_version": WorkbenchReadModelService.snapshot_version(
-                self._bank_transaction_category_service.snapshot()
+            "bank_transaction_category_snapshot_version": (
+                category_snapshot_version()
+                if callable(category_snapshot_version)
+                else WorkbenchReadModelService.snapshot_version(self._bank_transaction_category_service.snapshot())
             ),
         }
         if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE:

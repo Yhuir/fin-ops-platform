@@ -1052,12 +1052,14 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
 
             def __init__(self) -> None:
                 self.source_version_calls: list[list[str]] = []
+                self.source_version_reasons: list[str] = []
 
             def bulk_get_for_rows(self, _rows: list[dict[str, object]]) -> dict[str, dict[str, object]]:
                 raise AssertionError("source-version precheck must not load bank detail rows")
 
-            def source_versions_for_scope_keys(self, scope_keys: list[str], **_kwargs: object) -> dict[str, object]:
+            def source_versions_for_scope_keys(self, scope_keys: list[str], **kwargs: object) -> dict[str, object]:
                 self.source_version_calls.append(list(scope_keys))
+                self.source_version_reasons.append(str(kwargs.get("reason") or ""))
                 return {
                     "status": "fresh",
                     "source_versions": {
@@ -1072,12 +1074,14 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
 
             def __init__(self) -> None:
                 self.source_version_calls: list[str] = []
+                self.source_version_reasons: list[str] = []
 
             def list_by_month(self, *_args: object, **_kwargs: object) -> dict[str, object]:
                 raise AssertionError("source-version precheck must not load relation rows")
 
-            def source_versions_for_month(self, month: str, **_kwargs: object) -> dict[str, object]:
+            def source_versions_for_month(self, month: str, **kwargs: object) -> dict[str, object]:
                 self.source_version_calls.append(month)
+                self.source_version_reasons.append(str(kwargs.get("reason") or ""))
                 return {
                     "status": "fresh",
                     "source_versions": {
@@ -1102,6 +1106,8 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
 
         self.assertEqual(provider.source_version_calls, [["2026-02"]])
         self.assertEqual(relation_facade.source_version_calls, ["2026-02"])
+        self.assertEqual(provider.source_version_reasons, ["bank_flow_rule_batch_source_version_precheck"])
+        self.assertEqual(relation_facade.source_version_reasons, ["bank_flow_rule_batch_source_version_precheck"])
         self.assertEqual(versions["bank_flow_rule_batch_tag_rules_version"], 7)
         self.assertEqual(
             versions["bank_detail_source_versions"],
@@ -1163,12 +1169,11 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
 
         provider = EffectiveCategoryProvider()
         relation_facade = RelationFacade()
-        service = object.__new__(BankFlowRuleBatchApplicationService)
-        service._app_settings_service = settings
-        service._workbench_matching_source_versions_provider = lambda: {"workbench_formal_relation_rule_version": "rules-v1"}
-        service._bank_transaction_category_service = SimpleNamespace(
-            snapshot=lambda: {"version": 3},
-            tag_dictionary_payload=lambda: {
+        tag_dictionary_calls: list[bool] = []
+
+        def tag_dictionary_payload() -> dict[str, object]:
+            tag_dictionary_calls.append(True)
+            return {
                 "definitions": [
                     {
                         "code": "fee",
@@ -1177,7 +1182,14 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                         "output_sub_label": "手续费",
                     }
                 ]
-            },
+            }
+
+        service = object.__new__(BankFlowRuleBatchApplicationService)
+        service._app_settings_service = settings
+        service._workbench_matching_source_versions_provider = lambda: {"workbench_formal_relation_rule_version": "rules-v1"}
+        service._bank_transaction_category_service = SimpleNamespace(
+            snapshot=lambda: {"version": 3},
+            tag_dictionary_payload=tag_dictionary_payload,
         )
         service._effective_category_provider = provider
         service._relation_facade = relation_facade
@@ -1251,7 +1263,8 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         self.assertEqual(payload["read_model_status"], "fresh")
         self.assertEqual(len(payload["batches"]), 1)
         self.assertGreaterEqual(provider.source_version_calls.count(["2026-07"]), 1)
-        self.assertGreaterEqual(relation_facade.source_version_calls.count("2026-07"), 1)
+        self.assertEqual(relation_facade.source_version_calls.count("2026-07"), 2)
+        self.assertEqual(len(tag_dictionary_calls), 1)
         self.assertEqual(
             repository.calls,
             [

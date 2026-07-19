@@ -32,3 +32,12 @@
 - canonical relation 只通过 `WorkbenchRelationCommandService`；本模块不直接 SQL 写 relation。
 - state store 只原子持久化 changed relation snapshot和 bank-flow batch delta，不同步写 Workbench read model。
 - 其它页面只收到既有 canonical relation fan-out/domain event，不读取本页面私有 UI state，也不被当前页 freshness wait 阻塞。
+
+## 生产首轮未达标后的补充实现
+
+- 首轮 release `main-a3a331b5-20260720030257` 的 all 列表 p95 为 `539.327ms`、month 列表 p95 为 `720.336ms`，因此阶段保持 open。
+- 生产 runtime 指标证明数据库 p95 约 `80.504ms`，主要余量在 Python presentation/source-version。
+- 列表现在每请求只 deep-copy 一次 canonical tag dictionary，并复用 definition index 完成当前页 50 个 batch 与完整 summary categories 的标签展示；旧逐 batch/category 重复 deep-copy 路径已删除。
+- 月份 freshness 删除重复 relation scope 预加载；expected-source 读取仍完整保留。
+- dependency source-version probe reason 按 relation mode 分离，bank-flow API/worker 不再输出旧 no-OA precheck reason。
+- canonical category snapshot SHA-256 增加同合同懒缓存，只在分类或 tag dictionary 真实变化时失效；没有 TTL、Redis、额外表、跨进程 cache 或兼容 fallback。

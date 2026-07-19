@@ -507,3 +507,13 @@
 - 真实本地 PostgreSQL 空库应用全部 migrations 后，paged query + aggregate summary integration test 通过；验证 draft presentation、pagination total 和完整 summary 金额/计数。
 - architecture guard 固定 bank-flow route/application/refresh wrapper 不得出现 `no_oa`、`NO_OA`、`免OA` 或 legacy error map。
 - 最终唯一 SHA、部署 release、生产读/写性能、Page Audit 和 worker drain 证据在本次统一发布验证完成后补录。
+
+生产首轮验证与补充收敛：
+
+- release `main-a3a331b5-20260720030257` 首轮 20 次读测量中，页面壳 p95 `108.923ms`、Audit p95 `265.977ms` 已通过；all 列表从基线 `965.789ms` 降到 `539.327ms`，但仍未达到 `500ms` 门槛；2026-07 月列表 p95 `720.336ms`，且首次请求真实经历一次 stale/enqueue。因此本阶段没有提前关闭。
+- runtime 指标显示列表数据库 p95 约 `80.504ms`，而 server p95 约 `606.884ms`，剩余瓶颈主要在请求内 Python source-version/presentation，而不是 SQL 分页本身。
+- 删除列表热路径中重复的 relation source-version 预加载；月份 expected-source read 本身已经通过同一 facade 读取该 scope，旧调用造成一次重复 I/O。
+- shared source-version port 现在按显式 relation mode 传递 `bank_flow_rule_batch_source_version_precheck`；bank-flow API/worker 不再把旧 `no_oa_bank_batch_source_version_precheck` reason 污染到 dependency I/O，no-OA legacy 默认值只保留在自身调用链。
+- 当前页 50 个 batch 与约 40 个 summary category 过去会分别调用 `tag_dictionary_payload()`，每次 deep-copy 整份分类字典；现在每个请求只建立一次 definition index 并复用，不新增跨请求 payload cache。
+- `BankTransactionCategoryService.snapshot_version()` 缓存与完整 snapshot 序列化完全相同的 SHA-256，只在分类或 tag dictionary 实际变更时失效。20,000 条合成记录中，旧 copy+hash 约 `212.869ms`，首次无 copy hash 约 `190.723ms`，后续读取约 `0.005ms`；该优化保持 hash 合同不变，不改变其它页面数据。
+- 目标与 no-OA 隔离回归 `103 passed`，lint 通过；必须部署新 SHA 后重新执行相同 20 次生产读测量，未达门槛不得关闭。

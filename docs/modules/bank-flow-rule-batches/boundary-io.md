@@ -106,6 +106,7 @@
 - `reset-submitted` 不做前置 `all` refresh；撤回后只同步刷新受影响月份 scope，没有月份时才 fallback `all`。
 - 页面提交的前端阻塞等待到 command 成功为止：单批内部往来提交随后立即本地移除已提交批次，选中流水提交随后清空选择和当前展开批次；提交成功后的下一笔不得被自动选中或自动触发 detail GET，下一笔明细 I/O 只能来自用户显式选择或后续正常列表加载。`bank_flow_rule_batch` freshness wait / reload 在后台 reconcile。撤回、reset 至少只能等待 `bank_flow_rule_batch` 自身 target。`workbench_relation` / `workbench` targets 保留在 mutation result 和事件广播中，由关联台或后台 runtime 收敛；不能让 `workbench/all` 聚合刷新拖慢当前页提交完成反馈。
 - Worker refresh 使用 `bank_flow_rule_batch_source_versions_summary(...)` 判断 scope source versions 是否 unchanged；该 summary 必须在数据库内聚合 row count、distinct source versions 和示例 source_versions，不能把 scope 下全部 read-model rows 的 JSON 拉回 Python。能证明 unchanged 时完成 dirty scope 并跳过批次重建和 snapshot 发布。
+- 列表 presentation 在单次请求内只允许读取一次银行标签字典，并把同一份 definition index 用于当前页标签和完整 summary categories；禁止按 batch/category 重复 deep-copy 整份字典。月份 freshness 对 canonical category snapshot hash 的读取必须使用 `BankTransactionCategoryService.snapshot_version()`；该值与完整 snapshot SHA-256 合同完全一致，只在分类或标签字典真实变更时失效，不能引入 TTL、跨进程业务缓存或绕过 durable readiness。
 - Worker 无法 skip、必须 rebuild 时，发布到 `read_model.bank_flow_rule_batch_rows.source_versions` 的版本仍必须复用该 scope precheck source_versions；后续读取分类或 relation 明细只能影响行内容，不能把 `last_source_versions` 形态写成另一个版本。
 - PostgreSQL hot path index 位于 `0089_read_model_performance_hot_paths.sql`；新增 source-version 判断字段时必须同步维护该查询和索引，不得用 no-OA summary 或全量 Workbench snapshot 兜底。
 - `tag-rules` 保存仍触发 `all` refresh，因为规则变更可能影响所有 active bank-flow relation requirement metadata；后续若要优化必须先有按 relation/tag 反查受影响 scope 的可靠索引。

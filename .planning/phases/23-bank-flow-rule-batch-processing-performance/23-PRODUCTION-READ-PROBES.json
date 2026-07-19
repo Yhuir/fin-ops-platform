@@ -1,0 +1,23 @@
+{
+  "probes": [
+    {
+      "name": "bank_flow_rule_batch_list_all",
+      "path": "/api/bank-flow-rule-batches?page=1&page_size=50",
+      "expected_statuses": [200],
+      "target_ms": 500
+    },
+    {
+      "name": "bank_flow_rule_batch_list_month",
+      "path": "/api/bank-flow-rule-batches?month=2026-07&page=1&page_size=50",
+      "expected_statuses": [200],
+      "target_ms": 500
+    },
+    {
+      "name": "bank_flow_rule_batch_page_audit",
+      "path": "/api/operations/app-health/page-audit?page=bank-flow-rule-batches",
+      "expected_statuses": [200],
+      "target_ms": 1000,
+      "auth_scope": "admin"
+    }
+  ]
+}

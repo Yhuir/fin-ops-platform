@@ -573,6 +573,7 @@ class BankTransactionCategoryService:
             for entry in list(audit_log or [])
             if isinstance(entry, dict)
         ]
+        self._snapshot_version_cache: str | None = None
 
     @classmethod
     def from_snapshot(
@@ -602,6 +603,25 @@ class BankTransactionCategoryService:
                 "tag_dictionary": deepcopy(self._tag_dictionary_payload),
             }
 
+    def snapshot_version(self) -> str:
+        """Return the canonical snapshot hash without copying the full state on every read."""
+        with self._lock:
+            if self._snapshot_version_cache is None:
+                encoded = json.dumps(
+                    {
+                        "schema_version": BANK_TRANSACTION_CATEGORY_SCHEMA_VERSION,
+                        "categories": self._categories,
+                        "audit_log": self._audit_log,
+                        "tag_dictionary": self._tag_dictionary_payload,
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    default=str,
+                ).encode("utf-8")
+                self._snapshot_version_cache = hashlib.sha256(encoded).hexdigest()
+            return self._snapshot_version_cache
+
     def tag_dictionary_payload(self) -> dict[str, Any]:
         with self._lock:
             return deepcopy(self._tag_dictionary_payload)
@@ -618,6 +638,7 @@ class BankTransactionCategoryService:
         with self._lock:
             self._tag_dictionary_payload = normalized_payload
             self._tag_definitions_by_code = self._build_tag_definition_index(normalized_payload)
+            self._snapshot_version_cache = None
 
     @classmethod
     def auto_tag_rules_payload(
@@ -1485,6 +1506,8 @@ class BankTransactionCategoryService:
                 )
 
             self._audit_log.extend(audit_entries)
+            if audit_entries:
+                self._snapshot_version_cache = None
             return {
                 "updated_transaction_ids": [entry["transaction_id"] for entry in updated_categories],
                 "updated_categories": [
