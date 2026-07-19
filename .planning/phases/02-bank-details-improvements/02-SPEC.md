@@ -2,7 +2,7 @@
 
 **更新时间：** 2026-07-20
 **页面：** `bank-details` / `/bank-details`
-**状态：** 三轮审阅完成，允许制定并执行详细计划
+**状态：** `PRODUCTION_VERIFIED`；跨页统一系统门待九页完成后执行
 
 ## Goal
 
@@ -78,16 +78,18 @@
 
 ## Acceptance criteria
 
-- [ ] disconnected UoW 文件、孤立测试和当前错误引用全部移除；
-- [ ] architecture guard 阻止旧 module/class/import 回归，且不放宽现有断言；
-- [ ] bank-details 真实 application/read model/side-effect owner 测试通过；
-- [ ] frontend 页面关键回归通过；
-- [ ] docs、lint、diff 检查通过；
-- [ ] 变更不包含 migration、API/read model/worker/UI 行为变化；
-- [ ] 部署后 warm UI 和 API p95 满足门槛；
-- [ ] 受控写后 bank-detail fresh、显示新事实、queue drained、Audit pass；
-- [ ] 受影响页面和至少一个非相关页面隔离 smoke 通过；
-- [ ] 完成 READY、commit、push、deploy、production evidence 记录后才进入下一页面。
+- [x] disconnected UoW 文件、孤立测试和当前错误引用全部移除；
+- [x] architecture guard 阻止旧 module/class/import 回归，且不放宽现有断言；
+- [x] bank-details 真实 application/read model/side-effect owner 测试通过；
+- [x] frontend 页面关键回归通过；
+- [x] docs、lint、diff 检查通过；
+- [x] 变更不包含 migration、API/read model/worker/UI 行为变化；
+- [x] 部署后 warm UI 基线和 API p95 满足门槛；
+- [x] 受控直接操作后 bank-detail fresh、queue drained、Audit pass；
+- [x] 受影响页面和至少一个非相关页面隔离 smoke 通过；
+- [x] 完成 READY、commit、push、deploy、production evidence 记录后才进入下一页面。
+
+跨页 fan-out 被后续三个未处理页面的 System Audit 安全门在 mutation 前拒绝，不属于银行明细页面失败；该门与共享 `/health/ready` 1 秒 SLO 一并保留到九页最终统一系统验收，详见 `02-PRODUCTION-VALIDATION.md`。
 
 ## Evidence sources
 

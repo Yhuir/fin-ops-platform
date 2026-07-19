@@ -1,7 +1,7 @@
 # 银行明细实施与本地验证
 
 **日期：** 2026-07-20
-**状态：** `READY_FOR_UNIFIED_DEPLOYMENT`
+**状态：** `PRODUCTION_VERIFIED`
 
 ## 变更结果
 
@@ -59,3 +59,15 @@
 - bank-detail fresh 且读取到写后事实；
 - Page Audit pass，dirty/outbox/failed queue 为零；
 - Workbench/no-OA/turnover 和至少一个不相关页面 smoke 无回归。
+
+## 生产验证结果
+
+- 精确 SHA `123e2362d296efb6d23a0a2ca2f6fb8e7cfeebe0` 已部署为 `main-123e2362-20260720004738`；
+- 页面壳/accounts/transactions/rules/Page Audit p95 分别为 110.606/148.195/295.326/222.558/405.607ms，全部小于 1000ms；
+- 幂等 reapply 的 response-to-fresh 为 941.687ms，操作开始到 fresh 约 1.431s，操作开始到 Audit 完成为 1.786s；
+- 操作后 canonical/read model 为 989/989，dirty/outbox/issues/blocking 全为 0；
+- Workbench、bank-flow、turnover 与不相关 settings Audit 均 pass/fresh/drained；
+- 标准跨页 fan-out 在任何 mutation 前被后续三个未处理页面的 System Audit preflight 拒绝，`recovery_required=false`；该全系统门按串行工作流留到九页最终统一验证，未绕过、未产生半写；
+- 共享 `/health/ready` 虽返回 ready/0 blocker，但 2.295–4.566s 未达全局 1 秒门槛；它不在银行明细热路径，本页不越界修改，保留为最终系统门风险。
+
+完整证据见 `02-PRODUCTION-VALIDATION.md`。

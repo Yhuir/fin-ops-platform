@@ -29,6 +29,17 @@
 
 ## 历史记录
 
+## 2026-07-20 - 生产性能、操作后 freshness 与隔离闭环
+
+- 目标：在精确 release 上验证银行明细页面读性能、幂等操作后的 fresh 可见性、Page Audit、queue drain 与跨页隔离，并区分页面门和九页统一系统门。
+- 影响范围：仅生产验证与证据记录；没有新增运行时代码、API、read model、worker、cache、migration、前端或业务数据口径变更。
+- 关键决策：release `main-123e2362-20260720004738` 对应 SHA `123e2362d296efb6d23a0a2ca2f6fb8e7cfeebe0`。银行明细页面/API p95 均小于 406ms；幂等 auto-tag reapply response-to-fresh 为 941.687ms，操作后 Audit pass、dirty/outbox/blocking 为 0。标准跨页 fan-out 被三个后续未处理页面的 System Audit 安全门在 mutation 前拒绝且无需恢复；不绕过门禁，也不在银行明细轮次越界修复其他页面，留到九页最终统一验收。
+- 文档影响：更新 phase spec/verification，并新增 `02-PRODUCTION-VALIDATION.md`；长期边界和业务口径不变。
+- 测试覆盖：生产 authenticated read 共 100 样本；直接幂等写后 freshness；bank-details、Workbench、bank-flow、turnover、settings Page Audit；release/worker/queue readiness。全系统 fan-out 未 mutation，原因与恢复状态均有证据。
+- 验证命令：`./scripts/deploy-oa.sh`；authenticated HTTP SLO probe；`POST /api/bank-details/auto-tag-rules/reapply`；bank-details 与隔离页 Page Audit；root-owned write-operation runner dry-run/apply preflight；health-ready payload probe。
+- 未测风险：共享 `/health/ready` 虽 ready 且 runtime blocker 为 0，但耗时 2.295–4.566s；System Audit 的 `tax-offset`、`input-invoice-usage`、`output-invoice-collections` 尚失败。二者不在银行明细热路径，保留到后续对应页面和最终九页系统门。
+- 后续事项：银行明细状态为 `PRODUCTION_VERIFIED`；主控可进入下一个页面。九页全部完成后必须补跑标准 fan-out 与共享 readiness 总验收，未通过不能结束 Goal。
+
 ## 2026-07-20 - 删除未接入生产的 Bankdetail UoW 试验链
 
 - 目标：移除注释明确说明 disconnected from production write paths、且全仓无 runtime caller 的 `BankdetailWriteUnitOfWork` skeleton，避免它继续被误认为银行分类、自动标签和 no-OA 的生产事务 owner。

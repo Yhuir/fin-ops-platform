@@ -1,0 +1,170 @@
+{
+  "api_prefix": "/fin-ops-api",
+  "auth_configured": true,
+  "base_url": "https://www.yn-sourcing.com/",
+  "generated_at": "2026-07-19T16:50:56.736368+00:00",
+  "iterations": 20,
+  "probes": [
+    {
+      "cache_statuses": {},
+      "duration_ms": {
+        "p50": 96.215,
+        "p95": 110.606,
+        "p99": 111.54
+      },
+      "errors": [],
+      "expected_statuses": [
+        200
+      ],
+      "failure_count": 0,
+      "freshness_pass": true,
+      "kind": "page",
+      "name": "page_shell_bank_details",
+      "non_fresh_read_model_statuses": {},
+      "path": "/fin-ops/bank-details",
+      "read_model_statuses": {},
+      "refresh_enqueued_count": 0,
+      "sample_count": 20,
+      "slo_pass": true,
+      "status": "pass",
+      "status_counts": {
+        "200": 20
+      },
+      "success_count": 20,
+      "target_ms": 1000.0
+    },
+    {
+      "cache_statuses": {
+        "uncached": 20
+      },
+      "duration_ms": {
+        "p50": 126.133,
+        "p95": 148.195,
+        "p99": 150.061
+      },
+      "errors": [],
+      "expected_statuses": [
+        200,
+        202
+      ],
+      "failure_count": 0,
+      "freshness_pass": true,
+      "kind": "api",
+      "name": "bank_details_accounts",
+      "non_fresh_read_model_statuses": {},
+      "path": "/api/bank-details/accounts?date_from=2026-01-01&date_to=2026-12-31",
+      "read_model_statuses": {
+        "fresh": 20
+      },
+      "refresh_enqueued_count": 0,
+      "sample_count": 20,
+      "slo_pass": true,
+      "status": "pass",
+      "status_counts": {
+        "200": 20
+      },
+      "success_count": 20,
+      "target_ms": 1000.0
+    },
+    {
+      "cache_statuses": {
+        "hit": 20
+      },
+      "duration_ms": {
+        "p50": 184.3,
+        "p95": 295.326,
+        "p99": 335.719
+      },
+      "errors": [],
+      "expected_statuses": [
+        200,
+        202
+      ],
+      "failure_count": 0,
+      "freshness_pass": true,
+      "kind": "api",
+      "name": "bank_details_transactions",
+      "non_fresh_read_model_statuses": {},
+      "path": "/api/bank-details/transactions?date_from=2026-01-01&date_to=2026-12-31&page=1&page_size=50",
+      "read_model_statuses": {
+        "fresh": 20
+      },
+      "refresh_enqueued_count": 0,
+      "sample_count": 20,
+      "slo_pass": true,
+      "status": "pass",
+      "status_counts": {
+        "200": 20
+      },
+      "success_count": 20,
+      "target_ms": 1000.0
+    },
+    {
+      "cache_statuses": {},
+      "duration_ms": {
+        "p50": 164.644,
+        "p95": 222.558,
+        "p99": 268.636
+      },
+      "errors": [],
+      "expected_statuses": [
+        200,
+        202
+      ],
+      "failure_count": 0,
+      "freshness_pass": true,
+      "kind": "api",
+      "name": "bank_details_auto_tag_rules",
+      "non_fresh_read_model_statuses": {},
+      "path": "/api/bank-details/auto-tag-rules",
+      "read_model_statuses": {},
+      "refresh_enqueued_count": 0,
+      "sample_count": 20,
+      "slo_pass": true,
+      "status": "pass",
+      "status_counts": {
+        "200": 20
+      },
+      "success_count": 20,
+      "target_ms": 1000.0
+    },
+    {
+      "cache_statuses": {},
+      "duration_ms": {
+        "p50": 338.932,
+        "p95": 405.607,
+        "p99": 411.52
+      },
+      "errors": [],
+      "expected_statuses": [
+        200
+      ],
+      "failure_count": 0,
+      "freshness_pass": true,
+      "kind": "api",
+      "name": "bank_details_page_audit",
+      "non_fresh_read_model_statuses": {},
+      "path": "/api/operations/app-health/page-audit?page=bank-details",
+      "read_model_statuses": {},
+      "refresh_enqueued_count": 0,
+      "sample_count": 20,
+      "slo_pass": true,
+      "status": "pass",
+      "status_counts": {
+        "200": 20
+      },
+      "success_count": 20,
+      "target_ms": 1000.0
+    }
+  ],
+  "status": "pass",
+  "summary": {
+    "failed_probe_count": 0,
+    "max_p95_ms": 405.607,
+    "probe_count": 5,
+    "sample_count": 100
+  },
+  "timeout_seconds": 10.0,
+  "version": 1,
+  "warmup": 2
+}

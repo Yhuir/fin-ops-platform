@@ -1,0 +1,46 @@
+{
+  "api_performance_endpoint_count": 10,
+  "api_performance_endpoints_returned": 10,
+  "api_performance_omitted_endpoint_count": 0,
+  "content_type": "application/json; charset=utf-8",
+  "elapsed_ms": 2294.773,
+  "errors": [
+    "slo_miss"
+  ],
+  "generated_at": "2026-07-19T16:57:26.572383+00:00",
+  "health_status": "ready",
+  "max_api_performance_endpoints": 20,
+  "max_response_bytes": 50000,
+  "response_bytes": 10359,
+  "runtime_blocker_count": 0,
+  "runtime_blockers": {},
+  "runtime_release": {
+    "consistent": true,
+    "expected_source_root": "/opt/fin-ops/releases/main-123e2362-20260720004738/src/backend/src",
+    "is_release_runtime": true,
+    "package_file": "/opt/fin-ops/releases/main-123e2362-20260720004738/src/backend/src/fin_ops_platform/__init__.py",
+    "problems": [],
+    "pythonpath": [
+      "/opt/fin-ops/releases/main-123e2362-20260720004738/src/backend/src"
+    ],
+    "release_metadata": {
+      "created_at": "2026-07-20T00:47:50",
+      "deploy_mode": "release",
+      "frontend_base_path": "/fin-ops/",
+      "git_branch": "main",
+      "git_commit": "123e2362d296efb6d23a0a2ca2f6fb8e7cfeebe0",
+      "git_status_porcelain": "",
+      "release_name": "main-123e2362-20260720004738"
+    },
+    "release_metadata_error": null,
+    "release_metadata_path": "/opt/fin-ops/releases/main-123e2362-20260720004738/src/RELEASE.json",
+    "working_directory": "/opt/fin-ops/releases/main-123e2362-20260720004738/src"
+  },
+  "runtime_release_name": "main-123e2362-20260720004738",
+  "status": "fail",
+  "status_code": 200,
+  "target_ms": 1000.0,
+  "tool": "health_ready_payload_probe",
+  "url": "https://www.yn-sourcing.com/fin-ops-api/health/ready",
+  "version": 1
+}
