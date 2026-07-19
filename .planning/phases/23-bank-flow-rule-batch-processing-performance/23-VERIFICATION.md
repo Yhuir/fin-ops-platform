@@ -45,3 +45,17 @@
 - 20 次测量：页面壳 p95 `114.584ms` pass；all list p95 `244.072ms` pass；2026-07 list p95 `541.278ms` fail但20/20 fresh、零 enqueue；Page Audit p95 `294.511ms` pass。
 - 补充 durable freshness实现后，application/legacy no-OA目标组通过；真实 disposable PostgreSQL应用全部 migrations并通过 mixed-source fail-closed integration test。全量 repository boundary组仍有已知 cost-statistics fan-out fixture failure，与本 diff无关且未修改断言。
 - 下一门禁仍是新 SHA部署后的相同20次采样；month list未达到 `<=500ms` 前不进入写验证。
+
+## 最终生产读结果
+
+- SHA `a5e5b795a` 已部署为 release `main-a5e5b795-20260720032959`；API、dispatcher 与 22 个 workers active，migration 0001–0111 current。
+- 20 次测量全部通过：页面壳 p95 `130.237ms`；all list p95 `272.284ms`；2026-07 month list p95 `260.943ms`；Page Audit p95 `322.560ms`。80/80 响应成功，两个列表均 20/20 `fresh` 且零 enqueue。
+- 详情读取分别选择 1-row 与 33-row 批次，各测量 20 次：small detail p95 `175.940ms`，large detail p95 `337.446ms`；40/40 低于 `500ms` 门槛。
+- `bank-flow-rule-batches`、`reconciliation-workbench`、`bank-details`、`turnover-ledger`、`cost-statistics` 五个直接/上下游 Page Audit 均为 `pass / fresh / drained / ready`、0 issue。
+
+## 生产写验证安全门
+
+- 按运行手册在首个生产 mutation 前执行 `app-health-operations` 全系统 Audit。门禁返回 `issues_found`：`tax-offset`、`input-invoice-usage`、`output-invoice-collections`、`settings` 四个既有页面 integrity 未通过；freshness 仍为 fresh、queue drained。
+- 安全门在任何业务写之前终止，确认本轮未创建、提交、撤回或修改任何生产批次/关系/业务数据。
+- 这四个页面不属于第 3 项允许修改的模块范围；为保持九页面严格串行和无污染 I/O，本阶段不绕过全系统写门禁，也不跨模块夹带修复。submit→fresh→withdraw→fresh 的受控生产写证据移入主控流程最终系统门：相关页面完成且全系统预检通过后再执行。
+- 因此第 3 项代码、生产读性能、详情性能、目标页 Audit 与跨页只读隔离已达到门槛；唯一延后项是被全局前置门禁阻止的真实生产写样本，不得误报为已执行。

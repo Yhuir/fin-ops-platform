@@ -1,0 +1,135 @@
+{
+  "api_prefix": "/fin-ops-api",
+  "auth_configured": true,
+  "base_url": "https://www.yn-sourcing.com/",
+  "generated_at": "2026-07-19T19:32:21.165403+00:00",
+  "iterations": 20,
+  "probes": [
+    {
+      "cache_statuses": {},
+      "duration_ms": {
+        "p50": 90.804,
+        "p95": 130.237,
+        "p99": 153.685
+      },
+      "errors": [],
+      "expected_statuses": [
+        200
+      ],
+      "failure_count": 0,
+      "freshness_pass": true,
+      "kind": "page",
+      "name": "page_shell_bank_flow_rule_batches",
+      "non_fresh_read_model_statuses": {},
+      "path": "/fin-ops/bank-flow-rule-batches",
+      "read_model_statuses": {},
+      "refresh_enqueued_count": 0,
+      "sample_count": 20,
+      "slo_pass": true,
+      "status": "pass",
+      "status_counts": {
+        "200": 20
+      },
+      "success_count": 20,
+      "target_ms": 500.0
+    },
+    {
+      "cache_statuses": {},
+      "duration_ms": {
+        "p50": 212.436,
+        "p95": 272.284,
+        "p99": 310.522
+      },
+      "errors": [],
+      "expected_statuses": [
+        200
+      ],
+      "failure_count": 0,
+      "freshness_pass": true,
+      "kind": "api",
+      "name": "bank_flow_rule_batch_list_all",
+      "non_fresh_read_model_statuses": {},
+      "path": "/api/bank-flow-rule-batches?page=1&page_size=50",
+      "read_model_statuses": {
+        "fresh": 20
+      },
+      "refresh_enqueued_count": 0,
+      "sample_count": 20,
+      "slo_pass": true,
+      "status": "pass",
+      "status_counts": {
+        "200": 20
+      },
+      "success_count": 20,
+      "target_ms": 500.0
+    },
+    {
+      "cache_statuses": {},
+      "duration_ms": {
+        "p50": 164.6,
+        "p95": 260.943,
+        "p99": 264.238
+      },
+      "errors": [],
+      "expected_statuses": [
+        200
+      ],
+      "failure_count": 0,
+      "freshness_pass": true,
+      "kind": "api",
+      "name": "bank_flow_rule_batch_list_month",
+      "non_fresh_read_model_statuses": {},
+      "path": "/api/bank-flow-rule-batches?month=2026-07&page=1&page_size=50",
+      "read_model_statuses": {
+        "fresh": 20
+      },
+      "refresh_enqueued_count": 0,
+      "sample_count": 20,
+      "slo_pass": true,
+      "status": "pass",
+      "status_counts": {
+        "200": 20
+      },
+      "success_count": 20,
+      "target_ms": 500.0
+    },
+    {
+      "cache_statuses": {},
+      "duration_ms": {
+        "p50": 248.573,
+        "p95": 322.56,
+        "p99": 447.076
+      },
+      "errors": [],
+      "expected_statuses": [
+        200
+      ],
+      "failure_count": 0,
+      "freshness_pass": true,
+      "kind": "api",
+      "name": "bank_flow_rule_batch_page_audit",
+      "non_fresh_read_model_statuses": {},
+      "path": "/api/operations/app-health/page-audit?page=bank-flow-rule-batches",
+      "read_model_statuses": {},
+      "refresh_enqueued_count": 0,
+      "sample_count": 20,
+      "slo_pass": true,
+      "status": "pass",
+      "status_counts": {
+        "200": 20
+      },
+      "success_count": 20,
+      "target_ms": 1000.0
+    }
+  ],
+  "status": "pass",
+  "summary": {
+    "failed_probe_count": 0,
+    "max_p95_ms": 322.56,
+    "probe_count": 4,
+    "sample_count": 80
+  },
+  "timeout_seconds": 15.0,
+  "version": 1,
+  "warmup": 2
+}

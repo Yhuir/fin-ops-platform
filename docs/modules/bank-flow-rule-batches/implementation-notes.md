@@ -525,3 +525,9 @@
 - 列表删除 live dependency source-version读取，改为只消费 `read_page(...)` 返回的本模块 durable dirty/readiness/source-consistency proof。canonical writer仍必须事务内写 dirty/outbox，worker仍执行完整 source-version precheck；不存在“事实变了但页面继续伪装 fresh”的 fallback。
 - repository 对 fresh 月份 scope 的多个 distinct source versions返回 `schema_mismatch`，API返回明确 stale reason并入队 scoped refresh；all scope允许不同月份具有不同 source versions。
 - 同时删除 month readiness 对同一 dirty scope 的重复查询。真实 disposable PostgreSQL应用 0001–0111 后，SQL分页/聚合/混合 source-version fail-closed integration test通过；目标测试中的既有 cost-statistics fan-out fixture failure不属于本改动且未放宽。
+
+最终生产读验证与写门禁：
+
+- SHA `a5e5b795a` / release `main-a5e5b795-20260720032959` 的最终 20 次生产采样全部达标：页面壳 p95 `130.237ms`、all list p95 `272.284ms`、2026-07 month list p95 `260.943ms`、Page Audit p95 `322.560ms`；80/80 成功，list 40/40 fresh 且零 enqueue。
+- 1-row 与 33-row 详情各 20 次测量，p95 分别为 `175.940ms` 与 `337.446ms`；`bank-flow-rule-batches`、关联台、银行明细、流水台账、成本统计五个 Page Audit 均 `pass / fresh / drained / ready`、0 issue。
+- 生产 submit/withdraw 可逆样本没有被擅自执行：首次 mutation 的强制 `app-health-operations` 预检发现 `tax-offset`、`input-invoice-usage`、`output-invoice-collections`、`settings` 四个范围外页面已有 integrity issue，并在写前 fail closed。为保持模块隔离和九页面串行，当前模块不跨界修复、也不绕过门禁；该写证据在主控流程最终系统门、全局预检恢复 pass 后补做。
