@@ -7106,58 +7106,175 @@ class PostgresSummaryReadModelRepository:
         normalized_scope_key = text(scope_key) or "all"
         normalized_page = max(int_value(page, 1), 1)
         normalized_page_size = min(max(int_value(page_size, 50), 1), 200)
-        clauses: list[str] = ["status <> 'withdrawn'"]
-        params: list[Any] = []
+        base_clauses: list[str] = ["status <> 'withdrawn'"]
+        base_params: list[Any] = []
         if normalized_scope_key != "all":
-            clauses.append("scope_month = %s::date")
-            params.append(month_start(normalized_scope_key))
+            base_clauses.append("scope_month = %s::date")
+            base_params.append(month_start(normalized_scope_key))
+        scoped_clauses: list[str] = ["true"]
+        scoped_params: list[Any] = []
         if normalized_family != "all":
-            clauses.append("family = %s")
-            params.append(normalized_family)
+            scoped_clauses.append("family = %s")
+            scoped_params.append(normalized_family)
         if normalized_status:
-            clauses.append("status = %s")
-            params.append(normalized_status)
-        where_sql = " and ".join(clauses)
-        all_rows = self._connection.fetch_all(
-            f"""
-            select relation_id, family, status, amount::text as amount, source_versions, payload, raw_payload
-            from read_model.turnover_ledger_rows
-            where {where_sql}
-            order by scope_month desc nulls last, generated_at desc, relation_id
-            """,
-            tuple(params),
+            scoped_clauses.append("status = %s")
+            scoped_params.append(normalized_status)
+
+        def decimal_sql(field_name: str) -> str:
+            normalized = f"replace(btrim(coalesce(payload ->> '{field_name}', '')), ',', '')"
+            return (
+                f"case when {normalized} ~ '^[+-]?([0-9]+([.][0-9]*)?|[.][0-9]+)$' "
+                f"then ({normalized})::numeric else 0::numeric end"
+            )
+
+        explicit_amount_sql = " or ".join(
+            f"(payload ? '{field_name}' and payload -> '{field_name}' <> 'null'::jsonb)"
+            for field_name in (
+                "pending_repayment_amount",
+                "repaid_amount",
+                "pending_collection_amount",
+                "collected_amount",
+                "closed_amount",
+            )
         )
-        if not all_rows:
-            return None
-        source_versions = _shared_source_versions(all_rows)
-        source_versions_mixed = _turnover_ledger_source_versions_mixed(all_rows)
-        ledger_rows = [_turnover_ledger_row_payload(row) for row in all_rows]
+        direction_sql = "true"
         if normalized_direction == "borrow_in":
-            ledger_rows = [
-                row for row in ledger_rows
-                if row.get("business_type") == "borrow_in"
-                or _decimal_or_zero(row.get("pending_repayment_amount")) > Decimal("0")
-                or _decimal_or_zero(row.get("repaid_amount")) > Decimal("0")
-            ]
+            direction_sql = "business_type = 'borrow_in' or pending_repayment_input > 0 or repaid_input > 0"
         elif normalized_direction == "borrow_out":
-            ledger_rows = [
-                row for row in ledger_rows
-                if row.get("business_type") in {"borrow_out", "business_receivable"}
-                or _decimal_or_zero(row.get("pending_collection_amount")) > Decimal("0")
-                or _decimal_or_zero(row.get("collected_amount")) > Decimal("0")
-            ]
-        visible_rows = ledger_rows[(normalized_page - 1) * normalized_page_size : normalized_page * normalized_page_size]
+            direction_sql = (
+                "business_type in ('borrow_out', 'business_receivable') "
+                "or pending_collection_input > 0 or collected_input > 0"
+            )
+        cte_sql = f"""
+            with base as materialized (
+                select relation_id, family, status, scope_month, generated_at, source_versions, payload
+                from read_model.turnover_ledger_rows
+                where {' and '.join(base_clauses)}
+            ), scoped as (
+                select * from base where {' and '.join(scoped_clauses)}
+            ), amount_inputs as (
+                select
+                    *,
+                    ({explicit_amount_sql}) as has_explicit_amounts,
+                    coalesce(payload ->> 'business_type', '') as business_type,
+                    {decimal_sql('pending_repayment_amount')} as pending_repayment_input,
+                    {decimal_sql('repaid_amount')} as repaid_input,
+                    {decimal_sql('pending_collection_amount')} as pending_collection_input,
+                    {decimal_sql('collected_amount')} as collected_input,
+                    {decimal_sql('closed_amount')} as closed_input,
+                    {decimal_sql('principal_amount')} as principal_input,
+                    {decimal_sql('settled_amount')} as settled_input,
+                    {decimal_sql('balance_amount')} as balance_input
+                from scoped
+            ), filtered as (
+                select * from amount_inputs where {direction_sql}
+            ), normalized as (
+                select
+                    *,
+                    case
+                        when has_explicit_amounts then pending_repayment_input
+                        when business_type = 'borrow_in' then greatest(balance_input, 0::numeric)
+                        else 0::numeric
+                    end as pending_repayment_amount,
+                    case
+                        when has_explicit_amounts then repaid_input
+                        when business_type = 'borrow_in' then settled_input
+                        else 0::numeric
+                    end as repaid_amount,
+                    case
+                        when has_explicit_amounts then pending_collection_input
+                        when business_type in ('borrow_out', 'business_receivable')
+                            then greatest(balance_input, 0::numeric)
+                        else 0::numeric
+                    end as pending_collection_amount,
+                    case
+                        when has_explicit_amounts then collected_input
+                        when business_type in ('borrow_out', 'business_receivable') then settled_input
+                        else 0::numeric
+                    end as collected_amount,
+                    case
+                        when has_explicit_amounts then closed_input
+                        when balance_input = 0 and status in ('deterministic', 'confirmed') then principal_input
+                        else 0::numeric
+                    end as closed_amount
+                from filtered
+            )
+        """
+        query_params = tuple([*base_params, *scoped_params])
+        aggregate_rows = self._connection.fetch_all(
+            f"""
+            {cte_sql}, version_proof as (
+                select
+                    count(*) > 0 as scope_exists,
+                    case
+                        when count(*) > 0
+                         and bool_and(jsonb_typeof(source_versions) = 'object')
+                         and count(distinct source_versions) = 1
+                            then min(source_versions::text)::jsonb
+                        else '{{}}'::jsonb
+                    end as source_versions,
+                    coalesce(
+                        bool_and(jsonb_typeof(source_versions) = 'object' and source_versions <> '{{}}'::jsonb)
+                        and count(distinct source_versions) > 1,
+                        false
+                    ) as source_versions_mixed
+                from base
+            ), summary_rows as (
+                select
+                    grouping(family) = 1 as is_total,
+                    family,
+                    coalesce(sum(pending_repayment_amount), 0)::text as pending_repayment_amount,
+                    coalesce(sum(repaid_amount), 0)::text as repaid_amount,
+                    coalesce(sum(pending_collection_amount), 0)::text as pending_collection_amount,
+                    coalesce(sum(collected_amount), 0)::text as collected_amount,
+                    coalesce(sum(closed_amount), 0)::text as closed_amount,
+                    count(*) filter (where status = 'suggested')::integer as suggested_count,
+                    count(*) filter (where status = 'conflict')::integer as conflict_count,
+                    count(*)::integer as row_count
+                from normalized
+                group by grouping sets ((), (family))
+            )
+            select summary_rows.*, version_proof.scope_exists,
+                   version_proof.source_versions, version_proof.source_versions_mixed
+            from summary_rows
+            cross join version_proof
+            order by summary_rows.is_total desc, summary_rows.family
+            """,
+            query_params,
+        )
+        aggregate = next((row for row in aggregate_rows if bool(row.get("is_total"))), None)
+        if not isinstance(aggregate, dict) or not bool(aggregate.get("scope_exists")):
+            return None
+        total = max(int_value(aggregate.get("row_count"), 0), 0)
+        visible_rows: list[dict[str, Any]] = []
+        if total:
+            rows = self._connection.fetch_all(
+                f"""
+                {cte_sql}
+                select payload
+                from filtered
+                order by scope_month desc nulls last, generated_at desc, relation_id
+                limit %s offset %s
+                """,
+                (*query_params, normalized_page_size, (normalized_page - 1) * normalized_page_size),
+            )
+            visible_rows = [dict(row["payload"]) for row in rows if isinstance(row.get("payload"), dict)]
+        family_rows = {
+            text(row.get("family")): row
+            for row in aggregate_rows
+            if not bool(row.get("is_total")) and text(row.get("family"))
+        }
         payload = {
-            "summary": _turnover_ledger_summary(ledger_rows),
+            "summary": _turnover_ledger_aggregate_summary(aggregate),
             "family_summaries": [
-                _turnover_ledger_family_summary(family_key, [row for row in ledger_rows if row.get("family") == family_key])
+                _turnover_ledger_family_aggregate_summary(family_key, family_rows.get(family_key))
                 for family_key in ("personal", "company", "bank", "business")
             ],
             "rows": visible_rows,
             "pagination": {
                 "page": normalized_page,
                 "page_size": normalized_page_size,
-                "total": len(ledger_rows),
+                "total": total,
             },
             "filters": {
                 "family": normalized_family,
@@ -7165,12 +7282,32 @@ class PostgresSummaryReadModelRepository:
                 "status": normalized_status,
             },
             "read_model_status": "fresh",
-            "refresh_status": self._refresh_status(scope_type="turnover_ledger", scope_key=normalized_scope_key),
-            "source_versions": source_versions,
+            "refresh_status": self._turnover_ledger_refresh_status(scope_key=normalized_scope_key),
+            "source_versions": aggregate.get("source_versions") if isinstance(aggregate.get("source_versions"), dict) else {},
         }
-        if source_versions_mixed:
+        if bool(aggregate.get("source_versions_mixed")):
             payload["source_versions_mixed"] = True
         return payload
+
+    def _turnover_ledger_refresh_status(self, *, scope_key: str) -> str:
+        if scope_key != "all":
+            return self._refresh_status(scope_type="turnover_ledger", scope_key=scope_key)
+        row = self._connection.fetch_one(
+            """
+            select
+                coalesce(bool_or(status = 'failed'), false) as has_failed,
+                coalesce(bool_or(status in ('pending', 'processing')), false) as has_active
+            from job.read_model_dirty_scopes
+            where tenant_id = 'default'
+              and scope_type = 'turnover_ledger'
+              and status in ('pending', 'processing', 'failed')
+            """
+        )
+        if isinstance(row, dict) and bool(row.get("has_failed")):
+            return "stale"
+        if isinstance(row, dict) and bool(row.get("has_active")):
+            return "refreshing"
+        return "fresh"
 
     def save_turnover_ledger_rows(self, payload: dict[str, Any], *, scope_key: str | None = None) -> None:
         rows = payload.get("rows") if isinstance(payload, dict) else None
@@ -7206,7 +7343,7 @@ class PostgresSummaryReadModelRepository:
                         bank_row_ids,
                         jsonb(row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}),
                         jsonb(row),
-                        jsonb({"normalized_payload": row}),
+                        jsonb({}),
                     ),
                 )
             _execute_many(
@@ -7238,9 +7375,6 @@ class PostgresSummaryReadModelRepository:
             )
 
         run_in_transaction(self._connection, write)
-
-    def clear_turnover_ledger_rows(self) -> None:
-        self._connection.execute("delete from read_model.turnover_ledger_rows", ())
 
     def get_tax_offset_view(self, *, scope_key: str) -> dict[str, Any] | None:
         normalized_scope_key = str(scope_key or "").strip()
@@ -7823,9 +7957,6 @@ class PostgresReadModelRepository:
 
     def save_turnover_ledger_rows(self, *args: Any, **kwargs: Any) -> None:
         self._summary_read_model_repository.save_turnover_ledger_rows(*args, **kwargs)
-
-    def clear_turnover_ledger_rows(self, *args: Any, **kwargs: Any) -> None:
-        self._summary_read_model_repository.clear_turnover_ledger_rows(*args, **kwargs)
 
     def search_index(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
         return self._search_workbench_relation_repository.search_index(*args, **kwargs)
@@ -13162,105 +13293,22 @@ def _tax_offset_item_count(payload: dict[str, Any]) -> int:
     return total
 
 
-def _turnover_ledger_row_payload(row: dict[str, Any]) -> dict[str, Any]:
-    payload = _read_model_payload(row)
-    if isinstance(payload, dict):
-        return payload
+def _turnover_ledger_aggregate_summary(row: dict[str, Any] | None) -> dict[str, Any]:
+    aggregate = row if isinstance(row, dict) else {}
     return {
-        "relation_id": text(row.get("relation_id")),
-        "family": text(row.get("family")),
-        "status": text(row.get("status")),
-        "balance_amount": decimal_text(row.get("amount")) or "0.00",
+        "pending_repayment_amount": _format_decimal(_decimal_or_zero(aggregate.get("pending_repayment_amount"))),
+        "repaid_amount": _format_decimal(_decimal_or_zero(aggregate.get("repaid_amount"))),
+        "pending_collection_amount": _format_decimal(_decimal_or_zero(aggregate.get("pending_collection_amount"))),
+        "collected_amount": _format_decimal(_decimal_or_zero(aggregate.get("collected_amount"))),
+        "closed_amount": _format_decimal(_decimal_or_zero(aggregate.get("closed_amount"))),
+        "suggested_count": max(int_value(aggregate.get("suggested_count"), 0), 0),
+        "conflict_count": max(int_value(aggregate.get("conflict_count"), 0), 0),
+        "row_count": max(int_value(aggregate.get("row_count"), 0), 0),
     }
 
 
-def _shared_source_versions(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    versions: dict[str, Any] = {}
-    for row in rows:
-        row_versions = row.get("source_versions")
-        if not isinstance(row_versions, dict):
-            return {}
-        if not versions:
-            versions = dict(row_versions)
-            continue
-        if row_versions != versions:
-            return {}
-    return versions
-
-
-def _turnover_ledger_source_versions_mixed(rows: list[dict[str, Any]]) -> bool:
-    first_versions: dict[str, Any] | None = None
-    for row in rows:
-        row_versions = row.get("source_versions")
-        if not isinstance(row_versions, dict) or not row_versions:
-            return False
-        if first_versions is None:
-            first_versions = dict(row_versions)
-            continue
-        if row_versions != first_versions:
-            return True
-    return False
-
-
-def _turnover_ledger_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    pending_repayment = Decimal("0")
-    repaid = Decimal("0")
-    pending_collection = Decimal("0")
-    collected = Decimal("0")
-    closed = Decimal("0")
-    suggested_count = 0
-    conflict_count = 0
-    for row in rows:
-        if any(
-            row.get(key) is not None
-            for key in (
-                "pending_repayment_amount",
-                "repaid_amount",
-                "pending_collection_amount",
-                "collected_amount",
-                "closed_amount",
-            )
-        ):
-            pending_repayment += _decimal_or_zero(row.get("pending_repayment_amount"))
-            repaid += _decimal_or_zero(row.get("repaid_amount"))
-            pending_collection += _decimal_or_zero(row.get("pending_collection_amount"))
-            collected += _decimal_or_zero(row.get("collected_amount"))
-            closed += _decimal_or_zero(row.get("closed_amount"))
-            if row.get("status") == "suggested":
-                suggested_count += 1
-            if row.get("status") == "conflict":
-                conflict_count += 1
-            continue
-        principal = _decimal_or_zero(row.get("principal_amount"))
-        settled = _decimal_or_zero(row.get("settled_amount"))
-        balance = _decimal_or_zero(row.get("balance_amount"))
-        business_type = text(row.get("business_type")) or ""
-        if business_type == "borrow_in":
-            pending_repayment += max(balance, Decimal("0"))
-            repaid += settled
-        elif business_type in {"borrow_out", "business_receivable"}:
-            pending_collection += max(balance, Decimal("0"))
-            collected += settled
-        if balance == Decimal("0") and row.get("status") in {"deterministic", "confirmed"}:
-            closed += principal
-        if row.get("status") == "suggested":
-            suggested_count += 1
-        if row.get("status") == "conflict":
-            conflict_count += 1
-    return {
-        "pending_repayment_amount": _format_decimal(pending_repayment),
-        "repaid_amount": _format_decimal(repaid),
-        "pending_collection_amount": _format_decimal(pending_collection),
-        "collected_amount": _format_decimal(collected),
-        "closed_amount": _format_decimal(closed),
-        "suggested_count": suggested_count,
-        "conflict_count": conflict_count,
-        "row_count": len(rows),
-    }
-
-
-def _turnover_ledger_family_summary(family: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
-    summary = _turnover_ledger_summary(rows)
+def _turnover_ledger_family_aggregate_summary(family: str, row: dict[str, Any] | None) -> dict[str, Any]:
+    summary = _turnover_ledger_aggregate_summary(row)
     pending_amount = _decimal_or_zero(summary.get("pending_repayment_amount")) + _decimal_or_zero(
         summary.get("pending_collection_amount")
     )

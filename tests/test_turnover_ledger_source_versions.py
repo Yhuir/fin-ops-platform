@@ -61,7 +61,7 @@ class TurnoverLedgerSourceVersionsTests(unittest.TestCase):
         versions = self._versions()
 
         self.assertIn("turnover_ledger_schema_version", versions)
-        self.assertEqual(versions["turnover_ledger_schema_version"], "2026-07-turnover-ledger-v5")
+        self.assertEqual(versions["turnover_ledger_schema_version"], "2026-07-turnover-ledger-v6")
         self.assertIn("turnover_relation_schema_version", versions)
         self.assertIn("bank_transaction_category_schema_version", versions)
         self.assertIn("bank_auto_tag_rules_version", versions)

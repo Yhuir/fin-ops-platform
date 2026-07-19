@@ -1,12 +1,9 @@
 from __future__ import annotations
 
+import inspect
 import unittest
 
-from fin_ops_platform.services.postgres_repositories.read_models import (
-    _turnover_ledger_family_summary,
-    _turnover_ledger_source_versions_mixed,
-    _turnover_ledger_summary,
-)
+from fin_ops_platform.services.postgres_repositories.read_models import PostgresSummaryReadModelRepository
 from fin_ops_platform.services.turnover_ledger_query_service import TurnoverLedgerQueryService
 from fin_ops_platform.services.turnover_ledger_read_model_repository import TurnoverLedgerReadModelRepositoryPort
 
@@ -30,32 +27,13 @@ class FakeRepository:
 
 
 class TurnoverLedgerQueryServiceTests(unittest.TestCase):
-    def test_read_model_summary_uses_explicit_group_amount_fields(self) -> None:
-        rows = [
-            {
-                "relation_id": "group-personal",
-                "family": "personal",
-                "pending_repayment_amount": "1000.00",
-                "repaid_amount": "200.00",
-                "pending_collection_amount": "500.00",
-                "collected_amount": "300.00",
-                "closed_amount": "0.00",
-                "balance_amount": "1500.00",
-            }
-        ]
+    def test_repository_query_is_bounded_and_has_no_raw_payload_fallback(self) -> None:
+        source = inspect.getsource(PostgresSummaryReadModelRepository.list_turnover_ledger_view)
 
-        summary = _turnover_ledger_summary(rows)
-        family_summary = _turnover_ledger_family_summary("personal", rows)
-
-        self.assertEqual(summary["pending_repayment_amount"], "1000.00")
-        self.assertEqual(summary["repaid_amount"], "200.00")
-        self.assertEqual(summary["pending_collection_amount"], "500.00")
-        self.assertEqual(summary["collected_amount"], "300.00")
-        self.assertEqual(family_summary["pending_repayment_amount"], "1000.00")
-        self.assertEqual(family_summary["repaid_amount"], "200.00")
-        self.assertEqual(family_summary["pending_collection_amount"], "500.00")
-        self.assertEqual(family_summary["collected_amount"], "300.00")
-        self.assertEqual(family_summary["pending_amount"], "1500.00")
+        self.assertIn("limit %s offset %s", source.lower())
+        self.assertIn("sum(pending_repayment_amount)", source)
+        self.assertNotIn("raw_payload", source)
+        self.assertNotIn("_turnover_ledger_row_payload", source)
 
     def test_stale_sql_read_model_is_not_returned_as_fresh_and_enqueues_refresh(self) -> None:
         queue = FakeQueue()
@@ -71,8 +49,6 @@ class TurnoverLedgerQueryServiceTests(unittest.TestCase):
             read_repository=repository,
             refresh_queue_repository=queue,
             source_versions_provider=lambda: {"turnover_ledger_schema_version": "new"},
-            legacy_payload_builder=lambda **_kwargs: {"rows": [], "pagination": {"total": 0}},
-            settings_provider=lambda: {"postgres_required": True},
         )
 
         payload = service.list_ledger(family="all", direction="all", status=None, page=1, page_size=50)
@@ -84,7 +60,6 @@ class TurnoverLedgerQueryServiceTests(unittest.TestCase):
 
     def test_fresh_sql_read_model_is_returned_without_legacy_rebuild(self) -> None:
         queue = FakeQueue()
-        legacy_calls: list[dict[str, object]] = []
         repository = FakeRepository(
             {
                 "rows": [{"relation_id": "fresh"}],
@@ -97,8 +72,6 @@ class TurnoverLedgerQueryServiceTests(unittest.TestCase):
             read_repository=repository,
             refresh_queue_repository=queue,
             source_versions_provider=lambda: {"turnover_ledger_schema_version": "same"},
-            legacy_payload_builder=lambda **kwargs: legacy_calls.append(dict(kwargs)) or {"rows": []},
-            settings_provider=lambda: {"postgres_required": True},
         )
 
         payload = service.list_ledger(family="company", direction="all", status=None, page=2, page_size=25)
@@ -108,7 +81,6 @@ class TurnoverLedgerQueryServiceTests(unittest.TestCase):
         self.assertEqual(repository.calls[0]["family"], "company")
         self.assertEqual(repository.calls[0]["page"], 2)
         self.assertEqual(queue.enqueued, [])
-        self.assertEqual(legacy_calls, [])
 
     def test_mixed_all_scope_row_versions_use_dirty_scope_status_instead_of_reenqueueing_all(self) -> None:
         queue = FakeQueue()
@@ -126,8 +98,6 @@ class TurnoverLedgerQueryServiceTests(unittest.TestCase):
             read_repository=repository,
             refresh_queue_repository=queue,
             source_versions_provider=lambda: {"turnover_ledger_schema_version": "current"},
-            legacy_payload_builder=lambda **_kwargs: {"rows": []},
-            settings_provider=lambda: {"postgres_required": True},
         )
 
         payload = service.list_ledger(family="all", direction="all", status=None, page=1, page_size=50)
@@ -153,8 +123,6 @@ class TurnoverLedgerQueryServiceTests(unittest.TestCase):
             read_repository=repository,
             refresh_queue_repository=queue,
             source_versions_provider=lambda: {"turnover_ledger_schema_version": "current"},
-            legacy_payload_builder=lambda **_kwargs: {"rows": []},
-            settings_provider=lambda: {"postgres_required": True},
         )
 
         payload = service.list_ledger(family="all", direction="all", status=None, page=1, page_size=50)
@@ -170,8 +138,6 @@ class TurnoverLedgerQueryServiceTests(unittest.TestCase):
             read_repository=repository,
             refresh_queue_repository=queue,
             source_versions_provider=lambda: {"turnover_ledger_schema_version": "expected"},
-            legacy_payload_builder=lambda **_kwargs: {"rows": [{"relation_id": "legacy"}]},
-            settings_provider=lambda: {"postgres_required": True},
         )
 
         payload = service.list_ledger(family="personal", direction="income", status="suggested", page=0, page_size=999)
@@ -185,48 +151,21 @@ class TurnoverLedgerQueryServiceTests(unittest.TestCase):
         self.assertEqual(payload["pagination"], {"page": 1, "page_size": 200, "total": 0})
         self.assertEqual(queue.enqueued, [{"scope_type": "turnover_ledger", "scope_key": "all", "reason": "api_miss"}])
 
-    def test_missing_optional_sql_read_model_uses_legacy_builder_and_injects_source_versions(self) -> None:
+    def test_missing_repository_method_fails_closed_and_enqueues_miss(self) -> None:
         queue = FakeQueue()
-        repository = FakeRepository(None)
-        legacy_calls: list[dict[str, object]] = []
-
-        def legacy_payload_builder(**kwargs: object) -> dict[str, object]:
-            legacy_calls.append(dict(kwargs))
-            return {"rows": [{"relation_id": "legacy_without_versions"}], "pagination": {"total": 1}}
-
         service = TurnoverLedgerQueryService(
-            read_repository=repository,
+            read_repository=object(),
             refresh_queue_repository=queue,
             source_versions_provider=lambda: {"turnover_ledger_schema_version": "expected"},
-            legacy_payload_builder=legacy_payload_builder,
-            settings_provider=lambda: {"postgres_required": False},
         )
 
         payload = service.list_ledger(family="company", direction="all", status=None, page=3, page_size=25)
 
-        self.assertEqual(legacy_calls, [{"family": "company", "direction": "all", "status": None, "page": 3, "page_size": 25}])
+        self.assertEqual(payload["rows"], [])
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(payload["refresh_reason"], "api_miss")
         self.assertEqual(payload["source_versions"], {"turnover_ledger_schema_version": "expected"})
-        self.assertEqual(payload["rows"][0]["source_versions"], {"turnover_ledger_schema_version": "expected"})
-        self.assertEqual(queue.enqueued, [])
-
-    def test_turnover_source_versions_mixed_detects_incremental_row_versions(self) -> None:
-        self.assertTrue(
-            _turnover_ledger_source_versions_mixed(
-                [
-                    {"source_versions": {"turnover_ledger_schema_version": "old"}},
-                    {"source_versions": {"turnover_ledger_schema_version": "new"}},
-                ]
-            )
-        )
-        self.assertFalse(
-            _turnover_ledger_source_versions_mixed(
-                [
-                    {"source_versions": {"turnover_ledger_schema_version": "same"}},
-                    {"source_versions": {"turnover_ledger_schema_version": "same"}},
-                ]
-            )
-        )
-        self.assertFalse(_turnover_ledger_source_versions_mixed([{"source_versions": {}}]))
+        self.assertEqual(queue.enqueued, [{"scope_type": "turnover_ledger", "scope_key": "all", "reason": "api_miss"}])
 
 
 class TurnoverLedgerReadModelRepositoryPortTests(unittest.TestCase):
@@ -246,9 +185,6 @@ class TurnoverLedgerReadModelRepositoryPortTests(unittest.TestCase):
                         {"payload": dict(payload), "scope_key": scope_key},
                     )
                 )
-
-            def clear_turnover_ledger_rows(self) -> None:
-                self.calls.append(("clear_turnover_ledger_rows", {}))
 
             def get_cost_statistics_view(self, **_kwargs: object) -> dict[str, object]:
                 raise AssertionError("cost statistics should not be exposed through turnover port")
@@ -280,8 +216,8 @@ class TurnoverLedgerReadModelRepositoryPortTests(unittest.TestCase):
             {"rows": [{"relation_id": "turnover-1"}]},
         )
         port.save_turnover_ledger_rows({"rows": []}, scope_key="all")
-        port.clear_turnover_ledger_rows()
 
+        self.assertFalse(hasattr(port, "clear_turnover_ledger_rows"))
         self.assertFalse(hasattr(port, "get_cost_statistics_view"))
         self.assertFalse(hasattr(port, "get_tax_offset_view"))
         self.assertFalse(hasattr(port, "search_index"))
@@ -305,7 +241,6 @@ class TurnoverLedgerReadModelRepositoryPortTests(unittest.TestCase):
                     "save_turnover_ledger_rows",
                     {"payload": {"rows": []}, "scope_key": "all"},
                 ),
-                ("clear_turnover_ledger_rows", {}),
             ],
         )
 

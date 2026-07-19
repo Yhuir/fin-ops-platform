@@ -640,3 +640,14 @@ git diff --check
 - 决策：复用 builder 已存在的内部 relation detail，公开为 `workbench_relations` 结构化 summaries；不新增表、worker 或事实源。Audit 以 ledger aggregate row 和每条 flow row 为 anchor，与 linked shared groups 做 `(anchor, case, row_id, row_type)` 双向 equality。
 - 版本：`TURNOVER_LEDGER_SCHEMA_VERSION` 升至 `2026-07-turnover-ledger-v5`；发布后必须通过正式 gateway 重建旧 scope，禁止直接写 read model。
 - 测试：扩展 turnover projection/source-version tests 和 page Audit omission fixture；真实 PostgreSQL/生产数据仍由后续只读发布 gate 验证。
+
+## 2026-07-20 - 页面读取有界化、子 scope freshness 与旧链最终收口
+
+- 生产基线：页面 shell p95 `117.557ms`、grouped API p95 `284.012ms`、标签选项 p95 `177.869ms`、Page Audit p95 `323.220ms`，20/20 2xx/fresh/0 enqueue；生产只有 21 行，旧全量 SELECT 自身约 `0.169ms`，所以当前固定耗时主要不在 PostgreSQL。
+- 设计取舍：不增加 Redis cache、新表、新 worker、第二 read model、前端轮询或共享 gateway 分支。只修 turnover owner 内已证实的增长风险、freshness 缺口和旧代码。
+- 查询：family/status/scope/direction、总 summary、family summaries、total 改在 PostgreSQL 固定 CTE 中完成；第二条 data query 只读取当前页 `payload`，不再全量搬运/解析所有 rows 或 `raw_payload`。筛选为空但 projection 存在时返回 fresh 空结果。
+- 一致性：`all` query 聚合所有 turnover child dirty scopes；failed 优先为 stale，其次 pending/processing 为 refreshing，全部 clean 才为 fresh。mixed row source versions 只能在该证明 fresh 后规范为 expected versions。
+- 旧链删除：删除 query service `legacy_payload_builder`、`settings_provider`、`postgres_required` 分叉；删除 repository/port/wrapper/manifest 的 `clear_turnover_ledger_rows`；删除 Python 全量 summary/family/source-version helper 和 raw payload fallback。
+- 持久化：v6 projection 只把完整 DTO 写入 `payload`，`raw_payload` 写 `{}`；`TURNOVER_LEDGER_SCHEMA_VERSION` 升到 `2026-07-turnover-ledger-v6`，发布后必须经正式 gateway/worker 重建。
+- 测试：新增真实 PostgreSQL integration，覆盖金额/方向/分页/空筛选/mixed versions/child dirty/raw payload；query/service/API/manifest/architecture/platform guard 和前端既有测试共同保护契约。
+- 发布条件：部署精确 main SHA，等待所有 turnover 月份 v6 fresh/drained，再执行 40 样本性能、直接/交叉 Audit 和安全可逆 confirm→fresh→withdraw→fresh。若写样本不安全，不得制造 canonical 业务数据。

@@ -340,7 +340,6 @@ class ReadModelManifestTests(unittest.TestCase):
             "bank_flow_rule_batch_source_versions_summary",
             "list_turnover_ledger_view",
             "save_turnover_ledger_rows",
-            "clear_turnover_ledger_rows",
         }
 
         for method_name in owned_methods:
@@ -541,7 +540,6 @@ class ReadModelManifestTests(unittest.TestCase):
         required_turnover_ports = {
             "list_turnover_ledger_view",
             "save_turnover_ledger_rows",
-            "clear_turnover_ledger_rows",
         }
 
         for entry in (cost_statistics, tax_offset, turnover_ledger):

@@ -430,7 +430,6 @@ READ_MODEL_MANIFEST: dict[str, ReadModelManifestEntry] = {
         repository_port_contract=(
             "list_turnover_ledger_view",
             "save_turnover_ledger_rows",
-            "clear_turnover_ledger_rows",
         ),
         query_owner="TurnoverLedgerQueryService",
         repository_owner="TurnoverLedgerReadModelRepositoryPort",

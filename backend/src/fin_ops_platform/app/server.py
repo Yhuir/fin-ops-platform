@@ -1054,8 +1054,6 @@ class Application:
             read_repository=getattr(self, "_turnover_ledger_sql_read_repository", None),
             refresh_queue_repository=getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None),
             source_versions_provider=self._turnover_ledger_source_versions,
-            legacy_payload_builder=self._turnover_ledger_service.list_ledger,
-            settings_provider=lambda: {"postgres_required": self._requires_sql_read_model_runtime()},
         )
         self._tax_certified_import_service = TaxCertifiedImportService(state_store=self._state_store)
         self._etc_import_session_store = build_etc_import_session_store(self._state_store)

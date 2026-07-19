@@ -16,14 +16,10 @@ class TurnoverLedgerQueryService:
         read_repository: Any | None,
         refresh_queue_repository: Any | None,
         source_versions_provider: Callable[[], dict[str, Any]],
-        legacy_payload_builder: Callable[..., dict[str, Any]],
-        settings_provider: Callable[[], dict[str, Any]] | None = None,
     ) -> None:
         self._read_repository = read_repository
         self._refresh_queue_repository = refresh_queue_repository
         self._source_versions_provider = source_versions_provider
-        self._legacy_payload_builder = legacy_payload_builder
-        self._settings_provider = settings_provider or (lambda: {})
 
     def list_ledger(
         self,
@@ -50,44 +46,25 @@ class TurnoverLedgerQueryService:
                 expected_source_versions=expected_source_versions,
             )
 
-        if isinstance(read_model_payload, dict) or self._postgres_required():
-            result = ReadModelQueryGateway(queue_repository=self._refresh_queue_repository).load(
-                scope_type=TURNOVER_LEDGER_SCOPE_TYPE,
-                scope_key="all",
-                expected_source_versions=expected_source_versions,
-                load_view=lambda: read_model_payload,
-                payload_from_view=lambda view: view,
-                empty_payload_factory=lambda: self._empty_refreshing_payload(
-                    family=family,
-                    direction=direction,
-                    status=status,
-                    page=page,
-                    page_size=page_size,
-                    source_versions=expected_source_versions,
-                ),
-                missing_reason="api_miss",
-                stale_reason="api_stale",
-                source_mismatch_reason="api_stale",
-            )
-            return result.payload
-
-        payload = self._legacy_payload_builder(
-            family=family,
-            direction=direction,
-            status=status,
-            page=page,
-            page_size=page_size,
+        result = ReadModelQueryGateway(queue_repository=self._refresh_queue_repository).load(
+            scope_type=TURNOVER_LEDGER_SCOPE_TYPE,
+            scope_key="all",
+            expected_source_versions=expected_source_versions,
+            load_view=lambda: read_model_payload,
+            payload_from_view=lambda view: view,
+            empty_payload_factory=lambda: self._empty_refreshing_payload(
+                family=family,
+                direction=direction,
+                status=status,
+                page=page,
+                page_size=page_size,
+                source_versions=expected_source_versions,
+            ),
+            missing_reason="api_miss",
+            stale_reason="api_stale",
+            source_mismatch_reason="api_stale",
         )
-        result = dict(payload) if isinstance(payload, dict) else {}
-        if "source_versions" not in result:
-            result["source_versions"] = dict(expected_source_versions)
-            result["rows"] = [
-                {**row, "source_versions": dict(expected_source_versions)}
-                if isinstance(row, dict) and "source_versions" not in row
-                else row
-                for row in list(result.get("rows") or [])
-            ]
-        return result
+        return result.payload
 
     def _read_from_repository(
         self,
@@ -120,10 +97,6 @@ class TurnoverLedgerQueryService:
         if payload.get("source_versions_mixed") is True and refresh_status == "fresh":
             return {**payload, "source_versions": dict(expected_source_versions)}
         return payload
-
-    def _postgres_required(self) -> bool:
-        settings = self._settings_provider()
-        return bool(settings.get("postgres_required")) if isinstance(settings, dict) else False
 
     @staticmethod
     def _empty_refreshing_payload(

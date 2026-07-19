@@ -31,6 +31,3 @@ class TurnoverLedgerReadModelRepositoryPort:
 
     def save_turnover_ledger_rows(self, payload: dict[str, Any], *, scope_key: str | None = None) -> None:
         self._repository.save_turnover_ledger_rows(payload, scope_key=scope_key)
-
-    def clear_turnover_ledger_rows(self) -> None:
-        self._repository.clear_turnover_ledger_rows()

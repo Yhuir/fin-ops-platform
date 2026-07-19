@@ -1165,6 +1165,15 @@
 - 验证命令：见本轮交付说明。
 - 未测风险：本地未执行生产 worker drain；发布后仍需观察 `turnover_ledger:all` old projection stale/rebuild 到 fresh。
 
+## 2026-07-20 - Turnover query/read-model owner 性能与旧链收口
+
+- 影响范围：`TurnoverLedgerQueryService`、`TurnoverLedgerReadModelRepositoryPort`、`PostgresSummaryReadModelRepository` turnover 专属方法、manifest 和 turnover/read-model 文档；共享 gateway、其他 repository 方法、API DTO、worker topology 不变。
+- 边界：query 只读 SQL read model，repository miss fail-closed/enqueue；port 仅保留 list/save。删除 live builder/settings 分叉和无 caller 的 clear port。
+- 性能：SQL 固定 CTE完成过滤/汇总/total，page query 只返回 bounded payload；不读取/复制 raw payload，不新增 cache、table、index、worker 或 migration。
+- Freshness：组合 `all` 读取聚合全部 child dirty scope；failed > active > fresh，避免月 scope 刷新期间 stale-as-fresh。
+- Projection：schema v6 新写入 `raw_payload={}`，正式 rebuild 负责替换旧双写 rows。
+- 证明：真实 PostgreSQL integration、query/API/read model/manifest/architecture guards；生产证据待部署精确 SHA 后补 40 样本、Audit 和可逆写验证。
+
 ## 2026-06-16 - 事务型 producer 补齐成本统计 scope policy
 
 - 目标：修复外部往来 Postgres 事务写路径绕过 read model scope policy，导致 `turnover_relation_changed` 继续生成 legacy `cost_statistics` scope 的风险。

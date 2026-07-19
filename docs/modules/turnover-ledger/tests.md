@@ -487,3 +487,14 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api tests.
 - 大数据量 grouped table、导出 XLSX 文件、浏览器视觉遮挡、mutation 级网络失败和真实下载打开耗时需要真实浏览器/样本验证；本地 Playwright smoke 只覆盖小样本 grouped GET 失败恢复和 confirm/withdraw 主链路。
 - 外部往来写路径仍保留 legacy fallback 分支；常规 manual closure/withdraw 已通过 command service 收敛，未来删除 fallback 前需要单独回归。
 - 自动标签规则恢复只证明银行明细 read model 可从当前定义补齐历史确认语义；真实生产仍需刷新对应 `bank_detail`、`turnover_ledger`、`workbench_relation`、`workbench` scopes 后验证 open 区可见。
+
+## 2026-07-20 - 有界 SQL 查询、all-scope freshness 与旧链删除
+
+- Business core：业务规则未新增；真实 PostgreSQL integration 覆盖显式 grouped 金额、旧 flat 金额 fallback、borrow-in/borrow-out、family/status、空筛选、四类 family summary 和分页等价。
+- Service/API：query repository miss 或依赖缺失统一 fail-closed/enqueue；API grouped/list/freshness/权限和所有写入口回归。
+- Read model/job：`tests/test_turnover_ledger_postgres_integration.py` 覆盖规范化 payload-only 持久化、mixed versions、all 聚合月份 pending/processing/failed；source-version schema 固定为 v6。
+- Frontend：本轮没有前端实现变化，继续运行 TurnoverLedger API/Page/operation barrier 既有测试。
+- E2E：本地已有 confirm/withdraw 主链；生产发布后执行安全可逆写样本和 operation barrier 验证。
+- Regression：manifest/architecture/platform guards 证明 query live fallback、direct clear port、raw payload读取和 Python 全量汇总不回归；交叉 Page Audit 保护共享事实消费者。
+- 真实 PostgreSQL命令：创建 visibly disposable `fin_ops_test_turnover_phase25`，应用 0001–0113，运行 `tests.test_turnover_ledger_postgres_integration` 后自动删除测试库。
+- 剩余风险：生产历史 shard 需要 v6 正式重建后再证明 40 样本 p95、worker drain 和可逆写后可见性；不得用直接 SQL 标记 fresh。

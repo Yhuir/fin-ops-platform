@@ -1,0 +1,23 @@
+{
+  "probes": [
+    {
+      "name": "turnover_ledger_grouped",
+      "path": "/api/turnover-ledger?view=grouped&family=all&direction=all&page=1&page_size=100",
+      "expected_statuses": [200],
+      "target_ms": 500
+    },
+    {
+      "name": "turnover_ledger_tag_selection",
+      "path": "/api/turnover-ledger/tag-selection",
+      "expected_statuses": [200],
+      "target_ms": 500
+    },
+    {
+      "name": "turnover_ledger_page_audit",
+      "path": "/api/operations/app-health/page-audit?page=turnover-ledger",
+      "expected_statuses": [200],
+      "auth_scope": "admin",
+      "target_ms": 1000
+    }
+  ]
+}

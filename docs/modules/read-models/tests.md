@@ -261,7 +261,7 @@
 
 `read-models:turnover-ledger-repository-port-extraction` 已完成。测试覆盖如下：
 
-- Service-layer tests：新增 turnover repository port guard，证明 `TurnoverLedgerReadModelRepositoryPort` 只暴露 `list_turnover_ledger_view`、`save_turnover_ledger_rows`、`clear_turnover_ledger_rows`。
+- Service-layer tests：turnover repository port guard 证明 `TurnoverLedgerReadModelRepositoryPort` 只暴露 `list_turnover_ledger_view`、`save_turnover_ledger_rows`；旧 direct clear port 已于 2026-07-20 删除。
 - Read model/cache/background job tests：已运行 `tests/test_turnover_ledger_query_service.py` 和 `tests/test_turnover_ledger_read_model_refresh.py`，确保 fresh/stale/missing、projection save 和 worker complete dirty scope 行为不变。
 - Existing feature regression tests：保持 manifest/architecture guard 不允许 turnover port 暴露 cost/tax/search/no-OA/bank detail 等无关 read model 方法。
 
