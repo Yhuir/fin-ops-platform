@@ -29,11 +29,13 @@ class WorkbenchRelationReadModelRepositoryPort:
         *,
         tenant_id: str = "default",
         scope_keys_hint: list[str] | None = None,
+        submitted_year: str | None = None,
     ) -> dict[str, object] | None:
         payload = self._repository.get_batch_accounting_relation_rows_by_ids(
             row_ids,
             tenant_id=tenant_id,
             scope_keys_hint=scope_keys_hint,
+            submitted_year=submitted_year,
         )
         return dict(payload) if isinstance(payload, dict) else None
 
@@ -117,18 +119,6 @@ class WorkbenchRelationReadModelRepositoryPort:
     ) -> dict[str, object] | None:
         payload = self._repository.workbench_relation_scope_summary(
             scope_key=scope_key,
-            tenant_id=tenant_id,
-        )
-        return dict(payload) if isinstance(payload, dict) else None
-
-    def count_batch_accounting_relations_by_year(
-        self,
-        *,
-        year: str,
-        tenant_id: str = "default",
-    ) -> dict[str, object] | None:
-        payload = self._repository.count_batch_accounting_relations_by_year(
-            year=year,
             tenant_id=tenant_id,
         )
         return dict(payload) if isinstance(payload, dict) else None

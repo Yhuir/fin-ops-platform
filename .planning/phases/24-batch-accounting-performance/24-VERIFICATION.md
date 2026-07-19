@@ -11,6 +11,7 @@
 - 列表银行、OA、当前 OA 附件已合为一个 active-generation repository SQL I/O；submit 仍使用独立窄 loader，两条路径共享一个私有附件匹配谓词。
 - 第四次生产复采证明 query-count p95 已从 `10` 降到 `8`，但 unsubmitted p95 仍为 `513.385ms`；第五轮继续把候选 relation 的 scope proof+groups、年度 scope proof+count 各合为一个 batch-only I/O，目标 query-count p95 `<=6`。
 - 第五次生产复采证明 unsubmitted 查询数约为 `6`，但外部 p95 `523.595ms` 仍失败；第六轮把 relation rows/scope proof/referenced groups 合为同一个 batch-only repository 快照，再删除一次往返。
+- 第六次生产复采证明 unsubmitted 查询数约为 `5`，但外部 p95 `520.481ms` 仍失败；第七轮把仍独立的年度 scopes proof/`submitted_count` 并入同一个 relation bundle，并删除独立 count facade/port/repository/manifest 旧链，目标查询数约为 `4`。
 - 通用 relation reader、其他页面 facade、read model 表结构、worker、queue、command API 和前端 DTO 均未改变；0112 只增加 batch-only 读性能索引。
 - 静态 architecture/runtime guards 已覆盖专用 I/O、索引合同和旧链删除条件。
 
@@ -66,10 +67,12 @@
 
 第五次 release `main-784c9a46-20260720052008` 已部署；40 样本 shell `109.606ms`、submitted `369.071ms`、Audit `324.374ms` 通过，unsubmitted `523.595ms` 未通过。160/160 请求均为 2xx/fresh/0 enqueue；dashboard API/DB/connection/query-count p95 为 `389.325ms` / `262.648ms` / `0.202ms` / `7`，其中 endpoint 窗口混合了 unsubmitted 与 submitted，unsubmitted 实际调用路径约为 `6` 条。
 
-第六轮本地已完成：relation rows/proof/groups 使用一个 bundle SQL，相关 facade 单测与真实 PostgreSQL 0001–0112 的 2/2 集成测试通过，临时数据库残留 `0`。当前待完整定向门、精确 SHA 部署和生产复采。完成门为：
+第六次 release `main-f287a61e-20260720052939` 已部署；40 样本 shell `113.305ms`、submitted `311.506ms`、Audit `295.298ms` 通过，unsubmitted `520.481ms` 未通过。160/160 请求均为 2xx/fresh/0 enqueue；dashboard 混合 endpoint API/DB/connection/query-count p95 为 `388.908ms` / `277.282ms` / `0.183ms` / `6`，unsubmitted 实际调用路径约为 `5` 条。
+
+第七轮本地实现已完成：候选 relation rows、候选/年度 proof、referenced groups、年度 `submitted_count` 使用同一个 bundle SQL，独立年度 count service/facade/port/repository/manifest 方法已删除；facade/API 单测 62 项与真实 PostgreSQL 0001–0112 的 2/2 集成测试通过，临时数据库残留 `0`。当前待完整定向门、精确 SHA 部署和生产复采。完成门为：
 
 - 精确 SHA 部署。
 - shell、unsubmitted、submitted、Page Audit 各 40 样本。
-- unsubmitted 请求 query count 目标 `<=5`（dashboard 混合 endpoint p95 允许 submitted 固有值），列表 p95 `<=500ms`（目标 `<=300ms`），Audit p95 `<=1000ms`。
+- unsubmitted 请求 query count 目标 `<=4`（dashboard 混合 endpoint p95 允许 submitted 固有值），列表 p95 `<=500ms`（目标 `<=300ms`），Audit p95 `<=1000ms`。
 - 直接及跨页 Audit 必须 pass/fresh/drained/ready/0 issue。
 - submit → fresh → withdraw → fresh 只有在 `app-health-operations` 全局强制 preflight 通过后才允许执行；若仍被其他页面阻断，记录到最终系统门，不绕过安全门。

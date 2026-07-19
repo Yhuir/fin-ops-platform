@@ -96,6 +96,7 @@ class _WorkbenchContext:
     bank_linked_row_ids: set[str]
     eligible_bank_rows: list[dict[str, Any]]
     eligible_oa_rows: list[dict[str, Any]]
+    submitted_count: int
     relation_read_model_status: _RelationReadModelStatus
 
 
@@ -197,7 +198,7 @@ class BatchAccountingService:
             submitted_count = len(submitted_relations)
         else:
             context = self._build_list_context(bank_year=resolved_bank_year)
-            submitted_count = self._submitted_relation_count(resolved_bank_year, context)
+            submitted_count = context.submitted_count
             bank_rows = [self._bank_row_payload(row) for row in context.eligible_bank_rows]
             oa_rows = [self._oa_row_payload(row, context.invoice_ids_by_oa_id.get(str(row.get("id")), [])) for row in context.eligible_oa_rows]
             relations_by_bank_row_id = {}
@@ -629,6 +630,7 @@ class BatchAccountingService:
             bank_linked_row_ids=set(),
             eligible_bank_rows=[],
             eligible_oa_rows=[],
+            submitted_count=0,
             relation_read_model_status=relation_read_model_status,
         )
 
@@ -652,8 +654,9 @@ class BatchAccountingService:
             for row in context.unpaired_oa_rows
             if self._is_eligible_oa_row(row, linked_row_ids=set())
         ]
-        linked_row_ids, bank_linked_row_ids = self._relation_distribution_row_id_sets(
+        linked_row_ids, bank_linked_row_ids, submitted_count = self._relation_distribution_row_id_sets(
             [*selectable_bank_rows, *selectable_oa_rows],
+            submitted_year=bank_year,
             read_model_status=context.relation_read_model_status,
         )
         eligible_bank_rows = [
@@ -677,35 +680,8 @@ class BatchAccountingService:
             bank_linked_row_ids=bank_linked_row_ids,
             eligible_bank_rows=eligible_bank_rows,
             eligible_oa_rows=eligible_oa_rows,
+            submitted_count=submitted_count,
         )
-
-    def _submitted_relation_count(self, year: str, context: _WorkbenchContext) -> int:
-        if context.relation_read_model_status.status != "fresh":
-            return 0
-        if self._relation_facade is None:
-            return 0
-        counter = getattr(self._relation_facade, "count_batch_accounting_relations_by_year", None)
-        if not callable(counter):
-            context.relation_read_model_status.record(
-                {
-                    "status": "unavailable",
-                    "read_model_scope_keys": self._month_scope_keys_for_year(year),
-                    "stale_reasons": ["batch_accounting_relation_count_unavailable"],
-                }
-            )
-            return 0
-        try:
-            payload = counter(
-                year,
-                require_fresh=True,
-                reason="batch_accounting_submitted_relation_count",
-            )
-        except TypeError:
-            payload = counter(year)
-        context.relation_read_model_status.record(payload if isinstance(payload, dict) else None)
-        if not isinstance(payload, dict):
-            return 0
-        return self._optional_int(payload.get("submitted_count")) or 0
 
     @staticmethod
     def _groups_from_payload(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -803,7 +779,7 @@ class BatchAccountingService:
         *,
         read_model_status: _RelationReadModelStatus,
     ) -> set[str]:
-        linked_row_ids, _bank_linked_row_ids = self._relation_distribution_row_id_sets(
+        linked_row_ids, _bank_linked_row_ids, _submitted_count = self._relation_distribution_row_id_sets(
             rows,
             read_model_status=read_model_status,
         )
@@ -813,15 +789,16 @@ class BatchAccountingService:
         self,
         rows: list[dict[str, Any]],
         *,
+        submitted_year: str | None = None,
         read_model_status: _RelationReadModelStatus,
-    ) -> tuple[set[str], set[str]]:
+    ) -> tuple[set[str], set[str], int]:
         row_ids = self._dedupe(
             str(row.get("id") or "").strip()
             for row in list(rows or [])
             if isinstance(row, dict) and str(row.get("id") or "").strip()
         )
-        if not row_ids or self._relation_facade is None:
-            return set(), set()
+        if self._relation_facade is None:
+            return set(), set(), 0
         reader = getattr(self._relation_facade, "get_batch_accounting_by_row_ids", None)
         if not callable(reader):
             read_model_status.record(
@@ -831,17 +808,18 @@ class BatchAccountingService:
                     "stale_reasons": ["batch_accounting_relation_reader_unavailable"],
                 }
             )
-            return set(), set()
+            return set(), set(), 0
         scope_keys_hint = self._scope_keys_for_rows(rows)
         payload = reader(
             row_ids,
             require_fresh=True,
             reason="batch_accounting_unsubmitted_relations",
             scope_keys_hint=scope_keys_hint,
+            submitted_year=submitted_year,
         )
         read_model_status.record(payload if isinstance(payload, dict) else None)
         if not isinstance(payload, dict):
-            return set(), set()
+            return set(), set(), 0
         linked: set[str] = set()
         bank_linked: set[str] = set()
         for row in list(payload.get("rows") or []):
@@ -863,7 +841,10 @@ class BatchAccountingService:
                 normalized_row_id = str(row_id or "").strip()
                 if normalized_row_id:
                     bank_linked.add(normalized_row_id)
-        return linked, bank_linked
+        submitted_count = self._optional_int(payload.get("submitted_count")) or 0
+        if read_model_status.status != "fresh":
+            submitted_count = 0
+        return linked, bank_linked, submitted_count
 
     def _submitted_relations(self, year: str, context: _WorkbenchContext) -> list[dict[str, Any]]:
         if self._relation_facade is None:

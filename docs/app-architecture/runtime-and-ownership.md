@@ -38,7 +38,7 @@ flowchart LR
 `/api/batch-accounting` 不拥有独立 read model。它的读边界由 `BatchAccountingService` 组合 Workbench active payload 与 `WorkbenchRelationReadFacade`：
 
 1. `unsubmitted` bucket 只从专属年份 SQL loader 得到批量账务银行候选和日常报销 OA 候选，附件只按这些 OA IDs 读取；候选 row ids 只进入 batch 专用 relation facade I/O，不能调用 Workbench full-page builder、通用逐 scope relation reader 或把全量 open OA 当作输入。
-2. `summary.submitted_count` 使用 `count_batch_accounting_relations_by_year(year)`，以一次 12-scope bulk proof + 一次 count 返回统计和 freshness；未提交首屏不能扫描 12 个月完整 relation DTO。
+2. `summary.submitted_count` 由 `get_batch_accounting_by_row_ids(..., submitted_year=year)` 的同一 repository bundle 返回；该快照同时证明候选/年度 scopes、读取候选关系和 referenced groups，并直接聚合年度 count。未提交首屏不能调用独立 count reader，也不能扫描 12 个月完整 relation DTO。
 3. `submitted` bucket 的银行上下文只读专属年份 SQL loader；关系详情用一次 bulk proof + 一次 groups query 读取年度 DTO，并通过 batch 专用 row reader补齐 distribution，继续透出 freshness 诊断。
 4. submit/withdraw 写路径只用 `bank_row_id + oa_row_ids` 专属 SQL loader 取得本次 row context，再交给 `WorkbenchRelationCommandService` 的 canonical write safety；不能因为整页普通 relation distribution 追赶中阻断无关 row 的写操作。
 5. 任一专属 loader 缺失/无效时返回 `503 batch_accounting_workbench_read_model_unavailable`，不能跨用其它 loader、返回假空数据或回退 Workbench full-page builder。

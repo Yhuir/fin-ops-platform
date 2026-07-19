@@ -4913,14 +4913,24 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
         *,
         tenant_id: str = "default",
         scope_keys_hint: list[str] | None = None,
+        submitted_year: str | None = None,
     ) -> dict[str, Any] | None:
-        """Read batch-accounting relation rows with one bulk freshness proof."""
+        """Read the unsubmitted relation distribution and annual count in one snapshot."""
         normalized_ids = _dedupe_preserve_order(text(row_id) for row_id in list(row_ids or []))
-        if not normalized_ids:
+        normalized_submitted_year = text(submitted_year)
+        if normalized_submitted_year and not re.fullmatch(r"\d{4}", normalized_submitted_year):
+            return None
+        submitted_scope_keys = (
+            [f"{normalized_submitted_year}-{month:02d}" for month in range(1, 13)]
+            if normalized_submitted_year
+            else []
+        )
+        if not normalized_ids and not normalized_submitted_year:
             return {
                 "read_model_status": "fresh",
                 "rows": [],
                 "groups": [],
+                "submitted_count": 0,
                 "source_versions": {},
                 "read_model_scope_keys": [],
                 "stale_reasons": [],
@@ -4955,7 +4965,7 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
                   on relation_row.tenant_id = %s
                  and relation_row.row_id = requested.row_id
             ),
-            resolved_scopes as materialized (
+            candidate_scopes as materialized (
                 select matched.scope_key, min(matched.row_position) as position
                 from matched_rows matched
                 group by matched.scope_key
@@ -4963,6 +4973,16 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
                 select hinted.scope_key, hinted.position
                 from unnest(%s::text[]) with ordinality as hinted(scope_key, position)
                 where not exists (select 1 from matched_rows)
+            ),
+            resolved_scopes as materialized (
+                select combined.scope_key, min(combined.position) as position
+                from (
+                    select scope_key, position from candidate_scopes
+                    union all
+                    select annual.scope_key, annual.position + 100000
+                    from unnest(%s::text[]) with ordinality as annual(scope_key, position)
+                ) combined
+                group by combined.scope_key
             ),
             scope_proof as (
                 select requested.position,
@@ -5011,6 +5031,19 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
                   on requested_group.group_id = group_row.group_id
                 where group_row.tenant_id = %s
                   and group_row.scope_key in (select scope_key from resolved_scopes)
+            ),
+            submitted_count as (
+                select count(distinct group_id)::integer as submitted_count
+                from read_model.workbench_relation_groups
+                where %s::boolean
+                  and tenant_id = %s
+                  and scope_key = any(%s)
+                  and relation_status = 'linked'
+                  and payload->'special_metadata'->>'source' = 'batch_accounting'
+                  and coalesce(
+                        nullif(payload->'special_metadata'->>'bank_year', ''),
+                        nullif(payload->'special_metadata'->>'year', '')
+                      ) = %s
             )
             select
                 coalesce(
@@ -5041,15 +5074,22 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
                 coalesce(
                     (select jsonb_agg(to_jsonb(group_rows) order by scope_key, group_id) from group_rows),
                     '[]'::jsonb
-                ) as groups
+                ) as groups,
+                submitted_count.submitted_count
+            from submitted_count
             """,
             (
                 normalized_ids,
                 tenant_id,
                 normalized_scope_keys_hint,
+                submitted_scope_keys,
                 tenant_id,
                 tenant_id,
                 tenant_id,
+                bool(normalized_submitted_year),
+                tenant_id,
+                submitted_scope_keys,
+                normalized_submitted_year,
             ),
         ) or {}
         rows = [dict(row) for row in list(bundle.get("rows") or []) if isinstance(row, dict)]
@@ -5058,9 +5098,12 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
             for proof in list(bundle.get("scope_proof") or [])
             if isinstance(proof, dict)
         ]
+        proof_scope_keys = _dedupe_preserve_order(
+            text(proof.get("scope_key")) for proof in scope_proof
+        )
         groups = [dict(group) for group in list(bundle.get("groups") or []) if isinstance(group, dict)]
         if not rows:
-            scope_keys = normalized_scope_keys_hint
+            scope_keys = proof_scope_keys or normalized_scope_keys_hint
             if not scope_keys:
                 return None
             return self._batch_accounting_relation_payload_from_rows(
@@ -5070,9 +5113,11 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
                 tenant_id=tenant_id,
                 fallback_source_versions={},
                 scope_proof=scope_proof,
+                submitted_count=int_value(bundle.get("submitted_count"), 0),
             )
 
-        scope_keys = _dedupe_preserve_order(text(row.get("scope_key")) for row in rows)
+        row_scope_keys = _dedupe_preserve_order(text(row.get("scope_key")) for row in rows)
+        scope_keys = proof_scope_keys if normalized_submitted_year else row_scope_keys
         returned_ids = {text(row.get("row_id")) for row in rows if text(row.get("row_id"))}
         if len(returned_ids) < len(normalized_ids):
             proof_payload = self._batch_accounting_relation_payload_from_rows(
@@ -5098,6 +5143,7 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
             scope_keys=scope_keys,
             tenant_id=tenant_id,
             scope_proof=scope_proof,
+            submitted_count=int_value(bundle.get("submitted_count"), 0),
         )
 
 
@@ -5148,103 +5194,6 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
             fallback_source_versions=scope_row.get("source_versions") if isinstance(scope_row.get("source_versions"), dict) else {},
         )
 
-
-    def count_batch_accounting_relations_by_year(
-        self,
-        *,
-        year: str,
-        tenant_id: str = "default",
-    ) -> dict[str, Any] | None:
-        normalized_year = text(year)
-        if not re.fullmatch(r"\d{4}", normalized_year):
-            return None
-        scope_keys = [f"{normalized_year}-{month:02d}" for month in range(1, 13)]
-        count_row = self._connection.fetch_one(
-            """
-            /* batch_accounting_relation_scope_count */
-            with requested_scopes as (
-                select requested.scope_key, requested.position
-                from unnest(%s::text[]) with ordinality as requested(scope_key, position)
-            ),
-            scope_proof as (
-                select requested.position,
-                       requested.scope_key,
-                       (scope.scope_key is not null) as scope_exists,
-                       scope.source_versions,
-                       dirty.status as dirty_status
-                from requested_scopes requested
-                left join read_model.workbench_relation_scopes scope
-                  on scope.tenant_id = %s
-                 and scope.scope_key = requested.scope_key
-                left join lateral (
-                    select status
-                    from job.read_model_dirty_scopes
-                    where tenant_id = %s
-                      and scope_type = 'workbench_relation'
-                      and scope_key = requested.scope_key
-                      and status in ('pending', 'processing', 'failed')
-                    order by updated_at desc
-                    limit 1
-                ) dirty on true
-            )
-            select
-                coalesce(
-                    (
-                        select jsonb_agg(
-                            jsonb_build_object(
-                                'scope_key', scope_key,
-                                'scope_exists', scope_exists,
-                                'source_versions', source_versions,
-                                'dirty_status', dirty_status
-                            )
-                            order by position
-                        )
-                        from scope_proof
-                    ),
-                    '[]'::jsonb
-                ) as scope_proof,
-                (
-                    select count(distinct group_id)::integer
-                    from read_model.workbench_relation_groups
-                    where tenant_id = %s
-                      and scope_key = any(%s)
-                      and relation_status = 'linked'
-                      and payload->'special_metadata'->>'source' = 'batch_accounting'
-                      and coalesce(
-                            nullif(payload->'special_metadata'->>'bank_year', ''),
-                            nullif(payload->'special_metadata'->>'year', '')
-                          ) = %s
-                ) as submitted_count
-            """,
-            (
-                scope_keys,
-                tenant_id,
-                tenant_id,
-                tenant_id,
-                scope_keys,
-                normalized_year,
-            ),
-        ) or {}
-        scope_proof = [
-            dict(proof)
-            for proof in list(count_row.get("scope_proof") or [])
-            if isinstance(proof, dict)
-        ]
-        payload = self._batch_accounting_relation_payload_from_rows(
-            rows=[],
-            groups=[],
-            scope_keys=scope_keys,
-            tenant_id=tenant_id,
-            scope_proof=scope_proof,
-        )
-        if payload.get("read_model_status") != "fresh":
-            payload["submitted_count"] = 0
-            return payload
-        payload["submitted_count"] = int_value(
-            count_row.get("submitted_count"),
-            0,
-        )
-        return payload
 
     def list_batch_accounting_relation_groups_by_year(
         self,
@@ -5700,6 +5649,7 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
         tenant_id: str,
         fallback_source_versions: dict[str, Any] | None = None,
         scope_proof: list[dict[str, Any]] | None = None,
+        submitted_count: int | None = None,
     ) -> dict[str, Any]:
         normalized_scope_keys = _dedupe_preserve_order(text(scope_key) for scope_key in list(scope_keys or []))
         proof_rows = scope_proof if scope_proof is not None else self._batch_accounting_relation_scope_proof(
@@ -5737,6 +5687,7 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
             "read_model_status": status,
             "rows": [_workbench_relation_row_payload(row) for row in rows],
             "groups": [_workbench_relation_group_payload(group) for group in groups],
+            **({"submitted_count": int_value(submitted_count, 0) if status == "fresh" else 0} if submitted_count is not None else {}),
             "source_versions": source_versions,
             "read_model_scope_keys": normalized_scope_keys,
             "stale_reasons": stale_reasons,
@@ -7920,9 +7871,6 @@ class PostgresReadModelRepository:
 
     def workbench_relation_scope_summary(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
         return self._search_workbench_relation_repository.workbench_relation_scope_summary(*args, **kwargs)
-
-    def count_batch_accounting_relations_by_year(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
-        return self._search_workbench_relation_repository.count_batch_accounting_relations_by_year(*args, **kwargs)
 
     def list_batch_accounting_relation_groups_by_year(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
         return self._search_workbench_relation_repository.list_batch_accounting_relation_groups_by_year(*args, **kwargs)

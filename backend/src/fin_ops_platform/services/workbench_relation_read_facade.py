@@ -77,13 +77,19 @@ class WorkbenchRelationReadFacade:
         require_fresh: bool = True,
         reason: str = "batch_accounting_relation_read",
         scope_keys_hint: list[str] | None = None,
+        submitted_year: str | None = None,
     ) -> dict[str, Any]:
         normalized_ids = _dedupe_preserve_order(text(value) for value in list(row_ids or []))
-        if not normalized_ids:
+        normalized_submitted_year = text(submitted_year) or ""
+        annual_scope_keys = _year_scope_keys(normalized_submitted_year)
+        if not normalized_ids and not annual_scope_keys:
             result = _facade_result(status=FRESH_WORKBENCH_RELATION_STATUS)
+            result["submitted_count"] = 0
             self._last_result = result
             return result
-        fallback_scope_keys = _fallback_scope_keys(scope_keys_hint=scope_keys_hint)
+        fallback_scope_keys = _dedupe_preserve_order(
+            [*_fallback_scope_keys(scope_keys_hint=scope_keys_hint), *annual_scope_keys]
+        )
         reader = getattr(self._read_model_repository, "get_batch_accounting_relation_rows_by_ids", None)
         if not callable(reader):
             return self._non_fresh_result(
@@ -93,13 +99,23 @@ class WorkbenchRelationReadFacade:
                 reason=reason,
                 stale_reasons=["repository_method_unavailable"],
             )
-        payload = reader(normalized_ids, tenant_id=self._tenant_id, scope_keys_hint=fallback_scope_keys)
+        payload = reader(
+            normalized_ids,
+            tenant_id=self._tenant_id,
+            scope_keys_hint=_fallback_scope_keys(scope_keys_hint=scope_keys_hint),
+            submitted_year=normalized_submitted_year or None,
+        )
         result = self._result_from_repository_payload(
             payload,
             require_fresh=require_fresh,
             reason=reason,
             fallback_scope_keys=fallback_scope_keys,
         )
+        if isinstance(payload, dict):
+            try:
+                result["submitted_count"] = int(payload.get("submitted_count") or 0)
+            except (TypeError, ValueError):
+                result["submitted_count"] = 0
         self._last_result = result
         return result
 
@@ -168,39 +184,6 @@ class WorkbenchRelationReadFacade:
             reason=reason,
             fallback_scope_keys=[normalized_month],
         )
-        self._last_result = result
-        return result
-
-    def count_batch_accounting_relations_by_year(
-        self,
-        year: str,
-        *,
-        require_fresh: bool = True,
-        reason: str = "batch_accounting_submitted_relation_count",
-    ) -> dict[str, Any]:
-        normalized_year = text(year) or ""
-        scope_keys = _year_scope_keys(normalized_year)
-        reader = getattr(self._read_model_repository, "count_batch_accounting_relations_by_year", None)
-        if not callable(reader) or not scope_keys:
-            return self._non_fresh_result(
-                status="unavailable",
-                scope_keys=scope_keys,
-                require_fresh=require_fresh,
-                reason=reason,
-                stale_reasons=["repository_method_unavailable" if not callable(reader) else "year_required"],
-            )
-        payload = reader(year=normalized_year, tenant_id=self._tenant_id)
-        result = self._result_from_repository_payload(
-            payload,
-            require_fresh=require_fresh,
-            reason=reason,
-            fallback_scope_keys=scope_keys,
-        )
-        if isinstance(payload, dict):
-            try:
-                result["submitted_count"] = int(payload.get("submitted_count") or 0)
-            except (TypeError, ValueError):
-                result["submitted_count"] = 0
         self._last_result = result
         return result
 
@@ -421,7 +404,7 @@ def _fallback_scope_keys(*, month_hint: str | None = None, scope_keys_hint: list
 
 
 def _year_scope_keys(year: str) -> list[str]:
-    normalized_year = text(year)
+    normalized_year = text(year) or ""
     if len(normalized_year) == 4 and normalized_year.isdigit():
         return [f"{normalized_year}-{month:02d}" for month in range(1, 13)]
     return []

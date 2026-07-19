@@ -16,6 +16,8 @@
 
 第五次发布后 unsubmitted 的实际 query-count 已降到约 `6`，但 40 样本外部 p95 为 `523.595ms`；dashboard API/DB/connection/query-count p95 为 `389.325ms` / `262.648ms` / `0.202ms` / `7`（同一 endpoint 窗口混合 unsubmitted 与 submitted，后者查询数更高）。剩余最后一次可避免往返是同一 batch-only repository 方法内部先读 relation rows、再读其 scope proof/groups。第六轮把 rows/proof/groups 作为一个 SQL 快照返回，使 unsubmitted 再减少一次往返；这是当前边界内最后一个简单、确定且不跨模块的合并点。
 
+第六次发布后 unsubmitted 查询数约为 `5`，40 样本外部 p95 为 `520.481ms`；shell `113.305ms`、submitted `311.506ms`、Page Audit `295.298ms` 均通过，160/160 请求全部为 2xx/fresh/0 enqueue。dashboard 混合 endpoint API/DB/connection/query-count p95 为 `388.908ms` / `277.282ms` / `0.183ms` / `6`。剩余唯一独立的未提交 relation I/O 是年度 submitted count，它读取同一 `workbench_relation` 事实与 freshness scopes。第七轮因此把年度 scopes 和 `submitted_count` 合并进既有候选 relation bundle，并删除独立 count facade/port/repository/manifest 合同；目标 unsubmitted 查询数约为 `4`。这仍是同一 batch-only 边界内的单快照读取，不增加基础设施或影响通用 reader。
+
 本轮应保留现有 Workbench + workbench_relation 事实源，不新增独立 read model、缓存、表、队列或 worker。唯一 schema 变化是生产复测证明必需的 OA 类型部分表达式索引。最小而完整的生产方案是：
 
 1. 新增批量账务专用的 relation 批量读取 I/O，一条 SQL 同时证明 12 个或候选涉及的全部 scope。
@@ -24,8 +26,9 @@
 4. OA 类型筛选把两个字段规范为一个稳定表达式，并由 `0112` 部分 trigram 索引覆盖。
 5. 银行、OA、当前 OA 附件作为同一 active-generation 候选快照，由一个 repository SQL I/O 返回；submit 继续使用自己的窄 loader。
 6. 批量账务不再调用通用的逐 scope relation 读取入口；通用入口继续服务其他页面，行为不变。
-7. 候选 relation 的 scope proof+groups 和年度 scope proof+count 各由一个 batch-only SQL 返回，删除最后两次可合并的串行往返。
+7. 候选 relation 的 scope proof+groups 由一个 batch-only SQL 返回，年度 scope proof+count 先收敛为独立固定 I/O。
 8. 候选 relation rows 与其 scope proof/groups 最终由同一个 batch-only repository 快照返回，不再先 rows 后 proof/groups。
+9. 年度 scopes proof 和 `submitted_count` 最终并入同一候选 relation bundle；删除独立年度 count facade/port/repository/manifest 合同，未提交 relation 只保留一个 owner I/O。
 
 ## 生产基线
 

@@ -45,10 +45,16 @@ class FakeRelationRepository:
         *,
         tenant_id: str = "default",
         scope_keys_hint: list[str] | None = None,
+        submitted_year: str | None = None,
     ) -> dict[str, object] | None:
-        self.batch_row_id_calls.append(
-            {"row_ids": list(row_ids), "tenant_id": tenant_id, "scope_keys_hint": list(scope_keys_hint or [])}
-        )
+        call: dict[str, object] = {
+            "row_ids": list(row_ids),
+            "tenant_id": tenant_id,
+            "scope_keys_hint": list(scope_keys_hint or []),
+        }
+        if submitted_year:
+            call["submitted_year"] = submitted_year
+        self.batch_row_id_calls.append(call)
         return self.payload
 
     def list_workbench_relation_rows(
@@ -107,14 +113,24 @@ class UnderlyingWorkbenchRelationRepository:
         *,
         tenant_id: str = "default",
         scope_keys_hint: list[str] | None = None,
+        submitted_year: str | None = None,
     ) -> dict[str, object]:
         self.calls.append(
             (
                 "get_batch_accounting_relation_rows_by_ids",
-                {"row_ids": list(row_ids), "tenant_id": tenant_id, "scope_keys_hint": list(scope_keys_hint or [])},
+                {
+                    "row_ids": list(row_ids),
+                    "tenant_id": tenant_id,
+                    "scope_keys_hint": list(scope_keys_hint or []),
+                    "submitted_year": submitted_year or "",
+                },
             )
         )
-        return {"read_model_status": "fresh", "rows": [{"row_id": "txn-batch-1"}]}
+        return {
+            "read_model_status": "fresh",
+            "rows": [{"row_id": "txn-batch-1"}] if row_ids else [],
+            "submitted_count": 7 if submitted_year else 0,
+        }
 
     def list_workbench_relation_rows(
         self,
@@ -163,17 +179,6 @@ class UnderlyingWorkbenchRelationRepository:
             "row_count": 1,
             "group_count": 1,
             "source_versions": {"workbench_relation_schema_version": "test"},
-        }
-
-    def count_batch_accounting_relations_by_year(self, *, year: str, tenant_id: str = "default") -> dict[str, object]:
-        self.calls.append(("count_batch_accounting_relations_by_year", {"year": year, "tenant_id": tenant_id}))
-        return {
-            "read_model_status": "fresh",
-            "rows": [],
-            "groups": [],
-            "source_versions": {"workbench_relation_schema_version": "test"},
-            "read_model_scope_keys": [f"{year}-{month:02d}" for month in range(1, 13)],
-            "submitted_count": 7,
         }
 
     def list_batch_accounting_relation_groups_by_year(
@@ -423,6 +428,7 @@ class BatchAccountingBulkRelationConnection:
         normalized = " ".join(sql.lower().split())
         self.fetch_one_calls.append((normalized, params))
         if "batch_accounting_relation_rows_scope_groups" in normalized:
+            scope_keys = list(dict.fromkeys(["2026-01", *list(params[3] or [])]))
             return {
                 "rows": [
                     {
@@ -443,25 +449,14 @@ class BatchAccountingBulkRelationConnection:
                 ],
                 "scope_proof": [
                     {
-                        "scope_key": "2026-01",
-                        "scope_exists": "2026-01" != self.missing_scope,
-                        "source_versions": {"workbench_relation_schema_version": "bulk-v1"},
-                        "dirty_status": self.dirty_status if self.dirty_scope == "2026-01" else None,
-                    }
-                ],
-                "groups": [],
-            }
-        if "batch_accounting_relation_scope_count" in normalized:
-            return {
-                "scope_proof": [
-                    {
                         "scope_key": scope_key,
                         "scope_exists": scope_key != self.missing_scope,
                         "source_versions": {"workbench_relation_schema_version": "bulk-v1"},
-                        "dirty_status": self.dirty_status if scope_key == self.dirty_scope else None,
+                        "dirty_status": self.dirty_status if self.dirty_scope == scope_key else None,
                     }
-                    for scope_key in params[0]
+                    for scope_key in scope_keys
                 ],
+                "groups": [],
                 "submitted_count": 1,
             }
         if "count(distinct group_id)" in normalized:
@@ -487,6 +482,7 @@ class WorkbenchRelationReadModelRepositoryPortTests(unittest.TestCase):
                 ["txn-batch-1"],
                 tenant_id="tenant",
                 scope_keys_hint=["2026-01"],
+                submitted_year="2026",
             )["rows"][0]["row_id"],
             "txn-batch-1",
         )
@@ -518,10 +514,6 @@ class WorkbenchRelationReadModelRepositoryPortTests(unittest.TestCase):
             1,
         )
         self.assertEqual(
-            port.count_batch_accounting_relations_by_year(year="2026", tenant_id="tenant")["submitted_count"],
-            7,
-        )
-        self.assertEqual(
             port.list_batch_accounting_relation_groups_by_year(year="2026", tenant_id="tenant")["groups"][0][
                 "group_id"
             ],
@@ -550,7 +542,6 @@ class WorkbenchRelationReadModelRepositoryPortTests(unittest.TestCase):
                 "get_workbench_relation_groups_by_ids",
                 "workbench_relation_source_versions",
                 "workbench_relation_scope_summary",
-                "count_batch_accounting_relations_by_year",
                 "list_batch_accounting_relation_groups_by_year",
                 "save_workbench_relation_distribution",
                 "mark_workbench_relation_scope_empty",
@@ -566,9 +557,11 @@ class WorkbenchRelationReadFacadeTests(unittest.TestCase):
         row_payload = row_repository.get_batch_accounting_relation_rows_by_ids(
             ["txn-batch-1"],
             scope_keys_hint=["2026-01"],
+            submitted_year="2026",
         )
 
         self.assertEqual(row_payload["read_model_status"], "fresh")
+        self.assertEqual(row_payload["submitted_count"], 1)
         self.assertEqual(len(row_connection.fetch_all_calls) + len(row_connection.fetch_one_calls), 1)
         self.assertEqual(
             sum(
@@ -577,14 +570,6 @@ class WorkbenchRelationReadFacadeTests(unittest.TestCase):
             ),
             1,
         )
-
-        count_connection = BatchAccountingBulkRelationConnection()
-        count_payload = PostgresReadModelRepository(count_connection).count_batch_accounting_relations_by_year(
-            year="2026"
-        )
-        self.assertEqual(count_payload["submitted_count"], 1)
-        self.assertEqual(len(count_connection.fetch_all_calls) + len(count_connection.fetch_one_calls), 1)
-        self.assertIn("batch_accounting_relation_scope_count", count_connection.fetch_one_calls[0][0])
 
         list_connection = BatchAccountingBulkRelationConnection()
         list_payload = PostgresReadModelRepository(list_connection).list_batch_accounting_relation_groups_by_year(
@@ -596,14 +581,16 @@ class WorkbenchRelationReadFacadeTests(unittest.TestCase):
 
     def test_batch_accounting_bulk_proof_preserves_non_fresh_contract(self) -> None:
         missing_connection = BatchAccountingBulkRelationConnection(missing_scope="2026-12")
-        missing_payload = PostgresReadModelRepository(missing_connection).count_batch_accounting_relations_by_year(
-            year="2026"
+        missing_payload = PostgresReadModelRepository(missing_connection).get_batch_accounting_relation_rows_by_ids(
+            ["txn-batch-1"],
+            scope_keys_hint=["2026-01"],
+            submitted_year="2026",
         )
         self.assertEqual(missing_payload["read_model_status"], "missing")
         self.assertIn("missing_scope:2026-12", missing_payload["stale_reasons"])
         self.assertEqual(missing_payload["submitted_count"], 0)
         self.assertEqual(len(missing_connection.fetch_all_calls) + len(missing_connection.fetch_one_calls), 1)
-        self.assertIn("batch_accounting_relation_scope_count", missing_connection.fetch_one_calls[0][0])
+        self.assertIn("batch_accounting_relation_rows_scope_groups", missing_connection.fetch_one_calls[0][0])
 
         refreshing_connection = BatchAccountingBulkRelationConnection(
             dirty_scope="2026-06",
@@ -611,7 +598,11 @@ class WorkbenchRelationReadFacadeTests(unittest.TestCase):
         )
         refreshing_payload = PostgresReadModelRepository(
             refreshing_connection
-        ).count_batch_accounting_relations_by_year(year="2026")
+        ).get_batch_accounting_relation_rows_by_ids(
+            ["txn-batch-1"],
+            scope_keys_hint=["2026-01"],
+            submitted_year="2026",
+        )
         self.assertEqual(refreshing_payload["read_model_status"], "refreshing")
         self.assertIn("refreshing:2026-06", refreshing_payload["stale_reasons"])
         self.assertEqual(refreshing_payload["submitted_count"], 0)
@@ -619,7 +610,7 @@ class WorkbenchRelationReadFacadeTests(unittest.TestCase):
             len(refreshing_connection.fetch_all_calls) + len(refreshing_connection.fetch_one_calls),
             1,
         )
-        self.assertIn("batch_accounting_relation_scope_count", refreshing_connection.fetch_one_calls[0][0])
+        self.assertIn("batch_accounting_relation_rows_scope_groups", refreshing_connection.fetch_one_calls[0][0])
 
     def test_batch_accounting_row_lookup_uses_dedicated_repository_io(self) -> None:
         repository = FakeRelationRepository(
@@ -668,11 +659,11 @@ class WorkbenchRelationReadFacadeTests(unittest.TestCase):
             [("workbench_relation_source_versions", {"scope_key": "2026-01", "tenant_id": "default"})],
         )
 
-    def test_batch_accounting_count_uses_repository_count_without_loading_rows(self) -> None:
+    def test_batch_accounting_row_bundle_includes_annual_count_without_separate_reader(self) -> None:
         repository = UnderlyingWorkbenchRelationRepository()
         facade = WorkbenchRelationReadFacade(read_model_repository=repository)
 
-        payload = facade.count_batch_accounting_relations_by_year("2026")
+        payload = facade.get_batch_accounting_by_row_ids([], submitted_year="2026")
 
         self.assertEqual(payload["status"], "fresh")
         self.assertEqual(payload["submitted_count"], 7)
@@ -680,7 +671,17 @@ class WorkbenchRelationReadFacadeTests(unittest.TestCase):
         self.assertEqual(payload["groups"], [])
         self.assertEqual(
             repository.calls,
-            [("count_batch_accounting_relations_by_year", {"year": "2026", "tenant_id": "default"})],
+            [
+                (
+                    "get_batch_accounting_relation_rows_by_ids",
+                    {
+                        "row_ids": [],
+                        "tenant_id": "default",
+                        "scope_keys_hint": [],
+                        "submitted_year": "2026",
+                    },
+                )
+            ],
         )
 
     def test_batch_accounting_year_list_uses_repository_reader_without_month_scan(self) -> None:

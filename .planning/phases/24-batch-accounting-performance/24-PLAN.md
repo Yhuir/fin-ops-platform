@@ -37,7 +37,8 @@
 - 若该 release 仍失败，唯一剩余无索引条件是 OA `apply_type/expense_type` 的前导通配扫描：把两个 JSON 字段规范为一个稳定表达式，并用 migration 0112 添加只覆盖 `source_kind='oa' and scope_key<>'all'` 的部分 trigram 索引。
 - 若索引 release 已把 p95 降到接近门槛但仍失败，且 dashboard 证明 query-count p95 仍为 `10`、connection acquire 可忽略，则把同属一个 active-generation 候选快照的银行/OA/附件读取合为一个 repository SQL I/O；附件仍只引用当前 OA candidate CTE，submit 窄 loader 不变。
 - 若候选单 I/O release 已把 query-count p95 降到 `8`、但列表仍只差小幅未达门槛，则合并 batch-only relation 内剩余两组天然同边界读取：候选 `scope proof + referenced groups` 一次返回，年度 `scope proof + submitted count` 一次返回；目标 query-count p95 `<=6`。不改通用 relation reader 和 submitted list 已达标路径。
-- 若该 release 已把 unsubmitted 查询数降到约 `6`、但生产外部 p95 仍略高于门槛，则把同一 batch-only repository 方法的 relation rows 与它们决定的 scope proof/referenced groups 合为一个 JSON bundle 快照，目标 unsubmitted 请求查询数再减 `1`。这是最终允许的 SQL 合并；若仍失败，停止继续堆叠 SQL，转入新的生产证据审阅。
+- 若该 release 已把 unsubmitted 查询数降到约 `6`、但生产外部 p95 仍略高于门槛，则把同一 batch-only repository 方法的 relation rows 与它们决定的 scope proof/referenced groups 合为一个 JSON bundle 快照，目标 unsubmitted 请求查询数再减 `1`。若仍失败，必须先依据新生产证据审阅剩余 I/O，不得盲目增加基础设施或跨边界合并。
+- 第六次 release 把 unsubmitted 查询数降到约 `5` 后仍为 `520.481ms`；新证据确认剩余独立年度 count 与候选 bundle 读取同一 relation 事实和 freshness scopes。将 `submitted_year` 作为 batch-only bundle 的显式输入，由同一 SQL 返回年度 proof 与 `submitted_count`，并删除独立 count facade/port/repository/manifest 方法；目标查询数约为 `4`。这是边界内最后一次合并，不再新增 cache、projection、worker 或公共抽象；若仍失败，必须停止并基于新生产证据重新审阅。
 - 不新增结构化列、缓存、projection 或第二套候选 read model；真实 PostgreSQL 测试必须执行 0001–0112 并由 `EXPLAIN` 证明查询命中精确索引，静态 guard 禁止银行 fallback 和 OA 未索引 `OR` 回流。
 
 ### 5. 测试与架构门禁
@@ -47,7 +48,7 @@
 3. API contract：完整 `tests/test_batch_accounting_api.py`，确保 response/status/refresh contract 不变。
 4. Read model/cache/job：
    - fresh/missing/refreshing/stale 的批量 proof 等价测试；
-   - 12 scope count/list 查询数固定；
+   - 未提交候选/年度 proof、groups、count 固定为一个 relation bundle，已提交年度 list 查询数固定；
    - row lookup 查询数不随 scope 数增长；
    - non-fresh 仍由 facade enqueue；
    - OA 附件只按候选 IDs 查询，列表银行/OA/附件固定为一个 repository I/O。

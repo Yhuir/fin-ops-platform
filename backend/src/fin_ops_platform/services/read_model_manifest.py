@@ -83,7 +83,6 @@ READ_MODEL_MANIFEST: dict[str, ReadModelManifestEntry] = {
             "get_workbench_relation_groups_by_ids",
             "workbench_relation_source_versions",
             "workbench_relation_scope_summary",
-            "count_batch_accounting_relations_by_year",
         ),
         query_owner="WorkbenchRelationReadFacade",
         repository_owner="WorkbenchRelationReadModelRepositoryPort",

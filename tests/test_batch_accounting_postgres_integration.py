@@ -79,19 +79,18 @@ class BatchAccountingPostgresIntegrationTests(unittest.TestCase):
             """
         )
 
-        count_payload = self.repository.count_batch_accounting_relations_by_year(year="2026")
         list_payload = self.repository.list_batch_accounting_relation_groups_by_year(year="2026")
         row_payload = self.repository.get_batch_accounting_relation_rows_by_ids(
             ["txn-batch-1"],
             scope_keys_hint=["2026-01"],
+            submitted_year="2026",
         )
 
-        self.assertEqual(count_payload["read_model_status"], "fresh")
-        self.assertEqual(count_payload["submitted_count"], 1)
         self.assertEqual(list_payload["read_model_status"], "fresh")
         self.assertEqual(list_payload["groups"][0]["group_id"], "CASE-BATCH-1")
         self.assertEqual(row_payload["read_model_status"], "fresh")
         self.assertEqual(row_payload["rows"][0]["row_id"], "txn-batch-1")
+        self.assertEqual(row_payload["submitted_count"], 1)
 
         self.connection.execute(
             """
@@ -101,7 +100,11 @@ class BatchAccountingPostgresIntegrationTests(unittest.TestCase):
             values ('default', 'workbench_relation', '2026-01', 2, 'processing')
             """
         )
-        refreshing = self.repository.count_batch_accounting_relations_by_year(year="2026")
+        refreshing = self.repository.get_batch_accounting_relation_rows_by_ids(
+            ["txn-batch-1"],
+            scope_keys_hint=["2026-01"],
+            submitted_year="2026",
+        )
         self.assertEqual(refreshing["read_model_status"], "refreshing")
         self.assertIn("refreshing:2026-01", refreshing["stale_reasons"])
         self.assertEqual(refreshing["submitted_count"], 0)

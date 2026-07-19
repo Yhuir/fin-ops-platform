@@ -26,8 +26,7 @@ class FakeBatchRelationFacade:
             return {"status": "fresh", "rows": [], "groups": [], "source_versions": {}, "read_model_scope_keys": [month]}
         return self._payload()
 
-    def count_batch_accounting_relations_by_year(self, year: str, **kwargs: object) -> dict[str, object]:
-        self.calls.append({"year": year, **kwargs})
+    def _submitted_count(self, year: str) -> int:
         payload = self._payload()
         submitted_count = 0
         for group in list(payload.get("groups") or []):
@@ -38,16 +37,7 @@ class FakeBatchRelationFacade:
             relation_year = str(metadata.get("bank_year") or metadata.get("year") or "")
             if metadata.get("source") == "batch_accounting" and relation_year == year:
                 submitted_count += 1
-        return {
-            "status": payload.get("status", "fresh"),
-            "rows": [],
-            "groups": [],
-            "source_versions": payload.get("source_versions", {}),
-            "read_model_scope_keys": [f"{year}-{month:02d}" for month in range(1, 13)],
-            "refresh_enqueued": payload.get("refresh_enqueued", False),
-            "stale_reasons": payload.get("stale_reasons", []),
-            "submitted_count": submitted_count,
-        }
+        return submitted_count
 
     def list_batch_accounting_relations_by_year(self, year: str, **kwargs: object) -> dict[str, object]:
         self.calls.append({"list_year": year, **kwargs})
@@ -63,6 +53,8 @@ class FakeBatchRelationFacade:
             for row in list(payload["rows"])
             if str(row.get("row_id") or "") in {str(row_id) for row_id in row_ids}
         ]
+        submitted_year = str(kwargs.get("submitted_year") or "")
+        payload["submitted_count"] = self._submitted_count(submitted_year) if submitted_year else 0
         return payload
 
     def _payload(self) -> dict[str, object]:
@@ -224,8 +216,7 @@ class RowsBatchRelationFacade:
             return {"status": "fresh", "rows": [], "groups": [], "source_versions": {}, "read_model_scope_keys": [month]}
         return self._payload()
 
-    def count_batch_accounting_relations_by_year(self, year: str, **kwargs: object) -> dict[str, object]:
-        self.calls.append({"year": year, **kwargs})
+    def _submitted_count(self, year: str) -> int:
         submitted_count = 0
         for group in self._groups:
             group_payload = group.get("payload") if isinstance(group.get("payload"), dict) else {}
@@ -233,16 +224,7 @@ class RowsBatchRelationFacade:
             relation_year = str(metadata.get("bank_year") or metadata.get("year") or "")
             if metadata.get("source") == "batch_accounting" and relation_year == year:
                 submitted_count += 1
-        return {
-            "status": "fresh",
-            "rows": [],
-            "groups": [],
-            "source_versions": {"schema_version": 52},
-            "read_model_scope_keys": [f"{year}-{month:02d}" for month in range(1, 13)],
-            "refresh_enqueued": False,
-            "stale_reasons": [],
-            "submitted_count": submitted_count,
-        }
+        return submitted_count
 
     def list_batch_accounting_relations_by_year(self, year: str, **kwargs: object) -> dict[str, object]:
         self.calls.append({"list_year": year, **kwargs})
@@ -265,6 +247,8 @@ class RowsBatchRelationFacade:
             for row in list(payload["rows"])
             if str(row.get("row_id") or "") in row_id_set
         ]
+        submitted_year = str(kwargs.get("submitted_year") or "")
+        payload["submitted_count"] = self._submitted_count(submitted_year) if submitted_year else 0
         return payload
 
     def _payload(self) -> dict[str, object]:
@@ -858,10 +842,10 @@ class BatchAccountingApiTests(unittest.TestCase):
         payload = service.build_payload(year="2026", bucket="unsubmitted")
 
         self.assertEqual(payload["summary"]["submitted_count"], 1)
-        self.assertIn(
-            {"year": "2026", "require_fresh": True, "reason": "batch_accounting_submitted_relation_count"},
-            facade.calls,
-        )
+        relation_calls = [call for call in facade.calls if "row_ids" in call]
+        self.assertEqual(len(relation_calls), 1)
+        self.assertEqual(relation_calls[0]["submitted_year"], "2026")
+        self.assertEqual(relation_calls[0]["reason"], "batch_accounting_unsubmitted_relations")
         self.assertFalse([call for call in facade.calls if "month" in call], facade.calls)
 
     def test_unsubmitted_relation_lookup_is_scoped_to_batch_candidates(self) -> None:
@@ -931,6 +915,7 @@ class BatchAccountingApiTests(unittest.TestCase):
                     "require_fresh": True,
                     "reason": "batch_accounting_unsubmitted_relations",
                     "scope_keys_hint": ["2026-01"],
+                    "submitted_year": "2026",
                 }
             ],
         )
