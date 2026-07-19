@@ -12,10 +12,10 @@
 
 规则含义：
 
-- `requires_oa=true`：该标签流水进入已配对区前必须有 OA row。
-- `requires_invoice=true`：该标签流水进入已配对区前必须有发票 row。
-- 两者都为 `false`：银行流水批量 relation 可以在没有 OA/发票时进入已配对区。
-- 新增标签默认两者都为 `true`，避免误放行。
+- `requires_oa` / `requires_invoice` 是候选校验、新批次审计提示和规则版本事实，不决定关联台分区。
+- 新增标签默认两者都为 `true`，避免新批次缺少明确业务提示。
+- 规则保存不追溯改写既有 relation；既有 relation 保留提交时 snapshot。
+- 相同规则保存是 no-op，不递增版本、不写 audit、不触发 refresh。
 
 ## 批量提交状态
 
@@ -41,16 +41,16 @@
 
 | 状态 | 判定 | 语义 |
 | --- | --- | --- |
-| `open` | active relation 存在，但缺少规则要求的 OA 或发票 row | 关系事实有效，但尚未满足进入已配对区的闭环条件。 |
-| `paired` | active relation 存在，且所有勾选要求已满足 | 进入关联台已配对区。若 OA/发票都不需要，银行-only relation 可直接 paired。 |
+| `unpaired` | canonical fact 没有 active formal relation | 以 singleton 留在未配对区。 |
+| `paired` | canonical fact 属于 active formal relation | active relation 的完整成员进入已配对区，不按 requirement metadata 二次分类。 |
 | `collapsed` | relation 内银行流水数 `>3` | 关联台默认折叠为摘要行，原始银行 rows 保存在 `collapsed_rows.bank`。 |
 | `expanded` | 银行流水数 `<=3` 或用户展开 | 展示原始银行 rows。 |
 
 禁止流转：
 
-- 禁止仅因为 relation active 就进入 paired；必须根据 `requires_oa` / `requires_invoice` 重新判定。
-- 禁止前端根据勾选本地推断 paired/open；必须消费后端 relation/read model payload。
-- 禁止缺少 metadata 时按无需 OA/发票处理。metadata 缺失应 fail closed 到 open 或诊断状态。
+- 禁止根据当前规则把 active relation 的成员重新移回 unpaired。
+- 禁止规则保存扫描、升级或改写 Workbench/turnover relation。
+- 禁止前端根据勾选本地推断 paired/unpaired；必须消费 formal relation/read model payload。
 
 ## UI 状态
 

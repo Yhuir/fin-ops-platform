@@ -26,27 +26,27 @@
 - Backend route: `backend/src/fin_ops_platform/app/routes_bank_flow_rule_batches.py`，只承载 `/api/bank-flow-rule-batches/*`。
 - Backend service: `backend/src/fin_ops_platform/services/bank_flow_rule_batch_application_service.py`，新提交写 `relation_mode=bank_flow_rule_batch`；共享批次计算内核在中性 `bank_batch_application_service.py` / `bank_batch_service.py`，bank-flow 不再继承 no-OA application service；HTTP 输出边界把共享 core 仍可能抛出的 legacy `no_oa_bank_batch_*` 错误码翻译为 `bank_flow_rule_batch_*`。
 - Backend read model: `backend/src/fin_ops_platform/services/bank_flow_rule_batch_read_model_repository.py`、`bank_flow_rule_batch_read_model_refresh.py`、`bank_flow_rule_batch_read_model_refresh_producer.py`。
-- Rule persistence: `app_settings.bank_flow_rule_batch_tag_rules.requirements_by_tag_code`；新 API 和服务边界只读写 `rules`，拒绝 `selected_tag_codes`，重复 `tag_code` fail fast。`0083_bank_flow_rule_batch_tag_rules.sql` 只负责一次性从历史 no-OA settings key 复制缺失值。
+- Rule persistence: `app_settings.bank_flow_rule_batch_tag_rules.requirements_by_tag_code`；新 API 和服务边界只读写 `rules`，拒绝 `selected_tag_codes`，重复 `tag_code` fail fast。`0111_bank_flow_rule_batch_tag_rules_canonical_shape.sql` 已将一次性复制的 legacy selected seed 合并并删除。
 - Browser E2E: `web/e2e/bank-flow-rule-batches-flow.spec.ts`。
 
 ## 当前目标边界
 
-流水规则批量处理是全局 Bank Transaction Paired Policy 的管理入口：它处理所有可批量提交的银行流水，不再只处理免 OA 候选。页面右侧抽屉以紧凑 xlsx/grid 方式维护每个银行明细标签是否需要 OA、发票才能进入关联台已配对区。
+流水规则批量处理处理所有可批量提交的银行流水，不再只处理免 OA 候选。页面右侧抽屉以紧凑 xlsx/grid 方式维护每个银行明细标签的 OA/发票业务闭环与审计提示；该提示不决定关联台分区。
 
 核心规则：
 
 - 左侧 `收支类型 / 流水主标签 / 流水子标签` 来自银行明细当前 active 标签事实，只读展示，不能在本模块新增、编辑或删除。
-- 右侧只保留 `OA`、`发票` 两列勾选。勾选表示该标签流水进入关联台已配对区前必须具备对应 row type；空表示不需要该项即可闭环。
+- 右侧只保留 `OA`、`发票` 两列勾选。勾选表示该标签的业务闭环/审计提示需要对应单据，不作为 paired/unpaired 判定条件。
 - 新增或未配置的银行标签默认勾选 `OA` 和 `发票`，避免新标签自动进入无需 OA/发票闭环。
 - 旧 `selected_tag_codes` 不迁移为新事实源；实现时应移除或只作为只读 legacy 输入清理，所有流水重新按新规则计算。
-- 页面提交的是银行流水批量关系事实。所有含银行流水的关联台 group 是否进入已配对区，由银行流水 row 上物化的 Bank Transaction Paired Policy metadata 中的 `requires_oa` / `requires_invoice` 与实际 row type 组合决定；缺失 metadata 默认等价于需要 OA 和发票。
+- 页面提交的是银行流水批量关系事实。active formal relation 的完整成员进入 paired；没有 active relation 的事实进入 unpaired singleton。规则保存不追溯改写既有 relation metadata。
 - 从本页面提交且银行流水超过 3 条时，关联台以折叠形式展示；1 到 3 条可展开展示。
 
 ## 不属于本模块事实源
 
 - 银行明细标签定义、自动匹配规则和分类确认归 `bank-details`。
 - Workbench relation canonical fact 归 `workbench-relations`。
-- 关联台 paired/open 展示归 `reconciliation-workbench` active generation；bank-flow 折叠摘要必须输出 `source_kind=bank_flow_rule_batch_summary`、`invoice_relation.code=bank_flow_rule_batch` 和 `流水规则` display tag，不得复用 `no_oa_bank_batch_summary` 或 `免OA` 标签。
+- 关联台 paired/unpaired 展示归 `reconciliation-workbench` active generation；bank-flow 折叠摘要必须输出 `source_kind=bank_flow_rule_batch_summary`、`invoice_relation.code=bank_flow_rule_batch` 和 `流水规则` display tag，不得复用 `no_oa_bank_batch_summary` 或 `免OA` 标签。
 - 旧 no-OA 批次历史事实仅作为 backend legacy API/read-model 兼容风险处理；本模块不再提供旧 no-OA 历史重算页面入口或 API。
 
 ## 维护触发器

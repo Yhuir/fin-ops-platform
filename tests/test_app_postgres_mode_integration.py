@@ -259,6 +259,57 @@ class AppPostgresModeIntegrationTests(unittest.TestCase):
             ["fee"],
         )
 
+    def test_bank_flow_rule_save_is_noop_or_single_scope_refresh_in_postgres(self) -> None:
+        app = self._build_app()
+        current = app._app_settings_service.get_bank_flow_rule_batch_tag_rules_payload()
+
+        noop_response = app.handle_request(
+            "PUT",
+            "/api/bank-flow-rule-batches/tag-rules",
+            body=json.dumps({"expected_version": current["version"], "rules": current["rules"]}),
+        )
+        noop_payload = json.loads(noop_response.body)
+
+        self.assertEqual(noop_response.status_code, 200, noop_response.body)
+        self.assertEqual(noop_payload["version"], current["version"])
+        self.assertEqual(app._audit_service.as_dicts(), [])
+        self.assertEqual(
+            fetch_scalar(
+                self.database_url,
+                "select count(*) from job.read_model_dirty_scopes "
+                "where scope_type = 'bank_flow_rule_batch' and scope_key = 'all';",
+            ),
+            "0",
+        )
+
+        changed_rules = [
+            {**rule, "requires_invoice": not bool(rule["requires_invoice"])}
+            if rule["tag_code"] == current["rules"][0]["tag_code"]
+            else rule
+            for rule in current["rules"]
+        ]
+        changed_response = app.handle_request(
+            "PUT",
+            "/api/bank-flow-rule-batches/tag-rules",
+            body=json.dumps({"expected_version": current["version"], "rules": changed_rules}),
+        )
+        changed_payload = json.loads(changed_response.body)
+
+        self.assertEqual(changed_response.status_code, 200, changed_response.body)
+        self.assertEqual(changed_payload["version"], current["version"] + 1)
+        self.assertEqual(
+            fetch_scalar(
+                self.database_url,
+                "select count(*) from job.read_model_dirty_scopes "
+                "where scope_type = 'bank_flow_rule_batch' and scope_key = 'all';",
+            ),
+            "1",
+        )
+        self.assertEqual(
+            [event["action"] for event in app._audit_service.as_dicts()],
+            ["bank_flow_rule_batch_tag_rules_updated"],
+        )
+
     @staticmethod
     def _create_bank_transaction(app: object, *, counterparty_name: str, credit: bool = False) -> str:
         preview = app._import_service.preview_import(

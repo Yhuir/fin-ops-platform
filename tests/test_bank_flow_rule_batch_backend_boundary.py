@@ -105,6 +105,25 @@ class BankFlowRuleBatchBackendBoundaryTests(unittest.TestCase):
         self.assertEqual(worker.event_types, ("bank_flow_rule_batch.read_model.refresh",))
         self.assertEqual(worker.read_model_scope_type, "bank_flow_rule_batch")
 
+    def test_tag_rule_save_cannot_rewrite_relations_or_run_broad_lifecycle(self) -> None:
+        bank_flow_source = (SERVICES_ROOT / "bank_flow_rule_batch_application_service.py").read_text(encoding="utf-8")
+        base_source = (SERVICES_ROOT / "bank_batch_application_service.py").read_text(encoding="utf-8")
+        start = bank_flow_source.index("    def update_tag_selection(")
+        body = bank_flow_source[start:]
+
+        for forbidden in (
+            "list_active_relations",
+            "update_relation_metadata_for_case_id",
+            "_sync_bank_flow_rule_relation_requirements",
+            "_sync_turnover_rule_relation_requirements",
+            "after_mutation(",
+            "bank_flow_rule_batch_changed",
+        ):
+            self.assertNotIn(forbidden, body)
+        self.assertEqual(body.count("enqueue_background_refresh("), 1)
+        self.assertNotIn("def _sync_bank_flow_rule_relation_requirements(", base_source)
+        self.assertNotIn("def _sync_turnover_rule_relation_requirements(", base_source)
+
 
 if __name__ == "__main__":
     unittest.main()

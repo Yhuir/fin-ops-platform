@@ -1,0 +1,17 @@
+{
+  "probes": [
+    {
+      "name": "bank_flow_rule_tag_rules",
+      "path": "/api/bank-flow-rule-batches/tag-rules",
+      "expected_statuses": [200],
+      "target_ms": 1000
+    },
+    {
+      "name": "bank_flow_rule_page_audit",
+      "path": "/api/operations/app-health/page-audit?page=bank-flow-rule-batches",
+      "expected_statuses": [200],
+      "target_ms": 1000,
+      "auth_scope": "admin"
+    }
+  ]
+}

@@ -1,5 +1,14 @@
 # 流水规则批量处理实施记录
 
+## 2026-07-20 规则保存 O(1) 与 formal relation 合同收口
+
+- 2026-07-14 formal-relations 合同已取代 2026-06-30 的 requirement-based paired/open 模型：active relation 完整成员进入 paired，无 active relation 的事实进入 unpaired singleton。
+- 规则保存删除两次 active relation 全量扫描、逐 relation metadata/history 写、turnover mode 升级、broad lifecycle 和重复 refresh；actual change 只写 settings/audit 并 enqueue 一次 `bank_flow_rule_batch/all`。
+- semantic no-op 不递增 version、不写 settings/audit、不入队。
+- `BankBatchApplicationService` 中 bank-flow 可达的旧 tag writer/sync/helper 已删除；独立 no-OA legacy service 保留自身合同。
+- migration `0111_bank_flow_rule_batch_tag_rules_canonical_shape.sql` 把旧 selected seed 合并到 requirements 后删除 selected shape；runtime 不留 fallback。
+- 下方 2026-06-30 两个 requirement 同步章节是被本节明确废止的历史记录，不再描述当前运行时合同。
+
 ## 2026-07-06 Scope source-version freshness 修复
 
 目标：修复生产 `bank_flow_rule_batches` API 在 `bank_flow_rule_batch:2026-07` worker 刷新已完成且耗时约 100ms 后，仍因 `bank_detail_source_versions_mismatch` 持续返回 stale 并反复 enqueue refresh 的问题。
@@ -448,3 +457,25 @@
 - `python3 -m ruff check backend/src/fin_ops_platform/app/routes_bank_flow_rule_batches.py backend/src/fin_ops_platform/services/workbench_candidate_grouping.py backend/src/fin_ops_platform/services/postgres_repositories/read_models.py tests/test_bank_flow_rule_batch_routes.py tests/test_workbench_candidate_grouping.py tests/test_workbench_sql_runtime.py`
 - `cd web && npm test -- --run BankFlowRuleBatchApi.test.ts CandidateGroupGrid.test.tsx`
 - `cd web && npm exec tsc -- --noEmit`
+
+## 2026-07-20 流水规则配置保存 O(1) 收敛
+
+目标：
+
+- 将 tag-rules 保存从两次 active relation 全量扫描与逐 relation 写回，收敛为固定成本的 settings/audit 单写和一次 bank-flow read-model refresh。
+- 保持批次列表、详情、提交、撤回、重置、no-OA、关联台和流水台账合同不变。
+
+关键决策：
+
+- formal relation 本身决定既有关系的 paired/unpaired；relation 中的 requirement metadata 是创建时审计快照，规则保存不再追溯改写。
+- bank-flow 规则 canonical payload 只保留 `version` 与 `requirements_by_tag_code`；migration 0111 移除旧 selected shape，且不修改 no-OA payload。
+- 同值保存是真正 no-op；实际变化只产生一次 audit 与一次 `bank_flow_rule_batch/all` durable refresh。
+- 删除旧 `_sync_bank_flow_rule_relation_requirements`、`_sync_turnover_rule_relation_requirements` 及其专用 relation 扫描/逐条写回 helper，不保留 fallback。
+
+验证：
+
+- 目标后端 160 passed + 15 subtests；关联回归 204 passed + 287 subtests；前端既有 3 files / 53 tests passed。
+- 真实 PostgreSQL 空库应用 0001–0111，migration canonical/no-OA 隔离/幂等通过。
+- 真实 PostgreSQL 20 次采样：no-op p95 `34.002ms`，actual change p95 `83.475ms`；actual change 只有 1 个 bank-flow all dirty scope、0 relation history。
+- 全量后端修正后为 4200 passed、64 skipped、716 subtests；剩余 historical ETC、Workbench repository/direct cost fan-out、cost fan-out matrix 与 cost-statistics fixture 问题可在未改动基线 SHA `3c80361db` 复现，不属于本项链路。
+- 生产 exact-SHA、migration、no-op PUT、Page Audit 与跨模块隔离证据待统一发布步骤补录。

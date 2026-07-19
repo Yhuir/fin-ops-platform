@@ -444,14 +444,16 @@ class AppSettingsService:
             tag_codes=set(normalized["changes"].get("archived_codes") or []),
             group_labels=PENDING_OUTPUT_INVOICE_TAG_GROUP_LABELS,
         )
-        next_no_oa_selection, detached_no_oa_references = self._detach_no_oa_bank_batch_tag_references(
+        next_no_oa_selection, detached_no_oa_references = self._detach_bank_transaction_requirement_rule_references(
             previous_snapshot["no_oa_bank_batch_tag_selection"],
             tag_codes=set(normalized["changes"].get("archived_codes") or []),
+            include_selected_tag_codes=True,
         )
         next_bank_flow_rule_batch_tag_rules, detached_bank_flow_rule_batch_references = (
-            self._detach_no_oa_bank_batch_tag_references(
+            self._detach_bank_transaction_requirement_rule_references(
                 previous_snapshot["bank_flow_rule_batch_tag_rules"],
                 tag_codes=set(normalized["changes"].get("archived_codes") or []),
+                include_selected_tag_codes=False,
             )
         )
         next_turnover_selection, detached_turnover_references = self._detach_turnover_ledger_tag_references(
@@ -540,14 +542,16 @@ class AppSettingsService:
             tag_codes=archived_codes,
             group_labels=PENDING_OUTPUT_INVOICE_TAG_GROUP_LABELS,
         )
-        next_no_oa_selection, detached_no_oa_references = self._detach_no_oa_bank_batch_tag_references(
+        next_no_oa_selection, detached_no_oa_references = self._detach_bank_transaction_requirement_rule_references(
             previous_snapshot["no_oa_bank_batch_tag_selection"],
             tag_codes=archived_codes,
+            include_selected_tag_codes=True,
         )
         next_bank_flow_rule_batch_tag_rules, detached_bank_flow_rule_batch_references = (
-            self._detach_no_oa_bank_batch_tag_references(
+            self._detach_bank_transaction_requirement_rule_references(
                 previous_snapshot["bank_flow_rule_batch_tag_rules"],
                 tag_codes=archived_codes,
+                include_selected_tag_codes=False,
             )
         )
         next_turnover_selection, detached_turnover_references = self._detach_turnover_ledger_tag_references(
@@ -641,7 +645,7 @@ class AppSettingsService:
                 "no_oa_bank_batch_tag_selection_version_conflict",
                 "No-OA bank batch tag selection version conflict.",
             )
-        next_selection = self._normalize_no_oa_bank_batch_tag_selection(
+        next_selection = self._normalize_bank_transaction_requirement_rules(
             {
                 "version": int(current.get("version") or 1) + 1,
                 "selected_tag_codes": payload.get("selected_tag_codes"),
@@ -650,6 +654,7 @@ class AppSettingsService:
             },
             bank_transaction_tags=self._snapshot["bank_transaction_tags"],
             validate=True,
+            include_selected_tag_codes=True,
         )
         next_snapshot = dict(self._snapshot)
         next_snapshot["no_oa_bank_batch_tag_selection"] = next_selection
@@ -692,7 +697,7 @@ class AppSettingsService:
                 "bank_flow_rule_batch_tag_rules_version_conflict",
                 "Bank flow rule batch tag rules version conflict.",
             )
-        next_rules = self._normalize_no_oa_bank_batch_tag_selection(
+        next_rules = self._normalize_bank_transaction_requirement_rules(
             {
                 "version": int(current.get("version") or 1) + 1,
                 "rules": payload.get("rules"),
@@ -700,7 +705,20 @@ class AppSettingsService:
             },
             bank_transaction_tags=self._snapshot["bank_transaction_tags"],
             validate=True,
+            include_selected_tag_codes=False,
         )
+        current_public = self._public_bank_transaction_paired_policy(
+            current,
+            bank_transaction_tags=self._snapshot["bank_transaction_tags"],
+        )
+        next_public = self._public_bank_transaction_paired_policy(
+            next_rules,
+            bank_transaction_tags=self._snapshot["bank_transaction_tags"],
+        )
+        if dict(next_public.get("requirements_by_tag_code") or {}) == dict(
+            current_public.get("requirements_by_tag_code") or {}
+        ):
+            return self.get_bank_flow_rule_batch_tag_rules_payload()
         next_snapshot = dict(self._snapshot)
         next_snapshot["bank_flow_rule_batch_tag_rules"] = next_rules
         if self._state_store is not None:
@@ -1456,15 +1474,17 @@ class AppSettingsService:
             validate=validate_pending_invoice_tag_groups,
             group_labels=PENDING_OUTPUT_INVOICE_TAG_GROUP_LABELS,
         )
-        no_oa_bank_batch_tag_selection = AppSettingsService._normalize_no_oa_bank_batch_tag_selection(
+        no_oa_bank_batch_tag_selection = AppSettingsService._normalize_bank_transaction_requirement_rules(
             raw_payload.get("no_oa_bank_batch_tag_selection"),
             bank_transaction_tags=bank_transaction_tags,
             validate=False,
+            include_selected_tag_codes=True,
         )
-        bank_flow_rule_batch_tag_rules = AppSettingsService._normalize_no_oa_bank_batch_tag_selection(
+        bank_flow_rule_batch_tag_rules = AppSettingsService._normalize_bank_transaction_requirement_rules(
             raw_payload.get("bank_flow_rule_batch_tag_rules", DEFAULT_BANK_FLOW_RULE_BATCH_TAG_RULES),
             bank_transaction_tags=bank_transaction_tags,
             validate=False,
+            include_selected_tag_codes=False,
         )
         turnover_ledger_tag_selection = AppSettingsService._normalize_turnover_ledger_tag_selection(
             raw_payload.get("turnover_ledger_tag_selection"),
@@ -1650,11 +1670,12 @@ class AppSettingsService:
         ]
 
     @staticmethod
-    def _normalize_no_oa_bank_batch_tag_selection(
+    def _normalize_bank_transaction_requirement_rules(
         value: Any,
         *,
         bank_transaction_tags: dict[str, Any],
         validate: bool,
+        include_selected_tag_codes: bool,
     ) -> dict[str, Any]:
         raw_payload = value if isinstance(value, dict) else {}
         version = BankTransactionCategoryService._normalize_version(
@@ -1675,14 +1696,14 @@ class AppSettingsService:
                 if validate:
                     raise AppSettingsValidationError(
                         "unknown_bank_transaction_tag",
-                        f"Unknown bank transaction tag code in no-OA selection: {tag_code}",
+                        f"Unknown bank transaction requirement rule tag code: {tag_code}",
                     )
                 return False
             if str(definition.get("status") or "active") != "active":
                 if validate:
                     raise AppSettingsValidationError(
                         "archived_bank_transaction_tag",
-                        f"Archived bank transaction tag cannot enter no-OA selection: {tag_code}",
+                        f"Archived bank transaction tag cannot enter requirement rules: {tag_code}",
                     )
                 return False
             return True
@@ -1712,23 +1733,25 @@ class AppSettingsService:
                     "requires_invoice": bool(rule.get("requires_invoice")),
                 }
 
-        for item in list(raw_payload.get("selected_tag_codes") or []):
-            tag_code = str(item or "").strip()
-            if not tag_code or tag_code in requirements_by_tag_code:
-                continue
-            if not ensure_active(tag_code):
-                continue
-            requirements_by_tag_code[tag_code] = {"requires_oa": False, "requires_invoice": False}
-        selected_tag_codes = [
-            code
-            for code, rule in requirements_by_tag_code.items()
-            if not bool(rule.get("requires_oa")) and not bool(rule.get("requires_invoice"))
-        ]
-        return {
+        if include_selected_tag_codes:
+            for item in list(raw_payload.get("selected_tag_codes") or []):
+                tag_code = str(item or "").strip()
+                if not tag_code or tag_code in requirements_by_tag_code:
+                    continue
+                if not ensure_active(tag_code):
+                    continue
+                requirements_by_tag_code[tag_code] = {"requires_oa": False, "requires_invoice": False}
+        normalized = {
             "version": version,
-            "selected_tag_codes": selected_tag_codes,
             "requirements_by_tag_code": requirements_by_tag_code,
         }
+        if include_selected_tag_codes:
+            normalized["selected_tag_codes"] = [
+                code
+                for code, rule in requirements_by_tag_code.items()
+                if not bool(rule.get("requires_oa")) and not bool(rule.get("requires_invoice"))
+            ]
+        return normalized
 
     @staticmethod
     def _public_no_oa_bank_batch_tag_selection(
@@ -2536,10 +2559,11 @@ class AppSettingsService:
         return {**dict(raw_payload), "groups": next_groups}, detached
 
     @staticmethod
-    def _detach_no_oa_bank_batch_tag_references(
+    def _detach_bank_transaction_requirement_rule_references(
         value: Any,
         *,
         tag_codes: set[str],
+        include_selected_tag_codes: bool,
     ) -> tuple[dict[str, Any], list[dict[str, str]]]:
         normalized_codes = {str(code or "").strip() for code in tag_codes if str(code or "").strip()}
         raw_payload = value if isinstance(value, dict) else {}
@@ -2547,16 +2571,17 @@ class AppSettingsService:
         requirements: dict[str, dict[str, bool]] = {}
         detached: list[dict[str, str]] = []
         seen: set[str] = set()
-        for item in list(raw_payload.get("selected_tag_codes") or []):
-            tag_code = str(item or "").strip()
-            if not tag_code or tag_code in seen:
-                continue
-            seen.add(tag_code)
-            if tag_code in normalized_codes:
-                detached.append({"tag_code": tag_code})
-                continue
-            selected.append(tag_code)
-            requirements.setdefault(tag_code, {"requires_oa": False, "requires_invoice": False})
+        if include_selected_tag_codes:
+            for item in list(raw_payload.get("selected_tag_codes") or []):
+                tag_code = str(item or "").strip()
+                if not tag_code or tag_code in seen:
+                    continue
+                seen.add(tag_code)
+                if tag_code in normalized_codes:
+                    detached.append({"tag_code": tag_code})
+                    continue
+                selected.append(tag_code)
+                requirements.setdefault(tag_code, {"requires_oa": False, "requires_invoice": False})
         for raw_code, raw_rule in dict(raw_payload.get("requirements_by_tag_code") or {}).items():
             tag_code = str(raw_code or "").strip()
             if not tag_code:
@@ -2572,12 +2597,17 @@ class AppSettingsService:
             }
         current_version = BankTransactionCategoryService._normalize_version(raw_payload.get("version", 1)) or 1
         next_version = current_version + 1 if detached else current_version
-        return {
-            **dict(raw_payload),
+        normalized = {
             "version": next_version,
-            "selected_tag_codes": selected,
             "requirements_by_tag_code": requirements,
-        }, detached
+        }
+        if include_selected_tag_codes:
+            normalized = {
+                **dict(raw_payload),
+                **normalized,
+                "selected_tag_codes": selected,
+            }
+        return normalized, detached
 
     @staticmethod
     def _detach_turnover_ledger_tag_references(

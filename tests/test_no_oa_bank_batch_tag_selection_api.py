@@ -387,7 +387,7 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
             _bank_flow_rule_batch_operation_barrier_targets("2026-05"),
         )
 
-    def test_bank_flow_rule_tag_rule_update_resyncs_submitted_relation_requirements(self) -> None:
+    def test_bank_flow_rule_tag_rule_update_preserves_submitted_relation_history(self) -> None:
         app = build_application()
         preview = app._import_service.preview_import(
             batch_type=BatchType.BANK_TRANSACTION,
@@ -450,10 +450,10 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         metadata = relation["special_metadata"]
         self.assertEqual(metadata["flow_rule_tag_code"], "fee")
         self.assertTrue(metadata["requires_oa"])
-        self.assertFalse(metadata["requires_invoice"])
-        self.assertEqual(metadata["flow_rule_version"], saved_rules["version"])
+        self.assertTrue(metadata["requires_invoice"])
+        self.assertNotEqual(metadata["flow_rule_version"], saved_rules["version"])
 
-    def test_bank_flow_rule_tag_rule_update_resyncs_relation_from_persistent_repository(self) -> None:
+    def test_bank_flow_rule_tag_rule_update_does_not_rewrite_persistent_relation(self) -> None:
         data_dir = Path(tempfile.mkdtemp(prefix="finops-test-bank-flow-rules-"))
         self.addCleanup(shutil.rmtree, data_dir, ignore_errors=True)
         app = build_application(data_dir=data_dir)
@@ -508,9 +508,9 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         metadata = relation_snapshot["special_metadata"]
         self.assertEqual(relation_snapshot["relation_mode"], "bank_flow_rule_batch")
         self.assertTrue(metadata["requires_oa"])
-        self.assertFalse(metadata["requires_invoice"])
+        self.assertTrue(metadata["requires_invoice"])
 
-    def test_tag_rule_update_upgrades_legacy_turnover_relation_from_persistent_repository(self) -> None:
+    def test_tag_rule_update_does_not_upgrade_turnover_relation(self) -> None:
         data_dir = Path(tempfile.mkdtemp(prefix="finops-test-turnover-rules-"))
         self.addCleanup(shutil.rmtree, data_dir, ignore_errors=True)
         app = build_application(data_dir=data_dir)
@@ -560,6 +560,9 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
             note="旧往来款闭环关系",
         )
         app._state_store.save_workbench_pair_relations(app._workbench_pair_relation_service.snapshot())
+        before_relation_snapshot = app._state_store.load_workbench_pair_relations()["pair_relations"][
+            "turnover:turnover_rel_legacy"
+        ]
         app._workbench_pair_relation_service = WorkbenchPairRelationService()
 
         current_rules = _json(app.handle_request("GET", "/api/bank-flow-rule-batches/tag-rules"))
@@ -578,14 +581,9 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
 
         self.assertEqual(save_response.status_code, 200)
         relation_snapshot = app._state_store.load_workbench_pair_relations()["pair_relations"]["turnover:turnover_rel_legacy"]
-        metadata = relation_snapshot["special_metadata"]
-        self.assertEqual(relation_snapshot["relation_mode"], "turnover_manual_closure")
-        self.assertTrue(metadata["requires_oa"])
-        self.assertFalse(metadata["requires_invoice"])
-        self.assertEqual(metadata["paired_requirement_tag_codes"], ["external_turnover"])
-        self.assertEqual(metadata["paired_requirement_source"], "no_oa_bank_batch_tag_selection")
+        self.assertEqual(relation_snapshot, before_relation_snapshot)
 
-    def test_bank_flow_rule_update_syncs_manual_confirmed_bank_relation_requirements(self) -> None:
+    def test_bank_flow_rule_update_does_not_pollute_manual_relation(self) -> None:
         data_dir = Path(tempfile.mkdtemp(prefix="finops-test-manual-bank-policy-"))
         self.addCleanup(shutil.rmtree, data_dir, ignore_errors=True)
         app = build_application(data_dir=data_dir)
@@ -635,6 +633,9 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
             note="普通关联台手工关系",
         )
         app._state_store.save_workbench_pair_relations(app._workbench_pair_relation_service.snapshot())
+        before_relation_snapshot = app._state_store.load_workbench_pair_relations()["pair_relations"][
+            "CASE-MANUAL-TURNOVER-POLICY"
+        ]
         app._workbench_pair_relation_service = WorkbenchPairRelationService()
 
         current_rules = _json(app.handle_request("GET", "/api/bank-flow-rule-batches/tag-rules"))
@@ -655,12 +656,7 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         relation_snapshot = app._state_store.load_workbench_pair_relations()["pair_relations"][
             "CASE-MANUAL-TURNOVER-POLICY"
         ]
-        metadata = relation_snapshot["special_metadata"]
-        self.assertEqual(relation_snapshot["relation_mode"], "manual_confirmed")
-        self.assertTrue(metadata["requires_oa"])
-        self.assertFalse(metadata["requires_invoice"])
-        self.assertEqual(metadata["paired_requirement_tag_codes"], ["external_turnover"])
-        self.assertEqual(metadata["paired_requirement_source"], "bank_transaction_paired_policy")
+        self.assertEqual(relation_snapshot, before_relation_snapshot)
 
     def test_bank_flow_rule_reset_submitted_withdraws_all_submitted_batches(self) -> None:
         app = build_application()

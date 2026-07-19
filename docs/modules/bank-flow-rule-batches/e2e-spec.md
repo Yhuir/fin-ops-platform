@@ -26,11 +26,11 @@
 - 保存后规则持久化，刷新仍保持勾选。
 - API 不递增银行标签版本。
 
-## BRB-E2E-002 无需 OA/发票的银行流水直接进入已配对
+## BRB-E2E-002 提交形成 active relation 后进入已配对
 
 前置：
 
-- 某银行标签规则保存为 `requires_oa=false`、`requires_invoice=false`。
+- 某银行标签存在明确 OA/发票审计提示。
 - 存在 4 条同月、同账户、同标签且未被 active relation 占用的银行流水。
 
 步骤：
@@ -42,52 +42,48 @@
 
 验收：
 
-- 提交成功创建 `relation_mode=bank_flow_rule_batch`。
+- 提交成功创建 active `relation_mode=bank_flow_rule_batch`。
 - 关联台已配对区出现该 relation。
 - 因银行流水数 `>3`，默认以折叠摘要展示。
 - 展开后可看到 4 条原始银行流水。
 
-## BRB-E2E-003 需要发票的银行批次先留在 open，补票后进入已配对
+## BRB-E2E-003 无 active relation 的事实保持未配对，确认后进入已配对
 
 前置：
 
-- 某银行标签规则为 `requires_oa=false`、`requires_invoice=true`。
 - 存在 4 条同月、同账户、同标签银行流水。
 - 存在可匹配发票。
 
 步骤：
 
-1. 选择 4 条银行流水并提交。
-2. 打开关联台。
-3. 确认该 group 位于 open 区且折叠。
-4. 在关联台选中该银行批次和补票候选发票。
-5. 通过确认关联预览提交。
-6. 等待 operation barrier。
+1. 在关联台查看尚无 active relation 的银行/发票事实。
+2. 确认它们分别位于 unpaired singleton。
+3. 选择对应事实并通过确认关联预览提交。
+4. 等待 operation barrier。
 
 验收：
 
-- 缺发票时 active relation 不进入已配对。
-- 补齐并确认发票后，同一个 case 进入已配对。
+- 没有 active relation 时事实保持 unpaired。
+- 确认形成 active relation 后，同一个 case 的完整成员进入 paired。
 - 原始银行 rows 未丢失，折叠摘要和展开详情一致。
 
-## BRB-E2E-004 需要 OA 和发票时缺任一项均不得 paired
+## BRB-E2E-004 规则保存不追溯改写 existing relation
 
 前置：
 
-- 标签规则为 `requires_oa=true`、`requires_invoice=true`。
-- 已提交银行批次。
+- 已存在 bank-flow、turnover 或 manual active relation。
+- 当前规则与 relation 提交时的审计提示不同。
 
 步骤：
 
-1. 只补齐 OA，不补发票。
-2. 查看关联台。
-3. 再补齐发票。
+1. 保存新的 OA/发票规则。
+2. 读取 existing relation 和关联台分区。
 
 验收：
 
-- 只补齐 OA 时仍在 open。
-- OA 和发票都满足后才进入 paired。
-- relation metadata 缺失或不完整时 fail closed，不默认 paired。
+- existing relation metadata、relation mode 和 history 不变。
+- active relation 继续 paired，不因当前规则变化回到 unpaired。
+- 只产生 bank-flow read model refresh，不产生 Workbench/turnover relation 写入。
 
 ## BRB-E2E-008 已提交批次批量重置回未提交候选
 

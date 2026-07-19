@@ -876,16 +876,12 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
 
     def test_update_tag_selection_uses_bank_flow_rule_settings_boundary(self) -> None:
         settings = RecordingBankFlowRuleSettings()
+        refresh_calls: list[dict[str, object]] = []
         service = object.__new__(BankFlowRuleBatchApplicationService)
         service._app_settings_service = settings
-        service._sync_bank_flow_rule_relation_requirements = (  # type: ignore[method-assign]
-            lambda payload, *, actor_id: {"changed_case_ids": [], "affected_months": []}
+        service.enqueue_background_refresh = (  # type: ignore[method-assign]
+            lambda scope_keys, **kwargs: refresh_calls.append({"scope_keys": list(scope_keys), **kwargs}) or True
         )
-        service._sync_turnover_rule_relation_requirements = (  # type: ignore[method-assign]
-            lambda payload, *, actor_id: {"changed_case_ids": [], "affected_months": []}
-        )
-        service.after_mutation = lambda *_args, **_kwargs: False  # type: ignore[method-assign]
-        service.enqueue_background_refresh = lambda *_args, **_kwargs: True  # type: ignore[method-assign]
         service._read_model_refresh_metadata_for_relation_mode = (  # type: ignore[method-assign]
             lambda relation_mode: {"relation_mode": relation_mode}
         )
@@ -898,6 +894,37 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         self.assertEqual(settings.updated_payloads, [{"expected_version": 7, "rules": [{"tag_code": "fee"}]}])
         self.assertEqual(settings.actors, ["finance-user"])
         self.assertEqual(result["version"], 8)
+        self.assertEqual(
+            refresh_calls,
+            [
+                {
+                    "scope_keys": ["all"],
+                    "reason": "bank_flow_rule_batch_tag_rules_changed",
+                    "metadata": {"relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE},
+                }
+            ],
+        )
+
+    def test_update_tag_selection_noop_does_not_enqueue_refresh(self) -> None:
+        settings = RecordingBankFlowRuleSettings()
+        settings.update_bank_flow_rule_batch_tag_rules = (  # type: ignore[method-assign]
+            lambda _payload, *, actor_id: {
+                "version": 7,
+                "rules": [{"tag_code": "fee", "requires_oa": True, "requires_invoice": False}],
+            }
+        )
+        service = object.__new__(BankFlowRuleBatchApplicationService)
+        service._app_settings_service = settings
+        service.enqueue_background_refresh = (  # type: ignore[method-assign]
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("no-op must not enqueue refresh"))
+        )
+
+        result = service.update_tag_selection(
+            {"expected_version": 7, "rules": [{"tag_code": "fee"}]},
+            actor_id="finance-user",
+        )
+
+        self.assertEqual(result["version"], 7)
 
     def test_bank_flow_source_versions_use_bank_flow_rule_version_boundary(self) -> None:
         settings = RecordingBankFlowRuleSettings()

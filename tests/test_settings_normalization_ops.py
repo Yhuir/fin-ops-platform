@@ -76,7 +76,7 @@ class SettingsNormalizationOpsTests(unittest.TestCase):
         self.assertIs(transaction, connection)
         self.assertEqual(
             saved["bank_flow_rule_batch_tag_rules"],
-            {"version": 1, "selected_tag_codes": [], "requirements_by_tag_code": {}},
+            {"version": 1, "requirements_by_tag_code": {}},
         )
 
 

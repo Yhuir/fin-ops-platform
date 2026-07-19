@@ -196,7 +196,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 
 ## Bank Transaction Paired Policy / 流水规则批量处理 API
 
-状态：close。当前生产前端和公开 API 使用 `bank-flow-rule-batches`；HTTP route、application boundary、read model key、refresh producer、worker event、operation barrier target、repository port、mutation persistence port、refresh persistence port、PostgreSQL 批次表、read model row 表和 `app_settings.bank_flow_rule_batch_tag_rules` 使用 `bank_flow_rule_batch`。迁移 `0082_bank_flow_rule_batch_storage.sql` 从历史 no-OA 表回填旧 bank-flow rows；迁移 `0083_bank_flow_rule_batch_tag_rules.sql` 只在缺失新规则 key 时一次性从历史 no-OA settings 复制初始值。运行时不再把 no-OA 物理表、no-OA settings family、旧 `selected_tag_codes`、旧 no-OA HTTP 错误码、旧 `no_oa_bank_batch_summary` Workbench source kind 或旧 no-OA 历史重算作为 bank-flow source of truth。legacy `/api/no-oa-bank-batches/*` 仅作为 no-OA 兼容路径保留，不承接 bank-flow 新链路。
+状态：close。当前生产前端和公开 API 使用 `bank-flow-rule-batches`；HTTP route、application boundary、read model key、refresh producer、worker event、operation barrier target、repository port、mutation persistence port、refresh persistence port、PostgreSQL 批次表、read model row 表和 `app_settings.bank_flow_rule_batch_tag_rules` 使用 `bank_flow_rule_batch`。迁移 `0082` 回填旧 bank-flow rows，`0083` 一次性复制规则初值，`0111` 将 legacy selected seed 合并为 canonical requirements 并删除旧字段。运行时不再把 no-OA 物理表、no-OA settings family 或旧 `selected_tag_codes` 作为 bank-flow source of truth。
 
 `GET /api/bank-flow-rule-batches/tag-rules`
 
@@ -244,8 +244,9 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 - `expected_version` 必填；版本不一致返回 `409 bank_flow_rule_batch_tag_rules_version_conflict`。
 - 请求和 service 边界都不能包含 `selected_tag_codes`；旧字段不得作为新规则事实写入。
 - 只能提交当前 `active_tags` 中存在且可用的标签 code；未知、停用、重复 code 返回业务错误。
-- 成功后返回与 GET 相同结构，写审计动作 `bank_flow_rule_batch_tag_rules_updated`。
-- 保存后触发独立 `bank_flow_rule_batch`、`workbench`、`workbench_relation` 等受影响 read model refresh；不能递增 `bank_transaction_tags.version`。
+- 语义变化后返回与 GET 相同结构，version +1，写一次审计动作 `bank_flow_rule_batch_tag_rules_updated`，并只 enqueue `bank_flow_rule_batch/all` refresh；不能递增 `bank_transaction_tags.version`。
+- 提交与当前有效规则相同的 payload 是 no-op：version 不变，不写 settings/audit，不触发 refresh。
+- 保存规则不得读取或改写 existing Workbench/turnover relation；active formal relation 继续决定 paired/unpaired，existing metadata 保持历史快照。
 - HTTP 输出边界只返回 `bank_flow_rule_batch_*` 错误码。共享 bank-batch core 仍可能抛出的 legacy `no_oa_bank_batch_*` selection/relation/version/persistence 错误必须在 `routes_bank_flow_rule_batches.py` 翻译，不能泄露给前端 API client。
 
 `GET /api/bank-flow-rule-batches`

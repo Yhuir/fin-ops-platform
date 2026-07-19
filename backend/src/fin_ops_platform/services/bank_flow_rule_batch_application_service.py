@@ -9,6 +9,7 @@ from fin_ops_platform.services.bank_batch_application_service import (
     BankBatchRelationMutationError,
 )
 from fin_ops_platform.services.bank_batch_service import BANK_FLOW_RULE_BATCH_RELATION_MODE, BankBatchService
+from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService
 
 
 BANK_FLOW_RULE_BATCH_ONLINE_MUTATION_ACTIONS = frozenset(
@@ -305,14 +306,13 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
             payload,
             actor_id=actor_id,
         )
-        self._sync_bank_flow_rule_relation_requirements(result, actor_id=actor_id)
-        self._sync_turnover_rule_relation_requirements(result, actor_id=actor_id)
-        self.after_mutation(
-            ["all"],
-            changed_case_ids=[],
-            persist=False,
-            action_name="bank_flow_rule_batch_tag_rules_changed",
+        requested_version = int(
+            BankTransactionCategoryService._normalize_version(
+                payload.get("expected_version", payload.get("version", 0))
+            )
         )
+        if int(result.get("version") or 0) == requested_version:
+            return result
         self.enqueue_background_refresh(
             ["all"],
             reason="bank_flow_rule_batch_tag_rules_changed",

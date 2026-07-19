@@ -124,6 +124,7 @@ EXPECTED_MIGRATIONS = [
     "0108_cost_statistics_bank_flow_runtime_grant.sql",
     "0109_oa_pending_payment_freshness_gate_hot_path.sql",
     "0110_oa_pending_payment_outbox_freshness_hot_path.sql",
+    "0111_bank_flow_rule_batch_tag_rules_canonical_shape.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -286,9 +287,20 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 111)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 112)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
+
+    def test_bank_flow_rule_tag_settings_migration_removes_legacy_selected_shape(self) -> None:
+        sql = (
+            MIGRATIONS_DIR / "0111_bank_flow_rule_batch_tag_rules_canonical_shape.sql"
+        ).read_text(encoding="utf-8").lower()
+
+        self.assertIn("bank_flow_rule_batch_tag_rules", sql)
+        self.assertIn("requirements_by_tag_code", sql)
+        self.assertIn("selected_tag_codes", sql)
+        self.assertIn("jsonb_array_elements_text", sql)
+        self.assertNotIn("no_oa_bank_batch_tag_selection", sql)
 
     def test_pending_invoice_filter_constraints_allow_cash_income(self) -> None:
         sql = strip_sql_comments(migration_sql()).lower()

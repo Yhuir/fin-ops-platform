@@ -676,6 +676,29 @@ class AppSettingsServiceTests(unittest.TestCase):
         self.assertEqual(after["version"], current["version"])
         self.assertEqual(app._audit_service.as_dicts(), [])
 
+    def test_bank_flow_rule_batch_tag_rules_semantic_noop_has_no_write_or_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self._seed_settings(
+                temp_dir,
+                definitions=[self._custom_auto_rule("fee", "手续费")],
+            )
+            app = build_application(data_dir=Path(temp_dir))
+            current = app._app_settings_service.get_bank_flow_rule_batch_tag_rules_payload()
+            app._state_store.save_app_settings = lambda _snapshot: (_ for _ in ()).throw(  # type: ignore[method-assign]
+                AssertionError("semantic no-op must not persist settings")
+            )
+
+            result = app._app_settings_service.update_bank_flow_rule_batch_tag_rules(
+                {
+                    "expected_version": current["version"],
+                    "rules": list(current["rules"]),
+                },
+                actor_id="settings-owner",
+            )
+
+        self.assertEqual(result, current)
+        self.assertEqual(app._audit_service.as_dicts(), [])
+
     def test_update_settings_preserves_bank_flow_rule_batch_tag_rules(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             self._seed_settings(
