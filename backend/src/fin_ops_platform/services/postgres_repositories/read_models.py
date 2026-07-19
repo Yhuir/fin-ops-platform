@@ -52,6 +52,54 @@ WORKBENCH_GENERATION_RETENTION_KEEP_RECENT = 1
 WORKBENCH_GENERATION_RETENTION_KEEP_DAYS = 0
 WORKBENCH_GENERATION_RETENTION_LIMIT = 500
 WORKBENCH_ROW_PAYLOAD_PRUNED_KEYS = {"object_identity"}
+_BATCH_ACCOUNTING_INVOICE_CANDIDATE_MATCH_SQL = """
+    regexp_replace(
+      coalesce(
+        nullif(r.payload->>'source_oa_id', ''),
+        nullif(r.payload->>'source_oa_row_id', ''),
+        nullif(r.payload->>'derived_from_oa_id', ''),
+        nullif(r.payload->>'source_expense_item_id', ''),
+        nullif(r.payload->>'source_id', '')
+      ),
+      ':item:.*$',
+      ''
+    ) = any(
+      coalesce(
+        (select array_agg(candidate.oa_row_id) from oa_candidate_ids candidate),
+        array[]::text[]
+      )
+    )
+    or exists (
+      select 1
+      from oa_candidate_ids candidate
+      where r.row_id like 'oa-att-inv-' || candidate.oa_row_id || '%%'
+    )
+    or exists (
+      select 1
+      from jsonb_array_elements(
+        case
+          when jsonb_typeof(r.payload->'source_links') = 'array' then r.payload->'source_links'
+          else '[]'::jsonb
+        end
+      ) link
+      where regexp_replace(
+        coalesce(
+          nullif(link->>'source_oa_id', ''),
+          nullif(link->>'source_oa_row_id', ''),
+          nullif(link->>'derived_from_oa_id', ''),
+          nullif(link->>'source_expense_item_id', ''),
+          nullif(link->>'source_id', '')
+        ),
+        ':item:.*$',
+        ''
+      ) = any(
+        coalesce(
+          (select array_agg(candidate.oa_row_id) from oa_candidate_ids candidate),
+          array[]::text[]
+        )
+      )
+    )
+"""
 LOGGER = logging.getLogger(__name__)
 
 
@@ -11361,10 +11409,18 @@ class PostgresReadModelRepository:
         if not resolved_bank_year:
             return None
         bank_start = f"{resolved_bank_year}-01-01"
-        bank_rows = self._connection.fetch_all(
-            """
-            with active_rows as (
+        candidate_rows = self._connection.fetch_all(
+            f"""
+            with active_bank_rows as (
                 select distinct on (r.row_id)
+                    1 as batch_row_order,
+                    'bank'::text as batch_row_kind,
+                    coalesce(
+                        r.payload->>'trade_time',
+                        r.payload->>'pay_receive_time',
+                        r.payload->>'txn_date',
+                        ''
+                    ) as batch_sort_value,
                     r.row_id, r.source_kind, r.status, r.payload, r.raw_payload,
                     r.updated_at
                 from read_model.workbench_rows r
@@ -11380,17 +11436,18 @@ class PostgresReadModelRepository:
                         and r.scope_month < (%s::date + interval '1 year')
                       )
                 order by r.row_id, r.updated_at desc nulls last
-            )
-            select row_id, source_kind, status, payload, raw_payload
-            from active_rows
-            order by coalesce(payload->>'trade_time', payload->>'pay_receive_time', payload->>'txn_date', '') desc, row_id
-            """,
-            ("批量账务集中处理", bank_start, bank_start),
-        )
-        oa_rows = self._connection.fetch_all(
-            """
-            with active_rows as (
+            ),
+            active_oa_rows as (
                 select distinct on (r.row_id)
+                    2 as batch_row_order,
+                    'oa'::text as batch_row_kind,
+                    coalesce(
+                        r.payload->>'apply_time',
+                        r.payload->>'application_time',
+                        r.payload->>'application_date',
+                        r.payload->>'created_at',
+                        ''
+                    ) as batch_sort_value,
                     r.row_id, r.source_kind, r.status, r.payload, r.raw_payload,
                     r.updated_at
                 from read_model.workbench_rows r
@@ -11400,32 +11457,65 @@ class PostgresReadModelRepository:
                  and gen.status = 'active'
                 where r.scope_key <> 'all'
                   and r.source_kind = 'oa'
+                  and %s::boolean
                   and (
                         coalesce(r.payload->>'apply_type', '')
                         || ' '
                         || coalesce(r.payload->>'expense_type', '')
                       ) like %s
                 order by r.row_id, r.updated_at desc nulls last
+            ),
+            oa_candidate_ids as materialized (
+                select coalesce(nullif(payload->>'id', ''), row_id) as oa_row_id
+                from active_oa_rows
+            ),
+            active_invoice_rows as (
+                select distinct on (r.row_id)
+                    3 as batch_row_order,
+                    'invoice'::text as batch_row_kind,
+                    r.row_id as batch_sort_value,
+                    r.row_id, r.source_kind, r.status, r.payload, r.raw_payload,
+                    r.updated_at
+                from read_model.workbench_rows r
+                join read_model.workbench_generations gen
+                  on gen.generation_id = r.generation_id
+                 and gen.scope_key = r.scope_key
+                 and gen.status = 'active'
+                where r.source_kind = 'oa_attachment_invoice'
+                  and r.scope_key <> 'all'
+                  and %s::boolean
+                  and (
+                    {_BATCH_ACCOUNTING_INVOICE_CANDIDATE_MATCH_SQL}
+                  )
+                order by r.row_id, r.updated_at desc nulls last
+            ),
+            candidate_rows as (
+                select * from active_bank_rows
+                union all
+                select * from active_oa_rows
+                union all
+                select * from active_invoice_rows
             )
-            select row_id, source_kind, status, payload, raw_payload
-            from active_rows
-            order by coalesce(payload->>'apply_time', payload->>'application_time', payload->>'application_date', payload->>'created_at', '') desc, row_id
+            select batch_row_kind, row_id, source_kind, status, payload, raw_payload
+            from candidate_rows
+            order by
+                batch_row_order,
+                case when batch_row_order in (1, 2) then batch_sort_value end desc,
+                case when batch_row_order = 3 then row_id end,
+                row_id
             """,
-            ("%日常报销%",),
-        ) if include_oa else []
-        oa_row_ids = _dedupe_preserve_order(
-            text((_read_model_payload(row) or {}).get("id")) or text(row.get("row_id"))
-            for row in oa_rows
-            if isinstance(row, dict)
+            (
+                "批量账务集中处理",
+                bank_start,
+                bank_start,
+                include_oa,
+                "%日常报销%",
+                include_invoices,
+            ),
         )
-        invoice_rows = (
-            self._load_batch_accounting_invoice_rows(
-                oa_row_ids=oa_row_ids,
-                allow_all_scope=False,
-            )
-            if include_invoices
-            else []
-        )
+        bank_rows = [row for row in candidate_rows if text(row.get("batch_row_kind")) == "bank"]
+        oa_rows = [row for row in candidate_rows if text(row.get("batch_row_kind")) == "oa"]
+        invoice_rows = [row for row in candidate_rows if text(row.get("batch_row_kind")) == "invoice"]
         return self._batch_accounting_payload_from_rows(
             bank_year=resolved_bank_year,
             bank_rows=bank_rows,
@@ -11442,10 +11532,12 @@ class PostgresReadModelRepository:
         normalized_oa_row_ids = _dedupe_preserve_order(text(row_id) for row_id in list(oa_row_ids or []))
         if not normalized_oa_row_ids:
             return []
-        invoice_like_patterns = [f"oa-att-inv-{row_id}%" for row_id in normalized_oa_row_ids]
         return self._connection.fetch_all(
-            """
-            with active_rows as (
+            f"""
+            with oa_candidate_ids as materialized (
+                select unnest(%s::text[]) as oa_row_id
+            ),
+            active_rows as (
                 select distinct on (r.row_id)
                     r.row_id, r.source_kind, r.status, r.payload, r.raw_payload,
                     r.updated_at
@@ -11457,38 +11549,7 @@ class PostgresReadModelRepository:
                 where r.source_kind = 'oa_attachment_invoice'
                   and (%s or r.scope_key <> 'all')
                   and (
-                    regexp_replace(
-                      coalesce(
-                        nullif(r.payload->>'source_oa_id', ''),
-                        nullif(r.payload->>'source_oa_row_id', ''),
-                        nullif(r.payload->>'derived_from_oa_id', ''),
-                        nullif(r.payload->>'source_expense_item_id', ''),
-                        nullif(r.payload->>'source_id', '')
-                      ),
-                      ':item:.*$',
-                      ''
-                    ) = any(%s)
-                    or r.row_id like any(%s)
-                    or exists (
-                      select 1
-                      from jsonb_array_elements(
-                        case
-                          when jsonb_typeof(r.payload->'source_links') = 'array' then r.payload->'source_links'
-                          else '[]'::jsonb
-                        end
-                      ) link
-                      where regexp_replace(
-                        coalesce(
-                          nullif(link->>'source_oa_id', ''),
-                          nullif(link->>'source_oa_row_id', ''),
-                          nullif(link->>'derived_from_oa_id', ''),
-                          nullif(link->>'source_expense_item_id', ''),
-                          nullif(link->>'source_id', '')
-                        ),
-                        ':item:.*$',
-                        ''
-                      ) = any(%s)
-                    )
+                    {_BATCH_ACCOUNTING_INVOICE_CANDIDATE_MATCH_SQL}
                   )
                 order by r.row_id,
                   case when r.scope_key = 'all' then 1 else 0 end,
@@ -11498,7 +11559,7 @@ class PostgresReadModelRepository:
             from active_rows
             order by row_id
             """,
-            (allow_all_scope, normalized_oa_row_ids, invoice_like_patterns, normalized_oa_row_ids),
+            (normalized_oa_row_ids, allow_all_scope),
         )
 
     def _batch_accounting_payload_from_rows(

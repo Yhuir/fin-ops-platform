@@ -10,13 +10,16 @@
 
 第二次发布删除银行 fallback 后，40 样本 unsubmitted p95 仍为 `580.757ms`，dashboard DB p95 `274.008ms`、query count p95 `10`。这排除了响应体、connection acquire、worker 和银行 fallback 作为主瓶颈；剩余候选 SQL 中只有 OA 类型筛选仍以两个 JSON 字段的前导通配 `OR` 做全扫描。最终最小方案因此增加一个仅覆盖非 `all` OA 行、且表达式与查询完全一致的部分 trigram 索引；不增加结构化列、第二 read model、缓存或 worker。
 
+第三次发布应用 OA 类型索引后，40 样本 unsubmitted p95 降到 `514.231ms`，但仍比硬门槛高 `14.231ms`；dashboard 显示 API/DB/connection/query-count p95 为 `346.122ms` / `246.317ms` / `0.267ms` / `10`。剩余可控耗时是同一候选快照仍分成银行、OA、附件三个顺序数据库 round-trip。它们共享 active-generation 一致性边界和输出 DTO，合为一个 repository I/O 可删除两次往返，不需要增加新抽象或基础设施。
+
 本轮应保留现有 Workbench + workbench_relation 事实源，不新增独立 read model、缓存、表、队列或 worker。唯一 schema 变化是生产复测证明必需的 OA 类型部分表达式索引。最小而完整的生产方案是：
 
 1. 新增批量账务专用的 relation 批量读取 I/O，一条 SQL 同时证明 12 个或候选涉及的全部 scope。
 2. 未提交候选只读取当前 OA IDs 对应的附件发票。
 3. 银行候选只读取 Workbench projection 的结构化 `counterparty_name`，删除两个 JSON fallback，让既有复合索引生效。
 4. OA 类型筛选把两个字段规范为一个稳定表达式，并由 `0112` 部分 trigram 索引覆盖。
-5. 批量账务不再调用通用的逐 scope relation 读取入口；通用入口继续服务其他页面，行为不变。
+5. 银行、OA、当前 OA 附件作为同一 active-generation 候选快照，由一个 repository SQL I/O 返回；submit 继续使用自己的窄 loader。
+6. 批量账务不再调用通用的逐 scope relation 读取入口；通用入口继续服务其他页面，行为不变。
 
 ## 生产基线
 
@@ -84,13 +87,14 @@
 - 年度 count/list 内逐月 `_workbench_relation_payload_from_rows` 证明以及 list 的第二次重复证明。
 - 未提交 loader 中无 OA ID 约束的全量附件 SQL。
 - 银行候选 SQL 中绕过结构化投影列的 `payload.counterparty_name` / `payload.counterparty_name_raw` fallback。
+- OA 类型两个 JSON 字段各自前导通配再 `OR` 的未索引条件，以及列表银行/OA/附件三个顺序 round-trip。
 
 不会删除：
 
 - 通用 `get_by_row_ids` 和逐 scope payload 逻辑，因为仍有其他合法调用方；只禁止批量账务继续进入该旧路径。
 - submit/withdraw 已有窄读取和 canonical command 路径。
 
-静态 guard 必须证明批量账务 service 使用专用 relation I/O，loader 不再包含无 OA ID 条件的附件读取，并且银行候选只读取结构化 `counterparty_name`。
+静态 guard 必须证明批量账务 service 使用专用 relation I/O，列表候选只有一个 repository `fetch_all`，附件由当前 OA candidate CTE 界定，并且银行候选只读取结构化 `counterparty_name`。
 
 ## Grill-me 三轮审阅
 
@@ -112,10 +116,10 @@
 
 ### 第三次：性能、复杂度与运维
 
-- 未提交目标固定约 8 次查询：3 个候选读取 + 3 个专用 relation lookup + 2 个年度 count。
+- 未提交最终目标约 6 次业务查询：1 个候选快照 + 2–3 个专用 relation lookup + 2 个年度 count；请求级观测门为 p95 `<=8`。
 - 已提交目标固定约 6 次查询：1 个银行读取 + 2 个年度 relation list + 3 个 relation detail lookup。
 - 不新增基础设施；migration 0112 只增加可独立保留的读性能索引。应用回滚只需部署上一 release，索引不改变读写语义；如需物理清理，另行在维护窗口 `drop index concurrently`。
-- 只有部署后 p95 仍大于 `500ms` 且 EXPLAIN/数据库证据明确指向候选 SQL 时，才进入后续 server-side candidate paging/index 优化；本轮不提前实现。
+- 只有候选单 I/O 部署后 p95 仍大于 `500ms`，才依据新的生产 dashboard 继续分析；不提前增加 server-side candidate paging、缓存或第二 read model。
 - 结论：方案不是过度设计；它直接删除已量化的 N+1 和无界读取，并保留完整 freshness、审计、回滚和隔离闭环。
 
 ## 验收门槛

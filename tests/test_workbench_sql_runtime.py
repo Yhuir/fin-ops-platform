@@ -830,9 +830,10 @@ class BatchAccountingActiveGenerationConnection(WorkbenchSqlReadConnection):
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
         normalized = " ".join(sql.lower().split())
         self.fetch_all_calls.append((normalized, params))
-        if "from read_model.workbench_rows" in normalized and "r.source_kind = 'bank'" in normalized:
+        if "with active_bank_rows as" in normalized:
             return [
                 {
+                    "batch_row_kind": "bank",
                     "row_id": "txn_imported_202601_batch_001",
                     "source_kind": "bank",
                     "status": "unpaired",
@@ -843,11 +844,9 @@ class BatchAccountingActiveGenerationConnection(WorkbenchSqlReadConnection):
                         "trade_time": "2026-01-07 15:54:00",
                         "debit_amount": "1200.00",
                     },
-                }
-            ]
-        if "from read_model.workbench_rows" in normalized and "r.source_kind = 'oa'" in normalized:
-            return [
+                },
                 {
+                    "batch_row_kind": "oa",
                     "row_id": "oa-exp-ba-001",
                     "source_kind": "oa",
                     "status": "unpaired",
@@ -857,11 +856,9 @@ class BatchAccountingActiveGenerationConnection(WorkbenchSqlReadConnection):
                         "apply_type": "日常报销",
                         "amount": "1200.00",
                     },
-                }
-            ]
-        if "from read_model.workbench_rows" in normalized and "r.source_kind = 'oa_attachment_invoice'" in normalized:
-            return [
+                },
                 {
+                    "batch_row_kind": "invoice",
                     "row_id": "oa-att-inv-oa-exp-ba-001-01",
                     "source_kind": "oa_attachment_invoice",
                     "status": "unpaired",
@@ -870,7 +867,7 @@ class BatchAccountingActiveGenerationConnection(WorkbenchSqlReadConnection):
                         "type": "invoice",
                         "derived_from_oa_id": "oa-exp-ba-001",
                     },
-                }
+                },
             ]
         return []
 
@@ -2538,32 +2535,25 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         workbench_row_queries = [
             sql for sql, _params in connection.fetch_all_calls if "from read_model.workbench_rows" in sql
         ]
-        self.assertEqual(len(workbench_row_queries), 3)
+        self.assertEqual(len(workbench_row_queries), 1)
         for sql in workbench_row_queries:
             self.assertIn("join read_model.workbench_generations", sql)
             self.assertIn("status = 'active'", sql)
             self.assertIn("generation_id", sql)
-        bank_query = next(sql for sql in workbench_row_queries if "r.source_kind = 'bank'" in sql)
-        oa_query = next(sql for sql in workbench_row_queries if "r.source_kind = 'oa'" in sql)
-        invoice_query = next(sql for sql in workbench_row_queries if "r.source_kind = 'oa_attachment_invoice'" in sql)
-        invoice_params = next(
-            params
-            for sql, params in connection.fetch_all_calls
-            if "from read_model.workbench_rows" in sql and "r.source_kind = 'oa_attachment_invoice'" in sql
-        )
-        self.assertIn("r.scope_month >= %s::date", bank_query)
-        self.assertIn("r.counterparty_name = %s", bank_query)
-        self.assertNotIn("r.payload->>'counterparty_name'", bank_query)
-        self.assertNotIn("r.payload->>'counterparty_name_raw'", bank_query)
-        self.assertIn("coalesce(r.payload->>'apply_type', '')", oa_query)
-        self.assertIn("coalesce(r.payload->>'expense_type', '')", oa_query)
-        self.assertIn(") like %s", oa_query)
-        self.assertNotIn("r.scope_month >= %s::date", oa_query)
-        self.assertNotIn("r.scope_month >= %s::date", invoice_query)
-        self.assertIn("regexp_replace", invoice_query)
-        self.assertIn("= any(%s)", invoice_query)
-        self.assertEqual(invoice_params[0], False)
-        self.assertEqual(invoice_params[1], ["oa-exp-ba-001"])
+        candidate_query = workbench_row_queries[0]
+        candidate_params = connection.fetch_all_calls[0][1]
+        self.assertIn("r.scope_month >= %s::date", candidate_query)
+        self.assertIn("r.counterparty_name = %s", candidate_query)
+        self.assertNotIn("r.payload->>'counterparty_name'", candidate_query)
+        self.assertNotIn("r.payload->>'counterparty_name_raw'", candidate_query)
+        self.assertIn("coalesce(r.payload->>'apply_type', '')", candidate_query)
+        self.assertIn("coalesce(r.payload->>'expense_type', '')", candidate_query)
+        self.assertIn(") like %s", candidate_query)
+        self.assertIn("oa_candidate_ids as materialized", candidate_query)
+        self.assertIn("r.source_kind = 'oa_attachment_invoice'", candidate_query)
+        self.assertIn("regexp_replace", candidate_query)
+        self.assertEqual(candidate_params[3], True)
+        self.assertEqual(candidate_params[5], True)
 
     def test_repository_groups_page_pins_versions_counts_and_rows_to_single_active_generation(self) -> None:
         connection = SwitchingActiveWorkbenchGenerationConnection()

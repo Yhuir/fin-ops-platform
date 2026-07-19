@@ -182,6 +182,12 @@ class BatchAccountingPostgresIntegrationTests(unittest.TestCase):
 
         payload = self.repository.load_batch_accounting_workbench_payload(bank_year="2026")
         group = payload["unpaired"]["groups"][0]
+        submit_payload = self.repository.load_batch_accounting_submit_workbench_payload(
+            bank_year="2026",
+            bank_row_id="txn-batch-structured-1",
+            oa_row_ids=["oa-batch-1"],
+        )
+        submit_group = submit_payload["unpaired"]["groups"][0]
         explain_row = self.connection.fetch_one(
             """
             explain (format json)
@@ -202,6 +208,10 @@ class BatchAccountingPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-batch-1"])
         self.assertEqual(
             [row["id"] for row in group["invoice_rows"]],
+            ["oa-att-inv-oa-batch-1-01"],
+        )
+        self.assertEqual(
+            [row["id"] for row in submit_group["invoice_rows"]],
             ["oa-att-inv-oa-batch-1-01"],
         )
         self.assertIn(

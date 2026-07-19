@@ -8,6 +8,7 @@
 - 12 个 scope 的 freshness/status/dirty proof 已由逐 scope 查询改为一次批量 SQL；count/list 各固定为 2 条语句，row lookup 为 2–3 条语句。
 - 未提交列表的 OA 附件读取只接受当前 OA IDs；原无条件读取全部附件的 SQL 已删除。
 - 银行候选只读结构化 counterparty；OA 类型使用 migration 0112 对应的单一组合表达式，删除两个 JSON 字段各自前导通配再 `OR` 的全扫描。
+- 列表银行、OA、当前 OA 附件已合为一个 active-generation repository SQL I/O；submit 仍使用独立窄 loader，两条路径共享一个私有附件匹配谓词。
 - 通用 relation reader、其他页面 facade、read model 表结构、worker、queue、command API 和前端 DTO 均未改变；0112 只增加 batch-only 读性能索引。
 - 静态 architecture/runtime guards 已覆盖专用 I/O、索引合同和旧链删除条件。
 
@@ -15,7 +16,7 @@
 
 | 类别 | 结果 | 说明 |
 |---|---:|---|
-| 批量账务/API/relation 定向后端 | 63 passed | 业务筛选、API shape、service/facade、freshness 和 SQL runtime |
+| 批量账务/API/relation 定向后端 | 64 passed | 业务筛选、API shape、service/facade、freshness、列表单 I/O 和 SQL runtime |
 | manifest/architecture guards | 42 passed | owner、port、依赖方向和旧链删除 |
 | 共享受影响回归 | 786 passed, 4 skipped | workbench relation、worker、lifecycle、App Status 等；skip 为条件性外部依赖 |
 | 前端 BatchAccounting API/Page | 23 passed | 页面和 API 行为未回归 |
@@ -57,10 +58,12 @@
 
 第二次 release `main-66860e3d-20260720043120` 已部署；40 样本证明 shell `110.635ms`、submitted `312.452ms`、Audit `285.746ms` 通过，但 unsubmitted p95 仍为 `580.757ms`。dashboard 84 样本的 API/DB/query-count p95 分别为 `426.897ms` / `274.008ms` / `10`，因此银行 fallback 不是剩余主瓶颈。
 
-第三轮只把 OA 类型条件规范为一个稳定表达式，并由 migration 0112 添加 batch-only 部分 trigram 索引。定向 migration/SQL/guard 测试、真实 PostgreSQL 2 项、lint 与 diff-check 已通过；当前尚待精确 SHA 部署和生产复采。完成门为：
+第三次 release `main-c804314e-20260720044423` 已部署并应用 migration 0112（生产建索引 `12352ms`）；40 样本 shell `109.519ms`、submitted `291.228ms`、Audit `312.523ms` 通过，unsubmitted 从 `580.757ms` 降到 `514.231ms`，但仍超过硬门槛。dashboard API/DB/connection/query-count p95 为 `346.122ms` / `246.317ms` / `0.267ms` / `10`。
+
+第四轮据此只合并同一 active-generation 的银行/OA/附件候选读取，删除两个顺序数据库 round-trip；不增加 migration、缓存、read model 或 worker。真实 PostgreSQL 0001–0112 的 2 项集成测试同时证明列表单 I/O、submit 窄附件读取、OA 索引命中与结果等价；当前尚待精确 SHA 部署和生产复采。完成门为：
 
 - 精确 SHA 部署。
 - shell、unsubmitted、submitted、Page Audit 各 40 样本。
-- dashboard DB query count `<=10`，列表 p95 `<=500ms`（目标 `<=300ms`），Audit p95 `<=1000ms`。
+- dashboard DB query count p95 `<=8`，列表 p95 `<=500ms`（目标 `<=300ms`），Audit p95 `<=1000ms`。
 - 直接及跨页 Audit 必须 pass/fresh/drained/ready/0 issue。
 - submit → fresh → withdraw → fresh 只有在 `app-health-operations` 全局强制 preflight 通过后才允许执行；若仍被其他页面阻断，记录到最终系统门，不绕过安全门。

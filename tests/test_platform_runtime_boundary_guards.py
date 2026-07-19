@@ -4564,10 +4564,29 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             read_model_source,
             "_load_batch_accounting_invoice_rows",
         )
-        if "_load_batch_accounting_invoice_rows" not in batch_loader_source:
-            violations.append("batch accounting list no longer uses the OA-id-scoped attachment loader")
-        if "oa_row_ids=oa_row_ids" not in batch_loader_source or "allow_all_scope=False" not in batch_loader_source:
-            violations.append("batch accounting list attachment I/O is no longer bounded to current non-all OA candidates")
+        if batch_loader_source.count("self._connection.fetch_all(") != 1:
+            violations.append("batch accounting list candidate snapshot is no longer one repository I/O")
+        if "_load_batch_accounting_invoice_rows" in batch_loader_source:
+            violations.append("batch accounting list keeps the separate attachment round trip")
+        for required_candidate_bound in (
+            "oa_candidate_ids as materialized",
+            "r.source_kind = 'oa_attachment_invoice'",
+            "r.scope_key <> 'all'",
+            "_BATCH_ACCOUNTING_INVOICE_CANDIDATE_MATCH_SQL",
+        ):
+            if required_candidate_bound not in batch_loader_source:
+                violations.append(
+                    f"batch accounting list attachment I/O is missing current OA bound {required_candidate_bound}"
+                )
+        for required_shared_match in (
+            "from oa_candidate_ids candidate",
+            "candidate.oa_row_id",
+            "jsonb_array_elements",
+        ):
+            if required_shared_match not in read_model_source:
+                violations.append(
+                    f"batch accounting shared attachment match is missing candidate bound {required_shared_match}"
+                )
         if "r.counterparty_name = %s" not in batch_loader_source:
             violations.append("batch accounting bank candidate read no longer uses the structured indexed counterparty field")
         for legacy_bank_filter in ("r.payload->>'counterparty_name'", "r.payload->>'counterparty_name_raw'"):
@@ -4582,7 +4601,12 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"batch accounting OA candidate read is missing indexed type expression {required_oa_type_filter}")
         if "r.payload->>'apply_type' like %s" in batch_loader_source or "r.payload->>'expense_type' like %s" in batch_loader_source:
             violations.append("batch accounting OA candidate read keeps the unindexed OR filter")
-        for required_filter in ("normalized_oa_row_ids", "= any(%s)", "r.row_id like any(%s)"):
+        for required_filter in (
+            "normalized_oa_row_ids",
+            "oa_candidate_ids as materialized",
+            "select unnest(%s::text[])",
+            "_BATCH_ACCOUNTING_INVOICE_CANDIDATE_MATCH_SQL",
+        ):
             if required_filter not in invoice_loader_source:
                 violations.append(f"batch accounting attachment loader is missing scoped filter {required_filter}")
 

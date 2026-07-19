@@ -35,6 +35,7 @@
 - 首次部署后若 relation query count 已达标、但 unsubmitted p95 仍失败，使用 dashboard DB duration、响应大小和现有索引合同定位剩余慢 SQL。
 - 银行候选只按结构化 `workbench_rows.counterparty_name` 过滤，删除两个历史 JSON `OR` fallback，使既有 `workbench_rows_bank_counterparty_scope_idx` 可用。
 - 若该 release 仍失败，唯一剩余无索引条件是 OA `apply_type/expense_type` 的前导通配扫描：把两个 JSON 字段规范为一个稳定表达式，并用 migration 0112 添加只覆盖 `source_kind='oa' and scope_key<>'all'` 的部分 trigram 索引。
+- 若索引 release 已把 p95 降到接近门槛但仍失败，且 dashboard 证明 query-count p95 仍为 `10`、connection acquire 可忽略，则把同属一个 active-generation 候选快照的银行/OA/附件读取合为一个 repository SQL I/O；附件仍只引用当前 OA candidate CTE，submit 窄 loader 不变。
 - 不新增结构化列、缓存、projection 或第二套候选 read model；真实 PostgreSQL 测试必须执行 0001–0112 并由 `EXPLAIN` 证明查询命中精确索引，静态 guard 禁止银行 fallback 和 OA 未索引 `OR` 回流。
 
 ### 5. 测试与架构门禁
@@ -47,7 +48,7 @@
    - 12 scope count/list 查询数固定；
    - row lookup 查询数不随 scope 数增长；
    - non-fresh 仍由 facade enqueue；
-   - OA 附件只按候选 IDs 查询。
+   - OA 附件只按候选 IDs 查询，列表银行/OA/附件固定为一个 repository I/O。
 5. Frontend：无前端行为改动；运行 BatchAccountingPage/API 既有组件测试作为回归，不新增实现细节测试。
 6. E2E：运行批量账务关键流测试；本地/生产写入分别受环境和 App Health preflight 约束。
 7. Existing regression：运行 workbench relation facade、SQL runtime、manifest、architecture guards，并验证关联台/银行明细/成本统计等直接共享消费者 Audit。
@@ -63,7 +64,7 @@
 - 相关测试、lint、docs、diff-check 通过后，提交并 push `main`。
 - 使用 `./scripts/deploy-oa.sh` 部署精确 SHA。
 - authenticated 20-sample：shell、unsubmitted 2026、submitted 2026、Page Audit。
-- 读取 dashboard 的 duration、DB duration、query count，验证 query p95 `<=10`。
+- 读取 dashboard 的 duration、DB duration、query count；最终候选单 I/O release 验证 query p95 `<=8`。
 - 做直接及跨页 Page Audit。
 - 生产 submit→fresh→withdraw→fresh 仅在 `app-health-operations` 强制 preflight 通过后执行；否则记录为最终系统门待办，绝不绕过。
 - 失败回滚：回滚本轮代码 commit 并重新部署上一精确 release；0112 只增加读性能索引，可安全留存且不改变数据/API。需要物理删除时必须另走维护窗口 `drop index concurrently`，不在失败回滚热路径阻塞表。
