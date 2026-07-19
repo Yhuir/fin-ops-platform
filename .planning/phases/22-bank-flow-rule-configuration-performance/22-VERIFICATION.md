@@ -40,11 +40,11 @@
 
 它们不位于本项变更文件或调用链，不作为本项修复范围，也不通过放宽断言隐藏。
 
-## 尚待发布门禁
+## 生产门禁结果
 
-- 提交并推送唯一 SHA。
-- 使用标准部署入口应用 migration 0111。
-- 验证生产服务/worker exact SHA。
-- 复测页面壳、GET tag-rules、Page Audit。
-- 使用生产当前规则执行安全 no-op PUT，验证 version 不变且响应 `<500ms`。
-- 验证 bank-flow Audit pass/fresh/drained，并检查 Workbench、银行明细、turnover 与 no-OA 隔离。
+- SHA `182c29be4d6b1f9fd91001d88600fddd411bf2ef` 已推送并部署为 `main-182c29be-20260720015418`。
+- migration 0111 生产应用成功；API、dispatcher、22 个 workers active 且 workdir 一致。
+- 页面壳 / GET / Page Audit p95 分别为 `139.570ms` / `258.567ms` / `370.022ms`。
+- 生产同值 PUT 20 次测量 p95 `275.186ms`、max `431.232ms`，version `11 → 11`。
+- bank-flow、关联台、银行明细、turnover Audit 均 `pass / fresh / drained`、0 issue。
+- 详细证据见 `22-PRODUCTION-VALIDATION.md` 与 `22-PRODUCTION-POST-READ.json`。

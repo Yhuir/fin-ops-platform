@@ -1,0 +1,59 @@
+{
+  "api_prefix": "/fin-ops-api",
+  "auth_configured": true,
+  "base_url": "https://www.yn-sourcing.com/",
+  "generated_at": "2026-07-19T17:58:02.187556+00:00",
+  "iterations": 20,
+  "probes": [
+    {
+      "duration_ms": {"p50": 122.051, "p95": 139.57, "p99": 150.837},
+      "failure_count": 0,
+      "freshness_pass": true,
+      "kind": "page",
+      "name": "page_shell_bank_flow_rule_batches",
+      "path": "/fin-ops/bank-flow-rule-batches",
+      "refresh_enqueued_count": 0,
+      "sample_count": 20,
+      "slo_pass": true,
+      "status": "pass",
+      "status_counts": {"200": 20},
+      "success_count": 20,
+      "target_ms": 1000.0
+    },
+    {
+      "duration_ms": {"p50": 171.907, "p95": 258.567, "p99": 289.098},
+      "failure_count": 0,
+      "freshness_pass": true,
+      "kind": "api",
+      "name": "bank_flow_rule_tag_rules",
+      "path": "/api/bank-flow-rule-batches/tag-rules",
+      "refresh_enqueued_count": 0,
+      "sample_count": 20,
+      "slo_pass": true,
+      "status": "pass",
+      "status_counts": {"200": 20},
+      "success_count": 20,
+      "target_ms": 1000.0
+    },
+    {
+      "duration_ms": {"p50": 282.269, "p95": 370.022, "p99": 441.628},
+      "failure_count": 0,
+      "freshness_pass": true,
+      "kind": "api",
+      "name": "bank_flow_rule_page_audit",
+      "path": "/api/operations/app-health/page-audit?page=bank-flow-rule-batches",
+      "refresh_enqueued_count": 0,
+      "sample_count": 20,
+      "slo_pass": true,
+      "status": "pass",
+      "status_counts": {"200": 20},
+      "success_count": 20,
+      "target_ms": 1000.0
+    }
+  ],
+  "status": "pass",
+  "summary": {"failed_probe_count": 0, "max_p95_ms": 370.022, "probe_count": 3, "sample_count": 60},
+  "timeout_seconds": 15.0,
+  "version": 1,
+  "warmup": 2
+}

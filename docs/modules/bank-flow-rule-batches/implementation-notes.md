@@ -478,4 +478,7 @@
 - 真实 PostgreSQL 空库应用 0001–0111，migration canonical/no-OA 隔离/幂等通过。
 - 真实 PostgreSQL 20 次采样：no-op p95 `34.002ms`，actual change p95 `83.475ms`；actual change 只有 1 个 bank-flow all dirty scope、0 relation history。
 - 全量后端修正后为 4200 passed、64 skipped、716 subtests；剩余 historical ETC、Workbench repository/direct cost fan-out、cost fan-out matrix 与 cost-statistics fixture 问题可在未改动基线 SHA `3c80361db` 复现，不属于本项链路。
-- 生产 exact-SHA、migration、no-op PUT、Page Audit 与跨模块隔离证据待统一发布步骤补录。
+- SHA `182c29be4d6b1f9fd91001d88600fddd411bf2ef` 已部署为 `main-182c29be-20260720015418`；migration 0111 用时 42ms，API/dispatcher/22 workers active 且 worker workdir mismatch 为 0。
+- 生产 20 次读取：页面壳 p95 `139.570ms`、GET p95 `258.567ms`、Page Audit p95 `370.022ms`；60/60 通过。
+- 生产同值 PUT 20 次测量 p95 `275.186ms`、max `431.232ms`，version `11 → 11`。
+- bank-flow、关联台、银行明细、turnover Page Audit 全部 `pass / fresh / drained`、0 issue；本子链路生产闭环完成。
