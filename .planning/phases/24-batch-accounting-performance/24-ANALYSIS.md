@@ -145,3 +145,10 @@
 - DB query count 不随 scope/candidate 月份数线性增长；单请求目标 `<=10`。
 - command API p95 `<=1000ms`，committed-to-fresh p95 `<=2000ms`、hard max `3000ms`；生产写验证受全局 App Health preflight 门禁约束，门禁未通过时必须延后到最终系统门，不得绕过。
 - 直接模块及关联台、银行明细、流水统计/成本统计 Page Audit 无回归。
+
+## 第九轮生产反证与诊断收敛
+
+- release `main-36db2926-20260720061033` 的 unsubmitted 40 样本 p95 为 `548.316ms`；0113 已在真实 PostgreSQL 命中，但没有改善外部耗时，因此年度 count 索引不是剩余主因。
+- dashboard 混合 endpoint API/DB/connection/query-count p95 为 `400.724ms` / `248.446ms` / `0.169ms` / `6`；连接可忽略，查询已固定，外部网关/TLS/网络预算约占 100–150ms。
+- 当前 2026 响应仅 17 条银行、34 条 OA、约 13KB。新增两阶段分页水化会增加数据库 round-trip，在当前规模下属于过度设计；缓存、worker、第二 read model 同样没有证据支持。
+- 下一步只在批量账务 GET 增加标准 `Server-Timing` 响应头，区分 candidate load/parse/select、relation read/apply、payload assembly 和 serialization。响应 JSON、事实源、queue、read model、其他页面 route 均不改变；依据生产阶段 p95 只优化唯一主耗时段。

@@ -8279,8 +8279,21 @@ class Application:
         return routes
 
     def _handle_api_batch_accounting(self, query: dict[str, list[str]]) -> Response:
-        status_code, payload = self._batch_accounting_routes().list_payload(query)
-        return self._json_response(status_code, payload)
+        timings: list[tuple[str, float]] = []
+        service_started_at = monotonic()
+        status_code, payload = self._batch_accounting_routes().list_payload(
+            query,
+            timing_observer=lambda phase, duration_ms: timings.append((phase, duration_ms)),
+        )
+        timings.append(("service_total", self._duration_ms(service_started_at)))
+        serialization_started_at = monotonic()
+        response = self._json_response(status_code, payload)
+        timings.append(("serialization", self._duration_ms(serialization_started_at)))
+        response.headers["Server-Timing"] = ", ".join(
+            f"batch_{phase};dur={duration_ms:.3f}"
+            for phase, duration_ms in timings
+        )
+        return response
 
     def _handle_api_batch_accounting_submit(
         self,

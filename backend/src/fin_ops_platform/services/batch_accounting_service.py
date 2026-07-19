@@ -5,6 +5,7 @@ from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import re
 from threading import RLock
+from time import perf_counter
 from typing import Any, Callable, Iterable
 
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
@@ -175,6 +176,7 @@ class BatchAccountingService:
         bank_page_size: int | str | None = None,
         oa_page: int | str | None = None,
         oa_page_size: int | str | None = None,
+        timing_observer: Callable[[str, float], None] | None = None,
     ) -> dict[str, Any]:
         fallback_year = str(year or "").strip()
         resolved_bank_year = self._validate_year(bank_year or fallback_year)
@@ -191,14 +193,22 @@ class BatchAccountingService:
             requested=any(value is not None for value in (page, page_size, oa_page, oa_page_size)),
         )
         if bucket == "submitted":
-            context = self._build_submitted_list_context(bank_year=resolved_bank_year)
+            context = self._build_submitted_list_context(
+                bank_year=resolved_bank_year,
+                timing_observer=timing_observer,
+            )
             submitted_relations = self._submitted_relations(resolved_bank_year, context)
+            assembly_started_at = perf_counter()
             bank_rows, relations_by_bank_row_id = self._submitted_payload(submitted_relations, context)
             oa_rows: list[dict[str, Any]] = []
             submitted_count = len(submitted_relations)
         else:
-            context = self._build_list_context(bank_year=resolved_bank_year)
+            context = self._build_list_context(
+                bank_year=resolved_bank_year,
+                timing_observer=timing_observer,
+            )
             submitted_count = context.submitted_count
+            assembly_started_at = perf_counter()
             bank_rows = [self._bank_row_payload(row) for row in context.eligible_bank_rows]
             oa_rows = [self._oa_row_payload(row, context.invoice_ids_by_oa_id.get(str(row.get("id")), [])) for row in context.eligible_oa_rows]
             relations_by_bank_row_id = {}
@@ -211,7 +221,7 @@ class BatchAccountingService:
                 for bank_row_id, relation_payload in relations_by_bank_row_id.items()
                 if str(bank_row_id) in visible_bank_row_ids
             }
-        return {
+        payload = {
             "summary": {
                 "unsubmitted_count": len(context.eligible_bank_rows),
                 "submitted_count": submitted_count,
@@ -228,6 +238,8 @@ class BatchAccountingService:
             ),
             **context.relation_read_model_status.as_payload(),
         }
+        self._record_read_timing(timing_observer, "payload_assembly", assembly_started_at)
+        return payload
 
     @classmethod
     def _pagination_from_values(
@@ -513,19 +525,32 @@ class BatchAccountingService:
             "message": "已撤回批量账务关联。",
         }
 
-    def _build_list_context(self, *, bank_year: str) -> _WorkbenchContext:
+    def _build_list_context(
+        self,
+        *,
+        bank_year: str,
+        timing_observer: Callable[[str, float], None] | None = None,
+    ) -> _WorkbenchContext:
         return self._context_with_relation_distribution(
             self._build_workbench_row_context(
                 bank_year=bank_year,
                 payload_loader=self._batch_workbench_loader,
+                timing_observer=timing_observer,
             ),
             bank_year=bank_year,
+            timing_observer=timing_observer,
         )
 
-    def _build_submitted_list_context(self, *, bank_year: str) -> _WorkbenchContext:
+    def _build_submitted_list_context(
+        self,
+        *,
+        bank_year: str,
+        timing_observer: Callable[[str, float], None] | None = None,
+    ) -> _WorkbenchContext:
         return self._build_workbench_row_context(
             bank_year=bank_year,
             payload_loader=self._batch_submitted_workbench_loader,
+            timing_observer=timing_observer,
         )
 
     def _build_submit_context(
@@ -555,18 +580,22 @@ class BatchAccountingService:
         *,
         bank_year: str,
         payload_loader: Callable[..., dict[str, Any] | None] | None,
+        timing_observer: Callable[[str, float], None] | None = None,
     ) -> _WorkbenchContext:
         if payload_loader is None:
             raise BatchAccountingError(
                 "batch_accounting_workbench_read_model_unavailable",
                 "批量账务关联台读模型不可用，请稍后重试。",
             )
+        load_started_at = perf_counter()
         payload = payload_loader(bank_year=bank_year)
+        self._record_read_timing(timing_observer, "candidate_load", load_started_at)
         if not isinstance(payload, dict):
             raise BatchAccountingError(
                 "batch_accounting_workbench_read_model_unavailable",
                 "批量账务关联台读模型不可用，请稍后重试。",
             )
+        parse_started_at = perf_counter()
         groups = self._groups_from_payload(payload)
         rows_by_id: dict[str, dict[str, Any]] = {}
         bank_rows: list[dict[str, Any]] = []
@@ -620,7 +649,7 @@ class BatchAccountingService:
                 unique_invoice_rows.append(row)
             if section == "unpaired":
                 self._index_group_invoice_links(unique_group_oa_rows, unique_invoice_rows, invoice_ids_by_oa_id)
-        return _WorkbenchContext(
+        context = _WorkbenchContext(
             rows_by_id=rows_by_id,
             groups=groups,
             bank_rows=bank_rows,
@@ -633,13 +662,17 @@ class BatchAccountingService:
             submitted_count=0,
             relation_read_model_status=relation_read_model_status,
         )
+        self._record_read_timing(timing_observer, "candidate_parse", parse_started_at)
+        return context
 
     def _context_with_relation_distribution(
         self,
         context: _WorkbenchContext,
         *,
         bank_year: str,
+        timing_observer: Callable[[str, float], None] | None = None,
     ) -> _WorkbenchContext:
+        select_started_at = perf_counter()
         selectable_bank_rows = [
             row
             for row in context.bank_rows
@@ -654,11 +687,14 @@ class BatchAccountingService:
             for row in context.unpaired_oa_rows
             if self._is_eligible_oa_row(row, linked_row_ids=set())
         ]
+        self._record_read_timing(timing_observer, "candidate_select", select_started_at)
         linked_row_ids, bank_linked_row_ids, submitted_count = self._relation_distribution_row_id_sets(
             [*selectable_bank_rows, *selectable_oa_rows],
             submitted_year=bank_year,
             read_model_status=context.relation_read_model_status,
+            timing_observer=timing_observer,
         )
+        apply_started_at = perf_counter()
         eligible_bank_rows = [
             row
             for row in selectable_bank_rows
@@ -674,7 +710,7 @@ class BatchAccountingService:
             for row in selectable_oa_rows
             if self._is_eligible_oa_row(row, linked_row_ids=bank_linked_row_ids)
         ]
-        return replace(
+        result = replace(
             context,
             linked_row_ids=linked_row_ids,
             bank_linked_row_ids=bank_linked_row_ids,
@@ -682,6 +718,8 @@ class BatchAccountingService:
             eligible_oa_rows=eligible_oa_rows,
             submitted_count=submitted_count,
         )
+        self._record_read_timing(timing_observer, "relation_apply", apply_started_at)
+        return result
 
     @staticmethod
     def _groups_from_payload(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -791,6 +829,7 @@ class BatchAccountingService:
         *,
         submitted_year: str | None = None,
         read_model_status: _RelationReadModelStatus,
+        timing_observer: Callable[[str, float], None] | None = None,
     ) -> tuple[set[str], set[str], int]:
         row_ids = self._dedupe(
             str(row.get("id") or "").strip()
@@ -810,6 +849,7 @@ class BatchAccountingService:
             )
             return set(), set(), 0
         scope_keys_hint = self._scope_keys_for_rows(rows)
+        relation_started_at = perf_counter()
         payload = reader(
             row_ids,
             require_fresh=True,
@@ -817,6 +857,7 @@ class BatchAccountingService:
             scope_keys_hint=scope_keys_hint,
             submitted_year=submitted_year,
         )
+        self._record_read_timing(timing_observer, "relation_read", relation_started_at)
         read_model_status.record(payload if isinstance(payload, dict) else None)
         if not isinstance(payload, dict):
             return set(), set(), 0
@@ -845,6 +886,16 @@ class BatchAccountingService:
         if read_model_status.status != "fresh":
             submitted_count = 0
         return linked, bank_linked, submitted_count
+
+    @staticmethod
+    def _record_read_timing(
+        observer: Callable[[str, float], None] | None,
+        phase: str,
+        started_at: float,
+    ) -> None:
+        if observer is None:
+            return
+        observer(phase, round(max(0.0, (perf_counter() - started_at) * 1000), 3))
 
     def _submitted_relations(self, year: str, context: _WorkbenchContext) -> list[dict[str, Any]]:
         if self._relation_facade is None:

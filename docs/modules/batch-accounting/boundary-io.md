@@ -48,6 +48,7 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
+| 列表性能诊断 | HTTP `Server-Timing` 响应头 | 只属于 `GET /api/batch-accounting`，固定记录 candidate/relation/payload/serialization 阶段；不得进入业务 JSON、持久化、queue、共享 read model 或其他页面 route。 |
 | 批量账务操作结果 | 前端页面 | 返回成功/失败、受影响对象、`affected_months`、`affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`。提交/撤回 command 成功后，后置 barrier/reload 只影响读侧收敛提示，不能把 command 成功改写成失败。`affected_months`/`affected_scope_keys` 必须优先是具体月份集合，不得无条件包含 `all`。撤回语义是通过 relation command repository 取消当前 batch relation，并记录 `withdraw_link` history；不得走旧 restore-style withdraw 或进程内 fallback。 |
 | 页面 Audit 状态 | 标题附件 | integrity/freshness/queue 分栏判断；问题数量只显示 sample |
 | Relation dirty scopes | workbench relation/read model | 不直接写下游 payload |

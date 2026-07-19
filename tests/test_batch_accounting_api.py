@@ -635,6 +635,19 @@ class BatchAccountingApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200, response.body)
         self.assertEqual(sql_read_model.calls, ["2026"])
+        server_timing = response.headers.get("Server-Timing", "")
+        for phase in (
+            "batch_candidate_load",
+            "batch_candidate_parse",
+            "batch_candidate_select",
+            "batch_relation_apply",
+            "batch_payload_assembly",
+            "batch_service_total",
+            "batch_serialization",
+        ):
+            self.assertIn(f"{phase};dur=", server_timing)
+        self.assertNotIn("server_timing", payload)
+        self.assertNotIn("timings", payload)
         self.assertEqual([row["id"] for row in payload["bank_rows"]], ["txn_imported_202601_batch_001"])
         self.assertEqual(
             [row["id"] for row in payload["oa_rows"]],
@@ -838,10 +851,16 @@ class BatchAccountingApiTests(unittest.TestCase):
             batch_workbench_loader=lambda **_kwargs: self._grouped_payload(),
             relation_facade=facade,
         )
+        timings: dict[str, float] = {}
 
-        payload = service.build_payload(year="2026", bucket="unsubmitted")
+        payload = service.build_payload(
+            year="2026",
+            bucket="unsubmitted",
+            timing_observer=lambda phase, duration_ms: timings.__setitem__(phase, duration_ms),
+        )
 
         self.assertEqual(payload["summary"]["submitted_count"], 1)
+        self.assertGreaterEqual(timings["relation_read"], 0.0)
         relation_calls = [call for call in facade.calls if "row_ids" in call]
         self.assertEqual(len(relation_calls), 1)
         self.assertEqual(relation_calls[0]["submitted_year"], "2026")

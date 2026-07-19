@@ -15,7 +15,12 @@ class BatchAccountingApiRoutes:
     ) -> None:
         self._service_factory = service_factory
 
-    def list_payload(self, query: dict[str, list[str]]) -> tuple[HTTPStatus, dict[str, Any]]:
+    def list_payload(
+        self,
+        query: dict[str, list[str]],
+        *,
+        timing_observer: Callable[[str, float], None] | None = None,
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
         year = (query.get("year") or [""])[0]
         bank_year = (query.get("bank_year") or [year])[0]
         bucket = (query.get("bucket") or ["unsubmitted"])[0] or "unsubmitted"
@@ -30,6 +35,7 @@ class BatchAccountingApiRoutes:
                 bank_page_size=self._query_value(query, "bank_page_size", "bankPageSize"),
                 oa_page=self._query_value(query, "oa_page", "oaPage"),
                 oa_page_size=self._query_value(query, "oa_page_size", "oaPageSize"),
+                timing_observer=timing_observer,
             )
         except BatchAccountingError as exc:
             return self._batch_accounting_error_response(exc)

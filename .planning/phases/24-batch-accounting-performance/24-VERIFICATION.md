@@ -75,6 +75,8 @@
 
 第八次 release `main-25be1e4d-20260720060214` 已部署；shell `108.596ms`、submitted `308.023ms`、Audit `400.871ms` 通过，unsubmitted `536.798ms` 未通过，160/160 请求均为 2xx、API 全部 fresh/0 enqueue。dashboard 混合 endpoint API/DB/connection/query-count p95 为 `415.061ms` / `239.217ms` / `0.181ms` / `6`。第九轮 migration 0113 的本地定向后端 310 项/233 子断言和真实 PostgreSQL 2 项已通过，5,000 条非 batch relation 的 `EXPLAIN` 命中精确 partial index，临时数据库残留 `0`。当前待精确 SHA 部署和生产复采。
 
+第九次 release `main-36db2926-20260720061033` 已部署；shell `109.290ms`、submitted `297.918ms`、Audit `293.528ms` 通过，unsubmitted `548.316ms` 未通过；160/160 请求均为 2xx/fresh/0 enqueue。dashboard 混合 endpoint API/DB/connection/query-count p95 为 `400.724ms` / `248.446ms` / `0.169ms` / `6`。这反证 0113 年度 count 索引不是剩余主因。第十轮只增加批量账务 GET 的 `Server-Timing` 阶段诊断，业务 JSON、事实源、其他页面、read model/worker/queue 均不变；定向测试覆盖响应头和 service relation timing observer，当前待完整定向门、精确 SHA 部署和生产阶段采样。
+
 - 精确 SHA 部署。
 - shell、unsubmitted、submitted、Page Audit 各 40 样本。
 - unsubmitted 请求 query count 目标 `<=4`（dashboard 混合 endpoint p95 允许 submitted 固有值），列表 p95 `<=500ms`（目标 `<=300ms`），Audit p95 `<=1000ms`。

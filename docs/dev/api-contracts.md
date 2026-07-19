@@ -91,7 +91,9 @@
 
 `read_model_status` 的优先级按后端聚合：`unavailable > schema_mismatch > missing > failed > stale > refreshing > fresh`。接口仍返回当前可用 payload；前端需要展示刷新/陈旧状态并避免在非 fresh 时把缺失关系误解释成真实未提交。
 
-列表读取 relation distribution 必须通过现有 `workbench_relation` read facade freshness 边界请求 fresh payload；`missing`/`stale` scope 由 facade/gateway 负责 normalize、validate、dedupe 和入队，GET 不同步 rebuild，也不直接写 durable queue。`unsubmitted` bucket 只从专属年份 SQL loader 取得批量账务银行候选和日常报销 OA 候选，再将候选 row ids 用作 relation lookup；`summary.submitted_count` 通过年份级 count I/O 读取。`submitted` bucket 的银行上下文只读专属年份 SQL loader，关系详情读取年份级 submitted relation DTO。任一专属 loader 缺失或返回无效 payload 时返回 `503 batch_accounting_workbench_read_model_unavailable`，不得跨用其它 loader、返回假空数据或回退 Workbench full-page builder。
+列表读取 relation distribution 必须通过现有 `workbench_relation` read facade freshness 边界请求 fresh payload；`missing`/`stale` scope 由 facade/gateway 负责 normalize、validate、dedupe 和入队，GET 不同步 rebuild，也不直接写 durable queue。`unsubmitted` bucket 只从专属年份 SQL loader 取得批量账务银行候选和日常报销 OA 候选，再将候选 row ids 用作 batch-only relation bundle lookup；同一个 bundle 一致性快照返回候选 relation、freshness proof、referenced groups 和 `summary.submitted_count`，不得恢复独立年份 count I/O。`submitted` bucket 的银行上下文只读专属年份 SQL loader，关系详情读取年份级 submitted relation DTO。任一专属 loader 缺失或返回无效 payload 时返回 `503 batch_accounting_workbench_read_model_unavailable`，不得跨用其它 loader、返回假空数据或回退 Workbench full-page builder。
+
+成功或结构化错误响应均可带 `Server-Timing` 头，用于拆分本接口的 candidate、relation、payload assembly 和 serialization 阶段。该头只用于性能诊断，不属于业务 JSON，也不改变 freshness、权限或写入语义。
 
 `POST /api/batch-accounting/submit`
 

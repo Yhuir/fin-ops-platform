@@ -69,6 +69,7 @@
 | Daily reimbursement OA bank-link filter | 日常报销 OA 的右侧候选只因已关联银行流水而排除；仅发票关系或无流水候选关系不能排除，也不能在提交时被 active invoice-only relation 拒绝 | covered |
 | Submitted relation reader boundary | 已提交 bucket 缺少年份级 relation reader 时必须 fail closed 为 unavailable，不能回退 12 个月 `list_by_month` | covered |
 | Workbench full-payload fallback | 三类专属 SQL loader 缺失/无效时必须返回 `503 batch_accounting_workbench_read_model_unavailable`；不得调用 generic grouped/full-page builder，也不得跨用其它操作的 loader | covered |
+| Read timing boundary | 批量账务 GET 必须只在 `Server-Timing` 头暴露候选/relation/组装/序列化阶段，业务 JSON 不得出现 timing 内部字段；service observer 必须覆盖 relation read 阶段 | covered |
 
 ## 关键 Smoke Flows
 

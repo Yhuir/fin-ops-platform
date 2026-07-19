@@ -41,6 +41,7 @@
 - 第六次 release 把 unsubmitted 查询数降到约 `5` 后仍为 `520.481ms`；新证据确认剩余独立年度 count 与候选 bundle 读取同一 relation 事实和 freshness scopes。将 `submitted_year` 作为 batch-only bundle 的显式输入，由同一 SQL 返回年度 proof 与 `submitted_count`，并删除独立 count facade/port/repository/manifest 方法；目标查询数约为 `4`。这是边界内最后一次合并，不再新增 cache、projection、worker 或公共抽象；若仍失败，必须停止并基于新生产证据重新审阅。
 - 第七次 release 达到约 `4` 条查询但 p95 仍为 `538.172ms` 后，不再合并跨边界 SQL。删除候选列表 SELECT 中未消费的 `raw_payload`，保留规范化 `payload` 和既有单 I/O；测试必须证明列表查询不再包含该列且真实 PostgreSQL 行/附件结果等价。若仍失败，必须重新采集证据，不能把提交窄 loader或其他页面通用 Workbench reader一并改变。
 - 第八次 release 仅改善 `1.374ms` 后，新增 migration 0113：为年度 count 的 `tenant + batch source + bank year + scope + group` 谓词建立 linked batch-only partial expression index；不改 SQL 语义。真实 PostgreSQL 必须在 5,000 条非 batch relation 上证明计划命中，未命中则不发布。
+- 第九次 release 应用 0113 后 unsubmitted p95 反升至 `548.316ms`，停止猜测索引。先增加仅属于批量账务 GET 的 `Server-Timing` 响应头，精确区分候选加载/解析/筛选、relation 读取/应用、payload 组装和序列化；根据生产阶段 p95 只优化唯一主耗时段。该诊断不进入业务 JSON，不新增持久化、缓存、read model、queue、worker 或跨页面 hook。
 - 不新增结构化列、缓存、projection 或第二套候选 read model；真实 PostgreSQL 测试必须执行 0001–0113 并由 `EXPLAIN` 证明候选/年度查询命中精确索引，静态 guard 禁止银行 fallback、OA 未索引 `OR` 和年度 count 索引谓词漂移。
 
 ### 5. 测试与架构门禁
