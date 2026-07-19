@@ -40,7 +40,8 @@
 - 若该 release 已把 unsubmitted 查询数降到约 `6`、但生产外部 p95 仍略高于门槛，则把同一 batch-only repository 方法的 relation rows 与它们决定的 scope proof/referenced groups 合为一个 JSON bundle 快照，目标 unsubmitted 请求查询数再减 `1`。若仍失败，必须先依据新生产证据审阅剩余 I/O，不得盲目增加基础设施或跨边界合并。
 - 第六次 release 把 unsubmitted 查询数降到约 `5` 后仍为 `520.481ms`；新证据确认剩余独立年度 count 与候选 bundle 读取同一 relation 事实和 freshness scopes。将 `submitted_year` 作为 batch-only bundle 的显式输入，由同一 SQL 返回年度 proof 与 `submitted_count`，并删除独立 count facade/port/repository/manifest 方法；目标查询数约为 `4`。这是边界内最后一次合并，不再新增 cache、projection、worker 或公共抽象；若仍失败，必须停止并基于新生产证据重新审阅。
 - 第七次 release 达到约 `4` 条查询但 p95 仍为 `538.172ms` 后，不再合并跨边界 SQL。删除候选列表 SELECT 中未消费的 `raw_payload`，保留规范化 `payload` 和既有单 I/O；测试必须证明列表查询不再包含该列且真实 PostgreSQL 行/附件结果等价。若仍失败，必须重新采集证据，不能把提交窄 loader或其他页面通用 Workbench reader一并改变。
-- 不新增结构化列、缓存、projection 或第二套候选 read model；真实 PostgreSQL 测试必须执行 0001–0112 并由 `EXPLAIN` 证明查询命中精确索引，静态 guard 禁止银行 fallback 和 OA 未索引 `OR` 回流。
+- 第八次 release 仅改善 `1.374ms` 后，新增 migration 0113：为年度 count 的 `tenant + batch source + bank year + scope + group` 谓词建立 linked batch-only partial expression index；不改 SQL 语义。真实 PostgreSQL 必须在 5,000 条非 batch relation 上证明计划命中，未命中则不发布。
+- 不新增结构化列、缓存、projection 或第二套候选 read model；真实 PostgreSQL 测试必须执行 0001–0113 并由 `EXPLAIN` 证明候选/年度查询命中精确索引，静态 guard 禁止银行 fallback、OA 未索引 `OR` 和年度 count 索引谓词漂移。
 
 ### 5. 测试与架构门禁
 
@@ -71,7 +72,7 @@
 - 读取 dashboard 的 duration、DB duration、query count；最终候选单 I/O release 验证 query p95 `<=8`。
 - 做直接及跨页 Page Audit。
 - 生产 submit→fresh→withdraw→fresh 仅在 `app-health-operations` 强制 preflight 通过后执行；否则记录为最终系统门待办，绝不绕过。
-- 失败回滚：回滚本轮代码 commit 并重新部署上一精确 release；0112 只增加读性能索引，可安全留存且不改变数据/API。需要物理删除时必须另走维护窗口 `drop index concurrently`，不在失败回滚热路径阻塞表。
+- 失败回滚：回滚本轮代码 commit 并重新部署上一精确 release；0112/0113 只增加读性能索引，可安全留存且不改变数据/API。需要物理删除时必须另走维护窗口 `drop index concurrently`，不在失败回滚热路径阻塞表。
 
 ## 第三次计划反审阅
 

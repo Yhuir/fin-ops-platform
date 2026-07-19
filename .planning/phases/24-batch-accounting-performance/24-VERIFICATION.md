@@ -12,7 +12,7 @@
 - 第四次生产复采证明 query-count p95 已从 `10` 降到 `8`，但 unsubmitted p95 仍为 `513.385ms`；第五轮继续把候选 relation 的 scope proof+groups、年度 scope proof+count 各合为一个 batch-only I/O，目标 query-count p95 `<=6`。
 - 第五次生产复采证明 unsubmitted 查询数约为 `6`，但外部 p95 `523.595ms` 仍失败；第六轮把 relation rows/scope proof/referenced groups 合为同一个 batch-only repository 快照，再删除一次往返。
 - 第六次生产复采证明 unsubmitted 查询数约为 `5`，但外部 p95 `520.481ms` 仍失败；第七轮把仍独立的年度 scopes proof/`submitted_count` 并入同一个 relation bundle，并删除独立 count facade/port/repository/manifest 旧链，目标查询数约为 `4`。
-- 通用 relation reader、其他页面 facade、read model 表结构、worker、queue、command API 和前端 DTO 均未改变；0112 只增加 batch-only 读性能索引。
+- 通用 relation reader、其他页面 facade、read model 表数据/shape、worker、queue、command API 和前端 DTO 均未改变；0112/0113 只增加 batch-only partial 读性能索引。
 - 静态 architecture/runtime guards 已覆盖专用 I/O、索引合同和旧链删除条件。
 
 ## 已执行验证
@@ -24,7 +24,7 @@
 | 共享受影响回归 | 786 passed, 4 skipped | workbench relation、worker、lifecycle、App Status 等；skip 为条件性外部依赖 |
 | 前端 BatchAccounting API/Page | 23 passed | 页面和 API 行为未回归 |
 | Playwright 批量账务关键流 | 4 passed | 页面读、提交、barrier、撤回关键交互 |
-| 真实 PostgreSQL | 2 passed | 实际应用 migrations 0001–0112；bulk proof/count/list/row lookup、processing fail-closed、OA-ID 附件过滤均真实执行；5,000 条非命中 OA 上的 `EXPLAIN` 命中 0112 索引 |
+| 真实 PostgreSQL | 2 passed | 实际应用 migrations 0001–0113；bulk proof/count/list/row lookup、processing fail-closed、OA-ID 附件过滤均真实执行；5,000 条非命中 OA 和 5,000 条非 batch relation 上的 `EXPLAIN` 分别命中 0112/0113 索引 |
 | lint/docs/diff | passed | `scripts/verify.sh lint`、`scripts/verify.sh docs`、`git diff --check` |
 
 真实 PostgreSQL 临时数据库在验证后已删除，查询确认残留数为 0。
@@ -72,6 +72,8 @@
 第七轮本地实现已完成：候选 relation rows、候选/年度 proof、referenced groups、年度 `submitted_count` 使用同一个 bundle SQL，独立年度 count service/facade/port/repository/manifest 方法已删除；facade/API 单测 62 项与真实 PostgreSQL 0001–0112 的 2/2 集成测试通过，临时数据库残留 `0`。当前待完整定向门、精确 SHA 部署和生产复采。完成门为：
 
 第七次 release `main-9e77ff97-20260720054715` 已部署；unsubmitted 40 样本 p95 `538.172ms` 未通过，40/40 为 2xx/fresh/0 enqueue；submitted `311.865ms`、Audit `355.048ms` 通过。shell 39 个成功样本 p95 `113.899ms`，另有 1 次外部 TLS EOF，证据不隐藏。dashboard 混合 endpoint API/DB/connection/query-count p95 为 `377.917ms` / `279.912ms` / `0.189ms` / `6`，unsubmitted 实际约 `4` 条。第八轮删除候选列表未消费的 `raw_payload` 大 JSON I/O；定向后端 251 项/218 子断言和实际应用 0001–0112 migrations 的 PostgreSQL 2 项已通过，临时数据库已删除。当前待精确 SHA 部署和复采。
+
+第八次 release `main-25be1e4d-20260720060214` 已部署；shell `108.596ms`、submitted `308.023ms`、Audit `400.871ms` 通过，unsubmitted `536.798ms` 未通过，160/160 请求均为 2xx、API 全部 fresh/0 enqueue。dashboard 混合 endpoint API/DB/connection/query-count p95 为 `415.061ms` / `239.217ms` / `0.181ms` / `6`。第九轮 migration 0113 的本地定向后端 310 项/233 子断言和真实 PostgreSQL 2 项已通过，5,000 条非 batch relation 的 `EXPLAIN` 命中精确 partial index，临时数据库残留 `0`。当前待精确 SHA 部署和生产复采。
 
 - 精确 SHA 部署。
 - shell、unsubmitted、submitted、Page Audit 各 40 样本。

@@ -20,7 +20,9 @@
 
 第七次发布已达到约 `4` 条 unsubmitted 查询，但 40 样本外部 p95 为 `538.172ms`；已提交 `311.865ms`、Audit `355.048ms` 通过，未提交 40/40 fresh、0 enqueue。dashboard 混合 endpoint API/DB/connection/query-count p95 为 `377.917ms` / `279.912ms` / `0.189ms` / `6`。结构审阅发现候选 active-generation SQL 仍为每条银行/OA/附件选择 `raw_payload`，而 `_read_model_payload` 在这些行存在规范化 `payload` 时绝不会读取该列；生产 HTTP 响应仅 `19541` bytes，原始 OA/附件 JSON 却可能远大于最终 DTO。第八轮只删除这个未消费列，保留 submit 窄 loader、事实源和所有跨页 reader，不新增索引。
 
-本轮应保留现有 Workbench + workbench_relation 事实源，不新增独立 read model、缓存、表、队列或 worker。唯一 schema 变化是生产复测证明必需的 OA 类型部分表达式索引。最小而完整的生产方案是：
+第八次发布删除列表 `raw_payload` 后，40 样本 unsubmitted p95 为 `536.798ms`，仅改善 `1.374ms`；dashboard 混合 endpoint API/DB/connection/query-count p95 为 `415.061ms` / `239.217ms` / `0.181ms` / `6`，说明旧 I/O 应删除但不是主要尾延迟。剩余 relation bundle 中，年度 count 按 `tenant + linked + special_metadata.source + bank_year/year + 12 scopes` 过滤并 `count(distinct group_id)`，现有索引只覆盖 tenant/scope/relation_kind 或 tenant/group_id，没有覆盖该谓词。第九轮增加一个只包含 linked batch-accounting 行的 partial expression index；本地真实 PostgreSQL 以 5,000 条非 batch relation 验证执行计划命中，不改变任何运行时 I/O 或其他页面查询。
+
+本轮应保留现有 Workbench + workbench_relation 事实源，不新增独立 read model、缓存、表、队列或 worker。schema 变化只包括生产复测逐步证明必需的两个 batch-only partial index：0112 OA 类型表达式索引和 0113 relation 年度计数表达式索引。最小而完整的生产方案是：
 
 1. 新增批量账务专用的 relation 批量读取 I/O，一条 SQL 同时证明 12 个或候选涉及的全部 scope。
 2. 未提交候选只读取当前 OA IDs 对应的附件发票。
@@ -31,6 +33,7 @@
 7. 候选 relation 的 scope proof+groups 由一个 batch-only SQL 返回，年度 scope proof+count 先收敛为独立固定 I/O。
 8. 候选 relation rows 与其 scope proof/groups 最终由同一个 batch-only repository 快照返回，不再先 rows 后 proof/groups。
 9. 年度 scopes proof 和 `submitted_count` 最终并入同一候选 relation bundle；删除独立年度 count facade/port/repository/manifest 合同，未提交 relation 只保留一个 owner I/O。
+10. 删除候选列表未消费的 `raw_payload`；年度 count 命中 0113 batch-only partial expression index，不向其他页面增加运行时分支。
 
 ## 生产基线
 
@@ -129,7 +132,7 @@
 
 - 未提交最终目标约 6 次业务查询：1 个候选快照 + 2–3 个专用 relation lookup + 2 个年度 count；请求级观测门为 p95 `<=8`。
 - 已提交目标固定约 6 次查询：1 个银行读取 + 2 个年度 relation list + 3 个 relation detail lookup。
-- 不新增基础设施；migration 0112 只增加可独立保留的读性能索引。应用回滚只需部署上一 release，索引不改变读写语义；如需物理清理，另行在维护窗口 `drop index concurrently`。
+- 不新增基础设施；migrations 0112/0113 只增加可独立保留的 batch-only 读性能索引。应用回滚只需部署上一 release，索引不改变读写语义；如需物理清理，另行在维护窗口 `drop index concurrently`。
 - 只有候选单 I/O 部署后 p95 仍大于 `500ms`，才依据新的生产 dashboard 继续分析；不提前增加 server-side candidate paging、缓存或第二 read model。
 - 结论：方案不是过度设计；它直接删除已量化的 N+1 和无界读取，并保留完整 freshness、审计、回滚和隔离闭环。
 

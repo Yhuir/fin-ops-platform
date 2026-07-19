@@ -78,6 +78,31 @@ class BatchAccountingPostgresIntegrationTests(unittest.TestCase):
             )
             """
         )
+        self.connection.execute(
+            """
+            insert into read_model.workbench_relation_groups(
+                tenant_id, group_id, scope_key, scope_month, relation_source,
+                relation_kind, relation_status, source_versions, payload
+            )
+            select
+                'default',
+                'CASE-UNRELATED-' || item_number::text,
+                '2026-01',
+                '2026-01-01',
+                'manual',
+                'oa_bank',
+                'linked',
+                '{"workbench_relation_schema_version":"bulk-v1"}'::jsonb,
+                jsonb_build_object(
+                    'group_id', 'CASE-UNRELATED-' || item_number::text,
+                    'relation_mode', 'manual_confirmed',
+                    'relation_status', 'linked',
+                    'special_metadata', jsonb_build_object('source', 'manual_confirmed', 'bank_year', '2026')
+                )
+            from generate_series(1, 5000) item_number
+            """
+        )
+        self.connection.execute("analyze read_model.workbench_relation_groups")
 
         list_payload = self.repository.list_batch_accounting_relation_groups_by_year(year="2026")
         row_payload = self.repository.get_batch_accounting_relation_rows_by_ids(
@@ -91,6 +116,25 @@ class BatchAccountingPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(row_payload["read_model_status"], "fresh")
         self.assertEqual(row_payload["rows"][0]["row_id"], "txn-batch-1")
         self.assertEqual(row_payload["submitted_count"], 1)
+        count_explain = self.connection.fetch_one(
+            """
+            explain (format json)
+            select count(distinct group_id)::integer
+            from read_model.workbench_relation_groups
+            where tenant_id = 'default'
+              and scope_key = any(array['2026-01']::text[])
+              and relation_status = 'linked'
+              and payload->'special_metadata'->>'source' = 'batch_accounting'
+              and coalesce(
+                    nullif(payload->'special_metadata'->>'bank_year', ''),
+                    nullif(payload->'special_metadata'->>'year', '')
+                  ) = '2026'
+            """
+        )
+        self.assertIn(
+            "workbench_relation_groups_batch_accounting_year_scope_group_idx",
+            json.dumps(count_explain, ensure_ascii=False),
+        )
 
         self.connection.execute(
             """
