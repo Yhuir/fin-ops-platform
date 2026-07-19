@@ -2552,6 +2552,9 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             if "from read_model.workbench_rows" in sql and "r.source_kind = 'oa_attachment_invoice'" in sql
         )
         self.assertIn("r.scope_month >= %s::date", bank_query)
+        self.assertIn("r.counterparty_name = %s", bank_query)
+        self.assertNotIn("r.payload->>'counterparty_name'", bank_query)
+        self.assertNotIn("r.payload->>'counterparty_name_raw'", bank_query)
         self.assertIn("r.payload->>'apply_type' like %s", oa_query)
         self.assertIn("r.payload->>'expense_type' like %s", oa_query)
         self.assertNotIn("r.scope_month >= %s::date", oa_query)

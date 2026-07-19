@@ -11374,11 +11374,7 @@ class PostgresReadModelRepository:
                  and gen.status = 'active'
                 where r.scope_key <> 'all'
                   and r.source_kind = 'bank'
-                  and (
-                        r.counterparty_name = %s
-                        or r.payload->>'counterparty_name' = %s
-                        or r.payload->>'counterparty_name_raw' = %s
-                      )
+                  and r.counterparty_name = %s
                   and (
                         r.scope_month >= %s::date
                         and r.scope_month < (%s::date + interval '1 year')
@@ -11389,7 +11385,7 @@ class PostgresReadModelRepository:
             from active_rows
             order by coalesce(payload->>'trade_time', payload->>'pay_receive_time', payload->>'txn_date', '') desc, row_id
             """,
-            ("批量账务集中处理", "批量账务集中处理", "批量账务集中处理", bank_start, bank_start),
+            ("批量账务集中处理", bank_start, bank_start),
         )
         oa_rows = self._connection.fetch_all(
             """

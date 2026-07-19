@@ -1,0 +1,135 @@
+{
+  "api_prefix": "/fin-ops-api",
+  "auth_configured": true,
+  "base_url": "https://www.yn-sourcing.com/",
+  "generated_at": "2026-07-19T20:20:11.045656+00:00",
+  "iterations": 20,
+  "probes": [
+    {
+      "cache_statuses": {},
+      "duration_ms": {
+        "p50": 91.099,
+        "p95": 110.754,
+        "p99": 145.1
+      },
+      "errors": [],
+      "expected_statuses": [
+        200
+      ],
+      "failure_count": 0,
+      "freshness_pass": true,
+      "kind": "page",
+      "name": "page_shell_batch_accounting",
+      "non_fresh_read_model_statuses": {},
+      "path": "/fin-ops/batch-accounting",
+      "read_model_statuses": {},
+      "refresh_enqueued_count": 0,
+      "sample_count": 20,
+      "slo_pass": true,
+      "status": "pass",
+      "status_counts": {
+        "200": 20
+      },
+      "success_count": 20,
+      "target_ms": 500.0
+    },
+    {
+      "cache_statuses": {},
+      "duration_ms": {
+        "p50": 408.289,
+        "p95": 514.587,
+        "p99": 572.946
+      },
+      "errors": [],
+      "expected_statuses": [
+        200
+      ],
+      "failure_count": 0,
+      "freshness_pass": true,
+      "kind": "api",
+      "name": "batch_accounting_unsubmitted_2026",
+      "non_fresh_read_model_statuses": {},
+      "path": "/api/batch-accounting?bank_year=2026&bucket=unsubmitted&bank_page=1&bank_page_size=200&oa_page=1&oa_page_size=200",
+      "read_model_statuses": {
+        "fresh": 20
+      },
+      "refresh_enqueued_count": 0,
+      "sample_count": 20,
+      "slo_pass": false,
+      "status": "fail",
+      "status_counts": {
+        "200": 20
+      },
+      "success_count": 20,
+      "target_ms": 500.0
+    },
+    {
+      "cache_statuses": {},
+      "duration_ms": {
+        "p50": 260.489,
+        "p95": 291.211,
+        "p99": 361.306
+      },
+      "errors": [],
+      "expected_statuses": [
+        200
+      ],
+      "failure_count": 0,
+      "freshness_pass": true,
+      "kind": "api",
+      "name": "batch_accounting_submitted_2026",
+      "non_fresh_read_model_statuses": {},
+      "path": "/api/batch-accounting?bank_year=2026&bucket=submitted&bank_page=1&bank_page_size=200&oa_page=1&oa_page_size=200",
+      "read_model_statuses": {
+        "fresh": 20
+      },
+      "refresh_enqueued_count": 0,
+      "sample_count": 20,
+      "slo_pass": true,
+      "status": "pass",
+      "status_counts": {
+        "200": 20
+      },
+      "success_count": 20,
+      "target_ms": 500.0
+    },
+    {
+      "cache_statuses": {},
+      "duration_ms": {
+        "p50": 216.353,
+        "p95": 261.306,
+        "p99": 318.681
+      },
+      "errors": [],
+      "expected_statuses": [
+        200
+      ],
+      "failure_count": 0,
+      "freshness_pass": true,
+      "kind": "api",
+      "name": "batch_accounting_page_audit",
+      "non_fresh_read_model_statuses": {},
+      "path": "/api/operations/app-health/page-audit?page=batch-accounting",
+      "read_model_statuses": {},
+      "refresh_enqueued_count": 0,
+      "sample_count": 20,
+      "slo_pass": true,
+      "status": "pass",
+      "status_counts": {
+        "200": 20
+      },
+      "success_count": 20,
+      "target_ms": 1000.0
+    }
+  ],
+  "status": "fail",
+  "summary": {
+    "failed_probe_count": 1,
+    "max_p95_ms": 514.587,
+    "probe_count": 4,
+    "sample_count": 80
+  },
+  "timeout_seconds": 15.0,
+  "version": 1,
+  "warmup": 2
+}

@@ -6,11 +6,14 @@
 
 批量账务当前没有前端重复加载，也没有 worker 堵塞。生产 `GET /api/batch-accounting` 的主要慢点是 `workbench_relation` 查询端按 scope 逐个证明 freshness：一次请求产生约 52–66 次数据库查询。其次，未提交列表会读取所有 OA 附件发票，再在 Python 中关联到当前 OA 候选；这会随历史数据增长而放大。
 
+首次发布后 query count 已降到 p95 `10`，但 40 样本 unsubmitted HTTP p95 仍为 `612.217ms`；dashboard 显示 API 内部 p95 `400.374ms`、DB p95 `256.256ms`，压缩响应仅 `3629 bytes`。剩余根因是银行候选 SQL 对结构化 `counterparty_name` 与两个历史 payload 字段做 `OR`，使既有 `workbench_rows_bank_counterparty_scope_idx` 无法稳定命中。当前 projection/Audit 已保证结构化列，因此 payload fallback 是可删除旧链，不需要新索引或缓存。
+
 本轮应保留现有 Workbench + workbench_relation 事实源，不新增独立 read model、缓存、表、索引、队列或 worker。最小而完整的生产方案是：
 
 1. 新增批量账务专用的 relation 批量读取 I/O，一条 SQL 同时证明 12 个或候选涉及的全部 scope。
 2. 未提交候选只读取当前 OA IDs 对应的附件发票。
-3. 批量账务不再调用通用的逐 scope relation 读取入口；通用入口继续服务其他页面，行为不变。
+3. 银行候选只读取 Workbench projection 的结构化 `counterparty_name`，删除两个 JSON fallback，让既有复合索引生效。
+4. 批量账务不再调用通用的逐 scope relation 读取入口；通用入口继续服务其他页面，行为不变。
 
 ## 生产基线
 
@@ -77,13 +80,14 @@
 - BatchAccountingService 对通用 `get_by_row_ids` 的依赖。
 - 年度 count/list 内逐月 `_workbench_relation_payload_from_rows` 证明以及 list 的第二次重复证明。
 - 未提交 loader 中无 OA ID 约束的全量附件 SQL。
+- 银行候选 SQL 中绕过结构化投影列的 `payload.counterparty_name` / `payload.counterparty_name_raw` fallback。
 
 不会删除：
 
 - 通用 `get_by_row_ids` 和逐 scope payload 逻辑，因为仍有其他合法调用方；只禁止批量账务继续进入该旧路径。
 - submit/withdraw 已有窄读取和 canonical command 路径。
 
-静态 guard 必须证明批量账务 service 使用专用 relation I/O，且 loader 不再包含无 OA ID 条件的附件读取。
+静态 guard 必须证明批量账务 service 使用专用 relation I/O，loader 不再包含无 OA ID 条件的附件读取，并且银行候选只读取结构化 `counterparty_name`。
 
 ## Grill-me 三轮审阅
 

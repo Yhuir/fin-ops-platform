@@ -4568,6 +4568,11 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("batch accounting list no longer uses the OA-id-scoped attachment loader")
         if "oa_row_ids=oa_row_ids" not in batch_loader_source or "allow_all_scope=False" not in batch_loader_source:
             violations.append("batch accounting list attachment I/O is no longer bounded to current non-all OA candidates")
+        if "r.counterparty_name = %s" not in batch_loader_source:
+            violations.append("batch accounting bank candidate read no longer uses the structured indexed counterparty field")
+        for legacy_bank_filter in ("r.payload->>'counterparty_name'", "r.payload->>'counterparty_name_raw'"):
+            if legacy_bank_filter in batch_loader_source:
+                violations.append(f"batch accounting bank candidate read keeps legacy JSON fallback {legacy_bank_filter}")
         for required_filter in ("normalized_oa_row_ids", "= any(%s)", "r.row_id like any(%s)"):
             if required_filter not in invoice_loader_source:
                 violations.append(f"batch accounting attachment loader is missing scoped filter {required_filter}")

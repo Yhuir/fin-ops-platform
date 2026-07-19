@@ -8,7 +8,7 @@
 - 当前边界可信度：high
 - 目标边界：批量账务页面通过 BatchAccounting service 操作批量关系和账务候选，关系事实写入必须走 workbench relation 边界。
 - 当前缺口：无本地模块化 closure blocker。批量账务不拥有独立 read model，依赖 `workbench_relation` read/write 和 runtime worker fan-out 是设计边界，不作为 partial 原因。
-- 旧代码删除状态：旧 server.py 批量账务入口不再承载业务逻辑；所有关系写入走 command service；submit/withdraw route 不再调用旧 pair relation persist、snapshot restore、旧 lifecycle 或旧 workbench read model persist 链路；已提交 bucket 不再回退 12 个月 `list_by_month` 扫描；批量账务 GET 不再调用通用逐 scope `get_by_row_ids`，年度 count/list 不再重复逐月 freshness 查询；未提交 loader 不再无条件扫描全部 OA 附件；generic `grouped_workbench_loader` / Workbench full-page builder fallback 与 service-level `repair_legacy_case_id_collisions(...)` 已删除并由静态 guard 防回归。
+- 旧代码删除状态：旧 server.py 批量账务入口不再承载业务逻辑；所有关系写入走 command service；submit/withdraw route 不再调用旧 pair relation persist、snapshot restore、旧 lifecycle 或旧 workbench read model persist 链路；已提交 bucket 不再回退 12 个月 `list_by_month` 扫描；批量账务 GET 不再调用通用逐 scope `get_by_row_ids`，年度 count/list 不再重复逐月 freshness 查询；未提交 loader 不再无条件扫描全部 OA 附件，银行候选不再以历史 payload counterparty fallback 绕过结构化列和既有索引；generic `grouped_workbench_loader` / Workbench full-page builder fallback 与 service-level `repair_legacy_case_id_collisions(...)` 已删除并由静态 guard 防回归。
 
 ## 职责边界
 
@@ -31,7 +31,7 @@
 | --- | --- | --- |
 | 页面批量选择/操作 | `BatchAccountingPage.tsx`、`features/batchAccounting/api.ts` | 进入 batch accounting API/service |
 | 页面只读 Audit | `PageBusinessAuditIcon` / AppHealth operations API | admin-only 调用 `page-audit?page=batch-accounting`；页面直接消费 filtered shared relation groups，不拥有第二 read model；active canonical `special_metadata.source=batch_accounting` case set 与 linked group logical case set 必须双向相等，canonical `relation_mode` 必须为 `batch_accounting` 并与 group payload mode/source/special metadata 一致，不能误与表示 OA/银行组合形态的 `relation_kind` 比较；全部成员 edge 由 canonical/shared typed-edge equality 证明，所有检查在只读一致性快照执行；与批量提交/撤回 command 隔离，不触发 relation 或 read model 写入 |
-| 批量账务候选 payload | Workbench SQL active read model | 未提交 GET 列表必须走 `load_batch_accounting_workbench_payload(bank_year=...)`；该年份候选读口只服务列表，OA 附件查询必须由本次日常报销 OA row IDs 界定，不得无条件扫描全部附件；不得进入提交 command 热路径，也不得回退 Workbench full-page builder |
+| 批量账务候选 payload | Workbench SQL active read model | 未提交 GET 列表必须走 `load_batch_accounting_workbench_payload(bank_year=...)`；银行候选只使用结构化 `counterparty_name` 并命中既有年份复合索引，不允许退回 payload counterparty；OA 附件查询必须由本次日常报销 OA row IDs 界定，不得无条件扫描全部附件；不得进入提交 command 热路径，也不得回退 Workbench full-page builder |
 | 提交 command 窄 payload | Workbench SQL active read model | `POST /api/batch-accounting/submit` 必须走 `load_batch_accounting_submit_workbench_payload(bank_year, bank_row_id, oa_row_ids)`，只读取本次选中银行流水、OA 主单和这些 OA 的附件发票；禁止为单次提交扫描整年银行/OA/发票候选或回退 full-page builder |
 | 已提交银行列表 payload | Workbench SQL active read model | `bucket=submitted` 的银行行上下文必须走 `load_batch_accounting_submitted_bank_workbench_payload(bank_year)`，只读取批量账务银行行；OA/发票明细来自 relation DTO，不得用未提交候选 loader 或整页 payload 补齐 |
 | workbench row context | `BatchAccountingService._build_workbench_row_context` | 只解析 row/index/invoice links，不读取整页 relation distribution |
@@ -96,7 +96,7 @@
 ## 当前缺口和删除条件
 
 - 如果新增独立 read model，必须先登记 manifest/scope policy/worker/tests/docs。
-- 已删除旧链路：旧 app-level repair helper、service-level legacy case-id repair、submit/withdraw direct pair fallback、route duplicate lifecycle fan-out、旧 pair persist/snapshot restore、旧 workbench read model persist、已提交 bucket 12 个月 relation scan fallback、批量账务通用逐 scope relation lookup、年度重复 freshness proof、未提交无 OA-ID 限制的附件扫描、generic grouped Workbench loader 与 full-page builder fallback。
+- 已删除旧链路：旧 app-level repair helper、service-level legacy case-id repair、submit/withdraw direct pair fallback、route duplicate lifecycle fan-out、旧 pair persist/snapshot restore、旧 workbench read model persist、已提交 bucket 12 个月 relation scan fallback、批量账务通用逐 scope relation lookup、年度重复 freshness proof、未提交无 OA-ID 限制的附件扫描、银行候选 payload counterparty fallback、generic grouped Workbench loader 与 full-page builder fallback。
 - 批量账务 submit/withdraw 的生产 smoke 必须验证 durable relation 表、`workbench_relation` read model 和关联台 `workbench` active generation 同时收敛；单看 API `success=true` 不足以证明运行时外部收敛，但不影响本地模块边界 closed。
 
 ## Phase 19 relation normalization（2026-07-12）

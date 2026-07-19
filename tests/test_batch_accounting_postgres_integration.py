@@ -121,24 +121,34 @@ class BatchAccountingPostgresIntegrationTests(unittest.TestCase):
         self.connection.execute(
             """
             insert into read_model.workbench_rows(
-                row_id, scope_month, scope_key, source_kind, status, generated_at,
-                generation_id, payload
+                row_id, scope_month, scope_key, source_kind, status, counterparty_name,
+                generated_at, generation_id, payload
             )
             values
               (
-                'oa-batch-1', '2026-01-01', '2026-01', 'oa', 'unpaired', now(),
-                'batch-accounting-pg-2026-01',
+                'txn-batch-structured-1', '2026-01-01', '2026-01', 'bank', 'unpaired',
+                '批量账务集中处理', now(), 'batch-accounting-pg-2026-01',
+                '{"id":"txn-batch-structured-1","type":"bank","counterparty_name":"批量账务集中处理"}'::jsonb
+              ),
+              (
+                'txn-batch-legacy-json-1', '2026-01-01', '2026-01', 'bank', 'unpaired',
+                '其他对方', now(), 'batch-accounting-pg-2026-01',
+                '{"id":"txn-batch-legacy-json-1","type":"bank","counterparty_name":"批量账务集中处理"}'::jsonb
+              ),
+              (
+                'oa-batch-1', '2026-01-01', '2026-01', 'oa', 'unpaired', null,
+                now(), 'batch-accounting-pg-2026-01',
                 '{"id":"oa-batch-1","type":"oa","apply_type":"日常报销","amount":"10.00"}'::jsonb
               ),
               (
                 'oa-att-inv-oa-batch-1-01', '2026-01-01', '2026-01',
-                'oa_attachment_invoice', 'unpaired', now(),
+                'oa_attachment_invoice', 'unpaired', null, now(),
                 'batch-accounting-pg-2026-01',
                 '{"id":"oa-att-inv-oa-batch-1-01","type":"invoice","derived_from_oa_id":"oa-batch-1"}'::jsonb
               ),
               (
                 'oa-att-inv-unrelated-01', '2026-01-01', '2026-01',
-                'oa_attachment_invoice', 'unpaired', now(),
+                'oa_attachment_invoice', 'unpaired', null, now(),
                 'batch-accounting-pg-2026-01',
                 '{"id":"oa-att-inv-unrelated-01","type":"invoice","derived_from_oa_id":"oa-unrelated"}'::jsonb
               )
@@ -148,6 +158,7 @@ class BatchAccountingPostgresIntegrationTests(unittest.TestCase):
         payload = self.repository.load_batch_accounting_workbench_payload(bank_year="2026")
         group = payload["unpaired"]["groups"][0]
 
+        self.assertEqual([row["id"] for row in group["bank_rows"]], ["txn-batch-structured-1"])
         self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-batch-1"])
         self.assertEqual(
             [row["id"] for row in group["invoice_rows"]],

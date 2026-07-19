@@ -46,6 +46,16 @@
 
 ## 尚待发布后完成
 
+首次 release `main-27a2d841-20260720041456` 已完成部署并证明：
+
+- shell p95 `115.431ms`、submitted p95 `314.397ms`、Page Audit p95 `299.124ms`，全部通过；160/160 HTTP 成功、fresh、0 enqueue。
+- unsubmitted 40 样本 p95 `612.217ms`，未通过 `500ms`，因此阶段没有误判完成。
+- dashboard 128 样本：API duration p95 `400.374ms`、DB p95 `256.256ms`、query count p95 `10`；压缩响应 `3629 bytes`。
+- 第二轮据此删除银行候选的两个 JSON counterparty fallback，让既有 `workbench_rows_bank_counterparty_scope_idx` 生效；未新增 schema、索引或基础设施。
+- 第二轮定向 API/facade 62 项、SQL/guard 2 项、真实 PostgreSQL 2 项、lint/docs/diff-check 均通过。
+
+第二轮精确 SHA 尚待提交、部署和重复生产采样；以下项目仍是当前完成门：
+
 - 精确 SHA 部署。
 - shell、unsubmitted、submitted、Page Audit 各 20 样本。
 - dashboard DB query count `<=10`，列表 p95 `<=500ms`（目标 `<=300ms`），Audit p95 `<=1000ms`。

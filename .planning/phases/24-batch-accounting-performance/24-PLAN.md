@@ -30,7 +30,13 @@
 - submit 现有窄 loader 与 list loader 复用同一私有读取 helper；参数明确控制是否允许 `all` scope fallback，保持 submit 既有语义和 list 的非-all语义。
 - 删除 list 原有无 OA 条件的全量附件 SQL，不保留兼容分支。
 
-### 4. 测试与架构门禁
+### 4. 生产证据触发的候选索引修复
+
+- 首次部署后若 relation query count 已达标、但 unsubmitted p95 仍失败，使用 dashboard DB duration、响应大小和现有索引合同定位剩余慢 SQL。
+- 银行候选只按结构化 `workbench_rows.counterparty_name` 过滤，删除两个历史 JSON `OR` fallback，使既有 `workbench_rows_bank_counterparty_scope_idx` 可用。
+- 不新增 migration、索引、缓存、projection 或第二套候选 read model；真实 PostgreSQL 测试证明仅结构化列是读取合同，静态 guard 禁止 fallback 回流。
+
+### 5. 测试与架构门禁
 
 1. 业务核心单元：不改变业务规则，不新增专门业务单测；既有筛选、金额、submit/withdraw 状态测试回归。
 2. Service：验证候选和 submitted detail 只使用 batch 专用 facade 方法，缺失依赖 fail closed。
@@ -45,13 +51,13 @@
 6. E2E：运行批量账务关键流测试；本地/生产写入分别受环境和 App Health preflight 约束。
 7. Existing regression：运行 workbench relation facade、SQL runtime、manifest、architecture guards，并验证关联台/银行明细/成本统计等直接共享消费者 Audit。
 
-### 5. 文档
+### 6. 文档
 
 - 更新 batch-accounting README、boundary-io、tests、implementation-notes。
 - 更新 workbench-relations boundary I/O、read-model contracts 与 runtime ownership/manifest 事实。
 - API shape 和产品口径不变，不改产品 spec/API contract；若实现核验发现长期事实描述需要更新，再做最小修订。
 
-### 6. 发布与生产验证
+### 7. 发布与生产验证
 
 - 相关测试、lint、docs、diff-check 通过后，提交并 push `main`。
 - 使用 `./scripts/deploy-oa.sh` 部署精确 SHA。
