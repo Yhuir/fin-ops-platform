@@ -18,6 +18,8 @@
 
 第六次发布后 unsubmitted 查询数约为 `5`，40 样本外部 p95 为 `520.481ms`；shell `113.305ms`、submitted `311.506ms`、Page Audit `295.298ms` 均通过，160/160 请求全部为 2xx/fresh/0 enqueue。dashboard 混合 endpoint API/DB/connection/query-count p95 为 `388.908ms` / `277.282ms` / `0.183ms` / `6`。剩余唯一独立的未提交 relation I/O 是年度 submitted count，它读取同一 `workbench_relation` 事实与 freshness scopes。第七轮因此把年度 scopes 和 `submitted_count` 合并进既有候选 relation bundle，并删除独立 count facade/port/repository/manifest 合同；目标 unsubmitted 查询数约为 `4`。这仍是同一 batch-only 边界内的单快照读取，不增加基础设施或影响通用 reader。
 
+第七次发布已达到约 `4` 条 unsubmitted 查询，但 40 样本外部 p95 为 `538.172ms`；已提交 `311.865ms`、Audit `355.048ms` 通过，未提交 40/40 fresh、0 enqueue。dashboard 混合 endpoint API/DB/connection/query-count p95 为 `377.917ms` / `279.912ms` / `0.189ms` / `6`。结构审阅发现候选 active-generation SQL 仍为每条银行/OA/附件选择 `raw_payload`，而 `_read_model_payload` 在这些行存在规范化 `payload` 时绝不会读取该列；生产 HTTP 响应仅 `19541` bytes，原始 OA/附件 JSON 却可能远大于最终 DTO。第八轮只删除这个未消费列，保留 submit 窄 loader、事实源和所有跨页 reader，不新增索引。
+
 本轮应保留现有 Workbench + workbench_relation 事实源，不新增独立 read model、缓存、表、队列或 worker。唯一 schema 变化是生产复测证明必需的 OA 类型部分表达式索引。最小而完整的生产方案是：
 
 1. 新增批量账务专用的 relation 批量读取 I/O，一条 SQL 同时证明 12 个或候选涉及的全部 scope。

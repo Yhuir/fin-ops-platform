@@ -71,6 +71,8 @@
 
 第七轮本地实现已完成：候选 relation rows、候选/年度 proof、referenced groups、年度 `submitted_count` 使用同一个 bundle SQL，独立年度 count service/facade/port/repository/manifest 方法已删除；facade/API 单测 62 项与真实 PostgreSQL 0001–0112 的 2/2 集成测试通过，临时数据库残留 `0`。当前待完整定向门、精确 SHA 部署和生产复采。完成门为：
 
+第七次 release `main-9e77ff97-20260720054715` 已部署；unsubmitted 40 样本 p95 `538.172ms` 未通过，40/40 为 2xx/fresh/0 enqueue；submitted `311.865ms`、Audit `355.048ms` 通过。shell 39 个成功样本 p95 `113.899ms`，另有 1 次外部 TLS EOF，证据不隐藏。dashboard 混合 endpoint API/DB/connection/query-count p95 为 `377.917ms` / `279.912ms` / `0.189ms` / `6`，unsubmitted 实际约 `4` 条。第八轮删除候选列表未消费的 `raw_payload` 大 JSON I/O；定向后端 251 项/218 子断言和实际应用 0001–0112 migrations 的 PostgreSQL 2 项已通过，临时数据库已删除。当前待精确 SHA 部署和复采。
+
 - 精确 SHA 部署。
 - shell、unsubmitted、submitted、Page Audit 各 40 样本。
 - unsubmitted 请求 query count 目标 `<=4`（dashboard 混合 endpoint p95 允许 submitted 固有值），列表 p95 `<=500ms`（目标 `<=300ms`），Audit p95 `<=1000ms`。

@@ -11537,7 +11537,7 @@ class PostgresReadModelRepository:
                         r.payload->>'txn_date',
                         ''
                     ) as batch_sort_value,
-                    r.row_id, r.source_kind, r.status, r.payload, r.raw_payload,
+                    r.row_id, r.source_kind, r.status, r.payload,
                     r.updated_at
                 from read_model.workbench_rows r
                 join read_model.workbench_generations gen
@@ -11564,7 +11564,7 @@ class PostgresReadModelRepository:
                         r.payload->>'created_at',
                         ''
                     ) as batch_sort_value,
-                    r.row_id, r.source_kind, r.status, r.payload, r.raw_payload,
+                    r.row_id, r.source_kind, r.status, r.payload,
                     r.updated_at
                 from read_model.workbench_rows r
                 join read_model.workbench_generations gen
@@ -11590,7 +11590,7 @@ class PostgresReadModelRepository:
                     3 as batch_row_order,
                     'invoice'::text as batch_row_kind,
                     r.row_id as batch_sort_value,
-                    r.row_id, r.source_kind, r.status, r.payload, r.raw_payload,
+                    r.row_id, r.source_kind, r.status, r.payload,
                     r.updated_at
                 from read_model.workbench_rows r
                 join read_model.workbench_generations gen
@@ -11612,7 +11612,7 @@ class PostgresReadModelRepository:
                 union all
                 select * from active_invoice_rows
             )
-            select batch_row_kind, row_id, source_kind, status, payload, raw_payload
+            select batch_row_kind, row_id, source_kind, status, payload
             from candidate_rows
             order by
                 batch_row_order,

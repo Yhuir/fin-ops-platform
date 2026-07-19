@@ -2552,6 +2552,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertIn("oa_candidate_ids as materialized", candidate_query)
         self.assertIn("r.source_kind = 'oa_attachment_invoice'", candidate_query)
         self.assertIn("regexp_replace", candidate_query)
+        self.assertNotIn("raw_payload", candidate_query)
         self.assertEqual(candidate_params[3], True)
         self.assertEqual(candidate_params[5], True)
 
