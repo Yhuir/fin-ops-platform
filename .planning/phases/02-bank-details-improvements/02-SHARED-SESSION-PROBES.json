@@ -1,0 +1,10 @@
+{
+  "probes": [
+    {
+      "name": "shared_session_me",
+      "path": "/api/session/me",
+      "expected_statuses": [200],
+      "target_ms": 1000
+    }
+  ]
+}

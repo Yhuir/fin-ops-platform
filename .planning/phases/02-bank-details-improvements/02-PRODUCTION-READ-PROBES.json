@@ -1,0 +1,29 @@
+{
+  "probes": [
+    {
+      "name": "bank_details_accounts",
+      "path": "/api/bank-details/accounts?date_from=2026-01-01&date_to=2026-12-31",
+      "expected_statuses": [200, 202],
+      "target_ms": 1000
+    },
+    {
+      "name": "bank_details_transactions",
+      "path": "/api/bank-details/transactions?date_from=2026-01-01&date_to=2026-12-31&page=1&page_size=50",
+      "expected_statuses": [200, 202],
+      "target_ms": 1000
+    },
+    {
+      "name": "bank_details_auto_tag_rules",
+      "path": "/api/bank-details/auto-tag-rules",
+      "expected_statuses": [200, 202],
+      "target_ms": 1000
+    },
+    {
+      "name": "bank_details_page_audit",
+      "path": "/api/operations/app-health/page-audit?page=bank-details",
+      "expected_statuses": [200],
+      "target_ms": 1000,
+      "auth_scope": "admin"
+    }
+  ]
+}

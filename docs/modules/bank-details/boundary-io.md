@@ -69,7 +69,7 @@
 | Frontend page | `web/src/pages/BankDetailsPage.tsx` |
 | Frontend feature | `web/src/features/bankDetails/*`、`web/src/components/BankAccountValue.tsx` |
 | Backend route | `backend/src/fin_ops_platform/app/routes_bank_details.py`、`bank_detail_category_api.py`、`bank_detail_backfill.py` |
-| Backend service | `bank_details_application_service.py`、`bank_details_service.py`、`bank_detail_*`、`bank_transaction_*`、`bankdetail_write_uow.py` |
+| Backend service | `bank_details_application_service.py`、`bank_details_service.py`、`bank_detail_*`、`bank_transaction_*`；分类写入副作用由 `bank_detail_category_side_effects.py` 的明确 port 承担，不存在平行 Bankdetail UoW |
 | Repository / SQL | `bank_detail_read_model_repository.py`、`bank_detail_sql_projection.py`、`postgres_repositories/read_models.py` |
 | Worker/read model | `bank_detail_read_model_refresh.py`、`bank_detail_read_model_refresh_producer.py`、`bank_detail_derived_lifecycle_executor.py` |
 | Tests | `tests/test_bank_details*.py`、`tests/test_bank_detail*.py`、`web/src/test/BankDetails*.test.*`、`web/e2e/bank-details-*.spec.ts` |

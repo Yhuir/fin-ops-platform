@@ -2280,6 +2280,33 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
+    def test_bank_details_disconnected_write_uow_stays_deleted(self) -> None:
+        legacy_path = SERVICES_ROOT / "bankdetail_write_uow.py"
+        violations: list[str] = []
+
+        if legacy_path.exists():
+            violations.append("disconnected bankdetail_write_uow.py must stay deleted")
+
+        for path in _python_files(APP_ROOT, SERVICES_ROOT, TOOLS_ROOT):
+            source = path.read_text(encoding="utf-8")
+            for forbidden in (
+                "BankdetailWriteUnitOfWork",
+                "fin_ops_platform.services.bankdetail_write_uow",
+            ):
+                if forbidden in source:
+                    violations.append(f"{_relative(path)} still references {forbidden}")
+
+        owner_markers = {
+            SERVICES_ROOT / "bank_details_application_service.py": "class BankDetailsApplicationService",
+            SERVICES_ROOT / "bank_detail_category_side_effects.py": "class BankDetailCategoryMutationSideEffectPort",
+            APP_ROOT / "routes_bank_details.py": "class BankDetailsApiRoutes",
+        }
+        for path, marker in owner_markers.items():
+            if marker not in path.read_text(encoding="utf-8"):
+                violations.append(f"{_relative(path)} is missing production owner marker {marker}")
+
+        self.assertEqual(violations, [])
+
     def test_bank_details_auto_tag_and_category_writes_stay_on_application_boundary(self) -> None:
         server_path = APP_ROOT / "server.py"
         server_source = server_path.read_text(encoding="utf-8")

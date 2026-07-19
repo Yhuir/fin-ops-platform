@@ -147,7 +147,7 @@
 | Application service | `NoOaBankBatchApplicationService` | read model missing/stale 不同步 rebuild、after_mutation、durable queue enqueue、Workbench scope expansion |
 | Business core | `NoOaBankBatchService` | draft/submitted/withdrawn/stale/conflict、internal_transfer pairing、active relation exclusion、legacy relation migration |
 | Tag selection | `NoOaBankBatchTagSelectionService` / `AppSettingsService` | tag selection version、inactive selected cleanup、auto-tag rules labels 即时反映 |
-| Write target contract | `bankdetail_write_uow.py` + `tests/test_bankdetail_write_uow_contract.py` | no-OA batch + Workbench pair relation + audit + dirty/outbox 同事务目标 |
+| Write target contract | `NoOaBankBatchApplicationService` + `NoOaBankBatchService` + Workbench relation writer；由 `tests/test_no_oa_bank_batch_application_service.py`、`tests/test_no_oa_bank_batch_workbench_integration.py` 和 Workbench UoW tests 保护 | no-OA batch 状态、Workbench pair relation、audit 与 durable refresh 由各真实 owner 协作；不存在未接入生产的平行 Bankdetail UoW |
 | Read model worker | `NoOaBankBatchReadModelRefreshService` | stale source version event 不得 rebuild/overwrite；worker 必须 complete dirty scope |
 | App Status | `app_status_domain_registry.py`、`app_status_read_model_registry.py`、`runtime_worker_registry.py` | `no_oa_bank_batches` domain 必须绑定 `no-oa-bank-batch` worker 和 `no_oa_bank_batch.read_model.refresh` |
 
@@ -163,7 +163,7 @@
 
 当前 Browser e2e：
 
-- 无当前 no-OA 页面级 Browser 入口；与用户页面相关的真实 Chromium 覆盖归 `bank-flow-rule-batches`。legacy no-OA 的 API/read model/worker 和 Workbench relation 回归由 `tests/test_no_oa_bank_batch*.py`、`tests/test_bankdetail_write_uow_contract.py` 和受影响 Workbench tests 覆盖。
+- 无当前 no-OA 页面级 Browser 入口；与用户页面相关的真实 Chromium 覆盖归 `bank-flow-rule-batches`。legacy no-OA 的 API/read model/worker 和 Workbench relation 回归由 `tests/test_no_oa_bank_batch*.py`、`tests/test_workbench_uow_contract.py` 和受影响 Workbench tests 覆盖。
 
 ## 模块细化：batch-accounting
 
@@ -483,7 +483,7 @@
 
 - `tests/test_auth_guard.py`、`tests/test_session_api.py` 保护 401/403、session payload、tier 判定、settings allowed/readonly/admin、local dev auth。
 - `web/src/test/SessionGate.test.tsx`、`web/src/test/SessionApi.test.ts` 保护前端 session bootstrap、cookie Authorization header、超时和 retry。
-- `tests/test_audit_service.py`、`tests/test_workbench_auth_context_idempotency.py`、`tests/test_bankdetail_write_uow_contract.py`、`tests/test_turnover_ledger_uow_contract.py` 保护 actor/tenant、audit metadata 和事务原子性。
+- `tests/test_audit_service.py`、`tests/test_workbench_auth_context_idempotency.py`、`tests/test_bank_auto_tag_rules_api.py`、`tests/test_bank_details_sql_runtime.py`、`tests/test_turnover_ledger_uow_contract.py` 保护 actor/tenant、audit metadata、银行分类真实 side-effect owner 和事务型 writer 原子性。
 - `tests/test_settings_data_reset_service.py`、`tests/test_oa_applicant_credentials_api.py`、`tests/test_app_health_api.py` 保护 admin-only 高风险接口和敏感数据不泄露。
 - `tests/test_tax_offset_api.py`、`tests/test_pending_invoice_api.py`、`tests/test_turnover_ledger_api.py`、`tests/test_bank_auto_tag_rules_api.py` 保护模块写入权限。
 - `tests/test_platform_runtime_boundary_guards.py` 保护 service/worker 不依赖 HTTP auth 边界。

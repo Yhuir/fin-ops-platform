@@ -10,6 +10,7 @@
 - 账户余额 read model 与银行明细 rows read model 必须保持独立。标签规则保存、重应用、关键字/分类/日期筛选不能用 stale account payload 覆盖已有 fresh balance。
 - 银行明细前端 domain event 只负责刷新提示和 refetch；跨页面一致性的事实源仍是后端 dirty scope、outbox、worker 和 read model freshness。
 - 银行明细对 no-OA、turnover ledger、pending/search、cost/tax、workbench relation 的 fan-out 在本模块记录上游影响；具体下游页面的 UI/业务流回归由各模块轮次继续补齐。
+- 银行分类写入的当前 owner 是 `BankDetailsApplicationService`、明确 category store 和 `BankDetailCategoryMutationSideEffectPort`；仓库不保留未接入生产的平行 Bankdetail UoW。
 
 ## 记录模板
 
@@ -27,6 +28,17 @@
 ```
 
 ## 历史记录
+
+## 2026-07-20 - 删除未接入生产的 Bankdetail UoW 试验链
+
+- 目标：移除注释明确说明 disconnected from production write paths、且全仓无 runtime caller 的 `BankdetailWriteUnitOfWork` skeleton，避免它继续被误认为银行分类、自动标签和 no-OA 的生产事务 owner。
+- 影响范围：删除 `backend/src/fin_ops_platform/services/bankdetail_write_uow.py` 与其孤立 contract test；收紧平台 boundary guard；修正银行明细、权限审计和 testing closure 当前文档。未改变 API、业务规则、read model schema/scope、worker、queue、cache、migration 或前端行为。
+- 关键决策：不创建 replacement UoW。银行明细继续由 `BankDetailsApplicationService`、category store、category side-effect port 和 refresh gateway 负责；no-OA/Workbench/turnover 继续由各自真实 application/UoW owner 负责。保留处理当前合法银行文本输入的规范化逻辑、当前 `BankDetailsService` consumers、410 tombstone 和独立 no-OA read model。
+- 文档影响：更新 `boundary-io.md`、`tests.md`、权限审计矩阵和 testing closure 当前事实；历史 backend-refactor discovery/state log 保留当时记录，不作为当前运行时依据。
+- 测试覆盖：新增 architecture guard 防旧 module/class/import 回归；先观察 guard 在旧文件仍存在时按预期失败，删除后转绿。定向 backend 共通过 359 项，no-OA/Workbench 真实 owner 回归通过 69 项，BankDetails frontend 通过 56 项。
+- 验证命令：`bash scripts/verify.sh lint`；`PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_routes tests.test_bank_auto_tag_rules_api tests.test_bank_details_sql_runtime tests.test_bank_account_balance_read_model tests.test_bank_detail_read_model_refresh_producer tests.test_platform_runtime_boundary_guards tests.test_audit_service tests.test_permissions_write_entry_inventory -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_no_oa_bank_batch_application_service tests.test_no_oa_bank_batch_workbench_integration tests.test_workbench_uow_contract -v`；`cd web && npm test -- --run src/test/BankDetailsApi.test.ts src/test/BankDetailsPage.test.tsx`；`bash scripts/verify.sh docs`；`git diff --check`。
+- 未测风险：本地测试不证明部署后的真实 worker drain、写后可见耗时和生产 Audit；这些门禁在精确 SHA 部署后使用受控 fan-out evidence 验证。
+- 后续事项：无；不得以本次删除为理由改造其他页面或新建通用写框架。
 
 ## 2026-07-05 - 页面读链路 read model-only close
 
@@ -459,6 +471,6 @@
 - 关键决策：本轮判定现有 P0/P1 测试入口足够覆盖自动标签、候选确认、manual assignment、账户余额 read model、bank detail freshness、导出和前端交互；不为覆盖率新增重复测试。真实 Postgres/RabbitMQ/Redis worker drain、历史生产数据和浏览器视觉/性能 smoke 归入 `documented-risk`。
 - 文档影响：补齐影响面清单、场景覆盖清单、七类测试适用性、历史 bug 回归库、关键 smoke flows、验证命令、业务/UI/read model/worker 状态机。
 - 测试覆盖：沿用现有 bank details 后端和前端测试；本轮未新增代码测试。
-- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_service tests.test_bank_transaction_auto_category_service tests.test_bank_transaction_category_service -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_bank_auto_tag_rules_api tests.test_bank_details_routes tests.test_bankdetail_write_uow_contract -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime tests.test_bank_account_balance_read_model tests.test_bankdetail_backfill_cli -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_export_service tests.test_bank_transaction_identity_service -v`；`cd web && npm test -- --run src/test/BankDetailsApi.test.ts src/test/BankDetailsPage.test.tsx`。
+- 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_service tests.test_bank_transaction_auto_category_service tests.test_bank_transaction_category_service -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_bank_auto_tag_rules_api tests.test_bank_details_routes tests.test_platform_runtime_boundary_guards -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_sql_runtime tests.test_bank_account_balance_read_model tests.test_bankdetail_backfill_cli -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_bank_details_export_service tests.test_bank_transaction_identity_service -v`；`cd web && npm test -- --run src/test/BankDetailsApi.test.ts src/test/BankDetailsPage.test.tsx`。
 - 未测风险：不运行真实生产库 worker drain、真实导入到下游多页面完整 smoke、浏览器视觉/大数据性能验证。
 - 后续事项：下一模块继续处理 `input-invoice-usage`。
