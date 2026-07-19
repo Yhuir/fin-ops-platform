@@ -570,6 +570,10 @@ class WorkbenchRelationReadFacadeTests(unittest.TestCase):
             ),
             1,
         )
+        bundle_sql = row_connection.fetch_one_calls[0][0]
+        self.assertNotIn("relation_row.payload", bundle_sql)
+        self.assertNotIn("relation_row.raw_payload", bundle_sql)
+        self.assertNotIn("group_row.raw_payload", bundle_sql)
 
         list_connection = BatchAccountingBulkRelationConnection()
         list_payload = PostgresReadModelRepository(list_connection).list_batch_accounting_relation_groups_by_year(

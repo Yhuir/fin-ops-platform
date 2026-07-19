@@ -735,7 +735,7 @@ class BatchAccountingService:
 
     @staticmethod
     def _annotated_row(row: dict[str, Any], group: dict[str, Any], section: str) -> dict[str, Any]:
-        result = deepcopy(row)
+        result = dict(row)
         result["_section"] = section
         result["_group_id"] = str(group.get("group_id") or "")
         group_case_id = str(group.get("case_id") or "").strip()

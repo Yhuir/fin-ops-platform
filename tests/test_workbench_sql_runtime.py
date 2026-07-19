@@ -2556,6 +2556,17 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(candidate_params[3], True)
         self.assertEqual(candidate_params[5], True)
 
+    def test_batch_accounting_payload_mapping_does_not_recursively_copy_nested_json(self) -> None:
+        nested = {"large_rows": [{"value": index} for index in range(100)]}
+
+        payload_rows = PostgresReadModelRepository._batch_accounting_payload_rows(
+            [{"payload": {"id": "oa-exp-ba-001", "nested": nested, "rebuildable": True}}]
+        )
+
+        self.assertEqual(payload_rows[0]["id"], "oa-exp-ba-001")
+        self.assertNotIn("rebuildable", payload_rows[0])
+        self.assertIs(payload_rows[0]["nested"], nested)
+
     def test_repository_groups_page_pins_versions_counts_and_rows_to_single_active_generation(self) -> None:
         connection = SwitchingActiveWorkbenchGenerationConnection()
         repository = PostgresReadModelRepository(connection)

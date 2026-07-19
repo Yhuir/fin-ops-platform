@@ -77,6 +77,8 @@
 
 第九次 release `main-36db2926-20260720061033` 已部署；shell `109.290ms`、submitted `297.918ms`、Audit `293.528ms` 通过，unsubmitted `548.316ms` 未通过；160/160 请求均为 2xx/fresh/0 enqueue。dashboard 混合 endpoint API/DB/connection/query-count p95 为 `400.724ms` / `248.446ms` / `0.169ms` / `6`。这反证 0113 年度 count 索引不是剩余主因。第十轮只增加批量账务 GET 的 `Server-Timing` 阶段诊断，业务 JSON、事实源、其他页面、read model/worker/queue 均不变；定向测试覆盖响应头和 service relation timing observer，当前待完整定向门、精确 SHA 部署和生产阶段采样。
 
+第十次 release `main-09171af7-20260720062427` 已部署且 readiness/worker/frontend/session 门禁通过。unsubmitted 40 样本全部 200/fresh/0 enqueue、无错误；external p95 `591.930ms`，Server-Timing p95：candidate load `219.570ms`、candidate parse `43.591ms`、relation read `178.393ms`、service total `380.536ms`、serialization `1.127ms`，其余单段均小于 `2ms`。第十一轮只删除 batch-only candidate/relation 路径的递归复制和未消费 payload 列，当前待定向后端、真实 PostgreSQL、lint/docs 门禁后发布复采。
+
 - 精确 SHA 部署。
 - shell、unsubmitted、submitted、Page Audit 各 40 样本。
 - unsubmitted 请求 query count 目标 `<=4`（dashboard 混合 endpoint p95 允许 submitted 固有值），列表 p95 `<=500ms`（目标 `<=300ms`），Audit p95 `<=1000ms`。

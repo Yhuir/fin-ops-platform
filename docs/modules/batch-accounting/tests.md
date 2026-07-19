@@ -70,6 +70,7 @@
 | Submitted relation reader boundary | 已提交 bucket 缺少年份级 relation reader 时必须 fail closed 为 unavailable，不能回退 12 个月 `list_by_month` | covered |
 | Workbench full-payload fallback | 三类专属 SQL loader 缺失/无效时必须返回 `503 batch_accounting_workbench_read_model_unavailable`；不得调用 generic grouped/full-page builder，也不得跨用其它操作的 loader | covered |
 | Read timing boundary | 批量账务 GET 必须只在 `Server-Timing` 头暴露候选/relation/组装/序列化阶段，业务 JSON 不得出现 timing 内部字段；service observer 必须覆盖 relation read 阶段 | covered |
+| Read-copy budget | 列表 payload mapper 与 service group 注解不得递归复制嵌套 JSON；relation bundle 不得重新携带未消费的 row payload/raw payload 或 group raw payload | covered |
 
 ## 关键 Smoke Flows
 

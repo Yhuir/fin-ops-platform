@@ -1,0 +1,22 @@
+{
+  "captured_at": "2026-07-20T06:30:00+08:00",
+  "release": "main-09171af7-20260720062427",
+  "sha": "09171af76",
+  "endpoint": "GET /api/batch-accounting?bank_year=2026&bucket=unsubmitted&bank_page=1&bank_page_size=200&oa_page=1&oa_page_size=200",
+  "samples": 40,
+  "status_200": 40,
+  "fresh": 40,
+  "refresh_enqueued_true": 0,
+  "errors": [],
+  "external_total_ms": {"p50": 505.247, "p95": 591.93, "p99": 688.677},
+  "server_timing_ms": {
+    "batch_candidate_load": {"p50": 137.896, "p95": 219.57, "p99": 308.781},
+    "batch_candidate_parse": {"p50": 30.975, "p95": 43.591, "p99": 45.252},
+    "batch_candidate_select": {"p50": 0.29, "p95": 0.409, "p99": 1.626},
+    "batch_relation_read": {"p50": 82.318, "p95": 178.393, "p99": 190.363},
+    "batch_relation_apply": {"p50": 0.282, "p95": 0.381, "p99": 0.403},
+    "batch_payload_assembly": {"p50": 0.336, "p95": 0.501, "p99": 0.796},
+    "batch_service_total": {"p50": 289.929, "p95": 380.536, "p99": 511.553},
+    "batch_serialization": {"p50": 0.694, "p95": 1.127, "p99": 1.145}
+  }
+}

@@ -4957,9 +4957,7 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
                        relation_row.linked_bank_transactions,
                        relation_row.linked_input_invoices,
                        relation_row.linked_output_invoices,
-                       relation_row.source_versions,
-                       relation_row.payload,
-                       relation_row.raw_payload
+                       relation_row.source_versions
                 from requested_rows requested
                 join read_model.workbench_relation_rows relation_row
                   on relation_row.tenant_id = %s
@@ -5024,8 +5022,7 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
                        group_row.input_invoice_ids,
                        group_row.output_invoice_ids,
                        group_row.source_versions,
-                       group_row.payload,
-                       group_row.raw_payload
+                       group_row.payload
                 from read_model.workbench_relation_groups group_row
                 join requested_groups requested_group
                   on requested_group.group_id = group_row.group_id
@@ -11695,21 +11692,25 @@ class PostgresReadModelRepository:
                     {
                         "group_id": f"batch-accounting:{bank_year}:unpaired-oa",
                         "group_type": "batch_accounting_sql_read_model",
-                        "bank_rows": self._payload_rows(bank_rows),
-                        "oa_rows": self._payload_rows(oa_rows),
-                        "invoice_rows": self._payload_rows(invoice_rows),
+                        "bank_rows": self._batch_accounting_payload_rows(bank_rows),
+                        "oa_rows": self._batch_accounting_payload_rows(oa_rows),
+                        "invoice_rows": self._batch_accounting_payload_rows(invoice_rows),
                     }
                 ]
             },
         }
 
     @staticmethod
-    def _payload_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _batch_accounting_payload_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         payload_rows: list[dict[str, Any]] = []
         for row in rows:
-            payload = _read_model_payload(row)
+            payload = row_payload(row, "payload")
             if isinstance(payload, dict):
-                payload_rows.append(payload)
+                payload_rows.append(
+                    {key: value for key, value in payload.items() if str(key) != "rebuildable"}
+                    if "rebuildable" in payload
+                    else payload
+                )
                 continue
             row_id = text(row.get("row_id"))
             if row_id:

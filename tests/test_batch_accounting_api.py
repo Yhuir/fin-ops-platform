@@ -867,6 +867,20 @@ class BatchAccountingApiTests(unittest.TestCase):
         self.assertEqual(relation_calls[0]["reason"], "batch_accounting_unsubmitted_relations")
         self.assertFalse([call for call in facade.calls if "month" in call], facade.calls)
 
+    def test_candidate_annotation_only_copies_the_top_level_row(self) -> None:
+        nested = {"detail_fields": {"申请事由": "批量账务"}}
+        source = {"id": "oa-exp-ba-001", "nested": nested}
+
+        annotated = BatchAccountingService._annotated_row(
+            source,
+            {"group_id": "batch-accounting:2026:unpaired-oa"},
+            "unpaired",
+        )
+
+        self.assertIs(annotated["nested"], nested)
+        self.assertNotIn("_section", source)
+        self.assertEqual(annotated["_section"], "unpaired")
+
     def test_unsubmitted_relation_lookup_is_scoped_to_batch_candidates(self) -> None:
         payload = {
             "month": "all",
