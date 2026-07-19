@@ -1,0 +1,54 @@
+{
+  "captured_at": "2026-07-20T06:43:00+08:00",
+  "release": "main-f57baa1c-20260720063635",
+  "sha": "f57baa1c1",
+  "status": "pass_with_write_smoke_deferred_by_global_preflight",
+  "http_slo": {
+    "iterations": 40,
+    "warmup": 2,
+    "sample_count": 160,
+    "failed_probe_count": 0,
+    "probes": {
+      "page_shell_batch_accounting": {"p50_ms": 94.151, "p95_ms": 112.073, "p99_ms": 135.309, "status_200": 40},
+      "batch_accounting_unsubmitted_2026": {"p50_ms": 316.471, "p95_ms": 462.434, "p99_ms": 518.467, "status_200": 40, "fresh": 40, "refresh_enqueued_true": 0},
+      "batch_accounting_submitted_2026": {"p50_ms": 214.56, "p95_ms": 277.958, "p99_ms": 312.781, "status_200": 40, "fresh": 40, "refresh_enqueued_true": 0},
+      "batch_accounting_page_audit": {"p50_ms": 209.882, "p95_ms": 258.733, "p99_ms": 379.999, "status_200": 40}
+    }
+  },
+  "server_timing_unsubmitted": {
+    "samples": 40,
+    "external_total_ms": {"p50": 323.267, "p95": 485.002, "p99": 647.671},
+    "batch_candidate_load": {"p50": 122.353, "p95": 168.659, "p99": 346.975},
+    "batch_candidate_parse": {"p50": 1.178, "p95": 1.678, "p99": 2.21},
+    "batch_candidate_select": {"p50": 0.247, "p95": 0.457, "p99": 1.637},
+    "batch_relation_read": {"p50": 28.882, "p95": 44.835, "p99": 95.227},
+    "batch_relation_apply": {"p50": 0.262, "p95": 0.366, "p99": 0.376},
+    "batch_payload_assembly": {"p50": 0.337, "p95": 0.471, "p99": 0.569},
+    "batch_service_total": {"p50": 164.158, "p95": 210.858, "p99": 451.055},
+    "batch_serialization": {"p50": 0.771, "p95": 1.006, "p99": 2.847},
+    "status_200": 40,
+    "fresh": 40,
+    "refresh_enqueued_true": 0,
+    "errors": []
+  },
+  "page_audits": {
+    "batch-accounting": {"integrity": "pass", "freshness": "fresh", "queue": "drained", "issue_sample_count": 0},
+    "reconciliation-workbench": {"integrity": "pass", "freshness": "fresh", "queue": "drained", "issue_sample_count": 0},
+    "bank-details": {"integrity": "pass", "freshness": "fresh", "queue": "drained", "issue_sample_count": 0},
+    "cost-statistics": {"integrity": "pass", "freshness": "fresh", "queue": "drained", "issue_sample_count": 0},
+    "oa-pending-payments": {"integrity": "pass", "freshness": "fresh", "queue": "drained", "issue_sample_count": 0}
+  },
+  "production_write_smoke": {
+    "status": "deferred",
+    "reason": "global_app_health_system_audit_failed_before_first_mutation",
+    "unrelated_blocking_pages": [
+      "tax-offset",
+      "input-invoice-usage",
+      "output-invoice-collections",
+      "settings"
+    ],
+    "freshness": "fresh",
+    "queue": "drained",
+    "mutation_attempted": false
+  }
+}

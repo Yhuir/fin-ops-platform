@@ -79,6 +79,10 @@
 
 第十次 release `main-09171af7-20260720062427` 已部署且 readiness/worker/frontend/session 门禁通过。unsubmitted 40 样本全部 200/fresh/0 enqueue、无错误；external p95 `591.930ms`，Server-Timing p95：candidate load `219.570ms`、candidate parse `43.591ms`、relation read `178.393ms`、service total `380.536ms`、serialization `1.127ms`，其余单段均小于 `2ms`。第十一轮只删除 batch-only candidate/relation 路径的递归复制和未消费 payload 列，当前待定向后端、真实 PostgreSQL、lint/docs 门禁后发布复采。
 
+第十一次 release `main-f57baa1c-20260720063635` 已完成闭环：直接后端 446/446、真实 PostgreSQL 2/2（0001–0113，临时库残留 0）、lint/docs/diff 通过；部署 readiness、22 个 worker、frontend hash 和 public session route 通过。四通道 160/160 成功，shell/unsubmitted/submitted/Page Audit p95 分别为 `112.073/462.434/277.958/258.733ms`，全部通过硬门槛，API 80/80 fresh、0 enqueue。Server-Timing 复采把 candidate parse p95 从 `43.591ms` 降至 `1.678ms`，relation read 从 `178.393ms` 降至 `44.835ms`，service total 从 `380.536ms` 降至 `210.858ms`。批量账务、关联台、银行明细、成本统计、OA 待付款 Audit 均 pass/fresh/drained/0 issue。
+
+首次生产 mutation 前的强制 `app-health-operations` System Audit 仍被四个范围外页面 `tax-offset`、`input-invoice-usage`、`output-invoice-collections`、`settings` 的既有 integrity issue 阻断；freshness 为 fresh、queue 为 drained，未执行任何 mutation。按串行隔离规则，批量账务不跨页修复、不绕过门禁；submit→fresh→withdraw→fresh 留到最终系统门补做。本页面代码、读取性能、直接/跨页 Audit 和生产发布均已达到完成条件。
+
 - 精确 SHA 部署。
 - shell、unsubmitted、submitted、Page Audit 各 40 样本。
 - unsubmitted 请求 query count 目标 `<=4`（dashboard 混合 endpoint p95 允许 submitted 固有值），列表 p95 `<=500ms`（目标 `<=300ms`），Audit p95 `<=1000ms`。
