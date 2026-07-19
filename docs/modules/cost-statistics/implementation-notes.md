@@ -1,5 +1,11 @@
 # 成本统计 实施记录
 
+## 2026-07-19 - ETC batch 状态扇出隔离
+
+- ETC 页面旧合并 emitter 把 OA draft/manual-status 的 batch-only 变化同时广播成 `invoiceFactUpdated`，Cost 因而立刻清空可操作内容并进入遮罩；后端同时从 canonical relink 直投 Cost、historical repair 和 `all`，造成截图中的多 scope processing。
+- Cost 现只订阅真实 `invoiceFactUpdated`；`etcBusinessBatchUpdated` 不再影响本页。ETC import 不直投 Cost，成功 Workbench 月 generation 仍以既有 `workbench_shard_published` 精确刷新 active/all parent，维持 source-version 顺序与最终一致性。
+- 本轮没有修改 Cost API、projection、repository、scope policy、worker、queue、cache 或 UI；页面隔离由 architecture guard 固化。生产时仍需验证 ETC 可逆操作后的 explorer fresh、业务断言与 Audit，不能用 event done 替代页面可见。
+
 ## 2026-07-18 - 生产最终门修正：relation identity 与 invoice lifecycle 旧重算删除
 
 - 最终可逆 OA+银行+发票夹具证明 Cost direct 链已经达到目标：withdraw 在业务提交确认后 `906ms` 读到 `active:all` 的 `-1 行 / -5000`，confirm 在业务提交确认后 `1010ms` 读到 `+1 行 / +5000`。但最终 Audit 又发现 delta 把 Cost 行 `group_id` 写成裸 `case_id`，而 canonical Workbench 的正式展示 identity 是 `case:<case_id>`；金额和行数虽正确，exact-set 仍必须 fail closed。

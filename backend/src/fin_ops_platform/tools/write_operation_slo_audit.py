@@ -354,7 +354,7 @@ DEFAULT_OPERATION_EXPECTATIONS: tuple[OperationExpectation, ...] = (
     OperationExpectation("etc_import_confirmed", "workbench_relation", "etc_invoice_import_confirm"),
     OperationExpectation("etc_import_confirmed", "invoice_lifecycle", "etc_invoice_import_confirm"),
     OperationExpectation("etc_import_confirmed", "tax_offset", "etc_invoice_import_confirm"),
-    OperationExpectation("etc_import_confirmed", "cost_statistics", "etc_invoice_import_confirm"),
+    OperationExpectation("etc_import_confirmed", "cost_statistics", "workbench_shard_published"),
     OperationExpectation(
         "no_oa_bank_batch_withdraw", "no_oa_bank_batch", "no_oa_bank_batch_changed", ("no_oa_bank_batch_withdraw",)
     ),

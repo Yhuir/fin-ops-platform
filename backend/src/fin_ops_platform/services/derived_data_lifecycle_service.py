@@ -9,8 +9,7 @@ DERIVED_DATA_EVENTS = (
     "bank_import_confirmed",
     "import_state_changed",
     "etc_import_confirmed",
-    "etc_oa_submitted",
-    "etc_oa_revoked",
+    "etc_business_batch_status_changed",
     "oa_rebuilt",
     "oa_attachment_invoice_cache_updated",
     "pair_relation_changed",
@@ -146,28 +145,11 @@ class DerivedDataLifecycleService:
             "invoice_lifecycle_read_model",
             "tax_offset_read_model",
             "tax_offset_month_cache",
-            "cost_statistics_read_model",
-            "historical_etc_repair_state",
             "search_cache",
         ),
-        "etc_oa_submitted": (
+        "etc_business_batch_status_changed": (
             "workbench_read_model",
-            "workbench_relation_read_model",
             "workbench_matching_dirty_scopes",
-            "invoice_lifecycle_read_model",
-            "tax_offset_read_model",
-            "tax_offset_month_cache",
-            "cost_statistics_read_model",
-            "search_cache",
-        ),
-        "etc_oa_revoked": (
-            "workbench_read_model",
-            "workbench_relation_read_model",
-            "workbench_matching_dirty_scopes",
-            "invoice_lifecycle_read_model",
-            "tax_offset_read_model",
-            "tax_offset_month_cache",
-            "cost_statistics_read_model",
             "search_cache",
         ),
         "oa_rebuilt": (
@@ -378,18 +360,9 @@ class DerivedDataLifecycleService:
         "etc_import_confirmed": (
             "workbench_matching",
             "tax_offset_cache_warmup",
-            "cost_statistics.read_model.refresh",
-            "historical_etc_reconcile",
         ),
-        "etc_oa_submitted": (
+        "etc_business_batch_status_changed": (
             "workbench_matching",
-            "tax_offset_cache_warmup",
-            "cost_statistics.read_model.refresh",
-        ),
-        "etc_oa_revoked": (
-            "workbench_matching",
-            "tax_offset_cache_warmup",
-            "cost_statistics.read_model.refresh",
         ),
         "oa_rebuilt": (
             "workbench_matching",

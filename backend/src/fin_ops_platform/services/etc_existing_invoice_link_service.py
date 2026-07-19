@@ -29,11 +29,13 @@ class EtcExistingInvoiceLinkService:
         changed_months: set[str] = set()
         linked_invoices: list[Any] = []
         for etc_invoice in list(etc_invoices or []):
-            invoice = self._import_service.upsert_etc_invoice(etc_invoice)
-            if invoice is not None:
-                linked_invoices.append(invoice)
+            result = self._import_service.upsert_etc_invoice(etc_invoice)
+            if not result.changed or result.invoice is None:
+                continue
+            invoice = result.invoice
+            linked_invoices.append(invoice)
             for date_value in (
-                getattr(invoice, "invoice_date", None) if invoice is not None else None,
+                getattr(invoice, "invoice_date", None),
                 getattr(etc_invoice, "issue_date", None),
                 getattr(etc_invoice, "passage_start_date", None),
                 getattr(etc_invoice, "passage_end_date", None),

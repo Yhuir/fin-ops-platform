@@ -23,7 +23,8 @@ Domain event 和 derived lifecycle 是跨页面回归的主要传播层。修改
 | `invoice_import_confirmed` | workbench、relation、matching、invoice lifecycle、tax、cost、search | 关联台、待找发票、税金、成本、发票使用/收款 | `tests/test_derived_data_lifecycle_service.py` |
 | `bank_import_confirmed` | bank balance/detail、workbench、relation、invoice lifecycle、cost、search | 银行明细、关联台、待找发票、成本 | `tests/test_derived_data_lifecycle_service.py` |
 | `import_state_changed` | workbench、relation、invoice lifecycle、pending invoice、input invoice usage、output collection、OA pending payment、bank detail/balance、cost、search | 导入确认后的全部派生刷新 | `test_import_state_changed_maps_runtime_import_refresh_domains`、`test_import_state_persistence_uses_lifecycle_domain_scope_overrides`、`tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_workbench_sql_runtime.py` |
-| `etc_import_confirmed` / `etc_oa_submitted` / `etc_oa_revoked` | workbench、invoice lifecycle、tax、cost、historical ETC、search | ETC、税金、成本、关联台 | all-event safe plan guard；具体业务由 ETC 模块继续补 |
+| `etc_import_confirmed` | 精确月份的 workbench、relation、matching、invoice lifecycle、tax、search；Cost 由成功 Workbench publish 后的 `workbench_shard_published` 收敛 | ETC、税金、成本、关联台 | `test_etc_import_confirmed_refreshes_invoice_consumers_without_direct_cost_or_repair_fanout`；`etc_oa_submitted` / `etc_oa_revoked` 已删除 |
+| `etc_business_batch_status_changed` | 精确月份的 workbench、matching、search；无 tax/direct-cost/history | ETC、关联台；Cost 仅由 Workbench publish 收敛 | `test_etc_business_batch_status_changed_refreshes_only_exact_workbench_and_search_scope` |
 | `oa_rebuilt` / `oa_attachment_invoice_cache_updated` | OA cache、workbench、invoice lifecycle、input invoice usage、output collection、OA pending payment、tax、cost、historical ETC、search | OA 待付款、发票使用/收款、关联台、税金、成本 | `test_oa_rebuilt_maps_...`；附件缓存由后续 OA 模块补 |
 | `pair_relation_changed` | bank detail、workbench、relation、matching、invoice lifecycle、pending invoice、invoice usage collection、tax、cost、search | 关联台、银行明细、发票使用/收款、OA 待付款、待找发票、税金、成本 | `test_pair_and_exception_changes_...`、`test_pair_relation_lifecycle_metadata_limits_downstream_refreshes` |
 | `exception_case_changed` | bank detail、workbench、relation、matching、invoice lifecycle、pending invoice、tax、cost、search | 关联台、银行明细、待找发票、税金、成本 | `test_pair_and_exception_changes_...`；不得隐式刷新 invoice usage collection |
@@ -52,8 +53,8 @@ Domain event 和 derived lifecycle 是跨页面回归的主要传播层。修改
 | `bankAutoTagRulesUpdated` | 银行明细规则保存/重应用 | 银行明细、免 OA | domain event BroadcastChannel test、页面测试 |
 | `turnoverRelationUpdated` | 往来款确认/撤回 | 关联台、成本统计 | 页面测试；后续 turnover 模块细化 |
 | `turnoverLedgerExtraUpdated` | 往来款 extra 保存 | 当前主要局部消费 | event contract guard；后续 turnover 模块细化 |
-| `invoiceFactUpdated` | 待找发票、ETC、发票动作 | 税金、成本统计 | domain event contract guard、页面模块继续补 |
-| `etcBusinessBatchUpdated` | ETC 业务批次 | 税金、成本统计 | domain event contract guard、ETC/tax/cost 模块继续补 |
+| `invoiceFactUpdated` | 待找发票、ETC 真正导入/删除发票 | 税金、成本统计 | domain event contract guard、ETC import/delete 页面回归 |
+| `etcBusinessBatchUpdated` | ETC 导入、删除、OA 草稿/人工状态等批次变化 | ETC 页面局部刷新 | domain event contract guard；Cost/Tax architecture guard 明确禁止订阅批次-only 事件 |
 
 ## 七类测试适用性
 
@@ -77,6 +78,7 @@ Domain event 和 derived lifecycle 是跨页面回归的主要传播层。修改
 | 2026-07-05 | 导入持久化在 `Application` / runtime worker 中手写下游 fan-out，容易漏掉新 read model 或与 event contract 分叉；迁移后 bank detail reason 也必须保留 `import_facts_changed`。 | `test_import_state_changed_maps_runtime_import_refresh_domains`、`test_import_state_persistence_uses_lifecycle_domain_scope_overrides`、`test_import_state_search_refresh_uses_search_producer_boundary`、`test_import_state_invalidation_enqueues_workbench_month_scopes_before_all_aggregate` | covered |
 | 2026-07-05 | `workbench_read_model` executor 或 workbench scope invalidation helper 隐式刷新 invoice usage collection，导致 I/O 边界不清；relation metadata 限制只能靠隐藏副作用。 | `test_pair_relation_lifecycle_metadata_limits_downstream_refreshes`、`test_workbench_scope_invalidation_does_not_refresh_invoice_usage_domains`、`test_pair_and_exception_changes_mark_workbench_matching_dirty_scopes` | covered |
 | 2026-07-05 | 已声明的 `bank_flow_rule_batch_read_model` 在 runtime worker lifecycle 缺 executor，导致 worker 事件 plan 生成但实际 skipped。 | `test_lifecycle_bank_flow_rule_batch_refresh_has_runtime_executor` | covered |
+| 2026-07-19 | ETC OA 草稿/人工状态重连整批 canonical invoice，并由 batch event 同时刷新 Cost/Tax；无变化重放仍扩散 `all`、Cost 和 historical repair，形成几十秒同步。 | `test_etc_oa_workflow_methods_do_not_link_or_refresh_canonical_invoice_facts`、`test_etc_invoice_refresh_uses_changed_months_once_without_all_scope_or_duplicate_matching`、`test_cost_and_tax_pages_ignore_etc_batch_only_domain_events` | covered |
 | 长期 | 前端 domain event 被误当成事实源，inactive 页面 replay 旧事件误刷新。 | `web/src/test/useActiveFinanceDomainEvent.test.tsx` | covered |
 
 ## 关键 smoke flows

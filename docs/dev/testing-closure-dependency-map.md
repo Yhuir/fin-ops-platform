@@ -270,7 +270,7 @@
 | ETC service | `EtcService` | import session freshness、duplicate/idempotency、attachments、business batch merge、partial success、delete/release |
 | Import processing | `ImportProcessingService` | `etc_invoice_import.confirm` 创建/复用 task-scoped business batch、progress、mark imported/failed、保存 ETC metadata/PDF/XML 附件关系并只关联已存在 canonical invoice |
 | Import cleanup | `EtcReconciliationImportCleanupService`、`EtcBusinessBatchDeleteService` | 删除/重导只清理 ETC 自有 facts 和 changed months，不调用通用 import service 删除或改写 canonical invoice |
-| Derived lifecycle | `DerivedDataLifecycleService`、`runtime_worker_handlers.py` | `etc_import_confirmed` 刷新 Workbench、invoice lifecycle、tax offset、cost statistics、historical ETC repair、search |
+| Derived lifecycle | `DerivedDataLifecycleService`、`runtime_worker_handlers.py` | `etc_import_confirmed` 仅按真实 changed months 刷新 Workbench/relation/matching、invoice lifecycle、tax offset、search；Cost 由 Workbench publish 收敛，historical repair 不进入热路径 |
 | App Status | `app_status_domain_registry.py`、`app_status_job_registry.py`、`runtime_worker_registry.py` | `imports_etc_invoices` 绑定 `import` worker 和 `etc_invoice_import` job；共享 `import.process.requested` envelope 仍需后续专项校准 |
 
 `imports-etc-invoices` fan-out：
@@ -281,7 +281,7 @@
 | zip preview | `EtcZipFilterPreview` + `EtcImportSession` + audit，不刷新业务 read model | ETC 导入页 |
 | confirm queued | `etc_invoice_import` background job，RabbitMQ 模式下 `import.process.requested` | 导入页、App Status/App Health |
 | confirm processed | ETC business batch、ETC invoice metadata/附件关系、已存在 canonical invoice 关联、task imported/failed | ETC 票据管理、关联台 summary、税金抵扣、成本统计、search |
-| lifecycle refresh | `etc_import_confirmed` -> workbench、invoice lifecycle、tax offset、cost statistics、historical ETC repair、search | 关联台、税金抵扣、成本统计、ETC 票据管理、App Health |
+| lifecycle refresh | `etc_import_confirmed` -> workbench、invoice lifecycle、tax offset、search -> `workbench_shard_published` -> cost；`etc_business_batch_status_changed` 只到精确 Workbench/matching/search | 关联台、税金抵扣、成本统计、ETC 票据管理、App Health |
 | task/business batch delete | `etc_reconciliation_task_deleted` 或 business batch reset；不触碰 canonical invoice pool | ETC 票据管理、关联台 summary row、税金/成本、search |
 | preview stale | API `409 stale_reconciliation_task_preview` 或 `409 preview_stale`，前端清空 preview | 当前导入页 |
 
@@ -354,8 +354,8 @@
 | reconciliation task 创建/上传/confirm | task workflow state + source file metadata；对象存储失败不落半写入 | ETC 票据管理、导入页 ready task |
 | ETC ZIP preview/confirm | `etc_invoice_import` background job；成功后保存 ETC invoice metadata/PDF/XML、关联已存在 canonical invoice、同步 business batch | ETC 票据管理、导入页、税金抵扣、关联台 summary、App Status/App Health |
 | 创建 OA 草稿 | business batch `oa_confirmation_pending` + audit | ETC 票据管理、真实 OA 系统、App Status |
-| manual `submitted` | business batch submitted + linked task closed + Workbench dirty；前端 `etcBusinessBatchUpdated` | ETC 票据管理、关联台、税金抵扣、成本统计、search |
-| manual `not_submitted` | 释放本地 ETC 发票占用 + audit；前端 `etcBusinessBatchUpdated` | ETC 票据管理、关联台、税金抵扣、成本统计 |
+| manual `submitted` | business batch submitted + linked task closed + 精确 `etc_business_batch_status_changed`；前端只发 `etcBusinessBatchUpdated` | ETC 票据管理、关联台、search；Cost 仅由 Workbench publish 收敛 |
+| manual `not_submitted` | 释放本地 ETC 发票占用 + audit + 精确 `etc_business_batch_status_changed`；前端只发 `etcBusinessBatchUpdated` | ETC 票据管理、关联台、search；Cost 仅由 Workbench publish 收敛 |
 | business batch delete/reset | 本地批次/task/source/import/ETC metadata 清理；submitted summary 释放；可能取消 active relation | ETC 票据管理、关联台、税金抵扣、成本统计、search |
 | reconciliation task delete | 若绑定 business batch，委托同一 business batch delete；否则写 deleted tombstone | ETC 票据管理、导入页 ready task |
 | 历史迁移 execute | 旧 active relation/ETC 批次转业务批次 + Workbench invalidation | ETC 票据管理、关联台 paired/open 区 |
@@ -674,7 +674,7 @@
 | --- | --- | --- | --- | --- | --- |
 | 银行流水导入确认 | import API / import worker | `bank_import_confirmed` | bank balance/detail、workbench、workbench relation、workbench matching、invoice lifecycle、cost statistics、search | 银行明细、关联台、待找发票、成本统计、App Health | 导入确认幂等、dirty scope、worker 入队、旧页面不把 stale 当 fresh |
 | 发票导入确认 | import API / import worker | `invoice_import_confirmed` | workbench、workbench relation、workbench matching、invoice lifecycle、tax offset、cost statistics、search | 关联台、待找发票、税金抵扣、进项/销项/OA 待付款、成本统计 | API shape、source_versions、invoice lifecycle 先于下游页面 |
-| ETC 导入确认 | `/api/etc/import/confirm` | `etc_import_confirmed` | workbench、invoice lifecycle、tax offset、cost statistics、historical ETC repair、search | ETC、关联台、税金、成本 | ETC 汇总行、散票隐藏、历史修复状态、税金/成本刷新 |
+| ETC 导入确认 | `/api/etc/import/confirm` | `etc_import_confirmed` + downstream `workbench_shard_published` | workbench、invoice lifecycle、tax offset、search；Cost 顺序收敛 | ETC、关联台、税金、成本 | ETC 汇总行、散票隐藏、税金刷新、成本有序收敛；历史修复不进入热路径 |
 | OA 同步/重建 | OA sync worker / manual import | `oa_rebuilt`、`oa_attachment_invoice_cache_updated` | OA adapter cache、workbench、invoice lifecycle、tax/cost/search | 关联台、OA 待付款、进项/销项、税金、成本 | OA 源只读、附件发票 identity、worker readiness |
 | 关系确认/撤回 | workbench actions、batch accounting、turnover | relation command repository dirty/outbox fan-out、`turnover_relation_changed` | bank detail、workbench、relation、invoice lifecycle、pending invoice、tax/cost/search | 关联台、银行明细、批量账务、往来款、待找发票、税金、成本 | stale write contract、idempotency、跨页刷新、关系 read model |
 | 批量账务提交/撤回 | `/api/batch-accounting/submit`、`/api/batch-accounting/{relation_id}/withdraw` | relation command repository dirty/outbox fan-out | workbench relation、workbench、invoice lifecycle、pending invoice、cost/search | 批量账务、关联台、银行明细、待找发票、进项/销项/OA 待付款、成本统计、搜索 | relation read model fresh gate、差额说明、cancel current relation、GET 只读、route 不重复 fan-out |
@@ -696,8 +696,8 @@
 | `bankAutoTagRulesUpdated` | 银行明细规则保存/重应用 | 免 OA、银行明细 | 规则版本 stale、no-OA read model 刷新 |
 | `turnoverRelationUpdated` | 往来款确认/撤回 | 关联台、成本统计 | workbench relation 与 turnover read model 一致 |
 | `turnoverLedgerExtraUpdated` | 往来款 extra 保存 | 当前主要局部消费 | 不应误触发无关 read model |
-| `invoiceFactUpdated` | 待找发票、ETC、发票相关动作 | 税金抵扣、成本统计 | invoice lifecycle 下游顺序、税金/成本刷新 |
-| `etcBusinessBatchUpdated` | ETC 业务批次 | 税金抵扣、成本统计 | ETC 提交/撤回后下游不 stale |
+| `invoiceFactUpdated` | 待找发票、ETC 真正导入/成功删除、发票相关动作 | 税金抵扣、成本统计 | invoice lifecycle 下游顺序、税金/成本刷新 |
+| `etcBusinessBatchUpdated` | ETC 导入、删除、OA/batch 状态 | ETC 页面局部刷新 | Tax/Cost 明确不订阅；后端精确 status lifecycle 保证关联台不 stale |
 
 相关测试入口：`web/src/test/domainEvents.test.ts`、`web/src/test/useActiveFinanceDomainEvent.test.tsx`。
 

@@ -1,6 +1,6 @@
 # 成本统计模块边界与 I/O
 
-日期：2026-07-18
+日期：2026-07-19
 
 ## 模块化状态
 
@@ -47,6 +47,7 @@
 | Workbench 月度输入 | `read_model.workbench_generations` active generation + `read_model.workbench_groups` | 先定位 active generation，再按 `generation_id + scope_key` 读取 groups；禁止按裸 `scope_key` 扫描历史 generation |
 | 关系变更 | relation transaction 的 bounded delta + `WorkbenchReadModelRefreshService` 收敛发布 | relation transaction 只向 `active:YYYY-MM` 投递 `cost_statistics_relation_delta`，metadata 必须是按 `case_id` 分区的 `{status,row_ids}` 显式 I/O；同月并发事件按 case 合并，同 case 后写覆盖前写，禁止用一个共享状态污染多个 case。成本 worker 在 Workbench 当前 active generations 中按 row identity 有界点读；跨月关系可从各成员原生月份取得行，并在 Workbench 新 generation 发布后优先使用目标月份副本。随后结合成本自有 bank-flow 标签行，原子删除/替换受影响成本行；成功 Workbench publish 仍以 `workbench_shard_published` 触发 active/all 月份最终收敛。两条路径共用同一 queue、worker、scope policy、source-version CAS 和 parent fan-out，不新增 worker、表、HTTP 或 fallback。 |
 | 导入确认 | import processing service/job result | 返回规范化后的 cost_statistics operation barrier targets，月份输入经 scope policy 展开为 active/all shards 与 parent aggregate |
+| ETC 页面刷新提示 | `invoiceFactUpdated` | 只在 ETC invoice facts 真正导入或成功删除时重校验当前 Cost scope；明确忽略 `etcBusinessBatchUpdated`。OA 草稿、提交/未提交决定和标题等 batch-only 状态不得让成本页面进入 overlay。事件只作提示，是否 fresh 仍由 Cost query gate 决定 |
 
 ## 输出 I/O
 

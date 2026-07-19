@@ -81,6 +81,7 @@ class EtcBusinessBatchApplicationService:
         oa_client_factory: Callable[[dict[str, str] | None], Any] | None = None,
         link_etc_invoices_to_existing_invoices: Callable[[list[object]], list[str]] | None = None,
         refresh_after_etc_invoice_link: Callable[[list[str], str], None] | None = None,
+        refresh_after_etc_business_batch_status_change: Callable[[list[str], str], None] | None = None,
         invoice_pdf_bundle_service: EtcInvoicePdfBundleService | None = None,
         record_invoice_pdf_download: Callable[[EtcBusinessBatchActor, EtcBusinessBatch, EtcInvoicePdfBundle], None] | None = None,
     ) -> None:
@@ -89,6 +90,7 @@ class EtcBusinessBatchApplicationService:
         self._oa_client_factory = oa_client_factory
         self._link_etc_invoices_to_existing_invoices = link_etc_invoices_to_existing_invoices
         self._refresh_after_etc_invoice_link = refresh_after_etc_invoice_link
+        self._refresh_after_etc_business_batch_status_change = refresh_after_etc_business_batch_status_change
         self._invoice_pdf_bundle_service = invoice_pdf_bundle_service or EtcInvoicePdfBundleService(
             read_invoice_pdf=etc_service.read_invoice_pdf_bytes,
         )
@@ -278,7 +280,6 @@ class EtcBusinessBatchApplicationService:
         ):
             self._assert_reconciliation_task_allows_oa_draft(reconciliation_task)
             self._ensure_reconciliation_task_oa_draft_metadata(current, reconciliation_task, actor=actor)
-            self._link_existing_canonical_invoices(current, "etc_business_oa_draft_created")
             return {"businessBatch": self.business_batch_payload(current)}
         reconciliation_task = self._ensure_reconciliation_task_imported_for_batch(
             current,
@@ -298,7 +299,6 @@ class EtcBusinessBatchApplicationService:
             reconciliation_task=reconciliation_task,
         )
         self._ensure_reconciliation_task_oa_draft_metadata(batch, reconciliation_task, actor=actor)
-        self._link_existing_canonical_invoices(batch, "etc_business_oa_draft_created")
         return {"businessBatch": self.business_batch_payload(batch)}
 
     def recover_oa_draft_payload(
@@ -395,7 +395,7 @@ class EtcBusinessBatchApplicationService:
             reason=reason,
             expected_version=expected_version,
         )
-        self._link_existing_canonical_invoices(batch, "etc_business_oa_draft_revoked")
+        self._refresh_business_batch_status_change(batch, reason="etc_business_oa_draft_revoked")
         return {"businessBatch": self.business_batch_payload(batch)}
 
     def manual_oa_status_payload(
@@ -423,7 +423,7 @@ class EtcBusinessBatchApplicationService:
         )
         if str(decision or "").strip().lower() == "submitted":
             self._record_reconciliation_task_submitted(batch, actor=actor)
-        self._link_existing_canonical_invoices(batch, "etc_business_manual_oa_status")
+        self._refresh_business_batch_status_change(batch, reason="etc_business_manual_oa_status")
         return {"businessBatch": self.business_batch_payload(batch)}
 
     def source_files_payload(
@@ -607,6 +607,20 @@ class EtcBusinessBatchApplicationService:
         changed_months = self._link_etc_invoices_to_existing_invoices(invoices)
         if self._refresh_after_etc_invoice_link is not None:
             self._refresh_after_etc_invoice_link(changed_months, reason=reason)
+
+    def _refresh_business_batch_status_change(self, batch: EtcBusinessBatch, *, reason: str) -> None:
+        if self._refresh_after_etc_business_batch_status_change is None:
+            return
+        months = {
+            str((getattr(batch, "amount_breakdown", {}) or {}).get("scope_month") or "").strip()[:7]
+        }
+        for invoice in self._etc_service.list_invoices_by_ids(list(getattr(batch, "invoice_ids", []) or [])):
+            for field_name in ("issue_date", "passage_start_date", "passage_end_date"):
+                months.add(str(getattr(invoice, field_name, "") or "").strip()[:7])
+        self._refresh_after_etc_business_batch_status_change(
+            sorted(month for month in months if len(month) == 7 and month[4:5] == "-"),
+            reason=reason,
+        )
 
     def _record_reconciliation_task_submitted(self, batch: EtcBusinessBatch, *, actor: EtcBusinessBatchActor) -> None:
         submission_batch_id = str(getattr(batch, "submission_batch_id", "") or "").strip()

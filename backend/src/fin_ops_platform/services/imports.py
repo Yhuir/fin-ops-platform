@@ -76,6 +76,12 @@ class ImportPreview:
         return self.batch.status
 
 
+@dataclass(frozen=True, slots=True)
+class EtcInvoiceUpsertResult:
+    invoice: Invoice | None
+    changed: bool
+
+
 class _ImportObjectIdentityRepository:
     def __init__(self, import_service: "ImportNormalizationService") -> None:
         self._import_service = import_service
@@ -742,7 +748,7 @@ class ImportNormalizationService:
     def has_imported_records(self) -> bool:
         return bool(self._invoices_by_id or self._transactions_by_id)
 
-    def upsert_etc_invoice(self, etc_invoice: Any) -> Invoice | None:
+    def upsert_etc_invoice(self, etc_invoice: Any) -> EtcInvoiceUpsertResult:
         normalized = self._normalize_etc_invoice(etc_invoice)
         decision = self._dedup_decision_service.decide_invoice_import(normalized)
         linked_invoice_id = decision.linked_object_id
@@ -754,10 +760,14 @@ class ImportNormalizationService:
                 self._register_invoice(invoice)
             if invoice is None:
                 raise KeyError(linked_invoice_id)
+            previous_state = self._etc_invoice_merge_state(invoice)
             self._merge_invoice_from_etc_normalized(invoice, normalized)
-            return invoice
+            return EtcInvoiceUpsertResult(
+                invoice=invoice,
+                changed=self._etc_invoice_merge_state(invoice) != previous_state,
+            )
 
-        return None
+        return EtcInvoiceUpsertResult(invoice=None, changed=False)
 
     def upsert_oa_attachment_invoice(
         self,
@@ -1548,6 +1558,38 @@ class ImportNormalizationService:
             if invoice.source_unique_key:
                 self._invoice_unique_index[invoice.source_unique_key] = invoice.id
         self._clear_weak_invoice_fingerprint_when_canonical(invoice)
+
+    @staticmethod
+    def _etc_invoice_merge_state(invoice: Invoice) -> tuple[object, ...]:
+        source_links = tuple(
+            tuple(sorted((str(key), str(value)) for key, value in source_link.items()))
+            if isinstance(source_link, dict)
+            else str(source_link)
+            for source_link in list(getattr(invoice, "source_links", []) or [])
+        )
+        return (
+            tuple(str(tag) for tag in list(getattr(invoice, "tags", []) or [])),
+            source_links,
+            getattr(invoice, "etc_invoice_id", None),
+            getattr(invoice, "etc_import_batch_id", None),
+            getattr(invoice, "etc_submission_batch_id", None),
+            getattr(invoice, "etc_submission_status", None),
+            getattr(invoice, "workbench_visibility", None),
+            getattr(invoice, "source_batch_id", None),
+            getattr(invoice, "digital_invoice_no", None),
+            getattr(invoice, "invoice_date", None),
+            getattr(invoice, "seller_tax_no", None),
+            getattr(invoice, "seller_name", None),
+            getattr(invoice, "buyer_tax_no", None),
+            getattr(invoice, "buyer_name", None),
+            getattr(invoice, "tax_rate", None),
+            getattr(invoice, "invoice_source", None),
+            getattr(invoice, "invoice_kind", None),
+            getattr(invoice, "tax_amount", None),
+            getattr(invoice, "total_with_tax", None),
+            getattr(invoice, "source_unique_key", None),
+            getattr(invoice, "data_fingerprint", None),
+        )
 
     def _link_submitted_etc_metadata_if_present(self, invoice: Invoice, normalized: dict[str, Any]) -> None:
         invoice_type = getattr(invoice, "invoice_type", None)

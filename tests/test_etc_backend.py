@@ -3719,6 +3719,7 @@ class EtcApiTests(unittest.TestCase):
     def test_etc_business_manual_status_accepts_confirmation_pending_state(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
+            status_refreshes: list[tuple[list[str], str]] = []
             try:
                 app._etc_service.oa_client = FakeEtcOAClient()
                 app._etc_service.import_zips([UploadedEtcZipFile("draft.zip", etc_zip(["ETC001"]))])
@@ -3737,6 +3738,9 @@ class EtcApiTests(unittest.TestCase):
                     idempotency_key="draft-manual-state",
                     expected_version=imported.version,
                 )
+                app._etc_business_application_service()._refresh_after_etc_business_batch_status_change = (  # noqa: SLF001
+                    lambda months, reason: status_refreshes.append((list(months), str(reason)))
+                )
 
                 response = app.handle_request(
                     "POST",
@@ -3754,6 +3758,7 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["status"], "manually_marked_submitted")
         self.assertEqual(payload["oaProcessStatus"], "manual_without_oa_row")
+        self.assertEqual(status_refreshes, [(["2026-02"], "etc_business_manual_oa_status")])
 
     def test_etc_business_manual_submitted_closes_the_linked_reconciliation_task(self) -> None:
         with TemporaryDirectory() as temp_dir:

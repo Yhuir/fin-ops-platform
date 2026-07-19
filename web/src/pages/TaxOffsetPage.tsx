@@ -222,7 +222,6 @@ export default function TaxOffsetPage() {
     };
   }, [handleRefreshTrigger]);
   useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.invoiceFactUpdated, handleRefreshTrigger);
-  useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.etcBusinessBatchUpdated, handleRefreshTrigger);
 
   useEffect(() => {
     if (!monthData) {

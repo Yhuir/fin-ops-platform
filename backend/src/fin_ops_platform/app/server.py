@@ -5021,9 +5021,24 @@ class Application:
         self._execute_derived_data_lifecycle_event(
             "etc_import_confirmed",
             months=normalized_months,
+            include_all=False,
             metadata={"source": "etc_invoice_link", "reason": reason},
         )
-        self._schedule_or_run_workbench_auto_matching_for_scopes(normalized_months, reason=reason)
+
+    def _refresh_after_etc_business_batch_status_change(self, changed_months: list[str], *, reason: str) -> None:
+        normalized_months = [
+            month
+            for month in sorted(dict.fromkeys(str(month).strip() for month in changed_months))
+            if SEARCH_MONTH_RE.match(month)
+        ]
+        if not normalized_months:
+            return
+        self._execute_derived_data_lifecycle_event(
+            "etc_business_batch_status_changed",
+            months=normalized_months,
+            include_all=False,
+            metadata={"source": "etc_business_batch_status", "reason": reason},
+        )
 
     def _refresh_after_historical_etc_repair_link(self, changed_months: list[str], *, reason: str) -> None:
         normalized_months = [
@@ -5053,6 +5068,7 @@ class Application:
             oa_client_factory=self._build_etc_oa_client,
             link_etc_invoices_to_existing_invoices=self._link_etc_invoices_to_existing_invoices,
             refresh_after_etc_invoice_link=self._refresh_after_etc_invoice_link,
+            refresh_after_etc_business_batch_status_change=self._refresh_after_etc_business_batch_status_change,
             invoice_pdf_bundle_service=EtcInvoicePdfBundleService(
                 read_invoice_pdf=self._etc_service.read_invoice_pdf_bytes,
             ),

@@ -63,8 +63,9 @@ ETC 导入 runtime 删除链路只清理 ETC task、import batch、business batc
 | preview stale | `stale_reconciliation_task_preview` 或 `preview_stale` | 当前导入页必须清空 preview 并要求重新预览 |
 | confirm queued | `etc_invoice_import` background job、可选 `import.process.requested` | 导入页 job feedback、App Status/App Health；job source 必须携带 `task_id`、`affected_domains=["imports_etc_invoices","etc_tickets"]` 和 route `/imports/etc-invoices` |
 | confirm processed | `ImportProcessingService.execute_etc_invoice_import_confirm_job(...)` | ETC business batch、ETC invoice metadata、PDF/XML 附件关系；只关联已存在 canonical invoice，不创建新 canonical invoice |
-| lifecycle refresh | `etc_import_confirmed` | 关联台、ETC summary row、invoice lifecycle、税金抵扣、成本统计、历史 ETC repair、search |
-| 业务批次提交/删除 | `manual-oa-status`、business batch delete | ETC 票据管理、关联台 summary row、税金/成本刷新 |
+| lifecycle refresh | `etc_import_confirmed` | 仅在 existing canonical metadata 真变更时按精确月份刷新关联台、invoice lifecycle、税金抵扣和 search；成本统计在 Workbench 月 generation 发布后有序刷新，历史 repair 不进入导入热路径 |
+| OA 草稿/人工状态 | `oa-draft`、`manual-oa-status` | OA draft create 只更新 ETC business batch / reconciliation task / audit；manual submitted / not-submitted 不重连 canonical invoice，只按精确月份触发 `etc_business_batch_status_changed` 更新关联台。税金不刷新，成本不直投且只在 Workbench 成功发布后收敛一次 |
+| 业务批次删除 | business batch delete | ETC 票据管理和真实发票事实释放；按返回的精确影响范围刷新 downstream |
 
 ETC 导入页 ready task 下拉展示 `EtcReconciliationTask.title`。ETC 票据管理页允许未提交 business batch 在提交前修改 `title`，保存后会同步 linked reconciliation task title；因此导入页不得缓存旧标题或自行从 business batch ID 派生标题。
 

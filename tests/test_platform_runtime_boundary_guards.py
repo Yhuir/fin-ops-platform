@@ -12,9 +12,13 @@ from unittest.mock import patch
 
 from fin_ops_platform.app import server as server_module
 from fin_ops_platform.services.cutover_preflight import redact_secret_text
+from fin_ops_platform.services.etc_business_batch_application_service import EtcBusinessBatchApplicationService
 from fin_ops_platform.services.etc_existing_invoice_link_service import EtcExistingInvoiceLinkService
 from fin_ops_platform.services.etc_service import EtcImportItem, EtcImportResult
-from fin_ops_platform.services.runtime_worker_handlers import _link_etc_import_result_to_existing_invoices
+from fin_ops_platform.services.runtime_worker_handlers import (
+    _RuntimeWorkerDerivedLifecycle,
+    _link_etc_import_result_to_existing_invoices,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_ROOT = REPO_ROOT / "backend" / "src" / "fin_ops_platform"
@@ -7899,13 +7903,84 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         self.assertEqual(violations, [])
 
 class RuntimeWorkerEtcImportLinkExistingTests(unittest.TestCase):
+    def test_etc_oa_workflow_methods_do_not_link_or_refresh_canonical_invoice_facts(self) -> None:
+        self.assertIn(
+            "_link_existing_canonical_invoices",
+            inspect.getsource(EtcBusinessBatchApplicationService.confirm_import_payload),
+        )
+        for method in (
+            EtcBusinessBatchApplicationService.create_oa_draft_payload,
+            EtcBusinessBatchApplicationService.recover_oa_draft_payload,
+            EtcBusinessBatchApplicationService.revoke_oa_draft_payload,
+            EtcBusinessBatchApplicationService.manual_oa_status_payload,
+        ):
+            with self.subTest(method=method.__name__):
+                self.assertNotIn("_link_existing_canonical_invoices", inspect.getsource(method))
+        self.assertNotIn(
+            "_refresh_business_batch_status_change",
+            inspect.getsource(EtcBusinessBatchApplicationService.create_oa_draft_payload),
+        )
+        for method in (
+            EtcBusinessBatchApplicationService.revoke_oa_draft_payload,
+            EtcBusinessBatchApplicationService.manual_oa_status_payload,
+        ):
+            with self.subTest(status_refresh_method=method.__name__):
+                self.assertIn("_refresh_business_batch_status_change", inspect.getsource(method))
+
+    def test_etc_invoice_refresh_uses_changed_months_once_without_all_scope_or_duplicate_matching(self) -> None:
+        api_source = inspect.getsource(server_module.Application._refresh_after_etc_invoice_link)
+        worker_source = inspect.getsource(_RuntimeWorkerDerivedLifecycle.refresh_after_etc_invoice_link)
+
+        for source in (api_source, worker_source):
+            with self.subTest(source=source.splitlines()[0].strip()):
+                self.assertIn("include_all=False", source)
+                self.assertNotIn("schedule_workbench_matching", source)
+                self.assertNotIn("_schedule_or_run_workbench_auto_matching_for_scopes", source)
+
+    def test_cost_and_tax_pages_ignore_etc_batch_only_domain_events(self) -> None:
+        for path in (
+            WEB_SRC_ROOT / "pages" / "CostStatisticsPage.tsx",
+            WEB_SRC_ROOT / "pages" / "TaxOffsetPage.tsx",
+        ):
+            with self.subTest(path=_relative(path)):
+                source = path.read_text(encoding="utf-8")
+                self.assertNotIn(
+                    "useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.etcBusinessBatchUpdated",
+                    source,
+                )
+        etc_page_source = (WEB_SRC_ROOT / "pages" / "EtcTicketManagementPage.tsx").read_text(encoding="utf-8")
+        self.assertNotIn("emitEtcBusinessDomainUpdated", etc_page_source)
+        self.assertEqual(etc_page_source.count("FINANCE_DOMAIN_EVENTS.invoiceFactUpdated"), 2)
+        create_draft_source = etc_page_source.split("const handleCreateDraft", maxsplit=1)[1].split(
+            "const resolveOaActionBatch", maxsplit=1
+        )[0]
+        manual_status_source = etc_page_source.split("const handleManualBusinessBatchOaStatus", maxsplit=1)[1].split(
+            "const renderOaDecisionActions", maxsplit=1
+        )[0]
+        for source in (create_draft_source, manual_status_source):
+            self.assertIn("FINANCE_DOMAIN_EVENTS.etcBusinessBatchUpdated", source)
+            self.assertNotIn("FINANCE_DOMAIN_EVENTS.invoiceFactUpdated", source)
+
+    def test_removed_etc_oa_lifecycle_events_have_no_production_code(self) -> None:
+        violations = []
+        for path in _python_files(SOURCE_ROOT):
+            source = path.read_text(encoding="utf-8")
+            for event in ("etc_oa_submitted", "etc_oa_revoked"):
+                if event in source:
+                    violations.append(f"{_relative(path)}:{event}")
+
+        self.assertEqual(violations, [])
+
     def test_existing_invoice_link_service_uses_import_items_to_load_existing_invoices(self) -> None:
         upserted: list[object] = []
 
         class ImportService:
             def upsert_etc_invoice(self, etc_invoice: object) -> object:
                 upserted.append(etc_invoice)
-                return SimpleNamespace(invoice_date=getattr(etc_invoice, "issue_date", None))
+                return SimpleNamespace(
+                    invoice=SimpleNamespace(invoice_date=getattr(etc_invoice, "issue_date", None)),
+                    changed=True,
+                )
 
         class EtcService:
             def __init__(self) -> None:
@@ -7951,7 +8026,7 @@ class RuntimeWorkerEtcImportLinkExistingTests(unittest.TestCase):
 
         class ImportService:
             def upsert_etc_invoice(self, etc_invoice: object) -> object:
-                return linked_invoice
+                return SimpleNamespace(invoice=linked_invoice, changed=True)
 
         link_service = EtcExistingInvoiceLinkService(
             import_service=ImportService(),
@@ -7978,7 +8053,10 @@ class RuntimeWorkerEtcImportLinkExistingTests(unittest.TestCase):
         class ImportService:
             def upsert_etc_invoice(self, etc_invoice: object) -> object:
                 upserted.append(etc_invoice)
-                return SimpleNamespace(invoice_date=getattr(etc_invoice, "issue_date", None))
+                return SimpleNamespace(
+                    invoice=SimpleNamespace(invoice_date=getattr(etc_invoice, "issue_date", None)),
+                    changed=True,
+                )
 
         class EtcService:
             def __init__(self) -> None:
@@ -8028,9 +8106,9 @@ class RuntimeWorkerEtcImportLinkExistingTests(unittest.TestCase):
         upserted: list[object] = []
 
         class ImportService:
-            def upsert_etc_invoice(self, etc_invoice: object) -> None:
+            def upsert_etc_invoice(self, etc_invoice: object) -> object:
                 upserted.append(etc_invoice)
-                return None
+                return SimpleNamespace(invoice=None, changed=False)
 
         class EtcService:
             def list_invoices_by_numbers(self, invoice_numbers: list[str]) -> list[object]:
@@ -8064,14 +8142,14 @@ class RuntimeWorkerEtcImportLinkExistingTests(unittest.TestCase):
         )
 
         self.assertEqual([getattr(item, "invoice_number") for item in upserted], ["26537912210400752259"])
-        self.assertEqual(months, ["2026-04"])
+        self.assertEqual(months, [])
 
     def test_runtime_etc_import_link_never_calls_canonical_invoice_create_api(self) -> None:
         forbidden_calls: list[str] = []
 
         class ImportService:
-            def upsert_etc_invoice(self, etc_invoice: object) -> None:
-                return None
+            def upsert_etc_invoice(self, etc_invoice: object) -> object:
+                return SimpleNamespace(invoice=None, changed=False)
 
             def upsert_invoice(self, *_args: object, **_kwargs: object) -> None:
                 forbidden_calls.append("upsert_invoice")
@@ -8113,8 +8191,27 @@ class RuntimeWorkerEtcImportLinkExistingTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual(months, ["2026-04"])
+        self.assertEqual(months, [])
         self.assertEqual(forbidden_calls, [])
+
+    def test_existing_invoice_link_service_skips_persistence_and_scope_for_unchanged_replay(self) -> None:
+        persisted: list[list[object]] = []
+
+        class ImportService:
+            def upsert_etc_invoice(self, _etc_invoice: object) -> object:
+                return SimpleNamespace(invoice=SimpleNamespace(invoice_date="2026-04-28"), changed=False)
+
+        link_service = EtcExistingInvoiceLinkService(
+            import_service=ImportService(),
+            persist_linked_invoices=lambda invoices: persisted.append(list(invoices)),
+        )
+
+        months = link_service.link_etc_invoices_to_existing_invoices(
+            [SimpleNamespace(issue_date="2026-04-28", passage_start_date=None, passage_end_date=None)]
+        )
+
+        self.assertEqual(months, [])
+        self.assertEqual(persisted, [])
 
 if __name__ == "__main__":
     unittest.main()

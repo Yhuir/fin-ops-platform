@@ -200,9 +200,10 @@ class ImportNormalizationServiceTests(unittest.TestCase):
             },
         )()
 
-        invoice = service.upsert_etc_invoice(etc_invoice)
+        result = service.upsert_etc_invoice(etc_invoice)
 
-        self.assertIsNone(invoice)
+        self.assertIsNone(result.invoice)
+        self.assertFalse(result.changed)
         self.assertEqual(len(service.list_invoices()), 1)
 
     def test_upsert_etc_invoice_links_same_amount_same_day_existing_invoices_distinctly(self) -> None:
@@ -257,11 +258,15 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         first = type("EtcInvoice", (), {"id": "etc_invoice_0442", "invoice_number": "26537911470300077680", **base_fields})()
         second = type("EtcInvoice", (), {"id": "etc_invoice_0443", "invoice_number": "26537911470300077790", **base_fields})()
 
-        first_invoice = service.upsert_etc_invoice(first)
-        second_invoice = service.upsert_etc_invoice(second)
+        first_result = service.upsert_etc_invoice(first)
+        second_result = service.upsert_etc_invoice(second)
+        first_invoice = first_result.invoice
+        second_invoice = second_result.invoice
 
         self.assertIsNotNone(first_invoice)
         self.assertIsNotNone(second_invoice)
+        self.assertTrue(first_result.changed)
+        self.assertTrue(second_result.changed)
         assert first_invoice is not None
         assert second_invoice is not None
         self.assertEqual(first_invoice.id, "inv_existing_etc_0442")
@@ -271,6 +276,11 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         self.assertIsNone(first_invoice.data_fingerprint)
         self.assertIsNone(second_invoice.data_fingerprint)
         self.assertEqual(len(service.list_invoices()), 2)
+
+        replay_result = service.upsert_etc_invoice(first)
+
+        self.assertIs(replay_result.invoice, first_invoice)
+        self.assertFalse(replay_result.changed)
 
     def test_existing_canonical_invoice_drops_weak_fingerprint_on_load(self) -> None:
         stale = Invoice(

@@ -1,6 +1,6 @@
 # ETC发票导入模块边界与 I/O
 
-日期：2026-07-14
+日期：2026-07-19
 
 ## 模块化状态
 
@@ -45,14 +45,15 @@
 | 导入文件事实列表 | `/api/import-facts/files`、HTTP SLO probe | 只返回分页文件摘要字段；不得输出完整 `raw_payload`、`row_results`、`normalized_rows`，预览明细只能走导入 session/preview 边界 |
 | ETC batch/invoice facts | ETC services | 供 ETC 票据管理读取 |
 | Ready task title | `/imports/etc-invoices` 下拉 | 展示 linked reconciliation task 当前标题，与 business batch `title` 保持同步 |
-| Dirty scope | lifecycle/runtime queue | 影响 workbench/invoice/search 等下游 |
+| Existing canonical metadata delta | `ImportNormalizationService.upsert_etc_invoice(...)` -> `EtcExistingInvoiceLinkService` | 返回 `{invoice, changed}`；只有字段或 source link 真正变化的 invoice 才持久化并贡献 affected month。无 canonical match 或幂等重放必须返回空月份、零 refresh I/O |
+| Dirty scope | lifecycle/runtime queue | `etc_import_confirmed` 仅按真实 changed months、`include_all=false` 影响 workbench/relation/matching、invoice lifecycle、tax/search；禁止直接 cost、historical repair 或第二次 matching enqueue。Cost 由 Workbench publish owner 后续投递 |
 | Job completion target envelope | background job result summary / ETC 票据页 | 返回 `affected_months`、`affected_scope_keys`、`read_model_scope_keys`、`operation_barrier_targets`，消费 completed job 的页面必须先等待 barrier 再刷新最终列表 |
 | Imported-invoices removal | ETC reconciliation/business batch service | 只清理 ETC task/import batch/business batch 自有事实并返回 changed months；不得返回或执行 canonical invoice 删除计数 |
 
 ## 持久化与投影
 
 - Own read model：无独立 manifest entry；页面 Audit `registered_read_model_keys=[]`。
-- 影响 read model：`workbench`、`workbench_relation`、`invoice_lifecycle`、`search`、`tax_offset`、`input_invoice_usage`、`pending_invoice`、`oa_pending_payment`、`cost_statistics`。
+- 影响 read model：导入生命周期直接影响 `workbench`、`workbench_relation`、`invoice_lifecycle`、`search`、`tax_offset`；`cost_statistics` 是 Workbench 成功发布后的有序 downstream，不由 ETC 生命周期并行直投。其它 job result targets 只在各自 owner 明确返回时消费。
 - Worker：`etc_invoice_import.confirm` 只走 `job.import_jobs` + `import.process.requested`；worker 幂等执行 `begin_import`，Web 不 inline。
 
 ## 文件范围
@@ -71,7 +72,7 @@
 
 - 允许依赖：ETC parsers, import job queue, reconciliation service, attachment recognition。
 - 必须通过：ETC import/reconciliation service。
-- 禁止绕过：导入流程直接写 workbench relation；把 repair 工具作为常规 API；删除/重导链路调用通用 import service 清理 `app.invoices` 里的 legacy ETC canonical 污染。
+- 禁止绕过：导入流程直接写 workbench relation；把 repair 工具作为常规 API；删除/重导链路调用通用 import service 清理 `app.invoices` 里的 legacy ETC canonical 污染；用 ETC issue/passage 日期为无变化重放伪造 changed month；恢复 `include_all=true` 或 lifecycle direct Cost/repair fan-out。
 
 ## 测试与验证
 

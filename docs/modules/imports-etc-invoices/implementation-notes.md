@@ -1,5 +1,12 @@
 # ETC发票导入 实施记录
 
+## 2026-07-19：ETC link mutation-sensitive 与精确 lifecycle
+
+- 根因：ETC OA create/replay/revoke/manual-status 会重扫并重连整批 canonical invoice；link service 即使未发生字段变化也按 ETC 日期返回月份；API/worker 又以默认 `include_all=true` 直投 Cost、historical repair，并重复调度 matching，导致一次 batch 状态变化形成跨月队列风暴。
+- 修复：`upsert_etc_invoice(...)` 返回显式 `{invoice, changed}`，只有真实 metadata/source-link delta 才批量持久化并贡献月份；无 canonical match 和幂等重放均为零 scope。`etc_import_confirmed` 固定 `include_all=false`，删除 direct Cost/repair 与重复 matching；Cost 只在 Workbench publish 后以 `workbench_shard_published` 收敛。
+- 隔离：OA draft create/replay/recover 不再调用 canonical link。manual submitted/not-submitted 使用新窄事件 `etc_business_batch_status_changed`，只刷新 batch scope/成员日期对应的 Workbench、matching、search；Tax 不刷新，Cost 不直投。无新表、worker、queue、API、缓存或 fallback。
+- 旧链删除：无调用方 `etc_oa_submitted` / `etc_oa_revoked` event/mapping、前端 batch+invoice 合并 emitter、Cost/Tax 对 `etcBusinessBatchUpdated` 的订阅均已删除，并有 architecture guard。
+
 ## 2026-07-14：confirm worker MinIO 依赖与可确认计数修复
 
 - 生产 job `job_20260714_091414_65dc66a3` 在 `0/68` 即失败，错误为 `Object storage is not configured for PostgreSQL file access.`；PostgreSQL task/business batch 均未产生半写。API preview 通过 `build_state_store` 注入了对象存储，但 `ImportRuntimeProcessorFactory` 独立构造 `PostgresStateStore` 时漏掉同一依赖，worker 无法读取 durable session 的 `minio://` archive ref。
@@ -101,7 +108,7 @@
 
 - 目标：让 ETC ZIP 导入完成后的 canonical invoice 关联逻辑只通过统一 service 执行，避免 API route 和 runtime worker 保留两份旧链接代码。
 - 影响范围：`ImportProcessingService.execute_etc_invoice_import_confirm_job(...)` 的 runtime callback、`Application._link_etc_import_result_to_existing_invoices(...)` 和业务批次相关 link callback。
-- 关键决策：`EtcExistingInvoiceLinkService` 是 ETC import result / ETC metadata 到已存在 `app.invoices` 的唯一链接边界；它不暴露 create invoice API，缺失 canonical invoice 时只返回 ETC 月份用于刷新，不创建统一发票池事实。
+- 关键决策：`EtcExistingInvoiceLinkService` 是 ETC import result / ETC metadata 到已存在 `app.invoices` 的唯一链接边界；它不暴露 create invoice API。2026-07-19 起该合同进一步收窄为 mutation-sensitive result：缺失 canonical invoice 或幂等重放返回空月份、零 persistence/refresh，不再用 ETC 日期伪造影响 scope。
 - 文档影响：本实施记录补充边界；ETC 导入 README 的“只关联已存在 canonical invoice，不创建新 canonical invoice”口径不变。
 - 测试覆盖：boundary guard 强制 server/runtime helper 委托 service；runtime/service 行为测试覆盖按 `EtcImportResult.items[*].invoice_number` 回查 metadata、缺失 canonical invoice 不调用 create API。
 - 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_etc_existing_invoice_link_logic_stays_out_of_server_and_worker_helpers tests/test_platform_runtime_boundary_guards.py::RuntimeWorkerEtcImportLinkExistingTests -q`。

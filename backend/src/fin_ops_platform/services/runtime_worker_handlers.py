@@ -390,9 +390,9 @@ class _RuntimeWorkerDerivedLifecycle:
         self.execute_event(
             "etc_import_confirmed",
             months=months,
+            include_all=False,
             metadata={"source": "etc_invoice_link", "reason": reason},
         )
-        self.schedule_workbench_matching(months, reason=reason)
 
     def persist_confirmed_import_delta(
         self,

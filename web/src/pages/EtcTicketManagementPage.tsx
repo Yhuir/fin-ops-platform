@@ -460,11 +460,6 @@ function isEtcBusinessBatchNotFoundError(error: unknown, batchId?: string) {
   return /ETC business batch not found:/i.test(message);
 }
 
-function emitEtcBusinessDomainUpdated(detail: { affectedMonths?: string[]; source: string }) {
-  emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.etcBusinessBatchUpdated, detail);
-  emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.invoiceFactUpdated, detail);
-}
-
 function dedupeOperationBarrierTargets(targets: OperationBarrierTarget[]) {
   const deduped: OperationBarrierTarget[] = [];
   targets.forEach((target) => {
@@ -895,10 +890,12 @@ export default function EtcTicketManagementPage() {
         if (operationTargets.length > 0) {
           await waitForOperationFreshness(operationTargets);
         }
-        emitEtcBusinessDomainUpdated({
+        const detail = {
           affectedMonths,
           source: "etc_import_job_completed",
-        });
+        };
+        emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.etcBusinessBatchUpdated, detail);
+        emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.invoiceFactUpdated, detail);
         await loadBatches();
         setDetailReloadKey((current) => current + 1);
       } catch {
@@ -1569,15 +1566,21 @@ export default function EtcTicketManagementPage() {
       }
       payload = { reason: payload.reason };
     }
+    let invoiceFactsChanged = false;
     try {
       await deleteEtcBusinessBatch(plan.batchId, payload);
+      invoiceFactsChanged = true;
     } catch (caught) {
       if (!isEtcBusinessBatchNotFoundError(caught, plan.batchId)) {
         throw caught;
       }
     }
     removeDeletedBatchFromState(plan.batchId);
-    emitEtcBusinessDomainUpdated({ source: "etc_business_batch_delete" });
+    const detail = { source: "etc_business_batch_delete" };
+    emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.etcBusinessBatchUpdated, detail);
+    if (invoiceFactsChanged) {
+      emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.invoiceFactUpdated, detail);
+    }
   };
 
   const handleDeleteConfirmed = async () => {
@@ -1634,7 +1637,9 @@ export default function EtcTicketManagementPage() {
       });
       oaDraftIntentRef.current = null;
       mergeBusinessBatch(result);
-      emitEtcBusinessDomainUpdated({ source: "etc_business_batch_oa_draft_create" });
+      emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.etcBusinessBatchUpdated, {
+        source: "etc_business_batch_oa_draft_create",
+      });
       setDraftResult(result);
     } catch (caught) {
       if (caught instanceof EtcApiError && caught.code !== "oa_draft_outcome_unknown") {
@@ -1700,7 +1705,9 @@ export default function EtcTicketManagementPage() {
       });
       mergeBusinessBatch(result, target.status);
       const nextStatus = decision === "submitted" ? "submitted" : "unsubmitted";
-      emitEtcBusinessDomainUpdated({ source: "etc_business_batch_manual_oa_status" });
+      emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.etcBusinessBatchUpdated, {
+        source: "etc_business_batch_manual_oa_status",
+      });
       setActiveStatus(nextStatus);
       setSelectedBatchId(result.businessBatchId);
       setDraftResult(null);

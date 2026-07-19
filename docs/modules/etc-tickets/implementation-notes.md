@@ -10,6 +10,7 @@
 - 历史已在关联台 paired 的 ETC 批次可通过专用 migration service 转入新业务批次模型；迁移必须复用 `EtcService`、pair relation service、现有 state/repository 持久化和 Workbench invalidation，不允许临时 SQL 直接改 read model。
 - `etc_invoice_summary` 在 open 区和 paired 区都必须保留可展开 ETC 发票明细；已存在 active pair relation 的 ETC 外部批次不得继续泄漏到 open 区。
 - 本模块页面级 Spec-first 状态为 `spec-first-covered`：本地测试覆盖业务批次、发票明细、OA 草稿、人工提交、delete/reset、source file、Workbench summary 和 strict Browser 主链路；真实大 ZIP、对象存储、OA、历史迁移和 worker drain 仍需 staging/生产前验证。
+- 2026-07-19 起 OA draft create/replay/recover 不再重连 canonical invoice；manual submitted/not-submitted 只通过 `etc_business_batch_status_changed` 按精确月份刷新 Workbench/matching/search。前端只发 batch event，Tax/Cost 不订阅；Cost 如需收敛只能由成功 Workbench publish 顺序触发。
 
 ## 记录模板
 
@@ -27,6 +28,13 @@
 ```
 
 ## 历史记录
+
+## 2026-07-19 - OA 状态链路与跨页面 I/O 隔离
+
+- 目标：消除 OA 状态请求中的整批 canonical relink 和 `all`/Cost/repair 队列风暴，同时保持关联台 summary/散票可见性正确。
+- 关键决策：OA command 只写 ETC batch/task/audit；manual submitted/not-submitted 的唯一 read-model 输出是精确 `etc_business_batch_status_changed`。真实 ETC import 才允许 mutation-sensitive canonical link 与 `etc_import_confirmed`。
+- 测试覆盖：Import result changed/no-op、link persistence/scope、OA source guard、精确 lifecycle mapping、API manual status month callback、Cost/Tax listener isolation、write-operation Cost reason。
+- 未测风险：本地测试不能证明生产队列 drain 和页面端到端时间；部署后需以真实可逆操作验证 Workbench publish→Cost fresh 和三页面 Audit。
 
 ## 2026-07-18 - 生产 legacy creating 批次权威恢复
 

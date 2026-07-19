@@ -101,6 +101,38 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         )
         self.assertNotIn("tax_offset_read_model", [domain["domain"] for domain in plan["domains"]])
 
+    def test_etc_import_confirmed_refreshes_invoice_consumers_without_direct_cost_or_repair_fanout(self) -> None:
+        service = DerivedDataLifecycleService()
+
+        plan = service.plan_event("etc_import_confirmed", months=["2026-03"], include_all=False)
+
+        self.assertEqual(plan["affected_scopes"], ["2026-03"])
+        self.assertEqual(
+            [domain["domain"] for domain in plan["domains"]],
+            [
+                "workbench_read_model",
+                "workbench_relation_read_model",
+                "workbench_matching_dirty_scopes",
+                "invoice_lifecycle_read_model",
+                "tax_offset_read_model",
+                "tax_offset_month_cache",
+                "search_cache",
+            ],
+        )
+        self.assertEqual(plan["will_enqueue_jobs"], ["workbench_matching", "tax_offset_cache_warmup"])
+
+    def test_etc_business_batch_status_changed_refreshes_only_exact_workbench_and_search_scope(self) -> None:
+        service = DerivedDataLifecycleService()
+
+        plan = service.plan_event("etc_business_batch_status_changed", months=["2026-03"], include_all=False)
+
+        self.assertEqual(plan["affected_scopes"], ["2026-03"])
+        self.assertEqual(
+            [domain["domain"] for domain in plan["domains"]],
+            ["workbench_read_model", "workbench_matching_dirty_scopes", "search_cache"],
+        )
+        self.assertEqual(plan["will_enqueue_jobs"], ["workbench_matching"])
+
     def test_import_state_changed_maps_runtime_import_refresh_domains(self) -> None:
         service = DerivedDataLifecycleService()
 
@@ -411,8 +443,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
                 "bank_import_confirmed",
                 "import_state_changed",
                 "etc_import_confirmed",
-                "etc_oa_submitted",
-                "etc_oa_revoked",
+                "etc_business_batch_status_changed",
                 "oa_rebuilt",
                 "oa_attachment_invoice_cache_updated",
                 "pair_relation_changed",

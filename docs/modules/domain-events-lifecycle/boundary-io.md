@@ -1,6 +1,6 @@
 # Domain Events 与 Derived Lifecycle 模块边界与 I/O
 
-日期：2026-07-05
+日期：2026-07-19
 
 ## 模块化状态
 
@@ -8,7 +8,7 @@
 - 当前边界可信度：high
 - 目标边界：领域事件和 derived lifecycle 负责把业务写操作转成明确 downstream dirty scopes/jobs，不直接承载页面业务逻辑。
 - 当前缺口：无阻塞缺口；新增 event、domain 或 executor 时仍必须补 scope contract、执行器 wiring 和回归测试。
-- 旧代码删除状态：`import_state_changed` 已成为导入持久化后的唯一派生刷新事件；`Application` / runtime worker 中旧手写 import-state downstream fan-out 已移除，`workbench_read_model` executor 和 workbench scope invalidation helper 都不再隐藏刷新 invoice usage collection。
+- 旧代码删除状态：`import_state_changed` 已成为通用导入持久化后的唯一派生刷新事件；`Application` / runtime worker 中旧手写 import-state downstream fan-out 已移除，`workbench_read_model` executor 和 workbench scope invalidation helper 都不再隐藏刷新 invoice usage collection。无生产调用方的 `etc_oa_submitted` / `etc_oa_revoked` 事件、domain/job mapping 已删除。
 
 ## 职责边界
 
@@ -40,6 +40,8 @@
 | `import_state_changed` event | import persistence callbacks / runtime import worker | 导入 facts 保存后必须通过该 event fan out 到 workbench、relation、invoice lifecycle、pending invoice、invoice usage collection、bank detail/balance、cost 和 search；具体 scope 由 per-domain override 表达，禁止在 persist callback 手写逐个 downstream refresh；bank detail 输出必须保留 `import_facts_changed` reason 合同。 |
 | invoice usage collection dirty scope | `input_invoice_usage` / `output_invoice_collection` / `oa_pending_payment` workers | 只能作为显式 derived lifecycle domain 输出；不得挂在 `workbench_read_model` executor 的隐藏副作用里。 |
 | `bank_flow_rule_batch_changed` event | `bank-flow-rule-batches` / runtime workers | 只用于流水规则批量处理写入；必须 fan out 到 `bank_flow_rule_batch_read_model` 及 Workbench/relation/cost/search 下游，不能复用 `no_oa_bank_batch_changed` 表示 bank-flow 写入。 |
+| `etc_import_confirmed` event | ETC import worker / application service | 仅在 existing canonical invoice 元数据真实变化时按精确月份、`include_all=false` 输出 Workbench/relation/matching、invoice lifecycle、tax 和 search；不得直接投递 cost 或 historical repair。Cost 只能在对应 Workbench 月 generation 成功发布后由 `workbench_shard_published` 收敛；历史修复只能走显式运维事件。 |
+| `etc_business_batch_status_changed` event | ETC manual submitted / draft revoke | 只按 business batch scope 与成员发票日期计算精确月份，输出 Workbench、matching 和 search；不得直投 relation、invoice lifecycle、tax、cost 或 historical repair。Cost 仅因 Workbench 成功发布而有序收敛一次。 |
 | Frontend refresh signal | pages | 不伪装 fresh |
 
 ## 持久化与投影
@@ -62,7 +64,7 @@
 
 - 允许依赖：module-specific derived lifecycle executors, runtime queue。
 - 必须通过：explicit event/scope contract。
-- 禁止绕过：service 里散落手写 downstream SQL refresh；persist callback 逐个调用 read model producer；一个 domain executor 隐式刷新其它 read model domain；frontend event 直接改业务 state。
+- 禁止绕过：service 里散落手写 downstream SQL refresh；persist callback 逐个调用 read model producer；一个 domain executor 隐式刷新其它 read model domain；frontend event 直接改业务 state；把 ETC 批次/OA 状态事件冒充发票事实变化。
 
 ## 测试与验证
 

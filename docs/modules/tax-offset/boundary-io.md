@@ -1,6 +1,6 @@
 # 税金抵扣模块边界与 I/O
 
-日期：2026-07-16
+日期：2026-07-19
 
 ## 模块化状态
 
@@ -46,6 +46,7 @@
 | 导入/认证结果 | API/worker | 返回 job/result 并触发 dirty scope；同步完成时前端优先等待响应 targets |
 | 计划保存结果 | 前端页面 | 保存成功后等待 `read_model_key=tax_offset`、`scope_key=<month>` fresh，再刷新页面数据 |
 | Dirty scope | runtime queue | `tax_offset.read_model.refresh` |
+| ETC 页面刷新提示 | 前端 `invoiceFactUpdated` | 只在 ETC invoice facts 真正导入或成功删除时刷新当前月份；明确忽略 `etcBusinessBatchUpdated`，OA/batch-only 状态不得触发税金 I/O。事件不是 freshness 事实源 |
 | Audit proof | App Health 页面 | 五组 item 双向相等、关键字段/匹配/选择/summary/version/queue 证明；relation 明确为不适用 |
 
 ## 持久化与投影

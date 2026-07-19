@@ -1001,7 +1001,7 @@ class WriteOperationSloAuditTests(unittest.TestCase):
             _event(scope_type="workbench_relation", reason="etc_invoice_import_confirm"),
             _event(scope_type="invoice_lifecycle", reason="etc_invoice_import_confirm"),
             _event(scope_type="tax_offset", reason="etc_invoice_import_confirm"),
-            _event(scope_type="cost_statistics", reason="etc_invoice_import_confirm"),
+            _event(scope_type="cost_statistics", reason="workbench_shard_published"),
             _event(scope_type="search", reason="etc_invoice_import_confirm"),
         ]
 
@@ -1020,7 +1020,7 @@ class WriteOperationSloAuditTests(unittest.TestCase):
             _event(scope_type="workbench", reason="etc_invoice_import_confirm"),
             _event(scope_type="workbench_relation", reason="etc_invoice_import_confirm"),
             _event(scope_type="invoice_lifecycle", reason="etc_invoice_import_confirm"),
-            _event(scope_type="cost_statistics", reason="etc_invoice_import_confirm"),
+            _event(scope_type="cost_statistics", reason="workbench_shard_published"),
         ]
 
         report = write_operation_slo_audit.audit_write_operation_slo(
