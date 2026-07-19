@@ -9,6 +9,7 @@
 - 未提交列表的 OA 附件读取只接受当前 OA IDs；原无条件读取全部附件的 SQL 已删除。
 - 银行候选只读结构化 counterparty；OA 类型使用 migration 0112 对应的单一组合表达式，删除两个 JSON 字段各自前导通配再 `OR` 的全扫描。
 - 列表银行、OA、当前 OA 附件已合为一个 active-generation repository SQL I/O；submit 仍使用独立窄 loader，两条路径共享一个私有附件匹配谓词。
+- 第四次生产复采证明 query-count p95 已从 `10` 降到 `8`，但 unsubmitted p95 仍为 `513.385ms`；第五轮继续把候选 relation 的 scope proof+groups、年度 scope proof+count 各合为一个 batch-only I/O，目标 query-count p95 `<=6`。
 - 通用 relation reader、其他页面 facade、read model 表结构、worker、queue、command API 和前端 DTO 均未改变；0112 只增加 batch-only 读性能索引。
 - 静态 architecture/runtime guards 已覆盖专用 I/O、索引合同和旧链删除条件。
 
@@ -60,10 +61,12 @@
 
 第三次 release `main-c804314e-20260720044423` 已部署并应用 migration 0112（生产建索引 `12352ms`）；40 样本 shell `109.519ms`、submitted `291.228ms`、Audit `312.523ms` 通过，unsubmitted 从 `580.757ms` 降到 `514.231ms`，但仍超过硬门槛。dashboard API/DB/connection/query-count p95 为 `346.122ms` / `246.317ms` / `0.267ms` / `10`。
 
-第四轮据此只合并同一 active-generation 的银行/OA/附件候选读取，删除两个顺序数据库 round-trip；不增加 migration、缓存、read model 或 worker。真实 PostgreSQL 0001–0112 的 2 项集成测试同时证明列表单 I/O、submit 窄附件读取、OA 索引命中与结果等价；当前尚待精确 SHA 部署和生产复采。完成门为：
+第四次 release `main-c8dce363-20260720050207` 已部署；40 样本 shell `112.477ms`、submitted `295.003ms`、Audit `361.581ms` 通过，unsubmitted `513.385ms` 仍高于门槛 `13.385ms`。160/160 请求均为 2xx/fresh/0 enqueue；dashboard API/DB/connection/query-count p95 为 `349.779ms` / `254.613ms` / `0.230ms` / `8`。生产库存仅银行 `989`、OA `253`、OA 附件 `196`，因此第五轮只合并 batch-only relation 内最后两组串行 I/O，不增加 schema 或基础设施。
+
+第五轮本地已完成：相关后端/SQL/architecture 146 passed、2 个条件性 PostgreSQL skip，真实 PostgreSQL 0001–0112 的 2/2 集成测试另行通过，临时数据库残留 `0`；lint/diff-check 通过。当前待精确 SHA 部署和生产复采。完成门为：
 
 - 精确 SHA 部署。
 - shell、unsubmitted、submitted、Page Audit 各 40 样本。
-- dashboard DB query count p95 `<=8`，列表 p95 `<=500ms`（目标 `<=300ms`），Audit p95 `<=1000ms`。
+- dashboard DB query count p95 `<=6`，列表 p95 `<=500ms`（目标 `<=300ms`），Audit p95 `<=1000ms`。
 - 直接及跨页 Audit 必须 pass/fresh/drained/ready/0 issue。
 - submit → fresh → withdraw → fresh 只有在 `app-health-operations` 全局强制 preflight 通过后才允许执行；若仍被其他页面阻断，记录到最终系统门，不绕过安全门。

@@ -12,6 +12,8 @@
 
 第三次发布应用 OA 类型索引后，40 样本 unsubmitted p95 降到 `514.231ms`，但仍比硬门槛高 `14.231ms`；dashboard 显示 API/DB/connection/query-count p95 为 `346.122ms` / `246.317ms` / `0.267ms` / `10`。剩余可控耗时是同一候选快照仍分成银行、OA、附件三个顺序数据库 round-trip。它们共享 active-generation 一致性边界和输出 DTO，合为一个 repository I/O 可删除两次往返，不需要增加新抽象或基础设施。
 
+第四次发布把候选读取降为一个 I/O 后，query count p95 从 `10` 降为 `8`，但 unsubmitted p95 仍为 `513.385ms`；dashboard API/DB/connection p95 为 `349.779ms` / `254.613ms` / `0.230ms`。生产数据量只有银行 `989`、OA `253`、OA 附件 `196`，排除数据体量和连接获取后，剩余成本是 batch 专用 relation 读取内部仍有两组串行往返：候选 row lookup 后分别读取 scope proof 与 groups，年度计数分别读取 scope proof 与 count。第五轮只把这两组各合为一个 repository I/O，将页面请求从 `8` 条降到目标 `6` 条；不增加索引、缓存、read model、worker 或公共抽象。
+
 本轮应保留现有 Workbench + workbench_relation 事实源，不新增独立 read model、缓存、表、队列或 worker。唯一 schema 变化是生产复测证明必需的 OA 类型部分表达式索引。最小而完整的生产方案是：
 
 1. 新增批量账务专用的 relation 批量读取 I/O，一条 SQL 同时证明 12 个或候选涉及的全部 scope。
@@ -20,6 +22,7 @@
 4. OA 类型筛选把两个字段规范为一个稳定表达式，并由 `0112` 部分 trigram 索引覆盖。
 5. 银行、OA、当前 OA 附件作为同一 active-generation 候选快照，由一个 repository SQL I/O 返回；submit 继续使用自己的窄 loader。
 6. 批量账务不再调用通用的逐 scope relation 读取入口；通用入口继续服务其他页面，行为不变。
+7. 候选 relation 的 scope proof+groups 和年度 scope proof+count 各由一个 batch-only SQL 返回，删除最后两次可合并的串行往返。
 
 ## 生产基线
 

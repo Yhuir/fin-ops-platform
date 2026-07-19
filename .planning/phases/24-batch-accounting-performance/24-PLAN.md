@@ -36,6 +36,7 @@
 - 银行候选只按结构化 `workbench_rows.counterparty_name` 过滤，删除两个历史 JSON `OR` fallback，使既有 `workbench_rows_bank_counterparty_scope_idx` 可用。
 - 若该 release 仍失败，唯一剩余无索引条件是 OA `apply_type/expense_type` 的前导通配扫描：把两个 JSON 字段规范为一个稳定表达式，并用 migration 0112 添加只覆盖 `source_kind='oa' and scope_key<>'all'` 的部分 trigram 索引。
 - 若索引 release 已把 p95 降到接近门槛但仍失败，且 dashboard 证明 query-count p95 仍为 `10`、connection acquire 可忽略，则把同属一个 active-generation 候选快照的银行/OA/附件读取合为一个 repository SQL I/O；附件仍只引用当前 OA candidate CTE，submit 窄 loader 不变。
+- 若候选单 I/O release 已把 query-count p95 降到 `8`、但列表仍只差小幅未达门槛，则合并 batch-only relation 内剩余两组天然同边界读取：候选 `scope proof + referenced groups` 一次返回，年度 `scope proof + submitted count` 一次返回；目标 query-count p95 `<=6`。不改通用 relation reader 和 submitted list 已达标路径。
 - 不新增结构化列、缓存、projection 或第二套候选 read model；真实 PostgreSQL 测试必须执行 0001–0112 并由 `EXPLAIN` 证明查询命中精确索引，静态 guard 禁止银行 fallback 和 OA 未索引 `OR` 回流。
 
 ### 5. 测试与架构门禁
@@ -73,7 +74,7 @@
 
 - 生产级：包含权限/契约保持、freshness、审计、回滚、生产指标和失败门禁。
 - 模块化：批量账务拥有专用 relation read I/O；共享事实源只读，其他页面入口不变。
-- 简洁：只增加一个批量 proof 能力和一个收窄附件 helper，无新基础设施或抽象层。
+- 简洁：只增加 batch-only 批量 proof/组合读取能力和一个收窄附件 helper，无新基础设施或抽象层。
 - 高性能：直接消除生产量化的 52–66 查询扇出和无界附件扫描。
 - 旧链删除：service 不再调用通用 relation lookup；年度重复 proof 和无条件附件 SQL 被删除，并由 guard 固化。
 - 隔离：不改变 shared generic facade 行为、API DTO、worker、command 或其他页面 read model。
