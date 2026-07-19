@@ -8,12 +8,15 @@
 
 首次发布后 query count 已降到 p95 `10`，但 40 样本 unsubmitted HTTP p95 仍为 `612.217ms`；dashboard 显示 API 内部 p95 `400.374ms`、DB p95 `256.256ms`，压缩响应仅 `3629 bytes`。剩余根因是银行候选 SQL 对结构化 `counterparty_name` 与两个历史 payload 字段做 `OR`，使既有 `workbench_rows_bank_counterparty_scope_idx` 无法稳定命中。当前 projection/Audit 已保证结构化列，因此 payload fallback 是可删除旧链，不需要新索引或缓存。
 
-本轮应保留现有 Workbench + workbench_relation 事实源，不新增独立 read model、缓存、表、索引、队列或 worker。最小而完整的生产方案是：
+第二次发布删除银行 fallback 后，40 样本 unsubmitted p95 仍为 `580.757ms`，dashboard DB p95 `274.008ms`、query count p95 `10`。这排除了响应体、connection acquire、worker 和银行 fallback 作为主瓶颈；剩余候选 SQL 中只有 OA 类型筛选仍以两个 JSON 字段的前导通配 `OR` 做全扫描。最终最小方案因此增加一个仅覆盖非 `all` OA 行、且表达式与查询完全一致的部分 trigram 索引；不增加结构化列、第二 read model、缓存或 worker。
+
+本轮应保留现有 Workbench + workbench_relation 事实源，不新增独立 read model、缓存、表、队列或 worker。唯一 schema 变化是生产复测证明必需的 OA 类型部分表达式索引。最小而完整的生产方案是：
 
 1. 新增批量账务专用的 relation 批量读取 I/O，一条 SQL 同时证明 12 个或候选涉及的全部 scope。
 2. 未提交候选只读取当前 OA IDs 对应的附件发票。
 3. 银行候选只读取 Workbench projection 的结构化 `counterparty_name`，删除两个 JSON fallback，让既有复合索引生效。
-4. 批量账务不再调用通用的逐 scope relation 读取入口；通用入口继续服务其他页面，行为不变。
+4. OA 类型筛选把两个字段规范为一个稳定表达式，并由 `0112` 部分 trigram 索引覆盖。
+5. 批量账务不再调用通用的逐 scope relation 读取入口；通用入口继续服务其他页面，行为不变。
 
 ## 生产基线
 
@@ -111,7 +114,7 @@
 
 - 未提交目标固定约 8 次查询：3 个候选读取 + 3 个专用 relation lookup + 2 个年度 count。
 - 已提交目标固定约 6 次查询：1 个银行读取 + 2 个年度 relation list + 3 个 relation detail lookup。
-- 不新增基础设施、schema 或 migration，回滚为代码版本回滚。
+- 不新增基础设施；migration 0112 只增加可独立保留的读性能索引。应用回滚只需部署上一 release，索引不改变读写语义；如需物理清理，另行在维护窗口 `drop index concurrently`。
 - 只有部署后 p95 仍大于 `500ms` 且 EXPLAIN/数据库证据明确指向候选 SQL 时，才进入后续 server-side candidate paging/index 优化；本轮不提前实现。
 - 结论：方案不是过度设计；它直接删除已量化的 N+1 和无界读取，并保留完整 freshness、审计、回滚和隔离闭环。
 

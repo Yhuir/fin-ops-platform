@@ -125,6 +125,7 @@ EXPECTED_MIGRATIONS = [
     "0109_oa_pending_payment_freshness_gate_hot_path.sql",
     "0110_oa_pending_payment_outbox_freshness_hot_path.sql",
     "0111_bank_flow_rule_batch_tag_rules_canonical_shape.sql",
+    "0112_batch_accounting_oa_type_hot_path.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -287,7 +288,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 112)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 113)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -301,6 +302,18 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertIn("selected_tag_codes", sql)
         self.assertIn("jsonb_array_elements_text", sql)
         self.assertNotIn("no_oa_bank_batch_tag_selection", sql)
+
+    def test_batch_accounting_oa_type_hot_path_index_matches_query_contract(self) -> None:
+        sql = (
+            MIGRATIONS_DIR / "0112_batch_accounting_oa_type_hot_path.sql"
+        ).read_text(encoding="utf-8").lower()
+
+        self.assertIn("workbench_rows_batch_accounting_oa_type_trgm_idx", sql)
+        self.assertIn("coalesce(payload->>'apply_type', '')", sql)
+        self.assertIn("coalesce(payload->>'expense_type', '')", sql)
+        self.assertIn("gin_trgm_ops", sql)
+        self.assertIn("where source_kind = 'oa'", sql)
+        self.assertIn("scope_key <> 'all'", sql)
 
     def test_pending_invoice_filter_constraints_allow_cash_income(self) -> None:
         sql = strip_sql_comments(migration_sql()).lower()

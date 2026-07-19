@@ -11401,16 +11401,17 @@ class PostgresReadModelRepository:
                 where r.scope_key <> 'all'
                   and r.source_kind = 'oa'
                   and (
-                        r.payload->>'apply_type' like %s
-                        or r.payload->>'expense_type' like %s
-                      )
+                        coalesce(r.payload->>'apply_type', '')
+                        || ' '
+                        || coalesce(r.payload->>'expense_type', '')
+                      ) like %s
                 order by r.row_id, r.updated_at desc nulls last
             )
             select row_id, source_kind, status, payload, raw_payload
             from active_rows
             order by coalesce(payload->>'apply_time', payload->>'application_time', payload->>'application_date', payload->>'created_at', '') desc, row_id
             """,
-            ("%日常报销%", "%日常报销%"),
+            ("%日常报销%",),
         ) if include_oa else []
         oa_row_ids = _dedupe_preserve_order(
             text((_read_model_payload(row) or {}).get("id")) or text(row.get("row_id"))

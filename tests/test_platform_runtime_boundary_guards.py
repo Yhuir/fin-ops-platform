@@ -4573,6 +4573,15 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         for legacy_bank_filter in ("r.payload->>'counterparty_name'", "r.payload->>'counterparty_name_raw'"):
             if legacy_bank_filter in batch_loader_source:
                 violations.append(f"batch accounting bank candidate read keeps legacy JSON fallback {legacy_bank_filter}")
+        for required_oa_type_filter in (
+            "coalesce(r.payload->>'apply_type', '')",
+            "coalesce(r.payload->>'expense_type', '')",
+            ") like %s",
+        ):
+            if required_oa_type_filter not in batch_loader_source:
+                violations.append(f"batch accounting OA candidate read is missing indexed type expression {required_oa_type_filter}")
+        if "r.payload->>'apply_type' like %s" in batch_loader_source or "r.payload->>'expense_type' like %s" in batch_loader_source:
+            violations.append("batch accounting OA candidate read keeps the unindexed OR filter")
         for required_filter in ("normalized_oa_row_ids", "= any(%s)", "r.row_id like any(%s)"):
             if required_filter not in invoice_loader_source:
                 violations.append(f"batch accounting attachment loader is missing scoped filter {required_filter}")

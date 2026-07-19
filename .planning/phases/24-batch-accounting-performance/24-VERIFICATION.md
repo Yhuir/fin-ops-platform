@@ -7,8 +7,9 @@
 - 批量账务 relation row/detail、年度 count 和年度 list 已切换到页面专用读取 I/O。
 - 12 个 scope 的 freshness/status/dirty proof 已由逐 scope 查询改为一次批量 SQL；count/list 各固定为 2 条语句，row lookup 为 2–3 条语句。
 - 未提交列表的 OA 附件读取只接受当前 OA IDs；原无条件读取全部附件的 SQL 已删除。
-- 通用 relation reader、其他页面 facade、read model schema、worker、queue、command API 和前端 DTO 均未改变。
-- 静态 architecture/runtime guards 已覆盖专用 I/O 和旧链删除条件。
+- 银行候选只读结构化 counterparty；OA 类型使用 migration 0112 对应的单一组合表达式，删除两个 JSON 字段各自前导通配再 `OR` 的全扫描。
+- 通用 relation reader、其他页面 facade、read model 表结构、worker、queue、command API 和前端 DTO 均未改变；0112 只增加 batch-only 读性能索引。
+- 静态 architecture/runtime guards 已覆盖专用 I/O、索引合同和旧链删除条件。
 
 ## 已执行验证
 
@@ -19,7 +20,7 @@
 | 共享受影响回归 | 786 passed, 4 skipped | workbench relation、worker、lifecycle、App Status 等；skip 为条件性外部依赖 |
 | 前端 BatchAccounting API/Page | 23 passed | 页面和 API 行为未回归 |
 | Playwright 批量账务关键流 | 4 passed | 页面读、提交、barrier、撤回关键交互 |
-| 真实 PostgreSQL | 2 passed | 实际应用 migrations 0001–0111；bulk proof/count/list/row lookup、processing fail-closed、OA-ID 附件过滤均真实执行 |
+| 真实 PostgreSQL | 2 passed | 实际应用 migrations 0001–0112；bulk proof/count/list/row lookup、processing fail-closed、OA-ID 附件过滤均真实执行；5,000 条非命中 OA 上的 `EXPLAIN` 命中 0112 索引 |
 | lint/docs/diff | passed | `scripts/verify.sh lint`、`scripts/verify.sh docs`、`git diff --check` |
 
 真实 PostgreSQL 临时数据库在验证后已删除，查询确认残留数为 0。
@@ -44,20 +45,22 @@
 6. E2E：适用，4 项 Playwright 关键流通过；生产写 smoke 仍受强制全局 preflight 控制。
 7. 现有功能回归：适用，786 项共享链路通过，并在部署后补做直接/跨页 Page Audit。
 
-## 尚待发布后完成
+## 已部署迭代与当前完成门
 
 首次 release `main-27a2d841-20260720041456` 已完成部署并证明：
 
 - shell p95 `115.431ms`、submitted p95 `314.397ms`、Page Audit p95 `299.124ms`，全部通过；160/160 HTTP 成功、fresh、0 enqueue。
 - unsubmitted 40 样本 p95 `612.217ms`，未通过 `500ms`，因此阶段没有误判完成。
 - dashboard 128 样本：API duration p95 `400.374ms`、DB p95 `256.256ms`、query count p95 `10`；压缩响应 `3629 bytes`。
-- 第二轮据此删除银行候选的两个 JSON counterparty fallback，让既有 `workbench_rows_bank_counterparty_scope_idx` 生效；未新增 schema、索引或基础设施。
+- 第二轮据此删除银行候选的两个 JSON counterparty fallback，让既有 `workbench_rows_bank_counterparty_scope_idx` 生效。
 - 第二轮定向 API/facade 62 项、SQL/guard 2 项、真实 PostgreSQL 2 项、lint/docs/diff-check 均通过。
 
-第二轮精确 SHA 尚待提交、部署和重复生产采样；以下项目仍是当前完成门：
+第二次 release `main-66860e3d-20260720043120` 已部署；40 样本证明 shell `110.635ms`、submitted `312.452ms`、Audit `285.746ms` 通过，但 unsubmitted p95 仍为 `580.757ms`。dashboard 84 样本的 API/DB/query-count p95 分别为 `426.897ms` / `274.008ms` / `10`，因此银行 fallback 不是剩余主瓶颈。
+
+第三轮只把 OA 类型条件规范为一个稳定表达式，并由 migration 0112 添加 batch-only 部分 trigram 索引。定向 migration/SQL/guard 测试、真实 PostgreSQL 2 项、lint 与 diff-check 已通过；当前尚待精确 SHA 部署和生产复采。完成门为：
 
 - 精确 SHA 部署。
-- shell、unsubmitted、submitted、Page Audit 各 20 样本。
+- shell、unsubmitted、submitted、Page Audit 各 40 样本。
 - dashboard DB query count `<=10`，列表 p95 `<=500ms`（目标 `<=300ms`），Audit p95 `<=1000ms`。
 - 直接及跨页 Audit 必须 pass/fresh/drained/ready/0 issue。
 - submit → fresh → withdraw → fresh 只有在 `app-health-operations` 全局强制 preflight 通过后才允许执行；若仍被其他页面阻断，记录到最终系统门，不绕过安全门。

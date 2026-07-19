@@ -34,7 +34,8 @@
 
 - 首次部署后若 relation query count 已达标、但 unsubmitted p95 仍失败，使用 dashboard DB duration、响应大小和现有索引合同定位剩余慢 SQL。
 - 银行候选只按结构化 `workbench_rows.counterparty_name` 过滤，删除两个历史 JSON `OR` fallback，使既有 `workbench_rows_bank_counterparty_scope_idx` 可用。
-- 不新增 migration、索引、缓存、projection 或第二套候选 read model；真实 PostgreSQL 测试证明仅结构化列是读取合同，静态 guard 禁止 fallback 回流。
+- 若该 release 仍失败，唯一剩余无索引条件是 OA `apply_type/expense_type` 的前导通配扫描：把两个 JSON 字段规范为一个稳定表达式，并用 migration 0112 添加只覆盖 `source_kind='oa' and scope_key<>'all'` 的部分 trigram 索引。
+- 不新增结构化列、缓存、projection 或第二套候选 read model；真实 PostgreSQL 测试必须执行 0001–0112 并由 `EXPLAIN` 证明查询命中精确索引，静态 guard 禁止银行 fallback 和 OA 未索引 `OR` 回流。
 
 ### 5. 测试与架构门禁
 
@@ -65,7 +66,7 @@
 - 读取 dashboard 的 duration、DB duration、query count，验证 query p95 `<=10`。
 - 做直接及跨页 Page Audit。
 - 生产 submit→fresh→withdraw→fresh 仅在 `app-health-operations` 强制 preflight 通过后执行；否则记录为最终系统门待办，绝不绕过。
-- 失败回滚：回滚本轮 commit 并重新部署上一精确 release；无 migration、schema 或数据回滚。
+- 失败回滚：回滚本轮代码 commit 并重新部署上一精确 release；0112 只增加读性能索引，可安全留存且不改变数据/API。需要物理删除时必须另走维护窗口 `drop index concurrently`，不在失败回滚热路径阻塞表。
 
 ## 第三次计划反审阅
 

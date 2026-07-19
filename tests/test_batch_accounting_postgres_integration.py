@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
@@ -105,7 +106,7 @@ class BatchAccountingPostgresIntegrationTests(unittest.TestCase):
         self.assertIn("refreshing:2026-01", refreshing["stale_reasons"])
         self.assertEqual(refreshing["submitted_count"], 0)
 
-    def test_unsubmitted_attachment_read_is_limited_to_current_oa_ids(self) -> None:
+    def test_unsubmitted_candidate_and_attachment_reads_use_hot_paths(self) -> None:
         self.connection.execute(
             """
             insert into read_model.workbench_generations(
@@ -154,13 +155,56 @@ class BatchAccountingPostgresIntegrationTests(unittest.TestCase):
               )
             """
         )
+        self.connection.execute(
+            """
+            insert into read_model.workbench_rows(
+                row_id, scope_month, scope_key, source_kind, status, counterparty_name,
+                generated_at, generation_id, payload
+            )
+            select
+                'oa-batch-non-match-' || item_number::text,
+                '2026-01-01',
+                '2026-01',
+                'oa',
+                'unpaired',
+                null,
+                now(),
+                'batch-accounting-pg-2026-01',
+                jsonb_build_object(
+                    'id', 'oa-batch-non-match-' || item_number::text,
+                    'type', 'oa',
+                    'apply_type', '其他流程'
+                )
+            from generate_series(1, 5000) item_number
+            """
+        )
+        self.connection.execute("analyze read_model.workbench_rows")
 
         payload = self.repository.load_batch_accounting_workbench_payload(bank_year="2026")
         group = payload["unpaired"]["groups"][0]
+        explain_row = self.connection.fetch_one(
+            """
+            explain (format json)
+            select row_id
+            from read_model.workbench_rows
+            where scope_key <> 'all'
+              and source_kind = 'oa'
+              and (
+                    coalesce(payload->>'apply_type', '')
+                    || ' '
+                    || coalesce(payload->>'expense_type', '')
+                  ) like %s
+            """,
+            ("%日常报销%",),
+        )
 
         self.assertEqual([row["id"] for row in group["bank_rows"]], ["txn-batch-structured-1"])
         self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-batch-1"])
         self.assertEqual(
             [row["id"] for row in group["invoice_rows"]],
             ["oa-att-inv-oa-batch-1-01"],
+        )
+        self.assertIn(
+            "workbench_rows_batch_accounting_oa_type_trgm_idx",
+            json.dumps(explain_row, ensure_ascii=False),
         )

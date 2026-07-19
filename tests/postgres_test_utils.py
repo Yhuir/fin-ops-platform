@@ -123,6 +123,7 @@ EXPECTED_MIGRATION_FILES = [
     "0109_oa_pending_payment_freshness_gate_hot_path.sql",
     "0110_oa_pending_payment_outbox_freshness_hot_path.sql",
     "0111_bank_flow_rule_batch_tag_rules_canonical_shape.sql",
+    "0112_batch_accounting_oa_type_hot_path.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (
