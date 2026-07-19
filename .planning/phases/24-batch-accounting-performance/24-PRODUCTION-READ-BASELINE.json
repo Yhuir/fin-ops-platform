@@ -1,0 +1,20 @@
+{
+  "measured_at": "2026-07-20T03:59:00+08:00",
+  "page": "batch-accounting",
+  "samples_per_probe": 20,
+  "probes": {
+    "page_shell": {"p50_ms": 92.574, "p95_ms": 104.966, "p99_ms": 108.764, "target_p95_ms": 500, "passed": true},
+    "unsubmitted_2026": {"p50_ms": 510.763, "p95_ms": 638.061, "p99_ms": 655.242, "target_p95_ms": 500, "passed": false, "fresh_samples": 20, "refresh_enqueued_samples": 0},
+    "submitted_2026": {"p50_ms": 285.982, "p95_ms": 390.986, "p99_ms": 402.224, "target_p95_ms": 500, "passed": true},
+    "page_audit": {"p50_ms": 228.921, "p95_ms": 375.765, "p99_ms": 396.619, "target_p95_ms": 1000, "passed": true}
+  },
+  "dashboard": {
+    "sample_count": 52,
+    "duration_ms": {"p50": 289.341, "p95": 497.312, "p99": 658.344},
+    "db_duration_ms": {"p50": 172.5, "p95": 350.226, "p99": 515.733},
+    "connection_acquire_ms": {"p95": 0.905},
+    "sql_execute_fetch_ms": {"p95": 349.462},
+    "db_query_count": {"p50": 52, "p95": 66, "p99": 71}
+  },
+  "root_cause": "workbench_relation scope freshness N+1 plus unbounded OA attachment candidate read"
+}

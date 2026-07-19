@@ -4859,6 +4859,85 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
             tenant_id=tenant_id,
         )
 
+    def get_batch_accounting_relation_rows_by_ids(
+        self,
+        row_ids: list[str],
+        *,
+        tenant_id: str = "default",
+        scope_keys_hint: list[str] | None = None,
+    ) -> dict[str, Any] | None:
+        """Read batch-accounting relation rows with one bulk freshness proof."""
+        normalized_ids = _dedupe_preserve_order(text(row_id) for row_id in list(row_ids or []))
+        if not normalized_ids:
+            return {
+                "read_model_status": "fresh",
+                "rows": [],
+                "groups": [],
+                "source_versions": {},
+                "read_model_scope_keys": [],
+                "stale_reasons": [],
+            }
+        rows = self._connection.fetch_all(
+            """
+            select row_id, row_type, scope_key, scope_month, relation_status, group_ids,
+                   linked_oa, linked_bank_transactions, linked_input_invoices, linked_output_invoices,
+                   source_versions, payload, raw_payload
+            from read_model.workbench_relation_rows
+            where tenant_id = %s
+              and row_id = any(%s)
+            order by array_position(%s::text[], row_id), scope_key
+            """,
+            (tenant_id, normalized_ids, normalized_ids),
+        )
+        if not rows:
+            scope_keys = _dedupe_preserve_order(text(scope_key) for scope_key in list(scope_keys_hint or []))
+            if not scope_keys:
+                return None
+            return self._batch_accounting_relation_payload_from_rows(
+                rows=[],
+                groups=[],
+                scope_keys=scope_keys,
+                tenant_id=tenant_id,
+                fallback_source_versions={},
+            )
+
+        scope_keys = _dedupe_preserve_order(text(row.get("scope_key")) for row in rows)
+        scope_proof = self._batch_accounting_relation_scope_proof(
+            scope_keys=scope_keys,
+            tenant_id=tenant_id,
+        )
+        returned_ids = {text(row.get("row_id")) for row in rows if text(row.get("row_id"))}
+        if len(returned_ids) < len(normalized_ids):
+            proof_payload = self._batch_accounting_relation_payload_from_rows(
+                rows=rows,
+                groups=[],
+                scope_keys=scope_keys,
+                tenant_id=tenant_id,
+                scope_proof=scope_proof,
+            )
+            if proof_payload.get("read_model_status") != "fresh":
+                return {
+                    "read_model_status": "missing",
+                    "rows": [],
+                    "groups": [],
+                    "source_versions": _source_versions_from_relation_records(rows),
+                    "read_model_scope_keys": scope_keys,
+                    "stale_reasons": ["missing_relation_rows"],
+                }
+
+        groups = self._workbench_relation_groups_for_scope_group_ids(
+            scope_keys=scope_keys,
+            group_ids=_dedupe_preserve_order(group_id for row in rows for group_id in text_list(row.get("group_ids"))),
+            tenant_id=tenant_id,
+        )
+        return self._batch_accounting_relation_payload_from_rows(
+            rows=rows,
+            groups=groups,
+            scope_keys=scope_keys,
+            tenant_id=tenant_id,
+            scope_proof=scope_proof,
+        )
+
 
     def list_workbench_relation_rows(
         self,
@@ -4918,11 +4997,16 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
         if not re.fullmatch(r"\d{4}", normalized_year):
             return None
         scope_keys = [f"{normalized_year}-{month:02d}" for month in range(1, 13)]
-        payload = self._workbench_relation_payload_from_rows(
+        scope_proof = self._batch_accounting_relation_scope_proof(
+            scope_keys=scope_keys,
+            tenant_id=tenant_id,
+        )
+        payload = self._batch_accounting_relation_payload_from_rows(
             rows=[],
             groups=[],
             scope_keys=scope_keys,
             tenant_id=tenant_id,
+            scope_proof=scope_proof,
         )
         if payload.get("read_model_status") != "fresh":
             payload["submitted_count"] = 0
@@ -4955,11 +5039,16 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
         if not re.fullmatch(r"\d{4}", normalized_year):
             return None
         scope_keys = [f"{normalized_year}-{month:02d}" for month in range(1, 13)]
-        payload = self._workbench_relation_payload_from_rows(
+        scope_proof = self._batch_accounting_relation_scope_proof(
+            scope_keys=scope_keys,
+            tenant_id=tenant_id,
+        )
+        payload = self._batch_accounting_relation_payload_from_rows(
             rows=[],
             groups=[],
             scope_keys=scope_keys,
             tenant_id=tenant_id,
+            scope_proof=scope_proof,
         )
         if payload.get("read_model_status") != "fresh":
             return payload
@@ -4981,12 +5070,13 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
             """,
             (tenant_id, scope_keys, normalized_year),
         )
-        return self._workbench_relation_payload_from_rows(
+        return self._batch_accounting_relation_payload_from_rows(
             rows=[],
             groups=groups,
             scope_keys=scope_keys,
             tenant_id=tenant_id,
             fallback_source_versions=payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {},
+            scope_proof=scope_proof,
         )
 
 
@@ -5336,6 +5426,91 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
                 stale_reasons.append(f"{scope_status}:{scope_key}")
             if not source_versions and isinstance(scope_row.get("source_versions"), dict):
                 source_versions = dict(scope_row.get("source_versions"))
+        if not source_versions:
+            source_versions = (
+                dict(fallback_source_versions or {})
+                or _source_versions_from_relation_records(rows)
+                or _source_versions_from_relation_records(groups)
+            )
+        return {
+            "read_model_status": status,
+            "rows": [_workbench_relation_row_payload(row) for row in rows],
+            "groups": [_workbench_relation_group_payload(group) for group in groups],
+            "source_versions": source_versions,
+            "read_model_scope_keys": normalized_scope_keys,
+            "stale_reasons": stale_reasons,
+        }
+
+    def _batch_accounting_relation_scope_proof(
+        self,
+        *,
+        scope_keys: list[str],
+        tenant_id: str,
+    ) -> list[dict[str, Any]]:
+        normalized_scope_keys = _dedupe_preserve_order(text(scope_key) for scope_key in list(scope_keys or []))
+        if not normalized_scope_keys:
+            return []
+        return self._connection.fetch_all(
+            """
+            select requested.scope_key,
+                   (scope.scope_key is not null) as scope_exists,
+                   scope.source_versions,
+                   dirty.status as dirty_status
+            from unnest(%s::text[]) with ordinality as requested(scope_key, position)
+            left join read_model.workbench_relation_scopes scope
+              on scope.tenant_id = %s
+             and scope.scope_key = requested.scope_key
+            left join lateral (
+                select status
+                from job.read_model_dirty_scopes
+                where tenant_id = %s
+                  and scope_type = 'workbench_relation'
+                  and scope_key = requested.scope_key
+                  and status in ('pending', 'processing', 'failed')
+                order by updated_at desc
+                limit 1
+            ) dirty on true
+            order by requested.position
+            """,
+            (normalized_scope_keys, tenant_id, tenant_id),
+        )
+
+    def _batch_accounting_relation_payload_from_rows(
+        self,
+        *,
+        rows: list[dict[str, Any]],
+        groups: list[dict[str, Any]],
+        scope_keys: list[str],
+        tenant_id: str,
+        fallback_source_versions: dict[str, Any] | None = None,
+        scope_proof: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        normalized_scope_keys = _dedupe_preserve_order(text(scope_key) for scope_key in list(scope_keys or []))
+        proof_rows = scope_proof if scope_proof is not None else self._batch_accounting_relation_scope_proof(
+            scope_keys=normalized_scope_keys,
+            tenant_id=tenant_id,
+        )
+        proof_by_scope = {
+            text(proof.get("scope_key")): proof
+            for proof in list(proof_rows or [])
+            if isinstance(proof, dict) and text(proof.get("scope_key"))
+        }
+        status = "fresh"
+        stale_reasons: list[str] = []
+        source_versions: dict[str, Any] = {}
+        for scope_key in normalized_scope_keys:
+            proof = proof_by_scope.get(scope_key)
+            if not isinstance(proof, dict) or not bool(proof.get("scope_exists")):
+                status = "missing"
+                stale_reasons.append(f"missing_scope:{scope_key}")
+                continue
+            dirty_status = text(proof.get("dirty_status"))
+            if dirty_status:
+                scope_status = "refreshing" if dirty_status in {"pending", "processing"} else "stale"
+                status = scope_status
+                stale_reasons.append(f"{scope_status}:{scope_key}")
+            if not source_versions and isinstance(proof.get("source_versions"), dict):
+                source_versions = dict(proof.get("source_versions"))
         if not source_versions:
             source_versions = (
                 dict(fallback_source_versions or {})
@@ -7508,6 +7683,9 @@ class PostgresReadModelRepository:
 
     def get_workbench_relation_rows_by_ids(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
         return self._search_workbench_relation_repository.get_workbench_relation_rows_by_ids(*args, **kwargs)
+
+    def get_batch_accounting_relation_rows_by_ids(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        return self._search_workbench_relation_repository.get_batch_accounting_relation_rows_by_ids(*args, **kwargs)
 
     def list_workbench_relation_rows(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
         return self._search_workbench_relation_repository.list_workbench_relation_rows(*args, **kwargs)
@@ -11161,62 +11339,9 @@ class PostgresReadModelRepository:
             """,
             (normalized_oa_row_ids, normalized_oa_row_ids),
         )
-        invoice_like_patterns = [f"oa-att-inv-{row_id}%" for row_id in normalized_oa_row_ids]
-        invoice_rows = self._connection.fetch_all(
-            """
-            with active_rows as (
-                select distinct on (r.row_id)
-                    r.row_id, r.source_kind, r.status, r.payload, r.raw_payload,
-                    r.updated_at
-                from read_model.workbench_rows r
-                join read_model.workbench_generations gen
-                  on gen.generation_id = r.generation_id
-                 and gen.scope_key = r.scope_key
-                 and gen.status = 'active'
-                where r.source_kind = 'oa_attachment_invoice'
-                  and (
-                    regexp_replace(
-                      coalesce(
-                        nullif(r.payload->>'source_oa_id', ''),
-                        nullif(r.payload->>'source_oa_row_id', ''),
-                        nullif(r.payload->>'derived_from_oa_id', ''),
-                        nullif(r.payload->>'source_expense_item_id', ''),
-                        nullif(r.payload->>'source_id', '')
-                      ),
-                      ':item:.*$',
-                      ''
-                    ) = any(%s)
-                    or r.row_id like any(%s)
-                    or exists (
-                      select 1
-                      from jsonb_array_elements(
-                        case
-                          when jsonb_typeof(r.payload->'source_links') = 'array' then r.payload->'source_links'
-                          else '[]'::jsonb
-                        end
-                      ) link
-                      where regexp_replace(
-                        coalesce(
-                          nullif(link->>'source_oa_id', ''),
-                          nullif(link->>'source_oa_row_id', ''),
-                          nullif(link->>'derived_from_oa_id', ''),
-                          nullif(link->>'source_expense_item_id', ''),
-                          nullif(link->>'source_id', '')
-                        ),
-                        ':item:.*$',
-                        ''
-                      ) = any(%s)
-                    )
-                  )
-                order by r.row_id,
-                  case when r.scope_key = 'all' then 1 else 0 end,
-                  r.updated_at desc nulls last
-            )
-            select row_id, source_kind, status, payload, raw_payload
-            from active_rows
-            order by row_id
-            """,
-            (normalized_oa_row_ids, invoice_like_patterns, normalized_oa_row_ids),
+        invoice_rows = self._load_batch_accounting_invoice_rows(
+            oa_row_ids=normalized_oa_row_ids,
+            allow_all_scope=True,
         )
         return self._batch_accounting_payload_from_rows(
             bank_year=resolved_bank_year,
@@ -11291,7 +11416,37 @@ class PostgresReadModelRepository:
             """,
             ("%日常报销%", "%日常报销%"),
         ) if include_oa else []
-        invoice_rows = self._connection.fetch_all(
+        oa_row_ids = _dedupe_preserve_order(
+            text((_read_model_payload(row) or {}).get("id")) or text(row.get("row_id"))
+            for row in oa_rows
+            if isinstance(row, dict)
+        )
+        invoice_rows = (
+            self._load_batch_accounting_invoice_rows(
+                oa_row_ids=oa_row_ids,
+                allow_all_scope=False,
+            )
+            if include_invoices
+            else []
+        )
+        return self._batch_accounting_payload_from_rows(
+            bank_year=resolved_bank_year,
+            bank_rows=bank_rows,
+            oa_rows=oa_rows,
+            invoice_rows=invoice_rows,
+        )
+
+    def _load_batch_accounting_invoice_rows(
+        self,
+        *,
+        oa_row_ids: list[str],
+        allow_all_scope: bool,
+    ) -> list[dict[str, Any]]:
+        normalized_oa_row_ids = _dedupe_preserve_order(text(row_id) for row_id in list(oa_row_ids or []))
+        if not normalized_oa_row_ids:
+            return []
+        invoice_like_patterns = [f"oa-att-inv-{row_id}%" for row_id in normalized_oa_row_ids]
+        return self._connection.fetch_all(
             """
             with active_rows as (
                 select distinct on (r.row_id)
@@ -11302,21 +11457,51 @@ class PostgresReadModelRepository:
                   on gen.generation_id = r.generation_id
                  and gen.scope_key = r.scope_key
                  and gen.status = 'active'
-                where r.scope_key <> 'all'
-                  and r.source_kind = 'oa_attachment_invoice'
-                order by r.row_id, r.updated_at desc nulls last
+                where r.source_kind = 'oa_attachment_invoice'
+                  and (%s or r.scope_key <> 'all')
+                  and (
+                    regexp_replace(
+                      coalesce(
+                        nullif(r.payload->>'source_oa_id', ''),
+                        nullif(r.payload->>'source_oa_row_id', ''),
+                        nullif(r.payload->>'derived_from_oa_id', ''),
+                        nullif(r.payload->>'source_expense_item_id', ''),
+                        nullif(r.payload->>'source_id', '')
+                      ),
+                      ':item:.*$',
+                      ''
+                    ) = any(%s)
+                    or r.row_id like any(%s)
+                    or exists (
+                      select 1
+                      from jsonb_array_elements(
+                        case
+                          when jsonb_typeof(r.payload->'source_links') = 'array' then r.payload->'source_links'
+                          else '[]'::jsonb
+                        end
+                      ) link
+                      where regexp_replace(
+                        coalesce(
+                          nullif(link->>'source_oa_id', ''),
+                          nullif(link->>'source_oa_row_id', ''),
+                          nullif(link->>'derived_from_oa_id', ''),
+                          nullif(link->>'source_expense_item_id', ''),
+                          nullif(link->>'source_id', '')
+                        ),
+                        ':item:.*$',
+                        ''
+                      ) = any(%s)
+                    )
+                  )
+                order by r.row_id,
+                  case when r.scope_key = 'all' then 1 else 0 end,
+                  r.updated_at desc nulls last
             )
             select row_id, source_kind, status, payload, raw_payload
             from active_rows
             order by row_id
             """,
-            (),
-        ) if include_invoices else []
-        return self._batch_accounting_payload_from_rows(
-            bank_year=resolved_bank_year,
-            bank_rows=bank_rows,
-            oa_rows=oa_rows,
-            invoice_rows=invoice_rows,
+            (allow_all_scope, normalized_oa_row_ids, invoice_like_patterns, normalized_oa_row_ids),
         )
 
     def _batch_accounting_payload_from_rows(

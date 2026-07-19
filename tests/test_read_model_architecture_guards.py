@@ -178,6 +178,11 @@ DIRECT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
     ): (1, "repository fact lookup exposes current relation rows to downstream freshness facade."),
     (
         "backend/src/fin_ops_platform/services/postgres_repositories/read_models.py",
+        "PostgresSearchWorkbenchRelationReadModelRepository.get_batch_accounting_relation_rows_by_ids",
+        "dict read_model_status=fresh",
+    ): (1, "batch accounting relation lookup exposes current rows only after its bulk freshness proof."),
+    (
+        "backend/src/fin_ops_platform/services/postgres_repositories/read_models.py",
         "PostgresSearchWorkbenchRelationReadModelRepository.get_workbench_relation_groups_by_ids",
         "dict read_model_status=fresh",
     ): (1, "repository fact lookup exposes current relation groups to downstream freshness facade."),

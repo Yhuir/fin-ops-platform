@@ -23,6 +23,7 @@ class FakeRelationRepository:
     def __init__(self, payload: dict[str, object] | None = None) -> None:
         self.payload = payload
         self.row_id_calls: list[dict[str, object]] = []
+        self.batch_row_id_calls: list[dict[str, object]] = []
         self.month_calls: list[dict[str, object]] = []
         self.group_calls: list[dict[str, object]] = []
 
@@ -34,6 +35,18 @@ class FakeRelationRepository:
         scope_keys_hint: list[str] | None = None,
     ) -> dict[str, object] | None:
         self.row_id_calls.append(
+            {"row_ids": list(row_ids), "tenant_id": tenant_id, "scope_keys_hint": list(scope_keys_hint or [])}
+        )
+        return self.payload
+
+    def get_batch_accounting_relation_rows_by_ids(
+        self,
+        row_ids: list[str],
+        *,
+        tenant_id: str = "default",
+        scope_keys_hint: list[str] | None = None,
+    ) -> dict[str, object] | None:
+        self.batch_row_id_calls.append(
             {"row_ids": list(row_ids), "tenant_id": tenant_id, "scope_keys_hint": list(scope_keys_hint or [])}
         )
         return self.payload
@@ -87,6 +100,21 @@ class UnderlyingWorkbenchRelationRepository:
             )
         )
         return {"read_model_status": "fresh", "rows": [{"row_id": "txn-1"}]}
+
+    def get_batch_accounting_relation_rows_by_ids(
+        self,
+        row_ids: list[str],
+        *,
+        tenant_id: str = "default",
+        scope_keys_hint: list[str] | None = None,
+    ) -> dict[str, object]:
+        self.calls.append(
+            (
+                "get_batch_accounting_relation_rows_by_ids",
+                {"row_ids": list(row_ids), "tenant_id": tenant_id, "scope_keys_hint": list(scope_keys_hint or [])},
+            )
+        )
+        return {"read_model_status": "fresh", "rows": [{"row_id": "txn-batch-1"}]}
 
     def list_workbench_relation_rows(
         self,
@@ -323,6 +351,82 @@ class RelationGroupPayloadConnection:
         return None
 
 
+class BatchAccountingBulkRelationConnection:
+    def __init__(self, *, missing_scope: str = "", dirty_scope: str = "", dirty_status: str = "") -> None:
+        self.missing_scope = missing_scope
+        self.dirty_scope = dirty_scope
+        self.dirty_status = dirty_status
+        self.fetch_all_calls: list[tuple[str, tuple]] = []
+        self.fetch_one_calls: list[tuple[str, tuple]] = []
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_all_calls.append((normalized, params))
+        if "from unnest(%s::text[]) with ordinality" in normalized:
+            return [
+                {
+                    "scope_key": scope_key,
+                    "scope_exists": scope_key != self.missing_scope,
+                    "source_versions": {"workbench_relation_schema_version": "bulk-v1"},
+                    "dirty_status": self.dirty_status if scope_key == self.dirty_scope else None,
+                }
+                for scope_key in params[0]
+            ]
+        if "from read_model.workbench_relation_rows" in normalized:
+            return [
+                {
+                    "row_id": "txn-batch-1",
+                    "row_type": "bank_transaction",
+                    "scope_key": "2026-01",
+                    "scope_month": "2026-01-01",
+                    "relation_status": "unlinked",
+                    "group_ids": [],
+                    "linked_oa": [],
+                    "linked_bank_transactions": [],
+                    "linked_input_invoices": [],
+                    "linked_output_invoices": [],
+                    "source_versions": {"workbench_relation_schema_version": "row-v1"},
+                    "payload": {"row_id": "txn-batch-1", "row_type": "bank_transaction"},
+                    "raw_payload": {},
+                }
+            ]
+        if "from read_model.workbench_relation_groups" in normalized and "special_metadata" in normalized:
+            return [
+                {
+                    "group_id": "CASE-BATCH-1",
+                    "scope_key": "2026-01",
+                    "scope_month": "2026-01-01",
+                    "relation_source": "manual",
+                    "relation_kind": "oa_bank",
+                    "relation_status": "linked",
+                    "oa_row_ids": ["oa-batch-1"],
+                    "bank_transaction_ids": ["txn-batch-1"],
+                    "input_invoice_ids": [],
+                    "output_invoice_ids": [],
+                    "source_versions": {"workbench_relation_schema_version": "group-v1"},
+                    "payload": {
+                        "group_id": "CASE-BATCH-1",
+                        "relation_mode": "batch_accounting",
+                        "relation_status": "linked",
+                        "row_ids": ["txn-batch-1", "oa-batch-1"],
+                        "row_types": ["bank", "oa"],
+                        "special_metadata": {"source": "batch_accounting", "bank_year": "2026"},
+                    },
+                    "raw_payload": {},
+                }
+            ]
+        if "from read_model.workbench_relation_groups" in normalized:
+            return []
+        return []
+
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict[str, object] | None:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_one_calls.append((normalized, params))
+        if "count(distinct group_id)" in normalized:
+            return {"submitted_count": 1}
+        return None
+
+
 class WorkbenchRelationReadModelRepositoryPortTests(unittest.TestCase):
     def test_port_excludes_unrelated_read_model_methods(self) -> None:
         underlying = UnderlyingWorkbenchRelationRepository()
@@ -335,6 +439,14 @@ class WorkbenchRelationReadModelRepositoryPortTests(unittest.TestCase):
                 scope_keys_hint=["2026-01"],
             )["rows"][0]["row_id"],
             "txn-1",
+        )
+        self.assertEqual(
+            port.get_batch_accounting_relation_rows_by_ids(
+                ["txn-batch-1"],
+                tenant_id="tenant",
+                scope_keys_hint=["2026-01"],
+            )["rows"][0]["row_id"],
+            "txn-batch-1",
         )
         self.assertEqual(
             port.list_workbench_relation_rows(
@@ -391,6 +503,7 @@ class WorkbenchRelationReadModelRepositoryPortTests(unittest.TestCase):
             [name for name, _payload in underlying.calls],
             [
                 "get_workbench_relation_rows_by_ids",
+                "get_batch_accounting_relation_rows_by_ids",
                 "list_workbench_relation_rows",
                 "get_workbench_relation_groups_by_ids",
                 "workbench_relation_source_versions",
@@ -404,6 +517,93 @@ class WorkbenchRelationReadModelRepositoryPortTests(unittest.TestCase):
 
 
 class WorkbenchRelationReadFacadeTests(unittest.TestCase):
+    def test_batch_accounting_repository_uses_fixed_statement_counts(self) -> None:
+        row_connection = BatchAccountingBulkRelationConnection()
+        row_repository = PostgresReadModelRepository(row_connection)
+
+        row_payload = row_repository.get_batch_accounting_relation_rows_by_ids(
+            ["txn-batch-1"],
+            scope_keys_hint=["2026-01"],
+        )
+
+        self.assertEqual(row_payload["read_model_status"], "fresh")
+        self.assertEqual(len(row_connection.fetch_all_calls), 2)
+        self.assertEqual(
+            sum("from unnest(%s::text[]) with ordinality" in sql for sql, _params in row_connection.fetch_all_calls),
+            1,
+        )
+
+        count_connection = BatchAccountingBulkRelationConnection()
+        count_payload = PostgresReadModelRepository(count_connection).count_batch_accounting_relations_by_year(
+            year="2026"
+        )
+        self.assertEqual(count_payload["submitted_count"], 1)
+        self.assertEqual(len(count_connection.fetch_all_calls) + len(count_connection.fetch_one_calls), 2)
+
+        list_connection = BatchAccountingBulkRelationConnection()
+        list_payload = PostgresReadModelRepository(list_connection).list_batch_accounting_relation_groups_by_year(
+            year="2026"
+        )
+        self.assertEqual(list_payload["read_model_status"], "fresh")
+        self.assertEqual(list_payload["groups"][0]["group_id"], "CASE-BATCH-1")
+        self.assertEqual(len(list_connection.fetch_all_calls) + len(list_connection.fetch_one_calls), 2)
+
+    def test_batch_accounting_bulk_proof_preserves_non_fresh_contract(self) -> None:
+        missing_connection = BatchAccountingBulkRelationConnection(missing_scope="2026-12")
+        missing_payload = PostgresReadModelRepository(missing_connection).count_batch_accounting_relations_by_year(
+            year="2026"
+        )
+        self.assertEqual(missing_payload["read_model_status"], "missing")
+        self.assertIn("missing_scope:2026-12", missing_payload["stale_reasons"])
+        self.assertEqual(missing_payload["submitted_count"], 0)
+        self.assertEqual(len(missing_connection.fetch_all_calls), 1)
+        self.assertEqual(missing_connection.fetch_one_calls, [])
+
+        refreshing_connection = BatchAccountingBulkRelationConnection(
+            dirty_scope="2026-06",
+            dirty_status="processing",
+        )
+        refreshing_payload = PostgresReadModelRepository(
+            refreshing_connection
+        ).count_batch_accounting_relations_by_year(year="2026")
+        self.assertEqual(refreshing_payload["read_model_status"], "refreshing")
+        self.assertIn("refreshing:2026-06", refreshing_payload["stale_reasons"])
+        self.assertEqual(refreshing_payload["submitted_count"], 0)
+        self.assertEqual(len(refreshing_connection.fetch_all_calls), 1)
+        self.assertEqual(refreshing_connection.fetch_one_calls, [])
+
+    def test_batch_accounting_row_lookup_uses_dedicated_repository_io(self) -> None:
+        repository = FakeRelationRepository(
+            {
+                "read_model_status": "fresh",
+                "rows": [{"row_id": "txn-batch-1", "relation_status": "unlinked"}],
+                "groups": [],
+                "source_versions": {"workbench_relation_schema_version": "test"},
+                "read_model_scope_keys": ["2026-01"],
+                "stale_reasons": [],
+            }
+        )
+        facade = WorkbenchRelationReadFacade(read_model_repository=repository)
+
+        payload = facade.get_batch_accounting_by_row_ids(
+            ["txn-batch-1"],
+            scope_keys_hint=["2026-01"],
+        )
+
+        self.assertEqual(payload["status"], "fresh")
+        self.assertEqual(payload["rows"][0]["row_id"], "txn-batch-1")
+        self.assertEqual(repository.row_id_calls, [])
+        self.assertEqual(
+            repository.batch_row_id_calls,
+            [
+                {
+                    "row_ids": ["txn-batch-1"],
+                    "tenant_id": "default",
+                    "scope_keys_hint": ["2026-01"],
+                }
+            ],
+        )
+
     def test_source_versions_for_month_uses_scope_metadata_without_loading_rows(self) -> None:
         repository = UnderlyingWorkbenchRelationRepository()
         facade = WorkbenchRelationReadFacade(read_model_repository=repository)

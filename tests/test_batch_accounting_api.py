@@ -55,7 +55,7 @@ class FakeBatchRelationFacade:
         payload["read_model_scope_keys"] = [f"{year}-{month:02d}" for month in range(1, 13)]
         return payload
 
-    def get_by_row_ids(self, row_ids: list[str], **kwargs: object) -> dict[str, object]:
+    def get_batch_accounting_by_row_ids(self, row_ids: list[str], **kwargs: object) -> dict[str, object]:
         self.calls.append({"row_ids": list(row_ids), **kwargs})
         payload = self._payload()
         payload["rows"] = [
@@ -185,8 +185,8 @@ class NonFreshBatchRelationFacade(FakeBatchRelationFacade):
             payload["refresh_enqueued"] = bool(kwargs.get("require_fresh"))
         return payload
 
-    def get_by_row_ids(self, row_ids: list[str], **kwargs: object) -> dict[str, object]:
-        payload = super().get_by_row_ids(row_ids, **kwargs)
+    def get_batch_accounting_by_row_ids(self, row_ids: list[str], **kwargs: object) -> dict[str, object]:
+        payload = super().get_batch_accounting_by_row_ids(row_ids, **kwargs)
         if self._refresh_enqueued is None:
             payload["refresh_enqueued"] = bool(kwargs.get("require_fresh"))
         return payload
@@ -256,7 +256,7 @@ class RowsBatchRelationFacade:
             "stale_reasons": [],
         }
 
-    def get_by_row_ids(self, row_ids: list[str], **kwargs: object) -> dict[str, object]:
+    def get_batch_accounting_by_row_ids(self, row_ids: list[str], **kwargs: object) -> dict[str, object]:
         self.calls.append({"row_ids": list(row_ids), **kwargs})
         row_id_set = {str(row_id) for row_id in row_ids}
         payload = self._payload()

@@ -665,13 +665,17 @@ class Application:
         facade = getattr(self, "_workbench_relation_facade", None)
         if isinstance(facade, WorkbenchRelationReadFacade):
             return facade
-        if facade is not None and callable(getattr(facade, "get_by_row_ids", None)):
+        if facade is not None and (
+            callable(getattr(facade, "get_by_row_ids", None))
+            or callable(getattr(facade, "get_batch_accounting_by_row_ids", None))
+        ):
             return facade
         if not self._requires_sql_read_model_runtime():
             return None
         repository = getattr(self, "_workbench_relation_sql_read_repository", None)
         required_methods = (
             "get_workbench_relation_rows_by_ids",
+            "get_batch_accounting_relation_rows_by_ids",
             "list_workbench_relation_rows",
             "get_workbench_relation_groups_by_ids",
         )

@@ -822,19 +822,23 @@ class BatchAccountingService:
         )
         if not row_ids or self._relation_facade is None:
             return set(), set()
-        reader = getattr(self._relation_facade, "get_by_row_ids", None)
+        reader = getattr(self._relation_facade, "get_batch_accounting_by_row_ids", None)
         if not callable(reader):
+            read_model_status.record(
+                {
+                    "status": "unavailable",
+                    "read_model_scope_keys": self._scope_keys_for_rows(rows),
+                    "stale_reasons": ["batch_accounting_relation_reader_unavailable"],
+                }
+            )
             return set(), set()
         scope_keys_hint = self._scope_keys_for_rows(rows)
-        try:
-            payload = reader(
-                row_ids,
-                require_fresh=True,
-                reason="batch_accounting_unsubmitted_relations",
-                scope_keys_hint=scope_keys_hint,
-            )
-        except TypeError:
-            payload = reader(row_ids)
+        payload = reader(
+            row_ids,
+            require_fresh=True,
+            reason="batch_accounting_unsubmitted_relations",
+            scope_keys_hint=scope_keys_hint,
+        )
         read_model_status.record(payload if isinstance(payload, dict) else None)
         if not isinstance(payload, dict):
             return set(), set()
@@ -964,13 +968,20 @@ class BatchAccountingService:
                 normalized_ids.append(text)
         if not normalized_ids or self._relation_facade is None:
             return {}
-        reader = getattr(self._relation_facade, "get_by_row_ids", None)
+        reader = getattr(self._relation_facade, "get_batch_accounting_by_row_ids", None)
         if not callable(reader):
+            read_model_status.record(
+                {
+                    "status": "unavailable",
+                    "stale_reasons": ["batch_accounting_relation_reader_unavailable"],
+                }
+            )
             return {}
-        try:
-            payload = reader(normalized_ids, require_fresh=True, reason="batch_accounting_submitted_relations")
-        except TypeError:
-            payload = reader(normalized_ids)
+        payload = reader(
+            normalized_ids,
+            require_fresh=True,
+            reason="batch_accounting_submitted_relations",
+        )
         read_model_status.record(payload if isinstance(payload, dict) else None)
         if not isinstance(payload, dict):
             return {}

@@ -1,0 +1,74 @@
+# 批量账务性能实施计划
+
+日期：2026-07-20
+
+## 目标
+
+在不改变业务口径、API shape、权限、read model/worker 和其他页面通用 I/O 的前提下，将批量账务读取从按 scope 线性查询降为固定查询次数，并删除未提交列表的无界附件读取。
+
+## 实施步骤
+
+### 1. 专用 relation repository I/O
+
+- 增加 `get_batch_accounting_relation_rows_by_ids(...)`。
+- 增加内部批量 scope proof：用一个有序 `unnest(scope_keys)` 查询同时读取 scope metadata 和 current-effective dirty status。
+- 年度 count 改为“1 次批量 proof + 1 次 count”。
+- 年度 list 改为“1 次批量 proof + 1 次 groups”，组装结果时复用第一次 proof，不再二次证明。
+- 保持 status、stale reasons、source versions、scope keys 和 rows/groups DTO 等价。
+
+### 2. 端口与 facade
+
+- `WorkbenchRelationReadModelRepositoryPort` 仅暴露新增的窄方法。
+- `WorkbenchRelationReadFacade` 增加 `get_batch_accounting_by_row_ids(...)`，继续复用既有 `_result_from_repository_payload` 与 refresh gateway。
+- 更新 read model manifest 的 repository port contract。
+- BatchAccountingService 的未提交候选排除和已提交明细只调用新方法；不提供通用旧方法 fallback，依赖缺失时 fail closed。
+
+### 3. 收窄 OA 附件 I/O
+
+- 从已读取 OA payload 中提取 OA row IDs。
+- 附件 SQL 只查询这些 OA IDs/兼容 row-id/source-links，空 OA 列表时不查附件。
+- submit 现有窄 loader 与 list loader 复用同一私有读取 helper；参数明确控制是否允许 `all` scope fallback，保持 submit 既有语义和 list 的非-all语义。
+- 删除 list 原有无 OA 条件的全量附件 SQL，不保留兼容分支。
+
+### 4. 测试与架构门禁
+
+1. 业务核心单元：不改变业务规则，不新增专门业务单测；既有筛选、金额、submit/withdraw 状态测试回归。
+2. Service：验证候选和 submitted detail 只使用 batch 专用 facade 方法，缺失依赖 fail closed。
+3. API contract：完整 `tests/test_batch_accounting_api.py`，确保 response/status/refresh contract 不变。
+4. Read model/cache/job：
+   - fresh/missing/refreshing/stale 的批量 proof 等价测试；
+   - 12 scope count/list 查询数固定；
+   - row lookup 查询数不随 scope 数增长；
+   - non-fresh 仍由 facade enqueue；
+   - OA 附件只按候选 IDs 查询。
+5. Frontend：无前端行为改动；运行 BatchAccountingPage/API 既有组件测试作为回归，不新增实现细节测试。
+6. E2E：运行批量账务关键流测试；本地/生产写入分别受环境和 App Health preflight 约束。
+7. Existing regression：运行 workbench relation facade、SQL runtime、manifest、architecture guards，并验证关联台/银行明细/成本统计等直接共享消费者 Audit。
+
+### 5. 文档
+
+- 更新 batch-accounting README、boundary-io、tests、implementation-notes。
+- 更新 workbench-relations boundary I/O、read-model contracts 与 runtime ownership/manifest 事实。
+- API shape 和产品口径不变，不改产品 spec/API contract；若实现核验发现长期事实描述需要更新，再做最小修订。
+
+### 6. 发布与生产验证
+
+- 相关测试、lint、docs、diff-check 通过后，提交并 push `main`。
+- 使用 `./scripts/deploy-oa.sh` 部署精确 SHA。
+- authenticated 20-sample：shell、unsubmitted 2026、submitted 2026、Page Audit。
+- 读取 dashboard 的 duration、DB duration、query count，验证 query p95 `<=10`。
+- 做直接及跨页 Page Audit。
+- 生产 submit→fresh→withdraw→fresh 仅在 `app-health-operations` 强制 preflight 通过后执行；否则记录为最终系统门待办，绝不绕过。
+- 失败回滚：回滚本轮 commit 并重新部署上一精确 release；无 migration、schema 或数据回滚。
+
+## 第三次计划反审阅
+
+- 生产级：包含权限/契约保持、freshness、审计、回滚、生产指标和失败门禁。
+- 模块化：批量账务拥有专用 relation read I/O；共享事实源只读，其他页面入口不变。
+- 简洁：只增加一个批量 proof 能力和一个收窄附件 helper，无新基础设施或抽象层。
+- 高性能：直接消除生产量化的 52–66 查询扇出和无界附件扫描。
+- 旧链删除：service 不再调用通用 relation lookup；年度重复 proof 和无条件附件 SQL 被删除，并由 guard 固化。
+- 隔离：不改变 shared generic facade 行为、API DTO、worker、command 或其他页面 read model。
+- 闭环：代码、七类测试判定、文档、提交、部署、生产读写门禁、跨页 Audit、回滚均有明确完成条件。
+
+审阅结论：计划满足要求，没有需要在实现前新增的层或基础设施。唯一条件性后续是：部署后若 p95 仍未达标，必须依据 EXPLAIN/生产 dashboard 再决定是否做候选 SQL 分页或索引，不提前设计。

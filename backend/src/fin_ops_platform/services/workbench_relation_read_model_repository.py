@@ -23,6 +23,20 @@ class WorkbenchRelationReadModelRepositoryPort:
         )
         return dict(payload) if isinstance(payload, dict) else None
 
+    def get_batch_accounting_relation_rows_by_ids(
+        self,
+        row_ids: list[str],
+        *,
+        tenant_id: str = "default",
+        scope_keys_hint: list[str] | None = None,
+    ) -> dict[str, object] | None:
+        payload = self._repository.get_batch_accounting_relation_rows_by_ids(
+            row_ids,
+            tenant_id=tenant_id,
+            scope_keys_hint=scope_keys_hint,
+        )
+        return dict(payload) if isinstance(payload, dict) else None
+
     def list_workbench_relation_rows(
         self,
         *,

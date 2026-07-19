@@ -2546,11 +2546,20 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         bank_query = next(sql for sql in workbench_row_queries if "r.source_kind = 'bank'" in sql)
         oa_query = next(sql for sql in workbench_row_queries if "r.source_kind = 'oa'" in sql)
         invoice_query = next(sql for sql in workbench_row_queries if "r.source_kind = 'oa_attachment_invoice'" in sql)
+        invoice_params = next(
+            params
+            for sql, params in connection.fetch_all_calls
+            if "from read_model.workbench_rows" in sql and "r.source_kind = 'oa_attachment_invoice'" in sql
+        )
         self.assertIn("r.scope_month >= %s::date", bank_query)
         self.assertIn("r.payload->>'apply_type' like %s", oa_query)
         self.assertIn("r.payload->>'expense_type' like %s", oa_query)
         self.assertNotIn("r.scope_month >= %s::date", oa_query)
         self.assertNotIn("r.scope_month >= %s::date", invoice_query)
+        self.assertIn("regexp_replace", invoice_query)
+        self.assertIn("= any(%s)", invoice_query)
+        self.assertEqual(invoice_params[0], False)
+        self.assertEqual(invoice_params[1], ["oa-exp-ba-001"])
 
     def test_repository_groups_page_pins_versions_counts_and_rows_to_single_active_generation(self) -> None:
         connection = SwitchingActiveWorkbenchGenerationConnection()

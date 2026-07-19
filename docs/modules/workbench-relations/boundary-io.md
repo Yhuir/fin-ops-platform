@@ -1,6 +1,6 @@
 # Workbench 正式关系边界与 I/O
 
-日期：2026-07-16
+日期：2026-07-20
 
 ## Owner
 
@@ -21,6 +21,7 @@ Release A 已移除旧 `read_model.workbench_candidate_matches`、`read_model.wo
 | current snapshot | relation repository | active + relevant historical facts，必须在 UoW transaction 中加载 |
 | withdraw command | owner API | active case identity、preview id、expected versions、reason |
 | read request | downstream facade | scope keys、row ids、`require_fresh`、source version contract |
+| batch-accounting read request | `BatchAccountingService` via facade/port | 候选 row ids 或年份；使用批量账务专用 row reader 和有序 bulk scope proof，固定查询次数返回等价 freshness/status；不得改变其他页面通用 reader 行为 |
 | OA canonical snapshot changed | OA integration transactional writer | 只允许在提交 OA canonical snapshot 的同一事务中按精确月份标记 `workbench_relation` dirty/outbox；该 target 必须先于同事务的 `oa_pending_payment` consumer target，使 OA worker 对旧 relation fail-closed。它不写 relation fact，也不改变本模块 owner。 |
 
 ## 输出 I/O
@@ -53,6 +54,7 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 - `require_fresh=True` 时，missing/stale/source mismatch 必须返回非 fresh 并受控 enqueue，调用方不得把空 rows 当作无关系。
 - 下游只有 active relation 是 linked 证据。历史关系、显示 tags、候选搜索结果、matching evidence 都不是支付/关联/成本证据。
 - downstream read models 必须记录并比较 relation source versions，relation mutation 后旧 payload 不得继续 fresh。
+- 批量账务专用 `get_batch_accounting_by_row_ids`、年度 count/list 必须共享同一 bulk scope proof 语义：一次读取所有 requested scopes 及 current-effective dirty status，保留原 status/reason/source-version 合同；不能回退通用逐 scope查询。该优化只改变批量账务 reader 的 I/O 次数，不改变其他 consumer 的通用 facade 方法。
 
 ## 文件范围
 

@@ -4490,6 +4490,16 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         service_source = service_path.read_text(encoding="utf-8")
         service_tree = _parse(service_path)
         submitted_relations_source = _function_source(service_tree, service_source, "_submitted_relations")
+        unsubmitted_distribution_source = _function_source(
+            service_tree,
+            service_source,
+            "_relation_distribution_row_id_sets",
+        )
+        submitted_distribution_source = _function_source(
+            service_tree,
+            service_source,
+            "_distribution_rows_by_bank_id",
+        )
         workbench_context_source = _function_source(service_tree, service_source, "_build_workbench_row_context")
         service_factory_source = _function_source(tree, source, "_batch_accounting_service")
 
@@ -4521,6 +4531,11 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("submitted batch accounting list no longer uses the year-level relation DTO boundary")
         if "list_by_month" in submitted_relations_source:
             violations.append("submitted batch accounting list keeps legacy 12-month relation scan fallback")
+        for distribution_source in (unsubmitted_distribution_source, submitted_distribution_source):
+            if "get_batch_accounting_by_row_ids" not in distribution_source:
+                violations.append("batch accounting relation distribution no longer uses its dedicated row read I/O")
+            if 'getattr(self._relation_facade, "get_by_row_ids"' in distribution_source:
+                violations.append("batch accounting relation distribution keeps the generic row read fallback")
         for forbidden in ("grouped_workbench_loader", "_build_api_workbench_payload"):
             if forbidden in service_source:
                 violations.append(f"BatchAccountingService keeps full Workbench payload fallback {forbidden}")
@@ -4535,6 +4550,27 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if required_loader not in service_factory_source:
                 violations.append(f"Application batch accounting wiring is missing dedicated loader {required_loader}")
+
+        read_model_path = SERVICES_ROOT / "postgres_repositories" / "read_models.py"
+        read_model_source = read_model_path.read_text(encoding="utf-8")
+        read_model_tree = _parse(read_model_path)
+        batch_loader_source = _function_source(
+            read_model_tree,
+            read_model_source,
+            "_load_batch_accounting_workbench_payload",
+        )
+        invoice_loader_source = _function_source(
+            read_model_tree,
+            read_model_source,
+            "_load_batch_accounting_invoice_rows",
+        )
+        if "_load_batch_accounting_invoice_rows" not in batch_loader_source:
+            violations.append("batch accounting list no longer uses the OA-id-scoped attachment loader")
+        if "oa_row_ids=oa_row_ids" not in batch_loader_source or "allow_all_scope=False" not in batch_loader_source:
+            violations.append("batch accounting list attachment I/O is no longer bounded to current non-all OA candidates")
+        for required_filter in ("normalized_oa_row_ids", "= any(%s)", "r.row_id like any(%s)"):
+            if required_filter not in invoice_loader_source:
+                violations.append(f"batch accounting attachment loader is missing scoped filter {required_filter}")
 
         mutation_handlers = (
             (

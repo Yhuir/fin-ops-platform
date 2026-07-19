@@ -78,6 +78,7 @@ READ_MODEL_MANIFEST: dict[str, ReadModelManifestEntry] = {
             "save_workbench_relation_distribution",
             "mark_workbench_relation_scope_empty",
             "get_workbench_relation_rows_by_ids",
+            "get_batch_accounting_relation_rows_by_ids",
             "list_workbench_relation_rows",
             "get_workbench_relation_groups_by_ids",
             "workbench_relation_source_versions",

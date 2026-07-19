@@ -364,3 +364,13 @@
   - `bash scripts/verify.sh docs`
 - 未测风险：真实生产 PostgreSQL 历史批量账务关系、真实 RabbitMQ/Redis/systemd `workbench-relation` worker drain、大数据浏览器性能和下游页面最终展示仍需 staging/发布前 smoke。
 - 后续事项：后续改动若触及 relation freshness、DTO shape、提交/撤回规则或 Workbench relation fan-out，必须先按 `tests.md` 选择窄范围回归，再升级到跨模块验证。
+# 2026-07-20 - 批量账务固定查询数读取优化
+
+- 目标：把生产未提交 GET p95 `638.061ms`、单请求 DB query count p95 `66` 降到页面门槛以内，同时保持 Workbench/workbench_relation 事实源、freshness/enqueue、API shape 和其他页面 reader 不变。
+- 真实原因：批量账务候选、年度 count/list 复用了通用逐 scope freshness proof，每个 scope 分别查询 scope metadata 和 dirty status；已提交 list 还在 groups 查询后重复证明。未提交 loader 同时无条件读取全部 OA 附件候选。
+- 设计：新增 batch 专用 `get_batch_accounting_by_row_ids` facade/port/repository I/O；一个有序 bulk SQL 同时读取所有 scope metadata 与 current-effective dirty status。年度 count/list 固定为 2 条语句，候选 detail 固定为 2–3 条。OA 附件 SQL 只接受当前 OA IDs，submit/list 复用同一私有 helper 并显式区分 `all` scope 策略。
+- 隔离：通用 `get_by_row_ids`、其他页面 facade、worker、read model schema、queue、command service、API DTO 和前端不变；没有新增表、migration、缓存、索引、worker 或依赖。
+- 旧链删除：BatchAccountingService 不再调用通用 `get_by_row_ids`；年度 count/list 不再逐月或重复 proof；未提交 loader 删除无 OA-ID 条件的附件全量扫描。静态 guard 阻止这些路径回归。
+- 测试：`tests/test_workbench_relation_read_facade.py` 覆盖固定 statement count、fresh/missing/refreshing 等价、专用 port/facade；`tests/test_workbench_sql_runtime.py` 覆盖 OA-ID-scoped attachment SQL；`tests/test_batch_accounting_api.py` 覆盖 service/API 输出回归；manifest 和 runtime boundary guards 固化 owner 与旧链删除。`tests/test_batch_accounting_postgres_integration.py` 在本机 visibly disposable PostgreSQL 应用 0001–0111 后通过 2 项，真实执行 bulk proof、count/list/row lookup、processing fail-closed 和附件收窄 SQL；临时数据库已删除并确认不存在。
+- 生产基线：shell p95 `104.966ms`；unsubmitted p95 `638.061ms`（未达 `500ms`）；submitted p95 `390.986ms`；Page Audit p95 `375.765ms`；dashboard DB query count p50/p95/p99 `52/66/71`。
+- 发布后验收：unsubmitted/submitted 20-sample p95 `<=500ms`（目标 `<=300ms`），query count `<=10`，Page Audit pass/fresh/drained/ready/0 issue；生产写 smoke 必须先通过全局 `app-health-operations` preflight，失败不得绕过。

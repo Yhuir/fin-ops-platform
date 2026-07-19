@@ -70,6 +70,39 @@ class WorkbenchRelationReadFacade:
         self._last_result = result
         return result
 
+    def get_batch_accounting_by_row_ids(
+        self,
+        row_ids: list[str],
+        *,
+        require_fresh: bool = True,
+        reason: str = "batch_accounting_relation_read",
+        scope_keys_hint: list[str] | None = None,
+    ) -> dict[str, Any]:
+        normalized_ids = _dedupe_preserve_order(text(value) for value in list(row_ids or []))
+        if not normalized_ids:
+            result = _facade_result(status=FRESH_WORKBENCH_RELATION_STATUS)
+            self._last_result = result
+            return result
+        fallback_scope_keys = _fallback_scope_keys(scope_keys_hint=scope_keys_hint)
+        reader = getattr(self._read_model_repository, "get_batch_accounting_relation_rows_by_ids", None)
+        if not callable(reader):
+            return self._non_fresh_result(
+                status="unavailable",
+                scope_keys=fallback_scope_keys,
+                require_fresh=require_fresh,
+                reason=reason,
+                stale_reasons=["repository_method_unavailable"],
+            )
+        payload = reader(normalized_ids, tenant_id=self._tenant_id, scope_keys_hint=fallback_scope_keys)
+        result = self._result_from_repository_payload(
+            payload,
+            require_fresh=require_fresh,
+            reason=reason,
+            fallback_scope_keys=fallback_scope_keys,
+        )
+        self._last_result = result
+        return result
+
     def list_by_month(
         self,
         month: str,

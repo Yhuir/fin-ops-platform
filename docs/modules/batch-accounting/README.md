@@ -39,7 +39,7 @@
 
 - 银行流水、OA 行和已有关联关系来自 Workbench / Workbench relation read model。
 - `GET /api/batch-accounting` 必须返回 `summary`、`bank_rows`、`oa_rows`、`relations_by_bank_row_id`、`read_model_status`、`read_model_stale_reasons`、`read_model_scope_keys`、`refresh_enqueued`。显式传入 `page/page_size`、`bank_page/bank_page_size` 或 `oa_page/oa_page_size` 时，后端只裁剪对应列表并返回 `pagination`；不传分页参数时保持旧响应 shape。
-- 未提交 bucket 的 read path 必须把 Workbench 输入先收窄为批量账务银行候选和日常报销 OA 候选，再调用 `workbench_relation` facade；`submitted_count` 通过 relation read facade 的年份轻量统计 I/O 取得，不能为未提交首屏加载 12 个月完整 submitted relation DTO。
+- 未提交 bucket 的 read path 必须把 Workbench 输入先收窄为批量账务银行候选和日常报销 OA 候选；OA 附件只按这些 OA IDs 读取。候选 relation 必须调用 `get_batch_accounting_by_row_ids` 专用 bulk freshness I/O；`submitted_count` 使用一次年度 bulk proof + count，不能进入通用逐 scope lookup 或加载完整 submitted relation DTO。
 - 前端未提交 bucket 首屏默认以 200 行页大小分别请求银行流水和可关联 OA 项，并提供独立分页控件；切换 bucket 或流水年份会重置页码、选择和差额说明，避免跨页旧选择误提交。右侧 OA 不按年份过滤，只展示没有关联银行流水的日常报销 OA 主单；仅发票关系或无流水候选关系不应把该 OA 排除。已提交 bucket 只分页银行关系列表，OA 明细来自当前可见 relation bucket。
 - `POST /api/batch-accounting/submit` 必须优先通过 Workbench SQL active read model 的窄读口读取本次选中银行流水、OA 主单和对应 OA 附件发票，并通过 `WorkbenchRelationCommandService.confirm_relation(...)` 写入 relation，`special_metadata.source` 必须是 `batch_accounting`，`special_metadata.affected_scope_keys` 必须记录本次关系涉及的具体月份；缺少 command service 时 fail fast，不回退 direct pair relation mutation。
 - `POST /api/batch-accounting/{relation_id}/withdraw` 只能撤回当前 active 的批量账务关系，并保留提交/撤回历史备注；撤回必须通过 durable relation command repository 取消当前 batch relation，记录 `withdraw_link` history。它不走旧 snapshot restore，也不得把 OA 附件 case_id / `existing_case` 显示归属恢复成 active relation。
@@ -58,7 +58,7 @@
 - read model refresh 的事实源是 durable queue / `workbench_relation.read_model.refresh`，不是前端事件。
 - 批量账务 GET 必须保持只读；不能在列表读取路径执行 legacy relation repair。
 - 批量账务显式分页的 `page_size` 上限为 200，超限必须返回 `invalid_paging`，不能为了首屏性能静默全量返回或把 stale relation distribution 伪装成 fresh。
-- 批量账务 SQL 读路径分三类 I/O：未提交列表只用年份候选 loader；submit command 只用 `bank_row_id + oa_row_ids` 窄 loader；已提交 bucket 只用年份级 batch-accounting relation DTO 和银行行窄 payload。三者不能相互复用，也不能回退 Workbench full-page builder；缺少对应 loader/reader 时必须 fail closed 为 unavailable。
+- 批量账务 SQL 读路径分三类 I/O：未提交列表只用年份候选 loader、OA-ID-scoped 附件读取和专用 bulk relation reader；submit command 只用 `bank_row_id + oa_row_ids` 窄 loader；已提交 bucket 只用年份级 bulk-proof relation DTO 和银行行窄 payload。三者不能相互复用，也不能回退通用逐 scope relation reader 或 Workbench full-page builder；缺少对应 loader/reader 时必须 fail closed。
 
 ## 影响面清单
 
