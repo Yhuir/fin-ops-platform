@@ -14,25 +14,6 @@ MutationSessionResolver = Callable[[dict[str, str] | None], OARequestSession | A
 JsonBodyLoader = Callable[[str | bytes | None], tuple[dict[str, Any], Any | None]]
 JsonResponse = Callable[[HTTPStatus, dict[str, Any]], Any]
 
-BANK_FLOW_RULE_BATCH_LEGACY_ERROR_CODES = {
-    "no_oa_bank_batch_persistence_failed": "bank_flow_rule_batch_persistence_failed",
-    "no_oa_bank_batch_version_conflict": "bank_flow_rule_batch_version_conflict",
-    "no_oa_bank_batch_relation_read_model_not_fresh": "bank_flow_rule_batch_relation_read_model_not_fresh",
-    "no_oa_bank_batch_relation_active_row_conflict": "bank_flow_rule_batch_relation_active_row_conflict",
-    "no_oa_bank_batch_relation_not_found": "bank_flow_rule_batch_relation_not_found",
-    "no_oa_bank_batch_relation_case_id_required": "bank_flow_rule_batch_relation_case_id_required",
-    "no_oa_bank_batch_relation_command_unavailable": "bank_flow_rule_batch_relation_command_unavailable",
-    "no_oa_bank_batch_selection_empty": "bank_flow_rule_batch_selection_empty",
-    "no_oa_bank_batch_selection_duplicate_rows": "bank_flow_rule_batch_selection_duplicate_rows",
-    "no_oa_bank_batch_selection_unknown_row": "bank_flow_rule_batch_selection_unknown_row",
-    "no_oa_bank_batch_selection_internal_transfer_requires_pair": (
-        "bank_flow_rule_batch_selection_internal_transfer_requires_pair"
-    ),
-    "no_oa_bank_batch_selection_internal_transfer_conflict": (
-        "bank_flow_rule_batch_selection_internal_transfer_conflict"
-    ),
-}
-
 BANK_FLOW_RULE_BATCH_CONFLICT_ERROR_CODES = frozenset(
     {
         "bank_flow_rule_batch_version_conflict",
@@ -249,9 +230,7 @@ class BankFlowRuleBatchApiRoutes:
 
     @staticmethod
     def _persistence_error_response(exc: BankBatchPersistenceError) -> tuple[HTTPStatus, dict[str, Any]]:
-        error_code = BankFlowRuleBatchApiRoutes._bank_flow_error_code(
-            getattr(exc, "error_code", None) or "bank_flow_rule_batch_persistence_failed"
-        )
+        error_code = getattr(exc, "error_code", None) or "bank_flow_rule_batch_persistence_failed"
         return HTTPStatus.INTERNAL_SERVER_ERROR, {
             "error": error_code,
             "message": BankFlowRuleBatchApiRoutes._error_message(error_code, str(exc)),
@@ -286,25 +265,17 @@ class BankFlowRuleBatchApiRoutes:
     def _error_code(exc: ValueError) -> str:
         error_code = getattr(exc, "error_code", None)
         if isinstance(error_code, str) and error_code.strip():
-            return BankFlowRuleBatchApiRoutes._bank_flow_error_code(error_code.strip())
+            return error_code.strip()
         message = str(exc).strip()
         if message:
-            return BankFlowRuleBatchApiRoutes._bank_flow_error_code(message)
+            return message
         return "invalid_bank_flow_rule_batch_request"
-
-    @staticmethod
-    def _bank_flow_error_code(error_code: str) -> str:
-        return BANK_FLOW_RULE_BATCH_LEGACY_ERROR_CODES.get(error_code, error_code)
 
     @staticmethod
     def _error_message(error_code: str, message: str) -> str:
         normalized_message = str(message or "").strip()
         if not normalized_message:
             return "流水规则批次保存失败，请稍后重试。" if error_code.endswith("_persistence_failed") else error_code
-        if normalized_message in BANK_FLOW_RULE_BATCH_LEGACY_ERROR_CODES:
-            return BANK_FLOW_RULE_BATCH_LEGACY_ERROR_CODES[normalized_message]
-        if normalized_message == "免OA流水批次保存失败，请稍后重试。":
-            return "流水规则批次保存失败，请稍后重试。"
         return normalized_message
 
     def _json_write(

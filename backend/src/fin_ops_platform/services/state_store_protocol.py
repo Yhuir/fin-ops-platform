@@ -121,6 +121,7 @@ class ApplicationStateStoreProtocol(Protocol):
         bank_flow_rule_batch_snapshot: dict[str, Any],
         changed_case_ids: set[str] | list[str] | tuple[str, ...],
         changed_scope_keys: set[str] | list[str] | tuple[str, ...],
+        changed_batch_ids: set[str] | list[str] | tuple[str, ...] = (),
     ) -> None: ...
 
     def load_workbench_read_models(self) -> dict[str, Any]: ...

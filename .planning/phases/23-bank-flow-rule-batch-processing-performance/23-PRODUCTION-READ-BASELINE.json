@@ -1,0 +1,88 @@
+{
+  "api_prefix": "/fin-ops-api",
+  "auth_configured": true,
+  "base_url": "https://www.yn-sourcing.com/",
+  "generated_at": "2026-07-20T02:35:00+08:00",
+  "iterations": 20,
+  "scope": "bank-flow-rule-batch processing subchain",
+  "probes": [
+    {
+      "name": "page_shell_bank_flow_rule_batches",
+      "path": "/fin-ops/bank-flow-rule-batches",
+      "p50_ms": 112.421,
+      "p95_ms": 147.781,
+      "p99_ms": 155.881,
+      "success_count": 20,
+      "status": "pass"
+    },
+    {
+      "name": "bank_flow_rule_batch_list_all",
+      "path": "/api/bank-flow-rule-batches?page=1&page_size=20",
+      "p50_ms": 841.268,
+      "p95_ms": 965.789,
+      "p99_ms": 1000.138,
+      "success_count": 20,
+      "read_model_status": "fresh",
+      "refresh_enqueued_count": 0,
+      "status": "too_slow_for_high_performance"
+    },
+    {
+      "name": "bank_flow_rule_batch_detail",
+      "path": "/api/bank-flow-rule-batches/{batch_id}",
+      "p50_ms": 198.687,
+      "p95_ms": 254.178,
+      "p99_ms": 276.747,
+      "success_count": 20,
+      "status": "pass"
+    },
+    {
+      "name": "bank_flow_rule_batch_page_audit",
+      "path": "/api/operations/app-health/page-audit?page=bank-flow-rule-batches",
+      "p50_ms": 286.097,
+      "p95_ms": 367.993,
+      "success_count": 20,
+      "audit_status": "pass",
+      "read_model_status": "fresh",
+      "queue_status": "drained",
+      "status": "pass"
+    }
+  ],
+  "server_metrics": {
+    "list": {
+      "server_p50_ms": 633.785,
+      "server_p95_ms": 785.842,
+      "server_p99_ms": 829.003,
+      "database_p50_ms": 141.082,
+      "database_p95_ms": 264.128,
+      "query_count": 7
+    },
+    "detail": {
+      "server_p50_ms": 63.45,
+      "server_p95_ms": 103.705,
+      "database_p50_ms": 23.147,
+      "database_p95_ms": 38.937,
+      "query_count": 10
+    }
+  },
+  "historical_worker_metrics": {
+    "incremental": {
+      "sample_count": 507,
+      "p50_ms": 1742.569,
+      "p95_ms": 3317.018,
+      "p99_ms": 12062.143
+    },
+    "full": {
+      "sample_count": 5,
+      "p50_ms": 22125.344,
+      "p95_ms": 28027.705,
+      "p99_ms": 28965.823
+    },
+    "note": "15m/1h 内无新样本；该数据用于定位历史收敛风险，不伪装为当前写后 SLO。"
+  },
+  "data_shape": {
+    "visible_batch_count": 189,
+    "submitted_batch_count": 54,
+    "frontend_page_size": 200
+  },
+  "sanitization": "真实批次 ID 未写入证据文件。"
+}

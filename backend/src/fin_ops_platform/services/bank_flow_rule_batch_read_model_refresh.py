@@ -4,6 +4,7 @@ from typing import Any
 
 from fin_ops_platform.services.bank_batch_read_model_refresh import BankBatchReadModelRefreshService
 from fin_ops_platform.services.bank_batch_service import BANK_FLOW_RULE_BATCH_RELATION_MODE
+from fin_ops_platform.services.bank_flow_rule_batch_application_service import BankFlowRuleBatchApplicationService
 
 
 BANK_FLOW_RULE_BATCH_REFRESH_EVENT_TYPE = "bank_flow_rule_batch.read_model.refresh"
@@ -47,4 +48,5 @@ class BankFlowRuleBatchReadModelRefreshService(BankBatchReadModelRefreshService)
             refresh_event_type=BANK_FLOW_RULE_BATCH_REFRESH_EVENT_TYPE,
             scope_type=BANK_FLOW_RULE_BATCH_SCOPE_TYPE,
             relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+            application_service_class=BankFlowRuleBatchApplicationService,
         )

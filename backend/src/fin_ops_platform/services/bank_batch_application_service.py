@@ -15,6 +15,7 @@ from fin_ops_platform.services.bank_transaction_category_service import (
 )
 from fin_ops_platform.services.bank_batch_service import (
     BANK_FLOW_RULE_BATCH_RELATION_MODE,
+    BANK_FLOW_RULE_BATCH_SCHEMA_VERSION,
     NO_OA_BANK_BATCH_RELATION_MODE,
     NO_OA_BANK_BATCH_SCHEMA_VERSION,
     BankBatchService,
@@ -220,7 +221,7 @@ class BankBatchApplicationService:
                     if len(refresh_scope_keys) == 1 and SEARCH_MONTH_RE.match(refresh_scope_keys[0])
                     else None
                 )
-                stale_reasons = self.no_oa_bank_batch_stale_reasons(
+                stale_reasons = self.bank_batch_stale_reasons(
                     summary_read_model_batches + read_model_batches,
                     relation_mode=relation_mode,
                     expected_source_versions=expected_source_versions,
@@ -307,7 +308,7 @@ class BankBatchApplicationService:
         if public_batch is None:
             raise KeyError("no_oa_bank_batch_not_found")
         row_ids = [str(row_id) for row_id in list(batch.get("row_ids") or []) if str(row_id).strip()]
-        bank_rows = self.no_oa_bank_transaction_rows_by_ids(row_ids)
+        bank_rows = self.bank_transaction_rows_by_ids(row_ids)
         categories_by_transaction_id = self.effective_categories_for_rows(bank_rows)
         rows_by_id = {str(row.get("id")): row for row in bank_rows if str(row.get("id") or "").strip()}
         relation_rows_by_id = self._workbench_relation_rows_by_id(row_ids)
@@ -390,7 +391,7 @@ class BankBatchApplicationService:
                 bank_rows=bank_rows,
                 categories_by_transaction_id=categories_by_transaction_id,
                 active_relations=self._workbench_relation_active_relations_for_bank_rows(bank_rows),
-                source_versions=self.no_oa_bank_batch_source_versions(relation_mode=relation_mode),
+                source_versions=self.bank_batch_source_versions(relation_mode=relation_mode),
                 eligible_batch_types=self._eligible_tag_codes_for_relation_mode(relation_mode),
                 row_ids=row_ids,
                 actor=actor,
@@ -475,6 +476,7 @@ class BankBatchApplicationService:
                         if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE
                         else "withdraw"
                     ),
+                    relation_mode=relation_mode,
                 )
             result = self._mutation_result(
                 batch,
@@ -656,7 +658,7 @@ class BankBatchApplicationService:
         }
         case_id = str(payload.get("case_id") or "").strip()
         if not case_id:
-            raise ValueError("no_oa_bank_batch_relation_case_id_required")
+            raise ValueError(self._relation_case_id_required_error(relation_mode))
         try:
             relation_command_service.confirm_relation(
                 case_id=case_id,
@@ -741,11 +743,12 @@ class BankBatchApplicationService:
         reason: str | None,
         history_operation_type: str = "no_oa_bank_batch_withdraw",
         idempotency_operation: str = "withdraw",
+        relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
     ) -> None:
         relation_command_service = self._require_relation_command_service()
         case_id = str(batch.get("relation_case_id") or batch.get("batch_id") or "").strip()
         if not case_id:
-            raise ValueError("no_oa_bank_batch_relation_case_id_required")
+            raise ValueError(self._relation_case_id_required_error(relation_mode))
         try:
             relation_command_service.cancel_relation(
                 case_id=case_id,
@@ -761,6 +764,12 @@ class BankBatchApplicationService:
         if self._relation_command_service is None:
             raise ValueError("no_oa_bank_batch_relation_command_unavailable")
         return self._relation_command_service
+
+    @staticmethod
+    def _relation_case_id_required_error(relation_mode: str) -> str:
+        if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE:
+            return "bank_flow_rule_batch_relation_case_id_required"
+        return "no_oa_bank_batch_relation_case_id_required"
 
     @staticmethod
     def _relation_idempotency_key(batch: dict[str, object], *, operation: str) -> str:
@@ -857,7 +866,7 @@ class BankBatchApplicationService:
         relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
     ) -> tuple[list[dict[str, object]], dict[str, dict[str, object]]]:
         refresh_scope_key = str(scope_key or "all").strip() or "all"
-        bank_rows = self.no_oa_bank_transaction_rows(month=refresh_scope_key, include_categories=False)
+        bank_rows = self.bank_transaction_rows(month=refresh_scope_key, include_categories=False)
         categories_by_transaction_id = self.effective_categories_for_rows(bank_rows)
         return self.refresh_batches_from_prepared_rows(
             bank_rows=bank_rows,
@@ -1049,7 +1058,7 @@ class BankBatchApplicationService:
         source_version_payload = (
             dict(source_versions)
             if isinstance(source_versions, dict)
-            else self.no_oa_bank_batch_source_versions(relation_mode=relation_mode)
+            else self.bank_batch_source_versions(relation_mode=relation_mode)
         )
         self._apply_categories_to_rows(bank_rows, categories_by_transaction_id)
         self._bank_batch_service.build_batches(
@@ -1081,7 +1090,7 @@ class BankBatchApplicationService:
             )
         return bank_rows, categories_by_transaction_id
 
-    def no_oa_bank_transaction_rows(
+    def bank_transaction_rows(
         self,
         *,
         month: str = "all",
@@ -1093,12 +1102,20 @@ class BankBatchApplicationService:
             payload = self._serialize_value(transaction)
             if not isinstance(payload, dict):
                 continue
-            row = self.normalize_no_oa_bank_transaction_payload(payload)
+            row = self.normalize_bank_transaction_payload(payload)
             if row is not None:
                 rows.append(row)
         if include_categories:
             self._apply_categories_to_rows(rows, self.effective_categories_for_rows(rows))
         return rows
+
+    def no_oa_bank_transaction_rows(
+        self,
+        *,
+        month: str = "all",
+        include_categories: bool = True,
+    ) -> list[dict[str, object]]:
+        return self.bank_transaction_rows(month=month, include_categories=include_categories)
 
     def _apply_categories_to_rows(
         self,
@@ -1119,13 +1136,34 @@ class BankBatchApplicationService:
                 )
                 row["category_source"] = category.get("category_source") or category.get("source")
 
-    def no_oa_bank_transaction_rows_by_ids(self, row_ids: list[str]) -> list[dict[str, object]]:
-        get_transaction = getattr(self._import_service, "get_transaction", None)
-        normalized_row_ids = [str(row_id).strip() for row_id in list(row_ids or []) if str(row_id).strip()]
+    def bank_transaction_rows_by_ids(self, row_ids: list[str]) -> list[dict[str, object]]:
+        import_service = getattr(self, "_import_service", None)
+        list_transactions_by_ids = getattr(import_service, "list_transactions_by_ids", None)
+        normalized_row_ids = list(
+            dict.fromkeys(
+                str(row_id).strip()
+                for row_id in list(row_ids or [])
+                if str(row_id).strip()
+            )
+        )
+        if callable(list_transactions_by_ids):
+            rows_by_id: dict[str, dict[str, object]] = {}
+            for transaction in list(list_transactions_by_ids(normalized_row_ids) or []):
+                payload = self._serialize_value(transaction)
+                if not isinstance(payload, dict):
+                    continue
+                row = self.normalize_bank_transaction_payload(payload)
+                if row is not None:
+                    rows_by_id[str(row.get("id") or "").strip()] = row
+            return [rows_by_id[row_id] for row_id in normalized_row_ids if row_id in rows_by_id]
+
+        get_transaction = getattr(import_service, "get_transaction", None)
         if not callable(get_transaction):
+            if import_service is None:
+                return []
             rows_by_id = {
                 str(row.get("id") or "").strip(): row
-                for row in self.no_oa_bank_transaction_rows()
+                for row in self.bank_transaction_rows()
                 if str(row.get("id") or "").strip()
             }
             return [rows_by_id[row_id] for row_id in normalized_row_ids if row_id in rows_by_id]
@@ -1139,13 +1177,16 @@ class BankBatchApplicationService:
             payload = self._serialize_value(transaction)
             if not isinstance(payload, dict):
                 continue
-            row = self.normalize_no_oa_bank_transaction_payload(payload)
+            row = self.normalize_bank_transaction_payload(payload)
             if row is not None:
                 rows.append(row)
         return rows
 
+    def no_oa_bank_transaction_rows_by_ids(self, row_ids: list[str]) -> list[dict[str, object]]:
+        return self.bank_transaction_rows_by_ids(row_ids)
+
     @staticmethod
-    def normalize_no_oa_bank_transaction_payload(payload: dict[str, object]) -> dict[str, object] | None:
+    def normalize_bank_transaction_payload(payload: dict[str, object]) -> dict[str, object] | None:
         transaction_id = str(payload.get("id") or "").strip()
         if not transaction_id:
             return None
@@ -1182,6 +1223,10 @@ class BankBatchApplicationService:
         if "purpose" not in row:
             row["purpose"] = row.get("usage") or row.get("use") or ""
         return row
+
+    @staticmethod
+    def normalize_no_oa_bank_transaction_payload(payload: dict[str, object]) -> dict[str, object] | None:
+        return BankBatchApplicationService.normalize_bank_transaction_payload(payload)
 
     def effective_categories_for_rows(self, rows: list[dict[str, object]]) -> dict[str, dict[str, object]]:
         categories_by_transaction_id = {
@@ -1370,7 +1415,7 @@ class BankBatchApplicationService:
             next_batch["blocked_reason"] = ""
         return next_batch
 
-    def no_oa_bank_batch_source_versions(
+    def bank_batch_source_versions(
         self,
         *,
         relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
@@ -1383,6 +1428,13 @@ class BankBatchApplicationService:
         if workbench_relation_source_versions:
             source_versions["workbench_relation_source_versions"] = workbench_relation_source_versions
         return source_versions
+
+    def no_oa_bank_batch_source_versions(
+        self,
+        *,
+        relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
+    ) -> dict[str, object]:
+        return self.bank_batch_source_versions(relation_mode=relation_mode)
 
     def _bank_batch_base_source_versions(
         self,
@@ -1398,7 +1450,7 @@ class BankBatchApplicationService:
             ),
         }
         if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE:
-            source_versions["bank_flow_rule_batch_schema_version"] = NO_OA_BANK_BATCH_SCHEMA_VERSION
+            source_versions["bank_flow_rule_batch_schema_version"] = BANK_FLOW_RULE_BATCH_SCHEMA_VERSION
             source_versions["bank_flow_rule_batch_tag_rules_version"] = int(tag_rules_payload.get("version") or 1)
         else:
             source_versions["no_oa_bank_batch_schema_version"] = NO_OA_BANK_BATCH_SCHEMA_VERSION
@@ -1527,7 +1579,7 @@ class BankBatchApplicationService:
             enriched.append(next_row)
         return enriched
 
-    def no_oa_bank_batch_stale_reasons(
+    def bank_batch_stale_reasons(
         self,
         batches: object,
         *,
@@ -1540,7 +1592,7 @@ class BankBatchApplicationService:
         expected = require_expected_source_versions(
             expected_source_versions
             if isinstance(expected_source_versions, dict) and expected_source_versions
-            else self.no_oa_bank_batch_source_versions(relation_mode=relation_mode),
+            else self.bank_batch_source_versions(relation_mode=relation_mode),
             context=(
                 "bank_flow_rule_batch_read_model"
                 if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE
@@ -1559,6 +1611,19 @@ class BankBatchApplicationService:
                 if reason not in reasons:
                     reasons.append(reason)
         return reasons
+
+    def no_oa_bank_batch_stale_reasons(
+        self,
+        batches: object,
+        *,
+        relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
+        expected_source_versions: dict[str, object] | None = None,
+    ) -> list[str]:
+        return self.bank_batch_stale_reasons(
+            batches,
+            relation_mode=relation_mode,
+            expected_source_versions=expected_source_versions,
+        )
 
     def after_mutation(
         self,

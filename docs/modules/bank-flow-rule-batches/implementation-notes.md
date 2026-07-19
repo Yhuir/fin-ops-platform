@@ -482,3 +482,28 @@
 - 生产 20 次读取：页面壳 p95 `139.570ms`、GET p95 `258.567ms`、Page Audit p95 `370.022ms`；60/60 通过。
 - 生产同值 PUT 20 次测量 p95 `275.186ms`、max `431.232ms`，version `11 → 11`。
 - bank-flow、关联台、银行明细、turnover Page Audit 全部 `pass / fresh / drained`、0 issue；本子链路生产闭环完成。
+
+## 2026-07-20 流水规则批量处理读写性能收敛
+
+目标：
+
+- 把 all/month 列表从双全量 row 读取、Python 分页和摘要收敛为固定查询数的 SQL 分页/聚合。
+- 把批次详情的逐成员银行流水读取改为现有 canonical repository bulk I/O。
+- 把 reset 的逐 relation cancel 与请求内逐月 rebuild 改为一次 scoped bulk cancel、一次原子 delta 保存和后台 scoped reconcile。
+- 删除 bank-flow 运行链中的 no-OA schema/ID/display/error/idempotency/worker/route compatibility 路径，同时保持独立 no-OA legacy 模块功能不变。
+
+实现决策：
+
+- `BankFlowRuleBatchReadModelRepositoryPort.read_page(...)` 是页面列表唯一 read I/O：当前页 rows 使用 `LIMIT/OFFSET`，total 使用完整列表筛选，summary 使用 month/account summary filter 聚合，source-version/readiness proof 独立返回；前端默认 page size 从 200 收窄为 50。
+- `ImportNormalizationService.list_transactions_by_ids(...)` 复用 `PostgresCoreRepository.list_bank_transactions_by_ids(...)`，按输入 ID 去重并恢复稳定顺序；bank-flow detail/selection 不再调用逐 row getter。
+- reset 领域状态仍逐批校验 version，但 relation command 只调用一次 `cancel_relations_by_case_ids(...)`；persistence 显式接收 `changed_batch_ids`，即使历史 active relation 已缺失也不会漏写 withdrawn batch。HTTP 请求不调用 `refresh_batches(...)`。
+- submit/withdraw/reset command 成功后前端先更新本页 committed state并解除前台阻塞；`bank_flow_rule_batch` freshness wait 与 reload 作为后台 reconcile，完整跨页 targets 继续通过既有 domain event 发布。
+- bank-flow service 使用独立 schema version、新 batch ID prefix、正式 display tag、错误码和 idempotency namespace；route legacy error translation map 已删除。共享 core 的中性 bank rows/source versions/stale reasons 是正式入口，no-OA 名称只保留为 legacy 模块 wrapper。
+
+验证证据：
+
+- 目标及隔离回归 459 tests 通过；前端 BankFlowRuleBatch page/API 43 tests 通过。
+- Chromium `bank-flow-rule-batches-flow.spec.ts` 最终 9/9 通过；reset 写后不自动触发下一批 detail GET，后台重读稳定使用 unsubmitted/page 1。
+- 真实本地 PostgreSQL 空库应用全部 migrations 后，paged query + aggregate summary integration test 通过；验证 draft presentation、pagination total 和完整 summary 金额/计数。
+- architecture guard 固定 bank-flow route/application/refresh wrapper 不得出现 `no_oa`、`NO_OA`、`免OA` 或 legacy error map。
+- 最终唯一 SHA、部署 release、生产读/写性能、Page Audit 和 worker drain 证据在本次统一发布验证完成后补录。

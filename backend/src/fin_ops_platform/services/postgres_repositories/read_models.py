@@ -6469,6 +6469,113 @@ class PostgresSummaryReadModelRepository:
             relation_mode_filter_enabled=False,
         )
 
+    def read_bank_flow_rule_batch_page(
+        self,
+        filters: dict[str, Any] | None = None,
+        *,
+        summary_filters: dict[str, Any] | None = None,
+        page: int = 1,
+        page_size: int | None = 50,
+    ) -> dict[str, Any] | None:
+        normalized_page = max(int_value(page, 1), 1)
+        normalized_page_size = None if page_size is None else min(max(int_value(page_size, 50), 1), 200)
+        where_sql, params = self._bank_flow_rule_batch_filter_sql(filters)
+        summary_where_sql, summary_params = self._bank_flow_rule_batch_filter_sql(summary_filters)
+        presented_status_sql = self._bank_flow_rule_batch_presented_status_sql()
+        visible_where_sql = f"({where_sql}) and ({presented_status_sql}) in ('draft', 'submitted', 'withdrawn')"
+        visible_summary_where_sql = (
+            f"({summary_where_sql}) and ({presented_status_sql}) in ('draft', 'submitted', 'withdrawn')"
+        )
+        total_row = self._connection.fetch_one(
+            f"""
+            select count(*)::bigint as total
+            from read_model.bank_flow_rule_batch_rows
+            where {visible_where_sql}
+            """,
+            tuple(params),
+        ) or {}
+        page_sql = f"""
+            select batch_id, source_versions, payload, raw_payload
+            from read_model.bank_flow_rule_batch_rows
+            where {visible_where_sql}
+            order by scope_month desc nulls last, generated_at desc, batch_id
+            """
+        page_params: tuple[Any, ...] = tuple(params)
+        if normalized_page_size is not None:
+            page_sql = f"{page_sql} limit %s offset %s"
+            page_params = (*params, normalized_page_size, (normalized_page - 1) * normalized_page_size)
+        rows = self._connection.fetch_all(page_sql, page_params)
+        aggregates = self._connection.fetch_all(
+            f"""
+            select
+              batch_type,
+              {presented_status_sql} as presented_status,
+              count(*)::bigint as batch_count,
+              coalesce(sum(total_amount), 0)::text as total_amount
+            from read_model.bank_flow_rule_batch_rows
+            where {visible_summary_where_sql}
+            group by batch_type, presented_status
+            order by batch_type, presented_status
+            """,
+            tuple(summary_params),
+        )
+        normalized_items: list[dict[str, Any]] = []
+        for row in rows:
+            payload = _read_model_payload(row)
+            if not isinstance(payload, dict):
+                continue
+            if isinstance(row.get("source_versions"), dict):
+                payload = {**payload, "source_versions": row.get("source_versions")}
+            normalized_items.append(payload)
+        source_versions_summary = self.bank_flow_rule_batch_source_versions_summary(summary_filters)
+        if source_versions_summary is None:
+            return None
+        return {
+            "items": normalized_items,
+            "total": int_value(total_row.get("total"), 0),
+            "aggregates": [dict(row) for row in aggregates if isinstance(row, dict)],
+            "source_versions_summary": source_versions_summary,
+        }
+
+    @staticmethod
+    def _bank_flow_rule_batch_presented_status_sql() -> str:
+        return """
+        case
+          when status = 'unsubmitted' and status_bucket = 'unsubmitted' then 'draft'
+          when status = 'stale'
+           and (
+             status_bucket = 'submitted'
+             or lower(coalesce(payload->>'can_withdraw', 'false')) = 'true'
+           ) then 'submitted'
+          else status
+        end
+        """.strip()
+
+    @staticmethod
+    def _bank_flow_rule_batch_filter_sql(filters: dict[str, Any] | None) -> tuple[str, list[Any]]:
+        resolved_filters = filters if isinstance(filters, dict) else {}
+        where: list[str] = ["status <> 'superseded'"]
+        params: list[Any] = []
+        if value := text(resolved_filters.get("month")):
+            where.append("scope_month = %s::date")
+            params.append(month_start(value))
+        if value := text(resolved_filters.get("type")):
+            where.append("batch_type = %s")
+            params.append(value)
+        if value := text(resolved_filters.get("status")):
+            where.append("status = %s")
+            params.append(value)
+        if value := text(resolved_filters.get("bucket")):
+            where.append("status_bucket = %s")
+            params.append(value)
+        if value := text(resolved_filters.get("account_key")):
+            where.append("account_key = %s")
+            params.append(value)
+        if value := text(resolved_filters.get("batch_id")):
+            where.append("batch_id = %s")
+            params.append(value)
+        return " and ".join(where), params
+
     def _list_bank_batch_rows(
         self,
         filters: dict[str, Any] | None = None,
@@ -7351,6 +7458,9 @@ class PostgresReadModelRepository:
 
     def list_bank_flow_rule_batch_rows(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]] | None:
         return self._summary_read_model_repository.list_bank_flow_rule_batch_rows(*args, **kwargs)
+
+    def read_bank_flow_rule_batch_page(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        return self._summary_read_model_repository.read_bank_flow_rule_batch_page(*args, **kwargs)
 
     def bank_flow_rule_batch_source_versions_summary(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
         return self._summary_read_model_repository.bank_flow_rule_batch_source_versions_summary(*args, **kwargs)

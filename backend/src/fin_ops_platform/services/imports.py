@@ -469,6 +469,32 @@ class ImportNormalizationService:
                 return transaction
         raise KeyError(transaction_id)
 
+    def list_transactions_by_ids(self, transaction_ids: list[str]) -> list[BankTransaction]:
+        normalized_ids = list(
+            dict.fromkeys(
+                str(transaction_id).strip()
+                for transaction_id in list(transaction_ids or [])
+                if str(transaction_id).strip()
+            )
+        )
+        if not normalized_ids:
+            return []
+        transactions_by_id = {
+            transaction_id: self._transactions_by_id[transaction_id]
+            for transaction_id in normalized_ids
+            if transaction_id in self._transactions_by_id
+        }
+        missing_ids = [transaction_id for transaction_id in normalized_ids if transaction_id not in transactions_by_id]
+        list_by_ids = getattr(self._fact_repository, "list_bank_transactions_by_ids", None)
+        if missing_ids and callable(list_by_ids):
+            for transaction in list(list_by_ids(missing_ids) or []):
+                if not isinstance(transaction, BankTransaction):
+                    continue
+                transaction_id = str(transaction.id or "").strip()
+                if transaction_id:
+                    transactions_by_id[transaction_id] = transaction
+        return [transactions_by_id[transaction_id] for transaction_id in normalized_ids if transaction_id in transactions_by_id]
+
     def _list_repository_invoices(
         self,
         *,

@@ -19,6 +19,9 @@ from fin_ops_platform.services.workbench_relation_command_service import Workben
 NO_OA_BANK_BATCH_SCHEMA_VERSION = "2026-05-no-oa-bank-batch-v1"
 NO_OA_BANK_BATCH_RELATION_MODE = "no_oa_bank_batch"
 BANK_FLOW_RULE_BATCH_RELATION_MODE = "bank_flow_rule_batch"
+BANK_FLOW_RULE_BATCH_SCHEMA_VERSION = "2026-07-bank-flow-rule-batch-v1"
+NO_OA_BANK_BATCH_ID_PREFIX = "no_oa_batch_"
+BANK_FLOW_RULE_BATCH_ID_PREFIX = "bank_flow_rule_batch_"
 CENT = Decimal("0.01")
 ZERO = Decimal("0.00")
 
@@ -60,6 +63,9 @@ class BankBatchService:
         pair_relation_service: WorkbenchPairRelationService | None = None,
         relation_read_port: BankBatchRelationRepairReadPort | None = None,
         relation_command_service: Any | None = None,
+        schema_version: str = NO_OA_BANK_BATCH_SCHEMA_VERSION,
+        batch_id_prefix: str = NO_OA_BANK_BATCH_ID_PREFIX,
+        relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
     ) -> None:
         self._batches = {
             str(batch_id): self._normalize_batch(batch)
@@ -75,6 +81,9 @@ class BankBatchService:
             pair_relation_service or WorkbenchPairRelationService()
         )
         self._relation_command_service = relation_command_service
+        self._schema_version = str(schema_version or NO_OA_BANK_BATCH_SCHEMA_VERSION).strip()
+        self._batch_id_prefix = str(batch_id_prefix or NO_OA_BANK_BATCH_ID_PREFIX).strip()
+        self._relation_mode = self._normalize_relation_mode(relation_mode)
         self._legacy_migration_service = NoOaLegacyRelationMigrationService(
             relation_command_service=self._relation_command_service,
         )
@@ -98,12 +107,18 @@ class BankBatchService:
         pair_relation_service: WorkbenchPairRelationService | None = None,
         relation_read_port: BankBatchRelationRepairReadPort | None = None,
         relation_command_service: Any | None = None,
+        schema_version: str = NO_OA_BANK_BATCH_SCHEMA_VERSION,
+        batch_id_prefix: str = NO_OA_BANK_BATCH_ID_PREFIX,
+        relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
     ) -> "BankBatchService":
         if not isinstance(snapshot, dict):
             return cls(
                 pair_relation_service=pair_relation_service,
                 relation_read_port=relation_read_port,
                 relation_command_service=relation_command_service,
+                schema_version=schema_version,
+                batch_id_prefix=batch_id_prefix,
+                relation_mode=relation_mode,
             )
         batches = snapshot.get("batches")
         audit_log = snapshot.get("audit_log")
@@ -113,11 +128,14 @@ class BankBatchService:
             pair_relation_service=pair_relation_service,
             relation_read_port=relation_read_port,
             relation_command_service=relation_command_service,
+            schema_version=schema_version,
+            batch_id_prefix=batch_id_prefix,
+            relation_mode=relation_mode,
         )
 
     def snapshot(self) -> dict[str, Any]:
         return {
-            "schema_version": NO_OA_BANK_BATCH_SCHEMA_VERSION,
+            "schema_version": self._schema_version,
             "batches": deepcopy(self._batches),
             "audit_log": deepcopy(self._audit_log),
         }
@@ -127,6 +145,9 @@ class BankBatchService:
             snapshot,
             relation_read_port=self._relation_read_port,
             relation_command_service=self._relation_command_service,
+            schema_version=self._schema_version,
+            batch_id_prefix=self._batch_id_prefix,
+            relation_mode=self._relation_mode,
         )
         self._batches = deepcopy(restored._batches)
         self._audit_log = deepcopy(restored._audit_log)
@@ -153,7 +174,7 @@ class BankBatchService:
                 continue
             public_batches[batch_id] = deepcopy(batch)
         return {
-            "schema_version": NO_OA_BANK_BATCH_SCHEMA_VERSION,
+            "schema_version": self._schema_version,
             "batches": public_batches,
             "audit_log": deepcopy(self._audit_log),
         }
@@ -334,6 +355,9 @@ class BankBatchService:
             audit_log=[],
             relation_read_port=self._relation_read_port,
             relation_command_service=self._relation_command_service,
+            schema_version=self._schema_version,
+            batch_id_prefix=self._batch_id_prefix,
+            relation_mode=self._relation_mode,
         )
         scoped_service.build_batches(
             bank_rows,
@@ -394,33 +418,33 @@ class BankBatchService:
         rows_by_id = {self._row_id(row): dict(row) for row in list(bank_rows or []) if self._row_id(row)}
         selected_row_ids = [str(row_id).strip() for row_id in list(row_ids or []) if str(row_id).strip()]
         if not selected_row_ids:
-            raise ValueError("no_oa_bank_batch_selection_empty")
+            raise ValueError(self._batch_error_code("selection_empty"))
         if len(set(selected_row_ids)) != len(selected_row_ids):
-            raise ValueError("no_oa_bank_batch_selection_duplicate_rows")
+            raise ValueError(self._batch_error_code("selection_duplicate_rows"))
         selected_rows = [rows_by_id.get(row_id) for row_id in selected_row_ids]
         if any(row is None for row in selected_rows):
-            raise ValueError("no_oa_bank_batch_selection_unknown_row")
+            raise ValueError(self._batch_error_code("selection_unknown_row"))
         resolved_rows = [row for row in selected_rows if isinstance(row, dict)]
         occupied_row_ids = self._active_relation_row_ids(active_relations)
         if any(row_id in occupied_row_ids for row_id in selected_row_ids):
-            raise ValueError("no_oa_bank_batch_selection_occupied")
+            raise ValueError(self._batch_error_code("selection_occupied"))
         categories = categories_by_transaction_id if isinstance(categories_by_transaction_id, dict) else {}
         eligible_types = self._eligible_batch_types(eligible_batch_types)
         batch_types = {self._category_code(row, categories) for row in resolved_rows}
         batch_types.discard("")
         if len(batch_types) != 1:
-            raise ValueError("no_oa_bank_batch_selection_cross_tag")
+            raise ValueError(self._batch_error_code("selection_cross_tag"))
         batch_type = next(iter(batch_types))
         if batch_type not in eligible_types:
-            raise ValueError("no_oa_bank_batch_selection_unselected_tag")
+            raise ValueError(self._batch_error_code("selection_unselected_tag"))
         scope_months = {self._scope_month(row) for row in resolved_rows}
         scope_months.discard("")
         if len(scope_months) != 1:
-            raise ValueError("no_oa_bank_batch_selection_cross_month")
+            raise ValueError(self._batch_error_code("selection_cross_month"))
         account_keys = {self._account_key(row) for row in resolved_rows}
         account_keys.discard("")
         if len(account_keys) != 1:
-            raise ValueError("no_oa_bank_batch_selection_cross_bank")
+            raise ValueError(self._batch_error_code("selection_cross_bank"))
         scope_month = next(iter(scope_months))
         account_key = next(iter(account_keys))
         sorted_rows = sorted(resolved_rows, key=self._row_id)
@@ -571,7 +595,7 @@ class BankBatchService:
     def get_batch(self, batch_id: str) -> dict[str, Any]:
         resolved_batch_id = str(batch_id or "").strip()
         if not resolved_batch_id or resolved_batch_id not in self._batches:
-            raise KeyError("no_oa_bank_batch_not_found")
+            raise KeyError(self._batch_error_code("not_found"))
         return self._enrich_batch(self._batches[resolved_batch_id])
 
     def submit_batch(
@@ -586,7 +610,7 @@ class BankBatchService:
         if batch.get("status") == "submitted":
             return batch
         if batch.get("status") != "draft":
-            raise ValueError("only_draft_no_oa_bank_batch_can_be_submitted")
+            raise ValueError(f"only_draft_{self._relation_mode}_can_be_submitted")
         self._check_expected_version(batch, expected_version)
 
         timestamp = self._timestamp()
@@ -625,9 +649,9 @@ class BankBatchService:
         if batch.get("status") == "withdrawn":
             return batch
         if batch.get("status") not in {"submitted", "stale"}:
-            raise ValueError("only_submitted_no_oa_bank_batch_can_be_withdrawn")
+            raise ValueError(f"only_submitted_{self._relation_mode}_can_be_withdrawn")
         if batch.get("status") == "stale" and not self._has_active_relation_for_batch(batch):
-            raise ValueError("stale_no_oa_bank_batch_has_no_active_relation_to_withdraw")
+            raise ValueError(f"stale_{self._relation_mode}_has_no_active_relation_to_withdraw")
         self._check_expected_version(batch, expected_version)
 
         timestamp = self._timestamp()
@@ -683,7 +707,7 @@ class BankBatchService:
 
     def _require_relation_command_service(self) -> Any:
         if self._relation_command_service is None:
-            raise ValueError("no_oa_relation_command_unavailable")
+            raise ValueError(self._relation_command_unavailable_error_code())
         return self._relation_command_service
 
     def _confirm_no_oa_relation(
@@ -2506,12 +2530,11 @@ class BankBatchService:
             )
         )
 
-    @staticmethod
-    def _check_expected_version(batch: dict[str, Any], expected_version: int | None) -> None:
+    def _check_expected_version(self, batch: dict[str, Any], expected_version: int | None) -> None:
         if expected_version is None:
             return
         if int(batch.get("version") or 0) != int(expected_version):
-            raise ValueError("no_oa_bank_batch_version_conflict")
+            raise ValueError(self._batch_error_code("version_conflict"))
 
     @staticmethod
     def _active_relation_row_ids(active_relations: list[dict[str, Any]]) -> set[str]:
@@ -2870,10 +2893,17 @@ class BankBatchService:
                 continue
         return None
 
-    @staticmethod
-    def _batch_id(batch_key: str) -> str:
+    def _batch_id(self, batch_key: str) -> str:
         digest = hashlib.sha256(batch_key.encode("utf-8")).hexdigest()[:20]
-        return f"no_oa_batch_{digest}"
+        return f"{self._batch_id_prefix}{digest}"
+
+    def _batch_error_code(self, suffix: str) -> str:
+        return f"{self._relation_mode}_{suffix}"
+
+    def _relation_command_unavailable_error_code(self) -> str:
+        if self._relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE:
+            return "bank_flow_rule_batch_relation_command_unavailable"
+        return "no_oa_relation_command_unavailable"
 
     @staticmethod
     def _row_set_digest(row_ids: list[str]) -> str:

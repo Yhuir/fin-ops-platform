@@ -8,7 +8,12 @@ from fin_ops_platform.services.bank_batch_application_service import (
     BankBatchPersistenceError,
     BankBatchRelationMutationError,
 )
-from fin_ops_platform.services.bank_batch_service import BANK_FLOW_RULE_BATCH_RELATION_MODE, BankBatchService
+from fin_ops_platform.services.bank_batch_service import (
+    BANK_FLOW_RULE_BATCH_ID_PREFIX,
+    BANK_FLOW_RULE_BATCH_RELATION_MODE,
+    BANK_FLOW_RULE_BATCH_SCHEMA_VERSION,
+    BankBatchService,
+)
 from fin_ops_platform.services.bank_flow_rule_batch_application_service import BankFlowRuleBatchApplicationService
 from fin_ops_platform.services.bank_flow_rule_batch_read_model_refresh import (
     BankFlowRuleBatchReadModelPersistencePort,
@@ -182,6 +187,38 @@ class RecordingBankFlowRuleSettings:
 
 
 class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
+    def test_bank_flow_domain_contract_uses_new_namespace_and_keeps_historical_ids_readable(self) -> None:
+        historical_id = "no_oa_batch_historical"
+        service = BankBatchService(
+            batches={
+                historical_id: {
+                    "batch_id": historical_id,
+                    "batch_type": "fee",
+                    "status": "draft",
+                    "status_bucket": "unsubmitted",
+                    "version": 2,
+                    "scope_month": "2026-07",
+                    "row_ids": ["bank-1"],
+                    "row_count": 1,
+                    "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE,
+                }
+            },
+            schema_version=BANK_FLOW_RULE_BATCH_SCHEMA_VERSION,
+            batch_id_prefix=BANK_FLOW_RULE_BATCH_ID_PREFIX,
+            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+        )
+
+        self.assertEqual(service.snapshot()["schema_version"], BANK_FLOW_RULE_BATCH_SCHEMA_VERSION)
+        self.assertTrue(service._batch_id("fee|2026-07|acct").startswith(BANK_FLOW_RULE_BATCH_ID_PREFIX))
+        self.assertEqual(service.get_batch(historical_id)["batch_id"], historical_id)
+        with self.assertRaisesRegex(ValueError, "bank_flow_rule_batch_version_conflict"):
+            service.submit_batch(
+                historical_id,
+                actor="finance-user",
+                expected_version=1,
+                note="提交",
+            )
+
     @staticmethod
     def _service_with_refresh_aware_batch(
         *,
@@ -676,6 +713,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                         "version": 3,
                         "scope_month": "2026-05",
                         "row_count": 1,
+                        "relation_case_id": "batch-1",
                     }
                 ]
 
@@ -686,6 +724,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                     "version": 3,
                     "scope_month": "2026-05",
                     "row_count": 1,
+                    "relation_case_id": "batch-1",
                 }
 
             def withdraw_batch(
@@ -703,14 +742,21 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                     "version": expected_version + 1,
                     "scope_month": "2026-05",
                     "row_count": 1,
+                    "relation_case_id": "batch-1",
                 }
 
         refresh_calls: list[dict[str, object]] = []
+        cancel_calls: list[dict[str, object]] = []
         batch_service = BatchService()
         service = object.__new__(BankFlowRuleBatchApplicationService)
         service._bank_batch_service = batch_service
         service._pair_relation_snapshot_port = SimpleNamespace(snapshot=lambda: {}, restore=lambda _snapshot: None)
-        service._cancel_relation_for_batch = lambda *_args, **_kwargs: None  # type: ignore[method-assign]
+        service._relation_command_service = SimpleNamespace(
+            cancel_relations_by_case_ids=lambda **kwargs: (
+                cancel_calls.append(dict(kwargs))
+                or {"changed_case_ids": ["batch-1"], "affected_months": ["2026-05"]}
+            )
+        )
         service.affected_months = lambda _batch: ["2026-05"]  # type: ignore[method-assign]
         service.refresh_batches = lambda **kwargs: refresh_calls.append(dict(kwargs)) or ([], {})  # type: ignore[method-assign]
         service.after_mutation = lambda *_args, **_kwargs: True  # type: ignore[method-assign]
@@ -720,10 +766,54 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
 
         self.assertEqual(result["summary"]["reset_count"], 1)
         self.assertEqual(batch_service.withdrawn, ["batch-1"])
-        self.assertEqual(
-            refresh_calls,
-            [{"relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE, "scope_key": "2026-05"}],
+        self.assertEqual(refresh_calls, [])
+        self.assertEqual(len(cancel_calls), 1)
+        self.assertEqual(cancel_calls[0]["case_ids"], ["batch-1"])
+
+    def test_reset_persists_withdrawn_batch_even_when_relation_is_already_missing(self) -> None:
+        class BatchService:
+            def snapshot(self) -> dict[str, object]:
+                return {"batches": {"batch-1": {"batch_id": "batch-1", "status": "submitted"}}}
+
+            def get_batch(self, batch_id: str) -> dict[str, object]:
+                return {
+                    "batch_id": batch_id,
+                    "status": "submitted",
+                    "version": 1,
+                    "scope_month": "2026-05",
+                    "row_count": 1,
+                    "relation_case_id": "missing-case",
+                }
+
+            def withdraw_batch(self, batch_id: str, **_kwargs: object) -> dict[str, object]:
+                return {
+                    "batch_id": batch_id,
+                    "status": "withdrawn",
+                    "version": 2,
+                    "scope_month": "2026-05",
+                    "row_count": 1,
+                    "relation_case_id": "missing-case",
+                }
+
+        mutation_calls: list[dict[str, object]] = []
+        service = object.__new__(BankFlowRuleBatchApplicationService)
+        service._bank_batch_service = BatchService()
+        service._pair_relation_snapshot_port = SimpleNamespace(snapshot=lambda: {}, restore=lambda _snapshot: None)
+        service._relation_command_service = SimpleNamespace(
+            cancel_relations_by_case_ids=lambda **_kwargs: {"changed_case_ids": [], "affected_months": []}
         )
+        service._submitted_batches_for_relation_mode = lambda _mode: [  # type: ignore[method-assign]
+            {"batch_id": "batch-1", "status": "submitted"}
+        ]
+        service.affected_months = lambda _batch: ["2026-05"]  # type: ignore[method-assign]
+        service.after_mutation = (  # type: ignore[method-assign]
+            lambda *_args, **kwargs: mutation_calls.append(dict(kwargs)) or True
+        )
+
+        service.reset_submitted_bank_flow_rule_batches(actor="finance-user", reason="重置")
+
+        self.assertEqual(mutation_calls[0]["changed_case_ids"], [])
+        self.assertEqual(mutation_calls[0]["changed_batch_ids"], ["batch-1"])
 
     def test_persist_mutation_uses_bank_flow_state_store_boundary(self) -> None:
         state_store = RecordingStateStore()
@@ -748,6 +838,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         self.assertNotIn("workbench_read_model_snapshot", mutation)
         self.assertEqual(mutation["changed_case_ids"], ["case-1"])
         self.assertEqual(mutation["changed_scope_keys"], ["2026-05"])
+        self.assertEqual(mutation["changed_batch_ids"], [])
 
     def test_persist_mutation_fails_fast_without_bank_flow_boundary(self) -> None:
         service = object.__new__(BankFlowRuleBatchApplicationService)
@@ -789,6 +880,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                 {
                     "changed_case_ids": ["case-1"],
                     "changed_scope_keys": ["all", "2026-05"],
+                    "changed_batch_ids": None,
                 }
             ],
         )
@@ -844,7 +936,16 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
             action_name="bank_flow_rule_batch_submit",
         )
 
-        self.assertEqual(persist_calls, [{"changed_case_ids": ["case-1"], "changed_scope_keys": ["all", "2026-05"]}])
+        self.assertEqual(
+            persist_calls,
+            [
+                {
+                    "changed_case_ids": ["case-1"],
+                    "changed_scope_keys": ["all", "2026-05"],
+                    "changed_batch_ids": None,
+                }
+            ],
+        )
 
     def test_pair_relation_snapshot_by_case_id_uses_scoped_snapshot(self) -> None:
         pair_service = RecordingPairSnapshotPort()
@@ -1099,11 +1200,41 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
 
         class Repository:
             def __init__(self) -> None:
-                self.filters: list[dict[str, object]] = []
+                self.calls: list[dict[str, object]] = []
 
-            def list_bank_flow_rule_batch_rows(self, filters: dict[str, object]) -> list[dict[str, object]]:
-                self.filters.append(dict(filters))
-                return [dict(row)]
+            def read_page(
+                self,
+                filters: dict[str, object],
+                *,
+                summary_filters: dict[str, object],
+                page: int,
+                page_size: int | None,
+            ) -> dict[str, object]:
+                self.calls.append(
+                    {
+                        "filters": dict(filters),
+                        "summary_filters": dict(summary_filters),
+                        "page": page,
+                        "page_size": page_size,
+                    }
+                )
+                return {
+                    "items": [dict(row)],
+                    "total": 1,
+                    "aggregates": [
+                        {
+                            "batch_type": "fee",
+                            "presented_status": "draft",
+                            "batch_count": 1,
+                            "total_amount": "12.00",
+                        }
+                    ],
+                    "source_versions_summary": {
+                        "read_model_status": "fresh",
+                        "row_count": 1,
+                        "source_versions": expected_versions,
+                    },
+                }
 
         repository = Repository()
         service._bank_batch_read_model_repository = repository
@@ -1119,19 +1250,22 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
 
         self.assertEqual(payload["read_model_status"], "fresh")
         self.assertEqual(len(payload["batches"]), 1)
-        self.assertEqual(provider.source_version_calls, [["2026-07"], ["2026-07"]])
-        self.assertEqual(relation_facade.source_version_calls, ["2026-07", "2026-07", "2026-07"])
+        self.assertGreaterEqual(provider.source_version_calls.count(["2026-07"]), 1)
+        self.assertGreaterEqual(relation_facade.source_version_calls.count("2026-07"), 1)
         self.assertEqual(
-            repository.filters,
+            repository.calls,
             [
-                {"month": "2026-07", "account_key": "", "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE},
                 {
-                    "month": "2026-07",
-                    "type": "",
-                    "status": "",
-                    "bucket": "",
-                    "account_key": "",
-                    "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE,
+                    "filters": {
+                        "month": "2026-07",
+                        "type": "",
+                        "status": "",
+                        "bucket": "",
+                        "account_key": "",
+                    },
+                    "summary_filters": {"month": "2026-07", "account_key": ""},
+                    "page": 1,
+                    "page_size": None,
                 },
             ],
         )

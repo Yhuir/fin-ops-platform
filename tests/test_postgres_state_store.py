@@ -388,6 +388,7 @@ class PostgresStateStoreTests(unittest.TestCase):
             },
             changed_case_ids=["CASE-1"],
             changed_scope_keys=["all", "visibility:paired:2026-02", "2026-02"],
+            changed_batch_ids=["batch-2"],
         )
 
         self.assertEqual(
@@ -416,7 +417,7 @@ class PostgresStateStoreTests(unittest.TestCase):
                                 "batch-2": {"batch_id": "batch-2", "relation_case_id": "CASE-2"},
                             }
                         },
-                        "batch_ids": {"CASE-1", "batch-1"},
+                        "batch_ids": {"CASE-1", "batch-1", "batch-2"},
                     },
                 ),
             ],

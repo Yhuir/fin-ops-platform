@@ -13,6 +13,22 @@ class BankFlowRuleBatchReadModelRepositoryPort:
         rows = self._repository.list_bank_flow_rule_batch_rows(filters)
         return list(rows) if rows is not None else None
 
+    def read_page(
+        self,
+        filters: dict[str, object] | None = None,
+        *,
+        summary_filters: dict[str, object] | None = None,
+        page: int = 1,
+        page_size: int | None = 50,
+    ) -> dict[str, Any] | None:
+        payload = self._repository.read_bank_flow_rule_batch_page(
+            filters,
+            summary_filters=summary_filters,
+            page=page,
+            page_size=page_size,
+        )
+        return dict(payload) if isinstance(payload, dict) else None
+
     def bank_flow_rule_batch_source_versions_summary(
         self,
         filters: dict[str, object] | None = None,

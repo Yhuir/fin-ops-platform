@@ -247,7 +247,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 - 语义变化后返回与 GET 相同结构，version +1，写一次审计动作 `bank_flow_rule_batch_tag_rules_updated`，并只 enqueue `bank_flow_rule_batch/all` refresh；不能递增 `bank_transaction_tags.version`。
 - 提交与当前有效规则相同的 payload 是 no-op：version 不变，不写 settings/audit，不触发 refresh。
 - 保存规则不得读取或改写 existing Workbench/turnover relation；active formal relation 继续决定 paired/unpaired，existing metadata 保持历史快照。
-- HTTP 输出边界只返回 `bank_flow_rule_batch_*` 错误码。共享 bank-batch core 仍可能抛出的 legacy `no_oa_bank_batch_*` selection/relation/version/persistence 错误必须在 `routes_bank_flow_rule_batches.py` 翻译，不能泄露给前端 API client。
+- HTTP 输出边界只返回 `bank_flow_rule_batch_*` 错误码。共享 bank-batch core 必须根据显式 bank-flow relation mode 直接产生正式错误码；route 不保留 legacy translation map 或 no-OA fallback。
 
 `GET /api/bank-flow-rule-batches`
 
@@ -261,7 +261,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 | `tag_code` | 银行标签筛选。 |
 | `page` / `page_size` | 分页；`page_size` 上限由后端固定。 |
 
-响应必须包含 summary、rows、pagination、`read_model_status`、`read_model_stale_reasons`、`read_model_scope_keys` 和 `refresh_enqueued`。非 fresh 时前端不能把空 rows 当真实无候选。
+响应必须包含 summary、rows、pagination、`read_model_status`、`read_model_stale_reasons`、`read_model_scope_keys` 和 `refresh_enqueued`。rows 只包含当前页，summary 对完整 summary filter 范围做 SQL 聚合，不能由当前页 rows 推算；默认页面 `page_size=50`。非 fresh 时前端不能把空 rows 当真实无候选。
 
 `POST /api/bank-flow-rule-batches/submit-selection`
 
@@ -302,7 +302,8 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 处理规则：
 
 - 只处理当前 `submitted` 批次；没有 submitted 时返回空结果且保持幂等。
-- 每个批次必须通过既有 withdraw 边界撤回，并通过 `WorkbenchRelationCommandService.cancel_relation(...)` 取消 active relation。
+- 每个批次必须通过既有 withdraw 领域边界校验状态与 version；所有 active relation 通过一次 `WorkbenchRelationCommandService.cancel_relations_by_case_ids(...)` 取消，changed relations 与显式 changed batch IDs 在一次 mutation persistence transaction 中保存。
+- HTTP command 不同步执行逐月 read model rebuild；command 成功后前端立即显示 committed withdrawn/unsubmitted 结果，并在后台等待本模块 month scope fresh 后 reconcile。
 - 不直接修改银行流水、银行标签或 `app.workbench_pair_relations` 表。
 - 成功后返回 `summary.reset_count`、`summary.row_count`、`affected_months`、`results`、`freshness_targets` 和 `operation_barrier_targets`，其中 barrier target 使用 `read_model_key=bank_flow_rule_batch`。
 - 撤回后的旧批次进入 withdrawn/audit history；后续 read model rebuild 会按当前银行标签和规则重新生成未提交候选，不自动重新提交。

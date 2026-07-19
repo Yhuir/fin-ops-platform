@@ -4684,7 +4684,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         checked_sources = {
             method_name: _function_source(tree, source, method_name)
             for method_name in (
-                "_no_oa_bank_batch_workbench_source_versions",
+                "_bank_batch_workbench_source_versions",
                 "_workbench_read_model_source_versions",
             )
         }
@@ -5596,6 +5596,21 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if forbidden in route_source:
                 violations.append(f"no-OA route owner owns side effect boundary {forbidden}")
+
+        self.assertEqual(violations, [])
+
+    def test_bank_flow_rule_batch_runtime_has_no_no_oa_compatibility_path(self) -> None:
+        paths = (
+            APP_ROOT / "routes_bank_flow_rule_batches.py",
+            SERVICES_ROOT / "bank_flow_rule_batch_application_service.py",
+            SERVICES_ROOT / "bank_flow_rule_batch_read_model_refresh.py",
+        )
+        violations: list[str] = []
+        for path in paths:
+            source = path.read_text(encoding="utf-8")
+            for forbidden in ("no_oa", "NO_OA", "免OA", "LEGACY_ERROR_CODES"):
+                if forbidden in source:
+                    violations.append(f"{_relative(path)} keeps bank-flow legacy marker {forbidden}")
 
         self.assertEqual(violations, [])
 

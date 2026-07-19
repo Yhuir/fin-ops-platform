@@ -56,6 +56,7 @@ class BankBatchReadModelRefreshService:
         read_model_persistence: Any | None = None,
         workbench_matching_source_versions_provider: Callable[[], dict[str, object]] | None = None,
         relation_facade: Any | None = None,
+        application_service_class: type[BankBatchApplicationService] = BankBatchApplicationService,
         refresh_event_type: str = NO_OA_BANK_BATCH_REFRESH_EVENT_TYPE,
         scope_type: str = NO_OA_BANK_BATCH_SCOPE_TYPE,
         relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
@@ -71,7 +72,7 @@ class BankBatchReadModelRefreshService:
             else "no_oa_bank_batch_sql_read_repository"
         )
         bank_batch_read_model_repository = getattr(state_store, repository_attr, None)
-        self._application_service = BankBatchApplicationService(
+        self._application_service = application_service_class(
             import_service=import_service,
             effective_category_provider=effective_category_provider,
             bank_batch_service=bank_batch_service,
@@ -123,7 +124,7 @@ class BankBatchReadModelRefreshService:
                     "bank_row_count": self._application_service.bank_row_count_from_source_versions(precheck_source_versions),
                 }
 
-        bank_rows = self._application_service.no_oa_bank_transaction_rows(
+        bank_rows = self._application_service.bank_transaction_rows(
             month=scope_key,
             include_categories=False,
         )
@@ -132,7 +133,7 @@ class BankBatchReadModelRefreshService:
         source_versions = (
             dict(precheck_source_versions)
             if isinstance(precheck_source_versions, dict) and precheck_source_versions
-            else self._application_service.no_oa_bank_batch_source_versions(
+            else self._application_service.bank_batch_source_versions(
                 relation_mode=relation_mode,
             )
         )

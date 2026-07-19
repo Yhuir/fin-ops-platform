@@ -4,7 +4,7 @@
 - 类型: 页面模块
 - Route: `/bank-flow-rule-batches`
 - Page key: `bank-flow-rule-batches`
-- 状态: close。当前生产入口、API、全局 Bank Transaction Paired Policy 规则抽屉、提交、关联台判定、独立 application service、独立 read model key、独立 worker event、独立 persistence IO、独立 PostgreSQL 批次/read model 表、独立 tag-rule settings family、前端 feature I/O/view model/components 和 Browser E2E 已接入；本轮已收口 bank-flow HTTP 错误码、Workbench 折叠摘要 `source_kind`、display tags、关联台撤回文案和 read model display-only 判定，旧 no-OA 残留只作为 backend legacy API/read-model 兼容风险跟踪，不再作为页面模块登记。
+- 状态: close。当前生产入口、API、全局 Bank Transaction Paired Policy 规则抽屉、提交、关联台判定、独立 application service、独立 read model key、独立 worker event、独立 persistence IO、独立 PostgreSQL 批次/read model 表、独立 tag-rule settings family、前端 feature I/O/view model/components 和 Browser E2E 已接入；列表使用专属 SQL 分页/聚合 I/O，详情使用批量银行流水读取，reset 使用批量 relation cancel 和一次原子 delta 保存，写命令成功后当前页立即本地可见、后台再完成 freshness reconcile。bank-flow HTTP 错误码、batch ID/schema、Workbench 折叠摘要、display tags、关联台撤回文案和 worker 边界均为正式 bank-flow 合同；旧 no-OA 只作为独立 legacy 模块存在，不再进入本页面运行链。
 
 ## 修改前必读
 
@@ -24,7 +24,7 @@
 - Frontend page: `web/src/pages/BankFlowRuleBatchPage.tsx`，通过 `/bank-flow-rule-batches` route 作为流水规则批量处理页。
 - Frontend feature: `web/src/features/bankFlowRuleBatches/api.ts`（HTTP/DTO mapping）、`types.ts`（public DTO/domain types）、`policy.ts`（状态/权限策略）、`viewModel.ts`（格式化、规则 grid view model、operation barrier target helpers）、`components.tsx`（分页、状态标签、label rail）。API 指向 `/api/bank-flow-rule-batches`。
 - Backend route: `backend/src/fin_ops_platform/app/routes_bank_flow_rule_batches.py`，只承载 `/api/bank-flow-rule-batches/*`。
-- Backend service: `backend/src/fin_ops_platform/services/bank_flow_rule_batch_application_service.py`，新提交写 `relation_mode=bank_flow_rule_batch`；共享批次计算内核在中性 `bank_batch_application_service.py` / `bank_batch_service.py`，bank-flow 不再继承 no-OA application service；HTTP 输出边界把共享 core 仍可能抛出的 legacy `no_oa_bank_batch_*` 错误码翻译为 `bank_flow_rule_batch_*`。
+- Backend service: `backend/src/fin_ops_platform/services/bank_flow_rule_batch_application_service.py`，新提交写 `relation_mode=bank_flow_rule_batch`；共享批次计算内核在中性 `bank_batch_application_service.py` / `bank_batch_service.py`，由显式 relation mode/schema/ID prefix 直接生成正式 bank-flow 领域错误和身份，bank-flow 不继承 no-OA application service，route 不保留 legacy 错误翻译或 fallback。
 - Backend read model: `backend/src/fin_ops_platform/services/bank_flow_rule_batch_read_model_repository.py`、`bank_flow_rule_batch_read_model_refresh.py`、`bank_flow_rule_batch_read_model_refresh_producer.py`。
 - Rule persistence: `app_settings.bank_flow_rule_batch_tag_rules.requirements_by_tag_code`；新 API 和服务边界只读写 `rules`，拒绝 `selected_tag_codes`，重复 `tag_code` fail fast。`0111_bank_flow_rule_batch_tag_rules_canonical_shape.sql` 已将一次性复制的 legacy selected seed 合并并删除。
 - Browser E2E: `web/e2e/bank-flow-rule-batches-flow.spec.ts`。

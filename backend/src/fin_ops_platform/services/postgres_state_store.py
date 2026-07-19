@@ -756,11 +756,13 @@ class PostgresStateStore:
         bank_flow_rule_batch_snapshot: dict[str, Any],
         changed_case_ids: set[str] | list[str] | tuple[str, ...],
         changed_scope_keys: set[str] | list[str] | tuple[str, ...],
+        changed_batch_ids: set[str] | list[str] | tuple[str, ...] = (),
     ) -> None:
         normalized_case_ids = {str(case_id).strip() for case_id in changed_case_ids if str(case_id).strip()}
         normalized_scope_keys = {str(scope_key).strip() for scope_key in changed_scope_keys if str(scope_key).strip()}
+        normalized_batch_ids = {str(batch_id).strip() for batch_id in changed_batch_ids if str(batch_id).strip()}
         batch_scope_keys = _bank_flow_rule_batch_month_scopes(normalized_scope_keys)
-        changed_batch_ids = self._bank_flow_rule_batch_ids_from_mutation(
+        mutation_batch_ids = normalized_batch_ids | self._bank_flow_rule_batch_ids_from_mutation(
             pair_relation_snapshot=pair_relation_snapshot,
             bank_flow_rule_batch_snapshot=bank_flow_rule_batch_snapshot,
             changed_case_ids=normalized_case_ids,
@@ -772,10 +774,10 @@ class PostgresStateStore:
                     pair_relation_snapshot,
                     changed_case_ids=normalized_case_ids,
                 )
-            if changed_batch_ids:
+            if mutation_batch_ids:
                 self.save_bank_flow_rule_batch_items(
                     bank_flow_rule_batch_snapshot,
-                    batch_ids=changed_batch_ids,
+                    batch_ids=mutation_batch_ids,
                 )
             elif batch_scope_keys:
                 for scope_key in batch_scope_keys:
@@ -955,6 +957,9 @@ class PostgresStateStore:
 
     def list_bank_transactions_page(self, **kwargs: Any) -> tuple[list[Any], int]:
         return self._core_repository.list_bank_transactions_page(**kwargs)
+
+    def list_bank_transactions_by_ids(self, transaction_ids: list[str]) -> list[Any]:
+        return self._core_repository.list_bank_transactions_by_ids(transaction_ids)
 
     def list_bank_transactions_auto_category_context(self, **kwargs: Any) -> list[Any]:
         return self._core_repository.list_bank_transactions_auto_category_context(**kwargs)

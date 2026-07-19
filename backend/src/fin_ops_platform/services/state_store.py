@@ -874,6 +874,7 @@ class ApplicationStateStore:
         bank_flow_rule_batch_snapshot: dict[str, Any],
         changed_case_ids: set[str] | list[str] | tuple[str, ...],
         changed_scope_keys: set[str] | list[str] | tuple[str, ...],
+        changed_batch_ids: set[str] | list[str] | tuple[str, ...] = (),
     ) -> None:
         normalized_case_ids = [str(case_id).strip() for case_id in changed_case_ids if str(case_id).strip()]
         normalized_scope_keys = [str(scope_key).strip() for scope_key in changed_scope_keys if str(scope_key).strip()]

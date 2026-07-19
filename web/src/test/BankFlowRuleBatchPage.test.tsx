@@ -648,7 +648,7 @@ describe("BankFlowRuleBatchPage", () => {
       expect(firstGet).toBeTruthy();
       const url = new URL(typeof firstGet?.[0] === "string" ? firstGet[0] : firstGet?.[0] instanceof URL ? firstGet[0].toString() : firstGet?.[0].url ?? "", "http://localhost");
       expect(url.searchParams.get("page")).toBe("1");
-      expect(url.searchParams.get("page_size")).toBe("200");
+      expect(url.searchParams.get("page_size")).toBe("50");
     });
     expect(screen.getByRole("button", { name: "流水规则标签管理" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "未提交 3" })).toHaveAttribute("aria-pressed", "true");
@@ -775,9 +775,9 @@ describe("BankFlowRuleBatchPage", () => {
     renderPage();
 
     await waitFor(() => {
-      expect(within(screen.getByRole("group", { name: "流水规则批次分页" })).getByText("1-200 / 205")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "费用 200批 · 200条" })).toHaveAttribute("aria-pressed", "true");
-      expect(screen.getByRole("button", { name: "手续费 200批 · 200条" })).toHaveAttribute("aria-pressed", "true");
+      expect(within(screen.getByRole("group", { name: "流水规则批次分页" })).getByText("1-50 / 205")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "费用 50批 · 50条" })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("button", { name: "手续费 50批 · 50条" })).toHaveAttribute("aria-pressed", "true");
     });
     expect(screen.getByText("建设银行0000")).toBeInTheDocument();
     expect(screen.queryByText("建设银行0204")).not.toBeInTheDocument();
@@ -785,17 +785,17 @@ describe("BankFlowRuleBatchPage", () => {
     await user.click(screen.getByRole("button", { name: "流水规则批次分页下一页" }));
 
     await waitFor(() => {
-      expect(within(screen.getByRole("group", { name: "流水规则批次分页" })).getByText("201-205 / 205")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "费用 5批 · 5条" })).toHaveAttribute("aria-pressed", "true");
-      expect(screen.getByRole("button", { name: "手续费 5批 · 5条" })).toHaveAttribute("aria-pressed", "true");
+      expect(within(screen.getByRole("group", { name: "流水规则批次分页" })).getByText("51-100 / 205")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "费用 50批 · 50条" })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("button", { name: "手续费 50批 · 50条" })).toHaveAttribute("aria-pressed", "true");
     });
-    expect(screen.getAllByText("建设银行0200").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("建设银行0050").length).toBeGreaterThan(0);
     expect(screen.queryByText("建设银行0000")).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([input]) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
       return url.pathname === "/api/bank-flow-rule-batches"
         && url.searchParams.get("page") === "2"
-        && url.searchParams.get("page_size") === "200";
+        && url.searchParams.get("page_size") === "50";
     })).toBe(true);
   }, 30_000);
 
@@ -1312,6 +1312,7 @@ describe("BankFlowRuleBatchPage", () => {
 
     try {
       renderPage();
+      await user.click(await screen.findByRole("button", { name: "已提交 1" }));
       await user.click(await screen.findByRole("button", { name: "重置全部已提交" }));
 
       await waitFor(() => {
@@ -1324,6 +1325,20 @@ describe("BankFlowRuleBatchPage", () => {
         );
       });
       expect(await screen.findByText("已重置 1 个已提交批次")).toBeInTheDocument();
+      await waitFor(() => {
+        const resetCallIndex = fetchMock.mock.calls.findIndex(([input]) => {
+          const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+          return url.pathname === "/api/bank-flow-rule-batches/reset-submitted";
+        });
+        expect(resetCallIndex).toBeGreaterThanOrEqual(0);
+        expect(fetchMock.mock.calls.slice(resetCallIndex + 1).some(([input, init]) => {
+          const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+          return url.pathname === "/api/bank-flow-rule-batches"
+            && (!init?.method || init.method === "GET")
+            && url.searchParams.get("bucket") === "unsubmitted"
+            && url.searchParams.get("page") === "1";
+        })).toBe(true);
+      });
       expectCustomEventDetailContaining(relationListener, { affectedMonths: ["2026-05"] });
     } finally {
       window.removeEventListener("workbenchRelationUpdated", relationListener);

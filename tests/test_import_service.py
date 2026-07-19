@@ -82,6 +82,17 @@ class FailingSubmittedEtcIdentityRepository(BulkInvoiceIdentityRepository):
         raise RuntimeError("submitted etc lookup failed")
 
 
+class BulkBankTransactionRepository:
+    def __init__(self, transactions: list[BankTransaction]) -> None:
+        self.transactions = list(transactions)
+        self.calls: list[list[str]] = []
+
+    def list_bank_transactions_by_ids(self, transaction_ids: list[str]) -> list[BankTransaction]:
+        self.calls.append(list(transaction_ids))
+        requested = set(transaction_ids)
+        return [transaction for transaction in self.transactions if transaction.id in requested]
+
+
 class ImportNormalizationServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.counterparty = Counterparty(
@@ -131,6 +142,29 @@ class ImportNormalizationServiceTests(unittest.TestCase):
             existing_invoices=[self.existing_invoice, self.existing_invoice_without_unique],
             existing_transactions=[self.existing_transaction],
         )
+
+    def test_list_transactions_by_ids_uses_one_bulk_repository_read_and_preserves_requested_order(self) -> None:
+        second = BankTransaction(
+            id="txn_repository_002",
+            account_no="62220002",
+            txn_direction=TransactionDirection.INFLOW,
+            counterparty_name_raw="Beta",
+            amount=Decimal("12.00"),
+            signed_amount=Decimal("12.00"),
+            txn_date="2026-03-24",
+        )
+        repository = BulkBankTransactionRepository([second])
+        service = ImportNormalizationService(
+            existing_transactions=[self.existing_transaction],
+            fact_repository=repository,
+        )
+
+        result = service.list_transactions_by_ids(
+            [second.id, self.existing_transaction.id, second.id, "missing"]
+        )
+
+        self.assertEqual([transaction.id for transaction in result], [second.id, self.existing_transaction.id])
+        self.assertEqual(repository.calls, [[second.id, "missing"]])
 
     def test_invoice_identity_service_uses_tax_amount_canonical_key_and_only_suspects_weak_match(self) -> None:
         identity_service = InvoiceIdentityService()

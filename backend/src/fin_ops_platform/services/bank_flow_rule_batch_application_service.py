@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
+from hashlib import sha256
 from typing import Any
 
 from fin_ops_platform.services.bank_batch_application_service import (
@@ -10,6 +12,7 @@ from fin_ops_platform.services.bank_batch_application_service import (
 )
 from fin_ops_platform.services.bank_batch_service import BANK_FLOW_RULE_BATCH_RELATION_MODE, BankBatchService
 from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService
+from fin_ops_platform.services.read_model_write_targets import write_target_envelope
 
 
 BANK_FLOW_RULE_BATCH_ONLINE_MUTATION_ACTIONS = frozenset(
@@ -21,8 +24,199 @@ BANK_FLOW_RULE_BATCH_ONLINE_MUTATION_ACTIONS = frozenset(
 )
 
 
+class BankFlowRuleBatchPersistenceError(BankBatchPersistenceError):
+    error_code = "bank_flow_rule_batch_persistence_failed"
+
+
 class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
     """Application boundary for 流水规则批量处理."""
+
+    def list_batches_payload(
+        self,
+        query: dict[str, list[str]],
+        *,
+        relation_mode: str = BANK_FLOW_RULE_BATCH_RELATION_MODE,
+    ) -> dict[str, object]:
+        if relation_mode != BANK_FLOW_RULE_BATCH_RELATION_MODE:
+            raise BankBatchRelationMutationError(
+                "invalid_bank_flow_rule_batch_relation_mode",
+                "流水规则批次服务只接受 bank_flow_rule_batch relation mode。",
+            )
+        pagination = self._pagination_from_query(query)
+        filters = {
+            "month": query.get("month", [""])[0],
+            "type": query.get("type", [""])[0],
+            "status": query.get("status", [""])[0],
+            "bucket": query.get("bucket", [""])[0],
+            "account_key": query.get("account_key", [""])[0],
+        }
+        summary_filters = {
+            "month": filters["month"],
+            "account_key": filters["account_key"],
+        }
+        read_page = getattr(self._bank_batch_read_model_repository, "read_page", None)
+        if not callable(read_page):
+            raise RuntimeError("bank_flow_rule_batch read repository requires read_page.")
+        page_result = read_page(
+            filters,
+            summary_filters=summary_filters,
+            page=pagination["page"] if pagination is not None else 1,
+            page_size=pagination["page_size"] if pagination is not None else None,
+        )
+        refresh_scope_keys = self._refresh_scope_keys_for_filters(filters)
+        if page_result is None:
+            refresh_enqueued = self.enqueue_background_refresh(
+                refresh_scope_keys,
+                reason="api_bank_flow_rule_batch_read_model_missing",
+                metadata=self._read_model_refresh_metadata_for_relation_mode(BANK_FLOW_RULE_BATCH_RELATION_MODE),
+            )
+            return {
+                "summary": self._summary_from_aggregates([]),
+                "batches": [],
+                **self._bank_flow_pagination_payload(pagination, total=0),
+                "read_model_status": "missing",
+                "read_model_stale_reasons": [],
+                "refresh_enqueued": refresh_enqueued,
+                "refresh_reason": "api_bank_flow_rule_batch_read_model_missing",
+            }
+
+        source_summary = page_result.get("source_versions_summary")
+        source_summary = source_summary if isinstance(source_summary, dict) else {}
+        source_versions = source_summary.get("source_versions")
+        source_versions = source_versions if isinstance(source_versions, dict) else {}
+        self.load_relation_source_versions_for_scope_keys(refresh_scope_keys)
+        expected_source_versions = (
+            self.read_model_scope_source_versions(
+                scope_key=refresh_scope_keys[0],
+                relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+            )
+            if len(refresh_scope_keys) == 1 and SEARCH_MONTH_RE.match(refresh_scope_keys[0])
+            else None
+        )
+        stale_reasons = self.bank_batch_stale_reasons(
+            [{"source_versions": source_versions}] if source_versions else [],
+            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+            expected_source_versions=expected_source_versions,
+        )
+        repository_status = str(source_summary.get("read_model_status") or "missing").strip()
+        read_model_status = "stale" if stale_reasons else repository_status
+        refresh_enqueued = False
+        refresh_reason = ""
+        if read_model_status in {"missing", "stale", "schema_mismatch"}:
+            refresh_reason = (
+                "api_bank_flow_rule_batch_source_versions_stale"
+                if stale_reasons
+                else "api_bank_flow_rule_batch_read_model_missing"
+            )
+            refresh_enqueued = self.enqueue_background_refresh(
+                refresh_scope_keys,
+                reason=refresh_reason,
+                metadata=self._read_model_refresh_metadata_for_relation_mode(BANK_FLOW_RULE_BATCH_RELATION_MODE),
+            )
+        batches = self.resolve_labels(self._public_batches(page_result.get("items")))
+        payload: dict[str, object] = {
+            "summary": self._summary_from_aggregates(page_result.get("aggregates")),
+            "batches": batches,
+            **self._bank_flow_pagination_payload(
+                pagination,
+                total=int(page_result.get("total") or 0),
+            ),
+            "read_model_status": read_model_status,
+        }
+        if stale_reasons:
+            payload["read_model_stale_reasons"] = stale_reasons
+        if refresh_reason:
+            payload["refresh_enqueued"] = refresh_enqueued
+            payload["refresh_reason"] = refresh_reason
+        return payload
+
+    @staticmethod
+    def _bank_flow_pagination_payload(
+        pagination: dict[str, int] | None,
+        *,
+        total: int,
+    ) -> dict[str, object]:
+        if pagination is None:
+            return {}
+        page_size = pagination["page_size"]
+        return {
+            "pagination": {
+                "page": pagination["page"],
+                "page_size": page_size,
+                "pageSize": page_size,
+                "total": max(int(total), 0),
+            }
+        }
+
+    def _summary_from_aggregates(self, aggregates: object) -> dict[str, object]:
+        rows = [row for row in list(aggregates or []) if isinstance(row, dict)] if isinstance(aggregates, list) else []
+        aggregate_codes = [str(row.get("batch_type") or "").strip() for row in rows]
+        category_codes = self._dedupe_ordered(
+            [*sorted(self._eligible_tag_codes_for_relation_mode(BANK_FLOW_RULE_BATCH_RELATION_MODE)), *aggregate_codes]
+        )
+        counts = {"draft": 0, "submitted": 0, "withdrawn": 0, "conflict": 0, "stale": 0}
+        categories: dict[str, dict[str, object]] = {}
+        for code in category_codes:
+            if not code:
+                continue
+            definition = self.bank_transaction_tag_definition_current(code)
+            categories[code] = {
+                "code": code,
+                "label": self.bank_transaction_tag_label_from_definition(code, definition),
+                "primary_label": str((definition or {}).get("output_primary_label") or ""),
+                "sub_label": str((definition or {}).get("output_sub_label") or ""),
+                "label_path": [
+                    item
+                    for item in [
+                        str((definition or {}).get("output_primary_label") or "").strip(),
+                        str((definition or {}).get("output_sub_label") or "").strip(),
+                    ]
+                    if item
+                ],
+                "total": 0,
+                "draft": 0,
+                "submitted": 0,
+                "withdrawn": 0,
+                "conflict": 0,
+                "stale": 0,
+                "total_amount": Decimal("0.00"),
+            }
+        total_amount = Decimal("0.00")
+        for row in rows:
+            code = str(row.get("batch_type") or "").strip()
+            status = str(row.get("presented_status") or "").strip()
+            count = max(int(row.get("batch_count") or 0), 0)
+            try:
+                amount = Decimal(str(row.get("total_amount") or "0").replace(",", ""))
+            except (InvalidOperation, ValueError):
+                amount = Decimal("0.00")
+            if status in counts:
+                counts[status] += count
+            total_amount += amount
+            category = categories.get(code)
+            if category is None:
+                continue
+            category["total"] = int(category["total"]) + count
+            if status in counts:
+                category[status] = int(category[status]) + count
+            category["total_amount"] = Decimal(str(category["total_amount"])) + amount
+        category_payloads: list[dict[str, object]] = []
+        for category in categories.values():
+            next_category = dict(category)
+            next_category["total_amount"] = f"{Decimal(str(category['total_amount'])):.2f}"
+            category_payloads.append(next_category)
+        total = counts["draft"] + counts["submitted"] + counts["withdrawn"]
+        return {
+            "total": total,
+            **counts,
+            "draft_count": counts["draft"],
+            "submitted_count": counts["submitted"],
+            "withdrawn_count": counts["withdrawn"],
+            "conflict_count": counts["conflict"],
+            "stale_count": counts["stale"],
+            "total_amount": f"{total_amount:.2f}",
+            "categories": category_payloads,
+        }
 
     def _refresh_bank_flow_rule_batch_runtime_snapshot(self) -> None:
         self.refresh_batches(
@@ -156,7 +350,7 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 "invalid_bank_flow_rule_batch_relation_mode",
                 "流水规则批次服务只接受 bank_flow_rule_batch relation mode。",
             )
-        bank_rows = self.no_oa_bank_transaction_rows_by_ids(row_ids)
+        bank_rows = self.bank_transaction_rows_by_ids(row_ids)
         categories_by_transaction_id = self.effective_categories_for_rows(bank_rows)
         if self._selected_rows_include_internal_transfer(bank_rows, categories_by_transaction_id):
             raise BankBatchRelationMutationError(
@@ -172,7 +366,7 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                     relation_mode=relation_mode,
                 )
                 if len(months) == 1
-                else self.no_oa_bank_batch_source_versions(relation_mode=relation_mode)
+                else self.bank_batch_source_versions(relation_mode=relation_mode)
             )
             batch = self._bank_batch_service.submit_selected_rows(
                 bank_rows=bank_rows,
@@ -234,13 +428,108 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         actor: str,
         reason: str | None,
     ) -> dict[str, object]:
-        return super().reset_submitted_bank_flow_rule_batches(actor=actor, reason=reason)
+        previous_batch_snapshot = self._bank_batch_service.snapshot()
+        previous_relation_snapshot = self._pair_relation_snapshot_port.snapshot()
+        candidates = self._submitted_batches_for_relation_mode(BANK_FLOW_RULE_BATCH_RELATION_MODE)
+        if not candidates:
+            return {
+                "summary": {
+                    "reset_count": 0,
+                    "batch_count": 0,
+                    "row_count": 0,
+                    "affected_months": [],
+                },
+                "affected_months": [],
+                **write_target_envelope(targets=[], scope_keys=[], fallback_scope_key="all"),
+                "workbench_rebuild_queued": False,
+                "results": [],
+            }
+
+        withdrawn_batches: list[dict[str, object]] = []
+        affected_months: set[str] = set()
+        resolved_reason = str(reason or "").strip() or "流水规则批量处理：重置全部已提交批次为未提交"
+        try:
+            for candidate in candidates:
+                batch_id = str(candidate.get("batch_id") or "").strip()
+                if not batch_id:
+                    continue
+                before_batch = self._bank_batch_service.get_batch(batch_id)
+                withdrawn = self._bank_batch_service.withdraw_batch(
+                    batch_id,
+                    actor=actor,
+                    expected_version=int(before_batch.get("version") or 1),
+                    reason=resolved_reason,
+                )
+                withdrawn_batches.append(withdrawn)
+                affected_months.update(self.affected_months(withdrawn))
+
+            case_ids = [
+                str(batch.get("relation_case_id") or batch.get("batch_id") or "").strip()
+                for batch in withdrawn_batches
+                if str(batch.get("relation_case_id") or batch.get("batch_id") or "").strip()
+            ]
+            version_fingerprint = "|".join(
+                f"{batch.get('batch_id')}:{batch.get('version')}"
+                for batch in sorted(withdrawn_batches, key=lambda item: str(item.get("batch_id") or ""))
+            )
+            cancel_result = self._require_relation_command_service().cancel_relations_by_case_ids(
+                case_ids=case_ids,
+                actor_id=str(actor or ""),
+                reason=resolved_reason,
+                idempotency_key=(
+                    "bank_flow_rule_batch:reset_submitted:"
+                    f"{sha256(version_fingerprint.encode('utf-8')).hexdigest()[:20]}"
+                ),
+                history_operation_type="bank_flow_rule_batch_reset_submitted_withdraw",
+            )
+            changed_case_ids = [
+                str(case_id).strip()
+                for case_id in list(cancel_result.get("changed_case_ids") or [])
+                if str(case_id).strip()
+            ]
+            workbench_rebuild_queued = self.after_mutation(
+                sorted(affected_months),
+                changed_case_ids=changed_case_ids,
+                changed_batch_ids=[
+                    str(batch.get("batch_id") or "").strip()
+                    for batch in withdrawn_batches
+                    if str(batch.get("batch_id") or "").strip()
+                ],
+                persist=True,
+                action_name="bank_flow_rule_batch_reset_submitted",
+            )
+        except Exception:
+            self._restore_snapshots(previous_batch_snapshot, previous_relation_snapshot)
+            raise
+        return {
+            "summary": {
+                "reset_count": len(withdrawn_batches),
+                "batch_count": len(withdrawn_batches),
+                "row_count": sum(int(batch.get("row_count") or 0) for batch in withdrawn_batches),
+                "affected_months": sorted(affected_months),
+            },
+            "affected_months": sorted(affected_months),
+            **write_target_envelope(
+                targets=self._mutation_barrier_targets(
+                    BANK_FLOW_RULE_BATCH_RELATION_MODE,
+                    sorted(affected_months),
+                ),
+                scope_keys=sorted(affected_months),
+                fallback_scope_key="all",
+            ),
+            "workbench_rebuild_queued": workbench_rebuild_queued,
+            "results": [
+                {"batch_id": batch.get("batch_id"), "status": "withdrawn"}
+                for batch in withdrawn_batches
+            ],
+        }
 
     def after_mutation(
         self,
         affected_months: list[str],
         *,
         changed_case_ids: list[str],
+        changed_batch_ids: list[str] | None = None,
         persist: bool,
         action_name: str | None = None,
     ) -> bool:
@@ -271,10 +560,17 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
             self.persist_mutation(
                 changed_case_ids=changed_case_ids,
                 changed_scope_keys=["all", *normalized_months],
+                changed_batch_ids=changed_batch_ids,
             )
         return bool(normalized_months)
 
-    def persist_mutation(self, *, changed_case_ids: list[str], changed_scope_keys: list[str]) -> None:
+    def persist_mutation(
+        self,
+        *,
+        changed_case_ids: list[str],
+        changed_scope_keys: list[str],
+        changed_batch_ids: list[str] | None = None,
+    ) -> None:
         if self._state_store is None:
             return
         try:
@@ -289,9 +585,74 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 bank_flow_rule_batch_snapshot=self._bank_batch_public_snapshot(),
                 changed_case_ids=changed_case_ids,
                 changed_scope_keys=changed_scope_keys,
+                changed_batch_ids=list(changed_batch_ids or []),
             )
         except Exception as exc:
-            raise BankBatchPersistenceError(str(exc)) from exc
+            raise BankFlowRuleBatchPersistenceError(str(exc)) from exc
+
+    def resolve_labels(self, batches: list[dict[str, object]]) -> list[dict[str, object]]:
+        resolved: list[dict[str, object]] = []
+        for batch in list(batches or []):
+            if not isinstance(batch, dict):
+                continue
+            next_batch = self._presentation_batch(batch)
+            batch_type = str(next_batch.get("batch_type") or "").strip()
+            if batch_type:
+                definition = self.bank_transaction_tag_definition_current(batch_type)
+                label = self.bank_transaction_tag_label_from_definition(batch_type, definition)
+                next_batch["batch_label"] = label
+                next_batch["display_tags"] = ["流水规则", label]
+                next_batch["category_primary_label"] = str((definition or {}).get("output_primary_label") or label)
+                next_batch["category_sub_label"] = str((definition or {}).get("output_sub_label") or "")
+                next_batch["category_label_path"] = [
+                    item
+                    for item in [
+                        str(next_batch.get("category_primary_label") or "").strip(),
+                        str(next_batch.get("category_sub_label") or "").strip(),
+                    ]
+                    if item
+                ]
+            resolved.append(next_batch)
+        return resolved
+
+    def _require_relation_command_service(self) -> Any:
+        if self._relation_command_service is None:
+            raise ValueError("bank_flow_rule_batch_relation_command_unavailable")
+        return self._relation_command_service
+
+    @staticmethod
+    def _relation_idempotency_key(batch: dict[str, object], *, operation: str) -> str:
+        return ":".join(
+            [
+                "bank_flow_rule_batch",
+                operation,
+                str(batch.get("batch_id") or ""),
+                str(batch.get("relation_case_id") or batch.get("batch_id") or ""),
+                str(batch.get("version") or ""),
+            ]
+        )
+
+    @staticmethod
+    def _relation_command_error(exc: Any) -> BankBatchRelationMutationError:
+        if exc.error_code in {"workbench_relation_read_model_not_fresh", "workbench_relation_read_model_unavailable"}:
+            return BankBatchRelationMutationError(
+                "bank_flow_rule_batch_relation_read_model_not_fresh",
+                "bank_flow_rule_batch_relation_read_model_not_fresh",
+                payload=exc.payload,
+            )
+        if exc.error_code == "workbench_relation_active_row_conflict":
+            return BankBatchRelationMutationError(
+                "bank_flow_rule_batch_relation_active_row_conflict",
+                "bank_flow_rule_batch_relation_active_row_conflict",
+                payload=exc.payload,
+            )
+        if exc.error_code == "workbench_relation_not_found":
+            return BankBatchRelationMutationError(
+                "bank_flow_rule_batch_relation_not_found",
+                "bank_flow_rule_batch_relation_not_found",
+                payload=exc.payload,
+            )
+        return BankBatchRelationMutationError(exc.error_code, exc.error_code, payload=exc.payload)
 
     def tag_selection_payload(self) -> dict[str, Any]:
         return self._app_settings_service.get_bank_flow_rule_batch_tag_rules_payload()

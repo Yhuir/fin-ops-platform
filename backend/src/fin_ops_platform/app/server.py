@@ -259,7 +259,9 @@ from fin_ops_platform.services.live_workbench_service import LiveWorkbenchServic
 from fin_ops_platform.services.matching import MatchingEngineService
 from fin_ops_platform.services.bank_batch_application_service import BankBatchPairRelationSnapshotPort
 from fin_ops_platform.services.bank_batch_service import (
+    BANK_FLOW_RULE_BATCH_ID_PREFIX,
     BANK_FLOW_RULE_BATCH_RELATION_MODE,
+    BANK_FLOW_RULE_BATCH_SCHEMA_VERSION,
     BankBatchRelationRepairReadPort,
     BankBatchService,
 )
@@ -871,6 +873,9 @@ class Application:
             ),
             relation_read_port=BankBatchRelationRepairReadPort(bank_flow_relation_service),
             relation_command_service=self._workbench_relation_command_service(require_fresh_relations=False),
+            schema_version=BANK_FLOW_RULE_BATCH_SCHEMA_VERSION,
+            batch_id_prefix=BANK_FLOW_RULE_BATCH_ID_PREFIX,
+            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
         )
         self._workbench_amount_check_service = WorkbenchAmountCheckService()
         self._workbench_read_model_service = WorkbenchReadModelService.from_snapshot(
@@ -8043,7 +8048,7 @@ class Application:
             state_store=self._state_store,
             tag_selection_service=self._no_oa_bank_batch_tag_selection_service,
             no_oa_bank_batch_read_model_repository=getattr(self, "_no_oa_bank_batch_sql_read_repository", None),
-            workbench_matching_source_versions_provider=self._bank_flow_rule_batch_workbench_source_versions,
+            workbench_matching_source_versions_provider=self._bank_batch_workbench_source_versions,
             bank_transaction_category_affected_months_provider=self._bank_transaction_category_affected_months,
             execute_derived_data_lifecycle_event=self._execute_derived_data_lifecycle_event,
             expand_workbench_read_model_scope_keys_for_base_scopes=self._expand_workbench_read_model_scope_keys_for_base_scopes,
@@ -8086,7 +8091,7 @@ class Application:
             workbench_read_model_service=self._workbench_read_model_service,
             state_store=self._state_store,
             bank_batch_read_model_repository=read_repository,
-            workbench_matching_source_versions_provider=self._no_oa_bank_batch_workbench_source_versions,
+            workbench_matching_source_versions_provider=self._bank_batch_workbench_source_versions,
             bank_transaction_category_affected_months_provider=self._bank_transaction_category_affected_months,
             execute_derived_data_lifecycle_event=self._execute_derived_data_lifecycle_event,
             expand_workbench_read_model_scope_keys_for_base_scopes=self._expand_workbench_read_model_scope_keys_for_base_scopes,
@@ -9766,14 +9771,7 @@ class Application:
             payload["oa_projection_sync_version"] = projection_sync_version
         return payload
 
-    def _no_oa_bank_batch_workbench_source_versions(self) -> dict[str, object]:
-        payload = dict(self._workbench_matching_source_versions())
-        payload["workbench_read_model_schema_version"] = WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
-        relation_source_versions = self._workbench_relation_source_version_provider()
-        payload["pair_relation_snapshot_version"] = relation_source_versions.pair_relation_snapshot_version()
-        return payload
-
-    def _bank_flow_rule_batch_workbench_source_versions(self) -> dict[str, object]:
+    def _bank_batch_workbench_source_versions(self) -> dict[str, object]:
         payload = dict(self._workbench_matching_source_versions())
         payload["workbench_read_model_schema_version"] = WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
         relation_source_versions = self._workbench_relation_source_version_provider()

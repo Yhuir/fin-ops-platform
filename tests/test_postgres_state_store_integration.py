@@ -126,6 +126,87 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
             )
         )
 
+    def test_bank_flow_rule_batch_page_uses_sql_pagination_and_aggregate_summary(self) -> None:
+        source_versions = {"schema_version": "bank-flow-test-v1", "bank_rows": "3"}
+        self.store.save_bank_flow_rule_batches(
+            {
+                "batches": {
+                    "bank-flow-batch-draft": {
+                        "batch_id": "bank-flow-batch-draft",
+                        "relation_mode": "bank_flow_rule_batch",
+                        "scope_month": "2026-05",
+                        "batch_type": "bank_fee",
+                        "status": "unsubmitted",
+                        "status_bucket": "unsubmitted",
+                        "account_key": "ccb:8106",
+                        "total_amount": "10.00",
+                        "row_count": 1,
+                        "source_versions": source_versions,
+                    },
+                    "bank-flow-batch-submitted": {
+                        "batch_id": "bank-flow-batch-submitted",
+                        "relation_mode": "bank_flow_rule_batch",
+                        "scope_month": "2026-05",
+                        "batch_type": "bank_fee",
+                        "status": "submitted",
+                        "status_bucket": "submitted",
+                        "account_key": "ccb:8106",
+                        "total_amount": "20.00",
+                        "row_count": 1,
+                        "source_versions": source_versions,
+                    },
+                    "bank-flow-batch-withdrawn": {
+                        "batch_id": "bank-flow-batch-withdrawn",
+                        "relation_mode": "bank_flow_rule_batch",
+                        "scope_month": "2026-05",
+                        "batch_type": "project_payment",
+                        "status": "withdrawn",
+                        "status_bucket": "withdrawn",
+                        "account_key": "ccb:8106",
+                        "total_amount": "30.00",
+                        "row_count": 1,
+                        "source_versions": source_versions,
+                    },
+                }
+            }
+        )
+        with self.connection.transaction() as transaction:
+            for scope_key in ("all", "2026-05"):
+                transaction.execute(
+                    """
+                    insert into read_model.app_status_readiness(
+                        tenant_id, read_model_key, scope_type, scope_key, status, source_versions
+                    ) values ('default', 'bank_flow_rule_batch', 'bank_flow_rule_batch', %s, 'fresh', %s::jsonb)
+                    """,
+                    (scope_key, json.dumps(source_versions)),
+                )
+
+        repository = PostgresReadModelRepository(self.connection)
+        page = repository.read_bank_flow_rule_batch_page(
+            {"month": "2026-05", "account_key": "ccb:8106"},
+            summary_filters={"month": "2026-05", "account_key": "ccb:8106"},
+            page=1,
+            page_size=2,
+        )
+
+        self.assertIsNotNone(page)
+        assert page is not None
+        self.assertEqual(page["total"], 3)
+        self.assertEqual(len(page["items"]), 2)
+        self.assertEqual(page["source_versions_summary"]["read_model_status"], "fresh")
+        aggregates = {
+            (row["batch_type"], row["presented_status"]): (int(row["batch_count"]), row["total_amount"])
+            for row in page["aggregates"]
+        }
+        self.assertEqual(
+            aggregates,
+            {
+                ("bank_fee", "draft"): (1, "10.000000"),
+                ("bank_fee", "submitted"): (1, "20.000000"),
+                ("project_payment", "withdrawn"): (1, "30.000000"),
+            },
+        )
+
     def test_formal_table_writes_for_settings_jobs_workbench_and_read_models(self) -> None:
         self.store.save_app_settings({"admin_usernames": ["admin"], "manual_projects": []})
         self.store.save_pending_invoice_commands(

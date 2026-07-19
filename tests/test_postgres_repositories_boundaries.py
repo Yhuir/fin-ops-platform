@@ -826,11 +826,20 @@ def test_bank_flow_rule_batch_read_model_queries_dedicated_table_without_relatio
     repository.bank_flow_rule_batch_source_versions_summary(
         {"month": "2026-03", "relation_mode": "bank_flow_rule_batch"}
     )
+    repository.read_bank_flow_rule_batch_page(
+        {"month": "2026-03", "bucket": "submitted"},
+        summary_filters={"month": "2026-03"},
+        page=2,
+        page_size=50,
+    )
 
     read_sql = [*(sql for sql, _ in connection.fetched_all), *(sql for sql, _ in connection.fetched_one)]
     assert any("from read_model.bank_flow_rule_batch_rows" in sql for sql in read_sql)
     assert any("batch_id = %s" in sql for sql in read_sql)
     assert any("count(distinct source_versions)" in sql for sql in read_sql)
+    assert any("limit %s offset %s" in sql for sql in read_sql)
+    assert any("group by batch_type, presented_status" in sql for sql in read_sql)
+    assert any(params[-2:] == (50, 50) for sql, params in connection.fetched_all if "limit %s offset %s" in sql)
     assert not any("from read_model.no_oa_bank_batch_rows" in sql for sql in read_sql)
     assert not any("payload->>'relation_mode'" in sql for sql in read_sql)
 

@@ -15,7 +15,13 @@ from fin_ops_platform.services.app_settings_service import (
 )
 from fin_ops_platform.services.bank_account_balance_projection import BankAccountBalanceProjectionBuilder
 from fin_ops_platform.services.bank_account_balance_read_model_refresh import BankAccountBalanceReadModelRefreshService
-from fin_ops_platform.services.bank_batch_service import BankBatchRelationRepairReadPort, BankBatchService
+from fin_ops_platform.services.bank_batch_service import (
+    BANK_FLOW_RULE_BATCH_ID_PREFIX,
+    BANK_FLOW_RULE_BATCH_RELATION_MODE,
+    BANK_FLOW_RULE_BATCH_SCHEMA_VERSION,
+    BankBatchRelationRepairReadPort,
+    BankBatchService,
+)
 from fin_ops_platform.services.bank_detail_read_model_refresh import BankDetailReadModelRefreshService
 from fin_ops_platform.services.bank_detail_sql_projection import BankDetailSqlProjectionBuilder
 from fin_ops_platform.services.bank_flow_rule_batch_read_model_refresh import (
@@ -433,7 +439,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 state_store or SimpleNamespace(save_no_oa_bank_batches=lambda _snapshot: None)
             ),
             queue_repository=queue,
-            workbench_matching_source_versions_provider=lambda: _no_oa_workbench_matching_source_versions(
+            workbench_matching_source_versions_provider=lambda: _bank_batch_workbench_matching_source_versions(
                 app_settings_service
             ),
             relation_facade=workbench_relation_read_facade,
@@ -459,6 +465,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         bank_flow_service = BankBatchService.from_snapshot(
             state_store.load_bank_flow_rule_batches() if state_store is not None else {},
             relation_read_port=BankBatchRelationRepairReadPort(relation_service),
+            schema_version=BANK_FLOW_RULE_BATCH_SCHEMA_VERSION,
+            batch_id_prefix=BANK_FLOW_RULE_BATCH_ID_PREFIX,
+            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
         )
         refresh_service = BankFlowRuleBatchReadModelRefreshService(
             import_service=ImportNormalizationService(
@@ -479,7 +488,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 state_store or SimpleNamespace(save_bank_flow_rule_batches=lambda _snapshot: None)
             ),
             queue_repository=queue,
-            workbench_matching_source_versions_provider=lambda: _no_oa_workbench_matching_source_versions(
+            workbench_matching_source_versions_provider=lambda: _bank_batch_workbench_matching_source_versions(
                 app_settings_service
             ),
             relation_facade=workbench_relation_read_facade,
@@ -669,7 +678,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
-def _no_oa_workbench_matching_source_versions(app_settings_service: AppSettingsService) -> dict[str, object]:
+def _bank_batch_workbench_matching_source_versions(app_settings_service: AppSettingsService) -> dict[str, object]:
     payload: dict[str, object] = {
         "workbench_read_model_schema_version": WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
         "workbench_formal_relation_rule_version": WORKBENCH_FORMAL_RELATION_RULE_VERSION,

@@ -96,7 +96,7 @@ const EMPTY_TAG_SELECTION: BankFlowRuleBatchTagSelection = {
 const SELF_SUB_LABEL = "主标签本身";
 const TAG_SYNC_EVENT = "finops:bank-transaction-tags-updated";
 const BANK_FLOW_RULE_READ_MODEL_REFRESH_RETRY_MS = 1000;
-const BANK_FLOW_RULE_BATCH_PAGE_SIZE = 200;
+const BANK_FLOW_RULE_BATCH_PAGE_SIZE = 50;
 
 export default function BankFlowRuleBatchPage() {
   const { runOperation } = useGlobalOperationOverlay();
@@ -158,13 +158,16 @@ export default function BankFlowRuleBatchPage() {
     clearSelection();
   }, [clearSelection]);
 
-  const reloadBatchesAfterMutation = useCallback(async () => {
+  const reloadBatchesAfterMutation = useCallback(async (query?: {
+    bucket?: BankFlowRuleBatchStatusBucket;
+    page?: number;
+  }) => {
     const requestId = batchRequestSeqRef.current + 1;
     batchRequestSeqRef.current = requestId;
     const nextPayload = await fetchBankFlowRuleBatches({
       month,
-      bucket,
-      page: batchPage,
+      bucket: query?.bucket ?? bucket,
+      page: query?.page ?? batchPage,
       pageSize: BANK_FLOW_RULE_BATCH_PAGE_SIZE,
     });
     if (requestId !== batchRequestSeqRef.current) {
@@ -391,7 +394,6 @@ export default function BankFlowRuleBatchPage() {
   useEffect(() => {
     if (visibleBatches.length === 0) {
       setSelectedBatchId("");
-      suppressNextAutoSelectRef.current = false;
       return;
     }
     if (!selectedBatchId && suppressNextAutoSelectRef.current) {
@@ -525,14 +527,19 @@ export default function BankFlowRuleBatchPage() {
     affectedMonths?: string[];
     freshnessTargets?: Parameters<typeof mutationBarrierTargets>[0]["freshnessTargets"];
     operationBarrierTargets?: Parameters<typeof mutationBarrierTargets>[0]["operationBarrierTargets"];
-  }, fallbackScopeKey: string) => {
+  }, fallbackScopeKey: string, query?: {
+    bucket?: BankFlowRuleBatchStatusBucket;
+    page?: number;
+  }) => {
+    setBackgroundRefreshing(true);
     void (async () => {
       try {
         await waitForOperationFreshness(
           mutationBarrierTargets(result, fallbackScopeKey),
         );
-        await reloadBatchesAfterMutation();
+        await reloadBatchesAfterMutation(query);
       } catch (caught) {
+        setBackgroundRefreshing(false);
         setFeedback({
           severity: "warning",
           message: caught instanceof Error ? caught.message : "流水规则批次已提交，后台同步状态检查失败，请稍后刷新。",
@@ -540,6 +547,51 @@ export default function BankFlowRuleBatchPage() {
       }
     })();
   }, [reloadBatchesAfterMutation]);
+
+  const applyWithdrawnBatchLocally = useCallback((batch: BankFlowRuleBatch, withdrawnBatch: BankFlowRuleBatch | null) => {
+    suppressNextAutoSelectRef.current = true;
+    setSelectedBatchId("");
+    setPayload((current) => {
+      const existingBatch = current.batches.find((item) => item.batchId === batch.batchId);
+      if (!existingBatch) {
+        return current;
+      }
+      const nextBatches = current.batches.filter((item) => item.batchId !== batch.batchId);
+      return {
+        ...current,
+        summary: {
+          ...current.summary,
+          submittedCount: Math.max(0, current.summary.submittedCount - 1),
+          withdrawnCount: current.summary.withdrawnCount + 1,
+          categories: current.summary.categories.map((category) => (
+            category.code === batch.batchType
+              ? {
+                ...category,
+                submitted: Math.max(0, category.submitted - 1),
+                withdrawn: category.withdrawn + 1,
+              }
+              : category
+          )),
+        },
+        batches: withdrawnBatch && bucket === "withdrawn"
+          ? [...nextBatches, withdrawnBatch]
+          : nextBatches,
+        pagination: current.pagination
+          ? { ...current.pagination, total: Math.max(0, current.pagination.total - 1) }
+          : current.pagination,
+      };
+    });
+    setDetails((current) => {
+      const next = { ...current };
+      delete next[batch.batchId];
+      return next;
+    });
+    setDetailErrors((current) => {
+      const next = { ...current };
+      delete next[batch.batchId];
+      return next;
+    });
+  }, [bucket]);
 
   const toggleTransaction = (row: BankFlowRuleBatchDetailRow, checked: boolean) => {
     setSelectedTransactionIds((current) => {
@@ -664,12 +716,9 @@ export default function BankFlowRuleBatchPage() {
           });
           setWithdrawTarget(null);
           setWithdrawReason("");
-          setMessage("正在等待流水规则批次读模型同步...");
-          await waitForOperationFreshness(
-            mutationBarrierTargets(withdrawResult, target.scopeMonth || month),
-          );
-          setMessage("正在刷新流水规则批次...");
-          await reloadBatchesAfterMutation();
+          applyWithdrawnBatchLocally(target, withdrawResult.batch);
+          setMessage("正在后台同步流水规则批次...");
+          reconcileMutationInBackground(withdrawResult, target.scopeMonth || month);
           return withdrawResult;
         } finally {
           setMutating(false);
@@ -696,12 +745,11 @@ export default function BankFlowRuleBatchPage() {
           const resetResult = await resetSubmittedBankFlowRuleBatches({
             reason: "流水规则批量处理：全部已提交批次重新过规则",
           });
-          setMessage("正在等待流水规则批次读模型同步...");
-          await waitForOperationFreshness(
-            mutationBarrierTargets(resetResult, month),
-          );
-          setMessage("正在刷新流水规则批次...");
-          await reloadBatchesAfterMutation();
+          setBucket("unsubmitted");
+          setBatchPage(1);
+          setPayload((current) => ({ ...current, batches: [], readModelStatus: "refreshing" }));
+          setMessage("正在后台重新生成未提交批次...");
+          reconcileMutationInBackground(resetResult, month, { bucket: "unsubmitted", page: 1 });
           return resetResult;
         } finally {
           setMutating(false);
@@ -710,8 +758,6 @@ export default function BankFlowRuleBatchPage() {
       errorMessage: (caught) => caught instanceof Error ? caught.message : "重置已提交批次失败",
     });
     if (result.status === "success") {
-      setBucket("unsubmitted");
-      setBatchPage(1);
       handleMutationComplete(`已重置 ${result.value.results.length} 个已提交批次`, result.value);
     } else {
       setFeedback({ severity: "error", message: result.error instanceof Error ? result.error.message : "重置已提交批次失败" });

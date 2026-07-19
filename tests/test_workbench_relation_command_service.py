@@ -728,6 +728,62 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
         self.assertEqual(history["before_relations"][0]["case_id"], "case-etc")
         self.assertEqual(history["affected_row_ids"], ["etc_summary_batch_1", "oa-1"])
 
+    def test_cancel_relations_by_case_ids_loads_and_saves_all_targets_once(self) -> None:
+        repository = FakeRelationRepository(
+            {
+                "pair_relations": {
+                    "flow-1": {
+                        "case_id": "flow-1",
+                        "row_ids": ["bank-1"],
+                        "row_types": ["bank"],
+                        "status": "active",
+                        "relation_mode": "bank_flow_rule_batch",
+                        "month_scope": "2026-05",
+                    },
+                    "flow-2": {
+                        "case_id": "flow-2",
+                        "row_ids": ["bank-2"],
+                        "row_types": ["bank"],
+                        "status": "active",
+                        "relation_mode": "bank_flow_rule_batch",
+                        "month_scope": "2026-06",
+                    },
+                    "unrelated": {
+                        "case_id": "unrelated",
+                        "row_ids": ["bank-3"],
+                        "row_types": ["bank"],
+                        "status": "active",
+                        "relation_mode": "manual_confirmed",
+                        "month_scope": "2026-06",
+                    },
+                }
+            }
+        )
+        service = WorkbenchRelationCommandService(relation_repository=repository)
+
+        result = service.cancel_relations_by_case_ids(
+            case_ids=["flow-1", "flow-2", "flow-1"],
+            actor_id="finance-user",
+            reason="重置流水规则批次",
+            history_operation_type="bank_flow_rule_batch_reset_submitted_withdraw",
+        )
+
+        self.assertEqual(result["changed_case_ids"], ["flow-1", "flow-2"])
+        self.assertEqual(result["affected_months"], ["2026-05", "2026-06"])
+        self.assertEqual(
+            repository.scoped_load_calls,
+            [{"row_ids": [], "case_ids": ["flow-1", "flow-2"]}],
+        )
+        self.assertEqual(len(repository.save_calls), 1)
+        saved = repository.save_calls[0]["snapshot"]
+        self.assertEqual(saved["pair_relations"]["flow-1"]["status"], "cancelled")
+        self.assertEqual(saved["pair_relations"]["flow-2"]["status"], "cancelled")
+        self.assertNotIn("unrelated", saved["pair_relations"])
+        self.assertEqual(
+            saved["pair_relation_history"][0]["operation_type"],
+            "bank_flow_rule_batch_reset_submitted_withdraw",
+        )
+
     def test_update_relation_metadata_for_case_id_checks_freshness_and_records_history(self) -> None:
         repository = FakeRelationRepository(
             {

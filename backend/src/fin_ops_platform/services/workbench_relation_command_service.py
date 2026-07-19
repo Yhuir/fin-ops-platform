@@ -550,6 +550,108 @@ class WorkbenchRelationCommandService:
         self._save_idempotency_result(idempotency_key, fingerprint, result)
         return result
 
+    def cancel_relations_by_case_ids(
+        self,
+        *,
+        case_ids: list[str],
+        actor_id: str,
+        reason: str | None = None,
+        occurred_at: str | None = None,
+        idempotency_key: str | None = None,
+        history_operation_type: str = "cancel_relations",
+    ) -> dict[str, Any]:
+        normalized_case_ids = list(
+            dict.fromkeys(
+                str(case_id).strip()
+                for case_id in list(case_ids or [])
+                if str(case_id).strip()
+            )
+        )
+        fingerprint = self._request_fingerprint(
+            "cancel_relations_by_case_ids",
+            {
+                "case_ids": normalized_case_ids,
+                "actor_id": actor_id,
+                "reason": reason,
+                "history_operation_type": history_operation_type,
+            },
+        )
+        replay = self._idempotency_replay(idempotency_key, fingerprint)
+        if replay is not None:
+            return replay
+        if not normalized_case_ids:
+            return {
+                "status": "noop",
+                "relations": [],
+                "history": None,
+                "changed_case_ids": [],
+                "affected_months": [],
+                "idempotent_replay": False,
+            }
+
+        self._acquire_relation_member_locks([], case_ids=normalized_case_ids)
+        pair_service = self._pair_service_for_case_ids(normalized_case_ids)
+        before_relations = [
+            relation
+            for case_id in normalized_case_ids
+            for relation in [pair_service.get_active_relation_by_case_id(case_id)]
+            if isinstance(relation, dict)
+        ]
+        all_row_ids = list(
+            dict.fromkeys(
+                str(row_id).strip()
+                for relation in before_relations
+                for row_id in list(relation.get("row_ids") or [])
+                if str(row_id).strip()
+            )
+        )
+        freshness = self._assert_relation_read_model_fresh(
+            row_ids=all_row_ids,
+            month_scope=self._combined_month_scope(before_relations),
+        )
+        if not before_relations:
+            result = {
+                "status": "noop",
+                "relations": [],
+                "history": None,
+                "changed_case_ids": [],
+                "affected_months": [],
+                **self._success_freshness_payload(freshness, fallback_months=[]),
+                "idempotent_replay": False,
+            }
+            self._save_idempotency_result(idempotency_key, fingerprint, result)
+            return result
+
+        cancelled_relations = [
+            cancelled
+            for relation in before_relations
+            for cancelled in [pair_service.cancel_relation(str(relation.get("case_id") or ""), cancelled_at=occurred_at)]
+            if isinstance(cancelled, dict)
+        ]
+        history = pair_service.record_history(
+            operation_type=history_operation_type,
+            before_relations=before_relations,
+            after_relations=[],
+            affected_row_ids=all_row_ids,
+            created_by=actor_id,
+            note=reason,
+            created_at=occurred_at,
+        )
+        changed_case_ids = self._changed_case_ids(before_relations)
+        self._save_changed_cases(pair_service, changed_case_ids)
+        affected_months = self._affected_months_for_relations(before_relations)
+        result = {
+            "status": "cancelled",
+            "relations": deepcopy(cancelled_relations),
+            "history": deepcopy(history),
+            "changed_case_ids": changed_case_ids,
+            "affected_months": affected_months,
+            **self._success_freshness_payload(freshness, fallback_months=affected_months),
+            "idempotent_replay": False,
+        }
+        self._save_idempotency_result(idempotency_key, fingerprint, result)
+        return result
+
     def update_relation_metadata_for_case_id(
         self,
         *,
