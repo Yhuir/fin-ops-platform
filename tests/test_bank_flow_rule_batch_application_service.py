@@ -1213,6 +1213,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         class Repository:
             def __init__(self) -> None:
                 self.calls: list[dict[str, object]] = []
+                self.status = "fresh"
 
             def read_page(
                 self,
@@ -1242,7 +1243,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                         }
                     ],
                     "source_versions_summary": {
-                        "read_model_status": "fresh",
+                        "read_model_status": self.status,
                         "row_count": 1,
                         "source_versions": expected_versions,
                     },
@@ -1254,6 +1255,8 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         service.enqueue_background_refresh = (  # type: ignore[method-assign]
             lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("fresh read model must not enqueue refresh"))
         )
+        provider_calls_before = list(provider.source_version_calls)
+        relation_calls_before = list(relation_facade.source_version_calls)
 
         payload = service.list_batches_payload(
             {"month": ["2026-07"]},
@@ -1262,8 +1265,8 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
 
         self.assertEqual(payload["read_model_status"], "fresh")
         self.assertEqual(len(payload["batches"]), 1)
-        self.assertGreaterEqual(provider.source_version_calls.count(["2026-07"]), 1)
-        self.assertEqual(relation_facade.source_version_calls.count("2026-07"), 2)
+        self.assertEqual(provider.source_version_calls, provider_calls_before)
+        self.assertEqual(relation_facade.source_version_calls, relation_calls_before)
         self.assertEqual(len(tag_dictionary_calls), 1)
         self.assertEqual(
             repository.calls,
@@ -1282,6 +1285,32 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                 },
             ],
         )
+
+        refresh_calls: list[dict[str, object]] = []
+        repository.status = "schema_mismatch"
+        service.enqueue_background_refresh = (  # type: ignore[method-assign]
+            lambda scope_keys, *, reason, metadata: refresh_calls.append(
+                {"scope_keys": list(scope_keys), "reason": reason, "metadata": metadata}
+            )
+            or True
+        )
+
+        mismatch_payload = service.list_batches_payload(
+            {"month": ["2026-07"]},
+            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
+        )
+
+        self.assertEqual(mismatch_payload["read_model_status"], "schema_mismatch")
+        self.assertEqual(
+            mismatch_payload["read_model_stale_reasons"],
+            ["bank_flow_rule_batch_source_versions_inconsistent"],
+        )
+        self.assertTrue(mismatch_payload["refresh_enqueued"])
+        self.assertEqual(refresh_calls[0]["scope_keys"], ["2026-07"])
+        self.assertEqual(refresh_calls[0]["reason"], "api_bank_flow_rule_batch_source_versions_stale")
+        self.assertEqual(provider.source_version_calls, provider_calls_before)
+        self.assertEqual(relation_facade.source_version_calls, relation_calls_before)
+        self.assertEqual(len(tag_dictionary_calls), 2)
 
     def test_bank_flow_refresh_publishes_prechecked_scope_source_versions(self) -> None:
         class ImportService:

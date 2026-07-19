@@ -207,6 +207,28 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
             },
         )
 
+        with self.connection.transaction() as transaction:
+            transaction.execute(
+                """
+                update read_model.bank_flow_rule_batch_rows
+                set source_versions = %s::jsonb
+                where batch_id = 'bank-flow-batch-withdrawn'
+                """,
+                (json.dumps({"schema_version": "bank-flow-test-v2", "bank_rows": "3"}),),
+            )
+
+        mixed_page = repository.read_bank_flow_rule_batch_page(
+            {"month": "2026-05", "account_key": "ccb:8106"},
+            summary_filters={"month": "2026-05", "account_key": "ccb:8106"},
+            page=1,
+            page_size=2,
+        )
+
+        self.assertIsNotNone(mixed_page)
+        assert mixed_page is not None
+        self.assertEqual(mixed_page["source_versions_summary"]["read_model_status"], "schema_mismatch")
+        self.assertEqual(mixed_page["source_versions_summary"]["source_versions"], {})
+
     def test_formal_table_writes_for_settings_jobs_workbench_and_read_models(self) -> None:
         self.store.save_app_settings({"admin_usernames": ["admin"], "manual_projects": []})
         self.store.save_pending_invoice_commands(

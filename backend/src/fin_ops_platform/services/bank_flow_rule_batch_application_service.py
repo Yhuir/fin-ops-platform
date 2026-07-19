@@ -82,29 +82,19 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
 
         source_summary = page_result.get("source_versions_summary")
         source_summary = source_summary if isinstance(source_summary, dict) else {}
-        source_versions = source_summary.get("source_versions")
-        source_versions = source_versions if isinstance(source_versions, dict) else {}
-        expected_source_versions = (
-            self.read_model_scope_source_versions(
-                scope_key=refresh_scope_keys[0],
-                relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
-            )
-            if len(refresh_scope_keys) == 1 and SEARCH_MONTH_RE.match(refresh_scope_keys[0])
-            else None
-        )
-        stale_reasons = self.bank_batch_stale_reasons(
-            [{"source_versions": source_versions}] if source_versions else [],
-            relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
-            expected_source_versions=expected_source_versions,
-        )
         repository_status = str(source_summary.get("read_model_status") or "missing").strip()
-        read_model_status = "stale" if stale_reasons else repository_status
+        read_model_status = repository_status
+        stale_reasons = (
+            ["bank_flow_rule_batch_source_versions_inconsistent"]
+            if repository_status == "schema_mismatch"
+            else []
+        )
         refresh_enqueued = False
         refresh_reason = ""
         if read_model_status in {"missing", "stale", "schema_mismatch"}:
             refresh_reason = (
                 "api_bank_flow_rule_batch_source_versions_stale"
-                if stale_reasons
+                if read_model_status in {"stale", "schema_mismatch"}
                 else "api_bank_flow_rule_batch_read_model_missing"
             )
             refresh_enqueued = self.enqueue_background_refresh(

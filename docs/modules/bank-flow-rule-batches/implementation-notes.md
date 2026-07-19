@@ -517,3 +517,11 @@
 - 当前页 50 个 batch 与约 40 个 summary category 过去会分别调用 `tag_dictionary_payload()`，每次 deep-copy 整份分类字典；现在每个请求只建立一次 definition index 并复用，不新增跨请求 payload cache。
 - `BankTransactionCategoryService.snapshot_version()` 缓存与完整 snapshot 序列化完全相同的 SHA-256，只在分类或 tag dictionary 实际变更时失效。20,000 条合成记录中，旧 copy+hash 约 `212.869ms`，首次无 copy hash 约 `190.723ms`，后续读取约 `0.005ms`；该优化保持 hash 合同不变，不改变其它页面数据。
 - 目标与 no-OA 隔离回归 `103 passed`，lint 通过；必须部署新 SHA 后重新执行相同 20 次生产读测量，未达门槛不得关闭。
+
+生产第二轮与 durable freshness 收敛：
+
+- SHA `1be049026` 部署为 `main-1be04902-20260720032126` 后，all 列表 p95 降至 `244.072ms` 并通过；month 列表 p95 为 `541.278ms`，20/20 fresh、零 enqueue，但仍高于 `500ms`，阶段继续保持 open。
+- runtime 证明 month 与 all 的主要差异是每次 month GET 额外跨读 bank-detail/workbench-relation live source versions，查询数 p95 `15`；这绕过了页面 repository 的 durable freshness 边界，并在每次只读请求重复 worker 才需要的 dependency precheck。
+- 列表删除 live dependency source-version读取，改为只消费 `read_page(...)` 返回的本模块 durable dirty/readiness/source-consistency proof。canonical writer仍必须事务内写 dirty/outbox，worker仍执行完整 source-version precheck；不存在“事实变了但页面继续伪装 fresh”的 fallback。
+- repository 对 fresh 月份 scope 的多个 distinct source versions返回 `schema_mismatch`，API返回明确 stale reason并入队 scoped refresh；all scope允许不同月份具有不同 source versions。
+- 同时删除 month readiness 对同一 dirty scope 的重复查询。真实 disposable PostgreSQL应用 0001–0111 后，SQL分页/聚合/混合 source-version fail-closed integration test通过；目标测试中的既有 cost-statistics fan-out fixture failure不属于本改动且未放宽。

@@ -38,3 +38,10 @@
 - 20 次测量：页面壳 p95 `108.923ms` pass；all list p95 `539.327ms` fail；2026-07 list p95 `720.336ms` fail 并出现一次 stale/enqueue；Page Audit p95 `265.977ms` pass。
 - 因两个 list gate 未通过，本项未关闭。补充优化后目标测试 `103 passed`，`bash scripts/verify.sh lint` 通过；20,000 条 category 合成数据证明 canonical hash 相同，缓存命中从旧 copy+hash 约 `212.869ms` 降至约 `0.005ms`。
 - 下一门禁：提交/推送补充代码、部署唯一新 SHA，重复同一 probe；只有 all/month list p95 均 `<=500ms` 且全部 fresh/零 enqueue，才进入安全写验证。
+
+## 第二轮生产结果与继续门禁
+
+- SHA `1be049026` / release `main-1be04902-20260720032126` 标准部署成功；API、dispatcher 与 22 workers active，release identity一致。
+- 20 次测量：页面壳 p95 `114.584ms` pass；all list p95 `244.072ms` pass；2026-07 list p95 `541.278ms` fail但20/20 fresh、零 enqueue；Page Audit p95 `294.511ms` pass。
+- 补充 durable freshness实现后，application/legacy no-OA目标组通过；真实 disposable PostgreSQL应用全部 migrations并通过 mixed-source fail-closed integration test。全量 repository boundary组仍有已知 cost-statistics fan-out fixture failure，与本 diff无关且未修改断言。
+- 下一门禁仍是新 SHA部署后的相同20次采样；month list未达到 `<=500ms` 前不进入写验证。

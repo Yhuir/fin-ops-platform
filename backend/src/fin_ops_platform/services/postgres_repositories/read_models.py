@@ -6692,10 +6692,12 @@ class PostgresSummaryReadModelRepository:
             }
         source_versions = row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}
         consistent = int_value(row.get("distinct_source_versions_count"), 0) == 1 and bool(source_versions)
+        readiness_fresh = self._bank_batch_readiness_is_fresh(readiness_scope_type, normalized_month)
+        read_model_status = "fresh" if readiness_fresh else "refreshing"
+        if readiness_fresh and normalized_month and not consistent:
+            read_model_status = "schema_mismatch"
         return {
-            "read_model_status": "fresh"
-            if self._bank_batch_readiness_is_fresh(readiness_scope_type, normalized_month)
-            else "refreshing",
+            "read_model_status": read_model_status,
             "row_count": row_count,
             "source_versions": source_versions if consistent else {},
         }
@@ -6707,12 +6709,24 @@ class PostgresSummaryReadModelRepository:
         normalized_scope_type = text(scope_type) or "no_oa_bank_batch"
         normalized_scope_key = text(scope_key)
         candidate_scope_keys = [normalized_scope_key, "all"] if normalized_scope_key else ["all"]
-        if normalized_scope_key and self._refresh_status(scope_type=normalized_scope_type, scope_key=normalized_scope_key) != "fresh":
-            return False
+        refresh_statuses: dict[str, str] = {}
+        if normalized_scope_key:
+            refresh_statuses[normalized_scope_key] = self._refresh_status(
+                scope_type=normalized_scope_type,
+                scope_key=normalized_scope_key,
+            )
+            if refresh_statuses[normalized_scope_key] != "fresh":
+                return False
         for candidate_scope_key in candidate_scope_keys:
             if not candidate_scope_key:
                 continue
-            if self._refresh_status(scope_type=normalized_scope_type, scope_key=candidate_scope_key) != "fresh":
+            refresh_status = refresh_statuses.get(candidate_scope_key)
+            if refresh_status is None:
+                refresh_status = self._refresh_status(
+                    scope_type=normalized_scope_type,
+                    scope_key=candidate_scope_key,
+                )
+            if refresh_status != "fresh":
                 continue
             if self._bank_batch_readiness_scope_is_fresh(normalized_scope_type, candidate_scope_key):
                 return True

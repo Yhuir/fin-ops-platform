@@ -41,3 +41,10 @@
 - 月份 freshness 删除重复 relation scope 预加载；expected-source 读取仍完整保留。
 - dependency source-version probe reason 按 relation mode 分离，bank-flow API/worker 不再输出旧 no-OA precheck reason。
 - canonical category snapshot SHA-256 增加同合同懒缓存，只在分类或 tag dictionary 真实变化时失效；没有 TTL、Redis、额外表、跨进程 cache 或兼容 fallback。
+
+## 生产第二轮未达标后的补充实现
+
+- release `main-1be04902-20260720032126` 的 all list p95 `244.072ms` 已通过；month list p95 `541.278ms`、20/20 fresh、零 enqueue，但仍差 `41.278ms`。
+- month GET 不再执行 worker级 bank-detail/workbench-relation live dependency precheck；页面读侧只消费本模块 repository 的 durable dirty/readiness/source-consistency proof，canonical write 的事务内 dirty/outbox合同不变。
+- fresh 月份如果包含多个 distinct source versions，repository fail closed 为 `schema_mismatch`，API返回明确 stale reason并入队 scoped refresh；all scope继续允许不同月份版本不同。
+- month readiness复用同一次 dirty-scope查询结果，删除同 scope重复 SQL。没有新增 cache、表、queue或跨页面 I/O。
