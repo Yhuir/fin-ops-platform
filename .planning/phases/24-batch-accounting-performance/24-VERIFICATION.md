@@ -10,6 +10,7 @@
 - 银行候选只读结构化 counterparty；OA 类型使用 migration 0112 对应的单一组合表达式，删除两个 JSON 字段各自前导通配再 `OR` 的全扫描。
 - 列表银行、OA、当前 OA 附件已合为一个 active-generation repository SQL I/O；submit 仍使用独立窄 loader，两条路径共享一个私有附件匹配谓词。
 - 第四次生产复采证明 query-count p95 已从 `10` 降到 `8`，但 unsubmitted p95 仍为 `513.385ms`；第五轮继续把候选 relation 的 scope proof+groups、年度 scope proof+count 各合为一个 batch-only I/O，目标 query-count p95 `<=6`。
+- 第五次生产复采证明 unsubmitted 查询数约为 `6`，但外部 p95 `523.595ms` 仍失败；第六轮把 relation rows/scope proof/referenced groups 合为同一个 batch-only repository 快照，再删除一次往返。
 - 通用 relation reader、其他页面 facade、read model 表结构、worker、queue、command API 和前端 DTO 均未改变；0112 只增加 batch-only 读性能索引。
 - 静态 architecture/runtime guards 已覆盖专用 I/O、索引合同和旧链删除条件。
 
@@ -63,10 +64,12 @@
 
 第四次 release `main-c8dce363-20260720050207` 已部署；40 样本 shell `112.477ms`、submitted `295.003ms`、Audit `361.581ms` 通过，unsubmitted `513.385ms` 仍高于门槛 `13.385ms`。160/160 请求均为 2xx/fresh/0 enqueue；dashboard API/DB/connection/query-count p95 为 `349.779ms` / `254.613ms` / `0.230ms` / `8`。生产库存仅银行 `989`、OA `253`、OA 附件 `196`，因此第五轮只合并 batch-only relation 内最后两组串行 I/O，不增加 schema 或基础设施。
 
-第五轮本地已完成：相关后端/SQL/architecture 146 passed、2 个条件性 PostgreSQL skip，真实 PostgreSQL 0001–0112 的 2/2 集成测试另行通过，临时数据库残留 `0`；lint/diff-check 通过。当前待精确 SHA 部署和生产复采。完成门为：
+第五次 release `main-784c9a46-20260720052008` 已部署；40 样本 shell `109.606ms`、submitted `369.071ms`、Audit `324.374ms` 通过，unsubmitted `523.595ms` 未通过。160/160 请求均为 2xx/fresh/0 enqueue；dashboard API/DB/connection/query-count p95 为 `389.325ms` / `262.648ms` / `0.202ms` / `7`，其中 endpoint 窗口混合了 unsubmitted 与 submitted，unsubmitted 实际调用路径约为 `6` 条。
+
+第六轮本地已完成：relation rows/proof/groups 使用一个 bundle SQL，相关 facade 单测与真实 PostgreSQL 0001–0112 的 2/2 集成测试通过，临时数据库残留 `0`。当前待完整定向门、精确 SHA 部署和生产复采。完成门为：
 
 - 精确 SHA 部署。
 - shell、unsubmitted、submitted、Page Audit 各 40 样本。
-- dashboard DB query count p95 `<=6`，列表 p95 `<=500ms`（目标 `<=300ms`），Audit p95 `<=1000ms`。
+- unsubmitted 请求 query count 目标 `<=5`（dashboard 混合 endpoint p95 允许 submitted 固有值），列表 p95 `<=500ms`（目标 `<=300ms`），Audit p95 `<=1000ms`。
 - 直接及跨页 Audit 必须 pass/fresh/drained/ready/0 issue。
 - submit → fresh → withdraw → fresh 只有在 `app-health-operations` 全局强制 preflight 通过后才允许执行；若仍被其他页面阻断，记录到最终系统门，不绕过安全门。

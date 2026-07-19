@@ -1,0 +1,30 @@
+{
+  "probes": [
+    {
+      "name": "page_shell_batch_accounting",
+      "path": "/fin-ops/batch-accounting",
+      "kind": "page",
+      "expected_statuses": [200],
+      "target_ms": 500
+    },
+    {
+      "name": "batch_accounting_unsubmitted_2026",
+      "path": "/api/batch-accounting?bank_year=2026&bucket=unsubmitted&bank_page=1&bank_page_size=200&oa_page=1&oa_page_size=200",
+      "expected_statuses": [200],
+      "target_ms": 500
+    },
+    {
+      "name": "batch_accounting_submitted_2026",
+      "path": "/api/batch-accounting?bank_year=2026&bucket=submitted&bank_page=1&bank_page_size=200&oa_page=1&oa_page_size=200",
+      "expected_statuses": [200],
+      "target_ms": 500
+    },
+    {
+      "name": "batch_accounting_page_audit",
+      "path": "/api/operations/app-health/page-audit?page=batch-accounting",
+      "expected_statuses": [200],
+      "target_ms": 1000,
+      "auth_scope": "admin"
+    }
+  ]
+}

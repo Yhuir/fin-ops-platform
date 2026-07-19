@@ -8,7 +8,7 @@
 - 当前边界可信度：high
 - 目标边界：批量账务页面通过 BatchAccounting service 操作批量关系和账务候选，关系事实写入必须走 workbench relation 边界。
 - 当前缺口：无本地模块化 closure blocker。批量账务不拥有独立 read model，依赖 `workbench_relation` read/write 和 runtime worker fan-out 是设计边界，不作为 partial 原因。
-- 旧代码删除状态：旧 server.py 批量账务入口不再承载业务逻辑；所有关系写入走 command service；submit/withdraw route 不再调用旧 pair relation persist、snapshot restore、旧 lifecycle 或旧 workbench read model persist 链路；已提交 bucket 不再回退 12 个月 `list_by_month` 扫描；批量账务 GET 不再调用通用逐 scope `get_by_row_ids`，年度 count/list 不再重复逐月 freshness 查询，未提交候选 relation 不再分别读取 proof/groups，年度 count 不再分别读取 proof/count；未提交 loader 不再无条件扫描全部 OA 附件或按银行/OA/附件执行三个顺序 round-trip，银行候选不再以历史 payload counterparty fallback 绕过结构化列和既有索引，OA 类型不再保留两个 JSON 前导通配 `OR` 全扫描；generic `grouped_workbench_loader` / Workbench full-page builder fallback 与 service-level `repair_legacy_case_id_collisions(...)` 已删除并由静态 guard 防回归。
+- 旧代码删除状态：旧 server.py 批量账务入口不再承载业务逻辑；所有关系写入走 command service；submit/withdraw route 不再调用旧 pair relation persist、snapshot restore、旧 lifecycle 或旧 workbench read model persist 链路；已提交 bucket 不再回退 12 个月 `list_by_month` 扫描；批量账务 GET 不再调用通用逐 scope `get_by_row_ids`，年度 count/list 不再重复逐月 freshness 查询，未提交候选 relation 不再先读 rows 再分别读取 proof/groups，年度 count 不再分别读取 proof/count；未提交 loader 不再无条件扫描全部 OA 附件或按银行/OA/附件执行三个顺序 round-trip，银行候选不再以历史 payload counterparty fallback 绕过结构化列和既有索引，OA 类型不再保留两个 JSON 前导通配 `OR` 全扫描；generic `grouped_workbench_loader` / Workbench full-page builder fallback 与 service-level `repair_legacy_case_id_collisions(...)` 已删除并由静态 guard 防回归。
 
 ## 职责边界
 

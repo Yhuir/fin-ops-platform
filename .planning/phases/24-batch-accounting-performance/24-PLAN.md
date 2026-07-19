@@ -37,6 +37,7 @@
 - 若该 release 仍失败，唯一剩余无索引条件是 OA `apply_type/expense_type` 的前导通配扫描：把两个 JSON 字段规范为一个稳定表达式，并用 migration 0112 添加只覆盖 `source_kind='oa' and scope_key<>'all'` 的部分 trigram 索引。
 - 若索引 release 已把 p95 降到接近门槛但仍失败，且 dashboard 证明 query-count p95 仍为 `10`、connection acquire 可忽略，则把同属一个 active-generation 候选快照的银行/OA/附件读取合为一个 repository SQL I/O；附件仍只引用当前 OA candidate CTE，submit 窄 loader 不变。
 - 若候选单 I/O release 已把 query-count p95 降到 `8`、但列表仍只差小幅未达门槛，则合并 batch-only relation 内剩余两组天然同边界读取：候选 `scope proof + referenced groups` 一次返回，年度 `scope proof + submitted count` 一次返回；目标 query-count p95 `<=6`。不改通用 relation reader 和 submitted list 已达标路径。
+- 若该 release 已把 unsubmitted 查询数降到约 `6`、但生产外部 p95 仍略高于门槛，则把同一 batch-only repository 方法的 relation rows 与它们决定的 scope proof/referenced groups 合为一个 JSON bundle 快照，目标 unsubmitted 请求查询数再减 `1`。这是最终允许的 SQL 合并；若仍失败，停止继续堆叠 SQL，转入新的生产证据审阅。
 - 不新增结构化列、缓存、projection 或第二套候选 read model；真实 PostgreSQL 测试必须执行 0001–0112 并由 `EXPLAIN` 证明查询命中精确索引，静态 guard 禁止银行 fallback 和 OA 未索引 `OR` 回流。
 
 ### 5. 测试与架构门禁

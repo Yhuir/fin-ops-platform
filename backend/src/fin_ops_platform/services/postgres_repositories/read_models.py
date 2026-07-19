@@ -4925,20 +4925,142 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
                 "read_model_scope_keys": [],
                 "stale_reasons": [],
             }
-        rows = self._connection.fetch_all(
-            """
-            select row_id, row_type, scope_key, scope_month, relation_status, group_ids,
-                   linked_oa, linked_bank_transactions, linked_input_invoices, linked_output_invoices,
-                   source_versions, payload, raw_payload
-            from read_model.workbench_relation_rows
-            where tenant_id = %s
-              and row_id = any(%s)
-            order by array_position(%s::text[], row_id), scope_key
-            """,
-            (tenant_id, normalized_ids, normalized_ids),
+        normalized_scope_keys_hint = _dedupe_preserve_order(
+            text(scope_key) for scope_key in list(scope_keys_hint or [])
         )
+        bundle = self._connection.fetch_one(
+            """
+            /* batch_accounting_relation_rows_scope_groups */
+            with requested_rows as (
+                select requested.row_id, requested.position
+                from unnest(%s::text[]) with ordinality as requested(row_id, position)
+            ),
+            matched_rows as materialized (
+                select requested.position as row_position,
+                       relation_row.row_id,
+                       relation_row.row_type,
+                       relation_row.scope_key,
+                       relation_row.scope_month,
+                       relation_row.relation_status,
+                       relation_row.group_ids,
+                       relation_row.linked_oa,
+                       relation_row.linked_bank_transactions,
+                       relation_row.linked_input_invoices,
+                       relation_row.linked_output_invoices,
+                       relation_row.source_versions,
+                       relation_row.payload,
+                       relation_row.raw_payload
+                from requested_rows requested
+                join read_model.workbench_relation_rows relation_row
+                  on relation_row.tenant_id = %s
+                 and relation_row.row_id = requested.row_id
+            ),
+            resolved_scopes as materialized (
+                select matched.scope_key, min(matched.row_position) as position
+                from matched_rows matched
+                group by matched.scope_key
+                union all
+                select hinted.scope_key, hinted.position
+                from unnest(%s::text[]) with ordinality as hinted(scope_key, position)
+                where not exists (select 1 from matched_rows)
+            ),
+            scope_proof as (
+                select requested.position,
+                       requested.scope_key,
+                       (scope.scope_key is not null) as scope_exists,
+                       scope.source_versions,
+                       dirty.status as dirty_status
+                from resolved_scopes requested
+                left join read_model.workbench_relation_scopes scope
+                  on scope.tenant_id = %s
+                 and scope.scope_key = requested.scope_key
+                left join lateral (
+                    select status
+                    from job.read_model_dirty_scopes
+                    where tenant_id = %s
+                      and scope_type = 'workbench_relation'
+                      and scope_key = requested.scope_key
+                      and status in ('pending', 'processing', 'failed')
+                    order by updated_at desc
+                    limit 1
+                ) dirty on true
+            ),
+            requested_groups as (
+                select distinct item.group_id
+                from matched_rows matched
+                cross join lateral unnest(
+                    coalesce(matched.group_ids, array[]::text[])
+                ) as item(group_id)
+            ),
+            group_rows as (
+                select group_row.group_id,
+                       group_row.scope_key,
+                       group_row.scope_month,
+                       group_row.relation_source,
+                       group_row.relation_kind,
+                       group_row.relation_status,
+                       group_row.oa_row_ids,
+                       group_row.bank_transaction_ids,
+                       group_row.input_invoice_ids,
+                       group_row.output_invoice_ids,
+                       group_row.source_versions,
+                       group_row.payload,
+                       group_row.raw_payload
+                from read_model.workbench_relation_groups group_row
+                join requested_groups requested_group
+                  on requested_group.group_id = group_row.group_id
+                where group_row.tenant_id = %s
+                  and group_row.scope_key in (select scope_key from resolved_scopes)
+            )
+            select
+                coalesce(
+                    (
+                        select jsonb_agg(
+                            to_jsonb(matched_rows) - 'row_position'
+                            order by row_position, scope_key
+                        )
+                        from matched_rows
+                    ),
+                    '[]'::jsonb
+                ) as rows,
+                coalesce(
+                    (
+                        select jsonb_agg(
+                            jsonb_build_object(
+                                'scope_key', scope_key,
+                                'scope_exists', scope_exists,
+                                'source_versions', source_versions,
+                                'dirty_status', dirty_status
+                            )
+                            order by position
+                        )
+                        from scope_proof
+                    ),
+                    '[]'::jsonb
+                ) as scope_proof,
+                coalesce(
+                    (select jsonb_agg(to_jsonb(group_rows) order by scope_key, group_id) from group_rows),
+                    '[]'::jsonb
+                ) as groups
+            """,
+            (
+                normalized_ids,
+                tenant_id,
+                normalized_scope_keys_hint,
+                tenant_id,
+                tenant_id,
+                tenant_id,
+            ),
+        ) or {}
+        rows = [dict(row) for row in list(bundle.get("rows") or []) if isinstance(row, dict)]
+        scope_proof = [
+            dict(proof)
+            for proof in list(bundle.get("scope_proof") or [])
+            if isinstance(proof, dict)
+        ]
+        groups = [dict(group) for group in list(bundle.get("groups") or []) if isinstance(group, dict)]
         if not rows:
-            scope_keys = _dedupe_preserve_order(text(scope_key) for scope_key in list(scope_keys_hint or []))
+            scope_keys = normalized_scope_keys_hint
             if not scope_keys:
                 return None
             return self._batch_accounting_relation_payload_from_rows(
@@ -4947,17 +5069,10 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
                 scope_keys=scope_keys,
                 tenant_id=tenant_id,
                 fallback_source_versions={},
+                scope_proof=scope_proof,
             )
 
         scope_keys = _dedupe_preserve_order(text(row.get("scope_key")) for row in rows)
-        group_ids = _dedupe_preserve_order(
-            group_id for row in rows for group_id in text_list(row.get("group_ids"))
-        )
-        scope_proof, groups = self._batch_accounting_relation_scope_proof_and_groups(
-            scope_keys=scope_keys,
-            group_ids=group_ids,
-            tenant_id=tenant_id,
-        )
         returned_ids = {text(row.get("row_id")) for row in rows if text(row.get("row_id"))}
         if len(returned_ids) < len(normalized_ids):
             proof_payload = self._batch_accounting_relation_payload_from_rows(
@@ -5501,112 +5616,6 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
             """,
             (tenant_id, scope_keys, group_ids),
         )
-
-    def _batch_accounting_relation_scope_proof_and_groups(
-        self,
-        *,
-        scope_keys: list[str],
-        group_ids: list[str],
-        tenant_id: str,
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        """Read the batch-accounting freshness proof and referenced groups in one I/O."""
-        normalized_scope_keys = _dedupe_preserve_order(text(scope_key) for scope_key in list(scope_keys or []))
-        if not normalized_scope_keys:
-            return [], []
-        normalized_group_ids = _dedupe_preserve_order(text(group_id) for group_id in list(group_ids or []))
-        bundle = self._connection.fetch_one(
-            """
-            /* batch_accounting_relation_scope_groups */
-            with requested_scopes as (
-                select requested.scope_key, requested.position
-                from unnest(%s::text[]) with ordinality as requested(scope_key, position)
-            ),
-            scope_proof as (
-                select requested.position,
-                       requested.scope_key,
-                       (scope.scope_key is not null) as scope_exists,
-                       scope.source_versions,
-                       dirty.status as dirty_status
-                from requested_scopes requested
-                left join read_model.workbench_relation_scopes scope
-                  on scope.tenant_id = %s
-                 and scope.scope_key = requested.scope_key
-                left join lateral (
-                    select status
-                    from job.read_model_dirty_scopes
-                    where tenant_id = %s
-                      and scope_type = 'workbench_relation'
-                      and scope_key = requested.scope_key
-                      and status in ('pending', 'processing', 'failed')
-                    order by updated_at desc
-                    limit 1
-                ) dirty on true
-            ),
-            requested_groups as (
-                select unnest(%s::text[]) as group_id
-            ),
-            group_rows as (
-                select group_row.group_id,
-                       group_row.scope_key,
-                       group_row.scope_month,
-                       group_row.relation_source,
-                       group_row.relation_kind,
-                       group_row.relation_status,
-                       group_row.oa_row_ids,
-                       group_row.bank_transaction_ids,
-                       group_row.input_invoice_ids,
-                       group_row.output_invoice_ids,
-                       group_row.source_versions,
-                       group_row.payload,
-                       group_row.raw_payload
-                from read_model.workbench_relation_groups group_row
-                join requested_groups requested_group
-                  on requested_group.group_id = group_row.group_id
-                where group_row.tenant_id = %s
-                  and group_row.scope_key = any(%s)
-            )
-            select
-                coalesce(
-                    (
-                        select jsonb_agg(
-                            jsonb_build_object(
-                                'scope_key', scope_key,
-                                'scope_exists', scope_exists,
-                                'source_versions', source_versions,
-                                'dirty_status', dirty_status
-                            )
-                            order by position
-                        )
-                        from scope_proof
-                    ),
-                    '[]'::jsonb
-                ) as scope_proof,
-                coalesce(
-                    (select jsonb_agg(to_jsonb(group_rows) order by scope_key, group_id) from group_rows),
-                    '[]'::jsonb
-                ) as groups
-            """,
-            (
-                normalized_scope_keys,
-                tenant_id,
-                tenant_id,
-                normalized_group_ids,
-                tenant_id,
-                normalized_scope_keys,
-            ),
-        ) or {}
-        proof_rows = [
-            dict(proof)
-            for proof in list(bundle.get("scope_proof") or [])
-            if isinstance(proof, dict)
-        ]
-        groups = [
-            dict(group)
-            for group in list(bundle.get("groups") or [])
-            if isinstance(group, dict)
-        ]
-        return proof_rows, groups
-
 
     def _workbench_relation_payload_from_rows(
         self,

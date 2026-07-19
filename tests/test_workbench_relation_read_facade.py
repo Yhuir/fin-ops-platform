@@ -422,6 +422,35 @@ class BatchAccountingBulkRelationConnection:
     def fetch_one(self, sql: str, params: tuple = ()) -> dict[str, object] | None:
         normalized = " ".join(sql.lower().split())
         self.fetch_one_calls.append((normalized, params))
+        if "batch_accounting_relation_rows_scope_groups" in normalized:
+            return {
+                "rows": [
+                    {
+                        "row_id": "txn-batch-1",
+                        "row_type": "bank_transaction",
+                        "scope_key": "2026-01",
+                        "scope_month": "2026-01-01",
+                        "relation_status": "unlinked",
+                        "group_ids": [],
+                        "linked_oa": [],
+                        "linked_bank_transactions": [],
+                        "linked_input_invoices": [],
+                        "linked_output_invoices": [],
+                        "source_versions": {"workbench_relation_schema_version": "row-v1"},
+                        "payload": {"row_id": "txn-batch-1", "row_type": "bank_transaction"},
+                        "raw_payload": {},
+                    }
+                ],
+                "scope_proof": [
+                    {
+                        "scope_key": "2026-01",
+                        "scope_exists": "2026-01" != self.missing_scope,
+                        "source_versions": {"workbench_relation_schema_version": "bulk-v1"},
+                        "dirty_status": self.dirty_status if self.dirty_scope == "2026-01" else None,
+                    }
+                ],
+                "groups": [],
+            }
         if "batch_accounting_relation_scope_count" in normalized:
             return {
                 "scope_proof": [
@@ -434,45 +463,6 @@ class BatchAccountingBulkRelationConnection:
                     for scope_key in params[0]
                 ],
                 "submitted_count": 1,
-            }
-        if "batch_accounting_relation_scope_groups" in normalized:
-            groups: list[dict[str, object]] = []
-            if params[3]:
-                groups.append(
-                    {
-                        "group_id": "CASE-BATCH-1",
-                        "scope_key": "2026-01",
-                        "scope_month": "2026-01-01",
-                        "relation_source": "manual",
-                        "relation_kind": "oa_bank",
-                        "relation_status": "linked",
-                        "oa_row_ids": ["oa-batch-1"],
-                        "bank_transaction_ids": ["txn-batch-1"],
-                        "input_invoice_ids": [],
-                        "output_invoice_ids": [],
-                        "source_versions": {"workbench_relation_schema_version": "group-v1"},
-                        "payload": {
-                            "group_id": "CASE-BATCH-1",
-                            "relation_mode": "batch_accounting",
-                            "relation_status": "linked",
-                            "row_ids": ["txn-batch-1", "oa-batch-1"],
-                            "row_types": ["bank", "oa"],
-                            "special_metadata": {"source": "batch_accounting", "bank_year": "2026"},
-                        },
-                        "raw_payload": {},
-                    }
-                )
-            return {
-                "scope_proof": [
-                    {
-                        "scope_key": scope_key,
-                        "scope_exists": scope_key != self.missing_scope,
-                        "source_versions": {"workbench_relation_schema_version": "bulk-v1"},
-                        "dirty_status": self.dirty_status if scope_key == self.dirty_scope else None,
-                    }
-                    for scope_key in params[0]
-                ],
-                "groups": groups,
             }
         if "count(distinct group_id)" in normalized:
             return {"submitted_count": 1}
@@ -579,9 +569,12 @@ class WorkbenchRelationReadFacadeTests(unittest.TestCase):
         )
 
         self.assertEqual(row_payload["read_model_status"], "fresh")
-        self.assertEqual(len(row_connection.fetch_all_calls) + len(row_connection.fetch_one_calls), 2)
+        self.assertEqual(len(row_connection.fetch_all_calls) + len(row_connection.fetch_one_calls), 1)
         self.assertEqual(
-            sum("batch_accounting_relation_scope_groups" in sql for sql, _params in row_connection.fetch_one_calls),
+            sum(
+                "batch_accounting_relation_rows_scope_groups" in sql
+                for sql, _params in row_connection.fetch_one_calls
+            ),
             1,
         )
 
