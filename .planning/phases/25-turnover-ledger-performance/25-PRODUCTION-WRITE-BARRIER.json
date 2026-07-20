@@ -1,11 +1,11 @@
 {
-  "baseline_ms": 342.459,
+  "baseline_ms": 359.227,
   "cycles": [
     {
       "confirm": {
-        "barrier_polls": 3,
-        "click_to_visible_ms": 16903.791,
-        "command_ms": 6765.397,
+        "barrier_polls": 13,
+        "click_to_visible_ms": 14624.613,
+        "command_ms": 6443.065,
         "observed": {
           "txn_imported_1278": {
             "cash_closure_case_id": "turnover:turnover_rel_a4fc90a82cc517a9",
@@ -18,9 +18,9 @@
             "category_version": 2
           }
         },
-        "reload_ms": 360.055,
-        "response_to_fresh_ms": 9778.34,
-        "response_to_visible_ms": 10138.395,
+        "reload_ms": 529.349,
+        "response_to_fresh_ms": 7652.199,
+        "response_to_visible_ms": 8181.548,
         "targets": [
           {
             "read_model_key": "turnover_ledger",
@@ -42,9 +42,9 @@
       },
       "cycle": 1,
       "withdraw": {
-        "barrier_polls": 2,
-        "click_to_visible_ms": 8997.189,
-        "command_ms": 2768.684,
+        "barrier_polls": 9,
+        "click_to_visible_ms": 7971.176,
+        "command_ms": 2731.617,
         "observed": {
           "txn_imported_1278": {
             "cash_closure_case_id": null,
@@ -57,9 +57,9 @@
             "category_version": 2
           }
         },
-        "reload_ms": 548.886,
-        "response_to_fresh_ms": 5679.62,
-        "response_to_visible_ms": 6228.505,
+        "reload_ms": 415.555,
+        "response_to_fresh_ms": 4824.004,
+        "response_to_visible_ms": 5239.559,
         "targets": [
           {
             "read_model_key": "turnover_ledger",
@@ -82,9 +82,9 @@
     },
     {
       "confirm": {
-        "barrier_polls": 3,
-        "click_to_visible_ms": 8325.249,
-        "command_ms": 1554.284,
+        "barrier_polls": 11,
+        "click_to_visible_ms": 8645.505,
+        "command_ms": 2564.89,
         "observed": {
           "txn_imported_1278": {
             "cash_closure_case_id": "turnover:turnover_rel_a4fc90a82cc517a9",
@@ -97,9 +97,9 @@
             "category_version": 2
           }
         },
-        "reload_ms": 319.266,
-        "response_to_fresh_ms": 6451.699,
-        "response_to_visible_ms": 6770.965,
+        "reload_ms": 337.985,
+        "response_to_fresh_ms": 5742.63,
+        "response_to_visible_ms": 6080.615,
         "targets": [
           {
             "read_model_key": "turnover_ledger",
@@ -121,9 +121,9 @@
       },
       "cycle": 2,
       "withdraw": {
-        "barrier_polls": 2,
-        "click_to_visible_ms": 7443.271,
-        "command_ms": 1580.985,
+        "barrier_polls": 6,
+        "click_to_visible_ms": 5464.472,
+        "command_ms": 1729.218,
         "observed": {
           "txn_imported_1278": {
             "cash_closure_case_id": null,
@@ -136,9 +136,9 @@
             "category_version": 2
           }
         },
-        "reload_ms": 387.17,
-        "response_to_fresh_ms": 5475.116,
-        "response_to_visible_ms": 5862.286,
+        "reload_ms": 532.342,
+        "response_to_fresh_ms": 3202.911,
+        "response_to_visible_ms": 3735.253,
         "targets": [
           {
             "read_model_key": "turnover_ledger",
@@ -169,16 +169,16 @@
     "txn_imported_1278",
     "txn_imported_1348"
   ],
-  "generated_at": "2026-07-20T02:34:20.500349+00:00",
+  "generated_at": "2026-07-20T02:41:33.010691+00:00",
   "recovery": null,
-  "release_sha": "adc5bc85c",
+  "release_sha": "486507219",
   "status": "fail",
   "summary": {
-    "command_p95_ms": 6765.397,
+    "command_p95_ms": 6443.065,
     "command_target_ms": 1000.0,
     "fresh_target_ms": 2000.0,
     "hard_max_ms": 3000.0,
-    "response_to_fresh_p95_ms": 9778.34,
-    "response_to_visible_p95_ms": 10138.395
+    "response_to_fresh_p95_ms": 7652.199,
+    "response_to_visible_p95_ms": 8181.548
   }
 }

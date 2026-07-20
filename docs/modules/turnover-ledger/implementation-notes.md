@@ -669,3 +669,11 @@ git diff --check
 - 版本：`TURNOVER_LEDGER_SCHEMA_VERSION` 升至 `2026-07-turnover-ledger-v7`，强制旧 read model 通过正式 gateway/worker 重建；不新增 cache、表、queue、worker、API 或 fallback。
 - 测试：新增 source-version 回归覆盖 confirmed 变化、relation 顺序稳定、withdrawn/audit-only 不变；相关 source/query/projection/UoW/API 237 项通过。真实 PostgreSQL repository integration 在前一发布收口已 4/4 通过；本次复跑尝试因当前本地 runtime PostgreSQL 用户无 `CREATE DATABASE` 且对既有 `fin_ops_test.schema_migrations` 无权限而未执行，本修复不改变 repository/SQL。
 - 生产验收：必须发布 v7 后重新执行两轮安全可逆 confirm→fresh→withdraw→fresh；command p95 `<=1000ms`、response-to-fresh p95 `<=2000ms`、任一 hard max `<=3000ms`，最终无 active relation 残留、两条 fixture 均未关联、直接与交叉 Audit 通过，才可关闭本页。
+
+## 2026-07-20 - 写后可见性 hot path 去重
+
+- 生产证据：release `486507219` 已把 target-scoped operation barrier 降到只读样本 `117–234ms`，AppHealth p95 `318.8ms`；两轮可逆写探针仍显示确认 response-to-visible `8.65–14.62s`、撤回 `5.46–7.97s`。剩余耗时来自 command transaction 与同一 turnover worker 串行处理两个受影响月份，不再来自 barrier 查询。
+- 根因：每个月份 projection 都从 canonical facts 重建整本 grouped ledger 后再过滤 scope；一次跨月确认/撤回会让同一个 worker 对相同 source version 连续做两次完全相同的基础计算。同时 unchanged 检查和 relation-only refresh 会重复读取同一 scope 的 page 1。
+- 修复：projection builder 只保留最近一个、由完整 own source_versions 精确绑定的基础 rows 计算结果，让同版本的相邻 month shard 复用；source version 任一字段变化立即重算。首次 read-model page 在同一次 rebuild 内复用。该 memoization 不新增表、Redis、TTL、fallback、worker 或 API，不跨进程，也不改变 canonical facts、freshness 或页面 payload。
+- 旧链删除：移除同一次 rebuild 对 page 1 的第二次 repository 查询，以及相邻同版本 month shard 对整本 ledger 的第二次 canonical grouped 计算；保留每个 scope 独立的 relation context、source-version 标记和原子保存。
+- 测试：覆盖同版本两个月只计算一次、source version 改变必须计算两次、relation-only refresh page 1 只读取一次；生产门仍为两轮可逆 confirm→fresh→withdraw→fresh、最终 fixture 恢复与跨页面 Audit。

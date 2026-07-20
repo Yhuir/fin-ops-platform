@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from decimal import Decimal, InvalidOperation
 from types import SimpleNamespace
 from typing import Any, Callable
@@ -39,6 +40,8 @@ class TurnoverLedgerSqlProjectionBuilder:
         self._source_versions_provider = source_versions_provider
         self._bank_transaction_tag_read_facade = bank_transaction_tag_read_facade
         self._workbench_relation_source_repository = workbench_relation_source_repository
+        self._base_rows_cache_key = ""
+        self._base_rows_cache: list[dict[str, Any]] = []
 
     def rebuild_turnover_ledger_read_model_scope(self, scope_key: str, *, source_version: object = None) -> dict[str, Any]:
         normalized_scope_key = str(scope_key or "all").strip() or "all"
@@ -56,8 +59,12 @@ class TurnoverLedgerSqlProjectionBuilder:
             )
 
         source_versions = dict(source_versions_provider())
-        unchanged = self._unchanged_scope_result(
+        existing_payload = self._existing_scope_first_page(
             read_repository=read_repository,
+            scope_key=normalized_scope_key,
+        )
+        unchanged = self._unchanged_scope_result(
+            payload=existing_payload,
             workbench_relation_source_repository=workbench_relation_source_repository,
             scope_key=normalized_scope_key,
             source_versions=source_versions,
@@ -70,10 +77,11 @@ class TurnoverLedgerSqlProjectionBuilder:
             scope_key=normalized_scope_key,
             source_versions=source_versions,
             source_version=source_version,
+            initial_payload=existing_payload,
         )
         if refreshed_existing is not None:
             return refreshed_existing
-        rows = self._collect_rows(ledger_service)
+        rows = self._collect_rows_cached(ledger_service, source_versions=source_versions)
         if normalized_scope_key != "all":
             rows = [row for row in rows if self._row_scope_key(row) == normalized_scope_key]
         rows = self._with_workbench_relation_context(
@@ -99,15 +107,11 @@ class TurnoverLedgerSqlProjectionBuilder:
     def _unchanged_scope_result(
         cls,
         *,
-        read_repository: Any,
+        payload: dict[str, Any] | None,
         workbench_relation_source_repository: Any | None,
         scope_key: str,
         source_versions: dict[str, Any],
     ) -> dict[str, Any] | None:
-        list_view = getattr(read_repository, "list_turnover_ledger_view", None)
-        if not callable(list_view):
-            return None
-        payload = list_view(scope_key=scope_key, page=1, page_size=200)
         if not isinstance(payload, dict):
             return None
         existing_source_versions = payload.get("source_versions")
@@ -147,10 +151,12 @@ class TurnoverLedgerSqlProjectionBuilder:
         scope_key: str,
         source_versions: dict[str, Any],
         source_version: object,
+        initial_payload: dict[str, Any] | None,
     ) -> dict[str, Any] | None:
         rows, existing_source_versions = cls._existing_scope_rows(
             read_repository=read_repository,
             scope_key=scope_key,
+            initial_payload=initial_payload,
         )
         if not rows or not isinstance(existing_source_versions, dict):
             return None
@@ -189,6 +195,7 @@ class TurnoverLedgerSqlProjectionBuilder:
         *,
         read_repository: Any,
         scope_key: str,
+        initial_payload: dict[str, Any] | None = None,
     ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
         list_view = getattr(read_repository, "list_turnover_ledger_view", None)
         if not callable(list_view):
@@ -198,7 +205,11 @@ class TurnoverLedgerSqlProjectionBuilder:
         rows: list[dict[str, Any]] = []
         source_versions: dict[str, Any] | None = None
         while True:
-            payload = list_view(scope_key=scope_key, page=page, page_size=page_size)
+            payload = initial_payload if page == 1 and isinstance(initial_payload, dict) else list_view(
+                scope_key=scope_key,
+                page=page,
+                page_size=page_size,
+            )
             if not isinstance(payload, dict):
                 return [], None
             if source_versions is None and isinstance(payload.get("source_versions"), dict):
@@ -211,6 +222,32 @@ class TurnoverLedgerSqlProjectionBuilder:
                 break
             page += 1
         return rows, source_versions
+
+    @staticmethod
+    def _existing_scope_first_page(
+        *,
+        read_repository: Any,
+        scope_key: str,
+    ) -> dict[str, Any] | None:
+        list_view = getattr(read_repository, "list_turnover_ledger_view", None)
+        if not callable(list_view):
+            return None
+        payload = list_view(scope_key=scope_key, page=1, page_size=200)
+        return dict(payload) if isinstance(payload, dict) else None
+
+    def _collect_rows_cached(
+        self,
+        ledger_service: TurnoverLedgerService,
+        *,
+        source_versions: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        cache_key = json.dumps(source_versions, ensure_ascii=False, sort_keys=True, default=str)
+        if cache_key == self._base_rows_cache_key:
+            return [dict(row) for row in self._base_rows_cache]
+        rows = self._collect_rows(ledger_service)
+        self._base_rows_cache_key = cache_key
+        self._base_rows_cache = [dict(row) for row in rows]
+        return [dict(row) for row in rows]
 
     @staticmethod
     def _collect_rows(ledger_service: TurnoverLedgerService) -> list[dict[str, Any]]:

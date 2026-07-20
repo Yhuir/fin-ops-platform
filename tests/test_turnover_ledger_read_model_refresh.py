@@ -105,6 +105,33 @@ class FakeGroupedLedgerService:
         }
 
 
+class CountingMultiMonthLedgerService:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def list_grouped_ledger(self, *, page: int = 1, page_size: int = 200, **_kwargs: object) -> dict[str, object]:
+        self.calls += 1
+        if page > 1:
+            return {"groups": [], "pagination": {"page": page, "page_size": page_size, "total": 2}}
+        groups = []
+        for month in ("2026-04", "2026-05"):
+            row_id = f"txn-{month}"
+            groups.append(
+                {
+                    "group_id": f"group-{month}",
+                    "summary_row": {
+                        "relation_id": f"relation-{month}",
+                        "first_transaction_at": f"{month}-01",
+                        "bank_row_ids": [row_id],
+                    },
+                    "flow_rows": [{"source_bank_row_id": row_id}],
+                    "allocation_lots": [],
+                    "lot_rows": [],
+                }
+            )
+        return {"groups": groups, "pagination": {"page": page, "page_size": page_size, "total": 2}}
+
+
 class FakeTwoFlowGroupedLedgerService:
     def list_grouped_ledger(self, *, page: int = 1, page_size: int = 200, **_kwargs: object) -> dict[str, object]:
         if page > 1:
@@ -255,6 +282,38 @@ class TurnoverLedgerReadModelRefreshServiceTests(unittest.TestCase):
         self.assertEqual(row["flow_rows"][0]["category_label_path"], ["外部往来款收款", "收回借款", "个人往来"])
         self.assertEqual(row["flow_rows"][0]["bank_account_labels"], ["工行 2002"])
         self.assertEqual(row["flow_rows"][0]["repayment_remark"], "收回周转款 / 收款备注")
+
+    def test_projection_reuses_version_bound_base_rows_across_month_shards(self) -> None:
+        repository = FakeTurnoverReadRepository()
+        ledger_service = CountingMultiMonthLedgerService()
+        builder = TurnoverLedgerSqlProjectionBuilder(
+            read_repository=repository,
+            ledger_service=ledger_service,  # type: ignore[arg-type]
+            source_versions_provider=lambda: {"turnover_ledger_schema_version": "same-version"},
+        )
+
+        april = builder.rebuild_turnover_ledger_read_model_scope("2026-04", source_version=10)
+        may = builder.rebuild_turnover_ledger_read_model_scope("2026-05", source_version=11)
+
+        self.assertEqual(april["row_count"], 1)
+        self.assertEqual(may["row_count"], 1)
+        self.assertEqual(ledger_service.calls, 1)
+
+    def test_projection_does_not_reuse_base_rows_after_source_version_changes(self) -> None:
+        repository = FakeTurnoverReadRepository()
+        ledger_service = CountingMultiMonthLedgerService()
+        source_versions = {"turnover_ledger_schema_version": "version-1"}
+        builder = TurnoverLedgerSqlProjectionBuilder(
+            read_repository=repository,
+            ledger_service=ledger_service,  # type: ignore[arg-type]
+            source_versions_provider=lambda: dict(source_versions),
+        )
+
+        builder.rebuild_turnover_ledger_read_model_scope("2026-04", source_version=10)
+        source_versions["turnover_ledger_schema_version"] = "version-2"
+        builder.rebuild_turnover_ledger_read_model_scope("2026-05", source_version=11)
+
+        self.assertEqual(ledger_service.calls, 2)
 
     def test_projection_source_versions_are_captured_before_relation_rebuild_side_effects(self) -> None:
         repository = FakeTurnoverReadRepository()
@@ -458,6 +517,7 @@ class TurnoverLedgerReadModelRefreshServiceTests(unittest.TestCase):
         self.assertEqual(saved_rows[0]["source_versions"]["workbench_relation_source_versions"], relation_source_versions)
         self.assertEqual(len(repository.source_summary_calls), 1)
         self.assertEqual(len(repository.source_bundle_calls), 1)
+        self.assertEqual(repository.list_calls, [{"scope_key": "2026-05", "page": 1, "page_size": 200}])
 
     def test_projection_refreshes_all_scope_from_existing_rows_when_only_relation_versions_changed(self) -> None:
         repository = FakeTurnoverReadRepository()
