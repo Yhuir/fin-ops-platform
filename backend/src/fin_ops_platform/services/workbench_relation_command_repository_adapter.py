@@ -49,6 +49,38 @@ class WorkbenchRelationCommandRepositoryAdapter:
             return deepcopy(relation) if isinstance(relation, dict) else None
         return self._pair_relation_service.get_active_relation_by_case_id(normalized_case_id)
 
+    def load_active_workbench_pair_relations_for_row_ids(
+        self,
+        row_ids: list[str],
+        *,
+        case_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        loader = getattr(self._repository, "load_active_workbench_pair_relations_for_row_ids", None)
+        if callable(loader):
+            snapshot = loader(list(row_ids or []), case_ids=list(case_ids or []))
+            return deepcopy(snapshot) if isinstance(snapshot, dict) else {"pair_relations": {}}
+        normalized_row_ids = {
+            str(row_id).strip()
+            for row_id in list(row_ids or [])
+            if str(row_id).strip()
+        }
+        normalized_case_ids = {
+            str(case_id).strip()
+            for case_id in list(case_ids or [])
+            if str(case_id).strip()
+        }
+        relations = {
+            str(relation.get("case_id") or "").strip(): relation
+            for relation in self._pair_relation_service.list_active_relations()
+            if str(relation.get("case_id") or "").strip() in normalized_case_ids
+            or normalized_row_ids.intersection(
+                str(row_id).strip()
+                for row_id in list(relation.get("row_ids") or [])
+                if str(row_id).strip()
+            )
+        }
+        return {"pair_relations": deepcopy(relations)}
+
     def save_workbench_pair_relations(
         self,
         snapshot: dict[str, Any],
@@ -64,6 +96,28 @@ class WorkbenchRelationCommandRepositoryAdapter:
         if self._save_repository and callable(saver):
             saver(snapshot, changed_case_ids=normalized_case_ids)
         self._apply_snapshot(snapshot, changed_case_ids=normalized_case_ids)
+
+    def save_workbench_pair_relation_delta(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        changed_case_ids: set[str] | list[str] | None = None,
+    ) -> None:
+        normalized_case_ids = [
+            str(case_id).strip()
+            for case_id in list(changed_case_ids or [])
+            if str(case_id).strip()
+        ]
+        saver = getattr(self._repository, "save_workbench_pair_relation_delta", None)
+        if self._save_repository and self._repository is not None:
+            if not callable(saver):
+                raise RuntimeError("relation repository does not expose changed-case delta persistence")
+            saver(snapshot, changed_case_ids=normalized_case_ids)
+        self._pair_relation_service.apply_snapshot_delta(
+            snapshot,
+            changed_case_ids=normalized_case_ids,
+            replace_history=False,
+        )
 
     def acquire_relation_member_locks(
         self,

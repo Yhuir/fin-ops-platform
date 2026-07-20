@@ -40,6 +40,32 @@ class FakeRelationRepository:
             self.snapshot
         ).snapshot_for_row_ids(list(row_ids or []), case_ids=list(case_ids or []))
 
+    def load_active_workbench_pair_relations_for_row_ids(
+        self,
+        row_ids: list[str],
+        *,
+        case_ids: list[str] | None = None,
+    ) -> dict[str, object]:
+        self.scoped_load_calls.append(
+            {
+                "row_ids": list(row_ids or []),
+                "case_ids": list(case_ids or []),
+            }
+        )
+        normalized_row_ids = set(row_ids or [])
+        normalized_case_ids = set(case_ids or [])
+        relations = {
+            case_id: deepcopy(relation)
+            for case_id, relation in dict(self.snapshot.get("pair_relations") or {}).items()
+            if isinstance(relation, dict)
+            and relation.get("status") == "active"
+            and (
+                case_id in normalized_case_ids
+                or normalized_row_ids.intersection(relation.get("row_ids") or [])
+            )
+        }
+        return {"pair_relations": relations}
+
     def save_workbench_pair_relations(
         self,
         snapshot: dict[str, object],
@@ -53,6 +79,27 @@ class FakeRelationRepository:
             }
         )
         self.snapshot = deepcopy(snapshot)
+
+    def save_workbench_pair_relation_delta(
+        self,
+        snapshot: dict[str, object],
+        *,
+        changed_case_ids: set[str] | list[str] | None = None,
+    ) -> None:
+        normalized_case_ids = set(changed_case_ids or set())
+        self.save_calls.append(
+            {
+                "snapshot": deepcopy(snapshot),
+                "changed_case_ids": normalized_case_ids,
+            }
+        )
+        service = WorkbenchPairRelationService.from_snapshot(self.snapshot)
+        service.apply_snapshot_delta(
+            snapshot,
+            changed_case_ids=normalized_case_ids,
+            replace_history=False,
+        )
+        self.snapshot = service.snapshot()
 
     def load_active_workbench_pair_relation_by_case_id(self, case_id: str) -> dict[str, object] | None:
         self.active_case_load_calls.append(case_id)
@@ -193,6 +240,31 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
         )
         self.assertEqual(repository.save_calls[-1]["changed_case_ids"], {"case-new"})
 
+    def test_confirm_relation_saves_only_new_history_event(self) -> None:
+        historical_events = [
+            {
+                "operation_id": f"old-{index}",
+                "operation_type": "old-confirm",
+                "after_relations": [{"case_id": "case-new"}],
+            }
+            for index in range(25)
+        ]
+        repository = FakeRelationRepository({"pair_relation_history": historical_events})
+        service = WorkbenchRelationCommandService(relation_repository=repository)
+
+        result = service.confirm_relation(
+            case_id="case-new",
+            row_ids=["bank-1", "oa-1"],
+            row_types=["bank", "oa"],
+            relation_mode="manual_confirmed",
+            actor_id="finance-user",
+            month_scope="2026-05",
+        )
+
+        saved_history = repository.save_calls[-1]["snapshot"]["pair_relation_history"]
+        self.assertEqual(saved_history, [result["history"]])
+        self.assertEqual(len(repository.snapshot["pair_relation_history"]), 26)
+
     def test_prepared_confirm_reuses_freshness_locks_and_scoped_snapshot(self) -> None:
         repository = FakeRelationRepository(
             {
@@ -205,7 +277,15 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
                         "relation_mode": "manual_confirmed",
                         "month_scope": "2026-05",
                     }
-                }
+                },
+                "pair_relation_history": [
+                    {
+                        "operation_id": f"old-case-oa-{index}",
+                        "operation_type": "old-confirm",
+                        "after_relations": [{"case_id": "case-oa"}],
+                    }
+                    for index in range(25)
+                ],
             }
         )
         facade = FakeRelationFacade()
@@ -236,6 +316,10 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
         self.assertEqual(result["status"], "confirmed")
         self.assertEqual(len(facade.calls), 1)
         self.assertEqual(repository.scoped_load_calls, [{"row_ids": ["bank-1"], "case_ids": []}])
+        self.assertEqual(
+            repository.save_calls[-1]["snapshot"]["pair_relation_history"],
+            [result["history"]],
+        )
         self.assertEqual(
             repository.lock_calls,
             [

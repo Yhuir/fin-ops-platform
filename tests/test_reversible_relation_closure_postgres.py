@@ -10,6 +10,9 @@ from uuid import uuid4
 
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
+from fin_ops_platform.services.postgres_repositories.workbench_relation import (
+    PostgresWorkbenchRelationRepository,
+)
 from fin_ops_platform.services.postgres_repositories.workbench_idempotency import (
     PostgresWorkbenchIdempotencyRepository,
 )
@@ -233,6 +236,68 @@ class ReversibleRelationClosurePostgresTests(unittest.TestCase):
                 },
             ],
         )
+
+    def test_relation_command_delta_appends_history_without_rewriting_existing_events(self) -> None:
+        repository = PostgresWorkbenchRelationRepository(self.connection, enqueue_refreshes=False)
+        relation = {
+            "case_id": "case-delta",
+            "relation_mode": "manual_confirmed",
+            "status": "active",
+            "month_scope": "2026-02",
+            "row_ids": ["bank-delta", "oa-delta"],
+            "row_types": ["bank", "oa"],
+        }
+        existing_history = [
+            {
+                "case_id": "case-delta",
+                "operation_id": f"existing-{index}",
+                "operation_type": "manual_confirmed",
+                "before_relations": [],
+                "after_relations": [relation],
+            }
+            for index in range(25)
+        ]
+        repository.save_workbench_pair_relations(
+            {
+                "pair_relations": {"case-delta": relation},
+                "pair_relation_history": existing_history,
+            },
+            changed_case_ids={"case-delta"},
+        )
+        new_history = {
+            "case_id": "case-delta",
+            "operation_id": "new-operation",
+            "operation_type": "metadata_updated",
+            "before_relations": [relation],
+            "after_relations": [relation],
+        }
+
+        repository.save_workbench_pair_relation_delta(
+            {
+                "pair_relations": {"case-delta": relation},
+                "pair_relation_history": [new_history],
+            },
+            changed_case_ids={"case-delta"},
+        )
+        repository.save_workbench_pair_relation_delta(
+            {
+                "pair_relations": {"case-delta": relation},
+                "pair_relation_history": [new_history],
+            },
+            changed_case_ids={"case-delta"},
+        )
+
+        history_count = self.connection.fetch_one(
+            "select count(*)::integer as count from app.workbench_pair_relation_history where case_id = %s",
+            ("case-delta",),
+        )
+        active_snapshot = repository.load_active_workbench_pair_relations_for_row_ids(
+            ["bank-delta"],
+            case_ids=["case-delta"],
+        )
+        self.assertEqual(history_count["count"], 26)
+        self.assertEqual(sorted(active_snapshot["pair_relations"]), ["case-delta"])
+        self.assertNotIn("pair_relation_history", active_snapshot)
 
     def _run_checkpoint(
         self,

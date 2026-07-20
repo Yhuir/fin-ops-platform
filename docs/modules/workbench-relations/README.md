@@ -16,8 +16,8 @@
 
 - `WorkbenchPairRelationService`：纯领域规则，负责 row 独占、replace/cancel/withdraw/history 计算。
 - `WorkbenchPairRelationService.apply_snapshot_delta(...)`：只把已持久化的 changed cases 增量同步到进程内镜像；不读取、复制或重建无关 relation/history。
-- `WorkbenchRelationCommandService`：所有 relation mutation 的统一 command 边界。
-- `PostgresWorkbenchRelationRepository`：正式关系/history SQL owner；active case 校验使用单行、不加载 history 的窄读取。
+- `WorkbenchRelationCommandService`：所有 relation mutation 的统一 command 边界；confirm overlap 只读取 active relations，command save 只输出 changed relations 与本次新 history events。
+- `PostgresWorkbenchRelationRepository`：正式关系/history SQL owner；active case/row overlap 校验使用不加载 history 的窄读取，在线 command history 只追加；全量 history replacement 只留给 migration/repair。
 - `WorkbenchRelationUow`：relation、history、idempotency、audit/refresh outbox 的事务边界。
 - `WorkbenchRelationReadFacade`：下游 linked/unlinked 查询与 freshness 边界。
 - `WorkbenchRelationSqlProjection`：active relation -> `workbench_relation` distribution。

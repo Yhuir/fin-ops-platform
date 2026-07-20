@@ -1809,6 +1809,14 @@ class BatchAccountingApiTests(unittest.TestCase):
                     "pair_relation_history": [],
                 }
 
+            def load_active_workbench_pair_relation_by_case_id(
+                self,
+                case_id: str,
+            ) -> dict[str, object] | None:
+                if case_id != active_relation["case_id"]:
+                    return None
+                return dict(active_relation)
+
             def save_workbench_pair_relations(
                 self,
                 snapshot: dict[str, object],
@@ -1820,6 +1828,17 @@ class BatchAccountingApiTests(unittest.TestCase):
                         "snapshot": snapshot,
                         "changed_case_ids": set(changed_case_ids or []),
                     }
+                )
+
+            def save_workbench_pair_relation_delta(
+                self,
+                snapshot: dict[str, object],
+                *,
+                changed_case_ids: list[str] | set[str] | None = None,
+            ) -> None:
+                self.save_workbench_pair_relations(
+                    snapshot,
+                    changed_case_ids=changed_case_ids,
                 )
 
         app = build_application()

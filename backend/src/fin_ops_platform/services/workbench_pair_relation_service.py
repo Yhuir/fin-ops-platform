@@ -59,6 +59,7 @@ class WorkbenchPairRelationService:
         snapshot: dict[str, Any],
         *,
         changed_case_ids: list[str] | set[str] | None = None,
+        replace_history: bool = True,
     ) -> None:
         changed_ids = {
             str(case_id).strip()
@@ -74,17 +75,30 @@ class WorkbenchPairRelationService:
                     self._pair_relations.pop(case_id, None)
                 else:
                     self._pair_relations[case_id] = deepcopy(relation)
-            self._pair_relation_history = [
-                history
-                for history in self._pair_relation_history
-                if not self._history_touches_cases(history, changed_ids)
-            ]
+            if replace_history:
+                self._pair_relation_history = [
+                    history
+                    for history in self._pair_relation_history
+                    if not self._history_touches_cases(history, changed_ids)
+                ]
         else:
             self._pair_relations.update(deepcopy(incoming._pair_relations))
 
+        if not replace_history and incoming._pair_relation_history:
+            incoming_operation_ids = {
+                str(history.get("operation_id") or "").strip()
+                for history in incoming._pair_relation_history
+                if str(history.get("operation_id") or "").strip()
+            }
+            if incoming_operation_ids:
+                self._pair_relation_history = [
+                    history
+                    for history in self._pair_relation_history
+                    if str(history.get("operation_id") or "").strip() not in incoming_operation_ids
+                ]
         self._pair_relation_history.extend(deepcopy(incoming._pair_relation_history))
 
-    def snapshot_case_ids(self, case_ids: list[str]) -> dict[str, Any]:
+    def snapshot_case_ids(self, case_ids: list[str], *, include_history: bool = True) -> dict[str, Any]:
         normalized_case_ids = {
             str(case_id).strip()
             for case_id in list(case_ids or [])
@@ -97,7 +111,7 @@ class WorkbenchPairRelationService:
                 if case_id in normalized_case_ids
             }
         }
-        if self._pair_relation_history and normalized_case_ids:
+        if include_history and self._pair_relation_history and normalized_case_ids:
             payload["pair_relation_history"] = [
                 deepcopy(history)
                 for history in self._pair_relation_history

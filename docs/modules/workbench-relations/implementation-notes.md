@@ -4704,3 +4704,25 @@ FIN_OPS_TEST_DATABASE_URL=<disposable-db> PYTHONPATH=backend/src:. python3 -m py
 - repository statement-count 测试证明 25 条历史固定为 2 条 history SQL。
 - 独立 disposable PostgreSQL 17 数据库应用 0001–0114 后，25 条历史全部持久化且 `relation_id` 全部正确绑定。
 - command/UoW/API 回归与 lint 通过；发布后仍必须执行两轮安全可逆 confirm → fresh → withdraw → fresh，并以生产 SLO 和最终数据恢复判定是否闭环。
+
+## 2026-07-20 - Online relation command history 追加写
+
+目标：删除 confirm/cancel/withdraw 热链中仍然存在的“读取相关 case 全部历史、删除后整段重写”旧合同，使同步命令成本不再随同一 case 的审计历史长度增长。
+
+生产证据与根因：
+
+- release `f18f62136` 已把 withdraw 前置 active-case 校验收敛为单行读取，三轮 withdraw command 为 `0.787–0.999s`；但 confirm 首轮仍为 `6.030s`，两轮热态为 `1.004s` / `1.211s`，未满足 command p95 `<=1s` 与 hard max `<=3s`。
+- confirm preparation 仍调用通用 `load_workbench_pair_relations_for_row_ids(...)`，该接口读取 active/cancelled relations 后再加载命中 case 的全部 history；保存又通过 `snapshot_case_ids(...)` 输出全部历史，repository 随后 delete + rewrite。生产探针反复使用同一个 deterministic case 时，该旧 I/O 会持续放大。
+
+变更与边界：
+
+- repository/adapter 增加 `load_active_workbench_pair_relations_for_row_ids(...)`，只读取目标 row/case overlap 的 active canonical relations，不加载 cancelled relation 或 history；confirm preparation 与未预备 confirm 只走该端口。
+- command save 改为 `save_workbench_pair_relation_delta(...)`：输出 changed relations 和本次新 history events；PostgreSQL 在同一事务 upsert/delete relation、append/idempotent upsert history、写 dirty/outbox，不再删除旧 history。
+- withdraw 为历史恢复仍可读取相关 case history，但保存只追加本次 withdraw event。domain in-memory mirror 用 operation id 去重并保留旧历史。
+- 旧 full `save_workbench_pair_relations(...)` 保留给 migration/repair/restore；在线 command 不再调用。没有新增缓存、queue、worker、API、双写、兼容分支或第二事实源。
+
+验证：
+
+- domain、adapter、command 与 PostgreSQL statement-count 测试覆盖 history-free active overlap、25 条旧历史只输出 1 条新事件、append 不 delete、operation id 幂等和无关 case/history 保留。
+- architecture guard 固化窄读、delta save 与 `include_history=False`，防止旧整段 history 链回流。
+- 必须部署精确 SHA 后复用三轮可逆 confirm → fresh → withdraw → fresh；command p95 `<=1000ms`、response-to-fresh p95 `<=2000ms`、任一 hard max `<=3000ms` 才能进入最终 Audit/40 样本门。

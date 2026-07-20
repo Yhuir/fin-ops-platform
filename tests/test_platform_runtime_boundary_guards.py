@@ -5207,6 +5207,16 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         factory_source = _function_source(server_tree, server_source, "_workbench_relation_command_repository")
         adapter_path = SERVICES_ROOT / "workbench_relation_command_repository_adapter.py"
         adapter_source = adapter_path.read_text(encoding="utf-8") if adapter_path.exists() else ""
+        command_path = SERVICES_ROOT / "workbench_relation_command_service.py"
+        command_source = command_path.read_text(encoding="utf-8") if command_path.exists() else ""
+        command_tree = _parse(command_path)
+        prepare_confirm_source = _function_source(
+            command_tree,
+            command_source,
+            "prepare_confirm_relation",
+        )
+        confirm_source = _function_source(command_tree, command_source, "confirm_relation")
+        save_changed_source = _function_source(command_tree, command_source, "_save_changed_cases")
         domain_path = SERVICES_ROOT / "workbench_pair_relation_service.py"
         domain_source = domain_path.read_text(encoding="utf-8") if domain_path.exists() else ""
         violations: list[str] = []
@@ -5226,13 +5236,30 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "class WorkbenchRelationCommandRepositoryAdapter",
             "def load_workbench_pair_relations(",
             "def load_active_workbench_pair_relation_by_case_id(",
+            "def load_active_workbench_pair_relations_for_row_ids(",
             "def save_workbench_pair_relations(",
+            "def save_workbench_pair_relation_delta(",
             "self._pair_relation_service.apply_snapshot_delta(",
         ):
             if snippet not in adapter_source:
                 violations.append(f"relation command repository adapter missing behavior {snippet}")
         if "def apply_snapshot_delta(" not in domain_source:
             violations.append("relation domain service missing explicit changed-case snapshot delta boundary")
+        for required in (
+            "self._active_pair_service_for_row_ids(",
+            'getattr(self._relation_repository, "save_workbench_pair_relation_delta", None)',
+            "include_history=False",
+        ):
+            if required not in command_source:
+                violations.append(f"relation command hot path missing delta contract {required}")
+        if "self._pair_service_for_row_ids(" in prepare_confirm_source:
+            violations.append("confirm preparation still loads relation history through the generic scoped reader")
+        if "self._pair_service_for_row_ids(" in confirm_source:
+            violations.append("confirm command still loads relation history through the generic scoped reader")
+        if "save_workbench_pair_relations" in save_changed_source:
+            violations.append("online relation command still invokes full relation/history replacement")
+        if "include_history=False" not in save_changed_source:
+            violations.append("online relation command delta still snapshots historical events")
         for private_write in (
             "self._pair_relation_service._pair_relations",
             "self._pair_relation_service._pair_relation_history",

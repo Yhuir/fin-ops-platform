@@ -54,3 +54,20 @@
 - 首轮 confirm command `5.680s`、response-to-fresh `6.134s`；严格门仍失败，因此不进入下一页面。
 - AppHealth：confirm 23 queries，热态数据库约 `0.708s`；withdraw 17 queries，数据库 p50 `0.532s`、p95 `0.973s`。调用图进一步定位 withdraw 请求前置 active-case 校验仍复制全局 snapshot/history。
 - 下一修复只增加 canonical active-case 单行读取并删除 obsolete after-apply callback；事务 mutation、history restore、refresh fan-out 与 API 不变。
+
+## release f18f62136 第三轮生产写门
+
+- 三轮安全可逆 confirm → fresh → withdraw → fresh 均完成；最终 fixture 为 `unlinked`，无恢复操作或 active relation 残留。
+- withdraw command 为 `0.787s`、`0.999s`、`0.824s`，response-to-fresh 为 `1.72–1.86s`；active-case 窄读取已消除 withdraw 的全局 snapshot/history 复制。
+- confirm 首轮 command/response-to-fresh 为 `6.030s` / `6.035s`；两轮热态 command 为 `1.004s` / `1.211s`，response-to-fresh 为 `1.028s` / `2.253s`。严格 command、freshness 与 hard-max 门仍失败。
+- AppHealth 记录 confirm 为 23 queries，服务 p50 约 `1.075s`、数据库 p50 约 `0.902s`，冷态数据库约 `5.77s`；调用图定位通用 overlap load 与 full case-history replacement 仍在 confirm 热链。
+- App Health 在探针后为 15/15 read models fresh、28/28 workers ready/idle、queue 0、write safety ready；该健康状态不替代失败的写性能门。
+- 下一修复只把 confirm overlap 改为 active/history-free 窄读，并把所有在线 command history 改为 append-only delta；不改变 API、状态机、read model、worker 或其他页面事实。
+
+## command history append-only delta 本地门
+
+- relation domain/adapter/command/UoW/idempotency、turnover domain/UoW/API/query/read-model、PostgreSQL repository 与 architecture guards：`696 passed + 72 subtests`。
+- 共享调用方隔离回归：batch accounting/matching/no-OA/exception `94 passed + 4 subtests`；pending invoice/OA promotion/no-OA application/auth idempotency `107 passed + 2 subtests`。
+- 真实 disposable PostgreSQL 17 应用 0001–0114 后，25 条旧 history + 1 条新 event 最终为 26 条；重复 delta 保持 26，active overlap 返回 relation 且不返回 history。临时数据库自动删除。
+- `bash scripts/verify.sh lint`、`bash scripts/verify.sh docs`、`git diff --check`：通过。
+- 下一门：提交并部署精确 SHA，执行三轮可逆写探针；任何 command p95 `>1000ms`、response-to-fresh p95 `>2000ms` 或 hard max `>3000ms` 均继续本页，不进入税金抵扣。

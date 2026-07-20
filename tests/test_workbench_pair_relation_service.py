@@ -700,6 +700,75 @@ class WorkbenchPairRelationServiceTests(unittest.TestCase):
             ["selected-case"],
         )
 
+    def test_snapshot_case_ids_can_exclude_history_for_command_delta(self) -> None:
+        service = WorkbenchPairRelationService.from_snapshot(
+            {
+                "pair_relations": {
+                    "CASE-1": {
+                        "case_id": "CASE-1",
+                        "row_ids": ["bank-1"],
+                        "row_types": ["bank"],
+                        "status": "active",
+                    }
+                },
+                "pair_relation_history": [
+                    {
+                        "operation_id": "old-operation",
+                        "operation_type": "old",
+                        "after_relations": [{"case_id": "CASE-1"}],
+                    }
+                ],
+            }
+        )
+
+        snapshot = service.snapshot_case_ids(["CASE-1"], include_history=False)
+
+        self.assertEqual(sorted(snapshot["pair_relations"]), ["CASE-1"])
+        self.assertNotIn("pair_relation_history", snapshot)
+
+    def test_append_history_delta_preserves_old_history_and_is_idempotent(self) -> None:
+        service = WorkbenchPairRelationService.from_snapshot(
+            {
+                "pair_relations": {
+                    "CASE-1": {"case_id": "CASE-1", "row_ids": ["bank-1"], "status": "active"},
+                    "CASE-2": {"case_id": "CASE-2", "row_ids": ["bank-2"], "status": "active"},
+                },
+                "pair_relation_history": [
+                    {
+                        "operation_id": "old-case-1",
+                        "operation_type": "old-case-1",
+                        "after_relations": [{"case_id": "CASE-1"}],
+                    },
+                    {
+                        "operation_id": "old-case-2",
+                        "operation_type": "old-case-2",
+                        "after_relations": [{"case_id": "CASE-2"}],
+                    },
+                ],
+            }
+        )
+        delta = {
+            "pair_relations": {
+                "CASE-1": {"case_id": "CASE-1", "row_ids": ["bank-1", "oa-1"], "status": "active"}
+            },
+            "pair_relation_history": [
+                {
+                    "operation_id": "new-case-1",
+                    "operation_type": "new-case-1",
+                    "after_relations": [{"case_id": "CASE-1"}],
+                }
+            ],
+        }
+
+        service.apply_snapshot_delta(delta, changed_case_ids=["CASE-1"], replace_history=False)
+        service.apply_snapshot_delta(delta, changed_case_ids=["CASE-1"], replace_history=False)
+
+        self.assertEqual(
+            [history["operation_type"] for history in service.list_history()],
+            ["old-case-1", "old-case-2", "new-case-1"],
+        )
+        self.assertEqual(service.get_active_relation_by_case_id("CASE-1")["row_ids"], ["bank-1", "oa-1"])
+
 
 if __name__ == "__main__":
     unittest.main()

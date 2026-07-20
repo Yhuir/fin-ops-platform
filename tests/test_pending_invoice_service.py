@@ -289,24 +289,63 @@ class PairServiceWorkbenchRelationRepository:
     def load_workbench_pair_relations(self) -> dict[str, object]:
         return deepcopy(self._pair_service.snapshot())
 
+    def load_workbench_pair_relations_for_row_ids(
+        self,
+        row_ids: list[str],
+        *,
+        case_ids: list[str] | None = None,
+    ) -> dict[str, object]:
+        return self._pair_service.snapshot_for_row_ids(
+            list(row_ids or []),
+            case_ids=list(case_ids or []),
+        )
+
+    def load_active_workbench_pair_relations_for_row_ids(
+        self,
+        row_ids: list[str],
+        *,
+        case_ids: list[str] | None = None,
+    ) -> dict[str, object]:
+        normalized_row_ids = set(row_ids or [])
+        normalized_case_ids = set(case_ids or [])
+        return {
+            "pair_relations": {
+                str(relation.get("case_id") or ""): relation
+                for relation in self._pair_service.list_active_relations()
+                if str(relation.get("case_id") or "") in normalized_case_ids
+                or normalized_row_ids.intersection(relation.get("row_ids") or [])
+            }
+        }
+
+    def load_active_workbench_pair_relation_by_case_id(
+        self,
+        case_id: str,
+    ) -> dict[str, object] | None:
+        return self._pair_service.get_active_relation_by_case_id(case_id)
+
     def save_workbench_pair_relations(
         self,
         snapshot: dict[str, object],
         *,
         changed_case_ids: set[str] | list[str] | None = None,
     ) -> None:
-        current = deepcopy(self._pair_service.snapshot())
-        current_relations = current.setdefault("pair_relations", {})
-        snapshot_relations = snapshot.get("pair_relations") if isinstance(snapshot.get("pair_relations"), dict) else {}
-        for case_id in list(changed_case_ids or []):
-            case_text = str(case_id).strip()
-            if case_text and case_text in snapshot_relations and isinstance(current_relations, dict):
-                current_relations[case_text] = deepcopy(snapshot_relations[case_text])
-        if isinstance(snapshot.get("pair_relation_history"), list):
-            current["pair_relation_history"] = deepcopy(snapshot["pair_relation_history"])
-        replacement = WorkbenchPairRelationService.from_snapshot(current)
-        self._pair_service._pair_relations = replacement._pair_relations
-        self._pair_service._pair_relation_history = replacement._pair_relation_history
+        self._pair_service.apply_snapshot_delta(
+            snapshot,
+            changed_case_ids=changed_case_ids,
+            replace_history=True,
+        )
+
+    def save_workbench_pair_relation_delta(
+        self,
+        snapshot: dict[str, object],
+        *,
+        changed_case_ids: set[str] | list[str] | None = None,
+    ) -> None:
+        self._pair_service.apply_snapshot_delta(
+            snapshot,
+            changed_case_ids=changed_case_ids,
+            replace_history=False,
+        )
 
 
 class RepositoryOnlyPendingInvoiceFacts:

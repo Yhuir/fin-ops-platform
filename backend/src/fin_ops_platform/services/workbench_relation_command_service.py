@@ -69,6 +69,35 @@ class CallbackWorkbenchRelationRepository:
             self.load_workbench_pair_relations()
         ).snapshot_for_row_ids(list(row_ids or []), case_ids=list(case_ids or []))
 
+    def load_active_workbench_pair_relations_for_row_ids(
+        self,
+        row_ids: list[str],
+        *,
+        case_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        service = WorkbenchPairRelationService.from_snapshot(self.load_workbench_pair_relations())
+        normalized_row_ids = {
+            str(row_id).strip()
+            for row_id in list(row_ids or [])
+            if str(row_id).strip()
+        }
+        normalized_case_ids = {
+            str(case_id).strip()
+            for case_id in list(case_ids or [])
+            if str(case_id).strip()
+        }
+        relations = {
+            str(relation.get("case_id") or "").strip(): relation
+            for relation in service.list_active_relations()
+            if str(relation.get("case_id") or "").strip() in normalized_case_ids
+            or normalized_row_ids.intersection(
+                str(row_id).strip()
+                for row_id in list(relation.get("row_ids") or [])
+                if str(row_id).strip()
+            )
+        }
+        return {"pair_relations": deepcopy(relations)}
+
     def save_workbench_pair_relations(
         self,
         snapshot: dict[str, Any],
@@ -82,6 +111,28 @@ class CallbackWorkbenchRelationRepository:
                 for case_id in list(changed_case_ids or [])
                 if str(case_id).strip()
             ],
+        )
+
+    def save_workbench_pair_relation_delta(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        changed_case_ids: set[str] | list[str] | None = None,
+    ) -> None:
+        normalized_case_ids = [
+            str(case_id).strip()
+            for case_id in list(changed_case_ids or [])
+            if str(case_id).strip()
+        ]
+        service = WorkbenchPairRelationService.from_snapshot(self.load_workbench_pair_relations())
+        service.apply_snapshot_delta(
+            snapshot,
+            changed_case_ids=normalized_case_ids,
+            replace_history=False,
+        )
+        self._save_snapshot(
+            service.snapshot(),
+            changed_case_ids=normalized_case_ids,
         )
 
     @staticmethod
@@ -134,7 +185,7 @@ class WorkbenchRelationCommandService:
             normalized_row_ids,
             row_types=normalized_row_types,
         )
-        pair_service = self._pair_service_for_row_ids(normalized_row_ids)
+        pair_service = self._active_pair_service_for_row_ids(normalized_row_ids)
         active_relations = pair_service.active_relations_for_row_ids(normalized_row_ids)
         return WorkbenchRelationConfirmPreparation(
             owner_token=self._confirm_preparation_owner,
@@ -211,7 +262,10 @@ class WorkbenchRelationCommandService:
                 row_types=list(row_types or []),
                 case_ids=[case_id],
             )
-            pair_service = self._pair_service_for_row_ids(list(row_ids or []), case_ids=[case_id])
+            pair_service = self._active_pair_service_for_row_ids(
+                list(row_ids or []),
+                case_ids=[case_id],
+            )
         else:
             requested_row_ids = list(row_ids or [])
             requested_row_types = list(row_types or [])
@@ -318,7 +372,7 @@ class WorkbenchRelationCommandService:
                 relation,
             ]
         )
-        self._save_changed_cases(pair_service, changed_case_ids)
+        self._save_changed_cases(pair_service, changed_case_ids, history_events=[history])
         result = self._command_result(
             status="confirmed",
             relation=relation,
@@ -472,7 +526,11 @@ class WorkbenchRelationCommandService:
             histories.append(history)
             changed_case_ids.add(case_id)
             affected_months.update(scope_keys)
-        self._save_changed_cases(pair_service, sorted(changed_case_ids))
+        self._save_changed_cases(
+            pair_service,
+            sorted(changed_case_ids),
+            history_events=histories,
+        )
         return {
             "status": "confirmed",
             "relations": relations,
@@ -536,7 +594,7 @@ class WorkbenchRelationCommandService:
             created_at=occurred_at,
         )
         changed_case_ids = [resolved_case_id]
-        self._save_changed_cases(pair_service, changed_case_ids)
+        self._save_changed_cases(pair_service, changed_case_ids, history_events=[history])
         result = self._command_result(
             status="cancelled",
             relation=cancelled,
@@ -608,7 +666,7 @@ class WorkbenchRelationCommandService:
             operation_type=history_operation_type,
         )
         changed_case_ids = self._changed_case_ids([*before_relations, *cancelled_relations])
-        self._save_changed_cases(pair_service, changed_case_ids)
+        self._save_changed_cases(pair_service, changed_case_ids, history_events=[history])
         affected_months = self._affected_months_for_relations(before_relations)
         result = {
             "status": "cancelled",
@@ -710,7 +768,7 @@ class WorkbenchRelationCommandService:
             created_at=occurred_at,
         )
         changed_case_ids = self._changed_case_ids(before_relations)
-        self._save_changed_cases(pair_service, changed_case_ids)
+        self._save_changed_cases(pair_service, changed_case_ids, history_events=[history])
         affected_months = self._affected_months_for_relations(before_relations)
         result = {
             "status": "cancelled",
@@ -785,7 +843,7 @@ class WorkbenchRelationCommandService:
             operation_type=history_operation_type,
         )
         changed_case_ids = [resolved_case_id]
-        self._save_changed_cases(pair_service, changed_case_ids)
+        self._save_changed_cases(pair_service, changed_case_ids, history_events=[history])
         result = self._command_result(
             status="updated",
             relation=relation,
@@ -1092,11 +1150,12 @@ class WorkbenchRelationCommandService:
                 created_at=occurred_at,
             )
         snapshot = pair_service.snapshot_case_ids(
-            self._changed_case_ids([before_relation, *restored_relations])
+            self._changed_case_ids([before_relation, *restored_relations]),
+            include_history=False,
         )
         relation = deepcopy(snapshot.get("pair_relations", {}).get(resolved_case_id, before_relation))
         changed_case_ids = self._changed_case_ids([relation, *restored_relations])
-        self._save_changed_cases(pair_service, changed_case_ids)
+        self._save_changed_cases(pair_service, changed_case_ids, history_events=[history])
         affected_row_ids = [
             str(row_id)
             for relation_item in [before_relation, *restored_relations]
@@ -1304,15 +1363,47 @@ class WorkbenchRelationCommandService:
     def _pair_service_for_case_ids(self, case_ids: list[str]) -> WorkbenchPairRelationService:
         return self._pair_service_for_row_ids([], case_ids=case_ids)
 
-    def _save_changed_cases(self, pair_service: WorkbenchPairRelationService, changed_case_ids: list[str]) -> None:
-        saver = getattr(self._relation_repository, "save_workbench_pair_relations", None)
+    def _active_pair_service_for_row_ids(
+        self,
+        row_ids: list[str],
+        *,
+        case_ids: list[str] | None = None,
+    ) -> WorkbenchPairRelationService:
+        loader = getattr(
+            self._relation_repository,
+            "load_active_workbench_pair_relations_for_row_ids",
+            None,
+        )
+        if not callable(loader):
+            raise WorkbenchRelationCommandError(
+                "workbench_relation_repository_unavailable",
+                "Workbench relation repository does not expose active relation overlap reads.",
+            )
+        return WorkbenchPairRelationService.from_snapshot(
+            loader(list(row_ids or []), case_ids=list(case_ids or []))
+        )
+
+    def _save_changed_cases(
+        self,
+        pair_service: WorkbenchPairRelationService,
+        changed_case_ids: list[str],
+        *,
+        history_events: list[dict[str, Any]],
+    ) -> None:
+        saver = getattr(self._relation_repository, "save_workbench_pair_relation_delta", None)
         if not callable(saver):
             raise WorkbenchRelationCommandError(
                 "workbench_relation_repository_unavailable",
-                "Workbench relation repository does not expose save_workbench_pair_relations.",
+                "Workbench relation repository does not expose changed-case delta persistence.",
             )
         changed_ids = {str(case_id).strip() for case_id in list(changed_case_ids or []) if str(case_id).strip()}
-        saver(pair_service.snapshot_case_ids(sorted(changed_ids)), changed_case_ids=changed_ids)
+        snapshot = pair_service.snapshot_case_ids(sorted(changed_ids), include_history=False)
+        snapshot["pair_relation_history"] = [
+            deepcopy(history)
+            for history in list(history_events or [])
+            if isinstance(history, dict)
+        ]
+        saver(snapshot, changed_case_ids=changed_ids)
 
     @staticmethod
     def _changed_case_ids(relations: list[dict[str, Any]]) -> list[str]:

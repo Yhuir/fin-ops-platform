@@ -1260,6 +1260,24 @@ def test_workbench_active_relation_case_load_is_one_history_free_query() -> None
     assert params == ("case-1",)
 
 
+def test_workbench_active_relation_overlap_load_is_one_history_free_query() -> None:
+    connection = WorkbenchReadConnection()
+    repository = PostgresWorkbenchRelationRepository(connection)
+
+    snapshot = repository.load_active_workbench_pair_relations_for_row_ids(
+        ["row-1"],
+        case_ids=["case-1"],
+    )
+
+    assert sorted(snapshot["pair_relations"]) == ["case-1"]
+    assert len(connection.fetched_all) == 1
+    sql, params = connection.fetched_all[0]
+    assert "from app.workbench_pair_relations" in sql
+    assert "status = 'active'" in sql
+    assert "workbench_pair_relation_history" not in sql
+    assert params == (["row-1"], ["case-1"])
+
+
 def test_workbench_relation_repository_save_writes_relation_history_and_refresh_scopes() -> None:
     connection = WorkbenchRelationWriteConnection()
     repository = PostgresWorkbenchRelationRepository(connection)
@@ -1342,6 +1360,45 @@ def test_workbench_relation_repository_replaces_long_case_history_with_two_state
     assert "delete from app.workbench_pair_relation_history" in history_statements[0][0]
     assert "with input(" in history_statements[1][0]
     assert len(history_statements[1][1]) == len(histories) * 8
+
+
+def test_workbench_relation_delta_appends_one_history_event_without_delete() -> None:
+    connection = WorkbenchRelationWriteConnection()
+    repository = PostgresWorkbenchRelationRepository(connection)
+    history = {
+        "case_id": "case-1",
+        "operation_id": "new-operation",
+        "operation_type": "manual_confirmed",
+        "before_relations": [],
+        "after_relations": [{"case_id": "case-1"}],
+    }
+
+    repository.save_workbench_pair_relation_delta(
+        {
+            "pair_relations": {
+                "case-1": {
+                    "case_id": "case-1",
+                    "relation_mode": "manual_confirmed",
+                    "status": "active",
+                    "month_scope": "2026-05",
+                    "row_ids": ["bank-1"],
+                    "row_types": ["bank"],
+                }
+            },
+            "pair_relation_history": [history],
+        },
+        changed_case_ids={"case-1"},
+    )
+
+    history_statements = [
+        (sql, params)
+        for sql, params in connection.executed
+        if "app.workbench_pair_relation_history" in sql
+    ]
+    assert len(history_statements) == 1
+    assert "delete from app.workbench_pair_relation_history" not in history_statements[0][0]
+    assert "with input(" in history_statements[0][0]
+    assert len(history_statements[0][1]) == 8
 
 
 def test_workbench_relation_transactional_refresh_scopes_match_scope_policy_contracts() -> None:

@@ -13,7 +13,9 @@ class CaptureRepository:
         self.saved: list[dict[str, object]] = []
         self.snapshot: dict[str, object] = {}
         self.scoped_loads: list[dict[str, object]] = []
+        self.active_scoped_loads: list[dict[str, object]] = []
         self.active_case_loads: list[str] = []
+        self.delta_saved: list[dict[str, object]] = []
 
     def load_workbench_pair_relations(self) -> dict[str, object]:
         return self.snapshot
@@ -31,6 +33,40 @@ class CaptureRepository:
 
     def save_workbench_pair_relations(self, snapshot: dict[str, object], *, changed_case_ids: list[str]) -> None:
         self.saved.append({"snapshot": snapshot, "changed_case_ids": list(changed_case_ids)})
+
+    def load_active_workbench_pair_relations_for_row_ids(
+        self,
+        row_ids: list[str],
+        *,
+        case_ids: list[str] | None = None,
+    ) -> dict[str, object]:
+        self.active_scoped_loads.append(
+            {"row_ids": list(row_ids), "case_ids": list(case_ids or [])}
+        )
+        normalized_row_ids = set(row_ids or [])
+        normalized_case_ids = set(case_ids or [])
+        return {
+            "pair_relations": {
+                case_id: dict(relation)
+                for case_id, relation in dict(self.snapshot.get("pair_relations") or {}).items()
+                if isinstance(relation, dict)
+                and relation.get("status") == "active"
+                and (
+                    case_id in normalized_case_ids
+                    or normalized_row_ids.intersection(relation.get("row_ids") or [])
+                )
+            }
+        }
+
+    def save_workbench_pair_relation_delta(
+        self,
+        snapshot: dict[str, object],
+        *,
+        changed_case_ids: list[str],
+    ) -> None:
+        self.delta_saved.append(
+            {"snapshot": snapshot, "changed_case_ids": list(changed_case_ids)}
+        )
 
     def load_active_workbench_pair_relation_by_case_id(self, case_id: str) -> dict[str, object] | None:
         self.active_case_loads.append(case_id)
@@ -141,6 +177,32 @@ class WorkbenchRelationCommandRepositoryAdapterTests(unittest.TestCase):
 
         self.assertEqual(relation["row_ids"], ["bank-1"])
 
+    def test_active_overlap_load_uses_history_free_repository_boundary(self) -> None:
+        pair_service = SnapshotBlockingPairRelationService()
+        repository = CaptureRepository()
+        repository.snapshot = {
+            "pair_relations": {
+                "ACTIVE": {"case_id": "ACTIVE", "row_ids": ["bank-1"], "status": "active"},
+                "CANCELLED": {"case_id": "CANCELLED", "row_ids": ["bank-1"], "status": "cancelled"},
+            },
+            "pair_relation_history": [
+                {"operation_type": "old", "after_relations": [{"case_id": "ACTIVE"}]}
+            ],
+        }
+        adapter = WorkbenchRelationCommandRepositoryAdapter(
+            pair_relation_service=pair_service,
+            repository=repository,
+        )
+
+        snapshot = adapter.load_active_workbench_pair_relations_for_row_ids(["bank-1"])
+
+        self.assertEqual(sorted(snapshot["pair_relations"]), ["ACTIVE"])
+        self.assertNotIn("pair_relation_history", snapshot)
+        self.assertEqual(
+            repository.active_scoped_loads,
+            [{"row_ids": ["bank-1"], "case_ids": []}],
+        )
+
     def test_save_forwards_to_repository_and_applies_changed_case_delta(self) -> None:
         pair_service = WorkbenchPairRelationService.from_snapshot(
             {
@@ -210,6 +272,47 @@ class WorkbenchRelationCommandRepositoryAdapterTests(unittest.TestCase):
         self.assertEqual(
             [item["operation_type"] for item in pair_service.list_history()],
             ["old-2", "withdraw-1"],
+        )
+
+    def test_append_delta_forwards_explicit_port_and_preserves_same_case_history(self) -> None:
+        pair_service = WorkbenchPairRelationService.from_snapshot(
+            {
+                "pair_relations": {
+                    "CASE-1": {"case_id": "CASE-1", "row_ids": ["bank-1"], "status": "active"}
+                },
+                "pair_relation_history": [
+                    {
+                        "operation_id": "old-case-1",
+                        "operation_type": "old-case-1",
+                        "after_relations": [{"case_id": "CASE-1"}],
+                    }
+                ],
+            }
+        )
+        repository = CaptureRepository()
+        adapter = WorkbenchRelationCommandRepositoryAdapter(
+            pair_relation_service=pair_service,
+            repository=repository,
+        )
+        delta = {
+            "pair_relations": {
+                "CASE-1": {"case_id": "CASE-1", "row_ids": ["bank-1", "oa-1"], "status": "active"}
+            },
+            "pair_relation_history": [
+                {
+                    "operation_id": "new-case-1",
+                    "operation_type": "new-case-1",
+                    "after_relations": [{"case_id": "CASE-1"}],
+                }
+            ],
+        }
+
+        adapter.save_workbench_pair_relation_delta(delta, changed_case_ids=["CASE-1"])
+
+        self.assertEqual(repository.delta_saved[0]["changed_case_ids"], ["CASE-1"])
+        self.assertEqual(
+            [item["operation_type"] for item in pair_service.list_history()],
+            ["old-case-1", "new-case-1"],
         )
 
     def test_save_without_changed_cases_merges_incoming_relations_and_preserves_history(self) -> None:

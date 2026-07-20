@@ -117,3 +117,10 @@
 2. 真实调用图证明 withdraw 事务前的 case 校验在无 transaction repository 时进入 adapter 全局 snapshot fallback；事务内预检也为只读 active relation 加载完整 history。
 3. 在 canonical repository/adapter 增加单行 active-case read I/O，command service 优先使用；in-memory fallback 直接查 case。mutation 仍保留事务锁、history restore 与全部 outbox。
 4. 删除无一致性价值的 adapter after-apply exception-service 重建回调；guard 禁止恢复全局 snapshot fallback、history 读和 after-apply callback。
+
+## 第四次生产门补充：command history append-only delta
+
+1. release `f18f62136` 的三轮生产探针证明 withdraw 已达到 `0.787–0.999s`，但 confirm 首轮 `6.030s`、热态 `1.004–1.211s`；剩余同步热点是 confirm overlap 通用读取加载全部 case history，以及 save 删除后重写完整 history。
+2. 增加 active row/case overlap 窄读端口，confirm 只读取 active canonical relations，不读取 cancelled facts/history；withdraw 恢复逻辑继续按需读取相关 history。
+3. command 统一输出 changed relations + 本次 history events；PostgreSQL 同事务 append/idempotent upsert 新 history，不 delete/rewrite 旧历史；进程镜像按 operation id 追加去重。
+4. 在线 command 删除 full snapshot/history save 调用；full replacement 仅留给 migration/repair/restore。用 domain、adapter、command、SQL statement-count 与 architecture guard 证明旧链不能回流，然后部署精确 SHA 复跑同一三轮生产门。

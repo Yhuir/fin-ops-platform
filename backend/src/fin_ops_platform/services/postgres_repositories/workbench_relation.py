@@ -147,6 +147,42 @@ class PostgresWorkbenchRelationRepository:
         payload = row_payload(rows[0], "raw_payload")
         return dict(payload) if isinstance(payload, dict) else None
 
+    def load_active_workbench_pair_relations_for_row_ids(
+        self,
+        row_ids: list[str],
+        *,
+        case_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        normalized_row_ids = text_list(row_ids)
+        normalized_case_ids = text_list(case_ids)
+        predicates: list[str] = []
+        params: list[Any] = []
+        if normalized_row_ids:
+            predicates.append("row_ids && %s::text[]")
+            params.append(normalized_row_ids)
+        if normalized_case_ids:
+            predicates.append("case_id = any(%s::text[])")
+            params.append(normalized_case_ids)
+        if not predicates:
+            return {"pair_relations": {}}
+        rows = self._connection.fetch_all(
+            f"""
+            select case_id as key, raw_payload
+            from app.workbench_pair_relations
+            where status = 'active'
+              and ({' or '.join(predicates)})
+            order by case_id
+            """,
+            tuple(params),
+        )
+        return {
+            "pair_relations": {
+                str(row.get("key")): payload
+                for row in rows
+                if isinstance((payload := row_payload(row, "raw_payload")), dict)
+            }
+        }
+
     def acquire_relation_member_locks(
         self,
         row_ids: list[str],
@@ -212,6 +248,31 @@ class PostgresWorkbenchRelationRepository:
         snapshot: dict[str, Any],
         *,
         changed_case_ids: set[str] | None = None,
+    ) -> None:
+        self._save_workbench_pair_relations(
+            snapshot,
+            changed_case_ids=changed_case_ids,
+            replace_history=True,
+        )
+
+    def save_workbench_pair_relation_delta(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        changed_case_ids: set[str] | list[str] | None = None,
+    ) -> None:
+        self._save_workbench_pair_relations(
+            snapshot,
+            changed_case_ids=set(text_list(changed_case_ids)),
+            replace_history=False,
+        )
+
+    def _save_workbench_pair_relations(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        changed_case_ids: set[str] | None,
+        replace_history: bool,
     ) -> None:
         def write(connection: Any) -> None:
             relations = snapshot.get("pair_relations") if isinstance(snapshot, dict) else None
@@ -297,7 +358,12 @@ class PostgresWorkbenchRelationRepository:
                     ),
                 )
             history = snapshot.get("pair_relation_history") if isinstance(snapshot, dict) else None
-            self._replace_workbench_pair_relation_history(connection, history, changed_case_ids=changed_ids)
+            self._replace_workbench_pair_relation_history(
+                connection,
+                history,
+                changed_case_ids=changed_ids,
+                replace_existing=replace_history,
+            )
             if not self._enqueue_refreshes:
                 return
             refresh_metadata: dict[str, Any] = {}
@@ -395,7 +461,14 @@ class PostgresWorkbenchRelationRepository:
 
         run_in_transaction(self._connection, write)
 
-    def _replace_workbench_pair_relation_history(self, connection: Any, history: Any, *, changed_case_ids: set[str] | None) -> None:
+    def _replace_workbench_pair_relation_history(
+        self,
+        connection: Any,
+        history: Any,
+        *,
+        changed_case_ids: set[str] | None,
+        replace_existing: bool = True,
+    ) -> None:
         if not isinstance(history, list):
             return
         case_ids = {
@@ -408,10 +481,11 @@ class PostgresWorkbenchRelationRepository:
             case_ids &= changed_case_ids
         if not case_ids:
             return
-        connection.execute(
-            "delete from app.workbench_pair_relation_history where case_id = any(%s::text[])",
-            (sorted(case_ids),),
-        )
+        if replace_existing:
+            connection.execute(
+                "delete from app.workbench_pair_relation_history where case_id = any(%s::text[])",
+                (sorted(case_ids),),
+            )
         rows: list[tuple[Any, ...]] = []
         for item in history:
             if not isinstance(item, dict):
