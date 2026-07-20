@@ -13,6 +13,7 @@ class CaptureRepository:
         self.saved: list[dict[str, object]] = []
         self.snapshot: dict[str, object] = {}
         self.scoped_loads: list[dict[str, object]] = []
+        self.active_case_loads: list[str] = []
 
     def load_workbench_pair_relations(self) -> dict[str, object]:
         return self.snapshot
@@ -30,6 +31,11 @@ class CaptureRepository:
 
     def save_workbench_pair_relations(self, snapshot: dict[str, object], *, changed_case_ids: list[str]) -> None:
         self.saved.append({"snapshot": snapshot, "changed_case_ids": list(changed_case_ids)})
+
+    def load_active_workbench_pair_relation_by_case_id(self, case_id: str) -> dict[str, object] | None:
+        self.active_case_loads.append(case_id)
+        relation = dict(self.snapshot.get("pair_relations") or {}).get(case_id)
+        return dict(relation) if isinstance(relation, dict) and relation.get("status") == "active" else None
 
 
 class SnapshotBlockingPairRelationService(WorkbenchPairRelationService):
@@ -104,8 +110,38 @@ class WorkbenchRelationCommandRepositoryAdapterTests(unittest.TestCase):
         self.assertEqual(sorted(snapshot["pair_relations"]), ["CASE-2"])
         self.assertEqual([item["operation_type"] for item in snapshot["pair_relation_history"]], ["old-2"])
 
+    def test_active_case_load_uses_narrow_repository_boundary_without_history(self) -> None:
+        pair_service = SnapshotBlockingPairRelationService()
+        repository = CaptureRepository()
+        repository.snapshot = {
+            "pair_relations": {
+                "CASE-1": {"case_id": "CASE-1", "row_ids": ["bank-1"], "row_types": ["bank"], "status": "active"},
+            },
+            "pair_relation_history": [{"operation_type": "old-1", "after_relations": [{"case_id": "CASE-1"}]}],
+        }
+        adapter = WorkbenchRelationCommandRepositoryAdapter(
+            pair_relation_service=pair_service,
+            repository=repository,
+        )
+
+        relation = adapter.load_active_workbench_pair_relation_by_case_id("CASE-1")
+
+        self.assertEqual(relation["row_ids"], ["bank-1"])
+        self.assertEqual(repository.active_case_loads, ["CASE-1"])
+
+    def test_active_case_load_reads_in_memory_case_without_global_snapshot(self) -> None:
+        pair_service = SnapshotBlockingPairRelationService(
+            pair_relations={
+                "CASE-1": {"case_id": "CASE-1", "row_ids": ["bank-1"], "row_types": ["bank"], "status": "active"},
+            }
+        )
+        adapter = WorkbenchRelationCommandRepositoryAdapter(pair_relation_service=pair_service)
+
+        relation = adapter.load_active_workbench_pair_relation_by_case_id("CASE-1")
+
+        self.assertEqual(relation["row_ids"], ["bank-1"])
+
     def test_save_forwards_to_repository_and_applies_changed_case_delta(self) -> None:
-        after_apply_calls: list[str] = []
         pair_service = WorkbenchPairRelationService.from_snapshot(
             {
                 "pair_relations": {
@@ -122,7 +158,6 @@ class WorkbenchRelationCommandRepositoryAdapterTests(unittest.TestCase):
         adapter = WorkbenchRelationCommandRepositoryAdapter(
             pair_relation_service=pair_service,
             repository=repository,
-            after_apply=lambda: after_apply_calls.append("called"),
         )
         snapshot = {
             "pair_relations": {
@@ -143,7 +178,6 @@ class WorkbenchRelationCommandRepositoryAdapterTests(unittest.TestCase):
             [item["operation_type"] for item in current["pair_relation_history"]],
             ["old-2", "new-1"],
         )
-        self.assertEqual(after_apply_calls, ["called"])
 
     def test_changed_case_delta_does_not_read_global_snapshot_and_can_delete_case(self) -> None:
         pair_service = SnapshotBlockingPairRelationService(

@@ -5225,9 +5225,9 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         for snippet in (
             "class WorkbenchRelationCommandRepositoryAdapter",
             "def load_workbench_pair_relations(",
+            "def load_active_workbench_pair_relation_by_case_id(",
             "def save_workbench_pair_relations(",
             "self._pair_relation_service.apply_snapshot_delta(",
-            "self._after_apply()",
         ):
             if snippet not in adapter_source:
                 violations.append(f"relation command repository adapter missing behavior {snippet}")
@@ -5239,6 +5239,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if private_write in adapter_source:
                 violations.append(f"relation command repository adapter writes domain private state: {private_write}")
+        if "after_apply" in adapter_source or "after_apply=" in factory_source:
+            violations.append("relation command repository adapter still owns obsolete after-apply reconfiguration")
 
         self.assertEqual(violations, [])
 

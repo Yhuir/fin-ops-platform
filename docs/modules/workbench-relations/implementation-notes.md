@@ -4636,8 +4636,30 @@ PYTHONPATH=backend/src:. python3 -m pytest tests/test_deploy_runtime_examples.py
 
 验证：
 
-- adapter 回归覆盖 changed-case replace、delete、无关 relation/history 保留、after-apply，以及 changed-case 路径禁止读取全局 `snapshot()`。
+- adapter 回归覆盖 changed-case replace、delete、无关 relation/history 保留，以及 changed-case 路径禁止读取全局 `snapshot()`。
 - domain + adapter 目标测试通过；部署后必须重新跑两轮可逆 confirm → fresh → withdraw → fresh，按 command p95 `<=1000ms`、response-to-fresh p95 `<=2000ms`、hard max `<=3000ms` 判定。
+
+## 2026-07-20 - Active case 窄读取与旧 after-apply callback 删除
+
+目标：继续消除 turnover closure withdraw 进入事务前的隐藏全局 relation/history 复制，同时保持事务内加锁、历史恢复与跨页面 freshness 不变。
+
+生产证据与根因：
+
+- release `b4fce65f8` 热态 confirm 已降到 `0.804–1.025s`，但 withdraw 仍为 `1.530–1.757s`；热态 response-to-fresh 为 `1.414–1.721s`。
+- `_turnover_cash_closure_relation(...)` 进入 `get_active_relation_by_case_id(...)` 后，repository adapter 没有 active-case 窄接口；无 PostgreSQL transaction repository 时会调用全局 `snapshot()`，深拷贝全部 relation/history，再筛出一个 case。事务内 withdrawability 预检又加载一次该 case history。
+- adapter 的旧 `after_apply` callback 每次 mutation 都重建 `WorkbenchExceptionApplicationService`；该 service 持有的 command adapter 已引用同一个可变 domain service，重建既不提供一致性也不改变 I/O，是过期的同步链路。
+
+变更与边界：
+
+- PostgreSQL repository/adapter 增加 `load_active_workbench_pair_relation_by_case_id(...)`：一条 `case_id + status=active` query，只返回 canonical relation payload，不读取 history。
+- in-memory fallback 直接调用 domain service 的 case lookup；command service 优先使用该窄 I/O。真正 withdraw 仍在 Turnover UoW transaction 内加 member locks、加载相关 history、校验 relation 类型并原子写 relation/history/outbox。
+- 删除 adapter 的 `after_apply` 构造参数、回调执行与 server 注入；不新增缓存、状态、worker、API、fallback 或第二事实源。
+
+验证：
+
+- repository 测试证明 active case lookup 固定一条 relation SQL 且 SQL 不引用 history。
+- adapter 测试用禁止 `snapshot()` 的 domain service 证明 PostgreSQL 与 in-memory 两条窄路径都不会复制全局状态。
+- architecture guard 要求显式窄 I/O，并禁止 after-apply callback 与私有状态写入。
 ## 2026-07-13 - Workbench relation partial replacement stale-member cleanup
 
 目标：修复生产 turnover closure 撤回后，`workbench_relation` 局部投影已把 group 重建为 bank-only，但旧 OA row index 仍引用同一 group，造成银行明细、OA 待付款、发票、成本和 System Audit 出现幽灵配对。

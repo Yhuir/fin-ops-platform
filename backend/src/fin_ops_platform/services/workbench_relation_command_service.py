@@ -826,7 +826,12 @@ class WorkbenchRelationCommandService:
 
     def get_active_relation_by_case_id(self, case_id: str) -> dict[str, Any]:
         resolved_case_id = str(case_id or "").strip()
-        relation = self._pair_service_for_case_ids([resolved_case_id]).get_active_relation_by_case_id(resolved_case_id)
+        loader = getattr(self._relation_repository, "load_active_workbench_pair_relation_by_case_id", None)
+        relation = (
+            loader(resolved_case_id)
+            if callable(loader)
+            else self._pair_service_for_case_ids([resolved_case_id]).get_active_relation_by_case_id(resolved_case_id)
+        )
         if not isinstance(relation, dict):
             raise WorkbenchRelationCommandError(
                 "workbench_relation_not_found",

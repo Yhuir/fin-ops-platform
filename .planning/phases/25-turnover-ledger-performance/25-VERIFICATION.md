@@ -43,6 +43,14 @@
 
 - domain + adapter + workbench relation command/UoW/idempotency + turnover domain/UoW/API/query/read-model：`414 passed + 28 subtests`。
 - architecture guard + relation projection/read facade + write-operation smoke/SLO：`332 passed + 69 subtests`。
-- 新回归明确证明 changed-case apply 不调用全局 `snapshot()`，并覆盖目标 case 删除、history 替换、无关 case/history 保留及 after-apply。
+- 新回归明确证明 changed-case apply 不调用全局 `snapshot()`，并覆盖目标 case 删除、history 替换及无关 case/history 保留。
 - `bash scripts/verify.sh lint`、`bash scripts/verify.sh docs`、`git diff --check`：通过。
 - 下一门：提交并部署精确 SHA，待 readiness 稳定后复用相同两轮可逆写探针；command p95 `<=1000ms`、response-to-fresh p95 `<=2000ms`、hard max `<=3000ms` 才能继续最终 40 样本与直接/交叉 Audit。
+
+## release b4fce65f8 第二轮生产写门
+
+- 三轮安全可逆 confirm → fresh → withdraw → fresh 均完成，最终 fixture 为 `unlinked`，无恢复操作或 active relation 残留。
+- 热态 confirm command `0.804–1.025s`，withdraw command `1.530–1.757s`；热态 response-to-fresh `1.414–1.721s`。
+- 首轮 confirm command `5.680s`、response-to-fresh `6.134s`；严格门仍失败，因此不进入下一页面。
+- AppHealth：confirm 23 queries，热态数据库约 `0.708s`；withdraw 17 queries，数据库 p50 `0.532s`、p95 `0.973s`。调用图进一步定位 withdraw 请求前置 active-case 校验仍复制全局 snapshot/history。
+- 下一修复只增加 canonical active-case 单行读取并删除 obsolete after-apply callback；事务 mutation、history restore、refresh fan-out 与 API 不变。

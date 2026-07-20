@@ -109,4 +109,11 @@
 1. 生产两轮探针证明热态 read-model response-to-fresh 已小于 2s，但同步 command 仍为 `1.759–2.684s`；AppHealth 把热态数据库时间定位在约 `0.67s`，剩余开销集中在 canonical relation save 后的全量进程镜像重建。
 2. 在 `WorkbenchPairRelationService` 提供单一 `apply_snapshot_delta` domain I/O；只归一化 incoming scoped snapshot，按 changed case replace/delete relation 与 history。
 3. 删除 adapter 的全局 `snapshot()`、无关 relation/history 深拷贝、全量 `from_snapshot()` 重建与私有状态写入；无新缓存、worker、read model、API 或事实源。
-4. 先以测试证明无关 case/history 保持、删除语义、after-apply 与“禁止读取全局 snapshot”；通过共享 relation command 回归后提交、部署并复用同一可逆探针。
+4. 先以测试证明无关 case/history 保持、删除语义与“禁止读取全局 snapshot”；通过共享 relation command 回归后提交、部署并复用同一可逆探针。
+
+## 第三次生产门补充：active case 窄读取
+
+1. release `b4fce65f8` 已证明 changed-case apply 有效：热态 confirm `0.804–1.025s`，但 withdraw 仍为 `1.530–1.757s`，首轮冷态 command/fresh 仍超过 hard max。
+2. 真实调用图证明 withdraw 事务前的 case 校验在无 transaction repository 时进入 adapter 全局 snapshot fallback；事务内预检也为只读 active relation 加载完整 history。
+3. 在 canonical repository/adapter 增加单行 active-case read I/O，command service 优先使用；in-memory fallback 直接查 case。mutation 仍保留事务锁、history restore 与全部 outbox。
+4. 删除无一致性价值的 adapter after-apply exception-service 重建回调；guard 禁止恢复全局 snapshot fallback、history 读和 after-apply callback。

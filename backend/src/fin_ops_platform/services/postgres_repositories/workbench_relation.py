@@ -128,6 +128,25 @@ class PostgresWorkbenchRelationRepository:
             [payload for row in history_rows if isinstance((payload := row_payload(row, "raw_payload")), dict)],
         )
 
+    def load_active_workbench_pair_relation_by_case_id(self, case_id: str) -> dict[str, Any] | None:
+        normalized_case_id = text(case_id)
+        if not normalized_case_id:
+            return None
+        rows = self._connection.fetch_all(
+            """
+            select raw_payload
+            from app.workbench_pair_relations
+            where case_id = %s
+              and status = 'active'
+            limit 1
+            """,
+            (normalized_case_id,),
+        )
+        if not rows:
+            return None
+        payload = row_payload(rows[0], "raw_payload")
+        return dict(payload) if isinstance(payload, dict) else None
+
     def acquire_relation_member_locks(
         self,
         row_ids: list[str],

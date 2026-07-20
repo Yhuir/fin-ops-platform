@@ -164,8 +164,12 @@ def _workbench_relation_batch_refresh_rows(connection: WorkbenchRelationWriteCon
 
 
 class WorkbenchReadConnection:
+    def __init__(self) -> None:
+        self.fetched_all: list[tuple[str, tuple]] = []
+
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
         normalized_sql = " ".join(sql.split())
+        self.fetched_all.append((normalized_sql, params))
         if "from app.workbench_pair_relations" in normalized_sql:
             return [
                 {
@@ -1241,6 +1245,21 @@ def test_workbench_pair_history_load_preserves_original_mongo_array_order() -> N
     assert [item["operation"] for item in snapshot["pair_relation_history"]] == ["earlier", "later"]
 
 
+def test_workbench_active_relation_case_load_is_one_history_free_query() -> None:
+    connection = WorkbenchReadConnection()
+    repository = PostgresWorkbenchRelationRepository(connection)
+
+    relation = repository.load_active_workbench_pair_relation_by_case_id("case-1")
+
+    assert relation == {"case_id": "case-1", "row_ids": ["row-1"]}
+    assert len(connection.fetched_all) == 1
+    sql, params = connection.fetched_all[0]
+    assert "from app.workbench_pair_relations" in sql
+    assert "status = 'active'" in sql
+    assert "workbench_pair_relation_history" not in sql
+    assert params == ("case-1",)
+
+
 def test_workbench_relation_repository_save_writes_relation_history_and_refresh_scopes() -> None:
     connection = WorkbenchRelationWriteConnection()
     repository = PostgresWorkbenchRelationRepository(connection)
@@ -1281,7 +1300,7 @@ def test_workbench_relation_repository_save_writes_relation_history_and_refresh_
     assert "insert into job.outbox_events" in fetch_all_sql
     assert any(row["scope_type"] == "workbench_relation" and row["scope_key"] == "2026-05" for row in refresh_rows)
     assert any(row["event_type"] == "workbench_relation.read_model.refresh" for row in refresh_rows)
-    assert any(row["event_type"] == "cost_statistics.read_model.refresh" for row in refresh_rows)
+    assert not any(row["event_type"] == "cost_statistics.read_model.refresh" for row in refresh_rows)
 
 
 def test_workbench_relation_repository_replaces_long_case_history_with_two_statements() -> None:

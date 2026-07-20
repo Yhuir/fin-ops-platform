@@ -19,6 +19,7 @@ Release A 已移除旧 `read_model.workbench_candidate_matches`、`read_model.wo
 | manual command | Workbench/业务 owner API | canonical typed row ids、actor、tenant、idempotency、expected versions、note |
 | formal auto plan | matching orchestrator | immutable `FormalRelationPlan`：case/member set/fingerprint/rule/evidence/amount/scope/batch hash |
 | current snapshot | relation repository | active + relevant historical facts，必须在 UoW transaction 中加载 |
+| active case validation | relation repository | 只按 canonical case id 读取一条 active relation，不加载 history；只供进入事务前的 scope/owner 校验，真正 mutation 仍在事务内加锁并加载相关 history |
 | withdraw command | owner API | active case identity、preview id、expected versions、reason |
 | read request | downstream facade | scope keys、row ids、`require_fresh`、source version contract |
 | batch-accounting read request | `BatchAccountingService` via facade/port | 候选 row ids + 明确年份；使用一个批量账务专用 bundle 返回候选 rows、referenced groups、候选/年度 bulk scope proof 和 `submitted_count`，固定查询次数并保留等价 freshness/status；年度聚合只允许命中 batch-accounting partial expression index，不得改变其他页面通用 reader 行为 |
@@ -45,6 +46,7 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 - command service 必须接收明确 repository/idempotency/freshness 依赖，不接收整个 `Application`。
 - relation、history、idempotency、audit/dirty/outbox 的业务事务必须原子；失败不得留下半关系或漏刷新。
 - repository adapter 持久化 scoped snapshot 后，只能通过 domain service 的 changed-case delta I/O 更新进程内镜像；禁止读取并重建全局 relation/history snapshot，也禁止 adapter 直接写 domain service 私有状态。
+- 单 case active relation 读取必须走显式窄 I/O；禁止 adapter fallback 先复制全局 snapshot 再筛 case，禁止为只读校验加载该 case 全部 history。
 - case id 重用、active member overlap、row type 对齐、expected version 和 idempotency fingerprint 必须在写入边界校验。
 - 任意 `N:M:K` member set 都合法，只要上游业务规则已证明安全并且成员非空、唯一、typed。
 - 自动扩展既有 active case 必须使用 `target_case_id` 并原子 replace；不得创建重叠的第二条 active relation。

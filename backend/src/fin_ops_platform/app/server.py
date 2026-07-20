@@ -2709,7 +2709,6 @@ class Application:
         return WorkbenchRelationCommandRepositoryAdapter(
             pair_relation_service=self._workbench_pair_relation_service,
             repository=repository,
-            after_apply=self._configure_workbench_exception_application_service,
             save_repository=save_repository,
         )
 

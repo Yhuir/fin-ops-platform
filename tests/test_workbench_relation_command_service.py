@@ -16,6 +16,7 @@ class FakeRelationRepository:
         self.snapshot = deepcopy(snapshot or {})
         self.load_calls = 0
         self.scoped_load_calls: list[dict[str, object]] = []
+        self.active_case_load_calls: list[str] = []
         self.save_calls: list[dict[str, object]] = []
         self.lock_calls: list[dict[str, object]] = []
 
@@ -52,6 +53,11 @@ class FakeRelationRepository:
             }
         )
         self.snapshot = deepcopy(snapshot)
+
+    def load_active_workbench_pair_relation_by_case_id(self, case_id: str) -> dict[str, object] | None:
+        self.active_case_load_calls.append(case_id)
+        relation = dict(self.snapshot.get("pair_relations") or {}).get(case_id)
+        return deepcopy(relation) if isinstance(relation, dict) and relation.get("status") == "active" else None
 
     def acquire_relation_member_locks(
         self,
@@ -104,6 +110,30 @@ class FakeRelationFacade:
 
 
 class WorkbenchRelationCommandServiceTests(unittest.TestCase):
+    def test_active_relation_case_lookup_uses_narrow_repository_boundary(self) -> None:
+        repository = FakeRelationRepository(
+            {
+                "pair_relations": {
+                    "CASE-1": {
+                        "case_id": "CASE-1",
+                        "row_ids": ["bank-1"],
+                        "row_types": ["bank"],
+                        "status": "active",
+                    }
+                },
+                "pair_relation_history": [
+                    {"operation_type": "old-1", "after_relations": [{"case_id": "CASE-1"}]},
+                ],
+            }
+        )
+        service = WorkbenchRelationCommandService(relation_repository=repository)
+
+        relation = service.get_active_relation_by_case_id("CASE-1")
+
+        self.assertEqual(relation["row_ids"], ["bank-1"])
+        self.assertEqual(repository.active_case_load_calls, ["CASE-1"])
+        self.assertEqual(repository.scoped_load_calls, [])
+
     def test_write_precondition_preserves_explicit_cross_month_scope_hints(self) -> None:
         facade = FakeRelationFacade(
             {
