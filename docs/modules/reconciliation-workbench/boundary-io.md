@@ -44,6 +44,7 @@
 | matching summary | worker/App Health | planned/created/extended/preserved/ambiguous/resource-limited/unsafe counts；不输出候选 rows |
 | read model generation | Workbench query | 新 generation 完整写入并校验后原子激活；building/failed 不可读为 fresh |
 | all-scope generation stats | Workbench groups query | 每次月 generation 发布事务完成全部 active 切换后，只发布一组以 active-month generation-set digest 为 `generation_id` 的 paired/unpaired 统计；统计与月 generation 同事务可见，旧 digest 统计同事务删除 |
+| superseded generation retention | `finops-prune-workbench-generations.timer` | 低峰期有界删除非 active generation；发布热路径不得同步扫描/删除旧 generation，清理失败不得影响 fresh generation 或页面写后可见性 |
 | Search row context | 非 PostgreSQL 本地 Search | `list_workbench_search_rows(YYYY-MM)` 只返回 active generation 的 row/zone/group/project context；禁止复用 Workbench page/full payload |
 | ignored rows | Workbench ignored API / write command | `list_workbench_ignored_rows(scope_key)` 只读取 active generation；repository 缺失时公开 API 返回 unavailable、写命令 fail fast，禁止回退旧 snapshot |
 

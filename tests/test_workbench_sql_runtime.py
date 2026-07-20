@@ -4194,77 +4194,10 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(stale_stats_delete, (all_scope_stat_writes[0][0],))
 
-    def test_repository_prunes_old_workbench_generations_after_publish_for_changed_scope(self) -> None:
-        class RetentionAfterPublishConnection(WorkbenchWriteConnection):
-            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
-                normalized = " ".join(sql.lower().split())
-                self.fetch_all_calls.append((normalized, params))
-                if "from read_model.workbench_generations" in normalized and "status <> 'active'" in normalized:
-                    return [
-                        {
-                            "generation_id": "old-2026-05-gen",
-                            "scope_key": "2026-05",
-                            "status": "superseded",
-                            "activated_at": "2026-05-01T00:00:00+00:00",
-                            "completed_at": "2026-05-01T00:00:00+00:00",
-                            "updated_at": "2026-05-01T00:00:00+00:00",
-                        }
-                    ]
-                return super().fetch_all(sql, params)
-
-        connection = RetentionAfterPublishConnection()
-        repository = PostgresReadModelRepository(connection)
-
-        repository.save_workbench_read_models(
-            {
-                "read_models": {
-                    "2026-05": {
-                        "scope_key": "2026-05",
-                        "payload": {"paired": {"groups": []}, "unpaired": {"groups": []}},
-                        "source_versions": {"source_version": 6},
-                    }
-                }
-            },
-            changed_scope_keys={"2026-05"},
-        )
-
-        retention_query = next(
-            (sql, params)
-            for sql, params in connection.fetch_all_calls
-            if "from read_model.workbench_generations" in sql and "status <> 'active'" in sql
-        )
-        self.assertIn("scope_key = any(%s)", retention_query[0])
-        self.assertEqual(retention_query[1][0], ["2026-05"])
-        generation_deletes = [
-            (sql, params)
-            for sql, params in connection.executed
-            if "delete from read_model.workbench_generations" in sql
-        ]
-        self.assertEqual(len(generation_deletes), 1)
-        self.assertIn("status <> 'active'", generation_deletes[0][0])
-        self.assertEqual(generation_deletes[0][1], (["old-2026-05-gen"],))
-
-    def test_repository_skips_sync_retention_for_all_scope_publish(self) -> None:
+    def test_repository_publish_leaves_generation_retention_to_the_timer(self) -> None:
         connection = WorkbenchWriteConnection()
         repository = PostgresReadModelRepository(connection)
 
-        repository._prune_workbench_generations_after_publish({"all"})
-
-        self.assertFalse(connection.fetch_all_calls)
-        self.assertFalse(connection.executed)
-
-    def test_repository_retention_failure_does_not_rollback_published_workbench_generation(self) -> None:
-        class FailingRetentionAfterPublishConnection(WorkbenchWriteConnection):
-            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
-                normalized = " ".join(sql.lower().split())
-                self.fetch_all_calls.append((normalized, params))
-                if "from read_model.workbench_generations" in normalized and "status <> 'active'" in normalized:
-                    raise TimeoutError("retention query timed out")
-                return super().fetch_all(sql, params)
-
-        connection = FailingRetentionAfterPublishConnection()
-        repository = PostgresReadModelRepository(connection)
-
         repository.save_workbench_read_models(
             {
                 "read_models": {
@@ -4278,19 +4211,15 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             changed_scope_keys={"2026-05"},
         )
 
-        sql = "\n".join(statement for statement, _params in connection.executed)
-        self.assertIn("insert into read_model.workbench_generations", sql)
-        self.assertIn("set status = 'active'", sql)
-        self.assertNotIn("delete from read_model.workbench_generations", sql)
-
-
-
-
-
-
-
-
-
+        retention_reads = [
+            sql
+            for sql, _params in connection.fetch_all_calls
+            if "from read_model.workbench_generations" in sql and "status <> 'active'" in sql
+        ]
+        self.assertEqual(retention_reads, [])
+        self.assertFalse(
+            any("delete from read_model.workbench_generations" in sql for sql, _params in connection.executed)
+        )
 
     def test_repository_persists_no_oa_collapsed_group_fact_and_display_counts(self) -> None:
         connection = WorkbenchWriteConnection()

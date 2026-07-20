@@ -372,13 +372,13 @@ scripts/check-read-model-scope-contracts.py \
 ### Workbench generation retention
 
 Workbench 使用 active generation 原子发布模型，`read_model.workbench_generations.status='active'`
-是页面读路径的边界。发布新的月份或 `all` active generation 后，repository 会对本次发布涉及的
-scope 执行 bounded retention：保留每个 scope 最近 1 个非 active generation，并清理其余已被替代的
-旧 generation，每次最多 500 个。retention 只删除 `read_model.workbench_*` generation 投影行，
+是页面读路径的边界。发布热路径只负责原子切换 generation，不同步扫描或删除旧 generation；现有
+`finops-prune-workbench-generations.timer` 是唯一 retention owner，低峰期保留每个 scope 最近 1 个非 active
+generation，并清理其余已被替代的旧 generation。retention 只删除 `read_model.workbench_*` generation 投影行，
 不删除 `app.*`、`job.*` 或其他业务事实；删除条件始终包含 `status <> 'active'`。
 
-retention 是发布后的维护动作，不得让清理失败回滚已经发布成功的 fresh generation。生产环境还应
-保留 `finops-prune-workbench-generations.timer` 作为兜底防线，低峰期运行同一保留策略并记录。
+retention 是独立维护动作，不得进入页面写后可见性或让清理失败回滚已经发布成功的 fresh generation。生产环境必须
+保留 `finops-prune-workbench-generations.timer`，低峰期运行保留策略并记录。
 该 helper 和 systemd timer 由 `deploy/oa/bin/finops-deploy-control.sh` 在 release activate 时从
 `deploy/oa/bin/finops-prune-workbench-generations.sh` 与 `deploy/oa/systemd/finops-prune-workbench-generations.*.example`
 安装，生产不得维护漂移的手写 wrapper。默认策略必须与 repository/CLI 保持一致：

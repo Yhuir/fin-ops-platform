@@ -4605,7 +4605,7 @@ PYTHONPATH=backend/src:. python3 -m pytest tests/test_write_operation_e2e_smoke.
 - 普通低优先级月分片仍使用 low priority 和 3s 合并窗口，避免批量导入期间无意义重复 all 聚合。
 - `workbench-aggregate` worker env 示例改为 `--poll-interval-seconds 0.05` 与 `FIN_OPS_WORKER_MAX_EVENTS_PER_ITERATION=4`；deploy helper 会把生产旧的单事件 drain 迁移到 4。
 - cProfile 显示 all 聚合 Python 热点来自 `_as_workbench_row_list(...)` 对每个 row 做递归 `deepcopy`；该 helper 调用方只重组列表并读取 row 字段，因此改为浅拷贝，避免全量 `workbench:all` 聚合重复复制嵌套 payload。
-- `workbench:all` 发布后的 generation retention 不再在 worker hot path 同步执行；all-only 旧代清理交给 `finops-prune-workbench-generations.timer`，月份 shard 发布后的 month-scope retention 仍保留。
+- `workbench:all` 与月份 shard 发布后的 generation retention 均不再在 worker hot path 同步执行；全部旧代清理由既有 `finops-prune-workbench-generations.timer` 统一承担，active generation 的原子发布和保留策略不变。
 
 验证：
 

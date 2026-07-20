@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import logging
 import re
 from collections.abc import Mapping
 from contextlib import contextmanager
@@ -48,9 +47,6 @@ BANK_FLOW_RULE_BATCH_SUMMARY_SOURCE_KIND = "bank_flow_rule_batch_summary"
 WORKBENCH_BANK_BATCH_SUMMARY_SOURCE_KINDS = frozenset(
     {NO_OA_BANK_BATCH_SUMMARY_SOURCE_KIND, BANK_FLOW_RULE_BATCH_SUMMARY_SOURCE_KIND}
 )
-WORKBENCH_GENERATION_RETENTION_KEEP_RECENT = 1
-WORKBENCH_GENERATION_RETENTION_KEEP_DAYS = 0
-WORKBENCH_GENERATION_RETENTION_LIMIT = 500
 WORKBENCH_ROW_PAYLOAD_PRUNED_KEYS = {"object_identity"}
 _BATCH_ACCOUNTING_INVOICE_CANDIDATE_MATCH_SQL = """
     regexp_replace(
@@ -100,7 +96,6 @@ _BATCH_ACCOUNTING_INVOICE_CANDIDATE_MATCH_SQL = """
       )
     )
 """
-LOGGER = logging.getLogger(__name__)
 
 
 def _workbench_active_month_groups_sql(*, include_aggregated_metadata: bool = True) -> str:
@@ -11731,39 +11726,7 @@ class PostgresReadModelRepository:
                 except Exception:
                     pass
             raise
-        self._prune_workbench_generations_after_publish(published_scope_keys)
         return set(published_scope_keys)
-
-    def _prune_workbench_generations_after_publish(self, scope_keys: set[str]) -> None:
-        normalized_scope_keys = [
-            scope_key
-            for scope_key in (self._normalize_workbench_retention_scope_keys(scope_keys) or [])
-            if scope_key != "all"
-        ]
-        if not normalized_scope_keys:
-            return
-        try:
-            result = self.prune_workbench_generations(
-                keep_recent_generations_per_scope=WORKBENCH_GENERATION_RETENTION_KEEP_RECENT,
-                keep_days=WORKBENCH_GENERATION_RETENTION_KEEP_DAYS,
-                limit=WORKBENCH_GENERATION_RETENTION_LIMIT,
-                dry_run=False,
-                scope_keys=normalized_scope_keys,
-            )
-        except Exception:
-            LOGGER.warning(
-                "workbench generation retention failed after publish for scopes=%s",
-                ",".join(normalized_scope_keys),
-                exc_info=True,
-            )
-            return
-        deleted_count = int_value(result.get("deleted_count"), 0)
-        if deleted_count:
-            LOGGER.info(
-                "pruned %s old workbench read model generations for scopes=%s",
-                deleted_count,
-                ",".join(normalized_scope_keys),
-            )
 
     def load_batch_accounting_workbench_payload(self, *, bank_year: str) -> dict[str, Any] | None:
         return self._load_batch_accounting_workbench_payload(
