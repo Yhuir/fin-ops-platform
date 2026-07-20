@@ -422,6 +422,7 @@ from fin_ops_platform.services.turnover_relation_service import (
 )
 from fin_ops_platform.services.workbench_amount_check_service import WorkbenchAmountCheckService
 from fin_ops_platform.services.workbench_free_matching_engine import RULE_VERSION as WORKBENCH_FORMAL_RELATION_RULE_VERSION
+from fin_ops_platform.services.workbench_etc_batch_link import WORKBENCH_ETC_BATCH_LINK_VERSION
 from fin_ops_platform.services.workbench_groups_page_cache import (
     WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION,
     build_workbench_initial_redis_cache_key,
@@ -5115,7 +5116,11 @@ class Application:
             "etc_business_batch_status_changed",
             months=normalized_months,
             include_all=False,
-            metadata={"source": "etc_business_batch_status", "reason": reason},
+            metadata={
+                "source": "etc_business_batch_status",
+                "reason": reason,
+                "matching_debounce_seconds": 0,
+            },
         )
 
     def _refresh_after_historical_etc_repair_link(self, changed_months: list[str], *, reason: str) -> None:
@@ -9687,6 +9692,7 @@ class Application:
         *,
         reason: str,
         error: str | None = None,
+        debounce_seconds: int | None = None,
     ) -> list[str]:
         normalized_months = [
             str(month).strip()
@@ -9701,13 +9707,13 @@ class Application:
         mark_dirty_expanded = getattr(queue, "mark_dirty_expanded", None)
         if not callable(mark_dirty_expanded):
             raise RuntimeError("Durable Workbench matching dirty queue is unavailable.")
-        return list(
-            mark_dirty_expanded(
-                normalized_months,
-                reason=reason,
-                source_versions=self._workbench_matching_source_versions(),
-            )
-        )
+        arguments: dict[str, object] = {
+            "reason": reason,
+            "source_versions": self._workbench_matching_source_versions(),
+        }
+        if debounce_seconds is not None:
+            arguments["debounce_seconds"] = debounce_seconds
+        return list(mark_dirty_expanded(normalized_months, **arguments))
 
     def _schedule_or_run_workbench_auto_matching_for_scopes(
         self,
@@ -9859,6 +9865,7 @@ class Application:
         payload: dict[str, object] = {
             "workbench_read_model_schema_version": WORKBENCH_READ_MODEL_SCHEMA_VERSION,
             "workbench_formal_relation_rule_version": WORKBENCH_FORMAL_RELATION_RULE_VERSION,
+            "workbench_etc_batch_link_version": WORKBENCH_ETC_BATCH_LINK_VERSION,
             "workbench_exception_rules_version": WORKBENCH_EXCEPTION_RULE_VERSION,
             "workbench_exception_projection_version": EXCEPTION_PROJECTION_VERSION,
             "bank_auto_tag_rules_version": self._current_bank_auto_tag_rules_version(),
@@ -10893,9 +10900,16 @@ class Application:
         if not months and "all" in scope_keys:
             months = self._workbench_query_service.list_available_months()
         if months:
+            metadata = self._domain_plan_metadata(domain_plan)
+            raw_debounce_seconds = metadata.get("matching_debounce_seconds")
             dirty_months = self._mark_workbench_matching_dirty_scopes(
                 months,
                 reason=str(domain_plan.get("reason") or "derived_lifecycle"),
+                debounce_seconds=(
+                    int(raw_debounce_seconds)
+                    if raw_debounce_seconds is not None
+                    else None
+                ),
             )
         else:
             dirty_months = []

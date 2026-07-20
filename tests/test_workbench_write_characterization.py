@@ -54,6 +54,7 @@ class _RelationCommandRepositoryFactory(_RecordingRepositoryFactory):
             )
 
         repository.pair_relations.save_workbench_pair_relations = save_workbench_pair_relations
+        repository.pair_relations.save_workbench_pair_relation_delta = save_workbench_pair_relations
         return repository
 
 

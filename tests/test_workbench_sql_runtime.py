@@ -1447,7 +1447,14 @@ class EtcBusinessSummaryWithActiveRelationConnection(EtcBusinessSummaryProjectio
         normalized = " ".join(sql.lower().split())
         if "from app.workbench_pair_relations" in normalized:
             self.active_relation_query = normalized
-            return [{"external_etc_batch_id": "etc_20260520_001"}]
+            return [
+                {
+                    "amount_check": {},
+                    "special_metadata": {
+                        "etc_batch_link": {"external_etc_batch_id": "etc_20260520_001"}
+                    },
+                }
+            ]
         if "business_batches.external_etc_batch_id <> all" in normalized:
             self.business_summary_query = normalized
             return []

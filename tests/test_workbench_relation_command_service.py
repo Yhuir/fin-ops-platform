@@ -156,7 +156,122 @@ class FakeRelationFacade:
         return deepcopy(self.payload)
 
 
+class FakeEtcBatchLinkRepository:
+    def __init__(self, *, valid: bool = True) -> None:
+        self.valid = valid
+        self.calls: list[list[dict[str, object]]] = []
+
+    def validate_etc_batch_links(self, links: list[dict[str, object]]) -> dict[str, object]:
+        self.calls.append(deepcopy(links))
+        return {
+            "valid": self.valid,
+            "issues": [] if self.valid else [{"code": "canonical_owner_changed"}],
+        }
+
+
 class WorkbenchRelationCommandServiceTests(unittest.TestCase):
+    def test_enrich_etc_batch_link_requires_typed_oa_member_and_is_idempotent(self) -> None:
+        repository = FakeRelationRepository(
+            {
+                "pair_relations": {
+                    "case:etc": {
+                        "case_id": "case:etc",
+                        "row_ids": ["oa-etc", "bank-etc"],
+                        "row_types": ["oa", "bank"],
+                        "status": "active",
+                        "relation_mode": "manual_confirmed",
+                        "month_scope": "2026-06",
+                        "special_metadata": {"existing": {"preserved": True}},
+                    }
+                },
+                "pair_relation_history": [],
+            }
+        )
+        validator = FakeEtcBatchLinkRepository()
+        service = WorkbenchRelationCommandService(
+            relation_repository=repository,
+            etc_batch_link_repository=validator,
+        )
+        link = {
+            "case_id": "case:etc",
+            "oa_row_id": "oa-etc",
+            "business_batch_id": "etc_business_batch_0014",
+            "external_etc_batch_id": "etc_20260622_001",
+            "submission_batch_id": "etc_submission_0014",
+            "invoice_count": 34,
+            "total_amount": "1584.35",
+            "scope_keys": ["2026-06", "all"],
+        }
+
+        first = service.enrich_etc_batch_links([link], actor_id="system:matching")
+        second = service.enrich_etc_batch_links([link], actor_id="system:matching")
+
+        self.assertEqual(first["updated_count"], 1)
+        self.assertEqual(second["updated_count"], 0)
+        self.assertEqual(len(repository.save_calls), 1)
+        relation = repository.snapshot["pair_relations"]["case:etc"]
+        self.assertTrue(relation["special_metadata"]["existing"]["preserved"])
+        self.assertEqual(relation["special_metadata"]["etc_batch_link"]["invoice_count"], 34)
+
+    def test_enrich_etc_batch_link_rejects_id_that_is_not_typed_as_oa(self) -> None:
+        repository = FakeRelationRepository(
+            {
+                "pair_relations": {
+                    "case:bad-type": {
+                        "case_id": "case:bad-type",
+                        "row_ids": ["oa-etc", "bank-etc"],
+                        "row_types": ["bank", "bank"],
+                        "status": "active",
+                        "relation_mode": "manual_confirmed",
+                        "month_scope": "2026-06",
+                    }
+                }
+            }
+        )
+        service = WorkbenchRelationCommandService(
+            relation_repository=repository,
+            etc_batch_link_repository=FakeEtcBatchLinkRepository(),
+        )
+
+        with self.assertRaises(WorkbenchRelationCommandError) as raised:
+            service.enrich_etc_batch_links(
+                [
+                    {
+                        "case_id": "case:bad-type",
+                        "oa_row_id": "oa-etc",
+                        "business_batch_id": "business-1",
+                        "external_etc_batch_id": "etc-1",
+                        "invoice_count": 1,
+                        "total_amount": "1.00",
+                    }
+                ],
+                actor_id="system:matching",
+            )
+
+        self.assertEqual(raised.exception.error_code, "etc_batch_link_oa_relation_mismatch")
+        self.assertEqual(repository.save_calls, [])
+
+    def test_enrich_etc_batch_link_fails_closed_when_transactional_facts_changed(self) -> None:
+        service = WorkbenchRelationCommandService(
+            relation_repository=FakeRelationRepository(),
+            etc_batch_link_repository=FakeEtcBatchLinkRepository(valid=False),
+        )
+        with self.assertRaises(WorkbenchRelationCommandError) as raised:
+            service.enrich_etc_batch_links(
+                [
+                    {
+                        "case_id": "case:etc",
+                        "oa_row_id": "oa-etc",
+                        "business_batch_id": "business-1",
+                        "external_etc_batch_id": "etc-1",
+                        "invoice_count": 1,
+                        "total_amount": "1.00",
+                    }
+                ],
+                actor_id="system:matching",
+            )
+        self.assertEqual(raised.exception.error_code, "etc_batch_link_validation_conflict")
+
     def test_active_relation_case_lookup_uses_narrow_repository_boundary(self) -> None:
         repository = FakeRelationRepository(
             {

@@ -126,12 +126,14 @@ from fin_ops_platform.services.workbench_exception_rules import RULE_VERSION as 
 from fin_ops_platform.services.workbench_free_matching_engine import (
     RULE_VERSION as WORKBENCH_FORMAL_RELATION_RULE_VERSION,
 )
+from fin_ops_platform.services.workbench_etc_batch_link import WORKBENCH_ETC_BATCH_LINK_VERSION
 from fin_ops_platform.services.workbench_pair_relation_service import (
     WorkbenchPairRelationService,
     WorkbenchPairRelationService as PairRelationService,
 )
 from fin_ops_platform.services.workbench_read_model_refresh import WorkbenchReadModelRefreshService
 from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
+from fin_ops_platform.services.workbench_reconciliation_dirty_queue import WorkbenchReconciliationDirtyQueue
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandService
 from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRelationReadFacade
 from fin_ops_platform.services.workbench_relation_read_model_refresh import (
@@ -318,6 +320,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             ),
             payment_status_repository=payment_status_repository,
             pending_payment_source_snapshot_repository=pending_payment_source_snapshot_repository,
+            workbench_matching_dirty_queue=WorkbenchReconciliationDirtyQueue(
+                repository=read_model_repository,
+            ),
         )
         handlers["oa.sync"] = sync_service.handle_runtime_event
         if "oa.sync" not in config.event_types:
@@ -686,6 +691,7 @@ def _bank_batch_workbench_matching_source_versions(app_settings_service: AppSett
     payload: dict[str, object] = {
         "workbench_read_model_schema_version": WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
         "workbench_formal_relation_rule_version": WORKBENCH_FORMAL_RELATION_RULE_VERSION,
+        "workbench_etc_batch_link_version": WORKBENCH_ETC_BATCH_LINK_VERSION,
         "workbench_exception_rules_version": WORKBENCH_EXCEPTION_RULE_VERSION,
         "workbench_exception_projection_version": EXCEPTION_PROJECTION_VERSION,
         "bank_auto_tag_rules_version": _current_bank_auto_tag_rules_version(app_settings_service),

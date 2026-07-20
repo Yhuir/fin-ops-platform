@@ -24,6 +24,7 @@ from fin_ops_platform.services.workbench_write_conflict import WorkbenchWriteCon
 class WorkbenchWriteUnitOfWorkContext:
     transaction: Any
     pair_relations: Any
+    etc_batch_links: Any | None
     exception_cases: Any
     row_overrides: Any
     idempotency_store: Any
@@ -89,6 +90,7 @@ class WorkbenchWriteUnitOfWork:
             context = WorkbenchWriteUnitOfWorkContext(
                 transaction=transaction,
                 pair_relations=repositories.pair_relations,
+                etc_batch_links=getattr(repositories, "etc_batch_links", None),
                 exception_cases=repositories.exception_cases,
                 row_overrides=repositories.row_overrides,
                 idempotency_store=idempotency_store,

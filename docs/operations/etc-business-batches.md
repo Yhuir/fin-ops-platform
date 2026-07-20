@@ -16,6 +16,7 @@
 - 对象存储配置必须可供 PostgreSQL 文件写入链路识别 backend 和 bucket；上传信用卡账单、票根网文件和业务批次源文件前，先确认对象存储健康检查、bucket 权限和服务环境变量一致。
 - `0065_invoice_canonical_identity_fingerprint_invariant.sql` 必须随发布执行，用于清理历史 canonical invoice 中同时存在强 `source_unique_key` 和弱 `data_fingerprint` 的列值与 raw payload；否则旧快照仍可能在 ETC ZIP 导入或 OA 草稿创建后的本地持久化阶段触发 `invoices_data_fingerprint_uidx`。
 - `0103_etc_reconciliation_task_timestamps.sql` 必须随发布执行，用正式 task 行的 typed `created_at/updated_at` 补齐 Phase 19 历史任务 payload 时间戳；该迁移幂等，不能改写 task 状态、版本、scope 或 typed 时间列。
+- `0116_workbench_etc_relation_enrichment_hot_path.sql` 必须随发布执行，为 completed OA 精确 ETC marker、submitted business batch external identity/scope 和 active relation `etc_batch_link` 提供窄索引；它不改业务数据，也不引入新表或唯一性猜测。
 
 ## 迁移 dry-run
 
@@ -37,13 +38,7 @@ dry-run 报告保存到部署日志或 `docs/operations/` 下的发布记录。�
 - 发现多个 active 批次时，只标记 `migration_conflict`，不得自动选择 winner。
 - 迁移失败时保持功能开关关闭，恢复备份或保留现场后回滚应用版本。
 
-历史已配对 ETC 批次转入新业务批次模型时使用 `backend/src/fin_ops_platform/tools/migrate_historical_etc_business_batches.py`：
-
-- spec 必须显式提供 `business_batch_id`、`task_id`、旧 `submission_batch_id`、外部 ETC 批次号、active relation `case_id`、上报金额和 scope month。
-- dry-run 只校验旧提交批次、active relation 和金额差额；execute 必须通过 `HistoricalEtcBusinessBatchMigrationService` 调用 `EtcService` 和 pair relation service，不允许直接写 read model。
-- 差额批次保留旧 OA/银行事实源，差额原因写入业务批次 `amount_breakdown`，不为了凑金额跨批次抢占其他批次发票。
-- 迁移后必须只读验证：ETC 管理 submitted bucket 可见业务批次；关联台 paired 区可展开 ETC 明细；同一 `external_etc_batch_id` 不再出现在 open 区。
-- `0062_workbench_relation_etc_external_batch_idx.sql` 是 active relation ETC 外部批次索引，应由 schema owner/migrator 在部署迁移阶段执行；运行时 app 账号无权创建该索引时，不得用 runtime 账号手工改 owner。
+旧 historical business batch migration 与 existing batch link CLI 已删除。已注册的 submitted ETC 业务批次通过常驻 Workbench matching worker 自动收敛：completed OA 的精确 `etc_batch_id` 唯一命中批次且 OA 已有或同轮创建正式关系时，在同一关系 UoW 内写入 `etc_batch_link`。发布后必须由关联台 Page Audit 证明 marker 一致、external batch owner 唯一、matching/read-model queue drained；不得再运行旧 CLI 或手工写 relation metadata。
 
 ## 发布后 smoke
 

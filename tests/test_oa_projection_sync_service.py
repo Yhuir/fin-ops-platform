@@ -83,6 +83,31 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
             self.assertIn((read_model_key, "2026-06", "oa_projection_sync"), queue_repository.refreshes)
             self.assertNotIn((read_model_key, "all", "oa_projection_sync"), queue_repository.refreshes)
 
+    def test_completed_projection_change_marks_matching_scope_urgent(self) -> None:
+        matching_queue = FakeMatchingDirtyQueue()
+        service = OAProjectionSyncService(
+            source_adapter=FakeSourceAdapter(
+                months=["2026-06"],
+                records_by_month={"2026-06": [_oa("oa-etc", "2026-06", workflow_status="completed")]},
+            ),
+            projection_repository=FakeProjectionRepository(),
+            queue_repository=FakeQueueRepository(),
+            workbench_matching_dirty_queue=matching_queue,
+        )
+
+        service.handle_runtime_event(_event("2026-06"))
+
+        self.assertEqual(
+            matching_queue.calls,
+            [
+                {
+                    "months": ["2026-06"],
+                    "reason": "oa_projection_sync",
+                    "debounce_seconds": 0,
+                }
+            ],
+        )
+
     def test_oa_sync_treats_legacy_completed_workflow_aliases_as_completed(self) -> None:
         records = [
             _oa("oa-pay-legacy-cn", "2026-06", workflow_status="已完成"),
@@ -460,6 +485,27 @@ class FakePendingPaymentSourceSnapshotRepository:
             upserted_completed_count=completed_count,
             removed_non_completed_count=non_completed_count,
         )
+
+
+class FakeMatchingDirtyQueue:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def mark_dirty_expanded(
+        self,
+        months: list[str],
+        *,
+        reason: str,
+        debounce_seconds: int,
+    ) -> list[str]:
+        self.calls.append(
+            {
+                "months": list(months),
+                "reason": reason,
+                "debounce_seconds": debounce_seconds,
+            }
+        )
+        return list(months)
 
 
 def _oa(row_id: str, month: str, *, workflow_status: str) -> OAApplicationRecord:

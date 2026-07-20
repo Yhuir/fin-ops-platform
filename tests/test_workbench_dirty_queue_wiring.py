@@ -56,14 +56,16 @@ class RecordingDirtyQueue:
         *,
         reason: str,
         source_versions: dict[str, object] | None = None,
+        debounce_seconds: int | None = None,
     ) -> list[str]:
-        self.mark_calls.append(
-            {
-                "months": list(months),
-                "reason": reason,
-                "source_versions": dict(source_versions or {}),
-            }
-        )
+        call: dict[str, object] = {
+            "months": list(months),
+            "reason": reason,
+            "source_versions": dict(source_versions or {}),
+        }
+        if debounce_seconds is not None:
+            call["debounce_seconds"] = debounce_seconds
+        self.mark_calls.append(call)
         return sorted({expanded for month in months for expanded in expand_scope_month_window(month)})
 
     def claim_due_scopes(
@@ -211,6 +213,24 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
             [(call["months"], call["reason"]) for call in queue.mark_calls],
             [(["2026-05"], "confirm_link"), (["2026-04"], "cancel_exception")],
         )
+
+    def test_etc_status_lifecycle_expedites_only_matching_dirty_scope(self) -> None:
+        app = build_application()
+        queue = RecordingDirtyQueue()
+        app._workbench_reconciliation_dirty_queue = queue
+
+        app._execute_derived_data_lifecycle_event(
+            "etc_business_batch_status_changed",
+            months=["2026-06"],
+            include_all=False,
+            metadata={
+                "reason": "etc_business_batch_status_changed",
+                "matching_debounce_seconds": 0,
+            },
+        )
+
+        self.assertEqual(queue.mark_calls[0]["months"], ["2026-06"])
+        self.assertEqual(queue.mark_calls[0]["debounce_seconds"], 0)
 
     def test_lifecycle_read_model_refreshes_keep_action_name_metadata(self) -> None:
         app = build_application()

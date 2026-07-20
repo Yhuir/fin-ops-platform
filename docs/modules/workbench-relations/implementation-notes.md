@@ -4726,3 +4726,12 @@ FIN_OPS_TEST_DATABASE_URL=<disposable-db> PYTHONPATH=backend/src:. python3 -m py
 - domain、adapter、command 与 PostgreSQL statement-count 测试覆盖 history-free active overlap、25 条旧历史只输出 1 条新事件、append 不 delete、operation id 幂等和无关 case/history 保留。
 - architecture guard 固化窄读、delta save 与 `include_history=False`，防止旧整段 history 链回流。
 - 必须部署精确 SHA 后复用三轮可逆 confirm → fresh → withdraw → fresh；command p95 `<=1000ms`、response-to-fresh p95 `<=2000ms`、任一 hard max `<=3000ms` 才能进入最终 Audit/40 样本门。
+
+# 2026-07-21：ETC submitted batch 正式关系自动补全
+
+- 目标：completed OA 携带精确 `etc_batch_id` 且唯一命中 submitted ETC business batch 时，把 34 张发票/1584.35 等 canonical 批次事实补入 OA 所属正式关系，确保 summary 只进入 paired 区且不再与 unpaired 重复。
+- 边界：`PostgresWorkbenchFormalRelationFactRepository` 只读 canonical OA/ETC facts；`WorkbenchMatchingOrchestrator` 解析唯一 owner；`WorkbenchRelationCommandService` 在 `WorkbenchWriteUnitOfWork` 内锁定 external batch identity、重验 OA/批次/金额/数量/active owner 后写 `special_metadata.etc_batch_link`。projection 与 Page Audit 共享同一 marker resolver。
+- 性能：OA completed sync 与 ETC submitted 状态事件显式使用零 debounce；urgent upsert 可提前已有 60 秒 dirty scope，processing 期间的事件保留当前 lease 并在完成后立即再排队。matching worker poll 为 0.25 秒；未新增 worker、read model、缓存、API 或存储。
+- 旧链删除：删除 `ExistingEtcBatchLinkService`、`HistoricalEtcBusinessBatchMigrationService`、对应两条 CLI 与专属测试；保留 `HistoricalEtcRepairService`。whole-repo 生产调用方扫描为零，禁止恢复 operator-only 平行写链。
+- Audit：新增 exact OA/batch 反向 expected-owner、marker conflict、external batch 多 active owner 与 matching dirty scope 阻断；只有 integrity pass、matching/read-model queue drained 才显示通过。
+- UI 数量：折叠标签只使用 canonical collapsed detail count；aggregate summary row 不再把 34 张显示为 35 张。

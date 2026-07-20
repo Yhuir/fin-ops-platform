@@ -22,6 +22,9 @@ class FakeConnection:
         historical_invoice_rows: list[dict[str, object]] | None = None,
         active_rows: list[dict[str, object]] | None = None,
         history_rows: list[dict[str, object]] | None = None,
+        etc_batch_link_rows: list[dict[str, object]] | None = None,
+        etc_validation_rows: list[dict[str, object]] | None = None,
+        etc_owner_rows: list[dict[str, object]] | None = None,
     ) -> None:
         self.oa_rows = list(oa_rows or [])
         self.bank_rows = list(bank_rows or [])
@@ -31,11 +34,22 @@ class FakeConnection:
         self.historical_invoice_rows = list(historical_invoice_rows or [])
         self.active_rows = list(active_rows or [])
         self.history_rows = list(history_rows or [])
+        self.etc_batch_link_rows = list(etc_batch_link_rows or [])
+        self.etc_validation_rows = list(etc_validation_rows or [])
+        self.etc_owner_rows = list(etc_owner_rows or [])
         self.queries: list[tuple[str, tuple[object, ...]]] = []
 
     def fetch_all(self, sql: str, params: tuple[object, ...] = ()) -> list[dict[str, object]]:
         normalized = " ".join(sql.split())
         self.queries.append((normalized, tuple(params)))
+        if "pg_advisory_xact_lock" in normalized:
+            return []
+        if "for update of batch, oa" in normalized:
+            return list(self.etc_validation_rows)
+        if "select case_id, amount_check, special_metadata" in normalized:
+            return list(self.etc_owner_rows)
+        if "with submitted_batches as" in normalized:
+            return list(self.etc_batch_link_rows)
         if "from app.workbench_pair_relations" in normalized:
             return list(self.active_rows)
         if "from app.workbench_pair_relation_history" in normalized:
@@ -131,6 +145,109 @@ def invoice_row(
 
 
 class PostgresWorkbenchFormalRelationFactRepositoryTests(unittest.TestCase):
+    def test_exact_etc_candidate_query_is_bounded_and_preserves_ambiguity_evidence(self) -> None:
+        connection = FakeConnection(
+            etc_batch_link_rows=[
+                {
+                    "oa_row_id": "oa-etc",
+                    "business_batch_id": "etc_business_batch_0014",
+                    "external_etc_batch_id": "etc_20260622_001",
+                    "submission_batch_id": "etc_submission_0014",
+                    "invoice_count": 34,
+                    "total_amount": Decimal("1584.35"),
+                    "external_batch_owner_count": 2,
+                    "oa_scope_month": "2026-06",
+                    "batch_scope_month": "2026-06",
+                }
+            ]
+        )
+
+        candidates = PostgresWorkbenchFormalRelationFactRepository(
+            connection
+        ).load_etc_batch_link_candidates(["2026-06"])
+
+        self.assertEqual(candidates[0]["invoice_count"], 34)
+        self.assertEqual(candidates[0]["external_batch_owner_count"], 2)
+        sql, params = connection.queries[0]
+        self.assertIn("batch.scope_month between %s::date and %s::date", sql)
+        self.assertIn("oa.normalized_payload->>'etc_batch_id'", sql)
+        self.assertNotIn("like", sql.lower())
+        self.assertEqual(len(params), 4)
+
+    def test_transactional_etc_validation_rejects_changed_totals_and_other_relation_owner(self) -> None:
+        connection = FakeConnection(
+            etc_validation_rows=[
+                {
+                    "oa_row_id": "oa-etc",
+                    "business_batch_id": "etc_business_batch_0014",
+                    "external_etc_batch_id": "etc_20260622_001",
+                    "invoice_count": 33,
+                    "total_amount": Decimal("1584.35"),
+                }
+            ],
+            etc_owner_rows=[
+                {
+                    "case_id": "case:other",
+                    "amount_check": {},
+                    "special_metadata": {
+                        "etc_batch_link": {"external_etc_batch_id": "etc_20260622_001"}
+                    },
+                }
+            ],
+        )
+        link = {
+            "case_id": "case:target",
+            "oa_row_id": "oa-etc",
+            "business_batch_id": "etc_business_batch_0014",
+            "external_etc_batch_id": "etc_20260622_001",
+            "invoice_count": 34,
+            "total_amount": "1584.35",
+        }
+
+        result = PostgresWorkbenchFormalRelationFactRepository(connection).validate_etc_batch_links([link])
+
+        self.assertFalse(result["valid"])
+        self.assertEqual(
+            {issue["code"] for issue in result["issues"]},
+            {"canonical_batch_totals_changed", "active_relation_owner_conflict"},
+        )
+        self.assertIn("pg_advisory_xact_lock", connection.queries[0][0])
+        self.assertIn("for update of batch, oa", connection.queries[1][0])
+        self.assertIn("for update", connection.queries[2][0])
+        self.assertEqual(len(connection.queries[2][1]), 8)
+
+    def test_transactional_etc_validation_rejects_second_completed_oa_claim(self) -> None:
+        connection = FakeConnection(
+            etc_validation_rows=[
+                {
+                    "oa_row_id": oa_row_id,
+                    "business_batch_id": "etc_business_batch_0014",
+                    "external_etc_batch_id": "etc_20260622_001",
+                    "invoice_count": 34,
+                    "total_amount": Decimal("1584.35"),
+                }
+                for oa_row_id in ("oa-etc", "oa-duplicate")
+            ],
+        )
+        link = {
+            "case_id": "case:target",
+            "oa_row_id": "oa-etc",
+            "business_batch_id": "etc_business_batch_0014",
+            "external_etc_batch_id": "etc_20260622_001",
+            "invoice_count": 34,
+            "total_amount": "1584.35",
+        }
+
+        result = PostgresWorkbenchFormalRelationFactRepository(connection).validate_etc_batch_links([link])
+
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["issues"], [
+            {
+                "code": "canonical_owner_changed",
+                "external_etc_batch_id": "etc_20260622_001",
+            }
+        ])
+
     def test_load_batch_is_fixed_query_bulk_io_and_uses_canonical_tables_only(self) -> None:
         connection = FakeConnection(
             oa_rows=[oa_row()],

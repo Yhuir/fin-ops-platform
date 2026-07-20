@@ -292,6 +292,8 @@ systemd 模板位于：
 
 - `deploy/oa/env/fin-ops.worker.workbench-matching.env.example`
 
+该实例使用 `0.25s` idle poll；ETC business-batch status 与 completed OA canonical 变化可用零 debounce 标记 exact dirty scope，其他 matching 事件继续使用默认 debounce。它仍是同一个 PostgreSQL durable dirty-scope worker，不新增 lane 或旁路写入。
+
 生产部署时，API、worker、RabbitMQ dispatcher 和 RabbitMQ topology bootstrap 应使用不同的 `EnvironmentFile`。`FIN_OPS_POSTGRES_DATABASE_URL`、`FIN_OPS_POSTGRES_MIGRATOR_DATABASE_URL`、`RABBITMQ_URL`、Redis、MinIO/S3 和 OA role sync 密码只能放在服务器 root-only secret 文件中，不要写入仓库模板或 systemd inline `Environment=`。migrator DSN 只能用于手动/受控 migration，不要加载到 API 或 worker unit。
 
 发布激活会安装两个版本化 retention timer 和一个 OA sync enqueue timer：

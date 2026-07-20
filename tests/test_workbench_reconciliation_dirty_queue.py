@@ -128,6 +128,41 @@ class WorkbenchReconciliationDirtyQueueTests(unittest.TestCase):
         self.assertEqual(queue.claim_due_scopes(worker_id="worker-b", limit=1), ["2026-03"])
         self.assertEqual(queue.get_dirty_scope("2026-03")["lease_owner"], "worker-b")
 
+    def test_urgent_mark_accelerates_existing_debounce_without_changing_default_behavior(self) -> None:
+        clock = Clock()
+        queue = WorkbenchReconciliationDirtyQueue(options=WorkbenchReconciliationDirtyQueueOptions(now=clock.now))
+        queue.mark_dirty_expanded(["2026-05"], reason="ordinary")
+        ordinary_available_at = queue.get_dirty_scope("2026-05")["available_at"]
+
+        queue.mark_dirty_expanded(["2026-05"], reason="oa_completed", debounce_seconds=0)
+
+        entry = queue.get_dirty_scope("2026-05")
+        self.assertEqual(ordinary_available_at, datetime(2026, 5, 25, 9, 1, tzinfo=UTC))
+        self.assertEqual(entry["available_at"], datetime(2026, 5, 25, 9, 0, tzinfo=UTC))
+        self.assertIn("2026-05", queue.claim_due_scopes(worker_id="worker-a", limit=10, request_id="urgent"))
+
+    def test_mark_during_processing_preserves_lease_and_reschedules_after_completion(self) -> None:
+        clock = Clock()
+        queue = WorkbenchReconciliationDirtyQueue(options=WorkbenchReconciliationDirtyQueueOptions(now=clock.now))
+        queue.mark_dirty_expanded(["2026-05"], reason="ordinary", debounce_seconds=0)
+        queue.claim_due_scopes(worker_id="worker-a", limit=10, request_id="run-1")
+        before = queue.get_dirty_scope("2026-05")
+
+        queue.mark_dirty_expanded(["2026-05"], reason="oa_changed", debounce_seconds=0)
+        during = queue.get_dirty_scope("2026-05")
+        queue.complete(
+            "2026-05",
+            source_versions={"matching": "v1"},
+            worker_id="worker-a",
+            request_id="run-1:2026-05",
+        )
+        after = queue.get_dirty_scope("2026-05")
+
+        self.assertEqual(during["status"], "processing")
+        self.assertEqual(during["lease_owner"], before["lease_owner"])
+        self.assertEqual(after["status"], "dirty")
+        self.assertEqual(after["available_at"], clock.now())
+
     def test_complete_records_matching_run_lifecycle(self) -> None:
         clock = Clock()
         queue = WorkbenchReconciliationDirtyQueue(options=WorkbenchReconciliationDirtyQueueOptions(now=clock.now))
@@ -308,6 +343,25 @@ class WorkbenchReconciliationDirtyQueueTests(unittest.TestCase):
         self.assertIn("tenant-a", stale_params)
         self.assertIn("matching_source_versions_changed", stale_params)
         self.assertIn(3, stale_params)
+
+    def test_repository_urgent_upsert_uses_earlier_time_and_preserves_processing_lease(self) -> None:
+        connection = RepositoryRecordingConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        with patch("fin_ops_platform.services.postgres_repositories.read_models.jsonb", side_effect=lambda value: value):
+            repository.mark_workbench_matching_dirty_scopes(
+                tenant_id="tenant-a",
+                scope_months=["2026-05"],
+                reason="oa_completed",
+                source_versions={"matching": "v1"},
+                debounce_seconds=0,
+            )
+
+        sql, params = connection.execute_calls[-1]
+        self.assertIn("then least(job.workbench_matching_dirty_scopes.available_at", sql)
+        self.assertIn("status = 'processing' then 'processing'", sql)
+        self.assertIn("refresh_requested_while_processing", sql)
+        self.assertEqual(params[-1]["expedite"], True)
 
     def test_repository_complete_and_fail_require_active_lease_identity(self) -> None:
         connection = RepositoryRecordingConnection()

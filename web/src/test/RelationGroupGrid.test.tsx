@@ -521,6 +521,21 @@ describe("Workbench candidate grouping layout", () => {
     };
   }
 
+  function createEtcCollapsedCountPrecedenceGroup(): WorkbenchRelationGroup {
+    const group = createEtcCollapsedGroup();
+    return {
+      ...group,
+      rowCounts: {
+        ...group.rowCounts,
+        invoice: 35,
+        rows: 35,
+      },
+      collapsedRowCounts: {
+        invoice: 34,
+      },
+    };
+  }
+
   function renderNoOaGrid(group: WorkbenchRelationGroup = createNoOaCollapsedGroup()) {
     return render(
       <RelationGroupGrid
@@ -1390,6 +1405,31 @@ describe("Workbench candidate grouping layout", () => {
     expect(screen.getByText("ETC-002")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "收起ETC发票明细" })).toBeInTheDocument();
     expect(within(invoiceCell).getAllByRole("row")).toHaveLength(2);
+  });
+
+  test("prefers canonical collapsed detail counts over aggregate row counts", () => {
+    const group = createEtcCollapsedCountPrecedenceGroup();
+    render(
+      <RelationGroupGrid
+        canMutateData
+        displayState={createEmptyWorkbenchZoneDisplayState()}
+        getRowState={() => "idle"}
+        groups={[group]}
+        onOpenDetail={() => undefined}
+        onRowAction={() => undefined}
+        onSelectRow={() => undefined}
+        panes={[
+          { id: "oa", title: "OA", rows: group.rows.oa },
+          { id: "bank", title: "银行流水", rows: group.rows.bank },
+          { id: "invoice", title: "进销项发票", rows: group.rows.invoice },
+        ]}
+        rowTemplateColumns="1fr 8px 1fr 8px 1fr"
+        zoneId="paired"
+      />,
+    );
+
+    const expandButton = screen.getByRole("button", { name: "展开ETC发票明细，34 张" });
+    expect(expandButton).toHaveTextContent("展开 34 张明细");
   });
 
   test("renders submitted salary and internal-transfer batches as collapsed no-OA summaries", () => {

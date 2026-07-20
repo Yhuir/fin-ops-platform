@@ -74,6 +74,8 @@ class AuditWorkbenchRelationDisplayToolTests(unittest.TestCase):
         self.assertEqual(report["audit_status"], {"integrity": "pass", "freshness": "fresh", "queue": "drained"})
         self.assertIn("query_composed_relation_case_ownership", report["audit_contract"]["proof_checks"])
         self.assertIn("canonical_object_expected_set_equality", report["audit_contract"]["proof_checks"])
+        self.assertIn("exact_etc_batch_relation_owner", report["audit_contract"]["proof_checks"])
+        self.assertIn("unique_etc_batch_relation_owner", report["audit_contract"]["proof_checks"])
         queried_sql = " ".join(sql for sql, _params in connection.fetch_all_calls)
         self.assertIn("canonical_expected_scopes", queried_sql)
         self.assertIn("related.scope_key", queried_sql)
@@ -88,6 +90,55 @@ class AuditWorkbenchRelationDisplayToolTests(unittest.TestCase):
         self.assertIn("where relation_member.row_id = override.row_id", queried_sql)
         self.assertIn("where relation_member.row_id = member.row_id", queried_sql)
         self.assertNotIn("candidate:%%", queried_sql)
+
+    def test_missing_expected_etc_relation_owner_blocks_page_audit(self) -> None:
+        report = audit_workbench_relation_display.audit_workbench_relation_display(
+            FakeConnection(
+                projection_issues={
+                    "workbench_etc_relation_expected_owner": [
+                        {
+                            "subject_id": "case:etc",
+                            "scope_key": "all",
+                            "oa_row_id": "oa-etc",
+                            "expected_external_batch_id": "etc_20260622_001",
+                            "relation_external_batch_id": None,
+                        }
+                    ]
+                }
+            )
+        )
+
+        self.assertIn(
+            "workbench_etc_relation_expected_owner_mismatch",
+            {issue["code"] for issue in report["issues"]},
+        )
+
+    def test_duplicate_etc_owner_and_matching_queue_backlog_block_page_audit(self) -> None:
+        report = audit_workbench_relation_display.audit_workbench_relation_display(
+            FakeConnection(
+                projection_issues={
+                    "workbench_etc_relation_unique_owner": [
+                        {
+                            "subject_id": "case:etc-a",
+                            "scope_key": "all",
+                            "mismatch_kind": "external_batch_owner_conflict",
+                            "external_batch_ids": "etc_20260622_001",
+                        }
+                    ],
+                    "workbench_matching_dirty_scope": [
+                        {
+                            "scope_key": "2026-06",
+                            "status": "processing",
+                            "last_error": None,
+                        }
+                    ],
+                }
+            )
+        )
+
+        issue_codes = {issue["code"] for issue in report["issues"]}
+        self.assertIn("workbench_etc_relation_unique_owner_mismatch", issue_codes)
+        self.assertIn("workbench_matching_scope_not_converged", issue_codes)
 
     def test_relation_display_can_be_clean_while_canonical_object_is_missing(self) -> None:
         report = audit_workbench_relation_display.audit_workbench_relation_display(

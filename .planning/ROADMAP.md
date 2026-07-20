@@ -476,4 +476,25 @@ Plans:
 - [x] 21-03 — Enforce the paired/unpaired exact visibility partition across read models, API, UI and downstream consumers.
 - [ ] 21-04 — Deploy the clean cutover, run migration 0104, rehydrate registered scopes and capture production data-safety/Audit evidence.
 
+### Phase 21.1: ETC 批次正式关系归属与折叠数量闭环
+
+**Goal:** Make an ETC OA's exact batch marker enrich the one active formal Workbench relation, display the canonical invoice count consistently, remove obsolete operator-only link/migration paths, and prove fast isolated production convergence.
+**Requirements:** RELVIS-ETC-01, RELVIS-ETC-02, RELVIS-ETC-03, RELVIS-ETC-04, RELVIS-ETC-05, RELVIS-ETC-06
+**Depends on:** Phase 21 deterministic relation runtime and Phase 12 ETC business-batch state machine.
+**Canonical refs:** `.planning/phases/21.1-workbench-etc-relation-enrichment/21.1-CONTEXT.md`, `docs/modules/reconciliation-workbench/boundary-io.md`, `docs/modules/workbench-relations/boundary-io.md`, `docs/modules/etc-tickets/boundary-io.md`, `docs/architecture/module-boundaries/read-model-contracts.md`, `docs/operations/runtime-worker-governance.md`
+**Success Criteria** (what must be TRUE):
+
+  1. Collapsed ETC summary and expansion copy both use the canonical detail count; a 34-invoice batch never renders as 35.
+  2. An exact OA `etc_batch_id` and exactly one submitted ETC business batch enrich exactly one formal relation through the existing UoW/command boundary; ambiguous or conflicting ownership fails closed.
+  3. Paired and unpaired projection use one canonical relation-batch resolver, so one batch has one display owner.
+  4. Page Audit proves expected ETC relation enrichment and unique ownership, including post-write freshness/queue closure.
+  5. Retired operator-only existing-link and historical-migration services/tools/tests/docs are removed after whole-repository caller evidence.
+  6. API p95 is at most 1 second and operation-to-fresh p99 is at most 3 seconds without a new worker, table, cache, fallback, or cross-page write path.
+
+**Plans:** 1 plan
+
+Plans:
+
+- [ ] 21.1-01 — Implement exact enrichment, canonical count/ownership, scoped fast convergence, Audit proof, old-path removal, and production verification.
+
 ---

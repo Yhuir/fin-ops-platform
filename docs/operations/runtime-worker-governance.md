@@ -53,8 +53,8 @@ invoice usage/output collection backfill、App Health/workbench performance 和 
   registry 外长期运行，也禁止通过给未知实例补空参数来绕过 registration contract。
 - PostgreSQL durable queue worker 的 idle poll 基线是 `0.05s`；单一 `workbench` worker 使用 `0.01s`，同时处理月份 shard 与 `all` fan-out command。普通 relation 写入只要求具体月份和 relation/downstream read model 收敛；`month=all` 页面直接组合 active 月分片。`all` command 只列出月份并经统一 gateway 投递，不构建或发布全局 generation。新增 read model / 写后 fan-out worker 不能把
   `--poll-interval-seconds 2`、`0.25`、`0.1` 或 `5` 作为默认值；`workbench-matching` 是独立脏 scope 批处理例外，
-  可保留显式 5s poll。发布 helper 会把已有 env 中精确命中的历史 `--poll-interval-seconds 2|0.25|0.1|0.05`
-  迁移到当前 release env 示例声明的 poll 值。该迁移不会重写 RabbitMQ 灰度或自定义事件。
+  使用 `0.25s` poll 支撑精确 OA/ETC relation enrichment 的 3 秒写后可读 SLO。发布 helper 会把已有 env 中精确命中的历史 `--poll-interval-seconds 2|0.25|0.1|0.05`
+  迁移到当前 release env 示例声明的 poll 值，并只对 `workbench-matching` 把旧 `5s` 迁移为当前值。该迁移不会重写 RabbitMQ 灰度或自定义事件。
 - OA 待付款使用 required registration `oa-pending-payment`，只 claim `oa_pending_payment.read_model.refresh`；`invoice-usage-collection` 只保留 `input_invoice_usage` / `output_invoice_collection`。release helper 必须幂等删除既有 shared worker env 中精确命中的 OA handler/event 参数，不能让旧 env 覆盖新 registry 边界。OA projector不得访问Mongo/MySQL或复用shared invoice projector。普通业务变化只enqueue精确月份；显式`all`作为低优先级fan-out，用于首次回填、repair或backfill。
 - OA release统一切换时不允许两个worker同时claim OA event。先由registry激活新`oa-pending-payment`实例并确认shared invoice registration已不含OA handler，再执行`oa.sync:all`建立completed/admission/payment-status snapshot和watermark；该同步必须使用单次 dual-view source batch，任一 form 失败整轮不提交并记录 failed run。核对 `scanned_projection_count`、`scanned_completed_count`、`scanned_in_progress_count` 后，低优先级enqueue `oa_pending_payment:all`。全部月份dirty/outbox drain并Audit通过前，页面保持refreshing且不展示旧rows。
 - OA页面写回MySQL成功后由API进程通过窄PG snapshot writer同事务更新status、月份watermark和outbox；PG失败返回可重试错误。运维不得直接SQL补read model或把MySQL当前值当作页面fresh证明；可重试命令或重新运行OA sync。

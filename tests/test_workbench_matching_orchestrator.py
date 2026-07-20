@@ -43,13 +43,28 @@ def fact(
 
 
 class RecordingFactRepository:
-    def __init__(self, fact_batch: FormalRelationFactBatch) -> None:
+    def __init__(
+        self,
+        fact_batch: FormalRelationFactBatch,
+        *,
+        etc_batch_link_candidates: list[dict[str, object]] | None = None,
+    ) -> None:
         self.fact_batch = fact_batch
+        self.etc_batch_link_candidates = list(etc_batch_link_candidates or [])
         self.calls: list[dict[str, object]] = []
 
     def load_batch(self, scope_months: list[str], *, source_versions: dict[str, object]) -> FormalRelationFactBatch:
         self.calls.append({"scope_months": list(scope_months), "source_versions": dict(source_versions)})
         return self.fact_batch
+
+    def load_etc_batch_link_candidates(self, scope_months: list[str]) -> list[dict[str, object]]:
+        self.calls.append({"etc_scope_months": list(scope_months)})
+        return list(self.etc_batch_link_candidates)
+
+
+class RecordingEtcBatchLinkRepository:
+    def validate_etc_batch_links(self, links: list[dict[str, object]]) -> dict[str, object]:
+        return {"valid": bool(links), "issues": []}
 
 
 class RecordingUow:
@@ -71,6 +86,7 @@ class RecordingUow:
                 load_snapshot=lambda: self.snapshot,
                 save_snapshot=save_snapshot,
             ),
+            etc_batch_links=RecordingEtcBatchLinkRepository(),
             exception_cases=object(),
             row_overrides=object(),
             idempotency_store={},
@@ -87,8 +103,12 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
         fact_batch: FormalRelationFactBatch,
         *,
         uow: RecordingUow | None = None,
+        etc_batch_link_candidates: list[dict[str, object]] | None = None,
     ) -> tuple[WorkbenchMatchingOrchestrator, RecordingFactRepository, RecordingUow]:
-        repository = RecordingFactRepository(fact_batch)
+        repository = RecordingFactRepository(
+            fact_batch,
+            etc_batch_link_candidates=etc_batch_link_candidates,
+        )
         resolved_uow = uow or RecordingUow()
         return (
             WorkbenchMatchingOrchestrator(
@@ -111,7 +131,7 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
             request_id="request-1",
         )
 
-        self.assertEqual(len(repository.calls), 1)
+        self.assertEqual(len(repository.calls), 2)
         self.assertEqual(len(uow.calls), 1)
         self.assertEqual(uow.save_count, 1)
         self.assertEqual(summary["planned_relation_count"], 1)
@@ -140,7 +160,7 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
             request_id="request-2",
         )
 
-        self.assertEqual(len(repository.calls), 1)
+        self.assertEqual(len(repository.calls), 2)
         self.assertEqual(uow.calls, [])
         self.assertEqual(summary["planned_relation_count"], 0)
         self.assertEqual(summary["outbox_event_ids"], [])
@@ -252,6 +272,87 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
         self.assertNotIn("candidate", serialized.lower())
         self.assertNotIn("decision", serialized.lower())
         self.assertEqual(summary["scope_months"], ["2026-05"])
+
+    def test_same_run_relation_carries_exact_etc_link_with_one_save(self) -> None:
+        fixture = FormalRelationFactBatch(facts=(fact("oa", "oa-etc"), fact("bank", "bank-etc")))
+        candidate = {
+            "oa_row_id": "oa-etc",
+            "business_batch_id": "etc_business_batch_0014",
+            "external_etc_batch_id": "etc_20260622_001",
+            "submission_batch_id": "etc_submission_0014",
+            "invoice_count": 34,
+            "total_amount": "1584.35",
+            "external_batch_owner_count": 1,
+            "scope_keys": ["2026-05", "all"],
+        }
+        orchestrator, _repository, uow = self._orchestrator(
+            fixture,
+            etc_batch_link_candidates=[candidate],
+        )
+
+        summary = orchestrator.run(
+            changed_scope_months=["2026-05"],
+            reason="oa_projection_sync",
+            request_id="request-etc",
+        )
+
+        self.assertEqual(uow.save_count, 1)
+        self.assertEqual(summary["enriched_relation_count"], 1)
+        relation = next(iter(uow.snapshot["pair_relations"].values()))
+        self.assertEqual(
+            relation["special_metadata"]["etc_batch_link"]["external_etc_batch_id"],
+            "etc_20260622_001",
+        )
+        self.assertEqual(relation["special_metadata"]["etc_batch_link"]["invoice_count"], 34)
+
+    def test_existing_relation_is_enriched_without_creating_a_new_relation(self) -> None:
+        oa = fact("oa", "oa-existing-etc")
+        bank = fact("bank", "bank-existing-etc")
+        case_id = "case:existing-etc"
+        fixture = FormalRelationFactBatch(
+            facts=(oa, bank),
+            active_relations=(ActiveFormalRelationAnchor(case_id, (oa.member_key, bank.member_key)),),
+        )
+        snapshot = {
+            "pair_relations": {
+                case_id: {
+                    "case_id": case_id,
+                    "row_ids": [oa.row_id, bank.row_id],
+                    "row_types": [oa.row_type, bank.row_type],
+                    "relation_mode": "manual_confirmed",
+                    "status": "active",
+                    "version": 1,
+                    "month_scope": "2026-05",
+                }
+            },
+            "pair_relation_history": [],
+        }
+        candidate = {
+            "oa_row_id": oa.row_id,
+            "business_batch_id": "etc_business_batch_0014",
+            "external_etc_batch_id": "etc_20260622_001",
+            "submission_batch_id": "etc_submission_0014",
+            "invoice_count": 34,
+            "total_amount": "1584.35",
+            "external_batch_owner_count": 1,
+            "scope_keys": ["2026-05", "all"],
+        }
+        orchestrator, _repository, uow = self._orchestrator(
+            fixture,
+            uow=RecordingUow(snapshot),
+            etc_batch_link_candidates=[candidate],
+        )
+
+        summary = orchestrator.run(
+            changed_scope_months=["2026-05"],
+            reason="oa_projection_sync",
+            request_id="request-existing-etc",
+        )
+
+        self.assertEqual(summary["planned_relation_count"], 0)
+        self.assertEqual(summary["enriched_relation_count"], 1)
+        self.assertEqual(uow.save_count, 1)
+        self.assertEqual(set(uow.snapshot["pair_relations"]), {case_id})
 
     def test_invalid_input_fails_before_repository_or_uow(self) -> None:
         fixture = FormalRelationFactBatch(facts=())

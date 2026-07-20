@@ -4099,16 +4099,10 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         self.assertEqual(violations, [])
 
-    def test_etc_repair_and_link_services_do_not_keep_direct_relation_write_fallbacks(self) -> None:
+    def test_etc_repair_service_does_not_keep_direct_relation_write_fallback(self) -> None:
         checks = {
             "backend/src/fin_ops_platform/services/historical_etc_repair_service.py": {
                 "_reconcile_batch": "_pair_relation_service.create_active_relation",
-            },
-            "backend/src/fin_ops_platform/services/historical_etc_business_batch_migration_service.py": {
-                "_update_relation_metadata": "_pair_relation_service.update_relation_metadata_for_case_id",
-            },
-            "backend/src/fin_ops_platform/services/existing_etc_batch_link_service.py": {
-                "link_existing_invoices": "_pair_relation_service.update_relation_metadata_for_case_id",
             },
         }
         violations: list[str] = []
@@ -6437,6 +6431,14 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 "batch accounting legacy repair gained active app/service caller(s): "
                 + ", ".join(active_repair_callers)
             )
+        for retired_path in (
+            SERVICES_ROOT / "existing_etc_batch_link_service.py",
+            SERVICES_ROOT / "historical_etc_business_batch_migration_service.py",
+            SOURCE_ROOT / "fin_ops_platform/tools/link_existing_etc_batches.py",
+            SOURCE_ROOT / "fin_ops_platform/tools/migrate_historical_etc_business_batches.py",
+        ):
+            if retired_path.exists():
+                violations.append(f"retired ETC relation path resurfaced: {_relative(retired_path)}")
 
         self.assertEqual(violations, [])
 
@@ -7388,10 +7390,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 canonical_method = _function_source(tree, source, "_canonical_invoice_key_exists_for_etc_import")
                 if "list_invoices(" in canonical_method or "source_unique_key" in canonical_method:
                     violations.append("backend/src/fin_ops_platform/app/server.py owns canonical invoice key scan")
-            if rel_path == "backend/src/fin_ops_platform/services/existing_etc_batch_link_service.py":
-                canonical_method = _function_source(tree, source, "_canonical_invoices_by_number")
-                if "list_invoices(" in canonical_method:
-                    violations.append(f"{rel_path} scans invoices for canonical ETC identity lookup")
             if rel_path == "backend/src/fin_ops_platform/services/tax_certified_import_service.py":
                 unique_key_method = _function_source(tree, source, "_build_unique_key")
                 if "tax_certified_unique_key" not in unique_key_method:
@@ -7442,14 +7440,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 }:
                     violations.append(f"{rel_path}:{node.lineno} defines private invoice dedupe helper {node.name}")
 
-        etc_tool_path = TOOLS_ROOT / "link_existing_etc_batches.py"
-        etc_tool_source = etc_tool_path.read_text(encoding="utf-8")
-        if "list_invoices(" in etc_tool_source:
-            violations.append(f"{_relative(etc_tool_path)} dry-run scans canonical invoices with list_invoices()")
-        if "EtcExistingInvoiceLinkService" not in etc_tool_source:
-            violations.append(f"{_relative(etc_tool_path)} does not delegate ETC invoice linking to EtcExistingInvoiceLinkService")
-        if "upsert_etc_invoice" in etc_tool_source:
-            violations.append(f"{_relative(etc_tool_path)} owns ETC canonical invoice link loop")
         audit_tool_path = TOOLS_ROOT / "audit_object_identity.py"
         audit_tool_source = audit_tool_path.read_text(encoding="utf-8")
         if "invoice_evidence_types" in audit_tool_source or "document_kind.endswith" in audit_tool_source:

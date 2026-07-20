@@ -78,6 +78,9 @@ migrate_legacy_worker_poll_interval() {
   if grep -Eq -- "--poll-interval-seconds (2|0\\.25|0\\.1|0\\.05)([^0-9.]|$)" "$target_file"; then
     sed -i -E "s/--poll-interval-seconds (2|0\\.25|0\\.1|0\\.05)([^0-9.]|$)/--poll-interval-seconds ${source_poll}\\2/g" "$target_file"
   fi
+  if [ "$worker" = "workbench-matching" ] && grep -Eq -- "--poll-interval-seconds 5([^0-9.]|$)" "$target_file"; then
+    sed -i -E "s/--poll-interval-seconds 5([^0-9.]|$)/--poll-interval-seconds ${source_poll}\\1/g" "$target_file"
+  fi
 }
 
 migrate_rabbitmq_worker_drain_interval() {

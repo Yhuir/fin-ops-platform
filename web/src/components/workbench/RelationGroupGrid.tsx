@@ -442,7 +442,7 @@ function RelationGroupGrid({
           const isExpanded = expandedPaneGroups.has(collapseKey);
           const isLoading = loadingPaneGroups.has(collapseKey);
           const isFailed = failedPaneGroups.has(collapseKey);
-          const collapsedRowCount = group.rowCounts?.[paneId] ?? group.collapsedRowCounts?.[paneId] ?? collapsedRows.length;
+          const collapsedRowCount = group.collapsedRowCounts?.[paneId] ?? group.rowCounts?.[paneId] ?? collapsedRows.length;
           const rowTotal = isCollapsedSummary ? collapsedRowCount : totalRowCount;
           const visibleRowCount = isCollapsedSummary ? collapsedRows.length : visibleRows.length;
           const hiddenRowCount = Math.max(0, rowTotal - visibleRowCount);

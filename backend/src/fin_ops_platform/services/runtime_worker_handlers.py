@@ -65,6 +65,7 @@ from fin_ops_platform.services.workbench_free_matching_engine import (
 from fin_ops_platform.services.workbench_free_matching_engine import (
     WorkbenchFreeMatchingEngine,
 )
+from fin_ops_platform.services.workbench_etc_batch_link import WORKBENCH_ETC_BATCH_LINK_VERSION
 from fin_ops_platform.services.workbench_matching_dirty_scope_worker import (
     WorkbenchMatchingDirtyScopeWorker,
     WorkbenchMatchingDirtyScopeWorkerConfig,
@@ -264,6 +265,7 @@ class WorkbenchMatchingWorkerFactory:
         workbench_repository = PostgresWorkbenchRepository(transaction)
         return SimpleNamespace(
             pair_relations=PostgresWorkbenchRelationRepository(transaction, enqueue_refreshes=False),
+            etc_batch_links=PostgresWorkbenchFormalRelationFactRepository(transaction),
             exception_cases=workbench_repository,
             row_overrides=workbench_repository,
         )
@@ -713,6 +715,7 @@ def _workbench_matching_source_versions(app_settings_service: AppSettingsService
     payload: dict[str, object] = {
         "workbench_read_model_schema_version": WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
         "workbench_formal_relation_rule_version": WORKBENCH_FORMAL_RELATION_RULE_VERSION,
+        "workbench_etc_batch_link_version": WORKBENCH_ETC_BATCH_LINK_VERSION,
         "workbench_exception_rules_version": WORKBENCH_EXCEPTION_RULE_VERSION,
         "workbench_exception_projection_version": EXCEPTION_PROJECTION_VERSION,
         "bank_auto_tag_rules_version": _current_bank_auto_tag_rules_version(app_settings_service),

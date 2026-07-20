@@ -3,7 +3,10 @@ from __future__ import annotations
 from typing import Any
 
 from fin_ops_platform.services.oa_attachment_invoice_cache import attachment_invoice_cache_parser_version
-from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
+from fin_ops_platform.services.postgres_repositories.oa_projection import (
+    COMPLETED_WORKFLOW_STATUS_SQL,
+    OA_PROJECTION_SYNC_VERSION,
+)
 from fin_ops_platform.services.postgres_repositories.audit_report import AuditIssue
 from fin_ops_platform.services.workbench_free_matching_engine import RULE_VERSION as WORKBENCH_FORMAL_RELATION_RULE_VERSION
 from fin_ops_platform.services.workbench_sql_projection import WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
@@ -25,8 +28,37 @@ def workbench_projection_integrity_issues(
     tenant_id: str,
     limit: int,
 ) -> list[AuditIssue]:
+    return _integrity_issues_for_queries(
+        connection,
+        tenant_id=tenant_id,
+        limit=limit,
+        queries=_PROOF_QUERIES,
+    )
+
+
+def workbench_etc_relation_integrity_issues(
+    connection: Any,
+    *,
+    tenant_id: str,
+    limit: int,
+) -> list[AuditIssue]:
+    return _integrity_issues_for_queries(
+        connection,
+        tenant_id=tenant_id,
+        limit=limit,
+        queries=_ETC_RELATION_PROOF_QUERIES,
+    )
+
+
+def _integrity_issues_for_queries(
+    connection: Any,
+    *,
+    tenant_id: str,
+    limit: int,
+    queries: tuple[tuple[str, str, str], ...],
+) -> list[AuditIssue]:
     issues: list[AuditIssue] = []
-    for sql, code, message in _PROOF_QUERIES:
+    for sql, code, message in queries:
         rows = connection.fetch_all(sql, (tenant_id, limit))
         issues.extend(
             AuditIssue(
@@ -259,6 +291,122 @@ projected_rows as (
     select * from projected_alias_rows
 )
 """
+
+
+_ETC_RELATION_PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
+    (
+        r"""
+        /* check: workbench_etc_relation_expected_owner */
+        with submitted_batches as (
+            select batch.business_batch_id,
+                   coalesce(
+                       nullif(batch.raw_payload->'normalized_payload'->>'external_etc_batch_id', ''),
+                       nullif(batch.raw_payload->'normalized_payload'->>'externalEtcBatchId', ''),
+                       nullif(batch.raw_payload->'normalized_payload'->>'submission_batch_id', ''),
+                       nullif(batch.raw_payload->'normalized_payload'->>'submissionBatchId', ''),
+                       batch.business_batch_id
+                   ) as external_batch_id
+            from app.etc_business_batches batch
+            where batch.status in ('oa_submitted', 'manually_marked_submitted', 'closed')
+        ),
+        unique_batches as (
+            select external_batch_id, min(business_batch_id) as business_batch_id
+            from submitted_batches
+            group by external_batch_id
+            having count(*) = 1
+        ),
+        exact_oa as (
+            select oa.row_id, oa.normalized_payload->>'etc_batch_id' as external_batch_id,
+                   count(*) over (partition by oa.normalized_payload->>'etc_batch_id') as oa_owner_count
+            from app.oa_applications oa
+            where oa.status <> 'deleted'
+              and nullif(oa.normalized_payload->>'etc_batch_id', '') is not null
+              and """
+        + COMPLETED_WORKFLOW_STATUS_SQL
+        + r"""
+        ),
+        expected as (
+            select oa.row_id as oa_row_id, oa.external_batch_id, batch.business_batch_id,
+                   relation.case_id,
+                   coalesce(
+                       nullif(relation.amount_check->>'external_etc_batch_id', ''),
+                       nullif(relation.amount_check->>'etc_batch_id', ''),
+                       nullif(relation.special_metadata->>'external_etc_batch_id', ''),
+                       nullif(relation.special_metadata->>'etc_batch_id', ''),
+                       nullif(relation.special_metadata->'etc_batch_link'->>'external_etc_batch_id', ''),
+                       nullif(relation.special_metadata->'historical_etc_business_batch_migration'->>'external_etc_batch_id', '')
+                   ) as relation_external_batch_id
+            from exact_oa oa
+            join unique_batches batch on batch.external_batch_id = oa.external_batch_id
+            join app.workbench_pair_relations relation
+              on relation.status = 'active'
+             and exists (
+                    select 1
+                    from unnest(relation.row_ids, relation.row_types) member(row_id, row_type)
+                    where member.row_id = oa.row_id and member.row_type = 'oa'
+                 )
+            where oa.oa_owner_count = 1
+        )
+        select expected.case_id as subject_id, 'all'::text as scope_key,
+               expected.oa_row_id, expected.business_batch_id,
+               expected.external_batch_id as expected_external_batch_id,
+               expected.relation_external_batch_id
+        from expected
+        cross join (select %s::text as tenant_id) tenant
+        where expected.relation_external_batch_id is distinct from expected.external_batch_id
+        order by expected.case_id
+        limit %s
+        """,
+        "workbench_etc_relation_expected_owner_mismatch",
+        "A uniquely identified submitted ETC batch is missing from, or disagrees with, its OA-owned formal relation.",
+    ),
+    (
+        r"""
+        /* check: workbench_etc_relation_unique_owner */
+        with relation_markers as (
+            select relation.case_id, marker.external_batch_id
+            from app.workbench_pair_relations relation
+            cross join lateral (
+                values
+                    (nullif(relation.amount_check->>'external_etc_batch_id', '')),
+                    (nullif(relation.amount_check->>'etc_batch_id', '')),
+                    (nullif(relation.special_metadata->>'external_etc_batch_id', '')),
+                    (nullif(relation.special_metadata->>'etc_batch_id', '')),
+                    (nullif(relation.special_metadata->'etc_batch_link'->>'external_etc_batch_id', '')),
+                    (nullif(relation.special_metadata->'historical_etc_business_batch_migration'->>'external_etc_batch_id', ''))
+            ) marker(external_batch_id)
+            where relation.status = 'active'
+              and marker.external_batch_id is not null
+        ),
+        relation_conflicts as (
+            select case_id as subject_id, 'relation_marker_conflict'::text as mismatch_kind,
+                   string_agg(distinct external_batch_id, ',' order by external_batch_id) as external_batch_ids
+            from relation_markers
+            group by case_id
+            having count(distinct external_batch_id) > 1
+        ),
+        owner_conflicts as (
+            select min(case_id) as subject_id, 'external_batch_owner_conflict'::text as mismatch_kind,
+                   external_batch_id as external_batch_ids
+            from relation_markers
+            group by external_batch_id
+            having count(distinct case_id) > 1
+        )
+        select conflict.subject_id, 'all'::text as scope_key,
+               conflict.mismatch_kind, conflict.external_batch_ids
+        from (
+            select * from relation_conflicts
+            union all
+            select * from owner_conflicts
+        ) conflict
+        cross join (select %s::text as tenant_id) tenant
+        order by conflict.mismatch_kind, conflict.subject_id
+        limit %s
+        """,
+        "workbench_etc_relation_unique_owner_mismatch",
+        "An active Workbench relation has conflicting ETC markers or an ETC batch has multiple active relation owners.",
+    ),
+)
 
 
 _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (

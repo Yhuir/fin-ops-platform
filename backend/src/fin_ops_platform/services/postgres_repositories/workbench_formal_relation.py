@@ -15,6 +15,7 @@ from fin_ops_platform.services.workbench_free_matching_engine import (
     canonical_member_key,
     relation_fingerprint,
 )
+from fin_ops_platform.services.workbench_etc_batch_link import relation_external_etc_batch_ids
 from fin_ops_platform.services.workbench_invoice_direction import invoice_workbench_direction_from_row
 from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
 from fin_ops_platform.services.workbench_text_normalization import normalize_match_text
@@ -197,6 +198,217 @@ class PostgresWorkbenchFormalRelationFactRepository:
             affected_scopes=tuple(sorted({*normalized_scopes, "all"})),
             source_versions=versions,
         )
+
+    def load_etc_batch_link_candidates(self, scope_months: list[str]) -> list[dict[str, Any]]:
+        """Load exact OA -> submitted ETC batch references with one bounded query."""
+        normalized_scopes = _normalize_scope_months(scope_months)
+        start_date, end_date = _composite_window(normalized_scopes)
+        rows = self._connection.fetch_all(
+            """
+            with submitted_batches as (
+                select
+                    batch.business_batch_id,
+                    batch.scope_month,
+                    batch.invoice_count,
+                    batch.total_amount,
+                    coalesce(
+                        nullif(batch.raw_payload->'normalized_payload'->>'external_etc_batch_id', ''),
+                        nullif(batch.raw_payload->'normalized_payload'->>'externalEtcBatchId', ''),
+                        nullif(batch.raw_payload->'normalized_payload'->>'submission_batch_id', ''),
+                        nullif(batch.raw_payload->'normalized_payload'->>'submissionBatchId', ''),
+                        batch.business_batch_id
+                    ) as external_etc_batch_id,
+                    coalesce(
+                        nullif(batch.raw_payload->'normalized_payload'->>'submission_batch_id', ''),
+                        nullif(batch.raw_payload->'normalized_payload'->>'submissionBatchId', '')
+                    ) as submission_batch_id,
+                    count(*) over (
+                        partition by coalesce(
+                            nullif(batch.raw_payload->'normalized_payload'->>'external_etc_batch_id', ''),
+                            nullif(batch.raw_payload->'normalized_payload'->>'externalEtcBatchId', ''),
+                            nullif(batch.raw_payload->'normalized_payload'->>'submission_batch_id', ''),
+                            nullif(batch.raw_payload->'normalized_payload'->>'submissionBatchId', ''),
+                            batch.business_batch_id
+                        )
+                    ) as external_batch_owner_count
+                from app.etc_business_batches batch
+                where batch.status in ('oa_submitted', 'manually_marked_submitted', 'closed')
+                  and batch.scope_month between %s::date and %s::date
+            )
+            select
+                oa.row_id as oa_row_id,
+                submitted.business_batch_id,
+                submitted.external_etc_batch_id,
+                submitted.submission_batch_id,
+                submitted.invoice_count,
+                submitted.total_amount,
+                submitted.external_batch_owner_count,
+                to_char(coalesce(oa.scope_month, date_trunc('month', oa.application_date)::date), 'YYYY-MM') as oa_scope_month,
+                to_char(submitted.scope_month, 'YYYY-MM') as batch_scope_month
+            from app.oa_applications oa
+            join submitted_batches submitted
+              on submitted.external_etc_batch_id = nullif(oa.normalized_payload->>'etc_batch_id', '')
+            where coalesce(oa.application_date, oa.scope_month) between %s::date and %s::date
+              and oa.status <> 'deleted'
+              and """
+            + COMPLETED_WORKFLOW_STATUS_SQL
+            + """
+            order by submitted.external_etc_batch_id, oa.row_id
+            """,
+            (start_date, end_date, start_date, end_date),
+        )
+        return [
+            {
+                "oa_row_id": text(row.get("oa_row_id")) or "",
+                "business_batch_id": text(row.get("business_batch_id")) or "",
+                "external_etc_batch_id": text(row.get("external_etc_batch_id")) or "",
+                "submission_batch_id": text(row.get("submission_batch_id")) or "",
+                "invoice_count": int(row.get("invoice_count") or 0),
+                "total_amount": str(row.get("total_amount") or "0"),
+                "external_batch_owner_count": int(row.get("external_batch_owner_count") or 0),
+                "scope_keys": sorted(
+                    {
+                        "all",
+                        *(
+                            value
+                            for value in (
+                                text(row.get("oa_scope_month")),
+                                text(row.get("batch_scope_month")),
+                            )
+                            if value
+                        ),
+                    }
+                ),
+            }
+            for row in rows
+            if text(row.get("oa_row_id"))
+            and text(row.get("business_batch_id"))
+            and text(row.get("external_etc_batch_id"))
+        ]
+
+    def validate_etc_batch_links(self, links: list[dict[str, Any]]) -> dict[str, Any]:
+        """Revalidate and lock exact canonical ETC ownership inside the write UoW."""
+        candidates = [dict(link) for link in list(links or []) if isinstance(link, dict)]
+        external_ids = sorted(
+            {
+                external_id
+                for link in candidates
+                if (external_id := text(link.get("external_etc_batch_id")))
+            }
+        )
+        if not candidates or len(external_ids) != len(candidates):
+            return {"valid": False, "issues": [{"code": "invalid_candidate_set"}]}
+
+        self._connection.fetch_all(
+            """
+            select pg_advisory_xact_lock(
+                hashtextextended('workbench_etc_batch_owner:' || item.external_batch_id, 0)
+            )
+            from unnest(%s::text[]) item(external_batch_id)
+            order by item.external_batch_id
+            """,
+            (external_ids,),
+        )
+        canonical_rows = self._connection.fetch_all(
+            """
+            select
+                oa.row_id as oa_row_id,
+                batch.business_batch_id,
+                batch.invoice_count,
+                batch.total_amount,
+                coalesce(
+                    nullif(batch.raw_payload->'normalized_payload'->>'external_etc_batch_id', ''),
+                    nullif(batch.raw_payload->'normalized_payload'->>'externalEtcBatchId', ''),
+                    nullif(batch.raw_payload->'normalized_payload'->>'submission_batch_id', ''),
+                    nullif(batch.raw_payload->'normalized_payload'->>'submissionBatchId', ''),
+                    batch.business_batch_id
+                ) as external_etc_batch_id
+            from app.etc_business_batches batch
+            join app.oa_applications oa
+              on oa.normalized_payload->>'etc_batch_id' = coalesce(
+                    nullif(batch.raw_payload->'normalized_payload'->>'external_etc_batch_id', ''),
+                    nullif(batch.raw_payload->'normalized_payload'->>'externalEtcBatchId', ''),
+                    nullif(batch.raw_payload->'normalized_payload'->>'submission_batch_id', ''),
+                    nullif(batch.raw_payload->'normalized_payload'->>'submissionBatchId', ''),
+                    batch.business_batch_id
+                 )
+            where coalesce(
+                    nullif(batch.raw_payload->'normalized_payload'->>'external_etc_batch_id', ''),
+                    nullif(batch.raw_payload->'normalized_payload'->>'externalEtcBatchId', ''),
+                    nullif(batch.raw_payload->'normalized_payload'->>'submission_batch_id', ''),
+                    nullif(batch.raw_payload->'normalized_payload'->>'submissionBatchId', ''),
+                    batch.business_batch_id
+                  ) = any(%s::text[])
+              and batch.status in ('oa_submitted', 'manually_marked_submitted', 'closed')
+              and oa.status <> 'deleted'
+              and """
+            + COMPLETED_WORKFLOW_STATUS_SQL
+            + """
+            order by external_etc_batch_id, batch.business_batch_id, oa.row_id
+            for update of batch, oa
+            """,
+            (external_ids,),
+        )
+        active_rows = self._connection.fetch_all(
+            """
+            select case_id, amount_check, special_metadata
+            from app.workbench_pair_relations
+            where status = 'active'
+              and (
+                    nullif(amount_check->>'external_etc_batch_id', '') = any(%s::text[])
+                 or nullif(amount_check->>'etc_batch_id', '') = any(%s::text[])
+                 or nullif(special_metadata->>'external_etc_batch_id', '') = any(%s::text[])
+                 or nullif(special_metadata->>'etc_batch_id', '') = any(%s::text[])
+                 or nullif(special_metadata->'etc_batch_link'->>'external_etc_batch_id', '') = any(%s::text[])
+                 or nullif(special_metadata->'etc_batch_link'->>'etc_batch_id', '') = any(%s::text[])
+                 or nullif(special_metadata->'historical_etc_business_batch_migration'->>'external_etc_batch_id', '') = any(%s::text[])
+                 or nullif(special_metadata->'historical_etc_business_batch_migration'->>'etc_batch_id', '') = any(%s::text[])
+              )
+            order by case_id
+            for update
+            """,
+            tuple(external_ids for _ in range(8)),
+        )
+
+        rows_by_external: dict[str, list[dict[str, Any]]] = {}
+        for row in canonical_rows:
+            rows_by_external.setdefault(text(row.get("external_etc_batch_id")) or "", []).append(row)
+        owners_by_external: dict[str, set[str]] = {}
+        for relation in active_rows:
+            for external_id in relation_external_etc_batch_ids(dict(relation)):
+                owners_by_external.setdefault(external_id, set()).add(text(relation.get("case_id")) or "")
+
+        issues: list[dict[str, Any]] = []
+        for candidate in candidates:
+            external_id = text(candidate.get("external_etc_batch_id")) or ""
+            matching_rows = rows_by_external.get(external_id, [])
+            batch_owners = {text(row.get("business_batch_id")) or "" for row in matching_rows}
+            exact_rows = [
+                row
+                for row in matching_rows
+                if text(row.get("business_batch_id")) == text(candidate.get("business_batch_id"))
+                and text(row.get("oa_row_id")) == text(candidate.get("oa_row_id"))
+            ]
+            if len(batch_owners) != 1 or len(matching_rows) != 1 or len(exact_rows) != 1:
+                issues.append({"code": "canonical_owner_changed", "external_etc_batch_id": external_id})
+                continue
+            row = exact_rows[0]
+            if (
+                int(row.get("invoice_count") or 0) != int(candidate.get("invoice_count") or 0)
+                or _decimal_value(row.get("total_amount")) != _decimal_value(candidate.get("total_amount"))
+            ):
+                issues.append({"code": "canonical_batch_totals_changed", "external_etc_batch_id": external_id})
+            relation_owners = owners_by_external.get(external_id, set())
+            expected_case_id = text(candidate.get("case_id")) or ""
+            if relation_owners - {expected_case_id}:
+                issues.append(
+                    {
+                        "code": "active_relation_owner_conflict",
+                        "external_etc_batch_id": external_id,
+                        "case_ids": sorted(relation_owners),
+                    }
+                )
+        return {"valid": not issues, "issues": issues}
 
     def _load_historical_targets(self, target_ids: dict[str, set[str]]) -> dict[str, list[dict[str, Any]]]:
         oa_ids = sorted(target_ids["oa"])

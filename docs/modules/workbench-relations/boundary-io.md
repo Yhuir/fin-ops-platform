@@ -25,6 +25,7 @@ Release A 已移除旧 `read_model.workbench_candidate_matches`、`read_model.wo
 | read request | downstream facade | scope keys、row ids、`require_fresh`、source version contract |
 | batch-accounting read request | `BatchAccountingService` via facade/port | 候选 row ids + 明确年份；使用一个批量账务专用 bundle 返回候选 rows、referenced groups、候选/年度 bulk scope proof 和 `submitted_count`，固定查询次数并保留等价 freshness/status；年度聚合只允许命中 batch-accounting partial expression index，不得改变其他页面通用 reader 行为 |
 | OA canonical snapshot changed | OA integration transactional writer | 只允许在提交 OA canonical snapshot 的同一事务中按精确月份标记 `workbench_relation` dirty/outbox；该 target 必须先于同事务的 `oa_pending_payment` consumer target，使 OA worker 对旧 relation fail-closed。它不写 relation fact，也不改变本模块 owner。 |
+| completed ETC OA marker | `app.oa_applications.normalized_payload.etc_batch_id` + submitted `app.etc_business_batches` | 仅允许精确相等且 OA/batch owner 各自唯一；写入前在关系 UoW 内锁定 external batch identity 并重验 OA 状态、批次状态、数量、金额和 active relation owner。禁止金额、名称、OCR 或模糊匹配。 |
 
 ## 输出 I/O
 
@@ -33,6 +34,7 @@ Release A 已移除旧 `read_model.workbench_candidate_matches`、`read_model.wo
 | active relation | Workbench/downstream | deduped aligned `row_ids`/`row_types`，一个 row 只属于一个 active case |
 | history | Audit/withdraw | before/after、actor、event、timestamp、reason、rule/provenance |
 | command result | caller | relation/version/affected rows/months/idempotent replay/outbox ids/barrier targets |
+| ETC relation enrichment | Workbench projection/Audit | `special_metadata.etc_batch_link` 保存 external/business/submission/OA identity、发票数量与金额；一个 external batch 只能有一个 active relation owner。 |
 | dirty/outbox | durable runtime | 同事务 enqueue `workbench_relation`、`workbench` 和明确下游 scope |
 | read distribution | downstream pages | 只有 `linked` / `unlinked`；non-fresh 不能返回为业务空集合 |
 
@@ -53,6 +55,7 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 - 任意 `N:M:K` member set 都合法，只要上游业务规则已证明安全并且成员非空、唯一、typed。
 - 自动扩展既有 active case 必须使用 `target_case_id` 并原子 replace；不得创建重叠的第二条 active relation。
 - 精确 typed member set 的人工撤回历史阻止 deterministic engine 自动重建同一关系。
+- 同轮 deterministic relation 创建/扩展必须在首次保存前合并 ETC metadata；已有 active relation 的补全必须是一次 changed-case save。canonical revalidation 冲突时整批回滚，不允许部分写。
 
 ## Read facade
 
@@ -68,7 +71,7 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 | Domain/command | `workbench_pair_relation_service.py`、`workbench_relation_command_service.py`、`workbench_relation_modes.py` |
 | UoW/repository | `workbench_uow.py`、`workbench_relation_command_repository_adapter.py`、`postgres_repositories/workbench_relation.py` |
 | Read/projection | `workbench_relation_read_facade.py`、`workbench_relation_sql_projection.py`、`workbench_relation_read_model_refresh.py` |
-| Auto formalization | `workbench_free_matching_engine.py`、`workbench_matching_orchestrator.py`、`postgres_repositories/workbench_formal_relation.py` |
+| Auto formalization | `workbench_free_matching_engine.py`、`workbench_matching_orchestrator.py`、`workbench_etc_batch_link.py`、`postgres_repositories/workbench_formal_relation.py` |
 | Tests | `tests/test_workbench_relation_*.py`、`test_workbench_formal_relation_repository.py`、`test_workbench_matching_orchestrator.py` |
 
 ## 禁止路径与删除条件
@@ -78,3 +81,4 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 - 禁止 candidate/decision service/store/table/API、隐藏 fallback 或双写重新进入调用图。
 - 旧 generic `MatchingEngineService` 仅可服务其独立 legacy reconciliation/内部转账备注上下文；它的 result 不得决定 Workbench membership、zone、linked status 或正式关系写入。该隔离由 boundary guards 和 grouping tests 保护。
 - migration/repair 工具必须 dry-run、精确 scope、审计和 rollback manifest，且只能调用正式 command/repository adapter。
+- 已删除 `ExistingEtcBatchLinkService`、`HistoricalEtcBusinessBatchMigrationService` 及其 CLI；禁止恢复这两条 operator-only 平行写链。历史数据补全由同一 matching worker + formal relation UoW 收敛。

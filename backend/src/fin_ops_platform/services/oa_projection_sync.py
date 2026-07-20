@@ -39,6 +39,7 @@ class OAProjectionSyncService:
         search_read_model_refresh_producer: Any | None = None,
         payment_status_repository: Any | None = None,
         pending_payment_source_snapshot_repository: Any | None = None,
+        workbench_matching_dirty_queue: Any | None = None,
     ) -> None:
         if (payment_status_repository is None) != (pending_payment_source_snapshot_repository is None):
             raise ValueError(
@@ -51,6 +52,7 @@ class OAProjectionSyncService:
         self._pending_payment_relation_promoter = pending_payment_relation_promoter
         self._payment_status_repository = payment_status_repository
         self._pending_payment_source_snapshot_repository = pending_payment_source_snapshot_repository
+        self._workbench_matching_dirty_queue = workbench_matching_dirty_queue
         self._search_read_model_refresh_producer = (
             search_read_model_refresh_producer
             or SearchReadModelRefreshProducer(
@@ -412,6 +414,14 @@ class OAProjectionSyncService:
         if not refresh_gateway.can_enqueue():
             return
         refresh_gateway.enqueue_many("workbench", target_scopes, reason="oa_projection_sync")
+        matching_months = [scope for scope in target_scopes if scope != "all"]
+        mark_matching_dirty = getattr(self._workbench_matching_dirty_queue, "mark_dirty_expanded", None)
+        if matching_months and callable(mark_matching_dirty):
+            mark_matching_dirty(
+                matching_months,
+                reason="oa_projection_sync",
+                debounce_seconds=0,
+            )
         self._search_read_model_refresh_producer.enqueue(target_scopes, reason="oa_projection_sync")
         if self._pending_payment_source_snapshot_repository is None:
             refresh_gateway.enqueue_many("oa_pending_payment", target_scopes, reason="oa_projection_sync")

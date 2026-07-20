@@ -53,17 +53,23 @@ class WorkbenchReconciliationDirtyQueue:
         *,
         reason: str,
         source_versions: dict[str, object] | None = None,
+        debounce_seconds: int | None = None,
     ) -> list[str]:
         expanded = sorted({expanded for month in months for expanded in expand_scope_month_window(str(month))})
+        resolved_debounce_seconds = (
+            self._options.dirty_debounce_seconds
+            if debounce_seconds is None
+            else max(0, int(debounce_seconds))
+        )
         if self._repository is not None:
             return self._repository.mark_workbench_matching_dirty_scopes(
                 tenant_id=self._tenant_id,
                 scope_months=expanded,
                 reason=reason,
                 source_versions=source_versions or {},
-                debounce_seconds=self._options.dirty_debounce_seconds,
+                debounce_seconds=resolved_debounce_seconds,
             )
-        available_at = self._now() + timedelta(seconds=self._options.dirty_debounce_seconds)
+        available_at = self._now() + timedelta(seconds=resolved_debounce_seconds)
         for scope_month in expanded:
             entry = self._scopes.get(scope_month)
             if entry is None:
@@ -86,10 +92,17 @@ class WorkbenchReconciliationDirtyQueue:
                     "error_summary": None,
                 }
                 self._scopes[scope_month] = entry
-            entry["status"] = "dirty"
-            entry["available_at"] = max(entry["available_at"], available_at)
-            entry["lease_owner"] = None
-            entry["lease_expires_at"] = None
+            if entry.get("status") == "processing":
+                entry["refresh_requested_while_processing"] = True
+            else:
+                entry["status"] = "dirty"
+                entry["available_at"] = (
+                    min(entry["available_at"], available_at)
+                    if resolved_debounce_seconds == 0
+                    else max(entry["available_at"], available_at)
+                )
+                entry["lease_owner"] = None
+                entry["lease_expires_at"] = None
             if reason and reason not in entry["reasons"]:
                 entry["reasons"].append(reason)
             entry["source_versions"] = {**entry.get("source_versions", {}), **(source_versions or {})}
@@ -209,8 +222,10 @@ class WorkbenchReconciliationDirtyQueue:
         entry = self._require_scope(scope_month)
         _validate_active_lease(entry, worker_id=worker_id, request_id=request_id)
         now = self._now()
-        entry["status"] = "completed"
-        entry["completed_at"] = now
+        refresh_again = bool(entry.pop("refresh_requested_while_processing", False))
+        entry["status"] = "dirty" if refresh_again else "completed"
+        entry["available_at"] = now if refresh_again else entry["available_at"]
+        entry["completed_at"] = None if refresh_again else now
         entry["failed_at"] = None
         entry["source_versions"] = dict(source_versions)
         entry["lease_owner"] = None
@@ -251,6 +266,7 @@ class WorkbenchReconciliationDirtyQueue:
         entry["lease_owner"] = None
         entry["lease_expires_at"] = None
         entry["error_summary"] = error
+        entry.pop("refresh_requested_while_processing", None)
         if entry["attempt_count"] >= self._options.retry_max_attempts:
             entry["status"] = "failed"
         else:

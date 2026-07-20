@@ -16,8 +16,10 @@ from fin_ops_platform.services.postgres_repositories.workbench_relation_audit im
     workbench_relation_edge_equality_issues,
 )
 from fin_ops_platform.services.postgres_repositories.workbench_projection_audit import (
+    workbench_etc_relation_integrity_issues,
     workbench_projection_integrity_issues,
 )
+from fin_ops_platform.services.workbench_etc_batch_link import relation_external_etc_batch_id
 
 
 @dataclass(frozen=True)
@@ -62,7 +64,15 @@ def _audit_workbench_relation_display_snapshot(
         tenant_id=tenant_id,
         limit=example_limit + 1,
     )
+    audit_issues.extend(
+        workbench_etc_relation_integrity_issues(
+            connection,
+            tenant_id=tenant_id,
+            limit=example_limit + 1,
+        )
+    )
     audit_issues.extend(_dirty_scope_issues(connection, tenant_id=tenant_id, limit=example_limit + 1))
+    audit_issues.extend(_matching_dirty_scope_issues(connection, tenant_id=tenant_id, limit=example_limit + 1))
     audit_issues.extend(_outbox_issues(connection, tenant_id=tenant_id, limit=example_limit + 1))
     evaluation = evaluate_audit_issues(audit_issues, sample_limit=example_limit)
     error_count = sum(1 for issue in audit_issues if issue.severity == "error")
@@ -133,6 +143,8 @@ def _audit_workbench_relation_display_snapshot(
                 "query_composed_relation_case_ownership",
                 "relation_member_completeness",
                 "durable_queue_and_freshness_gate",
+                "exact_etc_batch_relation_owner",
+                "unique_etc_batch_relation_owner",
             ],
             "external_source_boundary": "bank, OA, invoice, and ETC completeness before App registration",
             "pass_condition": (
@@ -261,6 +273,32 @@ def _dirty_scope_issues(connection: Any, *, tenant_id: str, limit: int) -> list[
             code="read_model_scope_not_fresh",
             message="关联台证明依赖的 read model scope 尚未收敛。",
             subject_id=text(row.get("scope_type")) or "",
+            scope_key=text(row.get("scope_key")) or "",
+            details={"status": row.get("status"), "last_error": row.get("last_error")},
+        )
+        for row in rows
+    ]
+
+
+def _matching_dirty_scope_issues(connection: Any, *, tenant_id: str, limit: int) -> list[AuditIssue]:
+    rows = connection.fetch_all(
+        """
+        /* check: workbench_matching_dirty_scope */
+        select to_char(scope_month, 'YYYY-MM') as scope_key, status, last_error
+        from job.workbench_matching_dirty_scopes
+        where tenant_id = %s
+          and status in ('dirty', 'processing', 'retry', 'failed')
+        order by scope_month
+        limit %s
+        """,
+        (tenant_id, limit),
+    )
+    return [
+        AuditIssue(
+            severity="error",
+            code="workbench_matching_scope_not_converged",
+            message="关联台确定性配对 scope 尚未收敛。",
+            subject_id="workbench_matching",
             scope_key=text(row.get("scope_key")) or "",
             details={"status": row.get("status"), "last_error": row.get("last_error")},
         )
@@ -409,21 +447,9 @@ def _normalize_relation(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _external_etc_batch_id(amount_check: dict[str, Any], special_metadata: dict[str, Any]) -> str:
-    for value in (
-        amount_check.get("external_etc_batch_id"),
-        amount_check.get("etc_batch_id"),
-        special_metadata.get("external_etc_batch_id"),
-        special_metadata.get("etc_batch_id"),
-    ):
-        if resolved := text(value):
-            return resolved
-    for key in ("etc_batch_link", "historical_etc_business_batch_migration"):
-        nested = special_metadata.get(key)
-        if not isinstance(nested, dict):
-            continue
-        if resolved := text(nested.get("external_etc_batch_id") or nested.get("etc_batch_id")):
-            return resolved
-    return ""
+    return relation_external_etc_batch_id(
+        {"amount_check": amount_check, "special_metadata": special_metadata}
+    )
 
 
 def _rows_by_scope_and_row_id(rows: list[dict[str, Any]]) -> dict[tuple[str, str], list[dict[str, Any]]]:

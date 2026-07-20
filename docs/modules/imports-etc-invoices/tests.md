@@ -58,7 +58,7 @@
 | 类别 | 是否适用 | 当前测试入口 | 说明 |
 | --- | --- | --- | --- |
 | 1. Business core unit tests | 适用 | `tests/test_etc_reconciliation_service.py`、`tests/test_etc_backend.py` | 覆盖 task 状态、zip filter/matching、金额组合、重复发票、business batch 状态、manual OA status、delete/release。 |
-| 2. Service-layer tests | 适用 | `tests/test_etc_backend.py`、`tests/test_import_job_queue.py`、`tests/test_etc_reconciliation_import_cleanup_service.py`、`tests/test_etc_business_batch_delete_service.py`、`tests/test_cleanup_orphan_etc_reconciliation_tasks_tool.py`、`tests/test_historical_etc_business_batch_migration_service.py` | 覆盖 ETC service、import job processor、reconciliation task cleanup、business batch delete、migration/linking/idempotency。 |
+| 2. Service-layer tests | 适用 | `tests/test_etc_backend.py`、`tests/test_import_job_queue.py`、`tests/test_etc_reconciliation_import_cleanup_service.py`、`tests/test_etc_business_batch_delete_service.py`、`tests/test_cleanup_orphan_etc_reconciliation_tasks_tool.py` | 覆盖 ETC service、import job processor、reconciliation task cleanup、business batch delete、deterministic ETC relation enrichment/idempotency。 |
 | 3. API contract tests | 适用 | `tests/test_etc_backend.py`、`web/src/test/EtcApi.test.ts` | 覆盖 `/api/etc/import/*`、reconciliation task API、business batch API、structured errors、background job payload。 |
 | 4. Read model/cache/background job tests | 适用 | `tests/test_import_job_queue.py`、`tests/test_derived_data_lifecycle_service.py`、`tests/test_runtime_worker_registry.py`、`tests/test_app_status_overview_service.py`、`tests/test_tax_offset_api.py`、`tests/test_write_operation_slo_audit.py`、`tests/test_platform_runtime_boundary_guards.py` | 覆盖 mutation-sensitive existing link、精确 scope、`etc_import_confirmed`/`etc_business_batch_status_changed` lifecycle、Tax/Workbench 与 Workbench→Cost 顺序刷新、App Status job/readiness；write-operation profile 对 Cost 明确匹配 `workbench_shard_published`。 |
 | 5. Frontend component and interaction tests | 适用 | `web/src/test/ImportCenterPage.test.tsx`、`web/src/test/EtcApi.test.ts`、`web/src/test/EtcTicketManagementPage.test.tsx`、`web/src/test/AppStatusIndicator.test.tsx`、`web/e2e/imports-etc-invoices-flow.spec.ts`、`web/e2e/permissions-role-matrix.spec.ts` | 覆盖 ETC standalone route、preview/confirm/stale/unmount、API mapper、business batch UI、global job status，以及真实浏览器 ready task/zip/confirm job、preview stale、stale task preview、confirm failure、ETC 票据/税金/成本下游 fresh read model 交互、成功后无导入失败/后台导入失败/read model 失败可见残留和 read-only 导入门禁。 |
@@ -116,9 +116,6 @@ PYTHONPATH=backend/src python3 -m unittest \
   tests.test_app_status_overview_service \
   tests.test_write_operation_slo_audit \
   tests.test_cleanup_orphan_etc_reconciliation_tasks_tool \
-  tests.test_historical_etc_business_batch_migration_service \
-  tests.test_link_existing_etc_batches_tool \
-  tests.test_migrate_historical_etc_business_batches_tool \
   tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_etc_batch_oa_api_tags_wait_only_for_bank \
   tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_etc_batch_oa_bank_amount_mismatch_keeps_mismatch_tag_without_invoice \
   tests.test_workbench_v2_api.WorkbenchV2ApiTests.test_historical_etc_relation_tags_oa_and_injects_summary_row \

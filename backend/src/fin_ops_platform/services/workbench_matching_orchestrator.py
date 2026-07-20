@@ -26,6 +26,7 @@ AUTO_RELATION_ACTOR = "system:workbench-deterministic-relation"
 @dataclass(frozen=True, slots=True)
 class WorkbenchFormalRelationCommand:
     plans: tuple[FormalRelationPlan, ...]
+    etc_batch_links: tuple[dict[str, Any], ...]
     batch_hash: str
     scope_keys: tuple[str, ...]
     idempotency_key: str
@@ -43,16 +44,31 @@ class WorkbenchFormalRelationCommand:
         *,
         batch_hash: str,
         request_id: str,
+        etc_batch_links: tuple[dict[str, Any], ...] = (),
     ) -> "WorkbenchFormalRelationCommand":
         plans = tuple(sorted(result.plans, key=lambda plan: plan.relation_fingerprint))
-        if not plans:
-            raise ValueError("A formal relation command requires at least one plan.")
-        scope_keys = tuple(sorted({scope for plan in plans for scope in plan.scope_keys}))
+        links = tuple(sorted((deepcopy(link) for link in etc_batch_links), key=lambda link: str(link["case_id"])))
+        if not plans and not links:
+            raise ValueError("A formal relation command requires at least one plan or ETC batch link.")
+        scope_keys = tuple(
+            sorted(
+                {
+                    *{scope for plan in plans for scope in plan.scope_keys},
+                    *{
+                        str(scope).strip()
+                        for link in links
+                        for scope in list(link.get("scope_keys") or [])
+                        if str(scope).strip()
+                    },
+                }
+            )
+        )
         fingerprints = [plan.relation_fingerprint for plan in plans]
         fingerprint_payload = {
             "batch_hash": batch_hash,
             "relation_fingerprints": fingerprints,
             "rule_versions": sorted({plan.rule_version for plan in plans}),
+            "etc_batch_links": links,
         }
         request_fingerprint = sha256(
             json.dumps(fingerprint_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -74,9 +90,11 @@ class WorkbenchFormalRelationCommand:
             "batch_hash": batch_hash,
             "relation_fingerprints": fingerprints,
             "request_id": str(request_id or "").strip(),
+            "etc_batch_ids": [str(link["external_etc_batch_id"]) for link in links],
         }
         return cls(
             plans=plans,
+            etc_batch_links=links,
             batch_hash=batch_hash,
             scope_keys=scope_keys,
             idempotency_key=f"workbench:formal-relation-batch:{request_fingerprint}",
@@ -87,8 +105,9 @@ class WorkbenchFormalRelationCommand:
                 "origin": "system_deterministic",
                 "downstream_scope_types": sorted(downstream),
                 "row_ids": sorted({row_id for plan in plans for row_id in plan.row_ids}),
-                "case_ids": sorted({plan.case_id for plan in plans}),
+                "case_ids": sorted({plan.case_id for plan in plans} | {str(link["case_id"]) for link in links}),
             },
+            action_name="confirm_link" if plans else "enrich_etc_relation",
         )
 
 
@@ -129,6 +148,11 @@ class WorkbenchMatchingOrchestrator:
         source_versions = self._source_versions()
         batch = self._fact_repository.load_batch(scope_months, source_versions=source_versions)
         match_result = self._matcher.plan_relations(batch, self._search_limits)
+        etc_batch_links, ambiguous_etc_batch_link_count, unowned_etc_batch_link_count = self._resolve_etc_batch_links(
+            batch,
+            match_result,
+            self._fact_repository.load_etc_batch_link_candidates(scope_months),
+        )
         summary: dict[str, Any] = {
             "request_id": normalized_request_id,
             "reason": normalized_reason,
@@ -144,28 +168,69 @@ class WorkbenchMatchingOrchestrator:
             "unsafe_component_count": match_result.unsafe_component_count,
             "blocked_reason_counts": dict(match_result.blocked_reason_counts),
             "relation_ids": [],
+            "enriched_relation_count": 0,
+            "ambiguous_etc_batch_link_count": ambiguous_etc_batch_link_count,
+            "unowned_etc_batch_link_count": unowned_etc_batch_link_count,
             "outbox_event_ids": [],
             "idempotent_replay": False,
             "duration_ms": 0,
         }
-        if match_result.plans:
+        if match_result.plans or etc_batch_links:
             command = WorkbenchFormalRelationCommand.from_match_result(
                 match_result,
                 batch_hash=batch.batch_hash,
                 request_id=normalized_request_id,
+                etc_batch_links=etc_batch_links,
             )
 
             def apply_formal_relations(context: Any) -> dict[str, Any]:
                 service = self._relation_command_factory(context)
-                return service.confirm_formal_relation_plans(
+                plan_case_ids = {str(plan.case_id) for plan in command.plans}
+                plan_links = [
+                    link for link in command.etc_batch_links if str(link["case_id"]) in plan_case_ids
+                ]
+                existing_links = [
+                    link for link in command.etc_batch_links if str(link["case_id"]) not in plan_case_ids
+                ]
+                formal_result = service.confirm_formal_relation_plans(
                     list(command.plans),
                     actor_id=AUTO_RELATION_ACTOR,
+                    etc_batch_links=plan_links,
                 )
+                enrichment_result = service.enrich_etc_batch_links(
+                    existing_links, actor_id=AUTO_RELATION_ACTOR
+                )
+                return {
+                    "status": "updated",
+                    "relations": [
+                        *list(formal_result.get("relations") or []),
+                        *list(enrichment_result.get("relations") or []),
+                    ],
+                    "histories": [
+                        *list(formal_result.get("histories") or []),
+                        *list(enrichment_result.get("histories") or []),
+                    ],
+                    "changed_case_ids": sorted(
+                        {
+                            *list(formal_result.get("changed_case_ids") or []),
+                            *list(enrichment_result.get("changed_case_ids") or []),
+                        }
+                    ),
+                    "affected_months": sorted(
+                        {
+                            *list(formal_result.get("affected_months") or []),
+                            *list(enrichment_result.get("affected_months") or []),
+                        }
+                    ),
+                    "enriched_relation_count": int(formal_result.get("enriched_relation_count") or 0)
+                    + int(enrichment_result.get("updated_count") or 0),
+                }
 
             write_result = self._relation_uow.run(command, apply_formal_relations)
             relations = [item for item in list(write_result.get("relations") or []) if isinstance(item, dict)]
             summary["created_relation_count"] = sum(1 for plan in command.plans if not plan.target_case_id)
             summary["extended_relation_count"] = sum(1 for plan in command.plans if plan.target_case_id)
+            summary["enriched_relation_count"] = int(write_result.get("enriched_relation_count") or 0)
             summary["relation_ids"] = [
                 str(relation.get("case_id") or "")
                 for relation in relations
@@ -189,9 +254,92 @@ class WorkbenchMatchingOrchestrator:
         return summary
 
     @staticmethod
+    def _resolve_etc_batch_links(
+        batch: Any,
+        match_result: FormalRelationMatchResult,
+        raw_candidates: list[dict[str, Any]],
+    ) -> tuple[tuple[dict[str, Any], ...], int, int]:
+        facts_by_row_id = {
+            fact.row_id: fact
+            for fact in batch.facts
+            if fact.row_type == "oa"
+        }
+        active_by_member = {
+            member_key: anchor.case_id
+            for anchor in batch.active_relations
+            for member_key in anchor.member_keys
+        }
+        plan_by_member = {
+            member_key: plan.case_id
+            for plan in match_result.plans
+            for member_key in plan.member_keys
+        }
+        candidates_by_external: dict[str, list[dict[str, Any]]] = {}
+        for raw in list(raw_candidates or []):
+            external_batch_id = str(raw.get("external_etc_batch_id") or "").strip()
+            if external_batch_id:
+                candidates_by_external.setdefault(external_batch_id, []).append(raw)
+        ambiguous_external_ids = {
+            external_batch_id
+            for external_batch_id, candidates in candidates_by_external.items()
+            if len(candidates) != 1
+            or int(candidates[0].get("external_batch_owner_count") or 1) != 1
+        }
+        resolved: list[dict[str, Any]] = []
+        unowned_count = 0
+        for external_batch_id, candidates in candidates_by_external.items():
+            if external_batch_id in ambiguous_external_ids:
+                continue
+            raw = candidates[0]
+            oa_row_id = str(raw.get("oa_row_id") or "").strip()
+            business_batch_id = str(raw.get("business_batch_id") or "").strip()
+            fact = facts_by_row_id.get(oa_row_id)
+            if fact is None or not external_batch_id or not business_batch_id:
+                continue
+            case_id = active_by_member.get(fact.member_key) or plan_by_member.get(fact.member_key)
+            if not case_id:
+                unowned_count += 1
+                continue
+            resolved.append(
+                {
+                    "case_id": case_id,
+                    "oa_row_id": oa_row_id,
+                    "business_batch_id": business_batch_id,
+                    "external_etc_batch_id": external_batch_id,
+                    "submission_batch_id": str(raw.get("submission_batch_id") or "").strip(),
+                    "invoice_count": int(raw.get("invoice_count") or 0),
+                    "total_amount": str(raw.get("total_amount") or "0"),
+                    "scope_keys": sorted(
+                        {
+                            str(scope).strip()
+                            for scope in list(raw.get("scope_keys") or [])
+                            if str(scope).strip()
+                        }
+                    ),
+                }
+            )
+
+        by_external: dict[str, list[dict[str, Any]]] = {}
+        for item in resolved:
+            by_external.setdefault(str(item["external_etc_batch_id"]), []).append(item)
+        unique_external = [items[0] for items in by_external.values() if len(items) == 1]
+        by_case: dict[str, list[dict[str, Any]]] = {}
+        for item in unique_external:
+            by_case.setdefault(str(item["case_id"]), []).append(item)
+        links = tuple(
+            sorted(
+                (items[0] for items in by_case.values() if len(items) == 1),
+                key=lambda item: str(item["case_id"]),
+            )
+        )
+        ambiguous_count = len(ambiguous_external_ids) + len(resolved) - len(links)
+        return links, ambiguous_count, unowned_count
+
+    @staticmethod
     def _default_relation_command(context: Any) -> WorkbenchRelationCommandService:
         return WorkbenchRelationCommandService(
             relation_repository=context.pair_relations,
+            etc_batch_link_repository=context.etc_batch_links,
             idempotency_store=context.idempotency_store,
             require_fresh_relations=False,
         )

@@ -75,6 +75,9 @@ class WorkbenchMatchingDirtyScopeWorker:
             "planned_relation_count": 0,
             "created_relation_count": 0,
             "extended_relation_count": 0,
+            "enriched_relation_count": 0,
+            "ambiguous_etc_batch_link_count": 0,
+            "unowned_etc_batch_link_count": 0,
             "blocked_count": 0,
         }
         self._record_heartbeat(
@@ -183,6 +186,9 @@ class WorkbenchMatchingDirtyScopeWorker:
                 "planned_relation_count",
                 "created_relation_count",
                 "extended_relation_count",
+                "enriched_relation_count",
+                "ambiguous_etc_batch_link_count",
+                "unowned_etc_batch_link_count",
                 "blocked_count",
             ):
                 summary[count_key] = int(summary.get(count_key) or 0) + int(run_summary.get(count_key) or 0)

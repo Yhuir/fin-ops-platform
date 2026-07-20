@@ -12078,11 +12078,35 @@ class PostgresReadModelRepository:
                     )
                     on conflict (tenant_id, scope_month) do update set
                         reason = excluded.reason,
-                        status = 'dirty',
-                        available_at = greatest(job.workbench_matching_dirty_scopes.available_at, excluded.available_at),
+                        status = case
+                            when job.workbench_matching_dirty_scopes.status = 'processing' then 'processing'
+                            else 'dirty'
+                        end,
+                        available_at = case
+                            when job.workbench_matching_dirty_scopes.status = 'processing'
+                                then job.workbench_matching_dirty_scopes.available_at
+                            when coalesce((excluded.raw_payload->>'expedite')::boolean, false)
+                                then least(job.workbench_matching_dirty_scopes.available_at, excluded.available_at)
+                            else greatest(job.workbench_matching_dirty_scopes.available_at, excluded.available_at)
+                        end,
                         source_versions = job.workbench_matching_dirty_scopes.source_versions || excluded.source_versions,
-                        lease_owner = null,
-                        lease_expires_at = null,
+                        raw_payload = coalesce(job.workbench_matching_dirty_scopes.raw_payload, '{}'::jsonb)
+                            || excluded.raw_payload
+                            || case
+                                when job.workbench_matching_dirty_scopes.status = 'processing'
+                                    then '{"refresh_requested_while_processing":true}'::jsonb
+                                else '{}'::jsonb
+                               end,
+                        lease_owner = case
+                            when job.workbench_matching_dirty_scopes.status = 'processing'
+                                then job.workbench_matching_dirty_scopes.lease_owner
+                            else null
+                        end,
+                        lease_expires_at = case
+                            when job.workbench_matching_dirty_scopes.status = 'processing'
+                                then job.workbench_matching_dirty_scopes.lease_expires_at
+                            else null
+                        end,
                         updated_at = now()
                     """,
                     (
@@ -12091,7 +12115,13 @@ class PostgresReadModelRepository:
                         text(reason),
                         max(0, int_value(debounce_seconds, 60)),
                         jsonb(source_versions),
-                        jsonb({"reason": reason, "source_versions": source_versions}),
+                        jsonb(
+                            {
+                                "reason": reason,
+                                "source_versions": source_versions,
+                                "expedite": max(0, int_value(debounce_seconds, 60)) == 0,
+                            }
+                        ),
                     ),
                 )
 
@@ -12134,6 +12164,7 @@ class PostgresReadModelRepository:
                     source_versions = coalesce(dirty.source_versions, '{}'::jsonb) || %s,
                     lease_owner = null,
                     lease_expires_at = null,
+                    raw_payload = coalesce(raw_payload, '{}'::jsonb) - 'refresh_requested_while_processing',
                     updated_at = now()
                 from stale
                 where dirty.id = stale.id
@@ -12255,13 +12286,27 @@ class PostgresReadModelRepository:
             row = connection.fetch_one(
                 """
                 update job.workbench_matching_dirty_scopes
-                set status = 'completed',
-                    completed_at = now(),
+                set status = case
+                        when coalesce((raw_payload->>'refresh_requested_while_processing')::boolean, false)
+                            then 'dirty'
+                        else 'completed'
+                    end,
+                    available_at = case
+                        when coalesce((raw_payload->>'refresh_requested_while_processing')::boolean, false)
+                            then now()
+                        else available_at
+                    end,
+                    completed_at = case
+                        when coalesce((raw_payload->>'refresh_requested_while_processing')::boolean, false)
+                            then null
+                        else now()
+                    end,
                     failed_at = null,
                     duration_ms = greatest(0, floor(extract(epoch from (now() - started_at)) * 1000)::integer),
                     source_versions = %s,
                     lease_owner = null,
                     lease_expires_at = null,
+                    raw_payload = coalesce(raw_payload, '{}'::jsonb) - 'refresh_requested_while_processing',
                     updated_at = now()
                 where tenant_id = %s
                   and scope_month = %s::date
@@ -12339,6 +12384,7 @@ class PostgresReadModelRepository:
                     )::interval,
                     lease_owner = null,
                     lease_expires_at = null,
+                    raw_payload = coalesce(raw_payload, '{{}}'::jsonb) - 'refresh_requested_while_processing',
                     updated_at = now()
                 where tenant_id = %s
                   and scope_month = %s::date

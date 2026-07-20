@@ -38,11 +38,8 @@
 - `backend/src/fin_ops_platform/services/workbench_relation_command_service.py`
 - `backend/src/fin_ops_platform/services/workbench_relation_read_facade.py`
 - `backend/src/fin_ops_platform/services/historical_etc_repair_service.py`
-- `backend/src/fin_ops_platform/services/historical_etc_business_batch_migration_service.py`
-- `backend/src/fin_ops_platform/services/existing_etc_batch_link_service.py`
 - `backend/src/fin_ops_platform/services/derived_data_lifecycle_service.py`
 - `backend/src/fin_ops_platform/tools/cleanup_orphan_etc_reconciliation_tasks.py`
-- `backend/src/fin_ops_platform/tools/migrate_historical_etc_business_batches.py`
 
 ## 当前边界
 
@@ -65,7 +62,7 @@
 - ETC 发票本质上是进项发票；统一发票池只保留 `app.invoices` 内的正式进/销项发票。ETC 专用导入保存 ZIP 内命中本批次的 PDF/XML 和 ETC metadata，用于 OA 附件和 summary 展示；不得因为 ETC ZIP 中出现一张票就在统一发票池创建新发票。
 - 业务批次任意阶段允许本地删除/reset；删除不得撤销真实 OA 草稿或 OA 流程，已提交批次删除必须释放 ETC 发票合并关系，并取消包含 summary row 的 active relation。
 - 已提交业务批次删除/reset 在修改本地批次前必须先通过 Workbench relation command boundary 的 canonical write safety；权限/session、DB/目标写模型不可用、owner 状态或 relation version/idempotency/row occupation 冲突时 fail fast，不得乐观删除本地批次或 relation。普通 `workbench_relation` distribution non-fresh 只作为读侧诊断，不能作为默认写阻断条件。
-- ETC 历史 repair、historical business batch migration 和 existing batch link 的生产写入路径必须通过 `WorkbenchRelationCommandService` 写入或更新 relation；缺少 command service 时必须 fail fast，不得落回 direct pair relation mutation。domain event 只作为页面刷新提示，不是 relation 事实源。
+- ETC 历史 repair 只保留 `HistoricalEtcRepairService` 的显式运维入口。旧 historical business batch migration 与 existing batch link service/tool 已删除；常规链路由 Workbench matching worker 根据 completed OA 的精确 `etc_batch_id` 在正式关系 UoW 内补全 `etc_batch_link`，不得恢复 operator-only 平行写链。domain event 只作为页面刷新提示，不是 relation 事实源。
 - source file 上传必须先落对象存储，再追加 source file 元数据；对象存储失败不得留下半写入 source file、版本号或审计事件。
 - source file 元数据、解析结果和派生明细必须共享同一个 `file_id` 生命周期；慢 OCR 的解析提交与删除必须互斥，源文件已删除时不得再提交解析结果。历史孤儿解析结果必须通过既有 source file 删除边界清理，不得由前端过滤掩盖。
 - 信用卡 PDF 上传先解析可选文字；只有未识别到交易行时才回退到按页渲染的布局 OCR。OCR 成功结果必须保留人工核对警告，不得把图像识别结果冒充为无风险的文本解析。

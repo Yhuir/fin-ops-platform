@@ -27,6 +27,7 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import (
 )
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.workbench_exception_case_service import ACTIVE_CASE_STATUSES
+from fin_ops_platform.services.workbench_etc_batch_link import relation_external_etc_batch_id
 from fin_ops_platform.services.workbench_override_service import WorkbenchOverrideService
 from fin_ops_platform.services.workbench_object_identity_arbitration import WorkbenchObjectIdentityArbitrationService
 from fin_ops_platform.services.workbench_query_service import (
@@ -1423,18 +1424,26 @@ class WorkbenchSqlProjectionBuilder:
     def _active_etc_relation_external_batch_ids(self) -> set[str]:
         rows = self._connection.fetch_all(
             """
-            select distinct amount_check->>'external_etc_batch_id' as external_etc_batch_id
+            select amount_check, special_metadata
             from app.workbench_pair_relations
             where status = 'active'
-              and amount_check ? 'external_etc_batch_id'
-              and nullif(amount_check->>'external_etc_batch_id', '') is not null
+              and (
+                    nullif(amount_check->>'external_etc_batch_id', '') is not null
+                 or nullif(amount_check->>'etc_batch_id', '') is not null
+                 or nullif(special_metadata->>'external_etc_batch_id', '') is not null
+                 or nullif(special_metadata->>'etc_batch_id', '') is not null
+                 or nullif(special_metadata->'etc_batch_link'->>'external_etc_batch_id', '') is not null
+                 or nullif(special_metadata->'etc_batch_link'->>'etc_batch_id', '') is not null
+                 or nullif(special_metadata->'historical_etc_business_batch_migration'->>'external_etc_batch_id', '') is not null
+                 or nullif(special_metadata->'historical_etc_business_batch_migration'->>'etc_batch_id', '') is not null
+              )
             """,
             (),
         )
         return {
-            str(row.get("external_etc_batch_id") or "").strip()
+            external_batch_id
             for row in rows
-            if str(row.get("external_etc_batch_id") or "").strip()
+            if (external_batch_id := relation_external_etc_batch_id(row))
         }
 
     @staticmethod
@@ -1545,27 +1554,7 @@ class WorkbenchSqlProjectionBuilder:
 
     @staticmethod
     def _relation_external_etc_batch_id(relation: dict[str, Any]) -> str:
-        amount_check = relation.get("amount_check")
-        if isinstance(amount_check, dict):
-            value = str(amount_check.get("external_etc_batch_id") or amount_check.get("etc_batch_id") or "").strip()
-            if value:
-                return value
-
-        special_metadata = relation.get("special_metadata")
-        if not isinstance(special_metadata, dict):
-            return ""
-        for key in ("external_etc_batch_id", "etc_batch_id"):
-            value = str(special_metadata.get(key) or "").strip()
-            if value:
-                return value
-        for nested_key in ("etc_batch_link", "historical_etc_business_batch_migration"):
-            nested = special_metadata.get(nested_key)
-            if not isinstance(nested, dict):
-                continue
-            value = str(nested.get("external_etc_batch_id") or nested.get("etc_batch_id") or "").strip()
-            if value:
-                return value
-        return ""
+        return relation_external_etc_batch_id(relation)
 
     @staticmethod
     def _etc_invoice_summary_line(row: dict[str, Any]) -> str:

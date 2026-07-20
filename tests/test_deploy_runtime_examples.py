@@ -128,6 +128,8 @@ class DeployRuntimeExampleTests(unittest.TestCase):
         self.assertIn('source_poll="$(grep -oE -- "--poll-interval-seconds [0-9.]+"', helper)
         self.assertIn("--poll-interval-seconds (2|0\\\\.25|0\\\\.1|0\\\\.05)([^0-9.]|$)", helper)
         self.assertIn("--poll-interval-seconds ${source_poll}", helper)
+        self.assertIn('[ "$worker" = "workbench-matching" ]', helper)
+        self.assertIn("--poll-interval-seconds 5([^0-9.]|$)", helper)
         self.assertIn("--poll-interval-seconds 0.01", workbench_env)
 
     def test_runtime_worker_env_install_removes_retired_oa_handler_from_shared_invoice_worker(self) -> None:
