@@ -589,6 +589,9 @@ class RuntimeMonitoringRepository:
         self,
         targets: list[dict[str, str]] | None = None,
     ) -> dict[str, dict[str, Any]]:
+        if targets is not None:
+            rows = self._operation_barrier_outbox_status_rows(targets)
+            return self._group_app_status_outbox_rows(rows)
         target_filter_sql, target_filter_params = _operation_barrier_scope_filter_sql(
             targets,
             read_model_key_sql=None,
@@ -679,6 +682,163 @@ class RuntimeMonitoringRepository:
             """,
             target_filter_params,
         )
+        return self._group_app_status_outbox_rows(rows)
+
+    def _operation_barrier_outbox_status_rows(
+        self,
+        targets: list[dict[str, str]],
+    ) -> list[dict[str, Any]]:
+        """Load only the latest current-effective outbox fact per barrier scope."""
+        target_event_types = [target["refresh_event_type"] for target in targets]
+        target_scope_types = [target["scope_type"] for target in targets]
+        target_scope_keys = [target["scope_key"] for target in targets]
+        command_only_parent = _command_only_parent_event_sql(
+            event_type_sql="e.event_type",
+            scope_key_sql="e.scope_key",
+        )
+        return self._connection.fetch_all(
+            f"""
+            with barrier_target(target_event_type, target_scope_type, target_scope_key) as (
+              select *
+              from unnest(%s::text[], %s::text[], %s::text[])
+            ),
+            ranked_events as (
+              select
+                event.id,
+                event.tenant_id,
+                event.event_type,
+                coalesce(
+                  event.scope_type,
+                  event.raw_payload->>'scope_type',
+                  event.payload->>'scope_type',
+                  event.aggregate_type,
+                  ''
+                ) as scope_type,
+                coalesce(
+                  event.scope_key,
+                  event.raw_payload->>'scope_key',
+                  event.payload->>'scope_key',
+                  event.aggregate_id,
+                  ''
+                ) as scope_key,
+                event.status,
+                event.publish_status,
+                event.last_error,
+                event.publish_last_error,
+                event.updated_at,
+                row_number() over (
+                  partition by
+                    event.tenant_id,
+                    event.event_type,
+                    coalesce(
+                      event.scope_type,
+                      event.raw_payload->>'scope_type',
+                      event.payload->>'scope_type',
+                      event.aggregate_type,
+                      ''
+                    ),
+                    coalesce(
+                      event.scope_key,
+                      event.raw_payload->>'scope_key',
+                      event.payload->>'scope_key',
+                      event.aggregate_id,
+                      ''
+                    )
+                  order by event.created_at desc, event.id desc
+                ) as recency_rank
+              from barrier_target target
+              join job.outbox_events event
+                on event.tenant_id = 'default'
+               and event.event_type = target.target_event_type
+               and coalesce(
+                     event.scope_type,
+                     event.raw_payload->>'scope_type',
+                     event.payload->>'scope_type',
+                     event.aggregate_type,
+                     ''
+                   ) = target.target_scope_type
+               and (
+                    coalesce(
+                      event.scope_key,
+                      event.raw_payload->>'scope_key',
+                      event.payload->>'scope_key',
+                      event.aggregate_id,
+                      ''
+                    ) = target.target_scope_key
+                    or (
+                      target.target_scope_key <> 'all'
+                      and coalesce(
+                            event.scope_key,
+                            event.raw_payload->>'scope_key',
+                            event.payload->>'scope_key',
+                            event.aggregate_id,
+                            ''
+                          ) = 'all'
+                    )
+               )
+              where event.status in (
+                'pending',
+                'processing',
+                'publishing',
+                'publish_failed',
+                'failed',
+                'dead_lettered',
+                'done'
+              )
+            )
+            select
+              e.event_type,
+              e.scope_type,
+              e.scope_key,
+              case
+                when e.status in ('failed', 'dead_lettered') then e.status
+                when e.publish_status = 'failed' then 'publish_failed'
+                when e.publish_status = 'publishing' then 'publishing'
+                else e.status
+              end as status,
+              1::bigint as count,
+              coalesce(nullif(e.last_error, ''), e.publish_last_error) as last_error,
+              e.updated_at::text as updated_at,
+              false as covered_by_later_event,
+              false as covered_by_later_done,
+              false as covered_by_later_readiness,
+              false as covered_by_active_dirty_scope
+            from ranked_events e
+            where e.recency_rank = 1
+              and (
+                e.status in ('pending', 'processing', 'publishing', 'publish_failed', 'failed', 'dead_lettered')
+                or (e.status <> 'done' and e.publish_status in ('publishing', 'failed'))
+              )
+              and (
+                {command_only_parent}
+                or not exists (
+                  select 1
+                  from read_model.app_status_readiness readiness
+                  where readiness.tenant_id = e.tenant_id
+                    and coalesce(readiness.scope_type, '') = e.scope_type
+                    and coalesce(readiness.scope_key, '') = e.scope_key
+                    and readiness.status = 'fresh'
+                    and readiness.updated_at > e.updated_at
+                )
+              )
+              and not (
+                e.status in ('failed', 'dead_lettered')
+                and exists (
+                  select 1
+                  from job.read_model_dirty_scopes dirty
+                  where dirty.tenant_id = e.tenant_id
+                    and coalesce(dirty.scope_type, '') = e.scope_type
+                    and coalesce(dirty.scope_key, '') = e.scope_key
+                    and dirty.status in ('pending', 'processing')
+                    and dirty.updated_at >= e.updated_at
+                )
+              )
+            """,
+            (target_event_types, target_scope_types, target_scope_keys),
+        )
+
+    @staticmethod
+    def _group_app_status_outbox_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         grouped: dict[str, dict[str, Any]] = {}
         scope_indexes: dict[str, dict[tuple[str, str], dict[str, Any]]] = {}
         for row in rows:

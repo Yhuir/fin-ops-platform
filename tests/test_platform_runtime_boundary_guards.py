@@ -4747,6 +4747,18 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("runtime monitoring does not expose the target-scoped barrier query")
         if "_app_status_read_model_statuses(normalized_targets)" not in monitoring_source:
             violations.append("target-scoped barrier query does not bound read-model status I/O")
+        if "_operation_barrier_outbox_status_rows(targets)" not in monitoring_source:
+            violations.append("target-scoped barrier does not use the bounded latest-event outbox query")
+        target_outbox_source = _function_source(
+            _parse(SERVICES_ROOT / "runtime_monitoring.py"),
+            monitoring_source,
+            "_operation_barrier_outbox_status_rows",
+        )
+        for required in ("row_number() over", "event.created_at desc, event.id desc", "event.publish_status"):
+            if required not in target_outbox_source:
+                violations.append(f"target-scoped barrier outbox query is missing {required}")
+        if "_current_effective_outbox_attention_predicate_sql" in target_outbox_source:
+            violations.append("target-scoped barrier still rescans full outbox history")
 
         self.assertEqual(violations, [])
 

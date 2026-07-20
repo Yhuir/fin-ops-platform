@@ -584,7 +584,7 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
                     ]
                 if "from job.read_model_dirty_scopes dirty" in normalized:
                     return []
-                if "from job.outbox_events e" in normalized:
+                if "join job.outbox_events event" in normalized:
                     return []
                 if "from job.runtime_worker_heartbeats" in normalized:
                     return [
@@ -620,15 +620,26 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertEqual(snapshot["read_model_statuses"]["turnover_ledger"]["status"], "fresh")
         self.assertEqual(snapshot["worker_statuses"]["turnover-ledger"]["status"], "ready")
         self.assertEqual(set(snapshot["read_model_statuses"]), {"turnover_ledger"})
-        scoped_calls = [call for call in connection.calls if "unnest(%s::text[]" in call[0]]
-        self.assertEqual(len(scoped_calls), 3)
-        for sql, params in scoped_calls:
+        generic_scoped_calls = [
+            call
+            for call in connection.calls
+            if "as barrier_target(target_key, target_scope_type, target_scope_key)" in " ".join(call[0].split())
+        ]
+        self.assertEqual(len(generic_scoped_calls), 2)
+        for sql, params in generic_scoped_calls:
             self.assertIn(
                 "as barrier_target(target_key, target_scope_type, target_scope_key)",
                 " ".join(sql.split()),
             )
             self.assertEqual(params[1], ["turnover_ledger"])
             self.assertEqual(params[2], ["2026-02"])
+        outbox_call = next(call for call in connection.calls if "join job.outbox_events event" in call[0])
+        self.assertIn("row_number() over", outbox_call[0])
+        self.assertIn("event.created_at desc, event.id desc", outbox_call[0])
+        self.assertNotIn("_current_effective_outbox_attention", outbox_call[0])
+        self.assertEqual(outbox_call[1][0], ["turnover_ledger.read_model.refresh"])
+        self.assertEqual(outbox_call[1][1], ["turnover_ledger"])
+        self.assertEqual(outbox_call[1][2], ["2026-02"])
         worker_call = next(call for call in connection.calls if "from job.runtime_worker_heartbeats" in call[0])
         self.assertEqual(worker_call[1][0], ["turnover-ledger"])
         self.assertEqual(worker_call[1][1], ["turnover-ledger-read-model"])

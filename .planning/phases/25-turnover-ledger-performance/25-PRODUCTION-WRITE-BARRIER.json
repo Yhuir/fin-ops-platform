@@ -1,11 +1,11 @@
 {
-  "baseline_ms": 538.409,
+  "baseline_ms": 653.571,
   "cycles": [
     {
       "confirm": {
-        "barrier_polls": 5,
-        "click_to_visible_ms": 16017.261,
-        "command_ms": 6529.376,
+        "barrier_polls": 7,
+        "click_to_visible_ms": 19131.763,
+        "command_ms": 6819.394,
         "observed": {
           "txn_imported_1278": {
             "cash_closure_case_id": "turnover:turnover_rel_a4fc90a82cc517a9",
@@ -18,9 +18,9 @@
             "category_version": 2
           }
         },
-        "reload_ms": 572.715,
-        "response_to_fresh_ms": 8915.169,
-        "response_to_visible_ms": 9487.884,
+        "reload_ms": 282.707,
+        "response_to_fresh_ms": 12029.662,
+        "response_to_visible_ms": 12312.369,
         "targets": [
           {
             "read_model_key": "turnover_ledger",
@@ -42,9 +42,9 @@
       },
       "cycle": 1,
       "withdraw": {
-        "barrier_polls": 2,
-        "click_to_visible_ms": 8741.108,
-        "command_ms": 1219.74,
+        "barrier_polls": 3,
+        "click_to_visible_ms": 10220.286,
+        "command_ms": 2858.886,
         "observed": {
           "txn_imported_1278": {
             "cash_closure_case_id": null,
@@ -57,22 +57,34 @@
             "category_version": 2
           }
         },
-        "reload_ms": 684.957,
-        "response_to_fresh_ms": 6836.411,
-        "response_to_visible_ms": 7521.368,
+        "reload_ms": 367.579,
+        "response_to_fresh_ms": 6993.82,
+        "response_to_visible_ms": 7361.399,
         "targets": [
           {
             "read_model_key": "turnover_ledger",
-            "scope_key": "all"
+            "scope_key": "2026-02"
+          },
+          {
+            "read_model_key": "turnover_ledger",
+            "scope_key": "2026-03"
+          },
+          {
+            "read_model_key": "workbench_relation",
+            "scope_key": "2026-02"
+          },
+          {
+            "read_model_key": "workbench_relation",
+            "scope_key": "2026-03"
           }
         ]
       }
     },
     {
       "confirm": {
-        "barrier_polls": 2,
-        "click_to_visible_ms": 14290.829,
-        "command_ms": 2002.803,
+        "barrier_polls": 4,
+        "click_to_visible_ms": 8868.296,
+        "command_ms": 1472.324,
         "observed": {
           "txn_imported_1278": {
             "cash_closure_case_id": "turnover:turnover_rel_a4fc90a82cc517a9",
@@ -85,9 +97,9 @@
             "category_version": 2
           }
         },
-        "reload_ms": 772.546,
-        "response_to_fresh_ms": 11515.481,
-        "response_to_visible_ms": 12288.026,
+        "reload_ms": 277.155,
+        "response_to_fresh_ms": 7118.816,
+        "response_to_visible_ms": 7395.971,
         "targets": [
           {
             "read_model_key": "turnover_ledger",
@@ -109,9 +121,9 @@
       },
       "cycle": 2,
       "withdraw": {
-        "barrier_polls": 2,
-        "click_to_visible_ms": 11399.52,
-        "command_ms": 2029.932,
+        "barrier_polls": 3,
+        "click_to_visible_ms": 9482.378,
+        "command_ms": 1772.178,
         "observed": {
           "txn_imported_1278": {
             "cash_closure_case_id": null,
@@ -124,13 +136,25 @@
             "category_version": 2
           }
         },
-        "reload_ms": 594.761,
-        "response_to_fresh_ms": 8774.827,
-        "response_to_visible_ms": 9369.588,
+        "reload_ms": 435.536,
+        "response_to_fresh_ms": 7274.664,
+        "response_to_visible_ms": 7710.2,
         "targets": [
           {
             "read_model_key": "turnover_ledger",
-            "scope_key": "all"
+            "scope_key": "2026-02"
+          },
+          {
+            "read_model_key": "turnover_ledger",
+            "scope_key": "2026-03"
+          },
+          {
+            "read_model_key": "workbench_relation",
+            "scope_key": "2026-02"
+          },
+          {
+            "read_model_key": "workbench_relation",
+            "scope_key": "2026-03"
           }
         ]
       }
@@ -145,16 +169,16 @@
     "txn_imported_1278",
     "txn_imported_1348"
   ],
-  "generated_at": "2026-07-20T01:36:50.496920+00:00",
+  "generated_at": "2026-07-20T02:21:26.469308+00:00",
   "recovery": null,
-  "release_sha": "9be93982f",
+  "release_sha": "61763972a",
   "status": "fail",
   "summary": {
-    "command_p95_ms": 6529.376,
+    "command_p95_ms": 6819.394,
     "command_target_ms": 1000.0,
     "fresh_target_ms": 2000.0,
     "hard_max_ms": 3000.0,
-    "response_to_fresh_p95_ms": 11515.481,
-    "response_to_visible_p95_ms": 12288.026
+    "response_to_fresh_p95_ms": 12029.662,
+    "response_to_visible_p95_ms": 12312.369
   }
 }
