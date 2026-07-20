@@ -44,6 +44,7 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 
 - command service 必须接收明确 repository/idempotency/freshness 依赖，不接收整个 `Application`。
 - relation、history、idempotency、audit/dirty/outbox 的业务事务必须原子；失败不得留下半关系或漏刷新。
+- repository adapter 持久化 scoped snapshot 后，只能通过 domain service 的 changed-case delta I/O 更新进程内镜像；禁止读取并重建全局 relation/history snapshot，也禁止 adapter 直接写 domain service 私有状态。
 - case id 重用、active member overlap、row type 对齐、expected version 和 idempotency fingerprint 必须在写入边界校验。
 - 任意 `N:M:K` member set 都合法，只要上游业务规则已证明安全并且成员非空、唯一、typed。
 - 自动扩展既有 active case 必须使用 `target_case_id` 并原子 replace；不得创建重叠的第二条 active relation。

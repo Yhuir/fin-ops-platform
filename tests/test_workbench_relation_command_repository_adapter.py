@@ -32,6 +32,11 @@ class CaptureRepository:
         self.saved.append({"snapshot": snapshot, "changed_case_ids": list(changed_case_ids)})
 
 
+class SnapshotBlockingPairRelationService(WorkbenchPairRelationService):
+    def snapshot(self) -> dict[str, object]:
+        raise AssertionError("changed-case apply must not rebuild the global snapshot")
+
+
 class WorkbenchRelationCommandRepositoryAdapterTests(unittest.TestCase):
     def test_load_prefers_repository_when_repository_is_configured(self) -> None:
         pair_service = WorkbenchPairRelationService.from_snapshot(
@@ -139,6 +144,39 @@ class WorkbenchRelationCommandRepositoryAdapterTests(unittest.TestCase):
             ["old-2", "new-1"],
         )
         self.assertEqual(after_apply_calls, ["called"])
+
+    def test_changed_case_delta_does_not_read_global_snapshot_and_can_delete_case(self) -> None:
+        pair_service = SnapshotBlockingPairRelationService(
+            pair_relations={
+                "CASE-1": {"case_id": "CASE-1", "row_ids": ["bank-1"], "row_types": ["bank"], "status": "active"},
+                "CASE-2": {"case_id": "CASE-2", "row_ids": ["bank-2"], "row_types": ["bank"], "status": "active"},
+            },
+            pair_relation_history=[
+                {"operation_type": "old-1", "after_relations": [{"case_id": "CASE-1"}]},
+                {"operation_type": "old-2", "after_relations": [{"case_id": "CASE-2"}]},
+            ],
+        )
+        adapter = WorkbenchRelationCommandRepositoryAdapter(pair_relation_service=pair_service)
+
+        adapter.save_workbench_pair_relations(
+            {
+                "pair_relations": {},
+                "pair_relation_history": [
+                    {"operation_type": "withdraw-1", "before_relations": [{"case_id": "CASE-1"}]},
+                ],
+            },
+            changed_case_ids=["CASE-1"],
+        )
+
+        self.assertIsNone(pair_service.get_active_relation_by_case_id("CASE-1"))
+        self.assertEqual(
+            pair_service.get_active_relation_by_case_id("CASE-2")["row_ids"],
+            ["bank-2"],
+        )
+        self.assertEqual(
+            [item["operation_type"] for item in pair_service.list_history()],
+            ["old-2", "withdraw-1"],
+        )
 
     def test_save_without_changed_cases_merges_incoming_relations_and_preserves_history(self) -> None:
         pair_service = WorkbenchPairRelationService.from_snapshot(

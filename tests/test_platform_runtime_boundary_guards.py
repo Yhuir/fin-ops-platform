@@ -5207,6 +5207,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         factory_source = _function_source(server_tree, server_source, "_workbench_relation_command_repository")
         adapter_path = SERVICES_ROOT / "workbench_relation_command_repository_adapter.py"
         adapter_source = adapter_path.read_text(encoding="utf-8") if adapter_path.exists() else ""
+        domain_path = SERVICES_ROOT / "workbench_pair_relation_service.py"
+        domain_source = domain_path.read_text(encoding="utf-8") if domain_path.exists() else ""
         violations: list[str] = []
 
         for removed_helper in (
@@ -5224,11 +5226,19 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "class WorkbenchRelationCommandRepositoryAdapter",
             "def load_workbench_pair_relations(",
             "def save_workbench_pair_relations(",
-            "self._pair_relation_service._pair_relations",
+            "self._pair_relation_service.apply_snapshot_delta(",
             "self._after_apply()",
         ):
             if snippet not in adapter_source:
                 violations.append(f"relation command repository adapter missing behavior {snippet}")
+        if "def apply_snapshot_delta(" not in domain_source:
+            violations.append("relation domain service missing explicit changed-case snapshot delta boundary")
+        for private_write in (
+            "self._pair_relation_service._pair_relations",
+            "self._pair_relation_service._pair_relation_history",
+        ):
+            if private_write in adapter_source:
+                violations.append(f"relation command repository adapter writes domain private state: {private_write}")
 
         self.assertEqual(violations, [])
 

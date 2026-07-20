@@ -15,6 +15,7 @@
 ## 核心边界
 
 - `WorkbenchPairRelationService`：纯领域规则，负责 row 独占、replace/cancel/withdraw/history 计算。
+- `WorkbenchPairRelationService.apply_snapshot_delta(...)`：只把已持久化的 changed cases 增量同步到进程内镜像；不读取、复制或重建无关 relation/history。
 - `WorkbenchRelationCommandService`：所有 relation mutation 的统一 command 边界。
 - `PostgresWorkbenchRelationRepository`：正式关系/history SQL owner。
 - `WorkbenchRelationUow`：relation、history、idempotency、audit/refresh outbox 的事务边界。

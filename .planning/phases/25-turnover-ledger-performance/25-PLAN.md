@@ -103,3 +103,10 @@
 4. `cash_closure_relation_id` 只从显式 legacy metadata 读取，不从 case id 猜测，保证历史兼容与现代链路隔离。
 5. 删除无收益的 `turnover-ledger-secondary` registry、manifest、env、部署文档和测试；保持单 worker，不新增基础设施。
 6. 本地门：domain/service/API/read-model/job/E2E contract、runtime registry/manifest、前端 page/API、architecture guard、lint/docs/diff。生产门：精确 SHA 部署、旧 worker 退役、两轮可逆写、40 轮读、直接/交叉 Audit、queue drained、fixture 恢复。
+
+## 第二次生产门补充：changed-case 镜像限域
+
+1. 生产两轮探针证明热态 read-model response-to-fresh 已小于 2s，但同步 command 仍为 `1.759–2.684s`；AppHealth 把热态数据库时间定位在约 `0.67s`，剩余开销集中在 canonical relation save 后的全量进程镜像重建。
+2. 在 `WorkbenchPairRelationService` 提供单一 `apply_snapshot_delta` domain I/O；只归一化 incoming scoped snapshot，按 changed case replace/delete relation 与 history。
+3. 删除 adapter 的全局 `snapshot()`、无关 relation/history 深拷贝、全量 `from_snapshot()` 重建与私有状态写入；无新缓存、worker、read model、API 或事实源。
+4. 先以测试证明无关 case/history 保持、删除语义、after-apply 与“禁止读取全局 snapshot”；通过共享 relation command 回归后提交、部署并复用同一可逆探针。

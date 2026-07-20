@@ -30,3 +30,19 @@
 - 40 样本 post-deploy 性能。
 - 直接与交叉 Page Audit。
 - 安全可逆写后 committed-to-fresh；若 fixture 不再安全，记录为最终系统门而不制造事实。
+
+## release 7c25e9578 第一轮生产写门
+
+- 部署成功，旧 `turnover-ledger-secondary` worker 已由 deploy control 退役，registry 只保留单一 `turnover-ledger` owner。
+- 两轮安全可逆 confirm → fresh → withdraw → fresh 均完成，最终 fixture 恢复 `unlinked`，无 active relation 残留。
+- 热态 response-to-fresh：confirm `1.456s`、withdraw `1.443s`，已满足 `<=2s`；热态 command：confirm `1.759s`、withdraw `2.684s`，未满足 `<=1s`。
+- 部署后首轮 confirm 受冷态数据库/服务启动拖累为 `6.669s`，超过 hard max；因此该 release 不判定闭环，也不进入下一页面。
+- AppHealth 请求拆分显示热态 relation command 数据库时间约 `0.67s`，其余同步耗时集中在 canonical repository save 后的全局进程镜像复制与重建。
+
+## changed-case 镜像优化本地门
+
+- domain + adapter + workbench relation command/UoW/idempotency + turnover domain/UoW/API/query/read-model：`414 passed + 28 subtests`。
+- architecture guard + relation projection/read facade + write-operation smoke/SLO：`332 passed + 69 subtests`。
+- 新回归明确证明 changed-case apply 不调用全局 `snapshot()`，并覆盖目标 case 删除、history 替换、无关 case/history 保留及 after-apply。
+- `bash scripts/verify.sh lint`、`bash scripts/verify.sh docs`、`git diff --check`：通过。
+- 下一门：提交并部署精确 SHA，待 readiness 稳定后复用相同两轮可逆写探针；command p95 `<=1000ms`、response-to-fresh p95 `<=2000ms`、hard max `<=3000ms` 才能继续最终 40 样本与直接/交叉 Audit。

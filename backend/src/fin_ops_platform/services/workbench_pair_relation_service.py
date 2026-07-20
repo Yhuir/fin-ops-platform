@@ -54,6 +54,36 @@ class WorkbenchPairRelationService:
             payload["pair_relation_history"] = deepcopy(self._pair_relation_history)
         return payload
 
+    def apply_snapshot_delta(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        changed_case_ids: list[str] | set[str] | None = None,
+    ) -> None:
+        changed_ids = {
+            str(case_id).strip()
+            for case_id in list(changed_case_ids or [])
+            if str(case_id).strip()
+        }
+        incoming = self.from_snapshot(snapshot)
+
+        if changed_ids:
+            for case_id in changed_ids:
+                relation = incoming._pair_relations.get(case_id)
+                if relation is None:
+                    self._pair_relations.pop(case_id, None)
+                else:
+                    self._pair_relations[case_id] = deepcopy(relation)
+            self._pair_relation_history = [
+                history
+                for history in self._pair_relation_history
+                if not self._history_touches_cases(history, changed_ids)
+            ]
+        else:
+            self._pair_relations.update(deepcopy(incoming._pair_relations))
+
+        self._pair_relation_history.extend(deepcopy(incoming._pair_relation_history))
+
     def snapshot_case_ids(self, case_ids: list[str]) -> dict[str, Any]:
         normalized_case_ids = {
             str(case_id).strip()

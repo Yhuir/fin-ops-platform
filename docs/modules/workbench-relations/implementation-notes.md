@@ -4618,6 +4618,26 @@ PYTHONPATH=backend/src:. python3 -m pytest tests/test_deploy_runtime_examples.py
 ```
 
 后续：发布后重新执行生产受控 `withdraw-link` 写 smoke，要求 HTTP submit、`workbench_relation:<month>`、`workbench:<month>` 和 `workbench:all` aggregate 均进入 1s SLO；若仍失败，继续按生产事件时间线拆分 worker pickup 与 aggregate rebuild 耗时。
+
+## 2026-07-20 - Relation changed-case 进程镜像增量应用
+
+目标：消除 canonical relation confirm/withdraw 已经完成 scoped PostgreSQL 写入后，repository adapter 仍复制并重新归一化全量进程内 relation/history snapshot 的同步命令开销。
+
+生产证据与根因：
+
+- release `7c25e9578` 的两轮可逆 turnover closure 中，热态 response-to-fresh 已为 `1.443–1.456s`，但 confirm/withdraw command 仍为 `1.759–2.684s`；AppHealth 显示热态数据库约 `0.67s`，剩余主要耗时发生在 relation repository save 返回后的应用层。
+- 旧 `WorkbenchRelationCommandRepositoryAdapter._apply_snapshot(...)` 每次读取全局 `snapshot()`，深拷贝全部无关 relation/history，再用 `WorkbenchPairRelationService.from_snapshot(...)` 重建全量内存服务；成本随全局关系与历史总量增长，与本次 changed cases 数量无关。
+
+变更与边界：
+
+- `WorkbenchPairRelationService.apply_snapshot_delta(...)` 成为唯一进程内镜像增量 I/O：先归一化 incoming scoped snapshot，只替换或删除 `changed_case_ids` 及其 history，无 changed-case 的既有 merge 合同保持不变。
+- adapter 删除全局 snapshot、全量 merged snapshot、全量 service 重建和跨模块私有字段赋值；持久化、canonical PostgreSQL owner、UoW、idempotency、history payload、dirty/outbox、API 与 read model 合同不变。
+- 没有新增缓存、索引、worker、queue、fallback、双写或第二事实源；所有调用方共享同一 canonical command 边界，因此只减少 CPU/内存复制，不改变其他页面业务行为。
+
+验证：
+
+- adapter 回归覆盖 changed-case replace、delete、无关 relation/history 保留、after-apply，以及 changed-case 路径禁止读取全局 `snapshot()`。
+- domain + adapter 目标测试通过；部署后必须重新跑两轮可逆 confirm → fresh → withdraw → fresh，按 command p95 `<=1000ms`、response-to-fresh p95 `<=2000ms`、hard max `<=3000ms` 判定。
 ## 2026-07-13 - Workbench relation partial replacement stale-member cleanup
 
 目标：修复生产 turnover closure 撤回后，`workbench_relation` 局部投影已把 group 重建为 bank-only，但旧 OA row index 仍引用同一 group，造成银行明细、OA 待付款、发票、成本和 System Audit 出现幽灵配对。

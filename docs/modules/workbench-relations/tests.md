@@ -33,6 +33,7 @@
 - 自动安全 plan 与人工 command 进入同一 UoW、active relation、history 和 outbox 合同。
 - ambiguous/unsafe/resource-limited 结果零 relation write。
 - active case 保持稳定；唯一扩展使用原 case；撤回 exact set 不自动重建。
+- changed-case 持久化后只替换或删除目标 case/history；无关关系与审计保持不变，且 adapter 不得调用全局 `snapshot()` 做镜像重建。
 - 下游只把 active relation 视为 linked。
 - old candidate/decision 表、service、state key 和 API 不存在生产调用。
 - Release A 静态 guard 证明运行时不再访问旧状态；Release B 届时使用下一个可用 migration version，其 contract 必须证明只删除派生旧状态，不删除 canonical facts/relations/history。
