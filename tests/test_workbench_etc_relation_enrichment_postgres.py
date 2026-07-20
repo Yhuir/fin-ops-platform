@@ -192,6 +192,31 @@ class WorkbenchEtcRelationEnrichmentPostgresTests(unittest.TestCase):
         self.assertTrue(completed["due"])
         self.assertFalse(completed["refresh_flag_present"])
 
+        self.connection.execute(
+            """
+            update job.workbench_matching_dirty_scopes
+            set status = 'failed', source_versions = '{"proof":"v1"}'::jsonb
+            where tenant_id = 'default' and scope_month = '2026-06-01'
+            """
+        )
+        requeued = repository.mark_stale_workbench_matching_completed_scopes(
+            tenant_id="default",
+            source_versions={"proof": "v2"},
+            reason="matching_source_versions_changed",
+            debounce_seconds=0,
+            limit=10,
+        )
+        recovered = self.connection.fetch_one(
+            """
+            select status, available_at <= now() as due
+            from job.workbench_matching_dirty_scopes
+            where tenant_id = 'default' and scope_month = '2026-06-01'
+            """
+        )
+        self.assertEqual(requeued, ["2026-06"])
+        self.assertEqual(recovered["status"], "dirty")
+        self.assertTrue(recovered["due"])
+
     def test_hot_path_indexes_are_applied(self) -> None:
         rows = self.connection.fetch_all(
             """

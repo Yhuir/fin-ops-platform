@@ -74,7 +74,7 @@ class RepositoryRecordingConnection:
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
         self.fetch_all_calls.append((" ".join(sql.lower().split()), params))
         normalized = self.fetch_all_calls[-1][0]
-        if "status = 'completed'" in normalized:
+        if "status in ('completed', 'failed')" in normalized:
             return list(self.stale_completed_rows)
         if "update job.workbench_matching_dirty_scopes" in normalized:
             return list(self.claim_rows)
@@ -226,6 +226,36 @@ class WorkbenchReconciliationDirtyQueueTests(unittest.TestCase):
         self.assertEqual(entry["available_at"], datetime(2026, 5, 25, 9, 1, tzinfo=UTC))
         self.assertIn("matching_source_versions_changed", entry["reasons"])
 
+    def test_mark_stale_completed_scopes_requeues_failed_scope_after_source_version_change(self) -> None:
+        clock = Clock()
+        queue = WorkbenchReconciliationDirtyQueue(
+            options=WorkbenchReconciliationDirtyQueueOptions(
+                now=clock.now,
+                retry_max_attempts=1,
+            )
+        )
+        queue.mark_dirty_expanded(["2026-05"], reason="unit", source_versions={"rules": "v1"})
+        clock.advance(60)
+        queue.claim_due_scopes(worker_id="worker-a", limit=1, request_id="request-1")
+        queue.fail(
+            "2026-03",
+            error="old implementation failed",
+            worker_id="worker-a",
+            request_id="request-1:2026-03",
+        )
+
+        changed = queue.mark_stale_completed_scopes(
+            source_versions={"rules": "v2"},
+            reason="matching_source_versions_changed",
+        )
+
+        self.assertEqual(changed, ["2026-03"])
+        entry = queue.get_dirty_scope("2026-03")
+        self.assertEqual(entry["status"], "dirty")
+        self.assertEqual(entry["source_versions"], {"rules": "v2"})
+        self.assertIsNone(entry["lease_owner"])
+        self.assertIsNone(entry["lease_expires_at"])
+
     def test_fail_retries_with_configurable_backoff_until_max_attempts(self) -> None:
         clock = Clock()
         queue = WorkbenchReconciliationDirtyQueue(
@@ -331,7 +361,7 @@ class WorkbenchReconciliationDirtyQueueTests(unittest.TestCase):
         self.assertEqual(connection.transaction_exits, 1)
         self.assertEqual(len(connection.fetch_all_calls), 1)
         stale_sql, stale_params = connection.fetch_all_calls[0]
-        self.assertIn("status = 'completed'", stale_sql)
+        self.assertIn("status in ('completed', 'failed')", stale_sql)
         self.assertIn("not (coalesce(source_versions", stale_sql)
         self.assertIn("@> %s", stale_sql)
         self.assertIn("for update skip locked", stale_sql)

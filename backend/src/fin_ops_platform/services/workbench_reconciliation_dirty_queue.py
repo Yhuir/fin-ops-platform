@@ -136,7 +136,7 @@ class WorkbenchReconciliationDirtyQueue:
         for scope_month, entry in sorted(self._scopes.items()):
             if resolved_limit is not None and len(marked) >= resolved_limit:
                 break
-            if entry.get("status") != "completed":
+            if entry.get("status") not in {"completed", "failed"}:
                 continue
             existing_source_versions = entry.get("source_versions") if isinstance(entry.get("source_versions"), dict) else {}
             if _source_versions_include(existing_source_versions, normalized_source_versions):

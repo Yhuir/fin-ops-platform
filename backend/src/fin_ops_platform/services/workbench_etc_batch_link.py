@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 
-WORKBENCH_ETC_BATCH_LINK_VERSION = "workbench-etc-batch-link-v1"
+WORKBENCH_ETC_BATCH_LINK_VERSION = "workbench-etc-batch-link-v2"
 
 
 def relation_external_etc_batch_ids(relation: dict[str, Any]) -> frozenset[str]:

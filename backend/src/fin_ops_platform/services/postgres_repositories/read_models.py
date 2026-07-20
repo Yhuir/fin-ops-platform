@@ -12151,7 +12151,7 @@ class PostgresReadModelRepository:
                     select id
                     from job.workbench_matching_dirty_scopes
                     where tenant_id = %s
-                      and status = 'completed'
+                      and status in ('completed', 'failed')
                       and not (coalesce(source_versions, '{}'::jsonb) @> %s)
                     order by completed_at nulls first, scope_month
                     limit %s
