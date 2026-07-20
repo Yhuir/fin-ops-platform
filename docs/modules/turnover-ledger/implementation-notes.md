@@ -1,5 +1,13 @@
 # 外部往来款管理 实施记录
 
+## 2026-07-20 - 写命令重复 I/O 收口
+
+- 生产证据：relation-only projection 上线后，三轮可逆操作的 response-to-fresh p95 已降到 `934.515ms`、response-to-visible p95 `1699.211ms`；但 command p95 仍为 `3662.382ms`，稳定样本约 `1.13–1.32s`，未过 `1000ms` 门槛。
+- 根因：closure request 逐笔读取 canonical bank facts 解析月份；同一 selected bank rows 又被 expected-version 与 preview 分别读取；Turnover UoW 对幂等键先事务外查询、再事务内 reserve；cash-closure 撤回先读 current relation 做资格判断，command 内再次 lock/load/freshness。
+- 实施：月份改用既有 `ImportService.list_transactions_by_ids(...)` 单次批量事实读取；`TurnoverLedgerBankRowSelectionPort` 在单请求 facade 生命周期复用一份不可变副本给版本校验和 preview；幂等统一由事务内 reserve 判断首次、冲突、in-progress 和 replay；withdraw preparation 在同一事务内完成 case lock、scoped snapshot 和 freshness，并由实际 withdraw 复用。
+- 隔离：不新增 API、表、worker、cache service、queue 或 fallback；Workbench 普通调用不传 preparation，行为不变。旧事务外幂等预查、旧 `TurnoverLedgerBankRowStalePreconditionPort` 与 cash-closure current relation 二次加载已删除。
+- 验证：定向 API/UoW/Workbench command 测试 `253` 项通过；真实 PostgreSQL、完整回归与更新 SHA 的生产可逆探针在本轮后续记录补充。
+
 ## 2026-07-20 - 确认/撤回写后可见性链路收窄
 
 - 生产基线：列表读取 40 样本 shell/grouped/tag/Page Audit p95 分别为 `115.781ms`、`325.701ms`、`150.911ms`、`303.462ms`，均为 fresh；但可逆确认/撤回的命令耗时分别约 `1.3–1.5s` / `2.3–2.8s`，response-to-fresh 约 `5.8–8.9s`，因此只读性能通过而写后可见性不通过。

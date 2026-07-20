@@ -521,6 +521,9 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
 
     def build(self) -> TurnoverLedgerWriteFacade | None:
         storage_backend = str(getattr(self._state_store, "storage_backend", "") or "").strip()
+        bank_row_selection_port = TurnoverLedgerBankRowSelectionPort(
+            bank_rows_by_ids_provider=self._bank_rows_by_ids_provider
+        )
         if storage_backend == "postgres":
             connection = getattr(self._state_store, "_connection", None)
             enqueue_in_transaction = getattr(self._queue_repository, "enqueue_read_model_refresh_in_transaction", None)
@@ -529,7 +532,7 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
             relation_repository = TurnoverLedgerRelationWritePort(
                 relation_service=self._relation_service,
                 routes=self._routes,
-                bank_rows_by_ids_provider=self._bank_rows_by_ids_provider,
+                bank_rows_by_ids_provider=bank_row_selection_port.rows_by_ids,
                 persistence_repository_factory=self._persistence_repository_factory,
             )
             dirty_outbox_writer = TurnoverLedgerDirtyOutboxWriter(
@@ -579,9 +582,7 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
                 if self._relation_command_service_factory is not None
                 else None
             )
-        stale_precondition_port = TurnoverLedgerBankRowStalePreconditionPort(
-            bank_rows_by_ids_provider=self._bank_rows_by_ids_provider
-        )
+        stale_precondition_port = bank_row_selection_port
         uow = TurnoverLedgerWriteUnitOfWork(
             connection=connection,
             relation_repository=relation_repository,
@@ -1026,9 +1027,29 @@ class TurnoverLedgerRelationStalePreconditionPort:
                 )
 
 
-class TurnoverLedgerBankRowStalePreconditionPort:
+class TurnoverLedgerBankRowSelectionPort:
     def __init__(self, *, bank_rows_by_ids_provider: Callable[[list[str]], list[dict[str, object]]]) -> None:
         self._bank_rows_by_ids_provider = bank_rows_by_ids_provider
+        self._rows_by_selection: dict[tuple[str, ...], tuple[dict[str, object], ...]] = {}
+
+    def rows_by_ids(self, row_ids: list[str]) -> list[dict[str, object]]:
+        normalized_row_ids = [
+            str(row_id).strip()
+            for row_id in list(row_ids or [])
+            if str(row_id).strip()
+        ]
+        selection_key = tuple(sorted(set(normalized_row_ids)))
+        if not selection_key:
+            return []
+        cached_rows = self._rows_by_selection.get(selection_key)
+        if cached_rows is None:
+            cached_rows = tuple(
+                deepcopy(row)
+                for row in list(self._bank_rows_by_ids_provider(normalized_row_ids) or [])
+                if isinstance(row, dict)
+            )
+            self._rows_by_selection[selection_key] = cached_rows
+        return [deepcopy(row) for row in cached_rows]
 
     def assert_current(self, *, expected_versions: dict[str, object], transaction: object) -> None:
         _ = transaction
@@ -1044,7 +1065,7 @@ class TurnoverLedgerBankRowStalePreconditionPort:
             return
         rows_by_transaction_id = {
             str(row.get("id") or row.get("transaction_id") or "").strip(): dict(row)
-            for row in list(self._bank_rows_by_ids_provider(list(expected_by_transaction_id)) or [])
+            for row in self.rows_by_ids(list(expected_by_transaction_id))
             if str(row.get("id") or row.get("transaction_id") or "").strip()
         }
         for transaction_id, expected_value in expected_by_transaction_id.items():
@@ -1589,10 +1610,24 @@ class TurnoverLedgerWorkbenchPairPort:
                 row_ids=[],
                 action="cash_closure_withdraw",
             )
-        command_relation = self._active_relation_by_case_id_from_command(
-            relation_command_service,
-            normalized_case_id,
-        )
+        prepare = getattr(relation_command_service, "prepare_withdraw_relation", None)
+        if not callable(prepare):
+            raise self._command_unavailable_error(
+                case_id=normalized_case_id,
+                row_ids=[],
+                action="cash_closure_withdraw_prepare",
+            )
+        try:
+            preparation = prepare(case_id=normalized_case_id)
+        except WorkbenchRelationCommandError as exc:
+            if exc.error_code == "workbench_relation_not_found":
+                raise TurnoverLedgerWritePreconditionError(
+                    error_code="cash_closure_relation_not_found",
+                    message="收支闭环关系已变化，请刷新后重试。",
+                    payload=exc.payload,
+                ) from exc
+            raise self._command_precondition_error(exc) from exc
+        command_relation = dict(getattr(preparation, "before_relation", {}) or {})
         if command_relation is not None and not self._is_cash_closure_withdrawable(command_relation):
             raise TurnoverLedgerWritePreconditionError(
                 error_code="turnover_closure_withdraw_requires_workbench",
@@ -1604,6 +1639,7 @@ class TurnoverLedgerWorkbenchPairPort:
                 actor_id=actor_id,
                 reason=note,
                 history_operation_type="turnover_cash_closure_withdraw",
+                preparation=preparation,
             )
         except WorkbenchRelationCommandError as exc:
             if exc.error_code == "workbench_relation_not_found":

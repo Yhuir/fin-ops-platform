@@ -2924,7 +2924,7 @@ class Application:
     def _turnover_ledger_confirm_request_boundary_facade(self) -> TurnoverLedgerConfirmRequestBoundaryFacade:
         return TurnoverLedgerConfirmRequestBoundaryFacade(
             facade=self._turnover_ledger_confirm_write_facade(),
-            affected_months_resolver=self._bank_transaction_category_affected_months,
+            affected_months_resolver=self._turnover_bank_transaction_affected_months,
             cash_closure_relation_provider=self._turnover_cash_closure_relation,
         )
 
@@ -2964,7 +2964,7 @@ class Application:
     def _turnover_ledger_closure_request_boundary_facade(self) -> TurnoverLedgerConfirmRequestBoundaryFacade:
         return TurnoverLedgerConfirmRequestBoundaryFacade(
             facade=self._turnover_ledger_closure_write_facade(),
-            affected_months_resolver=self._bank_transaction_category_affected_months,
+            affected_months_resolver=self._turnover_bank_transaction_affected_months,
             cash_closure_relation_provider=self._turnover_cash_closure_relation,
         )
 
@@ -3008,7 +3008,7 @@ class Application:
         return TurnoverLedgerWithdrawRequestBoundaryFacade(
             facade=self._turnover_ledger_withdraw_write_facade(),
             relation_detail_provider=self._turnover_ledger_api_routes.get_relation,
-            affected_months_resolver=self._bank_transaction_category_affected_months,
+            affected_months_resolver=self._turnover_bank_transaction_affected_months,
         )
 
     def _postgres_turnover_ledger_persistence_repository(
@@ -8584,6 +8584,18 @@ class Application:
             if not isinstance(payload, dict):
                 continue
             month = str(payload.get("trade_time") or payload.get("txn_date") or "")[:7]
+            if SEARCH_MONTH_RE.match(month):
+                months.add(month)
+        return sorted(months)
+
+    def _turnover_bank_transaction_affected_months(self, transaction_ids: list[str]) -> list[str]:
+        months: set[str] = set()
+        transactions = self._import_service.list_transactions_by_ids(transaction_ids)
+        for transaction in transactions:
+            row = self._serialize_value(transaction)
+            if not isinstance(row, dict):
+                continue
+            month = str(row.get("trade_time") or row.get("txn_date") or "")[:7]
             if SEARCH_MONTH_RE.match(month):
                 months.add(month)
         return sorted(months)

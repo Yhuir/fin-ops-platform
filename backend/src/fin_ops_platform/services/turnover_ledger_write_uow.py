@@ -5,7 +5,6 @@ from typing import Any, Callable
 
 from fin_ops_platform.services.workbench_uow import (
     _idempotency_commit,
-    _idempotency_get,
     _idempotency_record,
     _idempotency_request_for,
     _idempotency_reserve,
@@ -56,24 +55,7 @@ class TurnoverLedgerWriteUnitOfWork:
 
     def run(self, command: Any, handler: Callable[[TurnoverLedgerWriteContext], Any]) -> Any:
         idempotency = _idempotency_request_for(command) if self._idempotency_store is not None else None
-        if idempotency is not None:
-            existing = _idempotency_get(self._idempotency_store, idempotency)
-            if existing is not None:
-                existing_record = _idempotency_record(existing)
-                _raise_on_fingerprint_conflict(existing_record, idempotency)
-                _raise_if_idempotency_failed(existing_record, idempotency)
-                replayed = _replay_committed_idempotency_response(existing_record)
-                if replayed is not None:
-                    return replayed
-                _raise_if_idempotency_in_progress(existing_record, idempotency)
-
         with self._connection.transaction() as transaction:
-            expected_versions = dict(getattr(command, "expected_versions", {}) or {})
-            if expected_versions:
-                self._stale_precondition_port.assert_current(
-                    expected_versions=expected_versions,
-                    transaction=transaction,
-                )
             idempotency_store = (
                 _transaction_bound_idempotency_store(self._idempotency_store, transaction)
                 if self._idempotency_store is not None
@@ -90,6 +72,13 @@ class TurnoverLedgerWriteUnitOfWork:
                         return replayed
                     if _is_existing_reservation(reserved) and not _is_taken_over_expired_reservation(reserved):
                         _raise_if_idempotency_in_progress(reserved_record, idempotency)
+
+            expected_versions = dict(getattr(command, "expected_versions", {}) or {})
+            if expected_versions:
+                self._stale_precondition_port.assert_current(
+                    expected_versions=expected_versions,
+                    transaction=transaction,
+                )
 
             context = TurnoverLedgerWriteContext(
                 command=command,

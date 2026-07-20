@@ -104,3 +104,18 @@
 - Workbench relation/turnover/UoW/API/repository/manifest/scope/architecture targeted：`605 passed + 283 subtests`。
 - 真实 disposable PostgreSQL 17：应用 0001–0115 后 `tests/test_turnover_ledger_postgres_integration.py` 6/6 passed；证明 withdrawn canonical relation也能推进 relation proof、其他 source versions保持不变；临时数据库自动删除。
 - `bash scripts/verify.sh lint`、`bash scripts/verify.sh docs`、`git diff --check`：通过。
+
+## release 21d5490e3 第六轮生产写门
+
+- 部署 release `main-21d5490e-20260720154514` 后，三轮 confirm→fresh→visible→withdraw→fresh→visible 业务断言全部通过；最终 fixture 为 `unlinked`，无需 recovery。
+- response-to-fresh p95/max `934.515ms`，response-to-visible p95/max `1699.211ms`，均已达到 `<=2000ms` / hard max `<=3000ms`；`workbench_relation` recent p50/p95/p99 `107.620/290.120/316.764ms`，`turnover_ledger` `68.264/141.507/181.189ms`。
+- command p95/max `3662.382ms` 仍失败；去掉首轮冷样本后 confirm/withdraw 稳定在约 `1.13–1.32s`，仍高于 `1000ms`。API telemetry 为 confirm 21 queries、withdraw 15 queries，数据库时间仍占主要部分。
+- 剩余同步重复 I/O：月份逐笔读取 canonical bank facts；selected bank rows 被 expected-version 与 closure preview 各读一次；Turnover UoW 事务外 idempotency get 后事务内 reserve；cash-closure withdraw 在 command 前后重复 relation snapshot/freshness。
+
+## command 重复 I/O 收口本地门
+
+- 月份改为单次 `list_transactions_by_ids(...)`；request-scoped selection port 复用 selected bank facts；幂等只保留事务内原子 reserve；cash-closure withdraw 复用 owner-bound preparation。未新增 API、schema、worker、queue、跨请求 cache 或 fallback。
+- API/UoW/Workbench command 定向回归：`253 passed`；扩大到 relation/domain/read-model/architecture：`635 passed, 3 skipped, 285 subtests passed`。
+- disposable PostgreSQL 17 实际应用 0001–0115：`10 passed + 6 subtests`；事务幂等、durable outbox/dirty scope、relation delta 均通过，临时数据库自动删除。
+- whole-repo production scan：旧 `TurnoverLedgerBankRowStalePreconditionPort` 为零；Turnover UoW 事务外 `_idempotency_get(...)` 为零；cash-closure withdraw 不再调用旧 current-relation helper，该 helper 仅由仍在使用的其他校验链保留。
+- `bash scripts/verify.sh lint`、`bash scripts/verify.sh docs`、`git diff --check`：通过。下一门为提交、push、部署精确 SHA 后复用同一三轮可逆探针；全部性能门通过后才执行 40 样本、直接/交叉 Audit，并停在本页闭环节点。

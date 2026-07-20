@@ -1,6 +1,11 @@
 # 关联台测试与验证
 
-日期：2026-07-17
+日期：2026-07-20
+
+## 2026-07-20 Turnover 撤回 preparation 隔离回归
+
+- `tests/test_workbench_relation_command_service.py::WorkbenchRelationCommandServiceTests::test_prepared_withdraw_reuses_lock_relation_snapshot_and_freshness` 保护同一 service/transaction 的 preparation 复用一次 lock/scoped snapshot/freshness。
+- `test_prepared_withdraw_rejects_a_different_case` 保护 preparation 不得跨 case 使用；普通 Workbench withdraw 不传 preparation，既有测试继续覆盖原调用合同。
 
 ## 七类测试
 

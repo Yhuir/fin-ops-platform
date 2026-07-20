@@ -576,6 +576,69 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
         self.assertEqual(facade.calls[0]["scope_keys_hint"], ["2026-05"])
         self.assertEqual(repository.save_calls[-1]["changed_case_ids"], {"case-new"})
 
+    def test_prepared_withdraw_reuses_lock_relation_snapshot_and_freshness(self) -> None:
+        active_relation = {
+            "case_id": "case-new",
+            "row_ids": ["bank-1", "bank-2"],
+            "row_types": ["bank", "bank"],
+            "status": "active",
+            "relation_mode": "turnover_manual_closure",
+            "month_scope": "2026-05",
+            "created_by": "finance-user",
+            "created_at": "2026-05-02T10:00:00+00:00",
+            "updated_at": "2026-05-02T10:00:00+00:00",
+            "version": 2,
+        }
+        repository = FakeRelationRepository({"pair_relations": {"case-new": active_relation}})
+        facade = FakeRelationFacade()
+        service = WorkbenchRelationCommandService(
+            relation_repository=repository,
+            relation_facade=facade,
+            require_fresh_relations=True,
+        )
+
+        preparation = service.prepare_withdraw_relation(case_id="case-new")
+        result = service.withdraw_relation(
+            case_id="case-new",
+            actor_id="finance-user",
+            reason="controlled withdraw",
+            operation_type="withdraw_relation",
+            preparation=preparation,
+        )
+
+        self.assertEqual(result["status"], "withdrawn")
+        self.assertEqual(repository.scoped_load_calls, [{"row_ids": [], "case_ids": ["case-new"]}])
+        self.assertEqual(
+            repository.lock_calls,
+            [{"row_ids": [], "row_types": [], "case_ids": ["case-new"]}],
+        )
+        self.assertEqual(len(facade.calls), 1)
+        self.assertEqual(repository.save_calls[-1]["changed_case_ids"], {"case-new"})
+
+    def test_prepared_withdraw_rejects_a_different_case(self) -> None:
+        active_relation = {
+            "case_id": "case-new",
+            "row_ids": ["bank-1", "bank-2"],
+            "row_types": ["bank", "bank"],
+            "status": "active",
+            "relation_mode": "turnover_manual_closure",
+            "month_scope": "2026-05",
+            "version": 2,
+        }
+        service = WorkbenchRelationCommandService(
+            relation_repository=FakeRelationRepository({"pair_relations": {"case-new": active_relation}})
+        )
+        preparation = service.prepare_withdraw_relation(case_id="case-new")
+
+        with self.assertRaises(WorkbenchRelationCommandError) as context:
+            service.withdraw_relation(
+                case_id="case-other",
+                actor_id="finance-user",
+                preparation=preparation,
+            )
+
+        self.assertEqual(context.exception.error_code, "workbench_relation_preparation_conflict")
+
     def test_withdraw_relation_row_id_submit_fingerprint_distinguishes_row_ids(self) -> None:
         repository = FakeRelationRepository(
             {

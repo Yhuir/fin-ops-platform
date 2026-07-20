@@ -1201,7 +1201,18 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
 
         class RecordingRelationCommandService:
             def __init__(self) -> None:
+                self.prepare_calls: list[dict[str, object]] = []
                 self.withdraw_calls: list[dict[str, object]] = []
+
+            def prepare_withdraw_relation(self, **kwargs: object) -> object:
+                self.prepare_calls.append(dict(kwargs))
+                return SimpleNamespace(
+                    before_relation={
+                        "case_id": str(kwargs["case_id"]),
+                        "row_ids": ["bank-income-1", "bank-expense-1"],
+                        "row_types": ["bank", "bank"],
+                    }
+                )
 
             def withdraw_relation(self, **kwargs: object) -> dict[str, object]:
                 self.withdraw_calls.append(dict(kwargs))
@@ -1234,12 +1245,14 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(relation["affected_months"], ["2026-02"])
         self.assertEqual(relation["affected_row_ids"], ["bank-income-1", "bank-expense-1"])
         self.assertEqual(relation["restored_relations"][0]["case_id"], "case-oa-restore")
+        self.assertEqual(command.prepare_calls, [{"case_id": "case-workbench-cash-1"}])
         self.assertEqual(len(command.withdraw_calls), 1)
         call = command.withdraw_calls[0]
         self.assertEqual(call["case_id"], "case-workbench-cash-1")
         self.assertEqual(call["actor_id"], "finance-user")
         self.assertEqual(call["reason"], "withdraw cash closure")
         self.assertEqual(call["history_operation_type"], "turnover_cash_closure_withdraw")
+        self.assertIsNotNone(call["preparation"])
 
     def test_turnover_workbench_pair_port_requires_relation_command_service_for_cash_closure_withdraw(self) -> None:
         module = self._write_adapters_module()
@@ -1364,7 +1377,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
 
         self.assertEqual(result["extra"], {"relation_id": "turnover_rel_1"})
         self.assertEqual(handler_calls, ["handler"])
-        self.assertEqual([call["operation"] for call in idempotency_store.calls], ["get", "for_transaction", "reserve", "commit"])
+        self.assertEqual([call["operation"] for call in idempotency_store.calls], ["for_transaction", "reserve", "commit"])
         self.assertEqual(deps.connection.commits, 1)
         self.assertEqual(deps.connection.rollbacks, 0)
         self.assertEqual(len(deps.extra_repository.extras), 1)
@@ -1376,6 +1389,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         command = _Command(
             action_name="turnover_relation_extra_update",
             scope_keys=["all"],
+            expected_versions={"relation:turnover_rel_1": 1},
             payload={"relation_id": "turnover_rel_1", "extra": {"note": "idem"}},
             idempotency_key="relation-extra-idem-1",
             request_fingerprint="fingerprint-1",
@@ -1390,6 +1404,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             return {"extra": {"relation_id": "turnover_rel_1"}}
 
         first = self._run_uow(uow, command, handler)
+        deps.stale_precondition_port.stale = True
         second = self._run_uow(
             uow,
             command,
@@ -1400,7 +1415,8 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(handler_calls, 1)
         self.assertEqual(len(deps.extra_repository.extras), 1)
         self.assertEqual(len(deps.dirty_outbox_writer.calls), 1)
-        self.assertEqual(deps.connection.opened, 1)
+        self.assertEqual(len(deps.stale_precondition_port.checked), 1)
+        self.assertEqual(deps.connection.opened, 2)
 
     def test_relation_extra_idempotency_conflict_rejects_before_handler_or_dirty_outbox(self) -> None:
         idempotency_store = _RecordingIdempotencyStore()
@@ -1430,7 +1446,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             )
 
         self.assertEqual(len(deps.dirty_outbox_writer.calls), 1)
-        self.assertEqual(deps.connection.opened, 1)
+        self.assertEqual(deps.connection.opened, 2)
 
     def test_relation_extra_idempotency_reserved_in_progress_rejects_before_handler(self) -> None:
         idempotency_store = _RecordingIdempotencyStore()
@@ -1458,8 +1474,8 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
                 lambda _context: self.fail("in-progress idempotency must not call handler"),
             )
 
-        self.assertEqual([call["operation"] for call in idempotency_store.calls], ["get"])
-        self.assertEqual(deps.connection.opened, 0)
+        self.assertEqual([call["operation"] for call in idempotency_store.calls], ["for_transaction", "reserve"])
+        self.assertEqual(deps.connection.opened, 1)
         self.assertEqual(deps.dirty_outbox_writer.calls, [])
 
     def test_target_confirm_relation_facade_uses_relation_port_and_returns_service_payload(self) -> None:
@@ -1651,7 +1667,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
                 }
             ]
 
-        port = module.TurnoverLedgerBankRowStalePreconditionPort(
+        port = module.TurnoverLedgerBankRowSelectionPort(
             bank_rows_by_ids_provider=load_rows
         )
 
@@ -1676,7 +1692,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
                 }
             ]
 
-        port = module.TurnoverLedgerBankRowStalePreconditionPort(
+        port = module.TurnoverLedgerBankRowSelectionPort(
             bank_rows_by_ids_provider=load_rows
         )
 
@@ -1685,6 +1701,28 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             transaction=object(),
         )
         self.assertEqual(requested_ids, [["bank_txn_1"]])
+
+    def test_bank_row_selection_reuses_the_version_checked_rows_for_relation_preview(self) -> None:
+        module = self._write_adapters_module()
+        requested_ids: list[list[str]] = []
+
+        def load_rows(row_ids: list[str]) -> list[dict[str, object]]:
+            requested_ids.append(list(row_ids))
+            return [{"id": "bank_txn_1", "category_version": 5}]
+
+        port = module.TurnoverLedgerBankRowSelectionPort(
+            bank_rows_by_ids_provider=load_rows
+        )
+
+        port.assert_current(
+            expected_versions={"turnover_bank_row:bank_txn_1": 5},
+            transaction=object(),
+        )
+        rows = port.rows_by_ids(["bank_txn_1"])
+        rows[0]["category_version"] = 99
+
+        self.assertEqual(requested_ids, [["bank_txn_1"]])
+        self.assertEqual(port.rows_by_ids(["bank_txn_1"])[0]["category_version"], 5)
 
     def test_target_confirm_relation_facade_passes_idempotency_before_repository(self) -> None:
         # PF-P177 target contract: confirm should reserve/replay/conflict by durable idempotency before repository save.
@@ -2433,7 +2471,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(result["updated_categories"], [{"transaction_id": "bank_txn_1"}])
         self.assertEqual(
             [call["operation"] for call in idempotency_store.calls],
-            ["get", "for_transaction", "reserve", "commit"],
+            ["for_transaction", "reserve", "commit"],
         )
         self.assertEqual(len(deps.bankdetail_port.category_updates), 1)
         self.assertEqual(deps.bankdetail_port.category_updates[0]["actor_id"], "finance-user")
@@ -2547,7 +2585,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(result["selected_tag_codes"], ["external_rule_borrow_out"])
         self.assertEqual(
             [call["operation"] for call in idempotency_store.calls],
-            ["get", "for_transaction", "reserve", "commit"],
+            ["for_transaction", "reserve", "commit"],
         )
         self.assertEqual(len(deps.settings_port.saved), 1)
         self.assertIs(deps.settings_port.saved[0]["transaction"], deps.connection.transaction_obj)

@@ -516,6 +516,13 @@ class ReversibleRelationClosurePostgresTests(unittest.TestCase):
             "shape": shape,
             "downstream_scope_types": downstream_scope_types,
         }
+        if "cost_statistics" in expected_scope_types and not profile.startswith("turnover_relation_"):
+            metadata["relation_deltas"] = {
+                f"phase20:{shape}": {
+                    "status": "active" if direction == "confirm" else "cancelled",
+                    "row_ids": [f"phase20:{shape}:bank"],
+                }
+            }
         if "pending_invoice" in expected_scope_types:
             metadata["downstream_scope_types"] = [*downstream_scope_types, "pending_invoice"]
             metadata["pending_invoice_scope_keys"] = [f"expense:all:{month}"]
@@ -532,7 +539,11 @@ class ReversibleRelationClosurePostgresTests(unittest.TestCase):
                 {
                     "scope_type": scope_type,
                     "scope_keys": [month],
-                    "reason": reason,
+                    "reason": (
+                        "cost_statistics_relation_delta"
+                        if scope_type == "cost_statistics"
+                        else reason
+                    ),
                 }
                 for scope_type in sorted(expected_scope_types)
             ]

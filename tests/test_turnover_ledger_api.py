@@ -1843,12 +1843,14 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertIn("relation_detail_provider=self._routes.get_relation", source)
         self.assertNotIn("stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None)", source)
 
-    def test_turnover_ledger_confirm_builder_uses_bank_row_stale_precondition_port(self) -> None:
+    def test_turnover_ledger_confirm_builder_reuses_bank_row_selection_for_stale_check_and_preview(self) -> None:
         source = inspect.getsource(
             Application._turnover_ledger_confirm_write_facade.__globals__["TurnoverLedgerConfirmPrimaryWriteFacadeBuilder"].build
         )
 
-        self.assertIn("TurnoverLedgerBankRowStalePreconditionPort(", source)
+        self.assertIn("TurnoverLedgerBankRowSelectionPort(", source)
+        self.assertIn("bank_rows_by_ids_provider=bank_row_selection_port.rows_by_ids", source)
+        self.assertIn("stale_precondition_port = bank_row_selection_port", source)
         self.assertIn("bank_rows_provider=self._bank_rows_provider", source)
         self.assertNotIn("stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None)", source)
 
@@ -3827,8 +3829,14 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         source = inspect.getsource(Application._turnover_ledger_confirm_request_boundary_facade)
 
         self.assertIn("TurnoverLedgerConfirmRequestBoundaryFacade(", source)
-        self.assertIn("affected_months_resolver=self._bank_transaction_category_affected_months", source)
+        self.assertIn("affected_months_resolver=self._turnover_bank_transaction_affected_months", source)
         self.assertIn("cash_closure_relation_provider=self._turnover_cash_closure_relation", source)
+
+    def test_turnover_affected_months_uses_one_bulk_fact_read(self) -> None:
+        source = inspect.getsource(Application._turnover_bank_transaction_affected_months)
+
+        self.assertIn("list_transactions_by_ids(transaction_ids)", source)
+        self.assertNotIn("get_transaction(", source)
 
     def test_confirm_and_closure_request_boundaries_fail_fast_without_write_facade(self) -> None:
         facade = TurnoverLedgerConfirmRequestBoundaryFacade(
@@ -4354,7 +4362,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
         self.assertIn("TurnoverLedgerWithdrawRequestBoundaryFacade(", source)
         self.assertIn("relation_detail_provider=self._turnover_ledger_api_routes.get_relation", source)
-        self.assertIn("affected_months_resolver=self._bank_transaction_category_affected_months", source)
+        self.assertIn("affected_months_resolver=self._turnover_bank_transaction_affected_months", source)
 
     def test_withdraw_request_boundary_fails_fast_without_write_facade(self) -> None:
         facade = TurnoverLedgerWithdrawRequestBoundaryFacade(

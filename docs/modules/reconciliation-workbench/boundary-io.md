@@ -1,6 +1,6 @@
 # 关联台模块边界与 I/O
 
-日期：2026-07-18
+日期：2026-07-20
 
 ## 职责
 
@@ -28,7 +28,7 @@
 | row overrides / exception cases | workbench control repositories | 仅对没有 active formal relation ownership 的 row 生效；优先级为 formal relation > override > exception，projection 与 Page Audit 必须共用该合同 |
 | list query | Workbench API | `month`、zone=`paired|unpaired`、分页、搜索、排序、generation/source versions；默认无筛选 `month=all` 查询必须读取与当前 active-month generation-set 精确同 key 的 `workbench_generation_stats`，缺失时返回 refreshing 并入队，禁止退回请求内全量 distinct count；带条件查询只在请求内物化 active generation 的窄 group/member key，先一次得到精确 total、row counts 与匹配 group ids，分页按匹配 ids 取 payload，禁止重复扫描历史 generation；普通标量列同列多选按 OR，不同列/不同 pane 按 AND；银行金额表头的方向+付款账号复合筛选继续按 AND |
 | row/group detail | Workbench read repository | 必须固定到同一 active generation；miss 不得合成占位行或回退旧 snapshot |
-| confirm/withdraw command | Workbench action route | canonical row ids、actor、tenant、idempotency、expected versions、preview identity |
+| confirm/withdraw command | Workbench action route / Turnover adapter | canonical row ids、actor、tenant、idempotency、expected versions、preview identity。通用页面调用保持原合同；Turnover cash-closure 撤回可在同一事务先调用 `prepare_withdraw_relation(case_id)`，以一次 case lock/scoped snapshot/freshness 得到 owner-bound preparation，再交给 `withdraw_relation(..., preparation=...)`，case、rows 或 aliases 不一致必须 fail closed，禁止重复加载关系 |
 | matching scope | durable matching dirty queue | 合法 `YYYY-MM`；repository 读取 ±365 日组合窗口，显式引用可补载全部保留历史 |
 
 ## 输出 I/O
