@@ -124,3 +124,11 @@
 2. 增加 active row/case overlap 窄读端口，confirm 只读取 active canonical relations，不读取 cancelled facts/history；withdraw 恢复逻辑继续按需读取相关 history。
 3. command 统一输出 changed relations + 本次 history events；PostgreSQL 同事务 append/idempotent upsert 新 history，不 delete/rewrite 旧历史；进程镜像按 operation id 追加去重。
 4. 在线 command 删除 full snapshot/history save 调用；full replacement 仅留给 migration/repair/restore。用 domain、adapter、command、SQL statement-count 与 architecture guard 证明旧链不能回流，然后部署精确 SHA 复跑同一三轮生产门。
+
+## 第五次生产门补充：relation-only month delta
+
+1. release `8c6ffcb744fde08ea4c2053ac8562380bef15a4f` 业务正确且 fixture 完整恢复，但首轮 confirm response-to-fresh `5801.700ms`；后续为 `1288.451–1938.478ms`。handler 证据和代码事实共同证明旧 projection 对两个受影响月份串行执行整月 payload 读取、relation enrichment、scope delete/rewrite。
+2. 复用既有 outbox `relation_deltas + row_ids`，不增加 cache、queue、worker、表或共享基础设施。只有精确月份与完整 delta metadata 才进入窄路径；`all`、导入、设置、标签、extra 和 own-source 变化仍走完整 rebuild。
+3. 在 turnover read-model owner 内增加 `load_turnover_ledger_relation_delta` / `save_turnover_ledger_relation_delta`：GIN overlap 查询只读受影响 grouped rows，canonical relation bundle 重套上下文，单条 scope update 推进统一 source-version proof，窄 upsert 目标 rows；禁止 delete scope。
+4. scope missing 或 source versions mixed 是显式安全 full rebuild，不是 hidden compatibility fallback。用 unit、repository SQL、真实 PostgreSQL、manifest/architecture、API/UoW 和 Audit 回归证明边界与隔离。
+5. 提交部署后复跑三轮可逆写；门槛不变：command p95 `<=1000ms`、response-to-fresh p95 `<=2000ms`、任一 hard max `<=3000ms`。若 freshness 达标但 command 仍失败，只继续定位同步 transaction I/O，不恢复第二 worker 或引入共享 cache。

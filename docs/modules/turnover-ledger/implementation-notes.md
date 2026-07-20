@@ -678,6 +678,15 @@ git diff --check
 - 旧链删除：移除同一次 rebuild 对 page 1 的第二次 repository 查询，以及相邻同版本 month shard 对整本 ledger 的第二次 canonical grouped 计算；保留每个 scope 独立的 relation context、source-version 标记和原子保存。
 - 测试：覆盖同版本两个月只计算一次、source version 改变必须计算两次、relation-only refresh page 1 只读取一次；生产门仍为两轮可逆 confirm→fresh→withdraw→fresh、最终 fixture 恢复与跨页面 Audit。
 
+## 2026-07-20 - Relation-only 整月重写旧链删除
+
+- 生产证据：release `8c6ffcb744fde08ea4c2053ac8562380bef15a4f` 的三轮可逆探针业务正确且最终 fixture 恢复，但首轮 confirm response-to-fresh `5801.700ms`，后续为 `1288.451–1938.478ms`；recent handler 显示 `workbench_relation` p95 `862.121ms`、`turnover_ledger` p95 `1406.471ms`。两个 turnover month scope 由单 worker 顺序执行，旧 projection 每次读取整月全部 payload、重套 context、delete scope 并整月写回，形成冷态串行长尾。
+- 现有事件合同已经在同一事务 outbox 中携带 `row_ids`、`case_ids` 和 `relation_deltas`，无需增加 queue、worker、cache、projection 表或共享 gateway 分支。
+- 修复：`TurnoverLedgerReadModelRefreshService` 只有在精确 month 且 `relation_deltas + row_ids` 完整时调用 relation-delta projection；repository 按 `scope_month + bank_row_ids overlap` 读取目标 grouped rows，从 canonical relation bundle 重套上下文，以一个月级 SQL 统一推进 source-version proof，再只 upsert 目标 rows。新增 GIN index 支撑 overlap 查询。
+- 旧链删除：relation-only hot path 不再调用 `_existing_scope_rows(...)` 分页读全月，也不再调用 `save_turnover_ledger_rows(...)` 的 delete/rewrite scope。完整 rebuild 只保留给 own-source 变化、`all`、首次构建或 mixed-version 安全恢复。
+- 隔离：改动只在 `turnover_ledger` worker/projection/repository port；canonical Workbench relation、其他页面 API/read model/worker 和 refresh gateway 不变。
+- 测试：worker dispatch、projection 窄 enrichment、repository 无 delete、真实 PostgreSQL overlap payload/统一版本证明与原 full projection 回归。生产仍需精确 SHA 部署后重跑三轮可逆写、读取/Audit 和 queue drain 门。
+
 ## 2026-07-20 - Manual closure command 历史写入热点收口
 
 - 后续生产定位：projection 相邻月份复用后，withdraw response-to-fresh 已降到 `1277–1489ms`，但 confirm 仍约 `6166–6206ms`；同步 command 仍为 `1516–7234ms`。AppHealth 显示 confirm/withdraw command 每次执行 `75–86` 条 SQL，数据库时间是同步命令主要耗时。

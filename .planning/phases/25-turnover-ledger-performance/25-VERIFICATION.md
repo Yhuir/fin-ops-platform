@@ -71,3 +71,20 @@
 - 真实 disposable PostgreSQL 17 应用 0001–0114 后，25 条旧 history + 1 条新 event 最终为 26 条；重复 delta 保持 26，active overlap 返回 relation 且不返回 history。临时数据库自动删除。
 - `bash scripts/verify.sh lint`、`bash scripts/verify.sh docs`、`git diff --check`：通过。
 - 下一门：提交并部署精确 SHA，执行三轮可逆写探针；任何 command p95 `>1000ms`、response-to-fresh p95 `>2000ms` 或 hard max `>3000ms` 均继续本页，不进入税金抵扣。
+
+## release 8c6ffcb744 第四轮生产写门
+
+- 三轮 confirm→fresh→withdraw→fresh 业务断言全部通过；最终 fixture 为 `unlinked`，无 active relation 或恢复残留。
+- command：confirm `0.800–1.639s`，withdraw `0.918–1.800s`，p95/max `1.800s`，未达到 `<=1s`。
+- response-to-fresh：首轮 confirm `5.802s`，其余 confirm `1.288–1.938s`，withdraw `1.391–2.116s`；p95/max `5.802s`，未达到 `<=2s` / hard max `<=3s`。
+- AppHealth recent handler：`workbench_relation` p95 `862.121ms`，`turnover_ledger` p95 `1406.471ms`。首轮 timeline 中两个 turnover month scopes 在同一 worker 串行收敛，第二个 scope 到约 `5.802s`。
+- 旧链定位：relation-only 事件已有 `relation_deltas + row_ids`，但 handler 忽略；projection 仍分页读取 scope 全部 rows，重套 relation context，再通过 `save_turnover_ledger_rows` delete/rewrite 整月。
+
+## relation-only month delta 本地门
+
+- Worker/projection/query/UoW/API/PostgreSQL repository/manifest/architecture：`541 passed + 72 subtests`。
+- Audit/manifest/write SLO targeted：初次 `118 passed + 236 subtests`，仅 manifest 精确 port set 因新增两个正式 delta I/O 按预期失败；更新合同后 manifest `25 passed + 211 subtests`。
+- 真实 disposable PostgreSQL 17：应用 0001–0115，`tests/test_turnover_ledger_postgres_integration.py` 5/5 passed；证明 overlap 只改目标 payload、非目标业务 payload 不变、同月 row/table source versions 一致；临时库自动删除。
+- repository boundary：relation delta 不执行 `delete from read_model.turnover_ledger_rows`；完整 scope save 仍保留给 own-source/repair/首次构建。
+- `bash scripts/verify.sh lint`、`bash scripts/verify.sh docs`、`git diff --check`：通过。
+- 下一门：提交、push main、部署精确 SHA并应用 0115；再运行三轮生产可逆探针。性能任一门失败则不进入下一页。

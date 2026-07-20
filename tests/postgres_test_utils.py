@@ -126,6 +126,7 @@ EXPECTED_MIGRATION_FILES = [
     "0112_batch_accounting_oa_type_hot_path.sql",
     "0113_batch_accounting_relation_count_hot_path.sql",
     "0114_operation_barrier_latest_scope_hot_path.sql",
+    "0115_turnover_ledger_relation_delta_hot_path.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (

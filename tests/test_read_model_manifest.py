@@ -540,6 +540,8 @@ class ReadModelManifestTests(unittest.TestCase):
         required_turnover_ports = {
             "list_turnover_ledger_view",
             "save_turnover_ledger_rows",
+            "load_turnover_ledger_relation_delta",
+            "save_turnover_ledger_relation_delta",
         }
 
         for entry in (cost_statistics, tax_offset, turnover_ledger):

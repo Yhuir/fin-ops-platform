@@ -216,6 +216,63 @@ class TurnoverLedgerPostgresIntegrationTests(unittest.TestCase):
         )
         self.assertTrue(bundle["source_versions"]["relation_updated_at"])
 
+    def test_relation_delta_updates_only_overlapping_payload_and_keeps_scope_versions_uniform(self) -> None:
+        original_versions = {"turnover_ledger_schema_version": "v7", "relation_revision": "before"}
+        next_versions = {"turnover_ledger_schema_version": "v7", "relation_revision": "after"}
+        self.repository.save_turnover_ledger_rows(
+            {
+                "rows": [
+                    {
+                        "relation_id": "turnover-target",
+                        "first_transaction_at": "2026-03-01",
+                        "bank_row_ids": ["bank-target"],
+                        "cash_closure_linked": False,
+                        "source_versions": original_versions,
+                    },
+                    {
+                        "relation_id": "turnover-untouched",
+                        "first_transaction_at": "2026-03-02",
+                        "bank_row_ids": ["bank-untouched"],
+                        "cash_closure_linked": False,
+                        "source_versions": original_versions,
+                    },
+                ]
+            },
+            scope_key="2026-03",
+        )
+
+        delta = self.repository.load_turnover_ledger_relation_delta(
+            scope_key="2026-03",
+            row_ids=["bank-target"],
+        )
+        self.assertTrue(delta["scope_exists"])
+        self.assertFalse(delta["source_versions_mixed"])
+        self.assertEqual([row["relation_id"] for row in delta["rows"]], ["turnover-target"])
+
+        target = dict(delta["rows"][0])
+        target["cash_closure_linked"] = True
+        target["source_versions"] = next_versions
+        self.repository.save_turnover_ledger_relation_delta(
+            {"rows": [target], "source_versions": next_versions},
+            scope_key="2026-03",
+        )
+
+        stored = self.connection.fetch_all(
+            """
+            select relation_id, source_versions, payload
+            from read_model.turnover_ledger_rows
+            where scope_month = '2026-03-01'::date
+            order by relation_id
+            """
+        )
+        self.assertEqual(len(stored), 2)
+        self.assertTrue(next(row for row in stored if row["relation_id"] == "turnover-target")["payload"]["cash_closure_linked"])
+        self.assertFalse(
+            next(row for row in stored if row["relation_id"] == "turnover-untouched")["payload"]["cash_closure_linked"]
+        )
+        self.assertTrue(all(row["source_versions"] == next_versions for row in stored))
+        self.assertTrue(all(row["payload"]["source_versions"] == next_versions for row in stored))
+
 
 if __name__ == "__main__":
     unittest.main()

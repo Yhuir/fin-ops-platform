@@ -142,6 +142,23 @@ class CostStatisticsPublishConnection(RecordingConnection):
         return None
 
 
+class TurnoverRelationDeltaConnection(RecordingConnection):
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+        self.fetched_one.append((" ".join(sql.split()), params))
+        return {
+            "scope_exists": True,
+            "source_versions": {"turnover_ledger_schema_version": "v6"},
+            "source_versions_mixed": False,
+            "rows": [
+                {
+                    "relation_id": "relation-1",
+                    "first_transaction_at": "2026-03-01",
+                    "bank_row_ids": ["bank-1"],
+                }
+            ],
+        }
+
+
 def _workbench_relation_batch_refresh_rows(connection: WorkbenchRelationWriteConnection) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     for sql, params in connection.fetched_all:
@@ -458,6 +475,50 @@ def test_read_model_bulk_insert_with_mapping_params_uses_execute_many() -> None:
 
     assert len(connection.executed_many) == 1
     assert connection.executed_many_values == []
+
+
+def test_turnover_relation_delta_reads_by_month_and_bank_row_overlap() -> None:
+    connection = TurnoverRelationDeltaConnection()
+    repository = PostgresReadModelRepository(connection)
+
+    payload = repository.load_turnover_ledger_relation_delta(
+        scope_key="2026-03",
+        row_ids=["bank-1"],
+    )
+
+    assert payload["scope_exists"] is True
+    assert payload["rows"][0]["relation_id"] == "relation-1"
+    sql, params = connection.fetched_one[-1]
+    assert "where scope_month = %s::date" in sql.lower()
+    assert "bank_row_ids && %s::text[]" in sql.lower()
+    assert params[1] == ["bank-1"]
+
+
+def test_turnover_relation_delta_updates_versions_and_upserts_without_scope_delete() -> None:
+    connection = RecordingConnection()
+    repository = PostgresReadModelRepository(connection)
+
+    repository.save_turnover_ledger_relation_delta(
+        {
+            "source_versions": {"turnover_ledger_schema_version": "v6"},
+            "rows": [
+                {
+                    "relation_id": "relation-1",
+                    "first_transaction_at": "2026-03-01",
+                    "bank_row_ids": ["bank-1"],
+                    "source_versions": {"turnover_ledger_schema_version": "v6"},
+                }
+            ],
+        },
+        scope_key="2026-03",
+    )
+
+    writes = [sql.lower() for sql in write_sql(connection)]
+    assert any("update read_model.turnover_ledger_rows" in sql for sql in writes)
+    assert any("insert into read_model.turnover_ledger_rows" in sql for sql in writes)
+    assert not any("delete from read_model.turnover_ledger_rows" in sql for sql in writes)
+    assert connection.transaction_enters == 1
+    assert connection.transaction_exits == 1
 
 
 def test_workbench_relation_distribution_save_batches_rows_and_groups() -> None:

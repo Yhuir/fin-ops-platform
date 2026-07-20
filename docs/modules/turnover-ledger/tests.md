@@ -501,3 +501,12 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api tests.
 - Regression：manifest/architecture/platform guards 证明 query live fallback、direct clear port、raw payload读取和 Python 全量汇总不回归；交叉 Page Audit 保护共享事实消费者。
 - 真实 PostgreSQL命令：创建 visibly disposable `fin_ops_test_turnover_phase25`，应用 0001–0113，运行 `tests.test_turnover_ledger_postgres_integration` 后自动删除测试库。
 - 剩余风险：生产历史 shard 需要 v6 正式重建后再证明 40 样本 p95、worker drain 和可逆写后可见性；不得用直接 SQL 标记 fresh。
+
+## 2026-07-20 - canonical relation delta 投影
+
+- Business core：金额、分组和状态机不变；既有 turnover domain 测试继续适用。
+- Service/read model/job：`tests/test_turnover_ledger_read_model_refresh.py` 证明只有精确 month、`relation_deltas + row_ids` 事件进入窄投影，`all` 和非 relation 事件仍走完整 rebuild；窄投影不调用 ledger own-source builder。
+- Repository/真实 PostgreSQL：`tests/test_postgres_repositories_boundaries.py` 证明 overlap SQL 和无 scope delete；`tests/test_turnover_ledger_postgres_integration.py` 证明只更新 overlap payload、保留非目标业务 payload，并把同月所有 row/table source versions 推进到一致值。
+- API/Frontend：response shape、operation barrier targets 与 UI 不变，不新增专项测试；既有 API/Page/E2E 回归继续保护。
+- Existing regression：manifest port contract、full projection、query freshness、Workbench relation canonical bundle 与跨页面 Audit 均需复跑。
+- 生产门：确认/撤回各三轮，command p95 `<=1000ms`、response-to-fresh p95 `<=2000ms`、hard max `<=3000ms`；最终 fixture unlinked、queue drained、直接与交叉 Audit 通过。

@@ -7374,6 +7374,93 @@ class PostgresSummaryReadModelRepository:
             return "refreshing"
         return "fresh"
 
+    def load_turnover_ledger_relation_delta(
+        self,
+        *,
+        scope_key: str,
+        row_ids: list[str],
+    ) -> dict[str, Any]:
+        normalized_scope_key = text(scope_key)
+        normalized_row_ids = text_list(row_ids)
+        if not normalized_scope_key or normalized_scope_key == "all" or not normalized_row_ids:
+            raise ValueError("Turnover relation delta requires one month scope and affected row ids.")
+        row = self._connection.fetch_one(
+            """
+            with scoped as materialized (
+                select bank_row_ids, source_versions, payload
+                from read_model.turnover_ledger_rows
+                where scope_month = %s::date
+            )
+            select
+                count(*) > 0 as scope_exists,
+                case
+                    when count(*) > 0
+                     and bool_and(jsonb_typeof(source_versions) = 'object')
+                     and count(distinct source_versions) = 1
+                        then min(source_versions::text)::jsonb
+                    else '{}'::jsonb
+                end as source_versions,
+                coalesce(
+                    bool_and(jsonb_typeof(source_versions) = 'object' and source_versions <> '{}'::jsonb)
+                    and count(distinct source_versions) > 1,
+                    false
+                ) as source_versions_mixed,
+                coalesce(
+                    jsonb_agg(payload order by payload->>'relation_id')
+                        filter (where bank_row_ids && %s::text[]),
+                    '[]'::jsonb
+                ) as rows
+            from scoped
+            """,
+            (month_start(normalized_scope_key), normalized_row_ids),
+        )
+        payload = row if isinstance(row, dict) else {}
+        return {
+            "scope_exists": bool(payload.get("scope_exists")),
+            "source_versions": (
+                dict(payload.get("source_versions"))
+                if isinstance(payload.get("source_versions"), dict)
+                else {}
+            ),
+            "source_versions_mixed": bool(payload.get("source_versions_mixed")),
+            "rows": [dict(item) for item in list(payload.get("rows") or []) if isinstance(item, dict)],
+        }
+
+    def save_turnover_ledger_relation_delta(
+        self,
+        payload: dict[str, Any],
+        *,
+        scope_key: str,
+    ) -> None:
+        normalized_scope_key = text(scope_key)
+        rows = payload.get("rows") if isinstance(payload, dict) else None
+        source_versions = payload.get("source_versions") if isinstance(payload, dict) else None
+        if not normalized_scope_key or normalized_scope_key == "all" or not isinstance(rows, list):
+            raise ValueError("Turnover relation delta requires one month scope and rows.")
+        if not isinstance(source_versions, dict):
+            raise ValueError("Turnover relation delta requires source_versions.")
+
+        def write(connection: Any) -> None:
+            connection.execute(
+                """
+                update read_model.turnover_ledger_rows
+                set source_versions = %s,
+                    payload = jsonb_set(payload, '{source_versions}', %s, true),
+                    generated_at = now(),
+                    updated_at = now()
+                where scope_month = %s::date
+                """,
+                (jsonb(source_versions), jsonb(source_versions), month_start(normalized_scope_key)),
+            )
+            params_seq = [
+                self._turnover_ledger_row_params(item, index)
+                for index, item in enumerate(rows)
+                if isinstance(item, dict)
+            ]
+            self._upsert_turnover_ledger_rows(connection, params_seq)
+
+        run_in_transaction(self._connection, write)
+
     def save_turnover_ledger_rows(self, payload: dict[str, Any], *, scope_key: str | None = None) -> None:
         rows = payload.get("rows") if isinstance(payload, dict) else None
         if not isinstance(rows, list):
@@ -7388,32 +7475,39 @@ class PostgresSummaryReadModelRepository:
                     "delete from read_model.turnover_ledger_rows where scope_month = %s::date",
                     (month_start(normalized_scope_key),),
                 )
-            params_seq: list[tuple[Any, ...]] = []
-            for index, item in enumerate(rows):
-                if not isinstance(item, dict):
-                    continue
-                row = serialize_value(item)
-                relation_id = text(row.get("relation_id")) or f"turnover-row-{index}"
-                bank_row_ids = text_list(row.get("bank_row_ids"))
-                params_seq.append(
-                    (
-                        relation_id,
-                        month_start(row.get("first_transaction_at") or row.get("borrow_date") or row.get("scope_month")),
-                        text(row.get("family")),
-                        text(row.get("status") or "suggested"),
-                        text(row.get("relation_type") or row.get("business_type")),
-                        text(row.get("source")),
-                        text(row.get("counterparty_name")),
-                        decimal_text(row.get("balance_amount") or row.get("principal_amount") or row.get("amount")),
-                        bank_row_ids,
-                        jsonb(row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}),
-                        jsonb(row),
-                        jsonb({}),
-                    ),
-                )
-            _execute_many(
-                connection,
-                """
+            params_seq = [
+                self._turnover_ledger_row_params(item, index)
+                for index, item in enumerate(rows)
+                if isinstance(item, dict)
+            ]
+            self._upsert_turnover_ledger_rows(connection, params_seq)
+
+        run_in_transaction(self._connection, write)
+
+    @staticmethod
+    def _turnover_ledger_row_params(item: dict[str, Any], index: int) -> tuple[Any, ...]:
+        row = serialize_value(item)
+        relation_id = text(row.get("relation_id")) or f"turnover-row-{index}"
+        return (
+            relation_id,
+            month_start(row.get("first_transaction_at") or row.get("borrow_date") or row.get("scope_month")),
+            text(row.get("family")),
+            text(row.get("status") or "suggested"),
+            text(row.get("relation_type") or row.get("business_type")),
+            text(row.get("source")),
+            text(row.get("counterparty_name")),
+            decimal_text(row.get("balance_amount") or row.get("principal_amount") or row.get("amount")),
+            text_list(row.get("bank_row_ids")),
+            jsonb(row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}),
+            jsonb(row),
+            jsonb({}),
+        )
+
+    @staticmethod
+    def _upsert_turnover_ledger_rows(connection: Any, params_seq: list[tuple[Any, ...]]) -> None:
+        _execute_many(
+            connection,
+            """
                 insert into read_model.turnover_ledger_rows(
                     relation_id, scope_month, family, status, relation_type, source,
                     counterparty_name, amount, bank_row_ids, source_versions,
@@ -7436,10 +7530,8 @@ class PostgresSummaryReadModelRepository:
                     raw_payload = excluded.raw_payload,
                     updated_at = now()
                 """,
-                params_seq,
-            )
-
-        run_in_transaction(self._connection, write)
+            params_seq,
+        )
 
     def get_tax_offset_view(self, *, scope_key: str) -> dict[str, Any] | None:
         normalized_scope_key = str(scope_key or "").strip()
@@ -8022,6 +8114,12 @@ class PostgresReadModelRepository:
 
     def save_turnover_ledger_rows(self, *args: Any, **kwargs: Any) -> None:
         self._summary_read_model_repository.save_turnover_ledger_rows(*args, **kwargs)
+
+    def load_turnover_ledger_relation_delta(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return self._summary_read_model_repository.load_turnover_ledger_relation_delta(*args, **kwargs)
+
+    def save_turnover_ledger_relation_delta(self, *args: Any, **kwargs: Any) -> None:
+        self._summary_read_model_repository.save_turnover_ledger_relation_delta(*args, **kwargs)
 
     def search_index(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
         return self._search_workbench_relation_repository.search_index(*args, **kwargs)

@@ -43,6 +43,81 @@ class TurnoverLedgerSqlProjectionBuilder:
         self._base_rows_cache_key = ""
         self._base_rows_cache: list[dict[str, Any]] = []
 
+    def rebuild_turnover_ledger_relation_delta(
+        self,
+        scope_key: str,
+        *,
+        row_ids: list[str],
+        source_version: object = None,
+    ) -> dict[str, Any]:
+        normalized_scope_key = str(scope_key or "").strip()
+        normalized_row_ids = _dedupe_preserve_order(str(row_id).strip() for row_id in list(row_ids or []))
+        if not normalized_scope_key or normalized_scope_key == "all" or not normalized_row_ids:
+            raise ValueError("Turnover relation delta requires one month scope and affected row ids.")
+        read_repository = self._read_repository
+        workbench_relation_source_repository = self._workbench_relation_source_repository
+        if read_repository is None or workbench_relation_source_repository is None:
+            built = self._build_runtime_dependencies()
+            read_repository = read_repository or built["read_repository"]
+            workbench_relation_source_repository = (
+                workbench_relation_source_repository or built.get("workbench_relation_source_repository")
+            )
+        load_delta = getattr(read_repository, "load_turnover_ledger_relation_delta", None)
+        save_delta = getattr(read_repository, "save_turnover_ledger_relation_delta", None)
+        if not callable(load_delta) or not callable(save_delta):
+            raise RuntimeError("Turnover ledger relation delta requires explicit repository I/O.")
+        existing = load_delta(scope_key=normalized_scope_key, row_ids=normalized_row_ids)
+        if not isinstance(existing, dict) or not bool(existing.get("scope_exists")):
+            result = self.rebuild_turnover_ledger_read_model_scope(
+                normalized_scope_key,
+                source_version=source_version,
+            )
+            return {**result, "relation_delta": False, "relation_delta_reason": "scope_missing"}
+        if bool(existing.get("source_versions_mixed")):
+            result = self.rebuild_turnover_ledger_read_model_scope(
+                normalized_scope_key,
+                source_version=source_version,
+            )
+            return {**result, "relation_delta": False, "relation_delta_reason": "source_versions_mixed"}
+        source_versions = (
+            dict(existing.get("source_versions"))
+            if isinstance(existing.get("source_versions"), dict)
+            else {}
+        )
+        rows = [dict(row) for row in list(existing.get("rows") or []) if isinstance(row, dict)]
+        rows = self._with_workbench_relation_context(
+            rows,
+            workbench_relation_source_repository=workbench_relation_source_repository,
+            scope_key=normalized_scope_key,
+            source_versions=source_versions,
+        )
+        if not rows:
+            relation_source_versions = self._workbench_relation_source_versions(
+                workbench_relation_source_repository,
+                scope_key=normalized_scope_key,
+                row_ids=normalized_row_ids,
+            )
+            if relation_source_versions:
+                source_versions["workbench_relation_source_versions"] = relation_source_versions
+        rows = [{**row, "source_versions": source_versions} for row in rows]
+        save_delta(
+            {
+                "scope_key": normalized_scope_key,
+                "rows": rows,
+                "source_versions": source_versions,
+                "source_version": source_version,
+            },
+            scope_key=normalized_scope_key,
+        )
+        return {
+            "scope_key": normalized_scope_key,
+            "row_count": len(rows),
+            "affected_row_count": len(normalized_row_ids),
+            "source_version": source_version,
+            "source_versions": source_versions,
+            "relation_delta": True,
+        }
+
     def rebuild_turnover_ledger_read_model_scope(self, scope_key: str, *, source_version: object = None) -> dict[str, Any]:
         normalized_scope_key = str(scope_key or "all").strip() or "all"
         ledger_service = self._ledger_service

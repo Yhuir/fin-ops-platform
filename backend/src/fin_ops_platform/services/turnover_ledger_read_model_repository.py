@@ -31,3 +31,23 @@ class TurnoverLedgerReadModelRepositoryPort:
 
     def save_turnover_ledger_rows(self, payload: dict[str, Any], *, scope_key: str | None = None) -> None:
         self._repository.save_turnover_ledger_rows(payload, scope_key=scope_key)
+
+    def load_turnover_ledger_relation_delta(
+        self,
+        *,
+        scope_key: str,
+        row_ids: list[str],
+    ) -> dict[str, Any]:
+        payload = self._repository.load_turnover_ledger_relation_delta(
+            scope_key=scope_key,
+            row_ids=row_ids,
+        )
+        return dict(payload) if isinstance(payload, dict) else {}
+
+    def save_turnover_ledger_relation_delta(
+        self,
+        payload: dict[str, Any],
+        *,
+        scope_key: str,
+    ) -> None:
+        self._repository.save_turnover_ledger_relation_delta(payload, scope_key=scope_key)

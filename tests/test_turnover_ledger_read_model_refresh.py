@@ -14,10 +14,23 @@ from fin_ops_platform.services.turnover_ledger_sql_projection import (
 class FakeProjectionBuilder:
     def __init__(self) -> None:
         self.rebuilt: list[tuple[str, object]] = []
+        self.rebuilt_relation_deltas: list[dict[str, object]] = []
 
     def rebuild_turnover_ledger_read_model_scope(self, scope_key: str, *, source_version: object = None) -> dict[str, object]:
         self.rebuilt.append((scope_key, source_version))
         return {"scope_key": scope_key, "row_count": 2}
+
+    def rebuild_turnover_ledger_relation_delta(
+        self,
+        scope_key: str,
+        *,
+        row_ids: list[str],
+        source_version: object = None,
+    ) -> dict[str, object]:
+        self.rebuilt_relation_deltas.append(
+            {"scope_key": scope_key, "row_ids": list(row_ids), "source_version": source_version}
+        )
+        return {"scope_key": scope_key, "row_count": 1, "relation_delta": True}
 
 
 class FakeQueue:
@@ -38,6 +51,9 @@ class FakeTurnoverReadRepository:
         self.source_summary: dict[str, object] = {}
         self.source_bundle_calls: list[dict[str, object]] = []
         self.source_summary_calls: list[dict[str, object]] = []
+        self.relation_delta_payload: dict[str, object] | None = None
+        self.saved_relation_delta: dict[str, object] | None = None
+        self.saved_relation_delta_scope_key: str | None = None
 
     def list_turnover_ledger_view(self, **kwargs: object) -> dict[str, object] | None:
         self.list_calls.append(dict(kwargs))
@@ -46,6 +62,18 @@ class FakeTurnoverReadRepository:
     def save_turnover_ledger_rows(self, payload: dict[str, object], *, scope_key: str | None = None) -> None:
         self.saved_payload = payload
         self.saved_scope_key = scope_key
+
+    def load_turnover_ledger_relation_delta(self, **_kwargs: object) -> dict[str, object]:
+        return dict(self.relation_delta_payload or {})
+
+    def save_turnover_ledger_relation_delta(
+        self,
+        payload: dict[str, object],
+        *,
+        scope_key: str,
+    ) -> None:
+        self.saved_relation_delta = dict(payload)
+        self.saved_relation_delta_scope_key = scope_key
 
     def workbench_relation_source_bundle_from_source(self, **kwargs: object) -> dict[str, object]:
         self.source_bundle_calls.append(dict(kwargs))
@@ -660,6 +688,122 @@ class TurnoverLedgerReadModelRefreshServiceTests(unittest.TestCase):
         self.assertEqual(
             queue.completed,
             [{"tenant_id": "default", "scope_type": "turnover_ledger", "scope_key": "2026-03", "source_version": 7}],
+        )
+
+    def test_worker_handler_uses_explicit_relation_delta_contract(self) -> None:
+        builder = FakeProjectionBuilder()
+        queue = FakeQueue()
+        service = TurnoverLedgerReadModelRefreshService(projection_builder=builder, queue_repository=queue)
+        event = RuntimeQueueEvent(
+            event_id="event-relation-delta",
+            tenant_id="default",
+            event_type="turnover_ledger.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id="2026-03",
+            scope_type="turnover_ledger",
+            scope_key="2026-03",
+            dedupe_key=None,
+            payload={
+                "metadata": {
+                    "row_ids": ["bank-1", "bank-1", "bank-2"],
+                    "relation_deltas": {"case-1": {"status": "active"}},
+                }
+            },
+            attempts=0,
+            status="pending",
+            source_version=8,
+        )
+
+        result = service.handle_runtime_event(event)
+
+        self.assertTrue(result["relation_delta"])
+        self.assertEqual(builder.rebuilt, [])
+        self.assertEqual(
+            builder.rebuilt_relation_deltas,
+            [{"scope_key": "2026-03", "row_ids": ["bank-1", "bank-2"], "source_version": 8}],
+        )
+        self.assertEqual(len(queue.completed), 1)
+
+    def test_worker_handler_does_not_use_relation_delta_for_all_scope(self) -> None:
+        builder = FakeProjectionBuilder()
+        service = TurnoverLedgerReadModelRefreshService(projection_builder=builder)
+        event = RuntimeQueueEvent(
+            event_id="event-all",
+            tenant_id="default",
+            event_type="turnover_ledger.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id="all",
+            scope_type="turnover_ledger",
+            scope_key="all",
+            dedupe_key=None,
+            payload={
+                "metadata": {
+                    "row_ids": ["bank-1"],
+                    "relation_deltas": {"case-1": {"status": "active"}},
+                }
+            },
+            attempts=0,
+            status="pending",
+        )
+
+        service.handle_runtime_event(event)
+
+        self.assertEqual(builder.rebuilt, [("all", None)])
+        self.assertEqual(builder.rebuilt_relation_deltas, [])
+
+    def test_projection_relation_delta_reenriches_only_overlapping_rows(self) -> None:
+        repository = FakeTurnoverReadRepository()
+        repository.relation_delta_payload = {
+            "scope_exists": True,
+            "source_versions": {"turnover_ledger_schema_version": "test"},
+            "source_versions_mixed": False,
+            "rows": [
+                {
+                    "relation_id": "relation-2026-03",
+                    "first_transaction_at": "2026-03-01",
+                    "bank_row_ids": ["bank-1"],
+                    "flow_rows": [{"source_bank_row_id": "bank-1", "bank_row_ids": ["bank-1"]}],
+                }
+            ],
+        }
+        repository.source_rows = [
+            {
+                "case_id": "case-1",
+                "status": "active",
+                "relation_mode": "turnover_manual_closure",
+                "row_ids": ["bank-1", "bank-2"],
+                "row_types": ["bank", "bank"],
+                "raw_payload": {"normalized_payload": {"case_id": "case-1"}},
+            }
+        ]
+        repository.source_summary = {
+            "source": "workbench_pair_relations",
+            "scope_key": "2026-03",
+            "relation_count": 1,
+            "relation_updated_at": "2026-07-20T12:00:00+00:00",
+        }
+        builder = TurnoverLedgerSqlProjectionBuilder(
+            read_repository=repository,
+            ledger_service=FailIfCalledLedgerService(),  # type: ignore[arg-type]
+            source_versions_provider=lambda: {"should_not_be_loaded": True},
+            workbench_relation_source_repository=repository,
+        )
+
+        result = builder.rebuild_turnover_ledger_relation_delta(
+            "2026-03",
+            row_ids=["bank-1", "bank-2"],
+            source_version=9,
+        )
+
+        self.assertTrue(result["relation_delta"])
+        self.assertEqual(repository.saved_relation_delta_scope_key, "2026-03")
+        rows = list((repository.saved_relation_delta or {}).get("rows") or [])
+        self.assertEqual(len(rows), 1)
+        self.assertTrue(rows[0]["cash_closure_linked"])
+        self.assertEqual(rows[0]["cash_closure_case_id"], "case-1")
+        self.assertEqual(
+            rows[0]["source_versions"]["workbench_relation_source_versions"]["relation_count"],
+            1,
         )
 
     def test_worker_handler_rejects_wrong_event_type(self) -> None:
