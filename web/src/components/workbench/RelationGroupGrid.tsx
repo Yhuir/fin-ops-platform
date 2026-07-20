@@ -167,8 +167,7 @@ function RelationGroupGrid({
   const [openFilterMenu, setOpenFilterMenu] = useState<{ paneId: WorkbenchRecordType; columnKey: string } | null>(null);
   const [expandedPaneGroups, setExpandedPaneGroups] = useState<Set<string>>(() => new Set());
   const [loadingPaneGroups, setLoadingPaneGroups] = useState<Set<string>>(() => new Set());
-  const pendingPreviewDetailRequestsRef = useRef<Set<string>>(new Set());
-  const failedPreviewDetailRequestsRef = useRef<Set<string>>(new Set());
+  const [failedPaneGroups, setFailedPaneGroups] = useState<Set<string>>(() => new Set());
   const syncInFlightRef = useRef<Record<WorkbenchRecordType, boolean>>({
     oa: false,
     bank: false,
@@ -204,31 +203,6 @@ function RelationGroupGrid({
       });
     });
   }, [groups, panes]);
-
-  useEffect(() => {
-    if (!onEnsureGroupDetail) {
-      return;
-    }
-    groups.forEach((group) => {
-      const requestKey = buildCollapsedSummaryDetailRequestKey(zoneId, group, panes);
-      if (!requestKey) {
-        clearPreviewDetailRequestKeys(zoneId, group.id, pendingPreviewDetailRequestsRef.current);
-        clearPreviewDetailRequestKeys(zoneId, group.id, failedPreviewDetailRequestsRef.current);
-        return;
-      }
-      if (pendingPreviewDetailRequestsRef.current.has(requestKey) || failedPreviewDetailRequestsRef.current.has(requestKey)) {
-        return;
-      }
-      pendingPreviewDetailRequestsRef.current.add(requestKey);
-      void onEnsureGroupDetail(zoneId, group.id)
-        .catch(() => {
-          failedPreviewDetailRequestsRef.current.add(requestKey);
-        })
-        .finally(() => {
-          pendingPreviewDetailRequestsRef.current.delete(requestKey);
-        });
-    });
-  }, [groups, onEnsureGroupDetail, panes, zoneId]);
 
   const handleSyncScroll = (paneId: WorkbenchRecordType, element: HTMLDivElement) => {
     const maxScrollLeft = Math.max(0, element.scrollWidth - element.clientWidth);
@@ -348,10 +322,16 @@ function RelationGroupGrid({
       if (!onEnsureGroupDetail) {
         return;
       }
+      setFailedPaneGroups((current) => {
+        const next = new Set(current);
+        next.delete(key);
+        return next;
+      });
       setLoadingPaneGroups((current) => new Set(current).add(key));
       try {
         await onEnsureGroupDetail(zoneId, group.id);
       } catch {
+        setFailedPaneGroups((current) => new Set(current).add(key));
         return;
       } finally {
         setLoadingPaneGroups((current) => {
@@ -461,6 +441,7 @@ function RelationGroupGrid({
           const collapseKey = `${group.id}:${paneId}`;
           const isExpanded = expandedPaneGroups.has(collapseKey);
           const isLoading = loadingPaneGroups.has(collapseKey);
+          const isFailed = failedPaneGroups.has(collapseKey);
           const collapsedRowCount = group.rowCounts?.[paneId] ?? group.collapsedRowCounts?.[paneId] ?? collapsedRows.length;
           const rowTotal = isCollapsedSummary ? collapsedRowCount : totalRowCount;
           const visibleRowCount = isCollapsedSummary ? collapsedRows.length : visibleRows.length;
@@ -478,6 +459,8 @@ function RelationGroupGrid({
                 aria-label={
                   isExpanded
                     ? `收起${collapseCopy.detailLabel}`
+                    : isFailed
+                      ? `加载${collapseCopy.detailLabel}失败，点击重试`
                     : isCollapsedSummary
                       ? `展开${collapseCopy.detailLabel}，${rowTotal} ${collapseCopy.countUnit}`
                       : `展开全部${collapseCopy.detailLabel}，当前显示 ${visibleRowCount} ${collapseCopy.countUnit}，共 ${rowTotal} ${collapseCopy.countUnit}`
@@ -494,7 +477,9 @@ function RelationGroupGrid({
                   ? "加载中"
                   : isExpanded
                     ? "收起明细"
-                    : expandText}
+                    : isFailed
+                      ? "加载失败，点击重试"
+                      : expandText}
               </button>
             </Fragment>
           );
@@ -706,6 +691,7 @@ function RelationGroupGrid({
     columnsByPane,
     displayState,
     expandedPaneGroups,
+    failedPaneGroups,
     getRowState,
     groups,
     highlightedRowId,
@@ -905,31 +891,6 @@ function isSourceSegmentedPane(paneId: WorkbenchRecordType, segments: ReturnType
     return true;
   }
   return Boolean(segments?.some((segment) => segment.rows[paneId].length > 0));
-}
-
-function buildCollapsedSummaryDetailRequestKey(zoneId: "paired" | "unpaired", group: WorkbenchRelationGroup, panes: WorkbenchPane[]) {
-  if (group.displayMode !== "collapsed_summary") {
-    return null;
-  }
-  const truncatedPaneSignatures = panes.flatMap((pane) => {
-    const paneId = pane.id as WorkbenchRecordType;
-    const visibleCollapsed = group.collapsedRows?.[paneId]?.length ?? 0;
-    const totalCollapsed = group.collapsedRowCounts?.[paneId] ?? group.rowCounts?.[paneId] ?? visibleCollapsed;
-    return totalCollapsed > visibleCollapsed ? [`${paneId}:collapsed:${visibleCollapsed}/${totalCollapsed}`] : [];
-  });
-  if (truncatedPaneSignatures.length === 0) {
-    return null;
-  }
-  return `${zoneId}:${group.id}:${truncatedPaneSignatures.join("|")}`;
-}
-
-function clearPreviewDetailRequestKeys(zoneId: "paired" | "unpaired", groupId: string, requestKeys: Set<string>) {
-  const prefix = `${zoneId}:${groupId}:`;
-  requestKeys.forEach((requestKey) => {
-    if (requestKey.startsWith(prefix)) {
-      requestKeys.delete(requestKey);
-    }
-  });
 }
 
 function buildPaneSortActionLabel(paneId: "oa" | "bank" | "invoice", currentDirection: "asc" | "desc" | null) {

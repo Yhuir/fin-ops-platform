@@ -1,5 +1,16 @@
 # 关联台 实施记录
 
+## 2026-07-20 - 折叠流水详情按需加载合同闭环
+
+- 目标：修复部分已配对组点击“展开 N 条明细”无响应，同时保持首屏不预取折叠明细；生产样例表现为 3 条摘要组可直接展开，而 28 条摘要组的详情响应缺少空的 OA/发票数组，前端映射抛错后被静默吞掉。
+- 影响范围：仅关联台 active-generation group detail materializer、`GET /api/workbench/groups/detail` 客户端合同、关联台详情安装语义和 `RelationGroupGrid` 展开交互；不修改 relation 事实、projection、worker、queue、Redis、数据库 schema 或其他页面 read model。
+- 关键决策：repository 详情物化必须稳定输出 `oa_rows`、`bank_rows`、`invoice_rows` 三个数组，空 pane 返回空数组；详情客户端验证 group identity、三数组 shape 与声明成员数，HTTP 200 但结构缺失或成员不完整一律 fail-closed；页面 Promise 只有在同一 active read-model version 的完整详情写入后才 fulfilled；组件仅在用户点击时请求详情，失败时保持折叠并显示“加载失败，点击重试”。
+- 旧逻辑清理：删除 mount/update 时自动预取折叠详情的 effect、pending/failed request refs、request-key helper 和静默失败分支；不保留并行预取、兼容 fallback 或第二套详情状态机。
+- 文档影响：模块边界、输入/输出 owner、API URL、response 字段、read-model scope 和 worker 合同均未改变；本记录和 `tests.md` 补充详情完整性与惰性加载不变量，其他长期文档不适用。
+- 测试覆盖：后端覆盖 production-shape materialized group 在 OA/发票 pane 无成员时仍返回空数组；API 单测覆盖字段缺失、声明成员不完整 fail-closed；组件覆盖零预取、点击单次请求、失败可见及重试；E2E 覆盖 3 条摘要经一次详情请求展开为 4 条完整流水。
+- 验证命令：见本轮最终说明及 `tests.md`；发布后使用正式生产 release、真实 active generation 与只读浏览器/API probe 验证。
+- 未测风险：本条记录写入时生产部署和生产性能验证尚未执行，最终结果以本轮发布后的生产证据为准。
+
 ## 2026-07-17 - 统一生产部署与写后验证闭环
 
 - 发布：精确 SHA `d3fc16026` 的 Nightly CI 成功后，生产 release `main-d3fc16026-oa-outbox-index-20260717` 完成 migration、API/dispatcher/22 workers、readiness、前端 hash 与公网 session route 门禁。

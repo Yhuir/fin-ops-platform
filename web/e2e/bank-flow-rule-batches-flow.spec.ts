@@ -593,10 +593,12 @@ test.describe("bank flow rule batches browser flow", () => {
 
     const expandButton = pairedZone.getByRole("button", { name: "展开流水规则批次明细，4 条" });
     await expect(expandButton).toBeVisible();
+    expect(api.count("GET /api/workbench/groups/detail")).toBe(0);
     await expandButton.click();
     await expect(pairedZone.getByText("流水规则手续费明细 1")).toBeVisible();
     await expect(pairedZone.getByText("流水规则手续费明细 4")).toBeVisible();
     await expect(pairedZone.getByRole("button", { name: "收起流水规则批次明细" })).toBeVisible();
+    expect(api.count("GET /api/workbench/groups/detail")).toBe(1);
 
     const invoiceRequiredGroup = page.getByTestId(
       "candidate-group-unpaired-bank-flow-rule-batch:bank_flow_rule_batch_e2e_invoice_required",

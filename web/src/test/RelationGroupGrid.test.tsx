@@ -873,7 +873,7 @@ describe("Workbench candidate grouping layout", () => {
     await waitFor(() => expect(ensureGroupDetail).toHaveBeenCalledWith("unpaired", "case:CASE-MANUAL-INVOICE-MANY"));
   });
 
-  test("auto-loads complete collapsed summary detail when summary response truncates collapsed rows", async () => {
+  test("keeps truncated collapsed summary detail lazy until the user expands it", () => {
     const group = createBankFlowCollapsedGroup();
     const ensureGroupDetail = vi.fn().mockResolvedValue(undefined);
 
@@ -897,7 +897,7 @@ describe("Workbench candidate grouping layout", () => {
       />,
     );
 
-    await waitFor(() => expect(ensureGroupDetail).toHaveBeenCalledWith("paired", "bank-flow-rule-batch:BATCH-202603-FEE"));
+    expect(ensureGroupDetail).not.toHaveBeenCalled();
   });
 
   test("renders a formal OA, bank, and invoice relation on the same horizontal group row", async () => {
@@ -1333,17 +1333,22 @@ describe("Workbench candidate grouping layout", () => {
       />,
     );
 
-    await waitFor(() => expect(ensureGroupDetail).toHaveBeenCalledWith("paired", "bank-flow-rule-batch:BATCH-202603-FEE"));
-    ensureGroupDetail.mockClear();
+    expect(ensureGroupDetail).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "展开流水规则批次明细，15 条" }));
 
     await waitFor(() => expect(ensureGroupDetail).toHaveBeenCalledWith("paired", "bank-flow-rule-batch:BATCH-202603-FEE"));
-    await waitFor(() => expect(screen.getByRole("button", { name: "展开流水规则批次明细，15 条" })).not.toBeDisabled());
+    const retryButton = await screen.findByRole("button", { name: "加载流水规则批次明细失败，点击重试" });
+    expect(retryButton).toHaveTextContent("加载失败，点击重试");
+    expect(retryButton).not.toBeDisabled();
+    expect(retryButton).toHaveAttribute("aria-expanded", "false");
     expect(screen.getByText("流水规则手续费批次")).toBeInTheDocument();
     expect(screen.queryByText("建设银行手续费")).not.toBeInTheDocument();
     expect(screen.queryByText("网银服务费")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "收起流水规则批次明细" })).not.toBeInTheDocument();
+
+    fireEvent.click(retryButton);
+    await waitFor(() => expect(ensureGroupDetail).toHaveBeenCalledTimes(2));
   });
 
   test("renders ETC invoice summaries collapsed by default and expands in the invoice pane", () => {

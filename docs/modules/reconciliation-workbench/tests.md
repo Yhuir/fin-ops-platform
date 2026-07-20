@@ -2,6 +2,13 @@
 
 日期：2026-07-20
 
+## 2026-07-20 折叠流水详情惰性加载回归
+
+- Repository：production-shape materialized group 只有银行成员时，group detail 仍必须返回 `oa_rows=[]`、完整 `bank_rows`、`invoice_rows=[]`，且折叠计数与明细成员一致。
+- API client：HTTP 200 若缺少任一 pane 数组、group identity 不一致，或声明成员数与实际详情不一致，必须 fail-closed，不能把不完整 payload 安装为可展开数据。
+- 前端交互：页面加载和 group 更新不得自动预取折叠明细；用户点击后只发一次详情请求，成功后展开，失败后保持折叠并显示可重试状态。
+- E2E：首屏只显示 3 条流水摘要时不请求详情；用户点击“展开 4 条明细”后恰好请求一次 group detail，并渲染 4 条完整流水。
+
 ## 2026-07-20 Turnover 撤回 preparation 隔离回归
 
 - `tests/test_workbench_relation_command_service.py::WorkbenchRelationCommandServiceTests::test_prepared_withdraw_reuses_lock_relation_snapshot_and_freshness` 保护同一 service/transaction 的 preparation 复用一次 lock/scoped snapshot/freshness。
@@ -53,6 +60,7 @@
 - 默认无筛选 all-scope `/groups` 的 total/row_counts 必须来自当前 active-month generation-set digest 对应的两条 `workbench_generation_stats`；统计缺失或查询前后 digest 改变时返回 refreshing，不得执行旧的全量 distinct row count。月 generation 发布与该统计必须处于同一事务，多个 scope 同批发布只生成一次最终 digest 统计。
 - all-scope 搜索、来源、pane/列/时间筛选必须只 materialize active generation key，条件之间按既有 AND/OR 语义相交；total、row counts、matching group ids 在一条计数 SQL 中得到，分页只按 matching ids 读取 payload。测试必须断言 SQL 不读取 `g.*`/payload/raw payload，不 join 历史 physical all group，且不为 count/page 重复执行 member 条件。
 - 普通标量列的同列多选必须按 OR，`全选`不能把结果清空；不同列/不同 pane 继续按 AND，银行金额表头的方向+付款账号复合筛选继续要求同一行同时满足。前端本地过滤、HTTP mock、repository SQL 和 summary preview 必须使用同一合同。
+- group detail 必须稳定输出三个 pane 数组；展开 Promise 只有在同一 active read-model version 的完整详情已安装后才能成功。详情保持 click-only lazy load，禁止恢复 mount/update 自动预取或静默吞错。
 
 ## 验证命令
 

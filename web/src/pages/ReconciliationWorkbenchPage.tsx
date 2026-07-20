@@ -1080,36 +1080,21 @@ export default function ReconciliationWorkbenchPage() {
   const handleEnsureGroupDetail = useCallback(async (zone: "paired" | "unpaired", groupId: string) => {
     const normalizedGroupId = groupId.trim();
     if (!normalizedGroupId) {
-      return;
+      throw new Error("invalid_workbench_group_detail_request");
     }
     const expectedReadModelVersion = activeWorkbenchReadModelVersionRef.current;
     if (!expectedReadModelVersion) {
       setLastActionMessage("数据版本尚未就绪，请刷新后重试。");
-      return;
+      throw new Error("workbench_group_detail_version_unavailable");
     }
+    let group: WorkbenchRelationGroup;
     try {
-      const group = await fetchWorkbenchGroupDetail(
+      group = await fetchWorkbenchGroupDetail(
         WORKBENCH_VIEW_MONTH,
         zone,
         normalizedGroupId,
         expectedReadModelVersion,
       );
-      if (activeWorkbenchReadModelVersionRef.current !== expectedReadModelVersion) {
-        return;
-      }
-      setWorkbenchData((current) => {
-        if (!current) {
-          return current;
-        }
-        return {
-          ...current,
-          [zone]: {
-            groups: current[zone].groups.map((candidate) => (
-              candidate.id === group.id ? group : candidate
-            )),
-          },
-        };
-      });
     } catch (error) {
       if (isWorkbenchReadModelRejected(error)) {
         await loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
@@ -1118,11 +1103,28 @@ export default function ReconciliationWorkbenchPage() {
           zoneQueries: zoneServerPageQueries,
         });
         setLastActionMessage("关联台数据版本已更新，页面已重新加载。");
-        return;
+        throw new Error("workbench_group_detail_version_changed");
       }
       setLastActionMessage("加载完整明细失败，请稍后重试。");
       throw new Error("workbench_group_detail_load_failed");
     }
+    if (activeWorkbenchReadModelVersionRef.current !== expectedReadModelVersion) {
+      setLastActionMessage("关联台数据版本已更新，请重新展开明细。");
+      throw new Error("workbench_group_detail_version_changed");
+    }
+    setWorkbenchData((current) => {
+      if (!current) {
+        return current;
+      }
+      return {
+        ...current,
+        [zone]: {
+          groups: current[zone].groups.map((candidate) => (
+            candidate.id === group.id ? group : candidate
+          )),
+        },
+      };
+    });
   }, [zonePages]);
 
   useEffect(() => {

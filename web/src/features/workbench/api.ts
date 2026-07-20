@@ -2468,7 +2468,35 @@ export async function fetchWorkbenchGroupDetail(
     method: "GET",
     signal,
   });
-  return mapGroup(payload.group, zone);
+  const rawGroup = payload?.group;
+  if (
+    !rawGroup
+    || typeof rawGroup !== "object"
+    || !Array.isArray(rawGroup.oa_rows)
+    || !Array.isArray(rawGroup.bank_rows)
+    || !Array.isArray(rawGroup.invoice_rows)
+  ) {
+    throw new Error("invalid_workbench_group_detail_contract");
+  }
+  if (String(rawGroup.group_id ?? "").trim() !== groupId.trim()) {
+    throw new Error("workbench_group_detail_identity_mismatch");
+  }
+  const group = mapGroup(rawGroup, zone);
+  for (const paneId of ["oa", "bank", "invoice"] as WorkbenchRecordType[]) {
+    const expectedCount = group.displayMode === "collapsed_summary"
+      ? group.collapsedRowCounts?.[paneId] ?? group.rowCounts?.[paneId]
+      : group.rowCounts?.[paneId];
+    if (expectedCount === undefined) {
+      continue;
+    }
+    const actualCount = group.displayMode === "collapsed_summary"
+      ? group.collapsedRows?.[paneId]?.length ?? 0
+      : group.rows[paneId].length;
+    if (actualCount !== expectedCount) {
+      throw new Error("incomplete_workbench_group_detail");
+    }
+  }
+  return group;
 }
 
 export async function fetchWorkbenchInitialPage(

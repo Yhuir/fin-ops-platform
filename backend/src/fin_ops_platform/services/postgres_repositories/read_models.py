@@ -14674,6 +14674,8 @@ def _materialize_workbench_group_payload(group: dict[str, Any], member_rows: lis
             collapsed_rows.setdefault(pane, []).append(row_payload_value)
             continue
         result.setdefault(f"{pane}_rows", []).append(row_payload_value)
+    for pane in ("oa", "bank", "invoice"):
+        result.setdefault(f"{pane}_rows", [])
     if collapsed_rows:
         result["collapsed_rows"] = collapsed_rows
     return result

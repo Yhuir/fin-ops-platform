@@ -638,6 +638,58 @@ describe("workbench api bank amount mapping", () => {
     expect(group.collapsedRows?.bank).toHaveLength(4);
   });
 
+  test("rejects sparse workbench group detail responses before the shared group mapper", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          group: {
+            group_id: "case:no-oa",
+            group_type: "relation",
+            match_confidence: "high",
+            reason: "免OA批次",
+            display_mode: "collapsed_summary",
+            bank_rows: [{ id: "summary", type: "bank" }],
+            row_counts: { bank: 1 },
+            collapsed_rows: { bank: [{ id: "bank-1", type: "bank" }] },
+            collapsed_row_counts: { bank: 1 },
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await expect(
+      fetchWorkbenchGroupDetail("all", "paired", "case:no-oa", "generation-set-1"),
+    ).rejects.toThrow("invalid_workbench_group_detail_contract");
+  });
+
+  test("rejects incomplete collapsed workbench group detail responses", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          group: {
+            group_id: "case:no-oa",
+            group_type: "relation",
+            match_confidence: "high",
+            reason: "免OA批次",
+            display_mode: "collapsed_summary",
+            oa_rows: [],
+            bank_rows: [{ id: "summary", type: "bank" }],
+            invoice_rows: [],
+            row_counts: { bank: 4 },
+            collapsed_rows: { bank: [{ id: "bank-1", type: "bank" }] },
+            collapsed_row_counts: { bank: 4 },
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await expect(
+      fetchWorkbenchGroupDetail("all", "paired", "case:no-oa", "generation-set-1"),
+    ).rejects.toThrow("incomplete_workbench_group_detail");
+  });
+
   test("keeps collapsed no-OA bank groups searchable when the hit is inside collapsed no-OA bank detail rows", () => {
     const state = createEmptyWorkbenchZoneDisplayState();
     state.activePaneId = "bank";

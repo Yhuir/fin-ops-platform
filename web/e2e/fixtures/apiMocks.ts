@@ -960,7 +960,11 @@ function bankFlowRuleInvoiceRequiredGroup(zone: WorkbenchZone, linked: boolean) 
   };
 }
 
-function bankFlowRuleWorkbenchGroups(zone: WorkbenchZone, invoiceRequiredConfirmed = false) {
+function bankFlowRuleWorkbenchGroups(
+  zone: WorkbenchZone,
+  invoiceRequiredConfirmed = false,
+  includeFullCollapsedRows = false,
+) {
   const invoiceRequiredGroup = bankFlowRuleInvoiceRequiredGroup(zone, invoiceRequiredConfirmed);
   if (zone === "paired") {
     const collapsedRows = [1, 2, 3, 4].map((index) => bankFlowRuleSourceRow(index));
@@ -994,7 +998,12 @@ function bankFlowRuleWorkbenchGroups(zone: WorkbenchZone, invoiceRequiredConfirm
       display_mode: "collapsed_summary",
       default_collapsed: true,
       summary_row: summaryRow,
-      collapsed_rows: { bank: collapsedRows, oa: [], invoice: [] },
+      collapsed_rows: {
+        bank: includeFullCollapsedRows ? collapsedRows : collapsedRows.slice(0, 3),
+        oa: [],
+        invoice: [],
+      },
+      collapsed_row_counts: { oa: 0, bank: 4, invoice: 0 },
       row_counts: { oa: 0, bank: 4, invoice: 0 },
       display_row_counts: { oa: 0, bank: 1, invoice: 0 },
       oa_rows: [],
@@ -9708,6 +9717,23 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         Number.isFinite(requestedPageSize) ? requestedPageSize : 50,
         url.searchParams.get("search") ?? "",
       ));
+    }
+
+    if (path === "/api/workbench/groups/detail" && options.workbenchBankFlowRuleBatchScenario) {
+      const zone = url.searchParams.get("zone") === "unpaired" ? "unpaired" : "paired";
+      const groupId = url.searchParams.get("group_id") ?? "";
+      const group = bankFlowRuleWorkbenchGroups(zone, relationConfirmed, true)
+        .find((candidate) => candidate.group_id === groupId);
+      if (!group) {
+        return json(route, { error: "workbench_group_not_found" }, 404);
+      }
+      return json(route, {
+        group,
+        read_model_status: "fresh",
+        read_model_version: relationConfirmed
+          ? "workbench-generation-e2e-002"
+          : "workbench-generation-e2e-001",
+      });
     }
 
     const workbenchRowDetailMatch = path.match(/^\/api\/workbench\/rows\/([^/]+)$/);

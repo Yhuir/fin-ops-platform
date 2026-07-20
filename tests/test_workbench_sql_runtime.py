@@ -3583,39 +3583,76 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                     return {
                         "group_id": "case:no-oa",
                         "zone": "paired",
+                        "scope_key": "2026-03",
+                        "generation_id": "gen-active",
                         "payload": {
                             "group_id": "case:no-oa",
                             "group_type": "auto_closed",
                             "match_confidence": "high",
                             "reason": "detail",
-                            "oa_rows": [],
-                            "bank_rows": [
-                                {
-                                    "id": "no_oa_summary:batch-1",
-                                    "type": "bank",
-                                    "source_kind": "no_oa_bank_batch_summary",
-                                }
-                            ],
-                            "invoice_rows": [],
-                            "collapsed_rows": {
-                                "bank": [
-                                    {"id": "bank-1", "type": "bank", "source_kind": "bank"},
-                                    {"id": "bank-2", "type": "bank"},
-                                ]
-                            },
+                            "workbench_group_rows_materialized": True,
                         },
                     }
                 return super().fetch_one(sql, params)
 
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_all_calls.append((normalized, params))
+                if "with target_groups as" in normalized and "read_model.workbench_group_rows gr" in normalized:
+                    return [
+                        {
+                            "scope_key": "2026-03",
+                            "generation_id": "gen-active",
+                            "zone": "paired",
+                            "group_id": "case:no-oa",
+                            "pane": "bank",
+                            "row_id": "no_oa_summary:batch-1",
+                            "row_role": "summary",
+                            "source_kind": "no_oa_bank_batch_summary",
+                            "row_payload": {
+                                "id": "no_oa_summary:batch-1",
+                                "type": "bank",
+                                "source_kind": "no_oa_bank_batch_summary",
+                            },
+                        },
+                        {
+                            "scope_key": "2026-03",
+                            "generation_id": "gen-active",
+                            "zone": "paired",
+                            "group_id": "case:no-oa",
+                            "pane": "bank",
+                            "row_id": "bank-1",
+                            "row_role": "collapsed",
+                            "source_kind": "bank",
+                            "row_payload": {"id": "bank-1", "type": "bank", "source_kind": "bank"},
+                        },
+                        {
+                            "scope_key": "2026-03",
+                            "generation_id": "gen-active",
+                            "zone": "paired",
+                            "group_id": "case:no-oa",
+                            "pane": "bank",
+                            "row_id": "bank-2",
+                            "row_role": "collapsed",
+                            "source_kind": "bank",
+                            "row_payload": {"id": "bank-2", "type": "bank"},
+                        },
+                    ]
+                return super().fetch_all(sql, params)
+
         connection = CollapsedGroupDetailConnection()
         repository = PostgresReadModelRepository(connection)
 
-        group = repository.get_workbench_group_detail(scope_key="all", zone="paired", group_id="case:no-oa")
+        group = repository.get_workbench_group_detail(scope_key="2026-03", zone="paired", group_id="case:no-oa")
 
         assert group is not None
+        self.assertEqual(group["oa_rows"], [])
+        self.assertEqual([row["id"] for row in group["bank_rows"]], ["no_oa_summary:batch-1"])
+        self.assertEqual(group["invoice_rows"], [])
         self.assertEqual(group["row_counts"], {"oa": 0, "bank": 2, "invoice": 0, "rows": 2})
         self.assertEqual(group["display_row_counts"], {"oa": 0, "bank": 1, "invoice": 0, "rows": 1})
         self.assertEqual([row["id"] for row in group["collapsed_rows"]["bank"]], ["bank-1", "bank-2"])
+        self.assertNotIn("workbench_group_rows_materialized", group)
 
     def test_repository_keeps_all_oa_attachment_invoice_rows_in_summary_page(self) -> None:
         class OaAttachmentInvoiceRowsConnection(WorkbenchSummaryGroupsConnection):
