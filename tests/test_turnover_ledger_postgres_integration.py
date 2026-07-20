@@ -176,6 +176,46 @@ class TurnoverLedgerPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(payload["source_versions"], {})
         self.assertTrue(payload["source_versions_mixed"])
 
+    def test_relation_source_bundle_returns_rows_and_version_from_one_canonical_scope(self) -> None:
+        self.connection.execute(
+            """
+            insert into app.workbench_pair_relations(
+                case_id, relation_mode, status, month_scope, row_ids, row_types, raw_payload
+            ) values
+                (
+                    'case-target', 'turnover_manual_closure', 'active', '2026-03-01',
+                    array['txn-target', 'txn-peer'], array['bank', 'bank'],
+                    '{"normalized_payload":{"relation_source":"manual"}}'::jsonb
+                ),
+                (
+                    'case-same-month', 'manual_confirmed', 'active', '2026-03-01',
+                    array['txn-other'], array['bank'], '{}'::jsonb
+                ),
+                (
+                    'case-withdrawn', 'turnover_manual_closure', 'withdrawn', '2026-03-01',
+                    array['txn-target'], array['bank'], '{}'::jsonb
+                )
+            """
+        )
+
+        bundle = self.repository.workbench_relation_source_bundle_from_source(
+            scope_key="2026-03",
+            row_ids=["txn-target"],
+        )
+
+        self.assertEqual([row["case_id"] for row in bundle["rows"]], ["case-target"])
+        self.assertEqual(bundle["rows"][0]["row_ids"], ["txn-target", "txn-peer"])
+        self.assertEqual(
+            bundle["source_versions"],
+            {
+                "source": "workbench_pair_relations",
+                "scope_key": "2026-03",
+                "relation_count": 2,
+                "relation_updated_at": bundle["source_versions"]["relation_updated_at"],
+            },
+        )
+        self.assertTrue(bundle["source_versions"]["relation_updated_at"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -20,6 +20,7 @@ from fin_ops_platform.services.etc_service import (
 )
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
+from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
 from fin_ops_platform.services.postgres_state_store import PostgresStateStore
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.import_file_service import FileImportPreviewItem, FileImportService, FileImportSession
@@ -76,6 +77,55 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
                 )
                 raise RuntimeError("force rollback")
         self.assertEqual(fetch_scalar(self.database_url, "select count(*) from app.app_settings where settings_key = 'tx-rollback';"), "0")
+
+    def test_turnover_relation_change_preserves_unrelated_relation_and_audit_history(self) -> None:
+        repository = PostgresWorkbenchRepository(self.connection)
+        repository.save_turnover_relations(
+            {
+                "relations": {
+                    "relation-a": {
+                        "relation_id": "relation-a",
+                        "bank_transaction_ids": ["bank-a"],
+                        "status": "confirmed",
+                        "scope_month": "2026-03",
+                        "version": 1,
+                    },
+                    "relation-b": {
+                        "relation_id": "relation-b",
+                        "bank_transaction_ids": ["bank-b"],
+                        "status": "confirmed",
+                        "scope_month": "2026-04",
+                        "version": 1,
+                    },
+                },
+                "audit_log": [
+                    {"operation_id": "create-a", "relation_id": "relation-a", "action": "confirm_relation"},
+                    {"operation_id": "create-b", "relation_id": "relation-b", "action": "confirm_relation"},
+                ],
+            }
+        )
+
+        repository.save_turnover_relation_change(
+            relation={
+                "relation_id": "relation-a",
+                "bank_transaction_ids": ["bank-a"],
+                "status": "withdrawn",
+                "scope_month": "2026-03",
+                "version": 2,
+            },
+            audit_event={
+                "operation_id": "withdraw-a",
+                "relation_id": "relation-a",
+                "action": "withdraw_relation",
+            },
+        )
+
+        loaded = repository.load_turnover_relations()
+        relations = {row["relation_id"]: row for row in loaded["relations"]}
+        self.assertEqual(relations["relation-a"]["status"], "withdrawn")
+        self.assertEqual(relations["relation-b"]["status"], "confirmed")
+        audit_operations = {row.get("operation_id") for row in loaded["audit_log"]}
+        self.assertEqual(audit_operations, {"create-a", "create-b", "withdraw-a"})
 
     def test_workbench_all_groups_use_exact_generation_stats_and_fail_closed_when_missing(self) -> None:
         self.store.save_workbench_read_models(

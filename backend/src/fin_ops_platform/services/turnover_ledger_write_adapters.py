@@ -371,6 +371,7 @@ class TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder:
         relation_service: Any,
         routes: Any,
         bank_rows_provider: Callable[[], list[dict[str, object]]],
+        bank_rows_by_ids_provider: Callable[[list[str]], list[dict[str, object]]],
         replace_snapshot: Callable[[dict[str, object]], None],
         emit_persistence_warning: Callable[..., None],
         tenant_id: str,
@@ -386,6 +387,7 @@ class TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder:
         self._relation_service = relation_service
         self._routes = routes
         self._bank_rows_provider = bank_rows_provider
+        self._bank_rows_by_ids_provider = bank_rows_by_ids_provider
         self._replace_snapshot = replace_snapshot
         self._emit_persistence_warning = emit_persistence_warning
         self._tenant_id = tenant_id
@@ -406,7 +408,7 @@ class TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder:
             relation_repository = TurnoverLedgerRelationWritePort(
                 relation_service=self._relation_service,
                 routes=self._routes,
-                bank_rows_provider=self._bank_rows_provider,
+                bank_rows_by_ids_provider=self._bank_rows_by_ids_provider,
                 persistence_repository_factory=self._persistence_repository_factory,
             )
             dirty_outbox_writer = TurnoverLedgerDirtyOutboxWriter(
@@ -481,6 +483,7 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
         relation_service: Any,
         routes: Any,
         bank_rows_provider: Callable[[], list[dict[str, object]]],
+        bank_rows_by_ids_provider: Callable[[list[str]], list[dict[str, object]]],
         replace_snapshot: Callable[[dict[str, object]], None],
         emit_persistence_warning: Callable[..., None],
         tenant_id: str,
@@ -496,6 +499,7 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
         self._relation_service = relation_service
         self._routes = routes
         self._bank_rows_provider = bank_rows_provider
+        self._bank_rows_by_ids_provider = bank_rows_by_ids_provider
         self._replace_snapshot = replace_snapshot
         self._emit_persistence_warning = emit_persistence_warning
         self._tenant_id = tenant_id
@@ -516,7 +520,7 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
             relation_repository = TurnoverLedgerRelationWritePort(
                 relation_service=self._relation_service,
                 routes=self._routes,
-                bank_rows_provider=self._bank_rows_provider,
+                bank_rows_by_ids_provider=self._bank_rows_by_ids_provider,
                 persistence_repository_factory=self._persistence_repository_factory,
             )
             dirty_outbox_writer = TurnoverLedgerDirtyOutboxWriter(
@@ -567,7 +571,7 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
                 else None
             )
         stale_precondition_port = TurnoverLedgerBankRowStalePreconditionPort(
-            bank_rows_provider=self._bank_rows_provider
+            bank_rows_by_ids_provider=self._bank_rows_by_ids_provider
         )
         uow = TurnoverLedgerWriteUnitOfWork(
             connection=connection,
@@ -978,8 +982,8 @@ class TurnoverLedgerRelationStalePreconditionPort:
 
 
 class TurnoverLedgerBankRowStalePreconditionPort:
-    def __init__(self, *, bank_rows_provider: Callable[[], list[dict[str, object]]]) -> None:
-        self._bank_rows_provider = bank_rows_provider
+    def __init__(self, *, bank_rows_by_ids_provider: Callable[[list[str]], list[dict[str, object]]]) -> None:
+        self._bank_rows_by_ids_provider = bank_rows_by_ids_provider
 
     def assert_current(self, *, expected_versions: dict[str, object], transaction: object) -> None:
         _ = transaction
@@ -995,7 +999,7 @@ class TurnoverLedgerBankRowStalePreconditionPort:
             return
         rows_by_transaction_id = {
             str(row.get("id") or row.get("transaction_id") or "").strip(): dict(row)
-            for row in list(self._bank_rows_provider() or [])
+            for row in list(self._bank_rows_by_ids_provider(list(expected_by_transaction_id)) or [])
             if str(row.get("id") or row.get("transaction_id") or "").strip()
         }
         for transaction_id, expected_value in expected_by_transaction_id.items():
@@ -1242,74 +1246,6 @@ class TurnoverLedgerTagSelectionRequestBoundaryFacade:
             )
         )
         return payload
-
-
-class TurnoverLedgerRelationRepositoryAdapter:
-    def __init__(self, *, repository_factory: Callable[[Any], Any]) -> None:
-        self._repository_factory = repository_factory
-
-    def confirm_relation(
-        self,
-        *,
-        bank_row_ids: list[str],
-        actor_id: str,
-        note: str | None,
-        transaction: Any,
-    ) -> dict[str, object]:
-        repository = self._repository_factory(transaction)
-        confirm = getattr(repository, "confirm_relation", None)
-        if not callable(confirm):
-            raise RuntimeError("turnover relation repository must expose confirm_relation.")
-        return dict(
-            confirm(
-                bank_row_ids=list(bank_row_ids or []),
-                actor_id=actor_id,
-                note=note,
-            )
-            or {}
-        )
-
-    def confirm_zero_difference_closure(
-        self,
-        *,
-        bank_row_ids: list[str],
-        actor_id: str,
-        note: str | None,
-        transaction: Any,
-    ) -> dict[str, object]:
-        repository = self._repository_factory(transaction)
-        confirm = getattr(repository, "confirm_zero_difference_closure", None)
-        if not callable(confirm):
-            raise RuntimeError("turnover relation repository must expose confirm_zero_difference_closure.")
-        return dict(
-            confirm(
-                bank_row_ids=list(bank_row_ids or []),
-                actor_id=actor_id,
-                note=note,
-            )
-            or {}
-        )
-
-    def withdraw_relation(
-        self,
-        *,
-        relation_id: str,
-        actor_id: str,
-        note: str | None,
-        transaction: Any,
-    ) -> dict[str, object]:
-        repository = self._repository_factory(transaction)
-        withdraw = getattr(repository, "withdraw_relation", None)
-        if not callable(withdraw):
-            raise RuntimeError("turnover relation repository must expose withdraw_relation.")
-        return dict(
-            withdraw(
-                relation_id=relation_id,
-                actor_id=actor_id,
-                note=note,
-            )
-            or {}
-        )
 
 
 class TurnoverLedgerBankdetailPortAdapter:
@@ -1872,12 +1808,12 @@ class TurnoverLedgerRelationWritePort:
         *,
         relation_service: Any,
         routes: Any,
-        bank_rows_provider: Callable[[], list[dict[str, object]]],
+        bank_rows_by_ids_provider: Callable[[list[str]], list[dict[str, object]]],
         persistence_repository_factory: Callable[[Any], Any],
     ) -> None:
         self._relation_service = relation_service
         self._routes = routes
-        self._bank_rows_provider = bank_rows_provider
+        self._bank_rows_by_ids_provider = bank_rows_by_ids_provider
         self._persistence_repository_factory = persistence_repository_factory
 
     def confirm_relation(
@@ -1888,7 +1824,8 @@ class TurnoverLedgerRelationWritePort:
         note: str | None,
         transaction: Any,
     ) -> dict[str, object]:
-        self._rebuild_relation_snapshot()
+        self._refresh_selected_bank_rows(bank_row_ids)
+        audit_cursor = self._audit_event_cursor()
         confirm = getattr(self._routes, "confirm_relation", None)
         if not callable(confirm):
             raise RuntimeError("turnover relation routes must expose confirm_relation.")
@@ -1900,7 +1837,7 @@ class TurnoverLedgerRelationWritePort:
             )
             or {}
         )
-        self._save_relation_snapshot(transaction)
+        self._save_relation_change(transaction, result, audit_cursor=audit_cursor)
         return result
 
     def confirm_zero_difference_closure(
@@ -1911,7 +1848,8 @@ class TurnoverLedgerRelationWritePort:
         note: str | None,
         transaction: Any,
     ) -> dict[str, object]:
-        self._rebuild_relation_snapshot()
+        self._refresh_selected_bank_rows(bank_row_ids)
+        audit_cursor = self._audit_event_cursor()
         confirm = getattr(self._relation_service, "confirm_zero_difference_closure", None)
         if not callable(confirm):
             raise RuntimeError("relation_service must expose confirm_zero_difference_closure.")
@@ -1923,7 +1861,7 @@ class TurnoverLedgerRelationWritePort:
             )
             or {}
         )
-        self._save_relation_snapshot(transaction)
+        self._save_relation_change(transaction, {"relation": relation}, audit_cursor=audit_cursor)
         return {"relation": relation}
 
     def withdraw_relation(
@@ -1934,6 +1872,7 @@ class TurnoverLedgerRelationWritePort:
         note: str | None,
         transaction: Any,
     ) -> dict[str, object]:
+        audit_cursor = self._audit_event_cursor()
         withdraw = getattr(self._routes, "withdraw_relation", None)
         if not callable(withdraw):
             raise RuntimeError("turnover relation routes must expose withdraw_relation.")
@@ -1945,24 +1884,56 @@ class TurnoverLedgerRelationWritePort:
             )
             or {}
         )
-        self._save_relation_snapshot(transaction)
+        self._save_relation_change(transaction, result, audit_cursor=audit_cursor)
         return result
 
-    def _rebuild_relation_snapshot(self) -> None:
-        rebuild = getattr(self._relation_service, "rebuild_from_bank_rows", None)
-        if not callable(rebuild):
-            raise RuntimeError("relation_service must expose rebuild_from_bank_rows.")
-        rebuild([dict(row) for row in list(self._bank_rows_provider() or [])])
+    def _refresh_selected_bank_rows(self, bank_row_ids: list[str]) -> None:
+        normalized_row_ids = [str(row_id).strip() for row_id in list(bank_row_ids or []) if str(row_id).strip()]
+        rows = [dict(row) for row in list(self._bank_rows_by_ids_provider(normalized_row_ids) or [])]
+        found_row_ids = {
+            str(row.get("id") or row.get("transaction_id") or row.get("source_bank_row_id") or "").strip()
+            for row in rows
+        }
+        missing_row_ids = [row_id for row_id in normalized_row_ids if row_id not in found_row_ids]
+        if missing_row_ids:
+            raise TurnoverRelationValidationError(
+                "unknown_transaction_id",
+                f"Unknown bank transaction id: {missing_row_ids[0]}",
+            )
+        refresh = getattr(self._relation_service, "refresh_bank_rows", None)
+        if not callable(refresh):
+            raise RuntimeError("relation_service must expose refresh_bank_rows.")
+        refresh(rows)
 
-    def _save_relation_snapshot(self, transaction: Any) -> None:
-        snapshot = getattr(self._relation_service, "snapshot", None)
-        if not callable(snapshot):
-            raise RuntimeError("relation_service must expose snapshot.")
+    def _audit_event_cursor(self) -> int:
+        cursor = getattr(self._relation_service, "audit_event_cursor", None)
+        if not callable(cursor):
+            raise RuntimeError("relation_service must expose audit_event_cursor.")
+        return int(cursor())
+
+    def _save_relation_change(
+        self,
+        transaction: Any,
+        result: dict[str, object],
+        *,
+        audit_cursor: int,
+    ) -> None:
+        relation_payload = result.get("relation") if isinstance(result.get("relation"), dict) else result
+        relation = dict(relation_payload) if isinstance(relation_payload, dict) else {}
+        relation_id = str(relation.get("relation_id") or "").strip()
+        if not relation_id:
+            raise RuntimeError("turnover relation command result must include relation_id.")
+        latest_audit_event = getattr(self._relation_service, "latest_audit_event", None)
+        if not callable(latest_audit_event):
+            raise RuntimeError("relation_service must expose latest_audit_event.")
+        audit_event = latest_audit_event(relation_id, after_cursor=audit_cursor)
+        if not isinstance(audit_event, dict):
+            raise RuntimeError("turnover relation command must append a matching audit event.")
         repository = self._persistence_repository_factory(transaction)
-        save = getattr(repository, "save_turnover_relations", None)
+        save = getattr(repository, "save_turnover_relation_change", None)
         if not callable(save):
-            raise RuntimeError("turnover persistence repository must expose save_turnover_relations.")
-        save(dict(snapshot() or {}))
+            raise RuntimeError("turnover persistence repository must expose save_turnover_relation_change.")
+        save(relation=relation, audit_event=audit_event)
 
 
 class TurnoverLedgerBankdetailWritePort:

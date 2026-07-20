@@ -3956,9 +3956,15 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             self._tag_rows(app, transaction_ids)
+            turnover_rows = app._turnover_bank_transaction_rows()
             queue = _PostgresQueueRecorder()
             read_repository = _TurnoverReadModelRecorder()
             app._state_store = _PostgresLikeStateStore(app._state_store)  # type: ignore[assignment]
+            app._turnover_bank_transaction_rows_by_ids = lambda row_ids: [  # type: ignore[method-assign]
+                dict(row)
+                for row in turnover_rows
+                if str(row.get("id") or "") in set(row_ids)
+            ]
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             app._workbench_sql_read_repository = read_repository
             app._turnover_ledger_sql_read_repository = read_repository

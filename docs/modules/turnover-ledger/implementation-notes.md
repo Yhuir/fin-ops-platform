@@ -1,5 +1,14 @@
 # 外部往来款管理 实施记录
 
+## 2026-07-20 - 确认/撤回写后可见性链路收窄
+
+- 生产基线：列表读取 40 样本 shell/grouped/tag/Page Audit p95 分别为 `115.781ms`、`325.701ms`、`150.911ms`、`303.462ms`，均为 fresh；但可逆确认/撤回的命令耗时分别约 `1.3–1.5s` / `2.3–2.8s`，response-to-fresh 约 `5.8–8.9s`，因此只读性能通过而写后可见性不通过。
+- 真实原因一：PostgreSQL confirm/withdraw port 在每条命令中加载全部 turnover 银行行、重建全部 domain relation、保存整个 relation snapshot 与 audit log，产生与本次操作无关的 I/O。
+- 真实原因二：turnover projection 在 canonical relation 已提交后，仍用 `WorkbenchRelationReadFacade(require_fresh=True)` 等待 `workbench_relation` read model；形成 workbench-relation worker → turnover worker 的串行依赖。
+- 实施边界：stale precondition 和 domain input refresh 只读取目标 bank row IDs；同一事务只 upsert 命令结果 relation、append 本次命令后新增且 relation-id 匹配的 audit event，并写既有 scoped outbox。projection 通过单条 bounded canonical-source bundle SQL 从同一快照读取 active `app.workbench_pair_relations` 和 source summary，不增加新表、worker、cache、queue 或 API。
+- 旧代码删除：移除生产无调用方的 `TurnoverLedgerRelationRepositoryAdapter`、confirm/withdraw 的全量 `_rebuild_relation_snapshot` / `_save_relation_snapshot`，以及 turnover projection 对 workbench-relation read model 的 freshness wait。全量 snapshot writer 只保留给明确的 import/restore/local snapshot owner，不再进入页面确认/撤回链。
+- 本地验证：turnover API/UoW/domain/projection/runtime wiring 共 `303` 项通过；真实 PostgreSQL 应用全量 migrations 后验证单关系 upsert + 单 audit append 不覆盖另一关系及其历史，临时数据库已删除。生产精确 SHA 复测结果在同日后续记录补充。
+
 ## 2026-07-13 - 跨月确认保留 relation freshness 精确 scope
 
 - 生产可逆场景发现：两条跨月 open 流水的 `affected_months` 被压缩成 `month_scope=all` 后，写前 freshness 查询丢失精确月份；因为尚无 relation rows，合法的 fresh empty 集合被误判为 missing 并返回 409。

@@ -1492,6 +1492,47 @@ class Application:
             rows.append(row)
         return rows
 
+    def _turnover_bank_transaction_rows_by_ids(self, transaction_ids: list[str]) -> list[dict[str, object]]:
+        normalized_ids = [
+            str(transaction_id).strip()
+            for transaction_id in list(transaction_ids or [])
+            if str(transaction_id).strip()
+        ]
+        if not normalized_ids:
+            return []
+        if self._requires_sql_read_model_runtime():
+            repository = getattr(self, "_bank_detail_sql_read_repository", None)
+            loader = getattr(repository, "get_bank_detail_tagged_rows_by_transaction_ids", None)
+            if not callable(loader):
+                return []
+            payload = loader(
+                normalized_ids,
+                tenant_id=self._workbench_reconciliation_tenant_id(),
+            )
+            if not isinstance(payload, dict):
+                return []
+            read_model_status = str(payload.get("read_model_status") or "fresh").strip()
+            if read_model_status not in {"fresh", "refreshing"}:
+                return []
+            current_rule_version = self._bank_transaction_category_service.auto_tag_rule_version_label()
+            rows: list[dict[str, object]] = []
+            for row in list(payload.get("rows") or []):
+                if not isinstance(row, dict):
+                    continue
+                if read_model_status == "refreshing" and str(row.get("category_rule_version") or "").strip() != current_rule_version:
+                    continue
+                turnover_row = self._turnover_bank_transaction_row_from_bank_detail(row)
+                if turnover_row is not None:
+                    rows.append(turnover_row)
+            return rows
+        selected_ids = set(normalized_ids)
+        return [
+            row
+            for row in self._turnover_bank_transaction_rows()
+            if str(row.get("id") or row.get("transaction_id") or row.get("source_bank_row_id") or "").strip()
+            in selected_ids
+        ]
+
     def _turnover_bank_transaction_rows_from_sql_read_model(self) -> list[dict[str, object]]:
         if not self._requires_sql_read_model_runtime():
             return []
@@ -2860,6 +2901,7 @@ class Application:
             relation_service=self._turnover_relation_service,
             routes=self._turnover_ledger_api_routes,
             bank_rows_provider=self._turnover_bank_transaction_rows,
+            bank_rows_by_ids_provider=self._turnover_bank_transaction_rows_by_ids,
             replace_snapshot=support.replace_turnover_relation_snapshot,
             emit_persistence_warning=self._emit_workbench_persistence_warning,
             tenant_id=self._workbench_reconciliation_tenant_id(),
@@ -2892,6 +2934,7 @@ class Application:
             relation_service=self._turnover_relation_service,
             routes=self._turnover_ledger_api_routes,
             bank_rows_provider=self._turnover_bank_transaction_rows,
+            bank_rows_by_ids_provider=self._turnover_bank_transaction_rows_by_ids,
             replace_snapshot=support.replace_turnover_relation_snapshot,
             emit_persistence_warning=self._emit_workbench_persistence_warning,
             tenant_id=self._workbench_reconciliation_tenant_id(),
@@ -2933,6 +2976,7 @@ class Application:
             relation_service=self._turnover_relation_service,
             routes=self._turnover_ledger_api_routes,
             bank_rows_provider=self._turnover_bank_transaction_rows,
+            bank_rows_by_ids_provider=self._turnover_bank_transaction_rows_by_ids,
             replace_snapshot=support.replace_turnover_relation_snapshot,
             emit_persistence_warning=self._emit_workbench_persistence_warning,
             tenant_id=self._workbench_reconciliation_tenant_id(),

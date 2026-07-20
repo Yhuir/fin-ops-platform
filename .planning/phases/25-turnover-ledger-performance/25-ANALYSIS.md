@@ -90,6 +90,30 @@
 
 结论：计划完整闭环；无需再增加层、基础设施或兼容分支。
 
+## 发布后写入门失败与补充根因分析
+
+首次发布后的 40 次只读探针全部通过，但可逆生产写入没有达到本阶段既定门槛，因此本阶段不能按只读结果提前结束：
+
+- 第一组：confirm command `1513.044ms`、confirm response-to-fresh `5796.803ms`；withdraw command `2360.949ms`、withdraw response-to-fresh `5869.402ms`。
+- 第二组：confirm command `1335.404ms`、confirm response-to-fresh `8869.179ms`；withdraw command `2772.193ms`、withdraw response-to-fresh `5803.559ms`。
+- 第三组诊断期间确认了页面会在 canonical relation 已更新后反复进入 `refreshing`；测试最终通过正式 withdraw 恢复，两条 test-owned 流水均为 unlinked，未留下 active relation。
+
+真实根因不是前端轮询，也不是列表 SQL：
+
+1. PostgreSQL command path 仍使用旧的 `TurnoverLedgerRelationWritePort` 全快照链。confirm 会全量读取所有 turnover 银行流水并重建所有自动 relation，随后把整个 relation snapshot 和完整 audit log 逐条 upsert；stale precondition 又独立全量读取一次。withdraw 也会保存完整 relation snapshot。该旧链造成命令事务超过 1 秒，并把无关 relation I/O 污染到两条局部命令。
+2. turnover projection 仍经 `WorkbenchRelationReadFacade(require_fresh=True)` 等待 `workbench_relation` read model。虽然同一事务已经写入 canonical `app.workbench_pair_relations`，turnover worker 仍必须等待另一个 worker 先发布 relation read model；事件先到时会 defer/retry，形成约 5–9 秒串行传播。
+3. repository 已有按 row ids 读取 canonical active pair relation 和计算 source summary 的窄方法，其他 projection 也已使用这一模式；turnover 没有复用它，属于残留旧依赖，不需要新队列、新表、新 worker 或缓存。
+
+### 补充三轮 Grill-me 审阅
+
+第一轮（正确性）：局部 command 仍必须复用现有 `TurnoverRelationService` 校验、同一 PostgreSQL 事务、stale/idempotency、Workbench pair relation 原子写入和 durable outbox。只允许把“全量银行行重建 + 全快照保存”改成“按所选行刷新 domain 输入 + 单 relation/单 audit event 持久化”；不能绕开业务规则。
+
+第二轮（隔离与简洁）：turnover projection 可以直接读取 canonical pair relation source，因为它是该 projection 的既有事实输入，且 repository 已有窄 I/O。拒绝同步写 read model、增加 delta cache、新 worker、调整共享队列调度或改其他页面 read model。其他页面继续消费自己的 read model；只删除 turnover 对 relation read model 的等待依赖。
+
+第三轮（旧链、回滚与验证）：必须删除 production command 的全量 `_rebuild_relation_snapshot` / `save_turnover_relations` 路径、全量 stale-row lookup 和 turnover projection 的 `WorkbenchRelationReadFacade` dependency。保留全快照 repository API仅供其仍有 owner 的导入/恢复场景，不作为 turnover confirm/withdraw。新增真实 PostgreSQL 原子窄写测试、canonical-source projection 测试、整条 confirm/withdraw 回归，并重新部署后以至少两组可逆样本验证 command 与 committed-to-fresh 门槛。
+
+补充结论：修复范围仍局限于 turnover owner 和已有 PostgreSQL repository 窄方法；这是消除已测得瓶颈所需的最小结构性修复，不是新增架构层。
+
 ## 验收门槛
 
 - 页面 shell p95 `<=500ms`。

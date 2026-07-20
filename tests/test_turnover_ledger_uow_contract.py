@@ -374,67 +374,6 @@ class _RecordingSettingsRepositoryFactory:
         return repository
 
 
-class _RecordingTurnoverRelationWriteRepository:
-    def __init__(self) -> None:
-        self.confirm_calls: list[dict[str, object]] = []
-        self.withdraw_calls: list[dict[str, object]] = []
-
-    def confirm_relation(
-        self,
-        *,
-        bank_row_ids: list[str],
-        actor_id: str,
-        note: str | None,
-    ) -> dict[str, object]:
-        self.confirm_calls.append(
-            {
-                "bank_row_ids": list(bank_row_ids),
-                "actor_id": actor_id,
-                "note": note,
-            }
-        )
-        return {
-            "relation": {
-                "relation_id": "turnover_rel_confirmed",
-                "status": "confirmed",
-                "bank_row_ids": list(bank_row_ids),
-            }
-        }
-
-    def withdraw_relation(
-        self,
-        *,
-        relation_id: str,
-        actor_id: str,
-        note: str | None,
-    ) -> dict[str, object]:
-        self.withdraw_calls.append(
-            {
-                "relation_id": relation_id,
-                "actor_id": actor_id,
-                "note": note,
-            }
-        )
-        return {
-            "relation": {
-                "relation_id": relation_id,
-                "status": "withdrawn",
-            }
-        }
-
-
-class _RecordingTurnoverRelationRepositoryFactory:
-    def __init__(self) -> None:
-        self.transactions: list[object] = []
-        self.repositories: list[_RecordingTurnoverRelationWriteRepository] = []
-
-    def __call__(self, transaction: object) -> _RecordingTurnoverRelationWriteRepository:
-        self.transactions.append(transaction)
-        repository = _RecordingTurnoverRelationWriteRepository()
-        self.repositories.append(repository)
-        return repository
-
-
 class _RecordingBankdetailWriteRepository:
     def __init__(self) -> None:
         self.category_updates: list[dict[str, object]] = []
@@ -472,10 +411,21 @@ class _RecordingBankdetailRepositoryFactory:
 class _RecordingTurnoverPersistenceRepository:
     def __init__(self) -> None:
         self.saved_relations: list[dict[str, object]] = []
+        self.saved_relation_changes: list[dict[str, object]] = []
         self.saved_categories: list[dict[str, object]] = []
 
     def save_turnover_relations(self, snapshot: dict[str, object]) -> None:
         self.saved_relations.append(dict(snapshot))
+
+    def save_turnover_relation_change(
+        self,
+        *,
+        relation: dict[str, object],
+        audit_event: dict[str, object],
+    ) -> None:
+        self.saved_relation_changes.append(
+            {"relation": dict(relation), "audit_event": dict(audit_event)}
+        )
 
     def save_bank_transaction_categories(self, snapshot: dict[str, object]) -> None:
         self.saved_categories.append(dict(snapshot))
@@ -496,17 +446,37 @@ class _RecordingTurnoverPersistenceRepositoryFactory:
 class _RecordingTurnoverRelationService:
     def __init__(self) -> None:
         self.rebuilds: list[list[dict[str, object]]] = []
+        self.refreshes: list[list[dict[str, object]]] = []
+        self._audit_log: list[dict[str, object]] = []
         self._snapshot = {"relations": {"turnover_rel_1": {"status": "confirmed"}}, "audit_log": []}
 
     def rebuild_from_bank_rows(self, rows: list[dict[str, object]]) -> None:
         self.rebuilds.append([dict(row) for row in rows])
+
+    def refresh_bank_rows(self, rows: list[dict[str, object]]) -> None:
+        self.refreshes.append([dict(row) for row in rows])
+
+    def append_audit(self, *, relation_id: str, action: str) -> None:
+        self._audit_log.append({"relation_id": relation_id, "action": action})
+
+    def audit_log(self) -> list[dict[str, object]]:
+        return [dict(event) for event in self._audit_log]
+
+    def audit_event_cursor(self) -> int:
+        return len(self._audit_log)
+
+    def latest_audit_event(self, relation_id: str, *, after_cursor: int) -> dict[str, object] | None:
+        if len(self._audit_log) <= after_cursor or self._audit_log[-1].get("relation_id") != relation_id:
+            return None
+        return dict(self._audit_log[-1])
 
     def snapshot(self) -> dict[str, object]:
         return dict(self._snapshot)
 
 
 class _RecordingTurnoverRoutes:
-    def __init__(self) -> None:
+    def __init__(self, relation_service: _RecordingTurnoverRelationService | None = None) -> None:
+        self._relation_service = relation_service
         self.confirm_calls: list[dict[str, object]] = []
         self.withdraw_calls: list[dict[str, object]] = []
 
@@ -518,6 +488,8 @@ class _RecordingTurnoverRoutes:
         note: str | None,
     ) -> dict[str, object]:
         self.confirm_calls.append({"bank_row_ids": list(bank_row_ids), "actor": actor, "note": note})
+        if self._relation_service is not None:
+            self._relation_service.append_audit(relation_id="turnover_rel_1", action="confirmed")
         return {"relation": {"relation_id": "turnover_rel_1", "status": "confirmed"}}
 
     def withdraw_relation(
@@ -528,6 +500,8 @@ class _RecordingTurnoverRoutes:
         note: str | None,
     ) -> dict[str, object]:
         self.withdraw_calls.append({"relation_id": relation_id, "actor": actor, "note": note})
+        if self._relation_service is not None:
+            self._relation_service.append_audit(relation_id=relation_id, action="withdrawn")
         return {"relation": {"relation_id": relation_id, "status": "withdrawn"}}
 
 
@@ -1605,25 +1579,35 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
 
     def test_bank_row_stale_precondition_uses_manual_version_when_category_version_is_zero(self) -> None:
         module = self._write_adapters_module()
-        port = module.TurnoverLedgerBankRowStalePreconditionPort(
-            bank_rows_provider=lambda: [
+        requested_ids: list[list[str]] = []
+
+        def load_rows(row_ids: list[str]) -> list[dict[str, object]]:
+            requested_ids.append(list(row_ids))
+            return [
                 {
                     "id": "bank_txn_1",
                     "category_version": 0,
                     "manual_category_version": 9,
                 }
             ]
+
+        port = module.TurnoverLedgerBankRowStalePreconditionPort(
+            bank_rows_by_ids_provider=load_rows
         )
 
         port.assert_current(
             expected_versions={"turnover_bank_row:bank_txn_1": 9},
             transaction=object(),
         )
+        self.assertEqual(requested_ids, [["bank_txn_1"]])
 
     def test_bank_row_stale_precondition_uses_base_version_when_category_versions_are_zero(self) -> None:
         module = self._write_adapters_module()
-        port = module.TurnoverLedgerBankRowStalePreconditionPort(
-            bank_rows_provider=lambda: [
+        requested_ids: list[list[str]] = []
+
+        def load_rows(row_ids: list[str]) -> list[dict[str, object]]:
+            requested_ids.append(list(row_ids))
+            return [
                 {
                     "id": "bank_txn_1",
                     "category_version": 0,
@@ -1631,12 +1615,16 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
                     "version": 5,
                 }
             ]
+
+        port = module.TurnoverLedgerBankRowStalePreconditionPort(
+            bank_rows_by_ids_provider=load_rows
         )
 
         port.assert_current(
             expected_versions={"turnover_bank_row:bank_txn_1": 5},
             transaction=object(),
         )
+        self.assertEqual(requested_ids, [["bank_txn_1"]])
 
     def test_target_confirm_relation_facade_passes_idempotency_before_repository(self) -> None:
         # PF-P177 target contract: confirm should reserve/replay/conflict by durable idempotency before repository save.
@@ -2738,69 +2726,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             adapter_class(application=object())
 
-    def test_postgres_relation_repository_adapter_rejects_application_god_object(self) -> None:
-        # PF-P090 PostgreSQL Write Port Contract: relation adapter must be a granular port.
-        adapter_class = getattr(self._write_adapters_module(), "TurnoverLedgerRelationRepositoryAdapter")
-
-        with self.assertRaises(TypeError):
-            adapter_class(application=object())
-
-    def test_postgres_relation_repository_adapter_confirms_with_supplied_transaction(self) -> None:
-        # PF-P090 PostgreSQL Write Port Contract: no SQL or Application dependency inside facade tests.
-        adapter_class = getattr(self._write_adapters_module(), "TurnoverLedgerRelationRepositoryAdapter")
-        factory = _RecordingTurnoverRelationRepositoryFactory()
-        transaction = _RecordingTransaction()
-        adapter = adapter_class(repository_factory=factory)
-
-        result = adapter.confirm_relation(
-            bank_row_ids=["bank_txn_1", "bank_txn_2"],
-            actor_id="finance-user",
-            note="manual confirm",
-            transaction=transaction,
-        )
-
-        self.assertEqual(factory.transactions, [transaction])
-        self.assertEqual(
-            factory.repositories[0].confirm_calls,
-            [
-                {
-                    "bank_row_ids": ["bank_txn_1", "bank_txn_2"],
-                    "actor_id": "finance-user",
-                    "note": "manual confirm",
-                }
-            ],
-        )
-        self.assertEqual(result["relation"]["status"], "confirmed")
-        self.assertTrue({"headers", "cookies", "response", "status_code", "auth"}.isdisjoint(result))
-
-    def test_postgres_relation_repository_adapter_withdraws_with_supplied_transaction(self) -> None:
-        # PF-P090 PostgreSQL Write Port Contract: withdraw relation must join the caller transaction.
-        adapter_class = getattr(self._write_adapters_module(), "TurnoverLedgerRelationRepositoryAdapter")
-        factory = _RecordingTurnoverRelationRepositoryFactory()
-        transaction = _RecordingTransaction()
-        adapter = adapter_class(repository_factory=factory)
-
-        result = adapter.withdraw_relation(
-            relation_id="turnover_rel_1",
-            actor_id="finance-user",
-            note="manual withdraw",
-            transaction=transaction,
-        )
-
-        self.assertEqual(factory.transactions, [transaction])
-        self.assertEqual(
-            factory.repositories[0].withdraw_calls,
-            [
-                {
-                    "relation_id": "turnover_rel_1",
-                    "actor_id": "finance-user",
-                    "note": "manual withdraw",
-                }
-            ],
-        )
-        self.assertEqual(result["relation"]["status"], "withdrawn")
-        self.assertTrue({"headers", "cookies", "response", "status_code", "auth"}.isdisjoint(result))
-
     def test_postgres_bankdetail_port_adapter_rejects_application_god_object(self) -> None:
         # PF-P090 PostgreSQL Write Port Contract: bankdetail adapter must not receive Application.
         adapter_class = getattr(self._write_adapters_module(), "TurnoverLedgerBankdetailPortAdapter")
@@ -2841,13 +2766,20 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         # PF-P095 Repository Ownership: service orchestration should leave server.py.
         port_class = getattr(self._write_adapters_module(), "TurnoverLedgerRelationWritePort")
         relation_service = _RecordingTurnoverRelationService()
-        routes = _RecordingTurnoverRoutes()
+        routes = _RecordingTurnoverRoutes(relation_service)
         persistence_factory = _RecordingTurnoverPersistenceRepositoryFactory()
         transaction = _RecordingTransaction()
+        selected_row_requests: list[list[str]] = []
+
+        def load_selected_rows(row_ids: list[str]) -> list[dict[str, object]]:
+            selected_row_requests.append(list(row_ids))
+            available = {"bank_txn_1": {"id": "bank_txn_1"}, "bank_txn_2": {"id": "bank_txn_2"}}
+            return [available[row_id] for row_id in row_ids if row_id in available]
+
         port = port_class(
             relation_service=relation_service,
             routes=routes,
-            bank_rows_provider=lambda: [{"id": "bank_txn_1"}, {"id": "bank_txn_2"}],
+            bank_rows_by_ids_provider=load_selected_rows,
             persistence_repository_factory=persistence_factory,
         )
 
@@ -2865,15 +2797,41 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         )
 
         self.assertEqual(persistence_factory.transactions, [transaction, transaction])
-        self.assertEqual(len(persistence_factory.repositories[0].saved_relations), 1)
-        self.assertEqual(len(persistence_factory.repositories[1].saved_relations), 1)
-        self.assertEqual(relation_service.rebuilds, [[{"id": "bank_txn_1"}, {"id": "bank_txn_2"}]])
+        self.assertEqual(len(persistence_factory.repositories[0].saved_relation_changes), 1)
+        self.assertEqual(len(persistence_factory.repositories[1].saved_relation_changes), 1)
+        self.assertEqual(persistence_factory.repositories[0].saved_relations, [])
+        self.assertEqual(persistence_factory.repositories[1].saved_relations, [])
+        self.assertEqual(selected_row_requests, [["bank_txn_1", "bank_txn_2"]])
+        self.assertEqual(relation_service.refreshes, [[{"id": "bank_txn_1"}, {"id": "bank_txn_2"}]])
+        self.assertEqual(relation_service.rebuilds, [])
         self.assertEqual(routes.confirm_calls[0]["actor"], "finance-user")
         self.assertEqual(routes.withdraw_calls[0]["relation_id"], "turnover_rel_1")
         self.assertEqual(confirm_result["relation"]["status"], "confirmed")
         self.assertEqual(withdraw_result["relation"]["status"], "withdrawn")
         self.assertTrue({"headers", "cookies", "response", "status_code", "auth"}.isdisjoint(confirm_result))
         self.assertTrue({"headers", "cookies", "response", "status_code", "auth"}.isdisjoint(withdraw_result))
+
+    def test_target_relation_write_port_rejects_stale_matching_audit_event(self) -> None:
+        port_class = getattr(self._write_adapters_module(), "TurnoverLedgerRelationWritePort")
+        relation_service = _RecordingTurnoverRelationService()
+        relation_service.append_audit(relation_id="turnover_rel_1", action="old_confirm")
+        persistence_factory = _RecordingTurnoverPersistenceRepositoryFactory()
+        port = port_class(
+            relation_service=relation_service,
+            routes=_RecordingTurnoverRoutes(),
+            bank_rows_by_ids_provider=lambda row_ids: [{"id": row_id} for row_id in row_ids],
+            persistence_repository_factory=persistence_factory,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "must append a matching audit event"):
+            port.confirm_relation(
+                bank_row_ids=["bank_txn_1", "bank_txn_2"],
+                actor_id="finance-user",
+                note="must not reuse old audit",
+                transaction=_RecordingTransaction(),
+            )
+
+        self.assertEqual(persistence_factory.transactions, [])
 
     def test_target_bankdetail_write_port_rejects_application_god_object(self) -> None:
         # PF-P095 Repository Ownership: future bankdetail write port must receive granular dependencies.

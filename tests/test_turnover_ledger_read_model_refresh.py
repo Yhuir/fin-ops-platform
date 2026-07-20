@@ -33,6 +33,10 @@ class FakeTurnoverReadRepository:
         self.saved_scope_key: str | None = None
         self.existing_payload: dict[str, object] | None = None
         self.list_calls: list[dict[str, object]] = []
+        self.source_rows: list[dict[str, object]] = []
+        self.source_summary: dict[str, object] = {}
+        self.source_bundle_calls: list[dict[str, object]] = []
+        self.source_summary_calls: list[dict[str, object]] = []
 
     def list_turnover_ledger_view(self, **kwargs: object) -> dict[str, object] | None:
         self.list_calls.append(dict(kwargs))
@@ -42,20 +46,16 @@ class FakeTurnoverReadRepository:
         self.saved_payload = payload
         self.saved_scope_key = scope_key
 
+    def workbench_relation_source_bundle_from_source(self, **kwargs: object) -> dict[str, object]:
+        self.source_bundle_calls.append(dict(kwargs))
+        return {
+            "rows": [dict(row) for row in self.source_rows],
+            "source_versions": dict(self.source_summary),
+        }
 
-class FakeWorkbenchRelationFacade:
-    def __init__(self, payload: dict[str, object]) -> None:
-        self.payload = payload
-        self.calls: list[dict[str, object]] = []
-
-    @property
-    def last_source_versions(self) -> dict[str, object]:
-        source_versions = self.payload.get("source_versions")
-        return dict(source_versions) if isinstance(source_versions, dict) else {}
-
-    def get_by_row_ids(self, row_ids: list[str], **kwargs: object) -> dict[str, object]:
-        self.calls.append({"row_ids": list(row_ids), **dict(kwargs)})
-        return self.payload
+    def workbench_relation_source_summary_from_source(self, **kwargs: object) -> dict[str, object]:
+        self.source_summary_calls.append(dict(kwargs))
+        return dict(self.source_summary)
 
 
 class FakeGroupedLedgerService:
@@ -283,43 +283,31 @@ class TurnoverLedgerReadModelRefreshServiceTests(unittest.TestCase):
 
     def test_projection_enriches_rows_with_fresh_workbench_relation_context(self) -> None:
         repository = FakeTurnoverReadRepository()
-        relation_facade = FakeWorkbenchRelationFacade(
+        repository.source_rows = [
             {
-                "status": "fresh",
-                "rows": [
-                    {
-                        "row_id": "txn-out-collected",
-                        "row_type": "bank_transaction",
-                        "relation_status": "linked",
-                        "group_ids": ["case-turnover-001"],
-                    }
-                ],
-                "groups": [
-                    {
-                        "group_id": "case-turnover-001",
-                        "relation_status": "linked",
-                        "relation_source": "manual",
-                        "payload": {
-                            "relation_mode": "turnover_manual_closure",
-                            "row_ids": ["txn-out-collected", "txn-repayment-001"],
-                            "row_types": ["bank", "bank"],
-                        },
-                    }
-                ],
-                "source_versions": {"workbench_relation_schema_version": "test"},
-                "read_model_scope_keys": ["2026-05"],
+                "case_id": "case-turnover-001",
+                "status": "active",
+                "relation_mode": "turnover_manual_closure",
+                "row_ids": ["txn-out-collected", "txn-repayment-001"],
+                "row_types": ["bank", "bank"],
+                "amount_check": {},
+                "raw_payload": {"normalized_payload": {"relation_source": "manual"}},
             }
-        )
+        ]
+        repository.source_summary = {"workbench_relation_schema_version": "test"}
         builder = TurnoverLedgerSqlProjectionBuilder(
             read_repository=repository,
             ledger_service=FakeGroupedLedgerService(),  # type: ignore[arg-type]
             source_versions_provider=lambda: {"turnover_ledger_schema_version": "test"},
-            workbench_relation_read_facade=relation_facade,
+            workbench_relation_source_repository=repository,
         )
 
         builder.rebuild_turnover_ledger_read_model_scope("all", source_version=11)
 
-        self.assertEqual(relation_facade.calls[0]["row_ids"], ["txn-out-collected"])
+        self.assertEqual(
+            repository.source_bundle_calls[0],
+            {"scope_key": "all", "row_ids": ["txn-out-collected"]},
+        )
         rows = list((repository.saved_payload or {}).get("rows") or [])
         row = rows[0]
         self.assertEqual(row["workbench_relation_status"], "linked")
@@ -374,20 +362,12 @@ class TurnoverLedgerReadModelRefreshServiceTests(unittest.TestCase):
             "source_versions": existing_source_versions,
             "read_model_status": "refreshing",
         }
-        relation_facade = FakeWorkbenchRelationFacade(
-            {
-                "status": "fresh",
-                "rows": [],
-                "groups": [],
-                "source_versions": relation_source_versions,
-                "read_model_scope_keys": ["2026-05"],
-            }
-        )
+        repository.source_summary = relation_source_versions
         builder = TurnoverLedgerSqlProjectionBuilder(
             read_repository=repository,
             ledger_service=FailIfCalledLedgerService(),  # type: ignore[arg-type]
             source_versions_provider=lambda: {"turnover_ledger_schema_version": "test"},
-            workbench_relation_read_facade=relation_facade,
+            workbench_relation_source_repository=repository,
         )
 
         result = builder.rebuild_turnover_ledger_read_model_scope("all", source_version=15)
@@ -404,16 +384,10 @@ class TurnoverLedgerReadModelRefreshServiceTests(unittest.TestCase):
         )
         self.assertEqual(repository.list_calls, [{"scope_key": "all", "page": 1, "page_size": 200}])
         self.assertIsNone(repository.saved_payload)
+        self.assertEqual(repository.source_bundle_calls, [])
         self.assertEqual(
-            relation_facade.calls,
-            [
-                {
-                    "row_ids": ["txn-existing"],
-                    "require_fresh": True,
-                    "reason": "turnover_ledger_sql_projection_unchanged_check",
-                    "scope_keys_hint": ["2026-05"],
-                }
-            ],
+            repository.source_summary_calls,
+            [{"scope_key": "all", "row_ids": ["txn-existing"], "include_row_ids": True}],
         )
 
     def test_projection_rebuilds_without_relation_check_when_base_source_versions_changed(self) -> None:
@@ -432,25 +406,17 @@ class TurnoverLedgerReadModelRefreshServiceTests(unittest.TestCase):
                 "workbench_relation_source_versions": {"workbench_relation_schema_version": "old"},
             },
         }
-        relation_facade = FakeWorkbenchRelationFacade(
-            {
-                "status": "fresh",
-                "rows": [],
-                "groups": [],
-                "source_versions": {"workbench_relation_schema_version": "current"},
-            }
-        )
+        repository.source_summary = {"workbench_relation_schema_version": "current"}
         builder = TurnoverLedgerSqlProjectionBuilder(
             read_repository=repository,
             ledger_service=FakeGroupedLedgerService(),  # type: ignore[arg-type]
             source_versions_provider=lambda: {"turnover_ledger_schema_version": "test"},
-            workbench_relation_read_facade=relation_facade,
+            workbench_relation_source_repository=repository,
         )
 
         builder.rebuild_turnover_ledger_read_model_scope("all", source_version=16)
 
-        self.assertEqual(relation_facade.calls[0]["reason"], "turnover_ledger_sql_projection")
-        self.assertEqual(len(relation_facade.calls), 1)
+        self.assertEqual(len(repository.source_bundle_calls), 1)
         self.assertIsNotNone(repository.saved_payload)
 
     def test_projection_refreshes_month_scope_from_existing_rows_when_only_relation_versions_changed(self) -> None:
@@ -471,27 +437,12 @@ class TurnoverLedgerReadModelRefreshServiceTests(unittest.TestCase):
             },
         }
         relation_source_versions = {"workbench_relation_schema_version": "current"}
-        relation_facade = FakeWorkbenchRelationFacade(
-            {
-                "status": "fresh",
-                "rows": [
-                    {
-                        "row_id": "txn-existing",
-                        "row_type": "bank_transaction",
-                        "relation_status": "linked",
-                        "group_ids": ["case-current"],
-                    }
-                ],
-                "groups": [],
-                "source_versions": relation_source_versions,
-                "read_model_scope_keys": ["2026-05"],
-            }
-        )
+        repository.source_summary = relation_source_versions
         builder = TurnoverLedgerSqlProjectionBuilder(
             read_repository=repository,
             ledger_service=FailIfCalledLedgerService(),  # type: ignore[arg-type]
             source_versions_provider=lambda: {"turnover_ledger_schema_version": "test"},
-            workbench_relation_read_facade=relation_facade,
+            workbench_relation_source_repository=repository,
         )
 
         result = builder.rebuild_turnover_ledger_read_model_scope("2026-05", source_version=17)
@@ -505,10 +456,8 @@ class TurnoverLedgerReadModelRefreshServiceTests(unittest.TestCase):
         assert repository.saved_payload is not None
         saved_rows = repository.saved_payload["rows"]
         self.assertEqual(saved_rows[0]["source_versions"]["workbench_relation_source_versions"], relation_source_versions)
-        self.assertEqual(
-            [call["reason"] for call in relation_facade.calls],
-            ["turnover_ledger_sql_projection_unchanged_check", "turnover_ledger_sql_projection"],
-        )
+        self.assertEqual(len(repository.source_summary_calls), 1)
+        self.assertEqual(len(repository.source_bundle_calls), 1)
 
     def test_projection_refreshes_all_scope_from_existing_rows_when_only_relation_versions_changed(self) -> None:
         repository = FakeTurnoverReadRepository()
@@ -528,27 +477,12 @@ class TurnoverLedgerReadModelRefreshServiceTests(unittest.TestCase):
             },
         }
         relation_source_versions = {"workbench_relation_schema_version": "current"}
-        relation_facade = FakeWorkbenchRelationFacade(
-            {
-                "status": "fresh",
-                "rows": [
-                    {
-                        "row_id": "txn-existing",
-                        "row_type": "bank_transaction",
-                        "relation_status": "linked",
-                        "group_ids": ["case-current"],
-                    }
-                ],
-                "groups": [],
-                "source_versions": relation_source_versions,
-                "read_model_scope_keys": ["2026-05"],
-            }
-        )
+        repository.source_summary = relation_source_versions
         builder = TurnoverLedgerSqlProjectionBuilder(
             read_repository=repository,
             ledger_service=FailIfCalledLedgerService(),  # type: ignore[arg-type]
             source_versions_provider=lambda: {"turnover_ledger_schema_version": "test"},
-            workbench_relation_read_facade=relation_facade,
+            workbench_relation_source_repository=repository,
         )
 
         result = builder.rebuild_turnover_ledger_read_model_scope("all", source_version=18)
@@ -562,51 +496,28 @@ class TurnoverLedgerReadModelRefreshServiceTests(unittest.TestCase):
         assert repository.saved_payload is not None
         saved_rows = repository.saved_payload["rows"]
         self.assertEqual(saved_rows[0]["source_versions"]["workbench_relation_source_versions"], relation_source_versions)
-        self.assertEqual(
-            [call["reason"] for call in relation_facade.calls],
-            ["turnover_ledger_sql_projection_unchanged_check", "turnover_ledger_sql_projection"],
-        )
+        self.assertEqual(len(repository.source_summary_calls), 1)
+        self.assertEqual(len(repository.source_bundle_calls), 1)
 
     def test_projection_marks_workbench_bank_pair_as_cash_closure_when_group_zeroes_out(self) -> None:
         repository = FakeTurnoverReadRepository()
-        relation_facade = FakeWorkbenchRelationFacade(
+        repository.source_rows = [
             {
-                "status": "fresh",
-                "rows": [
-                    {
-                        "row_id": "bank-income-240000",
-                        "row_type": "bank_transaction",
-                        "relation_status": "linked",
-                        "group_ids": ["case-workbench-cash-1"],
-                    },
-                    {
-                        "row_id": "bank-expense-240000",
-                        "row_type": "bank_transaction",
-                        "relation_status": "linked",
-                        "group_ids": ["case-workbench-cash-1"],
-                    },
-                ],
-                "groups": [
-                    {
-                        "group_id": "case-workbench-cash-1",
-                        "relation_status": "linked",
-                        "relation_source": "manual",
-                        "payload": {
-                            "relation_mode": "manual_confirmed",
-                            "row_ids": ["bank-income-240000", "bank-expense-240000"],
-                            "row_types": ["bank", "bank"],
-                        },
-                    }
-                ],
-                "source_versions": {"workbench_relation_schema_version": "test"},
-                "read_model_scope_keys": ["2026-03"],
+                "case_id": "case-workbench-cash-1",
+                "status": "active",
+                "relation_mode": "manual_confirmed",
+                "row_ids": ["bank-income-240000", "bank-expense-240000"],
+                "row_types": ["bank", "bank"],
+                "amount_check": {},
+                "raw_payload": {"normalized_payload": {"relation_source": "manual"}},
             }
-        )
+        ]
+        repository.source_summary = {"workbench_relation_schema_version": "test"}
         builder = TurnoverLedgerSqlProjectionBuilder(
             read_repository=repository,
             ledger_service=FakeTwoFlowGroupedLedgerService(),  # type: ignore[arg-type]
             source_versions_provider=lambda: {"turnover_ledger_schema_version": "test"},
-            workbench_relation_read_facade=relation_facade,
+            workbench_relation_source_repository=repository,
         )
 
         builder.rebuild_turnover_ledger_read_model_scope("all", source_version=13)
@@ -621,27 +532,25 @@ class TurnoverLedgerReadModelRefreshServiceTests(unittest.TestCase):
         self.assertEqual([flow["cash_closure_case_id"] for flow in flow_rows], ["case-workbench-cash-1", "case-workbench-cash-1"])
         self.assertNotIn("__workbench_relation_details", row)
 
-    def test_projection_does_not_save_when_workbench_relation_context_is_not_fresh(self) -> None:
+    def test_projection_does_not_depend_on_workbench_relation_read_model_freshness(self) -> None:
         repository = FakeTurnoverReadRepository()
+        repository.source_summary = {
+            "source": "workbench_pair_relations",
+            "scope_key": "all",
+            "relation_count": 0,
+            "relation_updated_at": "",
+        }
         builder = TurnoverLedgerSqlProjectionBuilder(
             read_repository=repository,
             ledger_service=FakeGroupedLedgerService(),  # type: ignore[arg-type]
             source_versions_provider=lambda: {"turnover_ledger_schema_version": "test"},
-            workbench_relation_read_facade=FakeWorkbenchRelationFacade(
-                {
-                    "status": "stale",
-                    "rows": [],
-                    "groups": [],
-                    "read_model_scope_keys": ["2026-05"],
-                    "stale_reasons": ["source_version_mismatch"],
-                }
-            ),
+            workbench_relation_source_repository=repository,
         )
 
-        with self.assertRaisesRegex(RuntimeError, "workbench_relation_read_model_not_fresh"):
-            builder.rebuild_turnover_ledger_read_model_scope("all", source_version=12)
+        result = builder.rebuild_turnover_ledger_read_model_scope("all", source_version=12)
 
-        self.assertIsNone(repository.saved_payload)
+        self.assertEqual(result["row_count"], 1)
+        self.assertIsNotNone(repository.saved_payload)
 
     def test_worker_handler_rebuilds_scope_and_completes_dirty_scope(self) -> None:
         builder = FakeProjectionBuilder()

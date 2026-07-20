@@ -14,8 +14,6 @@ from fin_ops_platform.services.turnover_ledger_extra_service import TurnoverLedg
 from fin_ops_platform.services.turnover_ledger_service import TurnoverLedgerService
 from fin_ops_platform.services.turnover_ledger_source_versions import build_turnover_ledger_source_versions
 from fin_ops_platform.services.turnover_relation_service import TurnoverRelationService
-from fin_ops_platform.services.workbench_relation_distribution_mapper import relation_dicts_by_row_id_from_distribution_payload
-from fin_ops_platform.services.workbench_relation_read_facade import FRESH_WORKBENCH_RELATION_STATUS, WorkbenchRelationReadFacade
 from fin_ops_platform.services.runtime_paths import default_data_dir
 
 
@@ -33,32 +31,34 @@ class TurnoverLedgerSqlProjectionBuilder:
         ledger_service: TurnoverLedgerService | None = None,
         source_versions_provider: Callable[[], dict[str, Any]] | None = None,
         bank_transaction_tag_read_facade: Any | None = None,
-        workbench_relation_read_facade: Any | None = None,
+        workbench_relation_source_repository: Any | None = None,
     ) -> None:
         self._connection = connection
         self._read_repository = read_repository
         self._ledger_service = ledger_service
         self._source_versions_provider = source_versions_provider
         self._bank_transaction_tag_read_facade = bank_transaction_tag_read_facade
-        self._workbench_relation_read_facade = workbench_relation_read_facade
+        self._workbench_relation_source_repository = workbench_relation_source_repository
 
     def rebuild_turnover_ledger_read_model_scope(self, scope_key: str, *, source_version: object = None) -> dict[str, Any]:
         normalized_scope_key = str(scope_key or "all").strip() or "all"
         ledger_service = self._ledger_service
         source_versions_provider = self._source_versions_provider
         read_repository = self._read_repository
-        workbench_relation_read_facade = self._workbench_relation_read_facade
+        workbench_relation_source_repository = self._workbench_relation_source_repository
         if ledger_service is None or source_versions_provider is None or read_repository is None:
             built = self._build_runtime_dependencies()
             ledger_service = built["ledger_service"]
             source_versions_provider = built["source_versions_provider"]
             read_repository = built["read_repository"]
-            workbench_relation_read_facade = workbench_relation_read_facade or built.get("workbench_relation_read_facade")
+            workbench_relation_source_repository = (
+                workbench_relation_source_repository or built.get("workbench_relation_source_repository")
+            )
 
         source_versions = dict(source_versions_provider())
         unchanged = self._unchanged_scope_result(
             read_repository=read_repository,
-            workbench_relation_read_facade=workbench_relation_read_facade,
+            workbench_relation_source_repository=workbench_relation_source_repository,
             scope_key=normalized_scope_key,
             source_versions=source_versions,
         )
@@ -66,7 +66,7 @@ class TurnoverLedgerSqlProjectionBuilder:
             return unchanged
         refreshed_existing = self._refresh_existing_scope_rows(
             read_repository=read_repository,
-            workbench_relation_read_facade=workbench_relation_read_facade,
+            workbench_relation_source_repository=workbench_relation_source_repository,
             scope_key=normalized_scope_key,
             source_versions=source_versions,
             source_version=source_version,
@@ -78,7 +78,8 @@ class TurnoverLedgerSqlProjectionBuilder:
             rows = [row for row in rows if self._row_scope_key(row) == normalized_scope_key]
         rows = self._with_workbench_relation_context(
             rows,
-            workbench_relation_read_facade=workbench_relation_read_facade,
+            workbench_relation_source_repository=workbench_relation_source_repository,
+            scope_key=normalized_scope_key,
             source_versions=source_versions,
         )
         rows = [{**row, "source_versions": source_versions} for row in rows]
@@ -99,7 +100,7 @@ class TurnoverLedgerSqlProjectionBuilder:
         cls,
         *,
         read_repository: Any,
-        workbench_relation_read_facade: Any | None,
+        workbench_relation_source_repository: Any | None,
         scope_key: str,
         source_versions: dict[str, Any],
     ) -> dict[str, Any] | None:
@@ -116,23 +117,15 @@ class TurnoverLedgerSqlProjectionBuilder:
         if any(existing_source_versions.get(key) != value for key, value in current_source_versions.items()):
             return None
         rows = [dict(row) for row in list(payload.get("rows") or []) if isinstance(row, dict)]
-        if workbench_relation_read_facade is not None:
+        if workbench_relation_source_repository is not None:
             row_ids = _dedupe_preserve_order(row_id for row in rows for row_id in cls._bank_row_ids(row))
             if row_ids:
-                scope_keys = _dedupe_preserve_order(cls._row_scope_key(row) for row in rows)
-                relation_payload = workbench_relation_read_facade.get_by_row_ids(
-                    row_ids,
-                    require_fresh=True,
-                    reason="turnover_ledger_sql_projection_unchanged_check",
-                    scope_keys_hint=scope_keys,
+                relation_source_versions = cls._workbench_relation_source_versions(
+                    workbench_relation_source_repository,
+                    scope_key=scope_key,
+                    row_ids=row_ids,
                 )
-                if (
-                    not isinstance(relation_payload, dict)
-                    or str(relation_payload.get("status") or "") != FRESH_WORKBENCH_RELATION_STATUS
-                ):
-                    return None
-                relation_source_versions = relation_payload.get("source_versions")
-                if isinstance(relation_source_versions, dict):
+                if relation_source_versions:
                     current_source_versions["workbench_relation_source_versions"] = dict(relation_source_versions)
         if existing_source_versions != current_source_versions:
             return None
@@ -150,7 +143,7 @@ class TurnoverLedgerSqlProjectionBuilder:
         cls,
         *,
         read_repository: Any,
-        workbench_relation_read_facade: Any | None,
+        workbench_relation_source_repository: Any | None,
         scope_key: str,
         source_versions: dict[str, Any],
         source_version: object,
@@ -166,7 +159,8 @@ class TurnoverLedgerSqlProjectionBuilder:
         refreshed_source_versions = dict(source_versions)
         rows = cls._with_workbench_relation_context(
             rows,
-            workbench_relation_read_facade=workbench_relation_read_facade,
+            workbench_relation_source_repository=workbench_relation_source_repository,
+            scope_key=scope_key,
             source_versions=refreshed_source_versions,
         )
         rows = [{**row, "source_versions": refreshed_source_versions} for row in rows]
@@ -315,9 +309,7 @@ class TurnoverLedgerSqlProjectionBuilder:
         return {
             "ledger_service": ledger_service,
             "read_repository": state_store.read_model_repository,
-            "workbench_relation_read_facade": WorkbenchRelationReadFacade(
-                read_model_repository=state_store.read_model_repository,
-            ),
+            "workbench_relation_source_repository": state_store.read_model_repository,
             "source_versions_provider": lambda: _with_bank_detail_source_versions(
                 build_turnover_ledger_source_versions(
                     relation_service=relation_service,
@@ -334,31 +326,55 @@ class TurnoverLedgerSqlProjectionBuilder:
         cls,
         rows: list[dict[str, Any]],
         *,
-        workbench_relation_read_facade: Any | None,
+        workbench_relation_source_repository: Any | None,
+        scope_key: str,
         source_versions: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        if workbench_relation_read_facade is None:
+        if workbench_relation_source_repository is None:
             return rows
-        get_by_row_ids = getattr(workbench_relation_read_facade, "get_by_row_ids", None)
-        if not callable(get_by_row_ids):
+        bundle_reader = getattr(
+            workbench_relation_source_repository,
+            "workbench_relation_source_bundle_from_source",
+            None,
+        )
+        if not callable(bundle_reader):
             return rows
         row_ids = _dedupe_preserve_order(row_id for row in rows for row_id in cls._bank_row_ids(row))
         if not row_ids:
             return rows
-        scope_keys = _dedupe_preserve_order(cls._row_scope_key(row) for row in rows)
-        payload = get_by_row_ids(
-            row_ids,
-            require_fresh=True,
-            reason="turnover_ledger_sql_projection",
-            scope_keys_hint=scope_keys,
+        bundle = bundle_reader(
+            scope_key=scope_key,
+            row_ids=row_ids,
         )
-        if not isinstance(payload, dict) or str(payload.get("status") or "") != FRESH_WORKBENCH_RELATION_STATUS:
-            raise RuntimeError("workbench_relation_read_model_not_fresh")
-        relation_source_versions = payload.get("source_versions")
-        if isinstance(relation_source_versions, dict):
+        if not isinstance(bundle, dict):
+            raise RuntimeError("workbench_relation_source_bundle_unavailable")
+        source_rows = bundle.get("rows") if isinstance(bundle.get("rows"), list) else []
+        relation_source_versions = (
+            bundle.get("source_versions")
+            if isinstance(bundle.get("source_versions"), dict)
+            else {}
+        )
+        if relation_source_versions:
             source_versions["workbench_relation_source_versions"] = dict(relation_source_versions)
-        relations_by_row_id = relation_dicts_by_row_id_from_distribution_payload(payload)
+        relations_by_row_id = _relations_by_row_id_from_source_rows(source_rows)
         return [cls._apply_workbench_relation_context(row, relations_by_row_id) for row in rows]
+
+    @staticmethod
+    def _workbench_relation_source_versions(
+        repository: Any,
+        *,
+        scope_key: str,
+        row_ids: list[str],
+    ) -> dict[str, Any]:
+        summary_reader = getattr(repository, "workbench_relation_source_summary_from_source", None)
+        if not callable(summary_reader):
+            return {}
+        payload = summary_reader(
+            scope_key=scope_key,
+            row_ids=row_ids,
+            include_row_ids=True,
+        )
+        return dict(payload) if isinstance(payload, dict) else {}
 
     @classmethod
     def _apply_workbench_relation_context(
@@ -473,6 +489,61 @@ def _workbench_relation_summary_for_ids(
     }
     if include_details:
         result[_RELATION_DETAILS_KEY] = [_relation_detail(relation) for relation in relations]
+    return result
+
+
+def _relations_by_row_id_from_source_rows(
+    source_rows: list[dict[str, Any]] | None,
+) -> dict[str, list[dict[str, Any]]]:
+    """Map canonical active relations without depending on another read model."""
+    result: dict[str, list[dict[str, Any]]] = {}
+    for source_row in list(source_rows or []):
+        if not isinstance(source_row, dict) or _text(source_row.get("status")) != "active":
+            continue
+        raw_payload = source_row.get("raw_payload") if isinstance(source_row.get("raw_payload"), dict) else {}
+        normalized_payload = (
+            raw_payload.get("normalized_payload")
+            if isinstance(raw_payload.get("normalized_payload"), dict)
+            else raw_payload
+        )
+        case_id = _text(source_row.get("case_id") or normalized_payload.get("case_id"))
+        row_ids = _text_list(source_row.get("row_ids") or normalized_payload.get("row_ids"))
+        if not case_id or not row_ids:
+            continue
+        relation = {
+            "case_id": case_id,
+            "relation_mode": _text(
+                source_row.get("relation_mode") or normalized_payload.get("relation_mode")
+            ),
+            "status": "active",
+            "relation_status": "linked",
+            "relationStatus": "linked",
+            "relation_source": _text(normalized_payload.get("relation_source")) or "manual",
+            "month_scope": _text(normalized_payload.get("month_scope")),
+            "row_ids": row_ids,
+            "row_types": _text_list(source_row.get("row_types") or normalized_payload.get("row_types")),
+            "amount_check": dict(
+                source_row.get("amount_check")
+                if isinstance(source_row.get("amount_check"), dict)
+                else normalized_payload.get("amount_check")
+                if isinstance(normalized_payload.get("amount_check"), dict)
+                else {}
+            ),
+            "special_metadata": dict(
+                normalized_payload.get("special_metadata")
+                if isinstance(normalized_payload.get("special_metadata"), dict)
+                else {}
+            ),
+            "source_versions": dict(
+                normalized_payload.get("source_versions")
+                if isinstance(normalized_payload.get("source_versions"), dict)
+                else {}
+            ),
+            "note": _text(normalized_payload.get("note")),
+            "raw_payload": dict(normalized_payload),
+        }
+        for row_id in row_ids:
+            result.setdefault(row_id, []).append(relation)
     return result
 
 

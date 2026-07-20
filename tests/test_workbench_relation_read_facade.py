@@ -172,6 +172,24 @@ class UnderlyingWorkbenchRelationRepository:
         self.calls.append(("workbench_relation_source_versions", {"scope_key": scope_key, "tenant_id": tenant_id}))
         return {"workbench_relation_schema_version": "test"}
 
+    def workbench_relation_source_bundle_from_source(
+        self,
+        *,
+        scope_key: str,
+        row_ids: list[str],
+        tenant_id: str = "default",
+    ) -> dict[str, object]:
+        self.calls.append(
+            (
+                "workbench_relation_source_bundle_from_source",
+                {"scope_key": scope_key, "row_ids": list(row_ids), "tenant_id": tenant_id},
+            )
+        )
+        return {
+            "rows": [{"case_id": "case-source-1", "row_ids": list(row_ids)}],
+            "source_versions": {"source": "workbench_pair_relations", "relation_count": 1},
+        }
+
     def workbench_relation_scope_summary(self, *, scope_key: str, tenant_id: str = "default") -> dict[str, object]:
         self.calls.append(("workbench_relation_scope_summary", {"scope_key": scope_key, "tenant_id": tenant_id}))
         return {
@@ -510,6 +528,14 @@ class WorkbenchRelationReadModelRepositoryPortTests(unittest.TestCase):
             "test",
         )
         self.assertEqual(
+            port.workbench_relation_source_bundle_from_source(
+                scope_key="2026-01",
+                row_ids=["txn-1"],
+                tenant_id="tenant",
+            )["rows"][0]["case_id"],
+            "case-source-1",
+        )
+        self.assertEqual(
             port.workbench_relation_scope_summary(scope_key="2026-01", tenant_id="tenant")["row_count"],
             1,
         )
@@ -541,6 +567,7 @@ class WorkbenchRelationReadModelRepositoryPortTests(unittest.TestCase):
                 "list_workbench_relation_rows",
                 "get_workbench_relation_groups_by_ids",
                 "workbench_relation_source_versions",
+                "workbench_relation_source_bundle_from_source",
                 "workbench_relation_scope_summary",
                 "list_batch_accounting_relation_groups_by_year",
                 "save_workbench_relation_distribution",

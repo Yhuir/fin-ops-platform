@@ -95,6 +95,20 @@ class WorkbenchRelationReadModelRepositoryPort:
         )
         return [dict(row) for row in list(rows or []) if isinstance(row, dict)]
 
+    def workbench_relation_source_bundle_from_source(
+        self,
+        *,
+        scope_key: str,
+        row_ids: list[str],
+        tenant_id: str = "default",
+    ) -> dict[str, object]:
+        payload = self._repository.workbench_relation_source_bundle_from_source(
+            scope_key=scope_key,
+            row_ids=row_ids,
+            tenant_id=tenant_id,
+        )
+        return dict(payload) if isinstance(payload, dict) else {"rows": [], "source_versions": {}}
+
     def workbench_relation_source_summary_from_source(
         self,
         *,

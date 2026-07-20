@@ -15,3 +15,12 @@
 - 旧代码闭合：通过。legacy builder、settings branch、clear port、raw duplicate 都列入删除和 guard。
 
 结论：`PLAN APPROVED`，可以进入实施。
+
+## 发布后失败反馈复审
+
+- 原计划对只读热路径判断正确，但把“可逆写验证”放在发布后才执行，实际暴露出两个未被静态扫描识别的旧链：command 全快照 I/O 与 projection 的跨 read-model 串行等待。
+- 补充计划不改变业务状态机、API、canonical pair relation、queue 协议或其他页面；只收窄 command I/O，并把 turnover projection 的 relation 输入从派生 read model 改回同一 canonical source。
+- 方案复用现有 canonical source reader 和既有 domain service，不增加表、worker、缓存、队列或兼容分支。
+- 回滚仍是上一精确 release；无 migration、无 canonical 数据搬迁。
+
+复审结论：`PLAN RE-APPROVED AFTER PRODUCTION FAILURE`。原计划的完成判定被撤销；只有补充修复通过生产写入门后，本阶段才可完成。

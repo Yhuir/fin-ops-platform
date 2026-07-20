@@ -505,7 +505,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 else None
             ),
             bank_transaction_tag_read_facade=bank_transaction_tag_read_facade,
-            workbench_relation_read_facade=workbench_relation_read_facade,
+            workbench_relation_source_repository=(
+                WorkbenchRelationReadModelRepositoryPort(read_model_repository)
+                if read_model_repository is not None
+                else None
+            ),
         )
         refresh_service = TurnoverLedgerReadModelRefreshService(
             projection_builder=projection_builder,

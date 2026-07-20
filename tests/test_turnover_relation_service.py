@@ -343,6 +343,47 @@ class TurnoverRelationServiceTests(unittest.TestCase):
         self.assertEqual(service.audit_log()[0]["actor"], "YNSYLP005")
         self.assertEqual(service.audit_log()[0]["note"], "人工确认")
 
+    def test_refresh_bank_rows_preserves_unrelated_relations_and_audit(self) -> None:
+        first_in = bank_row(
+            "txn-in-1",
+            category_code="borrow_in_personal_pending_repayment",
+            counterparty_name="甲",
+            credit_amount="100.00",
+        )
+        first_out = bank_row(
+            "txn-out-1",
+            category_code="borrow_in_personal_repaid",
+            counterparty_name="甲",
+            debit_amount="100.00",
+        )
+        second_in = bank_row(
+            "txn-in-2",
+            category_code="borrow_in_personal_pending_repayment",
+            counterparty_name="乙",
+            credit_amount="200.00",
+        )
+        second_out = bank_row(
+            "txn-out-2",
+            category_code="borrow_in_personal_repaid",
+            counterparty_name="乙",
+            debit_amount="200.00",
+        )
+        service = TurnoverRelationService.from_snapshot(
+            None,
+            bank_rows=[first_in, first_out, second_in, second_out],
+        )
+        relation = service.confirm_relation(["txn-in-1", "txn-out-1"], actor="YNSYLP005")
+        audit_before = service.audit_log()
+
+        refreshed_second_in = {**second_in, "remark": "bounded refresh"}
+        service.refresh_bank_rows([refreshed_second_in, second_out])
+
+        self.assertEqual(service.relations(), [relation])
+        self.assertEqual(service.audit_log(), audit_before)
+        second_relation = service.confirm_relation(["txn-in-2", "txn-out-2"], actor="YNSYLP006")
+        self.assertEqual(second_relation["status"], "confirmed")
+        self.assertEqual(len(service.relations()), 2)
+
     def test_confirm_relation_replaces_same_row_system_suggestion(self) -> None:
         service = TurnoverRelationService.from_snapshot(
             None,

@@ -180,6 +180,23 @@ class TurnoverRelationService:
                 "audit_log": deepcopy(self._audit_log),
             }
 
+    def refresh_bank_rows(self, bank_rows: list[dict[str, Any]]) -> None:
+        """Replace only the supplied canonical bank-row inputs.
+
+        Manual relation commands validate a bounded selection and must not
+        rebuild every system-derived relation as a side effect.
+        """
+        with self._lock:
+            for row in list(bank_rows or []):
+                if not isinstance(row, dict):
+                    continue
+                aliases = self._row_aliases(row)
+                if not aliases:
+                    continue
+                row_payload = deepcopy(row)
+                for row_id in aliases:
+                    self._bank_rows_by_id[row_id] = row_payload
+
     def relations(self) -> list[dict[str, Any]]:
         with self._lock:
             return deepcopy(self._relations)
@@ -187,6 +204,21 @@ class TurnoverRelationService:
     def audit_log(self) -> list[dict[str, Any]]:
         with self._lock:
             return deepcopy(self._audit_log)
+
+    def audit_event_cursor(self) -> int:
+        with self._lock:
+            return len(self._audit_log)
+
+    def latest_audit_event(self, relation_id: str, *, after_cursor: int) -> dict[str, Any] | None:
+        """Return only the event appended by the latest relation command."""
+        normalized_relation_id = str(relation_id or "").strip()
+        with self._lock:
+            if len(self._audit_log) <= max(0, int(after_cursor)):
+                return None
+            event = self._audit_log[-1]
+            if str(event.get("relation_id") or "").strip() != normalized_relation_id:
+                return None
+            return deepcopy(event)
 
     def rebuild_from_bank_rows(self, bank_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         with self._lock:

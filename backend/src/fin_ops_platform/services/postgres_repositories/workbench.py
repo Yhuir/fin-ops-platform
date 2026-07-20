@@ -872,40 +872,11 @@ class PostgresWorkbenchRepository:
         def write(connection: Any) -> None:
             relations = snapshot.get("relations") if isinstance(snapshot, dict) else None
             for relation_id, payload in self._iter_relation_items(relations):
-                bank_transaction_ids = text_list(payload.get("bank_transaction_ids") or payload.get("bank_row_ids"))
-                connection.execute(
-                    """
-                    insert into app.turnover_relations(
-                        relation_id, bank_transaction_id, status, relation_type, scope_month,
-                        counterparty_name, amount, version, audit_payload, source_versions, raw_payload
-                    )
-                    values (%s, %s, %s, %s, %s::date, %s, %s, %s, %s, %s, %s)
-                    on conflict (relation_id) do update set
-                        bank_transaction_id = excluded.bank_transaction_id,
-                        status = excluded.status,
-                        relation_type = excluded.relation_type,
-                        scope_month = excluded.scope_month,
-                        counterparty_name = excluded.counterparty_name,
-                        amount = excluded.amount,
-                        version = excluded.version,
-                        audit_payload = excluded.audit_payload,
-                        source_versions = excluded.source_versions,
-                        raw_payload = excluded.raw_payload,
-                        updated_at = now()
-                    """,
-                    (
-                        relation_id,
-                        bank_transaction_ids[0] if bank_transaction_ids else text(payload.get("bank_transaction_id")),
-                        text(payload.get("status") or "active"),
-                        text(payload.get("relation_type") or payload.get("type")),
-                        month_start(payload.get("scope_month") or payload.get("month")),
-                        text(payload.get("counterparty_name")),
-                        decimal_text(payload.get("amount")),
-                        int_value(payload.get("version"), 1),
-                        jsonb(snapshot.get("audit_log") if isinstance(snapshot.get("audit_log"), list) else []),
-                        jsonb(payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}),
-                        jsonb({"normalized_payload": payload}),
-                    ),
+                self._upsert_turnover_relation(
+                    connection,
+                    relation_id=relation_id,
+                    payload=payload,
+                    audit_payload=snapshot.get("audit_log") if isinstance(snapshot.get("audit_log"), list) else [],
                 )
             self._replace_turnover_relation_events(
                 connection,
@@ -913,6 +884,103 @@ class PostgresWorkbenchRepository:
             )
 
         run_in_transaction(self._connection, write)
+
+    def save_turnover_relation_change(
+        self,
+        *,
+        relation: dict[str, Any],
+        audit_event: dict[str, Any],
+    ) -> None:
+        """Persist one command result without rewriting unrelated relations."""
+        relation_id = text(relation.get("relation_id"))
+        if not relation_id:
+            raise ValueError("turnover relation change requires relation_id.")
+        if text(audit_event.get("relation_id")) != relation_id:
+            raise ValueError("turnover relation audit event must match relation_id.")
+
+        def write(connection: Any) -> None:
+            self._upsert_turnover_relation(
+                connection,
+                relation_id=relation_id,
+                payload=relation,
+                audit_payload=[audit_event],
+            )
+            self._insert_turnover_relation_event(connection, audit_event)
+
+        run_in_transaction(self._connection, write)
+
+    @staticmethod
+    def _upsert_turnover_relation(
+        connection: Any,
+        *,
+        relation_id: str,
+        payload: dict[str, Any],
+        audit_payload: Any,
+    ) -> None:
+        bank_transaction_ids = text_list(payload.get("bank_transaction_ids") or payload.get("bank_row_ids"))
+        connection.execute(
+            """
+            insert into app.turnover_relations(
+                relation_id, bank_transaction_id, status, relation_type, scope_month,
+                counterparty_name, amount, version, audit_payload, source_versions, raw_payload
+            )
+            values (%s, %s, %s, %s, %s::date, %s, %s, %s, %s, %s, %s)
+            on conflict (relation_id) do update set
+                bank_transaction_id = excluded.bank_transaction_id,
+                status = excluded.status,
+                relation_type = excluded.relation_type,
+                scope_month = excluded.scope_month,
+                counterparty_name = excluded.counterparty_name,
+                amount = excluded.amount,
+                version = excluded.version,
+                audit_payload = excluded.audit_payload,
+                source_versions = excluded.source_versions,
+                raw_payload = excluded.raw_payload,
+                updated_at = now()
+            """,
+            (
+                relation_id,
+                bank_transaction_ids[0] if bank_transaction_ids else text(payload.get("bank_transaction_id")),
+                text(payload.get("status") or "active"),
+                text(payload.get("relation_type") or payload.get("type")),
+                month_start(payload.get("scope_month") or payload.get("month")),
+                text(payload.get("counterparty_name")),
+                decimal_text(payload.get("amount")),
+                int_value(payload.get("version"), 1),
+                jsonb(audit_payload if isinstance(audit_payload, list) else []),
+                jsonb(payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}),
+                jsonb({"normalized_payload": payload}),
+            ),
+        )
+
+    @staticmethod
+    def _insert_turnover_relation_event(connection: Any, item: dict[str, Any]) -> None:
+        relation_id = text(item.get("relation_id"))
+        if not relation_id:
+            raise ValueError("turnover relation event requires relation_id.")
+        connection.execute(
+            """
+            insert into app.turnover_relation_events(
+                id, turnover_relation_id, relation_id, event_type, actor_id, occurred_at, payload, raw_payload
+            )
+            values (
+                %s::uuid,
+                (select id from app.turnover_relations where relation_id = %s limit 1),
+                %s, %s, %s, coalesce(%s::timestamptz, now()), %s, %s
+            )
+            on conflict (id) do update set payload = excluded.payload, raw_payload = excluded.raw_payload
+            """,
+            (
+                event_uuid("turnover_relation_events", relation_id, item),
+                relation_id,
+                relation_id,
+                text(item.get("action") or item.get("event_type") or item.get("operation") or "updated"),
+                text(item.get("actor") or item.get("actor_id") or item.get("updated_by")),
+                text(item.get("created_at") or item.get("occurred_at") or item.get("updated_at")),
+                jsonb(item),
+                jsonb({"normalized_payload": item}),
+            ),
+        )
 
     def load_turnover_relation_audit_log(self) -> list[Any]:
         snapshot = self.load_turnover_relations()
@@ -1213,29 +1281,7 @@ class PostgresWorkbenchRepository:
             relation_id = text(item.get("relation_id"))
             if not relation_id:
                 continue
-            connection.execute(
-                """
-                insert into app.turnover_relation_events(
-                    id, turnover_relation_id, relation_id, event_type, actor_id, occurred_at, payload, raw_payload
-                )
-                values (
-                    %s::uuid,
-                    (select id from app.turnover_relations where relation_id = %s limit 1),
-                    %s, %s, %s, coalesce(%s::timestamptz, now()), %s, %s
-                )
-                on conflict (id) do update set payload = excluded.payload, raw_payload = excluded.raw_payload
-                """,
-                (
-                    event_uuid("turnover_relation_events", relation_id, item),
-                    relation_id,
-                    relation_id,
-                    text(item.get("action") or item.get("event_type") or item.get("operation") or "updated"),
-                    text(item.get("actor") or item.get("actor_id") or item.get("updated_by")),
-                    text(item.get("created_at") or item.get("occurred_at") or item.get("updated_at")),
-                    jsonb(item),
-                    jsonb({"normalized_payload": item}),
-                ),
-            )
+            self._insert_turnover_relation_event(connection, item)
 
     def _replace_workbench_exception_case_events(self, connection: Any, cases: Any) -> None:
         if not isinstance(cases, dict):

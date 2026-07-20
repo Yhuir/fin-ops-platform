@@ -5379,6 +5379,71 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
             }
         return result
 
+    def workbench_relation_source_bundle_from_source(
+        self,
+        *,
+        scope_key: str,
+        row_ids: list[str],
+        tenant_id: str = "default",
+    ) -> dict[str, Any]:
+        """Read relation rows and their source version from one canonical snapshot."""
+        _ = tenant_id
+        normalized_scope_key = text(scope_key) or ""
+        normalized_row_ids = text_list(row_ids)
+        if not normalized_row_ids:
+            return {"rows": [], "source_versions": {}}
+        month = month_start(normalized_scope_key)
+        if month:
+            summary_predicate = "(month_scope = %s::date or row_ids && %s::text[])"
+            summary_params: list[Any] = [month, normalized_row_ids]
+        else:
+            summary_predicate = "row_ids && %s::text[]"
+            summary_params = [normalized_row_ids]
+        row = self._connection.fetch_one(
+            f"""
+            with selected_relations as materialized (
+                select case_id, status, relation_mode, row_ids, row_types, amount_check, raw_payload, updated_at
+                from app.workbench_pair_relations
+                where status = 'active'
+                  and row_ids && %s::text[]
+            ),
+            source_summary as (
+                select
+                    count(*)::integer as relation_count,
+                    coalesce(max(updated_at)::text, '') as relation_updated_at
+                from app.workbench_pair_relations
+                where status = 'active'
+                  and {summary_predicate}
+            )
+            select
+                coalesce(
+                    (
+                        select jsonb_agg(
+                            (to_jsonb(selected_relations) - 'updated_at')
+                            order by updated_at desc, case_id
+                        )
+                        from selected_relations
+                    ),
+                    '[]'::jsonb
+                ) as rows,
+                source_summary.relation_count,
+                source_summary.relation_updated_at
+            from source_summary
+            """,
+            tuple([normalized_row_ids, *summary_params]),
+        )
+        payload = row if isinstance(row, dict) else {}
+        rows = payload.get("rows") if isinstance(payload.get("rows"), list) else []
+        return {
+            "rows": [dict(item) for item in rows if isinstance(item, dict)],
+            "source_versions": {
+                "source": "workbench_pair_relations",
+                "scope_key": normalized_scope_key,
+                "relation_count": int_value(payload.get("relation_count"), 0),
+                "relation_updated_at": text(payload.get("relation_updated_at")) or "",
+            },
+        }
+
     def _workbench_relation_member_source_summaries(self, rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         bank_ids: list[str] = []
         oa_ids: list[str] = []
@@ -7993,6 +8058,9 @@ class PostgresReadModelRepository:
 
     def list_active_workbench_relation_source_rows(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
         return self._search_workbench_relation_repository.list_active_workbench_relation_source_rows(*args, **kwargs)
+
+    def workbench_relation_source_bundle_from_source(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return self._search_workbench_relation_repository.workbench_relation_source_bundle_from_source(*args, **kwargs)
 
     def workbench_relation_source_summary_from_source(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         return self._search_workbench_relation_repository.workbench_relation_source_summary_from_source(*args, **kwargs)

@@ -86,3 +86,11 @@
 - 闭环：测试、文档、提交、部署、重建、40 样本、可逆写验证和回滚条件明确。
 
 审阅结论：计划满足要求，没有遗漏，也没有需要新增的层。实施期间若 SQL 等价测试不能证明业务语义，必须停止并缩小修改，不能用 fallback 绕过。
+
+## 发布后补充修复计划（写入门失败）
+
+1. command I/O 收窄：为 turnover confirm/withdraw 增加按 transaction ids 读取银行 read-model 行的 provider；stale precondition 与 relation domain refresh 只读取所选行，不再扫描全部月份。
+2. relation 单事实持久化：`TurnoverRelationService` 增加只替换指定银行行输入而不重建全部自动 relation 的公开 domain 操作；PostgreSQL repository 增加单 relation + 单 audit event 的原子 upsert；`TurnoverLedgerRelationWritePort` 删除全量 rebuild/full-snapshot save。
+3. projection 去串行等待：turnover projection 直接通过已有窄 repository I/O 读取 canonical active pair relation rows 与 source summary；删除 `WorkbenchRelationReadFacade` 依赖，不等待另一 read model 发布，也不写同步 read model。
+4. 旧链门禁：production scan 必须证明 confirm/withdraw 不再调用 `_turnover_bank_transaction_rows()` 全量 provider、`_rebuild_relation_snapshot`、full `save_turnover_relations` 或 turnover projection relation read-model facade。
+5. 验证：先跑 domain/UoW/repository/worker/API/architecture 目标测试与真实 PostgreSQL；部署精确 SHA 后重建 turnover scopes，跑 40 次读取、直接/交叉 Audit，再执行至少两组 test-owned confirm→fresh→withdraw→fresh。门槛保持 command p95 `<=1000ms`、response-to-fresh p95 `<=2000ms`、hard max `3000ms`；不通过则继续本页闭环，不能进入下一页。
