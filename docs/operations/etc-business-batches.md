@@ -17,6 +17,7 @@
 - `0065_invoice_canonical_identity_fingerprint_invariant.sql` 必须随发布执行，用于清理历史 canonical invoice 中同时存在强 `source_unique_key` 和弱 `data_fingerprint` 的列值与 raw payload；否则旧快照仍可能在 ETC ZIP 导入或 OA 草稿创建后的本地持久化阶段触发 `invoices_data_fingerprint_uidx`。
 - `0103_etc_reconciliation_task_timestamps.sql` 必须随发布执行，用正式 task 行的 typed `created_at/updated_at` 补齐 Phase 19 历史任务 payload 时间戳；该迁移幂等，不能改写 task 状态、版本、scope 或 typed 时间列。
 - `0116_workbench_etc_relation_enrichment_hot_path.sql` 必须随发布执行，为 completed OA 精确 ETC marker、submitted business batch external identity/scope 和 active relation `etc_batch_link` 提供窄索引；它不改业务数据，也不引入新表或唯一性猜测。
+- `0117_workbench_matching_idempotency_runtime_grant.sql` 只授予 `fin_ops_app_runtime` 对既有 Workbench 幂等表的 `select/insert/update`，使 matching worker 能通过正式 relation command/UoW 提交 ETC enrichment；不授予 delete，也不扩大其他表或页面权限。
 
 ## 迁移 dry-run
 

@@ -244,6 +244,16 @@ class WorkbenchEtcRelationEnrichmentPostgresTests(unittest.TestCase):
                 "workbench_pair_relations_active_etc_link_idx",
             ],
         )
+        privilege = self.connection.fetch_one(
+            """
+            select has_table_privilege(
+                'fin_ops_app_runtime',
+                'app.workbench_idempotency_records',
+                'SELECT,INSERT,UPDATE'
+            ) as allowed
+            """
+        )
+        self.assertTrue(privilege["allowed"])
 
     def _seed_exact_etc_relation(self) -> None:
         self.connection.execute(

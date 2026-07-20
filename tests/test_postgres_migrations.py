@@ -130,6 +130,7 @@ EXPECTED_MIGRATIONS = [
     "0114_operation_barrier_latest_scope_hot_path.sql",
     "0115_turnover_ledger_relation_delta_hot_path.sql",
     "0116_workbench_etc_relation_enrichment_hot_path.sql",
+    "0117_workbench_matching_idempotency_runtime_grant.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -292,7 +293,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 117)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 118)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -366,6 +367,18 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertIn("external_etc_batch_id", sql)
         self.assertIn("workbench_pair_relations_active_etc_link_idx", sql)
         self.assertIn("special_metadata->'etc_batch_link'", sql)
+
+    def test_workbench_matching_runtime_can_commit_idempotency_records(self) -> None:
+        sql = (MIGRATIONS_DIR / "0117_workbench_matching_idempotency_runtime_grant.sql").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("fin_ops_app_runtime", sql)
+        self.assertIn(
+            "grant select, insert, update on app.workbench_idempotency_records to fin_ops_app_runtime",
+            " ".join(sql.split()),
+        )
+        self.assertNotIn("delete", sql.lower())
 
     def test_pending_invoice_filter_constraints_allow_cash_income(self) -> None:
         sql = strip_sql_comments(migration_sql()).lower()
