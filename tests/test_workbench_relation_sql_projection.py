@@ -3,6 +3,9 @@ from __future__ import annotations
 import unittest
 
 from fin_ops_platform.services.workbench_relation_sql_projection import WorkbenchRelationSqlProjectionBuilder
+from fin_ops_platform.services.workbench_relation_sql_projection import (
+    WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION,
+)
 
 
 class CaptureWorkbenchRelationRepository:
@@ -13,6 +16,12 @@ class CaptureWorkbenchRelationRepository:
         self.scope_summary_calls: list[dict[str, object]] = []
         self.previous_distribution: dict[str, object] | None = None
         self.previous_distribution_calls: list[dict[str, object]] = []
+        self.relation_delta_source_version_calls: list[dict[str, object]] = []
+        self.relation_delta_source_versions: dict[str, object] = {
+            "workbench_relation_schema_version": WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION,
+            "workbench_pair_relations_updated_at": "2026-07-20 15:00:00+08",
+            "bank_transactions_updated_at": "2026-07-19 00:00:00+08",
+        }
 
     def get_workbench_relation_rows_by_ids(
         self,
@@ -38,6 +47,18 @@ class CaptureWorkbenchRelationRepository:
     ) -> dict[str, object] | None:
         self.scope_summary_calls.append({"scope_key": scope_key, "tenant_id": tenant_id})
         return self.existing_scope_summary
+
+    def workbench_relation_delta_source_versions(
+        self,
+        *,
+        scope_key: str,
+        row_ids: list[str],
+        tenant_id: str = "default",
+    ) -> dict[str, object]:
+        self.relation_delta_source_version_calls.append(
+            {"scope_key": scope_key, "row_ids": list(row_ids), "tenant_id": tenant_id}
+        )
+        return dict(self.relation_delta_source_versions)
 
     def save_workbench_relation_distribution(
         self,
@@ -275,7 +296,13 @@ class CrossMonthRelationProjectionConnection(WorkbenchRelationProjectionConnecti
             return []
         if "from app.workbench_pair_relations" in normalized:
             self.sql_statements.append(sql)
-            requested_ids = set(params[1]) if len(params) > 1 and isinstance(params[1], list) else set()
+            requested_ids = (
+                set(params[1])
+                if len(params) > 1 and isinstance(params[1], list)
+                else set(params[0])
+                if params and isinstance(params[0], list)
+                else set()
+            )
             relation_ids = {"oa-yang", "bank-nanjing", "input-invoice-nanjing"}
             if requested_ids & relation_ids:
                 return [
@@ -585,6 +612,59 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
                 if "from app.invoices" in sql
             )
         )
+
+    def test_relation_delta_uses_narrow_version_and_active_relation_queries(self) -> None:
+        repository = CaptureWorkbenchRelationRepository()
+        connection = CrossMonthRelationProjectionConnection()
+        builder = WorkbenchRelationSqlProjectionBuilder(
+            connection=connection,
+            read_model_repository=repository,
+        )
+
+        result = builder.rebuild_workbench_relation_read_model_relation_delta(
+            "2026-04",
+            row_ids=["bank-nanjing"],
+        )
+
+        self.assertTrue(result["relation_delta"])
+        self.assertEqual(repository.saved_rows[0]["groups"][0]["group_id"], "case-nanjing-cross-month")
+        self.assertEqual(
+            repository.relation_delta_source_version_calls,
+            [{"scope_key": "2026-04", "row_ids": ["bank-nanjing"], "tenant_id": "default"}],
+        )
+        relation_queries = [
+            " ".join(sql.lower().split())
+            for sql in connection.sql_statements
+            if "from app.workbench_pair_relations" in " ".join(sql.lower().split())
+        ]
+        self.assertEqual(len(relation_queries), 1)
+        self.assertIn("row_ids && %s::text[]", relation_queries[0])
+        self.assertNotIn("month_scope =", relation_queries[0])
+        claim_queries = [
+            " ".join(sql.lower().split())
+            for sql in connection.sql_statements
+            if "from app.bank_transaction_relation_claims" in " ".join(sql.lower().split())
+        ]
+        self.assertEqual(len(claim_queries), 1)
+        self.assertIn("bank_transaction_id = any(%s::text[])", claim_queries[0])
+
+    def test_relation_delta_falls_back_to_full_scope_when_scope_proof_is_missing(self) -> None:
+        repository = CaptureWorkbenchRelationRepository()
+        repository.relation_delta_source_versions = {}
+        connection = CrossMonthRelationProjectionConnection()
+        builder = WorkbenchRelationSqlProjectionBuilder(
+            connection=connection,
+            read_model_repository=repository,
+        )
+
+        result = builder.rebuild_workbench_relation_read_model_relation_delta(
+            "2026-04",
+            row_ids=["bank-nanjing"],
+        )
+
+        self.assertNotIn("relation_delta", result)
+        self.assertEqual(len(repository.saved), 1)
+        self.assertEqual(repository.saved_rows, [])
 
     def test_rebuild_rows_reprojects_members_removed_from_previous_group(self) -> None:
         repository = CaptureWorkbenchRelationRepository()

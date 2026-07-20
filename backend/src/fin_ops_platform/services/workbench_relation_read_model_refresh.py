@@ -41,6 +41,20 @@ class WorkbenchRelationReadModelRefreshService:
         if not row_ids:
             metadata = event.payload.get("metadata")
             row_ids = _event_text_list(metadata if isinstance(metadata, dict) else {}, "row_ids")
+        relation_delta_row_ids = _event_relation_delta_row_ids(event)
+        if scope_key != "all" and relation_delta_row_ids and not force_refresh:
+            rebuild_relation_delta = getattr(
+                self._projection_builder,
+                "rebuild_workbench_relation_read_model_relation_delta",
+                None,
+            )
+            if callable(rebuild_relation_delta):
+                result = rebuild_relation_delta(scope_key, row_ids=relation_delta_row_ids)
+                payload = result if isinstance(result, dict) else {"scope_key": scope_key}
+                complete_dirty_scope = getattr(self._queue_repository, "complete_read_model_refresh", None)
+                if callable(complete_dirty_scope):
+                    complete_dirty_scope(tenant_id=event.tenant_id, scope_type=scope_type, scope_key=scope_key)
+                return payload
         if row_ids and not force_refresh:
             rebuild_rows = getattr(self._projection_builder, "rebuild_workbench_relation_read_model_rows", None)
             if callable(rebuild_rows):
@@ -112,3 +126,20 @@ def _event_force_refresh(event: RuntimeQueueEvent) -> bool:
         return True
     metadata = event.payload.get("metadata")
     return isinstance(metadata, dict) and metadata.get("force_refresh") is True
+
+
+def _event_relation_delta_row_ids(event: RuntimeQueueEvent) -> list[str]:
+    containers = [event.payload]
+    metadata = event.payload.get("metadata")
+    if isinstance(metadata, dict):
+        containers.append(metadata)
+    for container in containers:
+        relation_deltas = container.get("relation_deltas")
+        if not isinstance(relation_deltas, dict) or not relation_deltas:
+            continue
+        row_ids = _event_text_list(container, "row_ids")
+        for delta in relation_deltas.values():
+            if isinstance(delta, dict):
+                row_ids.extend(_event_text_list(delta, "row_ids"))
+        return list(dict.fromkeys(row_ids))
+    return []

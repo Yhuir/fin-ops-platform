@@ -583,3 +583,10 @@ git diff --check
 - 本模块不逐个证明所有业务页面对 `refreshing/stale/missing/failed` 的 UI 行为；后续页面模块闭环必须补齐。
 - 本模块默认不验证真实 Redis/RabbitMQ 网络和 worker drain；runtime-workers 与 operations/staging 覆盖。`bash scripts/verify.sh infra-smoke` 只有在 `FIN_OPS_TEST_DATABASE_URL` 和 `FIN_OPS_INFRA_SMOKE_APPLY=1` 同时存在时，才是直接 enqueue worker drain 证据；只有在 `FIN_OPS_WRITE_OPERATION_AUDIT_OPERATIONS` 指定 operation 且环境中已有对应真实业务写入样本时，才是该写链路 durable outbox fan-out 证据。
 - `server.py` 仍有 legacy route 分发；每个业务模块需要继续确认 route 是否走 `ReadModelQueryGateway` 或等价 freshness boundary。
+
+## 2026-07-20 - workbench_relation relation-only delta
+
+- Worker dispatch：`tests/test_workbench_relation_read_model_refresh.py::WorkbenchRelationReadModelRefreshServiceTests::test_handle_runtime_event_uses_explicit_relation_delta_contract`。
+- Projection bounded I/O：`tests/test_workbench_relation_sql_projection.py::WorkbenchRelationSqlProjectionTests::test_relation_delta_uses_narrow_version_and_active_relation_queries`。
+- Repository contract：`tests/test_postgres_repositories_boundaries.py::test_workbench_relation_delta_source_versions_preserve_unrelated_sources`。
+- 真实 PostgreSQL：`tests/test_turnover_ledger_postgres_integration.py::TurnoverLedgerPostgresIntegrationTests::test_workbench_relation_delta_source_versions_advance_only_relation_proof`。

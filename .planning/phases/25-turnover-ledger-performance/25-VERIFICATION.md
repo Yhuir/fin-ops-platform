@@ -88,3 +88,19 @@
 - repository boundary：relation delta 不执行 `delete from read_model.turnover_ledger_rows`；完整 scope save 仍保留给 own-source/repair/首次构建。
 - `bash scripts/verify.sh lint`、`bash scripts/verify.sh docs`、`git diff --check`：通过。
 - 下一门：提交、push main、部署精确 SHA并应用 0115；再运行三轮生产可逆探针。性能任一门失败则不进入下一页。
+
+## release 75565d67e 第五轮生产写门
+
+- 部署 release `main-75565d67-20260720145643` 成功，migration 0115 约 `39ms`；15/15 read models fresh、28/28 workers ready/idle、queue 0、write safety ready。
+- 三轮可逆业务断言全部通过，最终 fixture 为 `unlinked` 且无需 recovery。
+- `turnover_ledger` relation delta 已通过：recent 12 样本 p50/p95/p99 `72.853/126.677/143.571ms`，每轮首次 barrier 检查两个 turnover month scopes 均 fresh。
+- 总门仍失败：command p95/max `5313.061ms`；response-to-fresh p95/max `6703.945ms`。`workbench_relation` recent p50/p95/p99 `602.831/3178.564/5376.672ms`，慢点位于整月 source-version/relation扫描而非 turnover projection或 operation barrier。
+- API telemetry：confirm 3 样本数据库 p50/p95 `753.818/5132.376ms`、21 queries；withdraw `935.545/1497.237ms`、15 queries。先删除已证实的后台整月 I/O再复测同步 command，避免叠加未经证明的 command重构。
+
+## shared relation-only delta 本地门
+
+- Worker：显式 relation delta 进入专属 handler；普通 row ids继续通用 partial；force/`all`不进入 delta。
+- Projection/repository：版本 query 只读取 scope proof + impacted canonical relation max；active relation和 pending claim只按 affected row ids读取；输出仍通过 `save_workbench_relation_distribution_rows`。
+- Workbench relation/turnover/UoW/API/repository/manifest/scope/architecture targeted：`605 passed + 283 subtests`。
+- 真实 disposable PostgreSQL 17：应用 0001–0115 后 `tests/test_turnover_ledger_postgres_integration.py` 6/6 passed；证明 withdrawn canonical relation也能推进 relation proof、其他 source versions保持不变；临时数据库自动删除。
+- `bash scripts/verify.sh lint`、`bash scripts/verify.sh docs`、`git diff --check`：通过。

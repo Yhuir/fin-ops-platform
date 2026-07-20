@@ -124,6 +124,31 @@ class WorkbenchRelationSqlProjectionBuilder:
         }
 
     def rebuild_workbench_relation_read_model_rows(self, scope_key: str, *, row_ids: list[str]) -> dict[str, Any]:
+        return self._rebuild_workbench_relation_read_model_rows(
+            scope_key,
+            row_ids=row_ids,
+            relation_delta=False,
+        )
+
+    def rebuild_workbench_relation_read_model_relation_delta(
+        self,
+        scope_key: str,
+        *,
+        row_ids: list[str],
+    ) -> dict[str, Any]:
+        return self._rebuild_workbench_relation_read_model_rows(
+            scope_key,
+            row_ids=row_ids,
+            relation_delta=True,
+        )
+
+    def _rebuild_workbench_relation_read_model_rows(
+        self,
+        scope_key: str,
+        *,
+        row_ids: list[str],
+        relation_delta: bool,
+    ) -> dict[str, Any]:
         normalized_scope = text(scope_key) or ""
         if not MONTH_RE.match(normalized_scope):
             raise ValueError("workbench relation SQL projection scope_key must be a month shard YYYY-MM.")
@@ -133,7 +158,13 @@ class WorkbenchRelationSqlProjectionBuilder:
         save_rows = getattr(self._read_model_repository, "save_workbench_relation_distribution_rows", None)
         if not callable(save_rows):
             return self.rebuild_workbench_relation_read_model_scope(normalized_scope)
-        source_versions = self._source_versions(normalized_scope)
+        source_versions = (
+            self._relation_delta_source_versions(normalized_scope, affected_row_ids)
+            if relation_delta
+            else self._source_versions(normalized_scope)
+        )
+        if relation_delta and not source_versions:
+            return self.rebuild_workbench_relation_read_model_scope(normalized_scope)
         unchanged = self._unchanged_scope_result(
             scope_key=normalized_scope,
             source_versions=source_versions,
@@ -156,8 +187,16 @@ class WorkbenchRelationSqlProjectionBuilder:
             scope_key=normalized_scope,
         )
         affected_row_ids = _dedupe_preserve_order([*affected_row_ids, *previous_member_types])
-        pending_claimed_bank_ids = set(self._pending_claimed_bank_transaction_ids_for_month(normalized_scope))
-        relations = self._active_relations_for_scope(month=normalized_scope, row_ids=affected_row_ids)
+        pending_claimed_bank_ids = set(
+            self._pending_claimed_bank_transaction_ids_for_rows(normalized_scope, affected_row_ids)
+            if relation_delta
+            else self._pending_claimed_bank_transaction_ids_for_month(normalized_scope)
+        )
+        relations = (
+            self._active_relations_for_row_ids(affected_row_ids)
+            if relation_delta
+            else self._active_relations_for_scope(month=normalized_scope, row_ids=affected_row_ids)
+        )
         relation_row_ids = _dedupe_preserve_order(row_id for relation in relations for row_id in text_list(relation.get("row_ids")))
         object_row_ids = _dedupe_preserve_order([*affected_row_ids, *relation_row_ids])
         source_kinds = _source_kinds_for_relation_row_ids(relations, object_row_ids)
@@ -223,7 +262,22 @@ class WorkbenchRelationSqlProjectionBuilder:
             "source_versions": source_versions,
             "partial": True,
             "affected_row_count": len(affected_row_ids),
+            "relation_delta": relation_delta,
         }
+
+    def _relation_delta_source_versions(self, scope_key: str, row_ids: list[str]) -> dict[str, Any]:
+        loader = getattr(self._read_model_repository, "workbench_relation_delta_source_versions", None)
+        if not callable(loader):
+            return {}
+        payload = loader(
+            scope_key=scope_key,
+            row_ids=row_ids,
+            tenant_id=self._tenant_id,
+        )
+        source_versions = dict(payload) if isinstance(payload, dict) else {}
+        if source_versions.get("workbench_relation_schema_version") != WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION:
+            return {}
+        return source_versions
 
     def _unchanged_scope_result(self, *, scope_key: str, source_versions: dict[str, Any]) -> dict[str, Any] | None:
         scope_summary_loader = getattr(self._read_model_repository, "workbench_relation_scope_summary", None)
@@ -395,6 +449,20 @@ class WorkbenchRelationSqlProjectionBuilder:
             (month_start(month), row_ids),
         )
 
+    def _active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, Any]]:
+        if not row_ids:
+            return []
+        return self._connection.fetch_all(
+            """
+            select case_id, relation_mode, month_scope, row_ids, row_types, note, amount_check, special_metadata, source_versions, raw_payload
+            from app.workbench_pair_relations
+            where status = 'active'
+              and row_ids && %s::text[]
+            order by updated_at, case_id
+            """,
+            (row_ids,),
+        )
+
     def _pending_claimed_bank_transaction_ids_for_month(self, month: str) -> list[str]:
         rows = self._connection.fetch_all(
             """
@@ -406,6 +474,23 @@ class WorkbenchRelationSqlProjectionBuilder:
             order by bank_transaction_id
             """,
             (month_start(month),),
+        )
+        return _dedupe_preserve_order(row.get("bank_transaction_id") for row in rows)
+
+    def _pending_claimed_bank_transaction_ids_for_rows(self, month: str, row_ids: list[str]) -> list[str]:
+        if not row_ids:
+            return []
+        rows = self._connection.fetch_all(
+            """
+            select bank_transaction_id
+            from app.bank_transaction_relation_claims
+            where status = 'active'
+              and owner_type = 'oa_pending_payment_relation'
+              and scope_month = %s::date
+              and bank_transaction_id = any(%s::text[])
+            order by bank_transaction_id
+            """,
+            (month_start(month), row_ids),
         )
         return _dedupe_preserve_order(row.get("bank_transaction_id") for row in rows)
 

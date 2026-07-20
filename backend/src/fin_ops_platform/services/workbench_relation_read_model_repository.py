@@ -137,6 +137,20 @@ class WorkbenchRelationReadModelRepositoryPort:
         )
         return dict(payload) if isinstance(payload, dict) else None
 
+    def workbench_relation_delta_source_versions(
+        self,
+        *,
+        scope_key: str,
+        row_ids: list[str],
+        tenant_id: str = "default",
+    ) -> dict[str, object]:
+        payload = self._repository.workbench_relation_delta_source_versions(
+            scope_key=scope_key,
+            row_ids=row_ids,
+            tenant_id=tenant_id,
+        )
+        return dict(payload) if isinstance(payload, dict) else {}
+
     def list_batch_accounting_relation_groups_by_year(
         self,
         *,

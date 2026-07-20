@@ -1806,3 +1806,9 @@
 - 触发事实：relation source fast path 发布后，pending invoice projection 保存的是 `workbench_relation_source_summary_from_source(...)` 的 source summary；API expected-source gate 却继续读取 `read_model.workbench_relation_scopes.source_versions`，导致刷新完成后仍因 `workbench_relation_source_versions_mismatch` 返回 refreshing。
 - 决策：pending invoice API expected-source 与 worker actual 统一为 active relation source summary，按当前 pending invoice rows 命中的月份和 row id 计算；继续通过 workbench-relations repository port 访问源表，不新增页面 fallback 或绕过 fresh gate。
 - 本地保护：`tests/test_search_pending_sql_runtime.py::SearchPendingSqlRuntimeTests::test_pending_invoice_repository_loads_workbench_relation_source_versions_for_matching_months`。
+
+## 2026-07-20 - workbench_relation relation-only delta 收窄
+
+- 生产三轮可逆 turnover closure 探针证明 `turnover_ledger` delta 已达到 recent p95 `126.677ms`，剩余 response-to-fresh 长尾来自 `workbench_relation` recent p95/p99 `3178.564/5376.672ms`。
+- 显式 `relation_deltas + row_ids` 事件新增单一 relation-only delta 边界：既有 scope proof只推进 impacted pair-relation timestamp，canonical relation、pending claim与 source objects只按 affected ids读取，持久化复用原 partial save port。
+- relation-only path不再执行整月 source-version CTE或 `month_scope OR row_ids` active relation加载。普通 row hint、首次 scope、schema mismatch、force/`all`仍走原安全路径；无新增 read model、queue、worker、cache、表或 fallback。

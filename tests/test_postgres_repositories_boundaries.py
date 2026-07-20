@@ -636,6 +636,39 @@ def test_workbench_relation_distribution_partial_save_deletes_overlap_and_counts
     assert any("insert into read_model.workbench_relation_rows" in sql for sql in bulk_sql)
 
 
+def test_workbench_relation_delta_source_versions_preserve_unrelated_sources() -> None:
+    class DeltaSourceConnection(RecordingConnection):
+        def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+            self.fetched_one.append((" ".join(sql.split()), params))
+            return {
+                "source_versions": {
+                    "workbench_relation_schema_version": "v1",
+                    "workbench_pair_relations_updated_at": "2026-07-19 00:00:00+08",
+                    "bank_transactions_updated_at": "2026-07-18 00:00:00+08",
+                },
+                "pair_relations_updated_at": "2026-07-20 15:00:00+08",
+            }
+
+    connection = DeltaSourceConnection()
+    repository = PostgresReadModelRepository(connection)
+
+    result = repository.workbench_relation_delta_source_versions(
+        scope_key="2026-05",
+        row_ids=["txn-1", "oa-1"],
+    )
+
+    assert result == {
+        "workbench_relation_schema_version": "v1",
+        "workbench_pair_relations_updated_at": "2026-07-20 15:00:00+08",
+        "bank_transactions_updated_at": "2026-07-18 00:00:00+08",
+    }
+    sql, params = connection.fetched_one[0]
+    assert "from read_model.workbench_relation_scopes scope" in sql
+    assert "where relation.row_ids && %s::text[]" in sql
+    assert "from app.bank_transactions" not in sql
+    assert params == (["txn-1", "oa-1"], "default", "2026-05")
+
+
 def test_no_oa_bank_batch_empty_snapshot_deletes_events_before_batches() -> None:
     connection = RecordingConnection()
     repository = PostgresWorkbenchRepository(connection)

@@ -128,6 +128,14 @@
 ## 第五次生产门补充：relation-only month delta
 
 1. release `8c6ffcb744fde08ea4c2053ac8562380bef15a4f` 业务正确且 fixture 完整恢复，但首轮 confirm response-to-fresh `5801.700ms`；后续为 `1288.451–1938.478ms`。handler 证据和代码事实共同证明旧 projection 对两个受影响月份串行执行整月 payload 读取、relation enrichment、scope delete/rewrite。
+
+## 第六次生产门补充：共享 relation distribution 精确增量
+
+1. release `75565d67ec46b5b88ad9d8a630d099676a23e790` 已把 `turnover_ledger` relation delta 的 recent p95 收敛到 `126.677ms`，证明页面 own projection 热点已关闭。
+2. 同一三轮生产探针仍失败：`workbench_relation` recent p95/p99 为 `3178.564/5376.672ms`，第三轮撤回 response-to-fresh `6703.945ms`。worker 虽收到 row ids，仍执行整月 source-version CTE 与 `month_scope OR row_ids` active relation读取，两个 scope在单 worker串行累加。
+3. 只对显式 `relation_deltas + row_ids + exact month` 增加 relation-only delta I/O：复用既有 scope proof，只推进 impacted canonical relation version；active relation、pending claim和 bank/OA/invoice对象均按 affected ids读取；保存仍走既有 partial repository port。
+4. 删除 relation-only path 的整月 source-version CTE和整月 active relation分支；generic row-only、首次 scope、schema mismatch、force/`all` 保持安全 full路径，不新增 queue、worker、cache、表或 API。
+5. 发布后复用同一三轮可逆探针；严格门保持 command p95 `<=1000ms`、response-to-fresh p95 `<=2000ms`、hard max `<=3000ms`，最终 fixture 必须 unlinked 且直接/交叉 Audit、queue drain全部通过。
 2. 复用既有 outbox `relation_deltas + row_ids`，不增加 cache、queue、worker、表或共享基础设施。只有精确月份与完整 delta metadata 才进入窄路径；`all`、导入、设置、标签、extra 和 own-source 变化仍走完整 rebuild。
 3. 在 turnover read-model owner 内增加 `load_turnover_ledger_relation_delta` / `save_turnover_ledger_relation_delta`：GIN overlap 查询只读受影响 grouped rows，canonical relation bundle 重套上下文，单条 scope update 推进统一 source-version proof，窄 upsert 目标 rows；禁止 delete scope。
 4. scope missing 或 source versions mixed 是显式安全 full rebuild，不是 hidden compatibility fallback。用 unit、repository SQL、真实 PostgreSQL、manifest/architecture、API/UoW 和 Audit 回归证明边界与隔离。

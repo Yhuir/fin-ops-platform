@@ -14,6 +14,7 @@ class RecordingProjectionBuilder:
         self.full_scopes: list[str] = []
         self.full_force_refresh: list[bool] = []
         self.partial_calls: list[dict[str, object]] = []
+        self.relation_delta_calls: list[dict[str, object]] = []
 
     def rebuild_workbench_relation_read_model_scope(
         self,
@@ -31,6 +32,15 @@ class RecordingProjectionBuilder:
     def rebuild_workbench_relation_read_model_rows(self, scope_key: str, *, row_ids: list[str]) -> dict[str, object]:
         self.partial_calls.append({"scope_key": scope_key, "row_ids": list(row_ids)})
         return {"scope_key": scope_key, "row_count": len(row_ids), "partial": True}
+
+    def rebuild_workbench_relation_read_model_relation_delta(
+        self,
+        scope_key: str,
+        *,
+        row_ids: list[str],
+    ) -> dict[str, object]:
+        self.relation_delta_calls.append({"scope_key": scope_key, "row_ids": list(row_ids)})
+        return {"scope_key": scope_key, "row_count": len(row_ids), "partial": True, "relation_delta": True}
 
 
 class RecordingQueueRepository:
@@ -107,6 +117,37 @@ class WorkbenchRelationReadModelRefreshServiceTests(unittest.TestCase):
         self.assertEqual(projection_builder.full_force_refresh, [False])
         self.assertEqual(projection_builder.partial_calls, [])
 
+    def test_handle_runtime_event_uses_explicit_relation_delta_contract(self) -> None:
+        projection_builder = RecordingProjectionBuilder()
+        queue_repository = RecordingQueueRepository()
+        service = WorkbenchRelationReadModelRefreshService(
+            projection_builder=projection_builder,
+            queue_repository=queue_repository,
+        )
+
+        result = service.handle_runtime_event(
+            _event(
+                {
+                    "scope_type": "workbench_relation",
+                    "scope_key": "2026-05",
+                    "metadata": {
+                        "row_ids": ["txn-1"],
+                        "relation_deltas": {
+                            "case-1": {"status": "active", "row_ids": ["oa-1", "txn-1"]}
+                        },
+                    },
+                }
+            )
+        )
+
+        self.assertTrue(result["relation_delta"])
+        self.assertEqual(
+            projection_builder.relation_delta_calls,
+            [{"scope_key": "2026-05", "row_ids": ["txn-1", "oa-1"]}],
+        )
+        self.assertEqual(projection_builder.partial_calls, [])
+        self.assertEqual(projection_builder.full_scopes, [])
+
     def test_force_refresh_bypasses_partial_hint_and_source_version_skip(self) -> None:
         projection_builder = RecordingProjectionBuilder()
         service = WorkbenchRelationReadModelRefreshService(
@@ -119,12 +160,17 @@ class WorkbenchRelationReadModelRefreshServiceTests(unittest.TestCase):
                 {
                     "scope_type": "workbench_relation",
                     "scope_key": "2026-05",
-                    "metadata": {"row_ids": ["txn-1"], "force_refresh": True},
+                    "metadata": {
+                        "row_ids": ["txn-1"],
+                        "relation_deltas": {"case-1": {"row_ids": ["txn-1"]}},
+                        "force_refresh": True,
+                    },
                 }
             )
         )
 
         self.assertEqual(projection_builder.partial_calls, [])
+        self.assertEqual(projection_builder.relation_delta_calls, [])
         self.assertEqual(projection_builder.full_scopes, ["2026-05"])
         self.assertEqual(projection_builder.full_force_refresh, [True])
 

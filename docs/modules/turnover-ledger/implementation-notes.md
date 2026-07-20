@@ -702,3 +702,10 @@ git diff --check
 - 保留边界：通用 `/api/turnover-ledger/relations/confirm` 与 `/relations/{id}/withdraw` 仍服务“建议关系确认/补充信息”功能，继续拥有 Turnover relation 与 audit；本轮没有误删其真实 consumer。
 - 安全：canonical withdraw 在同一事务重新读取 active relation，只有至少两条 bank member 且 row types 限于 `oa/bank` 才允许；加入 invoice 或其他业务成员后必须回关联台撤回。确认/撤回继续原子写 relation history、dirty/outbox、幂等与 stale precondition。
 - 性能机制：现代确认不再改变 turnover own source versions，和撤回一样走既有 `_refresh_existing_scope_rows`，只从 canonical relation source bundle 重套 context；没有新表、缓存、队列、worker、fallback 或同步 read-model 写入。
+
+## 2026-07-20 - Shared workbench_relation relation-only delta
+
+- release `75565d67e` 的生产证据确认 turnover own delta 已收敛到 recent p95 `126.677ms`，但共享 `workbench_relation` recent p95/p99 仍为 `3178.564/5376.672ms`，跨月 scope 串行使第三轮撤回 response-to-fresh 达 `6703.945ms`。
+- 根因不是页面 API 或 barrier：旧通用 partial projection仍先执行整月 source-version CTE，并以 `month_scope = scope OR row_ids overlap`加载整月 active relations；显式 relation delta没有独立 I/O边界。
+- 修复只在完整 `relation_deltas + row_ids + exact month` 事件启用：repository从既有 scope source proof只推进 impacted pair-relation timestamp；projection按 affected ids读取 active relation、pending claim和对应 source objects，再复用既有 partial save。普通 row-only、首次 scope、schema mismatch、force/`all` 继续安全 full路径。
+- 删除的是 relation-only热路径中的整月 source-version/relation扫描；没有新增事实源、缓存、worker、表、API或 fallback。共享 relation业务语义与其它页面 refresh targets不变，跨页正确性由 Workbench/Bank Detail/成本/OA Audit回归保护。

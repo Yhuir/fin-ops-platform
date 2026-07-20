@@ -5668,6 +5668,44 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
             "stale_reasons": stale_reasons,
         }
 
+    def workbench_relation_delta_source_versions(
+        self,
+        *,
+        scope_key: str,
+        row_ids: list[str],
+        tenant_id: str = "default",
+    ) -> dict[str, Any]:
+        normalized_scope_key = text(scope_key) or ""
+        normalized_row_ids = text_list(row_ids)
+        scope_month = month_start(normalized_scope_key)
+        if not scope_month or not normalized_row_ids:
+            return {}
+        row = self._connection.fetch_one(
+            """
+            select
+              scope.source_versions,
+              greatest(
+                nullif(scope.source_versions ->> 'workbench_pair_relations_updated_at', '')::timestamptz,
+                (
+                  select max(relation.updated_at)
+                  from app.workbench_pair_relations relation
+                  where relation.row_ids && %s::text[]
+                )
+              )::text as pair_relations_updated_at
+            from read_model.workbench_relation_scopes scope
+            where scope.tenant_id = %s
+              and scope.scope_key = %s
+            """,
+            (normalized_row_ids, tenant_id, normalized_scope_key),
+        )
+        payload = row if isinstance(row, dict) else {}
+        source_versions = payload.get("source_versions")
+        if not isinstance(source_versions, dict):
+            return {}
+        result = dict(source_versions)
+        result["workbench_pair_relations_updated_at"] = text(payload.get("pair_relations_updated_at"))
+        return result
+
     def _batch_accounting_relation_scope_proof(
         self,
         *,
@@ -8165,6 +8203,9 @@ class PostgresReadModelRepository:
 
     def workbench_relation_scope_summary(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
         return self._search_workbench_relation_repository.workbench_relation_scope_summary(*args, **kwargs)
+
+    def workbench_relation_delta_source_versions(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return self._search_workbench_relation_repository.workbench_relation_delta_source_versions(*args, **kwargs)
 
     def list_batch_accounting_relation_groups_by_year(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
         return self._search_workbench_relation_repository.list_batch_accounting_relation_groups_by_year(*args, **kwargs)

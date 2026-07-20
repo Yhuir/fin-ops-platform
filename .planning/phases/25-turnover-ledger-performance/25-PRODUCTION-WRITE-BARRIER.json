@@ -1,28 +1,28 @@
 {
-  "baseline_ms": 334.699,
+  "baseline_ms": 1194.719,
   "cycles": [
     {
       "confirm": {
-        "barrier_polls": 11,
+        "barrier_polls": 4,
         "barrier_timeline": [
           {
-            "elapsed_ms": 234.229,
-            "request_ms": 234.152,
+            "elapsed_ms": 233.459,
+            "request_ms": 233.276,
             "status": "refreshing",
             "targets": [
               {
-                "fresh": false,
-                "raw_status": "refreshing",
+                "fresh": true,
+                "raw_status": "fresh",
                 "read_model_key": "turnover_ledger",
                 "scope_key": "2026-02",
-                "status": "refreshing"
+                "status": "fresh"
               },
               {
-                "fresh": false,
-                "raw_status": "refreshing",
+                "fresh": true,
+                "raw_status": "fresh",
                 "read_model_key": "turnover_ledger",
                 "scope_key": "2026-03",
-                "status": "refreshing"
+                "status": "fresh"
               },
               {
                 "fresh": false,
@@ -41,23 +41,23 @@
             ]
           },
           {
-            "elapsed_ms": 787.39,
-            "request_ms": 242.845,
+            "elapsed_ms": 769.673,
+            "request_ms": 226.84,
             "status": "refreshing",
             "targets": [
               {
-                "fresh": false,
-                "raw_status": "refreshing",
+                "fresh": true,
+                "raw_status": "fresh",
                 "read_model_key": "turnover_ledger",
                 "scope_key": "2026-02",
-                "status": "refreshing"
+                "status": "fresh"
               },
               {
-                "fresh": false,
-                "raw_status": "refreshing",
+                "fresh": true,
+                "raw_status": "fresh",
                 "read_model_key": "turnover_ledger",
                 "scope_key": "2026-03",
-                "status": "refreshing"
+                "status": "fresh"
               },
               {
                 "fresh": false,
@@ -76,23 +76,23 @@
             ]
           },
           {
-            "elapsed_ms": 1351.316,
-            "request_ms": 258.076,
+            "elapsed_ms": 1535.084,
+            "request_ms": 463.749,
             "status": "refreshing",
             "targets": [
               {
-                "fresh": false,
-                "raw_status": "refreshing",
+                "fresh": true,
+                "raw_status": "fresh",
                 "read_model_key": "turnover_ledger",
                 "scope_key": "2026-02",
-                "status": "refreshing"
+                "status": "fresh"
               },
               {
-                "fresh": false,
-                "raw_status": "refreshing",
+                "fresh": true,
+                "raw_status": "fresh",
                 "read_model_key": "turnover_ledger",
                 "scope_key": "2026-03",
-                "status": "refreshing"
+                "status": "fresh"
               },
               {
                 "fresh": true,
@@ -111,253 +111,8 @@
             ]
           },
           {
-            "elapsed_ms": 1876.144,
-            "request_ms": 224.208,
-            "status": "refreshing",
-            "targets": [
-              {
-                "fresh": false,
-                "raw_status": "refreshing",
-                "read_model_key": "turnover_ledger",
-                "scope_key": "2026-02",
-                "status": "refreshing"
-              },
-              {
-                "fresh": false,
-                "raw_status": "refreshing",
-                "read_model_key": "turnover_ledger",
-                "scope_key": "2026-03",
-                "status": "refreshing"
-              },
-              {
-                "fresh": true,
-                "raw_status": "fresh",
-                "read_model_key": "workbench_relation",
-                "scope_key": "2026-02",
-                "status": "fresh"
-              },
-              {
-                "fresh": true,
-                "raw_status": "fresh",
-                "read_model_key": "workbench_relation",
-                "scope_key": "2026-03",
-                "status": "fresh"
-              }
-            ]
-          },
-          {
-            "elapsed_ms": 2432.611,
-            "request_ms": 254.662,
-            "status": "refreshing",
-            "targets": [
-              {
-                "fresh": false,
-                "raw_status": "refreshing",
-                "read_model_key": "turnover_ledger",
-                "scope_key": "2026-02",
-                "status": "refreshing"
-              },
-              {
-                "fresh": false,
-                "raw_status": "refreshing",
-                "read_model_key": "turnover_ledger",
-                "scope_key": "2026-03",
-                "status": "refreshing"
-              },
-              {
-                "fresh": true,
-                "raw_status": "fresh",
-                "read_model_key": "workbench_relation",
-                "scope_key": "2026-02",
-                "status": "fresh"
-              },
-              {
-                "fresh": true,
-                "raw_status": "fresh",
-                "read_model_key": "workbench_relation",
-                "scope_key": "2026-03",
-                "status": "fresh"
-              }
-            ]
-          },
-          {
-            "elapsed_ms": 2971.47,
-            "request_ms": 229.486,
-            "status": "refreshing",
-            "targets": [
-              {
-                "fresh": false,
-                "raw_status": "refreshing",
-                "read_model_key": "turnover_ledger",
-                "scope_key": "2026-02",
-                "status": "refreshing"
-              },
-              {
-                "fresh": false,
-                "raw_status": "refreshing",
-                "read_model_key": "turnover_ledger",
-                "scope_key": "2026-03",
-                "status": "refreshing"
-              },
-              {
-                "fresh": true,
-                "raw_status": "fresh",
-                "read_model_key": "workbench_relation",
-                "scope_key": "2026-02",
-                "status": "fresh"
-              },
-              {
-                "fresh": true,
-                "raw_status": "fresh",
-                "read_model_key": "workbench_relation",
-                "scope_key": "2026-03",
-                "status": "fresh"
-              }
-            ]
-          },
-          {
-            "elapsed_ms": 3654.492,
-            "request_ms": 371.004,
-            "status": "refreshing",
-            "targets": [
-              {
-                "fresh": false,
-                "raw_status": "refreshing",
-                "read_model_key": "turnover_ledger",
-                "scope_key": "2026-02",
-                "status": "refreshing"
-              },
-              {
-                "fresh": false,
-                "raw_status": "refreshing",
-                "read_model_key": "turnover_ledger",
-                "scope_key": "2026-03",
-                "status": "refreshing"
-              },
-              {
-                "fresh": true,
-                "raw_status": "fresh",
-                "read_model_key": "workbench_relation",
-                "scope_key": "2026-02",
-                "status": "fresh"
-              },
-              {
-                "fresh": true,
-                "raw_status": "fresh",
-                "read_model_key": "workbench_relation",
-                "scope_key": "2026-03",
-                "status": "fresh"
-              }
-            ]
-          },
-          {
-            "elapsed_ms": 4168.601,
-            "request_ms": 206.012,
-            "status": "refreshing",
-            "targets": [
-              {
-                "fresh": false,
-                "raw_status": "refreshing",
-                "read_model_key": "turnover_ledger",
-                "scope_key": "2026-02",
-                "status": "refreshing"
-              },
-              {
-                "fresh": true,
-                "raw_status": "fresh",
-                "read_model_key": "turnover_ledger",
-                "scope_key": "2026-03",
-                "status": "fresh"
-              },
-              {
-                "fresh": true,
-                "raw_status": "fresh",
-                "read_model_key": "workbench_relation",
-                "scope_key": "2026-02",
-                "status": "fresh"
-              },
-              {
-                "fresh": true,
-                "raw_status": "fresh",
-                "read_model_key": "workbench_relation",
-                "scope_key": "2026-03",
-                "status": "fresh"
-              }
-            ]
-          },
-          {
-            "elapsed_ms": 4685.65,
-            "request_ms": 208.748,
-            "status": "refreshing",
-            "targets": [
-              {
-                "fresh": false,
-                "raw_status": "refreshing",
-                "read_model_key": "turnover_ledger",
-                "scope_key": "2026-02",
-                "status": "refreshing"
-              },
-              {
-                "fresh": true,
-                "raw_status": "fresh",
-                "read_model_key": "turnover_ledger",
-                "scope_key": "2026-03",
-                "status": "fresh"
-              },
-              {
-                "fresh": true,
-                "raw_status": "fresh",
-                "read_model_key": "workbench_relation",
-                "scope_key": "2026-02",
-                "status": "fresh"
-              },
-              {
-                "fresh": true,
-                "raw_status": "fresh",
-                "read_model_key": "workbench_relation",
-                "scope_key": "2026-03",
-                "status": "fresh"
-              }
-            ]
-          },
-          {
-            "elapsed_ms": 5296.816,
-            "request_ms": 306.196,
-            "status": "refreshing",
-            "targets": [
-              {
-                "fresh": false,
-                "raw_status": "refreshing",
-                "read_model_key": "turnover_ledger",
-                "scope_key": "2026-02",
-                "status": "refreshing"
-              },
-              {
-                "fresh": true,
-                "raw_status": "fresh",
-                "read_model_key": "turnover_ledger",
-                "scope_key": "2026-03",
-                "status": "fresh"
-              },
-              {
-                "fresh": true,
-                "raw_status": "fresh",
-                "read_model_key": "workbench_relation",
-                "scope_key": "2026-02",
-                "status": "fresh"
-              },
-              {
-                "fresh": true,
-                "raw_status": "fresh",
-                "read_model_key": "workbench_relation",
-                "scope_key": "2026-03",
-                "status": "fresh"
-              }
-            ]
-          },
-          {
-            "elapsed_ms": 5801.681,
-            "request_ms": 200.553,
+            "elapsed_ms": 2014.618,
+            "request_ms": 171.292,
             "status": "fresh",
             "targets": [
               {
@@ -391,8 +146,8 @@
             ]
           }
         ],
-        "click_to_visible_ms": 7233.793,
-        "command_ms": 1031.217,
+        "click_to_visible_ms": 7697.108,
+        "command_ms": 5313.061,
         "observed": {
           "txn_imported_1278": {
             "cash_closure_case_id": "turnover:turnover_rel_a4fc90a82cc517a9",
@@ -405,9 +160,9 @@
             "category_version": 2
           }
         },
-        "reload_ms": 400.876,
-        "response_to_fresh_ms": 5801.7,
-        "response_to_visible_ms": 6202.576,
+        "reload_ms": 369.406,
+        "response_to_fresh_ms": 2014.641,
+        "response_to_visible_ms": 2384.047,
         "targets": [
           {
             "read_model_key": "turnover_ledger",
@@ -429,46 +184,11 @@
       },
       "cycle": 1,
       "withdraw": {
-        "barrier_polls": 4,
+        "barrier_polls": 3,
         "barrier_timeline": [
           {
-            "elapsed_ms": 342.901,
-            "request_ms": 342.799,
-            "status": "refreshing",
-            "targets": [
-              {
-                "fresh": false,
-                "raw_status": "refreshing",
-                "read_model_key": "turnover_ledger",
-                "scope_key": "2026-02",
-                "status": "refreshing"
-              },
-              {
-                "fresh": false,
-                "raw_status": "refreshing",
-                "read_model_key": "turnover_ledger",
-                "scope_key": "2026-03",
-                "status": "refreshing"
-              },
-              {
-                "fresh": false,
-                "raw_status": "refreshing",
-                "read_model_key": "workbench_relation",
-                "scope_key": "2026-02",
-                "status": "refreshing"
-              },
-              {
-                "fresh": false,
-                "raw_status": "refreshing",
-                "read_model_key": "workbench_relation",
-                "scope_key": "2026-03",
-                "status": "refreshing"
-              }
-            ]
-          },
-          {
-            "elapsed_ms": 1029.939,
-            "request_ms": 382.825,
+            "elapsed_ms": 254.756,
+            "request_ms": 254.7,
             "status": "refreshing",
             "targets": [
               {
@@ -479,11 +199,11 @@
                 "status": "fresh"
               },
               {
-                "fresh": false,
-                "raw_status": "refreshing",
+                "fresh": true,
+                "raw_status": "fresh",
                 "read_model_key": "turnover_ledger",
                 "scope_key": "2026-03",
-                "status": "refreshing"
+                "status": "fresh"
               },
               {
                 "fresh": true,
@@ -502,8 +222,8 @@
             ]
           },
           {
-            "elapsed_ms": 1571.283,
-            "request_ms": 239.341,
+            "elapsed_ms": 790.836,
+            "request_ms": 229.668,
             "status": "refreshing",
             "targets": [
               {
@@ -514,11 +234,11 @@
                 "status": "fresh"
               },
               {
-                "fresh": false,
-                "raw_status": "refreshing",
+                "fresh": true,
+                "raw_status": "fresh",
                 "read_model_key": "turnover_ledger",
                 "scope_key": "2026-03",
-                "status": "refreshing"
+                "status": "fresh"
               },
               {
                 "fresh": true,
@@ -529,7 +249,7 @@
               },
               {
                 "fresh": false,
-                "raw_status": "publishing",
+                "raw_status": "refreshing",
                 "read_model_key": "workbench_relation",
                 "scope_key": "2026-03",
                 "status": "refreshing"
@@ -537,8 +257,8 @@
             ]
           },
           {
-            "elapsed_ms": 2115.734,
-            "request_ms": 240.771,
+            "elapsed_ms": 1306.376,
+            "request_ms": 205.87,
             "status": "fresh",
             "targets": [
               {
@@ -572,8 +292,8 @@
             ]
           }
         ],
-        "click_to_visible_ms": 4307.841,
-        "command_ms": 1800.001,
+        "click_to_visible_ms": 3772.763,
+        "command_ms": 2033.85,
         "observed": {
           "txn_imported_1278": {
             "cash_closure_case_id": null,
@@ -586,9 +306,9 @@
             "category_version": 2
           }
         },
-        "reload_ms": 392.079,
-        "response_to_fresh_ms": 2115.761,
-        "response_to_visible_ms": 2507.84,
+        "reload_ms": 432.516,
+        "response_to_fresh_ms": 1306.397,
+        "response_to_visible_ms": 1738.913,
         "targets": [
           {
             "read_model_key": "turnover_ledger",
@@ -611,26 +331,26 @@
     },
     {
       "confirm": {
-        "barrier_polls": 4,
+        "barrier_polls": 3,
         "barrier_timeline": [
           {
-            "elapsed_ms": 277.681,
-            "request_ms": 277.593,
+            "elapsed_ms": 316.386,
+            "request_ms": 316.26,
             "status": "refreshing",
             "targets": [
               {
-                "fresh": false,
-                "raw_status": "refreshing",
+                "fresh": true,
+                "raw_status": "fresh",
                 "read_model_key": "turnover_ledger",
                 "scope_key": "2026-02",
-                "status": "refreshing"
+                "status": "fresh"
               },
               {
-                "fresh": false,
-                "raw_status": "refreshing",
+                "fresh": true,
+                "raw_status": "fresh",
                 "read_model_key": "turnover_ledger",
                 "scope_key": "2026-03",
-                "status": "refreshing"
+                "status": "fresh"
               },
               {
                 "fresh": false,
@@ -649,30 +369,30 @@
             ]
           },
           {
-            "elapsed_ms": 859.185,
-            "request_ms": 271.357,
+            "elapsed_ms": 899.376,
+            "request_ms": 272.759,
             "status": "refreshing",
             "targets": [
               {
-                "fresh": false,
-                "raw_status": "refreshing",
+                "fresh": true,
+                "raw_status": "fresh",
                 "read_model_key": "turnover_ledger",
                 "scope_key": "2026-02",
-                "status": "refreshing"
-              },
-              {
-                "fresh": false,
-                "raw_status": "refreshing",
-                "read_model_key": "turnover_ledger",
-                "scope_key": "2026-03",
-                "status": "refreshing"
+                "status": "fresh"
               },
               {
                 "fresh": true,
                 "raw_status": "fresh",
+                "read_model_key": "turnover_ledger",
+                "scope_key": "2026-03",
+                "status": "fresh"
+              },
+              {
+                "fresh": false,
+                "raw_status": "refreshing",
                 "read_model_key": "workbench_relation",
                 "scope_key": "2026-02",
-                "status": "fresh"
+                "status": "refreshing"
               },
               {
                 "fresh": false,
@@ -684,43 +404,8 @@
             ]
           },
           {
-            "elapsed_ms": 1415.911,
-            "request_ms": 253.689,
-            "status": "refreshing",
-            "targets": [
-              {
-                "fresh": true,
-                "raw_status": "fresh",
-                "read_model_key": "turnover_ledger",
-                "scope_key": "2026-02",
-                "status": "fresh"
-              },
-              {
-                "fresh": false,
-                "raw_status": "refreshing",
-                "read_model_key": "turnover_ledger",
-                "scope_key": "2026-03",
-                "status": "refreshing"
-              },
-              {
-                "fresh": true,
-                "raw_status": "fresh",
-                "read_model_key": "workbench_relation",
-                "scope_key": "2026-02",
-                "status": "fresh"
-              },
-              {
-                "fresh": false,
-                "raw_status": "refreshing",
-                "read_model_key": "workbench_relation",
-                "scope_key": "2026-03",
-                "status": "refreshing"
-              }
-            ]
-          },
-          {
-            "elapsed_ms": 1938.458,
-            "request_ms": 212.337,
+            "elapsed_ms": 1482.027,
+            "request_ms": 273.229,
             "status": "fresh",
             "targets": [
               {
@@ -754,8 +439,8 @@
             ]
           }
         ],
-        "click_to_visible_ms": 4050.441,
-        "command_ms": 1638.761,
+        "click_to_visible_ms": 2987.608,
+        "command_ms": 946.453,
         "observed": {
           "txn_imported_1278": {
             "cash_closure_case_id": "turnover:turnover_rel_a4fc90a82cc517a9",
@@ -768,9 +453,9 @@
             "category_version": 2
           }
         },
-        "reload_ms": 473.202,
-        "response_to_fresh_ms": 1938.478,
-        "response_to_visible_ms": 2411.68,
+        "reload_ms": 559.109,
+        "response_to_fresh_ms": 1482.045,
+        "response_to_visible_ms": 2041.155,
         "targets": [
           {
             "read_model_key": "turnover_ledger",
@@ -795,23 +480,23 @@
         "barrier_polls": 3,
         "barrier_timeline": [
           {
-            "elapsed_ms": 308.619,
-            "request_ms": 308.483,
+            "elapsed_ms": 417.772,
+            "request_ms": 417.675,
             "status": "refreshing",
             "targets": [
               {
-                "fresh": false,
-                "raw_status": "refreshing",
+                "fresh": true,
+                "raw_status": "fresh",
                 "read_model_key": "turnover_ledger",
                 "scope_key": "2026-02",
-                "status": "refreshing"
+                "status": "fresh"
               },
               {
-                "fresh": false,
-                "raw_status": "refreshing",
+                "fresh": true,
+                "raw_status": "fresh",
                 "read_model_key": "turnover_ledger",
                 "scope_key": "2026-03",
-                "status": "refreshing"
+                "status": "fresh"
               },
               {
                 "fresh": false,
@@ -830,23 +515,23 @@
             ]
           },
           {
-            "elapsed_ms": 887.277,
-            "request_ms": 275.579,
+            "elapsed_ms": 958.396,
+            "request_ms": 232.004,
             "status": "refreshing",
             "targets": [
               {
-                "fresh": false,
-                "raw_status": "refreshing",
+                "fresh": true,
+                "raw_status": "fresh",
                 "read_model_key": "turnover_ledger",
                 "scope_key": "2026-02",
-                "status": "refreshing"
+                "status": "fresh"
               },
               {
-                "fresh": false,
-                "raw_status": "refreshing",
+                "fresh": true,
+                "raw_status": "fresh",
                 "read_model_key": "turnover_ledger",
                 "scope_key": "2026-03",
-                "status": "refreshing"
+                "status": "fresh"
               },
               {
                 "fresh": true,
@@ -865,8 +550,8 @@
             ]
           },
           {
-            "elapsed_ms": 1396.326,
-            "request_ms": 204.278,
+            "elapsed_ms": 1463.749,
+            "request_ms": 202.967,
             "status": "fresh",
             "targets": [
               {
@@ -900,8 +585,8 @@
             ]
           }
         ],
-        "click_to_visible_ms": 2713.179,
-        "command_ms": 918.267,
+        "click_to_visible_ms": 3149.87,
+        "command_ms": 1187.478,
         "observed": {
           "txn_imported_1278": {
             "cash_closure_case_id": null,
@@ -914,9 +599,9 @@
             "category_version": 2
           }
         },
-        "reload_ms": 398.565,
-        "response_to_fresh_ms": 1396.347,
-        "response_to_visible_ms": 1794.912,
+        "reload_ms": 498.617,
+        "response_to_fresh_ms": 1463.775,
+        "response_to_visible_ms": 1962.392,
         "targets": [
           {
             "read_model_key": "turnover_ledger",
@@ -942,23 +627,23 @@
         "barrier_polls": 3,
         "barrier_timeline": [
           {
-            "elapsed_ms": 293.092,
-            "request_ms": 293.039,
+            "elapsed_ms": 240.469,
+            "request_ms": 240.365,
             "status": "refreshing",
             "targets": [
               {
-                "fresh": false,
-                "raw_status": "refreshing",
+                "fresh": true,
+                "raw_status": "fresh",
                 "read_model_key": "turnover_ledger",
                 "scope_key": "2026-02",
-                "status": "refreshing"
+                "status": "fresh"
               },
               {
-                "fresh": false,
-                "raw_status": "refreshing",
+                "fresh": true,
+                "raw_status": "fresh",
                 "read_model_key": "turnover_ledger",
                 "scope_key": "2026-03",
-                "status": "refreshing"
+                "status": "fresh"
               },
               {
                 "fresh": false,
@@ -977,8 +662,8 @@
             ]
           },
           {
-            "elapsed_ms": 806.105,
-            "request_ms": 209.031,
+            "elapsed_ms": 801.914,
+            "request_ms": 258.869,
             "status": "refreshing",
             "targets": [
               {
@@ -989,11 +674,11 @@
                 "status": "fresh"
               },
               {
-                "fresh": false,
-                "raw_status": "refreshing",
+                "fresh": true,
+                "raw_status": "fresh",
                 "read_model_key": "turnover_ledger",
                 "scope_key": "2026-03",
-                "status": "refreshing"
+                "status": "fresh"
               },
               {
                 "fresh": true,
@@ -1012,8 +697,8 @@
             ]
           },
           {
-            "elapsed_ms": 1288.383,
-            "request_ms": 172.075,
+            "elapsed_ms": 1499.986,
+            "request_ms": 385.954,
             "status": "fresh",
             "targets": [
               {
@@ -1047,8 +732,8 @@
             ]
           }
         ],
-        "click_to_visible_ms": 2540.463,
-        "command_ms": 799.787,
+        "click_to_visible_ms": 3440.727,
+        "command_ms": 1014.941,
         "observed": {
           "txn_imported_1278": {
             "cash_closure_case_id": "turnover:turnover_rel_a4fc90a82cc517a9",
@@ -1061,9 +746,9 @@
             "category_version": 2
           }
         },
-        "reload_ms": 452.225,
-        "response_to_fresh_ms": 1288.451,
-        "response_to_visible_ms": 1740.676,
+        "reload_ms": 925.781,
+        "response_to_fresh_ms": 1500.004,
+        "response_to_visible_ms": 2425.785,
         "targets": [
           {
             "read_model_key": "turnover_ledger",
@@ -1085,26 +770,26 @@
       },
       "cycle": 3,
       "withdraw": {
-        "barrier_polls": 3,
+        "barrier_polls": 13,
         "barrier_timeline": [
           {
-            "elapsed_ms": 281.133,
-            "request_ms": 280.95,
+            "elapsed_ms": 510.839,
+            "request_ms": 510.737,
             "status": "refreshing",
             "targets": [
               {
-                "fresh": false,
-                "raw_status": "refreshing",
+                "fresh": true,
+                "raw_status": "fresh",
                 "read_model_key": "turnover_ledger",
                 "scope_key": "2026-02",
-                "status": "refreshing"
+                "status": "fresh"
               },
               {
-                "fresh": false,
-                "raw_status": "refreshing",
+                "fresh": true,
+                "raw_status": "fresh",
                 "read_model_key": "turnover_ledger",
                 "scope_key": "2026-03",
-                "status": "refreshing"
+                "status": "fresh"
               },
               {
                 "fresh": false,
@@ -1123,8 +808,8 @@
             ]
           },
           {
-            "elapsed_ms": 854.48,
-            "request_ms": 267.601,
+            "elapsed_ms": 1226.715,
+            "request_ms": 410.149,
             "status": "refreshing",
             "targets": [
               {
@@ -1135,11 +820,11 @@
                 "status": "fresh"
               },
               {
-                "fresh": false,
-                "raw_status": "refreshing",
+                "fresh": true,
+                "raw_status": "fresh",
                 "read_model_key": "turnover_ledger",
                 "scope_key": "2026-03",
-                "status": "refreshing"
+                "status": "fresh"
               },
               {
                 "fresh": true,
@@ -1158,8 +843,358 @@
             ]
           },
           {
-            "elapsed_ms": 1390.78,
-            "request_ms": 231.007,
+            "elapsed_ms": 1793.379,
+            "request_ms": 262.317,
+            "status": "refreshing",
+            "targets": [
+              {
+                "fresh": true,
+                "raw_status": "fresh",
+                "read_model_key": "turnover_ledger",
+                "scope_key": "2026-02",
+                "status": "fresh"
+              },
+              {
+                "fresh": true,
+                "raw_status": "fresh",
+                "read_model_key": "turnover_ledger",
+                "scope_key": "2026-03",
+                "status": "fresh"
+              },
+              {
+                "fresh": true,
+                "raw_status": "fresh",
+                "read_model_key": "workbench_relation",
+                "scope_key": "2026-02",
+                "status": "fresh"
+              },
+              {
+                "fresh": false,
+                "raw_status": "refreshing",
+                "read_model_key": "workbench_relation",
+                "scope_key": "2026-03",
+                "status": "refreshing"
+              }
+            ]
+          },
+          {
+            "elapsed_ms": 2388.574,
+            "request_ms": 292.325,
+            "status": "refreshing",
+            "targets": [
+              {
+                "fresh": true,
+                "raw_status": "fresh",
+                "read_model_key": "turnover_ledger",
+                "scope_key": "2026-02",
+                "status": "fresh"
+              },
+              {
+                "fresh": true,
+                "raw_status": "fresh",
+                "read_model_key": "turnover_ledger",
+                "scope_key": "2026-03",
+                "status": "fresh"
+              },
+              {
+                "fresh": true,
+                "raw_status": "fresh",
+                "read_model_key": "workbench_relation",
+                "scope_key": "2026-02",
+                "status": "fresh"
+              },
+              {
+                "fresh": false,
+                "raw_status": "refreshing",
+                "read_model_key": "workbench_relation",
+                "scope_key": "2026-03",
+                "status": "refreshing"
+              }
+            ]
+          },
+          {
+            "elapsed_ms": 2921.432,
+            "request_ms": 225.097,
+            "status": "refreshing",
+            "targets": [
+              {
+                "fresh": true,
+                "raw_status": "fresh",
+                "read_model_key": "turnover_ledger",
+                "scope_key": "2026-02",
+                "status": "fresh"
+              },
+              {
+                "fresh": true,
+                "raw_status": "fresh",
+                "read_model_key": "turnover_ledger",
+                "scope_key": "2026-03",
+                "status": "fresh"
+              },
+              {
+                "fresh": true,
+                "raw_status": "fresh",
+                "read_model_key": "workbench_relation",
+                "scope_key": "2026-02",
+                "status": "fresh"
+              },
+              {
+                "fresh": false,
+                "raw_status": "refreshing",
+                "read_model_key": "workbench_relation",
+                "scope_key": "2026-03",
+                "status": "refreshing"
+              }
+            ]
+          },
+          {
+            "elapsed_ms": 3472.694,
+            "request_ms": 241.095,
+            "status": "refreshing",
+            "targets": [
+              {
+                "fresh": true,
+                "raw_status": "fresh",
+                "read_model_key": "turnover_ledger",
+                "scope_key": "2026-02",
+                "status": "fresh"
+              },
+              {
+                "fresh": true,
+                "raw_status": "fresh",
+                "read_model_key": "turnover_ledger",
+                "scope_key": "2026-03",
+                "status": "fresh"
+              },
+              {
+                "fresh": true,
+                "raw_status": "fresh",
+                "read_model_key": "workbench_relation",
+                "scope_key": "2026-02",
+                "status": "fresh"
+              },
+              {
+                "fresh": false,
+                "raw_status": "refreshing",
+                "read_model_key": "workbench_relation",
+                "scope_key": "2026-03",
+                "status": "refreshing"
+              }
+            ]
+          },
+          {
+            "elapsed_ms": 3933.698,
+            "request_ms": 154.057,
+            "status": "refreshing",
+            "targets": [
+              {
+                "fresh": true,
+                "raw_status": "fresh",
+                "read_model_key": "turnover_ledger",
+                "scope_key": "2026-02",
+                "status": "fresh"
+              },
+              {
+                "fresh": true,
+                "raw_status": "fresh",
+                "read_model_key": "turnover_ledger",
+                "scope_key": "2026-03",
+                "status": "fresh"
+              },
+              {
+                "fresh": true,
+                "raw_status": "fresh",
+                "read_model_key": "workbench_relation",
+                "scope_key": "2026-02",
+                "status": "fresh"
+              },
+              {
+                "fresh": false,
+                "raw_status": "refreshing",
+                "read_model_key": "workbench_relation",
+                "scope_key": "2026-03",
+                "status": "refreshing"
+              }
+            ]
+          },
+          {
+            "elapsed_ms": 4406.041,
+            "request_ms": 171.365,
+            "status": "refreshing",
+            "targets": [
+              {
+                "fresh": true,
+                "raw_status": "fresh",
+                "read_model_key": "turnover_ledger",
+                "scope_key": "2026-02",
+                "status": "fresh"
+              },
+              {
+                "fresh": true,
+                "raw_status": "fresh",
+                "read_model_key": "turnover_ledger",
+                "scope_key": "2026-03",
+                "status": "fresh"
+              },
+              {
+                "fresh": true,
+                "raw_status": "fresh",
+                "read_model_key": "workbench_relation",
+                "scope_key": "2026-02",
+                "status": "fresh"
+              },
+              {
+                "fresh": false,
+                "raw_status": "refreshing",
+                "read_model_key": "workbench_relation",
+                "scope_key": "2026-03",
+                "status": "refreshing"
+              }
+            ]
+          },
+          {
+            "elapsed_ms": 4842.065,
+            "request_ms": 128.19,
+            "status": "refreshing",
+            "targets": [
+              {
+                "fresh": true,
+                "raw_status": "fresh",
+                "read_model_key": "turnover_ledger",
+                "scope_key": "2026-02",
+                "status": "fresh"
+              },
+              {
+                "fresh": true,
+                "raw_status": "fresh",
+                "read_model_key": "turnover_ledger",
+                "scope_key": "2026-03",
+                "status": "fresh"
+              },
+              {
+                "fresh": true,
+                "raw_status": "fresh",
+                "read_model_key": "workbench_relation",
+                "scope_key": "2026-02",
+                "status": "fresh"
+              },
+              {
+                "fresh": false,
+                "raw_status": "refreshing",
+                "read_model_key": "workbench_relation",
+                "scope_key": "2026-03",
+                "status": "refreshing"
+              }
+            ]
+          },
+          {
+            "elapsed_ms": 5309.904,
+            "request_ms": 164.264,
+            "status": "refreshing",
+            "targets": [
+              {
+                "fresh": true,
+                "raw_status": "fresh",
+                "read_model_key": "turnover_ledger",
+                "scope_key": "2026-02",
+                "status": "fresh"
+              },
+              {
+                "fresh": true,
+                "raw_status": "fresh",
+                "read_model_key": "turnover_ledger",
+                "scope_key": "2026-03",
+                "status": "fresh"
+              },
+              {
+                "fresh": true,
+                "raw_status": "fresh",
+                "read_model_key": "workbench_relation",
+                "scope_key": "2026-02",
+                "status": "fresh"
+              },
+              {
+                "fresh": false,
+                "raw_status": "refreshing",
+                "read_model_key": "workbench_relation",
+                "scope_key": "2026-03",
+                "status": "refreshing"
+              }
+            ]
+          },
+          {
+            "elapsed_ms": 5773.884,
+            "request_ms": 154.038,
+            "status": "refreshing",
+            "targets": [
+              {
+                "fresh": true,
+                "raw_status": "fresh",
+                "read_model_key": "turnover_ledger",
+                "scope_key": "2026-02",
+                "status": "fresh"
+              },
+              {
+                "fresh": true,
+                "raw_status": "fresh",
+                "read_model_key": "turnover_ledger",
+                "scope_key": "2026-03",
+                "status": "fresh"
+              },
+              {
+                "fresh": true,
+                "raw_status": "fresh",
+                "read_model_key": "workbench_relation",
+                "scope_key": "2026-02",
+                "status": "fresh"
+              },
+              {
+                "fresh": false,
+                "raw_status": "refreshing",
+                "read_model_key": "workbench_relation",
+                "scope_key": "2026-03",
+                "status": "refreshing"
+              }
+            ]
+          },
+          {
+            "elapsed_ms": 6256.062,
+            "request_ms": 178.135,
+            "status": "refreshing",
+            "targets": [
+              {
+                "fresh": true,
+                "raw_status": "fresh",
+                "read_model_key": "turnover_ledger",
+                "scope_key": "2026-02",
+                "status": "fresh"
+              },
+              {
+                "fresh": true,
+                "raw_status": "fresh",
+                "read_model_key": "turnover_ledger",
+                "scope_key": "2026-03",
+                "status": "fresh"
+              },
+              {
+                "fresh": true,
+                "raw_status": "fresh",
+                "read_model_key": "workbench_relation",
+                "scope_key": "2026-02",
+                "status": "fresh"
+              },
+              {
+                "fresh": false,
+                "raw_status": "refreshing",
+                "read_model_key": "workbench_relation",
+                "scope_key": "2026-03",
+                "status": "refreshing"
+              }
+            ]
+          },
+          {
+            "elapsed_ms": 6703.921,
+            "request_ms": 139.382,
             "status": "fresh",
             "targets": [
               {
@@ -1193,8 +1228,8 @@
             ]
           }
         ],
-        "click_to_visible_ms": 3074.098,
-        "command_ms": 1262.92,
+        "click_to_visible_ms": 8064.434,
+        "command_ms": 956.109,
         "observed": {
           "txn_imported_1278": {
             "cash_closure_case_id": null,
@@ -1207,9 +1242,9 @@
             "category_version": 2
           }
         },
-        "reload_ms": 420.378,
-        "response_to_fresh_ms": 1390.799,
-        "response_to_visible_ms": 1811.177,
+        "reload_ms": 404.38,
+        "response_to_fresh_ms": 6703.945,
+        "response_to_visible_ms": 7108.325,
         "targets": [
           {
             "read_model_key": "turnover_ledger",
@@ -1240,16 +1275,16 @@
     "txn_imported_1278",
     "txn_imported_1348"
   ],
-  "generated_at": "2026-07-20T06:13:12.615529+00:00",
+  "generated_at": "2026-07-20T07:06:10.576448+00:00",
   "recovery": null,
-  "release_sha": "8c6ffcb744fde08ea4c2053ac8562380bef15a4f",
+  "release_sha": "75565d67ec46b5b88ad9d8a630d099676a23e790",
   "status": "fail",
   "summary": {
-    "command_p95_ms": 1800.001,
+    "command_p95_ms": 5313.061,
     "command_target_ms": 1000.0,
     "fresh_target_ms": 2000.0,
     "hard_max_ms": 3000.0,
-    "response_to_fresh_p95_ms": 5801.7,
-    "response_to_visible_p95_ms": 6202.576
+    "response_to_fresh_p95_ms": 6703.945,
+    "response_to_visible_p95_ms": 7108.325
   }
 }
