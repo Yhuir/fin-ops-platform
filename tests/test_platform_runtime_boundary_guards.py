@@ -4754,7 +4754,12 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             monitoring_source,
             "_operation_barrier_outbox_status_rows",
         )
-        for required in ("row_number() over", "event.created_at desc, event.id desc", "event.publish_status"):
+        for required in (
+            "cross join lateral",
+            "limit 1",
+            "event.created_at desc, event.id desc",
+            "event.publish_status",
+        ):
             if required not in target_outbox_source:
                 violations.append(f"target-scoped barrier outbox query is missing {required}")
         if "_current_effective_outbox_attention_predicate_sql" in target_outbox_source:

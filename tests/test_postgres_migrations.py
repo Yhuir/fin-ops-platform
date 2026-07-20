@@ -127,6 +127,7 @@ EXPECTED_MIGRATIONS = [
     "0111_bank_flow_rule_batch_tag_rules_canonical_shape.sql",
     "0112_batch_accounting_oa_type_hot_path.sql",
     "0113_batch_accounting_relation_count_hot_path.sql",
+    "0114_operation_barrier_latest_scope_hot_path.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -289,7 +290,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 114)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 115)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -328,6 +329,20 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertIn("group_id", sql)
         self.assertIn("where relation_status = 'linked'", sql)
         self.assertIn("payload->'special_metadata'->>'source' = 'batch_accounting'", sql)
+
+    def test_operation_barrier_latest_scope_index_matches_query_contract(self) -> None:
+        sql = (
+            MIGRATIONS_DIR / "0114_operation_barrier_latest_scope_hot_path.sql"
+        ).read_text(encoding="utf-8").lower()
+
+        self.assertIn("outbox_events_operation_barrier_latest_scope_idx", sql)
+        self.assertIn("tenant_id", sql)
+        self.assertIn("event_type", sql)
+        self.assertIn("coalesce(scope_type, raw_payload->>'scope_type'", sql)
+        self.assertIn("coalesce(scope_key, raw_payload->>'scope_key'", sql)
+        self.assertIn("created_at desc", sql)
+        self.assertIn("id desc", sql)
+        self.assertIn("include (status, publish_status, updated_at, last_error, publish_last_error)", sql)
 
     def test_pending_invoice_filter_constraints_allow_cash_income(self) -> None:
         sql = strip_sql_comments(migration_sql()).lower()

@@ -702,89 +702,70 @@ class RuntimeMonitoringRepository:
               select *
               from unnest(%s::text[], %s::text[], %s::text[])
             ),
-            ranked_events as (
-              select
-                event.id,
-                event.tenant_id,
-                event.event_type,
-                coalesce(
-                  event.scope_type,
-                  event.raw_payload->>'scope_type',
-                  event.payload->>'scope_type',
-                  event.aggregate_type,
-                  ''
-                ) as scope_type,
-                coalesce(
-                  event.scope_key,
-                  event.raw_payload->>'scope_key',
-                  event.payload->>'scope_key',
-                  event.aggregate_id,
-                  ''
-                ) as scope_key,
-                event.status,
-                event.publish_status,
-                event.last_error,
-                event.publish_last_error,
-                event.updated_at,
-                row_number() over (
-                  partition by
-                    event.tenant_id,
-                    event.event_type,
-                    coalesce(
-                      event.scope_type,
-                      event.raw_payload->>'scope_type',
-                      event.payload->>'scope_type',
-                      event.aggregate_type,
-                      ''
-                    ),
-                    coalesce(
-                      event.scope_key,
-                      event.raw_payload->>'scope_key',
-                      event.payload->>'scope_key',
-                      event.aggregate_id,
-                      ''
-                    )
-                  order by event.created_at desc, event.id desc
-                ) as recency_rank
-              from barrier_target target
-              join job.outbox_events event
-                on event.tenant_id = 'default'
-               and event.event_type = target.target_event_type
-               and coalesce(
-                     event.scope_type,
-                     event.raw_payload->>'scope_type',
-                     event.payload->>'scope_type',
-                     event.aggregate_type,
-                     ''
-                   ) = target.target_scope_type
-               and (
-                    coalesce(
-                      event.scope_key,
-                      event.raw_payload->>'scope_key',
-                      event.payload->>'scope_key',
-                      event.aggregate_id,
-                      ''
-                    ) = target.target_scope_key
-                    or (
-                      target.target_scope_key <> 'all'
-                      and coalesce(
-                            event.scope_key,
-                            event.raw_payload->>'scope_key',
-                            event.payload->>'scope_key',
-                            event.aggregate_id,
-                            ''
-                          ) = 'all'
-                    )
-               )
-              where event.status in (
-                'pending',
-                'processing',
-                'publishing',
-                'publish_failed',
-                'failed',
-                'dead_lettered',
-                'done'
-              )
+            candidate_scope(target_event_type, target_scope_type, candidate_scope_key) as (
+              select target_event_type, target_scope_type, target_scope_key
+              from barrier_target
+              union
+              select target_event_type, target_scope_type, 'all'
+              from barrier_target
+              where target_scope_key <> 'all'
+            ),
+            latest_events as (
+              select latest.*
+              from candidate_scope target
+              cross join lateral (
+                select
+                  event.id,
+                  event.tenant_id,
+                  event.event_type,
+                  coalesce(
+                    event.scope_type,
+                    event.raw_payload->>'scope_type',
+                    event.payload->>'scope_type',
+                    event.aggregate_type,
+                    ''
+                  ) as scope_type,
+                  coalesce(
+                    event.scope_key,
+                    event.raw_payload->>'scope_key',
+                    event.payload->>'scope_key',
+                    event.aggregate_id,
+                    ''
+                  ) as scope_key,
+                  event.status,
+                  event.publish_status,
+                  event.last_error,
+                  event.publish_last_error,
+                  event.updated_at
+                from job.outbox_events event
+                where event.tenant_id = 'default'
+                  and event.event_type = target.target_event_type
+                  and coalesce(
+                        event.scope_type,
+                        event.raw_payload->>'scope_type',
+                        event.payload->>'scope_type',
+                        event.aggregate_type,
+                        ''
+                      ) = target.target_scope_type
+                  and coalesce(
+                        event.scope_key,
+                        event.raw_payload->>'scope_key',
+                        event.payload->>'scope_key',
+                        event.aggregate_id,
+                        ''
+                      ) = target.candidate_scope_key
+                  and event.status in (
+                    'pending',
+                    'processing',
+                    'publishing',
+                    'publish_failed',
+                    'failed',
+                    'dead_lettered',
+                    'done'
+                  )
+                order by event.created_at desc, event.id desc
+                limit 1
+              ) latest
             )
             select
               e.event_type,
@@ -803,9 +784,8 @@ class RuntimeMonitoringRepository:
               false as covered_by_later_done,
               false as covered_by_later_readiness,
               false as covered_by_active_dirty_scope
-            from ranked_events e
-            where e.recency_rank = 1
-              and (
+            from latest_events e
+            where (
                 e.status in ('pending', 'processing', 'publishing', 'publish_failed', 'failed', 'dead_lettered')
                 or (e.status <> 'done' and e.publish_status in ('publishing', 'failed'))
               )

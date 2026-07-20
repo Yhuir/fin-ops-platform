@@ -584,7 +584,7 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
                     ]
                 if "from job.read_model_dirty_scopes dirty" in normalized:
                     return []
-                if "join job.outbox_events event" in normalized:
+                if "from job.outbox_events event" in normalized and "cross join lateral" in normalized:
                     return []
                 if "from job.runtime_worker_heartbeats" in normalized:
                     return [
@@ -633,8 +633,9 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
             )
             self.assertEqual(params[1], ["turnover_ledger"])
             self.assertEqual(params[2], ["2026-02"])
-        outbox_call = next(call for call in connection.calls if "join job.outbox_events event" in call[0])
-        self.assertIn("row_number() over", outbox_call[0])
+        outbox_call = next(call for call in connection.calls if "cross join lateral" in call[0])
+        self.assertIn("candidate_scope", outbox_call[0])
+        self.assertIn("limit 1", outbox_call[0])
         self.assertIn("event.created_at desc, event.id desc", outbox_call[0])
         self.assertNotIn("_current_effective_outbox_attention", outbox_call[0])
         self.assertEqual(outbox_call[1][0], ["turnover_ledger.read_model.refresh"])
