@@ -719,3 +719,13 @@ git diff --check
 - 根因不是页面 API 或 barrier：旧通用 partial projection仍先执行整月 source-version CTE，并以 `month_scope = scope OR row_ids overlap`加载整月 active relations；显式 relation delta没有独立 I/O边界。
 - 修复只在完整 `relation_deltas + row_ids + exact month` 事件启用：repository从既有 scope source proof只推进 impacted pair-relation timestamp；projection按 affected ids读取 active relation、pending claim和对应 source objects，再复用既有 partial save。普通 row-only、首次 scope、schema mismatch、force/`all` 继续安全 full路径。
 - 删除的是 relation-only热路径中的整月 source-version/relation扫描；没有新增事实源、缓存、worker、表、API或 fallback。共享 relation业务语义与其它页面 refresh targets不变，跨页正确性由 Workbench/Bank Detail/成本/OA Audit回归保护。
+
+## 2026-07-20 - Command 重复 I/O 与 refresh owner 最终收口
+
+- 同步 command 的剩余重复 I/O 已删除：月份按所选银行行批量解析；expected-version 与 closure preview 复用 request-scoped selected rows；幂等只保留事务内 reserve；cash-closure withdraw 复用已锁定 relation preparation。
+- Turnover 专属 `PostgresWorkbenchRelationRepository` 以 `enqueue_refreshes=False` 组装，只负责 canonical relation/history；dirty scope 与 durable outbox 由 `TurnoverLedgerWriteUnitOfWork` 唯一输出。共享关联台和其他页面 repository composition 不变，避免以全局开关改变其他页面行为。
+- 旧链删除证明：Turnover UoW 事务外 idempotency get、独立 stale-precondition row read、cash-closure current relation 二次加载，以及 relation repository 的重复 scope 派生/refresh fan-out 均不再进入该页面 command 链；architecture guard 防止恢复双 owner。
+- 本地门：目标 API/UoW/Workbench command `254 passed`；disposable PostgreSQL 17 实际应用 0001–0115 后 `10 passed + 6 subtests`；lint、docs、`git diff --check` 通过。
+- 生产 release `main-188a9fdc-20260720170432`（SHA `188a9fdc3f91c84f7870bbc167e11bee59db14c4`）稳定窗口三轮可逆写全部通过：command p95/max `604.266ms`，response-to-fresh p95/max `699.225ms`，response-to-visible p95/max `1006.562ms`；最终 test fixture `unlinked` 且无需 recovery。
+- 发布邻接首轮曾记录 confirm `4542.127ms`，数据库执行占 `4343.046ms`；同窗口 readiness/Audit 也出现数据库竞争长尾。该证据保留为平台容量风险；release/queue/worker 稳定后的正式门通过，不在页面边界内新增 Redis、warmup 旧链、跨请求 cache 或共享鉴权分支。
+- 最终读取门：shell/grouped/tag-selection/Page Audit 各 40 个正式样本全部通过，p95 分别 `98.970/283.792/160.112/342.569ms`；grouped 40/40 fresh、0 enqueue。写操作后的页面直接 Audit 及关联台、银行明细、成本统计、OA 待付款交叉 Audit 均为 `pass/fresh/drained`、0 issue。

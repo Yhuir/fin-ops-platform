@@ -131,3 +131,13 @@
 - Turnover 专属 command factory 改为 `PostgresWorkbenchRelationRepository(transaction, enqueue_refreshes=False)`；repository 只保存 canonical relation/history，read-model dirty/outbox 只由 Turnover UoW 输出。关联台和其他页面 repository composition 不变。
 - 定向 API/UoW/Workbench command：`254 passed`；disposable PostgreSQL 17 应用 0001–0115 后 `10 passed + 6 subtests`，必需 durable events 完整且临时库自动删除。
 - 新 architecture guard 防止 Turnover repository 恢复默认 fan-out。下一门：lint/docs/diff-check、提交/push、部署精确 SHA，并复用三轮生产可逆探针。
+
+## release 188a9fdc3 最终生产门
+
+- 精确代码 SHA `188a9fdc3f91c84f7870bbc167e11bee59db14c4` 已推送 `origin/main` 并部署为 `main-188a9fdc-20260720170432`；`/health/ready` 返回 `ready`、release metadata 一致、PostgreSQL schema `115`、required worker missing/stale/mismatched 均为 `0`、queue backlog 与 stale dirty scope 均为 `0`。
+- 发布邻接的第一轮探针记录到一次 confirm command `4542.127ms`，但 response-to-fresh / response-to-visible 仅 `731.948/1120.433ms`，业务断言和最终恢复均通过。API telemetry 显示该次 `4393.272ms` 服务耗时中数据库为 `4343.046ms`、连接获取仅 `30.864ms`；同一窗口 `/health/ready` 与运维 Audit 也出现数据库 I/O 长尾，因此该样本保留为发布邻接数据库竞争风险，不用于 readiness 稳定前宣告通过。
+- release readiness、queue 和 worker 稳定后的正式三轮 confirm → fresh → visible → withdraw → fresh → visible 全部通过。六次 command 为 `243.341–604.266ms`，p95/max `604.266ms`；response-to-fresh p95/max `699.225ms`；response-to-visible p95/max `1006.562ms`，均满足 `<=1000ms`、`<=2000ms` 和 hard max `<=3000ms`。最终 fixture 为 `unlinked`，`recovery=null`。
+- AppHealth 证明同步 I/O 已收口为 confirm `14` queries、withdraw `11` queries；稳定窗口 API 中位数约 `243/233ms`。Turnover 专属 relation repository 不再输出第二套 dirty/outbox，关联台与其他调用方仍保持原 composition。
+- authenticated 40-sample 全部 2xx：页面 shell p95 `98.970ms`；grouped p95 `283.792ms`，40/40 `fresh`；tag selection p95 `160.112ms`；Page Audit p95 `342.569ms`。四组共 160 个正式样本、0 failure、0 refresh enqueue。
+- 写操作后的直接 Audit `turnover-ledger` 与交叉 Audit `reconciliation-workbench`、`bank-details`、`cost-statistics`、`oa-pending-payments` 全部 HTTP 200、`integrity=pass`、`freshness=fresh`、`queue=drained`、issues 为空。
+- 判定：外部往来款管理在 release 稳定生产窗口达到本阶段性能、正确性、隔离、Audit 和可恢复性门，可停在当前页面的安全暂停点；不自动进入“税金抵扣”。发布邻接数据库竞争长尾继续作为平台容量观测项保留，但不再用页面内 cache、兼容链或跨页面 I/O 掩盖。
