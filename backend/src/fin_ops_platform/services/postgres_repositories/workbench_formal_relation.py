@@ -279,7 +279,6 @@ class PostgresWorkbenchFormalRelationFactRepository:
                 "external_batch_owner_count": int(row.get("external_batch_owner_count") or 0),
                 "scope_keys": sorted(
                     {
-                        "all",
                         *(
                             value
                             for value in (

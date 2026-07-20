@@ -107,6 +107,36 @@ class WorkbenchFreeMatchingEngineTests(unittest.TestCase):
         self.assertEqual(len(result.plans), 1)
         self.assertEqual(result.plans[0].rule_code, "explicit_unique_reference")
         self.assertEqual(result.plans[0].amount_minor, 0)
+        self.assertEqual(result.plans[0].scope_keys, ("2020-01", "2026-05"))
+
+    def test_plan_uses_all_only_when_member_months_are_unknown(self) -> None:
+        invoice = fact(
+            "invoice",
+            "invoice-undated",
+            52_000,
+            fact_date=None,
+            evidence=(),
+        )
+        oa = fact(
+            "oa",
+            "oa-undated",
+            1,
+            fact_date=None,
+            evidence=(),
+            references=(
+                FormalRelationReference(
+                    kind="canonical_source",
+                    value="oa-undated:invoice-undated",
+                    target_row_type="invoice",
+                    target_identity="invoice-undated",
+                ),
+            ),
+        )
+
+        result = self.engine.plan_relations(batch(oa, invoice))
+
+        self.assertEqual(len(result.plans), 1)
+        self.assertEqual(result.plans[0].scope_keys, ("all",))
 
     def test_composite_evidence_accepts_365_days_and_rejects_366(self) -> None:
         oa = fact("oa", "oa-window", 10_000, fact_date=date(2025, 5, 1))

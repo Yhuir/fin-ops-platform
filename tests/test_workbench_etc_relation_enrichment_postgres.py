@@ -54,6 +54,7 @@ class WorkbenchEtcRelationEnrichmentPostgresTests(unittest.TestCase):
         self.assertEqual(candidates[0]["business_batch_id"], BUSINESS_BATCH_ID)
         self.assertEqual(candidates[0]["invoice_count"], 34)
         self.assertEqual(candidates[0]["total_amount"], "1584.350000")
+        self.assertEqual(candidates[0]["scope_keys"], ["2026-06"])
 
         with self.connection.transaction() as transaction:
             transactional_repository = PostgresWorkbenchFormalRelationFactRepository(transaction)

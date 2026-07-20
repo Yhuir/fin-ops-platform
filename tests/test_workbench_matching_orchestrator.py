@@ -298,6 +298,7 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
 
         self.assertEqual(uow.save_count, 1)
         self.assertEqual(summary["enriched_relation_count"], 1)
+        self.assertEqual(uow.calls[0].scope_keys, ("2026-05",))
         relation = next(iter(uow.snapshot["pair_relations"].values()))
         self.assertEqual(
             relation["special_metadata"]["etc_batch_link"]["external_etc_batch_id"],
@@ -351,6 +352,7 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
 
         self.assertEqual(summary["planned_relation_count"], 0)
         self.assertEqual(summary["enriched_relation_count"], 1)
+        self.assertEqual(uow.calls[0].scope_keys, ("2026-05",))
         self.assertEqual(uow.save_count, 1)
         self.assertEqual(set(uow.snapshot["pair_relations"]), {case_id})
 

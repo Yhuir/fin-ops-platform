@@ -658,7 +658,8 @@ class WorkbenchFreeMatchingEngine:
             for fact in member_facts
             if fact.fact_date is not None
         }
-        scope_keys.add("all")
+        if not scope_keys:
+            scope_keys.add("all")
         evidence_summary = (
             ("evidence_kinds", ",".join(sorted(evidence_kinds))),
             ("member_count", str(len(members))),

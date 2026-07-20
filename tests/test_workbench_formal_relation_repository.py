@@ -168,6 +168,7 @@ class PostgresWorkbenchFormalRelationFactRepositoryTests(unittest.TestCase):
 
         self.assertEqual(candidates[0]["invoice_count"], 34)
         self.assertEqual(candidates[0]["external_batch_owner_count"], 2)
+        self.assertEqual(candidates[0]["scope_keys"], ["2026-06"])
         sql, params = connection.queries[0]
         self.assertIn("batch.scope_month between %s::date and %s::date", sql)
         self.assertIn("oa.normalized_payload->>'etc_batch_id'", sql)

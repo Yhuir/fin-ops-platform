@@ -55,10 +55,9 @@ class WorkbenchFormalRelationCommand:
                 {
                     *{scope for plan in plans for scope in plan.scope_keys},
                     *{
-                        str(scope).strip()
+                        scope
                         for link in links
-                        for scope in list(link.get("scope_keys") or [])
-                        if str(scope).strip()
+                        for scope in _etc_batch_link_refresh_scope_keys(link)
                     },
                 }
             )
@@ -109,6 +108,18 @@ class WorkbenchFormalRelationCommand:
             },
             action_name="confirm_link" if plans else "enrich_etc_relation",
         )
+
+
+def _etc_batch_link_refresh_scope_keys(link: dict[str, Any]) -> tuple[str, ...]:
+    scope_keys = {
+        str(scope).strip()
+        for scope in list(link.get("scope_keys") or [])
+        if str(scope).strip()
+    }
+    specific_scope_keys = scope_keys - {"all"}
+    if specific_scope_keys:
+        return tuple(sorted(specific_scope_keys))
+    return ("all",) if "all" in scope_keys else ()
 
 
 class WorkbenchMatchingOrchestrator:
