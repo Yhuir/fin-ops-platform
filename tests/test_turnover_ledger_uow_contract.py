@@ -203,27 +203,34 @@ class _RecordingDirtyOutboxWriter:
     def __init__(self, *, fail: bool = False) -> None:
         self.fail = fail
         self.calls: list[dict[str, object]] = []
+        self.batch_calls: list[dict[str, object]] = []
 
-    def enqueue_refresh(
+    def enqueue_refreshes(
         self,
         *,
         transaction: object,
-        scope_type: str,
-        scope_keys: list[str],
-        reason: str,
-        payload: dict[str, object] | None = None,
+        refreshes: list[dict[str, object]],
     ) -> list[dict[str, object]]:
         if self.fail:
             raise RuntimeError("forced dirty/outbox failure")
-        call = {
-            "transaction": transaction,
-            "scope_type": scope_type,
-            "scope_keys": list(scope_keys),
-            "reason": reason,
-            "payload": dict(payload or {}),
-        }
-        self.calls.append(call)
-        return [call]
+        self.batch_calls.append(
+            {
+                "transaction": transaction,
+                "refreshes": [dict(refresh) for refresh in refreshes],
+            }
+        )
+        events: list[dict[str, object]] = []
+        for refresh in refreshes:
+            call = {
+                "transaction": transaction,
+                "scope_type": str(refresh.get("scope_type") or ""),
+                "scope_keys": list(refresh.get("scope_keys") or []),
+                "reason": str(refresh.get("reason") or ""),
+                "payload": dict(refresh.get("payload") or {}),
+            }
+            self.calls.append(call)
+            events.append(call)
+        return events
 
 
 class _StalePreconditionPort:
@@ -533,31 +540,41 @@ class _FailingTurnoverRelationPort:
 class _TransactionOnlyQueueRepository:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
+        self.batch_calls: list[dict[str, object]] = []
 
-    def enqueue_read_model_refresh_in_transaction(
+    def enqueue_read_model_refreshes_in_transaction(
         self,
         *,
         transaction: object,
-        scope_type: str,
-        scope_key: str,
-        reason: str,
+        refreshes: list[dict[str, object]],
         tenant_id: str,
         priority: str,
         trace_id: str | None,
-        metadata: dict[str, object] | None = None,
-    ) -> dict[str, object]:
-        event = {
-            "transaction": transaction,
-            "scope_type": scope_type,
-            "scope_key": scope_key,
-            "reason": reason,
-            "tenant_id": tenant_id,
-            "priority": priority,
-            "trace_id": trace_id,
-            "metadata": dict(metadata or {}),
-        }
-        self.calls.append(event)
-        return event
+    ) -> list[dict[str, object]]:
+        self.batch_calls.append(
+            {
+                "transaction": transaction,
+                "refreshes": [dict(refresh) for refresh in refreshes],
+                "tenant_id": tenant_id,
+                "priority": priority,
+                "trace_id": trace_id,
+            }
+        )
+        events = [
+            {
+                "transaction": transaction,
+                "scope_type": str(refresh.get("scope_type") or ""),
+                "scope_key": str(refresh.get("scope_key") or ""),
+                "reason": str(refresh.get("reason") or ""),
+                "tenant_id": tenant_id,
+                "priority": priority,
+                "trace_id": trace_id,
+                "metadata": dict(refresh.get("metadata") or {}),
+            }
+            for refresh in refreshes
+        ]
+        self.calls.extend(events)
+        return events
 
     def enqueue_read_model_refresh(self, **_kwargs: object) -> None:
         raise AssertionError("non-transaction enqueue must not be used")
@@ -1545,6 +1562,11 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
                 ("cost_statistics", ["active:2026-02"], "cost_statistics_relation_delta"),
                 ("search", ["2026-02"], "turnover_relation_changed"),
             ],
+        )
+        self.assertEqual(len(deps.dirty_outbox_writer.batch_calls), 1)
+        self.assertIs(
+            deps.dirty_outbox_writer.batch_calls[0]["transaction"],
+            deps.connection.transaction_obj,
         )
 
     def test_target_confirm_relation_facade_passes_expected_versions_before_repository(self) -> None:
@@ -2903,22 +2925,28 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertIn("app.app_settings", str(call["sql"]))
         self.assertEqual(call["params"][0], "app_settings")
 
-    def test_turnover_dirty_outbox_writer_uses_transaction_bound_queue_for_each_scope(self) -> None:
+    def test_turnover_dirty_outbox_writer_batches_all_scopes_in_one_transaction(self) -> None:
         module = self._write_adapters_module()
         writer_class = getattr(module, "TurnoverLedgerDirtyOutboxWriter")
         queue = _TransactionOnlyQueueRepository()
         transaction = _RecordingTransaction()
         writer = writer_class(queue_repository=queue, tenant_id="tenant-a", priority="high", trace_id="trace-1")
 
-        events = writer.enqueue_refresh(
+        events = writer.enqueue_refreshes(
             transaction=transaction,
-            scope_type="turnover_ledger",
-            scope_keys=["all", "2026-05"],
-            reason="relation_extra_update",
-            payload={"action_name": "turnover_relation_extra_update", "actor_id": "finance-user"},
+            refreshes=[
+                {
+                    "scope_type": "turnover_ledger",
+                    "scope_keys": ["all", "2026-05"],
+                    "reason": "relation_extra_update",
+                    "payload": {"action_name": "turnover_relation_extra_update", "actor_id": "finance-user"},
+                }
+            ],
         )
 
         self.assertEqual(events, queue.calls)
+        self.assertEqual(len(queue.batch_calls), 1)
+        self.assertIs(queue.batch_calls[0]["transaction"], transaction)
         self.assertEqual([call["transaction"] for call in queue.calls], [transaction, transaction])
         self.assertEqual([call["scope_key"] for call in queue.calls], ["all", "2026-05"])
         self.assertEqual([call["scope_type"] for call in queue.calls], ["turnover_ledger", "turnover_ledger"])
@@ -2938,12 +2966,16 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         writer_class = getattr(self._write_adapters_module(), "TurnoverLedgerDirtyOutboxWriter")
         writer = writer_class(queue_repository=_NonTransactionalQueueRepository())
 
-        with self.assertRaisesRegex(RuntimeError, "enqueue_read_model_refresh_in_transaction"):
-            writer.enqueue_refresh(
+        with self.assertRaisesRegex(RuntimeError, "enqueue_read_model_refreshes_in_transaction"):
+            writer.enqueue_refreshes(
                 transaction=_RecordingTransaction(),
-                scope_type="turnover_ledger",
-                scope_keys=["all"],
-                reason="relation_extra_update",
+                refreshes=[
+                    {
+                        "scope_type": "turnover_ledger",
+                        "scope_keys": ["all"],
+                        "reason": "relation_extra_update",
+                    }
+                ],
             )
 
     def test_relation_extra_normalizer_adapter_reuses_service_rules_without_state_mutation(self) -> None:

@@ -156,6 +156,29 @@ class _PostgresQueueRecorder:
         self.transactional.append((scope_type, scope_key, reason, transaction))
         return {"scope_type": scope_type, "scope_key": scope_key, "reason": reason, "source_version": len(self.transactional)}
 
+    def enqueue_read_model_refreshes_in_transaction(
+        self,
+        *,
+        transaction: object,
+        refreshes: list[dict[str, object]],
+        tenant_id: str = "default",
+        priority: str = "normal",
+        trace_id: str | None = None,
+    ) -> list[dict[str, object]]:
+        return [
+            self.enqueue_read_model_refresh_in_transaction(
+                transaction=transaction,
+                scope_type=str(refresh.get("scope_type") or ""),
+                scope_key=str(refresh.get("scope_key") or ""),
+                reason=str(refresh.get("reason") or ""),
+                tenant_id=tenant_id,
+                priority=priority,
+                trace_id=trace_id,
+                metadata=dict(refresh.get("metadata") or {}),
+            )
+            for refresh in refreshes
+        ]
+
 
 class _RelationExtraWriteFacadeRecorder:
     def __init__(self) -> None:
@@ -294,11 +317,15 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         transaction = _PostgresFakeTransaction()
         writer = TurnoverLedgerDirtyOutboxWriter(queue_repository=queue)
 
-        events = writer.enqueue_refresh(
+        events = writer.enqueue_refreshes(
             transaction=transaction,
-            scope_type="cost_statistics",
-            scope_keys=["2026-02", "all"],
-            reason="import_state_changed",
+            refreshes=[
+                {
+                    "scope_type": "cost_statistics",
+                    "scope_keys": ["2026-02", "all"],
+                    "reason": "import_state_changed",
+                }
+            ],
         )
 
         self.assertEqual(

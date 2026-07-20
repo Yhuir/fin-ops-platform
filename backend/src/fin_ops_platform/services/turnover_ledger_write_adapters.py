@@ -2007,87 +2007,88 @@ class TurnoverLedgerDirtyOutboxWriter:
         self._trace_id = str(trace_id).strip() if trace_id else None
         self._scope_policy_registry = scope_policy_registry
 
-    def enqueue_refresh(
+    def enqueue_refreshes(
         self,
         *,
         transaction: Any,
-        scope_type: str,
-        scope_keys: list[str],
-        reason: str,
-        payload: dict[str, object] | None = None,
+        refreshes: list[dict[str, object]],
     ) -> list[Any]:
-        enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh_in_transaction", None)
+        enqueue = getattr(self._queue_repository, "enqueue_read_model_refreshes_in_transaction", None)
         if not callable(enqueue):
-            raise RuntimeError("queue_repository must expose enqueue_read_model_refresh_in_transaction.")
-        events = []
-        normalized_scope_type = str(scope_type or "").strip()
-        normalized_scope_keys = self._scope_policy_registry.normalize_and_validate(
-            normalized_scope_type,
-            [str(scope_key or "all") for scope_key in list(scope_keys or ["all"])],
-        )
-        for scope_key in normalized_scope_keys:
-            refresh_metadata = {
-                "action_name": str((payload or {}).get("action_name") or "").strip(),
-                "row_ids": list((payload or {}).get("row_ids") or []),
-                "case_ids": list((payload or {}).get("case_ids") or []),
-                "relation_deltas": dict((payload or {}).get("relation_deltas") or {})
-                if isinstance((payload or {}).get("relation_deltas"), dict)
-                else {},
-            }
-            events.append(
-                enqueue(
-                    transaction=transaction,
-                    scope_type=normalized_scope_type,
-                    scope_key=scope_key,
-                    reason=reason,
-                    tenant_id=self._tenant_id,
-                    priority=self._priority,
-                    trace_id=self._trace_id,
-                    metadata={key: value for key, value in refresh_metadata.items() if value},
-                )
+            raise RuntimeError("queue_repository must expose enqueue_read_model_refreshes_in_transaction.")
+        targets: list[dict[str, object]] = []
+        for refresh in list(refreshes or []):
+            if not isinstance(refresh, dict):
+                raise TypeError("turnover refresh request must be a dict.")
+            scope_type = str(refresh.get("scope_type") or "").strip()
+            payload = refresh.get("payload") if isinstance(refresh.get("payload"), dict) else {}
+            scope_keys = self._scope_policy_registry.normalize_and_validate(
+                scope_type,
+                [str(scope_key or "all") for scope_key in list(refresh.get("scope_keys") or ["all"])],
             )
-        return events
+            metadata = _turnover_refresh_metadata(payload)
+            targets.extend(
+                {
+                    "scope_type": scope_type,
+                    "scope_key": scope_key,
+                    "reason": str(refresh.get("reason") or "read_model_refresh"),
+                    **({"metadata": metadata} if metadata else {}),
+                }
+                for scope_key in scope_keys
+            )
+        return list(
+            enqueue(
+                transaction=transaction,
+                refreshes=targets,
+                tenant_id=self._tenant_id,
+                priority=self._priority,
+                trace_id=self._trace_id,
+            )
+        )
 
 
 class TurnoverLedgerLocalDirtyOutboxWriter:
     def __init__(self, *, queue_repository: Any) -> None:
         self._queue_repository = queue_repository
 
-    def enqueue_refresh(
+    def enqueue_refreshes(
         self,
         *,
         transaction: Any,
-        scope_type: str,
-        scope_keys: list[str],
-        reason: str,
-        payload: dict[str, object] | None = None,
+        refreshes: list[dict[str, object]],
     ) -> list[Any]:
         _ = transaction
         refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
         if not refresh_gateway.can_enqueue():
             raise RuntimeError("queue_repository must expose enqueue_read_model_refresh.")
-        refresh_reason = (
-            "turnover_relation_extra_changed"
-            if reason == "relation_extra_update"
-            else reason
-        )
-        return refresh_gateway.enqueue_many_events(
-            scope_type,
-            [str(scope_key or "all") for scope_key in list(scope_keys or ["all"])],
-            reason=refresh_reason,
-            metadata={
-                key: value
-                for key, value in {
-                    "action_name": str((payload or {}).get("action_name") or "").strip(),
-                    "row_ids": list((payload or {}).get("row_ids") or []),
-                    "case_ids": list((payload or {}).get("case_ids") or []),
-                    "relation_deltas": dict((payload or {}).get("relation_deltas") or {})
-                    if isinstance((payload or {}).get("relation_deltas"), dict)
-                    else {},
-                }.items()
-                if value
-            },
-        )
+        events: list[Any] = []
+        for refresh in list(refreshes or []):
+            if not isinstance(refresh, dict):
+                raise TypeError("turnover refresh request must be a dict.")
+            reason = str(refresh.get("reason") or "read_model_refresh")
+            refresh_reason = "turnover_relation_extra_changed" if reason == "relation_extra_update" else reason
+            payload = refresh.get("payload") if isinstance(refresh.get("payload"), dict) else {}
+            events.extend(
+                refresh_gateway.enqueue_many_events(
+                    str(refresh.get("scope_type") or ""),
+                    [str(scope_key or "all") for scope_key in list(refresh.get("scope_keys") or ["all"])],
+                    reason=refresh_reason,
+                    metadata=_turnover_refresh_metadata(payload),
+                )
+            )
+        return events
+
+
+def _turnover_refresh_metadata(payload: dict[str, object]) -> dict[str, object]:
+    metadata = {
+        "action_name": str(payload.get("action_name") or "").strip(),
+        "row_ids": list(payload.get("row_ids") or []),
+        "case_ids": list(payload.get("case_ids") or []),
+        "relation_deltas": dict(payload.get("relation_deltas") or {})
+        if isinstance(payload.get("relation_deltas"), dict)
+        else {},
+    }
+    return {key: value for key, value in metadata.items() if value}
 
 
 class TurnoverLedgerLocalRelationExtraConnection:

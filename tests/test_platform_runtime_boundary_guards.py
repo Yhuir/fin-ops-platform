@@ -4664,6 +4664,12 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         source = path.read_text(encoding="utf-8")
         tree = _parse(path)
         port_source = _class_source(tree, source, "TurnoverLedgerWorkbenchPairPort")
+        dirty_writer_source = _class_source(tree, source, "TurnoverLedgerDirtyOutboxWriter")
+        local_dirty_writer_source = _class_source(tree, source, "TurnoverLedgerLocalDirtyOutboxWriter")
+        uow_path = SERVICES_ROOT / "turnover_ledger_write_uow.py"
+        uow_source = uow_path.read_text(encoding="utf-8")
+        uow_tree = _parse(uow_path)
+        uow_class_source = _class_source(uow_tree, uow_source, "TurnoverLedgerWriteUnitOfWork")
 
         violations: list[str] = []
         if "TurnoverLedgerRelationMutationInvalidationLegacyAdapter" in source:
@@ -4680,6 +4686,18 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"TurnoverLedgerWorkbenchPairPort keeps broad pair service surface {forbidden}")
         if "workbench_relation_command_unavailable" not in port_source:
             violations.append("TurnoverLedgerWorkbenchPairPort does not fail fast when relation command service is unavailable")
+        if "enqueue_read_model_refreshes_in_transaction" not in dirty_writer_source:
+            violations.append("TurnoverLedgerDirtyOutboxWriter does not use transaction-bound batch enqueue")
+        if ".enqueue_refresh(" in uow_class_source:
+            violations.append("TurnoverLedgerWriteUnitOfWork keeps per-request refresh enqueue")
+        for name, writer_source in (
+            ("TurnoverLedgerDirtyOutboxWriter", dirty_writer_source),
+            ("TurnoverLedgerLocalDirtyOutboxWriter", local_dirty_writer_source),
+        ):
+            if "def enqueue_refreshes(" not in writer_source:
+                violations.append(f"{name} does not expose the batched refresh contract")
+            if "def enqueue_refresh(" in writer_source:
+                violations.append(f"{name} keeps the removed single-refresh contract")
 
         self.assertEqual(violations, [])
 

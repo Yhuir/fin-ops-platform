@@ -113,34 +113,41 @@ class TurnoverLedgerWriteUnitOfWork:
             source_versions: dict[str, Any] = {}
             outbox_event_ids: list[Any] = []
             result_refresh_metadata = _result_refresh_metadata(result)
+            prepared_refreshes: list[dict[str, object]] = []
             for refresh_request in refresh_requests:
                 request = dict(refresh_request)
                 request_metadata = request.get("metadata") if isinstance(request.get("metadata"), dict) else {}
                 refresh_metadata = _merge_refresh_metadata(request_metadata, result_refresh_metadata)
-                events = self._dirty_outbox_writer.enqueue_refresh(
-                    transaction=transaction,
-                    scope_type=str(request.get("scope_type") or "turnover_ledger"),
-                    scope_keys=list(request.get("scope_keys") or ["all"]),
-                    reason=str(request.get("reason") or getattr(command, "action_name", "") or "turnover_ledger_write"),
-                    payload={
-                        "tenant_id": getattr(command, "tenant_id", None),
-                        "actor_id": getattr(command, "actor_id", None),
-                        "action_name": getattr(command, "action_name", None),
-                        **refresh_metadata,
-                    },
+                prepared_refreshes.append(
+                    {
+                        "scope_type": str(request.get("scope_type") or "turnover_ledger"),
+                        "scope_keys": list(request.get("scope_keys") or ["all"]),
+                        "reason": str(
+                            request.get("reason")
+                            or getattr(command, "action_name", "")
+                            or "turnover_ledger_write"
+                        ),
+                        "payload": {
+                            "tenant_id": getattr(command, "tenant_id", None),
+                            "actor_id": getattr(command, "actor_id", None),
+                            "action_name": getattr(command, "action_name", None),
+                            **refresh_metadata,
+                        },
+                    }
                 )
-                for event in list(events or []):
-                    event_id = _event_value(event, "event_id")
-                    source_version = _event_value(event, "source_version")
-                    if event_id is not None:
-                        outbox_event_ids.append(event_id)
-                    if source_version is not None:
-                        event_scope_key = _event_value(event, "scope_key")
-                        if event_scope_key is not None:
-                            source_versions[str(event_scope_key)] = source_version
-                        else:
-                            for scope_key in list(request.get("scope_keys") or ["all"]):
-                                source_versions[str(scope_key)] = source_version
+            events = self._dirty_outbox_writer.enqueue_refreshes(
+                transaction=transaction,
+                refreshes=prepared_refreshes,
+            )
+            for event in list(events or []):
+                event_id = _event_value(event, "event_id")
+                source_version = _event_value(event, "source_version")
+                if event_id is not None:
+                    outbox_event_ids.append(event_id)
+                if source_version is not None:
+                    event_scope_key = _event_value(event, "scope_key")
+                    if event_scope_key is not None:
+                        source_versions[str(event_scope_key)] = source_version
             if idempotency is not None and idempotency_store is not None:
                 if not isinstance(result, dict):
                     raise TypeError("TurnoverLedgerWriteUnitOfWork idempotent handler must return a dict result.")
