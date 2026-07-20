@@ -450,6 +450,37 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
         self.assertEqual(result.payload["read_model_stale_reasons"], ["builder_mismatch"])
         self.assertEqual(queue.refreshes, [("all", "api_initial_page_stale")])
 
+    def test_filtered_initial_page_refreshing_payload_does_not_enqueue_all_fan_out(self) -> None:
+        class Repository:
+            @staticmethod
+            def get_workbench_initial_page(**_kwargs: object) -> dict[str, object]:
+                return {
+                    "summary": {},
+                    "paired": {"groups": [], "total": 0},
+                    "unpaired": {"groups": [], "total": 0},
+                    "source_versions": {"builder": "v1"},
+                    "read_model_status": "refreshing",
+                    "read_model_version": "generation-set-current",
+                }
+
+        queue = QueueRecorder()
+        facade = WorkbenchQueryFacade(
+            repository=Repository(),
+            redis_helper=None,
+            enqueue_refresh=queue.enqueue,
+            scope_key_for_month=scope_key_for_month,
+            stale_reasons=no_stale_reasons,
+            emit_status_metric=MetricRecorder().emit,
+            missing_read_model_error=lambda _error: False,
+            is_default_initial_query=is_default_workbench_initial_query,
+        )
+
+        result = facade.initial_page("all", paired_query={"search": "ETC"})
+
+        self.assertEqual(result.status_code, HTTPStatus.OK)
+        self.assertEqual(result.payload["read_model_status"], "refreshing")
+        self.assertEqual(queue.refreshes, [])
+
     def test_initial_page_timeout_returns_503_without_false_refresh_enqueue(self) -> None:
         class Repository:
             @staticmethod
@@ -598,7 +629,7 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
         self.assertEqual(metrics.calls[0]["endpoint"], "/api/workbench/groups/detail")
         self.assertEqual(metrics.calls[0]["read_model_status"], "stale")
 
-    def test_group_detail_refreshing_status_does_not_return_stale_group(self) -> None:
+    def test_group_detail_refreshing_status_does_not_return_or_enqueue_stale_group(self) -> None:
         class Repository:
             def get_workbench_group_detail(self, **_kwargs: object) -> dict[str, object]:
                 return {
@@ -627,7 +658,7 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
         self.assertEqual(result.status_code, HTTPStatus.NOT_FOUND)
         self.assertEqual(result.payload["read_model_status"], "refreshing")
         self.assertNotIn("group", result.payload)
-        self.assertEqual(queue.refreshes, [("all", "api_group_detail_stale")])
+        self.assertEqual(queue.refreshes, [])
         self.assertEqual(metrics.calls[0]["read_model_status"], "refreshing")
 
     def test_groups_cache_hit_uses_granular_redis_dependency_without_page_query(self) -> None:

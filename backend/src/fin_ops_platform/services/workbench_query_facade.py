@@ -257,7 +257,7 @@ class WorkbenchQueryFacade:
         if "oa_status" not in payload and callable(self._oa_status_provider):
             payload["oa_status"] = self._serialize_value(self._oa_status_provider())
         if initial_status != "fresh":
-            if refresh_status not in {"refreshing", "stale"}:
+            if initial_status != "refreshing" and refresh_status not in {"refreshing", "stale"}:
                 self._enqueue_refresh(scope_key, reason="api_initial_page_stale")
             self._emit_status_metric(
                 endpoint="/api/workbench",
@@ -572,7 +572,8 @@ class WorkbenchQueryFacade:
         group_status = "stale" if stale_reasons else str(group.get("read_model_status") or "fresh")
         if group_status != "fresh":
             reason = "api_group_detail_source_versions_stale" if stale_reasons else "api_group_detail_stale"
-            self._enqueue_refresh(group_scope_key, reason=reason)
+            if group_status != "refreshing":
+                self._enqueue_refresh(group_scope_key, reason=reason)
             self._emit_status_metric(
                 endpoint="/api/workbench/groups/detail",
                 scope_key=group_scope_key,
