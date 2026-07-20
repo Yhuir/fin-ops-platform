@@ -387,8 +387,13 @@ class PostgresWorkbenchRelationRepository:
         }
         if changed_case_ids is not None:
             case_ids &= changed_case_ids
-        for case_id in sorted(case_ids):
-            connection.execute("delete from app.workbench_pair_relation_history where case_id = %s", (case_id,))
+        if not case_ids:
+            return
+        connection.execute(
+            "delete from app.workbench_pair_relation_history where case_id = any(%s::text[])",
+            (sorted(case_ids),),
+        )
+        rows: list[tuple[Any, ...]] = []
         for item in history:
             if not isinstance(item, dict):
                 continue
@@ -396,25 +401,9 @@ class PostgresWorkbenchRelationRepository:
             if changed_case_ids is not None and not (set(item_case_ids) & changed_case_ids):
                 continue
             for case_id in item_case_ids:
-                connection.execute(
-                    """
-                    insert into app.workbench_pair_relation_history(
-                        id, relation_id, case_id, event_type, actor_id, occurred_at,
-                        before_payload, after_payload, raw_payload
-                    )
-                    values (
-                        %s::uuid,
-                        (select id from app.workbench_pair_relations where case_id = %s limit 1),
-                        %s, %s, %s, coalesce(%s::timestamptz, now()), %s, %s, %s
-                    )
-                    on conflict (id) do update set
-                        before_payload = excluded.before_payload,
-                        after_payload = excluded.after_payload,
-                        raw_payload = excluded.raw_payload
-                    """,
+                rows.append(
                     (
                         event_uuid("workbench_pair_relation_history", case_id, item),
-                        case_id,
                         case_id,
                         text(item.get("operation_type") or item.get("event_type") or "unknown"),
                         text(item.get("created_by") or item.get("actor_id")),
@@ -422,8 +411,45 @@ class PostgresWorkbenchRelationRepository:
                         jsonb(item.get("before_relations") if isinstance(item.get("before_relations"), list) else item.get("before_payload") or {}),
                         jsonb(item.get("after_relations") if isinstance(item.get("after_relations"), list) else item.get("after_payload") or {}),
                         jsonb({"normalized_payload": item}),
-                    ),
+                    )
                 )
+        if not rows:
+            return
+        value_sql = ", ".join(
+            ["(%s::uuid, %s::text, %s::text, %s::text, %s::text, %s::jsonb, %s::jsonb, %s::jsonb)"]
+            * len(rows)
+        )
+        connection.execute(
+            f"""
+            with input(
+                id, case_id, event_type, actor_id, occurred_at,
+                before_payload, after_payload, raw_payload
+            ) as (
+                values {value_sql}
+            )
+            insert into app.workbench_pair_relation_history(
+                id, relation_id, case_id, event_type, actor_id, occurred_at,
+                before_payload, after_payload, raw_payload
+            )
+            select
+                input.id,
+                relation.id,
+                input.case_id,
+                input.event_type,
+                input.actor_id,
+                coalesce(input.occurred_at::timestamptz, now()),
+                input.before_payload,
+                input.after_payload,
+                input.raw_payload
+            from input
+            left join app.workbench_pair_relations relation on relation.case_id = input.case_id
+            on conflict (id) do update set
+                before_payload = excluded.before_payload,
+                after_payload = excluded.after_payload,
+                raw_payload = excluded.raw_payload
+            """,
+            tuple(value for row in rows for value in row),
+        )
 
     @staticmethod
     def _history_case_ids(item: dict[str, Any]) -> list[str]:

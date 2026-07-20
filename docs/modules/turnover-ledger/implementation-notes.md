@@ -677,3 +677,11 @@ git diff --check
 - 修复：projection builder 只保留最近一个、由完整 own source_versions 精确绑定的基础 rows 计算结果，让同版本的相邻 month shard 复用；source version 任一字段变化立即重算。首次 read-model page 在同一次 rebuild 内复用。该 memoization 不新增表、Redis、TTL、fallback、worker 或 API，不跨进程，也不改变 canonical facts、freshness 或页面 payload。
 - 旧链删除：移除同一次 rebuild 对 page 1 的第二次 repository 查询，以及相邻同版本 month shard 对整本 ledger 的第二次 canonical grouped 计算；保留每个 scope 独立的 relation context、source-version 标记和原子保存。
 - 测试：覆盖同版本两个月只计算一次、source version 改变必须计算两次、relation-only refresh page 1 只读取一次；生产门仍为两轮可逆 confirm→fresh→withdraw→fresh、最终 fixture 恢复与跨页面 Audit。
+
+## 2026-07-20 - Manual closure command 历史写入热点收口
+
+- 后续生产定位：projection 相邻月份复用后，withdraw response-to-fresh 已降到 `1277–1489ms`，但 confirm 仍约 `6166–6206ms`；同步 command 仍为 `1516–7234ms`。AppHealth 显示 confirm/withdraw command 每次执行 `75–86` 条 SQL，数据库时间是同步命令主要耗时。
+- 真实根因位于共享 owner `workbench-relations`：manual closure 通过正式 command/UoW 保存 relation 时，旧 repository 会逐条重写该 case 的完整审计历史；反复确认/撤回使历史增长，命令成本随历史长度线性增加。
+- 修复保持 turnover 页面 I/O 和状态机不变，只在 owner repository 内把 history replacement 改为同事务的单次批量删除 + 单次批量写入，并删除逐 case/逐 event 旧循环。没有新增页面专用事实源、缓存、worker、API 或 fallback，不改变其他页面的 relation 语义。
+- 本地证据：25 条历史的 statement-count 测试通过；独立 PostgreSQL 17 空库应用 0001–0114 后，25 条 history 和全部 relation foreign key 正确落库；command/UoW/API 回归通过。
+- 生产门不变：发布精确 SHA 后，两轮 confirm/withdraw 都必须满足 command p95 `<=1000ms`、response-to-fresh p95 `<=2000ms`、任一 hard max `<=3000ms`；最终 fixture 未关联、queue drained、页面及跨页面 Audit 通过，才能声明外部往来页面完成。

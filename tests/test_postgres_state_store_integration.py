@@ -422,6 +422,57 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
         self.store.save_pending_invoice_commands({})
         self.assertEqual(fetch_scalar(self.database_url, "select count(*) from app.pending_invoice_manual_invoice_commands;"), "0")
 
+    def test_workbench_relation_long_history_batch_is_persisted_with_relation_ids(self) -> None:
+        histories = [
+            {
+                "operation_id": f"operation-{index}",
+                "case_id": "case-long-history",
+                "event_type": "updated",
+                "actor_id": "integration-test",
+                "occurred_at": "2026-07-20T00:00:00+00:00",
+                "before_payload": {"version": index},
+                "after_payload": {"version": index + 1},
+            }
+            for index in range(25)
+        ]
+
+        self.store.save_workbench_pair_relations(
+            {
+                "pair_relations": {
+                    "case-long-history": {
+                        "case_id": "case-long-history",
+                        "relation_mode": "turnover_manual_closure",
+                        "status": "active",
+                        "version": 25,
+                        "month_scope": "2026-07",
+                        "row_ids": ["bank-long-history"],
+                        "row_types": ["bank"],
+                    }
+                },
+                "pair_relation_history": histories,
+            }
+        )
+
+        persisted = self.connection.fetch_one(
+            """
+            select
+                count(*)::integer as count,
+                count(relation_id)::integer as relation_id_count,
+                min(event_type) as event_type
+            from app.workbench_pair_relation_history
+            where case_id = %s
+            """,
+            ("case-long-history",),
+        )
+        self.assertEqual(
+            persisted,
+            {
+                "count": len(histories),
+                "relation_id_count": len(histories),
+                "event_type": "updated",
+            },
+        )
+
     def test_import_file_metadata_writes_file_object_and_import_file(self) -> None:
         stored_path = self.store.store_import_file(
             session_id="session-1",

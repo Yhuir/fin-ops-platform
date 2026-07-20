@@ -4641,3 +4641,24 @@ FIN_OPS_TEST_DATABASE_URL=<disposable-db> PYTHONPATH=backend/src:. python3 -m py
 生产验收：只能通过正式 turnover/workbench 写入口触发局部投影，等待 durable queue 与所有受影响 consumer fresh 后复跑 17 页 System Audit；禁止直接 SQL 删除幽灵 row 或伪造 readiness。
 
 对本修复发布前已产生且 source versions 未再变化的损坏 scope，使用 `finops-deploy-control read-model-refresh ... --force-refresh` 经过 scope policy、gateway 和 durable queue 做一次受控全量重算；该恢复入口不改变 canonical facts。
+
+## 2026-07-20 - Relation history replacement 批量持久化
+
+目标：消除 relation confirm/withdraw command 随同一 case 审计历史长度线性增长的 PostgreSQL 往返，收口外部往来 manual closure 写链路的同步命令热点。
+
+生产证据与根因：
+
+- release `1229708d5` 的两轮可逆生产样本中，confirm command 为 `3146–7234ms`，withdraw command 为 `1516–2374ms`；AppHealth 对应请求为 `75–86` 条 SQL，数据库时间占主要耗时。
+- `PostgresWorkbenchRelationRepository._replace_workbench_pair_relation_history(...)` 的旧实现逐 case DELETE，并为完整历史中的每个事件各执行一条 INSERT/UPSERT。生产探针反复确认/撤回同一 deterministic case，历史增长后每次 command 都重写更长历史，查询次数和耗时随历史条数增长。
+
+变更与边界：
+
+- 保留同一 canonical history 表、同一 relation UoW transaction、相同 deterministic event id、payload 和 ON CONFLICT 语义；改为一次 `case_id = any(...)` 批量删除及一次 CTE VALUES 批量写入。
+- 删除旧的 per-case delete loop 与 per-history-event insert loop；没有新增缓存、queue、worker、API、fallback、双写或兼容路径。
+- 模块 owner、输入/输出 I/O、relation 状态机、idempotency、audit、dirty/outbox 和 downstream freshness targets 均未改变，因此 `boundary-io.md` 不需要改合同。
+
+验证：
+
+- repository statement-count 测试证明 25 条历史固定为 2 条 history SQL。
+- 独立 disposable PostgreSQL 17 数据库应用 0001–0114 后，25 条历史全部持久化且 `relation_id` 全部正确绑定。
+- command/UoW/API 回归与 lint 通过；发布后仍必须执行两轮安全可逆 confirm → fresh → withdraw → fresh，并以生产 SLO 和最终数据恢复判定是否闭环。

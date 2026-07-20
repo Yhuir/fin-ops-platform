@@ -1284,6 +1284,47 @@ def test_workbench_relation_repository_save_writes_relation_history_and_refresh_
     assert any(row["event_type"] == "cost_statistics.read_model.refresh" for row in refresh_rows)
 
 
+def test_workbench_relation_repository_replaces_long_case_history_with_two_statements() -> None:
+    connection = WorkbenchRelationWriteConnection()
+    repository = PostgresWorkbenchRelationRepository(connection)
+    histories = [
+        {
+            "case_id": "case-1",
+            "operation_type": f"operation-{index}",
+            "before_relations": [],
+            "after_relations": [{"case_id": "case-1"}],
+        }
+        for index in range(25)
+    ]
+
+    repository.save_workbench_pair_relations(
+        {
+            "pair_relations": {
+                "case-1": {
+                    "case_id": "case-1",
+                    "relation_mode": "manual_confirmed",
+                    "status": "active",
+                    "month_scope": "2026-05",
+                    "row_ids": ["bank-1"],
+                    "row_types": ["bank"],
+                }
+            },
+            "pair_relation_history": histories,
+        },
+        changed_case_ids={"case-1"},
+    )
+
+    history_statements = [
+        (sql, params)
+        for sql, params in connection.executed
+        if "app.workbench_pair_relation_history" in sql
+    ]
+    assert len(history_statements) == 2
+    assert "delete from app.workbench_pair_relation_history" in history_statements[0][0]
+    assert "with input(" in history_statements[1][0]
+    assert len(history_statements[1][1]) == len(histories) * 8
+
+
 def test_workbench_relation_transactional_refresh_scopes_match_scope_policy_contracts() -> None:
     connection = WorkbenchRelationWriteConnection()
     repository = PostgresWorkbenchRelationRepository(connection)
