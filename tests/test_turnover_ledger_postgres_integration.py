@@ -21,7 +21,7 @@ class TurnoverLedgerPostgresIntegrationTests(unittest.TestCase):
         truncate_test_database(self.database_url)
         self.connection = PostgresConnection(PostgresSettings(database_url=self.database_url, pool_enabled=False))
         self.repository = PostgresReadModelRepository(self.connection)
-        self.source_versions = {"turnover_ledger_schema_version": "2026-07-turnover-ledger-v6"}
+        self.source_versions = {"turnover_ledger_schema_version": "2026-07-turnover-ledger-v7"}
 
     def test_list_uses_sql_summary_direction_and_bounded_page_with_normalized_payload_only(self) -> None:
         rows = [

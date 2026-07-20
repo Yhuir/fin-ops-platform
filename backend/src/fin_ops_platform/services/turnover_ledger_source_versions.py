@@ -28,7 +28,7 @@ def build_turnover_ledger_source_versions(
             else _bank_auto_tag_rules_version(app_settings_service)
         ),
         "turnover_relation_snapshot_version": WorkbenchReadModelService.snapshot_version(
-            relation_service.snapshot()
+            _turnover_relation_projection_snapshot(relation_service)
         ),
         "turnover_ledger_extras_snapshot_version": WorkbenchReadModelService.snapshot_version(
             extra_snapshot_provider()
@@ -43,6 +43,21 @@ def build_turnover_ledger_source_versions(
     if oa_projection_sync_version:
         payload["oa_projection_sync_version"] = oa_projection_sync_version
     return payload
+
+
+def _turnover_relation_projection_snapshot(relation_service: Any) -> dict[str, list[dict[str, Any]]]:
+    """Return only canonical relation state that can change current ledger rows."""
+    snapshot = relation_service.snapshot()
+    raw_relations = snapshot.get("relations") if isinstance(snapshot, dict) else []
+    if isinstance(raw_relations, dict):
+        raw_relations = list(raw_relations.values())
+    confirmed_relations = [
+        dict(relation)
+        for relation in list(raw_relations or [])
+        if isinstance(relation, dict) and str(relation.get("status") or "").strip() == "confirmed"
+    ]
+    confirmed_relations.sort(key=lambda relation: str(relation.get("relation_id") or ""))
+    return {"relations": confirmed_relations}
 
 
 def _bank_auto_tag_rules_version(app_settings_service: Any) -> int:

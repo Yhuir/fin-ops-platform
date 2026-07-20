@@ -660,3 +660,12 @@ git diff --check
 - 持久化：v6 projection 只把完整 DTO 写入 `payload`，`raw_payload` 写 `{}`；`TURNOVER_LEDGER_SCHEMA_VERSION` 升到 `2026-07-turnover-ledger-v6`，发布后必须经正式 gateway/worker 重建。
 - 测试：新增真实 PostgreSQL integration，覆盖金额/方向/分页/空筛选/mixed versions/child dirty/raw payload；query/service/API/manifest/architecture/platform guard 和前端既有测试共同保护契约。
 - 发布条件：部署精确 main SHA，等待所有 turnover 月份 v6 fresh/drained，再执行 40 样本性能、直接/交叉 Audit 和安全可逆 confirm→fresh→withdraw→fresh。若写样本不安全，不得制造 canonical 业务数据。
+
+## 2026-07-20 - 确认/撤回后 projection source version 收敛修复
+
+- 生产证据：`fc87df7b6` 发布后的 40 轮只读门通过（shell p95 `109.507ms`、grouped p95 `302.389ms`、tag-selection p95 `157.568ms`、Page Audit p95 `324.403ms`），但可逆确认后 grouped 在 15 秒内持续 `refreshing`；自动撤回后业务行已恢复未关联，freshness 仍反复出现 `turnover_relation_snapshot_version_mismatch`。durable dirty/outbox 已归零且 Page Audit 为 `integrity=pass/freshness=fresh/queue=drained`，因此不是 worker 积压。
+- 根因：`turnover_relation_snapshot_version` 旧实现散列整个 relation snapshot，包含不参与当前 grouped projection 的 `withdrawn` 关系和 audit history。确认再撤回后当前业务输入已经恢复，但历史记录必然增长，API 与 worker 的 source-version gate 因而无法回到操作前值，并在每次读取时重复 enqueue。
+- 修复：source version 只散列会改变当前台账的 canonical `confirmed` relations，并按 `relation_id` 稳定排序；audit history 和 withdrawn history 继续完整持久化、参与审计，但不再污染当前 projection freshness。确认改变版本，撤回完成后版本回到操作前值。
+- 版本：`TURNOVER_LEDGER_SCHEMA_VERSION` 升至 `2026-07-turnover-ledger-v7`，强制旧 read model 通过正式 gateway/worker 重建；不新增 cache、表、queue、worker、API 或 fallback。
+- 测试：新增 source-version 回归覆盖 confirmed 变化、relation 顺序稳定、withdrawn/audit-only 不变；相关 source/query/projection/UoW/API 237 项通过。真实 PostgreSQL repository integration 在前一发布收口已 4/4 通过；本次复跑尝试因当前本地 runtime PostgreSQL 用户无 `CREATE DATABASE` 且对既有 `fin_ops_test.schema_migrations` 无权限而未执行，本修复不改变 repository/SQL。
+- 生产验收：必须发布 v7 后重新执行两轮安全可逆 confirm→fresh→withdraw→fresh；command p95 `<=1000ms`、response-to-fresh p95 `<=2000ms`、任一 hard max `<=3000ms`，最终无 active relation 残留、两条 fixture 均未关联、直接与交叉 Audit 通过，才可关闭本页。

@@ -53,6 +53,7 @@
 - 生产投影必须信任 `BankTransactionTagReadFacade` 输出的 fresh bank-detail tag 事实；只有无 provider 的 legacy/local 路径才允许回退 `BankTransactionCategoryService` snapshot。禁止在 provider-backed worker hot path 逐笔读取旧 category service。
 - 关系 enrichment 必须通过 `WorkbenchRelationReadModelRepositoryPort.workbench_relation_source_bundle_from_source(...)` 读取 `app.workbench_pair_relations`；rows 与 source summary 必须来自同一个 SQL 快照。这是只读 shared-fact I/O，不读取或等待 `read_model.workbench_relation_*`。canonical source 不可用时不得伪造 linked relation context。
 - grouped 当前台账不得消费 `withdrawn` relation；撤回历史只留在 relation snapshot/audit log。系统自动关系恢复后，同一 bank leaf 在 grouped financial totals 和 flow rows 中只能计算一次。
+- `turnover_relation_snapshot_version` 只散列会改变当前台账的 canonical `confirmed` relations，并按 `relation_id` 稳定排序；`withdrawn` relation 与 audit history 不属于当前 projection 输入。确认必须改变该版本，撤回完成后版本必须回到操作前值，避免 audit-only 历史让 fresh worker 结果被 API 永久误判为 stale。
 - `all` 聚合查询不得要求所有行级 source_versions 完全一致；按月增量 worker 刷新会让不相关月份保留旧 provenance。Query owner 只能在 repository 标记 mixed row versions 且 durable dirty scope 为 fresh 时把 all-view 判为 fresh，不能绕过 dirty scope。
 - 列表 page payload 只能从规范化 `payload` 读取；family/status/scope/direction、总 summary、family summaries 和 total 在 PostgreSQL 中计算，第二条 data query 只读取当前 `page_size<=200` 的 payload。筛选为空但 projection 已存在时返回 fresh 空结果，不得误触发 rebuild。
 - `raw_payload` 不属于 turnover 新 projection 的业务读取合同，v6 新写入固定为空对象；完整业务 payload 只由 `payload` 拥有。

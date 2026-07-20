@@ -61,7 +61,7 @@ class TurnoverLedgerSourceVersionsTests(unittest.TestCase):
         versions = self._versions()
 
         self.assertIn("turnover_ledger_schema_version", versions)
-        self.assertEqual(versions["turnover_ledger_schema_version"], "2026-07-turnover-ledger-v6")
+        self.assertEqual(versions["turnover_ledger_schema_version"], "2026-07-turnover-ledger-v7")
         self.assertIn("turnover_relation_schema_version", versions)
         self.assertIn("bank_transaction_category_schema_version", versions)
         self.assertIn("bank_auto_tag_rules_version", versions)
@@ -74,7 +74,9 @@ class TurnoverLedgerSourceVersionsTests(unittest.TestCase):
     def test_source_versions_change_when_relation_extras_tags_categories_or_rules_change(self) -> None:
         baseline = self._versions()
 
-        relation_changed = self._versions(relation_snapshot={"relations": [{"relation_id": "rel-1"}]})
+        relation_changed = self._versions(
+            relation_snapshot={"relations": [{"relation_id": "rel-1", "status": "confirmed"}]}
+        )
         extras_changed = self._versions(extra_snapshot={"extras": [{"relation_id": "rel-1", "note": "changed"}]})
         tag_selection_changed = self._versions(tag_selection={"version": 2, "selected_tag_codes": ["turnover"]})
         category_changed = self._versions(bank_category_snapshot={"categories": [{"transaction_id": "bank-1"}]})
@@ -99,6 +101,59 @@ class TurnoverLedgerSourceVersionsTests(unittest.TestCase):
         )
         self.assertNotEqual(baseline["bank_auto_tag_rules_version"], rules_changed["bank_auto_tag_rules_version"])
         self.assertNotEqual(baseline["oa_projection_sync_version"], oa_changed["oa_projection_sync_version"])
+
+    def test_relation_projection_version_tracks_active_confirmed_relations_only(self) -> None:
+        baseline = self._versions(relation_snapshot={"relations": [], "audit_log": []})
+        confirmed = self._versions(
+            relation_snapshot={
+                "relations": [
+                    {"relation_id": "rel-2", "status": "confirmed", "bank_row_ids": ["bank-2"]},
+                    {"relation_id": "rel-1", "status": "confirmed", "bank_row_ids": ["bank-1"]},
+                ],
+                "audit_log": [{"relation_id": "rel-1", "action": "confirm_relation"}],
+            }
+        )
+        confirmed_reordered = self._versions(
+            relation_snapshot={
+                "relations": [
+                    {"relation_id": "rel-1", "status": "confirmed", "bank_row_ids": ["bank-1"]},
+                    {"relation_id": "rel-2", "status": "confirmed", "bank_row_ids": ["bank-2"]},
+                ],
+                "audit_log": [{"relation_id": "rel-2", "action": "confirm_relation"}],
+            }
+        )
+        withdrawn = self._versions(
+            relation_snapshot={
+                "relations": [{"relation_id": "rel-1", "status": "withdrawn", "bank_row_ids": ["bank-1"]}],
+                "audit_log": [
+                    {"relation_id": "rel-1", "action": "confirm_relation"},
+                    {"relation_id": "rel-1", "action": "withdraw_relation"},
+                ],
+            }
+        )
+        audit_only = self._versions(
+            relation_snapshot={
+                "relations": [],
+                "audit_log": [{"relation_id": "rel-old", "action": "withdraw_relation"}],
+            }
+        )
+
+        self.assertNotEqual(
+            baseline["turnover_relation_snapshot_version"],
+            confirmed["turnover_relation_snapshot_version"],
+        )
+        self.assertEqual(
+            confirmed["turnover_relation_snapshot_version"],
+            confirmed_reordered["turnover_relation_snapshot_version"],
+        )
+        self.assertEqual(
+            baseline["turnover_relation_snapshot_version"],
+            withdrawn["turnover_relation_snapshot_version"],
+        )
+        self.assertEqual(
+            baseline["turnover_relation_snapshot_version"],
+            audit_only["turnover_relation_snapshot_version"],
+        )
 
 
 if __name__ == "__main__":
