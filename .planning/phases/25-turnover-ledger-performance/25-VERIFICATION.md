@@ -119,3 +119,15 @@
 - disposable PostgreSQL 17 实际应用 0001–0115：`10 passed + 6 subtests`；事务幂等、durable outbox/dirty scope、relation delta 均通过，临时数据库自动删除。
 - whole-repo production scan：旧 `TurnoverLedgerBankRowStalePreconditionPort` 为零；Turnover UoW 事务外 `_idempotency_get(...)` 为零；cash-closure withdraw 不再调用旧 current-relation helper，该 helper 仅由仍在使用的其他校验链保留。
 - `bash scripts/verify.sh lint`、`bash scripts/verify.sh docs`、`git diff --check`：通过。下一门为提交、push、部署精确 SHA 后复用同一三轮可逆探针；全部性能门通过后才执行 40 样本、直接/交叉 Audit，并停在本页闭环节点。
+
+## release ffdcfcdcb 第七轮生产写门
+
+- 部署 release `main-ffdcfcdc-20260720164444` 后三轮 confirm/withdraw 业务与恢复断言全部通过，最终 fixture `unlinked`、recovery `null`。
+- response-to-fresh p95/max `1210.886ms`、response-to-visible p95/max `1805.972ms`，继续满足 freshness/visible 门；command p95/max `5443.004ms` 失败。热态 confirm `1273.308–1320.104ms`、withdraw `1089.893–1337.189ms`，仍高于 `1000ms`。
+- API telemetry：confirm 固定 17 queries、DB p50 `1089.088ms`；withdraw 固定 14 queries、DB p50 `897.667ms`。一次性 PostgreSQL 同链 SQL trace 复现 confirm 17 queries，并证明 relation repository 先执行 3 条 scope 解析 + 1 次 outbox batch，Turnover UoW 随后又执行第二次 outbox batch。
+
+## repository fan-out 单 owner 本地门
+
+- Turnover 专属 command factory 改为 `PostgresWorkbenchRelationRepository(transaction, enqueue_refreshes=False)`；repository 只保存 canonical relation/history，read-model dirty/outbox 只由 Turnover UoW 输出。关联台和其他页面 repository composition 不变。
+- 定向 API/UoW/Workbench command：`254 passed`；disposable PostgreSQL 17 应用 0001–0115 后 `10 passed + 6 subtests`，必需 durable events 完整且临时库自动删除。
+- 新 architecture guard 防止 Turnover repository 恢复默认 fan-out。下一门：lint/docs/diff-check、提交/push、部署精确 SHA，并复用三轮生产可逆探针。

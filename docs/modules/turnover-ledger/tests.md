@@ -5,8 +5,9 @@
 ## 2026-07-20 写命令重复 I/O 回归
 
 - Service/UoW：`test_bank_row_selection_reuses_the_version_checked_rows_for_relation_preview` 证明版本校验与 closure preview 只触发一次 selected-row I/O；幂等测试证明事务内 reserve 仍覆盖首次、replay、冲突和 in-progress，replay 不重新执行 stale precondition。
-- Workbench command：`test_prepared_withdraw_reuses_lock_relation_snapshot_and_freshness` 证明 preparation + withdraw 只执行一次 lock、一次 scoped relation load 和一次 freshness；不同 case fail closed。
+- Workbench command：`test_prepared_withdraw_reuses_lock_relation_snapshot_and_freshness` 证明启用 read-model precondition 的通用 service 在 preparation + withdraw 间也只执行一次 lock、一次 scoped relation load 和一次 freshness；不同 case fail closed。Turnover 生产 composition 使用 canonical 模式，不查询派生 relation read model。
 - API/composition：`test_turnover_affected_months_uses_one_bulk_fact_read` 与 builder wiring guard 防止恢复逐笔月份读取、独立 stale port 或 preview 二次读取。
+- Outbox owner：`test_turnover_relation_command_repository_leaves_refresh_fanout_to_the_turnover_uow` 防止 relation repository 恢复 scope 解析和重复 outbox；durable PostgreSQL 测试继续证明 UoW 必需事件完整。
 - 不适用：本轮未改 HTTP response shape、权限、业务金额/状态机、前端或 worker/read-model schema；这些继续由现有 API、权限、前端与生产可逆闭环回归覆盖。
 
 ## 2026-07-13 跨月关系 freshness scope 回归

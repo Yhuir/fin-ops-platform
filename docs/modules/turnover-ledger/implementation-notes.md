@@ -2,6 +2,8 @@
 
 ## 2026-07-20 - 写命令重复 I/O 收口
 
+- 第二轮生产证据：release `ffdcfcdcb` 三轮业务与恢复均通过，response-to-fresh/visible p95 为 `1210.886/1805.972ms`，但 command p95 仍为 `5443.004ms`，热态约 `1.09–1.34s`。一次性 PostgreSQL 对同一请求的 17/15 条 SQL trace 证明，relation repository 仍自行执行 3 条 scope 解析和 1 次 outbox batch，Turnover UoW 随后又执行第二次 outbox batch。
+- 第二轮实施：Turnover 专属 relation command factory 明确构造 `PostgresWorkbenchRelationRepository(..., enqueue_refreshes=False)`；canonical relation/history 仍由 repository 原子保存，全部 read-model refresh 只由 Turnover UoW 单 owner 输出。关联台自己的 repository composition 不变。
 - 生产证据：relation-only projection 上线后，三轮可逆操作的 response-to-fresh p95 已降到 `934.515ms`、response-to-visible p95 `1699.211ms`；但 command p95 仍为 `3662.382ms`，稳定样本约 `1.13–1.32s`，未过 `1000ms` 门槛。
 - 根因：closure request 逐笔读取 canonical bank facts 解析月份；同一 selected bank rows 又被 expected-version 与 preview 分别读取；Turnover UoW 对幂等键先事务外查询、再事务内 reserve；cash-closure 撤回先读 current relation 做资格判断，command 内再次 lock/load/freshness。
 - 实施：月份改用既有 `ImportService.list_transactions_by_ids(...)` 单次批量事实读取；`TurnoverLedgerBankRowSelectionPort` 在单请求 facade 生命周期复用一份不可变副本给版本校验和 preview；幂等统一由事务内 reserve 判断首次、冲突、in-progress 和 replay；withdraw preparation 在同一事务内完成 case lock、scoped snapshot 和 freshness，并由实际 withdraw 复用。

@@ -1810,6 +1810,15 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertFalse(hasattr(Application, "_turnover_ledger_closure_legacy_fallback_facade"))
         self.assertFalse(hasattr(Application, "_turnover_ledger_withdraw_legacy_fallback_facade"))
 
+    def test_turnover_relation_command_repository_leaves_refresh_fanout_to_the_turnover_uow(self) -> None:
+        source = inspect.getsource(Application._turnover_workbench_relation_command_service)
+
+        self.assertIn(
+            "PostgresWorkbenchRelationRepository(transaction, enqueue_refreshes=False)",
+            source,
+        )
+        self.assertNotIn("PostgresWorkbenchRelationRepository(transaction)\n", source)
+
     def test_turnover_ledger_primary_write_builders_still_use_noop_local_stale_precondition_ports(self) -> None:
         builder_methods = [
             Application._turnover_ledger_tag_selection_write_facade.__globals__["TurnoverLedgerTagSelectionPrimaryWriteFacadeBuilder"].build,

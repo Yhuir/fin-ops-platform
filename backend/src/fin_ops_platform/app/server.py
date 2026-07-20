@@ -2745,7 +2745,7 @@ class Application:
     def _turnover_workbench_relation_command_service(self, transaction: object | None = None) -> WorkbenchRelationCommandService:
         storage_backend = str(getattr(getattr(self, "_state_store", None), "storage_backend", "") or "").strip()
         repository = (
-            PostgresWorkbenchRelationRepository(transaction)
+            PostgresWorkbenchRelationRepository(transaction, enqueue_refreshes=False)
             if storage_backend == "postgres" and transaction is not None
             else None
         )
