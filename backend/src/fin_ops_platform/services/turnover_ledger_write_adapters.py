@@ -843,9 +843,11 @@ class TurnoverLedgerConfirmRequestBoundaryFacade:
         *,
         facade: Any,
         affected_months_resolver: Callable[[list[str]], list[str]],
+        cash_closure_relation_provider: Callable[[str], dict[str, object]] | None = None,
     ) -> None:
         self._facade = facade
         self._affected_months_resolver = affected_months_resolver
+        self._cash_closure_relation_provider = cash_closure_relation_provider
 
     def confirm_relation_from_request(
         self,
@@ -940,20 +942,54 @@ class TurnoverLedgerConfirmRequestBoundaryFacade:
         withdraw = getattr(self._facade, "withdraw_cash_closure_case", None)
         if not callable(withdraw):
             raise RuntimeError("turnover ledger cash closure withdraw facade is not configured.")
+        if not callable(self._cash_closure_relation_provider):
+            raise RuntimeError("turnover cash closure relation read boundary is not configured.")
+        try:
+            cash_closure_relation = dict(self._cash_closure_relation_provider(normalized_case_id) or {})
+        except WorkbenchRelationCommandError as exc:
+            raise TurnoverRelationValidationError(
+                "cash_closure_relation_not_found",
+                "收支闭环关系已变化，请刷新后重试。",
+            ) from exc
+        special_metadata = (
+            dict(cash_closure_relation.get("special_metadata") or {})
+            if isinstance(cash_closure_relation.get("special_metadata"), dict)
+            else {}
+        )
+        affected_months = [
+            str(month).strip()
+            for month in list(special_metadata.get("turnover_closure_affected_months") or [])
+            if str(month).strip() and str(month).strip() != "all"
+        ]
+        if not affected_months:
+            relation_row_ids = list(cash_closure_relation.get("row_ids") or [])
+            relation_row_types = [
+                str(row_type).strip()
+                for row_type in list(cash_closure_relation.get("row_types") or [])
+                if str(row_type).strip()
+            ]
+            bank_row_ids = [
+                str(row_id).strip()
+                for row_id, row_type in zip(relation_row_ids, relation_row_types, strict=False)
+                if str(row_id).strip() and row_type == "bank"
+            ]
+            affected_months = self._affected_months_resolver(bank_row_ids)
+        affected_months = list(dict.fromkeys(str(month).strip() for month in affected_months if str(month).strip()))
+        if not affected_months:
+            raise TurnoverRelationValidationError(
+                "cash_closure_scope_unavailable",
+                "无法确定收支闭环影响月份，请刷新后重试。",
+            )
         withdraw_kwargs = {
             "cash_closure_case_id": normalized_case_id,
             "actor_id": actor_id,
             "tenant_id": tenant_id,
             "note": note,
+            "affected_months": affected_months,
         }
         if idempotency_key:
             withdraw_kwargs["idempotency_key"] = idempotency_key
         payload = dict(withdraw(**withdraw_kwargs) or {})
-        affected_months = [
-            str(month)
-            for month in list(payload.get("affected_months") or [])
-            if str(month).strip()
-        ]
         payload["affected_months"] = affected_months
         payload["freshness_targets"] = _turnover_closure_visibility_freshness_targets(affected_months)
         payload.update(_turnover_write_target_envelope(affected_months, targets=payload["freshness_targets"]))
@@ -1351,6 +1387,11 @@ class TurnoverLedgerWorkbenchPairPort:
             for row_id in list(bank_row_ids or [])
             if str(row_id).strip()
         ]
+        normalized_months = [
+            str(month).strip()
+            for month in list(affected_months or [])
+            if str(month).strip()
+        ]
         case_id = f"turnover:{relation_id}"
         principal_amount = str(relation.get("principal_amount") or "0.00")
         settled_amount = str(relation.get("settled_amount") or "0.00")
@@ -1373,6 +1414,7 @@ class TurnoverLedgerWorkbenchPairPort:
             "turnover_relation_id": relation_id,
             "turnover_closure_mode": turnover_closure_mode,
             "turnover_closure_bank_row_ids": list(normalized_row_ids),
+            "turnover_closure_affected_months": list(normalized_months),
             "requires_oa": True,
             "requires_invoice": False,
             "paired_requirement_source": "turnover_ledger_manual_closure",
@@ -1383,11 +1425,6 @@ class TurnoverLedgerWorkbenchPairPort:
             "turnover_relation_id": relation_id,
             "bank_row_ids": list(normalized_row_ids),
         }
-        normalized_months = [
-            str(month).strip()
-            for month in list(affected_months or [])
-            if str(month).strip()
-        ]
         if (
             tuple(normalized_row_ids) != preparation.bank_row_ids
             or tuple(normalized_months) != preparation.affected_months

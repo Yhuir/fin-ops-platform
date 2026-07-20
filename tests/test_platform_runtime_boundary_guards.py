@@ -4670,6 +4670,10 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         uow_source = uow_path.read_text(encoding="utf-8")
         uow_tree = _parse(uow_path)
         uow_class_source = _class_source(uow_tree, uow_source, "TurnoverLedgerWriteUnitOfWork")
+        facade_path = SERVICES_ROOT / "turnover_ledger_write_facade.py"
+        facade_source = facade_path.read_text(encoding="utf-8")
+        facade_tree = _parse(facade_path)
+        cash_withdraw_source = _function_source(facade_tree, facade_source, "withdraw_cash_closure_case")
 
         violations: list[str] = []
         if "TurnoverLedgerRelationMutationInvalidationLegacyAdapter" in source:
@@ -4704,6 +4708,15 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("TurnoverLedgerDirtyOutboxWriter does not use transaction-bound batch enqueue")
         if ".enqueue_refresh(" in uow_class_source:
             violations.append("TurnoverLedgerWriteUnitOfWork keeps per-request refresh enqueue")
+        if 'refresh_scope_keys = ["all"]' in cash_withdraw_source:
+            violations.append("cash closure withdraw keeps the removed command-only all refresh target")
+        for required in (
+            "normalized_months",
+            "_scoped_month_keys_or_all(normalized_months)",
+            "_active_cost_statistics_scope_keys(normalized_months)",
+        ):
+            if required not in cash_withdraw_source:
+                violations.append(f"cash closure withdraw is missing exact-month target contract {required}")
         for name, writer_source in (
             ("TurnoverLedgerDirtyOutboxWriter", dirty_writer_source),
             ("TurnoverLedgerLocalDirtyOutboxWriter", local_dirty_writer_source),

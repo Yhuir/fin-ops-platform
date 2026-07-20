@@ -3828,6 +3828,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
         self.assertIn("TurnoverLedgerConfirmRequestBoundaryFacade(", source)
         self.assertIn("affected_months_resolver=self._bank_transaction_category_affected_months", source)
+        self.assertIn("cash_closure_relation_provider=self._turnover_cash_closure_relation", source)
 
     def test_confirm_and_closure_request_boundaries_fail_fast_without_write_facade(self) -> None:
         facade = TurnoverLedgerConfirmRequestBoundaryFacade(

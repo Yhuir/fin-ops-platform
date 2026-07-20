@@ -497,9 +497,17 @@ class TurnoverLedgerWriteFacade:
         actor_id: str,
         tenant_id: str,
         note: str | None,
+        affected_months: list[str],
         idempotency_key: str | None = None,
     ) -> dict[str, object]:
         normalized_case_id = str(cash_closure_case_id or "").strip()
+        normalized_months = [
+            str(month).strip()
+            for month in list(affected_months or [])
+            if str(month).strip() and str(month).strip() != "all"
+        ]
+        if not normalized_months:
+            raise ValueError("cash closure withdraw requires exact affected months.")
         normalized_idempotency_key = str(idempotency_key or "").strip()
         action_name = "turnover_cash_closure_withdraw" if normalized_idempotency_key else "cash_closure_withdraw"
         command_payload = {
@@ -514,14 +522,15 @@ class TurnoverLedgerWriteFacade:
                 action_name=action_name,
                 payload=dict(command_payload),
             )
-        refresh_scope_keys = ["all"]
+        refresh_scope_keys = _scoped_month_keys_or_all(normalized_months)
+        cost_statistics_scope_keys = _active_cost_statistics_scope_keys(normalized_months)
         command = TurnoverLedgerWriteCommand(
             action_name=action_name,
-            scope_keys=["all"],
+            scope_keys=list(refresh_scope_keys),
             refresh_requests=[
                 {
                     "scope_type": "turnover_ledger",
-                    "scope_keys": ["all"],
+                    "scope_keys": list(refresh_scope_keys),
                     "reason": "turnover_relation_changed",
                 },
                 {
@@ -534,6 +543,17 @@ class TurnoverLedgerWriteFacade:
                     "scope_keys": refresh_scope_keys,
                     "reason": "turnover_relation_changed",
                 },
+                *(
+                    [
+                        {
+                            "scope_type": "cost_statistics",
+                            "scope_keys": cost_statistics_scope_keys,
+                            "reason": "cost_statistics_relation_delta",
+                        }
+                    ]
+                    if cost_statistics_scope_keys
+                    else []
+                ),
                 {
                     "scope_type": "search",
                     "scope_keys": refresh_scope_keys,
@@ -562,7 +582,7 @@ class TurnoverLedgerWriteFacade:
                 "relation_id": "",
                 "status": "withdrawn",
                 "workbench_pair_relation": dict(pair_relation or {}),
-                "affected_months": list((pair_relation or {}).get("affected_months") or []),
+                "affected_months": list(normalized_months),
             }
 
         return self._uow.run(command, handler)

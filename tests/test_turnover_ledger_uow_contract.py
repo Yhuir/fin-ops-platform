@@ -819,6 +819,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(call["special_metadata"]["source"], "turnover_ledger")
         self.assertEqual(call["special_metadata"]["turnover_relation_id"], "turnover_rel_closure")
         self.assertEqual(call["special_metadata"]["turnover_closure_mode"], "manual_zero_difference_group")
+        self.assertEqual(call["special_metadata"]["turnover_closure_affected_months"], ["2026-02"])
         self.assertTrue(call["special_metadata"]["requires_oa"])
         self.assertFalse(call["special_metadata"]["requires_invoice"])
         self.assertEqual(call["special_metadata"]["paired_requirement_source"], "turnover_ledger_manual_closure")
@@ -1836,10 +1837,59 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(uow.pair_calls[0]["affected_months"], ["2026-02"])
         self.assertEqual(getattr(uow.pair_calls[0]["preparation"], "preparation_id"), "prepared-closure")
 
+    def test_cash_closure_withdraw_uses_exact_month_targets(self) -> None:
+        class _CommandCapturingUoW:
+            def __init__(self) -> None:
+                self.command: object | None = None
+
+            def run(self, command: object, handler: Callable[[object], object]) -> object:
+                self.command = command
+                return handler(
+                    SimpleNamespace(
+                        transaction=object(),
+                        workbench_pair_port=SimpleNamespace(
+                            withdraw_cash_closure_case=lambda **_kwargs: {
+                                "case_id": "turnover:case-1",
+                                "status": "cancelled",
+                            }
+                        ),
+                    )
+                )
+
+        uow = _CommandCapturingUoW()
+        facade = self._write_facade_class()(uow=uow)
+
+        result = facade.withdraw_cash_closure_case(
+            cash_closure_case_id="turnover:case-1",
+            actor_id="finance-user",
+            tenant_id="default",
+            note="withdraw",
+            affected_months=["2026-02", "2026-03"],
+        )
+
+        self.assertEqual(result["affected_months"], ["2026-02", "2026-03"])
+        self.assertEqual(getattr(uow.command, "scope_keys"), ["2026-02", "2026-03"])
+        self.assertEqual(
+            [
+                (request["scope_type"], request["scope_keys"])
+                for request in getattr(uow.command, "refresh_requests")
+            ],
+            [
+                ("turnover_ledger", ["2026-02", "2026-03"]),
+                ("workbench", ["2026-02", "2026-03"]),
+                ("workbench_relation", ["2026-02", "2026-03"]),
+                ("cost_statistics", ["active:2026-02", "active:2026-03"]),
+                ("search", ["2026-02", "2026-03"]),
+            ],
+        )
+
     def test_closure_request_boundary_returns_workbench_visibility_freshness_targets(self) -> None:
         module = self._write_adapters_module()
 
         class _RecordingClosureFacade:
+            def __init__(self) -> None:
+                self.withdraw_calls: list[dict[str, object]] = []
+
             def confirm_zero_difference_closure(self, **kwargs: object) -> dict[str, object]:
                 return {
                     "turnover_relation": {"relation_id": "turnover_rel_closure", "status": "confirmed"},
@@ -1850,9 +1900,20 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
                     "received_affected_months": list(kwargs.get("affected_months") or []),
                 }
 
+            def withdraw_cash_closure_case(self, **kwargs: object) -> dict[str, object]:
+                self.withdraw_calls.append(dict(kwargs))
+                return {"status": "withdrawn"}
+
+        facade = _RecordingClosureFacade()
         boundary = module.TurnoverLedgerConfirmRequestBoundaryFacade(
-            facade=_RecordingClosureFacade(),
+            facade=facade,
             affected_months_resolver=lambda _row_ids: ["2026-02", "2026-02", "2026-03"],
+            cash_closure_relation_provider=lambda _case_id: {
+                "case_id": "turnover:turnover_rel_closure",
+                "row_ids": ["oa-1", "bank_txn_income", "bank_txn_expense"],
+                "row_types": ["oa", "bank", "bank"],
+                "special_metadata": {},
+            },
         )
 
         result = boundary.confirm_zero_difference_closure_from_request(
@@ -1876,6 +1937,17 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         )
         self.assertEqual(result["affected_scope_keys"], ["2026-02", "2026-03"])
         self.assertEqual(result["operation_barrier_targets"], result["freshness_targets"])
+
+        withdrawn = boundary.withdraw_cash_closure_case_from_request(
+            cash_closure_case_id="turnover:turnover_rel_closure",
+            actor_id="finance-user",
+            tenant_id="default",
+            note="withdraw",
+        )
+
+        self.assertEqual(withdrawn["affected_months"], ["2026-02", "2026-03"])
+        self.assertEqual(withdrawn["operation_barrier_targets"], result["operation_barrier_targets"])
+        self.assertEqual(facade.withdraw_calls[0]["affected_months"], ["2026-02", "2026-03"])
 
     def test_withdraw_relation_rejects_stale_or_duplicate_submit_before_handler_runs(self) -> None:
         uow, deps = self._build_uow(stale_precondition_port=_StalePreconditionPort(stale=True))

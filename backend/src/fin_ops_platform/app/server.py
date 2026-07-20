@@ -2752,6 +2752,11 @@ class Application:
         )
         return self._workbench_relation_command_service(repository=repository)
 
+    def _turnover_cash_closure_relation(self, case_id: str) -> dict[str, object]:
+        return self._workbench_relation_command_service(
+            require_fresh_relations=False
+        ).get_active_relation_by_case_id(case_id)
+
     def _workbench_confirm_link_unit_of_work(self) -> WorkbenchWriteUnitOfWork | None:
         override = getattr(self, "_workbench_confirm_link_uow_override", None)
         if override is not None:
@@ -2921,6 +2926,7 @@ class Application:
         return TurnoverLedgerConfirmRequestBoundaryFacade(
             facade=self._turnover_ledger_confirm_write_facade(),
             affected_months_resolver=self._bank_transaction_category_affected_months,
+            cash_closure_relation_provider=self._turnover_cash_closure_relation,
         )
 
     def _turnover_ledger_closure_write_facade(self) -> TurnoverLedgerWriteFacade | None:
@@ -2960,6 +2966,7 @@ class Application:
         return TurnoverLedgerConfirmRequestBoundaryFacade(
             facade=self._turnover_ledger_closure_write_facade(),
             affected_months_resolver=self._bank_transaction_category_affected_months,
+            cash_closure_relation_provider=self._turnover_cash_closure_relation,
         )
 
     def _turnover_ledger_withdraw_write_facade(self) -> TurnoverLedgerWriteFacade | None:
