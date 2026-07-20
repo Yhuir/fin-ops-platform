@@ -395,6 +395,8 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
 | 前端 stale 写禁用 | `shows grouped read model stale warning and blocks manual closure`、`web/e2e/turnover-ledger-flow.spec.ts::shows stale grouped ledger data without allowing manual closure` |
 | 前端 operation-to-fresh closure | tag-selection、extra、manual closure confirm/withdraw 后保持全屏 overlay；manual closure confirm 提交前等待 affected-month `turnover_ledger` fresh 并 reload/rebind 最新 flow rows，无法解析月份时才退回 `all`；提交后只把后端 `freshness_targets` 中的 `turnover_ledger`、`workbench_relation` 作为硬等待目标，写入 path 在已知月份时只投递 affected month scopes，`workbench`/成本统计/搜索等 downstream scope 后台收敛；若 POST 成功后的 operation barrier/reload 被 blocked 或超时，页面显示“操作已提交，后台同步尚未完成” warning，不弹“操作失败”；`web/e2e/turnover-ledger-flow.spec.ts` 在真实 Chromium 中覆盖标签准入保存 -> barrier -> ledger reload，以及同组 flow rows confirm -> 成本统计 fresh read model fan-out -> withdraw recovery，并检查成功后无可见错误残留 |
 | 手动闭环后同对方剩余流水保留 | `test_manual_closure_keeps_remaining_same_counterparty_rows_in_auto_relation`、`test_grouped_ledger_keeps_unselected_same_counterparty_flows_after_manual_closure` |
+| 现代闭环 canonical 单事实写入 | `test_preview_zero_difference_closure_does_not_mutate_relation_or_audit_snapshots`、`test_turnover_relation_write_port_previews_closure_without_persisting_relation`、`test_target_zero_difference_closure_facade_writes_only_canonical_workbench_relation`、`test_manual_closure_uses_canonical_relation_when_workbench_relation_read_model_is_stale` |
+| 新旧撤回路由隔离 | `test_legacy_turnover_relation_id_requires_explicit_relation_metadata`、`test_turnover_workbench_pair_port_rejects_cash_closure_with_invoice_members`、`test_turnover_cash_closure_withdraw_rejects_upgraded_case_and_keeps_relation_active`、`test_bank_turnover_scenario_uses_canonical_closure_withdraw_contract` |
 
 ## 历史 bug 回归库
 
@@ -427,6 +429,7 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
 | fresh `bank_detail` read model 里缺少部分 transaction id 时被误判为 non-fresh，`downstream_bank_tag_read` 持续刷新月份 shard，台账 all scope 永久 pending | `tests/test_bank_details_sql_runtime.py::BankTransactionTagReadFacadeTests::test_category_records_do_not_refresh_or_raise_when_fresh_model_has_missing_rows` |
 | 多个月份中一个 `bank_detail` 月份 pending 时，facade 重刷所有月份，导致已 fresh 月份被快速父重试反复打 pending，台账 all scope 等不到同时 fresh | `tests/test_bank_details_sql_runtime.py::BankTransactionTagReadFacadeTests::test_get_by_transaction_ids_refreshes_only_blocking_dirty_scopes` |
 | 测试使用 `TemporaryDirectory(ignore_cleanup_errors=True)` 掩盖后台 job executor 未关闭，导致外部往来写入链路可能在临时目录释放时仍有异步写入残留 | `tests/test_turnover_ledger_api.py` 已切换为严格 `TemporaryDirectory()`；受影响用例在退出临时目录前调用 `app.shutdown_background_jobs()`；`PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api tests.test_historical_etc_business_batch_migration_service -v` 覆盖 136 个严格清理回归 |
+| 现代 `/closures/confirm` 同时写 Turnover relation/event 和 Workbench relation，导致 own source version 变化并触发昂贵全量 projection；或 projection 从 `turnover:*` case id 猜出不存在的 relation id，使前端误走旧撤回接口 | canonical-only domain/UoW/integration tests、`test_legacy_turnover_relation_id_requires_explicit_relation_metadata`、write-operation smoke canonical capture/withdraw contract，以及 runtime worker registry/manifest 回归共同保护 |
 
 新增线上或手工发现 bug 时，必须先在本节补复现测试名称，再修实现。
 
@@ -435,8 +438,8 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
 本地自动化重点保护：
 
 1. 银行明细已确认外部往来分类 -> tag-selection 生效 -> 等待 `turnover_ledger:all` operation barrier -> grouped ledger 重新加载。`web/e2e/turnover-ledger-flow.spec.ts` 已在真实 Chromium 中覆盖标签准入保存请求体、barrier、reload 和成功后无可见错误残留。
-2. grouped table 选择同组多条真实 flow rows -> 提交前等待台账 fresh 并重绑最新 row versions -> 人工零差额闭环 -> Turnover manual relation + Workbench pair relation -> 成本统计 fresh read model 展示闭环成本行；若所选流水已有 OA-bank relation，则合并进同一个 active case -> 前端刷新。`web/e2e/turnover-ledger-flow.spec.ts` 已在真实 Chromium 中覆盖两条同组 flow rows 的 confirm 主链路，并断言闭环后只显示“收支闭环”、成本统计展示 `外部往来闭环成本项目`，且成功后无可见错误残留。
-3. 手动闭环 relation 撤回 -> 只撤回同一 `cash_closure_case_id` 的多流水闭环，并恢复确认前的 OA-bank relation；关联台已经配对的同组银行收支闭环从外部往来页撤回时走 `/api/turnover-ledger/closures/withdraw`，与关联台撤回同一条 Workbench command service 链路；已升级为包含发票或其他业务 row type 时必须从关联台撤回；Workbench relation read model 不 fresh 时必须 fail fast 且不产生 Turnover 半写入。`web/e2e/turnover-ledger-flow.spec.ts` 已覆盖已闭环 flow row toolbar 撤回和 grouped payload 移除“收支闭环”。
+2. grouped table 选择同组多条真实 flow rows -> 提交前等待台账 fresh 并重绑最新 row versions -> Turnover domain 无副作用校验 -> 只写 canonical Workbench pair relation -> 成本统计 fresh read model 展示闭环成本行；若所选流水已有 OA-bank relation，则合并进同一个 active case -> 前端刷新。`web/e2e/turnover-ledger-flow.spec.ts` 已在真实 Chromium 中覆盖两条同组 flow rows 的 confirm 主链路，并断言闭环后只显示“收支闭环”、成本统计展示 `外部往来闭环成本项目`，且成功后无可见错误残留。
+3. 现代手动闭环统一按 `cash_closure_case_id` 调用 `/api/turnover-ledger/closures/withdraw`，只撤回同一 Workbench case，并恢复确认前的 OA-bank relation；只有元数据显式携带旧 `turnover_relation_id` 的历史闭环才走 `/relations/{id}/withdraw`。已升级为包含发票或其他业务 row type 时必须从关联台撤回；任何失败都不得产生 Turnover 半写入。`web/e2e/turnover-ledger-flow.spec.ts` 已覆盖已闭环 flow row toolbar 撤回和 grouped payload 移除“收支闭环”。
 4. extra 保存 -> relation row 更新 -> `turnoverLedgerExtraUpdated` 只作为局部刷新提示。
 5. grouped ledger `read_model_status=stale` -> 页面显示非最新 warning、保留当前 flow rows；即使选中两条真实流水，确认闭环仍禁用，Browser smoke 断言零 confirm mutation。
 6. tag-selection / bank-row-tags / confirm / withdraw / extra 的 outbox 失败必须 rollback 或显式暴露失败。

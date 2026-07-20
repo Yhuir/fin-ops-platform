@@ -463,6 +463,23 @@ class _RecordingTurnoverRelationService:
     def refresh_bank_rows(self, rows: list[dict[str, object]]) -> None:
         self.refreshes.append([dict(row) for row in rows])
 
+    def preview_zero_difference_closure(
+        self,
+        bank_row_ids: list[str],
+        *,
+        actor: str,
+        note: str | None,
+    ) -> dict[str, object]:
+        return {
+            "relation_id": "turnover_rel_preview",
+            "status": "confirmed",
+            "bank_row_ids": list(bank_row_ids),
+            "principal_amount": "100.00",
+            "settled_amount": "100.00",
+            "created_by": actor,
+            "evidence": {"note": note},
+        }
+
     def append_audit(self, *, relation_id: str, action: str) -> None:
         self._audit_log.append({"relation_id": relation_id, "action": action})
 
@@ -793,7 +810,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         )
 
         relation = port.create_turnover_manual_closure(
-            relation={
+            closure={
                 "relation_id": "turnover_rel_closure",
                 "principal_amount": "100.00",
                 "settled_amount": "100.00",
@@ -817,7 +834,8 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(call["actor_id"], "finance-user")
         self.assertEqual(call["month_scope"], "2026-02")
         self.assertEqual(call["special_metadata"]["source"], "turnover_ledger")
-        self.assertEqual(call["special_metadata"]["turnover_relation_id"], "turnover_rel_closure")
+        self.assertNotIn("turnover_relation_id", call["special_metadata"])
+        self.assertNotIn("turnover_relation_id", call["evidence"])
         self.assertEqual(call["special_metadata"]["turnover_closure_mode"], "manual_zero_difference_group")
         self.assertEqual(call["special_metadata"]["turnover_closure_affected_months"], ["2026-02"])
         self.assertTrue(call["special_metadata"]["requires_oa"])
@@ -909,7 +927,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         )
 
         relation = port.create_turnover_manual_closure(
-            relation={
+            closure={
                 "relation_id": "turnover_rel_closure",
                 "principal_amount": "100.00",
                 "settled_amount": "100.00",
@@ -970,7 +988,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
 
         with self.assertRaises(module.TurnoverLedgerWritePreconditionError) as context:
             port.create_turnover_manual_closure(
-                relation={
+                closure={
                     "relation_id": "turnover_rel_closure",
                     "principal_amount": "100.00",
                     "settled_amount": "100.00",
@@ -1724,7 +1742,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(len(uow.commands), 1)
         self.assertEqual(len(uow.confirm_calls), 1)
 
-    def test_target_zero_difference_closure_facade_writes_turnover_and_workbench_pair_relation(self) -> None:
+    def test_target_zero_difference_closure_facade_writes_only_canonical_workbench_relation(self) -> None:
         class _CommandCapturingUoW:
             def __init__(self) -> None:
                 self.commands: list[object] = []
@@ -1741,17 +1759,17 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
                     (request["scope_type"], request["scope_keys"], request["reason"])
                     for request in getattr(command, "refresh_requests")
                 ] == [
-                    ("turnover_ledger", ["2026-02"], "turnover_relation_changed"),
-                    ("workbench", ["2026-02"], "turnover_relation_changed"),
-                    ("workbench_relation", ["2026-02"], "turnover_relation_changed"),
+                    ("turnover_ledger", ["2026-02"], "turnover_closure_changed"),
+                    ("workbench", ["2026-02"], "turnover_closure_changed"),
+                    ("workbench_relation", ["2026-02"], "turnover_closure_changed"),
                     ("cost_statistics", ["active:2026-02"], "cost_statistics_relation_delta"),
-                    ("search", ["2026-02"], "turnover_relation_changed"),
+                    ("search", ["2026-02"], "turnover_closure_changed"),
                 ]
                 return handler(
                     SimpleNamespace(
                         transaction=object(),
                         relation_repository=SimpleNamespace(
-                            confirm_zero_difference_closure=self.confirm_zero_difference_closure,
+                            preview_zero_difference_closure=self.preview_zero_difference_closure,
                         ),
                         workbench_pair_port=SimpleNamespace(
                             prepare_turnover_manual_closure_write=self.prepare_turnover_manual_closure_write,
@@ -1764,7 +1782,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             def prepare_turnover_manual_closure_write(**_kwargs: object) -> object:
                 return SimpleNamespace(preparation_id="prepared-closure")
 
-            def confirm_zero_difference_closure(
+            def preview_zero_difference_closure(
                 self,
                 *,
                 bank_row_ids: list[str],
@@ -1781,7 +1799,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
                     }
                 )
                 return {
-                    "relation": {
+                    "closure": {
                         "relation_id": "turnover_rel_closure",
                         "bank_row_ids": list(bank_row_ids),
                         "principal_amount": "100.00",
@@ -1792,7 +1810,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             def create_turnover_manual_closure(
                 self,
                 *,
-                relation: dict[str, object],
+                closure: dict[str, object],
                 bank_row_ids: list[str],
                 actor_id: str,
                 note: str | None,
@@ -1802,7 +1820,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             ) -> dict[str, object]:
                 self.pair_calls.append(
                     {
-                        "relation_id": relation.get("relation_id"),
+                        "closure_id": closure.get("relation_id"),
                         "bank_row_ids": list(bank_row_ids),
                         "actor_id": actor_id,
                         "note": note,
@@ -1829,11 +1847,14 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             idempotency_key="closure-idem-1",
         )
 
-        self.assertEqual(result["turnover_relation"]["relation_id"], "turnover_rel_closure")
+        self.assertNotIn("turnover_relation", result)
+        self.assertNotIn("relation", result)
+        self.assertEqual(result["status"], "confirmed")
         self.assertEqual(result["workbench_pair_relation"]["relation_mode"], "turnover_manual_closure")
         self.assertEqual(len(uow.commands), 1)
         self.assertEqual(len(uow.closure_calls), 1)
         self.assertEqual(len(uow.pair_calls), 1)
+        self.assertEqual(uow.pair_calls[0]["closure_id"], "turnover_rel_closure")
         self.assertEqual(uow.pair_calls[0]["affected_months"], ["2026-02"])
         self.assertEqual(getattr(uow.pair_calls[0]["preparation"], "preparation_id"), "prepared-closure")
 
@@ -1892,7 +1913,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
 
             def confirm_zero_difference_closure(self, **kwargs: object) -> dict[str, object]:
                 return {
-                    "turnover_relation": {"relation_id": "turnover_rel_closure", "status": "confirmed"},
+                    "status": "confirmed",
                     "workbench_pair_relation": {
                         "case_id": "turnover:turnover_rel_closure",
                         "relation_mode": "turnover_manual_closure",
@@ -2883,7 +2904,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             port_class(application=object())
 
-    def test_target_relation_write_port_confirms_and_withdraws_with_supplied_transaction(self) -> None:
+    def test_target_relation_write_port_previews_closure_without_persistence_and_persists_legacy_commands(self) -> None:
         # PF-P095 Repository Ownership: service orchestration should leave server.py.
         port_class = getattr(self._write_adapters_module(), "TurnoverLedgerRelationWritePort")
         relation_service = _RecordingTurnoverRelationService()
@@ -2904,6 +2925,13 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             persistence_repository_factory=persistence_factory,
         )
 
+        preview_result = port.preview_zero_difference_closure(
+            bank_row_ids=["bank_txn_1", "bank_txn_2"],
+            actor_id="finance-user",
+            note="canonical closure",
+            transaction=transaction,
+        )
+
         confirm_result = port.confirm_relation(
             bank_row_ids=["bank_txn_1", "bank_txn_2"],
             actor_id="finance-user",
@@ -2922,11 +2950,21 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(len(persistence_factory.repositories[1].saved_relation_changes), 1)
         self.assertEqual(persistence_factory.repositories[0].saved_relations, [])
         self.assertEqual(persistence_factory.repositories[1].saved_relations, [])
-        self.assertEqual(selected_row_requests, [["bank_txn_1", "bank_txn_2"]])
-        self.assertEqual(relation_service.refreshes, [[{"id": "bank_txn_1"}, {"id": "bank_txn_2"}]])
+        self.assertEqual(
+            selected_row_requests,
+            [["bank_txn_1", "bank_txn_2"], ["bank_txn_1", "bank_txn_2"]],
+        )
+        self.assertEqual(
+            relation_service.refreshes,
+            [
+                [{"id": "bank_txn_1"}, {"id": "bank_txn_2"}],
+                [{"id": "bank_txn_1"}, {"id": "bank_txn_2"}],
+            ],
+        )
         self.assertEqual(relation_service.rebuilds, [])
         self.assertEqual(routes.confirm_calls[0]["actor"], "finance-user")
         self.assertEqual(routes.withdraw_calls[0]["relation_id"], "turnover_rel_1")
+        self.assertEqual(preview_result["closure"]["relation_id"], "turnover_rel_preview")
         self.assertEqual(confirm_result["relation"]["status"], "confirmed")
         self.assertEqual(withdraw_result["relation"]["status"], "withdrawn")
         self.assertTrue({"headers", "cookies", "response", "status_code", "auth"}.isdisjoint(confirm_result))

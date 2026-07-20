@@ -405,7 +405,7 @@ test.describe("turnover ledger browser flow", () => {
       visibleLabel: "撤回闭环",
       actionType: "click",
     }, async (mark) => {
-      const withdrawResponse = page.waitForResponse(responseFor("POST", "/api/turnover-ledger/relations/turnover_rel_e2e_closure/withdraw"));
+      const withdrawResponse = page.waitForResponse(responseFor("POST", "/api/turnover-ledger/closures/withdraw"));
       const barrierResponse = page.waitForResponse(responseFor("POST", "/api/operation-barrier/status"));
       const reloadResponse = waitForTurnoverLedger(page);
       await page.getByRole("button", { name: "撤回闭环" }).click();
@@ -416,7 +416,7 @@ test.describe("turnover ledger browser flow", () => {
     });
 
     await expect(page.getByText("外部往来闭环已撤回")).toBeVisible();
-    expect(api.count("POST /api/turnover-ledger/relations/turnover_rel_e2e_closure/withdraw")).toBe(1);
+    expect(api.count("POST /api/turnover-ledger/closures/withdraw")).toBe(1);
     expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(barrierCallsBeforeWithdraw);
     await expect(page.getByText("收支闭环")).toHaveCount(0);
     await expect(table.getByText("未闭环")).toHaveCount(0);

@@ -6,6 +6,7 @@ from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 from fin_ops_platform.services.turnover_ledger_read_model_refresh import TurnoverLedgerReadModelRefreshService
 from fin_ops_platform.services.turnover_ledger_sql_projection import (
     TurnoverLedgerSqlProjectionBuilder,
+    _turnover_relation_id_from_relation,
     _with_bank_detail_source_versions,
 )
 
@@ -233,6 +234,26 @@ class MutatingGroupedLedgerService:
 
 
 class TurnoverLedgerReadModelRefreshServiceTests(unittest.TestCase):
+    def test_legacy_turnover_relation_id_requires_explicit_relation_metadata(self) -> None:
+        self.assertEqual(
+            _turnover_relation_id_from_relation(
+                {
+                    "case_id": "turnover:turnover_rel_legacy",
+                    "special_metadata": {"turnover_relation_id": "turnover_rel_legacy"},
+                }
+            ),
+            "turnover_rel_legacy",
+        )
+        self.assertEqual(
+            _turnover_relation_id_from_relation(
+                {
+                    "case_id": "turnover:turnover_rel_canonical",
+                    "special_metadata": {},
+                }
+            ),
+            "",
+        )
+
     def test_projection_source_versions_include_bank_detail_source_versions(self) -> None:
         class CategoryProvider:
             last_source_versions = {"bank_detail": {"scope_key": "2026-04", "source_version": 12}}
@@ -392,6 +413,7 @@ class TurnoverLedgerReadModelRefreshServiceTests(unittest.TestCase):
         self.assertTrue(row["cash_closure_linked"])
         self.assertEqual(row["cash_closure_case_id"], "case-turnover-001")
         self.assertEqual(row["cash_closure_source"], "turnover_ledger")
+        self.assertEqual(row["cash_closure_relation_id"], "")
         self.assertEqual(row["source_versions"]["workbench_relation_source_versions"], {"workbench_relation_schema_version": "test"})
         flow = row["flow_rows"][0]
         self.assertEqual(flow["workbench_relation_status"], "linked")

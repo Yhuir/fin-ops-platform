@@ -301,17 +301,17 @@ class TurnoverLedgerWriteFacade:
                 {
                     "scope_type": "turnover_ledger",
                     "scope_keys": refresh_scope_keys,
-                    "reason": "turnover_relation_changed",
+                    "reason": "turnover_closure_changed",
                 },
                 {
                     "scope_type": "workbench",
                     "scope_keys": workbench_refresh_scope_keys,
-                    "reason": "turnover_relation_changed",
+                    "reason": "turnover_closure_changed",
                 },
                 {
                     "scope_type": "workbench_relation",
                     "scope_keys": workbench_refresh_scope_keys,
-                    "reason": "turnover_relation_changed",
+                    "reason": "turnover_closure_changed",
                 },
                 *(
                     [
@@ -328,7 +328,7 @@ class TurnoverLedgerWriteFacade:
                 {
                     "scope_type": "search",
                     "scope_keys": refresh_scope_keys,
-                    "reason": "turnover_relation_changed",
+                    "reason": "turnover_closure_changed",
                 },
             ],
             actor_id=actor_id,
@@ -349,15 +349,15 @@ class TurnoverLedgerWriteFacade:
                 affected_months=list(normalized_months),
                 transaction=context.transaction,
             )
-            result = context.relation_repository.confirm_zero_difference_closure(
+            result = context.relation_repository.preview_zero_difference_closure(
                 bank_row_ids=list(normalized_bank_row_ids),
                 actor_id=actor_id,
                 note=note,
                 transaction=context.transaction,
             )
-            relation = dict(result.get("relation") if isinstance(result.get("relation"), dict) else result)
+            closure = dict(result.get("closure") if isinstance(result.get("closure"), dict) else result)
             pair_relation = workbench_pair_port.create_turnover_manual_closure(
-                relation=relation,
+                closure=closure,
                 bank_row_ids=list(normalized_bank_row_ids),
                 actor_id=actor_id,
                 note=note,
@@ -366,8 +366,7 @@ class TurnoverLedgerWriteFacade:
                 preparation=preparation,
             )
             return {
-                "turnover_relation": relation,
-                "relation": relation,
+                "status": "confirmed",
                 "workbench_pair_relation": dict(pair_relation or {}),
                 "affected_months": list(normalized_months),
             }

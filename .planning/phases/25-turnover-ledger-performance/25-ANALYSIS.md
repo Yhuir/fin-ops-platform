@@ -112,6 +112,14 @@
 
 第三轮（旧链、回滚与验证）：必须删除 production command 的全量 `_rebuild_relation_snapshot` / `save_turnover_relations` 路径、全量 stale-row lookup 和 turnover projection 的 `WorkbenchRelationReadFacade` dependency。保留全快照 repository API仅供其仍有 owner 的导入/恢复场景，不作为 turnover confirm/withdraw。新增真实 PostgreSQL 原子窄写测试、canonical-source projection 测试、整条 confirm/withdraw 回归，并重新部署后以至少两组可逆样本验证 command 与 committed-to-fresh 门槛。
 
+## 生产对照后的最终根因（2026-07-20）
+
+- 单 worker + 仅 Workbench relation context 变化时，撤回 response-to-fresh 已实测为 `1.28–1.49s`；确认仍为 `4.89–6.21s`。
+- 唯一结构差异是现代确认额外持久化了重复 Turnover relation/event，导致 `turnover_relation_snapshot_version` 改变并强制整本基础 projection；撤回只改变 canonical Workbench context，可复用既有 scope rows。
+- `turnover-ledger-secondary` 实验没有缩短确认，反而把撤回退化到约 `4.33s`，并出现 `11.64s` 竞争长尾。瓶颈不是 consumer 数，而是重复事实导致的不必要 own-source rebuild。
+- 最简生产级方案是保留 Turnover domain 校验、只写 canonical Workbench relation，并删除 secondary；不增加 cache、表、队列、worker、fallback 或同步 read-model 写入。
+- 兼容风险：旧 projection 从 `turnover:*` case id 推断 relation id，会让没有 Turnover relation 的新闭环误走旧 `/relations/{id}/withdraw`。最终合同改为只接受显式 `special_metadata.turnover_relation_id`；新闭环统一走 `/closures/withdraw`，历史闭环仍可撤回。
+
 补充结论：修复范围仍局限于 turnover owner 和已有 PostgreSQL repository 窄方法；这是消除已测得瓶颈所需的最小结构性修复，不是新增架构层。
 
 ## 验收门槛

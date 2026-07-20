@@ -665,7 +665,6 @@ cd "$release_src"
 - `cost-statistics`：只消费 `cost_statistics.read_model.refresh`。
 - `tax-offset`：只消费 `tax_offset.read_model.refresh`。
 - `invoice-lifecycle-secondary`：作为第二条 `invoice_lifecycle.read_model.refresh` consumer，和 `invoice-lifecycle` 并发 drain 多月份 scope。
-- `turnover-ledger-secondary`：作为第二条 `turnover_ledger.read_model.refresh` consumer，和 `turnover-ledger` 并发 drain 不同月份 scope；PostgreSQL `FOR UPDATE SKIP LOCKED` / RabbitMQ event-id claim 保证同一 event 不会被两个实例同时处理。
 
 这些 worker 不改变 PostgreSQL durable queue / readiness 事实源；它们只是同一 outbox event type 的并发消费者或 scope-filtered lane。旧 `search-pending` 不应作为唯一性能 lane 依赖；`cost-tax` 不再消费 `cost_statistics.read_model.refresh`，避免旧成本统计链路与专用 lane 竞争长 SQL。
 

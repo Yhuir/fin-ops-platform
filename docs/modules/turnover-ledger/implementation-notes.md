@@ -686,8 +686,10 @@ git diff --check
 - 本地证据：25 条历史的 statement-count 测试通过；独立 PostgreSQL 17 空库应用 0001–0114 后，25 条 history 和全部 relation foreign key 正确落库；command/UoW/API 回归通过。
 - 生产门不变：发布精确 SHA 后，两轮 confirm/withdraw 都必须满足 command p95 `<=1000ms`、response-to-fresh p95 `<=2000ms`、任一 hard max `<=3000ms`；最终 fixture 未关联、queue drained、页面及跨页面 Audit 通过，才能声明外部往来页面完成。
 
-## 2026-07-20 - 跨月 projection drain 并行化
+## 2026-07-20 - 现代闭环收敛为 canonical 单事实写入
 
-- 历史批量写发布后，稳定样本确认 command 为 `1.24s`，但 response-to-fresh 仍为 `4.89s`。逐 target 时间线证明 `workbench_relation:2026-02/03` 在 `1.22s` 内 fresh，而 `turnover_ledger:2026-03/02` 依次在 `3.94s/4.89s` fresh；根因是两个独立月份事件由单 worker 串行 claim。
-- 方案只新增 `turnover-ledger-secondary` auxiliary consumer，复用同一个 handler、durable queue、source version 和 repository。不同月份可并行；同 event 仍由 PostgreSQL 原子 claim 排他。页面 query、写 facade、operation barrier、read model shape 与其它页面 fan-out 不变。
-- 不增加 Redis、表、API、projection 副本、scope lane、兼容 fallback 或新抽象；primary 不移除，因为它仍是 App Status owner 和正式 worker。最终是否达标只由发布后的可逆 confirm/withdraw 时间线、40 样本只读性能、Page Audit、queue drain 和 fixture 恢复共同判定。
+- 生产对照：单 worker 下，撤回只改变 Workbench relation context，response-to-fresh 为 `1.28–1.49s`；确认同时持久化重复 Turnover relation，改变 `turnover_relation_snapshot_version` 后触发全量台账重建，response-to-fresh 为 `4.89–6.21s`。secondary 实验没有收益并造成竞争，已完整删除。
+- 新合同：`POST /api/turnover-ledger/closures/confirm` 仍通过 Turnover domain 校验所选银行流水的方向、语义、对方和零差额，但只把 `turnover_manual_closure` 写入 canonical `app.workbench_pair_relations`；不再写 `app.turnover_relations` / `app.turnover_relation_events`，响应不再伪装存在持久化的 `turnover_relation`。撤回统一按 `workbench_pair_relation.case_id` 调用 `/closures/withdraw`。
+- 保留边界：通用 `/api/turnover-ledger/relations/confirm` 与 `/relations/{id}/withdraw` 仍服务“建议关系确认/补充信息”功能，继续拥有 Turnover relation 与 audit；本轮没有误删其真实 consumer。
+- 安全：canonical withdraw 在同一事务重新读取 active relation，只有至少两条 bank member 且 row types 限于 `oa/bank` 才允许；加入 invoice 或其他业务成员后必须回关联台撤回。确认/撤回继续原子写 relation history、dirty/outbox、幂等与 stale precondition。
+- 性能机制：现代确认不再改变 turnover own source versions，和撤回一样走既有 `_refresh_existing_scope_rows`，只从 canonical relation source bundle 重套 context；没有新表、缓存、队列、worker、fallback 或同步 read-model 写入。

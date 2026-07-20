@@ -904,10 +904,7 @@ function installTurnoverLedgerFetch(options: {
     }
     if (url.pathname === "/api/turnover-ledger/closures/confirm" && method === "POST") {
       return Response.json({
-        turnover_relation: {
-          relation_id: "turnover_rel_company_closure",
-          status: "confirmed",
-        },
+        status: "confirmed",
         workbench_pair_relation: {
           case_id: "turnover:turnover_rel_company_closure",
           relation_mode: "turnover_manual_closure",
@@ -1304,7 +1301,7 @@ describe("Turnover ledger page", () => {
     });
     await waitFor(() => {
       expectCustomEventDetailContaining(turnoverListener, {
-        relationId: "turnover_rel_company_closure",
+        relationId: "turnover:turnover_rel_company_closure",
         action: "manual_closure",
       });
       expectCustomEventDetailContaining(workbenchListener, {

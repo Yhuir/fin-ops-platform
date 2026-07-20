@@ -4673,7 +4673,13 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         facade_path = SERVICES_ROOT / "turnover_ledger_write_facade.py"
         facade_source = facade_path.read_text(encoding="utf-8")
         facade_tree = _parse(facade_path)
+        closure_confirm_source = _function_source(
+            facade_tree,
+            facade_source,
+            "confirm_zero_difference_closure",
+        )
         cash_withdraw_source = _function_source(facade_tree, facade_source, "withdraw_cash_closure_case")
+        projection_source = (SERVICES_ROOT / "turnover_ledger_sql_projection.py").read_text(encoding="utf-8")
 
         violations: list[str] = []
         if "TurnoverLedgerRelationMutationInvalidationLegacyAdapter" in source:
@@ -4704,6 +4710,14 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         ):
             if removed in port_source:
                 violations.append(f"TurnoverLedgerWorkbenchPairPort keeps removed duplicate read path {removed}")
+        if ".preview_zero_difference_closure(" not in closure_confirm_source:
+            violations.append("modern closure confirm no longer uses the side-effect-free Turnover validation boundary")
+        if ".confirm_zero_difference_closure(" in closure_confirm_source:
+            violations.append("modern closure confirm restored duplicate Turnover relation persistence")
+        if '"turnover_relation":' in closure_confirm_source or '"relation": relation' in closure_confirm_source:
+            violations.append("modern closure confirm response restored a non-canonical Turnover relation")
+        if "_turnover_relation_id_from_case_id" in projection_source:
+            violations.append("turnover projection restored legacy relation-id inference from canonical case ids")
         if "enqueue_read_model_refreshes_in_transaction" not in dirty_writer_source:
             violations.append("TurnoverLedgerDirtyOutboxWriter does not use transaction-bound batch enqueue")
         if ".enqueue_refresh(" in uow_class_source:

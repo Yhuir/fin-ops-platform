@@ -520,9 +520,7 @@ def _workbench_relation_summary_for_ids(
         "cash_closure_linked": manual_closure is not None,
         "cash_closure_case_id": _text(manual_closure.get("case_id")) if manual_closure is not None else "",
         "cash_closure_source": "turnover_ledger" if manual_closure is not None else "",
-        "cash_closure_relation_id": _turnover_relation_id_from_case_id(
-            _text(manual_closure.get("case_id")) if manual_closure is not None else ""
-        ),
+        "cash_closure_relation_id": _turnover_relation_id_from_relation(manual_closure),
     }
     if include_details:
         result[_RELATION_DETAILS_KEY] = [_relation_detail(relation) for relation in relations]
@@ -640,7 +638,7 @@ def _with_group_cash_closure_context(flow_rows: list[dict[str, Any]]) -> list[di
             rows[index]["cash_closure_linked"] = True
             rows[index]["cash_closure_case_id"] = case_id
             rows[index]["cash_closure_source"] = source
-            rows[index]["cash_closure_relation_id"] = _turnover_relation_id_from_case_id(case_id)
+            rows[index]["cash_closure_relation_id"] = _turnover_relation_id_from_relation(relation)
     return rows
 
 
@@ -771,9 +769,15 @@ def _normalize_relation_row_type(row_type: str, *, row_id: str) -> str:
     return "bank"
 
 
-def _turnover_relation_id_from_case_id(case_id: str) -> str:
-    normalized_case_id = _text(case_id)
-    return normalized_case_id.removeprefix("turnover:") if normalized_case_id.startswith("turnover:") else ""
+def _turnover_relation_id_from_relation(relation: dict[str, Any] | None) -> str:
+    """Expose the legacy relation id only when the canonical relation records it."""
+    if not isinstance(relation, dict):
+        return ""
+    metadata = relation.get("special_metadata")
+    if not isinstance(metadata, dict):
+        raw_payload = relation.get("raw_payload")
+        metadata = raw_payload.get("special_metadata") if isinstance(raw_payload, dict) else None
+    return _text(metadata.get("turnover_relation_id")) if isinstance(metadata, dict) else ""
 
 
 def _bank_row_ids(row: dict[str, Any]) -> list[str]:

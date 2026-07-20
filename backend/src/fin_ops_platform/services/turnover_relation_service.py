@@ -317,27 +317,10 @@ class TurnoverRelationService:
                 "turnover closure requires at least two bank rows.",
             )
         with self._lock:
-            prepared_rows = [self._require_prepared_row(row_id) for row_id in row_ids]
-            self._ensure_confirmable_relation(prepared_rows)
-            self._ensure_zero_difference_closure(prepared_rows)
-            self._ensure_no_manual_closure_overlap(row_ids)
-            self._ensure_no_blocking_confirmed_overlap_for_closure(row_ids)
-            relation = self._build_relation_from_rows(
-                prepared_rows,
-                status="confirmed",
-                source="manual",
-                created_by=normalized_actor,
-                evidence={
-                    "matched_fields": ["category_code", "counterparty_name", "amount", "manual_selection"],
-                    "manual_reason": "zero_difference_closure",
-                    "closure_mode": (
-                        MANUAL_ZERO_DIFFERENCE_PAIR_CLOSURE_MODE
-                        if len(row_ids) == 2
-                        else MANUAL_ZERO_DIFFERENCE_GROUP_CLOSURE_MODE
-                    ),
-                    "amount_delta": "0.00",
-                    "note": note,
-                },
+            relation = self._zero_difference_closure_relation(
+                row_ids,
+                actor=normalized_actor,
+                note=note,
             )
             self._relations = [
                 existing_relation
@@ -356,6 +339,60 @@ class TurnoverRelationService:
                 version=int(relation["version"]),
             )
             return deepcopy(relation)
+
+    def preview_zero_difference_closure(
+        self,
+        bank_row_ids: list[str],
+        *,
+        actor: str,
+        note: str | None = None,
+    ) -> dict[str, Any]:
+        """Validate and describe a canonical Workbench closure without persisting a Turnover relation."""
+        normalized_actor = self._require_actor(actor)
+        row_ids = self._normalize_row_ids(bank_row_ids)
+        if len(row_ids) < 2:
+            raise TurnoverRelationValidationError(
+                "invalid_turnover_closure_selection",
+                "turnover closure requires at least two bank rows.",
+            )
+        with self._lock:
+            return deepcopy(
+                self._zero_difference_closure_relation(
+                    row_ids,
+                    actor=normalized_actor,
+                    note=note,
+                )
+            )
+
+    def _zero_difference_closure_relation(
+        self,
+        row_ids: list[str],
+        *,
+        actor: str,
+        note: str | None,
+    ) -> dict[str, Any]:
+        prepared_rows = [self._require_prepared_row(row_id) for row_id in row_ids]
+        self._ensure_confirmable_relation(prepared_rows)
+        self._ensure_zero_difference_closure(prepared_rows)
+        self._ensure_no_manual_closure_overlap(row_ids)
+        self._ensure_no_blocking_confirmed_overlap_for_closure(row_ids)
+        return self._build_relation_from_rows(
+            prepared_rows,
+            status="confirmed",
+            source="manual",
+            created_by=actor,
+            evidence={
+                "matched_fields": ["category_code", "counterparty_name", "amount", "manual_selection"],
+                "manual_reason": "zero_difference_closure",
+                "closure_mode": (
+                    MANUAL_ZERO_DIFFERENCE_PAIR_CLOSURE_MODE
+                    if len(row_ids) == 2
+                    else MANUAL_ZERO_DIFFERENCE_GROUP_CLOSURE_MODE
+                ),
+                "amount_delta": "0.00",
+                "note": note,
+            },
+        )
 
     def withdraw_relation(
         self,

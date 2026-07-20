@@ -119,7 +119,6 @@ python -m fin_ops_platform.app.worker \
 - `deploy/oa/env/fin-ops.worker.bank-detail.env.example`
 - `deploy/oa/env/fin-ops.worker.no-oa-bank-batch.env.example`
 - `deploy/oa/env/fin-ops.worker.turnover-ledger.env.example`
-- `deploy/oa/env/fin-ops.worker.turnover-ledger-secondary.env.example`
 - `deploy/oa/env/fin-ops.worker.search-pending.env.example`
 - `deploy/oa/env/fin-ops.worker.search.env.example`
 - `deploy/oa/env/fin-ops.worker.search-secondary.env.example`

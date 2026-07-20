@@ -1371,7 +1371,7 @@ class TurnoverLedgerWorkbenchPairPort:
     def create_turnover_manual_closure(
         self,
         *,
-        relation: dict[str, object],
+        closure: dict[str, object],
         bank_row_ids: list[str],
         actor_id: str,
         note: str | None,
@@ -1379,9 +1379,9 @@ class TurnoverLedgerWorkbenchPairPort:
         transaction: Any,
         preparation: TurnoverManualClosureWritePreparation,
     ) -> dict[str, object]:
-        relation_id = str(relation.get("relation_id") or "").strip()
-        if not relation_id:
-            raise RuntimeError("turnover closure relation must include relation_id.")
+        closure_id = str(closure.get("relation_id") or "").strip()
+        if not closure_id:
+            raise RuntimeError("turnover closure validation must include a deterministic closure id.")
         normalized_row_ids = [
             str(row_id).strip()
             for row_id in list(bank_row_ids or [])
@@ -1392,13 +1392,13 @@ class TurnoverLedgerWorkbenchPairPort:
             for month in list(affected_months or [])
             if str(month).strip()
         ]
-        case_id = f"turnover:{relation_id}"
-        principal_amount = str(relation.get("principal_amount") or "0.00")
-        settled_amount = str(relation.get("settled_amount") or "0.00")
-        relation_evidence = relation.get("evidence")
+        case_id = f"turnover:{closure_id}"
+        principal_amount = str(closure.get("principal_amount") or "0.00")
+        settled_amount = str(closure.get("settled_amount") or "0.00")
+        closure_evidence = closure.get("evidence")
         turnover_closure_mode = (
-            str(relation_evidence.get("closure_mode") or "").strip()
-            if isinstance(relation_evidence, dict)
+            str(closure_evidence.get("closure_mode") or "").strip()
+            if isinstance(closure_evidence, dict)
             else ""
         ) or "manual_zero_difference_pair"
         amount_check = {
@@ -1411,7 +1411,6 @@ class TurnoverLedgerWorkbenchPairPort:
         }
         special_metadata = {
             "source": "turnover_ledger",
-            "turnover_relation_id": relation_id,
             "turnover_closure_mode": turnover_closure_mode,
             "turnover_closure_bank_row_ids": list(normalized_row_ids),
             "turnover_closure_affected_months": list(normalized_months),
@@ -1422,7 +1421,6 @@ class TurnoverLedgerWorkbenchPairPort:
         }
         evidence = {
             "source": "turnover_ledger",
-            "turnover_relation_id": relation_id,
             "bank_row_ids": list(normalized_row_ids),
         }
         if (
@@ -1590,6 +1588,15 @@ class TurnoverLedgerWorkbenchPairPort:
                 case_id=normalized_case_id,
                 row_ids=[],
                 action="cash_closure_withdraw",
+            )
+        command_relation = self._active_relation_by_case_id_from_command(
+            relation_command_service,
+            normalized_case_id,
+        )
+        if command_relation is not None and not self._is_cash_closure_withdrawable(command_relation):
+            raise TurnoverLedgerWritePreconditionError(
+                error_code="turnover_closure_withdraw_requires_workbench",
+                message="外部往来闭环已在关联台补齐发票或其他业务数据，请到关联台撤回完整关系。",
             )
         try:
             result = relation_command_service.withdraw_relation(
@@ -1835,6 +1842,15 @@ class TurnoverLedgerWorkbenchPairPort:
         return bool(row_types) and set(row_types).issubset({"oa", "bank"})
 
     @staticmethod
+    def _is_cash_closure_withdrawable(relation: dict[str, object]) -> bool:
+        row_types = TurnoverLedgerWorkbenchPairPort._normalized_relation_row_types(relation)
+        return (
+            bool(row_types)
+            and set(row_types).issubset({"oa", "bank"})
+            and sum(1 for row_type in row_types if row_type == "bank") >= 2
+        )
+
+    @staticmethod
     def _normalized_relation_row_types(relation: dict[str, object]) -> list[str]:
         return [
             str(row_type).strip()
@@ -1890,7 +1906,7 @@ class TurnoverLedgerRelationWritePort:
         self._save_relation_change(transaction, result, audit_cursor=audit_cursor)
         return result
 
-    def confirm_zero_difference_closure(
+    def preview_zero_difference_closure(
         self,
         *,
         bank_row_ids: list[str],
@@ -1899,20 +1915,18 @@ class TurnoverLedgerRelationWritePort:
         transaction: Any,
     ) -> dict[str, object]:
         self._refresh_selected_bank_rows(bank_row_ids)
-        audit_cursor = self._audit_event_cursor()
-        confirm = getattr(self._relation_service, "confirm_zero_difference_closure", None)
-        if not callable(confirm):
-            raise RuntimeError("relation_service must expose confirm_zero_difference_closure.")
-        relation = dict(
-            confirm(
+        preview = getattr(self._relation_service, "preview_zero_difference_closure", None)
+        if not callable(preview):
+            raise RuntimeError("relation_service must expose preview_zero_difference_closure.")
+        closure = dict(
+            preview(
                 bank_row_ids=list(bank_row_ids or []),
                 actor=actor_id,
                 note=note,
             )
             or {}
         )
-        self._save_relation_change(transaction, {"relation": relation}, audit_cursor=audit_cursor)
-        return {"relation": relation}
+        return {"closure": closure}
 
     def withdraw_relation(
         self,
@@ -2281,9 +2295,13 @@ class TurnoverLedgerLocalRelationRepository:
         self,
         *,
         routes: Any,
+        relation_service: Any | None = None,
+        bank_rows_provider: Callable[[], list[dict[str, object]]] | None = None,
         relation_rebuild: Callable[[], None] | None = None,
     ) -> None:
         self._routes = routes
+        self._relation_service = relation_service
+        self._bank_rows_provider = bank_rows_provider
         self._relation_rebuild = relation_rebuild
 
     def confirm_relation(
@@ -2306,7 +2324,7 @@ class TurnoverLedgerLocalRelationRepository:
             or {}
         )
 
-    def confirm_zero_difference_closure(
+    def preview_zero_difference_closure(
         self,
         *,
         bank_row_ids: list[str],
@@ -2315,13 +2333,14 @@ class TurnoverLedgerLocalRelationRepository:
         transaction: Any,
     ) -> dict[str, object]:
         _ = transaction
-        if self._relation_rebuild is not None:
-            self._relation_rebuild()
-        confirm = getattr(self._routes, "confirm_zero_difference_closure", None)
-        if not callable(confirm):
-            raise RuntimeError("turnover relation routes must expose confirm_zero_difference_closure.")
-        return {"relation": dict(
-            confirm(
+        refresh = getattr(self._relation_service, "refresh_bank_rows", None)
+        if callable(refresh) and self._bank_rows_provider is not None:
+            refresh(self._bank_rows_provider())
+        preview = getattr(self._relation_service, "preview_zero_difference_closure", None)
+        if not callable(preview):
+            raise RuntimeError("relation_service must expose preview_zero_difference_closure.")
+        return {"closure": dict(
+            preview(
                 bank_row_ids=list(bank_row_ids),
                 actor=actor_id,
                 note=note,
@@ -2376,6 +2395,8 @@ class TurnoverLedgerLocalConfirmRelationAdapterSet:
     def relation_repository(self) -> TurnoverLedgerLocalRelationRepository:
         return TurnoverLedgerLocalRelationRepository(
             routes=self._routes,
+            relation_service=self._relation_service,
+            bank_rows_provider=self._bank_rows_provider,
             relation_rebuild=self.rebuild_relations,
         )
 

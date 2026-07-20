@@ -355,10 +355,7 @@ describe("turnover ledger API", () => {
         idempotency_key: "closure-001",
       });
       return Response.json({
-        turnover_relation: {
-          relation_id: "turnover_rel_001",
-          status: "confirmed",
-        },
+        status: "confirmed",
         workbench_pair_relation: {
           case_id: "turnover:turnover_rel_001",
           relation_mode: "turnover_manual_closure",
@@ -379,7 +376,7 @@ describe("turnover ledger API", () => {
       expectedVersions: { "bank-income": 2 },
       idempotencyKey: "closure-001",
     })).resolves.toEqual({
-      relationId: "turnover_rel_001",
+      relationId: "",
       status: "confirmed",
       affectedMonths: ["2026-05"],
       affectedScopeKeys: ["2026-05"],

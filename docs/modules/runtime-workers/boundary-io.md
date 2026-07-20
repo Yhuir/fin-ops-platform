@@ -7,7 +7,7 @@
 - 状态：closed
 - 当前边界可信度：high
 - 目标边界：所有后台 worker 由 registry、durable queue、handler 和部署 manifest 显式声明。
-- 当前闭环：worker 入口使用 registration contract；worker instance、event type、env example、manifest/check command 和 App Health readiness 均由 `runtime_worker_registry.py` 派生。单一 `workbench` instance 同时 claim 月份 shard 与 `all` fan-out command；普通写后可见性走月份 shard + query-composed all，不存在全局 aggregate publish。OA 待付款由 `oa-pending-payment` 专属实例 claim `oa_pending_payment.read_model.refresh`，共享 `invoice-usage-collection` 只保留进项使用/销项收款。`turnover-ledger` 与 `turnover-ledger-secondary` 只并行消费同一 durable event type 的不同月份事件，不新增事实源或 scope 规则。部署文档不再维护手写 worker 矩阵或 `sudo systemctl enable --now fin-ops-worker@...` 清单。
+- 当前闭环：worker 入口使用 registration contract；worker instance、event type、env example、manifest/check command 和 App Health readiness 均由 `runtime_worker_registry.py` 派生。单一 `workbench` instance 同时 claim 月份 shard 与 `all` fan-out command；普通写后可见性走月份 shard + query-composed all，不存在全局 aggregate publish。OA 待付款由 `oa-pending-payment` 专属实例 claim `oa_pending_payment.read_model.refresh`，共享 `invoice-usage-collection` 只保留进项使用/销项收款。外部往来只保留单一 `turnover-ledger` owner；已证实无收益且引入数据库竞争的 secondary 实验已删除。部署文档不再维护手写 worker 矩阵或 `sudo systemctl enable --now fin-ops-worker@...` 清单。
 - 性能证据风险：高性能全域闭环仍需要生产 SLO 复测证明所有页面/读写操作 p95 收敛；该风险属于运行证据，不再代表 Runtime Worker 边界或 I/O open。
 - 旧代码删除状态：旧 `worker_legacy_application` / `RuntimeWorkerApplicationBridge` / GridFS migration worker / 手写生产 worker 矩阵已移除；本轮删除无调用 `_handle_import_fact_changed_event` wrapper 与 `required_worker_dependency(...)` 死 helper。
 

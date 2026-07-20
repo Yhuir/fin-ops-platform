@@ -42,7 +42,7 @@
 
 - 更新 turnover-ledger `README.md`、`boundary-io.md`、`tests.md`、`implementation-notes.md`。
 - 更新 read-model contracts、read-model module boundary/tests/implementation notes 和 manifest 事实。
-- 产品口径、API response shape、权限、状态机和 UI 不变，因此 product spec、API contract 与前端文档无需改动；如实现核验发现事实变化，再做最小更新。
+- 产品口径、权限和 UI 不变；现代 closure response shape 与撤回选择合同因删除重复事实而变化，必须同步 API contract、模块状态机和 smoke scenario。前端 mapper 已兼容无 `turnover_relation` 响应，不新增 UI 分支。
 
 ## 任务 6：本地验证
 
@@ -94,3 +94,12 @@
 3. projection 去串行等待：turnover projection 直接通过已有窄 repository I/O 读取 canonical active pair relation rows 与 source summary；删除 `WorkbenchRelationReadFacade` 依赖，不等待另一 read model 发布，也不写同步 read model。
 4. 旧链门禁：production scan 必须证明 confirm/withdraw 不再调用 `_turnover_bank_transaction_rows()` 全量 provider、`_rebuild_relation_snapshot`、full `save_turnover_relations` 或 turnover projection relation read-model facade。
 5. 验证：先跑 domain/UoW/repository/worker/API/architecture 目标测试与真实 PostgreSQL；部署精确 SHA 后重建 turnover scopes，跑 40 次读取、直接/交叉 Audit，再执行至少两组 test-owned confirm→fresh→withdraw→fresh。门槛保持 command p95 `<=1000ms`、response-to-fresh p95 `<=2000ms`、hard max `3000ms`；不通过则继续本页闭环，不能进入下一页。
+
+## 最终实施增补：canonical 单事实闭环
+
+1. `TurnoverRelationService.preview_zero_difference_closure(...)` 复用既有业务规则，只返回确定性 closure descriptor，不改变 relation/audit snapshot。
+2. `/closures/confirm` 的 UoW 只持久化 `app.workbench_pair_relations` 与 history；删除现代链路对 `app.turnover_relations` / `app.turnover_relation_events` 的重复写入和响应字段。
+3. 新闭环统一捕获 `workbench_pair_relation.case_id` 并调用 `/closures/withdraw`；撤回事务内重新验证 active members 仅为 `oa/bank` 且至少两条 bank rows。
+4. `cash_closure_relation_id` 只从显式 legacy metadata 读取，不从 case id 猜测，保证历史兼容与现代链路隔离。
+5. 删除无收益的 `turnover-ledger-secondary` registry、manifest、env、部署文档和测试；保持单 worker，不新增基础设施。
+6. 本地门：domain/service/API/read-model/job/E2E contract、runtime registry/manifest、前端 page/API、architecture guard、lint/docs/diff。生产门：精确 SHA 部署、旧 worker 退役、两轮可逆写、40 轮读、直接/交叉 Audit、queue drained、fixture 恢复。

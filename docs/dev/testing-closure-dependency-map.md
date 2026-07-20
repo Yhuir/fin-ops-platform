@@ -128,8 +128,9 @@
 | tag-selection 保存 | `turnover_ledger.read_model.refresh` | 往来款 |
 | bank-row-tags batch | `bank_detail`、`workbench`、`turnover_ledger` refresh | 银行明细、关联台、往来款、成本统计、搜索 |
 | relation extra 保存 | `turnover_ledger.read_model.refresh`，前端 `turnoverLedgerExtraUpdated` | 往来款 |
-| manual closure confirm | Turnover manual relation + Workbench active pair relation，`turnoverRelationUpdated` / `workbenchRelationUpdated` | 往来款、关联台、成本统计、搜索 |
-| withdraw | relation withdrawn + Workbench relation 恢复，`turnoverRelationUpdated` / `workbenchRelationUpdated` | 往来款、关联台、成本统计、搜索 |
+| modern manual closure confirm | Turnover domain 无副作用校验 + canonical Workbench active pair relation，`turnoverRelationUpdated` / `workbenchRelationUpdated` | 往来款、关联台、成本统计、搜索 |
+| modern closure withdraw | 按 canonical case id 撤回 Workbench relation 并恢复可恢复关系，`turnoverRelationUpdated` / `workbenchRelationUpdated` | 往来款、关联台、成本统计、搜索 |
+| legacy/generic relation withdraw | 显式存在的 Turnover relation withdrawn；历史 closure 同步撤回对应 Workbench case | 往来款、关联台、成本统计、搜索 |
 
 当前 Browser e2e：
 

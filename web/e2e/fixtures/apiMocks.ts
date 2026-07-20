@@ -6633,7 +6633,7 @@ function turnoverSummaryRow(relationClosed: boolean) {
     cash_closure_linked: relationClosed,
     cash_closure_case_id: relationClosed ? "turnover:turnover_rel_e2e_closure" : "",
     cash_closure_source: relationClosed ? "turnover_ledger" : "",
-    cash_closure_relation_id: relationClosed ? "turnover_rel_e2e_closure" : "",
+    cash_closure_relation_id: "",
   };
 }
 
@@ -6693,7 +6693,7 @@ function turnoverFlowRow(
     cash_closure_linked: relationClosed,
     cash_closure_case_id: relationClosed ? "turnover:turnover_rel_e2e_closure" : "",
     cash_closure_source: relationClosed ? "turnover_ledger" : "",
-    cash_closure_relation_id: relationClosed ? "turnover_rel_e2e_closure" : "",
+    cash_closure_relation_id: "",
   };
 }
 
@@ -6820,10 +6820,7 @@ function turnoverClosureRequestConflict(body: Record<string, unknown>) {
 
 function turnoverClosureMutationPayload() {
   return {
-    turnover_relation: {
-      relation_id: "turnover_rel_e2e_closure",
-      status: "confirmed",
-    },
+    status: "confirmed",
     workbench_pair_relation: {
       case_id: "turnover:turnover_rel_e2e_closure",
       relation_mode: "turnover_manual_closure",
@@ -9664,12 +9661,18 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       return json(route, turnoverClosureMutationPayload());
     }
 
-    if (path === "/api/turnover-ledger/relations/turnover_rel_e2e_closure/withdraw") {
+    if (path === "/api/turnover-ledger/closures/withdraw") {
+      const body = parseJsonBody(request.postData());
+      if (body.cash_closure_case_id !== "turnover:turnover_rel_e2e_closure") {
+        return json(route, {
+          error: "invalid_cash_closure_case_id",
+          message: "cash_closure_case_id must match the active canonical closure.",
+        }, 400);
+      }
       turnoverClosureConfirmed = false;
       return json(route, {
-        relation_id: "turnover_rel_e2e_closure",
-        status: "withdrawn",
         ...turnoverClosureMutationPayload(),
+        status: "withdrawn",
       });
     }
 

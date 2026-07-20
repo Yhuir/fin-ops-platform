@@ -380,14 +380,14 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
                 ),
             )
             payload = json.loads(response.body)
-            relation_id = str(payload.get("turnover_relation", {}).get("relation_id") or "")
+            case_id = str(payload.get("workbench_pair_relation", {}).get("case_id") or "")
             active_closure = app._workbench_pair_relation_service.get_active_relation_by_case_id(
-                f"turnover:{relation_id}"
+                case_id
             )
 
         self.assertEqual(response.status_code, 200, response.body)
-        self.assertEqual(payload["turnover_relation"]["status"], "confirmed")
-        self.assertEqual(set(payload["turnover_relation"]["bank_row_ids"]), set(transaction_ids))
+        self.assertEqual(payload["status"], "confirmed")
+        self.assertNotIn("turnover_relation", payload)
         self.assertEqual(payload["workbench_pair_relation"]["relation_mode"], "turnover_manual_closure")
         self.assertIsNotNone(active_closure)
         assert active_closure is not None
@@ -491,7 +491,8 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             unpaired_groups = self._workbench_unpaired_groups(app)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["turnover_relation"]["status"], "confirmed")
+        self.assertEqual(payload["status"], "confirmed")
+        self.assertNotIn("turnover_relation", payload)
         self.assertEqual(payload["workbench_pair_relation"]["relation_mode"], "turnover_manual_closure")
         self.assertEqual(
             payload["freshness_targets"],
@@ -543,12 +544,12 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             after_pair_snapshot = app._workbench_pair_relation_service.snapshot()
 
         self.assertEqual(response.status_code, 200, response.body)
-        self.assertEqual(payload["turnover_relation"]["status"], "confirmed")
+        self.assertEqual(payload["status"], "confirmed")
         self.assertEqual(payload["workbench_pair_relation"]["status"], "active")
         self.assertEqual(payload["workbench_pair_relation"]["relation_mode"], "turnover_manual_closure")
         self.assertEqual(set(payload["workbench_pair_relation"]["row_ids"]), set(transaction_ids))
         self.assertEqual(payload["affected_months"], ["2026-03"])
-        self.assertNotEqual(after_turnover_snapshot, before_turnover_snapshot)
+        self.assertEqual(after_turnover_snapshot, before_turnover_snapshot)
         self.assertNotEqual(after_pair_snapshot, before_pair_snapshot)
 
     def test_manual_closure_repairs_orphaned_turnover_closure_without_workbench_case(self) -> None:
@@ -574,8 +575,8 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             active_closure = app._workbench_pair_relation_service.get_active_relation_by_case_id(case_id)
 
         self.assertEqual(response.status_code, 200, response.body)
-        self.assertEqual(payload["turnover_relation"]["relation_id"], relation_id)
-        self.assertEqual(payload["turnover_relation"]["status"], "confirmed")
+        self.assertNotIn("turnover_relation", payload)
+        self.assertEqual(payload["status"], "confirmed")
         self.assertEqual(payload["workbench_pair_relation"]["case_id"], case_id)
         self.assertEqual(payload["workbench_pair_relation"]["relation_mode"], "turnover_manual_closure")
         self.assertIsNotNone(active_closure)
@@ -606,8 +607,8 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["turnover_relation"]["status"], "confirmed")
-        self.assertEqual(set(payload["turnover_relation"]["bank_row_ids"]), set(transaction_ids))
+        self.assertEqual(payload["status"], "confirmed")
+        self.assertEqual(set(payload["workbench_pair_relation"]["row_ids"]), set(transaction_ids))
         self.assertEqual(payload["workbench_pair_relation"]["relation_mode"], "turnover_manual_closure")
 
     def test_manual_closure_accepts_three_bank_rows_and_creates_paired_workbench_case(self) -> None:
@@ -692,14 +693,15 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             unpaired_groups = self._workbench_unpaired_groups(app)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["turnover_relation"]["evidence"]["closure_mode"], "manual_zero_difference_group")
+        self.assertEqual(payload["status"], "confirmed")
+        self.assertNotIn("turnover_relation", payload)
         self.assertEqual(
             payload["workbench_pair_relation"]["special_metadata"]["turnover_closure_mode"],
             "manual_zero_difference_group",
         )
         self.assertTrue(payload["workbench_pair_relation"]["special_metadata"]["requires_oa"])
         self.assertFalse(payload["workbench_pair_relation"]["special_metadata"]["requires_invoice"])
-        self.assertEqual(set(payload["turnover_relation"]["bank_row_ids"]), set(transaction_ids))
+        self.assertEqual(set(payload["workbench_pair_relation"]["row_ids"]), set(transaction_ids))
         matching_paired_groups = [
             group
             for group in paired_groups
@@ -742,16 +744,15 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
                 body=json.dumps({"bank_row_ids": transaction_ids, "note": "外部往来手动闭环"}),
             )
             payload = json.loads(response.body)
-            relation_id = str(payload["turnover_relation"]["relation_id"])
-            case_id = f"turnover:{relation_id}"
+            case_id = str(payload["workbench_pair_relation"]["case_id"])
             active_closure = app._workbench_pair_relation_service.get_active_relation_by_case_id(case_id)
             case_oa_1_after_confirm = app._workbench_pair_relation_service.get_active_relation_by_case_id("case-oa-1")
             case_oa_2_after_confirm = app._workbench_pair_relation_service.get_active_relation_by_case_id("case-oa-2")
 
             withdraw = app.handle_request(
                 "POST",
-                f"/api/turnover-ledger/relations/{relation_id}/withdraw",
-                body=json.dumps({"note": "仅撤回外部往来闭环"}),
+                "/api/turnover-ledger/closures/withdraw",
+                body=json.dumps({"cash_closure_case_id": case_id, "note": "仅撤回外部往来闭环"}),
             )
             withdraw_payload = json.loads(withdraw.body)
             active_closure_after_withdraw = app._workbench_pair_relation_service.get_active_relation_by_case_id(case_id)
@@ -760,7 +761,8 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             bank_3_active_relation = app._workbench_pair_relation_service.get_active_relation_by_row_id(bank_3)
 
         self.assertEqual(response.status_code, 200, response.body)
-        self.assertEqual(payload["turnover_relation"]["status"], "confirmed")
+        self.assertEqual(payload["status"], "confirmed")
+        self.assertNotIn("turnover_relation", payload)
         self.assertIsNotNone(active_closure)
         assert active_closure is not None
         self.assertEqual(active_closure["relation_mode"], "turnover_manual_closure")
@@ -776,7 +778,7 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
         self.assertIsNone(case_oa_2_after_confirm)
 
         self.assertEqual(withdraw.status_code, 200, withdraw.body)
-        self.assertEqual(withdraw_payload["relation"]["status"], "withdrawn")
+        self.assertEqual(withdraw_payload["status"], "withdrawn")
         self.assertEqual(withdraw_payload["workbench_pair_relation"]["status"], "cancelled")
         self.assertIsNone(active_closure_after_withdraw)
         self.assertIsNotNone(restored_case_oa_1)
@@ -797,8 +799,7 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
                 body=json.dumps({"bank_row_ids": transaction_ids, "note": "外部往来手动闭环"}),
             )
             payload = json.loads(response.body)
-            relation_id = str(payload["turnover_relation"]["relation_id"])
-            case_id = f"turnover:{relation_id}"
+            case_id = str(payload["workbench_pair_relation"]["case_id"])
             app._workbench_pair_relation_service.create_active_relation(
                 case_id=case_id,
                 row_ids=["oa-upgraded-1", *transaction_ids, "invoice-upgraded-1"],
@@ -810,8 +811,8 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
 
             withdraw = app.handle_request(
                 "POST",
-                f"/api/turnover-ledger/relations/{relation_id}/withdraw",
-                body=json.dumps({"note": "外部往来页撤回"}),
+                "/api/turnover-ledger/closures/withdraw",
+                body=json.dumps({"cash_closure_case_id": case_id, "note": "外部往来页撤回"}),
             )
             withdraw_payload = json.loads(withdraw.body)
 
@@ -828,20 +829,19 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
                 body=json.dumps({"bank_row_ids": transaction_ids, "note": "外部往来手动闭环"}),
             )
             payload = json.loads(response.body)
-            relation_id = str(payload["turnover_relation"]["relation_id"])
-            case_id = f"turnover:{relation_id}"
+            case_id = str(payload["workbench_pair_relation"]["case_id"])
             self.assertIsNotNone(app._workbench_pair_relation_service.get_active_relation_by_case_id(case_id))
 
             withdraw = app.handle_request(
                 "POST",
-                f"/api/turnover-ledger/relations/{relation_id}/withdraw",
-                body=json.dumps({"note": "撤回 bank-only 闭环"}),
+                "/api/turnover-ledger/closures/withdraw",
+                body=json.dumps({"cash_closure_case_id": case_id, "note": "撤回 bank-only 闭环"}),
             )
             withdraw_payload = json.loads(withdraw.body)
             active_after = app._workbench_pair_relation_service.get_active_relation_by_case_id(case_id)
 
         self.assertEqual(withdraw.status_code, 200)
-        self.assertEqual(withdraw_payload["relation"]["status"], "withdrawn")
+        self.assertEqual(withdraw_payload["status"], "withdrawn")
         self.assertEqual(withdraw_payload["workbench_pair_relation"]["status"], "cancelled")
         self.assertIsNone(active_after)
 

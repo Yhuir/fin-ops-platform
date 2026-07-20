@@ -2220,15 +2220,19 @@ def _validate_reversible_checkpoint_contract(
             for checkpoint in (*checkpoints, recovery_checkpoint)
         ):
             raise ValueError(f"scenario {scenario_name!r} turnover checkpoints must use the same fixture_row_ids.")
-        confirm_relation_capture = next(
-            name for name, pointer in checkpoints[0].steps[0].captures if pointer == "/turnover_relation/relation_id"
+        closure_case_capture = next(
+            name
+            for name, pointer in checkpoints[0].steps[0].captures
+            if pointer == "/workbench_pair_relation/case_id"
         )
-        expected_withdraw_path = f"/api/turnover-ledger/relations/${{{confirm_relation_capture}}}/withdraw"
+        expected_withdraw_path = "/api/turnover-ledger/closures/withdraw"
         if any(
-            checkpoint.steps[0].path != expected_withdraw_path for checkpoint in (checkpoints[1], recovery_checkpoint)
+            checkpoint.steps[0].path != expected_withdraw_path
+            or (checkpoint.steps[0].json_body or {}).get("cash_closure_case_id") != f"${{{closure_case_capture}}}"
+            for checkpoint in (checkpoints[1], recovery_checkpoint)
         ):
             raise ValueError(
-                f"scenario {scenario_name!r} turnover withdraw checkpoints must consume the confirmed relation_id."
+                f"scenario {scenario_name!r} turnover withdraw checkpoints must consume the canonical closure case_id."
             )
 
 
@@ -2291,7 +2295,11 @@ def _validate_checkpoint_consumers_and_rows(
         capture_name
         for step in checkpoint.steps
         for capture_name, pointer in step.captures
-        if pointer in {"/case_id", "/active_relation/case_id", "/turnover_relation/relation_id"}
+        if pointer in {
+            "/case_id",
+            "/active_relation/case_id",
+            "/workbench_pair_relation/case_id",
+        }
     }
     for consumer in checkpoint.consumers:
         if consumer.role != "affected":
@@ -2457,20 +2465,24 @@ def _validate_turnover_closure_steps(
             raise ValueError(
                 f"scenario {scenario_name!r} checkpoint {checkpoint.name!r} turnover confirm requires fixture rows and expected_versions."
             )
-        relation_captures = [name for name, pointer in mutation.captures if pointer == "/turnover_relation/relation_id"]
-        if len(relation_captures) != 1:
+        closure_captures = [
+            name
+            for name, pointer in mutation.captures
+            if pointer == "/workbench_pair_relation/case_id"
+        ]
+        if len(closure_captures) != 1:
             raise ValueError(
-                f"scenario {scenario_name!r} checkpoint {checkpoint.name!r} must capture the turnover relation_id."
+                f"scenario {scenario_name!r} checkpoint {checkpoint.name!r} must capture the canonical closure case_id."
             )
         return
-    relation_placeholders = [
-        capture_name
-        for capture_name in _placeholder_names(mutation.path)
-        if mutation.path == f"/api/turnover-ledger/relations/${{{capture_name}}}/withdraw"
-    ]
-    if len(relation_placeholders) != 1 or set(body) - {"idempotency_key", "note"}:
+    closure_case_id = body.get("cash_closure_case_id")
+    if (
+        mutation.path != "/api/turnover-ledger/closures/withdraw"
+        or len(_placeholder_names(closure_case_id)) != 1
+        or set(body) - {"cash_closure_case_id", "idempotency_key", "note"}
+    ):
         raise ValueError(
-            f"scenario {scenario_name!r} checkpoint {checkpoint.name!r} must use the captured turnover relation withdraw endpoint."
+            f"scenario {scenario_name!r} checkpoint {checkpoint.name!r} must use the captured canonical closure withdraw endpoint."
         )
 
 

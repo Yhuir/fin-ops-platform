@@ -459,6 +459,27 @@ class TurnoverRelationServiceTests(unittest.TestCase):
         self.assertEqual(service.audit_log()[0]["action"], "confirm_zero_difference_closure")
         self.assertEqual(service.audit_log()[0]["actor"], "YNSYLP005")
 
+    def test_preview_zero_difference_closure_validates_without_mutating_turnover_facts(self) -> None:
+        service = TurnoverRelationService.from_snapshot(
+            None,
+            bank_rows=[
+                bank_row("txn-in-1", category_code="borrow_in_personal_pending_repayment", credit_amount="200000.00"),
+                bank_row("txn-out-1", category_code="borrow_in_personal_repaid", debit_amount="200000.00"),
+            ],
+        )
+
+        closure = service.preview_zero_difference_closure(
+            ["txn-in-1", "txn-out-1"],
+            actor="YNSYLP005",
+            note="canonical workbench closure",
+        )
+
+        self.assertEqual(closure["status"], "confirmed")
+        self.assertEqual(closure["principal_amount"], "200000.00")
+        self.assertEqual(closure["settled_amount"], "200000.00")
+        self.assertEqual(service.relations(), [])
+        self.assertEqual(service.audit_log(), [])
+
     def test_confirm_zero_difference_closure_accepts_multiple_bank_rows_zero_delta(self) -> None:
         service = TurnoverRelationService.from_snapshot(
             None,

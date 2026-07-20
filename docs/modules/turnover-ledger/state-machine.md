@@ -76,8 +76,8 @@ same group flow rows selected
   -> frontend waits affected turnover_ledger month scopes fresh and reloads grouped ledger
   -> frontend rebinds selected bank row ids to latest same-group flow rows
   -> backend stale precondition passes
-  -> Turnover manual confirmed relation
-  -> Workbench active pair relation
+  -> Turnover domain validates a deterministic closure descriptor without persistence
+  -> canonical Workbench active pair relation only
   -> merge selected banks plus any selected banks' existing OA-bank active relations into one turnover_manual_closure case
   -> Workbench evaluates turnover_manual_closure relation metadata requires_oa/requires_invoice
   -> bank-only stays open when requires_oa=true; OA + bank can become paired when requires_invoice=false
@@ -87,6 +87,8 @@ same group flow rows selected
   -> workbench month aggregate and other downstream read models converge in background SLO path
   -> frontend emits Workbench refresh event; post-write sync/reload blockage is warning, not mutation failure
 ```
+
+现代确认不得写 `app.turnover_relations` 或 `app.turnover_relation_events`。成功响应以 `workbench_pair_relation.case_id` 作为撤回身份；projection 只有在历史 relation 的 `special_metadata.turnover_relation_id` 显式存在时才输出 `cash_closure_relation_id`，不得从 case id 推断。
 
 校验：
 
@@ -176,7 +178,7 @@ Scope type：`turnover_ledger`
 
 Scope key：正常写路径为 affected month scopes；`all` 仅作为 fan-out command 或无法在写前确定月份的例外路径。
 
-Worker instance：primary `turnover-ledger`；auxiliary `turnover-ledger-secondary`
+Worker instance：`turnover-ledger`
 
 Refresh event：`turnover_ledger.read_model.refresh`
 
@@ -204,10 +206,10 @@ worker 流程：
 
 ```text
 job.outbox_events / job.read_model_dirty_scopes
-  -> turnover-ledger / turnover-ledger-secondary workers atomically claim distinct turnover_ledger.read_model.refresh events
+  -> turnover-ledger worker consumes turnover_ledger.read_model.refresh
   -> TurnoverLedgerReadModelRefreshService.handle_runtime_event
   -> TurnoverLedgerSqlProjectionBuilder.rebuild_turnover_ledger_read_model_scope
-  -> WorkbenchRelationReadFacade.get_by_row_ids(require_fresh=True)
+  -> WorkbenchRelationReadModelRepositoryPort.workbench_relation_source_bundle_from_source
   -> fresh relation distribution enriches grouped payload; non-fresh relation context fails without saving
   -> save_turnover_ledger_rows
   -> complete dirty scope and readiness

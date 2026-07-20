@@ -317,7 +317,7 @@ def _raw_bank_turnover_scenario(name: str, key_prefix: str) -> dict[str, object]
                     "expected_versions": {f"turnover_bank_row:{row_id}": 1 for row_id in fixture_row_ids},
                     "idempotency_key": f"{key_prefix}-confirm",
                 },
-                "captures": {"turnover_relation_id": "/turnover_relation/relation_id"},
+                "captures": {"cash_closure_case_id": "/workbench_pair_relation/case_id"},
             }
         ],
         "consumers": consumers,
@@ -334,8 +334,11 @@ def _raw_bank_turnover_scenario(name: str, key_prefix: str) -> dict[str, object]
                 {
                     "name": checkpoint_name,
                     "method": "POST",
-                    "path": "/api/turnover-ledger/relations/${turnover_relation_id}/withdraw",
-                    "json": {"idempotency_key": idempotency_key},
+                    "path": "/api/turnover-ledger/closures/withdraw",
+                    "json": {
+                        "cash_closure_case_id": "${cash_closure_case_id}",
+                        "idempotency_key": idempotency_key,
+                    },
                 }
             ],
             "consumers": consumers,
@@ -1217,7 +1220,11 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         self.assertEqual(scenario.checkpoints[0].steps[0].path, "/api/turnover-ledger/closures/confirm")
         self.assertEqual(
             scenario.checkpoints[1].steps[0].path,
-            "/api/turnover-ledger/relations/${turnover_relation_id}/withdraw",
+            "/api/turnover-ledger/closures/withdraw",
+        )
+        self.assertEqual(
+            scenario.checkpoints[1].steps[0].json_body["cash_closure_case_id"],
+            "${cash_closure_case_id}",
         )
         self.assertEqual(scenario.checkpoints[0].fixture_row_ids, scenario.checkpoints[1].fixture_row_ids)
 
@@ -2240,7 +2247,9 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                 return_value={
                     "status": "committed",
                     "outbox_event_ids": ["event-confirm"],
-                    "response_payload": {"turnover_relation": {"relation_id": "turnover-relation-500"}},
+                    "response_payload": {
+                        "workbench_pair_relation": {"case_id": "turnover:closure-500"}
+                    },
                 },
             ),
             patch(
@@ -2270,7 +2279,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             mutation_paths,
             [
                 "/api/turnover-ledger/closures/confirm",
-                "/api/turnover-ledger/relations/turnover-relation-500/withdraw",
+                "/api/turnover-ledger/closures/withdraw",
             ],
         )
         self.assertEqual(result["recovery"]["status"], "pass")

@@ -676,7 +676,7 @@ export default function TurnoverLedgerPage() {
     });
     if (result.status === "success") {
       emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.turnoverRelationUpdated, {
-        relationId: result.value.relationId,
+        relationId: result.value.relationId || result.value.workbenchPairRelationId,
         affectedRowIds: bankRowIds,
         affectedMonths: result.value.affectedMonths,
         action: "manual_closure",
