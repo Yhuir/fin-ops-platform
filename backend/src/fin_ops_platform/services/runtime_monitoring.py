@@ -2012,11 +2012,9 @@ def _operation_barrier_scope_filter_sql(
 ) -> tuple[str, tuple[object, ...]]:
     if targets is None:
         return "", ()
-    key_name = "event_type" if event_type_sql is not None else "read_model_key"
     key_sql = event_type_sql or read_model_key_sql
     if key_sql is None:
         target_keys = [target["scope_type"] for target in targets]
-        key_name = "scope_type"
         key_sql = scope_type_sql
     else:
         target_keys = [target["refresh_event_type" if event_type_sql is not None else "read_model_key"] for target in targets]
@@ -2027,13 +2025,13 @@ def _operation_barrier_scope_filter_sql(
 and exists (
   select 1
   from unnest(%s::text[], %s::text[], %s::text[])
-       as barrier_target({key_name}, scope_type, scope_key)
-  where barrier_target.{key_name} = coalesce({key_sql}, '')
-    and barrier_target.scope_type = coalesce({scope_type_sql}, '')
+       as barrier_target(target_key, target_scope_type, target_scope_key)
+  where barrier_target.target_key = coalesce({key_sql}, '')
+    and barrier_target.target_scope_type = coalesce({scope_type_sql}, '')
     and (
-      barrier_target.scope_key = coalesce({scope_key_sql}, '')
+      barrier_target.target_scope_key = coalesce({scope_key_sql}, '')
       or (
-        barrier_target.scope_key <> 'all'
+        barrier_target.target_scope_key <> 'all'
         and coalesce({scope_key_sql}, '') = 'all'
       )
     )

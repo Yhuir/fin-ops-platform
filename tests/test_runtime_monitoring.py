@@ -622,7 +622,11 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertEqual(set(snapshot["read_model_statuses"]), {"turnover_ledger"})
         scoped_calls = [call for call in connection.calls if "unnest(%s::text[]" in call[0]]
         self.assertEqual(len(scoped_calls), 3)
-        for _sql, params in scoped_calls:
+        for sql, params in scoped_calls:
+            self.assertIn(
+                "as barrier_target(target_key, target_scope_type, target_scope_key)",
+                " ".join(sql.split()),
+            )
             self.assertEqual(params[1], ["turnover_ledger"])
             self.assertEqual(params[2], ["2026-02"])
         worker_call = next(call for call in connection.calls if "from job.runtime_worker_heartbeats" in call[0])
