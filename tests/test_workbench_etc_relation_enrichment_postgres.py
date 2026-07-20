@@ -43,8 +43,10 @@ class WorkbenchEtcRelationEnrichmentPostgresTests(unittest.TestCase):
         self._seed_exact_etc_relation()
         repository = PostgresWorkbenchFormalRelationFactRepository(self.connection)
 
+        fact_batch = repository.load_batch(["2026-06"])
         candidates = repository.load_etc_batch_link_candidates(["2026-06"])
 
+        self.assertIn(("oa", OA_ROW_ID), {fact.member_key for fact in fact_batch.facts})
         self.assertEqual(len(candidates), 1)
         self.assertEqual(candidates[0]["external_etc_batch_id"], EXTERNAL_BATCH_ID)
         self.assertEqual(candidates[0]["business_batch_id"], BUSINESS_BATCH_ID)

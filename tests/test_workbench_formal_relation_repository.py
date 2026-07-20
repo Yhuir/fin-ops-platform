@@ -270,6 +270,8 @@ class PostgresWorkbenchFormalRelationFactRepositoryTests(unittest.TestCase):
         self.assertIn("app.invoices", sql)
         self.assertIn("app.workbench_pair_relations", sql)
         self.assertIn("app.workbench_pair_relation_history", sql)
+        self.assertIn("actor_id not like 'system:%%'", sql)
+        self.assertIn("actor_id not like 'migration:%%'", sql)
         self.assertNotIn("read_model.workbench_candidate_matches", sql)
         self.assertNotIn("read_model.workbench_reconciliation_decisions", sql)
 

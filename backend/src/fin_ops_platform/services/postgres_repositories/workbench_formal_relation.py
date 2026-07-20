@@ -172,8 +172,8 @@ class PostgresWorkbenchFormalRelationFactRepository:
             from app.workbench_pair_relation_history
             where event_type = any(%s::text[])
               and nullif(actor_id, '') is not null
-              and actor_id not like 'system:%'
-              and actor_id not like 'migration:%'
+              and actor_id not like 'system:%%'
+              and actor_id not like 'migration:%%'
             order by occurred_at, case_id
             """,
             (sorted(_WITHDRAW_EVENTS),),
