@@ -58,7 +58,7 @@
 - `all` 聚合查询不得要求所有行级 source_versions 完全一致；按月增量 worker 刷新会让不相关月份保留旧 provenance。Query owner 只能在 repository 标记 mixed row versions 且 durable dirty scope 为 fresh 时把 all-view 判为 fresh，不能绕过 dirty scope。
 - 列表 page payload 只能从规范化 `payload` 读取；family/status/scope/direction、总 summary、family summaries 和 total 在 PostgreSQL 中计算，第二条 data query 只读取当前 `page_size<=200` 的 payload。筛选为空但 projection 已存在时返回 fresh 空结果，不得误触发 rebuild。
 - `raw_payload` 不属于 turnover 新 projection 的业务读取合同，v6 新写入固定为空对象；完整业务 payload 只由 `payload` 拥有。
-- Worker：`turnover-ledger`
+- Worker：`turnover-ledger`（primary）+ `turnover-ledger-secondary`（仅并行消费不同月份的同类 durable event）
 - Query owner：`TurnoverLedgerQueryService`
 - Repository owner：`TurnoverLedgerReadModelRepositoryPort`，仅暴露 `list_turnover_ledger_view`、`save_turnover_ledger_rows`。
 

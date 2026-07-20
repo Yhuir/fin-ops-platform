@@ -132,6 +132,10 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
                 "bank-flow-rule-batch-read-model",
                 ("bank_flow_rule_batch.read_model.refresh",),
             ),
+            "turnover-ledger-secondary": (
+                "turnover-ledger-secondary-read-model",
+                ("turnover_ledger.read_model.refresh",),
+            ),
             "invoice-lifecycle-secondary": (
                 "invoice-lifecycle-secondary-read-model",
                 ("invoice_lifecycle.read_model.refresh",),
@@ -150,6 +154,20 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
         self.assertEqual(APP_STATUS_READ_MODEL_REGISTRY["cost_statistics"].worker_instance, "cost-statistics")
         self.assertEqual(APP_STATUS_READ_MODEL_REGISTRY["tax_offset"].worker_instance, "tax-offset")
         self.assertEqual(APP_STATUS_READ_MODEL_REGISTRY["bank_flow_rule_batch"].worker_instance, "bank-flow-rule-batch")
+        self.assertEqual(APP_STATUS_READ_MODEL_REGISTRY["turnover_ledger"].worker_instance, "turnover-ledger")
+
+    def test_turnover_workers_share_only_the_turnover_event_contract(self) -> None:
+        registrations = registration_by_instance_name()
+        primary = registrations["turnover-ledger"]
+        secondary = registrations["turnover-ledger-secondary"]
+
+        self.assertEqual(primary.event_types, secondary.event_types)
+        self.assertEqual(primary.handler_flags, secondary.handler_flags)
+        self.assertEqual(primary.claim_scope_keys, ())
+        self.assertEqual(secondary.claim_scope_keys, ())
+        self.assertEqual(primary.exclude_claim_scope_keys, ())
+        self.assertEqual(secondary.exclude_claim_scope_keys, ())
+        self.assertNotEqual(primary.worker_kind, secondary.worker_kind)
 
     def test_cost_tax_worker_no_longer_consumes_cost_statistics_refreshes(self) -> None:
         registration = registration_by_instance_name()["cost-tax"]

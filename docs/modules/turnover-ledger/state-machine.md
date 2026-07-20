@@ -176,7 +176,7 @@ Scope type：`turnover_ledger`
 
 Scope key：正常写路径为 affected month scopes；`all` 仅作为 fan-out command 或无法在写前确定月份的例外路径。
 
-Worker instance：`turnover-ledger`
+Worker instance：primary `turnover-ledger`；auxiliary `turnover-ledger-secondary`
 
 Refresh event：`turnover_ledger.read_model.refresh`
 
@@ -204,7 +204,7 @@ worker 流程：
 
 ```text
 job.outbox_events / job.read_model_dirty_scopes
-  -> turnover-ledger worker consumes turnover_ledger.read_model.refresh
+  -> turnover-ledger / turnover-ledger-secondary workers atomically claim distinct turnover_ledger.read_model.refresh events
   -> TurnoverLedgerReadModelRefreshService.handle_runtime_event
   -> TurnoverLedgerSqlProjectionBuilder.rebuild_turnover_ledger_read_model_scope
   -> WorkbenchRelationReadFacade.get_by_row_ids(require_fresh=True)

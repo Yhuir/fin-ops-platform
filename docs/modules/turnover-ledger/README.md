@@ -51,7 +51,7 @@
 - 前端闭环入口：表格 checkbox 选中未闭环 flow rows 时，toolbar 主按钮为“确认闭环”。所选 flow rows 全部带同一个 `cash_closure_case_id` 且 `cash_closure_linked=true` 时，主按钮切换为“撤回闭环”。同一次选择不得混合已闭环与未闭环流水，也不得跨多个闭环 case 撤回。
 - 下游影响：外部往来关系变更影响 `turnover_ledger`、`workbench`、`workbench_relation`、成本统计、搜索和前端跨页刷新提示。
 - 操作闭环：前端 tag-selection、extra 保存、manual closure confirm/withdraw 必须接入 `GlobalOperationOverlayProvider`。manual closure 发起和提交不能依赖 stale grouped payload；提交前必须先等待所选 rows 对应的 affected-month `turnover_ledger` scopes fresh、重新加载 grouped payload，并按原始 bank row ids 在同一 group 内重绑定最新 flow rows，用最新 `categoryVersion` 生成 `expected_versions`；无法从所选 rows 解析月份时才退回 `all`。manual closure confirm/withdraw 的写 API 只返回本操作可见性所需的硬等待目标：affected-month `turnover_ledger` 和受影响月份的 `workbench_relation`；`workbench` 月份聚合、成本统计、搜索等下游 read model 继续通过 dirty/outbox 和 App Status/SLO 监控收敛，不得作为外部往来写操作的 overlay 释放条件。POST 成功后若 operation barrier 或页面 reload 仍未收敛，前端只能提示“操作已提交，后台同步尚未完成”，不能显示“操作失败”；提交前 fresh gate 和后端写入本身失败仍必须阻断。
-- App Status：`turnover_ledger` domain 绑定 `turnover-ledger` worker、`turnover_ledger` read model、`turnover_ledger.read_model.refresh` job type。
+- App Status：`turnover_ledger` domain 的 primary 绑定 `turnover-ledger` worker、`turnover_ledger` read model、`turnover_ledger.read_model.refresh` job type；`turnover-ledger-secondary` 是 required auxiliary consumer，只提高独立月份 drain 并发，不改变 domain readiness 或事实源。
 
 不属于本模块事实源：
 

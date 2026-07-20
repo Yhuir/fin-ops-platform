@@ -537,3 +537,12 @@
 - 关键决策：registry 是唯一允许运行实例集合。激活 release 时只对已启用、运行或失败的未注册 `fin-ops-worker@*.service` 执行 stop/disable；不删除 env，保持回滚可逆。禁止把历史/WIP 实例重新登记为正式 worker 来掩盖配置缺失。
 - 生产验收：发布后所有未注册实例必须为 disabled/inactive，注册 required worker 必须 active，durable queue 与 dirty scope 必须 drained，readiness 必须 ready。
 - 测试覆盖：`RuntimeWorkerRegistryTests.test_manifest_cli_lists_required_instances_and_env_examples`、`DeployRuntimeExampleTests.test_deploy_control_retires_unregistered_worker_instances_before_restart`。
+
+## 2026-07-20 - Turnover 月份 refresh 双 consumer
+
+- 生产证据：跨月 manual closure 确认后，两个 `workbench_relation` scope 在约 `1.2s` 内 fresh；两个 `turnover_ledger` scope 由单实例串行完成，分别约 `3.9s`、`4.9s`，成为页面写后可见性的剩余长尾。
+- 决策：复用既有 secondary-consumer 合同，新增 required RabbitMQ 实例 `turnover-ledger-secondary`。它与 primary 只消费同一个 `turnover_ledger.read_model.refresh` event type；不新增队列、scope、事实源、readiness、projection、cache 或 API。
+- 并发安全：PostgreSQL consumer 以 `FOR UPDATE SKIP LOCKED` 原子 claim，RabbitMQ consumer 仍以 event id 回到 PostgreSQL 原子 claim；两个实例可以处理不同月份，但不能同时处理同一 event。App Status 继续以 `turnover-ledger` 为 primary，manifest 显式登记 secondary 为 auxiliary。
+- CLI 兼容：生产始终用显式 `--registration`；仅 handler flag 的开发/旧 CLI 若命中多个完全相同 handler+event consumer，稳定推断 registry 中的 primary。真正不同的组合仍返回通用 `runtime`，不猜测 owner。
+- 旧链处理：保留 primary 作为正式 owner；本轮没有可删除的兼容 worker、fallback 或重复 projection。新增实例只替代“不同月份必须串行等待”的旧运行约束，不产生并行业务写路径。
+- 测试：registry、read-model manifest 与 deploy env 合同覆盖 secondary required/eligible、同 event/handler、无 scope 分叉、独立 worker kind、primary App Status ownership 和 env 完整性。

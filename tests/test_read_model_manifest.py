@@ -563,7 +563,7 @@ class ReadModelManifestTests(unittest.TestCase):
         self.assertEqual(turnover_ledger.primary_worker_instance, "turnover-ledger")
         self.assertEqual(cost_statistics.auxiliary_refresh_worker_instances, ())
         self.assertEqual(tax_offset.auxiliary_refresh_worker_instances, ("cost-tax",))
-        self.assertEqual(turnover_ledger.auxiliary_refresh_worker_instances, ())
+        self.assertEqual(turnover_ledger.auxiliary_refresh_worker_instances, ("turnover-ledger-secondary",))
         self.assertEqual(cost_statistics.query_owner, "CostStatisticsQueryService")
         self.assertEqual(tax_offset.query_owner, "TaxOffsetQueryService")
         self.assertEqual(turnover_ledger.query_owner, "TurnoverLedgerQueryService")

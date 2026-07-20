@@ -707,14 +707,19 @@ def _current_bank_auto_tag_rules_version(app_settings_service: AppSettingsServic
 
 
 def _infer_worker_kind(args: argparse.Namespace) -> str:
-    enabled = []
+    enabled: list[RuntimeWorkerRegistration] = []
     for registration in worker_registrations():
         if not registration.handler_flags:
             continue
         attr_names = [_argparse_attr_name(flag) for flag in registration.handler_flags]
         if any(bool(getattr(args, attr_name, False)) for attr_name in attr_names):
-            enabled.append(registration.worker_kind)
-    return enabled[0] if len(enabled) == 1 else "runtime"
+            enabled.append(registration)
+    if len(enabled) == 1:
+        return enabled[0].worker_kind
+    contracts = {(registration.handler_flags, registration.event_types) for registration in enabled}
+    if enabled and len(contracts) == 1:
+        return enabled[0].worker_kind
+    return "runtime"
 
 
 def _apply_registration_args(

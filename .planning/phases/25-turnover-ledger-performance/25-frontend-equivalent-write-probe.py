@@ -56,15 +56,39 @@ def target_rows(payload: dict[str, object]) -> dict[str, dict[str, object]]:
     return rows
 
 
-def wait_barrier(targets: list[dict[str, object]], *, token: str, timeout_seconds: float = 20.0) -> tuple[dict[str, object], float, int]:
+def wait_barrier(
+    targets: list[dict[str, object]],
+    *,
+    token: str,
+    timeout_seconds: float = 20.0,
+) -> tuple[dict[str, object], float, int, list[dict[str, object]]]:
     started = time.monotonic()
     polls = 0
+    timeline: list[dict[str, object]] = []
     while time.monotonic() - started <= timeout_seconds:
-        payload, _ = request_json("/api/operation-barrier/status", token=token, body={"targets": targets})
+        payload, request_ms = request_json("/api/operation-barrier/status", token=token, body={"targets": targets})
         polls += 1
+        timeline.append(
+            {
+                "elapsed_ms": round((time.monotonic() - started) * 1000.0, 3),
+                "request_ms": round(request_ms, 3),
+                "status": str(payload.get("status") or ""),
+                "targets": [
+                    {
+                        "read_model_key": str(item.get("read_model_key") or ""),
+                        "scope_key": str(item.get("scope_key") or ""),
+                        "status": str(item.get("status") or ""),
+                        "raw_status": str(item.get("raw_status") or ""),
+                        "fresh": bool(item.get("fresh")),
+                    }
+                    for item in list(payload.get("targets") or [])
+                    if isinstance(item, dict)
+                ],
+            }
+        )
         status = str(payload.get("status") or "").strip().lower()
         if bool(payload.get("fresh")) or status == "fresh":
-            return payload, (time.monotonic() - started) * 1000.0, polls
+            return payload, (time.monotonic() - started) * 1000.0, polls, timeline
         if status == "blocked" or list(payload.get("blocked_targets") or []):
             raise RuntimeError(f"operation barrier blocked: {json.dumps(payload, ensure_ascii=False)[:1500]}")
         time.sleep(0.3)
@@ -133,7 +157,7 @@ def run(iterations: int, *, release_sha: str) -> dict[str, object]:
             confirm_targets = list(confirm.get("operation_barrier_targets") or confirm.get("freshness_targets") or [])
             if not confirm_targets:
                 raise RuntimeError("confirm response missing operation barrier targets")
-            _, confirm_fresh_ms, confirm_polls = wait_barrier(confirm_targets, token=token)
+            _, confirm_fresh_ms, confirm_polls, confirm_timeline = wait_barrier(confirm_targets, token=token)
             confirm_reload_ms, confirm_observed = assert_visibility(linked=True, case_id=active_case_id, token=token)
 
             withdraw, withdraw_command_ms = request_json(
@@ -147,7 +171,7 @@ def run(iterations: int, *, release_sha: str) -> dict[str, object]:
             withdraw_targets = list(withdraw.get("operation_barrier_targets") or withdraw.get("freshness_targets") or [])
             if not withdraw_targets:
                 raise RuntimeError("withdraw response missing operation barrier targets")
-            _, withdraw_fresh_ms, withdraw_polls = wait_barrier(withdraw_targets, token=token)
+            _, withdraw_fresh_ms, withdraw_polls, withdraw_timeline = wait_barrier(withdraw_targets, token=token)
             withdraw_reload_ms, withdraw_observed = assert_visibility(linked=False, case_id=None, token=token)
             active_case_id = None
             cycles.append(
@@ -160,6 +184,7 @@ def run(iterations: int, *, release_sha: str) -> dict[str, object]:
                         "response_to_visible_ms": round(confirm_fresh_ms + confirm_reload_ms, 3),
                         "click_to_visible_ms": round(confirm_command_ms + confirm_fresh_ms + confirm_reload_ms, 3),
                         "barrier_polls": confirm_polls,
+                        "barrier_timeline": confirm_timeline,
                         "targets": confirm_targets,
                         "observed": confirm_observed,
                     },
@@ -170,6 +195,7 @@ def run(iterations: int, *, release_sha: str) -> dict[str, object]:
                         "response_to_visible_ms": round(withdraw_fresh_ms + withdraw_reload_ms, 3),
                         "click_to_visible_ms": round(withdraw_command_ms + withdraw_fresh_ms + withdraw_reload_ms, 3),
                         "barrier_polls": withdraw_polls,
+                        "barrier_timeline": withdraw_timeline,
                         "targets": withdraw_targets,
                         "observed": withdraw_observed,
                     },
@@ -184,7 +210,7 @@ def run(iterations: int, *, release_sha: str) -> dict[str, object]:
                     body={"cash_closure_case_id": active_case_id, "note": "Codex automatic probe recovery"},
                 )
                 targets = list(response.get("operation_barrier_targets") or response.get("freshness_targets") or [])
-                _, recovery_fresh_ms, recovery_polls = wait_barrier(targets, token=token)
+                _, recovery_fresh_ms, recovery_polls, recovery_timeline = wait_barrier(targets, token=token)
                 recovery_reload_ms, recovery_observed = assert_visibility(linked=False, case_id=None, token=token)
                 recovery = {
                     "status": "pass",
@@ -192,6 +218,7 @@ def run(iterations: int, *, release_sha: str) -> dict[str, object]:
                     "response_to_fresh_ms": round(recovery_fresh_ms, 3),
                     "reload_ms": round(recovery_reload_ms, 3),
                     "barrier_polls": recovery_polls,
+                    "barrier_timeline": recovery_timeline,
                     "observed": recovery_observed,
                 }
                 active_case_id = None

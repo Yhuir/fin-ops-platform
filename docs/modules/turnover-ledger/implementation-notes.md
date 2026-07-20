@@ -685,3 +685,9 @@ git diff --check
 - 修复保持 turnover 页面 I/O 和状态机不变，只在 owner repository 内把 history replacement 改为同事务的单次批量删除 + 单次批量写入，并删除逐 case/逐 event 旧循环。没有新增页面专用事实源、缓存、worker、API 或 fallback，不改变其他页面的 relation 语义。
 - 本地证据：25 条历史的 statement-count 测试通过；独立 PostgreSQL 17 空库应用 0001–0114 后，25 条 history 和全部 relation foreign key 正确落库；command/UoW/API 回归通过。
 - 生产门不变：发布精确 SHA 后，两轮 confirm/withdraw 都必须满足 command p95 `<=1000ms`、response-to-fresh p95 `<=2000ms`、任一 hard max `<=3000ms`；最终 fixture 未关联、queue drained、页面及跨页面 Audit 通过，才能声明外部往来页面完成。
+
+## 2026-07-20 - 跨月 projection drain 并行化
+
+- 历史批量写发布后，稳定样本确认 command 为 `1.24s`，但 response-to-fresh 仍为 `4.89s`。逐 target 时间线证明 `workbench_relation:2026-02/03` 在 `1.22s` 内 fresh，而 `turnover_ledger:2026-03/02` 依次在 `3.94s/4.89s` fresh；根因是两个独立月份事件由单 worker 串行 claim。
+- 方案只新增 `turnover-ledger-secondary` auxiliary consumer，复用同一个 handler、durable queue、source version 和 repository。不同月份可并行；同 event 仍由 PostgreSQL 原子 claim 排他。页面 query、写 facade、operation barrier、read model shape 与其它页面 fan-out 不变。
+- 不增加 Redis、表、API、projection 副本、scope lane、兼容 fallback 或新抽象；primary 不移除，因为它仍是 App Status owner 和正式 worker。最终是否达标只由发布后的可逆 confirm/withdraw 时间线、40 样本只读性能、Page Audit、queue drain 和 fixture 恢复共同判定。
