@@ -313,6 +313,40 @@ class PostgresWorkbenchFormalRelationFactRepositoryTests(unittest.TestCase):
         self.assertEqual(result.active_relations[0].case_id, "case:decision:historical")
         self.assertEqual(result.active_relations[0].member_keys, (("oa", "oa-1"), ("invoice", "inv-1")))
 
+    def test_single_member_bank_batch_relation_is_a_claim_not_a_formal_anchor(self) -> None:
+        connection = FakeConnection(
+            bank_rows=[bank_row("txn-1")],
+            active_rows=[
+                {
+                    "case_id": "no_oa_batch_001",
+                    "relation_mode": "bank_flow_rule_batch",
+                    "row_ids": ["txn-1"],
+                    "row_types": ["bank"],
+                }
+            ],
+        )
+
+        result = PostgresWorkbenchFormalRelationFactRepository(connection).load_batch(["2026-05"])
+
+        self.assertEqual(result.facts, ())
+        self.assertEqual(result.active_relations, ())
+
+    def test_single_member_manual_relation_remains_invalid(self) -> None:
+        connection = FakeConnection(
+            bank_rows=[bank_row("txn-1")],
+            active_rows=[
+                {
+                    "case_id": "case:invalid",
+                    "relation_mode": "manual_confirmed",
+                    "row_ids": ["txn-1"],
+                    "row_types": ["bank"],
+                }
+            ],
+        )
+
+        with self.assertRaisesRegex(ValueError, "at least two row_ids"):
+            PostgresWorkbenchFormalRelationFactRepository(connection).load_batch(["2026-05"])
+
     def test_explicit_user_withdrawal_records_exact_typed_fingerprint(self) -> None:
         before_relation = {
             "case_id": "CASE-WITHDRAWN",

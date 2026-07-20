@@ -41,6 +41,7 @@ _WITHDRAW_EVENTS = frozenset(
         "withdraw_relation",
     }
 )
+_SINGLE_MEMBER_CLAIM_RELATION_MODES = frozenset({"bank_flow_rule_batch", "no_oa_bank_batch"})
 
 
 class PostgresWorkbenchFormalRelationFactRepository:
@@ -160,7 +161,7 @@ class PostgresWorkbenchFormalRelationFactRepository:
 
         active_rows = self._connection.fetch_all(
             """
-            select case_id, row_ids, row_types
+            select case_id, relation_mode, row_ids, row_types
             from app.workbench_pair_relations
             where status = 'active'
             order by case_id
@@ -178,7 +179,17 @@ class PostgresWorkbenchFormalRelationFactRepository:
             """,
             (sorted(_WITHDRAW_EVENTS),),
         )
-        active_relations = tuple(_active_anchor(row) for row in active_rows)
+        single_member_claims = {
+            claim
+            for row in active_rows
+            if (claim := _single_member_claim(row)) is not None
+        }
+        facts = tuple(fact for fact in facts if fact.member_key not in single_member_claims)
+        active_relations = tuple(
+            _active_anchor(row)
+            for row in active_rows
+            if _single_member_claim(row) is None
+        )
         withdrawals = frozenset(
             fingerprint
             for row in history_rows
@@ -708,6 +719,17 @@ def _active_anchor(row: dict[str, Any]) -> ActiveFormalRelationAnchor:
         row_type = row_types[index] if index < len(row_types) and row_types[index] else row_type_for_workbench_row_id(row_id)
         members.append(canonical_member_key(row_type, row_id))
     return ActiveFormalRelationAnchor(case_id=case_id, member_keys=tuple(members))
+
+
+def _single_member_claim(row: dict[str, Any]) -> tuple[str, str] | None:
+    relation_mode = text(row.get("relation_mode"))
+    case_id = text(row.get("case_id"))
+    row_ids = [str(item).strip() for item in list(row.get("row_ids") or []) if str(item).strip()]
+    if relation_mode not in _SINGLE_MEMBER_CLAIM_RELATION_MODES or not case_id or len(row_ids) != 1:
+        return None
+    row_types = [str(item).strip().lower() for item in list(row.get("row_types") or [])]
+    row_type = row_types[0] if row_types and row_types[0] else row_type_for_workbench_row_id(row_ids[0])
+    return canonical_member_key(row_type, row_ids[0])
 
 
 def _withdrawal_fingerprints(row: dict[str, Any]) -> tuple[str, ...]:

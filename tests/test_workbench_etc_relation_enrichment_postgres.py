@@ -46,7 +46,9 @@ class WorkbenchEtcRelationEnrichmentPostgresTests(unittest.TestCase):
         fact_batch = repository.load_batch(["2026-06"])
         candidates = repository.load_etc_batch_link_candidates(["2026-06"])
 
-        self.assertIn(("oa", OA_ROW_ID), {fact.member_key for fact in fact_batch.facts})
+        fact_member_keys = {fact.member_key for fact in fact_batch.facts}
+        self.assertIn(("oa", OA_ROW_ID), fact_member_keys)
+        self.assertNotIn(("bank", "txn-claimed"), fact_member_keys)
         self.assertEqual(len(candidates), 1)
         self.assertEqual(candidates[0]["external_etc_batch_id"], EXTERNAL_BATCH_ID)
         self.assertEqual(candidates[0]["business_batch_id"], BUSINESS_BATCH_ID)
@@ -287,6 +289,27 @@ class WorkbenchEtcRelationEnrichmentPostgresTests(unittest.TestCase):
             )
             """,
             (CASE_ID, OA_ROW_ID),
+        )
+        self.connection.execute(
+            """
+            insert into app.bank_transactions(
+                legacy_mongo_id, account_no, txn_direction, counterparty_name_raw,
+                amount, signed_amount, txn_date, txn_month, status, raw_payload
+            ) values (
+                'txn-claimed', '6222', 'outflow', '已被批次占用',
+                10, -10, '2026-06-22', '2026-06-01', 'active', '{}'::jsonb
+            )
+            """
+        )
+        self.connection.execute(
+            """
+            insert into app.workbench_pair_relations(
+                case_id, relation_mode, status, month_scope, row_ids, row_types
+            ) values (
+                'no_oa_batch_claimed', 'bank_flow_rule_batch', 'active', '2026-06-01',
+                array['txn-claimed'], array['bank']
+            )
+            """
         )
 
 
