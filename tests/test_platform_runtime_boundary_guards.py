@@ -4686,6 +4686,20 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"TurnoverLedgerWorkbenchPairPort keeps broad pair service surface {forbidden}")
         if "workbench_relation_command_unavailable" not in port_source:
             violations.append("TurnoverLedgerWorkbenchPairPort does not fail fast when relation command service is unavailable")
+        for required in (
+            "def prepare_turnover_manual_closure_write(",
+            'getattr(relation_command_service, "prepare_confirm_relation", None)',
+            "confirm_preparation = prepare(",
+            "preparation=preparation.confirm_preparation",
+        ):
+            if required not in port_source:
+                violations.append(f"TurnoverLedgerWorkbenchPairPort is missing prepared relation write contract {required}")
+        for removed in (
+            "assert_turnover_manual_closure_write_precondition",
+            "_active_relations_for_row_ids_from_command",
+        ):
+            if removed in port_source:
+                violations.append(f"TurnoverLedgerWorkbenchPairPort keeps removed duplicate read path {removed}")
         if "enqueue_read_model_refreshes_in_transaction" not in dirty_writer_source:
             violations.append("TurnoverLedgerDirtyOutboxWriter does not use transaction-bound batch enqueue")
         if ".enqueue_refresh(" in uow_class_source:
@@ -4698,6 +4712,28 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"{name} does not expose the batched refresh contract")
             if "def enqueue_refresh(" in writer_source:
                 violations.append(f"{name} keeps the removed single-refresh contract")
+
+        self.assertEqual(violations, [])
+
+    def test_operation_barrier_uses_target_scoped_runtime_snapshot(self) -> None:
+        server_path = APP_ROOT / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        server_tree = _parse(server_path)
+        handler_source = _function_source(server_tree, server_source, "_handle_api_operation_barrier_status")
+        snapshot_source = _function_source(server_tree, server_source, "_operation_barrier_runtime_snapshot")
+        monitoring_source = (SERVICES_ROOT / "runtime_monitoring.py").read_text(encoding="utf-8")
+
+        violations: list[str] = []
+        if "self._operation_barrier_runtime_snapshot(targets)" not in handler_source:
+            violations.append("operation barrier handler does not pass the requested targets to the runtime boundary")
+        if 'getattr(state_store, "operation_barrier_runtime_snapshot", None)' not in snapshot_source:
+            violations.append("operation barrier does not use the target-scoped state-store contract")
+        if "app_status_runtime_snapshot" in snapshot_source:
+            violations.append("operation barrier still falls back to the full App Status runtime snapshot")
+        if "def operation_barrier_runtime_snapshot(" not in monitoring_source:
+            violations.append("runtime monitoring does not expose the target-scoped barrier query")
+        if "_app_status_read_model_statuses(normalized_targets)" not in monitoring_source:
+            violations.append("target-scoped barrier query does not bound read-model status I/O")
 
         self.assertEqual(violations, [])
 

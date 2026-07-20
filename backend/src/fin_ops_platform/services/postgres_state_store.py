@@ -248,6 +248,12 @@ class PostgresStateStore:
                 "outbox_statuses": {"__runtime__": dict(payload)},
             }
 
+    def operation_barrier_runtime_snapshot(
+        self,
+        targets: list[dict[str, str]],
+    ) -> dict[str, dict[str, dict[str, Any]]]:
+        return RuntimeMonitoringRepository(self._connection).operation_barrier_runtime_snapshot(targets)
+
     def record_read_model_readiness(
         self,
         *,

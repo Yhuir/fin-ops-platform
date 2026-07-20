@@ -277,8 +277,11 @@ class AppHealthApiTests(unittest.TestCase):
 
     def test_operation_barrier_status_returns_runtime_readiness_contract(self) -> None:
         app = build_application()
-        app._state_store = SimpleNamespace(
-            app_status_runtime_snapshot=lambda: {
+        requested_targets: list[list[dict[str, str]]] = []
+
+        def operation_barrier_runtime_snapshot(targets: list[dict[str, str]]) -> dict[str, object]:
+            requested_targets.append(targets)
+            return {
                 "read_model_statuses": {
                     "workbench_relation": {
                         "status": "refreshing",
@@ -295,6 +298,9 @@ class AppHealthApiTests(unittest.TestCase):
                 "outbox_statuses": {},
                 "worker_statuses": {"workbench-relation": {"status": "ready"}},
             }
+
+        app._state_store = SimpleNamespace(
+            operation_barrier_runtime_snapshot=operation_barrier_runtime_snapshot,
         )
 
         response = app.handle_request(
@@ -310,6 +316,25 @@ class AppHealthApiTests(unittest.TestCase):
         self.assertEqual(payload["targets"][0]["read_model_key"], "workbench_relation")
         self.assertEqual(payload["targets"][0]["scope_key"], "2026-02")
         self.assertEqual(payload["targets"][0]["worker_status"], "ready")
+        self.assertEqual(
+            requested_targets,
+            [[{"read_model_key": "workbench_relation", "scope_type": "workbench_relation", "scope_key": "2026-02"}]],
+        )
+
+    def test_operation_barrier_fails_closed_without_target_scoped_runtime_provider(self) -> None:
+        app = build_application()
+        app._state_store = SimpleNamespace(app_status_runtime_snapshot=lambda: {})
+
+        response = app.handle_request(
+            "POST",
+            "/api/operation-barrier/status",
+            body=json.dumps({"targets": [{"read_model_key": "workbench_relation", "scope_key": "2026-02"}]}),
+        )
+        payload = json.loads(response.body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["status"], "blocked")
+        self.assertEqual(payload["targets"][0]["reason"], "runtime_unavailable")
 
     def test_operation_barrier_rejects_invalid_target_contract(self) -> None:
         app = build_application()

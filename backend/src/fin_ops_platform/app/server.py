@@ -218,6 +218,7 @@ from fin_ops_platform.services.oa_attachment_invoice_linking import (
 )
 from fin_ops_platform.services.operation_freshness_barrier import (
     OperationFreshnessBarrierService,
+    OperationFreshnessTarget,
     targets_from_payload,
 )
 from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecyclePolicy
@@ -3593,16 +3594,36 @@ class Application:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_operation_barrier_request", "message": str(exc)},
             )
-        service = OperationFreshnessBarrierService(runtime_snapshot_provider=self._operation_barrier_runtime_snapshot)
+        service = OperationFreshnessBarrierService(
+            runtime_snapshot_provider=lambda: self._operation_barrier_runtime_snapshot(targets)
+        )
         return self._json_response(HTTPStatus.OK, service.status_payload(targets))
 
-    def _operation_barrier_runtime_snapshot(self) -> dict[str, object]:
+    def _operation_barrier_runtime_snapshot(self, targets: list[OperationFreshnessTarget]) -> dict[str, object]:
         state_store = getattr(self, "_state_store", None)
-        snapshot_loader = getattr(state_store, "app_status_runtime_snapshot", None)
+        snapshot_loader = getattr(state_store, "operation_barrier_runtime_snapshot", None)
         if callable(snapshot_loader):
-            snapshot = snapshot_loader()
+            snapshot = snapshot_loader(
+                [
+                    {
+                        "read_model_key": target.read_model_key,
+                        "scope_type": target.scope_type or "",
+                        "scope_key": target.scope_key,
+                    }
+                    for target in targets
+                ]
+            )
             return snapshot if isinstance(snapshot, dict) else {}
-        return {"read_model_statuses": {}, "outbox_statuses": {}, "worker_statuses": {}}
+        return {
+            "read_model_statuses": {
+                "__runtime__": {
+                    "status": "unavailable",
+                    "last_error": "operation barrier runtime snapshot provider unavailable",
+                }
+            },
+            "outbox_statuses": {},
+            "worker_statuses": {},
+        }
 
     def _handle_api_app_health_stream(self, headers: dict[str, str] | None) -> Response:
         session, error_response = self._resolve_app_health_session(headers)

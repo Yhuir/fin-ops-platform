@@ -761,7 +761,12 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
 
         class RecordingRelationCommandService:
             def __init__(self) -> None:
+                self.prepare_calls: list[dict[str, object]] = []
                 self.confirm_calls: list[dict[str, object]] = []
+
+            def prepare_confirm_relation(self, **kwargs: object) -> object:
+                self.prepare_calls.append(dict(kwargs))
+                return SimpleNamespace(active_relations=[])
 
             def confirm_relation(self, **kwargs: object) -> dict[str, object]:
                 self.confirm_calls.append(dict(kwargs))
@@ -781,6 +786,11 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         port = module.TurnoverLedgerWorkbenchPairPort(
             relation_command_service_factory=lambda transaction: command,
         )
+        preparation = port.prepare_turnover_manual_closure_write(
+            bank_row_ids=["bank_txn_1", "bank_txn_2", "bank_txn_3"],
+            affected_months=["2026-02"],
+            transaction=object(),
+        )
 
         relation = port.create_turnover_manual_closure(
             relation={
@@ -794,6 +804,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             note="manual closure",
             affected_months=["2026-02"],
             transaction=object(),
+            preparation=preparation,
         )
 
         self.assertEqual(relation["case_id"], "turnover:turnover_rel_closure")
@@ -812,45 +823,48 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertFalse(call["special_metadata"]["requires_invoice"])
         self.assertEqual(call["special_metadata"]["paired_requirement_source"], "turnover_ledger_manual_closure")
         self.assertEqual(call["history_operation_type"], "turnover_manual_closure_confirm")
+        self.assertIs(call["preparation"], preparation.confirm_preparation)
 
-    def test_turnover_manual_closure_precondition_keeps_cross_month_scope_keys(self) -> None:
+    def test_turnover_manual_closure_preparation_keeps_cross_month_scope_keys(self) -> None:
         module = self._write_adapters_module()
 
         class RecordingRelationCommandService:
             def __init__(self) -> None:
-                self.precondition_calls: list[dict[str, object]] = []
+                self.prepare_calls: list[dict[str, object]] = []
 
-            def assert_write_precondition(self, **kwargs: object) -> dict[str, object]:
-                self.precondition_calls.append(dict(kwargs))
-                return {"status": "fresh"}
+            def prepare_confirm_relation(self, **kwargs: object) -> object:
+                self.prepare_calls.append(dict(kwargs))
+                return SimpleNamespace(active_relations=[])
 
         command = RecordingRelationCommandService()
         port = module.TurnoverLedgerWorkbenchPairPort(
             relation_command_service_factory=lambda transaction: command,
         )
 
-        port.assert_turnover_manual_closure_write_precondition(
+        preparation = port.prepare_turnover_manual_closure_write(
             bank_row_ids=["bank-april", "bank-june"],
             affected_months=["2026-04", "2026-06"],
             transaction=object(),
         )
 
-        self.assertEqual(len(command.precondition_calls), 1)
-        self.assertEqual(command.precondition_calls[0]["row_ids"], ["bank-april", "bank-june"])
-        self.assertEqual(command.precondition_calls[0]["month_scope"], "all")
-        self.assertEqual(command.precondition_calls[0]["scope_keys_hint"], ["2026-04", "2026-06"])
+        self.assertEqual(len(command.prepare_calls), 1)
+        self.assertEqual(command.prepare_calls[0]["row_ids"], ["bank-april", "bank-june"])
+        self.assertEqual(command.prepare_calls[0]["row_types"], ["bank", "bank"])
+        self.assertEqual(command.prepare_calls[0]["month_scope"], "all")
+        self.assertEqual(command.prepare_calls[0]["scope_keys_hint"], ["2026-04", "2026-06"])
+        self.assertEqual(preparation.bank_row_ids, ("bank-april", "bank-june"))
 
     def test_turnover_manual_closure_merges_existing_oa_bank_relations(self) -> None:
         module = self._write_adapters_module()
 
         class RecordingRelationCommandService:
             def __init__(self) -> None:
-                self.active_calls: list[dict[str, object]] = []
+                self.prepare_calls: list[dict[str, object]] = []
                 self.confirm_calls: list[dict[str, object]] = []
 
-            def active_relations_for_row_ids(self, row_ids: list[str]) -> list[dict[str, object]]:
-                self.active_calls.append({"row_ids": list(row_ids)})
-                return [
+            def prepare_confirm_relation(self, **kwargs: object) -> object:
+                self.prepare_calls.append(dict(kwargs))
+                return SimpleNamespace(active_relations=[
                     {
                         "case_id": "case-oa-1",
                         "row_ids": ["oa-1", "bank-1"],
@@ -867,7 +881,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
                         "relation_mode": "manual_confirmed",
                         "month_scope": "2026-02",
                     },
-                ]
+                ])
 
             def confirm_relation(self, **kwargs: object) -> dict[str, object]:
                 self.confirm_calls.append(dict(kwargs))
@@ -887,6 +901,11 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         port = module.TurnoverLedgerWorkbenchPairPort(
             relation_command_service_factory=lambda transaction: command,
         )
+        preparation = port.prepare_turnover_manual_closure_write(
+            bank_row_ids=["bank-1", "bank-2", "bank-3"],
+            affected_months=["2026-02"],
+            transaction=object(),
+        )
 
         relation = port.create_turnover_manual_closure(
             relation={
@@ -900,10 +919,11 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             note="manual closure",
             affected_months=["2026-02"],
             transaction=object(),
+            preparation=preparation,
         )
 
         self.assertEqual(relation["case_id"], "turnover:turnover_rel_closure")
-        self.assertEqual(command.active_calls, [{"row_ids": ["bank-1", "bank-2", "bank-3"]}])
+        self.assertEqual(len(command.prepare_calls), 1)
         self.assertEqual(len(command.confirm_calls), 1)
         call = command.confirm_calls[0]
         self.assertEqual(call["case_id"], "turnover:turnover_rel_closure")
@@ -924,8 +944,8 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         module = self._write_adapters_module()
 
         class ExistingClosureRelationCommandService:
-            def active_relations_for_row_ids(self, _row_ids: list[str]) -> list[dict[str, object]]:
-                return [
+            def prepare_confirm_relation(self, **_kwargs: object) -> object:
+                return SimpleNamespace(active_relations=[
                     {
                         "case_id": "turnover:existing_closure",
                         "row_ids": ["bank-1", "bank-2"],
@@ -933,13 +953,18 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
                         "status": "active",
                         "relation_mode": "turnover_manual_closure",
                     }
-                ]
+                ])
 
             def confirm_relation(self, **_kwargs: object) -> dict[str, object]:
                 raise AssertionError("existing turnover closure must block confirm before writing.")
 
         port = module.TurnoverLedgerWorkbenchPairPort(
             relation_command_service_factory=lambda transaction: ExistingClosureRelationCommandService(),
+        )
+        preparation = port.prepare_turnover_manual_closure_write(
+            bank_row_ids=["bank-1", "bank-2", "bank-3"],
+            affected_months=["2026-02"],
+            transaction=object(),
         )
 
         with self.assertRaises(module.TurnoverLedgerWritePreconditionError) as context:
@@ -955,6 +980,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
                 note="manual closure",
                 affected_months=["2026-02"],
                 transaction=object(),
+                preparation=preparation,
             )
 
         self.assertEqual(context.exception.error_code, "turnover_relation_conflict")
@@ -966,15 +992,8 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         port = module.TurnoverLedgerWorkbenchPairPort()
 
         with self.assertRaises(module.TurnoverLedgerWritePreconditionError) as context:
-            port.create_turnover_manual_closure(
-                relation={
-                    "relation_id": "turnover_rel_closure",
-                    "principal_amount": "100.00",
-                    "settled_amount": "100.00",
-                },
+            port.prepare_turnover_manual_closure_write(
                 bank_row_ids=["bank_txn_1", "bank_txn_2"],
-                actor_id="finance-user",
-                note="manual closure",
                 affected_months=["2026-02"],
                 transaction=object(),
             )
@@ -1734,10 +1753,15 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
                             confirm_zero_difference_closure=self.confirm_zero_difference_closure,
                         ),
                         workbench_pair_port=SimpleNamespace(
+                            prepare_turnover_manual_closure_write=self.prepare_turnover_manual_closure_write,
                             create_turnover_manual_closure=self.create_turnover_manual_closure,
                         ),
                     )
                 )
+
+            @staticmethod
+            def prepare_turnover_manual_closure_write(**_kwargs: object) -> object:
+                return SimpleNamespace(preparation_id="prepared-closure")
 
             def confirm_zero_difference_closure(
                 self,
@@ -1773,6 +1797,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
                 note: str | None,
                 affected_months: list[str],
                 transaction: object,
+                preparation: object,
             ) -> dict[str, object]:
                 self.pair_calls.append(
                     {
@@ -1782,6 +1807,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
                         "note": note,
                         "affected_months": list(affected_months),
                         "transaction": transaction,
+                        "preparation": preparation,
                     }
                 )
                 return {
@@ -1808,6 +1834,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(len(uow.closure_calls), 1)
         self.assertEqual(len(uow.pair_calls), 1)
         self.assertEqual(uow.pair_calls[0]["affected_months"], ["2026-02"])
+        self.assertEqual(getattr(uow.pair_calls[0]["preparation"], "preparation_id"), "prepared-closure")
 
     def test_closure_request_boundary_returns_workbench_visibility_freshness_targets(self) -> None:
         module = self._write_adapters_module()

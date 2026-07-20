@@ -17,6 +17,7 @@ class FakeRelationRepository:
         self.load_calls = 0
         self.scoped_load_calls: list[dict[str, object]] = []
         self.save_calls: list[dict[str, object]] = []
+        self.lock_calls: list[dict[str, object]] = []
 
     def load_workbench_pair_relations(self) -> dict[str, object]:
         self.load_calls += 1
@@ -51,6 +52,22 @@ class FakeRelationRepository:
             }
         )
         self.snapshot = deepcopy(snapshot)
+
+    def acquire_relation_member_locks(
+        self,
+        row_ids: list[str],
+        *,
+        row_types: list[str] | None = None,
+        case_ids: list[str] | None = None,
+    ) -> list[str]:
+        self.lock_calls.append(
+            {
+                "row_ids": list(row_ids or []),
+                "row_types": list(row_types or []),
+                "case_ids": list(case_ids or []),
+            }
+        )
+        return list(row_ids or [])
 
 
 class FakeRelationFacade:
@@ -145,6 +162,82 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
             {"row_ids": ["bank-1", "oa-1"], "case_ids": ["case-new"]},
         )
         self.assertEqual(repository.save_calls[-1]["changed_case_ids"], {"case-new"})
+
+    def test_prepared_confirm_reuses_freshness_locks_and_scoped_snapshot(self) -> None:
+        repository = FakeRelationRepository(
+            {
+                "pair_relations": {
+                    "case-oa": {
+                        "case_id": "case-oa",
+                        "row_ids": ["oa-1", "bank-1"],
+                        "row_types": ["oa", "bank"],
+                        "status": "active",
+                        "relation_mode": "manual_confirmed",
+                        "month_scope": "2026-05",
+                    }
+                }
+            }
+        )
+        facade = FakeRelationFacade()
+        service = WorkbenchRelationCommandService(
+            relation_repository=repository,
+            relation_facade=facade,
+            require_fresh_relations=True,
+        )
+
+        preparation = service.prepare_confirm_relation(
+            row_ids=["bank-1"],
+            row_types=["bank"],
+            month_scope="2026-05",
+            scope_keys_hint=["2026-05"],
+        )
+        result = service.confirm_relation(
+            case_id="turnover:case-1",
+            row_ids=["oa-1", "bank-1"],
+            row_types=["oa", "bank"],
+            relation_mode="turnover_manual_closure",
+            actor_id="finance-user",
+            month_scope="2026-05",
+            before_relations=list(preparation.active_relations),
+            replace_existing=True,
+            preparation=preparation,
+        )
+
+        self.assertEqual(result["status"], "confirmed")
+        self.assertEqual(len(facade.calls), 1)
+        self.assertEqual(repository.scoped_load_calls, [{"row_ids": ["bank-1"], "case_ids": []}])
+        self.assertEqual(
+            repository.lock_calls,
+            [
+                {"row_ids": ["bank-1"], "row_types": ["bank"], "case_ids": []},
+                {"row_ids": ["oa-1"], "row_types": ["oa"], "case_ids": ["turnover:case-1"]},
+            ],
+        )
+
+    def test_prepared_confirm_rejects_rows_outside_prepared_snapshot(self) -> None:
+        service = WorkbenchRelationCommandService(
+            relation_repository=FakeRelationRepository(),
+            relation_facade=FakeRelationFacade(),
+            require_fresh_relations=True,
+        )
+        preparation = service.prepare_confirm_relation(
+            row_ids=["bank-1"],
+            row_types=["bank"],
+            month_scope="2026-05",
+        )
+
+        with self.assertRaises(WorkbenchRelationCommandError) as context:
+            service.confirm_relation(
+                case_id="turnover:case-1",
+                row_ids=["bank-1", "oa-unprepared"],
+                row_types=["bank", "oa"],
+                relation_mode="turnover_manual_closure",
+                actor_id="finance-user",
+                month_scope="2026-05",
+                preparation=preparation,
+            )
+
+        self.assertEqual(context.exception.error_code, "workbench_relation_preparation_conflict")
 
     def test_preview_withdraw_relation_returns_locked_previous_state(self) -> None:
         previous_relation = {

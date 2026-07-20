@@ -341,14 +341,14 @@ class TurnoverLedgerWriteFacade:
 
         def handler(context: Any) -> dict[str, object]:
             workbench_pair_port = getattr(context, "workbench_pair_port", None)
-            if workbench_pair_port is not None:
-                precheck = getattr(workbench_pair_port, "assert_turnover_manual_closure_write_precondition", None)
-                if callable(precheck):
-                    precheck(
-                        bank_row_ids=list(normalized_bank_row_ids),
-                        affected_months=list(normalized_months),
-                        transaction=context.transaction,
-                    )
+            prepare = getattr(workbench_pair_port, "prepare_turnover_manual_closure_write", None)
+            if not callable(prepare):
+                raise RuntimeError("turnover manual closure preparation boundary is unavailable.")
+            preparation = prepare(
+                bank_row_ids=list(normalized_bank_row_ids),
+                affected_months=list(normalized_months),
+                transaction=context.transaction,
+            )
             result = context.relation_repository.confirm_zero_difference_closure(
                 bank_row_ids=list(normalized_bank_row_ids),
                 actor_id=actor_id,
@@ -363,6 +363,7 @@ class TurnoverLedgerWriteFacade:
                 note=note,
                 affected_months=list(normalized_months),
                 transaction=context.transaction,
+                preparation=preparation,
             )
             return {
                 "turnover_relation": relation,

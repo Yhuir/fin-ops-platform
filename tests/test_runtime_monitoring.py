@@ -559,6 +559,76 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertIn("cost-tax", snapshot["worker_statuses"])
         self.assertNotIn("cost-tax-read-model", snapshot["worker_statuses"])
 
+    def test_operation_barrier_runtime_snapshot_queries_only_requested_scopes(self) -> None:
+        class TargetScopedConnection:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+            def fetch_all(self, sql: str, params: tuple[object, ...] = ()) -> list[dict[str, object]]:
+                self.calls.append((sql, params))
+                normalized = " ".join(sql.lower().split())
+                if "from read_model.app_status_readiness" in normalized and "select read_model_key" in normalized:
+                    return [
+                        {
+                            "read_model_key": "turnover_ledger",
+                            "scope_type": "turnover_ledger",
+                            "scope_key": "2026-02",
+                            "status": "fresh",
+                            "schema_version": "7",
+                            "source_versions": {},
+                            "row_count": 2,
+                            "generated_at": "2026-07-20T01:00:00+00:00",
+                            "updated_at": "2026-07-20T01:00:01+00:00",
+                            "last_error": None,
+                        }
+                    ]
+                if "from job.read_model_dirty_scopes dirty" in normalized:
+                    return []
+                if "from job.outbox_events e" in normalized:
+                    return []
+                if "from job.runtime_worker_heartbeats" in normalized:
+                    return [
+                        {
+                            "worker_id": "worker-turnover",
+                            "worker_instance": "turnover-ledger",
+                            "worker_kind": "turnover-ledger-read-model",
+                            "status": "running",
+                            "heartbeat_lag_seconds": 1.0,
+                            "payload": {"worker_instance": "turnover-ledger"},
+                        }
+                    ]
+                raise AssertionError(normalized)
+
+        connection = TargetScopedConnection()
+        repository = RuntimeMonitoringRepository(connection)
+
+        snapshot = repository.operation_barrier_runtime_snapshot(
+            [
+                {
+                    "read_model_key": "turnover_ledger",
+                    "scope_type": "turnover_ledger",
+                    "scope_key": "2026-02",
+                },
+                {
+                    "read_model_key": "turnover_ledger",
+                    "scope_type": "turnover_ledger",
+                    "scope_key": "2026-02",
+                },
+            ]
+        )
+
+        self.assertEqual(snapshot["read_model_statuses"]["turnover_ledger"]["status"], "fresh")
+        self.assertEqual(snapshot["worker_statuses"]["turnover-ledger"]["status"], "ready")
+        self.assertEqual(set(snapshot["read_model_statuses"]), {"turnover_ledger"})
+        scoped_calls = [call for call in connection.calls if "unnest(%s::text[]" in call[0]]
+        self.assertEqual(len(scoped_calls), 3)
+        for _sql, params in scoped_calls:
+            self.assertEqual(params[1], ["turnover_ledger"])
+            self.assertEqual(params[2], ["2026-02"])
+        worker_call = next(call for call in connection.calls if "from job.runtime_worker_heartbeats" in call[0])
+        self.assertEqual(worker_call[1][0], ["turnover-ledger"])
+        self.assertEqual(worker_call[1][1], ["turnover-ledger-read-model"])
+
     def test_health_summary_counts_worker_mismatches(self) -> None:
         repository = RuntimeMonitoringRepository(FakeWorkerMetricsConnection())
 

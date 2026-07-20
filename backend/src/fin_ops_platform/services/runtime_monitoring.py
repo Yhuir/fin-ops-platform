@@ -229,6 +229,41 @@ class RuntimeMonitoringRepository:
                 "worker_statuses": {"__runtime__": dict(payload)},
             }
 
+    def operation_barrier_runtime_snapshot(
+        self,
+        targets: list[dict[str, str]],
+    ) -> dict[str, dict[str, dict[str, Any]]]:
+        """Return the existing runtime facts for only the requested barrier scopes."""
+        normalized_targets = _normalized_operation_barrier_targets(targets)
+        if not normalized_targets:
+            return {
+                "read_model_statuses": {},
+                "outbox_statuses": {},
+                "worker_statuses": {},
+            }
+        try:
+            return {
+                "read_model_statuses": self._app_status_read_model_statuses(normalized_targets),
+                "outbox_statuses": self._app_status_outbox_statuses(normalized_targets),
+                "worker_statuses": self._app_status_worker_statuses(
+                    {
+                        target["worker_instance"]
+                        for target in normalized_targets
+                        if target["worker_instance"]
+                    }
+                ),
+            }
+        except Exception as exc:
+            payload = {
+                "status": "unavailable",
+                "last_error": str(exc) or exc.__class__.__name__,
+            }
+            return {
+                "read_model_statuses": {"__runtime__": dict(payload)},
+                "outbox_statuses": {"__runtime__": dict(payload)},
+                "worker_statuses": {"__runtime__": dict(payload)},
+            }
+
     def record_read_model_readiness(
         self,
         *,
@@ -314,11 +349,20 @@ class RuntimeMonitoringRepository:
     def app_status_readiness_backfill_fact(self, read_model_key: str, *, tenant_id: str = "default") -> dict[str, Any] | None:
         return _app_status_readiness_backfill_fact(self._connection, read_model_key, tenant_id=tenant_id)
 
-    def _app_status_read_model_statuses(self) -> dict[str, dict[str, Any]]:
-        grouped: dict[str, dict[str, Any]] = self._app_status_readiness_statuses()
+    def _app_status_read_model_statuses(
+        self,
+        targets: list[dict[str, str]] | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        grouped: dict[str, dict[str, Any]] = self._app_status_readiness_statuses(targets)
         definitions_by_scope = read_model_by_scope_type()
+        target_filter_sql, target_filter_params = _operation_barrier_scope_filter_sql(
+            targets,
+            read_model_key_sql=None,
+            scope_type_sql="dirty.scope_type",
+            scope_key_sql="dirty.scope_key",
+        )
         rows = self._connection.fetch_all(
-            """
+            f"""
             select
                 dirty.scope_type,
                 dirty.scope_key,
@@ -340,8 +384,10 @@ class RuntimeMonitoringRepository:
             from job.read_model_dirty_scopes dirty
             where dirty.tenant_id = 'default'
               and dirty.status in ('pending', 'processing', 'failed')
+              {target_filter_sql}
             group by dirty.scope_type, dirty.scope_key, dirty.status
-            """
+            """,
+            target_filter_params,
         )
         for row in rows:
             scope_type = str(row.get("scope_type") or "").strip()
@@ -405,7 +451,15 @@ class RuntimeMonitoringRepository:
                     current["last_error"] = current_error
                 elif str(current.get("status") or "").strip().lower() not in {"failed", "unavailable"}:
                     current.pop("last_error", None)
-        for key, definition in APP_STATUS_READ_MODEL_REGISTRY.items():
+        target_keys = (
+            {target["read_model_key"] for target in targets}
+            if targets is not None
+            else set(APP_STATUS_READ_MODEL_REGISTRY)
+        )
+        for key in target_keys:
+            definition = APP_STATUS_READ_MODEL_REGISTRY.get(key)
+            if definition is None:
+                continue
             grouped.setdefault(
                 key,
                 {
@@ -418,9 +472,18 @@ class RuntimeMonitoringRepository:
             )
         return grouped
 
-    def _app_status_readiness_statuses(self) -> dict[str, dict[str, Any]]:
+    def _app_status_readiness_statuses(
+        self,
+        targets: list[dict[str, str]] | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        target_filter_sql, target_filter_params = _operation_barrier_scope_filter_sql(
+            targets,
+            read_model_key_sql="read_model_key",
+            scope_type_sql="scope_type",
+            scope_key_sql="scope_key",
+        )
         rows = self._connection.fetch_all(
-            """
+            f"""
             select
                 read_model_key,
                 scope_type,
@@ -434,7 +497,9 @@ class RuntimeMonitoringRepository:
                 last_error
             from read_model.app_status_readiness
             where tenant_id = 'default'
-            """
+              {target_filter_sql}
+            """,
+            target_filter_params,
         )
         grouped: dict[str, dict[str, Any]] = {}
         historical_scopes_by_key: dict[str, list[dict[str, Any]]] = {}
@@ -520,7 +585,23 @@ class RuntimeMonitoringRepository:
                 target_scopes.extend(historical_scopes)
         return grouped
 
-    def _app_status_outbox_statuses(self) -> dict[str, dict[str, Any]]:
+    def _app_status_outbox_statuses(
+        self,
+        targets: list[dict[str, str]] | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        target_filter_sql, target_filter_params = _operation_barrier_scope_filter_sql(
+            targets,
+            read_model_key_sql=None,
+            event_type_sql="e.event_type",
+            scope_type_sql=(
+                "coalesce(e.scope_type, e.raw_payload->>'scope_type', "
+                "e.payload->>'scope_type', e.aggregate_type, '')"
+            ),
+            scope_key_sql=(
+                "coalesce(e.scope_key, e.raw_payload->>'scope_key', "
+                "e.payload->>'scope_key', e.aggregate_id, '')"
+            ),
+        )
         rows = self._connection.fetch_all(
             f"""
             select
@@ -592,9 +673,11 @@ class RuntimeMonitoringRepository:
                     and e.publish_status in ('publishing', 'failed')
                 )
             )
+              {target_filter_sql}
               and {_current_effective_outbox_attention_predicate_sql("e")}
             group by e.event_type, 2, 3, 4
-            """
+            """,
+            target_filter_params,
         )
         grouped: dict[str, dict[str, Any]] = {}
         scope_indexes: dict[str, dict[tuple[str, str], dict[str, Any]]] = {}
@@ -646,13 +729,16 @@ class RuntimeMonitoringRepository:
                 grouped[event_type]["scopes"] = list(scope_index.values())
         return grouped
 
-    def _app_status_worker_statuses(self) -> dict[str, dict[str, Any]]:
+    def _app_status_worker_statuses(
+        self,
+        worker_instances: set[str] | None = None,
+    ) -> dict[str, dict[str, Any]]:
         statuses: dict[str, dict[str, Any]] = {}
-        for row in self.dashboard_worker_metrics():
+        for row in self.dashboard_worker_metrics(worker_instances=worker_instances):
             if row.get("required") is False and row.get("current_effective") is False:
                 continue
             instance = str(row.get("worker_instance") or "").strip()
-            if not instance:
+            if not instance or (worker_instances is not None and instance not in worker_instances):
                 continue
             statuses[instance] = {
                 "status": _app_status_worker_status(row.get("status")),
@@ -1770,9 +1856,36 @@ class RuntimeMonitoringRepository:
             )
         return rows
 
-    def dashboard_worker_metrics(self) -> list[dict[str, Any]]:
-        rows = self._connection.fetch_all(
+    def dashboard_worker_metrics(
+        self,
+        *,
+        worker_instances: set[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        normalized_instances = {
+            str(instance).strip()
+            for instance in set(worker_instances or set())
+            if str(instance).strip()
+        }
+        registrations = worker_registrations(required_only=True)
+        if worker_instances is not None:
+            registrations = [
+                registration
+                for registration in registrations
+                if registration.instance_name in normalized_instances
+            ]
+        worker_kinds = sorted({registration.worker_kind for registration in registrations})
+        worker_filter_sql = ""
+        worker_filter_params: tuple[object, ...] = ()
+        if worker_instances is not None:
+            worker_filter_sql = """
+              and (
+                coalesce(payload->>'worker_instance', worker_kind) = any(%s::text[])
+                or worker_kind = any(%s::text[])
+              )
             """
+            worker_filter_params = (sorted(normalized_instances), worker_kinds)
+        rows = self._connection.fetch_all(
+            f"""
             select distinct on (coalesce(payload->>'worker_instance', worker_kind))
               worker_id,
               coalesce(payload->>'worker_instance', worker_kind) as worker_instance,
@@ -1782,8 +1895,10 @@ class RuntimeMonitoringRepository:
               payload
             from job.runtime_worker_heartbeats
             where worker_kind <> 'runtime'
+              {worker_filter_sql}
             order by coalesce(payload->>'worker_instance', worker_kind), last_seen_at desc
-            """
+            """,
+            worker_filter_params,
         )
         latest_by_instance: dict[str, dict[str, Any]] = {}
         latest_by_kind: dict[str, dict[str, Any]] = {}
@@ -1798,7 +1913,7 @@ class RuntimeMonitoringRepository:
         worker_rows: list[dict[str, Any]] = []
         emitted_instances: set[str] = set()
         emitted_worker_ids: set[str] = set()
-        for registration in worker_registrations(required_only=True):
+        for registration in registrations:
             row = latest_by_instance.get(registration.instance_name) or latest_by_kind.get(registration.worker_kind)
             emitted_instances.add(registration.instance_name)
             if row is None:
@@ -1824,6 +1939,8 @@ class RuntimeMonitoringRepository:
             worker_rows.append(_worker_metric_row(row, registration=registration, required=True))
         for row in rows:
             worker_instance = str(row.get("worker_instance") or "").strip()
+            if worker_instances is not None and worker_instance not in normalized_instances:
+                continue
             if worker_instance in emitted_instances:
                 continue
             worker_id = str(row.get("worker_id") or "").strip()
@@ -1853,6 +1970,77 @@ def _optional_int(value: object) -> int | None:
 
 def _json_payload(value: dict[str, Any]) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def _normalized_operation_barrier_targets(targets: list[dict[str, str]]) -> list[dict[str, str]]:
+    normalized: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for target in list(targets or []):
+        if not isinstance(target, dict):
+            continue
+        read_model_key = str(target.get("read_model_key") or "").strip().lower()
+        definition = APP_STATUS_READ_MODEL_REGISTRY.get(read_model_key)
+        scope_type = str(
+            target.get("scope_type")
+            or (definition.scope_type if definition is not None else read_model_key)
+            or ""
+        ).strip()
+        scope_key = str(target.get("scope_key") or "all").strip() or "all"
+        identity = (read_model_key, scope_type, scope_key)
+        if not read_model_key or identity in seen:
+            continue
+        seen.add(identity)
+        normalized.append(
+            {
+                "read_model_key": read_model_key,
+                "scope_type": scope_type,
+                "scope_key": scope_key,
+                "refresh_event_type": definition.refresh_event_type if definition is not None else "",
+                "worker_instance": definition.worker_instance if definition is not None else "",
+            }
+        )
+    return normalized
+
+
+def _operation_barrier_scope_filter_sql(
+    targets: list[dict[str, str]] | None,
+    *,
+    read_model_key_sql: str | None,
+    scope_type_sql: str,
+    scope_key_sql: str,
+    event_type_sql: str | None = None,
+) -> tuple[str, tuple[object, ...]]:
+    if targets is None:
+        return "", ()
+    key_name = "event_type" if event_type_sql is not None else "read_model_key"
+    key_sql = event_type_sql or read_model_key_sql
+    if key_sql is None:
+        target_keys = [target["scope_type"] for target in targets]
+        key_name = "scope_type"
+        key_sql = scope_type_sql
+    else:
+        target_keys = [target["refresh_event_type" if event_type_sql is not None else "read_model_key"] for target in targets]
+    target_scope_types = [target["scope_type"] for target in targets]
+    target_scope_keys = [target["scope_key"] for target in targets]
+    return (
+        f"""
+and exists (
+  select 1
+  from unnest(%s::text[], %s::text[], %s::text[])
+       as barrier_target({key_name}, scope_type, scope_key)
+  where barrier_target.{key_name} = coalesce({key_sql}, '')
+    and barrier_target.scope_type = coalesce({scope_type_sql}, '')
+    and (
+      barrier_target.scope_key = coalesce({scope_key_sql}, '')
+      or (
+        barrier_target.scope_key <> 'all'
+        and coalesce({scope_key_sql}, '') = 'all'
+      )
+    )
+)
+""",
+        (target_keys, target_scope_types, target_scope_keys),
+    )
 
 
 def _optional_float(value: object) -> float | None:

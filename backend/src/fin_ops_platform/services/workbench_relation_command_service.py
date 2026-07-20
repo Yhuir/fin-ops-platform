@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 from hashlib import sha256
 import json
 from typing import Any
@@ -24,6 +25,17 @@ class WorkbenchRelationCommandError(Exception):
         self.error_code = error_code
         self.message = message
         self.payload = dict(payload or {})
+
+
+@dataclass(frozen=True, slots=True)
+class WorkbenchRelationConfirmPreparation:
+    owner_token: object
+    row_ids: tuple[str, ...]
+    row_types: tuple[str, ...]
+    month_scope: str
+    freshness: dict[str, Any]
+    pair_service: WorkbenchPairRelationService
+    active_relations: tuple[dict[str, Any], ...]
 
 
 class _InMemoryIdempotencyStore:
@@ -101,6 +113,38 @@ class WorkbenchRelationCommandService:
         self._relation_facade = relation_facade
         self._idempotency_store = idempotency_store or _InMemoryIdempotencyStore()
         self._require_fresh_relations = bool(require_fresh_relations)
+        self._confirm_preparation_owner = object()
+
+    def prepare_confirm_relation(
+        self,
+        *,
+        row_ids: list[str],
+        row_types: list[str],
+        month_scope: str = "all",
+        scope_keys_hint: list[str] | None = None,
+    ) -> WorkbenchRelationConfirmPreparation:
+        normalized_row_ids = [str(row_id).strip() for row_id in list(row_ids or []) if str(row_id).strip()]
+        normalized_row_types = [str(row_type).strip() for row_type in list(row_types or [])]
+        freshness = self._assert_relation_read_model_fresh(
+            row_ids=normalized_row_ids,
+            month_scope=month_scope,
+            scope_keys_hint=scope_keys_hint,
+        )
+        self._acquire_relation_member_locks(
+            normalized_row_ids,
+            row_types=normalized_row_types,
+        )
+        pair_service = self._pair_service_for_row_ids(normalized_row_ids)
+        active_relations = pair_service.active_relations_for_row_ids(normalized_row_ids)
+        return WorkbenchRelationConfirmPreparation(
+            owner_token=self._confirm_preparation_owner,
+            row_ids=tuple(normalized_row_ids),
+            row_types=tuple(normalized_row_types),
+            month_scope=str(month_scope or "all").strip() or "all",
+            freshness=deepcopy(freshness),
+            pair_service=pair_service,
+            active_relations=tuple(deepcopy(active_relations)),
+        )
 
     def confirm_relation(
         self,
@@ -126,6 +170,7 @@ class WorkbenchRelationCommandService:
         before_relations: list[dict[str, Any]] | None = None,
         replace_existing: bool = False,
         history_operation_type: str = "confirm_relation",
+        preparation: WorkbenchRelationConfirmPreparation | None = None,
     ) -> dict[str, Any]:
         mode = self._validated_relation_mode(relation_mode)
         fingerprint = self._request_fingerprint(
@@ -156,16 +201,43 @@ class WorkbenchRelationCommandService:
         if replay is not None:
             return replay
 
-        freshness = self._assert_relation_read_model_fresh(
-            row_ids=list(row_ids or []),
-            month_scope=month_scope,
-        )
-        self._acquire_relation_member_locks(
-            list(row_ids or []),
-            row_types=list(row_types or []),
-            case_ids=[case_id],
-        )
-        pair_service = self._pair_service_for_row_ids(list(row_ids or []), case_ids=[case_id])
+        if preparation is None:
+            freshness = self._assert_relation_read_model_fresh(
+                row_ids=list(row_ids or []),
+                month_scope=month_scope,
+            )
+            self._acquire_relation_member_locks(
+                list(row_ids or []),
+                row_types=list(row_types or []),
+                case_ids=[case_id],
+            )
+            pair_service = self._pair_service_for_row_ids(list(row_ids or []), case_ids=[case_id])
+        else:
+            requested_row_ids = list(row_ids or [])
+            requested_row_types = list(row_types or [])
+            self._validate_confirm_preparation(
+                preparation,
+                row_ids=requested_row_ids,
+                row_types=requested_row_types,
+                month_scope=month_scope,
+            )
+            freshness = deepcopy(preparation.freshness)
+            pair_service = preparation.pair_service
+            prepared_members = set(zip(preparation.row_ids, preparation.row_types, strict=False))
+            additional_row_ids: list[str] = []
+            additional_row_types: list[str] = []
+            for index, row_id in enumerate(requested_row_ids):
+                row_type = str(requested_row_types[index] if index < len(requested_row_types) else "").strip()
+                member = (str(row_id).strip(), row_type)
+                if member in prepared_members:
+                    continue
+                additional_row_ids.append(member[0])
+                additional_row_types.append(member[1])
+            self._acquire_relation_member_locks(
+                additional_row_ids,
+                row_types=additional_row_types,
+                case_ids=[case_id],
+            )
         active_relations = pair_service.active_relations_for_row_ids(list(row_ids or []))
         if not replace_existing:
             conflicts = [
@@ -1134,6 +1206,53 @@ class WorkbenchRelationCommandService:
                 "Workbench relation repository does not expose load_workbench_pair_relations.",
             )
         return WorkbenchPairRelationService.from_snapshot(loader())
+
+    def _validate_confirm_preparation(
+        self,
+        preparation: WorkbenchRelationConfirmPreparation,
+        *,
+        row_ids: list[str],
+        row_types: list[str],
+        month_scope: str,
+    ) -> None:
+        normalized_month_scope = str(month_scope or "all").strip() or "all"
+        prepared_members = set(zip(preparation.row_ids, preparation.row_types, strict=False))
+        requested_members = {
+            (
+                str(row_id).strip(),
+                str(row_types[index] if index < len(row_types) else "").strip(),
+            )
+            for index, row_id in enumerate(list(row_ids or []))
+            if str(row_id).strip()
+        }
+        allowed_members = set(prepared_members)
+        for relation in preparation.active_relations:
+            relation_row_ids = list(relation.get("row_ids") or [])
+            relation_row_types = list(relation.get("row_types") or [])
+            allowed_members.update(
+                (
+                    str(row_id).strip(),
+                    str(relation_row_types[index] if index < len(relation_row_types) else "").strip(),
+                )
+                for index, row_id in enumerate(relation_row_ids)
+                if str(row_id).strip()
+            )
+        if (
+            preparation.owner_token is not self._confirm_preparation_owner
+            or preparation.month_scope != normalized_month_scope
+            or not prepared_members.issubset(requested_members)
+            or not requested_members.issubset(allowed_members)
+        ):
+            raise WorkbenchRelationCommandError(
+                "workbench_relation_preparation_conflict",
+                "Prepared workbench relation context does not match the confirm command.",
+                payload={
+                    "month_scope": normalized_month_scope,
+                    "prepared_month_scope": preparation.month_scope,
+                    "row_ids": [str(row_id).strip() for row_id in list(row_ids or []) if str(row_id).strip()],
+                    "prepared_row_ids": list(preparation.row_ids),
+                },
+            )
 
     def _acquire_relation_member_locks(
         self,

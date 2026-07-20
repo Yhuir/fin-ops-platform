@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from copy import deepcopy
+from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any, Callable
 
@@ -32,6 +33,14 @@ class TurnoverLedgerWritePreconditionError(ValueError):
         self.status_code = 409
         self.error_code = error_code
         self.payload = dict(payload or {})
+
+
+@dataclass(frozen=True, slots=True)
+class TurnoverManualClosureWritePreparation:
+    relation_command_service: Any
+    confirm_preparation: Any
+    bank_row_ids: tuple[str, ...]
+    affected_months: tuple[str, ...]
 
 
 class TurnoverLedgerExtraRepositoryAdapter:
@@ -1282,6 +1291,47 @@ class TurnoverLedgerWorkbenchPairPort:
         self._relation_command_service_factory = relation_command_service_factory
         self._relation_facade = relation_facade
 
+    def prepare_turnover_manual_closure_write(
+        self,
+        *,
+        bank_row_ids: list[str],
+        affected_months: list[str],
+        transaction: Any,
+    ) -> TurnoverManualClosureWritePreparation:
+        normalized_row_ids = [
+            str(row_id).strip()
+            for row_id in list(bank_row_ids or [])
+            if str(row_id).strip()
+        ]
+        normalized_months = [
+            str(month).strip()
+            for month in list(affected_months or [])
+            if str(month).strip()
+        ]
+        relation_command_service = self._relation_command_service(transaction)
+        prepare = getattr(relation_command_service, "prepare_confirm_relation", None)
+        if not callable(prepare):
+            raise self._command_unavailable_error(
+                case_id="",
+                row_ids=normalized_row_ids,
+                action="turnover_manual_closure_prepare",
+            )
+        try:
+            confirm_preparation = prepare(
+                row_ids=normalized_row_ids,
+                row_types=["bank"] * len(normalized_row_ids),
+                month_scope=self._month_scope(normalized_months),
+                scope_keys_hint=normalized_months,
+            )
+        except WorkbenchRelationCommandError as exc:
+            raise self._command_precondition_error(exc) from exc
+        return TurnoverManualClosureWritePreparation(
+            relation_command_service=relation_command_service,
+            confirm_preparation=confirm_preparation,
+            bank_row_ids=tuple(normalized_row_ids),
+            affected_months=tuple(normalized_months),
+        )
+
     def create_turnover_manual_closure(
         self,
         *,
@@ -1291,6 +1341,7 @@ class TurnoverLedgerWorkbenchPairPort:
         note: str | None,
         affected_months: list[str],
         transaction: Any,
+        preparation: TurnoverManualClosureWritePreparation,
     ) -> dict[str, object]:
         relation_id = str(relation.get("relation_id") or "").strip()
         if not relation_id:
@@ -1332,12 +1383,27 @@ class TurnoverLedgerWorkbenchPairPort:
             "turnover_relation_id": relation_id,
             "bank_row_ids": list(normalized_row_ids),
         }
-        relation_command_service = self._relation_command_service(transaction)
-        if relation_command_service is not None:
-            active_relations = self._active_relations_for_row_ids_from_command(
-                relation_command_service,
-                normalized_row_ids,
+        normalized_months = [
+            str(month).strip()
+            for month in list(affected_months or [])
+            if str(month).strip()
+        ]
+        if (
+            tuple(normalized_row_ids) != preparation.bank_row_ids
+            or tuple(normalized_months) != preparation.affected_months
+        ):
+            raise TurnoverLedgerWritePreconditionError(
+                error_code="turnover_relation_preparation_conflict",
+                message="Prepared turnover closure context does not match the closure command.",
+                payload={"bank_row_ids": normalized_row_ids, "affected_months": normalized_months},
             )
+        relation_command_service = preparation.relation_command_service
+        if relation_command_service is not None:
+            active_relations = [
+                dict(active_relation)
+                for active_relation in list(preparation.confirm_preparation.active_relations or [])
+                if isinstance(active_relation, dict)
+            ]
             merge_relations = [
                 dict(active_relation)
                 for active_relation in active_relations
@@ -1367,6 +1433,7 @@ class TurnoverLedgerWorkbenchPairPort:
                     before_relations=merge_relations if merge_relations else None,
                     replace_existing=bool(merge_relations),
                     history_operation_type="turnover_manual_closure_confirm",
+                    preparation=preparation.confirm_preparation,
                 )
             except WorkbenchRelationCommandError as exc:
                 raise self._command_precondition_error(exc) from exc
@@ -1377,41 +1444,6 @@ class TurnoverLedgerWorkbenchPairPort:
             row_ids=normalized_row_ids,
             action="turnover_manual_closure_confirm",
         )
-
-    def assert_turnover_manual_closure_write_precondition(
-        self,
-        *,
-        bank_row_ids: list[str],
-        affected_months: list[str],
-        transaction: Any,
-    ) -> None:
-        relation_command_service = self._relation_command_service(transaction)
-        if relation_command_service is None:
-            raise self._command_unavailable_error(
-                case_id="",
-                row_ids=[
-                    str(row_id).strip()
-                    for row_id in list(bank_row_ids or [])
-                    if str(row_id).strip()
-                ],
-                action="turnover_manual_closure_precondition",
-            )
-        try:
-            relation_command_service.assert_write_precondition(
-                row_ids=[
-                    str(row_id).strip()
-                    for row_id in list(bank_row_ids or [])
-                    if str(row_id).strip()
-                ],
-                month_scope=self._month_scope(affected_months),
-                scope_keys_hint=[
-                    str(month).strip()
-                    for month in list(affected_months or [])
-                    if str(month).strip()
-                ],
-            )
-        except WorkbenchRelationCommandError as exc:
-            raise self._command_precondition_error(exc) from exc
 
     def assert_turnover_manual_closure_withdrawable(
         self,
@@ -1560,25 +1592,6 @@ class TurnoverLedgerWorkbenchPairPort:
                     if isinstance(item, dict)
                 ]
         return relation_result
-
-    @staticmethod
-    def _active_relations_for_row_ids_from_command(
-        relation_command_service: Any,
-        row_ids: list[str],
-    ) -> list[dict[str, object]]:
-        reader = getattr(relation_command_service, "active_relations_for_row_ids", None)
-        if not callable(reader):
-            return []
-        relations = reader([
-            str(row_id).strip()
-            for row_id in list(row_ids or [])
-            if str(row_id).strip()
-        ])
-        return [
-            dict(relation)
-            for relation in list(relations or [])
-            if isinstance(relation, dict)
-        ]
 
     @classmethod
     def _assert_mergeable_turnover_manual_closure_relations(
