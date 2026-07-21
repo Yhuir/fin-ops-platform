@@ -20,6 +20,8 @@ class OaPendingPaymentReadModelQueryTests(unittest.TestCase):
             "payment_status_signature": "payment-3",
             "oa_pending_payment_source_signature": "source-3",
             "oa_pending_payment_relation_version": 4,
+            "oa_pending_payment_bank_coverage_signature": "rows:2|digest:bank-3",
+            "oa_pending_payment_input_invoice_coverage_signature": "rows:1|digest:invoice-3",
             "oa_pending_payment_event_source_version": 7,
         }
         state_row = {
@@ -75,8 +77,10 @@ class OaPendingPaymentReadModelQueryTests(unittest.TestCase):
             "outbox.status in ('pending', 'processing', 'failed', 'dead_lettered')",
             target_inventory_sql,
         )
-        self.assertIn("group by duplicate_row.row_id", state_sql)
-        self.assertIn("having count(*) > 1", state_sql)
+        self.assertNotIn("group by duplicate_row.row_id", state_sql)
+        self.assertNotIn("having count(*) > 1", state_sql)
+        self.assertNotIn("from app.bank_transactions", state_sql)
+        self.assertNotIn("from app.invoices", state_sql)
         self.assertIn("'dead_lettered'", state_sql)
         self.assertIn(
             "order by dirty.source_version desc, dirty.updated_at desc, dirty.id desc",
@@ -84,7 +88,7 @@ class OaPendingPaymentReadModelQueryTests(unittest.TestCase):
         )
         self.assertNotIn("read_model.workbench_relation_scopes", state_sql)
 
-    def test_all_scope_query_state_fails_closed_on_cross_scope_duplicate_row_identity(self) -> None:
+    def test_all_scope_query_state_leaves_duplicate_detection_to_page_audit(self) -> None:
         base_versions = {"schema": 1}
         duplicate_row = _fresh_state_row(
             scope_key="2026-05",
@@ -92,7 +96,6 @@ class OaPendingPaymentReadModelQueryTests(unittest.TestCase):
             snapshot_version=3,
             event_source_version=7,
         )
-        duplicate_row["duplicate_row_identity"] = True
         repository = PostgresInvoiceUsageCollectionReadModelRepository(QueryStateConnection([duplicate_row]))
 
         payload = repository.oa_pending_payment_query_state(
@@ -101,9 +104,8 @@ class OaPendingPaymentReadModelQueryTests(unittest.TestCase):
             base_source_versions=base_versions,
         )
 
-        self.assertEqual(payload["status"], "refreshing")
-        self.assertEqual(payload["blocking_scope_keys"], ["2026-05"])
-        self.assertIn("all:duplicate_row_identity", payload["stale_reasons"])
+        self.assertEqual(payload["status"], "fresh")
+        self.assertEqual(payload["blocking_scope_keys"], [])
 
     def test_all_scope_query_state_returns_only_versions_common_to_every_month(self) -> None:
         base_versions = {"schema": 1, "projection": "oa-v3"}
@@ -148,13 +150,14 @@ class OaPendingPaymentReadModelQueryTests(unittest.TestCase):
 
         self.assertEqual(payload["pagination"], {"page": 1, "pageSize": 20, "total": 1})
         self.assertEqual(payload["summary"]["statusCounts"], {"paid": 1})
+        self.assertEqual(payload["statistics"]["oa_count"], 1)
         self.assertEqual(payload["filterOptions"]["bank_direction"][0]["label"], "支出")
         self.assertEqual(len(connection.fetch_one_calls), 1)
         self.assertEqual(len(connection.fetch_all_calls), 0)
         aggregate_sql = connection.fetch_one_calls[0][0].lower()
         self.assertIn("with base_rows as materialized", aggregate_sql)
-        self.assertNotIn("raw_payload", aggregate_sql)
         base_rows_sql = aggregate_sql.split("filtered_rows as materialized", 1)[0]
+        self.assertNotIn("raw_payload", base_rows_sql)
         self.assertNotIn("select *", base_rows_sql)
         self.assertNotIn("payload", base_rows_sql)
         self.assertIn("cross join lateral unnest", aggregate_sql)
@@ -252,6 +255,10 @@ def _fresh_state_row(
         "payment_status_signature": source_payload["payment_status_signature"],
         "oa_pending_payment_source_signature": source_payload["source_signature"],
         "oa_pending_payment_relation_version": snapshot_version,
+        "oa_pending_payment_bank_coverage_signature": f"rows:1|digest:bank-{snapshot_version}",
+        "oa_pending_payment_input_invoice_coverage_signature": (
+            f"rows:1|digest:invoice-{snapshot_version}"
+        ),
         "oa_pending_payment_event_source_version": event_source_version,
     }
     return {
@@ -287,6 +294,21 @@ class AggregateConnection:
             "filter_options": {
                 "bank_direction": [{"value": "outflow", "label": "outflow", "count": 1}],
             },
+            "page_statistics": [
+                {
+                    "oa_count": 1,
+                    "bank_transaction_count": 1,
+                    "input_invoice_count": 1,
+                    "paid_oa_count": 1,
+                    "completed_oa_count": 1,
+                    "in_progress_oa_count": 0,
+                    "expense_transaction_count": 1,
+                    "income_transaction_count": 0,
+                    "unpaid_oa_count": 0,
+                    "linked_bank_oa_count": 1,
+                    "linked_input_invoice_oa_count": 1,
+                }
+            ],
             "rows": [{"payload": {"id": "row-1"}}],
         }
 
@@ -303,6 +325,18 @@ class LifecycleSourceConnection(AggregateConnection):
     def fetch_one(self, sql: str, params: tuple[object, ...] = ()) -> dict[str, object] | None:
         normalized = " ".join(sql.lower().split())
         self.fetch_one_calls.append((sql, params))
+        if "with base_rows as materialized" in normalized:
+            return {
+                "count": 1,
+                "oa_amount_total": "100.00",
+                "bank_paid_total": "100.00",
+                "completed_count": 1,
+                "in_progress_count": 0,
+                "status_counts": {"paid": 1},
+                "filter_options": {},
+                "page_statistics": [],
+                "rows": [{"payload": {"id": "row-1"}}],
+            }
         if "from read_model.oa_pending_payment_scopes" in normalized:
             if not self.scope_exists:
                 return None

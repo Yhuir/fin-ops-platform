@@ -29,6 +29,20 @@
 - `/api/operations/app-health/input-invoice-usage-refresh`：管理员受控入队刷新进项使用 read model scope。
 - `/api/operations/app-health/output-invoice-collection-refresh`：管理员受控入队刷新销项收款 read model scope。
 
+## 页面标题完整性统计契约
+
+银行明细、OA 待付款、外部往来款、ETC 业务批次、税金抵扣、待找发票、进项发票使用、销项发票收款、关联台和成本统计的现有页面主响应可以携带 additive `statistics` 对象。前端必须复用该对象，不得为标题统计增加独立 HTTP 请求。
+
+- `statistics` 由当前 endpoint 所属页面的主查询或已发布 read model 计算，不从 Page Audit 或跨页统一统计接口回填。
+- `statistics` 始终覆盖页面未应用 month/search/filter/sort/page 前的完整范围，因此同一已发布版本下改变这些参数不会改变统计对象。
+- read model 页面只有在完整范围 freshness 可证明时返回数字；否则 `statistics=null`。请求的月份或当前页 fresh 不能替代 all/parent 统计 freshness。
+- direct-canonical ETC 页面在业务批次列表主查询中同时计算未筛选统计；成功响应不增加另一条浏览器请求。
+- 所有计数均为非负整数。业务对象按页面合同的稳定身份去重，不能使用当前页行数或折叠组行数代替 OA、流水或发票数量。
+- 该字段为 additive contract，不改变原 `rows/items/groups`、`summary/counts`、pagination、filter、sort、ETag 和权限语义。
+- 管理员 Page Audit 独立读取 canonical facts 和页面投影做集合、关系与统计重算；Audit 结果不得作为 `statistics` 的输入。
+
+各模块的字段名和恒等式以对应 `docs/modules/<module>/boundary-io.md` 为准。前端对缺失、负数、非整数或超出安全整数范围的值按不可用处理；合法零值必须保留。
+
 ## 成本统计 API
 
 `GET /api/cost-statistics/explorer`

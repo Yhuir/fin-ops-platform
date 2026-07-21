@@ -75,6 +75,19 @@ export type EtcBusinessBatchCounts = {
   submitted: number;
 };
 
+export type EtcPageStatistics = {
+  invoiceCount?: number;
+  businessBatchCount?: number;
+  unsubmittedBatchCount?: number;
+  draftBatchCount?: number;
+  submittedBatchCount?: number;
+  reconciliationTaskCount?: number;
+  sourceFileCount?: number;
+  importedInvoiceCount?: number;
+  linkedCanonicalInvoiceCount?: number;
+  oaDraftBatchCount?: number;
+};
+
 export type EtcBusinessBatchQuery = {
   bucket?: EtcBusinessBatchBucket;
   status?: EtcBusinessBatchStatus;
@@ -149,6 +162,7 @@ export type EtcBusinessBatchDetail = EtcBusinessBatchSummary & {
 export type EtcBusinessBatchListPayload = {
   counts: EtcBusinessBatchCounts;
   items: EtcBusinessBatchSummary[];
+  statistics?: EtcPageStatistics;
   pagination: {
     page: number;
     pageSize: number;

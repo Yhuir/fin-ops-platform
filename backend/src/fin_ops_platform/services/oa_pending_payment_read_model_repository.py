@@ -86,11 +86,13 @@ class OaPendingPaymentReadModelRepositoryPort:
         scope_key: str,
         rows: list[dict[str, object]],
         source_versions: dict[str, object] | None = None,
+        statistics: dict[str, int] | None = None,
     ) -> None:
         self._repository.save_oa_pending_payment_rows(
             scope_key=scope_key,
             rows=rows,
             source_versions=source_versions,
+            statistics=statistics,
         )
 
     def publish_oa_pending_payment_rows(
@@ -101,6 +103,7 @@ class OaPendingPaymentReadModelRepositoryPort:
         source_version: int,
         rows: list[dict[str, object]],
         source_versions: dict[str, object] | None = None,
+        statistics: dict[str, int] | None = None,
     ) -> bool:
         publish = getattr(self._repository, "publish_oa_pending_payment_rows", None)
         if not callable(publish):
@@ -116,6 +119,7 @@ class OaPendingPaymentReadModelRepositoryPort:
                 source_version=source_version,
                 rows=rows,
                 source_versions=published_source_versions,
+                statistics=statistics,
             )
         )
 

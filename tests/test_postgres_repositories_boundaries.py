@@ -494,6 +494,31 @@ def test_turnover_relation_delta_reads_by_month_and_bank_row_overlap() -> None:
     assert params[1] == ["bank-1"]
 
 
+def test_turnover_full_save_publishes_statistics_marker_in_same_transaction() -> None:
+    connection = RecordingConnection()
+    repository = PostgresReadModelRepository(connection)
+
+    repository.save_turnover_ledger_rows(
+        {
+            "rows": [
+                {
+                    "relation_id": "relation-1",
+                    "first_transaction_at": "2026-03-01",
+                    "flow_rows": [{"source_bank_row_id": "bank-1", "flow_direction": "expense"}],
+                }
+            ]
+        },
+        scope_key="all",
+    )
+
+    writes = [sql.lower() for sql in write_sql(connection)]
+    marker_sql = next(sql for sql in writes if "statistics_flows as materialized" in sql)
+    assert "jsonb_array_elements" in marker_sql
+    assert "set raw_payload" in marker_sql
+    assert connection.transaction_enters == 1
+    assert connection.transaction_exits == 1
+
+
 def test_turnover_relation_delta_updates_versions_and_upserts_without_scope_delete() -> None:
     connection = RecordingConnection()
     repository = PostgresReadModelRepository(connection)
@@ -516,6 +541,7 @@ def test_turnover_relation_delta_updates_versions_and_upserts_without_scope_dele
     writes = [sql.lower() for sql in write_sql(connection)]
     assert any("update read_model.turnover_ledger_rows" in sql for sql in writes)
     assert any("insert into read_model.turnover_ledger_rows" in sql for sql in writes)
+    assert any("statistics_flows as materialized" in sql and "set raw_payload" in sql for sql in writes)
     assert not any("delete from read_model.turnover_ledger_rows" in sql for sql in writes)
     assert connection.transaction_enters == 1
     assert connection.transaction_exits == 1

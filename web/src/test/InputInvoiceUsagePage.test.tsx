@@ -104,6 +104,17 @@ const rowsPayload = {
     matchedBankTransactionCount: 1,
     pendingCount: 1,
   },
+  statistics: {
+    invoice_count: 787,
+    linked_oa_invoice_count: 620,
+    linked_bank_invoice_count: 610,
+    paid_invoice_count: 500,
+    unlinked_oa_invoice_count: 167,
+    unlinked_bank_invoice_count: 177,
+    unpaid_invoice_count: 287,
+    formal_relation_group_count: 490,
+    oa_reverse_batch_count: 12,
+  },
   filterConfig: [],
   readModelStatus: "fresh",
 };
@@ -532,6 +543,7 @@ describe("Input invoice usage page", () => {
 
     const page = await screen.findByTestId("input-invoice-usage-page");
     expect(await within(page).findByText("进项发票使用情况数据正在刷新")).toBeInTheDocument();
+    expect(within(page).getByLabelText("进项发票使用情况数据统计")).toHaveTextContent("进项发票—");
     expect(within(page).getByText("进项发票使用情况读模型不是最新，完成后页面会自动重新加载。")).toBeInTheDocument();
     expect(within(page).queryByText("当前条件下暂无记录。")).not.toBeInTheDocument();
     expect(within(page).queryByText("当前条件下没有进项发票使用记录。")).not.toBeInTheDocument();
@@ -623,7 +635,7 @@ describe("Input invoice usage page", () => {
     expect(rowsRequests(fetchMock).length).toBeGreaterThan(1);
   });
 
-  test("keeps title invoice count stable when filters change", async () => {
+  test("keeps page-owned statistics stable when filters change without a title-total request", async () => {
     const user = userEvent.setup();
     const fetchMock = installInputInvoiceUsageFetch((url) => {
       const filtered = Boolean(url.searchParams.get("keyword"));
@@ -638,12 +650,15 @@ describe("Input invoice usage page", () => {
 
     const page = await screen.findByTestId("input-invoice-usage-page");
     await waitFor(() => expect(rowsRequests(fetchMock).length).toBeGreaterThan(0));
-    expect(within(page).getByLabelText("进项发票数量统计")).toHaveTextContent("进项票 787");
+    const initialRowsRequestCount = rowsRequests(fetchMock).length;
+    expect(within(page).getByLabelText("进项发票使用情况数据统计")).toHaveTextContent("进项发票787张");
 
     await user.type(within(page).getByLabelText("进项发票使用情况搜索"), "已支付");
     await user.click(within(page).getByRole("button", { name: "查询" }));
-    await waitFor(() => expect(rowsRequests(fetchMock).some((url) => url.searchParams.get("keyword") === "已支付")).toBe(true));
-    expect(within(page).getByLabelText("进项发票数量统计")).toHaveTextContent("进项票 787");
+    await waitFor(() => expect(rowsRequests(fetchMock)).toHaveLength(initialRowsRequestCount + 1));
+    expect(rowsRequests(fetchMock).at(-1)?.searchParams.get("keyword")).toBe("已支付");
+    expect(rowsRequests(fetchMock).every((url) => url.searchParams.get("page_size") !== "1")).toBe(true);
+    expect(within(page).getByLabelText("进项发票使用情况数据统计")).toHaveTextContent("进项发票787张");
   });
 
   test("admin can run title audit icon and see data relation freshness result", async () => {
@@ -684,7 +699,7 @@ describe("Input invoice usage page", () => {
     expect(initialRowsRequest.searchParams.get("page")).toBe("1");
     expect(initialRowsRequest.searchParams.get("page_size")).toBe("20");
     expect(within(page).getByRole("heading", { name: "进项发票使用情况" })).toBeInTheDocument();
-    expect(within(page).getByLabelText("进项发票数量统计")).toHaveTextContent("进项票 787");
+    expect(within(page).getByLabelText("进项发票使用情况数据统计")).toHaveTextContent("进项发票787张");
     expect(within(page).queryByText("以进项发票为主对象反查支付状态、OA 和银行流水。")).not.toBeInTheDocument();
     expect(within(page).queryByText("关键字")).not.toBeInTheDocument();
     expect(within(page).queryByRole("grid")).not.toBeInTheDocument();

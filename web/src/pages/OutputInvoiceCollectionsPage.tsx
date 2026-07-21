@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import PageScaffold from "../components/common/PageScaffold";
+import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import PageToolbar from "../components/common/PageToolbar";
 import StatePanel from "../components/common/StatePanel";
 import MonthPicker from "../components/MonthPicker";
@@ -51,6 +52,7 @@ import type {
   OutputInvoiceCollectionRow,
   OutputInvoiceCollectionSortDirection,
   OutputInvoiceCollectionStatusRulesResponse,
+  OutputInvoiceCollectionStatistics,
   OutputInvoiceCollectionWorkflow,
 } from "../features/outputInvoiceCollections/types";
 
@@ -202,16 +204,6 @@ function normalizeFilterValue(filter: {
   return null;
 }
 
-function queryAffectsTitleTotal(query: OutputInvoiceCollectionQuery) {
-  return Boolean(
-    query.keyword.trim()
-    || query.invoiceDateFrom
-    || query.invoiceDateTo
-    || query.month
-    || query.filters.length > 0,
-  );
-}
-
 export default function OutputInvoiceCollectionsPage() {
   const { active } = useOptionalPageActivation("output-invoice-collections");
   const { canAdminAccess, canMutateData } = useSessionPermissions();
@@ -230,7 +222,7 @@ export default function OutputInvoiceCollectionsPage() {
   const setQuery = querySession.setValue;
   const [rows, setRows] = useState<OutputInvoiceCollectionRow[]>([]);
   const [total, setTotal] = useState(0);
-  const [titleInvoiceCount, setTitleInvoiceCount] = useState(0);
+  const [statistics, setStatistics] = useState<OutputInvoiceCollectionStatistics | null>(null);
   const [filterConfigs, setFilterConfigs] = useState<OutputInvoiceCollectionFilterFieldConfig[]>([]);
   const [filterOptions, setFilterOptions] = useState<Record<string, OutputInvoiceCollectionFilterOption[]>>({});
   const [statusRulesPayload, setStatusRulesPayload] = useState<OutputInvoiceCollectionStatusRulesResponse | null>(null);
@@ -241,42 +233,10 @@ export default function OutputInvoiceCollectionsPage() {
   const [expandedCells, setExpandedCells] = useState<Set<string>>(() => new Set());
   const [keywordDraft, setKeywordDraft] = useState(query.keyword);
   const requestIdRef = useRef(0);
-  const titleTotalRequestIdRef = useRef(0);
-  const hasTitleInvoiceCountRef = useRef(false);
 
   useEffect(() => {
     setKeywordDraft(query.keyword);
   }, [query.keyword]);
-
-  const loadTitleTotal = useCallback((signal?: AbortSignal) => {
-    const requestId = titleTotalRequestIdRef.current + 1;
-    titleTotalRequestIdRef.current = requestId;
-    fetchOutputInvoiceCollectionRows({
-      page: 1,
-      pageSize: 1,
-      keyword: "",
-      invoiceDateFrom: "",
-      invoiceDateTo: "",
-      month: "",
-      filters: [],
-      sortField: "",
-      sortDirection: "",
-      signal,
-    })
-      .then((payload) => {
-        if (signal?.aborted || requestId !== titleTotalRequestIdRef.current) {
-          return;
-        }
-        if (READ_MODEL_NON_FRESH_STATUSES.has(normalizeReadModelStatus(payload.readModelStatus))) {
-          return;
-        }
-        hasTitleInvoiceCountRef.current = true;
-        setTitleInvoiceCount(payload.summary?.invoiceCount ?? payload.pagination.total);
-      })
-      .catch(() => {
-        // Keep the previous title count; the main rows request owns user-visible errors.
-      });
-  }, []);
 
   const loadRows = useCallback((mode: "reset" | "refresh", signal?: AbortSignal) => {
     const requestId = requestIdRef.current + 1;
@@ -316,15 +276,11 @@ export default function OutputInvoiceCollectionsPage() {
         }
         setRows(payload.rows);
         setTotal(payload.pagination.total);
-        if (!queryAffectsTitleTotal(query)) {
-          hasTitleInvoiceCountRef.current = true;
-          setTitleInvoiceCount(payload.summary?.invoiceCount ?? payload.pagination.total);
-        } else if (!hasTitleInvoiceCountRef.current) {
-          loadTitleTotal(signal);
-        }
+        const nextReadModelStatus = combineReadModelStatus(payload.readModelStatus, optionsPayload.readModelStatus);
+        setStatistics(nextReadModelStatus === "fresh" ? payload.statistics ?? null : null);
         setFilterConfigs(payload.filterConfig.length > 0 ? payload.filterConfig : filterConfigsFromOptions(optionsPayload.fields));
         setFilterOptions(filterOptionsByField(optionsPayload.fields));
-        setReadModelStatus(combineReadModelStatus(payload.readModelStatus, optionsPayload.readModelStatus));
+        setReadModelStatus(nextReadModelStatus);
       })
       .catch((caught: unknown) => {
         if (signal?.aborted || requestId !== requestIdRef.current) {
@@ -332,6 +288,7 @@ export default function OutputInvoiceCollectionsPage() {
         }
         setRows([]);
         setTotal(0);
+        setStatistics(null);
         setFilterConfigs([]);
         setFilterOptions({});
         setReadModelStatus("");
@@ -353,7 +310,6 @@ export default function OutputInvoiceCollectionsPage() {
     query.pageSize,
     query.sortDirection,
     query.sortField,
-    loadTitleTotal,
   ]);
 
   useEffect(() => {
@@ -599,11 +555,26 @@ export default function OutputInvoiceCollectionsPage() {
       ) : null}
     </div>
   ), [canAdminAccess, exportDisabled, handleOpenWorkflow, loadRows, loading, refreshing]);
+  const visibleStatistics = readModelStatus === "fresh" ? statistics : null;
   const titleAccessory = useMemo(() => (
-    <div aria-label="销项发票数量统计" className="page-title-accessory-group" role="group">
-      <span className="invoice-count-segment">
-        <span className="invoice-count-segment__item invoice-count-segment__item--active">销项票 {titleInvoiceCount}</span>
-      </span>
+    <div className="page-title-accessory-group">
+      <PageStatisticsPopover
+        ariaLabel="销项发票收款情况数据统计"
+        loading={loading && !readModelStatus}
+        coreItems={[
+          { label: "销项发票", value: visibleStatistics?.invoiceCount, unit: "张" },
+          { label: "已关联收入流水的销项票", value: visibleStatistics?.linkedIncomeBankInvoiceCount, unit: "张" },
+          { label: "已收款销项票", value: visibleStatistics?.collectedInvoiceCount, unit: "张", tone: "success" },
+        ]}
+        detailItems={[
+          { label: "已关联 OA 的销项票", value: visibleStatistics?.linkedOaInvoiceCount, unit: "张" },
+          { label: "未关联 OA", value: visibleStatistics?.unlinkedOaInvoiceCount, unit: "张", tone: "warning" },
+          { label: "未关联流水", value: visibleStatistics?.unlinkedBankInvoiceCount, unit: "张", tone: "warning" },
+          { label: "未收款销项票", value: visibleStatistics?.uncollectedInvoiceCount, unit: "张", tone: "warning" },
+          { label: "红字发票", value: visibleStatistics?.redInvoiceCount, unit: "张" },
+          { label: "已开收据", value: visibleStatistics?.issuedReceiptCount, unit: "张" },
+        ]}
+      />
       {canAdminAccess ? (
         <PageBusinessAuditIcon
           ariaLabel="Audit 销项发票收款情况"
@@ -613,7 +584,7 @@ export default function OutputInvoiceCollectionsPage() {
         />
       ) : null}
     </div>
-  ), [canAdminAccess, readModelStatus, titleInvoiceCount]);
+  ), [canAdminAccess, loading, readModelStatus, visibleStatistics]);
   const isEmpty = !loading && !error && !isReadModelNonFresh && rows.length === 0;
 
   return (

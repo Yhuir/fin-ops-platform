@@ -19,7 +19,11 @@ from fin_ops_platform.services.cost_statistics_source_versions import (
     cost_statistics_source_versions,
 )
 from fin_ops_platform.services.cost_statistics_sql_projection import CostStatisticsSqlProjectionBuilder
-from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
+from fin_ops_platform.services.postgres_repositories.read_models import (
+    BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
+    PostgresReadModelRepository,
+    _cost_statistics_page_statistics,
+)
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
 
@@ -139,7 +143,7 @@ class CostStatisticsSqlReadRepositoryStub:
     ) -> None:
         self.payload = payload
         self.source_versions = source_versions
-        self.source_settings = source_settings or test_cost_statistics_source_settings()
+        self.source_settings = source_settings or _cost_statistics_source_settings_fixture()
 
     def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
         return cost_statistics_fresh_gate(
@@ -162,16 +166,16 @@ class CostStatisticsSqlReadRepositoryStub:
         return None
 
 
-def test_cost_statistics_source_settings() -> dict[str, object]:
+def _cost_statistics_source_settings_fixture() -> dict[str, object]:
     return CostStatisticsAppSettingsStub().get_cost_statistics_source_settings_payload()
 
 
-def test_cost_statistics_source_versions(scope_key: str) -> dict[str, object]:
+def _cost_statistics_source_versions_fixture(scope_key: str) -> dict[str, object]:
     _project_scope, month = str(scope_key).split(":", 1)
     dependency_versions = {"source_version": 1} if month != "all" else None
     return cost_statistics_source_versions(
         month=month,
-        settings_payload=test_cost_statistics_source_settings(),
+        settings_payload=_cost_statistics_source_settings_fixture(),
         workbench_source_versions=dependency_versions,
         bank_detail_source_versions=dependency_versions,
     )
@@ -188,7 +192,7 @@ def cost_statistics_fresh_gate(
     workbench_source_versions: dict[str, object] | None = None,
     bank_detail_source_versions: dict[str, object] | None = None,
 ) -> dict[str, object]:
-    normalized_source_settings = source_settings or test_cost_statistics_source_settings()
+    normalized_source_settings = source_settings or _cost_statistics_source_settings_fixture()
     current_workbench_source_versions = (
         workbench_source_versions
         if workbench_source_versions is not None
@@ -218,6 +222,21 @@ def cost_statistics_fresh_gate(
         "published_source_version": published_source_version,
         "dirty_source_version": published_source_version,
         "refresh_status": refresh_status,
+        "statistics": {
+            "transaction_count": 0,
+            "expense_transaction_count": 0,
+            "income_transaction_count": 0,
+            "cost_group_count": 0,
+            "tagged_transaction_count": 0,
+            "untagged_transaction_count": 0,
+            "project_count": 0,
+            "expense_type_count": 0,
+            "bank_tag_count": 0,
+            "cost_transaction_count": 0,
+        },
+        "statistics_status": "fresh",
+        "statistics_scope_key": f"{scope_key.split(':', 1)[0]}:all",
+        "statistics_published_source_version": published_source_version,
         "stale_reasons": list(stale_reasons or []),
     }
 
@@ -247,7 +266,7 @@ def redis_fresh_payload(
 class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
     def test_bank_detail_execution_counter_change_does_not_stale_unchanged_cost_business_data(self) -> None:
         runtime = CostStatisticsRuntimeStub()
-        stored_versions = test_cost_statistics_source_versions("active:2026-05")
+        stored_versions = _cost_statistics_source_versions_fixture("active:2026-05")
         stored_versions["bank_detail_source_versions"] = {
             "source_version": 10,
             "bank_detail_source_signature": "same-business-data",
@@ -307,7 +326,7 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
                 self.gate_calls.append(scope_key)
                 return cost_statistics_fresh_gate(
                     scope_key=scope_key,
-                    source_versions=test_cost_statistics_source_versions(scope_key),
+                    source_versions=_cost_statistics_source_versions_fixture(scope_key),
                     refresh_status="refreshing",
                 )
 
@@ -342,12 +361,12 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
 
     def test_current_settings_change_locks_old_cost_snapshot_without_loading_rows(self) -> None:
         runtime = CostStatisticsRuntimeStub()
-        old_settings = test_cost_statistics_source_settings()
+        old_settings = _cost_statistics_source_settings_fixture()
         current_settings = {
             **old_settings,
             "bank_transaction_tags": {"version": 8, "active_rules": []},
         }
-        actual_source_versions = test_cost_statistics_source_versions("active:2026-05")
+        actual_source_versions = _cost_statistics_source_versions_fixture("active:2026-05")
 
         class Repository:
             def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
@@ -381,7 +400,7 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
 
     def test_tag_rules_filter_transaction_detail(self) -> None:
         runtime = CostStatisticsRuntimeStub()
-        source_versions = test_cost_statistics_source_versions("active:2026-05")
+        source_versions = _cost_statistics_source_versions_fixture("active:2026-05")
         payload = {
             "month": "2026-05",
             "summary": {"row_count": 2, "transaction_count": 2, "total_amount": "130.00"},
@@ -508,7 +527,7 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
             tag_selection_mapper=tag_selection_mapper,
         )
 
-        detail_source_versions = test_cost_statistics_source_versions("active:all")
+        detail_source_versions = _cost_statistics_source_versions_fixture("active:all")
         detail_service = CostStatisticsQueryService(
             runtime_service=runtime,
             sql_read_repository=CostStatisticsSqlReadRepositoryStub(payload, detail_source_versions),
@@ -522,7 +541,7 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
 
     def test_transaction_detail_uses_freshness_gate_and_indexed_point_lookup_only(self) -> None:
         runtime = CostStatisticsRuntimeStub()
-        source_versions = test_cost_statistics_source_versions("active:all")
+        source_versions = _cost_statistics_source_versions_fixture("active:all")
 
         class Repository:
             def __init__(self) -> None:
@@ -568,7 +587,7 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
 
     def test_transaction_detail_non_fresh_gate_blocks_point_lookup(self) -> None:
         runtime = CostStatisticsRuntimeStub()
-        source_versions = test_cost_statistics_source_versions("active:all")
+        source_versions = _cost_statistics_source_versions_fixture("active:all")
 
         class Repository:
             def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
@@ -595,7 +614,7 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
 
     def test_export_preview_reads_only_eight_filtered_rows_without_full_view(self) -> None:
         runtime = CostStatisticsRuntimeStub()
-        source_versions = test_cost_statistics_source_versions("active:2026-05")
+        source_versions = _cost_statistics_source_versions_fixture("active:2026-05")
 
         class Repository:
             def __init__(self) -> None:
@@ -658,7 +677,7 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
 
     def test_bulk_export_uses_bounded_pages_and_rechecks_same_published_version(self) -> None:
         runtime = CostStatisticsRuntimeStub()
-        source_versions = test_cost_statistics_source_versions("active:2026-05")
+        source_versions = _cost_statistics_source_versions_fixture("active:2026-05")
 
         class Repository:
             def __init__(self) -> None:
@@ -722,7 +741,7 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
 
     def test_bulk_export_fails_closed_when_published_version_changes_after_rows(self) -> None:
         runtime = CostStatisticsRuntimeStub()
-        source_versions = test_cost_statistics_source_versions("active:2026-05")
+        source_versions = _cost_statistics_source_versions_fixture("active:2026-05")
 
         class Repository:
             def __init__(self) -> None:
@@ -769,7 +788,7 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
 
     def test_bulk_export_rejects_row_limit_before_workbook_creation(self) -> None:
         runtime = CostStatisticsRuntimeStub()
-        source_versions = test_cost_statistics_source_versions("active:2026-05")
+        source_versions = _cost_statistics_source_versions_fixture("active:2026-05")
 
         class Repository:
             def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
@@ -829,11 +848,22 @@ class CostStatisticsReadConnection:
             row["dirty_source_version"] = self.dirty_source_version
             if self.dirty_status is not None and self.dirty_source_version is None:
                 row["dirty_source_version"] = int(row.get("published_source_version") or 0) + 1
-            row.setdefault("source_settings", test_cost_statistics_source_settings())
+            row.setdefault("source_settings", _cost_statistics_source_settings_fixture())
             row.setdefault("workbench_source_versions", {"source_version": 1})
             row.setdefault("workbench_dirty_source_version", 1)
             row.setdefault("workbench_dirty_status", "done")
-            row.setdefault("bank_detail_schema_version", 10)
+            row.setdefault("bank_detail_schema_version", BANK_DETAIL_READ_MODEL_SCHEMA_VERSION)
+            row.setdefault("statistics_scope_key", "active:all")
+            row.setdefault("statistics", cost_statistics_fresh_gate(
+                scope_key="active:all",
+                source_versions=_cost_statistics_source_versions_fixture("active:all"),
+            )["statistics"])
+            row.setdefault("statistics_schema_version", COST_STATISTICS_READ_MODEL_SCHEMA_VERSION)
+            row.setdefault("statistics_published_source_version", row.get("published_source_version"))
+            row.setdefault("statistics_dirty_source_version", row.get("published_source_version"))
+            row.setdefault("statistics_dirty_status", "done")
+            row.setdefault("statistics_child_has_failed", False)
+            row.setdefault("statistics_child_has_active", False)
             row.setdefault("bank_detail_status", "fresh")
             row.setdefault("bank_detail_source_version", 1)
             row.setdefault("bank_detail_source_versions", {"source_version": 1})
@@ -1276,15 +1306,25 @@ class CostStatisticsParentAggregationConnection:
         normalized = " ".join(sql.lower().split())
         self.fetch_one_calls.append((normalized, params))
         if "from read_model.cost_statistics_rows" in normalized:
-            return {"row_count": 2, "total_amount": "15.50"}
+            return {
+                "row_count": 2,
+                "transaction_count": 2,
+                "group_count": 2,
+                "project_count": 2,
+                "expense_type_count": 2,
+                "total_amount": "15.50",
+            }
         if "from read_model.cost_statistics_bank_flow_rows" in normalized:
             return {
                 "row_count": 1,
+                "transaction_count": 1,
                 "total_amount": "20.00",
                 "expense_amount": "20.00",
                 "income_amount": "0",
                 "expense_transaction_count": 1,
                 "income_transaction_count": 0,
+                "tagged_transaction_count": 1,
+                "bank_tag_count": 1,
             }
         if "from app.app_settings" in normalized:
             return {
@@ -1312,6 +1352,7 @@ class CostStatisticsSaveRecorder:
             "scope_key": scope_key,
             "entry_count": 0,
             "source_versions": {"bank_detail_source_versions": {"source_version": 3}},
+            "statistics_ready": True,
         }
 
     def active_workbench_source_versions(self, *, scope_key: str) -> dict[str, object]:
@@ -1421,6 +1462,7 @@ class UnchangedCostStatisticsSaveRecorder(CostStatisticsSaveRecorder):
             "scope_key": scope_key,
             "entry_count": 1,
             "source_versions": dict(self.source_versions),
+            "statistics_ready": True,
         }
 
 
@@ -1556,10 +1598,58 @@ class CostStatisticsReadModelRepositoryPortTests(unittest.TestCase):
 
 
 class CostStatisticsSqlRuntimeTests(unittest.TestCase):
+    def test_page_statistics_reject_invalid_partition_totals(self) -> None:
+        statistics = {
+            "transaction_count": 4,
+            "expense_transaction_count": 3,
+            "income_transaction_count": 1,
+            "cost_group_count": 2,
+            "tagged_transaction_count": 3,
+            "untagged_transaction_count": 1,
+            "project_count": 2,
+            "expense_type_count": 2,
+            "bank_tag_count": 2,
+            "cost_transaction_count": 2,
+        }
+
+        self.assertEqual(_cost_statistics_page_statistics(statistics), statistics)
+        self.assertIsNone(
+            _cost_statistics_page_statistics({**statistics, "untagged_transaction_count": 2})
+        )
+
+    def test_parent_aggregate_statistics_come_from_unfiltered_structured_rows(self) -> None:
+        connection = CostStatisticsParentAggregationConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.cost_statistics_aggregate_payload(
+            project_scope="active",
+            scope_keys=["active:2026-04", "active:2026-05"],
+            bank_accounts=[],
+        )
+
+        self.assertEqual(
+            payload["statistics"],
+            {
+                "transaction_count": 1,
+                "expense_transaction_count": 1,
+                "income_transaction_count": 0,
+                "cost_group_count": 2,
+                "tagged_transaction_count": 1,
+                "untagged_transaction_count": 0,
+                "project_count": 2,
+                "expense_type_count": 2,
+                "bank_tag_count": 1,
+                "cost_transaction_count": 2,
+            },
+        )
+        queried_sql = " ".join(sql for sql, _params in connection.fetch_one_calls)
+        self.assertIn("count(distinct transaction_id)", queried_sql)
+        self.assertNotIn("limit", queried_sql)
+
     def test_cost_statistics_page_etag_short_circuits_sql_and_cursor_rejects_new_generation(self) -> None:
         app = object.__new__(Application)
         app._app_settings_service = CostStatisticsAppSettingsStub()
-        source_versions = test_cost_statistics_source_versions("active:2026-05")
+        source_versions = _cost_statistics_source_versions_fixture("active:2026-05")
         gate_version = {"value": 7}
         page_calls: list[dict[str, object]] = []
 
@@ -2046,12 +2136,14 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
                 "scope_key": "active:2026-05",
                 "entry_count": 3,
                 "source_versions": {"proof": "v1"},
+                "statistics_ready": False,
             },
         )
         self.assertEqual(len(connection.fetch_one_calls), 1)
         sql, params = connection.fetch_one_calls[0]
         self.assertIn("select scope_key, entry_count, source_versions", sql)
-        self.assertNotIn("payload", sql)
+        self.assertIn("payload #> '{payload,statistics}' is not null as statistics_ready", sql)
+        self.assertNotIn("payload->", sql)
         self.assertNotIn("join", sql)
         self.assertNotIn("job.read_model_dirty_scopes", sql)
         self.assertEqual(params, ("active:2026-05",))
@@ -2153,7 +2245,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
                     read_model_row={
                         "scope_key": "active:2026-05",
                         "schema_version": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
-                        "source_versions": test_cost_statistics_source_versions("active:2026-05"),
+                        "source_versions": _cost_statistics_source_versions_fixture("active:2026-05"),
                         "published_source_version": 7,
                         **overrides,
                     },
@@ -2275,7 +2367,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
     def test_cost_statistics_api_reads_redis_hot_cache_after_postgres_gate_without_full_payload(self) -> None:
         app = object.__new__(Application)
         app._app_settings_service = CostStatisticsAppSettingsStub()
-        source_versions = test_cost_statistics_source_versions("active:2026-05")
+        source_versions = _cost_statistics_source_versions_fixture("active:2026-05")
         gate_calls: list[str] = []
         call_order: list[str] = []
         gate_version = {"value": 7}
@@ -2472,7 +2564,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
             {
                 "get_cost_statistics_freshness_gate": lambda _self, *, scope_key: cost_statistics_fresh_gate(
                     scope_key=scope_key,
-                    source_versions=test_cost_statistics_source_versions(scope_key),
+                    source_versions=_cost_statistics_source_versions_fixture(scope_key),
                 ),
                 "get_cost_statistics_page": lambda *_args, **_kwargs: {
                     "summary": {"row_count": 1, "transaction_count": 1, "total_amount": "100.00"},
@@ -2528,7 +2620,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
                 "get_cost_statistics_freshness_gate": lambda _self, *, scope_key: {
                     **cost_statistics_fresh_gate(
                         scope_key=scope_key,
-                        source_versions=test_cost_statistics_source_versions(scope_key),
+                        source_versions=_cost_statistics_source_versions_fixture(scope_key),
                     ),
                     "schema_version": "2026-07-cost-statistics-bank-accounts-v3",
                 },
@@ -2569,7 +2661,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
             {
                 "get_cost_statistics_freshness_gate": lambda _self, *, scope_key: cost_statistics_fresh_gate(
                     scope_key=scope_key,
-                    source_versions=test_cost_statistics_source_versions(scope_key),
+                    source_versions=_cost_statistics_source_versions_fixture(scope_key),
                 ),
                 "get_cost_statistics_page": lambda *_args, **_kwargs: None,
             },
@@ -2986,7 +3078,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
     def test_cost_statistics_source_version_mapper_includes_gate_dependency_snapshots(self) -> None:
         source_versions = cost_statistics_source_versions(
             month="2026-05",
-            settings_payload=test_cost_statistics_source_settings(),
+            settings_payload=_cost_statistics_source_settings_fixture(),
             workbench_source_versions={"builder": "workbench-v5", "source_version": 2511},
             bank_detail_source_versions={"bank_detail_scope_version": "bank-detail-v2"},
         )
@@ -3001,7 +3093,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         )
         parent_source_versions = cost_statistics_source_versions(
             month="all",
-            settings_payload=test_cost_statistics_source_settings(),
+            settings_payload=_cost_statistics_source_settings_fixture(),
             workbench_source_versions={"source_version": 2511},
             bank_detail_source_versions={"source_version": 12},
         )
@@ -3058,7 +3150,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
 
         class SqlCostStats:
             def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
-                source_versions = test_cost_statistics_source_versions(scope_key)
+                source_versions = _cost_statistics_source_versions_fixture(scope_key)
                 source_versions["workbench_source_versions"] = old_workbench_versions
                 return cost_statistics_fresh_gate(
                     scope_key=scope_key,
@@ -3223,6 +3315,35 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertTrue(result["skipped"])
         self.assertEqual(result["skip_reason"], "stale_source_version_at_unchanged_ack")
         self.assertEqual(repository.publish_calls, [])
+
+    def test_cost_statistics_sql_projection_rebuilds_parent_without_statistics(self) -> None:
+        repository = UnchangedCostStatisticsSaveRecorder()
+        repository.source_versions = {"proof": "v1"}
+        builder = CostStatisticsSqlProjectionBuilder(
+            connection=CostStatisticsProjectionConnection(),
+            read_model_repository=repository,
+        )
+        original_get_metadata = repository.get_cost_statistics_scope_metadata
+
+        def metadata_without_statistics(*, scope_key: str) -> dict[str, object]:
+            metadata = original_get_metadata(scope_key=scope_key)
+            metadata["statistics_ready"] = False
+            return metadata
+
+        repository.get_cost_statistics_scope_metadata = metadata_without_statistics
+
+        result = builder._unchanged_cost_statistics_scope_result(
+            scope_key="active:all",
+            month="all",
+            project_scope="active",
+            source_versions=repository.source_versions,
+            refresh_kind="parent",
+            tenant_id="default",
+            source_version=7,
+        )
+
+        self.assertIsNone(result)
+        self.assertEqual(repository.acknowledge_calls, [])
 
     def test_cost_statistics_sql_projection_does_not_skip_mismatched_scope_metadata(self) -> None:
         repository = UnchangedCostStatisticsSaveRecorder()

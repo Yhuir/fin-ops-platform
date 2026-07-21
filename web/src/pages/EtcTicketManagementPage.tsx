@@ -17,6 +17,7 @@ import { Link as RouterLink } from "react-router-dom";
 import AppDialog from "../components/common/AppDialog";
 import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import PageScaffold from "../components/common/PageScaffold";
+import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import StatePanel from "../components/common/StatePanel";
 import { useSessionPermissions } from "../contexts/SessionContext";
 import { useBackgroundJobProgress } from "../features/backgroundJobs/BackgroundJobProgressProvider";
@@ -51,6 +52,7 @@ import type {
   EtcBusinessBatchSummary,
   EtcCreditCardItem,
   EtcInvoice,
+  EtcPageStatistics,
   EtcReconciliationTask,
   EtcSourceFile,
   EtcSupplementEvidence,
@@ -719,6 +721,7 @@ export default function EtcTicketManagementPage() {
   const [plate, setPlate] = useState("");
   const [keyword, setKeyword] = useState("");
   const [counts, setCounts] = useState(initialCounts);
+  const [statistics, setStatistics] = useState<EtcPageStatistics | null>(null);
   const [businessBatches, setBusinessBatches] = useState<EtcBusinessBatchSummary[]>([]);
   const [selectedBatchId, setSelectedBatchId] = useState("");
   const [businessBatchDetail, setBusinessBatchDetail] = useState<EtcBusinessBatchDetail | null>(null);
@@ -781,6 +784,7 @@ export default function EtcTicketManagementPage() {
       });
       setBusinessBatches(payload.items);
       setCounts(payload.counts);
+      setStatistics(payload.statistics ?? null);
       const currentSelection = selectedBatchIdRef.current;
       const nextSelection = payload.items.some((batch) => batch.businessBatchId === currentSelection)
         ? currentSelection
@@ -794,6 +798,7 @@ export default function EtcTicketManagementPage() {
       setSelectedBatchId(nextSelection);
     } catch (caught) {
       if (!(caught instanceof DOMException && caught.name === "AbortError")) {
+        setStatistics(null);
         setBatchListError(formatEtcUiErrorMessage(caught, "ETC业务批次加载失败。"));
       }
     } finally {
@@ -1952,6 +1957,26 @@ export default function EtcTicketManagementPage() {
       <PageScaffold
         className="etc-page"
         title="ETC票据"
+        titleAccessory={
+          <PageStatisticsPopover
+            ariaLabel="ETC票据数据统计"
+            loading={loading && !statistics}
+            coreItems={[
+              { label: "ETC 发票", value: statistics?.invoiceCount, unit: "张" },
+              { label: "业务批次", value: statistics?.businessBatchCount, unit: "批" },
+              { label: "已提交", value: statistics?.submittedBatchCount, unit: "批", tone: "success" },
+            ]}
+            detailItems={[
+              { label: "未提交", value: statistics?.unsubmittedBatchCount, unit: "批", tone: "warning" },
+              { label: "暂存", value: statistics?.draftBatchCount, unit: "批" },
+              { label: "对账任务", value: statistics?.reconciliationTaskCount, unit: "个" },
+              { label: "源文件", value: statistics?.sourceFileCount, unit: "个" },
+              { label: "成功导入发票", value: statistics?.importedInvoiceCount, unit: "张", tone: "success" },
+              { label: "已关联统一发票", value: statistics?.linkedCanonicalInvoiceCount, unit: "张" },
+              { label: "OA 草稿批次", value: statistics?.oaDraftBatchCount, unit: "批" },
+            ]}
+          />
+        }
         actions={
           <>
             <PageBusinessAuditIcon

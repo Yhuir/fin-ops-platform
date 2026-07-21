@@ -210,6 +210,7 @@ def _audit_page_business_read_model_snapshot(
         _dirty_scope_issues,
         _outbox_backlog_issues,
         _scope_row_count_mismatch_issues,
+        _page_statistics_issues,
         _read_model_source_version_mismatch_issues,
         _oa_pending_payment_fresh_gate_issues,
         _missing_read_model_scope_issues,
@@ -256,6 +257,7 @@ def _audit_page_business_read_model_snapshot(
                 "missing_or_orphan_identity",
                 "key_display_field_recalculation",
                 "scope_count_and_source_version_equality",
+                "page_statistics_recalculation",
                 "bidirectional_relation_edge_equality",
                 *(["consumer_relation_edge_equality"] if contract.consumer_relation_contract else []),
                 *(
@@ -550,6 +552,240 @@ def _scope_row_count_mismatch_issues(
             subject_id=_text(row.get("scope_type")),
             scope_key=_text(row.get("scope_key")),
             details={key: _jsonable(value) for key, value in row.items() if key not in {"scope_type", "scope_key"}},
+        )
+        for row in rows
+    ]
+
+
+def _page_statistics_issues(
+    connection: Any,
+    contract: PageAuditContract,
+    tenant_id: str,
+    limit: int,
+) -> list[AuditIssue]:
+    if contract.domain_key == "oa_pending_payments":
+        rows = connection.fetch_all(
+            """
+            /* check: oa_pending_payment_page_statistics_recalculation */
+            with canonical_oa as (
+                select row_id as oa_id, to_char(scope_month, 'YYYY-MM') as scope_key, 'completed' as workflow_kind
+                from app.oa_applications
+                where status <> 'deleted'
+                  and scope_month is not null
+                  and (
+                        workflow_status is null or workflow_status = ''
+                     or workflow_status in ('completed', '已完成', 'approved', 'APPROVED', 'Approved', '2')
+                  )
+                union
+                select oa_id, scope_key, 'in_progress' as workflow_kind
+                from app.oa_pending_payment_admissions
+                where tenant_id = %s
+                  and workflow_status = 'in_progress'
+            ), canonical_counts as (
+                select scope_key,
+                       count(distinct oa_id)::integer as oa_count,
+                       count(distinct oa_id) filter (where workflow_kind = 'completed')::integer as completed_oa_count,
+                       count(distinct oa_id) filter (where workflow_kind = 'in_progress')::integer as in_progress_oa_count
+                from canonical_oa
+                group by scope_key
+            ), projected_oa as (
+                select row.scope_key, member.oa_id,
+                       bool_or(row.payment_status = 'paid') as paid,
+                       bool_or(
+                           coalesce((row.payload->'bankTransaction'->>'linkedRelationCount')::integer, 0) > 0
+                       ) as linked_bank,
+                       bool_or(exists (
+                           select 1
+                           from jsonb_array_elements(
+                               case
+                                   when jsonb_typeof(row.payload->'invoice'->'summaries') = 'array'
+                                   then row.payload->'invoice'->'summaries'
+                                   else '[]'::jsonb
+                               end
+                           ) invoice(value)
+                           where invoice.value->>'relationStatus' = 'linked'
+                       )) as linked_input_invoice
+                from read_model.oa_pending_payment_rows row
+                join lateral unnest(
+                    case
+                        when cardinality(row.oa_ids) > 0 then row.oa_ids
+                        else array[row.oa_id]
+                    end
+                ) member(oa_id) on true
+                group by row.scope_key, member.oa_id
+            ), projected_counts as (
+                select scope_key,
+                       count(*) filter (where paid)::integer as paid_oa_count,
+                       count(*) filter (where linked_bank)::integer as linked_bank_oa_count,
+                       count(*) filter (where linked_input_invoice)::integer as linked_input_invoice_oa_count
+                from projected_oa
+                group by scope_key
+            ), bank_counts as (
+                select to_char(txn_month, 'YYYY-MM') as scope_key,
+                       count(distinct coalesce(legacy_mongo_id, id::text))::integer as bank_transaction_count,
+                       count(distinct coalesce(legacy_mongo_id, id::text)) filter (
+                           where txn_direction = 'outflow'
+                       )::integer as expense_transaction_count,
+                       count(distinct coalesce(legacy_mongo_id, id::text)) filter (
+                           where txn_direction = 'inflow'
+                       )::integer as income_transaction_count,
+                       md5(coalesce(string_agg(
+                           concat(
+                               coalesce(legacy_mongo_id, id::text),
+                               '|',
+                               coalesce(txn_direction, '')
+                           ),
+                           E'\n' order by coalesce(legacy_mongo_id, id::text)
+                       ), '')) as membership_digest
+                from app.bank_transactions
+                where status <> 'deleted' and txn_month is not null
+                group by txn_month
+            ), invoice_counts as (
+                select to_char(invoice_month, 'YYYY-MM') as scope_key,
+                       count(distinct coalesce(legacy_mongo_id, id::text))::integer as input_invoice_count,
+                       md5(coalesce(string_agg(
+                           concat(
+                               coalesce(legacy_mongo_id, id::text),
+                               '|',
+                               coalesce(invoice_type, '')
+                           ),
+                           E'\n' order by coalesce(legacy_mongo_id, id::text)
+                       ), '')) as membership_digest
+                from app.invoices
+                where status <> 'deleted'
+                  and invoice_month is not null
+                  and not (
+                      coalesce(invoice_type, '') ilike '%%output%%'
+                      or coalesce(invoice_type, '') like '%%销%%'
+                  )
+                group by invoice_month
+            ), recalculated as (
+                select scope.scope_key,
+                       jsonb_build_object(
+                           'oa_count', coalesce(canonical.oa_count, 0),
+                           'bank_transaction_count', coalesce(bank.bank_transaction_count, 0),
+                           'input_invoice_count', coalesce(invoice.input_invoice_count, 0),
+                           'paid_oa_count', coalesce(projected.paid_oa_count, 0),
+                           'completed_oa_count', coalesce(canonical.completed_oa_count, 0),
+                           'in_progress_oa_count', coalesce(canonical.in_progress_oa_count, 0),
+                           'expense_transaction_count', coalesce(bank.expense_transaction_count, 0),
+                           'income_transaction_count', coalesce(bank.income_transaction_count, 0),
+                           'unpaid_oa_count', greatest(
+                               coalesce(canonical.oa_count, 0) - coalesce(projected.paid_oa_count, 0), 0
+                           ),
+                           'linked_bank_oa_count', coalesce(projected.linked_bank_oa_count, 0),
+                           'linked_input_invoice_oa_count', coalesce(projected.linked_input_invoice_oa_count, 0)
+                       ) as statistics,
+                       concat(
+                           'rows:', coalesce(bank.bank_transaction_count, 0),
+                           '|digest:', coalesce(bank.membership_digest, md5(''))
+                       ) as bank_coverage_signature,
+                       concat(
+                           'rows:', coalesce(invoice.input_invoice_count, 0),
+                           '|digest:', coalesce(invoice.membership_digest, md5(''))
+                       ) as input_invoice_coverage_signature
+                from read_model.oa_pending_payment_scopes scope
+                left join canonical_counts canonical using (scope_key)
+                left join projected_counts projected using (scope_key)
+                left join bank_counts bank using (scope_key)
+                left join invoice_counts invoice using (scope_key)
+                where scope.scope_key <> 'all'
+            )
+            select scope.scope_key,
+                   scope.raw_payload->'statistics' as stored_statistics,
+                   recalculated.statistics as recalculated_statistics,
+                   scope.source_versions->>'oa_pending_payment_bank_coverage_signature'
+                       as stored_bank_coverage_signature,
+                   recalculated.bank_coverage_signature as recalculated_bank_coverage_signature,
+                   scope.source_versions->>'oa_pending_payment_input_invoice_coverage_signature'
+                       as stored_input_invoice_coverage_signature,
+                   recalculated.input_invoice_coverage_signature as recalculated_input_invoice_coverage_signature
+            from read_model.oa_pending_payment_scopes scope
+            join recalculated using (scope_key)
+            where scope.raw_payload->'statistics' is distinct from recalculated.statistics
+               or scope.source_versions->>'oa_pending_payment_bank_coverage_signature'
+                    is distinct from recalculated.bank_coverage_signature
+               or scope.source_versions->>'oa_pending_payment_input_invoice_coverage_signature'
+                    is distinct from recalculated.input_invoice_coverage_signature
+            order by scope.scope_key
+            limit %s
+            """,
+            (tenant_id, limit),
+        )
+        return [
+            AuditIssue(
+                severity="error",
+                code="oa_pending_payments_page_statistics_mismatch",
+                message="OA 待付款核对页面统计与独立重算结果不一致。",
+                scope_key=_text(row.get("scope_key")),
+                details=_details(
+                    row,
+                    "stored_statistics",
+                    "recalculated_statistics",
+                    "stored_bank_coverage_signature",
+                    "recalculated_bank_coverage_signature",
+                    "stored_input_invoice_coverage_signature",
+                    "recalculated_input_invoice_coverage_signature",
+                ),
+            )
+            for row in rows
+        ]
+    if contract.domain_key != "bank_details":
+        return []
+    rows = connection.fetch_all(
+        """
+        /* check: page_statistics_recalculation */
+        with recalculated as (
+            select scope.scope_key,
+                   jsonb_build_object(
+                       'transaction_count', count(row.transaction_id)::integer,
+                       'expense_transaction_count', count(row.transaction_id) filter (
+                           where row.direction = 'expense'
+                       )::integer,
+                       'income_transaction_count', count(row.transaction_id) filter (
+                           where row.direction = 'income'
+                       )::integer,
+                       'classified_transaction_count', count(row.transaction_id) filter (
+                           where nullif(btrim(row.effective_category_code), '') is not null
+                       )::integer,
+                       'unclassified_transaction_count', count(row.transaction_id) filter (
+                           where nullif(btrim(row.effective_category_code), '') is null
+                       )::integer,
+                       'linked_transaction_count', count(row.transaction_id) filter (
+                           where row.payload->>'relation_status' = 'linked'
+                       )::integer,
+                       'unlinked_transaction_count', count(row.transaction_id) filter (
+                           where coalesce(row.payload->>'relation_status', '') <> 'linked'
+                       )::integer
+                   ) as statistics
+            from read_model.bank_detail_scopes scope
+            left join read_model.bank_detail_rows row
+              on row.tenant_id = scope.tenant_id
+             and row.scope_key = scope.scope_key
+            where scope.tenant_id = %s
+              and scope.scope_type = 'bank_detail'
+            group by scope.scope_key
+        )
+        select scope.scope_key,
+               scope.raw_payload->'statistics' as stored_statistics,
+               recalculated.statistics as recalculated_statistics
+        from read_model.bank_detail_scopes scope
+        join recalculated on recalculated.scope_key = scope.scope_key
+        where scope.tenant_id = %s
+          and scope.scope_type = 'bank_detail'
+          and scope.raw_payload->'statistics' is distinct from recalculated.statistics
+        order by scope.scope_key
+        limit %s
+        """,
+        (tenant_id, tenant_id, limit),
+    )
+    return [
+        AuditIssue(
+            severity="error",
+            code="bank_details_page_statistics_mismatch",
+            message="银行明细页面统计与页面 Read model 行不一致。",
+            scope_key=_text(row.get("scope_key")),
+            details=_details(row, "stored_statistics", "recalculated_statistics"),
         )
         for row in rows
     ]
@@ -1616,7 +1852,60 @@ def _key_display_field_issues(
                 """,
                 (limit,),
                 "turnover_ledger_extra_fields_mismatch",
-            )
+            ),
+            (
+                """
+                /* check: turnover_statistics_projection */
+                with expected as (
+                    select ledger.relation_id,
+                           member.row_id,
+                           case when source.txn_direction = 'inflow' then 'income' else 'expense' end
+                               as expected_direction
+                    from read_model.turnover_ledger_rows ledger
+                    join lateral unnest(ledger.bank_row_ids) member(row_id) on true
+                    left join app.bank_transactions source
+                      on coalesce(source.legacy_mongo_id, source.id::text) = member.row_id
+                     and source.status <> 'deleted'
+                ), projected as (
+                    select ledger.relation_id,
+                           nullif(btrim(flow.value->>'source_bank_row_id'), '') as row_id,
+                           flow.value->>'flow_direction' as flow_direction,
+                           count(*) over (
+                               partition by ledger.relation_id, flow.value->>'source_bank_row_id'
+                           )::integer as identity_count
+                    from read_model.turnover_ledger_rows ledger
+                    join lateral jsonb_array_elements(
+                        case
+                            when jsonb_typeof(ledger.payload->'flow_rows') = 'array'
+                            then ledger.payload->'flow_rows'
+                            else '[]'::jsonb
+                        end
+                    ) flow(value) on true
+                ), mismatches as (
+                    select coalesce(expected.relation_id, projected.relation_id) as relation_id,
+                           coalesce(expected.row_id, projected.row_id) as row_id,
+                           expected.expected_direction,
+                           projected.flow_direction,
+                           projected.identity_count
+                    from expected
+                    full join projected
+                      on projected.relation_id = expected.relation_id
+                     and projected.row_id = expected.row_id
+                    where expected.row_id is null
+                       or projected.row_id is null
+                       or projected.identity_count <> 1
+                       or projected.flow_direction <> expected.expected_direction
+                )
+                select relation_id || ':' || coalesce(row_id, '') as subject_id,
+                       relation_id as scope_key,
+                       row_id, expected_direction, flow_direction, identity_count
+                from mismatches
+                order by relation_id, row_id
+                limit %s
+                """,
+                (limit,),
+                "turnover_ledger_statistics_projection_mismatch",
+            ),
         ]
     elif domain == "batch_accounting":
         queries = [
@@ -1896,6 +2185,7 @@ def collect_bank_detail_projection_integrity_issues(
     contract = PAGE_AUDIT_CONTRACTS["bank_details"]
     checks: tuple[Callable[[Any, PageAuditContract, str, int], list[AuditIssue]], ...] = (
         _scope_row_count_mismatch_issues,
+        _page_statistics_issues,
         _read_model_source_version_mismatch_issues,
         _missing_read_model_scope_issues,
         _missing_read_model_row_issues,

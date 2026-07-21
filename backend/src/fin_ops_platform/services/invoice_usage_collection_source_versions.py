@@ -18,6 +18,7 @@ def input_invoice_usage_source_versions(payment_status_rules_version: int | str 
         "input_invoice_usage_source_version": INPUT_INVOICE_USAGE_SOURCE_VERSION,
         "invoice_lifecycle_policy_schema_version": INVOICE_LIFECYCLE_POLICY_SCHEMA_VERSION,
         "input_invoice_usage_payment_rules_version": normalized_rules_version,
+        "input_invoice_usage_statistics_schema_version": 1,
         "oa_attachment_invoice_parser_version": attachment_invoice_cache_parser_version(),
         "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
     }
@@ -30,6 +31,7 @@ def output_invoice_collection_source_versions() -> dict[str, object]:
         "output_invoice_collection_lifecycle_schema_version": 1,
         "output_invoice_collection_status_rules_version": "sheet6-static-v1+lifecycle-v1",
         "output_invoice_receipt_schema_version": 1,
+        "output_invoice_collection_statistics_schema_version": 1,
         "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
     }
 

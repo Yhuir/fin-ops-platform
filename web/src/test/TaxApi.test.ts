@@ -1,6 +1,6 @@
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { taxCertifiedImportConfirmedFromJob } from "../features/tax/api";
+import { fetchTaxOffsetMonth, taxCertifiedImportConfirmedFromJob } from "../features/tax/api";
 import type { TaxCertifiedImportJob } from "../features/tax/types";
 
 function importJob(resultPayload: Record<string, unknown>): TaxCertifiedImportJob {
@@ -14,6 +14,45 @@ function importJob(resultPayload: Record<string, unknown>): TaxCertifiedImportJo
 }
 
 describe("tax API mappers", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  test("maps page-owned statistics and rejects invalid counts", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      month: "2026-05",
+      output_items: [],
+      input_items: [],
+      default_selected_output_ids: [],
+      default_selected_input_ids: [],
+      summary: {
+        output_tax: "0.00",
+        input_tax: "0.00",
+        deductible_tax: "0.00",
+        result_label: "应纳税额",
+        result_amount: "0.00",
+      },
+      statistics: {
+        input_invoice_count: "800",
+        output_invoice_count: 600,
+        certification_record_count: 500,
+        matched_certification_count: -1,
+        deductible_invoice_count: 2.5,
+      },
+      read_model_status: "fresh",
+    }), { headers: { "Content-Type": "application/json" } })));
+
+    const result = await fetchTaxOffsetMonth("2026-05");
+
+    expect(result.statistics).toEqual(expect.objectContaining({
+      inputInvoiceCount: 800,
+      outputInvoiceCount: 600,
+      certificationRecordCount: 500,
+      matchedCertificationCount: undefined,
+      deductibleInvoiceCount: undefined,
+    }));
+  });
+
   test("maps a completed certified import job batch result", () => {
     const result = taxCertifiedImportConfirmedFromJob(
       importJob({

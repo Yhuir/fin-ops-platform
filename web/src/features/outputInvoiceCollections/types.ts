@@ -194,6 +194,18 @@ export type OutputInvoiceCollectionRow = {
   receipt: OutputInvoiceCollectionReceiptSummary;
 };
 
+export type OutputInvoiceCollectionStatistics = {
+  invoiceCount?: number;
+  linkedOaInvoiceCount?: number;
+  linkedIncomeBankInvoiceCount?: number;
+  collectedInvoiceCount?: number;
+  unlinkedOaInvoiceCount?: number;
+  unlinkedBankInvoiceCount?: number;
+  uncollectedInvoiceCount?: number;
+  redInvoiceCount?: number;
+  issuedReceiptCount?: number;
+};
+
 export type OutputInvoiceCollectionRowsResponse = {
   rows: OutputInvoiceCollectionRow[];
   summary?: {
@@ -205,6 +217,7 @@ export type OutputInvoiceCollectionRowsResponse = {
     partialCollectionCount: number;
     receiptPendingCount: number;
   };
+  statistics?: OutputInvoiceCollectionStatistics;
   pagination: {
     page: number;
     pageSize: number;

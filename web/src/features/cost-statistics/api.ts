@@ -90,6 +90,18 @@ type ApiCostStatisticsExplorerPage = {
   scope: string;
   view: CostStatisticsExplorerPage["view"];
   summary: ApiCostSummary;
+  statistics?: {
+    transaction_count?: number | null;
+    expense_transaction_count?: number | null;
+    income_transaction_count?: number | null;
+    cost_group_count?: number | null;
+    tagged_transaction_count?: number | null;
+    untagged_transaction_count?: number | null;
+    project_count?: number | null;
+    expense_type_count?: number | null;
+    bank_tag_count?: number | null;
+    cost_transaction_count?: number | null;
+  } | null;
   available_years?: string[] | null;
   facets?: {
     projects?: ApiCostProjectExplorerRow[] | null;
@@ -181,6 +193,14 @@ function mapSummary(summary: ApiCostSummary) {
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function optionalCount(value: unknown): number | undefined {
+  if (value === null || value === undefined || value === "") {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
 function stringList(value: unknown): string[] | undefined {
@@ -292,6 +312,18 @@ export async function fetchCostStatisticsExplorerPage(
     scope: payload.scope,
     view: payload.view,
     summary: mapSummary(payload.summary),
+    statistics: payload.statistics ? {
+      transactionCount: optionalCount(payload.statistics.transaction_count),
+      expenseTransactionCount: optionalCount(payload.statistics.expense_transaction_count),
+      incomeTransactionCount: optionalCount(payload.statistics.income_transaction_count),
+      costGroupCount: optionalCount(payload.statistics.cost_group_count),
+      taggedTransactionCount: optionalCount(payload.statistics.tagged_transaction_count),
+      untaggedTransactionCount: optionalCount(payload.statistics.untagged_transaction_count),
+      projectCount: optionalCount(payload.statistics.project_count),
+      expenseTypeCount: optionalCount(payload.statistics.expense_type_count),
+      bankTagCount: optionalCount(payload.statistics.bank_tag_count),
+      costTransactionCount: optionalCount(payload.statistics.cost_transaction_count),
+    } : undefined,
     availableYears: stringList(payload.available_years) ?? [],
     facets: {
       projects: (facets.projects ?? []).map<CostProjectExplorerRow>((row) => ({

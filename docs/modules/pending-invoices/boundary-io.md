@@ -1,6 +1,6 @@
 # 待找发票模块边界与 I/O
 
-日期：2026-07-05
+日期：2026-07-22
 
 ## 模块化状态
 
@@ -40,10 +40,12 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| 待找发票 rows/summary | 前端页面 | fresh/status 可见；缺少/未知 read model status 保持 refreshing/non-fresh |
+| 待找发票 rows/summary/statistics | 前端页面 | fresh/status 可见；主 rows 响应附带全期间 `statistics` 与独立 `statistics_status`，按 `bank_transactions.summaries` 中唯一流水 ID 统计总流水、支出、收入、已找到/待找、无需开票、现金收入及 OA/进项/销项关联覆盖；统计忽略当前 direction/filter/date/keyword/sort/page。任一 pending-invoice child scope non-fresh 或完整方向 scope 缺失时 `statistics=null`，合法 fresh 空集才返回零；缺少/未知 read model status 保持 refreshing/non-fresh。 |
 | 页面 Audit 状态 | 标题附件 | 仅 integrity pass、freshness fresh、queue drained 且页面 read model 明确 fresh 才显示成功 |
 | 规则保存结果 | API | 持久化规则并触发刷新 |
 | 发票关联/收入状态写结果 | API/frontend | 返回 `affected_months`、`affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets` |
+
+批量导出仅第一页读取并校验全量标题统计；后续分页使用内部 `include_statistics=false` 跳过重复的统计 scope/dirty/outbox 聚合，但每一页仍执行 rows read-model freshness、schema 与 source-version检查。
 | Dirty scope | runtime queue | 不允许无界全量 |
 
 ## 持久化与投影

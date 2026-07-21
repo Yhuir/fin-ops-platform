@@ -250,6 +250,19 @@ export type PendingInvoiceSourceSummary = {
   excludedDirectionRows: number;
 };
 
+export type PendingInvoiceStatistics = {
+  bankTransactionCount?: number;
+  expenseTransactionCount?: number;
+  incomeTransactionCount?: number;
+  foundInvoiceTransactionCount?: number;
+  pendingInvoiceTransactionCount?: number;
+  noInvoiceRequiredTransactionCount?: number;
+  cashIncomeTransactionCount?: number;
+  linkedOaTransactionCount?: number;
+  linkedInputInvoiceTransactionCount?: number;
+  linkedOutputInvoiceTransactionCount?: number;
+};
+
 export type PendingInvoiceRelationDetailKind = "all" | "bank" | "invoice" | "oa";
 
 export type PendingInvoiceRow = {
@@ -281,6 +294,7 @@ export type PendingInvoiceRowsResponse = {
     createInvoiceAvailableRows: number;
     sourceSummary?: PendingInvoiceSourceSummary;
   };
+  statistics?: PendingInvoiceStatistics;
   readModelStatus: PendingInvoiceReadModelStatus;
   tagDictionary?: BankTransactionTagDictionary;
 };

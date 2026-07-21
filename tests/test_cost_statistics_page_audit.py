@@ -118,7 +118,7 @@ class CostStatisticsPageAuditTests(unittest.TestCase):
             len(connection.fetch_one_calls) + len(connection.fetch_all_calls),
             COST_STATISTICS_AUDIT_QUERY_BUDGET,
         )
-        self.assertEqual(COST_STATISTICS_AUDIT_QUERY_BUDGET, 23)
+        self.assertEqual(COST_STATISTICS_AUDIT_QUERY_BUDGET, 25)
         relation_queries = [
             sql for sql, _params in connection.fetch_all_calls if "/* check: relation_edge_equality */" in sql
         ]
@@ -455,7 +455,7 @@ class CostStatisticsPageAuditTests(unittest.TestCase):
         self.assertIn("row.bank_tag_label_path", business_sql)
         self.assertIn("expected_bank_scope_rows as (", business_sql)
         self.assertIn(
-            "select project_scope || ':all', row_key, amount, direction",
+            "select project_scope || ':all', row_key, transaction_id, amount, direction, bank_tag_code",
             business_sql,
         )
         self.assertGreaterEqual(

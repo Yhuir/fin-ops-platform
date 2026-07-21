@@ -40,13 +40,39 @@ class _BankDetailStatusRepository:
         return [str(date_from or "")[:7] or "2026-01"]
 
     def bank_detail_scope_summary(self, *, scope_keys: list[str]) -> dict[str, object]:
+        statistics = {
+            "transaction_count": 1,
+            "expense_transaction_count": 1,
+            "income_transaction_count": 0,
+            "classified_transaction_count": 1,
+            "unclassified_transaction_count": 0,
+            "linked_transaction_count": 0,
+            "unlinked_transaction_count": 1,
+        }
         return {
             "read_model_status": self.status,
+            "statistics": statistics if self.status == "fresh" else None,
+            "statistics_status": self.status,
+            "statistics_scope_keys": list(scope_keys),
+            "statistics_signature": f"test:{self.status}",
             "read_model_scope_keys": list(scope_keys),
             "read_model_generated_at": "2026-05-27T21:00:00+00:00",
             "read_model_scope_signatures": {
                 scope_key: {
                     "status": "fresh",
+                    "source_versions": (
+                        {"bank_auto_tag_rules_version": self.bank_auto_tag_rules_version}
+                        if self.bank_auto_tag_rules_version is not None
+                        else {}
+                    ),
+                    "dirty_status": "pending" if self.status == "refreshing" else None,
+                }
+                for scope_key in scope_keys
+            },
+            "statistics_scope_signatures": {
+                scope_key: {
+                    "status": "fresh",
+                    "statistics": statistics,
                     "source_versions": (
                         {"bank_auto_tag_rules_version": self.bank_auto_tag_rules_version}
                         if self.bank_auto_tag_rules_version is not None

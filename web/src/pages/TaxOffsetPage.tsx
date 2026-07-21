@@ -4,6 +4,7 @@ import { Alert, Button } from "@heroui/react";
 
 import PageScaffold from "../components/common/PageScaffold";
 import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
+import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import StatePanel from "../components/common/StatePanel";
 import CertifiedInvoiceImportModal from "../components/tax/CertifiedInvoiceImportModal";
 import CertifiedResultsDrawer from "../components/tax/CertifiedResultsDrawer";
@@ -364,14 +365,36 @@ export default function TaxOffsetPage() {
   const headerStatusMessage = importFeedback
     ?? planFeedback
     ?? null;
-  const titleAccessory = canAdminAccess ? (
-    <PageBusinessAuditIcon
-      ariaLabel="Audit 税金抵扣"
-      pageKey="tax-offset"
-      label="税金抵扣"
-      readModelStatus={readModelStatus}
-    />
-  ) : null;
+  const visibleStatistics = readModelStatus === "fresh" ? monthData?.statistics : null;
+  const titleAccessory = (
+    <div className="page-title-accessory-group">
+      <PageStatisticsPopover
+        ariaLabel="税金抵扣数据统计"
+        loading={isLoading && !monthData?.statistics}
+        coreItems={[
+          { label: "进项发票", value: visibleStatistics?.inputInvoiceCount, unit: "张" },
+          { label: "销项发票", value: visibleStatistics?.outputInvoiceCount, unit: "张" },
+          { label: "认证记录", value: visibleStatistics?.certificationRecordCount, unit: "条" },
+        ]}
+        detailItems={[
+          { label: "认证匹配", value: visibleStatistics?.matchedCertificationCount, unit: "条", tone: "success" },
+          { label: "认证未匹配", value: visibleStatistics?.unmatchedCertificationCount, unit: "条", tone: "warning" },
+          { label: "认证范围外", value: visibleStatistics?.outOfScopeCertificationCount, unit: "条", tone: "warning" },
+          { label: "可抵扣", value: visibleStatistics?.deductibleInvoiceCount, unit: "张" },
+          { label: "已选择", value: visibleStatistics?.selectedInvoiceCount, unit: "张", tone: "success" },
+          { label: "未选择", value: visibleStatistics?.unselectedInvoiceCount, unit: "张" },
+        ]}
+      />
+      {canAdminAccess ? (
+        <PageBusinessAuditIcon
+          ariaLabel="Audit 税金抵扣"
+          pageKey="tax-offset"
+          label="税金抵扣"
+          readModelStatus={readModelStatus}
+        />
+      ) : null}
+    </div>
+  );
 
   const waitForTaxOffsetBarrier = useCallback(async () => {
     try {

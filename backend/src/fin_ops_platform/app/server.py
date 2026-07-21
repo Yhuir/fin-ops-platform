@@ -1200,6 +1200,11 @@ class Application:
             queue_repository=getattr(runtime_repositories, "queue_repository", None),
             redis_helper=getattr(runtime_repositories, "redis_helper", None),
             source_versions_provider=self._tax_offset_source_versions,
+            statistics_generation_token_provider=lambda: (
+                self._tax_offset_sql_read_repository.tax_offset_statistics_generation_token()
+                if getattr(self, "_tax_offset_sql_read_repository", None) is not None
+                else None
+            ),
             persist_read_models=self._persist_tax_offset_read_models_best_effort,
             month_cache_clearer=getattr(tax_offset_service, "clear_month_cache", None),
             schedule_cache_warmup=lambda months, reason: self._tax_offset_cache_warmup_executor.schedule(
@@ -1338,6 +1343,11 @@ class Application:
             queue_repository=getattr(runtime_repositories, "queue_repository", None),
             redis_helper=getattr(runtime_repositories, "redis_helper", None),
             source_versions_provider=self._tax_offset_source_versions,
+            statistics_generation_token_provider=lambda: (
+                self._tax_offset_sql_read_repository.tax_offset_statistics_generation_token()
+                if getattr(self, "_tax_offset_sql_read_repository", None) is not None
+                else None
+            ),
             persist_read_models=self._persist_tax_offset_read_models_best_effort,
             month_cache_clearer=getattr(tax_offset_service, "clear_month_cache", None),
             schedule_cache_warmup=schedule_cache_warmup,
@@ -7895,22 +7905,6 @@ class Application:
         if not isinstance(row, dict):
             return "rows:0|max_updated_at:"
         return f"rows:{row.get('row_count') or 0}|max_updated_at:{row.get('max_updated_at') or ''}"
-
-    def _tax_offset_redis_cache_key(
-        self,
-        scope_key: str,
-        *,
-        source_versions: dict[str, object] | None = None,
-    ) -> str:
-        return self._tax_offset_runtime_for_read_model().redis_cache_key(scope_key, source_versions=source_versions)
-
-    def _tax_offset_summary_redis_cache_key(
-        self,
-        scope_key: str,
-        *,
-        source_versions: dict[str, object] | None = None,
-    ) -> str:
-        return self._tax_offset_runtime_for_read_model().summary_redis_cache_key(scope_key, source_versions=source_versions)
 
     @staticmethod
     def _tax_offset_redis_ttl_seconds() -> int:

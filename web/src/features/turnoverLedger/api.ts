@@ -201,6 +201,16 @@ type ApiTurnoverLedgerGroupedResponse = {
   family_summaries?: ApiTurnoverLedgerResponse["family_summaries"];
   groups?: ApiTurnoverLedgerGroup[];
   pagination?: ApiTurnoverLedgerResponse["pagination"];
+  statistics?: {
+    transaction_count?: number | null;
+    expense_transaction_count?: number | null;
+    income_transaction_count?: number | null;
+    closed_group_count?: number | null;
+    ledger_group_count?: number | null;
+    unclosed_group_count?: number | null;
+    linked_oa_transaction_count?: number | null;
+    linked_invoice_transaction_count?: number | null;
+  } | null;
   read_model_status?: string | null;
   read_model_stale_reasons?: string[] | null;
 };
@@ -410,6 +420,14 @@ function numberValue(value: number | string | null | undefined) {
   }
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function optionalCount(value: number | string | null | undefined) {
+  if (value === null || value === undefined || value === "") {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
 function nullableNumberValue(value: number | string | null | undefined) {
@@ -878,6 +896,16 @@ export async function fetchTurnoverLedgerGrouped({
       pageSize: payload.pagination?.page_size ?? pageSize,
       total: payload.pagination?.total ?? payload.groups?.length ?? 0,
     },
+    statistics: payload.statistics ? {
+      transactionCount: optionalCount(payload.statistics.transaction_count),
+      expenseTransactionCount: optionalCount(payload.statistics.expense_transaction_count),
+      incomeTransactionCount: optionalCount(payload.statistics.income_transaction_count),
+      closedGroupCount: optionalCount(payload.statistics.closed_group_count),
+      ledgerGroupCount: optionalCount(payload.statistics.ledger_group_count),
+      unclosedGroupCount: optionalCount(payload.statistics.unclosed_group_count),
+      linkedOaTransactionCount: optionalCount(payload.statistics.linked_oa_transaction_count),
+      linkedInvoiceTransactionCount: optionalCount(payload.statistics.linked_invoice_transaction_count),
+    } : undefined,
     readModelStatus: text(payload.read_model_status, "refreshing"),
     readModelStaleReasons: stringList(payload.read_model_stale_reasons ?? undefined),
   };

@@ -746,7 +746,11 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertIn("coalesce(source.legacy_mongo_id, source.id::text)", queried_sql)
         self.assertIn("bank_tag_label_path", queried_sql)
         self.assertIn("bank_flow_summary", queried_sql)
-        self.assertIn("select project_scope || ':all', row_key, amount", queried_sql)
+        self.assertIn(
+            "select project_scope || ':all', row_key, transaction_id, amount",
+            queried_sql,
+        )
+        self.assertIn("model.payload->'payload'->'statistics'", queried_sql)
         self.assertIn("read_model.cost_statistics_bank_flow_rows", queried_sql)
         self.assertNotIn("bank_flow_time_rows", queried_sql)
         self.assertIn("expected_sub_label", queried_sql)
@@ -845,6 +849,17 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertNotIn("relation_scope.source_versions as relation_source_versions", fresh_gate_sql)
         self.assertIn("dead_lettered", fresh_gate_sql)
         self.assertNotIn("select relation_scope.scope_key", target_inventory_sql)
+        self.assertNotIn("from app.bank_transactions", fresh_gate_sql)
+        self.assertNotIn("from app.invoices", fresh_gate_sql)
+        statistics_sql = next(
+            sql
+            for sql, _params in connection.fetch_all_calls
+            if "oa_pending_payment_page_statistics_recalculation" in sql
+        )
+        self.assertIn("stored_bank_coverage_signature", statistics_sql)
+        self.assertIn("recalculated_bank_coverage_signature", statistics_sql)
+        self.assertIn("coalesce(txn_direction, '')", statistics_sql)
+        self.assertIn("coalesce(invoice_type, '')", statistics_sql)
         duplicate_sql, _params = next(
             (sql, params)
             for sql, params in connection.fetch_all_calls
@@ -1149,6 +1164,8 @@ def _fresh_oa_pending_payment_query_state_row() -> dict[str, object]:
         "payment_status_signature": "payment",
         "oa_pending_payment_source_signature": "source",
         "oa_pending_payment_relation_version": 1,
+        "oa_pending_payment_bank_coverage_signature": "rows:1|digest:bank",
+        "oa_pending_payment_input_invoice_coverage_signature": "rows:1|digest:invoice",
         "oa_pending_payment_event_source_version": 1,
     }
     return {

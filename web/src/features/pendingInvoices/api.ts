@@ -206,6 +206,18 @@ type ApiPendingInvoiceRowsResponse = {
       excluded_direction_rows: number | string | null;
     }> | null;
   } | null;
+  statistics?: Partial<{
+    bank_transaction_count: number | string | null;
+    expense_transaction_count: number | string | null;
+    income_transaction_count: number | string | null;
+    found_invoice_transaction_count: number | string | null;
+    pending_invoice_transaction_count: number | string | null;
+    no_invoice_required_transaction_count: number | string | null;
+    cash_income_transaction_count: number | string | null;
+    linked_oa_transaction_count: number | string | null;
+    linked_input_invoice_transaction_count: number | string | null;
+    linked_output_invoice_transaction_count: number | string | null;
+  }> | null;
   read_model_status?: string | null;
   tag_dictionary?: ApiTagDictionary | null;
   bank_transaction_tags?: ApiTagDictionary | null;
@@ -398,6 +410,14 @@ function displayDateTime(value: unknown, fallback = "") {
 function numberValue(value: unknown, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function optionalCount(value: unknown): number | undefined {
+  if (value === null || value === undefined || value === "") {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
 function stringList(value: unknown): string[] {
@@ -673,6 +693,18 @@ function mapRowsResponse(payload: ApiPendingInvoiceRowsResponse, request: FetchP
         excludedDirectionRows: numberValue(sourceSummary.excluded_direction_rows),
       } : undefined,
     },
+    statistics: payload.statistics ? {
+      bankTransactionCount: optionalCount(payload.statistics.bank_transaction_count),
+      expenseTransactionCount: optionalCount(payload.statistics.expense_transaction_count),
+      incomeTransactionCount: optionalCount(payload.statistics.income_transaction_count),
+      foundInvoiceTransactionCount: optionalCount(payload.statistics.found_invoice_transaction_count),
+      pendingInvoiceTransactionCount: optionalCount(payload.statistics.pending_invoice_transaction_count),
+      noInvoiceRequiredTransactionCount: optionalCount(payload.statistics.no_invoice_required_transaction_count),
+      cashIncomeTransactionCount: optionalCount(payload.statistics.cash_income_transaction_count),
+      linkedOaTransactionCount: optionalCount(payload.statistics.linked_oa_transaction_count),
+      linkedInputInvoiceTransactionCount: optionalCount(payload.statistics.linked_input_invoice_transaction_count),
+      linkedOutputInvoiceTransactionCount: optionalCount(payload.statistics.linked_output_invoice_transaction_count),
+    } : undefined,
     readModelStatus: stringValue(payload.read_model_status, "refreshing") as PendingInvoiceRowsResponse["readModelStatus"],
     tagDictionary: mapBankTransactionTagDictionary(payload.tag_dictionary ?? payload.bank_transaction_tags),
   };

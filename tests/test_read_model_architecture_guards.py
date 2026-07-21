@@ -67,16 +67,6 @@ DIRECT_FRESH_ALLOWLIST: dict[tuple[str, str, str], tuple[int, str]] = {
         "readModelStatus=fresh",
     ): (1, "camelCase alias for the same fresh-gated output invoice collection payload."),
     (
-        "backend/src/fin_ops_platform/services/tax_offset_worker_rebuild_executor.py",
-        "TaxOffsetWorkerRebuildExecutor._publish_fresh_cache",
-        "read_model_status=fresh",
-    ): (1, "worker rebuild publishes a freshly generated payload before writing a fresh cache envelope."),
-    (
-        "backend/src/fin_ops_platform/services/tax_offset_sql_projection.py",
-        "TaxOffsetSqlProjectionBuilder.rebuild_tax_offset_read_model_scope",
-        "dict read_model_status=fresh",
-    ): (1, "projection builder publishes the read model it just rebuilt."),
-    (
         "backend/src/fin_ops_platform/services/input_invoice_usage_export_service.py",
         "InputInvoiceUsageExportService.export_preview",
         "dict readModelStatus=fresh",
@@ -255,6 +245,10 @@ DIRECT_REFRESH_ENQUEUE_ALLOWLIST: dict[tuple[str, str], str] = {
     ): "legacy HTTP/app wrapper delegates to TaxOffsetRuntimeService, which uses ReadModelRefreshGateway.",
     (
         "backend/src/fin_ops_platform/services/cost_statistics_query_service.py",
+        "CostStatisticsQueryService.get_explorer_page",
+    ): "stale title statistics delegates to CostStatisticsRuntimeService, which uses ReadModelRefreshGateway.",
+    (
+        "backend/src/fin_ops_platform/services/cost_statistics_query_service.py",
         "CostStatisticsQueryService._cost_statistics_non_fresh_gate_payload",
     ): "dependency-bound cost gate mismatch delegates to the same runtime gateway before any payload read.",
     (
@@ -265,6 +259,10 @@ DIRECT_REFRESH_ENQUEUE_ALLOWLIST: dict[tuple[str, str], str] = {
         "backend/src/fin_ops_platform/services/tax_offset_query_service.py",
         "TaxOffsetQueryService.get_month_payload",
     ): "production SQL repository miss delegates to TaxOffsetRuntimeService gateway wrapper.",
+    (
+        "backend/src/fin_ops_platform/services/tax_offset_query_service.py",
+        "TaxOffsetQueryService._gate_statistics",
+    ): "non-fresh all-period statistics delegates to TaxOffsetRuntimeService, which uses ReadModelRefreshGateway.",
     (
         "backend/src/fin_ops_platform/services/tax_offset_runtime_service.py",
         "TaxOffsetRuntimeService.enqueue_refresh_for_months",

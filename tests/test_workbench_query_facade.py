@@ -240,6 +240,57 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
         self.assertEqual(redis.set_json_calls[0][2], 120)
         self.assertEqual(redis.set_json_calls[0][1]["payload"]["read_model_version"], "generation-set-2")
 
+    def test_month_initial_cache_key_changes_when_all_period_statistics_generation_changes(self) -> None:
+        class Repository:
+            def __init__(self) -> None:
+                self.all_version = "generation-set-1"
+                self.initial_calls = 0
+
+            def get_workbench_groups_freshness_status(self, *, scope_key: str) -> dict[str, object]:
+                return {
+                    "scope_key": scope_key,
+                    "read_model_status": "fresh",
+                    "read_model_version": self.all_version if scope_key == "all" else "month-generation-1",
+                }
+
+            def get_workbench_initial_page(self, **_kwargs: object) -> dict[str, object]:
+                self.initial_calls += 1
+                return {
+                    "month": "2026-05",
+                    "scope_key": "2026-05",
+                    "summary": {"oa_count": 1},
+                    "statistics": {"oa_count": self.initial_calls},
+                    "paired": {"groups": [], "total": 0},
+                    "unpaired": {"groups": [], "total": 0},
+                    "source_versions": {"builder": "v1"},
+                    "read_model_status": "fresh",
+                    "read_model_version": "month-generation-1",
+                }
+
+        repository = Repository()
+        redis = RedisRecorder()
+        facade = WorkbenchQueryFacade(
+            repository=repository,
+            redis_helper=redis,
+            enqueue_refresh=QueueRecorder().enqueue,
+            scope_key_for_month=scope_key_for_month,
+            stale_reasons=no_stale_reasons,
+            emit_status_metric=MetricRecorder().emit,
+            missing_read_model_error=lambda _error: False,
+            initial_cache_key_from_version=build_workbench_initial_redis_cache_key,
+            is_default_initial_query=is_default_workbench_initial_query,
+        )
+
+        first = facade.initial_page("2026-05")
+        repository.all_version = "generation-set-2"
+        second = facade.initial_page("2026-05")
+
+        self.assertEqual(first.payload["statistics"], {"oa_count": 1})
+        self.assertEqual(second.payload["statistics"], {"oa_count": 2})
+        self.assertEqual(repository.initial_calls, 2)
+        self.assertEqual(len(redis.set_json_calls), 2)
+        self.assertNotEqual(redis.set_json_calls[0][0], redis.set_json_calls[1][0])
+
     def test_default_initial_page_version_drift_fails_closed_without_caching_old_payload(self) -> None:
         class Repository:
             @staticmethod

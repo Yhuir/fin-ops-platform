@@ -112,6 +112,24 @@ class OaPendingPaymentReadModelService:
                 ),
             )
 
+        statistics_state = state
+        statistics_base_source_versions = base_source_versions
+        if scope_key != "all":
+            statistics_base_source_versions = self.expected_source_versions(scope_key="all")
+            statistics_state = self._repository.query_state(
+                scope_key="all",
+                tenant_id=tenant_id,
+                base_source_versions=statistics_base_source_versions,
+            ) or {}
+        if str(statistics_state.get("status") or "refreshing") != "fresh":
+            statistics_blocking_scope_keys = [
+                str(value)
+                for value in list(statistics_state.get("blocking_scope_keys") or [])
+                if str(value).strip()
+            ] or ["all"]
+            for blocking_scope_key in statistics_blocking_scope_keys:
+                self._enqueue_refresh(str(blocking_scope_key), reason="api_statistics_freshness_gate_blocked")
+
         etag = self._etag(
             tenant_id=tenant_id,
             normalized_query={
@@ -126,15 +144,21 @@ class OaPendingPaymentReadModelService:
                 "pageSize": page_size,
                 "viewMode": view_mode,
             },
-            version_token=str(state.get("version_token") or ""),
+            version_token="|".join(
+                (
+                    str(state.get("version_token") or ""),
+                    str(statistics_state.get("version_token") or ""),
+                )
+            ),
         )
         if _etag_matches(if_none_match, etag):
             return OaPendingPaymentRowsRead(status=HTTPStatus.NOT_MODIFIED, payload={}, etag=etag)
 
         snapshot_state: dict[str, Any] | None = None
+        snapshot_statistics_state: dict[str, Any] | None = None
 
         def load_rows_view() -> dict[str, Any] | None:
-            nonlocal snapshot_state
+            nonlocal snapshot_state, snapshot_statistics_state
             with self._repository.read_snapshot() as repository:
                 snapshot_state = repository.query_state(
                     scope_key=scope_key,
@@ -147,6 +171,15 @@ class OaPendingPaymentReadModelService:
                     or str(snapshot_state.get("version_token") or "") != str(state.get("version_token") or "")
                 ):
                     return None
+                snapshot_statistics_state = (
+                    snapshot_state
+                    if scope_key == "all"
+                    else repository.query_state(
+                        scope_key="all",
+                        tenant_id=tenant_id,
+                        base_source_versions=statistics_base_source_versions,
+                    )
+                )
                 rows_payload = repository.list_oa_pending_payment_rows(
                     month=query.get("month", [None])[0],
                     keyword=query.get("keyword", [None])[0],
@@ -161,6 +194,13 @@ class OaPendingPaymentReadModelService:
                 )
                 if not isinstance(rows_payload, dict):
                     return None
+                if (
+                    not isinstance(snapshot_statistics_state, dict)
+                    or str(snapshot_statistics_state.get("status") or "refreshing") != "fresh"
+                    or str(snapshot_statistics_state.get("version_token") or "")
+                    != str(statistics_state.get("version_token") or "")
+                ):
+                    rows_payload["statistics"] = None
                 return {
                     "payload": rows_payload,
                     "source_versions": dict(snapshot_state.get("source_versions") or {}),
@@ -283,6 +323,7 @@ class OaPendingPaymentReadModelService:
             "rows": [],
             "pagination": {"page": 1, "pageSize": 50, "total": 0},
             "summary": {"rowCount": 0, "viewCounts": {"completed": 0, "in_progress": 0}},
+            "statistics": None,
             "filterConfig": filter_config(),
             "filterOptions": {},
             "read_model_status": "refreshing",

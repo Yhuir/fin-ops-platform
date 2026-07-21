@@ -99,7 +99,7 @@ class WorkbenchQueryFacade:
             if isinstance(refresh_status_payload, dict)
             else ""
         )
-        cache_version = (
+        expected_payload_version = (
             str(
                 refresh_status_payload.get("read_model_version")
                 or refresh_status_payload.get("active_generation_id")
@@ -108,6 +108,32 @@ class WorkbenchQueryFacade:
             if isinstance(refresh_status_payload, dict)
             else ""
         )
+        statistics_cache_status = refresh_status
+        statistics_cache_version = expected_payload_version
+        if cacheable_query and scope_key != "all":
+            try:
+                statistics_status_payload = self._groups_refresh_status_payload("all")
+            except Exception as error:
+                if not self._transient_read_model_error(error):
+                    raise
+                statistics_status_payload = None
+            statistics_cache_status = (
+                str(statistics_status_payload.get("read_model_status") or "")
+                if isinstance(statistics_status_payload, dict)
+                else ""
+            )
+            statistics_cache_version = (
+                str(
+                    statistics_status_payload.get("read_model_version")
+                    or statistics_status_payload.get("active_generation_id")
+                    or ""
+                ).strip()
+                if isinstance(statistics_status_payload, dict)
+                else ""
+            )
+        cache_version = expected_payload_version
+        if scope_key != "all" and expected_payload_version and statistics_cache_version:
+            cache_version = f"{expected_payload_version}|all-statistics:{statistics_cache_version}"
         cache_key = (
             self._initial_cache_key_from_version(cache_version=cache_version, scope_key=scope_key)
             if cacheable_query and cache_version and callable(self._initial_cache_key_from_version)
@@ -115,7 +141,10 @@ class WorkbenchQueryFacade:
         )
         payload: object = None
         loaded_from_cache = False
-        if cache_key and refresh_status in {"fresh", "refreshing"}:
+        cache_status_allows_read = refresh_status in {"fresh", "refreshing"}
+        if scope_key != "all":
+            cache_status_allows_read = refresh_status == "fresh" and statistics_cache_status == "fresh"
+        if cache_key and cache_status_allows_read:
             get_cached = getattr(self._redis_helper, "get_json", None)
             if callable(get_cached):
                 try:
@@ -128,7 +157,7 @@ class WorkbenchQueryFacade:
                     if isinstance(cached_payload, dict)
                     else ""
                 )
-                if isinstance(cached_payload, dict) and cached_version == cache_version:
+                if isinstance(cached_payload, dict) and cached_version == expected_payload_version:
                     payload = dict(cached_payload)
                     loaded_from_cache = True
         try:
@@ -191,7 +220,7 @@ class WorkbenchQueryFacade:
         payload = dict(payload)
         payload["read_model_scope_key"] = scope_key
         payload_version = str(payload.get("read_model_version") or "").strip()
-        if cacheable_query and cache_version and payload_version != cache_version:
+        if cacheable_query and expected_payload_version and payload_version != expected_payload_version:
             self._enqueue_refresh(scope_key, reason="api_initial_page_version_drift")
             self._emit_status_metric(
                 endpoint="/api/workbench",
@@ -207,7 +236,7 @@ class WorkbenchQueryFacade:
                     "scope_key": scope_key,
                     "read_model_scope_key": scope_key,
                     "read_model_status": "refreshing",
-                    "expected_read_model_version": cache_version,
+                    "expected_read_model_version": expected_payload_version,
                     "read_model_version": payload_version or None,
                     "summary": {
                         "oa_count": 0,
@@ -221,7 +250,11 @@ class WorkbenchQueryFacade:
                     "unpaired": {"groups": [], "total": 0, "has_more": False},
                 },
             )
-        if refresh_status_payload and cache_version == payload_version and refresh_status in {"refreshing", "stale"}:
+        if (
+            refresh_status_payload
+            and expected_payload_version == payload_version
+            and refresh_status in {"refreshing", "stale"}
+        ):
             payload["read_model_status"] = refresh_status
             context_stale_reasons = refresh_status_payload.get("read_model_stale_reasons")
             if isinstance(context_stale_reasons, list) and context_stale_reasons:
@@ -238,10 +271,11 @@ class WorkbenchQueryFacade:
                 *stale_reasons,
             ]
         initial_status = str(payload.get("read_model_status") or "fresh")
-        if not loaded_from_cache and cacheable_query and initial_status == "fresh":
+        statistics_cache_is_fresh = scope_key == "all" or statistics_cache_status == "fresh"
+        if not loaded_from_cache and cacheable_query and initial_status == "fresh" and statistics_cache_is_fresh:
             resolved_cache_key = (
-                self._initial_cache_key_from_version(cache_version=payload_version, scope_key=scope_key)
-                if payload_version and callable(self._initial_cache_key_from_version)
+                self._initial_cache_key_from_version(cache_version=cache_version, scope_key=scope_key)
+                if cache_version and callable(self._initial_cache_key_from_version)
                 else None
             )
             set_cached = getattr(self._redis_helper, "set_json", None)

@@ -114,6 +114,7 @@ def _confirm_active_cost_relation(
         created_by="cost_statistics_test",
         month_scope=month,
         note="cost statistics active relation fixture",
+        special_metadata={"requires_oa": True, "requires_invoice": False},
     )
 
 

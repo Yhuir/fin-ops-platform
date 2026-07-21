@@ -27,7 +27,7 @@ from fin_ops_platform.services.postgres_repositories.read_models import MONTH_SC
 from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
 
 
-OA_PENDING_PAYMENT_POSTGRES_PROJECTOR_VERSION = "2026-07-17-canonical-relation-v2"
+OA_PENDING_PAYMENT_POSTGRES_PROJECTOR_VERSION = "2026-07-22-page-inventory-v3"
 
 
 def oa_pending_payment_base_source_versions() -> dict[str, object]:
@@ -83,6 +83,7 @@ class OaPendingPaymentSqlProjectionBuilder:
             source_version=source_version,
             rows=build["rows"],
             source_versions=build["source_versions"],
+            statistics=build["statistics"],
         )
         publish_ms = _elapsed_ms(publish_started_at)
         if not published:
@@ -172,15 +173,26 @@ class OaPendingPaymentSqlProjectionBuilder:
                 scope_key=scope_key,
             ),
         ]
+        statistics, coverage_versions = _oa_pending_payment_statistics(
+            connection,
+            scope_key=scope_key,
+            completed_records=completed_records,
+            in_progress_records=in_progress_records,
+            rows=rows,
+        )
         return {
             "rows": rows,
+            "statistics": statistics,
             "load_ms": load_ms,
             "assemble_ms": _elapsed_ms(assemble_started_at),
-            "source_versions": self._expected_source_versions(
-                connection,
-                scope_key=scope_key,
-                tenant_id=tenant_id,
-            ),
+            "source_versions": {
+                **self._expected_source_versions(
+                    connection,
+                    scope_key=scope_key,
+                    tenant_id=tenant_id,
+                ),
+                **coverage_versions,
+            },
         }
 
     @staticmethod
@@ -217,6 +229,126 @@ def _active_relations(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
         for relation in dict(relations or {}).values()
         if isinstance(relation, dict) and str(relation.get("status") or "active").strip() == "active"
     ]
+
+
+def _oa_pending_payment_statistics(
+    connection: Any,
+    *,
+    scope_key: str,
+    completed_records: list[Any],
+    in_progress_records: list[Any],
+    rows: list[dict[str, Any]],
+) -> tuple[dict[str, int], dict[str, str]]:
+    coverage = connection.fetch_one(
+        """
+        with bank_coverage as (
+            select
+                count(distinct coalesce(bank.legacy_mongo_id, bank.id::text))::integer as row_count,
+                count(distinct coalesce(bank.legacy_mongo_id, bank.id::text)) filter (
+                    where bank.txn_direction = 'outflow'
+                )::integer as expense_count,
+                count(distinct coalesce(bank.legacy_mongo_id, bank.id::text)) filter (
+                    where bank.txn_direction = 'inflow'
+                )::integer as income_count,
+                md5(coalesce(string_agg(
+                    concat(
+                        coalesce(bank.legacy_mongo_id, bank.id::text),
+                        '|',
+                        coalesce(bank.txn_direction, '')
+                    ),
+                    E'\n' order by coalesce(bank.legacy_mongo_id, bank.id::text)
+                ), '')) as membership_digest
+            from app.bank_transactions bank
+            where bank.txn_month = to_date(%s, 'YYYY-MM')
+              and bank.status <> 'deleted'
+        ), invoice_coverage as (
+            select
+                count(distinct coalesce(invoice.legacy_mongo_id, invoice.id::text))::integer as row_count,
+                md5(coalesce(string_agg(
+                    concat(
+                        coalesce(invoice.legacy_mongo_id, invoice.id::text),
+                        '|',
+                        coalesce(invoice.invoice_type, '')
+                    ),
+                    E'\n' order by coalesce(invoice.legacy_mongo_id, invoice.id::text)
+                ), '')) as membership_digest
+            from app.invoices invoice
+            where invoice.invoice_month = to_date(%s, 'YYYY-MM')
+              and invoice.status <> 'deleted'
+              and not (
+                  coalesce(invoice.invoice_type, '') ilike '%%output%%'
+                  or coalesce(invoice.invoice_type, '') like '%%销%%'
+              )
+        )
+        select
+            bank_coverage.row_count as bank_transaction_count,
+            bank_coverage.expense_count as expense_bank_transaction_count,
+            bank_coverage.income_count as income_bank_transaction_count,
+            bank_coverage.membership_digest as bank_membership_digest,
+            invoice_coverage.row_count as input_invoice_count,
+            invoice_coverage.membership_digest as input_invoice_membership_digest
+        from bank_coverage
+        cross join invoice_coverage
+        """,
+        (scope_key, scope_key),
+    ) or {}
+    completed_ids = {str(record.id) for record in completed_records if str(getattr(record, "id", "")).strip()}
+    in_progress_ids = {
+        str(record.id) for record in in_progress_records if str(getattr(record, "id", "")).strip()
+    }
+    all_oa_ids = completed_ids | in_progress_ids
+    paid_oa_ids: set[str] = set()
+    linked_bank_oa_ids: set[str] = set()
+    linked_invoice_oa_ids: set[str] = set()
+    for row in rows:
+        oa_payload = row.get("oa") if isinstance(row.get("oa"), dict) else {}
+        summaries = oa_payload.get("summaries") if isinstance(oa_payload.get("summaries"), list) else []
+        row_oa_ids = {
+            str(item.get("oaId") or item.get("id") or "").strip()
+            for item in summaries
+            if isinstance(item, dict) and str(item.get("oaId") or item.get("id") or "").strip()
+        }
+        if not row_oa_ids:
+            oa_id = str(oa_payload.get("id") or oa_payload.get("primaryOaId") or "").strip()
+            if oa_id:
+                row_oa_ids.add(oa_id)
+        payment_status = row.get("paymentStatus") if isinstance(row.get("paymentStatus"), dict) else {}
+        if str(payment_status.get("code") or "") == "paid":
+            paid_oa_ids.update(row_oa_ids)
+        bank_payload = row.get("bankTransaction") if isinstance(row.get("bankTransaction"), dict) else {}
+        if int(bank_payload.get("linkedRelationCount") or 0) > 0:
+            linked_bank_oa_ids.update(row_oa_ids)
+        invoice_payload = row.get("invoice") if isinstance(row.get("invoice"), dict) else {}
+        invoice_summaries = (
+            invoice_payload.get("summaries") if isinstance(invoice_payload.get("summaries"), list) else []
+        )
+        if any(
+            isinstance(item, dict) and str(item.get("relationStatus") or "") == "linked"
+            for item in invoice_summaries
+        ):
+            linked_invoice_oa_ids.update(row_oa_ids)
+    statistics = {
+        "oa_count": len(all_oa_ids),
+        "bank_transaction_count": int(coverage.get("bank_transaction_count") or 0),
+        "expense_transaction_count": int(coverage.get("expense_bank_transaction_count") or 0),
+        "income_transaction_count": int(coverage.get("income_bank_transaction_count") or 0),
+        "input_invoice_count": int(coverage.get("input_invoice_count") or 0),
+        "paid_oa_count": len(paid_oa_ids & all_oa_ids),
+        "unpaid_oa_count": len(all_oa_ids - paid_oa_ids),
+        "completed_oa_count": len(completed_ids),
+        "in_progress_oa_count": len(in_progress_ids),
+        "linked_bank_oa_count": len(linked_bank_oa_ids & all_oa_ids),
+        "linked_input_invoice_oa_count": len(linked_invoice_oa_ids & all_oa_ids),
+    }
+    return statistics, {
+        "oa_pending_payment_bank_coverage_signature": (
+            f"rows:{statistics['bank_transaction_count']}|digest:{coverage.get('bank_membership_digest') or ''}"
+        ),
+        "oa_pending_payment_input_invoice_coverage_signature": (
+            f"rows:{statistics['input_invoice_count']}|digest:"
+            f"{coverage.get('input_invoice_membership_digest') or ''}"
+        ),
+    }
 
 
 def _elapsed_ms(started_at: float) -> float:

@@ -14,6 +14,7 @@ from fin_ops_platform.services.tax_offset_read_model_service import (
     TaxOffsetReadModelService,
 )
 from fin_ops_platform.services.tax_offset_sql_projection import TaxOffsetSqlProjectionBuilder
+from fin_ops_platform.services.tax_offset_runtime_service import TaxOffsetRuntimeService
 
 
 def tax_payload(month: str = "2026-05") -> dict[str, object]:
@@ -222,17 +223,25 @@ class TaxOffsetReadModelRepositoryPortTests(unittest.TestCase):
 
 class TaxOffsetReadConnection:
     def __init__(
-        self, *, read_model_row: dict | None = None, item_rows: list[dict] | None = None, dirty: bool = False
+        self,
+        *,
+        read_model_row: dict | None = None,
+        item_rows: list[dict] | None = None,
+        dirty: bool = False,
+        statistics_row: dict | None = None,
     ) -> None:
         self.read_model_row = read_model_row
         self.item_rows = list(item_rows or [])
         self.dirty = dirty
+        self.statistics_row = statistics_row
         self.fetch_one_calls: list[tuple[str, tuple]] = []
         self.fetch_all_calls: list[tuple[str, tuple]] = []
 
     def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
         normalized = " ".join(sql.lower().split())
         self.fetch_one_calls.append((normalized, params))
+        if "check: tax_offset_page_statistics" in normalized:
+            return self.statistics_row
         if "from read_model.tax_offset_read_models" in normalized:
             return self.read_model_row
         if "from job.read_model_dirty_scopes" in normalized:
@@ -248,6 +257,21 @@ class TaxOffsetReadConnection:
 
 
 class TaxOffsetSqlRuntimeTests(unittest.TestCase):
+    def test_runtime_refuses_shared_cache_keys_without_a_statistics_generation_token(self) -> None:
+        runtime = TaxOffsetRuntimeService()
+        source_versions = {"tax_offset_read_model_schema_version": TAX_OFFSET_READ_MODEL_SCHEMA_VERSION}
+
+        with self.assertRaises(ValueError):
+            runtime.redis_cache_key(
+                "2026-05",
+                source_versions=source_versions,
+            )
+        with self.assertRaises(ValueError):
+            runtime.summary_redis_cache_key(
+                "2026-05",
+                source_versions=source_versions,
+            )
+
     def test_tax_offset_all_scope_shards_include_existing_projection_scopes(self) -> None:
         class ScopeConnection:
             def __init__(self) -> None:
@@ -291,6 +315,35 @@ class TaxOffsetSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(view["schema_version"], TAX_OFFSET_READ_MODEL_SCHEMA_VERSION)
         self.assertEqual(view["refresh_status"], "refreshing")
         self.assertTrue(all("app_settings" not in sql for sql, _params in connection.fetch_one_calls))
+
+    def test_repository_returns_only_fresh_unfiltered_tax_statistics(self) -> None:
+        connection = TaxOffsetReadConnection(
+            read_model_row={
+                "scope_key": "2026-05",
+                "schema_version": TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
+                "cache_status": "fresh",
+                "payload": {"payload": tax_payload("2026-05")},
+            },
+            statistics_row={
+                "statistics_fresh": True,
+                "input_invoice_count": 8,
+                "output_invoice_count": 5,
+                "certification_record_count": 4,
+                "matched_certification_count": 3,
+                "out_of_scope_certification_count": 1,
+                "selected_invoice_count": 10,
+            },
+        )
+
+        view = PostgresReadModelRepository(connection).get_tax_offset_view(scope_key="2026-05")
+
+        self.assertEqual(view["payload"]["statistics"]["input_invoice_count"], 8)
+        self.assertEqual(view["payload"]["statistics"]["unmatched_certification_count"], 1)
+        self.assertEqual(view["payload"]["statistics"]["unselected_invoice_count"], 3)
+
+        connection.statistics_row = {"statistics_fresh": False}
+        stale_view = PostgresReadModelRepository(connection).get_tax_offset_view(scope_key="2026-05")
+        self.assertIsNone(stale_view["payload"]["statistics"])
 
     def test_repository_prefers_tax_offset_item_table_over_snapshot_item_arrays(self) -> None:
         connection = TaxOffsetReadConnection(
@@ -339,6 +392,7 @@ class TaxOffsetSqlRuntimeTests(unittest.TestCase):
             "SqlTaxOffset",
             (),
             {
+                "tax_offset_statistics_generation_token": lambda _self: "generation-1",
                 "get_tax_offset_view": lambda *_args, **_kwargs: (_ for _ in ()).throw(
                     AssertionError("SQL should not be hit on Redis cache")
                 )
@@ -462,7 +516,7 @@ class TaxOffsetSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["read_model_scope_key"], "2026-05")
         self.assertEqual(queue.refreshes, [("tax_offset", "2026-05", "api_miss")])
 
-    def test_tax_offset_api_reads_sql_and_populates_short_redis_cache(self) -> None:
+    def test_tax_offset_api_reads_sql_without_shared_cache_when_generation_token_is_missing(self) -> None:
         redis = RedisRecorder()
         app = object.__new__(Application)
         app._runtime_repositories = type(
@@ -498,12 +552,56 @@ class TaxOffsetSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, int(HTTPStatus.OK))
         self.assertEqual(payload["input_plan_items"], [{"id": "input-1"}])
-        self.assertTrue(
-            redis.sets[0][0].startswith(
-                f"tax_offset:month:2026-05:schema:{TAX_OFFSET_READ_MODEL_SCHEMA_VERSION}:sources:"
-            )
+        self.assertEqual(redis.gets, [])
+        self.assertEqual(redis.sets, [])
+
+    def test_tax_offset_api_invalidates_cross_month_statistics_cache_and_enqueues_all(self) -> None:
+        class StatisticsRepository:
+            def __init__(self, source_versions: dict[str, object]) -> None:
+                self.token = "generation-1"
+                self.source_versions = source_versions
+
+            def tax_offset_statistics_generation_token(self) -> str:
+                return self.token
+
+            def get_tax_offset_view(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+                payload = tax_payload("2026-05")
+                payload["statistics"] = None
+                payload["statistics_status"] = "refreshing"
+                return {
+                    "payload": payload,
+                    "refresh_status": "fresh",
+                    "generated_at": "2026-05-21T09:00:00+00:00",
+                    "schema_version": TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
+                    "source_versions": self.source_versions,
+                }
+
+        queue = QueueRecorder()
+        redis = RedisRecorder()
+        app = object.__new__(Application)
+        repository = StatisticsRepository(app._tax_offset_expected_source_versions())
+        app._runtime_repositories = type(
+            "RuntimeRepos",
+            (),
+            {"queue_repository": queue, "redis_helper": redis},
+        )()
+        app._tax_offset_sql_read_repository = repository
+
+        first = json.loads(app._handle_api_tax_offset("2026-05").body)
+        repository.token = "generation-2"
+        second = json.loads(app._handle_api_tax_offset("2026-05").body)
+
+        self.assertIsNone(first["statistics"])
+        self.assertEqual(first["statistics_status"], "refreshing")
+        self.assertIsNone(second["statistics"])
+        self.assertNotEqual(redis.sets[0][0], redis.sets[1][0])
+        self.assertEqual(
+            queue.refreshes,
+            [
+                ("tax_offset", "all", "api_statistics_refreshing"),
+                ("tax_offset", "all", "api_statistics_refreshing"),
+            ],
         )
-        self.assertLessEqual(redis.sets[0][2], 120)
 
     def test_tax_offset_api_falls_back_to_sql_when_redis_times_out(self) -> None:
         app = object.__new__(Application)
@@ -545,6 +643,7 @@ class TaxOffsetSqlRuntimeTests(unittest.TestCase):
             "SqlTaxOffset",
             (),
             {
+                "tax_offset_statistics_generation_token": lambda _self: "generation-1",
                 "get_tax_offset_view": lambda *_args, **_kwargs: {
                     "payload": tax_payload("2026-05"),
                     "refresh_status": "fresh",
@@ -596,6 +695,7 @@ class TaxOffsetSqlRuntimeTests(unittest.TestCase):
             "SqlTaxOffset",
             (),
             {
+                "tax_offset_statistics_generation_token": lambda _self: "generation-1",
                 "get_tax_offset_view": lambda *_args, **_kwargs: (_ for _ in ()).throw(
                     AssertionError("SQL should not be hit on summary Redis cache")
                 )
@@ -752,6 +852,11 @@ class TaxOffsetSqlRuntimeTests(unittest.TestCase):
         )()
         app._tax_offset_service = type("TaxOffsetService", (), {"clear_month_cache": lambda *_args, **_kwargs: None})()
         app._tax_offset_read_model_service = EmptyTaxOffsetReadModelService()
+        app._tax_offset_sql_read_repository = type(
+            "StatisticsTokenRepository",
+            (),
+            {"tax_offset_statistics_generation_token": lambda _self: "generation-1"},
+        )()
         app._persist_tax_offset_read_models_best_effort = lambda **_kwargs: None
         app._schedule_tax_offset_cache_warmup = lambda *_args, **_kwargs: (_ for _ in ()).throw(
             AssertionError("SQL runtime invalidation should enqueue durable refresh when queue exists")
@@ -761,9 +866,9 @@ class TaxOffsetSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual(deleted, [])
         self.assertEqual(queue.refreshes, [("tax_offset", "2026-05", "unit_test")])
-        self.assertIn("tax_offset:month:2026-05", redis.deletes)
-        self.assertIn("tax_offset:summary:2026-05", redis.deletes)
-        self.assertTrue(any(f":schema:{TAX_OFFSET_READ_MODEL_SCHEMA_VERSION}:sources:" in key for key in redis.deletes))
+        self.assertEqual(len(redis.deletes), 2)
+        self.assertTrue(all(f":schema:{TAX_OFFSET_READ_MODEL_SCHEMA_VERSION}:sources:" in key for key in redis.deletes))
+        self.assertTrue(all("missing" not in key for key in redis.deletes))
 
     def test_invoice_change_invalidates_all_tax_scopes_because_source_version_is_global(self) -> None:
         read_models = TaxOffsetReadModelService()
@@ -779,6 +884,11 @@ class TaxOffsetSqlRuntimeTests(unittest.TestCase):
             "RuntimeRepos",
             (),
             {"queue_repository": queue, "redis_helper": RedisRecorder()},
+        )()
+        app._tax_offset_sql_read_repository = type(
+            "StatisticsTokenRepository",
+            (),
+            {"tax_offset_statistics_generation_token": lambda _self: "generation-1"},
         )()
         app._tax_offset_service = type("TaxOffsetService", (), {"clear_month_cache": lambda *_args: None})()
         app._tax_offset_read_model_service = read_models
@@ -806,12 +916,17 @@ class TaxOffsetSqlRuntimeTests(unittest.TestCase):
             (),
             {"queue_repository": queue, "redis_helper": redis},
         )()
+        app._tax_offset_sql_read_repository = type(
+            "StatisticsTokenRepository",
+            (),
+            {"tax_offset_statistics_generation_token": lambda _self: "generation-1"},
+        )()
 
         app._delete_tax_offset_redis_cache("2026-05")
 
-        self.assertIn("tax_offset:month:2026-05", redis.deletes)
-        self.assertIn("tax_offset:summary:2026-05", redis.deletes)
-        self.assertTrue(any(f":schema:{TAX_OFFSET_READ_MODEL_SCHEMA_VERSION}:sources:" in key for key in redis.deletes))
+        self.assertEqual(len(redis.deletes), 2)
+        self.assertTrue(all(f":schema:{TAX_OFFSET_READ_MODEL_SCHEMA_VERSION}:sources:" in key for key in redis.deletes))
+        self.assertTrue(all("missing" not in key for key in redis.deletes))
 
 
 if __name__ == "__main__":

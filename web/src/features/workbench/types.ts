@@ -255,6 +255,24 @@ export type WorkbenchSummary = {
   zoneCounts: Record<WorkbenchZoneId, WorkbenchZoneCounts>;
 };
 
+export type WorkbenchStatistics = {
+  oaCount?: number;
+  bankTransactionCount?: number;
+  inputInvoiceCount?: number;
+  outputInvoiceCount?: number;
+  pairedGroupCount?: number;
+  unpairedObjectCount?: number;
+  expenseTransactionCount?: number;
+  incomeTransactionCount?: number;
+  pairedOaCount?: number;
+  pairedBankTransactionCount?: number;
+  pairedInvoiceCount?: number;
+  incompleteGroupCount?: number;
+  missingOaGroupCount?: number;
+  missingBankGroupCount?: number;
+  missingInvoiceGroupCount?: number;
+};
+
 export type WorkbenchReadModelStatus = "fresh" | "refreshing" | "stale" | "failed" | "unavailable" | (string & {});
 
 export type WorkbenchRefreshScopeStatus = {
@@ -360,6 +378,7 @@ export type WorkbenchData = {
 export type WorkbenchInitialPageResult = {
   data: WorkbenchData;
   pages: Record<WorkbenchZoneId, WorkbenchZonePageInfo>;
+  statistics?: WorkbenchStatistics;
 };
 
 export type WorkbenchGroupsPageResult = {

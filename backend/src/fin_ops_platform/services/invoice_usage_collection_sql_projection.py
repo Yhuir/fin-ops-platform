@@ -110,6 +110,11 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
             scope_key=normalized_scope_key,
             rows=rows,
             source_versions=source_versions,
+            statistics_metadata=_invoice_relation_statistics_metadata(
+                rows,
+                summary_kind="input",
+                scope_key=normalized_scope_key,
+            ),
         )
         return {"scope_key": normalized_scope_key, "row_count": len(rows), "source_versions": source_versions}
 
@@ -151,6 +156,11 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
             scope_key=normalized_scope_key,
             rows=rows,
             source_versions=source_versions,
+            statistics_metadata=_invoice_relation_statistics_metadata(
+                rows,
+                summary_kind="output",
+                scope_key=normalized_scope_key,
+            ),
         )
         return {"scope_key": normalized_scope_key, "row_count": len(rows), "source_versions": source_versions}
 
@@ -161,6 +171,11 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
             source_versions=input_invoice_usage_source_versions(
                 payment_status_rules_version=self._payment_rules_provider.rules_source_version(),
             ),
+            statistics_metadata=_invoice_relation_statistics_metadata(
+                [],
+                summary_kind="input",
+                scope_key=scope_key,
+            ),
         )
 
     def mark_output_invoice_collection_scope_empty(self, scope_key: str) -> None:
@@ -168,6 +183,11 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
             scope_key=scope_key,
             row_count=0,
             source_versions=output_invoice_collection_source_versions(),
+            statistics_metadata=_invoice_relation_statistics_metadata(
+                [],
+                summary_kind="output",
+                scope_key=scope_key,
+            ),
         )
 
     @staticmethod
@@ -186,6 +206,8 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
             return None
         existing_source_versions = payload.get("source_versions")
         if not isinstance(existing_source_versions, dict) or existing_source_versions != source_versions:
+            return None
+        if not isinstance(payload.get("statistics"), dict):
             return None
         pagination = payload.get("pagination") if isinstance(payload.get("pagination"), dict) else {}
         return {
@@ -260,3 +282,139 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
         if not MONTH_SCOPE_RE.match(normalized_scope_key):
             raise ValueError(f"invoice read model scope must be a YYYY-MM shard: {scope_key}")
         return normalized_scope_key
+
+
+def _invoice_relation_statistics_metadata(
+    rows: list[dict[str, object]],
+    *,
+    summary_kind: str,
+    scope_key: str,
+) -> dict[str, object]:
+    members: dict[str, dict[str, object]] = {}
+    formal_group_ids: set[str] = set()
+    for index, raw_row in enumerate(rows):
+        row = raw_row.get("payload") if isinstance(raw_row.get("payload"), dict) else raw_row
+        if not isinstance(row, dict):
+            continue
+        invoice = row.get("invoice") if isinstance(row.get("invoice"), dict) else {}
+        oa = row.get("oa") if isinstance(row.get("oa"), dict) else {}
+        bank = row.get("bankTransactions") if isinstance(row.get("bankTransactions"), dict) else {}
+        payment = row.get("paymentStatus") if isinstance(row.get("paymentStatus"), dict) else {}
+        collection = row.get("collectionStatus") if isinstance(row.get("collectionStatus"), dict) else {}
+        receipt = row.get("receipt") if isinstance(row.get("receipt"), dict) else {}
+        relation = row.get("invoiceRelations") if isinstance(row.get("invoiceRelations"), dict) else {}
+        summaries = relation.get("summaries") if isinstance(relation.get("summaries"), list) else []
+        if not summaries:
+            summaries = [invoice]
+        linked_oa = int(oa.get("relationCount") or 0) > 0
+        linked_bank = int(bank.get("relationCount") or 0) > 0
+        row_id = str(row.get("id") or raw_row.get("id") or f"row:{index}").strip()
+        primary_month = str(invoice.get("invoiceDate") or invoice.get("invoice_date") or "")[:7]
+        if row_id and primary_month == scope_key and (linked_oa or linked_bank):
+            formal_group_ids.add(row_id)
+        for summary in summaries:
+            member = summary if isinstance(summary, dict) else {}
+            invoice_id = str(
+                member.get("invoiceId")
+                or member.get("relatedInvoiceId")
+                or member.get("primaryInvoiceId")
+                or member.get("id")
+                or invoice.get("id")
+                or row.get("invoiceId")
+                or ""
+            ).strip()
+            if not invoice_id:
+                continue
+            member_month = str(member.get("invoiceDate") or member.get("invoice_date") or "")[:7]
+            primary_invoice_id = str(invoice.get("id") or row.get("invoiceId") or "").strip()
+            if not member_month and invoice_id == primary_invoice_id:
+                member_month = primary_month
+            if member_month != scope_key:
+                continue
+            flags = members.setdefault(
+                invoice_id,
+                {
+                    "invoice_id": invoice_id,
+                    "linked_oa": False,
+                    "linked_bank": False,
+                    "linked_income_bank": False,
+                    "paid": False,
+                    "collected": False,
+                    "red_invoice": False,
+                    "receipt_issued": False,
+                },
+            )
+            flags["linked_oa"] = bool(flags["linked_oa"] or linked_oa)
+            flags["linked_bank"] = bool(flags["linked_bank"] or linked_bank)
+            flags["linked_income_bank"] = bool(
+                flags["linked_income_bank"] or (linked_bank and str(bank.get("direction") or "") == "inflow")
+            )
+            flags["paid"] = bool(flags["paid"] or str(payment.get("code") or "") == "paid")
+            flags["collected"] = bool(
+                flags["collected"]
+                or str(collection.get("code") or "") in {"collected", "collected_red_refunded"}
+            )
+            flags["receipt_issued"] = bool(
+                flags["receipt_issued"] or str(receipt.get("status") or receipt.get("code") or "") == "issued"
+            )
+            total_with_tax = str(
+                member.get("totalWithTax")
+                or member.get("total_with_tax")
+                or invoice.get("totalWithTax")
+                or ""
+            ).strip()
+            positive = str(
+                member.get("isPositiveInvoice")
+                or member.get("is_positive_invoice")
+                or invoice.get("isPositiveInvoice")
+                or ""
+            ).strip()
+            flags["red_invoice"] = bool(
+                flags["red_invoice"]
+                or positive in {"否", "false", "False", "0"}
+                or total_with_tax.startswith("-")
+            )
+    statistics = _invoice_relation_statistics_from_members(
+        members,
+        summary_kind=summary_kind,
+        formal_group_count=len(formal_group_ids),
+    )
+    return {"statistics": statistics}
+
+
+def _invoice_relation_statistics_from_members(
+    members: dict[str, dict[str, object]],
+    *,
+    summary_kind: str,
+    formal_group_count: int = 0,
+) -> dict[str, int]:
+    values = list(members.values())
+    invoice_count = len(values)
+    linked_oa_count = sum(bool(item.get("linked_oa")) for item in values)
+    if summary_kind == "input":
+        linked_bank_count = sum(bool(item.get("linked_bank")) for item in values)
+        paid_count = sum(bool(item.get("paid")) for item in values)
+        return {
+            "invoice_count": invoice_count,
+            "linked_oa_invoice_count": linked_oa_count,
+            "linked_bank_invoice_count": linked_bank_count,
+            "paid_invoice_count": paid_count,
+            "unlinked_oa_invoice_count": invoice_count - linked_oa_count,
+            "unlinked_bank_invoice_count": invoice_count - linked_bank_count,
+            "unpaid_invoice_count": invoice_count - paid_count,
+            "formal_relation_group_count": formal_group_count,
+            "oa_reverse_batch_count": 0,
+        }
+    linked_bank_count = sum(bool(item.get("linked_income_bank")) for item in values)
+    collected_count = sum(bool(item.get("collected")) for item in values)
+    return {
+        "invoice_count": invoice_count,
+        "linked_oa_invoice_count": linked_oa_count,
+        "linked_income_bank_invoice_count": linked_bank_count,
+        "collected_invoice_count": collected_count,
+        "unlinked_oa_invoice_count": invoice_count - linked_oa_count,
+        "unlinked_bank_invoice_count": invoice_count - linked_bank_count,
+        "uncollected_invoice_count": invoice_count - collected_count,
+        "red_invoice_count": sum(bool(item.get("red_invoice")) for item in values),
+        "issued_receipt_count": sum(bool(item.get("receipt_issued")) for item in values),
+    }

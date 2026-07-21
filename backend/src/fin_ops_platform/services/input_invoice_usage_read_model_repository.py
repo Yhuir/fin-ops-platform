@@ -21,6 +21,7 @@ class InputInvoiceUsageReadModelRepositoryPort:
         sort_direction: str | None = None,
         page: int | str | None = 1,
         page_size: int | str | None = 50,
+        include_statistics: bool = True,
     ) -> dict[str, object] | None:
         payload = self._repository.list_input_invoice_usage_rows(
             month=month,
@@ -32,6 +33,7 @@ class InputInvoiceUsageReadModelRepositoryPort:
             sort_direction=sort_direction,
             page=page,
             page_size=page_size,
+            include_statistics=include_statistics,
         )
         return dict(payload) if isinstance(payload, dict) else None
 
@@ -67,11 +69,13 @@ class InputInvoiceUsageReadModelRepositoryPort:
         scope_key: str,
         rows: list[dict[str, object]],
         source_versions: dict[str, object] | None = None,
+        statistics_metadata: dict[str, object] | None = None,
     ) -> None:
         self._repository.save_input_invoice_usage_rows(
             scope_key=scope_key,
             rows=rows,
             source_versions=source_versions,
+            statistics_metadata=statistics_metadata,
         )
 
     def mark_input_invoice_usage_scope(
@@ -80,11 +84,13 @@ class InputInvoiceUsageReadModelRepositoryPort:
         scope_key: str,
         row_count: int,
         source_versions: dict[str, object] | None = None,
+        statistics_metadata: dict[str, object] | None = None,
     ) -> None:
         self._repository.mark_input_invoice_usage_scope(
             scope_key=scope_key,
             row_count=row_count,
             source_versions=source_versions,
+            statistics_metadata=statistics_metadata,
         )
 
     def prune_input_invoice_usage_scope_shards(self, current_scope_keys: list[str]) -> None:

@@ -15,6 +15,8 @@ from fin_ops_platform.services.bank_transaction_tag_read_facade import BankTrans
 from fin_ops_platform.services.postgres_repositories.read_models import (
     BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
     PostgresReadModelRepository,
+    _bank_detail_scope_statistics,
+    _bank_detail_statistics_from_rows,
 )
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
@@ -881,6 +883,40 @@ class BankTransactionTagReadFacadeTests(unittest.TestCase):
 
 
 class BankDetailSqlRepositoryTests(unittest.TestCase):
+    def test_page_statistics_count_projected_rows_and_reject_inconsistent_payload(self) -> None:
+        statistics = _bank_detail_statistics_from_rows(
+            [
+                {
+                    "direction": "income",
+                    "effective_category_code": "collection",
+                    "relation_status": "linked",
+                },
+                {
+                    "payload": {
+                        "direction": "expense",
+                        "effective_category_code": "",
+                        "relation_status": "unlinked",
+                    }
+                },
+            ]
+        )
+
+        self.assertEqual(
+            statistics,
+            {
+                "transaction_count": 2,
+                "expense_transaction_count": 1,
+                "income_transaction_count": 1,
+                "classified_transaction_count": 1,
+                "unclassified_transaction_count": 1,
+                "linked_transaction_count": 1,
+                "unlinked_transaction_count": 1,
+            },
+        )
+        self.assertEqual(_bank_detail_scope_statistics({"statistics": statistics}), statistics)
+        invalid = {**statistics, "unlinked_transaction_count": 2}
+        self.assertIsNone(_bank_detail_scope_statistics({"statistics": invalid}))
+
     def test_bank_detail_read_model_port_excludes_unrelated_read_model_methods(self) -> None:
         underlying = _UnderlyingBankDetailReadModelRepository()
         port = BankDetailReadModelRepositoryPort(underlying)
@@ -1340,6 +1376,7 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             "kind": "transactions",
             "query": {"page": 1},
             "scope_signatures": scope_summary["read_model_scope_signatures"],
+            "statistics_signature": "missing",
             "schema": f"bank_detail:v{BANK_DETAIL_READ_MODEL_SCHEMA_VERSION}",
         }
         expected_digest = hashlib.sha256(
@@ -2104,6 +2141,7 @@ class BankDetailSqlProjectionBuilderTests(unittest.TestCase):
             "bank_detail_source_signature": source_signature,
             "row_count": 1,
         }
+        existing_statistics = _bank_detail_statistics_from_rows([normalized_row])
 
         class Repository(CaptureBankDetailReadModelRepository):
             def bank_detail_scope_summary(self, *, scope_keys: list[str]) -> dict[str, object]:
@@ -2113,6 +2151,7 @@ class BankDetailSqlProjectionBuilderTests(unittest.TestCase):
                         "2026-05": {
                             "row_count": 1,
                             "source_versions": existing_source_versions,
+                            "statistics": existing_statistics,
                         }
                     }
                 }

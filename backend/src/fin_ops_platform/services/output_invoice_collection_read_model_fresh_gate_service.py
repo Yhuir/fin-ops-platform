@@ -46,7 +46,7 @@ class OutputInvoiceCollectionReadModelFreshGateService:
             page_query = {key: list(values) for key, values in query.items()}
             page_query["page"] = [str(page)]
             page_query["page_size"] = [str(page_size)]
-            page_payload = self.rows(page_query)
+            page_payload = self.rows(page_query, include_statistics=False)
             if not isinstance(page_payload, dict):
                 return None
             if page_payload.get("read_model_status") != "fresh":
@@ -60,11 +60,18 @@ class OutputInvoiceCollectionReadModelFreshGateService:
             "rows": rows,
             "pagination": {"page": 1, "pageSize": page_size, "total": total},
             "summary": first_payload.get("summary") if isinstance(first_payload.get("summary"), dict) else {},
+            "statistics": first_payload.get("statistics") if isinstance(first_payload.get("statistics"), dict) else None,
+            "statistics_status": first_payload.get("statistics_status") or "refreshing",
             "read_model_status": "fresh",
             "read_model_scope_key": first_payload.get("read_model_scope_key"),
         }
 
-    def rows(self, query: dict[str, list[str]]) -> dict[str, object] | None:
+    def rows(
+        self,
+        query: dict[str, list[str]],
+        *,
+        include_statistics: bool = True,
+    ) -> dict[str, object] | None:
         list_rows = getattr(self._repository, "list_output_invoice_collection_rows", None)
         scope_key = self.scope_key_from_query(query)
         if not callable(list_rows):
@@ -83,6 +90,7 @@ class OutputInvoiceCollectionReadModelFreshGateService:
                 sort_direction=query.get("sort_direction", ["desc"])[0],
                 page=query.get("page", [1])[0],
                 page_size=query.get("page_size", [50])[0],
+                include_statistics=include_statistics,
             )
         except ValueError as exc:
             raise OutputInvoiceCollectionError("invalid_output_invoice_collection_query", str(exc)) from exc
@@ -112,6 +120,8 @@ class OutputInvoiceCollectionReadModelFreshGateService:
             query.get("sort_direction", ["desc"])[0],
         )
         result = dict(payload)
+        if include_statistics:
+            self._gate_statistics(result)
         result["filterConfig"] = self._filter_config()
         result["appliedFilters"] = {"filters": parsed_filters}
         result["sort"] = {"field": sort_field, "direction": sort_direction}
@@ -120,6 +130,29 @@ class OutputInvoiceCollectionReadModelFreshGateService:
         result["read_model_scope_key"] = scope_key
         result.pop("refresh_status", None)
         return result
+
+    def _gate_statistics(self, payload: dict[str, object]) -> None:
+        status = str(payload.get("statistics_status") or "stale")
+        actual_versions = (
+            payload.get("statistics_source_versions")
+            if isinstance(payload.get("statistics_source_versions"), dict)
+            else {}
+        )
+        stale_reasons = source_version_mismatch_reasons(
+            expected=require_expected_source_versions(
+                self._expected_source_versions(scope_key="all"),
+                context="output_invoice_collection_statistics",
+            ),
+            actual=actual_versions,
+        )
+        if status == "fresh" and isinstance(payload.get("statistics"), dict) and not stale_reasons:
+            return
+        payload["statistics"] = None
+        payload["statistics_status"] = "refreshing"
+        self._enqueue_refresh(
+            "all",
+            "api_statistics_source_versions_stale" if stale_reasons else f"api_statistics_{status}",
+        )
 
     def relation_details(self, row_id: str, query: dict[str, list[str]]) -> dict[str, object] | None:
         if not callable(getattr(self._repository, "get_output_invoice_collection_row_by_row_id", None)):
@@ -195,6 +228,8 @@ class OutputInvoiceCollectionReadModelFreshGateService:
             "rows": [],
             "pagination": {"page": 1, "pageSize": 50, "total": 0},
             "summary": {},
+            "statistics": None,
+            "statistics_status": "refreshing",
             "filterConfig": [],
             "read_model_status": "refreshing",
             "readModelStatus": "refreshing",

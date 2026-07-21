@@ -134,6 +134,7 @@ class EtcBusinessBatchApplicationService:
         return {
             "items": items,
             "counts": counts,
+            "statistics": dict(result.get("statistics")) if isinstance(result.get("statistics"), dict) else None,
             "page": page,
             "pageSize": page_size,
             "total": total,

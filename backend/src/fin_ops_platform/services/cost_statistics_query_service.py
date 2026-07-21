@@ -110,6 +110,15 @@ class CostStatisticsQueryService:
 
         tag_selection_payload = self._cost_tag_selection_payload_from_gate(gate)
         selected_codes = self._selected_bank_tag_codes(tag_selection_payload)
+        statistics_status = str(gate.get("statistics_status") or "stale").strip().lower()
+        statistics = gate.get("statistics") if statistics_status == "fresh" else None
+        statistics_refresh_enqueued = False
+        if statistics_status not in {"fresh", "refreshing"}:
+            statistics_refresh_enqueued = self._runtime_service.enqueue_read_model_refresh(
+                str(gate.get("statistics_scope_key") or f"{normalized_project_scope}:all"),
+                reason=f"api_statistics_{statistics_status}",
+            )
+        statistics_published_source_version = gate.get("statistics_published_source_version")
         query_binding = self._page_query_binding(
             scope=normalized_scope,
             view=normalized_view,
@@ -126,6 +135,12 @@ class CostStatisticsQueryService:
         etag = self._page_etag(
             scope_key=gate_scope_key,
             published_source_version=int(gate["published_source_version"]),
+            statistics_published_source_version=(
+                int(statistics_published_source_version)
+                if statistics_published_source_version is not None
+                else None
+            ),
+            statistics_status=statistics_status,
             query_fingerprint=query_fingerprint,
             tag_token=tag_token,
         )
@@ -152,6 +167,9 @@ class CostStatisticsQueryService:
                 query_binding=query_binding,
                 published_source_version=int(gate["published_source_version"]),
                 bank_accounts=list(gate.get("bank_accounts") or []),
+                statistics=dict(statistics) if isinstance(statistics, dict) else None,
+                statistics_status=statistics_status,
+                statistics_refresh_enqueued=statistics_refresh_enqueued,
             )
             payload["cost_statistics_tag_selection_version"] = (
                 int(tag_selection_payload.get("version") or 1)
@@ -176,6 +194,12 @@ class CostStatisticsQueryService:
             source_versions={
                 **expected_source_versions,
                 "cost_statistics_published_source_version": gate["published_source_version"],
+                "cost_statistics_statistics_published_source_version": (
+                    statistics_published_source_version
+                    if statistics_published_source_version is not None
+                    else f"{statistics_status}:missing"
+                ),
+                "cost_statistics_statistics_status": statistics_status,
                 "cost_statistics_tag_selection": tag_token,
             },
         )
@@ -703,11 +727,17 @@ class CostStatisticsQueryService:
         *,
         scope_key: str,
         published_source_version: int,
+        statistics_published_source_version: int | None,
+        statistics_status: str,
         query_fingerprint: str,
         tag_token: str,
     ) -> str:
         digest = hashlib.sha256(
-            f"{scope_key}|{published_source_version}|{query_fingerprint}|{tag_token}".encode("utf-8")
+            (
+                f"{scope_key}|{published_source_version}|statistics:"
+                f"{statistics_published_source_version}:{statistics_status}|"
+                f"{query_fingerprint}|{tag_token}"
+            ).encode("utf-8")
         ).hexdigest()[:32]
         return f'"cost-statistics-{digest}"'
 
@@ -726,6 +756,9 @@ class CostStatisticsQueryService:
         query_binding: str,
         published_source_version: int,
         bank_accounts: list[Any],
+        statistics: dict[str, Any] | None,
+        statistics_status: str,
+        statistics_refresh_enqueued: bool,
     ) -> dict[str, Any]:
         primary = [dict(item) for item in list(payload.get("primary_facets") or []) if isinstance(item, dict)]
         secondary = [dict(item) for item in list(payload.get("secondary_facets") or []) if isinstance(item, dict)]
@@ -758,6 +791,9 @@ class CostStatisticsQueryService:
         return {
             "scope": scope,
             "view": view,
+            "statistics": dict(statistics) if isinstance(statistics, dict) else None,
+            "statistics_status": statistics_status,
+            **({"statistics_refresh_enqueued": True} if statistics_refresh_enqueued else {}),
             "summary": dict(payload.get("summary") or {}),
             "available_years": [str(value) for value in list(payload.get("available_years") or []) if str(value)],
             "facets": facets,
@@ -793,6 +829,8 @@ class CostStatisticsQueryService:
         return {
             "scope": scope,
             "view": view,
+            "statistics": None,
+            "statistics_status": "refreshing",
             "summary": {
                 "row_count": 0,
                 "transaction_count": 0,

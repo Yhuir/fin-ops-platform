@@ -13,6 +13,7 @@ from urllib.parse import unquote
 from uuid import uuid4
 
 from fin_ops_platform.services.bank_transaction_category_service import BANK_TRANSACTION_CATEGORY_COUNT_KEYS
+from fin_ops_platform.services.cost_statistics_source_versions import COST_STATISTICS_READ_MODEL_SCHEMA_VERSION
 from fin_ops_platform.services.pending_invoice_status import pending_invoice_filter_status_codes
 from fin_ops_platform.services.read_model_freshness import normalize_source_versions
 from fin_ops_platform.services.postgres_repositories.common import (
@@ -71,6 +72,7 @@ WORKBENCH_BANK_BATCH_SUMMARY_SOURCE_KINDS = frozenset(
     {NO_OA_BANK_BATCH_SUMMARY_SOURCE_KIND, BANK_FLOW_RULE_BATCH_SUMMARY_SOURCE_KIND}
 )
 WORKBENCH_ROW_PAYLOAD_PRUNED_KEYS = {"object_identity"}
+TURNOVER_LEDGER_PAGE_STATISTICS_KEY = "page_statistics"
 _BATCH_ACCOUNTING_INVOICE_CANDIDATE_MATCH_SQL = """
     regexp_replace(
       coalesce(
@@ -574,6 +576,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
         sort_direction: str | None = None,
         page: int | str | None = 1,
         page_size: int | str | None = 50,
+        include_statistics: bool = True,
     ) -> dict[str, Any] | None:
         return self._list_invoice_relation_rows(
             table_name="read_model.input_invoice_usage_rows",
@@ -592,6 +595,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
             page_size=page_size,
             summary_kind="input",
             dedupe_all_scope_by_row_id=True,
+            include_statistics=include_statistics,
         )
 
     def list_input_invoice_usage_filter_options(
@@ -622,6 +626,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
         scope_key: str,
         rows: list[dict[str, Any]],
         source_versions: dict[str, Any] | None = None,
+        statistics_metadata: dict[str, Any] | None = None,
     ) -> None:
         self._save_invoice_relation_rows(
             table_name="read_model.input_invoice_usage_rows",
@@ -631,6 +636,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
             rows=rows,
             source_versions=source_versions,
             row_builder=_input_invoice_usage_read_model_record,
+            statistics_metadata=statistics_metadata,
         )
 
     def mark_input_invoice_usage_scope(
@@ -639,12 +645,14 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
         scope_key: str,
         row_count: int = 0,
         source_versions: dict[str, Any] | None = None,
+        statistics_metadata: dict[str, Any] | None = None,
     ) -> None:
         self._mark_invoice_relation_scope(
             scope_table_name="read_model.input_invoice_usage_scopes",
             scope_key=scope_key,
             row_count=row_count,
             source_versions=source_versions,
+            statistics_metadata=statistics_metadata,
         )
 
     def prune_input_invoice_usage_scope_shards(self, current_scope_keys: list[str]) -> None:
@@ -793,6 +801,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
         sort_direction: str | None = None,
         page: int | str | None = 1,
         page_size: int | str | None = 50,
+        include_statistics: bool = True,
     ) -> dict[str, Any] | None:
         return self._list_invoice_relation_rows(
             table_name="read_model.output_invoice_collection_rows",
@@ -810,6 +819,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
             page=page,
             page_size=page_size,
             summary_kind="output",
+            include_statistics=include_statistics,
         )
 
     def get_output_invoice_collection_row_by_row_id(self, row_id: str) -> dict[str, Any] | None:
@@ -844,6 +854,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
         scope_key: str,
         rows: list[dict[str, Any]],
         source_versions: dict[str, Any] | None = None,
+        statistics_metadata: dict[str, Any] | None = None,
     ) -> None:
         self._save_invoice_relation_rows(
             table_name="read_model.output_invoice_collection_rows",
@@ -853,6 +864,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
             rows=rows,
             source_versions=source_versions,
             row_builder=_output_invoice_collection_read_model_record,
+            statistics_metadata=statistics_metadata,
         )
 
     def mark_output_invoice_collection_scope(
@@ -861,12 +873,14 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
         scope_key: str,
         row_count: int = 0,
         source_versions: dict[str, Any] | None = None,
+        statistics_metadata: dict[str, Any] | None = None,
     ) -> None:
         self._mark_invoice_relation_scope(
             scope_table_name="read_model.output_invoice_collection_scopes",
             scope_key=scope_key,
             row_count=row_count,
             source_versions=source_versions,
+            statistics_metadata=statistics_metadata,
         )
 
     def prune_output_invoice_collection_scope_shards(self, current_scope_keys: list[str]) -> None:
@@ -1020,6 +1034,22 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                 select coalesce(jsonb_object_agg(field, options), '{{}}'::jsonb) as payload
                 from options_by_field
             ),
+            statistics_scopes as (
+                select raw_payload->'statistics' as statistics
+                from read_model.oa_pending_payment_scopes
+                where scope_key <> 'all'
+                union all
+                select raw_payload->'statistics' as statistics
+                from read_model.oa_pending_payment_scopes
+                where scope_key = 'all'
+                  and not exists (
+                      select 1 from read_model.oa_pending_payment_scopes where scope_key <> 'all'
+                  )
+            ),
+            page_statistics as (
+                select coalesce(jsonb_agg(statistics), '[]'::jsonb) as payload
+                from statistics_scopes
+            ),
             paged_rows as materialized (
                 select
                     payload - 'searchText' - 'sourceVersions' - 'source_versions' as payload,
@@ -1044,11 +1074,13 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                 view_counts.in_progress_count,
                 status_counts.payload as status_counts,
                 filter_options.payload as filter_options,
+                page_statistics.payload as page_statistics,
                 page_rows.payload as rows
             from summary
             cross join view_counts
             cross join status_counts
             cross join filter_options
+            cross join page_statistics
             cross join page_rows
             """,
             tuple([*base_params, *params, page_limit, (page_number - 1) * page_limit]),
@@ -1069,6 +1101,9 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
         for option in normalized_filter_options.get("bank_direction", []):
             value = text(option.get("value")) or ""
             option["label"] = "支出" if value == "outflow" else "收入" if value == "inflow" else value
+        statistics = self._oa_pending_payment_statistics(
+            summary_row.get("page_statistics") if isinstance(summary_row, dict) else None
+        )
         return {
             "rows": [row for row in payload_rows if isinstance(row, dict)],
             "pagination": {"page": page_number, "pageSize": page_limit, "total": total},
@@ -1079,9 +1114,39 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                 "statusCounts": dict(summary_row.get("status_counts") or {}) if isinstance(summary_row, dict) else {},
                 "viewCounts": view_counts,
             },
+            "statistics": statistics,
             "filterOptions": normalized_filter_options,
             "read_model_scope_key": scope_key,
         }
+
+    @staticmethod
+    def _oa_pending_payment_statistics(values: Any) -> dict[str, int] | None:
+        rows = list(values) if isinstance(values, list) else []
+        keys = (
+            "oa_count",
+            "bank_transaction_count",
+            "input_invoice_count",
+            "paid_oa_count",
+            "completed_oa_count",
+            "in_progress_oa_count",
+            "expense_transaction_count",
+            "income_transaction_count",
+            "unpaid_oa_count",
+            "linked_bank_oa_count",
+            "linked_input_invoice_oa_count",
+        )
+        result = {key: 0 for key in keys}
+        if not rows:
+            return None
+        for statistics in rows:
+            if not isinstance(statistics, dict) or any(
+                isinstance(statistics.get(key), bool) or not isinstance(statistics.get(key), int)
+                for key in keys
+            ):
+                return None
+            for key in keys:
+                result[key] += statistics[key]
+        return result
 
     def list_oa_pending_payment_lifecycle_source_rows(
         self,
@@ -1213,16 +1278,6 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                 pending_relation_watermark.version as pending_relation_version,
                 latest_dirty.status as dirty_status,
                 latest_dirty.source_version as dirty_source_version,
-                case
-                    when requested.scope_key = 'all' then exists (
-                        select 1
-                        from read_model.oa_pending_payment_rows duplicate_row
-                        group by duplicate_row.row_id
-                        having count(*) > 1
-                        limit 1
-                    )
-                    else false
-                end as duplicate_row_identity,
                 exists (
                     select 1
                     from job.outbox_events outbox
@@ -1264,7 +1319,6 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
         state_rows = [dict(row) for row in rows if isinstance(row, dict)]
         month_rows = [row for row in state_rows if MONTH_SCOPE_RE.match(text(row.get("scope_key")) or "")]
         control_rows = [row for row in state_rows if text(row.get("scope_key")) == "all"]
-        duplicate_row_identity = any(bool(row.get("duplicate_row_identity")) for row in state_rows)
         blocking_scope_keys: set[str] = set()
         stale_reasons: list[str] = []
         actual_versions_by_scope: dict[str, dict[str, Any]] = {}
@@ -1289,6 +1343,20 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                 if isinstance(row.get("actual_source_versions"), dict)
                 else {}
             )
+            bank_coverage_signature = text(
+                actual_versions.get("oa_pending_payment_bank_coverage_signature")
+            ) or ""
+            input_invoice_coverage_signature = text(
+                actual_versions.get("oa_pending_payment_input_invoice_coverage_signature")
+            ) or ""
+            # Coverage digests are projection-owned inventory evidence persisted at
+            # refresh time. The request hot path validates their presence and relies
+            # on the durable dirty/outbox event version to invalidate them; only the
+            # independent Page Audit recomputes canonical membership for comparison.
+            expected_versions["oa_pending_payment_bank_coverage_signature"] = bank_coverage_signature
+            expected_versions[
+                "oa_pending_payment_input_invoice_coverage_signature"
+            ] = input_invoice_coverage_signature
             actual_versions_by_scope[row_scope_key] = actual_versions
             expected_versions_by_scope[row_scope_key] = expected_versions
             reasons: list[str] = []
@@ -1302,6 +1370,10 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                 reasons.append("source_snapshot_missing")
             if int_value(row.get("pending_relation_version"), 0) < 1:
                 reasons.append("pending_relation_version_missing")
+            if not bank_coverage_signature or "|digest:" not in bank_coverage_signature:
+                reasons.append("bank_coverage_missing")
+            if not input_invoice_coverage_signature or "|digest:" not in input_invoice_coverage_signature:
+                reasons.append("input_invoice_coverage_missing")
             if text(row.get("dirty_status")) in {"pending", "processing", "failed"}:
                 reasons.append(f"dirty_{text(row.get('dirty_status'))}")
             if bool(row.get("outbox_blocking")):
@@ -1320,16 +1392,9 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                     "actual_source_versions": actual_versions,
                     "dirty_status": text(row.get("dirty_status")),
                     "dirty_source_version": int_value(row.get("dirty_source_version"), -1),
-                    "duplicate_row_identity": bool(row.get("duplicate_row_identity")),
                     "outbox_blocking": bool(row.get("outbox_blocking")),
                 }
             )
-
-        if duplicate_row_identity:
-            blocking_scope_keys.update(row["scope_key"] for row in month_rows if text(row.get("scope_key")))
-            if not month_rows:
-                blocking_scope_keys.add(normalized_scope_key)
-            stale_reasons.append("all:duplicate_row_identity")
 
         control_blocking = any(
             text(row.get("dirty_status")) in {"pending", "processing", "failed"} or bool(row.get("outbox_blocking"))
@@ -1392,6 +1457,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
         scope_key: str,
         rows: list[dict[str, Any]],
         source_versions: dict[str, Any] | None = None,
+        statistics: dict[str, int] | None = None,
         transaction: Any | None = None,
     ) -> None:
         normalized_scope_key = _invoice_relation_scope_key(scope_key)
@@ -1503,6 +1569,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                 row_count=len(rows_to_save),
                 scope_type="oa_pending_payment",
                 source_versions=normalized_source_versions,
+                scope_payload={"statistics": dict(statistics)} if isinstance(statistics, dict) else None,
             )
 
         if transaction is not None:
@@ -1518,6 +1585,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
         source_version: int,
         rows: list[dict[str, Any]],
         source_versions: dict[str, Any] | None = None,
+        statistics: dict[str, int] | None = None,
     ) -> bool:
         normalized_tenant_id = text(tenant_id)
         normalized_scope_key = _invoice_relation_scope_key(scope_key)
@@ -1546,6 +1614,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                 scope_key=normalized_scope_key,
                 rows=rows,
                 source_versions=source_versions,
+                statistics=statistics,
                 transaction=connection,
             )
             return True
@@ -1635,6 +1704,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
         page_size: int | str | None,
         summary_kind: str,
         dedupe_all_scope_by_row_id: bool = False,
+        include_statistics: bool = True,
     ) -> dict[str, Any] | None:
         scope_key = _invoice_relation_scope_key(month)
         rows_table_sql = (
@@ -1683,6 +1753,42 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
         total = int_value(summary_row.get("count") if isinstance(summary_row, dict) else 0, 0)
         refresh_status = self._invoice_relation_refresh_status(scope_type=scope_type, scope_key=scope_key)
         scope_row = self._invoice_relation_scope_row(scope_table_name=scope_table_name, scope_key=scope_key)
+        statistics_status = (
+            self._invoice_relation_statistics_refresh_status(scope_type=scope_type)
+            if include_statistics
+            else "not_requested"
+        )
+        statistics_scope_row = None
+        if include_statistics:
+            statistics_scope_row = (
+                scope_row
+                if scope_key == "all"
+                else self._invoice_relation_scope_row(scope_table_name=scope_table_name, scope_key="all")
+            )
+        statistics = (
+            _invoice_relation_statistics_from_scope_metadata(
+                statistics_scope_row.get("statistics_metadata_rows"),
+                summary_kind=summary_kind,
+            )
+            if statistics_status == "fresh" and isinstance(statistics_scope_row, dict)
+            else None
+        )
+        if include_statistics and statistics is None:
+            statistics_status = "stale" if statistics_status == "fresh" else statistics_status
+        elif include_statistics and summary_kind == "input":
+            reverse_batch_row = self._connection.fetch_one(
+                "select count(*)::integer as count from app.input_invoice_usage_oa_reverse_batches"
+            )
+            statistics["oa_reverse_batch_count"] = int_value(
+                reverse_batch_row.get("count") if isinstance(reverse_batch_row, dict) else 0,
+                0,
+            )
+        statistics_source_versions = (
+            statistics_scope_row.get("statistics_source_versions")
+            if isinstance(statistics_scope_row, dict)
+            and isinstance(statistics_scope_row.get("statistics_source_versions"), dict)
+            else {}
+        )
         source_versions = (
             scope_row.get("source_versions")
             if isinstance(scope_row, dict) and isinstance(scope_row.get("source_versions"), dict)
@@ -1695,6 +1801,9 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                 "rows": [],
                 "pagination": {"page": page_number, "pageSize": page_limit, "total": 0},
                 "summary": _invoice_relation_summary_payload(summary_row or {}, summary_kind=summary_kind, total=0),
+                "statistics": statistics,
+                "statistics_status": statistics_status,
+                "statistics_source_versions": statistics_source_versions,
                 "refresh_status": refresh_status,
                 "source_versions": source_versions,
             }
@@ -1718,6 +1827,9 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
             "rows": [row for row in payload_rows if isinstance(row, dict)],
             "pagination": {"page": page_number, "pageSize": page_limit, "total": total},
             "summary": _invoice_relation_summary_payload(summary_row or {}, summary_kind=summary_kind, total=total),
+            "statistics": statistics,
+            "statistics_status": statistics_status,
+            "statistics_source_versions": statistics_source_versions,
             "refresh_status": refresh_status,
             "source_versions": source_versions,
         }
@@ -1814,6 +1926,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
         rows: list[dict[str, Any]],
         source_versions: dict[str, Any] | None,
         row_builder: Any,
+        statistics_metadata: dict[str, Any] | None = None,
     ) -> None:
         normalized_scope_key = _invoice_relation_scope_key(scope_key)
         rows_to_save = list(rows or [])
@@ -1909,6 +2022,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                 row_count=len(rows_to_save),
                 scope_type=scope_type,
                 source_versions=normalized_source_versions,
+                scope_payload={"statistics_metadata": dict(statistics_metadata or {})},
             )
 
         run_in_transaction(self._connection, write)
@@ -1920,6 +2034,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
         scope_key: str,
         row_count: int,
         source_versions: dict[str, Any] | None,
+        statistics_metadata: dict[str, Any] | None = None,
     ) -> None:
         normalized_scope_key = _invoice_relation_scope_key(scope_key)
         normalized_source_versions = source_versions if isinstance(source_versions, dict) else {}
@@ -1932,6 +2047,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                 row_count=max(int_value(row_count, 0), 0),
                 scope_type="",
                 source_versions=normalized_source_versions,
+                scope_payload={"statistics_metadata": dict(statistics_metadata or {})},
             )
 
         run_in_transaction(self._connection, write)
@@ -1976,7 +2092,15 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
         row_count: int,
         scope_type: str,
         source_versions: dict[str, Any],
+        scope_payload: dict[str, Any] | None = None,
     ) -> None:
+        raw_payload = {
+            "scope_type": scope_type,
+            "scope_key": scope_key,
+            "row_count": row_count,
+            "source_versions": source_versions,
+            **dict(scope_payload or {}),
+        }
         connection.execute(
             f"""
             insert into {scope_table_name}(
@@ -1997,7 +2121,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                 month_start(scope_key) if MONTH_SCOPE_RE.match(scope_key) else None,
                 row_count,
                 jsonb(source_versions),
-                jsonb({"scope_type": scope_type, "scope_key": scope_key, "row_count": row_count, "source_versions": source_versions}),
+                jsonb(raw_payload),
             ),
         )
 
@@ -2005,7 +2129,7 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
         if scope_key == "all":
             rows = self._connection.fetch_all(
                 f"""
-                select scope_key, row_count, source_versions, cache_status
+                select scope_key, row_count, source_versions, cache_status, raw_payload
                 from {scope_table_name}
                 where scope_key <> 'all'
                 order by generated_at desc, scope_key desc
@@ -2013,21 +2137,63 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
             )
             if not rows:
                 row = self._connection.fetch_one(
-                    f"select scope_key, source_versions, cache_status from {scope_table_name} where scope_key = 'all' limit 1"
+                    f"select scope_key, row_count, source_versions, cache_status, raw_payload "
+                    f"from {scope_table_name} where scope_key = 'all' limit 1"
                 )
-                return dict(row) if isinstance(row, dict) else None
+                if not isinstance(row, dict):
+                    return None
+                raw_payload = row.get("raw_payload") if isinstance(row.get("raw_payload"), dict) else {}
+                return {
+                    **dict(row),
+                    "statistics_source_versions": (
+                        dict(row.get("source_versions")) if isinstance(row.get("source_versions"), dict) else {}
+                    ),
+                    "statistics_metadata_rows": [raw_payload.get("statistics_metadata")],
+                }
             rows_for_all_status = self._invoice_relation_all_scope_effective_rows(rows)
             for row in rows_for_all_status:
                 if not isinstance(row, dict):
                     continue
                 if text(row.get("cache_status")) not in {"", "fresh"}:
                     return {"scope_key": "all", "source_versions": {}}
-            return {"scope_key": "all", "source_versions": self._common_source_versions(rows_for_all_status)}
+            return {
+                "scope_key": "all",
+                "source_versions": self._common_source_versions(rows_for_all_status),
+                "statistics_source_versions": self._common_source_versions(rows),
+                "statistics_metadata_rows": [
+                    row.get("raw_payload", {}).get("statistics_metadata")
+                    if isinstance(row.get("raw_payload"), dict)
+                    else None
+                    for row in rows
+                ],
+            }
         row = self._connection.fetch_one(
             f"select scope_key, source_versions from {scope_table_name} where scope_key = %s limit 1",
             (scope_key,),
         )
         return dict(row) if isinstance(row, dict) else None
+
+    def _invoice_relation_statistics_refresh_status(self, *, scope_type: str) -> str:
+        status = self._invoice_relation_refresh_status(scope_type=scope_type, scope_key="all")
+        if status != "fresh":
+            return status
+        row = self._connection.fetch_one(
+            """
+            select
+                coalesce(bool_or(status in ('failed', 'dead_lettered')), false) as has_failed,
+                coalesce(bool_or(status in ('pending', 'processing')), false) as has_active
+            from job.outbox_events
+            where tenant_id = 'default'
+              and event_type = %s
+              and status in ('pending', 'processing', 'failed', 'dead_lettered')
+            """,
+            (f"{scope_type}.read_model.refresh",),
+        )
+        if isinstance(row, dict) and bool(row.get("has_failed")):
+            return "stale"
+        if isinstance(row, dict) and bool(row.get("has_active")):
+            return "refreshing"
+        return "fresh"
 
     def _invoice_relation_refresh_status(self, *, scope_type: str, scope_key: str) -> str:
         if scope_key != "all":
@@ -2155,13 +2321,12 @@ class PostgresBankReadModelRepository:
         rows = executor.fetch_all(
             """
             select scope_key, scope_type, schema_version, status, row_count, source_version,
-                   source_versions, generated_at, last_error
+                   source_versions, generated_at, last_error, raw_payload
             from read_model.bank_detail_scopes
             where tenant_id = %s
               and scope_type = 'bank_detail'
-              and scope_key = any(%s)
             """,
-            (tenant_id, normalized_scope_keys),
+            (tenant_id,),
         )
         dirty_rows = executor.fetch_all(
             """
@@ -2169,11 +2334,10 @@ class PostgresBankReadModelRepository:
             from job.read_model_dirty_scopes
             where tenant_id = %s
               and scope_type = 'bank_detail'
-              and scope_key = any(%s)
               and status in ('pending', 'processing', 'failed')
             order by updated_at desc
             """,
-            (tenant_id, normalized_scope_keys),
+            (tenant_id,),
         )
         by_scope = {text(row.get("scope_key")): row for row in rows if text(row.get("scope_key"))}
         dirty_by_scope: dict[str, dict[str, Any]] = {}
@@ -2181,45 +2345,109 @@ class PostgresBankReadModelRepository:
             scope_key = text(row.get("scope_key"))
             if scope_key and scope_key not in dirty_by_scope:
                 dirty_by_scope[scope_key] = row
-        dirty_statuses = {text(row.get("status")) for row in dirty_by_scope.values()}
-        if dirty_statuses.intersection({"pending", "processing"}):
-            status = "refreshing"
-        elif "failed" in dirty_statuses:
-            status = "stale"
-        elif any(scope_key not in by_scope for scope_key in normalized_scope_keys):
-            status = "missing"
-        elif any(int_value(by_scope[scope_key].get("schema_version"), 0) != BANK_DETAIL_READ_MODEL_SCHEMA_VERSION for scope_key in normalized_scope_keys):
-            status = "schema_mismatch"
-        elif any(text(by_scope[scope_key].get("status")) != "fresh" for scope_key in normalized_scope_keys):
-            status = "stale"
-        else:
-            status = "fresh"
+        def status_for(scope_key_values: list[str], *, require_statistics: bool = False) -> str:
+            statuses = {
+                text(dirty_by_scope.get(scope_key, {}).get("status"))
+                for scope_key in scope_key_values
+                if scope_key in dirty_by_scope
+            }
+            if statuses.intersection({"pending", "processing"}):
+                return "refreshing"
+            if "failed" in statuses:
+                return "stale"
+            if not scope_key_values or any(scope_key not in by_scope for scope_key in scope_key_values):
+                return "missing"
+            if any(
+                int_value(by_scope[scope_key].get("schema_version"), 0)
+                != BANK_DETAIL_READ_MODEL_SCHEMA_VERSION
+                for scope_key in scope_key_values
+            ):
+                return "schema_mismatch"
+            if any(text(by_scope[scope_key].get("status")) != "fresh" for scope_key in scope_key_values):
+                return "stale"
+            if require_statistics and any(
+                _bank_detail_scope_statistics(by_scope[scope_key].get("raw_payload")) is None
+                for scope_key in scope_key_values
+            ):
+                return "stale"
+            return "fresh"
+
+        status = status_for(normalized_scope_keys)
+        statistics_scope_keys = sorted(
+            {
+                scope_key
+                for scope_key in [*by_scope, *dirty_by_scope]
+                if MONTH_SCOPE_RE.match(scope_key)
+            }
+        )
+        statistics_status = status_for(statistics_scope_keys, require_statistics=True)
         generated_values = [
             text(by_scope[scope_key].get("generated_at"))
             for scope_key in normalized_scope_keys
             if scope_key in by_scope and text(by_scope[scope_key].get("generated_at"))
         ]
-        signatures = {
+        all_signatures = {
             scope_key: {
                 "schema_version": int_value(by_scope[scope_key].get("schema_version"), 0),
                 "status": text(by_scope[scope_key].get("status")) or "",
                 "row_count": int_value(by_scope[scope_key].get("row_count"), 0),
                 "source_version": int_value(by_scope[scope_key].get("source_version"), 0),
                 "source_versions": by_scope[scope_key].get("source_versions") if isinstance(by_scope[scope_key].get("source_versions"), dict) else {},
+                "statistics": _bank_detail_scope_statistics(by_scope[scope_key].get("raw_payload")),
                 "generated_at": text(by_scope[scope_key].get("generated_at")),
                 "last_error": text(by_scope[scope_key].get("last_error")),
                 "dirty_status": text(dirty_by_scope.get(scope_key, {}).get("status")),
                 "dirty_source_version": int_value(dirty_by_scope.get(scope_key, {}).get("source_version"), 0),
                 "dirty_last_error": text(dirty_by_scope.get(scope_key, {}).get("last_error")),
             }
-            for scope_key in normalized_scope_keys
+            for scope_key in statistics_scope_keys
             if scope_key in by_scope
         }
+        signatures = {
+            scope_key: all_signatures[scope_key]
+            for scope_key in normalized_scope_keys
+            if scope_key in all_signatures
+        }
+        statistics = None
+        if statistics_status == "fresh":
+            statistics = _bank_detail_empty_statistics()
+            for scope_key in statistics_scope_keys:
+                scope_statistics = _bank_detail_scope_statistics(by_scope[scope_key].get("raw_payload"))
+                if scope_statistics is None:
+                    statistics = None
+                    statistics_status = "stale"
+                    break
+                for key in statistics:
+                    statistics[key] += scope_statistics[key]
+        statistics_signature_payload = {
+            "status": statistics_status,
+            "scopes": {
+                scope_key: {
+                    **all_signatures.get(scope_key, {}),
+                    "statistics": _bank_detail_scope_statistics(by_scope.get(scope_key, {}).get("raw_payload")),
+                }
+                for scope_key in statistics_scope_keys
+            },
+        }
+        statistics_signature = hashlib.sha256(
+            json.dumps(
+                statistics_signature_payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                default=str,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
         return {
             "read_model_status": status,
             "read_model_scope_keys": normalized_scope_keys,
             "read_model_generated_at": max(generated_values) if generated_values else None,
             "read_model_scope_signatures": signatures,
+            "statistics": statistics,
+            "statistics_status": statistics_status,
+            "statistics_scope_keys": statistics_scope_keys,
+            "statistics_scope_signatures": all_signatures,
+            "statistics_signature": statistics_signature,
             "dirty_scopes": [
                 {
                     "scope_key": scope_key,
@@ -2229,6 +2457,7 @@ class PostgresBankReadModelRepository:
                     "source_version": int_value(row.get("source_version"), 0),
                 }
                 for scope_key, row in dirty_by_scope.items()
+                if scope_key in normalized_scope_keys
             ],
         }
 
@@ -2850,6 +3079,7 @@ class PostgresBankReadModelRepository:
             raise ValueError("bank detail row scope_key must be YYYY-MM.")
         scope_month = month_start(normalized_scope_key)
         generated_at = text((rows[0] if rows else {}).get("generated_at")) if rows else None
+        statistics = _bank_detail_statistics_from_rows(rows)
 
         def write(connection: Any) -> None:
             connection.execute(
@@ -2984,6 +3214,7 @@ class PostgresBankReadModelRepository:
                 row_count=len(list(rows or [])),
                 source_versions=(rows[0].get("source_versions") if rows and isinstance(rows[0].get("source_versions"), dict) else {}),
                 generated_at=generated_at,
+                statistics=statistics,
             )
 
         run_in_transaction(self._connection, write)
@@ -2996,6 +3227,7 @@ class PostgresBankReadModelRepository:
         row_count: int = 0,
         tenant_id: str = "default",
         source_versions: dict[str, Any] | None = None,
+        statistics: dict[str, int] | None = None,
     ) -> None:
         normalized_scope_key = text(scope_key)
         if not normalized_scope_key:
@@ -3009,6 +3241,7 @@ class PostgresBankReadModelRepository:
                 scope_month=month_start(normalized_scope_key),
                 row_count=row_count,
                 source_versions=source_versions or {},
+                statistics=statistics if statistics is not None else (_bank_detail_empty_statistics() if row_count == 0 else None),
             )
 
         run_in_transaction(self._connection, write)
@@ -3026,6 +3259,7 @@ class PostgresBankReadModelRepository:
         source_versions: dict[str, Any],
         schema_version: int = BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
         generated_at: str | None = None,
+        statistics: dict[str, int] | None = None,
     ) -> None:
         connection.execute(
             """
@@ -3046,7 +3280,12 @@ class PostgresBankReadModelRepository:
                 source_versions = excluded.source_versions,
                 generated_at = excluded.generated_at,
                 last_error = null,
-                raw_payload = excluded.raw_payload,
+                raw_payload = excluded.raw_payload || case
+                    when excluded.raw_payload ? 'statistics' then '{}'::jsonb
+                    when bank_detail_scopes.raw_payload ? 'statistics'
+                        then jsonb_build_object('statistics', bank_detail_scopes.raw_payload->'statistics')
+                    else '{}'::jsonb
+                end,
                 updated_at = now()
             """,
             (
@@ -3059,7 +3298,12 @@ class PostgresBankReadModelRepository:
                 _source_version_value(source_versions),
                 jsonb(source_versions),
                 generated_at,
-                jsonb({"source_versions": source_versions}),
+                jsonb(
+                    {
+                        "source_versions": source_versions,
+                        **({"statistics": statistics} if statistics is not None else {}),
+                    }
+                ),
             ),
         )
 
@@ -3108,6 +3352,7 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
         sort_direction: str | None = None,
         page: int | str | None = 1,
         page_size: int | str | None = 50,
+        include_statistics: bool = True,
     ) -> dict[str, Any] | None:
         normalized_direction = str(direction or "").strip()
         normalized_filter = str(filter or "all").strip() or "all"
@@ -3174,6 +3419,22 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
                 if isinstance(scope_row, dict) and isinstance(scope_row.get("source_versions"), dict)
                 else {}
             )
+            statistics_state = (
+                self._pending_invoice_statistics_state(connection=connection)
+                if include_statistics
+                else {"status": "not_requested"}
+            )
+            statistics_status = str(statistics_state.get("status") or "stale")
+            statistics = (
+                statistics_state.get("statistics")
+                if isinstance(statistics_state.get("statistics"), dict)
+                else None
+            )
+            statistics_source_versions_by_scope = (
+                statistics_state.get("source_versions_by_scope")
+                if isinstance(statistics_state.get("source_versions_by_scope"), dict)
+                else {}
+            )
             if total == 0:
                 if scope_row is None:
                     return None
@@ -3193,6 +3454,9 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
                             connection=connection,
                         ),
                     },
+                    "statistics": statistics,
+                    "statistics_status": statistics_status,
+                    "statistics_source_versions_by_scope": statistics_source_versions_by_scope,
                     "bank_transaction_tags": {},
                     "bank_transaction_tags_version": 1,
                     "refresh_status": refresh_status,
@@ -3230,6 +3494,9 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
                         connection=connection,
                     ),
                 },
+                "statistics": statistics,
+                "statistics_status": statistics_status,
+                "statistics_source_versions_by_scope": statistics_source_versions_by_scope,
                 "bank_transaction_tags": {},
                 "bank_transaction_tags_version": 1,
                 "refresh_status": refresh_status,
@@ -3445,6 +3712,7 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
         scope_key: str,
         rows: list[dict[str, Any]],
         source_versions: dict[str, Any] | None = None,
+        statistics_metadata: dict[str, Any] | None = None,
     ) -> None:
         normalized_direction, normalized_filter, scope_month = _parse_pending_invoice_scope_key(scope_key)
         rows_to_save = list(rows or [])
@@ -3550,6 +3818,7 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
                     filter_group=normalized_filter,
                     row_count=len(rows_to_save),
                     source_versions=normalized_source_versions,
+                    statistics_metadata=statistics_metadata,
                 )
                 filter_counts = _pending_invoice_filter_group_counts_for_rows(
                     rows_to_save,
@@ -3569,6 +3838,7 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
                         filter_group=filter_group,
                         row_count=row_count,
                         source_versions=normalized_source_versions,
+                        statistics_metadata=statistics_metadata,
                     )
             else:
                 self._upsert_pending_invoice_scope(
@@ -3578,6 +3848,7 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
                     filter_group=normalized_filter,
                     row_count=len(rows_to_save),
                     source_versions=normalized_source_versions,
+                    statistics_metadata=statistics_metadata,
                 )
 
         run_in_transaction(self._connection, write)
@@ -3589,6 +3860,7 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
         scope_key: str,
         row_count: int = 0,
         source_versions: dict[str, Any] | None = None,
+        statistics_metadata: dict[str, Any] | None = None,
     ) -> None:
         normalized_direction, normalized_filter, _scope_month = _parse_pending_invoice_scope_key(scope_key)
         normalized_source_versions = source_versions if isinstance(source_versions, dict) else {}
@@ -3601,6 +3873,7 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
                 filter_group=normalized_filter,
                 row_count=max(int_value(row_count, 0), 0),
                 source_versions=normalized_source_versions,
+                statistics_metadata=statistics_metadata,
             )
 
         run_in_transaction(self._connection, write)
@@ -4144,6 +4417,83 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
             "excluded_direction_rows": max(total - current, 0),
         }
 
+    def _pending_invoice_statistics_state(self, *, connection: Any) -> dict[str, Any]:
+        dirty_row = connection.fetch_one(
+            """
+            select status
+            from job.read_model_dirty_scopes
+            where tenant_id = 'default'
+              and scope_type = 'pending_invoice'
+              and status in ('pending', 'processing', 'failed')
+            order by updated_at desc
+            limit 1
+            """
+        )
+        if isinstance(dirty_row, dict):
+            return {
+                "status": "refreshing" if text(dirty_row.get("status")) in {"pending", "processing"} else "stale"
+            }
+        outbox_row = connection.fetch_one(
+            """
+            select
+                coalesce(bool_or(status in ('failed', 'dead_lettered')), false) as has_failed,
+                coalesce(bool_or(status in ('pending', 'processing')), false) as has_active
+            from job.outbox_events
+            where tenant_id = 'default'
+              and event_type = 'pending_invoice.read_model.refresh'
+              and status in ('pending', 'processing', 'failed', 'dead_lettered')
+            """
+        )
+        if isinstance(outbox_row, dict) and bool(outbox_row.get("has_failed")):
+            return {"status": "stale"}
+        if isinstance(outbox_row, dict) and bool(outbox_row.get("has_active")):
+            return {"status": "refreshing"}
+        rows = connection.fetch_all(
+            """
+            select scope_key, direction, row_count, cache_status, source_versions, raw_payload
+            from read_model.pending_invoice_scopes
+            where filter_group = 'all'
+              and direction in ('expense', 'income')
+            order by scope_key
+            """
+        )
+        by_direction: dict[str, list[dict[str, Any]]] = {}
+        metadata_rows: list[Any] = []
+        source_versions_by_scope: dict[str, Any] = {}
+        for direction in ("expense", "income"):
+            direction_rows = [
+                row for row in rows if isinstance(row, dict) and text(row.get("direction")) == direction
+            ]
+            child_rows = [row for row in direction_rows if text(row.get("scope_key") or "").count(":") >= 2]
+            effective_rows = child_rows or direction_rows
+            if not effective_rows or any(text(row.get("cache_status")) not in {"", "fresh"} for row in effective_rows):
+                return {"status": "stale"}
+            by_direction[direction] = effective_rows
+            source_row = _pending_invoice_scope_source_versions_row(
+                f"{direction}:all",
+                effective_rows,
+                include_empty=True,
+            )
+            source_versions_by_scope[f"{direction}:all"] = (
+                source_row.get("source_versions")
+                if isinstance(source_row, dict) and isinstance(source_row.get("source_versions"), dict)
+                else {}
+            )
+            metadata_rows.extend(
+                row.get("raw_payload", {}).get("statistics_metadata")
+                if isinstance(row.get("raw_payload"), dict)
+                else None
+                for row in effective_rows
+            )
+        statistics = _pending_invoice_statistics_from_scope_metadata(metadata_rows)
+        if statistics is None:
+            return {"status": "stale", "source_versions_by_scope": source_versions_by_scope}
+        return {
+            "status": "fresh",
+            "statistics": statistics,
+            "source_versions_by_scope": source_versions_by_scope,
+        }
+
 
     def _upsert_pending_invoice_scope(
         self,
@@ -4154,6 +4504,7 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
         filter_group: str,
         row_count: int,
         source_versions: dict[str, Any],
+        statistics_metadata: dict[str, Any] | None = None,
     ) -> None:
         connection.execute(
             """
@@ -4177,7 +4528,14 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
                 filter_group,
                 row_count,
                 jsonb(source_versions),
-                jsonb({"scope_key": scope_key, "row_count": row_count, "source_versions": source_versions}),
+                jsonb(
+                    {
+                        "scope_key": scope_key,
+                        "row_count": row_count,
+                        "source_versions": source_versions,
+                        "statistics_metadata": dict(statistics_metadata or {}),
+                    }
+                ),
             ),
         )
 
@@ -5880,7 +6238,10 @@ class PostgresSummaryReadModelRepository:
             return None
         row = self._connection.fetch_one(
             """
-            select scope_key, entry_count, source_versions
+            select scope_key,
+                   entry_count,
+                   source_versions,
+                   payload #> '{payload,statistics}' is not null as statistics_ready
             from read_model.cost_statistics_read_models
             where scope_key = %s
             limit 1
@@ -5893,6 +6254,7 @@ class PostgresSummaryReadModelRepository:
             "scope_key": normalized_scope_key,
             "entry_count": max(int_value(row.get("entry_count"), 0), 0),
             "source_versions": row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {},
+            "statistics_ready": row.get("statistics_ready") is True,
         }
 
     def cost_statistics_aggregate_payload(
@@ -5942,7 +6304,18 @@ class PostgresSummaryReadModelRepository:
                 bank_detail.source_version as bank_detail_source_version,
                 bank_detail.source_versions as bank_detail_source_versions,
                 bank_detail_dirty.source_version as bank_detail_dirty_source_version,
-                bank_detail_dirty.status as bank_detail_dirty_status
+                bank_detail_dirty.status as bank_detail_dirty_status,
+                statistics_parent.scope_key as statistics_scope_key,
+                statistics_parent.payload #> '{payload,statistics}' as statistics,
+                statistics_parent.published_source_version as statistics_published_source_version,
+                coalesce(
+                    nullif(statistics_parent.payload->>'schema_version', ''),
+                    nullif(statistics_parent.raw_payload #>> '{normalized_payload,schema_version}', '')
+                ) as statistics_schema_version,
+                statistics_parent_dirty.source_version as statistics_dirty_source_version,
+                statistics_parent_dirty.status as statistics_dirty_status,
+                statistics_children.has_failed as statistics_child_has_failed,
+                statistics_children.has_active as statistics_child_has_active
             from read_model.cost_statistics_read_models model
             left join lateral (
                 select source_version, status, updated_at, last_error
@@ -6005,6 +6378,32 @@ class PostgresSummaryReadModelRepository:
                 order by source_version desc, updated_at desc, id desc
                 limit 1
             ) bank_detail_dirty on true
+            left join lateral (
+                select scope_key, payload, raw_payload, published_source_version
+                from read_model.cost_statistics_read_models
+                where scope_key = split_part(model.scope_key, ':', 1) || ':all'
+                limit 1
+            ) statistics_parent on true
+            left join lateral (
+                select source_version, status
+                from job.read_model_dirty_scopes
+                where tenant_id = 'default'
+                  and scope_type = 'cost_statistics'
+                  and scope_key = statistics_parent.scope_key
+                order by source_version desc, updated_at desc, id desc
+                limit 1
+            ) statistics_parent_dirty on true
+            left join lateral (
+                select
+                    coalesce(bool_or(status = 'failed'), false) as has_failed,
+                    coalesce(bool_or(status in ('pending', 'processing')), false) as has_active
+                from job.read_model_dirty_scopes
+                where tenant_id = 'default'
+                  and scope_type = 'cost_statistics'
+                  and scope_key like split_part(model.scope_key, ':', 1) || ':%'
+                  and scope_key <> split_part(model.scope_key, ':', 1) || ':all'
+                  and status in ('pending', 'processing', 'failed')
+            ) statistics_children on true
             where model.scope_key = %s
             limit 1
             """,
@@ -6101,6 +6500,34 @@ class PostgresSummaryReadModelRepository:
             if bank_detail_status != "fresh":
                 refresh_status = "stale" if refresh_status == "fresh" else refresh_status
                 stale_reasons.append("bank_detail_scope_not_fresh")
+        statistics = _cost_statistics_page_statistics(row.get("statistics"))
+        statistics_published_source_version = (
+            int_value(row.get("statistics_published_source_version"), -1)
+            if row.get("statistics_published_source_version") is not None
+            else None
+        )
+        statistics_dirty_source_version = (
+            int_value(row.get("statistics_dirty_source_version"), -1)
+            if row.get("statistics_dirty_source_version") is not None
+            else None
+        )
+        statistics_dirty_status = text(row.get("statistics_dirty_status"))
+        statistics_status = "fresh"
+        if statistics_published_source_version is None or statistics is None:
+            statistics_status = "stale"
+        if text(row.get("statistics_schema_version")) != COST_STATISTICS_READ_MODEL_SCHEMA_VERSION:
+            statistics_status = "stale"
+        if bool(row.get("statistics_child_has_failed")) or statistics_dirty_status == "failed":
+            statistics_status = "failed"
+        elif bool(row.get("statistics_child_has_active")) or statistics_dirty_status in {"pending", "processing"}:
+            statistics_status = "refreshing"
+        elif statistics_dirty_status is not None and (
+            statistics_dirty_status != "done"
+            or statistics_dirty_source_version != statistics_published_source_version
+        ):
+            statistics_status = "stale"
+        if statistics_status != "fresh":
+            statistics = None
         return {
             "scope_key": normalized_scope_key,
             "schema_version": text(row.get("schema_version")),
@@ -6114,6 +6541,11 @@ class PostgresSummaryReadModelRepository:
             "dirty_source_version": dirty_source_version,
             "refresh_status": refresh_status,
             "stale_reasons": stale_reasons,
+            "statistics": statistics,
+            "statistics_status": statistics_status,
+            "statistics_scope_key": text(row.get("statistics_scope_key"))
+            or f"{normalized_scope_key.split(':', 1)[0]}:all",
+            "statistics_published_source_version": statistics_published_source_version,
             "dirty_scope": (
                 {
                     "source_version": dirty_source_version,
@@ -7367,7 +7799,13 @@ class PostgresSummaryReadModelRepository:
         query_params = tuple([*base_params, *scoped_params])
         aggregate_rows = self._connection.fetch_all(
             f"""
-            {cte_sql}, version_proof as (
+            {cte_sql}, statistics_marker as materialized (
+                select raw_payload -> '{TURNOVER_LEDGER_PAGE_STATISTICS_KEY}' as page_statistics
+                from read_model.turnover_ledger_rows
+                where status <> 'withdrawn'
+                order by relation_id
+                limit 1
+            ), version_proof as (
                 select
                     count(*) > 0 as scope_exists,
                     case
@@ -7383,6 +7821,26 @@ class PostgresSummaryReadModelRepository:
                         false
                     ) as source_versions_mixed
                 from base
+            ), statistics as (
+                select
+                    coalesce(
+                        jsonb_typeof((select page_statistics from statistics_marker)) = 'object',
+                        false
+                    ) as statistics_ready,
+                    coalesce((select (page_statistics->>'transaction_count')::integer
+                        from statistics_marker), 0) as statistics_transaction_count,
+                    coalesce((select (page_statistics->>'expense_transaction_count')::integer
+                        from statistics_marker), 0) as statistics_expense_transaction_count,
+                    coalesce((select (page_statistics->>'income_transaction_count')::integer
+                        from statistics_marker), 0) as statistics_income_transaction_count,
+                    coalesce((select (page_statistics->>'ledger_group_count')::integer
+                        from statistics_marker), 0) as statistics_ledger_group_count,
+                    coalesce((select (page_statistics->>'closed_group_count')::integer
+                        from statistics_marker), 0) as statistics_closed_group_count,
+                    coalesce((select (page_statistics->>'linked_oa_transaction_count')::integer
+                        from statistics_marker), 0) as statistics_linked_oa_transaction_count,
+                    coalesce((select (page_statistics->>'linked_invoice_transaction_count')::integer
+                        from statistics_marker), 0) as statistics_linked_invoice_transaction_count
             ), summary_rows as (
                 select
                     grouping(family) = 1 as is_total,
@@ -7399,9 +7857,11 @@ class PostgresSummaryReadModelRepository:
                 group by grouping sets ((), (family))
             )
             select summary_rows.*, version_proof.scope_exists,
-                   version_proof.source_versions, version_proof.source_versions_mixed
+                   version_proof.source_versions, version_proof.source_versions_mixed,
+                   statistics.*
             from summary_rows
             cross join version_proof
+            cross join statistics
             order by summary_rows.is_total desc, summary_rows.family
             """,
             query_params,
@@ -7428,6 +7888,11 @@ class PostgresSummaryReadModelRepository:
             for row in aggregate_rows
             if not bool(row.get("is_total")) and text(row.get("family"))
         }
+        refresh_status = self._turnover_ledger_refresh_status(scope_key=normalized_scope_key)
+        statistics_ready = bool(aggregate.get("statistics_ready"))
+        if refresh_status == "fresh" and not statistics_ready:
+            refresh_status = "stale"
+        statistics_status = refresh_status if statistics_ready else "stale"
         payload = {
             "summary": _turnover_ledger_aggregate_summary(aggregate),
             "family_summaries": [
@@ -7446,7 +7911,9 @@ class PostgresSummaryReadModelRepository:
                 "status": normalized_status,
             },
             "read_model_status": "fresh",
-            "refresh_status": self._turnover_ledger_refresh_status(scope_key=normalized_scope_key),
+            "refresh_status": refresh_status,
+            "statistics": _turnover_ledger_page_statistics(aggregate) if refresh_status == "fresh" else None,
+            "statistics_status": statistics_status,
             "source_versions": aggregate.get("source_versions") if isinstance(aggregate.get("source_versions"), dict) else {},
         }
         if bool(aggregate.get("source_versions_mixed")):
@@ -7557,6 +8024,7 @@ class PostgresSummaryReadModelRepository:
                 if isinstance(item, dict)
             ]
             self._upsert_turnover_ledger_rows(connection, params_seq)
+            self._refresh_turnover_ledger_statistics_marker(connection)
 
         run_in_transaction(self._connection, write)
 
@@ -7580,6 +8048,7 @@ class PostgresSummaryReadModelRepository:
                 if isinstance(item, dict)
             ]
             self._upsert_turnover_ledger_rows(connection, params_seq)
+            self._refresh_turnover_ledger_statistics_marker(connection)
 
         run_in_transaction(self._connection, write)
 
@@ -7632,6 +8101,111 @@ class PostgresSummaryReadModelRepository:
             params_seq,
         )
 
+    @staticmethod
+    def _refresh_turnover_ledger_statistics_marker(connection: Any) -> None:
+        connection.execute(
+            f"""
+            with base as materialized (
+                select relation_id, payload
+                from read_model.turnover_ledger_rows
+                where status <> 'withdrawn'
+            ), statistics_flows as materialized (
+                select
+                    nullif(btrim(flow.value->>'source_bank_row_id'), '') as transaction_id,
+                    flow.value->>'flow_direction' as direction,
+                    coalesce(flow.value->>'linked_oa', 'false') = 'true' as linked_oa,
+                    coalesce(flow.value->>'linked_invoice', 'false') = 'true' as linked_invoice
+                from base
+                join lateral jsonb_array_elements(
+                    case
+                        when jsonb_typeof(base.payload->'flow_rows') = 'array'
+                        then base.payload->'flow_rows'
+                        else '[]'::jsonb
+                    end
+                ) flow(value) on true
+            ), statistics as (
+                select jsonb_build_object(
+                    'transaction_count', (
+                        select count(distinct transaction_id) from statistics_flows
+                        where transaction_id is not null
+                    ),
+                    'expense_transaction_count', (
+                        select count(distinct transaction_id) from statistics_flows
+                        where transaction_id is not null and direction = 'expense'
+                    ),
+                    'income_transaction_count', (
+                        select count(distinct transaction_id) from statistics_flows
+                        where transaction_id is not null and direction = 'income'
+                    ),
+                    'ledger_group_count', (select count(*) from base),
+                    'closed_group_count', (
+                        select count(*) from base
+                        where coalesce(payload->>'cash_closure_linked', 'false') = 'true'
+                    ),
+                    'linked_oa_transaction_count', (
+                        select count(distinct transaction_id) from statistics_flows
+                        where transaction_id is not null and linked_oa
+                    ),
+                    'linked_invoice_transaction_count', (
+                        select count(distinct transaction_id) from statistics_flows
+                        where transaction_id is not null and linked_invoice
+                    )
+                ) as payload
+            ), marker_target as (
+                select min(relation_id) as relation_id from base
+            )
+            update read_model.turnover_ledger_rows row
+            set raw_payload = case
+                    when row.relation_id = marker_target.relation_id
+                    then jsonb_set(
+                        row.raw_payload - '{TURNOVER_LEDGER_PAGE_STATISTICS_KEY}',
+                        '{{{TURNOVER_LEDGER_PAGE_STATISTICS_KEY}}}',
+                        statistics.payload,
+                        true
+                    )
+                    else row.raw_payload - '{TURNOVER_LEDGER_PAGE_STATISTICS_KEY}'
+                end,
+                updated_at = now()
+            from statistics
+            cross join marker_target
+            where row.raw_payload ? '{TURNOVER_LEDGER_PAGE_STATISTICS_KEY}'
+               or row.relation_id = marker_target.relation_id
+            """,
+            (),
+        )
+
+    def tax_offset_statistics_generation_token(self) -> str | None:
+        row = self._connection.fetch_one(
+            """
+            with scope_material as (
+                select coalesce(string_agg(
+                    scope_key || ':' || generated_at::text || ':' || source_versions::text || ':'
+                    || coalesce((coalesce(payload->'payload', payload)->'statistics')::text, ''),
+                    ',' order by scope_key
+                ), '') as value
+                from read_model.tax_offset_read_models
+                where scope_key ~ '^[0-9]{4}-[0-9]{2}$'
+            ), dirty_material as (
+                select coalesce(string_agg(scope_key || ':' || status || ':' || source_version::text, ',' order by scope_key), '') as value
+                from job.read_model_dirty_scopes
+                where tenant_id = 'default'
+                  and scope_type = 'tax_offset'
+                  and status in ('pending', 'processing', 'failed')
+            ), outbox_material as (
+                select coalesce(string_agg(coalesce(scope_key, '') || ':' || status, ',' order by scope_key), '') as value
+                from job.outbox_events
+                where tenant_id = 'default'
+                  and event_type = 'tax_offset.read_model.refresh'
+                  and status in ('pending', 'processing', 'failed', 'dead_lettered')
+            )
+            select md5(scope_material.value || '|dirty:' || dirty_material.value || '|outbox:' || outbox_material.value) as token
+            from scope_material
+            cross join dirty_material
+            cross join outbox_material
+            """
+        )
+        return text(row.get("token")) if isinstance(row, dict) else None
+
     def get_tax_offset_view(self, *, scope_key: str) -> dict[str, Any] | None:
         normalized_scope_key = str(scope_key or "").strip()
         if not normalized_scope_key:
@@ -7678,6 +8252,91 @@ class PostgresSummaryReadModelRepository:
         refresh_status = "fresh"
         if dirty_row is not None:
             refresh_status = "refreshing" if text(dirty_row.get("status")) in {"pending", "processing"} else "stale"
+        statistics_row = self._connection.fetch_one(
+            """
+            /* check: tax_offset_page_statistics */
+            with scopes as (
+                select
+                    scope_key,
+                    generated_at,
+                    schema_version,
+                    cache_status,
+                    source_versions,
+                    coalesce(payload->'payload', payload) as page_payload
+                from read_model.tax_offset_read_models
+                where scope_key ~ '^[0-9]{4}-[0-9]{2}$'
+            ), scope_counts as (
+                select
+                    coalesce(sum((page_payload->'statistics'->>'input_invoice_count')::integer), 0)::integer as input_invoice_count,
+                    coalesce(sum((page_payload->'statistics'->>'output_invoice_count')::integer), 0)::integer as output_invoice_count,
+                    coalesce(sum((page_payload->'statistics'->>'certification_record_count')::integer), 0)::integer as certification_record_count,
+                    coalesce(sum((page_payload->'statistics'->>'matched_certification_count')::integer), 0)::integer as matched_certification_count,
+                    coalesce(sum((page_payload->'statistics'->>'out_of_scope_certification_count')::integer), 0)::integer as out_of_scope_certification_count,
+                    coalesce(sum((page_payload->'statistics'->>'selected_invoice_count')::integer), 0)::integer as selected_invoice_count,
+                    bool_and(
+                        schema_version = %s
+                        and cache_status in ('fresh', 'ready')
+                        and source_versions = %s::jsonb
+                        and jsonb_typeof(page_payload->'statistics') = 'object'
+                    ) as scopes_fresh,
+                    md5(coalesce(string_agg(
+                        scope_key || ':' || generated_at::text || ':' || source_versions::text || ':'
+                        || coalesce((page_payload->'statistics')::text, ''),
+                        ',' order by scope_key
+                    ), '')) as statistics_generation_token
+                from scopes
+            )
+            select scope_counts.*,
+                   not exists (
+                       select 1
+                       from job.read_model_dirty_scopes dirty
+                       where dirty.tenant_id = 'default'
+                         and dirty.scope_type = 'tax_offset'
+                         and dirty.status in ('pending', 'processing', 'failed')
+                   ) and not exists (
+                       select 1
+                       from job.outbox_events outbox
+                       where outbox.tenant_id = 'default'
+                         and outbox.event_type = 'tax_offset.read_model.refresh'
+                         and outbox.status in ('pending', 'processing', 'failed', 'dead_lettered')
+                   ) and coalesce(scope_counts.scopes_fresh, false) as statistics_fresh
+            from scope_counts
+            """,
+            (
+                text(row.get("schema_version") or stored_payload.get("schema_version") or payload.get("schema_version")),
+                jsonb(row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {}),
+            ),
+        )
+        statistics: dict[str, int] | None = None
+        if isinstance(statistics_row, dict) and bool(statistics_row.get("statistics_fresh")):
+            input_count = int_value(statistics_row.get("input_invoice_count"), 0)
+            output_count = int_value(statistics_row.get("output_invoice_count"), 0)
+            certification_count = int_value(statistics_row.get("certification_record_count"), 0)
+            matched_count = int_value(statistics_row.get("matched_certification_count"), 0)
+            selected_count = int_value(statistics_row.get("selected_invoice_count"), 0)
+            invoice_count = input_count + output_count
+            statistics = {
+                "input_invoice_count": input_count,
+                "output_invoice_count": output_count,
+                "certification_record_count": certification_count,
+                "matched_certification_count": matched_count,
+                "unmatched_certification_count": max(certification_count - matched_count, 0),
+                "out_of_scope_certification_count": int_value(
+                    statistics_row.get("out_of_scope_certification_count"), 0
+                ),
+                "deductible_invoice_count": input_count,
+                "selected_invoice_count": selected_count,
+                "unselected_invoice_count": max(invoice_count - selected_count, 0),
+            }
+        payload = dict(payload)
+        payload["statistics"] = statistics
+        payload["statistics_status"] = (
+            "fresh"
+            if statistics is not None
+            else "refreshing"
+            if isinstance(statistics_row, dict) and not bool(statistics_row.get("statistics_fresh"))
+            else "stale"
+        )
         return {
             "scope_key": normalized_scope_key,
             "payload": payload,
@@ -7692,6 +8351,11 @@ class PostgresSummaryReadModelRepository:
             ),
             "entry_count": int_value(row.get("entry_count") or stored_payload.get("entry_count") or _tax_offset_item_count(payload), 0),
             "refresh_status": refresh_status,
+            "statistics_generation_token": (
+                text(statistics_row.get("statistics_generation_token"))
+                if isinstance(statistics_row, dict)
+                else None
+            ),
             "dirty_scope": dict(dirty_row) if isinstance(dirty_row, dict) else None,
         }
 
@@ -9457,10 +10121,12 @@ class PostgresReadModelRepository:
                 generated_at = row_generated_at
         if complete_summary_count < len(rows):
             read_model_status = "stale"
+        statistics = summary.get("statistics") if isinstance(summary.get("statistics"), dict) else None
         return {
             "month": "all",
             "scope_key": "all",
             "summary": _normalize_workbench_summary_counts(summary),
+            "statistics": dict(statistics) if read_model_status == "fresh" and statistics is not None else None,
             "invoice_inventory": invoice_inventory,
             "read_model_status": read_model_status,
             "generated_at": generated_at,
@@ -9576,7 +10242,8 @@ class PostgresReadModelRepository:
                     canonical_groups.zone,
                     canonical_groups.group_id,
                     member.pane,
-                    coalesce(nullif(member.object_identity_key, ''), member.row_id) as object_identity_key
+                    coalesce(nullif(member.object_identity_key, ''), member.row_id) as object_identity_key,
+                    member.column_values
                 from canonical_groups
                 join physical_groups
                   on physical_groups.logical_group_id = canonical_groups.group_id
@@ -9631,7 +10298,73 @@ class PostgresReadModelRepository:
                 )::bigint as unpaired_bank_count,
                 count(distinct (canonical_members.pane, canonical_members.object_identity_key)) filter (
                     where canonical_members.zone = 'unpaired' and canonical_members.pane = 'invoice'
-                )::bigint as unpaired_invoice_count
+                )::bigint as unpaired_invoice_count,
+                count(distinct (canonical_members.pane, canonical_members.object_identity_key)) filter (
+                    where canonical_members.pane = 'bank'
+                      and lower(coalesce(canonical_members.column_values->>'direction', '')) in ('支出', 'expense', 'outflow')
+                )::bigint as expense_transaction_count,
+                count(distinct (canonical_members.pane, canonical_members.object_identity_key)) filter (
+                    where canonical_members.pane = 'bank'
+                      and lower(coalesce(canonical_members.column_values->>'direction', '')) in ('收入', 'income', 'inflow')
+                )::bigint as income_transaction_count,
+                count(distinct (canonical_members.pane, canonical_members.object_identity_key)) filter (
+                    where canonical_members.pane = 'invoice'
+                      and (
+                          lower(coalesce(canonical_members.column_values->>'invoiceType', '')) like '%%input%%'
+                          or lower(coalesce(canonical_members.column_values->>'invoiceType', '')) like '%%purchase%%'
+                          or coalesce(canonical_members.column_values->>'invoiceType', '') like '%%进%%'
+                      )
+                )::bigint as input_invoice_count,
+                count(distinct (canonical_members.pane, canonical_members.object_identity_key)) filter (
+                    where canonical_members.pane = 'invoice'
+                      and (
+                          lower(coalesce(canonical_members.column_values->>'invoiceType', '')) like '%%output%%'
+                          or lower(coalesce(canonical_members.column_values->>'invoiceType', '')) like '%%sale%%'
+                          or coalesce(canonical_members.column_values->>'invoiceType', '') like '%%销%%'
+                      )
+                )::bigint as output_invoice_count,
+                count(distinct canonical_groups.group_id) filter (
+                    where coalesce(canonical_groups.payload #>> '{{completion,is_complete}}', 'true') = 'false'
+                )::bigint as incomplete_group_count,
+                count(distinct canonical_groups.group_id) filter (
+                    where exists (
+                        select 1
+                        from jsonb_array_elements_text(
+                            case
+                                when jsonb_typeof(canonical_groups.payload #> '{{completion,missing_row_types}}') = 'array'
+                                then canonical_groups.payload #> '{{completion,missing_row_types}}'
+                                else '[]'::jsonb
+                            end
+                        ) missing(value)
+                        where lower(missing.value) = 'oa'
+                    )
+                )::bigint as missing_oa_group_count,
+                count(distinct canonical_groups.group_id) filter (
+                    where exists (
+                        select 1
+                        from jsonb_array_elements_text(
+                            case
+                                when jsonb_typeof(canonical_groups.payload #> '{{completion,missing_row_types}}') = 'array'
+                                then canonical_groups.payload #> '{{completion,missing_row_types}}'
+                                else '[]'::jsonb
+                            end
+                        ) missing(value)
+                        where lower(missing.value) in ('bank', 'bank_transaction')
+                    )
+                )::bigint as missing_bank_group_count,
+                count(distinct canonical_groups.group_id) filter (
+                    where exists (
+                        select 1
+                        from jsonb_array_elements_text(
+                            case
+                                when jsonb_typeof(canonical_groups.payload #> '{{completion,missing_row_types}}') = 'array'
+                                then canonical_groups.payload #> '{{completion,missing_row_types}}'
+                                else '[]'::jsonb
+                            end
+                        ) missing(value)
+                        where lower(missing.value) = 'invoice'
+                    )
+                )::bigint as missing_invoice_group_count
             from canonical_groups
             left join canonical_members
               on canonical_members.zone = canonical_groups.zone
@@ -9648,14 +10381,38 @@ class PostgresReadModelRepository:
             for pane in WORKBENCH_PANES:
                 target[pane] = int_value(row.get(f"{zone}_{pane}_count"), 0)
             target["rows"] = target["oa"] + target["bank"] + target["invoice"]
+        oa_count = int_value(row.get("oa_count"), 0)
+        bank_count = int_value(row.get("bank_count"), 0)
+        invoice_count = int_value(row.get("invoice_count"), 0)
+        paired_count = int_value(row.get("paired_count"), 0)
+        unpaired_object_count = sum(
+            int_value(row.get(f"unpaired_{pane}_count"), 0) for pane in WORKBENCH_PANES
+        )
         return {
-            "oa_count": int_value(row.get("oa_count"), 0),
-            "bank_count": int_value(row.get("bank_count"), 0),
-            "invoice_count": int_value(row.get("invoice_count"), 0),
-            "paired_count": int_value(row.get("paired_count"), 0),
+            "oa_count": oa_count,
+            "bank_count": bank_count,
+            "invoice_count": invoice_count,
+            "paired_count": paired_count,
             "unpaired_count": int_value(row.get("unpaired_count"), 0),
             "exception_count": int_value(row.get("exception_count"), 0),
             "zone_counts": zone_counts,
+            "statistics": {
+                "oa_count": oa_count,
+                "bank_transaction_count": bank_count,
+                "input_invoice_count": int_value(row.get("input_invoice_count"), 0),
+                "output_invoice_count": int_value(row.get("output_invoice_count"), 0),
+                "paired_group_count": paired_count,
+                "unpaired_object_count": unpaired_object_count,
+                "expense_transaction_count": int_value(row.get("expense_transaction_count"), 0),
+                "income_transaction_count": int_value(row.get("income_transaction_count"), 0),
+                "paired_oa_count": int_value(row.get("paired_oa_count"), 0),
+                "paired_bank_transaction_count": int_value(row.get("paired_bank_count"), 0),
+                "paired_invoice_count": int_value(row.get("paired_invoice_count"), 0),
+                "incomplete_group_count": int_value(row.get("incomplete_group_count"), 0),
+                "missing_oa_group_count": int_value(row.get("missing_oa_group_count"), 0),
+                "missing_bank_group_count": int_value(row.get("missing_bank_group_count"), 0),
+                "missing_invoice_group_count": int_value(row.get("missing_invoice_group_count"), 0),
+            },
         }
 
     def _workbench_all_active_source_versions(self) -> dict[str, Any]:
@@ -9771,10 +10528,14 @@ class PostgresReadModelRepository:
                 (status for status in ("failed", "refreshing", "stale", "fresh") if status in status_values),
                 "fresh",
             )
+            statistics = summary_payload.get("statistics")
+            if read_model_status != "fresh" or not isinstance(statistics, dict):
+                statistics = None
             return {
                 "month": normalized_scope_key,
                 "scope_key": normalized_scope_key,
                 "summary": dict(summary_payload.get("summary") or {}),
+                "statistics": dict(statistics) if isinstance(statistics, dict) else None,
                 "invoice_inventory": dict(summary_payload.get("invoice_inventory") or {}),
                 "paired": paired_page,
                 "unpaired": unpaired_page,
@@ -9838,6 +10599,15 @@ class PostgresReadModelRepository:
                 result["read_model_version"] = result["active_generation_id"]
                 result["read_model_status"] = self._workbench_summary_read_model_status(
                     scope_key=normalized_scope_key
+                )
+                if normalized_scope_key == "all":
+                    statistics = result.get("summary", {}).get("statistics")
+                else:
+                    statistics = self._workbench_published_all_page_statistics()
+                result["statistics"] = (
+                    dict(statistics)
+                    if result["read_model_status"] == "fresh" and isinstance(statistics, dict)
+                    else None
                 )
                 result.pop("diagnostics", None)
                 return result
@@ -10102,8 +10872,17 @@ class PostgresReadModelRepository:
         zone_counts = normalized_summary.get("zone_counts")
         if not isinstance(zone_counts, dict):
             zone_counts = _empty_workbench_zone_counts()
+        page_statistics = (
+            dict(normalized_summary.get("statistics"))
+            if isinstance(normalized_summary.get("statistics"), dict)
+            else None
+        )
         for zone in ("paired", "unpaired"):
             counts = zone_counts.get(zone) if isinstance(zone_counts.get(zone), dict) else {}
+            stored_counts = {
+                **dict(counts),
+                "page_statistics": page_statistics,
+            }
             oa_count = int_value(counts.get("oa"), 0)
             bank_count = int_value(counts.get("bank"), 0)
             invoice_count = int_value(counts.get("invoice"), 0)
@@ -10135,8 +10914,8 @@ class PostgresReadModelRepository:
                     bank_count,
                     invoice_count,
                     row_count_total,
-                    jsonb(counts if isinstance(counts, dict) else {}),
-                    jsonb({"summary_zone_counts": counts if isinstance(counts, dict) else {}}),
+                    jsonb(stored_counts),
+                    jsonb({"summary_zone_counts": counts, "page_statistics": page_statistics}),
                 ),
             )
 
@@ -10161,6 +10940,40 @@ class PostgresReadModelRepository:
             """,
             (generation_id,),
         )
+
+    def _workbench_published_all_page_statistics(self) -> dict[str, int] | None:
+        if self._workbench_summary_read_model_status(scope_key="all") != "fresh":
+            return None
+        active_version = self._workbench_active_month_generation_version(self._connection)
+        generation_id = text(active_version.get("version"))
+        if not generation_id:
+            return None
+        rows = self._connection.fetch_all(
+            """
+            select zone, payload
+            from read_model.workbench_generation_stats
+            where generation_id = %s
+              and scope_key = 'all'
+              and zone in ('paired', 'unpaired')
+              and status_bucket = 'all'
+            order by zone
+            """,
+            (generation_id,),
+        )
+        if len(rows) != 2:
+            return None
+        page_statistics: list[dict[str, int]] = []
+        for row in rows:
+            payload = row.get("payload") if isinstance(row, dict) else None
+            statistics = payload.get("page_statistics") if isinstance(payload, dict) else None
+            if not isinstance(statistics, dict):
+                return None
+            page_statistics.append(
+                {str(key): int_value(value, 0) for key, value in statistics.items()}
+            )
+        if page_statistics[0] != page_statistics[1]:
+            return None
+        return page_statistics[0]
 
     def _workbench_generation_stats_for_groups_page(
         self,
@@ -12803,6 +13616,208 @@ def _invoice_relation_summary_payload(row: dict[str, Any], *, summary_kind: str,
     }
 
 
+def _invoice_relation_statistics_sql(*, table_name: str, summary_kind: str) -> str:
+    invoice_id_expression = """
+        nullif(btrim(coalesce(
+            invoice_summary.value->>'invoiceId',
+            invoice_summary.value->>'id',
+            invoice_summary.value->>'primaryInvoiceId',
+            invoice_summary.value->>'relatedInvoiceId',
+            base_rows.payload->'invoice'->>'id',
+            base_rows.invoice_id
+        )), '')
+    """
+    invoice_members_cte = f"""
+        base_rows as (
+            select * from {table_name}
+        ),
+        invoice_members as (
+            select
+                base_rows.row_id,
+                {invoice_id_expression} as invoice_id,
+                base_rows.oa_relation_count,
+                base_rows.bank_relation_count,
+                base_rows.payment_status,
+                base_rows.collection_status,
+                coalesce(
+                    nullif(base_rows.bank_direction, ''),
+                    nullif(base_rows.payload->'bankTransactions'->>'direction', ''),
+                    case base_rows.payload->'bankTransactions'->>'directionLabel'
+                        when '收入' then 'inflow'
+                        when '支出' then 'outflow'
+                        else null
+                    end
+                ) as bank_direction,
+                base_rows.receipt_status,
+                base_rows.red_invoice_relation_count,
+                coalesce(
+                    invoice_summary.value->>'totalWithTax',
+                    invoice_summary.value->>'total_with_tax',
+                    base_rows.payload->'invoice'->>'totalWithTax',
+                    base_rows.total_with_tax::text
+                ) as invoice_total_with_tax,
+                coalesce(
+                    invoice_summary.value->>'isPositiveInvoice',
+                    invoice_summary.value->>'is_positive_invoice',
+                    base_rows.payload->'invoice'->>'isPositiveInvoice',
+                    ''
+                ) as is_positive_invoice
+            from base_rows
+            left join lateral jsonb_array_elements(
+                case
+                    when jsonb_typeof(base_rows.payload->'invoiceRelations'->'summaries') = 'array'
+                    then coalesce(
+                        nullif(base_rows.payload->'invoiceRelations'->'summaries', '[]'::jsonb),
+                        jsonb_build_array(jsonb_build_object('invoiceId', coalesce(base_rows.payload->'invoice'->>'id', base_rows.invoice_id)))
+                    )
+                    else jsonb_build_array(jsonb_build_object('invoiceId', coalesce(base_rows.payload->'invoice'->>'id', base_rows.invoice_id)))
+                end
+            ) as invoice_summary(value) on true
+        ),
+        invoice_flags as (
+            select
+                invoice_id,
+                bool_or(oa_relation_count > 0) as linked_oa,
+                bool_or(bank_relation_count > 0) as linked_bank,
+                bool_or(bank_relation_count > 0 and bank_direction = 'inflow') as linked_income_bank,
+                bool_or(payment_status = 'paid') as paid,
+                bool_or(collection_status in ('collected', 'collected_red_refunded')) as collected,
+                bool_or(receipt_status = 'issued') as receipt_issued,
+                bool_or(
+                    is_positive_invoice in ('否', 'false', 'False', '0')
+                    or ltrim(coalesce(invoice_total_with_tax, '')) like '-%'
+                ) as red_invoice
+            from invoice_members
+            where invoice_id is not null
+            group by invoice_id
+        )
+    """
+    if summary_kind == "input":
+        return f"""
+        with {invoice_members_cte}
+        select
+            count(*) as invoice_count,
+            count(*) filter (where linked_oa) as linked_oa_invoice_count,
+            count(*) filter (where linked_bank) as linked_bank_invoice_count,
+            count(*) filter (where paid) as paid_invoice_count,
+            (select count(distinct row_id) from invoice_members where oa_relation_count > 0 or bank_relation_count > 0)
+                as formal_relation_group_count,
+            (select count(*) from app.input_invoice_usage_oa_reverse_batches) as oa_reverse_batch_count
+        from invoice_flags
+        """
+    return f"""
+    with {invoice_members_cte}
+    select
+        count(*) as invoice_count,
+        count(*) filter (where linked_oa) as linked_oa_invoice_count,
+        count(*) filter (where linked_income_bank) as linked_income_bank_invoice_count,
+        count(*) filter (where collected) as collected_invoice_count,
+        count(*) filter (where red_invoice) as red_invoice_count,
+        count(*) filter (where receipt_issued) as issued_receipt_count
+    from invoice_flags
+    """
+
+
+def _invoice_relation_statistics_payload(row: dict[str, Any], *, summary_kind: str) -> dict[str, int]:
+    invoice_count = int_value(row.get("invoice_count"), 0)
+    linked_oa_count = int_value(row.get("linked_oa_invoice_count"), 0)
+    if summary_kind == "input":
+        linked_bank_count = int_value(row.get("linked_bank_invoice_count"), 0)
+        paid_count = int_value(row.get("paid_invoice_count"), 0)
+        return {
+            "invoice_count": invoice_count,
+            "linked_oa_invoice_count": linked_oa_count,
+            "linked_bank_invoice_count": linked_bank_count,
+            "paid_invoice_count": paid_count,
+            "unlinked_oa_invoice_count": max(invoice_count - linked_oa_count, 0),
+            "unlinked_bank_invoice_count": max(invoice_count - linked_bank_count, 0),
+            "unpaid_invoice_count": max(invoice_count - paid_count, 0),
+            "formal_relation_group_count": int_value(row.get("formal_relation_group_count"), 0),
+            "oa_reverse_batch_count": int_value(row.get("oa_reverse_batch_count"), 0),
+        }
+    linked_bank_count = int_value(row.get("linked_income_bank_invoice_count"), 0)
+    collected_count = int_value(row.get("collected_invoice_count"), 0)
+    return {
+        "invoice_count": invoice_count,
+        "linked_oa_invoice_count": linked_oa_count,
+        "linked_income_bank_invoice_count": linked_bank_count,
+        "collected_invoice_count": collected_count,
+        "unlinked_oa_invoice_count": max(invoice_count - linked_oa_count, 0),
+        "unlinked_bank_invoice_count": max(invoice_count - linked_bank_count, 0),
+        "uncollected_invoice_count": max(invoice_count - collected_count, 0),
+        "red_invoice_count": int_value(row.get("red_invoice_count"), 0),
+        "issued_receipt_count": int_value(row.get("issued_receipt_count"), 0),
+    }
+
+
+def _invoice_relation_statistics_from_scope_metadata(
+    values: Any,
+    *,
+    summary_kind: str,
+) -> dict[str, int] | None:
+    metadata_rows = list(values) if isinstance(values, list) else []
+    if not metadata_rows:
+        return None
+    keys = (
+        (
+            "invoice_count",
+            "linked_oa_invoice_count",
+            "linked_bank_invoice_count",
+            "paid_invoice_count",
+            "unlinked_oa_invoice_count",
+            "unlinked_bank_invoice_count",
+            "unpaid_invoice_count",
+            "formal_relation_group_count",
+            "oa_reverse_batch_count",
+        )
+        if summary_kind == "input"
+        else (
+            "invoice_count",
+            "linked_oa_invoice_count",
+            "linked_income_bank_invoice_count",
+            "collected_invoice_count",
+            "unlinked_oa_invoice_count",
+            "unlinked_bank_invoice_count",
+            "uncollected_invoice_count",
+            "red_invoice_count",
+            "issued_receipt_count",
+        )
+    )
+    totals = {key: 0 for key in keys}
+    for metadata in metadata_rows:
+        if not isinstance(metadata, dict) or not isinstance(metadata.get("statistics"), dict):
+            return None
+        statistics = metadata["statistics"]
+        if any(
+            isinstance(statistics.get(key), bool)
+            or not isinstance(statistics.get(key), int)
+            or int(statistics[key]) < 0
+            for key in keys
+        ):
+            return None
+        for key in keys:
+            totals[key] += int(statistics[key])
+    invoice_count = totals["invoice_count"]
+    linked_oa_count = totals["linked_oa_invoice_count"]
+    if totals["unlinked_oa_invoice_count"] != invoice_count - linked_oa_count:
+        return None
+    if summary_kind == "input":
+        if (
+            totals["unlinked_bank_invoice_count"]
+            != invoice_count - totals["linked_bank_invoice_count"]
+            or totals["unpaid_invoice_count"] != invoice_count - totals["paid_invoice_count"]
+        ):
+            return None
+        totals["oa_reverse_batch_count"] = 0
+    elif (
+        totals["unlinked_bank_invoice_count"]
+        != invoice_count - totals["linked_income_bank_invoice_count"]
+        or totals["uncollected_invoice_count"] != invoice_count - totals["collected_invoice_count"]
+    ):
+        return None
+    return totals
+
+
 def _input_invoice_usage_read_model_record(row: dict[str, Any], scope_key: str) -> dict[str, Any]:
     payload = serialize_value(row.get("payload") if isinstance(row.get("payload"), dict) else row)
     invoice = payload.get("invoice") if isinstance(payload.get("invoice"), dict) else {}
@@ -13199,7 +14214,7 @@ def _cost_statistics_aggregate_payload(
         cost_row = connection.fetch_one(
             """
             with base as materialized (
-                select project_name, expense_type, amount
+                select transaction_id, group_id, project_name, expense_type, amount
                 from read_model.cost_statistics_rows
                 where project_scope = %s
                   and scope_key = any(%s::text[])
@@ -13219,6 +14234,13 @@ def _cost_statistics_aggregate_payload(
             )
             select
                 (select count(*)::integer from base) as row_count,
+                (select count(distinct transaction_id)::integer from base) as transaction_count,
+                (select count(distinct group_id)::integer from base
+                    where nullif(btrim(group_id), '') is not null) as group_count,
+                (select count(distinct project_name)::integer from base
+                    where nullif(btrim(project_name), '') is not null) as project_count,
+                (select count(distinct expense_type)::integer from base
+                    where nullif(btrim(expense_type), '') is not null) as expense_type_count,
                 (select coalesce(sum(amount), 0)::text from base) as total_amount,
                 coalesce(
                     (
@@ -13255,11 +14277,20 @@ def _cost_statistics_aggregate_payload(
             """
             select
                 count(*)::integer as row_count,
+                count(distinct transaction_id)::integer as transaction_count,
                 coalesce(sum(abs(amount)), 0)::text as total_amount,
                 coalesce(sum(abs(amount)) filter (where direction = '支出'), 0)::text as expense_amount,
                 coalesce(sum(abs(amount)) filter (where direction = '收入'), 0)::text as income_amount,
-                count(*) filter (where direction = '支出')::integer as expense_transaction_count,
-                count(*) filter (where direction = '收入')::integer as income_transaction_count
+                count(distinct transaction_id) filter (where direction = '支出')::integer
+                    as expense_transaction_count,
+                count(distinct transaction_id) filter (where direction = '收入')::integer
+                    as income_transaction_count,
+                count(distinct transaction_id) filter (
+                    where nullif(btrim(bank_tag_code), '') is not null
+                )::integer as tagged_transaction_count,
+                count(distinct bank_tag_code) filter (
+                    where nullif(btrim(bank_tag_code), '') is not null
+                )::integer as bank_tag_count
             from read_model.cost_statistics_bank_flow_rows
             where project_scope = %s
               and scope_key = any(%s::text[])
@@ -13277,6 +14308,8 @@ def _cost_statistics_aggregate_payload(
         row["total_amount"] = _format_decimal(_decimal_or_zero(row.get("total_amount")))
     cost_count = int_value(cost_row.get("row_count"), 0)
     bank_count = int_value(bank_row.get("row_count"), 0)
+    bank_transaction_count = int_value(bank_row.get("transaction_count"), 0)
+    tagged_transaction_count = int_value(bank_row.get("tagged_transaction_count"), 0)
     return {
         "month": "all" if len(normalized_scope_keys) != 1 else normalized_scope_keys[0].split(":", 1)[-1],
         "project_scope": project_scope,
@@ -13287,17 +14320,62 @@ def _cost_statistics_aggregate_payload(
         },
         "bank_flow_summary": {
             "row_count": bank_count,
-            "transaction_count": bank_count,
+            "transaction_count": bank_transaction_count,
             "total_amount": _format_decimal(_decimal_or_zero(bank_row.get("total_amount"))),
             "expense_amount": _format_decimal(_decimal_or_zero(bank_row.get("expense_amount"))),
             "income_amount": _format_decimal(_decimal_or_zero(bank_row.get("income_amount"))),
             "expense_transaction_count": int_value(bank_row.get("expense_transaction_count"), 0),
             "income_transaction_count": int_value(bank_row.get("income_transaction_count"), 0),
         },
+        "statistics": {
+            "transaction_count": bank_transaction_count,
+            "expense_transaction_count": int_value(bank_row.get("expense_transaction_count"), 0),
+            "income_transaction_count": int_value(bank_row.get("income_transaction_count"), 0),
+            "cost_group_count": int_value(cost_row.get("group_count"), 0),
+            "tagged_transaction_count": tagged_transaction_count,
+            "untagged_transaction_count": max(bank_transaction_count - tagged_transaction_count, 0),
+            "project_count": int_value(cost_row.get("project_count"), 0),
+            "expense_type_count": int_value(cost_row.get("expense_type_count"), 0),
+            "bank_tag_count": int_value(bank_row.get("bank_tag_count"), 0),
+            "cost_transaction_count": int_value(cost_row.get("transaction_count"), 0),
+        },
         "bank_accounts": [dict(row) for row in bank_accounts if isinstance(row, dict)],
         "project_rows": project_rows,
         "expense_type_rows": expense_type_rows,
     }
+
+
+def _cost_statistics_page_statistics(value: Any) -> dict[str, int] | None:
+    if not isinstance(value, dict):
+        return None
+    expected_keys = (
+        "transaction_count",
+        "expense_transaction_count",
+        "income_transaction_count",
+        "cost_group_count",
+        "tagged_transaction_count",
+        "untagged_transaction_count",
+        "project_count",
+        "expense_type_count",
+        "bank_tag_count",
+        "cost_transaction_count",
+    )
+    if any(
+        isinstance(value.get(key), bool)
+        or not isinstance(value.get(key), int)
+        or value.get(key, -1) < 0
+        for key in expected_keys
+    ):
+        return None
+    statistics = {key: int(value[key]) for key in expected_keys}
+    if (
+        statistics["transaction_count"]
+        != statistics["expense_transaction_count"] + statistics["income_transaction_count"]
+        or statistics["transaction_count"]
+        != statistics["tagged_transaction_count"] + statistics["untagged_transaction_count"]
+    ):
+        return None
+    return statistics
 
 
 def _cost_statistics_percentage_sql() -> str:
@@ -13562,6 +14640,33 @@ def _turnover_ledger_aggregate_summary(row: dict[str, Any] | None) -> dict[str, 
         "suggested_count": max(int_value(aggregate.get("suggested_count"), 0), 0),
         "conflict_count": max(int_value(aggregate.get("conflict_count"), 0), 0),
         "row_count": max(int_value(aggregate.get("row_count"), 0), 0),
+    }
+
+
+def _turnover_ledger_page_statistics(row: dict[str, Any]) -> dict[str, int]:
+    group_count = max(int_value(row.get("statistics_ledger_group_count"), 0), 0)
+    closed_group_count = max(int_value(row.get("statistics_closed_group_count"), 0), 0)
+    return {
+        "transaction_count": max(int_value(row.get("statistics_transaction_count"), 0), 0),
+        "expense_transaction_count": max(
+            int_value(row.get("statistics_expense_transaction_count"), 0),
+            0,
+        ),
+        "income_transaction_count": max(
+            int_value(row.get("statistics_income_transaction_count"), 0),
+            0,
+        ),
+        "ledger_group_count": group_count,
+        "closed_group_count": closed_group_count,
+        "unclosed_group_count": max(group_count - closed_group_count, 0),
+        "linked_oa_transaction_count": max(
+            int_value(row.get("statistics_linked_oa_transaction_count"), 0),
+            0,
+        ),
+        "linked_invoice_transaction_count": max(
+            int_value(row.get("statistics_linked_invoice_transaction_count"), 0),
+            0,
+        ),
     }
 
 
@@ -15061,7 +16166,12 @@ def _source_versions_from_scope_summary(scope_summary: dict[str, Any]) -> dict[s
     return result
 
 
-def _pending_invoice_scope_source_versions_row(scope_key: str, rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+def _pending_invoice_scope_source_versions_row(
+    scope_key: str,
+    rows: list[dict[str, Any]],
+    *,
+    include_empty: bool = False,
+) -> dict[str, Any] | None:
     normalized_rows = [row for row in list(rows or []) if isinstance(row, dict)]
     if not normalized_rows:
         return None
@@ -15071,10 +16181,8 @@ def _pending_invoice_scope_source_versions_row(scope_key: str, rows: list[dict[s
             "scope_key": text(row.get("scope_key")) or scope_key,
             "source_versions": row.get("source_versions") if isinstance(row.get("source_versions"), dict) else {},
         }
-    effective_rows = [
-        row
-        for row in normalized_rows
-        if int_value(row.get("row_count"), 0) > 0
+    effective_rows = normalized_rows if include_empty else [
+        row for row in normalized_rows if int_value(row.get("row_count"), 0) > 0
     ] or normalized_rows
     first_versions = (
         effective_rows[0].get("source_versions")
@@ -15109,6 +16217,47 @@ def _pending_invoice_scope_source_versions_row(scope_key: str, rows: list[dict[s
     if workbench_relation_by_month:
         aggregate["workbench_relation_source_versions"] = workbench_relation_by_month
     return {"scope_key": scope_key, "source_versions": aggregate}
+
+
+def _pending_invoice_statistics_from_scope_metadata(values: Any) -> dict[str, int] | None:
+    metadata_rows = list(values) if isinstance(values, list) else []
+    if not metadata_rows:
+        return None
+    keys = (
+        "bank_transaction_count",
+        "expense_transaction_count",
+        "income_transaction_count",
+        "found_invoice_transaction_count",
+        "pending_invoice_transaction_count",
+        "no_invoice_required_transaction_count",
+        "cash_income_transaction_count",
+        "linked_oa_transaction_count",
+        "linked_input_invoice_transaction_count",
+        "linked_output_invoice_transaction_count",
+    )
+    totals = {key: 0 for key in keys}
+    for metadata in metadata_rows:
+        if not isinstance(metadata, dict) or not isinstance(metadata.get("statistics"), dict):
+            return None
+        statistics = metadata["statistics"]
+        if any(
+            isinstance(statistics.get(key), bool)
+            or not isinstance(statistics.get(key), int)
+            or int(statistics[key]) < 0
+            for key in keys
+        ):
+            return None
+        for key in keys:
+            totals[key] += int(statistics[key])
+    if (
+        totals["bank_transaction_count"]
+        != totals["expense_transaction_count"] + totals["income_transaction_count"]
+        or totals["found_invoice_transaction_count"]
+        != totals["linked_input_invoice_transaction_count"]
+        + totals["linked_output_invoice_transaction_count"]
+    ):
+        return None
+    return totals
 
 
 def _merge_pending_invoice_direction_scope_rows(scope_key: str, rows: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -15523,6 +16672,60 @@ def _bank_detail_row_record(row: dict[str, Any], *, scope_key: str, scope_month:
         jsonb(payload),
         jsonb(raw_payload),
     )
+
+
+def _bank_detail_empty_statistics() -> dict[str, int]:
+    return {
+        "transaction_count": 0,
+        "expense_transaction_count": 0,
+        "income_transaction_count": 0,
+        "classified_transaction_count": 0,
+        "unclassified_transaction_count": 0,
+        "linked_transaction_count": 0,
+        "unlinked_transaction_count": 0,
+    }
+
+
+def _bank_detail_statistics_from_rows(rows: list[dict[str, Any]]) -> dict[str, int]:
+    statistics = _bank_detail_empty_statistics()
+    for row in rows:
+        payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+        direction = text(row.get("direction") or payload.get("direction"))
+        classified = bool(text(row.get("effective_category_code") or payload.get("effective_category_code")))
+        linked = text(row.get("relation_status") or payload.get("relation_status")) == "linked"
+        statistics["transaction_count"] += 1
+        if direction == "income":
+            statistics["income_transaction_count"] += 1
+        else:
+            statistics["expense_transaction_count"] += 1
+        statistics["classified_transaction_count" if classified else "unclassified_transaction_count"] += 1
+        statistics["linked_transaction_count" if linked else "unlinked_transaction_count"] += 1
+    return statistics
+
+
+def _bank_detail_scope_statistics(raw_payload: Any) -> dict[str, int] | None:
+    if not isinstance(raw_payload, dict) or not isinstance(raw_payload.get("statistics"), dict):
+        return None
+    raw_statistics = raw_payload["statistics"]
+    expected_keys = tuple(_bank_detail_empty_statistics())
+    if any(
+        isinstance(raw_statistics.get(key), bool)
+        or not isinstance(raw_statistics.get(key), int)
+        or raw_statistics.get(key, -1) < 0
+        for key in expected_keys
+    ):
+        return None
+    statistics = {key: int(raw_statistics[key]) for key in expected_keys}
+    if (
+        statistics["transaction_count"]
+        != statistics["expense_transaction_count"] + statistics["income_transaction_count"]
+        or statistics["transaction_count"]
+        != statistics["classified_transaction_count"] + statistics["unclassified_transaction_count"]
+        or statistics["transaction_count"]
+        != statistics["linked_transaction_count"] + statistics["unlinked_transaction_count"]
+    ):
+        return None
+    return statistics
 
 
 def _bank_detail_search_text(row: dict[str, Any]) -> str:

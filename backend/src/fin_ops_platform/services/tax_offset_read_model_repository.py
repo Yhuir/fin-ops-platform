@@ -17,6 +17,11 @@ class TaxOffsetReadModelRepositoryPort:
         payload = self._repository.get_tax_offset_view(scope_key=scope_key)
         return dict(payload) if isinstance(payload, dict) else None
 
+    def tax_offset_statistics_generation_token(self) -> str | None:
+        loader = getattr(self._repository, "tax_offset_statistics_generation_token", None)
+        value = loader() if callable(loader) else None
+        return str(value) if value not in (None, "") else None
+
     def save_tax_offset_read_models(
         self,
         snapshot: dict[str, Any],

@@ -3,8 +3,6 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Callable
 
-from fin_ops_platform.services.read_model_query_gateway import build_fresh_cache_envelope
-from fin_ops_platform.services.tax_offset_read_model_service import TAX_OFFSET_READ_MODEL_SCHEMA_VERSION
 from fin_ops_platform.services.tax_offset_runtime_service import TaxOffsetRuntimeService
 
 
@@ -42,11 +40,6 @@ class TaxOffsetWorkerRebuildExecutor:
             changed_scope_keys=[warmed_scope_key],
             operation="worker_tax_offset_read_model_refresh",
         )
-        self._publish_fresh_cache(
-            scope_key=warmed_scope_key,
-            payload=payload,
-            source_versions=source_versions,
-        )
         return {
             "scope_key": warmed_scope_key,
             "month": month,
@@ -58,35 +51,3 @@ class TaxOffsetWorkerRebuildExecutor:
         if not isinstance(payload, dict):
             raise RuntimeError("Tax offset month payload loader must return a dict.")
         return dict(payload)
-
-    def _publish_fresh_cache(
-        self,
-        *,
-        scope_key: str,
-        payload: dict[str, object],
-        source_versions: dict[str, Any],
-    ) -> None:
-        cached_payload = dict(payload)
-        cached_payload["read_model_status"] = "fresh"
-        cached_payload["read_model_scope_key"] = scope_key
-        cached_payload["source_versions"] = source_versions
-        self._runtime_service.redis_set_json_best_effort(
-            self._runtime_service.redis_cache_key(scope_key, source_versions=source_versions),
-            build_fresh_cache_envelope(
-                cached_payload,
-                scope_key=scope_key,
-                source_versions=source_versions,
-                schema_version=TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
-            ),
-            ttl_seconds=self._runtime_service.redis_ttl_seconds(),
-        )
-        self._runtime_service.redis_set_json_best_effort(
-            self._runtime_service.summary_redis_cache_key(scope_key, source_versions=source_versions),
-            build_fresh_cache_envelope(
-                self._runtime_service.summary_payload(cached_payload, scope_key=scope_key),
-                scope_key=scope_key,
-                source_versions=source_versions,
-                schema_version=TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
-            ),
-            ttl_seconds=self._runtime_service.redis_ttl_seconds(),
-        )

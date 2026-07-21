@@ -216,6 +216,18 @@ type ApiEtcBusinessBatchPayload = {
     pageSize?: number;
     total?: number;
   };
+  statistics?: {
+    invoice_count?: number | null;
+    business_batch_count?: number | null;
+    unsubmitted_batch_count?: number | null;
+    draft_batch_count?: number | null;
+    submitted_batch_count?: number | null;
+    reconciliation_task_count?: number | null;
+    source_file_count?: number | null;
+    imported_invoice_count?: number | null;
+    linked_canonical_invoice_count?: number | null;
+    oa_draft_batch_count?: number | null;
+  } | null;
 };
 
 type ApiEtcBusinessBatchSinglePayload =
@@ -697,6 +709,14 @@ function unwrapEnvelope<T>(payload: T | ApiEnvelope<T>): T {
 
 function numberOrZero(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function optionalCount(value: unknown): number | undefined {
+  if (value === null || value === undefined || value === "") {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
 function mapAuditCounts(payload?: ApiEtcImportAuditCounts | null): ImportPreviewAuditCounts | undefined {
@@ -1385,6 +1405,18 @@ export async function fetchEtcBusinessBatches(query: EtcBusinessBatchQuery = {})
       submitted: payload.counts?.submitted ?? 0,
     },
     items,
+    statistics: payload.statistics ? {
+      invoiceCount: optionalCount(payload.statistics.invoice_count),
+      businessBatchCount: optionalCount(payload.statistics.business_batch_count),
+      unsubmittedBatchCount: optionalCount(payload.statistics.unsubmitted_batch_count),
+      draftBatchCount: optionalCount(payload.statistics.draft_batch_count),
+      submittedBatchCount: optionalCount(payload.statistics.submitted_batch_count),
+      reconciliationTaskCount: optionalCount(payload.statistics.reconciliation_task_count),
+      sourceFileCount: optionalCount(payload.statistics.source_file_count),
+      importedInvoiceCount: optionalCount(payload.statistics.imported_invoice_count),
+      linkedCanonicalInvoiceCount: optionalCount(payload.statistics.linked_canonical_invoice_count),
+      oaDraftBatchCount: optionalCount(payload.statistics.oa_draft_batch_count),
+    } : undefined,
     pagination: {
       page: payload.pagination?.page ?? query.page ?? 1,
       pageSize: payload.pagination?.pageSize ?? payload.pagination?.page_size ?? query.pageSize ?? 100,

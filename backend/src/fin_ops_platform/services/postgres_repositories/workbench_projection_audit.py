@@ -1065,4 +1065,71 @@ _PROOF_QUERIES: tuple[tuple[str, str, str], ...] = (
         "workbench_generation_count_mismatch",
         "Workbench active generation counts do not equal their stored rows, groups, and summary.",
     ),
+    (
+        r"""
+        /* check: workbench_page_statistics */
+        with active_groups as (
+            select group_row.scope_key, group_row.generation_id, group_row.zone, group_row.group_id,
+                   case
+                       when left(group_row.group_id, 5) = 'case:' or left(group_row.group_id, 9) = 'unpaired:'
+                       then group_row.group_id
+                       else 'scope:' || group_row.scope_key || ':' || group_row.group_id
+                   end as logical_group_id
+            from read_model.workbench_groups group_row
+            join read_model.workbench_generations generation
+              on generation.tenant_id = %s
+             and generation.scope_key = group_row.scope_key
+             and generation.generation_id = group_row.generation_id
+             and generation.status = 'active'
+            where group_row.scope_key <> 'all'
+        ), active_members as (
+            select distinct active_groups.zone, active_groups.logical_group_id, member.pane,
+                   coalesce(nullif(member.object_identity_key, ''), member.row_id) as object_identity_key
+            from active_groups
+            join read_model.workbench_group_rows member
+              on member.scope_key = active_groups.scope_key
+             and member.generation_id = active_groups.generation_id
+             and member.zone = active_groups.zone
+             and member.group_id = active_groups.group_id
+            where coalesce(member.row_role, '') <> 'summary'
+        ), expected as (
+            select
+                count(distinct (pane, object_identity_key)) filter (where pane = 'oa')::integer as oa_count,
+                count(distinct (pane, object_identity_key)) filter (where pane = 'bank')::integer as bank_count,
+                count(distinct logical_group_id) filter (where zone = 'paired')::integer as paired_group_count,
+                count(distinct (pane, object_identity_key)) filter (where zone = 'paired' and pane = 'oa')::integer as paired_oa_count,
+                count(distinct (pane, object_identity_key)) filter (where zone = 'paired' and pane = 'bank')::integer as paired_bank_count,
+                count(distinct (pane, object_identity_key)) filter (where zone = 'paired' and pane = 'invoice')::integer as paired_invoice_count,
+                count(distinct (pane, object_identity_key)) filter (where zone = 'unpaired')::integer as unpaired_object_count
+            from active_members
+        ), stored as (
+            select generation_id,
+                   count(*)::integer as stored_row_count,
+                   count(distinct (payload->'page_statistics')::text)::integer as distinct_statistics_count,
+                   (array_agg(payload->'page_statistics' order by zone))[1] as page_statistics
+            from read_model.workbench_generation_stats
+            where scope_key = 'all'
+              and zone in ('paired', 'unpaired')
+              and status_bucket = 'all'
+            group by generation_id
+        )
+        select coalesce(stored.generation_id, 'missing') as subject_id, 'all' as scope_key,
+               stored.stored_row_count, stored.distinct_statistics_count,
+               stored.page_statistics, to_jsonb(expected) as expected_statistics
+        from expected
+        left join stored on true
+        where coalesce(stored.stored_row_count, 0) <> 2
+           or coalesce(stored.distinct_statistics_count, 0) <> 1
+           or (stored.page_statistics->>'oa_count')::integer is distinct from expected.oa_count
+           or (stored.page_statistics->>'bank_transaction_count')::integer is distinct from expected.bank_count
+           or (stored.page_statistics->>'paired_group_count')::integer is distinct from expected.paired_group_count
+           or (stored.page_statistics->>'paired_oa_count')::integer is distinct from expected.paired_oa_count
+           or (stored.page_statistics->>'paired_bank_transaction_count')::integer is distinct from expected.paired_bank_count
+           or (stored.page_statistics->>'paired_invoice_count')::integer is distinct from expected.paired_invoice_count
+           or (stored.page_statistics->>'unpaired_object_count')::integer is distinct from expected.unpaired_object_count
+        limit %s
+        """,
+        "workbench_page_statistics_mismatch",
+        "Workbench page statistics do not equal active generation groups and members.",
+    ),
 )

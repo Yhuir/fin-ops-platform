@@ -44,7 +44,7 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| 银行明细列表/账户/标签 payload | 前端页面 | 必须来自 read model/query port 并带 freshness/status；read model 缺失或非 fresh 时返回 `refreshing/stale/schema_mismatch/missing` 诊断，不回退同步导入扫描 |
+| 银行明细列表/账户/标签 payload | 前端页面 | 必须来自 read model/query port 并带 freshness/status；标题统计由全部已发布 month shard 的 `raw_payload.statistics` 汇总，固定表示页面未筛选完整集合，不随月份、账户、标签、搜索或分页变化；统计与任一 shard 非 fresh 时返回 `statistics=null` 并入队缺失 shard，禁止回读 canonical/统一事实源填数。read model 缺失或非 fresh 时返回 `refreshing/stale/schema_mismatch/missing` 诊断，不回退同步导入扫描 |
 | 页面 Audit 状态 | 标题附件 | integrity/freshness/queue 均通过且列表 read model 明确 fresh 才显示成功；issue 数为样本 |
 | 自动标签规则写入结果 | 前端页面 | 前端优先等待服务端返回的 `operation_barrier_targets`；缺少/未知 read model status 默认按 `refreshing` 处理 |
 | 标签/分类事实写入 | canonical store | `BankDetailsApplicationService` 只依赖显式 `BankTransactionCategoryStorePort.save_bank_transaction_categories(...)`；禁止通过宽 `state_store` 在业务 service 内散写 |

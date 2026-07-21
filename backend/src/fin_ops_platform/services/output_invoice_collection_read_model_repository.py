@@ -21,6 +21,7 @@ class OutputInvoiceCollectionReadModelRepositoryPort:
         sort_direction: str | None = None,
         page: int | str | None = 1,
         page_size: int | str | None = 50,
+        include_statistics: bool = True,
     ) -> dict[str, object] | None:
         payload = self._repository.list_output_invoice_collection_rows(
             month=month,
@@ -32,6 +33,7 @@ class OutputInvoiceCollectionReadModelRepositoryPort:
             sort_direction=sort_direction,
             page=page,
             page_size=page_size,
+            include_statistics=include_statistics,
         )
         return dict(payload) if isinstance(payload, dict) else None
 
@@ -45,11 +47,13 @@ class OutputInvoiceCollectionReadModelRepositoryPort:
         scope_key: str,
         rows: list[dict[str, object]],
         source_versions: dict[str, object] | None = None,
+        statistics_metadata: dict[str, object] | None = None,
     ) -> None:
         self._repository.save_output_invoice_collection_rows(
             scope_key=scope_key,
             rows=rows,
             source_versions=source_versions,
+            statistics_metadata=statistics_metadata,
         )
 
     def mark_output_invoice_collection_scope(
@@ -58,11 +62,13 @@ class OutputInvoiceCollectionReadModelRepositoryPort:
         scope_key: str,
         row_count: int,
         source_versions: dict[str, object] | None = None,
+        statistics_metadata: dict[str, object] | None = None,
     ) -> None:
         self._repository.mark_output_invoice_collection_scope(
             scope_key=scope_key,
             row_count=row_count,
             source_versions=source_versions,
+            statistics_metadata=statistics_metadata,
         )
 
     def prune_output_invoice_collection_scope_shards(self, current_scope_keys: list[str]) -> None:

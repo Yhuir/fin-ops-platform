@@ -245,6 +245,17 @@ const rowsPayload = {
     partialCollectionCount: 1,
     receiptPendingCount: 1,
   },
+  statistics: {
+    invoice_count: 20,
+    linked_oa_invoice_count: 16,
+    linked_income_bank_invoice_count: 14,
+    collected_invoice_count: 12,
+    unlinked_oa_invoice_count: 4,
+    unlinked_bank_invoice_count: 6,
+    uncollected_invoice_count: 8,
+    red_invoice_count: 2,
+    issued_receipt_count: 10,
+  },
   filterConfig: [],
   readModelStatus: "fresh",
   generatedAt: "2026-05-24T00:00:00Z",
@@ -663,6 +674,7 @@ describe("Output invoice collections page", () => {
 
     const page = await screen.findByTestId("output-invoice-collections-page");
     expect(await within(page).findByText("销项发票收款情况数据正在刷新")).toBeInTheDocument();
+    expect(within(page).getByLabelText("销项发票收款情况数据统计")).toHaveTextContent("销项发票—");
     expect(within(page).getByText("当前数据仍在刷新或等待后台任务完成，请稍后重试。")).toBeInTheDocument();
     expect(within(page).queryByText("当前条件下暂无记录。")).not.toBeInTheDocument();
     expect(within(page).queryByText("销项发票收款情况读模型正在刷新，完成后页面会自动重新加载。")).not.toBeInTheDocument();
@@ -738,7 +750,7 @@ describe("Output invoice collections page", () => {
     expect(rowsRequests(fetchMock).length).toBeGreaterThan(1);
   });
 
-  test("keeps title invoice count stable when filters change", async () => {
+  test("keeps page-owned statistics stable when filters change without a title-total request", async () => {
     const user = userEvent.setup();
     const fetchMock = installOutputInvoiceCollectionsFetch({
       rowsPayloadOverride: (url) => {
@@ -755,12 +767,15 @@ describe("Output invoice collections page", () => {
 
     const page = await screen.findByTestId("output-invoice-collections-page");
     await waitFor(() => expect(rowsRequests(fetchMock).length).toBeGreaterThan(0));
-    expect(within(page).getByLabelText("销项发票数量统计")).toHaveTextContent("销项票 20");
+    const initialRowsRequestCount = rowsRequests(fetchMock).length;
+    expect(within(page).getByLabelText("销项发票收款情况数据统计")).toHaveTextContent("销项发票20张");
 
     await user.type(within(page).getByLabelText("搜索销项发票收款情况"), "已收");
     await user.click(within(page).getByRole("button", { name: "查询" }));
-    await waitFor(() => expect(rowsRequests(fetchMock).some((url) => url.searchParams.get("keyword") === "已收")).toBe(true));
-    expect(within(page).getByLabelText("销项发票数量统计")).toHaveTextContent("销项票 20");
+    await waitFor(() => expect(rowsRequests(fetchMock)).toHaveLength(initialRowsRequestCount + 1));
+    expect(rowsRequests(fetchMock).at(-1)?.searchParams.get("keyword")).toBe("已收");
+    expect(rowsRequests(fetchMock).every((url) => url.searchParams.get("page_size") !== "1")).toBe(true);
+    expect(within(page).getByLabelText("销项发票收款情况数据统计")).toHaveTextContent("销项发票20张");
   });
 
   test("admin can run title audit icon and see data relation freshness result", async () => {
@@ -802,7 +817,7 @@ describe("Output invoice collections page", () => {
     expect(initialRowsRequest.searchParams.get("page_size")).toBe("20");
     expect(initialRowsRequest.searchParams.get("month")).toBeNull();
     expect(within(page).getByRole("heading", { name: "销项发票收款情况" })).toBeInTheDocument();
-    expect(within(page).getByLabelText("销项发票数量统计")).toHaveTextContent("销项票 20");
+    expect(within(page).getByLabelText("销项发票收款情况数据统计")).toHaveTextContent("销项发票20张");
     expect(within(page).getByRole("button", { name: "销项发票月份" })).toHaveTextContent("全部发票");
     expect(within(page).queryByText("以销项发票为主对象查看收款状态、收入流水和收据预览。")).not.toBeInTheDocument();
     const refreshButton = within(page).getByRole("button", { name: "刷新" });

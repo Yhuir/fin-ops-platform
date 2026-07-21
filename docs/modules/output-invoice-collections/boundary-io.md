@@ -1,6 +1,6 @@
 # 销项发票收款情况模块边界与 I/O
 
-日期：2026-07-07
+日期：2026-07-22
 
 ## 模块化状态
 
@@ -42,7 +42,7 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| 收款 rows/details | 前端页面 | fresh/status 可见；linked 多销项发票 relation 输出单条 row，`invoiceRelations.summaries` 包含全部成员发票，`invoiceRelations.totalWithTax` 为成员净额；rows summary 的 `invoiceCount` 按唯一销项发票 ID 统计并驱动标题右侧 `销项票 N`，`pagination.total` 仍是表格行数/配对组行数；标题统计表示全量销项票数，不随当前 keyword/filter/month/sort 的表格筛选结果变化 |
+| 收款 rows/details/statistics | 前端页面 | fresh/status 可见；linked 多销项发票 relation 输出单条 row，`invoiceRelations.summaries` 包含全部成员发票，`invoiceRelations.totalWithTax` 为成员净额。主 rows 响应的 `statistics` 从完整 `output_invoice_collection` 投影按唯一发票成员 ID 计算发票、OA/收入流水关联、收款及补集、红字和已开收据；忽略当前 keyword/filter/month/sort/page。`pagination.total` 仍是表格行数/配对组行数；任一 child scope non-fresh 时统计不可用，合法 fresh 空集才返回零。 |
 | 页面 Audit icon | AppHealth operations audit API | admin-only；active canonical 销项发票（含 collapsed members）是 independent expected-set，成员/金额/scope 与共享 relation 的受影响月份双向 edge 必须在同一只读一致性快照中相等；只有结构化 integrity=pass、freshness=fresh、queue=drained 且 database snapshot 已启用才显示成功，unknown/live-query 不得伪装 fresh，问题数显示为 sample |
 | lifecycle/status result | API | 写后可恢复、可审计 |
 | operation barrier targets | 前端页面 | lifecycle/receipt 写成功后用服务端返回 targets 等待 fresh；缺省时才回退当前查询月份 |
@@ -88,6 +88,8 @@
 ## 当前缺口和删除条件
 
 - 红冲 fan-out 和撤回恢复必须在删除旧路径前覆盖。
+- 已删除标题计数的 `page_size=1` 二次请求；标题统计只能消费 rows 主响应，禁止恢复独立 title-total I/O。
+- `output_invoice_collection_statistics_schema_version` 负责生产旧 scope 的统计元数据回填；source version 相同但缺少合法统计元数据时也必须重建，不能走 unchanged skip。批量导出仅第一页读取并校验标题统计，后续页传 `include_statistics=false`，但仍逐页执行 rows freshness/source-version gate。
 
 ## Canonical facts ownership
 

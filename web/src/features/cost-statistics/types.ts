@@ -10,6 +10,19 @@ export type CostSummary = {
   incomeTransactionCount?: number;
 };
 
+export type CostStatisticsPageStatistics = {
+  transactionCount?: number;
+  expenseTransactionCount?: number;
+  incomeTransactionCount?: number;
+  costGroupCount?: number;
+  taggedTransactionCount?: number;
+  untaggedTransactionCount?: number;
+  projectCount?: number;
+  expenseTypeCount?: number;
+  bankTagCount?: number;
+  costTransactionCount?: number;
+};
+
 export type CostTimeRow = {
   transactionId: string;
   tradeTime: string;
@@ -76,6 +89,7 @@ export type CostStatisticsExplorerPage = {
   scope: string;
   view: CostStatisticsView;
   summary: CostSummary;
+  statistics?: CostStatisticsPageStatistics;
   availableYears: string[];
   facets: {
     projects: CostProjectExplorerRow[];

@@ -12,6 +12,7 @@ import {
   FinanceTableRow,
 } from "../components/common/FinanceTable";
 import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
+import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import StatePanel from "../components/common/StatePanel";
 import { useGlobalOperationOverlay } from "../contexts/GlobalOperationOverlayContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
@@ -46,6 +47,7 @@ import type {
   BankDetailExportMode,
   BankDetailReadModelStatus,
   BankDetailTransaction,
+  BankDetailStatistics,
   BankDetailTransactionsResponse,
   BankTransactionDirection,
   BankTransactionCategoryCode,
@@ -1582,6 +1584,7 @@ export default function BankDetailsPage() {
   const activeDatePickerYear = datePickerYearSession.value;
   const setActiveDatePickerYear = datePickerYearSession.setValue;
   const [rows, setRows] = useState<BankDetailTransaction[]>([]);
+  const [statistics, setStatistics] = useState<BankDetailStatistics | null>(null);
   const [rowCount, setRowCount] = useState(0);
   const [paginationModel, setPaginationModel] = useState({
     page: 0,
@@ -1673,6 +1676,7 @@ export default function BankDetailsPage() {
   ) => {
     const nextReadModelStatus = normalizeReadModelStatus(payload.readModelStatus);
     setTransactionsReadModelStatus(nextReadModelStatus);
+    setStatistics(nextReadModelStatus === "fresh" ? payload.statistics ?? null : null);
     if (nextReadModelStatus !== "fresh" && payload.rows.length === 0) {
       return;
     }
@@ -1770,6 +1774,7 @@ export default function BankDetailsPage() {
     if (!selectedAccountKey) {
       setRows([]);
       setRowCount(0);
+      setStatistics(null);
       setCategoryFilterSnapshot({
         queryKey: "",
         totalCount: 0,
@@ -1828,6 +1833,7 @@ export default function BankDetailsPage() {
       })
       .catch((caught) => {
         if (!isAbortLikeError(caught)) {
+          setStatistics(null);
           setError(caught instanceof Error ? caught.message : "银行流水加载失败。");
         }
       })
@@ -2415,14 +2421,34 @@ export default function BankDetailsPage() {
 
   const datePickerYears = createYearOptions(activeDatePickerYear);
   const selectedDateFilterLabel = dateFilterLabel(dateFilter);
-  const titleAccessory = canAdminAccess ? (
-    <PageBusinessAuditIcon
-      ariaLabel="Audit 银行明细"
-      pageKey="bank-details"
-      label="银行明细"
-      readModelStatus={readModelStatus}
-    />
-  ) : null;
+  const visibleStatistics = readModelStatus === "fresh" ? statistics : null;
+  const titleAccessory = (
+    <div className="page-title-accessory-group">
+      <PageStatisticsPopover
+        ariaLabel="银行明细数据统计"
+        loading={loading && !hasTransactionPayloadRef.current}
+        coreItems={[
+          { label: "流水", value: visibleStatistics?.transactionCount, unit: "笔" },
+          { label: "支出", value: visibleStatistics?.expenseTransactionCount, unit: "笔", tone: "expense" },
+          { label: "收入", value: visibleStatistics?.incomeTransactionCount, unit: "笔", tone: "income" },
+        ]}
+        detailItems={[
+          { label: "已分类", value: visibleStatistics?.classifiedTransactionCount, unit: "笔" },
+          { label: "未分类", value: visibleStatistics?.unclassifiedTransactionCount, unit: "笔", tone: "warning" },
+          { label: "已关联", value: visibleStatistics?.linkedTransactionCount, unit: "笔", tone: "success" },
+          { label: "未关联", value: visibleStatistics?.unlinkedTransactionCount, unit: "笔", tone: "warning" },
+        ]}
+      />
+      {canAdminAccess ? (
+        <PageBusinessAuditIcon
+          ariaLabel="Audit 银行明细"
+          pageKey="bank-details"
+          label="银行明细"
+          readModelStatus={readModelStatus}
+        />
+      ) : null}
+    </div>
+  );
 
   return (
     <div className="bank-details-page" data-testid="bank-details-page">

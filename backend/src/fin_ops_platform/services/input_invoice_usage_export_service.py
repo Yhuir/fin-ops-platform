@@ -160,6 +160,7 @@ class InputInvoiceUsageExportService:
                 sort_direction=sort_direction or "desc",
                 page=page,
                 page_size=INPUT_INVOICE_USAGE_EXPORT_PAGE_SIZE,
+                include_statistics=page == 1,
             )
             if not isinstance(payload, dict):
                 raise InputInvoiceUsageExportError(

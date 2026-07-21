@@ -133,11 +133,16 @@ class SearchPendingSqlProjectionBuilder:
             scope_key=f"{normalized_direction}:{normalized_filter}:{month}",
             rows=rows,
             source_versions=source_versions,
+            statistics_metadata=_pending_invoice_statistics_metadata(
+                rows,
+                direction=normalized_direction,
+                scope_month=month,
+            ),
         )
         return {"scope_key": f"{normalized_direction}:{normalized_filter}:{month}", "row_count": len(rows), "source_versions": source_versions}
 
     def mark_pending_invoice_scope_empty(self, scope_key: str) -> dict[str, object]:
-        normalized_direction, normalized_filter, _month = _parse_pending_invoice_scope_key(scope_key)
+        normalized_direction, normalized_filter, month = _parse_pending_invoice_scope_key(scope_key)
         if normalized_direction not in {"expense", "income"}:
             raise ValueError("pending invoice direction must be expense or income.")
         if normalized_filter not in _pending_invoice_filters_for_direction(normalized_direction):
@@ -150,6 +155,11 @@ class SearchPendingSqlProjectionBuilder:
             scope_key=normalized_scope_key,
             row_count=0,
             source_versions=self._pending_invoice_source_versions(),
+            statistics_metadata=_pending_invoice_statistics_metadata(
+                [],
+                direction=normalized_direction,
+                scope_month=month,
+            ),
         )
         return {"scope_key": normalized_scope_key, "row_count": 0}
 
@@ -1020,6 +1030,104 @@ def _dedupe_preserve_order(values: object) -> list[str]:
         seen.add(normalized)
         result.append(normalized)
     return result
+
+
+def _pending_invoice_statistics_metadata(
+    rows: list[dict[str, object]],
+    *,
+    direction: str,
+    scope_month: str | None,
+) -> dict[str, object]:
+    members: dict[str, dict[str, object]] = {}
+    for index, raw_row in enumerate(rows):
+        payload = raw_row.get("payload") if isinstance(raw_row.get("payload"), dict) else raw_row
+        if not isinstance(payload, dict):
+            continue
+        bank = payload.get("bank_transaction") if isinstance(payload.get("bank_transaction"), dict) else {}
+        banks = payload.get("bank_transactions") if isinstance(payload.get("bank_transactions"), dict) else {}
+        summaries = banks.get("summaries") if isinstance(banks.get("summaries"), list) else []
+        if not summaries:
+            summaries = [bank]
+        oa = payload.get("oa") if isinstance(payload.get("oa"), dict) else {}
+        invoices = payload.get("input_invoices") if isinstance(payload.get("input_invoices"), dict) else {}
+        status = (
+            payload.get("invoice_acquisition_status")
+            if isinstance(payload.get("invoice_acquisition_status"), dict)
+            else {}
+        )
+        linked_oa = bool(oa.get("primary")) or bool(oa.get("summaries"))
+        linked_invoice = bool(invoices.get("primary")) or bool(invoices.get("summaries"))
+        status_code = str(status.get("code") or "")
+        row_direction = str(payload.get("direction") or raw_row.get("direction") or direction)
+        for summary in summaries:
+            item = summary if isinstance(summary, dict) else {}
+            transaction_id = str(
+                item.get("id")
+                or item.get("transaction_id")
+                or bank.get("id")
+                or payload.get("id")
+                or raw_row.get("row_id")
+                or f"row:{index}"
+            ).strip()
+            if not transaction_id:
+                continue
+            transaction_month = str(
+                item.get("trade_time")
+                or item.get("booked_date")
+                or bank.get("trade_time")
+                or bank.get("booked_date")
+                or ""
+            )[:7]
+            if scope_month and transaction_month and transaction_month != scope_month:
+                continue
+            flags = members.setdefault(
+                transaction_id,
+                {
+                    "transaction_id": transaction_id,
+                    "direction": row_direction,
+                    "linked_oa": False,
+                    "linked_invoice": False,
+                    "pending_invoice": False,
+                    "no_invoice_required": False,
+                    "cash_income": False,
+                },
+            )
+            flags["direction"] = str(flags.get("direction") or row_direction)
+            flags["linked_oa"] = bool(flags["linked_oa"] or linked_oa)
+            flags["linked_invoice"] = bool(flags["linked_invoice"] or linked_invoice)
+            flags["pending_invoice"] = bool(
+                flags["pending_invoice"]
+                or status_code in {"paid_pending_invoice", "paid_pending_future_invoice", "income_pending_invoice"}
+            )
+            flags["no_invoice_required"] = bool(
+                flags["no_invoice_required"]
+                or status_code in {"no_invoice_required", "income_no_invoice_required"}
+            )
+            flags["cash_income"] = bool(flags["cash_income"] or status_code == "cash_income")
+    statistics = _pending_invoice_statistics_from_members(members)
+    return {"statistics": statistics}
+
+
+def _pending_invoice_statistics_from_members(
+    members: dict[str, dict[str, object]],
+) -> dict[str, int]:
+    values = list(members.values())
+    return {
+        "bank_transaction_count": len(values),
+        "expense_transaction_count": sum(item.get("direction") == "expense" for item in values),
+        "income_transaction_count": sum(item.get("direction") == "income" for item in values),
+        "found_invoice_transaction_count": sum(bool(item.get("linked_invoice")) for item in values),
+        "pending_invoice_transaction_count": sum(bool(item.get("pending_invoice")) for item in values),
+        "no_invoice_required_transaction_count": sum(bool(item.get("no_invoice_required")) for item in values),
+        "cash_income_transaction_count": sum(bool(item.get("cash_income")) for item in values),
+        "linked_oa_transaction_count": sum(bool(item.get("linked_oa")) for item in values),
+        "linked_input_invoice_transaction_count": sum(
+            item.get("direction") == "expense" and bool(item.get("linked_invoice")) for item in values
+        ),
+        "linked_output_invoice_transaction_count": sum(
+            item.get("direction") == "income" and bool(item.get("linked_invoice")) for item in values
+        ),
+    }
 
 
 def _pending_invoice_filters_for_direction(direction: str) -> set[str]:

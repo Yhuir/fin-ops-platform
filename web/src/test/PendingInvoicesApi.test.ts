@@ -188,6 +188,13 @@ describe("pending invoices and tag settings API mapping", () => {
           excluded_direction_rows: 75,
         },
       },
+      statistics: {
+        bank_transaction_count: "10000",
+        found_invoice_transaction_count: 6200,
+        pending_invoice_transaction_count: 3800,
+        expense_transaction_count: -1,
+        income_transaction_count: 2.5,
+      },
       read_model_status: "fresh",
       tag_dictionary: {
         version: 9,
@@ -233,6 +240,13 @@ describe("pending invoices and tag settings API mapping", () => {
       currentDirectionRows: 356,
       excludedDirectionRows: 75,
     });
+    expect(payload.statistics).toEqual(expect.objectContaining({
+      bankTransactionCount: 10000,
+      foundInvoiceTransactionCount: 6200,
+      pendingInvoiceTransactionCount: 3800,
+      expenseTransactionCount: undefined,
+      incomeTransactionCount: undefined,
+    }));
     expect(payload.rows[0]).toMatchObject({
       id: "txn_001",
       bankTransaction: {

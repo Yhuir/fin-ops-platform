@@ -10,7 +10,6 @@ from fin_ops_platform.services.oa_attachment_invoice_cache import attachment_inv
 from fin_ops_platform.services.postgres_repositories.common import month_start, row_payload
 from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
-from fin_ops_platform.services.read_model_query_gateway import build_fresh_cache_envelope
 from fin_ops_platform.services.tax_offset_read_model_repository import TaxOffsetReadModelRepositoryPort
 from fin_ops_platform.services.tax_offset_read_model_service import (
     TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
@@ -69,6 +68,7 @@ class TaxOffsetSqlProjectionBuilder:
         if not MONTH_RE.match(month):
             raise ValueError("tax offset SQL projection scope_key must be a month shard YYYY-MM.")
         payload = self._build_tax_payload(month)
+        payload["statistics"] = _tax_offset_scope_statistics(payload)
         source_versions = self._source_versions()
         service = TaxOffsetReadModelService()
         read_model = service.upsert_read_model(
@@ -83,20 +83,6 @@ class TaxOffsetSqlProjectionBuilder:
         self._tax_offset_read_model_repository.save_tax_offset_read_models(
             service.snapshot_scope_keys([warmed_scope_key]),
             changed_scope_keys={warmed_scope_key},
-        )
-        self._set_redis_json(
-            f"tax_offset:month:{warmed_scope_key}",
-            build_fresh_cache_envelope(
-                {
-                    **payload,
-                    "read_model_status": "fresh",
-                    "read_model_scope_key": warmed_scope_key,
-                    "source_versions": source_versions,
-                },
-                scope_key=warmed_scope_key,
-                source_versions=source_versions,
-                schema_version=TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
-            ),
         )
         return {
             "scope_key": warmed_scope_key,
@@ -191,10 +177,6 @@ class TaxOffsetSqlProjectionBuilder:
             for row in rows
         ]
 
-    def _set_redis_json(self, key: str, value: dict[str, Any]) -> None:
-        set_json = getattr(self._redis_helper, "set_json", None)
-        if callable(set_json):
-            set_json(key, value, ttl_seconds=120)
 
 
 def _tax_invoice_item(row: dict[str, Any], *, output: bool) -> dict[str, Any]:
@@ -220,6 +202,27 @@ def _tax_invoice_item(row: dict[str, Any], *, output: bool) -> dict[str, Any]:
         "seller_name": row.get("seller_name") or "",
         "seller_tax_no": row.get("seller_tax_no"),
         "risk_level": (row_payload(row, "raw_payload") if isinstance(row_payload(row, "raw_payload"), dict) else {}).get("risk_level") or "待评估",
+    }
+
+
+def _tax_offset_scope_statistics(payload: dict[str, Any]) -> dict[str, int]:
+    input_count = len(list(payload.get("input_plan_items") or []))
+    output_count = len(list(payload.get("output_items") or []))
+    certification_count = len(list(payload.get("certified_items") or []))
+    matched_count = len(list(payload.get("certified_matched_rows") or []))
+    selected_count = len(set(payload.get("default_selected_input_ids") or [])) + len(
+        set(payload.get("default_selected_output_ids") or [])
+    )
+    return {
+        "input_invoice_count": input_count,
+        "output_invoice_count": output_count,
+        "certification_record_count": certification_count,
+        "matched_certification_count": matched_count,
+        "unmatched_certification_count": max(certification_count - matched_count, 0),
+        "out_of_scope_certification_count": len(list(payload.get("certified_outside_plan_rows") or [])),
+        "deductible_invoice_count": input_count,
+        "selected_invoice_count": selected_count,
+        "unselected_invoice_count": max(input_count + output_count - selected_count, 0),
     }
 
 

@@ -70,7 +70,12 @@ class PendingInvoiceReadModelService:
         self._settings_provider = settings_provider or (lambda: {})
         self._source_versions_provider = source_versions_provider
 
-    def rows(self, query: dict[str, list[str]]) -> dict[str, Any]:
+    def rows(
+        self,
+        query: dict[str, list[str]],
+        *,
+        include_statistics: bool = True,
+    ) -> dict[str, Any]:
         direction = str(query.get("direction", ["expense"])[0] or "expense").strip()
         filter_name = str(query.get("filter", ["all"])[0] or "all").strip() or "all"
         self._validate_direction_filter(direction=direction, filter_name=filter_name)
@@ -87,6 +92,7 @@ class PendingInvoiceReadModelService:
                 sort_direction=query.get("sort_direction", [None])[0],
                 page=query.get("page", [1])[0],
                 page_size=query.get("page_size", [50])[0],
+                include_statistics=include_statistics,
             )
         except ValueError as exc:
             raise PendingInvoiceError("invalid_pending_invoice_query", str(exc)) from exc
@@ -108,6 +114,8 @@ class PendingInvoiceReadModelService:
                 source_payload=payload,
             )
 
+        if include_statistics:
+            self._gate_statistics(payload)
         if refresh_status != "fresh":
             return self.payload_response(payload, read_model_status=refresh_status, scope_key=scope_key)
 
@@ -132,6 +140,38 @@ class PendingInvoiceReadModelService:
 
         return self.payload_response(payload, read_model_status=refresh_status, scope_key=scope_key)
 
+    def _gate_statistics(self, payload: dict[str, Any]) -> None:
+        status = str(payload.get("statistics_status") or "stale")
+        actual_by_scope = (
+            payload.get("statistics_source_versions_by_scope")
+            if isinstance(payload.get("statistics_source_versions_by_scope"), dict)
+            else {}
+        )
+        stale_scope_keys: list[str] = []
+        for direction in ("expense", "income"):
+            scope_key = f"{direction}:all"
+            actual_versions = (
+                actual_by_scope.get(scope_key)
+                if isinstance(actual_by_scope.get(scope_key), dict)
+                else {}
+            )
+            expected_versions = require_expected_source_versions(
+                self.expected_source_versions(
+                    query={"direction": [direction], "filter": ["all"]},
+                    payload={"direction": direction, "filter": "all"},
+                ),
+                context=f"pending_invoice_statistics:{direction}",
+            )
+            if source_version_mismatch_reasons(expected=expected_versions, actual=actual_versions):
+                stale_scope_keys.append(scope_key)
+        if status == "fresh" and isinstance(payload.get("statistics"), dict) and not stale_scope_keys:
+            return
+        payload["statistics"] = None
+        payload["statistics_status"] = "refreshing"
+        refresh_scope_keys = stale_scope_keys or ["expense:all", "income:all"]
+        for scope_key in refresh_scope_keys:
+            self.enqueue_refresh(scope_key, reason="api_statistics_source_versions_stale")
+
     def all_rows(self, query: dict[str, list[str]]) -> dict[str, Any]:
         page_size = 200
         first_query = {key: list(values) for key, values in query.items()}
@@ -155,7 +195,7 @@ class PendingInvoiceReadModelService:
             page_query = {key: list(values) for key, values in query.items()}
             page_query["page"] = [str(page)]
             page_query["page_size"] = [str(page_size)]
-            page_payload = self.rows(page_query)
+            page_payload = self.rows(page_query, include_statistics=False)
             if page_payload.get("read_model_status") != "fresh":
                 return page_payload
             page_rows = list(page_payload.get("rows") or [])
@@ -169,6 +209,8 @@ class PendingInvoiceReadModelService:
             "rows": rows,
             "pagination": {"page": 1, "page_size": page_size, "total": total},
             "summary": first_payload.get("summary") if isinstance(first_payload.get("summary"), dict) else {},
+            "statistics": first_payload.get("statistics") if isinstance(first_payload.get("statistics"), dict) else None,
+            "statistics_status": first_payload.get("statistics_status") or "refreshing",
             "read_model_status": "fresh",
             "read_model_scope_key": first_payload.get("read_model_scope_key"),
         }
@@ -320,6 +362,8 @@ class PendingInvoiceReadModelService:
                     source_payload=source_payload,
                 ),
             },
+            "statistics": None,
+            "statistics_status": "refreshing",
             "bank_transaction_tags": {},
             "bank_transaction_tags_version": 1,
             "read_model_status": "refreshing",

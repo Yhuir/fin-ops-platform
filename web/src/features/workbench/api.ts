@@ -182,6 +182,23 @@ type ApiWorkbenchSummaryPayload = {
   oa_status?: ApiWorkbenchPayload["oa_status"];
   invoice_inventory?: ApiWorkbenchInvoiceInventory;
   summary: ApiWorkbenchPayload["summary"];
+  statistics?: {
+    oa_count?: number | null;
+    bank_transaction_count?: number | null;
+    input_invoice_count?: number | null;
+    output_invoice_count?: number | null;
+    paired_group_count?: number | null;
+    unpaired_object_count?: number | null;
+    expense_transaction_count?: number | null;
+    income_transaction_count?: number | null;
+    paired_oa_count?: number | null;
+    paired_bank_transaction_count?: number | null;
+    paired_invoice_count?: number | null;
+    incomplete_group_count?: number | null;
+    missing_oa_group_count?: number | null;
+    missing_bank_group_count?: number | null;
+    missing_invoice_group_count?: number | null;
+  } | null;
 };
 
 type ApiWorkbenchGroupsPayload = {
@@ -1911,6 +1928,14 @@ function toCount(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
+function toOptionalCount(value: unknown): number | undefined {
+  if (value === null || value === undefined || value === "") {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
 function mapOaManualSearchItem(item: ApiOaManualSearchItem): OaManualSearchItem {
   return {
     date: toDisplayValue(item.date),
@@ -2560,6 +2585,23 @@ export async function fetchWorkbenchInitialPage(
       paired: mapWorkbenchZonePage(pairedPayload),
       unpaired: mapWorkbenchZonePage(unpairedPayload),
     },
+    statistics: payload.statistics ? {
+      oaCount: toOptionalCount(payload.statistics.oa_count),
+      bankTransactionCount: toOptionalCount(payload.statistics.bank_transaction_count),
+      inputInvoiceCount: toOptionalCount(payload.statistics.input_invoice_count),
+      outputInvoiceCount: toOptionalCount(payload.statistics.output_invoice_count),
+      pairedGroupCount: toOptionalCount(payload.statistics.paired_group_count),
+      unpairedObjectCount: toOptionalCount(payload.statistics.unpaired_object_count),
+      expenseTransactionCount: toOptionalCount(payload.statistics.expense_transaction_count),
+      incomeTransactionCount: toOptionalCount(payload.statistics.income_transaction_count),
+      pairedOaCount: toOptionalCount(payload.statistics.paired_oa_count),
+      pairedBankTransactionCount: toOptionalCount(payload.statistics.paired_bank_transaction_count),
+      pairedInvoiceCount: toOptionalCount(payload.statistics.paired_invoice_count),
+      incompleteGroupCount: toOptionalCount(payload.statistics.incomplete_group_count),
+      missingOaGroupCount: toOptionalCount(payload.statistics.missing_oa_group_count),
+      missingBankGroupCount: toOptionalCount(payload.statistics.missing_bank_group_count),
+      missingInvoiceGroupCount: toOptionalCount(payload.statistics.missing_invoice_group_count),
+    } : undefined,
   };
 }
 

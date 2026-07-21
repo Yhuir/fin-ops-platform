@@ -1,6 +1,6 @@
 # 进项发票使用情况模块边界与 I/O
 
-日期：2026-07-07
+日期：2026-07-22
 
 ## 模块化状态
 
@@ -43,7 +43,7 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| 使用情况 rows/details | 前端页面 | fresh/status 可见；confirmed relation group 是优先行边界，组内发票/OA/流水各显示一次合计与 `+N`，未 linked 发票按 identity 兜底；all scope 读取多个 month shard 时按 read model row id 去重；rows summary 的 `invoiceCount` 按唯一进项发票 ID 统计并驱动标题右侧 `进项票 N`，`pagination.total` 仍是表格行数/配对组行数；标题统计表示全量进项票数，不随当前 keyword/filter/month/sort 的表格筛选结果变化 |
+| 使用情况 rows/details/statistics | 前端页面 | fresh/status 可见；confirmed relation group 是优先行边界，组内发票/OA/流水各显示一次合计与 `+N`，未 linked 发票按 identity 兜底；all scope 读取多个 month shard 时按 read model row id 去重。主 rows 响应的 `statistics` 从完整 `input_invoice_usage` 投影按唯一发票成员 ID 计算发票、OA/流水关联、付款及补集，并补充本模块 OA reverse 批次数；忽略当前 keyword/filter/month/sort/page。`pagination.total` 仍是表格行数/配对组行数；任一 child scope non-fresh 时统计不可用，合法 fresh 空集才返回零。 |
 | 页面 Audit icon | AppHealth operations audit API | admin-only；active canonical 进项发票（含 collapsed members）是 independent expected-set，成员/金额/scope 与共享 relation 的受影响月份双向 edge 必须在同一只读一致性快照中相等；只有结构化 integrity=pass、freshness=fresh、queue=drained 且 database snapshot 已启用才显示成功，unknown 不得伪装 fresh，问题数显示为 sample |
 | 支付状态 | rows/filter/export/read model | 只消费 `workbench_relation` distribution 中 confirmed/linked 关系；多 OA/多流水用 linked 合计与发票价税合计比对；无 active relation 或历史 candidate 兼容值不参与 `已付款` 判断 |
 | OA reverse 本地状态 | API/OA drawer | draft/staged/submitted/not_submitted 只落 `app.input_invoice_usage_oa_reverse_batches`，前端立即释放按钮；不等待 `input_invoice_usage` operation barrier |
@@ -88,6 +88,8 @@
 ## 当前缺口和删除条件
 
 - OA reverse 变更必须覆盖权限、凭证、审计和 read model recovery。
+- 已删除标题计数的 `page_size=1` 二次请求；标题统计只能消费 rows 主响应，禁止恢复独立 title-total I/O。
+- `input_invoice_usage_statistics_schema_version` 负责生产旧 scope 的统计元数据回填；source version 相同但缺少合法统计元数据时也必须重建，不能走 unchanged skip。批量导出仅第一页读取并校验标题统计，后续页传 `include_statistics=false`，但仍逐页执行 rows freshness/source-version gate。
 
 ## Canonical facts ownership
 

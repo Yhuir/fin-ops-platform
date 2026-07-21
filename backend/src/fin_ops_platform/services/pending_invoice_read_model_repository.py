@@ -22,6 +22,7 @@ class PendingInvoiceReadModelRepositoryPort:
         sort_direction: str | None = None,
         page: int | str = 1,
         page_size: int | str = 50,
+        include_statistics: bool = True,
     ) -> dict[str, object] | None:
         payload = self._repository.list_pending_invoice_rows(
             direction=direction,
@@ -34,6 +35,7 @@ class PendingInvoiceReadModelRepositoryPort:
             sort_direction=sort_direction,
             page=page,
             page_size=page_size,
+            include_statistics=include_statistics,
         )
         return dict(payload) if isinstance(payload, dict) else None
 
@@ -117,11 +119,13 @@ class PendingInvoiceReadModelRepositoryPort:
         scope_key: str,
         rows: list[dict[str, object]],
         source_versions: dict[str, object] | None = None,
+        statistics_metadata: dict[str, object] | None = None,
     ) -> None:
         self._repository.save_pending_invoice_rows(
             scope_key=scope_key,
             rows=rows,
             source_versions=source_versions,
+            statistics_metadata=statistics_metadata,
         )
 
     def mark_pending_invoice_scope(
@@ -130,9 +134,11 @@ class PendingInvoiceReadModelRepositoryPort:
         scope_key: str,
         row_count: int,
         source_versions: dict[str, object] | None = None,
+        statistics_metadata: dict[str, object] | None = None,
     ) -> None:
         self._repository.mark_pending_invoice_scope(
             scope_key=scope_key,
             row_count=row_count,
             source_versions=source_versions,
+            statistics_metadata=statistics_metadata,
         )

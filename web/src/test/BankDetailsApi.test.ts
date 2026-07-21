@@ -56,6 +56,14 @@ describe("bank details API", () => {
             account_last4: "6386",
           },
         ],
+        statistics: {
+          transaction_count: "12345",
+          expense_transaction_count: 7000,
+          income_transaction_count: 5345,
+          classified_transaction_count: -1,
+          unclassified_transaction_count: 1.5,
+        },
+        read_model_status: "fresh",
       }), { status: 200, headers: { "Content-Type": "application/json" } })),
     );
 
@@ -79,6 +87,13 @@ describe("bank details API", () => {
       relationCaseId: null,
       relationStatus: "",
     });
+    expect(payload.statistics).toEqual(expect.objectContaining({
+      transactionCount: 12345,
+      expenseTransactionCount: 7000,
+      incomeTransactionCount: 5345,
+      classifiedTransactionCount: undefined,
+      unclassifiedTransactionCount: undefined,
+    }));
   });
 
   test("maps auto category and bank text display fields from transaction rows", async () => {

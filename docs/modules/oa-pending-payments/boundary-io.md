@@ -127,3 +127,11 @@
 4. enqueue 低优先级 `oa_pending_payment:all`，等待所有月份 dirty/outbox drain。
 5. 验证 Page Audit pass、writer inventory、queue/worker health，再执行 1000 次 API 与 200 次 mutation 性能验收。
 6. 未达到门槛则回滚 release/worker 配置；新 additive 表可保留，但运行时不得启用旧 live fallback。
+
+## 页面完整性统计合同
+
+- `GET /api/oa-pending-payments` 的既有主响应增加 `statistics`，统计严格来自 OA 待付款页面自身投影时实际拉取的 OA、银行流水和进项发票全集，不读取统一事实源的汇总结果，也不受搜索、筛选、排序或分页影响。
+- Worker 在同一次月份投影中拉取完整流水/进项库存，按稳定业务身份生成数量和 membership digest；流水 digest 同时绑定 direction，发票 digest 同时绑定 invoice type。统计与 digest 随月份分片原子发布到既有 `raw_payload.statistics` / `source_versions`，不新增表。
+- API freshness 热路径只读取已发布 scope metadata、dirty/outbox 和 source version，不得重新扫描 `app.bank_transactions` / `app.invoices`。全量查询只有在所有相关分片和覆盖 digest 均存在且 scope fresh 时返回统计，否则 `statistics=null` 并沿用既有 refreshing/refresh I/O，禁止用旧统计或 live fallback 冒充 fresh。
+- 跨 scope 重复 row identity 检查属于独立 Page Audit/发布质量约束，不在正常页面 freshness 请求中执行全表 `GROUP BY`；月度页面的全量标题统计只重复校验紧凑 scope 元数据和版本令牌。
+- Page Audit 在独立只读查询中从 canonical facts、关系事实和投影行重算数量及 membership digest，并与已发布值比较；它只证明页面拉取和投影完整性，不把统一事实源汇总值作为页面统计输入。

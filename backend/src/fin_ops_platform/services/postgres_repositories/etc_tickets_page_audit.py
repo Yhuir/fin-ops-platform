@@ -82,6 +82,14 @@ def _audit_etc_tickets_snapshot(
     active_tasks = [row for row in tasks if _text(row.get("status")) != "deleted"]
     active_files = [row for row in files if _text(row.get("status")) != "deleted"]
     active_invoices = [row for row in invoices if _text(row.get("status")) != "deleted"]
+    page_statistics = _etc_page_statistics(
+        batches=batches,
+        tasks=tasks,
+        files=files,
+        invoices=invoices,
+        import_batches=import_batches,
+        invoice_links=invoice_links,
+    )
     return {
         "mode": "etc-tickets-page-audit",
         "tenant_id": tenant_id,
@@ -107,6 +115,7 @@ def _audit_etc_tickets_snapshot(
             "active_invoice_link_count": sum(
                 1 for row in invoice_links if _text(row.get("link_status")) == "active"
             ),
+            "page_statistics": page_statistics,
             "etc_import_job_count": len(import_jobs),
             "covered_failed_import_job_count": sum(
                 1
@@ -211,6 +220,7 @@ def _etc_tickets_audit_contract(*, snapshot_consistency: str, database_snapshot:
                 "task_file_bidirectional_membership",
                 "card_ticket_reconciled_supplement_reference_and_owner_closure",
                 "ETC_import_job_queue_and_terminal_failure_gate",
+                "page_statistics_independent_recalculation",
             ],
             "snapshot_consistency": snapshot_consistency,
             "database_snapshot": database_snapshot,
@@ -227,6 +237,67 @@ def _etc_tickets_audit_contract(*, snapshot_consistency: str, database_snapshot:
                 "external ETC archive/OA completeness and downstream Workbench relation completeness are not inferred."
             ),
             "write_policy": "read_only",
+    }
+
+
+def _etc_page_statistics(
+    *,
+    batches: list[dict[str, Any]],
+    tasks: list[dict[str, Any]],
+    files: list[dict[str, Any]],
+    invoices: list[dict[str, Any]],
+    import_batches: list[dict[str, Any]],
+    invoice_links: list[dict[str, Any]],
+) -> dict[str, int]:
+    page_batches = [
+        row for row in batches if _text(row.get("status")) not in {"deleted", "superseded"}
+    ]
+    active_invoice_ids = {
+        _text(row.get("etc_invoice_id"))
+        for row in invoices
+        if _text(row.get("status")) != "deleted" and _text(row.get("etc_invoice_id"))
+    }
+    imported_invoice_ids = {
+        invoice_id
+        for row in import_batches
+        if _text(row.get("status")) != "deleted"
+        for invoice_id in _text_set(_payload(row).get("invoice_ids"))
+        if invoice_id in active_invoice_ids
+    }
+    return {
+        "invoice_count": len(active_invoice_ids),
+        "business_batch_count": len(page_batches),
+        "unsubmitted_batch_count": sum(
+            1
+            for row in page_batches
+            if _text(row.get("status"))
+            not in {"oa_confirmation_pending", "oa_submitted", "manually_marked_submitted", "closed"}
+        ),
+        "draft_batch_count": sum(
+            1 for row in page_batches if _text(row.get("status")) == "oa_confirmation_pending"
+        ),
+        "submitted_batch_count": sum(
+            1
+            for row in page_batches
+            if _text(row.get("status")) in {"oa_submitted", "manually_marked_submitted", "closed"}
+        ),
+        "reconciliation_task_count": sum(
+            1 for row in tasks if _text(row.get("status")) != "deleted"
+        ),
+        "source_file_count": sum(
+            1 for row in files if _text(row.get("status")) != "deleted"
+        ),
+        "imported_invoice_count": len(imported_invoice_ids),
+        "linked_canonical_invoice_count": len(
+            {
+                _text(row.get("etc_invoice_id"))
+                for row in invoice_links
+                if _text(row.get("link_status")) == "active" and _text(row.get("etc_invoice_id"))
+            }
+        ),
+        "oa_draft_batch_count": sum(
+            1 for row in page_batches if _text(_payload(row).get("oa_draft_id"))
+        ),
     }
 
 

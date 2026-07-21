@@ -90,6 +90,13 @@ describe("etc api", () => {
             ok: true,
             data: {
               counts: { unsubmitted: 0, staged: 1, submitted: 0 },
+              statistics: {
+                invoice_count: "10000",
+                business_batch_count: 25,
+                submitted_batch_count: 20,
+                unsubmitted_batch_count: -1,
+                draft_batch_count: 1.25,
+              },
               items: [
                 {
                   id: "etc_business_batch_0001",
@@ -130,6 +137,13 @@ describe("etc api", () => {
       expect.objectContaining({ method: "GET", credentials: "include" }),
     );
     expect(result.counts).toEqual({ unsubmitted: 0, staged: 1, submitted: 0 });
+    expect(result.statistics).toEqual(expect.objectContaining({
+      invoiceCount: 10000,
+      businessBatchCount: 25,
+      submittedBatchCount: 20,
+      unsubmittedBatchCount: undefined,
+      draftBatchCount: undefined,
+    }));
     expect(result.items[0]).toMatchObject({
       businessBatchId: "etc_business_batch_0001",
       taskId: "etc-recon-task-001",

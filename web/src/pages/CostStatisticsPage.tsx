@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 
 import { formatMonthLabel } from "../components/MonthPicker";
 import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
+import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import CostExplorerList from "../components/cost-statistics/CostExplorerList";
 import CostStatisticsTagRulesDrawer from "../components/cost-statistics/CostStatisticsTagRulesDrawer";
 import ExportCenterModal, {
@@ -427,6 +428,7 @@ export default function CostStatisticsPage() {
   const setTimeScopeMonth = (value: SetStateAction<string>) => setCostSessionField("timeScopeMonth", value);
 
   const [loadedExplorer, setLoadedExplorer] = useState<LoadedCostStatisticsExplorer | null>(null);
+  const [pageStatistics, setPageStatistics] = useState<CostStatisticsExplorerPage["statistics"]>(undefined);
   const [exportReferenceData, setExportReferenceData] = useState<CostStatisticsExportReferenceData | null>(null);
   const [transactionDetail, setTransactionDetail] = useState<CostTransactionDetail | null>(null);
   const [isExplorerLoading, setIsExplorerLoading] = useState(true);
@@ -893,10 +895,12 @@ export default function CostStatisticsPage() {
         const request = JSON.parse(explorerRequestKey) as CostStatisticsExplorerPageRequest;
         const payload = await fetchCostStatisticsExplorerPage({ ...request, signal: controller.signal });
         if (!controller.signal.aborted) {
+          setPageStatistics(payload.readModelStatus === "fresh" ? payload.statistics : undefined);
           setLoadedExplorer({ requestKey: explorerRequestKey, payload });
         }
       } catch (caught) {
         if (!controller.signal.aborted) {
+          setPageStatistics(undefined);
           setLoadError(getCostStatisticsLoadErrorMessage(caught));
         }
       } finally {
@@ -1697,14 +1701,37 @@ export default function CostStatisticsPage() {
     ?? selectedExpenseTransactionId
     ?? selectedBankTagTransactionId;
   const isExportActionBusy = isExportReferenceLoading || isExporting || isPreviewLoading || Boolean(detailLoadingMessage);
-  const titleAccessory = canAdminAccess ? (
-    <PageBusinessAuditIcon
-      ariaLabel="Audit 成本统计"
-      pageKey="cost-statistics"
-      label="成本统计"
-      readModelStatus={readModelStatus}
-    />
-  ) : null;
+  const visibleStatistics = pageStatistics;
+  const titleAccessory = (
+    <div className="page-title-accessory-group">
+      <PageStatisticsPopover
+        ariaLabel="成本统计数据统计"
+        loading={isExplorerLoading && !pageStatistics}
+        coreItems={[
+          { label: "流水", value: visibleStatistics?.transactionCount, unit: "笔" },
+          { label: "支出", value: visibleStatistics?.expenseTransactionCount, unit: "笔", tone: "expense" },
+          { label: "收入", value: visibleStatistics?.incomeTransactionCount, unit: "笔", tone: "income" },
+        ]}
+        detailItems={[
+          { label: "OA 配对成本组", value: visibleStatistics?.costGroupCount, unit: "组" },
+          { label: "有成本标签流水", value: visibleStatistics?.taggedTransactionCount, unit: "笔", tone: "success" },
+          { label: "未标记流水", value: visibleStatistics?.untaggedTransactionCount, unit: "笔", tone: "warning" },
+          { label: "项目", value: visibleStatistics?.projectCount, unit: "个" },
+          { label: "费用类型", value: visibleStatistics?.expenseTypeCount, unit: "类" },
+          { label: "银行标签", value: visibleStatistics?.bankTagCount, unit: "个" },
+          { label: "已进入成本统计流水", value: visibleStatistics?.costTransactionCount, unit: "笔" },
+        ]}
+      />
+      {canAdminAccess ? (
+        <PageBusinessAuditIcon
+          ariaLabel="Audit 成本统计"
+          pageKey="cost-statistics"
+          label="成本统计"
+          readModelStatus={readModelStatus}
+        />
+      ) : null}
+    </div>
+  );
 
   return (
     <div className="page-stack cost-page">

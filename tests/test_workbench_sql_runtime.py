@@ -2423,6 +2423,9 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(payload["paired"]["row_counts"], {"oa": 1, "bank": 1, "invoice": 1, "rows": 3})
         self.assertEqual(payload["unpaired"]["row_counts"], {"oa": 0, "bank": 1, "invoice": 2, "rows": 3})
+        self.assertEqual(payload["statistics"]["oa_count"], 1)
+        self.assertEqual(payload["statistics"]["bank_transaction_count"], 2)
+        self.assertEqual(payload["statistics"]["unpaired_object_count"], 3)
         self.assertEqual(connection.transaction_count, 1)
         statement_count = len(connection.execute_calls) + len(connection.fetch_one_calls) + len(connection.fetch_all_calls)
         self.assertLessEqual(statement_count, 10)
@@ -2441,6 +2444,28 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                 for sql, _params in connection.fetch_all_calls
             )
         )
+
+    def test_workbench_all_statistics_are_unavailable_when_read_model_is_not_fresh(self) -> None:
+        payload = PostgresReadModelRepository._compose_workbench_all_summary_payload(
+            rows=[{
+                "generation_source_versions": {"source_version": 1},
+                "generated_at": "2026-05-22T10:00:00+00:00",
+                "payload": {"summary": {}},
+            }],
+            summary={
+                "oa_count": 1,
+                "bank_count": 2,
+                "invoice_count": 3,
+                "paired_count": 1,
+                "unpaired_count": 2,
+                "exception_count": 0,
+                "statistics": {"oa_count": 1, "bank_transaction_count": 2},
+            },
+            read_model_status="stale",
+            active_month_version={"version": "version-1"},
+        )
+
+        self.assertIsNone(payload["statistics"])
 
     def test_repository_initial_page_fails_closed_when_component_versions_drift(self) -> None:
         repository = PostgresReadModelRepository(VersionDriftWorkbenchInitialPageConnection())
@@ -4206,6 +4231,14 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                         "unpaired_oa_count": 8,
                         "unpaired_bank_count": 18,
                         "unpaired_invoice_count": 28,
+                        "expense_transaction_count": 12,
+                        "income_transaction_count": 10,
+                        "input_invoice_count": 20,
+                        "output_invoice_count": 13,
+                        "incomplete_group_count": 4,
+                        "missing_oa_group_count": 2,
+                        "missing_bank_group_count": 1,
+                        "missing_invoice_group_count": 3,
                     }
                 return super().fetch_one(sql, params)
 
@@ -4238,6 +4271,10 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         stats_by_zone = {params[2]: params for params in all_scope_stat_writes}
         self.assertEqual(stats_by_zone["paired"][3:8], (2, 3, 4, 5, 12))
         self.assertEqual(stats_by_zone["unpaired"][3:8], (7, 8, 18, 28, 54))
+        page_statistics = stats_by_zone["paired"][8].obj["page_statistics"]
+        self.assertEqual(page_statistics["bank_transaction_count"], 22)
+        self.assertEqual(page_statistics["unpaired_object_count"], 54)
+        self.assertEqual(page_statistics["incomplete_group_count"], 4)
         stale_stats_delete = next(
             params
             for statement, params in connection.executed

@@ -73,6 +73,17 @@ type ApiTaxMonthPayload = {
   default_selected_output_ids: string[];
   default_selected_input_ids: string[];
   summary: ApiTaxSummary;
+  statistics?: {
+    input_invoice_count?: number | null;
+    output_invoice_count?: number | null;
+    certification_record_count?: number | null;
+    matched_certification_count?: number | null;
+    unmatched_certification_count?: number | null;
+    out_of_scope_certification_count?: number | null;
+    deductible_invoice_count?: number | null;
+    selected_invoice_count?: number | null;
+    unselected_invoice_count?: number | null;
+  } | null;
   read_model_status?: string;
   read_model_scope_key?: string;
   read_model_generated_at?: string | null;
@@ -199,6 +210,14 @@ type ApiTaxOffsetPlanSavePayload = {
 
 function parseMoney(value: string) {
   return Number(value.replace(/,/g, ""));
+}
+
+function optionalCount(value: unknown): number | undefined {
+  if (value === null || value === undefined || value === "") {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
 function arrayValue(value: unknown): unknown[] {
@@ -426,6 +445,17 @@ export async function fetchTaxOffsetMonth(month: string, signal?: AbortSignal): 
     defaultSelectedOutputIds: payload.default_selected_output_ids,
     defaultSelectedInputIds: payload.default_selected_input_ids,
     summary: mapSummary(payload.summary),
+    statistics: payload.statistics ? {
+      inputInvoiceCount: optionalCount(payload.statistics.input_invoice_count),
+      outputInvoiceCount: optionalCount(payload.statistics.output_invoice_count),
+      certificationRecordCount: optionalCount(payload.statistics.certification_record_count),
+      matchedCertificationCount: optionalCount(payload.statistics.matched_certification_count),
+      unmatchedCertificationCount: optionalCount(payload.statistics.unmatched_certification_count),
+      outOfScopeCertificationCount: optionalCount(payload.statistics.out_of_scope_certification_count),
+      deductibleInvoiceCount: optionalCount(payload.statistics.deductible_invoice_count),
+      selectedInvoiceCount: optionalCount(payload.statistics.selected_invoice_count),
+      unselectedInvoiceCount: optionalCount(payload.statistics.unselected_invoice_count),
+    } : undefined,
     readModelStaleReasons: payload.read_model_stale_reasons ?? [],
     sourceVersions: payload.source_versions ?? {},
   };

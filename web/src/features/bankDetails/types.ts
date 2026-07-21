@@ -136,6 +136,16 @@ export type BankDetailTransaction = {
   relationStatus: BankDetailRelationStatus;
 };
 
+export type BankDetailStatistics = {
+  transactionCount?: number;
+  expenseTransactionCount?: number;
+  incomeTransactionCount?: number;
+  classifiedTransactionCount?: number;
+  unclassifiedTransactionCount?: number;
+  linkedTransactionCount?: number;
+  unlinkedTransactionCount?: number;
+};
+
 export type BankDetailTransactionsResponse = {
   accountKey: string | null;
   dateFrom: string | null;
@@ -147,6 +157,7 @@ export type BankDetailTransactionsResponse = {
     total: number;
   };
   categoryCounts: BankTransactionCategoryCounts;
+  statistics?: BankDetailStatistics;
   tagDictionary?: BankTransactionTagDictionary;
   readModelStatus?: BankDetailReadModelStatus;
   cacheStatus?: string | null;

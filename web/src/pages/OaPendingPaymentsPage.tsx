@@ -2,6 +2,7 @@ import { ChevronLeft, ChevronRight, PanelRightOpen, SlidersHorizontal } from "lu
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import PageScaffold from "../components/common/PageScaffold";
+import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import PageToolbar from "../components/common/PageToolbar";
 import StatePanel from "../components/common/StatePanel";
 import InputInvoiceUsageDetailDrawer from "../components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer";
@@ -29,6 +30,7 @@ import type {
   OaPendingPaymentRowsResponse,
   OaPendingPaymentSortDirection,
   OaPendingPaymentSummary,
+  OaPendingPaymentStatistics,
   OaPendingPaymentViewMode,
   LinkOaPendingPaymentBankTransactionsResponse,
   WritebackOaPendingPaymentPaidResponse,
@@ -146,6 +148,7 @@ export default function OaPendingPaymentsPage() {
   const [rows, setRows] = useState<OaPendingPaymentRow[]>([]);
   const [total, setTotal] = useState(0);
   const [summary, setSummary] = useState<OaPendingPaymentSummary>({ rowCount: 0 });
+  const [statistics, setStatistics] = useState<OaPendingPaymentStatistics | null>(null);
   const [filterConfigs, setFilterConfigs] = useState<OaPendingPaymentFieldConfig[]>([]);
   const [filterOptions, setFilterOptions] = useState<Record<string, OaPendingPaymentFilterOption[]>>({});
   const [readModelStatus, setReadModelStatus] = useState("refreshing");
@@ -169,18 +172,21 @@ export default function OaPendingPaymentsPage() {
     setRows([]);
     setTotal(0);
     setSummary({ rowCount: 0 });
+    setStatistics(null);
     setFilterConfigs([]);
     setFilterOptions({});
   }, []);
 
   const applyRowsPayload = useCallback((payload: OaPendingPaymentRowsResponse) => {
     const payloadTotal = finiteCount(payload.pagination?.total);
+    const payloadReadModelStatus = readModelStatusFromPayloads(payload);
     setRows(payload.rows ?? []);
     setTotal(payloadTotal);
     setSummary(normalizeSummary(payload.summary, payloadTotal));
+    setStatistics(isReadModelFresh(payloadReadModelStatus) ? payload.statistics ?? null : null);
     setFilterConfigs(payload.filterConfig ?? []);
     setFilterOptions(payload.filterOptions ?? {});
-    setReadModelStatus(readModelStatusFromPayloads(payload));
+    setReadModelStatus(payloadReadModelStatus);
   }, []);
 
   const loadRows = useCallback(async (
@@ -458,12 +464,33 @@ export default function OaPendingPaymentsPage() {
   const showReadModelState = isEmpty && !isReadModelFresh(readModelStatus);
   const completedCountLabel = formatViewCount(summary.viewCounts?.completed);
   const inProgressCountLabel = formatViewCount(summary.viewCounts?.in_progress);
-  const titleAccessory = canAdminAccess ? (
-    <OaPendingPaymentAuditIcon
-      readModelStatus={readModelStatus}
-      scopeKey={query.month || "all"}
-    />
-  ) : null;
+  const visibleStatistics = isReadModelFresh(readModelStatus) ? statistics : null;
+  const titleAccessory = (
+    <div className="page-title-accessory-group">
+      <PageStatisticsPopover
+        ariaLabel="OA 待付款核对数据统计"
+        loading={loading && !statistics}
+        coreItems={[
+          { label: "OA", value: visibleStatistics?.oa_count, unit: "条" },
+          { label: "流水", value: visibleStatistics?.bank_transaction_count, unit: "笔" },
+          { label: "进项发票", value: visibleStatistics?.input_invoice_count, unit: "张" },
+        ]}
+        detailItems={[
+          { label: "已付款 OA", value: visibleStatistics?.paid_oa_count, unit: "条", tone: "success" },
+          { label: "已完成", value: visibleStatistics?.completed_oa_count, unit: "条", tone: "success" },
+          { label: "进行中", value: visibleStatistics?.in_progress_oa_count, unit: "条" },
+          { label: "支出流水", value: visibleStatistics?.expense_transaction_count, unit: "笔", tone: "expense" },
+          { label: "收入流水", value: visibleStatistics?.income_transaction_count, unit: "笔", tone: "income" },
+          { label: "未付款", value: visibleStatistics?.unpaid_oa_count, unit: "条", tone: "warning" },
+          { label: "已关联流水的 OA", value: visibleStatistics?.linked_bank_oa_count, unit: "条" },
+          { label: "已关联进项票的 OA", value: visibleStatistics?.linked_input_invoice_oa_count, unit: "条" },
+        ]}
+      />
+      {canAdminAccess ? (
+        <OaPendingPaymentAuditIcon readModelStatus={readModelStatus} scopeKey={query.month || "all"} />
+      ) : null}
+    </div>
+  );
 
   return (
     <>

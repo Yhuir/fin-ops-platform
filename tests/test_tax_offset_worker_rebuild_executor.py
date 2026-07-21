@@ -21,7 +21,7 @@ class _RedisRecorder:
 
 
 class TaxOffsetWorkerRebuildExecutorTests(unittest.TestCase):
-    def test_rebuild_scope_persists_read_model_and_publishes_fresh_cache(self) -> None:
+    def test_rebuild_scope_persists_without_prepublishing_an_unstable_generation_cache(self) -> None:
         redis = _RedisRecorder()
         read_models = TaxOffsetReadModelService()
         persisted: list[dict[str, object]] = []
@@ -32,6 +32,7 @@ class TaxOffsetWorkerRebuildExecutorTests(unittest.TestCase):
                 "tax_offset_read_model_schema_version": TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
                 "invoice_fact_source_version": "invoice:v1",
             },
+            statistics_generation_token_provider=lambda: "generation-1",
         )
 
         executor = TaxOffsetWorkerRebuildExecutor(
@@ -54,23 +55,7 @@ class TaxOffsetWorkerRebuildExecutorTests(unittest.TestCase):
         self.assertEqual(persisted[0]["changed_scope_keys"], ["2026-05"])
         self.assertEqual(persisted[0]["operation"], "worker_tax_offset_read_model_refresh")
         self.assertIn("2026-05", persisted[0]["snapshot"]["read_models"])
-        self.assertEqual(len(redis.set_calls), 2)
-        month_cache = next(call for call in redis.set_calls if ":month:" in str(call["key"]))
-        summary_cache = next(call for call in redis.set_calls if ":summary:" in str(call["key"]))
-        self.assertEqual(month_cache["ttl_seconds"], 60)
-        self.assertEqual(summary_cache["ttl_seconds"], 60)
-        month_payload = month_cache["payload"]["payload"]
-        self.assertEqual(month_payload["read_model_status"], "fresh")
-        self.assertEqual(month_payload["read_model_scope_key"], "2026-05")
-        self.assertEqual(month_cache["payload"]["fresh_gate"]["read_model_status"], "fresh")
-        self.assertEqual(month_cache["payload"]["fresh_gate"]["scope_key"], "2026-05")
-        self.assertEqual(
-            month_cache["payload"]["fresh_gate"]["schema_version"],
-            TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
-        )
-        summary_payload = summary_cache["payload"]["payload"]
-        self.assertEqual(summary_payload["summary"], {"output_tax": "13.00"})
-        self.assertNotIn("output_items", summary_payload)
+        self.assertEqual(redis.set_calls, [])
 
     def test_rebuild_scope_rejects_non_month_scope(self) -> None:
         executor = TaxOffsetWorkerRebuildExecutor(

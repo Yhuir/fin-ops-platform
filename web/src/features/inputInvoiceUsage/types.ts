@@ -115,6 +115,18 @@ export type InputInvoiceUsageRow = {
   invoiceRelations: InputInvoiceUsageInvoiceRelations;
 };
 
+export type InputInvoiceUsageStatistics = {
+  invoiceCount?: number;
+  linkedOaInvoiceCount?: number;
+  linkedBankInvoiceCount?: number;
+  paidInvoiceCount?: number;
+  unlinkedOaInvoiceCount?: number;
+  unlinkedBankInvoiceCount?: number;
+  unpaidInvoiceCount?: number;
+  formalRelationGroupCount?: number;
+  oaReverseBatchCount?: number;
+};
+
 export type InputInvoiceUsageRowsResponse = {
   rows: InputInvoiceUsageRow[];
   summary?: {
@@ -124,6 +136,7 @@ export type InputInvoiceUsageRowsResponse = {
     matchedBankTransactionCount: number;
     pendingCount: number;
   };
+  statistics?: InputInvoiceUsageStatistics;
   pagination: {
     page: number;
     pageSize: number;

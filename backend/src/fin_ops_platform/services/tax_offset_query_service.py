@@ -107,7 +107,16 @@ class TaxOffsetQueryService:
             return None
         scope_key = self._runtime_service.request_scope_key(month)
         expected_source_versions = self._runtime_service.expected_source_versions()
-        cache_key = self._runtime_service.redis_cache_key(scope_key, source_versions=expected_source_versions)
+        statistics_generation_token = self._statistics_generation_token()
+        cache_key = (
+            self._runtime_service.redis_cache_key(
+                scope_key,
+                source_versions=expected_source_versions,
+                statistics_generation_token=statistics_generation_token,
+            )
+            if statistics_generation_token
+            else None
+        )
         result = self._read_model_query_gateway.load(
             scope_type="tax_offset",
             scope_key=scope_key,
@@ -121,12 +130,22 @@ class TaxOffsetQueryService:
             stale_reason="api_stale",
             source_mismatch_reason="api_source_versions_stale",
         )
+        self._gate_statistics(result.payload)
         return result.payload, result.cache_hit
 
     def get_summary_payload(self, month: str) -> tuple[dict[str, Any], bool]:
         scope_key = self._runtime_service.request_scope_key(month)
         expected_source_versions = self._runtime_service.expected_source_versions()
-        cache_key = self._runtime_service.summary_redis_cache_key(scope_key, source_versions=expected_source_versions)
+        statistics_generation_token = self._statistics_generation_token()
+        cache_key = (
+            self._runtime_service.summary_redis_cache_key(
+                scope_key,
+                source_versions=expected_source_versions,
+                statistics_generation_token=statistics_generation_token,
+            )
+            if statistics_generation_token
+            else None
+        )
         get_view = getattr(self._sql_read_repository, "get_tax_offset_view", None)
         if not callable(get_view):
             full_payload, cache_hit = self.get_month_payload(month)
@@ -152,4 +171,23 @@ class TaxOffsetQueryService:
             stale_reason="api_summary_stale",
             source_mismatch_reason="api_summary_source_versions_stale",
         )
+        self._gate_statistics(result.payload)
         return result.payload, result.cache_hit
+
+    def _statistics_generation_token(self) -> str | None:
+        loader = getattr(self._sql_read_repository, "tax_offset_statistics_generation_token", None)
+        value = loader() if callable(loader) else None
+        return str(value) if value not in (None, "") else None
+
+    def _gate_statistics(self, payload: dict[str, Any]) -> None:
+        if "statistics_status" not in payload:
+            return
+        status = str(payload.get("statistics_status") or "stale").strip().lower()
+        if status == "fresh" and isinstance(payload.get("statistics"), dict):
+            return
+        payload["statistics"] = None
+        payload["statistics_status"] = "refreshing"
+        payload["statistics_refresh_enqueued"] = self._runtime_service.enqueue_read_model_refresh(
+            "all",
+            reason=f"api_statistics_{status}",
+        )

@@ -22,6 +22,7 @@ class TaxOffsetRuntimeService:
         queue_repository: Any | None = None,
         redis_helper: Any | None = None,
         source_versions_provider: Callable[[], dict[str, Any]] | None = None,
+        statistics_generation_token_provider: Callable[[], str | None] | None = None,
         persist_read_models: Callable[..., None] | None = None,
         month_cache_clearer: Callable[[list[str] | None], None] | None = None,
         schedule_cache_warmup: Callable[[list[str], str], None] | None = None,
@@ -32,6 +33,7 @@ class TaxOffsetRuntimeService:
         self._queue_repository = queue_repository
         self._redis_helper = redis_helper
         self._source_versions_provider = source_versions_provider
+        self._statistics_generation_token_provider = statistics_generation_token_provider
         self._persist_read_models = persist_read_models
         self._month_cache_clearer = month_cache_clearer
         self._schedule_cache_warmup = schedule_cache_warmup
@@ -50,20 +52,48 @@ class TaxOffsetRuntimeService:
             return dict(self._source_versions_provider() or {})
         return {"tax_offset_read_model_schema_version": TAX_OFFSET_READ_MODEL_SCHEMA_VERSION}
 
-    def redis_cache_key(self, scope_key: str, *, source_versions: dict[str, Any] | None = None) -> str:
+    def statistics_generation_token(self) -> str | None:
+        if not callable(self._statistics_generation_token_provider):
+            return None
+        value = self._statistics_generation_token_provider()
+        return str(value) if value not in (None, "") else None
+
+    def redis_cache_key(
+        self,
+        scope_key: str,
+        *,
+        source_versions: dict[str, Any] | None = None,
+        statistics_generation_token: str | None = None,
+    ) -> str:
+        if not statistics_generation_token:
+            raise ValueError("tax offset Redis cache key requires statistics_generation_token")
         return self.read_model_redis_cache_key(
             "tax_offset:month",
             scope_key,
             schema_version=TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
-            source_versions=source_versions,
+            source_versions={
+                **dict(source_versions or {}),
+                "statistics_generation_token": statistics_generation_token,
+            },
         )
 
-    def summary_redis_cache_key(self, scope_key: str, *, source_versions: dict[str, Any] | None = None) -> str:
+    def summary_redis_cache_key(
+        self,
+        scope_key: str,
+        *,
+        source_versions: dict[str, Any] | None = None,
+        statistics_generation_token: str | None = None,
+    ) -> str:
+        if not statistics_generation_token:
+            raise ValueError("tax offset summary Redis cache key requires statistics_generation_token")
         return self.read_model_redis_cache_key(
             "tax_offset:summary",
             scope_key,
             schema_version=TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
-            source_versions=source_versions,
+            source_versions={
+                **dict(source_versions or {}),
+                "statistics_generation_token": statistics_generation_token,
+            },
         )
 
     @staticmethod
@@ -197,10 +227,23 @@ class TaxOffsetRuntimeService:
 
     def delete_redis_cache(self, scope_key: str) -> None:
         source_versions = self.expected_source_versions()
-        self.redis_delete_best_effort(self.redis_cache_key(scope_key, source_versions=source_versions))
-        self.redis_delete_best_effort(self.summary_redis_cache_key(scope_key, source_versions=source_versions))
-        self.redis_delete_best_effort(f"tax_offset:month:{scope_key}")
-        self.redis_delete_best_effort(f"tax_offset:summary:{scope_key}")
+        statistics_generation_token = self.statistics_generation_token()
+        if not statistics_generation_token:
+            return
+        self.redis_delete_best_effort(
+            self.redis_cache_key(
+                scope_key,
+                source_versions=source_versions,
+                statistics_generation_token=statistics_generation_token,
+            )
+        )
+        self.redis_delete_best_effort(
+            self.summary_redis_cache_key(
+                scope_key,
+                source_versions=source_versions,
+                statistics_generation_token=statistics_generation_token,
+            )
+        )
 
     def redis_get_json_best_effort(self, cache_key: str) -> dict[str, Any] | None:
         get_cached = getattr(self._redis_helper, "get_json", None)
@@ -279,6 +322,10 @@ class TaxOffsetRuntimeService:
             },
             "read_model_scope_key": scope_key,
         }
+        if isinstance(payload.get("statistics"), dict):
+            result["statistics"] = dict(payload["statistics"])
+        if payload.get("statistics_status"):
+            result["statistics_status"] = payload["statistics_status"]
         for key in (
             "read_model_status",
             "read_model_generated_at",

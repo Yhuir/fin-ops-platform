@@ -499,6 +499,37 @@ class TurnoverLedgerReadModelRefreshServiceTests(unittest.TestCase):
             [{"scope_key": "all", "row_ids": ["txn-existing"], "include_row_ids": True}],
         )
 
+    def test_projection_republishes_unchanged_rows_when_statistics_marker_is_missing(self) -> None:
+        repository = FakeTurnoverReadRepository()
+        source_versions = {"turnover_ledger_schema_version": "test"}
+        repository.existing_payload = {
+            "rows": [
+                {
+                    "relation_id": "rel-existing",
+                    "first_transaction_at": "2026-05-18",
+                    "flow_rows": [{"source_bank_row_id": "txn-existing"}],
+                }
+            ],
+            "pagination": {"page": 1, "page_size": 200, "total": 1},
+            "source_versions": source_versions,
+            "statistics": None,
+            "statistics_status": "stale",
+        }
+        builder = TurnoverLedgerSqlProjectionBuilder(
+            read_repository=repository,
+            ledger_service=FailIfCalledLedgerService(),  # type: ignore[arg-type]
+            source_versions_provider=lambda: source_versions,
+        )
+
+        result = builder.rebuild_turnover_ledger_read_model_scope("all", source_version=16)
+
+        self.assertTrue(result["refreshed_from_existing_scope"])
+        self.assertEqual(repository.saved_scope_key, "all")
+        self.assertIsNotNone(repository.saved_payload)
+        assert repository.saved_payload is not None
+        self.assertEqual(repository.saved_payload["rows"][0]["relation_id"], "rel-existing")
+        self.assertEqual(repository.saved_payload["rows"][0]["source_versions"], source_versions)
+
     def test_projection_rebuilds_without_relation_check_when_base_source_versions_changed(self) -> None:
         repository = FakeTurnoverReadRepository()
         repository.existing_payload = {

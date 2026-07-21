@@ -168,6 +168,8 @@ class BankDetailSqlProjectionBuilder:
         existing_source_versions = signature.get("source_versions")
         if not isinstance(existing_source_versions, dict):
             return None
+        if not isinstance(signature.get("statistics"), dict):
+            return None
         if int_value(signature.get("row_count"), -1) != row_count:
             return None
         if _stable_source_versions(existing_source_versions) != _stable_source_versions(source_versions):

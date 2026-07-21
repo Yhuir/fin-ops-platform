@@ -26,7 +26,10 @@ from fin_ops_platform.services.oa_payment_status_service import PAY_STATUS_PENDI
 from fin_ops_platform.services.output_invoice_collection_read_model_repository import (
     OutputInvoiceCollectionReadModelRepositoryPort,
 )
-from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
+from fin_ops_platform.services.postgres_repositories.read_models import (
+    PostgresInvoiceUsageCollectionReadModelRepository,
+    PostgresReadModelRepository,
+)
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_admission import (
     PostgresOaPendingPaymentAdmissionRepository,
     oa_pending_payment_records_signature,
@@ -383,10 +386,13 @@ class InvoiceReadModelConnection:
                 return rows
             return self._oa_rows_for_sql(normalized)
         if "from read_model.input_invoice_usage_scopes" in normalized:
-            return self.input_scope_rows
+            return self._scope_rows_with_statistics(self.input_scope_rows, summary_kind="input")
         if "from read_model.output_invoice_collection_scopes" in normalized:
-            return self.output_scope_rows
-        if "from read_model.oa_pending_payment_scopes" in normalized:
+            return self._scope_rows_with_statistics(self.output_scope_rows, summary_kind="output")
+        if (
+            "from read_model.oa_pending_payment_scopes" in normalized
+            and "with base_rows as materialized" not in normalized
+        ):
             return self.oa_scope_rows
         if "from read_model.workbench_relation_scopes" in normalized:
             return self.workbench_relation_scope_rows
@@ -404,7 +410,11 @@ class InvoiceReadModelConnection:
             for row in self.input_scope_rows:
                 if str(row.get("scope_key")) == requested_scope:
                     return row
-            return {"scope_key": requested_scope, "source_versions": input_invoice_usage_source_versions()}
+            return {
+                "scope_key": requested_scope,
+                "source_versions": input_invoice_usage_source_versions(),
+                "raw_payload": {"statistics_metadata": {"statistics": self._statistics("input")}},
+            }
         if "from read_model.output_invoice_collection_scopes" in normalized:
             if not self.scope_exists:
                 return None
@@ -412,8 +422,15 @@ class InvoiceReadModelConnection:
             for row in self.output_scope_rows:
                 if str(row.get("scope_key")) == requested_scope:
                     return row
-            return {"scope_key": requested_scope, "source_versions": output_invoice_collection_source_versions()}
-        if "from read_model.oa_pending_payment_scopes" in normalized:
+            return {
+                "scope_key": requested_scope,
+                "source_versions": output_invoice_collection_source_versions(),
+                "raw_payload": {"statistics_metadata": {"statistics": self._statistics("output")}},
+            }
+        if (
+            "from read_model.oa_pending_payment_scopes" in normalized
+            and "with base_rows as materialized" not in normalized
+        ):
             if not self.scope_exists:
                 return None
             requested_scope = str(params[0] if params else "2026-05")
@@ -441,6 +458,35 @@ class InvoiceReadModelConnection:
             rows = self._input_rows_for_sql(normalized)
             for row in rows:
                 input_invoice_ids.update(self._invoice_row_ids(row))
+            if "invoice_flags as" in normalized:
+                linked_oa_ids: set[str] = set()
+                linked_bank_ids: set[str] = set()
+                paid_ids: set[str] = set()
+                formal_group_count = 0
+                for row in rows:
+                    payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+                    invoice_ids = self._invoice_row_ids(row)
+                    oa = payload.get("oa") if isinstance(payload.get("oa"), dict) else {}
+                    bank = payload.get("bankTransactions") if isinstance(payload.get("bankTransactions"), dict) else {}
+                    payment = payload.get("paymentStatus") if isinstance(payload.get("paymentStatus"), dict) else {}
+                    linked_oa = int(oa.get("relationCount") or row.get("oa_relation_count") or 0) > 0
+                    linked_bank = int(bank.get("relationCount") or row.get("bank_relation_count") or 0) > 0
+                    if linked_oa:
+                        linked_oa_ids.update(invoice_ids)
+                    if linked_bank:
+                        linked_bank_ids.update(invoice_ids)
+                    if str(payment.get("code") or row.get("payment_status") or "") == "paid":
+                        paid_ids.update(invoice_ids)
+                    if linked_oa or linked_bank:
+                        formal_group_count += 1
+                return {
+                    "invoice_count": len(input_invoice_ids),
+                    "linked_oa_invoice_count": len(linked_oa_ids),
+                    "linked_bank_invoice_count": len(linked_bank_ids),
+                    "paid_invoice_count": len(paid_ids),
+                    "formal_relation_group_count": formal_group_count,
+                    "oa_reverse_batch_count": 0,
+                }
             return {
                 "count": len(rows),
                 "invoice_count": len(input_invoice_ids),
@@ -453,6 +499,15 @@ class InvoiceReadModelConnection:
             output_invoice_ids: set[str] = set()
             for row in self.output_rows:
                 output_invoice_ids.update(self._invoice_row_ids(row))
+            if "invoice_flags as" in normalized:
+                return {
+                    "invoice_count": len(output_invoice_ids),
+                    "linked_oa_invoice_count": len(output_invoice_ids),
+                    "linked_income_bank_invoice_count": len(output_invoice_ids),
+                    "collected_invoice_count": len(output_invoice_ids),
+                    "red_invoice_count": 0,
+                    "issued_receipt_count": 0,
+                }
             return {
                 "count": len(self.output_rows),
                 "invoice_count": len(output_invoice_ids),
@@ -551,6 +606,81 @@ class InvoiceReadModelConnection:
                 ),
             }
         return None
+
+    def _scope_rows_with_statistics(self, rows: list[dict], *, summary_kind: str) -> list[dict]:
+        result: list[dict] = []
+        zero = {key: 0 for key in self._statistics(summary_kind)}
+        for index, row in enumerate(rows):
+            normalized = dict(row)
+            normalized.setdefault("row_count", 1)
+            normalized.setdefault("cache_status", "fresh")
+            normalized.setdefault(
+                "raw_payload",
+                {"statistics_metadata": {"statistics": self._statistics(summary_kind) if index == 0 else zero}},
+            )
+            result.append(normalized)
+        return result
+
+    def _statistics(self, summary_kind: str) -> dict[str, int]:
+        rows = self.input_rows if summary_kind == "input" else self.output_rows
+        invoice_ids: set[str] = set()
+        linked_oa_ids: set[str] = set()
+        linked_bank_ids: set[str] = set()
+        paid_ids: set[str] = set()
+        collected_ids: set[str] = set()
+        formal_group_count = 0
+        for row in rows:
+            payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+            member_ids = self._invoice_row_ids(row)
+            invoice_ids.update(member_ids)
+            oa = payload.get("oa") if isinstance(payload.get("oa"), dict) else {}
+            bank = payload.get("bankTransactions") if isinstance(payload.get("bankTransactions"), dict) else {}
+            linked_oa = int(oa.get("relationCount") or row.get("oa_relation_count") or 0) > 0
+            linked_bank = int(bank.get("relationCount") or row.get("bank_relation_count") or 0) > 0
+            if linked_oa:
+                linked_oa_ids.update(member_ids)
+            if linked_bank:
+                linked_bank_ids.update(member_ids)
+            payment = payload.get("paymentStatus") if isinstance(payload.get("paymentStatus"), dict) else {}
+            if str(payment.get("code") or row.get("payment_status") or "") == "paid":
+                paid_ids.update(member_ids)
+            collection = payload.get("collectionStatus") if isinstance(payload.get("collectionStatus"), dict) else {}
+            if str(collection.get("code") or row.get("collection_status") or "") in {
+                "collected",
+                "collected_red_refunded",
+            }:
+                collected_ids.update(member_ids)
+            if linked_oa or linked_bank:
+                formal_group_count += 1
+        invoice_count = len(invoice_ids)
+        linked_oa_count = len(linked_oa_ids)
+        if summary_kind == "input":
+            linked_bank_count = len(linked_bank_ids)
+            paid_count = len(paid_ids)
+            return {
+                "invoice_count": invoice_count,
+                "linked_oa_invoice_count": linked_oa_count,
+                "linked_bank_invoice_count": linked_bank_count,
+                "paid_invoice_count": paid_count,
+                "unlinked_oa_invoice_count": invoice_count - linked_oa_count,
+                "unlinked_bank_invoice_count": invoice_count - linked_bank_count,
+                "unpaid_invoice_count": invoice_count - paid_count,
+                "formal_relation_group_count": formal_group_count,
+                "oa_reverse_batch_count": 0,
+            }
+        collected_count = len(collected_ids)
+        linked_bank_count = len(linked_bank_ids)
+        return {
+            "invoice_count": invoice_count,
+            "linked_oa_invoice_count": linked_oa_count,
+            "linked_income_bank_invoice_count": linked_bank_count,
+            "collected_invoice_count": collected_count,
+            "unlinked_oa_invoice_count": invoice_count - linked_oa_count,
+            "unlinked_bank_invoice_count": invoice_count - linked_bank_count,
+            "uncollected_invoice_count": invoice_count - collected_count,
+            "red_invoice_count": 0,
+            "issued_receipt_count": 0,
+        }
 
     def _input_rows_for_sql(self, normalized_sql: str) -> list[dict]:
         rows = list(self.input_rows)
@@ -754,6 +884,7 @@ class RecordingInvoiceRelationReadRepository:
         self.workbench_relation_versions_by_scope: dict[str, dict[str, object]] = {}
         self.existing_source_versions_by_method: dict[str, dict[str, object]] = {}
         self.existing_row_count_by_method: dict[str, int] = {}
+        self.existing_statistics_by_method: dict[str, dict[str, object]] = {}
 
     def _existing_payload(self, method_name: str) -> dict[str, object] | None:
         source_versions = self.existing_source_versions_by_method.get(method_name)
@@ -767,6 +898,7 @@ class RecordingInvoiceRelationReadRepository:
                 "total": self.existing_row_count_by_method.get(method_name, 1),
             },
             "source_versions": dict(source_versions),
+            "statistics": self.existing_statistics_by_method.get(method_name),
             "refresh_status": "refreshing",
         }
 
@@ -785,8 +917,14 @@ class RecordingInvoiceRelationReadRepository:
         scope_key: str,
         rows: list[dict[str, object]],
         source_versions: dict[str, object] | None = None,
+        statistics_metadata: dict[str, object] | None = None,
     ) -> None:
-        self.saved_input = {"scope_key": scope_key, "rows": rows, "source_versions": source_versions}
+        self.saved_input = {
+            "scope_key": scope_key,
+            "rows": rows,
+            "source_versions": source_versions,
+            "statistics_metadata": statistics_metadata,
+        }
 
     def save_output_invoice_collection_rows(
         self,
@@ -794,8 +932,14 @@ class RecordingInvoiceRelationReadRepository:
         scope_key: str,
         rows: list[dict[str, object]],
         source_versions: dict[str, object] | None = None,
+        statistics_metadata: dict[str, object] | None = None,
     ) -> None:
-        self.saved_output = {"scope_key": scope_key, "rows": rows, "source_versions": source_versions}
+        self.saved_output = {
+            "scope_key": scope_key,
+            "rows": rows,
+            "source_versions": source_versions,
+            "statistics_metadata": statistics_metadata,
+        }
 
     def mark_input_invoice_usage_scope(
         self,
@@ -803,8 +947,14 @@ class RecordingInvoiceRelationReadRepository:
         scope_key: str,
         row_count: int,
         source_versions: dict[str, object] | None = None,
+        statistics_metadata: dict[str, object] | None = None,
     ) -> None:
-        self.marked_input = {"scope_key": scope_key, "row_count": row_count, "source_versions": source_versions}
+        self.marked_input = {
+            "scope_key": scope_key,
+            "row_count": row_count,
+            "source_versions": source_versions,
+            "statistics_metadata": statistics_metadata,
+        }
 
     def prune_input_invoice_usage_scope_shards(self, current_scope_keys: list[str]) -> None:
         self.pruned_input = list(current_scope_keys)
@@ -815,8 +965,14 @@ class RecordingInvoiceRelationReadRepository:
         scope_key: str,
         row_count: int,
         source_versions: dict[str, object] | None = None,
+        statistics_metadata: dict[str, object] | None = None,
     ) -> None:
-        self.marked_output = {"scope_key": scope_key, "row_count": row_count, "source_versions": source_versions}
+        self.marked_output = {
+            "scope_key": scope_key,
+            "row_count": row_count,
+            "source_versions": source_versions,
+            "statistics_metadata": statistics_metadata,
+        }
 
     def prune_output_invoice_collection_scope_shards(self, current_scope_keys: list[str]) -> None:
         self.pruned_output = list(current_scope_keys)
@@ -1122,6 +1278,38 @@ class OutputInvoiceCollectionReadModelRepositoryPortTests(unittest.TestCase):
 
 
 class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
+    def test_input_repository_can_skip_statistics_on_later_export_pages(self) -> None:
+        connection = InvoiceReadModelConnection(
+            input_rows=[
+                {
+                    "payload": {
+                        "id": "input_invoice_usage_row_1",
+                        "invoiceId": "invoice-1",
+                        "invoice": {"id": "invoice-1", "invoiceNo": "1001", "totalWithTax": "118.00"},
+                        "paymentStatus": {"code": "pending", "label": "待处理"},
+                        "oa": {"relationCount": 0},
+                        "bankTransactions": {"relationCount": 0},
+                    },
+                    "raw_payload": {},
+                }
+            ]
+        )
+        repository = PostgresInvoiceUsageCollectionReadModelRepository(connection)
+
+        payload = repository.list_input_invoice_usage_rows(
+            month=None,
+            page=2,
+            page_size=50,
+            include_statistics=False,
+        )
+
+        self.assertIsInstance(payload, dict)
+        self.assertIsNone(payload["statistics"])
+        self.assertEqual(payload["statistics_status"], "not_requested")
+        executed_sql = " ".join(sql for sql, _params in connection.fetch_all_calls + connection.fetch_one_calls)
+        self.assertNotIn("input_invoice_usage_oa_reverse_batches", executed_sql)
+        self.assertNotIn("statistics_metadata_rows", executed_sql)
+
     def test_input_repository_returns_fresh_empty_scope_without_api_miss(self) -> None:
         repository = PostgresReadModelRepository(
             InvoiceReadModelConnection(input_rows=[], dirty=False, scope_exists=True)
@@ -1229,8 +1417,25 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual(payload["pagination"]["total"], 1)
         self.assertEqual(payload["summary"]["invoiceCount"], 3)
+        self.assertEqual(
+            payload["statistics"],
+            {
+                "invoice_count": 3,
+                "linked_oa_invoice_count": 3,
+                "linked_bank_invoice_count": 3,
+                "paid_invoice_count": 0,
+                "unlinked_oa_invoice_count": 0,
+                "unlinked_bank_invoice_count": 0,
+                "unpaid_invoice_count": 3,
+                "formal_relation_group_count": 1,
+                "oa_reverse_batch_count": 0,
+            },
+        )
+        self.assertEqual(payload["statistics_status"], "fresh")
         executed_sql = " ".join(sql for sql, _params in connection.fetch_all_calls + connection.fetch_one_calls)
         self.assertIn("invoice_count_ids", executed_sql)
+        self.assertNotIn("invoice_flags as", executed_sql)
+        self.assertIn("from read_model.input_invoice_usage_scopes", executed_sql)
 
     def test_input_repository_filter_options_use_sql_aggregation_without_payload_rows(self) -> None:
         class FilterOptionConnection:
@@ -1452,8 +1657,14 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual(payload["pagination"]["total"], 1)
         self.assertEqual(payload["summary"]["invoiceCount"], 3)
+        self.assertEqual(payload["statistics"]["invoice_count"], 3)
+        self.assertEqual(payload["statistics"]["collected_invoice_count"], 3)
+        self.assertEqual(payload["statistics"]["uncollected_invoice_count"], 0)
+        self.assertEqual(payload["statistics_status"], "fresh")
         executed_sql = " ".join(sql for sql, _params in connection.fetch_all_calls + connection.fetch_one_calls)
         self.assertIn("invoice_count_ids", executed_sql)
+        self.assertNotIn("invoice_flags as", executed_sql)
+        self.assertIn("from read_model.output_invoice_collection_scopes", executed_sql)
 
     def test_output_repository_save_persists_oa_relation_columns(self) -> None:
         connection = WriteRecordingConnection()
@@ -1567,7 +1778,8 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertNotIn("source_versions", payload)
         self.assertEqual(payload["pagination"]["total"], 1)
         executed_sql = " ".join(sql for sql, _params in connection.fetch_all_calls + connection.fetch_one_calls)
-        self.assertNotIn("from read_model.oa_pending_payment_scopes", executed_sql)
+        self.assertIn("statistics_scopes as", executed_sql)
+        self.assertEqual(len(connection.fetch_one_calls), 1)
 
     def test_oa_repository_all_scope_does_not_hide_cross_scope_duplicate_rows(self) -> None:
         source_versions = oa_pending_payment_source_versions()
@@ -2179,6 +2391,8 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["pagination"]["total"], 1)
         self.assertEqual(payload["rows"][0]["id"], "input_invoice_usage_row_1")
         self.assertNotIn("read_model_stale_reasons", payload)
+        self.assertEqual(payload["statistics_status"], "fresh")
+        self.assertIsInstance(payload["statistics"], dict)
         self.assertEqual(queue.refreshes, [])
 
     def test_input_api_all_scope_recovers_after_orphan_scope_prune(self) -> None:
@@ -2301,7 +2515,12 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["pagination"]["total"], 1)
         self.assertEqual(payload["rows"][0]["id"], "output_invoice_collection_row_1")
         self.assertNotIn("read_model_stale_reasons", payload)
-        self.assertEqual(queue.refreshes, [])
+        self.assertEqual(payload["statistics_status"], "refreshing")
+        self.assertIsNone(payload["statistics"])
+        self.assertEqual(
+            queue.refreshes,
+            [("output_invoice_collection", "all", "api_statistics_source_versions_stale")],
+        )
 
     def test_output_api_all_scope_does_not_loop_on_relation_all_versions(self) -> None:
         base_versions = output_invoice_collection_source_versions()
@@ -2507,6 +2726,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         expected_source_versions = input_invoice_usage_source_versions()
         read_repository.existing_source_versions_by_method["list_input_invoice_usage_rows"] = expected_source_versions
         read_repository.existing_row_count_by_method["list_input_invoice_usage_rows"] = 154
+        read_repository.existing_statistics_by_method["list_input_invoice_usage_rows"] = {"invoice_count": 154}
         builder = InvoiceUsageCollectionSqlProjectionBuilder(
             connection=EmptyTransactionConnection(),
             workbench_relation_read_facade=FreshEmptyWorkbenchRelationFacade(),
@@ -2523,6 +2743,47 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(result["row_count"], 154)
         self.assertEqual(result["source_versions"], expected_source_versions)
         self.assertIsNone(read_repository.saved_input)
+
+    def test_projection_builder_rebuilds_unchanged_input_scope_when_statistics_metadata_is_missing(self) -> None:
+        read_repository = RecordingInvoiceRelationReadRepository()
+        read_repository.existing_source_versions_by_method[
+            "list_input_invoice_usage_rows"
+        ] = input_invoice_usage_source_versions()
+        builder = InvoiceUsageCollectionSqlProjectionBuilder(
+            connection=EmptyTransactionConnection(),
+            workbench_relation_read_facade=FreshEmptyWorkbenchRelationFacade(),
+        )
+        builder._core_repository = ProjectionCoreRepository(
+            invoices=[self._invoice("input-invoice-1", InvoiceType.INPUT)],
+        )
+        builder._read_repository = read_repository
+        builder._input_invoice_usage_read_model_repository = read_repository
+
+        result = builder.rebuild_input_invoice_usage_read_model_scope("2026-05")
+
+        self.assertNotIn("skip_reason", result)
+        self.assertIsNotNone(read_repository.saved_input)
+
+    def test_projection_builder_rebuilds_unchanged_output_scope_when_statistics_metadata_is_missing(self) -> None:
+        read_repository = RecordingInvoiceRelationReadRepository()
+        read_repository.existing_source_versions_by_method[
+            "list_output_invoice_collection_rows"
+        ] = output_invoice_collection_source_versions()
+        builder = InvoiceUsageCollectionSqlProjectionBuilder(
+            connection=EmptyTransactionConnection(),
+            workbench_relation_read_facade=FreshEmptyWorkbenchRelationFacade(),
+        )
+        builder._core_repository = ProjectionCoreRepository(
+            invoices=[self._invoice("output-invoice-1", InvoiceType.OUTPUT)],
+        )
+        builder._oa_projection_repository = EmptyOAProjectionRepository()
+        builder._read_repository = read_repository
+        builder._output_invoice_collection_read_model_repository = read_repository
+
+        result = builder.rebuild_output_invoice_collection_read_model_scope("2026-05")
+
+        self.assertNotIn("skip_reason", result)
+        self.assertIsNotNone(read_repository.saved_output)
 
     def test_projection_builder_force_refresh_bypasses_unchanged_invoice_relation_scopes(self) -> None:
         read_repository = RecordingInvoiceRelationReadRepository()

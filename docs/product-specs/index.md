@@ -16,3 +16,4 @@
 ## 平台能力
 
 - `platform-settings-health.md`：设置、权限、数据重置、App Health 和后台任务可见性。
+- `page-data-integrity-statistics.md`：业务页面标题统计、页面自有数据边界与独立 Page Audit 对账口径。

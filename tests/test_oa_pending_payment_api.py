@@ -271,6 +271,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
 
         self.assertEqual(result.status, HTTPStatus.OK)
         self.assertEqual(result.payload["read_model_status"], "fresh")
+        self.assertEqual(result.payload["statistics"]["oa_count"], 1)
         self.assertEqual(repository.state_calls, 2)
         self.assertEqual(repository.data_calls, 1)
         self.assertEqual(repository.snapshot_entries, 1)
@@ -370,6 +371,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
 
         self.assertEqual(result.status, HTTPStatus.ACCEPTED)
         self.assertEqual(result.payload["read_model_status"], "refreshing")
+        self.assertIsNone(result.payload["statistics"])
         self.assertEqual(repository.state_calls, 2)
         self.assertEqual(repository.data_calls, 0)
         self.assertEqual(repository.snapshot_entries, 1)
@@ -1290,6 +1292,7 @@ class ConditionalOaRowsRepository:
             "rows": [_read_model_row()],
             "pagination": {"page": page, "pageSize": page_size, "total": 1},
             "summary": {"rowCount": 1, "viewCounts": {"completed": 1, "in_progress": 0}},
+            "statistics": {"oa_count": 1, "bank_transaction_count": 1},
             "filterOptions": {},
             "read_model_scope_key": "all",
         }

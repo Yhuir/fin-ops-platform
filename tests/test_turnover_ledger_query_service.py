@@ -3,7 +3,10 @@ from __future__ import annotations
 import inspect
 import unittest
 
-from fin_ops_platform.services.postgres_repositories.read_models import PostgresSummaryReadModelRepository
+from fin_ops_platform.services.postgres_repositories.read_models import (
+    PostgresSummaryReadModelRepository,
+    _turnover_ledger_page_statistics,
+)
 from fin_ops_platform.services.turnover_ledger_query_service import TurnoverLedgerQueryService
 from fin_ops_platform.services.turnover_ledger_read_model_repository import TurnoverLedgerReadModelRepositoryPort
 
@@ -27,13 +30,37 @@ class FakeRepository:
 
 
 class TurnoverLedgerQueryServiceTests(unittest.TestCase):
-    def test_repository_query_is_bounded_and_has_no_raw_payload_fallback(self) -> None:
+    def test_repository_query_is_bounded_and_reads_precomputed_statistics_scalar(self) -> None:
         source = inspect.getsource(PostgresSummaryReadModelRepository.list_turnover_ledger_view)
 
         self.assertIn("limit %s offset %s", source.lower())
         self.assertIn("sum(pending_repayment_amount)", source)
-        self.assertNotIn("raw_payload", source)
+        self.assertIn("raw_payload ->", source)
+        self.assertIn("statistics_marker as materialized", source)
+        self.assertLess(source.index("from base\n"), source.index("from normalized\n"))
+        self.assertNotIn("jsonb_array_elements", source)
+        self.assertNotIn("statistics_flows", source)
         self.assertNotIn("_turnover_ledger_row_payload", source)
+
+    def test_page_statistics_keep_unique_flow_and_group_counts_separate(self) -> None:
+        statistics = _turnover_ledger_page_statistics(
+            {
+                "statistics_transaction_count": 9,
+                "statistics_expense_transaction_count": 5,
+                "statistics_income_transaction_count": 4,
+                "statistics_ledger_group_count": 6,
+                "statistics_closed_group_count": 2,
+                "statistics_linked_oa_transaction_count": 3,
+                "statistics_linked_invoice_transaction_count": 4,
+            }
+        )
+
+        self.assertEqual(statistics["transaction_count"], 9)
+        self.assertEqual(statistics["ledger_group_count"], 6)
+        self.assertEqual(statistics["closed_group_count"], 2)
+        self.assertEqual(statistics["unclosed_group_count"], 4)
+        self.assertEqual(statistics["linked_oa_transaction_count"], 3)
+        self.assertEqual(statistics["linked_invoice_transaction_count"], 4)
 
     def test_stale_sql_read_model_is_not_returned_as_fresh_and_enqueues_refresh(self) -> None:
         queue = FakeQueue()

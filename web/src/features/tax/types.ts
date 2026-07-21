@@ -29,6 +29,18 @@ export type TaxSummary = {
   resultAmount: string;
 };
 
+export type TaxPageStatistics = {
+  inputInvoiceCount?: number;
+  outputInvoiceCount?: number;
+  certificationRecordCount?: number;
+  matchedCertificationCount?: number;
+  unmatchedCertificationCount?: number;
+  outOfScopeCertificationCount?: number;
+  deductibleInvoiceCount?: number;
+  selectedInvoiceCount?: number;
+  unselectedInvoiceCount?: number;
+};
+
 export type TaxMonthData = {
   outputInvoices: TaxInvoiceRecord[];
   inputPlanInvoices: TaxInvoiceRecord[];
@@ -38,6 +50,7 @@ export type TaxMonthData = {
   defaultSelectedOutputIds: string[];
   defaultSelectedInputIds: string[];
   summary: TaxSummary;
+  statistics?: TaxPageStatistics;
   readModelStatus?: "fresh" | "refreshing" | "stale" | string;
   readModelScopeKey?: string;
   readModelGeneratedAt?: string | null;

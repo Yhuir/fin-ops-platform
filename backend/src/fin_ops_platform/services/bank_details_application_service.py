@@ -544,6 +544,8 @@ class BankDetailsApplicationService:
         scope_keys = self._scope_keys_for_range(date_from=date_from, date_to=date_to)
         scope_summary = self._scope_summary(scope_keys)
         read_model_status = str(scope_summary.get("read_model_status") or "missing")
+        statistics_status = str(scope_summary.get("statistics_status") or "missing")
+        statistics_refresh_enqueued = False
         refresh_enqueued = False
         refresh_reason = ""
         if read_model_status == "missing":
@@ -571,6 +573,18 @@ class BankDetailsApplicationService:
                 reason=refresh_reason,
                 scope_summary=scope_summary,
             )
+        if statistics_status not in {"fresh", "refreshing"}:
+            selected_scope_keys = set(scope_keys) if refresh_enqueued else set()
+            statistics_scope_keys = [
+                scope_key
+                for scope_key in list(scope_summary.get("statistics_scope_keys") or scope_keys)
+                if scope_key not in selected_scope_keys
+            ]
+            if statistics_scope_keys:
+                statistics_refresh_enqueued = self._enqueue_read_model_refreshes(
+                    statistics_scope_keys,
+                    reason=f"api_statistics_{statistics_status}",
+                )
         cache_key = self._redis_cache_key(
             "transactions",
             {
@@ -587,7 +601,11 @@ class BankDetailsApplicationService:
             },
             scope_summary=scope_summary,
         )
-        cached = self._get_cached_payload(cache_key) if read_model_status == "fresh" else None
+        cached = (
+            self._get_cached_payload(cache_key)
+            if read_model_status == "fresh" and statistics_status == "fresh"
+            else None
+        )
         if cached is not None:
             cached["cache_status"] = "hit"
             return self._with_tag_dictionary(cached)
@@ -629,6 +647,19 @@ class BankDetailsApplicationService:
                 refresh_reason="api_miss",
             )
         payload_status = str(payload.get("read_model_status") or read_model_status or "fresh")
+        payload = {
+            **payload,
+            **{
+                key: scope_summary.get(key)
+                for key in (
+                    "statistics",
+                    "statistics_status",
+                    "statistics_scope_keys",
+                    "statistics_signature",
+                )
+                if key in scope_summary
+            },
+        }
         if read_model_status != "fresh":
             payload = {**payload, **scope_summary, "read_model_status": read_model_status}
             payload_status = read_model_status
@@ -653,10 +684,12 @@ class BankDetailsApplicationService:
         result = self._with_tag_dictionary(dict(payload))
         result["read_model_status"] = payload_status
         result["cache_status"] = "miss" if payload_status == "fresh" else "stale"
+        if statistics_refresh_enqueued:
+            result["statistics_refresh_enqueued"] = True
         if payload_status != "fresh":
             result["refresh_enqueued"] = refresh_enqueued
             result["refresh_reason"] = refresh_reason or f"api_{payload_status}"
-        if payload_status == "fresh":
+        if payload_status == "fresh" and str(result.get("statistics_status") or "") == "fresh":
             self._set_cached_payload(cache_key, result)
         return result
 
@@ -777,18 +810,35 @@ class BankDetailsApplicationService:
             return scope_summary
         expected_version = self._current_bank_auto_tag_rules_version()
         signatures = scope_summary.get("read_model_scope_signatures") if isinstance(scope_summary.get("read_model_scope_signatures"), dict) else {}
-        stale_scope_keys: list[str] = []
-        for scope_key, signature in signatures.items():
-            if not isinstance(signature, dict):
-                stale_scope_keys.append(str(scope_key))
-                continue
-            source_versions = signature.get("source_versions") if isinstance(signature.get("source_versions"), dict) else {}
-            actual_version = self._int_or_none(source_versions.get("bank_auto_tag_rules_version"))
-            if actual_version != expected_version:
-                stale_scope_keys.append(str(scope_key))
-        if not stale_scope_keys:
+        statistics_signatures = (
+            scope_summary.get("statistics_scope_signatures")
+            if isinstance(scope_summary.get("statistics_scope_signatures"), dict)
+            else {}
+        )
+
+        def stale_scope_keys_for(signature_rows: dict[str, object]) -> list[str]:
+            stale_scope_keys: list[str] = []
+            for scope_key, signature in signature_rows.items():
+                if not isinstance(signature, dict):
+                    stale_scope_keys.append(str(scope_key))
+                    continue
+                source_versions = signature.get("source_versions") if isinstance(signature.get("source_versions"), dict) else {}
+                actual_version = self._int_or_none(source_versions.get("bank_auto_tag_rules_version"))
+                if actual_version != expected_version:
+                    stale_scope_keys.append(str(scope_key))
+            return stale_scope_keys
+
+        stale_scope_keys = stale_scope_keys_for(signatures)
+        statistics_stale_scope_keys = stale_scope_keys_for(statistics_signatures)
+        if not stale_scope_keys and not statistics_stale_scope_keys:
             return scope_summary
         result = dict(scope_summary)
+        if statistics_stale_scope_keys:
+            result["statistics"] = None
+            result["statistics_status"] = "stale"
+            result["statistics_stale_scope_keys"] = statistics_stale_scope_keys
+        if not stale_scope_keys:
+            return result
         result["read_model_status"] = "stale"
         result["read_model_stale_reasons"] = [
             *list(result.get("read_model_stale_reasons") or []),
@@ -849,6 +899,8 @@ class BankDetailsApplicationService:
                 "rows": [],
                 "category_counts": {"uncategorized": 0},
                 "pagination": {"page": page, "page_size": page_size, "total": 0},
+                "statistics": None,
+                "statistics_status": str(summary.get("statistics_status") or "refreshing"),
                 "read_model_status": "refreshing",
                 "read_model_scope_keys": list(summary.get("read_model_scope_keys") or scope_keys),
                 "read_model_generated_at": summary.get("read_model_generated_at"),
@@ -941,6 +993,7 @@ class BankDetailsApplicationService:
             "kind": kind,
             "query": query,
             "scope_signatures": scope_summary.get("read_model_scope_signatures") or {},
+            "statistics_signature": scope_summary.get("statistics_signature") or "missing",
             "schema": f"bank_detail:v{BANK_DETAIL_READ_MODEL_SCHEMA_VERSION}",
         }
         digest = hashlib.sha256(json.dumps(signature, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")).hexdigest()

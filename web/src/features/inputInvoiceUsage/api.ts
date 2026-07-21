@@ -43,6 +43,14 @@ function numberValue(value: unknown, fallback: number) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function optionalCount(value: unknown): number | undefined {
+  if (value === null || value === undefined || value === "") {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
 function objectValue(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? value as Record<string, unknown> : {};
 }
@@ -281,6 +289,20 @@ function mapRowsResponse(payload: unknown): InputInvoiceUsageRowsResponse {
         matchedOaCount: numberValue(camelOrSnake(summary, "matchedOaCount", "matched_oa_count"), 0),
         matchedBankTransactionCount: numberValue(camelOrSnake(summary, "matchedBankTransactionCount", "matched_bank_transaction_count"), 0),
         pendingCount: numberValue(camelOrSnake(summary, "pendingCount", "pending_count"), 0),
+      };
+    })() : undefined,
+    statistics: raw.statistics && typeof raw.statistics === "object" ? (() => {
+      const statistics = objectValue(raw.statistics);
+      return {
+        invoiceCount: optionalCount(camelOrSnake(statistics, "invoiceCount", "invoice_count")),
+        linkedOaInvoiceCount: optionalCount(camelOrSnake(statistics, "linkedOaInvoiceCount", "linked_oa_invoice_count")),
+        linkedBankInvoiceCount: optionalCount(camelOrSnake(statistics, "linkedBankInvoiceCount", "linked_bank_invoice_count")),
+        paidInvoiceCount: optionalCount(camelOrSnake(statistics, "paidInvoiceCount", "paid_invoice_count")),
+        unlinkedOaInvoiceCount: optionalCount(camelOrSnake(statistics, "unlinkedOaInvoiceCount", "unlinked_oa_invoice_count")),
+        unlinkedBankInvoiceCount: optionalCount(camelOrSnake(statistics, "unlinkedBankInvoiceCount", "unlinked_bank_invoice_count")),
+        unpaidInvoiceCount: optionalCount(camelOrSnake(statistics, "unpaidInvoiceCount", "unpaid_invoice_count")),
+        formalRelationGroupCount: optionalCount(camelOrSnake(statistics, "formalRelationGroupCount", "formal_relation_group_count")),
+        oaReverseBatchCount: optionalCount(camelOrSnake(statistics, "oaReverseBatchCount", "oa_reverse_batch_count")),
       };
     })() : undefined,
     pagination: {

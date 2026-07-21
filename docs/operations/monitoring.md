@@ -262,7 +262,7 @@ curl -sS \
   "https://www.yn-sourcing.com/fin-ops-api/api/operations/app-health/page-audit?page=bank-details"
 ```
 
-当前 `ready` 页面：`pending-invoices`、`turnover-ledger`、`batch-accounting`、`bank-flow-rule-batches`、`oa-pending-payments`、`bank-details`、`cost-statistics`、`input-invoice-usage`、`output-invoice-collections`。其余注册页面返回 `409 page_audit_proof_unavailable`，不能作为通过证据。
+当前 17 个注册页面均为 `ready`，具体页面键以 `PAGE_AUDIT_REGISTRY` 为唯一事实源；包括本统计合同涉及的 `reconciliation-workbench`、`cost-statistics`、`bank-details`、`oa-pending-payments`、`turnover-ledger`、`etc-tickets`、`tax-offset`、`pending-invoices`、`input-invoice-usage`、`output-invoice-collections`。若后续 registry 登记为 unavailable，接口返回 `409 page_audit_proof_unavailable`，不能作为通过证据。
 
 报告还必须带 `proof_availability=ready`、非空 `contract_revision`、repeatable-read database snapshot，且 `audit_status.integrity=pass`、`freshness=fresh`、`queue=drained`，才可作为该页面已登记 proof 一致的证据。outbox/dirty scope 按 tenant 隔离，问题只返回样本；该审计不能证明尚未登记的 consumer projection，也不能证明外部银行/OA 系统本身没有漏同步。
 

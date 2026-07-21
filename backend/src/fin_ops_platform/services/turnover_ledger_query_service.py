@@ -111,6 +111,8 @@ class TurnoverLedgerQueryService:
         normalized_page = max(int(page or 1), 1)
         normalized_page_size = min(max(int(page_size or 50), 1), 200)
         return {
+            "statistics": None,
+            "statistics_status": "refreshing",
             "summary": {
                 "pending_repayment_amount": "0.00",
                 "repaid_amount": "0.00",

@@ -150,6 +150,33 @@ def _pending_invoice_expected_source_versions() -> dict[str, object]:
     }
 
 
+def _pending_invoice_statistics_contract(
+    *,
+    expense_versions: dict[str, object] | None = None,
+    income_versions: dict[str, object] | None = None,
+) -> dict[str, object]:
+    statistics = {
+        "bank_transaction_count": 0,
+        "expense_transaction_count": 0,
+        "income_transaction_count": 0,
+        "found_invoice_transaction_count": 0,
+        "pending_invoice_transaction_count": 0,
+        "no_invoice_required_transaction_count": 0,
+        "cash_income_transaction_count": 0,
+        "linked_oa_transaction_count": 0,
+        "linked_input_invoice_transaction_count": 0,
+        "linked_output_invoice_transaction_count": 0,
+    }
+    return {
+        "statistics": statistics,
+        "statistics_status": "fresh",
+        "statistics_source_versions_by_scope": {
+            "expense:all": expense_versions or _pending_invoice_expected_source_versions(),
+            "income:all": income_versions or _pending_invoice_expected_source_versions(),
+        },
+    }
+
+
 def _search_expected_source_versions() -> dict[str, object]:
     return SearchIndexSourceVersionsProvider(
         bank_auto_tag_rules_version_provider=lambda: 1,
@@ -452,6 +479,7 @@ class SearchPendingConnection:
         pending_rows: list[dict] | None = None,
         workbench_rows: list[dict] | None = None,
         pending_source_counts: dict[str, int] | None = None,
+        pending_statistics: dict[str, int] | None = None,
         pending_filter_option_rows: list[dict] | None = None,
         dirty: bool = False,
         pending_scope_exists: bool = True,
@@ -462,6 +490,7 @@ class SearchPendingConnection:
         self.pending_rows = list(pending_rows or [])
         self.workbench_rows = list(workbench_rows or [])
         self.pending_source_counts = dict(pending_source_counts or {"expense": len(self.pending_rows)})
+        self.pending_statistics = dict(pending_statistics or {})
         self.pending_filter_option_rows = list(pending_filter_option_rows or [])
         self.dirty = dirty
         self.pending_scope_exists = pending_scope_exists
@@ -485,6 +514,65 @@ class SearchPendingConnection:
             return self.search_rows
         if "from read_model.workbench_rows" in normalized:
             return self.workbench_rows
+        if "from read_model.pending_invoice_scopes" in normalized and "filter_group = 'all'" in normalized:
+            if not self.pending_scope_exists:
+                return []
+            statistics = self.pending_statistics or {
+                "bank_transaction_count": len(self.pending_rows),
+                "expense_transaction_count": len(self.pending_rows),
+                "income_transaction_count": 0,
+                "found_invoice_transaction_count": 0,
+                "pending_invoice_transaction_count": 0,
+                "no_invoice_required_transaction_count": 0,
+                "cash_income_transaction_count": 0,
+                "linked_oa_transaction_count": 0,
+                "linked_input_invoice_transaction_count": 0,
+                "linked_output_invoice_transaction_count": 0,
+            }
+            expense_count = int(statistics.get("expense_transaction_count") or 0)
+            income_count = int(statistics.get("income_transaction_count") or 0)
+            expense_statistics = {
+                **{key: 0 for key in statistics},
+                "bank_transaction_count": expense_count,
+                "expense_transaction_count": expense_count,
+                "found_invoice_transaction_count": int(statistics.get("linked_input_invoice_transaction_count") or 0),
+                "linked_input_invoice_transaction_count": int(
+                    statistics.get("linked_input_invoice_transaction_count") or 0
+                ),
+                "pending_invoice_transaction_count": int(statistics.get("pending_invoice_transaction_count") or 0),
+                "no_invoice_required_transaction_count": int(
+                    statistics.get("no_invoice_required_transaction_count") or 0
+                ),
+                "cash_income_transaction_count": int(statistics.get("cash_income_transaction_count") or 0),
+                "linked_oa_transaction_count": int(statistics.get("linked_oa_transaction_count") or 0),
+            }
+            income_statistics = {
+                **{key: 0 for key in statistics},
+                "bank_transaction_count": income_count,
+                "income_transaction_count": income_count,
+                "found_invoice_transaction_count": int(statistics.get("linked_output_invoice_transaction_count") or 0),
+                "linked_output_invoice_transaction_count": int(
+                    statistics.get("linked_output_invoice_transaction_count") or 0
+                ),
+            }
+            return [
+                {
+                    "scope_key": "expense:all:2026-05",
+                    "direction": "expense",
+                    "row_count": expense_count,
+                    "cache_status": "fresh",
+                    "source_versions": _pending_invoice_expected_source_versions(),
+                    "raw_payload": {"statistics_metadata": {"statistics": expense_statistics}},
+                },
+                {
+                    "scope_key": "income:all:2026-05",
+                    "direction": "income",
+                    "row_count": income_count,
+                    "cache_status": "fresh",
+                    "source_versions": _pending_invoice_expected_source_versions(),
+                    "raw_payload": {"statistics_metadata": {"statistics": income_statistics}},
+                },
+            ]
         if "from read_model.pending_invoice_scopes" in normalized:
             return [
                 {
@@ -493,9 +581,10 @@ class SearchPendingConnection:
                 }
             ] if self.pending_scope_exists else []
         if "from read_model.bank_detail_scopes" in normalized:
+            requested_scope = params[1][0] if len(params) > 1 else "2026-05"
             return [
                 {
-                    "scope_key": params[1][0],
+                    "scope_key": requested_scope,
                     "scope_type": "bank_detail",
                     "schema_version": 10,
                     "status": "fresh",
@@ -522,6 +611,8 @@ class SearchPendingConnection:
             return {"status": "pending", "updated_at": "2026-05-21T09:00:00+00:00"} if self.dirty else None
         if "from read_model.bank_detail_rows" in normalized:
             return {"transaction_id": "txn-bank-1"} if self.bank_detail_direction_exists else None
+        if "transaction_flags as" in normalized and "from read_model.pending_invoice_rows" in normalized:
+            return self.pending_statistics
         if "count(*)" in normalized and "from read_model.search_index_rows" in normalized:
             versions = [
                 dict(row.get("source_versions"))
@@ -1593,6 +1684,57 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
             },
         )
 
+    def test_pending_invoice_repository_returns_unfiltered_projection_statistics(self) -> None:
+        statistics = {
+            "bank_transaction_count": 900,
+            "expense_transaction_count": 500,
+            "income_transaction_count": 400,
+            "found_invoice_transaction_count": 620,
+            "pending_invoice_transaction_count": 210,
+            "no_invoice_required_transaction_count": 55,
+            "cash_income_transaction_count": 15,
+            "linked_oa_transaction_count": 580,
+            "linked_input_invoice_transaction_count": 360,
+            "linked_output_invoice_transaction_count": 260,
+        }
+        connection = SearchPendingConnection(
+            pending_rows=[
+                {
+                    "payload": {
+                        "id": "txn-visible",
+                        "bank_transaction": {"id": "txn-visible"},
+                        "invoice_acquisition_status": {"code": "paid_invoiced"},
+                    },
+                    "missing_invoice": False,
+                    "can_create_invoice": False,
+                }
+            ],
+            pending_statistics=statistics,
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.list_pending_invoice_rows(
+            direction="expense",
+            filter="requires_invoice",
+            date_from="2026-05-01",
+            date_to="2026-05-31",
+            keyword="visible",
+            page=1,
+            page_size=1,
+        )
+
+        self.assertEqual(payload["statistics"], statistics)
+        self.assertEqual(payload["statistics_status"], "fresh")
+        self.assertFalse(any("transaction_flags as" in sql for sql, _params in connection.fetch_one_calls))
+        statistics_sql = next(
+            sql
+            for sql, _params in connection.fetch_all_calls
+            if "from read_model.pending_invoice_scopes" in sql and "filter_group = 'all'" in sql
+        )
+        self.assertNotIn("from read_model.pending_invoice_rows", statistics_sql)
+        self.assertNotIn("trade_date >=", statistics_sql)
+        self.assertNotIn("searchable_text ilike", statistics_sql)
+
     def test_invoice_lifecycle_reads_exact_pending_invoice_month_shard(self) -> None:
         connection = SearchPendingConnection(
             pending_rows=[
@@ -2155,6 +2297,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                     "bank_transaction_tags": {},
                     "bank_transaction_tags_version": 1,
                     "refresh_status": "fresh",
+                    **_pending_invoice_statistics_contract(),
                     "source_versions": {
                         "pending_invoice_read_model_schema_version": "2026-05-pending-invoice-v1",
                         "pending_invoice_tag_groups_version": 999,
@@ -2208,6 +2351,22 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                     "bank_transaction_tags": {},
                     "bank_transaction_tags_version": 1,
                     "refresh_status": "fresh",
+                    **_pending_invoice_statistics_contract(
+                        expense_versions={
+                            **_pending_invoice_expected_source_versions(),
+                            "bank_detail_source_versions": {
+                                "bank_detail_schema_version": 12,
+                                "bank_auto_tag_rules_version": 7,
+                            },
+                        },
+                        income_versions={
+                            **_pending_invoice_expected_source_versions(),
+                            "bank_detail_source_versions": {
+                                "bank_detail_schema_version": 12,
+                                "bank_auto_tag_rules_version": 7,
+                            },
+                        },
+                    ),
                     "source_versions": {
                         key: value
                         for key, value in _pending_invoice_expected_source_versions().items()
@@ -2269,6 +2428,22 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                     "bank_transaction_tags": {},
                     "bank_transaction_tags_version": 1,
                     "refresh_status": "fresh",
+                    **_pending_invoice_statistics_contract(
+                        expense_versions={
+                            **_pending_invoice_expected_source_versions(),
+                            "workbench_relation_source_versions": {
+                                "workbench_relation_schema_version": "2026-06-relation-v1",
+                                "source_version": 42,
+                            },
+                        },
+                        income_versions={
+                            **_pending_invoice_expected_source_versions(),
+                            "workbench_relation_source_versions": {
+                                "workbench_relation_schema_version": "2026-06-relation-v1",
+                                "source_version": 42,
+                            },
+                        },
+                    ),
                     "source_versions": {
                         key: value
                         for key, value in _pending_invoice_expected_source_versions().items()
@@ -2331,6 +2506,22 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                     "bank_transaction_tags": {},
                     "bank_transaction_tags_version": 1,
                     "refresh_status": "fresh",
+                    **_pending_invoice_statistics_contract(
+                        expense_versions={
+                            **_pending_invoice_expected_source_versions(),
+                            "workbench_relation_source_versions": {
+                                "workbench_relation_schema_version": "2026-06-relation-v1",
+                                "source_version": 42,
+                            },
+                        },
+                        income_versions={
+                            **_pending_invoice_expected_source_versions(),
+                            "workbench_relation_source_versions": {
+                                "workbench_relation_schema_version": "2026-06-relation-v1",
+                                "source_version": 42,
+                            },
+                        },
+                    ),
                     "source_versions": {
                         **_pending_invoice_expected_source_versions(),
                         "workbench_relation_source_versions": {
@@ -2436,6 +2627,18 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                     "bank_transaction_tags": {},
                     "bank_transaction_tags_version": 1,
                     "refresh_status": "fresh",
+                    **_pending_invoice_statistics_contract(
+                        expense_versions={
+                            **_pending_invoice_expected_source_versions(),
+                            "bank_detail_source_versions": bank_versions["expense"],
+                            "workbench_relation_source_versions": relation_versions["expense"],
+                        },
+                        income_versions={
+                            **_pending_invoice_expected_source_versions(),
+                            "bank_detail_source_versions": bank_versions["income"],
+                            "workbench_relation_source_versions": relation_versions["income"],
+                        },
+                    ),
                     "source_versions": {
                         **_pending_invoice_expected_source_versions(),
                         "bank_detail_source_versions": bank_versions,
@@ -2466,15 +2669,12 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["read_model_status"], "fresh")
         self.assertNotIn("read_model_stale_reasons", payload)
         self.assertEqual(queue.refreshes, [])
-        self.assertEqual(
-            pending_repo.version_calls,
-            [
-                ("bank", {"direction": "expense", "filter": "all"}),
-                ("bank", {"direction": "income", "filter": "all"}),
-                ("relation", {"direction": "expense", "filter": "all"}),
-                ("relation", {"direction": "income", "filter": "all"}),
-            ],
-        )
+        for kind in ("bank", "relation"):
+            for direction in ("expense", "income"):
+                self.assertEqual(
+                    pending_repo.version_calls.count((kind, {"direction": direction, "filter": "all"})),
+                    2,
+                )
 
     def test_pending_invoice_api_serves_existing_rows_while_scope_refreshes(self) -> None:
         queue = QueueRecorder()
@@ -2519,7 +2719,13 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["source_summary"]["bank_transaction_rows"], 431)
         self.assertEqual(payload["summary"]["source_summary"]["income_rows"], 75)
         self.assertEqual(payload["read_model_status"], "refreshing")
-        self.assertEqual(queue.refreshes, [])
+        self.assertEqual(
+            queue.refreshes,
+            [
+                ("pending_invoice", "expense:all", "api_statistics_source_versions_stale"),
+                ("pending_invoice", "income:all", "api_statistics_source_versions_stale"),
+            ],
+        )
 
     def test_pending_invoice_read_model_service_rejects_unconfigured_repository_without_sync_scan(self) -> None:
         service = PendingInvoiceReadModelService(
@@ -2596,6 +2802,57 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(len(repository.calls), 1)
         self.assertEqual(repository.calls[0]["page"], "1")
         self.assertEqual(repository.calls[0]["page_size"], "200")
+
+    def test_pending_invoice_all_rows_requests_title_statistics_only_on_first_page(self) -> None:
+        expected_versions = _pending_invoice_expected_source_versions()
+
+        class PendingRepo:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            def list_pending_invoice_rows(self, **kwargs: object) -> dict[str, object]:
+                self.calls.append(dict(kwargs))
+                page = int(kwargs.get("page") or 1)
+                count = 200 if page == 1 else 1
+                return {
+                    "direction": "expense",
+                    "filter": "all",
+                    "rows": [
+                        {
+                            "id": f"txn-{page}-{index}",
+                            "invoice_acquisition_status": {"code": "paid_pending_invoice"},
+                            "input_invoices": {"primary": None, "summaries": []},
+                            "oa": {"primary": None, "summaries": []},
+                        }
+                        for index in range(count)
+                    ],
+                    "pagination": {"page": page, "page_size": 200, "total": 201},
+                    "summary": {"total_rows": 201},
+                    "statistics": {"bank_transaction_count": 201},
+                    "statistics_status": "fresh",
+                    "statistics_source_versions_by_scope": {
+                        "expense:all": expected_versions,
+                        "income:all": expected_versions,
+                    },
+                    "bank_transaction_tags": {},
+                    "bank_transaction_tags_version": 1,
+                    "refresh_status": "fresh",
+                    "source_versions": expected_versions,
+                }
+
+        repository = PendingRepo()
+        service = PendingInvoiceReadModelService(
+            repository=repository,
+            queue_repository=QueueRecorder(),
+            row_normalizer=lambda rows: rows,
+            settings_provider=lambda: {},
+            source_versions_provider=lambda: expected_versions,
+        )
+
+        payload = service.all_rows({"direction": ["expense"]})
+
+        self.assertEqual(len(payload["rows"]), 201)
+        self.assertEqual([call["include_statistics"] for call in repository.calls], [True, False])
 
     def test_pending_invoice_sql_page_preserves_bank_tag_settings(self) -> None:
         app = object.__new__(Application)

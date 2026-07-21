@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import PageScaffold from "../components/common/PageScaffold";
+import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import PageToolbar from "../components/common/PageToolbar";
 import StatePanel from "../components/common/StatePanel";
 import InputInvoiceUsageDetailDrawer from "../components/inputInvoiceUsage/InputInvoiceUsageDetailDrawer";
@@ -40,6 +41,7 @@ import type {
   InputInvoiceUsageQuery,
   InputInvoiceUsageRow,
   InputInvoiceUsageSortDirection,
+  InputInvoiceUsageStatistics,
 } from "../features/inputInvoiceUsage/types";
 
 const initialQuery: InputInvoiceUsageQuery = {
@@ -160,16 +162,6 @@ function normalizeFilterValue(filter: {
   };
 }
 
-function queryAffectsTitleTotal(query: InputInvoiceUsageQuery) {
-  return Boolean(
-    query.keyword.trim()
-    || query.invoiceDateFrom
-    || query.invoiceDateTo
-    || query.month
-    || query.filters.length > 0,
-  );
-}
-
 export default function InputInvoiceUsagePage() {
   const { active } = useOptionalPageActivation("input-invoice-usage");
   const { canAdminAccess } = useSessionPermissions();
@@ -188,7 +180,7 @@ export default function InputInvoiceUsagePage() {
   const setQuery = querySession.setValue;
   const [rows, setRows] = useState<InputInvoiceUsageRow[]>([]);
   const [total, setTotal] = useState(0);
-  const [titleInvoiceCount, setTitleInvoiceCount] = useState(0);
+  const [statistics, setStatistics] = useState<InputInvoiceUsageStatistics | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [readModelStatus, setReadModelStatus] = useState("");
@@ -198,43 +190,11 @@ export default function InputInvoiceUsagePage() {
   const [expandedCells, setExpandedCells] = useState<Set<string>>(() => new Set());
   const [keywordDraft, setKeywordDraft] = useState(query.keyword);
   const requestIdRef = useRef(0);
-  const titleTotalRequestIdRef = useRef(0);
-  const hasTitleInvoiceCountRef = useRef(false);
   const hasLoadedRef = useRef(false);
 
   useEffect(() => {
     setKeywordDraft(query.keyword);
   }, [query.keyword]);
-
-  const loadTitleTotal = useCallback((signal?: AbortSignal) => {
-    const requestId = titleTotalRequestIdRef.current + 1;
-    titleTotalRequestIdRef.current = requestId;
-    fetchInputInvoiceUsageRows({
-      page: 1,
-      pageSize: 1,
-      keyword: "",
-      invoiceDateFrom: "",
-      invoiceDateTo: "",
-      month: "",
-      filters: [],
-      sortField: "",
-      sortDirection: "",
-      signal,
-    })
-      .then((payload) => {
-        if (signal?.aborted || requestId !== titleTotalRequestIdRef.current) {
-          return;
-        }
-        if (READ_MODEL_NON_FRESH_STATUSES.has(normalizeReadModelStatus(payload.readModelStatus))) {
-          return;
-        }
-        hasTitleInvoiceCountRef.current = true;
-        setTitleInvoiceCount(payload.summary?.invoiceCount ?? payload.pagination.total);
-      })
-      .catch(() => {
-        // Keep the previous title count; the main rows request owns user-visible errors.
-      });
-  }, []);
 
   const loadRows = useCallback((mode: "reset" | "refresh", signal?: AbortSignal) => {
     const requestId = requestIdRef.current + 1;
@@ -274,15 +234,11 @@ export default function InputInvoiceUsagePage() {
         }
         setRows(payload.rows);
         setTotal(payload.pagination.total);
-        if (!queryAffectsTitleTotal(query)) {
-          hasTitleInvoiceCountRef.current = true;
-          setTitleInvoiceCount(payload.summary?.invoiceCount ?? payload.pagination.total);
-        } else if (!hasTitleInvoiceCountRef.current) {
-          loadTitleTotal(signal);
-        }
+        const nextReadModelStatus = combineReadModelStatus(payload.readModelStatus, optionsPayload.readModelStatus);
+        setStatistics(nextReadModelStatus === "fresh" ? payload.statistics ?? null : null);
         setFilterConfigs((payload.filterConfig?.length ?? 0) > 0 ? payload.filterConfig : filterConfigsFromOptions(optionsPayload.fields ?? []));
         setFilterOptions(filterOptionsByField(optionsPayload.fields ?? []));
-        setReadModelStatus(combineReadModelStatus(payload.readModelStatus, optionsPayload.readModelStatus));
+        setReadModelStatus(nextReadModelStatus);
         hasLoadedRef.current = true;
       })
       .catch((caught: unknown) => {
@@ -291,6 +247,7 @@ export default function InputInvoiceUsagePage() {
         }
         setRows([]);
         setTotal(0);
+        setStatistics(null);
         setReadModelStatus("");
         setError(caught instanceof Error ? caught.message : "进项发票使用情况加载失败，请稍后重试。");
       })
@@ -310,7 +267,6 @@ export default function InputInvoiceUsagePage() {
     query.pageSize,
     query.sortDirection,
     query.sortField,
-    loadTitleTotal,
   ]);
 
   useEffect(() => {
@@ -499,11 +455,26 @@ export default function InputInvoiceUsagePage() {
       </button>
     </PageToolbar>
   ), [exportDisabled, loadRows, loading, refreshing, setQuery]);
+  const visibleStatistics = readModelStatus === "fresh" ? statistics : null;
   const titleAccessory = useMemo(() => (
-    <div aria-label="进项发票数量统计" className="page-title-accessory-group" role="group">
-      <span className="invoice-count-segment">
-        <span className="invoice-count-segment__item invoice-count-segment__item--active">进项票 {titleInvoiceCount}</span>
-      </span>
+    <div className="page-title-accessory-group">
+      <PageStatisticsPopover
+        ariaLabel="进项发票使用情况数据统计"
+        loading={loading && !hasLoadedRef.current}
+        coreItems={[
+          { label: "进项发票", value: visibleStatistics?.invoiceCount, unit: "张" },
+          { label: "已关联 OA 的进项票", value: visibleStatistics?.linkedOaInvoiceCount, unit: "张" },
+          { label: "已关联流水的进项票", value: visibleStatistics?.linkedBankInvoiceCount, unit: "张" },
+        ]}
+        detailItems={[
+          { label: "已付款进项票", value: visibleStatistics?.paidInvoiceCount, unit: "张", tone: "success" },
+          { label: "未关联 OA", value: visibleStatistics?.unlinkedOaInvoiceCount, unit: "张", tone: "warning" },
+          { label: "未关联流水", value: visibleStatistics?.unlinkedBankInvoiceCount, unit: "张", tone: "warning" },
+          { label: "未付款进项票", value: visibleStatistics?.unpaidInvoiceCount, unit: "张", tone: "warning" },
+          { label: "正式关系组", value: visibleStatistics?.formalRelationGroupCount, unit: "组" },
+          { label: "反提 OA 批次", value: visibleStatistics?.oaReverseBatchCount, unit: "批" },
+        ]}
+      />
       {canAdminAccess ? (
         <PageBusinessAuditIcon
           ariaLabel="Audit 进项发票使用情况"
@@ -513,7 +484,7 @@ export default function InputInvoiceUsagePage() {
         />
       ) : null}
     </div>
-  ), [canAdminAccess, readModelStatus, titleInvoiceCount]);
+  ), [canAdminAccess, loading, readModelStatus, visibleStatistics]);
   const isEmpty = !loading && !refreshing && !error && !isReadModelNonFresh && rows.length === 0;
 
   return (

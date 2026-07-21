@@ -3452,7 +3452,20 @@ class EtcApiTests(unittest.TestCase):
             normalized_sql = " ".join(sql.split())
             fetch_all_calls.append((normalized_sql, params))
             if "group by bucket" in normalized_sql:
-                return [{"bucket": "unsubmitted", "count": 1}]
+                return [{
+                    "bucket": "unsubmitted",
+                    "count": 1,
+                    "etc_invoice_count": 65,
+                    "business_batch_count": 9,
+                    "unsubmitted_batch_count": 6,
+                    "draft_batch_count": 1,
+                    "submitted_batch_count": 2,
+                    "reconciliation_task_count": 4,
+                    "source_file_count": 7,
+                    "imported_invoice_count": 60,
+                    "linked_canonical_invoice_count": 58,
+                    "oa_draft_batch_count": 2,
+                }]
             if "select batch_payload, task_payload" in normalized_sql:
                 return [{
                     "batch_payload": batch_payload,
@@ -3487,7 +3500,7 @@ class EtcApiTests(unittest.TestCase):
         repository = PostgresOpsTaxEtcRepository(
             SimpleNamespace(fetch_all=fetch_all, fetch_one=fetch_one),
         )
-        repository.list_etc_business_batch_summaries(
+        list_payload = repository.list_etc_business_batch_summaries(
             bucket="unsubmitted",
             page=1,
             page_size=100,
@@ -3503,6 +3516,16 @@ class EtcApiTests(unittest.TestCase):
         self.assertIn("lower(%s::text)", list_count_sql)
         self.assertIn("where bucket = %s::text", list_page_sql)
         self.assertIn("limit %s::integer offset %s::integer", list_page_sql)
+        self.assertIn("left join app.etc_import_batches import_batch", list_count_sql)
+        self.assertIn("invoice.raw_payload->'normalized_payload'->>'import_batch_id'", list_count_sql)
+        self.assertIn("count(*) filter (where import_batch.batch_id is not null)", list_count_sql)
+        self.assertIn("count(*) filter (where oa_draft_id is not null)", list_count_sql)
+        self.assertEqual(list_count_sql.count("from app.etc_business_batches"), 1)
+        self.assertNotIn("jsonb_array_elements_text", list_count_sql)
+        self.assertNotIn("cross join lateral unnest", list_count_sql)
+        self.assertEqual(list_payload["counts"]["unsubmitted"], 1)
+        self.assertEqual(list_payload["statistics"]["business_batch_count"], 9)
+        self.assertEqual(list_payload["statistics"]["invoice_count"], 65)
         repository.get_etc_business_batch_record("ETC-BATCH-PERF-SQL")
         repository.list_etc_invoice_records_by_ids(invoice_ids)
         repository.get_etc_reconciliation_task_record("ETC-TASK-PERF-SQL")

@@ -8,7 +8,7 @@
 - 当前边界可信度：high
 - 目标边界：外部往来款页面读取 `turnover_ledger` read model；写操作通过 write facade/UoW/adapters 进入 scoped dirty projection。
 - 当前闭环：read path 由 `TurnoverLedgerApiRoutes` route owner 进入 `TurnoverLedgerQueryService` / read model，并在 repository 内用固定查询数完成 SQL 过滤、汇总和有界分页；repository miss 只允许经 `ReadModelQueryGateway` fail-closed/enqueue，不存在 live page builder fallback。write path 由 request-boundary facade 进入 `TurnoverLedgerWriteFacade` / UoW / explicit adapters；现代 closure confirm 先由 Turnover domain 做无副作用业务校验，再由 `WorkbenchRelationCommandService.prepare_confirm_relation(...)` 在同一事务完成 freshness、member lock 和 scoped relation snapshot，最终只写 canonical Workbench relation。通用 suggested relation confirm/withdraw 仍写 Turnover-owned relation/audit。全部 scoped dirty/outbox 目标经 scope policy 后交给 runtime queue 的 transaction-bound batch enqueue，一条 SQL 原子落库，不重写全量关系快照。refresh producer 只负责通过 `ReadModelRefreshGateway` enqueue。
-- 旧代码删除状态：`TurnoverLedgerReadFacade` app 转发壳、`TurnoverLedgerRelationMutationInvalidationLegacyAdapter`、`TurnoverLedgerRelationRepositoryAdapter`、确认/撤回的全量 `rebuild_from_bank_rows`/`save_turnover_relations` 链、现代 closure 的重复 Turnover relation/event 持久化、无收益的 `turnover-ledger-secondary`、turnover projection 对 `WorkbenchRelationReadFacade(require_fresh=True)` 的串行依赖、`Application._after_turnover_relation_mutation(...)`、`Application._refresh_local_app_settings_snapshot(...)`、refresh producer direct clear、query service `legacy_payload_builder/settings_provider` 分叉、repository `clear_turnover_ledger_rows` port、UoW 按 request/scope 逐条 enqueue、幂等事务外预查、同一 selected bank rows 的版本校验/closure preview 重复读取、cash-closure 撤回的 current relation 二次加载，以及 `assert_turnover_manual_closure_write_precondition` 独立预检和 `_active_relations_for_row_ids_from_command` 二次快照热路径已删除；列表不再读取或回退 `raw_payload`，projection 不再复制规范化 payload；边界 guard 防止恢复。
+- 旧代码删除状态：`TurnoverLedgerReadFacade` app 转发壳、`TurnoverLedgerRelationMutationInvalidationLegacyAdapter`、`TurnoverLedgerRelationRepositoryAdapter`、确认/撤回的全量 `rebuild_from_bank_rows`/`save_turnover_relations` 链、现代 closure 的重复 Turnover relation/event 持久化、无收益的 `turnover-ledger-secondary`、turnover projection 对 `WorkbenchRelationReadFacade(require_fresh=True)` 的串行依赖、`Application._after_turnover_relation_mutation(...)`、`Application._refresh_local_app_settings_snapshot(...)`、refresh producer direct clear、query service `legacy_payload_builder/settings_provider` 分叉、repository `clear_turnover_ledger_rows` port、UoW 按 request/scope 逐条 enqueue、幂等事务外预查、同一 selected bank rows 的版本校验/closure preview 重复读取、cash-closure 撤回的 current relation 二次加载，以及 `assert_turnover_manual_closure_write_precondition` 独立预检和 `_active_relations_for_row_ids_from_command` 二次快照热路径已删除；列表不再从 `raw_payload` 回退业务行 payload，projection 不再复制规范化 payload；边界 guard 防止恢复。
 
 ## 职责边界
 
@@ -39,7 +39,7 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| 外部往来款 rows/summary | 前端页面 | query gateway 后 fresh/status |
+| 外部往来款 rows/summary | 前端页面 | query gateway 后 fresh/status；完整重建和 relation delta 在发布事务内从未筛选 read-model rows/`flow_rows` 计算标题 `statistics`（去重流水、收支、台账组、结清、OA/发票关联），只在稳定首行的 `raw_payload.page_statistics` 保存一个标量标记；请求 SQL 只读取该标量，不再展开 `flow_rows`，且统计不受页面筛选、排序或分页影响；read model 或统计标记非 fresh 时统计为 `null` 并触发 scoped refresh，禁止用银行 canonical/统一事实源替代 |
 | 页面 Audit 状态 | 标题附件 | unknown/non-fresh 不得显示 Fresh；样本截断必须显式呈现 |
 | 写操作结果 | API/frontend operation barrier | 可审计、幂等或有版本保护；返回 `affected_months`、`affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`。前端轮询由共享 target-scoped runtime snapshot 只读取这些 scopes，不触发全局 App Status 聚合 |
 | Workbench active relation | `workbench-relations` | 只通过 `WorkbenchRelationCommandService` 写入/撤回；`turnover_manual_closure` relation metadata 明确声明 OA/发票 requirement。metadata 缺失的旧关系必须 fail closed，等待规则保存同步链路升级 |
@@ -58,7 +58,7 @@
 - Relation-only month refresh 的正式 I/O 是 `load_turnover_ledger_relation_delta(...)` / `save_turnover_ledger_relation_delta(...)`。查询依赖 `turnover_ledger_rows_bank_row_ids_gin`，保存不得 delete scope；完整 `save_turnover_ledger_rows(...)` 只属于 own-source 变化、repair、首次构建或明确安全 fallback。
 - `all` 聚合查询不得要求所有行级 source_versions 完全一致；按月增量 worker 刷新会让不相关月份保留旧 provenance。Query owner 只能在 repository 标记 mixed row versions 且 durable dirty scope 为 fresh 时把 all-view 判为 fresh，不能绕过 dirty scope。
 - 列表 page payload 只能从规范化 `payload` 读取；family/status/scope/direction、总 summary、family summaries 和 total 在 PostgreSQL 中计算，第二条 data query 只读取当前 `page_size<=200` 的 payload。筛选为空但 projection 已存在时返回 fresh 空结果，不得误触发 rebuild。
-- `raw_payload` 不属于 turnover 新 projection 的业务读取合同，v6 新写入固定为空对象；完整业务 payload 只由 `payload` 拥有。
+- `raw_payload` 不属于 turnover 业务行读取合同；完整业务 payload 只由 `payload` 拥有。唯一例外是 projection 发布时在按 `relation_id` 排序的首个 active row 写入 `raw_payload.page_statistics` 标量标记，其余行移除该键；列表仅可读取该内部标量，不得恢复业务 payload fallback。完整重建与 relation delta 必须在各自写事务内同步更新标记；标记缺失时 statistics 判为 stale，并复用现有 scope rows 补发。
 - Worker：`turnover-ledger`
 - Query owner：`TurnoverLedgerQueryService`
 - Repository owner：`TurnoverLedgerReadModelRepositoryPort`，仅暴露 `list_turnover_ledger_view`、`save_turnover_ledger_rows`、`load_turnover_ledger_relation_delta`、`save_turnover_ledger_relation_delta`。

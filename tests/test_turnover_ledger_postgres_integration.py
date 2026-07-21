@@ -39,6 +39,14 @@ class TurnoverLedgerPostgresIntegrationTests(unittest.TestCase):
                 "pending_collection_amount": "0.00",
                 "collected_amount": "0.00",
                 "closed_amount": "0.00",
+                "flow_rows": [
+                    {
+                        "source_bank_row_id": "bank-personal-in",
+                        "flow_direction": "income",
+                        "linked_oa": True,
+                        "linked_invoice": False,
+                    }
+                ],
                 "source_versions": self.source_versions,
             },
             {
@@ -50,6 +58,15 @@ class TurnoverLedgerPostgresIntegrationTests(unittest.TestCase):
                 "principal_amount": "600.00",
                 "settled_amount": "100.00",
                 "balance_amount": "500.00",
+                "cash_closure_linked": True,
+                "flow_rows": [
+                    {
+                        "source_bank_row_id": "bank-company-out",
+                        "flow_direction": "expense",
+                        "linked_oa": False,
+                        "linked_invoice": True,
+                    }
+                ],
                 "source_versions": self.source_versions,
             },
             {
@@ -63,6 +80,14 @@ class TurnoverLedgerPostgresIntegrationTests(unittest.TestCase):
                 "pending_collection_amount": "300.00",
                 "collected_amount": "50.00",
                 "closed_amount": "0.00",
+                "flow_rows": [
+                    {
+                        "source_bank_row_id": "bank-bank-out",
+                        "flow_direction": "expense",
+                        "linked_oa": False,
+                        "linked_invoice": False,
+                    }
+                ],
                 "source_versions": self.source_versions,
             },
         ]
@@ -85,6 +110,19 @@ class TurnoverLedgerPostgresIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(payload["source_versions"], self.source_versions)
         self.assertEqual(payload["refresh_status"], "fresh")
+        self.assertEqual(
+            payload["statistics"],
+            {
+                "transaction_count": 3,
+                "expense_transaction_count": 2,
+                "income_transaction_count": 1,
+                "ledger_group_count": 3,
+                "closed_group_count": 1,
+                "unclosed_group_count": 2,
+                "linked_oa_transaction_count": 1,
+                "linked_invoice_transaction_count": 1,
+            },
+        )
         personal = next(item for item in payload["family_summaries"] if item["family"] == "personal")
         company = next(item for item in payload["family_summaries"] if item["family"] == "company")
         self.assertEqual(personal["pending_amount"], "1000.00")
@@ -104,7 +142,10 @@ class TurnoverLedgerPostgresIntegrationTests(unittest.TestCase):
             "select payload, raw_payload from read_model.turnover_ledger_rows order by relation_id"
         )
         self.assertTrue(all(isinstance(row["payload"], dict) and row["payload"] for row in stored))
-        self.assertTrue(all(row["raw_payload"] == {} for row in stored))
+        markers = [row["raw_payload"]["page_statistics"] for row in stored if "page_statistics" in row["raw_payload"]]
+        self.assertEqual(len(markers), 1)
+        self.assertEqual(markers[0]["transaction_count"], 3)
+        self.assertEqual(markers[0]["ledger_group_count"], 3)
 
     def test_all_scope_aggregates_child_dirty_status_and_failed_takes_precedence(self) -> None:
         self.repository.save_turnover_ledger_rows(
@@ -316,6 +357,9 @@ class TurnoverLedgerPostgresIntegrationTests(unittest.TestCase):
         )
         self.assertTrue(all(row["source_versions"] == next_versions for row in stored))
         self.assertTrue(all(row["payload"]["source_versions"] == next_versions for row in stored))
+        refreshed = self.repository.list_turnover_ledger_view(scope_key="all")
+        self.assertEqual(refreshed["statistics"]["closed_group_count"], 1)
+        self.assertEqual(refreshed["statistics"]["unclosed_group_count"], 1)
 
 
 if __name__ == "__main__":

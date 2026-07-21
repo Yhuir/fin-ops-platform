@@ -310,7 +310,6 @@ describe("turnover ledger API", () => {
       syncToWorkbench: false,
     });
     expect(ledger.pagination.pageSize).toBe(50);
-
     const detail = await fetchTurnoverRelationDetail("rel-001");
     expect(detail.relation.relationId).toBe("rel-001");
     expect(detail.relation.counterpartyName).toBe("张三");
@@ -697,6 +696,13 @@ describe("turnover ledger API", () => {
             page_size: 100,
             total: 1,
           },
+          statistics: {
+            transaction_count: "9000",
+            expense_transaction_count: 4500,
+            income_transaction_count: 4500,
+            closed_group_count: -1,
+            ledger_group_count: 2.5,
+          },
         }), { headers: { "Content-Type": "application/json" } });
       }),
     );
@@ -711,6 +717,13 @@ describe("turnover ledger API", () => {
       pendingCollectionAmount: "0.00",
       collectedAmount: "0.00",
     });
+    expect(ledger.statistics).toEqual(expect.objectContaining({
+      transactionCount: 9000,
+      expenseTransactionCount: 4500,
+      incomeTransactionCount: 4500,
+      closedGroupCount: undefined,
+      ledgerGroupCount: undefined,
+    }));
     expect(ledger.groups[0]).toMatchObject({
       groupId: "counterparty:company:梁希涛",
       counterpartyName: "梁希涛",

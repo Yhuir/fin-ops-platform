@@ -3,6 +3,7 @@ import { ChevronDown } from "lucide-react";
 
 import PageScaffold from "../components/common/PageScaffold";
 import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
+import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import PageToolbar from "../components/common/PageToolbar";
 import PendingInvoiceDetailDrawer from "../components/pendingInvoices/PendingInvoiceDetailDrawer";
 import PendingInvoiceExportDrawer from "../components/pendingInvoices/PendingInvoiceExportDrawer";
@@ -45,6 +46,7 @@ import type {
   PendingInvoiceSortDirection,
   PendingInvoiceSortField,
   PendingInvoiceSourceSummary,
+  PendingInvoiceStatistics,
 } from "../features/pendingInvoices/types";
 
 const DEFAULT_PAGE_SIZE = 50;
@@ -219,6 +221,7 @@ export default function PendingInvoicesPage() {
   const [rows, setRows] = useState<PendingInvoiceRow[]>([]);
   const [total, setTotal] = useState(0);
   const [sourceSummary, setSourceSummary] = useState<PendingInvoiceSourceSummary | null>(null);
+  const [statistics, setStatistics] = useState<PendingInvoiceStatistics | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [keyword, setKeyword] = useState("");
@@ -266,6 +269,7 @@ export default function PendingInvoicesPage() {
     setTotal(payload.pagination.total);
     setSourceSummary(payload.summary.sourceSummary ?? null);
     setReadModelStatus(payload.readModelStatus);
+    setStatistics(payload.readModelStatus === "fresh" ? payload.statistics ?? null : null);
     const version = payload.tagDictionary?.version;
     if (typeof version === "number" && version > 0) {
       const previousVersion = tagVersionRef.current;
@@ -284,6 +288,7 @@ export default function PendingInvoicesPage() {
       .then(applyRowsPayload)
       .catch((caught) => {
         if (!isAbortLikeError(caught)) {
+          setStatistics(null);
           setError(caught instanceof Error ? caught.message : "待找发票加载失败。");
         }
       })
@@ -741,14 +746,37 @@ export default function PendingInvoicesPage() {
     </div>
   );
 
-  const titleAccessory = canAdminAccess ? (
-    <PageBusinessAuditIcon
-      ariaLabel="Audit 待找发票"
-      pageKey="pending-invoices"
-      label="待找发票"
-      readModelStatus={readModelStatus}
-    />
-  ) : null;
+  const visibleStatistics = readModelStatus === "fresh" ? statistics : null;
+  const titleAccessory = (
+    <div className="page-title-accessory-group">
+      <PageStatisticsPopover
+        ariaLabel="待找发票数据统计"
+        loading={loading && !readModelStatus}
+        coreItems={[
+          { label: "流水", value: visibleStatistics?.bankTransactionCount, unit: "笔" },
+          { label: "已找到发票的流水", value: visibleStatistics?.foundInvoiceTransactionCount, unit: "笔", tone: "success" },
+          { label: "待找发票的流水", value: visibleStatistics?.pendingInvoiceTransactionCount, unit: "笔", tone: "warning" },
+        ]}
+        detailItems={[
+          { label: "支出", value: visibleStatistics?.expenseTransactionCount, unit: "笔", tone: "expense" },
+          { label: "收入", value: visibleStatistics?.incomeTransactionCount, unit: "笔", tone: "income" },
+          { label: "无需开票流水", value: visibleStatistics?.noInvoiceRequiredTransactionCount, unit: "笔" },
+          { label: "现金收入流水", value: visibleStatistics?.cashIncomeTransactionCount, unit: "笔", tone: "income" },
+          { label: "已关联 OA 的流水", value: visibleStatistics?.linkedOaTransactionCount, unit: "笔" },
+          { label: "已关联进项票的流水", value: visibleStatistics?.linkedInputInvoiceTransactionCount, unit: "笔" },
+          { label: "已关联销项票的流水", value: visibleStatistics?.linkedOutputInvoiceTransactionCount, unit: "笔" },
+        ]}
+      />
+      {canAdminAccess ? (
+        <PageBusinessAuditIcon
+          ariaLabel="Audit 待找发票"
+          pageKey="pending-invoices"
+          label="待找发票"
+          readModelStatus={readModelStatus}
+        />
+      ) : null}
+    </div>
+  );
 
   return (
     <div className="pending-invoices-page" data-testid="pending-invoices-page">

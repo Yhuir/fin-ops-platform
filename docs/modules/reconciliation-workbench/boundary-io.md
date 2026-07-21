@@ -122,3 +122,9 @@ Release A 已删除运行时链路且禁止恢复；旧表物理存储只为短�
 - rehydrate 必须至少成功发布一个月 generation，从而为当前 active-month generation-set 原子生成两条 all-scope stats；stats 缺失时页面只能保持 refreshing，运维不得直接 SQL 补写统计。
 - 回滚应用版本不得重新创建旧 candidate/decision 表；若必须回退展示代码，只能继续读取 active formal relations 和 paired/unpaired generation。
 - 修复验收必须证明 520 关系进入 paired、13 张合计 1709.49 的发票各自 unpaired、canonical count 未减少、active relation/history 未损坏。
+
+## 页面完整性统计合同
+
+- 关联台既有 combined initial 响应增加 `statistics`，统计只组合当前 active monthly generations 中页面实际拉取的 OA、银行流水、进项/销项发票、已配对组和未配对对象；不读取统一事实源汇总，也不受页面筛选、排序或分页影响。
+- 每次月份 generation 发布后，统计写入既有 `workbench_generation_stats(scope_key='all')` 的 `page_statistics`；只有 paired/unpaired 两条记录与当前 active generation-set digest 完全一致且 all-scope fresh 时返回，任一不一致即 `statistics=null`/refreshing，禁止请求内旧统计 fallback。
+- Page Audit 使用 active generations、groups 和 members 独立重算核心统计，与发布值比较；统计复用既有 active-generation/read-model 边界，不新增 endpoint、表、worker、队列或共享 I/O。

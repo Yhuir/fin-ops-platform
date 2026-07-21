@@ -2,6 +2,7 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } f
 
 import AppDrawer from "../components/common/AppDrawer";
 import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
+import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import ActionStatusModal from "../components/workbench/ActionStatusModal";
 import CancelProcessedExceptionModal from "../components/workbench/CancelProcessedExceptionModal";
 import DetailDrawer from "../components/workbench/DetailDrawer";
@@ -75,6 +76,7 @@ import type {
   WorkbenchRefreshStatus,
   WorkbenchRelationPreview,
   WorkbenchSettings,
+  WorkbenchStatistics,
   WorkbenchZoneCounts,
   WorkbenchZonePageInfo,
 } from "../features/workbench/types";
@@ -440,6 +442,7 @@ export default function ReconciliationWorkbenchPage() {
   } =
     useWorkbenchSelection();
   const [workbenchData, setWorkbenchData] = useState<WorkbenchData | null>(null);
+  const [statistics, setStatistics] = useState<WorkbenchStatistics | null>(null);
   const [loadedZoneServerPageQueryKeys, setLoadedZoneServerPageQueryKeys] = useState<
     Record<"paired" | "unpaired", string> | null
   >(null);
@@ -809,6 +812,7 @@ export default function ReconciliationWorkbenchPage() {
     }
     activeWorkbenchReadModelVersionRef.current = nextVersion;
     setWorkbenchData(workbenchPayload.data);
+    setStatistics(workbenchZonePagesReadModelStatus(workbenchPayload.pages) === "fresh" ? workbenchPayload.statistics ?? null : null);
     setLoadedZoneServerPageQueryKeys(createWorkbenchZoneServerPageQueryKeys(resolvedZoneQueries));
     setZonePages(workbenchPayload.pages);
   }
@@ -881,6 +885,7 @@ export default function ReconciliationWorkbenchPage() {
         : new Error("工作台数据加载失败，请稍后重试。");
       if (!background) {
         setWorkbenchData(null);
+        setStatistics(null);
         activeWorkbenchReadModelVersionRef.current = "";
         setLoadedZoneServerPageQueryKeys(null);
         setZonePages(createInitialZonePages());
@@ -2360,8 +2365,32 @@ export default function ReconciliationWorkbenchPage() {
         <header className="page-header">
           <div className="page-title-row">
             <h1 className="page-title">关联台</h1>
-            {canAdminAccess ? (
-              <div className="page-title-accessory">
+            <div className="page-title-accessory">
+              <div className="page-title-accessory-group">
+                <PageStatisticsPopover
+                  ariaLabel="关联台数据统计"
+                  loading={isLoading && !workbenchData}
+                  coreItems={[
+                    { label: "OA", value: workbenchPageReadModelStatus === "fresh" ? statistics?.oaCount : null, unit: "条" },
+                    { label: "流水", value: workbenchPageReadModelStatus === "fresh" ? statistics?.bankTransactionCount : null, unit: "笔" },
+                    { label: "进项", value: workbenchPageReadModelStatus === "fresh" ? statistics?.inputInvoiceCount : null, unit: "张" },
+                    { label: "销项", value: workbenchPageReadModelStatus === "fresh" ? statistics?.outputInvoiceCount : null, unit: "张" },
+                  ]}
+                  detailItems={[
+                    { label: "已配对组", value: workbenchPageReadModelStatus === "fresh" ? statistics?.pairedGroupCount : null, unit: "组", tone: "success" },
+                    { label: "未配对对象", value: workbenchPageReadModelStatus === "fresh" ? statistics?.unpairedObjectCount : null, unit: "个", tone: "warning" },
+                    { label: "支出流水", value: workbenchPageReadModelStatus === "fresh" ? statistics?.expenseTransactionCount : null, unit: "笔", tone: "expense" },
+                    { label: "收入流水", value: workbenchPageReadModelStatus === "fresh" ? statistics?.incomeTransactionCount : null, unit: "笔", tone: "income" },
+                    { label: "已配对 OA", value: workbenchPageReadModelStatus === "fresh" ? statistics?.pairedOaCount : null, unit: "条" },
+                    { label: "已配对流水", value: workbenchPageReadModelStatus === "fresh" ? statistics?.pairedBankTransactionCount : null, unit: "笔" },
+                    { label: "已配对发票", value: workbenchPageReadModelStatus === "fresh" ? statistics?.pairedInvoiceCount : null, unit: "张" },
+                    { label: "不完整关系组", value: workbenchPageReadModelStatus === "fresh" ? statistics?.incompleteGroupCount : null, unit: "组", tone: "warning" },
+                    { label: "缺 OA 关系组", value: workbenchPageReadModelStatus === "fresh" ? statistics?.missingOaGroupCount : null, unit: "组", tone: "warning" },
+                    { label: "缺流水关系组", value: workbenchPageReadModelStatus === "fresh" ? statistics?.missingBankGroupCount : null, unit: "组", tone: "warning" },
+                    { label: "缺发票关系组", value: workbenchPageReadModelStatus === "fresh" ? statistics?.missingInvoiceGroupCount : null, unit: "组", tone: "warning" },
+                  ]}
+                />
+                {canAdminAccess ? (
                 <PageBusinessAuditIcon
                   ariaLabel="Audit 关联台"
                   pageKey="reconciliation-workbench"
@@ -2369,8 +2398,9 @@ export default function ReconciliationWorkbenchPage() {
                   auditContextKey={`${activeWorkbenchReadModelVersion ?? "none"}:${workbenchPageReadModelStatus}`}
                   readModelStatus={workbenchPageReadModelStatus}
                 />
+                ) : null}
               </div>
-            ) : null}
+            </div>
           </div>
         </header>
         {loadError ? <div className="state-panel error">{loadError}</div> : null}

@@ -232,6 +232,14 @@ describe("workbench api bank amount mapping", () => {
                   unpaired: { groups: 1, oa: 3, bank: 0, invoice: 5, rows: 8 },
                 },
               },
+              statistics: {
+                oa_count: "800",
+                bank_transaction_count: 900,
+                input_invoice_count: 700,
+                output_invoice_count: 600,
+                paired_group_count: -1,
+                unpaired_object_count: 3.5,
+              },
               oa_status: { code: "ready", message: "OA 已同步" },
               invoice_inventory: {
                 system_total: 9,
@@ -362,6 +370,14 @@ describe("workbench api bank amount mapping", () => {
     expect(result.data.invoiceInventory.systemTotal).toBe(9);
     expect(result.data.invoiceInventory.oaAttachmentTotal).toBe(5);
     expect(result.data.oaStatus.message).toBe("OA 已同步");
+    expect(result.statistics).toEqual(expect.objectContaining({
+      oaCount: 800,
+      bankTransactionCount: 900,
+      inputInvoiceCount: 700,
+      outputInvoiceCount: 600,
+      pairedGroupCount: undefined,
+      unpairedObjectCount: undefined,
+    }));
     expect(result.pages.unpaired.hasMore).toBe(false);
     expect(result.pages.paired.readModelVersion).toBe("generation-set-1");
     expect(result.pages.unpaired.readModelVersion).toBe("generation-set-1");

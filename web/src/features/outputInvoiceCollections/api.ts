@@ -46,6 +46,14 @@ function numberValue(value: unknown, fallback: number) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function optionalCount(value: unknown): number | undefined {
+  if (value === null || value === undefined || value === "") {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
 function objectValue(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? value as Record<string, unknown> : {};
 }
@@ -412,6 +420,20 @@ function mapRowsResponse(payload: unknown): OutputInvoiceCollectionRowsResponse 
         pendingCollectionCount: numberValue(camelOrSnake(summary, "pendingCollectionCount", "pending_collection_count"), 0),
         partialCollectionCount: numberValue(camelOrSnake(summary, "partialCollectionCount", "partial_collection_count"), 0),
         receiptPendingCount: numberValue(camelOrSnake(summary, "receiptPendingCount", "receipt_pending_count"), 0),
+      };
+    })() : undefined,
+    statistics: raw.statistics && typeof raw.statistics === "object" ? (() => {
+      const statistics = objectValue(raw.statistics);
+      return {
+        invoiceCount: optionalCount(camelOrSnake(statistics, "invoiceCount", "invoice_count")),
+        linkedOaInvoiceCount: optionalCount(camelOrSnake(statistics, "linkedOaInvoiceCount", "linked_oa_invoice_count")),
+        linkedIncomeBankInvoiceCount: optionalCount(camelOrSnake(statistics, "linkedIncomeBankInvoiceCount", "linked_income_bank_invoice_count")),
+        collectedInvoiceCount: optionalCount(camelOrSnake(statistics, "collectedInvoiceCount", "collected_invoice_count")),
+        unlinkedOaInvoiceCount: optionalCount(camelOrSnake(statistics, "unlinkedOaInvoiceCount", "unlinked_oa_invoice_count")),
+        unlinkedBankInvoiceCount: optionalCount(camelOrSnake(statistics, "unlinkedBankInvoiceCount", "unlinked_bank_invoice_count")),
+        uncollectedInvoiceCount: optionalCount(camelOrSnake(statistics, "uncollectedInvoiceCount", "uncollected_invoice_count")),
+        redInvoiceCount: optionalCount(camelOrSnake(statistics, "redInvoiceCount", "red_invoice_count")),
+        issuedReceiptCount: optionalCount(camelOrSnake(statistics, "issuedReceiptCount", "issued_receipt_count")),
       };
     })() : undefined,
     pagination: {

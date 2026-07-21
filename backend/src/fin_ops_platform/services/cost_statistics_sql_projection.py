@@ -561,6 +561,8 @@ class CostStatisticsSqlProjectionBuilder:
             return None
         if not isinstance(metadata, dict):
             return None
+        if month == "all" and metadata.get("statistics_ready") is not True:
+            return None
         existing_source_versions = metadata.get("source_versions")
         if not isinstance(existing_source_versions, dict) or existing_source_versions != source_versions:
             return None

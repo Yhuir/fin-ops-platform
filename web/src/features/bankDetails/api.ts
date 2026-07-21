@@ -150,6 +150,15 @@ type ApiBankDetailTransactionsResponse = {
     total?: number;
   };
   category_counts?: Record<string, number>;
+  statistics?: {
+    transaction_count?: number | null;
+    expense_transaction_count?: number | null;
+    income_transaction_count?: number | null;
+    classified_transaction_count?: number | null;
+    unclassified_transaction_count?: number | null;
+    linked_transaction_count?: number | null;
+    unlinked_transaction_count?: number | null;
+  } | null;
   tag_dictionary?: Parameters<typeof mapBankTransactionTagDictionary>[0];
   bank_transaction_tags?: Parameters<typeof mapBankTransactionTagDictionary>[0];
   read_model_status?: string | null;
@@ -255,6 +264,14 @@ function normalizeBankDetailReadModelStatus(value: unknown): BankDetailReadModel
     return value;
   }
   return "refreshing";
+}
+
+function optionalCount(value: unknown): number | undefined {
+  if (value === null || value === undefined || value === "") {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
 function fieldErrorMessagesFromPayload(payload: unknown) {
@@ -822,6 +839,15 @@ export async function fetchBankDetailTransactions({
       total: payload.pagination?.total ?? payload.rows.length,
     },
     categoryCounts: mapCategoryCounts(payload.category_counts),
+    statistics: payload.statistics ? {
+      transactionCount: optionalCount(payload.statistics.transaction_count),
+      expenseTransactionCount: optionalCount(payload.statistics.expense_transaction_count),
+      incomeTransactionCount: optionalCount(payload.statistics.income_transaction_count),
+      classifiedTransactionCount: optionalCount(payload.statistics.classified_transaction_count),
+      unclassifiedTransactionCount: optionalCount(payload.statistics.unclassified_transaction_count),
+      linkedTransactionCount: optionalCount(payload.statistics.linked_transaction_count),
+      unlinkedTransactionCount: optionalCount(payload.statistics.unlinked_transaction_count),
+    } : undefined,
     tagDictionary: mapBankTransactionTagDictionary(payload.tag_dictionary ?? payload.bank_transaction_tags),
     readModelStatus: normalizeBankDetailReadModelStatus(payload.read_model_status),
     cacheStatus: payload.cache_status ?? null,

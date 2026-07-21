@@ -27,7 +27,7 @@ COST_STATISTICS_AUDIT_EVENT_TYPES = (
     "bank_detail.read_model.refresh",
     "workbench_relation.read_model.refresh",
 )
-COST_STATISTICS_AUDIT_QUERY_BUDGET = 23
+COST_STATISTICS_AUDIT_QUERY_BUDGET = 25
 
 _EXACT_SET_ISSUE_MESSAGES = {
     "cost_statistics_scope_row_count_mismatch": (
@@ -175,6 +175,7 @@ def _audit_cost_statistics_snapshot(
                 "month_upstream_source_version_equality",
                 "parent_source_shard_map_equality",
                 "project_expense_and_bank_flow_summary_recalculation",
+                "page_statistics_recalculation",
                 "durable_queue_and_freshness_gate",
             ],
             "pass_condition": (
@@ -1200,39 +1201,56 @@ def _key_display_field_issues(
             """
             /* check: cost_summary_recalculation */
             with expected_scope_rows as (
-                select scope_key, row_key, amount
+                select scope_key, row_key, transaction_id, group_id, project_name, expense_type, amount
                 from read_model.cost_statistics_rows
                 union all
-                select project_scope || ':all', row_key, amount
+                select project_scope || ':all', row_key, transaction_id, group_id, project_name, expense_type, amount
                 from read_model.cost_statistics_rows
                 where scope_key ~ '^(active|all):[0-9]{4}-[0-9]{2}$'
             ),
             recalculated as (
                 select model.scope_key,
                        count(row.row_key)::integer as row_count,
+                       count(distinct row.transaction_id)::integer as transaction_count,
+                       count(distinct row.group_id) filter (
+                           where nullif(btrim(row.group_id), '') is not null
+                       )::integer as group_count,
+                       count(distinct row.project_name) filter (
+                           where nullif(btrim(row.project_name), '') is not null
+                       )::integer as project_count,
+                       count(distinct row.expense_type) filter (
+                           where nullif(btrim(row.expense_type), '') is not null
+                       )::integer as expense_type_count,
                        coalesce(sum(row.amount), 0)::numeric as total_amount
                 from read_model.cost_statistics_read_models model
                 left join expected_scope_rows row on row.scope_key = model.scope_key
                 group by model.scope_key
             ),
             expected_bank_scope_rows as (
-                select scope_key, row_key, amount, direction
+                select scope_key, row_key, transaction_id, amount, direction, bank_tag_code
                 from read_model.cost_statistics_bank_flow_rows
                 union all
-                select project_scope || ':all', row_key, amount, direction
+                select project_scope || ':all', row_key, transaction_id, amount, direction, bank_tag_code
                 from read_model.cost_statistics_bank_flow_rows
                 where scope_key ~ '^(active|all):[0-9]{4}-[0-9]{2}$'
             ),
             bank_recalculated as (
                 select model.scope_key,
                        count(row.row_key)::integer as row_count,
+                       count(distinct row.transaction_id)::integer as transaction_count,
                        coalesce(sum(abs(row.amount)), 0)::numeric as total_amount,
-                       count(row.row_key) filter (
+                       count(distinct row.transaction_id) filter (
                            where row.direction = '支出'
                        )::integer as expense_transaction_count
-                       , count(row.row_key) filter (
+                       , count(distinct row.transaction_id) filter (
                            where row.direction = '收入'
                        )::integer as income_transaction_count
+                       , count(distinct row.transaction_id) filter (
+                           where nullif(btrim(row.bank_tag_code), '') is not null
+                       )::integer as tagged_transaction_count
+                       , count(distinct row.bank_tag_code) filter (
+                           where nullif(btrim(row.bank_tag_code), '') is not null
+                       )::integer as bank_tag_count
                        , coalesce(sum(
                            case
                                when row.direction = '支出' then abs(row.amount)
@@ -1254,7 +1272,9 @@ def _key_display_field_issues(
                    recalculated.row_count,
                    recalculated.total_amount::text as recalculated_total_amount,
                    model.payload->'payload'->'bank_flow_summary' as stored_bank_flow_summary,
+                   model.payload->'payload'->'statistics' as stored_statistics,
                    bank_recalculated.row_count as bank_flow_row_count,
+                   bank_recalculated.transaction_count as bank_flow_transaction_count,
                    bank_recalculated.total_amount::text as bank_flow_total_amount,
                    bank_recalculated.expense_amount::text as bank_flow_expense_amount,
                    bank_recalculated.income_amount::text as bank_flow_income_amount
@@ -1351,6 +1371,72 @@ def _key_display_field_issues(
                         else 0
                     end - bank_recalculated.income_amount
                   ) > 0.01
+               or case
+                      when coalesce(
+                               model.payload->'payload'->'statistics'->>'transaction_count', ''
+                           ) ~ '^[0-9]+$'
+                      then (model.payload->'payload'->'statistics'->>'transaction_count')::integer
+                      else -1
+                  end <> bank_recalculated.transaction_count
+               or case
+                      when coalesce(
+                               model.payload->'payload'->'statistics'->>'expense_transaction_count', ''
+                           ) ~ '^[0-9]+$'
+                      then (model.payload->'payload'->'statistics'->>'expense_transaction_count')::integer
+                      else -1
+                  end <> bank_recalculated.expense_transaction_count
+               or case
+                      when coalesce(
+                               model.payload->'payload'->'statistics'->>'income_transaction_count', ''
+                           ) ~ '^[0-9]+$'
+                      then (model.payload->'payload'->'statistics'->>'income_transaction_count')::integer
+                      else -1
+                  end <> bank_recalculated.income_transaction_count
+               or case
+                      when coalesce(
+                               model.payload->'payload'->'statistics'->>'cost_group_count', ''
+                           ) ~ '^[0-9]+$'
+                      then (model.payload->'payload'->'statistics'->>'cost_group_count')::integer
+                      else -1
+                  end <> recalculated.group_count
+               or case
+                      when coalesce(
+                               model.payload->'payload'->'statistics'->>'tagged_transaction_count', ''
+                           ) ~ '^[0-9]+$'
+                      then (model.payload->'payload'->'statistics'->>'tagged_transaction_count')::integer
+                      else -1
+                  end <> bank_recalculated.tagged_transaction_count
+               or case
+                      when coalesce(
+                               model.payload->'payload'->'statistics'->>'untagged_transaction_count', ''
+                           ) ~ '^[0-9]+$'
+                      then (model.payload->'payload'->'statistics'->>'untagged_transaction_count')::integer
+                      else -1
+                  end <> bank_recalculated.transaction_count - bank_recalculated.tagged_transaction_count
+               or case
+                      when coalesce(model.payload->'payload'->'statistics'->>'project_count', '') ~ '^[0-9]+$'
+                      then (model.payload->'payload'->'statistics'->>'project_count')::integer
+                      else -1
+                  end <> recalculated.project_count
+               or case
+                      when coalesce(
+                               model.payload->'payload'->'statistics'->>'expense_type_count', ''
+                           ) ~ '^[0-9]+$'
+                      then (model.payload->'payload'->'statistics'->>'expense_type_count')::integer
+                      else -1
+                  end <> recalculated.expense_type_count
+               or case
+                      when coalesce(model.payload->'payload'->'statistics'->>'bank_tag_count', '') ~ '^[0-9]+$'
+                      then (model.payload->'payload'->'statistics'->>'bank_tag_count')::integer
+                      else -1
+                  end <> bank_recalculated.bank_tag_count
+               or case
+                      when coalesce(
+                               model.payload->'payload'->'statistics'->>'cost_transaction_count', ''
+                           ) ~ '^[0-9]+$'
+                      then (model.payload->'payload'->'statistics'->>'cost_transaction_count')::integer
+                      else -1
+                  end <> recalculated.transaction_count
             order by model.scope_key
             limit %s
             """,

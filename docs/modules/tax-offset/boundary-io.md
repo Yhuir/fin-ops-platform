@@ -1,5 +1,12 @@
 # 税金抵扣模块边界与 I/O
 
+## 页面完整性统计合同
+
+- 税金抵扣既有主响应增加 `statistics`，统计来自该页面已经拉取并发布的进项发票、销项发票和认证抵扣明细，始终覆盖未筛选完整数据，不读取统一事实源汇总。
+- 统计在一个 `tax_offset_items` `FILTER` 扫描内完成各状态计数；只有全部月份 projection schema/cache fresh，且不存在 active dirty/outbox 时才返回，任一条件不满足即返回 `statistics=null`，禁止 stale fallback。
+- Page Audit 从 tax 页面 read model 与结构化 item 行独立重算统计并对比主响应口径；不新增 endpoint、表、worker 或缓存。
+- 既有 Redis 月度/摘要缓存键绑定完整统计的稳定 generation token；API 只在 token 已存在时按需读写缓存，token 缺失时绕过 Redis 并走 freshness gate，worker/projection 不在 dirty scope 完成前预热，也不再写入或读取旧固定键及 `token=missing` 死链。
+
 日期：2026-07-19
 
 ## 模块化状态

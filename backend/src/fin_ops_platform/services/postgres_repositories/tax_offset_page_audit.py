@@ -61,6 +61,7 @@ def _audit_tax_offset_snapshot(
     )
     issues.extend(_runtime_issues(connection, tenant_id=tenant_id, limit=limit + 1))
     evaluation = evaluate_audit_issues(issues, sample_limit=limit)
+    page_statistics = _tax_offset_page_statistics(model_rows=model_rows, item_rows=item_rows)
     return {
         "mode": "tax-offset-page-audit",
         "tenant_id": tenant_id,
@@ -71,6 +72,7 @@ def _audit_tax_offset_snapshot(
             "canonical_certified_count": len(certified_rows),
             "read_model_scope_count": len(model_rows),
             "read_model_item_count": len(item_rows),
+            "page_statistics": page_statistics,
             **evaluation.summary,
         },
         "issues": evaluation.issue_samples,
@@ -98,6 +100,7 @@ def _audit_tax_offset_snapshot(
                 "tax_summary_recalculation",
                 "scope_count_and_source_version_equality",
                 "durable_queue_and_freshness_gate",
+                "page_statistics_independent_recalculation",
             ],
             "snapshot_consistency": snapshot_consistency,
             "database_snapshot": database_snapshot,
@@ -113,6 +116,34 @@ def _audit_tax_offset_snapshot(
             "write_policy": "read_only",
         },
         "generated_at": datetime.now(UTC).isoformat(),
+    }
+
+
+def _tax_offset_page_statistics(
+    *,
+    model_rows: list[dict[str, Any]],
+    item_rows: list[dict[str, Any]],
+) -> dict[str, int]:
+    item_counts = Counter(str(row.get("item_type") or "") for row in item_rows)
+    selected_count = 0
+    for row in model_rows:
+        payload = _payload(row)
+        selected_count += len(_text_set(payload.get("default_selected_input_ids")))
+        selected_count += len(_text_set(payload.get("default_selected_output_ids")))
+    input_count = item_counts["input_plan"]
+    output_count = item_counts["output"]
+    certification_count = item_counts["certified"]
+    matched_count = item_counts["certified_matched"]
+    return {
+        "input_invoice_count": input_count,
+        "output_invoice_count": output_count,
+        "certification_record_count": certification_count,
+        "matched_certification_count": matched_count,
+        "unmatched_certification_count": max(certification_count - matched_count, 0),
+        "out_of_scope_certification_count": item_counts["certified_outside"],
+        "deductible_invoice_count": input_count,
+        "selected_invoice_count": selected_count,
+        "unselected_invoice_count": max(input_count + output_count - selected_count, 0),
     }
 
 
@@ -596,6 +627,12 @@ def _payload(row: dict[str, Any], key: str = "payload") -> dict[str, Any]:
 
 def _dict(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, dict) else {}
+
+
+def _text_set(value: Any) -> set[str]:
+    if not isinstance(value, list):
+        return set()
+    return {str(item).strip() for item in value if str(item).strip()}
 
 
 def _normal(value: Any) -> Any:

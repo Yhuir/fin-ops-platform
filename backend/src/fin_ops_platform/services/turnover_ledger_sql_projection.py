@@ -189,6 +189,8 @@ class TurnoverLedgerSqlProjectionBuilder:
     ) -> dict[str, Any] | None:
         if not isinstance(payload, dict):
             return None
+        if payload.get("statistics_status") == "stale":
+            return None
         existing_source_versions = payload.get("source_versions")
         if not isinstance(existing_source_versions, dict):
             return None

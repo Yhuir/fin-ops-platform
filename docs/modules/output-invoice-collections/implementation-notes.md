@@ -441,3 +441,8 @@
 - 测试覆盖：新增 `tests.test_invoice_usage_collection_sql_runtime.InvoiceUsageCollectionSqlRuntimeTests.test_output_api_all_scope_ignores_stale_empty_month_scope_versions`，覆盖“当前非空月份 fresh + 历史空月份旧 source version”时默认 all rows 返回 `200 fresh`、无 stale reasons、无 refresh enqueue。
 - 发布验证：hotfix release `main-9e9546ac-output-invoice-all-scope-20260619173552` 已激活；两个生产目标 OA 登录态下 rows/filter-options 均返回 `200 fresh`，rows total=22；生产 `output_invoice_collection` current dirty scope 和非 done outbox 均为空。
 - 未测风险：该修复证明默认 all fresh gate；每个销项收款写入口后的真实 mutation -> worker -> rows fresh 仍需要 write-operation approval ticket 后执行 mutating smoke。
+## 2026-07-22 - 页面自有全量标题统计
+
+- 目标：标题同时展示销项发票、OA/收入流水关联、收款、红字和收据覆盖，且始终代表页面投影全期间数据。
+- 决策：rows 主响应从 `output_invoice_collection` 完整投影展开 `invoiceRelations.summaries`，按唯一发票 ID 返回 `statistics` / `statistics_status`；筛选、月份、排序和分页不参与统计。Page Audit 保持 canonical expected-set 独立对照。
+- 旧链路：删除前端 `titleInvoiceCount`、`loadTitleTotal`、`queryAffectsTitleTotal` 与 `page_size=1` 额外标题请求，禁止恢复第二浏览器 I/O。

@@ -55,6 +55,17 @@ export type TurnoverLedgerSummary = {
   rowCount: number;
 };
 
+export type TurnoverLedgerStatistics = {
+  transactionCount?: number;
+  expenseTransactionCount?: number;
+  incomeTransactionCount?: number;
+  closedGroupCount?: number;
+  ledgerGroupCount?: number;
+  unclosedGroupCount?: number;
+  linkedOaTransactionCount?: number;
+  linkedInvoiceTransactionCount?: number;
+};
+
 export type TurnoverLedgerFamilySummary = {
   family: Exclude<TurnoverLedgerFamily, "all"> | string;
   label: string;
@@ -207,6 +218,7 @@ export type TurnoverLedgerGroupedResponse = {
   familySummaries: TurnoverLedgerFamilySummary[];
   groups: TurnoverLedgerGroup[];
   pagination: TurnoverLedgerPagination;
+  statistics?: TurnoverLedgerStatistics;
   readModelStatus?: string;
   readModelStaleReasons?: string[];
 };

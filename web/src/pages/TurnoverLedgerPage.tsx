@@ -4,6 +4,7 @@ import { Download, RefreshCw } from "lucide-react";
 import AppDrawer from "../components/common/AppDrawer";
 import PageScaffold from "../components/common/PageScaffold";
 import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
+import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import StatePanel from "../components/common/StatePanel";
 import TurnoverLedgerExportDialog from "../components/turnoverLedger/TurnoverLedgerExportDialog";
 import TurnoverLedgerExtraDrawer from "../components/turnoverLedger/TurnoverLedgerExtraDrawer";
@@ -962,14 +963,35 @@ export default function TurnoverLedgerPage() {
     }
   };
 
-  const titleAccessory = canAdminAccess ? (
-    <PageBusinessAuditIcon
-      ariaLabel="Audit 外部往来款管理"
-      pageKey="turnover-ledger"
-      label="外部往来款管理"
-      readModelStatus={readModelStatus}
-    />
-  ) : null;
+  const visibleStatistics = readModelStatus === "fresh" ? ledger?.statistics : null;
+  const titleAccessory = (
+    <div className="page-title-accessory-group">
+      <PageStatisticsPopover
+        ariaLabel="外部往来款管理数据统计"
+        loading={loading && !ledger}
+        coreItems={[
+          { label: "往来流水", value: visibleStatistics?.transactionCount, unit: "笔" },
+          { label: "支出", value: visibleStatistics?.expenseTransactionCount, unit: "笔", tone: "expense" },
+          { label: "收入", value: visibleStatistics?.incomeTransactionCount, unit: "笔", tone: "income" },
+        ]}
+        detailItems={[
+          { label: "已闭环组", value: visibleStatistics?.closedGroupCount, unit: "组", tone: "success" },
+          { label: "台账组", value: visibleStatistics?.ledgerGroupCount, unit: "组" },
+          { label: "未闭环组", value: visibleStatistics?.unclosedGroupCount, unit: "组", tone: "warning" },
+          { label: "已关联 OA 的流水", value: visibleStatistics?.linkedOaTransactionCount, unit: "笔" },
+          { label: "已关联发票的流水", value: visibleStatistics?.linkedInvoiceTransactionCount, unit: "笔" },
+        ]}
+      />
+      {canAdminAccess ? (
+        <PageBusinessAuditIcon
+          ariaLabel="Audit 外部往来款管理"
+          pageKey="turnover-ledger"
+          label="外部往来款管理"
+          readModelStatus={readModelStatus}
+        />
+      ) : null}
+    </div>
+  );
 
   return (
     <div className="turnover-ledger-page" data-testid="turnover-ledger-page">

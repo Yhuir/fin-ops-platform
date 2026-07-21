@@ -720,3 +720,8 @@
 - 验证命令：`PYTHONPATH=backend/src python3 -m unittest tests.test_invoice_usage_collection_sql_runtime -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_input_invoice_usage_api -v`；`PYTHONPATH=backend/src python3 -m unittest tests.test_read_model_freshness -v`；`cd web && npm test -- --run src/test/InputInvoiceUsagePage.test.tsx`；`cd web && npm run build`。
 - 未测风险：本地验证已完成；生产仍需部署后只读验证默认 rows API 是否返回 `fresh` 与非空分页总数。
 - 后续事项：发布必须走 `./scripts/deploy-oa.sh` 或现有运维流程，不直接在服务器热改代码。
+## 2026-07-22 - 页面自有全量标题统计
+
+- 目标：标题同时展示进项发票、OA/流水关联和付款完整性，且始终代表页面投影全期间数据。
+- 决策：rows 主响应从 `input_invoice_usage` 完整投影展开 `invoiceRelations.summaries`，按唯一发票 ID 返回 `statistics` / `statistics_status`；筛选、月份、排序和分页不参与统计。Page Audit 保持 canonical expected-set 独立对照。
+- 旧链路：删除前端 `titleInvoiceCount`、`loadTitleTotal`、`queryAffectsTitleTotal` 与 `page_size=1` 额外标题请求，禁止恢复第二浏览器 I/O。

@@ -152,6 +152,13 @@ describe("Cost statistics export API", () => {
           transaction_count: 1,
           total_amount: "145.00",
         },
+        statistics: {
+          transaction_count: "12000",
+          expense_transaction_count: 7000,
+          income_transaction_count: 5000,
+          cost_group_count: -1,
+          tagged_transaction_count: 4.5,
+        },
         available_years: ["2026"],
         facets: {},
         rows: [{
@@ -190,6 +197,13 @@ describe("Cost statistics export API", () => {
     expect(payload.readModelScopeKey).toBe("active:2026-03");
     expect(payload.readModelGeneratedAt).toBe("2026-06-01T00:00:00");
     expect(payload.readModelStaleReasons).toEqual(["workbench_scope_key"]);
+    expect(payload.statistics).toEqual(expect.objectContaining({
+      transactionCount: 12000,
+      expenseTransactionCount: 7000,
+      incomeTransactionCount: 5000,
+      costGroupCount: undefined,
+      taggedTransactionCount: undefined,
+    }));
     expect(payload.rows[0]).toMatchObject({
       bankTagCode: "travel_transport",
       bankTagLabel: "交通费",

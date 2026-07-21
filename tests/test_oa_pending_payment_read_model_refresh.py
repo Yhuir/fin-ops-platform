@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from types import SimpleNamespace
 import unittest
 
 from fin_ops_platform.services.oa_pending_payment_read_model_refresh import (
     OaPendingPaymentReadModelRefreshService,
 )
-from fin_ops_platform.services.oa_pending_payment_sql_projection import OaPendingPaymentSqlProjectionBuilder
+from fin_ops_platform.services.oa_pending_payment_sql_projection import (
+    OaPendingPaymentSqlProjectionBuilder,
+    _oa_pending_payment_statistics,
+)
 from fin_ops_platform.services.postgres_repositories.read_models import (
     PostgresInvoiceUsageCollectionReadModelRepository,
 )
@@ -113,6 +117,35 @@ class OaPendingPaymentReadModelRefreshTests(unittest.TestCase):
 
 
 class OaPendingPaymentSqlProjectionBuilderTests(unittest.TestCase):
+    def test_statistics_publish_full_page_inventory_counts_and_membership_digests(self) -> None:
+        connection = CoverageConnection()
+
+        statistics, source_versions = _oa_pending_payment_statistics(
+            connection,
+            scope_key="2026-05",
+            completed_records=[SimpleNamespace(id="oa-1")],
+            in_progress_records=[],
+            rows=[],
+        )
+
+        self.assertEqual(statistics["bank_transaction_count"], 900)
+        self.assertEqual(statistics["expense_transaction_count"], 500)
+        self.assertEqual(statistics["income_transaction_count"], 400)
+        self.assertEqual(statistics["input_invoice_count"], 800)
+        self.assertEqual(
+            source_versions["oa_pending_payment_bank_coverage_signature"],
+            "rows:900|digest:bank-membership",
+        )
+        self.assertEqual(
+            source_versions["oa_pending_payment_input_invoice_coverage_signature"],
+            "rows:800|digest:invoice-membership",
+        )
+        coverage_sql = connection.fetch_one_calls[0][0].lower()
+        self.assertIn("coalesce(bank.txn_direction, '')", coverage_sql)
+        self.assertIn("coalesce(invoice.invoice_type, '')", coverage_sql)
+        self.assertIn("order by coalesce(bank.legacy_mongo_id, bank.id::text)", coverage_sql)
+        self.assertIn("order by coalesce(invoice.legacy_mongo_id, invoice.id::text)", coverage_sql)
+
     def test_rebuild_uses_atomic_repository_publish_with_event_version(self) -> None:
         connection = CallbackConnection()
         read_model_repository = AtomicReadModelRepository()
@@ -138,6 +171,7 @@ class OaPendingPaymentSqlProjectionBuilderTests(unittest.TestCase):
                         "source": "new",
                         "oa_pending_payment_event_source_version": 17,
                     },
+                    "statistics": {"oa_count": 1},
                 }
             ],
         )
@@ -202,6 +236,22 @@ class OaPendingPaymentSqlProjectionBuilderTests(unittest.TestCase):
         self.assertEqual(len(batch_params[0]), 30)
 
 
+class CoverageConnection:
+    def __init__(self) -> None:
+        self.fetch_one_calls: list[tuple[str, tuple[object, ...]]] = []
+
+    def fetch_one(self, sql: str, params: tuple[object, ...]) -> dict[str, object]:
+        self.fetch_one_calls.append((sql, params))
+        return {
+            "bank_transaction_count": 900,
+            "expense_bank_transaction_count": 500,
+            "income_bank_transaction_count": 400,
+            "bank_membership_digest": "bank-membership",
+            "input_invoice_count": 800,
+            "input_invoice_membership_digest": "invoice-membership",
+        }
+
+
 class TestProjectionBuilder(OaPendingPaymentSqlProjectionBuilder):
     @staticmethod
     def _expected_source_versions(
@@ -221,7 +271,11 @@ class TestProjectionBuilder(OaPendingPaymentSqlProjectionBuilder):
         tenant_id: str,
     ) -> dict[str, object]:
         del scope_key, tenant_id
-        return {"rows": [{"id": "row-1"}], "source_versions": {"source": "new"}}
+        return {
+            "rows": [{"id": "row-1"}],
+            "source_versions": {"source": "new"},
+            "statistics": {"oa_count": 1},
+        }
 
 
 class AtomicReadModelRepository:
