@@ -1740,6 +1740,12 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertNotIn("from read_model.pending_invoice_rows", statistics_sql)
         self.assertNotIn("trade_date >=", statistics_sql)
         self.assertNotIn("searchable_text ilike", statistics_sql)
+        statistics_gate_sql = " ".join(sql for sql, _params in connection.fetch_one_calls)
+        self.assertEqual(
+            statistics_gate_sql.count("'^(expense|income):all(?::[0-9]{4}-[0-9]{2})?$'"),
+            2,
+        )
+        self.assertIn("coalesce(scope_key, payload->>'scope_key', '')", statistics_gate_sql)
 
     def test_pending_invoice_statistics_ignore_historical_zero_row_scope_metadata(self) -> None:
         keys = tuple(_pending_invoice_statistics_contract()["statistics"])

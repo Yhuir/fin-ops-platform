@@ -4440,6 +4440,7 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
             from job.read_model_dirty_scopes
             where tenant_id = 'default'
               and scope_type = 'pending_invoice'
+              and scope_key ~ '^(expense|income):all(?::[0-9]{4}-[0-9]{2})?$'
               and status in ('pending', 'processing', 'failed')
             order by updated_at desc
             limit 1
@@ -4457,6 +4458,8 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
             from job.outbox_events
             where tenant_id = 'default'
               and event_type = 'pending_invoice.read_model.refresh'
+              and coalesce(scope_key, payload->>'scope_key', '')
+                  ~ '^(expense|income):all(?::[0-9]{4}-[0-9]{2})?$'
               and status in ('pending', 'processing', 'failed', 'dead_lettered')
             """
         )
