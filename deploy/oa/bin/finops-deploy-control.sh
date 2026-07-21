@@ -41,6 +41,8 @@ commands:
                                       rebuild Workbench SQL read models using runtime env
   workbench-audit-identity <release-name> [args]
                                       run Workbench object identity audit using runtime env
+  workbench-requirement-repair <release-name> [--dry-run|--execute --expected-fingerprint <sha256>]
+                                      repair historical frozen OA/invoice requirements through relation commands
   read-model-scope-contract <release-name> [args]
                                       check or repair read model scope contracts using runtime env
   read-model-slo-smoke <release-name> [args]
@@ -512,6 +514,16 @@ workbench_audit_identity() {
   run_with_runtime_env "$src" -m fin_ops_platform.tools.audit_object_identity "$@"
 }
 
+workbench_requirement_repair() {
+  local release="${1:-}"
+  [[ -n "$release" ]] || die "workbench-requirement-repair requires release name"
+  shift
+  local src
+  src="$(release_src "$release")"
+  assert_runtime_env_contract
+  run_with_runtime_env "$src" -m fin_ops_platform.tools.workbench_relation_requirement_repair_ops "$@"
+}
+
 read_model_scope_contract() {
   local release="${1:-}"
   [[ -n "$release" ]] || die "read-model-scope-contract requires release name"
@@ -694,6 +706,10 @@ case "$cmd" in
   workbench-audit-identity)
     shift
     workbench_audit_identity "$@"
+    ;;
+  workbench-requirement-repair)
+    shift
+    workbench_requirement_repair "$@"
     ;;
   read-model-scope-contract)
     shift

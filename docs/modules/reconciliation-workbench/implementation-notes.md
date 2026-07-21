@@ -8,6 +8,10 @@
 - 旧链清理：删除 no-OA application 中越权扫描、逐 relation 回写 bank-flow requirement 的旧 `_sync_bank_flow_rule_relation_requirements` 及专用比较 helper；规则保存保持 O(1)，existing relation 不追溯改写。存量缺快照关系只允许在部署窗口经 relation command/history 一次性修复。
 - 性能与隔离：没有新增表、索引、worker、queue、共享 read model 或请求内 I/O；分区计算是已加载 relation 上的纯 O(member count) 判断。Redis groups/initial 使用关联台专属 cache schema 淘汰旧分区 payload，不升级共享 Workbench projection schema，因此不标脏成本统计或搜索 read model。
 - Audit：Page Audit 独立复算快照完整性与期望 zone；缺快照或错误 paired/unpaired 都 blocking，不能复用生产分组 helper 自证。
+- 生产存量闭环：发布账号不具备任意 root shell 权限；一次性存量修复因此收敛为 root-owned
+  `workbench-requirement-repair` 固定命令。它先以 current active relation + 一次 fresh 标签批量读取生成
+  source fingerprint，再在 fingerprint 未变化时逐 case 通过 relation command 写审计 history 和 durable
+  refresh；不允许直接 SQL，也不恢复规则保存后的持续回扫旧链。
 
 
 ## 2026-07-20 - 折叠流水详情按需加载合同闭环

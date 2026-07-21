@@ -114,6 +114,9 @@ Release A 已删除运行时链路且禁止恢复；旧表物理存储只为短�
 - 发布前备份 relation facts、history、active generation metadata 和 queue 状态；candidate/decision 表是派生旧状态，不进入业务备份恢复源。
 - Release B 的旧状态 drop migration 只做 forward drop 和旧 app-setting 清理，不改 canonical facts；Release A 不携带该 migration，也不提前预留空版本。
 - 发布后运行 `scripts/rehydrate-workbench-read-models.py`，等待 matching/workbench/workbench_relation scopes fresh，再运行页面 Audit。
+- 历史普通银行 relation 缺失冻结要求时，只走 root-owned `workbench-requirement-repair`：输入为
+  active relation、fresh 银行标签和规则 payload，输出为带 dry-run fingerprint 的正式 relation
+  metadata/history 与 durable refresh；禁止直接 SQL、任意 shell 或设置保存后的持续回扫。
 - rehydrate 必须至少成功发布一个月 generation，从而为当前 active-month generation-set 原子生成两条 all-scope stats；stats 缺失时页面只能保持 refreshing，运维不得直接 SQL 补写统计。
 - 回滚应用版本不得重新创建旧 candidate/decision 表；若必须回退展示代码，只能继续读取 active formal relations 和 paired/unpaired generation。
 - 修复验收必须证明 520 关系进入 paired、13 张合计 1709.49 的发票各自 unpaired、canonical count 未减少、active relation/history 未损坏。

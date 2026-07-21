@@ -61,6 +61,23 @@ def workbench_relation_reader(app: Any) -> Any | None:
     return getattr(tool_runtime_ports(app), "workbench_relation_reader", None)
 
 
+def bank_transaction_tag_read_facade(app: Any) -> Any:
+    facade = getattr(tool_runtime_ports(app), "bank_transaction_tag_read_facade", None)
+    if facade is None:
+        raise RuntimeError("Bank transaction tag read boundary is unavailable.")
+    return facade
+
+
+def bank_flow_rule_batch_tag_rules_payload(app: Any) -> dict[str, Any]:
+    provider = getattr(tool_runtime_ports(app), "get_bank_flow_rule_batch_tag_rules_payload", None)
+    if not callable(provider):
+        raise RuntimeError("Bank flow rule tag requirements boundary is unavailable.")
+    payload = provider()
+    if not isinstance(payload, dict):
+        raise RuntimeError("Bank flow rule tag requirements payload is invalid.")
+    return dict(payload)
+
+
 def object_identity_repository(app: Any) -> Any | None:
     repository = getattr(tool_runtime_ports(app), "object_identity_repository", None)
     finder = getattr(repository, "find_invoice_by_identity", None)

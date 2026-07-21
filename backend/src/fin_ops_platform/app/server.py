@@ -763,6 +763,10 @@ class Application:
             etc_reconciliation_task_service=etc_reconciliation_task_service,
             workbench_relation_command_service=self._workbench_relation_command_service(),
             workbench_relation_reader=self._workbench_relation_command_service(),
+            bank_transaction_tag_read_facade=self._bank_transaction_tag_read_facade,
+            get_bank_flow_rule_batch_tag_rules_payload=(
+                self._app_settings_service.get_bank_flow_rule_batch_tag_rules_payload
+            ),
             object_identity_repository=(
                 self._import_fact_repository
                 if callable(getattr(getattr(self, "_import_fact_repository", None), "find_invoice_by_identity", None))
