@@ -174,14 +174,24 @@ class SearchPendingSqlProjectionBuilder:
         txn_direction = "outflow" if normalized_direction == "expense" else "inflow"
         rows = self._connection.fetch_all(
             """
-            select distinct to_char(txn_month, 'YYYY-MM') as scope_key
-            from app.bank_transactions
-            where txn_month is not null
-              and txn_direction = %s
-              and status <> 'deleted'
-            order by scope_key desc
+            select distinct covered.scope_key
+            from (
+                select to_char(txn_month, 'YYYY-MM') as scope_key
+                from app.bank_transactions
+                where txn_month is not null
+                  and txn_direction = %s
+                  and status <> 'deleted'
+                union
+                select split_part(scope_key, ':', 3) as scope_key
+                from read_model.pending_invoice_scopes
+                where direction = %s
+                  and filter_group = %s
+                  and scope_key ~ '^(expense|income):[^:]+:[0-9]{4}-[0-9]{2}$'
+            ) covered
+            where covered.scope_key ~ '^[0-9]{4}-[0-9]{2}$'
+            order by covered.scope_key desc
             """,
-            (txn_direction,),
+            (txn_direction, normalized_direction, normalized_filter),
         )
         return [
             f"{normalized_direction}:{normalized_filter}:{row['scope_key']}"

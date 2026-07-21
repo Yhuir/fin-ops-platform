@@ -412,6 +412,7 @@ class CostStatisticsPageAuditTests(unittest.TestCase):
             "/* check: cost_bank_accounts */",
         ):
             self.assertEqual(proof_sql.count(marker), 1)
+        self.assertIn("model.scope_key ~ '^(active|all):all$'", proof_sql)
         self.assertEqual(proof_sql.count("limit %s"), 5)
         self.assertEqual(
             proof_params,

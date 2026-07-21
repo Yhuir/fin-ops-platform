@@ -6416,7 +6416,7 @@ class PostgresSummaryReadModelRepository:
                 from job.read_model_dirty_scopes
                 where tenant_id = 'default'
                   and scope_type = 'cost_statistics'
-                  and scope_key like split_part(model.scope_key, ':', 1) || ':%'
+                  and scope_key like split_part(model.scope_key, ':', 1) || ':%%'
                   and scope_key <> split_part(model.scope_key, ':', 1) || ':all'
                   and status in ('pending', 'processing', 'failed')
             ) statistics_children on true

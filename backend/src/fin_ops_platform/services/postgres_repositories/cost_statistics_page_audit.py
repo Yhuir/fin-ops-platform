@@ -1371,14 +1371,17 @@ def _key_display_field_issues(
                         else 0
                     end - bank_recalculated.income_amount
                   ) > 0.01
-               or case
+               or (
+                  model.scope_key ~ '^(active|all):all$'
+                  and (
+                    case
                       when coalesce(
                                model.payload->'payload'->'statistics'->>'transaction_count', ''
                            ) ~ '^[0-9]+$'
                       then (model.payload->'payload'->'statistics'->>'transaction_count')::integer
                       else -1
-                  end <> bank_recalculated.transaction_count
-               or case
+                    end <> bank_recalculated.transaction_count
+                  or case
                       when coalesce(
                                model.payload->'payload'->'statistics'->>'expense_transaction_count', ''
                            ) ~ '^[0-9]+$'
@@ -1437,6 +1440,8 @@ def _key_display_field_issues(
                       then (model.payload->'payload'->'statistics'->>'cost_transaction_count')::integer
                       else -1
                   end <> recalculated.transaction_count
+                  )
+               )
             order by model.scope_key
             limit %s
             """,

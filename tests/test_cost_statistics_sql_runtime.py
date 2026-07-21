@@ -2188,6 +2188,14 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertIn("from app.app_settings", gate_sql)
         self.assertIn("from read_model.workbench_generations", gate_sql)
         self.assertIn("from read_model.bank_detail_scopes", gate_sql)
+        self.assertIn(
+            "scope_key like split_part(model.scope_key, ':', 1) || ':%%'",
+            gate_sql,
+        )
+        self.assertNotIn(
+            "scope_key like split_part(model.scope_key, ':', 1) || ':%'",
+            gate_sql,
+        )
         self.assertEqual(len(connection.fetch_one_calls), 1)
         self.assertEqual(connection.fetch_all_calls, [])
 

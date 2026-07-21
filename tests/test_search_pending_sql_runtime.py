@@ -471,6 +471,28 @@ class SearchReadModelRefreshProducerTests(unittest.TestCase):
         self.assertEqual(producer.enqueue_scope_keys(["2026-05"], reason="api_miss"), [])
 
 
+class PendingInvoiceScopeShardCoverageTests(unittest.TestCase):
+    def test_parent_refresh_covers_current_and_persisted_zero_row_months(self) -> None:
+        class ScopeConnection:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, tuple]] = []
+
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, str]]:
+                self.calls.append((" ".join(sql.split()), params))
+                return [{"scope_key": "2026-05"}, {"scope_key": "2023-01"}]
+
+        connection = ScopeConnection()
+        builder = SearchPendingSqlProjectionBuilder(connection=connection)
+
+        scopes = builder.list_pending_invoice_scope_shards("expense:all")
+
+        self.assertEqual(scopes, ["expense:all:2026-05", "expense:all:2023-01"])
+        sql, params = connection.calls[0]
+        self.assertIn("from app.bank_transactions", sql)
+        self.assertIn("from read_model.pending_invoice_scopes", sql)
+        self.assertEqual(params, ("outflow", "expense", "all"))
+
+
 class SearchPendingConnection:
     def __init__(
         self,
