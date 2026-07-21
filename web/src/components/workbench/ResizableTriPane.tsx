@@ -39,6 +39,8 @@ type ResizableTriPaneProps = {
   onOpenDetail: (row: WorkbenchRecord) => void;
   onRowAction: (row: WorkbenchRecord, action: WorkbenchInlineAction) => void;
   onEnsureGroupDetail?: (zoneId: "paired" | "unpaired", groupId: string) => Promise<void>;
+  canRequestNextPage?: boolean;
+  onRequestNextPage?: (zoneId: "paired" | "unpaired") => void;
   onColumnFilterChange: (
     zoneId: "paired" | "unpaired",
     paneId: "oa" | "bank" | "invoice",
@@ -77,6 +79,8 @@ function ResizableTriPane({
   onOpenDetail,
   onRowAction,
   onEnsureGroupDetail,
+  canRequestNextPage = false,
+  onRequestNextPage,
   onColumnFilterChange,
   onTogglePaneSort,
   onPaneTimeFilterChange = () => undefined,
@@ -144,6 +148,8 @@ function ResizableTriPane({
         onOpenDetail={onOpenDetail}
         onRowAction={onRowAction}
         onEnsureGroupDetail={onEnsureGroupDetail}
+        canRequestNextPage={canRequestNextPage}
+        onRequestNextPage={onRequestNextPage}
         onColumnFilterChange={onColumnFilterChange}
         onPaneTimeFilterChange={onPaneTimeFilterChange}
         onReorderPaneColumns={onReorderPaneColumns}

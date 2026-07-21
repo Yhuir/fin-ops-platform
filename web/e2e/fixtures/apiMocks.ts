@@ -174,6 +174,7 @@ type ApiMockOptions = {
   workbenchConfirmSubmitError?: boolean;
   workbenchConfirmSubmitFailuresBeforeSuccess?: number;
   workbenchFreshRefetchError?: boolean;
+  workbenchGroupsFailuresBeforeSuccess?: number;
   workbenchHealthStatus?: WorkbenchHealthMockStatus;
   workbenchCashSpecialActions?: boolean;
   workbenchInitialExceptionApplied?: boolean;
@@ -1618,7 +1619,7 @@ function workbenchInitialPayload(
       largeDataset,
       includeCashSpecialActions,
       1,
-      200,
+      50,
       zoneSearch.paired ?? "",
     ),
     unpaired: workbenchGroupsPayload(
@@ -1631,7 +1632,7 @@ function workbenchInitialPayload(
       largeDataset,
       includeCashSpecialActions,
       1,
-      200,
+      50,
       zoneSearch.unpaired ?? "",
     ),
     read_model_status: pageStatus,
@@ -8343,6 +8344,7 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
   let workbenchExceptionApplied = options.workbenchInitialExceptionApplied === true;
   let workbenchRowIgnored = options.workbenchInitialRowIgnored === true;
   let workbenchConfirmSubmitAttempts = 0;
+  let workbenchGroupsFailuresRemaining = options.workbenchGroupsFailuresBeforeSuccess ?? 0;
   const workbenchPageStatus = options.workbenchPageStatus ?? "fresh";
   let bankDetailsCategoryOverride: BankDetailCategoryOverride | null = null;
   let bankAutoTagRulesVersion = 1;
@@ -9851,6 +9853,13 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     }
 
     if (path === "/api/workbench/groups") {
+      if (workbenchGroupsFailuresRemaining > 0) {
+        workbenchGroupsFailuresRemaining -= 1;
+        return json(route, {
+          error: "workbench_groups_temporarily_unavailable",
+          message: "关联台下一页暂时加载失败，请重试。",
+        }, 503);
+      }
       if (options.workbenchFreshRefetchError && (relationConfirmed || workbenchExceptionApplied)) {
         return json(route, {
           error: "browser_workbench_refetch_failed",

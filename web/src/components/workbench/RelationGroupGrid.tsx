@@ -57,6 +57,8 @@ type RelationGroupGridProps = {
   onOpenDetail: (row: WorkbenchRecord) => void;
   onRowAction: (row: WorkbenchRecord, action: WorkbenchInlineAction) => void;
   onEnsureGroupDetail?: (zoneId: "paired" | "unpaired", groupId: string) => Promise<void>;
+  canRequestNextPage?: boolean;
+  onRequestNextPage?: (zoneId: "paired" | "unpaired") => void;
   onColumnFilterChange?: (
     zoneId: "paired" | "unpaired",
     paneId: "oa" | "bank" | "invoice",
@@ -161,6 +163,8 @@ function RelationGroupGrid({
   onOpenDetail,
   onRowAction,
   onEnsureGroupDetail,
+  canRequestNextPage = false,
+  onRequestNextPage,
   onColumnFilterChange = () => undefined,
   onTogglePaneSort = () => undefined,
   onPaneTimeFilterChange = () => undefined,
@@ -168,6 +172,8 @@ function RelationGroupGrid({
   canMutateData,
 }: RelationGroupGridProps) {
   const gridRef = useRef<HTMLDivElement | null>(null);
+  const gridBodyRef = useRef<HTMLDivElement | null>(null);
+  const nextPageSentinelRef = useRef<HTMLDivElement | null>(null);
   const [openFilterMenu, setOpenFilterMenu] = useState<{ paneId: WorkbenchRecordType; columnKey: string } | null>(null);
   const [expandedPaneGroups, setExpandedPaneGroups] = useState<Set<string>>(() => new Set());
   const [loadingPaneGroups, setLoadingPaneGroups] = useState<Set<string>>(() => new Set());
@@ -207,6 +213,30 @@ function RelationGroupGrid({
       });
     });
   }, [groups, panes]);
+
+  useEffect(() => {
+    const root = gridBodyRef.current;
+    const sentinel = nextPageSentinelRef.current;
+    if (
+      !canRequestNextPage
+      || !onRequestNextPage
+      || !root
+      || !sentinel
+      || typeof IntersectionObserver === "undefined"
+    ) {
+      return undefined;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        onRequestNextPage(zoneId);
+      }
+    }, {
+      root,
+      rootMargin: "0px 0px 200px 0px",
+    });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [canRequestNextPage, onRequestNextPage, zoneId]);
 
   const handleSyncScroll = (paneId: WorkbenchRecordType, element: HTMLDivElement) => {
     const maxScrollLeft = Math.max(0, element.scrollWidth - element.clientWidth);
@@ -427,7 +457,7 @@ function RelationGroupGrid({
   }, [canMutateData, clearDragClasses, onReorderPaneColumns]);
 
   const gridBody = useMemo(() => (
-    <div className="candidate-grid-body">
+    <div ref={gridBodyRef} className="candidate-grid-body">
       {groups.length === 0 ? <div className="state-panel">当前区域暂无记录。</div> : null}
       {groups.map((group, index) => {
         const renderCollapseControls = (paneId: WorkbenchRecordType): ReactNode => {
@@ -719,6 +749,7 @@ function RelationGroupGrid({
           ))}
         </div>
       ) : null}
+      <div ref={nextPageSentinelRef} aria-hidden="true" className="candidate-grid-end-sentinel" />
     </div>
   ), [
     actionMode,

@@ -61,7 +61,8 @@ type WorkbenchZoneProps = {
   tertiarySelectionActionDisabled?: boolean;
   pageInfo?: WorkbenchZonePageInfo;
   loadingMore?: boolean;
-  onLoadMore?: () => void;
+  loadMoreError?: string | null;
+  onRequestNextPage?: (zoneId: "paired" | "unpaired") => void;
   auxiliaryHeaderActions?: Array<{
     label: string;
     onClick: () => void;
@@ -126,7 +127,8 @@ function WorkbenchZone({
   tertiarySelectionActionDisabled,
   pageInfo,
   loadingMore = false,
-  onLoadMore,
+  loadMoreError,
+  onRequestNextPage,
   auxiliaryHeaderActions,
   searchQuery,
   searchPending = false,
@@ -144,6 +146,15 @@ function WorkbenchZone({
   const explicitSelectionTotal = selectionSummary?.explicitTotal ?? selectionSummary?.total ?? 0;
   const contextualSelectionTotal = Math.max(0, (selectionSummary?.total ?? 0) - explicitSelectionTotal);
   const activePaneIds = panes.filter((_, index) => widths[index] > 0.0001).map((pane) => pane.id);
+  const canRequestNextPage = Boolean(
+    isVisible
+    && pageInfo?.hasMore
+    && pageInfo.readModelStatus === "fresh"
+    && !loadingMore
+    && !loadMoreError
+    && !searchPending
+    && onRequestNextPage,
+  );
 
   return (
     <section
@@ -352,10 +363,12 @@ function WorkbenchZone({
         onOpenDetail={onOpenDetail}
         onRowAction={onRowAction}
         onEnsureGroupDetail={onEnsureGroupDetail}
+        canRequestNextPage={canRequestNextPage}
         onColumnFilterChange={onColumnFilterChange}
         onPaneTimeFilterChange={onPaneTimeFilterChange}
         onReorderPaneColumns={onReorderPaneColumns}
         onSelectRow={onSelectRow}
+        onRequestNextPage={onRequestNextPage}
         onTogglePaneSort={onTogglePaneSort}
         panes={panes}
         sourceGroups={sourceGroups}
@@ -365,21 +378,21 @@ function WorkbenchZone({
         onStartDrag={startDrag}
         zoneId={zoneId}
       />
-      {pageInfo ? (
-        <div className="zone-page-footer">
-          <span>
-            已加载 {groups?.length ?? 0} / {pageInfo.total}
-          </span>
-          {pageInfo.hasMore ? (
-            <button
-              className="zone-load-more-btn"
-              disabled={loadingMore}
-              type="button"
-              onClick={onLoadMore}
-            >
-              {loadingMore ? "加载中" : "加载更多"}
-            </button>
-          ) : null}
+      {loadingMore ? (
+        <div aria-live="polite" className="zone-auto-load-status" role="status">
+          <Spinner aria-label="正在加载更多结果" color="current" size="sm" />
+          <span>正在加载更多结果</span>
+        </div>
+      ) : loadMoreError ? (
+        <div className="zone-auto-load-status error" role="alert">
+          <span>{loadMoreError}</span>
+          <Button
+            onPress={() => onRequestNextPage?.(zoneId)}
+            size="sm"
+            variant="tertiary"
+          >
+            重试自动加载
+          </Button>
         </div>
       ) : null}
     </section>

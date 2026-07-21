@@ -591,7 +591,7 @@ test.describe("bank flow rule batches browser flow", () => {
 
     await expect(pairedGroup).toBeVisible();
     await expect(pairedZone.getByText("流水规则手续费批次")).toBeVisible();
-    await expect(pairedZone.getByText("已加载 1 / 1")).toBeVisible();
+    await expect(pairedZone.getByRole("button", { name: "加载更多" })).toHaveCount(0);
     await expect(pairedZone.getByText("流水规则手续费明细 1")).toHaveCount(0);
 
     const expandButton = pairedZone.getByRole("button", { name: "展开流水规则批次明细，4 条" });

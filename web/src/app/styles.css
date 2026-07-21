@@ -12162,20 +12162,21 @@ body.workbench-page-mode .workbench-zone-slot .zone {
   height: auto;
 }
 
-.zone-page-footer {
+.zone-auto-load-status {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: center;
   gap: 12px;
-  padding: 8px 14px;
+  min-height: 36px;
+  padding: 6px 14px;
   border-top: 1px solid #d9e2ec;
   background: #fbfdff;
   color: #52606d;
   font-size: 12px;
 }
 
-.zone-load-more-btn {
-  min-width: 88px;
+.zone-auto-load-status.error {
+  color: var(--fp-danger);
 }
 
 .embedded-shell .workbench-zone-slot .zone {
@@ -13559,6 +13560,12 @@ body.column-layout-dragging {
   min-height: 0;
   margin-top: -6px;
   background: #fbfdff;
+}
+
+.candidate-grid-end-sentinel {
+  flex: 0 0 1px;
+  min-height: 1px;
+  pointer-events: none;
 }
 
 .candidate-group-pane-slot {

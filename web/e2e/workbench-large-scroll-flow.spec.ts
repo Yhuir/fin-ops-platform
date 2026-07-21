@@ -41,7 +41,7 @@ async function scrollPaneHorizontally(scrollbar: Locator) {
 }
 
 test.describe("workbench large dataset browser flow", () => {
-  test("keeps pagination, search, tri-pane scroll, detail drawer, and selection controls usable", async ({ page }) => {
+  test("keeps automatic pagination, full search, tri-pane scroll, detail drawer, and selection controls usable", async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 900 });
     const api = await installDeterministicApiMocks(page, {
       sessionMode: "full_access",
@@ -51,50 +51,55 @@ test.describe("workbench large dataset browser flow", () => {
     await page.goto("/");
 
     const openZone = page.getByTestId("zone-unpaired");
-    await expect(openZone.getByText("已加载 200 / 205")).toBeVisible();
     await expect(page.getByTestId("candidate-group-unpaired-row:oa-large-202603-001")).toBeVisible();
+    await expect(page.getByTestId("candidate-group-unpaired-row:oa-large-202603-064")).toHaveCount(0);
+    await expect(openZone.getByRole("button", { name: "加载更多" })).toHaveCount(0);
+    expect(api.count("GET /api/workbench/groups")).toBe(0);
 
     await openZone.locator(".candidate-grid-body").evaluate((element) => {
       element.scrollTop = element.scrollHeight;
       element.dispatchEvent(new Event("scroll", { bubbles: true }));
     });
-    await expectVisibleAndUncovered(openZone.getByRole("button", { name: "加载更多" }), "open zone load-more button");
-    await openZone.getByRole("button", { name: "加载更多" }).click();
-    await expect(openZone.getByText("已加载 205 / 205")).toBeVisible();
+    await expect(page.getByTestId("candidate-group-unpaired-row:iv-large-202603-099")).toBeVisible();
     expect(api.count("GET /api/workbench/groups")).toBe(1);
 
     const pairedSearch = page.getByRole("searchbox", { name: "搜索已配对区域" });
     const unpairedSearch = openZone.getByRole("searchbox", { name: "搜索未配对区域" });
     await expect(pairedSearch).toBeVisible();
     await expect(unpairedSearch).toBeVisible();
-    await unpairedSearch.fill("长列表供应商065");
-    const targetGroup = page.getByTestId("candidate-group-unpaired-row:bk-large-202603-065");
+    await unpairedSearch.fill("长列表供应商155");
+    const targetGroup = page.getByTestId("candidate-group-unpaired-row:bk-large-202603-155");
     await expect(targetGroup).toBeVisible();
-    await expect(openZone.getByText("已加载 1 / 1")).toBeVisible();
     await expect(page.getByTestId("candidate-group-unpaired-row:oa-large-202603-001")).toHaveCount(0);
-    await expect(targetGroup.locator("mark.search-hit", { hasText: "长列表供应商065" })).toBeVisible();
+    await expect(targetGroup.locator("mark.search-hit", { hasText: "长列表供应商155" })).toBeVisible();
     await expect(pairedSearch).toHaveValue("");
 
-    await targetGroup.getByRole("row", { name: /长列表供应商065/ }).click();
+    await targetGroup.getByRole("row", { name: /长列表供应商155/ }).click();
     await expect(openZone.getByText("已选 1")).toBeVisible();
     await expect(openZone.getByText(/带入/)).toHaveCount(0);
+    await targetGroup.getByRole("button", { name: "查看银行流水 长列表供应商155有限公司 详情" }).click();
+    const detailDrawer = page.getByRole("dialog", { name: "银行流水详情" });
+    await expect(detailDrawer.getByText("银行流水详情", { exact: true })).toBeVisible();
+    await expect(detailDrawer.getByText("第155组银行流水详情")).toBeVisible();
+    await expectVisibleAndUncovered(detailDrawer.getByRole("button", { name: "关闭详情抽屉" }), "detail drawer close button");
+    await detailDrawer.getByRole("button", { name: "关闭详情抽屉" }).click();
+    await expect(detailDrawer).toHaveCount(0);
+    await expect(page.locator(".finance-drawer__content")).toHaveCount(0);
+    await expect(openZone.getByText("已选 1")).toBeVisible();
     await openZone.getByRole("button", { name: "清空搜索" }).click();
-    await expect(openZone.getByText("已加载 200 / 205")).toBeVisible();
+    await expect(page.getByTestId("candidate-group-unpaired-row:oa-large-202603-001")).toBeVisible();
+    await openZone.locator(".candidate-grid-body").evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+      element.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+    await expect(page.getByTestId("candidate-group-unpaired-row:iv-large-202603-066")).toBeVisible();
+    expect(api.count("GET /api/workbench/groups")).toBe(2);
     await page.getByTestId("candidate-group-unpaired-row:oa-large-202603-064").getByRole("row").click();
     await page.getByTestId("candidate-group-unpaired-row:iv-large-202603-066").getByRole("row").click();
     await expect(openZone.getByText("已选 3")).toBeVisible();
     const confirmButton = openZone.getByRole("button", { name: "确认关联" });
     await expect(confirmButton).toBeEnabled();
     await expectVisibleAndUncovered(confirmButton, "open zone confirm button after filtering");
-
-    await targetGroup.getByRole("button", { name: "查看银行流水 长列表供应商065有限公司 详情" }).click();
-    const detailDrawer = page.getByRole("dialog", { name: "银行流水详情" });
-    await expect(detailDrawer.getByText("银行流水详情", { exact: true })).toBeVisible();
-    await expect(detailDrawer.getByText("第65组银行流水详情")).toBeVisible();
-    await expectVisibleAndUncovered(detailDrawer.getByRole("button", { name: "关闭详情抽屉" }), "detail drawer close button");
-    await detailDrawer.getByRole("button", { name: "关闭详情抽屉" }).click();
-    await expect(detailDrawer).toHaveCount(0);
-    await expect(page.locator(".finance-drawer__content")).toHaveCount(0);
     await expect(openZone.getByText("已选 3")).toBeVisible();
     await expect(openZone.getByText(/带入/)).toHaveCount(0);
     await expect(confirmButton).toBeEnabled();
@@ -110,5 +115,31 @@ test.describe("workbench large dataset browser flow", () => {
       (element) => element.scrollWidth - element.clientWidth - element.scrollLeft,
     )).toBe(0);
     await expectVisibleAndUncovered(confirmButton, "open zone confirm button after horizontal scroll");
+  });
+
+  test("stops automatic retries after a page failure and resumes only when the user retries", async ({ page }) => {
+    const api = await installDeterministicApiMocks(page, {
+      sessionMode: "full_access",
+      workbenchGroupsFailuresBeforeSuccess: 1,
+      workbenchLargeDataset: true,
+    });
+
+    await page.goto("/");
+    const openZone = page.getByTestId("zone-unpaired");
+    await expect(page.getByTestId("candidate-group-unpaired-row:oa-large-202603-001")).toBeVisible();
+    await openZone.locator(".candidate-grid-body").evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+      element.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+
+    await expect(openZone.getByRole("alert")).toContainText("自动加载下一页失败，请重试。");
+    expect(api.count("GET /api/workbench/groups")).toBe(1);
+    await page.waitForTimeout(500);
+    expect(api.count("GET /api/workbench/groups")).toBe(1);
+
+    await openZone.getByRole("button", { name: "重试自动加载" }).click();
+    await expect(page.getByTestId("candidate-group-unpaired-row:oa-large-202603-064")).toBeVisible();
+    expect(api.count("GET /api/workbench/groups")).toBe(2);
+    await expect(openZone.getByRole("alert")).toHaveCount(0);
   });
 });

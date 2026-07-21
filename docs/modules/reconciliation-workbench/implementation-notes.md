@@ -1,5 +1,15 @@
 # 关联台 实施记录
 
+## 2026-07-22 - 两区滚动自动分页与全量搜索闭环
+
+- 目标：移除已配对和未配对区域底部“已加载 N / total”与手动“加载更多”，保留每区 50 组首屏，并在用户滚动接近各自列表底部时自动加载下一页；区域搜索继续命中服务端全部数据，包括尚未加载页、隐藏 pane 和折叠明细。
+- 边界决策：只在 `RelationGroupGrid` 内用原生 `IntersectionObserver` 观测滚动容器底部哨兵，向页面输出 `zoneId`；页面继续拥有 `/groups` 请求、查询 key、active read-model version、合并和错误状态。没有新增 API、后端查询、缓存、worker、依赖或通用分页抽象。
+- Freshness 与竞态：自动分页只在区域可见、`read_model_status=fresh`、搜索防抖已稳定、当前已安装 query key 与请求 query key 一致时开放；每区独立 in-flight/sequence gate 去重，搜索、筛选或 active version 更新立即使旧响应失效。普通网络失败停止自动重试，只在原区域显示一次显式重试，防止观察器形成请求风暴。
+- 旧链清理：删除 `zone-page-footer`、`zone-load-more-btn`、`onLoadMore` 组件 I/O 和旧错误文案；没有保留隐藏按钮、兼容 fallback 或并行分页实现。Cost Statistics 的同名分页属于独立模块，不在本次范围内。
+- 性能：首屏和服务端全量搜索合同不变；无滚动时不增加 `/groups` 请求。接近底部才读取 50 组下一页，避免一次性把全部组传输和渲染到 DOM；观察器回调为浏览器原生交叉检测，同区最多一个在途请求。
+- 测试覆盖：Vitest 锁定 fresh 才注册观察、stale 不触发、失败仅显式重试；Browser E2E 锁定首屏 50、滚动前零分页请求、滚动后单次请求、搜索第 155 组并高亮、分页失败不循环重试及手动恢复，同时回归详情、选择和三栏滚动。
+- 文档影响：combined initial/API response shape、read-model scope、worker、权限和跨模块 I/O 均未改变；更新本模块 `boundary-io.md`、`tests.md`、`e2e-spec.md`、`e2e-coverage.md` 与本记录，其他长期事实源不适用。
+
 ## 2026-07-21 - relation 冻结要求与关联台展示分区闭环
 
 - 真实原因：新 formal-relation grouping 曾把所有 active relation 无条件发布到 paired，覆盖了 relation 创建时的 `requires_oa` / `requires_invoice`；deterministic matching 写入又遗漏 requirement snapshot，因此“工程服务费 / 人员保险”只有 OA+银行、没有发票时仍显示为已配对。

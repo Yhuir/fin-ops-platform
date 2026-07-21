@@ -104,6 +104,10 @@ function dispatchMouseEvent(target: EventTarget, type: string, clientX: number) 
 }
 
 describe("WorkbenchZone", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   test("keeps selection toolbar actions and counts in the zone header", async () => {
     const user = userEvent.setup();
     const onClearSelection = vi.fn();
@@ -247,6 +251,81 @@ describe("WorkbenchZone", () => {
 
     await user.type(searchbox, "A");
     expect(onChange).toHaveBeenCalled();
+  });
+
+  test("requests the next page at the grid end and only shows a manual action after failure", async () => {
+    const user = userEvent.setup();
+    const onRequestNextPage = vi.fn();
+    const observe = vi.fn();
+    const disconnect = vi.fn();
+    let observerCallback: IntersectionObserverCallback | null = null;
+
+    vi.stubGlobal("IntersectionObserver", class {
+      constructor(callback: IntersectionObserverCallback) {
+        observerCallback = callback;
+      }
+
+      observe = observe;
+      disconnect = disconnect;
+      unobserve = vi.fn();
+      takeRecords = () => [];
+      root = null;
+      rootMargin = "0px";
+      thresholds = [0];
+    });
+
+    const pageInfo = {
+      zone: "unpaired" as const,
+      page: 1,
+      pageSize: 50,
+      total: 205,
+      rowCounts: { oa: 69, bank: 68, invoice: 68, rows: 205 },
+      hasMore: true,
+      readModelStatus: "fresh" as const,
+      readModelVersion: "generation-set-1",
+    };
+    const zone = (
+      <WorkbenchZone
+        canMutateData
+        getRowState={() => "idle"}
+        isExpanded={false}
+        isVisible
+        onOpenDetail={() => {}}
+        onRequestNextPage={onRequestNextPage}
+        onRowAction={() => {}}
+        onSearchQueryChange={() => {}}
+        onSelectRow={() => {}}
+        onToggleExpand={() => {}}
+        pageInfo={pageInfo}
+        panes={panes}
+        searchQuery=""
+        title="未配对"
+        tone="warning"
+        zoneId="unpaired"
+      />
+    );
+    const { rerender } = render(zone);
+
+    expect(observe).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "加载更多" })).not.toBeInTheDocument();
+    act(() => {
+      observerCallback?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver);
+    });
+    expect(onRequestNextPage).toHaveBeenCalledWith("unpaired");
+
+    rerender(<WorkbenchZone
+      {...zone.props}
+      loadMoreError="自动加载下一页失败，请重试。"
+    />);
+    expect(disconnect).toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "重试自动加载" }));
+    expect(onRequestNextPage).toHaveBeenCalledTimes(2);
+
+    rerender(<WorkbenchZone
+      {...zone.props}
+      pageInfo={{ ...pageInfo, readModelStatus: "stale" }}
+    />);
+    expect(observe).toHaveBeenCalledTimes(1);
   });
 
   test("uses the native HeroUI zone search and removes the workbench pane-search chain", () => {

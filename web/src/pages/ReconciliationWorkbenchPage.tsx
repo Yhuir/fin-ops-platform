@@ -455,7 +455,14 @@ export default function ReconciliationWorkbenchPage() {
     && !isOaSyncWriteBlocked
     && workbenchPageReadModelStatus === "fresh"
     && Boolean(activeWorkbenchReadModelVersion);
-  const [loadingMoreZone, setLoadingMoreZone] = useState<"paired" | "unpaired" | null>(null);
+  const [loadingMoreByZone, setLoadingMoreByZone] = useState<Record<"paired" | "unpaired", boolean>>({
+    paired: false,
+    unpaired: false,
+  });
+  const [loadMoreErrorByZone, setLoadMoreErrorByZone] = useState<Record<"paired" | "unpaired", string | null>>({
+    paired: null,
+    unpaired: null,
+  });
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [loadProgress, setLoadProgress] = useState<WorkbenchLoadProgressState>({
@@ -472,6 +479,8 @@ export default function ReconciliationWorkbenchPage() {
   const [detailError, setDetailError] = useState<string | null>(null);
   const detailRequestSeqRef = useRef(0);
   const loadRequestSeqRef = useRef(0);
+  const loadMoreRequestSeqRef = useRef<Record<"paired" | "unpaired", number>>({ paired: 0, unpaired: 0 });
+  const loadMoreInFlightRef = useRef<Record<"paired" | "unpaired", boolean>>({ paired: false, unpaired: false });
   const activeWorkbenchReadModelVersionRef = useRef("");
   const [lastActionMessage, setLastActionMessage] = useState<string | null>(null);
   const [expandedZoneId, setExpandedZoneId] = useState<"paired" | "unpaired" | null>(null);
@@ -545,6 +554,10 @@ export default function ReconciliationWorkbenchPage() {
     zoneId: "paired" | "unpaired",
     updater: (current: WorkbenchZoneDisplayState) => WorkbenchZoneDisplayState,
   ) => {
+    loadMoreRequestSeqRef.current[zoneId] += 1;
+    loadMoreInFlightRef.current[zoneId] = false;
+    setLoadingMoreByZone((current) => current[zoneId] ? { ...current, [zoneId]: false } : current);
+    setLoadMoreErrorByZone((current) => current[zoneId] ? { ...current, [zoneId]: null } : current);
     if (zoneId === "paired") {
       setPairedDisplayState((current) => updater(current));
       return;
@@ -773,6 +786,11 @@ export default function ReconciliationWorkbenchPage() {
     workbenchPayload: WorkbenchInitialPageResult,
     resolvedZoneQueries: Record<"paired" | "unpaired", WorkbenchGroupsPageQuery>,
   ) {
+    loadMoreRequestSeqRef.current.paired += 1;
+    loadMoreRequestSeqRef.current.unpaired += 1;
+    loadMoreInFlightRef.current = { paired: false, unpaired: false };
+    setLoadingMoreByZone({ paired: false, unpaired: false });
+    setLoadMoreErrorByZone({ paired: null, unpaired: null });
     const nextVersion = workbenchActiveReadModelVersion(workbenchPayload.pages);
     const previousVersion = activeWorkbenchReadModelVersionRef.current;
     if (previousVersion && nextVersion && previousVersion !== nextVersion) {
@@ -941,7 +959,17 @@ export default function ReconciliationWorkbenchPage() {
 
   const handleLoadMoreZone = useCallback(async (zone: "paired" | "unpaired") => {
     const pageInfo = zonePages[zone];
-    if (!workbenchData || !pageInfo.hasMore || loadingMoreZone) {
+    const displayStatePending = zone === "paired"
+      ? pairedDisplayState !== deferredPairedDisplayState
+      : openDisplayState !== deferredOpenDisplayState;
+    if (
+      !workbenchData
+      || !pageInfo.hasMore
+      || pageInfo.readModelStatus !== "fresh"
+      || displayStatePending
+      || loadedZoneServerPageQueryKeys?.[zone] !== zoneServerPageQueryKeys[zone]
+      || loadMoreInFlightRef.current[zone]
+    ) {
       return;
     }
     const expectedReadModelVersion = activeWorkbenchReadModelVersionRef.current;
@@ -949,7 +977,11 @@ export default function ReconciliationWorkbenchPage() {
       setLastActionMessage("数据版本尚未就绪，请刷新后重试。");
       return;
     }
-    setLoadingMoreZone(zone);
+    const requestSeq = loadMoreRequestSeqRef.current[zone] + 1;
+    loadMoreRequestSeqRef.current[zone] = requestSeq;
+    loadMoreInFlightRef.current[zone] = true;
+    setLoadingMoreByZone((current) => ({ ...current, [zone]: true }));
+    setLoadMoreErrorByZone((current) => current[zone] ? { ...current, [zone]: null } : current);
     try {
       const result = await fetchWorkbenchGroupsPage(
         WORKBENCH_VIEW_MONTH,
@@ -960,6 +992,9 @@ export default function ReconciliationWorkbenchPage() {
         { ...zoneServerPageQueries[zone], detailLevel: "summary" },
         expectedReadModelVersion,
       );
+      if (loadMoreRequestSeqRef.current[zone] !== requestSeq) {
+        return;
+      }
       if (
         activeWorkbenchReadModelVersionRef.current !== expectedReadModelVersion
         || result.page.readModelVersion !== expectedReadModelVersion
@@ -987,6 +1022,9 @@ export default function ReconciliationWorkbenchPage() {
         [zone]: result.page,
       }));
     } catch (error) {
+      if (loadMoreRequestSeqRef.current[zone] !== requestSeq) {
+        return;
+      }
       if (isWorkbenchReadModelRejected(error)) {
         await loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
           background: true,
@@ -995,12 +1033,28 @@ export default function ReconciliationWorkbenchPage() {
         });
         setLastActionMessage("关联台数据版本已更新，页面已重新加载。");
       } else {
-        setLastActionMessage("加载更多关系分组失败，请稍后重试。");
+        setLoadMoreErrorByZone((current) => ({
+          ...current,
+          [zone]: "自动加载下一页失败，请重试。",
+        }));
       }
     } finally {
-      setLoadingMoreZone(null);
+      if (loadMoreRequestSeqRef.current[zone] === requestSeq) {
+        loadMoreInFlightRef.current[zone] = false;
+        setLoadingMoreByZone((current) => current[zone] ? { ...current, [zone]: false } : current);
+      }
     }
-  }, [loadingMoreZone, workbenchData, zonePages, zoneServerPageQueries]);
+  }, [
+    deferredOpenDisplayState,
+    deferredPairedDisplayState,
+    loadedZoneServerPageQueryKeys,
+    openDisplayState,
+    pairedDisplayState,
+    workbenchData,
+    zonePages,
+    zoneServerPageQueries,
+    zoneServerPageQueryKeys,
+  ]);
 
   const handleEnsureGroupDetail = useCallback(async (zone: "paired" | "unpaired", groupId: string) => {
     const normalizedGroupId = groupId.trim();
@@ -2196,8 +2250,10 @@ export default function ReconciliationWorkbenchPage() {
   const isUnpairedVisible = expandedZoneId === null || expandedZoneId === "unpaired";
   const pairedZoneItemCount = resolveZoneItemCount(zonePages.paired, workbenchData?.summary.zoneCounts.paired);
   const unpairedZoneItemCount = resolveZoneItemCount(zonePages.unpaired, workbenchData?.summary.zoneCounts.unpaired);
-  const pairedSearchPending = isRefreshing && loadedZoneServerPageQueryKeys?.paired !== zoneServerPageQueryKeys.paired;
-  const unpairedSearchPending = isRefreshing && loadedZoneServerPageQueryKeys?.unpaired !== zoneServerPageQueryKeys.unpaired;
+  const pairedSearchPending = pairedDisplayState !== deferredPairedDisplayState
+    || (isRefreshing && loadedZoneServerPageQueryKeys?.paired !== zoneServerPageQueryKeys.paired);
+  const unpairedSearchPending = openDisplayState !== deferredOpenDisplayState
+    || (isRefreshing && loadedZoneServerPageQueryKeys?.unpaired !== zoneServerPageQueryKeys.unpaired);
   const pairedSearchError = backgroundLoadError && loadedZoneServerPageQueryKeys?.paired !== zoneServerPageQueryKeys.paired
     ? backgroundLoadError
     : null;
@@ -2219,7 +2275,7 @@ export default function ReconciliationWorkbenchPage() {
       onClearSelection={handleClearPairedSelection}
       onOpenDetail={handleOpenDetail}
       onEnsureGroupDetail={handleEnsureGroupDetail}
-      onLoadMore={() => handleLoadMoreZone("paired")}
+      onRequestNextPage={handleLoadMoreZone}
       onPrimarySelectionAction={handleCancelPairedSelection}
       primarySelectionActionDisabled={isPairedCancelSelectionDisabled || !canWriteWorkbench}
       onRowAction={handleRowAction}
@@ -2239,7 +2295,8 @@ export default function ReconciliationWorkbenchPage() {
       groups={displayPairedGroups}
       sourceGroups={workbenchData?.paired.groups ?? []}
       invoiceInventory={workbenchData?.invoiceInventory}
-      loadingMore={loadingMoreZone === "paired"}
+      loadingMore={loadingMoreByZone.paired}
+      loadMoreError={loadMoreErrorByZone.paired}
       pageInfo={zonePages.paired}
       highlightedRowId={null}
       panes={pairedPanes}
@@ -2261,7 +2318,7 @@ export default function ReconciliationWorkbenchPage() {
       onClearSelection={handleClearOpenSelection}
       onOpenDetail={handleOpenDetail}
       onEnsureGroupDetail={handleEnsureGroupDetail}
-      onLoadMore={() => handleLoadMoreZone("unpaired")}
+      onRequestNextPage={handleLoadMoreZone}
       onPrimarySelectionAction={handleConfirmOpenSelection}
       primarySelectionActionDisabled={isOpenConfirmSelectionDisabled || !canWriteWorkbench}
       onRowAction={handleRowAction}
@@ -2283,7 +2340,8 @@ export default function ReconciliationWorkbenchPage() {
       groups={displayOpenGroups}
       sourceGroups={visibleOpenGroups}
       invoiceInventory={workbenchData?.invoiceInventory}
-      loadingMore={loadingMoreZone === "unpaired"}
+      loadingMore={loadingMoreByZone.unpaired}
+      loadMoreError={loadMoreErrorByZone.unpaired}
       pageInfo={zonePages.unpaired}
       highlightedRowId={null}
       panes={openPanes}

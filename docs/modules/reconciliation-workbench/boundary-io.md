@@ -1,6 +1,6 @@
 # 关联台模块边界与 I/O
 
-日期：2026-07-20
+日期：2026-07-22
 
 ## 职责
 
@@ -38,7 +38,7 @@
 | --- | --- | --- |
 | `paired.groups` | 前端 | 每组恰好对应一条冻结要求已满足的 active formal relation，`group_type=relation` |
 | `unpaired.groups` | 前端 | 无 active owner 的 canonical fact 为 `group_type=unpaired` singleton；冻结要求未满足的 active relation 保持同 case、`group_type=relation`，并返回 `completion.is_complete=false` 与 `missing_row_types` |
-| combined initial | 前端/App Health | `GET /api/workbench` 在同一 active generation-set 快照返回 summary 与 paired/unpaired 各 50 组首页；summary 含 `paired_count`、`unpaired_count`、OA/流水/发票事实数与 exception count；其余组只通过既有 `/groups` 分页读取 |
+| combined initial | 前端/App Health | `GET /api/workbench` 在同一 active generation-set 快照返回 summary 与 paired/unpaired 各 50 组首页；summary 含 `paired_count`、`unpaired_count`、OA/流水/发票事实数与 exception count；用户滚动接近每区列表底部时，前端才通过既有 `/groups` 自动读取下一页，不显示“已加载 N / total”或手动“加载更多”；搜索仍由服务端查询该区全部 active generation 数据，不受前端当前已加载页限制 |
 | formal relation write result | caller | before/after、version、affected months、audit、outbox ids、barrier targets |
 | relation-origin Cost refresh | `cost_statistics` durable queue | relation transaction 以现有队列额外发布 identity-bound `cost_statistics_relation_delta`（`active:YYYY-MM` + 按 case 的 status/row IDs），用于低延迟；Workbench 月 generation 成功且 current 后仍以 `workbench_shard_published` 发布 active/all 月份收敛事件。不得直接调用成本 repository、HTTP 或 worker。 |
 | matching summary | worker/App Health | planned/created/extended/preserved/ambiguous/resource-limited/unsafe counts；不输出候选 rows |
@@ -89,6 +89,7 @@ Release A 已删除运行时链路且禁止恢复；旧表物理存储只为短�
 - 旧独立 summary HTTP handler/route/facade 与其 metric owner；运维 probe 和页面只能使用 combined initial 或已有窄查询。
 - 默认无筛选 `month=all` groups 请求中的动态 `count(distinct workbench_group_rows...)` 旧慢路径及其把历史 materialized all generation join 回 active month shards 的污染；它不再作为 generation stats 缺失 fallback。带用户搜索/列筛选时重复执行 member `EXISTS`、分别计算 count/page、或把历史 physical groups join 回 active shards 的旧路径也已删除；精确条件计数只能使用当前 active key 集合。
 - 已删除三栏 `WorkbenchPaneSearch`、`search_by_pane`、`search_mode`、pane-local draft/open/session 状态和对应 cache/repository 分支；不得恢复并行搜索路径或兼容 fallback。页面 session schema 为 v2，旧 v1 搜索状态直接失效。
+- 已删除区域底部 `已加载 N / total`、手动 `加载更多` 按钮、`onLoadMore` 组件 I/O 与旧 footer 样式；下一页只由区域列表底部哨兵触发，并复用既有 `/groups`、query 和 `expected_read_model_version` 合同。失败后允许显式重试，但禁止恢复常驻手动分页入口或第二套分页路径。
 - 已删除的旧链包括：无 row/case identity 的 direct full cost refresh、facade downstream-discovery 中的 cost scope、自动匹配/lifecycle cost domain/job、relation repository 隐藏 scope expansion，以及先等待完整 Workbench 再开始成本可见性计时的旧验收合同。当前 direct delta 与 publish convergence 共用一个正式 worker/repository，不得恢复兼容分支或第二套 fan-out。
 - on-demand raw/live/OA/retained payload builders、read-time OA invoice-offset relation sync/repair executors、ETC summary DTO 重拼装、legacy `WorkbenchApiRoutes` 和 row-detail fallback；当前详情只走 `WorkbenchRowDetailApiRoutes -> WorkbenchQueryFacade -> active generation repository`，确认关联所需 OA 附件上下文只读取同 generation grouped rows。
 
