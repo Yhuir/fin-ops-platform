@@ -49,7 +49,7 @@
 | 自动标签规则写入结果 | 前端页面 | 前端优先等待服务端返回的 `operation_barrier_targets`；缺少/未知 read model status 默认按 `refreshing` 处理 |
 | 标签/分类事实写入 | canonical store | `BankDetailsApplicationService` 只依赖显式 `BankTransactionCategoryStorePort.save_bank_transaction_categories(...)`；禁止通过宽 `state_store` 在业务 service 内散写 |
 | 标签副作用 | relation/downstream read models | 通过 lifecycle/gateway 传播；`bank-flow-rule-batches` 只能读取 active 标签并维护自身 OA/发票规则 |
-| 自动标签规则/分类下游刷新 | cost_statistics / workbench matching | `bank_auto_tag_rules_changed` 和银行明细分类变化必须入队 `workbench_matching` 和 `cost_statistics.read_model.refresh`；成本统计 worker 只能通过 `BankTransactionTagReadFacade` 读取 fresh `bank_detail` scoped read model 后写入 `time_rows.bank_tag_*`，成本统计页面不得直接读取银行明细 API 或规则表 |
+| 自动标签规则/分类下游刷新 | bank_flow_rule_batch / cost_statistics / workbench matching | `bank_auto_tag_rules_changed` 和银行明细分类变化必须刷新 `bank_flow_rule_batch`，并入队 `workbench_matching` 和 `cost_statistics.read_model.refresh`。分类 UoW 已知月份时必须同事务批量写 bank-flow dirty/outbox；自动规则无精确月份时通过 lifecycle `all` fan-out。成本统计 worker 只能通过 `BankTransactionTagReadFacade` 读取 fresh `bank_detail` scoped read model。 |
 | Tagged snapshot payload | cost_statistics 等下游 projection | `rows` 是目标月 + 指定跨月 ID 的去重集合，`month_rows` 仅属于目标月；同时返回全部涉及 scope 的 status/signatures 供一次性 fail-closed。缺失指定 ID 通过 `missing_transaction_ids` 显式报告，不得从 canonical 表或旧页面 payload 隐式 fallback。 |
 | 关系标签展示 | 银行明细列表/下游展示 | 只输出 relation chip/status；不发布 relation 事实、不触发 relation 写入、不绕过 `workbench-relations` freshness/command 边界 |
 | 导出文件 | 用户下载 | 复用当前查询边界，不绕过权限 |

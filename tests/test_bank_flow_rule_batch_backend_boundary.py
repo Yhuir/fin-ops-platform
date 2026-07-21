@@ -121,7 +121,9 @@ class BankFlowRuleBatchBackendBoundaryTests(unittest.TestCase):
             "bank_flow_rule_batch_changed",
         ):
             self.assertNotIn(forbidden, body)
-        self.assertEqual(body.count("enqueue_background_refresh("), 1)
+        self.assertNotIn("enqueue_background_refresh(", body)
+        self.assertEqual(body.count("enqueue_read_model_refreshes_in_transaction"), 1)
+        self.assertIn("affected_scope_keys_for_tag_codes", body)
         self.assertNotIn("_sync_bank_flow_rule_relation_requirements", no_oa_source)
         self.assertNotIn("def _sync_bank_flow_rule_relation_requirements(", base_source)
         self.assertNotIn("def _sync_turnover_rule_relation_requirements(", base_source)

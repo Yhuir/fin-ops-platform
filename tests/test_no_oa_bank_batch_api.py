@@ -123,10 +123,57 @@ def bank_transaction(
 class NoOaBankBatchApiTests(unittest.TestCase):
     def _install_runtime_read_model_repository(self, app) -> None:
         batch_service = app._no_oa_bank_batch_service
-        app._no_oa_bank_batch_sql_read_repository = SimpleNamespace(
+        def read_bank_flow_rule_batch_page(
+            filters,
+            *,
+            summary_filters,
+            page,
+            page_size,
+        ):
+            items = batch_service.list_batches(filters)
+            summary_items = batch_service.list_batches(summary_filters)
+            aggregates_by_key: dict[tuple[str, str], dict[str, object]] = {}
+            for item in summary_items:
+                status = str(item.get("status") or "")
+                presented_status = "draft" if status == "unsubmitted" else status
+                key = (str(item.get("batch_type") or ""), presented_status)
+                aggregate = aggregates_by_key.setdefault(
+                    key,
+                    {
+                        "batch_type": key[0],
+                        "presented_status": key[1],
+                        "batch_count": 0,
+                        "row_count": 0,
+                        "total_amount": "0.00",
+                        "batch_label": item.get("batch_label"),
+                        "category_primary_label": item.get("category_primary_label"),
+                        "category_sub_label": item.get("category_sub_label"),
+                    },
+                )
+                aggregate["batch_count"] = int(aggregate["batch_count"]) + 1
+                aggregate["row_count"] = int(aggregate["row_count"]) + int(item.get("row_count") or 0)
+                aggregate["total_amount"] = str(
+                    Decimal(str(aggregate["total_amount"])) + Decimal(str(item.get("total_amount") or "0"))
+                )
+            start = max(int(page) - 1, 0) * int(page_size or len(items) or 1)
+            end = start + int(page_size) if page_size is not None else None
+            return {
+                "items": items[start:end],
+                "total": len(items),
+                "aggregates": list(aggregates_by_key.values()),
+                "source_versions_summary": {
+                    "read_model_status": "fresh",
+                    "source_versions": {"test": 1},
+                },
+            }
+
+        repository = SimpleNamespace(
             list_no_oa_bank_batch_rows=lambda filters: batch_service.list_batches(filters),
             list_bank_flow_rule_batch_rows=lambda filters: batch_service.list_batches(filters),
+            read_page=read_bank_flow_rule_batch_page,
         )
+        app._no_oa_bank_batch_sql_read_repository = repository
+        app._bank_flow_rule_batch_sql_read_repository = repository
 
     def _app_with_transactions(
         self,
@@ -515,6 +562,14 @@ class NoOaBankBatchApiTests(unittest.TestCase):
 
     def test_bank_flow_submit_selection_appears_only_in_bank_flow_submitted_list(self) -> None:
         app = self._app_with_transactions([bank_transaction("bank-202603-fee-1", amount="3.00")])
+        current_rules = app._app_settings_service.get_bank_flow_rule_batch_tag_rules_payload()
+        app._app_settings_service.update_bank_flow_rule_batch_tag_rules(
+            {
+                "expected_version": current_rules["version"],
+                "rules": [{"tag_code": "fee", "requires_oa": False, "requires_invoice": False}],
+            },
+            actor_id="tester",
+        )
         batch = self._list_bank_flow_batches(app, "?bucket=unsubmitted")["batches"][0]
 
         response = app.handle_request(

@@ -60,7 +60,7 @@ domain registry 是页面域入口；`AppStatusReadModelRegistry` 是 read model
 
 `batch_accounting` 页面依赖 Workbench active payload 和 `workbench_relation` read model 判定已提交/未提交。`GET /api/batch-accounting` 必须透出 relation read model 的 `read_model_status`、`read_model_stale_reasons`、`read_model_scope_keys` 和 `refresh_enqueued`；页面不能在 relation read model 非 fresh 时把空关系结果当作真实“全部未提交”。未提交 bucket 的 relation lookup 输入必须先收窄到批量账务银行候选和日常报销 OA 候选，`summary.submitted_count` 只能走年份级 count I/O；已提交 bucket 才读取完整 submitted relation DTO。
 
-`bank_flow_rule_batches` 列表只通过 bank-flow 专属 paged read port 读取当前页和完整筛选范围聚合，默认 page size 50，不能先加载全部批次再由前端或 application 分页。详情按成员 ID 一次 bulk 读取 canonical 银行流水。submit/withdraw/reset 以 command 原子提交为前台完成边界，页面立即更新本地 committed state；`bank_flow_rule_batch` freshness wait 与 reload 只在后台 reconcile，完整跨页 targets 仍通过既有 domain event 传递，不能把关联台或其它页面 freshness 重新变成当前页操作的同步依赖。
+`bank_flow_rule_batches` 列表只通过 bank-flow 专属 paged read port 读取当前页和完整筛选范围聚合，默认 page size 50，不能先加载全部批次再由前端或 application 分页。未提交 rail 和批次只接纳 active 且 OA/发票双 false 的标签；submitted/history rail 使用实际历史聚合，不受当前规则隐藏。详情按成员 ID 一次 bulk 读取 canonical 银行流水。规则保存把 settings CAS 与精确受影响月份 dirty/outbox 原子提交；submit/withdraw/reset 以 command 原子提交为前台完成边界，页面立即更新本地 committed state；`bank_flow_rule_batch` freshness wait 与 reload 只在后台 reconcile，完整跨页 targets 仍通过既有 domain event 传递，不能把关联台或其它页面 freshness 重新变成当前页操作的同步依赖。
 
 ## 页面职责边界
 

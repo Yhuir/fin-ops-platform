@@ -4,6 +4,7 @@ import type {
   BankFlowRuleBatch,
   BankFlowRuleBatchDetailRow,
   BankFlowRuleBatchSummaryCategory,
+  BankFlowRuleBatchStatusBucket,
   BankFlowRuleBatchTagDefinition,
   BankFlowRuleBatchTagSelection,
 } from "./types";
@@ -286,6 +287,34 @@ export function formatCountMeta(batchCount: number, rowCount: number) {
     return "暂无";
   }
   return `${batchCount}批 · ${rowCount}条`;
+}
+
+export function isUnsubmittedEligible(
+  requirements: BankFlowRuleDraftRequirements,
+  tagCode: string,
+) {
+  const requirement = requirementFor(requirements, tagCode);
+  return !requirement.requiresOa && !requirement.requiresInvoice;
+}
+
+export function categoryCountForBucket(
+  category: BankFlowRuleBatchSummaryCategory,
+  bucket: BankFlowRuleBatchStatusBucket,
+) {
+  if (bucket === "unsubmitted") return category.draft;
+  if (bucket === "submitted") return category.submitted;
+  if (bucket === "withdrawn") return category.withdrawn;
+  return category.total;
+}
+
+export function categoryRowCountForBucket(
+  category: BankFlowRuleBatchSummaryCategory,
+  bucket: BankFlowRuleBatchStatusBucket,
+) {
+  if (bucket === "unsubmitted") return category.draftRowCount;
+  if (bucket === "submitted") return category.submittedRowCount;
+  if (bucket === "withdrawn") return category.withdrawnRowCount;
+  return category.totalRowCount;
 }
 
 export function relationContextLabels(row: BankFlowRuleBatchDetailRow) {

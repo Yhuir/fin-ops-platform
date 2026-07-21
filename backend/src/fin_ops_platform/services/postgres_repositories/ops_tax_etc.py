@@ -201,6 +201,43 @@ class PostgresOpsTaxEtcRepository:
     def save_app_settings_in_transaction(self, payload: dict[str, Any], *, transaction: Any) -> None:
         self.save_settings_in_transaction("app_settings", payload, transaction=transaction)
 
+    def save_app_settings_for_bank_flow_rule_version_in_transaction(
+        self,
+        payload: dict[str, Any],
+        *,
+        expected_version: int,
+        transaction: Any,
+    ) -> dict[str, Any] | None:
+        row = transaction.fetch_one(
+            """
+            select settings_payload
+            from app.app_settings
+            where settings_key = 'app_settings'
+            for update
+            """
+        )
+        current_payload = row_payload(row, "settings_payload") if row is not None else {}
+        current_rules = (
+            current_payload.get("bank_flow_rule_batch_tag_rules")
+            if isinstance(current_payload, dict)
+            else None
+        )
+        current_version = int_value(
+            current_rules.get("version") if isinstance(current_rules, dict) else 1,
+            1,
+        )
+        if current_version != int(expected_version):
+            return None
+        next_rules = payload.get("bank_flow_rule_batch_tag_rules")
+        if not isinstance(next_rules, dict):
+            raise ValueError("bank_flow_rule_batch_tag_rules payload is required.")
+        persisted_payload = {
+            **(current_payload if isinstance(current_payload, dict) else {}),
+            "bank_flow_rule_batch_tag_rules": dict(next_rules),
+        }
+        self.save_app_settings_in_transaction(persisted_payload, transaction=transaction)
+        return persisted_payload
+
     def _save_settings_with_executor(self, executor: Any, settings_key: str, payload: dict[str, Any]) -> None:
         normalized = serialize_value(payload)
         executor.execute(

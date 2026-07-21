@@ -84,6 +84,14 @@ type ApiBankFlowRuleBatchSummary = {
   conflictCount?: number | null;
   stale_count?: number | null;
   staleCount?: number | null;
+  total_row_count?: number | null;
+  totalRowCount?: number | null;
+  draft_row_count?: number | null;
+  draftRowCount?: number | null;
+  submitted_row_count?: number | null;
+  submittedRowCount?: number | null;
+  withdrawn_row_count?: number | null;
+  withdrawnRowCount?: number | null;
   total_amount?: string | null;
   totalAmount?: string | null;
   categories?: ApiBankFlowRuleBatchSummaryCategory[];
@@ -98,6 +106,14 @@ type ApiBankFlowRuleBatchSummaryCategory = {
   withdrawn?: number | null;
   conflict?: number | null;
   stale?: number | null;
+  total_row_count?: number | null;
+  totalRowCount?: number | null;
+  draft_row_count?: number | null;
+  draftRowCount?: number | null;
+  submitted_row_count?: number | null;
+  submittedRowCount?: number | null;
+  withdrawn_row_count?: number | null;
+  withdrawnRowCount?: number | null;
   total_amount?: string | null;
   totalAmount?: string | null;
   primary_label?: string | null;
@@ -140,6 +156,22 @@ type ApiBankFlowRuleBatchTagSelection = {
   rules?: ApiBankFlowRuleBatchTagRule[] | null;
   requirements_by_tag_code?: Record<string, ApiBankFlowRuleBatchTagRule> | null;
   requirementsByTagCode?: Record<string, ApiBankFlowRuleBatchTagRule> | null;
+  eligibility_changed?: boolean | null;
+  eligibilityChanged?: boolean | null;
+  eligibility_changed_tag_codes?: unknown[] | null;
+  eligibilityChangedTagCodes?: unknown[] | null;
+  affected_months?: unknown[] | null;
+  affectedMonths?: unknown[] | null;
+  affected_scope_keys?: unknown[] | null;
+  affectedScopeKeys?: unknown[] | null;
+  read_model_scope_keys?: unknown[] | null;
+  readModelScopeKeys?: unknown[] | null;
+  freshness_targets?: unknown;
+  freshnessTargets?: unknown;
+  operation_barrier_targets?: unknown;
+  operationBarrierTargets?: unknown;
+  refresh_enqueued?: boolean | null;
+  refreshEnqueued?: boolean | null;
 };
 
 type ApiBankFlowRuleBatchesResponse = {
@@ -385,6 +417,10 @@ function mapSummary(summary: ApiBankFlowRuleBatchSummary = {}): BankFlowRuleBatc
     withdrawnCount: numberValue(summary.withdrawn_count ?? summary.withdrawnCount),
     conflictCount: numberValue(summary.conflict_count ?? summary.conflictCount),
     staleCount: numberValue(summary.stale_count ?? summary.staleCount),
+    totalRowCount: numberValue(summary.total_row_count ?? summary.totalRowCount),
+    draftRowCount: numberValue(summary.draft_row_count ?? summary.draftRowCount),
+    submittedRowCount: numberValue(summary.submitted_row_count ?? summary.submittedRowCount),
+    withdrawnRowCount: numberValue(summary.withdrawn_row_count ?? summary.withdrawnRowCount),
     totalAmount: text(summary.total_amount ?? summary.totalAmount, "0.00"),
     categories: Array.isArray(summary.categories) ? summary.categories.map(mapSummaryCategory) : [],
   };
@@ -411,6 +447,10 @@ function mapSummaryCategory(category: ApiBankFlowRuleBatchSummaryCategory) {
     withdrawn: numberValue(category.withdrawn),
     conflict: numberValue(category.conflict),
     stale: numberValue(category.stale),
+    totalRowCount: numberValue(category.total_row_count ?? category.totalRowCount),
+    draftRowCount: numberValue(category.draft_row_count ?? category.draftRowCount),
+    submittedRowCount: numberValue(category.submitted_row_count ?? category.submittedRowCount),
+    withdrawnRowCount: numberValue(category.withdrawn_row_count ?? category.withdrawnRowCount),
     totalAmount: text(category.total_amount ?? category.totalAmount, "0.00"),
   };
   const primaryLabel = text(category.primary_label ?? category.primaryLabel);
@@ -469,6 +509,8 @@ function mapTagSelection(payload: ApiBankFlowRuleBatchTagSelection = {}): BankFl
     requiresOa: true,
     requiresInvoice: true,
   });
+  const freshnessTargets = readModelTargets(payload.freshness_targets ?? payload.freshnessTargets);
+  const operationTargets = readModelTargets(payload.operation_barrier_targets ?? payload.operationBarrierTargets);
   return {
     version: numberValue(payload.version),
     bankAutoTagRulesVersion: numberValue(payload.bank_auto_tag_rules_version ?? payload.bankAutoTagRulesVersion),
@@ -478,6 +520,16 @@ function mapTagSelection(payload: ApiBankFlowRuleBatchTagSelection = {}): BankFl
       rule.tagCode,
       { requiresOa: rule.requiresOa, requiresInvoice: rule.requiresInvoice },
     ])),
+    eligibilityChanged: Boolean(payload.eligibility_changed ?? payload.eligibilityChanged),
+    eligibilityChangedTagCodes: unknownStringList(
+      payload.eligibility_changed_tag_codes ?? payload.eligibilityChangedTagCodes,
+    ),
+    affectedMonths: unknownStringList(payload.affected_months ?? payload.affectedMonths),
+    affectedScopeKeys: unknownStringList(payload.affected_scope_keys ?? payload.affectedScopeKeys),
+    readModelScopeKeys: unknownStringList(payload.read_model_scope_keys ?? payload.readModelScopeKeys),
+    freshnessTargets,
+    operationBarrierTargets: operationTargets.length > 0 ? operationTargets : freshnessTargets,
+    refreshEnqueued: Boolean(payload.refresh_enqueued ?? payload.refreshEnqueued),
   };
 }
 

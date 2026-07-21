@@ -131,6 +131,7 @@ EXPECTED_MIGRATIONS = [
     "0115_turnover_ledger_relation_delta_hot_path.sql",
     "0116_workbench_etc_relation_enrichment_hot_path.sql",
     "0117_workbench_matching_idempotency_runtime_grant.sql",
+    "0118_bank_flow_rule_batch_settings_raw_alignment.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -293,7 +294,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 118)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 119)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -583,6 +584,23 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertIn("'{bank_flow_rule_batch_tag_rules}'", sql)
         self.assertIn("settings_payload->'no_oa_bank_batch_tag_selection'", sql)
         self.assertIn("not (settings_payload ? 'bank_flow_rule_batch_tag_rules')", sql)
+
+    def test_bank_flow_rule_batch_settings_raw_payload_is_aligned_without_changing_canonical_value(self) -> None:
+        sql = (
+            MIGRATIONS_DIR / "0118_bank_flow_rule_batch_settings_raw_alignment.sql"
+        ).read_text(encoding="utf-8").lower()
+        normalized_sql = " ".join(strip_sql_comments(sql).split())
+
+        self.assertIn("update app.app_settings", normalized_sql)
+        self.assertIn("'{normalized_payload}'", normalized_sql)
+        self.assertIn("'{bank_flow_rule_batch_tag_rules}'", normalized_sql)
+        self.assertIn(
+            "raw_payload->'normalized_payload'->'bank_flow_rule_batch_tag_rules' is distinct from "
+            "settings_payload->'bank_flow_rule_batch_tag_rules'",
+            normalized_sql,
+        )
+        self.assertIn('"canonical_value_changed":false', normalized_sql)
+        self.assertNotIn("settings_payload =", normalized_sql)
 
     def test_runtime_queue_history_retention_indexes_and_migrator_delete_grants_are_declared(self) -> None:
         sql = strip_sql_comments(migration_sql()).lower()

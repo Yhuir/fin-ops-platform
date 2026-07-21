@@ -296,6 +296,19 @@ class PostgresStateStore:
     def save_app_settings(self, payload: dict[str, Any]) -> None:
         self._save_settings(APP_SETTINGS_KEY, payload)
 
+    def save_app_settings_for_bank_flow_rule_version_in_transaction(
+        self,
+        payload: dict[str, Any],
+        *,
+        expected_version: int,
+        transaction: Any,
+    ) -> dict[str, Any] | None:
+        return self._ops_tax_etc_repository.save_app_settings_for_bank_flow_rule_version_in_transaction(
+            payload,
+            expected_version=expected_version,
+            transaction=transaction,
+        )
+
     def load_pending_invoice_commands(self) -> dict[str, Any]:
         snapshot = self._ops_tax_etc_repository.load_pending_invoice_commands()
         if snapshot:

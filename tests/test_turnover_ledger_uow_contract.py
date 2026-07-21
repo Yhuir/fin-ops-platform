@@ -2444,6 +2444,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             ],
             [
                 ("bank_detail", ["2026-02", "2026-03"], "bank_transaction_category_changed"),
+                ("bank_flow_rule_batch", ["2026-02", "2026-03"], "bank_transaction_category_changed"),
                 ("workbench", ["2026-02", "2026-03"], "workbench_scope_invalidated"),
                 ("turnover_ledger", ["2026-02", "2026-03"], "turnover_relation_changed"),
             ],

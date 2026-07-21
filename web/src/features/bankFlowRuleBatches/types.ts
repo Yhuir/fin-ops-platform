@@ -33,6 +33,10 @@ export type BankFlowRuleBatchSummaryCategory = {
   withdrawn: number;
   conflict: number;
   stale: number;
+  totalRowCount: number;
+  draftRowCount: number;
+  submittedRowCount: number;
+  withdrawnRowCount: number;
   totalAmount: string;
 };
 
@@ -70,6 +74,10 @@ export type BankFlowRuleBatchSummary = {
   withdrawnCount: number;
   conflictCount: number;
   staleCount: number;
+  totalRowCount: number;
+  draftRowCount: number;
+  submittedRowCount: number;
+  withdrawnRowCount: number;
   totalAmount: string;
   categories: BankFlowRuleBatchSummaryCategory[];
 };
@@ -200,6 +208,14 @@ export type BankFlowRuleBatchTagSelection = {
   activeTags: BankFlowRuleBatchTagDefinition[];
   rules: BankFlowRuleBatchTagRule[];
   requirementsByTagCode: Record<string, { requiresOa: boolean; requiresInvoice: boolean }>;
+  eligibilityChanged: boolean;
+  eligibilityChangedTagCodes: string[];
+  affectedMonths: string[];
+  affectedScopeKeys: string[];
+  readModelScopeKeys: string[];
+  freshnessTargets: ReadModelOperationBarrierTarget[];
+  operationBarrierTargets: ReadModelOperationBarrierTarget[];
+  refreshEnqueued: boolean;
 };
 
 export type SaveBankFlowRuleBatchTagSelectionRequest = {

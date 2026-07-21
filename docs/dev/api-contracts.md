@@ -225,7 +225,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 | `sub_label` | 流水子标签；为空时前端可显示主标签。 |
 | `status` | 当前只返回 `active`。 |
 
-`rules[*].requires_oa` / `requires_invoice` 表示该标签业务闭环所需的单据类型。新 relation 创建时把当时规则冻结到 `special_metadata`；关联台只读取该快照判定 paired/unpaired，不回查当前规则。active relation 仍决定跨页面 linked ownership。
+`rules[*].requires_oa` / `requires_invoice` 表示该标签业务闭环所需的单据类型。未提交批次只接纳 active 且两者都为 `false` 的标签；任一项为 `true`、规则缺失或标签归档时，该标签流水完全退出本页面未提交区。新 relation 创建时把当时规则冻结到 `special_metadata`；已提交/历史读取冻结事实，不回查当前规则。active relation 仍决定跨页面 linked ownership。
 
 `PUT /api/bank-flow-rule-batches/tag-rules`
 
@@ -246,9 +246,12 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 - `expected_version` 必填；版本不一致返回 `409 bank_flow_rule_batch_tag_rules_version_conflict`。
 - 请求和 service 边界都不能包含 `selected_tag_codes`；旧字段不得作为新规则事实写入。
 - 只能提交当前 `active_tags` 中存在且可用的标签 code；未知、停用、重复 code 返回业务错误。
-- 语义变化后返回与 GET 相同结构，version +1，写一次审计动作 `bank_flow_rule_batch_tag_rules_updated`，并只 enqueue `bank_flow_rule_batch/all` refresh；不能递增 `bank_transaction_tags.version`。
+- 语义变化后返回与 GET 相同结构，version +1，写一次审计动作 `bank_flow_rule_batch_tag_rules_updated`；不能递增 `bank_transaction_tags.version`。
+- 后端比较保存前后未提交资格集合。只有资格实际变化的 tag code 才通过单条集合查询解析受影响月份，并在同一 PostgreSQL 事务中完成 settings 乐观锁写入与这些月份的 dirty scope/outbox 批量写入；禁止 `all` fallback。OA-only 改为 invoice-only 等资格不变的语义更新不触发 read model refresh。
+- 响应额外返回 `eligibility_changed`、`eligibility_changed_tag_codes`、`affected_months`、`affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets` 和 `refresh_enqueued`。target 只包含精确的 `bank_flow_rule_batch/YYYY-MM`。
 - 提交与当前有效规则相同的 payload 是 no-op：version 不变，不写 settings/audit，不触发 refresh。
 - 保存规则不得读取或改写 existing Workbench/turnover relation；existing metadata 保持历史快照，关联台按各 relation 自己的快照分区。
+- 保存 API 在 durable transaction 提交后立即返回；前端清空旧选择并将受影响当前月份标记为 refreshing，operation barrier 和列表重读只在后台执行。
 - HTTP 输出边界只返回 `bank_flow_rule_batch_*` 错误码。共享 bank-batch core 必须根据显式 bank-flow relation mode 直接产生正式错误码；route 不保留 legacy translation map 或 no-OA fallback。
 
 `GET /api/bank-flow-rule-batches`
@@ -263,7 +266,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 | `tag_code` | 银行标签筛选。 |
 | `page` / `page_size` | 分页；`page_size` 上限由后端固定。 |
 
-响应必须包含 summary、rows、pagination、`read_model_status`、`read_model_stale_reasons`、`read_model_scope_keys` 和 `refresh_enqueued`。rows 只包含当前页，summary 对完整 summary filter 范围做 SQL 聚合，不能由当前页 rows 推算；默认页面 `page_size=50`。非 fresh 时前端不能把空 rows 当真实无候选。
+响应必须包含 summary、rows、pagination、`read_model_status`、`read_model_stale_reasons`、`read_model_scope_keys` 和 `refresh_enqueued`。rows 只包含当前页；summary 对完整 summary filter 范围做 SQL 聚合，并为总计和每个 category 返回 draft/submitted/withdrawn 的 batch count 与 `*_row_count`，历史 category 还携带冻结 label/primary/sub label，不能由当前页 rows 推算。默认页面 `page_size=50`。未提交标签只展示当前 OA/发票双 false 的 active tags，已提交/历史只展示对应状态 count > 0 的 summary categories。非 fresh 时前端不能把空 rows 当真实无候选。
 
 `POST /api/bank-flow-rule-batches/submit-selection`
 

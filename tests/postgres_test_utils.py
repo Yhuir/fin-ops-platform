@@ -129,6 +129,7 @@ EXPECTED_MIGRATION_FILES = [
     "0115_turnover_ledger_relation_delta_hot_path.sql",
     "0116_workbench_etc_relation_enrichment_hot_path.sql",
     "0117_workbench_matching_idempotency_runtime_grant.sql",
+    "0118_bank_flow_rule_batch_settings_raw_alignment.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (

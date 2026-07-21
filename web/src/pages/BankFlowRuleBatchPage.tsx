@@ -14,7 +14,7 @@ import {
 import { useActivePageEvent, useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
 import { useSessionPermissions } from "../contexts/SessionContext";
-import { operationBarrierTargets, waitForOperationFreshness } from "../features/operationBarrier/api";
+import { waitForOperationFreshness } from "../features/operationBarrier/api";
 import {
   fetchBankFlowRuleBatchDetail,
   fetchBankFlowRuleBatchTagSelection,
@@ -34,17 +34,19 @@ import {
 import { BatchStatusTag, LabelRail, PageControls } from "../features/bankFlowRuleBatches/components";
 import type { LabelRailGroup } from "../features/bankFlowRuleBatches/components";
 import {
-  BANK_FLOW_RULE_BATCH_READ_MODEL_KEY,
   accountLabel,
   bankDetailTagLabels,
   bankTagLabel,
   batchBlockingReason,
   buildTagDrawerRows,
+  categoryCountForBucket,
+  categoryRowCountForBucket,
   currentMonth,
   cx,
   directionTagLabel,
   formatMoney,
   isAbortLikeError,
+  isUnsubmittedEligible,
   mutationBarrierTargets,
   mutationEventDetail,
   relationContextLabels,
@@ -77,6 +79,10 @@ const EMPTY_BATCHES: BankFlowRuleBatchesResponse = {
     withdrawnCount: 0,
     conflictCount: 0,
     staleCount: 0,
+    totalRowCount: 0,
+    draftRowCount: 0,
+    submittedRowCount: 0,
+    withdrawnRowCount: 0,
     totalAmount: "0.00",
     categories: [],
   },
@@ -91,6 +97,14 @@ const EMPTY_TAG_SELECTION: BankFlowRuleBatchTagSelection = {
   activeTags: [],
   rules: [],
   requirementsByTagCode: {},
+  eligibilityChanged: false,
+  eligibilityChangedTagCodes: [],
+  affectedMonths: [],
+  affectedScopeKeys: [],
+  readModelScopeKeys: [],
+  freshnessTargets: [],
+  operationBarrierTargets: [],
+  refreshEnqueued: false,
 };
 
 const SELF_SUB_LABEL = "主标签本身";
@@ -256,36 +270,33 @@ export default function BankFlowRuleBatchPage() {
 
   const tagNodesByCode = useMemo(() => {
     const nodes = new Map<string, BankFlowRuleTagNode>();
-    tagSelection.activeTags.forEach((tag) => {
-      nodes.set(tag.code, {
-        code: tag.code,
-        label: tag.label || tag.code,
-        primaryLabel: tagPrimaryLabel(tag) || tag.label || tag.code,
-        subLabel: tagSubLabel(tag),
+    if (bucket === "unsubmitted") {
+      tagSelection.activeTags.forEach((tag) => {
+        if (!isUnsubmittedEligible(tagSelection.requirementsByTagCode, tag.code)) {
+          return;
+        }
+        nodes.set(tag.code, {
+          code: tag.code,
+          label: tag.label || tag.code,
+          primaryLabel: tagPrimaryLabel(tag) || tag.label || tag.code,
+          subLabel: tagSubLabel(tag),
+        });
       });
-    });
-    payload.summary.categories.forEach((category) => {
-      if (!nodes.has(category.code)) {
+    } else {
+      payload.summary.categories.forEach((category) => {
+        if (categoryCountForBucket(category, bucket) <= 0) {
+          return;
+        }
         nodes.set(category.code, {
           code: category.code,
           label: category.label || category.code,
           primaryLabel: tagPrimaryLabel(category) || category.label || category.code,
           subLabel: tagSubLabel(category),
         });
-      }
-    });
-    payload.batches.forEach((batch) => {
-      if (!nodes.has(batch.batchType)) {
-        nodes.set(batch.batchType, {
-          code: batch.batchType,
-          label: batch.batchLabel || batch.batchType,
-          primaryLabel: tagPrimaryLabel(batch) || batch.batchLabel || batch.batchType,
-          subLabel: tagSubLabel(batch),
-        });
-      }
-    });
+      });
+    }
     return nodes;
-  }, [payload.batches, payload.summary.categories, tagSelection.activeTags]);
+  }, [bucket, payload.summary.categories, tagSelection.activeTags, tagSelection.requirementsByTagCode]);
 
   const visibleBucketBatches = useMemo(
     () => payload.batches.filter((batch) => statusBucketFor(batch) === bucket),
@@ -294,25 +305,21 @@ export default function BankFlowRuleBatchPage() {
 
   const primaryGroups = useMemo(() => {
     const groups = new Map<string, { primaryLabel: string; codes: string[]; batchCount: number; rowCount: number }>();
+    const categoriesByCode = new Map(payload.summary.categories.map((category) => [category.code, category]));
     tagNodesByCode.forEach((node) => {
       if (!groups.has(node.primaryLabel)) {
         groups.set(node.primaryLabel, { primaryLabel: node.primaryLabel, codes: [], batchCount: 0, rowCount: 0 });
       }
-      groups.get(node.primaryLabel)?.codes.push(node.code);
-    });
-    visibleBucketBatches.forEach((batch) => {
-      const node = tagNodesByCode.get(batch.batchType);
-      if (!node) {
-        return;
-      }
       const group = groups.get(node.primaryLabel);
       if (group) {
-        group.batchCount += 1;
-        group.rowCount += batch.rowCount;
+        const category = categoriesByCode.get(node.code);
+        group.codes.push(node.code);
+        group.batchCount += category ? categoryCountForBucket(category, bucket) : 0;
+        group.rowCount += category ? categoryRowCountForBucket(category, bucket) : 0;
       }
     });
     return Array.from(groups.values());
-  }, [tagNodesByCode, visibleBucketBatches]);
+  }, [bucket, payload.summary.categories, tagNodesByCode]);
 
   useEffect(() => {
     if (primaryGroups.length === 0) {
@@ -336,6 +343,7 @@ export default function BankFlowRuleBatchPage() {
 
   const subGroups = useMemo(() => {
     const groups = new Map<string, { key: string; label: string; codes: string[]; batchCount: number; rowCount: number }>();
+    const categoriesByCode = new Map(payload.summary.categories.map((category) => [category.code, category]));
     tagNodesByCode.forEach((node) => {
       if (node.primaryLabel !== selectedPrimaryLabel) {
         return;
@@ -344,22 +352,16 @@ export default function BankFlowRuleBatchPage() {
       if (!groups.has(key)) {
         groups.set(key, { key, label: key, codes: [], batchCount: 0, rowCount: 0 });
       }
-      groups.get(key)?.codes.push(node.code);
-    });
-    visibleBucketBatches.forEach((batch) => {
-      const node = tagNodesByCode.get(batch.batchType);
-      if (!node || node.primaryLabel !== selectedPrimaryLabel) {
-        return;
-      }
-      const key = node.subLabel || SELF_SUB_LABEL;
       const group = groups.get(key);
       if (group) {
-        group.batchCount += 1;
-        group.rowCount += batch.rowCount;
+        const category = categoriesByCode.get(node.code);
+        group.codes.push(node.code);
+        group.batchCount += category ? categoryCountForBucket(category, bucket) : 0;
+        group.rowCount += category ? categoryRowCountForBucket(category, bucket) : 0;
       }
     });
     return Array.from(groups.values());
-  }, [selectedPrimaryLabel, tagNodesByCode, visibleBucketBatches]);
+  }, [bucket, payload.summary.categories, selectedPrimaryLabel, tagNodesByCode]);
 
   useEffect(() => {
     if (subGroups.length === 0) {
@@ -788,12 +790,17 @@ export default function BankFlowRuleBatchPage() {
           setTagSelection(saved);
           setDraftTagRequirements(requirementsFromSelection(saved));
           setTagDrawerOpen(false);
+          clearSelection();
+          setSelectedBatchId("");
           setDetails({});
           setDetailErrors({});
-          setMessage("正在等待流水规则批次读模型同步...");
-          await waitForOperationFreshness(operationBarrierTargets(BANK_FLOW_RULE_BATCH_READ_MODEL_KEY, ["all"]));
-          setMessage("正在刷新流水规则批次...");
-          await reloadBatchesAfterMutation();
+          if (saved.affectedScopeKeys.includes(month)) {
+            if (bucket === "unsubmitted") {
+              setPayload((current) => ({ ...current, batches: [], readModelStatus: "refreshing" }));
+            }
+            setMessage("流水规则已保存，正在后台重新生成未提交批次...");
+            reconcileMutationInBackground(saved, month);
+          }
           return saved;
         } finally {
           setMutating(false);

@@ -35,3 +35,9 @@ class BankFlowRuleBatchReadModelRepositoryPort:
     ) -> dict[str, object] | None:
         payload = self._repository.bank_flow_rule_batch_source_versions_summary(filters)
         return dict(payload) if isinstance(payload, dict) else None
+
+    def affected_scope_keys_for_tag_codes(self, tag_codes: list[str]) -> list[str]:
+        return list(
+            self._repository.bank_flow_rule_batch_affected_scope_keys_for_tag_codes(tag_codes)
+            or []
+        )

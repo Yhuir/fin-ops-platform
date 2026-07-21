@@ -212,6 +212,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         self.assertIn(("bank_detail", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
         self.assertIn(("turnover_ledger", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
         self.assertIn(("no_oa_bank_batch", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
+        self.assertIn(("bank_flow_rule_batch", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
 
     def test_put_direction_only_change_persists_reloads_and_triggers_refresh(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -886,6 +887,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         )
         self.assertIn(("bank_detail", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
         self.assertIn(("no_oa_bank_batch", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
+        self.assertIn(("bank_flow_rule_batch", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
 
     def test_put_external_turnover_rule_clears_legacy_third_label_and_persists_action_type(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1185,6 +1187,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         self.assertIn(("bank_detail", "2026-01", "bank_auto_tag_rules_changed"), queue.enqueued)
         self.assertIn(("bank_detail", "2026-03", "bank_auto_tag_rules_changed"), queue.enqueued)
         self.assertNotIn(("bank_detail", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
+        self.assertIn(("bank_flow_rule_batch", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
 
     def test_bank_category_mutation_side_effect_port_enqueues_turnover_ledger_all_refresh(self) -> None:
         app = build_application()

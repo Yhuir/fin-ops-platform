@@ -681,6 +681,23 @@ class AppSettingsService:
         *,
         actor_id: str,
     ) -> dict[str, Any]:
+        normalized = self.normalize_bank_flow_rule_batch_tag_rules_update(
+            payload,
+            actor_id=actor_id,
+        )
+        if not bool(normalized["changed"]):
+            return dict(normalized["public_payload"])
+        self._save_snapshot(dict(normalized["next_snapshot"]))
+        self._record_bank_flow_rule_batch_tag_rules_audit(dict(normalized["audit_event"]))
+        return dict(normalized["public_payload"])
+
+    def normalize_bank_flow_rule_batch_tag_rules_update(
+        self,
+        payload: dict[str, Any],
+        *,
+        actor_id: str,
+    ) -> dict[str, Any]:
+        """Validate one rule update without mutating settings or enqueueing work."""
         self._refresh_snapshot_from_state_store()
         if "selected_tag_codes" in payload or "selectedTagCodes" in payload:
             raise AppSettingsValidationError(
@@ -718,23 +735,46 @@ class AppSettingsService:
         if dict(next_public.get("requirements_by_tag_code") or {}) == dict(
             current_public.get("requirements_by_tag_code") or {}
         ):
-            return self.get_bank_flow_rule_batch_tag_rules_payload()
+            return {
+                "changed": False,
+                "previous_snapshot": dict(self._snapshot),
+                "next_snapshot": dict(self._snapshot),
+                "audit_event": {},
+                "previous_public_payload": dict(current_public),
+                "public_payload": dict(current_public),
+            }
         next_snapshot = dict(self._snapshot)
         next_snapshot["bank_flow_rule_batch_tag_rules"] = next_rules
-        if self._state_store is not None:
-            self._state_store.save_app_settings(next_snapshot)
-        self._snapshot = next_snapshot
-        self._configure_category_service(next_snapshot)
-        self._record_bank_flow_rule_batch_tag_rules_audit(
-            {
+        return {
+            "changed": True,
+            "previous_snapshot": dict(self._snapshot),
+            "next_snapshot": next_snapshot,
+            "previous_public_payload": dict(current_public),
+            "public_payload": dict(next_public),
+            "audit_event": {
                 "actor_id": actor_id,
                 "old_version": int(current.get("version") or 1),
                 "new_version": int(next_rules.get("version") or 1),
                 "old_rules": dict(current.get("requirements_by_tag_code") or {}),
                 "new_rules": dict(next_rules.get("requirements_by_tag_code") or {}),
-            }
+            },
+        }
+
+    def accept_bank_flow_rule_batch_tag_rules_update(
+        self,
+        *,
+        next_snapshot: dict[str, Any],
+        audit_event: dict[str, Any],
+    ) -> None:
+        """Publish a rule update after its durable transaction commits."""
+        normalized_snapshot = self._normalize_settings(
+            next_snapshot,
+            validate_pending_invoice_tag_groups=False,
         )
-        return self.get_bank_flow_rule_batch_tag_rules_payload()
+        self._snapshot = normalized_snapshot
+        self._configure_category_service(normalized_snapshot)
+        self._restore_manual_projects()
+        self._record_bank_flow_rule_batch_tag_rules_audit(dict(audit_event))
 
     @staticmethod
     def _assert_unique_bank_flow_rule_batch_rule_codes(payload: dict[str, Any]) -> None:
@@ -2435,6 +2475,8 @@ class AppSettingsService:
                 "new_version": int(event.get("new_version") or 0),
                 "old_rules": dict(event.get("old_rules") or {}),
                 "new_rules": dict(event.get("new_rules") or {}),
+                "eligibility_changed_tag_codes": list(event.get("eligibility_changed_tag_codes") or []),
+                "affected_months": list(event.get("affected_months") or []),
             },
         )
 

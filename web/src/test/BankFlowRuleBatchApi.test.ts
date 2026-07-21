@@ -130,10 +130,14 @@ describe("bank flow rule batch API", () => {
           withdrawn_count: 3,
           conflictCount: 4,
           stale_count: 5,
+          total_row_count: 12,
+          draftRowCount: 12,
+          submitted_row_count: 0,
+          withdrawnRowCount: 0,
           total_amount: "12345.67",
           categories: [
-            { code: "fee", label: "手续费", total: 1, draft: 1, submitted: 0, withdrawn: 0, conflict: 0, stale: 0, total_amount: "88.00" },
-            { code: "bonus", label: "奖金", total: 0, draft: 0, submitted: 0, withdrawn: 0, conflict: 0, stale: 0, total_amount: "0.00" },
+            { code: "fee", label: "手续费", total: 1, draft: 1, submitted: 0, withdrawn: 0, conflict: 0, stale: 0, total_row_count: 12, draft_row_count: 12, submitted_row_count: 0, withdrawn_row_count: 0, total_amount: "88.00" },
+            { code: "bonus", label: "奖金", total: 0, draft: 0, submitted: 0, withdrawn: 0, conflict: 0, stale: 0, total_row_count: 0, draft_row_count: 0, submitted_row_count: 0, withdrawn_row_count: 0, total_amount: "0.00" },
           ],
         },
         batches: [
@@ -207,10 +211,14 @@ describe("bank flow rule batch API", () => {
       withdrawnCount: 3,
       conflictCount: 4,
       staleCount: 5,
+      totalRowCount: 12,
+      draftRowCount: 12,
+      submittedRowCount: 0,
+      withdrawnRowCount: 0,
       totalAmount: "12345.67",
       categories: [
-        { code: "fee", label: "手续费", total: 1, draft: 1, submitted: 0, withdrawn: 0, conflict: 0, stale: 0, totalAmount: "88.00" },
-        { code: "bonus", label: "奖金", total: 0, draft: 0, submitted: 0, withdrawn: 0, conflict: 0, stale: 0, totalAmount: "0.00" },
+        { code: "fee", label: "手续费", total: 1, draft: 1, submitted: 0, withdrawn: 0, conflict: 0, stale: 0, totalRowCount: 12, draftRowCount: 12, submittedRowCount: 0, withdrawnRowCount: 0, totalAmount: "88.00" },
+        { code: "bonus", label: "奖金", total: 0, draft: 0, submitted: 0, withdrawn: 0, conflict: 0, stale: 0, totalRowCount: 0, draftRowCount: 0, submittedRowCount: 0, withdrawnRowCount: 0, totalAmount: "0.00" },
       ],
     });
     expect(payload.batches).toEqual([

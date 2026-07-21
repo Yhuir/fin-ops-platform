@@ -2311,6 +2311,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertGreaterEqual(len(saved_relations), 1)
         self.assertEqual(read_repository.clear_calls, 0)
         self.assertIn(("bank_detail", "2026-02", "bank_transaction_category_changed"), queue.enqueued)
+        self.assertIn(("bank_flow_rule_batch", "2026-02", "bank_transaction_category_changed"), queue.enqueued)
         self.assertIn(("workbench", "2026-02", "workbench_scope_invalidated"), queue.enqueued)
         self.assertIn(("turnover_ledger", "2026-02", "turnover_relation_changed"), queue.enqueued)
 
@@ -2473,6 +2474,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertGreaterEqual(len(saved_categories), 1)
         self.assertEqual(read_repository.clear_calls, 0)
         self.assertIn(("bank_detail", "2026-02", "bank_transaction_category_changed"), queue.enqueued)
+        self.assertIn(("bank_flow_rule_batch", "2026-02", "bank_transaction_category_changed"), queue.enqueued)
         self.assertIn(("workbench", "2026-02", "workbench_scope_invalidated"), queue.enqueued)
         self.assertIn(("turnover_ledger", "2026-02", "turnover_relation_changed"), queue.enqueued)
 
@@ -2603,6 +2605,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             [item[:3] for item in queue.transactional],
             [
                 ("bank_detail", "2026-02", "bank_transaction_category_changed"),
+                ("bank_flow_rule_batch", "2026-02", "bank_transaction_category_changed"),
                 ("workbench", "2026-02", "workbench_scope_invalidated"),
                 ("turnover_ledger", "2026-02", "turnover_relation_changed"),
             ],
@@ -2779,6 +2782,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn(("bank_detail", "2026-02", "bank_transaction_category_changed"), queue.enqueued)
+        self.assertIn(("bank_flow_rule_batch", "2026-02", "bank_transaction_category_changed"), queue.enqueued)
         self.assertIn(("workbench", "2026-02", "workbench_scope_invalidated"), queue.enqueued)
         self.assertIn(("turnover_ledger", "2026-02", "turnover_relation_changed"), queue.enqueued)
 

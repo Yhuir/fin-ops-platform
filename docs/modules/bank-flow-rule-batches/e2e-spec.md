@@ -1,6 +1,6 @@
 # 流水规则批量处理 E2E 规格
 
-状态：covered-transition。关键 P0 场景已映射到 `web/e2e/bank-flow-rule-batches-flow.spec.ts`；真实 pending-invoice/invoice attach 跨页补票入口和独立 read model 拆分仍是后续风险。
+状态：covered-close。关键 P0 场景已映射到 `web/e2e/bank-flow-rule-batches-flow.spec.ts`；真实生产 worker drain 和大数据月份性能仍由 runtime smoke 验证。
 
 ## BRB-E2E-001 标签规则抽屉跟随银行明细标签
 
@@ -17,6 +17,7 @@
 4. 尝试编辑左侧标签列。
 5. 勾选/取消右侧 `OA`、`发票`。
 6. 保存后刷新页面。
+7. 返回未提交 bucket，比较双 false 标签与需要 OA/发票标签。
 
 验收：
 
@@ -25,19 +26,21 @@
 - 未配置标签默认 OA 和发票都勾选。
 - 保存后规则持久化，刷新仍保持勾选。
 - API 不递增银行标签版本。
+- 未提交主/子标签只显示 OA、发票都未勾选的 active 标签；需要任一单据的标签在抽屉中仍可见，但完全退出未提交区。
+- 保存 API 成功反馈和抽屉关闭不等待 worker；精确月份 barrier 与列表重读在后台完成。
 
 ## BRB-E2E-002 提交形成 active relation 后进入已配对
 
 前置：
 
-- 某银行标签存在明确 OA/发票审计提示。
+- 某银行标签明确不需要 OA 和发票。
 - 存在 4 条同月、同账户、同标签且未被 active relation 占用的银行流水。
 
 步骤：
 
 1. 在流水规则批量处理页筛选该标签。
 2. 选择 4 条银行流水并提交。
-3. 等待 operation barrier 完成。
+3. command 成功后确认页面立即清空选择；在后台等待 operation barrier 完成。
 4. 打开关联台。
 
 验收：
@@ -83,7 +86,7 @@
 
 - existing relation metadata、relation mode 和 history 不变。
 - active relation 继续 paired，不因当前规则变化回到 unpaired。
-- 只产生 bank-flow read model refresh，不产生 Workbench/turnover relation 写入。
+- 资格变化时只产生受影响月份 bank-flow read model refresh，不产生 Workbench/turnover relation 写入；资格未变化时零 bank-flow refresh。
 
 ## BRB-E2E-008 已提交批次批量重置回未提交候选
 
@@ -104,7 +107,7 @@
 - API 调用 `POST /api/bank-flow-rule-batches/reset-submitted`。
 - 后端通过 withdraw + relation command 取消 active relation，不手工 SQL 修改 relation 表。
 - 页面提示重置成功，并切回未提交。
-- 银行 rows 重新按当前规则进入未提交候选；不会自动重新提交。
+- 银行 rows 只有在当前标签 OA/发票双 false 时才重新进入未提交候选；需要任一单据时退出本页面，且不会自动重新提交。
 
 ## BRB-E2E-006 权限、陈旧和失败状态 fail closed
 

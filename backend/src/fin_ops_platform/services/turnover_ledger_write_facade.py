@@ -135,6 +135,11 @@ class TurnoverLedgerWriteFacade:
                 "reason": "bank_transaction_category_changed",
             },
             {
+                "scope_type": "bank_flow_rule_batch",
+                "scope_keys": list(normalized_months),
+                "reason": "bank_transaction_category_changed",
+            },
+            {
                 "scope_type": "workbench",
                 "scope_keys": list(normalized_months),
                 "reason": "workbench_scope_invalidated",

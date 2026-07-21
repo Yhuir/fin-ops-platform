@@ -584,13 +584,29 @@ class BankBatchApplicationService:
 
     def _eligible_tag_codes_for_relation_mode(self, relation_mode: str) -> set[str]:
         if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE:
-            payload = self._tag_rules_payload_for_relation_mode(relation_mode)
-            return {
-                str(tag.get("code") or "").strip()
-                for tag in list(payload.get("active_tags") or [])
-                if isinstance(tag, dict) and str(tag.get("code") or "").strip()
-            }
+            return self._eligible_bank_flow_rule_batch_tag_codes(
+                self._tag_rules_payload_for_relation_mode(relation_mode)
+            )
         return set(self.selected_tag_codes())
+
+    @staticmethod
+    def _eligible_bank_flow_rule_batch_tag_codes(payload: dict[str, object]) -> set[str]:
+        requirements = payload.get("requirements_by_tag_code")
+        requirements = requirements if isinstance(requirements, dict) else {}
+        eligible: set[str] = set()
+        for tag in list(payload.get("active_tags") or []):
+            if not isinstance(tag, dict):
+                continue
+            code = str(tag.get("code") or "").strip()
+            requirement = requirements.get(code)
+            requirement = requirement if isinstance(requirement, dict) else {}
+            if (
+                code
+                and requirement.get("requires_oa") is False
+                and requirement.get("requires_invoice") is False
+            ):
+                eligible.add(code)
+        return eligible
 
     @staticmethod
     def _read_model_key_for_relation_mode(relation_mode: str) -> str:
@@ -1490,7 +1506,9 @@ class BankBatchApplicationService:
         }
         if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE:
             source_versions["bank_flow_rule_batch_schema_version"] = BANK_FLOW_RULE_BATCH_SCHEMA_VERSION
-            source_versions["bank_flow_rule_batch_tag_rules_version"] = int(tag_rules_payload.get("version") or 1)
+            source_versions["bank_flow_rule_batch_eligibility_version"] = WorkbenchReadModelService.snapshot_version(
+                sorted(self._eligible_bank_flow_rule_batch_tag_codes(tag_rules_payload))
+            )
         else:
             source_versions["no_oa_bank_batch_schema_version"] = NO_OA_BANK_BATCH_SCHEMA_VERSION
             source_versions["no_oa_bank_batch_tag_selection_version"] = int(tag_rules_payload.get("version") or 1)

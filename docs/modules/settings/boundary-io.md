@@ -63,7 +63,7 @@
 | Frontend API | `web/src/features/workbench/api.ts` |
 | Backend route | `backend/src/fin_ops_platform/app/routes_settings.py`；`server.py` 只负责 route owner 组装和 runtime side-effect ports |
 | Backend service | `app_settings_service.py`、`settings_data_reset_service.py`、`oa_applicant_credentials.py`、`target_oa_applicant_token_provider.py` |
-| Repository | `postgres_repositories/oa_applicant_credentials.py` |
+| Repository | `postgres_repositories/oa_applicant_credentials.py`、`postgres_repositories/ops_tax_etc.py`；`0118_bank_flow_rule_batch_settings_raw_alignment.sql` 只修复 `bank_flow_rule_batch_tag_rules` 的 formal/raw 镜像一致性，不改变 canonical rule value |
 | Audit proof owner | `postgres_repositories/settings_page_audit.py`、`page_audit_registry.py`、`postgres_repositories/operations_audit.py` |
 | Lifecycle | `derived_data_lifecycle_service.py`、`app_status_domain_registry.py`、`app_status_read_model_registry.py` |
 | Tests | `tests/test_app_settings_service.py`、`tests/test_settings_data_reset_service.py`、`web/src/test/Settings*.test.*` |
@@ -102,3 +102,9 @@
 - `settings_normalization_ops` dry-run 只输出 changed top-level keys 与前后 hash，不输出完整设置或秘密。
 - execute 调用 `AppSettingsService.normalize_settings_payload(...)`，并在单事务内通过 `PostgresOpsTaxEtcRepository.save_app_settings_in_transaction(...)` 保存；tool 不复制 normalization 规则，也不直接拼 settings SQL。
 - 生产入口固定为 `finops-deploy-control settings-normalize <release> --dry-run|--execute`。
+
+## 流水规则 formal/raw 一致性（2026-07-21）
+
+- `app.app_settings.settings_payload.bank_flow_rule_batch_tag_rules` 是 canonical value；`raw_payload.normalized_payload` 只是同值审计镜像，不是第二事实源。
+- 历史迁移 `0111` 只规范了 formal payload，导致设置页只读 Audit 报 `settings_formal_raw_payload_mismatch`。`0118` 仅把该 setting family 的 canonical value 同步到 raw 镜像并记录 migration marker，禁止修改规则版本、OA/发票开关或其它 setting family。
+- 后续正常写入继续统一走 repository settings writer，由同一事务同时写 formal 与 raw；禁止再增加只改 `settings_payload` 的旁路 SQL。

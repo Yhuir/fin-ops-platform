@@ -937,9 +937,67 @@ def test_bank_flow_rule_batch_read_model_queries_dedicated_table_without_relatio
     assert any("count(distinct source_versions)" in sql for sql in read_sql)
     assert any("limit %s offset %s" in sql for sql in read_sql)
     assert any("group by batch_type, presented_status" in sql for sql in read_sql)
+    assert any("coalesce(sum(row_count), 0)::bigint as row_count" in sql for sql in read_sql)
+    assert any("payload->>'category_primary_label'" in sql for sql in read_sql)
     assert any(params[-2:] == (50, 50) for sql, params in connection.fetched_all if "limit %s offset %s" in sql)
     assert not any("from read_model.no_oa_bank_batch_rows" in sql for sql in read_sql)
     assert not any("payload->>'relation_mode'" in sql for sql in read_sql)
+
+
+def test_bank_flow_rule_batch_affected_scope_lookup_is_one_set_based_query() -> None:
+    connection = RecordingConnection()
+    connection.fetch_all = lambda sql, params=(): (  # type: ignore[method-assign]
+        connection.fetched_all.append((" ".join(sql.split()), params))
+        or [{"scope_key": "2026-05"}, {"scope_key": "2026-07"}]
+    )
+    repository = PostgresReadModelRepository(connection)
+
+    scopes = repository.bank_flow_rule_batch_affected_scope_keys_for_tag_codes(["fee", "fee", "salary"])
+
+    assert scopes == ["2026-05", "2026-07"]
+    assert len(connection.fetched_all) == 1
+    sql, params = connection.fetched_all[0]
+    assert "from read_model.bank_detail_rows" in sql
+    assert "from read_model.bank_flow_rule_batch_rows" in sql
+    assert "= 'draft'" in sql
+    assert params == (["fee", "salary"], ["fee", "salary"])
+
+
+def test_bank_flow_rule_settings_version_check_locks_and_saves_in_caller_transaction() -> None:
+    connection = RecordingConnection()
+    current_settings = {
+        "allowed_usernames": ["concurrent-user"],
+        "bank_flow_rule_batch_tag_rules": {"version": 1},
+    }
+    connection.fetch_one = lambda sql, params=(): (  # type: ignore[method-assign]
+        connection.fetched_one.append((" ".join(sql.split()), params))
+        or {"settings_payload": current_settings}
+    )
+    repository = PostgresOpsTaxEtcRepository(connection)
+    transaction = connection.transaction()
+
+    saved = repository.save_app_settings_for_bank_flow_rule_version_in_transaction(
+        {"bank_flow_rule_batch_tag_rules": {"version": 2}},
+        expected_version=1,
+        transaction=transaction,
+    )
+    conflict = repository.save_app_settings_for_bank_flow_rule_version_in_transaction(
+        {"bank_flow_rule_batch_tag_rules": {"version": 8}},
+        expected_version=7,
+        transaction=transaction,
+    )
+
+    assert saved == {
+        "allowed_usernames": ["concurrent-user"],
+        "bank_flow_rule_batch_tag_rules": {"version": 2},
+    }
+    assert conflict is None
+    assert len(connection.fetched_one) == 2
+    assert all("for update" in sql for sql, _params in connection.fetched_one)
+    assert len(connection.executed) == 1
+    assert "insert into app.app_settings" in connection.executed[0][0]
+    persisted_payload = connection.executed[0][1][1].obj
+    assert persisted_payload["allowed_usernames"] == ["concurrent-user"]
 
 
 def test_workbench_category_confirmation_uses_confirmation_fact_table() -> None:

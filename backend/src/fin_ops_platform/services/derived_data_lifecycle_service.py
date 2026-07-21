@@ -118,6 +118,7 @@ class DerivedDataLifecycleService:
         "bank_import_confirmed": (
             "bank_account_balance_read_model",
             "bank_detail_read_model",
+            "bank_flow_rule_batch_read_model",
             "workbench_read_model",
             "workbench_relation_read_model",
             "workbench_matching_dirty_scopes",
@@ -135,6 +136,7 @@ class DerivedDataLifecycleService:
             "oa_pending_payment_read_model",
             "bank_account_balance_read_model",
             "bank_detail_read_model",
+            "bank_flow_rule_batch_read_model",
             "cost_statistics_read_model",
             "search_cache",
         ),
@@ -208,6 +210,7 @@ class DerivedDataLifecycleService:
         ),
         "bank_transaction_category_changed": (
             "bank_detail_read_model",
+            "bank_flow_rule_batch_read_model",
             "workbench_read_model",
             "workbench_relation_read_model",
             "workbench_matching_dirty_scopes",
@@ -219,6 +222,7 @@ class DerivedDataLifecycleService:
         "bank_auto_tag_rules_changed": (
             "bank_detail_read_model",
             "no_oa_bank_batch_read_model",
+            "bank_flow_rule_batch_read_model",
             "workbench_read_model",
             "workbench_relation_read_model",
             "workbench_matching_dirty_scopes",

@@ -14,14 +14,17 @@
 
 - `requires_oa` / `requires_invoice` 在 relation 创建时冻结；关联台只按冻结值判定该 relation 是否进入 paired，不读取当前 settings。
 - 新增标签默认两者都为 `true`，避免新批次缺少明确业务提示。
+- 只有 active 且 `requires_oa=false`、`requires_invoice=false` 的标签进入 `candidate`。任一项为 `true`、规则缺失或标签归档时进入 `document_flow_only`，完全退出本页面未提交区。
 - 规则保存不追溯改写既有 relation；既有 relation 保留提交时 snapshot。
-- 相同规则保存是 no-op，不递增版本、不写 audit、不触发 refresh。
+- 相同规则保存是 no-op，不递增版本、不写 audit、不触发 refresh；规则语义变化但资格集合不变时递增版本并记录 audit，但不触发 bank-flow refresh。
+- 资格集合变化时，设置 CAS 与精确月份 dirty/outbox 原子提交；请求不等待 worker，当前月份 UI 清空旧候选后进入 `refreshing`，后台收敛。
 
 ## 批量提交状态
 
 | 状态 | 事实源 | 语义 | 允许流转 |
 | --- | --- | --- | --- |
 | `candidate` | `bank_flow_rule_batch` read model | 当前筛选下可选择的未占用银行流水候选。 | 用户选择后进入 `selected_draft`。 |
+| `document_flow_only` | 当前标签规则 | 需要 OA 或发票，或缺少明确双 false 规则；不属于本页面未提交候选。 | 在关联台、待找发票等单据流程处理；只有未来规则改为双 false 后才可重新进入本页面候选。 |
 | `selected_draft` | 页面本地状态 | 用户本次选择的银行流水，尚未写事实。 | 提交成功进入 `submitted`; 清空选择回到 `candidate`。 |
 | `submitted` | `app.bank_flow_rule_batches` + active relation | 已通过 command service 创建 relation。 | owner withdraw 或 reset-submitted 后进入 `withdrawn`。 |
 | `withdrawn` | batch event + cancelled/withdrawn relation | 批次关系已撤回，银行流水释放，可重新按新规则进入候选。 | 不自动恢复为 submitted；重新提交创建新 request/case。 |
@@ -34,7 +37,7 @@
 - 提交时必须冻结每条银行流水的标签 snapshot、规则版本和规则值；银行明细后续改标签只影响新候选，不重写已提交批次。
 - 已被 active relation 占用的 row 不得再次提交。
 - 提交成功写 `relation_mode=bank_flow_rule_batch`，不是 `no_oa_bank_batch`。
-- `POST /api/bank-flow-rule-batches/reset-submitted` 可批量撤回所有当前 submitted 批次；它通过既有 withdraw 规则校验、一次 bulk relation cancel 和一次原子 delta 保存完成 command，旧批次立即以 withdrawn 进入未提交/历史语义，银行 rows 由后台 scoped read model rebuild 按当前规则重新成为 candidate。HTTP 请求不等待逐月 rebuild。
+- `POST /api/bank-flow-rule-batches/reset-submitted` 可批量撤回所有当前 submitted 批次；它通过既有 withdraw 规则校验、一次 bulk relation cancel 和一次原子 delta 保存完成 command，旧批次立即进入 withdrawn/history。释放的银行 rows 只有在当前规则仍为双 false 时才由后台 scoped read model rebuild 重新成为 candidate；需要 OA/发票时退出本页面。HTTP 请求不等待逐月 rebuild。
 - 禁止用手写 SQL 直接把 submitted 改成 draft；必须保留撤回审计、relation history 和 dirty scope。
 
 ## 关联台展示状态
@@ -61,7 +64,7 @@
 | `editing_rules` | 抽屉打开，左侧标签只读，右侧 OA/发票 checkbox 可编辑。 |
 | `saving_rules` | 保存规则中，禁用重复提交。 |
 | `selection_dirty` | 用户已选择银行流水；切换月份、标签、账户、分页或 bucket 必须清空选择。 |
-| `submitting` | 批量提交中，等待 operation barrier。 |
+| `submitting` | 批量提交 command 进行中；command 成功即结束前台阻塞，freshness barrier/reload 在后台 reconcile。 |
 | `resetting_submitted` | 正在批量撤回已提交流水规则批次，等待 operation barrier 后刷新未提交候选。 |
 
 ## Read Model / Worker 状态
@@ -77,6 +80,7 @@
 刷新来源：
 
 - 银行流水导入或银行明细标签变化。
+- 手工银行分类变化；owner UoW 同事务输出精确月份 dirty/outbox。
 - 本模块标签规则保存。
 - 本模块 submit/withdraw/reset-submitted。
 - Workbench relation 写入、撤回或下游 relation distribution 变化。

@@ -1,5 +1,13 @@
 # 设置 实施记录
 
+## 2026-07-21 - 流水规则 formal/raw 审计镜像修复
+
+- 生产跨页验收发现设置页 Audit 仅在 `bank_flow_rule_batch_tag_rules` 报 `settings_formal_raw_payload_mismatch`；规则正式值与页面行为正确。
+- 根因是历史 migration `0111` 规范 `settings_payload` 时只给 raw 根节点写了 migration marker，没有同步 `raw_payload.normalized_payload` 的同一 setting family。
+- 新 migration `0118_bank_flow_rule_batch_settings_raw_alignment.sql` 只复制该 canonical setting family 到 raw 审计镜像，保留其它 raw metadata，不改 formal value、规则 version 或 OA/发票开关；正常运行时仍由 settings repository writer 原子双写 formal/raw。
+- 本地迁移、settings Audit、repository 与 migration pin 回归共 120 passed + 19 subtests；生产 migration 用时 33ms，schema version 118，执行后 settings 与四个直接/上下游页面 Audit 全部 `pass`、0 blocking issue。
+- 生产没有执行业务规则变更；随后 10 次同值 PUT 均为零写入、零 refresh，settings Audit 继续 `pass`。
+
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 

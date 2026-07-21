@@ -14,7 +14,11 @@ from fin_ops_platform.services.bank_batch_service import (
     BANK_FLOW_RULE_BATCH_SCHEMA_VERSION,
     BankBatchService,
 )
-from fin_ops_platform.services.bank_flow_rule_batch_application_service import BankFlowRuleBatchApplicationService
+from fin_ops_platform.services.app_settings_service import AppSettingsValidationError
+from fin_ops_platform.services.bank_flow_rule_batch_application_service import (
+    BankFlowRuleBatchApplicationService,
+    BankFlowRuleBatchPersistenceError,
+)
 from fin_ops_platform.services.bank_flow_rule_batch_read_model_refresh import (
     BankFlowRuleBatchReadModelPersistencePort,
     BankFlowRuleBatchReadModelRefreshService,
@@ -164,11 +168,19 @@ class RecordingBankFlowRuleSettings:
     def __init__(self) -> None:
         self.updated_payloads: list[dict[str, object]] = []
         self.actors: list[str] = []
+        self.accepted_updates: list[dict[str, object]] = []
 
     def get_bank_flow_rule_batch_tag_rules_payload(self) -> dict[str, object]:
-        return {"version": 7, "rules": [{"tag_code": "fee"}]}
+        return {
+            "version": 7,
+            "active_tags": [{"code": "fee", "status": "active"}],
+            "rules": [{"tag_code": "fee", "requires_oa": True, "requires_invoice": False}],
+            "requirements_by_tag_code": {
+                "fee": {"requires_oa": True, "requires_invoice": False},
+            },
+        }
 
-    def update_bank_flow_rule_batch_tag_rules(
+    def normalize_bank_flow_rule_batch_tag_rules_update(
         self,
         payload: dict[str, object],
         *,
@@ -177,13 +189,45 @@ class RecordingBankFlowRuleSettings:
         self.updated_payloads.append(dict(payload))
         self.actors.append(actor_id)
         return {
-            "version": 8,
-            "rules": [{"tag_code": "fee", "requires_oa": True, "requires_invoice": False}],
-            "requirements_by_tag_code": {"fee": {"requires_oa": True, "requires_invoice": False}},
+            "changed": True,
+            "previous_snapshot": {"bank_flow_rule_batch_tag_rules": {"version": 7}},
+            "next_snapshot": {"bank_flow_rule_batch_tag_rules": {"version": 8}},
+            "previous_public_payload": self.get_bank_flow_rule_batch_tag_rules_payload(),
+            "public_payload": {
+                "version": 8,
+                "active_tags": [{"code": "fee", "status": "active"}],
+                "rules": [{"tag_code": "fee", "requires_oa": False, "requires_invoice": False}],
+                "requirements_by_tag_code": {
+                    "fee": {"requires_oa": False, "requires_invoice": False},
+                },
+            },
+            "audit_event": {"old_version": 7, "new_version": 8},
         }
+
+    def accept_bank_flow_rule_batch_tag_rules_update(self, **kwargs: object) -> None:
+        self.accepted_updates.append(dict(kwargs))
 
     def update_no_oa_bank_batch_tag_selection(self, *_args: object, **_kwargs: object) -> dict[str, object]:
         raise AssertionError("bank-flow tag rules must not use no-OA settings I/O")
+
+
+class RecordingTransaction:
+    def __init__(self) -> None:
+        self.exited_with: type[BaseException] | None = None
+
+    def __enter__(self) -> "RecordingTransaction":
+        return self
+
+    def __exit__(self, exc_type, _exc, _tb) -> None:
+        self.exited_with = exc_type
+
+
+class RecordingTransactionConnection:
+    def __init__(self) -> None:
+        self.recording_transaction = RecordingTransaction()
+
+    def transaction(self) -> RecordingTransaction:
+        return self.recording_transaction
 
 
 class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
@@ -973,18 +1017,21 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
 
         payload = service.tag_selection_payload()
 
-        self.assertEqual(payload, {"version": 7, "rules": [{"tag_code": "fee"}]})
+        self.assertEqual(payload, settings.get_bank_flow_rule_batch_tag_rules_payload())
 
     def test_update_tag_selection_uses_bank_flow_rule_settings_boundary(self) -> None:
         settings = RecordingBankFlowRuleSettings()
-        refresh_calls: list[dict[str, object]] = []
+        commit_calls: list[dict[str, object]] = []
         service = object.__new__(BankFlowRuleBatchApplicationService)
         service._app_settings_service = settings
-        service.enqueue_background_refresh = (  # type: ignore[method-assign]
-            lambda scope_keys, **kwargs: refresh_calls.append({"scope_keys": list(scope_keys), **kwargs}) or True
+        service._bank_batch_read_model_repository = SimpleNamespace(
+            affected_scope_keys_for_tag_codes=lambda codes: ["2026-05"] if codes == ["fee"] else []
         )
         service._read_model_refresh_metadata_for_relation_mode = (  # type: ignore[method-assign]
             lambda relation_mode: {"relation_mode": relation_mode}
+        )
+        service._commit_tag_rule_update = (  # type: ignore[method-assign]
+            lambda **kwargs: commit_calls.append(dict(kwargs)) or True
         )
 
         result = service.update_tag_selection(
@@ -995,29 +1042,30 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         self.assertEqual(settings.updated_payloads, [{"expected_version": 7, "rules": [{"tag_code": "fee"}]}])
         self.assertEqual(settings.actors, ["finance-user"])
         self.assertEqual(result["version"], 8)
+        self.assertTrue(result["eligibility_changed"])
+        self.assertEqual(result["eligibility_changed_tag_codes"], ["fee"])
+        self.assertEqual(result["affected_scope_keys"], ["2026-05"])
+        self.assertTrue(result["refresh_enqueued"])
+        self.assertEqual(commit_calls[0]["affected_scope_keys"], ["2026-05"])
         self.assertEqual(
-            refresh_calls,
-            [
-                {
-                    "scope_keys": ["all"],
-                    "reason": "bank_flow_rule_batch_tag_rules_changed",
-                    "metadata": {"relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE},
-                }
-            ],
+            commit_calls[0]["refresh_metadata"],
+            {"relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE},
         )
 
     def test_update_tag_selection_noop_does_not_enqueue_refresh(self) -> None:
         settings = RecordingBankFlowRuleSettings()
-        settings.update_bank_flow_rule_batch_tag_rules = (  # type: ignore[method-assign]
+        current = settings.get_bank_flow_rule_batch_tag_rules_payload()
+        settings.normalize_bank_flow_rule_batch_tag_rules_update = (  # type: ignore[method-assign]
             lambda _payload, *, actor_id: {
-                "version": 7,
-                "rules": [{"tag_code": "fee", "requires_oa": True, "requires_invoice": False}],
+                "changed": False,
+                "previous_public_payload": current,
+                "public_payload": current,
             }
         )
         service = object.__new__(BankFlowRuleBatchApplicationService)
         service._app_settings_service = settings
-        service.enqueue_background_refresh = (  # type: ignore[method-assign]
-            lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("no-op must not enqueue refresh"))
+        service._commit_tag_rule_update = (  # type: ignore[method-assign]
+            lambda **_kwargs: (_ for _ in ()).throw(AssertionError("no-op must not commit or enqueue"))
         )
 
         result = service.update_tag_selection(
@@ -1026,8 +1074,214 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(result["version"], 7)
+        self.assertFalse(result["eligibility_changed"])
+        self.assertEqual(result["affected_scope_keys"], [])
 
-    def test_bank_flow_source_versions_use_bank_flow_rule_version_boundary(self) -> None:
+    def test_update_tag_selection_eligibility_neutral_change_saves_without_refresh_scope(self) -> None:
+        settings = RecordingBankFlowRuleSettings()
+        prepared = settings.normalize_bank_flow_rule_batch_tag_rules_update(
+            {"expected_version": 7, "rules": []},
+            actor_id="finance-user",
+        )
+        next_public = dict(prepared["public_payload"])
+        next_public["requirements_by_tag_code"] = {
+            "fee": {"requires_oa": False, "requires_invoice": True},
+        }
+        prepared["public_payload"] = next_public
+        settings.normalize_bank_flow_rule_batch_tag_rules_update = (  # type: ignore[method-assign]
+            lambda _payload, *, actor_id: prepared
+        )
+        commit_calls: list[dict[str, object]] = []
+        service = object.__new__(BankFlowRuleBatchApplicationService)
+        service._app_settings_service = settings
+        service._read_model_refresh_metadata_for_relation_mode = (  # type: ignore[method-assign]
+            lambda relation_mode: {"relation_mode": relation_mode}
+        )
+        service._commit_tag_rule_update = (  # type: ignore[method-assign]
+            lambda **kwargs: commit_calls.append(dict(kwargs)) or False
+        )
+
+        result = service.update_tag_selection(
+            {"expected_version": 7, "rules": []},
+            actor_id="finance-user",
+        )
+
+        self.assertFalse(result["eligibility_changed"])
+        self.assertFalse(result["refresh_enqueued"])
+        self.assertEqual(result["affected_scope_keys"], [])
+        self.assertEqual(commit_calls[0]["affected_scope_keys"], [])
+
+    def test_commit_tag_rule_update_uses_one_postgres_transaction_for_settings_and_refreshes(self) -> None:
+        settings = RecordingBankFlowRuleSettings()
+        prepared = settings.normalize_bank_flow_rule_batch_tag_rules_update(
+            {"expected_version": 7, "rules": []},
+            actor_id="finance-user",
+        )
+        connection = RecordingTransactionConnection()
+        calls: list[tuple[str, object]] = []
+
+        def save_settings(
+            payload: dict[str, object], *, expected_version: int, transaction: object
+        ) -> dict[str, object]:
+            calls.append(("settings", transaction))
+            self.assertEqual(expected_version, 7)
+            return payload
+
+        def enqueue_refreshes(*, transaction: object, refreshes: list[dict[str, object]]) -> list[object]:
+            calls.append(("refreshes", transaction))
+            self.assertEqual([item["scope_key"] for item in refreshes], ["2026-05", "2026-06"])
+            return [object(), object()]
+
+        service = object.__new__(BankFlowRuleBatchApplicationService)
+        service._state_store = SimpleNamespace(
+            storage_backend="postgres",
+            _connection=connection,
+            save_app_settings_for_bank_flow_rule_version_in_transaction=save_settings,
+        )
+        service._queue_repository = SimpleNamespace(
+            enqueue_read_model_refreshes_in_transaction=enqueue_refreshes,
+        )
+        service._app_settings_service = settings
+
+        enqueued = service._commit_tag_rule_update(
+            prepared=prepared,
+            affected_scope_keys=["2026-05", "2026-06"],
+            refresh_metadata={"actor_id": "finance-user"},
+        )
+
+        transaction = connection.recording_transaction
+        self.assertTrue(enqueued)
+        self.assertEqual(calls, [("settings", transaction), ("refreshes", transaction)])
+        self.assertIsNone(transaction.exited_with)
+        self.assertEqual(len(settings.accepted_updates), 1)
+
+    def test_commit_tag_rule_update_rolls_back_when_refresh_enqueue_fails(self) -> None:
+        settings = RecordingBankFlowRuleSettings()
+        prepared = settings.normalize_bank_flow_rule_batch_tag_rules_update(
+            {"expected_version": 7, "rules": []},
+            actor_id="finance-user",
+        )
+        connection = RecordingTransactionConnection()
+
+        service = object.__new__(BankFlowRuleBatchApplicationService)
+        service._state_store = SimpleNamespace(
+            storage_backend="postgres",
+            _connection=connection,
+            save_app_settings_for_bank_flow_rule_version_in_transaction=(
+                lambda payload, *, expected_version, transaction: payload
+            ),
+        )
+        service._queue_repository = SimpleNamespace(
+            enqueue_read_model_refreshes_in_transaction=(
+                lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("queue unavailable"))
+            ),
+        )
+        service._app_settings_service = settings
+
+        with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
+            service._commit_tag_rule_update(
+                prepared=prepared,
+                affected_scope_keys=["2026-05"],
+                refresh_metadata={},
+            )
+
+        self.assertIs(connection.recording_transaction.exited_with, RuntimeError)
+        self.assertEqual(settings.accepted_updates, [])
+
+    def test_commit_tag_rule_update_rejects_stale_database_version_before_enqueue(self) -> None:
+        settings = RecordingBankFlowRuleSettings()
+        prepared = settings.normalize_bank_flow_rule_batch_tag_rules_update(
+            {"expected_version": 7, "rules": []},
+            actor_id="finance-user",
+        )
+        connection = RecordingTransactionConnection()
+        enqueue_calls: list[object] = []
+        service = object.__new__(BankFlowRuleBatchApplicationService)
+        service._state_store = SimpleNamespace(
+            storage_backend="postgres",
+            _connection=connection,
+            save_app_settings_for_bank_flow_rule_version_in_transaction=(
+                lambda _payload, *, expected_version, transaction: None
+            ),
+        )
+        service._queue_repository = SimpleNamespace(
+            enqueue_read_model_refreshes_in_transaction=lambda **kwargs: enqueue_calls.append(kwargs),
+        )
+        service._app_settings_service = settings
+
+        with self.assertRaises(AppSettingsValidationError) as context:
+            service._commit_tag_rule_update(
+                prepared=prepared,
+                affected_scope_keys=["2026-05"],
+                refresh_metadata={},
+            )
+
+        self.assertEqual(context.exception.error_code, "bank_flow_rule_batch_tag_rules_version_conflict")
+        self.assertIs(connection.recording_transaction.exited_with, AppSettingsValidationError)
+        self.assertEqual(enqueue_calls, [])
+        self.assertEqual(settings.accepted_updates, [])
+
+    def test_commit_tag_rule_update_rejects_partial_refresh_enqueue(self) -> None:
+        settings = RecordingBankFlowRuleSettings()
+        prepared = settings.normalize_bank_flow_rule_batch_tag_rules_update(
+            {"expected_version": 7, "rules": []},
+            actor_id="finance-user",
+        )
+        connection = RecordingTransactionConnection()
+        service = object.__new__(BankFlowRuleBatchApplicationService)
+        service._state_store = SimpleNamespace(
+            storage_backend="postgres",
+            _connection=connection,
+            save_app_settings_for_bank_flow_rule_version_in_transaction=(
+                lambda payload, *, expected_version, transaction: payload
+            ),
+        )
+        service._queue_repository = SimpleNamespace(
+            enqueue_read_model_refreshes_in_transaction=lambda **_kwargs: [object()],
+        )
+        service._app_settings_service = settings
+
+        with self.assertRaisesRegex(BankFlowRuleBatchPersistenceError, "refresh enqueue was incomplete"):
+            service._commit_tag_rule_update(
+                prepared=prepared,
+                affected_scope_keys=["2026-05", "2026-06"],
+                refresh_metadata={},
+            )
+
+        self.assertIs(connection.recording_transaction.exited_with, BankFlowRuleBatchPersistenceError)
+        self.assertEqual(settings.accepted_updates, [])
+
+    def test_commit_tag_rule_update_restores_local_settings_when_refresh_enqueue_is_incomplete(self) -> None:
+        settings = RecordingBankFlowRuleSettings()
+        prepared = settings.normalize_bank_flow_rule_batch_tag_rules_update(
+            {"expected_version": 7, "rules": []},
+            actor_id="finance-user",
+        )
+        saved_snapshots: list[dict[str, object]] = []
+        service = object.__new__(BankFlowRuleBatchApplicationService)
+        service._state_store = SimpleNamespace(
+            storage_backend="local",
+            save_app_settings=lambda payload: saved_snapshots.append(dict(payload)),
+        )
+        service._read_model_refresh_producer = SimpleNamespace(
+            enqueue_scope_keys=lambda *_args, **_kwargs: [],
+        )
+        service._app_settings_service = settings
+
+        with self.assertRaisesRegex(BankFlowRuleBatchPersistenceError, "refresh enqueue was incomplete"):
+            service._commit_tag_rule_update(
+                prepared=prepared,
+                affected_scope_keys=["2026-05"],
+                refresh_metadata={},
+            )
+
+        self.assertEqual(
+            saved_snapshots,
+            [prepared["next_snapshot"], prepared["previous_snapshot"]],
+        )
+        self.assertEqual(settings.accepted_updates, [])
+
+    def test_bank_flow_source_versions_use_eligibility_signature_boundary(self) -> None:
         settings = RecordingBankFlowRuleSettings()
         service = object.__new__(BankFlowRuleBatchApplicationService)
         service._app_settings_service = settings
@@ -1040,9 +1294,68 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
             relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
         )
 
-        self.assertEqual(versions["bank_flow_rule_batch_tag_rules_version"], 7)
+        self.assertIn("bank_flow_rule_batch_eligibility_version", versions)
+        self.assertNotIn("bank_flow_rule_batch_tag_rules_version", versions)
         self.assertIn("bank_flow_rule_batch_schema_version", versions)
         self.assertNotIn("no_oa_bank_batch_tag_selection_version", versions)
+
+    def test_bank_flow_eligibility_requires_both_oa_and_invoice_unchecked(self) -> None:
+        payload = {
+            "active_tags": [
+                {"code": "neither"},
+                {"code": "oa"},
+                {"code": "invoice"},
+                {"code": "both"},
+                {"code": "missing"},
+            ],
+            "requirements_by_tag_code": {
+                "neither": {"requires_oa": False, "requires_invoice": False},
+                "oa": {"requires_oa": True, "requires_invoice": False},
+                "invoice": {"requires_oa": False, "requires_invoice": True},
+                "both": {"requires_oa": True, "requires_invoice": True},
+            },
+        }
+
+        self.assertEqual(
+            BankFlowRuleBatchApplicationService._eligible_bank_flow_rule_batch_tag_codes(payload),
+            {"neither"},
+        )
+
+    def test_summary_keeps_frozen_submitted_history_for_now_ineligible_tag(self) -> None:
+        service = object.__new__(BankFlowRuleBatchApplicationService)
+
+        summary = service._summary_from_aggregates(
+            [
+                {
+                    "batch_type": "archived_fee",
+                    "presented_status": "submitted",
+                    "batch_count": 2,
+                    "row_count": 7,
+                    "total_amount": "88.00",
+                    "batch_label": "历史手续费",
+                    "category_primary_label": "历史费用",
+                    "category_sub_label": "历史手续费",
+                }
+            ],
+            eligible_tag_codes={"current_fee"},
+            definitions_by_code={
+                "current_fee": {
+                    "code": "current_fee",
+                    "label": "当前手续费",
+                    "output_primary_label": "费用",
+                    "output_sub_label": "当前手续费",
+                }
+            },
+        )
+
+        categories = {item["code"]: item for item in summary["categories"]}
+        self.assertEqual(categories["current_fee"]["draft"], 0)
+        self.assertEqual(categories["archived_fee"]["label"], "历史手续费")
+        self.assertEqual(categories["archived_fee"]["primary_label"], "历史费用")
+        self.assertEqual(categories["archived_fee"]["submitted"], 2)
+        self.assertEqual(categories["archived_fee"]["submitted_row_count"], 7)
+        self.assertEqual(summary["submitted_count"], 2)
+        self.assertEqual(summary["submitted_row_count"], 7)
 
     def test_bank_flow_scope_source_versions_use_probe_ports_before_row_loading(self) -> None:
         settings = RecordingBankFlowRuleSettings()
@@ -1108,7 +1421,8 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         self.assertEqual(relation_facade.source_version_calls, ["2026-02"])
         self.assertEqual(provider.source_version_reasons, ["bank_flow_rule_batch_source_version_precheck"])
         self.assertEqual(relation_facade.source_version_reasons, ["bank_flow_rule_batch_source_version_precheck"])
-        self.assertEqual(versions["bank_flow_rule_batch_tag_rules_version"], 7)
+        self.assertIn("bank_flow_rule_batch_eligibility_version", versions)
+        self.assertNotIn("bank_flow_rule_batch_tag_rules_version", versions)
         self.assertEqual(
             versions["bank_detail_source_versions"],
             {
@@ -1507,6 +1821,79 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
             ],
         )
 
+    def test_bank_flow_force_refresh_bypasses_unchanged_scope_fast_path(self) -> None:
+        class ApplicationService:
+            def __init__(self) -> None:
+                self.unchanged_calls = 0
+                self.rebuild_calls = 0
+
+            def read_model_scope_source_versions(self, **_kwargs: object) -> dict[str, object]:
+                return {"version": "current"}
+
+            def unchanged_read_model_scope_result(self, **_kwargs: object) -> dict[str, object]:
+                self.unchanged_calls += 1
+                return {"skipped": True, "skip_reason": "source_versions_unchanged"}
+
+            def bank_transaction_rows(self, **_kwargs: object) -> list[dict[str, object]]:
+                return [{"id": "bank-1"}]
+
+            def effective_categories_for_rows(self, _rows: object) -> dict[str, object]:
+                return {}
+
+            def load_relation_source_versions_for_bank_rows(self, _rows: object, **_kwargs: object) -> None:
+                return None
+
+            def active_relations_for_bank_rows(self, _rows: object) -> list[dict[str, object]]:
+                return []
+
+            def refresh_batches_from_prepared_rows(self, **_kwargs: object) -> tuple[list[object], dict[str, object]]:
+                self.rebuild_calls += 1
+                return list(_kwargs.get("bank_rows") or []), {}
+
+        application_service = ApplicationService()
+        completions: list[dict[str, object]] = []
+        saved: list[dict[str, object]] = []
+        service = object.__new__(BankFlowRuleBatchReadModelRefreshService)
+        service._refresh_event_type = "bank_flow_rule_batch.read_model.refresh"
+        service._scope_type = "bank_flow_rule_batch"
+        service._relation_mode = BANK_FLOW_RULE_BATCH_RELATION_MODE
+        service._application_service = application_service
+        service._bank_batch_service = SimpleNamespace(public_snapshot=lambda: {"batches": {}})
+        service._read_model_persistence = SimpleNamespace(
+            save_public_snapshot=lambda snapshot, **kwargs: saved.append({"snapshot": snapshot, **kwargs})
+        )
+        service._queue_repository = SimpleNamespace(
+            read_model_refresh_is_current=lambda **_kwargs: True,
+            complete_read_model_refresh=lambda **kwargs: completions.append(dict(kwargs)),
+        )
+
+        result = service.handle_runtime_event(
+            RuntimeQueueEvent(
+                event_id="evt-bank-flow-force-refresh",
+                tenant_id="default",
+                event_type="bank_flow_rule_batch.read_model.refresh",
+                aggregate_type="read_model",
+                aggregate_id="2026-07",
+                scope_type="bank_flow_rule_batch",
+                scope_key="2026-07",
+                dedupe_key="bank_flow_rule_batch.read_model.refresh:bank_flow_rule_batch:2026-07:force",
+                payload={
+                    "scope_type": "bank_flow_rule_batch",
+                    "scope_key": "2026-07",
+                    "metadata": {"force_refresh": True},
+                },
+                attempts=1,
+                status="processing",
+                source_version=10,
+            )
+        )
+
+        self.assertEqual(application_service.unchanged_calls, 0)
+        self.assertEqual(application_service.rebuild_calls, 1)
+        self.assertEqual(result["bank_row_count"], 1)
+        self.assertEqual(len(saved), 1)
+        self.assertEqual(completions[0]["scope_key"], "2026-07")
+
     def test_unchanged_read_model_scope_uses_bank_flow_source_version_summary(self) -> None:
         class Repository:
             def __init__(self) -> None:
@@ -1520,7 +1907,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                 return {
                     "read_model_status": "fresh",
                     "row_count": 4,
-                    "source_versions": {"bank_flow_rule_batch_tag_rules_version": 7},
+                    "source_versions": {"bank_flow_rule_batch_eligibility_version": "eligible-v1"},
                 }
 
             def no_oa_bank_batch_source_versions_summary(self, _filters: dict[str, object]) -> dict[str, object]:
@@ -1535,7 +1922,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
 
         result = service.unchanged_read_model_scope_result(
             scope_key="2026-05",
-            source_versions={"bank_flow_rule_batch_tag_rules_version": 7},
+            source_versions={"bank_flow_rule_batch_eligibility_version": "eligible-v1"},
             relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
         )
 
@@ -1544,7 +1931,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
             {
                 "scope_key": "2026-05",
                 "batch_count": 4,
-                "source_versions": {"bank_flow_rule_batch_tag_rules_version": 7},
+                "source_versions": {"bank_flow_rule_batch_eligibility_version": "eligible-v1"},
                 "skipped": True,
                 "skip_reason": "source_versions_unchanged",
             },
@@ -1560,7 +1947,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
                 return {
                     "read_model_status": "refreshing",
                     "row_count": 4,
-                    "source_versions": {"bank_flow_rule_batch_tag_rules_version": 7},
+                    "source_versions": {"bank_flow_rule_batch_eligibility_version": "eligible-v1"},
                 }
 
         service = object.__new__(BankFlowRuleBatchApplicationService)
@@ -1568,12 +1955,12 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
 
         default_result = service.unchanged_read_model_scope_result(
             scope_key="2026-05",
-            source_versions={"bank_flow_rule_batch_tag_rules_version": 7},
+            source_versions={"bank_flow_rule_batch_eligibility_version": "eligible-v1"},
             relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
         )
         worker_result = service.unchanged_read_model_scope_result(
             scope_key="2026-05",
-            source_versions={"bank_flow_rule_batch_tag_rules_version": 7},
+            source_versions={"bank_flow_rule_batch_eligibility_version": "eligible-v1"},
             relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
             allow_refreshing_read_model_status=True,
         )

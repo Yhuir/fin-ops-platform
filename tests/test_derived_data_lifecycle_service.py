@@ -91,6 +91,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
             [
                 "bank_account_balance_read_model",
                 "bank_detail_read_model",
+                "bank_flow_rule_batch_read_model",
                 "workbench_read_model",
                 "workbench_relation_read_model",
                 "workbench_matching_dirty_scopes",
@@ -151,6 +152,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
                 "oa_pending_payment_read_model",
                 "bank_account_balance_read_model",
                 "bank_detail_read_model",
+                "bank_flow_rule_batch_read_model",
                 "cost_statistics_read_model",
                 "search_cache",
             ],
@@ -169,6 +171,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
             [domain["domain"] for domain in plan["domains"]],
             [
                 "bank_detail_read_model",
+                "bank_flow_rule_batch_read_model",
                 "workbench_read_model",
                 "workbench_relation_read_model",
                 "workbench_matching_dirty_scopes",
@@ -313,6 +316,7 @@ class DerivedDataLifecycleServiceTests(unittest.TestCase):
         domains = [domain["domain"] for domain in plan["domains"]]
         self.assertIn("bank_detail_read_model", domains)
         self.assertIn("no_oa_bank_batch_read_model", domains)
+        self.assertIn("bank_flow_rule_batch_read_model", domains)
         self.assertIn("cost_statistics_read_model", domains)
         self.assertIn("cost_statistics.read_model.refresh", plan["will_enqueue_jobs"])
         self.assertNotIn("bank_account_balance_read_model", domains)

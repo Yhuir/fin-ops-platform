@@ -30,7 +30,20 @@ class FakeBankFlowRuleBatchApplicationService:
             raise AppSettingsValidationError("bank_flow_rule_batch_tag_rules_version_conflict", "version conflict")
         if payload.get("duplicate_rule"):
             raise AppSettingsValidationError("duplicate_bank_flow_rule_batch_tag_rule", "duplicate tag rule")
-        return {"version": 2, "rules": [{"tag_code": "fee", "requires_oa": False, "requires_invoice": False}]}
+        return {
+            "version": 2,
+            "rules": [{"tag_code": "fee", "requires_oa": False, "requires_invoice": False}],
+            "eligibility_changed": True,
+            "eligibility_changed_tag_codes": ["fee"],
+            "affected_months": ["2026-05"],
+            "affected_scope_keys": ["2026-05"],
+            "read_model_scope_keys": ["2026-05"],
+            "freshness_targets": [{"read_model_key": "bank_flow_rule_batch", "scope_key": "2026-05"}],
+            "operation_barrier_targets": [
+                {"read_model_key": "bank_flow_rule_batch", "scope_key": "2026-05"}
+            ],
+            "refresh_enqueued": True,
+        }
 
     def submit_batch(self, batch_id, *, actor, expected_version, note, relation_mode):  # type: ignore[no-untyped-def]
         self.calls.append(
@@ -114,6 +127,10 @@ class BankFlowRuleBatchRoutesTests(unittest.TestCase):
         routes = BankFlowRuleBatchApiRoutes(application_service=service)  # type: ignore[arg-type]
 
         status, payload = routes.tag_rules()
+        update_status, update_payload = routes.update_tag_rules(
+            {"expected_version": 1, "rules": [{"tag_code": "fee"}]},
+            session=SimpleNamespace(identity=SimpleNamespace(username="finance-user", user_id="oa-001")),
+        )
         conflict_status, conflict_payload = routes.update_tag_rules(
             {"expected_version": 0, "rules": []},
             session=SimpleNamespace(identity=SimpleNamespace(username="finance-user", user_id="oa-001")),
@@ -121,6 +138,11 @@ class BankFlowRuleBatchRoutesTests(unittest.TestCase):
 
         self.assertEqual(status, HTTPStatus.OK)
         self.assertEqual(payload["rules"], [{"tag_code": "fee", "requires_oa": False, "requires_invoice": False}])
+        self.assertEqual(update_status, HTTPStatus.OK)
+        self.assertEqual(update_payload["affected_months"], ["2026-05"])
+        self.assertEqual(update_payload["read_model_scope_keys"], ["2026-05"])
+        self.assertEqual(update_payload["freshness_targets"], update_payload["operation_barrier_targets"])
+        self.assertTrue(update_payload["refresh_enqueued"])
         self.assertEqual(conflict_status, HTTPStatus.CONFLICT)
         self.assertEqual(conflict_payload["error"], "bank_flow_rule_batch_tag_rules_version_conflict")
 

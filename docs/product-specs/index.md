@@ -10,7 +10,7 @@
 
 ## 专题页面
 
-- `bank-turnover-and-no-oa.md`：银行明细、流水标签、往来款、免 OA 流水批处理。
+- `bank-turnover-and-no-oa.md`：银行明细、流水标签、流水规则批量处理、往来款和 legacy 免 OA 流水批处理。
 - `cost-tax.md`：成本统计、项目归因、税金抵扣、发票使用/收款。
 
 ## 平台能力

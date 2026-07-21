@@ -5392,6 +5392,10 @@ function bankFlowRuleBatchSummary(status: BankFlowRuleBrowserBatchStatus, batche
     withdrawn: number;
     conflict: number;
     stale: number;
+    total_row_count: number;
+    draft_row_count: number;
+    submitted_row_count: number;
+    withdrawn_row_count: number;
     total_amount: string;
   }>();
   for (const batch of batches) {
@@ -5407,17 +5411,26 @@ function bankFlowRuleBatchSummary(status: BankFlowRuleBrowserBatchStatus, batche
       withdrawn: 0,
       conflict: 0,
       stale: 0,
+      total_row_count: 0,
+      draft_row_count: 0,
+      submitted_row_count: 0,
+      withdrawn_row_count: 0,
       total_amount: "0.00",
     };
+    const batchRowCount = Number(batch.row_count ?? 0);
     current.total += 1;
+    current.total_row_count += batchRowCount;
     if (batch.status_bucket === "unsubmitted" && batch.status === "draft") {
       current.draft += 1;
+      current.draft_row_count += batchRowCount;
     }
     if (batch.status_bucket === "submitted") {
       current.submitted += 1;
+      current.submitted_row_count += batchRowCount;
     }
     if (batch.status_bucket === "withdrawn") {
       current.withdrawn += 1;
+      current.withdrawn_row_count += batchRowCount;
     }
     if (batch.status === "conflict") {
       current.conflict += 1;
@@ -5436,6 +5449,16 @@ function bankFlowRuleBatchSummary(status: BankFlowRuleBrowserBatchStatus, batche
     withdrawn_count: withdrawn,
     conflict_count: 0,
     stale_count: stale,
+    total_row_count: batches.reduce((sum, batch) => sum + Number(batch.row_count ?? 0), 0),
+    draft_row_count: batches
+      .filter((batch) => batch.status_bucket === "unsubmitted" && batch.status === "draft")
+      .reduce((sum, batch) => sum + Number(batch.row_count ?? 0), 0),
+    submitted_row_count: batches
+      .filter((batch) => batch.status_bucket === "submitted")
+      .reduce((sum, batch) => sum + Number(batch.row_count ?? 0), 0),
+    withdrawn_row_count: batches
+      .filter((batch) => batch.status_bucket === "withdrawn")
+      .reduce((sum, batch) => sum + Number(batch.row_count ?? 0), 0),
     total_amount: bankFlowRuleMoneyTotal(batches),
     categories: Array.from(categoriesByCode.values()),
   };
@@ -5662,6 +5685,23 @@ function bankFlowRuleBatchTagSelectionPayloadForScenario(
   scenario: BankFlowRuleBatchMockScenario = "single",
 ) {
   const payload = bankFlowRuleBatchTagSelectionPayload(rules, salarySubLabel);
+  if (scenario === "ordinaryDraftMatrix") {
+    const matrixRules = bankFlowRuleOrdinaryDraftMatrixDefinitions.map((definition) => (
+      payload.rules.find((rule) => rule.tag_code === definition.batchType)
+      ?? { tag_code: definition.batchType, requires_oa: false, requires_invoice: false }
+    ));
+    return {
+      ...payload,
+      active_tags: bankFlowRuleOrdinaryDraftMatrixDefinitions.map((definition) => ({
+        code: definition.batchType,
+        label: definition.batchLabel,
+        output_primary_label: definition.batchType === "salary" ? "人工成本" : definition.primaryLabel,
+        output_sub_label: definition.batchLabel,
+        status: "active",
+      })),
+      rules: matrixRules,
+    };
+  }
   if (scenario !== "internalTransferPairs") {
     return payload;
   }
@@ -9173,6 +9213,14 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
           options.bankFlowRuleBatchScenario ?? "single",
         ),
         version: 4,
+        eligibility_changed: true,
+        eligibility_changed_tag_codes: ["salary"],
+        affected_months: ["2026-05"],
+        affected_scope_keys: ["2026-05"],
+        read_model_scope_keys: ["2026-05"],
+        freshness_targets: [{ read_model_key: "bank_flow_rule_batch", scope_key: "2026-05" }],
+        operation_barrier_targets: [{ read_model_key: "bank_flow_rule_batch", scope_key: "2026-05" }],
+        refresh_enqueued: true,
       });
     }
 

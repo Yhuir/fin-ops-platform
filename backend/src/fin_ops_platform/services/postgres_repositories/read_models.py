@@ -6906,6 +6906,42 @@ class PostgresSummaryReadModelRepository:
             relation_mode_filter_enabled=False,
         )
 
+    def bank_flow_rule_batch_affected_scope_keys_for_tag_codes(self, tag_codes: list[str]) -> list[str]:
+        normalized_codes = _dedupe_preserve_order(
+            text(tag_code)
+            for tag_code in list(tag_codes or [])
+            if text(tag_code)
+        )
+        if not normalized_codes:
+            return []
+        presented_status_sql = self._bank_flow_rule_batch_presented_status_sql()
+        rows = self._connection.fetch_all(
+            f"""
+            with affected_scopes as (
+                select scope_month
+                from read_model.bank_detail_rows
+                where tenant_id = 'default'
+                  and effective_category_code = any(%s)
+                union
+                select scope_month
+                from read_model.bank_flow_rule_batch_rows
+                where batch_type = any(%s)
+                  and ({presented_status_sql}) = 'draft'
+            )
+            select to_char(scope_month, 'YYYY-MM') as scope_key
+            from affected_scopes
+            where scope_month is not null
+            order by scope_key
+            """,
+            (normalized_codes, normalized_codes),
+        )
+        return [
+            scope_key
+            for row in rows
+            for scope_key in [text(row.get("scope_key"))]
+            if scope_key
+        ]
+
     def read_bank_flow_rule_batch_page(
         self,
         filters: dict[str, Any] | None = None,
@@ -6948,6 +6984,13 @@ class PostgresSummaryReadModelRepository:
               batch_type,
               {presented_status_sql} as presented_status,
               count(*)::bigint as batch_count,
+              coalesce(sum(row_count), 0)::bigint as row_count,
+              (array_agg(nullif(payload->>'batch_label', '') order by generated_at desc)
+                filter (where nullif(payload->>'batch_label', '') is not null))[1] as batch_label,
+              (array_agg(nullif(payload->>'category_primary_label', '') order by generated_at desc)
+                filter (where nullif(payload->>'category_primary_label', '') is not null))[1] as category_primary_label,
+              (array_agg(nullif(payload->>'category_sub_label', '') order by generated_at desc)
+                filter (where nullif(payload->>'category_sub_label', '') is not null))[1] as category_sub_label,
               coalesce(sum(total_amount), 0)::text as total_amount
             from read_model.bank_flow_rule_batch_rows
             where {visible_summary_where_sql}
@@ -8135,6 +8178,12 @@ class PostgresReadModelRepository:
 
     def list_bank_flow_rule_batch_rows(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]] | None:
         return self._summary_read_model_repository.list_bank_flow_rule_batch_rows(*args, **kwargs)
+
+    def bank_flow_rule_batch_affected_scope_keys_for_tag_codes(self, *args: Any, **kwargs: Any) -> list[str]:
+        return self._summary_read_model_repository.bank_flow_rule_batch_affected_scope_keys_for_tag_codes(
+            *args,
+            **kwargs,
+        )
 
     def read_bank_flow_rule_batch_page(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
         return self._summary_read_model_repository.read_bank_flow_rule_batch_page(*args, **kwargs)

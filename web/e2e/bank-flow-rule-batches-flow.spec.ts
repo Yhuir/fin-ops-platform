@@ -212,7 +212,7 @@ test.describe("bank flow rule batches browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
-  test("saves tag rules through the freshness barrier and reloads the flow rule list", async ({ page }, testInfo) => {
+  test("saves tag rules immediately and reconciles the affected month in the background", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       sessionMode: "full_access",
@@ -222,6 +222,9 @@ test.describe("bank flow rule batches browser flow", () => {
     await page.goto("/bank-flow-rule-batches");
     await expect(page.getByRole("heading", { name: "流水规则批量处理" })).toBeVisible();
     await expect(page.getByRole("button", { name: "未提交 1" })).toHaveAttribute("aria-pressed", "true");
+    const monthReload = waitForBankFlowRuleBatches(page);
+    await page.getByLabel("月份").fill("2026-05");
+    await monthReload;
 
     const tagDrawer = page.getByRole("dialog", { name: "流水规则标签管理" });
     await recordLatency({
@@ -263,7 +266,6 @@ test.describe("bank flow rule batches browser flow", () => {
     }, async (mark) => {
       await tagDrawer.getByRole("button", { name: "保存" }).click();
       await mark("apiLatencyMs", saveResponse);
-      await mark("operationBarrierLatencyMs", barrierResponse);
       await mark("firstVisibleResponseLatencyMs", expect(page.getByText("流水规则已保存")).toBeVisible());
       await mark("finalSettledLatencyMs", expect(tagDrawer).toHaveCount(0));
     });
@@ -286,8 +288,9 @@ test.describe("bank flow rule batches browser flow", () => {
       targets?: Array<{ read_model_key?: string; readModelKey?: string; scope_key?: string; scopeKey?: string }>;
     };
     expect(barrierBody.targets).toEqual([
-      { read_model_key: "bank_flow_rule_batch", scope_key: "all" },
+      { read_model_key: "bank_flow_rule_batch", scope_key: "2026-05" },
     ]);
+    expect((await barrierResponse).status()).toBe(200);
     expect(api.count("PUT /api/bank-flow-rule-batches/tag-rules")).toBe(1);
     expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThanOrEqual(1);
     expect(api.count("GET /api/bank-flow-rule-batches")).toBeGreaterThanOrEqual(2);

@@ -33,6 +33,34 @@ class _ReadModelQueue:
 
 
 class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
+    def _set_bank_flow_rule_requirements(
+        self,
+        app,
+        *,
+        tag_code: str,
+        requires_oa: bool,
+        requires_invoice: bool,
+    ) -> dict[str, object]:
+        current = _json(app.handle_request("GET", "/api/bank-flow-rule-batches/tag-rules"))
+        rules = [
+            {
+                **rule,
+                "requires_oa": requires_oa,
+                "requires_invoice": requires_invoice,
+            }
+            if rule["tag_code"] == tag_code
+            else rule
+            for rule in current["rules"]
+        ]
+        response = app.handle_request(
+            "PUT",
+            "/api/bank-flow-rule-batches/tag-rules",
+            body=json.dumps({"expected_version": current["version"], "rules": rules}),
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(response.status_code, 200)
+        return _json(response)
+
     def test_bank_flow_rule_tag_rules_hide_and_reject_selected_tag_codes(self) -> None:
         app = build_application()
         payload = _json(app.handle_request("GET", "/api/bank-flow-rule-batches/tag-rules"))
@@ -361,6 +389,12 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
             [{"transaction_id": row_id, "category_code": "fee"}],
             actor="tester",
         )
+        self._set_bank_flow_rule_requirements(
+            app,
+            tag_code="fee",
+            requires_oa=False,
+            requires_invoice=False,
+        )
 
         response = app.handle_request(
             "POST",
@@ -378,8 +412,8 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         metadata = relation["special_metadata"]
         self.assertEqual(metadata["source"], "bank_flow_rule_batch")
         self.assertEqual(metadata["flow_rule_tag_code"], "fee")
-        self.assertTrue(metadata["requires_oa"])
-        self.assertTrue(metadata["requires_invoice"])
+        self.assertFalse(metadata["requires_oa"])
+        self.assertFalse(metadata["requires_invoice"])
         self.assertEqual(metadata["source_row_count"], 1)
         self.assertFalse(metadata["collapsed_bank_rows"])
         self.assertEqual(
@@ -412,6 +446,12 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
             [{"transaction_id": row_id, "category_code": "fee"}],
             actor="tester",
         )
+        self._set_bank_flow_rule_requirements(
+            app,
+            tag_code="fee",
+            requires_oa=False,
+            requires_invoice=False,
+        )
         submit_response = app.handle_request(
             "POST",
             "/api/bank-flow-rule-batches/submit-selection",
@@ -422,8 +462,8 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         relation = app._workbench_pair_relation_service.get_active_relation_by_row_id(row_id)
         self.assertIsNotNone(relation)
         self.assertEqual(relation["relation_mode"], "bank_flow_rule_batch")
-        self.assertTrue(relation["special_metadata"]["requires_oa"])
-        self.assertTrue(relation["special_metadata"]["requires_invoice"])
+        self.assertFalse(relation["special_metadata"]["requires_oa"])
+        self.assertFalse(relation["special_metadata"]["requires_invoice"])
 
         current_rules = _json(app.handle_request("GET", "/api/bank-flow-rule-batches/tag-rules"))
         next_rules = [
@@ -449,8 +489,8 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         self.assertIsNotNone(relation)
         metadata = relation["special_metadata"]
         self.assertEqual(metadata["flow_rule_tag_code"], "fee")
-        self.assertTrue(metadata["requires_oa"])
-        self.assertTrue(metadata["requires_invoice"])
+        self.assertFalse(metadata["requires_oa"])
+        self.assertFalse(metadata["requires_invoice"])
         self.assertNotEqual(metadata["flow_rule_version"], saved_rules["version"])
 
     def test_bank_flow_rule_tag_rule_update_does_not_rewrite_persistent_relation(self) -> None:
@@ -480,6 +520,15 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
             [{"transaction_id": row_id, "category_code": "fee"}],
             actor="tester",
         )
+        app._bank_flow_rule_batch_read_model_refresh_producer = lambda: SimpleNamespace(
+            enqueue_scope_keys=lambda scope_keys, **_kwargs: list(scope_keys)
+        )
+        self._set_bank_flow_rule_requirements(
+            app,
+            tag_code="fee",
+            requires_oa=False,
+            requires_invoice=False,
+        )
         submit_response = app.handle_request(
             "POST",
             "/api/bank-flow-rule-batches/submit-selection",
@@ -507,8 +556,8 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         relation_snapshot = app._state_store.load_workbench_pair_relations()["pair_relations"][batch_id]
         metadata = relation_snapshot["special_metadata"]
         self.assertEqual(relation_snapshot["relation_mode"], "bank_flow_rule_batch")
-        self.assertTrue(metadata["requires_oa"])
-        self.assertTrue(metadata["requires_invoice"])
+        self.assertFalse(metadata["requires_oa"])
+        self.assertFalse(metadata["requires_invoice"])
 
     def test_tag_rule_update_does_not_upgrade_turnover_relation(self) -> None:
         data_dir = Path(tempfile.mkdtemp(prefix="finops-test-turnover-rules-"))
@@ -683,6 +732,12 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
             [{"transaction_id": row_id, "category_code": "fee"}],
             actor="tester",
         )
+        self._set_bank_flow_rule_requirements(
+            app,
+            tag_code="fee",
+            requires_oa=False,
+            requires_invoice=False,
+        )
         submit_response = app.handle_request(
             "POST",
             "/api/bank-flow-rule-batches/submit-selection",
@@ -711,9 +766,14 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         self.assertEqual(app._bank_flow_rule_batch_service.get_batch(batch_id)["status"], "withdrawn")
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id(row_id))
 
-        app._no_oa_bank_batch_application_service().refresh_batches()
-        unsubmitted = _json(app.handle_request("GET", "/api/bank-flow-rule-batches?bucket=unsubmitted"))
-        self.assertEqual([batch["batch_type"] for batch in unsubmitted["batches"]], ["fee"])
+        app._bank_flow_rule_batch_application_service().refresh_batches(
+            scope_key="2026-05",
+            relation_mode="bank_flow_rule_batch",
+        )
+        unsubmitted = app._bank_flow_rule_batch_service.list_batches(
+            {"relation_mode": "bank_flow_rule_batch", "status": "draft"}
+        )
+        self.assertEqual([batch["batch_type"] for batch in unsubmitted], ["fee"])
 
     def test_bank_flow_rule_reset_submitted_tolerates_missing_active_relation(self) -> None:
         app = build_application()
@@ -740,6 +800,12 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
             [{"transaction_id": row_id, "category_code": "fee"}],
             actor="tester",
         )
+        self._set_bank_flow_rule_requirements(
+            app,
+            tag_code="fee",
+            requires_oa=False,
+            requires_invoice=False,
+        )
         submit_response = app.handle_request(
             "POST",
             "/api/bank-flow-rule-batches/submit-selection",
@@ -759,8 +825,14 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         self.assertEqual(reset_response.status_code, 200)
         self.assertEqual(_json(reset_response)["results"], [{"batch_id": batch_id, "status": "withdrawn"}])
         self.assertEqual(app._bank_flow_rule_batch_service.get_batch(batch_id)["status"], "withdrawn")
-        unsubmitted = _json(app.handle_request("GET", "/api/bank-flow-rule-batches?bucket=unsubmitted"))
-        self.assertEqual([batch["batch_type"] for batch in unsubmitted["batches"]], ["fee"])
+        app._bank_flow_rule_batch_application_service().refresh_batches(
+            scope_key="2026-05",
+            relation_mode="bank_flow_rule_batch",
+        )
+        unsubmitted = app._bank_flow_rule_batch_service.list_batches(
+            {"relation_mode": "bank_flow_rule_batch", "status": "draft"}
+        )
+        self.assertEqual([batch["batch_type"] for batch in unsubmitted], ["fee"])
 
     def test_selected_row_submit_rejects_cross_bank_selection(self) -> None:
         app = build_application()

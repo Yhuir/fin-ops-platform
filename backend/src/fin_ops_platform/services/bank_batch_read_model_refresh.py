@@ -105,24 +105,28 @@ class BankBatchReadModelRefreshService:
             }
 
         relation_mode = self._relation_mode_for_event(event)
+        force_refresh = _event_force_refresh(event)
         precheck_source_versions: dict[str, object] | None = None
         if _is_month_scope(scope_key):
             precheck_source_versions = self._application_service.read_model_scope_source_versions(
                 scope_key=scope_key,
                 relation_mode=relation_mode,
             )
-            unchanged = self._application_service.unchanged_read_model_scope_result(
-                scope_key=scope_key,
-                source_versions=precheck_source_versions,
-                relation_mode=relation_mode,
-                allow_refreshing_read_model_status=True,
-            )
-            if unchanged is not None:
-                self._complete_dirty_scope(event, scope_key=scope_key)
-                return {
-                    **unchanged,
-                    "bank_row_count": self._application_service.bank_row_count_from_source_versions(precheck_source_versions),
-                }
+            if not force_refresh:
+                unchanged = self._application_service.unchanged_read_model_scope_result(
+                    scope_key=scope_key,
+                    source_versions=precheck_source_versions,
+                    relation_mode=relation_mode,
+                    allow_refreshing_read_model_status=True,
+                )
+                if unchanged is not None:
+                    self._complete_dirty_scope(event, scope_key=scope_key)
+                    return {
+                        **unchanged,
+                        "bank_row_count": self._application_service.bank_row_count_from_source_versions(
+                            precheck_source_versions
+                        ),
+                    }
 
         bank_rows = self._application_service.bank_transaction_rows(
             month=scope_key,
@@ -204,3 +208,10 @@ class BankBatchReadModelRefreshService:
 
 def _is_month_scope(scope_key: str) -> bool:
     return len(scope_key) == 7 and scope_key[4:5] == "-" and scope_key[:4].isdigit() and scope_key[5:].isdigit()
+
+
+def _event_force_refresh(event: RuntimeQueueEvent) -> bool:
+    if event.payload.get("force_refresh") is True:
+        return True
+    metadata = event.payload.get("metadata")
+    return isinstance(metadata, dict) and metadata.get("force_refresh") is True

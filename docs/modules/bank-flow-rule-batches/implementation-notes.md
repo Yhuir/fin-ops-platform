@@ -1,13 +1,24 @@
 # 流水规则批量处理实施记录
 
+## 2026-07-21 未提交资格、精确月份原子刷新与完整汇总
+
+- 新未提交资格收口为 active tag 且 `requires_oa=false`、`requires_invoice=false`；需要 OA 或发票的流水退出本页面未提交区。标签抽屉仍显示全部 active tags，submitted/withdrawn rail 只按实际历史聚合显示。
+- 页面删除 `activeTags + summary categories + current page batches` 的旧三路标签合并；主/子 rail 的 batch count 与 row count 只读取服务端完整 summary，不再受分页影响。
+- 规则保存先纯规范化并比较合格 tag code 集合；资格中性变化零 refresh，完全 no-op 零写入。资格变化用单条集合 SQL 查找 bank-detail/现存 draft 的受影响月份。
+- PostgreSQL 生产路径在同一事务内用数据库版本锁写 settings，并批量写所有月份 dirty scope/outbox；队列异常、部分入队或版本冲突整体回滚。响应携带 changed codes、affected months、targets 和 refresh 状态。
+- source versions 删除原始 `bank_flow_rule_batch_tag_rules_version`，改用合格 tag code 集合的稳定 `bank_flow_rule_batch_eligibility_version`，避免 OA-only/Invoice-only 互换造成无效重建。
+- 规则保存前端不等待 worker：先清空选择、隐藏受影响当前月份旧未提交 rows 并反馈成功；月份 barrier 和 reload 在后台执行。
+- 上游刷新补齐：银行导入/导入状态/自动标签规则走 derived lifecycle，手工银行分类在 Turnover UoW 同事务追加精确 `bank_flow_rule_batch` dirty/outbox。
+- 旧 `all` 规则刷新、全部 active 标签未提交显示、当前页行数反推 rail count 和已删除 relation requirement 回写文档均已移除。
+
 ## 2026-07-20 规则保存 O(1) 与 formal relation 合同收口
 
 - 2026-07-14 formal-relations 合同已取代 2026-06-30 的 requirement-based paired/open 模型：active relation 完整成员进入 paired，无 active relation 的事实进入 unpaired singleton。
-- 规则保存删除两次 active relation 全量扫描、逐 relation metadata/history 写、turnover mode 升级、broad lifecycle 和重复 refresh；actual change 只写 settings/audit 并 enqueue 一次 `bank_flow_rule_batch/all`。
+- 规则保存删除两次 active relation 全量扫描、逐 relation metadata/history 写、turnover mode 升级、broad lifecycle 和重复 refresh；当时暂以一次 `bank_flow_rule_batch/all` 代替，已在 2026-07-21 收口为精确受影响月份事务入队。
 - semantic no-op 不递增 version、不写 settings/audit、不入队。
 - `BankBatchApplicationService` 中 bank-flow 可达的旧 tag writer/sync/helper 已删除；独立 no-OA legacy service 保留自身合同。
 - migration `0111_bank_flow_rule_batch_tag_rules_canonical_shape.sql` 把旧 selected seed 合并到 requirements 后删除 selected shape；runtime 不留 fallback。
-- 下方 2026-06-30 两个 requirement 同步章节是被本节明确废止的历史记录，不再描述当前运行时合同。
+- 2026-06-30 requirement 同步方案已从本实施记录删除，不再描述当前运行时合同。
 
 ## 2026-07-06 Scope source-version freshness 修复
 
@@ -43,8 +54,8 @@
 
 测试覆盖：
 
-- `tests/test_workbench_candidate_grouping.py::WorkbenchCandidateGroupingTests::test_bank_transaction_missing_policy_defaults_to_full_three_pane_requirement`
-- `tests/test_workbench_candidate_grouping.py`
+- `tests/test_no_oa_bank_batch_tag_selection_api.py`
+- `web/src/test/RelationGroupGrid.test.tsx`
 - `tests/test_bank_flow_rule_batch_routes.py`
 - `web/src/test/BankFlowRuleBatchApi.test.ts`
 
@@ -122,7 +133,7 @@
 
 - 新增迁移 `0083_bank_flow_rule_batch_tag_rules.sql`，在 `app.app_settings.settings_payload` 缺失 `bank_flow_rule_batch_tag_rules` 时，从历史 `no_oa_bank_batch_tag_selection` 一次性复制规则值；运行时不做隐式 fallback。
 - `AppSettingsService` 新增 `get_bank_flow_rule_batch_tag_rules_payload()` / `update_bank_flow_rule_batch_tag_rules(...)`，保留原 public payload shape、乐观锁、active tag 校验、审计和自动标签归档时的失效规则清理。
-- `BankFlowRuleBatchApplicationService` 的规则读写切到 bank-flow settings key；`BankBatchApplicationService` 按 relation mode 选择 tag rules payload 和 source versions，`bank_flow_rule_batch` read model freshness 使用 `bank_flow_rule_batch_tag_rules_version`。
+- `BankFlowRuleBatchApplicationService` 的规则读写切到 bank-flow settings key；`BankBatchApplicationService` 按 relation mode 选择 tag rules payload。2026-07-21 起 bank-flow source version 使用合格 tag code 集合的稳定 `bank_flow_rule_batch_eligibility_version`，不再使用原始规则版本。
 - 2026-07-04 后旧 no-OA 历史重算不再属于 bank-flow 页面或公开 API；历史 no-OA 事实只由 no-OA legacy 域管理。
 
 测试覆盖：
@@ -216,44 +227,15 @@
 
 - `tests/test_no_oa_bank_batch_tag_selection_api.py::NoOaBankBatchTagSelectionApiTests::test_tag_rule_update_upgrades_legacy_turnover_relation_from_persistent_repository`
 - `tests/test_workbench_relation_command_service.py::WorkbenchRelationCommandServiceTests::test_update_relation_metadata_for_case_id_can_upgrade_relation_mode`
-- `tests/test_workbench_turnover_grouping.py::WorkbenchTurnoverGroupingTests::test_two_pane_turnover_manual_closure_with_no_invoice_requirement_is_paired`
+- `tests/test_workbench_relation_grouping.py`
 
 验证命令：
 
-- `PYTHONPATH=backend/src:. pytest tests/test_no_oa_bank_batch_tag_selection_api.py tests/test_workbench_candidate_grouping.py tests/test_workbench_turnover_grouping.py tests/test_no_oa_bank_batch_application_service.py tests/test_workbench_relation_command_service.py tests/test_workbench_relation_command_repository_adapter.py tests/test_turnover_workbench_integration.py tests/test_turnover_ledger_uow_contract.py -q`
+- `PYTHONPATH=backend/src:. pytest tests/test_no_oa_bank_batch_tag_selection_api.py tests/test_workbench_relation_grouping.py tests/test_no_oa_bank_batch_application_service.py tests/test_workbench_relation_command_service.py tests/test_workbench_relation_command_repository_adapter.py tests/test_turnover_workbench_integration.py tests/test_turnover_ledger_uow_contract.py -q`
 
 未测风险：
 
 - 生产需发布后执行一次同步，确认现存 `turnover:*` 旧关系被升级并触发 `workbench_relation` / `workbench` 刷新。
-
-## 2026-06-30 规则保存同步已提交 relation requirement 修复
-
-目标：
-
-- 修复保存“外部往来款”等流水标签的 `OA` / `发票` requirement 后，已提交 `bank_flow_rule_batch` relation 仍按旧 requirement 留在关联台未配对区的问题。
-
-关键决策：
-
-- 根因不是 Workbench 分组缺展示逻辑，而是规则保存只更新 settings family 和 read model refresh，没有同步已存在 active relation 的 `special_metadata.requires_oa` / `requires_invoice` / `flow_rule_version`。Workbench 按架构只能读取 relation fact，不应在分组阶段回读当前设置，否则 settings 与关系事实会变成双事实源。
-- 修复边界放在 `NoOaBankBatchApplicationService.update_tag_selection(...)`：保存规则后由流水规则模块 owner 遍历 active `relation_mode=bank_flow_rule_batch` relation，并通过 `WorkbenchRelationCommandService.update_relation_metadata_for_case_id(...)` 回写 requirement metadata。
-- 生产验证发现新进程构造的内存 `WorkbenchPairRelationService` 不一定包含历史 relation；因此 no-OA/bank-flow application service 注入的 relation command 必须通过 state store / PostgreSQL durable repository load active relations，再回写同一 repository。`WorkbenchRelationCommandRepositoryAdapter` 在传入 repository 时以 repository 为 load 事实源，内存只作为未注入 repository 的兼容路径。
-- 删除旧污染路径：不再在存在 `NoOaBankBatchTagSelectionApplicationService` 时提前 return；委托保存后必须继续执行 bank-flow relation requirement sync。旧 no-OA relation 不参与同步，避免 legacy 链路被新规则污染。
-- 同步只更新已有 relation metadata 和版本，不让 Workbench 直接读取 settings；变更后触发 no-OA 过渡底座的 mutation persistence、derived lifecycle 和 `bank_flow_rule_batch_tag_rules_changed` refresh。
-
-测试覆盖：
-
-- `tests/test_no_oa_bank_batch_tag_selection_api.py::NoOaBankBatchTagSelectionApiTests::test_bank_flow_rule_tag_rule_update_resyncs_submitted_relation_requirements` 覆盖 PUT 规则后已提交 relation metadata 从 `requires_invoice=true` 同步为 `false`，并更新 `flow_rule_version`。
-- `tests/test_no_oa_bank_batch_tag_selection_api.py::NoOaBankBatchTagSelectionApiTests::test_bank_flow_rule_tag_rule_update_resyncs_relation_from_persistent_repository` 覆盖进程内 relation snapshot 为空时，规则保存仍从持久化 relation repository 同步已提交 relation。
-- `tests/test_workbench_relation_command_repository_adapter.py::WorkbenchRelationCommandRepositoryAdapterTests::test_load_prefers_repository_when_repository_is_configured` 锁定 adapter load 事实源。
-- `tests/test_workbench_candidate_grouping.py::WorkbenchCandidateGroupingTests::test_bank_flow_rule_batch_requires_only_oa_before_paired` 覆盖只要求 OA、不要求发票时，缺 OA 留 open，补齐 OA 后进入 paired。
-
-验证命令：
-
-- `pytest tests/test_workbench_candidate_grouping.py::WorkbenchCandidateGroupingTests::test_bank_flow_rule_batch_requires_only_oa_before_paired tests/test_no_oa_bank_batch_tag_selection_api.py::NoOaBankBatchTagSelectionApiTests::test_bank_flow_rule_tag_rule_update_resyncs_submitted_relation_requirements -q`
-
-未测风险：
-
-- 本地测试使用稳定 `fee` 标签构造同步场景；生产同一同步逻辑按 `flow_rule_tag_code` 泛化到 `external_turnover` 等标签。发布后需要对生产当前 settings 执行一次同步或重新保存规则，使此前已保存但未同步的 relation metadata 收敛。
 
 ## 2026-06-30 submitted 列表 read model mode 修复
 
@@ -339,8 +321,8 @@
 
 验证：
 
-- `PYTHONPATH=backend/src python3 -m pytest tests/test_no_oa_bank_batch_tag_selection_api.py tests/test_workbench_candidate_grouping.py tests/test_workbench_relation_command_service.py -q`
-- `npm --prefix web test -- --run CandidateGroupGrid.test.tsx BankFlowRuleBatchPage.test.tsx BankFlowRuleBatchApi.test.ts App.test.tsx`
+- `PYTHONPATH=backend/src python3 -m pytest tests/test_no_oa_bank_batch_tag_selection_api.py tests/test_workbench_relation_command_service.py tests/test_workbench_relation_repository.py -q`
+- `npm --prefix web test -- --run RelationGroupGrid.test.tsx BankFlowRuleBatchPage.test.tsx BankFlowRuleBatchApi.test.ts App.test.tsx`
 - `npm --prefix web run e2e -- e2e/bank-flow-rule-batches-flow.spec.ts --project=chromium`
 - `npm --prefix web run e2e -- e2e/permissions-role-matrix.spec.ts --project=chromium`
 - `PYTHONPATH=backend/src python3 -m unittest tests.test_playwright_e2e_strict_diagnostics -v`
@@ -444,8 +426,8 @@
 关键决策：
 
 - `routes_bank_flow_rule_batches.py` 在 HTTP 输出边界翻译共享 bank-batch core 仍可能抛出的 legacy `no_oa_bank_batch_*` selection/relation/version/persistence 错误，公开 API 只返回 `bank_flow_rule_batch_*`。
-- `workbench_candidate_grouping.py` 不再让 bank-flow 折叠摘要复用 no-OA 输出：bank-flow summary 使用 `source_kind=bank_flow_rule_batch_summary`、id prefix `bank_flow_rule_summary:`、`invoice_relation.code=bank_flow_rule_batch` 和 `流水规则` display tag，并过滤旧 `免OA` tag。
-- `workbench_candidate_grouping.py` 的 Bank Transaction Paired Policy 保留 legacy `no_oa_bank_batch` 在缺失 explicit requirement metadata 时的无需 OA/发票合同；若 legacy no-OA 已写 `requires_oa` / `requires_invoice` 则仍按显式 requirement 判定。该保留只服务 no-OA legacy，bank-flow 缺失 requirement metadata 仍 fail closed 为需要 OA+发票。
+- 当前 `workbench_relation_grouping.py` 不让 bank-flow 折叠摘要复用 no-OA 输出：bank-flow summary 使用 `source_kind=bank_flow_rule_batch_summary`、id prefix `bank_flow_rule_summary:`、`invoice_relation.code=bank_flow_rule_batch` 和 `流水规则` display tag，并过滤旧 `免OA` tag。
+- 当前 `workbench_relation_grouping.py` 保留 legacy `no_oa_bank_batch` 的显式 requirement 合同；该保留只服务 no-OA legacy，bank-flow 缺失 requirement metadata 仍 fail closed 为需要 OA+发票。已删除的 `workbench_candidate_grouping.py` 不得恢复。
 - `postgres_repositories/read_models.py` 把 `bank_flow_rule_batch_summary` 纳入 Workbench summary display-only source kind，避免摘要行污染真实银行明细计数、筛选和 read model I/O。
 - `web/src/features/workbench/api.ts` 与 `ReconciliationWorkbenchPage.tsx` 按 bank-flow source kind / relation metadata 识别撤回链路，用户可见文案和撤回 reason 改为“流水规则批次”。
 - `web/e2e/bank-flow-rule-batches-flow.spec.ts` 与 deterministic `apiMocks.ts` 移除 bank-flow 浏览器链路里的旧 no-OA fixture I/O：transaction id 改为 `bank-flow-rule-e2e-*`，batch id 改为 `bank-flow-rule-batch-e2e-*`，relation case id 改为 `bank-flow-rule-relation-e2e-*`，成本统计 fan-out 项目名改为 `流水规则手续费成本项目`，read model stale reason 改为 `bank_flow_rule_batch_*`。
@@ -453,30 +435,30 @@
 
 验证：
 
-- `PYTHONPATH=backend/src:. python3 -m pytest tests/test_bank_flow_rule_batch_routes.py tests/test_workbench_candidate_grouping.py::WorkbenchCandidateGroupingTests::test_bank_flow_rule_batch_collapses_only_when_more_than_three_bank_rows tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_treats_bank_flow_rule_batch_summary_source_kind_as_display_only -q`
-- `python3 -m ruff check backend/src/fin_ops_platform/app/routes_bank_flow_rule_batches.py backend/src/fin_ops_platform/services/workbench_candidate_grouping.py backend/src/fin_ops_platform/services/postgres_repositories/read_models.py tests/test_bank_flow_rule_batch_routes.py tests/test_workbench_candidate_grouping.py tests/test_workbench_sql_runtime.py`
-- `cd web && npm test -- --run BankFlowRuleBatchApi.test.ts CandidateGroupGrid.test.tsx`
+- `PYTHONPATH=backend/src:. python3 -m pytest tests/test_bank_flow_rule_batch_routes.py tests/test_no_oa_bank_batch_tag_selection_api.py tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_treats_bank_flow_rule_batch_summary_source_kind_as_display_only -q`
+- `python3 -m ruff check backend/src/fin_ops_platform/app/routes_bank_flow_rule_batches.py backend/src/fin_ops_platform/services/postgres_repositories/read_models.py tests/test_bank_flow_rule_batch_routes.py tests/test_no_oa_bank_batch_tag_selection_api.py tests/test_workbench_sql_runtime.py`
+- `cd web && npm test -- --run BankFlowRuleBatchApi.test.ts RelationGroupGrid.test.tsx`
 - `cd web && npm exec tsc -- --noEmit`
 
-## 2026-07-20 流水规则配置保存 O(1) 收敛
+## 2026-07-20 流水规则配置保存 O(1) 收敛（已由 2026-07-21 精确月份事务方案替代）
 
 目标：
 
-- 将 tag-rules 保存从两次 active relation 全量扫描与逐 relation 写回，收敛为固定成本的 settings/audit 单写和一次 bank-flow read-model refresh。
+- 当时先将 tag-rules 保存从两次 active relation 全量扫描与逐 relation 写回，收敛为 settings/audit 单写和一次 bank-flow read-model refresh；后续精确月份方案保留了“零 relation 扫描”并替换 broad refresh。
 - 保持批次列表、详情、提交、撤回、重置、no-OA、关联台和流水台账合同不变。
 
 关键决策：
 
 - formal relation 本身决定既有关系的 paired/unpaired；relation 中的 requirement metadata 是创建时审计快照，规则保存不再追溯改写。
 - bank-flow 规则 canonical payload 只保留 `version` 与 `requirements_by_tag_code`；migration 0111 移除旧 selected shape，且不修改 no-OA payload。
-- 同值保存是真正 no-op；实际变化只产生一次 audit 与一次 `bank_flow_rule_batch/all` durable refresh。
+- 同值保存是真正 no-op；2026-07-21 起实际变化只在资格集合变化时产生精确月份 durable refresh，资格中性变化为零 refresh。
 - 删除旧 `_sync_bank_flow_rule_relation_requirements`、`_sync_turnover_rule_relation_requirements` 及其专用 relation 扫描/逐条写回 helper，不保留 fallback。
 
 验证：
 
 - 目标后端 160 passed + 15 subtests；关联回归 204 passed + 287 subtests；前端既有 3 files / 53 tests passed。
 - 真实 PostgreSQL 空库应用 0001–0111，migration canonical/no-OA 隔离/幂等通过。
-- 真实 PostgreSQL 20 次采样：no-op p95 `34.002ms`，actual change p95 `83.475ms`；actual change 只有 1 个 bank-flow all dirty scope、0 relation history。
+- 当时真实 PostgreSQL 20 次采样：no-op p95 `34.002ms`，actual change p95 `83.475ms`；该 release 的单个 all dirty scope 已由 2026-07-21 精确月份 scope 替代，数值只作为历史基线。
 - 全量后端修正后为 4200 passed、64 skipped、716 subtests；剩余 historical ETC、Workbench repository/direct cost fan-out、cost fan-out matrix 与 cost-statistics fixture 问题可在未改动基线 SHA `3c80361db` 复现，不属于本项链路。
 - SHA `182c29be4d6b1f9fd91001d88600fddd411bf2ef` 已部署为 `main-182c29be-20260720015418`；migration 0111 用时 42ms，API/dispatcher/22 workers active 且 worker workdir mismatch 为 0。
 - 生产 20 次读取：页面壳 p95 `139.570ms`、GET p95 `258.567ms`、Page Audit p95 `370.022ms`；60/60 通过。
@@ -531,3 +513,15 @@
 - SHA `a5e5b795a` / release `main-a5e5b795-20260720032959` 的最终 20 次生产采样全部达标：页面壳 p95 `130.237ms`、all list p95 `272.284ms`、2026-07 month list p95 `260.943ms`、Page Audit p95 `322.560ms`；80/80 成功，list 40/40 fresh 且零 enqueue。
 - 1-row 与 33-row 详情各 20 次测量，p95 分别为 `175.940ms` 与 `337.446ms`；`bank-flow-rule-batches`、关联台、银行明细、流水台账、成本统计五个 Page Audit 均 `pass / fresh / drained / ready`、0 issue。
 - 生产 submit/withdraw 可逆样本没有被擅自执行：首次 mutation 的强制 `app-health-operations` 预检发现 `tax-offset`、`input-invoice-usage`、`output-invoice-collections`、`settings` 四个范围外页面已有 integrity issue，并在写前 fail closed。为保持模块隔离和九页面串行，当前模块不跨界修复、也不绕过门禁；该写证据在主控流程最终系统门、全局预检恢复 pass 后补做。
+
+## 2026-07-21 双 false 资格规则与生产刷新验证
+
+- 新未提交资格统一为 active tag 且 `requires_oa=false`、`requires_invoice=false`；缺失 requirement fail closed。左侧未提交主/子标签只来自该集合，submitted/withdrawn 标签与计数继续来自 read model 中冻结的实际历史。
+- 规则保存先比较资格集合的对称差；只对变化 tag 使用一条集合 SQL 解析 canonical bank-detail 与现存 draft 批次的精确月份。PostgreSQL 下 settings version CAS、无关 settings 字段合并、多月份 dirty/outbox 在同一事务提交；资格中性保存零 refresh，完全同值为零写入，空月份不 fallback `all`。
+- 最终生产 release `main-ca22f3be-20260721155950` 已激活，schema version `118`。首次 7 个月 rollout 校正后，2026-01 至 2026-07 的未提交结果均无不合格 tag；2026-07 submitted 历史仍为 2 个 batch，未受当前规则隐藏。
+- 生产验证发现共享 worker 没有兑现 manifest 已声明的 `force_refresh` 合同：运维强制事件仍会进入 unchanged skip。现已删除该旧行为；顶层或 metadata 的 `force_refresh=true` 都绕过 skip，仍按精确 month scope 和原 source-version/persistence 边界重建。
+- 稳态真实强制重建验证：2026-01 至 2026-06 enqueue-to-fresh 为 `402.6–861.0ms`；2026-07 连续 10 次为 median `484.9ms`、p95/max `883.8ms`，达到当前月 p95 ≤ 1s、历史月份 p95 ≤ 5s 的目标。发布重启后首轮冷样本有长尾，因此生产监控仍保留长窗口告警，不用冷样本替代稳态 SLO 结论。
+- 最终 release 再次强制刷新 2026-07：worker 处理 `677.275ms`，stale/unavailable 均为 0，outbox pending/publishing/failed 均为 0；从本地 SSH 运维命令发起到公网 barrier fresh 共 `2572.9ms`，其中远程 enqueue 命令往返 `1785.1ms`。
+- 最终 release 的 10 次同值 PUT 全部保持 version `11`、零 affected scope、零 enqueue，median `178.5ms`、p95/max `208.5ms`；10 次 2026-07 GET 全部 fresh，median `186.1ms`、p95/max `272.1ms`。
+- 生产跨页只读 Audit：`bank-flow-rule-batches`、`bank-details`、`turnover-ledger`、`reconciliation-workbench`、`settings` 全部 `pass`、0 blocking issue。历史 `0111` 只修改 formal rule payload 导致 settings formal/raw 审计不一致，已由 `0118` 在 33ms 内只同步 raw 镜像，canonical rule value、version 和 OA/发票开关均未改变。
+- 本项相关后端回归 `421 passed + 76 subtests`，迁移/settings Audit/repository 回归最终 `120 passed + 19 subtests`；前端全量 `73 files / 862 tests`、构建和 Chromium bank-flow `9/9` 通过。全仓后端基线 `4245 tests` 仍有 8 failures + 3 errors：6 个 cost-statistics fixture、3 个 no-OA legacy 历史折叠、1 个 write-operation impact matrix，以及 1 个 local read-model API harness 缺少 bank-flow SQL repository；除最后一个既有本地 harness contract 外均不在本模块文件范围，生产 PostgreSQL route/Audit 已通过。

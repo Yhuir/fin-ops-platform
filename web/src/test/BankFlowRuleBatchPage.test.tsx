@@ -50,12 +50,16 @@ const listPayload = {
     withdrawn_count: 1,
     conflict_count: 0,
     stale_count: 0,
+    total_row_count: 18,
+    draft_row_count: 9,
+    submitted_row_count: 8,
+    withdrawn_row_count: 1,
     total_amount: "26006.00",
     categories: [
-      { code: "fee", label: "手续费", primary_label: "费用", sub_label: "手续费", total: 2, draft: 1, submitted: 0, withdrawn: 1, conflict: 0, stale: 0, total_amount: "106.00" },
-      { code: "salary", label: "工资", primary_label: "人工成本", sub_label: "工资", total: 1, draft: 0, submitted: 1, withdrawn: 0, conflict: 0, stale: 0, total_amount: "20000.00" },
-      { code: "holiday_bonus", label: "过节费", primary_label: "福利", sub_label: "过节费", total: 1, draft: 1, submitted: 0, withdrawn: 0, conflict: 0, stale: 0, total_amount: "5000.00" },
-      { code: "internal_transfer", label: "内部往来款", primary_label: "往来", sub_label: "内部往来款", total: 1, draft: 1, submitted: 0, withdrawn: 0, conflict: 0, stale: 0, total_amount: "1000.00" },
+      { code: "fee", label: "手续费", primary_label: "费用", sub_label: "手续费", total: 2, draft: 1, submitted: 0, withdrawn: 1, conflict: 0, stale: 0, total_row_count: 3, draft_row_count: 2, submitted_row_count: 0, withdrawn_row_count: 1, total_amount: "106.00" },
+      { code: "salary", label: "工资", primary_label: "人工成本", sub_label: "工资", total: 1, draft: 0, submitted: 1, withdrawn: 0, conflict: 0, stale: 0, total_row_count: 8, draft_row_count: 0, submitted_row_count: 8, withdrawn_row_count: 0, total_amount: "20000.00" },
+      { code: "holiday_bonus", label: "过节费", primary_label: "福利", sub_label: "过节费", total: 1, draft: 1, submitted: 0, withdrawn: 0, conflict: 0, stale: 0, total_row_count: 5, draft_row_count: 5, submitted_row_count: 0, withdrawn_row_count: 0, total_amount: "5000.00" },
+      { code: "internal_transfer", label: "内部往来款", primary_label: "往来", sub_label: "内部往来款", total: 1, draft: 1, submitted: 0, withdrawn: 0, conflict: 0, stale: 0, total_row_count: 2, draft_row_count: 2, submitted_row_count: 0, withdrawn_row_count: 0, total_amount: "1000.00" },
     ],
   },
   batches: [
@@ -374,9 +378,13 @@ function largeListPayload(total = 205) {
       withdrawn_count: 0,
       conflict_count: 0,
       stale_count: 0,
+      total_row_count: total,
+      draft_row_count: total,
+      submitted_row_count: 0,
+      withdrawn_row_count: 0,
       total_amount: total.toFixed(2),
       categories: [
-        { code: "fee", label: "手续费", primary_label: "费用", sub_label: "手续费", total, draft: total, submitted: 0, withdrawn: 0, conflict: 0, stale: 0, total_amount: total.toFixed(2) },
+        { code: "fee", label: "手续费", primary_label: "费用", sub_label: "手续费", total, draft: total, submitted: 0, withdrawn: 0, conflict: 0, stale: 0, total_row_count: total, draft_row_count: total, submitted_row_count: 0, withdrawn_row_count: 0, total_amount: total.toFixed(2) },
       ],
     },
     batches: Array.from({ length: total }, (_, index) => ({
@@ -663,6 +671,8 @@ describe("BankFlowRuleBatchPage", () => {
     });
     expect(screen.getByRole("group", { name: "流水规则批次分页" })).toHaveTextContent("1-3 / 3");
     expect(within(primaryRegion).getByRole("button", { name: "福利 1批 · 5条" })).toBeInTheDocument();
+    expect(within(primaryRegion).queryByRole("button", { name: /外部往来款付款/ })).not.toBeInTheDocument();
+    expect(within(primaryRegion).queryByRole("button", { name: /其他免OA/ })).not.toBeInTheDocument();
 
     const subRegion = screen.getByRole("region", { name: "子标签" });
     await waitFor(() => {
@@ -776,8 +786,8 @@ describe("BankFlowRuleBatchPage", () => {
 
     await waitFor(() => {
       expect(within(screen.getByRole("group", { name: "流水规则批次分页" })).getByText("1-50 / 205")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "费用 50批 · 50条" })).toHaveAttribute("aria-pressed", "true");
-      expect(screen.getByRole("button", { name: "手续费 50批 · 50条" })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("button", { name: "费用 205批 · 205条" })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("button", { name: "手续费 205批 · 205条" })).toHaveAttribute("aria-pressed", "true");
     });
     expect(screen.getByText("建设银行0000")).toBeInTheDocument();
     expect(screen.queryByText("建设银行0204")).not.toBeInTheDocument();
@@ -786,8 +796,8 @@ describe("BankFlowRuleBatchPage", () => {
 
     await waitFor(() => {
       expect(within(screen.getByRole("group", { name: "流水规则批次分页" })).getByText("51-100 / 205")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "费用 50批 · 50条" })).toHaveAttribute("aria-pressed", "true");
-      expect(screen.getByRole("button", { name: "手续费 50批 · 50条" })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("button", { name: "费用 205批 · 205条" })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("button", { name: "手续费 205批 · 205条" })).toHaveAttribute("aria-pressed", "true");
     });
     expect(screen.getAllByText("建设银行0050").length).toBeGreaterThan(0);
     expect(screen.queryByText("建设银行0000")).not.toBeInTheDocument();
@@ -893,11 +903,7 @@ describe("BankFlowRuleBatchPage", () => {
         }),
       );
     });
-    expect(operationBarrierRequests(fetchMock).at(-1)).toMatchObject({
-      targets: [
-        { read_model_key: "bank_flow_rule_batch", scope_key: "all" },
-      ],
-    });
+    expect(operationBarrierRequests(fetchMock)).toHaveLength(0);
     expect(await screen.findByText("流水规则已保存")).toBeInTheDocument();
   });
 
@@ -1065,7 +1071,7 @@ describe("BankFlowRuleBatchPage", () => {
         draft_count: 4,
         categories: listPayload.summary.categories.map((category) => (
           category.code === "fee"
-            ? { ...category, total: 3, draft: 2, total_amount: "150.00" }
+            ? { ...category, total: 3, draft: 2, total_row_count: 5, draft_row_count: 4, total_amount: "150.00" }
             : category
         )),
       },
@@ -1195,6 +1201,11 @@ describe("BankFlowRuleBatchPage", () => {
         ...listPayload.summary,
         draft_count: 1,
         stale_count: 1,
+        categories: listPayload.summary.categories.map((category) => (
+          category.code === "fee"
+            ? { ...category, total: 1, draft: 0, total_row_count: 1, draft_row_count: 0 }
+            : category
+        )),
       },
       batches: [staleUnsubmittedBatch, ...listPayload.batches.slice(1)],
     });
@@ -1408,7 +1419,7 @@ describe("BankFlowRuleBatchPage", () => {
         draft_count: 4,
         categories: listPayload.summary.categories.map((category) => (
           category.code === "internal_transfer"
-            ? { ...category, total: 2, draft: 2, total_amount: "3000.00" }
+            ? { ...category, total: 2, draft: 2, total_row_count: 4, draft_row_count: 4, total_amount: "3000.00" }
             : category
         )),
       },
