@@ -759,12 +759,14 @@ class CapturePendingInvoiceReadRepository:
         scope_key: str,
         rows: list[dict[str, object]],
         source_versions: dict[str, object] | None = None,
+        statistics_metadata: dict[str, object] | None = None,
     ) -> None:
         self.saved.append(
             {
                 "scope_key": scope_key,
                 "rows": list(rows),
                 "source_versions": dict(source_versions or {}),
+                "statistics_metadata": dict(statistics_metadata or {}),
             }
         )
 
@@ -3332,6 +3334,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                     {"id": "txn-group-1", "amount": "120.00", "trade_time": "2026-05-20 10:01:00", "counterparty_name": "云南供应商", "relation_case_id": "case-sql-multi"},
                     {"id": "txn-group-2", "amount": "80.00", "trade_time": "2026-05-20 10:02:00", "counterparty_name": "云南供应商", "relation_case_id": "case-sql-multi"},
                     {"id": "txn-group-3", "amount": "50.00", "trade_time": "2026-05-20 10:03:00", "counterparty_name": "云南供应商", "relation_case_id": "case-sql-multi"},
+                    {"id": "txn-other-direction", "amount": "25.00", "trade_time": "2026-05-20 10:04:00", "counterparty_name": "云南供应商", "relation_case_id": "case-sql-multi"},
                 ],
                 "linked_input_invoices": [
                     {"id": "inv-sql-1", "invoice_no": "IN-SQL-001", "seller_name": "云南供应商", "total_with_tax": "100.00", "relation_case_id": "case-sql-multi"},
@@ -3350,27 +3353,47 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                 "read_model_scope_keys": ["2026-05"],
             }
         )
+        read_repository = CapturePendingInvoiceReadRepository()
         builder = SearchPendingSqlProjectionBuilder(
             connection=MultiBankConnection(),
+            pending_invoice_read_model_repository=read_repository,
             workbench_relation_read_facade=relation_facade,
         )
 
-        rows = builder._pending_invoice_rows(direction="expense", filter_name="all", month="2026-05")
+        builder.rebuild_pending_invoice_read_model_scope("expense:all:2026-05")
 
+        rows = read_repository.saved[0]["rows"]
         self.assertEqual(len(rows), 1)
         payload = rows[0]["payload"]
         self.assertEqual(payload["id"], "txn-group-1")
         self.assertEqual(payload["relation_case_ids"], ["case-sql-multi"])
-        self.assertEqual(payload["bank_transactions"]["relation_count"], 3)
-        self.assertEqual(payload["bank_transactions"]["linked_relation_count"], 3)
+        self.assertEqual(payload["bank_transactions"]["relation_count"], 4)
+        self.assertEqual(payload["bank_transactions"]["linked_relation_count"], 4)
         self.assertEqual(
             [transaction["id"] for transaction in payload["bank_transactions"]["summaries"]],
-            ["txn-group-1", "txn-group-2", "txn-group-3"],
+            ["txn-group-1", "txn-group-2", "txn-group-3", "txn-other-direction"],
         )
-        self.assertEqual(payload["bank_transactions"]["payment_summary"]["paid_total"], "250.00")
+        self.assertEqual(payload["bank_transactions"]["payment_summary"]["paid_total"], "275.00")
         self.assertEqual(payload["input_invoices"]["relation_count"], 2)
         self.assertEqual(payload["oa"]["relation_count"], 2)
         self.assertEqual(payload["invoice_acquisition_status"]["code"], "paid_invoiced")
+        self.assertEqual(
+            read_repository.saved[0]["statistics_metadata"],
+            {
+                "statistics": {
+                    "bank_transaction_count": 3,
+                    "expense_transaction_count": 3,
+                    "income_transaction_count": 0,
+                    "found_invoice_transaction_count": 3,
+                    "pending_invoice_transaction_count": 0,
+                    "no_invoice_required_transaction_count": 0,
+                    "cash_income_transaction_count": 0,
+                    "linked_oa_transaction_count": 3,
+                    "linked_input_invoice_transaction_count": 3,
+                    "linked_output_invoice_transaction_count": 0,
+                }
+            },
+        )
 
     def test_pending_invoice_sql_projection_preserves_candidate_without_closing_status(self) -> None:
         relation_facade = FakeWorkbenchRelationReadFacade(

@@ -127,22 +127,26 @@ class SearchPendingSqlProjectionBuilder:
             raise ValueError("pending invoice filter must be all or a supported filter group.")
         if month is None:
             raise ValueError("pending invoice SQL projection scope_key must include a month shard YYYY-MM.")
-        rows = self._pending_invoice_rows(direction=normalized_direction, filter_name=normalized_filter, month=month)
+        statistics_members: dict[str, dict[str, object]] = {}
+        rows = self._pending_invoice_rows(
+            direction=normalized_direction,
+            filter_name=normalized_filter,
+            month=month,
+            statistics_members=statistics_members,
+        )
         source_versions = self._pending_invoice_source_versions()
         self._pending_invoice_read_model_repository.save_pending_invoice_rows(
             scope_key=f"{normalized_direction}:{normalized_filter}:{month}",
             rows=rows,
             source_versions=source_versions,
-            statistics_metadata=_pending_invoice_statistics_metadata(
-                rows,
-                direction=normalized_direction,
-                scope_month=month,
-            ),
+            statistics_metadata={
+                "statistics": _pending_invoice_statistics_from_members(statistics_members),
+            },
         )
         return {"scope_key": f"{normalized_direction}:{normalized_filter}:{month}", "row_count": len(rows), "source_versions": source_versions}
 
     def mark_pending_invoice_scope_empty(self, scope_key: str) -> dict[str, object]:
-        normalized_direction, normalized_filter, month = _parse_pending_invoice_scope_key(scope_key)
+        normalized_direction, normalized_filter, _month = _parse_pending_invoice_scope_key(scope_key)
         if normalized_direction not in {"expense", "income"}:
             raise ValueError("pending invoice direction must be expense or income.")
         if normalized_filter not in _pending_invoice_filters_for_direction(normalized_direction):
@@ -155,11 +159,7 @@ class SearchPendingSqlProjectionBuilder:
             scope_key=normalized_scope_key,
             row_count=0,
             source_versions=self._pending_invoice_source_versions(),
-            statistics_metadata=_pending_invoice_statistics_metadata(
-                [],
-                direction=normalized_direction,
-                scope_month=month,
-            ),
+            statistics_metadata={"statistics": _pending_invoice_statistics_from_members({})},
         )
         return {"scope_key": normalized_scope_key, "row_count": 0}
 
@@ -303,7 +303,14 @@ class SearchPendingSqlProjectionBuilder:
             )
         return result
 
-    def _pending_invoice_rows(self, *, direction: str, filter_name: str, month: str) -> list[dict[str, object]]:
+    def _pending_invoice_rows(
+        self,
+        *,
+        direction: str,
+        filter_name: str,
+        month: str,
+        statistics_members: dict[str, dict[str, object]] | None = None,
+    ) -> list[dict[str, object]]:
         txn_direction = "outflow" if direction == "expense" else "inflow"
         target_invoice_type = "input" if direction == "expense" else "output"
         tag_groups = self._pending_invoice_tag_groups(direction=direction)
@@ -455,6 +462,23 @@ class SearchPendingSqlProjectionBuilder:
                 ),
                 status_override=row.get("income_status_override") if isinstance(row.get("income_status_override"), dict) else None,
             )
+            if statistics_members is not None:
+                status_code = str(status_payload.get("code") or "")
+                statistics_members[transaction_id] = {
+                    "transaction_id": transaction_id,
+                    "direction": direction,
+                    "linked_oa": any(
+                        bool(text(summary.get("id"))) and _distribution_item_is_linked(summary)
+                        for summary in oa_summaries
+                        if isinstance(summary, dict)
+                    ),
+                    "linked_invoice": bool(linked_invoices),
+                    "pending_invoice": status_code
+                    in {"paid_pending_invoice", "paid_pending_future_invoice", "income_pending_invoice"},
+                    "no_invoice_required": status_code
+                    in {"no_invoice_required", "income_no_invoice_required"},
+                    "cash_income": status_code == "cash_income",
+                }
             if filter_name != "all" and not pending_invoice_status_matches_filter(
                 direction=direction,
                 filter_name=filter_name,
@@ -1040,82 +1064,6 @@ def _dedupe_preserve_order(values: object) -> list[str]:
         seen.add(normalized)
         result.append(normalized)
     return result
-
-
-def _pending_invoice_statistics_metadata(
-    rows: list[dict[str, object]],
-    *,
-    direction: str,
-    scope_month: str | None,
-) -> dict[str, object]:
-    members: dict[str, dict[str, object]] = {}
-    for index, raw_row in enumerate(rows):
-        payload = raw_row.get("payload") if isinstance(raw_row.get("payload"), dict) else raw_row
-        if not isinstance(payload, dict):
-            continue
-        bank = payload.get("bank_transaction") if isinstance(payload.get("bank_transaction"), dict) else {}
-        banks = payload.get("bank_transactions") if isinstance(payload.get("bank_transactions"), dict) else {}
-        summaries = banks.get("summaries") if isinstance(banks.get("summaries"), list) else []
-        if not summaries:
-            summaries = [bank]
-        oa = payload.get("oa") if isinstance(payload.get("oa"), dict) else {}
-        invoices = payload.get("input_invoices") if isinstance(payload.get("input_invoices"), dict) else {}
-        status = (
-            payload.get("invoice_acquisition_status")
-            if isinstance(payload.get("invoice_acquisition_status"), dict)
-            else {}
-        )
-        linked_oa = bool(oa.get("primary")) or bool(oa.get("summaries"))
-        linked_invoice = bool(invoices.get("primary")) or bool(invoices.get("summaries"))
-        status_code = str(status.get("code") or "")
-        row_direction = str(payload.get("direction") or raw_row.get("direction") or direction)
-        for summary in summaries:
-            item = summary if isinstance(summary, dict) else {}
-            transaction_id = str(
-                item.get("id")
-                or item.get("transaction_id")
-                or bank.get("id")
-                or payload.get("id")
-                or raw_row.get("row_id")
-                or f"row:{index}"
-            ).strip()
-            if not transaction_id:
-                continue
-            transaction_month = str(
-                item.get("trade_time")
-                or item.get("booked_date")
-                or bank.get("trade_time")
-                or bank.get("booked_date")
-                or ""
-            )[:7]
-            if scope_month and transaction_month and transaction_month != scope_month:
-                continue
-            flags = members.setdefault(
-                transaction_id,
-                {
-                    "transaction_id": transaction_id,
-                    "direction": row_direction,
-                    "linked_oa": False,
-                    "linked_invoice": False,
-                    "pending_invoice": False,
-                    "no_invoice_required": False,
-                    "cash_income": False,
-                },
-            )
-            flags["direction"] = str(flags.get("direction") or row_direction)
-            flags["linked_oa"] = bool(flags["linked_oa"] or linked_oa)
-            flags["linked_invoice"] = bool(flags["linked_invoice"] or linked_invoice)
-            flags["pending_invoice"] = bool(
-                flags["pending_invoice"]
-                or status_code in {"paid_pending_invoice", "paid_pending_future_invoice", "income_pending_invoice"}
-            )
-            flags["no_invoice_required"] = bool(
-                flags["no_invoice_required"]
-                or status_code in {"no_invoice_required", "income_no_invoice_required"}
-            )
-            flags["cash_income"] = bool(flags["cash_income"] or status_code == "cash_income")
-    statistics = _pending_invoice_statistics_from_members(members)
-    return {"statistics": statistics}
 
 
 def _pending_invoice_statistics_from_members(
