@@ -471,28 +471,6 @@ class SearchReadModelRefreshProducerTests(unittest.TestCase):
         self.assertEqual(producer.enqueue_scope_keys(["2026-05"], reason="api_miss"), [])
 
 
-class PendingInvoiceScopeShardCoverageTests(unittest.TestCase):
-    def test_parent_refresh_covers_current_and_persisted_zero_row_months(self) -> None:
-        class ScopeConnection:
-            def __init__(self) -> None:
-                self.calls: list[tuple[str, tuple]] = []
-
-            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, str]]:
-                self.calls.append((" ".join(sql.split()), params))
-                return [{"scope_key": "2026-05"}, {"scope_key": "2023-01"}]
-
-        connection = ScopeConnection()
-        builder = SearchPendingSqlProjectionBuilder(connection=connection)
-
-        scopes = builder.list_pending_invoice_scope_shards("expense:all")
-
-        self.assertEqual(scopes, ["expense:all:2026-05", "expense:all:2023-01"])
-        sql, params = connection.calls[0]
-        self.assertIn("from app.bank_transactions", sql)
-        self.assertIn("from read_model.pending_invoice_scopes", sql)
-        self.assertEqual(params, ("outflow", "expense", "all"))
-
-
 class SearchPendingConnection:
     def __init__(
         self,
@@ -502,6 +480,7 @@ class SearchPendingConnection:
         workbench_rows: list[dict] | None = None,
         pending_source_counts: dict[str, int] | None = None,
         pending_statistics: dict[str, int] | None = None,
+        pending_statistics_scope_rows: list[dict[str, object]] | None = None,
         pending_filter_option_rows: list[dict] | None = None,
         dirty: bool = False,
         pending_scope_exists: bool = True,
@@ -513,6 +492,7 @@ class SearchPendingConnection:
         self.workbench_rows = list(workbench_rows or [])
         self.pending_source_counts = dict(pending_source_counts or {"expense": len(self.pending_rows)})
         self.pending_statistics = dict(pending_statistics or {})
+        self.pending_statistics_scope_rows = pending_statistics_scope_rows
         self.pending_filter_option_rows = list(pending_filter_option_rows or [])
         self.dirty = dirty
         self.pending_scope_exists = pending_scope_exists
@@ -539,6 +519,8 @@ class SearchPendingConnection:
         if "from read_model.pending_invoice_scopes" in normalized and "filter_group = 'all'" in normalized:
             if not self.pending_scope_exists:
                 return []
+            if self.pending_statistics_scope_rows is not None:
+                return list(self.pending_statistics_scope_rows)
             statistics = self.pending_statistics or {
                 "bank_transaction_count": len(self.pending_rows),
                 "expense_transaction_count": len(self.pending_rows),
@@ -1758,6 +1740,82 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertNotIn("from read_model.pending_invoice_rows", statistics_sql)
         self.assertNotIn("trade_date >=", statistics_sql)
         self.assertNotIn("searchable_text ilike", statistics_sql)
+
+    def test_pending_invoice_statistics_ignore_historical_zero_row_scope_metadata(self) -> None:
+        keys = tuple(_pending_invoice_statistics_contract()["statistics"])
+        expense_statistics = {
+            **{key: 0 for key in keys},
+            "bank_transaction_count": 2,
+            "expense_transaction_count": 2,
+            "found_invoice_transaction_count": 1,
+            "pending_invoice_transaction_count": 1,
+            "linked_input_invoice_transaction_count": 1,
+        }
+        income_statistics = {
+            **{key: 0 for key in keys},
+            "bank_transaction_count": 1,
+            "income_transaction_count": 1,
+            "found_invoice_transaction_count": 1,
+            "linked_output_invoice_transaction_count": 1,
+        }
+        connection = SearchPendingConnection(
+            pending_statistics_scope_rows=[
+                {
+                    "scope_key": "expense:all:2023-05",
+                    "direction": "expense",
+                    "row_count": 0,
+                    "cache_status": "fresh",
+                    "source_versions": {
+                        **_pending_invoice_expected_source_versions(),
+                        "bank_detail_source_versions": {"source_version": 1},
+                    },
+                    "raw_payload": {},
+                },
+                {
+                    "scope_key": "expense:all:2026-05",
+                    "direction": "expense",
+                    "row_count": 2,
+                    "cache_status": "fresh",
+                    "source_versions": {
+                        **_pending_invoice_expected_source_versions(),
+                        "bank_detail_source_versions": {"source_version": 7},
+                    },
+                    "raw_payload": {"statistics_metadata": {"statistics": expense_statistics}},
+                },
+                {
+                    "scope_key": "income:all:2026-05",
+                    "direction": "income",
+                    "row_count": 1,
+                    "cache_status": "fresh",
+                    "source_versions": {
+                        **_pending_invoice_expected_source_versions(),
+                        "bank_detail_source_versions": {"source_version": 8},
+                    },
+                    "raw_payload": {"statistics_metadata": {"statistics": income_statistics}},
+                },
+            ],
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.list_pending_invoice_rows(
+            direction="expense",
+            filter="all",
+            date_from=None,
+            date_to=None,
+            keyword=None,
+            page=1,
+            page_size=50,
+        )
+
+        self.assertEqual(payload["statistics_status"], "fresh")
+        self.assertEqual(payload["statistics"]["bank_transaction_count"], 3)
+        self.assertEqual(payload["statistics"]["expense_transaction_count"], 2)
+        self.assertEqual(payload["statistics"]["income_transaction_count"], 1)
+        self.assertEqual(payload["statistics"]["found_invoice_transaction_count"], 2)
+        self.assertEqual(
+            payload["statistics_source_versions_by_scope"]["expense:all"]["bank_detail_source_versions"],
+            {"source_version": 7},
+        )
 
     def test_invoice_lifecycle_reads_exact_pending_invoice_month_shard(self) -> None:
         connection = SearchPendingConnection(

@@ -4481,14 +4481,15 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
                 row for row in rows if isinstance(row, dict) and text(row.get("direction")) == direction
             ]
             child_rows = [row for row in direction_rows if text(row.get("scope_key") or "").count(":") >= 2]
-            effective_rows = child_rows or direction_rows
+            nonempty_child_rows = [row for row in child_rows if int_value(row.get("row_count"), 0) > 0]
+            parent_rows = [row for row in direction_rows if text(row.get("scope_key") or "").count(":") < 2]
+            effective_rows = nonempty_child_rows or parent_rows[-1:] or child_rows[-1:]
             if not effective_rows or any(text(row.get("cache_status")) not in {"", "fresh"} for row in effective_rows):
                 return {"status": "stale"}
             by_direction[direction] = effective_rows
             source_row = _pending_invoice_scope_source_versions_row(
                 f"{direction}:all",
                 effective_rows,
-                include_empty=True,
             )
             source_versions_by_scope[f"{direction}:all"] = (
                 source_row.get("source_versions")
