@@ -533,3 +533,11 @@
 - projection schema version 升级为 `2026-07-bank-flow-rule-batch-v2`，确保旧 v1 页面投影无法冒充 fresh。列表响应增加稳定 `read_model_version`；前端在版本、status 或手工刷新 token 变化时取消在途 Audit 并清除旧结果，写后本地状态立即标记 refreshing。
 - Audit contract 升级到 v26，并在既有 batch/relation proof 内补充 draft member 与其它 active relation 的跨 case overlap；旧 Audit 之所以通过，是因为只校验同 case relation 的状态/成员 equality，没有证明未提交成员未被其它 case 占用。
 - `bank_flow_rule_batch_selection_occupied` 明确映射 HTTP 409；页面 linked 行只展示“已有未撤回关联”及 OA/发票计数，内部 relation case id 保留为机器冲突证据但不渲染。
+
+生产闭环：
+
+- SHA `fc5babd5b16c427ca7bf027e2af81f9b980188e1` 已部署为 release `main-fc5babd5b-bank-flow-audit-202607211740`；`/health/ready` 证明 runtime commit、source root 和 release metadata 一致，schema version 为 118，API、dispatcher 与 22 个登记 worker 全部 active。
+- 通过正式 durable gateway 对 `bank_flow_rule_batch=2026-07` 执行 `force_refresh`，事件 `3b5bc119-ba56-436b-984e-9efbba2cbcbd` 完成后页面为 fresh。未提交由 4 批降为 3 批；手续费未提交由 1 批/13 条降为 0，手续费 5 个已提交批次/28 条历史仍保留；全部已提交历史为 10 批/38 条。
+- 该页 Page Audit v26 返回 `pass / fresh / drained / ready`，0 blocking issue、0 backlog；单次列表 204.8ms、Audit 539.5ms。正式 20 次只读采样中列表 p50/p95/p99 为 `129.510/199.007/219.358ms`，Audit 为 `248.811/418.376/584.328ms`，40/40 成功，列表 20/20 fresh、零 enqueue。
+- 生产 Chromium DOM 验证未提交 3、已提交 10；两区均不含 `bank_flow_rule_batch_*`，已提交详情显示“已有未撤回关联”，无操作失败、console error 或 page error，完整交互 1.45s。
+- 17 页 System Audit 的 freshness/queue 为 `fresh / drained`，但仍有 5 个本模块范围外的既有 integrity 阻断：tax-offset source version、pending-invoices row count、input-invoice-usage relation version、invoice import 历史孤儿/证据、ETC import 历史状态。本次未修改这些模块的 service/repository/worker I/O，未越权修复，也不把系统级结果声明为全绿。

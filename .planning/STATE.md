@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: milestone
 status: verifying
 stopped_at: v3 full local gate passed after the safe v2 rollback; branch/main exact-SHA CI and recutover remain gated.
-last_updated: "2026-07-15T07:54:07+08:00"
-last_activity: 2026-07-15 - v3 full gate passed with 4192 backend, 835 frontend, production build and 177 Chromium tests
+last_updated: "2026-07-21T17:48:06+08:00"
+last_activity: 2026-07-21 - bank-flow canonical relation/Audit fresh fix deployed and production verified
 progress:
   total_phases: 21
   completed_phases: 2
@@ -136,6 +136,7 @@ None yet.
 | 260630-qkx | 待找发票选中工具栏与表格列对齐修复 | 2026-06-30 | — | [260630-qkx-checkbox](./quick/260630-qkx-checkbox/) |
 | 260630-r4a | 重新设计销项发票收款情况右侧详情抽屉排版 | 2026-06-30 | — | [260630-r4a-output-invoice-detail-drawer](./quick/260630-r4a-output-invoice-detail-drawer/) |
 | 260630-tyy | 生产级修复 bank_flow_rule_batch App Status storage contract | 2026-06-30 | — | [260630-tyy-bank-flow-rule-batch-app-status-registry](./quick/260630-tyy-bank-flow-rule-batch-app-status-registry/) |
+| 260721-nrf | 流水规则批量处理 canonical relation、Audit fresh 与内部 ID 隐藏生产闭环 | 2026-07-21 | fc5babd5b | [260721-nrf-audit-fresh](./quick/260721-nrf-audit-fresh/) |
 
 ## Deferred Items
 
@@ -145,6 +146,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-06-21
-Stopped at: Completed quick task 260621-n7i and verified bank details date picker simplification.
-Resume file: .planning/quick/260621-n7i-bank-details-date-picker/260621-n7i-SUMMARY.md
+Last session: 2026-07-21
+Stopped at: Completed quick task 260721-nrf and production-verified the bank-flow canonical relation/Audit/UI closure.
+Resume file: .planning/quick/260721-nrf-audit-fresh/260721-nrf-SUMMARY.md
