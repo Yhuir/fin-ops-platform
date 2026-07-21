@@ -8796,12 +8796,18 @@ class PostgresReadModelRepository:
                     join target_generations
                       on target_generations.generation_id = gr.generation_id
                      and target_generations.scope_key = gr.scope_key
+                    join read_model.workbench_groups grp
+                      on grp.generation_id = gr.generation_id
+                     and grp.scope_key = gr.scope_key
+                     and grp.zone = gr.zone
+                     and grp.group_id = gr.group_id
                     join app.workbench_pair_relations rel
                       on rel.status = 'active'
                      and gr.row_id = any(rel.row_ids)
                     where coalesce(gr.row_role, '') <> 'summary'
                       and gr.zone = 'unpaired'
                       and gr.row_id is not null
+                      and coalesce(grp.payload #>> '{{completion,is_complete}}', 'true') <> 'false'
                 ) active_rows
                 group by active_rows.generation_id, active_rows.scope_key
             )

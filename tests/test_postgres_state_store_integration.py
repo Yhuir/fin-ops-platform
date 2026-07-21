@@ -176,6 +176,80 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
             )
         )
 
+    def test_workbench_generation_accepts_explicitly_incomplete_active_relation_only(self) -> None:
+        self.store.save_workbench_pair_relations(
+            {
+                "pair_relations": {
+                    "case-incomplete": {
+                        "case_id": "case-incomplete",
+                        "relation_mode": "manual_confirmed",
+                        "status": "active",
+                        "month_scope": "2026-06",
+                        "row_ids": ["oa-incomplete", "bank-incomplete"],
+                        "row_types": ["oa", "bank"],
+                        "special_metadata": {
+                            "requires_oa": True,
+                            "requires_invoice": True,
+                        },
+                    }
+                },
+                "pair_relation_history": [],
+            },
+            changed_case_ids={"case-incomplete"},
+        )
+
+        def projection(*, is_complete: bool, source_version: int) -> dict[str, object]:
+            return {
+                "read_models": {
+                    "2026-06": {
+                        "scope_key": "2026-06",
+                        "source_versions": {"source_version": source_version},
+                        "payload": {
+                            "month": "2026-06",
+                            "paired": {"groups": []},
+                            "unpaired": {
+                                "groups": [
+                                    {
+                                        "group_id": "relation:case-incomplete",
+                                        "zone": "unpaired",
+                                        "status": "unpaired",
+                                        "completion": {
+                                            "is_complete": is_complete,
+                                            "missing_row_types": [] if is_complete else ["invoice"],
+                                        },
+                                        "oa_rows": [{"id": "oa-incomplete", "type": "oa"}],
+                                        "bank_rows": [{"id": "bank-incomplete", "type": "bank"}],
+                                        "invoice_rows": [],
+                                    }
+                                ]
+                            },
+                        },
+                    }
+                }
+            }
+
+        self.store.save_workbench_read_models(
+            projection(is_complete=False, source_version=1),
+            changed_scope_keys={"2026-06"},
+        )
+
+        with self.connection.transaction() as transaction:
+            transaction.execute(
+                """
+                update read_model.workbench_groups
+                set payload = jsonb_set(payload, '{completion,is_complete}', 'true'::jsonb)
+                where scope_key = %s
+                  and zone = 'unpaired'
+                """,
+                ("2026-06",),
+            )
+        failures = PostgresReadModelRepository._workbench_generation_consistency_failures(
+            self.connection,
+            scope_key="2026-06",
+        )
+        self.assertEqual(len(failures), 1)
+        self.assertIn("active_relation_unpaired_membership count=2", failures[0]["reasons"])
+
     def test_bank_flow_rule_batch_page_uses_sql_pagination_and_aggregate_summary(self) -> None:
         source_versions = {"schema_version": "bank-flow-test-v1", "bank_rows": "3"}
         self.store.save_bank_flow_rule_batches(

@@ -113,5 +113,5 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.audit_w
 - migration 前后 canonical OA/银行流水/发票 counts 与金额 checksum 不得减少。
 - migration 不修改 `app.workbench_pair_relations` 或 history。
 - rehydrate 只发布新 generation，不原地改旧 generation。
-- Audit 必须证明 active relation typed members 与 paired display 双向相等、其余 canonical facts 全部 singleton unpaired。
+- Audit 必须证明满足冻结 requirement 的 active relation typed members 与 paired display 双向相等；未满足 requirement 的 active relation 必须保持同 case、显式 incomplete 并进入 unpaired；无 active owner 的其余 canonical facts 全部 singleton unpaired。
 - 520 case、发票号和 OA row id 必须在 fresh generation 中同组；13 张样例必须完整可见。

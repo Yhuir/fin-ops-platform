@@ -2846,6 +2846,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         sql = connection.fetch_all_calls[0][0]
         self.assertIn("active_relation_unpaired_membership_counts as", sql)
         self.assertIn("join app.workbench_pair_relations rel", sql)
+        self.assertIn("join read_model.workbench_groups grp", sql)
+        self.assertIn("grp.payload #>> '{completion,is_complete}'", sql)
 
 
     def test_workbench_refresh_status_api_maps_statement_timeout_to_retryable_unavailable(self) -> None:

@@ -13,6 +13,10 @@
   source fingerprint，再在 fingerprint 未变化时逐 case 更新 tool runtime，并通过既有
   `persist_workbench_pair_relations` port 一次持久化正式 metadata/history 与 durable refresh；不允许直接
   SQL，也不恢复规则保存后的持续回扫旧链。
+- 生产 rehydrate 补充门禁：旧 generation consistency 曾把任何 active relation 出现在 unpaired 都判为
+  损坏，和“active relation 缺冻结要求时保留同一 case 并进入 unpaired”的新合同冲突。validator 现只在
+  group 没有显式 `completion.is_complete=false` 证据时阻断；它复用 projection 已发布的 completion
+  结果，不在 repository SQL 复制 OA/发票业务规则。缺 completion 仍 fail closed，避免放宽旧坏数据。
 
 
 ## 2026-07-20 - 折叠流水详情按需加载合同闭环
