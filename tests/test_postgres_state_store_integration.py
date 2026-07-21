@@ -473,6 +473,57 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
             },
         )
 
+    def test_workbench_relation_reloaded_multi_case_history_is_persisted_once_per_case(self) -> None:
+        shared_history = {
+            "operation_id": "shared-operation",
+            "operation_type": "replace_link",
+            "before_relations": [{"case_id": "case-before"}],
+            "after_relations": [{"case_id": "case-after"}],
+            "created_by": "integration-test",
+            "created_at": "2026-07-21T00:00:00+00:00",
+        }
+
+        self.store.save_workbench_pair_relations(
+            {
+                "pair_relations": {
+                    "case-before": {
+                        "case_id": "case-before",
+                        "relation_mode": "manual_confirmed",
+                        "status": "cancelled",
+                        "month_scope": "2026-07",
+                        "row_ids": ["bank-shared"],
+                        "row_types": ["bank"],
+                    },
+                    "case-after": {
+                        "case_id": "case-after",
+                        "relation_mode": "manual_confirmed",
+                        "status": "active",
+                        "month_scope": "2026-07",
+                        "row_ids": ["bank-shared", "oa-shared"],
+                        "row_types": ["bank", "oa"],
+                    },
+                },
+                "pair_relation_history": [dict(shared_history), dict(shared_history)],
+            },
+            changed_case_ids={"case-before", "case-after"},
+        )
+
+        persisted = self.connection.fetch_one(
+            """
+            select
+                count(*)::integer as count,
+                count(distinct case_id)::integer as case_count,
+                count(distinct id)::integer as event_id_count
+            from app.workbench_pair_relation_history
+            where case_id = any(%s::text[])
+            """,
+            (["case-before", "case-after"],),
+        )
+        self.assertEqual(
+            persisted,
+            {"count": 2, "case_count": 2, "event_id_count": 2},
+        )
+
     def test_import_file_metadata_writes_file_object_and_import_file(self) -> None:
         stored_path = self.store.store_import_file(
             session_id="session-1",

@@ -486,7 +486,7 @@ class PostgresWorkbenchRelationRepository:
                 "delete from app.workbench_pair_relation_history where case_id = any(%s::text[])",
                 (sorted(case_ids),),
             )
-        rows: list[tuple[Any, ...]] = []
+        rows_by_id: dict[str, tuple[Any, ...]] = {}
         for item in history:
             if not isinstance(item, dict):
                 continue
@@ -494,18 +494,18 @@ class PostgresWorkbenchRelationRepository:
             if changed_case_ids is not None and not (set(item_case_ids) & changed_case_ids):
                 continue
             for case_id in item_case_ids:
-                rows.append(
-                    (
-                        event_uuid("workbench_pair_relation_history", case_id, item),
-                        case_id,
-                        text(item.get("operation_type") or item.get("event_type") or "unknown"),
-                        text(item.get("created_by") or item.get("actor_id")),
-                        text(item.get("created_at") or item.get("occurred_at")),
-                        jsonb(item.get("before_relations") if isinstance(item.get("before_relations"), list) else item.get("before_payload") or {}),
-                        jsonb(item.get("after_relations") if isinstance(item.get("after_relations"), list) else item.get("after_payload") or {}),
-                        jsonb({"normalized_payload": item}),
-                    )
+                row_id = event_uuid("workbench_pair_relation_history", case_id, item)
+                rows_by_id[row_id] = (
+                    row_id,
+                    case_id,
+                    text(item.get("operation_type") or item.get("event_type") or "unknown"),
+                    text(item.get("created_by") or item.get("actor_id")),
+                    text(item.get("created_at") or item.get("occurred_at")),
+                    jsonb(item.get("before_relations") if isinstance(item.get("before_relations"), list) else item.get("before_payload") or {}),
+                    jsonb(item.get("after_relations") if isinstance(item.get("after_relations"), list) else item.get("after_payload") or {}),
+                    jsonb({"normalized_payload": item}),
                 )
+        rows = list(rows_by_id.values())
         if not rows:
             return
         value_sql = ", ".join(

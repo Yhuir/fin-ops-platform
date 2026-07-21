@@ -4705,6 +4705,18 @@ FIN_OPS_TEST_DATABASE_URL=<disposable-db> PYTHONPATH=backend/src:. python3 -m py
 - 独立 disposable PostgreSQL 17 数据库应用 0001–0114 后，25 条历史全部持久化且 `relation_id` 全部正确绑定。
 - command/UoW/API 回归与 lint 通过；发布后仍必须执行两轮安全可逆 confirm → fresh → withdraw → fresh，并以生产 SLO 和最终数据恢复判定是否闭环。
 
+### 2026-07-21 存量修复批量写入的事件身份去重
+
+- 生产存量 requirement repair 暴露了既有批量 replacement 的边界缺口：跨 case history 在表中按 case
+  各存一行，重新加载完整 history 后，同一 `operation_id` 的 raw payload 会出现多份；批量 VALUES
+  因而可能在一条语句中生成重复 deterministic event UUID，PostgreSQL 会以
+  `ON CONFLICT DO UPDATE command cannot affect row a second time` 拒绝整笔事务。
+- repository 现在在发出单条批量 INSERT 前，按最终 event UUID 折叠重复输入；同一逻辑事件在同一
+  case 仍只保留一条，跨 case 仍各保留一条。该行为等价于旧逐条 UPSERT 的最终状态，不改变表、
+  operation identity、payload、relation UoW、refresh I/O 或任一页面业务语义。
+- 没有恢复逐 event SQL、逐 case fallback 或第二套修复路径；新增 repository 回归覆盖重新加载的
+  跨 case 重复 history，并继续保持固定两条 history SQL。
+
 ## 2026-07-20 - Online relation command history 追加写
 
 目标：删除 confirm/cancel/withdraw 热链中仍然存在的“读取相关 case 全部历史、删除后整段重写”旧合同，使同步命令成本不再随同一 case 的审计历史长度增长。

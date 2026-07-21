@@ -1456,6 +1456,53 @@ def test_workbench_relation_repository_replaces_long_case_history_with_two_state
     assert len(history_statements[1][1]) == len(histories) * 8
 
 
+def test_workbench_relation_repository_deduplicates_reloaded_multi_case_history() -> None:
+    connection = WorkbenchRelationWriteConnection()
+    repository = PostgresWorkbenchRelationRepository(connection)
+    shared_history = {
+        "operation_id": "shared-operation",
+        "operation_type": "replace_link",
+        "before_relations": [{"case_id": "case-1"}],
+        "after_relations": [{"case_id": "case-2"}],
+    }
+
+    repository.save_workbench_pair_relations(
+        {
+            "pair_relations": {
+                "case-1": {
+                    "case_id": "case-1",
+                    "relation_mode": "manual_confirmed",
+                    "status": "cancelled",
+                    "month_scope": "2026-05",
+                    "row_ids": ["bank-1"],
+                    "row_types": ["bank"],
+                },
+                "case-2": {
+                    "case_id": "case-2",
+                    "relation_mode": "manual_confirmed",
+                    "status": "active",
+                    "month_scope": "2026-05",
+                    "row_ids": ["bank-1", "oa-1"],
+                    "row_types": ["bank", "oa"],
+                },
+            },
+            # PostgreSQL stores a cross-case event once per case; loading the
+            # raw payload therefore legitimately reconstructs both copies.
+            "pair_relation_history": [dict(shared_history), dict(shared_history)],
+        },
+        changed_case_ids={"case-1", "case-2"},
+    )
+
+    history_statements = [
+        (sql, params)
+        for sql, params in connection.executed
+        if "app.workbench_pair_relation_history" in sql
+    ]
+    assert len(history_statements) == 2
+    assert "with input(" in history_statements[1][0]
+    assert len(history_statements[1][1]) == 2 * 8
+
+
 def test_workbench_relation_delta_appends_one_history_event_without_delete() -> None:
     connection = WorkbenchRelationWriteConnection()
     repository = PostgresWorkbenchRelationRepository(connection)
