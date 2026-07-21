@@ -18,6 +18,16 @@ class _CommandService:
 
     def update_relation_metadata_for_case_id(self, **kwargs: object) -> dict[str, object]:
         self.updates.append(dict(kwargs))
+        case_id = str(kwargs.get("case_id") or "")
+        metadata = kwargs.get("special_metadata")
+        for relation in self.relations:
+            if relation.get("case_id") != case_id or not isinstance(metadata, dict):
+                continue
+            existing = relation.get("special_metadata")
+            relation["special_metadata"] = {
+                **(existing if isinstance(existing, dict) else {}),
+                **metadata,
+            }
         return {"affected_months": ["2026-06"]}
 
 
@@ -85,11 +95,17 @@ class WorkbenchRelationRequirementRepairOpsTests(unittest.TestCase):
         plan = repair_ops._build_plan(command.relations, tag_facade=tag_facade, rules_payload=_rules())
         fingerprint = repair_ops._fingerprint(plan)
         output = io.StringIO()
+        persisted_case_ids: list[str] = []
         with (
             patch.object(repair_ops, "build_tool_runtime_application", return_value=object()),
             patch.object(repair_ops, "workbench_relation_command_service", return_value=command),
             patch.object(repair_ops, "bank_transaction_tag_read_facade", return_value=tag_facade),
             patch.object(repair_ops, "bank_flow_rule_batch_tag_rules_payload", return_value=_rules()),
+            patch.object(
+                repair_ops,
+                "persist_workbench_pair_relations",
+                side_effect=lambda _app, case_ids: persisted_case_ids.extend(case_ids),
+            ),
         ):
             repair_ops.main(
                 ["--execute", "--expected-fingerprint", fingerprint],
@@ -101,7 +117,18 @@ class WorkbenchRelationRequirementRepairOpsTests(unittest.TestCase):
         self.assertEqual(update["actor_id"], repair_ops.REPAIR_ACTOR_ID)
         self.assertEqual(update["history_operation_type"], repair_ops.REPAIR_OPERATION_TYPE)
         self.assertEqual(update["special_metadata"]["requires_invoice"], True)
+        self.assertEqual(persisted_case_ids, ["case-1"])
         self.assertEqual(json.loads(output.getvalue())["written_relation_count"], 1)
+
+        second_output = io.StringIO()
+        with (
+            patch.object(repair_ops, "build_tool_runtime_application", return_value=object()),
+            patch.object(repair_ops, "workbench_relation_command_service", return_value=command),
+            patch.object(repair_ops, "bank_transaction_tag_read_facade", return_value=tag_facade),
+            patch.object(repair_ops, "bank_flow_rule_batch_tag_rules_payload", return_value=_rules()),
+        ):
+            repair_ops.main(["--dry-run"], stdout=second_output)
+        self.assertEqual(json.loads(second_output.getvalue())["target_relation_count"], 0)
 
     def test_execute_rejects_stale_fingerprint_before_any_relation_write(self) -> None:
         command = _CommandService([_ordinary_relation()])

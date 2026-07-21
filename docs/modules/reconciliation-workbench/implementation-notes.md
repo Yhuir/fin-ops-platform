@@ -10,8 +10,9 @@
 - Audit：Page Audit 独立复算快照完整性与期望 zone；缺快照或错误 paired/unpaired 都 blocking，不能复用生产分组 helper 自证。
 - 生产存量闭环：发布账号不具备任意 root shell 权限；一次性存量修复因此收敛为 root-owned
   `workbench-requirement-repair` 固定命令。它先以 current active relation + 一次 fresh 标签批量读取生成
-  source fingerprint，再在 fingerprint 未变化时逐 case 通过 relation command 写审计 history 和 durable
-  refresh；不允许直接 SQL，也不恢复规则保存后的持续回扫旧链。
+  source fingerprint，再在 fingerprint 未变化时逐 case 更新 tool runtime，并通过既有
+  `persist_workbench_pair_relations` port 一次持久化正式 metadata/history 与 durable refresh；不允许直接
+  SQL，也不恢复规则保存后的持续回扫旧链。
 
 
 ## 2026-07-20 - 折叠流水详情按需加载合同闭环

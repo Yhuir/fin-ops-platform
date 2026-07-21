@@ -15,6 +15,7 @@ from fin_ops_platform.tools.runtime_application import (
     bank_flow_rule_batch_tag_rules_payload,
     bank_transaction_tag_read_facade,
     build_tool_runtime_application,
+    persist_workbench_pair_relations,
     workbench_relation_command_service,
 )
 
@@ -71,6 +72,11 @@ def main(argv: Sequence[str] | None = None, *, stdout: TextIO | None = None) -> 
                 str(value).strip()
                 for value in list(result.get("affected_months") or [])
                 if str(value).strip()
+            )
+        if plan:
+            persist_workbench_pair_relations(
+                app,
+                [item["case_id"] for item in plan],
             )
 
     report = _public_report(
