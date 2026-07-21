@@ -180,6 +180,8 @@ type ApiBankFlowRuleBatchesResponse = {
   pagination?: ApiBankFlowRuleBatchesPageInfo | null;
   read_model_status?: string | null;
   readModelStatus?: string | null;
+  read_model_version?: string | null;
+  readModelVersion?: string | null;
   read_model_stale_reasons?: unknown[] | null;
   readModelStaleReasons?: unknown[] | null;
 };
@@ -622,6 +624,7 @@ export async function fetchBankFlowRuleBatches({
     batches: Array.isArray(payload.batches) ? payload.batches.map(mapBatch).filter(isPublicBatch) : [],
     pagination: mapPagination(payload.pagination),
     readModelStatus: normalizeReadModelStatus(payload.read_model_status ?? payload.readModelStatus),
+    readModelVersion: text(payload.read_model_version ?? payload.readModelVersion),
     readModelStaleReasons: unknownStringList(payload.read_model_stale_reasons ?? payload.readModelStaleReasons),
   };
 }

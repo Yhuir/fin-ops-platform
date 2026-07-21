@@ -88,6 +88,7 @@ const EMPTY_BATCHES: BankFlowRuleBatchesResponse = {
   },
   batches: [],
   readModelStatus: "refreshing",
+  readModelVersion: "",
   readModelStaleReasons: [],
 };
 
@@ -491,6 +492,7 @@ export default function BankFlowRuleBatchPage() {
       const nextBatches = current.batches.filter((item) => item.batchId !== batch.batchId);
       return {
         ...current,
+        readModelStatus: "refreshing",
         summary: {
           ...current.summary,
           draftCount: Math.max(0, current.summary.draftCount - 1),
@@ -561,6 +563,7 @@ export default function BankFlowRuleBatchPage() {
       const nextBatches = current.batches.filter((item) => item.batchId !== batch.batchId);
       return {
         ...current,
+        readModelStatus: "refreshing",
         summary: {
           ...current.summary,
           submittedCount: Math.max(0, current.summary.submittedCount - 1),
@@ -868,6 +871,7 @@ export default function BankFlowRuleBatchPage() {
 
   const titleAccessory = canAdminAccess ? (
     <PageBusinessAuditIcon
+      auditContextKey={`${payload.readModelVersion}:${readModelStatus}:${refreshToken}`}
       ariaLabel="Audit 流水规则批量处理"
       pageKey="bank-flow-rule-batches"
       label="流水规则批量处理"

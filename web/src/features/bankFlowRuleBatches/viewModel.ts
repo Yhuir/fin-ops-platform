@@ -321,8 +321,7 @@ export function relationContextLabels(row: BankFlowRuleBatchDetailRow) {
   if (row.relationStatus !== "linked" && row.relationCaseIds.length === 0) {
     return [];
   }
-  const relationLabel = row.relationCaseIds[0] ? `关联 ${row.relationCaseIds[0]}` : "已有未撤回关联";
-  return [relationLabel, `OA ${row.linkedOaCount}`, `发票 ${row.linkedInvoiceCount}`];
+  return ["已有未撤回关联", `OA ${row.linkedOaCount}`, `发票 ${row.linkedInvoiceCount}`];
 }
 
 export function bankDetailTagLabels(row: BankFlowRuleBatchDetailRow) {

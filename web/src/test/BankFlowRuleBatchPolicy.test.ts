@@ -6,7 +6,8 @@ import {
   canWithdrawBatch,
   statusBucketFor,
 } from "../features/bankFlowRuleBatches/policy";
-import type { BankFlowRuleBatch } from "../features/bankFlowRuleBatches/types";
+import { relationContextLabels } from "../features/bankFlowRuleBatches/viewModel";
+import type { BankFlowRuleBatch, BankFlowRuleBatchDetailRow } from "../features/bankFlowRuleBatches/types";
 
 function batch(overrides: Partial<BankFlowRuleBatch> = {}): BankFlowRuleBatch {
   return {
@@ -84,5 +85,17 @@ describe("bank flow rule batch policy", () => {
     expect(canWithdrawBatch(batch({ status: "submitted", canWithdraw: false }))).toBe(true);
     expect(canWithdrawBatch(batch({ status: "draft", canWithdraw: true }))).toBe(true);
     expect(canWithdrawBatch(batch({ status: "draft", canWithdraw: false }))).toBe(false);
+  });
+
+  test("does not expose internal relation case ids in transaction labels", () => {
+    const labels = relationContextLabels({
+      relationStatus: "linked",
+      relationCaseIds: ["bank_flow_rule_batch_3defaace9aa027627034"],
+      linkedOaCount: 0,
+      linkedInvoiceCount: 0,
+    } as BankFlowRuleBatchDetailRow);
+
+    expect(labels).toEqual(["已有未撤回关联", "OA 0", "发票 0"]);
+    expect(labels.join(" ")).not.toContain("bank_flow_rule_batch_");
   });
 });

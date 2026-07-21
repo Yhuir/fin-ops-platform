@@ -338,7 +338,7 @@ class InvoiceImportPageAuditTests(unittest.TestCase):
             sample_limit=20,
         )
 
-        self.assertEqual(report["audit_contract"]["contract_revision"], "page-audit-contract.v25")
+        self.assertEqual(report["audit_contract"]["contract_revision"], "page-audit-contract.v26")
         self.assertEqual(report["audit_contract"]["registered_read_model_keys"], [])
         self.assertFalse(report["audit_contract"]["relation_proof_required"])
 

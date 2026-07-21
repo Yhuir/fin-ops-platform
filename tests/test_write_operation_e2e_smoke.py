@@ -99,7 +99,7 @@ def _system_audit_payload(audit_id: str = "system-audit:test-1") -> dict[str, ob
             "database_snapshot": True,
             "page_results": page_results,
         },
-        "audit_contract": {"contract_revision": "page-audit-contract.v25"},
+        "audit_contract": {"contract_revision": "page-audit-contract.v26"},
         "external_evidence": {"status": "unknown"},
     }
 

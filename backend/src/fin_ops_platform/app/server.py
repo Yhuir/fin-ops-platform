@@ -8161,15 +8161,19 @@ class Application:
                 if raw_repository is not None
                 else None
             )
+        pair_relation_snapshot_port = BankBatchPairRelationSnapshotPort(
+            getattr(self, "_workbench_pair_relation" + "_service")
+        )
+        relation_source_repository = getattr(self, "_workbench_relation_sql_read_repository", None)
+        if relation_source_repository is None:
+            relation_source_repository = pair_relation_snapshot_port
         return BankFlowRuleBatchApplicationService(
             import_service=self._import_service,
             effective_category_provider=self._bank_transaction_tag_reader(),
             bank_batch_service=self._bank_flow_rule_batch_service,
             app_settings_service=self._app_settings_service,
             bank_transaction_category_service=self._bank_transaction_category_service,
-            pair_relation_snapshot_port=BankBatchPairRelationSnapshotPort(
-                getattr(self, "_workbench_pair_relation" + "_service")
-            ),
+            pair_relation_snapshot_port=pair_relation_snapshot_port,
             workbench_read_model_service=self._workbench_read_model_service,
             state_store=self._state_store,
             bank_batch_read_model_repository=read_repository,
@@ -8185,6 +8189,7 @@ class Application:
                 repository=self._state_store,
                 save_repository=False,
             ),
+            relation_source_repository=relation_source_repository,
         )
 
     def _bank_flow_rule_batch_routes(self) -> BankFlowRuleBatchApiRoutes:

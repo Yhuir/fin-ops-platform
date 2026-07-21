@@ -1,17 +1,17 @@
 # 流水规则批量处理测试矩阵
 
-状态：covered-close。前端页面、feature 和 Vitest 文件已切到 `BankFlowRuleBatch*` / `bankFlowRuleBatches` 边界；后端 route、application service、read model key、producer、worker event、manifest、operation barrier、repository port、mutation persistence port、refresh persistence port、PostgreSQL 批次表、read model row 表和 tag-rule settings family 已独立。页面级 state/effect 编排保留在 page，纯 I/O、DTO、策略、view model 和通用组件已进入 feature 边界。本轮新增/更新测试固定 SQL 分页/完整范围聚合、详情 bulk bank read、reset bulk cancel/一次原子 delta 保存/零同步 rebuild、历史 relation 缺失时显式 changed batch 持久化、command 后本地可见与后台 reconcile，以及 bank-flow runtime 不得出现 no-OA compatibility marker。共享 core 直接产生正式 bank-flow 错误，不再由 route 翻译。
+状态：covered-close。前端页面、feature 和 Vitest 文件已切到 `BankFlowRuleBatch*` / `bankFlowRuleBatches` 边界；后端 route、application service、read model key、producer、worker event、manifest、operation barrier、repository port、mutation persistence port、refresh persistence port、PostgreSQL 批次表、read model row 表和 tag-rule settings family 已独立。页面级 state/effect 编排保留在 page，纯 I/O、DTO、策略、view model 和通用组件已进入 feature 边界。本轮新增/更新测试固定 canonical relation source bundle、worker 不读取全量关系快照、跨 case 占用 Audit、read-model version 驱动的 Audit 失效、占用冲突 409，以及页面不显示内部 relation case id。共享 core 直接产生正式 bank-flow 错误，不再由 route 翻译。
 
 ## 七类测试适用性
 
 | 类别 | 是否适用 | 计划覆盖 |
 | --- | --- | --- |
 | 1. Business core unit tests | 适用 | 覆盖 OA/发票四种组合只有双 false 合格、缺规则 fail closed、实际变化 version +1、semantic no-op version 不变、未知/停用/重复标签与 legacy selected 输入 fail fast，以及已提交历史不受当前资格影响。 |
-| 2. Service-layer tests | 适用 | 覆盖数据库锁内只合并规则字段并保留并发写入的无关 settings；设置与多月份 dirty/outbox 使用同一 PostgreSQL transaction，队列异常/部分入队/版本冲突整体回滚，本地投递不完整恢复旧 snapshot；资格变化只解析并 enqueue 精确月份，资格中性变化零 refresh，no-op 零写入；规则保存不读取/改写 existing relation。批次 list 固定查询数、单次 tag dictionary、完整 summary batch/row count，详情 bulk bank read，reset bulk relation cancel/原子 persist/零同步 rebuild。 |
-| 3. API contract tests | 适用 | 覆盖 GET/PUT shape、乐观锁、正式 bank-flow 错误码、无 selected 字段、`eligibility_changed_tag_codes` / affected scopes / targets / `refresh_enqueued`，列表 pagination/summary/freshness、mutation targets、history snapshot、no-OA legacy I/O 不受影响。 |
-| 4. Read model, cache, and background job tests | 适用 | 覆盖独立 producer/scope、稳定 eligibility signature、受影响月份单条集合 SQL、summary `sum(row_count)` 和冻结标签文本、SQL `LIMIT/OFFSET`、freshness/schema mismatch、worker unchanged skip、`force_refresh` 绕过 unchanged 并真实重建、stale/refreshing/fresh 与 Page Audit；规则保存不产生 Workbench/turnover dirty/outbox，reset HTTP 不执行同步 projection rebuild。 |
-| 5. Frontend component and interaction tests | 适用 | 抽屉继续显示全部 active tags；未提交主/子标签只显示 OA/发票双 false 标签，count/row count 来自完整服务端 summary 而不是当前页；submitted/history 保留实际历史标签。规则保存后清空选择、隐藏受影响当前月份旧候选、先反馈成功，再后台 barrier/reload；覆盖 loading/error/empty/stale、分页、权限、提交/撤回/reset。 |
-| 6. End-to-end business-flow integration tests | 适用 | 覆盖 Chromium 规则保存立即完成 -> 精确月份后台 barrier -> 列表重读，以及导入/分类/自动标签规则的 lifecycle/UoW refresh、submit/reset/withdraw 和关联台历史展示。 |
+| 2. Service-layer tests | 适用 | 覆盖数据库锁内只合并规则字段并保留并发写入的无关 settings；设置与多月份 dirty/outbox 使用同一 PostgreSQL transaction，队列异常/部分入队/版本冲突整体回滚；worker/submit 对目标 bank row 只调用一次 canonical relation source bundle，旧 relation facade 调用次数为零；真实 service projection 不为 canonical active relation 已占用的行生成未提交批次。 |
+| 3. API contract tests | 适用 | 覆盖 GET/PUT shape、乐观锁、正式 bank-flow 错误码、`read_model_version`、占用冲突 `409` 及结构化 details、mutation targets、history snapshot、no-OA legacy I/O 不受影响。 |
+| 4. Read model, cache, and background job tests | 适用 | 覆盖独立 producer/scope、稳定 eligibility signature、canonical relation rows/source versions 同 snapshot、worker unchanged skip、`force_refresh` 真实重建、cross-case overlap Audit blocking、stale/refreshing/fresh；worker 启动禁止全量 relation snapshot 和 relation read-model facade。 |
+| 5. Frontend component and interaction tests | 适用 | 抽屉继续显示全部 active tags；未提交主/子标签只显示 OA/发票双 false 标签，submitted/history 保留实际历史标签；read-model status/version 或手工刷新变化清除旧 Audit；linked 提示保留 OA/发票计数但不渲染内部 case id；覆盖 loading/error/empty/stale、分页、权限、提交/撤回/reset。 |
+| 6. End-to-end business-flow integration tests | 适用 | 覆盖真实 `BankBatchService` + worker 使用 canonical active relation 时只产出 submitted 历史、零 unsubmitted；生产发布后强制月份重建、列表/Audit/freshness/worker drain 共同验收。 |
 | 7. Existing feature regression tests | 适用 | no-OA legacy paths、Workbench formal relation grouping、bank-details auto tag rules、Turnover category UoW 新增 bank-flow scope 后仍保持原三类输出、bank-flow batch operations、operation barrier、permissions/audit。 |
 
 ## 计划后端测试入口

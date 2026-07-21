@@ -525,3 +525,11 @@
 - 最终 release 的 10 次同值 PUT 全部保持 version `11`、零 affected scope、零 enqueue，median `178.5ms`、p95/max `208.5ms`；10 次 2026-07 GET 全部 fresh，median `186.1ms`、p95/max `272.1ms`。
 - 生产跨页只读 Audit：`bank-flow-rule-batches`、`bank-details`、`turnover-ledger`、`reconciliation-workbench`、`settings` 全部 `pass`、0 blocking issue。历史 `0111` 只修改 formal rule payload 导致 settings formal/raw 审计不一致，已由 `0118` 在 33ms 内只同步 raw 镜像，canonical rule value、version 和 OA/发票开关均未改变。
 - 本项相关后端回归 `421 passed + 76 subtests`，迁移/settings Audit/repository 回归最终 `120 passed + 19 subtests`；前端全量 `73 files / 862 tests`、构建和 Chromium bank-flow `9/9` 通过。全仓后端基线 `4245 tests` 仍有 8 failures + 3 errors：6 个 cost-statistics fixture、3 个 no-OA legacy 历史折叠、1 个 write-operation impact matrix，以及 1 个 local read-model API harness 缺少 bank-flow SQL repository；除最后一个既有本地 harness contract 外均不在本模块文件范围，生产 PostgreSQL route/Audit 已通过。
+
+## 2026-07-21 canonical relation 占用与页面 Audit freshness 收敛
+
+- 根因不是双 false 候选规则本身持续算错，而是 bank-flow worker 用 Workbench relation read model 生成候选；canonical relation 已提交后，该依赖投影仍可能暂时保留旧关系视图，导致旧 draft 被发布到未提交列表。提交入口随后读取到 canonical 新关系并正确拒绝，因此暴露 `bank_flow_rule_batch_selection_occupied`。
+- worker 和 submit-selection 统一复用现有 PostgreSQL `workbench_relation_source_bundle_from_source(...)`：一次查询按目标 bank row ids 返回 canonical active relation rows 与同一 snapshot source versions。worker 先读 scope bank rows，再读 bundle；unchanged 才跳过，重建时才加载分类。worker 启动不再加载全量 relation snapshot，也不再接入 relation read-model facade。
+- projection schema version 升级为 `2026-07-bank-flow-rule-batch-v2`，确保旧 v1 页面投影无法冒充 fresh。列表响应增加稳定 `read_model_version`；前端在版本、status 或手工刷新 token 变化时取消在途 Audit 并清除旧结果，写后本地状态立即标记 refreshing。
+- Audit contract 升级到 v26，并在既有 batch/relation proof 内补充 draft member 与其它 active relation 的跨 case overlap；旧 Audit 之所以通过，是因为只校验同 case relation 的状态/成员 equality，没有证明未提交成员未被其它 case 占用。
+- `bank_flow_rule_batch_selection_occupied` 明确映射 HTTP 409；页面 linked 行只展示“已有未撤回关联”及 OA/发票计数，内部 relation case id 保留为机器冲突证据但不渲染。

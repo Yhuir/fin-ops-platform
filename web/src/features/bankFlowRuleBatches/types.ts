@@ -104,6 +104,7 @@ export type BankFlowRuleBatchesResponse = {
   batches: BankFlowRuleBatch[];
   pagination?: BankFlowRuleBatchesPageInfo;
   readModelStatus: BankFlowRuleBatchReadModelStatus;
+  readModelVersion: string;
   readModelStaleReasons: string[];
 };
 

@@ -9,6 +9,7 @@ type PageBusinessAuditIconProps = {
   label: string;
   pageKey: PageAuditPageKey;
   readModelStatus?: string;
+  auditContextKey?: string;
 };
 
 const BUSINESS_AUDIT_SUCCESS_TEXT = "Audit 通过 · 此数据库快照内已登记 App 内部合同一致 · 已登记配对证明一致 · 外部来源未证明 · Fresh";
@@ -19,6 +20,7 @@ export default function PageBusinessAuditIcon({
   label,
   pageKey,
   readModelStatus,
+  auditContextKey,
 }: PageBusinessAuditIconProps) {
   const runAudit = useCallback((signal?: AbortSignal) => fetchPageAudit(pageKey, signal), [pageKey]);
 
@@ -27,6 +29,7 @@ export default function PageBusinessAuditIcon({
       ariaLabel={ariaLabel}
       label={label}
       readModelStatus={readModelStatus}
+      resetKey={auditContextKey}
       runAudit={runAudit}
       successText={BUSINESS_AUDIT_SUCCESS_TEXT}
       notFreshText={BUSINESS_AUDIT_NOT_FRESH_TEXT}

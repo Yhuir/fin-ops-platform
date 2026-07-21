@@ -57,7 +57,9 @@ class BankFlowRuleBatchBackendBoundaryTests(unittest.TestCase):
         server_end = server_source.index("\n    def _bank_flow_rule_batch_routes", server_start)
         server_body = server_source[server_start:server_end]
         self.assertIn("bank_batch_service=self._bank_flow_rule_batch_service", server_body)
-        self.assertIn("pair_relation_snapshot_port=BankBatchPairRelationSnapshotPort", server_body)
+        self.assertIn("pair_relation_snapshot_port = BankBatchPairRelationSnapshotPort", server_body)
+        self.assertIn("relation_source_repository = pair_relation_snapshot_port", server_body)
+        self.assertIn("relation_source_repository=relation_source_repository", server_body)
         self.assertIn("bank_batch_read_model_repository=read_repository", server_body)
         self.assertNotIn("no_oa_bank_batch_service=", server_body)
         self.assertNotIn("no_oa_bank_batch_read_model_repository=", server_body)
@@ -68,6 +70,10 @@ class BankFlowRuleBatchBackendBoundaryTests(unittest.TestCase):
         self.assertIn("bank_batch_service=bank_flow_service", worker_body)
         self.assertIn("BankFlowRuleBatchReadModelPersistencePort", worker_body)
         self.assertIn("load_bank_flow_rule_batches()", worker_body)
+        self.assertIn("relation_source_repository=(", worker_body)
+        self.assertIn("WorkbenchRelationReadModelRepositoryPort(read_model_repository)", worker_body)
+        self.assertNotIn("load_workbench_pair_relations()", worker_body)
+        self.assertNotIn("relation_facade=workbench_relation_read_facade", worker_body)
         self.assertNotIn("no_oa_bank_batch_service=", worker_body)
         self.assertNotIn("NoOaBankBatchReadModelPersistencePort", worker_body)
 

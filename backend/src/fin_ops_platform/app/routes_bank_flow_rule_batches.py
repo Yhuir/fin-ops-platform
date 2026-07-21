@@ -19,6 +19,7 @@ BANK_FLOW_RULE_BATCH_CONFLICT_ERROR_CODES = frozenset(
         "bank_flow_rule_batch_version_conflict",
         "bank_flow_rule_batch_relation_read_model_not_fresh",
         "bank_flow_rule_batch_relation_active_row_conflict",
+        "bank_flow_rule_batch_selection_occupied",
     }
 )
 

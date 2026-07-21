@@ -1,6 +1,6 @@
 # Runtime Worker 模块边界与 I/O
 
-日期：2026-07-16
+日期：2026-07-21
 
 ## 模块化状态
 
@@ -36,6 +36,7 @@
 | Workbench all fan-out | `WorkbenchReadModelRefreshService` | `scope_key=all` 只列出当前月份 scopes，通过既有 gateway 投递月份 refresh，传播 tenant/priority/trace/force metadata，并在 fan-out 接受后完成 command；不得构建或发布 `workbench:all` generation。relation 写只投递已知受影响月份；无法解析月份时才投递 ordinary `all` command |
 | OA sync source/fan-out | `OAProjectionSyncService` | runtime `oa.sync` 只调用 dual-view source batch；任一启用 form 失败整轮失败并记录 run，不提交部分 snapshot。admission/payment-status-only 变化只投递 OA pending 精确月份；completed canonical 真实变化才进入 shared owner fan-out。in-progress source 不解析附件/OCR；禁止恢复多 list 扫描、fingerprint polling 或 snapshot repository 的 shared fan-out |
 | Workbench dependent publish | `WorkbenchReadModelRefreshService` | `cost_statistics` 直接消费 Workbench 月度 active generation。月分片 projection commit 后，handler 必须在完成 Workbench dirty scope 前通过 `ReadModelRefreshGateway` 入队该月份的 active/all 成本 scope；入队失败使当前 handler 失败并重试，禁止出现 Workbench 已标 fresh、成本仍停留在旧 generation 且 queue drained。materialized `workbench:all` 不属于成本输入，不触发该 fan-out |
+| Bank-flow canonical relation source | `BankFlowRuleBatchReadModelRefreshService` | bank-flow worker 先按 scope 读取银行流水，再用一次 canonical PostgreSQL source bundle 按这些 row id 获取 active relation rows 与同一 snapshot source versions；unchanged skip 和 rebuild 必须共用该版本。worker 启动不得加载全量 Workbench relation snapshot，不得使用 `workbench_relation` read model facade 生成未提交候选；需要 rebuild 时才读取完整分类 snapshot。该约束不改变 no-OA legacy worker 的独立 I/O。 |
 | Cost statistics versioned publish | `CostStatisticsReadModelRefreshService` / repository | handler 必须从 event 取得非负整数 `source_version` 并显式传入 month/parent builder。repository 复用现有 partial unique index，在一个事务内锁定该 scope 唯一 `pending` / `processing` dirty row，版本精确相等才写 read model；随后 handler 以同一版本条件完成。发布被拒绝或完成竞态失败都保持 `refreshing`，不得污染 Redis 或投递 parent；月份仅在发布和完成都成功后 fan-out parent |
 | Cost statistics structured publish | `CostStatisticsSqlProjectionBuilder` / repository | 月份发布把 OA rows 和 bank-flow rows 分别批量写入两张 cost-owned 行表，parent metadata 必须剥离两类大数组；parent 只从结构化 shard rows 聚合并原子删除 obsolete scope 的两类 rows。projection 不写 Redis，禁止恢复旧无版本 cache writer 或 JSON dual-write |
 | Shared relation proof consumers | Workbench relation UoW / relation repository | 任一 shared relation confirm/withdraw/cancel 都必须为对应月份投递 `oa_pending_payment`；即使关系没有 OA 成员，OA projection 仍嵌入全局 relation source version。缺该事件会形成 fresh/queue-drained 但 integrity fail 的污染状态，禁止按“业务行未变化”跳过 |

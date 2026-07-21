@@ -134,6 +134,46 @@ describe("PageAuditIcon", () => {
     expect(await screen.findByText(/已登记 App 内部合同一致/)).toHaveTextContent("已登记配对证明一致");
   });
 
+  test("invalidates a prior success when the audited page version changes", async () => {
+    const user = userEvent.setup();
+    const runAudit = vi.fn().mockResolvedValue({
+      overall_status: "pass",
+      audit_status: { integrity: "pass", freshness: "fresh", queue: "drained" },
+      audit_contract: {
+        database_snapshot: true,
+        snapshot_consistency: "repeatable_read_read_only",
+        proof_availability: "ready",
+        contract_revision: "page-audit-contract.v26",
+      },
+      summary: { blocking_issue_sample_count: 0, issue_sample_count: 0 },
+      issues: [],
+    });
+    const view = render(
+      <PageAuditIcon
+        ariaLabel="Audit 测试页面"
+        label="测试页面"
+        readModelStatus="fresh"
+        resetKey="read-model-v1"
+        runAudit={runAudit}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Audit 测试页面" }));
+    expect(await screen.findByText(/已登记 App 内部合同一致/)).toBeInTheDocument();
+
+    view.rerender(
+      <PageAuditIcon
+        ariaLabel="Audit 测试页面"
+        label="测试页面"
+        readModelStatus="fresh"
+        resetKey="read-model-v2"
+        runAudit={runAudit}
+      />,
+    );
+
+    expect(screen.queryByText(/已登记 App 内部合同一致/)).not.toBeInTheDocument();
+  });
+
   test("does not claim relation proof for a page that does not consume relations", async () => {
     const user = userEvent.setup();
     render(

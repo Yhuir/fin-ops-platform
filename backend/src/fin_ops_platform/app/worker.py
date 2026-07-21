@@ -464,9 +464,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             bank_transaction_category_service=category_service,
             bank_transaction_auto_category_service=auto_category_service,
         )
-        relation_service = PairRelationService.from_snapshot(
-            state_store.load_workbench_pair_relations() if state_store is not None else {}
-        )
+        relation_service = PairRelationService()
         bank_flow_service = BankBatchService.from_snapshot(
             state_store.load_bank_flow_rule_batches() if state_store is not None else {},
             relation_read_port=BankBatchRelationRepairReadPort(relation_service),
@@ -496,7 +494,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             workbench_matching_source_versions_provider=lambda: _bank_batch_workbench_matching_source_versions(
                 app_settings_service
             ),
-            relation_facade=workbench_relation_read_facade,
+            relation_source_repository=(
+                WorkbenchRelationReadModelRepositoryPort(read_model_repository)
+                if read_model_repository is not None
+                else None
+            ),
         )
         handlers[BANK_FLOW_RULE_BATCH_REFRESH_EVENT_TYPE] = _read_model_handler(refresh_service.handle_runtime_event)
         if BANK_FLOW_RULE_BATCH_REFRESH_EVENT_TYPE not in config.event_types:

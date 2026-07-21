@@ -71,6 +71,52 @@ class BankBatchPairRelationSnapshotPort:
     def snapshot_version(self) -> str:
         return WorkbenchReadModelService.snapshot_version(self.snapshot())
 
+    def workbench_relation_source_bundle_from_source(
+        self,
+        *,
+        scope_key: str,
+        row_ids: list[str],
+        tenant_id: str = "default",
+    ) -> dict[str, object]:
+        """Expose the in-memory canonical owner with the SQL bundle contract."""
+        _ = tenant_id
+        normalized_row_ids = {
+            str(row_id or "").strip()
+            for row_id in list(row_ids or [])
+            if str(row_id or "").strip()
+        }
+        if not normalized_row_ids:
+            return {"rows": [], "source_versions": {}}
+        snapshot = self.snapshot()
+        pair_relations = snapshot.get("pair_relations")
+        relation_rows = pair_relations if isinstance(pair_relations, dict) else {}
+        active_relations = [
+            dict(relation)
+            for relation in relation_rows.values()
+            if isinstance(relation, dict)
+            and str(relation.get("status") or "").strip().lower() == "active"
+        ]
+        active_relations.sort(key=lambda relation: str(relation.get("case_id") or ""))
+        selected_relations = [
+            relation
+            for relation in active_relations
+            if normalized_row_ids.intersection(
+                {
+                    str(row_id or "").strip()
+                    for row_id in list(relation.get("row_ids") or [])
+                    if str(row_id or "").strip()
+                }
+            )
+        ]
+        return {
+            "rows": selected_relations,
+            "source_versions": {
+                "source": "workbench_pair_relations_memory",
+                "scope_key": str(scope_key or "").strip(),
+                "snapshot_version": WorkbenchReadModelService.snapshot_version(active_relations),
+            },
+        }
+
     def snapshot_by_case_id(self, case_id: str) -> dict[str, object] | None:
         normalized_case_id = str(case_id or "").strip()
         if not normalized_case_id:
@@ -127,6 +173,7 @@ class BankBatchApplicationService:
         read_model_refresh_producer: Any | None = None,
         relation_facade: Any | None = None,
         relation_command_service: Any | None = None,
+        relation_source_repository: Any | None = None,
     ) -> None:
         self._import_service = import_service
         self._effective_category_provider = effective_category_provider
@@ -154,6 +201,7 @@ class BankBatchApplicationService:
         self._read_model_refresh_producer = read_model_refresh_producer
         self._relation_facade = relation_facade
         self._relation_command_service = relation_command_service
+        self._relation_source_repository = relation_source_repository
 
     def list_batches_payload(
         self,
@@ -1000,6 +1048,7 @@ class BankBatchApplicationService:
         *,
         scope_key: str,
         relation_mode: str = NO_OA_BANK_BATCH_RELATION_MODE,
+        relation_source_versions: dict[str, object] | None = None,
     ) -> dict[str, object]:
         normalized_scope_key = str(scope_key or "all").strip() or "all"
         scope_keys = [normalized_scope_key] if SEARCH_MONTH_RE.match(normalized_scope_key) else []
@@ -1011,10 +1060,17 @@ class BankBatchApplicationService:
         )
         if bank_detail_source_versions:
             source_versions["bank_detail_source_versions"] = bank_detail_source_versions
-        workbench_relation_source_versions = self._workbench_relation_source_versions_for_scope_keys(
-            scope_keys,
-            reason=precheck_reason,
-        )
+        if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE:
+            if not isinstance(relation_source_versions, dict):
+                raise RuntimeError(
+                    "bank_flow_rule_batch source versions require canonical relation source bundle."
+                )
+            workbench_relation_source_versions = dict(relation_source_versions)
+        else:
+            workbench_relation_source_versions = self._workbench_relation_source_versions_for_scope_keys(
+                scope_keys,
+                reason=precheck_reason,
+            )
         if workbench_relation_source_versions:
             source_versions["workbench_relation_source_versions"] = workbench_relation_source_versions
         return source_versions

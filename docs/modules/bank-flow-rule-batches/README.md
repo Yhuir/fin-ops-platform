@@ -4,7 +4,7 @@
 - 类型: 页面模块
 - Route: `/bank-flow-rule-batches`
 - Page key: `bank-flow-rule-batches`
-- 状态: close。当前生产入口、API、全局 Bank Transaction Paired Policy 规则抽屉、提交、关联台判定、独立 application service、独立 read model key、独立 worker event、独立 persistence IO、独立 PostgreSQL 批次/read model 表、独立 tag-rule settings family、前端 feature I/O/view model/components 和 Browser E2E 已接入；列表使用专属 SQL 分页/聚合 I/O，详情使用批量银行流水读取，reset 使用批量 relation cancel 和一次原子 delta 保存，写命令成功后当前页立即本地可见、后台再完成 freshness reconcile。bank-flow HTTP 错误码、batch ID/schema、Workbench 折叠摘要、display tags、关联台撤回文案和 worker 边界均为正式 bank-flow 合同；旧 no-OA 只作为独立 legacy 模块存在，不再进入本页面运行链。
+- 状态: close。当前生产入口、API、全局 Bank Transaction Paired Policy 规则抽屉、提交、关联台判定、独立 application service、独立 read model key、独立 worker event、独立 persistence IO、独立 PostgreSQL 批次/read model 表、独立 tag-rule settings family、前端 feature I/O/view model/components 和 Browser E2E 已接入；列表使用专属 SQL 分页/聚合 I/O，详情使用批量银行流水读取，worker 与提交校验通过一次 canonical relation source bundle 获取 active relation 与 source versions，reset 使用批量 relation cancel 和一次原子 delta 保存，写命令成功后当前页立即本地可见、后台再完成 freshness reconcile。bank-flow HTTP 错误码、batch ID/schema、Workbench 折叠摘要、display tags、关联台撤回文案和 worker 边界均为正式 bank-flow 合同；旧 no-OA 只作为独立 legacy 模块存在，不再进入本页面运行链。
 
 ## 修改前必读
 
@@ -40,10 +40,12 @@
 - 新增或未配置的银行标签默认勾选 `OA` 和 `发票`，避免新标签自动进入无需 OA/发票闭环。
 - 未提交主/子标签和批次的生成资格固定为 active tag 且 `requires_oa=false`、`requires_invoice=false`；任一勾选、规则缺失或标签归档都不得进入未提交区。
 - 已提交/历史 bucket 保留批次提交时冻结的标签和 requirement snapshot，不受当前勾选、标签 active 状态或改名影响。
+- 未提交候选还必须排除任一 canonical active relation 已占用的银行流水；worker 和提交入口均不得用可能滞后的 Workbench relation read model 代替 canonical relation source bundle。
 - 旧 `selected_tag_codes` 不迁移为新事实源；实现时应移除或只作为只读 legacy 输入清理，所有流水重新按新规则计算。
 - 页面提交的是银行流水批量关系事实。由于未提交资格已经排除需单据标签，新 relation 的冻结 requirement 必须为双 false；active relation 决定 ownership。规则保存不追溯改写既有 relation metadata。
 - 规则资格变化只 enqueue 受影响未提交月份；资格未变化的语义更新不重算。保存 API 不等待 worker，页面先清空旧选择和候选，再在后台等待月份 read model 收敛。
 - 从本页面提交且银行流水超过 3 条时，关联台以折叠形式展示；1 到 3 条可展开展示。
+- 本页 linked 提示只显示“已有未撤回关联”和 OA/发票数量，不向用户渲染内部 relation case id；case id 仍保留在 API 数据与 Audit 证据中。
 
 ## 不属于本模块事实源
 

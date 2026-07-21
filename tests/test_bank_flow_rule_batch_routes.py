@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 from fin_ops_platform.app.routes_bank_flow_rule_batches import BankFlowRuleBatchApiRoutes
 from fin_ops_platform.services.app_settings_service import AppSettingsValidationError
+from fin_ops_platform.services.bank_batch_application_service import BankBatchRelationMutationError
 from fin_ops_platform.services.bank_batch_service import BANK_FLOW_RULE_BATCH_RELATION_MODE
 from fin_ops_platform.services.bank_flow_rule_batch_application_service import BankFlowRuleBatchPersistenceError
 
@@ -240,6 +241,13 @@ class BankFlowRuleBatchRoutesTests(unittest.TestCase):
         invalid_status, invalid_payload = BankFlowRuleBatchApiRoutes._value_error_response(
             ValueError("bank_flow_rule_batch_selection_internal_transfer_requires_pair")
         )
+        occupied_status, occupied_payload = BankFlowRuleBatchApiRoutes._value_error_response(
+            BankBatchRelationMutationError(
+                "bank_flow_rule_batch_selection_occupied",
+                "所选流水已被其他批次占用。",
+                payload={"row_ids": ["bank-1"], "conflicting_case_ids": ["submitted-batch"]},
+            )
+        )
         persistence_status, persistence_payload = BankFlowRuleBatchApiRoutes._persistence_error_response(
             BankFlowRuleBatchPersistenceError("流水规则批次保存失败，请稍后重试。")
         )
@@ -252,6 +260,10 @@ class BankFlowRuleBatchRoutesTests(unittest.TestCase):
             invalid_payload["error"],
             "bank_flow_rule_batch_selection_internal_transfer_requires_pair",
         )
+        self.assertEqual(occupied_status, HTTPStatus.CONFLICT)
+        self.assertEqual(occupied_payload["message"], "所选流水已被其他批次占用。")
+        self.assertEqual(occupied_payload["row_ids"], ["bank-1"])
+        self.assertEqual(occupied_payload["conflicting_case_ids"], ["submitted-batch"])
         self.assertEqual(persistence_status, HTTPStatus.INTERNAL_SERVER_ERROR)
         self.assertEqual(persistence_payload["error"], "bank_flow_rule_batch_persistence_failed")
         self.assertEqual(persistence_payload["message"], "流水规则批次保存失败，请稍后重试。")

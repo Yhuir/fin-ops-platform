@@ -189,6 +189,8 @@ describe("bank flow rule batch API", () => {
           },
         ],
         pagination: { page: 2, page_size: 50, total: 125 },
+        read_model_status: "fresh",
+        read_model_version: "bank-flow-v2",
       }), { status: 200, headers: { "Content-Type": "application/json" } })),
     );
 
@@ -252,7 +254,8 @@ describe("bank flow rule batch API", () => {
       }),
     ]);
     expect(payload.pagination).toEqual({ page: 2, pageSize: 50, total: 125 });
-    expect(payload.readModelStatus).toBe("refreshing");
+    expect(payload.readModelStatus).toBe("fresh");
+    expect(payload.readModelVersion).toBe("bank-flow-v2");
   });
 
   test("maps legacy unsubmitted batch status to draft in the unsubmitted bucket", async () => {

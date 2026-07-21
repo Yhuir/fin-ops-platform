@@ -1,6 +1,6 @@
 import { Button, Spinner, Tooltip } from "@heroui/react";
 import { RefreshCw } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { PageAuditPayload } from "../../features/appHealth/types";
 
@@ -8,6 +8,7 @@ type PageAuditIconProps = {
   ariaLabel: string;
   label: string;
   readModelStatus?: string;
+  resetKey?: string;
   runAudit: (signal?: AbortSignal) => Promise<PageAuditPayload>;
   successText?: string;
   notFreshText?: string;
@@ -94,6 +95,7 @@ export default function PageAuditIcon({
   ariaLabel,
   label,
   readModelStatus,
+  resetKey,
   runAudit,
   successText = "Audit 通过 · 此数据库快照内已登记 App 内部合同一致 · 已登记配对证明一致 · 外部来源未证明 · Fresh",
   notFreshText = "Audit 完整性通过 · 已登记 App 内部合同 · Not fresh",
@@ -103,21 +105,41 @@ export default function PageAuditIcon({
   const [payload, setPayload] = useState<PageAuditPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const activeControllerRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    activeControllerRef.current?.abort();
+    activeControllerRef.current = null;
+    setPayload(null);
+    setError(null);
+    setIsLoading(false);
+    return () => activeControllerRef.current?.abort();
+  }, [resetKey]);
 
   const handleRun = useCallback(async () => {
     if (isLoading) {
       return;
     }
     const controller = new AbortController();
+    activeControllerRef.current?.abort();
+    activeControllerRef.current = controller;
     setIsLoading(true);
     setError(null);
     try {
-      setPayload(await runAudit(controller.signal));
+      const nextPayload = await runAudit(controller.signal);
+      if (!controller.signal.aborted && activeControllerRef.current === controller) {
+        setPayload(nextPayload);
+      }
     } catch (caught) {
-      setError(formatError?.(caught) ?? "Audit 失败");
-      setPayload(null);
+      if (!controller.signal.aborted && activeControllerRef.current === controller) {
+        setError(formatError?.(caught) ?? "Audit 失败");
+        setPayload(null);
+      }
     } finally {
-      setIsLoading(false);
+      if (activeControllerRef.current === controller) {
+        activeControllerRef.current = null;
+        setIsLoading(false);
+      }
     }
   }, [formatError, isLoading, runAudit]);
 

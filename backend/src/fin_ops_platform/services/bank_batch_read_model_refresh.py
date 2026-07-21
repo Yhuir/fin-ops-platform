@@ -56,6 +56,7 @@ class BankBatchReadModelRefreshService:
         read_model_persistence: Any | None = None,
         workbench_matching_source_versions_provider: Callable[[], dict[str, object]] | None = None,
         relation_facade: Any | None = None,
+        relation_source_repository: Any | None = None,
         application_service_class: type[BankBatchApplicationService] = BankBatchApplicationService,
         refresh_event_type: str = NO_OA_BANK_BATCH_REFRESH_EVENT_TYPE,
         scope_type: str = NO_OA_BANK_BATCH_SCOPE_TYPE,
@@ -85,6 +86,7 @@ class BankBatchReadModelRefreshService:
             workbench_matching_source_versions_provider=workbench_matching_source_versions_provider,
             queue_repository=queue_repository,
             relation_facade=relation_facade,
+            relation_source_repository=relation_source_repository,
         )
         self._bank_batch_service = bank_batch_service
 
@@ -106,11 +108,32 @@ class BankBatchReadModelRefreshService:
 
         relation_mode = self._relation_mode_for_event(event)
         force_refresh = _event_force_refresh(event)
+        relation_bundle: dict[str, object] | None = None
+        bank_rows: list[dict[str, object]] | None = None
+        if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE:
+            bank_rows = self._application_service.bank_transaction_rows(
+                month=scope_key,
+                include_categories=False,
+            )
+            relation_bundle = self._application_service.active_relation_source_bundle_for_bank_rows(
+                bank_rows,
+                scope_key=scope_key,
+            )
         precheck_source_versions: dict[str, object] | None = None
         if _is_month_scope(scope_key):
+            relation_source_versions = (
+                relation_bundle.get("source_versions")
+                if isinstance(relation_bundle, dict)
+                else None
+            )
             precheck_source_versions = self._application_service.read_model_scope_source_versions(
                 scope_key=scope_key,
                 relation_mode=relation_mode,
+                relation_source_versions=(
+                    dict(relation_source_versions)
+                    if isinstance(relation_source_versions, dict)
+                    else None
+                ),
             )
             if not force_refresh:
                 unchanged = self._application_service.unchanged_read_model_scope_result(
@@ -128,15 +151,17 @@ class BankBatchReadModelRefreshService:
                         ),
                     }
 
-        bank_rows = self._application_service.bank_transaction_rows(
-            month=scope_key,
-            include_categories=False,
-        )
+        if bank_rows is None:
+            bank_rows = self._application_service.bank_transaction_rows(
+                month=scope_key,
+                include_categories=False,
+            )
         categories = self._application_service.effective_categories_for_rows(bank_rows)
-        self._application_service.load_relation_source_versions_for_bank_rows(
-            bank_rows,
-            relation_mode=relation_mode,
-        )
+        if relation_mode != BANK_FLOW_RULE_BATCH_RELATION_MODE:
+            self._application_service.load_relation_source_versions_for_bank_rows(
+                bank_rows,
+                relation_mode=relation_mode,
+            )
         source_versions = (
             dict(precheck_source_versions)
             if isinstance(precheck_source_versions, dict) and precheck_source_versions
@@ -144,8 +169,16 @@ class BankBatchReadModelRefreshService:
                 relation_mode=relation_mode,
             )
         )
+        if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE and isinstance(relation_bundle, dict):
+            relation_source_versions = relation_bundle.get("source_versions")
+            if isinstance(relation_source_versions, dict):
+                source_versions["workbench_relation_source_versions"] = dict(relation_source_versions)
 
-        active_relations = self._application_service.active_relations_for_bank_rows(bank_rows)
+        active_relations = (
+            [dict(row) for row in list(relation_bundle.get("rows") or []) if isinstance(row, dict)]
+            if isinstance(relation_bundle, dict)
+            else self._application_service.active_relations_for_bank_rows(bank_rows)
+        )
         bank_rows, _categories = self._application_service.refresh_batches_from_prepared_rows(
             bank_rows=bank_rows,
             categories_by_transaction_id=categories,

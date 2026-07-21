@@ -482,8 +482,8 @@ def _bank_flow_rule_batch_sql(*, tenant_id: str, limit: int) -> tuple[str, tuple
             from read_model.bank_flow_rule_batch_rows row
             where row.cache_status = 'fresh'
         ),
-        active_batch_relations as (
-            select relation.case_id,
+        active_bank_relations as (
+            select relation.case_id, relation.relation_mode,
                    coalesce(
                        array_agg(distinct member.row_id order by member.row_id) filter (
                            where lower(coalesce(relation.row_types[member.ordinality], ''))
@@ -495,8 +495,22 @@ def _bank_flow_rule_batch_sql(*, tenant_id: str, limit: int) -> tuple[str, tuple
             from app.workbench_pair_relations relation
             join lateral unnest(relation.row_ids) with ordinality member(row_id, ordinality) on true
             where relation.status = 'active'
-              and relation.relation_mode = 'bank_flow_rule_batch'
-            group by relation.case_id
+            group by relation.case_id, relation.relation_mode
+        ),
+        active_batch_relations as (
+            select case_id, relation_member_ids
+            from active_bank_relations
+            where relation_mode = 'bank_flow_rule_batch'
+        ),
+        conflicting_relations as (
+            select batch.batch_id,
+                   array_agg(relation.case_id order by relation.case_id) as conflicting_case_ids
+            from canonical_batches batch
+            join active_bank_relations relation
+              on relation.case_id <> batch.batch_id
+             and relation.relation_member_ids && batch.canonical_member_ids
+            where batch.status in ('draft', 'unsubmitted')
+            group by batch.batch_id
         ),
         batch_mismatches as (
             select batch.batch_id as subject_id, batch.scope_key,
@@ -505,6 +519,8 @@ def _bank_flow_rule_batch_sql(*, tenant_id: str, limit: int) -> tuple[str, tuple
                        when projected.batch_id is null then 'canonical_batch_missing_page_consumer'
                        when projected.projected_member_ids <> batch.canonical_member_ids
                        then 'page_consumer_member_set_mismatch'
+                       when conflict.conflicting_case_ids is not null
+                       then 'batch_members_occupied_by_other_active_relation'
                        when batch.status = 'submitted' and relation.case_id is null
                        then 'submitted_batch_missing_active_relation'
                        when batch.status <> 'submitted' and relation.case_id is not null
@@ -517,10 +533,12 @@ def _bank_flow_rule_batch_sql(*, tenant_id: str, limit: int) -> tuple[str, tuple
                    batch.status as canonical_status,
                    batch.canonical_member_ids,
                    projected.projected_member_ids,
-                   relation.relation_member_ids
+                   relation.relation_member_ids,
+                   conflict.conflicting_case_ids
             from canonical_batches batch
             left join projected_batches projected on projected.batch_id = batch.batch_id
             left join active_batch_relations relation on relation.case_id = batch.batch_id
+            left join conflicting_relations conflict on conflict.batch_id = batch.batch_id
         ),
         relation_orphans as (
             select relation.case_id as subject_id, ''::text as scope_key,
@@ -529,7 +547,8 @@ def _bank_flow_rule_batch_sql(*, tenant_id: str, limit: int) -> tuple[str, tuple
                    null::text as canonical_status,
                    null::text[] as canonical_member_ids,
                    null::text[] as projected_member_ids,
-                   relation.relation_member_ids
+                   relation.relation_member_ids,
+                   null::text[] as conflicting_case_ids
             from active_batch_relations relation
             left join canonical_batches batch on batch.batch_id = relation.case_id
             where batch.batch_id is null
@@ -540,7 +559,8 @@ def _bank_flow_rule_batch_sql(*, tenant_id: str, limit: int) -> tuple[str, tuple
             select * from relation_orphans
         )
         select mismatch_kind, subject_id, scope_key, row_id, row_type,
-               canonical_status, canonical_member_ids, projected_member_ids, relation_member_ids
+               canonical_status, canonical_member_ids, projected_member_ids, relation_member_ids,
+               conflicting_case_ids
         from mismatches
         order by mismatch_kind, scope_key, subject_id
         limit %s

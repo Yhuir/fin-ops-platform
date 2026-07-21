@@ -266,7 +266,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 | `tag_code` | 银行标签筛选。 |
 | `page` / `page_size` | 分页；`page_size` 上限由后端固定。 |
 
-响应必须包含 summary、rows、pagination、`read_model_status`、`read_model_stale_reasons`、`read_model_scope_keys` 和 `refresh_enqueued`。rows 只包含当前页；summary 对完整 summary filter 范围做 SQL 聚合，并为总计和每个 category 返回 draft/submitted/withdrawn 的 batch count 与 `*_row_count`，历史 category 还携带冻结 label/primary/sub label，不能由当前页 rows 推算。默认页面 `page_size=50`。未提交标签只展示当前 OA/发票双 false 的 active tags，已提交/历史只展示对应状态 count > 0 的 summary categories。非 fresh 时前端不能把空 rows 当真实无候选。
+响应必须包含 summary、rows、pagination、`read_model_status`、`read_model_version`、`read_model_stale_reasons`、`read_model_scope_keys` 和 `refresh_enqueued`。`read_model_version` 是由当前 status、source versions 和 row count 派生的稳定页面版本；页面版本/status/手工刷新变化时，前端必须清除旧 Audit 结果。rows 只包含当前页；summary 对完整 summary filter 范围做 SQL 聚合，并为总计和每个 category 返回 draft/submitted/withdrawn 的 batch count 与 `*_row_count`，历史 category 还携带冻结 label/primary/sub label，不能由当前页 rows 推算。默认页面 `page_size=50`。未提交标签只展示当前 OA/发票双 false 的 active tags，已提交/历史只展示对应状态 count > 0 的 summary categories。非 fresh 时前端不能把空 rows 当真实无候选。详情 payload 可保留 `relation_case_ids` 供机器冲突诊断，但页面只显示“已有未撤回关联”和 OA/发票数量，不得渲染内部 case id。
 
 `POST /api/bank-flow-rule-batches/submit-selection`
 
@@ -286,7 +286,8 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 
 - `transaction_ids` 必填、不能为空、不能重复。
 - 实现初期要求所有流水来自同一月份、同一银行账户、同一当前有效银行标签；后续放宽必须更新本 API 和模块状态机。
-- 提交前必须重查银行流水、标签、active relation 占用和规则版本。
+- 提交前必须重查银行流水、标签、canonical active relation 占用和规则版本。目标行已被任一 active relation 占用时返回 `409 bank_flow_rule_batch_selection_occupied` 和结构化冲突信息；不能把领域冲突映射为 500。
+- active relation rows 与 relation source versions 必须由同一次 canonical PostgreSQL source bundle 查询返回；提交与 worker 不得使用 Workbench relation read model 或启动时全量 relation snapshot 作为占用事实源。
 - 成功后写入 `relation_mode=bank_flow_rule_batch`，并在 relation `special_metadata` 写入 `source_batch_id`、`flow_rule_tag_code`、`flow_rule_version`、`requires_oa`、`requires_invoice`、`source_row_count`、`collapsed_bank_rows`。
 - 关联台按 active 正式关系判断 ownership，再按该批次 relation 冻结的 OA/发票 requirement 判断 paired/unpaired；`source_row_count > 3` 时默认折叠。
 - Workbench 折叠摘要必须输出 `source_kind=bank_flow_rule_batch_summary`、summary id prefix `bank_flow_rule_summary:`、`invoice_relation.code=bank_flow_rule_batch` 和 `流水规则` display tag；不得输出 `no_oa_bank_batch_summary` 或 `免OA` tag 作为 bank-flow 摘要 I/O。
@@ -1327,7 +1328,7 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
     "relation_tables": ["read_model.workbench_relation_rows", "read_model.workbench_relation_groups"],
     "scope_types": ["bank_detail", "bank_account_balance", "workbench_relation"],
     "event_types": ["bank_detail.read_model.refresh", "bank_account_balance.read_model.refresh", "workbench_relation.read_model.refresh"],
-    "contract_revision": "page-audit-contract.v25",
+    "contract_revision": "page-audit-contract.v26",
     "proof_availability": "ready",
     "registered_read_model_keys": ["bank_detail", "bank_account_balance", "workbench_relation"],
     "relation_proof_required": true,

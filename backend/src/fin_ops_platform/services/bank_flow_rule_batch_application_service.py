@@ -13,6 +13,7 @@ from fin_ops_platform.services.bank_batch_application_service import (
 )
 from fin_ops_platform.services.bank_batch_service import BANK_FLOW_RULE_BATCH_RELATION_MODE, BankBatchService
 from fin_ops_platform.services.read_model_write_targets import write_target_envelope
+from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
 
 
 BANK_FLOW_RULE_BATCH_ONLINE_MUTATION_ACTIONS = frozenset(
@@ -75,6 +76,7 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 "batches": [],
                 **self._bank_flow_pagination_payload(pagination, total=0),
                 "read_model_status": "missing",
+                "read_model_version": self._read_model_version("missing", {}, 0),
                 "read_model_stale_reasons": [],
                 "refresh_enqueued": refresh_enqueued,
                 "refresh_reason": "api_bank_flow_rule_batch_read_model_missing",
@@ -126,6 +128,11 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 total=int(page_result.get("total") or 0),
             ),
             "read_model_status": read_model_status,
+            "read_model_version": self._read_model_version(
+                read_model_status,
+                source_summary.get("source_versions"),
+                int(source_summary.get("row_count") or 0),
+            ),
         }
         if stale_reasons:
             payload["read_model_stale_reasons"] = stale_reasons
@@ -133,6 +140,51 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
             payload["refresh_enqueued"] = refresh_enqueued
             payload["refresh_reason"] = refresh_reason
         return payload
+
+    @staticmethod
+    def _read_model_version(status: str, source_versions: object, row_count: int) -> str:
+        return WorkbenchReadModelService.snapshot_version(
+            {
+                "status": str(status or "missing"),
+                "source_versions": dict(source_versions) if isinstance(source_versions, dict) else {},
+                "row_count": max(int(row_count or 0), 0),
+            }
+        )
+
+    def active_relation_source_bundle_for_bank_rows(
+        self,
+        bank_rows: list[dict[str, object]],
+        *,
+        scope_key: str | None = None,
+    ) -> dict[str, object]:
+        row_ids = self._dedupe_ordered(
+            [
+                str(row.get("id") or row.get("transaction_id") or row.get("row_id") or "").strip()
+                for row in list(bank_rows or [])
+                if isinstance(row, dict)
+            ]
+        )
+        if not row_ids:
+            return {"rows": [], "source_versions": {}}
+        repository = getattr(self, "_relation_source_repository", None)
+        load_bundle = getattr(repository, "workbench_relation_source_bundle_from_source", None)
+        if not callable(load_bundle):
+            raise RuntimeError(
+                "bank_flow_rule_batch requires canonical workbench relation source repository."
+            )
+        months = self._months_for_bank_rows(bank_rows)
+        resolved_scope_key = str(scope_key or "").strip()
+        if not resolved_scope_key:
+            resolved_scope_key = months[0] if len(months) == 1 else "all"
+        payload = load_bundle(scope_key=resolved_scope_key, row_ids=row_ids)
+        if not isinstance(payload, dict):
+            raise RuntimeError("bank_flow_rule_batch canonical workbench relation source returned invalid payload.")
+        rows = [dict(row) for row in list(payload.get("rows") or []) if isinstance(row, dict)]
+        source_versions = payload.get("source_versions")
+        return {
+            "rows": rows,
+            "source_versions": dict(source_versions) if isinstance(source_versions, dict) else {},
+        }
 
     @staticmethod
     def _bank_flow_pagination_payload(
@@ -410,18 +462,34 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         previous_batch_snapshot = self._bank_batch_service.snapshot()
         try:
             months = self._months_for_bank_rows(bank_rows)
+            relation_bundle = self.active_relation_source_bundle_for_bank_rows(
+                bank_rows,
+                scope_key=months[0] if len(months) == 1 else "all",
+            )
+            relation_source_versions = relation_bundle.get("source_versions")
             source_versions = (
                 self.read_model_scope_source_versions(
                     scope_key=months[0],
                     relation_mode=relation_mode,
+                    relation_source_versions=(
+                        dict(relation_source_versions)
+                        if isinstance(relation_source_versions, dict)
+                        else {}
+                    ),
                 )
                 if len(months) == 1
                 else self.bank_batch_source_versions(relation_mode=relation_mode)
             )
+            if len(months) != 1 and isinstance(relation_source_versions, dict):
+                source_versions["workbench_relation_source_versions"] = dict(relation_source_versions)
             batch = self._bank_batch_service.submit_selected_rows(
                 bank_rows=bank_rows,
                 categories_by_transaction_id=categories_by_transaction_id,
-                active_relations=self._workbench_relation_active_relations_for_bank_rows(bank_rows),
+                active_relations=[
+                    dict(row)
+                    for row in list(relation_bundle.get("rows") or [])
+                    if isinstance(row, dict)
+                ],
                 source_versions=source_versions,
                 eligible_batch_types=self._eligible_tag_codes_for_relation_mode(relation_mode),
                 row_ids=row_ids,

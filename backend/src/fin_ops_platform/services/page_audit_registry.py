@@ -21,7 +21,7 @@ PageAuditExecutor = Literal[
 PageAuditAvailability = Literal["ready", "unavailable"]
 ExternalEvidenceDomain = Literal["bank", "oa", "invoice", "etc"]
 
-PAGE_AUDIT_CONTRACT_REVISION = "page-audit-contract.v25"
+PAGE_AUDIT_CONTRACT_REVISION = "page-audit-contract.v26"
 
 
 @dataclass(frozen=True, slots=True)

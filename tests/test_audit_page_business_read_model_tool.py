@@ -280,10 +280,14 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         )
         self.assertIn("row.payload->'bank_transaction_ids'", consumer_sql)
         self.assertIn("row.payload->'row_ids'", consumer_sql)
-        self.assertIn("relation.relation_mode = 'bank_flow_rule_batch'", consumer_sql)
+        self.assertIn("where relation_mode = 'bank_flow_rule_batch'", consumer_sql)
+        self.assertIn("join active_bank_relations relation", consumer_sql)
+        self.assertIn("where batch.status in ('draft', 'unsubmitted')", consumer_sql)
         self.assertIn("submitted_batch_missing_active_relation", consumer_sql)
         self.assertIn("non_submitted_batch_has_active_relation", consumer_sql)
         self.assertIn("active_relation_member_set_mismatch", consumer_sql)
+        self.assertIn("batch_members_occupied_by_other_active_relation", consumer_sql)
+        self.assertIn("relation.relation_member_ids && batch.canonical_member_ids", consumer_sql)
         self.assertIn("active_relation_without_canonical_batch", consumer_sql)
         self.assertEqual(params, (51,))
         self.assertIn("consumer_relation_edge_equality", report["audit_contract"]["proof_checks"])
@@ -316,6 +320,36 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
             {"bank_flow_rule_batches_consumer_relation_edge_mismatch": 1},
         )
         self.assertEqual(report["issues"][0]["details"]["canonical_status"], "submitted")
+
+    def test_unsubmitted_bank_flow_batch_occupied_by_other_relation_is_blocking(self) -> None:
+        report = audit_page_business_read_model.audit_page_business_read_model(
+            FakeConnection(
+                rows_by_check={
+                    "consumer_relation_edge_equality": [
+                        {
+                            "subject_id": "draft-batch",
+                            "scope_key": "2026-07",
+                            "row_id": "draft-batch",
+                            "row_type": "bank_flow_rule_batch",
+                            "mismatch_kind": "batch_members_occupied_by_other_active_relation",
+                            "canonical_status": "draft",
+                            "canonical_member_ids": ["bank-1", "bank-2"],
+                            "projected_member_ids": ["bank-1", "bank-2"],
+                            "relation_member_ids": None,
+                            "conflicting_case_ids": ["submitted-batch"],
+                        }
+                    ]
+                }
+            ),
+            domain_key="bank_flow_rule_batches",
+        )
+
+        self.assertEqual(report["audit_status"]["integrity"], "issues_found")
+        self.assertEqual(
+            report["issues"][0]["details"]["mismatch_kind"],
+            "batch_members_occupied_by_other_active_relation",
+        )
+        self.assertEqual(report["issues"][0]["details"]["conflicting_case_ids"], ["submitted-batch"])
 
     def test_bank_flow_page_member_set_mismatch_is_blocking(self) -> None:
         report = audit_page_business_read_model.audit_page_business_read_model(
