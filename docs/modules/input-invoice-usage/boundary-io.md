@@ -19,7 +19,7 @@
 - 与 invoice usage collection worker 的 event 合同。
 - rows 聚合单位必须是 confirmed/linked 配对关系组优先；同一配对关系组内多张进项发票、多条 OA 或多条流水只能生成一行，行内展示合计和 `+N` 明细。没有 confirmed relation group 的发票才按发票 identity 聚合兜底。
 - `InputInvoiceUsageQueryService` 必须显式接收支付状态规则 provider 或上层 lifecycle policy；生产 `Application` 和 SQL projection 必须注入 app-settings backed provider，`InvoiceLifecyclePolicy` 不提供进项支付规则默认值，生产模块不得保留静态支付规则 provider，禁止静默回退静态规则污染支付状态链路；规则设置完整保存时以提交的 `conditions` 为准，读取历史配置时才补默认条件。
-- OA reverse evidence detected 后通过 relation command 写入真正影响 rows 的事实，并返回 `input_invoice_usage` write target envelope；创建 OA 草稿、撤回本地草稿绑定、手动确认 submitted/not_submitted 只修改本地 batch 状态，不污染 rows read model。
+- OA reverse evidence detected 后通过 relation command 写入真正影响 rows 的事实，并返回 `input_invoice_usage` write target envelope。真实新建 batch 会增加页面标题的 OA 批次数，因此保存成功后单独 enqueue `input_invoice_usage:all` 统计刷新；幂等命中、创建 OA 草稿、撤回本地草稿绑定和 submitted/not_submitted 状态更新不改变批次数，不重复 enqueue 统计刷新，也不污染 relation/rows 事实。
 
 ### 不负责
 
@@ -46,7 +46,7 @@
 | 使用情况 rows/details/statistics | 前端页面 | fresh/status 可见；confirmed relation group 是优先行边界，组内发票/OA/流水各显示一次合计与 `+N`，未 linked 发票按 identity 兜底；all scope 读取多个 month shard 时按 read model row id 去重。主 rows 响应的 `statistics` 从完整 `input_invoice_usage` 投影按唯一发票成员 ID 计算发票、OA/流水关联、付款及补集，并补充本模块 OA reverse 批次数；忽略当前 keyword/filter/month/sort/page。`pagination.total` 仍是表格行数/配对组行数；任一 child scope non-fresh 时统计不可用，合法 fresh 空集才返回零。 |
 | 页面 Audit icon | AppHealth operations audit API | admin-only；active canonical 进项发票（含 collapsed members）是 independent expected-set，成员/金额/scope 与共享 relation 的受影响月份双向 edge 必须在同一只读一致性快照中相等；只有结构化 integrity=pass、freshness=fresh、queue=drained 且 database snapshot 已启用才显示成功，unknown 不得伪装 fresh，问题数显示为 sample |
 | 支付状态 | rows/filter/export/read model | 只消费 `workbench_relation` distribution 中 confirmed/linked 关系；多 OA/多流水用 linked 合计与发票价税合计比对；无 active relation 或历史 candidate 兼容值不参与 `已付款` 判断 |
-| OA reverse 本地状态 | API/OA drawer | draft/staged/submitted/not_submitted 只落 `app.input_invoice_usage_oa_reverse_batches`，前端立即释放按钮；不等待 `input_invoice_usage` operation barrier |
+| OA reverse 本地状态 | API/OA drawer | draft/staged/submitted/not_submitted 只落 `app.input_invoice_usage_oa_reverse_batches`，前端立即释放按钮；真实新建 batch 额外 enqueue `input_invoice_usage:all` 仅刷新标题批次数，幂等命中和后续状态更新不 enqueue；前端不等待该统计 refresh 的 operation barrier |
 | OA reverse relation 结果 | Workbench relation / API / operation barrier | evidence detected 写入 relation 后触发 dirty scope，并返回 `read_model_key=input_invoice_usage`、`scope_key=<invoice month>` |
 | Dirty scope | runtime queue | `input_invoice_usage.read_model.refresh` |
 
@@ -89,7 +89,8 @@
 
 - OA reverse 变更必须覆盖权限、凭证、审计和 read model recovery。
 - 已删除标题计数的 `page_size=1` 二次请求；标题统计只能消费 rows 主响应，禁止恢复独立 title-total I/O。
-- `input_invoice_usage_statistics_schema_version` 负责生产旧 scope 的统计元数据回填；source version 相同但缺少合法统计元数据时也必须重建，不能走 unchanged skip。批量导出仅第一页读取并校验标题统计，后续页传 `include_statistics=false`，但仍逐页执行 rows freshness/source-version gate。
+- `input_invoice_usage_statistics_schema_version` 负责生产旧 scope 的统计元数据回填；source version 相同但缺少合法统计元数据时也必须重建，不能走 unchanged skip。批量导出的所有分页均传 `include_statistics=false`，不重复读取、校验或透传页面标题统计；每一页仍执行 rows freshness、schema 和 source-version gate。
+- `oa_reverse_batch_count` 在 worker rebuild 时从 owned batch 表聚合，并把数量及 `count + max(created_at)` source version 原子写入每个月份 scope metadata。`all` 统计将该全局值视为一致性字段而不是按月求和；月份值不一致时统计 fail closed。普通 rows/filter/detail/export expected-version 热路径不读取 batch 表；只有标题 `statistics` fresh gate 执行同一紧凑 generation 聚合，若 live generation 新于已发布 metadata，则隐藏统计并 enqueue `input_invoice_usage:all`，禁止旧统计伪 fresh。
 
 ## Canonical facts ownership
 

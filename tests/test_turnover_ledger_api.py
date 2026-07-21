@@ -728,6 +728,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                     "filters": {},
                     "read_model_status": "fresh",
                     "source_versions": dict(self.source_versions),
+                    "generation": 11,
                 }
 
             def save_turnover_ledger_rows(self, payload: dict[str, object], **_kwargs: object) -> None:
@@ -748,6 +749,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(payload["read_model_status"], "fresh")
         self.assertFalse(payload["refresh_enqueued"])
         self.assertEqual(payload["source_versions"], normalize_source_versions(source_versions))
+        self.assertNotIn("generation", payload)
         self.assertIn("groups", payload)
         self.assertEqual(payload["groups"][0]["counterparty_name"], "SQL对方")
         self.assertEqual(queue.enqueued, [])

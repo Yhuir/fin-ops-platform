@@ -54,6 +54,8 @@ class FakeTurnoverReadRepository:
         self.relation_delta_payload: dict[str, object] | None = None
         self.saved_relation_delta: dict[str, object] | None = None
         self.saved_relation_delta_scope_key: str | None = None
+        self.generation = 0
+        self.acknowledged: list[dict[str, object]] = []
 
     def list_turnover_ledger_view(self, **kwargs: object) -> dict[str, object] | None:
         self.list_calls.append(dict(kwargs))
@@ -62,6 +64,14 @@ class FakeTurnoverReadRepository:
     def save_turnover_ledger_rows(self, payload: dict[str, object], *, scope_key: str | None = None) -> None:
         self.saved_payload = payload
         self.saved_scope_key = scope_key
+
+    def turnover_ledger_generation(self) -> int:
+        return self.generation
+
+    def acknowledge_unchanged_turnover_ledger_scope(self, **kwargs: object) -> int:
+        self.acknowledged.append(dict(kwargs))
+        self.generation += 1
+        return self.generation
 
     def load_turnover_ledger_relation_delta(self, **_kwargs: object) -> dict[str, object]:
         return dict(self.relation_delta_payload or {})
@@ -489,7 +499,12 @@ class TurnoverLedgerReadModelRefreshServiceTests(unittest.TestCase):
                 "source_versions": existing_source_versions,
                 "skipped": True,
                 "skip_reason": "source_versions_unchanged",
+                "generation": 1,
             },
+        )
+        self.assertEqual(
+            repository.acknowledged,
+            [{"scope_key": "all", "source_version": 15, "expected_generation": 0}],
         )
         self.assertEqual(repository.list_calls, [{"scope_key": "all", "page": 1, "page_size": 200}])
         self.assertIsNone(repository.saved_payload)
@@ -499,7 +514,7 @@ class TurnoverLedgerReadModelRefreshServiceTests(unittest.TestCase):
             [{"scope_key": "all", "row_ids": ["txn-existing"], "include_row_ids": True}],
         )
 
-    def test_projection_republishes_unchanged_rows_when_statistics_marker_is_missing(self) -> None:
+    def test_projection_republishes_unchanged_rows_when_scope_summary_is_missing(self) -> None:
         repository = FakeTurnoverReadRepository()
         source_versions = {"turnover_ledger_schema_version": "test"}
         repository.existing_payload = {
@@ -558,6 +573,39 @@ class TurnoverLedgerReadModelRefreshServiceTests(unittest.TestCase):
 
         self.assertEqual(len(repository.source_bundle_calls), 1)
         self.assertIsNotNone(repository.saved_payload)
+
+    def test_mixed_all_scope_versions_converge_through_full_all_rebuild(self) -> None:
+        repository = FakeTurnoverReadRepository()
+        repository.generation = 6
+        repository.existing_payload = {
+            "rows": [{"relation_id": "mixed-existing", "first_transaction_at": "2026-05-18"}],
+            "pagination": {"page": 1, "page_size": 200, "total": 1},
+            "source_versions": {},
+            "source_versions_mixed": True,
+            "generation": 6,
+        }
+        expected_source_versions = {"turnover_ledger_schema_version": "current"}
+        builder = TurnoverLedgerSqlProjectionBuilder(
+            read_repository=repository,
+            ledger_service=FakeGroupedLedgerService(),  # type: ignore[arg-type]
+            source_versions_provider=lambda: expected_source_versions,
+            workbench_relation_source_repository=repository,
+        )
+
+        result = builder.rebuild_turnover_ledger_read_model_scope("all", source_version=21)
+
+        self.assertEqual(result["scope_key"], "all")
+        self.assertIsNotNone(repository.saved_payload)
+        assert repository.saved_payload is not None
+        self.assertEqual(repository.saved_payload["expected_generation"], 6)
+        self.assertEqual(repository.saved_payload["source_version"], 21)
+        self.assertTrue(repository.saved_payload["rows"])
+        self.assertTrue(
+            all(
+                row["source_versions"] == expected_source_versions
+                for row in repository.saved_payload["rows"]
+            )
+        )
 
     def test_projection_refreshes_month_scope_from_existing_rows_when_only_relation_versions_changed(self) -> None:
         repository = FakeTurnoverReadRepository()

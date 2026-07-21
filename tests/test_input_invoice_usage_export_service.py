@@ -56,7 +56,7 @@ class InputInvoiceUsageExportServiceTests(unittest.TestCase):
         self.assertEqual(sheet["F2"].value, "供应商甲")
         self.assertEqual(sheet["N2"].value, "未付")
 
-    def test_export_requests_title_statistics_only_on_first_page(self) -> None:
+    def test_export_skips_title_statistics_on_every_page(self) -> None:
         loader = StaticPageLoader(
             [self._row(f"row-{index}", f"inv-{index}", str(index), "供应商", "1.00") for index in range(201)]
         )
@@ -65,7 +65,7 @@ class InputInvoiceUsageExportServiceTests(unittest.TestCase):
         preview = service.export_preview(month="2026-05")
 
         self.assertEqual(preview["row_count"], 201)
-        self.assertEqual([call["include_statistics"] for call in loader.calls], [True, False])
+        self.assertEqual([call["include_statistics"] for call in loader.calls], [False, False])
 
     def test_preview_returns_refreshing_payload_and_export_rejects_stale_read_model(self) -> None:
         loader = RefreshingPageLoader()

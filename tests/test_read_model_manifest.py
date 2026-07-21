@@ -340,6 +340,8 @@ class ReadModelManifestTests(unittest.TestCase):
             "bank_flow_rule_batch_source_versions_summary",
             "list_turnover_ledger_view",
             "save_turnover_ledger_rows",
+            "turnover_ledger_generation",
+            "acknowledge_unchanged_turnover_ledger_scope",
         }
 
         for method_name in owned_methods:
@@ -540,6 +542,8 @@ class ReadModelManifestTests(unittest.TestCase):
         required_turnover_ports = {
             "list_turnover_ledger_view",
             "save_turnover_ledger_rows",
+            "turnover_ledger_generation",
+            "acknowledge_unchanged_turnover_ledger_scope",
             "load_turnover_ledger_relation_delta",
             "save_turnover_ledger_relation_delta",
         }
@@ -572,6 +576,8 @@ class ReadModelManifestTests(unittest.TestCase):
         self.assertEqual(cost_statistics.permission_owner, "cost_statistics_api_session")
         self.assertEqual(tax_offset.permission_owner, "tax_offset_api_session")
         self.assertEqual(turnover_ledger.permission_owner, "turnover_ledger_api_session")
+        self.assertIn("turnover_ledger_scopes", turnover_ledger.scoped_incremental_target)
+        self.assertIn("turnover_ledger_scopes", turnover_ledger.freshness_proof_contract)
         self.assertEqual(required_cost_ports, set(cost_statistics.repository_port_contract))
         self.assertEqual(required_tax_ports, set(tax_offset.repository_port_contract))
         self.assertEqual(required_turnover_ports, set(turnover_ledger.repository_port_contract))

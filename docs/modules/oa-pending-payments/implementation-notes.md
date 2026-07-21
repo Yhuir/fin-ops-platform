@@ -1,5 +1,12 @@
 # OA待付款核对 实施记录
 
+## 2026-07-22 - 标题统计覆盖月份闭环
+
+- 目标：让 `oa_pending_payment:all` 统计覆盖只有银行流水或进项发票、尚无 OA integration watermark 的月份，避免标题全期间库存漏月。
+- 边界：worker inventory 一次 SQL union OA source watermark、未删除银行月份和未删除进项发票月份；coverage-only 月份只在 read-model metadata 写确定性 empty source vector，不写 `app.oa_sync_watermarks`。真实 OA source 后到会使该 vector stale；prune 只作用于 read-model shard。
+- 测试：`tests/test_oa_pending_payment_read_model_refresh.py` 覆盖 inventory union 与不写 source watermark；`tests/test_oa_pending_payment_read_model_query.py` 覆盖 coverage-only fresh 和真实 OA source supersede。
+- 验证：`PYTHONPATH=backend/src python3 -m unittest tests.test_oa_pending_payment_read_model_refresh tests.test_oa_pending_payment_read_model_query -v`。
+
 ## 2026-07-17 - Workbench 关联后 OA 可见性热路径去串行依赖
 
 - 生产基线：正式关联操作后，OA 页面新数据约 `18.7s` 才可见；证据分解为 OA 事件首次 defer `1.510s`、等待约 `17.182s`、OA handler `12.180s`，另有约 `5s` queue 尾部。撤回同 scope 约 `2.106s`、handler `0.888s`，说明慢点不是页面查询，而是 OA projector串行等待 `workbench_relation` read model后又用 live query service做全量组装。

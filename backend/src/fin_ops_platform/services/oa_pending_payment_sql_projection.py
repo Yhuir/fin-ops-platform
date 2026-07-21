@@ -3,6 +3,7 @@ from __future__ import annotations
 from time import perf_counter
 from typing import Any
 
+from fin_ops_platform.domain.enums import InvoiceType
 from fin_ops_platform.services.invoice_usage_collection_source_versions import oa_pending_payment_source_versions
 from fin_ops_platform.services.oa_pending_payment_projection_rows import (
     build_oa_pending_payment_rows,
@@ -19,7 +20,7 @@ from fin_ops_platform.services.postgres_repositories.oa_pending_payment_relation
 )
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_snapshot import (
     PostgresOaPendingPaymentStatusSnapshotReader,
-    oa_pending_payment_source_scope_keys,
+    oa_pending_payment_coverage_only_source_versions,
     oa_pending_payment_source_versions_from_snapshot,
 )
 from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository
@@ -27,7 +28,7 @@ from fin_ops_platform.services.postgres_repositories.read_models import MONTH_SC
 from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
 
 
-OA_PENDING_PAYMENT_POSTGRES_PROJECTOR_VERSION = "2026-07-22-page-inventory-v3"
+OA_PENDING_PAYMENT_POSTGRES_PROJECTOR_VERSION = "2026-07-22-page-inventory-v4"
 
 
 def oa_pending_payment_base_source_versions() -> dict[str, object]:
@@ -49,9 +50,38 @@ class OaPendingPaymentSqlProjectionBuilder:
         normalized_scope_key = str(scope_key or "").strip()
         if MONTH_SCOPE_RE.match(normalized_scope_key):
             return [normalized_scope_key]
-        return oa_pending_payment_source_scope_keys(
-            self._connection,
-            tenant_id=tenant_id,
+        source_prefix = f"oa_pending_payment_source:{str(tenant_id or 'default').strip() or 'default'}:"
+        rows = self._connection.fetch_all(
+            """
+            select scope_key
+            from (
+                select substring(watermark.sync_key from length(%s) + 1) as scope_key
+                from app.oa_sync_watermarks watermark
+                where watermark.sync_key like %s
+                union
+                select distinct to_char(bank.txn_month, 'YYYY-MM') as scope_key
+                from app.bank_transactions bank
+                where bank.txn_month is not null
+                  and bank.status <> 'deleted'
+                union
+                select distinct to_char(invoice.invoice_month, 'YYYY-MM') as scope_key
+                from app.invoices invoice
+                where invoice.invoice_month is not null
+                  and invoice.status <> 'deleted'
+                  and invoice.invoice_type = %s
+            ) inventory
+            where scope_key ~ '^[0-9]{4}-[0-9]{2}$'
+            order by scope_key desc
+            """,
+            (source_prefix, f"{source_prefix}%", InvoiceType.INPUT.value),
+        )
+        return sorted(
+            {
+                str(row.get("scope_key") or "").strip()
+                for row in list(rows or [])
+                if isinstance(row, dict) and MONTH_SCOPE_RE.match(str(row.get("scope_key") or "").strip())
+            },
+            reverse=True,
         )
 
     def prune_scope_shards(self, current_scope_keys: list[str]) -> None:
@@ -180,6 +210,15 @@ class OaPendingPaymentSqlProjectionBuilder:
             in_progress_records=in_progress_records,
             rows=rows,
         )
+        coverage_only = (
+            not completed_records
+            and not in_progress_records
+            and not payment_statuses
+            and (
+                int(statistics.get("bank_transaction_count") or 0) > 0
+                or int(statistics.get("input_invoice_count") or 0) > 0
+            )
+        )
         return {
             "rows": rows,
             "statistics": statistics,
@@ -190,6 +229,7 @@ class OaPendingPaymentSqlProjectionBuilder:
                     connection,
                     scope_key=scope_key,
                     tenant_id=tenant_id,
+                    coverage_only=coverage_only,
                 ),
                 **coverage_versions,
             },
@@ -201,18 +241,27 @@ class OaPendingPaymentSqlProjectionBuilder:
         *,
         scope_key: str,
         tenant_id: str,
+        coverage_only: bool = False,
     ) -> dict[str, object]:
         snapshot_versions = oa_pending_payment_source_versions_from_snapshot(
             connection,
             scope_key=scope_key,
             tenant_id=tenant_id,
         )
-        if not snapshot_versions or not snapshot_versions.get("oa_pending_payment_source_signature"):
-            raise RuntimeError(f"oa_pending_payment_source_snapshot_missing:{scope_key}")
         pending_relation_versions = PostgresOaPendingPaymentRelationRepository(connection).source_versions(
             scope_key=scope_key,
             tenant_id=tenant_id,
         )
+        if not snapshot_versions and coverage_only:
+            return {
+                **oa_pending_payment_base_source_versions(),
+                **oa_pending_payment_coverage_only_source_versions(scope_key),
+                "oa_pending_payment_relation_version": int(
+                    pending_relation_versions.get("oa_pending_payment_relation_version") or 0
+                ),
+            }
+        if not snapshot_versions or not snapshot_versions.get("oa_pending_payment_source_signature"):
+            raise RuntimeError(f"oa_pending_payment_source_snapshot_missing:{scope_key}")
         if not pending_relation_versions:
             raise RuntimeError(f"oa_pending_payment_relation_version_missing:{scope_key}")
         return {
@@ -275,10 +324,7 @@ def _oa_pending_payment_statistics(
             from app.invoices invoice
             where invoice.invoice_month = to_date(%s, 'YYYY-MM')
               and invoice.status <> 'deleted'
-              and not (
-                  coalesce(invoice.invoice_type, '') ilike '%%output%%'
-                  or coalesce(invoice.invoice_type, '') like '%%销%%'
-              )
+              and invoice.invoice_type = %s
         )
         select
             bank_coverage.row_count as bank_transaction_count,
@@ -290,7 +336,7 @@ def _oa_pending_payment_statistics(
         from bank_coverage
         cross join invoice_coverage
         """,
-        (scope_key, scope_key),
+        (scope_key, scope_key, InvoiceType.INPUT.value),
     ) or {}
     completed_ids = {str(record.id) for record in completed_records if str(getattr(record, "id", "")).strip()}
     in_progress_ids = {

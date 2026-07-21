@@ -10,14 +10,20 @@ from fin_ops_platform.services.input_invoice_usage_oa_reverse_service import (
 )
 from fin_ops_platform.services.postgres_repositories.input_invoice_usage_oa_reverse import (
     PostgresInputInvoiceUsageOaReverseBatchRepository,
+    input_invoice_usage_oa_reverse_statistics_snapshot,
 )
 
 
 class RecordingConnection:
     def __init__(self) -> None:
         self.fetches: list[tuple[str, tuple[object, ...]]] = []
+        self.fetch_one_row: dict[str, object] | None = None
         self.fetch_all_rows: list[dict[str, object]] = []
         self.executions: list[tuple[str, tuple[object, ...]]] = []
+
+    def fetch_one(self, sql: str, params: tuple[object, ...] = ()) -> dict[str, object] | None:
+        self.fetches.append((" ".join(sql.split()), params))
+        return dict(self.fetch_one_row) if isinstance(self.fetch_one_row, dict) else None
 
     def fetch_all(self, sql: str, params: tuple[object, ...] = ()) -> list[dict[str, object]]:
         self.fetches.append((" ".join(sql.split()), params))
@@ -29,6 +35,26 @@ class RecordingConnection:
 
 
 class PostgresInputInvoiceUsageOaReverseBatchRepositoryTests(unittest.TestCase):
+    def test_statistics_snapshot_versions_batch_count_without_loading_batch_payloads(self) -> None:
+        connection = RecordingConnection()
+        connection.fetch_one_row = {
+            "batch_count": 12,
+            "max_created_at": "2026-07-22 08:30:00+00",
+        }
+
+        snapshot = input_invoice_usage_oa_reverse_statistics_snapshot(connection)
+
+        self.assertEqual(snapshot["batch_count"], 12)
+        self.assertEqual(
+            snapshot["source_version"],
+            "rows:12|max_created_at:2026-07-22 08:30:00+00",
+        )
+        sql, params = connection.fetches[0]
+        self.assertIn("count(*)::integer as batch_count", sql)
+        self.assertIn("max(created_at)::text as max_created_at", sql)
+        self.assertNotIn("raw_payload", sql)
+        self.assertEqual(params, ())
+
     def test_list_batches_by_status_reads_raw_payload_in_updated_order(self) -> None:
         batch = InputInvoiceUsageOaReverseBatch(
             batch_id="batch-history",

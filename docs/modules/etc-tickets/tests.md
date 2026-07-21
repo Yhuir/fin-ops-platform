@@ -46,6 +46,10 @@
 | 6. End-to-end business-flow integration tests | 适用 | `tests/test_etc_backend.py`、`web/e2e/etc-tickets-flow.spec.ts` | 覆盖导入/批次/人工提交/创建 OA 草稿/对账任务闭环/关联台展示/已提交批次本地 reset、任务入口删除绑定业务批次并取消 summary relation 的关键路径，并覆盖 durable import restart 后业务批次与 linked task 的一致性恢复；Playwright 补充真实浏览器 business-batches GET 暂时失败 -> 刷新 -> 恢复批次/明细、未提交 business batch delete 暂时失败 -> 弹窗/行保持 -> 重试成功后列表刷新、已提交 business batch reset/delete 暂时失败 -> submitted row/计数保持 -> 重试成功后列表刷新、source file delete 暂时失败 -> 弹窗/文件行保持 -> 重试成功后文件列表刷新、ticket-root source upload 暂时失败 -> 不追加文件 -> 重试成功后追加 source file、OA draft 暂时失败 -> dialog 保持 -> 重试成功、manual OA status 暂时失败 -> 保持提交确认 -> 重试成功，以及从未提交业务批次创建 OA 草稿到人工已提交 bucket 的页面闭环和成功后错误残留检查。 |
 | 7. Existing feature regression tests | 适用 | `tests/test_etc_backend.py`、`tests/test_object_storage_repository.py`、`tests/test_oa_projection_sql_runtime.py`、`tests/test_mongo_oa_adapter.py`、`tests/test_postgres_migrations.py`、`tests/test_postgres_state_store_integration.py`、`tests/test_rabbitmq_staging_preflight.py`、`web/src/test/EtcTicketManagementPage.test.tsx`、`web/e2e/etc-tickets-flow.spec.ts` | 覆盖既有 ETC 页面旧入口、OA 匹配汇总行、删除/文件/补充凭证交互、OA projection/Mongo adapter 删除 ETC 专用候选查询后不影响非 ETC OA 能力、对象存储 repository 暴露 backend/bucket 给 PostgreSQL 文件写入，migration 清单连续且 0103 只从 typed 时间列幂等补齐缺失 payload 时间，RabbitMQ staging preflight 不再要求 ETC OA detection worker，防止首屏加载失败被伪装为空态、历史任务与新任务混排导致 list/ready-list 500、未提交/已提交 business batch delete/reset 暂时失败被伪装成已删除、source file delete 暂时失败被伪装成已删除、ticket-root source upload 暂时失败被伪装成已上传、OA draft 暂时失败被伪装成提交确认成功、manual OA status 暂时失败被伪装成已提交、旧撤销提交入口、旧检测入口、旧删除状态阻塞、浏览器层 OA 草稿确认流程和“成功但报错提示仍显示”重新漂移。 |
 
+## 2026-07-22 页面统计快照回归
+
+- `tests/test_etc_backend.py::EtcApiTests::test_etc_business_batch_summaries_use_one_repeatable_read_only_snapshot` 证明 bucket 计数、完整性统计和当前分页 items 的两条有界 SQL 只在同一个 `REPEATABLE READ READ ONLY` 快照连接上执行。
+
 ## 2026-07-14 import worker 跨进程查询可见性增量
 
 - 类别 2（service）：`tests/test_etc_backend.py::EtcApiTests::test_etc_query_services_reload_worker_writes_from_postgres_state_store` 先构造 API query services，再由独立 worker services 写入共享 PostgreSQL 语义 store，断言 task、business batch 和 invoice 无需重启即可读取。

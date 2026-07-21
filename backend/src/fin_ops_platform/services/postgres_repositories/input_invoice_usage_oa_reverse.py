@@ -12,6 +12,23 @@ from fin_ops_platform.services.postgres_repositories.common import jsonb as _jso
 from fin_ops_platform.services.postgres_repositories.common import serialize_value as _serialize_jsonb_value
 
 
+def input_invoice_usage_oa_reverse_statistics_snapshot(connection: Any) -> dict[str, object]:
+    row = connection.fetch_one(
+        """
+        select
+            count(*)::integer as batch_count,
+            max(created_at)::text as max_created_at
+        from app.input_invoice_usage_oa_reverse_batches
+        """
+    )
+    batch_count = int(row.get("batch_count") or 0) if isinstance(row, dict) else 0
+    max_created_at = str(row.get("max_created_at") or "") if isinstance(row, dict) else ""
+    return {
+        "batch_count": batch_count,
+        "source_version": f"rows:{batch_count}|max_created_at:{max_created_at}",
+    }
+
+
 class PostgresInputInvoiceUsageOaReverseBatchRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection

@@ -40,11 +40,6 @@ class TurnoverLedgerQueryService:
             page=page,
             page_size=page_size,
         )
-        if isinstance(read_model_payload, dict):
-            read_model_payload = self._normalize_all_scope_source_versions(
-                read_model_payload,
-                expected_source_versions=expected_source_versions,
-            )
 
         result = ReadModelQueryGateway(queue_repository=self._refresh_queue_repository).load(
             scope_type=TURNOVER_LEDGER_SCOPE_TYPE,
@@ -64,7 +59,12 @@ class TurnoverLedgerQueryService:
             stale_reason="api_stale",
             source_mismatch_reason="api_stale",
         )
-        return result.payload
+        payload = dict(result.payload)
+        payload.pop("generation", None)
+        if payload.get("read_model_status") != "fresh":
+            payload["statistics"] = None
+            payload["statistics_status"] = "refreshing"
+        return payload
 
     def _read_from_repository(
         self,
@@ -86,17 +86,6 @@ class TurnoverLedgerQueryService:
             page_size=page_size,
             scope_key="all",
         )
-
-    @staticmethod
-    def _normalize_all_scope_source_versions(
-        payload: dict[str, Any],
-        *,
-        expected_source_versions: dict[str, Any],
-    ) -> dict[str, Any]:
-        refresh_status = str(payload.get("refresh_status") or "").strip().lower()
-        if payload.get("source_versions_mixed") is True and refresh_status == "fresh":
-            return {**payload, "source_versions": dict(expected_source_versions)}
-        return payload
 
     @staticmethod
     def _empty_refreshing_payload(

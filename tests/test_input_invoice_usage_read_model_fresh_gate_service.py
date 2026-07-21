@@ -8,6 +8,86 @@ from fin_ops_platform.services.input_invoice_usage_read_model_fresh_gate_service
 
 
 class InputInvoiceUsageReadModelFreshGateServiceTests(unittest.TestCase):
+    def test_statistics_generation_stale_keeps_rows_fresh_but_hides_statistics_and_refreshes_all(self) -> None:
+        enqueued: list[tuple[str, str]] = []
+        service = InputInvoiceUsageReadModelFreshGateService(
+            repository=RowsRepository(
+                {
+                    "rows": [
+                        {
+                            "id": "row-1",
+                            "invoice": {},
+                            "paymentStatus": {},
+                            "oa": {},
+                            "bankTransactions": {},
+                        }
+                    ],
+                    "pagination": {"page": 1, "pageSize": 50, "total": 1},
+                    "refresh_status": "fresh",
+                    "source_versions": {"schema": "v1"},
+                    "statistics": {"invoice_count": 1, "oa_reverse_batch_count": 2},
+                    "statistics_status": "fresh",
+                    "statistics_source_versions": {
+                        "schema": "v1",
+                        "input_invoice_usage_oa_reverse_batch_source_version": (
+                            "rows:2|max_created_at:2026-07-22 08:00:00+00"
+                        )
+                    },
+                }
+            ),
+            requires_sql_read_model_runtime=lambda: True,
+            enqueue_refresh=lambda scope_key, reason: enqueued.append((scope_key, reason)) or True,
+            expected_source_versions=lambda **_: {"schema": "v1"},
+            expected_statistics_source_versions=lambda **_: {
+                "schema": "v1",
+                "input_invoice_usage_oa_reverse_batch_source_version": (
+                    "rows:3|max_created_at:2026-07-22 09:00:00+00"
+                )
+            },
+        )
+
+        payload = service.rows({"month": ["2026-05"]})
+
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual(payload["rows"][0]["id"], "row-1")
+        self.assertIsNone(payload["statistics"])
+        self.assertEqual(payload["statistics_status"], "refreshing")
+        self.assertEqual(enqueued, [("all", "api_statistics_source_versions_stale")])
+
+    def test_statistics_base_source_mismatch_hides_statistics_and_refreshes_all(self) -> None:
+        enqueued: list[tuple[str, str]] = []
+        generation = "rows:3|max_created_at:2026-07-22 09:00:00+00"
+        service = InputInvoiceUsageReadModelFreshGateService(
+            repository=RowsRepository(
+                {
+                    "rows": [],
+                    "pagination": {"page": 1, "pageSize": 50, "total": 0},
+                    "refresh_status": "fresh",
+                    "source_versions": {"schema": "rows-v1"},
+                    "statistics": {"invoice_count": 0, "oa_reverse_batch_count": 3},
+                    "statistics_status": "fresh",
+                    "statistics_source_versions": {
+                        "schema": "statistics-v1",
+                        "input_invoice_usage_oa_reverse_batch_source_version": generation,
+                    },
+                }
+            ),
+            requires_sql_read_model_runtime=lambda: True,
+            enqueue_refresh=lambda scope_key, reason: enqueued.append((scope_key, reason)) or True,
+            expected_source_versions=lambda **_: {"schema": "rows-v1"},
+            expected_statistics_source_versions=lambda **_: {
+                "schema": "statistics-v2",
+                "input_invoice_usage_oa_reverse_batch_source_version": generation,
+            },
+        )
+
+        payload = service.rows({})
+
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertIsNone(payload["statistics"])
+        self.assertEqual(payload["statistics_status"], "refreshing")
+        self.assertEqual(enqueued, [("all", "api_statistics_source_versions_stale")])
+
     def test_schema_stale_payload_enqueues_refresh_without_marking_fresh(self) -> None:
         enqueued: list[tuple[str, str]] = []
         service = InputInvoiceUsageReadModelFreshGateService(

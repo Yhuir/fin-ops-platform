@@ -84,6 +84,7 @@ class TurnoverLedgerSqlProjectionBuilder:
             if isinstance(existing.get("source_versions"), dict)
             else {}
         )
+        expected_generation = max(int(existing.get("generation") or 0), 0)
         rows = [dict(row) for row in list(existing.get("rows") or []) if isinstance(row, dict)]
         rows = self._with_workbench_relation_context(
             rows,
@@ -106,6 +107,7 @@ class TurnoverLedgerSqlProjectionBuilder:
                 "rows": rows,
                 "source_versions": source_versions,
                 "source_version": source_version,
+                "expected_generation": expected_generation,
             },
             scope_key=normalized_scope_key,
         )
@@ -138,6 +140,11 @@ class TurnoverLedgerSqlProjectionBuilder:
             read_repository=read_repository,
             scope_key=normalized_scope_key,
         )
+        expected_generation = (
+            max(int(existing_payload.get("generation") or 0), 0)
+            if isinstance(existing_payload, dict)
+            else self._turnover_ledger_generation(read_repository)
+        )
         unchanged = self._unchanged_scope_result(
             payload=existing_payload,
             workbench_relation_source_repository=workbench_relation_source_repository,
@@ -145,13 +152,22 @@ class TurnoverLedgerSqlProjectionBuilder:
             source_versions=source_versions,
         )
         if unchanged is not None:
-            return unchanged
+            acknowledge = getattr(read_repository, "acknowledge_unchanged_turnover_ledger_scope", None)
+            if not callable(acknowledge):
+                raise RuntimeError("Turnover ledger unchanged refresh requires generation acknowledgement I/O.")
+            generation = acknowledge(
+                scope_key=normalized_scope_key,
+                source_version=source_version,
+                expected_generation=expected_generation,
+            )
+            return {**unchanged, "generation": generation}
         refreshed_existing = self._refresh_existing_scope_rows(
             read_repository=read_repository,
             workbench_relation_source_repository=workbench_relation_source_repository,
             scope_key=normalized_scope_key,
             source_versions=source_versions,
             source_version=source_version,
+            expected_generation=expected_generation,
             initial_payload=existing_payload,
         )
         if refreshed_existing is not None:
@@ -171,6 +187,7 @@ class TurnoverLedgerSqlProjectionBuilder:
             "rows": rows,
             "source_versions": source_versions,
             "source_version": source_version,
+            "expected_generation": expected_generation,
         }
         save_rows = getattr(read_repository, "save_turnover_ledger_rows", None)
         if not callable(save_rows):
@@ -228,6 +245,7 @@ class TurnoverLedgerSqlProjectionBuilder:
         scope_key: str,
         source_versions: dict[str, Any],
         source_version: object,
+        expected_generation: int,
         initial_payload: dict[str, Any] | None,
     ) -> dict[str, Any] | None:
         rows, existing_source_versions = cls._existing_scope_rows(
@@ -256,6 +274,7 @@ class TurnoverLedgerSqlProjectionBuilder:
                 "rows": rows,
                 "source_versions": refreshed_source_versions,
                 "source_version": source_version,
+                "expected_generation": expected_generation,
             },
             scope_key=scope_key,
         )
@@ -311,6 +330,13 @@ class TurnoverLedgerSqlProjectionBuilder:
             return None
         payload = list_view(scope_key=scope_key, page=1, page_size=200)
         return dict(payload) if isinstance(payload, dict) else None
+
+    @staticmethod
+    def _turnover_ledger_generation(read_repository: Any) -> int:
+        get_generation = getattr(read_repository, "turnover_ledger_generation", None)
+        if not callable(get_generation):
+            return 0
+        return max(int(get_generation() or 0), 0)
 
     def _collect_rows_cached(
         self,

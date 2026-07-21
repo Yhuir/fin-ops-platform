@@ -89,7 +89,7 @@
 
 - 红冲 fan-out 和撤回恢复必须在删除旧路径前覆盖。
 - 已删除标题计数的 `page_size=1` 二次请求；标题统计只能消费 rows 主响应，禁止恢复独立 title-total I/O。
-- `output_invoice_collection_statistics_schema_version` 负责生产旧 scope 的统计元数据回填；source version 相同但缺少合法统计元数据时也必须重建，不能走 unchanged skip。批量导出仅第一页读取并校验标题统计，后续页传 `include_statistics=false`，但仍逐页执行 rows freshness/source-version gate。
+- `output_invoice_collection_statistics_schema_version` 负责生产旧 scope 的统计元数据回填；source version 相同但缺少合法统计元数据时也必须重建，不能走 unchanged skip。批量导出的所有分页均传 `include_statistics=false`，不重复读取、校验或透传页面标题统计；每一页仍执行 rows freshness、schema 和 source-version gate。
 
 ## Canonical facts ownership
 

@@ -132,6 +132,7 @@ EXPECTED_MIGRATIONS = [
     "0116_workbench_etc_relation_enrichment_hot_path.sql",
     "0117_workbench_matching_idempotency_runtime_grant.sql",
     "0118_bank_flow_rule_batch_settings_raw_alignment.sql",
+    "0119_turnover_ledger_scope_summaries.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -243,6 +244,7 @@ EXPECTED_TABLES = [
     "read_model.no_oa_bank_batch_rows",
     "read_model.bank_flow_rule_batch_rows",
     "read_model.turnover_ledger_rows",
+    "read_model.turnover_ledger_scopes",
 ]
 READ_MODEL_STORAGE_CONTRACTS = {
     "workbench": (
@@ -277,7 +279,7 @@ READ_MODEL_STORAGE_CONTRACTS = {
     "tax_offset": ("read_model.tax_offset_read_models", "read_model.tax_offset_items"),
     "no_oa_bank_batch": ("read_model.no_oa_bank_batch_rows",),
     "bank_flow_rule_batch": ("read_model.bank_flow_rule_batch_rows",),
-    "turnover_ledger": ("read_model.turnover_ledger_rows",),
+    "turnover_ledger": ("read_model.turnover_ledger_rows", "read_model.turnover_ledger_scopes"),
 }
 
 
@@ -294,7 +296,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 119)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 120)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -356,6 +358,27 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertIn("turnover_ledger_rows_bank_row_ids_gin", sql)
         self.assertIn("read_model.turnover_ledger_rows", sql)
         self.assertIn("using gin (bank_row_ids)", sql)
+
+    def test_turnover_ledger_scope_summary_has_zero_row_and_runtime_contracts(self) -> None:
+        sql = strip_sql_comments(
+            (MIGRATIONS_DIR / "0119_turnover_ledger_scope_summaries.sql").read_text(encoding="utf-8")
+        ).lower()
+        normalized_sql = " ".join(sql.split())
+
+        self.assertIn("create table if not exists read_model.turnover_ledger_scopes", normalized_sql)
+        self.assertIn("scope_key text not null unique", normalized_sql)
+        self.assertIn("row_count integer not null default 0", normalized_sql)
+        self.assertIn("source_versions jsonb not null", normalized_sql)
+        self.assertIn("statistics jsonb not null", normalized_sql)
+        self.assertIn("generation bigint not null default 0", normalized_sql)
+        self.assertIn("published_source_version bigint", normalized_sql)
+        self.assertIn("check (generation >= 0)", normalized_sql)
+        self.assertIn("raw_payload = raw_payload - 'page_statistics'", normalized_sql)
+        for role in ("fin_ops_worker", "fin_ops_migrator", "fin_ops_app_runtime", "fin_ops_app"):
+            self.assertIn(
+                f"grant select, insert, update, delete on read_model.turnover_ledger_scopes to {role}",
+                normalized_sql,
+            )
 
     def test_workbench_etc_relation_enrichment_indexes_match_exact_contract(self) -> None:
         sql = (

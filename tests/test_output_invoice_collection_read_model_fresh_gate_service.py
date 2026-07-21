@@ -8,7 +8,7 @@ from fin_ops_platform.services.output_invoice_collection_read_model_fresh_gate_s
 
 
 class OutputInvoiceCollectionReadModelFreshGateServiceTests(unittest.TestCase):
-    def test_all_rows_requests_title_statistics_only_on_first_page(self) -> None:
+    def test_all_rows_skips_title_statistics_on_every_page(self) -> None:
         repository = PagedRowsRepository()
         service = OutputInvoiceCollectionReadModelFreshGateService(
             repository=repository,
@@ -21,7 +21,9 @@ class OutputInvoiceCollectionReadModelFreshGateServiceTests(unittest.TestCase):
         payload = service.all_rows({"month": ["2026-05"]})
 
         self.assertEqual(len(payload["rows"]), 201)
-        self.assertEqual([call["include_statistics"] for call in repository.calls], [True, False])
+        self.assertEqual([call["include_statistics"] for call in repository.calls], [False, False])
+        self.assertNotIn("statistics", payload)
+        self.assertNotIn("statistics_status", payload)
 
     def test_schema_stale_payload_enqueues_refresh_without_marking_fresh(self) -> None:
         enqueued: list[tuple[str, str]] = []

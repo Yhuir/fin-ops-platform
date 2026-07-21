@@ -177,7 +177,7 @@ class PendingInvoiceReadModelService:
         first_query = {key: list(values) for key, values in query.items()}
         first_query["page"] = ["1"]
         first_query["page_size"] = [str(page_size)]
-        first_payload = self.rows(first_query)
+        first_payload = self.rows(first_query, include_statistics=False)
         if first_payload.get("read_model_status") != "fresh":
             return first_payload
 
@@ -209,8 +209,6 @@ class PendingInvoiceReadModelService:
             "rows": rows,
             "pagination": {"page": 1, "page_size": page_size, "total": total},
             "summary": first_payload.get("summary") if isinstance(first_payload.get("summary"), dict) else {},
-            "statistics": first_payload.get("statistics") if isinstance(first_payload.get("statistics"), dict) else None,
-            "statistics_status": first_payload.get("statistics_status") or "refreshing",
             "read_model_status": "fresh",
             "read_model_scope_key": first_payload.get("read_model_scope_key"),
         }

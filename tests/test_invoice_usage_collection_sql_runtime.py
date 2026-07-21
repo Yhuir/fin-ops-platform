@@ -29,6 +29,7 @@ from fin_ops_platform.services.output_invoice_collection_read_model_repository i
 from fin_ops_platform.services.postgres_repositories.read_models import (
     PostgresInvoiceUsageCollectionReadModelRepository,
     PostgresReadModelRepository,
+    _invoice_relation_statistics_from_scope_metadata,
 )
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_admission import (
     PostgresOaPendingPaymentAdmissionRepository,
@@ -105,6 +106,9 @@ class EmptyTransactionConnection:
 
     def fetch_all(self, *_args: object, **_kwargs: object) -> list[dict]:
         return []
+
+    def fetch_one(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+        return {"batch_count": 0, "max_created_at": None}
 
     def execute(self, *_args: object, **_kwargs: object) -> None:
         return None
@@ -1278,6 +1282,88 @@ class OutputInvoiceCollectionReadModelRepositoryPortTests(unittest.TestCase):
 
 
 class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
+    def test_input_expected_versions_do_not_live_query_oa_reverse_batch_statistics(self) -> None:
+        app = object.__new__(Application)
+        app._input_invoice_usage_payment_rules_provider_instance = (
+            AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None)
+        )
+        app._workbench_relation_sql_read_repository = None
+
+        versions = app._input_invoice_usage_expected_source_versions(scope_key="all")
+
+        self.assertNotIn("input_invoice_usage_oa_reverse_batch_source_version", versions)
+        self.assertEqual(versions["input_invoice_usage_statistics_schema_version"], 2)
+
+    def test_input_statistics_expected_versions_use_live_oa_reverse_batch_generation(self) -> None:
+        class StatisticsConnection:
+            def fetch_one(self, sql: str, params: tuple = ()) -> dict[str, object]:
+                self.sql = " ".join(sql.split())
+                self.params = params
+                return {
+                    "batch_count": 3,
+                    "max_created_at": "2026-07-22 09:00:00+00",
+                }
+
+        connection = StatisticsConnection()
+        app = object.__new__(Application)
+        app._input_invoice_usage_payment_rules_provider_instance = (
+            AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None)
+        )
+        app._workbench_relation_sql_read_repository = None
+        app._state_store = type(
+            "StateStore",
+            (),
+            {"storage_backend": "postgres", "_connection": connection},
+        )()
+
+        versions = app._input_invoice_usage_statistics_expected_source_versions(scope_key="all")
+
+        self.assertEqual(
+            versions["input_invoice_usage_oa_reverse_batch_source_version"],
+            "rows:3|max_created_at:2026-07-22 09:00:00+00",
+        )
+        self.assertEqual(versions["input_invoice_usage_statistics_schema_version"], 2)
+        self.assertIn("oa_projection_sync_version", versions)
+        self.assertIn("from app.input_invoice_usage_oa_reverse_batches", connection.sql)
+        self.assertEqual(connection.params, ())
+
+    def test_input_all_scope_uses_one_consistent_global_oa_reverse_batch_count(self) -> None:
+        month_statistics = {
+            "invoice_count": 1,
+            "linked_oa_invoice_count": 0,
+            "linked_bank_invoice_count": 0,
+            "paid_invoice_count": 0,
+            "unlinked_oa_invoice_count": 1,
+            "unlinked_bank_invoice_count": 1,
+            "unpaid_invoice_count": 1,
+            "formal_relation_group_count": 0,
+            "oa_reverse_batch_count": 3,
+        }
+
+        statistics = _invoice_relation_statistics_from_scope_metadata(
+            [
+                {"statistics": dict(month_statistics)},
+                {"statistics": dict(month_statistics)},
+            ],
+            summary_kind="input",
+        )
+
+        self.assertIsNotNone(statistics)
+        self.assertEqual(statistics["invoice_count"], 2)
+        self.assertEqual(statistics["oa_reverse_batch_count"], 3)
+
+        inconsistent = dict(month_statistics)
+        inconsistent["oa_reverse_batch_count"] = 4
+        self.assertIsNone(
+            _invoice_relation_statistics_from_scope_metadata(
+                [
+                    {"statistics": dict(month_statistics)},
+                    {"statistics": inconsistent},
+                ],
+                summary_kind="input",
+            )
+        )
+
     def test_input_repository_can_skip_statistics_on_later_export_pages(self) -> None:
         connection = InvoiceReadModelConnection(
             input_rows=[
@@ -2962,7 +3048,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
 
     def test_projection_builder_marks_empty_invoice_scopes_with_source_versions(self) -> None:
         read_repository = RecordingInvoiceRelationReadRepository()
-        builder = InvoiceUsageCollectionSqlProjectionBuilder(connection=object())
+        builder = InvoiceUsageCollectionSqlProjectionBuilder(connection=EmptyTransactionConnection())
         builder._output_invoice_collection_read_model_repository = read_repository
         builder._input_invoice_usage_read_model_repository = read_repository
 

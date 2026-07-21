@@ -26,11 +26,15 @@ class InputInvoiceUsageReadModelFreshGateService:
         requires_sql_read_model_runtime: Callable[[], bool],
         enqueue_refresh: Callable[[str, str], bool],
         expected_source_versions: Callable[..., dict[str, object]],
+        expected_statistics_source_versions: Callable[..., dict[str, object]] | None = None,
     ) -> None:
         self._repository = repository
         self._requires_sql_read_model_runtime = requires_sql_read_model_runtime
         self._enqueue_refresh = enqueue_refresh
         self._expected_source_versions = expected_source_versions
+        self._expected_statistics_source_versions = (
+            expected_statistics_source_versions or expected_source_versions
+        )
 
     def export_page(self, **kwargs: object) -> dict[str, object] | None:
         include_statistics = bool(kwargs.pop("include_statistics", True))
@@ -176,7 +180,7 @@ class InputInvoiceUsageReadModelFreshGateService:
         )
         stale_reasons = source_version_mismatch_reasons(
             expected=require_expected_source_versions(
-                self._expected_source_versions(scope_key="all"),
+                self._expected_statistics_source_versions(scope_key="all"),
                 context="input_invoice_usage_statistics",
             ),
             actual=actual_versions,

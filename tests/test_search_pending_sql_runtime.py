@@ -2803,7 +2803,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(repository.calls[0]["page"], "1")
         self.assertEqual(repository.calls[0]["page_size"], "200")
 
-    def test_pending_invoice_all_rows_requests_title_statistics_only_on_first_page(self) -> None:
+    def test_pending_invoice_all_rows_skips_title_statistics_on_every_page(self) -> None:
         expected_versions = _pending_invoice_expected_source_versions()
 
         class PendingRepo:
@@ -2852,7 +2852,9 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         payload = service.all_rows({"direction": ["expense"]})
 
         self.assertEqual(len(payload["rows"]), 201)
-        self.assertEqual([call["include_statistics"] for call in repository.calls], [True, False])
+        self.assertEqual([call["include_statistics"] for call in repository.calls], [False, False])
+        self.assertNotIn("statistics", payload)
+        self.assertNotIn("statistics_status", payload)
 
     def test_pending_invoice_sql_page_preserves_bank_tag_settings(self) -> None:
         app = object.__new__(Application)

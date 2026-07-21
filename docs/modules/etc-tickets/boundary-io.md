@@ -5,7 +5,7 @@
 ## 页面完整性统计合同
 
 - ETC 批次列表既有主响应增加 `statistics`，统计来自该页面查询所用的 ETC 发票、业务批次、对账任务和 OA 草稿事实；它不读取统一事实源汇总，也不受当前用户的 bucket、车牌、关键词或分页条件影响。
-- ETC 页面当前直接读取 PostgreSQL canonical facts，没有 read model freshness 状态；统计与列表计数在同一查询边界内计算。业务批次状态与 OA 草稿数复用一次 `FILTER` 聚合；发票总数与已导入数单次扫描发票表，并通过发票持久化的导入来源标量关联有效导入批次，不在请求期展开批次 JSON 数组。不新增 endpoint、表、worker、缓存或第二套事实源。
+- ETC 页面当前直接读取 PostgreSQL canonical facts，没有 read model freshness 状态；统计、三个 bucket 计数和当前分页 items 的两条有界 SQL 必须在同一个显式 `REPEATABLE READ READ ONLY` 快照内执行，避免并发写入导致同一响应自相矛盾。业务批次状态与 OA 草稿数复用一次 `FILTER` 聚合；发票总数与已导入数单次扫描发票表，并通过发票持久化的导入来源标量关联有效导入批次，不在请求期展开批次 JSON 数组。不新增 endpoint、表、worker、缓存或第二套事实源。
 - Page Audit 独立重算同一页面边界的统计并检查批次/发票/任务关系；页面统计只用于与外部统一事实源进行人工完整性对比，统一事实源不能反向填充页面统计。
 
 ## 模块化状态

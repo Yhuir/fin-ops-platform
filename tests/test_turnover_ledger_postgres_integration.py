@@ -142,10 +142,41 @@ class TurnoverLedgerPostgresIntegrationTests(unittest.TestCase):
             "select payload, raw_payload from read_model.turnover_ledger_rows order by relation_id"
         )
         self.assertTrue(all(isinstance(row["payload"], dict) and row["payload"] for row in stored))
-        markers = [row["raw_payload"]["page_statistics"] for row in stored if "page_statistics" in row["raw_payload"]]
-        self.assertEqual(len(markers), 1)
-        self.assertEqual(markers[0]["transaction_count"], 3)
-        self.assertEqual(markers[0]["ledger_group_count"], 3)
+        self.assertTrue(all(row["raw_payload"] == {} for row in stored))
+        scope = self.connection.fetch_one(
+            "select row_count, statistics from read_model.turnover_ledger_scopes where scope_key = 'all'"
+        )
+        self.assertEqual(scope["row_count"], 3)
+        self.assertEqual(scope["statistics"]["transaction_count"], 3)
+        self.assertEqual(scope["statistics"]["ledger_group_count"], 3)
+
+    def test_zero_row_generation_is_fresh_with_zero_statistics(self) -> None:
+        self.repository.save_turnover_ledger_rows(
+            {"rows": [], "source_versions": self.source_versions},
+            scope_key="all",
+        )
+
+        payload = self.repository.list_turnover_ledger_view(scope_key="all")
+
+        self.assertIsInstance(payload, dict)
+        assert isinstance(payload, dict)
+        self.assertEqual(payload["rows"], [])
+        self.assertEqual(payload["pagination"]["total"], 0)
+        self.assertEqual(payload["source_versions"], self.source_versions)
+        self.assertEqual(payload["refresh_status"], "fresh")
+        self.assertEqual(
+            payload["statistics"],
+            {
+                "transaction_count": 0,
+                "expense_transaction_count": 0,
+                "income_transaction_count": 0,
+                "ledger_group_count": 0,
+                "closed_group_count": 0,
+                "unclosed_group_count": 0,
+                "linked_oa_transaction_count": 0,
+                "linked_invoice_transaction_count": 0,
+            },
+        )
 
     def test_all_scope_aggregates_child_dirty_status_and_failed_takes_precedence(self) -> None:
         self.repository.save_turnover_ledger_rows(
@@ -338,7 +369,12 @@ class TurnoverLedgerPostgresIntegrationTests(unittest.TestCase):
         target["cash_closure_linked"] = True
         target["source_versions"] = next_versions
         self.repository.save_turnover_ledger_relation_delta(
-            {"rows": [target], "source_versions": next_versions},
+            {
+                "rows": [target],
+                "source_versions": next_versions,
+                "source_version": 1,
+                "expected_generation": delta["generation"],
+            },
             scope_key="2026-03",
         )
 

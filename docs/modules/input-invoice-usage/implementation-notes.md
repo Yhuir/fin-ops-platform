@@ -3,6 +3,14 @@
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 
+## 2026-07-22 - OA reverse 批次数投影化
+
+- 目标：标题展示完整 OA reverse 批次数，同时保持 API/标题热路径不扫描 owned batch 表。
+- 边界：worker rebuild 一次聚合 `count + max(created_at)`，把数量和 source version 写入每月统计 metadata；all scope 对全局批次数取一致值、不按月份求和。真实新建 batch 保存成功后单独 enqueue `input_invoice_usage:all`；幂等命中和后续状态变更不重复 enqueue。
+- 旧链：移除 repository 页面统计组装时混入的 live COUNT；普通 rows/filter/detail/export expected-version provider不读取 batch 表。标题 statistics 使用独立 generation gate 对比 live `count + max(created_at)` 与已发布 metadata，enqueue 失败时也会 fail closed 为 refreshing/dash。
+- 测试：repository snapshot、跨月一致性聚合、create 幂等单次 invalidation，以及 invoice usage SQL runtime 回归。
+- 验证：`PYTHONPATH=backend/src python3 -m unittest tests.test_input_invoice_usage_oa_reverse_service tests.test_postgres_input_invoice_usage_oa_reverse_repository tests.test_invoice_usage_collection_sql_runtime -v`。
+
 ## 当前决策
 
 - 默认 all scope 查询不得因为月份间嵌套 `workbench_relation_source_versions` 不同而清空基础 `source_versions`；API freshness 只要求服务端期望的基础 source version 字段匹配。

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import Any, Iterator
 
 from fin_ops_platform.services.postgres_repositories.common import (
     decimal_text,
@@ -22,6 +23,17 @@ from fin_ops_platform.services.postgres_snapshot_contracts import normalize_app_
 
 
 OA_SYNC_STATE_KEY = "oa_sync_state"
+
+
+@contextmanager
+def _repeatable_read_only_snapshot(connection: Any) -> Iterator[Any]:
+    transaction_factory = getattr(connection, "transaction", None)
+    if not callable(transaction_factory):
+        yield connection
+        return
+    with transaction_factory() as snapshot_connection:
+        snapshot_connection.execute("set transaction isolation level repeatable read read only")
+        yield snapshot_connection
 
 
 def _oa_attachment_cache_source_rows(cache_key: str, payload: dict[str, Any]) -> list[dict[str, str | None]]:
@@ -895,94 +907,95 @@ class PostgresOpsTaxEtcRepository:
             params[5], params[5],
             params[6], params[6], params[6], params[6], params[6],
         )
-        count_rows = self._connection.fetch_all(
-            common_sql
-            + """
-            , bucket_counts as (
-                select bucket, count(*)::integer as count
-                from scoped
-                group by bucket
-            ), invoice_stats as (
-                select
-                    count(*)::integer as etc_invoice_count,
-                    count(*) filter (where import_batch.batch_id is not null)::integer
-                        as imported_invoice_count
-                from app.etc_invoices invoice
-                left join app.etc_import_batches import_batch
-                  on import_batch.batch_id = nullif(
-                      coalesce(
-                          invoice.raw_payload->'normalized_payload'->>'import_batch_id',
-                          invoice.raw_payload->>'import_batch_id'
-                      ),
-                      ''
-                  )
-                 and coalesce(import_batch.legacy_mongo_id, '') !~ '^current_state:'
-                 and import_batch.status <> 'deleted'
-                where coalesce(invoice.legacy_mongo_id, '') !~ '^current_state:'
-                  and invoice.status <> 'deleted'
-            ), statistics as (
-                select
-                    invoice_stats.etc_invoice_count,
-                    batch_stats.business_batch_count,
-                    batch_stats.unsubmitted_batch_count,
-                    batch_stats.draft_batch_count,
-                    batch_stats.submitted_batch_count,
-                    (
-                        select count(*)::integer
-                        from app.etc_reconciliation_tasks task
-                        where coalesce(task.legacy_mongo_id, '') !~ '^current_state:'
-                          and task.status <> 'deleted'
-                    ) as reconciliation_task_count,
-                    (
-                        select count(*)::integer
-                        from app.etc_reconciliation_files file
-                        where coalesce(file.legacy_mongo_id, '') !~ '^current_state:'
-                          and file.status <> 'deleted'
-                    ) as source_file_count,
-                    invoice_stats.imported_invoice_count,
-                    (
-                        select count(distinct link.etc_invoice_id)::integer
-                        from app.etc_batch_invoice_links link
-                        where link.link_status = 'active'
-                          and link.tenant_id = 'default'
-                    ) as linked_canonical_invoice_count,
-                    batch_stats.oa_draft_batch_count
-                from (
+        with _repeatable_read_only_snapshot(self._connection) as connection:
+            count_rows = connection.fetch_all(
+                common_sql
+                + """
+                , bucket_counts as (
+                    select bucket, count(*)::integer as count
+                    from scoped
+                    group by bucket
+                ), invoice_stats as (
                     select
-                        count(*)::integer as business_batch_count,
-                        count(*) filter (
-                            where status not in (
-                                'oa_confirmation_pending', 'oa_submitted', 'manually_marked_submitted', 'closed'
-                            )
-                        )::integer as unsubmitted_batch_count,
-                        count(*) filter (where status = 'oa_confirmation_pending')::integer as draft_batch_count,
-                        count(*) filter (
-                            where status in ('oa_submitted', 'manually_marked_submitted', 'closed')
-                        )::integer as submitted_batch_count,
-                        count(*) filter (where oa_draft_id is not null)::integer as oa_draft_batch_count
-                    from canonical
-                ) batch_stats
-                cross join invoice_stats
+                        count(*)::integer as etc_invoice_count,
+                        count(*) filter (where import_batch.batch_id is not null)::integer
+                            as imported_invoice_count
+                    from app.etc_invoices invoice
+                    left join app.etc_import_batches import_batch
+                      on import_batch.batch_id = nullif(
+                          coalesce(
+                              invoice.raw_payload->'normalized_payload'->>'import_batch_id',
+                              invoice.raw_payload->>'import_batch_id'
+                          ),
+                          ''
+                      )
+                     and coalesce(import_batch.legacy_mongo_id, '') !~ '^current_state:'
+                     and import_batch.status <> 'deleted'
+                    where coalesce(invoice.legacy_mongo_id, '') !~ '^current_state:'
+                      and invoice.status <> 'deleted'
+                ), statistics as (
+                    select
+                        invoice_stats.etc_invoice_count,
+                        batch_stats.business_batch_count,
+                        batch_stats.unsubmitted_batch_count,
+                        batch_stats.draft_batch_count,
+                        batch_stats.submitted_batch_count,
+                        (
+                            select count(*)::integer
+                            from app.etc_reconciliation_tasks task
+                            where coalesce(task.legacy_mongo_id, '') !~ '^current_state:'
+                              and task.status <> 'deleted'
+                        ) as reconciliation_task_count,
+                        (
+                            select count(*)::integer
+                            from app.etc_reconciliation_files file
+                            where coalesce(file.legacy_mongo_id, '') !~ '^current_state:'
+                              and file.status <> 'deleted'
+                        ) as source_file_count,
+                        invoice_stats.imported_invoice_count,
+                        (
+                            select count(distinct link.etc_invoice_id)::integer
+                            from app.etc_batch_invoice_links link
+                            where link.link_status = 'active'
+                              and link.tenant_id = 'default'
+                        ) as linked_canonical_invoice_count,
+                        batch_stats.oa_draft_batch_count
+                    from (
+                        select
+                            count(*)::integer as business_batch_count,
+                            count(*) filter (
+                                where status not in (
+                                    'oa_confirmation_pending', 'oa_submitted', 'manually_marked_submitted', 'closed'
+                                )
+                            )::integer as unsubmitted_batch_count,
+                            count(*) filter (where status = 'oa_confirmation_pending')::integer as draft_batch_count,
+                            count(*) filter (
+                                where status in ('oa_submitted', 'manually_marked_submitted', 'closed')
+                            )::integer as submitted_batch_count,
+                            count(*) filter (where oa_draft_id is not null)::integer as oa_draft_batch_count
+                        from canonical
+                    ) batch_stats
+                    cross join invoice_stats
+                )
+                select bucket.bucket, coalesce(bucket_counts.count, 0)::integer as count, statistics.*
+                from (values ('unsubmitted'), ('staged'), ('submitted')) as bucket(bucket)
+                left join bucket_counts using (bucket)
+                cross join statistics
+                order by bucket.bucket
+                """,
+                repeated_params,
             )
-            select bucket.bucket, coalesce(bucket_counts.count, 0)::integer as count, statistics.*
-            from (values ('unsubmitted'), ('staged'), ('submitted')) as bucket(bucket)
-            left join bucket_counts using (bucket)
-            cross join statistics
-            order by bucket.bucket
-            """,
-            repeated_params,
-        )
-        rows = self._connection.fetch_all(
-            common_sql
-            + """
-                select batch_payload, task_payload, scope_month, invoice_count, total_amount
-                from scoped
-                where bucket = %s::text
-                order by created_at desc, business_batch_id desc
-                limit %s::integer offset %s::integer
-            """,
-            repeated_params + (bucket, page_size, (page - 1) * page_size),
-        )
+            rows = connection.fetch_all(
+                common_sql
+                + """
+                    select batch_payload, task_payload, scope_month, invoice_count, total_amount
+                    from scoped
+                    where bucket = %s::text
+                    order by created_at desc, business_batch_id desc
+                    limit %s::integer offset %s::integer
+                """,
+                repeated_params + (bucket, page_size, (page - 1) * page_size),
+            )
         counts = {"unsubmitted": 0, "staged": 0, "submitted": 0}
         statistics: dict[str, int] | None = None
         for row in count_rows:

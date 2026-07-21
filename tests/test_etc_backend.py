@@ -3534,6 +3534,84 @@ class EtcApiTests(unittest.TestCase):
         self.assertEqual(list_query_count, 2)
         self.assertEqual(detail_query_count, 3)
 
+    def test_etc_business_batch_summaries_use_one_repeatable_read_only_snapshot(self) -> None:
+        snapshot_calls: list[tuple[str, tuple[object, ...]]] = []
+        transaction_count = 0
+
+        class SnapshotConnection:
+            def execute(self, sql: str, params: tuple[object, ...] = ()) -> None:
+                snapshot_calls.append((" ".join(sql.split()), params))
+
+            def fetch_all(self, sql: str, params: tuple[object, ...] = ()) -> list[dict[str, object]]:
+                normalized_sql = " ".join(sql.split())
+                snapshot_calls.append((normalized_sql, params))
+                if "group by bucket" in normalized_sql:
+                    return [{
+                        "bucket": "unsubmitted",
+                        "count": 1,
+                        "etc_invoice_count": 2,
+                        "business_batch_count": 1,
+                        "unsubmitted_batch_count": 1,
+                        "draft_batch_count": 0,
+                        "submitted_batch_count": 0,
+                        "reconciliation_task_count": 1,
+                        "source_file_count": 1,
+                        "imported_invoice_count": 2,
+                        "linked_canonical_invoice_count": 2,
+                        "oa_draft_batch_count": 0,
+                    }]
+                if "select batch_payload, task_payload" in normalized_sql:
+                    return [{
+                        "batch_payload": {
+                            "business_batch_id": "ETC-BATCH-SNAPSHOT",
+                            "task_id": "ETC-TASK-SNAPSHOT",
+                            "status": "imported",
+                            "invoice_ids": ["invoice-1", "invoice-2"],
+                            "created_at": "2026-07-22T00:00:00+00:00",
+                            "version": 1,
+                        },
+                        "task_payload": {"task_id": "ETC-TASK-SNAPSHOT", "status": "imported"},
+                        "scope_month": None,
+                        "invoice_count": 2,
+                        "total_amount": "26.14",
+                    }]
+                raise AssertionError(f"unexpected fetch_all SQL: {normalized_sql}")
+
+        snapshot_connection = SnapshotConnection()
+
+        class Transaction:
+            def __enter__(self) -> SnapshotConnection:
+                return snapshot_connection
+
+            def __exit__(self, *_args: object) -> None:
+                return None
+
+        class RootConnection:
+            def transaction(self) -> Transaction:
+                nonlocal transaction_count
+                transaction_count += 1
+                return Transaction()
+
+            def fetch_all(self, *_args: object, **_kwargs: object) -> list[dict[str, object]]:
+                raise AssertionError("ETC summary queries must use the snapshot connection")
+
+        payload = PostgresOpsTaxEtcRepository(RootConnection()).list_etc_business_batch_summaries(
+            bucket="unsubmitted",
+            page=1,
+            page_size=20,
+            can_admin_access=True,
+        )
+
+        self.assertEqual(transaction_count, 1)
+        self.assertEqual(snapshot_calls[0], ("set transaction isolation level repeatable read read only", ()))
+        self.assertEqual(len([call for call in snapshot_calls if call[0] != snapshot_calls[0][0]]), 2)
+        self.assertEqual(payload["total"], 1)
+        self.assertEqual(payload["statistics"]["invoice_count"], 2)
+        self.assertEqual(
+            payload["items"][0]["business_batch"]["business_batch_id"],
+            "ETC-BATCH-SNAPSHOT",
+        )
+
     def test_etc_business_batch_scope_uses_session_dept_id(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))

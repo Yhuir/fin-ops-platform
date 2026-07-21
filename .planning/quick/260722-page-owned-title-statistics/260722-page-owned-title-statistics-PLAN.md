@@ -9,7 +9,7 @@
 ## 不变量
 
 - 标题统计不受月份、搜索、筛选、排序、分页影响。
-- 不增加浏览器请求，不新增跨页 API、统一统计服务、表或 worker。
+- 不增加浏览器请求，不新增跨页 API、统一统计服务或 worker；仅允许为现有 read model 的零行 generation 证明新增模块私有 scope summary 表。
 - 页面统计不能从 Page Audit 或统一事实源回填；Audit 不能进入页面热路径。
 - 只有页面投影的全期间 freshness 可证明时返回数字；missing/refreshing/stale/schema mismatch 返回不可用，合法空集返回 `0`。
 - 所有有页面访问权限的用户可见；Page Audit 权限不变。
@@ -56,9 +56,10 @@ independent canonical facts
 ## 实施结果（2026-07-22）
 
 - 已在 10 个既有页面主响应中增加页面自有、全期间、fresh-gated 的 `statistics` / `statistics_status`，前端统一使用轻量 HeroUI Popover 展示。
-- 已删除进项/销项标题统计的旧 `page_size=1` 二次请求及相关状态；没有新增浏览器请求、跨页统计服务、表或 worker。
+- 已删除进项/销项标题统计的旧 `page_size=1` 二次请求及相关状态；没有新增浏览器请求、跨页统计服务或 worker。外部往来款仅新增 `read_model.turnover_ledger_scopes`，用于零行 generation、统计元数据和并发发布 CAS，不承载业务事实。
 - 已将统计版本纳入相关 read model/source-version/cache 合同；missing、dirty、schema/source-version mismatch 时不暴露旧数字。
 - 已扩展独立 Page Audit，以 canonical facts 对照页面投影统计；Audit 仍不进入普通页面热路径。
-- 专项后端回归通过 677 个测试；前端 74 个文件、876 个测试全部通过；生产构建、lint、docs 与 diff 校验通过。
-- 全量后端 4,271 个测试中仅保留 5 个已在变更前 HEAD 复现的基线失败（3 个 no-OA/workbench fixture、1 个 bank-flow contract harness、1 个 write-operation cost fanout matrix），本次新增 architecture guard 已修复并通过。
+- 最终合并专项后端回归通过 523 个测试（另有 11 个真实 PostgreSQL 环境测试按条件跳过）；前端 74 个文件、876 个测试全部通过；生产构建、lint、docs 与 diff 校验通过。
+- 全量后端通过 4,328 个测试；迁移白名单遗漏已修复并由 95 个 migration/manifest 测试复验。其余 5 个失败均已在变更前 HEAD 复现（3 个 no-OA/workbench fixture、1 个 bank-flow contract harness、1 个 write-operation cost fanout matrix）。
+- 发布前审查补齐 OA 跨来源月份 inventory、进项冲销 batch generation fail-closed、ETC 同快照、外部往来款零行 generation 与 full/month/delta 全局 generation CAS，并删除旧 OA inventory 和旧 invoice statistics helper。
 - 生产发布、scope 刷新、Page Audit 与请求耗时证据在代码提交后执行并补充到最终交付说明。

@@ -32,6 +32,24 @@ class TurnoverLedgerReadModelRepositoryPort:
     def save_turnover_ledger_rows(self, payload: dict[str, Any], *, scope_key: str | None = None) -> None:
         self._repository.save_turnover_ledger_rows(payload, scope_key=scope_key)
 
+    def turnover_ledger_generation(self) -> int:
+        return int(self._repository.turnover_ledger_generation())
+
+    def acknowledge_unchanged_turnover_ledger_scope(
+        self,
+        *,
+        scope_key: str,
+        source_version: Any,
+        expected_generation: int,
+    ) -> int:
+        return int(
+            self._repository.acknowledge_unchanged_turnover_ledger_scope(
+                scope_key=scope_key,
+                source_version=source_version,
+                expected_generation=expected_generation,
+            )
+        )
+
     def load_turnover_ledger_relation_delta(
         self,
         *,

@@ -224,6 +224,7 @@ from fin_ops_platform.services.operation_freshness_barrier import (
 from fin_ops_platform.services.invoice_lifecycle_policy import InvoiceLifecyclePolicy
 from fin_ops_platform.services.postgres_repositories.input_invoice_usage_oa_reverse import (
     PostgresInputInvoiceUsageOaReverseBatchRepository,
+    input_invoice_usage_oa_reverse_statistics_snapshot,
 )
 from fin_ops_platform.services.postgres_repositories.oa_applicant_credentials import (
     PostgresOaApplicantCredentialRepository,
@@ -6124,6 +6125,9 @@ class Application:
                 reason=reason,
             ),
             expected_source_versions=self._input_invoice_usage_expected_source_versions,
+            expected_statistics_source_versions=(
+                self._input_invoice_usage_statistics_expected_source_versions
+            ),
         )
         self._input_invoice_usage_read_model_fresh_gate_instance = service
         return service
@@ -6253,7 +6257,14 @@ class Application:
             relation_writer=WorkbenchInputInvoiceUsageOaReverseRelationWriter(self._workbench_relation_command_service()),
             audit_recorder=self._record_input_invoice_usage_oa_reverse_audit,
             read_model_invalidator=self._invalidate_input_invoice_usage_oa_reverse_read_models,
-            read_model_rows_loader=lambda query: self._input_invoice_usage_read_model_fresh_gate().rows(query),
+            statistics_invalidator=lambda reason: self._enqueue_input_invoice_usage_read_model_refresh(
+                "all",
+                reason=reason,
+            ),
+            read_model_rows_loader=lambda query: self._input_invoice_usage_read_model_fresh_gate().rows(
+                query,
+                include_statistics=False,
+            ),
             read_model_rows_by_invoice_ids_loader=lambda invoice_ids: self._input_invoice_usage_read_model_fresh_gate().rows_by_invoice_ids(invoice_ids),
         )
         self._input_invoice_usage_oa_reverse_service_instance = service
@@ -6714,6 +6725,7 @@ class Application:
     def _input_invoice_usage_expected_source_versions(self, scope_key: str | None = None) -> dict[str, object]:
         source_versions = input_invoice_usage_source_versions(
             payment_status_rules_version=self._input_invoice_usage_payment_rules_provider().rules_source_version(),
+            oa_reverse_batch_source_version=None,
         )
         relation_source_versions = self._workbench_relation_source_versions_from_repository(
             getattr(self, "_workbench_relation_sql_read_repository", None),
@@ -6721,6 +6733,21 @@ class Application:
         )
         if relation_source_versions:
             source_versions["workbench_relation_source_versions"] = relation_source_versions
+        return source_versions
+
+    def _input_invoice_usage_statistics_expected_source_versions(
+        self,
+        scope_key: str | None = None,
+    ) -> dict[str, object]:
+        source_versions = self._input_invoice_usage_expected_source_versions(scope_key=scope_key or "all")
+        state_store = getattr(self, "_state_store", None)
+        connection = getattr(state_store, "_connection", None)
+        if str(getattr(state_store, "storage_backend", "") or "").strip() == "postgres" and connection is not None:
+            reverse_statistics = input_invoice_usage_oa_reverse_statistics_snapshot(connection)
+            source_version = str(reverse_statistics["source_version"])
+        else:
+            source_version = "rows:0|max_created_at:"
+        source_versions["input_invoice_usage_oa_reverse_batch_source_version"] = source_version
         return source_versions
 
     def _output_invoice_collection_expected_source_versions(self, scope_key: str | None = None) -> dict[str, object]:

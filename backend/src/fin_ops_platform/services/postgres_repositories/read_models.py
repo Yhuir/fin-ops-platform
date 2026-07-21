@@ -16,6 +16,10 @@ from fin_ops_platform.services.bank_transaction_category_service import BANK_TRA
 from fin_ops_platform.services.cost_statistics_source_versions import COST_STATISTICS_READ_MODEL_SCHEMA_VERSION
 from fin_ops_platform.services.pending_invoice_status import pending_invoice_filter_status_codes
 from fin_ops_platform.services.read_model_freshness import normalize_source_versions
+from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_snapshot import (
+    OA_PENDING_PAYMENT_COVERAGE_ONLY_SCHEMA_VERSION,
+    oa_pending_payment_coverage_only_source_versions,
+)
 from fin_ops_platform.services.postgres_repositories.common import (
     decimal_text,
     int_value,
@@ -72,7 +76,10 @@ WORKBENCH_BANK_BATCH_SUMMARY_SOURCE_KINDS = frozenset(
     {NO_OA_BANK_BATCH_SUMMARY_SOURCE_KIND, BANK_FLOW_RULE_BATCH_SUMMARY_SOURCE_KIND}
 )
 WORKBENCH_ROW_PAYLOAD_PRUNED_KEYS = {"object_identity"}
-TURNOVER_LEDGER_PAGE_STATISTICS_KEY = "page_statistics"
+
+
+class TurnoverLedgerGenerationConflictError(RuntimeError):
+    pass
 _BATCH_ACCOUNTING_INVOICE_CANDIDATE_MATCH_SQL = """
     regexp_replace(
       coalesce(
@@ -1328,21 +1335,37 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
         for row in month_rows:
             row_scope_key = text(row.get("scope_key")) or ""
             source_payload = row.get("source_payload") if isinstance(row.get("source_payload"), dict) else {}
-            expected_versions: dict[str, Any] = {
-                **dict(base_source_versions),
-                "oa_pending_payment_source_snapshot_version": int_value(row.get("source_snapshot_version"), 0),
-                "completed_oa_signature": text(source_payload.get("completed_oa_signature")) or "",
-                "in_progress_admission_signature": text(source_payload.get("admission_signature")) or "",
-                "payment_status_signature": text(source_payload.get("payment_status_signature")) or "",
-                "oa_pending_payment_source_signature": text(source_payload.get("source_signature")) or "",
-                "oa_pending_payment_relation_version": int_value(row.get("pending_relation_version"), 0),
-                "oa_pending_payment_event_source_version": int_value(row.get("dirty_source_version"), -1),
-            }
             actual_versions = (
                 dict(row.get("actual_source_versions"))
                 if isinstance(row.get("actual_source_versions"), dict)
                 else {}
             )
+            coverage_only = (
+                int_value(
+                    actual_versions.get("oa_pending_payment_coverage_only_schema_version"),
+                    0,
+                )
+                == OA_PENDING_PAYMENT_COVERAGE_ONLY_SCHEMA_VERSION
+                and row.get("source_snapshot_version") is None
+            )
+            if coverage_only:
+                expected_versions: dict[str, Any] = {
+                    **dict(base_source_versions),
+                    **oa_pending_payment_coverage_only_source_versions(row_scope_key),
+                    "oa_pending_payment_relation_version": int_value(row.get("pending_relation_version"), 0),
+                    "oa_pending_payment_event_source_version": int_value(row.get("dirty_source_version"), -1),
+                }
+            else:
+                expected_versions = {
+                    **dict(base_source_versions),
+                    "oa_pending_payment_source_snapshot_version": int_value(row.get("source_snapshot_version"), 0),
+                    "completed_oa_signature": text(source_payload.get("completed_oa_signature")) or "",
+                    "in_progress_admission_signature": text(source_payload.get("admission_signature")) or "",
+                    "payment_status_signature": text(source_payload.get("payment_status_signature")) or "",
+                    "oa_pending_payment_source_signature": text(source_payload.get("source_signature")) or "",
+                    "oa_pending_payment_relation_version": int_value(row.get("pending_relation_version"), 0),
+                    "oa_pending_payment_event_source_version": int_value(row.get("dirty_source_version"), -1),
+                }
             bank_coverage_signature = text(
                 actual_versions.get("oa_pending_payment_bank_coverage_signature")
             ) or ""
@@ -1364,11 +1387,12 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                 reasons.append("scope_missing")
             if text(row.get("cache_status")) not in {"fresh"}:
                 reasons.append("scope_not_fresh")
-            if text(row.get("source_status")) not in {"success", "succeeded"} or not text(
-                source_payload.get("source_signature")
+            if not coverage_only and (
+                text(row.get("source_status")) not in {"success", "succeeded"}
+                or not text(source_payload.get("source_signature"))
             ):
                 reasons.append("source_snapshot_missing")
-            if int_value(row.get("pending_relation_version"), 0) < 1:
+            if not coverage_only and int_value(row.get("pending_relation_version"), 0) < 1:
                 reasons.append("pending_relation_version_missing")
             if not bank_coverage_signature or "|digest:" not in bank_coverage_signature:
                 reasons.append("bank_coverage_missing")
@@ -1775,14 +1799,6 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
         )
         if include_statistics and statistics is None:
             statistics_status = "stale" if statistics_status == "fresh" else statistics_status
-        elif include_statistics and summary_kind == "input":
-            reverse_batch_row = self._connection.fetch_one(
-                "select count(*)::integer as count from app.input_invoice_usage_oa_reverse_batches"
-            )
-            statistics["oa_reverse_batch_count"] = int_value(
-                reverse_batch_row.get("count") if isinstance(reverse_batch_row, dict) else 0,
-                0,
-            )
         statistics_source_versions = (
             statistics_scope_row.get("statistics_source_versions")
             if isinstance(statistics_scope_row, dict)
@@ -7799,20 +7815,24 @@ class PostgresSummaryReadModelRepository:
         query_params = tuple([*base_params, *scoped_params])
         aggregate_rows = self._connection.fetch_all(
             f"""
-            {cte_sql}, statistics_marker as materialized (
-                select raw_payload -> '{TURNOVER_LEDGER_PAGE_STATISTICS_KEY}' as page_statistics
-                from read_model.turnover_ledger_rows
-                where status <> 'withdrawn'
-                order by relation_id
+            {cte_sql}, scope_summary as materialized (
+                select scope.row_count, scope.source_versions, scope.statistics,
+                       coalesce(parent.generation, 0) as global_generation
+                from read_model.turnover_ledger_scopes scope
+                left join read_model.turnover_ledger_scopes parent on parent.scope_key = 'all'
+                where scope.scope_key = %s
                 limit 1
             ), version_proof as (
                 select
-                    count(*) > 0 as scope_exists,
+                    exists (select 1 from scope_summary) as scope_exists,
+                    coalesce((select global_generation from scope_summary), 0) as generation,
                     case
                         when count(*) > 0
                          and bool_and(jsonb_typeof(source_versions) = 'object')
                          and count(distinct source_versions) = 1
                             then min(source_versions::text)::jsonb
+                        when count(*) = 0
+                            then coalesce((select source_versions from scope_summary), '{{}}'::jsonb)
                         else '{{}}'::jsonb
                     end as source_versions,
                     coalesce(
@@ -7824,23 +7844,24 @@ class PostgresSummaryReadModelRepository:
             ), statistics as (
                 select
                     coalesce(
-                        jsonb_typeof((select page_statistics from statistics_marker)) = 'object',
+                        jsonb_typeof((select statistics from scope_summary)) = 'object'
+                        and (select row_count from scope_summary) = (select count(*) from base),
                         false
                     ) as statistics_ready,
-                    coalesce((select (page_statistics->>'transaction_count')::integer
-                        from statistics_marker), 0) as statistics_transaction_count,
-                    coalesce((select (page_statistics->>'expense_transaction_count')::integer
-                        from statistics_marker), 0) as statistics_expense_transaction_count,
-                    coalesce((select (page_statistics->>'income_transaction_count')::integer
-                        from statistics_marker), 0) as statistics_income_transaction_count,
-                    coalesce((select (page_statistics->>'ledger_group_count')::integer
-                        from statistics_marker), 0) as statistics_ledger_group_count,
-                    coalesce((select (page_statistics->>'closed_group_count')::integer
-                        from statistics_marker), 0) as statistics_closed_group_count,
-                    coalesce((select (page_statistics->>'linked_oa_transaction_count')::integer
-                        from statistics_marker), 0) as statistics_linked_oa_transaction_count,
-                    coalesce((select (page_statistics->>'linked_invoice_transaction_count')::integer
-                        from statistics_marker), 0) as statistics_linked_invoice_transaction_count
+                    coalesce((select (statistics->>'transaction_count')::integer
+                        from scope_summary), 0) as statistics_transaction_count,
+                    coalesce((select (statistics->>'expense_transaction_count')::integer
+                        from scope_summary), 0) as statistics_expense_transaction_count,
+                    coalesce((select (statistics->>'income_transaction_count')::integer
+                        from scope_summary), 0) as statistics_income_transaction_count,
+                    coalesce((select (statistics->>'ledger_group_count')::integer
+                        from scope_summary), 0) as statistics_ledger_group_count,
+                    coalesce((select (statistics->>'closed_group_count')::integer
+                        from scope_summary), 0) as statistics_closed_group_count,
+                    coalesce((select (statistics->>'linked_oa_transaction_count')::integer
+                        from scope_summary), 0) as statistics_linked_oa_transaction_count,
+                    coalesce((select (statistics->>'linked_invoice_transaction_count')::integer
+                        from scope_summary), 0) as statistics_linked_invoice_transaction_count
             ), summary_rows as (
                 select
                     grouping(family) = 1 as is_total,
@@ -7857,14 +7878,15 @@ class PostgresSummaryReadModelRepository:
                 group by grouping sets ((), (family))
             )
             select summary_rows.*, version_proof.scope_exists,
-                   version_proof.source_versions, version_proof.source_versions_mixed,
+                   version_proof.generation, version_proof.source_versions,
+                   version_proof.source_versions_mixed,
                    statistics.*
             from summary_rows
             cross join version_proof
             cross join statistics
             order by summary_rows.is_total desc, summary_rows.family
             """,
-            query_params,
+            (*query_params, normalized_scope_key),
         )
         aggregate = next((row for row in aggregate_rows if bool(row.get("is_total"))), None)
         if not isinstance(aggregate, dict) or not bool(aggregate.get("scope_exists")):
@@ -7914,6 +7936,7 @@ class PostgresSummaryReadModelRepository:
             "refresh_status": refresh_status,
             "statistics": _turnover_ledger_page_statistics(aggregate) if refresh_status == "fresh" else None,
             "statistics_status": statistics_status,
+            "generation": max(int_value(aggregate.get("generation"), 0), 0),
             "source_versions": aggregate.get("source_versions") if isinstance(aggregate.get("source_versions"), dict) else {},
         }
         if bool(aggregate.get("source_versions_mixed")):
@@ -7959,6 +7982,11 @@ class PostgresSummaryReadModelRepository:
             )
             select
                 count(*) > 0 as scope_exists,
+                coalesce((
+                    select generation
+                    from read_model.turnover_ledger_scopes
+                    where scope_key = 'all'
+                ), 0) as generation,
                 case
                     when count(*) > 0
                      and bool_and(jsonb_typeof(source_versions) = 'object')
@@ -7983,6 +8011,7 @@ class PostgresSummaryReadModelRepository:
         payload = row if isinstance(row, dict) else {}
         return {
             "scope_exists": bool(payload.get("scope_exists")),
+            "generation": max(int_value(payload.get("generation"), 0), 0),
             "source_versions": (
                 dict(payload.get("source_versions"))
                 if isinstance(payload.get("source_versions"), dict)
@@ -7991,6 +8020,52 @@ class PostgresSummaryReadModelRepository:
             "source_versions_mixed": bool(payload.get("source_versions_mixed")),
             "rows": [dict(item) for item in list(payload.get("rows") or []) if isinstance(item, dict)],
         }
+
+    def turnover_ledger_generation(self) -> int:
+        row = self._connection.fetch_one(
+            "select generation from read_model.turnover_ledger_scopes where scope_key = 'all'"
+        )
+        return max(int_value(row.get("generation") if isinstance(row, dict) else 0, 0), 0)
+
+    def acknowledge_unchanged_turnover_ledger_scope(
+        self,
+        *,
+        scope_key: str,
+        source_version: Any,
+        expected_generation: int,
+    ) -> int:
+        normalized_scope_key = text(scope_key) or "all"
+        event_source_version = self._turnover_ledger_event_source_version(source_version)
+
+        def write(connection: Any) -> int:
+            generation = self._lock_turnover_ledger_generation(
+                connection,
+                scope_key=normalized_scope_key,
+                expected_generation=expected_generation,
+                event_source_version=event_source_version,
+            )
+            connection.execute(
+                """
+                update read_model.turnover_ledger_scopes
+                set generation = %s,
+                    published_source_version = case
+                        when scope_key = %s and %s is not null then %s
+                        else published_source_version
+                    end,
+                    updated_at = now()
+                where scope_key = 'all' or scope_key = %s
+                """,
+                (
+                    generation,
+                    normalized_scope_key,
+                    event_source_version,
+                    event_source_version,
+                    normalized_scope_key,
+                ),
+            )
+            return generation
+
+        return int(run_in_transaction(self._connection, write))
 
     def save_turnover_ledger_relation_delta(
         self,
@@ -8001,12 +8076,20 @@ class PostgresSummaryReadModelRepository:
         normalized_scope_key = text(scope_key)
         rows = payload.get("rows") if isinstance(payload, dict) else None
         source_versions = payload.get("source_versions") if isinstance(payload, dict) else None
+        expected_generation = int_value(payload.get("expected_generation"), 0)
+        event_source_version = self._turnover_ledger_event_source_version(payload.get("source_version"))
         if not normalized_scope_key or normalized_scope_key == "all" or not isinstance(rows, list):
             raise ValueError("Turnover relation delta requires one month scope and rows.")
         if not isinstance(source_versions, dict):
             raise ValueError("Turnover relation delta requires source_versions.")
 
         def write(connection: Any) -> None:
+            generation = self._lock_turnover_ledger_generation(
+                connection,
+                scope_key=normalized_scope_key,
+                expected_generation=expected_generation,
+                event_source_version=event_source_version,
+            )
             connection.execute(
                 """
                 update read_model.turnover_ledger_rows
@@ -8024,7 +8107,14 @@ class PostgresSummaryReadModelRepository:
                 if isinstance(item, dict)
             ]
             self._upsert_turnover_ledger_rows(connection, params_seq)
-            self._refresh_turnover_ledger_statistics_marker(connection)
+            self._refresh_turnover_ledger_scope_summaries(
+                connection,
+                scope_keys=["all", normalized_scope_key],
+                source_versions=source_versions,
+                generation=generation,
+                published_scope_key=normalized_scope_key,
+                published_source_version=event_source_version,
+            )
 
         run_in_transaction(self._connection, write)
 
@@ -8033,8 +8123,26 @@ class PostgresSummaryReadModelRepository:
         if not isinstance(rows, list):
             return
         normalized_scope_key = text(scope_key) or text(payload.get("scope_key")) or "all"
+        expected_generation = int_value(payload.get("expected_generation"), 0)
+        event_source_version = self._turnover_ledger_event_source_version(payload.get("source_version"))
+        source_versions = payload.get("source_versions") if isinstance(payload, dict) else None
+        if not isinstance(source_versions, dict):
+            source_versions = next(
+                (
+                    dict(row["source_versions"])
+                    for row in rows
+                    if isinstance(row, dict) and isinstance(row.get("source_versions"), dict)
+                ),
+                {},
+            )
 
         def write(connection: Any) -> None:
+            generation = self._lock_turnover_ledger_generation(
+                connection,
+                scope_key=normalized_scope_key,
+                expected_generation=expected_generation,
+                event_source_version=event_source_version,
+            )
             if normalized_scope_key == "all":
                 connection.execute("delete from read_model.turnover_ledger_rows", ())
             else:
@@ -8048,7 +8156,28 @@ class PostgresSummaryReadModelRepository:
                 if isinstance(item, dict)
             ]
             self._upsert_turnover_ledger_rows(connection, params_seq)
-            self._refresh_turnover_ledger_statistics_marker(connection)
+            self._refresh_turnover_ledger_scope_summaries(
+                connection,
+                scope_keys=None if normalized_scope_key == "all" else ["all", normalized_scope_key],
+                source_versions=source_versions,
+                generation=generation,
+                published_scope_key=normalized_scope_key,
+                published_source_version=event_source_version,
+            )
+            if normalized_scope_key == "all":
+                connection.execute(
+                    """
+                    delete from read_model.turnover_ledger_scopes scope
+                    where scope.scope_key <> 'all'
+                      and not exists (
+                          select 1
+                          from read_model.turnover_ledger_rows row
+                          where row.scope_month = scope.scope_month
+                            and row.status <> 'withdrawn'
+                      )
+                    """,
+                    (),
+                )
 
         run_in_transaction(self._connection, write)
 
@@ -8102,77 +8231,189 @@ class PostgresSummaryReadModelRepository:
         )
 
     @staticmethod
-    def _refresh_turnover_ledger_statistics_marker(connection: Any) -> None:
+    def _refresh_turnover_ledger_scope_summaries(
+        connection: Any,
+        *,
+        scope_keys: list[str] | None,
+        source_versions: dict[str, Any],
+        generation: int,
+        published_scope_key: str,
+        published_source_version: int | None,
+    ) -> None:
+        requested_scopes_sql = (
+            """
+                select 'all'::text as scope_key, null::date as scope_month
+                union all
+                select distinct to_char(scope_month, 'YYYY-MM'), scope_month
+                from read_model.turnover_ledger_rows
+                where scope_month is not null and status <> 'withdrawn'
+            """
+            if scope_keys is None
+            else """
+                select requested.scope_key,
+                       case when requested.scope_key = 'all'
+                            then null::date
+                            else to_date(requested.scope_key || '-01', 'YYYY-MM-DD')
+                       end as scope_month
+                from unnest(%s::text[]) requested(scope_key)
+            """
+        )
+        requested_scope_params: tuple[Any, ...] = (
+            () if scope_keys is None else (scope_keys,)
+        )
         connection.execute(
             f"""
-            with base as materialized (
-                select relation_id, payload
-                from read_model.turnover_ledger_rows
-                where status <> 'withdrawn'
+            with requested_scopes as materialized (
+                {requested_scopes_sql}
+            ), scoped_rows as materialized (
+                select requested.scope_key, row.payload
+                from requested_scopes requested
+                join read_model.turnover_ledger_rows row
+                  on requested.scope_key = 'all' or row.scope_month = requested.scope_month
+                where row.status <> 'withdrawn'
             ), statistics_flows as materialized (
                 select
+                    scoped.scope_key,
                     nullif(btrim(flow.value->>'source_bank_row_id'), '') as transaction_id,
                     flow.value->>'flow_direction' as direction,
                     coalesce(flow.value->>'linked_oa', 'false') = 'true' as linked_oa,
                     coalesce(flow.value->>'linked_invoice', 'false') = 'true' as linked_invoice
-                from base
+                from scoped_rows scoped
                 join lateral jsonb_array_elements(
                     case
-                        when jsonb_typeof(base.payload->'flow_rows') = 'array'
-                        then base.payload->'flow_rows'
+                        when jsonb_typeof(scoped.payload->'flow_rows') = 'array'
+                        then scoped.payload->'flow_rows'
                         else '[]'::jsonb
                     end
                 ) flow(value) on true
-            ), statistics as (
-                select jsonb_build_object(
-                    'transaction_count', (
-                        select count(distinct transaction_id) from statistics_flows
-                        where transaction_id is not null
-                    ),
-                    'expense_transaction_count', (
-                        select count(distinct transaction_id) from statistics_flows
-                        where transaction_id is not null and direction = 'expense'
-                    ),
-                    'income_transaction_count', (
-                        select count(distinct transaction_id) from statistics_flows
-                        where transaction_id is not null and direction = 'income'
-                    ),
-                    'ledger_group_count', (select count(*) from base),
-                    'closed_group_count', (
-                        select count(*) from base
+            ), row_statistics as (
+                select
+                    scope_key,
+                    count(*)::integer as ledger_group_count,
+                    count(*) filter (
                         where coalesce(payload->>'cash_closure_linked', 'false') = 'true'
-                    ),
-                    'linked_oa_transaction_count', (
-                        select count(distinct transaction_id) from statistics_flows
+                    )::integer as closed_group_count
+                from scoped_rows
+                group by scope_key
+            ), flow_statistics as (
+                select
+                    scope_key,
+                    count(distinct transaction_id) filter (where transaction_id is not null)::integer
+                        as transaction_count,
+                    count(distinct transaction_id) filter (
+                        where transaction_id is not null and direction = 'expense'
+                    )::integer as expense_transaction_count,
+                    count(distinct transaction_id) filter (
+                        where transaction_id is not null and direction = 'income'
+                    )::integer as income_transaction_count,
+                    count(distinct transaction_id) filter (
                         where transaction_id is not null and linked_oa
-                    ),
-                    'linked_invoice_transaction_count', (
-                        select count(distinct transaction_id) from statistics_flows
+                    )::integer as linked_oa_transaction_count,
+                    count(distinct transaction_id) filter (
                         where transaction_id is not null and linked_invoice
-                    )
-                ) as payload
-            ), marker_target as (
-                select min(relation_id) as relation_id from base
+                    )::integer as linked_invoice_transaction_count
+                from statistics_flows
+                group by scope_key
+            ), summaries as (
+                select
+                    requested.scope_key,
+                    requested.scope_month,
+                    coalesce(rows.ledger_group_count, 0) as row_count,
+                    jsonb_build_object(
+                        'transaction_count', coalesce(flows.transaction_count, 0),
+                        'expense_transaction_count', coalesce(flows.expense_transaction_count, 0),
+                        'income_transaction_count', coalesce(flows.income_transaction_count, 0),
+                        'ledger_group_count', coalesce(rows.ledger_group_count, 0),
+                        'closed_group_count', coalesce(rows.closed_group_count, 0),
+                        'linked_oa_transaction_count', coalesce(flows.linked_oa_transaction_count, 0),
+                        'linked_invoice_transaction_count', coalesce(flows.linked_invoice_transaction_count, 0)
+                    ) as statistics
+                from requested_scopes requested
+                left join row_statistics rows on rows.scope_key = requested.scope_key
+                left join flow_statistics flows on flows.scope_key = requested.scope_key
             )
-            update read_model.turnover_ledger_rows row
-            set raw_payload = case
-                    when row.relation_id = marker_target.relation_id
-                    then jsonb_set(
-                        row.raw_payload - '{TURNOVER_LEDGER_PAGE_STATISTICS_KEY}',
-                        '{{{TURNOVER_LEDGER_PAGE_STATISTICS_KEY}}}',
-                        statistics.payload,
-                        true
-                    )
-                    else row.raw_payload - '{TURNOVER_LEDGER_PAGE_STATISTICS_KEY}'
-                end,
+            insert into read_model.turnover_ledger_scopes(
+                scope_key, scope_month, row_count, source_versions, statistics,
+                generation, published_source_version, generated_at, cache_status
+            )
+            select scope_key, scope_month, row_count, %s, statistics, %s,
+                   case when scope_key = %s then %s else null end,
+                   now(), 'fresh'
+            from summaries
+            on conflict (scope_key) do update set
+                scope_month = excluded.scope_month,
+                row_count = excluded.row_count,
+                source_versions = excluded.source_versions,
+                statistics = excluded.statistics,
+                generation = excluded.generation,
+                published_source_version = coalesce(
+                    excluded.published_source_version,
+                    turnover_ledger_scopes.published_source_version
+                ),
+                generated_at = excluded.generated_at,
+                cache_status = excluded.cache_status,
                 updated_at = now()
-            from statistics
-            cross join marker_target
-            where row.raw_payload ? '{TURNOVER_LEDGER_PAGE_STATISTICS_KEY}'
-               or row.relation_id = marker_target.relation_id
             """,
-            (),
+            (
+                *requested_scope_params,
+                jsonb(source_versions),
+                generation,
+                published_scope_key,
+                published_source_version,
+            ),
         )
+
+    @staticmethod
+    def _turnover_ledger_event_source_version(value: Any) -> int | None:
+        if value in (None, ""):
+            return None
+        try:
+            normalized = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Turnover ledger source_version must be a non-negative integer.") from exc
+        if normalized < 0:
+            raise ValueError("Turnover ledger source_version must be a non-negative integer.")
+        return normalized
+
+    @staticmethod
+    def _lock_turnover_ledger_generation(
+        connection: Any,
+        *,
+        scope_key: str,
+        expected_generation: int,
+        event_source_version: int | None,
+    ) -> int:
+        connection.execute(
+            "select pg_advisory_xact_lock(hashtext(%s))",
+            ("turnover_ledger_projection",),
+        )
+        row = connection.fetch_one(
+            """
+            select
+                coalesce((
+                    select generation from read_model.turnover_ledger_scopes where scope_key = 'all'
+                ), 0) as generation,
+                (
+                    select published_source_version
+                    from read_model.turnover_ledger_scopes
+                    where scope_key = %s
+                ) as published_source_version
+            """,
+            (scope_key,),
+        )
+        current_generation = max(int_value(row.get("generation") if isinstance(row, dict) else 0, 0), 0)
+        published_source_version = (
+            int_value(row.get("published_source_version"), -1) if isinstance(row, dict) else -1
+        )
+        if current_generation != max(int_value(expected_generation, 0), 0):
+            raise TurnoverLedgerGenerationConflictError(
+                f"Turnover ledger generation advanced from {expected_generation} to {current_generation}."
+            )
+        if event_source_version is not None and published_source_version > event_source_version:
+            raise TurnoverLedgerGenerationConflictError(
+                "Turnover ledger event source_version is older than the published scope version."
+            )
+        return current_generation + 1
 
     def tax_offset_statistics_generation_token(self) -> str | None:
         row = self._connection.fetch_one(
@@ -8883,6 +9124,12 @@ class PostgresReadModelRepository:
 
     def save_turnover_ledger_rows(self, *args: Any, **kwargs: Any) -> None:
         self._summary_read_model_repository.save_turnover_ledger_rows(*args, **kwargs)
+
+    def turnover_ledger_generation(self, *args: Any, **kwargs: Any) -> int:
+        return self._summary_read_model_repository.turnover_ledger_generation(*args, **kwargs)
+
+    def acknowledge_unchanged_turnover_ledger_scope(self, *args: Any, **kwargs: Any) -> int:
+        return self._summary_read_model_repository.acknowledge_unchanged_turnover_ledger_scope(*args, **kwargs)
 
     def load_turnover_ledger_relation_delta(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         return self._summary_read_model_repository.load_turnover_ledger_relation_delta(*args, **kwargs)
@@ -13616,140 +13863,6 @@ def _invoice_relation_summary_payload(row: dict[str, Any], *, summary_kind: str,
     }
 
 
-def _invoice_relation_statistics_sql(*, table_name: str, summary_kind: str) -> str:
-    invoice_id_expression = """
-        nullif(btrim(coalesce(
-            invoice_summary.value->>'invoiceId',
-            invoice_summary.value->>'id',
-            invoice_summary.value->>'primaryInvoiceId',
-            invoice_summary.value->>'relatedInvoiceId',
-            base_rows.payload->'invoice'->>'id',
-            base_rows.invoice_id
-        )), '')
-    """
-    invoice_members_cte = f"""
-        base_rows as (
-            select * from {table_name}
-        ),
-        invoice_members as (
-            select
-                base_rows.row_id,
-                {invoice_id_expression} as invoice_id,
-                base_rows.oa_relation_count,
-                base_rows.bank_relation_count,
-                base_rows.payment_status,
-                base_rows.collection_status,
-                coalesce(
-                    nullif(base_rows.bank_direction, ''),
-                    nullif(base_rows.payload->'bankTransactions'->>'direction', ''),
-                    case base_rows.payload->'bankTransactions'->>'directionLabel'
-                        when '收入' then 'inflow'
-                        when '支出' then 'outflow'
-                        else null
-                    end
-                ) as bank_direction,
-                base_rows.receipt_status,
-                base_rows.red_invoice_relation_count,
-                coalesce(
-                    invoice_summary.value->>'totalWithTax',
-                    invoice_summary.value->>'total_with_tax',
-                    base_rows.payload->'invoice'->>'totalWithTax',
-                    base_rows.total_with_tax::text
-                ) as invoice_total_with_tax,
-                coalesce(
-                    invoice_summary.value->>'isPositiveInvoice',
-                    invoice_summary.value->>'is_positive_invoice',
-                    base_rows.payload->'invoice'->>'isPositiveInvoice',
-                    ''
-                ) as is_positive_invoice
-            from base_rows
-            left join lateral jsonb_array_elements(
-                case
-                    when jsonb_typeof(base_rows.payload->'invoiceRelations'->'summaries') = 'array'
-                    then coalesce(
-                        nullif(base_rows.payload->'invoiceRelations'->'summaries', '[]'::jsonb),
-                        jsonb_build_array(jsonb_build_object('invoiceId', coalesce(base_rows.payload->'invoice'->>'id', base_rows.invoice_id)))
-                    )
-                    else jsonb_build_array(jsonb_build_object('invoiceId', coalesce(base_rows.payload->'invoice'->>'id', base_rows.invoice_id)))
-                end
-            ) as invoice_summary(value) on true
-        ),
-        invoice_flags as (
-            select
-                invoice_id,
-                bool_or(oa_relation_count > 0) as linked_oa,
-                bool_or(bank_relation_count > 0) as linked_bank,
-                bool_or(bank_relation_count > 0 and bank_direction = 'inflow') as linked_income_bank,
-                bool_or(payment_status = 'paid') as paid,
-                bool_or(collection_status in ('collected', 'collected_red_refunded')) as collected,
-                bool_or(receipt_status = 'issued') as receipt_issued,
-                bool_or(
-                    is_positive_invoice in ('否', 'false', 'False', '0')
-                    or ltrim(coalesce(invoice_total_with_tax, '')) like '-%'
-                ) as red_invoice
-            from invoice_members
-            where invoice_id is not null
-            group by invoice_id
-        )
-    """
-    if summary_kind == "input":
-        return f"""
-        with {invoice_members_cte}
-        select
-            count(*) as invoice_count,
-            count(*) filter (where linked_oa) as linked_oa_invoice_count,
-            count(*) filter (where linked_bank) as linked_bank_invoice_count,
-            count(*) filter (where paid) as paid_invoice_count,
-            (select count(distinct row_id) from invoice_members where oa_relation_count > 0 or bank_relation_count > 0)
-                as formal_relation_group_count,
-            (select count(*) from app.input_invoice_usage_oa_reverse_batches) as oa_reverse_batch_count
-        from invoice_flags
-        """
-    return f"""
-    with {invoice_members_cte}
-    select
-        count(*) as invoice_count,
-        count(*) filter (where linked_oa) as linked_oa_invoice_count,
-        count(*) filter (where linked_income_bank) as linked_income_bank_invoice_count,
-        count(*) filter (where collected) as collected_invoice_count,
-        count(*) filter (where red_invoice) as red_invoice_count,
-        count(*) filter (where receipt_issued) as issued_receipt_count
-    from invoice_flags
-    """
-
-
-def _invoice_relation_statistics_payload(row: dict[str, Any], *, summary_kind: str) -> dict[str, int]:
-    invoice_count = int_value(row.get("invoice_count"), 0)
-    linked_oa_count = int_value(row.get("linked_oa_invoice_count"), 0)
-    if summary_kind == "input":
-        linked_bank_count = int_value(row.get("linked_bank_invoice_count"), 0)
-        paid_count = int_value(row.get("paid_invoice_count"), 0)
-        return {
-            "invoice_count": invoice_count,
-            "linked_oa_invoice_count": linked_oa_count,
-            "linked_bank_invoice_count": linked_bank_count,
-            "paid_invoice_count": paid_count,
-            "unlinked_oa_invoice_count": max(invoice_count - linked_oa_count, 0),
-            "unlinked_bank_invoice_count": max(invoice_count - linked_bank_count, 0),
-            "unpaid_invoice_count": max(invoice_count - paid_count, 0),
-            "formal_relation_group_count": int_value(row.get("formal_relation_group_count"), 0),
-            "oa_reverse_batch_count": int_value(row.get("oa_reverse_batch_count"), 0),
-        }
-    linked_bank_count = int_value(row.get("linked_income_bank_invoice_count"), 0)
-    collected_count = int_value(row.get("collected_invoice_count"), 0)
-    return {
-        "invoice_count": invoice_count,
-        "linked_oa_invoice_count": linked_oa_count,
-        "linked_income_bank_invoice_count": linked_bank_count,
-        "collected_invoice_count": collected_count,
-        "unlinked_oa_invoice_count": max(invoice_count - linked_oa_count, 0),
-        "unlinked_bank_invoice_count": max(invoice_count - linked_bank_count, 0),
-        "uncollected_invoice_count": max(invoice_count - collected_count, 0),
-        "red_invoice_count": int_value(row.get("red_invoice_count"), 0),
-        "issued_receipt_count": int_value(row.get("issued_receipt_count"), 0),
-    }
-
-
 def _invoice_relation_statistics_from_scope_metadata(
     values: Any,
     *,
@@ -13784,6 +13897,7 @@ def _invoice_relation_statistics_from_scope_metadata(
         )
     )
     totals = {key: 0 for key in keys}
+    oa_reverse_batch_counts: set[int] = set()
     for metadata in metadata_rows:
         if not isinstance(metadata, dict) or not isinstance(metadata.get("statistics"), dict):
             return None
@@ -13796,19 +13910,25 @@ def _invoice_relation_statistics_from_scope_metadata(
         ):
             return None
         for key in keys:
-            totals[key] += int(statistics[key])
+            value = int(statistics[key])
+            if key == "oa_reverse_batch_count":
+                oa_reverse_batch_counts.add(value)
+            else:
+                totals[key] += value
     invoice_count = totals["invoice_count"]
     linked_oa_count = totals["linked_oa_invoice_count"]
     if totals["unlinked_oa_invoice_count"] != invoice_count - linked_oa_count:
         return None
     if summary_kind == "input":
+        if len(oa_reverse_batch_counts) != 1:
+            return None
         if (
             totals["unlinked_bank_invoice_count"]
             != invoice_count - totals["linked_bank_invoice_count"]
             or totals["unpaid_invoice_count"] != invoice_count - totals["paid_invoice_count"]
         ):
             return None
-        totals["oa_reverse_batch_count"] = 0
+        totals["oa_reverse_batch_count"] = next(iter(oa_reverse_batch_counts))
     elif (
         totals["unlinked_bank_invoice_count"]
         != invoice_count - totals["linked_income_bank_invoice_count"]

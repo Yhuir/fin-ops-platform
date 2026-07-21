@@ -422,14 +422,22 @@ READ_MODEL_MANIFEST: dict[str, ReadModelManifestEntry] = {
         projection_strategy="partitioned_scoped_incremental",
         all_scope_semantics="fan_out_command",
         partition_key_contract="turnover ledger month_scope; all is fan-out only",
-        scoped_incremental_target="turnover ledger grouped/list rows for affected month scopes",
+        scoped_incremental_target=(
+            "turnover ledger grouped/list rows plus turnover_ledger_scopes row-count/statistics summary "
+            "for affected month scopes and the all-page aggregate"
+        ),
         full_rebuild_fallback="gateway force refresh all enumerates turnover ledger month shards and supports explicit clear/rebuild",
-        freshness_proof_contract="ReadModelQueryGateway expected schema/source_versions plus workbench_relation versions and current-effective dirty/outbox state",
+        freshness_proof_contract=(
+            "turnover_ledger_scopes generation/source_versions/statistics with module-global serialized CAS plus "
+            "ReadModelQueryGateway expected versions, workbench_relation versions, and current-effective dirty/outbox state"
+        ),
         force_refresh_contract="gateway_force_refresh",
         operation_barrier_contract="app_status_registry_target",
         repository_port_contract=(
             "list_turnover_ledger_view",
             "save_turnover_ledger_rows",
+            "turnover_ledger_generation",
+            "acknowledge_unchanged_turnover_ledger_scope",
             "load_turnover_ledger_relation_delta",
             "save_turnover_ledger_relation_delta",
         ),

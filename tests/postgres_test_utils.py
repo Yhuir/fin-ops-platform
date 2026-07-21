@@ -130,6 +130,7 @@ EXPECTED_MIGRATION_FILES = [
     "0116_workbench_etc_relation_enrichment_hot_path.sql",
     "0117_workbench_matching_idempotency_runtime_grant.sql",
     "0118_bank_flow_rule_batch_settings_raw_alignment.sql",
+    "0119_turnover_ledger_scope_summaries.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (
@@ -178,6 +179,7 @@ TEST_TABLES = (
     "read_model.tax_offset_items",
     "read_model.no_oa_bank_batch_rows",
     "read_model.turnover_ledger_rows",
+    "read_model.turnover_ledger_scopes",
     "app.import_batches",
     "app.import_batch_rows",
     "app.file_objects",

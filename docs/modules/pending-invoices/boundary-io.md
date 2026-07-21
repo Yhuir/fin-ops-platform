@@ -45,7 +45,7 @@
 | 规则保存结果 | API | 持久化规则并触发刷新 |
 | 发票关联/收入状态写结果 | API/frontend | 返回 `affected_months`、`affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets` |
 
-批量导出仅第一页读取并校验全量标题统计；后续分页使用内部 `include_statistics=false` 跳过重复的统计 scope/dirty/outbox 聚合，但每一页仍执行 rows read-model freshness、schema 与 source-version检查。
+批量导出的所有分页均使用内部 `include_statistics=false`，不读取、校验或透传页面标题统计，从而跳过与导出无关的统计 scope/dirty/outbox 聚合；每一页仍执行 rows read-model freshness、schema 与 source-version 检查。
 | Dirty scope | runtime queue | 不允许无界全量 |
 
 ## 持久化与投影

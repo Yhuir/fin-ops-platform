@@ -12,6 +12,9 @@ from fin_ops_platform.services.oa_pending_payment_sql_projection import (
     OaPendingPaymentSqlProjectionBuilder,
     _oa_pending_payment_statistics,
 )
+from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_snapshot import (
+    OA_PENDING_PAYMENT_COVERAGE_ONLY_SCHEMA_VERSION,
+)
 from fin_ops_platform.services.postgres_repositories.read_models import (
     PostgresInvoiceUsageCollectionReadModelRepository,
 )
@@ -117,6 +120,52 @@ class OaPendingPaymentReadModelRefreshTests(unittest.TestCase):
 
 
 class OaPendingPaymentSqlProjectionBuilderTests(unittest.TestCase):
+    def test_all_scope_inventory_unions_oa_bank_and_input_invoice_months(self) -> None:
+        connection = ScopeInventoryConnection()
+        builder = OaPendingPaymentSqlProjectionBuilder(
+            connection=connection,
+            read_model_repository=AtomicReadModelRepository(),
+        )
+
+        scopes = builder.list_scope_shards("all", tenant_id="tenant-a")
+
+        self.assertEqual(scopes, ["2026-06", "2026-05", "2026-04"])
+        inventory_sql, params = connection.fetch_all_calls[0]
+        self.assertIn("from app.oa_sync_watermarks", inventory_sql)
+        self.assertIn("from app.bank_transactions", inventory_sql)
+        self.assertIn("bank.status <> 'deleted'", inventory_sql)
+        self.assertIn("from app.invoices", inventory_sql)
+        self.assertIn("invoice.status <> 'deleted'", inventory_sql)
+        self.assertIn("invoice.invoice_type = %s", inventory_sql)
+        self.assertNotIn("read_model.oa_pending_payment_scopes", inventory_sql)
+        self.assertEqual(
+            params,
+            (
+                "oa_pending_payment_source:tenant-a:",
+                "oa_pending_payment_source:tenant-a:%",
+                "input",
+            ),
+        )
+
+    def test_coverage_only_month_uses_read_model_empty_vector_without_writing_source_watermark(self) -> None:
+        connection = MissingOaSourceConnection()
+
+        versions = OaPendingPaymentSqlProjectionBuilder._expected_source_versions(
+            connection,
+            scope_key="2026-05",
+            tenant_id="tenant-a",
+            coverage_only=True,
+        )
+
+        self.assertEqual(
+            versions["oa_pending_payment_coverage_only_schema_version"],
+            OA_PENDING_PAYMENT_COVERAGE_ONLY_SCHEMA_VERSION,
+        )
+        self.assertEqual(versions["oa_pending_payment_source_snapshot_version"], 0)
+        self.assertEqual(versions["oa_pending_payment_relation_version"], 0)
+        self.assertTrue(versions["oa_pending_payment_source_signature"])
+        self.assertEqual(connection.executions, [])
+
     def test_statistics_publish_full_page_inventory_counts_and_membership_digests(self) -> None:
         connection = CoverageConnection()
 
@@ -250,6 +299,31 @@ class CoverageConnection:
             "input_invoice_count": 800,
             "input_invoice_membership_digest": "invoice-membership",
         }
+
+
+class ScopeInventoryConnection:
+    def __init__(self) -> None:
+        self.fetch_all_calls: list[tuple[str, tuple[object, ...]]] = []
+
+    def fetch_all(self, sql: str, params: tuple[object, ...]) -> list[dict[str, object]]:
+        self.fetch_all_calls.append((sql, params))
+        return [
+            {"scope_key": "2026-04"},
+            {"scope_key": "2026-06"},
+            {"scope_key": "2026-05"},
+            {"scope_key": "invalid"},
+        ]
+
+
+class MissingOaSourceConnection:
+    def __init__(self) -> None:
+        self.executions: list[tuple[str, tuple[object, ...]]] = []
+
+    def fetch_one(self, _sql: str, _params: tuple[object, ...]) -> None:
+        return None
+
+    def execute(self, sql: str, params: tuple[object, ...]) -> None:
+        self.executions.append((sql, params))
 
 
 class TestProjectionBuilder(OaPendingPaymentSqlProjectionBuilder):

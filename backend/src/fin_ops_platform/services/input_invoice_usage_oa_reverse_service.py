@@ -306,6 +306,7 @@ class InputInvoiceUsageOaReverseService:
         relation_writer: Callable[[InputInvoiceUsageOaReverseBatch, InputInvoiceUsageOaEvidence], None] | None = None,
         audit_recorder: Callable[[dict[str, object]], None] | None = None,
         read_model_invalidator: Callable[[list[str], str], None] | None = None,
+        statistics_invalidator: Callable[[str], None] | None = None,
         read_model_rows_loader: Callable[[dict[str, list[Any]]], dict[str, object] | None] | None = None,
         read_model_rows_by_invoice_ids_loader: Callable[[list[str]], dict[str, object] | None] | None = None,
     ) -> None:
@@ -315,6 +316,7 @@ class InputInvoiceUsageOaReverseService:
         self._relation_writer = relation_writer
         self._audit_recorder = audit_recorder
         self._read_model_invalidator = read_model_invalidator
+        self._statistics_invalidator = statistics_invalidator
         self._read_model_rows_loader = read_model_rows_loader
         self._read_model_rows_by_invoice_ids_loader = read_model_rows_by_invoice_ids_loader
 
@@ -427,6 +429,7 @@ class InputInvoiceUsageOaReverseService:
         )
         self._append_audit(batch, "oa_reverse_batch_created", actor_id=actor_id, before_status=None, after_status=batch.status)
         self._repository.save_batch(batch)
+        self._invalidate_statistics("input_invoice_usage_oa_reverse_batch_created")
         self._record_external_audit(batch, "oa_reverse_batch_created", actor_id=actor_id)
         return self.batch_payload(batch)
 
@@ -1066,6 +1069,10 @@ class InputInvoiceUsageOaReverseService:
             }
         )
         self._read_model_invalidator(months or ["all"], reason)
+
+    def _invalidate_statistics(self, reason: str) -> None:
+        if self._statistics_invalidator is not None:
+            self._statistics_invalidator(reason)
 
 
 def _copy_batch(batch: InputInvoiceUsageOaReverseBatch | None) -> InputInvoiceUsageOaReverseBatch:

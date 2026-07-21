@@ -12,16 +12,23 @@ from fin_ops_platform.services.oa_pending_payment_projection_rows import (
 from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
 
 
-def input_invoice_usage_source_versions(payment_status_rules_version: int | str | None = None) -> dict[str, object]:
+def input_invoice_usage_source_versions(
+    payment_status_rules_version: int | str | None = None,
+    *,
+    oa_reverse_batch_source_version: str | None = "rows:0|max_created_at:",
+) -> dict[str, object]:
     normalized_rules_version = payment_status_rules_version if payment_status_rules_version not in (None, "") else 1
-    return {
+    versions: dict[str, object] = {
         "input_invoice_usage_source_version": INPUT_INVOICE_USAGE_SOURCE_VERSION,
         "invoice_lifecycle_policy_schema_version": INVOICE_LIFECYCLE_POLICY_SCHEMA_VERSION,
         "input_invoice_usage_payment_rules_version": normalized_rules_version,
-        "input_invoice_usage_statistics_schema_version": 1,
+        "input_invoice_usage_statistics_schema_version": 2,
         "oa_attachment_invoice_parser_version": attachment_invoice_cache_parser_version(),
         "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
     }
+    if oa_reverse_batch_source_version not in (None, ""):
+        versions["input_invoice_usage_oa_reverse_batch_source_version"] = str(oa_reverse_batch_source_version)
+    return versions
 
 
 def output_invoice_collection_source_versions() -> dict[str, object]:

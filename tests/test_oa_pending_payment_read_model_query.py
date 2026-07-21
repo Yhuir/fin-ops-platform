@@ -7,9 +7,121 @@ from fin_ops_platform.services.postgres_repositories.read_models import (
     PostgresInvoiceUsageCollectionReadModelRepository,
     PostgresReadModelRepository,
 )
+from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_snapshot import (
+    oa_pending_payment_coverage_only_source_versions,
+)
 
 
 class OaPendingPaymentReadModelQueryTests(unittest.TestCase):
+    def test_coverage_only_scope_is_fresh_without_integration_or_relation_watermarks(self) -> None:
+        base_versions = {"schema": 1}
+        coverage_versions = {
+            **base_versions,
+            **oa_pending_payment_coverage_only_source_versions("2026-05"),
+            "oa_pending_payment_relation_version": 0,
+            "oa_pending_payment_bank_coverage_signature": "rows:2|digest:bank-coverage",
+            "oa_pending_payment_input_invoice_coverage_signature": "rows:1|digest:invoice-coverage",
+            "oa_pending_payment_event_source_version": 7,
+        }
+        connection = QueryStateConnection(
+            [
+                {
+                    "scope_key": "2026-05",
+                    "row_count": 0,
+                    "generated_at": "2026-07-22T10:00:00+08:00",
+                    "cache_status": "fresh",
+                    "actual_source_versions": coverage_versions,
+                    "source_status": None,
+                    "source_snapshot_version": None,
+                    "source_payload": None,
+                    "pending_relation_version": None,
+                    "dirty_status": "done",
+                    "dirty_source_version": 7,
+                    "outbox_blocking": False,
+                }
+            ]
+        )
+        repository = PostgresInvoiceUsageCollectionReadModelRepository(connection)
+
+        state = repository.oa_pending_payment_query_state(
+            scope_key="all",
+            tenant_id="default",
+            base_source_versions=base_versions,
+        )
+
+        self.assertEqual(state["status"], "fresh")
+        self.assertEqual(state["blocking_scope_keys"], [])
+        self.assertNotIn("2026-05:source_snapshot_missing", state["stale_reasons"])
+        self.assertNotIn("2026-05:pending_relation_version_missing", state["stale_reasons"])
+
+    def test_real_oa_source_supersedes_coverage_only_vector(self) -> None:
+        base_versions = {"schema": 1}
+        actual_versions = {
+            **base_versions,
+            **oa_pending_payment_coverage_only_source_versions("2026-05"),
+            "oa_pending_payment_relation_version": 0,
+            "oa_pending_payment_bank_coverage_signature": "rows:2|digest:bank-coverage",
+            "oa_pending_payment_input_invoice_coverage_signature": "rows:1|digest:invoice-coverage",
+            "oa_pending_payment_event_source_version": 8,
+        }
+        row = _fresh_state_row(
+            scope_key="2026-05",
+            base_versions=base_versions,
+            snapshot_version=4,
+            event_source_version=8,
+        )
+        row["actual_source_versions"] = actual_versions
+        repository = PostgresInvoiceUsageCollectionReadModelRepository(QueryStateConnection([row]))
+
+        state = repository.oa_pending_payment_query_state(
+            scope_key="2026-05",
+            tenant_id="default",
+            base_source_versions=base_versions,
+        )
+
+        self.assertEqual(state["status"], "refreshing")
+        self.assertIn("2026-05:source_versions_mismatch", state["stale_reasons"])
+
+    def test_failed_integration_watermark_does_not_accept_coverage_only_vector(self) -> None:
+        base_versions = {"schema": 1}
+        actual_versions = {
+            **base_versions,
+            **oa_pending_payment_coverage_only_source_versions("2026-05"),
+            "oa_pending_payment_relation_version": 0,
+            "oa_pending_payment_bank_coverage_signature": "rows:2|digest:bank-coverage",
+            "oa_pending_payment_input_invoice_coverage_signature": "rows:1|digest:invoice-coverage",
+            "oa_pending_payment_event_source_version": 8,
+        }
+        connection = QueryStateConnection(
+            [
+                {
+                    "scope_key": "2026-05",
+                    "row_count": 0,
+                    "generated_at": "2026-07-22T10:00:00+08:00",
+                    "cache_status": "fresh",
+                    "actual_source_versions": actual_versions,
+                    "source_status": "failed",
+                    "source_snapshot_version": 4,
+                    "source_payload": {},
+                    "pending_relation_version": None,
+                    "dirty_status": "done",
+                    "dirty_source_version": 8,
+                    "outbox_blocking": False,
+                }
+            ]
+        )
+        repository = PostgresInvoiceUsageCollectionReadModelRepository(connection)
+
+        state = repository.oa_pending_payment_query_state(
+            scope_key="2026-05",
+            tenant_id="default",
+            base_source_versions=base_versions,
+        )
+
+        self.assertEqual(state["status"], "refreshing")
+        self.assertIn("2026-05:source_snapshot_missing", state["stale_reasons"])
+        self.assertIn("2026-05:source_versions_mismatch", state["stale_reasons"])
+
     def test_dynamic_source_state_is_fresh_only_for_exact_published_vector(self) -> None:
         base_versions = {"schema": 1}
         expected_versions = {

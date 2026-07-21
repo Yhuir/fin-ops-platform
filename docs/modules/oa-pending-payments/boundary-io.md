@@ -1,6 +1,6 @@
 # OA 待付款核对模块边界与 I/O
 
-日期：2026-07-17
+日期：2026-07-22
 
 ## 模块化状态
 
@@ -59,7 +59,8 @@
 - pending relation / bank claim：`app.oa_pending_payment_bank_relations`、`app.bank_transaction_relation_claims` 及事件表。
 - read model：OA 专属月份 rows/scopes；只由 `OaPendingPaymentSqlProjectionBuilder` 发布。
 - durable refresh truth：`job.outbox_events` 与 `job.read_model_dirty_scopes`；Redis/RabbitMQ 不能替代状态事实源。Redis 只保存通过当前请求 fresh gate 后的 OA 私有版本化 rows payload，不拥有 freshness、版本或失效事实。
-- `all` scope freshness inventory 只组合 canonical source watermark、现存 OA scope，以及当前 `pending/processing/failed/dead_lettered` queue scope；已 `done` 的 outbox 历史不属于当前 freshness I/O，不得进入页面热路径或改变 version token。
+- `all` fan-out inventory 由 worker 一次 SQL 合并当前 tenant 的 canonical OA source watermark、未删除银行流水月份和未删除进项发票月份；不得从既有 read-model scope 反推当前事实库存。只存在银行/进项覆盖事实、且 completed/admission/payment-status 均为空的月份必须发布合法 empty shard。prune 只删除不再属于当前 inventory 的 read-model shard，不删除或伪造 integration watermark。
+- `all` query freshness inventory 继续只组合已发布 OA scope与当前 `pending/processing/failed/dead_lettered` queue scope；已 `done` 的 outbox 历史不属于页面热路径或 version token。页面查询不得为核对标题重新扫描银行/发票 canonical facts。
 - `all` scope 在同一个 freshness statement 中检查跨月份 `row_id` 唯一性；发现重复必须返回 `202/refreshing` 并由 Page Audit 给出跨 scope 样本。fresh 数据直接读取月份 projection，不保留会每次排序并静默吞错的旧 `DISTINCT ON(row_id)` 兼容链。
 
 ## 动态 freshness vector
@@ -70,6 +71,8 @@
 - pending relation scope version；
 - canonical relation schema、pending relation scope version，以及本次 `oa_pending_payment` event source version；
 - OA projector/API/read-model contract revision。
+
+覆盖月份没有 OA integration watermark 时，worker只能在 read-model `source_versions` 写入按月份确定性的 coverage-only empty vector（空 completed/admission/payment signatures、snapshot version `0`、relation version 缺失时为 `0`）；不得写 `app.oa_sync_watermarks` 冒充 integration 成功。query freshness 仅在真实 OA source watermark 缺失时接受该 vector；后续真实 watermark 出现必须使 coverage-only shard stale 并触发重建。
 
 输入发票 payment rules 不参与 `InvoiceLifecyclePolicy.evaluate_oa_payment`，因此不虚构 OA dependency/version。若未来业务规则真正进入 OA 付款判定，必须同时增加 owner version、writer fan-out 和测试。
 
@@ -83,7 +86,7 @@
 | completed Workbench relation confirm/withdraw | `WorkbenchWriteUnitOfWork` | 与 canonical relation 同一事务批量 enqueue 受影响 `oa_pending_payment:<month>`；OA projector直接读取 canonical relation，不等待 `workbench_relation` read model |
 | 银行导入/更正 | bank lifecycle/UoW owner | 只有影响 OA relation evidence 的事实变化才由既有 target planner enqueue 对应 OA 月份；projector按 relation member id 批量读取 canonical bank facts |
 | 进项发票导入/更正 | invoice lifecycle owner | 只有影响 OA relation evidence 的事实变化才由既有 target planner enqueue 对应 OA 月份；projector按 relation member id 批量读取 canonical invoice facts |
-| 显式初始化/修复 | `runtime_queue_ops enqueue-read-model-refresh --scope oa_pending_payment:all` | 低优先级 all fan-out；月份 inventory 只读取当前 tenant 的 `oa_pending_payment_source:<tenant>:<month>` watermarks，因此有事实快照但零 OA rows 的月份也必须发布 empty fresh shard；不从 completed/admission rows 猜月份，不用于普通单月写入 |
+| 显式初始化/修复 | `runtime_queue_ops enqueue-read-model-refresh --scope oa_pending_payment:all` | 低优先级 all fan-out；月份 inventory 合并当前 tenant 的 `oa_pending_payment_source:<tenant>:<month>` watermarks、未删除银行流水月份和未删除进项发票月份。只有覆盖事实而无 OA source 的月份发布 coverage-only empty vector；不得写 integration watermark，也不用于普通单月写入 |
 
 禁止直接 SQL 改 canonical facts后不更新 owner version/outbox。生产权限、boundary guard 和 Audit 共同防止越界写入。
 
@@ -133,5 +136,6 @@
 - `GET /api/oa-pending-payments` 的既有主响应增加 `statistics`，统计严格来自 OA 待付款页面自身投影时实际拉取的 OA、银行流水和进项发票全集，不读取统一事实源的汇总结果，也不受搜索、筛选、排序或分页影响。
 - Worker 在同一次月份投影中拉取完整流水/进项库存，按稳定业务身份生成数量和 membership digest；流水 digest 同时绑定 direction，发票 digest 同时绑定 invoice type。统计与 digest 随月份分片原子发布到既有 `raw_payload.statistics` / `source_versions`，不新增表。
 - API freshness 热路径只读取已发布 scope metadata、dirty/outbox 和 source version，不得重新扫描 `app.bank_transactions` / `app.invoices`。全量查询只有在所有相关分片和覆盖 digest 均存在且 scope fresh 时返回统计，否则 `statistics=null` 并沿用既有 refreshing/refresh I/O，禁止用旧统计或 live fallback 冒充 fresh。
+- `all` rebuild 必须覆盖只有流水或进项发票、没有 OA source watermark 的月份；真实 OA watermark 后到时必须淘汰 coverage-only vector。inventory 缩小时只 prune read-model shard，不能删除 integration 或 canonical facts。
 - 跨 scope 重复 row identity 检查属于独立 Page Audit/发布质量约束，不在正常页面 freshness 请求中执行全表 `GROUP BY`；月度页面的全量标题统计只重复校验紧凑 scope 元数据和版本令牌。
 - Page Audit 在独立只读查询中从 canonical facts、关系事实和投影行重算数量及 membership digest，并与已发布值比较；它只证明页面拉取和投影完整性，不把统一事实源汇总值作为页面统计输入。

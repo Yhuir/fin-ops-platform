@@ -1,6 +1,6 @@
 # OA 待付款核对测试责任
 
-日期：2026-07-17
+日期：2026-07-22
 
 ## 风险模型
 
@@ -68,7 +68,7 @@
 - `all` freshness gate 对跨 scope 重复 `row_id` fail closed；Page Audit 按全局 `row_id` 返回涉及 scopes；rows SQL 不再包含旧 `deduped_oa_pending_payment_rows` / `DISTINCT ON(row_id)` 隐藏去重。
 - PG-only projector，按 relation member id 批量读取 canonical facts，纯函数组装，单次 values 批量写入，空 scope清理，原子 publish。
 - projector/freshness SQL 不包含 `WorkbenchRelationReadFacade`、`workbench_relation_read_model_not_fresh`、`workbench_relation_source_versions` 或 `read_model.workbench_relation_scopes`。
-- stale event在读取源前 skip，CAS lost不清新 dirty，all仅低优先级 fan-out；all 的 shard inventory 按 event tenant 读取 source watermarks，覆盖合法 empty month，禁止回退为 completed/admission 非空月份枚举。
+- stale event在读取源前 skip，CAS lost不清新 dirty，all仅低优先级 fan-out；all 的 shard inventory 按 event tenant union OA source watermarks、未删除银行月份和未删除进项发票月份。测试锁定 coverage-only month 使用 read-model empty vector且不写 source watermark、真实 OA source 出现会使旧 coverage vector stale，并禁止从 read-model scopes 反推 inventory。
 - `oa-pending-payment` worker claim隔离；shared `invoice-usage-collection` 不含 OA handler。
 - source snapshot/migration/permission/schema contract。
 - OA 私有 rows cache 每次命中前仍执行 PostgreSQL freshness/version gate；同版本同 tenant/query 的重复 fresh `200` 跳过 payload SQL和 read transaction，版本、tenant 或 query 变化必须 cache miss。miss/Redis 故障路径在 repeatable-read snapshot 内重跑 gate，只有 version token 不变才读取/回填 payload；读中 version/status 变化必须 `202` fail-closed。key 已绑定 version token，因此不增加 writer invalidation/fan-out。

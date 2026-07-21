@@ -39,7 +39,7 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| 外部往来款 rows/summary | 前端页面 | query gateway 后 fresh/status；完整重建和 relation delta 在发布事务内从未筛选 read-model rows/`flow_rows` 计算标题 `statistics`（去重流水、收支、台账组、结清、OA/发票关联），只在稳定首行的 `raw_payload.page_statistics` 保存一个标量标记；请求 SQL 只读取该标量，不再展开 `flow_rows`，且统计不受页面筛选、排序或分页影响；read model 或统计标记非 fresh 时统计为 `null` 并触发 scoped refresh，禁止用银行 canonical/统一事实源替代 |
+| 外部往来款 rows/summary | 前端页面 | query gateway 后 fresh/status；完整重建和 relation delta 在发布事务内从未筛选 read-model rows/`flow_rows` 计算标题 `statistics`（去重流水、收支、台账组、结清、OA/发票关联），原子写入 `read_model.turnover_ledger_scopes`；请求 SQL 只读取 scope summary 标量，不再展开 `flow_rows`，且统计不受页面筛选、排序或分页影响；0 行 generation 仍由 scope row 证明存在并 fresh 返回全零统计；read model 或 scope summary 非 fresh 时统计为 `null` 并触发 scoped refresh，禁止用银行 canonical/统一事实源替代 |
 | 页面 Audit 状态 | 标题附件 | unknown/non-fresh 不得显示 Fresh；样本截断必须显式呈现 |
 | 写操作结果 | API/frontend operation barrier | 可审计、幂等或有版本保护；返回 `affected_months`、`affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`。前端轮询由共享 target-scoped runtime snapshot 只读取这些 scopes，不触发全局 App Status 聚合 |
 | Workbench active relation | `workbench-relations` | 只通过 `WorkbenchRelationCommandService` 写入/撤回；`turnover_manual_closure` relation metadata 明确声明 OA/发票 requirement。metadata 缺失的旧关系必须 fail closed，等待规则保存同步链路升级 |
@@ -48,20 +48,20 @@
 
 ## 持久化与投影
 
-- Read model：`turnover_ledger`
+- Read model：`turnover_ledger_rows` 业务行 + `turnover_ledger_scopes` generation/row-count/statistics summary
 - Projection：`partitioned_scoped_incremental`
 - 生产投影必须信任 `BankTransactionTagReadFacade` 输出的 fresh bank-detail tag 事实；只有无 provider 的 legacy/local 路径才允许回退 `BankTransactionCategoryService` snapshot。禁止在 provider-backed worker hot path 逐笔读取旧 category service。
 - 关系 enrichment 必须通过 `WorkbenchRelationReadModelRepositoryPort.workbench_relation_source_bundle_from_source(...)` 读取 `app.workbench_pair_relations`；rows 与 source summary 必须来自同一个 SQL 快照。这是只读 shared-fact I/O，不读取或等待 `read_model.workbench_relation_*`。canonical source 不可用时不得伪造 linked relation context。
 - grouped 当前台账不得消费 `withdrawn` relation；撤回历史只留在 relation snapshot/audit log。系统自动关系恢复后，同一 bank leaf 在 grouped financial totals 和 flow rows 中只能计算一次。
 - `turnover_relation_snapshot_version` 只散列通用 suggested-relation 链会改变当前台账的 canonical `confirmed` Turnover relations，并按 `relation_id` 稳定排序；`withdrawn` relation 与 audit history 不属于当前 projection 输入。现代 closure confirm/withdraw 只改变 Workbench canonical context，不得改变该版本；通用 relation 确认改变版本、撤回后回到操作前值。
 - Month projection 首次读取的现有 read-model page 必须在 unchanged 检查和 relation-only refresh 之间复用，禁止对 page 1 重复 SQL；同一 worker 内的基础 grouped rows memoization 只能保留最近一个完整 source-version 快照，调用方得到副本，任何 source-version 变化都必须重新读取 canonical facts 并重算。
-- Relation-only month refresh 的正式 I/O 是 `load_turnover_ledger_relation_delta(...)` / `save_turnover_ledger_relation_delta(...)`。查询依赖 `turnover_ledger_rows_bank_row_ids_gin`，保存不得 delete scope；完整 `save_turnover_ledger_rows(...)` 只属于 own-source 变化、repair、首次构建或明确安全 fallback。
-- `all` 聚合查询不得要求所有行级 source_versions 完全一致；按月增量 worker 刷新会让不相关月份保留旧 provenance。Query owner 只能在 repository 标记 mixed row versions 且 durable dirty scope 为 fresh 时把 all-view 判为 fresh，不能绕过 dirty scope。
+- Relation-only month refresh 的正式 I/O 是 `load_turnover_ledger_relation_delta(...)` / `save_turnover_ledger_relation_delta(...)`。查询依赖 `turnover_ledger_rows_bank_row_ids_gin`，保存不得 delete scope；它必须与 affected month 及 `all` scope summary 在同一事务更新。完整 `save_turnover_ledger_rows(...)` 只属于 own-source 变化、repair、首次构建或明确安全 fallback，并同样原子发布对应 scope summaries。full/month/delta/unchanged acknowledgement 共享唯一 turnover advisory transaction lock，并在写前比较内部 global generation 与目标 scope 的 event `published_source_version`；先获得锁再做 CAS，锁集合恒为一个，禁止增加 month/all 多锁顺序。CAS 失败必须中止整个事务并由 worker 重试，旧 generation 不得覆盖新 projection。
+- `all` 聚合发现行级 `source_versions` mixed 时必须 fail closed，禁止把实际版本改写成 expected 后伪装 fresh。API 应入队 `turnover_ledger:all`；full-all builder 必须绕过 existing-row reuse，从 canonical facts 重建所有 rows 并写入同一 source vector，从而收敛 mixed 状态。
 - 列表 page payload 只能从规范化 `payload` 读取；family/status/scope/direction、总 summary、family summaries 和 total 在 PostgreSQL 中计算，第二条 data query 只读取当前 `page_size<=200` 的 payload。筛选为空但 projection 已存在时返回 fresh 空结果，不得误触发 rebuild。
-- `raw_payload` 不属于 turnover 业务行读取合同；完整业务 payload 只由 `payload` 拥有。唯一例外是 projection 发布时在按 `relation_id` 排序的首个 active row 写入 `raw_payload.page_statistics` 标量标记，其余行移除该键；列表仅可读取该内部标量，不得恢复业务 payload fallback。完整重建与 relation delta 必须在各自写事务内同步更新标记；标记缺失时 statistics 判为 stale，并复用现有 scope rows 补发。
+- `raw_payload` 不属于 turnover 业务行读取合同，完整业务 payload 只由 `payload` 拥有；不得恢复业务 payload fallback，也不得把 scope metadata/统计寄存在任一业务行。`turnover_ledger_scopes` 是 generation 存在性、source versions、row count、标题 statistics 与内部 CAS metadata 的唯一持久边界；scope row 缺失或 row count 不一致时 statistics 判为 stale，并复用现有 scope rows 补发。`generation` / `published_source_version` 只允许 repository port 与 builder 消费，禁止进入公开 API DTO。
 - Worker：`turnover-ledger`
 - Query owner：`TurnoverLedgerQueryService`
-- Repository owner：`TurnoverLedgerReadModelRepositoryPort`，仅暴露 `list_turnover_ledger_view`、`save_turnover_ledger_rows`、`load_turnover_ledger_relation_delta`、`save_turnover_ledger_relation_delta`。
+- Repository owner：`TurnoverLedgerReadModelRepositoryPort`，仅暴露 `list_turnover_ledger_view`、`save_turnover_ledger_rows`、`turnover_ledger_generation`、`acknowledge_unchanged_turnover_ledger_scope`、`load_turnover_ledger_relation_delta`、`save_turnover_ledger_relation_delta`。
 
 ## 文件范围
 

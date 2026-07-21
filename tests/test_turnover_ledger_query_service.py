@@ -30,16 +30,17 @@ class FakeRepository:
 
 
 class TurnoverLedgerQueryServiceTests(unittest.TestCase):
-    def test_repository_query_is_bounded_and_reads_precomputed_statistics_scalar(self) -> None:
+    def test_repository_query_is_bounded_and_reads_precomputed_scope_statistics(self) -> None:
         source = inspect.getsource(PostgresSummaryReadModelRepository.list_turnover_ledger_view)
 
         self.assertIn("limit %s offset %s", source.lower())
         self.assertIn("sum(pending_repayment_amount)", source)
-        self.assertIn("raw_payload ->", source)
-        self.assertIn("statistics_marker as materialized", source)
+        self.assertIn("read_model.turnover_ledger_scopes", source)
+        self.assertIn("scope_summary as materialized", source)
         self.assertLess(source.index("from base\n"), source.index("from normalized\n"))
         self.assertNotIn("jsonb_array_elements", source)
         self.assertNotIn("statistics_flows", source)
+        self.assertNotIn("raw_payload", source)
         self.assertNotIn("_turnover_ledger_row_payload", source)
 
     def test_page_statistics_keep_unique_flow_and_group_counts_separate(self) -> None:
@@ -92,6 +93,7 @@ class TurnoverLedgerQueryServiceTests(unittest.TestCase):
                 "rows": [{"relation_id": "fresh"}],
                 "pagination": {"page": 1, "page_size": 50, "total": 1},
                 "source_versions": {"turnover_ledger_schema_version": "same"},
+                "generation": 7,
                 "read_model_status": "fresh",
             }
         )
@@ -105,11 +107,12 @@ class TurnoverLedgerQueryServiceTests(unittest.TestCase):
 
         self.assertEqual(payload["rows"], [{"relation_id": "fresh"}])
         self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertNotIn("generation", payload)
         self.assertEqual(repository.calls[0]["family"], "company")
         self.assertEqual(repository.calls[0]["page"], 2)
         self.assertEqual(queue.enqueued, [])
 
-    def test_mixed_all_scope_row_versions_use_dirty_scope_status_instead_of_reenqueueing_all(self) -> None:
+    def test_mixed_all_scope_row_versions_fail_closed_even_when_dirty_scope_is_clean(self) -> None:
         queue = FakeQueue()
         repository = FakeRepository(
             {
@@ -119,6 +122,8 @@ class TurnoverLedgerQueryServiceTests(unittest.TestCase):
                 "source_versions_mixed": True,
                 "refresh_status": "fresh",
                 "read_model_status": "fresh",
+                "statistics": {"transaction_count": 3},
+                "statistics_status": "fresh",
             }
         )
         service = TurnoverLedgerQueryService(
@@ -129,10 +134,16 @@ class TurnoverLedgerQueryServiceTests(unittest.TestCase):
 
         payload = service.list_ledger(family="all", direction="all", status=None, page=1, page_size=50)
 
-        self.assertEqual(payload["read_model_status"], "fresh")
-        self.assertFalse(payload["refresh_enqueued"])
-        self.assertEqual(payload["source_versions"], {"turnover_ledger_schema_version": "current"})
-        self.assertEqual(queue.enqueued, [])
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertTrue(payload["refresh_enqueued"])
+        self.assertEqual(payload["refresh_reason"], "source_version_mismatch")
+        self.assertEqual(payload["source_versions"], {})
+        self.assertIsNone(payload["statistics"])
+        self.assertEqual(payload["statistics_status"], "refreshing")
+        self.assertEqual(
+            queue.enqueued,
+            [{"scope_type": "turnover_ledger", "scope_key": "all", "reason": "api_stale"}],
+        )
 
     def test_mixed_all_scope_row_versions_still_refresh_when_dirty_scope_is_active(self) -> None:
         queue = FakeQueue()
@@ -170,6 +181,7 @@ class TurnoverLedgerQueryServiceTests(unittest.TestCase):
         payload = service.list_ledger(family="personal", direction="income", status="suggested", page=0, page_size=999)
 
         self.assertEqual(payload["rows"], [])
+        self.assertNotIn("generation", payload)
         self.assertEqual(payload["read_model_status"], "refreshing")
         self.assertTrue(payload["refresh_enqueued"])
         self.assertEqual(payload["refresh_reason"], "api_miss")

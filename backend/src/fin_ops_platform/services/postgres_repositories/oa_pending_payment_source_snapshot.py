@@ -18,6 +18,34 @@ from fin_ops_platform.services.postgres_repositories.oa_projection import (
 )
 
 
+OA_PENDING_PAYMENT_COVERAGE_ONLY_SCHEMA_VERSION = 1
+
+
+def oa_pending_payment_coverage_only_source_versions(scope_key: str) -> dict[str, object]:
+    """Return the deterministic empty OA vector for a coverage-only month.
+
+    This vector is projection metadata, not an integration watermark. It lets the
+    OA page publish bank/invoice inventory for a month that has no OA source
+    snapshot without making the read-model worker an owner of integration facts.
+    """
+
+    normalized_scope_key = _month(scope_key)
+    if not normalized_scope_key:
+        raise ValueError("coverage-only OA source versions require a YYYY-MM scope_key.")
+    empty_signature = hashlib.sha256(b"[]").hexdigest()
+    source_signature = hashlib.sha256(
+        f"oa_pending_payment:coverage_only:{normalized_scope_key}:v{OA_PENDING_PAYMENT_COVERAGE_ONLY_SCHEMA_VERSION}".encode()
+    ).hexdigest()
+    return {
+        "oa_pending_payment_coverage_only_schema_version": OA_PENDING_PAYMENT_COVERAGE_ONLY_SCHEMA_VERSION,
+        "oa_pending_payment_source_snapshot_version": 0,
+        "completed_oa_signature": empty_signature,
+        "in_progress_admission_signature": empty_signature,
+        "payment_status_signature": empty_signature,
+        "oa_pending_payment_source_signature": source_signature,
+    }
+
+
 @dataclass(slots=True, frozen=True)
 class OaPendingPaymentSourceSnapshotResult:
     completed_projection_changed_scopes: tuple[str, ...]
@@ -775,32 +803,6 @@ class PostgresOaPendingPaymentStatusSnapshotReader:
         if not isinstance(row, dict):
             return None
         return OAPaymentStatusRecord(flow_id=normalized_flow_id, pay_status=int(row.get("pay_status") or 0))
-
-
-def oa_pending_payment_source_scope_keys(
-    connection: Any,
-    *,
-    tenant_id: str = "default",
-) -> list[str]:
-    normalized_tenant_id = text(tenant_id) or "default"
-    source_prefix = f"oa_pending_payment_source:{normalized_tenant_id}:"
-    rows = connection.fetch_all(
-        """
-        select substring(sync_key from length(%s) + 1) as scope_key
-        from app.oa_sync_watermarks
-        where sync_key like %s
-        order by sync_key
-        """,
-        (source_prefix, f"{source_prefix}%"),
-    )
-    return sorted(
-        {
-            month
-            for row in list(rows or [])
-            if isinstance(row, dict) and (month := _month(row.get("scope_key")))
-        },
-        reverse=True,
-    )
 
 
 def oa_pending_payment_source_versions_from_snapshot(

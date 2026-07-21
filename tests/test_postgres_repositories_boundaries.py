@@ -2,10 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
 from fin_ops_platform.services.postgres_repositories.common import max_numeric_suffix
-from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
-from fin_ops_platform.services.postgres_repositories.read_models import _execute_many
+from fin_ops_platform.services.postgres_repositories.read_models import (
+    PostgresReadModelRepository,
+    TurnoverLedgerGenerationConflictError,
+    _execute_many,
+)
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
 from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
 from fin_ops_platform.services.read_model_scope_policy import DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY
@@ -157,6 +162,22 @@ class TurnoverRelationDeltaConnection(RecordingConnection):
                 }
             ],
         }
+
+
+class TurnoverGenerationConnection(RecordingConnection):
+    def __init__(self, *, generation: int, published_source_version: int | None) -> None:
+        super().__init__()
+        self.generation = generation
+        self.published_source_version = published_source_version
+
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+        self.fetched_one.append((" ".join(sql.split()), params))
+        if "published_source_version" in sql:
+            return {
+                "generation": self.generation,
+                "published_source_version": self.published_source_version,
+            }
+        return None
 
 
 def _workbench_relation_batch_refresh_rows(connection: WorkbenchRelationWriteConnection) -> list[dict[str, object]]:
@@ -494,7 +515,7 @@ def test_turnover_relation_delta_reads_by_month_and_bank_row_overlap() -> None:
     assert params[1] == ["bank-1"]
 
 
-def test_turnover_full_save_publishes_statistics_marker_in_same_transaction() -> None:
+def test_turnover_full_save_publishes_scope_summary_in_same_transaction() -> None:
     connection = RecordingConnection()
     repository = PostgresReadModelRepository(connection)
 
@@ -512,11 +533,91 @@ def test_turnover_full_save_publishes_statistics_marker_in_same_transaction() ->
     )
 
     writes = [sql.lower() for sql in write_sql(connection)]
-    marker_sql = next(sql for sql in writes if "statistics_flows as materialized" in sql)
-    assert "jsonb_array_elements" in marker_sql
-    assert "set raw_payload" in marker_sql
+    summary_sql = next(sql for sql in writes if "statistics_flows as materialized" in sql)
+    assert any("pg_advisory_xact_lock" in sql for sql in writes)
+    assert "jsonb_array_elements" in summary_sql
+    assert "insert into read_model.turnover_ledger_scopes" in summary_sql
     assert connection.transaction_enters == 1
     assert connection.transaction_exits == 1
+
+
+def test_turnover_full_save_rejects_generation_that_lost_the_cross_scope_commit_race() -> None:
+    connection = TurnoverGenerationConnection(generation=4, published_source_version=7)
+    repository = PostgresReadModelRepository(connection)
+
+    with pytest.raises(TurnoverLedgerGenerationConflictError, match="advanced from 3 to 4"):
+        repository.save_turnover_ledger_rows(
+            {
+                "rows": [],
+                "source_versions": {"turnover_ledger_schema_version": "v7"},
+                "source_version": 7,
+                "expected_generation": 3,
+            },
+            scope_key="all",
+        )
+
+    writes = [sql.lower() for sql in write_sql(connection)]
+    assert any("pg_advisory_xact_lock" in sql for sql in writes)
+    assert not any("delete from read_model.turnover_ledger_rows" in sql for sql in writes)
+    assert not any("insert into read_model.turnover_ledger_scopes" in sql for sql in writes)
+
+
+def test_turnover_delta_rejects_older_scope_event_after_generation_cas_passes() -> None:
+    connection = TurnoverGenerationConnection(generation=5, published_source_version=9)
+    repository = PostgresReadModelRepository(connection)
+
+    with pytest.raises(TurnoverLedgerGenerationConflictError, match="older than the published"):
+        repository.save_turnover_ledger_relation_delta(
+            {
+                "rows": [],
+                "source_versions": {"turnover_ledger_schema_version": "v7"},
+                "source_version": 8,
+                "expected_generation": 5,
+            },
+            scope_key="2026-03",
+        )
+
+    writes = [sql.lower() for sql in write_sql(connection)]
+    assert not any("update read_model.turnover_ledger_rows set source_versions" in sql for sql in writes)
+    assert not any("insert into read_model.turnover_ledger_scopes" in sql for sql in writes)
+
+
+def test_turnover_delta_started_before_newer_full_generation_cannot_overwrite_it() -> None:
+    connection = TurnoverGenerationConnection(generation=12, published_source_version=None)
+    repository = PostgresReadModelRepository(connection)
+
+    with pytest.raises(TurnoverLedgerGenerationConflictError, match="advanced from 11 to 12"):
+        repository.save_turnover_ledger_relation_delta(
+            {
+                "rows": [{"relation_id": "stale-delta"}],
+                "source_versions": {"turnover_ledger_schema_version": "old"},
+                "source_version": 4,
+                "expected_generation": 11,
+            },
+            scope_key="2026-03",
+        )
+
+    writes = [sql.lower() for sql in write_sql(connection)]
+    assert not any("update read_model.turnover_ledger_rows set source_versions" in sql for sql in writes)
+    assert not any("insert into read_model.turnover_ledger_rows" in sql for sql in writes)
+
+
+def test_turnover_unchanged_refresh_advances_generation_and_published_scope_version() -> None:
+    connection = TurnoverGenerationConnection(generation=5, published_source_version=8)
+    repository = PostgresReadModelRepository(connection)
+
+    generation = repository.acknowledge_unchanged_turnover_ledger_scope(
+        scope_key="2026-03",
+        source_version=9,
+        expected_generation=5,
+    )
+
+    self_writes = [sql.lower() for sql in write_sql(connection)]
+    assert generation == 6
+    assert "pg_advisory_xact_lock" in self_writes[0]
+    metadata_write = next(sql for sql in self_writes if "update read_model.turnover_ledger_scopes" in sql)
+    assert "published_source_version" in metadata_write
+    assert not any("turnover_ledger_rows" in sql for sql in self_writes)
 
 
 def test_turnover_relation_delta_updates_versions_and_upserts_without_scope_delete() -> None:
@@ -541,7 +642,11 @@ def test_turnover_relation_delta_updates_versions_and_upserts_without_scope_dele
     writes = [sql.lower() for sql in write_sql(connection)]
     assert any("update read_model.turnover_ledger_rows" in sql for sql in writes)
     assert any("insert into read_model.turnover_ledger_rows" in sql for sql in writes)
-    assert any("statistics_flows as materialized" in sql and "set raw_payload" in sql for sql in writes)
+    assert any(
+        "statistics_flows as materialized" in sql
+        and "insert into read_model.turnover_ledger_scopes" in sql
+        for sql in writes
+    )
     assert not any("delete from read_model.turnover_ledger_rows" in sql for sql in writes)
     assert connection.transaction_enters == 1
     assert connection.transaction_exits == 1

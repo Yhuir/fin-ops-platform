@@ -308,7 +308,11 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         self.assertEqual(context.exception.error_code, "input_invoice_usage_oa_reverse_preview_refreshing")
 
     def test_create_batch_is_idempotent_and_persists_audit_metadata(self) -> None:
-        service = self._service(invoices=[self._invoice("inv-1", "1001", self._counterparty("vendor", "供应商"))])
+        statistics_invalidations: list[str] = []
+        service = self._service(
+            invoices=[self._invoice("inv-1", "1001", self._counterparty("vendor", "供应商"))],
+            statistics_invalidator=statistics_invalidations.append,
+        )
         preview = service.preview(
             {"invoiceIds": ["inv-1"], "targetApplicantCode": "chen_xiuyun"}, can_create_draft=True
         )
@@ -339,6 +343,7 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         self.assertEqual(first["version"], 1)
         self.assertEqual(first["createdBy"], "user-1")
         self.assertEqual(first["auditEvents"][0]["eventType"], "oa_reverse_batch_created")
+        self.assertEqual(statistics_invalidations, ["input_invoice_usage_oa_reverse_batch_created"])
 
     def test_create_oa_draft_from_selection_creates_internal_batch_and_uses_target_provider(self) -> None:
         service = self._service(invoices=[self._invoice("inv-1", "1001", self._counterparty("vendor", "供应商"))])
@@ -798,6 +803,7 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         evidence_provider: object | None = None,
         relation_writer: object | None = None,
         read_model_invalidator: object | None = None,
+        statistics_invalidator: object | None = None,
     ) -> InputInvoiceUsageOaReverseService:
         query_service = InputInvoiceUsageQueryService(
             payment_rules_provider=AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None),
@@ -816,6 +822,7 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
             evidence_provider=evidence_provider,
             relation_writer=relation_writer,
             read_model_invalidator=read_model_invalidator,
+            statistics_invalidator=statistics_invalidator,
             read_model_rows_loader=lambda query: query_service.list_rows(
                 page=query.get("page", [1])[0],
                 page_size=query.get("page_size", [200])[0],
