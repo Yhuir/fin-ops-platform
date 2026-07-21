@@ -1,5 +1,15 @@
 # 关联台 实施记录
 
+## 2026-07-21 - relation 冻结要求与关联台展示分区闭环
+
+- 真实原因：新 formal-relation grouping 曾把所有 active relation 无条件发布到 paired，覆盖了 relation 创建时的 `requires_oa` / `requires_invoice`；deterministic matching 写入又遗漏 requirement snapshot，因此“工程服务费 / 人员保险”只有 OA+银行、没有发票时仍显示为已配对。
+- 边界决策：active relation 继续是跨页面 linked ownership 唯一事实源；只有关联台纯分组投影按 relation 自身冻结要求决定 paired/unpaired。未满足要求的 active relation 保持同一 case，不拆成员，不回查当前 settings，并返回 `completion.missing_row_types`。ETC、批量账务等显式业务完成合同继续隔离。
+- 写路径：人工确认复用既有 bank-tag fresh bulk read；deterministic matching 在一个 batch 内只读取一次全部 bank tags，并在 relation UoW 首次保存时写入 requirement snapshot。non-fresh 或缺行时整批 fail closed，不写半条 relation。
+- 旧链清理：删除 no-OA application 中越权扫描、逐 relation 回写 bank-flow requirement 的旧 `_sync_bank_flow_rule_relation_requirements` 及专用比较 helper；规则保存保持 O(1)，existing relation 不追溯改写。存量缺快照关系只允许在部署窗口经 relation command/history 一次性修复。
+- 性能与隔离：没有新增表、索引、worker、queue、共享 read model 或请求内 I/O；分区计算是已加载 relation 上的纯 O(member count) 判断。Redis groups/initial 使用关联台专属 cache schema 淘汰旧分区 payload，不升级共享 Workbench projection schema，因此不标脏成本统计或搜索 read model。
+- Audit：Page Audit 独立复算快照完整性与期望 zone；缺快照或错误 paired/unpaired 都 blocking，不能复用生产分组 helper 自证。
+
+
 ## 2026-07-20 - 折叠流水详情按需加载合同闭环
 
 - 目标：修复部分已配对组点击“展开 N 条明细”无响应，同时保持首屏不预取折叠明细；生产样例表现为 3 条摘要组可直接展开，而 28 条摘要组的详情响应缺少空的 OA/发票数组，前端映射抛错后被静默吞掉。

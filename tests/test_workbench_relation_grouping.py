@@ -101,6 +101,7 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
             "row_types": ["oa", "bank"],
             "status": "active",
             "relation_mode": "automatic_match",
+            "special_metadata": {"requires_oa": True, "requires_invoice": False},
         }
 
         payload = self.service.group_payload("2026-05", rows_by_id=rows, active_relations=[relation])
@@ -213,6 +214,10 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
             "row_types": ["bank", "bank"],
             "status": "active",
             "relation_mode": "no_oa_bank_batch",
+            "special_metadata": {
+                "paired_requires_oa": False,
+                "paired_requires_invoice": False,
+            },
         }
 
         payload = self.service.group_payload("2026-05", rows_by_id=rows, active_relations=[relation])
@@ -221,6 +226,66 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["unpaired_count"], 0)
         self.assertEqual(identities(payload["paired"]["groups"]), {("bank", "bank-a"), ("bank", "bank-b")})
         self.assertEqual(payload["paired"]["groups"][0]["display_mode"], "collapsed_summary")
+
+    def test_bank_relation_required_invoice_stays_grouped_in_unpaired(self) -> None:
+        rows = {
+            "oa-a": {"id": "oa-a", "type": "oa", "object_identity_key": "oa-a"},
+            "bank-a": {"id": "bank-a", "type": "bank", "object_identity_key": "bank-a"},
+        }
+        relation = {
+            "case_id": "case:insurance",
+            "row_ids": ["oa-a", "bank-a"],
+            "row_types": ["oa", "bank"],
+            "status": "active",
+            "relation_mode": "manual_confirmed",
+            "special_metadata": {"requires_oa": True, "requires_invoice": True},
+        }
+
+        payload = self.service.group_payload("2026-06", rows_by_id=rows, active_relations=[relation])
+
+        self.assertEqual(payload["summary"]["paired_count"], 0)
+        self.assertEqual(payload["summary"]["unpaired_count"], 1)
+        group = payload["unpaired"]["groups"][0]
+        self.assertEqual(group["group_type"], "relation")
+        self.assertEqual(group["case_id"], "case:insurance")
+        self.assertEqual(group["completion"], {"is_complete": False, "missing_row_types": ["invoice"]})
+        self.assertEqual(identities([group]), {("oa", "oa-a"), ("bank", "bank-a")})
+
+    def test_bank_relation_missing_requirement_metadata_fails_closed(self) -> None:
+        rows = {
+            "oa-a": {"id": "oa-a", "type": "oa", "object_identity_key": "oa-a"},
+            "bank-a": {"id": "bank-a", "type": "bank", "object_identity_key": "bank-a"},
+        }
+        relation = {
+            "case_id": "case:missing-policy",
+            "row_ids": ["oa-a", "bank-a"],
+            "row_types": ["oa", "bank"],
+            "status": "active",
+        }
+
+        payload = self.service.group_payload("2026-06", rows_by_id=rows, active_relations=[relation])
+
+        group = payload["unpaired"]["groups"][0]
+        self.assertEqual(group["completion"]["missing_row_types"], ["invoice"])
+
+    def test_bank_relation_enters_paired_after_required_invoice_is_present(self) -> None:
+        rows = {
+            "oa-a": {"id": "oa-a", "type": "oa", "object_identity_key": "oa-a"},
+            "bank-a": {"id": "bank-a", "type": "bank", "object_identity_key": "bank-a"},
+            "invoice-a": {"id": "invoice-a", "type": "invoice", "object_identity_key": "invoice-a"},
+        }
+        relation = {
+            "case_id": "case:complete-insurance",
+            "row_ids": ["oa-a", "bank-a", "invoice-a"],
+            "row_types": ["oa", "bank", "invoice"],
+            "status": "active",
+            "special_metadata": {"requires_oa": True, "requires_invoice": True},
+        }
+
+        payload = self.service.group_payload("2026-06", rows_by_id=rows, active_relations=[relation])
+
+        self.assertEqual(payload["summary"]["paired_count"], 1)
+        self.assertEqual(payload["paired"]["groups"][0]["completion"]["missing_row_types"], [])
 
     def test_input_order_and_decorations_do_not_change_membership_or_group_ids(self) -> None:
         batch = yunnan_lifu_520_fixture()
@@ -322,6 +387,26 @@ class WorkbenchRelationPreviewGroupingServiceTests(unittest.TestCase):
                 selected_rows=[{"id": "other-1", "type": "other"}],
                 ungrouped_selected_rows="individual",
             )
+
+    def test_incomplete_bank_relation_preview_stays_in_unpaired(self) -> None:
+        groups = self.service.group_relations(
+            [
+                {
+                    "case_id": "case:incomplete-preview",
+                    "row_ids": ["oa-1", "bank-1"],
+                    "row_types": ["oa", "bank"],
+                    "special_metadata": {"requires_oa": True, "requires_invoice": True},
+                }
+            ],
+            selected_rows=[
+                {"id": "oa-1", "type": "oa"},
+                {"id": "bank-1", "type": "bank"},
+            ],
+        )
+
+        self.assertEqual(groups[0]["zone"], "unpaired")
+        self.assertEqual(groups[0]["completion"]["missing_row_types"], ["invoice"])
+        self.assertEqual([row["status"] for row in groups[0]["bank_rows"]], ["unpaired"])
 
 
 if __name__ == "__main__":

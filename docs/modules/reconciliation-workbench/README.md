@@ -15,7 +15,7 @@
 
 ## 当前业务边界
 
-关联台是 canonical OA、银行流水和发票事实与 active 正式关系的读写工作台。页面只有 `paired` 和 `unpaired` 两个关系区：active relation 的完整成员组进入 `paired`，其余 canonical facts 各自作为单行进入 `unpaired`。
+关联台是 canonical OA、银行流水和发票事实与 active 正式关系的读写工作台。页面只有 `paired` 和 `unpaired` 两个关系区：满足冻结 OA/发票要求的 active relation 进入 `paired`；未满足要求的 active relation 保持同 case 分组进入 `unpaired` 并显示缺失类型；无 active owner 的 canonical facts 各自作为单行进入 `unpaired`。
 
 页面不拥有自动候选、matching decision 或第三种关系状态。确定性引擎满足安全规则时直接通过正式关系命令边界创建 active relation；不满足时不写关系，事实仍保持可见的未配对单行。
 
@@ -53,10 +53,10 @@ canonical fact repositories
 
 ## 不变量
 
-- `paired = active relation members`。
-- `unpaired = canonical facts - active relation members`。
+- `paired = complete active relation members`。
+- `unpaired = incomplete active relation members + unowned canonical facts`。
 - 两区不相交且完整覆盖 canonical facts。
-- 未配对事实永远是 singleton；旧 `case_id` 和候选 metadata 不能合并它们。
+- 无 active owner 的未配对事实永远是 singleton；未闭环 active relation 只能按其 canonical case 分组，旧 `case_id` 和候选 metadata 不能合并无 owner 事实。
 - 一个 canonical member 最多属于一个 active relation。
 - 未知 zone、group type、relation mode、重复 identity、缺失 active member 或跨 case 占用冲突均 fail fast。
 

@@ -112,7 +112,8 @@ class WorkbenchSqlProjectionRelationPayloadTests(unittest.TestCase):
             {
                 "relation_mode": "manual_confirmed",
                 "special_metadata": {"origin": "oa_pending_payment_in_progress"},
-            }
+            },
+            completion={"is_complete": True, "missing_row_types": []},
         )
 
         self.assertEqual(payload, {"code": "oa_pending_payment_in_progress", "label": "已关联进行中OA", "tone": "success"})
@@ -1862,7 +1863,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(summary_row["etc_invoice_detail_count"], 2)
 
 
-    def test_sql_projection_keeps_active_manual_oa_bank_relation_paired_without_invoice(self) -> None:
+    def test_sql_projection_keeps_active_manual_oa_bank_relation_unpaired_without_requirement_metadata(self) -> None:
         builder = WorkbenchSqlProjectionBuilder(
             connection=WorkbenchProjectionSettingsConnection(),
             read_model_repository=ReadModelSnapshotRecorder(),
@@ -1898,16 +1899,17 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
         payload = builder._group_payload("2026-03", with_test_object_identities(rows_by_id), [relation])
 
-        self.assertEqual(payload["unpaired"]["groups"], [])
-        paired_groups = payload["paired"]["groups"]
-        self.assertEqual(len(paired_groups), 1)
-        group = paired_groups[0]
+        self.assertEqual(payload["paired"]["groups"], [])
+        unpaired_groups = payload["unpaired"]["groups"]
+        self.assertEqual(len(unpaired_groups), 1)
+        group = unpaired_groups[0]
         self.assertEqual(group["group_id"], "case:CASE-MANUAL-PARTIAL")
         self.assertEqual(group["group_type"], "relation")
         self.assertEqual(group["relation_mode"], "manual_confirmed")
         self.assertEqual([row["id"] for row in group["oa_rows"]], ["oa-exp-2046"])
         self.assertEqual([row["id"] for row in group["bank_rows"]], ["txn_imported_1387"])
-        self.assertTrue(all(row["status"] == "paired" for row in [*group["oa_rows"], *group["bank_rows"]]))
+        self.assertTrue(all(row["status"] == "unpaired" for row in [*group["oa_rows"], *group["bank_rows"]]))
+        self.assertEqual(group["completion"]["missing_row_types"], ["invoice"])
         self.assertTrue(all(row["case_id"] == "CASE-MANUAL-PARTIAL" for row in [*group["oa_rows"], *group["bank_rows"]]))
 
     def test_sql_projection_emits_source_oa_for_deterministic_multi_oa_relation_alignment(self) -> None:
@@ -4846,10 +4848,12 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
         self.assertNotEqual(key_a, key_b)
 
-    def test_workbench_groups_page_cache_version_tracks_projection_schema(self) -> None:
-        self.assertEqual(
-            WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION,
-            WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
+    def test_workbench_groups_page_cache_version_isolated_from_shared_projection_schema(self) -> None:
+        self.assertNotEqual(WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION, WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION)
+        self.assertTrue(
+            WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION.startswith(
+                f"{WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION}:relation-completion-"
+            )
         )
 
     def test_workbench_groups_api_reports_missing_groups_table_as_unavailable(self) -> None:
@@ -6932,6 +6936,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                 "total_amount": "20.00",
                 "withdrawable": True,
                 "relation_mode": "no_oa_bank_batch",
+                "paired_requires_oa": False,
+                "paired_requires_invoice": False,
                 "display_tags": ["免OA", "手续费"],
             },
             "display_tags": ["免OA", "手续费"],

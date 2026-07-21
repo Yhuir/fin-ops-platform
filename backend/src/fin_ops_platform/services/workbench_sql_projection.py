@@ -36,6 +36,9 @@ from fin_ops_platform.services.workbench_query_service import (
 )
 from fin_ops_platform.services.workbench_relation_alignment_service import WorkbenchRelationAlignmentService
 from fin_ops_platform.services.workbench_relation_grouping import WorkbenchRelationGroupingService
+from fin_ops_platform.services.workbench_relation_requirements import (
+    evaluate_bank_relation_completion,
+)
 from fin_ops_platform.services.workbench_read_model_version import WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION
 from fin_ops_platform.services.oa_attachment_invoice_cache import attachment_invoice_cache_parser_version
 from fin_ops_platform.services.workbench_free_matching_engine import RULE_VERSION as WORKBENCH_FORMAL_RELATION_RULE_VERSION
@@ -712,15 +715,33 @@ class WorkbenchSqlProjectionBuilder:
             if not relation_row_ids:
                 continue
             case_id = str(relation.get("case_id") or "")
+            completion = evaluate_bank_relation_completion(
+                row_types=list(relation.get("row_types") or []),
+                special_metadata=(
+                    relation.get("special_metadata")
+                    if isinstance(relation.get("special_metadata"), dict)
+                    else {}
+                ),
+                relation_mode=str(relation.get("relation_mode") or ""),
+                amount_check=(
+                    relation.get("amount_check")
+                    if isinstance(relation.get("amount_check"), dict)
+                    else None
+                ),
+            )
+            relation_zone = "paired" if completion["is_complete"] else "unpaired"
             external_etc_batch_id = self._relation_external_etc_batch_id(relation)
             relation_amount_check = relation.get("amount_check") if isinstance(relation.get("amount_check"), dict) else None
             for row_id in relation_row_ids:
                 row = working_rows_by_id[row_id]
-                row["status"] = "paired"
+                row["status"] = relation_zone
                 row["case_id"] = case_id
                 row["relation_mode"] = relation.get("relation_mode")
                 self._apply_active_relation_metadata(row, relation)
-                row[self._relation_field_name(str(row.get("type") or ""))] = self._active_relation_payload(relation)
+                row[self._relation_field_name(str(row.get("type") or ""))] = self._active_relation_payload(
+                    relation,
+                    completion=completion,
+                )
                 if relation_amount_check:
                     row["relation_amount_check"] = deepcopy(relation_amount_check)
                 if external_etc_batch_id and str(row.get("type") or "").strip() == "oa":
@@ -741,7 +762,7 @@ class WorkbenchSqlProjectionBuilder:
                 if summary_row:
                     row = deepcopy(summary_row)
                     row["case_id"] = case_id
-                    row["status"] = "paired"
+                    row["status"] = relation_zone
                     row["workbench_display_role"] = "summary"
                     row["relation_mode"] = relation.get("relation_mode")
                     self._apply_active_relation_metadata(row, relation)
@@ -914,7 +935,20 @@ class WorkbenchSqlProjectionBuilder:
         return result
 
     @staticmethod
-    def _active_relation_payload(relation: dict[str, Any]) -> dict[str, str]:
+    def _active_relation_payload(
+        relation: dict[str, Any],
+        *,
+        completion: dict[str, object],
+    ) -> dict[str, str]:
+        missing_row_types = [str(value) for value in list(completion.get("missing_row_types") or [])]
+        if missing_row_types:
+            labels = {"oa": "OA", "invoice": "发票"}
+            missing_label = "、".join(labels.get(row_type, row_type) for row_type in missing_row_types)
+            return {
+                "code": "relation_incomplete",
+                "label": f"待补{missing_label}",
+                "tone": "warning",
+            }
         special_metadata = relation.get("special_metadata")
         if not isinstance(special_metadata, dict):
             special_metadata = {}

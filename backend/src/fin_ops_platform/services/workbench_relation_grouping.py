@@ -9,6 +9,9 @@ from fin_ops_platform.services.no_oa_bank_batch_service import (
     BANK_FLOW_RULE_BATCH_RELATION_MODE,
     NO_OA_BANK_BATCH_RELATION_MODE,
 )
+from fin_ops_platform.services.workbench_relation_requirements import (
+    evaluate_bank_relation_completion,
+)
 ROW_TYPES = ("oa", "bank", "invoice")
 DISPLAY_ROLES = frozenset({"summary", "collapsed_summary"})
 LEGACY_CANDIDATE_CASE_PREFIXES = ("candidate:", "decision:", "temp:")
@@ -32,16 +35,20 @@ class WorkbenchRelationGroupingService:
         relations = self._normalize_relations(active_relations)
         ownership = self._active_ownership(relations, canonical_rows)
 
-        paired_groups = [
+        relation_groups = [
             self._relation_group(relation, canonical_rows, display_rows)
             for relation in relations
         ]
-        paired_groups = [group for group in paired_groups if self._group_member_count(group)]
+        relation_groups = [group for group in relation_groups if self._group_member_count(group)]
+        paired_groups = [group for group in relation_groups if group["zone"] == "paired"]
 
         unpaired_groups = [
-            self._unpaired_group(row)
-            for row_id, row in sorted(canonical_rows.items(), key=self._row_sort_key)
-            if row_id not in ownership
+            *[group for group in relation_groups if group["zone"] == "unpaired"],
+            *[
+                self._unpaired_group(row)
+                for row_id, row in sorted(canonical_rows.items(), key=self._row_sort_key)
+                if row_id not in ownership
+            ],
         ]
 
         self._assert_partition(canonical_rows, paired_groups, unpaired_groups, ownership)
@@ -153,35 +160,47 @@ class WorkbenchRelationGroupingService:
         display_rows_by_case: dict[str, list[dict[str, Any]]],
     ) -> dict[str, Any]:
         case_id = str(relation["case_id"])
-        rows = [self._paired_row(rows_by_id[row_id], relation) for row_id in relation["row_ids"]]
+        special_metadata = relation.get("special_metadata")
+        completion = evaluate_bank_relation_completion(
+            row_types=[str(rows_by_id[row_id]["type"]) for row_id in relation["row_ids"]],
+            special_metadata=special_metadata if isinstance(special_metadata, dict) else None,
+            relation_mode=str(relation.get("relation_mode") or ""),
+            amount_check=(
+                relation.get("amount_check")
+                if isinstance(relation.get("amount_check"), dict)
+                else None
+            ),
+        )
+        zone = "paired" if completion["is_complete"] else "unpaired"
+        rows = [self._relation_row(rows_by_id[row_id], relation, zone=zone) for row_id in relation["row_ids"]]
         group = self._base_group(
             group_id=f"case:{case_id}",
             group_type="relation",
-            reason="active_formal_relation",
-            zone="paired",
+            reason="active_formal_relation" if zone == "paired" else "active_relation_incomplete",
+            zone=zone,
             rows=rows,
         )
+        group["completion"] = completion
         relation_mode = str(relation.get("relation_mode") or "manual_confirmed").strip() or "manual_confirmed"
         group["relation_mode"] = relation_mode
         group["case_id"] = case_id
         group["can_withdraw"] = True
         if isinstance(relation.get("amount_check"), dict):
             group["amount_check"] = deepcopy(relation["amount_check"])
-        special_metadata = relation.get("special_metadata")
         if isinstance(special_metadata, dict):
             group["special_metadata"] = deepcopy(special_metadata)
         display_tags = self._display_tags(rows, relation)
         if display_tags:
             group["display_tags"] = display_tags
-        self._apply_display_summary(group, display_rows_by_case.get(case_id, []), zone="paired")
+        self._apply_display_summary(group, display_rows_by_case.get(case_id, []), zone=zone)
         if relation_mode in {NO_OA_BANK_BATCH_RELATION_MODE, BANK_FLOW_RULE_BATCH_RELATION_MODE}:
-            self._apply_bank_batch_summary(group, relation_mode=relation_mode)
+            self._apply_bank_batch_summary(group, relation_mode=relation_mode, zone=zone)
         return group
 
     @staticmethod
-    def _paired_row(row: dict[str, Any], relation: dict[str, Any]) -> dict[str, Any]:
+    def _relation_row(row: dict[str, Any], relation: dict[str, Any], *, zone: str) -> dict[str, Any]:
         resolved = deepcopy(row)
-        resolved["status"] = "paired"
+        resolved["status"] = zone
         resolved["case_id"] = str(relation["case_id"])
         resolved["relation_mode"] = str(relation.get("relation_mode") or "manual_confirmed")
         return resolved
@@ -270,7 +289,7 @@ class WorkbenchRelationGroupingService:
             group["collapsed_row_counts"] = {"invoice": len(details)}
 
     @staticmethod
-    def _apply_bank_batch_summary(group: dict[str, Any], *, relation_mode: str) -> None:
+    def _apply_bank_batch_summary(group: dict[str, Any], *, relation_mode: str, zone: str) -> None:
         bank_rows = [deepcopy(row) for row in list(group.get("bank_rows") or [])]
         if len(bank_rows) < 2 or group.get("oa_rows") or group.get("invoice_rows"):
             return
@@ -305,7 +324,7 @@ class WorkbenchRelationGroupingService:
                 "amount": f"{total:.2f}",
                 "debit_amount": f"{total:.2f}",
                 "credit_amount": "",
-                "status": "paired",
+                "status": zone,
                 "case_id": case_id,
                 "relation_mode": relation_mode,
                 "available_actions": actions,
@@ -387,7 +406,14 @@ class WorkbenchRelationGroupingService:
         }
         paired = self._member_identities(paired_groups)
         unpaired = self._member_identities(unpaired_groups)
-        if paired != active or unpaired != canonical - active or paired.intersection(unpaired) or paired.union(unpaired) != canonical:
+        relation_members = self._member_identities(
+            [group for group in [*paired_groups, *unpaired_groups] if group.get("group_type") == "relation"]
+        )
+        if (
+            relation_members != active
+            or paired.intersection(unpaired)
+            or paired.union(unpaired) != canonical
+        ):
             raise AssertionError("Workbench relation visibility partition invariant failed.")
 
 
@@ -424,13 +450,30 @@ class WorkbenchRelationPreviewGroupingService:
         grouped_row_ids: set[str] = set()
         for relation in relations:
             case_id = str(relation.get("case_id") or "")
+            row_types = [str(row_type) for row_type in list(relation.get("row_types") or [])]
+            completion = evaluate_bank_relation_completion(
+                row_types=row_types,
+                special_metadata=(
+                    relation.get("special_metadata")
+                    if isinstance(relation.get("special_metadata"), dict)
+                    else {}
+                ),
+                relation_mode=str(relation.get("relation_mode") or ""),
+                amount_check=(
+                    relation.get("amount_check")
+                    if isinstance(relation.get("amount_check"), dict)
+                    else None
+                ),
+            )
+            zone = "paired" if completion["is_complete"] else "unpaired"
             group: dict[str, object] = {
                 "group_id": f"case:{case_id}",
                 "group_type": "relation",
                 "match_confidence": "high",
-                "reason": "active_formal_relation",
-                "zone": "paired",
-                "status": "paired",
+                "reason": "active_formal_relation" if zone == "paired" else "active_relation_incomplete",
+                "zone": zone,
+                "status": zone,
+                "completion": completion,
                 "relation_mode": str(relation.get("relation_mode") or "manual_confirmed"),
                 "special_metadata": self._serialize_value(relation.get("special_metadata") or {}),
                 "oa_rows": [],
@@ -438,7 +481,6 @@ class WorkbenchRelationPreviewGroupingService:
                 "invoice_rows": [],
             }
             row_ids = [str(row_id) for row_id in list(relation.get("row_ids") or [])]
-            row_types = [str(row_type) for row_type in list(relation.get("row_types") or [])]
             relation_row_ids: set[str] = set()
             for index, row_id in enumerate(row_ids):
                 if not row_id or row_id in relation_row_ids:
@@ -448,7 +490,7 @@ class WorkbenchRelationPreviewGroupingService:
                 row_type = row_types[index] if index < len(row_types) else self._row_type_for_row_id(row_id)
                 row = dict(rows_by_id.get(row_id) or {"id": row_id, "type": row_type})
                 row["case_id"] = case_id
-                row["status"] = "paired"
+                row["status"] = zone
                 if isinstance(relation.get("special_metadata"), dict):
                     row["special_metadata"] = self._serialize_value(relation.get("special_metadata") or {})
                 row["tags"] = self._derive_row_tags(row, group, relation)

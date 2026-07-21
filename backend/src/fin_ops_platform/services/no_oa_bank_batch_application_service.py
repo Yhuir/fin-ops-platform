@@ -276,104 +276,8 @@ class NoOaBankBatchApplicationService:
             result = self._app_settings_service.update_no_oa_bank_batch_tag_selection(payload, actor_id=actor_id)
             self.enqueue_background_refresh(["all"], reason="no_oa_bank_batch_tag_selection_changed")
             self.after_mutation(["all"], changed_case_ids=[], persist=False)
-        self._sync_bank_flow_rule_relation_requirements(result, actor_id=actor_id)
         self._sync_turnover_rule_relation_requirements(result, actor_id=actor_id)
         return result
-
-    def _sync_bank_flow_rule_relation_requirements(
-        self,
-        payload: dict[str, Any],
-        *,
-        actor_id: str,
-    ) -> dict[str, object]:
-        relation_command_service = self._relation_command_service
-        if relation_command_service is None:
-            return {"changed_case_ids": [], "affected_months": []}
-        list_active_relations = getattr(relation_command_service, "list_active_relations", None)
-        if not callable(list_active_relations):
-            return {"changed_case_ids": [], "affected_months": []}
-        requirements_by_tag_code = self._bank_flow_rule_requirements_by_tag_code(payload)
-        if not requirements_by_tag_code:
-            return {"changed_case_ids": [], "affected_months": []}
-        rule_version = int(BankTransactionCategoryService._normalize_version(payload.get("version", 1)) or 1)
-        changed_case_ids: list[str] = []
-        affected_months: set[str] = set()
-        for relation in list(list_active_relations() or []):
-            if not isinstance(relation, dict):
-                continue
-            metadata = relation.get("special_metadata") if isinstance(relation.get("special_metadata"), dict) else {}
-            relation_mode = str(relation.get("relation_mode") or metadata.get("relation_mode") or "").strip()
-            tag_code = str(metadata.get("flow_rule_tag_code") or "").strip()
-            requirement = (
-                {"tag_codes": [tag_code], **requirements_by_tag_code[tag_code]}
-                if tag_code in requirements_by_tag_code
-                else self._turnover_relation_requirement_from_bank_rows(
-                    self._turnover_relation_bank_row_ids(relation),
-                    requirements_by_tag_code=requirements_by_tag_code,
-                )
-            )
-            if not isinstance(requirement, dict):
-                continue
-            if relation_mode == BANK_FLOW_RULE_BATCH_RELATION_MODE:
-                next_metadata = {
-                    "requires_oa": bool(requirement.get("requires_oa")),
-                    "requires_invoice": bool(requirement.get("requires_invoice")),
-                    "flow_rule_version": rule_version,
-                }
-                history_operation_type = "bank_flow_rule_batch_tag_rule_requirement_sync"
-                is_current = self._bank_flow_rule_relation_requirements_current(metadata, next_metadata)
-            else:
-                next_metadata = {
-                    "requires_oa": bool(requirement.get("requires_oa")),
-                    "requires_invoice": bool(requirement.get("requires_invoice")),
-                    "paired_requirement_tag_codes": list(requirement.get("tag_codes") or []),
-                    "paired_requirement_source": "bank_transaction_paired_policy",
-                    "paired_requirement_version": rule_version,
-                }
-                tag_codes = list(next_metadata["paired_requirement_tag_codes"])
-                if len(tag_codes) == 1:
-                    next_metadata["paired_requirement_tag_code"] = tag_codes[0]
-                history_operation_type = "bank_transaction_paired_policy_requirement_sync"
-                is_current = self._bank_transaction_paired_policy_requirements_current(metadata, next_metadata)
-            if is_current:
-                continue
-            case_id = str(relation.get("case_id") or "").strip()
-            if not case_id:
-                continue
-            try:
-                result = relation_command_service.update_relation_metadata_for_case_id(
-                    case_id=case_id,
-                    actor_id=str(actor_id or ""),
-                    special_metadata=next_metadata,
-                    history_operation_type=history_operation_type,
-                )
-            except WorkbenchRelationCommandError as exc:
-                raise self._relation_command_error(exc) from exc
-            changed_case_ids.extend(
-                str(changed_case_id).strip()
-                for changed_case_id in list(result.get("changed_case_ids") or [])
-                if str(changed_case_id).strip()
-            )
-            affected_months.update(
-                str(month).strip()
-                for month in list(result.get("affected_months") or [])
-                if SEARCH_MONTH_RE.match(str(month).strip())
-            )
-        normalized_changed_case_ids = self._dedupe_ordered(changed_case_ids)
-        normalized_months = sorted(affected_months)
-        if normalized_changed_case_ids:
-            self.after_mutation(
-                normalized_months,
-                changed_case_ids=normalized_changed_case_ids,
-                persist=True,
-                action_name="bank_flow_rule_batch_tag_rules_changed",
-            )
-            self.enqueue_background_refresh(
-                normalized_months or ["all"],
-                reason="bank_flow_rule_batch_tag_rules_changed",
-                metadata=self._read_model_refresh_metadata_for_relation_mode(BANK_FLOW_RULE_BATCH_RELATION_MODE),
-            )
-        return {"changed_case_ids": normalized_changed_case_ids, "affected_months": normalized_months}
 
     def _sync_turnover_rule_relation_requirements(
         self,
@@ -586,43 +490,6 @@ class NoOaBankBatchApplicationService:
                     "requires_invoice": bool(item.get("requires_invoice")),
                 }
         return requirements
-
-    @staticmethod
-    def _bank_flow_rule_relation_requirements_current(
-        metadata: dict[str, Any],
-        next_metadata: dict[str, object],
-    ) -> bool:
-        return (
-            bool(metadata.get("requires_oa")) == bool(next_metadata.get("requires_oa"))
-            and bool(metadata.get("requires_invoice")) == bool(next_metadata.get("requires_invoice"))
-            and int(BankTransactionCategoryService._normalize_version(metadata.get("flow_rule_version", 1)) or 1)
-            == int(next_metadata.get("flow_rule_version") or 1)
-        )
-
-    @staticmethod
-    def _bank_transaction_paired_policy_requirements_current(
-        metadata: dict[str, Any],
-        next_metadata: dict[str, object],
-    ) -> bool:
-        if bool(metadata.get("requires_oa")) != bool(next_metadata.get("requires_oa")):
-            return False
-        if bool(metadata.get("requires_invoice")) != bool(next_metadata.get("requires_invoice")):
-            return False
-        current_version = int(
-            BankTransactionCategoryService._normalize_version(metadata.get("paired_requirement_version", 1)) or 1
-        )
-        if current_version != int(next_metadata.get("paired_requirement_version") or 1):
-            return False
-        if str(metadata.get("paired_requirement_source") or "").strip() != str(
-            next_metadata.get("paired_requirement_source") or ""
-        ).strip():
-            return False
-        current_tags = [
-            str(tag_code).strip()
-            for tag_code in list(metadata.get("paired_requirement_tag_codes") or [])
-            if str(tag_code).strip()
-        ]
-        return current_tags == list(next_metadata.get("paired_requirement_tag_codes") or [])
 
     @staticmethod
     def _dedupe_ordered(values: list[str]) -> list[str]:

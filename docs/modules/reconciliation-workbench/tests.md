@@ -1,6 +1,13 @@
 # 关联台测试与验证
 
-日期：2026-07-20
+日期：2026-07-21
+
+## 2026-07-21 冻结要求分区回归
+
+- Business core：要求发票的 OA+银行 active relation 必须保持同 case unpaired；补齐发票后同 case paired；缺 requirement snapshot fail closed。
+- Service/API：人工与 deterministic 写入都冻结 tag code、OA/发票布尔值和规则版本；bank-tag non-fresh/缺行时 UoW 不打开。
+- Read model/Audit：SQL projection、写后 operation projection 和 preview 复用同一纯分区；Page Audit 独立发现缺快照与错误 zone；关联台专属 Redis schema 淘汰旧 payload，不改变共享 projection schema。
+- Frontend：不完整 relation 的空 pane 显示轻量“待补 OA/发票”，不改变选择、详情和其它页面组件。
 
 ## 2026-07-20 折叠流水详情惰性加载回归
 

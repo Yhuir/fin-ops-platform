@@ -205,6 +205,10 @@ export type WorkbenchRelationGroup = {
   amountCheck?: WorkbenchAmountCheck;
   specialMetadata?: Record<string, unknown>;
   processedExceptionSummary?: WorkbenchProcessedExceptionSummary;
+  completion?: {
+    isComplete: boolean;
+    missingRecordTypes: WorkbenchRecordType[];
+  };
 };
 
 export type WorkbenchAmountSummaryTotals = {

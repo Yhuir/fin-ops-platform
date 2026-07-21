@@ -12,7 +12,7 @@
 
 规则含义：
 
-- `requires_oa` / `requires_invoice` 是候选校验、新批次审计提示和规则版本事实，不决定关联台分区。
+- `requires_oa` / `requires_invoice` 在 relation 创建时冻结；关联台只按冻结值判定该 relation 是否进入 paired，不读取当前 settings。
 - 新增标签默认两者都为 `true`，避免新批次缺少明确业务提示。
 - 规则保存不追溯改写既有 relation；既有 relation 保留提交时 snapshot。
 - 相同规则保存是 no-op，不递增版本、不写 audit、不触发 refresh。
@@ -41,14 +41,14 @@
 
 | 状态 | 判定 | 语义 |
 | --- | --- | --- |
-| `unpaired` | canonical fact 没有 active formal relation | 以 singleton 留在未配对区。 |
-| `paired` | canonical fact 属于 active formal relation | active relation 的完整成员进入已配对区，不按 requirement metadata 二次分类。 |
+| `unpaired` | 无 active relation，或 active relation 的冻结 requirement 未满足 | 无 owner 时为 singleton；有 owner 时保持同 case 并显示待补类型。 |
+| `paired` | canonical fact 属于 active formal relation，且冻结 requirement 已满足 | active relation 的完整成员进入已配对区。 |
 | `collapsed` | relation 内银行流水数 `>3` | 关联台默认折叠为摘要行，原始银行 rows 保存在 `collapsed_rows.bank`。 |
 | `expanded` | 银行流水数 `<=3` 或用户展开 | 展示原始银行 rows。 |
 
 禁止流转：
 
-- 禁止根据当前规则把 active relation 的成员重新移回 unpaired。
+- 禁止根据当前规则追溯重分 existing relation；只能读取 relation 创建时冻结的 requirement。
 - 禁止规则保存扫描、升级或改写 Workbench/turnover relation。
 - 禁止前端根据勾选本地推断 paired/unpaired；必须消费 formal relation/read model payload。
 

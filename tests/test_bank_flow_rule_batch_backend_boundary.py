@@ -108,6 +108,7 @@ class BankFlowRuleBatchBackendBoundaryTests(unittest.TestCase):
     def test_tag_rule_save_cannot_rewrite_relations_or_run_broad_lifecycle(self) -> None:
         bank_flow_source = (SERVICES_ROOT / "bank_flow_rule_batch_application_service.py").read_text(encoding="utf-8")
         base_source = (SERVICES_ROOT / "bank_batch_application_service.py").read_text(encoding="utf-8")
+        no_oa_source = (SERVICES_ROOT / "no_oa_bank_batch_application_service.py").read_text(encoding="utf-8")
         start = bank_flow_source.index("    def update_tag_selection(")
         body = bank_flow_source[start:]
 
@@ -121,6 +122,7 @@ class BankFlowRuleBatchBackendBoundaryTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, body)
         self.assertEqual(body.count("enqueue_background_refresh("), 1)
+        self.assertNotIn("_sync_bank_flow_rule_relation_requirements", no_oa_source)
         self.assertNotIn("def _sync_bank_flow_rule_relation_requirements(", base_source)
         self.assertNotIn("def _sync_turnover_rule_relation_requirements(", base_source)
 

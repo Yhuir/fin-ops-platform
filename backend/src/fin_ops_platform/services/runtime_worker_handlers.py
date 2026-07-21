@@ -20,6 +20,7 @@ from fin_ops_platform.services.bank_account_balance_read_model_refresh_producer 
 )
 from fin_ops_platform.services.bank_transaction_auto_category_service import BankTransactionAutoCategoryService
 from fin_ops_platform.services.bank_transaction_category_service import BankTransactionCategoryService
+from fin_ops_platform.services.bank_transaction_tag_read_facade import BankTransactionTagReadFacade
 from fin_ops_platform.services.derived_data_lifecycle_service import DerivedDataLifecycleService
 from fin_ops_platform.services.etc_existing_invoice_link_service import EtcExistingInvoiceLinkService
 from fin_ops_platform.services.etc_reconciliation_service import EtcReconciliationTaskService
@@ -244,6 +245,13 @@ class WorkbenchMatchingWorkerFactory:
                 matcher=WorkbenchFreeMatchingEngine(),
                 relation_uow=relation_uow,
                 source_versions_provider=lambda: _workbench_matching_source_versions(app_settings_service),
+                bank_tag_read_facade=BankTransactionTagReadFacade(
+                    read_model_repository=read_model_repository,
+                    queue_repository=queue_repository,
+                ),
+                bank_flow_rule_tag_rules_payload=(
+                    app_settings_service.get_bank_flow_rule_batch_tag_rules_payload
+                ),
             ),
             source_versions_provider=lambda: _workbench_matching_source_versions(app_settings_service),
             heartbeat_recorder=heartbeat_recorder,

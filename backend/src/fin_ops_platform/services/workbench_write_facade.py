@@ -19,6 +19,9 @@ from fin_ops_platform.services.read_model_write_targets import write_target_enve
 from fin_ops_platform.services.workbench_exception_application_service import WorkbenchExceptionApplicationConflict
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from fin_ops_platform.services.workbench_relation_modes import workbench_relations_have_same_row_set
+from fin_ops_platform.services.workbench_relation_requirements import (
+    build_bank_relation_requirement_metadata,
+)
 from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
 from fin_ops_platform.services.workbench_stale_precondition import assert_workbench_stale_preconditions
 from fin_ops_platform.services.workbench_write_conflict import WorkbenchWriteConflict
@@ -954,10 +957,12 @@ class WorkbenchWriteFacade:
             "special_metadata": dict(paired_policy_metadata or {}),
         }
         after_groups = self._relation_groups([after_relation], selected_rows=selected_rows)
+        paired_groups = [group for group in after_groups if group.get("zone") == "paired"]
+        unpaired_groups = [group for group in after_groups if group.get("zone") != "paired"]
         return {
             "after": {
-                "paired_groups": after_groups,
-                "unpaired_groups": [],
+                "paired_groups": paired_groups,
+                "unpaired_groups": unpaired_groups,
             }
         }
 
@@ -973,36 +978,14 @@ class WorkbenchWriteFacade:
         if not bank_row_ids:
             return {}
         payload = self._bank_flow_rule_tag_rules_payload() if self._bank_flow_rule_tag_rules_payload else {}
-        requirements_by_tag_code = self._bank_flow_rule_requirements_by_tag_code(payload)
         category_codes = self._bank_category_codes_for_policy(bank_row_ids, selected_rows)
-        requires_oa = False
-        requires_invoice = False
-        tag_codes: list[str] = []
-        for row_id in bank_row_ids:
-            tag_code = str(category_codes.get(row_id) or "").strip()
-            if tag_code:
-                tag_codes.append(tag_code)
-            requirement = requirements_by_tag_code.get(tag_code)
-            if isinstance(requirement, dict):
-                row_requires_oa = bool(requirement.get("requires_oa"))
-                row_requires_invoice = bool(requirement.get("requires_invoice"))
-            elif self._is_etc_confirm_link_amount_check(amount_check) or self._selected_rows_include_etc_batch_oa(selected_rows):
-                row_requires_oa = True
-                row_requires_invoice = False
-            else:
-                row_requires_oa = True
-                row_requires_invoice = True
-            requires_oa = requires_oa or row_requires_oa
-            requires_invoice = requires_invoice or row_requires_invoice
-        metadata: dict[str, object] = {
-            "paired_requirement_source": "bank_transaction_paired_policy",
-            "paired_requirement_tag_codes": self._dedupe_ordered(tag_codes),
-            "paired_requirement_version": self._positive_int((payload or {}).get("version"), default=1),
-            "requires_oa": requires_oa,
-            "requires_invoice": requires_invoice,
-        }
-        if len(metadata["paired_requirement_tag_codes"]) == 1:
-            metadata["paired_requirement_tag_code"] = metadata["paired_requirement_tag_codes"][0]
+        metadata = build_bank_relation_requirement_metadata(
+            tag_codes=(str(category_codes.get(row_id) or "") for row_id in bank_row_ids),
+            rules_payload=payload,
+        )
+        if self._is_etc_confirm_link_amount_check(amount_check) or self._selected_rows_include_etc_batch_oa(selected_rows):
+            metadata["requires_oa"] = True
+            metadata["requires_invoice"] = False
         return metadata
 
     @staticmethod
@@ -1057,37 +1040,6 @@ class WorkbenchWriteFacade:
             for row_id in normalized_row_ids
             if row_id and row_type_for_workbench_row_id(row_id) == "bank"
         ]
-
-    @staticmethod
-    def _bank_flow_rule_requirements_by_tag_code(payload: dict[str, object]) -> dict[str, dict[str, bool]]:
-        requirements: dict[str, dict[str, bool]] = {}
-        for item in list((payload or {}).get("rules") or []):
-            if not isinstance(item, dict):
-                continue
-            tag_code = str(item.get("tag_code") or item.get("code") or "").strip()
-            if tag_code:
-                requirements[tag_code] = {
-                    "requires_oa": bool(item.get("requires_oa")),
-                    "requires_invoice": bool(item.get("requires_invoice")),
-                }
-        raw_requirements = (payload or {}).get("requirements_by_tag_code")
-        if isinstance(raw_requirements, dict):
-            for raw_code, item in raw_requirements.items():
-                tag_code = str(raw_code or "").strip()
-                if tag_code and isinstance(item, dict):
-                    requirements[tag_code] = {
-                        "requires_oa": bool(item.get("requires_oa")),
-                        "requires_invoice": bool(item.get("requires_invoice")),
-                    }
-        return requirements
-
-    @staticmethod
-    def _positive_int(value: object, *, default: int) -> int:
-        try:
-            parsed = int(value)
-        except (TypeError, ValueError):
-            return default
-        return parsed if parsed > 0 else default
 
     @staticmethod
     def _dedupe_ordered(values: list[str]) -> list[str]:

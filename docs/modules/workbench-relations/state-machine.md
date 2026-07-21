@@ -1,12 +1,12 @@
 # Workbench 正式关系状态机
 
-日期：2026-07-14
+日期：2026-07-21
 
 ## 当前状态
 
 | 状态 | 成员占用 | 下游 | 关联台 |
 | --- | --- | --- | --- |
-| `active` | 是，case 独占 | `linked` | 同一 `paired` group |
+| `active` | 是，case 独占 | `linked` | 冻结要求满足时为 `paired`；未满足时同 case 为 `unpaired` |
 | `cancelled` | 否 | `unlinked` | 无其他 active owner 时 singleton `unpaired` |
 | `withdrawn` | 否 | `unlinked` | 无其他 active owner 时 singleton `unpaired` |
 | `superseded` | 否，由新 active relation 接管 | 由新关系决定 | 由新关系决定 |

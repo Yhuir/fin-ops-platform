@@ -73,6 +73,7 @@ class AuditWorkbenchRelationDisplayToolTests(unittest.TestCase):
         self.assertEqual(report["issues"], [])
         self.assertEqual(report["audit_status"], {"integrity": "pass", "freshness": "fresh", "queue": "drained"})
         self.assertIn("query_composed_relation_case_ownership", report["audit_contract"]["proof_checks"])
+        self.assertIn("relation_requirement_partition_correctness", report["audit_contract"]["proof_checks"])
         self.assertIn("canonical_object_expected_set_equality", report["audit_contract"]["proof_checks"])
         self.assertIn("exact_etc_batch_relation_owner", report["audit_contract"]["proof_checks"])
         self.assertIn("unique_etc_batch_relation_owner", report["audit_contract"]["proof_checks"])
@@ -90,6 +91,53 @@ class AuditWorkbenchRelationDisplayToolTests(unittest.TestCase):
         self.assertIn("where relation_member.row_id = override.row_id", queried_sql)
         self.assertIn("where relation_member.row_id = member.row_id", queried_sql)
         self.assertNotIn("candidate:%%", queried_sql)
+
+    def test_missing_requirement_snapshot_blocks_page_audit(self) -> None:
+        relation = _relation()
+        relation["raw_payload"] = {
+            "normalized_payload": {
+                "case_id": "case-a",
+                "relation_mode": "manual_confirmed",
+                "row_ids": ["bank-1", "invoice-1"],
+                "row_types": ["bank", "invoice"],
+            }
+        }
+
+        report = audit_workbench_relation_display.audit_workbench_relation_display(
+            FakeConnection(relations=[relation])
+        )
+
+        self.assertIn(
+            "relation_requirement_snapshot_missing",
+            {issue["code"] for issue in report["issues"]},
+        )
+
+    def test_required_invoice_relation_in_paired_zone_blocks_page_audit(self) -> None:
+        relation = _relation()
+        relation["row_ids"] = ["oa-1", "bank-1"]
+        relation["row_types"] = ["oa", "bank"]
+        relation["raw_payload"] = {
+            "normalized_payload": {
+                "case_id": "case-a",
+                "relation_mode": "manual_confirmed",
+                "row_ids": ["oa-1", "bank-1"],
+                "row_types": ["oa", "bank"],
+                "special_metadata": {"requires_oa": True, "requires_invoice": True},
+            }
+        }
+        rows = [
+            _group_row("2026-01", "oa-1", zone="paired"),
+            _group_row("2026-01", "bank-1", zone="paired"),
+        ]
+
+        report = audit_workbench_relation_display.audit_workbench_relation_display(
+            FakeConnection(relations=[relation], group_rows=rows)
+        )
+
+        self.assertIn(
+            "relation_requirement_partition_mismatch",
+            {issue["code"] for issue in report["issues"]},
+        )
 
     def test_missing_expected_etc_relation_owner_blocks_page_audit(self) -> None:
         report = audit_workbench_relation_display.audit_workbench_relation_display(
@@ -275,6 +323,7 @@ class AuditWorkbenchRelationDisplayToolTests(unittest.TestCase):
                         "status": "active",
                         "row_ids": ["oa-29350", "oa-88050", "bank-29350"],
                         "row_types": ["oa", "oa", "bank"],
+                        "special_metadata": {"requires_oa": True, "requires_invoice": False},
                         "month_scope": "2026-05-01",
                         "updated_at": "2026-06-23 09:00:00+08",
                         "raw_payload": {},
@@ -456,6 +505,7 @@ def _relation() -> dict[str, object]:
                 "relation_mode": "manual_confirmed",
                 "row_ids": ["bank-1", "invoice-1"],
                 "row_types": ["bank", "invoice"],
+                "special_metadata": {"requires_oa": False, "requires_invoice": True},
             }
         },
     }
@@ -479,6 +529,7 @@ def _group_row(
     group_id: str = "case:case-a",
     payload_case_id: str = "case-a",
     relation_mode: str = "manual_confirmed",
+    zone: str = "paired",
 ) -> dict[str, object]:
     if row_id.startswith("bank"):
         pane = "bank"
@@ -491,7 +542,7 @@ def _group_row(
         "generation_id": f"workbench:{scope_key}:001",
         "generation_activated_at": "2026-06-14 10:00:00+08",
         "group_id": group_id,
-        "zone": "unpaired",
+        "zone": zone,
         "pane": pane,
         "row_id": row_id,
         "row_role": "normal",

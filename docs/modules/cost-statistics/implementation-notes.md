@@ -1,5 +1,13 @@
 # 成本统计 实施记录
 
+## 2026-07-21 - 金额展示统一两位小数
+
+- 目标：修复 `1584.350000` 等数据库精度字符串直接出现在成本统计页面的问题。
+- 边界：新增 cost-statistics feature-local 纯格式化函数，只处理页面摘要、表格、详情和导出预览的显示文本；不修改 API DTO、Decimal 计算、read model、导出原始数据或其他页面。
+- 旧逻辑清理：成本页面不再在多个组件直接输出原始金额字符串，统一复用同一 formatter；非数值文本保持原样，空值仍为 `--`。
+- 验证：单元测试覆盖六位小数、整数、负数、千分位、空值和非数值，并回归成本页面既有交互测试。
+
+
 ## 2026-07-19 - ETC batch 状态扇出隔离
 
 - ETC 页面旧合并 emitter 把 OA draft/manual-status 的 batch-only 变化同时广播成 `invoiceFactUpdated`，Cost 因而立刻清空可操作内容并进入遮罩；后端同时从 canonical relink 直投 Cost、historical repair 和 `all`，造成截图中的多 scope processing。

@@ -40,7 +40,7 @@
 - active relation member：`linked`。
 - 无 active relation：`unlinked`。
 - 不输出 `candidate`，也不读取已删除的 candidate/decision 表。
-- 关联台页面把 linked active relation 显示为 `paired`，把其余 canonical facts 显示为 singleton `unpaired`。
+- 关联台页面把冻结完成要求已满足的 linked active relation 显示为 `paired`；未满足的 linked relation 保持同 case 显示为 `unpaired`，无 active owner 的 canonical facts 显示为 singleton `unpaired`。其他下游仍只消费 linked/unlinked ownership，不消费关联台 zone。
 
 ## 文档
 

@@ -136,6 +136,19 @@ function resolvePreviewExpansionCopy(paneId: WorkbenchRecordType): CollapsedSumm
   };
 }
 
+function missingRequirementLabel(group: WorkbenchRelationGroup, paneId: WorkbenchRecordType) {
+  if (!group.completion?.missingRecordTypes.includes(paneId)) {
+    return null;
+  }
+  if (paneId === "oa") {
+    return "待补 OA";
+  }
+  if (paneId === "invoice") {
+    return "待补发票";
+  }
+  return "待补银行流水";
+}
+
 function RelationGroupGrid({
   zoneId,
   panes,
@@ -629,9 +642,19 @@ function RelationGroupGrid({
               const collapseKey = `${group.id}:${paneId}`;
               const isExpanded = isCollapsedSummary && expandedPaneGroups.has(collapseKey);
               const visibleRecords = isExpanded ? collapsedRows : group.rows[paneId];
+              const requirementLabel = missingRequirementLabel(group, paneId);
               return (
                 <Fragment key={`${group.id}-${pane.id}`}>
                   <div className="candidate-group-pane-slot candidate-group-pane-slot-sheet">
+                    {requirementLabel ? (
+                      <span
+                        aria-label={requirementLabel}
+                        className="candidate-group-missing-requirement"
+                        role="status"
+                      >
+                        {requirementLabel}
+                      </span>
+                    ) : null}
                     <RelationGroupCell
                       actionMode={actionMode}
                       columnGridStyle={paneGridStyleByPane[paneId]}

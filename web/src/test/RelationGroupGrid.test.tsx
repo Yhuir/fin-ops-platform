@@ -591,6 +591,20 @@ describe("Workbench candidate grouping layout", () => {
     expect(screen.getByText("91 条")).toBeInTheDocument();
   });
 
+  test("shows the missing required pane on an incomplete active relation", () => {
+    const group = createNoOaCollapsedGroup();
+    renderNoOaGrid({
+      ...group,
+      completion: {
+        isComplete: false,
+        missingRecordTypes: ["invoice"],
+      },
+    });
+
+    expect(screen.getByRole("status", { name: "待补发票" })).toBeInTheDocument();
+    expect(screen.queryByText("待补 OA")).not.toBeInTheDocument();
+  });
+
   function buildNoOaWorkbenchPayload() {
     return {
       month: "all",

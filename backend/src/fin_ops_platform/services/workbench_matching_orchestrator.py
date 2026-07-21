@@ -16,6 +16,9 @@ from fin_ops_platform.services.workbench_free_matching_engine import (
     WorkbenchFreeMatchingEngine,
 )
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandService
+from fin_ops_platform.services.workbench_relation_requirements import (
+    build_bank_relation_requirement_metadata,
+)
 
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
@@ -33,6 +36,7 @@ class WorkbenchFormalRelationCommand:
     request_fingerprint: str
     payload: dict[str, Any]
     refresh_metadata: dict[str, object]
+    paired_requirements_by_case_id: dict[str, dict[str, object]]
     tenant_id: str = "default"
     actor_id: str = AUTO_RELATION_ACTOR
     action_name: str = "confirm_link"
@@ -45,6 +49,7 @@ class WorkbenchFormalRelationCommand:
         batch_hash: str,
         request_id: str,
         etc_batch_links: tuple[dict[str, Any], ...] = (),
+        paired_requirements_by_case_id: dict[str, dict[str, object]] | None = None,
     ) -> "WorkbenchFormalRelationCommand":
         plans = tuple(sorted(result.plans, key=lambda plan: plan.relation_fingerprint))
         links = tuple(sorted((deepcopy(link) for link in etc_batch_links), key=lambda link: str(link["case_id"])))
@@ -63,11 +68,18 @@ class WorkbenchFormalRelationCommand:
             )
         )
         fingerprints = [plan.relation_fingerprint for plan in plans]
+        requirements = {
+            str(case_id): deepcopy(metadata)
+            for case_id, metadata in dict(paired_requirements_by_case_id or {}).items()
+        }
+        if set(requirements) - {plan.case_id for plan in plans}:
+            raise ValueError("Paired requirements must belong to the formal relation plan batch.")
         fingerprint_payload = {
             "batch_hash": batch_hash,
             "relation_fingerprints": fingerprints,
             "rule_versions": sorted({plan.rule_version for plan in plans}),
             "etc_batch_links": links,
+            "paired_requirements_by_case_id": requirements,
         }
         request_fingerprint = sha256(
             json.dumps(fingerprint_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -106,6 +118,7 @@ class WorkbenchFormalRelationCommand:
                 "row_ids": sorted({row_id for plan in plans for row_id in plan.row_ids}),
                 "case_ids": sorted({plan.case_id for plan in plans} | {str(link["case_id"]) for link in links}),
             },
+            paired_requirements_by_case_id=requirements,
             action_name="confirm_link" if plans else "enrich_etc_relation",
         )
 
@@ -133,6 +146,8 @@ class WorkbenchMatchingOrchestrator:
         relation_uow: Any,
         relation_command_factory: Callable[[Any], WorkbenchRelationCommandService] | None = None,
         source_versions_provider: Callable[[], dict[str, object]] | None = None,
+        bank_tag_read_facade: Any,
+        bank_flow_rule_tag_rules_payload: Callable[[], dict[str, object]],
         search_limits: FormalRelationSearchLimits | None = None,
         logger: logging.Logger | None = None,
     ) -> None:
@@ -141,6 +156,8 @@ class WorkbenchMatchingOrchestrator:
         self._relation_uow = relation_uow
         self._relation_command_factory = relation_command_factory or self._default_relation_command
         self._source_versions_provider = source_versions_provider
+        self._bank_tag_read_facade = bank_tag_read_facade
+        self._bank_flow_rule_tag_rules_payload = bank_flow_rule_tag_rules_payload
         self._search_limits = search_limits or FormalRelationSearchLimits()
         self._logger = logger or LOGGER
 
@@ -187,11 +204,16 @@ class WorkbenchMatchingOrchestrator:
             "duration_ms": 0,
         }
         if match_result.plans or etc_batch_links:
+            paired_requirements_by_case_id = self._paired_requirements_by_case_id(
+                match_result,
+                etc_batch_links=etc_batch_links,
+            )
             command = WorkbenchFormalRelationCommand.from_match_result(
                 match_result,
                 batch_hash=batch.batch_hash,
                 request_id=normalized_request_id,
                 etc_batch_links=etc_batch_links,
+                paired_requirements_by_case_id=paired_requirements_by_case_id,
             )
 
             def apply_formal_relations(context: Any) -> dict[str, Any]:
@@ -207,6 +229,7 @@ class WorkbenchMatchingOrchestrator:
                     list(command.plans),
                     actor_id=AUTO_RELATION_ACTOR,
                     etc_batch_links=plan_links,
+                    paired_requirements_by_case_id=command.paired_requirements_by_case_id,
                 )
                 enrichment_result = service.enrich_etc_batch_links(
                     existing_links, actor_id=AUTO_RELATION_ACTOR
@@ -263,6 +286,60 @@ class WorkbenchMatchingOrchestrator:
         if progress_callback is not None:
             progress_callback(deepcopy(summary))
         return summary
+
+    def _paired_requirements_by_case_id(
+        self,
+        match_result: FormalRelationMatchResult,
+        *,
+        etc_batch_links: tuple[dict[str, Any], ...],
+    ) -> dict[str, dict[str, object]]:
+        bank_row_ids = sorted(
+            {
+                row_id
+                for plan in match_result.plans
+                for row_id, row_type in zip(plan.row_ids, plan.row_types, strict=True)
+                if row_type == "bank"
+            }
+        )
+        if not bank_row_ids:
+            return {}
+        payload = self._bank_tag_read_facade.get_by_transaction_ids(
+            bank_row_ids,
+            require_fresh=True,
+            reason="workbench_formal_relation_requirement_snapshot",
+        )
+        if str(payload.get("status") or "") != "fresh":
+            raise RuntimeError("bank_detail_read_model_not_fresh")
+        rows_by_id = {
+            str(row.get("transaction_id") or "").strip(): row
+            for row in list(payload.get("rows") or [])
+            if isinstance(row, dict) and str(row.get("transaction_id") or "").strip()
+        }
+        if set(bank_row_ids) - set(rows_by_id):
+            raise RuntimeError("bank_detail_tag_rows_missing")
+        rules_payload = self._bank_flow_rule_tag_rules_payload()
+        etc_case_ids = {str(link["case_id"]) for link in etc_batch_links}
+        requirements: dict[str, dict[str, object]] = {}
+        for plan in match_result.plans:
+            plan_bank_row_ids = [
+                row_id
+                for row_id, row_type in zip(plan.row_ids, plan.row_types, strict=True)
+                if row_type == "bank"
+            ]
+            if not plan_bank_row_ids:
+                continue
+            metadata = build_bank_relation_requirement_metadata(
+                tag_codes=(
+                    str(rows_by_id[row_id].get("effective_category_code") or "")
+                    for row_id in plan_bank_row_ids
+                ),
+                rules_payload=rules_payload,
+            )
+            if plan.case_id in etc_case_ids:
+                metadata["requires_oa"] = True
+                metadata["requires_invoice"] = False
+            requirements[plan.case_id] = metadata
+        return requirements
 
     @staticmethod
     def _resolve_etc_batch_links(

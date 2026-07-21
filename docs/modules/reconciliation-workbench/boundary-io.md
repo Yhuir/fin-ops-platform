@@ -36,8 +36,8 @@
 
 | 输出 | Consumer | 合同 |
 | --- | --- | --- |
-| `paired.groups` | 前端 | 每组恰好对应一条 active formal relation，`group_type=relation` |
-| `unpaired.groups` | 前端 | 每组恰好一个未被 active relation 占用的 canonical fact，`group_type=unpaired` |
+| `paired.groups` | 前端 | 每组恰好对应一条冻结要求已满足的 active formal relation，`group_type=relation` |
+| `unpaired.groups` | 前端 | 无 active owner 的 canonical fact 为 `group_type=unpaired` singleton；冻结要求未满足的 active relation 保持同 case、`group_type=relation`，并返回 `completion.is_complete=false` 与 `missing_row_types` |
 | combined initial | 前端/App Health | `GET /api/workbench` 在同一 active generation-set 快照返回 summary 与 paired/unpaired 各 50 组首页；summary 含 `paired_count`、`unpaired_count`、OA/流水/发票事实数与 exception count；其余组只通过既有 `/groups` 分页读取 |
 | formal relation write result | caller | before/after、version、affected months、audit、outbox ids、barrier targets |
 | relation-origin Cost refresh | `cost_statistics` durable queue | relation transaction 以现有队列额外发布 identity-bound `cost_statistics_relation_delta`（`active:YYYY-MM` + 按 case 的 status/row IDs），用于低延迟；Workbench 月 generation 成功且 current 后仍以 `workbench_shard_published` 发布 active/all 月份收敛事件。不得直接调用成本 repository、HTTP 或 worker。 |
@@ -56,7 +56,7 @@
 - `PostgresWorkbenchFormalRelationFactRepository` 是 matching 输入的唯一 SQL owner。
 - `WorkbenchMatchingOrchestrator` 只编排 repository -> matcher -> 单次 relation UoW。
 - `WorkbenchRelationCommandService` 拥有正式关系状态转换；repository/UoW 拥有 SQL、事务和 durable outbox。
-- `WorkbenchRelationGroupingService` 只消费 canonical rows + active relations；display decorations 不得改变 membership 或 zone。
+- `WorkbenchRelationGroupingService` 只消费 canonical rows + active relations；relation requirement snapshot 是唯一可改变关联台 zone 的业务 metadata，其他 display decorations 不得改变 membership 或 zone。
 - 前端只消费 API，不读取 relation provenance 推断分区。
 
 ## Read model 与 worker
@@ -105,7 +105,7 @@ Release A 已删除运行时链路且禁止恢复；旧表物理存储只为短�
 | Worker | `workbench_matching_dirty_scope_worker.py`、`workbench_read_model_refresh.py`、runtime worker registry |
 | Tests | `tests/test_workbench_*.py`、`web/src/test/RelationGroupGrid.test.tsx`、`web/src/test/Workbench*.test.*`、`web/e2e/workbench-*.spec.ts` |
 
-`WorkbenchRelationGroupingService` 只接收 canonical rows 与 active formal relations，并输出页面 `paired/unpaired` 精确分区；`WorkbenchRelationPreviewGroupingService` 只接收写操作预览所需的 formal relations、selected rows 和显式 ungrouped mode，并输出预览 groups。二者都是无 I/O 的纯投影边界；route/server 只负责组装依赖，不能重新实现 membership、隐藏未分组行或读取 repository/HTTP 状态。
+`WorkbenchRelationGroupingService` 只接收 canonical rows 与 active formal relations，并按冻结 requirement snapshot 输出页面 `paired/unpaired` 精确分区；`WorkbenchRelationPreviewGroupingService` 复用同一判定，只接收写操作预览所需的 formal relations、selected rows 和显式 ungrouped mode，并输出预览 groups。二者都是无 I/O 的纯投影边界；route/server 只负责组装依赖，不能重新实现 membership、隐藏未分组行、回查当前规则或读取 repository/HTTP 状态。
 
 正式关系是关系 ownership 的唯一事实源。projection builder 必须在读取 override/exception 前先从已经加载的 active relations 计算 member row ids，并从 control I/O 集合排除这些成员；不能先把旧 candidate/exception ownership 写入正式成员，再依靠字段覆盖或 Audit 豁免掩盖冲突。未配对 row 仍按 active override > active exception 投影，两个查询继续由既有 repository SQL 边界批量完成。
 

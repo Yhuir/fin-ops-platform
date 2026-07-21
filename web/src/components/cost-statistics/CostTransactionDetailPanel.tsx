@@ -1,6 +1,7 @@
 import type { CostTransactionDetail } from "../../features/cost-statistics/types";
 import BankAccountValue from "../BankAccountValue";
 import DirectionTag from "../DirectionTag";
+import { formatCostAmount } from "../../features/cost-statistics/format";
 
 type CostTransactionDetailPanelProps = {
   detail: CostTransactionDetail["transaction"];
@@ -17,7 +18,13 @@ function renderFieldRows(fields: Record<string, string>) {
       {entries.map(([label, value]) => (
         <div key={label} className="cost-detail-item">
           <dt>{label}</dt>
-          <dd>{label === "支付账户" || label === "收款账户" ? <BankAccountValue value={value} variant="tag" /> : value}</dd>
+          <dd>
+            {label === "支付账户" || label === "收款账户"
+              ? <BankAccountValue value={value} variant="tag" />
+              : /金额|价税合计|税额|余额|差异/.test(label)
+                ? formatCostAmount(value)
+                : value}
+          </dd>
         </div>
       ))}
     </dl>
@@ -40,7 +47,7 @@ export default function CostTransactionDetailPanel({ detail }: CostTransactionDe
           <span>金额</span>
           <strong className="money-cell-stack money-detail-stack">
             <span className="money-detail-value">
-              <span>{detail.amount}</span>
+              <span>{formatCostAmount(detail.amount)}</span>
             </span>
             <span className="money-cell-meta-row">
               <DirectionTag direction={detail.direction} />

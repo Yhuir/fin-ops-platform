@@ -67,6 +67,36 @@ class RecordingEtcBatchLinkRepository:
         return {"valid": bool(links), "issues": []}
 
 
+class RecordingBankTagFacade:
+    def __init__(
+        self,
+        category_codes: dict[str, str] | None = None,
+        *,
+        status: str = "fresh",
+        omitted_ids: set[str] | None = None,
+    ) -> None:
+        self.category_codes = dict(category_codes or {})
+        self.status = status
+        self.omitted_ids = set(omitted_ids or set())
+        self.calls: list[list[str]] = []
+
+    def get_by_transaction_ids(self, transaction_ids: list[str], **_kwargs: object) -> dict[str, object]:
+        self.calls.append(list(transaction_ids))
+        return {
+            "status": self.status,
+            "rows": [
+                {
+                    "transaction_id": transaction_id,
+                    "effective_category_code": self.category_codes.get(
+                        transaction_id, "custom_engineering_services"
+                    ),
+                }
+                for transaction_id in transaction_ids
+                if transaction_id not in self.omitted_ids
+            ],
+        }
+
+
 class RecordingUow:
     def __init__(self, snapshot: dict[str, object] | None = None) -> None:
         self.snapshot = snapshot or {"pair_relations": {}, "pair_relation_history": []}
@@ -104,6 +134,7 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
         *,
         uow: RecordingUow | None = None,
         etc_batch_link_candidates: list[dict[str, object]] | None = None,
+        bank_tag_facade: RecordingBankTagFacade | None = None,
     ) -> tuple[WorkbenchMatchingOrchestrator, RecordingFactRepository, RecordingUow]:
         repository = RecordingFactRepository(
             fact_batch,
@@ -116,6 +147,16 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
                 matcher=WorkbenchFreeMatchingEngine(),
                 relation_uow=resolved_uow,
                 source_versions_provider=lambda: {"matching": "v1"},
+                bank_tag_read_facade=bank_tag_facade or RecordingBankTagFacade(),
+                bank_flow_rule_tag_rules_payload=lambda: {
+                    "version": 11,
+                    "requirements_by_tag_code": {
+                        "custom_engineering_services": {
+                            "requires_oa": True,
+                            "requires_invoice": True,
+                        }
+                    },
+                },
             ),
             repository,
             resolved_uow,
@@ -144,6 +185,63 @@ class WorkbenchMatchingOrchestratorTests(unittest.TestCase):
         self.assertEqual(relation["created_by"], AUTO_RELATION_ACTOR)
         self.assertEqual(relation["special_metadata"]["formal_relation"]["origin"], "system_deterministic")
         self.assertNotIn("cost_statistics", uow.calls[0].refresh_metadata["downstream_scope_types"])
+
+    def test_bank_plan_persists_one_bulk_requirement_snapshot(self) -> None:
+        fixture = FormalRelationFactBatch(facts=(fact("oa", "oa-520"), fact("bank", "bank-520")))
+        tag_facade = RecordingBankTagFacade()
+        orchestrator, _repository, uow = self._orchestrator(
+            fixture,
+            bank_tag_facade=tag_facade,
+        )
+
+        orchestrator.run(
+            changed_scope_months=["2026-05"],
+            reason="dirty_scope_retry",
+            request_id="request-bank-requirements",
+        )
+
+        self.assertEqual(tag_facade.calls, [["bank-520"]])
+        relation = next(iter(uow.snapshot["pair_relations"].values()))
+        self.assertEqual(
+            {
+                "requires_oa": relation["special_metadata"]["requires_oa"],
+                "requires_invoice": relation["special_metadata"]["requires_invoice"],
+                "paired_requirement_version": relation["special_metadata"]["paired_requirement_version"],
+            },
+            {"requires_oa": True, "requires_invoice": True, "paired_requirement_version": 11},
+        )
+
+    def test_bank_plan_fails_before_uow_when_tag_read_model_is_not_fresh(self) -> None:
+        fixture = FormalRelationFactBatch(facts=(fact("oa", "oa-520"), fact("bank", "bank-520")))
+        orchestrator, _repository, uow = self._orchestrator(
+            fixture,
+            bank_tag_facade=RecordingBankTagFacade(status="refreshing"),
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "bank_detail_read_model_not_fresh"):
+            orchestrator.run(
+                changed_scope_months=["2026-05"],
+                reason="dirty_scope_retry",
+                request_id="request-bank-tags-refreshing",
+            )
+
+        self.assertEqual(uow.calls, [])
+
+    def test_bank_plan_fails_before_uow_when_tag_row_is_missing(self) -> None:
+        fixture = FormalRelationFactBatch(facts=(fact("oa", "oa-520"), fact("bank", "bank-520")))
+        orchestrator, _repository, uow = self._orchestrator(
+            fixture,
+            bank_tag_facade=RecordingBankTagFacade(omitted_ids={"bank-520"}),
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "bank_detail_tag_rows_missing"):
+            orchestrator.run(
+                changed_scope_months=["2026-05"],
+                reason="dirty_scope_retry",
+                request_id="request-bank-tags-missing",
+            )
+
+        self.assertEqual(uow.calls, [])
 
     def test_no_plan_does_not_open_uow_or_write_history_outbox(self) -> None:
         fixture = FormalRelationFactBatch(

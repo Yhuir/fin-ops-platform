@@ -13462,6 +13462,24 @@ body.column-layout-dragging {
   background: transparent;
 }
 
+.candidate-group-missing-requirement {
+  position: absolute;
+  z-index: 1;
+  top: 10px;
+  left: 12px;
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 9px;
+  border: 1px dashed color-mix(in srgb, var(--fp-warning) 52%, var(--fp-border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fp-warning-soft) 42%, transparent);
+  color: var(--fp-warning);
+  font-size: 12px;
+  font-weight: 700;
+  pointer-events: none;
+}
+
 .candidate-group-pane-slot-filler {
   background: #fbfdff;
 }

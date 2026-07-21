@@ -391,6 +391,7 @@ describe("workbench api bank amount mapping", () => {
               group_type: "relation",
               match_confidence: "high",
               reason: "active_formal_relation",
+              completion: { is_complete: true, missing_row_types: [] },
               oa_rows: [
                 {
                   id: "oa-paired",
@@ -432,6 +433,7 @@ describe("workbench api bank amount mapping", () => {
     expect(group.groupType).toBe("paired");
     expect(group.rawGroupType).toBe("relation");
     expect(group.reason).toBe("active_formal_relation");
+    expect(group.completion).toEqual({ isComplete: true, missingRecordTypes: [] });
     expect(group.rows.oa.map((row) => row.id)).toEqual(["oa-paired"]);
   });
 

@@ -396,6 +396,10 @@ type ApiWorkbenchGroup = {
   amount_check?: ApiWorkbenchRelationAmountCheck | null;
   special_metadata?: Record<string, unknown> | null;
   processed_exception_summary?: Record<string, unknown> | null;
+  completion?: {
+    is_complete?: boolean | null;
+    missing_row_types?: unknown[] | null;
+  } | null;
 };
 
 type ApiWorkbenchRelationAmountCheck = {
@@ -1432,6 +1436,17 @@ function mapGroup(group: ApiWorkbenchGroup, zoneHint?: WorkbenchZoneId): Workben
     amountCheck: mapRelationAmountCheck(group.amount_check),
     specialMetadata: group.special_metadata && typeof group.special_metadata === "object" ? group.special_metadata : undefined,
     processedExceptionSummary: mapProcessedExceptionSummary(group.processed_exception_summary),
+    completion: group.completion && typeof group.completion === "object"
+      ? {
+        isComplete: group.completion.is_complete === true,
+        missingRecordTypes: (Array.isArray(group.completion.missing_row_types)
+          ? group.completion.missing_row_types.map((rowType) => String(rowType).trim())
+          : [])
+          .filter((rowType): rowType is WorkbenchRecordType => (
+            rowType === "oa" || rowType === "bank" || rowType === "invoice"
+          )),
+      }
+      : undefined,
     canWithdraw: Boolean(
       group.can_withdraw
       || groupHasNoOaWithdrawAction(group),

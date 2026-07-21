@@ -29,6 +29,7 @@ import {
   type PreviewCostExportParams,
 } from "../features/cost-statistics/api";
 import { ApiClientError } from "../features/apiClient";
+import { formatCostAmount } from "../features/cost-statistics/format";
 import { FINANCE_DOMAIN_EVENTS } from "../features/domainEvents";
 import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
 import { importWorkflowPath } from "../features/imports/importRoutes";
@@ -150,13 +151,14 @@ function DirectionAmount({
   label: string;
   tone: "expense" | "income";
 }) {
+  const formattedAmount = formatCostAmount(amount);
   return (
     <span
-      aria-label={`${label} ${amount}`}
+      aria-label={`${label} ${formattedAmount}`}
       className={`cost-direction-amount cost-direction-amount--aligned cost-direction-amount--${tone}`}
     >
       <span className="cost-direction-amount-label">{label}</span>
-      <span className="cost-direction-amount-value">{amount}</span>
+      <span className="cost-direction-amount-value">{formattedAmount}</span>
     </span>
   );
 }
@@ -1643,7 +1645,7 @@ export default function CostStatisticsPage() {
         width: 190,
         cellClassName: "cost-table-cell-money",
         render: (row) => ({
-          amount: row.amount,
+          amount: formatCostAmount(row.amount),
           direction: row.direction,
           paymentAccountLabel: row.paymentAccountLabel,
           toneByDirection: true,
@@ -1677,7 +1679,7 @@ export default function CostStatisticsPage() {
         width: 180,
         cellClassName: "cost-table-cell-money",
         render: (row) => ({
-          amount: row.amount,
+          amount: formatCostAmount(row.amount),
           direction: row.direction,
           paymentAccountLabel: row.paymentAccountLabel,
           toneByDirection: viewMode === "bankTag",

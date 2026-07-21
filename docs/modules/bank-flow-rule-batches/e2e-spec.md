@@ -64,7 +64,7 @@
 验收：
 
 - 没有 active relation 时事实保持 unpaired。
-- 确认形成 active relation 后，同一个 case 的完整成员进入 paired。
+- 确认形成 active relation 后，冻结要求满足时同一个 case 的完整成员进入 paired；未满足时保持同 case unpaired 并显示缺失类型。
 - 原始银行 rows 未丢失，折叠摘要和展开详情一致。
 
 ## BRB-E2E-004 规则保存不追溯改写 existing relation

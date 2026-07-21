@@ -225,7 +225,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 | `sub_label` | 流水子标签；为空时前端可显示主标签。 |
 | `status` | 当前只返回 `active`。 |
 
-`rules[*].requires_oa` / `requires_invoice` 表示该标签业务闭环所需的单据类型，用于规则校验和审计提示；它们不再决定关联台分区。只要存在 active 正式关系，关系完整成员就进入 paired；没有 active relation 的事实进入 unpaired singleton。
+`rules[*].requires_oa` / `requires_invoice` 表示该标签业务闭环所需的单据类型。新 relation 创建时把当时规则冻结到 `special_metadata`；关联台只读取该快照判定 paired/unpaired，不回查当前规则。active relation 仍决定跨页面 linked ownership。
 
 `PUT /api/bank-flow-rule-batches/tag-rules`
 
@@ -248,7 +248,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 - 只能提交当前 `active_tags` 中存在且可用的标签 code；未知、停用、重复 code 返回业务错误。
 - 语义变化后返回与 GET 相同结构，version +1，写一次审计动作 `bank_flow_rule_batch_tag_rules_updated`，并只 enqueue `bank_flow_rule_batch/all` refresh；不能递增 `bank_transaction_tags.version`。
 - 提交与当前有效规则相同的 payload 是 no-op：version 不变，不写 settings/audit，不触发 refresh。
-- 保存规则不得读取或改写 existing Workbench/turnover relation；active formal relation 继续决定 paired/unpaired，existing metadata 保持历史快照。
+- 保存规则不得读取或改写 existing Workbench/turnover relation；existing metadata 保持历史快照，关联台按各 relation 自己的快照分区。
 - HTTP 输出边界只返回 `bank_flow_rule_batch_*` 错误码。共享 bank-batch core 必须根据显式 bank-flow relation mode 直接产生正式错误码；route 不保留 legacy translation map 或 no-OA fallback。
 
 `GET /api/bank-flow-rule-batches`
@@ -285,7 +285,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 - 实现初期要求所有流水来自同一月份、同一银行账户、同一当前有效银行标签；后续放宽必须更新本 API 和模块状态机。
 - 提交前必须重查银行流水、标签、active relation 占用和规则版本。
 - 成功后写入 `relation_mode=bank_flow_rule_batch`，并在 relation `special_metadata` 写入 `source_batch_id`、`flow_rule_tag_code`、`flow_rule_version`、`requires_oa`、`requires_invoice`、`source_row_count`、`collapsed_bank_rows`。
-- 关联台按 active 正式关系判断 paired/unpaired；该批次 active relation 的完整成员进入 paired，`source_row_count > 3` 时默认折叠。
+- 关联台按 active 正式关系判断 ownership，再按该批次 relation 冻结的 OA/发票 requirement 判断 paired/unpaired；`source_row_count > 3` 时默认折叠。
 - Workbench 折叠摘要必须输出 `source_kind=bank_flow_rule_batch_summary`、summary id prefix `bank_flow_rule_summary:`、`invoice_relation.code=bank_flow_rule_batch` 和 `流水规则` display tag；不得输出 `no_oa_bank_batch_summary` 或 `免OA` tag 作为 bank-flow 摘要 I/O。
 - 成功响应返回 `batch_id`、`case_id`、`affected_months`、`affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`。
 
@@ -327,7 +327,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 | `selected_tag_codes` | 兼容字段：当前仍可用、且 `OA/发票` 都不需要的标签 code 列表。首次为空数组；新调用方应以 `rules` 为准。 |
 | `inactive_selected_tag_codes` | 历史配置中已停用或不可用的标签 code；不参与候选生成，保存后会被清理。 |
 | `active_tags` | 银行明细自动标签规则中的可用标签，供抽屉以只读 grid 展示 `收支类型 / 流水主标签 / 流水子标签`。 |
-| `rules` | 当前可用标签的闭环要求列表。每行包含 `tag_code`、`requires_oa`、`requires_invoice`；字段只表达业务闭环/审计要求，不决定关联台 paired/unpaired 分区。 |
+| `rules` | 当前可用标签的闭环要求列表。每行包含 `tag_code`、`requires_oa`、`requires_invoice`；字段影响未来 relation 的冻结 requirement，不追溯改写 existing relation。 |
 | `requirements_by_tag_code` | `rules` 的 code map 形式，便于后端服务和前端 draft 合并。 |
 
 `active_tags[*]` 至少包含：
@@ -362,7 +362,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 
 - `expected_version` 必填；版本不一致返回 `409 no_oa_bank_batch_tag_selection_version_conflict`。
 - `rules` 是当前主合同；`selected_tag_codes` 只用于旧调用方兼容。旧调用方只传 `selected_tag_codes` 时，后端解释为这些标签 `requires_oa=false, requires_invoice=false`。
-- `rules[*].requires_oa=true` / `requires_invoice=true` 表示该标签业务闭环要求 OA / 发票；关联台仍只按是否存在 active 正式关系分为 paired/unpaired。
+- `rules[*].requires_oa=true` / `requires_invoice=true` 表示该标签业务闭环要求 OA / 发票；关联台按 relation 创建时冻结的值判定 paired/unpaired。
 - 只有 `requires_oa=false` 且 `requires_invoice=false` 的标签会派生到 `selected_tag_codes`，并进入免 OA 未提交候选。新增银行自动标签若没有保存过规则，默认 `requires_oa=true, requires_invoice=true`，避免新增标签自动放行到免 OA 候选。
 - 只能提交当前 `active_tags` 中存在且处于可用状态的标签 code；未知或停用标签返回业务错误。
 - 成功后返回与 GET 相同结构，并写审计动作 `no_oa_bank_batch_tag_selection_updated`。
@@ -408,7 +408,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 - `transaction_ids` 必填且不能为空，不能重复。
 - 所有流水必须来自同一月份、同一银行账户、同一 `category_code`，且该 `category_code` 必须在当前免 OA 标签准入范围内。
 - 只提交请求中的流水；同银行区域内未选中的流水不提交。
-- 成功后写入 `relation_mode=no_oa_bank_batch`，并可在 relation `special_metadata` 保留 `paired_requires_oa`、`paired_requires_invoice`、`paired_requirement_tag_code` 和 `paired_requirement_version` 作为历史业务规则审计；这些字段不改变 active relation 进入 paired 的事实。接口返回 `affected_months` 和 `workbench_rebuild_queued` 供前端刷新关联台。
+- 成功后写入 `relation_mode=no_oa_bank_batch`，并在 relation `special_metadata` 保留 no-OA 专属冻结要求与规则版本。该显式批次合同继续由 no-OA owner 解释，不允许通用 Workbench 读路径回查当前规则。接口返回 `affected_months` 和 `workbench_rebuild_queued` 供前端刷新关联台。
 
 `POST /api/no-oa-bank-batches/{batch_id}/withdraw`
 
@@ -496,7 +496,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 
 当响应携带 `read_model_status` 且不为 `fresh` 时，前端可以展示当前可用数据，但必须把闭环确认、流水选择、补充信息编辑等写操作置为不可用，直到后续查询恢复 fresh。未返回 `read_model_status` 时按 `fresh` 处理。
 
-外部往来款 `deterministic` 只表示系统识别到零差额计算结果，不表示已闭环，也不形成关联台关系组。外部往来闭环的共同事实源是 Workbench active pair relation；来源可以是外部往来页人工确认闭环，也可以是关联台已经把同一往来组内的银行收入/支出配成同一个零差额 case。`view=grouped` 的 `summary_row` 和 `flow_rows[*]` 必须输出 `linked_oa`、`linked_invoice`、`cash_closure_linked`、`cash_closure_case_id`、`cash_closure_source`、`cash_closure_relation_id`；前端只能据此显示“已关联 OA”“已关联 发票”“收支闭环”三个正向 chip。`cash_closure_relation_id` 只用于兼容历史上显式携带 `special_metadata.turnover_relation_id` 的旧闭环，不得从 `cash_closure_case_id` 猜测；现代闭环该字段为空，撤回按 canonical case id 执行。若所选银行流水已存在 OA + 银行 active relation，确认闭环应把新增流水原子扩展进同一个 `turnover_manual_closure` case。Workbench 只按 active relation 分区：active relation 全部进入 paired，其余事实 singleton unpaired。
+外部往来款 `deterministic` 只表示系统识别到零差额计算结果，不表示已闭环，也不形成关联台关系组。外部往来闭环的共同事实源是 Workbench active pair relation；来源可以是外部往来页人工确认闭环，也可以是关联台已经把同一往来组内的银行收入/支出配成同一个零差额 case。`view=grouped` 的 `summary_row` 和 `flow_rows[*]` 必须输出 `linked_oa`、`linked_invoice`、`cash_closure_linked`、`cash_closure_case_id`、`cash_closure_source`、`cash_closure_relation_id`；前端只能据此显示“已关联 OA”“已关联 发票”“收支闭环”三个正向 chip。`cash_closure_relation_id` 只用于兼容历史上显式携带 `special_metadata.turnover_relation_id` 的旧闭环，不得从 `cash_closure_case_id` 猜测；现代闭环该字段为空，撤回按 canonical case id 执行。若所选银行流水已存在 OA + 银行 active relation，确认闭环应把新增流水原子扩展进同一个 `turnover_manual_closure` case。active relation 继续决定外部往来闭环 ownership；关联台展示区由该 relation 的显式 completion contract 判定。
 
 `POST /api/turnover-ledger/closures/confirm`
 
@@ -782,8 +782,8 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 
 关系分区只允许 `paired` / `unpaired`：
 
-- `paired.groups[*]` 必须一一对应 active 正式关系，完整包含该 relation 在当前查询范围内的 OA、银行流水和发票成员，`group_type=relation`。
-- `unpaired.groups[*]` 必须恰好包含一个未被任何 active relation 占用的 canonical fact，`group_type=unpaired`。
+- `paired.groups[*]` 必须一一对应冻结要求已满足的 active 正式关系，完整包含该 relation 在当前查询范围内的 OA、银行流水和发票成员，`group_type=relation`。
+- `unpaired.groups[*]` 可以是一个未被 active relation 占用的 canonical singleton，也可以是冻结要求未满足的 active relation group；后一种必须返回 `completion.is_complete=false` 和精确 `missing_row_types`，不能拆散 relation ownership。
 - `summary` 使用 `paired_count` / `unpaired_count`；不得返回 `open_count` 或把 candidate/decision 作为第三种关系状态。
 - 历史 row `case_id`、来源 section、display tag 或 candidate/decision metadata 不能合并未配对行，也不能隐藏 canonical fact。
 - 未知 zone/group type 必须返回结构化 contract error，不能静默映射为 unpaired 或 paired。

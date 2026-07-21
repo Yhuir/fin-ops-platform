@@ -18,7 +18,7 @@
 - OA 配对统计继续展示自身支出汇总；全流水的按时间、按标签视图不展示收入与支出的合并总金额。summary、方向金额/笔数和 percentages 均由当前 fresh page query 的完整筛选集合在 SQL 中计算，页面不得从当前页重算或回读源表。
 - 成本统计页面的按银行统计；银行账户全集来自 `app.app_settings.bank_account_mappings` 经后端 owner read port 进入 gate 的小型 metadata，再由 page repository 与结构化成本行生成银行 facets。页面不做全量账户聚合，也不调用设置页 API。
 - 成本统计页面的 `按标签` 三栏视图；主/子标签 facets 与选中层级 rows 只由 cost-owned page repository 从 `cost_statistics_bank_flow_rows.bank_tag_*` 计算，不直接读取银行明细页 read model，也不把完整 bank-flow rows 传到浏览器派生。
-- 成本统计页面的紧凑展示合同：五个分类与标题同排，范围控件位于金额摘要行最左；OA 配对金额显式标注支出，收支标签左对齐、金额右对齐；四种 explorer 下钻表把时间合并到户名/项目名复合单元格，桌面端各栏等高且独立滚动。该合同只改变展示，不改变 explorer/API DTO。
+- 成本统计页面的紧凑展示合同：五个分类与标题同排，范围控件位于金额摘要行最左；OA 配对金额显式标注支出，收支标签左对齐、金额右对齐；页面摘要、列表、详情和导出预览中的金额统一保留两位小数；四种 explorer 下钻表把时间合并到户名/项目名复合单元格，桌面端各栏等高且独立滚动。该合同只改变展示，不改变 explorer/API DTO 或计算精度。
 - 成本统计标签规则抽屉；抽屉读取 app settings owner 归一后的银行主/子标签与虚拟 `__uncategorized__` 未分类标签，保存后等待当前成本统计 scope fresh 再关闭。
 - `cost_statistics` read model 的 parent rollup 投影。
 - 与税金抵扣共享 cost/tax 投影 worker 时保持明确 event/scope。

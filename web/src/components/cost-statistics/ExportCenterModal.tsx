@@ -1,5 +1,6 @@
 import MonthPicker from "../MonthPicker";
 import type { CostStatisticsExportPreview } from "../../features/cost-statistics/types";
+import { formatCostAmount } from "../../features/cost-statistics/format";
 
 export type ExportCenterMode = "time" | "bank_tag" | "project" | "expense_type";
 export type ExportRangeMode = "month" | "custom";
@@ -349,13 +350,13 @@ export default function ExportCenterModal({
                   {preview.view === "time" || preview.view === "bank_tag" ? (
                     <>
                       <span className="cost-direction-amount cost-direction-amount--expense">
-                        支出金额 {preview.summary.expenseAmount ?? "0.00"}
+                        支出金额 {formatCostAmount(preview.summary.expenseAmount ?? "0.00")}
                       </span>
                       <span className="cost-direction-amount cost-direction-amount--income">
-                        收入金额 {preview.summary.incomeAmount ?? "0.00"}
+                        收入金额 {formatCostAmount(preview.summary.incomeAmount ?? "0.00")}
                       </span>
                     </>
-                  ) : <span>总金额 {preview.summary.totalAmount}</span>}
+                  ) : <span>总金额 {formatCostAmount(preview.summary.totalAmount)}</span>}
                 </div>
                 <div className="export-center-sheet-list">
                   {preview.sheetNames.map((sheetName) => (
@@ -385,7 +386,9 @@ export default function ExportCenterModal({
                         preview.rows.map((row, rowIndex) => (
                           <tr key={`${rowIndex}-${row.join("-")}`} className="cost-table-row">
                             {row.map((cell, cellIndex) => (
-                              <td key={`${rowIndex}-${cellIndex}`}>{cell}</td>
+                              <td key={`${rowIndex}-${cellIndex}`}>
+                                {preview.columns[cellIndex]?.includes("金额") ? formatCostAmount(cell) : cell}
+                              </td>
                             ))}
                           </tr>
                         ))

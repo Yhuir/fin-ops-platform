@@ -458,6 +458,7 @@ class WorkbenchRelationCommandService:
         *,
         actor_id: str,
         etc_batch_links: list[dict[str, Any]] | None = None,
+        paired_requirements_by_case_id: dict[str, dict[str, object]] | None = None,
     ) -> dict[str, Any]:
         normalized_plans = [plan for plan in list(plans or []) if plan is not None]
         normalized_links = self._normalize_etc_batch_links(etc_batch_links or [])
@@ -487,10 +488,19 @@ class WorkbenchRelationCommandService:
                 "Formal relation plans require aligned row ids, row types and case ids.",
             )
         links_by_case = {str(link["case_id"]): link for link in normalized_links}
+        requirements_by_case = {
+            str(case_id): dict(metadata)
+            for case_id, metadata in dict(paired_requirements_by_case_id or {}).items()
+        }
         if set(links_by_case) - set(case_ids):
             raise WorkbenchRelationCommandError(
                 "etc_batch_link_plan_mismatch",
                 "ETC batch link targets must belong to the formal relation plan batch.",
+            )
+        if set(requirements_by_case) - set(case_ids):
+            raise WorkbenchRelationCommandError(
+                "paired_requirement_plan_mismatch",
+                "Paired requirements must belong to the formal relation plan batch.",
             )
         self._acquire_relation_member_locks(row_ids, row_types=row_types, case_ids=case_ids)
         self._validate_etc_batch_links(normalized_links)
@@ -545,6 +555,7 @@ class WorkbenchRelationCommandService:
                     "rule_version": str(getattr(plan, "rule_version", "") or ""),
                 }
             }
+            special_metadata.update(requirements_by_case.get(case_id, {}))
             etc_batch_link = links_by_case.get(case_id)
             if etc_batch_link is not None:
                 if (str(etc_batch_link["oa_row_id"]), "oa") not in set(

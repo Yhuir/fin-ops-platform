@@ -142,6 +142,8 @@ def _audit_workbench_relation_display_snapshot(
                 "bidirectional_relation_edge_equality",
                 "query_composed_relation_case_ownership",
                 "relation_member_completeness",
+                "relation_requirement_snapshot_completeness",
+                "relation_requirement_partition_correctness",
                 "durable_queue_and_freshness_gate",
                 "exact_etc_batch_relation_owner",
                 "unique_etc_batch_relation_owner",
@@ -203,6 +205,7 @@ def collect_workbench_page_integrity_issues(
     issues: list[RelationDisplayIssue] = []
 
     for relation in relations:
+        issues.extend(_relation_requirement_snapshot_issues(relation))
         issues.extend(
             _query_composed_relation_display_issues(
                 relation,
@@ -421,12 +424,12 @@ def _normalize_relation(row: dict[str, Any]) -> dict[str, Any]:
     row_types = text_list(row.get("row_types")) or text_list(relation_payload.get("row_types"))
     normalized_payload = relation_payload.get("normalized_payload")
     normalized_payload = normalized_payload if isinstance(normalized_payload, dict) else relation_payload
-    amount_check = row_payload(row, "amount_check")
+    amount_check = row.get("amount_check")
     if not isinstance(amount_check, dict):
         amount_check = normalized_payload.get("amount_check")
     if not isinstance(amount_check, dict):
         amount_check = relation_payload.get("amount_check")
-    special_metadata = row_payload(row, "special_metadata")
+    special_metadata = row.get("special_metadata")
     if not isinstance(special_metadata, dict):
         special_metadata = normalized_payload.get("special_metadata")
     if not isinstance(special_metadata, dict):
@@ -439,6 +442,8 @@ def _normalize_relation(row: dict[str, Any]) -> dict[str, Any]:
         "row_types": row_types,
         "month_scope": text(row.get("month_scope") or relation_payload.get("month_scope")) or "",
         "updated_at": text(row.get("updated_at")) or "",
+        "amount_check": amount_check if isinstance(amount_check, dict) else {},
+        "special_metadata": special_metadata if isinstance(special_metadata, dict) else {},
         "external_etc_batch_id": _external_etc_batch_id(
             amount_check if isinstance(amount_check, dict) else {},
             special_metadata if isinstance(special_metadata, dict) else {},
@@ -493,6 +498,22 @@ def _query_composed_relation_display_issues(
         if text(row.get("scope_key")) != "all"
         and text(row.get("group_id")) in expected_group_ids
     ]
+    expected_zone = _expected_relation_zone(relation)
+    for row in actual_case_rows:
+        actual_zone = text(row.get("zone")) or ""
+        if actual_zone != expected_zone:
+            issues.append(
+                RelationDisplayIssue(
+                    severity="error",
+                    code="relation_requirement_partition_mismatch",
+                    message="关联台 relation 未按持久化的 OA/发票要求进入正确分区。",
+                    case_id=case_id,
+                    scope_key=text(row.get("scope_key")) or "",
+                    row_id=text(row.get("row_id")) or "",
+                    row_type=text(row.get("source_kind")) or "",
+                    details={"expected_zone": expected_zone, "actual_zone": actual_zone},
+                )
+            )
     expected_row_id_set = set(row_ids)
     actual_row_id_set = {
         row_id
@@ -587,6 +608,70 @@ def _query_composed_relation_display_issues(
                     )
                 )
     return issues
+
+
+def _relation_requirement_snapshot_issues(relation: dict[str, Any]) -> list[RelationDisplayIssue]:
+    row_types = {str(value or "").strip().lower() for value in list(relation.get("row_types") or [])}
+    if "bank" not in row_types or _is_requirement_exempt_relation(relation):
+        return []
+    metadata = relation.get("special_metadata")
+    metadata = metadata if isinstance(metadata, dict) else {}
+    has_oa_requirement = "requires_oa" in metadata or "paired_requires_oa" in metadata
+    has_invoice_requirement = "requires_invoice" in metadata or "paired_requires_invoice" in metadata
+    if has_oa_requirement and has_invoice_requirement:
+        return []
+    return [
+        RelationDisplayIssue(
+            severity="error",
+            code="relation_requirement_snapshot_missing",
+            message="普通银行 relation 缺少创建时的 OA/发票要求快照。",
+            case_id=str(relation.get("case_id") or ""),
+            scope_key="all",
+            details={
+                "has_oa_requirement": has_oa_requirement,
+                "has_invoice_requirement": has_invoice_requirement,
+            },
+        )
+    ]
+
+
+def _expected_relation_zone(relation: dict[str, Any]) -> str:
+    row_types = {str(value or "").strip().lower() for value in list(relation.get("row_types") or [])}
+    if "bank" not in row_types or _is_requirement_exempt_relation(relation):
+        return "paired"
+    metadata = relation.get("special_metadata")
+    metadata = metadata if isinstance(metadata, dict) else {}
+    requires_oa = bool(
+        metadata["requires_oa"]
+        if "requires_oa" in metadata
+        else metadata.get("paired_requires_oa", True)
+    )
+    requires_invoice = bool(
+        metadata["requires_invoice"]
+        if "requires_invoice" in metadata
+        else metadata.get("paired_requires_invoice", True)
+    )
+    complete = (not requires_oa or "oa" in row_types) and (
+        not requires_invoice or "invoice" in row_types
+    )
+    return "paired" if complete else "unpaired"
+
+
+def _is_requirement_exempt_relation(relation: dict[str, Any]) -> bool:
+    metadata = relation.get("special_metadata")
+    metadata = metadata if isinstance(metadata, dict) else {}
+    amount_check = relation.get("amount_check")
+    amount_check = amount_check if isinstance(amount_check, dict) else {}
+    return bool(
+        str(relation.get("relation_mode") or "").strip() == "turnover_manual_closure"
+        or str(metadata.get("source") or "").strip() == "batch_accounting"
+        or isinstance(metadata.get("etc_batch_link"), dict)
+        or str(
+            amount_check.get("external_etc_batch_id")
+            or amount_check.get("etc_batch_id")
+            or ""
+        ).strip()
+    )
 
 
 def _is_registered_etc_display_expansion(row: dict[str, Any], *, relation: dict[str, Any]) -> bool:

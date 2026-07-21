@@ -7,7 +7,7 @@
 - 状态：close
 - 当前边界可信度：closed for API/UI/application service/relation rules/paged read I/O/bulk detail and reset/read model runtime/physical batch storage/tag-rule settings family/frontend feature split/workbench summary I/O
 - 本 slice 范围：生产入口、API、全局 Bank Transaction Paired Policy 规则抽屉、批量提交、关联台分区判定、旧 bank-flow/no-OA 历史重算页面链路清理、文档和自动化测试。
-- 当前边界：本模块是 Bank Transaction Paired Policy 的规则管理入口，`requires_oa` / `requires_invoice` 只用于候选校验、新批次审计提示和 source version，不决定关联台 paired/unpaired 分区。HTTP route、application service、read model key、refresh producer、worker event、operation barrier target、repository port、mutation persistence port、refresh persistence port、PostgreSQL 批次存储、read model row 表和 tag-rule settings family 已独立为 `bank_flow_rule_batch`。旧 no-OA 模块只保留自身 legacy API 与历史批次功能，不再承接 bank-flow 新链路。
+- 当前边界：本模块是 Bank Transaction Paired Policy 的规则管理入口，`requires_oa` / `requires_invoice` 在 relation 创建时冻结为审计快照，并供关联台纯投影判定是否闭环；规则保存不追溯改写 existing relations。HTTP route、application service、read model key、refresh producer、worker event、operation barrier target、repository port、mutation persistence port、refresh persistence port、PostgreSQL 批次存储、read model row 表和 tag-rule settings family 已独立为 `bank_flow_rule_batch`。旧 no-OA 模块只保留自身 legacy API 与历史批次功能，不再承接 bank-flow 新链路。
 - 当前缺口：无已知生产链路模块边界缺口。页面级 state/effect 编排仍保留在 `BankFlowRuleBatchPage.tsx`，纯 I/O、DTO、策略、view model、operation barrier helper 和通用组件位于 `web/src/features/bankFlowRuleBatches/`。新功能生产路径不接收 `selected_tag_codes`；旧 no-OA `selected_tag_codes` 写路径只属于 legacy no-OA 域。
 - 旧代码删除条件：closed。bank-flow 新链路不得 import/继承 no-OA route、application service、derived lifecycle executor、read model refresh、persistence port、no-OA worker 或 no-OA physical batch/read-model 表；不得输出 `no_oa_bank_batch_summary`、`no_oa_bank_batch_*` HTTP error code、`no_oa_bank_batch` relation display code、`no-oa-*` Browser transaction/batch id 或 `免OA` display tag/成本项目名作为 bank-flow I/O。route legacy error translation map、同步 reset rebuild、逐成员银行流水读取、逐 relation reset cancel 和前端同步等待全部下游 freshness 的旧路径已删除；architecture guard 禁止回归。no-OA 主入口、`selected_tag_codes` 写路径和 no-OA 常驻 worker只属于 no-OA legacy 业务，不得重新接入 bank-flow。
 
@@ -49,7 +49,7 @@
 | 批次列表 payload | 页面 | 返回 summary、当前页 rows、status bucket、read model status、stale reasons、scope keys 和分页信息。summary 由 SQL 对完整 summary filter 范围聚合，不能由当前页推算；非 fresh 不能展示为真实空态。 |
 | 页面 Audit 状态 | 标题附件 | 只有结构化 status 与页面 read model 都 fresh/pass 才显示成功；issue counts 是样本。 |
 | Relation command | `workbench-relations` | 使用 `relation_mode=bank_flow_rule_batch`，行级 relation display code 必须保持 `bank_flow_rule_batch`，不能退回 `fully_linked` 或 `no_oa_bank_batch`。metadata 至少包含 `source_batch_id`、`flow_rule_tag_code`、`flow_rule_version`、`requires_oa`、`requires_invoice`、`source_row_count`、`collapsed_bank_rows`；display tags 使用 `流水规则` + 业务标签，不能继承旧 `免OA` 标签。 |
-| 关联台展示 | `reconciliation-workbench` | paired/unpaired 只由 active formal relation 决定：active relation 的完整成员进入 paired，无 active relation 的事实进入 unpaired singleton。requirement metadata 不参与分区。银行流水数 `>3` 时默认折叠，折叠摘要必须使用 `source_kind=bank_flow_rule_batch_summary`、summary id prefix `bank_flow_rule_summary:`、`invoice_relation.code=bank_flow_rule_batch`、`流水规则` display tag 和“流水规则批次”撤回文案。 |
+| 关联台展示 | `reconciliation-workbench` | active formal relation 决定 ownership，下游仍为 linked；关联台只按 relation 创建时冻结的 requirement metadata 判定展示区。要求已满足进入 paired，未满足保持同 case 进入 unpaired 并显示缺失类型；无 active relation 的事实为 unpaired singleton。银行流水数 `>3` 时默认折叠，折叠摘要必须使用 `source_kind=bank_flow_rule_batch_summary`、summary id prefix `bank_flow_rule_summary:`、`invoice_relation.code=bank_flow_rule_batch`、`流水规则` display tag 和“流水规则批次”撤回文案。 |
 | Browser fixture / E2E | `web/e2e/bank-flow-rule-batches-flow.spec.ts` / `web/e2e/fixtures/apiMocks.ts` | 本模块浏览器链路的测试 I/O 必须使用 `bank-flow-rule-e2e-*` transaction id、`bank-flow-rule-batch-e2e-*` batch id、`bank-flow-rule-relation-e2e-*` relation case id、`bank_flow_rule_batch_*` stale reason/error code 和 `流水规则手续费成本项目`；禁止用旧 `no-oa-*` id 或“免OA”成本项目名表示 bank-flow 行为。 |
 | HTTP 错误 | 前端 API client | HTTP 输出边界只返回 `bank_flow_rule_batch_*` 错误码。共享 bank-batch core 由显式 `relation_mode=bank_flow_rule_batch` 直接产生正式错误码；`routes_bank_flow_rule_batches.py` 不得保留 legacy translation map、message fallback 或 no-OA compatibility branch。 |
 | Operation barrier | 前端 | 写成功后返回 `affected_months`、`affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`。批量提交、撤回和 reset 的完整 target envelope 必须同时包含页面自身 `bank_flow_rule_batch` 受影响 month scope，以及关联台实际读取的 `workbench_relation`、`workbench` 的 `all` + 受影响 month scope；不能由 route 覆盖 service 返回的目标，也不能只返回 `bank_flow_rule_batch` 后让关联台读取旧 `month=all` 空 generation。流水规则批量处理页面的单批内部往来提交和选中流水提交都以 command 成功为用户阻塞边界，前端立即清空当前选择、禁止自动选中下一笔触发 detail GET；`bank_flow_rule_batch` freshness wait 和 reload 只作为后台 reconcile I/O。完整跨页 visibility targets 必须继续通过 `workbenchRelationUpdated` 事件传给下游页面和全局刷新链路，禁止把 `workbench/all` 聚合刷新重新接入当前页提交阻塞链路。 |
@@ -70,7 +70,7 @@
 - 迁移 `0083_bank_flow_rule_batch_tag_rules.sql` 只在缺失新 key 时从 `app_settings.no_oa_bank_batch_tag_selection` 一次性复制历史值；迁移 `0111_bank_flow_rule_batch_tag_rules_canonical_shape.sql` 把复制来的 legacy selected 值合并到 requirements 后删除 selected 字段。运行时不再回退读取 no-OA settings family。
 - 新 API 和服务边界拒绝 `selected_tag_codes` / `selectedTagCodes`；`rules` 中重复 `tag_code` fail fast。bank-flow public payload 不返回旧 selected 字段。legacy no-OA API 仍可读取旧字段用于历史兼容。
 - 未配置 active tag 默认 `requires_oa=true`、`requires_invoice=true`。
-- 规则设置不是关联台分区事实源。existing active relation 是不可追溯改写的历史事实；规则变化只影响未来候选/新批次，并只触发 `bank_flow_rule_batch` 刷新。
+- 当前规则设置不是关联台读路径事实源。existing active relation 的 requirement 是不可追溯改写的历史快照；规则变化只影响未来关系，并只触发 `bank_flow_rule_batch` 刷新。
 
 目标拆分仍可新增独立表 `app.bank_flow_rule_tag_requirements`，前提是保留版本、审计和乐观锁，并提供旧 settings family 的一次性迁移。
 
@@ -92,7 +92,7 @@
 - 月份 scope 的 API freshness gate 与 worker refresh 必须使用同一份 scope source-version 合同：先通过 bank-detail scope summary 与 Workbench relation source-version port 计算 `read_model_scope_source_versions(month)`，再用于 stale 判断、unchanged skip 和 snapshot 发布。禁止用 provider 的 mutable `last_source_versions` 作为月份 scope 的期望版本，否则同一刷新完成后 API 可能因 `bank_detail_source_versions_mismatch` 持续返回 stale。
 - 规则配置变化直接通过 `BankFlowRuleBatchReadModelRefreshProducer` enqueue 单一 `bank_flow_rule_batch/all`，不得调用 `bank_flow_rule_batch_changed` broad lifecycle。在线 submit/withdraw/reset 仍由 relation command repository 在同一写入边界内产生 downstream dirty/outbox fan-out。
 - 服务内由 submitted batch 反推 relation fact 时，必须继承该 batch 的 `relation_mode`、`source=bank_flow_rule_batch` 和 bank-flow display tags，并且只为当前 refresh `relation_mode` 生成 fact；禁止再把所有 submitted batch 硬编码为 `no_oa_bank_batch`。旧 no-OA legacy migration/repair 只允许处理 no-OA/明确 legacy relation，不得处理 `bank_flow_rule_batch`。
-- 关联台按 active formal relation 判定 paired/unpaired，不读取 policy metadata 重新分类。
+- 关联台按 active formal relation 判定 ownership，再读取该 relation 的冻结 policy metadata 判定 paired/unpaired；不得回查当前 settings，也不得由 bank-flow 规则保存扫描或改写 existing relations。
 
 ## 性能与刷新 I/O
 
@@ -109,7 +109,7 @@
 - 列表 presentation 在单次请求内只允许读取一次银行标签字典，并把同一份 definition index 用于当前页标签和完整 summary categories；禁止按 batch/category 重复 deep-copy 整份字典。列表 freshness 只读取本模块 repository 返回的 durable dirty/readiness/source-consistency proof，不得在每次 GET 时跨读 bank-detail/workbench-relation dependency facts；canonical writers 的事务内 dirty/outbox 是防旧数据边界。fresh 月份 scope 若同时存在多个 `source_versions` 必须返回 `schema_mismatch` 并入队修复，不能伪装 fresh。worker/refresh precheck 对 canonical category snapshot hash 的读取使用 `BankTransactionCategoryService.snapshot_version()`；该值与完整 snapshot SHA-256 合同完全一致，只在分类或标签字典真实变更时失效，不能引入 TTL、跨进程业务缓存或绕过 durable readiness。
 - Worker 无法 skip、必须 rebuild 时，发布到 `read_model.bank_flow_rule_batch_rows.source_versions` 的版本仍必须复用该 scope precheck source_versions；后续读取分类或 relation 明细只能影响行内容，不能把 `last_source_versions` 形态写成另一个版本。
 - PostgreSQL hot path index 位于 `0089_read_model_performance_hot_paths.sql`；新增 source-version 判断字段时必须同步维护该查询和索引，不得用 no-OA summary 或全量 Workbench snapshot 兜底。
-- `tag-rules` 保存仍触发 `all` refresh，因为规则变更可能影响所有 active bank-flow relation requirement metadata；后续若要优化必须先有按 relation/tag 反查受影响 scope 的可靠索引。
+- `tag-rules` 保存仍只触发 `bank_flow_rule_batch/all` refresh，用于页面自身规则版本与候选刷新；它不得扫描或追溯改写 active relation requirement snapshot。
 
 Workbench relation facts 仍归 `workbench-relations`：
 

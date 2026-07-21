@@ -1,12 +1,13 @@
 # 关联台状态机
 
-日期：2026-07-14
+日期：2026-07-21
 
 ## 页面关系状态
 
 ```text
-canonical fact + active formal relation  -> paired
-canonical fact - active formal relation  -> unpaired singleton
+canonical fact + complete active formal relation    -> paired relation group
+canonical fact + incomplete active formal relation  -> unpaired relation group（待补 OA/发票）
+canonical fact - active formal relation              -> unpaired singleton
 ```
 
 页面关系状态只有 `paired` 和 `unpaired`。`open`、`proposed`、candidate、decision 不是页面关系状态，也不是隐藏状态。
@@ -29,7 +30,7 @@ durable dirty scope
 
 | 状态 | 含义 | 页面效果 |
 | --- | --- | --- |
-| `active` | 当前唯一有效正式关系，成员被该 case 独占 | 关系全部成员进入同一 paired group |
+| `active` | 当前唯一有效正式关系，成员被该 case 独占 | 冻结要求满足时进入 paired；未满足时同 case 进入 unpaired，并保留下游 linked ownership |
 | `cancelled` | 被上层业务取消或替换 | 不再拥有成员，成员按当前事实重新分区 |
 | `withdrawn` | 用户/业务 owner 撤回 | 不再拥有成员；精确 typed member fingerprint 阻止自动重建 |
 | `superseded` | 被新正式关系显式替代 | 旧关系仅保留审计，新 active relation 决定分组 |

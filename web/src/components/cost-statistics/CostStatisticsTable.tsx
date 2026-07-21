@@ -2,6 +2,7 @@ import { type ReactNode } from "react";
 
 import BankAccountValue from "../BankAccountValue";
 import DirectionTag from "../DirectionTag";
+import { formatCostAmount } from "../../features/cost-statistics/format";
 import {
   EmptyValue,
   FinanceTable,
@@ -154,7 +155,7 @@ function getCellText(content: ReactNode | CostStatisticsAmountCell) {
     content !== null &&
     "amount" in content
   ) {
-    return String((content as { amount: string }).amount ?? "--");
+    return formatCostAmount((content as { amount: string }).amount);
   }
   if (typeof content === "string" || typeof content === "number") {
     return String(content);
@@ -169,7 +170,7 @@ function renderTableCellContent(content: ReactNode | CostStatisticsAmountCell) {
     "amount" in content &&
     "direction" in content
   ) {
-    const amount = String((content as { amount: string }).amount ?? "--");
+    const amount = formatCostAmount((content as { amount: string }).amount);
     const direction = String((content as { direction: string }).direction ?? "");
     const paymentAccountLabel = String((content as { paymentAccountLabel?: string }).paymentAccountLabel ?? "");
     const toneByDirection = Boolean((content as { toneByDirection?: boolean }).toneByDirection);

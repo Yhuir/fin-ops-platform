@@ -32,6 +32,7 @@ Release A 已移除旧 `read_model.workbench_candidate_matches`、`read_model.wo
 | 输出 | Consumer | 合同 |
 | --- | --- | --- |
 | active relation | Workbench/downstream | deduped aligned `row_ids`/`row_types`，一个 row 只属于一个 active case |
+| frozen completion requirement | reconciliation-workbench | 含银行流水的普通 relation 创建时写 `requires_oa`、`requires_invoice`、tag codes 和规则版本；关联台据此判定 paired/unpaired，缺失 fail closed。规则保存不得追溯改写；下游 linked ownership 仍只由 active status 决定。 |
 | history | Audit/withdraw | before/after、actor、event、timestamp、reason、rule/provenance |
 | command result | caller | relation/version/affected rows/months/idempotent replay/outbox ids/barrier targets |
 | ETC relation enrichment | Workbench projection/Audit | `special_metadata.etc_batch_link` 保存 external/business/submission/OA identity、发票数量与金额；一个 external batch 只能有一个 active relation owner。 |
@@ -56,6 +57,7 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 - 自动扩展既有 active case 必须使用 `target_case_id` 并原子 replace；不得创建重叠的第二条 active relation。
 - 精确 typed member set 的人工撤回历史阻止 deterministic engine 自动重建同一关系。
 - 同轮 deterministic relation 创建/扩展必须在首次保存前合并 ETC metadata；已有 active relation 的补全必须是一次 changed-case save。canonical revalidation 冲突时整批回滚，不允许部分写。
+- manual confirm 与 deterministic matching 必须在 relation UoW 写入前，通过 bank-tag read facade 的一次批量 fresh I/O 冻结 requirement metadata；non-fresh 或任一 bank row 缺失时整批不写。读投影不得回查 settings、不得按 row 逐条读取标签。
 
 ## Read facade
 

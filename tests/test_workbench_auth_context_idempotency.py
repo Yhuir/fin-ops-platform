@@ -584,13 +584,14 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
             ],
         )
 
-    def test_confirm_link_two_pane_operation_projection_uses_paired_groups(self) -> None:
+    def test_confirm_link_two_pane_operation_projection_uses_group_zone(self) -> None:
         def relation_groups(relations: list[dict[str, object]], **_: object) -> list[dict[str, object]]:
             relation = relations[0]
             return [
                 {
                     "group_id": f"case:{relation['case_id']}",
                     "group_type": relation["relation_mode"],
+                    "zone": "unpaired",
                     "oa_rows": [{"id": "oa-1", "type": "oa"}],
                     "bank_rows": [{"id": "bank-1", "type": "bank"}],
                     "invoice_rows": [],
@@ -619,8 +620,8 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
 
         self.assertEqual(result.status_code, HTTPStatus.OK)
         projection_after = result.payload["operation_projection"]["after"]
-        self.assertEqual(projection_after["paired_groups"][0]["group_id"], "case:CASE-NEW")
-        self.assertEqual(projection_after["unpaired_groups"], [])
+        self.assertEqual(projection_after["paired_groups"], [])
+        self.assertEqual(projection_after["unpaired_groups"][0]["group_id"], "case:CASE-NEW")
 
     def test_confirm_link_three_pane_operation_projection_uses_paired_groups(self) -> None:
         def relation_groups(relations: list[dict[str, object]], **_: object) -> list[dict[str, object]]:
@@ -629,6 +630,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
                 {
                     "group_id": f"case:{relation['case_id']}",
                     "group_type": relation["relation_mode"],
+                    "zone": "paired",
                     "oa_rows": [{"id": "oa-1", "type": "oa"}],
                     "bank_rows": [{"id": "bank-1", "type": "bank"}],
                     "invoice_rows": [{"id": "inv-1", "type": "invoice"}],
