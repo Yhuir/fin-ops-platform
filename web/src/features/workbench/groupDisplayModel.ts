@@ -4,9 +4,26 @@ import type {
   WorkbenchPaneRows,
   WorkbenchRecord,
   WorkbenchRecordType,
+  WorkbenchSourceKind,
 } from "./types";
 
 const workbenchPaneIds: WorkbenchRecordType[] = ["oa", "bank", "invoice"];
+const compactBankNameByPrefix: Record<string, string> = {
+  中国工商银行: "工行",
+  工商银行: "工行",
+  中国建设银行: "建行",
+  建设银行: "建行",
+  中国农业银行: "农行",
+  农业银行: "农行",
+  中国银行: "中行",
+  招商银行: "招行",
+  交通银行: "交行",
+  中国光大银行: "光大",
+  光大银行: "光大",
+  中国民生银行: "民生",
+  民生银行: "民生",
+  平安银行: "平安",
+};
 
 export type WorkbenchGroupDisplaySegment = {
   id: string;
@@ -20,10 +37,7 @@ export type WorkbenchPaneTimeFilter =
 
 export type WorkbenchZoneDisplayState = {
   activePaneId: WorkbenchRecordType | null;
-  openSearchPaneId: WorkbenchRecordType | null;
-  unifiedSearchQuery: string;
-  draftSearchQueryByPane: Record<WorkbenchRecordType, string>;
-  searchQueryByPane: Record<WorkbenchRecordType, string>;
+  searchQuery: string;
   filtersByPaneAndColumn: Record<WorkbenchRecordType, Record<string, string[]>>;
   sortByPane: Record<WorkbenchRecordType, "asc" | "desc" | null>;
   timeFilterByPane: Record<WorkbenchRecordType, WorkbenchPaneTimeFilter>;
@@ -32,18 +46,7 @@ export type WorkbenchZoneDisplayState = {
 export function createEmptyWorkbenchZoneDisplayState(): WorkbenchZoneDisplayState {
   return {
     activePaneId: null,
-    openSearchPaneId: null,
-    unifiedSearchQuery: "",
-    draftSearchQueryByPane: {
-      oa: "",
-      bank: "",
-      invoice: "",
-    },
-    searchQueryByPane: {
-      oa: "",
-      bank: "",
-      invoice: "",
-    },
+    searchQuery: "",
     filtersByPaneAndColumn: {
       oa: {},
       bank: {},
@@ -71,13 +74,9 @@ export function buildWorkbenchDisplayGroups(
     return groups;
   }
   const activePaneId = resolveWorkbenchActivePane(state, state.activePaneId);
-  if (!activePaneId) {
-    return groups;
-  }
-
-  const sortDirection = state.sortByPane[activePaneId];
-  const linkedSearchContext = resolveWorkbenchSearchContext(state);
-  const hasPaneCriteria = Boolean(linkedSearchContext) || workbenchPaneIds.some((paneId) => paneHasWorkbenchRowCriteria(state, paneId));
+  const sortDirection = activePaneId ? state.sortByPane[activePaneId] : null;
+  const hasPaneCriteria = Boolean(normalizeWorkbenchSearchText(state.searchQuery))
+    || workbenchPaneIds.some((paneId) => paneHasWorkbenchRowCriteria(state, paneId));
   const hasPaneRowCriteria = workbenchPaneIds.some((paneId) => paneHasWorkbenchRowCriteria(state, paneId));
 
   const displayGroups = !hasPaneCriteria
@@ -99,7 +98,7 @@ export function buildWorkbenchDisplayGroups(
       return [filteredGroup];
     });
 
-  if (!sortDirection) {
+  if (!sortDirection || !activePaneId) {
     return displayGroups;
   }
 
@@ -301,13 +300,9 @@ export function mergeWorkbenchGroupsById(
 
 export function buildWorkbenchServerPageQuery(state: WorkbenchZoneDisplayState): WorkbenchGroupsPageQuery {
   const query: WorkbenchGroupsPageQuery = {};
-  const searchByPane = Object.fromEntries(
-    workbenchPaneIds
-      .map((paneId) => [paneId, (state.searchQueryByPane[paneId] ?? "").trim()] as const)
-      .filter(([, value]) => Boolean(value)),
-  );
-  if (Object.keys(searchByPane).length > 0) {
-    query.searchByPane = searchByPane;
+  const search = state.searchQuery.trim();
+  if (search) {
+    query.search = search;
   }
   const sortPaneId = workbenchPaneIds.find((paneId) => state.sortByPane[paneId]);
   if (sortPaneId) {
@@ -330,7 +325,6 @@ export function buildWorkbenchServerPageQuery(state: WorkbenchZoneDisplayState):
 export function hasWorkbenchServerPageCriteria(query: WorkbenchGroupsPageQuery) {
   return Boolean(
     query.search
-    || (query.searchByPane && Object.keys(query.searchByPane).length > 0)
     || query.sort
     || (query.filtersByPaneAndColumn && Object.keys(query.filtersByPaneAndColumn).length > 0)
     || (query.timeFilterByPane && Object.keys(query.timeFilterByPane).length > 0),
@@ -456,39 +450,12 @@ export function resolveWorkbenchActivePane(
   return (["oa", "bank", "invoice"] as const).find((paneId) => paneHasWorkbenchCriteria(state, paneId)) ?? null;
 }
 
-function resolveWorkbenchSearchContext(state: WorkbenchZoneDisplayState) {
-  if (state.activePaneId) {
-    const activePaneRawQuery = (state.searchQueryByPane[state.activePaneId] || "").trim();
-    const activePaneQuery = normalizeWorkbenchSearchText(activePaneRawQuery);
-    if (activePaneQuery) {
-      return {
-        paneId: state.activePaneId,
-        rawQuery: activePaneRawQuery,
-        normalizedQuery: activePaneQuery,
-      };
-    }
-  }
-
-  const paneId = workbenchPaneIds.find((candidatePaneId) =>
-    normalizeWorkbenchSearchText(state.searchQueryByPane[candidatePaneId] || ""),
-  );
-  if (!paneId) {
-    return null;
-  }
-
-  return {
-    paneId,
-    rawQuery: (state.searchQueryByPane[paneId] || "").trim(),
-    normalizedQuery: normalizeWorkbenchSearchText(state.searchQueryByPane[paneId] || ""),
-  };
-}
-
 function groupMatchesPaneCriteria(group: WorkbenchRelationGroup, state: WorkbenchZoneDisplayState) {
-  const linkedSearchContext = resolveWorkbenchSearchContext(state);
+  const normalizedSearchQuery = normalizeWorkbenchSearchText(state.searchQuery);
   if (
-    linkedSearchContext
-    && !getWorkbenchGroupPaneRowsForCriteria(group, linkedSearchContext.paneId).some((row) =>
-      matchesWorkbenchRowText(row, linkedSearchContext.normalizedQuery),
+    normalizedSearchQuery
+    && !workbenchPaneIds.some((paneId) =>
+      getWorkbenchGroupPaneRowsForCriteria(group, paneId).some((row) => matchesWorkbenchRowText(row, normalizedSearchQuery)),
     )
   ) {
     return false;
@@ -617,7 +584,7 @@ function resolveBankAmountFilterValues(row: WorkbenchRecord) {
 }
 
 function normalizeWorkbenchSearchText(value: string) {
-  return value.replace(/\s+/g, "").trim().toLowerCase();
+  return value.trim().toLocaleLowerCase("zh-CN");
 }
 
 export function workbenchRowMatchesUnifiedSearch(row: WorkbenchRecord, query: string) {
@@ -625,23 +592,85 @@ export function workbenchRowMatchesUnifiedSearch(row: WorkbenchRecord, query: st
   return normalizedQuery ? matchesWorkbenchRowText(row, normalizedQuery) : false;
 }
 
-export function resolveWorkbenchLinkedSearchQuery(state: WorkbenchZoneDisplayState) {
-  return resolveWorkbenchSearchContext(state)?.rawQuery ?? "";
-}
-
 function matchesWorkbenchRowText(row: WorkbenchRecord, normalizedQuery: string) {
+  const tableValues = Object.entries(row.tableValues)
+    .filter(([key]) => !key.startsWith("__detail:"))
+    .map(([, value]) => value);
+  const bankTextValues = (row.bankTextFields ?? []).flatMap((field) => [field.label, field.value]);
+  const displayAliases = workbenchRowDisplaySearchAliases(row);
   const normalizedHaystack = normalizeWorkbenchSearchText(
-    [row.label, row.status, row.amount, row.counterparty, ...Object.values(row.tableValues), ...(row.tags ?? [])].join(" "),
+    [
+      row.label,
+      row.status,
+      row.amount,
+      row.counterparty,
+      row.categoryLabel,
+      ...tableValues,
+      ...bankTextValues,
+      ...displayAliases,
+      ...(row.tags ?? []),
+    ].join(" "),
   );
   return normalizedHaystack.includes(normalizedQuery);
 }
 
-function paneHasWorkbenchCriteria(state: WorkbenchZoneDisplayState, paneId: WorkbenchRecordType) {
-  const normalizedQuery = normalizeWorkbenchSearchText(state.searchQueryByPane[paneId] || "");
-  if (normalizedQuery) {
-    return true;
+function workbenchRowDisplaySearchAliases(row: WorkbenchRecord) {
+  if (row.recordType === "bank") {
+    return [compactWorkbenchBankAccountLabel(row.tableValues.paymentAccount ?? "")];
   }
+  if (row.recordType === "invoice") {
+    const invoiceType = row.tableValues.invoiceType ?? "";
+    const flowLabel = workbenchInvoiceFlowLabel(invoiceType);
+    const sourceLabel = flowLabel || row.sourceKind ? workbenchInvoiceSourceLabel(row.sourceKind) : null;
+    return [flowLabel, sourceLabel].filter((value): value is string => Boolean(value));
+  }
+  return [];
+}
 
+export function compactWorkbenchBankAccountLabel(value: string) {
+  const normalizedValue = value.replace(/\s+/g, " ").trim();
+  for (const [bankName, shortName] of Object.entries(compactBankNameByPrefix)) {
+    if (normalizedValue === bankName) {
+      return shortName;
+    }
+    if (normalizedValue.startsWith(`${bankName} `)) {
+      return `${shortName}${normalizedValue.slice(bankName.length)}`;
+    }
+  }
+  return value;
+}
+
+export function workbenchInvoiceFlowLabel(invoiceType: string) {
+  const normalized = invoiceType.trim().toLowerCase();
+  if (normalized.includes("销") || normalized.includes("output") || normalized.includes("sale")) {
+    return "销";
+  }
+  if (normalized.includes("进") || normalized.includes("input") || normalized.includes("purchase")) {
+    return "进";
+  }
+  return null;
+}
+
+export function workbenchInvoiceSourceLabel(sourceKind: WorkbenchSourceKind | undefined) {
+  if (sourceKind === "etc_invoice_summary") {
+    return "ETC批次";
+  }
+  if (sourceKind === "etc_invoice") {
+    return "ETC";
+  }
+  if (sourceKind === "oa_attachment_invoice") {
+    return "OA附件";
+  }
+  if (sourceKind === "oa_attachment_payment_receipt") {
+    return "付款凭证";
+  }
+  if (sourceKind === "oa_attachment_unknown") {
+    return "未识别附件";
+  }
+  return "人工导入";
+}
+
+function paneHasWorkbenchCriteria(state: WorkbenchZoneDisplayState, paneId: WorkbenchRecordType) {
   if ((state.timeFilterByPane[paneId] ?? { mode: "none" }).mode !== "none") {
     return true;
   }

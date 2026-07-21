@@ -4,7 +4,6 @@ import { resolve } from "node:path";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import WorkbenchPaneSearch from "../components/workbench/WorkbenchPaneSearch";
 import WorkbenchZone from "../components/workbench/WorkbenchZone";
 
 const panes = [
@@ -137,6 +136,8 @@ describe("WorkbenchZone", () => {
         tertiarySelectionActionLabel="取消异常"
         title="未配对"
         tone="warning"
+        searchQuery=""
+        onSearchQueryChange={() => {}}
         onClearSelection={onClearSelection}
         onOpenDetail={() => {}}
         onPrimarySelectionAction={onPrimarySelectionAction}
@@ -183,6 +184,8 @@ describe("WorkbenchZone", () => {
         isVisible
         title="已配对"
         tone="success"
+        searchQuery=""
+        onSearchQueryChange={() => {}}
         onOpenDetail={() => {}}
         onRowAction={() => {}}
         onSelectRow={() => {}}
@@ -213,78 +216,51 @@ describe("WorkbenchZone", () => {
     expect(onToggleExpand).toHaveBeenCalledTimes(1);
   });
 
-  test("keeps pane search focus, clear, applied summary, and outside-close behavior", async () => {
+  test("renders one HeroUI search field inside the zone header", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    const onClear = vi.fn();
-    const onClose = vi.fn();
-    const onToggle = vi.fn();
-
-    const { rerender } = render(
-      <div>
-        <button type="button">外部区域</button>
-        <WorkbenchPaneSearch
-          appliedValue=""
-          draftValue="陈涛"
-          open
-          paneTitle="OA"
-          onChange={onChange}
-          onClear={onClear}
-          onClose={onClose}
-          onToggle={onToggle}
-        />
-      </div>,
-    );
-
-    const searchbox = screen.getByRole("searchbox", { name: "搜索 OA" });
-    expect(searchbox).toHaveFocus();
-    expect(searchbox).toHaveValue("陈涛");
-
-    await user.type(searchbox, "A");
-    expect(onChange).toHaveBeenLastCalledWith("陈涛A");
-
-    await user.click(screen.getByRole("button", { name: "清空搜索 OA" }));
-    expect(onClear).toHaveBeenCalledTimes(1);
-
-    fireEvent.mouseDown(screen.getByRole("button", { name: "外部区域" }));
-    expect(onClose).toHaveBeenCalledTimes(1);
-
-    rerender(
-      <WorkbenchPaneSearch
-        appliedValue="陈涛"
-        draftValue="陈涛"
-        open={false}
-        paneTitle="OA"
-        onChange={onChange}
-        onClear={onClear}
-        onClose={onClose}
-        onToggle={onToggle}
+    render(
+      <WorkbenchZone
+        getRowState={() => "idle"}
+        isExpanded={false}
+        isVisible
+        onOpenDetail={() => {}}
+        onRowAction={() => {}}
+        onSearchQueryChange={onChange}
+        onSelectRow={() => {}}
+        onToggleExpand={() => {}}
+        panes={panes}
+        searchPending
+        searchQuery="陈涛"
+        title="未配对"
+        tone="warning"
+        zoneId="unpaired"
       />,
     );
 
-    const summaryButton = screen.getByRole("button", { name: "搜索 OA，当前关键词 陈涛" });
-    expect(summaryButton).toHaveTextContent("陈涛");
-    await user.click(summaryButton);
-    expect(onToggle).toHaveBeenCalledTimes(1);
+    const zone = screen.getByTestId("zone-unpaired");
+    const searchbox = within(zone).getByRole("searchbox", { name: "搜索未配对区域" });
+    expect(searchbox).toHaveValue("陈涛");
+    expect(searchbox).toHaveAttribute("maxlength", "200");
+    expect(searchbox.closest(".zone-header")).not.toBeNull();
+    expect(within(zone).getByLabelText("搜索中")).toBeInTheDocument();
+
+    await user.type(searchbox, "A");
+    expect(onChange).toHaveBeenCalled();
   });
 
-  test("keeps pane search as a stable header icon control without Tailwind fixed positioning", () => {
+  test("uses the native HeroUI zone search and removes the workbench pane-search chain", () => {
     const workbenchStyles = readFileSync(resolve(__dirname, "../app/styles.css"), "utf8");
-    const workbenchSearchSource = readFileSync(resolve(__dirname, "../components/workbench/WorkbenchPaneSearch.tsx"), "utf8");
-    const searchRule = workbenchStyles.match(/\.pane-search\s*\{[^}]*\}/s)?.[0] ?? "";
-    const openSearchRule = workbenchStyles.match(/\.pane-search\.open\s*\{[^}]*\}/s)?.[0] ?? "";
-    const popoverRule = workbenchStyles.match(/\.pane-search-popover\s*\{[^}]*\}/s)?.[0] ?? "";
-    const toggleButtonRule = workbenchStyles.match(/\.pane-search-toggle-btn--header-control\s*\{[^}]*\}/s)?.[0] ?? "";
+    const zoneSource = readFileSync(resolve(__dirname, "../components/workbench/WorkbenchZone.tsx"), "utf8");
+    const gridSource = readFileSync(resolve(__dirname, "../components/workbench/RelationGroupGrid.tsx"), "utf8");
+    const searchRule = workbenchStyles.match(/\.workbench-zone-search\s*\{[^}]*\}/s)?.[0] ?? "";
 
-    expect(searchRule).toMatch(/width:\s*30px;/);
-    expect(searchRule).toMatch(/flex:\s*0 0 30px;/);
-    expect(openSearchRule).not.toMatch(/width:\s*236px;/);
-    expect(openSearchRule).not.toMatch(/flex-basis:\s*236px;/);
-    expect(workbenchSearchSource).not.toContain("pane-search-toggle-btn fixed");
-    expect(toggleButtonRule).toMatch(/width:\s*30px;/);
-    expect(toggleButtonRule).toMatch(/flex:\s*0 0 30px;/);
-    expect(toggleButtonRule).toMatch(/position:\s*static;/);
-    expect(popoverRule).toMatch(/position:\s*fixed;/);
+    expect(zoneSource).toContain("SearchField");
+    expect(zoneSource).toContain("SearchField.Group");
+    expect(zoneSource).toContain("SearchField.ClearButton");
+    expect(gridSource).not.toContain("WorkbenchPaneSearch");
+    expect(searchRule).toMatch(/width:\s*clamp\(/);
+    expect(searchRule).toMatch(/max-width:\s*320px;/);
   });
 
   test("records current workbench MUI migration targets without broadening the tri-pane core scope", () => {

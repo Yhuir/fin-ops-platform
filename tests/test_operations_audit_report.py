@@ -51,6 +51,25 @@ class OperationsAuditReportTests(unittest.TestCase):
         )
         self.assertTrue(evaluation.summary["issue_samples_truncated"])
 
+    def test_workbench_convergence_and_source_version_issues_invalidate_freshness(self) -> None:
+        convergence = evaluate_audit_issues(
+            [AuditIssue("error", "workbench_matching_scope_not_converged", "scope pending")],
+            sample_limit=1,
+        )
+        source_version = evaluate_audit_issues(
+            [AuditIssue("error", "workbench_generation_source_versions_mismatch", "version mismatch")],
+            sample_limit=1,
+        )
+
+        self.assertEqual(
+            convergence.audit_status,
+            {"integrity": "pass", "freshness": "not_fresh", "queue": "backlog"},
+        )
+        self.assertEqual(
+            source_version.audit_status,
+            {"integrity": "pass", "freshness": "not_fresh", "queue": "drained"},
+        )
+
 
 class _SnapshotTransaction:
     def __init__(self) -> None:

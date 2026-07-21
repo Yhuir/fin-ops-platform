@@ -351,7 +351,7 @@ describe("workbench api bank amount mapping", () => {
 
     const result = await fetchWorkbenchInitialPage("all", undefined, undefined, {
       paired: { sort: "bank:desc" },
-      unpaired: { search: "供应商", searchByPane: { bank: "建行" } },
+      unpaired: { search: "供应商" },
     });
 
     expect(result.data.summary.pairedCount).toBe(1);
@@ -371,7 +371,6 @@ describe("workbench api bank amount mapping", () => {
     expect(JSON.parse(initialUrl.searchParams.get("paired_query") ?? "{}")).toEqual({ sort: "bank:desc" });
     expect(JSON.parse(initialUrl.searchParams.get("unpaired_query") ?? "{}")).toEqual({
       search: "供应商",
-      search_by_pane: { bank: "建行" },
     });
   });
 
@@ -456,10 +455,6 @@ describe("workbench api bank amount mapping", () => {
 
     await fetchWorkbenchGroupsPage("all", "unpaired", 2, 25, undefined, {
       search: "供应商A",
-      searchMode: "linked_context",
-      searchByPane: {
-        bank: "建行",
-      },
       status: "unpaired",
       sourceKind: "bank_transaction",
       sort: "bank:desc",
@@ -482,10 +477,8 @@ describe("workbench api bank amount mapping", () => {
     expect(url.searchParams.get("page")).toBe("2");
     expect(url.searchParams.get("page_size")).toBe("25");
     expect(url.searchParams.get("search")).toBe("供应商A");
-    expect(url.searchParams.get("search_mode")).toBe("linked_context");
-    expect(JSON.parse(url.searchParams.get("search_by_pane") ?? "{}")).toEqual({
-      bank: "建行",
-    });
+    expect(url.searchParams.has("search_mode")).toBe(false);
+    expect(url.searchParams.has("search_by_pane")).toBe(false);
     expect(url.searchParams.get("status")).toBe("unpaired");
     expect(url.searchParams.get("source_kind")).toBe("bank_transaction");
     expect(url.searchParams.get("sort")).toBe("bank:desc");
@@ -571,13 +564,12 @@ describe("workbench api bank amount mapping", () => {
     });
   });
 
-  test("builds a pane-scoped search query from any pane search", () => {
+  test("builds one zone search query", () => {
     const state = createEmptyWorkbenchZoneDisplayState();
-    state.activePaneId = "invoice";
-    state.searchQueryByPane.invoice = "花";
+    state.searchQuery = "花";
 
     expect(buildWorkbenchServerPageQuery(state)).toEqual({
-      searchByPane: { invoice: "花" },
+      search: "花",
     });
   });
 
@@ -694,8 +686,7 @@ describe("workbench api bank amount mapping", () => {
 
   test("keeps collapsed no-OA bank groups searchable when the hit is inside collapsed no-OA bank detail rows", () => {
     const state = createEmptyWorkbenchZoneDisplayState();
-    state.activePaneId = "bank";
-    state.searchQueryByPane.bank = "企业网银年费";
+    state.searchQuery = "企业网银年费";
 
     const displayGroups = buildWorkbenchDisplayGroups(
       [
@@ -781,12 +772,11 @@ describe("workbench api bank amount mapping", () => {
   });
 
   test.each(workbenchPanes)(
-    "keeps formal relation context only for groups matching the searched %s pane",
+    "keeps full relation context for every group whose %s fixture has a zone-wide hit",
     (activePaneId) => {
       const groups = createContextSearchGroups(activePaneId);
       const state = createEmptyWorkbenchZoneDisplayState();
-      state.activePaneId = activePaneId;
-      state.searchQueryByPane[activePaneId] = "张三";
+      state.searchQuery = "张三";
 
       const displayGroups = buildWorkbenchDisplayGroups(groups, state);
       const displayIds = displayGroups.map((group) => group.id);
@@ -794,6 +784,7 @@ describe("workbench api bank amount mapping", () => {
 
       expect(displayIds).toEqual([
         `${activePaneId}-anchor`,
+        ...supplementPanes.map((paneId) => `${paneId}-supplement`),
         "multi-pane-hit",
       ]);
       expect(displayIds.filter((id) => id === "multi-pane-hit")).toHaveLength(1);
@@ -809,14 +800,13 @@ describe("workbench api bank amount mapping", () => {
     },
   );
 
-  test("keeps pane search state isolated when only invoice query is set", () => {
-    const state = createEmptyWorkbenchZoneDisplayState();
-    state.activePaneId = "invoice";
-    state.searchQueryByPane.invoice = "26532000";
+  test("keeps the zone search query as one explicit state value", () => {
+    const pairedState = createEmptyWorkbenchZoneDisplayState();
+    const unpairedState = createEmptyWorkbenchZoneDisplayState();
+    pairedState.searchQuery = "26532000";
 
-    expect(state.searchQueryByPane.invoice).toBe("26532000");
-    expect(state.searchQueryByPane.oa).toBe("");
-    expect(state.searchQueryByPane.bank).toBe("");
+    expect(pairedState.searchQuery).toBe("26532000");
+    expect(unpairedState.searchQuery).toBe("");
   });
 
   test("intersects another pane search query with active pane row filters", () => {
@@ -843,7 +833,7 @@ describe("workbench api bank amount mapping", () => {
     state.filtersByPaneAndColumn.bank = {
       direction: ["支出"],
     };
-    state.searchQueryByPane.invoice = "张三";
+    state.searchQuery = "张三";
 
     const displayGroups = buildWorkbenchDisplayGroups(groups, state);
 

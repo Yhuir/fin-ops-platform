@@ -66,9 +66,7 @@ describe("Workbench pane display model", () => {
       },
     ];
     const state = createEmptyWorkbenchZoneDisplayState();
-    state.activePaneId = "oa";
-    state.openSearchPaneId = "oa";
-    state.searchQueryByPane.oa = "赵华";
+    state.searchQuery = "赵华";
 
     const displayGroups = buildWorkbenchDisplayGroups(groups, state);
     const paneRows = buildWorkbenchPaneRows(displayGroups);
@@ -212,60 +210,49 @@ describe("Workbench pane display model", () => {
     ]);
   });
 
-  test("searches while typing and only clears pane-local search from the inner clear action", async () => {
+  test("searches a whole zone while typing and keeps the paired zone query independent", async () => {
     installMockApiFetch();
     renderWorkbenchPage();
     await screen.findByText("陈涛", {}, { timeout: 3_000 });
 
     const unpairedZone = screen.getByTestId("zone-unpaired");
-    const openOaPane = within(unpairedZone).getByTestId("pane-oa");
-    const openBankPane = within(unpairedZone).getByTestId("pane-bank");
-    const openInvoicePane = within(unpairedZone).getByTestId("pane-invoice");
+    const pairedZone = screen.getByTestId("zone-paired");
+    const unpairedSearch = within(unpairedZone).getByRole("searchbox", { name: "搜索未配对区域" });
+    const pairedSearch = within(pairedZone).getByRole("searchbox", { name: "搜索已配对区域" });
 
-    fireEvent.click(within(openOaPane).getByRole("button", { name: "搜索 OA" }));
-
-    const oaSearchInput = within(openOaPane).getByRole("searchbox", { name: "搜索 OA" });
-    expect(oaSearchInput.closest(".pane-search-popover")).not.toBeNull();
-    expect(within(openOaPane).getByRole("button", { name: "收起搜索 OA" })).toHaveClass("pane-search-toggle-btn", "pane-search-toggle-btn--header-control");
-    fireEvent.change(oaSearchInput, { target: { value: "陈涛" } });
+    expect(within(unpairedZone).queryByRole("searchbox", { name: "搜索 OA" })).not.toBeInTheDocument();
+    fireEvent.change(unpairedSearch, { target: { value: "陈涛" } });
 
     await waitFor(() => {
       expect(within(unpairedZone).queryByTestId("candidate-group-unpaired-row:oa-o-202603-002")).not.toBeInTheDocument();
     });
     expect(within(unpairedZone).getAllByText((content) => content.includes("智能工厂设备商"))).toHaveLength(1);
     expect(within(unpairedZone).queryByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).not.toBeInTheDocument();
-    expect(oaSearchInput.closest(".pane-search-field")).not.toBeNull();
-    expect(within(openOaPane).getByRole("button", { name: "收起搜索 OA" })).toHaveClass("pane-search-toggle-btn", "pane-search-toggle-btn--header-control");
-    expect(within(openOaPane).getByRole("button", { name: "清空搜索 OA" })).toBeInTheDocument();
+    expect(pairedSearch).toHaveValue("");
+    expect(within(unpairedZone).getAllByText("陈涛").some((node) => node.classList.contains("search-hit"))).toBe(true);
 
-    fireEvent.click(within(openOaPane).getByRole("button", { name: "收起搜索 OA" }));
-    expect(within(openOaPane).queryByRole("searchbox", { name: "搜索 OA" })).not.toBeInTheDocument();
-    expect(within(openOaPane).getByRole("button", { name: "搜索 OA，当前关键词 陈涛" })).toHaveTextContent("陈涛");
-
-    fireEvent.click(within(openOaPane).getByRole("button", { name: "搜索 OA，当前关键词 陈涛" }));
-    const reopenedOaSearchInput = within(openOaPane).getByRole("searchbox", { name: "搜索 OA" });
-    expect(reopenedOaSearchInput).toBeInTheDocument();
-    expect(within(openOaPane).getByRole("button", { name: "收起搜索 OA" })).toBeInTheDocument();
-
-    fireEvent.mouseDown(document.body);
-    expect(within(openOaPane).queryByRole("searchbox", { name: "搜索 OA" })).not.toBeInTheDocument();
-    expect(within(openOaPane).getByRole("button", { name: "搜索 OA，当前关键词 陈涛" })).toHaveTextContent("陈涛");
-
-    fireEvent.click(within(openBankPane).getByRole("button", { name: "搜索 银行流水" }));
-    expect(within(openBankPane).getByRole("searchbox", { name: "搜索 银行流水" })).toBeInTheDocument();
-    expect(within(openOaPane).getByRole("button", { name: "搜索 OA，当前关键词 陈涛" })).toHaveTextContent("陈涛");
-
-    fireEvent.click(within(openOaPane).getByRole("button", { name: "搜索 OA，当前关键词 陈涛" }));
-    expect(within(openOaPane).getByRole("searchbox", { name: "搜索 OA" })).toBeInTheDocument();
-    fireEvent.click(within(openOaPane).getByRole("button", { name: "清空搜索 OA" }));
+    fireEvent.click(within(unpairedZone).getByRole("button", { name: "清空搜索" }));
     await waitFor(() => {
       expect(within(unpairedZone).getByTestId("candidate-group-unpaired-row:oa-o-202603-002")).toBeInTheDocument();
     });
-    expect(within(openOaPane).getByRole("searchbox", { name: "搜索 OA" })).toHaveValue("");
-    expect(within(openOaPane).getByRole("button", { name: "收起搜索 OA" })).toBeInTheDocument();
+    expect(unpairedSearch).toHaveValue("");
+  });
 
-    fireEvent.mouseDown(document.body);
-    expect(within(openOaPane).getByRole("button", { name: "搜索 OA" })).toBeInTheDocument();
+  test("runs a zone search entered before the initial page load finishes", async () => {
+    const fetchMock = installMockApiFetch({ workbenchLoadDelayMs: 600 });
+    renderWorkbenchPage();
+
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
+    const unpairedSearch = within(unpairedZone).getByRole("searchbox", { name: "搜索未配对区域" });
+    fireEvent.change(unpairedSearch, { target: { value: "智能工厂" } });
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([input]) => {
+        const url = new URL(String(input), "http://localhost");
+        const unpairedQuery = JSON.parse(url.searchParams.get("unpaired_query") ?? "{}") as Record<string, unknown>;
+        return url.pathname === "/api/workbench" && unpairedQuery.search === "智能工厂";
+      })).toBe(true);
+    }, { timeout: 3_000 });
   });
 
   test("supports multi-select column filtering with select-all and clear actions", async () => {
@@ -313,8 +300,7 @@ describe("Workbench pane display model", () => {
       expect(within(unpairedZone).getByRole("row", { name: /尾差设备商.*建设银行 1138/ })).toBeInTheDocument();
     }, { timeout: 3000 });
 
-    fireEvent.click(within(openBankPane).getByRole("button", { name: "搜索 银行流水" }));
-    fireEvent.change(within(openBankPane).getByRole("searchbox", { name: "搜索 银行流水" }), {
+    fireEvent.change(within(unpairedZone).getByRole("searchbox", { name: "搜索未配对区域" }), {
       target: { value: "智能工厂" },
     });
     fireEvent.click(within(openBankPane).getByRole("button", { name: "筛选 金额" }));
@@ -329,8 +315,8 @@ describe("Workbench pane display model", () => {
         const url = new URL(String(input), "http://localhost");
         const unpairedQuery = JSON.parse(url.searchParams.get("unpaired_query") ?? "{}") as Record<string, unknown>;
         return url.pathname === "/api/workbench"
-          && JSON.stringify(unpairedQuery.search_by_pane) === JSON.stringify({ bank: "智能工厂" })
-          && !("search" in unpairedQuery)
+          && unpairedQuery.search === "智能工厂"
+          && !("search_by_pane" in unpairedQuery)
           && !("search_mode" in unpairedQuery);
       })).toBe(true);
     }, { timeout: 3000 });
@@ -419,7 +405,7 @@ describe("Workbench pane display model", () => {
     ];
     const state = createEmptyWorkbenchZoneDisplayState();
     state.activePaneId = "bank";
-    state.searchQueryByPane.bank = "建行";
+    state.searchQuery = "建行";
     state.filtersByPaneAndColumn.bank = {
       amount: ["支出"],
     };

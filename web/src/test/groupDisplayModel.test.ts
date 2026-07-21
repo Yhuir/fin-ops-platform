@@ -4,6 +4,7 @@ import {
   buildWorkbenchDisplayGroups,
   createEmptyWorkbenchZoneDisplayState,
   mergeWorkbenchGroupsById,
+  workbenchRowMatchesUnifiedSearch,
 } from "../features/workbench/groupDisplayModel";
 import type { WorkbenchRelationGroup, WorkbenchRecord } from "../features/workbench/types";
 
@@ -193,11 +194,7 @@ describe("groupDisplayModel time filter", () => {
     const state = {
       ...createEmptyWorkbenchZoneDisplayState(),
       activePaneId: "bank",
-      searchQueryByPane: {
-        oa: "",
-        bank: "供应商A",
-        invoice: "",
-      },
+      searchQuery: "供应商A",
       sortByPane: {
         oa: null,
         bank: "desc",
@@ -206,9 +203,33 @@ describe("groupDisplayModel time filter", () => {
     } as ReturnType<typeof createEmptyWorkbenchZoneDisplayState>;
 
     expect(buildWorkbenchServerPageQuery(state)).toEqual({
-      searchByPane: { bank: "供应商A" },
+      search: "供应商A",
       sort: "bank:desc",
     });
+  });
+
+  test("matches structured bank note labels and values shown in the grid", () => {
+    const row = {
+      ...buildBankRow("bank-searchable-text", "2026-07-21 11:30"),
+      bankTextFields: [{ label: "客户附言", value: "专项服务费" }],
+      tableValues: {
+        transactionTime: "2026-07-21 11:30",
+        paymentAccount: "建设银行 8106",
+      },
+    };
+
+    expect(workbenchRowMatchesUnifiedSearch(row, "客户附言")).toBe(true);
+    expect(workbenchRowMatchesUnifiedSearch(row, "专项服务费")).toBe(true);
+    expect(workbenchRowMatchesUnifiedSearch(row, "建行 8106")).toBe(true);
+  });
+
+  test("matches the rendered invoice source label", () => {
+    const row = {
+      ...buildInvoiceRow("invoice-searchable-source", "100.00"),
+      sourceKind: "oa_attachment_invoice" as const,
+    };
+
+    expect(workbenchRowMatchesUnifiedSearch(row, "OA附件")).toBe(true);
   });
 
   test("filters bank groups by year and month when bank pane is active", () => {

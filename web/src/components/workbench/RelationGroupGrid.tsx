@@ -15,7 +15,7 @@ import {
   collectWorkbenchFilterOptions,
   collectWorkbenchTimeFilterYears,
   createEmptyWorkbenchZoneDisplayState,
-  resolveWorkbenchLinkedSearchQuery,
+  workbenchRowMatchesUnifiedSearch,
   type WorkbenchPaneTimeFilter as WorkbenchPaneTimeFilterState,
   type WorkbenchZoneDisplayState,
 } from "../../features/workbench/groupDisplayModel";
@@ -32,7 +32,6 @@ import type { WorkbenchInlineAction } from "./RowActions";
 import type { WorkbenchPane } from "./ResizableTriPane";
 import RelationGroupCell from "./RelationGroupCell";
 import WorkbenchColumnFilterMenu from "./WorkbenchColumnFilterMenu";
-import WorkbenchPaneSearch from "./WorkbenchPaneSearch";
 import WorkbenchPaneTimeFilter from "./WorkbenchPaneTimeFilter";
 import type { WorkbenchColumnDropPosition } from "../../features/workbench/columnLayout";
 
@@ -58,10 +57,6 @@ type RelationGroupGridProps = {
   onOpenDetail: (row: WorkbenchRecord) => void;
   onRowAction: (row: WorkbenchRecord, action: WorkbenchInlineAction) => void;
   onEnsureGroupDetail?: (zoneId: "paired" | "unpaired", groupId: string) => Promise<void>;
-  onTogglePaneSearch?: (zoneId: "paired" | "unpaired", paneId: "oa" | "bank" | "invoice") => void;
-  onClosePaneSearch?: (zoneId: "paired" | "unpaired", paneId: "oa" | "bank" | "invoice") => void;
-  onClearPaneSearch?: (zoneId: "paired" | "unpaired", paneId: "oa" | "bank" | "invoice") => void;
-  onPaneSearchQueryChange?: (zoneId: "paired" | "unpaired", paneId: "oa" | "bank" | "invoice", query: string) => void;
   onColumnFilterChange?: (
     zoneId: "paired" | "unpaired",
     paneId: "oa" | "bank" | "invoice",
@@ -166,10 +161,6 @@ function RelationGroupGrid({
   onOpenDetail,
   onRowAction,
   onEnsureGroupDetail,
-  onTogglePaneSearch = () => undefined,
-  onClosePaneSearch = () => undefined,
-  onClearPaneSearch = () => undefined,
-  onPaneSearchQueryChange = () => undefined,
   onColumnFilterChange = () => undefined,
   onTogglePaneSort = () => undefined,
   onPaneTimeFilterChange = () => undefined,
@@ -297,8 +288,6 @@ function RelationGroupGrid({
       invoice: collectWorkbenchTimeFilterYears(filterSourceGroups, "invoice"),
     } satisfies Record<WorkbenchRecordType, string[]>;
   }, [groups, sourceGroups]);
-
-  const linkedSearchQuery = useMemo(() => resolveWorkbenchLinkedSearchQuery(displayState), [displayState]);
 
   const handleToggleFilterMenu = useCallback((paneId: WorkbenchRecordType, columnKey: string) => {
     setOpenFilterMenu((current) => (
@@ -499,6 +488,20 @@ function RelationGroupGrid({
         };
         const displaySegments = buildWorkbenchGroupDisplaySegments(group);
         const segmentCount = displaySegments?.length ?? 0;
+        const hiddenSearchMatch = Boolean(displayState.searchQuery.trim()) && !panes.some((pane) => {
+          const paneId = pane.id as WorkbenchRecordType;
+          let visibleRows = group.rows[paneId];
+          if (displaySegments && isSourceSegmentedPane(paneId, displaySegments)) {
+            visibleRows = displaySegments.flatMap((segment) => segment.rows[paneId]);
+          } else if (!displaySegments) {
+            const collapsedRows = group.collapsedRows?.[paneId] ?? [];
+            const collapseKey = `${group.id}:${paneId}`;
+            if (group.displayMode === "collapsed_summary" && expandedPaneGroups.has(collapseKey)) {
+              visibleRows = collapsedRows;
+            }
+          }
+          return visibleRows.some((row) => workbenchRowMatchesUnifiedSearch(row, displayState.searchQuery));
+        });
 
         if (displaySegments) {
           return (
@@ -528,6 +531,9 @@ function RelationGroupGrid({
                           gridRow: segmentIndex + 1,
                         }}
                       >
+                        {hiddenSearchMatch && paneIndex === 0 && segmentIndex === 0 ? (
+                          <span className="candidate-group-hidden-search-match" role="status">隐藏内容命中</span>
+                        ) : null}
                         <RelationGroupCell
                           actionMode={actionMode}
                           columnGridStyle={paneGridStyleByPane[paneId]}
@@ -535,7 +541,7 @@ function RelationGroupGrid({
                           getRowState={getRowState}
                           highlightedRowId={highlightedRowId}
                           leadingControl={segmentIndex === 0 ? renderCollapseControls(paneId) : null}
-                          searchQuery={linkedSearchQuery || displayState.searchQueryByPane[paneId]}
+                          searchQuery={displayState.searchQuery}
                           onOpenDetail={onOpenDetail}
                           onRowAction={onRowAction}
                           onSelectRow={onSelectRow}
@@ -567,6 +573,9 @@ function RelationGroupGrid({
                       gridRow: `1 / span ${segmentCount}`,
                     }}
                   >
+                    {hiddenSearchMatch && paneIndex === 0 ? (
+                      <span className="candidate-group-hidden-search-match" role="status">隐藏内容命中</span>
+                    ) : null}
                     <RelationGroupCell
                       actionMode={actionMode}
                       columnGridStyle={paneGridStyleByPane[paneId]}
@@ -574,7 +583,7 @@ function RelationGroupGrid({
                       getRowState={getRowState}
                       highlightedRowId={highlightedRowId}
                       leadingControl={renderCollapseControls(paneId)}
-                      searchQuery={linkedSearchQuery || displayState.searchQueryByPane[paneId]}
+                      searchQuery={displayState.searchQuery}
                       onOpenDetail={onOpenDetail}
                       onRowAction={onRowAction}
                       onSelectRow={onSelectRow}
@@ -646,6 +655,9 @@ function RelationGroupGrid({
               return (
                 <Fragment key={`${group.id}-${pane.id}`}>
                   <div className="candidate-group-pane-slot candidate-group-pane-slot-sheet">
+                    {hiddenSearchMatch && paneIndex === 0 ? (
+                      <span className="candidate-group-hidden-search-match" role="status">隐藏内容命中</span>
+                    ) : null}
                     {requirementLabel ? (
                       <span
                         aria-label={requirementLabel}
@@ -662,7 +674,7 @@ function RelationGroupGrid({
                       getRowState={getRowState}
                       highlightedRowId={highlightedRowId}
                       leadingControl={renderCollapseControls(paneId)}
-                      searchQuery={linkedSearchQuery || displayState.searchQueryByPane[paneId]}
+                      searchQuery={displayState.searchQuery}
                       onOpenDetail={onOpenDetail}
                       onRowAction={onRowAction}
                       onSelectRow={onSelectRow}
@@ -719,7 +731,7 @@ function RelationGroupGrid({
     groups,
     highlightedRowId,
     loadingPaneGroups,
-    linkedSearchQuery,
+    displayState.searchQuery,
     onEnsureGroupDetail,
     onOpenDetail,
     onRowAction,
@@ -771,16 +783,6 @@ function RelationGroupGrid({
                       );
                     })()
                   ) : null}
-                  <WorkbenchPaneSearch
-                    open={displayState.openSearchPaneId === pane.id}
-                    appliedValue={displayState.searchQueryByPane[pane.id]}
-                    draftValue={displayState.draftSearchQueryByPane[pane.id]}
-                    paneTitle={pane.title}
-                    onChange={(query) => onPaneSearchQueryChange(zoneId, pane.id, query)}
-                    onClear={() => onClearPaneSearch(zoneId, pane.id)}
-                    onClose={() => onClosePaneSearch(zoneId, pane.id)}
-                    onToggle={() => onTogglePaneSearch(zoneId, pane.id)}
-                  />
                 </div>
               </div>
               <div

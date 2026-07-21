@@ -2336,8 +2336,6 @@ function workbenchGroupsUrl(
     page_size: String(pageSize),
   });
   const search = String(query.search ?? "").trim();
-  const searchMode = query.searchMode === "linked_context" ? "linked_context" : "";
-  const searchByPane = stableJsonQueryParam(query.searchByPane);
   const status = String(query.status ?? "").trim();
   const sourceKind = String(query.sourceKind ?? "").trim();
   const sort = String(query.sort ?? "").trim();
@@ -2346,12 +2344,6 @@ function workbenchGroupsUrl(
   const timeFilters = stableJsonQueryParam(query.timeFilterByPane);
   if (search) {
     params.set("search", search);
-  }
-  if (searchMode) {
-    params.set("search_mode", searchMode);
-  }
-  if (searchByPane) {
-    params.set("search_by_pane", searchByPane);
   }
   if (status) {
     params.set("status", status);
@@ -2384,8 +2376,6 @@ function workbenchInitialZoneQuery(query: WorkbenchGroupsPageQuery = {}) {
   const sourceKind = String(query.sourceKind ?? "").trim();
   const sort = String(query.sort ?? "").trim();
   if (search) payload.search = search;
-  if (query.searchMode === "linked_context") payload.search_mode = "linked_context";
-  if (query.searchByPane && Object.keys(query.searchByPane).length > 0) payload.search_by_pane = query.searchByPane;
   if (status) payload.status = status;
   if (sourceKind) payload.source_kind = sourceKind;
   if (sort) payload.sort = sort;

@@ -2,29 +2,16 @@ import { Info } from "lucide-react";
 import { memo, useState, type FocusEvent, type MouseEvent, type ReactNode, type TouchEvent } from "react";
 
 import { getWorkbenchColumns } from "../../features/workbench/tableConfig";
+import {
+  compactWorkbenchBankAccountLabel,
+  workbenchInvoiceFlowLabel,
+  workbenchInvoiceSourceLabel,
+} from "../../features/workbench/groupDisplayModel";
 import type { WorkbenchRecord, WorkbenchRecordType, WorkbenchSourceKind } from "../../features/workbench/types";
 import type { WorkbenchColumn } from "../../features/workbench/tableConfig";
 import type { WorkbenchRowState } from "../../hooks/useWorkbenchSelection";
-import BankAccountValue from "../BankAccountValue";
-import DirectionTag from "../DirectionTag";
+import { splitBankAccountLabel } from "../BankAccountValue";
 import RowActions, { type WorkbenchInlineAction } from "./RowActions";
-
-const COMPACT_BANK_NAME_BY_PREFIX: Record<string, string> = {
-  中国工商银行: "工行",
-  工商银行: "工行",
-  中国建设银行: "建行",
-  建设银行: "建行",
-  中国农业银行: "农行",
-  农业银行: "农行",
-  中国银行: "中行",
-  招商银行: "招行",
-  交通银行: "交行",
-  中国光大银行: "光大",
-  光大银行: "光大",
-  中国民生银行: "民生",
-  民生银行: "民生",
-  平安银行: "平安",
-};
 
 const HIDDEN_OA_PROJECT_TAGS = new Set(["多明细"]);
 
@@ -145,6 +132,7 @@ export default memo(WorkbenchRecordCard, (previousProps, nextProps) => (
   && previousProps.actionMode === nextProps.actionMode
   && previousProps.showActionColumn === nextProps.showActionColumn
   && previousProps.highlighted === nextProps.highlighted
+  && previousProps.searchQuery === nextProps.searchQuery
   && previousProps.sheetRowMode === nextProps.sheetRowMode
   && previousProps.showWorkflowActions === nextProps.showWorkflowActions
   && previousProps.canMutateData === nextProps.canMutateData
@@ -214,15 +202,15 @@ function renderCellValue(
   searchQuery = "",
 ) {
   if (column.kind === "status") {
-    return <span className="status-tag">{value}</span>;
+    return <span className="status-tag">{highlightSearchText(value, searchQuery)}</span>;
   }
 
   if (column.className?.includes("column-datetime-compact")) {
-    return renderDateTimeValue(value);
+    return renderDateTimeValue(value, searchQuery);
   }
 
   if (paneId === "oa" && column.key === "applicant") {
-    return renderOaApplicantValue(value, row.tableValues.applicationTime ?? "", showInlineDetail, onOpenDetail);
+    return renderOaApplicantValue(value, row.tableValues.applicationTime ?? "", showInlineDetail, onOpenDetail, searchQuery);
   }
 
   if (paneId === "oa" && column.key === "projectName") {
@@ -236,7 +224,7 @@ function renderCellValue(
   }
 
   if (paneId === "oa" && column.kind === "money") {
-    return renderOaMoneyValue(value);
+    return renderOaMoneyValue(value, searchQuery);
   }
 
   if (paneId === "bank" && column.kind === "money") {
@@ -248,6 +236,7 @@ function renderCellValue(
       row.categoryLabel ?? "",
       row,
       zoneId,
+      searchQuery,
     );
   }
 
@@ -258,6 +247,7 @@ function renderCellValue(
       false,
       onOpenDetail,
       row.bankTextFields,
+      searchQuery,
     );
   }
 
@@ -268,19 +258,20 @@ function renderCellValue(
       row.tableValues.invoiceRelationStatus ?? "",
       showInlineDetail,
       onOpenDetail,
+      searchQuery,
     );
   }
 
   if (paneId === "invoice" && column.key === "sellerName") {
-    return renderInvoicePartyValue(value, row.tableValues.sellerTaxId ?? "", row.tableValues.invoiceType ?? "", row.sourceKind);
+    return renderInvoicePartyValue(value, row.tableValues.sellerTaxId ?? "", row.tableValues.invoiceType ?? "", row.sourceKind, searchQuery);
   }
 
   if (paneId === "invoice" && column.key === "buyerName") {
-    return renderInvoicePartyValue(value, row.tableValues.buyerTaxId ?? "", "");
+    return renderInvoicePartyValue(value, row.tableValues.buyerTaxId ?? "", "", undefined, searchQuery);
   }
 
   if (paneId === "invoice" && column.key === "issueDate") {
-    return renderInvoiceIdentityValue(row.tableValues.invoiceNo ?? "", value, showInlineDetail, onOpenDetail);
+    return renderInvoiceIdentityValue(row.tableValues.invoiceNo ?? "", value, showInlineDetail, onOpenDetail, searchQuery);
   }
 
   if (paneId === "invoice" && column.key === "grossAmount") {
@@ -289,6 +280,7 @@ function renderCellValue(
       row.tableValues.amount ?? "",
       row.tableValues.taxRate ?? "",
       row.tableValues.taxAmount ?? "",
+      searchQuery,
     );
   }
 
@@ -300,13 +292,14 @@ function renderOaApplicantValue(
   applicationTime: string,
   showInlineDetail: boolean,
   onOpenDetail: () => void,
+  searchQuery: string,
 ) {
   const hasApplicationTime = applicationTime !== "--" && applicationTime !== "—" && applicationTime !== "";
 
   return (
     <span className="compound-cell-value">
       <span className="compound-cell-primary workbench-oa-applicant-line">
-        <span className="cell-text-value cell-text-value-full">{value}</span>
+        <span className="cell-text-value cell-text-value-full">{highlightSearchText(value, searchQuery)}</span>
         {showInlineDetail ? (
           <button
             aria-label={`查看OA ${value} 详情`}
@@ -324,7 +317,7 @@ function renderOaApplicantValue(
       </span>
       {hasApplicationTime ? (
         <span className="compound-cell-secondary">
-          {renderInlineDateTimeTag(applicationTime)}
+          {renderInlineDateTimeTag(applicationTime, searchQuery)}
         </span>
       ) : null}
     </span>
@@ -337,6 +330,7 @@ function renderBankNoteValue(
   showInlineDetail: boolean,
   onOpenDetail: () => void,
   bankTextFields: WorkbenchRecord["bankTextFields"] = [],
+  searchQuery = "",
 ) {
   const internalTransferRemark = parseInternalTransferRemark(value, relationStatus);
   const visibleBankTextFields = (bankTextFields ?? []).filter((field) => field.label.trim() && field.value.trim());
@@ -347,23 +341,23 @@ function renderBankNoteValue(
         <span className="compound-cell-primary bank-note-field-stack">
           {visibleBankTextFields.map((field) => (
             <span key={field.label} className="cell-text-value cell-text-value-full bank-note-field-line">
-              {`${field.label}：${field.value}`}
+              {highlightSearchText(`${field.label}：${field.value}`, searchQuery)}
             </span>
           ))}
         </span>
       ) : internalTransferRemark ? (
         <>
           <span className="compound-cell-primary">
-            <span className="inline-meta-tag">{internalTransferRemark.accountLabel}</span>
+            <span className="inline-meta-tag">{highlightSearchText(internalTransferRemark.accountLabel, searchQuery)}</span>
           </span>
           {internalTransferRemark.note ? (
             <span className="compound-cell-secondary">
-              <span className="cell-text-value cell-text-value-full">{internalTransferRemark.note}</span>
+              <span className="cell-text-value cell-text-value-full">{highlightSearchText(internalTransferRemark.note, searchQuery)}</span>
             </span>
           ) : null}
         </>
       ) : (
-        <span className="compound-cell-primary cell-text-value cell-text-value-full">{value}</span>
+        <span className="compound-cell-primary cell-text-value cell-text-value-full">{highlightSearchText(value, searchQuery)}</span>
       )}
       {showInlineDetail ? (
         <span className="inline-cell-action-row">
@@ -414,7 +408,7 @@ function buildTextValueClassName(column: WorkbenchColumn) {
   return ["cell-text-value", "cell-text-value-full"].join(" ");
 }
 
-function renderDateTimeValue(value: string) {
+function renderDateTimeValue(value: string, searchQuery = "") {
   if (value === "--" || value === "—") {
     return value;
   }
@@ -423,13 +417,13 @@ function renderDateTimeValue(value: string) {
   const timePart = rest.join(" ").trim();
 
   if (!timePart) {
-    return <span className="datetime-cell-value">{datePart}</span>;
+    return <span className="datetime-cell-value">{highlightSearchText(datePart, searchQuery)}</span>;
   }
 
   return (
     <span className="datetime-cell-value">
-      <span className="datetime-line">{datePart}</span>
-      <span className="datetime-line datetime-line-secondary">{timePart}</span>
+      <span className="datetime-line">{highlightSearchText(datePart, searchQuery)}</span>
+      <span className="datetime-line datetime-line-secondary">{highlightSearchText(timePart, searchQuery)}</span>
     </span>
   );
 }
@@ -442,6 +436,7 @@ function renderBankMoneyValue(
   categoryLabel: string,
   row: WorkbenchRecord,
   zoneId: "paired" | "unpaired",
+  searchQuery = "",
 ) {
   const hasValue = value !== "--" && value !== "—" && value !== "";
   const normalizedDirection = resolveDirectionForMoneyCell(columnKey, direction, hasValue);
@@ -453,20 +448,24 @@ function renderBankMoneyValue(
   return (
     <span className="money-cell-stack">
       <span className="money-cell-value">
-        <span>{hasValue ? value : "--"}</span>
+        <span>{highlightSearchText(hasValue ? value : "--", searchQuery)}</span>
         {columnKey === "amount" && zoneId === "paired" ? <BankAmountMismatchWarning row={row} /> : null}
       </span>
       {shouldShowDirectionTag || shouldShowAccount || shouldShowCategory ? (
         <span className="money-cell-meta-row">
-          {shouldShowDirectionTag ? <DirectionTag direction={normalizedDirection} /> : null}
+          {shouldShowDirectionTag ? (
+            <span className={`direction-tag direction-tag-${normalizedDirection === "收入" ? "inflow" : "outflow"}`}>
+              {highlightSearchText(normalizedDirection, searchQuery)}
+            </span>
+          ) : null}
           {shouldShowAccount ? (
             <span className="money-cell-account">
-              <BankAccountValue value={compactBankAccountLabel(paymentAccount)} variant="tag" />
+              {renderHighlightedBankAccount(compactWorkbenchBankAccountLabel(paymentAccount), searchQuery)}
             </span>
           ) : null}
           {shouldShowCategory ? (
             <span className="inline-meta-tag bank-category-tag bank-chip-auto-size" title={normalizedCategoryLabel}>
-              {normalizedCategoryLabel}
+              {highlightSearchText(normalizedCategoryLabel, searchQuery)}
             </span>
           ) : null}
         </span>
@@ -477,12 +476,13 @@ function renderBankMoneyValue(
 
 function renderOaMoneyValue(
   value: string,
+  searchQuery = "",
 ) {
   const hasValue = value !== "--" && value !== "—" && value !== "";
   return (
     <span className="money-cell-stack">
       <span className="money-cell-value">
-        <span>{hasValue ? value : "--"}</span>
+        <span>{highlightSearchText(hasValue ? value : "--", searchQuery)}</span>
       </span>
     </span>
   );
@@ -573,17 +573,17 @@ function formatMismatchAmount(value: string | undefined) {
   return `${sign}${formattedInteger}${decimalPart === undefined ? "" : `.${decimalPart}`}`;
 }
 
-function compactBankAccountLabel(value: string) {
-  const normalizedValue = value.replace(/\s+/g, " ").trim();
-  for (const [bankName, shortName] of Object.entries(COMPACT_BANK_NAME_BY_PREFIX)) {
-    if (normalizedValue === bankName) {
-      return shortName;
-    }
-    if (normalizedValue.startsWith(`${bankName} `)) {
-      return `${shortName}${normalizedValue.slice(bankName.length)}`;
-    }
+function renderHighlightedBankAccount(value: string, searchQuery: string) {
+  const parts = splitBankAccountLabel(value);
+  if (!parts) {
+    return <span className="bank-account-value bank-account-tag">{highlightSearchText(value, searchQuery)}</span>;
   }
-  return value;
+  return (
+    <span className="bank-account-value bank-account-tag">
+      <span className="bank-account-primary">{highlightSearchText(parts.primary, searchQuery)}</span>
+      <span className="bank-account-secondary">{highlightSearchText(parts.secondary, searchQuery)}</span>
+    </span>
+  );
 }
 
 function resolveDirectionForMoneyCell(columnKey: string, direction: string, hasValue: boolean) {
@@ -619,11 +619,11 @@ function renderOaProjectValue(
       <span className="compound-cell-primary cell-text-value cell-text-value-full">{highlightSearchText(projectName, searchQuery)}</span>
       {hasApplicationType || hasReconciliationStatus || visibleTags.length > 0 ? (
         <span className="compound-cell-secondary compound-cell-secondary-nowrap">
-          {hasApplicationType ? <span className="inline-meta-tag">{applicationType}</span> : null}
-          {hasReconciliationStatus ? <span className="status-tag">{reconciliationStatus}</span> : null}
+          {hasApplicationType ? <span className="inline-meta-tag">{highlightSearchText(applicationType, searchQuery)}</span> : null}
+          {hasReconciliationStatus ? <span className="status-tag">{highlightSearchText(reconciliationStatus, searchQuery)}</span> : null}
           {visibleTags.map((tag) => (
             <span key={tag} className="inline-meta-tag">
-              {tag}
+              {highlightSearchText(tag, searchQuery)}
             </span>
           ))}
         </span>
@@ -662,19 +662,53 @@ function normalizeOaProjectTags(tags: string[]) {
 }
 
 function highlightSearchText(value: string, query: string) {
-  const normalizedQuery = query.replace(/\s+/g, "").trim();
+  const normalizedQuery = query.trim().toLocaleLowerCase("zh-CN");
   if (!normalizedQuery) {
     return value;
   }
-  const matchIndex = value.toLowerCase().indexOf(normalizedQuery.toLowerCase());
-  if (matchIndex < 0) {
+  const normalizedValue = value.toLocaleLowerCase("zh-CN");
+  const queryParts = Array.from(new Set(normalizedQuery.split(/\s+/).filter(Boolean)))
+    .sort((left, right) => right.length - left.length);
+  const matches: Array<{ start: number; end: number }> = [];
+  let offset = 0;
+  while (offset < normalizedValue.length) {
+    let nextMatch: { start: number; end: number } | null = null;
+    for (const queryPart of queryParts) {
+      const start = normalizedValue.indexOf(queryPart, offset);
+      if (start < 0) {
+        continue;
+      }
+      const candidate = { start, end: start + queryPart.length };
+      if (!nextMatch || candidate.start < nextMatch.start || (
+        candidate.start === nextMatch.start && candidate.end > nextMatch.end
+      )) {
+        nextMatch = candidate;
+      }
+    }
+    if (!nextMatch) {
+      break;
+    }
+    matches.push(nextMatch);
+    offset = nextMatch.end;
+  }
+  if (matches.length === 0) {
     return value;
   }
+  let cursor = 0;
   return (
     <>
-      {value.slice(0, matchIndex)}
-      <span className="search-hit">{value.slice(matchIndex, matchIndex + normalizedQuery.length)}</span>
-      {value.slice(matchIndex + normalizedQuery.length)}
+      {matches.map((match, index) => {
+        const prefix = value.slice(cursor, match.start);
+        const hit = value.slice(match.start, match.end);
+        cursor = match.end;
+        return (
+          <span key={`${match.start}-${index}`}>
+            {prefix}
+            <mark className="search-hit">{hit}</mark>
+          </span>
+        );
+      })}
+      {value.slice(cursor)}
     </>
   );
 }
@@ -685,15 +719,15 @@ function renderBankCounterpartyValue(
   relationStatus: string,
   showInlineDetail: boolean,
   onOpenDetail: () => void,
+  searchQuery = "",
 ) {
   const hasTransactionTime = transactionTime !== "--" && transactionTime !== "—" && transactionTime !== "";
   const hasRelationStatus = relationStatus !== "--" && relationStatus !== "—" && relationStatus !== "";
-  const relationTag = hasRelationStatus ? renderBankRelationStatusTag(relationStatus) : null;
 
   return (
     <span className="compound-cell-value">
       <span className="compound-cell-primary bank-counterparty-primary">
-        <span className="cell-text-value cell-text-value-full">{counterparty}</span>
+        <span className="cell-text-value cell-text-value-full">{highlightSearchText(counterparty, searchQuery)}</span>
         {showInlineDetail ? (
           <button
             aria-label={`查看银行流水 ${counterparty} 详情`}
@@ -711,20 +745,20 @@ function renderBankCounterpartyValue(
       </span>
       {hasTransactionTime || hasRelationStatus ? (
         <span className="compound-cell-secondary compound-cell-secondary-nowrap">
-          {hasTransactionTime ? renderInlineDateTimeTag(transactionTime) : null}
-          {relationTag}
+          {hasTransactionTime ? renderInlineDateTimeTag(transactionTime, searchQuery) : null}
+          {hasRelationStatus ? renderBankRelationStatusTag(relationStatus, searchQuery) : null}
         </span>
       ) : null}
     </span>
   );
 }
 
-function renderBankRelationStatusTag(relationStatus: string) {
+function renderBankRelationStatusTag(relationStatus: string, searchQuery = "") {
   if (relationStatus === "已匹配：工资") {
     return (
       <span className="status-tag status-tag-split">
-        <span className="status-tag-line">已匹配：</span>
-        <span className="status-tag-line">工资</span>
+        <span className="status-tag-line">{highlightSearchText("已匹配：", searchQuery)}</span>
+        <span className="status-tag-line">{highlightSearchText("工资", searchQuery)}</span>
       </span>
     );
   }
@@ -732,48 +766,54 @@ function renderBankRelationStatusTag(relationStatus: string) {
   if (relationStatus === "已匹配：内部往来款") {
     return (
       <span className="status-tag status-tag-split">
-        <span className="status-tag-line">已匹配：</span>
-        <span className="status-tag-line">内部往来款</span>
+        <span className="status-tag-line">{highlightSearchText("已匹配：", searchQuery)}</span>
+        <span className="status-tag-line">{highlightSearchText("内部往来款", searchQuery)}</span>
       </span>
     );
   }
 
-  return <span className="status-tag">{relationStatus}</span>;
+  return <span className="status-tag">{highlightSearchText(relationStatus, searchQuery)}</span>;
 }
 
-function renderInlineDateTimeTag(value: string) {
+function renderInlineDateTimeTag(value: string, searchQuery = "") {
   const [datePart, ...rest] = value.trim().split(/\s+/);
   const timePart = rest.join(" ").trim();
 
   if (!timePart) {
-    return <span className="inline-meta-tag inline-meta-tag-muted">{datePart}</span>;
+    return <span className="inline-meta-tag inline-meta-tag-muted">{highlightSearchText(datePart, searchQuery)}</span>;
   }
 
   return (
     <span className="inline-meta-tag inline-meta-tag-muted inline-meta-tag-datetime">
-      <span className="inline-meta-tag-datetime-date">{datePart}</span>
-      <span className="inline-meta-tag-datetime-time">{timePart}</span>
+      <span className="inline-meta-tag-datetime-date">{highlightSearchText(datePart, searchQuery)}</span>
+      <span className="inline-meta-tag-datetime-time">{highlightSearchText(timePart, searchQuery)}</span>
     </span>
   );
 }
 
-function renderInvoicePartyValue(value: string, taxId: string, invoiceType: string, sourceKind?: WorkbenchSourceKind) {
-  const flowLabel = resolveInvoiceFlowLabel(invoiceType);
-  const sourceLabel = flowLabel || sourceKind ? resolveInvoiceSourceLabel(sourceKind) : null;
+function renderInvoicePartyValue(
+  value: string,
+  taxId: string,
+  invoiceType: string,
+  sourceKind?: WorkbenchSourceKind,
+  searchQuery = "",
+) {
+  const flowLabel = workbenchInvoiceFlowLabel(invoiceType);
+  const sourceLabel = flowLabel || sourceKind ? workbenchInvoiceSourceLabel(sourceKind) : null;
   const hasTaxId = taxId !== "--" && taxId !== "—" && taxId !== "";
 
   return (
     <span className="compound-cell-value invoice-party-value">
       <span className="compound-cell-primary invoice-party-primary">
         <span className="invoice-party-text-stack">
-          <span className="cell-text-value cell-text-value-full">{value}</span>
-          {hasTaxId ? <span className="cell-text-value cell-text-value-full cell-subtext-value">{taxId}</span> : null}
+          <span className="cell-text-value cell-text-value-full">{highlightSearchText(value, searchQuery)}</span>
+          {hasTaxId ? <span className="cell-text-value cell-text-value-full cell-subtext-value">{highlightSearchText(taxId, searchQuery)}</span> : null}
           {flowLabel || sourceLabel ? (
             <span className="invoice-chip-row">
               {flowLabel ? (
-                <span className={`invoice-flow-tag invoice-flow-tag-${flowLabel === "销" ? "output" : "input"}`}>{flowLabel}</span>
+                <span className={`invoice-flow-tag invoice-flow-tag-${flowLabel === "销" ? "output" : "input"}`}>{highlightSearchText(flowLabel, searchQuery)}</span>
               ) : null}
-              {sourceLabel ? <span className="inline-meta-tag invoice-source-tag">{sourceLabel}</span> : null}
+              {sourceLabel ? <span className="inline-meta-tag invoice-source-tag">{highlightSearchText(sourceLabel, searchQuery)}</span> : null}
             </span>
           ) : null}
         </span>
@@ -782,7 +822,7 @@ function renderInvoicePartyValue(value: string, taxId: string, invoiceType: stri
   );
 }
 
-function renderInvoiceAmountValue(grossAmount: string, amount: string, taxRate: string, taxAmount: string) {
+function renderInvoiceAmountValue(grossAmount: string, amount: string, taxRate: string, taxAmount: string, searchQuery = "") {
   const hasAmount = amount !== "--" && amount !== "—" && amount !== "";
   const showTaxMeta =
     taxRate !== "--" &&
@@ -794,11 +834,11 @@ function renderInvoiceAmountValue(grossAmount: string, amount: string, taxRate: 
 
   return (
     <span className="compound-cell-value invoice-amount-value">
-      <span className="compound-cell-primary cell-text-value cell-text-value-full">{grossAmount}</span>
+      <span className="compound-cell-primary cell-text-value cell-text-value-full">{highlightSearchText(grossAmount, searchQuery)}</span>
       {hasAmount || showTaxMeta ? (
         <span className="compound-cell-secondary">
           <span className="cell-text-value cell-text-value-full cell-subtext-value">
-            {`${hasAmount ? amount : "--"}${showTaxMeta ? ` ${taxRate} (${taxAmount})` : ""}`}
+            {highlightSearchText(`${hasAmount ? amount : "--"}${showTaxMeta ? ` ${taxRate} (${taxAmount})` : ""}`, searchQuery)}
           </span>
         </span>
       ) : null}
@@ -811,6 +851,7 @@ function renderInvoiceIdentityValue(
   issueDate: string,
   showInlineDetail: boolean,
   onOpenDetail: () => void,
+  searchQuery = "",
 ) {
   const normalizedNo = normalizeDisplayText(invoiceNo);
   const hasIssueDate = issueDate !== "--" && issueDate !== "—" && issueDate !== "";
@@ -818,7 +859,7 @@ function renderInvoiceIdentityValue(
   return (
     <span className="compound-cell-value invoice-identity-value">
       <span className="compound-cell-primary invoice-identity-primary">
-        <span className="cell-text-value cell-text-value-full invoice-identity-no">{normalizedNo}</span>
+        <span className="cell-text-value cell-text-value-full invoice-identity-no">{highlightSearchText(normalizedNo, searchQuery)}</span>
         {showInlineDetail ? (
           <button
             aria-label={`查看发票 ${normalizedNo} 详情`}
@@ -836,7 +877,7 @@ function renderInvoiceIdentityValue(
       </span>
       {hasIssueDate ? (
         <span className="compound-cell-tertiary">
-          {renderInlineInvoiceDateTag(issueDate)}
+          {renderInlineInvoiceDateTag(issueDate, searchQuery)}
         </span>
       ) : null}
     </span>
@@ -847,48 +888,18 @@ function normalizeDisplayText(value: string) {
   return value && value !== "—" ? value : "--";
 }
 
-function renderInlineInvoiceDateTag(value: string) {
+function renderInlineInvoiceDateTag(value: string, searchQuery = "") {
   const [datePart, ...rest] = value.trim().split(/\s+/);
   const timePart = rest.join(" ").trim();
 
   if (!timePart) {
-    return <span className="inline-meta-tag inline-meta-tag-muted invoice-issue-date-tag">{datePart}</span>;
+    return <span className="inline-meta-tag inline-meta-tag-muted invoice-issue-date-tag">{highlightSearchText(datePart, searchQuery)}</span>;
   }
 
   return (
     <span className="inline-meta-tag inline-meta-tag-muted inline-meta-tag-datetime invoice-issue-date-tag">
-      <span className="inline-meta-tag-datetime-date">{datePart}</span>
-      <span className="inline-meta-tag-datetime-time">{timePart}</span>
+      <span className="inline-meta-tag-datetime-date">{highlightSearchText(datePart, searchQuery)}</span>
+      <span className="inline-meta-tag-datetime-time">{highlightSearchText(timePart, searchQuery)}</span>
     </span>
   );
-}
-
-function resolveInvoiceFlowLabel(invoiceType: string) {
-  const normalized = invoiceType.trim().toLowerCase();
-  if (normalized.includes("销") || normalized.includes("output") || normalized.includes("sale")) {
-    return "销";
-  }
-  if (normalized.includes("进") || normalized.includes("input") || normalized.includes("purchase")) {
-    return "进";
-  }
-  return null;
-}
-
-function resolveInvoiceSourceLabel(sourceKind: WorkbenchSourceKind | undefined) {
-  if (sourceKind === "etc_invoice_summary") {
-    return "ETC批次";
-  }
-  if (sourceKind === "etc_invoice") {
-    return "ETC";
-  }
-  if (sourceKind === "oa_attachment_invoice") {
-    return "OA附件";
-  }
-  if (sourceKind === "oa_attachment_payment_receipt") {
-    return "付款凭证";
-  }
-  if (sourceKind === "oa_attachment_unknown") {
-    return "未识别附件";
-  }
-  return "人工导入";
 }

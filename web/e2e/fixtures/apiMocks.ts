@@ -1253,6 +1253,123 @@ function countWorkbenchRows(groups: Array<{ oa_rows: unknown[]; bank_rows: unkno
   };
 }
 
+const workbenchSearchableRowFields = [
+  "label",
+  "status",
+  "category_label",
+  "counterparty_name",
+  "amount",
+  "amount_value",
+  "applicant",
+  "application_time",
+  "apply_time",
+  "project_name_display",
+  "project_name",
+  "apply_type",
+  "reason",
+  "trade_time",
+  "direction",
+  "debit_amount",
+  "credit_amount",
+  "payment_account_label",
+  "remark",
+  "repayment_date",
+  "seller_tax_no",
+  "seller_name",
+  "buyer_tax_no",
+  "buyer_name",
+  "invoice_code",
+  "invoice_no",
+  "digital_invoice_no",
+  "issue_date",
+  "tax_rate",
+  "tax_amount",
+  "total_with_tax",
+  "invoice_type",
+] as const;
+
+function workbenchGroupMatchesSearch(group: unknown, query: string) {
+  const normalizedQuery = query.trim().toLocaleLowerCase("zh-CN");
+  if (!normalizedQuery || !group || typeof group !== "object") {
+    return !normalizedQuery;
+  }
+  const payload = group as Record<string, unknown>;
+  const rows: unknown[] = [];
+  ["oa_rows", "bank_rows", "invoice_rows"].forEach((key) => {
+    const value = payload[key];
+    if (Array.isArray(value)) rows.push(...value);
+  });
+  const collapsedRows = payload.collapsed_rows;
+  if (collapsedRows && typeof collapsedRows === "object") {
+    Object.values(collapsedRows).forEach((value) => {
+      if (Array.isArray(value)) rows.push(...value);
+    });
+  }
+  return rows.some((row) => workbenchSearchableRowText(row).includes(normalizedQuery));
+}
+
+function workbenchSearchableRowText(row: unknown) {
+  if (!row || typeof row !== "object") {
+    return "";
+  }
+  const payload = row as Record<string, unknown>;
+  const values = workbenchSearchableRowFields.map((key) => payload[key]);
+  ["oa_bank_relation", "invoice_relation", "invoice_bank_relation", "relation"].forEach((key) => {
+    const relation = payload[key];
+    if (relation && typeof relation === "object") {
+      values.push((relation as Record<string, unknown>).label);
+    }
+  });
+  if (Array.isArray(payload.tags)) {
+    values.push(...payload.tags);
+  }
+  if (Array.isArray(payload.bank_text_fields)) {
+    payload.bank_text_fields.forEach((field) => {
+      if (field && typeof field === "object") {
+        values.push((field as Record<string, unknown>).label, (field as Record<string, unknown>).value);
+      }
+    });
+  }
+  values.push(...workbenchRowDisplaySearchAliases(payload));
+  return values
+    .filter((value): value is string | number => typeof value === "string" || typeof value === "number")
+    .join(" ")
+    .trim()
+    .toLocaleLowerCase("zh-CN");
+}
+
+function workbenchRowDisplaySearchAliases(row: Record<string, unknown>) {
+  const aliases: string[] = [];
+  if (row.type === "bank" && typeof row.payment_account_label === "string") {
+    const compactAccount = row.payment_account_label
+      .replace(/^中国工商银行|^工商银行/, "工行")
+      .replace(/^中国建设银行|^建设银行/, "建行")
+      .replace(/^中国农业银行|^农业银行/, "农行")
+      .replace(/^中国银行/, "中行")
+      .replace(/^招商银行/, "招行")
+      .replace(/^交通银行/, "交行")
+      .replace(/^中国光大银行|^光大银行/, "光大")
+      .replace(/^中国民生银行|^民生银行/, "民生")
+      .replace(/^平安银行/, "平安");
+    if (compactAccount !== row.payment_account_label) aliases.push(compactAccount);
+  }
+  if (row.type === "invoice") {
+    const invoiceType = String(row.invoice_type ?? "").toLocaleLowerCase("zh-CN");
+    if (invoiceType.includes("销") || invoiceType.includes("output") || invoiceType.includes("sale")) aliases.push("销");
+    if (invoiceType.includes("进") || invoiceType.includes("input") || invoiceType.includes("purchase")) aliases.push("进");
+    const sourceKind = String(row.source_kind ?? "");
+    const sourceLabels: Record<string, string> = {
+      etc_invoice_summary: "ETC批次",
+      etc_invoice: "ETC",
+      oa_attachment_invoice: "OA附件",
+      oa_attachment_payment_receipt: "付款凭证",
+      oa_attachment_unknown: "未识别附件",
+    };
+    if (invoiceType || sourceKind) aliases.push(sourceLabels[sourceKind] ?? "人工导入");
+  }
+  return aliases;
+}
+
 function workbenchSummary(
   relationConfirmed: boolean,
   exceptionApplied = false,
@@ -1321,7 +1438,7 @@ function workbenchGroupsPayload(
     );
   const normalizedSearch = search.trim().toLowerCase();
   const groups = normalizedSearch
-    ? allGroups.filter((group) => JSON.stringify(group).toLowerCase().includes(normalizedSearch))
+    ? allGroups.filter((group) => workbenchGroupMatchesSearch(group, normalizedSearch))
     : allGroups;
   const boundedPage = Math.max(1, page);
   const boundedPageSize = Math.max(1, pageSize);
@@ -1352,7 +1469,7 @@ function bankFlowRuleWorkbenchGroupsPayload(
   const allGroups = bankFlowRuleWorkbenchGroups(zone, relationConfirmed);
   const normalizedSearch = search.trim().toLowerCase();
   const groups = normalizedSearch
-    ? allGroups.filter((group) => JSON.stringify(group).toLowerCase().includes(normalizedSearch))
+    ? allGroups.filter((group) => workbenchGroupMatchesSearch(group, normalizedSearch))
     : allGroups;
   const boundedPage = Math.max(1, page);
   const boundedPageSize = Math.max(1, pageSize);

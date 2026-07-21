@@ -63,18 +63,22 @@ test.describe("workbench large dataset browser flow", () => {
     await expect(openZone.getByText("已加载 205 / 205")).toBeVisible();
     expect(api.count("GET /api/workbench/groups")).toBe(1);
 
-    await openZone.getByRole("button", { name: "搜索 银行流水" }).click();
-    await page.getByRole("searchbox", { name: "搜索 银行流水" }).fill("长列表供应商065");
+    const pairedSearch = page.getByRole("searchbox", { name: "搜索已配对区域" });
+    const unpairedSearch = openZone.getByRole("searchbox", { name: "搜索未配对区域" });
+    await expect(pairedSearch).toBeVisible();
+    await expect(unpairedSearch).toBeVisible();
+    await unpairedSearch.fill("长列表供应商065");
     const targetGroup = page.getByTestId("candidate-group-unpaired-row:bk-large-202603-065");
     await expect(targetGroup).toBeVisible();
-    await expect(openZone.getByText("已加载 200 / 205")).toBeVisible();
-    await expect(page.getByTestId("candidate-group-unpaired-row:oa-large-202603-001")).toBeVisible();
+    await expect(openZone.getByText("已加载 1 / 1")).toBeVisible();
+    await expect(page.getByTestId("candidate-group-unpaired-row:oa-large-202603-001")).toHaveCount(0);
+    await expect(targetGroup.locator("mark.search-hit", { hasText: "长列表供应商065" })).toBeVisible();
+    await expect(pairedSearch).toHaveValue("");
 
     await targetGroup.getByRole("row", { name: /长列表供应商065/ }).click();
     await expect(openZone.getByText("已选 1")).toBeVisible();
     await expect(openZone.getByText(/带入/)).toHaveCount(0);
-    await openZone.getByRole("button", { name: /搜索 银行流水，当前关键词 长列表供应商065/ }).click();
-    await openZone.getByRole("button", { name: "清空搜索 银行流水" }).click();
+    await openZone.getByRole("button", { name: "清空搜索" }).click();
     await expect(openZone.getByText("已加载 200 / 205")).toBeVisible();
     await page.getByTestId("candidate-group-unpaired-row:oa-large-202603-064").getByRole("row").click();
     await page.getByTestId("candidate-group-unpaired-row:iv-large-202603-066").getByRole("row").click();

@@ -298,8 +298,6 @@ export type WorkbenchGroupsSort = `${WorkbenchRecordType}:asc` | `${WorkbenchRec
 
 export type WorkbenchGroupsPageQuery = {
   search?: string;
-  searchMode?: "linked_context";
-  searchByPane?: Partial<Record<WorkbenchRecordType, string>>;
   status?: string;
   sourceKind?: string;
   sort?: WorkbenchGroupsSort;

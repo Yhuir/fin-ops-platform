@@ -6,9 +6,11 @@ from typing import Any, Callable, Iterable
 
 from fin_ops_platform.services.workbench_groups_page_cache import (
     normalize_workbench_group_detail_level,
-    normalize_workbench_group_search_mode,
     stable_json_value,
 )
+
+
+WORKBENCH_SEARCH_QUERY_MAX_LENGTH = 200
 
 
 class WorkbenchRowDetailApiRoutes:
@@ -116,8 +118,6 @@ class WorkbenchReadApiRoutes:
         status: str | None = None,
         source_kind: str | None = None,
         search: str | None = None,
-        search_mode: str | None = None,
-        search_by_pane: str | None = None,
         sort: str | None = None,
         detail_level: str | None = None,
         column_filters: str | None = None,
@@ -134,7 +134,7 @@ class WorkbenchReadApiRoutes:
         try:
             normalized_column_filters = self._normalize_json_query_param(column_filters, "column_filters")
             normalized_time_filters = self._normalize_json_query_param(time_filters, "time_filters")
-            normalized_search_by_pane = self._normalize_json_query_param(search_by_pane, "search_by_pane")
+            normalized_search = self._normalize_search_query(search, "search")
         except ValueError as error:
             return (
                 HTTPStatus.BAD_REQUEST,
@@ -146,9 +146,7 @@ class WorkbenchReadApiRoutes:
             "page_size": page_size,
             "status": status,
             "source_kind": source_kind,
-            "search": search,
-            "search_mode": normalize_workbench_group_search_mode(search_mode),
-            "search_by_pane": normalized_search_by_pane,
+            "search": normalized_search,
             "sort": sort,
             "detail_level": normalize_workbench_group_detail_level(detail_level),
             "column_filters": normalized_column_filters,
@@ -163,8 +161,8 @@ class WorkbenchReadApiRoutes:
     @staticmethod
     def _normalize_initial_query_param(value: str | None, name: str) -> dict[str, object]:
         normalized = WorkbenchReadApiRoutes._normalize_json_query_param(value, name)
-        allowed_string_fields = {"status", "source_kind", "search", "search_mode", "sort"}
-        allowed_object_fields = {"search_by_pane", "column_filters", "time_filters"}
+        allowed_string_fields = {"status", "source_kind", "search", "sort"}
+        allowed_object_fields = {"column_filters", "time_filters"}
         unknown_fields = sorted(set(normalized) - allowed_string_fields - allowed_object_fields)
         if unknown_fields:
             raise ValueError(f"{name} contains unsupported fields: {', '.join(unknown_fields)}.")
@@ -176,11 +174,18 @@ class WorkbenchReadApiRoutes:
             field_value = normalized.get(field_name)
             if field_value is not None and not isinstance(field_value, dict):
                 raise ValueError(f"{name}.{field_name} must be a JSON object.")
-        search_mode = str(normalized.get("search_mode") or "").strip().lower()
-        if search_mode and search_mode not in {"pane", "linked_context"}:
-            raise ValueError(f"{name}.search_mode must be pane or linked_context.")
-        if search_mode:
-            normalized["search_mode"] = search_mode
+        search = WorkbenchReadApiRoutes._normalize_search_query(normalized.get("search"), f"{name}.search")
+        if search:
+            normalized["search"] = search
+        else:
+            normalized.pop("search", None)
+        return normalized
+
+    @staticmethod
+    def _normalize_search_query(value: object, name: str) -> str:
+        normalized = str(value or "").strip()
+        if len(normalized) > WORKBENCH_SEARCH_QUERY_MAX_LENGTH:
+            raise ValueError(f"{name} must be at most {WORKBENCH_SEARCH_QUERY_MAX_LENGTH} characters.")
         return normalized
 
     @staticmethod

@@ -1,4 +1,6 @@
 import { memo } from "react";
+import { Button, SearchField, Spinner, Tooltip } from "@heroui/react";
+import { RefreshCw } from "lucide-react";
 
 import ResizableTriPane, { type WorkbenchPane } from "./ResizableTriPane";
 import { useResizablePanes } from "../../hooks/useResizablePanes";
@@ -65,10 +67,11 @@ type WorkbenchZoneProps = {
     onClick: () => void;
     tone?: "warning" | "danger";
   }>;
-  onTogglePaneSearch: (zoneId: "paired" | "unpaired", paneId: "oa" | "bank" | "invoice") => void;
-  onClosePaneSearch: (zoneId: "paired" | "unpaired", paneId: "oa" | "bank" | "invoice") => void;
-  onClearPaneSearch: (zoneId: "paired" | "unpaired", paneId: "oa" | "bank" | "invoice") => void;
-  onPaneSearchQueryChange: (zoneId: "paired" | "unpaired", paneId: "oa" | "bank" | "invoice", query: string) => void;
+  searchQuery: string;
+  searchPending?: boolean;
+  searchError?: string | null;
+  onSearchQueryChange: (query: string) => void;
+  onRetrySearch?: () => void;
   onColumnFilterChange: (
     zoneId: "paired" | "unpaired",
     paneId: "oa" | "bank" | "invoice",
@@ -125,10 +128,11 @@ function WorkbenchZone({
   loadingMore = false,
   onLoadMore,
   auxiliaryHeaderActions,
-  onTogglePaneSearch,
-  onClosePaneSearch,
-  onClearPaneSearch,
-  onPaneSearchQueryChange,
+  searchQuery,
+  searchPending = false,
+  searchError,
+  onSearchQueryChange,
+  onRetrySearch,
   onColumnFilterChange,
   onTogglePaneSort,
   onPaneTimeFilterChange = () => undefined,
@@ -149,14 +153,59 @@ function WorkbenchZone({
     >
       <header className={`zone-header ${tone}`}>
         <div className="zone-title-block">
-          <div className="zone-title">
-            {title}
-          </div>
-          {meta ? (
-            <div className="zone-meta">
-              {meta}
+          <div className="zone-heading-row">
+            <div className="zone-title-copy">
+              <div className="zone-title">
+                {title}
+              </div>
+              {meta ? (
+                <div className="zone-meta">
+                  {meta}
+                </div>
+              ) : null}
             </div>
-          ) : null}
+            <SearchField
+              aria-label={`搜索${zoneId === "paired" ? "已配对" : "未配对"}区域`}
+              className="workbench-zone-search"
+              fullWidth
+              isInvalid={Boolean(searchError)}
+              maxLength={200}
+              onChange={onSearchQueryChange}
+              value={searchQuery}
+            >
+              <SearchField.Group className="workbench-zone-search-group">
+                {searchPending ? (
+                  <Spinner aria-label="搜索中" className="workbench-zone-search-spinner" color="current" size="sm" />
+                ) : (
+                  <SearchField.SearchIcon className="workbench-zone-search-icon" />
+                )}
+                <SearchField.Input
+                  className="workbench-zone-search-input"
+                  placeholder="搜索 OA、流水、发票"
+                />
+                {searchError && onRetrySearch ? (
+                  <Tooltip delay={0}>
+                    <Button
+                      aria-label="重试搜索"
+                      className="workbench-zone-search-retry"
+                      isIconOnly
+                      onPress={onRetrySearch}
+                      size="sm"
+                      variant="tertiary"
+                    >
+                      <RefreshCw aria-hidden="true" size={14} strokeWidth={2.2} />
+                    </Button>
+                    <Tooltip.Content>{searchError}</Tooltip.Content>
+                  </Tooltip>
+                ) : (
+                  <SearchField.ClearButton aria-label="清空搜索" className="workbench-zone-search-clear" />
+                )}
+              </SearchField.Group>
+            </SearchField>
+          </div>
+          <span aria-live="polite" className="sr-only">
+            {searchPending ? "正在更新搜索结果" : searchError ? `搜索失败：${searchError}` : ""}
+          </span>
           {shouldShowSelectionToolbar ? (
             <div className="zone-selection-toolbar">
               <div className="zone-selection-summary">
@@ -300,17 +349,13 @@ function WorkbenchZone({
         groups={groups}
         highlightedRowId={highlightedRowId}
         invoiceInventory={invoiceInventory}
-        onClearPaneSearch={onClearPaneSearch}
-        onClosePaneSearch={onClosePaneSearch}
         onOpenDetail={onOpenDetail}
         onRowAction={onRowAction}
         onEnsureGroupDetail={onEnsureGroupDetail}
         onColumnFilterChange={onColumnFilterChange}
-        onPaneSearchQueryChange={onPaneSearchQueryChange}
         onPaneTimeFilterChange={onPaneTimeFilterChange}
         onReorderPaneColumns={onReorderPaneColumns}
         onSelectRow={onSelectRow}
-        onTogglePaneSearch={onTogglePaneSearch}
         onTogglePaneSort={onTogglePaneSort}
         panes={panes}
         sourceGroups={sourceGroups}

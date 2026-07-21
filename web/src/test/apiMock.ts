@@ -2153,35 +2153,29 @@ function countMockWorkbenchRows(groups: MockWorkbenchGroup[]) {
 function mockWorkbenchGroupMatchesQuery(
   group: MockWorkbenchGroup,
   search: string,
-  searchByPane: MockWorkbenchJsonParam,
   columnFilters: MockWorkbenchJsonParam,
   timeFilters: MockWorkbenchJsonParam,
 ) {
   const normalizedSearch = normalizeMockWorkbenchText(search);
   if (
     normalizedSearch
-    && Object.keys(searchByPane).length === 0
     && !normalizeMockWorkbenchText(mockWorkbenchSearchText(group)).includes(normalizedSearch)
   ) {
     return false;
   }
 
-  return mockWorkbenchGroupMatchesStructuredFilters(group, searchByPane, columnFilters, timeFilters);
+  return mockWorkbenchGroupMatchesStructuredFilters(group, columnFilters, timeFilters);
 }
 
 function mockWorkbenchGroupMatchesStructuredFilters(
   group: MockWorkbenchGroup,
-  searchByPane: MockWorkbenchJsonParam,
   columnFilters: MockWorkbenchJsonParam,
   timeFilters: MockWorkbenchJsonParam,
 ) {
   const activePanes = MOCK_WORKBENCH_PANES.filter((pane) => {
-    const paneSearch = normalizeMockWorkbenchText(searchByPane[pane]);
     const paneColumns = columnFilters[pane];
     const paneTime = timeFilters[pane];
     return (
-      Boolean(paneSearch)
-      ||
       (paneColumns && typeof paneColumns === "object" && !Array.isArray(paneColumns) && Object.keys(paneColumns).length > 0)
       || (paneTime && typeof paneTime === "object" && !Array.isArray(paneTime))
     );
@@ -2193,7 +2187,7 @@ function mockWorkbenchGroupMatchesStructuredFilters(
 
   return activePanes.every((pane) =>
     groupRowsForMockPane(group, pane).some((row) =>
-      mockWorkbenchRowMatchesPaneFilters(row, pane, searchByPane[pane], columnFilters[pane], timeFilters[pane]),
+      mockWorkbenchRowMatchesPaneFilters(row, pane, columnFilters[pane], timeFilters[pane]),
     ),
   );
 }
@@ -2201,15 +2195,9 @@ function mockWorkbenchGroupMatchesStructuredFilters(
 function mockWorkbenchRowMatchesPaneFilters(
   row: Record<string, unknown>,
   pane: RawWorkbenchPaneKey,
-  rawSearch: unknown,
   rawColumnFilters: unknown,
   rawTimeFilter: unknown,
 ) {
-  const normalizedSearch = normalizeMockWorkbenchText(rawSearch);
-  if (normalizedSearch && !normalizeMockWorkbenchText(mockWorkbenchRowSearchText(row)).includes(normalizedSearch)) {
-    return false;
-  }
-
   if (rawColumnFilters && typeof rawColumnFilters === "object" && !Array.isArray(rawColumnFilters)) {
     for (const [columnKey, rawValues] of Object.entries(rawColumnFilters)) {
       const selectedValues = normalizeMockWorkbenchSelectedValues(rawValues);
@@ -2378,12 +2366,7 @@ function groupRowsForMockPane(group: MockWorkbenchGroup, pane: RawWorkbenchPaneK
 }
 
 function mockWorkbenchSearchText(group: MockWorkbenchGroup) {
-  return [
-    group.group_id,
-    group.group_type,
-    group.reason,
-    ...MOCK_WORKBENCH_PANES.flatMap((pane) => groupRowsForMockPane(group, pane).map(mockWorkbenchRowSearchText)),
-  ].join(" ");
+  return MOCK_WORKBENCH_PANES.flatMap((pane) => groupRowsForMockPane(group, pane).map(mockWorkbenchRowSearchText)).join(" ");
 }
 
 function mockWorkbenchRowSearchText(row: Record<string, unknown>) {
@@ -2398,13 +2381,15 @@ function flattenMockWorkbenchText(value: unknown): string[] {
     return value.flatMap(flattenMockWorkbenchText);
   }
   if (typeof value === "object") {
-    return Object.values(value as Record<string, unknown>).flatMap(flattenMockWorkbenchText);
+    return Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => !["id", "row_id", "group_id", "detail_fields"].includes(key))
+      .flatMap(([, item]) => flattenMockWorkbenchText(item));
   }
   return [String(value)];
 }
 
 function normalizeMockWorkbenchText(value: unknown) {
-  return String(value ?? "").replace(/\s+/g, "").trim().toLowerCase();
+  return String(value ?? "").trim().toLocaleLowerCase("zh-CN");
 }
 
 function stringValue(value: unknown) {
@@ -4925,7 +4910,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           payload[zone].groups.filter((group) => mockWorkbenchGroupMatchesQuery(
             group,
             String(query.search ?? "").trim(),
-            parseWorkbenchGroupJsonParam(JSON.stringify(query.search_by_pane ?? {})),
             parseWorkbenchGroupJsonParam(JSON.stringify(query.column_filters ?? {})),
             parseWorkbenchGroupJsonParam(JSON.stringify(query.time_filters ?? {})),
           )),
@@ -4977,12 +4961,11 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         };
       }
       const search = String(url.searchParams.get("search") ?? "").trim();
-      const searchByPane = parseWorkbenchGroupJsonParam(url.searchParams.get("search_by_pane"));
       const sort = String(url.searchParams.get("sort") ?? "").trim();
       const columnFilters = parseWorkbenchGroupJsonParam(url.searchParams.get("column_filters"));
       const timeFilters = parseWorkbenchGroupJsonParam(url.searchParams.get("time_filters"));
       const groups = sortMockWorkbenchGroups(
-        payload[zone].groups.filter((group) => mockWorkbenchGroupMatchesQuery(group, search, searchByPane, columnFilters, timeFilters)),
+        payload[zone].groups.filter((group) => mockWorkbenchGroupMatchesQuery(group, search, columnFilters, timeFilters)),
         sort,
       );
       const offset = (page - 1) * pageSize;

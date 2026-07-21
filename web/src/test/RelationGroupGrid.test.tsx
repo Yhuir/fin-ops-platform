@@ -536,23 +536,22 @@ describe("Workbench candidate grouping layout", () => {
     };
   }
 
-  function renderNoOaGrid(group: WorkbenchRelationGroup = createNoOaCollapsedGroup()) {
+  function renderNoOaGrid(
+    group: WorkbenchRelationGroup = createNoOaCollapsedGroup(),
+    displayState = createEmptyWorkbenchZoneDisplayState(),
+  ) {
     return render(
       <RelationGroupGrid
         canMutateData
-        displayState={createEmptyWorkbenchZoneDisplayState()}
+        displayState={displayState}
         getRowState={() => "idle"}
         groups={[group]}
-        onClearPaneSearch={() => undefined}
-        onClosePaneSearch={() => undefined}
         onColumnFilterChange={() => undefined}
         onOpenDetail={() => undefined}
-        onPaneSearchQueryChange={() => undefined}
         onPaneTimeFilterChange={() => undefined}
         onReorderPaneColumns={() => undefined}
         onRowAction={() => undefined}
         onSelectRow={() => undefined}
-        onTogglePaneSearch={() => undefined}
         onTogglePaneSort={() => undefined}
         panes={[
           { id: "oa", title: "OA", rows: [] },
@@ -1200,6 +1199,18 @@ describe("Workbench candidate grouping layout", () => {
     expect(screen.getByRole("button", { name: "收起免OA批次明细" })).toBeInTheDocument();
   });
 
+  test("marks a hidden search hit until collapsed detail is expanded, then highlights the value", () => {
+    const state = createEmptyWorkbenchZoneDisplayState();
+    state.searchQuery = "建设银行手续费";
+    renderNoOaGrid(createNoOaCollapsedGroup(), state);
+
+    expect(screen.getByText("隐藏内容命中")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "展开免OA批次明细，2 条" }));
+
+    expect(screen.queryByText("隐藏内容命中")).not.toBeInTheDocument();
+    expect(screen.getByText("建设银行手续费")).toHaveClass("search-hit");
+  });
+
   test("renders bank-flow summary rows without overlapping collapsed count copy", () => {
     renderNoOaGrid(createBankFlowCollapsedGroup());
 
@@ -1488,16 +1499,12 @@ describe("Workbench candidate grouping layout", () => {
             },
           },
         ]}
-        onClearPaneSearch={() => undefined}
-        onClosePaneSearch={() => undefined}
         onColumnFilterChange={() => undefined}
         onOpenDetail={() => undefined}
-        onPaneSearchQueryChange={() => undefined}
         onPaneTimeFilterChange={() => undefined}
         onReorderPaneColumns={() => undefined}
         onRowAction={() => undefined}
         onSelectRow={() => undefined}
-        onTogglePaneSearch={() => undefined}
         onTogglePaneSort={() => undefined}
         panes={[
           { id: "oa", title: "OA", rows: [] },
@@ -1589,6 +1596,58 @@ describe("Workbench candidate grouping layout", () => {
     expect(screen.getByText("用途：货款")).toBeInTheDocument();
     expect(screen.queryByText(/交易用途：/)).not.toBeInTheDocument();
     expect(screen.queryByText(/客户附言：/)).not.toBeInTheDocument();
+  });
+
+  test("highlights every visible occurrence of a zone search term", () => {
+    const row = {
+      ...createBankRecord(),
+      bankTextFields: [],
+      tableValues: {
+        ...createBankRecord().tableValues,
+        note: "服务费服务费",
+      },
+    };
+    render(
+      <WorkbenchRecordCard
+        canMutateData
+        columnGridStyle={getWorkbenchPaneGridStyle("bank")}
+        columns={getWorkbenchColumns("bank")}
+        paneId="bank"
+        row={row}
+        rowState="idle"
+        searchQuery="服务费"
+        showWorkflowActions={false}
+        zoneId="unpaired"
+        onOpenDetail={() => undefined}
+        onRowAction={() => undefined}
+        onSelectRow={() => undefined}
+      />,
+    );
+
+    expect(screen.getAllByText("服务费")).toHaveLength(2);
+    screen.getAllByText("服务费").forEach((hit) => expect(hit).toHaveClass("search-hit"));
+  });
+
+  test("highlights a matching date-time phrase across compact display spans", () => {
+    render(
+      <WorkbenchRecordCard
+        canMutateData
+        columnGridStyle={getWorkbenchPaneGridStyle("bank")}
+        columns={getWorkbenchColumns("bank")}
+        paneId="bank"
+        row={createBankRecord()}
+        rowState="idle"
+        searchQuery="2026-03-20 12:15:00"
+        showWorkflowActions={false}
+        zoneId="unpaired"
+        onOpenDetail={() => undefined}
+        onRowAction={() => undefined}
+        onSelectRow={() => undefined}
+      />,
+    );
+
+    expect(screen.getByText("2026-03-20")).toHaveClass("search-hit");
+    expect(screen.getByText("12:15:00")).toHaveClass("search-hit");
   });
 
   test("renders OA 2035 and every unpaired attachment invoice as separate visible rows", async () => {

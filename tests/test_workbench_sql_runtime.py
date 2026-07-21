@@ -16,6 +16,7 @@ from fin_ops_platform.services.postgres_repositories.read_models import (
     WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION,
     PostgresReadModelRepository,
     _workbench_group_row_records,
+    _workbench_literal_ilike_pattern,
     _workbench_payload_row_matches_preview_criteria,
     _workbench_row_payload_for_write,
 )
@@ -1497,6 +1498,9 @@ class FakeWorkbenchReadModelService:
 
 
 class WorkbenchSqlRuntimeTests(unittest.TestCase):
+    def test_workbench_zone_search_escapes_ilike_wildcards_as_literals(self) -> None:
+        self.assertEqual(_workbench_literal_ilike_pattern(r"100%_\vendor"), r"%100\%\_\\vendor%")
+
     def test_workbench_sql_source_versions_include_matching_rules_version_for_freshness(self) -> None:
         app = object.__new__(Application)
 
@@ -3002,7 +3006,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertNotIn("column_values @>", filtered_page_query[0])
         self.assertEqual(filtered_page_query[1][:2], ("unpaired", ["case:1", "case:2"]))
 
-    def test_repository_plain_search_aggregates_only_searchable_text_in_filtered_count_query(self) -> None:
+    def test_repository_search_uses_active_structured_rows_without_payload_aggregation(self) -> None:
         connection = WorkbenchSummaryGroupsConnection()
         repository = PostgresReadModelRepository(connection)
 
@@ -3019,11 +3023,13 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             for sql, _params in connection.fetch_one_calls
             if "count(distinct (r.pane" in sql
         )
-        self.assertIn("string_agg(canonical_candidates.searchable_text", count_query)
+        self.assertIn("select distinct r_zone_search.zone, r_zone_search.all_scope_group_id", count_query)
+        self.assertIn("r_zone_search.searchable_text ilike %s", count_query)
+        self.assertNotIn("string_agg(canonical_candidates.searchable_text", count_query)
         self.assertNotIn("oa_sort_min", count_query)
         self.assertNotIn("payload", count_query)
 
-    def test_repository_intersects_pane_search_with_structured_group_row_filters(self) -> None:
+    def test_repository_intersects_zone_search_with_structured_group_row_filters(self) -> None:
         connection = WorkbenchSummaryGroupsConnection()
         repository = PostgresReadModelRepository(connection)
 
@@ -3032,7 +3038,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             zone="unpaired",
             page=1,
             page_size=25,
-            search_by_pane={"bank": "建行"},
+            search="建行",
             column_filters={"bank": {"amount": ["支出"]}},
         )
 
@@ -3040,7 +3046,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         group_row_queries = [(sql, params) for sql, params in all_queries if "read_model.workbench_group_rows" in sql]
         self.assertTrue(group_row_queries)
         self.assertTrue(any("case when left(r.group_id, 5) = 'case:'" in sql for sql, _params in group_row_queries))
-        self.assertTrue(any("r.searchable_text ilike %s" in sql for sql, _params in group_row_queries))
+        self.assertTrue(any("r_zone_search.searchable_text ilike %s" in sql for sql, _params in group_row_queries))
         self.assertTrue(
             any(
                 "%建行%" in params
@@ -3049,7 +3055,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             )
         )
 
-    def test_repository_filters_linked_context_search_from_any_structured_group_row(self) -> None:
+    def test_repository_filters_zone_search_from_any_structured_group_row(self) -> None:
         connection = WorkbenchSummaryGroupsConnection()
         repository = PostgresReadModelRepository(connection)
 
@@ -3059,7 +3065,6 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             page=1,
             page_size=25,
             search="花",
-            search_mode="linked_context",
             column_filters={"bank": {"amount": ["支出"]}},
         )
 
@@ -3068,8 +3073,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertTrue(group_row_queries)
         self.assertTrue(
             any(
-                "select distinct r_linked_search.zone, r_linked_search.all_scope_group_id" in sql
-                and "r_linked_search.searchable_text ilike %s" in sql
+                "select distinct r_zone_search.zone, r_zone_search.all_scope_group_id" in sql
+                and "r_zone_search.searchable_text ilike %s" in sql
                 and "%花%" in params
                 for sql, params in group_row_queries
             )
@@ -3138,8 +3143,6 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             "pane": "oa",
             "column_filters": {"oa": {"applicant": ["陈涛", "孙敏"]}},
             "time_filters": {},
-            "search_by_pane": {},
-            "fallback_search": None,
         }
 
         self.assertTrue(
@@ -3161,7 +3164,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             )
         )
 
-    def test_repository_filters_summary_preview_rows_with_intersected_pane_criteria(self) -> None:
+    def test_repository_keeps_full_summary_preview_rows_after_zone_search_hit(self) -> None:
         class PreviewRowsConnection(WorkbenchSummaryGroupsConnection):
             def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
                 normalized = " ".join(sql.lower().split())
@@ -3215,12 +3218,12 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             page=1,
             page_size=25,
             detail_level="summary",
-            search_by_pane={"bank": "建行"},
+            search="建行",
             column_filters={"bank": {"amount": ["支出"]}},
         )
 
         group = page["groups"][0]
-        self.assertEqual([row["id"] for row in group["bank_rows"]], ["bank-expense-ccb"])
+        self.assertEqual([row["id"] for row in group["bank_rows"]], ["bank-expense-ms", "bank-expense-ccb"])
         self.assertEqual(group["row_counts"]["bank"], 3)
 
     def test_repository_requires_all_selected_bank_amount_filter_values_on_same_row(self) -> None:
@@ -3515,7 +3518,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             zone="unpaired",
             page=1,
             page_size=25,
-            search_by_pane={"bank": "建行"},
+            search="建行",
             column_filters={"bank": {"amount": ["支出"]}},
             time_filters={"bank": {"mode": "month", "month": "2026-04"}},
         )
@@ -3531,7 +3534,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             any(
                 "r.column_values @> %s::jsonb" in sql
                 and "r.time_date >= %s::date and r.time_date < %s::date" in sql
-                and "r.searchable_text ilike %s" in sql
+                and "r_zone_search.searchable_text ilike %s" in sql
                 and '"direction": "支出"' in str(params)
                 and "2026-04-01" in str(params)
                 and "%建行%" in params
@@ -3883,6 +3886,51 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             }
         )
         self.assertNotIn("workbench_reconciliation_decision", unpaired_payload)
+
+    def test_workbench_searchable_rows_cover_display_values_without_internal_ids(self) -> None:
+        rows = _workbench_group_row_records(
+            {
+                "group_id": "case:internal-secret",
+                "zone": "unpaired",
+                "oa_rows": [
+                    {
+                        "id": "oa-internal-secret",
+                        "type": "oa",
+                        "label": "付款申请",
+                        "applicant": "陈涛",
+                        "application_time": "2026-07-21 09:30",
+                    }
+                ],
+                "bank_rows": [
+                    {
+                        "id": "bank-internal-secret",
+                        "type": "bank",
+                        "label": "银行流水",
+                        "category_label": "软件服务费",
+                        "payment_account_label": "建设银行 8106",
+                        "bank_text_fields": [{"label": "客户附言", "value": "专项服务费"}],
+                    }
+                ],
+                "invoice_rows": [
+                    {
+                        "id": "invoice-internal-secret",
+                        "type": "invoice",
+                        "label": "发票",
+                        "source_kind": "oa_attachment_invoice",
+                        "invoice_type": "进项发票",
+                    }
+                ],
+            }
+        )
+
+        searchable_text = " ".join(str(row["searchable_text"]) for row in rows)
+        self.assertIn("2026-07-21 09:30", searchable_text)
+        self.assertIn("软件服务费", searchable_text)
+        self.assertIn("客户附言", searchable_text)
+        self.assertIn("专项服务费", searchable_text)
+        self.assertIn("建行 8106", searchable_text)
+        self.assertIn("OA附件", searchable_text)
+        self.assertNotIn("internal-secret", searchable_text)
 
     def test_repository_reads_single_workbench_group_detail(self) -> None:
         connection = WorkbenchSummaryGroupsConnection()
@@ -4530,8 +4578,6 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             status="unpaired",
             source_kind="bank_transaction",
             search="供应商",
-            search_mode="linked_context",
-            search_by_pane='{"bank":"建行"}',
             sort="bank:desc",
             detail_level="summary",
             column_filters='{"bank":{"amount":["支出"]}}',
@@ -4552,8 +4598,6 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                     "status": "unpaired",
                     "source_kind": "bank_transaction",
                     "search": "供应商",
-                    "search_mode": "linked_context",
-                    "search_by_pane": {"bank": "建行"},
                     "sort": "bank:desc",
                     "detail_level": "summary",
                     "column_filters": {"bank": {"amount": ["支出"]}},
@@ -4777,7 +4821,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(key_a, key_b)
         self.assertNotEqual(key_a, key_c)
 
-    def test_workbench_groups_api_redis_cache_key_includes_search_mode(self) -> None:
+    def test_workbench_groups_api_redis_cache_key_includes_zone_search(self) -> None:
         app = object.__new__(Application)
         base_kwargs = {
             "cache_version": "v7",
@@ -4794,14 +4838,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             "time_filters": {},
         }
 
-        linked_key = app._workbench_groups_redis_cache_key_from_version(
-            **base_kwargs,
-            search_mode="linked_context",
-        )
-        pane_key = app._workbench_groups_redis_cache_key_from_version(
-            **base_kwargs,
-            search_mode="pane",
-        )
+        linked_key = app._workbench_groups_redis_cache_key_from_version(**base_kwargs)
+        pane_key = app._workbench_groups_redis_cache_key_from_version(**{**base_kwargs, "search": "供应商"})
 
         self.assertNotEqual(linked_key, pane_key)
 

@@ -136,8 +136,8 @@ class WorkbenchReadApiRoutesTests(unittest.TestCase):
 
         status, payload = routes.initial(
             "2026-05",
-            paired_query='{"sort":"bank:desc","search_by_pane":{"bank":"建行"}}',
-            unpaired_query='{"search":"供应商","search_mode":"linked_context"}',
+            paired_query='{"sort":"bank:desc","search":"建行"}',
+            unpaired_query='{"search":"供应商"}',
         )
 
         self.assertEqual(status, HTTPStatus.OK)
@@ -148,14 +148,14 @@ class WorkbenchReadApiRoutesTests(unittest.TestCase):
                 {
                     "endpoint": "initial",
                     "month": "2026-05",
-                    "paired_query": {"search_by_pane": {"bank": "建行"}, "sort": "bank:desc"},
-                    "unpaired_query": {"search": "供应商", "search_mode": "linked_context"},
+                    "paired_query": {"search": "建行", "sort": "bank:desc"},
+                    "unpaired_query": {"search": "供应商"},
                 }
             ],
         )
 
     def test_initial_rejects_unknown_or_wrong_typed_fields_without_calling_facade(self) -> None:
-        for query in ('{"page":2}', '{"search":123}', '{"search_mode":"global"}'):
+        for query in ('{"page":2}', '{"search":123}', '{"search_mode":"global"}', '{"search_by_pane":{}}'):
             with self.subTest(query=query):
                 facade = FakeWorkbenchQueryFacade()
                 routes = WorkbenchReadApiRoutes(query_facade_provider=lambda: facade)
@@ -187,9 +187,7 @@ class WorkbenchReadApiRoutesTests(unittest.TestCase):
             page_size="50",
             status="unpaired",
             source_kind="bank",
-            search="vendor",
-            search_mode="pane",
-            search_by_pane='{"bank": "foo", "oa": ["bar"]}',
+            search=" vendor ",
             sort="amount_desc",
             detail_level="summary",
             column_filters='{"amount": {"min": 10}}',
@@ -210,8 +208,6 @@ class WorkbenchReadApiRoutesTests(unittest.TestCase):
                     "status": "unpaired",
                     "source_kind": "bank",
                     "search": "vendor",
-                    "search_mode": "pane",
-                    "search_by_pane": {"bank": "foo", "oa": ["bar"]},
                     "sort": "amount_desc",
                     "detail_level": "summary",
                     "column_filters": {"amount": {"min": 10}},
@@ -219,6 +215,17 @@ class WorkbenchReadApiRoutesTests(unittest.TestCase):
                 }
             ],
         )
+
+    def test_groups_rejects_search_longer_than_contract_limit(self) -> None:
+        facade = FakeWorkbenchQueryFacade()
+        routes = WorkbenchReadApiRoutes(query_facade_provider=lambda: facade)
+
+        status, payload = routes.groups("all", zone="paired", search="x" * 201)
+
+        self.assertEqual(status, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(payload["error"], "invalid_workbench_groups_query")
+        self.assertIn("at most 200 characters", payload["message"])
+        self.assertEqual(facade.calls, [])
 
     def test_groups_rejects_invalid_zone_without_calling_facade(self) -> None:
         facade = FakeWorkbenchQueryFacade()

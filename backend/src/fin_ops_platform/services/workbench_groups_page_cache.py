@@ -11,11 +11,6 @@ WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION = f"{WORKBENCH_MONTH_SCOPE_SCHEMA_VER
 WORKBENCH_INITIAL_PAGE_CACHE_SCHEMA_VERSION = f"{WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION}:initial-v2"
 
 
-def normalize_workbench_group_search_mode(value: str | None) -> str:
-    normalized = str(value or "").strip().lower()
-    return "linked_context" if normalized == "linked_context" else "pane"
-
-
 def normalize_workbench_group_detail_level(value: str | None) -> str:
     normalized = str(value or "full").strip().lower()
     return "summary" if normalized == "summary" else "full"
@@ -62,8 +57,6 @@ def is_default_workbench_initial_query(
         for key, value in query.items():
             if value in (None, "", [], {}):
                 continue
-            if key == "search_mode" and normalize_workbench_group_search_mode(str(value)) == "pane":
-                continue
             return False
     return True
 
@@ -99,8 +92,6 @@ def build_workbench_groups_redis_cache_key_from_version(
     status: str | None,
     source_kind: str | None,
     search: str | None,
-    search_mode: str | None = None,
-    search_by_pane: dict[str, object] | None = None,
     sort: str | None,
     detail_level: str | None,
     column_filters: dict[str, object] | None = None,
@@ -119,13 +110,11 @@ def build_workbench_groups_redis_cache_key_from_version(
         "status": status or "",
         "source_kind": source_kind or "",
         "search": search or "",
-        "search_mode": normalize_workbench_group_search_mode(search_mode),
-        "search_by_pane": stable_json_value(search_by_pane or {}),
         "sort": sort or "",
         "detail_level": normalize_workbench_group_detail_level(detail_level),
         "column_filters": stable_json_value(column_filters or {}),
         "time_filters": stable_json_value(time_filters or {}),
-        "filter_semantics": "linked_context_scalar_multiselect_or_v2",
+        "filter_semantics": "zone_search_scalar_multiselect_or_v3",
     }
     digest = hashlib.sha256(json.dumps(key_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:16]
     return f"workbench:{version_token}:groups:{digest}"

@@ -42,6 +42,29 @@ BANK_DETAIL_SUMMARY_TEXT_LABELS = ("摘要",)
 BANK_DETAIL_NOTE_TEXT_LABELS = ("备注", "附言", "客户附言")
 WORKBENCH_PANES = ("oa", "bank", "invoice")
 WORKBENCH_FILTER_PLACEHOLDERS = {"", "--", "—"}
+WORKBENCH_COMPACT_BANK_NAMES = {
+    "中国工商银行": "工行",
+    "工商银行": "工行",
+    "中国建设银行": "建行",
+    "建设银行": "建行",
+    "中国农业银行": "农行",
+    "农业银行": "农行",
+    "中国银行": "中行",
+    "招商银行": "招行",
+    "交通银行": "交行",
+    "中国光大银行": "光大",
+    "光大银行": "光大",
+    "中国民生银行": "民生",
+    "民生银行": "民生",
+    "平安银行": "平安",
+}
+WORKBENCH_INVOICE_SOURCE_LABELS = {
+    "etc_invoice_summary": "ETC批次",
+    "etc_invoice": "ETC",
+    "oa_attachment_invoice": "OA附件",
+    "oa_attachment_payment_receipt": "付款凭证",
+    "oa_attachment_unknown": "未识别附件",
+}
 NO_OA_BANK_BATCH_SUMMARY_SOURCE_KIND = "no_oa_bank_batch_summary"
 BANK_FLOW_RULE_BATCH_SUMMARY_SOURCE_KIND = "bank_flow_rule_batch_summary"
 WORKBENCH_BANK_BATCH_SUMMARY_SOURCE_KINDS = frozenset(
@@ -9671,8 +9694,6 @@ class PostgresReadModelRepository:
                     "status",
                     "source_kind",
                     "search",
-                    "search_mode",
-                    "search_by_pane",
                     "sort",
                     "column_filters",
                     "time_filters",
@@ -10350,8 +10371,6 @@ class PostgresReadModelRepository:
         status: str | None = None,
         source_kind: str | None = None,
         search: str | None = None,
-        search_mode: str | None = None,
-        search_by_pane: Any = None,
         sort: str | None = None,
         detail_level: str | None = None,
         column_filters: Any = None,
@@ -10391,18 +10410,9 @@ class PostgresReadModelRepository:
         )
         normalized_column_filters = _normalize_workbench_column_filters(column_filters)
         normalized_time_filters = _normalize_workbench_time_filters(time_filters)
-        normalized_search_by_pane = _normalize_workbench_search_by_pane(search_by_pane)
-        normalized_search_mode = _normalize_workbench_search_mode(search_mode)
-        normalized_search = text(search)
-        requires_aggregated_searchable_text = bool(
-            normalized_search
-            and normalized_search_mode != "linked_context"
-            and not normalized_search_by_pane
-            and not normalized_column_filters
-            and not normalized_time_filters
-        )
+        normalized_search = (text(search) or "")[:200]
         if composed_all_scope:
-            requires_aggregated_metadata = bool(text(sort) or requires_aggregated_searchable_text)
+            requires_aggregated_metadata = bool(text(sort))
             groups_from_sql = _workbench_active_month_groups_sql(
                 include_aggregated_metadata=requires_aggregated_metadata
             )
@@ -10429,35 +10439,24 @@ class PostgresReadModelRepository:
             else:
                 clauses.append("%s = any(g.source_kinds)")
                 params.append(normalized)
-        if (
-            normalized_search
-            and normalized_search_mode != "linked_context"
-            and not normalized_search_by_pane
-            and not normalized_column_filters
-            and not normalized_time_filters
-        ):
-            clauses.append("(g.searchable_text ilike %s or g.group_id ilike %s)")
-            pattern = f"%{normalized_search}%"
-            params.extend([pattern, pattern])
-        if normalized_search and normalized_search_mode == "linked_context":
+        if normalized_search:
+            pattern = _workbench_literal_ilike_pattern(normalized_search)
             if composed_all_scope:
                 active_member_filter_joins.append(
                     _workbench_all_active_member_filter_join_sql(
-                        "r_linked_search.searchable_text ilike %s",
-                        row_alias="r_linked_search",
-                        match_alias="linked_search_match",
+                        "r_zone_search.searchable_text ilike %s escape E'\\\\'",
+                        row_alias="r_zone_search",
+                        match_alias="zone_search_match",
                     )
                 )
-                active_member_filter_params.append(f"%{normalized_search}%")
+                active_member_filter_params.append(pattern)
             else:
-                clauses.append(_workbench_linked_search_exists_sql(group_id_sql=group_row_join_id_sql))
-                params.append(f"%{normalized_search}%")
+                clauses.append(_workbench_zone_search_exists_sql(group_id_sql=group_row_join_id_sql))
+                params.append(pattern)
         if composed_all_scope:
             row_filter_joins, row_filter_params = _workbench_all_group_row_filter_joins_sql(
                 column_filters=normalized_column_filters,
                 time_filters=normalized_time_filters,
-                search_by_pane=normalized_search_by_pane,
-                fallback_search=None if normalized_search_mode == "linked_context" else normalized_search,
             )
             active_member_filter_joins.extend(row_filter_joins)
             active_member_filter_params.extend(row_filter_params)
@@ -10465,8 +10464,6 @@ class PostgresReadModelRepository:
             row_filter_sql, row_filter_params = _workbench_group_row_filter_exists_sql(
                 column_filters=normalized_column_filters,
                 time_filters=normalized_time_filters,
-                search_by_pane=normalized_search_by_pane,
-                fallback_search=None if normalized_search_mode == "linked_context" else normalized_search,
                 group_id_sql=group_row_join_id_sql,
             )
             if row_filter_sql:
@@ -10479,30 +10476,22 @@ class PostgresReadModelRepository:
             "oa",
             column_filters=normalized_column_filters,
             time_filters=normalized_time_filters,
-            search_by_pane=normalized_search_by_pane,
-            fallback_search=None if normalized_search_mode == "linked_context" else normalized_search,
         )
         bank_row_filter_sql, bank_row_filter_params = _workbench_group_row_count_filter_sql(
             "bank",
             column_filters=normalized_column_filters,
             time_filters=normalized_time_filters,
-            search_by_pane=normalized_search_by_pane,
-            fallback_search=None if normalized_search_mode == "linked_context" else normalized_search,
         )
         invoice_row_filter_sql, invoice_row_filter_params = _workbench_group_row_count_filter_sql(
             "invoice",
             column_filters=normalized_column_filters,
             time_filters=normalized_time_filters,
-            search_by_pane=normalized_search_by_pane,
-            fallback_search=None if normalized_search_mode == "linked_context" else normalized_search,
         )
         generation_stats_eligible = bool(active_generation_id) and not any(
             (
                 text(status),
                 text(source_kind),
                 normalized_search,
-                normalized_search_mode == "linked_context",
-                normalized_search_by_pane,
                 normalized_column_filters,
                 normalized_time_filters,
             )
@@ -10522,7 +10511,7 @@ class PostgresReadModelRepository:
         if materialized_counts is None:
             if composed_all_scope:
                 groups_for_counts_sql = _workbench_active_month_group_keys_sql(
-                    include_aggregated_searchable_text=requires_aggregated_searchable_text
+                    include_aggregated_searchable_text=False
                 )
                 distinct_row_sql = "(r.pane, coalesce(nullif(r.object_identity_key, ''), r.row_id))"
                 count_row = self._connection.fetch_one(
@@ -10671,8 +10660,6 @@ class PostgresReadModelRepository:
                     group,
                     column_filters=normalized_column_filters,
                     time_filters=normalized_time_filters,
-                    search_by_pane=normalized_search_by_pane,
-                    fallback_search=None if normalized_search_mode == "linked_context" else normalized_search,
                 )
                 group = _compact_workbench_group_for_summary_page(group)
             groups.append(group)
@@ -13794,29 +13781,19 @@ def _normalize_workbench_time_filters(value: Any) -> dict[str, dict[str, str]]:
     return result
 
 
-def _normalize_workbench_search_by_pane(value: Any) -> dict[str, str]:
-    payload = _json_object_payload(value)
-    result: dict[str, str] = {}
-    for pane in WORKBENCH_PANES:
-        normalized = text(payload.get(pane))
-        if normalized:
-            result[pane] = normalized[:200]
-    return result
+def _workbench_literal_ilike_pattern(value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
 
 
-def _normalize_workbench_search_mode(value: Any) -> str:
-    normalized = text(value)
-    return "linked_context" if normalized == "linked_context" else "pane"
-
-
-def _workbench_linked_search_exists_sql(*, group_id_sql: str = "g.group_id") -> str:
+def _workbench_zone_search_exists_sql(*, group_id_sql: str = "g.group_id") -> str:
     return (
-        "exists (select 1 from read_model.workbench_group_rows r_linked_search "
-        "where r_linked_search.scope_key = g.scope_key "
-        "and r_linked_search.generation_id = g.generation_id "
-        "and r_linked_search.zone = g.zone "
-        f"and r_linked_search.group_id = {group_id_sql} "
-        "and r_linked_search.searchable_text ilike %s)"
+        "exists (select 1 from read_model.workbench_group_rows r_zone_search "
+        "where r_zone_search.scope_key = g.scope_key "
+        "and r_zone_search.generation_id = g.generation_id "
+        "and r_zone_search.zone = g.zone "
+        f"and r_zone_search.group_id = {group_id_sql} "
+        "and r_zone_search.searchable_text ilike %s escape E'\\\\')"
     )
 
 
@@ -13858,8 +13835,6 @@ def _workbench_group_row_filter_exists_sql(
     *,
     column_filters: dict[str, dict[str, list[str]]],
     time_filters: dict[str, dict[str, str]],
-    search_by_pane: dict[str, str],
-    fallback_search: str | None,
     group_id_sql: str = "g.group_id",
 ) -> tuple[str, list[Any]]:
     pane_exists: list[str] = []
@@ -13869,8 +13844,6 @@ def _workbench_group_row_filter_exists_sql(
             pane,
             column_filters=column_filters,
             time_filters=time_filters,
-            search_by_pane=search_by_pane,
-            fallback_search=fallback_search,
             include_pane=True,
         )
         if not row_match_clauses:
@@ -13895,8 +13868,6 @@ def _workbench_all_group_row_filter_joins_sql(
     *,
     column_filters: dict[str, dict[str, list[str]]],
     time_filters: dict[str, dict[str, str]],
-    search_by_pane: dict[str, str],
-    fallback_search: str | None,
 ) -> tuple[list[str], list[Any]]:
     joins: list[str] = []
     params: list[Any] = []
@@ -13905,8 +13876,6 @@ def _workbench_all_group_row_filter_joins_sql(
             pane,
             column_filters=column_filters,
             time_filters=time_filters,
-            search_by_pane=search_by_pane,
-            fallback_search=fallback_search,
             include_pane=True,
         )
         if not row_match_clauses:
@@ -13927,15 +13896,11 @@ def _workbench_group_row_count_filter_sql(
     *,
     column_filters: dict[str, dict[str, list[str]]],
     time_filters: dict[str, dict[str, str]],
-    search_by_pane: dict[str, str],
-    fallback_search: str | None,
 ) -> tuple[str, list[Any]]:
     row_clauses, params = _workbench_group_row_match_sql(
         pane,
         column_filters=column_filters,
         time_filters=time_filters,
-        search_by_pane=search_by_pane,
-        fallback_search=fallback_search,
         include_pane=False,
     )
     if not row_clauses:
@@ -13948,16 +13913,11 @@ def _workbench_group_row_match_sql(
     *,
     column_filters: dict[str, dict[str, list[str]]],
     time_filters: dict[str, dict[str, str]],
-    search_by_pane: dict[str, str],
-    fallback_search: str | None,
     include_pane: bool,
 ) -> tuple[list[str], list[Any]]:
     pane_column_filters = column_filters.get(pane, {})
     pane_time_filter = time_filters.get(pane)
-    pane_search = search_by_pane.get(pane)
-    if not pane_search and fallback_search and (pane_column_filters or pane_time_filter):
-        pane_search = fallback_search
-    if not pane_column_filters and not pane_time_filter and not pane_search:
+    if not pane_column_filters and not pane_time_filter:
         return [], []
 
     row_clauses: list[str] = []
@@ -13988,9 +13948,6 @@ def _workbench_group_row_match_sql(
         if start_date and end_date:
             row_clauses.append("r.time_date >= %s::date and r.time_date < %s::date")
             row_params.extend([start_date, end_date])
-    if pane_search:
-        row_clauses.append("r.searchable_text ilike %s")
-        row_params.append(f"%{pane_search}%")
     return row_clauses, row_params
 
 
@@ -14162,13 +14119,11 @@ def _filter_workbench_group_preview_rows_for_criteria(
     *,
     column_filters: dict[str, dict[str, list[str]]],
     time_filters: dict[str, dict[str, str]],
-    search_by_pane: dict[str, str],
-    fallback_search: str | None,
 ) -> dict[str, Any]:
     panes_to_filter = [
         pane
         for pane in WORKBENCH_PANES
-        if column_filters.get(pane) or time_filters.get(pane) or search_by_pane.get(pane)
+        if column_filters.get(pane) or time_filters.get(pane)
     ]
     if not panes_to_filter:
         return group
@@ -14203,8 +14158,6 @@ def _filter_workbench_group_preview_rows_for_criteria(
                     pane,
                     column_filters=column_filters,
                     time_filters=time_filters,
-                    search_by_pane=search_by_pane,
-                    fallback_search=fallback_search,
                 )
             ]
         if isinstance(collapsed_rows, dict):
@@ -14220,8 +14173,6 @@ def _filter_workbench_group_preview_rows_for_criteria(
                         pane,
                         column_filters=column_filters,
                         time_filters=time_filters,
-                        search_by_pane=search_by_pane,
-                        fallback_search=fallback_search,
                     )
                 ]
                 filtered["collapsed_rows"] = next_collapsed_rows
@@ -14239,8 +14190,6 @@ def _workbench_payload_row_matches_preview_criteria(
     *,
     column_filters: dict[str, dict[str, list[str]]],
     time_filters: dict[str, dict[str, str]],
-    search_by_pane: dict[str, str],
-    fallback_search: str | None,
 ) -> bool:
     pane_column_filters = column_filters.get(pane, {})
     column_values = _workbench_row_column_values(row, pane)
@@ -14266,12 +14215,6 @@ def _workbench_payload_row_matches_preview_criteria(
         row_date = _workbench_date_from_text(_workbench_row_sort_value(row, pane))
         if start_date and end_date and (not row_date or row_date < start_date or row_date >= end_date):
             return False
-
-    pane_search = search_by_pane.get(pane)
-    if not pane_search and fallback_search and (pane_column_filters or pane_time_filter):
-        pane_search = fallback_search
-    if pane_search and pane_search.lower() not in _searchable_row_text(row, pane).lower():
-        return False
 
     return True
 
@@ -14495,6 +14438,7 @@ def _workbench_row_column_values(row: dict[str, Any], pane_id: str) -> dict[str,
         return _clean_workbench_column_values(
             {
                 "applicant": table_values.get("applicant") or row.get("applicant"),
+                "applicationTime": table_values.get("applicationTime") or row.get("application_time"),
                 "projectName": table_values.get("projectName") or row.get("project_name_display") or row.get("project_name"),
                 "applicationType": table_values.get("applicationType") or row.get("apply_type"),
                 "counterparty": table_values.get("counterparty") or row.get("counterparty_name"),
@@ -14588,13 +14532,51 @@ def _workbench_date_from_text(value: str | None) -> str | None:
 
 
 def _searchable_row_text(row: dict[str, Any], pane_id: str) -> str:
-    values = [text(row.get("id") or row.get("row_id")), text(row.get("label")), text(row.get("status"))]
+    values = [
+        text(row.get("label")),
+        text(row.get("status")),
+        text(row.get("category_label") or row.get("categoryLabel")),
+        text(row.get("counterparty") or row.get("counterparty_name")),
+    ]
     values.extend(text(value) for value in _workbench_row_column_values(row, pane_id).values())
     values.append(text(row.get("amount_value")))
     tags = row.get("tags")
     if isinstance(tags, list):
         values.extend(text(tag) for tag in tags)
+    bank_text_fields = row.get("bank_text_fields") or row.get("bankTextFields")
+    if isinstance(bank_text_fields, list):
+        for field in bank_text_fields:
+            if isinstance(field, dict):
+                values.extend((text(field.get("label")), text(field.get("value"))))
+    values.extend(_workbench_row_display_search_aliases(row, pane_id))
     return " ".join(value for value in values if value)
+
+
+def _workbench_row_display_search_aliases(row: dict[str, Any], pane_id: str) -> list[str]:
+    if pane_id == "bank":
+        account_label = text(_workbench_row_column_values(row, pane_id).get("paymentAccount")) or ""
+        for bank_name, short_name in WORKBENCH_COMPACT_BANK_NAMES.items():
+            if account_label == bank_name:
+                return [short_name]
+            if account_label.startswith(f"{bank_name} "):
+                return [f"{short_name}{account_label[len(bank_name):]}"]
+        return []
+    if pane_id != "invoice":
+        return []
+    invoice_type = text(_workbench_row_column_values(row, pane_id).get("invoiceType")) or ""
+    normalized_invoice_type = invoice_type.lower()
+    flow_label = None
+    if any(value in normalized_invoice_type for value in ("销", "output", "sale")):
+        flow_label = "销"
+    elif any(value in normalized_invoice_type for value in ("进", "input", "purchase")):
+        flow_label = "进"
+    source_kind = text(row.get("source_kind") or row.get("sourceKind"))
+    source_label = (
+        WORKBENCH_INVOICE_SOURCE_LABELS.get(source_kind or "", "人工导入")
+        if flow_label or source_kind
+        else None
+    )
+    return [value for value in (flow_label, source_label) if value]
 
 
 def _workbench_group_row_identity(group: dict[str, Any]) -> tuple[tuple[str, str], ...]:

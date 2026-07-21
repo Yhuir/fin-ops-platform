@@ -1294,40 +1294,36 @@ describe("Workbench row selection and detail drawer", () => {
     expect(within(unpairedZone).queryByRole("button", { name: "撤回关联" })).not.toBeInTheDocument();
   });
 
-  test("pane search filters singleton unpaired rows without surfacing legacy case siblings", async () => {
+  test("zone search scans every pane while keeping singleton unpaired groups isolated", async () => {
     const user = userEvent.setup();
     installMockApiFetch();
     renderWorkbenchPage();
 
     const unpairedZone = await screen.findByTestId("zone-unpaired");
-    const openOaPane = within(unpairedZone).getByTestId("pane-oa");
-    const openBankPane = within(unpairedZone).getByTestId("pane-bank");
-    const openInvoicePane = within(unpairedZone).getByTestId("pane-invoice");
+    const zoneSearch = within(unpairedZone).getByRole("searchbox", { name: "搜索未配对区域" });
 
-    await user.click(within(openOaPane).getByRole("button", { name: "搜索 OA" }));
-    await user.type(within(openOaPane).getByLabelText("搜索 OA"), "智能工厂");
+    expect(within(unpairedZone).getAllByRole("searchbox")).toHaveLength(1);
+    await user.type(zoneSearch, "智能工厂");
 
     expect(within(unpairedZone).getByRole("row", { name: /陈涛.*智能工厂设备商/ })).toBeInTheDocument();
-    expect(within(unpairedZone).queryByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).not.toBeInTheDocument();
-    expect(within(unpairedZone).queryByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ })).not.toBeInTheDocument();
+    expect(within(unpairedZone).getByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).toBeInTheDocument();
+    expect(within(unpairedZone).getByTestId("candidate-group-unpaired-row:oa-o-202603-001")).toBeInTheDocument();
+    expect(within(unpairedZone).getByTestId("candidate-group-unpaired-row:bk-o-202603-001")).toBeInTheDocument();
+    expect(within(unpairedZone).getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ })).toBeInTheDocument();
+    expect(within(unpairedZone).getByTestId("candidate-group-unpaired-row:iv-o-202603-001")).toBeInTheDocument();
     expect(within(unpairedZone).queryByText("杭州张三广告有限公司")).not.toBeInTheDocument();
-    expect(within(openBankPane).getByRole("button", { name: "搜索 银行流水" })).toBeInTheDocument();
-    expect(within(openInvoicePane).getByRole("button", { name: "搜索 进销项发票" })).toBeInTheDocument();
 
-    await user.click(within(openOaPane).getByRole("button", { name: "清空搜索 OA" }));
+    await user.click(within(unpairedZone).getByRole("button", { name: "清空搜索" }));
 
     expect(within(unpairedZone).getAllByText("杭州张三广告有限公司").length).toBeGreaterThan(0);
 
-    await user.click(within(openInvoicePane).getByRole("button", { name: "搜索 进销项发票" }));
-    await user.type(within(openInvoicePane).getByLabelText("搜索 进销项发票"), "91330108");
+    await user.type(zoneSearch, "91330108");
 
     expect(within(unpairedZone).queryByRole("row", { name: /陈涛.*智能工厂设备商/ })).not.toBeInTheDocument();
     expect(within(unpairedZone).queryByRole("row", { name: /2026-03-28.*智能工厂设备商/ })).not.toBeInTheDocument();
     expect(within(unpairedZone).getByRole("row", { name: /91330108MA27B4011D.*杭州溯源科技有限公司/ })).toBeInTheDocument();
-    expect(within(openOaPane).getByRole("button", { name: "搜索 OA" })).toBeInTheDocument();
-    expect(within(openBankPane).getByRole("button", { name: "搜索 银行流水" })).toBeInTheDocument();
-    expect(within(openInvoicePane).getByRole("searchbox", { name: "搜索 进销项发票" })).toHaveValue("91330108");
-    expect(within(openInvoicePane).getByRole("button", { name: "清空搜索 进销项发票" })).toBeInTheDocument();
+    expect(zoneSearch).toHaveValue("91330108");
+    expect(within(unpairedZone).getByRole("button", { name: "清空搜索" })).toBeInTheDocument();
   });
 
   test("unpaired zone header actions use the selected group context", async () => {

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 
-WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION = "2026-07-15-formal-relation-partition-v4"
+WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION = "2026-07-21-unified-zone-search-v5"
 WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION = (
-    "workbench_sql_projection.composed_active_month_shards.formal_relation_partition.v4"
+    "workbench_sql_projection.composed_active_month_shards.unified_zone_search.v5"
 )
 
 

@@ -159,7 +159,7 @@ function isWorkbenchZoneDisplayState(value: unknown): value is WorkbenchZoneDisp
   const state = value as Record<string, unknown>;
   return (
     Object.prototype.hasOwnProperty.call(state, "activePaneId")
-    && Object.prototype.hasOwnProperty.call(state, "searchQueryByPane")
+    && typeof state.searchQuery === "string"
     && Object.prototype.hasOwnProperty.call(state, "filtersByPaneAndColumn")
     && Object.prototype.hasOwnProperty.call(state, "sortByPane")
     && Object.prototype.hasOwnProperty.call(state, "timeFilterByPane")
@@ -467,6 +467,7 @@ export default function ReconciliationWorkbenchPage() {
   });
   const [workbenchRefreshStatus, setWorkbenchRefreshStatus] = useState<WorkbenchRefreshStatus | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [backgroundLoadError, setBackgroundLoadError] = useState<string | null>(null);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const detailRequestSeqRef = useRef(0);
@@ -486,7 +487,7 @@ export default function ReconciliationWorkbenchPage() {
   const pairedDisplaySession = usePageSessionState<WorkbenchZoneDisplayState>({
     pageKey: "reconciliation-workbench",
     stateKey: "pairedDisplayState",
-    version: 1,
+    version: 2,
     initialValue: createEmptyWorkbenchZoneDisplayState(),
     ttlMs: 24 * 60 * 60 * 1000,
     storage: "session",
@@ -496,7 +497,7 @@ export default function ReconciliationWorkbenchPage() {
   const openDisplaySession = usePageSessionState<WorkbenchZoneDisplayState>({
     pageKey: "reconciliation-workbench",
     stateKey: "openDisplayState",
-    version: 1,
+    version: 2,
     initialValue: createEmptyWorkbenchZoneDisplayState(),
     ttlMs: 24 * 60 * 60 * 1000,
     storage: "session",
@@ -551,88 +552,9 @@ export default function ReconciliationWorkbenchPage() {
     setOpenDisplayState((current) => updater(current));
   }, []);
 
-  const handleTogglePaneSearch = useCallback((zoneId: "paired" | "unpaired", paneId: "oa" | "bank" | "invoice") => {
-    updateZoneDisplayState(zoneId, (current) => {
-      const isOpen = current.openSearchPaneId === paneId;
-      const nextState: WorkbenchZoneDisplayState = {
-        ...current,
-        openSearchPaneId: isOpen ? null : paneId,
-        draftSearchQueryByPane: {
-          ...current.draftSearchQueryByPane,
-          [paneId]: isOpen ? current.draftSearchQueryByPane[paneId] : current.searchQueryByPane[paneId],
-        },
-      };
-      return {
-        ...nextState,
-        activePaneId: resolveWorkbenchActivePane(nextState, paneId),
-      };
-    });
+  const handleSearchQueryChange = useCallback((zoneId: "paired" | "unpaired", query: string) => {
+    updateZoneDisplayState(zoneId, (current) => ({ ...current, searchQuery: query.slice(0, 200) }));
   }, [updateZoneDisplayState]);
-
-  const handleClosePaneSearch = useCallback((zoneId: "paired" | "unpaired", paneId: "oa" | "bank" | "invoice") => {
-    updateZoneDisplayState(zoneId, (current) => {
-      if (current.openSearchPaneId !== paneId) {
-        return current;
-      }
-      const nextState: WorkbenchZoneDisplayState = {
-        ...current,
-        openSearchPaneId: null,
-        draftSearchQueryByPane: {
-          ...current.draftSearchQueryByPane,
-          [paneId]: current.searchQueryByPane[paneId],
-        },
-      };
-      return {
-        ...nextState,
-        activePaneId: resolveWorkbenchActivePane(nextState, paneId),
-      };
-    });
-  }, [updateZoneDisplayState]);
-
-  const handleClearPaneSearch = useCallback((zoneId: "paired" | "unpaired", paneId: "oa" | "bank" | "invoice") => {
-    updateZoneDisplayState(zoneId, (current) => {
-      const nextState: WorkbenchZoneDisplayState = {
-        ...current,
-        draftSearchQueryByPane: {
-          ...current.draftSearchQueryByPane,
-          [paneId]: "",
-        },
-        searchQueryByPane: {
-          ...current.searchQueryByPane,
-          [paneId]: "",
-        },
-        unifiedSearchQuery: "",
-      };
-      return {
-        ...nextState,
-        activePaneId: resolveWorkbenchActivePane(nextState),
-      };
-    });
-  }, [updateZoneDisplayState]);
-
-  const handlePaneSearchQueryChange = useCallback(
-    (zoneId: "paired" | "unpaired", paneId: "oa" | "bank" | "invoice", query: string) => {
-      updateZoneDisplayState(zoneId, (current) => {
-        const nextState: WorkbenchZoneDisplayState = {
-          ...current,
-          draftSearchQueryByPane: {
-            ...current.draftSearchQueryByPane,
-            [paneId]: query,
-          },
-          searchQueryByPane: {
-            ...current.searchQueryByPane,
-            [paneId]: query,
-          },
-          unifiedSearchQuery: "",
-        };
-        return {
-          ...nextState,
-          activePaneId: resolveWorkbenchActivePane(nextState, paneId),
-        };
-      });
-    },
-    [updateZoneDisplayState],
-  );
 
   const handleColumnFilterChange = useCallback(
     (
@@ -893,6 +815,7 @@ export default function ReconciliationWorkbenchPage() {
 
     if (background) {
       setIsRefreshing(true);
+      setBackgroundLoadError(null);
     } else {
       setIsLoading(true);
       setLoadError(null);
@@ -920,6 +843,7 @@ export default function ReconciliationWorkbenchPage() {
       if (!deferStateApply) {
         applyWorkbenchInitialPageResult(workbenchPayload, resolvedZoneQueries);
       }
+      setBackgroundLoadError(null);
       if (!background) {
         setIsLoading(false);
       } else {
@@ -948,6 +872,7 @@ export default function ReconciliationWorkbenchPage() {
       } else {
         setIsRefreshing(false);
         setLastActionMessage(null);
+        setBackgroundLoadError(normalizedError.message);
       }
       if (options?.propagateError) {
         throw normalizedError;
@@ -1132,7 +1057,6 @@ export default function ReconciliationWorkbenchPage() {
       return undefined;
     }
     if (!workbenchData || isLoading) {
-      lastZoneServerPageQueryKeyRef.current = zoneServerPageQueryKey;
       return;
     }
     if (lastZoneServerPageQueryKeyRef.current === zoneServerPageQueryKey) {
@@ -2272,6 +2196,20 @@ export default function ReconciliationWorkbenchPage() {
   const isUnpairedVisible = expandedZoneId === null || expandedZoneId === "unpaired";
   const pairedZoneItemCount = resolveZoneItemCount(zonePages.paired, workbenchData?.summary.zoneCounts.paired);
   const unpairedZoneItemCount = resolveZoneItemCount(zonePages.unpaired, workbenchData?.summary.zoneCounts.unpaired);
+  const pairedSearchPending = isRefreshing && loadedZoneServerPageQueryKeys?.paired !== zoneServerPageQueryKeys.paired;
+  const unpairedSearchPending = isRefreshing && loadedZoneServerPageQueryKeys?.unpaired !== zoneServerPageQueryKeys.unpaired;
+  const pairedSearchError = backgroundLoadError && loadedZoneServerPageQueryKeys?.paired !== zoneServerPageQueryKeys.paired
+    ? backgroundLoadError
+    : null;
+  const unpairedSearchError = backgroundLoadError && loadedZoneServerPageQueryKeys?.unpaired !== zoneServerPageQueryKeys.unpaired
+    ? backgroundLoadError
+    : null;
+  const retryCurrentSearch = () => {
+    void loadWorkbenchData(WORKBENCH_VIEW_MONTH, undefined, {
+      background: true,
+      zoneQueries: zoneServerPageQueries,
+    });
+  };
   const pairedZoneElement = (
     <WorkbenchZone
       canMutateData={canWriteWorkbench}
@@ -2285,14 +2223,15 @@ export default function ReconciliationWorkbenchPage() {
       onPrimarySelectionAction={handleCancelPairedSelection}
       primarySelectionActionDisabled={isPairedCancelSelectionDisabled || !canWriteWorkbench}
       onRowAction={handleRowAction}
-      onClearPaneSearch={handleClearPaneSearch}
-      onClosePaneSearch={handleClosePaneSearch}
       onSelectRow={handleSelectRow}
       onToggleExpand={togglePairedExpand}
       displayState={pairedDisplayState}
       onColumnFilterChange={handleColumnFilterChange}
-      onPaneSearchQueryChange={handlePaneSearchQueryChange}
-      onTogglePaneSearch={handleTogglePaneSearch}
+      onSearchQueryChange={(query) => handleSearchQueryChange("paired", query)}
+      onRetrySearch={retryCurrentSearch}
+      searchError={pairedSearchError}
+      searchPending={pairedSearchPending}
+      searchQuery={pairedDisplayState.searchQuery}
       onTogglePaneSort={handleTogglePaneSort}
       onPaneTimeFilterChange={handlePaneTimeFilterChange}
       onReorderPaneColumns={handleReorderPaneColumns}
@@ -2326,16 +2265,17 @@ export default function ReconciliationWorkbenchPage() {
       onPrimarySelectionAction={handleConfirmOpenSelection}
       primarySelectionActionDisabled={isOpenConfirmSelectionDisabled || !canWriteWorkbench}
       onRowAction={handleRowAction}
-      onClearPaneSearch={handleClearPaneSearch}
-      onClosePaneSearch={handleClosePaneSearch}
       onSelectRow={handleSelectRow}
       onSecondarySelectionAction={handleOpenSelectionException}
       secondarySelectionActionDisabled={isOpenExceptionSelectionDisabled || !canWriteWorkbench}
       onToggleExpand={toggleOpenExpand}
       displayState={openDisplayState}
       onColumnFilterChange={handleColumnFilterChange}
-      onPaneSearchQueryChange={handlePaneSearchQueryChange}
-      onTogglePaneSearch={handleTogglePaneSearch}
+      onSearchQueryChange={(query) => handleSearchQueryChange("unpaired", query)}
+      onRetrySearch={retryCurrentSearch}
+      searchError={unpairedSearchError}
+      searchPending={unpairedSearchPending}
+      searchQuery={openDisplayState.searchQuery}
       onTogglePaneSort={handleTogglePaneSort}
       onPaneTimeFilterChange={handlePaneTimeFilterChange}
       onReorderPaneColumns={handleReorderPaneColumns}
@@ -2368,6 +2308,7 @@ export default function ReconciliationWorkbenchPage() {
                   ariaLabel="Audit 关联台"
                   pageKey="reconciliation-workbench"
                   label="关联台"
+                  auditContextKey={`${activeWorkbenchReadModelVersion ?? "none"}:${workbenchPageReadModelStatus}`}
                   readModelStatus={workbenchPageReadModelStatus}
                 />
               </div>
