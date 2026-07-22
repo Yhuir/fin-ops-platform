@@ -12901,6 +12901,15 @@ body.workbench-page-mode .workbench-zone-slot .zone {
   transform: none;
 }
 
+.zone-selection-notice {
+  flex-basis: 100%;
+  margin: 0;
+  color: #8a5a18;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
 .zone-actions {
   display: flex;
   flex-wrap: wrap;

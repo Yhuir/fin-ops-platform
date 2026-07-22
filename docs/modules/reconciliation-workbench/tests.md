@@ -47,6 +47,7 @@
 - `web/src/test/RelationGroupGrid.test.tsx`
 - `web/src/test/WorkbenchApi.test.ts`
 - `web/src/test/WorkbenchSelection.test.tsx`
+- `web/src/test/WorkbenchWriteGate.test.ts`
 - `web/src/test/WorkbenchZone.test.tsx`
 
 ## 必须保护的不变量
@@ -98,6 +99,7 @@ cd web && npm test -- --run \
   src/test/RelationGroupGrid.test.tsx \
   src/test/WorkbenchApi.test.ts \
   src/test/WorkbenchSelection.test.tsx \
+  src/test/WorkbenchWriteGate.test.ts \
   src/test/WorkbenchZone.test.tsx
 
 bash scripts/verify.sh lint
@@ -128,3 +130,10 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.audit_w
 - 既有 grouping/projection/query 回归继续证明：要求 OA 的 bank-only case 保持同 case unpaired，补齐 OA 后进入 paired，active generation 只经现有原子 publish 边界切换。
 - `tests/test_audit_workbench_relation_display_tool.py` 同步保护审计口径：`turnover_manual_closure` 不再享有旧的 requirement 豁免；缺 OA 的 bank-only closure 在 unpaired 不报警，若出现在 paired 必须报告 `relation_requirement_partition_mismatch`。
 - `tests/test_workbench_dirty_queue_wiring.py` 证明 v6 展示 schema 不再污染 matching stale scan，同时 bank-flow read-model source versions 仍包含展示 schema；`tests/test_workbench_matching_scope_retry_ops.py` 保护生产失败 scope 的精确、fingerprint-guarded durable retry。
+
+## 2026-07-22 Workbench 写入门禁与 OA 同步恢复回归
+
+- `web/src/test/WorkbenchWriteGate.test.ts` 保护权限、系统写安全、OA dirty/refreshing、read model non-fresh 和缺 active generation version 的单一优先级门禁。
+- `web/src/test/WorkbenchSelection.test.tsx` 保护已选 OA + 银行流水在 OA 同步期间禁用确认/异常操作并展示真实原因；关联台专属 `/api/oa-sync/status` 返回 synced 后，即使全局 App Health 仍是旧 dirty 快照，也必须在既有 3 秒轮询周期内自动恢复按钮且保留同 generation 选择。
+- `web/src/test/WorkbenchZone.test.tsx` 保护选择区禁用原因的可见与可访问输出；`web/e2e/workbench-stale-error-flow.spec.ts` 保护 Chromium 下 OA dirty/refreshing 的按钮、提示和零 mutation 请求。
+- 性能不新增 I/O：门禁复用既有 OA status 轮询和已加载的 Workbench page status/version，不新增 API、轮询器、worker、read model 或跨页面状态。

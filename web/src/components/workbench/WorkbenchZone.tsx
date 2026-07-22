@@ -59,6 +59,7 @@ type WorkbenchZoneProps = {
   primarySelectionActionDisabled?: boolean;
   secondarySelectionActionDisabled?: boolean;
   tertiarySelectionActionDisabled?: boolean;
+  selectionActionNotice?: string | null;
   pageInfo?: WorkbenchZonePageInfo;
   loadingMore?: boolean;
   loadMoreError?: string | null;
@@ -125,6 +126,7 @@ function WorkbenchZone({
   primarySelectionActionDisabled,
   secondarySelectionActionDisabled,
   tertiarySelectionActionDisabled,
+  selectionActionNotice,
   pageInfo,
   loadingMore = false,
   loadMoreError,
@@ -265,6 +267,16 @@ function WorkbenchZone({
                   </button>
                 ) : null}
               </div>
+              {selectionActionNotice ? (
+                <p
+                  aria-label={selectionActionNotice}
+                  aria-live="polite"
+                  className="zone-selection-notice"
+                  role="status"
+                >
+                  {selectionActionNotice}
+                </p>
+              ) : null}
             </div>
           ) : null}
         </div>

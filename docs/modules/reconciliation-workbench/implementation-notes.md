@@ -1279,3 +1279,10 @@
 - 运维修复：新增只接受单个 failed month、先 dry-run 后 fingerprint-guarded execute 的 durable retry 工具；工具复用现有 repository mark-dirty I/O，实际处理仍由注册的 matching worker claim/UoW/complete。禁止直接 SQL 或相邻月份扩散。
 - worker 修复：worker 入口在专用 matching polling worker 构造前应用 registration statement timeout，避免配置的 120 秒被独立运行路径绕过并退回 10 秒默认值。
 - 回归：`tests/test_workbench_dirty_queue_wiring.py`、`tests/test_workbench_matching_scope_retry_ops.py`、`tests/test_deploy_oa_script.py` 与既有 Workbench/Turnover/Page Audit 套件。
+
+## 2026-07-22 - 选择区写入门禁原因与快速恢复
+
+- 目标：修复已选 OA + 银行流水时“确认关联”与“异常处理”只显示灰色、无法判断原因，并避免 OA 已同步后继续等待较慢的全局 App Health 聚合才恢复。
+- 真实原因：页面按钮与点击守卫维护了两套重复条件；页面已有 3 秒 `/api/oa-sync/status` 轮询，但按钮只消费全局 App Health 的 OA 快照，导致专属状态已 synced 时仍可能被旧 dirty/refreshing 快照禁用。
+- 关键决策：用无 I/O 的 `resolveWorkbenchWriteGate` 统一权限、系统写安全、OA、Workbench page freshness 和 active generation version；按钮、选择区提示和点击守卫消费同一个结果。OA 状态优先使用页面既有专属轮询，首次结果前才回退全局 App Health。删除 `useCanMutateWithHealth` 与页面内三段重复旧判断，不新增请求、worker、read model、API 或跨页面状态。
+- 测试覆盖：新增 `WorkbenchWriteGate.test.ts`；扩展 `WorkbenchSelection.test.tsx` 覆盖旧全局 dirty 快照下的 3 秒自动恢复和选择保留；扩展 `WorkbenchZone.test.tsx` 与 `workbench-stale-error-flow.spec.ts` 覆盖可访问禁用原因及 dirty/refreshing 零写入。

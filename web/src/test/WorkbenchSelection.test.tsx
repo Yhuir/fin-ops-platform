@@ -1404,6 +1404,16 @@ describe("Workbench row selection and detail drawer", () => {
   test("OA dirty sync still disables selected group actions", async () => {
     const user = userEvent.setup();
     installMockApiFetch({
+      workbenchOaSyncStatuses: [
+        {
+          status: "idle",
+          message: "OA 有待处理变更",
+          dirty_scopes: ["2026-04"],
+          changed_scopes: [],
+          last_synced_at: "2026-05-06T09:59:00+08:00",
+          version: 1,
+        },
+      ],
       appHealth: {
         status: "ok",
         generated_at: "2026-05-06T00:00:00+08:00",
@@ -1436,7 +1446,80 @@ describe("Workbench row selection and detail drawer", () => {
 
     expect(within(unpairedZone).getByRole("button", { name: "确认关联" })).toBeDisabled();
     expect(within(unpairedZone).getByRole("button", { name: "异常处理" })).toBeDisabled();
+    expect(within(unpairedZone).getByRole("status", {
+      name: "OA 正在同步，完成后将自动恢复关联操作。",
+    })).toBeInTheDocument();
     expect(within(unpairedZone).queryByRole("button", { name: "撤回关联" })).not.toBeInTheDocument();
+  });
+
+  test("restores selected Workbench actions from the local OA status without waiting for stale App Health", async () => {
+    const user = userEvent.setup();
+    installMockApiFetch({
+      appHealth: {
+        status: "ok",
+        generated_at: "2026-05-06T00:00:00+08:00",
+        session: { status: "authenticated" },
+        oa_sync: {
+          status: "synced",
+          message: "OA 有待处理变更",
+          dirty_scopes: ["2026-03"],
+        },
+        workbench_read_model: {
+          status: "ready",
+          dirty_scopes: [],
+          stale_scopes: [],
+          rebuilding_scopes: [],
+        },
+        background_jobs: {
+          active: 0,
+          queued: 0,
+          running: 0,
+          attention: 0,
+        },
+        dependencies: {},
+      },
+      workbenchOaSyncStatuses: [
+        {
+          status: "idle",
+          message: "OA 有待处理变更",
+          dirty_scopes: ["2026-03"],
+          changed_scopes: [],
+          last_synced_at: "2026-05-06T09:59:00+08:00",
+          version: 1,
+        },
+        {
+          status: "synced",
+          message: "OA 已同步",
+          dirty_scopes: [],
+          changed_scopes: ["all"],
+          last_synced_at: "2026-05-06T10:00:00+08:00",
+          version: 2,
+        },
+      ],
+    });
+    renderAppAt("/");
+
+    const unpairedZone = await screen.findByTestId("zone-unpaired");
+    const oaRow = await within(unpairedZone).findByRole("row", { name: /陈涛.*智能工厂设备商/ });
+    const bankRow = await within(unpairedZone).findByRole("row", { name: /2026-03-28.*智能工厂设备商/ });
+    await user.click(oaRow);
+    await user.click(bankRow);
+
+    const confirmButton = within(unpairedZone).getByRole("button", { name: "确认关联" });
+    expect(confirmButton).toBeDisabled();
+    expect(within(unpairedZone).getByRole("status", {
+      name: "OA 正在同步，完成后将自动恢复关联操作。",
+    })).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(confirmButton).toBeEnabled();
+      expect(within(unpairedZone).queryByRole("status", {
+        name: "OA 正在同步，完成后将自动恢复关联操作。",
+      })).not.toBeInTheDocument();
+    }, { timeout: 5_000 });
+
+    expect(oaRow).toHaveAttribute("data-row-state", "selected");
+    expect(bankRow).toHaveAttribute("data-row-state", "selected");
   });
 
   test("workbench settings can manage allowed app accounts", async () => {

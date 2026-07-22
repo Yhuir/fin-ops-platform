@@ -13,7 +13,7 @@ import WorkbenchExceptionModal from "../components/workbench/WorkbenchExceptionM
 import WorkbenchZone from "../components/workbench/WorkbenchZone";
 import type { WorkbenchPane } from "../components/workbench/ResizableTriPane";
 import { useAppChrome } from "../contexts/AppChromeContext";
-import { useAppHealthStatus, useCanMutateWithHealth } from "../contexts/AppHealthStatusContext";
+import { useAppHealthStatus } from "../contexts/AppHealthStatusContext";
 import { useGlobalOperationOverlay } from "../contexts/GlobalOperationOverlayContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
@@ -64,6 +64,7 @@ import {
 } from "../features/workbench/groupDisplayModel";
 import { reorderWorkbenchColumnLayout, type WorkbenchColumnDropPosition } from "../features/workbench/columnLayout";
 import { buildWorkbenchSelectionContext } from "../features/workbench/selectionModel";
+import { resolveWorkbenchWriteGate } from "../features/workbench/writeGate";
 import type {
   IgnoredWorkbenchData,
   WorkbenchRelationGroup,
@@ -223,7 +224,6 @@ function normalizedAmountForInput(value: string) {
   return normalized;
 }
 
-const READONLY_ACTION_MESSAGE = "当前账号仅支持查看和导出，不能执行写操作。";
 const WORKBENCH_VIEW_MONTH = "all";
 const OA_SYNC_POLL_INTERVAL_MS = 3_000;
 const OA_SYNC_REFRESH_DEBOUNCE_MS = 120;
@@ -420,11 +420,9 @@ export default function ReconciliationWorkbenchPage() {
   const { currentMonth } = useMonth();
   const { setWorkbenchStatus } = useAppChrome();
   const healthStatus = useAppHealthStatus();
-  const canMutateWithHealth = useCanMutateWithHealth();
   const { runOperation } = useGlobalOperationOverlay();
   const { canAdminAccess, canMutateData } = useSessionPermissions();
   const { active } = useOptionalPageActivation("reconciliation-workbench");
-  const isOaSyncWriteBlocked = healthStatus.sources.oaSync === "dirty" || healthStatus.sources.oaSync === "refreshing";
   const {
     detailRow,
     getRowState,
@@ -451,13 +449,20 @@ export default function ReconciliationWorkbenchPage() {
     unpaired: [],
   });
   const [zonePages, setZonePages] = useState<Record<"paired" | "unpaired", WorkbenchZonePageInfo>>(() => createInitialZonePages());
+  const [oaSyncStatus, setOaSyncStatus] = useState<WorkbenchOaSyncStatus | null>(null);
   const workbenchPageReadModelStatus = workbenchZonePagesReadModelStatus(zonePages);
   const activeWorkbenchReadModelVersion = workbenchActiveReadModelVersion(zonePages);
-  const canWriteWorkbench = canMutateData
-    && canMutateWithHealth
-    && !isOaSyncWriteBlocked
-    && workbenchPageReadModelStatus === "fresh"
-    && Boolean(activeWorkbenchReadModelVersion);
+  const oaSyncWriteBlocked = oaSyncStatus
+    ? oaSyncStatus.status === "refreshing" || oaSyncStatus.dirtyScopes.length > 0
+    : healthStatus.sources.oaSync === "dirty" || healthStatus.sources.oaSync === "refreshing";
+  const workbenchWriteGate = resolveWorkbenchWriteGate({
+    canMutateData,
+    mutationsBlocked: healthStatus.blocksMutations,
+    oaSyncWriteBlocked,
+    readModelStatus: workbenchPageReadModelStatus,
+    readModelVersion: activeWorkbenchReadModelVersion || null,
+  });
+  const canWriteWorkbench = workbenchWriteGate.allowed;
   const [loadingMoreByZone, setLoadingMoreByZone] = useState<Record<"paired" | "unpaired", boolean>>({
     paired: false,
     unpaired: false,
@@ -709,6 +714,8 @@ export default function ReconciliationWorkbenchPage() {
   const applyOaSyncStatus = useCallback((status: WorkbenchOaSyncStatus) => {
     const previousStatus = previousOaSyncStatusRef.current;
     const message = status.message || (status.status === "refreshing" ? "OA 正在同步" : "OA 已同步");
+
+    setOaSyncStatus(status);
 
     if (status.status === "refreshing") {
       setOaSyncShellStatus({ level: "pending", reason: message });
@@ -1448,6 +1455,16 @@ export default function ReconciliationWorkbenchPage() {
   const isOpenConfirmSelectionDisabled = !canConfirmOpenSelection;
   const isOpenExceptionSelectionDisabled = openSelectionSummary.total < 1;
   const isPairedCancelSelectionDisabled = pairedSelectionSummary.total < 1;
+  const pairedSelectionActionNotice = pairedSelectionSummary.total > 0 && !workbenchWriteGate.allowed
+    ? workbenchWriteGate.message
+    : null;
+  const openSelectionActionNotice = openSelectionSummary.total < 1
+    ? null
+    : !workbenchWriteGate.allowed
+      ? workbenchWriteGate.message
+      : !canConfirmOpenSelection
+        ? "确认关联至少需要 1 条银行流水，以及 1 条 OA 或发票。"
+        : null;
 
   const collectCaseRowIds = useCallback((row: WorkbenchRecord) => {
     const containingGroup = sourceAllGroups.find((group) =>
@@ -1547,20 +1564,12 @@ export default function ReconciliationWorkbenchPage() {
   }, []);
 
   const ensureCanWriteWorkbench = useCallback(() => {
-    if (!canMutateData) {
-      openActionResultDialog(READONLY_ACTION_MESSAGE);
-      return false;
-    }
-    if (healthStatus.blocksMutations) {
-      openActionResultDialog("登录已失效或系统不可用，请返回 OA 系统重新进入。");
-      return false;
-    }
-    if (isOaSyncWriteBlocked) {
-      openActionResultDialog("OA 正在同步，请刷新完成后再操作。");
+    if (!workbenchWriteGate.allowed) {
+      openActionResultDialog(workbenchWriteGate.message ?? "关联台当前不可执行写操作。");
       return false;
     }
     return true;
-  }, [canMutateData, healthStatus.blocksMutations, isOaSyncWriteBlocked, openActionResultDialog]);
+  }, [openActionResultDialog, workbenchWriteGate]);
 
   const openCancelProcessedExceptionDialog = useCallback((row: WorkbenchRecord) => {
     const group = processedExceptionGroups.find((candidateGroup) =>
@@ -2283,6 +2292,7 @@ export default function ReconciliationWorkbenchPage() {
       onRequestNextPage={handleLoadMoreZone}
       onPrimarySelectionAction={handleCancelPairedSelection}
       primarySelectionActionDisabled={isPairedCancelSelectionDisabled || !canWriteWorkbench}
+      selectionActionNotice={pairedSelectionActionNotice}
       onRowAction={handleRowAction}
       onSelectRow={handleSelectRow}
       onToggleExpand={togglePairedExpand}
@@ -2330,6 +2340,7 @@ export default function ReconciliationWorkbenchPage() {
       onSelectRow={handleSelectRow}
       onSecondarySelectionAction={handleOpenSelectionException}
       secondarySelectionActionDisabled={isOpenExceptionSelectionDisabled || !canWriteWorkbench}
+      selectionActionNotice={openSelectionActionNotice}
       onToggleExpand={toggleOpenExpand}
       displayState={openDisplayState}
       onColumnFilterChange={handleColumnFilterChange}

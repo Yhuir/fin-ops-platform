@@ -99,6 +99,9 @@ test.describe("workbench stale and error browser flow", () => {
     await openGroup.getByRole("row", { name: /陈涛.*智能工厂设备商/ }).click();
     await expect(openZone.getByRole("button", { name: "确认关联" })).toBeDisabled();
     await expect(openZone.getByRole("button", { name: "异常处理" })).toBeDisabled();
+    await expect(openZone.getByRole("status", {
+      name: "OA 正在同步，完成后将自动恢复关联操作。",
+    })).toBeVisible();
     await expect(openZone.getByRole("button", { name: "撤回关联" })).toHaveCount(0);
     expect(api.count("POST /api/workbench/actions/confirm-link/preview")).toBe(0);
     expect(api.count("POST /api/workbench/actions/withdraw-link/preview")).toBe(0);
@@ -121,6 +124,9 @@ test.describe("workbench stale and error browser flow", () => {
     await openGroup.getByRole("row", { name: /陈涛.*智能工厂设备商/ }).click();
     await expect(openZone.getByRole("button", { name: "确认关联" })).toBeDisabled();
     await expect(openZone.getByRole("button", { name: "异常处理" })).toBeDisabled();
+    await expect(openZone.getByRole("status", {
+      name: "OA 正在同步，完成后将自动恢复关联操作。",
+    })).toBeVisible();
     await expect(openZone.getByRole("button", { name: "撤回关联" })).toHaveCount(0);
     expect(api.count("POST /api/workbench/actions/confirm-link/preview")).toBe(0);
     expect(api.count("POST /api/workbench/actions/withdraw-link/preview")).toBe(0);

@@ -124,6 +124,7 @@ describe("WorkbenchZone", () => {
         isVisible
         primarySelectionActionDisabled
         primarySelectionActionLabel="确认关联"
+        selectionActionNotice="OA 正在同步，完成后将自动恢复关联操作。"
         secondarySelectionActionLabel="异常处理"
         selectionSummary={{
           explicitTotal: 2,
@@ -164,6 +165,9 @@ describe("WorkbenchZone", () => {
     expect(within(toolbar as HTMLElement).getByText("流水 1 / 128,000.00")).toBeInTheDocument();
     expect(within(toolbar as HTMLElement).getByText("发票 1 / 144,640.00")).toBeInTheDocument();
     expect(within(toolbar as HTMLElement).getByRole("button", { name: "确认关联" })).toBeDisabled();
+    expect(within(toolbar as HTMLElement).getByRole("status", {
+      name: "OA 正在同步，完成后将自动恢复关联操作。",
+    })).toBeInTheDocument();
 
     await user.click(within(toolbar as HTMLElement).getByRole("button", { name: "清空选择" }));
     await user.click(within(toolbar as HTMLElement).getByRole("button", { name: "异常处理" }));
