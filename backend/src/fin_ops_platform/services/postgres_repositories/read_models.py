@@ -13330,7 +13330,7 @@ class PostgresReadModelRepository:
                     lease_owner = null,
                     lease_expires_at = null,
                     raw_payload = coalesce(raw_payload, '{}'::jsonb)
-                        || jsonb_build_object('reason', %s, 'expedite', true),
+                        || jsonb_build_object('reason', cast(%s as text), 'expedite', true),
                     updated_at = now()
                 where tenant_id = %s
                   and scope_month = %s::date

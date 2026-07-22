@@ -419,6 +419,7 @@ class WorkbenchReconciliationDirtyQueueTests(unittest.TestCase):
         self.assertIn("coalesce(source_versions, '{}'::jsonb) = %s", sql)
         self.assertIn("status = 'dirty'", sql)
         self.assertIn("available_at = now()", sql)
+        self.assertIn("cast(%s as text)", sql)
         self.assertIn("operator_retry_failed_scope", params)
         self.assertIn("tenant-a", params)
         self.assertIn("request-8:2025-10", params)
