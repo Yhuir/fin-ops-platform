@@ -542,7 +542,7 @@ Plans:
 
 - [x] 27-01-PLAN — Freeze the mechanically checked page, operation, Drawer, read-model and legacy-call coverage contract.
 - [x] 27-02-PLAN — Prove the architecture vertically on bank-details and cost-statistics fact/rule/batch behavior.
-- [ ] 27-03-PLAN — Migrate Workbench, bank-flow, batch-accounting and Turnover relation-heavy writes.
+- [x] 27-03-PLAN — Migrate Workbench, bank-flow, batch-accounting and Turnover relation-heavy writes.
 - [ ] 27-04-PLAN — Migrate pending/input/OA/output invoice-family rules, facts, Drawers and strict consumers.
 - [ ] 27-05-PLAN — Complete imports, tax, ETC, settings, App Health and minimal page activation behavior.
 - [ ] 27-06-PLAN — Delete superseded fan-out paths and close all local correctness/performance gates.

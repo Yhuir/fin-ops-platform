@@ -4,13 +4,14 @@
 
 ## 业务状态
 
-- 当前状态：read model 是写模型之外的派生投影；写入事实不直接改页面投影，而是通过 dirty scope/outbox 触发 worker 重建。
+- 当前状态：read model 是写模型之外的派生投影；普通 canonical 写不直接改页面投影，也不主动写 dirty/outbox。页面访问时 query gate 比较 canonical expected versions，只有 missing/stale scope 才经 gateway 触发 worker。显式 import/reapply/repair/job 可按其声明合同直接写 exact dirty/outbox。
 - 状态事实源：
   - PostgreSQL durable queue：`job.outbox_events`、`job.read_model_dirty_scopes`
   - Readiness 证明层：`read_model.app_status_readiness`
   - Workbench 例外：active generation/readiness metadata
 - 允许流转：
-  - business write -> lifecycle/dirty scope -> outbox event -> worker processing -> projection publish -> readiness fresh
+  - ordinary business write -> canonical source version commit -> consumer page access -> query mismatch -> exact dirty/outbox -> worker -> projection publish -> fresh
+  - explicit import/reapply/repair/job -> declared exact dirty/outbox -> worker -> projection publish -> fresh
   - API miss/stale -> `ReadModelQueryGateway` 返回 refreshing payload -> `ReadModelRefreshGateway` enqueue refresh
   - expected schema/source contract 与 actual projection metadata 不匹配或缺失 -> refreshing/stale reason -> enqueue refresh
   - fresh gate 通过但业务 payload contract 不满足当前 API shape -> 忽略 Redis cache 或返回 refreshing/stale reason -> enqueue refresh
@@ -48,12 +49,12 @@
 | --- | --- | --- | --- |
 | `validated` | `ReadModelScopePolicyRegistry` 已接受 scope | gateway 可生成 durable queue request 或返回 existing active refresh | 绕过 policy 直接写 dirty/outbox。 |
 | `deduped` | gateway 发现同 scope active refresh | API 可返回 `refreshing` 且 `refresh_enqueued=false` | 把去重解释为 fresh 或再次强制写入重复 outbox。 |
-| `queued` | `job.outbox_events` / `job.read_model_dirty_scopes` 已写入 | worker 可 claim；App Status / operation barrier 显示 refreshing | RabbitMQ publish success 被当作状态事实源。 |
+| `queued` | 页面 query miss/stale、显式 job 或 worker dependency 已写 `job.outbox_events` / `job.read_model_dirty_scopes` | worker 可 claim；页面/App Status 显示 refreshing；显式 job barrier 可读取 | RabbitMQ publish success 被当作状态事实源；普通写直接制造 queue。 |
 | `force_refresh_requested` | runbook/API/smoke 通过受控入口请求 | 受权限、scope validation、dedupe、audit 保护；返回 job/readiness proof | 页面任意触发 refresh all；不记录 actor/scope/reason。 |
 | `force_refresh_rejected` | 非法 scope、权限不足、缺少 contract 或 current-effective blocker 不可覆盖 | fail fast 并暴露诊断 | 自动降级到 broad all 或 live scan。 |
-| `barrier_fresh` | operation barrier 目标 scope current-effective fresh | 前端可释放操作 overlay 并重读/应用 projection | 跳过页面自身 fresh gate。 |
-| `barrier_refreshing` | 目标 scope pending/processing/deferred | 前端继续等待或提示后台同步中 | 显示操作失败，除非写 API 本身失败。 |
-| `barrier_blocked` | failed/unavailable/current uncovered failure | API 返回具体 read model/scope/reason | 伪装 fresh 或吞掉 blocker。 |
+| `barrier_fresh` | 显式 import/reapply/job 的目标 scope current-effective fresh | 对应显式流程可结束 job 等待，但仍重读页面 | 用于普通 relation/规则 mutation；跳过页面 fresh gate。 |
+| `barrier_refreshing` | 显式目标 scope pending/processing/deferred | 显式流程继续等待或提示后台同步中 | 把普通写接回全局 overlay。 |
+| `barrier_blocked` | 显式目标 failed/unavailable/current uncovered failure | API 返回具体 read model/scope/reason | 伪装 fresh 或吞掉 blocker。 |
 
 ## Projection 策略状态
 
@@ -79,8 +80,8 @@
 - schema version mismatch
 - source version missing/mismatch
 - 业务 payload shape invalid，例如旧 projection 或旧 Redis payload 不满足当前 API mapper 的必需字段
-- 业务写入后的 `DerivedDataLifecycleService` dirty cascade
-- 高影响写操作可把 `metadata.action_name` 随 dirty/outbox 一起传递，用于 write operation SLO 审计区分具体动作；metadata 不替代权限、审计或业务状态事实源
+- 显式 import/reapply/repair/job 合同声明的 exact lifecycle refresh；普通页面 mutation 不触发 dirty cascade
+- 显式高影响 job 可把 `metadata.action_name` 随 dirty/outbox 一起传递，用于 SLO 审计；metadata 不替代权限、审计或业务事实
 - `startup_stale_scan` 之后的 workbench matching dirty worker 间接更新；startup scan 本身默认不运行，且不得直接刷新用户可见 read model
 - worker shard fan-out / parent scope convergence
 - 手工 runtime scope contract 清理后的 replacement scope

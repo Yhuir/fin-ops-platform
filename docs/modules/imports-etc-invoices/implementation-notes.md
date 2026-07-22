@@ -1,5 +1,10 @@
 # ETC发票导入 实施记录
 
+## 2026-07-23：Cost 改为访问时依赖收敛
+
+- 显式 ETC import 仍只为真实 canonical metadata changed months 输出其注册合同中的精确 Workbench/relation/matching/invoice lifecycle/tax/search scopes。
+- Workbench generation publish 不再投递 `workbench_shard_published`；Cost 不是 import 或 publish 直投目标，只在 Cost 页面访问时先收敛 Workbench 精确月份、再收敛 Cost scope。本条取代下方 2026-07-19 中的旧 Cost 收敛描述。
+
 ## 2026-07-19：ETC link mutation-sensitive 与精确 lifecycle
 
 - 根因：ETC OA create/replay/revoke/manual-status 会重扫并重连整批 canonical invoice；link service 即使未发生字段变化也按 ETC 日期返回月份；API/worker 又以默认 `include_all=true` 直投 Cost、historical repair，并重复调度 matching，导致一次 batch 状态变化形成跨月队列风暴。

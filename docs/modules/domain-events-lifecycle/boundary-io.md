@@ -1,12 +1,12 @@
 # Domain Events 与 Derived Lifecycle 模块边界与 I/O
 
-日期：2026-07-19
+日期：2026-07-23
 
 ## 模块化状态
 
 - 状态：close
 - 当前边界可信度：high
-- 目标边界：领域事件和 derived lifecycle 负责把业务写操作转成明确 downstream dirty scopes/jobs，不直接承载页面业务逻辑。
+- 目标边界：领域事件和 derived lifecycle 只为显式 import/reapply/repair/batch 工作输出明确 scopes/jobs；普通写操作不用 lifecycle 做跨页 read-model fan-out。
 - 当前缺口：无阻塞缺口；新增 event、domain 或 executor 时仍必须补 scope contract、执行器 wiring 和回归测试。
 - 旧代码删除状态：`import_state_changed` 已成为通用导入持久化后的唯一派生刷新事件；`Application` / runtime worker 中旧手写 import-state downstream fan-out 已移除，`workbench_read_model` executor 和 workbench scope invalidation helper 都不再隐藏刷新 invoice usage collection。无生产调用方的 `etc_oa_submitted` / `etc_oa_revoked` 事件、domain/job mapping 已删除。
 
@@ -14,7 +14,7 @@
 
 ### 负责
 
-- 领域事件类型、derived lifecycle 执行、跨 read model/worker dirty fan-out。
+- 领域事件类型、显式 batch/import/repair lifecycle 执行与它们声明的 read-model scopes。
 - 前端 domain event hook/API 的轻量提示和刷新协调。
 
 ### 不负责
@@ -39,11 +39,11 @@
 | Derived job | runtime worker/background job | 可观察、可失败恢复 |
 | `import_state_changed` event | import persistence callbacks / runtime import worker | 导入 facts 保存后必须通过该 event fan out 到 workbench、relation、invoice lifecycle、pending invoice、invoice usage collection、bank detail/balance、bank-flow rule batches、cost 和 search；具体 scope 由 per-domain override 表达，禁止在 persist callback 手写逐个 downstream refresh；bank detail 输出必须保留 `import_facts_changed` reason 合同。 |
 | invoice usage collection dirty scope | `input_invoice_usage` / `output_invoice_collection` / `oa_pending_payment` workers | 只能作为显式 derived lifecycle domain 输出；不得挂在 `workbench_read_model` executor 的隐藏副作用里。 |
-| `bank_flow_rule_batch_changed` event | `bank-flow-rule-batches` / runtime workers | 只用于流水规则批量处理写入；必须 fan out 到 `bank_flow_rule_batch_read_model` 及 Workbench/relation/cost/search 下游，不能复用 `no_oa_bank_batch_changed` 表示 bank-flow 写入。 |
-| `bank_transaction_category_changed` event | bank detail category mutation | legacy/non-UoW 分类路径按精确月份输出 `bank_flow_rule_batch_read_model`；现代 Turnover bank-row category UoW 必须在同一业务事务直接批量写等价 `bank_flow_rule_batch` dirty/outbox，不能等事务后补偿。 |
-| `bank_auto_tag_rules_changed` event | bank details automatic tag rule writer | 除 bank detail/no-OA/workbench/cost/search 外必须输出 `bank_flow_rule_batch_read_model`；无可证明的精确月份时允许 `all` fan-out，不能遗漏未来批次资格重算。 |
-| `etc_import_confirmed` event | ETC import worker / application service | 仅在 existing canonical invoice 元数据真实变化时按精确月份、`include_all=false` 输出 Workbench/relation/matching、invoice lifecycle、tax 和 search；不得直接投递 cost 或 historical repair。Cost 只能在对应 Workbench 月 generation 成功发布后由 `workbench_shard_published` 收敛；历史修复只能走显式运维事件。 |
-| `etc_business_batch_status_changed` event | ETC manual submitted / draft revoke | 只按 business batch scope 与成员发票日期计算精确月份，输出 Workbench、matching 和 search；不得直投 relation、invoice lifecycle、tax、cost 或 historical repair。Cost 仅因 Workbench 成功发布而有序收敛一次。 |
+| `bank_flow_rule_batch_changed` event | explicit bank-flow repair/import tooling | 不得由 tag-rule save、submit、withdraw 或 reset 调用。若由显式 repair/import 保留，只能输出声明的 bank-flow exact scopes，不得 fan-out Workbench/relation/Cost/Search。 |
+| `bank_transaction_category_changed` event | explicit import/reapply compatibility owner | 普通银行分类/Turnover UoW 只推进 canonical category version，不写 bank-flow 或其它页面 dirty/outbox。消费页在访问时比较该版本。 |
+| `bank_auto_tag_rules_changed` event | explicit reapply/import owner | 规则保存本身不调用该事件；只有用户明确“重新应用规则”或 import 合同可输出有界 exact month scopes，不得因无月份 fallback `all` 污染未访问页面。 |
+| `etc_import_confirmed` event | ETC import worker / application service | 仅在 existing canonical invoice 元数据真实变化时按精确月份、`include_all=false` 输出该显式 import 合同仍声明的 Workbench/relation/matching、invoice lifecycle、tax 和 search；不得直接投递 cost 或 historical repair。Cost 在页面访问时按 Workbench→Cost 两阶段 gate 收敛，不消费 `workbench_shard_published`。 |
+| `etc_business_batch_status_changed` event | ETC manual submitted / draft revoke | 只按 business batch scope 与成员发票日期计算精确月份，输出当前显式合同声明的 Workbench、matching 和 search；不得直投 relation、invoice lifecycle、tax、cost 或 historical repair。Cost 仅在后续访问时收敛。 |
 | Frontend refresh signal | pages | 不伪装 fresh |
 
 ## 持久化与投影

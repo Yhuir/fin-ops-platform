@@ -165,14 +165,14 @@ extra 保存只影响 Turnover ledger read model 和局部 UI；前端可发 `tu
 | closure drawer | 允许同组多条未闭环 flow rows；至少一收一支且收支合计差额为 0 才允许确认；仅已关联 OA 或发票但未闭环的 flow row 不阻断确认；点击确定前先等台账 fresh、reload grouped payload，并用最新 row versions 提交 | manual closure/cross-group/fresh-rebind tests |
 | extra drawer | 从真实 flow row 打开，隐藏技术 relation id，可保存 extra | extra drawer tests |
 | export dialog | preview 后下载 XLSX，不按 JSON 解析 blob | export API/page tests |
-| operation pending | tag-selection、extra、confirm、withdraw 成功后显示全屏 overlay，等待 `turnover_ledger` operation barrier fresh，再 reload grouped ledger | operation overlay / page tests |
+| operation pending | 只覆盖 tag-selection、extra、confirm、withdraw HTTP 请求；成功后结束全局阻塞并 reload grouped normal GET，non-fresh 使用页面内状态 | page/API tests |
 | workbench relation feedback | grouped payload 中的 flow row 展示后端 projection 给出的正向 relation chip：`linked_oa=true` 显示“已关联 OA”，`linked_invoice=true` 显示“已关联 发票”，`cash_closure_linked=true` 显示“收支闭环”。未发生闭环时不显示负向闭环 chip。toolbar 的确认/撤回只看 `cash_closure_*` 字段，不看 OA/发票 chip；这些字段来自后端 projection，不来自前端本地事件 | API mapper / page tests |
 
 前端跨页事件：
 
 - confirm/withdraw 成功后发 `turnoverRelationUpdated` 和 `workbenchRelationUpdated`。
 - extra 保存成功后发 `turnoverLedgerExtraUpdated`。
-- 这些事件只提示当前浏览器刷新；后端 dirty/outbox/read model freshness 才是事实源。
+- 这些事件只提示当前可见浏览器重跑正常 GET；事件不携带 freshness 事实。canonical source version 与页面 read-model gate 才是事实源。
 
 ## Read Model / Worker 状态
 
@@ -180,7 +180,7 @@ Read model key：`turnover_ledger`
 
 Scope type：`turnover_ledger`
 
-Scope key：正常写路径为 affected month scopes；`all` 仅作为 fan-out command 或无法在写前确定月份的例外路径。
+Scope key：普通写只返回信息性 affected month scopes，不 enqueue；页面 GET 发现 stale 时按精确月份入队。普通写无法确定月份时 fail closed，不能退回 `all` fan-out。
 
 Worker instance：`turnover-ledger`
 
@@ -203,7 +203,7 @@ refresh 触发来源：
 - bank-row-tags batch，按 affected months refresh。
 - relation extra 保存。
 - manual closure confirm，按 affected months refresh；无法解析 affected months 时才退回 `all`。
-- withdraw，按 affected months refresh；cash closure withdraw 等写前无法解析 affected months 的例外路径可使用 `all` fan-out。
+- withdraw 只保存 canonical relation/history 并返回可解析的 affected months；无法解析时 fail closed，不使用 `all` fan-out。
 - 底层银行流水分类、relation、extra、settings、source versions 变化。
 
 worker 流程：

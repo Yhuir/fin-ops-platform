@@ -1,6 +1,6 @@
 # Workbench 正式关系边界与 I/O
 
-日期：2026-07-20
+日期：2026-07-23
 
 ## Owner
 
@@ -34,9 +34,9 @@ Release A 已移除旧 `read_model.workbench_candidate_matches`、`read_model.wo
 | active relation | Workbench/downstream | deduped aligned `row_ids`/`row_types`，一个 row 只属于一个 active case |
 | frozen completion requirement | reconciliation-workbench | 含银行流水的普通 relation 创建时写 `requires_oa`、`requires_invoice`、tag codes 和规则版本；关联台据此判定 paired/unpaired，缺失 fail closed。规则保存不得追溯改写；下游 linked ownership 仍只由 active status 决定。 |
 | history | Audit/withdraw | before/after、actor、event、timestamp、reason、rule/provenance |
-| command result | caller | relation/version/affected rows/months/idempotent replay/outbox ids/barrier targets |
+| command result | caller | relation/version/affected rows/months/idempotent replay；普通关系操作的 `freshness_targets` / `operation_barrier_targets` 为空，月份/scope 只作读侧重校验提示 |
 | ETC relation enrichment | Workbench projection/Audit | `special_metadata.etc_batch_link` 保存 external/business/submission/OA identity、发票数量与金额；一个 external batch 只能有一个 active relation owner。 |
-| dirty/outbox | durable runtime | 同事务 enqueue `workbench_relation`、`workbench` 和明确下游 scope |
+| access-time refresh request | durable runtime | 普通 confirm/withdraw/split/exception/ignore/cash/relation 写入不 enqueue 任何页面 read model。消费页的正常 GET 比较 canonical relation source version 与已发布证明，只对当前访问 scope 通过正式 gateway 入队 |
 | read distribution | downstream pages | 只有 `linked` / `unlinked`；non-fresh 不能返回为业务空集合 |
 
 ## 合法 relation modes
@@ -48,7 +48,7 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 ## 事务与一致性
 
 - command service 必须接收明确 repository/idempotency/freshness 依赖，不接收整个 `Application`。
-- relation、history、idempotency、audit/dirty/outbox 的业务事务必须原子；失败不得留下半关系或漏刷新。
+- relation、history、idempotency 与 audit 的业务事务必须原子；失败不得留下半关系。普通关系写入不承担下游 dirty/outbox 事务，页面访问通过 canonical version drift 发现并收敛。
 - repository adapter 持久化 scoped snapshot 后，只能通过 domain service 的 changed-case delta I/O 更新进程内镜像；禁止读取并重建全局 relation/history snapshot，也禁止 adapter 直接写 domain service 私有状态。
 - 单 case active relation 读取必须走显式窄 I/O；禁止 adapter fallback 先复制全局 snapshot 再筛 case，禁止为只读校验加载该 case 全部 history。
 - 在线 command 持久化必须走显式 changed-case delta I/O：relation upsert/delete 与本次新 history event 在同一事务写入，history 只能 append/idempotent upsert，不得先删除再重写该 case 的完整历史。全量 relation/history replacement 只用于 migration、restore 或 repair，不得重新进入 confirm/cancel/withdraw 热链。
@@ -63,7 +63,7 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 
 - `require_fresh=True` 时，missing/stale/source mismatch 必须返回非 fresh 并受控 enqueue，调用方不得把空 rows 当作无关系。
 - 下游只有 active relation 是 linked 证据。历史关系、显示 tags、候选搜索结果、matching evidence 都不是支付/关联/成本证据。
-- downstream read models 必须记录并比较 relation source versions，relation mutation 后旧 payload 不得继续 fresh。
+- downstream read models 必须记录并比较 relation source versions，relation mutation 后旧 payload 不得继续 fresh。当前访问只能 enqueue 本页面所需的精确 scope；未访问/隐藏页面不得由 relation 写路径提前 fan-out。
 - 批量账务未提交列表专用 `get_batch_accounting_by_row_ids(..., submitted_year=...)` 必须在同一 bundle 中读取所有候选/年度 scopes 的 current-effective dirty status、候选 rows、referenced groups 和年度 `submitted_count`，保留原 status/reason/source-version 合同；不能恢复独立 count port 或回退通用逐 scope 查询。`workbench_relation_groups_batch_accounting_year_scope_group_idx` 只覆盖 linked batch-accounting 年度聚合谓词，不改变其他 consumer 的查询或数据。已提交年度 list 继续使用自己的固定 I/O。
 
 ## 文件范围

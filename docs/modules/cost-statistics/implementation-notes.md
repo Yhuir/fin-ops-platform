@@ -1,5 +1,11 @@
 # 成本统计 实施记录
 
+## 2026-07-23 - Workbench→Cost 访问时两阶段收敛
+
+- 普通 relation/turnover/bank-flow 写入与 Workbench generation publish 均不再投递 Cost。`CostStatisticsQueryService` 先比较 canonical Workbench expected versions 与 active generation；上游 stale 时只 enqueue 当前 Workbench 月份并返回 `refresh_dependency=workbench`，不同时 enqueue Cost。Workbench fresh 后的下一次 GET 才允许 enqueue 当前 Cost scope。
+- Cost 页面首次访问、轻量 relation 提示、focus/hidden→visible 均复用正常 explorer GET。refreshing 使用 150ms 间隔、最长 3s 的页面自身有界重试；无 operation barrier、无全局 App Status 轮询、无新 worker/表/协调器。
+- 本条取代下方历史记录中“`cost_statistics_relation_delta` 为普通写入可达主链”和“`workbench_shard_published` 保证 Cost 最终收敛”的描述。现存 delta worker/repository 能力暂不是普通写可达路径，将在 27-06 按旧代码门禁分类，不得作为 fallback。
+
 ## 2026-07-22 - 银行流水中心 OA 成本资格与多 OA 明确金额拆分
 
 - 生产 v11 验证发现 `cost_statistics` worker 未读取/透传 durable event 的 `force_refresh`：`active:all` / `all:all` 虽重新发布为 fresh，实际仍聚合旧 v10 月分片，独立 Audit 以旧 `txn:index` row key、跨月残留和 expected-set 缺行为证据阻断。修复保持原架构，只补齐 parent→month force metadata、forced month 全量重建和 unchanged/delta bypass；不新增表、worker、queue 或 endpoint。

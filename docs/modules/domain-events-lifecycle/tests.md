@@ -4,7 +4,7 @@
 
 ## 修改前影响面清单
 
-Domain event 和 derived lifecycle 是跨页面回归的主要传播层。修改前必须先写清楚影响面：
+Domain event 是前端轻量重校验提示，derived lifecycle 只为显式 import/reapply/repair/batch 工作传播 scopes；普通页面写入不得再把它们作为跨页 read-model fan-out。
 
 | 影响面 | 当前事实源 | 需要关注的旧功能 |
 | --- | --- | --- |
@@ -23,19 +23,19 @@ Domain event 和 derived lifecycle 是跨页面回归的主要传播层。修改
 | `invoice_import_confirmed` | workbench、relation、matching、invoice lifecycle、tax、cost、search | 关联台、待找发票、税金、成本、发票使用/收款 | `tests/test_derived_data_lifecycle_service.py` |
 | `bank_import_confirmed` | bank balance/detail、workbench、relation、invoice lifecycle、cost、search | 银行明细、关联台、待找发票、成本 | `tests/test_derived_data_lifecycle_service.py` |
 | `import_state_changed` | workbench、relation、invoice lifecycle、pending invoice、input invoice usage、output collection、OA pending payment、bank detail/balance、cost、search | 导入确认后的全部派生刷新 | `test_import_state_changed_maps_runtime_import_refresh_domains`、`test_import_state_persistence_uses_lifecycle_domain_scope_overrides`、`tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_workbench_sql_runtime.py` |
-| `etc_import_confirmed` | 精确月份的 workbench、relation、matching、invoice lifecycle、tax、search；Cost 由成功 Workbench publish 后的 `workbench_shard_published` 收敛 | ETC、税金、成本、关联台 | `test_etc_import_confirmed_refreshes_invoice_consumers_without_direct_cost_or_repair_fanout`；`etc_oa_submitted` / `etc_oa_revoked` 已删除 |
-| `etc_business_batch_status_changed` | 精确月份的 workbench、matching、search；无 tax/direct-cost/history | ETC、关联台；Cost 仅由 Workbench publish 收敛 | `test_etc_business_batch_status_changed_refreshes_only_exact_workbench_and_search_scope` |
+| `etc_import_confirmed` | 精确月份的 workbench、relation、matching、invoice lifecycle、tax、search；Cost 在访问时收敛 | ETC、税金、成本、关联台 | `test_etc_import_confirmed_refreshes_invoice_consumers_without_direct_cost_or_repair_fanout`；无 `workbench_shard_published` Cost 目标 |
+| `etc_business_batch_status_changed` | 精确月份的 workbench、matching、search；无 tax/direct-cost/history | ETC、关联台；Cost 只在访问时收敛 | `test_etc_business_batch_status_changed_refreshes_only_exact_workbench_and_search_scope` |
 | `oa_rebuilt` / `oa_attachment_invoice_cache_updated` | OA cache、workbench、invoice lifecycle、input invoice usage、output collection、OA pending payment、tax、cost、historical ETC、search | OA 待付款、发票使用/收款、关联台、税金、成本 | `test_oa_rebuilt_maps_...`；附件缓存由后续 OA 模块补 |
-| `pair_relation_changed` | bank detail、workbench、relation、matching、invoice lifecycle、pending invoice、invoice usage collection、tax、cost、search | 关联台、银行明细、发票使用/收款、OA 待付款、待找发票、税金、成本 | `test_pair_and_exception_changes_...`、`test_pair_relation_lifecycle_metadata_limits_downstream_refreshes` |
-| `exception_case_changed` | bank detail、workbench、relation、matching、invoice lifecycle、pending invoice、tax、cost、search | 关联台、银行明细、待找发票、税金、成本 | `test_pair_and_exception_changes_...`；不得隐式刷新 invoice usage collection |
-| `bank_transaction_category_changed` | bank detail、workbench deterministic matching、invoice lifecycle、pending invoice、cost、search | 银行明细、关联台、往来款、免 OA、成本 | `test_bank_transaction_category_changed_...` |
-| `bank_auto_tag_rules_changed` | bank detail、no-OA、workbench deterministic matching、invoice lifecycle、pending invoice、cost、search | 银行明细、免 OA、关联台、待找发票、成本 | `test_bank_auto_tag_rules_changed_...` |
+| `pair_relation_changed` | 普通 relation 写不调用；仅显式 repair/import 可保留精确合同 | 各消费页访问时收敛 | architecture guards 保护零 ordinary downstream jobs |
+| `exception_case_changed` | 普通 exception 写不调用 | 关联台访问时收敛 | Workbench action/API/frontend regression |
+| `bank_transaction_category_changed` | 普通 category 写不调用；显式 import/reapply 依合同保留 | 银行明细与消费页访问时收敛 | bank-detail access-time tests |
+| `bank_auto_tag_rules_changed` | 只属于显式 reapply/import；规则 save 不调用 | 银行明细与消费页访问时收敛 | bank auto-tag save/reapply tests |
 | `pending_invoice_rules_changed` | workbench deterministic matching、invoice lifecycle、pending invoice、tax、cost、search | 待找发票、税金、成本、关联台 | `test_pending_invoice_rules_changed_...` |
 | `pending_invoice_manual_invoice_confirmed` / `pending_invoice_attach_existing_invoice_confirmed` | bank detail、workbench、invoice lifecycle、pending invoice、invoice usage collection、tax、cost、search | 待找发票、发票使用/收款、OA 待付款、银行明细、税金、成本 | `test_manual_invoice_confirmed_...` |
 | `pending_invoice_income_status_override_confirmed` | pending invoice、search | 待找发票 | `test_income_status_override_...` |
-| `no_oa_bank_batch_changed` | no-OA、workbench | 免 OA、关联台 | `test_no_oa_bank_batch_changed_...` |
-| `bank_flow_rule_batch_changed` | bank-flow rule batch、workbench、relation、cost、search | 流水规则批量处理、关联台 | `test_bank_flow_rule_batch_changed_refreshes_bank_flow_read_model`、`test_lifecycle_bank_flow_rule_batch_refresh_has_runtime_executor` |
-| `batch_accounting_relation_changed` | bank detail、workbench relation | 批量账务、银行明细、关联台 | `test_batch_accounting_relation_changed_...` |
+| `no_oa_bank_batch_changed` | 普通 legacy no-OA 写不调用 | legacy API 访问时收敛 | no-OA service/API regression |
+| `bank_flow_rule_batch_changed` | 普通 save/submit/withdraw/reset 不调用；显式 repair/import 不得跨页 fan-out | 流水规则页访问时收敛 | bank-flow zero-target + access-time tests |
+| `batch_accounting_relation_changed` | 普通 submit/withdraw 不调用 | 批量账务/关联台访问时收敛 | batch-accounting zero-target regression |
 | `turnover_relation_changed` | workbench/relation/matching、cost/search | 往来款、关联台、成本 | all-event safe plan guard；页面模块继续补 |
 | `tax_certified_import_confirmed` | invoice lifecycle、tax、search | 税金、进项使用 | lifecycle ordering test；税金模块继续补 |
 | `etc_business_batch_changed` | ETC/tax/cost/search 相关派生域 | ETC、税金、成本 | all-event safe plan guard；ETC 模块继续补 |

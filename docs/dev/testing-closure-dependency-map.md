@@ -117,24 +117,24 @@
 | API routes / query service | `TurnoverLedgerApiRoutes`、`TurnoverLedgerQueryService` | grouped/legacy flat 兼容、导出、detail/extra contract、fresh/stale/missing 不伪装 fresh |
 | Query service | `TurnoverLedgerQueryService` | stale/missing SQL read model 不能伪装 fresh；必须 enqueue `api_stale` / `api_miss` |
 | Business core | `TurnoverLedgerService`、`TurnoverRelationService`、`TurnoverLedgerExtraService` | deterministic 不是已闭环；人工闭环必须同组、同对方、同语义、一收一支、零差额 |
-| Write boundary | `TurnoverLedgerWriteFacade`、`TurnoverLedgerWriteUnitOfWork`、write adapters | stale precondition、idempotency、rollback、dirty/outbox 必须在同一写边界内被保护 |
+| Write boundary | `TurnoverLedgerWriteFacade`、`TurnoverLedgerWriteUnitOfWork`、write adapters | stale precondition、idempotency、rollback、canonical relation/category/event/audit 必须在同一写边界内被保护；普通写必须零 read-model queue I/O |
 | Read model worker | `TurnoverLedgerReadModelRefreshService`、`TurnoverLedgerSqlProjectionBuilder` | projection 不得保存半成品；worker 必须 complete dirty scope |
 | App Status | `app_status_domain_registry.py`、`app_status_read_model_registry.py`、`runtime_worker_registry.py` | `turnover_ledger` domain 必须绑定 `turnover-ledger` worker 和 `turnover_ledger.read_model.refresh` |
 
-`turnover-ledger` 写入 fan-out：
+`turnover-ledger` 写入与访问时收敛：
 
 | 写入动作 | Dirty/outbox / event | 受影响页面 |
 | --- | --- | --- |
-| tag-selection 保存 | `turnover_ledger.read_model.refresh` | 往来款 |
-| bank-row-tags batch | `bank_detail`、`workbench`、`turnover_ledger` refresh | 银行明细、关联台、往来款、成本统计、搜索 |
-| relation extra 保存 | `turnover_ledger.read_model.refresh`，前端 `turnoverLedgerExtraUpdated` | 往来款 |
-| modern manual closure confirm | Turnover domain 无副作用校验 + canonical Workbench active pair relation，`turnoverRelationUpdated` / `workbenchRelationUpdated` | 往来款、关联台、成本统计、搜索 |
-| modern closure withdraw | 按 canonical case id 撤回 Workbench relation 并恢复可恢复关系，`turnoverRelationUpdated` / `workbenchRelationUpdated` | 往来款、关联台、成本统计、搜索 |
-| legacy/generic relation withdraw | 显式存在的 Turnover relation withdrawn；历史 closure 同步撤回对应 Workbench case | 往来款、关联台、成本统计、搜索 |
+| tag-selection 保存 | canonical settings/version/audit；零 read-model target | 当前可见往来款页 normal GET |
+| bank-row-tags batch | canonical bank category/event/audit；零 downstream target | 当前可见往来款页 normal GET；其它页面访问时自检 |
+| relation extra 保存 | canonical extra/version/audit；`turnoverLedgerExtraUpdated` 只作轻量提示 | 当前可见往来款页 normal GET |
+| modern manual closure confirm | Turnover domain 无副作用校验 + canonical Workbench active pair relation；零 dirty/outbox fan-out | 当前往来款页 normal GET；关联台/Cost/Search 访问时各自收敛 |
+| modern closure withdraw | 按 canonical case id 撤回 Workbench relation并恢复可恢复关系；零 dirty/outbox fan-out | 当前往来款页 normal GET；关联台/Cost/Search 访问时各自收敛 |
+| legacy/generic relation withdraw | 显式存在的 Turnover relation withdrawn；历史 closure 同步撤回对应 canonical Workbench case；零 read-model target | 当前页 normal GET；其他消费者访问时自检 |
 
 当前 Browser e2e：
 
-- `web/e2e/turnover-ledger-flow.spec.ts`：真实 Chromium 中进入外部往来款页，展开同一公司两条真实 flow rows，manual closure confirm 前触发 `turnover_ledger:all` fresh gate 与 grouped reload/rebind，写成功后等待后端 operation barrier，进入成本统计验证 `/api/cost-statistics/explorer` fresh 和闭环成本行，再从“收支闭环” flow row toolbar 撤回并验证 grouped payload 移除闭环 chip。
+- `web/e2e/turnover-ledger-flow.spec.ts`：真实 Chromium 中进入外部往来款页，展开同一公司两条真实 flow rows，manual closure confirm 前以 grouped GET reload/rebind 最新 rows；写成功后只重跑当前页 normal GET。随后独立进入成本统计，验证 `/api/cost-statistics/explorer` 通过自身两阶段 gate fresh；再从“收支闭环” flow row toolbar 撤回并以当前页 GET 验证 chip 移除，明确零 operation barrier。
 
 ## 模块细化：no-oa-bank-batches
 
@@ -145,22 +145,22 @@
 | Frontend page | 无当前 no-OA 页面 | 当前页面归 `bank-flow-rule-batches`；新增 no-OA 前端入口必须重新做边界评审。 |
 | Frontend API mapper | 无当前 no-OA feature | 当前 `web/src/features/bankFlowRuleBatches/api.ts` 归 `bank-flow-rule-batches`；legacy no-OA API regression 主要由后端/API tests 覆盖。 |
 | Route facade | `routes_no_oa_bank_batches.py` | HTTP status、version conflict、actor mapping、partial failure aggregation、unknown batch/error shape |
-| Application service | `NoOaBankBatchApplicationService` | read model missing/stale 不同步 rebuild、after_mutation、durable queue enqueue、Workbench scope expansion |
+| Application service | `NoOaBankBatchApplicationService` | read model missing/stale 不同步 rebuild；普通 mutation 返回信息性 scopes 与空 targets，不保留 after_mutation enqueue 或 Workbench scope expansion |
 | Business core | `NoOaBankBatchService` | draft/submitted/withdrawn/stale/conflict、internal_transfer pairing、active relation exclusion、legacy relation migration |
 | Tag selection | `NoOaBankBatchTagSelectionService` / `AppSettingsService` | tag selection version、inactive selected cleanup、auto-tag rules labels 即时反映 |
 | Write target contract | `NoOaBankBatchApplicationService` + `NoOaBankBatchService` + Workbench relation writer；由 `tests/test_no_oa_bank_batch_application_service.py`、`tests/test_no_oa_bank_batch_workbench_integration.py` 和 Workbench UoW tests 保护 | no-OA batch 状态、Workbench pair relation、audit 与 durable refresh 由各真实 owner 协作；不存在未接入生产的平行 Bankdetail UoW |
 | Read model worker | `NoOaBankBatchReadModelRefreshService` | stale source version event 不得 rebuild/overwrite；worker 必须 complete dirty scope |
 | App Status | `app_status_domain_registry.py`、`app_status_read_model_registry.py`、`runtime_worker_registry.py` | `no_oa_bank_batches` domain 必须绑定 `no-oa-bank-batch` worker 和 `no_oa_bank_batch.read_model.refresh` |
 
-`no-oa-bank-batches` 写入 fan-out：
+`no-oa-bank-batches` 写入与访问时收敛：
 
 | 写入动作 | Dirty/outbox / event | 受影响页面 |
 | --- | --- | --- |
-| tag-selection 保存 | `no_oa_bank_batch.read_model.refresh` | 免 OA |
-| submit-selection | `no_oa_bank_batch_changed`、Workbench pair relation、`workbenchRelationUpdated` | 免 OA、关联台、银行明细、成本统计、搜索 |
-| internal_transfer confirm-link | no-OA batch submit + `relation_mode=no_oa_bank_batch` | 关联台、免 OA、银行明细、成本统计、搜索 |
-| batch withdraw | pair relation cancel + `no_oa_bank_batch_changed`、`workbenchRelationUpdated` | 免 OA、关联台、银行明细、成本统计、搜索 |
-| bank auto tag rules changed | `no_oa_bank_batch` all-scope refresh | 免 OA、银行明细相关候选 |
+| tag-selection 保存 | canonical settings/version/audit；零 read-model target | no-OA consumer 访问时自检 |
+| submit-selection | no-OA batch + canonical Workbench pair relation；零 dirty/outbox fan-out | no-OA/关联台等消费者访问时自检 |
+| internal_transfer confirm-link | no-OA batch submit + `relation_mode=no_oa_bank_batch`；零 downstream target | 当前关联台 normal GET；no-OA 访问时自检 |
+| batch withdraw | canonical pair relation cancel + no-OA batch history；零 downstream target | consumer 访问时自检 |
+| bank auto tag rules changed | bank-detail owner 的 canonical 规则变化；不从 no-OA 普通写链触发 all-scope | no-OA consumer 访问时自检 |
 
 当前 Browser e2e：
 
@@ -178,22 +178,22 @@
 | Business service | `BatchAccountingService` | 金额不一致说明、active relation 排除、version conflict、合法日常报销 OA 行、历史 collision repair |
 | Relation read facade | `WorkbenchRelationReadFacade` | missing/stale/unavailable 不能伪装 fresh；non-fresh 时必须 enqueue refresh 并透出 reason/scope |
 | Relation projection | `WorkbenchRelationSqlProjectionBuilder`、`WorkbenchRelationDistributionMapper` | active batch relation、OA invoice snapshot、linked/unlinked rows、source version 和去重 |
-| Write target | `WorkbenchRelationCommandService` + durable repository | submit/withdraw 不能产生半写入；撤回只 cancel current batch relation 并保留历史说明，OA invoice `existing_case` 显示归属不能恢复成 active relation；repository 是 dirty/outbox fan-out 边界 |
+| Write target | `WorkbenchRelationCommandService` + durable repository | submit/withdraw 不能产生半写入；撤回只 cancel current batch relation 并保留历史说明，OA invoice `existing_case` 显示归属不能恢复成 active relation；repository 只保存 canonical relation/history/idempotency/audit，普通写必须零 dirty/outbox |
 | Read model worker | `WorkbenchRelationReadModelRefreshService`、`workbench-relation` worker | `workbench_relation.read_model.refresh` 必须可注册、可观测、可重试 |
 | App Status | `app_status_domain_registry.py`、`app_status_job_registry.py`、`runtime_worker_registry.py` | `batch_accounting` domain 必须绑定 `workbench_relation` readiness 和 relation refresh job |
 
-`batch-accounting` 写入 fan-out：
+`batch-accounting` 写入与访问时收敛：
 
 | 写入动作 | Dirty/outbox / event | 受影响页面 |
 | --- | --- | --- |
-| batch submit | Workbench relation command save + durable dirty/outbox fan-out；前端 `workbenchRelationUpdated` 只提示刷新 | 批量账务、关联台、银行明细、待找发票、进项/销项/OA 待付款、成本统计、搜索 |
-| batch withdraw | Workbench relation command cancel + durable dirty/outbox fan-out；前端 `workbenchRelationUpdated` 只提示刷新 | 批量账务、关联台、银行明细、待找发票、进项/销项/OA 待付款、成本统计、搜索 |
+| batch submit | canonical Workbench relation command save；零 dirty/outbox fan-out；`workbenchRelationUpdated` 只提示可见 consumer 重读 | 当前批量账务页 normal GET；其他消费者访问时自检 |
+| batch withdraw | canonical Workbench relation command cancel/history；零 dirty/outbox fan-out；`workbenchRelationUpdated` 只作提示 | 当前批量账务页 normal GET；其他消费者访问时自检 |
 | legacy collision repair | 显式 service repair / mutation 路径；GET 列表不允许 repair | 批量账务、关联台 relation projection |
 | relation read model missing/stale | `WorkbenchRelationReadFacade` enqueue refresh | 批量账务 mutation 禁用、App Status busy/blocked |
 
 当前 Browser e2e：
 
-- `web/e2e/batch-accounting-flow.spec.ts`：真实 Chromium 中选择未提交批量账务银行流水和 OA 行，submit 后等待 `workbench_relation` operation barrier，再重新读取并在 submitted bucket 展示 relation/OA 明细；随后填写撤回原因，withdraw 后等待 barrier 并回到未提交状态。
+- `web/e2e/batch-accounting-flow.spec.ts`：真实 Chromium 中选择未提交批量账务银行流水和 OA 行，submit 后不调用 operation barrier，只通过当前页正常 GET 在 submitted bucket 展示 relation/OA 明细；随后填写撤回原因，withdraw 后以同一 GET 回到未提交状态。
 
 ## 模块细化：imports-bank-transactions
 
@@ -271,7 +271,7 @@
 | ETC service | `EtcService` | import session freshness、duplicate/idempotency、attachments、business batch merge、partial success、delete/release |
 | Import processing | `ImportProcessingService` | `etc_invoice_import.confirm` 创建/复用 task-scoped business batch、progress、mark imported/failed、保存 ETC metadata/PDF/XML 附件关系并只关联已存在 canonical invoice |
 | Import cleanup | `EtcReconciliationImportCleanupService`、`EtcBusinessBatchDeleteService` | 删除/重导只清理 ETC 自有 facts 和 changed months，不调用通用 import service 删除或改写 canonical invoice |
-| Derived lifecycle | `DerivedDataLifecycleService`、`runtime_worker_handlers.py` | `etc_import_confirmed` 仅按真实 changed months 刷新 Workbench/relation/matching、invoice lifecycle、tax offset、search；Cost 由 Workbench publish 收敛，historical repair 不进入热路径 |
+| Derived lifecycle | `DerivedDataLifecycleService`、`runtime_worker_handlers.py` | `etc_import_confirmed` 仅按真实 changed months 刷新显式 import 合同中的 Workbench/relation/matching、invoice lifecycle、tax offset、search；Cost 在页面访问时先收敛 Workbench、再收敛自身，historical repair 不进入热路径 |
 | App Status | `app_status_domain_registry.py`、`app_status_job_registry.py`、`runtime_worker_registry.py` | `imports_etc_invoices` 绑定 `import` worker 和 `etc_invoice_import` job；共享 `import.process.requested` envelope 仍需后续专项校准 |
 
 `imports-etc-invoices` fan-out：
@@ -282,7 +282,7 @@
 | zip preview | `EtcZipFilterPreview` + `EtcImportSession` + audit，不刷新业务 read model | ETC 导入页 |
 | confirm queued | `etc_invoice_import` background job，RabbitMQ 模式下 `import.process.requested` | 导入页、App Status/App Health |
 | confirm processed | ETC business batch、ETC invoice metadata/附件关系、已存在 canonical invoice 关联、task imported/failed | ETC 票据管理、关联台 summary、税金抵扣、成本统计、search |
-| lifecycle refresh | `etc_import_confirmed` -> workbench、invoice lifecycle、tax offset、search -> `workbench_shard_published` -> cost；`etc_business_batch_status_changed` 只到精确 Workbench/matching/search | 关联台、税金抵扣、成本统计、ETC 票据管理、App Health |
+| lifecycle refresh | `etc_import_confirmed` -> workbench、invoice lifecycle、tax offset、search；`etc_business_batch_status_changed` 只到精确 Workbench/matching/search。Cost 不消费 publish fan-out，访问时按 Workbench→Cost 两阶段 gate 收敛 | 关联台、税金抵扣、成本统计、ETC 票据管理、App Health |
 | task/business batch delete | `etc_reconciliation_task_deleted` 或 business batch reset；不触碰 canonical invoice pool | ETC 票据管理、关联台 summary row、税金/成本、search |
 | preview stale | API `409 stale_reconciliation_task_preview` 或 `409 preview_stale`，前端清空 preview | 当前导入页 |
 
@@ -355,8 +355,8 @@
 | reconciliation task 创建/上传/confirm | task workflow state + source file metadata；对象存储失败不落半写入 | ETC 票据管理、导入页 ready task |
 | ETC ZIP preview/confirm | `etc_invoice_import` background job；成功后保存 ETC invoice metadata/PDF/XML、关联已存在 canonical invoice、同步 business batch | ETC 票据管理、导入页、税金抵扣、关联台 summary、App Status/App Health |
 | 创建 OA 草稿 | business batch `oa_confirmation_pending` + audit | ETC 票据管理、真实 OA 系统、App Status |
-| manual `submitted` | business batch submitted + linked task closed + 精确 `etc_business_batch_status_changed`；前端只发 `etcBusinessBatchUpdated` | ETC 票据管理、关联台、search；Cost 仅由 Workbench publish 收敛 |
-| manual `not_submitted` | 释放本地 ETC 发票占用 + audit + 精确 `etc_business_batch_status_changed`；前端只发 `etcBusinessBatchUpdated` | ETC 票据管理、关联台、search；Cost 仅由 Workbench publish 收敛 |
+| manual `submitted` | business batch submitted + linked task closed + 精确 `etc_business_batch_status_changed`；前端只发 `etcBusinessBatchUpdated` | ETC 票据管理、关联台、search；Cost 仅在访问时收敛 |
+| manual `not_submitted` | 释放本地 ETC 发票占用 + audit + 精确 `etc_business_batch_status_changed`；前端只发 `etcBusinessBatchUpdated` | ETC 票据管理、关联台、search；Cost 仅在访问时收敛 |
 | business batch delete/reset | 本地批次/task/source/import/ETC metadata 清理；submitted summary 释放；可能取消 active relation | ETC 票据管理、关联台、税金抵扣、成本统计、search |
 | reconciliation task delete | 若绑定 business batch，委托同一 business batch delete；否则写 deleted tombstone | ETC 票据管理、导入页 ready task |
 | 历史迁移 execute | 旧 active relation/ETC 批次转业务批次 + Workbench invalidation | ETC 票据管理、关联台 paired/open 区 |
@@ -675,13 +675,13 @@
 | --- | --- | --- | --- | --- | --- |
 | 银行流水导入确认 | import API / import worker | `bank_import_confirmed` | bank balance/detail、workbench、workbench relation、workbench matching、invoice lifecycle、cost statistics、search | 银行明细、关联台、待找发票、成本统计、App Health | 导入确认幂等、dirty scope、worker 入队、旧页面不把 stale 当 fresh |
 | 发票导入确认 | import API / import worker | `invoice_import_confirmed` | workbench、workbench relation、workbench matching、invoice lifecycle、tax offset、cost statistics、search | 关联台、待找发票、税金抵扣、进项/销项/OA 待付款、成本统计 | API shape、source_versions、invoice lifecycle 先于下游页面 |
-| ETC 导入确认 | `/api/etc/import/confirm` | `etc_import_confirmed` + downstream `workbench_shard_published` | workbench、invoice lifecycle、tax offset、search；Cost 顺序收敛 | ETC、关联台、税金、成本 | ETC 汇总行、散票隐藏、税金刷新、成本有序收敛；历史修复不进入热路径 |
+| ETC 导入确认 | `/api/etc/import/confirm` | `etc_import_confirmed`；无 `workbench_shard_published` Cost fan-out | workbench、invoice lifecycle、tax offset、search；Cost 访问时两阶段收敛 | ETC、关联台、税金、成本 | ETC 汇总行、散票隐藏、税金刷新、Cost 访问从 Workbench 依赖到自身 fresh；历史修复不进入热路径 |
 | OA 同步/重建 | OA sync worker / manual import | `oa_rebuilt`、`oa_attachment_invoice_cache_updated` | OA adapter cache、workbench、invoice lifecycle、tax/cost/search | 关联台、OA 待付款、进项/销项、税金、成本 | OA 源只读、附件发票 identity、worker readiness |
-| 关系确认/撤回 | workbench actions、batch accounting、turnover | relation command repository dirty/outbox fan-out、`turnover_relation_changed` | bank detail、workbench、relation、invoice lifecycle、pending invoice、tax/cost/search | 关联台、银行明细、批量账务、往来款、待找发票、税金、成本 | stale write contract、idempotency、跨页刷新、关系 read model |
-| 批量账务提交/撤回 | `/api/batch-accounting/submit`、`/api/batch-accounting/{relation_id}/withdraw` | relation command repository dirty/outbox fan-out | workbench relation、workbench、invoice lifecycle、pending invoice、cost/search | 批量账务、关联台、银行明细、待找发票、进项/销项/OA 待付款、成本统计、搜索 | relation read model fresh gate、差额说明、cancel current relation、GET 只读、route 不重复 fan-out |
-| 标签/规则保存 | bank details、pending invoices、turnover | `bank_transaction_category_changed`、`bank_auto_tag_rules_changed`、`pending_invoice_rules_changed` | bank detail、no-OA、workbench/candidates/matching、invoice lifecycle、pending invoice、cost/search、tax | 银行明细、免 OA、关联台、待找发票、成本、税金 | 配置版本、scope 去重、不误伤无关页面 |
+| 关系确认/撤回 | workbench actions、batch accounting、turnover | canonical relation/history/idempotency/audit/version；零 page target | 各消费者访问时按 canonical source proof 收敛 | 关联台、批量账务、往来款及后续访问页 | stale write contract、idempotency、当前页 normal GET、隐藏页零 I/O、关系 read-model access gate |
+| 批量账务提交/撤回 | `/api/batch-accounting/submit`、`/api/batch-accounting/{relation_id}/withdraw` | canonical relation commit；零 dirty/outbox fan-out | workbench relation / workbench 在各自访问时收敛 | 批量账务、关联台 | relation fresh gate、cancel current relation、GET 只读、route/repository 零 fan-out |
+| 标签/规则保存 | bank details、bank-flow、turnover | canonical settings/category version；普通 save 零 page target | 当前可见页 normal GET，其它页访问时收敛 | 当前页与后续访问的语义消费页 | 配置版本、资格中性零工作、无 `all` fallback、不误伤无关页面 |
 | 税金认证导入 | tax offset import | `tax_certified_import_confirmed` | invoice lifecycle、tax offset、tax month cache、search | 税金抵扣、进项使用、App Health | import job、read model freshness、已认证状态 |
-| no-OA 批处理 | no-OA API | `no_oa_bank_batch_changed` | no-OA read model、workbench、relation、cost、search | 免 OA、关联台、成本 | 批量提交/撤回、read model stale polling |
+| no-OA 批处理 | no-OA API | canonical legacy batch/relation facts；零 page target | no-OA/workbench 在访问时收敛 | legacy 免 OA API、关联台 | 批量提交/撤回、零旧 bank-flow 污染、access-time stale/fresh |
 | 设置重置 / backfill | settings data reset | `settings_reset_completed`、`startup_stale_scan` | 多数 read model/cache/session cleanup | 所有列表页、App Health | protected targets 不删除、全局 busy/blocked、worker readiness |
 | 项目范围变化 | settings/project scope | `project_scope_changed` | cost statistics、search | 成本统计、搜索 | 成本统计 all/month scope、search 刷新 |
 | OA 反提草稿/提交确认 | input invoice usage OA reverse | service/API 状态写入，可能影响 invoice usage/OA 关系 | input invoice usage、invoice lifecycle、OA 关系、审计 | 进项发票使用、设置、App Health | 目标申请人凭据、preview stale、外部 OA 失败、提交历史、不泄露内部 id |

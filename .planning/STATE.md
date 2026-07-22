@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 27 Plan 02 completed; Plan 27-03 relation-heavy write migration next.
-last_updated: "2026-07-23T02:25:00+08:00"
-last_activity: 2026-07-23 - Phase 27 Plan 02 bank-details/cost-statistics access-time freshness slice completed
+stopped_at: Phase 27 Plan 03 completed; Plan 27-04 invoice-family write and Drawer migration next.
+last_updated: "2026-07-23T04:24:02+08:00"
+last_activity: 2026-07-23 - Phase 27 Plan 03 relation-heavy ordinary writes now converge only on consumer access
 progress:
   total_phases: 23
   completed_phases: 2
   total_plans: 35
-  completed_plans: 27
-  percent: 77
+  completed_plans: 28
+  percent: 80
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 ## Current Position
 
 Phase: 27 of 27 (按页面访问收敛 Read Model)
-Plan: 27-03 of 27-07
-Status: Plan 27-02 bank/cost vertical slice complete; relation-heavy write migration next
-Last activity: 2026-07-23 - ordinary bank/cost saves now have zero downstream fan-out and reconcile through current-page access
+Plan: 27-04 of 27-07
+Status: Plan 27-03 relation-heavy write migration complete; invoice-family write/Drawer migration next
+Last activity: 2026-07-23 - Workbench, bank-flow/no-OA, batch-accounting and Turnover writes now have zero ordinary downstream fan-out
 
-Progress: [████████░░] 77%
+Progress: [████████░░] 80%
 
 ## Performance Metrics
 
@@ -51,6 +51,10 @@ Progress: [████████░░] 77%
 
 ### Decisions
 
+- Phase 27-03: Ordinary Workbench relation, bank-flow/no-OA, batch-accounting and Turnover writes persist canonical facts/history/idempotency/audit only; freshness and operation-barrier targets are empty.
+- Phase 27-03: Current visible consumers reconcile through normal GET, hidden consumers do no page I/O until visible, and existing lightweight notifications only trigger independent GETs in already visible windows.
+- Phase 27-03: Workbench keeps active-generation atomic publish but no longer publishes Cost refreshes; Cost access first converges exact Workbench months and only then its own exact scope.
+- Phase 27-03: Existing Cost relation-delta capability is unreachable from ordinary writes and cannot act as a fallback; Phase 27-06 owns its final deletion or explicit-operations classification.
 - Phase 27-02: Redis remains payload-only; current canonical/schema/dirty proof must pass before a cached bank/cost/tax/OA payload is accepted.
 - Phase 27-02: Ordinary bank category/rule writes and cost tag-rule saves own zero downstream refresh/barrier targets; bank auto-tag reapply is the explicit bounded month-shard exception.
 - Phase 27-02: Bank category/confirmation canonical drift is proven by a set-based month signature persisted in bank-detail schema v11; no per-row jobs or new coordinator were introduced.
@@ -159,5 +163,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-07-23
-Stopped at: Phase 27 Plan 02 completed; Plan 27-03 relation-heavy write migration remains.
-Resume file: .planning/phases/27-read-model-fan-out/27-02-SUMMARY.md
+Stopped at: Phase 27 Plan 03 completed; Plan 27-04 invoice-family write and Drawer migration remains.
+Resume file: .planning/phases/27-read-model-fan-out/27-03-SUMMARY.md

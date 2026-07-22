@@ -41,7 +41,7 @@
 | mismatch | 显示金额不一致提示和差额说明输入；说明为空时前端阻止提交，后端再次校验。 |
 | bucket 切换 | `unsubmitted` 与 `submitted` 切换时清空 bank/OA selection、差额说明、撤回状态。 |
 | search/filter | 右侧 OA 搜索只过滤展示，不改变后端事实或已选中金额。 |
-| operation pending | submit/withdraw API 成功后显示全屏 overlay，等待 `workbench_relation` operation barrier fresh，再重新加载当前 bucket。 |
+| operation pending | 只覆盖 submit/withdraw HTTP 请求本身；成功后结束全局阻塞并触发当前页面正常 GET。GET 非 fresh 时使用页面内 refreshing 状态有界重试。 |
 | submit success | barrier 与 reload 完成后显示成功 feedback，发送 `workbenchRelationUpdated`。 |
 | withdraw success | barrier 与 reload 完成后关闭撤回 dialog，显示成功 feedback，发送 `workbenchRelationUpdated`。 |
 | permission disabled/hidden | 当前没有独立权限开关；若后续接入权限，必须同时覆盖 API 403 和前端 hidden/disabled。 |
@@ -61,7 +61,7 @@
 Refresh 触发来源：
 
 - 批量账务列表读取：通过 `WorkbenchRelationReadFacade` 以 `require_fresh=true` 请求 relation read model；缺失/stale scope 经现有 freshness/gateway 边界去重入队，GET 不同步 rebuild、不直接写 queue。
-- 批量账务提交/撤回：`WorkbenchRelationCommandService` repository 写入 relation 后，按 relation payload scope 投递 `workbench_relation`、`workbench` 和下游 read model dirty/outbox。
+- 批量账务提交/撤回：`WorkbenchRelationCommandService` repository 只写 canonical relation/history/idempotency/audit；不投递 `workbench_relation`、`workbench` 或下游 read model dirty/outbox。页面访问时由各 query gate 对比 canonical version。
 - 关联台关系确认/撤回：`pair_relation_changed`。
 - 银行流水或发票导入、OA rebuild、标签规则等影响 Workbench relation 的生命周期事件。
 - backfill / runtime worker retry。

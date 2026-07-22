@@ -27,7 +27,7 @@
 - 保存后规则持久化，刷新仍保持勾选。
 - API 不递增银行标签版本。
 - 未提交主/子标签只显示 OA、发票都未勾选的 active 标签；需要任一单据的标签在抽屉中仍可见，但完全退出未提交区。
-- 保存 API 成功反馈和抽屉关闭不等待 worker；精确月份 barrier 与列表重读在后台完成。
+- 保存 API 成功反馈和抽屉关闭不等待 worker；当前页随后只通过正常列表 GET 收敛精确月份，零 operation barrier。
 
 ## BRB-E2E-002 提交形成 active relation 后进入已配对
 
@@ -40,7 +40,7 @@
 
 1. 在流水规则批量处理页筛选该标签。
 2. 选择 4 条银行流水并提交。
-3. command 成功后确认页面立即清空选择；在后台等待 operation barrier 完成。
+3. command 成功后确认页面立即清空选择，并通过当前页正常 GET 收敛；不得等待 operation barrier。
 4. 打开关联台。
 
 验收：
@@ -62,7 +62,7 @@
 1. 在关联台查看尚无 active relation 的银行/发票事实。
 2. 确认它们分别位于 unpaired singleton。
 3. 选择对应事实并通过确认关联预览提交。
-4. 等待 operation barrier。
+4. 通过关联台自己的正常 GET 等待其 freshness gate 收敛。
 
 验收：
 
@@ -86,7 +86,7 @@
 
 - existing relation metadata、relation mode 和 history 不变。
 - active relation 继续 paired，不因当前规则变化回到 unpaired。
-- 资格变化时只产生受影响月份 bank-flow read model refresh，不产生 Workbench/turnover relation 写入；资格未变化时零 bank-flow refresh。
+- 资格变化时只返回信息性受影响月份，不写 bank-flow/Workbench/turnover dirty/outbox；访问当前月份时才由 bank-flow query gate 精确 enqueue。资格未变化时同样零 projection work。
 
 ## BRB-E2E-008 已提交批次批量重置回未提交候选
 
@@ -99,7 +99,7 @@
 
 1. 在页面提交一组银行流水。
 2. 点击“重置全部已提交”。
-3. 等待 operation barrier。
+3. command 成功后通过当前页正常 GET 收敛。
 4. 查看未提交列表。
 
 验收：

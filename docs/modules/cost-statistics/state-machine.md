@@ -36,7 +36,7 @@
 | --- | --- | --- |
 | loading | 页面首次请求 explorer，或 scope/view/domain/lifecycle refresh 触发当前 scope 重读 | 显示内联“正在加载成本统计”状态轨；成本业务区域 `inert`，上一 scope payload 立即退出可操作内容，不渲染假数据。 |
 | export reference loading | 项目/费用类型导出缺少 fresh 全期间筛选选项 | 用户动作后才并行读取两个 `scope=all&page_size=1` bounded facets；请求期间禁止重复触发，fresh 后打开导出中心，non-fresh/失败则保持关闭并显示错误。 |
-| refreshing | API/App Status 当前精确 cost scope 返回 loading/pending/processing/refreshing，或标签规则 operation barrier 未完成 | 显示“成本数据正在同步”并锁定业务区域；不能把空 accepted payload 或上一 scope 内容当作当前最终结果。 |
+| refreshing | explorer GET 判定 Workbench dependency 或当前精确 Cost scope 为 loading/pending/processing/refreshing | 显示“成本数据正在同步”并锁定业务区域；150ms 有界重试 normal GET，不能把空 accepted payload 或上一 scope 内容当作当前最终结果。 |
 | stale | API 返回 stale/schema/source mismatch，或 App Status 显示当前精确 cost scope stale | 显示“正在更新至最新数据”并锁定；其他月份或其他 read model non-fresh 不得误锁当前页面。 |
 | unavailable | API/App Status 当前精确 cost scope 为 missing/failed/unavailable | 显示“成本数据暂未就绪”，保持锁定并提供状态轨内的“重新检查”。 |
 | fresh | 当前 request identity 的 explorer payload 明确 fresh，且 App Status 当前精确 cost scope 没有 non-fresh 反证 | 一次性移除成本业务区域 `inert` 与拦截层；如焦点曾被锁定迁移，安全地恢复原控件或页面标题。 |

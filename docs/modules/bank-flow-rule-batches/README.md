@@ -22,7 +22,7 @@
 当前代码使用 bank-flow 独立 HTTP route、application boundary、read model key、refresh producer、worker event、批次/read model 表和 tag-rule settings key 承载新业务入口；新页面和生产 API 不接收或返回 `selected_tag_codes` 作为规则事实源。
 
 - Frontend page: `web/src/pages/BankFlowRuleBatchPage.tsx`，通过 `/bank-flow-rule-batches` route 作为流水规则批量处理页。
-- Frontend feature: `web/src/features/bankFlowRuleBatches/api.ts`（HTTP/DTO mapping）、`types.ts`（public DTO/domain types）、`policy.ts`（状态/权限策略）、`viewModel.ts`（格式化、规则 grid view model、operation barrier target helpers）、`components.tsx`（分页、状态标签、label rail）。API 指向 `/api/bank-flow-rule-batches`。
+- Frontend feature: `web/src/features/bankFlowRuleBatches/api.ts`（HTTP/DTO mapping）、`types.ts`（public DTO/domain types）、`policy.ts`（状态/权限策略）、`viewModel.ts`（格式化、规则 grid view model、access-time refresh helpers）、`components.tsx`（分页、状态标签、label rail）。API 指向 `/api/bank-flow-rule-batches`。
 - Backend route: `backend/src/fin_ops_platform/app/routes_bank_flow_rule_batches.py`，只承载 `/api/bank-flow-rule-batches/*`。
 - Backend service: `backend/src/fin_ops_platform/services/bank_flow_rule_batch_application_service.py`，新提交写 `relation_mode=bank_flow_rule_batch`；共享批次计算内核在中性 `bank_batch_application_service.py` / `bank_batch_service.py`，由显式 relation mode/schema/ID prefix 直接生成正式 bank-flow 领域错误和身份，bank-flow 不继承 no-OA application service，route 不保留 legacy 错误翻译或 fallback。
 - Backend read model: `backend/src/fin_ops_platform/services/bank_flow_rule_batch_read_model_repository.py`、`bank_flow_rule_batch_read_model_refresh.py`、`bank_flow_rule_batch_read_model_refresh_producer.py`。

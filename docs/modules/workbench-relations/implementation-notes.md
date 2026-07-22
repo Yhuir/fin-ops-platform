@@ -1,5 +1,11 @@
 # 关联台关系事实源 实施记录
 
+## 2026-07-23 - 普通关系写迁移为访问时收敛
+
+当前合同取代本文中更早关于 relation transaction/UoW/repository 直投 Workbench、Cost、OA、invoice、Search 或其它页面的描述。confirm/withdraw/cancel/split/exception/ignore/cash 只原子保存 canonical relation/history/idempotency/audit 与版本，`freshness_targets` / `operation_barrier_targets` 为空。当前可见消费页的正常 GET 比较 canonical expected version 与已发布 proof，只 enqueue 自身精确 scope；隐藏页面延迟到再次可见。
+
+Workbench active-generation 原子发布仍保留，但发布完成不再产生 `workbench_shard_published` Cost fan-out。Cost 访问先收敛 Workbench 精确月份，再收敛当前 Cost scope。旧 UoW target planner、downstream discovery、repository hidden enqueue 和前端 ordinary operation barrier 已从生产主链删除；本文下方的历史记录只用于追溯，不再是当前合同。
+
 ## 2026-07-18 - 删除 relation → Cost Statistics 提前直投链
 
 当前合同由本条取代本文更早关于 relation repository/UoW 直接投递 `cost_statistics`、cost-bearing 分支、broad cost scope 和 direct cost write-SLO receipt 的历史描述。relation transaction 现在只投递 Workbench 与明确直接 downstream；Cost Statistics 只能在对应 Workbench 月 generation 精确版本成功发布后，由 `WorkbenchReadModelRefreshService` 以 `workbench_shard_published` 派生。该派生 enqueue 失败时 Workbench dirty 不得完成，确保不会把缺失成本更新伪装为已收敛。

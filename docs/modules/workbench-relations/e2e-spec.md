@@ -12,8 +12,8 @@
 | --- | --- | --- | --- |
 | `WB-REL-E2E-001` | 关联台 confirm -> bank details linked tags | P0 | confirm 后，银行明细从未关联变为 linked 标签，且列表重新请求。 |
 | `WB-REL-E2E-002` | 关联台 confirm -> pending invoices linked status | P0 | confirm 后，待找发票 linked-only 状态更新为已开票，显示发票号码/OA 申请人。 |
-| `WB-REL-E2E-003` | batch accounting submit/withdraw -> relation barrier -> bucket recovery | P0 | 批量账务提交后进入已提交 bucket，撤回后回未提交 bucket，期间等待 `workbench_relation` barrier。 |
-| `WB-REL-E2E-004` | turnover closure confirm/withdraw -> turnover/workbench barriers -> grouped recovery | P0 | 外部往来闭环后显示收支闭环，撤回后恢复，期间等待目标 freshness barriers。 |
+| `WB-REL-E2E-003` | batch accounting submit/withdraw -> current-page GET -> bucket recovery | P0 | 批量账务提交后零 read-model target，通过当前页 normal GET 进入已提交 bucket；撤回后以同一 gate 回未提交 bucket。 |
+| `WB-REL-E2E-004` | turnover closure confirm/withdraw -> current-page GET -> grouped recovery | P0 | 外部往来闭环写入只保存 canonical relation，当前往来页 normal GET 后显示收支闭环；撤回后同样恢复，零 freshness barrier。 |
 | `WB-REL-E2E-005` | 非正式历史输入不驱动 linked-only 业务状态 | P0 | 下游页面不能把非 linked 的历史输入推断成已关联 chip；支付/开票/收款/成本等业务状态只按 linked relation 计算。 |
 | `WB-REL-E2E-006` | relation read model non-fresh | P0 | 页面显示 freshness 诊断，不把空 relation 当真实空，不全局禁用具备 canonical write safety 的无关 mutation。 |
 | `WB-REL-E2E-007` | canonical write safety 和 idempotency | P0 | 重复提交不创建第二条 active relation；version conflict 显示明确错误。 |

@@ -27,11 +27,11 @@
 | 类别 | 适用 | 主要覆盖 |
 | --- | --- | --- |
 | 1. Business core | 是 | 确定性证据、365 日边界、N:M:K exact-sum、歧义/金额-only/红冲 fail-closed、撤回阻断指纹、paired/unpaired 精确分区 |
-| 2. Service layer | 是 | repository 输入、orchestrator 单 UoW、幂等、rollback、history、dirty/outbox、旧状态清理 |
+| 2. Service layer | 是 | repository 输入、orchestrator 单 UoW、幂等、rollback、history、普通 relation 写零 dirty/outbox、旧状态清理 |
 | 3. API contract | 是 | paired/unpaired shape、分页/search/detail、confirm/withdraw、版本冲突、权限、unknown state fail-fast |
 | 4. Read model/cache/worker | 是 | active generation 原子发布、freshness、all-scope 组合、exact generation stats、stats 缺失/发布竞态 fail-closed、bulk refresh、旧 generation 不冒充 fresh |
 | 5. Frontend interaction | 是 | 两区渲染、singleton 未配对、选择/preview/撤回、loading/empty/error/stale、权限与分页 |
-| 6. End-to-end | 是 | canonical import/OA -> matching -> formal relation -> worker -> paired；withdraw -> singleton unpaired；跨页 relation fan-out |
+| 6. End-to-end | 是 | canonical import/OA -> matching -> formal relation；当前页访问触发 Workbench fresh 后 paired；withdraw -> 当前页访问后 singleton unpaired；跨页访问时独立收敛与非消费者隔离 |
 | 7. Regression | 是 | 520 样例、13 张发票、ETC/OA 附件、no-OA、batch accounting、turnover、cost/search/invoice lifecycle |
 
 ## 核心固定测试

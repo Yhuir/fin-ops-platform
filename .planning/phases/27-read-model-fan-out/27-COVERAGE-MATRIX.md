@@ -1,7 +1,7 @@
 # Phase 27 页面访问 freshness 与写入口覆盖矩阵
 
-> 状态：`planned`。本文是 Phase 27 的测试时覆盖合同，不是生产运行时 registry，也不表示目标架构已经上线。
-> 当前生产仍存在写后 lifecycle fan-out 与页面 operation barrier；只有对应 vertical slice 完成并通过本地、部署后与生产 probe，行状态才可改为 `migrated`。
+> 状态：`planned` 表示未实施，`implemented-local` 表示代码/文档/本地门禁已通过但尚未上线，`migrated` 只用于部署后生产 probe 通过的 slice。本文是 Phase 27 覆盖合同，不是生产 runtime registry。
+> 27-02/27-03 相关 slice 当前为 `implemented-local`；生产仍运行上一 release，不得把本地结果表述为已上线。只有 27-07 部署后正确性/性能 probe 通过，行状态才可改为 `migrated`。
 
 ## Operation classes
 
@@ -44,21 +44,21 @@
 
 | Read model key | Scope / all semantics | Query owner | Page or resource consumers | Access-time proof and migration target | Status |
 | --- | --- | --- | --- | --- | --- |
-| `workbench` | `workbench`; month active generation；`all=active_month_shard_aggregate` | `WorkbenchQueryFacade` | `reconciliation-workbench`, `cost_statistics`, `search` | active generation/source versions/current-effective queue；保留原子发布例外 | `planned` |
-| `workbench_relation` | `workbench_relation`; month；`all=fan_out_command` | `WorkbenchRelationReadFacade` | `reconciliation-workbench`, `batch-accounting`, invoice family | exact relation scope source versions；消费者不得把旧 relation projection 伪装 fresh | `planned` |
-| `bank_detail` | `bank_detail`; month；`all=fan_out_command` | `BankDetailsApplicationService` | `bank-details`, `pending-invoices`, `cost-statistics` | exact month signature/source versions + queue state | `planned` |
-| `bank_account_balance` | `bank_account_balance`; global `all=queryable_all_scope` | `BankDetailsApplicationService` | `bank-details`, App Status | all-only canonical balance source version | `planned` |
+| `workbench` | `workbench`; month active generation；`all=active_month_shard_aggregate` | `WorkbenchQueryFacade` | `reconciliation-workbench`, `cost_statistics`, `search` | active generation/source versions/current-effective queue；保留原子发布例外 | `implemented-local` |
+| `workbench_relation` | `workbench_relation`; month；`all=fan_out_command` | `WorkbenchRelationReadFacade` | `reconciliation-workbench`, `batch-accounting`, invoice family | exact relation scope source versions；消费者不得把旧 relation projection 伪装 fresh | `implemented-local` |
+| `bank_detail` | `bank_detail`; month；`all=fan_out_command` | `BankDetailsApplicationService` | `bank-details`, `pending-invoices`, `cost-statistics` | exact month signature/source versions + queue state | `implemented-local` |
+| `bank_account_balance` | `bank_account_balance`; global `all=queryable_all_scope` | `BankDetailsApplicationService` | `bank-details`, App Status | all-only canonical balance source version | `implemented-local` |
 | `pending_invoice` | `pending_invoice`; `direction:filter_group[:month]`; bare all forbidden | `PendingInvoiceReadModelService` | `pending-invoices`, `invoice_lifecycle` | page-first-screen exact scope + bank/relation dependency versions | `planned` |
 | `search` | `search`; month；`all=fan_out_command` | `Search read API` | global search, settings manual OA search | requested month index source versions | `planned` |
 | `invoice_lifecycle` | `invoice_lifecycle`; month；`all=fan_out_command` | `InvoiceLifecycleReadFacade` | pending/input/output/OA invoice resources | exact lifecycle + upstream source proof；strict stale consumer | `planned` |
 | `input_invoice_usage` | `input_invoice_usage`; month；`all=fan_out_command` | `InputInvoiceUsageReadModelService` | `input-invoice-usage` | exact month + relation/lifecycle/rule signature | `planned` |
 | `output_invoice_collection` | `output_invoice_collection`; month；`all=fan_out_command` | `OutputInvoiceCollectionReadApplicationService` | `output-invoice-collections` | exact month + relation/lifecycle/receipt/rule versions | `planned` |
 | `oa_pending_payment` | `oa_pending_payment`; month；`all=fan_out_command` | `OaPendingPaymentReadModelService` | `oa-pending-payments`, lifecycle resource | exact OA snapshot/relation/schema versions | `planned` |
-| `cost_statistics` | `cost_statistics`; `active/all` shard + queryable parent | `CostStatisticsQueryService` | `cost-statistics` | requested view parent + Workbench/Bank Detail dependency-bound gate | `planned` |
+| `cost_statistics` | `cost_statistics`; `active/all` shard + queryable parent | `CostStatisticsQueryService` | `cost-statistics` | Workbench expected/active gate 先收敛，再检查 Cost/Bank Detail dependency-bound gate；两级不同时 enqueue | `implemented-local` |
 | `tax_offset` | `tax_offset`; month；`all=fan_out_command` | `TaxOffsetQueryService` | `tax-offset` | exact invoice/certified source versions | `planned` |
-| `no_oa_bank_batch` | `no_oa_bank_batch`; month；`all=fan_out_command` | `NoOaBankBatchApplicationService` | legacy API/regression only | exact canonical no-OA relation versions；不新增页面依赖 | `planned` |
-| `bank_flow_rule_batch` | `bank_flow_rule_batch`; month；`all=fan_out_command` | `BankFlowRuleBatchApplicationService` | `bank-flow-rule-batches` | exact bank/tag eligibility/relation versions | `planned` |
-| `turnover_ledger` | `turnover_ledger`; month；`all=fan_out_command` | `TurnoverLedgerQueryService` | `turnover-ledger` | exact ledger + canonical relation source bundle | `planned` |
+| `no_oa_bank_batch` | `no_oa_bank_batch`; month；`all=fan_out_command` | `NoOaBankBatchApplicationService` | legacy API/regression only | exact canonical no-OA relation versions；不新增页面依赖 | `implemented-local` |
+| `bank_flow_rule_batch` | `bank_flow_rule_batch`; month；`all=fan_out_command` | `BankFlowRuleBatchApplicationService` | `bank-flow-rule-batches` | exact bank/tag eligibility/relation versions；普通写零 target | `implemented-local` |
+| `turnover_ledger` | `turnover_ledger`; month；`all=fan_out_command` | `TurnoverLedgerQueryService` | `turnover-ledger` | exact ledger + canonical relation source bundle；普通写零 target | `implemented-local` |
 
 ## Mutating frontend API function coverage
 
@@ -177,18 +177,18 @@
 | `enqueue-tax-server` | `backend/src/fin_ops_platform/app/server.py` | `.enqueue_read_model_refresh(` | `1` | `migrate` | thin route helper；保持 gateway-backed，删除业务 fan-out调用 |
 | `enqueue-cost-runtime` | `backend/src/fin_ops_platform/services/cost_statistics_runtime_service.py` | `.enqueue_read_model_refresh(` | `1` | `retain` | access/force refresh gateway wrapper |
 | `enqueue-cost-query` | `backend/src/fin_ops_platform/services/cost_statistics_query_service.py` | `.enqueue_read_model_refresh(` | `2` | `retain` | access-time dependency-bound exact scope miss/stale owner |
-| `barrier-cost-page` | `web/src/pages/CostStatisticsPage.tsx` | `waitForOperationFreshness(` | `1` | `migrate` | tag rule save barrier 已删除并改为 query-time refetch；保留 relation mutation 的 current exact scope proof |
+| `barrier-cost-page` | `web/src/pages/CostStatisticsPage.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | 页面首次/事件/hidden→visible 均复用正常 GET；refreshing 使用 3s 有界自身重试 |
 | `barrier-input-page` | `web/src/pages/InputInvoiceUsagePage.tsx` | `waitForOperationFreshness(` | `1` | `migrate` | ordinary writes改为 visible scope access reconcile；explicit OA job可保留 |
-| `barrier-batch-accounting-page` | `web/src/pages/BatchAccountingPage.tsx` | `waitForOperationFreshness(` | `2` | `migrate` | relation commit 后当前 page exact proof；移除跨页面 targets |
+| `barrier-batch-accounting-page` | `web/src/pages/BatchAccountingPage.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | relation commit 后当前可见页面正常 GET，无跨页 targets |
 | `barrier-bank-page` | `web/src/pages/BankDetailsPage.tsx` | `waitForOperationFreshness(` | `1` | `retain` | ordinary category/rule save 已零 barrier；唯一 caller 属于显式 reapply batch 的 exact month job wait |
 | `barrier-tax-page` | `web/src/pages/TaxOffsetPage.tsx` | `waitForOperationFreshness(` | `3` | `migrate` | plan current month exact proof；certified import explicit job |
-| `barrier-turnover-page` | `web/src/pages/TurnoverLedgerPage.tsx` | `waitForOperationFreshness(` | `2` | `migrate` | current ledger exact scope；删除 Workbench/search/cost cross-page wait |
-| `barrier-workbench-page` | `web/src/pages/ReconciliationWorkbenchPage.tsx` | `waitForOperationFreshness(` | `2` | `migrate` | current active generation only；下游页面访问时收敛 |
+| `barrier-turnover-page` | `web/src/pages/TurnoverLedgerPage.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | command 后只重跑 current ledger normal GET；删除 Workbench/search/cost cross-page wait |
+| `barrier-workbench-page` | `web/src/pages/ReconciliationWorkbenchPage.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | command 后只重跑当前 active-generation normal GET；下游页面访问时收敛 |
 | `barrier-etc-page` | `web/src/pages/EtcTicketManagementPage.tsx` | `waitForOperationFreshness(` | `1` | `retain` | explicit reconciliation/import job only；普通 batch fact write不得 broad wait |
 | `barrier-oa-page` | `web/src/pages/OaPendingPaymentsPage.tsx` | `waitForOperationFreshness(` | `2` | `migrate` | current OA exact scope；删除跨页面 wait |
 | `barrier-pending-page` | `web/src/pages/PendingInvoicesPage.tsx` | `waitForOperationFreshness(` | `3` | `migrate` | current direction/filter/month scope；rule save不得 rebuild all |
 | `barrier-output-page` | `web/src/pages/OutputInvoiceCollectionsPage.tsx` | `waitForOperationFreshness(` | `1` | `migrate` | current output exact scope；receipt settings不 rebuild |
-| `barrier-bank-flow-page` | `web/src/pages/BankFlowRuleBatchPage.tsx` | `waitForOperationFreshness(` | `1` | `migrate` | current batch scope；bulk submit remains explicit |
+| `barrier-bank-flow-page` | `web/src/pages/BankFlowRuleBatchPage.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | 规则/submit/withdraw/reset 成功后只重跑当前 normal GET |
 | `barrier-manual-oa-table` | `web/src/components/settings/OaManualSearchImportTable.tsx` | `waitForOperationFreshness(` | `2` | `migrate` | settings table refetch；search在访问时收敛 |
 | `barrier-oa-audit-icon` | `web/src/components/oaPendingPayments/OaPendingPaymentAuditIcon.tsx` | `waitForOperationFreshness(` | `1` | `retain` | explicit user audit/reconcile action；只等 exact OA scope |
 | `barrier-import-workflow` | `web/src/components/imports/ImportWorkflowPage.tsx` | `waitForOperationFreshness(` | `1` | `retain` | explicit import batch completion；目标必须来自 receipt exact scopes |

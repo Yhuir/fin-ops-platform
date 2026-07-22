@@ -13,7 +13,7 @@
 | `IMPORT-ETC-E2E-007` | confirm 失败 | confirm API/worker 入队失败时，页面必须显示错误，不展示“已开始后台导入”，不把下游 read model 伪装成 fresh。 |
 | `IMPORT-ETC-E2E-008` | confirm job feedback | 可确认 session 提交后必须展示 background job feedback；job source 应指向 `imports_etc_invoices` 和 `etc_tickets`，不能走通用 `/imports/files/confirm`。 |
 | `IMPORT-ETC-E2E-009` | 权限和系统保护 | `read_export_only` 不能上传、预览或确认；系统 write-safety blocked 时不能执行确认。 |
-| `IMPORT-ETC-E2E-010` | derived lifecycle fan-out | canonical metadata 真变更时，`etc_import_confirmed` 必须只按精确月份触发 Workbench、invoice lifecycle、tax offset 和 search；Cost 必须由 Workbench publish 后的 `workbench_shard_published` 有序收敛，historical repair 不进入热路径。页面必须通过 freshness/status 判断下游是否可读。 |
+| `IMPORT-ETC-E2E-010` | explicit import scopes + access convergence | canonical metadata 真变更时，`etc_import_confirmed` 必须只按精确月份触发显式 import 合同声明的 Workbench、invoice lifecycle、tax offset 和 search；不直投 Cost，Workbench publish 也不投 `workbench_shard_published`。Cost 页面在访问时先收敛 Workbench，再收敛当前 Cost scope；historical repair 不进入热路径。 |
 | `IMPORT-ETC-E2E-011` | 真实基础设施 worker drain | PostgreSQL/RabbitMQ/Redis/systemd import worker、derived lifecycle worker、对象存储、真实 OA 草稿和下游 read model freshness 必须在 staging 或生产只读 smoke 验证。 |
 
 ## 非目标

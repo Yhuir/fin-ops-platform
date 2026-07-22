@@ -42,14 +42,15 @@ durable dirty scope
 ```text
 unpaired singleton selection
   -> preview locks canonical row set + expected versions
-  -> command/UoW creates active relation
-  -> operation barrier fresh
+  -> command/UoW creates active relation only
+  -> current page normal GET compares canonical source version
+  -> exact Workbench scope converges on access
   -> paired group
 
 paired group
   -> withdraw preview locks active case + expected versions
-  -> command/UoW withdraws/cancels relation
-  -> operation barrier fresh
+  -> command/UoW withdraws/cancels relation only
+  -> current page normal GET converges on access
   -> each no-longer-owned fact becomes an unpaired singleton
 ```
 

@@ -47,7 +47,7 @@ read model 查询边界必须 fail-closed。调用 `ReadModelQueryGateway` 时�
 
 `read_model_scope_policy.py` 是 refresh scope 入口契约。除 `cost_statistics` 与 `pending_invoice` 的特殊 scope 外，主要页面 read model（`bank_detail`、`bank_account_balance`、`bank_flow_rule_batch`、`input_invoice_usage`、`output_invoice_collection`、`oa_pending_payment`、`invoice_lifecycle`、`search`、`tax_offset`、`turnover_ledger`、`workbench`、`workbench_relation`）接受 month 或 `all` scope，并在 gateway 阶段拒绝 `active:*` 等非本 read model 合约 scope。`no_oa_bank_batch` 仍接受 legacy month/all scope，但默认生产页面 SLO 和 critical read model smoke 不再把它当作当前页面目标。新增 read model 或变更 scope 形态时必须先更新 registry、worker manifest、tests 和本模块文档。
 
-`read_model_manifest.py` 是 14 个 App Status read model 的共享合同清单。它不替代具体 query service、repository 或 worker 实现，但必须与 `APP_STATUS_READ_MODEL_REGISTRY`、`runtime_worker_registry.py`、RabbitMQ dispatch events 和 `ReadModelScopePolicyRegistry` 保持一致。manifest 还登记每个 read model 的 force refresh 合同和 operation barrier target 合同：受控强制刷新必须通过 gateway/runbook/smoke 入口，写后可见性必须通过 App Status runtime snapshot 目标推导，不能让页面或脚本绕过统一边界。新增 read model、变更 refresh event、变更 primary/auxiliary worker、变更 `all` scope 语义、变更 force refresh/barrier 合同或 query freshness 合同时，必须同步更新 manifest 和 `tests/test_read_model_manifest.py`。
+`read_model_manifest.py` 是 14 个 App Status read model 的共享合同清单。它不替代具体 query service、repository 或 worker 实现，但必须与 `APP_STATUS_READ_MODEL_REGISTRY`、`runtime_worker_registry.py`、RabbitMQ dispatch events 和 `ReadModelScopePolicyRegistry` 保持一致。manifest 还登记 force refresh 与显式 import/reapply/job 可能使用的 operation barrier target 合同；普通 canonical 写不生成 barrier target，也不靠 App Status 代表页面 fresh。页面访问必须通过自己的 query freshness gate。新增 read model、变更 refresh event、worker、`all` scope、force refresh/barrier 或 query freshness 合同时，必须同步更新 manifest 和测试。
 
 `read_model_manifest.py` 同时登记每个 read model 当前占用的 `PostgresReadModelRepository` repository port contract。`postgres_repositories/read_models.py` 仍是过渡期共享 SQL owner，但每个公共 repository 方法必须有且只有一个 manifest owner；后续拆分只能按已登记 port 小步迁移，不能在共享 repository 中继续新增未登记的跨模块方法。
 
@@ -62,9 +62,9 @@ read model 查询边界必须 fail-closed。调用 `ReadModelQueryGateway` 时�
 | 输入 | 允许来源 | 合同 owner | 校验要求 |
 | --- | --- | --- | --- |
 | Query 读取 | 页面 API、service facade、SLO probe | `ReadModelQueryGateway` 或登记过的自管 freshness service | 必须声明 expected schema/source contract；缺少证明时 fail closed，不返回 fresh。 |
-| Refresh request | API miss/stale、derived lifecycle、worker fan-out、runbook/force refresh | `ReadModelRefreshGateway` + `ReadModelScopePolicyRegistry` | normalize、validate、dedupe 后才能进入 durable queue；非法 scope 在 enqueue 前拒绝。 |
-| Transactional refresh | 同事务业务 writer | 对应业务 service/repository UoW | 必须承担与 gateway 等价的 scope contract，并与 canonical write 同事务提交。 |
-| Operation barrier target | 写 API 返回的 affected scopes / freshness targets | `OperationFreshnessBarrierService` | 只读取 current-effective readiness、dirty scope、outbox 和 worker facts；不写 readiness、不重建投影。 |
+| Refresh request | 页面 API miss/stale、显式 import/reapply/repair、worker dependency/parent、runbook/force refresh | `ReadModelRefreshGateway` + `ReadModelScopePolicyRegistry` | normalize、validate、dedupe 后才能进入 durable queue；非法 scope 在 enqueue 前拒绝。普通 canonical write 不经过此入口。 |
+| Transactional refresh | 仅显式 import/reapply/batch 或当前业务合同明确要求的 writer | 对应业务 service/repository UoW | 必须承担与 gateway 等价的 scope contract，并与 canonical write 同事务提交；不得把普通页面 mutation 重新接回 fan-out。 |
+| Operation barrier target | 显式 job/import/reapply 返回的 freshness targets | `OperationFreshnessBarrierService` | 只读取 current-effective readiness、dirty scope、outbox 和 worker facts；不写 readiness、不重建投影。普通页面 mutation 的 target 必须为空。 |
 | Force refresh | 运维 runbook、受控 API、SLO/smoke 工具 | gateway/runbook 边界 | 必须有权限、scope validation、dedupe/idempotency、readiness proof 和审计；页面按钮不得随意触发刷新所有。 |
 
 ### 输出合同
@@ -72,7 +72,7 @@ read model 查询边界必须 fail-closed。调用 `ReadModelQueryGateway` 时�
 | 输出 | 必需字段 / 证明 | 禁止行为 |
 | --- | --- | --- |
 | API payload | `read_model_status` 或等价 freshness 语义、`read_model_scope_keys`、stale/missing reason、`refresh_enqueued`、schema/source proof | 把 missing/stale/failed payload 标为 fresh；把 fresh 空态用于非 fresh rows。 |
-| Write API result | 对跨页面一致性有影响时返回 affected scopes/months、version/job 或 operation barrier target；不适用时必须明确由业务模块说明 | 只返回成功但不给前端等待目标，导致页面自行猜测同步完成。 |
+| Write API result | 普通 canonical mutation 返回业务 receipt/version 和信息性 affected scopes/months，freshness/barrier targets 为空；显式 import/reapply/job 可返回经过 owner 声明的 exact targets | 普通写后制造跨页面 target/fan-out；或前端把轻量事件当作 fresh 证明。 |
 | Dirty scope / outbox | `read_model_key`、规范 `scope_type/scope_key`、reason、priority、metadata/action name、dedupe contract | 业务 service 直接 SQL 写 `job.outbox_events` 或 `job.read_model_dirty_scopes`。 |
 | Readiness | 当前 schema/source proof、current-effective status、worker/error 诊断 | Redis/RabbitMQ 作为状态事实源；fan-out-only `all` 写假 parent fresh proof。 |
 | Cache | 只缓存 fresh gate 后、且通过 payload validator 的 payload | Redis cache 命中绕过 fresh gate 或 payload contract。 |
@@ -82,7 +82,7 @@ read model 查询边界必须 fail-closed。调用 `ReadModelQueryGateway` 时�
 | 事件类型 | Producer | Consumer | 合同 |
 | --- | --- | --- | --- |
 | Domain/derived lifecycle event | 业务 writer、import/OA sync、settings/data reset | Derived lifecycle service / module refresh producer | 先由模块 producer 归一化 scope，再进入 gateway；metadata 可用于 SLO/audit，不替代权限或业务事实。 |
-| Dirty scope | gateway、事务内等价 writer | Runtime worker / App Status / operation barrier | PostgreSQL durable queue 是事实源；同 scope active refresh 可合并，`refresh_enqueued=false` 不等于 fresh。 |
+| Dirty scope | query miss/stale gateway、显式 job writer、worker dependency/parent | Runtime worker / App Status / operation barrier | PostgreSQL durable queue 是事实源；同 scope active refresh 可合并，`refresh_enqueued=false` 不等于 fresh。普通 canonical write不产生该事件。 |
 | Outbox event | gateway、事务内等价 writer | `RuntimeWorkerRegistry` 对应 worker | event type 必须登记于 manifest、worker registry、RabbitMQ dispatch 和 scope policy。 |
 | Frontend domain event | 页面 mutation success 后的刷新提示 | 同浏览器页面 | 只提示 refetch，不证明 worker done 或 read model fresh。 |
 
@@ -158,9 +158,9 @@ Scoped incremental projection 可以在当前 SQL view 已 fresh 且 `source_ver
 
 fan-out-only `all` refresh 还必须维护子 scope 集合的收敛：worker 发现当前有效 month shards 后，应清理不再属于当前事实源的旧 month rows/scopes，或用等价机制把旧 scope 从页面 `all` freshness proof 中移除。否则旧 scope 的 source versions 会继续参与无界查询聚合，导致缺失/过期版本反复触发 refreshing。
 
-写操作后的用户体验闭环由 operation freshness barrier 负责。前端写操作成功后可以调用 `/api/operation-barrier/status` 轮询受影响 read model/scope；后端只读取 `RuntimeMonitoringRepository.app_status_runtime_snapshot()` 中的 current-effective readiness、dirty/outbox 和 worker facts，不写 readiness、不重建 read model、不把 RabbitMQ/Redis 当事实源。barrier 返回 `fresh` 才允许页面关闭全屏操作 overlay；`refreshing` 继续等待；`blocked` 必须暴露具体 read model/scope 和原因，不能伪装成已同步。
+普通写操作后的用户体验闭环由当前页面 normal GET 负责：HTTP command 成功即结束写阻塞；当前可见页面重新执行自己的 freshness/status/enqueue gate，hidden→visible 与另一个可见窗口也只在各自收到既有轻量提示后独立 GET。事件与 command receipt 不证明 read model fresh。GET 返回 refreshing 时页面用本模块有界重试；blocked/failed 必须展示真实原因，不能把 canonical 写成功改写成失败。
 
-operation barrier 不替代各页面自己的 fresh gate。Workbench 仍以 active generation 原子发布为最终展示事实；但确认/撤回这类写 API 如果返回后端 `operation_projection`，该 projection 是写后真实状态，前端只需等待操作级 `workbench_relation` barrier fresh 即可释放 overlay 并应用 projection。`workbench` month shard、`workbench:all` 和跨页面下游 read model 必须继续后台追赶并最终 fresh，由 cross-page SLO/监控单独验收；没有 operation projection 的写动作仍要等待目标 read model/scope fresh 或页面 fresh reload 后释放。
+`/api/operation-barrier/status` 只保留给显式 import/reapply/job 或被业务合同声明的 exact target；它不替代页面 fresh gate，也不得用于普通确认/撤回/规则保存。Workbench 继续以 active generation 原子发布为展示事实；其他 consumer 不在 relation 写后后台全量追赶，而在被访问时比较 canonical expected versions 并精确 enqueue 自身 scope。
 
 Workbench SQL active generation 的 freshness 还必须覆盖自动匹配规则版本。`source_versions` 中缺少或落后 `workbench_matching_rules_version` 时，API 必须把 generation 判为 stale 并入队 `workbench` refresh；不能让旧规则产出的 open/paired 分组继续伪装 fresh。自动 reconciliation decision 的 upsert、stale expire 和 missing expire 是事务内 writer，必须同时入队 `workbench_relation` 和主 `workbench` month scope refresh，避免 relation read model 与 Workbench active generation 脱节。
 
