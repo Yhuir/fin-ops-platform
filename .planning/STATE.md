@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 27 Plan 01 completed; Plan 27-02 vertical bank-details/cost-statistics migration next.
-last_updated: "2026-07-23T01:24:00+08:00"
-last_activity: 2026-07-23 - Phase 27 Plan 01 coverage contract and static hard gates completed
+stopped_at: Phase 27 Plan 02 completed; Plan 27-03 relation-heavy write migration next.
+last_updated: "2026-07-23T02:25:00+08:00"
+last_activity: 2026-07-23 - Phase 27 Plan 02 bank-details/cost-statistics access-time freshness slice completed
 progress:
   total_phases: 23
   completed_phases: 2
   total_plans: 35
-  completed_plans: 26
-  percent: 74
+  completed_plans: 27
+  percent: 77
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 ## Current Position
 
 Phase: 27 of 27 (按页面访问收敛 Read Model)
-Plan: 27-02 of 27-07
-Status: Plan 27-01 coverage hard gate complete; first runtime vertical slice next
-Last activity: 2026-07-23 - 17 pages, 110 API functions, 22 Drawers, 23 openers, 15 read models and 36 direct calls mechanically covered
+Plan: 27-03 of 27-07
+Status: Plan 27-02 bank/cost vertical slice complete; relation-heavy write migration next
+Last activity: 2026-07-23 - ordinary bank/cost saves now have zero downstream fan-out and reconcile through current-page access
 
-Progress: [███████░░░] 74%
+Progress: [████████░░] 77%
 
 ## Performance Metrics
 
@@ -51,6 +51,9 @@ Progress: [███████░░░] 74%
 
 ### Decisions
 
+- Phase 27-02: Redis remains payload-only; current canonical/schema/dirty proof must pass before a cached bank/cost/tax/OA payload is accepted.
+- Phase 27-02: Ordinary bank category/rule writes and cost tag-rule saves own zero downstream refresh/barrier targets; bank auto-tag reapply is the explicit bounded month-shard exception.
+- Phase 27-02: Bank category/confirmation canonical drift is proven by a set-based month signature persisted in bank-detail schema v11; no per-row jobs or new coordinator were introduced.
 - Phase 27-01: Reuse `PageRuntimeContext`, `ReadModelQueryGateway`, `ReadModelRefreshGateway`, PostgreSQL durable queue and existing workers; do not add a page coordinator, dependency registry or second freshness system.
 - Phase 27-01: Classify all POST/PUT/PATCH/DELETE exports as `fact-write`, `rule-write`, `read-like-command` or `explicit-batch`; an HTTP mutation method alone does not justify read-model invalidation.
 - Phase 27-01: Ordinary target behavior is canonical commit plus current-page exact reconcile and access-time consumer proof; full-history convergence remains an explicit batch exception, while Workbench keeps active-generation atomic publish.
@@ -155,6 +158,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-07-22
-Stopped at: Phase 26 Plan 01 completed; Plan 26-02 historical repair, v6 and production gates remain.
-Resume file: .planning/phases/26-oa/26-01-SUMMARY.md
+Last session: 2026-07-23
+Stopped at: Phase 27 Plan 02 completed; Plan 27-03 relation-heavy write migration remains.
+Resume file: .planning/phases/27-read-model-fan-out/27-02-SUMMARY.md
