@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import logging
 import os
+from datetime import UTC, datetime
 from typing import Any, Callable
 
 from fin_ops_platform.services.api_performance_metrics import ApiPerformanceRecorder
@@ -21,6 +22,7 @@ DEFAULT_OPERATION_ENDPOINTS = (
 )
 
 EMPTY_PERCENTILES = {"p50": None, "p95": None, "p99": None}
+LOGGER = logging.getLogger(__name__)
 
 
 class OperationsDashboardService:
@@ -397,7 +399,12 @@ class OperationsDashboardService:
     def _runtime_rows(self, warning_code: str, warnings: list[str], loader: Callable[[], list[dict[str, Any]]]) -> list[dict[str, Any]]:
         try:
             rows = loader()
-        except Exception:
+        except Exception as exc:
+            LOGGER.warning(
+                "operations_dashboard_block_unavailable warning_code=%s exception_type=%s",
+                warning_code,
+                type(exc).__name__,
+            )
             warnings.append(warning_code)
             return []
         for row in rows:

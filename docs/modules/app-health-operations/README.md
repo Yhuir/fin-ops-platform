@@ -84,7 +84,8 @@
 | runtime summary counts | `/api/app-health.app_status.runtime_summary` 聚合 read model、worker、queue 状态 | 左上角 popover 和 `/operations/app-health` 必须能直接看出 fresh/refreshing/failed、active/working/stale/missing、pending/processing/failed/backlog |
 | background job queued/running/attention | overall/domain busy 或 attention | 导入、数据重置、ETC、worker rebuild 状态可见 |
 | dependency unavailable | blocked/red 或 degraded | OA/session/PostgreSQL/RabbitMQ/Redis 等依赖异常可见；operations dashboard 默认只把 RabbitMQ queue metrics 标记 unknown，不让可选管理接口拖慢写后健康探针 |
-| dashboard metrics refresh 失败 | dashboard 保留上一份 payload 并显示 stale warning | 运维读侧不中断，但不能作为 fresh 事实 |
+| dashboard 整体构建失败 | dashboard 保留上一份 payload 并显示 stale warning | 运维读侧不中断，但不能作为 fresh 事实 |
+| dashboard 局部指标失败 | 当前 payload 保留其它成功区块，失败区块显示 unknown/warning | inventory、导入历史等独立事实不得被旧缓存冻结 |
 
 ## 维护触发器
 

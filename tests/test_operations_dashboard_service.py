@@ -469,6 +469,7 @@ class OperationsDashboardServiceTests(unittest.TestCase):
             def __init__(self) -> None:
                 self.duration_sql = ""
                 self.duration_params: tuple[object, ...] = ()
+                self.dirty_sql = ""
 
             def fetch_one(self, sql: str, params: tuple[object, ...] = ()):
                 normalized = " ".join(sql.lower().split())
@@ -483,6 +484,7 @@ class OperationsDashboardServiceTests(unittest.TestCase):
                     self.duration_params = params
                     return []
                 if "from job.read_model_dirty_scopes" in normalized:
+                    self.dirty_sql = sql
                     return []
                 raise AssertionError(sql)
 
@@ -502,6 +504,8 @@ class OperationsDashboardServiceTests(unittest.TestCase):
         self.assertNotIn("runtime_metric_rank", normalized_sql)
         self.assertEqual(len(connection.duration_params), 2)
         self.assertEqual(connection.duration_params[1], 512)
+        normalized_dirty_sql = " ".join(connection.dirty_sql.lower().split())
+        self.assertIn("status in ('pending', 'processing', 'failed')", normalized_dirty_sql)
 
 
 if __name__ == "__main__":

@@ -523,14 +523,6 @@ PRODUCTION_RUNTIME_GUARD_ENV = "FIN_OPS_PRODUCTION_RUNTIME_GUARD"
 POSTGRES_FULL_STATE_SNAPSHOT_ENV = "FIN_OPS_ENABLE_POSTGRES_FULL_STATE_SNAPSHOT"
 PROMETHEUS_BEARER_TOKEN_ENV = "FIN_OPS_PROMETHEUS_BEARER_TOKEN"
 HEALTH_API_PERFORMANCE_ENDPOINT_LIMIT = 20
-APP_HEALTH_DASHBOARD_STALE_WARNING_CODES = {
-    "bank_inventory_unknown",
-    "invoice_inventory_unknown",
-    "oa_inventory_unknown",
-    "outbox_metrics_unavailable",
-    "read_model_metrics_unavailable",
-    "worker_metrics_unavailable",
-}
 def _truthy_env(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -3990,8 +3982,6 @@ class Application:
             if cached_payload is not None:
                 return self._app_health_dashboard_stale_payload(cached_payload)
             raise
-        if cached_payload is not None and self._app_health_dashboard_refresh_failed(payload):
-            return self._app_health_dashboard_stale_payload(cached_payload)
         expires_at = monotonic() + ttl_seconds
         with self._app_health_dashboard_cache_lock:
             self._app_health_dashboard_cache = (expires_at, deepcopy(payload))
@@ -4007,13 +3997,6 @@ class Application:
         if not isinstance(expires_at, (int, float)) or not isinstance(payload, dict):
             return None
         return deepcopy(payload), now < float(expires_at)
-
-    @staticmethod
-    def _app_health_dashboard_refresh_failed(payload: dict[str, object]) -> bool:
-        freshness = payload.get("freshness") if isinstance(payload.get("freshness"), dict) else {}
-        warnings = freshness.get("warnings") if isinstance(freshness, dict) else []
-        warning_codes = {str(item) for item in list(warnings or [])}
-        return bool(warning_codes & APP_HEALTH_DASHBOARD_STALE_WARNING_CODES)
 
     @staticmethod
     def _app_health_dashboard_stale_payload(payload: dict[str, object]) -> dict[str, object]:

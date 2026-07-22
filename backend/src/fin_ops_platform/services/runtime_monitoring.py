@@ -1908,6 +1908,7 @@ class RuntimeMonitoringRepository:
               count(*) filter (where status = 'failed')::bigint as unavailable_count
             from job.read_model_dirty_scopes
             where scope_type = any(%s)
+              and status in ('pending', 'processing', 'failed')
             group by scope_type
             """,
             (list({scope_type for _, scope_type in READ_MODEL_EVENT_TYPES.values()}),),

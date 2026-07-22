@@ -19,11 +19,10 @@ from tests.app_test_support import (
 
 class FakeOperationsDashboardConnection:
     def __init__(self) -> None:
-        self.fail = False
+        self.import_status = "completed"
+        self.fail_read_model_metrics = False
 
     def fetch_one(self, sql: str, params: tuple[object, ...] = ()):
-        if self.fail:
-            raise RuntimeError("dashboard database timeout")
         normalized = " ".join(sql.lower().split())
         if "from app.bank_transactions" in normalized:
             return {"total_count": 1, "latest_synced_at": "2026-05-20T10:00:00+00:00"}
@@ -63,9 +62,9 @@ class FakeOperationsDashboardConnection:
         raise AssertionError(sql)
 
     def fetch_all(self, sql: str, params: tuple[object, ...] = ()):
-        if self.fail:
-            raise RuntimeError("dashboard database timeout")
         normalized = " ".join(sql.lower().split())
+        if self.fail_read_model_metrics and "metric_windows(window_name" in normalized:
+            raise RuntimeError("read model metrics timeout")
         if "from app.import_batches" in normalized and "batch_type in" in normalized:
             return [
                 {
@@ -77,7 +76,7 @@ class FakeOperationsDashboardConnection:
                     "count": 1,
                     "supplementary_count": None,
                     "imported_at": "2026-05-20T10:00:00+00:00",
-                    "status": "completed",
+                    "status": self.import_status,
                 }
             ]
         if "oa_attachment_source_links" in normalized:
@@ -769,15 +768,52 @@ class AppHealthApiTests(unittest.TestCase):
             setattr(app._state_store, "_connection", connection)
 
             first_response = app.handle_request("GET", "/api/operations/app-health-dashboard")
-            connection.fail = True
             current_time["value"] = 140.0
-            second_response = app.handle_request("GET", "/api/operations/app-health-dashboard")
+            with patch(
+                "fin_ops_platform.app.server.OperationsDashboardService.build_payload",
+                side_effect=RuntimeError("dashboard build failed"),
+            ):
+                second_response = app.handle_request("GET", "/api/operations/app-health-dashboard")
             second_payload = json.loads(second_response.body)
 
         self.assertEqual(first_response.status_code, 200)
         self.assertEqual(second_response.status_code, 200)
         self.assertEqual(second_payload["data_inventory"]["bank"]["total_count"], 1)
         self.assertIn("dashboard_cache_stale_after_error", second_payload["freshness"]["warnings"])
+
+    def test_operations_app_health_dashboard_refreshes_import_status_when_read_model_metrics_fail(self) -> None:
+        current_time = {"value": 100.0}
+
+        def fake_monotonic() -> float:
+            return current_time["value"]
+
+        with (
+            self._temporary_env(
+                FIN_OPS_ADMIN_USERNAMES="test_finops_user",
+                FIN_OPS_APP_HEALTH_DASHBOARD_CACHE_TTL_SECONDS="30",
+            ),
+            tempfile.TemporaryDirectory() as temp_dir,
+            patch("fin_ops_platform.app.server.monotonic", side_effect=fake_monotonic),
+        ):
+            app = build_application(data_dir=Path(temp_dir))
+            connection = FakeOperationsDashboardConnection()
+            connection.import_status = "pending"
+            setattr(app._state_store, "_connection", connection)
+
+            first_response = app.handle_request("GET", "/api/operations/app-health-dashboard")
+            first_payload = json.loads(first_response.body)
+            connection.import_status = "completed"
+            connection.fail_read_model_metrics = True
+            current_time["value"] = 140.0
+            second_response = app.handle_request("GET", "/api/operations/app-health-dashboard")
+            second_payload = json.loads(second_response.body)
+
+        self.assertEqual(first_payload["data_inventory"]["import_events"][0]["status"], "pending")
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(second_payload["data_inventory"]["import_events"][0]["status"], "completed")
+        self.assertEqual(second_payload["runtime_performance"]["read_models"], [])
+        self.assertIn("read_model_metrics_unavailable", second_payload["freshness"]["warnings"])
+        self.assertNotIn("dashboard_cache_stale_after_error", second_payload["freshness"]["warnings"])
 
     def test_operations_input_invoice_usage_audit_returns_read_only_report_for_admin(self) -> None:
         with self._temporary_env(FIN_OPS_ADMIN_USERNAMES="test_finops_user"), tempfile.TemporaryDirectory() as temp_dir:
