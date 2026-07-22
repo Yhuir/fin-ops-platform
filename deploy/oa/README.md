@@ -443,6 +443,13 @@ sudo /usr/local/sbin/finops-deploy-control workbench-requirement-repair <release
 sudo /usr/local/sbin/finops-deploy-control workbench-requirement-repair <release-name> \
   --rollback \
   --expected-fingerprint <executed-source-fingerprint>
+sudo /usr/local/sbin/finops-deploy-control workbench-matching-retry <release-name> \
+  --scope-month <YYYY-MM> \
+  --dry-run
+sudo /usr/local/sbin/finops-deploy-control workbench-matching-retry <release-name> \
+  --scope-month <YYYY-MM> \
+  --execute \
+  --expected-fingerprint <dry-run-fingerprint>
 sudo /usr/local/sbin/finops-deploy-control read-model-scope-contract <release-name> --json
 sudo /usr/local/sbin/finops-deploy-control read-model-scope-contract <release-name> \
   --apply \

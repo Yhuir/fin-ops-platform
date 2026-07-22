@@ -1070,6 +1070,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             aggregate_sql_versions = app._workbench_sql_read_model_source_versions("all")
 
         self.assertEqual(matching_versions["bank_auto_tag_rules_version"], 42)
+        self.assertNotIn("workbench_read_model_schema_version", matching_versions)
         self.assertEqual(read_model_versions["bank_auto_tag_rules_version"], 42)
         self.assertEqual(sql_versions["bank_auto_tag_rules_version"], 42)
         self.assertEqual(sql_versions["builder"], WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION)

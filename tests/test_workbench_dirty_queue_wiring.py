@@ -8,8 +8,10 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import fin_ops_platform.app.server as server_module
+from fin_ops_platform.app import worker as worker_app
 from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.app.worker import build_parser
+from fin_ops_platform.services.runtime_worker_handlers import _workbench_matching_source_versions
 from fin_ops_platform.services.workbench_matching_dirty_scope_worker import (
     WorkbenchMatchingDirtyScopeWorker,
     WorkbenchMatchingDirtyScopeWorkerConfig,
@@ -164,6 +166,31 @@ class RecordingHeartbeatRecorder:
 
 
 class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
+    def test_matching_source_versions_exclude_workbench_projection_schema(self) -> None:
+        app = build_application()
+
+        application_versions = app._workbench_matching_source_versions()
+        worker_versions = _workbench_matching_source_versions(app._app_settings_service)
+        bank_batch_versions = app._bank_batch_workbench_source_versions()
+
+        self.assertNotIn("workbench_read_model_schema_version", application_versions)
+        self.assertNotIn("workbench_read_model_schema_version", worker_versions)
+        self.assertIn("workbench_read_model_schema_version", bank_batch_versions)
+
+    def test_matching_worker_applies_configured_statement_timeout_before_polling(self) -> None:
+        class Queue:
+            def __init__(self) -> None:
+                self.statement_timeouts: list[int | None] = []
+
+            def set_statement_timeout_seconds(self, seconds: int | None) -> None:
+                self.statement_timeouts.append(seconds)
+
+        queue = Queue()
+
+        worker_app._apply_statement_timeout(queue, 120)
+
+        self.assertEqual(queue.statement_timeouts, [120])
+
     def test_import_and_oa_lifecycle_events_mark_expanded_db_dirty_scopes(self) -> None:
         app = build_application()
         queue = RecordingDirtyQueue()

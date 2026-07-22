@@ -247,6 +247,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         claim_scope_keys=list(args.claim_scope_key or []),
         exclude_claim_scope_keys=list(args.exclude_claim_scope_key or []),
     )
+    _apply_statement_timeout(queue, config.statement_timeout_seconds)
     readiness_reporter = (
         ReadModelReadinessReporter(readiness_repository=RuntimeMonitoringRepository(connection))
         if connection is not None
@@ -704,6 +705,12 @@ def _bank_batch_workbench_matching_source_versions(app_settings_service: AppSett
     if OA_PROJECTION_SYNC_VERSION:
         payload["oa_projection_sync_version"] = OA_PROJECTION_SYNC_VERSION
     return payload
+
+
+def _apply_statement_timeout(queue_repository: Any, seconds: int | None) -> None:
+    setter = getattr(queue_repository, "set_statement_timeout_seconds", None)
+    if callable(setter):
+        setter(seconds)
 
 
 def _current_bank_auto_tag_rules_version(app_settings_service: AppSettingsService) -> int:

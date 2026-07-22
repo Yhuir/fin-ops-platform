@@ -30,6 +30,7 @@
 | row/group detail | Workbench read repository | 必须固定到同一 active generation；miss 不得合成占位行或回退旧 snapshot |
 | confirm/withdraw command | Workbench action route / Turnover adapter | canonical row ids、actor、tenant、idempotency、expected versions、preview identity。通用页面调用保持原合同；Turnover cash-closure 撤回可在同一事务先调用 `prepare_withdraw_relation(case_id)`，以一次 case lock/scoped snapshot/freshness 得到 owner-bound preparation，再交给 `withdraw_relation(..., preparation=...)`，case、rows 或 aliases 不一致必须 fail closed，禁止重复加载关系 |
 | matching scope | durable matching dirty queue | 合法 `YYYY-MM`；repository 读取 ±365 日组合窗口，显式引用可补载全部保留历史 |
+| matching source versions | matching worker / orchestrator | 只跟踪会改变正式关系计算结果的输入；Workbench 展示投影 schema 不是 matching 输入，禁止因纯展示版本升级重算历史月份。 |
 | exact ETC relation enrichment scopes | `PostgresWorkbenchFormalRelationFactRepository` | candidate 只输出 OA 月份与 ETC batch 月份；已知月份时禁止附加 `all`。`month=all` 查询直接组合 active 月 generation，因此 exact enrichment 只需刷新受影响月份；只有完全无法解析月份的通用 relation 合同才允许 `all` fan-out command |
 
 ## 输出 I/O
@@ -55,6 +56,7 @@
 - `WorkbenchFreeMatchingEngine` 是纯函数边界，不读数据库、不写队列、不记录网络 I/O。
 - `PostgresWorkbenchFormalRelationFactRepository` 是 matching 输入的唯一 SQL owner。
 - `WorkbenchMatchingOrchestrator` 只编排 repository -> matcher -> 单次 relation UoW。
+- 已失败 matching scope 的人工恢复只能先 dry-run 固定 scope/fingerprint，再通过 `workbench_matching_scope_retry_ops` 调用 durable repository 精确重排；禁止手工 SQL 改 queue 状态或扩散到相邻月份。
 - `WorkbenchRelationCommandService` 拥有正式关系状态转换；repository/UoW 拥有 SQL、事务和 durable outbox。
 - `WorkbenchRelationGroupingService` 只消费 canonical rows + active relations；relation requirement snapshot 是唯一可改变关联台 zone 的业务 metadata，其他 display decorations 不得改变 membership 或 zone。
 - 前端只消费 API，不读取 relation provenance 推断分区。

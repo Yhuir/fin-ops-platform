@@ -46,6 +46,9 @@ commands:
   workbench-requirement-repair <release-name> --rollback-dry-run --expected-fingerprint <sha256>
   workbench-requirement-repair <release-name> --rollback --expected-fingerprint <sha256>
                                       repair historical frozen OA/invoice requirements through relation commands
+  workbench-matching-retry <release-name> --scope-month YYYY-MM --dry-run
+  workbench-matching-retry <release-name> --scope-month YYYY-MM --execute --expected-fingerprint <sha256>
+                                      requeue one failed matching scope through its durable repository boundary
   read-model-scope-contract <release-name> [args]
                                       check or repair read model scope contracts using runtime env
   read-model-slo-smoke <release-name> [args]
@@ -542,6 +545,30 @@ workbench_requirement_repair() {
   run_with_runtime_env "$src" -m fin_ops_platform.tools.workbench_relation_requirement_repair_ops "$@"
 }
 
+workbench_matching_retry() {
+  local release="${1:-}"
+  [[ -n "$release" ]] || die "workbench-matching-retry requires release name"
+  shift
+  [[ "${1:-}" == "--scope-month" && "${2:-}" =~ ^[0-9]{4}-(0[1-9]|1[0-2])$ ]] || \
+    die "workbench-matching-retry requires --scope-month YYYY-MM"
+  case "${3:-}" in
+    --dry-run)
+      [[ "$#" -eq 3 ]] || die "workbench-matching-retry only permits dry-run or fingerprint-guarded execute"
+      ;;
+    --execute)
+      [[ "$#" -eq 5 && "${4:-}" == "--expected-fingerprint" && "${5:-}" =~ ^[0-9a-f]{64}$ ]] || \
+        die "workbench-matching-retry only permits dry-run or fingerprint-guarded execute"
+      ;;
+    *)
+      die "workbench-matching-retry only permits dry-run or fingerprint-guarded execute"
+      ;;
+  esac
+  local src
+  src="$(release_src "$release")"
+  assert_runtime_env_contract
+  run_with_runtime_env "$src" -m fin_ops_platform.tools.workbench_matching_scope_retry_ops "$@"
+}
+
 read_model_scope_contract() {
   local release="${1:-}"
   [[ -n "$release" ]] || die "read-model-scope-contract requires release name"
@@ -738,6 +765,10 @@ case "$cmd" in
   workbench-requirement-repair)
     shift
     workbench_requirement_repair "$@"
+    ;;
+  workbench-matching-retry)
+    shift
+    workbench_matching_retry "$@"
     ;;
   read-model-scope-contract)
     shift

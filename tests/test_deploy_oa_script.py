@@ -290,6 +290,14 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn('case "$mode" in', script)
         self.assertIn("fin_ops_platform.tools.workbench_relation_requirement_repair_ops", script)
 
+    def test_workbench_matching_retry_is_scope_and_fingerprint_guarded(self) -> None:
+        script = DEPLOY_CONTROL_SCRIPT_PATH.read_text()
+
+        self.assertIn("workbench-matching-retry <release-name> --scope-month YYYY-MM --dry-run", script)
+        self.assertIn("--scope-month YYYY-MM --execute --expected-fingerprint <sha256>", script)
+        self.assertIn("workbench-matching-retry only permits dry-run or fingerprint-guarded execute", script)
+        self.assertIn("fin_ops_platform.tools.workbench_matching_scope_retry_ops", script)
+
     def test_deploy_control_script_uses_canonical_etc_finops_secret_contract(self) -> None:
         script = DEPLOY_CONTROL_SCRIPT_PATH.read_text()
 
@@ -328,6 +336,9 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("--rollback-dry-run --expected-fingerprint <sha256>", script)
         self.assertIn("--rollback --expected-fingerprint <sha256>", script)
         self.assertIn("workbench-requirement-repair only permits the four fixed modes", script)
+        self.assertIn("workbench-matching-retry <release-name>", script)
+        self.assertIn("workbench_matching_retry()", script)
+        self.assertIn("fin_ops_platform.tools.workbench_matching_scope_retry_ops", script)
         self.assertIn('case "$mode" in', script)
         self.assertIn("read_model_scope_contract()", script)
         self.assertIn('run_with_runtime_env "$src" "$src/scripts/check-read-model-scope-contracts.py" "$@"', script)

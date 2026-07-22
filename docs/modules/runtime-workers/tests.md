@@ -182,3 +182,10 @@ FIN_OPS_TEST_DATABASE_URL=postgresql://... FIN_OPS_WRITE_OPERATION_AUDIT_OPERATI
 - 新增测试：`tests/test_deploy_runtime_examples.py::DeployRuntimeExampleTests::test_runtime_worker_docs_use_registry_manifest_instead_of_manual_matrix`，防止 `docs/operations/deployment.md` 或 `deploy/oa/README.md` 重新维护手写 worker 矩阵、`sudo systemctl enable --now fin-ops-worker@...` 清单或已删除 file migration worker 文案。
 - 更新测试：`tests/test_runtime_monitoring.py::RuntimeMonitoringRepositoryTests::test_dashboard_outbox_metric_only_scans_current_attention_statuses` 不再绑定旧 SQL 括号格式，改为断言 current-effective attention statuses 与 publish statuses 的实际查询合同。
 - 覆盖类别：service-layer tests、read model/cache/background job tests、existing feature regression。API contract 和 frontend interaction 未新增，因为本轮未改变 HTTP response shape 或前端页面；真实 RabbitMQ/PostgreSQL/systemd drain 仍由 `infra-smoke` / staging gate 覆盖。
+
+## 2026-07-22 - matching 专用 worker 回归
+
+- `tests/test_workbench_dirty_queue_wiring.py`：matching source versions 排除纯展示 schema；bank-flow read-model provider 仍保留该依赖；worker entry 把配置的 statement timeout 传给 PostgreSQL queue boundary。
+- `tests/test_workbench_matching_scope_retry_ops.py`：dry-run 零写、exact failed scope execute、fingerprint drift 零写、non-failed 拒绝。
+- `tests/test_deploy_oa_script.py`：root-owned helper 只接受合法 `YYYY-MM` 和 dry-run / fingerprint-guarded execute 固定模式。
+- 七类测试：业务核心不适用（不改匹配规则）；service、read-model/worker、跨模块集成和现有回归适用；HTTP API contract 与 frontend interaction 不适用（未改 HTTP/UI）；真实 PostgreSQL/systemd drain 由发布后 Page Audit、App Health 和 worker scope 状态验证。

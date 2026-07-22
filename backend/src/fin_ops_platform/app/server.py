@@ -9883,7 +9883,6 @@ class Application:
         parser_version = self._current_oa_attachment_invoice_parser_version()
         projection_sync_version = self._current_oa_projection_sync_version()
         payload: dict[str, object] = {
-            "workbench_read_model_schema_version": WORKBENCH_READ_MODEL_SCHEMA_VERSION,
             "workbench_formal_relation_rule_version": WORKBENCH_FORMAL_RELATION_RULE_VERSION,
             "workbench_etc_batch_link_version": WORKBENCH_ETC_BATCH_LINK_VERSION,
             "workbench_exception_rules_version": WORKBENCH_EXCEPTION_RULE_VERSION,

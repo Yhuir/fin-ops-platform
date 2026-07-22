@@ -1271,3 +1271,11 @@
 
 - 生产 v6 rehydrate 已把缺 OA 的 Turnover closure 正确投影到 unpaired，但 Page Audit 仍把 `turnover_manual_closure` 无条件列为 requirement exempt，产生“实际 unpaired、预期 paired”的假阳性。这是写链路 bypass 删除后遗漏的审计旧路径。
 - 修复只删除 `_is_requirement_exempt_relation(...)` 中该 relation-mode 特例；审计和 projection 现在统一读取冻结的 `requires_oa/requires_invoice` 与实际 typed members。`batch_accounting`、ETC 的既有显式豁免保持不变，无新 I/O、API、schema、worker 或兼容分支。
+
+## 2026-07-22 - matching 与展示投影版本解耦
+
+- 生产事实：Workbench v6 只改变 active relation 的 paired/unpaired requirement 展示分区，但旧 matching source provider 同时携带 `workbench_read_model_schema_version`，导致所有历史 completed scope 被误判为规则过期；`2025-10` 在无关重算中按默认 10 秒 PostgreSQL timeout 连续失败并阻断关联台 freshness Audit。
+- 边界修复：从 API/runtime matching provider 删除展示 schema 依赖；bank-flow/no-OA read-model provider 继续显式添加其真正消费的 Workbench projection schema。删除不再使用的 `WORKBENCH_READ_MODEL_SCHEMA_VERSION` alias，不保留兼容分支。
+- 运维修复：新增只接受单个 failed month、先 dry-run 后 fingerprint-guarded execute 的 durable retry 工具；工具复用现有 repository mark-dirty I/O，实际处理仍由注册的 matching worker claim/UoW/complete。禁止直接 SQL 或相邻月份扩散。
+- worker 修复：worker 入口在专用 matching polling worker 构造前应用 registration statement timeout，避免配置的 120 秒被独立运行路径绕过并退回 10 秒默认值。
+- 回归：`tests/test_workbench_dirty_queue_wiring.py`、`tests/test_workbench_matching_scope_retry_ops.py`、`tests/test_deploy_oa_script.py` 与既有 Workbench/Turnover/Page Audit 套件。

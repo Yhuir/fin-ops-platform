@@ -1,6 +1,6 @@
 # Runtime Worker 模块边界与 I/O
 
-日期：2026-07-21
+日期：2026-07-22
 
 ## 模块化状态
 
@@ -32,6 +32,8 @@
 | Outbox/job event | PostgreSQL durable queue | event type 必须在 registry 中登记。read model refresh metadata 只允许白名单字段进入 outbox；操作级 `row_ids` / `case_ids` 只能作为 worker 局部投影提示，`relation_deltas + row_ids` 才能授权 relation-only delta，均不能替代 dirty scope/source_version 事实源；`force_refresh=true` 仅用于显式运维重建并强制 full projection。支持 fan-out 的 handler 必须把 force 传播给每个具体 shard。`invoice-usage-collection` 只处理进项使用/销项收款；`oa-pending-payment` 只处理 OA 待付款，二者不得互相 claim。OA 普通业务事件只用精确月份，显式 `all` 为低优先级 fan-out。同 scope pending 事件合并时必须删除 row 级 metadata并让 handler full rebuild；禁止保留不完整 delta却继续局部发布 |
 | Refresh availability timestamp | `job.outbox_events.available_at` | write-operation / read-model refresh SLO 以 `available_at -> processed_at` 衡量 enqueue-to-done；事务内 writer 必须用 `clock_timestamp()` 写实际入队可处理时间，不能让 transaction-level `now()` 把业务写事务耗时计入 worker drain；同 scope pending refresh 被新 source_version 合并时，active outbox event 的 `created_at`/`updated_at` 也必须重置为当前 enqueue 时间，避免兼容报表继续读到旧 pending 年龄 |
 | Worker instance env | deploy/systemd | 生产 systemd 必须传 `--registration <instance>` 与 `--worker-instance <instance>`；instance name、event types、claim scope filters 与 handler flags 由 registry 派生。激活 release 时，已启用、运行或失败但不在当前 registry 中的 `fin-ops-worker@*.service` 必须先被 stop/disable，禁止 WIP/历史实例继续消费队列或 crash-loop；该收敛不删除 env 文件，保留受控回滚能力。PostgreSQL durable queue worker 的默认 idle poll 为 `0.05s`，`workbench` 使用 `0.01s`；历史 `--poll-interval-seconds 2`、`0.25`、`0.1`、`0.05` 只允许由 deploy helper 精确迁移到当前 release env 示例声明值。OA worker 拆分时，helper 还必须幂等删除既有 `invoice-usage-collection` env 中精确命中的 OA handler/event 参数，禁止旧 env 重新扩张 registry claim 边界 |
+| Worker PostgreSQL statement timeout | worker env / `RuntimeQueueRepository` | worker 入口必须在构造专用 polling worker 前把 registration 的 `FIN_OPS_WORKER_STATEMENT_TIMEOUT_SECONDS` 应用到共享 PostgreSQL connection；不能只依赖通用 `RuntimeWorker` 初始化，否则 `workbench-matching` 这类独立 dirty-scope worker 会静默退回 10 秒默认值。 |
+| Workbench matching source versions | matching worker / matching orchestrator | 只包含会改变确定性正式关系结果的规则、OA、附件解析、银行标签和异常版本；`workbench_read_model_schema_version` 属于展示投影 owner，不得进入 matching stale-scan 输入。展示 schema 升级只通过正式 Workbench refresh/rehydrate 发布，不得无关重算全部历史 matching scope。 |
 | Claim scope filter | worker registry / worker env | 只用于确有当前吞吐隔离需求的同 event type worker；Workbench 不拆 lane，单一 `workbench` registration claim 月份与 `all`。scope contract 仍由 read model scope policy 负责，不能把业务 scope 规则塞进 queue 层 |
 | Workbench all fan-out | `WorkbenchReadModelRefreshService` | `scope_key=all` 只列出当前月份 scopes，通过既有 gateway 投递月份 refresh，传播 tenant/priority/trace/force metadata，并在 fan-out 接受后完成 command；不得构建或发布 `workbench:all` generation。relation 写只投递已知受影响月份；无法解析月份时才投递 ordinary `all` command |
 | OA sync source/fan-out | `OAProjectionSyncService` | runtime `oa.sync` 只调用 dual-view source batch；任一启用 form 失败整轮失败并记录 run，不提交部分 snapshot。admission/payment-status-only 变化只投递 OA pending 精确月份；completed canonical 真实变化才进入 shared owner fan-out。in-progress source 不解析附件/OCR；禁止恢复多 list 扫描、fingerprint polling 或 snapshot repository 的 shared fan-out |
@@ -70,7 +72,7 @@
 | Worker registry | `backend/src/fin_ops_platform/services/runtime_worker_registry.py` |
 | Worker runtime | `backend/src/fin_ops_platform/services/runtime_worker.py`、`runtime_worker_handlers.py` |
 | App worker entry | `backend/src/fin_ops_platform/app/worker.py` |
-| Queue ops | `backend/src/fin_ops_platform/tools/runtime_queue_ops.py` |
+| Queue ops | `backend/src/fin_ops_platform/tools/runtime_queue_ops.py`、`backend/src/fin_ops_platform/tools/workbench_matching_scope_retry_ops.py` |
 | RabbitMQ | `backend/src/fin_ops_platform/app/rabbitmq_dispatcher.py`、`rabbitmq_topology.py`、`services/rabbitmq_runtime.py` |
 | Deploy | `deploy/oa/systemd/*.service.example`、`deploy/oa/env/*.env.example`、`deploy/oa/bin/finops-deploy-control.sh`、`deploy/oa/bin/finops-ensure-runtime-workers.sh`、`deploy/oa/bin/finops-prune-runtime-queue-history.sh` |
 | Tests | `tests/test_runtime_worker*.py`、`tests/test_runtime_queue*.py`、`tests/test_rabbitmq_*.py` |

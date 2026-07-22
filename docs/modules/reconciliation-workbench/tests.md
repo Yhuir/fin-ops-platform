@@ -70,6 +70,7 @@
 - 前端必须断言每区只有一个 HeroUI `SearchField` 且位于区域 header 同行；输入时使用既有 deferred combined initial 单请求，等待期间保留当前稳定结果并显示 pending，失败可重试。所有可见命中片段都高亮；只命中隐藏 pane/折叠明细时显示“隐藏内容命中”，用户展开完整详情后显示实际高亮。
 - 搜索框在首个 combined initial 完成前已可输入时，不得提前消费新的 zone query key；初始稳定数据安装后必须补发包含该 query 的 combined initial 请求，不能只对首屏 50 组做本地高亮并漏掉其它组或折叠明细。
 - 关联台 Audit 绿色结果必须绑定 active Workbench read-model version + 页面 freshness status；generation/status 改变立即清除旧绿色结果。`workbench_matching_scope_not_converged` 属于 freshness+queue 阻断，`workbench_generation_source_versions_mismatch` 属于 freshness 阻断。
+- matching source-version 回归必须证明纯 Workbench projection schema 不进入 matching provider；bank-flow/no-OA read-model provider 仍保留自身所需的 Workbench projection dependency。失败 scope 运维重试必须覆盖 dry-run 零写、fingerprint drift 零写、非 failed 拒绝和 exact month 单次 durable requeue。
 - 普通标量列的同列多选必须按 OR，`全选`不能把结果清空；不同列/不同 pane 继续按 AND，银行金额表头的方向+付款账号复合筛选继续要求同一行同时满足。前端本地过滤、HTTP mock、repository SQL 和 summary preview 必须使用同一合同。
 - group detail 必须稳定输出三个 pane 数组；展开 Promise 只有在同一 active read-model version 的完整详情已安装后才能成功。详情保持 click-only lazy load，禁止恢复 mount/update 自动预取或静默吞错。
 
@@ -126,3 +127,4 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.audit_w
 - requirement repair 测试证明 legacy Turnover active relation 的完整 preimage/intended after fingerprint、partial execute、exact metadata rollback、partial rollback retry 和 drift zero-write；普通 relation、ETC、batch 与 inactive relation 不受影响。
 - 既有 grouping/projection/query 回归继续证明：要求 OA 的 bank-only case 保持同 case unpaired，补齐 OA 后进入 paired，active generation 只经现有原子 publish 边界切换。
 - `tests/test_audit_workbench_relation_display_tool.py` 同步保护审计口径：`turnover_manual_closure` 不再享有旧的 requirement 豁免；缺 OA 的 bank-only closure 在 unpaired 不报警，若出现在 paired 必须报告 `relation_requirement_partition_mismatch`。
+- `tests/test_workbench_dirty_queue_wiring.py` 证明 v6 展示 schema 不再污染 matching stale scan，同时 bank-flow read-model source versions 仍包含展示 schema；`tests/test_workbench_matching_scope_retry_ops.py` 保护生产失败 scope 的精确、fingerprint-guarded durable retry。

@@ -543,3 +543,10 @@
 - 生产反证：部署 `turnover-ledger-secondary` 后，confirm response-to-fresh 仍为 `4.46s`，withdraw 从单 worker 的 `1.28–1.49s` 退化到 `4.33s`，另有一次数据库竞争长尾达到 `11.64s`。双 consumer 没有解决 own source 重建，反而让相同 projection 争用数据库。
 - 决策：从 registry、manifest、env、部署文档、测试和 active module contract 完整删除 secondary，并恢复原 CLI worker-kind 推断。部署控制会按既有“退役未注册实例”合同自动 stop/disable 生产旧实例，保留回滚能力。
 - 替代方案不在 worker 层：现代 closure 改为 canonical Workbench relation 单事实写入，使 turnover 只执行既有 relation-context refresh；不再通过并发 worker 掩盖重复事实写入。
+
+## 2026-07-22 - 专用 matching worker timeout 与失败 scope 恢复
+
+- 根因：通用 `RuntimeWorker` 会应用 `--statement-timeout-seconds`，但只启用 `workbench-matching` 时入口在构造通用 worker 前直接进入专用 dirty-scope loop，导致 env 声明的 120 秒未生效、PostgreSQL connection 使用 10 秒默认值。
+- 修复：worker entry 在所有 handler 分支前通过既有 `RuntimeQueueRepository.set_statement_timeout_seconds(...)` 应用同一 config；通用 worker 后续重复设置相同值，不改变其它 registration 合同。
+- 恢复入口：`workbench_matching_scope_retry_ops` 只允许 failed exact month，dry-run 生成包含当前 status/attempt/request/error hash/source versions 的 fingerprint，execute 漂移即零写；写入复用 matching repository，不暴露 SQL/DSN。
+- 不变项：未新增 worker、event type、queue/table、HTTP API 或 fallback；matching claim、relation UoW、heartbeat 和 complete/fail owner 不变。

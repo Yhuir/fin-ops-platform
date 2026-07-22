@@ -73,10 +73,7 @@ from fin_ops_platform.services.workbench_matching_dirty_scope_worker import (
 )
 from fin_ops_platform.services.workbench_matching_orchestrator import WorkbenchMatchingOrchestrator
 from fin_ops_platform.services.workbench_reconciliation_dirty_queue import WorkbenchReconciliationDirtyQueue
-from fin_ops_platform.services.workbench_sql_projection import (
-    WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
-    WorkbenchSqlProjectionBuilder,
-)
+from fin_ops_platform.services.workbench_sql_projection import WorkbenchSqlProjectionBuilder
 from fin_ops_platform.services.workbench_uow import RuntimeQueueReadModelRefreshWriter, WorkbenchWriteUnitOfWork
 
 IMPORT_FACT_CHANGED_EVENT = "import.fact.changed"
@@ -721,7 +718,6 @@ def _app_settings_service(state_store: Any) -> AppSettingsService:
 
 def _workbench_matching_source_versions(app_settings_service: AppSettingsService) -> dict[str, object]:
     payload: dict[str, object] = {
-        "workbench_read_model_schema_version": WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
         "workbench_formal_relation_rule_version": WORKBENCH_FORMAL_RELATION_RULE_VERSION,
         "workbench_etc_batch_link_version": WORKBENCH_ETC_BATCH_LINK_VERSION,
         "workbench_exception_rules_version": WORKBENCH_EXCEPTION_RULE_VERSION,

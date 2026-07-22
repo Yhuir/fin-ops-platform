@@ -13309,6 +13309,53 @@ class PostgresReadModelRepository:
         rows = run_in_transaction(self._connection, write)
         return [str(row.get("scope_month")) for row in rows if row.get("scope_month")]
 
+    def retry_failed_workbench_matching_scope(
+        self,
+        *,
+        tenant_id: str,
+        scope_month: str,
+        reason: str,
+        expected_attempt_count: int,
+        expected_request_id: str,
+        expected_last_error: str,
+        expected_source_versions: dict[str, object],
+    ) -> bool:
+        def write(connection: Any) -> bool:
+            row = connection.fetch_one(
+                """
+                update job.workbench_matching_dirty_scopes
+                set reason = %s,
+                    status = 'dirty',
+                    available_at = now(),
+                    lease_owner = null,
+                    lease_expires_at = null,
+                    raw_payload = coalesce(raw_payload, '{}'::jsonb)
+                        || jsonb_build_object('reason', %s, 'expedite', true),
+                    updated_at = now()
+                where tenant_id = %s
+                  and scope_month = %s::date
+                  and status = 'failed'
+                  and attempt_count = %s
+                  and coalesce(request_id, '') = %s
+                  and coalesce(last_error, '') = %s
+                  and coalesce(source_versions, '{}'::jsonb) = %s
+                returning id
+                """,
+                (
+                    text(reason),
+                    text(reason),
+                    text(tenant_id) or "default",
+                    month_start(scope_month),
+                    max(0, int_value(expected_attempt_count, 0)),
+                    text(expected_request_id) or "",
+                    text(expected_last_error) or "",
+                    jsonb(expected_source_versions),
+                ),
+            )
+            return isinstance(row, dict)
+
+        return bool(run_in_transaction(self._connection, write))
+
     def claim_workbench_matching_dirty_scopes(
         self,
         *,

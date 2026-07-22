@@ -434,6 +434,21 @@ worker 会通过 `WorkbenchReconciliationDirtyQueue` / repository 检查
 不要手工改 `job.workbench_matching_dirty_scopes` 状态来补指定月份；生产恢复应走发布后的 worker、
 read model refresh 和只读审计验证。
 
+matching source versions 只允许包含会改变正式关系计算结果的输入。`workbench_read_model_schema_version`
+属于 Workbench 展示投影边界，不能触发 matching stale scan。若已失败 scope 经确认是无关投影升级触发，
+先发布完成该依赖解耦和专用 worker statement-timeout 修复，再使用受控命令精确恢复：
+
+```bash
+sudo /usr/local/sbin/finops-deploy-control workbench-matching-retry <release-name> \
+  --scope-month YYYY-MM --dry-run
+sudo /usr/local/sbin/finops-deploy-control workbench-matching-retry <release-name> \
+  --scope-month YYYY-MM --execute --expected-fingerprint <dry-run-fingerprint>
+```
+
+该命令只接受 `failed` 状态、单个合法月份和未漂移 fingerprint，并通过既有 matching durable repository
+把 exact scope 置回 dirty；实际 claim、relation UoW、complete/fail 仍由注册的 `workbench-matching`
+worker 负责。不得用它重排 completed/processing scope，也不得直接 SQL 修改 attempt/status。
+
 ### 2026-07-14 正式关系二态迁移
 
 该迁移必须拆成两个不可合并的生产发布。Release A 只发布 paired/unpaired 新运行时并移除全部旧

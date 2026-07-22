@@ -393,6 +393,36 @@ class WorkbenchReconciliationDirtyQueueTests(unittest.TestCase):
         self.assertIn("refresh_requested_while_processing", sql)
         self.assertEqual(params[-1]["expedite"], True)
 
+    def test_repository_failed_scope_retry_uses_atomic_expected_state_guard(self) -> None:
+        connection = RepositoryRecordingConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        with patch("fin_ops_platform.services.postgres_repositories.read_models.jsonb", side_effect=lambda value: value):
+            retried = repository.retry_failed_workbench_matching_scope(
+                tenant_id="tenant-a",
+                scope_month="2025-10",
+                reason="operator_retry_failed_scope",
+                expected_attempt_count=8,
+                expected_request_id="request-8:2025-10",
+                expected_last_error="statement timeout",
+                expected_source_versions={"matching": "v1"},
+            )
+
+        self.assertTrue(retried)
+        self.assertEqual(connection.transaction_enters, 1)
+        self.assertEqual(connection.transaction_exits, 1)
+        sql, params = connection.fetch_one_calls[-1]
+        self.assertIn("status = 'failed'", sql)
+        self.assertIn("attempt_count = %s", sql)
+        self.assertIn("coalesce(request_id, '') = %s", sql)
+        self.assertIn("coalesce(last_error, '') = %s", sql)
+        self.assertIn("coalesce(source_versions, '{}'::jsonb) = %s", sql)
+        self.assertIn("status = 'dirty'", sql)
+        self.assertIn("available_at = now()", sql)
+        self.assertIn("operator_retry_failed_scope", params)
+        self.assertIn("tenant-a", params)
+        self.assertIn("request-8:2025-10", params)
+
     def test_repository_complete_and_fail_require_active_lease_identity(self) -> None:
         connection = RepositoryRecordingConnection()
         repository = PostgresReadModelRepository(connection)
