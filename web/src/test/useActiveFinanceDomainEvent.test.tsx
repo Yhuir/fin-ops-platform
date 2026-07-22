@@ -65,7 +65,7 @@ afterEach(() => {
 });
 
 describe("useActiveFinanceDomainEvent", () => {
-  test("defers the latest event while a mounted page is hidden and handles it once when visible", async () => {
+  test("ignores events while a mounted page is hidden", async () => {
     const handler = vi.fn();
 
     function Page() {
@@ -91,8 +91,7 @@ describe("useActiveFinanceDomainEvent", () => {
       </PageRuntimeProvider>,
     );
 
-    await waitFor(() => expect(handler).toHaveBeenCalledTimes(1));
-    expect(handler.mock.calls[0][0].detail.action).toBe("hidden-latest");
+    await waitFor(() => expect(handler).not.toHaveBeenCalled());
   });
 
   test("handles events while mounted and does not replay events after route unmount", async () => {

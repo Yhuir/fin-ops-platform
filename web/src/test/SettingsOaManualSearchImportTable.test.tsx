@@ -250,13 +250,7 @@ describe("OaManualSearchImportTable", () => {
     expect(await screen.findByText("预计发票 2 张")).toBeInTheDocument();
     expect(completedRow).toHaveTextContent("2");
     expect(completedRow).toHaveTextContent("0");
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/operation-barrier/status",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ targets: oaManualBarrierTargets }),
-      }),
-    );
+    expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/operation-barrier/status")).toHaveLength(0);
 
     await user.click(screen.getByRole("button", { name: "导入已选OA项" }));
     expect(fetchMock).toHaveBeenCalledWith(
@@ -267,7 +261,7 @@ describe("OaManualSearchImportTable", () => {
       }),
     );
     expect(await screen.findByText("已导入")).toBeInTheDocument();
-    expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/operation-barrier/status")).toHaveLength(2);
+    expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/operation-barrier/status")).toHaveLength(0);
 
     await user.click(screen.getByRole("button", { name: "清空选择" }));
     expect(screen.getByText("已选 0 个OA")).toBeInTheDocument();

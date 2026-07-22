@@ -111,7 +111,7 @@ class ImportFileApiTests(unittest.TestCase):
     def test_preview_files_uses_lightweight_import_preview_persistence(self) -> None:
         app = build_application()
         persist_calls: list[str] = []
-        app._persist_confirmed_import_delta_with_read_model_invalidation = lambda **_kwargs: self.fail(  # type: ignore[attr-defined]
+        app._persist_confirmed_import_delta = lambda **_kwargs: self.fail(  # type: ignore[attr-defined]
             "file preview must not persist full workbench state"
         )
         app._persist_import_preview_delta = lambda session_id: persist_calls.append(session_id)  # type: ignore[attr-defined]

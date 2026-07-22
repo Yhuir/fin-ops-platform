@@ -174,6 +174,31 @@ describe("PageRouteHost", () => {
     ))).toBe(true);
   });
 
+  test("keeps every registered page behind the shared activation boundary", () => {
+    const pageOwners = [
+      "src/pages/ReconciliationWorkbenchPage.tsx",
+      "src/pages/CostStatisticsPage.tsx",
+      "src/pages/BankDetailsPage.tsx",
+      "src/pages/OaPendingPaymentsPage.tsx",
+      "src/pages/BankFlowRuleBatchPage.tsx",
+      "src/pages/BatchAccountingPage.tsx",
+      "src/pages/TurnoverLedgerPage.tsx",
+      "src/pages/EtcTicketManagementPage.tsx",
+      "src/pages/TaxOffsetPage.tsx",
+      "src/pages/PendingInvoicesPage.tsx",
+      "src/pages/InputInvoiceUsagePage.tsx",
+      "src/pages/OutputInvoiceCollectionsPage.tsx",
+      "src/pages/SettingsPage.tsx",
+      "src/pages/AppHealthOperationsPage.tsx",
+      "src/components/imports/ImportWorkflowPage.tsx",
+    ];
+
+    expect(appPageRoutes).toHaveLength(17);
+    for (const path of pageOwners) {
+      expect(readFileSync(path, "utf8"), path).toContain("useOptionalPageActivation");
+    }
+  });
+
   test("leaves only the current route content after navigation", async () => {
     const user = userEvent.setup();
 
@@ -231,5 +256,49 @@ describe("PageRouteHost", () => {
 
     expect(pageAHandler).toHaveBeenCalledTimes(1);
     expect(pageBHandler).toHaveBeenCalledTimes(1);
+  });
+
+  test("keeps hidden pages idle and reactivates the current page when visible", async () => {
+    const visibilityState = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const loadCurrentPage = vi.fn();
+    const pageEventHandler = vi.fn();
+
+    function PageA() {
+      const activation = usePageActivation("page-a");
+      useActivePageEvent("pageActivationTestEvent", pageEventHandler);
+      useEffect(() => {
+        if (activation.active) {
+          loadCurrentPage(activation.activationGeneration);
+        }
+      }, [activation.active, activation.activationGeneration]);
+      return (
+        <section>
+          <span data-testid="page-active">{String(activation.active)}</span>
+          <span data-testid="page-generation">{activation.activationGeneration}</span>
+        </section>
+      );
+    }
+
+    render(<PageRouteHost routes={[createRoute("/a", "page-a", PageA)]} />, { wrapper: Harness });
+    expect(loadCurrentPage).toHaveBeenCalledTimes(1);
+
+    visibilityState.mockReturnValue("hidden");
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      window.dispatchEvent(new CustomEvent("pageActivationTestEvent"));
+    });
+    expect(screen.getByTestId("page-active")).toHaveTextContent("false");
+    expect(pageEventHandler).not.toHaveBeenCalled();
+    expect(loadCurrentPage).toHaveBeenCalledTimes(1);
+
+    visibilityState.mockReturnValue("visible");
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    await waitFor(() => expect(screen.getByTestId("page-active")).toHaveTextContent("true"));
+    expect(screen.getByTestId("page-generation")).toHaveTextContent("2");
+    expect(loadCurrentPage).toHaveBeenCalledTimes(2);
+    expect(pageEventHandler).not.toHaveBeenCalled();
   });
 });

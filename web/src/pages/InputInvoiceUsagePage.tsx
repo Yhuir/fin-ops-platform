@@ -162,7 +162,7 @@ function normalizeFilterValue(filter: {
 }
 
 export default function InputInvoiceUsagePage() {
-  const { active } = useOptionalPageActivation("input-invoice-usage");
+  const { active, activationGeneration } = useOptionalPageActivation("input-invoice-usage");
   const { canAdminAccess } = useSessionPermissions();
   const querySession = usePageSessionState({
     pageKey: "input-invoice-usage",
@@ -275,7 +275,7 @@ export default function InputInvoiceUsagePage() {
     const controller = new AbortController();
     loadRows(hasLoadedRef.current ? "refresh" : "reset", controller.signal);
     return () => controller.abort();
-  }, [active, loadRows]);
+  }, [active, activationGeneration, loadRows]);
 
   useEffect(() => {
     if (!active || readModelStatus !== "refreshing" || loading || refreshing) {

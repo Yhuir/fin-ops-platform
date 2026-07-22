@@ -2023,20 +2023,6 @@ function importSessionPayload(
   options: { corruptBankFile?: boolean; corruptInvoiceFile?: boolean; noBankAccountConflict?: boolean } = {},
 ) {
   const sessionId = importSessionIds[scenario];
-  const operationBarrierTargets = imported
-    ? scenario === "bank"
-      ? [
-        { read_model_key: "bank_detail", scope_key: "2026-06" },
-        { read_model_key: "bank_account_balance", scope_key: "all" },
-        { read_model_key: "cost_statistics", scope_key: "active:2026-06" },
-      ]
-      : [
-        { read_model_key: "tax_offset", scope_key: "2026-06" },
-        { read_model_key: "input_invoice_usage", scope_key: "2026-06" },
-        { read_model_key: "output_invoice_collection", scope_key: "2026-06" },
-        { read_model_key: "workbench_relation", scope_key: "2026-06" },
-      ]
-    : [];
   return {
     session: {
       id: sessionId,
@@ -2058,7 +2044,7 @@ function importSessionPayload(
         manual_review_count: 0,
       }
       : undefined,
-    operation_barrier_targets: operationBarrierTargets,
+    operation_barrier_targets: [],
   };
 }
 

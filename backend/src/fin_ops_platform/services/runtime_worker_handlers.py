@@ -156,9 +156,6 @@ class ImportRuntimeProcessorFactory:
             search_service=_runtime_search_service(import_service),
             workbench_source_versions_provider=lambda: _workbench_matching_source_versions(app_settings_service),
         )
-        persist_confirmed_import_delta = _persist_confirmed_import_delta_callback(
-            lifecycle=lifecycle,
-        )
         processing_service = ImportProcessingService(
             file_import_service=file_import_service,
             tax_certified_import_service=tax_certified_import_service,
@@ -166,11 +163,8 @@ class ImportRuntimeProcessorFactory:
             etc_reconciliation_task_service=etc_reconciliation_task_service,
             background_job_service=background_job_service,
             serialize_value=_serialize_value,
-            execute_derived_data_lifecycle_event=lifecycle.execute_event,
-            schedule_or_run_workbench_auto_matching_for_scopes=lifecycle.schedule_workbench_matching,
             enqueue_workbench_auto_matching_for_scopes=lifecycle.enqueue_workbench_matching_job,
-            persist_confirmed_import_delta=persist_confirmed_import_delta,
-            invalidate_tax_offset_read_model_scopes=lifecycle.invalidate_tax_offset_scopes,
+            persist_confirmed_import_delta=lifecycle.persist_confirmed_import_delta,
             workbench_matching_scope_months_for_import_file_session=_workbench_matching_scope_months_for_import_file_session,
             tax_offset_scope_keys_for_import_file_session=_tax_offset_scope_keys_for_import_file_session,
             cost_statistics_scope_keys_for_import_file_session=_cost_statistics_scope_keys_for_import_file_session,
@@ -182,7 +176,6 @@ class ImportRuntimeProcessorFactory:
                 etc_service,
                 state_store,
             ),
-            refresh_after_etc_invoice_link=lifecycle.refresh_after_etc_invoice_link,
             etc_import_preview_service=etc_import_preview_service,
             oa_manual_import_create_processor=_oa_manual_import_create_processor(state_store=state_store),
         )
@@ -400,11 +393,6 @@ class _RuntimeWorkerDerivedLifecycle:
         self,
         *,
         import_state_payload: dict[str, Any],
-        cost_statistics_scope_keys: list[str] | None = None,
-        bank_detail_scope_keys: list[str] | None = None,
-        input_invoice_usage_scope_keys: list[str] | None = None,
-        output_invoice_collection_scope_keys: list[str] | None = None,
-        invalidate_cost_statistics: bool = True,
     ) -> None:
         payload = dict(import_state_payload or {})
         if not payload or set(payload) - {"imports", "file_imports"}:
@@ -413,13 +401,7 @@ class _RuntimeWorkerDerivedLifecycle:
         if not callable(persist):
             raise RuntimeError("File import confirmation requires the import delta persistence port.")
         persist(payload)
-        self._execute_import_state_changed(
-            cost_statistics_scope_keys=cost_statistics_scope_keys,
-            bank_detail_scope_keys=bank_detail_scope_keys,
-            input_invoice_usage_scope_keys=input_invoice_usage_scope_keys,
-            output_invoice_collection_scope_keys=output_invoice_collection_scope_keys,
-            invalidate_cost_statistics=invalidate_cost_statistics,
-        )
+        self._search_service.clear_cache()
 
     def _executors_for_reason(self, reason: str) -> dict[str, Callable[[dict[str, object]], dict[str, object] | None]]:
         return {
@@ -733,13 +715,6 @@ def _current_bank_auto_tag_rules_version(app_settings_service: AppSettingsServic
         return int(payload.get("version") or 1)
     except Exception:
         return 1
-
-
-def _persist_confirmed_import_delta_callback(
-    *,
-    lifecycle: _RuntimeWorkerDerivedLifecycle,
-) -> Callable[..., None]:
-    return lambda **kwargs: lifecycle.persist_confirmed_import_delta(**kwargs)
 
 
 def _link_etc_import_result_to_existing_invoices(

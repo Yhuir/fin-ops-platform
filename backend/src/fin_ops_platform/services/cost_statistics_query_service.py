@@ -17,6 +17,7 @@ from fin_ops_platform.services.cost_statistics_source_versions import (
     cost_statistics_source_versions,
 )
 from fin_ops_platform.services.read_model_freshness import (
+    require_expected_source_versions,
     resolve_read_model_freshness,
     source_version_mismatch_reasons,
 )
@@ -398,6 +399,10 @@ class CostStatisticsQueryService:
         if scope_month and scope_month != "all":
             expected_workbench_versions, active_workbench_versions = (
                 self._workbench_dependency_versions_provider(scope_month)
+            )
+            expected_workbench_versions = require_expected_source_versions(
+                expected_workbench_versions,
+                context="cost_statistics_workbench_dependency",
             )
             workbench_stale_reasons = source_version_mismatch_reasons(
                 expected=expected_workbench_versions,

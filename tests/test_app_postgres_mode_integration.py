@@ -288,11 +288,10 @@ class AppPostgresModeIntegrationTests(unittest.TestCase):
             )
         batch_id = preview.id
         self.assertEqual(confirmed_batch.status.value, "completed")
-        app._persist_confirmed_import_delta_with_read_model_invalidation(
+        app._persist_confirmed_import_delta(
             import_state_payload={
                 "imports": app._import_service.persistence_snapshot_for_batches([batch_id]),
             },
-            invalidate_cost_statistics=False,
         )
 
         self.assertEqual(

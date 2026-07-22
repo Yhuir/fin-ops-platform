@@ -6,6 +6,7 @@ import PageScaffold from "../components/common/PageScaffold";
 import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import StatePanel from "../components/common/StatePanel";
 import { useGlobalOperationOverlay } from "../contexts/GlobalOperationOverlayContext";
+import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
 import { FINANCE_DOMAIN_EVENTS, emitFinanceDomainEvent } from "../features/domainEvents";
 import { ApiClientError } from "../features/apiClient";
@@ -291,6 +292,7 @@ function AmountMismatchWarning({
 }
 
 export default function BatchAccountingPage() {
+  const { active, activationGeneration } = useOptionalPageActivation("batch-accounting");
   const { runOperation } = useGlobalOperationOverlay();
   const { canAdminAccess, canMutateData } = useSessionPermissions();
   const [bankYear, setBankYear] = useState(currentYear);
@@ -455,10 +457,13 @@ export default function BatchAccountingPage() {
   }, [applyBatchAccountingPayload, bankPage, bankYear, bucket, oaPage]);
 
   useEffect(() => {
+    if (!active) {
+      return undefined;
+    }
     const controller = new AbortController();
     loadData(controller.signal);
     return () => controller.abort();
-  }, [loadData]);
+  }, [active, activationGeneration, loadData]);
 
   useEffect(() => {
     setSelectedBankRowId((current) => {

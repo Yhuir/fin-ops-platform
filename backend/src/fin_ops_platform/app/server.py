@@ -134,9 +134,8 @@ from fin_ops_platform.services.pending_invoice_scope_planner import (
     pending_invoice_read_model_scope_keys_for_import_state,
 )
 from fin_ops_platform.services.prometheus_metrics import PROMETHEUS_CONTENT_TYPE, render_prometheus_metrics
-from fin_ops_platform.services.read_model_scope_policy import DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY, ReadModelScopeError
+from fin_ops_platform.services.read_model_scope_policy import ReadModelScopeError
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
-from fin_ops_platform.services.read_model_write_targets import normalized_scope_keys as normalized_write_scope_keys
 from fin_ops_platform.services.etc_existing_invoice_link_service import EtcExistingInvoiceLinkService
 from fin_ops_platform.services.etc_service import (
     EtcBatchDeleteError,
@@ -1086,11 +1085,8 @@ class Application:
             etc_reconciliation_task_service=self._etc_reconciliation_task_service,
             background_job_service=self._background_job_service,
             serialize_value=self._serialize_value,
-            execute_derived_data_lifecycle_event=self._execute_derived_data_lifecycle_event,
-            schedule_or_run_workbench_auto_matching_for_scopes=self._schedule_or_run_workbench_auto_matching_for_scopes,
             enqueue_workbench_auto_matching_for_scopes=self._enqueue_workbench_auto_matching_for_scopes,
-            persist_confirmed_import_delta=self._persist_confirmed_import_delta_with_read_model_invalidation,
-            invalidate_tax_offset_read_model_scopes=self._invalidate_tax_offset_read_model_scopes,
+            persist_confirmed_import_delta=self._persist_confirmed_import_delta,
             workbench_matching_scope_months_for_import_file_session=self._workbench_matching_scope_months_for_import_file_session,
             tax_offset_scope_keys_for_import_file_session=self._tax_offset_scope_keys_for_import_file_session,
             cost_statistics_scope_keys_for_import_file_session=self._cost_statistics_scope_keys_for_import_file_session,
@@ -1098,7 +1094,6 @@ class Application:
             input_invoice_usage_scope_keys_for_import_file_session=self._input_invoice_usage_scope_keys_for_import_file_session,
             output_invoice_collection_scope_keys_for_import_file_session=self._output_invoice_collection_scope_keys_for_import_file_session,
             link_etc_import_result_to_existing_invoices=self._link_etc_import_result_to_existing_invoices,
-            refresh_after_etc_invoice_link=self._refresh_after_etc_invoice_link,
             etc_import_preview_service=self._etc_import_preview_service,
             oa_manual_import_create_processor=self._process_oa_manual_import_create_job,
         )
@@ -5039,12 +5034,8 @@ class Application:
         ]
         if not normalized_months:
             return
-        self._execute_derived_data_lifecycle_event(
-            "etc_import_confirmed",
-            months=normalized_months,
-            include_all=False,
-            metadata={"source": "etc_invoice_link", "reason": reason},
-        )
+        _ = reason
+        self._search_service.clear_cache()
 
     def _refresh_after_etc_business_batch_status_change(self, changed_months: list[str], *, reason: str) -> None:
         normalized_months = [
@@ -5054,16 +5045,8 @@ class Application:
         ]
         if not normalized_months:
             return
-        self._execute_derived_data_lifecycle_event(
-            "etc_business_batch_status_changed",
-            months=normalized_months,
-            include_all=False,
-            metadata={
-                "source": "etc_business_batch_status",
-                "reason": reason,
-                "matching_debounce_seconds": 0,
-            },
-        )
+        _ = reason
+        self._search_service.clear_cache()
 
     def _refresh_after_historical_etc_repair_link(self, changed_months: list[str], *, reason: str) -> None:
         normalized_months = [
@@ -5785,22 +5768,9 @@ class Application:
         scope_keys.add("all")
         normalized_scope_keys = sorted(scope_keys)
         if promoted_count:
-            self._execute_import_state_changed_lifecycle(
-                cost_statistics_scope_keys=[
-                    scope_key for scope_key in normalized_scope_keys if SEARCH_MONTH_RE.match(scope_key)
-                ],
-                bank_detail_scope_keys=[],
-                input_invoice_usage_scope_keys=None,
-                output_invoice_collection_scope_keys=None,
-                invalidate_cost_statistics=True,
-                source="oa_attachment_invoice_promotion",
-            )
+            self._search_service.clear_cache()
         for scope_key in normalized_scope_keys:
             self._enqueue_oa_projection_sync_refresh(scope_key, reason="oa_attachment_invoice_cache")
-        self._invalidate_tax_offset_read_model_scopes(
-            [scope_key for scope_key in normalized_scope_keys if SEARCH_MONTH_RE.match(scope_key)],
-            reason="oa_attachment_invoice_cache",
-        )
 
     def _promote_oa_attachment_invoices_to_canonical(self, scope_keys: set[str]) -> int:
         promotion_mode = self._app_settings_service.get_oa_attachment_invoice_promotion_mode()
@@ -6980,18 +6950,6 @@ class Application:
                     method(event)
                 break
         self._search_service.clear_cache()
-        new_versions = event.get("new_versions") if isinstance(event.get("new_versions"), dict) else {}
-        self._execute_derived_data_lifecycle_event(
-            "pending_invoice_rules_changed",
-            scope_keys=["all"],
-            include_all=True,
-            metadata={
-                "reason": "pending_invoice_rules_changed",
-                "direction": "both",
-                "new_versions": dict(new_versions),
-                "affected_groups": list(event.get("affected_groups") or []),
-            },
-        )
 
     def _after_workbench_settings_update(
         self,
@@ -7006,12 +6964,6 @@ class Application:
                 operation="invalidate_read_models_after_settings_update",
             )
         self._search_service.clear_cache()
-        self._search_read_model_refresh_producer().invalidate(["all"], reason="settings_update")
-        if updated_payload.get("oa_invoice_offset") != previous_oa_invoice_offset:
-            self._mark_workbench_matching_dirty_scopes(
-                self._workbench_query_service.list_available_months(),
-                reason="oa_invoice_offset_settings_changed",
-            )
 
     def _settings_oa_manual_import_affected_scope_keys(
         self,
@@ -7047,11 +6999,7 @@ class Application:
                 except Exception:
                     pass
         resolved_scope_keys = sorted(scope_keys)
-        self._execute_derived_data_lifecycle_event(
-            "oa_attachment_invoice_cache_updated",
-            scope_keys=resolved_scope_keys,
-            metadata={"source": "oa_manual_import_mutation"},
-        )
+        self._search_service.clear_cache()
         invalidate_records_cache = getattr(self._workbench_query_service._oa_adapter, "invalidate_records_cache", None)
         if callable(invalidate_records_cache):
             invalidate_records_cache([scope_key for scope_key in resolved_scope_keys if scope_key != "all"])
@@ -7073,36 +7021,14 @@ class Application:
 
     @staticmethod
     def _settings_oa_manual_import_write_target_envelope(scope_keys: list[str]) -> dict[str, object]:
-        targets: list[dict[str, str]] = []
-
-        def add(read_model_key: str, raw_scope_keys: list[str]) -> None:
-            normalized_scope_keys = normalized_write_scope_keys(raw_scope_keys, fallback="all")
-            if read_model_key in DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY.registered_scope_types():
-                normalized_scope_keys = DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY.normalize_and_validate(
-                    read_model_key,
-                    normalized_scope_keys,
-                )
-            for scope_key in normalized_scope_keys:
-                target = {"read_model_key": read_model_key, "scope_key": scope_key}
-                if target not in targets:
-                    targets.append(target)
-
-        base_scope_keys = normalized_write_scope_keys(scope_keys, fallback="all")
-        for read_model_key in (
-            "workbench",
-            "workbench_relation",
-            "invoice_lifecycle",
-            "tax_offset",
-            "search",
-            "cost_statistics",
-        ):
-            add(read_model_key, base_scope_keys)
-        target_scope_keys = normalized_write_scope_keys([target["scope_key"] for target in targets])
+        target_scope_keys = sorted(
+            dict.fromkeys(str(scope_key).strip() for scope_key in scope_keys if str(scope_key).strip())
+        ) or ["all"]
         return {
             "affected_scope_keys": target_scope_keys,
             "read_model_scope_keys": target_scope_keys,
-            "freshness_targets": targets,
-            "operation_barrier_targets": list(targets),
+            "freshness_targets": [],
+            "operation_barrier_targets": [],
         }
 
     def _execute_settings_data_reset(
@@ -8575,11 +8501,6 @@ class Application:
                     method(event)
                 break
         self._search_service.clear_cache()
-        self._bank_detail_read_model_refresh_producer().enqueue(["all"], reason="bank_transaction_tag_settings_changed")
-        self._turnover_ledger_read_model_refresh_producer().enqueue(
-            ["all"],
-            reason="bank_transaction_tag_settings_changed",
-        )
 
     def _handle_live_workbench_confirm_link(
         self,
@@ -10014,15 +9935,10 @@ class Application:
             raise RuntimeError("File import preview requires the import delta persistence port.")
         persist(self._file_import_service.preview_session_persistence_payload(session_id))
 
-    def _persist_confirmed_import_delta_with_read_model_invalidation(
+    def _persist_confirmed_import_delta(
         self,
         *,
         import_state_payload: dict[str, object],
-        cost_statistics_scope_keys: list[str] | None = None,
-        bank_detail_scope_keys: list[str] | None = None,
-        input_invoice_usage_scope_keys: list[str] | None = None,
-        output_invoice_collection_scope_keys: list[str] | None = None,
-        invalidate_cost_statistics: bool = True,
     ) -> None:
         self._search_service.clear_cache()
         if self._state_store is not None:
@@ -10033,15 +9949,6 @@ class Application:
             if not callable(persist):
                 raise RuntimeError("File import confirmation requires the import delta persistence port.")
             persist(payload)
-
-        self._execute_import_state_changed_lifecycle(
-            cost_statistics_scope_keys=cost_statistics_scope_keys,
-            bank_detail_scope_keys=bank_detail_scope_keys,
-            input_invoice_usage_scope_keys=input_invoice_usage_scope_keys,
-            output_invoice_collection_scope_keys=output_invoice_collection_scope_keys,
-            invalidate_cost_statistics=invalidate_cost_statistics,
-            source="application_import_state",
-        )
 
     def _execute_import_state_changed_lifecycle(
         self,

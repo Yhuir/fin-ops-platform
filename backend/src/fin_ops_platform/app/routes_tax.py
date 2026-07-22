@@ -452,8 +452,8 @@ class TaxApiRoutes:
     def _tax_certified_import_write_targets(result: dict[str, object]) -> dict[str, object]:
         batch = result.get("batch") if isinstance(result.get("batch"), dict) else {}
         return write_target_envelope(
-            read_model_key="tax_offset",
             scope_keys=list(batch.get("months") or []),
+            targets=[],
             fallback_scope_key="all",
         )
 

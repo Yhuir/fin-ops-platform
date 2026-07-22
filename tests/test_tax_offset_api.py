@@ -250,8 +250,8 @@ class TaxOffsetApiTests(unittest.TestCase):
         self.assertEqual(first_payload["plan"]["read_model_scope_key"], "2026-05")
         self.assertEqual(first_payload["affected_scope_keys"], ["2026-05"])
         self.assertEqual(first_payload["read_model_scope_keys"], ["2026-05"])
-        self.assertEqual(first_payload["freshness_targets"], [{"read_model_key": "tax_offset", "scope_key": "2026-05"}])
-        self.assertEqual(first_payload["operation_barrier_targets"], [{"read_model_key": "tax_offset", "scope_key": "2026-05"}])
+        self.assertEqual(first_payload["freshness_targets"], [])
+        self.assertEqual(first_payload["operation_barrier_targets"], [])
         self.assertEqual(second_payload["operation_barrier_targets"], first_payload["operation_barrier_targets"])
 
     def test_tax_offset_plan_save_rejects_stale_source_versions(self) -> None:
@@ -401,7 +401,7 @@ class TaxOffsetApiTests(unittest.TestCase):
         self.assertIn("2026-05", create_job.call_args.kwargs["idempotency_key"])
         run_job.assert_called_once()
 
-    def test_tax_certified_confirm_triggers_tax_offset_lifecycle_refresh(self) -> None:
+    def test_tax_certified_confirm_does_not_trigger_write_side_read_model_refresh(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             preview_body, preview_headers = build_multipart_payload(
@@ -416,11 +416,7 @@ class TaxOffsetApiTests(unittest.TestCase):
             )
             preview_payload = json.loads(preview_response.body)
 
-            with patch.object(
-                app._import_processing_service,
-                "_execute_derived_data_lifecycle_event",
-                wraps=app._import_processing_service._execute_derived_data_lifecycle_event,
-            ) as lifecycle_event:
+            with patch.object(app, "_execute_derived_data_lifecycle_event") as lifecycle_event:
                 confirm_response = app.handle_request(
                     "POST",
                     "/api/tax-offset/certified-import/confirm",
@@ -428,10 +424,7 @@ class TaxOffsetApiTests(unittest.TestCase):
                 )
 
         self.assertEqual(confirm_response.status_code, 200)
-        lifecycle_event.assert_called_once()
-        self.assertEqual(lifecycle_event.call_args.args[0], "tax_certified_import_confirmed")
-        self.assertEqual(lifecycle_event.call_args.kwargs["months"], ["2026-01"])
-        self.assertEqual(lifecycle_event.call_args.kwargs["include_all"], False)
+        lifecycle_event.assert_not_called()
 
     def test_tax_offset_includes_oa_attachment_invoice_rows_by_issue_month(self) -> None:
         app = build_application()
@@ -555,8 +548,8 @@ class TaxOffsetApiTests(unittest.TestCase):
             self.assertEqual(confirm_payload["batch"]["persisted_record_count"], 2)
             self.assertEqual(confirm_payload["affected_scope_keys"], ["2026-01"])
             self.assertEqual(confirm_payload["read_model_scope_keys"], ["2026-01"])
-            self.assertEqual(confirm_payload["freshness_targets"], [{"read_model_key": "tax_offset", "scope_key": "2026-01"}])
-            self.assertEqual(confirm_payload["operation_barrier_targets"], [{"read_model_key": "tax_offset", "scope_key": "2026-01"}])
+            self.assertEqual(confirm_payload["freshness_targets"], [])
+            self.assertEqual(confirm_payload["operation_barrier_targets"], [])
 
             list_response = app.handle_request("GET", "/api/tax-offset/certified-imports?month=2026-01")
             self.assertEqual(list_response.status_code, 200)

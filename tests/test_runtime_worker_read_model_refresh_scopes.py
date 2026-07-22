@@ -63,25 +63,20 @@ class RuntimeWorkerReadModelRefreshScopeTests(unittest.TestCase):
         self.assertNotIn(("cost_statistics", "2026-04", "unit_test"), cost_refreshes)
         self.assertNotIn(("cost_statistics", "all", "unit_test"), cost_refreshes)
 
-    def test_import_state_search_refresh_uses_search_producer_boundary(self) -> None:
+    def test_import_state_persistence_does_not_enqueue_page_read_models(self) -> None:
         queue = QueueRecorder()
         search_producer = FakeSearchRefreshProducer()
         lifecycle = self._lifecycle(queue, search_read_model_refresh_producer=search_producer)
         import_state_payload = {"imports": {"batches": {"batch-1": {}}}, "file_imports": {"sessions": {}}}
         lifecycle.persist_confirmed_import_delta(
             import_state_payload=import_state_payload,
-            cost_statistics_scope_keys=["2026-03"],
         )
 
         self.assertEqual(lifecycle._state_store.saved_payloads, [import_state_payload])
-        self.assertEqual(search_producer.calls, [(["2026-03"], "import_state_changed")])
-        self.assertNotIn(("search", "2026-03", "import_state_changed"), queue.refreshes)
-        self.assertIn(("workbench_relation", "2026-03", "import_state_changed"), queue.refreshes)
-        self.assertIn(("input_invoice_usage", "2026-03", "import_state_changed"), queue.refreshes)
-        self.assertIn(("output_invoice_collection", "2026-03", "import_state_changed"), queue.refreshes)
-        self.assertIn(("oa_pending_payment", "2026-03", "import_state_changed"), queue.refreshes)
+        self.assertEqual(search_producer.calls, [])
+        self.assertEqual(queue.refreshes, [])
 
-    def test_import_state_bank_account_balance_refresh_uses_producer_boundary(self) -> None:
+    def test_bank_import_persistence_does_not_enqueue_balance_or_detail_read_models(self) -> None:
         queue = QueueRecorder()
         bank_account_balance_producer = FakeBankAccountBalanceRefreshProducer()
         lifecycle = self._lifecycle(
@@ -90,12 +85,10 @@ class RuntimeWorkerReadModelRefreshScopeTests(unittest.TestCase):
         )
         lifecycle.persist_confirmed_import_delta(
             import_state_payload={"imports": {}, "file_imports": {}},
-            bank_detail_scope_keys=["2026-03"],
         )
 
-        self.assertEqual(bank_account_balance_producer.calls, [(["all"], "import_state_changed")])
-        self.assertNotIn(("bank_account_balance", "all", "import_state_changed"), queue.refreshes)
-        self.assertIn(("bank_detail", "2026-03", "import_facts_changed"), queue.refreshes)
+        self.assertEqual(bank_account_balance_producer.calls, [])
+        self.assertEqual(queue.refreshes, [])
 
     def test_import_state_persistence_rejects_cross_domain_payload(self) -> None:
         lifecycle = self._lifecycle(QueueRecorder())

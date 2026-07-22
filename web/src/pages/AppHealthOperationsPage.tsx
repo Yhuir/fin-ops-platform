@@ -164,6 +164,28 @@ function sampleLabel(row: OperationsDashboardReadModelMetric) {
   return formatNumber(sampleCount);
 }
 
+function latestScopeEvidence(row: OperationsDashboardReadModelMetric) {
+  return row.scope_evidence?.[0];
+}
+
+function scopeEvidenceTitle(row: OperationsDashboardReadModelMetric) {
+  const evidence = latestScopeEvidence(row);
+  if (!evidence) {
+    return "暂无 scope 运行证据";
+  }
+  return JSON.stringify({
+    expected_source_version: evidence.expected_source_version,
+    projection_status: evidence.projection_status,
+    projection_source_versions: evidence.projection_source_versions,
+    lag_seconds: evidence.lag_seconds,
+    queue_wait_ms: evidence.queue_wait_ms,
+    handler_duration_ms: evidence.handler_duration_ms,
+    retry_count: evidence.retry_count,
+    dedupe_reason: evidence.dedupe_reason,
+    last_error: evidence.last_error,
+  });
+}
+
 function readModelState(row: OperationsDashboardReadModelMetric) {
   if ((row.unavailable_count ?? 0) > 0) {
     return { label: "failed", tone: "danger" as const };
@@ -579,7 +601,7 @@ function QueueTable({ payload }: { payload: OperationsDashboardPayload }) {
 
 function ReadModelTable({ rows }: { rows: OperationsDashboardReadModelMetric[] }) {
   return (
-    <FinanceTable ariaLabel="Read Model 状态" minWidth={920}>
+    <FinanceTable ariaLabel="Read Model 状态" minWidth={1160}>
       <FinanceTableHeader>
         <FinanceTableColumn columnRole="identity" isRowHeader>Read Model</FinanceTableColumn>
         <FinanceTableColumn columnRole="status">状态</FinanceTableColumn>
@@ -588,6 +610,8 @@ function ReadModelTable({ rows }: { rows: OperationsDashboardReadModelMetric[] }
         <FinanceTableColumn columnRole="status">历史 p95</FinanceTableColumn>
         <FinanceTableColumn columnRole="quantity">15m 样本</FinanceTableColumn>
         <FinanceTableColumn columnRole="date">最近完成</FinanceTableColumn>
+        <FinanceTableColumn columnRole="description">最近 scope</FinanceTableColumn>
+        <FinanceTableColumn columnRole="description">queue / handler / retry</FinanceTableColumn>
         <FinanceTableColumn columnRole="quantity">stale</FinanceTableColumn>
         <FinanceTableColumn columnRole="quantity">unavailable</FinanceTableColumn>
       </FinanceTableHeader>
@@ -595,6 +619,7 @@ function ReadModelTable({ rows }: { rows: OperationsDashboardReadModelMetric[] }
           {rows.map((row) => (
             (() => {
               const state = readModelState(row);
+              const evidence = latestScopeEvidence(row);
               return (
                 <FinanceTableRow key={row.key} id={row.key}>
                   <FinanceTableCell columnRole="identity" textValue={row.key}>{row.key}</FinanceTableCell>
@@ -603,6 +628,18 @@ function ReadModelTable({ rows }: { rows: OperationsDashboardReadModelMetric[] }
                   <PerformanceCell value={row.historical_refresh_duration_ms?.p95} kind="p95" />
                   <FinanceTableCell columnRole="quantity">{sampleLabel(row)}</FinanceTableCell>
                   <FinanceTableCell columnRole="date">{formatTimestamp(row.refresh_duration_windows?.recent_15m?.last_completed_at)}</FinanceTableCell>
+                  <FinanceTableCell columnRole="description" textValue={evidence?.scope_key ?? EMPTY_VALUE}>
+                    <span title={scopeEvidenceTitle(row)}>
+                      {evidence
+                        ? `${evidence.operation_class === "full_history_batch" ? "全量" : "当前"} ${evidence.scope_key}`
+                        : EMPTY_VALUE}
+                    </span>
+                  </FinanceTableCell>
+                  <FinanceTableCell columnRole="description">
+                    {evidence
+                      ? `${formatMs(evidence.queue_wait_ms)} / ${formatMs(evidence.handler_duration_ms)} / r${evidence.retry_count}`
+                      : EMPTY_VALUE}
+                  </FinanceTableCell>
                   <FinanceTableCell columnRole="quantity">{formatNumber(row.stale_count)}</FinanceTableCell>
                   <FinanceTableCell columnRole="quantity">{formatNumber(row.unavailable_count)}</FinanceTableCell>
                 </FinanceTableRow>
@@ -677,7 +714,7 @@ function RuntimePerformance({ payload }: { payload: OperationsDashboardPayload }
 export default function AppHealthOperationsPage() {
   const session = useSession();
   const permissions = useSessionPermissions();
-  const { active } = useOptionalPageActivation("app-health-operations");
+  const { active, activationGeneration } = useOptionalPageActivation("app-health-operations");
   const [payload, setPayload] = useState<OperationsDashboardPayload | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -756,7 +793,7 @@ export default function AppHealthOperationsPage() {
       auditInFlightRef.current?.abort();
       auditInFlightRef.current = null;
     };
-  }, [active, loadDashboard, permissions.canAdminAccess]);
+  }, [active, activationGeneration, loadDashboard, permissions.canAdminAccess]);
 
   if (session.status === "loading") {
     return (

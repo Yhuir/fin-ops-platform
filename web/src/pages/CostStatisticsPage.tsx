@@ -17,6 +17,7 @@ import CostTransactionDetailModal from "../components/cost-statistics/CostTransa
 import { useAppChrome } from "../contexts/AppChromeContext";
 import { useAppStatusOverview } from "../contexts/AppHealthStatusContext";
 import { DEFAULT_MONTH } from "../contexts/MonthContext";
+import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
 import {
@@ -390,6 +391,7 @@ function isCostStatisticsPageSession(value: unknown): value is CostStatisticsPag
 }
 
 export default function CostStatisticsPage() {
+  const { active, activationGeneration } = useOptionalPageActivation("cost-statistics");
   const navigate = useNavigate();
   const { setWorkbenchHeaderActions } = useAppChrome();
   const appStatusOverview = useAppStatusOverview();
@@ -680,53 +682,6 @@ export default function CostStatisticsPage() {
     }
   }, [appStatusReadModelStatus, currentCostStatisticsScopeKey, handleDomainMutation]);
 
-  useEffect(() => {
-    let shouldRevalidate = false;
-    let lastRevalidationAt = 0;
-
-    const revalidate = () => {
-      const now = Date.now();
-      if (now - lastRevalidationAt < 500) {
-        return;
-      }
-      lastRevalidationAt = now;
-      shouldRevalidate = false;
-      handleManualRefresh();
-    };
-    const handleBlur = () => {
-      shouldRevalidate = true;
-    };
-    const handleFocus = () => {
-      if (shouldRevalidate) {
-        revalidate();
-      }
-    };
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "hidden") {
-        shouldRevalidate = true;
-        return;
-      }
-      if (shouldRevalidate) {
-        revalidate();
-      }
-    };
-    const handlePageShow = (event: PageTransitionEvent) => {
-      if (event.persisted) {
-        revalidate();
-      }
-    };
-
-    window.addEventListener("blur", handleBlur);
-    window.addEventListener("focus", handleFocus);
-    window.addEventListener("pageshow", handlePageShow);
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => {
-      window.removeEventListener("blur", handleBlur);
-      window.removeEventListener("focus", handleFocus);
-      window.removeEventListener("pageshow", handlePageShow);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, [handleManualRefresh]);
   const openTagRulesDrawer = useCallback(() => {
     setTagRulesError(null);
     setIsTagRulesDrawerOpen(true);
@@ -766,7 +721,7 @@ export default function CostStatisticsPage() {
   useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.invoiceFactUpdated, handleDomainMutation);
 
   useEffect(() => {
-    if (!isTagRulesDrawerOpen) {
+    if (!active || !isTagRulesDrawerOpen) {
       return undefined;
     }
     const controller = new AbortController();
@@ -791,7 +746,7 @@ export default function CostStatisticsPage() {
     }
     void loadTagRules();
     return () => controller.abort();
-  }, [isTagRulesDrawerOpen]);
+  }, [active, activationGeneration, isTagRulesDrawerOpen]);
 
   const saveTagRules = useCallback(async () => {
     if (!tagRules || isTagRulesSaving) {
@@ -823,6 +778,9 @@ export default function CostStatisticsPage() {
   ]);
 
   useEffect(() => {
+    if (!active) {
+      return undefined;
+    }
     explorerRequestRef.current?.abort();
     const controller = new AbortController();
     explorerRequestRef.current = controller;
@@ -878,7 +836,7 @@ export default function CostStatisticsPage() {
         explorerRequestRef.current = null;
       }
     };
-  }, [domainRefreshNonce, explorerRequestKey]);
+  }, [active, activationGeneration, domainRefreshNonce, explorerRequestKey, resetDetailSelection]);
 
   async function loadMoreExplorerRows() {
     if (!explorerData?.nextCursor || isLoadingMore) {

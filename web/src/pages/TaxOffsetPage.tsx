@@ -18,7 +18,6 @@ import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
 import { ApiClientError } from "../features/apiClient";
-import { operationBarrierTargets, waitForOperationFreshness } from "../features/operationBarrier/api";
 import { calculateTaxOffset, fetchTaxOffsetMonth, saveTaxOffsetPlan } from "../features/tax/api";
 import { FINANCE_DOMAIN_EVENTS } from "../features/domainEvents";
 import { importWorkflowPath } from "../features/imports/importRoutes";
@@ -66,8 +65,7 @@ export default function TaxOffsetPage() {
   const navigate = useNavigate();
   const { setWorkbenchHeaderActions } = useAppChrome();
   const { canAdminAccess, canMutateData } = useSessionPermissions();
-  const { active } = useOptionalPageActivation("tax-offset");
-  const pageActiveRef = useRef(active);
+  const { active, activationGeneration } = useOptionalPageActivation("tax-offset");
   const currentMonthSession = usePageSessionState({
     pageKey: "tax-offset",
     stateKey: "currentMonth",
@@ -196,32 +194,22 @@ export default function TaxOffsetPage() {
   );
 
   useEffect(() => {
+    if (!active) {
+      return undefined;
+    }
     const controller = new AbortController();
     setImportFeedback(null);
     setPlanFeedback(null);
     void loadMonthData("reset", controller.signal);
     return () => controller.abort();
-  }, [loadMonthData]);
+  }, [active, activationGeneration, loadMonthData]);
 
   const handleRefreshTrigger = useCallback(() => {
-    if (!pageActiveRef.current || document.visibilityState === "hidden") {
+    if (!active) {
       return;
     }
     void loadMonthData("refresh");
-  }, [loadMonthData]);
-
-  useEffect(() => {
-    pageActiveRef.current = active;
-  }, [active]);
-
-  useEffect(() => {
-    window.addEventListener("focus", handleRefreshTrigger);
-    document.addEventListener("visibilitychange", handleRefreshTrigger);
-    return () => {
-      window.removeEventListener("focus", handleRefreshTrigger);
-      document.removeEventListener("visibilitychange", handleRefreshTrigger);
-    };
-  }, [handleRefreshTrigger]);
+  }, [active, loadMonthData]);
   useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.invoiceFactUpdated, handleRefreshTrigger);
 
   useEffect(() => {
@@ -396,32 +384,14 @@ export default function TaxOffsetPage() {
     </div>
   );
 
-  const waitForTaxOffsetBarrier = useCallback(async () => {
-    try {
-      await waitForOperationFreshness(operationBarrierTargets("tax_offset", [currentMonth]));
-      return true;
-    } catch {
-      return false;
-    }
-  }, [currentMonth]);
-
   const handleCertifiedImportComplete = useCallback(
     async (result: TaxCertifiedImportConfirmedResult) => {
       setIsCertifiedImportModalOpen(false);
-      const barrierTargets = result.operationBarrierTargets.filter((target) => target.scopeKey);
-      const synced = barrierTargets.length > 0
-        ? await waitForOperationFreshness(barrierTargets).then(() => true).catch(() => false)
-        : await waitForTaxOffsetBarrier();
-      if (!synced) {
-        setImportFeedback(`已导入 ${result.persistedRecordCount} 条已认证记录，后台同步尚未完成，请稍后刷新。`);
-        setPlanFeedback(null);
-        return;
-      }
       await loadMonthData("refresh");
       setImportFeedback(`已导入 ${result.persistedRecordCount} 条已认证记录，并已刷新当前税金抵扣页面。`);
       setPlanFeedback(null);
     },
-    [loadMonthData, waitForTaxOffsetBarrier],
+    [loadMonthData],
   );
 
   const handleSavePlan = useCallback(async () => {
@@ -441,14 +411,7 @@ export default function TaxOffsetPage() {
         expectedSourceVersions: monthData.sourceVersions,
         idempotencyKey: `tax-offset-plan:${currentMonth}:${monthData.readModelScopeKey ?? "scope"}:${selectedInputIds.join(",")}`,
       });
-      const barrierTargets = saveResult.operationBarrierTargets.filter((target) => target.scopeKey);
-      const synced = barrierTargets.length > 0
-        ? await waitForOperationFreshness(barrierTargets).then(() => true).catch(() => false)
-        : await waitForTaxOffsetBarrier();
-      if (!synced) {
-        setPlanFeedback("已保存本月税金抵扣计划，后台同步尚未完成，请稍后刷新。");
-        return;
-      }
+      void saveResult;
       setPlanFeedback("已保存本月税金抵扣计划。");
       await loadMonthData("refresh");
     } catch (error) {
@@ -462,7 +425,7 @@ export default function TaxOffsetPage() {
         setIsSavingPlan(false);
       }
     }
-  }, [currentMonth, isSavingPlan, loadMonthData, monthData, selectedInputIds, summary, waitForTaxOffsetBarrier]);
+  }, [currentMonth, isSavingPlan, loadMonthData, monthData, selectedInputIds, summary]);
 
   return (
     <PageScaffold

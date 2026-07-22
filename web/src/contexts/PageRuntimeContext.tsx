@@ -1,7 +1,6 @@
 import {
   createContext,
   type ReactNode,
-  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -57,33 +56,20 @@ export function useActivePageEvent<EventType extends Event = Event>(
   eventName: string,
   handler: (event: EventType) => void,
 ) {
-  const { active, activationGeneration } = usePageActivation();
+  const { active } = usePageActivation();
   const handlerRef = useRef(handler);
-  const pendingEventRef = useRef<EventType | null>(null);
 
   useEffect(() => {
     handlerRef.current = handler;
   }, [handler]);
 
-  const eventListener = useCallback((event: Event) => {
-    if (active) {
-      handlerRef.current(event as EventType);
-      return;
-    }
-    pendingEventRef.current = event as EventType;
-  }, [active]);
-
   useEffect(() => {
+    const eventListener = (event: Event) => {
+    if (active && document.visibilityState !== "hidden") {
+      handlerRef.current(event as EventType);
+    }
+    };
     window.addEventListener(eventName, eventListener);
     return () => window.removeEventListener(eventName, eventListener);
-  }, [eventListener, eventName]);
-
-  useEffect(() => {
-    if (!active || !pendingEventRef.current) {
-      return;
-    }
-    const pendingEvent = pendingEventRef.current;
-    pendingEventRef.current = null;
-    handlerRef.current(pendingEvent);
-  }, [active, activationGeneration]);
+  }, [active, eventName]);
 }

@@ -395,7 +395,7 @@ export default function ReconciliationWorkbenchPage() {
   const healthStatus = useAppHealthStatus();
   const { runOperation } = useGlobalOperationOverlay();
   const { canAdminAccess, canMutateData } = useSessionPermissions();
-  const { active } = useOptionalPageActivation("reconciliation-workbench");
+  const { active, activationGeneration } = useOptionalPageActivation("reconciliation-workbench");
   const {
     detailRow,
     getRowState,
@@ -1121,13 +1121,16 @@ export default function ReconciliationWorkbenchPage() {
   }, [workbenchData]);
 
   useEffect(() => {
+    if (!active) {
+      return undefined;
+    }
     const controller = new AbortController();
     clearSelection();
     setLastActionMessage(null);
     setDetailError(null);
     void loadWorkbenchData(WORKBENCH_VIEW_MONTH, controller.signal, { includeAuxiliary: true });
     return () => controller.abort();
-  }, []);
+  }, [active, activationGeneration]);
 
   useEffect(() => {
     if (!active) {

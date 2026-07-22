@@ -1,17 +1,10 @@
 from __future__ import annotations
 
-import re
 from typing import Any, Callable
 
 from fin_ops_platform.domain.enums import BatchType
 from fin_ops_platform.services.import_job_queue import ImportJob
-from fin_ops_platform.services.pending_invoice_scope_planner import (
-    pending_invoice_read_model_scope_keys_for_import_state,
-)
-from fin_ops_platform.services.read_model_scope_policy import DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY
 from fin_ops_platform.services.read_model_write_targets import normalized_scope_keys
-
-MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 
 
 class ImportProcessingService:
@@ -24,11 +17,8 @@ class ImportProcessingService:
         etc_reconciliation_task_service: Any,
         background_job_service: Any,
         serialize_value: Callable[[Any], Any],
-        execute_derived_data_lifecycle_event: Callable[..., Any],
-        schedule_or_run_workbench_auto_matching_for_scopes: Callable[..., Any],
         enqueue_workbench_auto_matching_for_scopes: Callable[..., Any],
         persist_confirmed_import_delta: Callable[..., Any],
-        invalidate_tax_offset_read_model_scopes: Callable[..., Any],
         workbench_matching_scope_months_for_import_file_session: Callable[[Any, list[str]], list[str]],
         tax_offset_scope_keys_for_import_file_session: Callable[[Any, list[str]], list[str]],
         cost_statistics_scope_keys_for_import_file_session: Callable[[Any, list[str]], list[str]],
@@ -36,7 +26,6 @@ class ImportProcessingService:
         input_invoice_usage_scope_keys_for_import_file_session: Callable[[Any, list[str]], list[str]],
         output_invoice_collection_scope_keys_for_import_file_session: Callable[[Any, list[str]], list[str]],
         link_etc_import_result_to_existing_invoices: Callable[[Any], list[str]],
-        refresh_after_etc_invoice_link: Callable[..., Any],
         etc_import_preview_service: Any,
         oa_manual_import_create_processor: Callable[[ImportJob], dict[str, object]] | None = None,
     ) -> None:
@@ -46,11 +35,8 @@ class ImportProcessingService:
         self._etc_reconciliation_task_service = etc_reconciliation_task_service
         self._background_job_service = background_job_service
         self._serialize_value = serialize_value
-        self._execute_derived_data_lifecycle_event = execute_derived_data_lifecycle_event
-        self._schedule_or_run_workbench_auto_matching_for_scopes = schedule_or_run_workbench_auto_matching_for_scopes
         self._enqueue_workbench_auto_matching_for_scopes = enqueue_workbench_auto_matching_for_scopes
         self._persist_confirmed_import_delta = persist_confirmed_import_delta
-        self._invalidate_tax_offset_read_model_scopes = invalidate_tax_offset_read_model_scopes
         self._workbench_matching_scope_months_for_import_file_session = workbench_matching_scope_months_for_import_file_session
         self._tax_offset_scope_keys_for_import_file_session = tax_offset_scope_keys_for_import_file_session
         self._cost_statistics_scope_keys_for_import_file_session = cost_statistics_scope_keys_for_import_file_session
@@ -58,7 +44,6 @@ class ImportProcessingService:
         self._input_invoice_usage_scope_keys_for_import_file_session = input_invoice_usage_scope_keys_for_import_file_session
         self._output_invoice_collection_scope_keys_for_import_file_session = output_invoice_collection_scope_keys_for_import_file_session
         self._link_etc_import_result_to_existing_invoices = link_etc_import_result_to_existing_invoices
-        self._refresh_after_etc_invoice_link = refresh_after_etc_invoice_link
         self._etc_import_preview_service = etc_import_preview_service
         self._oa_manual_import_create_processor = oa_manual_import_create_processor
 
@@ -104,16 +89,6 @@ class ImportProcessingService:
 
     def execute_tax_certified_import_confirm(self, session_id: str) -> dict[str, object]:
         batch = self._tax_certified_import_service.confirm_session(session_id)
-        self._execute_derived_data_lifecycle_event(
-            "tax_certified_import_confirmed",
-            months=list(getattr(batch, "months", []) or []),
-            include_all=False,
-            metadata={
-                "source": "tax_certified_import_confirm",
-                "reason": "tax_certified_import_confirm",
-                "session_id": session_id,
-            },
-        )
         return {
             "success": True,
             "batch": self._serialize_value(batch),
@@ -187,14 +162,6 @@ class ImportProcessingService:
             )
             self._persist_confirmed_import_delta(
                 import_state_payload=import_state_payload,
-                cost_statistics_scope_keys=cost_statistics_scope_keys,
-                bank_detail_scope_keys=bank_detail_scope_keys,
-                input_invoice_usage_scope_keys=input_invoice_usage_scope_keys,
-                output_invoice_collection_scope_keys=output_invoice_collection_scope_keys,
-            )
-            self._invalidate_tax_offset_read_model_scopes(
-                tax_offset_scope_keys,
-                reason="invoice_file_import_confirm",
             )
             matching_job_id = None
             if any(file.status == "confirmed" for file in confirmed_session.files):
@@ -215,7 +182,7 @@ class ImportProcessingService:
                 "selected": total,
                 "affected_months": scope_months,
                 "enqueued_matching_job_id": matching_job_id,
-                **self._import_write_target_envelope(
+                **self._write_result_envelope(
                     cost_statistics_scope_keys=cost_statistics_scope_keys,
                     tax_offset_scope_keys=tax_offset_scope_keys,
                     bank_detail_scope_keys=bank_detail_scope_keys,
@@ -316,7 +283,6 @@ class ImportProcessingService:
             None,
         )
         changed_months = self._link_etc_import_result_to_existing_invoices(result)
-        self._refresh_after_etc_invoice_link(changed_months, reason="etc_invoice_import_confirm")
         summary = self.etc_import_job_summary(result, total)
         changed_scope_keys = normalized_scope_keys(changed_months)
         result_summary = {
@@ -327,7 +293,7 @@ class ImportProcessingService:
         result_summary.update(
             {
                 "affected_months": changed_scope_keys,
-                **self._import_write_target_envelope(
+                **self._write_result_envelope(
                     cost_statistics_scope_keys=changed_scope_keys,
                     tax_offset_scope_keys=changed_scope_keys,
                     bank_detail_scope_keys=[],
@@ -399,7 +365,7 @@ class ImportProcessingService:
         }
 
     @staticmethod
-    def _import_write_target_envelope(
+    def _write_result_envelope(
         *,
         cost_statistics_scope_keys: list[str],
         tax_offset_scope_keys: list[str],
@@ -407,41 +373,20 @@ class ImportProcessingService:
         input_invoice_usage_scope_keys: list[str],
         output_invoice_collection_scope_keys: list[str],
     ) -> dict[str, object]:
-        targets: list[dict[str, str]] = []
-
-        def add(read_model_key: str, scope_keys: list[str], *, fallback_scope_key: str | None = None) -> None:
-            normalized = normalized_scope_keys(scope_keys, fallback=fallback_scope_key)
-            if read_model_key in DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY.registered_scope_types():
-                normalized = DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY.normalize_and_validate(read_model_key, normalized)
-            for scope_key in normalized:
-                target = {"read_model_key": read_model_key, "scope_key": scope_key}
-                if target not in targets:
-                    targets.append(target)
-
-        cost_scope_keys = normalized_scope_keys(cost_statistics_scope_keys, fallback="all")
-        add("tax_offset", tax_offset_scope_keys)
-        add("workbench", _workbench_read_model_scope_keys_for_import_state(cost_scope_keys))
-        add("workbench_relation", cost_scope_keys)
-        add("invoice_lifecycle", cost_scope_keys)
-        add("search", cost_scope_keys)
-        add(
-            "pending_invoice",
-            pending_invoice_read_model_scope_keys_for_import_state(cost_scope_keys, bank_detail_scope_keys),
+        scope_keys = normalized_scope_keys(
+            [
+                *cost_statistics_scope_keys,
+                *tax_offset_scope_keys,
+                *bank_detail_scope_keys,
+                *input_invoice_usage_scope_keys,
+                *output_invoice_collection_scope_keys,
+            ]
         )
-        add("input_invoice_usage", input_invoice_usage_scope_keys)
-        add("output_invoice_collection", output_invoice_collection_scope_keys)
-        add("oa_pending_payment", cost_scope_keys)
-        add("bank_detail", bank_detail_scope_keys)
-        if bank_detail_scope_keys:
-            add("bank_account_balance", ["all"])
-        add("cost_statistics", cost_scope_keys)
-
-        scope_keys = normalized_scope_keys([target["scope_key"] for target in targets])
         return {
             "affected_scope_keys": scope_keys,
             "read_model_scope_keys": scope_keys,
-            "freshness_targets": targets,
-            "operation_barrier_targets": list(targets),
+            "freshness_targets": [],
+            "operation_barrier_targets": [],
         }
 
     def resolve_task_etc_business_batch(
@@ -460,8 +405,3 @@ class ImportProcessingService:
             owner_user_id=owner_user_id,
             idempotency_key=idempotency_key,
         )
-
-
-def _workbench_read_model_scope_keys_for_import_state(scope_keys: list[str] | None) -> list[str]:
-    month_scope_keys = [scope_key for scope_key in normalized_scope_keys(scope_keys) if MONTH_RE.match(scope_key)]
-    return month_scope_keys or ["all"]

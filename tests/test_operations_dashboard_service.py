@@ -415,6 +415,29 @@ class OperationsDashboardServiceTests(unittest.TestCase):
                     ]
                 if "from job.read_model_dirty_scopes" in normalized:
                     return []
+                if "projection_source_versions" in normalized and "from job.outbox_events" in normalized:
+                    return [
+                        {
+                            "event_type": "workbench.read_model.refresh",
+                            "scope_type": "workbench",
+                            "scope_key": "2026-05",
+                            "status": "done",
+                            "source_version": 7,
+                            "attempts": 2,
+                            "last_error": "",
+                            "available_at": "2026-05-28T09:59:59+00:00",
+                            "locked_at": "2026-05-28T10:00:00+00:00",
+                            "processed_at": "2026-05-28T10:00:00.120000+00:00",
+                            "updated_at": "2026-05-28T10:00:00.120000+00:00",
+                            "lag_seconds": 1.12,
+                            "queue_wait_ms": 1000.0,
+                            "handler_duration_ms": 120.0,
+                            "dedupe_reason": "",
+                            "projection_status": "fresh",
+                            "projection_source_versions": {"source_version": 7},
+                            "projection_last_error": "",
+                        }
+                    ]
                 raise AssertionError(sql)
 
         connection = WindowedConnection()
@@ -427,6 +450,11 @@ class OperationsDashboardServiceTests(unittest.TestCase):
         self.assertEqual(workbench["historical_refresh_duration_ms"]["p95"], 24000.0)
         self.assertEqual(workbench["refresh_duration_windows"]["recent_15m"]["sample_count"], 2)
         self.assertIn("full", workbench["refresh_duration_by_kind"])
+        self.assertEqual(workbench["scope_evidence"][0]["operation_class"], "current_scope")
+        self.assertEqual(workbench["scope_evidence"][0]["queue_wait_ms"], 1000.0)
+        self.assertEqual(workbench["scope_evidence"][0]["handler_duration_ms"], 120.0)
+        self.assertEqual(workbench["scope_evidence"][0]["retry_count"], 1)
+        self.assertEqual(workbench["scope_evidence"][0]["projection_source_versions"], {"source_version": 7})
         self.assertTrue(
             any(
                 "from read_model.workbench_generations" in sql and "consistency_status = 'inconsistent'" in sql

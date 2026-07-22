@@ -5,6 +5,7 @@ import StatePanel from "../components/common/StatePanel";
 import SettingsPageContent from "../components/settings/SettingsPageContent";
 import { useAppChrome } from "../contexts/AppChromeContext";
 import { useAppHealthStatus, useCanMutateWithHealth } from "../contexts/AppHealthStatusContext";
+import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSession, useSessionPermissions } from "../contexts/SessionContext";
 import { importWorkflowPath } from "../features/imports/importRoutes";
 import {
@@ -54,6 +55,7 @@ function normalizeSettingsError(error: unknown, fallback: string) {
 }
 
 export default function SettingsPage() {
+  const { active, activationGeneration } = useOptionalPageActivation("settings");
   const navigate = useNavigate();
   const session = useSession();
   const healthStatus = useAppHealthStatus();
@@ -101,15 +103,18 @@ export default function SettingsPage() {
   }, []);
 
   useEffect(() => {
+    if (!active) {
+      return undefined;
+    }
     const controller = new AbortController();
     void loadSettings(controller.signal);
     return () => {
       controller.abort();
     };
-  }, [loadSettings]);
+  }, [active, activationGeneration, loadSettings]);
 
   useEffect(() => {
-    if (!canAdminAccess) {
+    if (!active || !canAdminAccess) {
       setOaApplicantCredentials([]);
       setIsOaApplicantCredentialLoading(false);
       return;
@@ -138,10 +143,10 @@ export default function SettingsPage() {
     return () => {
       controller.abort();
     };
-  }, [canAdminAccess]);
+  }, [active, activationGeneration, canAdminAccess]);
 
   useEffect(() => {
-    if (!canAdminAccess) {
+    if (!active || !canAdminAccess) {
       setActiveDataResetJob(null);
       return;
     }
@@ -179,7 +184,7 @@ export default function SettingsPage() {
     return () => {
       cancelled = true;
     };
-  }, [canAdminAccess, loadSettings]);
+  }, [active, activationGeneration, canAdminAccess, loadSettings]);
 
   useEffect(() => {
     if (loadError) {

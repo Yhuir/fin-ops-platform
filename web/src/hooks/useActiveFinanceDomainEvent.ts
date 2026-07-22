@@ -11,10 +11,9 @@ export function useActiveFinanceDomainEvent(
   eventName: FinanceDomainEventName,
   handler: (event: FinanceDomainEvent) => void,
 ) {
-  const { active, activationGeneration } = useOptionalPageActivation();
+  const { active } = useOptionalPageActivation();
   const activeRef = useRef(active);
   const handlerRef = useRef(handler);
-  const pendingEventRef = useRef<FinanceDomainEvent | null>(null);
 
   useEffect(() => {
     activeRef.current = active;
@@ -26,20 +25,9 @@ export function useActiveFinanceDomainEvent(
 
   useEffect(() => (
     subscribeFinanceDomainEvent(eventName, (event) => {
-      if (activeRef.current) {
+      if (activeRef.current && document.visibilityState !== "hidden") {
         handlerRef.current(event);
-        return;
       }
-      pendingEventRef.current = event;
     })
   ), [eventName]);
-
-  useEffect(() => {
-    if (!active || !pendingEventRef.current) {
-      return;
-    }
-    const pendingEvent = pendingEventRef.current;
-    pendingEventRef.current = null;
-    handlerRef.current(pendingEvent);
-  }, [active, activationGeneration]);
 }

@@ -19,10 +19,10 @@ import PageBusinessAuditIcon from "../components/common/PageBusinessAuditIcon";
 import PageScaffold from "../components/common/PageScaffold";
 import PageStatisticsPopover from "../components/common/PageStatisticsPopover";
 import StatePanel from "../components/common/StatePanel";
+import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
 import { useBackgroundJobProgress } from "../features/backgroundJobs/BackgroundJobProgressProvider";
 import { FINANCE_DOMAIN_EVENTS, emitFinanceDomainEvent } from "../features/domainEvents";
-import { waitForOperationFreshness, type OperationBarrierTarget } from "../features/operationBarrier/api";
 import {
   EtcApiError,
   confirmEtcReconciliationTask,
@@ -462,20 +462,6 @@ function isEtcBusinessBatchNotFoundError(error: unknown, batchId?: string) {
   return /ETC business batch not found:/i.test(message);
 }
 
-function dedupeOperationBarrierTargets(targets: OperationBarrierTarget[]) {
-  const deduped: OperationBarrierTarget[] = [];
-  targets.forEach((target) => {
-    if (!deduped.some((candidate) =>
-      candidate.readModelKey === target.readModelKey
-      && candidate.scopeKey === target.scopeKey
-      && candidate.scopeType === target.scopeType
-    )) {
-      deduped.push(target);
-    }
-  });
-  return deduped;
-}
-
 type UploadBlockProps = {
   label: string;
   accept: string;
@@ -715,6 +701,7 @@ function ReconciliationDescriptionCell({
 }
 
 export default function EtcTicketManagementPage() {
+  const { active, activationGeneration } = useOptionalPageActivation("etc-tickets");
   const { jobs } = useBackgroundJobProgress();
   const { canMutateData } = useSessionPermissions();
   const [activeStatus, setActiveStatus] = useState<EtcBusinessBatchBucket>("unsubmitted");
@@ -807,12 +794,18 @@ export default function EtcTicketManagementPage() {
   }, [activeStatus, keyword, plate]);
 
   useEffect(() => {
+    if (!active) {
+      return undefined;
+    }
     const controller = new AbortController();
     void loadBatches(controller.signal);
     return () => controller.abort();
-  }, [loadBatches]);
+  }, [active, activationGeneration, loadBatches]);
 
   useEffect(() => {
+    if (!active) {
+      return undefined;
+    }
     if (oaDraftIntentRef.current?.businessBatchId !== selectedBatchId) {
       oaDraftIntentRef.current = null;
     }
@@ -873,9 +866,12 @@ export default function EtcTicketManagementPage() {
         }
       });
     return () => controller.abort();
-  }, [detailReloadKey, selectedBatchId, selectedBusinessBatchTaskId]);
+  }, [active, activationGeneration, detailReloadKey, selectedBatchId, selectedBusinessBatchTaskId]);
 
   useEffect(() => {
+    if (!active) {
+      return;
+    }
     const completedImportJobs = jobs.filter(
       (job) =>
         job.type === "etc_invoice_import"
@@ -887,27 +883,17 @@ export default function EtcTicketManagementPage() {
     }
     completedImportJobs.forEach((job) => refreshedImportJobIdsRef.current.add(job.jobId));
     const affectedMonths = completedImportJobs.flatMap((job) => job.affectedMonths ?? []);
-    const operationTargets = dedupeOperationBarrierTargets(
-      completedImportJobs.flatMap((job) => job.operationBarrierTargets ?? []),
-    );
     void (async () => {
-      try {
-        if (operationTargets.length > 0) {
-          await waitForOperationFreshness(operationTargets);
-        }
-        const detail = {
-          affectedMonths,
-          source: "etc_import_job_completed",
-        };
-        emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.etcBusinessBatchUpdated, detail);
-        emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.invoiceFactUpdated, detail);
-        await loadBatches();
-        setDetailReloadKey((current) => current + 1);
-      } catch {
-        setActionError("ETC发票导入已完成，但数据同步状态检查失败，请稍后刷新。");
-      }
+      const detail = {
+        affectedMonths,
+        source: "etc_import_job_completed",
+      };
+      emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.etcBusinessBatchUpdated, detail);
+      emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.invoiceFactUpdated, detail);
+      await loadBatches();
+      setDetailReloadKey((current) => current + 1);
     })();
-  }, [jobs, loadBatches]);
+  }, [active, jobs, loadBatches]);
 
   const selectedBusinessBatch = useMemo(
     () => businessBatchDetail ?? businessBatches.find((batch) => batch.businessBatchId === selectedBatchId) ?? null,

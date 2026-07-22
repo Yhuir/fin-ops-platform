@@ -1366,7 +1366,7 @@ describe("Bank details page", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    renderBankDetailsPage();
+    renderAuthenticatedAppAt("/bank-details");
     expect(await screen.findByText("版本1供应商")).toBeInTheDocument();
     const initialTransactionRequests = requestUrls(fetchMock as ReturnType<typeof installMockApiFetch>, "/api/bank-details/transactions").length;
 

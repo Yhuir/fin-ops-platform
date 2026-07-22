@@ -3,7 +3,10 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from fin_ops_platform.services.postgres_repositories.common import text, text_list
-from fin_ops_platform.services.read_model_freshness import source_version_mismatch_reasons
+from fin_ops_platform.services.read_model_freshness import (
+    require_expected_source_versions,
+    source_version_mismatch_reasons,
+)
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 
 
@@ -314,12 +317,15 @@ class WorkbenchRelationReadFacade:
         canonical_stale_scopes: list[str] = []
         if callable(self._expected_source_versions):
             for scope_key in scope_keys:
-                expected = self._expected_source_versions(scope_key)
+                expected = require_expected_source_versions(
+                    self._expected_source_versions(scope_key),
+                    context="workbench_relation_read",
+                )
                 actual = scope_source_versions.get(scope_key)
                 if not isinstance(actual, dict) and len(scope_keys) == 1:
                     actual = source_versions
                 mismatch_reasons = source_version_mismatch_reasons(
-                    expected=expected if isinstance(expected, dict) else {},
+                    expected=expected,
                     actual=actual if isinstance(actual, dict) else {},
                 )
                 if mismatch_reasons:

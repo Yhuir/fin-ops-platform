@@ -402,11 +402,11 @@ class ReadModelArchitectureGuardTests(unittest.TestCase):
         server_source = (SOURCE_ROOT / "app" / "server.py").read_text(encoding="utf-8")
         preview_start = server_source.index("    def _persist_import_preview_delta(")
         preview_end = server_source.index(
-            "\n    def _persist_confirmed_import_delta_with_read_model_invalidation(",
+            "\n    def _persist_confirmed_import_delta(",
             preview_start,
         )
         preview_helper_body = server_source[preview_start:preview_end]
-        start = server_source.index("    def _persist_confirmed_import_delta_with_read_model_invalidation(")
+        start = server_source.index("    def _persist_confirmed_import_delta(")
         end = server_source.index("\n    def _execute_import_state_changed_lifecycle", start)
         helper_body = server_source[start:end]
 

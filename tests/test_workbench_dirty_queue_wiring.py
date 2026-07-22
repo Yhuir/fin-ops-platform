@@ -316,36 +316,20 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
         self.assertFalse(any(scope_type == "cost_statistics" for scope_type, _scope_key in refreshes))
         self.assertFalse(any(scope_type == "tax_offset" for scope_type, _scope_key in refreshes))
 
-    def test_import_state_persistence_uses_lifecycle_domain_scope_overrides(self) -> None:
+    def test_import_state_persistence_does_not_fan_out_page_refreshes(self) -> None:
         app = build_application()
         queue = RecordingReadModelQueue()
         app._runtime_repositories = SimpleNamespace(queue_repository=queue)
 
-        app._persist_confirmed_import_delta_with_read_model_invalidation(
+        app._persist_confirmed_import_delta(
             import_state_payload={"imports": {}, "file_imports": {}},
-            cost_statistics_scope_keys=["2026-05"],
-            bank_detail_scope_keys=["2026-06"],
-            input_invoice_usage_scope_keys=["2026-04"],
-            output_invoice_collection_scope_keys=[],
-            invalidate_cost_statistics=False,
         )
 
         refreshes = [
             (call.get("scope_type"), call.get("scope_key"), call.get("reason"))
             for call in queue.calls
         ]
-        self.assertIn(("workbench", "2026-05", "workbench_scope_invalidated"), refreshes)
-        self.assertIn(("workbench_relation", "2026-05", "import_state_changed"), refreshes)
-        self.assertIn(("invoice_lifecycle", "2026-05", "import_state_changed"), refreshes)
-        self.assertIn(("pending_invoice", "expense:all", "import_state_changed"), refreshes)
-        self.assertIn(("pending_invoice", "income:all", "import_state_changed"), refreshes)
-        self.assertIn(("input_invoice_usage", "2026-04", "import_state_changed"), refreshes)
-        self.assertIn(("oa_pending_payment", "2026-05", "import_state_changed"), refreshes)
-        self.assertIn(("bank_account_balance", "all", "import_state_changed"), refreshes)
-        self.assertIn(("bank_detail", "2026-06", "import_facts_changed"), refreshes)
-        self.assertIn(("search", "2026-05", "import_state_changed"), refreshes)
-        self.assertNotIn(("output_invoice_collection", "2026-05", "import_state_changed"), refreshes)
-        self.assertFalse(any(scope_type == "cost_statistics" for scope_type, _scope_key, _reason in refreshes))
+        self.assertEqual(refreshes, [])
 
     def test_db_dirty_queue_write_path_marks_scope_instead_of_inline_matching(self) -> None:
         app = build_application()
@@ -493,10 +477,7 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
             response = app.handle_request("POST", "/api/workbench/settings", body=json.dumps(payload), headers={})
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            [(call["months"], call["reason"]) for call in queue.mark_calls],
-            [(["2026-05"], "oa_invoice_offset_settings_changed")],
-        )
+        self.assertEqual(queue.mark_calls, [])
 
     def test_startup_stale_scan_is_disabled_during_application_startup_by_default(self) -> None:
         with patch.object(

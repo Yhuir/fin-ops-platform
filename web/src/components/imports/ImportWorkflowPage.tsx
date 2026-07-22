@@ -26,7 +26,6 @@ import {
 } from "../../features/imports/api";
 import { confirmEtcImportSession, fetchReadyEtcReconciliationTasks, previewEtcZipFiles } from "../../features/etc/api";
 import { fetchWorkbenchSettings } from "../../features/workbench/api";
-import { waitForOperationFreshness } from "../../features/operationBarrier/api";
 import type {
   ImportBatchType,
   ImportFilePreview,
@@ -49,6 +48,7 @@ import { useImportWorkflowDraft } from "../../contexts/ImportWorkflowDraftContex
 import type { FileSelectionState } from "../../contexts/ImportWorkflowDraftContext";
 import { useImportProgress } from "../../contexts/ImportProgressContext";
 import { useAppHealthStatus } from "../../contexts/AppHealthStatusContext";
+import { useOptionalPageActivation } from "../../contexts/PageRuntimeContext";
 import { useSessionPermissions } from "../../contexts/SessionContext";
 import type { ImportWorkflowMode } from "../../features/imports/importRoutes";
 
@@ -766,6 +766,7 @@ function EtcPreviewTable({ rows, loading }: { rows: EtcPreviewRow[]; loading: bo
 }
 
 export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
+  const { active: pageActive, activationGeneration } = useOptionalPageActivation();
   const inputId = useId();
   const { setProgress, clearProgress } = useImportProgress();
   const {
@@ -829,7 +830,7 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
 
   useEffect(() => {
     const controller = new AbortController();
-    if (mode !== "bank_transaction") {
+    if (!pageActive || mode !== "bank_transaction") {
       setSettingsLoading(false);
       setBankOptions([]);
       return () => controller.abort();
@@ -856,11 +857,11 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
       });
 
     return () => controller.abort();
-  }, [mode]);
+  }, [activationGeneration, mode, pageActive, setErrorMessage]);
 
   useEffect(() => {
     const controller = new AbortController();
-    if (mode !== "etc_invoice") {
+    if (!pageActive || mode !== "etc_invoice") {
       setReadyEtcTasks([]);
       setUnavailableEtcTasks([]);
       setReadyEtcTasksLoading(false);
@@ -888,10 +889,10 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
       });
 
     return () => controller.abort();
-  }, [mode]);
+  }, [activationGeneration, mode, pageActive, setErrorMessage]);
 
   useEffect(() => {
-    if (mode === "etc_invoice" || selectedFiles.length > 0 || previewPayload) {
+    if (!pageActive || mode === "etc_invoice" || selectedFiles.length > 0 || previewPayload) {
       return undefined;
     }
     const sessionId = readPersistedSessionId();
@@ -925,8 +926,10 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
       active = false;
     };
   }, [
+    activationGeneration,
     clearPersistedSession,
     mode,
+    pageActive,
     previewPayload,
     readPersistedSessionId,
     resetDraft,
@@ -1244,19 +1247,9 @@ export default function ImportWorkflowPage({ mode }: ImportWorkflowPageProps) {
     }
   }
 
-  async function completeImportFeedback(payload: ImportSessionPayload) {
+  function completeImportFeedback(payload: ImportSessionPayload) {
     const confirmedCount = payload.files.filter((file) => file.status === "confirmed").length;
-    if (payload.operationBarrierTargets.length === 0) {
-      setProgress({ tone: "success", label: `已导入 ${confirmedCount} 个文件。` });
-      return;
-    }
-    setProgress({ tone: "loading", label: `已导入 ${confirmedCount} 个文件，正在同步受影响页面。` });
-    try {
-      await waitForOperationFreshness(payload.operationBarrierTargets);
-      setProgress({ tone: "success", label: `已导入 ${confirmedCount} 个文件。` });
-    } catch {
-      setProgress({ tone: "error", label: "导入已提交，受影响页面同步失败。" });
-    }
+    setProgress({ tone: "success", label: `已导入 ${confirmedCount} 个文件。` });
   }
 
   async function submitConfirm() {

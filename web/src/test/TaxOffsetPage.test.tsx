@@ -68,14 +68,6 @@ function operationBarrierRequests(fetchMock: ReturnType<typeof installMockApiFet
   return fetchMock.mock.calls.filter(([input]) => requestUrl(input).pathname === "/api/operation-barrier/status");
 }
 
-function deferred() {
-  let resolve!: () => void;
-  const promise = new Promise<void>((next) => {
-    resolve = next;
-  });
-  return { promise, resolve };
-}
-
 describe("Tax offset workbench", () => {
   test("shows the unified page Audit control to admins", async () => {
     window.history.pushState({}, "", "/tax-offset");
@@ -551,11 +543,10 @@ describe("Tax offset workbench", () => {
     });
   });
 
-  test("waits for tax offset barrier before reloading after plan save", async () => {
+  test("reloads the current tax page directly after plan save without a cross-page barrier", async () => {
     window.history.pushState({}, "", "/tax-offset");
     const user = userEvent.setup();
-    const gate = deferred();
-    const fetchMock = installMockApiFetch({ operationBarrierDelay: gate.promise });
+    const fetchMock = installMockApiFetch();
 
     render(<App />);
 
@@ -566,13 +557,7 @@ describe("Tax offset workbench", () => {
 
     await user.click(screen.getByRole("button", { name: "保存计划" }));
     await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => input === "/api/tax-offset/plans")).toBe(true));
-    await waitFor(() => expect(operationBarrierRequests(fetchMock)).toHaveLength(1));
-    expect(JSON.parse(String(operationBarrierRequests(fetchMock)[0][1]?.body))).toEqual({
-      targets: [{ read_model_key: "tax_offset", scope_key: "2026-03" }],
-    });
-    expect(taxOffsetMonthRequests(fetchMock)).toHaveLength(initialTaxReads);
-
-    gate.resolve();
+    expect(operationBarrierRequests(fetchMock)).toHaveLength(0);
     expect(await screen.findByText("已保存本月税金抵扣计划。")).toBeInTheDocument();
     await waitFor(() => expect(taxOffsetMonthRequests(fetchMock).length).toBeGreaterThan(initialTaxReads));
   });

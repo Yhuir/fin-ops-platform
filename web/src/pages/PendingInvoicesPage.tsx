@@ -193,8 +193,6 @@ export default function PendingInvoicesPage() {
   const { active, activationGeneration } = useOptionalPageActivation("pending-invoices");
   const { runOperation } = useGlobalOperationOverlay();
   const { canAdminAccess, canMutateData } = useSessionPermissions();
-  const pageActiveRef = useRef(active);
-  const pendingTagRefreshRef = useRef(false);
   const [direction, setDirection] = useState<PendingInvoiceDirection>("expense");
   const [statusFilters, setStatusFilters] = useState<StatusFilterSelection[]>(DEFAULT_STATUS_FILTERS);
   const [rows, setRows] = useState<PendingInvoiceRow[]>([]);
@@ -319,25 +317,14 @@ export default function PendingInvoicesPage() {
   }, [active, loadRows, loading, readModelStatus]);
 
   useEffect(() => {
-    pageActiveRef.current = active;
-    if (!active || !pendingTagRefreshRef.current) {
-      return;
-    }
-    pendingTagRefreshRef.current = false;
-    setRulesTagRefreshToken((current) => current + 1);
-    setRefreshToken((current) => current + 1);
-  }, [active, activationGeneration]);
-
-  useEffect(() => {
     const handleTagUpdate = (event: Event) => {
+      if (!active || document.visibilityState === "hidden") {
+        return;
+      }
       const version = eventVersion(event);
       if (version !== null) {
         tagVersionRef.current = version;
         persistTagVersion(version);
-      }
-      if (!pageActiveRef.current) {
-        pendingTagRefreshRef.current = true;
-        return;
       }
       setRulesTagRefreshToken((current) => current + 1);
       setRefreshToken((current) => current + 1);
@@ -353,24 +340,11 @@ export default function PendingInvoicesPage() {
       };
     }
 
-    const handleFocus = () => {
-      if (!pageActiveRef.current) {
-        return;
-      }
-      const persistedVersion = readPersistedTagVersion();
-      if (persistedVersion !== null && persistedVersion !== tagVersionRef.current) {
-        tagVersionRef.current = persistedVersion;
-        setRulesTagRefreshToken((current) => current + 1);
-      }
-      setRefreshToken((current) => current + 1);
-    };
-    window.addEventListener("focus", handleFocus);
     return () => {
       window.removeEventListener(TAG_SYNC_EVENT, handleTagUpdate);
-      window.removeEventListener("focus", handleFocus);
       channel?.close();
     };
-  }, []);
+  }, [active]);
 
   const filterOptions = useMemo(() => statusFilterOptionsForDirection(direction), [direction]);
 

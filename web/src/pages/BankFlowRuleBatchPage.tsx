@@ -115,7 +115,7 @@ const BANK_FLOW_RULE_BATCH_PAGE_SIZE = 50;
 
 export default function BankFlowRuleBatchPage() {
   const { runOperation } = useGlobalOperationOverlay();
-  const { active } = useOptionalPageActivation("bank-flow-rule-batches");
+  const { active, activationGeneration } = useOptionalPageActivation("bank-flow-rule-batches");
   const { canAdminAccess, canMutateData } = useSessionPermissions();
   const [month, setMonth] = useState(currentMonth);
   const [bucket, setBucket] = useState<BankFlowRuleBatchStatusBucket>("unsubmitted");
@@ -240,12 +240,18 @@ export default function BankFlowRuleBatchPage() {
   }, [applyBatchesPayload, batchPage, bucket, month]);
 
   useEffect(() => {
+    if (!active) {
+      return undefined;
+    }
     const controller = new AbortController();
     loadTagSelection(controller.signal);
     return () => controller.abort();
-  }, [loadTagSelection]);
+  }, [active, activationGeneration, loadTagSelection]);
 
   useEffect(() => {
+    if (!active) {
+      return undefined;
+    }
     const controller = new AbortController();
     const batchQueryKey = JSON.stringify({ bucket, month, page: batchPage });
     if (batchQueryKeyRef.current !== batchQueryKey) {
@@ -256,7 +262,7 @@ export default function BankFlowRuleBatchPage() {
     }
     loadBatches(controller.signal);
     return () => controller.abort();
-  }, [batchPage, bucket, loadBatches, month, refreshToken]);
+  }, [active, activationGeneration, batchPage, bucket, loadBatches, month, refreshToken]);
 
   useEffect(() => {
     if (!active || !readModelNeedsRefresh || loading || backgroundRefreshing) {

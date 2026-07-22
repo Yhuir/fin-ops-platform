@@ -6,8 +6,8 @@ from types import SimpleNamespace
 from fin_ops_platform.services.import_processing_service import ImportProcessingService
 
 
-def _assert_import_write_target_envelope_uses_bank_detail_months_for_pending_invoice() -> None:
-    result = ImportProcessingService._import_write_target_envelope(
+def _assert_import_write_result_envelope_has_no_page_refresh_targets() -> None:
+    result = ImportProcessingService._write_result_envelope(
         cost_statistics_scope_keys=[],
         tax_offset_scope_keys=[],
         bank_detail_scope_keys=["2026-07"],
@@ -15,10 +15,9 @@ def _assert_import_write_target_envelope_uses_bank_detail_months_for_pending_inv
         output_invoice_collection_scope_keys=[],
     )
 
-    assert {"read_model_key": "pending_invoice", "scope_key": "expense:all:2026-07"} in result["operation_barrier_targets"]
-    assert {"read_model_key": "pending_invoice", "scope_key": "income:all:2026-07"} in result["operation_barrier_targets"]
-    assert {"read_model_key": "pending_invoice", "scope_key": "income:cash_income:2026-07"} in result["operation_barrier_targets"]
-    assert {"read_model_key": "pending_invoice", "scope_key": "expense:all"} not in result["operation_barrier_targets"]
+    assert result["affected_scope_keys"] == ["2026-07"]
+    assert result["freshness_targets"] == []
+    assert result["operation_barrier_targets"] == []
 
 
 def _assert_file_import_confirm_job_returns_import_write_targets(*, fail_persist: bool = False) -> None:
@@ -54,11 +53,8 @@ def _assert_file_import_confirm_job_returns_import_write_targets(*, fail_persist
         etc_reconciliation_task_service=SimpleNamespace(),
         background_job_service=SimpleNamespace(),
         serialize_value=lambda value: value,
-        execute_derived_data_lifecycle_event=lambda *args, **kwargs: None,
-        schedule_or_run_workbench_auto_matching_for_scopes=lambda *args, **kwargs: None,
         enqueue_workbench_auto_matching_for_scopes=lambda *args, **kwargs: events.append("matching"),
         persist_confirmed_import_delta=persist_confirmed_import_delta,
-        invalidate_tax_offset_read_model_scopes=lambda *args, **kwargs: events.append("tax_offset"),
         workbench_matching_scope_months_for_import_file_session=lambda _session, _selected_file_ids: ["2026-06"],
         tax_offset_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
         cost_statistics_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: ["2026-06"],
@@ -66,7 +62,6 @@ def _assert_file_import_confirm_job_returns_import_write_targets(*, fail_persist
         input_invoice_usage_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
         output_invoice_collection_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
         link_etc_import_result_to_existing_invoices=lambda _result: [],
-        refresh_after_etc_invoice_link=lambda *args, **kwargs: None,
         etc_import_preview_service=SimpleNamespace(),
     )
 
@@ -92,16 +87,15 @@ def _assert_file_import_confirm_job_returns_import_write_targets(*, fail_persist
         background_job_id="",
     )
 
-    assert events == ["persist", "tax_offset", "matching"]
+    assert events == ["persist", "matching"]
     assert result["affected_months"] == ["2026-06"]
     assert persisted[0]["import_state_payload"] is import_state_payload
-    assert {"read_model_key": "bank_detail", "scope_key": "2026-06"} in result["operation_barrier_targets"]
-    assert {"read_model_key": "bank_account_balance", "scope_key": "all"} in result["operation_barrier_targets"]
-    assert {"read_model_key": "cost_statistics", "scope_key": "active:2026-06"} in result["operation_barrier_targets"]
+    assert result["affected_scope_keys"] == ["2026-06"]
+    assert result["freshness_targets"] == []
+    assert result["operation_barrier_targets"] == []
 
 
 def _assert_etc_invoice_import_confirm_job_returns_targets_after_changed_months_are_known() -> None:
-    refresh_calls: list[tuple[list[str], str]] = []
     imported_marks: list[dict[str, object]] = []
     business_batch = SimpleNamespace(
         business_batch_id="business-1",
@@ -126,11 +120,8 @@ def _assert_etc_invoice_import_confirm_job_returns_targets_after_changed_months_
         ),
         background_job_service=SimpleNamespace(),
         serialize_value=lambda value: value,
-        execute_derived_data_lifecycle_event=lambda *args, **kwargs: None,
-        schedule_or_run_workbench_auto_matching_for_scopes=lambda *args, **kwargs: None,
         enqueue_workbench_auto_matching_for_scopes=lambda *args, **kwargs: None,
         persist_confirmed_import_delta=lambda **kwargs: None,
-        invalidate_tax_offset_read_model_scopes=lambda *args, **kwargs: None,
         workbench_matching_scope_months_for_import_file_session=lambda _session, _selected_file_ids: [],
         tax_offset_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
         cost_statistics_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
@@ -138,7 +129,6 @@ def _assert_etc_invoice_import_confirm_job_returns_targets_after_changed_months_
         input_invoice_usage_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
         output_invoice_collection_scope_keys_for_import_file_session=lambda _session, _selected_file_ids: [],
         link_etc_import_result_to_existing_invoices=lambda _result: ["2026-04"],
-        refresh_after_etc_invoice_link=lambda months, **kwargs: refresh_calls.append((list(months), str(kwargs.get("reason")))),
         etc_import_preview_service=SimpleNamespace(
             validate=lambda **_kwargs: SimpleNamespace(uploads=[]),
             mark_status=lambda *_args, **_kwargs: None,
@@ -155,19 +145,16 @@ def _assert_etc_invoice_import_confirm_job_returns_targets_after_changed_months_
         total=3,
     )
 
-    assert refresh_calls == [(["2026-04"], "etc_invoice_import_confirm")]
     assert imported_marks[0]["import_batch_id"] == "batch-etc-1"
     assert result["affected_months"] == ["2026-04"]
     assert result["affected_scope_keys"] == result["read_model_scope_keys"]
-    assert {"read_model_key": "tax_offset", "scope_key": "2026-04"} in result["operation_barrier_targets"]
-    assert {"read_model_key": "input_invoice_usage", "scope_key": "2026-04"} in result["operation_barrier_targets"]
-    assert {"read_model_key": "workbench_relation", "scope_key": "2026-04"} in result["operation_barrier_targets"]
-    assert {"read_model_key": "cost_statistics", "scope_key": "active:2026-04"} in result["operation_barrier_targets"]
+    assert result["freshness_targets"] == []
+    assert result["operation_barrier_targets"] == []
 
 
 class ImportProcessingServiceTests(unittest.TestCase):
-    def test_import_write_target_envelope_uses_bank_detail_months_for_pending_invoice(self) -> None:
-        _assert_import_write_target_envelope_uses_bank_detail_months_for_pending_invoice()
+    def test_import_write_result_envelope_has_no_page_refresh_targets(self) -> None:
+        _assert_import_write_result_envelope_has_no_page_refresh_targets()
 
     def test_file_import_confirm_persists_before_publishing_downstream_work(self) -> None:
         _assert_file_import_confirm_job_returns_import_write_targets()

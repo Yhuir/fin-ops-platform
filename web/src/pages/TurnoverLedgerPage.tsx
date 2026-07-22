@@ -10,6 +10,7 @@ import TurnoverLedgerExportDialog from "../components/turnoverLedger/TurnoverLed
 import TurnoverLedgerExtraDrawer from "../components/turnoverLedger/TurnoverLedgerExtraDrawer";
 import TurnoverLedgerGroupedTable, { formatMoney, formatNullable } from "../components/turnoverLedger/TurnoverLedgerGroupedTable";
 import { useGlobalOperationOverlay } from "../contexts/GlobalOperationOverlayContext";
+import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
 import {
   FINANCE_DOMAIN_EVENTS,
@@ -379,6 +380,7 @@ function tagSubLabel(tag: TurnoverLedgerTagDefinition) {
 }
 
 export default function TurnoverLedgerPage() {
+  const { active, activationGeneration } = useOptionalPageActivation("turnover-ledger");
   const { runOperation } = useGlobalOperationOverlay();
   const { canAdminAccess, canMutateData } = useSessionPermissions();
   const [family, setFamily] = useState<TurnoverLedgerFamily>("all");
@@ -506,16 +508,22 @@ export default function TurnoverLedgerPage() {
   }, [fetchLedger]);
 
   useEffect(() => {
+    if (!active) {
+      return undefined;
+    }
     const controller = new AbortController();
     loadLedger(controller.signal);
     return () => controller.abort();
-  }, [loadLedger]);
+  }, [active, activationGeneration, loadLedger]);
 
   useEffect(() => {
+    if (!active) {
+      return undefined;
+    }
     const controller = new AbortController();
     loadTagSelection(controller.signal);
     return () => controller.abort();
-  }, [loadTagSelection]);
+  }, [active, activationGeneration, loadTagSelection]);
 
   useEffect(() => {
     if (!toast) {
@@ -532,7 +540,7 @@ export default function TurnoverLedgerPage() {
   useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.bankTransactionCategoryUpdated, handleCategoryUpdated);
 
   useEffect(() => {
-    if (!exportOpen) {
+    if (!active || !exportOpen) {
       return undefined;
     }
     const controller = new AbortController();
@@ -548,7 +556,7 @@ export default function TurnoverLedgerPage() {
       })
       .finally(() => setExportLoading(false));
     return () => controller.abort();
-  }, [exportFamily, exportOpen]);
+  }, [active, exportFamily, exportOpen]);
 
   const handleFamilyChange = (_event: SyntheticEvent, nextFamily: TurnoverLedgerFamily) => {
     if (!nextFamily) {

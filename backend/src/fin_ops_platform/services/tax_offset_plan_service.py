@@ -175,8 +175,8 @@ class TaxOffsetPlanService:
             "status": "saved",
             "plan": saved_plan,
             **write_target_envelope(
-                read_model_key="tax_offset",
                 scope_keys=[read_model_scope_key],
+                targets=[],
                 fallback_scope_key=month,
             ),
         }

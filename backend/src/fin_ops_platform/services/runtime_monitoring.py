@@ -1966,6 +1966,7 @@ class RuntimeMonitoringRepository:
                 },
             }
         dirty_by_scope_type = {str(row.get("scope_type")): row for row in dirty_rows}
+        scope_evidence_by_event_type, scope_evidence_warning = self._dashboard_read_model_scope_evidence(event_types)
         rows: list[dict[str, Any]] = []
         for event_type, (key, scope_type) in READ_MODEL_EVENT_TYPES.items():
             duration = durations_by_event_type.get(event_type, {})
@@ -1990,13 +1991,122 @@ class RuntimeMonitoringRepository:
                     },
                     "historical_refresh_duration_ms": all_time.get("duration_ms") or dict(EMPTY_PERCENTILES),
                     "refresh_duration_by_kind": duration.get("kinds") if isinstance(duration.get("kinds"), dict) else {},
+                    "scope_evidence": scope_evidence_by_event_type.get(event_type, []),
                     "stale_count": _optional_int(dirty.get("stale_count")) or 0,
                     "unavailable_count": unavailable_count,
                     "status": "available",
-                    **({"warning_code": warning_code} if warning_code else {}),
+                    **({"warning_code": warning_code or scope_evidence_warning} if warning_code or scope_evidence_warning else {}),
                 }
             )
         return rows
+
+    def _dashboard_read_model_scope_evidence(
+        self,
+        event_types: tuple[str, ...],
+    ) -> tuple[dict[str, list[dict[str, Any]]], str | None]:
+        try:
+            rows = self._connection.fetch_all(
+                """
+                with event_type_filter(event_type) as (
+                  select unnest(%s::text[])
+                )
+                select
+                  refresh_event.event_type,
+                  refresh_event.scope_type,
+                  refresh_event.scope_key,
+                  refresh_event.status,
+                  refresh_event.source_version,
+                  refresh_event.attempts,
+                  refresh_event.last_error,
+                  refresh_event.available_at::text as available_at,
+                  refresh_event.locked_at::text as locked_at,
+                  refresh_event.processed_at::text as processed_at,
+                  refresh_event.updated_at::text as updated_at,
+                  case
+                    when refresh_event.status in ('pending', 'processing')
+                      then extract(epoch from now() - refresh_event.available_at)::float
+                    else extract(epoch from coalesce(refresh_event.processed_at, refresh_event.updated_at) - refresh_event.available_at)::float
+                  end as lag_seconds,
+                  extract(epoch from (
+                    coalesce(refresh_event.locked_at, refresh_event.processed_at, refresh_event.updated_at)
+                    - refresh_event.available_at
+                  ))::float * 1000 as queue_wait_ms,
+                  (refresh_event.runtime_result->>'duration_ms')::float as handler_duration_ms,
+                  refresh_event.runtime_result->>'skip_reason' as dedupe_reason,
+                  readiness.status as projection_status,
+                  readiness.source_versions as projection_source_versions,
+                  readiness.last_error as projection_last_error
+                from event_type_filter
+                cross join lateral (
+                  select
+                    event_type,
+                    coalesce(scope_type, raw_payload->>'scope_type', aggregate_type, '') as scope_type,
+                    coalesce(scope_key, raw_payload->>'scope_key', aggregate_id, '') as scope_key,
+                    status,
+                    source_version,
+                    attempts,
+                    last_error,
+                    available_at,
+                    locked_at,
+                    processed_at,
+                    updated_at,
+                    coalesce(raw_payload->'runtime_result', '{}'::jsonb) as runtime_result
+                  from job.outbox_events
+                  where event_type = event_type_filter.event_type
+                    and event_type like '%%.read_model.refresh'
+                  order by updated_at desc
+                  limit 5
+                ) refresh_event
+                left join lateral (
+                  select status, source_versions, last_error
+                  from read_model.app_status_readiness
+                  where scope_type = refresh_event.scope_type
+                    and scope_key = refresh_event.scope_key
+                  order by updated_at desc
+                  limit 1
+                ) readiness on true
+                order by refresh_event.event_type, refresh_event.updated_at desc
+                """,
+                (list(event_types),),
+            )
+        except Exception:
+            return {}, "read_model_scope_evidence_unavailable"
+
+        evidence: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            event_type = str(row.get("event_type") or "")
+            scope_key = str(row.get("scope_key") or "")
+            if not event_type:
+                continue
+            full_history = scope_key == "all" or scope_key.endswith(":all")
+            attempts = _optional_int(row.get("attempts")) or 0
+            evidence.setdefault(event_type, []).append(
+                {
+                    "scope_type": str(row.get("scope_type") or ""),
+                    "scope_key": scope_key,
+                    "operation_class": "full_history_batch" if full_history else "current_scope",
+                    "status": str(row.get("status") or ""),
+                    "expected_source_version": _optional_int(row.get("source_version")),
+                    "projection_status": str(row.get("projection_status") or ""),
+                    "projection_source_versions": (
+                        dict(row.get("projection_source_versions"))
+                        if isinstance(row.get("projection_source_versions"), dict)
+                        else {}
+                    ),
+                    "lag_seconds": _optional_float(row.get("lag_seconds")),
+                    "queue_wait_ms": _optional_float(row.get("queue_wait_ms")),
+                    "handler_duration_ms": _optional_float(row.get("handler_duration_ms")),
+                    "attempts": attempts,
+                    "retry_count": max(0, attempts - 1),
+                    "dedupe_reason": str(row.get("dedupe_reason") or ""),
+                    "last_error": str(row.get("last_error") or row.get("projection_last_error") or ""),
+                    "available_at": row.get("available_at"),
+                    "locked_at": row.get("locked_at"),
+                    "processed_at": row.get("processed_at"),
+                    "updated_at": row.get("updated_at"),
+                }
+            )
+        return evidence, None
 
     def dashboard_worker_metrics(
         self,

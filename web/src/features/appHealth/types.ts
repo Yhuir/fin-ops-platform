@@ -207,6 +207,26 @@ export type OperationsDashboardReadModelMetric = {
     };
   };
   refresh_duration_by_kind?: Record<string, unknown>;
+  scope_evidence?: Array<{
+    scope_type: string;
+    scope_key: string;
+    operation_class: "current_scope" | "full_history_batch" | string;
+    status: string;
+    expected_source_version: number | null;
+    projection_status: string;
+    projection_source_versions: Record<string, unknown>;
+    lag_seconds: number | null;
+    queue_wait_ms: number | null;
+    handler_duration_ms: number | null;
+    attempts: number;
+    retry_count: number;
+    dedupe_reason: string;
+    last_error: string;
+    available_at: string | null;
+    locked_at: string | null;
+    processed_at: string | null;
+    updated_at: string | null;
+  }>;
   stale_count: number | null;
   unavailable_count: number | null;
   status: OperationsDashboardAvailability;

@@ -204,7 +204,7 @@ function normalizeFilterValue(filter: {
 }
 
 export default function OutputInvoiceCollectionsPage() {
-  const { active } = useOptionalPageActivation("output-invoice-collections");
+  const { active, activationGeneration } = useOptionalPageActivation("output-invoice-collections");
   const { canAdminAccess, canMutateData } = useSessionPermissions();
   const querySession = usePageSessionState({
     pageKey: "output-invoice-collections",
@@ -318,7 +318,7 @@ export default function OutputInvoiceCollectionsPage() {
     const controller = new AbortController();
     loadRows("reset", controller.signal);
     return () => controller.abort();
-  }, [active, loadRows]);
+  }, [active, activationGeneration, loadRows]);
 
   useEffect(() => {
     if (!active || readModelStatus !== "refreshing" || loading || refreshing) {

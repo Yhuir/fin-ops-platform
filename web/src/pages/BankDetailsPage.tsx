@@ -1501,8 +1501,6 @@ export default function BankDetailsPage() {
   const { active, activationGeneration } = useOptionalPageActivation("bank-details");
   const { runOperation } = useGlobalOperationOverlay();
   const { canAdminAccess, canMutateData } = useSessionPermissions();
-  const pageActiveRef = useRef(active);
-  const pendingTagRefreshRef = useRef(false);
   const selectedAccountSession = usePageSessionState<string | null>({
     pageKey: "bank-details",
     stateKey: "selectedAccountKey",
@@ -1666,6 +1664,9 @@ export default function BankDetailsPage() {
   }, []);
 
   useEffect(() => {
+    if (!active) {
+      return undefined;
+    }
     const controller = new AbortController();
     setAccountRequestPending(true);
     setLoading(!hasAccountPayloadRef.current);
@@ -1708,9 +1709,12 @@ export default function BankDetailsPage() {
         }
       });
     return () => controller.abort();
-  }, [accountRefreshToken, dateFilter.dateFrom, dateFilter.dateTo, setSelectedAccountKey]);
+  }, [accountRefreshToken, activationGeneration, active, dateFilter.dateFrom, dateFilter.dateTo, setSelectedAccountKey]);
 
   useEffect(() => {
+    if (!active) {
+      return undefined;
+    }
     const controller = new AbortController();
     fetchBankAutoTagRules({ signal: controller.signal })
       .then((payload) => {
@@ -1722,7 +1726,7 @@ export default function BankDetailsPage() {
         }
       });
     return () => controller.abort();
-  }, []);
+  }, [active, activationGeneration]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1732,6 +1736,9 @@ export default function BankDetailsPage() {
   }, [searchInput]);
 
   useEffect(() => {
+    if (!active) {
+      return undefined;
+    }
     if (!selectedAccountKey) {
       setRows([]);
       setRowCount(0);
@@ -1808,6 +1815,8 @@ export default function BankDetailsPage() {
   }, [
     applyCategorySnapshotPayload,
     applyTransactionsPayload,
+    activationGeneration,
+    active,
     categoryFilterQueryKey,
     dateFilter.dateFrom,
     dateFilter.dateTo,
@@ -1880,25 +1889,14 @@ export default function BankDetailsPage() {
   useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, handleWorkbenchRelationUpdated);
 
   useEffect(() => {
-    pageActiveRef.current = active;
-    if (!active || !pendingTagRefreshRef.current) {
-      return;
-    }
-    pendingTagRefreshRef.current = false;
-    refreshAutoTagRules();
-    setRefreshToken((current) => current + 1);
-  }, [active, activationGeneration, refreshAutoTagRules]);
-
-  useEffect(() => {
     const handleTagUpdate = (event: Event) => {
+      if (!active || document.visibilityState === "hidden") {
+        return;
+      }
       const version = eventTagVersion(event);
       if (version !== null) {
         tagVersionRef.current = version;
         persistTagVersion(version);
-      }
-      if (!pageActiveRef.current) {
-        pendingTagRefreshRef.current = true;
-        return;
       }
       const activeRules = eventActiveAutoTagRules(event);
       if (activeRules) {
@@ -1925,24 +1923,11 @@ export default function BankDetailsPage() {
       };
     }
 
-    const handleFocus = () => {
-      if (!pageActiveRef.current) {
-        return;
-      }
-      const persistedVersion = readPersistedTagVersion();
-      if (persistedVersion !== null && persistedVersion !== tagVersionRef.current) {
-        tagVersionRef.current = persistedVersion;
-      }
-      refreshAutoTagRules();
-      setRefreshToken((current) => current + 1);
-    };
-    window.addEventListener("focus", handleFocus);
     return () => {
       window.removeEventListener(TAG_SYNC_EVENT, handleTagUpdate);
-      window.removeEventListener("focus", handleFocus);
       channel?.close();
     };
-  }, [refreshAutoTagRules]);
+  }, [active, refreshAutoTagRules]);
 
   const effectiveCategoryCounts = categoryCounts;
   const visibleCategorySummary = useMemo<CategorySummaryItem[]>(() => {
