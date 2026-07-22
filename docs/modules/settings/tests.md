@@ -102,3 +102,9 @@ Nightly full suite 应覆盖本模块的后端 settings/data-reset/credential te
 - 真实 OA 登录、RSA、token、草稿页面和目标申请人权限需要 staging/生产前 smoke；本地以 mock provider 保护密码和错误语义。
 - 真实 PostgreSQL pgcrypto key、历史 settings payload、半迁移数据和大规模 state store 仍需生产 dry-run 或 staging 验证。
 - 所有下游页面在 settings fan-out 后的最终 UI 刷新不能只靠本模块证明；由各下游模块测试和少量真实链路 smoke 共同保护。
+
+## 2026-07-22 Phase 27 设置写后零 fan-out 回归
+
+- `tests/test_oa_manual_import_api.py`：OA 手工导入与设置保存保留 owner 校验、权限、审计、事实/version 写入，普通结果 targets 为空且不发布跨页面 refresh。
+- `web/src/test/SettingsOaManualSearchImportTable.test.tsx`：可写 Drawer 保存后立即结束并刷新当前设置视图，不轮询 operation barrier。
+- 下游正确性改为逐页面访问验证；旧“settings 保存后必须 fan-out 所有页面”的测试与说明不再有效。数据 reset 仍是显式运维批处理，不属于普通保存。

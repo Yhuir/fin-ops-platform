@@ -1,6 +1,6 @@
 # 运行时调用链与模块归属
 
-本文维护当前 app 的运行时序、read model/worker 边界和模块 owner。它回答“请求如何到达事实源”“写入如何触发派生数据刷新”“哪个模块负责维护某类事实”。
+本文维护当前 app 的运行时序、read model/worker 边界和模块 owner。它回答“请求如何到达事实源”“页面访问如何收敛派生数据”“哪个模块负责维护某类事实”。
 
 PostgreSQL 业务唯一真相的全局 owner matrix 见 `../architecture/module-boundaries/canonical-facts.md`。本文描述运行链路；具体 canonical fact family 的写入口、读入口和禁止路径以 canonical facts 合同和对应业务模块 `boundary-io.md` 为准。
 
@@ -12,7 +12,7 @@ flowchart LR
   API --> Service["Application / domain services"]
   Service --> Repo["Repositories / SQL stores"]
   Repo --> PG["PostgreSQL"]
-  Service --> Lifecycle["DerivedDataLifecycleService"]
+  Service -. "explicit integration/reset/repair only" .-> Lifecycle["DerivedDataLifecycleService"]
   Lifecycle --> Queue["RuntimeQueueRepository"]
   Queue --> Outbox["job.outbox_events / job.read_model_dirty_scopes"]
   Worker["Runtime workers"] --> Outbox
@@ -57,10 +57,12 @@ React 启动时由 `SessionProvider` 调用 `fetchSessionMe()`，通过 `Session
 
 1. Route 只做 HTTP contract、auth/permission、依赖组装和错误映射。
 2. Application/domain service 校验业务规则，调用 repository 做原子写入。
-3. 写入产生业务事件或 dirty scope。
-4. `DerivedDataLifecycleService` 统一判断哪些 read model、缓存或页面事实被影响。
-5. 通过 durable queue/outbox 记录 refresh 请求；worker 异步重建 projection。
-6. API 返回写入结果、受影响月份/对象、版本、job 或 refresh 状态。
+3. 普通写只提交 owner canonical facts、可比较 source version、审计/idempotency 与必要领域任务；返回精确 affected scopes 作为信息，不产生页面 dirty/outbox。
+4. API 返回写入结果、受影响月份/对象和版本；普通写的 `freshness_targets`、`operation_barrier_targets` 为空，不等待任何未访问页面重建。
+5. 当前可见页可以在成功后重新执行自己的普通 GET；未访问或 hidden 页面不执行 I/O。
+6. 页面进入、focus 或 hidden→visible 时，页面 query owner 比较 expected/actual source versions。只有 missing/stale 的当前精确 scope 经 `ReadModelRefreshGateway` 入 durable queue，worker 异步重建 projection，页面有界轮询到 fresh。
+
+显式 authoritative integration snapshot、data reset、repair/backfill/reapply 和人工 maintenance 可以按各自合同主动入队；它们必须被标记为 batch/full-history，经过 scope policy/gateway，并与普通用户写严格区分。`DerivedDataLifecycleService` 只服务这些已登记例外，不是普通写后的默认分发器。
 
 写模型、权限认证、冲突校验不做“分发 read model”；它们保留明确 command/service 边界。
 
@@ -68,14 +70,15 @@ React 启动时由 `SessionProvider` 调用 `fetchSessionMe()`，通过 `Session
 
 ### 写操作后的页面闭环
 
-用户触发确认关联、撤回、异常处理、批量账务、免 OA 批次、往来款闭环等写操作时，前端必须把“写入成功”和“页面可继续操作”分开处理：
+用户触发确认关联、撤回、异常处理、规则保存、导入确认、批量账务或往来款闭环等普通写操作时：
 
-1. 写 API 返回成功只代表 canonical write 已提交并产生 affected scopes/months。
-2. 前端通过 `/api/operation-barrier/status` 轮询这些 read model/scope 的 current-effective 状态。后端 `OperationFreshnessBarrierService` 只读 runtime snapshot，不写 readiness、不消费队列、不触发同步 rebuild。
-3. barrier 必须按目标 scope 判定 outbox/readiness；同一 `event_type` 下其他月份或其他 scope 的 pending refresh 不得阻断当前目标 scope。barrier 为 `refreshing` 时，全屏操作 overlay 保持显示；barrier 为 `blocked` 时显示具体失败，不把页面放回可操作状态并假装已同步。
-4. barrier 为 `fresh` 后，页面还要重新读取自己的 read boundary。Workbench 特别需要等待 active generation fresh；`workbench_relation` fresh 不能单独证明三栏展示已经更新。
+1. 写 API 成功代表 canonical write、version、audit/idempotency 已提交，并返回 affected scopes/months。
+2. 写操作立即结束，不轮询其它页面的 operation barrier，也不把无关后台工作显示为本次操作阻塞。
+3. 当前可见页若需要立即展示结果，只重新调用自己的正常 GET。GET 的 freshness gate 负责 exact-scope enqueue、refreshing/failed 状态和有界轮询。
+4. 未挂载或 document hidden 的页面不响应 domain event、不缓冲重放、不执行 load。route mount、window focus 或 hidden→visible 会递增中央 `activationGeneration`，当前页面据此重新运行自己的 load/freshness contract。
+5. 排序、分页和筛选只改变当前查询参数，不是页面激活，也不能触发其它页面重建。
 
-这个闭环用于压缩和隐藏写操作后的短暂 read model 收敛时间，不改变后端写安全。权限/session、DB 可写性、canonical relation version/idempotency/owner 状态仍由 command service 和 UoW 决定。
+`/api/operation-barrier/status` 只保留给显式返回非空 targets 的 maintenance/integration 操作；普通 mutation 不再依赖它。权限/session、DB 可写性、canonical version/idempotency/owner 状态仍由 command service 和 UoW 决定。
 
 ### 待找发票规则写入
 
@@ -83,11 +86,11 @@ React 启动时由 `SessionProvider` 调用 `fetchSessionMe()`，通过 `Session
 
 1. `PendingInvoiceRulesApplicationService.update_rules(...)` 只接收 HTTP route 映射后的 direction、payload 和 actor。
 2. `AppSettingsService.update_pending_invoice_rule_groups(...)` 校验当前 direction 的规则 `version`、归一化分组、递增对应规则版本并写审计。
-3. 保存事件返回 `event_type=pending_invoice_rules_changed`、`direction`、`old_version`、`new_version`、`affected_groups` 和 `actor_id`。
-4. API finalizer 只清必要内存 cache，并把 `pending_invoice_rules_changed` 交给 `DerivedDataLifecycleService`。
-5. lifecycle executor 通过 `ReadModelRefreshGateway` 或 workbench dirty queue 入队相关 read model refresh；API server 不同步重建发票生命周期、待找发票、成本、税金或关联台 read model。
+3. 保存结果返回 `direction`、`old_version`、`new_version`、`affected_groups`、`actor_id` 与精确 scope hints；普通 freshness/barrier targets 为空。
+4. API finalizer 只清必要的 process-local cache，不调用 `DerivedDataLifecycleService`，不写 dirty/outbox。
+5. 当前待找发票页重新执行 normal GET；其余逻辑消费者在各自被访问时比较规则 owner version 并精确收敛。expense/income 使用独立 expected version，避免无关方向被误判 stale。
 
-该事件的影响域必须保持低耦合：刷新 `invoice_lifecycle`、`pending_invoice`、workbench、进项使用、销项收款、税金抵扣、成本统计和 search；不刷新 `oa_pending_payment`、`turnover_ledger`、`no_oa_bank_batch`、`bank_account_balance`。OA 付款算法不读取待找发票规则，OA 页面保存规则后不得等待 OA barrier或重载rows。App Health 只根据实际受影响 read model 的 readiness/dirty/outbox/worker 事实判定页面 busy 或 blocked，不能因为规则版本变化把无关页面标红。
+OA 付款算法不读取待找发票规则，因此 OA 页面不因该规则保存而刷新。App Health 只展示真实 runtime scope 事件，不把规则版本变化推导成未实际入队的全局同步。
 
 ### 关联台 automatic decision 显示边界
 

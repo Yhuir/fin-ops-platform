@@ -1,6 +1,6 @@
 # Search 模块边界与 I/O
 
-日期：2026-07-16
+日期：2026-07-22
 
 ## 模块化状态
 
@@ -30,7 +30,8 @@
 | --- | --- | --- |
 | 搜索请求 | 前端/API | 查询 read model index |
 | Refresh scope | `search` manifest | month or `all`；`all` 是 fan-out command |
-| 业务对象变化 | lifecycle/producer | 产生 search scope refresh |
+| 业务对象变化 | canonical writer/source version | 普通写只更新事实/version 或返回 affected scope，不直接发布 search refresh |
+| 页面访问 | `/api/search` freshness boundary | 进入/重新激活搜索消费者时比较 expected/actual versions；仅在 stale/missing 时通过 gateway 精确入队当前月份 |
 | 本地即时查询输入 | Workbench repository | 仅允许 `list_workbench_search_rows(scope_key=YYYY-MM)`；返回 active generation 的 row/zone/group/project context，不得构建 Workbench 页面 payload；生产查询不走该路径 |
 
 ## 输出 I/O
@@ -40,7 +41,7 @@
 | 搜索结果 | 调用页面 | 必须来自 fresh index 或暴露 nonfresh |
 | Search index rows | repository | partitioned scoped index；保存时按 `row_id` 做 no-op aware bulk upsert，只删除同 scope 不再存在的 stale rows；空结果 scope 才允许整月删除 |
 | Search scope summary | repository / worker | `search_index_scope_summary(month)` 只返回 scope row count、freshness 和 source_versions；worker 在 source_versions 未变化时必须跳过 Workbench row scan 和保存。 |
-| Dirty scope | runtime queue | `search.read_model.refresh` |
+| Dirty scope | runtime queue | 仅由搜索访问 freshness gateway 或显式 maintenance 通过 `ReadModelRefreshGateway` 发布 `search.read_model.refresh`；普通业务写不 fan-out |
 
 ## 持久化与投影
 

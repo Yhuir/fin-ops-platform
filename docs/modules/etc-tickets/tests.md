@@ -140,3 +140,9 @@ bash scripts/verify.sh docs
 - 历史生产数据迁移和 orphan task 清理必须先 dry-run，再由运维窗口执行；本地测试只能证明工具边界。
 - deterministic Playwright 已覆盖 ETC 页面内三 bucket、business-batches 首屏暂时失败刷新恢复、未提交/已提交 business batch delete/reset 暂时失败重试恢复、source file delete 暂时失败重试恢复、ticket-root source upload 暂时失败重试恢复、OA draft 暂时失败重试恢复、草稿成功后暂存确认 target 保留、manual OA status 暂时失败重试恢复、未提交业务批次 -> OA 草稿暂存 -> 人工已提交 bucket 和成功后无可见错误残留；真实 OA 草稿页面、对象存储、Nginx 上传、大 ZIP、import confirm 等其它 mutation 级网络恢复，以及 Workbench、税金、成本和 search read model 全量重建后的最终页面展示仍需跨模块 staging smoke。
 - `tests/test_etc_backend.py` 已清零历史 `TemporaryDirectory(ignore_cleanup_errors=True)`；真实大 ZIP、对象存储/Nginx 上传、OA 和 worker drain 仍需要 staging/生产 smoke。
+
+## 2026-07-22 Phase 27 ETC 普通写隔离回归
+
+- ETC import、OA manual status、批次状态等普通写只提交 owner facts/version/audit 与精确 affected scope，不发布 Workbench/search/tax/cost 页面 refresh。
+- `web/src/test/EtcTicketManagementPage.test.tsx` 与中央 activation 测试覆盖：当前可见 ETC 页可重新读取；hidden 页忽略事件且不重放，后续重新可见时通过页面访问收敛。
+- 显式 repair/reset/authoritative integration 仍按各自运维合同执行，不得被普通写零 fan-out 测试误删或降格。

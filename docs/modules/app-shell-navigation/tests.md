@@ -104,3 +104,9 @@ cd web && npm run e2e:smoke
 - 生产 user-scope route-shell smoke 已证明真实域名和真实 full-access user cookie 下 16 个核心路由可打开且无隐藏浏览器错误/意外写请求，但它不替代页面级业务流、弹窗、下载、iframe、滚动、大表格、网络恢复或写后 read model 收敛测试。
 - route chunk preload 只验证调用和 fallback，不模拟真实网络分包失败后的浏览器缓存行为；当前契约是失败不阻断导航。
 - full route registry 数量测试会在新增页面时失败，需要同步更新预期和 App Status/domain docs，而不是随意放宽。
+
+## 2026-07-22 Phase 27 页面激活回归
+
+- `web/src/test/PageRouteHost.test.tsx` 锁定全部 17 个 route owner、route mount 单次加载、window focus 与 hidden→visible generation 增量，以及 hidden 时零 I/O/零 domain-event 重放。
+- 每个页面 owner 源码必须消费 `useOptionalPageActivation`；shell helper 不得包含 read-model dependency map、API 分支或业务 DTO。
+- 排序、分页、筛选只属于当前页面查询状态，不改变 activation generation，也不能触发跨页面 rebuild。

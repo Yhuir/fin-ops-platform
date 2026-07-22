@@ -18,6 +18,9 @@ invoice usage/output collection backfill、App Health/workbench performance 和 
 
 ## Hardening 基线
 
+- 普通用户写入默认只提交 canonical facts/source version/audit/idempotency 与必要领域任务，返回信息性 affected scopes；不得直接产生页面 read-model dirty/outbox，也不得返回页面 operation-barrier targets。
+- 页面 route mount、focus 或 hidden→visible 后，由该页 query owner 比较 expected/actual versions；只有当前精确 scope non-fresh 才经 `ReadModelRefreshGateway` 入队。hidden/未访问页面保持零 I/O。
+- `all` / full-history 只允许显式 authoritative integration、data reset、repair/backfill/reapply 或人工 maintenance 使用；必须在 App Health 标记为 `full_history_batch`，不能伪装成普通 current-scope 工作。
 - SQL-native read model 必须有 source version guard，避免读取旧 projection 并标记为 fresh。
 - rebuild/backfill 应按 scope 批量执行，避免逐行重建。
 - 请求线程不做高成本 live rebuild；miss/stale 返回 refresh 状态并 enqueue。
@@ -51,11 +54,11 @@ invoice usage/output collection backfill、App Health/workbench performance 和 
   `fin-ops-worker@*.service`，对已启用、运行或失败但不在 registry 中的实例执行 stop/disable；不删除实例 env，
   因而可通过恢复含该 registration 的 release 受控回滚。禁止把 WIP 性能 worker 或手工 systemd 实例留在
   registry 外长期运行，也禁止通过给未知实例补空参数来绕过 registration contract。
-- PostgreSQL durable queue worker 的 idle poll 基线是 `0.05s`；单一 `workbench` worker 使用 `0.01s`，同时处理月份 shard 与 `all` fan-out command。普通 relation 写入只要求具体月份和 relation/downstream read model 收敛；`month=all` 页面直接组合 active 月分片。`all` command 只列出月份并经统一 gateway 投递，不构建或发布全局 generation。新增 read model / 写后 fan-out worker 不能把
+- PostgreSQL durable queue worker 的 idle poll 基线是 `0.05s`；单一 `workbench` worker 使用 `0.01s`，同时处理月份 shard 与 `all` fan-out command。普通写不投递页面 refresh；被访问的具体月份由 query owner 收敛，`month=all` 页面直接组合 active 月分片。显式 `all` command 只列出月份并经统一 gateway 投递，不构建或发布全局 generation。新增 read model worker 不能把
   `--poll-interval-seconds 2`、`0.25`、`0.1` 或 `5` 作为默认值；`workbench-matching` 是独立脏 scope 批处理例外，
   使用 `0.25s` poll 支撑精确 OA/ETC relation enrichment 的 3 秒写后可读 SLO。发布 helper 会把已有 env 中精确命中的历史 `--poll-interval-seconds 2|0.25|0.1|0.05`
   迁移到当前 release env 示例声明的 poll 值，并只对 `workbench-matching` 把旧 `5s` 迁移为当前值。该迁移不会重写 RabbitMQ 灰度或自定义事件。
-- OA 待付款使用 required registration `oa-pending-payment`，只 claim `oa_pending_payment.read_model.refresh`；`invoice-usage-collection` 只保留 `input_invoice_usage` / `output_invoice_collection`。release helper 必须幂等删除既有 shared worker env 中精确命中的 OA handler/event 参数，不能让旧 env 覆盖新 registry 边界。OA projector不得访问Mongo/MySQL或复用shared invoice projector。普通业务变化只enqueue精确月份；显式`all`作为低优先级fan-out，用于首次回填、repair或backfill。
+- OA 待付款使用 required registration `oa-pending-payment`，只 claim `oa_pending_payment.read_model.refresh`；`invoice-usage-collection` 只保留 `input_invoice_usage` / `output_invoice_collection`。release helper 必须幂等删除既有 shared worker env 中精确命中的 OA handler/event 参数，不能让旧 env 覆盖新 registry 边界。OA projector不得访问Mongo/MySQL或复用shared invoice projector。普通业务变化不 enqueue 页面 refresh；页面访问只 enqueue 精确月份。显式 `all` 作为低优先级 fan-out，仅用于首次回填、repair 或 backfill。
 - OA release统一切换时不允许两个worker同时claim OA event。先由registry激活新`oa-pending-payment`实例并确认shared invoice registration已不含OA handler，再执行`oa.sync:all`建立completed/admission/payment-status snapshot和watermark；该同步必须使用单次 dual-view source batch，任一 form 失败整轮不提交并记录 failed run。核对 `scanned_projection_count`、`scanned_completed_count`、`scanned_in_progress_count` 后，低优先级enqueue `oa_pending_payment:all`。全部月份dirty/outbox drain并Audit通过前，页面保持refreshing且不展示旧rows。
 - OA页面写回MySQL成功后由API进程通过窄PG snapshot writer同事务更新status、月份watermark和outbox；PG失败返回可重试错误。运维不得直接SQL补read model或把MySQL当前值当作页面fresh证明；可重试命令或重新运行OA sync。
 - 周期性 `oa.sync` 必须是 change-driven：completed OA、status、admission 与上一 snapshot 一致时只记录 run/watermark，不更新 projection/status/admission 的业务时间戳，也不 fan-out Workbench/OA/成本等页面 refresh。admission/payment-status-only 变化只刷新 OA 待付款；只有 completed canonical 真实新增、修改或删除才允许 shared owner fan-out。snapshot repository 不得直接 enqueue Workbench/shared consumers。若无对应业务变化却持续出现跨页面 dirty/outbox 或 `app.oa_applications.updated_at` 漂移，按同步 owner 回归处理，禁止通过扩大 worker 数量掩盖写放大。

@@ -140,3 +140,9 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.runtime_worker_manifest
 
 - `tests/test_tax_offset_sql_runtime.py` 证明 canonical invoice 变化会清除全部已存在月份，并将“旧月份 + 新受影响月份”全部通过 durable refresh gateway 入队。
 - 同文件保留“本地没有缓存 projection 也必须为显式受影响月份入队”的回归，避免 clear 缺失时静默漏刷新。
+
+## 2026-07-22 Phase 27 访问时收敛回归
+
+- `tests/test_tax_offset_api.py`：认证导入和计划保存返回精确 affected scope，但普通 `freshness_targets` / `operation_barrier_targets` 为空，写路径不展开所有历史月份 refresh。
+- `web/src/test/TaxOffsetPage.test.tsx`：保存/确认立即结束写反馈；当前可见页重新读取，missing/stale/refreshing 继续由 tax query freshness gate 精确入队和轮询。
+- 先前“canonical invoice 变化立即清除并入队全部历史月份”的测试合同已废止；现在必须证明历史 scope 只在被访问或显式 maintenance `all` 时收敛。

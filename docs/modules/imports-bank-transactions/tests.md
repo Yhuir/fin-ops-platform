@@ -151,3 +151,9 @@ Nightly CI 通过 `scripts/verify.sh all` 执行后端、前端、Playwright bro
 - `tests/test_import_file_service.py`：batch-scoped row id 不再依赖进程级 counter。
 - `tests/test_postgres_repositories_core.py`：同一 row id 若已属于其它 batch，repository fail closed，不重挂 owner。
 - `tests/test_import_audit_repair_ops.py`：registered file evidence + canonical owner 恢复、重复执行幂等、legacy row id/owner 冲突拒绝。
+
+## 2026-07-22 Phase 27 写后零 fan-out 回归
+
+- `tests/test_import_processing_service.py`、`tests/test_import_file_api.py`：confirm 仍原子提交精确 import delta、幂等/失败回滚和必要领域任务，但结果中的页面 `freshness_targets` / `operation_barrier_targets` 为空，且不发布 read-model refresh。
+- `web/src/test/ImportCenterPage.test.tsx` 与共享 `ImportWorkflowPage` 回归：普通完成反馈不等待跨页面 barrier；后续访问银行明细等页面时由页面 freshness gate 收敛。
+- 旧的 `write_operation_slo_audit` “确认后必须产生下游 refresh 事件”断言不再是本模块正确性合同；Phase 27-07 改为验证写延迟、零 fan-out 和逐页面访问收敛延迟。

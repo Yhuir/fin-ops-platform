@@ -158,3 +158,9 @@ Nightly full suite 应覆盖本模块的后端 app health/status/runtime tests�
 - SSE 经过 Nginx/OA iframe 代理后是否缓冲、断线、回退轮询，需要真实部署 smoke。
 - `/api/operations/app-health-dashboard` 的真实大库指标性能、pg_stat_statements 可用性和短 TTL cache 行为需要生产观测；生产 admin Browser smoke 已有脚本和只读 guard，但仍需要真实 admin token/cookie 才能执行通过。
 - App Status 和现有 Playwright smoke 只能证明全局运行事实 plane 与 AppHealth dashboard 浏览器 gate，不替代每个业务页面自己的 stale/error/loading 交互测试。
+
+## 2026-07-22 Phase 27 scope 级运行证据
+
+- `tests/test_operations_dashboard_service.py` 覆盖最近 read-model scope evidence：current-scope/full-history 分类、expected/projection source versions、lag、queue wait、handler duration、attempt/retry、dedupe 与 error。
+- `web/src/test/AppHealthOperationsPage.test.tsx` 覆盖 scope 类型和 timing/retry 证据展示，不再用一个“同步中”总状态解释所有后台工作。
+- 真实 p50/p95/p99、队列等待与逐页面访问收敛仍必须在 Phase 27-07 使用 test-owned 生产 fixture 采集；本地 fake repository 不作为性能结论。

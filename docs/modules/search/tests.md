@@ -159,3 +159,9 @@ git diff --check
 
 - 当前没有独立 Browser `/api/search` 页面入口；用户可见全局搜索 UI 若后续新增，必须补 Spec-first E2E。
 - 真实 PostgreSQL/RabbitMQ/worker drain、high-row search index performance、App Status readiness 和生产页面/用户流 smoke evidence 仍需 staging/production evidence；本地测试不能替代。
+
+## 2026-07-22 Phase 27 搜索访问收敛回归
+
+- `tests/test_search_api.py` 与 search freshness tests 必须证明访问时比较 exact source versions，仅在 missing/stale 时通过 gateway 入队 current month；fresh 时零队列 I/O。
+- 普通 import/settings/relation 写不再直接发布 search refresh；旧 import-state/search lifecycle fan-out 测试应改为零事件断言。
+- `search:all` 只保留为显式 maintenance fan-out command；不得从普通业务写路径恢复调用。

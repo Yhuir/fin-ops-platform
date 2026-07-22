@@ -6,7 +6,7 @@
 
 - 状态：close
 - 当前边界可信度：high
-- 目标边界：银行流水导入通过 import file/service/job queue 进入预览、确认、后台处理和 derived lifecycle，不直接写页面 read model。
+- 目标边界：银行流水导入通过 import file/service/job queue 进入预览、确认和后台处理；确认只提交 canonical facts、source version、审计与必要领域任务，不写页面 read model，也不扇出页面 refresh job。
 - 当前缺口：App 内部 direct-canonical Audit 已闭环；外部银行回单页数、行数、control total 与上传前字节真实性仍须独立来源证据，不能由 App 文件登记 hash 推导。
 - 旧代码删除状态：生产与前端只保留 `/imports/files/*` file/session I/O。旧 `/imports/preview`、`/imports/confirm` JSON route/handler/entrypoint、无生产者的 `general_import.confirm` worker 类型、processor、preview-only orchestration dependencies 和无 session 范围的 preview 全量 snapshot writer 已删除；`FileImportService.snapshot/from_snapshot` 只保留为跨进程恢复 I/O，不作为增量写入接口。
 
@@ -15,11 +15,11 @@
 ### 负责
 
 - 银行流水文件上传、模板识别、预览、确认导入、导入任务状态。
-- 通过后台任务和 lifecycle 触发银行明细及下游 read model 刷新。
+- 导入完成后返回精确 affected scopes；银行明细及下游页面只在进入或重新可见时，通过各自 freshness gateway 检查并刷新当前 scope。
 - 记录导入预览审计。
 - 通过统一 page Audit 在同一只读 snapshot 证明 file object、session/file、batch/row、canonical bank transaction、当前 import job/outbox 的集合、字段、引用与 queue 状态。
 - Audit 比较交易时间时必须比较同一时间点：银行文件中无时区的 `trade_time` 按 `Asia/Shanghai` 解释，PostgreSQL `timestamptz` 与带时区 ISO 值统一归一到 UTC 后比较；禁止把同一时刻的本地时间与 UTC 表示误报为漂移，也禁止忽略真实的时间差异。
-- 导入确认结果或完成后的 job result 必须透出 read model write target envelope；银行流水导入必须包含 `bank_detail:<month>` 与 `bank_account_balance:all` operation barrier targets。
+- 导入确认结果或完成后的 job result 必须透出 write result envelope；普通导入的 `freshness_targets` 与 `operation_barrier_targets` 固定为空，不要求当前写操作等待任意页面重建。
 
 ### 不负责
 
@@ -41,7 +41,7 @@ Import worker 注册 handler 时只固定 processor 类型，不得把启动时�
 
 file/session preview/retry 只允许输出当前 `session_id`、files 与其 `preview_batch_id` 的精确 delta，且不得包含 canonical invoice/transaction facts。confirm 的持久化输出必须是本次所选 session、正式 batch 及其新建/状态更新 canonical facts 的精确 delta。合法重复行只引用既有 transaction，不重新拥有或回写该 transaction；两条链都不得回写其它 session 或未受影响 facts。调用方必须通过 `ApplicationStateStoreProtocol.save_import_delta(...)` 写入；PostgreSQL 在同一事务写 batch 与 file/session，本地实现按 batch/entity/session id 合并且计数器只增不减，二者共享“未出现在 delta 中的事实保持不变”语义。
 
-confirm 的 I/O 顺序必须是 `save_import_delta` 原子提交在先，tax/read-model invalidation 与 Workbench matching enqueue 在后。batch 与 file/session 任一写入失败必须整体回滚且不得发布下游任务；禁止让 worker 在 canonical facts 可见之前消费 scope，也禁止后台状态写入与 confirm 形成丢失更新窗口。
+confirm 的 I/O 顺序必须是 `save_import_delta` 原子提交在先，必要的 Workbench auto-matching 领域任务 enqueue 在后。batch 与 file/session 任一写入失败必须整体回滚且不得发布领域任务；普通 confirm 禁止发布 tax/read-model refresh，禁止让 worker 在 canonical facts 可见之前消费 scope，也禁止后台状态写入与 confirm 形成丢失更新窗口。
 
 通用 `Application._persist_state()` 已从 import canonical/session 写链隔离，不得再包含 `imports`、`file_imports` 或调用其全量 snapshot。preview/retry 只通过 `_persist_import_preview_delta(session_id)` 写当前 session-scoped delta，confirm 只通过上述 selected-files delta 边界持久化正式事实；OA 附件发票晋升和 ETC metadata 关联分别使用 `save_invoices` 与 `save_invoice_etc_metadata` 窄端口。
 
@@ -52,8 +52,8 @@ confirm 的 I/O 顺序必须是 `save_import_delta` 原子提交在先，tax/rea
 | 预览结果 | 前端导入页面 | 不持久化为业务事实直到确认 |
 | 导入文件事实列表 | `/api/import-facts/files`、HTTP SLO probe | 只返回分页文件摘要字段；不得输出完整 `raw_payload`、`row_results`、`normalized_rows`，预览明细只能走 `/imports/files/*` session/preview 边界 |
 | 导入 job status | background job/app status | 可查询、可失败恢复 |
-| Dirty scope | derived lifecycle/runtime queue | bank_detail/workbench/search 等受影响 scope |
-| Write target envelope | 前端导入页面/job result | 返回 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets`；background job mapper 会标准化 result summary targets。前端只在 targets 非空时等待 operation barrier；targets 为空时直接完成反馈，禁止读取 Workbench 页面猜测刷新状态 |
+| Affected scope | 页面 freshness gateway / 必要领域任务 | 返回本次写入影响的精确月份；不在写路径展开成页面 refresh jobs |
+| Write result envelope | 前端导入页面/job result | 返回 `affected_scope_keys`，普通写的 `read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets` 为空。前端立即结束写操作；后续访问页面由该页 freshness/status/enqueue 边界收敛 |
 | Page Audit | `/api/operations/app-health/page-audit?page=imports.bank-transactions` | admin-only、只读、`read_model_keys=[]`、`relation_proof_required=false`；expected-set 同时包含本次正式 batch 拥有的 transaction 与 duplicate row 引用的历史 canonical transaction，反向 owner 唯一性只约束本批次拥有的 transaction；下游 read model 只登记为 impact targets，不冒充页面 consumer |
 
 失败但仍可重试的 import job 必须在 admin-only Audit issue 中返回 `attempt_count/max_attempts`、`last_error`、`session_id` 和 `selected_file_ids`，使运维只能通过正式 file/session retry/confirm I/O 定位和恢复；不得要求直接查询或改写 `job.import_jobs`。
@@ -61,7 +61,7 @@ confirm 的 I/O 顺序必须是 `save_import_delta` 原子提交在先，tax/rea
 ## 持久化与投影
 
 - Own read model：无独立 manifest entry。
-- 影响 read model：`bank_detail`、`bank_account_balance`、`workbench`、`workbench_relation`、`invoice_lifecycle`、`search`、`pending_invoice`、`oa_pending_payment`、`cost_statistics`。
+- 逻辑影响 read model：`bank_detail`、`bank_account_balance`、`workbench`、`workbench_relation`、`invoice_lifecycle`、`search`、`pending_invoice`、`oa_pending_payment`、`cost_statistics`；这些影响不等于写后立即入队，页面访问按当前 scope 收敛。
 - Worker：import job/runtime worker handlers。
 
 ## 文件范围
@@ -75,12 +75,12 @@ confirm 的 I/O 顺序必须是 `save_import_delta` 原子提交在先，tax/rea
 | Backend service | `import_file_service.py`、`imports.py`、`import_processing_service.py`、`import_job_queue.py`、`import_preview_audit.py` |
 | Audit owner | `services/postgres_repositories/bank_transaction_import_page_audit.py`、`services/postgres_repositories/import_audit_repair.py`、`services/page_audit_registry.py` |
 | Controlled repair | `services/import_audit_repair_service.py` 输出纯 plan；`tools/import_audit_repair_ops.py` 仅编排 dry-run/execute I/O |
-| Worker/lifecycle | `runtime_worker_handlers.py`、`derived_data_lifecycle_service.py`、`app_status_job_registry.py` |
+| Worker/runtime | `runtime_worker_handlers.py`、`app_status_job_registry.py` |
 | Tests | `tests/test_import*.py`、`web/src/test/ImportsApi.test.ts`、`web/e2e/imports-bank-transactions-flow.spec.ts` |
 
 ## 依赖方向
 
-- 允许依赖：import job queue, background job service, derived lifecycle。
+- 允许依赖：import job queue、background job service、明确的 Workbench auto-matching 领域任务端口。
 - 必须通过：`ImportWorkflowPage` file/session API、`FileImportService`、`ImportProcessingService`、import job queue。
 - 禁止绕过：银行流水页面回到 `/imports/preview` / `/imports/confirm` JSON 入口；导入确认时直接写 read model；长任务直接跑在 HTTP request 中；`server.py` 重新持有 import confirm processor 业务逻辑。
 
@@ -99,7 +99,7 @@ confirm 的 I/O 顺序必须是 `save_import_delta` 原子提交在先，tax/rea
 
 ## 当前缺口和删除条件
 
-- 模板识别变更必须覆盖预览、确认、失败恢复和 downstream freshness。
+- 模板识别变更必须覆盖预览、确认、失败恢复，以及导入后首次访问受影响页面时的 downstream freshness。
 - 旧 JSON import API 及其 `general_import.confirm` worker 链已删除；测试造数只能调用保留的 service-level normalization ports，HTTP 行为必须走 file/session API。
 - 删除任何 file/session snapshot 持久化前，必须先提供 import worker 跨进程恢复替代方案；不能把 `FileImportService.snapshot/from_snapshot` 误判为旧 full snapshot fallback。
 - Audit pass 只证明已登记 App 内部事实闭包；外部银行 control evidence 与下游受影响页面各自的 Audit 仍是独立 gate。

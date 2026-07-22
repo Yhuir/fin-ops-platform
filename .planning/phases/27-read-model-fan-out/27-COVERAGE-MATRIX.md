@@ -49,13 +49,13 @@
 | `bank_detail` | `bank_detail`; month；`all=fan_out_command` | `BankDetailsApplicationService` | `bank-details`, `pending-invoices`, `cost-statistics` | exact month signature/source versions + queue state | `implemented-local` |
 | `bank_account_balance` | `bank_account_balance`; global `all=queryable_all_scope` | `BankDetailsApplicationService` | `bank-details`, App Status | all-only canonical balance source version | `implemented-local` |
 | `pending_invoice` | `pending_invoice`; `direction:filter_group[:month]`; bare all forbidden | `PendingInvoiceReadModelService` | `pending-invoices`, `invoice_lifecycle` | page-first-screen exact scope + bank/relation dependency versions | `migrated-27-04` |
-| `search` | `search`; month；`all=fan_out_command` | `Search read API` | global search, settings manual OA search | requested month index source versions | `planned` |
-| `invoice_lifecycle` | `invoice_lifecycle`; month；`all=fan_out_command` | `InvoiceLifecycleReadFacade` | pending/input/output/OA invoice resources | exact lifecycle + upstream source proof；strict stale consumer | `planned` |
+| `search` | `search`; month；`all=fan_out_command` | `Search read API` | global search, settings manual OA search | requested month index source versions；普通写零 refresh，访问 non-fresh 才 enqueue | `migrated-27-05` |
+| `invoice_lifecycle` | `invoice_lifecycle`; month；`all=fan_out_command` | `InvoiceLifecycleReadFacade` | pending/input/output/OA invoice resources | exact lifecycle + upstream source proof；strict stale consumer | `migrated-27-04` |
 | `input_invoice_usage` | `input_invoice_usage`; month；`all=fan_out_command` | `InputInvoiceUsageReadModelService` | `input-invoice-usage` | exact month + relation/lifecycle/rule signature | `migrated-27-04` |
 | `output_invoice_collection` | `output_invoice_collection`; month；`all=fan_out_command` | `OutputInvoiceCollectionReadApplicationService` | `output-invoice-collections` | exact month + relation/lifecycle/receipt/rule versions | `migrated-27-04` |
 | `oa_pending_payment` | `oa_pending_payment`; month；`all=fan_out_command` | `OaPendingPaymentReadModelService` | `oa-pending-payments`, lifecycle resource | exact OA snapshot/relation/schema versions | `migrated-27-04` |
 | `cost_statistics` | `cost_statistics`; `active/all` shard + queryable parent | `CostStatisticsQueryService` | `cost-statistics` | Workbench expected/active gate 先收敛，再检查 Cost/Bank Detail dependency-bound gate；两级不同时 enqueue | `implemented-local` |
-| `tax_offset` | `tax_offset`; month；`all=fan_out_command` | `TaxOffsetQueryService` | `tax-offset` | exact invoice/certified source versions | `planned` |
+| `tax_offset` | `tax_offset`; month；`all=fan_out_command` | `TaxOffsetQueryService` | `tax-offset` | exact invoice/certified source versions；普通写零 refresh，访问 current month 收敛 | `migrated-27-05` |
 | `no_oa_bank_batch` | `no_oa_bank_batch`; month；`all=fan_out_command` | `NoOaBankBatchApplicationService` | legacy API/regression only | exact canonical no-OA relation versions；不新增页面依赖 | `implemented-local` |
 | `bank_flow_rule_batch` | `bank_flow_rule_batch`; month；`all=fan_out_command` | `BankFlowRuleBatchApplicationService` | `bank-flow-rule-batches` | exact bank/tag eligibility/relation versions；普通写零 target | `implemented-local` |
 | `turnover_ledger` | `turnover_ledger`; month；`all=fan_out_command` | `TurnoverLedgerQueryService` | `turnover-ledger` | exact ledger + canonical relation source bundle；普通写零 target | `implemented-local` |
@@ -178,20 +178,20 @@
 | `enqueue-cost-runtime` | `backend/src/fin_ops_platform/services/cost_statistics_runtime_service.py` | `.enqueue_read_model_refresh(` | `1` | `retain` | access/force refresh gateway wrapper |
 | `enqueue-cost-query` | `backend/src/fin_ops_platform/services/cost_statistics_query_service.py` | `.enqueue_read_model_refresh(` | `2` | `retain` | access-time dependency-bound exact scope miss/stale owner |
 | `barrier-cost-page` | `web/src/pages/CostStatisticsPage.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | 页面首次/事件/hidden→visible 均复用正常 GET；refreshing 使用 3s 有界自身重试 |
-| `barrier-input-page` | `web/src/pages/InputInvoiceUsagePage.tsx` | `waitForOperationFreshness(` | `1` | `migrate` | ordinary writes改为 visible scope access reconcile；explicit OA job可保留 |
+| `barrier-input-page` | `web/src/pages/InputInvoiceUsagePage.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | ordinary writes改为 visible scope normal GET；OA reverse 也不等待跨页 barrier |
 | `barrier-batch-accounting-page` | `web/src/pages/BatchAccountingPage.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | relation commit 后当前可见页面正常 GET，无跨页 targets |
 | `barrier-bank-page` | `web/src/pages/BankDetailsPage.tsx` | `waitForOperationFreshness(` | `1` | `retain` | ordinary category/rule save 已零 barrier；唯一 caller 属于显式 reapply batch 的 exact month job wait |
-| `barrier-tax-page` | `web/src/pages/TaxOffsetPage.tsx` | `waitForOperationFreshness(` | `3` | `migrate` | plan current month exact proof；certified import explicit job |
+| `barrier-tax-page` | `web/src/pages/TaxOffsetPage.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | plan/certified import 提交后重跑 current month normal GET；freshness gate 精确收敛 |
 | `barrier-turnover-page` | `web/src/pages/TurnoverLedgerPage.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | command 后只重跑 current ledger normal GET；删除 Workbench/search/cost cross-page wait |
 | `barrier-workbench-page` | `web/src/pages/ReconciliationWorkbenchPage.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | command 后只重跑当前 active-generation normal GET；下游页面访问时收敛 |
-| `barrier-etc-page` | `web/src/pages/EtcTicketManagementPage.tsx` | `waitForOperationFreshness(` | `1` | `retain` | explicit reconciliation/import job only；普通 batch fact write不得 broad wait |
-| `barrier-oa-page` | `web/src/pages/OaPendingPaymentsPage.tsx` | `waitForOperationFreshness(` | `2` | `migrate` | current OA exact scope；删除跨页面 wait |
-| `barrier-pending-page` | `web/src/pages/PendingInvoicesPage.tsx` | `waitForOperationFreshness(` | `3` | `migrate` | current direction/filter/month scope；rule save不得 rebuild all |
-| `barrier-output-page` | `web/src/pages/OutputInvoiceCollectionsPage.tsx` | `waitForOperationFreshness(` | `1` | `migrate` | current output exact scope；receipt settings不 rebuild |
+| `barrier-etc-page` | `web/src/pages/EtcTicketManagementPage.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | import/ordinary batch write 后只重跑当前 ETC canonical query；其它页面访问收敛 |
+| `barrier-oa-page` | `web/src/pages/OaPendingPaymentsPage.tsx` | `waitForOperationFreshness(` | `1` | `retain-explicit-audit` | 普通写已删除 barrier；只保留显式 Audit/reconcile action exact OA scope |
+| `barrier-pending-page` | `web/src/pages/PendingInvoicesPage.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | 当前 direction/filter/month normal GET；rule save 不 rebuild all |
+| `barrier-output-page` | `web/src/pages/OutputInvoiceCollectionsPage.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | 当前 output normal GET；receipt settings 不 rebuild |
 | `barrier-bank-flow-page` | `web/src/pages/BankFlowRuleBatchPage.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | 规则/submit/withdraw/reset 成功后只重跑当前 normal GET |
-| `barrier-manual-oa-table` | `web/src/components/settings/OaManualSearchImportTable.tsx` | `waitForOperationFreshness(` | `2` | `migrate` | settings table refetch；search在访问时收敛 |
+| `barrier-manual-oa-table` | `web/src/components/settings/OaManualSearchImportTable.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | settings table refetch；search 在访问时收敛 |
 | `barrier-oa-audit-icon` | `web/src/components/oaPendingPayments/OaPendingPaymentAuditIcon.tsx` | `waitForOperationFreshness(` | `1` | `retain` | explicit user audit/reconcile action；只等 exact OA scope |
-| `barrier-import-workflow` | `web/src/components/imports/ImportWorkflowPage.tsx` | `waitForOperationFreshness(` | `1` | `retain` | explicit import batch completion；目标必须来自 receipt exact scopes |
+| `barrier-import-workflow` | `web/src/components/imports/ImportWorkflowPage.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | import job completion 只确认事实提交；受影响页面访问时 exact-scope 收敛 |
 
 ## Migration and deletion rule
 

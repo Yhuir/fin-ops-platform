@@ -162,3 +162,9 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_aud
 - `tests/test_audit_etc_import_page.py` 同时覆盖：failed session/job 的精确 task 已 `imported` 时只报告 covered warning；task 未正式完成时仍返回 blocking integrity issue。
 - 覆盖判定复用 ETC 票据 Audit 常量，防止两个页面对同一 job/session 得出相反结果。
 - 同一测试文件覆盖 `succeeded` session 对应 task 后续从 `imported` 合法推进到 `closed`；完整 terminal output edges 下不得产生 task-status mismatch，非法状态仍按原合同阻断。
+
+## 2026-07-22 Phase 27 写后零 fan-out 回归
+
+- `tests/test_import_processing_service.py`：ETC confirm 仍按真实 changed months 关联 canonical facts、保持幂等与 durable job recovery；无变化重放为零影响，普通完成不发布页面 read-model refresh。
+- 共享导入前端与 ETC 页面测试：完成后只重新读取当前可见页，不等待 tax/search/workbench/cost barrier；其它页面首次访问时按自己的 freshness owner 收敛。
+- 旧 `etc_import_confirmed` SLO 中“必须观察到核心下游 refresh 事件”的要求已被零 fan-out 合同取代。
