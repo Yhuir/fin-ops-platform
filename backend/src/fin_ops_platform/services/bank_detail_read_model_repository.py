@@ -22,6 +22,14 @@ class BankDetailReadModelRepositoryPort:
         payload = self._repository.bank_detail_scope_summary(scope_keys=scope_keys)
         return dict(payload) if isinstance(payload, dict) else {}
 
+    def bank_detail_category_source_signatures(self, *, scope_keys: list[str]) -> dict[str, str]:
+        payload = self._repository.bank_detail_category_source_signatures(scope_keys=scope_keys)
+        return {
+            str(scope_key): str(source_signature)
+            for scope_key, source_signature in dict(payload or {}).items()
+            if str(scope_key).strip() and str(source_signature).strip()
+        }
+
     def list_bank_detail_transactions(
         self,
         *,

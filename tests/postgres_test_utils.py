@@ -131,6 +131,7 @@ EXPECTED_MIGRATION_FILES = [
     "0117_workbench_matching_idempotency_runtime_grant.sql",
     "0118_bank_flow_rule_batch_settings_raw_alignment.sql",
     "0119_turnover_ledger_scope_summaries.sql",
+    "0120_bank_transaction_category_legacy_lookup.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (

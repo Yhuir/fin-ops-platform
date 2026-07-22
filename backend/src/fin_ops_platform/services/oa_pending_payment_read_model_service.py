@@ -215,6 +215,12 @@ class OaPendingPaymentReadModelService:
                 expected_schema_version=OA_PENDING_PAYMENT_ROWS_CACHE_SCHEMA_VERSION,
                 expected_source_versions=dict(state.get("source_versions") or {}),
                 load_view=load_rows_view,
+                load_freshness_view=lambda: {
+                    "payload": {},
+                    "source_versions": dict(state.get("source_versions") or {}),
+                    "schema_version": OA_PENDING_PAYMENT_ROWS_CACHE_SCHEMA_VERSION,
+                    "refresh_status": "fresh",
+                },
                 empty_payload_factory=lambda: self.refreshing_rows_payload(
                     scope_key=scope_key,
                     blocking_scope_keys=[scope_key],

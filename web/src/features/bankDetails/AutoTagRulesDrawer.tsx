@@ -347,10 +347,10 @@ export default function AutoTagRulesDrawer({
 
   useEffect(() => {
     if (refreshStatus === "refreshing") {
-      setFeedback(lastRefreshAction === "reapply" ? "已提交重新应用，银行明细正在刷新。" : "规则已保存，银行明细正在刷新。");
+      setFeedback(lastRefreshAction === "reapply" ? "已提交重新应用，银行明细正在刷新。" : "规则已保存；当前页面正在按需更新。");
     }
     if (refreshStatus === "fresh") {
-      setFeedback(lastRefreshAction === "reapply" ? "重新应用已完成，银行明细已刷新。" : "规则已保存，银行明细已刷新。");
+      setFeedback(lastRefreshAction === "reapply" ? "重新应用已完成，银行明细已刷新。" : "规则已保存。");
     }
   }, [lastRefreshAction, refreshStatus]);
 
@@ -460,7 +460,7 @@ export default function AutoTagRulesDrawer({
         setActiveRules(nextActive);
         setArchivedRules(nextArchived);
         setBaseline(normalizedDraft(nextActive, nextArchived));
-        setFeedback(payload.readModelStatus === "fresh" ? "规则已保存，银行明细已刷新。" : "规则已保存，银行明细正在刷新。");
+        setFeedback("规则已保存；当前页面正在按需更新。");
         onSaved?.(payload);
       })
       .catch((caught) => {

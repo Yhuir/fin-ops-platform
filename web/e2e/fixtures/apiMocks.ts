@@ -10188,11 +10188,19 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     const canSaveBankAutoTagRules = options.sessionMode !== "read_export_only"
       && options.sessionMode !== "forbidden";
     if (path === "/api/bank-details/auto-tag-rules/reapply") {
-      return json(route, bankAutoTagRulesPayload(canSaveBankAutoTagRules, {
-        version: bankAutoTagRulesVersion,
-        readModelStatus: "refreshing",
-        salarySubLabel: bankAutoTagRulesSalarySubLabel,
-      }), 202);
+      const targets = [{ read_model_key: "bank_detail", scope_key: "2026-03" }];
+      return json(route, {
+        ...bankAutoTagRulesPayload(canSaveBankAutoTagRules, {
+          version: bankAutoTagRulesVersion,
+          readModelStatus: "refreshing",
+          salarySubLabel: bankAutoTagRulesSalarySubLabel,
+        }),
+        affected_scope_keys: ["2026-03"],
+        read_model_scope_keys: ["2026-03"],
+        freshness_targets: targets,
+        operation_barrier_targets: targets,
+        refresh_enqueued: true,
+      }, 202);
     }
 
     if (path === "/api/bank-details/auto-tag-rules") {

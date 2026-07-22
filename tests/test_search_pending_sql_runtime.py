@@ -19,6 +19,10 @@ from fin_ops_platform.services.pending_invoice_service import (
     PendingInvoiceError,
 )
 from fin_ops_platform.services.postgres_repositories.oa_projection import OA_PROJECTION_SYNC_VERSION
+from fin_ops_platform.services.postgres_repositories.read_models import (
+    BANK_DETAIL_EMPTY_CATEGORY_SOURCE_SIGNATURE,
+    BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
+)
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 from fin_ops_platform.services.search_read_model_repository import SearchReadModelRepositoryPort
 from fin_ops_platform.services.search_query_freshness_service import (
@@ -590,11 +594,14 @@ class SearchPendingConnection:
                 {
                     "scope_key": requested_scope,
                     "scope_type": "bank_detail",
-                    "schema_version": 10,
+                    "schema_version": BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
                     "status": "fresh",
                     "row_count": 0,
                     "source_version": 7,
-                    "source_versions": {"bank_detail_signature": "empty-v1"},
+                    "source_versions": {
+                        "bank_detail_signature": "empty-v1",
+                        "bank_transaction_category_source_signature": BANK_DETAIL_EMPTY_CATEGORY_SOURCE_SIGNATURE,
+                    },
                     "generated_at": "2026-05-21T09:00:00+00:00",
                     "last_error": None,
                 }
@@ -1896,7 +1903,10 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["rows"], [])
         self.assertEqual(
             payload["source_versions"]["pending_invoice_empty_month_direction"]["bank_detail_source_versions"],
-            {"bank_detail_signature": "empty-v1"},
+            {
+                "bank_detail_signature": "empty-v1",
+                "bank_transaction_category_source_signature": BANK_DETAIL_EMPTY_CATEGORY_SOURCE_SIGNATURE,
+            },
         )
 
     def test_invoice_lifecycle_rejects_missing_pending_scope_when_bank_direction_has_rows(self) -> None:

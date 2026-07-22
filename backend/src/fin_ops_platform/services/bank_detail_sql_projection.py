@@ -95,6 +95,10 @@ class BankDetailSqlProjectionBuilder:
             source_version=source_version,
             row_count=len(transaction_rows),
             relation_source_versions=relation_source_versions,
+            category_source_signature=self._category_source_signature(
+                normalized_scope_key,
+                manual_categories=manual_categories,
+            ),
             source_signature=self._source_signature(
                 scope_key=normalized_scope_key,
                 transaction_rows=transaction_rows,
@@ -751,12 +755,14 @@ class BankDetailSqlProjectionBuilder:
         source_version: int | None,
         row_count: int,
         relation_source_versions: dict[str, Any] | None = None,
+        category_source_signature: str = "",
         source_signature: str = "",
     ) -> dict[str, Any]:
         return {
             "source_version": source_version,
             "bank_detail_schema_version": BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
             "bank_auto_tag_rules_version": self._bank_auto_tag_rules_version,
+            "bank_transaction_category_source_signature": category_source_signature,
             "workbench_relation_source_versions": dict(
                 relation_source_versions
                 if isinstance(relation_source_versions, dict)
@@ -765,6 +771,28 @@ class BankDetailSqlProjectionBuilder:
             "bank_detail_source_signature": source_signature,
             "row_count": row_count,
         }
+
+    def _category_source_signature(
+        self,
+        scope_key: str,
+        *,
+        manual_categories: dict[str, dict[str, Any]],
+    ) -> str:
+        loader = getattr(self._read_model_repository, "bank_detail_category_source_signatures", None)
+        if callable(loader):
+            signatures = loader(scope_keys=[scope_key])
+            if isinstance(signatures, dict):
+                signature = str(signatures.get(scope_key) or "").strip()
+                if signature:
+                    return signature
+        encoded = json.dumps(
+            manual_categories,
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def _stable_source_versions(source_versions: dict[str, Any]) -> dict[str, Any]:

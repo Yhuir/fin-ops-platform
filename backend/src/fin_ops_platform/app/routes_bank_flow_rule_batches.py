@@ -91,6 +91,14 @@ class BankFlowRuleBatchApiRoutes:
                 query,
                 relation_mode=BANK_FLOW_RULE_BATCH_RELATION_MODE,
             )
+        except RuntimeError as exc:
+            if str(exc) != "bank_flow_rule_batch read repository requires read_page.":
+                raise
+            return HTTPStatus.SERVICE_UNAVAILABLE, {
+                "error": "bank_flow_rule_batch_read_model_unavailable",
+                "message": "流水规则批次读取模型暂不可用，请稍后重试。",
+                "read_model_status": "unavailable",
+            }
         except ValueError as exc:
             return self._value_error_response(exc)
 

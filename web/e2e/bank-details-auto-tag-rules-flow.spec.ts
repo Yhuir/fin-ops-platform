@@ -53,7 +53,7 @@ function barrierTargets(body: Record<string, unknown>) {
 }
 
 test.describe("bank details auto tag rules browser flow", () => {
-  test("saves edited automatic tag rules with the visible date scope and waits for fresh bank detail rows", async ({ page }, testInfo) => {
+  test("saves edited automatic tag rules and reloads visible rows without an operation barrier", async ({ page }, testInfo) => {
     const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
     const recordLatency = createBankDetailsLatencyRecorder(page, testInfo);
 
@@ -79,11 +79,9 @@ test.describe("bank details auto tag rules browser flow", () => {
       actionType: "click",
     }, async (mark) => {
       const saveResponse = page.waitForResponse(responseFor("PUT", "/api/bank-details/auto-tag-rules"));
-      const barrierResponse = page.waitForResponse(responseFor("POST", "/api/operation-barrier/status"));
       await drawer.getByRole("button", { name: "保存" }).click();
       await mark("apiLatencyMs", saveResponse);
-      await mark("operationBarrierLatencyMs", barrierResponse);
-      await mark("firstVisibleResponseLatencyMs", expect(page.getByText("规则已保存，银行明细已刷新。").first()).toBeVisible());
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByText("规则已保存。").first()).toBeVisible());
       await mark("finalSettledLatencyMs", expect.poll(() => api.count(TRANSACTIONS_PATH)).toBeGreaterThan(initialTransactionRequests));
     });
 
@@ -112,12 +110,9 @@ test.describe("bank details auto tag rules browser flow", () => {
       expect.objectContaining({ code: "internal_transfer" }),
     ]));
 
-    await expect.poll(() => api.count(OPERATION_BARRIER_PATH)).toBeGreaterThanOrEqual(1);
-    expect(barrierTargets(api.lastBody(OPERATION_BARRIER_PATH))).toEqual(expect.arrayContaining([
-      expect.objectContaining({ read_model_key: "bank_detail", scope_key: "2026-03" }),
-    ]));
+    expect(api.count(OPERATION_BARRIER_PATH)).toBe(0);
     await expect.poll(() => api.count(TRANSACTIONS_PATH)).toBeGreaterThan(initialTransactionRequests);
-    await expect(page.getByText("规则已保存，银行明细已刷新。").first()).toBeVisible();
+    await expect(page.getByText("规则已保存。").first()).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
   });
 
@@ -158,7 +153,7 @@ test.describe("bank details auto tag rules browser flow", () => {
     await expectNoUnexpectedSuccessUiErrors(page);
   });
 
-  test("keeps a successful save as a warning instead of a failure when the post-save sync is blocked", async ({ page }, testInfo) => {
+  test("ordinary save ignores a blocked global barrier because it owns no barrier targets", async ({ page }, testInfo) => {
     const api = await installDeterministicApiMocks(page, {
       operationBarrierMode: "blocked",
       sessionMode: "full_access",
@@ -166,6 +161,7 @@ test.describe("bank details auto tag rules browser flow", () => {
     const recordLatency = createBankDetailsLatencyRecorder(page, testInfo);
 
     await gotoAndExpectPageReady(page, "/bank-details", "bank-details-page");
+    const initialTransactionRequests = api.count(TRANSACTIONS_PATH);
 
     const drawer = await openAutoTagRulesDrawer(page, recordLatency);
     await drawer.getByRole("textbox", { name: "费用 / 工资 子标签" }).fill("同步阻断测试");
@@ -175,20 +171,18 @@ test.describe("bank details auto tag rules browser flow", () => {
       actionType: "click",
     }, async (mark) => {
       const saveResponse = page.waitForResponse(responseFor("PUT", "/api/bank-details/auto-tag-rules"));
-      const barrierResponse = page.waitForResponse(responseFor("POST", "/api/operation-barrier/status"));
       await drawer.getByRole("button", { name: "保存" }).click();
       await mark("apiLatencyMs", saveResponse);
-      await mark("operationBarrierLatencyMs", barrierResponse);
-      await mark("firstVisibleResponseLatencyMs", expect(page.getByText("规则已保存，后台同步尚未完成，请稍后刷新。").first()).toBeVisible());
-      await mark("finalSettledLatencyMs", expect(page.getByRole("dialog", { name: "操作失败" })).toHaveCount(0));
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByText("规则已保存。").first()).toBeVisible());
+      await mark("finalSettledLatencyMs", expect.poll(() => api.count(TRANSACTIONS_PATH)).toBeGreaterThan(initialTransactionRequests));
     });
 
     await expect.poll(() => api.count(SAVE_RULES_PATH)).toBe(1);
-    await expect.poll(() => api.count(OPERATION_BARRIER_PATH)).toBeGreaterThanOrEqual(1);
+    expect(api.count(OPERATION_BARRIER_PATH)).toBe(0);
     expect(api.lastBody(SAVE_RULES_PATH)).toEqual(expect.objectContaining({
       expected_version: 1,
     }));
-    await expect(page.getByText("规则已保存，后台同步尚未完成，请稍后刷新。").first()).toBeVisible();
+    await expect(page.getByText("规则已保存。").first()).toBeVisible();
     await expect(page.getByRole("dialog", { name: "操作失败" })).toHaveCount(0);
   });
 });

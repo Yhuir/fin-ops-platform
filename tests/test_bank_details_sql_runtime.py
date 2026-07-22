@@ -13,6 +13,7 @@ from fin_ops_platform.services.bank_details_application_service import BankDetai
 from fin_ops_platform.services.bank_transaction_effective_category_provider import BankTransactionEffectiveCategoryProvider
 from fin_ops_platform.services.bank_transaction_tag_read_facade import BankTransactionTagReadFacade
 from fin_ops_platform.services.postgres_repositories.read_models import (
+    BANK_DETAIL_EMPTY_CATEGORY_SOURCE_SIGNATURE,
     BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
     PostgresReadModelRepository,
     _bank_detail_scope_statistics,
@@ -28,6 +29,7 @@ class FakeConnection:
         app_settings_payload: dict[str, object] | None = None,
         dirty_scope_rows: list[dict[str, object]] | None = None,
         category_rows: list[dict[str, object]] | None = None,
+        category_source_signature_rows: list[dict[str, object]] | None = None,
         confirmation_rows: list[dict[str, object]] | None = None,
         relation_rows: list[dict[str, object]] | None = None,
         relation_source_row: dict[str, object] | None = None,
@@ -36,6 +38,7 @@ class FakeConnection:
         self.app_settings_payload = app_settings_payload
         self.dirty_scope_rows = list(dirty_scope_rows or [])
         self.category_rows = list(category_rows or [])
+        self.category_source_signature_rows = list(category_source_signature_rows or [])
         self.confirmation_rows = list(confirmation_rows or [])
         self.relation_rows = list(relation_rows or [])
         self.relation_source_row = relation_source_row
@@ -60,6 +63,8 @@ class FakeConnection:
         normalized_sql = " ".join(sql.lower().split())
         if "from job.read_model_dirty_scopes" in normalized_sql:
             return list(self.dirty_scope_rows)
+        if "/* bank_detail_category_source_signatures */" in normalized_sql:
+            return list(self.category_source_signature_rows)
         if "from app.bank_transaction_categories" in normalized_sql:
             return list(self.category_rows)
         if "from app.bank_transaction_category_confirmations" in normalized_sql:
@@ -101,6 +106,10 @@ class _UnderlyingBankDetailReadModelRepository:
     def bank_detail_scope_summary(self, *, scope_keys: list[str]) -> dict[str, object]:
         self.calls.append(("bank_detail_scope_summary", {"scope_keys": list(scope_keys)}))
         return {"read_model_status": "fresh", "read_model_scope_keys": list(scope_keys)}
+
+    def bank_detail_category_source_signatures(self, *, scope_keys: list[str]) -> dict[str, str]:
+        self.calls.append(("bank_detail_category_source_signatures", {"scope_keys": list(scope_keys)}))
+        return {scope_key: f"signature:{scope_key}" for scope_key in scope_keys}
 
     def list_bank_detail_transactions(self, **kwargs: object) -> dict[str, object]:
         self.calls.append(("list_bank_detail_transactions", dict(kwargs)))
@@ -216,7 +225,10 @@ def scope_row(scope_key: str, **overrides: object) -> dict[str, object]:
         "status": "fresh",
         "row_count": 0,
         "source_version": 3,
-        "source_versions": {"source_version": 3},
+        "source_versions": {
+            "source_version": 3,
+            "bank_transaction_category_source_signature": BANK_DETAIL_EMPTY_CATEGORY_SOURCE_SIGNATURE,
+        },
         "generated_at": "2026-05-25T00:00:00+00:00",
         "last_error": None,
     }
@@ -924,6 +936,10 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         self.assertEqual(port.bank_detail_scope_keys_for_range(date_from="2026-05-01", date_to=None), ["2026-05"])
         self.assertEqual(port.bank_detail_scope_summary(scope_keys=["2026-05"])["read_model_status"], "fresh")
         self.assertEqual(
+            port.bank_detail_category_source_signatures(scope_keys=["2026-05"]),
+            {"2026-05": "signature:2026-05"},
+        )
+        self.assertEqual(
             port.list_bank_detail_transactions(
                 account_key=None,
                 date_from="2026-05-01",
@@ -959,6 +975,7 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             [
                 "bank_detail_scope_keys_for_range",
                 "bank_detail_scope_summary",
+                "bank_detail_category_source_signatures",
                 "list_bank_detail_transactions",
                 "list_bank_detail_accounts",
                 "get_bank_detail_tagged_rows_by_transaction_ids",
@@ -1025,6 +1042,50 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         executed_sql = " ".join(call[1].lower() for call in connection.calls)
         self.assertIn("from read_model.bank_detail_scopes", executed_sql)
         self.assertIn("scope_key ~", executed_sql)
+
+    def test_scope_summary_detects_category_source_change_with_one_set_based_query(self) -> None:
+        current_signature = "current-category-source-signature"
+        connection = FakeConnection(
+            rows=[
+                [
+                    scope_row(
+                        "2026-05",
+                        source_versions={
+                            "source_version": 3,
+                            "bank_transaction_category_source_signature": "projected-category-source-signature",
+                        },
+                    ),
+                    scope_row(
+                        "2026-06",
+                        source_versions={
+                            "source_version": 4,
+                            "bank_transaction_category_source_signature": current_signature,
+                        },
+                    ),
+                ],
+            ],
+            category_source_signature_rows=[
+                {"scope_key": "2026-05", "source_signature": current_signature},
+                {"scope_key": "2026-06", "source_signature": current_signature},
+            ],
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.bank_detail_scope_summary(scope_keys=["2026-05", "2026-06"])
+
+        self.assertEqual(payload["read_model_status"], "stale")
+        signature_calls = [
+            (sql, params)
+            for method, sql, params in connection.calls
+            if method == "fetch_all" and "/* bank_detail_category_source_signatures */" in sql
+        ]
+        self.assertEqual(len(signature_calls), 1)
+        signature_sql, signature_params = signature_calls[0]
+        self.assertEqual(signature_params[0], ["2026-05", "2026-06"])
+        normalized_sql = " ".join(signature_sql.lower().split())
+        self.assertIn("from app.bank_transaction_categories", normalized_sql)
+        self.assertIn("from app.bank_transaction_category_confirmations", normalized_sql)
+        self.assertIn("digest(", normalized_sql)
 
     def test_transactions_return_none_when_month_scope_is_missing(self) -> None:
         connection = FakeConnection(rows=[[]])
@@ -1130,7 +1191,13 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         self.assertEqual([row["transaction_id"] for row in payload["rows"]], ["txn-001", "txn-002"])
         self.assertEqual(payload["missing_transaction_ids"], ["txn-missing"])
         self.assertEqual(payload["read_model_scope_keys"], ["2026-05"])
-        self.assertEqual(payload["source_versions"], {"source_version": 3})
+        self.assertEqual(
+            payload["source_versions"],
+            {
+                "source_version": 3,
+                "bank_transaction_category_source_signature": BANK_DETAIL_EMPTY_CATEGORY_SOURCE_SIGNATURE,
+            },
+        )
         sql_text = " ".join(" ".join(call[1].lower().split()) for call in connection.calls)
         self.assertIn("from read_model.bank_detail_rows", sql_text)
         self.assertIn("transaction_id = any", sql_text)
@@ -1171,8 +1238,22 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
                     bank_detail_projected_row("txn-cross-month", scope_key="2026-04"),
                 ],
                 [
-                    scope_row("2026-05", source_version=3, source_versions={"source_version": 3}),
-                    scope_row("2026-04", source_version=2, source_versions={"source_version": 2}),
+                    scope_row(
+                        "2026-05",
+                        source_version=3,
+                        source_versions={
+                            "source_version": 3,
+                            "bank_transaction_category_source_signature": BANK_DETAIL_EMPTY_CATEGORY_SOURCE_SIGNATURE,
+                        },
+                    ),
+                    scope_row(
+                        "2026-04",
+                        source_version=2,
+                        source_versions={
+                            "source_version": 2,
+                            "bank_transaction_category_source_signature": BANK_DETAIL_EMPTY_CATEGORY_SOURCE_SIGNATURE,
+                        },
+                    ),
                 ],
             ]
         )
@@ -1195,8 +1276,14 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         self.assertEqual(
             payload["source_versions"],
             {
-                "2026-05": {"source_version": 3},
-                "2026-04": {"source_version": 2},
+                "2026-05": {
+                    "source_version": 3,
+                    "bank_transaction_category_source_signature": BANK_DETAIL_EMPTY_CATEGORY_SOURCE_SIGNATURE,
+                },
+                "2026-04": {
+                    "source_version": 2,
+                    "bank_transaction_category_source_signature": BANK_DETAIL_EMPTY_CATEGORY_SOURCE_SIGNATURE,
+                },
             },
         )
         execute_sql = [
@@ -1234,7 +1321,13 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         self.assertEqual(payload["read_model_status"], "fresh")
         self.assertEqual(payload["read_model_scope_keys"], ["2026-05"])
         self.assertEqual(payload["rows"][0]["effective_category_code"], "equipment_purchase")
-        self.assertEqual(payload["source_versions"], {"source_version": 3})
+        self.assertEqual(
+            payload["source_versions"],
+            {
+                "source_version": 3,
+                "bank_transaction_category_source_signature": BANK_DETAIL_EMPTY_CATEGORY_SOURCE_SIGNATURE,
+            },
+        )
         sql_text = " ".join(" ".join(call[1].lower().split()) for call in connection.calls)
         self.assertIn("from read_model.bank_detail_rows", sql_text)
         self.assertIn("scope_month = %s::date", sql_text)
@@ -1355,9 +1448,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             bank_detail_sql_read_repository=None,
             runtime_repositories=SimpleNamespace(),
             affected_months_provider=lambda _transaction_ids: [],
-            invalidate_after_category_mutation=lambda _affected_months: False,
-            execute_derived_data_lifecycle_event=lambda *_args, **_kwargs: None,
-            clear_relation_tag_projection_cache=lambda: None,
             available_month_scope_keys_provider=lambda: ["2026-05"],
             enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
         )
@@ -1411,9 +1501,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             bank_account_balance_read_model_repository=account_balance_repository,
             runtime_repositories=SimpleNamespace(),
             affected_months_provider=lambda _transaction_ids: [],
-            invalidate_after_category_mutation=lambda _affected_months: False,
-            execute_derived_data_lifecycle_event=lambda *_args, **_kwargs: None,
-            clear_relation_tag_projection_cache=lambda: None,
             available_month_scope_keys_provider=lambda: ["2026-05"],
             enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
         )
@@ -1465,9 +1552,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             bank_detail_sql_read_repository=repository,
             runtime_repositories=SimpleNamespace(queue_repository=queue),
             affected_months_provider=lambda _transaction_ids: [],
-            invalidate_after_category_mutation=lambda _affected_months: False,
-            execute_derived_data_lifecycle_event=lambda *_args, **_kwargs: None,
-            clear_relation_tag_projection_cache=lambda: None,
             available_month_scope_keys_provider=lambda: ["2026-05"],
             enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
             bank_transaction_tags_provider=lambda: {"version": 1, "definitions": []},
@@ -1492,7 +1576,7 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         self.assertEqual(repository.scope_key_calls, [{"date_from": "2026-05-01", "date_to": "2026-05-31"}])
         self.assertEqual(repository.summary_calls, [["2026-05"]])
 
-    def test_local_category_mutation_refreshes_turnover_ledger_exact_month(self) -> None:
+    def test_local_category_mutation_writes_canonical_state_without_read_model_fan_out(self) -> None:
         class CategoryStore:
             def save_bank_transaction_categories(self, _snapshot: dict[str, object]) -> None:
                 return None
@@ -1514,9 +1598,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             bank_detail_sql_read_repository=None,
             runtime_repositories=SimpleNamespace(queue_repository=queue),
             affected_months_provider=lambda _transaction_ids: ["2026-04"],
-            invalidate_after_category_mutation=lambda _affected_months: False,
-            execute_derived_data_lifecycle_event=lambda *_args, **_kwargs: None,
-            clear_relation_tag_projection_cache=lambda: None,
             available_month_scope_keys_provider=lambda: ["2026-04"],
             enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
         )
@@ -1531,9 +1612,7 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         )
 
         self.assertEqual(persisted["affected_months"], ["2026-04"])
-        self.assertIn(("bank_detail", "2026-04", "bank_detail_category_confirmation_changed"), queue.enqueued)
-        self.assertIn(("turnover_ledger", "2026-04", "bank_detail_category_confirmation_changed"), queue.enqueued)
-        self.assertNotIn(("turnover_ledger", "all", "bank_detail_category_confirmation_changed"), queue.enqueued)
+        self.assertEqual(queue.enqueued, [])
 
     def test_category_mutation_persists_via_explicit_category_store_port(self) -> None:
         saved_snapshots: list[dict[str, object]] = []
@@ -1551,9 +1630,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             bank_detail_sql_read_repository=None,
             runtime_repositories=SimpleNamespace(queue_repository=SimpleNamespace(enqueue_read_model_refresh=lambda **_kwargs: None)),
             affected_months_provider=lambda _transaction_ids: ["2026-04"],
-            invalidate_after_category_mutation=lambda _affected_months: False,
-            execute_derived_data_lifecycle_event=lambda *_args, **_kwargs: None,
-            clear_relation_tag_projection_cache=lambda: None,
             available_month_scope_keys_provider=lambda: ["2026-04"],
             enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
         )
@@ -1570,7 +1646,7 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         self.assertEqual(persisted["affected_months"], ["2026-04"])
         self.assertEqual(saved_snapshots, [{"categories": {"txn-apr": {"version": 2}}}])
 
-    def test_category_mutation_response_returns_bank_detail_operation_barrier_targets(self) -> None:
+    def test_category_mutation_response_returns_access_scopes_without_operation_barrier(self) -> None:
         class CategoryStore:
             def save_bank_transaction_categories(self, _snapshot: dict[str, object]) -> None:
                 return None
@@ -1600,9 +1676,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             bank_detail_sql_read_repository=None,
             runtime_repositories=SimpleNamespace(queue_repository=queue),
             affected_months_provider=lambda _transaction_ids: ["2026-04"],
-            invalidate_after_category_mutation=lambda _affected_months: False,
-            execute_derived_data_lifecycle_event=lambda *_args, **_kwargs: None,
-            clear_relation_tag_projection_cache=lambda: None,
             available_month_scope_keys_provider=lambda: ["2026-04", "2026-05"],
             enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
             suggestion_provider=lambda _transaction_id: {"category_resolution_status": "unmatched"},
@@ -1617,11 +1690,9 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         self.assertEqual(result["affected_months"], ["2026-04"])
         self.assertEqual(result["affected_scope_keys"], ["2026-04"])
         self.assertEqual(result["read_model_scope_keys"], ["2026-04"])
-        self.assertEqual(result["freshness_targets"], [{"read_model_key": "bank_detail", "scope_key": "2026-04"}])
-        self.assertEqual(result["operation_barrier_targets"], [{"read_model_key": "bank_detail", "scope_key": "2026-04"}])
-        self.assertIn(("bank_detail", "2026-04", "bank_detail_category_confirmation_changed"), queue.enqueued)
-        self.assertIn(("turnover_ledger", "2026-04", "bank_detail_category_confirmation_changed"), queue.enqueued)
-        self.assertNotIn(("bank_detail", "all", "bank_detail_category_confirmation_changed"), queue.enqueued)
+        self.assertNotIn("freshness_targets", result)
+        self.assertNotIn("operation_barrier_targets", result)
+        self.assertEqual(queue.enqueued, [])
 
     def test_category_mutation_without_durable_writer_or_local_store_fails_closed(self) -> None:
         queue = SimpleNamespace(enqueue_read_model_refresh=lambda **_kwargs: self.fail("must not enqueue"))
@@ -1637,9 +1708,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             bank_detail_sql_read_repository=None,
             runtime_repositories=SimpleNamespace(queue_repository=queue),
             affected_months_provider=lambda _transaction_ids: ["2026-04"],
-            invalidate_after_category_mutation=lambda _affected_months: self.fail("must not invalidate"),
-            execute_derived_data_lifecycle_event=lambda *_args, **_kwargs: None,
-            clear_relation_tag_projection_cache=lambda: None,
             available_month_scope_keys_provider=lambda: ["2026-04"],
             enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
         )
@@ -1664,7 +1732,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
 
         queue = Queue()
         audit_records: list[dict[str, object]] = []
-        invalidated: list[list[str]] = []
         writer_calls: list[dict[str, object]] = []
         writer = SimpleNamespace(
             persist=lambda **kwargs: writer_calls.append(dict(kwargs))
@@ -1682,9 +1749,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             bank_detail_sql_read_repository=None,
             runtime_repositories=SimpleNamespace(queue_repository=queue),
             affected_months_provider=lambda _transaction_ids: ["2026-04"],
-            invalidate_after_category_mutation=lambda affected_months: invalidated.append(list(affected_months)),
-            execute_derived_data_lifecycle_event=lambda *_args, **_kwargs: None,
-            clear_relation_tag_projection_cache=lambda: None,
             available_month_scope_keys_provider=lambda: ["2026-04"],
             enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
             category_mutation_writer=writer,
@@ -1702,9 +1766,9 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         self.assertEqual(persisted["affected_months"], ["2026-04"])
         self.assertEqual(writer_calls[0]["mutation_type"], "manual_assign")
         self.assertEqual(writer_calls[0]["record"]["category_code"], "salary")
+        self.assertFalse(writer_calls[0]["enqueue_refreshes"])
         self.assertEqual(queue.enqueued, [])
         self.assertEqual(len(audit_records), 1)
-        self.assertEqual(invalidated, [])
 
     def test_category_mutation_writer_failure_does_not_run_legacy_fallback_side_effects(self) -> None:
         class Queue:
@@ -1716,7 +1780,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
 
         queue = Queue()
         audit_records: list[dict[str, object]] = []
-        invalidated: list[list[str]] = []
 
         def failing_callback(**_kwargs: object) -> None:
             raise RuntimeError("category_uow_adapter_failed")
@@ -1734,9 +1797,6 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             bank_detail_sql_read_repository=None,
             runtime_repositories=SimpleNamespace(queue_repository=queue),
             affected_months_provider=lambda _transaction_ids: ["2026-04"],
-            invalidate_after_category_mutation=lambda affected_months: invalidated.append(list(affected_months)),
-            execute_derived_data_lifecycle_event=lambda *_args, **_kwargs: None,
-            clear_relation_tag_projection_cache=lambda: None,
             available_month_scope_keys_provider=lambda: ["2026-04"],
             enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
             category_mutation_writer=writer,
@@ -1754,9 +1814,8 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
 
         self.assertEqual(queue.enqueued, [])
         self.assertEqual(audit_records, [])
-        self.assertEqual(invalidated, [])
 
-    def test_auto_tag_rules_update_refreshes_priority_bank_detail_and_turnover_all_scope(self) -> None:
+    def test_auto_tag_rules_update_returns_access_scopes_without_read_model_fan_out(self) -> None:
         class Queue:
             def __init__(self) -> None:
                 self.enqueued: list[tuple[str, str, str]] = []
@@ -1765,10 +1824,14 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
                 self.enqueued.append((scope_type, scope_key, reason))
 
         queue = Queue()
-        cleared: list[str] = []
-        lifecycle_events: list[dict[str, object]] = []
+        update_calls: list[dict[str, object]] = []
         service = BankDetailsApplicationService(
-            app_settings_service=SimpleNamespace(),
+            app_settings_service=SimpleNamespace(
+                update_bank_auto_tag_rules=lambda payload, **kwargs: update_calls.append(
+                    {"payload": dict(payload), **kwargs}
+                )
+                or {"version": 12, "active_rules": []}
+            ),
             bank_transaction_category_service=SimpleNamespace(),
             bank_transaction_auto_category_service=SimpleNamespace(),
             audit_service=SimpleNamespace(),
@@ -1776,38 +1839,24 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             bank_detail_sql_read_repository=None,
             runtime_repositories=SimpleNamespace(queue_repository=queue),
             affected_months_provider=lambda _transaction_ids: [],
-            invalidate_after_category_mutation=lambda _affected_months: False,
-            execute_derived_data_lifecycle_event=lambda event_type, **kwargs: lifecycle_events.append(
-                {"event_type": event_type, **kwargs}
-            ),
-            clear_relation_tag_projection_cache=lambda: cleared.append("relation_tag_projection"),
             available_month_scope_keys_provider=lambda: ["2026-04", "2026-05"],
             enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
         )
 
-        service.finalize_auto_tag_rules_update(
+        result = service.update_auto_tag_rules(
             {
-                "new_version": 12,
-                "bank_detail_priority_scope_keys": ["2026-05", "all", "", "2026-04"],
-            }
+                "expected_version": 11,
+                "active_rules": [],
+                "refresh_scope": {"date_from": "2026-04-01", "date_to": "2026-05-31"},
+            },
+            actor_id="TESTFULL001",
         )
 
-        self.assertEqual(cleared, ["relation_tag_projection"])
-        self.assertIn(("turnover_ledger", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
-        self.assertIn(("bank_detail", "2026-04", "bank_auto_tag_rules_changed_priority"), queue.enqueued)
-        self.assertIn(("bank_detail", "2026-05", "bank_auto_tag_rules_changed_priority"), queue.enqueued)
-        self.assertNotIn(("bank_detail", "all", "bank_auto_tag_rules_changed_priority"), queue.enqueued)
-        self.assertEqual(
-            lifecycle_events,
-            [
-                {
-                    "event_type": "bank_auto_tag_rules_changed",
-                    "scope_keys": ["all"],
-                    "include_all": True,
-                    "metadata": {"reason": "bank_auto_tag_rules_changed", "new_version": 12},
-                }
-            ],
-        )
+        self.assertEqual(update_calls[0]["actor_id"], "TESTFULL001")
+        self.assertEqual(result["affected_scope_keys"], ["2026-04", "2026-05"])
+        self.assertEqual(result["read_model_scope_keys"], ["2026-04", "2026-05"])
+        self.assertNotIn("operation_barrier_targets", result)
+        self.assertEqual(queue.enqueued, [])
 
     def test_accounts_serve_previous_schema_rows_while_refreshing(self) -> None:
         connection = FakeConnection(
@@ -2179,6 +2228,7 @@ class BankDetailSqlProjectionBuilderTests(unittest.TestCase):
             "source_version": 8,
             "bank_detail_schema_version": BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
             "bank_auto_tag_rules_version": 1,
+            "bank_transaction_category_source_signature": hashlib.sha256(b"{}").hexdigest(),
             "workbench_relation_source_versions": relation_source_versions,
             "bank_detail_source_signature": source_signature,
             "row_count": 1,

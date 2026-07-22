@@ -177,10 +177,10 @@
 | `enqueue-tax-server` | `backend/src/fin_ops_platform/app/server.py` | `.enqueue_read_model_refresh(` | `1` | `migrate` | thin route helper；保持 gateway-backed，删除业务 fan-out调用 |
 | `enqueue-cost-runtime` | `backend/src/fin_ops_platform/services/cost_statistics_runtime_service.py` | `.enqueue_read_model_refresh(` | `1` | `retain` | access/force refresh gateway wrapper |
 | `enqueue-cost-query` | `backend/src/fin_ops_platform/services/cost_statistics_query_service.py` | `.enqueue_read_model_refresh(` | `2` | `retain` | access-time dependency-bound exact scope miss/stale owner |
-| `barrier-cost-page` | `web/src/pages/CostStatisticsPage.tsx` | `waitForOperationFreshness(` | `2` | `delete` | rule save不得等待 read-model rebuild；页面 refetch rule-filtered data |
+| `barrier-cost-page` | `web/src/pages/CostStatisticsPage.tsx` | `waitForOperationFreshness(` | `1` | `migrate` | tag rule save barrier 已删除并改为 query-time refetch；保留 relation mutation 的 current exact scope proof |
 | `barrier-input-page` | `web/src/pages/InputInvoiceUsagePage.tsx` | `waitForOperationFreshness(` | `1` | `migrate` | ordinary writes改为 visible scope access reconcile；explicit OA job可保留 |
 | `barrier-batch-accounting-page` | `web/src/pages/BatchAccountingPage.tsx` | `waitForOperationFreshness(` | `2` | `migrate` | relation commit 后当前 page exact proof；移除跨页面 targets |
-| `barrier-bank-page` | `web/src/pages/BankDetailsPage.tsx` | `waitForOperationFreshness(` | `1` | `migrate` | category/rule save只 reconcile current exact scope；reapply batch可保留 job wait |
+| `barrier-bank-page` | `web/src/pages/BankDetailsPage.tsx` | `waitForOperationFreshness(` | `1` | `retain` | ordinary category/rule save 已零 barrier；唯一 caller 属于显式 reapply batch 的 exact month job wait |
 | `barrier-tax-page` | `web/src/pages/TaxOffsetPage.tsx` | `waitForOperationFreshness(` | `3` | `migrate` | plan current month exact proof；certified import explicit job |
 | `barrier-turnover-page` | `web/src/pages/TurnoverLedgerPage.tsx` | `waitForOperationFreshness(` | `2` | `migrate` | current ledger exact scope；删除 Workbench/search/cost cross-page wait |
 | `barrier-workbench-page` | `web/src/pages/ReconciliationWorkbenchPage.tsx` | `waitForOperationFreshness(` | `2` | `migrate` | current active generation only；下游页面访问时收敛 |

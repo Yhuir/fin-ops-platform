@@ -1074,7 +1074,6 @@ class AppSettingsServiceTests(unittest.TestCase):
                 ],
             )
             app = build_application(data_dir=Path(temp_dir))
-            finalize_calls: list[dict[str, object]] = []
             app._app_settings_service.update_settings(
                 completed_project_ids=[],
                 bank_account_mappings=[],
@@ -1107,13 +1106,16 @@ class AppSettingsServiceTests(unittest.TestCase):
                     "archived_rules": [*current_rules["archived_rules"], target],
                 },
                 actor_id="settings-owner",
-                after_bank_auto_tag_rules_saved=finalize_calls.append,
             )
             current = app._app_settings_service.get_settings_payload()
 
         self.assertEqual(current["pending_invoice_tag_groups"]["groups"]["requires_invoice"]["tag_codes"], [])
         self.assertEqual(
-            finalize_calls[0]["detached_pending_invoice_tag_references"],
+            next(
+                item["metadata"]["detached_pending_invoice_tag_references"]
+                for item in app._audit_service.as_dicts()
+                if item["action"] == "bank_auto_tag_rules_updated"
+            ),
             [
                 {
                     "group_id": "requires_invoice",

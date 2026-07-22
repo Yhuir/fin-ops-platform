@@ -221,7 +221,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         self.assertEqual(payload["field_options"][0]["value"], "counterparty_name")
         self.assertEqual(payload["permissions"], {"can_save": True})
 
-    def test_file_replacement_endpoint_uses_bundled_rules_and_triggers_lifecycle(self) -> None:
+    def test_file_replacement_endpoint_uses_bundled_rules_without_write_time_fan_out(self) -> None:
         app = build_application()
         queue = _ReadModelQueue()
         app._runtime_repositories = SimpleNamespace(queue_repository=queue)
@@ -235,12 +235,9 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         self.assertEqual(payload["system_rule"]["priority_label"], "优先级 1")
         self.assertEqual(payload["active_rules"][0]["priority_label"], "优先级 2")
         self.assertEqual({rule["priority"] for rule in payload["active_rules"]}, {2})
-        self.assertIn(("bank_detail", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
-        self.assertIn(("turnover_ledger", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
-        self.assertIn(("no_oa_bank_batch", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
-        self.assertIn(("bank_flow_rule_batch", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
+        self.assertEqual(queue.enqueued, [])
 
-    def test_put_direction_only_change_persists_reloads_and_triggers_refresh(self) -> None:
+    def test_put_direction_only_change_persists_without_write_time_refresh(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir)
             app = build_application(data_dir=data_dir)
@@ -275,7 +272,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         self.assertEqual(payload["version"], current["version"] + 1)
         self.assertEqual(next(rule for rule in payload["active_rules"] if rule["code"] == "fee")["direction"], "expense")
         self.assertEqual(next(rule for rule in reloaded["active_rules"] if rule["code"] == "fee")["direction"], "expense")
-        self.assertIn(("bank_detail", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
+        self.assertEqual(queue.enqueued, [])
         audit = app._audit_service.as_dicts()[-1]
         self.assertEqual(audit["metadata"]["rule_payload_changes"], [{"code": "fee"}])
 
@@ -698,7 +695,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         self.assertEqual(mutations[0]["action"], "bank_detail_category_manual_assignment_cleared")
         self.assertEqual(mutations[0]["metadata"]["assignment_source"], "manual")
 
-    def test_put_renames_reorders_adds_archives_audits_and_triggers_lifecycle(self) -> None:
+    def test_put_renames_reorders_adds_archives_and_audits_without_lifecycle_fan_out(self) -> None:
         app = build_application()
         current = app._app_settings_service.get_bank_auto_tag_rules_payload()
         salary = next(rule for rule in current["active_rules"] if rule["code"] == "salary")
@@ -767,8 +764,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         self.assertEqual(saved_salary["output_sub_label"], "薪酬发放")
         self.assertTrue(any(rule["label"] == "银行利息" and rule["code"].startswith("custom_") for rule in payload["active_rules"]))
         self.assertEqual([rule["code"] for rule in payload["archived_rules"]], ["bonus"])
-        self.assertEqual(lifecycle_calls[0][0], "bank_auto_tag_rules_changed")
-        self.assertEqual(lifecycle_calls[0][1]["scope_keys"], ["all"])
+        self.assertEqual(lifecycle_calls, [])
         audit = app._audit_service.as_dicts()[-1]
         self.assertEqual(audit["action"], "bank_auto_tag_rules_updated")
         metadata = audit["metadata"]
@@ -831,7 +827,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         self.assertEqual(suggestion["category_code"], custom_rule["code"])
         self.assertEqual(suggestion["auto_category_evidence"]["condition_type"], "contains_all")
 
-    def test_put_primary_label_only_change_persists_reconfigures_engine_and_enqueues_refresh(self) -> None:
+    def test_put_primary_label_only_change_persists_and_reconfigures_engine_without_fan_out(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir)
             app = build_application(data_dir=data_dir)
@@ -907,9 +903,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
                 for candidate in suggestion["auto_candidate_categories"]
             )
         )
-        self.assertIn(("bank_detail", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
-        self.assertIn(("no_oa_bank_batch", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
-        self.assertIn(("bank_flow_rule_batch", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
+        self.assertEqual(queue.enqueued, [])
 
     def test_put_external_turnover_rule_clears_legacy_third_label_and_persists_action_type(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1163,7 +1157,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         self.assertEqual(cert_fee["label"], "网银证书服务费")
         self.assertEqual(cert_fee["output_primary_label"], "费用")
 
-    def test_put_enqueues_bank_detail_month_shards_for_rule_changes(self) -> None:
+    def test_put_with_refresh_scope_still_creates_zero_write_time_jobs(self) -> None:
         app = build_application()
         queue = _ReadModelQueue()
         app._runtime_repositories = SimpleNamespace(queue_repository=queue)
@@ -1205,12 +1199,7 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn(("turnover_ledger", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
-        self.assertIn(("bank_detail", "2026-01", "bank_auto_tag_rules_changed_priority"), queue.enqueued)
-        self.assertIn(("bank_detail", "2026-01", "bank_auto_tag_rules_changed"), queue.enqueued)
-        self.assertIn(("bank_detail", "2026-03", "bank_auto_tag_rules_changed"), queue.enqueued)
-        self.assertNotIn(("bank_detail", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
-        self.assertIn(("bank_flow_rule_batch", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
+        self.assertEqual(queue.enqueued, [])
 
     def test_bank_category_mutation_refresh_contract_uses_exact_downstream_scopes(self) -> None:
         refreshes = bank_transaction_category_refreshes(["2026-03"])

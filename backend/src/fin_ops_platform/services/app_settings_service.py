@@ -424,7 +424,6 @@ class AppSettingsService:
         payload: dict[str, Any],
         *,
         actor_id: str,
-        after_bank_auto_tag_rules_saved: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         self._refresh_snapshot_from_state_store()
         previous_snapshot = dict(self._snapshot)
@@ -513,8 +512,6 @@ class AppSettingsService:
             "detached_cost_statistics_tag_references": detached_cost_statistics_references,
         }
         self._record_bank_auto_tag_rules_audit(event)
-        if after_bank_auto_tag_rules_saved is not None:
-            after_bank_auto_tag_rules_saved(dict(event))
         return self.get_bank_auto_tag_rules_payload(can_save=True)
 
     def replace_bank_auto_tag_rules_from_file_source(
@@ -522,7 +519,6 @@ class AppSettingsService:
         source: Any,
         *,
         actor_id: str,
-        after_bank_auto_tag_rules_saved: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         self._refresh_snapshot_from_state_store()
         previous_snapshot = dict(self._snapshot)
@@ -611,8 +607,6 @@ class AppSettingsService:
             "detached_cost_statistics_tag_references": detached_cost_statistics_references,
         }
         self._record_bank_auto_tag_rules_audit(event)
-        if after_bank_auto_tag_rules_saved is not None:
-            after_bank_auto_tag_rules_saved(dict(event))
         return self.get_bank_auto_tag_rules_payload(can_save=True)
 
     def get_no_oa_bank_batch_tag_selection_payload(self) -> dict[str, Any]:

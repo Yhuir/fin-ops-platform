@@ -198,5 +198,4 @@ export type CostStatisticsTagRules = {
 export type SaveCostStatisticsTagRulesRequest = {
   expectedVersion: number;
   selectedTagCodes: string[];
-  currentScopeKey: string;
 };

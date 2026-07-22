@@ -209,6 +209,13 @@ class CostStatisticsQueryService:
             expected_schema_version=COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
             expected_source_versions=expected_source_versions,
             load_view=load_page_view,
+            load_freshness_view=lambda: {
+                "payload": {},
+                "source_versions": expected_source_versions,
+                "schema_version": gate.get("schema_version"),
+                "generated_at": gate.get("generated_at"),
+                "refresh_status": "fresh",
+            },
             empty_payload_factory=empty_payload,
             payload_validator=self._is_explorer_page_payload,
             cache_key=cache_key,

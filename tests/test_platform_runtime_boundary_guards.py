@@ -2372,9 +2372,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         required_service_snippets = {
             "self._app_settings_service.update_bank_auto_tag_rules(",
             "self._app_settings_service.replace_bank_auto_tag_rules_from_file_source(",
-            "def finalize_auto_tag_rules_update",
-            "self._execute_derived_data_lifecycle_event(",
-            "self._enqueue_read_model_refreshes(priority_scope_keys",
+            "def _bank_detail_access_scope_payload(",
+            "enqueue_refreshes=False",
             "self._bank_transaction_category_service.confirm_auto_category(",
             "self._bank_transaction_category_service.assign_manual_category(",
             "self._persist_category_mutation(",
@@ -2382,6 +2381,17 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         for snippet in sorted(required_service_snippets):
             if snippet not in service_source:
                 violations.append(f"BankDetailsApplicationService is missing boundary behavior {snippet}")
+
+        for removed_service_snippet in (
+            "def finalize_auto_tag_rules_update",
+            "self._execute_derived_data_lifecycle_event(",
+            "self._enqueue_turnover_ledger_read_model_refreshes(",
+            "self._invalidate_after_category_mutation(",
+        ):
+            if removed_service_snippet in service_source:
+                violations.append(
+                    f"BankDetailsApplicationService retains removed fan-out behavior {removed_service_snippet}"
+                )
 
         if "bank_transaction_tags_write_forbidden" not in settings_routes_source:
             violations.append("settings route owner no longer blocks legacy bank_transaction_tags writes")
@@ -2550,7 +2560,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "_bank_detail_auto_category_suggestion_provider",
             "_bank_detail_available_month_scope_provider",
             "_bank_account_balance_read_model_refresh_producer",
-            "_turnover_ledger_read_model_refresh_producer",
         ):
             if retained_callback not in factory_source:
                 violations.append(f"BankDetailsApplicationService factory no longer classifies retained callback {retained_callback}")

@@ -539,8 +539,7 @@ describe("bank details API", () => {
       active_rules: [],
       archived_rules: [],
       permissions: { can_save: true },
-      readModelScopeKeys: ["2026-04"],
-      freshnessTargets: [{ readModelKey: "bank_detail", scopeKey: "2026-04" }],
+      read_model_scope_keys: ["2026-04"],
     }), { status: 200, headers: { "Content-Type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -570,7 +569,7 @@ describe("bank details API", () => {
     expect(body.active_rules[0].output_primary_label).toBe("费用");
     expect(body.active_rules[0].output_sub_label).toBe("手续费");
     expect(payload.readModelScopeKeys).toEqual(["2026-04"]);
-    expect(payload.operationBarrierTargets).toEqual([{ readModelKey: "bank_detail", scopeKey: "2026-04" }]);
+    expect(payload.operationBarrierTargets).toEqual([]);
   });
 
   test("rejects successful HTML responses from bank detail export", async () => {

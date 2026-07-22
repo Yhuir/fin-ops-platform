@@ -1110,7 +1110,7 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertEqual(preview_payload["details"], expected_details)
         self.assertEqual(export_payload["details"], expected_details)
 
-    def test_cost_statistics_tag_rules_route_reads_and_saves_selection_with_barrier_target(self) -> None:
+    def test_cost_statistics_tag_rules_route_reads_and_saves_selection_without_read_model_barrier(self) -> None:
         from fin_ops_platform.app.routes_cost_statistics import CostStatisticsApiRoutes
         from fin_ops_platform.app.server import Response
 
@@ -1160,7 +1160,6 @@ class CostStatisticsApiTests(unittest.TestCase):
             json.dumps({
                 "expected_version": 3,
                 "selected_tag_codes": ["fee"],
-                "current_scope_key": "active:2026-05",
             }),
             {},
         )
@@ -1172,14 +1171,8 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertEqual(put_response.status_code, 200)
         self.assertEqual(settings.saved_payload["selected_tag_codes"], ["fee"])
         self.assertEqual(put_payload["selected_tag_codes"], ["fee"])
-        self.assertIn(
-            {
-                "read_model_key": "cost_statistics",
-                "scope_key": "active:2026-05",
-                "scope_type": "cost_statistics",
-            },
-            put_payload["operation_barrier_targets"],
-        )
+        self.assertNotIn("operation_barrier_targets", put_payload)
+        self.assertNotIn("freshness_targets", put_payload)
 
     def test_cost_statistics_tag_rules_update_rejects_missing_write_permission(self) -> None:
         from fin_ops_platform.app.routes_cost_statistics import CostStatisticsApiRoutes

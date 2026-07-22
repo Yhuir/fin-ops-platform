@@ -128,14 +128,14 @@ class BankTransactionCategoryMutationWriter:
                 if str(result.get("transaction_id") or "").strip()
             }
         )
-        refreshes = bank_transaction_category_refreshes(
-            months,
-            metadata={
-                "action_names": action_names,
-                "transaction_ids": transaction_ids,
-            },
-        )
         if enqueue_refreshes:
+            refreshes = bank_transaction_category_refreshes(
+                months,
+                metadata={
+                    "action_names": action_names,
+                    "transaction_ids": transaction_ids,
+                },
+            )
             events = self._queue_repository.enqueue_read_model_refreshes_in_transaction(
                 transaction=transaction,
                 refreshes=refreshes,
@@ -147,20 +147,20 @@ class BankTransactionCategoryMutationWriter:
                 for event in list(events or [])
                 if getattr(event, "event_id", None) or (isinstance(event, dict) and event.get("event_id"))
             ]
-        source_versions = (
-            dict(self._workbench_matching_source_versions_provider() or {})
-            if callable(self._workbench_matching_source_versions_provider)
-            else {}
-        )
-        self._workbench_matching_repository.mark_workbench_matching_dirty_scopes_in_transaction(
-            transaction=transaction,
-            tenant_id=self._tenant_id,
-            scope_months=sorted({item for month in months for item in expand_scope_month_window(month)}),
-            reason="bank_transaction_category_changed",
-            source_versions=source_versions,
-            debounce_seconds=0,
-        )
         if enqueue_refreshes:
+            source_versions = (
+                dict(self._workbench_matching_source_versions_provider() or {})
+                if callable(self._workbench_matching_source_versions_provider)
+                else {}
+            )
+            self._workbench_matching_repository.mark_workbench_matching_dirty_scopes_in_transaction(
+                transaction=transaction,
+                tenant_id=self._tenant_id,
+                scope_months=sorted({item for month in months for item in expand_scope_month_window(month)}),
+                reason="bank_transaction_category_changed",
+                source_versions=source_versions,
+                debounce_seconds=0,
+            )
             batch_result["operation_barrier_targets"] = [
                 {
                     "read_model_key": str(item["scope_type"]),

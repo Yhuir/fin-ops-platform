@@ -184,8 +184,6 @@ type ApiCostStatisticsTagRules = {
   inactive_selected_tag_codes?: string[] | null;
   active_tags?: ApiCostStatisticsTagRuleTag[] | null;
   can_save?: boolean | null;
-  operation_barrier_targets?: unknown;
-  freshness_targets?: unknown;
 };
 
 function mapSummary(summary: ApiCostSummary) {
@@ -393,35 +391,16 @@ export async function fetchCostStatisticsTagRules(signal?: AbortSignal): Promise
 
 export async function saveCostStatisticsTagRules(
   request: SaveCostStatisticsTagRulesRequest,
-): Promise<CostStatisticsTagRules & { operationBarrierTargets: Array<{ readModelKey: string; scopeKey: string; scopeType?: string }> }> {
+): Promise<CostStatisticsTagRules> {
   const payload = await requestJson<ApiCostStatisticsTagRules>("/api/cost-statistics/tag-rules", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       expected_version: request.expectedVersion,
       selected_tag_codes: request.selectedTagCodes,
-      current_scope_key: request.currentScopeKey,
     }),
   });
-  const targets = Array.isArray(payload.operation_barrier_targets) ? payload.operation_barrier_targets : [];
-  return {
-    ...mapTagRules(payload),
-    operationBarrierTargets: targets
-      .map((target) => {
-        if (!target || typeof target !== "object") {
-          return null;
-        }
-        const record = target as Record<string, unknown>;
-        const readModelKey = optionalString(record.read_model_key) ?? optionalString(record.readModelKey);
-        const scopeKey = optionalString(record.scope_key) ?? optionalString(record.scopeKey);
-        const scopeType = optionalString(record.scope_type) ?? optionalString(record.scopeType);
-        if (!readModelKey || !scopeKey) {
-          return null;
-        }
-        return { readModelKey, scopeKey, ...(scopeType ? { scopeType } : {}) };
-      })
-      .filter((target): target is { readModelKey: string; scopeKey: string; scopeType?: string } => target !== null),
-  };
+  return mapTagRules(payload);
 }
 
 export async function fetchCostTransactionDetail(

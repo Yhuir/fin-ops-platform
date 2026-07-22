@@ -123,6 +123,12 @@ class TaxOffsetQueryService:
             expected_schema_version=TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
             expected_source_versions=expected_source_versions,
             load_view=lambda: get_view(scope_key=scope_key),
+            load_freshness_view=lambda: {
+                "payload": {},
+                "source_versions": expected_source_versions,
+                "schema_version": TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
+                "refresh_status": "fresh",
+            },
             empty_payload_factory=lambda: self._runtime_service.empty_month_payload(month),
             cache_key=cache_key,
             cache_ttl_seconds=self._runtime_service.redis_ttl_seconds(),
@@ -157,6 +163,12 @@ class TaxOffsetQueryService:
             expected_schema_version=TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
             expected_source_versions=expected_source_versions,
             load_view=lambda: get_view(scope_key=scope_key),
+            load_freshness_view=lambda: {
+                "payload": {},
+                "source_versions": expected_source_versions,
+                "schema_version": TAX_OFFSET_READ_MODEL_SCHEMA_VERSION,
+                "refresh_status": "fresh",
+            },
             empty_payload_factory=lambda: self._runtime_service.summary_payload(
                 self._runtime_service.empty_month_payload(month),
                 scope_key=scope_key,

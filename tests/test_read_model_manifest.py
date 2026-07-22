@@ -318,6 +318,7 @@ class ReadModelManifestTests(unittest.TestCase):
         owned_methods = {
             "bank_detail_scope_keys_for_range",
             "bank_detail_scope_summary",
+            "bank_detail_category_source_signatures",
             "bank_account_balance_scope_summary",
             "list_bank_detail_transactions",
             "list_bank_detail_accounts",
@@ -422,6 +423,7 @@ class ReadModelManifestTests(unittest.TestCase):
         required_bank_detail_ports = {
             "bank_detail_scope_keys_for_range",
             "bank_detail_scope_summary",
+            "bank_detail_category_source_signatures",
             "list_bank_detail_transactions",
             "list_bank_detail_accounts",
             "get_bank_detail_tagged_rows_by_transaction_ids",

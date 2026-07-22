@@ -213,7 +213,7 @@ describe("Cost statistics export API", () => {
     });
   });
 
-  test("loads and saves cost statistics tag rules with operation barrier targets", async () => {
+  test("loads and saves cost statistics tag rules without read model barrier targets", async () => {
     global.fetch = vi.fn(async (input, init) => {
       const url = String(input);
       if (url === "/api/cost-statistics/tag-rules" && init?.method === "PUT") {
@@ -234,13 +234,6 @@ describe("Cost statistics export API", () => {
             },
           ],
           can_save: true,
-          operation_barrier_targets: [
-            {
-              read_model_key: "cost_statistics",
-              scope_key: "active:2026-03",
-              scope_type: "cost_statistics",
-            },
-          ],
         }), { status: 200 });
       }
       return new Response(JSON.stringify({
@@ -274,18 +267,10 @@ describe("Cost statistics export API", () => {
     const saved = await saveCostStatisticsTagRules({
       expectedVersion: rules.version,
       selectedTagCodes: ["fee"],
-      currentScopeKey: "active:2026-03",
     });
 
     expect(rules.activeTags.map((tag) => tag.label)).toEqual(["费用", "未分类"]);
     expect(saved.selectedTagCodes).toEqual(["fee"]);
-    expect(saved.operationBarrierTargets).toEqual([
-      {
-        readModelKey: "cost_statistics",
-        scopeKey: "active:2026-03",
-        scopeType: "cost_statistics",
-      },
-    ]);
     expect(global.fetch).toHaveBeenCalledWith(
       "/api/cost-statistics/tag-rules",
       expect.objectContaining({
@@ -293,7 +278,6 @@ describe("Cost statistics export API", () => {
         body: JSON.stringify({
           expected_version: 1,
           selected_tag_codes: ["fee"],
-          current_scope_key: "active:2026-03",
         }),
       }),
     );

@@ -2101,6 +2101,8 @@ class NoOaBankBatchService:
             "cost_policy": "exclude_all" if batch_type == "internal_transfer" else "normal",
             "withdrawable": True,
             "relation_mode": NO_OA_BANK_BATCH_RELATION_MODE,
+            "requires_oa": False,
+            "requires_invoice": False,
             "display_tags": self._display_tags(batch_type),
             **{
                 key: deepcopy(evidence[key])

@@ -32,6 +32,7 @@ Phase 27 把“普通写后同步等待所有受影响页面”迁移为“canon
 - “隐藏页面”不是后台保留一份持续运行的页面。当前 `PageRouteHost` 离开 route 会卸载 React tree；目标页面重新被访问时重新 mount，通过已有 query/read boundary 触发 freshness 检查。
 - 同一页面仍处于当前 route 时，`PageRuntimeContext.active` / `activationGeneration` 允许成功写入后对当前 exact scope 做一次 reconcile；未激活页面不得发 query、enqueue 或 rebuild，也不得保存旧 payload 当 fresh。
 - query/read facade 必须用 canonical source versions、schema version、稳定 rule signature 和 current-effective dirty/outbox 证明 freshness。mismatch 返回 `refreshing/stale` 并通过现有 `ReadModelRefreshGateway` enqueue exact scope；页面展示明确状态，不能 stale-as-fresh。
+- cache 不是 freshness proof。共享 query gateway 必须先读取当前 view/status，或复用 owner 已完成的轻量 PostgreSQL gate，再允许命中 Redis；cache miss 后完整 view 必须再次校验。银行明细另以 active category + confirmation 的 set-based month signature 和当前 settings rule version 证明 ordinary write 后的 mismatch，不能依赖 writer 广播 dirty。
 - 如果两个页面是两个独立浏览器 tab，它们不靠进程内 domain event 保证一致；另一 tab 下次 focus/visibility activation 或正常 query 时必须走同一 freshness contract。跨 tab 即时提示可以优化 UX，但不能成为正确性事实源。
 - `workbench` 继续保留 active generation 原子发布；访问驱动迁移不把它改成普通 read model，也不允许消费者绕过 active-generation proof。
 

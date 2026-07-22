@@ -47,8 +47,9 @@ class ReadModelQueryGatewayTests(unittest.TestCase):
                 empty_payload_factory=lambda: {"rows": []},
             )
 
-    def test_fresh_cache_hit_does_not_call_sql_or_enqueue_refresh(self) -> None:
+    def test_fresh_cache_hit_requires_current_view_proof_and_does_not_enqueue_refresh(self) -> None:
         queue = QueueRecorder()
+        view_loads: list[str] = []
         redis = RedisRecorder(
             {
                 "payload": {
@@ -69,7 +70,15 @@ class ReadModelQueryGatewayTests(unittest.TestCase):
             scope_type="example",
             scope_key="all",
             expected_source_versions={"source_version": 3},
-            load_view=lambda: (_ for _ in ()).throw(AssertionError("SQL should not be called on cache hit")),
+            load_view=lambda: (_ for _ in ()).throw(AssertionError("full payload must not load on a cache hit")),
+            load_freshness_view=lambda: (
+                view_loads.append("loaded")
+                or {
+                    "payload": {},
+                    "refresh_status": "fresh",
+                    "source_versions": {"source_version": 3},
+                }
+            ),
             empty_payload_factory=lambda: {"rows": []},
             cache_key="example:all:v3",
             cache_ttl_seconds=60,
@@ -82,7 +91,50 @@ class ReadModelQueryGatewayTests(unittest.TestCase):
         self.assertTrue(result.cache_hit)
         self.assertFalse(result.refresh_enqueued)
         self.assertEqual(queue.refreshes, [])
+        self.assertEqual(view_loads, ["loaded"])
         self.assertEqual(redis.gets, ["example:all:v3"])
+
+    def test_matching_cache_is_not_consumed_when_current_view_is_dirty(self) -> None:
+        queue = QueueRecorder()
+        redis = RedisRecorder(
+            {
+                "payload": {"rows": [{"id": "cached"}]},
+                "fresh_gate": {
+                    "scope_key": "2026-05",
+                    "read_model_status": "fresh",
+                    "source_versions": {"source_version": "3"},
+                },
+            }
+        )
+        gateway = ReadModelQueryGateway(queue_repository=queue, redis_helper=redis)
+
+        result = gateway.load(
+            scope_type="bank_detail",
+            scope_key="2026-05",
+            expected_source_versions={"source_version": 3},
+            load_freshness_view=lambda: {
+                "payload": {},
+                "refresh_status": "processing",
+                "source_versions": {"source_version": 3},
+            },
+            load_view=lambda: {
+                "payload": {"rows": [{"id": "sql-stale"}]},
+                "refresh_status": "processing",
+                "source_versions": {"source_version": 3},
+            },
+            empty_payload_factory=lambda: {"rows": []},
+            cache_key="bank-detail:2026-05:v3",
+            cache_ttl_seconds=60,
+        )
+
+        self.assertEqual(result.payload["rows"], [{"id": "sql-stale"}])
+        self.assertEqual(result.payload["read_model_status"], "refreshing")
+        self.assertFalse(result.cache_hit)
+        self.assertEqual(redis.gets, [])
+        self.assertEqual(
+            queue.refreshes,
+            [{"scope_type": "bank_detail", "scope_key": "2026-05", "reason": "api_stale"}],
+        )
 
     def test_cache_missing_expected_schema_misses_and_uses_sql_view(self) -> None:
         queue = QueueRecorder()

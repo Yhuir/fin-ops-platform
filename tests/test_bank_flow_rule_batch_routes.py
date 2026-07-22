@@ -123,6 +123,20 @@ class BankFlowRuleBatchRoutesTests(unittest.TestCase):
         self.assertEqual(service.calls, [("list", {"bucket": ["submitted"]})])
         self.assertEqual(service.list_relation_modes, [BANK_FLOW_RULE_BATCH_RELATION_MODE])
 
+    def test_list_route_maps_missing_read_page_boundary_to_sanitized_503(self) -> None:
+        service = FakeBankFlowRuleBatchApplicationService()
+        service.list_batches_payload = lambda *_args, **_kwargs: (_ for _ in ()).throw(  # type: ignore[method-assign]
+            RuntimeError("bank_flow_rule_batch read repository requires read_page.")
+        )
+        routes = BankFlowRuleBatchApiRoutes(application_service=service)  # type: ignore[arg-type]
+
+        status, payload = routes.list_batches({})
+
+        self.assertEqual(status, HTTPStatus.SERVICE_UNAVAILABLE)
+        self.assertEqual(payload["error"], "bank_flow_rule_batch_read_model_unavailable")
+        self.assertEqual(payload["read_model_status"], "unavailable")
+        self.assertIn("message", payload)
+
     def test_tag_rules_return_policy_rules_and_map_conflict(self) -> None:
         service = FakeBankFlowRuleBatchApplicationService()
         routes = BankFlowRuleBatchApiRoutes(application_service=service)  # type: ignore[arg-type]

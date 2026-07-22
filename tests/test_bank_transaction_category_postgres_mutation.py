@@ -187,6 +187,42 @@ def test_batch_writer_deduplicates_refresh_io_and_expands_matching_once() -> Non
     ]
 
 
+def test_batch_writer_can_commit_canonical_facts_without_write_time_fan_out() -> None:
+    repository = BatchRepository()
+    queue = BatchQueue()
+    matching = MatchingRepository()
+    writer = BankTransactionCategoryMutationWriter(
+        connection=SimpleNamespace(),
+        repository=repository,
+        queue_repository=queue,
+        workbench_matching_repository=matching,
+        workbench_matching_source_versions_provider=lambda: {"bank_transaction_category_version": "v1"},
+    )
+
+    result = writer.persist_many(
+        mutations=[
+            {
+                "transaction_id": "bank-1",
+                "mutation_type": "manual_assign",
+                "record": {"category_code": "salary"},
+                "actor_id": "finance-user",
+                "action": "bank_detail_category_manual_assignment_saved",
+                "metadata": {},
+            }
+        ],
+        transaction=object(),
+        enqueue_refreshes=False,
+    )
+
+    assert len(repository.calls) == 1
+    assert queue.calls == []
+    assert matching.calls == []
+    assert result["changed"] is True
+    assert result["affected_months"] == ["2026-02"]
+    assert "outbox_event_ids" not in result
+    assert "operation_barrier_targets" not in result
+
+
 class InspectionConnection:
     def fetch_all(self, _sql: str, _params: tuple[object, ...] = ()) -> list[dict[str, object]]:
         return [

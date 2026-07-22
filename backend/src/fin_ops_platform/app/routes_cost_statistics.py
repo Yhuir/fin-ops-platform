@@ -11,7 +11,6 @@ from fin_ops_platform.services.cost_statistics_query_service import (
     CostStatisticsExportLimitError,
     CostStatisticsReadModelNotFreshError,
 )
-from fin_ops_platform.services.read_model_write_targets import write_target_envelope
 
 ReadSessionResolver = Callable[[dict[str, str] | None], tuple[OARequestSession | None, Any | None]]
 WriteSessionResolver = Callable[[dict[str, str] | None], tuple[OARequestSession | None, Any | None]]
@@ -146,15 +145,6 @@ class CostStatisticsApiRoutes:
                 else HTTPStatus.BAD_REQUEST
             )
             return self._json_response(status, {"error": exc.error_code, "message": str(exc)})
-        current_scope_key = str(payload.get("current_scope_key") or payload.get("scope_key") or "active:all").strip()
-        result.update(
-            write_target_envelope(
-                read_model_key="cost_statistics",
-                scope_keys=[current_scope_key],
-                scope_type="cost_statistics",
-                fallback_scope_key="active:all",
-            )
-        )
         return self._json_response(HTTPStatus.OK, result)
 
     def handle_explorer(

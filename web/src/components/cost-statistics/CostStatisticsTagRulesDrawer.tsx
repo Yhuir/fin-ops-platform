@@ -15,7 +15,6 @@ type CostStatisticsTagRulesDrawerProps = {
   saving: boolean;
   interactionLocked: boolean;
   error: string | null;
-  syncMessage: string | null;
   canSave: boolean;
   onToggleCode: (code: string) => void;
   onToggleGroup: (codes: string[], checked: boolean) => void;
@@ -51,7 +50,6 @@ export default function CostStatisticsTagRulesDrawer({
   saving,
   interactionLocked,
   error,
-  syncMessage,
   canSave,
   onToggleCode,
   onToggleGroup,
@@ -74,7 +72,7 @@ export default function CostStatisticsTagRulesDrawer({
       footer={(
         <div className="cost-tag-rules-footer" inert={interactionLocked ? true : undefined}>
           <div className="cost-tag-rules-footer-status" role="status">
-            {syncMessage || (rules ? `已选 ${selectedCount} / ${tagCount}` : "")}
+            {rules ? `已选 ${selectedCount} / ${tagCount}` : ""}
           </div>
           <div className="cost-tag-rules-footer-actions">
             <button className="cost-drawer-secondary-button" disabled={saving || interactionLocked} onClick={onClose} type="button">
@@ -86,7 +84,7 @@ export default function CostStatisticsTagRulesDrawer({
               onClick={onSave}
               type="button"
             >
-              {saving ? "保存并同步中" : "保存并同步"}
+              {saving ? "保存中" : "保存"}
             </button>
           </div>
         </div>

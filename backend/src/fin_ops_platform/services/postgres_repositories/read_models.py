@@ -40,7 +40,8 @@ from fin_ops_platform.services.workbench_read_model_version import (
     WorkbenchReadModelVersionConflictError,
 )
 MONTH_SCOPE_RE = re.compile(r"^\d{4}-\d{2}$")
-BANK_DETAIL_READ_MODEL_SCHEMA_VERSION = 10
+BANK_DETAIL_READ_MODEL_SCHEMA_VERSION = 11
+BANK_DETAIL_EMPTY_CATEGORY_SOURCE_SIGNATURE = hashlib.sha256(b"[]").hexdigest()
 BANK_ACCOUNT_BALANCE_READ_MODEL_SCHEMA_VERSION = 1
 BANK_DETAIL_PURPOSE_TEXT_LABELS = ("用途", "交易用途")
 BANK_DETAIL_SUMMARY_TEXT_LABELS = ("摘要",)
@@ -2313,6 +2314,126 @@ class PostgresBankReadModelRepository:
             if scope_key and MONTH_SCOPE_RE.match(scope_key)
         )
 
+    def bank_detail_category_source_signatures(
+        self,
+        *,
+        scope_keys: list[str],
+        tenant_id: str = "default",
+        connection: Any | None = None,
+    ) -> dict[str, str]:
+        normalized_scope_keys = _dedupe_preserve_order(
+            str(scope_key).strip()
+            for scope_key in list(scope_keys or [])
+            if MONTH_SCOPE_RE.match(str(scope_key).strip())
+        )
+        if not normalized_scope_keys:
+            return {}
+        executor = connection or self._connection
+        rows = executor.fetch_all(
+            """
+            /* bank_detail_category_source_signatures */
+            with requested_scopes as (
+                select distinct requested.scope_key
+                from unnest(%s::text[]) as requested(scope_key)
+            ),
+            latest_categories as (
+                select distinct on (requested.scope_key, bank.id)
+                       requested.scope_key,
+                       bank.id::text as transaction_id,
+                       jsonb_build_object(
+                           'category', category.category,
+                           'source', category.source,
+                           'version', category.version,
+                           'raw_payload', category.raw_payload
+                       ) as value
+                from app.bank_transaction_categories category
+                join app.bank_transactions bank
+                  on category.bank_transaction_id = bank.id
+                  or (
+                      category.bank_transaction_id is null
+                      and category.legacy_transaction_id is not null
+                      and category.legacy_transaction_id in (bank.legacy_mongo_id, bank.id::text)
+                  )
+                join requested_scopes requested
+                  on to_char(coalesce(bank.txn_month, date_trunc('month', bank.txn_date)), 'YYYY-MM')
+                     = requested.scope_key
+                where category.status = 'active'
+                  and bank.status <> 'deleted'
+                order by requested.scope_key, bank.id, category.updated_at desc, category.id desc
+            ),
+            latest_confirmations as (
+                select distinct on (requested.scope_key, bank.id)
+                       requested.scope_key,
+                       bank.id::text as transaction_id,
+                       jsonb_build_object(
+                           'category_code', confirmation.category_code,
+                           'candidate_category_codes', confirmation.candidate_category_codes,
+                           'rule_version', confirmation.rule_version,
+                           'version', confirmation.version,
+                           'raw_payload', confirmation.raw_payload
+                       ) as value
+                from app.bank_transaction_category_confirmations confirmation
+                join app.bank_transactions bank
+                  on confirmation.bank_transaction_id = bank.id
+                  or (
+                      confirmation.bank_transaction_id is null
+                      and confirmation.legacy_transaction_id is not null
+                      and confirmation.legacy_transaction_id in (bank.legacy_mongo_id, bank.id::text)
+                  )
+                join requested_scopes requested
+                  on to_char(coalesce(bank.txn_month, date_trunc('month', bank.txn_date)), 'YYYY-MM')
+                     = requested.scope_key
+                where confirmation.tenant_id = %s
+                  and confirmation.status = 'active'
+                  and bank.status <> 'deleted'
+                order by requested.scope_key, bank.id, confirmation.confirmed_at desc, confirmation.id desc
+            ),
+            facts as (
+                select scope_key, 'category'::text as kind, transaction_id, value
+                from latest_categories
+                union all
+                select scope_key, 'confirmation'::text as kind, transaction_id, value
+                from latest_confirmations
+            )
+            select requested.scope_key,
+                   encode(
+                       digest(
+                           convert_to(
+                               coalesce(
+                                   jsonb_agg(
+                                       jsonb_build_object(
+                                           'kind', facts.kind,
+                                           'transaction_id', facts.transaction_id,
+                                           'value', facts.value
+                                       )
+                                       order by facts.kind, facts.transaction_id
+                                   ) filter (where facts.transaction_id is not null),
+                                   '[]'::jsonb
+                               )::text,
+                               'UTF8'
+                           ),
+                           'sha256'
+                       ),
+                       'hex'
+                   ) as source_signature
+            from requested_scopes requested
+            left join facts on facts.scope_key = requested.scope_key
+            group by requested.scope_key
+            order by requested.scope_key
+            """,
+            (normalized_scope_keys, tenant_id),
+        )
+        signatures = {
+            scope_key: BANK_DETAIL_EMPTY_CATEGORY_SOURCE_SIGNATURE
+            for scope_key in normalized_scope_keys
+        }
+        for row in rows:
+            scope_key = text(row.get("scope_key"))
+            source_signature = text(row.get("source_signature"))
+            if scope_key in signatures and source_signature:
+                signatures[scope_key] = source_signature
+        return signatures
+
 
     def bank_detail_scope_summary(
         self,
@@ -2361,6 +2482,19 @@ class PostgresBankReadModelRepository:
             scope_key = text(row.get("scope_key"))
             if scope_key and scope_key not in dirty_by_scope:
                 dirty_by_scope[scope_key] = row
+        statistics_scope_keys = sorted(
+            {
+                scope_key
+                for scope_key in [*by_scope, *dirty_by_scope]
+                if MONTH_SCOPE_RE.match(scope_key)
+            }
+        )
+        current_category_signatures = self.bank_detail_category_source_signatures(
+            scope_keys=_dedupe_preserve_order([*normalized_scope_keys, *statistics_scope_keys]),
+            tenant_id=tenant_id,
+            connection=executor,
+        )
+
         def status_for(scope_key_values: list[str], *, require_statistics: bool = False) -> str:
             statuses = {
                 text(dirty_by_scope.get(scope_key, {}).get("status"))
@@ -2381,6 +2515,18 @@ class PostgresBankReadModelRepository:
                 return "schema_mismatch"
             if any(text(by_scope[scope_key].get("status")) != "fresh" for scope_key in scope_key_values):
                 return "stale"
+            if any(
+                text(
+                    (
+                        by_scope[scope_key].get("source_versions")
+                        if isinstance(by_scope[scope_key].get("source_versions"), dict)
+                        else {}
+                    ).get("bank_transaction_category_source_signature")
+                )
+                != current_category_signatures.get(scope_key, "")
+                for scope_key in scope_key_values
+            ):
+                return "stale"
             if require_statistics and any(
                 _bank_detail_scope_statistics(by_scope[scope_key].get("raw_payload")) is None
                 for scope_key in scope_key_values
@@ -2389,13 +2535,6 @@ class PostgresBankReadModelRepository:
             return "fresh"
 
         status = status_for(normalized_scope_keys)
-        statistics_scope_keys = sorted(
-            {
-                scope_key
-                for scope_key in [*by_scope, *dirty_by_scope]
-                if MONTH_SCOPE_RE.match(scope_key)
-            }
-        )
         statistics_status = status_for(statistics_scope_keys, require_statistics=True)
         generated_values = [
             text(by_scope[scope_key].get("generated_at"))
@@ -9244,6 +9383,9 @@ class PostgresReadModelRepository:
 
     def bank_detail_scope_summary(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         return self._bank_read_model_repository.bank_detail_scope_summary(*args, **kwargs)
+
+    def bank_detail_category_source_signatures(self, *args: Any, **kwargs: Any) -> dict[str, str]:
+        return self._bank_read_model_repository.bank_detail_category_source_signatures(*args, **kwargs)
 
     def bank_account_balance_scope_summary(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         return self._bank_read_model_repository.bank_account_balance_scope_summary(*args, **kwargs)

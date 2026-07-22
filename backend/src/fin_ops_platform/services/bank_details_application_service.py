@@ -50,16 +50,11 @@ class BankDetailsApplicationService:
         bank_account_balance_read_model_repository: Any | None = None,
         runtime_repositories: Any | None,
         affected_months_provider: Callable[[list[str]], list[str]],
-        invalidate_after_category_mutation: Callable[[list[str]], bool],
-        execute_derived_data_lifecycle_event: Callable[..., Any],
-        clear_relation_tag_projection_cache: Callable[[], Any],
         available_month_scope_keys_provider: Callable[[], list[str]],
         enqueue_bank_account_balance_refresh: Callable[..., bool],
-        enqueue_turnover_ledger_refresh: Callable[..., bool] | None = None,
         suggestion_provider: Callable[[str], dict[str, object] | None] | None = None,
         bank_transaction_tags_provider: Callable[[], dict[str, object]] | None = None,
         category_mutation_writer: Any | None = None,
-        clear_search_cache: Callable[[], None] | None = None,
     ) -> None:
         self._app_settings_service = app_settings_service
         self._bank_transaction_category_service = bank_transaction_category_service
@@ -74,16 +69,11 @@ class BankDetailsApplicationService:
         self._bank_account_balance_read_model_repository = bank_account_balance_read_model_repository
         self._runtime_repositories = runtime_repositories
         self._affected_months_provider = affected_months_provider
-        self._invalidate_after_category_mutation = invalidate_after_category_mutation
-        self._execute_derived_data_lifecycle_event = execute_derived_data_lifecycle_event
-        self._clear_relation_tag_projection_cache = clear_relation_tag_projection_cache
         self._available_month_scope_keys_provider = available_month_scope_keys_provider
         self._enqueue_bank_account_balance_refresh = enqueue_bank_account_balance_refresh
-        self._enqueue_turnover_ledger_refresh = enqueue_turnover_ledger_refresh
         self._suggestion_provider = suggestion_provider
         self._bank_transaction_tags_provider = bank_transaction_tags_provider
         self._category_mutation_writer = category_mutation_writer
-        self._clear_search_cache = clear_search_cache or (lambda: None)
         self._category_mutation_lock = RLock()
 
     def accounts_payload(self, *, date_from: str | None, date_to: str | None) -> dict[str, object]:
@@ -124,27 +114,20 @@ class BankDetailsApplicationService:
         result = self._app_settings_service.update_bank_auto_tag_rules(
             payload,
             actor_id=actor_id,
-            after_bank_auto_tag_rules_saved=lambda event: self.finalize_auto_tag_rules_update(
-                {
-                    **dict(event),
-                    **({"bank_detail_priority_scope_keys": priority_scope_keys} if priority_scope_keys else {}),
-                }
-            ),
         )
         return {
             **result,
-            **self._bank_detail_refresh_contract_payload(priority_scope_keys),
+            **self._bank_detail_access_scope_payload(priority_scope_keys),
         }
 
     def replace_auto_tag_rules_from_file_source(self, source: object, *, actor_id: str) -> dict[str, Any]:
         result = self._app_settings_service.replace_bank_auto_tag_rules_from_file_source(
             source,
             actor_id=actor_id,
-            after_bank_auto_tag_rules_saved=self.finalize_auto_tag_rules_update,
         )
         return {
             **result,
-            **self._bank_detail_refresh_contract_payload([]),
+            **self._bank_detail_access_scope_payload([]),
         }
 
     def reapply_auto_tag_rules(self, *, actor_id: str, can_save: bool) -> dict[str, Any]:
@@ -170,7 +153,7 @@ class BankDetailsApplicationService:
             read_model_status="refreshing",
         )
         payload["read_model_status"] = "refreshing"
-        payload.update(self._bank_detail_refresh_contract_payload(scope_keys))
+        payload.update(self._bank_detail_reapply_contract_payload(scope_keys))
         payload["refresh_enqueued"] = True
         payload["refresh_reason"] = "bank_auto_tag_rules_reapply_requested"
         payload["enqueued_jobs"] = ["bank_detail.read_model.refresh"]
@@ -221,7 +204,7 @@ class BankDetailsApplicationService:
         affected_months = list(persisted.get("affected_months") or [])
         return {
             **result,
-            **self._bank_detail_refresh_contract_payload(affected_months),
+            **self._bank_detail_access_scope_payload(affected_months),
             **persisted,
             "affected_months": affected_months,
         }
@@ -248,7 +231,7 @@ class BankDetailsApplicationService:
         affected_months = list(persisted.get("affected_months") or [])
         return {
             **result,
-            **self._bank_detail_refresh_contract_payload(affected_months),
+            **self._bank_detail_access_scope_payload(affected_months),
             **persisted,
             "affected_months": affected_months,
         }
@@ -305,7 +288,7 @@ class BankDetailsApplicationService:
         affected_months = list(persisted.get("affected_months") or [])
         return {
             **result,
-            **self._bank_detail_refresh_contract_payload(affected_months),
+            **self._bank_detail_access_scope_payload(affected_months),
             **persisted,
             "affected_months": affected_months,
         }
@@ -332,7 +315,7 @@ class BankDetailsApplicationService:
         affected_months = list(persisted.get("affected_months") or [])
         return {
             **result,
-            **self._bank_detail_refresh_contract_payload(affected_months),
+            **self._bank_detail_access_scope_payload(affected_months),
             **persisted,
             "affected_months": affected_months,
         }
@@ -389,26 +372,6 @@ class BankDetailsApplicationService:
             },
         )
         return result
-
-    def finalize_auto_tag_rules_update(self, event: dict[str, object]) -> None:
-        self._clear_relation_tag_projection_cache()
-        self._enqueue_turnover_ledger_read_model_refreshes(["all"], reason="bank_auto_tag_rules_changed")
-        priority_scope_keys = [
-            str(scope_key).strip()
-            for scope_key in list(event.get("bank_detail_priority_scope_keys") or [])
-            if str(scope_key).strip() and str(scope_key).strip() != "all"
-        ]
-        if priority_scope_keys:
-            self._enqueue_read_model_refreshes(priority_scope_keys, reason="bank_auto_tag_rules_changed_priority")
-        self._execute_derived_data_lifecycle_event(
-            "bank_auto_tag_rules_changed",
-            scope_keys=["all"],
-            include_all=True,
-            metadata={
-                "reason": "bank_auto_tag_rules_changed",
-                "new_version": event.get("new_version"),
-            },
-        )
 
     def _accounts_from_sql_read_model(self, *, date_from: str | None, date_to: str | None) -> dict[str, object] | None:
         repository = self._bank_account_balance_read_model_repository
@@ -752,12 +715,11 @@ class BankDetailsApplicationService:
                     actor_id=actor_id,
                     action=action,
                     metadata=metadata,
+                    enqueue_refreshes=False,
                 )
                 or {}
             )
             affected_months = list(persisted.get("affected_months") or affected_months)
-            self._clear_relation_tag_projection_cache()
-            self._clear_search_cache()
             self._audit_service.record_action(
                 actor_id=actor_id,
                 action=action,
@@ -777,12 +739,6 @@ class BankDetailsApplicationService:
             self._bank_transaction_category_store.save_bank_transaction_categories(
                 self._bank_transaction_category_service.snapshot()
             )
-        self._enqueue_read_model_refreshes(affected_months or ["all"], reason="bank_detail_category_confirmation_changed")
-        self._enqueue_turnover_ledger_read_model_refreshes(
-            affected_months or ["all"],
-            reason="bank_detail_category_confirmation_changed",
-        )
-        self._invalidate_after_category_mutation(affected_months)
         self._audit_service.record_action(
             actor_id=actor_id,
             action=action,
@@ -824,34 +780,34 @@ class BankDetailsApplicationService:
             if scope_key and scope_key != "all"
         ]
 
-    def _bank_detail_refresh_contract_payload(self, scope_keys: list[str]) -> dict[str, object]:
-        target_scope_keys = self._bank_detail_operation_scope_keys(scope_keys)
+    def _bank_detail_access_scope_payload(self, scope_keys: list[str]) -> dict[str, object]:
+        target_scope_keys = self._bank_detail_concrete_scope_keys(scope_keys)
+        return {
+            "affected_scope_keys": target_scope_keys,
+            "read_model_scope_keys": target_scope_keys,
+        }
+
+    def _bank_detail_reapply_contract_payload(self, scope_keys: list[str]) -> dict[str, object]:
+        target_scope_keys = self._bank_detail_concrete_scope_keys(scope_keys)
         return write_target_envelope(
             scope_keys=target_scope_keys,
             targets=self._bank_detail_freshness_targets(target_scope_keys),
-            fallback_scope_key="all",
         )
 
     def _bank_detail_freshness_targets(self, scope_keys: list[str]) -> list[dict[str, str]]:
         return [
             {"read_model_key": "bank_detail", "scope_key": scope_key}
-            for scope_key in self._bank_detail_operation_scope_keys(scope_keys)
+            for scope_key in self._bank_detail_concrete_scope_keys(scope_keys)
         ]
 
-    def _bank_detail_operation_scope_keys(self, scope_keys: list[str]) -> list[str]:
+    @staticmethod
+    def _bank_detail_concrete_scope_keys(scope_keys: list[str]) -> list[str]:
         normalized = [
             str(scope_key).strip()
             for scope_key in list(scope_keys or [])
             if str(scope_key).strip()
         ]
-        concrete = [scope_key for scope_key in normalized if scope_key != "all"]
-        if not concrete:
-            concrete = [
-                str(scope_key).strip()
-                for scope_key in list(self._available_month_scope_keys_provider() or [])
-                if str(scope_key).strip() and str(scope_key).strip() != "all"
-            ]
-        return list(dict.fromkeys(concrete or normalized or ["all"]))
+        return list(dict.fromkeys(scope_key for scope_key in normalized if SEARCH_MONTH_RE.match(scope_key)))
 
     def _scope_summary(self, scope_keys: list[str]) -> dict[str, object]:
         summary_loader = getattr(self._bank_detail_sql_read_repository, "bank_detail_scope_summary", None)
@@ -1033,21 +989,6 @@ class BankDetailsApplicationService:
         for scope_key in target_scope_keys:
             self._delete_redis_cache(scope_key)
         return bool(refresh_gateway.enqueue_many("bank_detail", target_scope_keys, reason=reason))
-
-    def _enqueue_turnover_ledger_read_model_refreshes(self, scope_keys: list[str], *, reason: str) -> bool:
-        enqueue = self._enqueue_turnover_ledger_refresh
-        if callable(enqueue):
-            return bool(enqueue(scope_keys, reason=reason))
-        queue_repository = getattr(self._runtime_repositories, "queue_repository", None)
-        refresh_gateway = ReadModelRefreshGateway(queue_repository=queue_repository)
-        if not refresh_gateway.can_enqueue():
-            return False
-        normalized_scope_keys = [
-            str(scope_key).strip()
-            for scope_key in list(scope_keys or [])
-            if str(scope_key).strip()
-        ] or ["all"]
-        return bool(refresh_gateway.enqueue_many("turnover_ledger", sorted(dict.fromkeys(normalized_scope_keys)), reason=reason))
 
     def _redis_cache_key(self, kind: str, query: dict[str, object], *, scope_summary: dict[str, object]) -> str:
         signature = {

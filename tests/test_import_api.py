@@ -193,11 +193,6 @@ class ImportApiTests(unittest.TestCase):
         self.assertEqual(preview.row_results[1].decision.value, "error")
 
         confirmed_batch = app._import_service.confirm_import(preview.id)
-        app._state_store.save_import_delta(  # noqa: SLF001
-            {
-                "imports": app._import_service.persistence_snapshot_for_batches([preview.id])  # noqa: SLF001
-            }
-        )
         self.assertEqual(confirmed_batch.status.value, "completed_with_errors")
 
         batch_response = app.handle_request(

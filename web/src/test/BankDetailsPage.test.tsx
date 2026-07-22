@@ -532,30 +532,12 @@ describe("Bank details page", () => {
     expect(rulesRequest?.pathname).toBe("/api/bank-details/auto-tag-rules");
   });
 
-  test("saving automatic tag rules refreshes bank details", async () => {
+  test("saving automatic tag rules returns immediately and refreshes the visited page on demand", async () => {
     const user = userEvent.setup();
     const baseFetchMock = installMockApiFetch({
       bankDetailTransactionReadModelStatuses: ["refreshing", "refreshing", "fresh"],
     });
-    let releaseBarrier: (() => void) | null = null;
-    const barrierGate = new Promise<void>((resolve) => {
-      releaseBarrier = resolve;
-    });
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      if (url.pathname === "/api/operation-barrier/status" && (init?.method ?? "GET").toUpperCase() === "POST") {
-        await barrierGate;
-        return new Response(JSON.stringify({
-          status: "fresh",
-          fresh: true,
-          targets: [],
-          blocked_targets: [],
-          refreshing_targets: [],
-        }), { status: 200, headers: { "Content-Type": "application/json" } });
-      }
-      return baseFetchMock(input, init);
-    }) as ReturnType<typeof installMockApiFetch>;
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = baseFetchMock;
     const autoTagRulesListener = vi.fn();
     window.addEventListener("bankAutoTagRulesUpdated", autoTagRulesListener);
     renderBankDetailsPage();
@@ -570,15 +552,7 @@ describe("Bank details page", () => {
       await editRuleLabelInDrawer(user, drawer, "费用 / 工资", "费用", "规则刷新测试");
       await user.click(within(drawer).getByRole("button", { name: "保存" }));
 
-      await waitFor(() => {
-        expect(operationBarrierRequests(fetchMock).at(-1)).toMatchObject({
-          targets: [
-            { read_model_key: "bank_detail", scope_key: "2026-05" },
-          ],
-        });
-      });
-      expect(requestUrls(fetchMock, "/api/bank-details/transactions").length).toBe(initialTransactionRequests);
-      releaseBarrier?.();
+      expect(operationBarrierRequests(fetchMock)).toHaveLength(0);
 
       await waitFor(() => {
         expect(autoTagRulesListener).toHaveBeenCalled();
@@ -593,7 +567,7 @@ describe("Bank details page", () => {
       });
       await waitFor(() => {
         expect(requestUrls(fetchMock, "/api/bank-details/transactions").length).toBeGreaterThan(initialTransactionRequests + 2);
-        expect(screen.getAllByText("规则已保存，银行明细已刷新。").length).toBeGreaterThan(0);
+        expect(screen.getAllByText("规则已保存。").length).toBeGreaterThan(0);
       }, { timeout: 4000 });
       const saveCall = fetchMock.mock.calls.find(([input, init]) => (
         new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost").pathname === "/api/bank-details/auto-tag-rules"
@@ -605,41 +579,14 @@ describe("Bank details page", () => {
         date_to: "2026-12-31",
       });
     } finally {
-      releaseBarrier?.();
       window.removeEventListener("bankAutoTagRulesUpdated", autoTagRulesListener);
     }
   });
 
-  test("does not report saved automatic tag rules as failed when post-save freshness sync is blocked", async () => {
+  test("does not call an operation barrier after automatic tag rules are saved", async () => {
     const user = userEvent.setup();
     const baseFetchMock = installMockApiFetch();
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      if (url.pathname === "/api/operation-barrier/status" && (init?.method ?? "GET").toUpperCase() === "POST") {
-        const body = JSON.parse(String(init?.body ?? "{}")) as { targets?: Array<Record<string, unknown>> };
-        const requestedTarget = body.targets?.[0] ?? { read_model_key: "bank_detail", scope_key: "2026-05" };
-        const blockedTarget = {
-          read_model_key: String(requestedTarget.read_model_key ?? "bank_detail"),
-          scope_type: "snapshot",
-          scope_key: String(requestedTarget.scope_key ?? "2026-05"),
-          status: "blocked",
-          fresh: false,
-          blocking: true,
-          raw_status: "failed",
-          reason: "read_model_dirty_scope_failed",
-          last_error: "bank_detail_refresh_pending",
-        };
-        return new Response(JSON.stringify({
-          status: "blocked",
-          fresh: false,
-          targets: [blockedTarget],
-          blocked_targets: [blockedTarget],
-          refreshing_targets: [],
-        }), { status: 200, headers: { "Content-Type": "application/json" } });
-      }
-      return baseFetchMock(input, init);
-    }) as ReturnType<typeof installMockApiFetch>;
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = baseFetchMock;
 
     renderBankDetailsPage();
 
@@ -657,7 +604,8 @@ describe("Bank details page", () => {
       });
       expect(saveCall).toBeDefined();
     });
-    expect(await screen.findByText("规则已保存，后台同步尚未完成，请稍后刷新。")).toBeInTheDocument();
+    expect(operationBarrierRequests(fetchMock)).toHaveLength(0);
+    expect((await screen.findAllByText(/规则已保存/)).length).toBeGreaterThan(0);
     expect(screen.queryByRole("dialog", { name: "操作失败" })).not.toBeInTheDocument();
   });
 
@@ -724,7 +672,7 @@ describe("Bank details page", () => {
 
     expect(screen.queryByText("银行明细读模型正在刷新，已显示当前可用数据。")).not.toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.getAllByText("规则已保存，银行明细已刷新。").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("规则已保存。").length).toBeGreaterThan(0);
     });
     expect(within(page).getByText("云南溯源科技有限公司")).toBeInTheDocument();
     expect(within(page).queryByText("当前时间范围内没有流水。")).not.toBeInTheDocument();
@@ -783,7 +731,7 @@ describe("Bank details page", () => {
       ))).toBe(true);
     });
     await waitFor(() => {
-      expect(screen.getAllByText("规则已保存，银行明细已刷新。").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("规则已保存。").length).toBeGreaterThan(0);
     });
     expect(screen.queryByText("银行明细读模型待刷新，已显示当前可用数据。")).not.toBeInTheDocument();
     expect(within(page).getAllByText("130,500.50").length).toBeGreaterThan(0);
@@ -910,7 +858,7 @@ describe("Bank details page", () => {
       );
     });
     await waitFor(() => {
-      expect(screen.getAllByText("规则已保存，银行明细已刷新。").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("规则已保存。").length).toBeGreaterThan(0);
     });
     await user.click(within(drawer).getByRole("button", { name: "关闭自动标签规则抽屉" }));
 

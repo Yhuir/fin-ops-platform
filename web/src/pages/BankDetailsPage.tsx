@@ -37,7 +37,7 @@ import {
   emitFinanceDomainEvent,
   eventAffectedMonths,
 } from "../features/domainEvents";
-import { operationBarrierTargets, waitForOperationFreshness } from "../features/operationBarrier/api";
+import { waitForOperationFreshness } from "../features/operationBarrier/api";
 import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
 import type {
   BankAutoTagRulesResponse,
@@ -59,14 +59,13 @@ import type { BankTransactionTagDefinition } from "../features/pendingInvoices/t
 const DEFAULT_BANK_YEAR = "2026";
 const DEFAULT_BANK_MONTH = "2026-05";
 const DEFAULT_PAGE_SIZE = 100;
-const BANK_DETAIL_READ_MODEL_REFRESH_RETRY_MS = 1000;
+const BANK_DETAIL_READ_MODEL_REFRESH_RETRY_MS = 300;
 const BANK_DETAIL_RULE_REFRESH_RETRY_MS = 300;
 const BANK_DETAIL_RULE_REFRESH_RELOAD_ATTEMPTS = 20;
 const ALL_ACCOUNTS_KEY = "__all_bank_accounts__";
 const TAG_SYNC_EVENT = "finops:bank-transaction-tags-updated";
 const TAG_VERSION_STORAGE_KEY = "finops.bankTransactionTags.version";
-const AUTO_TAG_RULE_SAVE_SYNC_WARNING = "规则已保存，后台同步尚未完成，请稍后刷新。";
-const AUTO_TAG_RULE_REAPPLY_SYNC_WARNING = "已提交重新应用，后台同步尚未完成，请稍后刷新。";
+const AUTO_TAG_RULE_REAPPLY_REFRESH_WARNING = "已提交重新应用，后台刷新尚未完成，请稍后刷新。";
 const FEATURED_CATEGORY_CODES: BankTransactionCategoryCode[] = [
   "fee",
   "salary",
@@ -337,47 +336,6 @@ function selectedCategoryFilterStillExists(filter: BankCategoryFilter, options: 
     }
     return tagDefinitionDisplayParts(option).primaryLabel === filter.primaryLabel;
   });
-}
-
-function monthScopeKey(value: string | null | undefined) {
-  const match = /^(\d{4})-(\d{2})/.exec(String(value ?? "").trim());
-  return match ? `${match[1]}-${match[2]}` : null;
-}
-
-function monthScopeKeysForRange(dateFrom: string | null | undefined, dateTo: string | null | undefined) {
-  const startMonth = monthScopeKey(dateFrom);
-  const endMonth = monthScopeKey(dateTo);
-  if (!startMonth && !endMonth) {
-    return [];
-  }
-  if (!startMonth || !endMonth || startMonth === endMonth) {
-    return [startMonth ?? endMonth].filter((value): value is string => Boolean(value));
-  }
-  const [startYear, startMonthNumber] = startMonth.split("-").map(Number);
-  const [endYear, endMonthNumber] = endMonth.split("-").map(Number);
-  const startIndex = startYear * 12 + startMonthNumber - 1;
-  const endIndex = endYear * 12 + endMonthNumber - 1;
-  if (!Number.isFinite(startIndex) || !Number.isFinite(endIndex) || startIndex > endIndex) {
-    return Array.from(new Set([startMonth, endMonth])).sort();
-  }
-  const scopeKeys: string[] = [];
-  for (let index = startIndex; index <= endIndex; index += 1) {
-    const year = Math.floor(index / 12);
-    const month = (index % 12) + 1;
-    scopeKeys.push(`${year}-${String(month).padStart(2, "0")}`);
-  }
-  return scopeKeys;
-}
-
-function bankDetailOperationScopeKeys(rows: BankDetailTransaction[], dateFilter: BankDateFilter) {
-  const visibleRowScopes = Array.from(new Set(
-    rows
-      .map((row) => monthScopeKey(row.tradeTime))
-      .filter((value): value is string => Boolean(value)),
-  ));
-  return visibleRowScopes.length > 0
-    ? visibleRowScopes
-    : monthScopeKeysForRange(dateFilter.dateFrom, dateFilter.dateTo);
 }
 
 function wait(ms: number) {
@@ -1878,7 +1836,7 @@ export default function BankDetailsPage() {
     if (!rulesRefreshPendingRef.current) {
       return;
     }
-    if (readModelNeedsRefresh) {
+    if (transactionRequestPending || transactionsNeedRefresh) {
       setRulesRefreshStatus("refreshing");
       setRulesFeedback(rulesRefreshFeedbackRef.current.refreshing);
       return;
@@ -1886,7 +1844,7 @@ export default function BankDetailsPage() {
     rulesRefreshPendingRef.current = false;
     setRulesRefreshStatus("fresh");
     setRulesFeedback(rulesRefreshFeedbackRef.current.fresh);
-  }, [readModelNeedsRefresh]);
+  }, [transactionRequestPending, transactionsNeedRefresh]);
 
   useEffect(() => {
     if (!active || !readModelNeedsRefresh || loading || rowLoading || accountRequestPending || transactionRequestPending) {
@@ -2410,8 +2368,8 @@ export default function BankDetailsPage() {
         fresh: "重新应用已完成，银行明细已刷新。",
       }
       : {
-        refreshing: "规则已保存，银行明细正在刷新。",
-        fresh: "规则已保存，银行明细已刷新。",
+        refreshing: "规则已保存；当前页面正在按需更新。",
+        fresh: "规则已保存。",
       };
     rulesRefreshFeedbackRef.current = feedback;
     return feedback;
@@ -2424,40 +2382,34 @@ export default function BankDetailsPage() {
     setRulesFeedback(feedback.fresh);
   }, [publishAutoTagRulesSaved]);
 
-  const handleAutoTagRulesSavedWithPendingSync = useCallback((payload: BankAutoTagRulesResponse, message: string) => {
+  const handleAutoTagRulesSavedWithPendingRefresh = useCallback((payload: BankAutoTagRulesResponse, message: string) => {
     publishAutoTagRulesSaved(payload);
-    rulesRefreshPendingRef.current = false;
+    rulesRefreshPendingRef.current = true;
     setRulesRefreshStatus("refreshing");
     setRulesFeedback(message);
     setRefreshToken((current) => current + 1);
   }, [publishAutoTagRulesSaved]);
 
-  const waitForCurrentBankDetailRulesRefresh = useCallback(async (
+  const waitForExplicitBankDetailRulesReapply = useCallback(async (
     setMessage: (message: string) => void,
-    payload?: BankAutoTagRulesResponse,
+    payload: BankAutoTagRulesResponse,
   ) => {
-    const responseTargets = (payload?.operationBarrierTargets ?? []).filter((target) => target.scopeKey);
-    const scopeKeys = bankDetailOperationScopeKeys(rows, dateFilter);
+    const responseTargets = (payload.operationBarrierTargets ?? []).filter((target) => target.scopeKey);
+    if (responseTargets.length === 0) {
+      throw new Error("重新应用未返回可验证的银行明细刷新范围。");
+    }
     setMessage("正在等待银行明细读模型同步...");
-    await waitForOperationFreshness(
-      responseTargets.length > 0 ? responseTargets : operationBarrierTargets("bank_detail", scopeKeys),
-    );
+    await waitForOperationFreshness(responseTargets);
     setMessage("正在刷新银行流水...");
     await reloadTransactionsAfterRulesMutation();
-  }, [dateFilter, reloadTransactionsAfterRulesMutation, rows]);
+  }, [reloadTransactionsAfterRulesMutation]);
 
   const saveAutoTagRulesWithRefresh = useCallback(async (request: SaveBankAutoTagRulesRequest) => {
     const result = await runOperation({
       loadingMessage: "正在保存自动标签规则...",
-      action: async ({ setMessage }) => {
+      action: async () => {
         const payload = await saveBankAutoTagRules(request);
-        try {
-          await waitForCurrentBankDetailRulesRefresh(setMessage, payload);
-        } catch {
-          handleAutoTagRulesSavedWithPendingSync(payload, AUTO_TAG_RULE_SAVE_SYNC_WARNING);
-          return payload;
-        }
-        handleAutoTagRulesSavedAfterRefresh(payload);
+        handleAutoTagRulesSavedWithPendingRefresh(payload, "规则已保存；当前页面正在按需更新。");
         return payload;
       },
       errorMessage: (caught) => caught instanceof Error ? caught.message : "自动标签规则保存失败。",
@@ -2466,7 +2418,7 @@ export default function BankDetailsPage() {
       return result.value;
     }
     throw result.error;
-  }, [handleAutoTagRulesSavedAfterRefresh, handleAutoTagRulesSavedWithPendingSync, runOperation, waitForCurrentBankDetailRulesRefresh]);
+  }, [handleAutoTagRulesSavedWithPendingRefresh, runOperation]);
 
   const reapplyAutoTagRulesWithRefresh = useCallback(async () => {
     const result = await runOperation({
@@ -2474,9 +2426,9 @@ export default function BankDetailsPage() {
       action: async ({ setMessage }) => {
         const payload = await reapplyBankAutoTagRules();
         try {
-          await waitForCurrentBankDetailRulesRefresh(setMessage, payload);
+          await waitForExplicitBankDetailRulesReapply(setMessage, payload);
         } catch {
-          handleAutoTagRulesSavedWithPendingSync(payload, AUTO_TAG_RULE_REAPPLY_SYNC_WARNING);
+          handleAutoTagRulesSavedWithPendingRefresh(payload, AUTO_TAG_RULE_REAPPLY_REFRESH_WARNING);
           return payload;
         }
         handleAutoTagRulesSavedAfterRefresh(payload);
@@ -2488,7 +2440,7 @@ export default function BankDetailsPage() {
       return result.value;
     }
     throw result.error;
-  }, [handleAutoTagRulesSavedAfterRefresh, handleAutoTagRulesSavedWithPendingSync, runOperation, waitForCurrentBankDetailRulesRefresh]);
+  }, [handleAutoTagRulesSavedAfterRefresh, handleAutoTagRulesSavedWithPendingRefresh, runOperation, waitForExplicitBankDetailRulesReapply]);
 
   const datePickerYears = createYearOptions(activeDatePickerYear);
   const selectedDateFilterLabel = dateFilterLabel(dateFilter);

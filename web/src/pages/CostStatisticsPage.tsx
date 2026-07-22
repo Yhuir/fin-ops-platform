@@ -34,7 +34,7 @@ import { formatCostAmount } from "../features/cost-statistics/format";
 import { FINANCE_DOMAIN_EVENTS } from "../features/domainEvents";
 import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
 import { importWorkflowPath } from "../features/imports/importRoutes";
-import { waitForOperationFreshness, type OperationBarrierTarget } from "../features/operationBarrier/api";
+import { waitForOperationFreshness } from "../features/operationBarrier/api";
 import type {
   CostBankExplorerRow,
   CostBankTagPrimaryExplorerRow,
@@ -450,7 +450,6 @@ export default function CostStatisticsPage() {
   const [isTagRulesLoading, setIsTagRulesLoading] = useState(false);
   const [isTagRulesSaving, setIsTagRulesSaving] = useState(false);
   const [tagRulesError, setTagRulesError] = useState<string | null>(null);
-  const [tagRulesSyncMessage, setTagRulesSyncMessage] = useState<string | null>(null);
 
   const [timeRangeMode, setTimeRangeMode] = useState<ExportRangeMode>("month");
   const [timeMonth, setTimeMonth] = useState(DEFAULT_MONTH);
@@ -764,7 +763,6 @@ export default function CostStatisticsPage() {
   }, [handleManualRefresh]);
   const openTagRulesDrawer = useCallback(() => {
     setTagRulesError(null);
-    setTagRulesSyncMessage(null);
     setIsTagRulesDrawerOpen(true);
   }, []);
   const closeTagRulesDrawer = useCallback(() => {
@@ -773,7 +771,6 @@ export default function CostStatisticsPage() {
     }
     setIsTagRulesDrawerOpen(false);
     setTagRulesError(null);
-    setTagRulesSyncMessage(null);
   }, [isTagRulesSaving]);
   const toggleTagRuleCode = useCallback((code: string) => {
     setTagRuleDraftCodes((current) => (
@@ -836,40 +833,23 @@ export default function CostStatisticsPage() {
     }
     setIsTagRulesSaving(true);
     setTagRulesError(null);
-    setTagRulesSyncMessage("正在保存规则...");
     invalidateExportReferenceData();
     try {
       const result = await saveCostStatisticsTagRules({
         expectedVersion: tagRules.version,
         selectedTagCodes: tagRuleDraftCodes,
-        currentScopeKey: currentCostStatisticsScopeKey,
       });
       setTagRules(result);
       setTagRuleDraftCodes(result.effectiveSelectedTagCodes);
-      const targets: OperationBarrierTarget[] = result.operationBarrierTargets.length > 0
-        ? result.operationBarrierTargets
-        : [{ readModelKey: "cost_statistics", scopeKey: currentCostStatisticsScopeKey, scopeType: "cost_statistics" }];
-      setTagRulesSyncMessage("规则已保存，正在等待成本统计同步...");
-      await waitForOperationFreshness(targets, {
-        timeoutMs: 6_000,
-        intervalMs: 200,
-        onStatus: (status) => {
-          setTagRulesSyncMessage(status.fresh ? "成本统计已同步，正在刷新页面..." : "规则已保存，正在等待成本统计同步...");
-        },
-      });
       setLoadedExplorer(null);
       setDomainRefreshNonce((current) => current + 1);
-      setTagRulesSyncMessage(null);
       setIsTagRulesDrawerOpen(false);
     } catch (caught) {
       setTagRulesError(getCostStatisticsActionErrorMessage(caught));
-      setTagRulesSyncMessage(null);
     } finally {
       setIsTagRulesSaving(false);
     }
   }, [
-    costProjectScope,
-    currentCostStatisticsScopeKey,
     invalidateExportReferenceData,
     isTagRulesSaving,
     tagRuleDraftCodes,
@@ -2341,7 +2321,6 @@ export default function CostStatisticsPage() {
         rules={tagRules}
         saving={isTagRulesSaving}
         selectedCodes={tagRuleDraftCodes}
-        syncMessage={tagRulesSyncMessage}
       />
 
       {isExportCenterOpen ? (

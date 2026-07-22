@@ -5711,13 +5711,6 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
             },
           ],
           can_save: options.costTagRulesCanSave ?? true,
-          operation_barrier_targets: [
-            {
-              read_model_key: "cost_statistics",
-              scope_key: String(jsonBody?.current_scope_key ?? "active:2026-03"),
-              scope_type: "cost_statistics",
-            },
-          ],
         },
       };
     },
@@ -6076,6 +6069,9 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           permissions: { can_save: true },
           read_model_status: "refreshing",
           read_model_scope_keys: ["2026-01"],
+          operation_barrier_targets: [
+            { read_model_key: "bank_detail", scope_key: "2026-01" },
+          ],
           enqueued_jobs: ["bank_detail.read_model.refresh"],
         },
       };

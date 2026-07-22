@@ -8230,20 +8230,12 @@ class Application:
             bank_account_balance_read_model_repository=getattr(self, "_bank_account_balance_sql_read_repository", None),
             runtime_repositories=getattr(self, "_runtime_repositories", None),
             affected_months_provider=getattr(self, "_bank_transaction_category_affected_months", lambda _transaction_ids: []),
-            invalidate_after_category_mutation=getattr(self, "_invalidate_workbench_after_bank_transaction_categories", lambda _affected_months: False),
-            execute_derived_data_lifecycle_event=getattr(self, "_execute_derived_data_lifecycle_event", lambda *_args, **_kwargs: None),
-            clear_relation_tag_projection_cache=getattr(
-                getattr(self, "_bank_details_relation_tag_projection_service", None),
-                "clear_cache",
-                lambda: None,
-            ),
             available_month_scope_keys_provider=(
                 self._bank_detail_available_month_scope_provider().scope_keys
                 if hasattr(self, "_import_service")
                 else lambda: []
             ),
             enqueue_bank_account_balance_refresh=self._bank_account_balance_read_model_refresh_producer().enqueue_all,
-            enqueue_turnover_ledger_refresh=self._turnover_ledger_read_model_refresh_producer().enqueue,
             suggestion_provider=suggestion_provider if callable(suggestion_provider) else None,
             bank_transaction_tags_provider=getattr(
                 getattr(self, "_bank_details_service", None),
@@ -8251,7 +8243,6 @@ class Application:
                 lambda: {},
             ),
             category_mutation_writer=category_mutation_writer,
-            clear_search_cache=self._search_service.clear_cache,
         )
 
     def _bank_transaction_category_mutation_writer(self) -> BankTransactionCategoryMutationWriter | None:

@@ -339,14 +339,10 @@ describe("Cost statistics page", () => {
     );
   });
 
-  test("keeps tag rules drawer open until cost statistics read model is fresh after save", async () => {
+  test("closes tag rules drawer after canonical save without waiting for a read model barrier", async () => {
     window.history.pushState({}, "", "/cost-statistics");
     const user = userEvent.setup();
-    let resolveBarrier!: () => void;
-    const barrierDelay = new Promise<void>((resolve) => {
-      resolveBarrier = resolve;
-    });
-    const fetchMock = installMockApiFetch({ operationBarrierDelay: barrierDelay });
+    const fetchMock = installMockApiFetch();
 
     renderCostStatisticsPage();
 
@@ -356,17 +352,14 @@ describe("Cost statistics page", () => {
     expect(within(drawer).getAllByText("未分类").length).toBeGreaterThan(0);
     expect(within(drawer).getByText("收入 · 经营收入")).toBeInTheDocument();
 
-    await user.click(within(drawer).getByRole("button", { name: "保存并同步" }));
+    await user.click(within(drawer).getByRole("button", { name: "保存" }));
 
-    expect(screen.getByRole("dialog", { name: "成本统计标签规则" })).toBeInTheDocument();
-    expect(await within(drawer).findByText("规则已保存，正在等待成本统计同步...")).toBeInTheDocument();
-    resolveBarrier();
     await waitFor(() => {
       expect(screen.queryByRole("dialog", { name: "成本统计标签规则" })).not.toBeInTheDocument();
     });
-    expect(fetchMock).toHaveBeenCalledWith(
+    expect(fetchMock).not.toHaveBeenCalledWith(
       "/api/operation-barrier/status",
-      expect.objectContaining({ method: "POST" }),
+      expect.any(Object),
     );
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/cost-statistics/explorer?scope=2026-03&view=time&project_scope=active&page_size=50",
@@ -385,7 +378,7 @@ describe("Cost statistics page", () => {
     await user.click(screen.getByRole("button", { name: "成本统计标签规则" }));
     const drawer = await screen.findByRole("dialog", { name: "成本统计标签规则" });
 
-    expect(within(drawer).getByRole("button", { name: "保存并同步" })).toBeDisabled();
+    expect(within(drawer).getByRole("button", { name: "保存" })).toBeDisabled();
   });
 
   test("admin can run the cost statistics title audit icon", async () => {
