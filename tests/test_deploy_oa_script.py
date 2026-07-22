@@ -351,6 +351,8 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("write_operation_restore_point()", script)
         self.assertIn("write-operation-restore-point run-id must be 1..80 safe filename characters", script)
         self.assertIn("from psycopg.conninfo import conninfo_to_dict", script)
+        self.assertIn('source "$MIGRATOR_ENV"', script)
+        self.assertIn('os.environ.get("FIN_OPS_POSTGRES_MIGRATOR_DATABASE_URL")', script)
         self.assertIn('environment = {key: value for key, value in os.environ.items() if not key.startswith("PG")}', script)
         self.assertIn('"password": "PGPASSWORD"', script)
         self.assertIn('environment["PGAPPNAME"] = "finops-write-operation-restore-point"', script)

@@ -609,6 +609,7 @@ write_operation_restore_point() {
   local src output_dir dump_path temp_path manifest_path checksum size created_at
   src="$(release_src "$release")"
   assert_runtime_env_contract
+  [[ -f "$MIGRATOR_ENV" ]] || die "missing PostgreSQL migrator env: $MIGRATOR_ENV"
   command -v pg_dump >/dev/null || die "pg_dump is required for write-operation restore points"
   command -v pg_restore >/dev/null || die "pg_restore is required to verify write-operation restore points"
   install -d -m 0700 "$WRITE_E2E_BACKUP_ROOT"
@@ -628,8 +629,10 @@ write_operation_restore_point() {
     source "$COMMON_ENV"
     # shellcheck disable=SC1090
     source "$SECRETS_ENV"
+    # shellcheck disable=SC1090
+    source "$MIGRATOR_ENV"
     set +a
-    [[ -n "${FIN_OPS_POSTGRES_DATABASE_URL:-${DATABASE_URL:-}}" ]] \
+    [[ -n "${FIN_OPS_POSTGRES_MIGRATOR_DATABASE_URL:-${FIN_OPS_POSTGRES_DATABASE_URL:-${DATABASE_URL:-}}}" ]] \
       || die "PostgreSQL DSN is empty after loading runtime env"
     umask 077
     trap 'rm -f -- "$temp_path"; rmdir -- "$output_dir" 2>/dev/null || true' EXIT
@@ -640,7 +643,12 @@ import sys
 
 from psycopg.conninfo import conninfo_to_dict
 
-database_url = (os.environ.get("FIN_OPS_POSTGRES_DATABASE_URL") or os.environ.get("DATABASE_URL") or "").strip()
+database_url = (
+    os.environ.get("FIN_OPS_POSTGRES_MIGRATOR_DATABASE_URL")
+    or os.environ.get("FIN_OPS_POSTGRES_DATABASE_URL")
+    or os.environ.get("DATABASE_URL")
+    or ""
+).strip()
 if database_url.startswith("postgresql+psycopg://"):
     database_url = "postgresql://" + database_url.removeprefix("postgresql+psycopg://")
 parameters = conninfo_to_dict(database_url)
