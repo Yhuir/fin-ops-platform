@@ -24,7 +24,15 @@ from fin_ops_platform.services.postgres_repositories.ops_tax_etc import Postgres
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 from fin_ops_platform.services.runtime_worker_handlers import _RuntimeWorkerDerivedLifecycle
 from fin_ops_platform.services.workbench_free_matching_engine import RULE_VERSION as WORKBENCH_FORMAL_RELATION_RULE_VERSION
-from fin_ops_platform.services.workbench_groups_page_cache import WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION
+from fin_ops_platform.services.workbench_groups_page_cache import (
+    WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION,
+    WORKBENCH_INITIAL_PAGE_CACHE_SCHEMA_VERSION,
+    build_workbench_groups_redis_cache_key_from_version,
+    build_workbench_initial_redis_cache_key,
+)
+from fin_ops_platform.services.workbench_read_model_version import (
+    WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION,
+)
 from fin_ops_platform.services.workbench_read_model_refresh import WorkbenchReadModelRefreshService
 from fin_ops_platform.services.workbench_sql_projection import (
     WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
@@ -1533,6 +1541,67 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         versions = app._workbench_sql_read_model_source_versions("all")
 
         self.assertEqual(versions["builder"], WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION)
+
+    def test_workbench_v6_rejects_v5_month_all_and_cache_versions(self) -> None:
+        app = object.__new__(Application)
+        old_month = "2026-07-21-unified-zone-search-v5"
+        old_all = "workbench_sql_projection.composed_active_month_shards.unified_zone_search.v5"
+
+        self.assertIn("v6", WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION)
+        self.assertIn("v6", WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION)
+        self.assertIn(WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION, WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION)
+        self.assertIn(WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION, WORKBENCH_INITIAL_PAGE_CACHE_SCHEMA_VERSION)
+        self.assertIn(
+            "builder_mismatch",
+            app._workbench_sql_read_model_stale_reasons(
+                {**app._workbench_sql_read_model_source_versions("2026-05"), "builder": old_month},
+                scope_key="2026-05",
+            ),
+        )
+        self.assertIn(
+            "builder_mismatch",
+            app._workbench_sql_read_model_stale_reasons(
+                {**app._workbench_sql_read_model_source_versions("all"), "builder": old_all},
+                scope_key="all",
+            ),
+        )
+
+        current_groups_key = build_workbench_groups_redis_cache_key_from_version(
+            cache_version="generation-1",
+            scope_key="2026-05",
+            zone="unpaired",
+            page="1",
+            page_size="50",
+            status=None,
+            source_kind=None,
+            search=None,
+            sort=None,
+            detail_level="summary",
+        )
+        old_groups_key = build_workbench_groups_redis_cache_key_from_version(
+            cache_version="generation-1",
+            scope_key="2026-05",
+            zone="unpaired",
+            page="1",
+            page_size="50",
+            status=None,
+            source_kind=None,
+            search=None,
+            sort=None,
+            detail_level="summary",
+            schema_version=f"{old_month}:relation-completion-v1",
+        )
+        current_initial_key = build_workbench_initial_redis_cache_key(
+            cache_version="generation-1",
+            scope_key="2026-05",
+        )
+        old_initial_key = build_workbench_initial_redis_cache_key(
+            cache_version="generation-1",
+            scope_key="2026-05",
+            schema_version=f"{old_month}:relation-completion-v1:initial-v2",
+        )
+        self.assertNotEqual(current_groups_key, old_groups_key)
+        self.assertNotEqual(current_initial_key, old_initial_key)
 
     def test_sql_projection_manual_invoice_rows_include_tax_meta_for_amount_cell(self) -> None:
         connection = InvoiceRowsProjectionConnection()
