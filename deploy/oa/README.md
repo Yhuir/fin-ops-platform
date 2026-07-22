@@ -467,7 +467,8 @@ sudo /usr/local/sbin/finops-deploy-control runtime-queue-resolve-covered <releas
 修复历史 batch/file 生命周期时，dry-run 与 execute 都必须同时传入同一组精确
 `--batch-id` / `--file-id`；工具仅在 succeeded job、registered row counters、canonical invoice owner
 和 `manual_invoice_import` source-link 全部闭环时允许把精确的 `pending/preview_ready` 降级态恢复为
-`completed/confirmed`。它不扫描或修改其它生命周期记录，也不重新发布 read model 事件。
+`completed/confirmed`，并按 batch + source identity 一对一恢复被旧 preview 清空的 import row link。
+它不修改 canonical invoice/source-link，不扫描或修改其它生命周期记录，也不重新发布 read model 事件。
 
 `workbench-rehydrate` 会调用 release 内的 `scripts/rehydrate-workbench-read-models.py`，
 按月份 shard 重建 Workbench SQL read model，再发布 `all` 聚合；`workbench-audit-identity`

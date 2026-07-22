@@ -28,6 +28,7 @@ def load_import_audit_repair_snapshot(
             "lifecycle_targets": targets,
             "lifecycle_jobs": connection.fetch_all(_LIFECYCLE_JOB_SQL, (session_id, lifecycle_file_id)),
             "lifecycle_row_evidence": connection.fetch_all(_LIFECYCLE_ROW_EVIDENCE_SQL, (lifecycle_batch_id,)),
+            "lifecycle_row_links": connection.fetch_all(_LIFECYCLE_ROW_LINK_SQL, (lifecycle_batch_id,)),
         }
     )
     return snapshot
@@ -66,6 +67,14 @@ def apply_import_audit_repair(connection: Any, plan: dict[str, Any]) -> None:
     for repair in list(plan.get("lifecycle_repairs") or []):
         batch_id = str(repair["batch_id"])
         file_id = str(repair["file_id"])
+        row_links = list(repair.get("row_links") or [])
+        if row_links:
+            affected = connection.execute(
+                _LIFECYCLE_ROW_LINK_UPDATE_SQL,
+                (json.dumps(row_links, ensure_ascii=False), batch_id),
+            )
+            if affected != len(row_links):
+                raise RuntimeError(f"Import batch {batch_id} row-link precondition changed.")
         if connection.execute(_LIFECYCLE_BATCH_UPDATE_SQL, (batch_id,)) != 1:
             raise RuntimeError(f"Import batch {batch_id} lifecycle precondition changed.")
         if connection.execute(_LIFECYCLE_FILE_UPDATE_SQL, (batch_id, file_id, batch_id)) != 1:
@@ -229,33 +238,75 @@ select count(*)::bigint as row_count,
        count(*) filter (where decision = 'status_updated')::bigint as status_updated_count,
        count(*) filter (where decision = 'error')::bigint as error_count,
        count(*) filter (where decision = 'duplicate_skipped')::bigint as duplicate_count,
-       count(*) filter (where decision = 'suspected_duplicate')::bigint as suspected_duplicate_count,
-       count(*) filter (
-           where decision in ('created', 'status_updated') and nullif(linked_object_id, '') is not null
-       )::bigint as linked_success_count,
-       count(*) filter (
-           where decision = 'created' and exists (
-               select 1 from app.invoices invoice
-               where coalesce(invoice.legacy_mongo_id, invoice.id::text) = target_rows.linked_object_id
-                 and (
-                     invoice.source_batch_id = target_rows.import_batch_id
-                     or invoice.legacy_source_batch_id = target_rows.batch_id
-                 )
-           )
-       )::bigint as created_canonical_owner_count,
-       count(*) filter (
-           where decision in ('created', 'status_updated') and exists (
-               select 1 from app.invoices invoice
-               where coalesce(invoice.legacy_mongo_id, invoice.id::text) = target_rows.linked_object_id
-                 and exists (
-                     select 1
-                     from jsonb_array_elements(coalesce(invoice.source_links, '[]'::jsonb)) source_link
-                     where source_link->>'source_type' = 'manual_invoice_import'
-                       and source_link->>'batch_id' = target_rows.batch_id
-                 )
-           )
-       )::bigint as manual_source_link_success_count
+       count(*) filter (where decision = 'suspected_duplicate')::bigint as suspected_duplicate_count
 from target_rows
+"""
+
+_LIFECYCLE_ROW_LINK_SQL = """
+with target_batch as (
+    select id, coalesce(legacy_mongo_id, id::text) as batch_id
+    from app.import_batches
+    where coalesce(legacy_mongo_id, id::text) = %s
+), target_rows as (
+    select rows.*, target.batch_id
+    from app.import_batch_rows rows
+    join target_batch target on target.id = rows.import_batch_id
+)
+select coalesce(rows.legacy_mongo_id, rows.id::text) as row_id,
+       rows.decision,
+       coalesce(nullif(rows.source_unique_key, ''), nullif(rows.data_fingerprint, '')) as source_id,
+       rows.linked_object_type,
+       rows.linked_object_id,
+       count(candidate.invoice_id)::bigint as candidate_count,
+       min(candidate.invoice_id) as candidate_invoice_id,
+       coalesce(bool_or(candidate.is_batch_owner), false) as candidate_is_batch_owner
+from target_rows rows
+left join lateral (
+    select distinct coalesce(invoice.legacy_mongo_id, invoice.id::text) as invoice_id,
+           (
+               invoice.source_batch_id = rows.import_batch_id
+               or invoice.legacy_source_batch_id = rows.batch_id
+           ) as is_batch_owner
+    from app.invoices invoice
+    cross join lateral jsonb_array_elements(coalesce(invoice.source_links, '[]'::jsonb)) source_link
+    where source_link->>'source_type' = 'manual_invoice_import'
+      and source_link->>'batch_id' = rows.batch_id
+      and source_link->>'source_id' = coalesce(nullif(rows.source_unique_key, ''), nullif(rows.data_fingerprint, ''))
+) candidate on true
+group by rows.id, rows.legacy_mongo_id, rows.decision, rows.source_unique_key,
+         rows.data_fingerprint, rows.linked_object_type, rows.linked_object_id
+order by rows.row_no, row_id
+"""
+
+_LIFECYCLE_ROW_LINK_UPDATE_SQL = """
+with repairs as (
+    select *
+    from jsonb_to_recordset(%s::jsonb) as repair(
+        row_id text,
+        decision text,
+        source_id text,
+        linked_object_id text,
+        before jsonb
+    )
+), target_batch as (
+    select id
+    from app.import_batches
+    where coalesce(legacy_mongo_id, id::text) = %s
+)
+update app.import_batch_rows rows
+set linked_object_type = 'invoice',
+    linked_object_id = repairs.linked_object_id,
+    raw_payload = jsonb_set(
+        jsonb_set(rows.raw_payload, '{normalized_payload,linked_object_type}', to_jsonb('invoice'::text), true),
+        '{normalized_payload,linked_object_id}', to_jsonb(repairs.linked_object_id), true
+    )
+from repairs, target_batch
+where coalesce(rows.legacy_mongo_id, rows.id::text) = repairs.row_id
+  and rows.import_batch_id = target_batch.id
+  and rows.decision = repairs.decision
+  and coalesce(nullif(rows.source_unique_key, ''), nullif(rows.data_fingerprint, '')) = repairs.source_id
+  and nullif(rows.linked_object_type, '') is null
+  and nullif(rows.linked_object_id, '') is null
 """
 
 _LIFECYCLE_BATCH_UPDATE_SQL = """

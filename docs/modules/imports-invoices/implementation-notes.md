@@ -224,7 +224,7 @@
 
 - 目标：在根因修复发布后，安全恢复已被旧 stale preview writer 降级的历史 batch/file 状态，不修改 canonical 发票、导入行、job 或 read model。
 - 设计：复用既有 `import-audit-repair`，增加必须成对出现的 `--batch-id` / `--file-id`；dry-run 是 repeatable-read read-only，execute 是 serializable + advisory lock + expected fingerprint。纯 plan 只接受唯一 succeeded job、完整 batch counter/row decision、created invoice owner 和成功行 `manual_invoice_import` source-link 闭环。
-- 写入范围：只把精确目标从 `batch pending + file preview_ready + batch_id null` 恢复为 `batch completed + file confirmed + batch_id/session_status terminal`；SQL 自带旧状态与 preview batch precondition，任一步 rowcount 不是 1 都回滚整个事务。
-- 非目标：不新增 HTTP 修复接口，不做常驻扫描，不重放 worker/read model，不覆盖 raw payload 的其它字段，不支持其它中间态推断。
+- 写入范围：把精确目标从 `batch pending + file preview_ready + batch_id null` 恢复为 `batch completed + file confirmed + batch_id/session_status terminal`，并恢复被同一 stale preview 清空的 import row `linked_object_type/id`。row link 只从既存 canonical `manual_invoice_import(batch_id, source_id)` 一对一映射得到，created 行还必须证明 canonical batch owner；单条 bulk SQL 的 rowcount 必须等于 dry-run 计划数，batch/file 任一步 rowcount 不是 1 都回滚整个事务。
+- 非目标：不新增 HTTP 修复接口，不做常驻扫描，不重放 worker/read model，不修改 canonical invoice/source-link/金额，不覆盖 raw payload 的其它字段，不支持其它中间态推断。
 - 测试：`tests/test_import_audit_repair_ops.py` 覆盖 plan、幂等、fail-closed、CLI exact target 与 repository precondition；`tests/test_app_postgres_mode_integration.py` 覆盖真实 PostgreSQL 状态恢复（无测试 DSN 时 skip）。
 - 生产 dry-run 校准：canonical invoice owner 与页面 Audit 保持同一合同，接受正式 UUID `source_batch_id` 或迁移期 `legacy_source_batch_id`；不把只缺 legacy 文本列的有效 owner 误判为闭环缺失。

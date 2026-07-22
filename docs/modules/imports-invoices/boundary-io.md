@@ -96,7 +96,7 @@ file/session preview/retry 只允许通过当前 `session_id` 持久化该 sessi
 - Old code deletion: 旧同步导入、直接状态写入、snapshot 发票池 fallback、batch revert 和从 `app.import_files.import_batch_id` 反推 file session 状态的 fallback 已删除；历史 migration/只读 audit 工具不构成 runtime fallback。
 - Durable confirm：`/imports/files/confirm` 必须创建 `job.import_jobs(import_type=file_import.confirm)` 与 `job.outbox_events(event_type=import.process.requested)`；PostgreSQL polling 与 RabbitMQ wakeup 共用该 gateway，queue/repository 不可用返回 `503 import_queue_unavailable`，禁止进程内确认。
 - 2026-07-22：文件预览保存改为 `FileImportService.preview_session_persistence_payload(session_id)`，只写当前 session 和 `preview_batch_id`；删除 `ImportNormalizationService.snapshot(include_facts=False)` 与无参全量 preview writer。PostgreSQL `save_import_delta` 在同一事务写 batch 与 file/session，防止 stale API 覆盖其它已确认导入或形成半写状态。
-- 2026-07-22：历史上已被 stale preview 降级的单条生命周期事实通过现有 `import-audit-repair` 边界修复；必须显式提供 `--batch-id` 与 `--file-id`，dry-run 指纹和 execute 必须一致，且只允许 `pending/preview_ready -> completed/confirmed` 的精确转换。其它中间态、活跃 job、计数不符或 canonical/source-link 不闭环一律 fail closed。
+- 2026-07-22：历史上已被 stale preview 降级的单条生命周期事实通过现有 `import-audit-repair` 边界修复；必须显式提供 `--batch-id` 与 `--file-id`，dry-run 指纹和 execute 必须一致，且只允许 `pending/preview_ready -> completed/confirmed` 的精确转换。旧 preview 同时清空的 import row link 只能按 `(batch_id, source_unique_key/data_fingerprint)` 唯一匹配既存 `manual_invoice_import` source-link 后恢复；其它中间态、活跃 job、计数不符、多义匹配或 canonical/source-link 不闭环一律 fail closed。
 
 ## Audit v19 provenance 版本边界（2026-07-12）
 

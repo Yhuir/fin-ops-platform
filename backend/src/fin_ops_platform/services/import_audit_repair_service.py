@@ -30,6 +30,11 @@ def build_import_audit_repair_plan(snapshot: dict[str, list[dict[str, Any]]]) ->
             "delete_bank_row_ids": [row["row_id"] for row in bank_rows],
             "restore_invoices": [update["before"] for update in invoice_updates],
             "restore_import_lifecycle": [repair["before"] for repair in lifecycle_repairs],
+            "restore_import_row_links": [
+                row_link["before"]
+                for repair in lifecycle_repairs
+                for row_link in list(repair.get("row_links") or [])
+            ],
         },
     }
 
@@ -43,6 +48,9 @@ def public_repair_report(plan: dict[str, Any], *, mode: str, written: bool) -> d
         "bank_row_count": len(plan["bank_rows"]),
         "invoice_update_count": len(plan["invoice_updates"]),
         "lifecycle_repair_count": len(plan["lifecycle_repairs"]),
+        "lifecycle_row_link_repair_count": sum(
+            len(list(repair.get("row_links") or [])) for repair in plan["lifecycle_repairs"]
+        ),
         "affected_invoice_months": plan["affected_invoice_months"],
         "rollback_manifest": plan["rollback_manifest"],
         "authorized_write_scope": [
@@ -114,19 +122,44 @@ def _lifecycle_repair_plan(snapshot: dict[str, list[dict[str, Any]]]) -> list[di
     }
     if actual_counts != expected_counts:
         raise ValueError("Import lifecycle batch counters do not match durable row evidence.")
-    if (
-        int(evidence.get("linked_success_count") or 0) != expected_counts["success_count"]
-        or int(evidence.get("created_canonical_owner_count") or 0) != int(evidence.get("created_count") or 0)
-        or int(evidence.get("manual_source_link_success_count") or 0) != expected_counts["success_count"]
-    ):
-        raise ValueError(
-            "Import lifecycle canonical invoice closure is incomplete: "
-            f"success={expected_counts['success_count']}, "
-            f"created={int(evidence.get('created_count') or 0)}, "
-            f"linked={int(evidence.get('linked_success_count') or 0)}, "
-            f"created_owner={int(evidence.get('created_canonical_owner_count') or 0)}, "
-            f"manual_link={int(evidence.get('manual_source_link_success_count') or 0)}."
+    row_links = list(snapshot.get("lifecycle_row_links") or [])
+    if len(row_links) != expected_counts["row_count"]:
+        raise ValueError("Import lifecycle row-link evidence does not cover the registered batch.")
+    row_link_repairs: list[dict[str, Any]] = []
+    linked_decision_count = 0
+    for row in row_links:
+        decision = _text(row.get("decision"))
+        current_type = _text(row.get("linked_object_type"))
+        current_id = _text(row.get("linked_object_id"))
+        if decision not in {"created", "status_updated", "duplicate_skipped"}:
+            if current_type or current_id:
+                raise ValueError("Non-linked import decision unexpectedly owns a canonical invoice link.")
+            continue
+        linked_decision_count += 1
+        if int(row.get("candidate_count") or 0) != 1 or not _text(row.get("candidate_invoice_id")):
+            raise ValueError("Import lifecycle canonical source-link evidence is not one-to-one.")
+        if decision == "created" and not bool(row.get("candidate_is_batch_owner")):
+            raise ValueError("Created import row canonical invoice owner does not match the target batch.")
+        candidate_invoice_id = _text(row.get("candidate_invoice_id"))
+        if current_type or current_id:
+            if current_type != "invoice" or current_id != candidate_invoice_id:
+                raise ValueError("Existing import row canonical link conflicts with source-link evidence.")
+            continue
+        row_link_repairs.append(
+            {
+                "row_id": _text(row.get("row_id")),
+                "decision": decision,
+                "source_id": _text(row.get("source_id")),
+                "linked_object_id": candidate_invoice_id,
+                "before": {
+                    "row_id": _text(row.get("row_id")),
+                    "linked_object_type": None,
+                    "linked_object_id": None,
+                },
+            }
         )
+    if linked_decision_count != expected_counts["success_count"] + expected_counts["duplicate_count"]:
+        raise ValueError("Import lifecycle linked decision count does not match registered batch counters.")
 
     batch_payload = _payload(target.get("batch_raw_payload"))
     file_payload = _payload(target.get("file_raw_payload"))
@@ -137,6 +170,7 @@ def _lifecycle_repair_plan(snapshot: dict[str, list[dict[str, Any]]]) -> list[di
         and _text(file_payload.get("status")) == "confirmed"
         and _text(file_payload.get("batch_id")) == batch_id
         and _text(file_payload.get("session_status")) == "confirmed"
+        and not row_link_repairs
     )
     if terminal:
         return []
@@ -155,6 +189,7 @@ def _lifecycle_repair_plan(snapshot: dict[str, list[dict[str, Any]]]) -> list[di
         {
             "batch_id": batch_id,
             "file_id": file_id,
+            "row_links": row_link_repairs,
             "before": {
                 "batch_id": batch_id,
                 "batch_status": _text(target.get("batch_status")),

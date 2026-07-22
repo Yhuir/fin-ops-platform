@@ -178,10 +178,20 @@ def _lifecycle_snapshot(*, terminal: bool = False) -> dict[str, list[dict[str, o
                 "error_count": 0,
                 "duplicate_count": 1,
                 "suspected_duplicate_count": 0,
-                "linked_success_count": 2,
-                "created_canonical_owner_count": 2,
-                "manual_source_link_success_count": 2,
             }
+        ],
+        "lifecycle_row_links": [
+            {
+                "row_id": f"row-import-{index}",
+                "decision": "created" if index < 3 else "duplicate_skipped",
+                "source_id": f"source-{index}",
+                "linked_object_type": "invoice" if terminal else None,
+                "linked_object_id": f"invoice-{index}" if terminal else None,
+                "candidate_count": 1,
+                "candidate_invoice_id": f"invoice-{index}",
+                "candidate_is_batch_owner": index < 3,
+            }
+            for index in range(1, 4)
         ],
     }
 
@@ -190,26 +200,13 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
     def test_plan_repairs_exact_downgraded_lifecycle_from_succeeded_job_and_canonical_closure(self) -> None:
         plan = build_import_audit_repair_plan(_lifecycle_snapshot())
 
-        self.assertEqual(
-            plan["lifecycle_repairs"],
-            [
-                {
-                    "batch_id": "batch-import-1",
-                    "file_id": "file-import-1",
-                    "before": {
-                        "batch_id": "batch-import-1",
-                        "batch_status": "pending",
-                        "batch_payload_status": "pending",
-                        "file_id": "file-import-1",
-                        "file_status": "preview_ready",
-                        "file_payload_status": "preview_ready",
-                        "file_payload_batch_id": None,
-                        "file_payload_session_status": "preview_ready",
-                    },
-                }
-            ],
-        )
-        self.assertEqual(plan["rollback_manifest"]["restore_import_lifecycle"], [plan["lifecycle_repairs"][0]["before"]])
+        self.assertEqual(len(plan["lifecycle_repairs"]), 1)
+        repair = plan["lifecycle_repairs"][0]
+        self.assertEqual((repair["batch_id"], repair["file_id"]), ("batch-import-1", "file-import-1"))
+        self.assertEqual(len(repair["row_links"]), 3)
+        self.assertEqual(repair["before"]["batch_status"], "pending")
+        self.assertEqual(plan["rollback_manifest"]["restore_import_lifecycle"], [repair["before"]])
+        self.assertEqual(len(plan["rollback_manifest"]["restore_import_row_links"]), 3)
 
     def test_plan_is_idempotent_after_lifecycle_is_terminal(self) -> None:
         plan = build_import_audit_repair_plan(_lifecycle_snapshot(terminal=True))
@@ -225,9 +222,10 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
 
     def test_plan_refuses_lifecycle_repair_without_canonical_invoice_closure(self) -> None:
         snapshot = _lifecycle_snapshot()
-        snapshot["lifecycle_row_evidence"][0]["manual_source_link_success_count"] = 1
+        snapshot["lifecycle_row_links"][0]["candidate_count"] = 0
+        snapshot["lifecycle_row_links"][0]["candidate_invoice_id"] = None
 
-        with self.assertRaisesRegex(ValueError, "canonical invoice closure"):
+        with self.assertRaisesRegex(ValueError, "not one-to-one"):
             build_import_audit_repair_plan(snapshot)
 
     def test_repository_applies_lifecycle_batch_and_file_with_exact_preconditions(self) -> None:
@@ -237,16 +235,19 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
 
             def execute(self, sql: str, params: tuple[object, ...] = ()) -> int:
                 self.calls.append((sql, params))
-                return 1
+                return 3 if "jsonb_to_recordset" in sql else 1
 
         connection = Connection()
         plan = build_import_audit_repair_plan(_lifecycle_snapshot())
 
         apply_import_audit_repair(connection, plan)
 
-        self.assertEqual([params for _sql, params in connection.calls], [("batch-import-1",), ("batch-import-1", "file-import-1", "batch-import-1")])
-        self.assertIn("status = 'completed'", connection.calls[0][0])
-        self.assertIn("status = 'confirmed'", connection.calls[1][0])
+        self.assertEqual(len(connection.calls), 3)
+        self.assertEqual(connection.calls[1][1], ("batch-import-1",))
+        self.assertEqual(connection.calls[2][1], ("batch-import-1", "file-import-1", "batch-import-1"))
+        self.assertIn("jsonb_to_recordset", connection.calls[0][0])
+        self.assertIn("status = 'completed'", connection.calls[1][0])
+        self.assertIn("status = 'confirmed'", connection.calls[2][0])
 
     def test_plan_restores_bank_provenance_and_aggregates_invoice_components(self) -> None:
         plan = build_import_audit_repair_plan(_snapshot())
