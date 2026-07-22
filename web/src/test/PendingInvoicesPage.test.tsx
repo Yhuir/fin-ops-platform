@@ -1291,7 +1291,7 @@ describe("Pending invoices page", () => {
     const rulesPut = pendingInvoiceRulesRequests(fetchMock, "PUT")[0];
     const rulesBody = JSON.parse(String(rulesPut[1]?.body ?? "{}")) as Record<string, unknown>;
     expect(rulesBody).toMatchObject({ version: 7, direction: "expense" });
-    expect(await screen.findByText("规则已保存，相关数据正在刷新。")).toBeInTheDocument();
+    expect(await screen.findByText("规则已保存。")).toBeInTheDocument();
     expect(pendingInvoiceRowsRequests(fetchMock).length).toBeGreaterThan(1);
     await user.click(screen.getByRole("button", { name: "关闭规则抽屉" }));
 
@@ -1501,27 +1501,13 @@ describe("Pending invoices page", () => {
   test("refetches rows after saving rules and displays refreshed rule filter buckets", async () => {
     const user = userEvent.setup();
     let rulesSaved = false;
-    let releaseBarrier: (() => void) | null = null;
     const requiresRow = pendingRuleClosureRow("fee", "需要开票闭环供应商", "已支付待开票", "requires_invoice");
     const statementRow = pendingRuleClosureRow("internal_transfer", "流水代替闭环供应商", "流水代替发票", "bank_statement_as_invoice");
     const noInvoiceRow = pendingRuleClosureRow("salary", "无需开票闭环供应商", "无需开票", "no_invoice_required");
     const unknownRow = pendingRuleClosureRow("unknown_external_code", "未知标签闭环供应商", "未分类", "unknown");
-    const barrierGate = new Promise<void>((resolve) => {
-      releaseBarrier = resolve;
-    });
     const fetchMock = installPendingInvoiceFetch({
       onRulesSaved: () => {
         rulesSaved = true;
-      },
-      operationBarrierResponse: async () => {
-        await barrierGate;
-        return new Response(JSON.stringify({
-          status: "fresh",
-          fresh: true,
-          targets: [],
-          blocked_targets: [],
-          refreshing_targets: [],
-        }), { status: 200, headers: { "Content-Type": "application/json" } });
       },
       rowsPayload: (url) => {
         if (!rulesSaved) {
@@ -1555,19 +1541,10 @@ describe("Pending invoices page", () => {
     await user.click(await screen.findByRole("button", { name: "保存规则" }));
 
     await waitFor(() => {
-      expect(operationBarrierRequests(fetchMock).at(-1)).toMatchObject({
-        targets: [
-          { read_model_key: "pending_invoice", scope_key: "expense:all" },
-        ],
-      });
-    });
-    expect(pendingInvoiceRowsRequests(fetchMock).length).toBe(initialRequests);
-    releaseBarrier?.();
-
-    await waitFor(() => {
       expect(rulesSaved).toBe(true);
       expect(pendingInvoiceRowsRequests(fetchMock).length).toBeGreaterThan(initialRequests);
     });
+    expect(operationBarrierRequests(fetchMock)).toHaveLength(0);
     expect(await within(page).findByText("需要开票闭环供应商")).toBeInTheDocument();
     expect(within(page).getByText("流水代替闭环供应商")).toBeInTheDocument();
     expect(within(page).getByText("无需开票闭环供应商")).toBeInTheDocument();
@@ -1635,17 +1612,9 @@ describe("Pending invoices page", () => {
       const paths = fetchMock.mock.calls.map(([input]) => new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost").pathname);
       expect(paths).toContain("/api/pending-invoices/attach-existing-invoices/preview");
       expect(paths).toContain("/api/pending-invoices/attach-existing-invoices");
-      expect(paths).toContain("/api/operation-barrier/status");
       expect(pendingInvoiceRowsRequests(fetchMock).length).toBeGreaterThan(initialRequests);
     });
-    const barrierCall = fetchMock.mock.calls.find(([input, init]) => {
-      const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      return url.pathname === "/api/operation-barrier/status" && (init?.method ?? "GET").toUpperCase() === "POST";
-    });
-    expect(JSON.parse(String(barrierCall?.[1]?.body ?? "{}")).targets).toEqual([
-      { read_model_key: "workbench_relation", scope_key: "2026-05" },
-      { read_model_key: "pending_invoice", scope_key: "expense:requires_invoice:2026-05" },
-    ]);
+    expect(operationBarrierRequests(fetchMock)).toHaveLength(0);
   }, 45_000);
 
   test("shows preview conflicts and keeps confirm disabled when attach-existing cannot be confirmed", async () => {
@@ -1790,18 +1759,7 @@ describe("Pending invoices page", () => {
         amount: "200.00",
       },
     };
-    let lastBarrierBody: Record<string, unknown> | null = null;
     const fetchMock = installPendingInvoiceFetch({
-      operationBarrierResponse: (body) => {
-        lastBarrierBody = body;
-        return new Response(JSON.stringify({
-          status: "fresh",
-          fresh: true,
-          targets: [],
-          blocked_targets: [],
-          refreshing_targets: [],
-        }), { status: 200, headers: { "Content-Type": "application/json" } });
-      },
       rowsPayload: (url) => (url.searchParams.get("direction") === "income" ? [firstIncomeRow, secondIncomeRow] : upgradedRows()),
     });
     renderAppAt("/pending-invoices");
@@ -1829,12 +1787,7 @@ describe("Pending invoices page", () => {
       });
       expect(pendingInvoiceRowsRequests(fetchMock).length).toBeGreaterThan(2);
     });
-    await waitFor(() => {
-      expect(operationBarrierRequests(fetchMock).length).toBeGreaterThan(0);
-    });
-    expect(lastBarrierBody?.targets).toEqual([
-      { read_model_key: "pending_invoice", scope_key: "income:all:2026-05" },
-    ]);
+    expect(operationBarrierRequests(fetchMock)).toHaveLength(0);
   }, 45_000);
 
   test("does not expose manual invoice dialog or API calls", async () => {

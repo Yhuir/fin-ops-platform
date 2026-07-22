@@ -184,18 +184,11 @@ class OaPendingPaymentCommandServiceTests(unittest.TestCase):
         self.assertEqual(create_call["oa_row_ids"], ["oa-link"])
         self.assertEqual(create_call["bank_transaction_ids"], ["bank-link"])
         self.assertEqual(create_call["source_action"], "link_bank_transactions")
-        self.assertEqual(
-            refresh_calls,
-            [
-                ("workbench", "2026-06", "oa_pending_payment_link_bank_transactions"),
-                ("oa_pending_payment", "2026-06", "oa_pending_payment_link_bank_transactions"),
-                ("workbench", "all", "oa_pending_payment_link_bank_transactions"),
-            ],
-        )
+        self.assertEqual(refresh_calls, [])
         self.assertEqual(payload["read_model_scope_keys"], ["2026-06"])
         self.assertEqual(
             payload["freshness_targets"],
-            [{"read_model_key": "oa_pending_payment", "scope_key": "2026-06"}],
+            [],
         )
 
     def test_link_bank_transactions_keeps_relation_without_writeback_when_amount_mismatches(self) -> None:
@@ -254,14 +247,7 @@ class OaPendingPaymentCommandServiceTests(unittest.TestCase):
         self.assertEqual(payload["oaPaymentWritebacks"][0]["oaRowId"], "oa-completed-paid")
         self.assertEqual(payment_repository.marked_flow_ids, ["507f1f77bcf86cd799439020"])
         self.assertEqual(relation_command.confirm_calls, [])
-        self.assertEqual(
-            refresh_calls,
-            [
-                ("workbench", "2026-06", "oa_pending_payment_writeback_paid"),
-                ("oa_pending_payment", "2026-06", "oa_pending_payment_writeback_paid"),
-                ("workbench", "all", "oa_pending_payment_writeback_paid"),
-            ],
-        )
+        self.assertEqual(refresh_calls, [])
 
     def test_writeback_paid_uses_full_relation_for_amount_check_but_only_writes_requested_oa(self) -> None:
         payment_repository = FakePaymentStatusRepository(
@@ -404,8 +390,8 @@ class OaPendingPaymentCommandServiceTests(unittest.TestCase):
         self.assertEqual(payload["writebackCount"], 0)
         self.assertEqual(payment_repository.marked_flow_ids, [])
         self.assertEqual([[record.id for record in call] for call in snapshot_writer.calls], [["oa-completed-paid"]])
-        self.assertTrue(payload["readModelRefresh"]["enqueued"])
-        self.assertIn(("oa_pending_payment", "2026-06", "oa_pending_payment_writeback_paid"), refresh_calls)
+        self.assertFalse(payload["readModelRefresh"]["enqueued"])
+        self.assertEqual(refresh_calls, [])
 
     def test_writeback_paid_surfaces_retryable_error_when_snapshot_commit_fails(self) -> None:
         payment_repository = FakePaymentStatusRepository(
@@ -609,16 +595,6 @@ def _service(
     snapshot_writer: FakePaidStatusSnapshotWriter | None = None,
     refresh_calls: list[tuple[str, str, str]] | None = None,
 ) -> OaPendingPaymentCommandService:
-    calls = refresh_calls if refresh_calls is not None else []
-
-    def enqueue_workbench(scope_key: str, *, reason: str, **_kwargs: object) -> bool:
-        calls.append(("workbench", scope_key, reason))
-        return True
-
-    def enqueue_oa_pending(scope_key: str, *, reason: str, **_kwargs: object) -> bool:
-        calls.append(("oa_pending_payment", scope_key, reason))
-        return True
-
     return OaPendingPaymentCommandService(
         import_service=ImportNormalizationService(existing_transactions=transactions),
         oa_projection=StaticOAProjection(oa_records),
@@ -630,8 +606,6 @@ def _service(
         or FakePaidStatusSnapshotWriter(
             affected_scope_keys=() if payment_repository.pay_status == PAY_STATUS_PAID else ("2026-06",)
         ),
-        enqueue_workbench_refresh=enqueue_workbench,
-        enqueue_oa_pending_payment_refresh=enqueue_oa_pending,
     )
 
 

@@ -100,6 +100,7 @@ test.describe("OA pending payments in-progress bank link browser flow", () => {
     await expect(page.getByRole("button", { name: "关联支出流水" })).toBeEnabled();
 
     const rowsBeforeLink = api.count(ROWS_PATH);
+    const barriersBeforeLink = api.count("POST /api/operation-barrier/status");
     const drawer = page.getByLabel("关联支出流水抽屉", { exact: true });
     await recordLatency({
       operationId: "oa-pending-payments.open-bank-link-drawer",
@@ -168,12 +169,10 @@ test.describe("OA pending payments in-progress bank link browser flow", () => {
       actionType: "click",
     }, async (mark) => {
       const linkResponse = page.waitForResponse(responseFor("POST", "/api/oa-pending-payments/link-bank-transactions"));
-      const barrierResponse = page.waitForResponse(responseFor("POST", "/api/operation-barrier/status"));
       const rowsResponse = page.waitForResponse(responseFor("GET", "/api/oa-pending-payments/rows"));
       await drawer.getByRole("button", { name: "确认关联 1 条流水" }).click();
       await mark("firstVisibleResponseLatencyMs", expect(drawer.getByRole("button", { name: "关联中" })).toBeDisabled());
       await mark("apiLatencyMs", linkResponse);
-      await mark("operationBarrierLatencyMs", barrierResponse);
       await mark("finalSettledLatencyMs", rowsResponse);
     });
     await expect.poll(() => api.count(LINK_BANK_PATH)).toBe(1);
@@ -181,8 +180,9 @@ test.describe("OA pending payments in-progress bank link browser flow", () => {
       oa_row_ids: ["oa-bank-link-e2e-001"],
       bank_transaction_ids: ["bank-link-e2e-001"],
     });
+    expect(api.count("POST /api/operation-barrier/status")).toBe(barriersBeforeLink);
 
-    await expect(page.getByText("已关联支出流水并写回 OA，等待核对表刷新。")).toBeVisible();
+    await expect(page.getByText("已关联支出流水并写回 OA，正在重新加载当前核对表。")).toBeVisible();
     await expect(page.getByRole("heading", { name: "关联支出流水" })).toHaveCount(0);
     await expect.poll(() => api.count(ROWS_PATH)).toBeGreaterThan(rowsBeforeLink);
 

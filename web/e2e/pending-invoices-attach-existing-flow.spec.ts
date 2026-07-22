@@ -203,7 +203,7 @@ test.describe("pending invoices attach existing invoice browser flow", () => {
       await picker.getByRole("button", { name: "确认建立关系" }).click();
       expect((await mark("apiLatencyMs", confirmResponse)).status()).toBe(200);
       await mark("firstVisibleResponseLatencyMs", expect(picker).toBeHidden());
-      await mark("operationBarrierLatencyMs", expect.poll(() => api.count("GET /api/pending-invoices/rows")).toBeGreaterThan(rowsBeforeConfirm));
+      await expect.poll(() => api.count("GET /api/pending-invoices/rows")).toBeGreaterThan(rowsBeforeConfirm);
     });
     await expect(picker).toBeHidden();
     expect(api.lastBody("POST /api/pending-invoices/attach-existing-invoices")).toMatchObject({
@@ -324,7 +324,7 @@ test.describe("pending invoices attach existing invoice browser flow", () => {
       await picker.getByRole("button", { name: "确认建立关系" }).click();
       expect((await mark("apiLatencyMs", recoveredConfirm)).status()).toBe(200);
       await mark("firstVisibleResponseLatencyMs", expect(picker).toBeHidden());
-      await mark("operationBarrierLatencyMs", expect.poll(() => api.count("GET /api/pending-invoices/rows")).toBeGreaterThan(rowsBeforeConfirm));
+      await expect.poll(() => api.count("GET /api/pending-invoices/rows")).toBeGreaterThan(rowsBeforeConfirm);
     });
     expect(api.count("POST /api/pending-invoices/attach-existing-invoices")).toBe(2);
 

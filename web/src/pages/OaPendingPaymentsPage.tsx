@@ -9,6 +9,7 @@ import InputInvoiceUsageDetailDrawer from "../components/inputInvoiceUsage/Input
 import OaPendingPaymentAuditIcon from "../components/oaPendingPayments/OaPendingPaymentAuditIcon";
 import OaPendingPaymentsTable from "../components/oaPendingPayments/OaPendingPaymentsTable";
 import PendingInvoiceRulesDrawer from "../components/pendingInvoices/PendingInvoiceRulesDrawer";
+import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
 import {
   fetchOaPendingPaymentBankCandidates,
@@ -35,7 +36,7 @@ import type {
   LinkOaPendingPaymentBankTransactionsResponse,
   WritebackOaPendingPaymentPaidResponse,
 } from "../features/oaPendingPayments/types";
-import { operationBarrierTargets, waitForOperationFreshness } from "../features/operationBarrier/api";
+import { waitForOperationFreshness } from "../features/operationBarrier/api";
 import { fetchPendingInvoiceRules, savePendingInvoiceRules } from "../features/pendingInvoices/api";
 
 const initialQuery: OaPendingPaymentQuery = {
@@ -81,46 +82,6 @@ function isReadModelFresh(status: string) {
   return status === "fresh";
 }
 
-type OaPendingPaymentReadModelRefresh = {
-  scopeKeys?: string[];
-};
-
-function normalizedRefreshScopeKeys(refresh: OaPendingPaymentReadModelRefresh | undefined) {
-  return Array.from(new Set(
-    (refresh?.scopeKeys ?? [])
-      .map((scopeKey) => String(scopeKey).trim())
-      .filter(Boolean),
-  ));
-}
-
-function oaPendingPaymentBarrierTargets(refresh: OaPendingPaymentReadModelRefresh | undefined, currentScopeKey: string) {
-  const visibleScopeKey = currentScopeKey.trim() || "all";
-  const refreshScopeKeys = normalizedRefreshScopeKeys(refresh);
-  const concreteRefreshScopeKeys = refreshScopeKeys.filter((scopeKey) => scopeKey !== "all");
-  if (visibleScopeKey === "all" && concreteRefreshScopeKeys.length > 0) {
-    return operationBarrierTargets("oa_pending_payment", concreteRefreshScopeKeys);
-  }
-  if (refreshScopeKeys.includes(visibleScopeKey)) {
-    return operationBarrierTargets("oa_pending_payment", [visibleScopeKey]);
-  }
-  if (visibleScopeKey === "all" && refreshScopeKeys.length > 0) {
-    return operationBarrierTargets("oa_pending_payment", refreshScopeKeys);
-  }
-  return operationBarrierTargets("oa_pending_payment", [visibleScopeKey]);
-}
-
-async function waitForOaPendingPaymentBarrier(
-  refresh: OaPendingPaymentReadModelRefresh | undefined,
-  currentScopeKey: string,
-) {
-  try {
-    await waitForOperationFreshness(oaPendingPaymentBarrierTargets(refresh, currentScopeKey));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function readModelStatusTitle(status: string) {
   if (status === "stale") {
     return "OA 待付款核对数据不是最新";
@@ -144,6 +105,7 @@ function normalizeSummary(summary: OaPendingPaymentSummary | undefined, fallback
 
 export default function OaPendingPaymentsPage() {
   const { canAdminAccess, canMutateData } = useSessionPermissions();
+  const { active, activationGeneration } = useOptionalPageActivation("oa-pending-payments");
   const [query, setQuery] = useState<OaPendingPaymentQuery>(initialQuery);
   const [rows, setRows] = useState<OaPendingPaymentRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -269,15 +231,18 @@ export default function OaPendingPaymentsPage() {
   }, [applyRowsPayload, clearVisibleReadModel, query]);
 
   useEffect(() => {
+    if (!active) {
+      return undefined;
+    }
     const controller = new AbortController();
     etagRef.current = null;
     setConditionalPollingEnabled(false);
     void loadRows("reset", controller.signal);
     return () => controller.abort();
-  }, [loadRows]);
+  }, [active, activationGeneration, loadRows]);
 
   useEffect(() => {
-    if (!conditionalPollingEnabled) {
+    if (!active || !conditionalPollingEnabled) {
       return undefined;
     }
     let controller: AbortController | null = null;
@@ -314,7 +279,7 @@ export default function OaPendingPaymentsPage() {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       controller?.abort();
     };
-  }, [conditionalPollingEnabled, loadRows]);
+  }, [active, conditionalPollingEnabled, loadRows]);
 
   const handleKeywordSubmit = useCallback(() => {
     setQuery((current) => ({ ...current, page: 1, keyword: keywordDraft.trim() }));
@@ -374,14 +339,11 @@ export default function OaPendingPaymentsPage() {
     message: string,
     result: LinkOaPendingPaymentBankTransactionsResponse,
   ) => {
-    const synced = await waitForOaPendingPaymentBarrier(result.readModelRefresh, query.month || "all");
-    setFeedback(synced ? message : "已关联支出流水，后台同步尚未完成，请稍后刷新。");
+    setFeedback(message);
     setSelectedOaRowIds(new Set());
     setBankLinkDrawerOpen(false);
-    if (synced) {
-      loadRows("refresh");
-    }
-  }, [loadRows, query.month]);
+    loadRows("refresh");
+  }, [loadRows]);
 
   const handleWritebackPaid = useCallback(async (row: OaPendingPaymentRow) => {
     if (!canMutateData) {
@@ -395,13 +357,8 @@ export default function OaPendingPaymentsPage() {
     setWritingBackOaRowIds((current) => new Set([...current, ...oaRowIds]));
     try {
       const result = await writebackOaPendingPaymentPaid({ oaRowIds });
-      const synced = await waitForOaPendingPaymentBarrier(result.readModelRefresh, query.month || "all");
-      if (synced) {
-        setFeedback(writebackPaidFeedback(result));
-        loadRows("refresh");
-      } else {
-        setFeedback("写回已提交，后台同步尚未完成，请稍后刷新。");
-      }
+      setFeedback(writebackPaidFeedback(result));
+      loadRows("refresh");
     } catch (caught: unknown) {
       setActionError(caught instanceof Error ? caught.message : "写回失败。");
     } finally {
@@ -411,7 +368,7 @@ export default function OaPendingPaymentsPage() {
         return next;
       });
     }
-  }, [canMutateData, loadRows, query.month]);
+  }, [canMutateData, loadRows]);
 
   const loadExpensePendingInvoiceRules = useCallback(() => fetchPendingInvoiceRules("expense"), []);
 
@@ -653,9 +610,9 @@ function linkBankSuccessMessage(result: LinkOaPendingPaymentBankTransactionsResp
     || result.oaPaymentWriteback?.code === "written"
     || (result.oaPaymentWritebacks ?? []).some((item) => item.code === "written")
   ) {
-    return "已关联支出流水并写回 OA，等待核对表刷新。";
+    return "已关联支出流水并写回 OA，正在重新加载当前核对表。";
   }
-  return "已关联支出流水，等待核对表刷新。";
+  return "已关联支出流水，正在重新加载当前核对表。";
 }
 
 function selectableOaRowIds(row: OaPendingPaymentRow): string[] {

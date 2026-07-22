@@ -172,7 +172,7 @@ async function saveRules(buttonName: string, title: string) {
 
   await user.click(screen.getByRole("button", { name: "保存规则" }));
 
-  expect(await screen.findByText("规则已保存，相关数据正在刷新。")).toBeInTheDocument();
+  expect(await screen.findByText("规则已保存。")).toBeInTheDocument();
   expect(screen.queryByRole("dialog", { name: "全局操作进度" })).not.toBeInTheDocument();
   expect(screen.queryByText(/操作同步等待超时/)).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "关闭规则抽屉" }));
@@ -183,8 +183,8 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("pending invoice rule save timeout", () => {
-  test("keeps expense and income rule saves successful when read model freshness wait times out", async () => {
+describe("pending invoice rule save convergence", () => {
+  test("saves expense and income rules without a write-time freshness barrier", async () => {
     const fetchMock = installPendingInvoiceRulesSaveFetch();
     renderAppAt("/pending-invoices");
 
@@ -192,16 +192,12 @@ describe("pending invoice rule save timeout", () => {
     await waitFor(() => {
       expect(pendingInvoiceRulesPutRequests(fetchMock)).toHaveLength(1);
     });
-    expect(waitForOperationFreshness).toHaveBeenLastCalledWith([
-      { readModelKey: "pending_invoice", scopeKey: "expense:requires_invoice" },
-    ]);
+    expect(waitForOperationFreshness).not.toHaveBeenCalled();
 
     await saveRules("收入待找发票规则设置", "收入待找发票规则设置");
     await waitFor(() => {
       expect(pendingInvoiceRulesPutRequests(fetchMock)).toHaveLength(2);
     });
-    expect(waitForOperationFreshness).toHaveBeenLastCalledWith([
-      { readModelKey: "pending_invoice", scopeKey: "income:all" },
-    ]);
+    expect(waitForOperationFreshness).not.toHaveBeenCalled();
   }, 30_000);
 });

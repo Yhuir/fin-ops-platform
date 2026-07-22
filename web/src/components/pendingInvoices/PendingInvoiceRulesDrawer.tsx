@@ -138,7 +138,7 @@ export default function PendingInvoiceRulesDrawer({
       const savedPayload = await saveRules(payload);
       setPayload(savedPayload);
       setBaselinePayload(savedPayload);
-      setRefreshNotice(savedPayload.readModelStatus === "refreshing" ? "规则已保存，相关数据正在刷新。" : "规则已保存。");
+      setRefreshNotice("规则已保存。");
       await onSaved(savedPayload);
     } catch (reason) {
       setError(resolveRuleSaveErrorMessage(reason));

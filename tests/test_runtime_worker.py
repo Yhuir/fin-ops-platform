@@ -305,6 +305,28 @@ class RuntimeWorkerTests(unittest.TestCase):
             ],
         )
 
+    def test_run_once_rejects_invoice_lifecycle_dependency_outside_manifest(self) -> None:
+        claimed = RuntimeQueueEvent(
+            **{
+                **event("invoice_lifecycle.read_model.refresh").__dict__,
+                "scope_type": "invoice_lifecycle",
+                "scope_key": "2026-04",
+            }
+        )
+        queue = FakeQueue(claimed)
+
+        def fail_not_fresh(_event: RuntimeQueueEvent) -> None:
+            raise RuntimeError("bank_detail_read_model_not_fresh")
+
+        worker = RuntimeWorker(
+            queue_repository=queue,
+            config=RuntimeWorkerConfig(event_types=["invoice_lifecycle.read_model.refresh"]),
+            handlers={"invoice_lifecycle.read_model.refresh": fail_not_fresh},
+        )
+
+        self.assertEqual(worker.run_once(), RuntimeWorkerResult.DEFERRED)
+        self.assertEqual(queue.enqueued_read_model_refreshes, [])
+
     def test_run_once_does_not_enqueue_bank_detail_all_for_all_scope_dependency(self) -> None:
         claimed = RuntimeQueueEvent(
             **{

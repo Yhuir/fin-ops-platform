@@ -18,7 +18,6 @@ import ReceiptSettingsDrawer from "../components/outputInvoiceCollections/Receip
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
-import { operationBarrierTargets, waitForOperationFreshness } from "../features/operationBarrier/api";
 import {
   cancelOutputInvoiceCollectionReminder,
   downloadOutputInvoiceCollectionExport,
@@ -69,7 +68,7 @@ const initialQuery: OutputInvoiceCollectionQuery = {
   activeWorkflow: null,
   detailTarget: null,
 };
-const READ_MODEL_REFRESH_RETRY_MS = 10000;
+const READ_MODEL_REFRESH_RETRY_MS = 250;
 const READ_MODEL_REFRESHING_STATUSES = new Set(["refreshing", "stale", "missing", "schema_mismatch"]);
 const READ_MODEL_NON_FRESH_STATUSES = new Set([...READ_MODEL_REFRESHING_STATUSES, "failed", "unavailable"]);
 
@@ -313,10 +312,13 @@ export default function OutputInvoiceCollectionsPage() {
   ]);
 
   useEffect(() => {
+    if (!active) {
+      return undefined;
+    }
     const controller = new AbortController();
     loadRows("reset", controller.signal);
     return () => controller.abort();
-  }, [loadRows]);
+  }, [active, loadRows]);
 
   useEffect(() => {
     if (!active || readModelStatus !== "refreshing" || loading || refreshing) {
@@ -477,20 +479,9 @@ export default function OutputInvoiceCollectionsPage() {
     return code ? [{ code, label }] : [];
   }, [collectionStatusRow, manualStatusOptions]);
 
-  const handleLifecycleChanged = useCallback(async (result?: OutputInvoiceCollectionMutationResponse | null) => {
-    const responseTargets = (result?.operationBarrierTargets ?? result?.freshnessTargets ?? [])
-      .filter((target) => target.scopeKey && target.scopeKey !== "all");
-    const targets = responseTargets.length > 0
-      ? responseTargets
-      : operationBarrierTargets("output_invoice_collection", [query.month || "all"]);
-    try {
-      await waitForOperationFreshness(targets);
-      loadRows("refresh");
-    } catch {
-      // The write already committed. Do not immediately reread a projection that
-      // the runtime has reported as not yet fresh.
-    }
-  }, [loadRows, query.month]);
+  const handleLifecycleChanged = useCallback(async (_result?: OutputInvoiceCollectionMutationResponse | null) => {
+    loadRows("refresh");
+  }, [loadRows]);
 
   const exportRequest = useMemo(() => ({
     page: query.page,

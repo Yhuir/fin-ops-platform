@@ -53,7 +53,7 @@ function startBrowserRuntimeErrorCapture(
 }
 
 test.describe("pending invoices rules save browser flow", () => {
-  test("saves expense rules through the pending invoice freshness barrier and refreshes rows", async ({ page }, testInfo) => {
+  test("saves expense rules without a write-time barrier and reloads the current page", async ({ page }, testInfo) => {
     const browserErrors = startBrowserRuntimeErrorCapture(page);
     const diagnostics = startPageDiagnostics(page);
     const api = await installDeterministicApiMocks(page, {
@@ -72,6 +72,7 @@ test.describe("pending invoices rules save browser flow", () => {
     });
     await expect(page.getByRole("row", { name: /智能工厂设备商/ })).toBeVisible();
     const rowsBeforeSave = api.count("GET /api/pending-invoices/rows");
+    const barriersBeforeSave = api.count("POST /api/operation-barrier/status");
 
     await recordLatency({
       operationId: "pending-invoices.open-expense-rules-drawer",
@@ -99,7 +100,6 @@ test.describe("pending invoices rules save browser flow", () => {
       const saveResponse = waitForPendingInvoiceRulesSave(page);
       await page.getByRole("button", { name: "保存规则" }).click();
       expect((await mark("apiLatencyMs", saveResponse)).status()).toBe(200);
-      await mark("operationBarrierLatencyMs", expect.poll(() => api.count("POST /api/operation-barrier/status")).toBeGreaterThan(0));
       await mark("finalSettledLatencyMs", expect.poll(() => api.count("GET /api/pending-invoices/rows")).toBeGreaterThan(rowsBeforeSave));
     });
 
@@ -113,17 +113,9 @@ test.describe("pending invoices rules save browser flow", () => {
       version: 1,
     });
 
-    await expect.poll(() => api.count("POST /api/operation-barrier/status")).toBeGreaterThan(0);
-    expect(api.lastBody("POST /api/operation-barrier/status")).toMatchObject({
-      targets: [
-        {
-          read_model_key: "pending_invoice",
-          scope_key: "expense:requires_invoice",
-        },
-      ],
-    });
+    expect(api.count("POST /api/operation-barrier/status")).toBe(barriersBeforeSave);
     await expect.poll(() => api.count("GET /api/pending-invoices/rows")).toBeGreaterThan(rowsBeforeSave);
-    await expect(page.getByRole("status").filter({ hasText: "规则已保存，相关数据正在刷新。" })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: "规则已保存。" })).toBeVisible();
     await expect(page.getByRole("row", { name: /智能工厂设备商/ })).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(browserErrors).toEqual([]);
@@ -208,13 +200,12 @@ test.describe("pending invoices rules save browser flow", () => {
       const saveResponse = waitForPendingInvoiceRulesSave(page);
       await page.getByRole("button", { name: "保存规则" }).click();
       expect((await mark("apiLatencyMs", saveResponse)).status()).toBe(200);
-      await mark("operationBarrierLatencyMs", expect.poll(() => api.count("POST /api/operation-barrier/status")).toBeGreaterThan(barrierBeforeSave));
       await mark("finalSettledLatencyMs", expect.poll(() => api.count("GET /api/pending-invoices/rows")).toBeGreaterThan(rowsBeforeSave));
     });
     await expect.poll(() => api.count("PUT /api/pending-invoices/rules")).toBe(2);
-    await expect.poll(() => api.count("POST /api/operation-barrier/status")).toBeGreaterThan(barrierBeforeSave);
+    expect(api.count("POST /api/operation-barrier/status")).toBe(barrierBeforeSave);
     await expect.poll(() => api.count("GET /api/pending-invoices/rows")).toBeGreaterThan(rowsBeforeSave);
-    await expect(page.getByRole("status").filter({ hasText: "规则已保存，相关数据正在刷新。" })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: "规则已保存。" })).toBeVisible();
     await expect(page.getByRole("row", { name: /智能工厂设备商/ })).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(browserErrors).toEqual([]);

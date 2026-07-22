@@ -1364,6 +1364,32 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual(writer_versions, api_versions)
 
+    def test_pending_invoice_writer_and_api_versions_are_direction_exact(self) -> None:
+        connection = SearchPendingConnection()
+        builder = SearchPendingSqlProjectionBuilder(connection=connection)
+        settings = {
+            "pending_invoice_tag_groups": {"version": 1},
+            "pending_output_invoice_tag_groups": {"version": 1},
+            "bank_transaction_tags": {"version": 1},
+        }
+
+        for direction, included_key, excluded_key in (
+            ("expense", "pending_invoice_tag_groups_version", "pending_output_invoice_tag_groups_version"),
+            ("income", "pending_output_invoice_tag_groups_version", "pending_invoice_tag_groups_version"),
+        ):
+            writer_versions = builder._pending_invoice_source_versions(direction)
+            api_versions = pending_invoice_source_versions(
+                settings,
+                direction=direction,
+                attachment_invoice_parser_version=str(writer_versions["oa_attachment_invoice_parser_version"]),
+                oa_projection_sync_version=str(writer_versions["oa_projection_sync_version"]),
+                bank_detail_source_versions={},
+                workbench_relation_source_versions={},
+            )
+            self.assertEqual(writer_versions, api_versions)
+            self.assertIn(included_key, writer_versions)
+            self.assertNotIn(excluded_key, writer_versions)
+
     def test_search_projection_reads_unique_workbench_rows_before_python_build(self) -> None:
         connection = SearchPendingConnection(
             workbench_rows=[

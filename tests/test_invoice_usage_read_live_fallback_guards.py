@@ -29,7 +29,6 @@ class InvoiceUsageReadLiveFallbackGuardTests(unittest.TestCase):
             xlsx_response=lambda filename, content: (filename, content),
             app_settings_service=object(),
             load_json_body=lambda _body: ({}, None),
-            payment_rules_refreshes=lambda _payload: None,
             payment_rules_error_response=lambda exc: exc,
             json_response=lambda status, payload: (status, payload),
             input_usage_error_response=lambda exc: exc,

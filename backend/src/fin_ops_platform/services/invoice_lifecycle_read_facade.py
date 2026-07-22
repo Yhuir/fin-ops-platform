@@ -4,12 +4,14 @@ from typing import Any
 
 from fin_ops_platform.services.invoice_lifecycle_read_model_repository import InvoiceLifecycleReadModelRepositoryPort
 from fin_ops_platform.services.postgres_repositories.common import text
+from fin_ops_platform.services.read_model_manifest import READ_MODEL_MANIFEST
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 
 
 FRESH_INVOICE_LIFECYCLE_STATUS = "fresh"
 NON_FRESH_INVOICE_LIFECYCLE_STATUSES = {"refreshing", "stale", "missing", "schema_mismatch", "unavailable", "failed"}
 INVOICE_LIFECYCLE_SCOPE_TYPE = "invoice_lifecycle"
+INVOICE_LIFECYCLE_READ_DEPENDENCIES = READ_MODEL_MANIFEST[INVOICE_LIFECYCLE_SCOPE_TYPE].read_dependencies
 
 
 class InvoiceLifecycleReadFacade:
@@ -203,11 +205,40 @@ class InvoiceLifecycleReadFacade:
         refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
         if not refresh_gateway.can_enqueue():
             return False
-        return bool(
+        normalized_scope_keys = _dedupe_preserve_order(text(value) for value in list(scope_keys or []))
+        dependency_enqueued = False
+        for dependency_scope_type, dependency_scope_key in _invoice_lifecycle_dependency_scopes(normalized_scope_keys):
+            if self._dependency_scope_is_fresh(dependency_scope_type, dependency_scope_key):
+                continue
+            dependency_enqueued = bool(
+                refresh_gateway.enqueue_one(
+                    dependency_scope_type,
+                    dependency_scope_key,
+                    reason="invoice_lifecycle_access_dependency",
+                    tenant_id=self._tenant_id,
+                    priority="high",
+                )
+            ) or dependency_enqueued
+        lifecycle_enqueued = bool(
             refresh_gateway.enqueue_many(
                 INVOICE_LIFECYCLE_SCOPE_TYPE,
-                _dedupe_preserve_order(text(value) for value in list(scope_keys or [])),
+                normalized_scope_keys,
                 reason=reason,
+                tenant_id=self._tenant_id,
+                priority="high",
+            )
+        )
+        return dependency_enqueued or lifecycle_enqueued
+
+    def _dependency_scope_is_fresh(self, scope_type: str, scope_key: str) -> bool:
+        checker = getattr(self._queue_repository, "read_model_refresh_is_fresh", None)
+        if not callable(checker):
+            return False
+        return bool(
+            checker(
+                tenant_id=self._tenant_id,
+                scope_type=scope_type,
+                scope_key=scope_key,
             )
         )
 
@@ -246,6 +277,24 @@ def _fallback_scope_keys(*, month_hint: str | None = None, scope_keys_hint: list
         return scope_keys
     month = text(month_hint)
     return [month] if month else []
+
+
+def _invoice_lifecycle_dependency_scopes(scope_keys: list[str]) -> list[tuple[str, str]]:
+    targets: list[tuple[str, str]] = []
+    for scope_key in scope_keys:
+        if len(scope_key) != 7 or scope_key[4:5] != "-" or not scope_key[:4].isdigit() or not scope_key[5:].isdigit():
+            continue
+        for dependency in INVOICE_LIFECYCLE_READ_DEPENDENCIES:
+            if dependency == "pending_invoice":
+                targets.extend(
+                    [
+                        (dependency, f"expense:all:{scope_key}"),
+                        (dependency, f"income:all:{scope_key}"),
+                    ]
+                )
+                continue
+            targets.append((dependency, scope_key))
+    return list(dict.fromkeys(targets))
 
 
 def _text_list(value: object) -> list[str]:

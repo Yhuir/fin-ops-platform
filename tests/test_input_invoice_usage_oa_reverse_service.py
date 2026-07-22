@@ -308,10 +308,8 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         self.assertEqual(context.exception.error_code, "input_invoice_usage_oa_reverse_preview_refreshing")
 
     def test_create_batch_is_idempotent_and_persists_audit_metadata(self) -> None:
-        statistics_invalidations: list[str] = []
         service = self._service(
             invoices=[self._invoice("inv-1", "1001", self._counterparty("vendor", "供应商"))],
-            statistics_invalidator=statistics_invalidations.append,
         )
         preview = service.preview(
             {"invoiceIds": ["inv-1"], "targetApplicantCode": "chen_xiuyun"}, can_create_draft=True
@@ -343,7 +341,7 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         self.assertEqual(first["version"], 1)
         self.assertEqual(first["createdBy"], "user-1")
         self.assertEqual(first["auditEvents"][0]["eventType"], "oa_reverse_batch_created")
-        self.assertEqual(statistics_invalidations, ["input_invoice_usage_oa_reverse_batch_created"])
+        self.assertEqual(first["operation_barrier_targets"], [])
 
     def test_create_oa_draft_from_selection_creates_internal_batch_and_uses_target_provider(self) -> None:
         service = self._service(invoices=[self._invoice("inv-1", "1001", self._counterparty("vendor", "供应商"))])
@@ -368,8 +366,8 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         self.assertEqual(provider.requested_codes, ["zhou_jieying"])
         self.assertEqual(provider.client.requests[0]["payload"]["data"]["applicant"], "周洁莹")
         self.assertIn("input_invoice_usage_oa_reverse_batch_", drafted["batchId"])
-        self.assertNotIn("freshness_targets", drafted)
-        self.assertNotIn("operation_barrier_targets", drafted)
+        self.assertEqual(drafted["freshness_targets"], [])
+        self.assertEqual(drafted["operation_barrier_targets"], [])
 
     def test_staged_drafts_returns_created_drafts_waiting_for_user_decision(self) -> None:
         service = self._service(
@@ -479,7 +477,6 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         service = self._service(
             invoices=[self._invoice("inv-1", "1001", self._counterparty("vendor", "供应商"))],
             oa_client=FakeOaDraftClient(),
-            read_model_invalidator=lambda months, reason: invalidations.append((months, reason)),
         )
         batch = self._create_batch(service, ["inv-1"])
         drafted = service.create_oa_draft(
@@ -503,8 +500,8 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         self.assertIsNone(revoked["oaDraftId"])
         self.assertEqual(revoked["oaDetectionStatus"], "revoked")
         self.assertEqual(revoked["oaDetectionPayload"]["revokedOaDraftId"], "oa-draft-001")
-        self.assertNotIn("freshness_targets", revoked)
-        self.assertNotIn("operation_barrier_targets", revoked)
+        self.assertEqual(revoked["freshness_targets"], [])
+        self.assertEqual(revoked["operation_barrier_targets"], [])
         self.assertEqual(invalidations, [])
 
     def test_create_oa_draft_uses_selected_applicant_form_data_and_waits_for_user_submission_choice(self) -> None:
@@ -645,7 +642,6 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
             oa_client=FakeOaDraftClient(),
             evidence_provider=StaticEvidenceProvider(evidence),
             relation_writer=lambda batch, evidence: relation_calls.append((batch, evidence)),
-            read_model_invalidator=lambda scopes, reason: invalidations.append((list(scopes), reason)),
         )
         batch = self._create_batch(service, ["inv-1"])
         drafted = service.create_oa_draft(
@@ -672,15 +668,10 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         self.assertEqual(relation_batch.batch_id, refreshed["batchId"])
         self.assertEqual(relation_batch.oa_row_id, "oa-projected-001")
         self.assertIs(relation_evidence, evidence)
-        self.assertEqual(
-            invalidations,
-            [
-                (["2026-05"], "input_invoice_usage_oa_reverse_evidence_detected"),
-            ],
-        )
+        self.assertEqual(invalidations, [])
         self.assertEqual(
             refreshed["operation_barrier_targets"],
-            [{"read_model_key": "input_invoice_usage", "scope_key": "2026-05"}],
+            [],
         )
 
     def _create_batch(self, service: InputInvoiceUsageOaReverseService, invoice_ids: list[str]) -> dict[str, object]:
@@ -802,8 +793,6 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
         oa_client: object | None = None,
         evidence_provider: object | None = None,
         relation_writer: object | None = None,
-        read_model_invalidator: object | None = None,
-        statistics_invalidator: object | None = None,
     ) -> InputInvoiceUsageOaReverseService:
         query_service = InputInvoiceUsageQueryService(
             payment_rules_provider=AppSettingsInputInvoiceUsagePaymentRulesProvider(state_store=None),
@@ -821,8 +810,6 @@ class InputInvoiceUsageOaReverseServiceTests(unittest.TestCase):
             oa_client=oa_client,
             evidence_provider=evidence_provider,
             relation_writer=relation_writer,
-            read_model_invalidator=read_model_invalidator,
-            statistics_invalidator=statistics_invalidator,
             read_model_rows_loader=lambda query: query_service.list_rows(
                 page=query.get("page", [1])[0],
                 page_size=query.get("page_size", [200])[0],

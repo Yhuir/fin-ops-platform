@@ -37,7 +37,6 @@ class InputInvoiceUsageApiRoutes:
         xlsx_response: Callable[[str, bytes], Any],
         app_settings_service: Any,
         load_json_body: Callable[[str | bytes | None], tuple[dict[str, Any], Any | None]],
-        payment_rules_refreshes: Callable[[dict[str, object]], None],
         payment_rules_error_response: Callable[[AppSettingsValidationError], Any],
         json_response: Callable[[HTTPStatus, object], Any],
         input_usage_error_response: Callable[[InputInvoiceUsageError], Any],
@@ -58,7 +57,6 @@ class InputInvoiceUsageApiRoutes:
         self._xlsx_response = xlsx_response
         self._app_settings_service = app_settings_service
         self._load_json_body = load_json_body
-        self._payment_rules_refreshes = payment_rules_refreshes
         self._payment_rules_error_response = payment_rules_error_response
         self._json_response = json_response
         self._input_usage_error_response = input_usage_error_response
@@ -191,7 +189,6 @@ class InputInvoiceUsageApiRoutes:
             updated = self._app_settings_service.update_input_invoice_usage_payment_status_rules(
                 payload,
                 actor_id=str(actor_id or "input_invoice_usage_payment_rules"),
-                after_input_invoice_usage_payment_rules_saved=self._payment_rules_refreshes,
             )
         except AppSettingsValidationError as exc:
             return self._payment_rules_error_response(exc)

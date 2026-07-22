@@ -531,7 +531,7 @@ class OutputInvoiceCollectionApiTests(unittest.TestCase):
 
         expected_freshness = {
             "read_model_scope_keys": ["2026-05"],
-            "freshness_targets": [{"read_model_key": "output_invoice_collection", "scope_key": "2026-05"}],
+            "freshness_targets": [],
         }
         status_payload = json.loads(status_response.body)
         reminder_payload = json.loads(reminder_response.body)
@@ -561,11 +561,8 @@ class OutputInvoiceCollectionApiTests(unittest.TestCase):
             reissue_payload,
         ]:
             self.assertEqual({key: payload[key] for key in expected_freshness}, expected_freshness)
-        self.assertEqual(red_relation_delete_payload["read_model_scope_keys"], ["all"])
-        self.assertEqual(
-            red_relation_delete_payload["freshness_targets"],
-            [{"read_model_key": "output_invoice_collection", "scope_key": "all"}],
-        )
+        self.assertEqual(red_relation_delete_payload["read_model_scope_keys"], [])
+        self.assertEqual(red_relation_delete_payload["freshness_targets"], [])
         self.assertEqual(refreshed_row["collectionStatus"]["code"], "pending_red_invoice")
         self.assertIsNone(refreshed_row["collectionStatus"]["reminder"])
         self.assertFalse(any(item["source"] == "manual" for item in refreshed_row["redInvoiceRelation"]["summaries"]))

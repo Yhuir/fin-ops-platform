@@ -14,7 +14,6 @@ import PaymentStatusRulesDrawer from "../components/inputInvoiceUsage/PaymentSta
 import { usePageSessionState } from "../contexts/PageSessionStateContext";
 import { useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useSessionPermissions } from "../contexts/SessionContext";
-import { operationBarrierTargets, waitForOperationFreshness } from "../features/operationBarrier/api";
 import {
   downloadInputInvoiceUsageExport,
   fetchInputInvoiceUsageBankTransactionDetail,
@@ -57,7 +56,7 @@ const initialQuery: InputInvoiceUsageQuery = {
   activeWorkflow: null,
   detailTarget: null,
 };
-const READ_MODEL_REFRESH_RETRY_MS = 10000;
+const READ_MODEL_REFRESH_RETRY_MS = 250;
 const READ_MODEL_REFRESHING_STATUSES = new Set(["refreshing", "stale", "missing", "schema_mismatch"]);
 const READ_MODEL_NON_FRESH_STATUSES = new Set([...READ_MODEL_REFRESHING_STATUSES, "failed", "unavailable"]);
 
@@ -270,10 +269,13 @@ export default function InputInvoiceUsagePage() {
   ]);
 
   useEffect(() => {
+    if (!active) {
+      return undefined;
+    }
     const controller = new AbortController();
     loadRows(hasLoadedRef.current ? "refresh" : "reset", controller.signal);
     return () => controller.abort();
-  }, [loadRows]);
+  }, [active, loadRows]);
 
   useEffect(() => {
     if (!active || readModelStatus !== "refreshing" || loading || refreshing) {
@@ -359,22 +361,9 @@ export default function InputInvoiceUsagePage() {
     setQuery((current) => ({ ...current, activeWorkflow: null }));
   }, [setQuery]);
 
-  const waitForInputInvoiceUsageBarrier = useCallback(async () => {
-    try {
-      await waitForOperationFreshness(operationBarrierTargets("input_invoice_usage", [query.month || "all"]));
-      return true;
-    } catch {
-      return false;
-    }
-  }, [query.month]);
-
   const handlePaymentStatusRulesSaved = useCallback(async () => {
-    const synced = await waitForInputInvoiceUsageBarrier();
-    if (!synced) {
-      return;
-    }
     loadRows("refresh");
-  }, [loadRows, waitForInputInvoiceUsageBarrier]);
+  }, [loadRows]);
 
   const loadDetail = useCallback((target: InputInvoiceUsageDetailTarget) => {
     if (target.kind === "invoice") {

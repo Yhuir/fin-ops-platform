@@ -398,7 +398,7 @@ test.describe("output invoice collections browser flow", () => {
       await statusDrawer.getByRole("button", { name: "保存" }).click();
       expect((await mark("apiLatencyMs", statusResponse)).status()).toBe(200);
       expect((await reminderResponse).status()).toBe(200);
-      await mark("operationBarrierLatencyMs", expect.poll(() => api.count("GET /api/output-invoice-collections/rows")).toBeGreaterThan(rowsBeforeStatusSave));
+      await expect.poll(() => api.count("GET /api/output-invoice-collections/rows")).toBeGreaterThan(rowsBeforeStatusSave);
       await mark("finalSettledLatencyMs", expect(page.getByRole("dialog", { name: "收款状态和提醒" })).toBeHidden());
     });
     await expect(page.getByRole("dialog", { name: "收款状态和提醒" })).toBeHidden();
@@ -429,7 +429,7 @@ test.describe("output invoice collections browser flow", () => {
       const createReceiptResponse = waitForOutputInvoiceReceiptCreate(page);
       await receiptDrawer.getByRole("button", { name: "创建正式收据" }).click();
       expect((await mark("apiLatencyMs", createReceiptResponse)).status()).toBe(200);
-      await mark("operationBarrierLatencyMs", expect.poll(() => api.count("GET /api/output-invoice-collections/rows")).toBeGreaterThan(rowsBeforeReceiptCreate));
+      await expect.poll(() => api.count("GET /api/output-invoice-collections/rows")).toBeGreaterThan(rowsBeforeReceiptCreate);
       await mark("finalSettledLatencyMs", expect(page.getByRole("dialog", { name: "待出收据预览" })).toBeHidden());
     });
     expect(api.count("POST /api/output-invoice-collections/rows/output-collection-row-e2e-001/receipts")).toBe(1);
@@ -477,7 +477,7 @@ test.describe("output invoice collections browser flow", () => {
       await voidDialog.getByRole("button", { name: "确认作废" }).click();
       voidBody = JSON.parse((await voidReceiptRequest).postData() ?? "{}") as { reason?: string };
       expect((await mark("apiLatencyMs", voidReceiptResponse)).status()).toBe(200);
-      await mark("operationBarrierLatencyMs", expect.poll(() => api.count("GET /api/output-invoice-collections/rows")).toBeGreaterThan(rowsBeforeReceiptVoid));
+      await expect.poll(() => api.count("GET /api/output-invoice-collections/rows")).toBeGreaterThan(rowsBeforeReceiptVoid);
       await mark("finalSettledLatencyMs", expect(page.getByRole("dialog", { name: "作废收据原因" })).toHaveCount(0));
     });
     if (!voidBody) {
@@ -516,7 +516,7 @@ test.describe("output invoice collections browser flow", () => {
       await reissueDialog.getByRole("button", { name: "确认重开" }).click();
       reissueBody = JSON.parse((await reissueReceiptRequest).postData() ?? "{}") as { reason?: string };
       expect((await mark("apiLatencyMs", reissueReceiptResponse)).status()).toBe(200);
-      await mark("operationBarrierLatencyMs", expect.poll(() => api.count("GET /api/output-invoice-collections/rows")).toBeGreaterThan(rowsBeforeReceiptReissue));
+      await expect.poll(() => api.count("GET /api/output-invoice-collections/rows")).toBeGreaterThan(rowsBeforeReceiptReissue);
       await mark("finalSettledLatencyMs", expect(page.getByRole("dialog", { name: "重开收据原因" })).toHaveCount(0));
     });
     if (!reissueBody) {
@@ -604,7 +604,7 @@ test.describe("output invoice collections browser flow", () => {
       await statusDrawer.getByRole("button", { name: "保存" }).click();
       expect((await mark("apiLatencyMs", retryStatusResponse)).status()).toBe(200);
       expect((await retryReminderResponse).status()).toBe(200);
-      await mark("operationBarrierLatencyMs", expect.poll(() => api.count("GET /api/output-invoice-collections/rows")).toBeGreaterThan(rowsBeforeSave));
+      await expect.poll(() => api.count("GET /api/output-invoice-collections/rows")).toBeGreaterThan(rowsBeforeSave);
       await mark("finalSettledLatencyMs", expect(statusDrawer).toBeHidden());
     });
     await expect(statusDrawer).toBeHidden();
@@ -688,7 +688,7 @@ test.describe("output invoice collections browser flow", () => {
       const retryReminderResponse = waitForOutputInvoiceReminderSave(page);
       await statusDrawer.getByRole("button", { name: "保存" }).click();
       expect((await mark("apiLatencyMs", retryReminderResponse)).status()).toBe(200);
-      await mark("operationBarrierLatencyMs", expect.poll(() => api.count("GET /api/output-invoice-collections/rows")).toBeGreaterThan(rowsBeforeSave));
+      await expect.poll(() => api.count("GET /api/output-invoice-collections/rows")).toBeGreaterThan(rowsBeforeSave);
       await mark("finalSettledLatencyMs", expect(statusDrawer).toBeHidden());
     });
     expect(api.count("PUT /api/output-invoice-collections/rows/output-collection-row-e2e-001/collection-status")).toBe(1);
@@ -771,7 +771,7 @@ test.describe("output invoice collections browser flow", () => {
       const retryCreateResponse = waitForOutputInvoiceReceiptCreate(page);
       await receiptDrawer.getByRole("button", { name: "创建正式收据" }).click();
       expect((await mark("apiLatencyMs", retryCreateResponse)).status()).toBe(200);
-      await mark("operationBarrierLatencyMs", expect.poll(() => api.count("GET /api/output-invoice-collections/rows")).toBeGreaterThan(rowsBeforeCreate));
+      await expect.poll(() => api.count("GET /api/output-invoice-collections/rows")).toBeGreaterThan(rowsBeforeCreate);
       await mark("finalSettledLatencyMs", expect(receiptDrawer).toBeHidden());
     });
     await expect(receiptDrawer).toBeHidden();
@@ -860,7 +860,7 @@ test.describe("output invoice collections browser flow", () => {
       const retryVoidResponse = waitForOutputInvoiceReceiptVoid(page);
       await voidDialog.getByRole("button", { name: "确认作废" }).click();
       expect((await mark("apiLatencyMs", retryVoidResponse)).status()).toBe(200);
-      await mark("operationBarrierLatencyMs", expect.poll(() => api.count("GET /api/output-invoice-collections/rows")).toBeGreaterThan(rowsBeforeVoid));
+      await expect.poll(() => api.count("GET /api/output-invoice-collections/rows")).toBeGreaterThan(rowsBeforeVoid);
       await mark("finalSettledLatencyMs", expect(voidDialog).toHaveCount(0));
     });
     await expect(voidDialog).toHaveCount(0);
@@ -909,7 +909,7 @@ test.describe("output invoice collections browser flow", () => {
       const retryReissueResponse = waitForOutputInvoiceReceiptReissue(page);
       await reissueDialog.getByRole("button", { name: "确认重开" }).click();
       expect((await mark("apiLatencyMs", retryReissueResponse)).status()).toBe(200);
-      await mark("operationBarrierLatencyMs", expect.poll(() => api.count("GET /api/output-invoice-collections/rows")).toBeGreaterThan(rowsBeforeReissue));
+      await expect.poll(() => api.count("GET /api/output-invoice-collections/rows")).toBeGreaterThan(rowsBeforeReissue);
       await mark("finalSettledLatencyMs", expect(reissueDialog).toHaveCount(0));
     });
     await expect(reissueDialog).toHaveCount(0);

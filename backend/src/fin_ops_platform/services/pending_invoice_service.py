@@ -65,9 +65,8 @@ def _with_pending_invoice_write_targets(result: dict[str, Any]) -> dict[str, Any
     affected_months = result.get("affected_months")
     result.update(
         write_target_envelope(
-            read_model_key="pending_invoice",
             scope_keys=affected_months,
-            fallback_scope_key="all",
+            targets=[],
         )
     )
     return result
@@ -1624,7 +1623,6 @@ class PendingInvoiceApplicationService:
         command_store: dict[str, dict[str, Any]] | None = None,
         command_repository: Any | None = None,
         audit_recorder: Callable[[dict[str, Any]], None] | None = None,
-        finalizer: Callable[[dict[str, Any]], None] | None = None,
         row_provider: Callable[[str, str], dict[str, Any]] | None = None,
         relation_facade: Any | None = None,
         relation_command_service: Any | None = None,
@@ -1635,7 +1633,6 @@ class PendingInvoiceApplicationService:
         self._relation_command_service = relation_command_service
         self._command_repository = command_repository or InMemoryPendingInvoiceCommandRepository(command_store)
         self._audit_recorder = audit_recorder
-        self._finalizer = finalizer
         self._row_provider = row_provider
         self._fault_injector = fault_injector
         self._previews: dict[str, dict[str, Any]] = {}
@@ -1859,19 +1856,6 @@ class PendingInvoiceApplicationService:
                 request_key=request_key,
                 affected_months=affected_months,
             )
-            self._finalize(
-                {
-                    "action": "pending_invoice_attach_existing_invoice_confirmed",
-                    "source": "pending_invoice_attach_existing_invoice",
-                    "entity_type": "pending_invoice_attach_existing_invoice",
-                    "transaction_id": transaction_id,
-                    "invoice_id": invoice_id,
-                    "relation_case_id": relation_case_id,
-                    "request_id": request_id,
-                    "request_key": request_key,
-                    "affected_months": affected_months,
-                }
-            )
             result = _with_pending_invoice_write_targets(result)
             command["result"] = deepcopy(result)
             self._mark_command(command, "completed")
@@ -2042,19 +2026,6 @@ class PendingInvoiceApplicationService:
                 request_key=request_key,
                 affected_months=affected_months,
             )
-            self._finalize(
-                {
-                    "action": "pending_invoice_attach_existing_invoice_confirmed",
-                    "source": "pending_invoice_attach_existing_invoice",
-                    "entity_type": "pending_invoice_attach_existing_invoice",
-                    "transaction_ids": list(transaction_ids),
-                    "invoice_ids": list(invoice_ids),
-                    "relation_case_id": relation_case_id,
-                    "request_id": request_id,
-                    "request_key": request_key,
-                    "affected_months": affected_months,
-                }
-            )
             result = _with_pending_invoice_write_targets(result)
             command["result"] = deepcopy(result)
             self._mark_command(command, "completed")
@@ -2159,16 +2130,6 @@ class PendingInvoiceApplicationService:
                 request_key=request_key,
                 affected_months=affected_months,
             )
-            self._finalize(
-                {
-                    "transaction_id": transaction_id,
-                    "invoice_id": invoice_id,
-                    "relation_case_id": relation_case_id,
-                    "request_id": request_id,
-                    "request_key": request_key,
-                    "affected_months": affected_months,
-                }
-            )
             command["result"] = deepcopy(result)
             self._mark_command(command, "completed")
             return result
@@ -2264,17 +2225,6 @@ class PendingInvoiceApplicationService:
             request_key=request_key,
             status_code=status_code,
             affected_months=affected_months,
-        )
-        self._finalize(
-            {
-                "action": "pending_invoice_income_status_override_confirmed",
-                "source": "pending_invoice_income_status_override",
-                "entity_type": "pending_invoice_income_status_override",
-                "transaction_id": transaction.id,
-                "request_id": request_id,
-                "request_key": request_key,
-                "affected_months": affected_months,
-            }
         )
         return result
 
@@ -2384,17 +2334,6 @@ class PendingInvoiceApplicationService:
             request_key=request_key,
             status_code=status_code,
             affected_months=affected_months,
-        )
-        self._finalize(
-            {
-                "action": "pending_invoice_income_status_override_confirmed",
-                "source": "pending_invoice_income_status_override",
-                "entity_type": "pending_invoice_income_status_override",
-                "transaction_ids": list(transaction_ids),
-                "request_id": request_id,
-                "request_key": request_key,
-                "affected_months": affected_months,
-            }
         )
         return result
 
@@ -3183,10 +3122,6 @@ class PendingInvoiceApplicationService:
                 "affected_months": list(affected_months),
             }
         )
-
-    def _finalize(self, event: dict[str, Any]) -> None:
-        if self._finalizer is not None:
-            self._finalizer(event)
 
     def _inject_fault(self, phase: str, command: dict[str, Any]) -> None:
         if self._fault_injector is not None:

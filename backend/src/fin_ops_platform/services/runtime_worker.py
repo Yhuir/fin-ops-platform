@@ -11,6 +11,7 @@ import signal
 from time import monotonic, sleep
 from typing import Any, Iterator
 
+from fin_ops_platform.services.read_model_manifest import read_model_manifest_by_scope_type
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 
@@ -22,6 +23,7 @@ READ_MODEL_NOT_FRESH_RE = re.compile(r"([a-z0-9_]+)_read_model_not_fresh")
 MONTH_SCOPE_RE = re.compile(r"\d{4}-\d{2}")
 PARENT_SCOPE_KEYS_RE = re.compile(r"parent_scope_keys=([0-9]{4}-[0-9]{2}(?:,[0-9]{4}-[0-9]{2})*)")
 FORCED_HEARTBEAT_STATUSES = frozenset({"processing", "deferred", "failed", "stopping", "stopped"})
+READ_MODEL_MANIFEST_BY_SCOPE_TYPE = read_model_manifest_by_scope_type()
 
 
 class RuntimeWorkerResult(str, Enum):
@@ -394,6 +396,8 @@ class RuntimeWorker:
                 continue
             if scope_type == str(event.scope_type or ""):
                 continue
+            if not cls._dependency_scope_type_is_declared(event, scope_type):
+                continue
             for scope_key in cls._dependency_scope_keys(scope_type, event):
                 identity = (scope_type, scope_key)
                 if identity in seen:
@@ -401,6 +405,14 @@ class RuntimeWorker:
                 seen.add(identity)
                 dependencies.append({"scope_type": scope_type, "scope_key": scope_key})
         return dependencies
+
+    @staticmethod
+    def _dependency_scope_type_is_declared(event: RuntimeQueueEvent, dependency_scope_type: str) -> bool:
+        source_entry = READ_MODEL_MANIFEST_BY_SCOPE_TYPE.get(str(event.scope_type or "").strip())
+        if source_entry is None or not source_entry.read_dependencies:
+            return True
+        dependency_entry = READ_MODEL_MANIFEST_BY_SCOPE_TYPE.get(str(dependency_scope_type or "").strip())
+        return dependency_entry is not None and dependency_entry.key in source_entry.read_dependencies
 
     @classmethod
     def _dependency_scope_keys(cls, dependency_scope_type: str, event: RuntimeQueueEvent) -> list[str]:

@@ -69,7 +69,7 @@ test.describe("pending invoices browser flow", () => {
     }, async (mark) => {
       await page.getByRole("link", { name: "待找发票" }).click();
       await mark("firstVisibleResponseLatencyMs", expect(page.getByTestId("pending-invoices-page")).toBeVisible());
-      await mark("operationBarrierLatencyMs", expect.poll(() => api.count("GET /api/pending-invoices/rows")).toBeGreaterThan(pendingRowsBefore));
+      await expect.poll(() => api.count("GET /api/pending-invoices/rows")).toBeGreaterThan(pendingRowsBefore);
     });
     const pendingRowAfter = page.getByRole("row", { name: /智能工厂设备商/ });
     await expect(pendingRowAfter.getByText("已支付已开票")).toBeVisible();

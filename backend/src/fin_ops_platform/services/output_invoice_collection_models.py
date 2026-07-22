@@ -71,7 +71,6 @@ def output_invoice_collection_scope_key(row: dict[str, Any]) -> str:
 def output_invoice_collection_freshness_metadata(row: dict[str, Any]) -> dict[str, object]:
     scope_key = output_invoice_collection_scope_key(row)
     return write_target_envelope(
-        read_model_key="output_invoice_collection",
-        scope_keys=[scope_key],
-        fallback_scope_key="all",
+        scope_keys=[] if scope_key == "all" else [scope_key],
+        targets=[],
     )

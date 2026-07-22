@@ -29,6 +29,7 @@ def pending_invoice_source_versions(
     *,
     attachment_invoice_parser_version: str,
     oa_projection_sync_version: str,
+    direction: str | None = None,
     bank_detail_source_versions: dict[str, Any] | None = None,
     workbench_relation_source_versions: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -36,11 +37,10 @@ def pending_invoice_source_versions(
     pending_groups = payload.get("pending_invoice_tag_groups")
     pending_output_groups = payload.get("pending_output_invoice_tag_groups")
     bank_tags = payload.get("bank_transaction_tags")
+    normalized_direction = str(direction or "all").strip().lower()
     result: dict[str, Any] = {
         "pending_invoice_read_model_schema_version": "2026-06-pending-invoice-oa-identity-v2",
         "invoice_lifecycle_policy_schema_version": INVOICE_LIFECYCLE_POLICY_SCHEMA_VERSION,
-        "pending_invoice_tag_groups_version": pending_groups.get("version") if isinstance(pending_groups, dict) else 1,
-        "pending_output_invoice_tag_groups_version": pending_output_groups.get("version") if isinstance(pending_output_groups, dict) else 1,
         "bank_auto_tag_rules_version": bank_tags.get("version") if isinstance(bank_tags, dict) else 1,
         "oa_attachment_invoice_parser_version": attachment_invoice_parser_version,
         "oa_projection_sync_version": oa_projection_sync_version,
@@ -51,6 +51,14 @@ def pending_invoice_source_versions(
             else {}
         ),
     }
+    if normalized_direction in {"all", "expense"}:
+        result["pending_invoice_tag_groups_version"] = (
+            pending_groups.get("version") if isinstance(pending_groups, dict) else 1
+        )
+    if normalized_direction in {"all", "income"}:
+        result["pending_output_invoice_tag_groups_version"] = (
+            pending_output_groups.get("version") if isinstance(pending_output_groups, dict) else 1
+        )
     return result
 
 
@@ -493,6 +501,7 @@ class PendingInvoiceSourceVersionsProvider:
             self._settings_provider(),
             attachment_invoice_parser_version=self._attachment_invoice_parser_version_provider(),
             oa_projection_sync_version=self._oa_projection_sync_version_provider(),
+            direction=str((query or {}).get("direction", ["all"])[0] or "all"),
             bank_detail_source_versions=self._bank_detail_source_versions(query=query or {}, payload=payload or {}),
             workbench_relation_source_versions=self._workbench_relation_source_versions(
                 query=query or {},

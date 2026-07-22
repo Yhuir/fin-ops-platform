@@ -1960,14 +1960,12 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
         self.import_service = ImportNormalizationService(existing_transactions=[self.expense_txn])
         self.pair_service = WorkbenchPairRelationService()
         self.audit_events: list[dict[str, object]] = []
-        self.finalize_events: list[dict[str, object]] = []
         self.command_store: dict[str, dict[str, object]] = {}
         relation_facade = self._relation_facade(import_service=self.import_service)
         self.service = PendingInvoiceApplicationService(
             import_service=self.import_service,
             command_repository=InMemoryPendingInvoiceCommandRepository(self.command_store),
             audit_recorder=self.audit_events.append,
-            finalizer=self.finalize_events.append,
             relation_facade=relation_facade,
             relation_command_service=self._relation_command_service(
                 relation_facade=relation_facade,
@@ -2031,7 +2029,6 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
         self.assertEqual(self.command_store["request-001"]["status"], "completed")
         self.assertEqual(self.audit_events[0]["actor_id"], "finance-user")
         self.assertEqual(self.audit_events[0]["invoice_id"], result["invoice_id"])
-        self.assertEqual(self.finalize_events[0]["affected_months"], ["2026-05"])
 
     def test_confirm_manual_invoice_delegates_relation_write_to_command_service(self) -> None:
         relation_command = RecordingPendingInvoiceRelationCommandService()
@@ -2236,7 +2233,6 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
             import_service=self.import_service,
             command_store=self.command_store,
             audit_recorder=self.audit_events.append,
-            finalizer=self.finalize_events.append,
             relation_facade=relation_facade,
             relation_command_service=self._relation_command_service(
                 relation_facade=relation_facade,
@@ -2267,7 +2263,7 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
         self.assertEqual(result["affected_scope_keys"], ["2026-05"])
         self.assertEqual(
             result["operation_barrier_targets"],
-            [{"read_model_key": "pending_invoice", "scope_key": "2026-05"}],
+            [],
         )
         self.assertEqual(len(self.pair_service.list_active_relations()), 1)
         self.assertEqual(self.audit_events[0]["action"], "pending_invoice_attach_existing_invoice_confirmed")
@@ -2362,7 +2358,6 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
             import_service=self.import_service,
             command_store=self.command_store,
             audit_recorder=self.audit_events.append,
-            finalizer=self.finalize_events.append,
             relation_facade=relation_facade,
             relation_command_service=self._relation_command_service(
                 relation_facade=relation_facade,
@@ -2390,7 +2385,6 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
         self.assertEqual(relation["row_ids"], ["txn_previous_payment", "inv_multi_payment", "txn_current_payment"])
         self.assertEqual(relation["row_types"], ["bank", "invoice", "bank"])
         self.assertEqual(self.audit_events[0]["entity_type"], "pending_invoice_attach_existing_invoice")
-        self.assertEqual(self.finalize_events[0]["action"], "pending_invoice_attach_existing_invoice_confirmed")
 
     def test_preview_and_confirm_attach_existing_invoices_batch_are_idempotent(self) -> None:
         first_txn = BankTransaction(
@@ -2446,7 +2440,6 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
             import_service=self.import_service,
             command_store=self.command_store,
             audit_recorder=self.audit_events.append,
-            finalizer=self.finalize_events.append,
             relation_facade=relation_facade,
             relation_command_service=self._relation_command_service(
                 relation_facade=relation_facade,
@@ -2493,9 +2486,6 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
         self.assertEqual(relation["row_types"], ["bank", "bank", "invoice", "invoice"])
         self.assertEqual(len(self.pair_service.list_active_relations()), 1)
         self.assertEqual(self.audit_events[0]["action"], "pending_invoice_attach_existing_invoice_batch_confirmed")
-        self.assertEqual(self.finalize_events[0]["action"], "pending_invoice_attach_existing_invoice_confirmed")
-        self.assertEqual(self.finalize_events[0]["transaction_ids"], [first_txn.id, second_txn.id])
-        self.assertEqual(self.finalize_events[0]["invoice_ids"], [first_invoice.id, second_invoice.id])
 
     def test_attach_existing_batch_merges_existing_oa_relation_and_withdraw_restores_previous_state(self) -> None:
         first_txn = BankTransaction(
@@ -2550,7 +2540,6 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
             import_service=self.import_service,
             command_store=self.command_store,
             audit_recorder=self.audit_events.append,
-            finalizer=self.finalize_events.append,
             relation_facade=relation_facade,
             relation_command_service=relation_command_service,
         )
@@ -2713,7 +2702,6 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
             import_service=self.import_service,
             command_repository=InMemoryPendingInvoiceCommandRepository(self.command_store),
             audit_recorder=self.audit_events.append,
-            finalizer=self.finalize_events.append,
             row_provider=row_provider,
         )
         payload = {
@@ -2735,18 +2723,11 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
         self.assertEqual(result["read_model_scope_keys"], ["2026-05", "2026-06"])
         self.assertEqual(
             result["freshness_targets"],
-            [
-                {"read_model_key": "pending_invoice", "scope_key": "2026-05"},
-                {"read_model_key": "pending_invoice", "scope_key": "2026-06"},
-            ],
+            [],
         )
         self.assertEqual(len(self.audit_events), 1)
         self.assertEqual(self.audit_events[0]["action"], "pending_invoice_income_status_override_batch_confirmed")
         self.assertEqual(self.audit_events[0]["transaction_ids"], [first_txn.id, second_txn.id])
-        self.assertEqual(len(self.finalize_events), 1)
-        self.assertEqual(self.finalize_events[0]["action"], "pending_invoice_income_status_override_confirmed")
-        self.assertEqual(self.finalize_events[0]["transaction_ids"], [first_txn.id, second_txn.id])
-        self.assertEqual(self.finalize_events[0]["affected_months"], ["2026-05", "2026-06"])
 
     def test_confirm_income_status_overrides_batch_rejects_duplicates_before_writing(self) -> None:
         income_txn = BankTransaction(
@@ -2764,7 +2745,6 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
             import_service=self.import_service,
             command_repository=InMemoryPendingInvoiceCommandRepository(self.command_store),
             audit_recorder=self.audit_events.append,
-            finalizer=self.finalize_events.append,
         )
 
         with self.assertRaises(PendingInvoiceError) as context:
@@ -2780,7 +2760,6 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
         self.assertEqual(context.exception.error_code, "duplicate_income_status_transactions")
         self.assertEqual(self.command_store, {})
         self.assertEqual(self.audit_events, [])
-        self.assertEqual(self.finalize_events, [])
 
     def test_confirm_income_status_overrides_batch_rejects_ineligible_rows_before_writing(self) -> None:
         income_txn = BankTransaction(
@@ -2808,7 +2787,6 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
             import_service=self.import_service,
             command_repository=InMemoryPendingInvoiceCommandRepository(self.command_store),
             audit_recorder=self.audit_events.append,
-            finalizer=self.finalize_events.append,
             row_provider=lambda transaction_id, _direction: {
                 "id": transaction_id,
                 "invoices": [{"invoice_id": "out-linked"}] if transaction_id == income_txn.id else [],
@@ -2828,7 +2806,6 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
         self.assertEqual(context.exception.error_code, "income_invoice_already_linked")
         self.assertEqual(self.command_store, {})
         self.assertEqual(self.audit_events, [])
-        self.assertEqual(self.finalize_events, [])
 
     def test_confirm_income_status_overrides_batch_rejects_explicitly_unavailable_rows_before_writing(self) -> None:
         income_txn = BankTransaction(
@@ -2846,7 +2823,6 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
             import_service=self.import_service,
             command_repository=InMemoryPendingInvoiceCommandRepository(self.command_store),
             audit_recorder=self.audit_events.append,
-            finalizer=self.finalize_events.append,
             row_provider=lambda transaction_id, _direction: {
                 "id": transaction_id,
                 "available_actions": [],
@@ -2867,7 +2843,6 @@ class PendingInvoiceApplicationServiceTests(unittest.TestCase):
         self.assertEqual(context.exception.error_code, "income_status_not_available")
         self.assertEqual(self.command_store, {})
         self.assertEqual(self.audit_events, [])
-        self.assertEqual(self.finalize_events, [])
 
     def _payload(self, *, invoice_no: str = "MAN-001") -> dict[str, object]:
         return {

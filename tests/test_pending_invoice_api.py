@@ -739,19 +739,7 @@ class PendingInvoiceApiTests(unittest.TestCase):
             for refresh in queue_repository.enqueued
             if refresh[0] == "pending_invoice" and refresh[2] == "pending_invoice_rules_update"
         ]
-        self.assertEqual(
-            pending_invoice_refreshes,
-            [
-                ("pending_invoice", "expense:all", "pending_invoice_rules_update"),
-                ("pending_invoice", "expense:requires_invoice", "pending_invoice_rules_update"),
-                ("pending_invoice", "expense:bank_statement_as_invoice", "pending_invoice_rules_update"),
-                ("pending_invoice", "expense:no_invoice_required", "pending_invoice_rules_update"),
-                ("pending_invoice", "income:all", "pending_invoice_rules_update"),
-                ("pending_invoice", "income:requires_invoice", "pending_invoice_rules_update"),
-                ("pending_invoice", "income:no_invoice_required", "pending_invoice_rules_update"),
-                ("pending_invoice", "income:cash_income", "pending_invoice_rules_update"),
-            ],
-        )
+        self.assertEqual(pending_invoice_refreshes, [])
 
     def test_pending_invoice_rules_put_runs_low_coupling_lifecycle_without_unrelated_domains(self) -> None:
         class QueueRepository:
@@ -785,35 +773,15 @@ class PendingInvoiceApiTests(unittest.TestCase):
             saved_settings = app._app_settings_service.get_settings_payload()
 
         payload = json.loads(response.body)
-        scope_types = {scope_type for scope_type, _scope_key, _reason in queue_repository.enqueued}
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["read_model_status"], "refreshing")
-        self.assertEqual(payload["derived_data_lifecycle"]["event"], "pending_invoice_rules_changed")
-        self.assertIn("cost_statistics.read_model.refresh", payload["derived_data_lifecycle"]["enqueued_jobs"])
-        self.assertNotIn("cost_statistics_cache_warmup", payload["derived_data_lifecycle"]["enqueued_jobs"])
-        self.assertNotIn("invoice_lifecycle_read_model", payload["derived_data_lifecycle"]["skipped"])
-        self.assertNotIn("workbench_relation_read_model", payload["derived_data_lifecycle"]["skipped"])
+        self.assertNotIn("read_model_status", payload)
+        self.assertNotIn("derived_data_lifecycle", payload)
         self.assertEqual(saved_settings["bank_transaction_tags"]["version"], initial_bank_rules_version)
         self.assertEqual(
             saved_settings["pending_invoice_tag_groups"]["groups"]["no_invoice_required"]["tag_codes"],
             ["external_rule_borrow_out"],
         )
-        self.assertTrue(
-            {
-                "invoice_lifecycle",
-                "pending_invoice",
-                "workbench",
-                "workbench_relation",
-                "tax_offset",
-                "cost_statistics",
-                "input_invoice_usage",
-                "output_invoice_collection",
-            }.issubset(scope_types)
-        )
-        self.assertNotIn("oa_pending_payment", scope_types)
-        self.assertNotIn("turnover_ledger", scope_types)
-        self.assertNotIn("no_oa_bank_batch", scope_types)
-        self.assertNotIn("bank_account_balance", scope_types)
+        self.assertEqual(queue_repository.enqueued, [])
 
     def test_pending_invoice_rules_put_rejects_stale_rule_version(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

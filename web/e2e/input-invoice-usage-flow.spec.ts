@@ -374,7 +374,7 @@ test.describe("input invoice usage browser flow", () => {
     await expect(rulesDrawer).toBeVisible();
     await expect(rulesDrawer.getByText("只读")).toBeVisible();
     await expect(rulesDrawer.getByText("待付款（自动识别有oa无流水）")).toBeVisible();
-    await expect(rulesDrawer.getByRole("button", { name: "保存并刷新" })).toHaveCount(0);
+    await expect(rulesDrawer.getByRole("button", { name: "保存" })).toHaveCount(0);
     await expect(rulesDrawer.getByRole("button", { name: "还原" })).toHaveCount(0);
     await expect(rulesDrawer.getByRole("textbox")).toHaveCount(0);
     await recordLatency({
@@ -459,7 +459,7 @@ test.describe("input invoice usage browser flow", () => {
     });
     await expect(rulesDrawer).toBeVisible();
     await expect(rulesDrawer.getByText(/版本\s*1/)).toHaveCount(0);
-    await expect(rulesDrawer.getByRole("button", { name: "保存并刷新" })).toBeDisabled();
+    await expect(rulesDrawer.getByRole("button", { name: "保存" })).toBeDisabled();
 
     await recordLatency({
       operationId: "input-invoice-usage.edit-payment-rule-label",
@@ -467,20 +467,20 @@ test.describe("input invoice usage browser flow", () => {
       actionType: "fill",
     }, async (mark) => {
       await rulesDrawer.getByRole("textbox", { name: "支付状态" }).first().fill("待付款（规则保存后刷新）");
-      await mark("finalSettledLatencyMs", expect(rulesDrawer.getByRole("button", { name: "保存并刷新" })).toBeEnabled());
+      await mark("finalSettledLatencyMs", expect(rulesDrawer.getByRole("button", { name: "保存" })).toBeEnabled());
     });
-    await expect(rulesDrawer.getByRole("button", { name: "保存并刷新" })).toBeEnabled();
+    await expect(rulesDrawer.getByRole("button", { name: "保存" })).toBeEnabled();
 
     await recordLatency({
       operationId: "input-invoice-usage.save-payment-rules",
-      visibleLabel: "保存并刷新",
+      visibleLabel: "保存",
       actionType: "click",
     }, async (mark) => {
       const saveResponsePromise = waitForInputInvoiceUsagePaymentRulesSave(page);
       const refreshedRowsPromise = waitForInputInvoiceUsageRows(page);
-      await rulesDrawer.getByRole("button", { name: "保存并刷新" }).click();
+      await rulesDrawer.getByRole("button", { name: "保存" }).click();
       expect((await mark("apiLatencyMs", saveResponsePromise)).status()).toBe(200);
-      expect((await mark("operationBarrierLatencyMs", refreshedRowsPromise)).status()).toBe(200);
+      expect((await refreshedRowsPromise).status()).toBe(200);
       await mark("finalSettledLatencyMs", expect(row).toContainText("待付款（规则保存后刷新）"));
     });
 
@@ -493,7 +493,7 @@ test.describe("input invoice usage browser flow", () => {
     expect(String(saveBody.idempotencyKey ?? "")).toMatch(/^input-invoice-usage-payment-rules-save:/);
     expect(saveBody.rules?.find((rule) => rule.id === "waiting_payment")?.label).toBe("待付款（规则保存后刷新）");
 
-    await expect(rulesDrawer.getByText("规则已保存，正在刷新进项发票使用情况。")).toBeVisible();
+    await expect(rulesDrawer.getByText("规则已保存。")).toBeVisible();
     await expect(rulesDrawer.getByText(/版本\s*2/)).toHaveCount(0);
     await expect(row).toContainText("待付款（规则保存后刷新）");
     await expectNoUnexpectedSuccessUiErrors(page);

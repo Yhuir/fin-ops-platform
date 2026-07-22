@@ -134,7 +134,7 @@ class SearchPendingSqlProjectionBuilder:
             month=month,
             statistics_members=statistics_members,
         )
-        source_versions = self._pending_invoice_source_versions()
+        source_versions = self._pending_invoice_source_versions(normalized_direction)
         self._pending_invoice_read_model_repository.save_pending_invoice_rows(
             scope_key=f"{normalized_direction}:{normalized_filter}:{month}",
             rows=rows,
@@ -158,7 +158,7 @@ class SearchPendingSqlProjectionBuilder:
         mark_scope(
             scope_key=normalized_scope_key,
             row_count=0,
-            source_versions=self._pending_invoice_source_versions(),
+            source_versions=self._pending_invoice_source_versions(normalized_direction),
             statistics_metadata={"statistics": _pending_invoice_statistics_from_members({})},
         )
         return {"scope_key": normalized_scope_key, "row_count": 0}
@@ -655,22 +655,30 @@ class SearchPendingSqlProjectionBuilder:
             return {}
         return dict(summary_reader(scope_key=month, row_ids=text_list(row_ids), include_row_ids=True))
 
-    def _pending_invoice_source_versions(self) -> dict[str, object]:
+    def _pending_invoice_source_versions(self, direction: str = "all") -> dict[str, object]:
         settings = _settings_payload(self._connection)
         pending_groups = settings.get("pending_invoice_tag_groups")
         pending_output_groups = settings.get("pending_output_invoice_tag_groups")
         bank_tags = settings.get("bank_transaction_tags")
-        return {
+        normalized_direction = str(direction or "all").strip().lower()
+        result: dict[str, object] = {
             "pending_invoice_read_model_schema_version": "2026-06-pending-invoice-oa-identity-v2",
             "invoice_lifecycle_policy_schema_version": INVOICE_LIFECYCLE_POLICY_SCHEMA_VERSION,
-            "pending_invoice_tag_groups_version": pending_groups.get("version") if isinstance(pending_groups, dict) else 1,
-            "pending_output_invoice_tag_groups_version": pending_output_groups.get("version") if isinstance(pending_output_groups, dict) else 1,
             "bank_auto_tag_rules_version": bank_tags.get("version") if isinstance(bank_tags, dict) else 1,
             "oa_attachment_invoice_parser_version": attachment_invoice_cache_parser_version(),
             "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
             "bank_detail_source_versions": dict(self._pending_invoice_bank_tag_source_versions),
             "workbench_relation_source_versions": dict(self._pending_invoice_relation_source_versions),
         }
+        if normalized_direction in {"all", "expense"}:
+            result["pending_invoice_tag_groups_version"] = (
+                pending_groups.get("version") if isinstance(pending_groups, dict) else 1
+            )
+        if normalized_direction in {"all", "income"}:
+            result["pending_output_invoice_tag_groups_version"] = (
+                pending_output_groups.get("version") if isinstance(pending_output_groups, dict) else 1
+            )
+        return result
 
 
 def _parse_pending_invoice_scope_key(scope_key: str) -> tuple[str, str, str | None]:

@@ -9,9 +9,13 @@ from fin_ops_platform.services.invoice_lifecycle_read_model_repository import In
 class QueueRecorder:
     def __init__(self) -> None:
         self.refreshes: list[tuple[str, str, str]] = []
+        self.fresh_scopes: set[tuple[str, str]] = set()
 
-    def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
+    def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str, **_kwargs: object) -> None:
         self.refreshes.append((scope_type, scope_key, reason))
+
+    def read_model_refresh_is_fresh(self, *, tenant_id: str, scope_type: str, scope_key: str) -> bool:
+        return (scope_type, scope_key) in self.fresh_scopes
 
 
 class FakeLifecycleRepository:
@@ -92,7 +96,40 @@ class InvoiceLifecycleReadFacadeTests(unittest.TestCase):
         self.assertEqual(payload["status"], "missing")
         self.assertEqual(payload["rows"], [])
         self.assertTrue(payload["refresh_enqueued"])
-        self.assertEqual(queue.refreshes, [("invoice_lifecycle", "2026-01", "pending_invoice_projection")])
+        self.assertEqual(
+            queue.refreshes,
+            [
+                ("pending_invoice", "expense:all:2026-01", "invoice_lifecycle_access_dependency"),
+                ("pending_invoice", "income:all:2026-01", "invoice_lifecycle_access_dependency"),
+                ("input_invoice_usage", "2026-01", "invoice_lifecycle_access_dependency"),
+                ("output_invoice_collection", "2026-01", "invoice_lifecycle_access_dependency"),
+                ("oa_pending_payment", "2026-01", "invoice_lifecycle_access_dependency"),
+                ("workbench_relation", "2026-01", "invoice_lifecycle_access_dependency"),
+                ("invoice_lifecycle", "2026-01", "pending_invoice_projection"),
+            ],
+        )
+
+    def test_non_fresh_result_skips_fresh_dependencies_and_never_expands_unknown_scope(self) -> None:
+        repository = FakeLifecycleRepository(
+            {
+                "read_model_status": "stale",
+                "rows": [],
+                "source_versions": {},
+                "read_model_scope_keys": ["2026-02", "all"],
+            }
+        )
+        queue = QueueRecorder()
+        queue.fresh_scopes.add(("workbench_relation", "2026-02"))
+        facade = InvoiceLifecycleReadFacade(read_model_repository=repository, queue_repository=queue)
+
+        payload = facade.get_by_subject_ids(["inv-2"], require_fresh=True, reason="unit_test")
+
+        self.assertTrue(payload["refresh_enqueued"])
+        self.assertNotIn(
+            ("workbench_relation", "2026-02", "invoice_lifecycle_access_dependency"),
+            queue.refreshes,
+        )
+        self.assertFalse(any(scope_type != "invoice_lifecycle" and scope_key == "all" for scope_type, scope_key, _ in queue.refreshes))
 
     def test_list_by_month_passes_subject_type_filter(self) -> None:
         repository = FakeLifecycleRepository(

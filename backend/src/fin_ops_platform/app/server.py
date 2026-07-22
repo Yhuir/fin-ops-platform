@@ -983,8 +983,6 @@ class Application:
         )
         self._pending_invoice_lifecycle_service = PendingInvoiceLifecycleService(
             audit_service=self._audit_service,
-            execute_derived_data_lifecycle_event=self._execute_derived_data_lifecycle_event,
-            relation_tag_projection_service=self._bank_details_relation_tag_projection_service,
         )
         self._input_invoice_usage_query_service = InputInvoiceUsageQueryService(
             import_service=self._import_service,
@@ -1005,18 +1003,15 @@ class Application:
         self._output_invoice_collection_lifecycle_service = OutputInvoiceCollectionLifecycleService(
             repository=self._output_invoice_collection_lifecycle_repository,
             row_provider=lambda row_id: self._output_invoice_collection_service().row_by_id(row_id),
-            queue_repository=getattr(self._runtime_repositories, "queue_repository", None),
         )
         self._output_invoice_collection_receipt_service = OutputInvoiceCollectionReceiptService(
             repository=self._output_invoice_collection_lifecycle_repository,
             row_provider=lambda row_id: self._output_invoice_collection_service().row_by_id(row_id),
-            queue_repository=getattr(self._runtime_repositories, "queue_repository", None),
         )
         self._pending_invoice_application_service = PendingInvoiceApplicationService(
             import_service=self._import_service,
             command_repository=self._pending_invoice_command_repository,
             audit_recorder=self._pending_invoice_lifecycle_service.record_manual_invoice_audit,
-            finalizer=self._pending_invoice_lifecycle_service.finalize_manual_invoice,
             row_provider=lambda transaction_id, direction: self._pending_invoice_query_service.row_for_transaction(
                 transaction_id,
                 direction=direction,
@@ -6099,7 +6094,6 @@ class Application:
             xlsx_response=self._input_invoice_usage_xlsx_response,
             app_settings_service=self._app_settings_service,
             load_json_body=self._load_json_body,
-            payment_rules_refreshes=self._enqueue_input_invoice_usage_payment_rules_refreshes,
             payment_rules_error_response=self._input_invoice_usage_payment_rules_error_response,
             json_response=self._json_response,
             input_usage_error_response=self._input_invoice_usage_error_response,
@@ -6202,11 +6196,6 @@ class Application:
             ),
             relation_writer=WorkbenchInputInvoiceUsageOaReverseRelationWriter(self._workbench_relation_command_service()),
             audit_recorder=self._record_input_invoice_usage_oa_reverse_audit,
-            read_model_invalidator=self._invalidate_input_invoice_usage_oa_reverse_read_models,
-            statistics_invalidator=lambda reason: self._enqueue_input_invoice_usage_read_model_refresh(
-                "all",
-                reason=reason,
-            ),
             read_model_rows_loader=lambda query: self._input_invoice_usage_read_model_fresh_gate().rows(
                 query,
                 include_statistics=False,
@@ -6240,11 +6229,6 @@ class Application:
         record_action = getattr(getattr(self, "_audit_service", None), "record_action", None)
         if callable(record_action):
             record_action(**event)
-
-    def _invalidate_input_invoice_usage_oa_reverse_read_models(self, scope_keys: list[str], reason: str) -> None:
-        for scope_key in list(scope_keys or ["all"]):
-            self._enqueue_input_invoice_usage_read_model_refresh(str(scope_key or "all"), reason=reason)
-        self._persist_workbench_pair_relations()
 
     def _input_invoice_usage_oa_draft_client_for_batch(self, batch_id: str) -> object | None:
         try:
@@ -6326,12 +6310,6 @@ class Application:
         query: dict[str, list[str]],
     ) -> dict[str, object] | None:
         return self._input_invoice_usage_read_model_fresh_gate().relation_details(row_id, query)
-
-    def _enqueue_input_invoice_usage_payment_rules_refreshes(self, event: dict[str, object]) -> None:
-        scope_key = str(event.get("scope_key") or "all")
-        reason = str(event.get("reason") or "payment_status_rules_updated")
-        self._enqueue_input_invoice_usage_read_model_refresh(scope_key, reason=reason)
-        self._enqueue_generic_read_model_refreshes("invoice_lifecycle", [scope_key], reason=reason)
 
     def _input_invoice_usage_payment_rules_error_response(self, exc: AppSettingsValidationError) -> Response:
         status = (
@@ -6436,8 +6414,6 @@ class Application:
             pending_relation_service=self._oa_pending_payment_relation_repository(),
             payment_status_repository=self._oa_payment_status_repository(),
             payment_status_snapshot_writer=self._oa_pending_payment_source_snapshot_repository(),
-            enqueue_workbench_refresh=self._enqueue_workbench_read_model_refresh,
-            enqueue_oa_pending_payment_refresh=self._enqueue_oa_pending_payment_read_model_refresh,
         )
         self._oa_pending_payment_command_service_instance = service
         return service
@@ -6568,7 +6544,6 @@ class Application:
             lifecycle_service = OutputInvoiceCollectionLifecycleService(
                 repository=lifecycle_repository,
                 row_provider=lambda row_id: self._output_invoice_collection_service().row_by_id(row_id),
-                queue_repository=getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None),
             )
             self._output_invoice_collection_lifecycle_service = lifecycle_service
         receipt_service = getattr(self, "_output_invoice_collection_receipt_service", None)
@@ -6576,7 +6551,6 @@ class Application:
             receipt_service = OutputInvoiceCollectionReceiptService(
                 repository=lifecycle_repository,
                 row_provider=lambda row_id: self._output_invoice_collection_service().row_by_id(row_id),
-                queue_repository=getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None),
             )
             self._output_invoice_collection_receipt_service = receipt_service
         return OutputInvoiceCollectionApiRoutes(
@@ -6787,8 +6761,6 @@ class Application:
         )
         rules_service = PendingInvoiceRulesApplicationService(
             settings_gateway=AppSettingsPendingInvoiceRulesGateway(settings_service),
-            invalidate_read_model_scopes=read_model_service.invalidate_base_scopes,
-            after_pending_invoice_rule_settings_saved=getattr(self, "_finalize_pending_invoice_rule_settings_update", None),
         )
         routes = PendingInvoiceApiRoutes(
             query_service=query_service,
@@ -8608,32 +8580,6 @@ class Application:
             ["all"],
             reason="bank_transaction_tag_settings_changed",
         )
-
-    def _finalize_pending_invoice_rule_settings_update(self, event: dict[str, object]) -> dict[str, object]:
-        pending_invoice_service = getattr(self, "_pending_invoice_query_service", None)
-        for method_name in ("clear_cache", "invalidate_cache", "refresh"):
-            method = getattr(pending_invoice_service, method_name, None)
-            if callable(method):
-                try:
-                    method()
-                except TypeError:
-                    method(event)
-                break
-        self._search_service.clear_cache()
-        return self._execute_derived_data_lifecycle_event(
-            "pending_invoice_rules_changed",
-            scope_keys=["all"],
-            include_all=True,
-            metadata={
-                "reason": "pending_invoice_rules_changed",
-                "direction": event.get("direction"),
-                "old_version": event.get("old_version"),
-                "new_version": event.get("new_version"),
-                "affected_groups": list(event.get("affected_groups") or []),
-            },
-        )
-
-
 
     def _handle_live_workbench_confirm_link(
         self,

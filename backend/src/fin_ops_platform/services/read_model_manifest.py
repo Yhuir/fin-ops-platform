@@ -24,6 +24,7 @@ class ReadModelManifestEntry:
     repository_owner: str
     permission_owner: str
     test_owner: str
+    read_dependencies: tuple[str, ...] = ()
 
 
 READ_MODEL_MANIFEST: dict[str, ReadModelManifestEntry] = {
@@ -225,6 +226,13 @@ READ_MODEL_MANIFEST: dict[str, ReadModelManifestEntry] = {
         repository_owner="InvoiceLifecycleReadModelRepositoryPort",
         permission_owner="invoice_lifecycle_page_api_session",
         test_owner="tests/test_invoice_lifecycle_read_model_refresh.py",
+        read_dependencies=(
+            "pending_invoice",
+            "input_invoice_usage",
+            "output_invoice_collection",
+            "oa_pending_payment",
+            "workbench_relation",
+        ),
     ),
     "input_invoice_usage": ReadModelManifestEntry(
         key="input_invoice_usage",

@@ -218,7 +218,7 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
         self.assertFalse(connection.committed)
         self.assertTrue(connection.rolled_back)
 
-    def test_paid_writeback_updates_snapshot_watermark_and_exact_month_outbox_atomically(self) -> None:
+    def test_paid_writeback_updates_snapshot_watermark_without_downstream_outbox(self) -> None:
         connection = FakeConnection(
             status_rows=[
                 {
@@ -242,8 +242,7 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
         )
 
         self.assertEqual(result.oa_pending_payment_changed_scopes, ("2026-06",))
-        self.assertEqual([call["scope_key"] for call in queue.calls], ["2026-06"])
-        self.assertIs(queue.calls[0]["transaction"], connection.transaction_handle)
+        self.assertEqual(queue.calls, [])
         executed_sql = "\n".join(sql for sql, _params in connection.transaction_handle.executions)
         self.assertIn("insert into app.oa_pending_payment_status_snapshots", executed_sql)
         self.assertIn("(item.scope_month || '-01')::date", executed_sql)
@@ -278,7 +277,7 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
         self.assertEqual(connection.transaction_handle.executions, [])
         self.assertTrue(connection.committed)
 
-    def test_paid_writeback_rolls_back_snapshot_and_watermark_when_outbox_fails(self) -> None:
+    def test_paid_writeback_does_not_depend_on_downstream_outbox_availability(self) -> None:
         connection = FakeConnection(
             status_rows=[
                 {
@@ -290,19 +289,21 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
             ],
             watermark_rows=[_watermark("2026-06")],
         )
+        queue = FakeTransactionalQueue(error=RuntimeError("outbox unavailable"))
         repository = PostgresOaPendingPaymentSourceSnapshotRepository(
             connection,
-            queue_repository=FakeTransactionalQueue(error=RuntimeError("outbox unavailable")),
+            queue_repository=queue,
             pending_relation_repository=FakePendingRelationRepository(),
         )
 
-        with self.assertRaisesRegex(RuntimeError, "outbox unavailable"):
-            repository.record_paid_statuses(
-                records=[_oa("oa-pay-row-1", "2026-06", workflow_status="completed", flow_id="flow-1")]
-            )
+        result = repository.record_paid_statuses(
+            records=[_oa("oa-pay-row-1", "2026-06", workflow_status="completed", flow_id="flow-1")]
+        )
 
-        self.assertFalse(connection.committed)
-        self.assertTrue(connection.rolled_back)
+        self.assertEqual(result.oa_pending_payment_changed_scopes, ("2026-06",))
+        self.assertEqual(queue.calls, [])
+        self.assertTrue(connection.committed)
+        self.assertFalse(connection.rolled_back)
 
     def test_paid_writeback_fails_fast_when_authoritative_snapshot_is_not_initialized(self) -> None:
         connection = FakeConnection(

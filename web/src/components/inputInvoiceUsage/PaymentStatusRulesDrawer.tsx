@@ -144,7 +144,7 @@ export default function PaymentStatusRulesDrawer({
         setPayload(nextPayload);
         setDraftRules(cloneRules(nextPayload.rules));
         setDraftPendingDirections(nextPayload.pendingDirections.map((item) => ({ ...item })));
-        setFeedback("规则已保存，正在刷新进项发票使用情况。");
+        setFeedback("规则已保存。");
         await onSaved?.();
       })
       .catch((caught) => {
@@ -158,7 +158,7 @@ export default function PaymentStatusRulesDrawer({
   };
 
   const subtitle = canSave
-    ? "编辑后保存会校验冲突并触发刷新"
+    ? "编辑后保存会校验版本冲突"
     : "按后端权限展示规则和待处理方向";
 
   const footer = payload && canSave ? (
@@ -182,7 +182,7 @@ export default function PaymentStatusRulesDrawer({
         onClick={handleSave}
         type="button"
       >
-        {saving ? "保存中..." : "保存并刷新"}
+        {saving ? "保存中..." : "保存"}
       </button>
     </div>
   ) : null;
@@ -223,7 +223,7 @@ export default function PaymentStatusRulesDrawer({
               {payload.readOnly === false && !canSave ? (
                 <span className="input-invoice-usage-rules-tag input-invoice-usage-rules-tag--warning">无保存权限</span>
               ) : null}
-              <span className="input-invoice-usage-rules-tag input-invoice-usage-rules-tag--info">保存后刷新进项发票使用情况与发票生命周期</span>
+              <span className="input-invoice-usage-rules-tag input-invoice-usage-rules-tag--info">保存只更新规则，当前页面按访问状态刷新</span>
             </div>
             <section className="input-invoice-usage-rules-section">
               <h3>影响预览</h3>

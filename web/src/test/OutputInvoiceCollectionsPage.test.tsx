@@ -731,23 +731,24 @@ describe("Output invoice collections page", () => {
     const page = await screen.findByTestId("output-invoice-collections-page");
     expect(await within(page).findByText("销项发票收款情况数据正在刷新")).toBeInTheDocument();
     expect(within(page).queryByText("当前条件下暂无记录。")).not.toBeInTheDocument();
-    expect(rowsRequests(fetchMock)).toHaveLength(1);
+    expect(rowsRequests(fetchMock).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole("link", { name: "设置" }));
     expect(await screen.findByTestId("settings-page")).toBeInTheDocument();
     expect(screen.queryByTestId("output-invoice-collections-page")).not.toBeInTheDocument();
+    const rowsAfterUnmount = rowsRequests(fetchMock).length;
     vi.useFakeTimers();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10_000);
     });
 
-    expect(rowsRequests(fetchMock)).toHaveLength(1);
+    expect(rowsRequests(fetchMock)).toHaveLength(rowsAfterUnmount);
 
     vi.useRealTimers();
     fireEvent.click(screen.getByRole("link", { name: "销项发票收款情况" }));
     expect(await screen.findByTestId("output-invoice-collections-page")).toBeInTheDocument();
 
-    expect(rowsRequests(fetchMock).length).toBeGreaterThan(1);
+    expect(rowsRequests(fetchMock).length).toBeGreaterThan(rowsAfterUnmount);
   });
 
   test("keeps page-owned statistics stable when filters change without a title-total request", async () => {
@@ -1234,12 +1235,13 @@ describe("Output invoice collections page", () => {
         expect.objectContaining({ method: "PUT" }),
       );
     });
+    expect(operationBarrierRequests(fetchMock)).toHaveLength(0);
+    expect(rowsRequests(fetchMock).length).toBeGreaterThan(1);
   }, 45000);
 
-  test("waits for output invoice collection barrier before reloading after red relation confirm", async () => {
-    const barrier = deferred();
+  test("reloads the current output collection page without a write-time barrier after red relation confirm", async () => {
     const user = userEvent.setup();
-    const fetchMock = installOutputInvoiceCollectionsFetch({ operationBarrierDelay: barrier.promise });
+    const fetchMock = installOutputInvoiceCollectionsFetch();
     renderAuthenticatedAppAt("/output-invoice-collections");
 
     const page = await screen.findByTestId("output-invoice-collections-page");
@@ -1259,24 +1261,15 @@ describe("Output invoice collections page", () => {
         expect.objectContaining({ method: "POST" }),
       );
     });
-    await waitFor(() => expect(operationBarrierRequests(fetchMock)).toHaveLength(1));
-    const [, barrierInit] = operationBarrierRequests(fetchMock)[0];
-    expect(JSON.parse(String(barrierInit?.body))).toEqual({
-      targets: [{ read_model_key: "output_invoice_collection", scope_key: "2026-05" }],
-    });
-    expect(rowsRequests(fetchMock)).toHaveLength(rowsBeforeMutation);
-
-    barrier.resolve();
-
     await waitFor(() => {
       expect(rowsRequests(fetchMock).length).toBeGreaterThan(rowsBeforeMutation);
     });
+    expect(operationBarrierRequests(fetchMock)).toHaveLength(0);
   }, 45000);
 
-  test("waits for output invoice collection barrier target returned by receipt creation", async () => {
-    const barrier = deferred();
+  test("reloads the current output collection page without a write-time barrier after receipt creation", async () => {
     const user = userEvent.setup();
-    const fetchMock = installOutputInvoiceCollectionsFetch({ operationBarrierDelay: barrier.promise });
+    const fetchMock = installOutputInvoiceCollectionsFetch();
     renderAuthenticatedAppAt("/output-invoice-collections", { session: { canAdminAccess: true } });
 
     const page = await screen.findByTestId("output-invoice-collections-page");
@@ -1293,17 +1286,9 @@ describe("Output invoice collections page", () => {
         expect.objectContaining({ method: "POST" }),
       );
     });
-    await waitFor(() => expect(operationBarrierRequests(fetchMock)).toHaveLength(1));
-    const [, barrierInit] = operationBarrierRequests(fetchMock)[0];
-    expect(JSON.parse(String(barrierInit?.body))).toEqual({
-      targets: [{ read_model_key: "output_invoice_collection", scope_key: "2026-05" }],
-    });
-    expect(rowsRequests(fetchMock)).toHaveLength(rowsBeforeMutation);
-
-    barrier.resolve();
-
     await waitFor(() => {
       expect(rowsRequests(fetchMock).length).toBeGreaterThan(rowsBeforeMutation);
     });
+    expect(operationBarrierRequests(fetchMock)).toHaveLength(0);
   }, 45000);
 });

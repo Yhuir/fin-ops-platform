@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any
 
 from fin_ops_platform.services.pending_invoice_rules import (
     editable_pending_invoice_tag_groups_payload,
@@ -59,16 +59,12 @@ class PendingInvoiceRulesApplicationService:
         *,
         settings_gateway: Any | None = None,
         app_settings_service: Any | None = None,
-        invalidate_read_model_scopes: Callable[[str], None] | None = None,
-        after_pending_invoice_rule_settings_saved: Callable[[dict[str, Any]], dict[str, Any] | None] | None = None,
     ) -> None:
         if settings_gateway is None:
             if app_settings_service is None:
                 raise ValueError("settings_gateway is required for pending invoice rules.")
             settings_gateway = AppSettingsPendingInvoiceRulesGateway(app_settings_service)
         self._settings_gateway = settings_gateway
-        self._invalidate_read_model_scopes = invalidate_read_model_scopes
-        self._after_pending_invoice_rule_settings_saved = after_pending_invoice_rule_settings_saved
 
     def get_rules(self, *, direction: str, can_save: bool) -> dict[str, Any]:
         rules_payload = pending_invoice_rules_payload(
@@ -90,26 +86,17 @@ class PendingInvoiceRulesApplicationService:
             direction=direction,
         )
         expected_version = _optional_int(pending_invoice_tag_groups.get("version"))
-        update_result = self._settings_gateway.update_pending_invoice_rule_groups(
+        self._settings_gateway.update_pending_invoice_rule_groups(
             direction=direction,
             editable_groups=editable_groups,
             expected_version=expected_version,
             actor_id=actor_id or "pending_invoice_rules",
         )
-        if self._invalidate_read_model_scopes is not None:
-            self._invalidate_read_model_scopes("pending_invoice_rules_update")
-        lifecycle_summary = None
-        event = update_result.get("event") if isinstance(update_result, dict) else None
-        if isinstance(event, dict) and self._after_pending_invoice_rule_settings_saved is not None:
-            lifecycle_summary = self._after_pending_invoice_rule_settings_saved(dict(event))
         rules_payload = pending_invoice_rules_payload(
             self._settings_gateway.get_pending_invoice_settings_payload(),
             direction=direction,
         )
         rules_payload["permissions"] = {"can_save": True}
-        rules_payload["read_model_status"] = "refreshing"
-        if lifecycle_summary is not None:
-            rules_payload["derived_data_lifecycle"] = lifecycle_summary
         return rules_payload
 
 

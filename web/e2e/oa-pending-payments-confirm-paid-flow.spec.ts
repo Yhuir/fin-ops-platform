@@ -89,9 +89,9 @@ test.describe("OA pending payments in-progress paid writeback browser flow", () 
     await expect(page.getByRole("button", { name: "自动匹配并写回 OA 待付款" })).toHaveCount(0);
 
     const rowsBeforeWriteback = api.count(ROWS_PATH);
+    const barriersBeforeWriteback = api.count("POST /api/operation-barrier/status");
     expect(api.count(WRITEBACK_PAID_PATH)).toBe(0);
     const writebackResponse = page.waitForResponse(responseFor("POST", "/api/oa-pending-payments/writeback-paid"));
-    const barrierResponse = page.waitForResponse(responseFor("POST", "/api/operation-barrier/status"));
     await recordLatency({
       operationId: "oa-pending-payments.writeback-paid",
       visibleLabel: "写回 OA 进行中付款申请人",
@@ -99,7 +99,6 @@ test.describe("OA pending payments in-progress paid writeback browser flow", () 
     }, async (mark) => {
       await row.getByRole("button", { name: "写回 OA 进行中付款申请人" }).click();
       await mark("apiLatencyMs", writebackResponse);
-      await mark("operationBarrierLatencyMs", barrierResponse);
       await mark("firstVisibleResponseLatencyMs", expect(page.getByText("已写回 1 条 OA。")).toBeVisible());
       await mark("finalSettledLatencyMs", expect(page.getByRole("row", { name: /进行中付款申请人/ })).toContainText("已写回"));
     });
@@ -116,6 +115,7 @@ test.describe("OA pending payments in-progress paid writeback browser flow", () 
     await expect(refreshedRow.getByRole("button", { name: /确认已支付并写回|写回 OA/ })).toHaveCount(0);
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(api.count(WRITEBACK_PAID_PATH)).toBe(1);
+    expect(api.count("POST /api/operation-barrier/status")).toBe(barriersBeforeWriteback);
     expect(unexpectedRuntimeErrors(runtimeErrors)).toEqual([]);
   });
 

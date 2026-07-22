@@ -108,7 +108,7 @@ test.describe("pending invoices income status browser flow", () => {
       const incomeStatusResponse = waitForIncomeStatusBatch(page);
       await page.getByRole("button", { name: "标记现金收入" }).click();
       expect((await mark("apiLatencyMs", incomeStatusResponse)).status()).toBe(200);
-      await mark("operationBarrierLatencyMs", expect.poll(() => api.count("GET /api/pending-invoices/rows")).toBeGreaterThan(rowsBeforeSubmit));
+      await expect.poll(() => api.count("GET /api/pending-invoices/rows")).toBeGreaterThan(rowsBeforeSubmit);
       await mark("finalSettledLatencyMs", expect(page.getByRole("row", { name: /收入批量客户A/ }).getByText("现金收入")).toBeVisible());
     });
     await expect.poll(() => api.count("PUT /api/pending-invoices/income-statuses")).toBe(1);
@@ -191,7 +191,7 @@ test.describe("pending invoices income status browser flow", () => {
       const incomeStatusResponse = waitForIncomeStatusBatch(page);
       await page.getByRole("button", { name: "标记现金收入" }).click();
       expect((await mark("apiLatencyMs", incomeStatusResponse)).status()).toBe(200);
-      await mark("operationBarrierLatencyMs", expect.poll(() => api.count("GET /api/pending-invoices/rows")).toBeGreaterThan(rowsBeforeSubmit));
+      await expect.poll(() => api.count("GET /api/pending-invoices/rows")).toBeGreaterThan(rowsBeforeSubmit);
       await mark("finalSettledLatencyMs", expect(page.getByRole("row", { name: /收入批量客户A/ }).getByText("现金收入")).toBeVisible());
     });
     await expect.poll(() => api.count("PUT /api/pending-invoices/income-statuses")).toBe(2);

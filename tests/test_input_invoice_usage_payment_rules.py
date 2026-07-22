@@ -80,16 +80,9 @@ class InputInvoiceUsagePaymentRulesTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            queue.refreshes,
-            [
-                ("input_invoice_usage", "all", "payment_status_rules_updated"),
-                ("invoice_lifecycle", "all", "payment_status_rules_updated"),
-            ],
-        )
+        self.assertEqual(queue.refreshes, [])
 
     def test_rules_update_persists_audits_and_returns_invalidation_event(self) -> None:
-        events: list[dict[str, object]] = []
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir)
             app = build_application(data_dir=data_dir)
@@ -105,7 +98,6 @@ class InputInvoiceUsagePaymentRulesTests(unittest.TestCase):
                     "pendingDirections": current["pendingDirections"],
                 },
                 actor_id="finance-owner",
-                after_input_invoice_usage_payment_rules_saved=events.append,
             )
             reloaded = build_application(
                 data_dir=data_dir,
@@ -113,7 +105,6 @@ class InputInvoiceUsagePaymentRulesTests(unittest.TestCase):
 
         self.assertEqual(updated["version"], 2)
         self.assertEqual(reloaded["rules"][1]["label"], "已支付")
-        self.assertEqual(events, [{"scope_type": "input_invoice_usage", "scope_key": "all", "reason": "payment_status_rules_updated", "old_version": 1, "new_version": 2}])
         audit = app._audit_service.as_dicts()[-1]
         self.assertEqual(audit["actor_id"], "finance-owner")
         self.assertEqual(audit["action"], "input_invoice_usage_payment_status_rules_updated")

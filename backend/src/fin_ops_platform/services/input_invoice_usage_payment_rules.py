@@ -4,7 +4,7 @@ import json
 from copy import deepcopy
 from dataclasses import dataclass
 from hashlib import sha256
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 SETTINGS_KEY = "input_invoice_usage_payment_status_rules"
 DEFAULT_VERSION = 1
@@ -150,7 +150,6 @@ class AppSettingsInputInvoiceUsagePaymentRulesProvider:
         payload: dict[str, Any] | None,
         *,
         actor_id: str,
-        after_saved: Callable[[dict[str, object]], None] | None = None,
     ) -> dict[str, Any]:
         if self._state_store is None:
             raise InputInvoiceUsagePaymentRulesValidationError(
@@ -215,8 +214,6 @@ class AppSettingsInputInvoiceUsagePaymentRulesProvider:
             "new_version": int(next_settings["version"]),
         }
         self._record_audit(actor_id=actor_id, event=event, before=current, after=next_settings)
-        if after_saved is not None:
-            after_saved(dict(event))
         return response
 
     def _current_settings(self) -> dict[str, Any]:

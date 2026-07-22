@@ -3,7 +3,7 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation
 from hashlib import sha1
 from http import HTTPStatus
-from typing import Any, Callable
+from typing import Any
 
 from fin_ops_platform.domain.enums import TransactionDirection
 from fin_ops_platform.domain.models import BankTransaction
@@ -25,9 +25,6 @@ from fin_ops_platform.services.read_model_write_targets import write_target_enve
 from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
 
 
-RefreshCallback = Callable[[str], object]
-
-
 class OaPendingPaymentCommandService:
     def __init__(
         self,
@@ -39,8 +36,6 @@ class OaPendingPaymentCommandService:
         pending_relation_service: Any | None = None,
         completed_oa_projection: Any | None = None,
         payment_status_snapshot_writer: Any | None = None,
-        enqueue_workbench_refresh: Callable[..., object] | None = None,
-        enqueue_oa_pending_payment_refresh: Callable[..., object] | None = None,
     ) -> None:
         self._import_service = import_service
         self._oa_projection = oa_projection
@@ -49,8 +44,6 @@ class OaPendingPaymentCommandService:
         self._pending_relation_service = pending_relation_service
         self._payment_status_repository = payment_status_repository
         self._payment_status_snapshot_writer = payment_status_snapshot_writer
-        self._enqueue_workbench_refresh = enqueue_workbench_refresh
-        self._enqueue_oa_pending_payment_refresh = enqueue_oa_pending_payment_refresh
 
     def link_bank_transactions(self, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
         oa_row_ids = _payload_list(payload, "oa_row_ids", "oaRowIds")
@@ -101,7 +94,7 @@ class OaPendingPaymentCommandService:
         writebacks = self._mark_oa_flow_ids_paid(flow_ids)
         if flow_ids:
             self._record_paid_statuses(records)
-        refresh = self._enqueue_refreshes_for_records(records, reason="oa_pending_payment_link_bank_transactions")
+        refresh = _refresh_hints_for_records(records)
         return {
             "success": True,
             "action": "oa_pending_payment_link_bank_transactions",
@@ -152,7 +145,7 @@ class OaPendingPaymentCommandService:
             + (eligible_records if snapshot_changed else [])
         )
         refresh = (
-            self._enqueue_refreshes_for_records(changed_records, reason="oa_pending_payment_writeback_paid")
+            _refresh_hints_for_records(changed_records)
             if changed_records
             else _empty_refresh_payload()
         )
@@ -444,48 +437,6 @@ class OaPendingPaymentCommandService:
             return None
         return self._mark_oa_paid(flow_id)
 
-    def _enqueue_refreshes_for_records(
-        self,
-        records: list[OAApplicationRecord],
-        *,
-        reason: str = "oa_pending_payment_link_bank_transactions",
-    ) -> dict[str, Any]:
-        scope_keys: list[str] = []
-        for record in records:
-            for scope_key in _refresh_scope_keys(record.month):
-                if scope_key not in scope_keys:
-                    scope_keys.append(scope_key)
-        metadata = {"oa_row_ids": [record.id for record in records], "reason": reason}
-        refreshed: list[str] = []
-        for scope_key in scope_keys:
-            if callable(self._enqueue_workbench_refresh):
-                self._enqueue_workbench_refresh(
-                    scope_key,
-                    reason=reason,
-                    metadata=metadata,
-                )
-                refreshed.append(f"workbench:{scope_key}")
-            if scope_key != "all" and callable(self._enqueue_oa_pending_payment_refresh):
-                self._enqueue_oa_pending_payment_refresh(
-                    scope_key,
-                    reason=reason,
-                    metadata=metadata,
-                )
-                refreshed.append(f"oa_pending_payment:{scope_key}")
-        if callable(self._enqueue_workbench_refresh):
-            self._enqueue_workbench_refresh(
-                "all",
-                reason=reason,
-                metadata=metadata,
-            )
-            refreshed.append("workbench:all")
-        return {
-            "scopeKeys": scope_keys,
-            "targets": refreshed,
-            "enqueued": bool(refreshed),
-            "targetSeconds": 1,
-        }
-
     def _record_paid_statuses(self, records: list[OAApplicationRecord]) -> bool:
         if not records:
             return False
@@ -727,10 +678,21 @@ def _empty_refresh_payload() -> dict[str, Any]:
 
 def _oa_pending_payment_write_target_envelope(refresh: dict[str, Any]) -> dict[str, object]:
     scope_keys = _payload_list(refresh, "scopeKeys", "scope_keys")
-    if not scope_keys:
-        return write_target_envelope(scope_keys=[], targets=[])
-    targets = [{"read_model_key": "oa_pending_payment", "scope_key": scope_key} for scope_key in scope_keys]
-    return write_target_envelope(scope_keys=scope_keys, targets=targets)
+    return write_target_envelope(scope_keys=scope_keys, targets=[])
+
+
+def _refresh_hints_for_records(records: list[OAApplicationRecord]) -> dict[str, Any]:
+    scope_keys: list[str] = []
+    for record in records:
+        for scope_key in _refresh_scope_keys(record.month):
+            if scope_key not in scope_keys:
+                scope_keys.append(scope_key)
+    return {
+        "scopeKeys": scope_keys,
+        "targets": [],
+        "enqueued": False,
+        "targetSeconds": 0,
+    }
 
 
 def _pending_payment_relation_id(oa_row_ids: list[str], bank_transaction_ids: list[str]) -> str:

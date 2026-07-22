@@ -549,11 +549,6 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
                     scope_key=scope,
                     payload=payload,
                 )
-                self._enqueue_refresh(
-                    transaction,
-                    tenant_id=normalized_tenant_id,
-                    scope_key=scope,
-                )
                 source_signatures[scope] = str(payload["source_signature"])
 
             return OaPendingPaymentSourceSnapshotResult(

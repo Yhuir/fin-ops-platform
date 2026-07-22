@@ -1131,7 +1131,7 @@ describe("OA pending payments page", () => {
       oa_row_ids: ["oa-candidate"],
       bank_transaction_ids: ["bank-drawer-001"],
     });
-    expect(await within(page).findByText("已关联支出流水并写回 OA，等待核对表刷新。")).toBeInTheDocument();
+    expect(await within(page).findByText("已关联支出流水并写回 OA，正在重新加载当前核对表。")).toBeInTheDocument();
     await waitFor(() => {
       expect(rowsRequests(fetchMock).at(-1)?.searchParams.get("view_mode")).toBe("in_progress");
     });
@@ -1203,10 +1203,8 @@ describe("OA pending payments page", () => {
     expect(writebackPaidRequests(fetchMock)).toHaveLength(0);
   });
 
-  test("waits for the OA pending payment barrier before reloading after paid writeback", async () => {
-    const barrier = deferred();
+  test("reloads the current OA pending payment page without a write-time barrier after paid writeback", async () => {
     const fetchMock = installOaPendingPaymentsFetch({
-      operationBarrierDelay: barrier.promise,
       writebackPaidPayload: {
         success: true,
         action: "oa_pending_payment_writeback_paid",
@@ -1230,18 +1228,10 @@ describe("OA pending payments page", () => {
     await waitFor(() => expect(writebackPaidRequests(fetchMock)).toHaveLength(1));
     const [, writebackInit] = writebackPaidRequests(fetchMock)[0];
     expect(JSON.parse(String(writebackInit?.body))).toEqual({ oa_row_ids: ["oa-003"] });
-    await waitFor(() => expect(operationBarrierRequests(fetchMock)).toHaveLength(1));
-    const [, barrierInit] = operationBarrierRequests(fetchMock)[0];
-    expect(JSON.parse(String(barrierInit?.body))).toEqual({
-      targets: [{ read_model_key: "oa_pending_payment", scope_key: "2026-05" }],
-    });
-    expect(rowsRequests(fetchMock)).toHaveLength(rowsBeforeMutation);
-
-    barrier.resolve();
-
     await waitFor(() => {
       expect(rowsRequests(fetchMock).length).toBeGreaterThan(rowsBeforeMutation);
     });
+    expect(operationBarrierRequests(fetchMock)).toHaveLength(0);
   });
 
   test("allows paid writeback retry after a failed attempt", async () => {
@@ -1306,9 +1296,8 @@ describe("OA pending payments page", () => {
     expect(writebackPaidRequests(fetchMock)).toHaveLength(0);
   });
 
-  test("waits for the OA pending payment barrier before reloading after bank link", async () => {
-    const barrier = deferred();
-    const fetchMock = installOaPendingPaymentsFetch({ operationBarrierDelay: barrier.promise });
+  test("reloads the current OA pending payment page without a write-time barrier after bank link", async () => {
+    const fetchMock = installOaPendingPaymentsFetch();
     const user = userEvent.setup();
 
     renderAuthenticatedAppAt("/oa-pending-payments");
@@ -1329,18 +1318,10 @@ describe("OA pending payments page", () => {
     await user.click(screen.getByRole("button", { name: "确认关联 1 条流水" }));
 
     await waitFor(() => expect(linkBankRequests(fetchMock)).toHaveLength(1));
-    await waitFor(() => expect(operationBarrierRequests(fetchMock)).toHaveLength(1));
-    const [, barrierInit] = operationBarrierRequests(fetchMock)[0];
-    expect(JSON.parse(String(barrierInit?.body))).toEqual({
-      targets: [{ read_model_key: "oa_pending_payment", scope_key: "2026-05" }],
-    });
-    expect(rowsRequests(fetchMock)).toHaveLength(rowsBeforeMutation);
-
-    barrier.resolve();
-
     await waitFor(() => {
       expect(rowsRequests(fetchMock).length).toBeGreaterThan(rowsBeforeMutation);
     });
+    expect(operationBarrierRequests(fetchMock)).toHaveLength(0);
   });
 
   test("opens OA, bank, relation drawers and reuses pending invoice rules endpoint", async () => {

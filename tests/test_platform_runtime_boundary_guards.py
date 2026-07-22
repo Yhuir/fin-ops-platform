@@ -3377,13 +3377,10 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         )
         if "record_paid_statuses" not in paid_snapshot_write:
             violations.append("OA payment command does not reconcile successful external writes into PostgreSQL")
-        enqueue_refreshes = _function_source(
-            _parse(command_service_path),
-            command_service_source,
-            "_enqueue_refreshes_for_records",
-        )
-        if 'scope_key != "all"' not in enqueue_refreshes:
-            violations.append("OA payment command can still enqueue ordinary oa_pending_payment:all refreshes")
+        if "_enqueue_refreshes_for_records" in command_service_source:
+            violations.append("OA payment command still owns ordinary write-time read-model fan-out")
+        if "enqueue_workbench_refresh=" in command_composition or "enqueue_oa_pending_payment_refresh=" in command_composition:
+            violations.append("OA payment command composition still injects downstream refresh callbacks")
         for removed_write_path in (
             "/api/oa-pending-payments/confirm-paid",
             "/api/oa-pending-payments/auto-reconcile-bank-transactions",
@@ -4300,7 +4297,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "xlsx_response=self._input_invoice_usage_xlsx_response",
             "app_settings_service=self._app_settings_service",
             "load_json_body=self._load_json_body",
-            "payment_rules_refreshes=self._enqueue_input_invoice_usage_payment_rules_refreshes",
             "payment_rules_error_response=self._input_invoice_usage_payment_rules_error_response",
             "json_response=self._json_response",
             "input_usage_error_response=self._input_invoice_usage_error_response",

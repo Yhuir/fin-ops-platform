@@ -46,7 +46,6 @@ class OutputInvoiceCollectionLifecycleTests(unittest.TestCase):
         lifecycle = OutputInvoiceCollectionLifecycleService(
             repository=repository,
             row_provider=lambda row_id: query.row_by_id(row_id),
-            queue_repository=queue,
         )
 
         status_result = lifecycle.set_collection_status(
@@ -71,8 +70,8 @@ class OutputInvoiceCollectionLifecycleTests(unittest.TestCase):
         expected_freshness = {
             "affected_scope_keys": ["2026-05"],
             "read_model_scope_keys": ["2026-05"],
-            "freshness_targets": [{"read_model_key": "output_invoice_collection", "scope_key": "2026-05"}],
-            "operation_barrier_targets": [{"read_model_key": "output_invoice_collection", "scope_key": "2026-05"}],
+            "freshness_targets": [],
+            "operation_barrier_targets": [],
         }
         self.assertEqual(status_result["override"]["version"], 1)
         self.assertEqual(
@@ -88,7 +87,7 @@ class OutputInvoiceCollectionLifecycleTests(unittest.TestCase):
         self.assertEqual(refreshed_row["collectionStatus"]["manualOverride"]["note"], "客户确认需要冲红")
         self.assertEqual(refreshed_row["collectionStatus"]["expectedCollectionDate"], "2026-06-20")
         self.assertEqual(refreshed_row["collectionStatus"]["reminder"]["channel"], "oa")
-        self.assertEqual(queue.refreshes, [("output_invoice_collection", "2026-05", "lifecycle_status_changed"), ("output_invoice_collection", "2026-05", "lifecycle_reminder_changed")])
+        self.assertEqual(queue.refreshes, [])
 
     def test_lifecycle_overlays_and_receipt_history_are_tenant_scoped(self) -> None:
         repository = InMemoryOutputInvoiceCollectionLifecycleRepository()
@@ -108,12 +107,10 @@ class OutputInvoiceCollectionLifecycleTests(unittest.TestCase):
         lifecycle = OutputInvoiceCollectionLifecycleService(
             repository=repository,
             row_provider=lambda row_id: query.row_by_id(row_id, tenant_id="tenant-a"),
-            queue_repository=RecordingRefreshQueue(),
         )
         receipts = OutputInvoiceCollectionReceiptService(
             repository=repository,
             row_provider=lambda row_id: query.row_by_id(row_id, tenant_id="tenant-a"),
-            queue_repository=RecordingRefreshQueue(),
         )
 
         lifecycle.set_collection_status(
@@ -150,7 +147,6 @@ class OutputInvoiceCollectionLifecycleTests(unittest.TestCase):
         lifecycle = OutputInvoiceCollectionLifecycleService(
             repository=repository,
             row_provider=lambda row_id: query.row_by_id(row_id),
-            queue_repository=RecordingRefreshQueue(),
         )
 
         result = lifecycle.confirm_red_invoice_relation(
@@ -203,7 +199,6 @@ class OutputInvoiceCollectionLifecycleTests(unittest.TestCase):
         receipts = OutputInvoiceCollectionReceiptService(
             repository=repository,
             row_provider=lambda row_id: query.row_by_id(row_id),
-            queue_repository=RecordingRefreshQueue(),
         )
 
         first = receipts.create_receipt(
@@ -225,8 +220,8 @@ class OutputInvoiceCollectionLifecycleTests(unittest.TestCase):
         expected_freshness = {
             "affected_scope_keys": ["2026-05"],
             "read_model_scope_keys": ["2026-05"],
-            "freshness_targets": [{"read_model_key": "output_invoice_collection", "scope_key": "2026-05"}],
-            "operation_barrier_targets": [{"read_model_key": "output_invoice_collection", "scope_key": "2026-05"}],
+            "freshness_targets": [],
+            "operation_barrier_targets": [],
         }
         self.assertEqual(first["receipt"]["id"], replay["receipt"]["id"])
         self.assertEqual(first["receipt"]["receiptNo"], replay["receipt"]["receiptNo"])
@@ -278,7 +273,6 @@ class OutputInvoiceCollectionLifecycleTests(unittest.TestCase):
         receipts = OutputInvoiceCollectionReceiptService(
             repository=repository,
             row_provider=lambda row_id: query.row_by_id(row_id),
-            queue_repository=RecordingRefreshQueue(),
         )
 
         def create_for(invoice_id: str) -> str:

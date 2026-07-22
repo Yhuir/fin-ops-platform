@@ -59,6 +59,42 @@ def _phase_27_read_model_coverage() -> dict[str, tuple[str, str]]:
 
 
 class ReadModelManifestTests(unittest.TestCase):
+    def test_declared_read_model_dependency_graph_is_complete_and_acyclic(self) -> None:
+        graph = {
+            key: tuple(entry.read_dependencies)
+            for key, entry in READ_MODEL_MANIFEST.items()
+        }
+        for key, dependencies in graph.items():
+            self.assertNotIn(key, dependencies)
+            self.assertLessEqual(set(dependencies), set(graph))
+
+        visiting: set[str] = set()
+        visited: set[str] = set()
+
+        def visit(key: str) -> None:
+            if key in visited:
+                return
+            self.assertNotIn(key, visiting, f"read model dependency cycle at {key}")
+            visiting.add(key)
+            for dependency in graph[key]:
+                visit(dependency)
+            visiting.remove(key)
+            visited.add(key)
+
+        for key in graph:
+            visit(key)
+
+        self.assertEqual(
+            graph["invoice_lifecycle"],
+            (
+                "pending_invoice",
+                "input_invoice_usage",
+                "output_invoice_collection",
+                "oa_pending_payment",
+                "workbench_relation",
+            ),
+        )
+
     def test_phase_27_coverage_matches_manifest_keys_scopes_and_query_owners(self) -> None:
         coverage = _phase_27_read_model_coverage()
 

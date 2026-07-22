@@ -854,7 +854,6 @@ class AppSettingsService:
         payload: dict[str, Any],
         *,
         actor_id: str,
-        after_input_invoice_usage_payment_rules_saved: Callable[[dict[str, object]], None] | None = None,
     ) -> dict[str, Any]:
         provider = AppSettingsInputInvoiceUsagePaymentRulesProvider(
             state_store=self._state_store,
@@ -864,7 +863,6 @@ class AppSettingsService:
             updated = provider.update_payment_status_rules(
                 payload,
                 actor_id=actor_id,
-                after_saved=after_input_invoice_usage_payment_rules_saved,
             )
         except InputInvoiceUsagePaymentRulesValidationError as exc:
             raise AppSettingsValidationError(exc.error_code, str(exc)) from exc
