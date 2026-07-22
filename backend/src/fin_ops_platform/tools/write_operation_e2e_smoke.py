@@ -760,6 +760,7 @@ def _run_checkpoint(
         api_prefix=api_prefix,
         headers=headers,
         timeout_seconds=timeout_seconds,
+        poll_interval_seconds=poll_interval_seconds,
         request_fn=request_fn,
         variables=variables,
     )
@@ -778,6 +779,7 @@ def _run_checkpoint(
         api_prefix=api_prefix,
         headers=headers,
         timeout_seconds=timeout_seconds,
+        poll_interval_seconds=poll_interval_seconds,
         request_fn=request_fn,
         variables=variables,
     )
@@ -1540,6 +1542,7 @@ def _capture_isolation_baseline(
     timeout_seconds: float,
     request_fn: RequestFn,
     variables: Mapping[str, Any],
+    poll_interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS,
 ) -> dict[str, Any]:
     isolation_consumers = [consumer for consumer in checkpoint.consumers if consumer.role == "isolation"]
     if not isolation_consumers:
@@ -1547,12 +1550,13 @@ def _capture_isolation_baseline(
     values: dict[str, Any] = {}
     try:
         for consumer in isolation_consumers:
-            _path, payload, _read_model_status = _request_fresh_consumer_payload(
+            _path, payload, _read_model_status = _wait_for_fresh_consumer_payload(
                 consumer,
                 base_url=base_url,
                 api_prefix=api_prefix,
                 headers=headers,
                 timeout_seconds=timeout_seconds,
+                poll_interval_seconds=poll_interval_seconds,
                 request_fn=request_fn,
                 variables=variables,
             )
@@ -1575,6 +1579,7 @@ def _capture_consumer_causal_baseline(
     timeout_seconds: float,
     request_fn: RequestFn,
     variables: Mapping[str, Any],
+    poll_interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS,
 ) -> dict[str, Any]:
     consumers = [
         consumer
@@ -1589,12 +1594,13 @@ def _capture_consumer_causal_baseline(
     values: dict[str, str] = {}
     try:
         for consumer in consumers:
-            path, payload, _read_model_status = _request_fresh_consumer_payload(
+            path, payload, _read_model_status = _wait_for_fresh_consumer_payload(
                 consumer,
                 base_url=base_url,
                 api_prefix=api_prefix,
                 headers=headers,
                 timeout_seconds=timeout_seconds,
+                poll_interval_seconds=poll_interval_seconds,
                 request_fn=request_fn,
                 variables=variables,
             )
@@ -1815,6 +1821,35 @@ def _request_fresh_consumer_payload(
     if metadata.get("read_model_status") != "fresh" or metadata.get("refresh_enqueued") is True:
         raise ValueError("consumer_read_model_not_fresh")
     return path, payload, metadata.get("read_model_status")
+
+
+def _wait_for_fresh_consumer_payload(
+    consumer: ConsumerProbe,
+    *,
+    base_url: str,
+    api_prefix: str,
+    headers: Mapping[str, str],
+    timeout_seconds: float,
+    poll_interval_seconds: float,
+    request_fn: RequestFn,
+    variables: Mapping[str, Any],
+) -> tuple[str, Any, Any]:
+    deadline = monotonic() + max(1.0, timeout_seconds)
+    while True:
+        try:
+            return _request_fresh_consumer_payload(
+                consumer,
+                base_url=base_url,
+                api_prefix=api_prefix,
+                headers=headers,
+                timeout_seconds=timeout_seconds,
+                request_fn=request_fn,
+                variables=variables,
+            )
+        except ValueError as exc:
+            if str(exc) not in _RETRYABLE_CONSUMER_ERRORS or monotonic() >= deadline:
+                raise
+        sleep(max(0.05, poll_interval_seconds))
 
 
 def _evaluate_isolation_assertion(

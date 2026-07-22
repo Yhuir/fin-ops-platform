@@ -1566,6 +1566,62 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         self.assertEqual(result["status"], "fail")
         self.assertEqual(result["results"][0]["assertions"][0]["error"], "non_consumer_changed")
 
+    def test_isolation_baseline_waits_for_transient_refresh_before_recovery(self) -> None:
+        checkpoint = write_operation_e2e_smoke.WriteCheckpoint(
+            name="recovery",
+            operations=("turnover_relation_withdraw_cross_page",),
+            steps=(),
+            consumers=(
+                write_operation_e2e_smoke.ConsumerProbe(
+                    probe=http_slo_probe.HttpProbe("isolation", "/api/isolation", target_ms=1000),
+                    assertions=(
+                        write_operation_e2e_smoke.JsonPointerAssertion("/rows/0/id", "equals", "stable"),
+                    ),
+                    page_key="input-invoice-usage",
+                    role="isolation",
+                ),
+            ),
+        )
+        attempts = 0
+
+        def refreshing_then_fresh(*_args) -> http_slo_probe.HttpProbeResponse:
+            nonlocal attempts
+            attempts += 1
+            status = 202 if attempts == 1 else 200
+            payload = (
+                {"read_model_status": "refreshing", "refresh_enqueued": True}
+                if status == 202
+                else {
+                    "read_model_status": "fresh",
+                    "refresh_enqueued": False,
+                    "rows": [{"id": "stable"}],
+                }
+            )
+            return http_slo_probe.HttpProbeResponse(
+                status_code=status,
+                headers={"content-type": "application/json"},
+                body=json.dumps(payload).encode(),
+            )
+
+        with patch("fin_ops_platform.tools.write_operation_e2e_smoke.sleep", return_value=None):
+            baseline = write_operation_e2e_smoke._capture_isolation_baseline(
+                checkpoint,
+                base_url="https://example.test",
+                api_prefix="/fin-ops-api",
+                headers={"Authorization": "Bearer token"},
+                timeout_seconds=1,
+                poll_interval_seconds=0.05,
+                request_fn=refreshing_then_fresh,
+                variables={},
+            )
+
+        self.assertEqual(baseline["status"], "pass")
+        self.assertEqual(attempts, 2)
+        self.assertEqual(
+            baseline["values"]["input-invoice-usage\x1f/rows/0/id"],
+            "stable",
+        )
+
     def test_cost_all_consumer_requires_fresh_changed_source_versions_and_business_value(self) -> None:
         checkpoint = write_operation_e2e_smoke.WriteCheckpoint(
             name="cost-all-causal",

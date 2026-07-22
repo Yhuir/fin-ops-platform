@@ -146,8 +146,9 @@ event 或 worker instance 时，必须先更新 registry，再让 deploy/preflig
   通过 `write-operation-restore-point-delete <run-id> <expected-sha256>` 精确校验固定文件集、manifest 和 dump
   checksum 后删除；禁止宽泛路径删除。
 - 同步写超过门禁仍判定为 SLO failure；如果 HTTP 结果已经证明 mutation committed，恢复步骤必须先按该响应的
-  精确 `outbox_event_ids` 等待 durable fan-out 收敛，再读取隔离页基线和执行撤回。`202 refreshing`
-  不是稳定恢复基线，不能据此跳过撤回或把生产关系留在 active 状态。
+  精确 `outbox_event_ids` 等待 durable fan-out 收敛，再读取隔离页基线和执行撤回。隔离/causal 写前基线遇到
+  `202 refreshing`、`read_model_not_fresh` 或 dependency `503` 时，必须在同一个有界 timeout 内轮询到 fresh；
+  这些瞬态状态不能据此跳过撤回或把生产关系留在 active 状态。
 - 首批 receipt 完成后，consumer gate 对 `202` / `read_model_not_fresh` / dependency `503` 在总 timeout
   内继续轮询，因为这些状态可由合法链式 fan-out 产生；业务字段断言失败和单次 fresh 响应超过页面 SLO
   不可重试，仍立即失败，防止 eventual consistency 轮询掩盖错误内容或性能退化。

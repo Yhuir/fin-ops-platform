@@ -89,3 +89,6 @@
 - `runtime-queue-resolve-covered` 只处理已有 exact-scope fresh/done 覆盖证明的 dead letter，不开放通用 SQL 或任意 queue mutation。
 - `write-operation-e2e-smoke --apply-stdin` 只把两行 stdin 注入固定 relation runner：Admin Token 与 approval ticket；
   缺任一输入都在 mutation 前失败，不依赖 root-owned env 已同步才能保留审批闸门。
+- write-operation runner 的 consumer 与隔离/causal 写前 baseline 共用有界 freshness 语义：只对
+  `202 refreshing`、`read_model_not_fresh`、dependency `503` 轮询；业务断言、认证、合同和页面 SLO 失败仍立即
+  fail closed，避免瞬态 read model 状态阻断已提交关系的 canonical recovery。
