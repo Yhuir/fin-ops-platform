@@ -2,12 +2,13 @@
 
 日期：2026-07-22
 
-## 2026-07-21 冻结要求分区回归
+## 2026-07-22 Turnover 人工闭环冻结要求分区回归
 
-- Business core：要求发票的 OA+银行 active relation 必须保持同 case unpaired；补齐发票后同 case paired；缺 requirement snapshot fail closed。
-- Service/API：人工与 deterministic 写入都冻结 tag code、OA/发票布尔值和规则版本；bank-tag non-fresh/缺行时 UoW 不打开。
-- Read model/Audit：SQL projection、写后 operation projection 和 preview 复用同一纯分区；Page Audit 独立发现缺快照与错误 zone；关联台专属 Redis schema 淘汰旧 payload，不改变共享 projection schema。
-- Frontend：不完整 relation 的空 pane 显示轻量“待补 OA/发票”，不改变选择、详情和其它页面组件。
+- Business core：`turnover_manual_closure` active relation 只拥有同组关系，不无条件代表完成；OA/发票四种冻结 requirement 组合按 OR 聚合，未知、空或缺失 snapshot fail closed。要求 OA 的 bank-only case 保持完整 unpaired，补齐要求后才以同 case paired；`batch_accounting` 与 ETC 显式完成合同保持隔离。
+- Service/API：Turnover 人工确认复用同一次 selected-row 快照，并且只读取一次 canonical rule payload，冻结 tag code、OA/发票布尔值、来源和版本；合并后的任一 bank member 不在 selected ids、bank row 缺失/重复或规则无效时 UoW 不打开。deterministic 写入的既有冻结合同不变。
+- Read model/Audit：SQL projection、写后 operation projection 和 preview 复用 relation 自身冻结要求；Page Audit 独立发现缺快照与错误 zone；本次不改变共享 projection schema、scope、worker 或 cache。
+- Frontend：API mapper 保留显式 false、缺字段保持缺失语义；不完整 relation 的空 pane显示“待补 OA/发票”。生产组件与页面请求 I/O 未改变。
+- 旧链回归：no-OA 规则保存不再扫描并追溯回写既有 Turnover relation；普通 manual、deterministic、batch accounting、ETC、合并与撤回测试共同防止其它页面分区被放宽。
 
 ## 2026-07-20 折叠流水详情惰性加载回归
 

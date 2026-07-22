@@ -178,7 +178,7 @@
 
 - 外部往来款管理 Spec-first E2E 本地闭环状态为 `spec-first-covered`：`TURNOVER-E2E-001..009` 已映射到 Browser、组件、API、后端和 integration 覆盖；`TURNOVER-E2E-010` 真实基础设施 worker drain 明确保留为 staging/runtime risk。
 - 后续只有发现明确 P0/P1 缺口、真实 bug 或业务规则变化时，再按 `e2e-spec.md` 和 `tests.md` 中七类矩阵补测试。
-- 手动零差额闭环写入 Workbench active pair relation 作为共同事实源；系统 `deterministic` 只表示自动识别出的零差额组合，不是已闭环事实。外部往来闭环 relation 在关联台保留同一个 `turnover_manual_closure` active case/evidence；新写入关系必须声明 `requires_oa=true`、`requires_invoice=false`，因此纯银行闭环留在 open 待处理区，合并或补齐 OA 后可在无需发票时进入 paired。metadata 缺失的旧闭环关系 fail closed，仍按三栏完整后 paired，或由规则保存同步链路补齐 metadata 后按新规则分区。若闭环确认前已有 OA-bank relation，可合并为同一个包含 `oa` + `bank` rows 的 active case。
+- 手动零差额闭环写入 Workbench active pair relation 作为共同事实源；系统 `deterministic` 只表示自动识别出的零差额组合，不是已闭环事实。外部往来闭环 relation 在关联台保留同一个 `turnover_manual_closure` active case/evidence；新写入关系必须从所选流水的有效规则标签冻结真实 `requires_oa`、`requires_invoice`、source 和 version。纯银行闭环若要求 OA/发票则以同一 case 留在未配对区，全部要求满足后才进入 paired。metadata 缺失的旧闭环关系 fail closed，只能由受控 repair 补齐；规则保存不得追溯改写。若闭环确认前已有 OA-bank relation，可在其全部银行成员均属于本次选择时合并为同一个包含 `oa` + `bank` rows 的 active case。
 - PostgreSQL SQL runtime 下外部往来闭环的银行流水事实源必须是 `bank_detail` SQL read model，并保留 Workbench 使用的 legacy/source row id；不能再从 legacy import snapshot 推导可闭环流水。
 - 手动零差额闭环支持同组多流水；至少一收一支且收支合计差额为 `0.00`。已确认后不能追加流水，漏选时先撤回原闭环关系再重新选择。
 - 外部往来页撤回只允许 row types 子集为 `{oa, bank}` 的 `turnover_manual_closure`；若已在关联台补齐发票或其他业务 row type，必须去关联台撤回完整关系。
@@ -736,3 +736,11 @@ git diff --check
 - 生产 release `main-188a9fdc-20260720170432`（SHA `188a9fdc3f91c84f7870bbc167e11bee59db14c4`）稳定窗口三轮可逆写全部通过：command p95/max `604.266ms`，response-to-fresh p95/max `699.225ms`，response-to-visible p95/max `1006.562ms`；最终 test fixture `unlinked` 且无需 recovery。
 - 发布邻接首轮曾记录 confirm `4542.127ms`，数据库执行占 `4343.046ms`；同窗口 readiness/Audit 也出现数据库竞争长尾。该证据保留为平台容量风险；release/queue/worker 稳定后的正式门通过，不在页面边界内新增 Redis、warmup 旧链、跨请求 cache 或共享鉴权分支。
 - 最终读取门：shell/grouped/tag-selection/Page Audit 各 40 个正式样本全部通过，p95 分别 `98.970/283.792/160.112/342.569ms`；grouped 40/40 fresh、0 enqueue。写操作后的页面直接 Audit 及关联台、银行明细、成本统计、OA 待付款交叉 Audit 均为 `pass/fresh/drained`、0 issue。
+
+## 2026-07-22 - 人工闭环冻结真实流水规则要求
+
+- 真实原因：Turnover 人工闭环写 adapter 曾硬编码 `requires_oa=false`、`requires_invoice=false`，同时 Workbench 分组对 `turnover_manual_closure` 存在 active 即无条件 complete 的旧 bypass。两条旧逻辑叠加，使规则标签明确要求 OA 的 bank-only closure 直接进入已配对。
+- 最小设计：复用现有 selected-row port 和 `build_bank_relation_requirement_metadata(...)`，每次确认只读取一次 selected rows、一次 canonical rules payload；从 `effective_category_code`（缺失时回退 `category_code`）冻结 tag code、OA/发票要求、source 和 version。不新增 service、repository、表、worker、cache、API DTO 或前端请求。
+- 安全边界：合并 preview 完成后，最终 typed bank members 必须是 selected ids 的子集；缺行、重复行、无效 rules、未知 tag 或未选 bank member 都在 relation command 前 fail closed。事务、幂等、权限、版本、dirty/outbox 与撤回合同保持原 owner。
+- 旧链删除：删除 Workbench 对 turnover active relation 的无条件完成 bypass；删除 legacy no-OA 规则保存后扫描并回写既有 Turnover relation requirement 的同步方法、常量和专用测试语义。规则保存只维护当前规则，不追溯污染已冻结 relation；存量缺快照关系继续 fail closed，留给受控 repair。
+- 隔离与性能：改动仅位于 Turnover composition/write adapter、Workbench 纯分区 policy 与 legacy no-OA service 的旧链清理；普通 manual/deterministic、batch accounting、ETC、其它页面 API/read model/worker I/O 不变。request 热路径保持固定 I/O 次数，且不增加逐流水或逐 relation 查询。

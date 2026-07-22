@@ -77,9 +77,12 @@ same group flow rows selected
   -> frontend rebinds selected bank row ids to latest same-group flow rows
   -> backend stale precondition passes
   -> Turnover domain validates a deterministic closure descriptor without persistence
+  -> reuse the same selected-row snapshot and read canonical rule payload exactly once
   -> canonical Workbench active pair relation only
   -> merge selected banks plus any selected banks' existing OA-bank active relations into one turnover_manual_closure case
-  -> Workbench evaluates turnover_manual_closure relation metadata requires_oa/requires_invoice
+  -> reject before command if any final bank member is outside selected bank row ids
+  -> freeze tag code, requires_oa/requires_invoice, rule source and version in relation metadata
+  -> Workbench evaluates the frozen turnover_manual_closure requirements
   -> bank-only stays open when requires_oa=true; OA + bank can become paired when requires_invoice=false
   -> turnover/workbench/workbench_relation dirty-outbox refresh
   -> API 返回 operation freshness targets
@@ -98,11 +101,12 @@ same group flow rows selected
 - 前端不能用抽屉打开时缓存的 flow row 版本直接提交；提交前必须刷新并重绑定，若任一流水消失、离开原 group、或刷新后不再零差额，必须中止并要求重新选择。
 - 不得被其他 active Turnover confirmed relation 占用。
 - 已处于 Workbench active relation 的所选银行流水，只有当既有 relation 的 row types 仅包含 `oa` 和 `bank` 时，外部往来闭环确认才可合并这些 relation；合并后新的 `turnover_manual_closure` active case 包含既有 OA rows、既有 bank rows 和本次新增 bank rows。既有 relation 包含 `invoice` 或其他业务 row type 时必须拒绝，并要求到关联台处理完整关系。
+- 合并后的每个 bank member 都必须属于本次 `bank_row_ids`；既有 OA-bank relation 若带入未选择银行流水，必须在 relation command 前返回冲突，不能扩大用户确认范围。
 - `expected_versions` 必须在写 relation 和 Workbench pair relation 前校验。
 - `idempotency_key` 相同 payload 重放返回第一次结果；不同 payload 返回 409。
 - 已确认后不能追加流水；漏选时必须先撤回原闭环关系，再重新选择完整流水确认。
 - 两笔流水保留 `evidence.closure_mode=manual_zero_difference_pair`；三笔及以上使用 `manual_zero_difference_group`。
-- 写入 Workbench active relation 时必须携带 `special_metadata.requires_oa=true`、`requires_invoice=false`、`paired_requirement_source` 和版本。关联台只读取 relation metadata 判断 required row type 是否满足；metadata 缺失的旧关系 fail closed，不得在关联台查询当前规则设置兜底。
+- 写入 Workbench active relation 时，必须从本次 selected-row 快照的 `effective_category_code`（缺失时回退 `category_code`）和一次 canonical rules payload，经统一 helper 冻结 tag code、`requires_oa`、`requires_invoice`、`paired_requirement_source` 与版本。关联台只读取 relation metadata 判断 required row type 是否满足；未知/空规则和 metadata 缺失的旧关系 fail closed，不得在关联台查询当前设置兜底，也不得由规则保存追溯改写。
 
 ### 撤回
 

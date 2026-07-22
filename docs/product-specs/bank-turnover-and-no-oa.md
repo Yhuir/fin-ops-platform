@@ -29,7 +29,7 @@
 - 自动识别只产生候选和差额提示。`deterministic` 表示系统发现同组零差额候选，不表示业务已闭环。
 - 页面汇总行只承载组级聚合、余额和展开入口；流水选择、补充信息编辑、确认闭环和撤销归并等写操作必须以真实流水行为入口。
 - 所有外部往来闭环都必须由用户在外部往来款管理页手动选择同一往来组内真实流水确认；可选择多笔流水，但必须同时包含收入和支出，且收支合计差额为 `0.00`。确认前不进入关联台已配对区。
-- 人工闭环成功后，后端在同一写事务中写 Turnover 手动闭环 evidence 和 Workbench active pair relation。Workbench relation 是外部往来闭环的共同事实源；若所选流水已存在仅含 OA + 银行的 active relation，确认闭环应把这些既有关联合并进同一个 `turnover_manual_closure` active case。确认成功后，外部往来台账必须在对应流水展示“收支闭环”；关联台必须保留同一个 canonical `case:*` relation/evidence。关联台只按 active relation 成员显示已配对组；没有 active relation 的事实逐条显示在未配对区，不再存在 open/candidate relation 展示状态。
+- 人工闭环成功后，后端在同一写事务中写 Turnover 手动闭环 evidence 和 Workbench active pair relation。Workbench relation 是外部往来闭环的共同事实源；若所选流水已存在仅含 OA + 银行的 active relation，确认闭环应把这些既有关联合并进同一个 `turnover_manual_closure` active case，但合并后的全部银行成员必须属于本次所选流水，否则冲突并整笔回滚。确认成功后，外部往来台账必须在对应流水展示“收支闭环”；关联台必须保留同一个 canonical `case:*` relation/evidence。active relation 只表示同组 ownership，不等于完成：relation 创建时必须按所选流水的有效规则标签冻结 `requires_oa`、`requires_invoice`、规则来源和版本；关联台按这份冻结快照判断分区。只含银行流水且规则要求 OA 时，同一个 active case 必须完整留在未配对区等待 OA；所需 OA/发票全部满足后才进入已配对。缺失、空或无法识别的规则快照一律 fail closed，规则保存不得追溯改写既有 relation。
 - 已确认的外部往来闭环不能直接追加流水；用户发现漏选流水时，必须先撤回原闭环关系，再重新选择完整流水确认。
 - 撤回范围必须受限：当 Workbench active relation 仍是只含 `oa` + `bank` rows 的 `turnover_manual_closure` 时，外部往来款管理页可以撤回；撤回只撤回外部往来闭环关系，并恢复确认闭环前已有的 OA-bank relation。若该 Workbench relation 已在关联台补齐发票或其他业务 row type，外部往来页不得直接撤回整组关系，必须转到关联台撤回完整关系。
 - 旧的自动关系和旧 `sync_to_workbench` 字段只能作为历史兼容/候选信息，不作为闭环事实。

@@ -541,3 +541,9 @@
 - 该页 Page Audit v26 返回 `pass / fresh / drained / ready`，0 blocking issue、0 backlog；单次列表 204.8ms、Audit 539.5ms。正式 20 次只读采样中列表 p50/p95/p99 为 `129.510/199.007/219.358ms`，Audit 为 `248.811/418.376/584.328ms`，40/40 成功，列表 20/20 fresh、零 enqueue。
 - 生产 Chromium DOM 验证未提交 3、已提交 10；两区均不含 `bank_flow_rule_batch_*`，已提交详情显示“已有未撤回关联”，无操作失败、console error 或 page error，完整交互 1.45s。
 - 17 页 System Audit 的 freshness/queue 为 `fresh / drained`，但仍有 5 个本模块范围外的既有 integrity 阻断：tax-offset source version、pending-invoices row count、input-invoice-usage relation version、invoice import 历史孤儿/证据、ETC import 历史状态。本次未修改这些模块的 service/repository/worker I/O，未越权修复，也不把系统级结果声明为全绿。
+
+## 2026-07-22 Turnover requirement 旧回写链删除
+
+- legacy no-OA rule-save service 不再扫描 active relations，也不再调用 relation metadata update 去追溯改写 `turnover_manual_closure` 的 OA/发票要求；相关 `_sync_turnover_rule_relation_requirements`、tag mapping、比较 helper、常量和测试语义已删除。
+- 当前 bank-flow rule save 继续只维护 canonical 规则和自身受影响月份 refresh；Turnover 新 relation 在创建事务中从一次 canonical rules payload 冻结 requirement，存量缺快照 relation fail closed 并只允许受控 repair。
+- 本次不改变 bank-flow API、settings DTO、read model、worker、queue、页面或性能合同；零扫描回归防止重新引入跨模块 relation 写 I/O。

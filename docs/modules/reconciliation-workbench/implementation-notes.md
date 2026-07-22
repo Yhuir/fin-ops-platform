@@ -1253,3 +1253,10 @@
 - 生产发布：release `main-23fce735-20260721224107` 已激活；API、dispatcher 与 22 个 required workers active。关联台 Page Audit 为 `pass / fresh / drained`，227 条 active relation、38 个 active generation scopes、909 个 relation row ids、1358 个 active group rows，issue/error/warning/blocking 均为 0；combined initial 为 fresh，paired 157、unpaired 1140，两区首屏各 50 groups。
 - 生产浏览器证据：人为延迟首个 combined initial 1.5 秒并在响应前输入，随后观测到 paired 服务端 query；折叠流水仅隐藏内容命中时显示提示，展开后 1 处实际高亮；unpaired 独立查询产生 7 处可见高亮，paired 输入保持不变。两区各 1 个搜索框且与标题处于同一 header 行；全程 0 mutation request、0 browser error。管理员 App Health smoke 与 16 条核心 route-shell smoke 均通过且无写请求。
 - 生产性能：浏览器等价 gzip 请求每区预热 2 次后各采样 20 次；paired p50/p95/max 为 `222.619/315.723/401.075ms`，unpaired 为 `514.499/617.169/625.768ms`，结果 total 稳定，均满足本轮 p95 `<=1000ms` 门禁。未压缩诊断请求不作为浏览器 SLO 样本。
+
+## 2026-07-22 - Turnover active ownership 与完成分区纠偏
+
+- 真实原因：`turnover_manual_closure` 在通用分组 policy 中仍有“active 即 complete”的旧特例，绕过 relation 创建时冻结的 OA/发票要求；因此外部往来确认只生成关系的动作，被错误解释为关联台业务资料已齐。
+- 边界决策：删除该唯一 bypass，统一复用现有 relation requirement completion policy。active relation 继续拥有同组 case，不拆成 singleton；冻结 requirements 未满足时整组进入 unpaired，全部满足后进入 paired。未知、空或缺失 metadata fail closed。
+- 隔离：`batch_accounting`、ETC 显式完成合同保留，普通 manual/deterministic 行为不放宽；不改变 projection schema、SQL shape、API response、cache、worker、queue、权限或前端生产组件。
+- 回归：business matrix、SQL production-shape projection、Turnover UoW/integration、frontend mapper/render，以及 no-OA/bank-flow/普通 Workbench 回归共同保护跨页面边界。
