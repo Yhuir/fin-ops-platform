@@ -3920,6 +3920,16 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertNotIn("save_snapshot=lambda", source)
         self.assertNotIn("relation_rebuild=lambda", source)
 
+    def test_closure_write_facade_wires_canonical_bank_policy_provider(self) -> None:
+        source = inspect.getsource(Application._turnover_ledger_closure_write_facade)
+
+        self.assertIn(
+            "rules_payload_provider=self._app_settings_service.get_bank_flow_rule_batch_tag_rules_payload",
+            source,
+        )
+        self.assertNotIn("requires_oa=", source)
+        self.assertNotIn("requires_invoice=", source)
+
     def test_confirm_relation_queue_failure_happens_after_relation_confirm_and_read_model_clear(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))

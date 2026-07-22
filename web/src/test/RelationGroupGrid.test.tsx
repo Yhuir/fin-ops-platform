@@ -596,12 +596,12 @@ describe("Workbench candidate grouping layout", () => {
       ...group,
       completion: {
         isComplete: false,
-        missingRecordTypes: ["invoice"],
+        missingRecordTypes: ["oa", "invoice"],
       },
     });
 
     expect(screen.getByRole("status", { name: "待补发票" })).toBeInTheDocument();
-    expect(screen.queryByText("待补 OA")).not.toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "待补 OA" })).toBeInTheDocument();
   });
 
   function buildNoOaWorkbenchPayload() {

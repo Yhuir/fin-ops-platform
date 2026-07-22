@@ -6869,7 +6869,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(unpaired_invoice_rows[0]["identity_alias_rows"]["invoice"][0]["id"], "oa-att-inv-project-1")
 
 
-    def test_sql_projection_keeps_turnover_manual_closure_bank_only_case_paired(self) -> None:
+    def test_sql_projection_keeps_turnover_manual_closure_bank_only_case_unpaired_while_waiting_for_oa(self) -> None:
         builder = WorkbenchSqlProjectionBuilder(
             connection=WorkbenchProjectionSettingsConnection(),
             read_model_repository=ReadModelSnapshotRecorder(),
@@ -6908,23 +6908,33 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             "relation_mode": "turnover_manual_closure",
             "row_ids": ["bank-in-1", "bank-in-2", "bank-out-1"],
             "row_types": ["bank", "bank", "bank"],
+            "special_metadata": {
+                "requires_oa": True,
+                "requires_invoice": False,
+                "paired_requirement_source": "bank_transaction_paired_policy",
+                "paired_requirement_tag_codes": ["external_turnover"],
+            },
         }
 
         payload = builder._group_payload("2026-03", with_test_object_identities(rows_by_id), [relation])
 
-        self.assertEqual(payload["unpaired"]["groups"], [])
-        paired_groups = payload["paired"]["groups"]
-        self.assertEqual(len(paired_groups), 1)
-        self.assertEqual(paired_groups[0]["group_id"], "case:turnover:turnover_rel_jia_xiaohua")
-        self.assertEqual(paired_groups[0]["group_type"], "relation")
-        self.assertEqual(paired_groups[0]["relation_mode"], "turnover_manual_closure")
+        self.assertEqual(payload["paired"]["groups"], [])
+        unpaired_groups = payload["unpaired"]["groups"]
+        self.assertEqual(len(unpaired_groups), 1)
+        self.assertEqual(unpaired_groups[0]["group_id"], "case:turnover:turnover_rel_jia_xiaohua")
+        self.assertEqual(unpaired_groups[0]["group_type"], "relation")
+        self.assertEqual(unpaired_groups[0]["relation_mode"], "turnover_manual_closure")
+        self.assertEqual(
+            unpaired_groups[0]["completion"],
+            {"is_complete": False, "missing_row_types": ["oa"]},
+        )
         self.assertCountEqual(
-            [row["id"] for row in paired_groups[0]["bank_rows"]],
+            [row["id"] for row in unpaired_groups[0]["bank_rows"]],
             ["bank-in-1", "bank-in-2", "bank-out-1"],
         )
-        self.assertTrue(all(row["case_id"] == relation["case_id"] for row in paired_groups[0]["bank_rows"]))
-        self.assertTrue(all(row["invoice_relation"]["label"] == "收支闭环" for row in paired_groups[0]["bank_rows"]))
-        self.assertTrue(all(row["status"] == "paired" for row in paired_groups[0]["bank_rows"]))
+        self.assertTrue(all(row["case_id"] == relation["case_id"] for row in unpaired_groups[0]["bank_rows"]))
+        self.assertTrue(all(row["invoice_relation"]["label"] == "收支闭环" for row in unpaired_groups[0]["bank_rows"]))
+        self.assertTrue(all(row["status"] == "unpaired" for row in unpaired_groups[0]["bank_rows"]))
 
     def test_sql_projection_pairs_turnover_manual_closure_when_no_invoice_required(self) -> None:
         builder = WorkbenchSqlProjectionBuilder(
@@ -6960,7 +6970,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                 "requires_oa": True,
                 "requires_invoice": False,
                 "paired_requirement_tag_codes": ["external_turnover"],
-                "paired_requirement_source": "no_oa_bank_batch_tag_selection",
+                "paired_requirement_source": "bank_transaction_paired_policy",
             },
         }
 

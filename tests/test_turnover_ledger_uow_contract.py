@@ -781,6 +781,26 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
 
     def test_turnover_workbench_pair_port_delegates_manual_closure_to_relation_command_service(self) -> None:
         module = self._write_adapters_module()
+        bank_row_reads: list[list[str]] = []
+        rules_reads: list[None] = []
+
+        def bank_rows_by_ids(row_ids: list[str]) -> list[dict[str, object]]:
+            bank_row_reads.append(list(row_ids))
+            return [
+                {"id": "bank_txn_1", "effective_category_code": "requires-oa"},
+                {"id": "bank_txn_2", "category_code": "requires-invoice"},
+                {"id": "bank_txn_3", "effective_category_code": "requires-oa"},
+            ]
+
+        def rules_payload() -> dict[str, object]:
+            rules_reads.append(None)
+            return {
+                "version": 7,
+                "requirements_by_tag_code": {
+                    "requires-oa": {"requires_oa": True, "requires_invoice": False},
+                    "requires-invoice": {"requires_oa": False, "requires_invoice": True},
+                },
+            }
 
         class RecordingRelationCommandService:
             def __init__(self) -> None:
@@ -808,6 +828,8 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         command = RecordingRelationCommandService()
         port = module.TurnoverLedgerWorkbenchPairPort(
             relation_command_service_factory=lambda transaction: command,
+            bank_rows_by_ids_provider=bank_rows_by_ids,
+            rules_payload_provider=rules_payload,
         )
         preparation = port.prepare_turnover_manual_closure_write(
             bank_row_ids=["bank_txn_1", "bank_txn_2", "bank_txn_3"],
@@ -845,8 +867,18 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(call["special_metadata"]["turnover_closure_mode"], "manual_zero_difference_group")
         self.assertEqual(call["special_metadata"]["turnover_closure_affected_months"], ["2026-02"])
         self.assertTrue(call["special_metadata"]["requires_oa"])
-        self.assertFalse(call["special_metadata"]["requires_invoice"])
-        self.assertEqual(call["special_metadata"]["paired_requirement_source"], "turnover_ledger_manual_closure")
+        self.assertTrue(call["special_metadata"]["requires_invoice"])
+        self.assertEqual(
+            call["special_metadata"]["paired_requirement_source"],
+            "bank_transaction_paired_policy",
+        )
+        self.assertEqual(
+            call["special_metadata"]["paired_requirement_tag_codes"],
+            ["requires-oa", "requires-invoice"],
+        )
+        self.assertEqual(call["special_metadata"]["paired_requirement_version"], 7)
+        self.assertEqual(bank_row_reads, [["bank_txn_1", "bank_txn_2", "bank_txn_3"]])
+        self.assertEqual(len(rules_reads), 1)
         self.assertEqual(call["history_operation_type"], "turnover_manual_closure_confirm")
         self.assertIs(call["preparation"], preparation.confirm_preparation)
 
@@ -881,6 +913,24 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
 
     def test_turnover_manual_closure_merges_existing_oa_bank_relations(self) -> None:
         module = self._write_adapters_module()
+        bank_row_reads: list[list[str]] = []
+        rules_reads: list[None] = []
+
+        def bank_rows_by_ids(row_ids: list[str]) -> list[dict[str, object]]:
+            bank_row_reads.append(list(row_ids))
+            return [
+                {"id": row_id, "effective_category_code": "external-turnover"}
+                for row_id in row_ids
+            ]
+
+        def rules_payload() -> dict[str, object]:
+            rules_reads.append(None)
+            return {
+                "version": 5,
+                "requirements_by_tag_code": {
+                    "external-turnover": {"requires_oa": True, "requires_invoice": False}
+                },
+            }
 
         class RecordingRelationCommandService:
             def __init__(self) -> None:
@@ -925,6 +975,8 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         command = RecordingRelationCommandService()
         port = module.TurnoverLedgerWorkbenchPairPort(
             relation_command_service_factory=lambda transaction: command,
+            bank_rows_by_ids_provider=bank_rows_by_ids,
+            rules_payload_provider=rules_payload,
         )
         preparation = port.prepare_turnover_manual_closure_write(
             bank_row_ids=["bank-1", "bank-2", "bank-3"],
@@ -964,6 +1016,154 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             call["special_metadata"]["turnover_closure_bank_row_ids"],
             ["bank-1", "bank-2", "bank-3"],
         )
+        self.assertEqual(
+            call["special_metadata"]["paired_requirement_tag_codes"],
+            ["external-turnover"],
+        )
+        self.assertEqual(bank_row_reads, [["bank-1", "bank-2", "bank-3"]])
+        self.assertEqual(len(rules_reads), 1)
+
+    def test_turnover_manual_closure_rejects_unselected_bank_member_without_second_bank_read(self) -> None:
+        module = self._write_adapters_module()
+        raw_bank_reads: list[list[str]] = []
+        rules_reads: list[None] = []
+
+        def load_rows(row_ids: list[str]) -> list[dict[str, object]]:
+            raw_bank_reads.append(list(row_ids))
+            return [
+                {"id": row_id, "effective_category_code": "external-turnover"}
+                for row_id in row_ids
+            ]
+
+        selection_port = module.TurnoverLedgerBankRowSelectionPort(
+            bank_rows_by_ids_provider=load_rows
+        )
+        selection_port.rows_by_ids(["bank-1", "bank-2"])
+
+        class ExistingRelationCommandService:
+            def __init__(self) -> None:
+                self.confirm_calls: list[dict[str, object]] = []
+
+            def prepare_confirm_relation(self, **_kwargs: object) -> object:
+                return SimpleNamespace(active_relations=[
+                    {
+                        "case_id": "case-oa-with-extra-bank",
+                        "row_ids": ["oa-1", "bank-1", "bank-unselected"],
+                        "row_types": ["oa", "bank", "bank"],
+                        "status": "active",
+                        "relation_mode": "manual_confirmed",
+                    }
+                ])
+
+            def confirm_relation(self, **kwargs: object) -> dict[str, object]:
+                self.confirm_calls.append(dict(kwargs))
+                raise AssertionError("unselected bank member must block before relation/history mutation")
+
+        command = ExistingRelationCommandService()
+        port = module.TurnoverLedgerWorkbenchPairPort(
+            relation_command_service_factory=lambda transaction: command,
+            bank_rows_by_ids_provider=selection_port.rows_by_ids,
+            rules_payload_provider=lambda: rules_reads.append(None) or {
+                "version": 3,
+                "requirements_by_tag_code": {
+                    "external-turnover": {"requires_oa": True, "requires_invoice": False}
+                },
+            },
+        )
+        preparation = port.prepare_turnover_manual_closure_write(
+            bank_row_ids=["bank-1", "bank-2"],
+            affected_months=["2026-02"],
+            transaction=object(),
+        )
+
+        with self.assertRaises(module.TurnoverLedgerWritePreconditionError) as context:
+            port.create_turnover_manual_closure(
+                closure={
+                    "relation_id": "turnover_rel_closure",
+                    "principal_amount": "100.00",
+                    "settled_amount": "100.00",
+                },
+                bank_row_ids=["bank-1", "bank-2"],
+                actor_id="finance-user",
+                note="manual closure",
+                affected_months=["2026-02"],
+                transaction=object(),
+                preparation=preparation,
+            )
+
+        self.assertEqual(context.exception.error_code, "turnover_relation_conflict")
+        self.assertEqual(command.confirm_calls, [])
+        self.assertEqual(raw_bank_reads, [["bank-1", "bank-2"]])
+        self.assertEqual(rules_reads, [])
+
+    def test_turnover_manual_closure_requirement_inputs_fail_closed_before_command(self) -> None:
+        module = self._write_adapters_module()
+
+        class RecordingRelationCommandService:
+            def __init__(self) -> None:
+                self.confirm_calls: list[dict[str, object]] = []
+
+            def prepare_confirm_relation(self, **_kwargs: object) -> object:
+                return SimpleNamespace(active_relations=[])
+
+            def confirm_relation(self, **kwargs: object) -> dict[str, object]:
+                self.confirm_calls.append(dict(kwargs))
+                return {"relation": dict(kwargs)}
+
+        cases = [
+            (
+                "missing-row",
+                lambda _row_ids: [{"id": "bank-1", "effective_category_code": "external-turnover"}],
+                lambda: {"version": 1, "requirements_by_tag_code": {}},
+            ),
+            (
+                "duplicate-row",
+                lambda _row_ids: [
+                    {"id": "bank-1", "effective_category_code": "external-turnover"},
+                    {"id": "bank-1", "effective_category_code": "external-turnover"},
+                ],
+                lambda: {"version": 1, "requirements_by_tag_code": {}},
+            ),
+            (
+                "invalid-rules",
+                lambda row_ids: [
+                    {"id": row_id, "effective_category_code": "external-turnover"}
+                    for row_id in row_ids
+                ],
+                lambda: [],
+            ),
+        ]
+        for name, row_provider, rules_provider in cases:
+            with self.subTest(name=name):
+                command = RecordingRelationCommandService()
+                port = module.TurnoverLedgerWorkbenchPairPort(
+                    relation_command_service_factory=lambda transaction: command,
+                    bank_rows_by_ids_provider=row_provider,
+                    rules_payload_provider=rules_provider,
+                )
+                preparation = port.prepare_turnover_manual_closure_write(
+                    bank_row_ids=["bank-1", "bank-2"],
+                    affected_months=["2026-02"],
+                    transaction=object(),
+                )
+
+                with self.assertRaises(module.TurnoverLedgerWritePreconditionError) as context:
+                    port.create_turnover_manual_closure(
+                        closure={
+                            "relation_id": f"turnover-rel-{name}",
+                            "principal_amount": "100.00",
+                            "settled_amount": "100.00",
+                        },
+                        bank_row_ids=["bank-1", "bank-2"],
+                        actor_id="finance-user",
+                        note=None,
+                        affected_months=["2026-02"],
+                        transaction=object(),
+                        preparation=preparation,
+                    )
+
+                self.assertEqual(context.exception.error_code, "turnover_relation_conflict")
+                self.assertEqual(command.confirm_calls, [])
 
     def test_turnover_manual_closure_rejects_rows_already_in_turnover_closure(self) -> None:
         module = self._write_adapters_module()

@@ -105,6 +105,32 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             app._bank_transaction_category_service.snapshot()
         )
 
+    def _set_turnover_requirements(
+        self,
+        app: Application,
+        *,
+        tag_codes: list[str],
+        requires_oa: bool,
+        requires_invoice: bool,
+    ) -> None:
+        current = app._app_settings_service.get_bank_flow_rule_batch_tag_rules_payload()
+        app._app_settings_service.update_bank_flow_rule_batch_tag_rules(
+            {
+                "expected_version": current["version"],
+                "rules": [
+                    {
+                        **rule,
+                        "requires_oa": requires_oa,
+                        "requires_invoice": requires_invoice,
+                    }
+                    if rule["tag_code"] in set(tag_codes)
+                    else rule
+                    for rule in current["rules"]
+                ],
+            },
+            actor_id="YNSYLP005",
+        )
+
     def _import_three_personal_borrow_rows(self, app: Application) -> list[str]:
         preview = app._import_service.preview_import(
             batch_type=BatchType.BANK_TRANSACTION,
@@ -476,10 +502,19 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             and set(self._group_bank_ids(group)) == set(transaction_ids)
         ])
 
-    def test_manual_zero_difference_closure_creates_paired_bank_only_workbench_relation(self) -> None:
+    def test_manual_zero_difference_closure_keeps_active_bank_only_relation_unpaired_while_waiting_for_oa(self) -> None:
         with self._temporary_app() as app:
             transaction_ids = self._import_bank_rows(app)
             self._tag_borrow_in_rows(app, transaction_ids)
+            self._set_turnover_requirements(
+                app,
+                tag_codes=[
+                    "borrow_in_company_pending_repayment",
+                    "borrow_in_company_repaid",
+                ],
+                requires_oa=True,
+                requires_invoice=False,
+            )
 
             response = app.handle_request(
                 "POST",
@@ -506,13 +541,26 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             for group in paired_groups
             if set(self._group_bank_ids(group)) == set(transaction_ids)
         ]
-        self.assertEqual(len(matching_paired_groups), 1)
-        self.assertEqual(matching_paired_groups[0]["relation_mode"], "turnover_manual_closure")
-        self.assertFalse([
+        matching_unpaired_groups = [
             group
             for group in unpaired_groups
             if set(self._group_bank_ids(group)) == set(transaction_ids)
-        ])
+        ]
+        self.assertEqual(matching_paired_groups, [])
+        self.assertEqual(len(matching_unpaired_groups), 1)
+        self.assertEqual(matching_unpaired_groups[0]["relation_mode"], "turnover_manual_closure")
+        self.assertEqual(
+            matching_unpaired_groups[0]["completion"],
+            {"is_complete": False, "missing_row_types": ["oa"]},
+        )
+        self.assertEqual(
+            payload["workbench_pair_relation"]["special_metadata"]["paired_requirement_source"],
+            "bank_transaction_paired_policy",
+        )
+        self.assertEqual(
+            payload["workbench_pair_relation"]["special_metadata"]["paired_requirement_tag_codes"],
+            ["borrow_in_company_pending_repayment", "borrow_in_company_repaid"],
+        )
 
     def test_manual_closure_uses_canonical_relation_when_workbench_relation_read_model_is_stale(self) -> None:
         class StaleWorkbenchRelationFacade:
@@ -682,6 +730,15 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             app._state_store.save_bank_transaction_categories(
                 app._bank_transaction_category_service.snapshot()
             )
+            self._set_turnover_requirements(
+                app,
+                tag_codes=[
+                    "borrow_in_company_pending_repayment",
+                    "borrow_in_company_repaid",
+                ],
+                requires_oa=False,
+                requires_invoice=False,
+            )
 
             response = app.handle_request(
                 "POST",
@@ -699,7 +756,7 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             payload["workbench_pair_relation"]["special_metadata"]["turnover_closure_mode"],
             "manual_zero_difference_group",
         )
-        self.assertTrue(payload["workbench_pair_relation"]["special_metadata"]["requires_oa"])
+        self.assertFalse(payload["workbench_pair_relation"]["special_metadata"]["requires_oa"])
         self.assertFalse(payload["workbench_pair_relation"]["special_metadata"]["requires_invoice"])
         self.assertEqual(set(payload["workbench_pair_relation"]["row_ids"]), set(transaction_ids))
         matching_paired_groups = [
@@ -718,6 +775,15 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
     def test_manual_closure_merges_existing_oa_bank_relations_and_withdraw_restores_them(self) -> None:
         with self._temporary_app() as app:
             transaction_ids = self._import_three_personal_borrow_rows(app)
+            self._set_turnover_requirements(
+                app,
+                tag_codes=[
+                    "borrow_in_personal_pending_repayment",
+                    "borrow_in_personal_repaid",
+                ],
+                requires_oa=True,
+                requires_invoice=False,
+            )
             bank_1, bank_2, bank_3 = transaction_ids
             app._workbench_pair_relation_service.create_active_relation(
                 case_id="case-oa-1",

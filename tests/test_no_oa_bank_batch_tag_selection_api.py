@@ -98,6 +98,44 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         self.assertEqual(selection["bank_auto_tag_rules_version"], auto_rules["version"])
         self.assertEqual([tag["code"] for tag in selection["active_tags"]], expected_codes)
 
+    def test_no_oa_tag_selection_save_does_not_scan_or_rewrite_turnover_relations(self) -> None:
+        app = build_application()
+
+        class RelationCommandMustNotBeRead:
+            def __init__(self) -> None:
+                self.list_calls = 0
+                self.update_calls = 0
+
+            def list_active_relations(self) -> list[dict[str, object]]:
+                self.list_calls += 1
+                raise AssertionError("no-OA tag selection must not scan Workbench relations")
+
+            def update_relation_metadata_for_case_id(self, **_kwargs: object) -> dict[str, object]:
+                self.update_calls += 1
+                raise AssertionError("no-OA tag selection must not rewrite Workbench relations")
+
+        relation_command = RelationCommandMustNotBeRead()
+        app._workbench_relation_command_service = lambda **_kwargs: relation_command  # type: ignore[method-assign]
+        current = _json(app.handle_request("GET", "/api/no-oa-bank-batches/tag-selection"))
+
+        response = app.handle_request(
+            "PUT",
+            "/api/no-oa-bank-batches/tag-selection",
+            body=json.dumps(
+                {
+                    "expected_version": current["version"],
+                    "rules": [
+                        {"tag_code": "fee", "requires_oa": False, "requires_invoice": False}
+                    ],
+                }
+            ),
+            headers={"Content-Type": "application/json"},
+        )
+
+        self.assertEqual(response.status_code, 200, response.body)
+        self.assertEqual(relation_command.list_calls, 0)
+        self.assertEqual(relation_command.update_calls, 0)
+
     def test_tag_selection_reflects_bank_auto_rule_label_changes_immediately(self) -> None:
         app = build_application()
         current_rules = app._app_settings_service.get_bank_auto_tag_rules_payload()

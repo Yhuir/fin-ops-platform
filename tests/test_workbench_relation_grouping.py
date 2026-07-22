@@ -8,6 +8,10 @@ from fin_ops_platform.services.workbench_relation_grouping import (
     WorkbenchRelationGroupingService,
     WorkbenchRelationPreviewGroupingService,
 )
+from fin_ops_platform.services.workbench_relation_requirements import (
+    build_bank_relation_requirement_metadata,
+    evaluate_bank_relation_completion,
+)
 from tests.workbench_deterministic_relation_fixtures import (
     YUNNAN_LIFU_CASE_ID,
     omitted_thirteen_invoice_fixture,
@@ -250,6 +254,120 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         self.assertEqual(group["case_id"], "case:insurance")
         self.assertEqual(group["completion"], {"is_complete": False, "missing_row_types": ["invoice"]})
         self.assertEqual(identities([group]), {("oa", "oa-a"), ("bank", "bank-a")})
+
+    def test_turnover_manual_closure_active_bank_only_waits_for_required_oa(self) -> None:
+        rows = {
+            "bank-in": {"id": "bank-in", "type": "bank", "object_identity_key": "bank-in"},
+            "bank-out": {"id": "bank-out", "type": "bank", "object_identity_key": "bank-out"},
+        }
+        relation = {
+            "case_id": "turnover:closure-waiting-oa",
+            "row_ids": ["bank-in", "bank-out"],
+            "row_types": ["bank", "bank"],
+            "status": "active",
+            "relation_mode": "turnover_manual_closure",
+            "special_metadata": {
+                "requires_oa": True,
+                "requires_invoice": False,
+                "paired_requirement_source": "bank_transaction_paired_policy",
+            },
+        }
+
+        payload = self.service.group_payload("2026-06", rows_by_id=rows, active_relations=[relation])
+
+        self.assertEqual(payload["summary"]["paired_count"], 0)
+        self.assertEqual(payload["summary"]["unpaired_count"], 1)
+        group = payload["unpaired"]["groups"][0]
+        self.assertEqual(group["case_id"], "turnover:closure-waiting-oa")
+        self.assertEqual(group["completion"], {"is_complete": False, "missing_row_types": ["oa"]})
+        self.assertEqual(identities(payload["paired"]["groups"]), set())
+        self.assertEqual(identities([group]), {("bank", "bank-in"), ("bank", "bank-out")})
+
+    def test_bank_policy_requirement_matrix_and_required_type_completion(self) -> None:
+        cases = [
+            (True, False, ["oa"]),
+            (False, True, ["invoice"]),
+            (True, True, ["oa", "invoice"]),
+            (False, False, []),
+        ]
+        for requires_oa, requires_invoice, missing in cases:
+            with self.subTest(requires_oa=requires_oa, requires_invoice=requires_invoice):
+                metadata = build_bank_relation_requirement_metadata(
+                    tag_codes=["policy-tag"],
+                    rules_payload={
+                        "version": 7,
+                        "requirements_by_tag_code": {
+                            "policy-tag": {
+                                "requires_oa": requires_oa,
+                                "requires_invoice": requires_invoice,
+                            }
+                        },
+                    },
+                )
+
+                incomplete = evaluate_bank_relation_completion(
+                    row_types=["bank"],
+                    special_metadata=metadata,
+                )
+                complete = evaluate_bank_relation_completion(
+                    row_types=[
+                        "bank",
+                        *(("oa",) if requires_oa else ()),
+                        *(("invoice",) if requires_invoice else ()),
+                    ],
+                    special_metadata=metadata,
+                )
+
+                self.assertEqual(incomplete["missing_row_types"], missing)
+                self.assertEqual(complete, {"is_complete": True, "missing_row_types": []})
+
+    def test_bank_policy_multiple_tags_or_requirements_and_unknowns_fail_closed(self) -> None:
+        rules_payload = {
+            "version": 9,
+            "requirements_by_tag_code": {
+                "requires-oa": {"requires_oa": True, "requires_invoice": False},
+                "requires-invoice": {"requires_oa": False, "requires_invoice": True},
+                "requires-neither": {"requires_oa": False, "requires_invoice": False},
+            },
+        }
+
+        combined = build_bank_relation_requirement_metadata(
+            tag_codes=["requires-oa", "requires-neither", "requires-invoice", "requires-oa"],
+            rules_payload=rules_payload,
+        )
+        unknown = build_bank_relation_requirement_metadata(
+            tag_codes=["requires-neither", "unknown-tag"],
+            rules_payload=rules_payload,
+        )
+        empty = build_bank_relation_requirement_metadata(tag_codes=[], rules_payload=rules_payload)
+        missing_rules = build_bank_relation_requirement_metadata(
+            tag_codes=["requires-neither"],
+            rules_payload={},
+        )
+
+        self.assertEqual(combined["paired_requirement_tag_codes"], ["requires-oa", "requires-neither", "requires-invoice"])
+        self.assertTrue(combined["requires_oa"])
+        self.assertTrue(combined["requires_invoice"])
+        for metadata in (unknown, empty, missing_rules):
+            self.assertTrue(metadata["requires_oa"])
+            self.assertTrue(metadata["requires_invoice"])
+
+    def test_batch_accounting_and_etc_completion_exemptions_remain_complete(self) -> None:
+        for relation_mode, metadata, amount_check in [
+            ("manual_confirmed", {"source": "batch_accounting"}, {}),
+            ("manual_confirmed", {"etc_batch_link": {"batch_id": "etc-1"}}, {}),
+            ("manual_confirmed", {}, {"etc_batch_id": "etc-2"}),
+        ]:
+            with self.subTest(metadata=metadata, amount_check=amount_check):
+                self.assertEqual(
+                    evaluate_bank_relation_completion(
+                        row_types=["bank"],
+                        special_metadata=metadata,
+                        relation_mode=relation_mode,
+                        amount_check=amount_check,
+                    ),
+                    {"is_complete": True, "missing_row_types": []},
+                )
 
     def test_bank_relation_missing_requirement_metadata_fails_closed(self) -> None:
         rows = {
