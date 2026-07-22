@@ -437,6 +437,12 @@ sudo /usr/local/sbin/finops-deploy-control workbench-requirement-repair <release
 sudo /usr/local/sbin/finops-deploy-control workbench-requirement-repair <release-name> \
   --execute \
   --expected-fingerprint <dry-run-source-fingerprint>
+sudo /usr/local/sbin/finops-deploy-control workbench-requirement-repair <release-name> \
+  --rollback-dry-run \
+  --expected-fingerprint <executed-source-fingerprint>
+sudo /usr/local/sbin/finops-deploy-control workbench-requirement-repair <release-name> \
+  --rollback \
+  --expected-fingerprint <executed-source-fingerprint>
 sudo /usr/local/sbin/finops-deploy-control read-model-scope-contract <release-name> --json
 sudo /usr/local/sbin/finops-deploy-control read-model-scope-contract <release-name> \
   --apply \
@@ -480,10 +486,12 @@ sudo /usr/local/sbin/finops-deploy-control runtime-queue-resolve-covered <releas
 `read-model-scope-contract` 只运行 release 内的 `scripts/check-read-model-scope-contracts.py`，
 用于只读检查或受控清理 legacy/invalid read model scope。以上命令都只接受固定脚本/模块参数，
 由 helper 加载 runtime env，不提供任意 shell 执行能力。
-`workbench-requirement-repair` 只补普通银行正式关系缺失的冻结 OA/发票要求：dry-run 使用一次
-fresh 银行标签批量读取生成 source fingerprint；execute 必须精确匹配该 fingerprint，并通过
-`WorkbenchRelationCommandService` 写 relation history 与 durable refresh。ETC、批量账务和往来款
-显式完成合同不在修复范围；命令不开放 SQL、任意脚本或规则保存后的常驻回扫。
+`workbench-requirement-repair` 修复普通银行正式关系缺失的冻结要求，以及 active Turnover 旧 source、
+缺 tag/version 的 requirement snapshot。dry-run 使用一次 fresh 银行标签批量读取，fingerprint 同时绑定
+完整 metadata preimage 与 intended after；execute 通过 fingerprint-bound history 重建 original plan，支持
+中断后幂等续跑。`rollback-dry-run` / `rollback` 只选择同 fingerprint 的 execute history，在首写前检查
+after-image drift，并通过 `WorkbenchRelationCommandService` 原地精确恢复完整 `special_metadata` preimage；
+不 cancel/recreate relation。ETC 与批量账务不在修复范围；命令不开放 SQL、任意脚本或常驻回扫。
 `read-model-slo-smoke` 只运行 release 内的 `fin_ops_platform.tools.read_model_slo_smoke` dry-run，
 用于在不暴露 PostgreSQL DSN 的情况下发现 critical read model scopes；该 helper 明确拒绝 `--apply`，
 真实 enqueue-to-fresh 只能在单独批准的 root session 中执行。

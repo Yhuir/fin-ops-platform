@@ -279,6 +279,17 @@ class DeployOAScriptTest(unittest.TestCase):
             template,
         )
 
+    def test_workbench_requirement_repair_fixed_modes(self) -> None:
+        script = DEPLOY_CONTROL_SCRIPT_PATH.read_text()
+
+        self.assertIn("workbench-requirement-repair <release-name> --dry-run", script)
+        self.assertIn("--execute --expected-fingerprint <sha256>", script)
+        self.assertIn("--rollback-dry-run --expected-fingerprint <sha256>", script)
+        self.assertIn("--rollback --expected-fingerprint <sha256>", script)
+        self.assertIn("workbench-requirement-repair only permits the four fixed modes", script)
+        self.assertIn('case "$mode" in', script)
+        self.assertIn("fin_ops_platform.tools.workbench_relation_requirement_repair_ops", script)
+
     def test_deploy_control_script_uses_canonical_etc_finops_secret_contract(self) -> None:
         script = DEPLOY_CONTROL_SCRIPT_PATH.read_text()
 

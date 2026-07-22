@@ -41,7 +41,10 @@ commands:
                                       rebuild Workbench SQL read models using runtime env
   workbench-audit-identity <release-name> [args]
                                       run Workbench object identity audit using runtime env
-  workbench-requirement-repair <release-name> [--dry-run|--execute --expected-fingerprint <sha256>]
+  workbench-requirement-repair <release-name> --dry-run
+  workbench-requirement-repair <release-name> --execute --expected-fingerprint <sha256>
+  workbench-requirement-repair <release-name> --rollback-dry-run --expected-fingerprint <sha256>
+  workbench-requirement-repair <release-name> --rollback --expected-fingerprint <sha256>
                                       repair historical frozen OA/invoice requirements through relation commands
   read-model-scope-contract <release-name> [args]
                                       check or repair read model scope contracts using runtime env
@@ -520,6 +523,19 @@ workbench_requirement_repair() {
   local release="${1:-}"
   [[ -n "$release" ]] || die "workbench-requirement-repair requires release name"
   shift
+  local mode="${1:-}"
+  case "$mode" in
+    --dry-run)
+      [[ "$#" -eq 1 ]] || die "workbench-requirement-repair only permits the four fixed modes"
+      ;;
+    --execute|--rollback-dry-run|--rollback)
+      [[ "$#" -eq 3 && "${2:-}" == "--expected-fingerprint" && -n "${3:-}" ]] || \
+        die "workbench-requirement-repair only permits the four fixed modes"
+      ;;
+    *)
+      die "workbench-requirement-repair only permits the four fixed modes"
+      ;;
+  esac
   local src
   src="$(release_src "$release")"
   assert_runtime_env_contract

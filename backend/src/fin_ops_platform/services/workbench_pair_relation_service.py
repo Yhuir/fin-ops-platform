@@ -389,6 +389,7 @@ class WorkbenchPairRelationService:
         relation_mode: str | None = None,
         amount_check: dict[str, Any] | None = None,
         special_metadata: dict[str, Any] | None = None,
+        replace_special_metadata: bool = False,
         display_tags: list[str] | None = None,
         updated_by: str,
         note: str | None = None,
@@ -400,10 +401,19 @@ class WorkbenchPairRelationService:
             raise KeyError("workbench_pair_relation_not_found")
         timestamp = updated_at or self._timestamp()
         before_relation = deepcopy(active_relation)
-        merged_metadata = {
-            **deepcopy(active_relation.get("special_metadata") if isinstance(active_relation.get("special_metadata"), dict) else {}),
-            **deepcopy(special_metadata if isinstance(special_metadata, dict) else {}),
-        }
+        supplied_metadata = deepcopy(special_metadata if isinstance(special_metadata, dict) else {})
+        merged_metadata = (
+            supplied_metadata
+            if replace_special_metadata
+            else {
+                **deepcopy(
+                    active_relation.get("special_metadata")
+                    if isinstance(active_relation.get("special_metadata"), dict)
+                    else {}
+                ),
+                **supplied_metadata,
+            }
+        )
         merged_display_tags = [
             str(tag).strip()
             for tag in [
