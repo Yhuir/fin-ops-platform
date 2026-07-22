@@ -6933,7 +6933,6 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             ["bank-in-1", "bank-in-2", "bank-out-1"],
         )
         self.assertTrue(all(row["case_id"] == relation["case_id"] for row in unpaired_groups[0]["bank_rows"]))
-        self.assertTrue(all(row["invoice_relation"]["label"] == "收支闭环" for row in unpaired_groups[0]["bank_rows"]))
         self.assertTrue(all(row["status"] == "unpaired" for row in unpaired_groups[0]["bank_rows"]))
 
     def test_sql_projection_pairs_turnover_manual_closure_when_no_invoice_required(self) -> None:

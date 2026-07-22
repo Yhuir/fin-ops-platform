@@ -1540,8 +1540,13 @@ class Application:
         return [
             row
             for row in self._turnover_bank_transaction_rows()
-            if str(row.get("id") or row.get("transaction_id") or row.get("source_bank_row_id") or "").strip()
-            in selected_ids
+            if selected_ids.intersection(
+                {
+                    str(row.get("id") or "").strip(),
+                    str(row.get("transaction_id") or "").strip(),
+                    str(row.get("source_bank_row_id") or "").strip(),
+                }
+            )
         ]
 
     def _turnover_bank_transaction_rows_from_sql_read_model(self) -> list[dict[str, object]]:
@@ -2925,6 +2930,7 @@ class Application:
             ),
             postgres_idempotency_store_factory=self._turnover_ledger_confirm_postgres_idempotency_store,
             local_idempotency_store_provider=self._turnover_ledger_confirm_local_idempotency_store,
+            rules_payload_provider=self._app_settings_service.get_bank_flow_rule_batch_tag_rules_payload,
         ).build()
         if facade is not None:
             return facade
@@ -2959,6 +2965,7 @@ class Application:
             ),
             postgres_idempotency_store_factory=self._turnover_ledger_confirm_postgres_idempotency_store,
             local_idempotency_store_provider=self._turnover_ledger_confirm_local_idempotency_store,
+            rules_payload_provider=self._app_settings_service.get_bank_flow_rule_batch_tag_rules_payload,
             pair_snapshot_port=TurnoverLedgerLocalPairSnapshotPort(
                 pair_relation_service=self._workbench_pair_relation_service,
                 save_pair_snapshot=lambda snapshot: self._state_store.save_workbench_pair_relations(dict(snapshot)),

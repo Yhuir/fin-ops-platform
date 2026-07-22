@@ -117,12 +117,14 @@ class BankFlowRuleBatchBackendBoundaryTests(unittest.TestCase):
         no_oa_source = (SERVICES_ROOT / "no_oa_bank_batch_application_service.py").read_text(encoding="utf-8")
         start = bank_flow_source.index("    def update_tag_selection(")
         body = bank_flow_source[start:]
+        no_oa_start = no_oa_source.index("    def update_tag_selection(")
+        no_oa_end = no_oa_source.index("\n    def detail_payload(", no_oa_start)
+        no_oa_body = no_oa_source[no_oa_start:no_oa_end]
 
         for forbidden in (
             "list_active_relations",
             "update_relation_metadata_for_case_id",
             "_sync_bank_flow_rule_relation_requirements",
-            "_sync_turnover_rule_relation_requirements",
             "after_mutation(",
             "bank_flow_rule_batch_changed",
         ):
@@ -132,7 +134,8 @@ class BankFlowRuleBatchBackendBoundaryTests(unittest.TestCase):
         self.assertIn("affected_scope_keys_for_tag_codes", body)
         self.assertNotIn("_sync_bank_flow_rule_relation_requirements", no_oa_source)
         self.assertNotIn("def _sync_bank_flow_rule_relation_requirements(", base_source)
-        self.assertNotIn("def _sync_turnover_rule_relation_requirements(", base_source)
+        self.assertNotIn("list_active_relations", no_oa_body)
+        self.assertNotIn("update_relation_metadata_for_case_id", no_oa_body)
 
 
 if __name__ == "__main__":

@@ -113,6 +113,11 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
         requires_oa: bool,
         requires_invoice: bool,
     ) -> None:
+        original_rows_by_ids = app._turnover_bank_transaction_rows_by_ids
+        app._turnover_bank_transaction_rows_by_ids = lambda row_ids: [  # type: ignore[method-assign]
+            {**row, "effective_category_code": "external_turnover"}
+            for row in original_rows_by_ids(row_ids)
+        ]
         current = app._app_settings_service.get_bank_flow_rule_batch_tag_rules_payload()
         app._app_settings_service.update_bank_flow_rule_batch_tag_rules(
             {
@@ -508,10 +513,7 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             self._tag_borrow_in_rows(app, transaction_ids)
             self._set_turnover_requirements(
                 app,
-                tag_codes=[
-                    "borrow_in_company_pending_repayment",
-                    "borrow_in_company_repaid",
-                ],
+                tag_codes=["external_turnover"],
                 requires_oa=True,
                 requires_invoice=False,
             )
@@ -559,7 +561,7 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(
             payload["workbench_pair_relation"]["special_metadata"]["paired_requirement_tag_codes"],
-            ["borrow_in_company_pending_repayment", "borrow_in_company_repaid"],
+            ["external_turnover"],
         )
 
     def test_manual_closure_uses_canonical_relation_when_workbench_relation_read_model_is_stale(self) -> None:
@@ -732,10 +734,7 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             )
             self._set_turnover_requirements(
                 app,
-                tag_codes=[
-                    "borrow_in_company_pending_repayment",
-                    "borrow_in_company_repaid",
-                ],
+                tag_codes=["external_turnover"],
                 requires_oa=False,
                 requires_invoice=False,
             )
@@ -777,10 +776,7 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
             transaction_ids = self._import_three_personal_borrow_rows(app)
             self._set_turnover_requirements(
                 app,
-                tag_codes=[
-                    "borrow_in_personal_pending_repayment",
-                    "borrow_in_personal_repaid",
-                ],
+                tag_codes=["external_turnover"],
                 requires_oa=True,
                 requires_invoice=False,
             )

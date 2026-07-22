@@ -19,6 +19,9 @@ from fin_ops_platform.services.turnover_relation_service import TurnoverRelation
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandError
 from fin_ops_platform.services.workbench_relation_distribution_mapper import relation_dicts_from_distribution_payload
 from fin_ops_platform.services.workbench_relation_modes import TURNOVER_MANUAL_CLOSURE_RELATION_MODE
+from fin_ops_platform.services.workbench_relation_requirements import (
+    build_bank_relation_requirement_metadata,
+)
 
 
 class TurnoverLedgerWritePreconditionError(ValueError):
@@ -499,6 +502,7 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
         persistence_repository_factory: Callable[[Any], Any],
         postgres_idempotency_store_factory: Callable[[Any], Any],
         local_idempotency_store_provider: Callable[[], Any],
+        rules_payload_provider: Callable[[], dict[str, object]],
         pair_snapshot_port: Any | None = None,
         relation_command_service_factory: Callable[..., Any] | None = None,
         relation_facade: Any | None = None,
@@ -515,6 +519,7 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
         self._persistence_repository_factory = persistence_repository_factory
         self._postgres_idempotency_store_factory = postgres_idempotency_store_factory
         self._local_idempotency_store_provider = local_idempotency_store_provider
+        self._rules_payload_provider = rules_payload_provider
         self._pair_snapshot_port = pair_snapshot_port
         self._relation_command_service_factory = relation_command_service_factory
         self._relation_facade = relation_facade
@@ -544,6 +549,8 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
                 TurnoverLedgerWorkbenchPairPort(
                     relation_command_service_factory=self._relation_command_service_factory,
                     relation_facade=self._relation_facade,
+                    bank_rows_by_ids_provider=bank_row_selection_port.rows_by_ids,
+                    rules_payload_provider=self._rules_payload_provider,
                 )
                 if self._relation_command_service_factory is not None
                 else None
@@ -556,6 +563,7 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
                 relation_service=self._relation_service,
                 routes=self._routes,
                 bank_rows_provider=self._bank_rows_provider,
+                bank_rows_by_ids_provider=bank_row_selection_port.rows_by_ids,
                 replace_snapshot=self._replace_snapshot,
                 emit_persistence_warning=self._emit_persistence_warning,
             )
@@ -578,6 +586,8 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
                 TurnoverLedgerWorkbenchPairPort(
                     relation_command_service_factory=self._relation_command_service_factory,
                     relation_facade=self._relation_facade,
+                    bank_rows_by_ids_provider=bank_row_selection_port.rows_by_ids,
+                    rules_payload_provider=self._rules_payload_provider,
                 )
                 if self._relation_command_service_factory is not None
                 else None
@@ -1347,9 +1357,13 @@ class TurnoverLedgerWorkbenchPairPort:
         *,
         relation_command_service_factory: Callable[..., Any] | None = None,
         relation_facade: Any | None = None,
+        bank_rows_by_ids_provider: Callable[[list[str]], list[dict[str, object]]] | None = None,
+        rules_payload_provider: Callable[[], dict[str, object]] | None = None,
     ) -> None:
         self._relation_command_service_factory = relation_command_service_factory
         self._relation_facade = relation_facade
+        self._bank_rows_by_ids_provider = bank_rows_by_ids_provider
+        self._rules_payload_provider = rules_payload_provider
 
     def prepare_turnover_manual_closure_write(
         self,
@@ -1433,15 +1447,11 @@ class TurnoverLedgerWorkbenchPairPort:
             "amount_delta": "0.00",
             "requires_note": False,
         }
-        special_metadata = {
+        special_metadata: dict[str, object] = {
             "source": "turnover_ledger",
             "turnover_closure_mode": turnover_closure_mode,
             "turnover_closure_bank_row_ids": list(normalized_row_ids),
             "turnover_closure_affected_months": list(normalized_months),
-            "requires_oa": True,
-            "requires_invoice": False,
-            "paired_requirement_source": "turnover_ledger_manual_closure",
-            "paired_requirement_version": 1,
         }
         evidence = {
             "source": "turnover_ledger",
@@ -1475,6 +1485,75 @@ class TurnoverLedgerWorkbenchPairPort:
             merged_row_ids, merged_row_types = self._merged_turnover_manual_closure_rows(
                 selected_bank_row_ids=normalized_row_ids,
                 merge_relations=merge_relations,
+            )
+            merged_bank_row_ids = {
+                row_id
+                for row_id, row_type in zip(merged_row_ids, merged_row_types, strict=False)
+                if row_type == "bank"
+            }
+            selected_bank_row_ids = set(normalized_row_ids)
+            if not merged_bank_row_ids.issubset(selected_bank_row_ids):
+                raise TurnoverLedgerWritePreconditionError(
+                    error_code="turnover_relation_conflict",
+                    message="关联台关系包含未选择的银行流水，请到关联台处理后重试。",
+                    payload={"bank_row_ids": sorted(merged_bank_row_ids - selected_bank_row_ids)},
+                )
+            if len(normalized_row_ids) != len(selected_bank_row_ids):
+                raise TurnoverLedgerWritePreconditionError(
+                    error_code="turnover_relation_conflict",
+                    message="所选银行流水存在重复项，请刷新后重试。",
+                )
+            if self._bank_rows_by_ids_provider is None or self._rules_payload_provider is None:
+                raise TurnoverLedgerWritePreconditionError(
+                    error_code="turnover_relation_conflict",
+                    message="银行流水配对规则暂不可用，请刷新后重试。",
+                )
+            selected_rows = list(self._bank_rows_by_ids_provider(normalized_row_ids) or [])
+            rows_by_selected_id: dict[str, dict[str, object]] = {}
+            invalid_rows = False
+            for raw_row in selected_rows:
+                if not isinstance(raw_row, dict):
+                    invalid_rows = True
+                    break
+                row = dict(raw_row)
+                matching_ids = selected_bank_row_ids.intersection(
+                    {
+                        str(row.get("id") or "").strip(),
+                        str(row.get("transaction_id") or "").strip(),
+                        str(row.get("source_bank_row_id") or "").strip(),
+                    }
+                )
+                if len(matching_ids) != 1:
+                    invalid_rows = True
+                    break
+                selected_id = next(iter(matching_ids))
+                if selected_id in rows_by_selected_id:
+                    invalid_rows = True
+                    break
+                rows_by_selected_id[selected_id] = row
+            if invalid_rows or set(rows_by_selected_id) != selected_bank_row_ids:
+                raise TurnoverLedgerWritePreconditionError(
+                    error_code="turnover_relation_conflict",
+                    message="所选银行流水状态不完整，请刷新后重试。",
+                )
+            rules_payload = self._rules_payload_provider()
+            if not isinstance(rules_payload, dict):
+                raise TurnoverLedgerWritePreconditionError(
+                    error_code="turnover_relation_conflict",
+                    message="银行流水配对规则状态无效，请刷新后重试。",
+                )
+            special_metadata.update(
+                build_bank_relation_requirement_metadata(
+                    tag_codes=[
+                        str(
+                            rows_by_selected_id[row_id].get("effective_category_code")
+                            or rows_by_selected_id[row_id].get("category_code")
+                            or ""
+                        ).strip()
+                        for row_id in normalized_row_ids
+                    ],
+                    rules_payload=rules_payload,
+                )
             )
             try:
                 result = relation_command_service.confirm_relation(
@@ -2364,11 +2443,13 @@ class TurnoverLedgerLocalRelationRepository:
         routes: Any,
         relation_service: Any | None = None,
         bank_rows_provider: Callable[[], list[dict[str, object]]] | None = None,
+        bank_rows_by_ids_provider: Callable[[list[str]], list[dict[str, object]]] | None = None,
         relation_rebuild: Callable[[], None] | None = None,
     ) -> None:
         self._routes = routes
         self._relation_service = relation_service
         self._bank_rows_provider = bank_rows_provider
+        self._bank_rows_by_ids_provider = bank_rows_by_ids_provider
         self._relation_rebuild = relation_rebuild
 
     def confirm_relation(
@@ -2401,8 +2482,11 @@ class TurnoverLedgerLocalRelationRepository:
     ) -> dict[str, object]:
         _ = transaction
         refresh = getattr(self._relation_service, "refresh_bank_rows", None)
-        if callable(refresh) and self._bank_rows_provider is not None:
-            refresh(self._bank_rows_provider())
+        if callable(refresh):
+            if self._bank_rows_by_ids_provider is not None:
+                refresh(self._bank_rows_by_ids_provider(list(bank_row_ids)))
+            elif self._bank_rows_provider is not None:
+                refresh(self._bank_rows_provider())
         preview = getattr(self._relation_service, "preview_zero_difference_closure", None)
         if not callable(preview):
             raise RuntimeError("relation_service must expose preview_zero_difference_closure.")
@@ -2442,6 +2526,7 @@ class TurnoverLedgerLocalConfirmRelationAdapterSet:
         relation_service: Any,
         routes: Any,
         bank_rows_provider: Callable[[], list[dict[str, object]]],
+        bank_rows_by_ids_provider: Callable[[list[str]], list[dict[str, object]]],
         replace_snapshot: Callable[[dict[str, object]], None],
         emit_persistence_warning: Callable[..., None],
     ) -> None:
@@ -2449,6 +2534,7 @@ class TurnoverLedgerLocalConfirmRelationAdapterSet:
         self._relation_service = relation_service
         self._routes = routes
         self._bank_rows_provider = bank_rows_provider
+        self._bank_rows_by_ids_provider = bank_rows_by_ids_provider
         self._replace_snapshot = replace_snapshot
         self._emit_persistence_warning = emit_persistence_warning
 
@@ -2464,6 +2550,7 @@ class TurnoverLedgerLocalConfirmRelationAdapterSet:
             routes=self._routes,
             relation_service=self._relation_service,
             bank_rows_provider=self._bank_rows_provider,
+            bank_rows_by_ids_provider=self._bank_rows_by_ids_provider,
             relation_rebuild=self.rebuild_relations,
         )
 

@@ -1217,7 +1217,7 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
         self.assertEqual(history["before_relations"][0]["case_id"], "case-existing-etc")
         self.assertEqual(history["after_relations"][0]["amount_check"]["invoice_total"], "100.00")
 
-    def test_update_relation_metadata_for_case_id_can_upgrade_relation_mode(self) -> None:
+    def test_update_relation_metadata_for_case_id_persists_mode_and_audit_history(self) -> None:
         repository = FakeRelationRepository(
             {
                 "pair_relations": {
@@ -1243,13 +1243,13 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
         result = service.update_relation_metadata_for_case_id(
             case_id="turnover:rel-1",
             relation_mode="turnover_manual_closure",
-            actor_id="system_turnover_rule_sync",
+            actor_id="system_requirement_repair",
             special_metadata={
                 "requires_oa": True,
                 "requires_invoice": False,
                 "paired_requirement_tag_codes": ["external_turnover"],
             },
-            history_operation_type="turnover_rule_tag_requirement_sync",
+            history_operation_type="workbench_relation_requirement_repair",
         )
 
         self.assertEqual(result["status"], "updated")
@@ -1260,7 +1260,7 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
         saved_relation = saved_snapshot["pair_relations"]["turnover:rel-1"]
         self.assertEqual(saved_relation["relation_mode"], "turnover_manual_closure")
         history = saved_snapshot["pair_relation_history"][0]
-        self.assertEqual(history["operation_type"], "turnover_rule_tag_requirement_sync")
+        self.assertEqual(history["operation_type"], "workbench_relation_requirement_repair")
         self.assertEqual(history["before_relations"][0]["relation_mode"], "manual_confirmed")
         self.assertEqual(history["after_relations"][0]["relation_mode"], "turnover_manual_closure")
 

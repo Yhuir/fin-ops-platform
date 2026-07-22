@@ -61,11 +61,7 @@ def evaluate_bank_relation_completion(
         isinstance(metadata.get("etc_batch_link"), dict)
         or str(check.get("external_etc_batch_id") or check.get("etc_batch_id") or "").strip()
     )
-    if (
-        str(relation_mode or "").strip() == "turnover_manual_closure"
-        or str(metadata.get("source") or "").strip() == "batch_accounting"
-        or is_etc_batch_relation
-    ):
+    if str(metadata.get("source") or "").strip() == "batch_accounting" or is_etc_batch_relation:
         return {"is_complete": True, "missing_row_types": []}
     requires_oa = _requirement(metadata, "requires_oa", "paired_requires_oa")
     requires_invoice = _requirement(metadata, "requires_invoice", "paired_requires_invoice")
