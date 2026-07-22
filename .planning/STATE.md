@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 26 Plan 01 ready for execution after validated planning and production gate design.
-last_updated: "2026-07-22T17:32:23+08:00"
-last_activity: 2026-07-22 - Phase 26 execution started
+stopped_at: Phase 26 Plan 01 completed; Plan 26-02 historical repair and production closure remains.
+last_updated: "2026-07-22T18:03:00+08:00"
+last_activity: 2026-07-22 - Phase 26 Plan 01 online correction completed
 progress:
   total_phases: 22
   completed_phases: 2
   total_plans: 28
-  completed_plans: 24
-  percent: 86
+  completed_plans: 25
+  percent: 89
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-06-16)
 ## Current Position
 
 Phase: 26 of 26 (外部往来闭环冻结要求分区)
-Plan: 26-01 of 26-02
-Status: Executing online root-cause correction
-Last activity: 2026-07-22 - Phase 26 execution started
+Plan: 26-02 of 26-02
+Status: Online correction complete; historical repair and controlled production closure pending
+Last activity: 2026-07-22 - Phase 26 Plan 01 online correction completed
 
-Progress: [█████████░] 86%
+Progress: [█████████░] 89%
 
 ## Performance Metrics
 
@@ -50,6 +50,10 @@ Progress: [█████████░] 86%
 ## Accumulated Context
 
 ### Decisions
+
+- Phase 26-01: `turnover_manual_closure` active relation expresses ownership only; paired/unpaired comes from the immutable OA/invoice requirement snapshot.
+- Phase 26-01: Turnover confirm reuses one selected-row snapshot and one canonical rules payload through the existing helper; merged bank membership must remain inside selected ids.
+- Phase 26-01: Rule saves never retroactively rewrite Turnover relation requirements; legacy-invalid snapshots remain fail closed for controlled Plan 26-02 repair.
 
 - Setup: Keep `.planning/codebase/` as a global map and preserve per-page analysis in dedicated phase directories.
 - Setup: Parallel page analysis threads must not modify `.planning/codebase/*.md`.
@@ -147,6 +151,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-07-21
-Stopped at: Completed quick task 260721-nrf and production-verified the bank-flow canonical relation/Audit/UI closure.
-Resume file: .planning/quick/260721-nrf-audit-fresh/260721-nrf-SUMMARY.md
+Last session: 2026-07-22
+Stopped at: Phase 26 Plan 01 completed; Plan 26-02 historical repair, v6 and production gates remain.
+Resume file: .planning/phases/26-oa/26-01-SUMMARY.md

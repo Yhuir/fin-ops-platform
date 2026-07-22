@@ -518,7 +518,7 @@ Plans:
 
 Plans:
 
-- [ ] 26-01-PLAN — TDD online root-cause fix, selected-member invariant, real policy snapshot, legacy sync deletion, minimal docs and isolated regression coverage.
+- [x] 26-01-PLAN — TDD online root-cause fix, selected-member invariant, real policy snapshot, legacy sync deletion, minimal docs and isolated regression coverage.
 - [ ] 26-02-PLAN — Historical repair target expansion, Workbench v6, automatic verification, then human-gated production repair/rehydrate/SLO/E2E and rollback evidence.
 
 ---
