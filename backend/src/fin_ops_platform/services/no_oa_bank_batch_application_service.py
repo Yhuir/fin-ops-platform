@@ -267,8 +267,6 @@ class NoOaBankBatchApplicationService:
             result = self._tag_selection_service.update_tag_selection(payload, actor_id=actor_id)
         else:
             result = self._app_settings_service.update_no_oa_bank_batch_tag_selection(payload, actor_id=actor_id)
-            self.enqueue_background_refresh(["all"], reason="no_oa_bank_batch_tag_selection_changed")
-            self.after_mutation(["all"], changed_case_ids=[], persist=False)
         return result
 
     def detail_payload(self, batch_id: str) -> dict[str, object]:
@@ -1366,28 +1364,29 @@ class NoOaBankBatchApplicationService:
             for month in list(affected_months or [])
             if SEARCH_MONTH_RE.match(str(month).strip())
         ]
-        scope_keys = ["all", *normalized_months]
-        event_name = self._mutation_lifecycle_event(action_name)
-        lifecycle_source = self._mutation_lifecycle_source(action_name)
-        self._execute_derived_data_lifecycle_event(
-            event_name,
-            months=normalized_months,
-            metadata={
-                "source": lifecycle_source,
-                **(
-                    {"relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE}
-                    if lifecycle_source == BANK_FLOW_RULE_BATCH_RELATION_MODE
-                    else {}
-                ),
-                **({"action_name": str(action_name).strip()} if str(action_name or "").strip() else {}),
-            },
-        )
+        normalized_action_name = str(action_name or "").strip()
+        if normalized_action_name not in {"no_oa_bank_batch_submit", "no_oa_bank_batch_withdraw"}:
+            event_name = self._mutation_lifecycle_event(action_name)
+            lifecycle_source = self._mutation_lifecycle_source(action_name)
+            self._execute_derived_data_lifecycle_event(
+                event_name,
+                months=normalized_months,
+                metadata={
+                    "source": lifecycle_source,
+                    **(
+                        {"relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE}
+                        if lifecycle_source == BANK_FLOW_RULE_BATCH_RELATION_MODE
+                        else {}
+                    ),
+                    **({"action_name": normalized_action_name} if normalized_action_name else {}),
+                },
+            )
         if persist:
             self.persist_mutation(
                 changed_case_ids=changed_case_ids,
-                changed_scope_keys=self._expand_workbench_read_model_scope_keys_for_base_scopes(scope_keys),
+                changed_scope_keys=normalized_months,
             )
-        return bool(normalized_months)
+        return False
 
     @staticmethod
     def _mutation_lifecycle_event(action_name: str | None) -> str:
@@ -1437,7 +1436,6 @@ class NoOaBankBatchApplicationService:
         if self._state_store is None:
             return
         try:
-            self._search_cache_clearer()
             save_mutation = getattr(self._state_store, "save_no_oa_bank_batch_mutation", None)
             if not callable(save_mutation):
                 raise RuntimeError("No-OA mutation persistence requires save_no_oa_bank_batch_mutation.")
@@ -1446,7 +1444,6 @@ class NoOaBankBatchApplicationService:
                 if changed_case_ids
                 else self._pair_relation_snapshot_port.snapshot(),
                 no_oa_bank_batch_snapshot=self._no_oa_public_snapshot(),
-                workbench_read_model_snapshot=self._workbench_read_model_service.snapshot(),
                 changed_case_ids=changed_case_ids,
                 changed_scope_keys=changed_scope_keys,
             )
@@ -1496,8 +1493,8 @@ class NoOaBankBatchApplicationService:
             "pair_relation": relation or {},
             "affected_months": affected_months,
             **write_target_envelope(
-                read_model_key=read_model_key,
                 scope_keys=affected_months,
+                targets=[],
                 fallback_scope_key="all",
             ),
             "workbench_rebuild_queued": workbench_rebuild_queued,

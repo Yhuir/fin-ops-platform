@@ -388,35 +388,21 @@ from fin_ops_platform.services.turnover_ledger_export_service import (
 from fin_ops_platform.services.turnover_bank_row_version import turnover_bank_row_version
 from fin_ops_platform.services.turnover_ledger_source_versions import build_turnover_ledger_source_versions
 from fin_ops_platform.services.turnover_ledger_write_adapters import (
-    TurnoverLedgerBankdetailWritePort,
     TurnoverLedgerBankRowTagsRequestBoundaryFacade,
     TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder,
-    TurnoverLedgerDirtyOutboxWriter,
-    TurnoverLedgerExtraNormalizerAdapter,
-    TurnoverLedgerExtraRepositoryAdapter,
     TurnoverLedgerRelationExtraRequestBoundaryFacade,
-    TurnoverLedgerLocalBankRowTagsAdapterSet,
-    TurnoverLedgerLocalConfirmRelationAdapterSet,
-    TurnoverLedgerLocalDirtyOutboxWriter,
     TurnoverLedgerLocalPairSnapshotPort,
-    TurnoverLedgerLocalRelationConnection,
-    TurnoverLedgerLocalRelationRepository,
-    TurnoverLedgerLocalRelationExtraAdapterSet,
     TurnoverLedgerRelationExtraPrimaryWriteFacadeBuilder,
     TurnoverLedgerLocalRuntimeSupport,
-    TurnoverLedgerLocalWithdrawRelationAdapterSet,
     TurnoverLedgerTagSelectionPrimaryWriteFacadeBuilder,
     TurnoverLedgerTagSelectionRequestBoundaryFacade,
     TurnoverLedgerConfirmRequestBoundaryFacade,
     TurnoverLedgerConfirmPrimaryWriteFacadeBuilder,
-    TurnoverLedgerRelationWritePort,
-    TurnoverLedgerTagSelectionSettingsAdapter,
     TurnoverLedgerWritePreconditionError,
     TurnoverLedgerWithdrawRequestBoundaryFacade,
     TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder,
 )
 from fin_ops_platform.services.turnover_ledger_write_facade import TurnoverLedgerWriteFacade
-from fin_ops_platform.services.turnover_ledger_write_uow import TurnoverLedgerWriteUnitOfWork
 from fin_ops_platform.services.turnover_relation_service import (
     TURNOVER_CATEGORY_RULES,
     TURNOVER_RELATION_SCHEMA_VERSION,
@@ -488,7 +474,10 @@ from fin_ops_platform.services.workbench_relation_derived_lifecycle_executor imp
 )
 from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRelationReadFacade
 from fin_ops_platform.services.workbench_relation_source_version_provider import WorkbenchRelationSourceVersionProvider
-from fin_ops_platform.services.workbench_relation_sql_projection import WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION
+from fin_ops_platform.services.workbench_relation_sql_projection import (
+    WORKBENCH_RELATION_SQL_PROJECTION_SCHEMA_VERSION,
+    WorkbenchRelationSqlProjectionBuilder,
+)
 from fin_ops_platform.services.workbench_row_identity import row_type_for_workbench_row_id
 from fin_ops_platform.services.postgres_repositories.read_models import (
     BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
@@ -503,7 +492,7 @@ from fin_ops_platform.services.workbench_idempotency import (
     WorkbenchIdempotencyInProgress,
     WorkbenchIdempotencyKeyConflict,
 )
-from fin_ops_platform.services.workbench_uow import RuntimeQueueReadModelRefreshWriter, WorkbenchWriteUnitOfWork
+from fin_ops_platform.services.workbench_uow import WorkbenchWriteUnitOfWork
 from fin_ops_platform.services.workbench_sql_projection import (
     MONTH_RE as WORKBENCH_SQL_MONTH_RE,
     WorkbenchSqlProjectionBuilder,
@@ -542,10 +531,6 @@ class Response:
 
 class StatePersistenceError(RuntimeError):
     """Raised when critical workbench state cannot be durably persisted."""
-
-class _LocalTurnoverLedgerRefreshQueue:
-    def enqueue_read_model_refresh(self, **kwargs: object) -> dict[str, object]:
-        return dict(kwargs)
 
 def _build_ascii_download_name(filename: str, *, fallback_stem: str = "download", fallback_suffix: str = ".bin") -> str:
     safe = "".join(character if ord(character) < 128 else "_" for character in filename)
@@ -682,9 +667,17 @@ class Application:
             read_model_repository=repository,
             queue_repository=getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None),
             tenant_id=self._workbench_reconciliation_tenant_id(),
+            expected_source_versions=self._workbench_relation_expected_source_versions,
         )
         self._workbench_relation_facade = facade
         return facade
+
+    def _workbench_relation_expected_source_versions(self, scope_key: str) -> dict[str, object]:
+        state_store = getattr(self, "_state_store", None)
+        connection = getattr(state_store, "_connection", None)
+        if connection is None or not callable(getattr(connection, "fetch_one", None)):
+            return {}
+        return WorkbenchRelationSqlProjectionBuilder(connection=connection).source_versions_for_scope(scope_key)
 
     def _workbench_reconciliation_dirty_queue_repository(self):
         repository = getattr(self._state_store, "read_model_repository", None)
@@ -933,15 +926,6 @@ class Application:
         )
         self._no_oa_bank_batch_tag_selection_service = NoOaBankBatchTagSelectionApplicationService(
             app_settings_service=self._app_settings_service,
-            enqueue_no_oa_bank_batch_refresh=lambda scope_keys: self._no_oa_bank_batch_read_model_refresh_producer().enqueue(
-                scope_keys,
-                reason="no_oa_bank_batch_tag_selection_changed",
-            ),
-            after_no_oa_bank_batch_mutation=lambda affected_months, **kwargs: self._no_oa_bank_batch_application_service().after_mutation(
-                affected_months,
-                changed_case_ids=list(kwargs.get("changed_case_ids") or []),
-                persist=bool(kwargs.get("persist")),
-            ),
         )
         self._oa_identity_service = OAIdentityService()
         self._access_control_service = AccessControlService.from_environment(
@@ -1377,6 +1361,8 @@ class Application:
             redis_helper=getattr(runtime_repositories, "redis_helper", None),
             sql_read_repository=getattr(self, "_cost_statistics_sql_read_repository", None),
             tag_selection_mapper=AppSettingsService.cost_statistics_tag_selection_payload_from_settings,
+            workbench_dependency_versions_provider=self._cost_statistics_workbench_dependency_versions,
+            workbench_refresh_enqueuer=self._enqueue_workbench_read_model_refresh,
         )
         self._cost_statistics_api_routes = CostStatisticsApiRoutes(
             query_service=self._cost_statistics_query_service,
@@ -1392,6 +1378,19 @@ class Application:
             load_json_body=self._load_json_body,
         )
         self._cost_statistics_dependency_key = self._cost_statistics_current_dependency_key()
+
+    def _cost_statistics_workbench_dependency_versions(
+        self,
+        scope_key: str,
+    ) -> tuple[dict[str, object], dict[str, object]]:
+        repository = getattr(self, "_cost_statistics_sql_read_repository", None)
+        active_source_versions = getattr(repository, "active_workbench_source_versions", None)
+        if not callable(active_source_versions):
+            raise RuntimeError("Cost statistics requires the Workbench source-version read boundary.")
+        return (
+            self._workbench_sql_read_model_source_versions(scope_key),
+            dict(active_source_versions(scope_key=scope_key) or {}),
+        )
 
     def _cost_statistics_current_dependency_key(self) -> tuple[int | None, ...]:
         return (
@@ -2665,8 +2664,6 @@ class Application:
             restore_exception_pair_snapshots=self._restore_workbench_exception_pair_snapshots,
             schedule_pair_relation_persist=self._schedule_workbench_pair_relation_persist,
             restore_pair_relation_snapshot=self._restore_workbench_pair_relation_snapshot,
-            execute_derived_data_lifecycle_event=self._execute_derived_data_lifecycle_event,
-            schedule_read_model_persist=self._schedule_workbench_read_model_persist,
             emit_action_timing=self._emit_workbench_action_timing,
             confirm_link_uow=self._workbench_confirm_link_unit_of_work(),
             cancel_link_uow=self._workbench_cancel_link_unit_of_work(),
@@ -2758,7 +2755,7 @@ class Application:
     def _turnover_workbench_relation_command_service(self, transaction: object | None = None) -> WorkbenchRelationCommandService:
         storage_backend = str(getattr(getattr(self, "_state_store", None), "storage_backend", "") or "").strip()
         repository = (
-            PostgresWorkbenchRelationRepository(transaction, enqueue_refreshes=False)
+            PostgresWorkbenchRelationRepository(transaction)
             if storage_backend == "postgres" and transaction is not None
             else None
         )
@@ -2777,8 +2774,7 @@ class Application:
         if str(getattr(state_store, "storage_backend", "") or "").strip() != "postgres":
             return None
         connection = getattr(state_store, "_connection", None)
-        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
-        if connection is None or queue_repository is None:
+        if connection is None:
             return None
         idempotency_store = self._workbench_write_idempotency_store(
             "_workbench_confirm_link_idempotency_store",
@@ -2787,11 +2783,6 @@ class Application:
         return WorkbenchWriteUnitOfWork(
             connection=connection,
             repository_factory=self._workbench_uow_repository_factory,
-            read_model_refresh_writer=RuntimeQueueReadModelRefreshWriter(
-                queue_repository,
-                tenant_id=self._workbench_reconciliation_tenant_id(),
-                priority="high",
-            ),
             idempotency_store=idempotency_store,
         )
 
@@ -2803,8 +2794,7 @@ class Application:
         if str(getattr(state_store, "storage_backend", "") or "").strip() != "postgres":
             return None
         connection = getattr(state_store, "_connection", None)
-        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
-        if connection is None or queue_repository is None:
+        if connection is None:
             return None
         idempotency_store = self._workbench_write_idempotency_store(
             "_workbench_cancel_link_idempotency_store",
@@ -2813,11 +2803,6 @@ class Application:
         return WorkbenchWriteUnitOfWork(
             connection=connection,
             repository_factory=self._workbench_uow_repository_factory,
-            read_model_refresh_writer=RuntimeQueueReadModelRefreshWriter(
-                queue_repository,
-                tenant_id=self._workbench_reconciliation_tenant_id(),
-                priority="high",
-            ),
             idempotency_store=idempotency_store,
         )
 
@@ -2829,8 +2814,7 @@ class Application:
         if str(getattr(state_store, "storage_backend", "") or "").strip() != "postgres":
             return None
         connection = getattr(state_store, "_connection", None)
-        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
-        if connection is None or queue_repository is None:
+        if connection is None:
             return None
         idempotency_store = self._workbench_write_idempotency_store(
             "_workbench_withdraw_link_idempotency_store",
@@ -2839,11 +2823,6 @@ class Application:
         return WorkbenchWriteUnitOfWork(
             connection=connection,
             repository_factory=self._workbench_uow_repository_factory,
-            read_model_refresh_writer=RuntimeQueueReadModelRefreshWriter(
-                queue_repository,
-                tenant_id=self._workbench_reconciliation_tenant_id(),
-                priority="high",
-            ),
             idempotency_store=idempotency_store,
         )
 
@@ -2852,20 +2831,17 @@ class Application:
         if override is not None:
             return override
         state_store = getattr(self, "_state_store", None)
-        queue_repository = self._turnover_ledger_write_queue_repository(state_store)
-        if state_store is None or queue_repository is None:
+        if state_store is None:
             return None
         support = self._turnover_ledger_local_runtime_support()
         facade = TurnoverLedgerRelationExtraPrimaryWriteFacadeBuilder(
             state_store=state_store,
-            queue_repository=queue_repository,
             routes=self._turnover_ledger_api_routes,
             replace_snapshot=support.replace_turnover_ledger_extra_snapshot,
             emit_persistence_warning=self._emit_workbench_persistence_warning,
             extra_service=self._turnover_ledger_extra_service,
             row_provider=self._turnover_ledger_relation_extra_row_provider,
             current_extra_reader=self._turnover_ledger_api_routes.get_relation_extra,
-            tenant_id=self._workbench_reconciliation_tenant_id(),
             postgres_extra_repository_factory=PostgresWorkbenchRepository,
             postgres_idempotency_store_factory=self._turnover_ledger_relation_extra_postgres_idempotency_store,
             local_idempotency_store_provider=self._turnover_ledger_relation_extra_local_idempotency_store,
@@ -2879,20 +2855,17 @@ class Application:
         if override is not None:
             return override
         state_store = getattr(self, "_state_store", None)
-        queue_repository = self._turnover_ledger_write_queue_repository(state_store)
-        if state_store is None or queue_repository is None:
+        if state_store is None:
             return None
         support = self._turnover_ledger_local_runtime_support()
         facade = TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder(
             state_store=state_store,
-            queue_repository=queue_repository,
             category_service=self._bank_transaction_category_service,
             relation_service=self._turnover_relation_service,
             bank_rows_provider=self._turnover_bank_transaction_rows,
             replace_category_snapshot=support.replace_bank_transaction_category_snapshot,
             replace_relation_snapshot=support.replace_turnover_relation_snapshot,
             emit_persistence_warning=self._emit_workbench_persistence_warning,
-            tenant_id=self._workbench_reconciliation_tenant_id(),
             persistence_repository_factory=lambda transaction: support.persistence_repository(
                 transaction,
                 state_store=state_store,
@@ -2910,20 +2883,17 @@ class Application:
         if override is not None:
             return override
         state_store = getattr(self, "_state_store", None)
-        queue_repository = self._turnover_ledger_write_queue_repository(state_store)
-        if state_store is None or queue_repository is None:
+        if state_store is None:
             return None
         support = self._turnover_ledger_local_runtime_support()
         facade = TurnoverLedgerConfirmPrimaryWriteFacadeBuilder(
             state_store=state_store,
-            queue_repository=queue_repository,
             relation_service=self._turnover_relation_service,
             routes=self._turnover_ledger_api_routes,
             bank_rows_provider=self._turnover_bank_transaction_rows,
             bank_rows_by_ids_provider=self._turnover_bank_transaction_rows_by_ids,
             replace_snapshot=support.replace_turnover_relation_snapshot,
             emit_persistence_warning=self._emit_workbench_persistence_warning,
-            tenant_id=self._workbench_reconciliation_tenant_id(),
             persistence_repository_factory=lambda transaction: support.persistence_repository(
                 transaction,
                 state_store=state_store,
@@ -2945,20 +2915,17 @@ class Application:
 
     def _turnover_ledger_closure_write_facade(self) -> TurnoverLedgerWriteFacade | None:
         state_store = getattr(self, "_state_store", None)
-        queue_repository = self._turnover_ledger_write_queue_repository(state_store)
-        if state_store is None or queue_repository is None:
+        if state_store is None:
             return None
         support = self._turnover_ledger_local_runtime_support()
         facade = TurnoverLedgerConfirmPrimaryWriteFacadeBuilder(
             state_store=state_store,
-            queue_repository=queue_repository,
             relation_service=self._turnover_relation_service,
             routes=self._turnover_ledger_api_routes,
             bank_rows_provider=self._turnover_bank_transaction_rows,
             bank_rows_by_ids_provider=self._turnover_bank_transaction_rows_by_ids,
             replace_snapshot=support.replace_turnover_relation_snapshot,
             emit_persistence_warning=self._emit_workbench_persistence_warning,
-            tenant_id=self._workbench_reconciliation_tenant_id(),
             persistence_repository_factory=lambda transaction: support.persistence_repository(
                 transaction,
                 state_store=state_store,
@@ -2989,20 +2956,17 @@ class Application:
         if override is not None:
             return override
         state_store = getattr(self, "_state_store", None)
-        queue_repository = self._turnover_ledger_write_queue_repository(state_store)
-        if state_store is None or queue_repository is None:
+        if state_store is None:
             return None
         support = self._turnover_ledger_local_runtime_support()
         facade = TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder(
             state_store=state_store,
-            queue_repository=queue_repository,
             relation_service=self._turnover_relation_service,
             routes=self._turnover_ledger_api_routes,
             bank_rows_provider=self._turnover_bank_transaction_rows,
             bank_rows_by_ids_provider=self._turnover_bank_transaction_rows_by_ids,
             replace_snapshot=support.replace_turnover_relation_snapshot,
             emit_persistence_warning=self._emit_workbench_persistence_warning,
-            tenant_id=self._workbench_reconciliation_tenant_id(),
             persistence_repository_factory=lambda transaction: support.persistence_repository(
                 transaction,
                 state_store=state_store,
@@ -3067,14 +3031,6 @@ class Application:
             relation_service_rebinder=self._bind_local_turnover_relation_runtime,
             extra_service_rebinder=self._bind_local_turnover_ledger_extra_runtime,
         )
-
-    def _turnover_ledger_write_queue_repository(self, state_store: object | None) -> object | None:
-        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
-        if queue_repository is not None:
-            return queue_repository
-        if str(getattr(state_store, "storage_backend", "") or "").strip() == "postgres":
-            return None
-        return _LocalTurnoverLedgerRefreshQueue()
 
     def _bind_local_bank_transaction_category_runtime(
         self,
@@ -3160,14 +3116,11 @@ class Application:
         if override is not None:
             return override
         state_store = getattr(self, "_state_store", None)
-        queue_repository = self._turnover_ledger_write_queue_repository(state_store)
-        if state_store is None or queue_repository is None:
+        if state_store is None:
             return None
         facade = TurnoverLedgerTagSelectionPrimaryWriteFacadeBuilder(
             state_store=state_store,
-            queue_repository=queue_repository,
             app_settings_service=self._app_settings_service,
-            tenant_id=self._workbench_reconciliation_tenant_id(),
             postgres_settings_repository_factory=lambda transaction: PostgresOpsTaxEtcRepository(transaction),
             postgres_idempotency_store_factory=self._turnover_ledger_tag_selection_postgres_idempotency_store,
             local_idempotency_store_provider=self._turnover_ledger_tag_selection_local_idempotency_store,
@@ -3271,7 +3224,7 @@ class Application:
     @staticmethod
     def _workbench_uow_repository_factory(transaction: object) -> SimpleNamespace:
         workbench_repository = PostgresWorkbenchRepository(transaction)
-        relation_repository = PostgresWorkbenchRelationRepository(transaction, enqueue_refreshes=False)
+        relation_repository = PostgresWorkbenchRelationRepository(transaction)
         return SimpleNamespace(
             pair_relations=relation_repository,
             exception_cases=workbench_repository,
@@ -3571,11 +3524,11 @@ class Application:
         *,
         reason: str,
         metadata: dict[str, object] | None = None,
-    ) -> None:
+    ) -> bool:
         refresh_gateway = self._read_model_refresh_gateway()
         if not refresh_gateway.can_enqueue():
-            return
-        refresh_gateway.enqueue_one("workbench", scope_key, reason=reason, metadata=metadata)
+            return False
+        return bool(refresh_gateway.enqueue_one("workbench", scope_key, reason=reason, metadata=metadata))
 
     def _handle_api_oa_sync_status(self) -> Response:
         return self._json_response(HTTPStatus.OK, self._oa_sync_status_payload())
@@ -9895,6 +9848,12 @@ class Application:
 
     def _workbench_sql_read_model_source_versions(self, scope_key: str | None = None) -> dict[str, object]:
         normalized_scope_key = str(scope_key or "").strip()
+        state_store = getattr(self, "_state_store", None)
+        connection = getattr(state_store, "_connection", None)
+        if connection is not None and callable(getattr(connection, "fetch_one", None)):
+            return WorkbenchSqlProjectionBuilder(connection=connection).source_versions_for_scope(
+                normalized_scope_key or "all"
+            )
         builder_version = (
             WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION
             if normalized_scope_key == "all"

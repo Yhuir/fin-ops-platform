@@ -63,7 +63,7 @@ class BatchAccountingApiRoutes:
         return HTTPStatus.OK, {
             **result,
             "affected_months": changed_scope_keys,
-            **write_target_envelope(read_model_key="workbench_relation", scope_keys=changed_scope_keys),
+            **write_target_envelope(scope_keys=changed_scope_keys, targets=[]),
         }
 
     def withdraw(
@@ -92,7 +92,7 @@ class BatchAccountingApiRoutes:
         return HTTPStatus.OK, {
             **result,
             "affected_months": changed_scope_keys,
-            **write_target_envelope(read_model_key="workbench_relation", scope_keys=changed_scope_keys),
+            **write_target_envelope(scope_keys=changed_scope_keys, targets=[]),
         }
 
     @staticmethod

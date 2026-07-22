@@ -159,7 +159,6 @@ class NoOaBankBatchApiRoutes:
         payload: dict[str, Any],
         *,
         session: OARequestSession,
-        read_model_key: str = "no_oa_bank_batch",
     ) -> tuple[HTTPStatus, dict[str, Any]]:
         try:
             result = self._application_service.withdraw_batch(
@@ -175,8 +174,8 @@ class NoOaBankBatchApiRoutes:
         except ValueError as exc:
             return self._value_error_response(exc)
         result.update(write_target_envelope(
-            read_model_key=read_model_key,
             scope_keys=result.get("affected_months"),
+            targets=[],
             fallback_scope_key="all",
         ))
         return HTTPStatus.OK, result
@@ -257,6 +256,7 @@ class NoOaBankBatchApiRoutes:
                 sorted(affected_months),
                 changed_case_ids=changed_case_ids,
                 persist=True,
+                action_name="no_oa_bank_batch_submit",
             )
         except NoOaBankBatchPersistenceError as exc:
             return self._persistence_error_response(exc)
@@ -267,8 +267,8 @@ class NoOaBankBatchApiRoutes:
             "results": results,
             "affected_months": sorted(affected_months),
             **write_target_envelope(
-                read_model_key="no_oa_bank_batch",
                 scope_keys=sorted(affected_months),
+                targets=[],
                 fallback_scope_key="all",
             ),
             "workbench_rebuild_queued": workbench_rebuild_queued,

@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from fin_ops_platform.services.bank_transaction_category_refresh import turnover_category_refresh_requests
 from fin_ops_platform.services.workbench_idempotency import workbench_request_fingerprint
 
 
@@ -17,15 +16,10 @@ def _scoped_month_keys_or_all(months: list[str]) -> list[str]:
     return normalized or ["all"]
 
 
-def _active_cost_statistics_scope_keys(months: list[str]) -> list[str]:
-    return [f"active:{month}" for month in _scoped_month_keys_or_all(months) if month != "all"]
-
-
 @dataclass(frozen=True)
 class TurnoverLedgerWriteCommand:
     action_name: str
     scope_keys: list[str] = field(default_factory=lambda: ["all"])
-    refresh_requests: list[dict[str, object]] = field(default_factory=list)
     expected_versions: dict[str, object] = field(default_factory=dict)
     idempotency_key: str = ""
     request_fingerprint: str = ""
@@ -90,13 +84,6 @@ class TurnoverLedgerWriteFacade:
         command = TurnoverLedgerWriteCommand(
             action_name=action_name,
             scope_keys=list(scope_keys or ["all"]),
-            refresh_requests=[
-                {
-                    "scope_type": "turnover_ledger",
-                    "scope_keys": list(scope_keys or ["all"]),
-                    "reason": "turnover_relation_extra_changed",
-                }
-            ],
             expected_versions=dict(normalized_expected_versions),
             idempotency_key=normalized_idempotency_key,
             request_fingerprint=request_fingerprint,
@@ -129,7 +116,6 @@ class TurnoverLedgerWriteFacade:
             for month in list(affected_months or [])
             if str(month).strip()
         ]
-        refresh_requests = turnover_category_refresh_requests(normalized_months)
         normalized_idempotency_key = str(idempotency_key or "").strip()
         action_name = "turnover_bank_row_tags_batch" if normalized_idempotency_key else "bank_row_tags_batch"
         command_payload = {
@@ -147,7 +133,6 @@ class TurnoverLedgerWriteFacade:
         command = TurnoverLedgerWriteCommand(
             action_name=action_name,
             scope_keys=_scoped_month_keys_or_all(normalized_months),
-            refresh_requests=refresh_requests,
             actor_id=actor_id,
             tenant_id=tenant_id,
             idempotency_key=normalized_idempotency_key,
@@ -210,13 +195,6 @@ class TurnoverLedgerWriteFacade:
         command = TurnoverLedgerWriteCommand(
             action_name=action_name,
             scope_keys=_scoped_month_keys_or_all(normalized_months),
-            refresh_requests=[
-                {
-                    "scope_type": "turnover_ledger",
-                    "scope_keys": _scoped_month_keys_or_all(normalized_months),
-                    "reason": "turnover_relation_changed",
-                }
-            ],
             actor_id=actor_id,
             tenant_id=tenant_id,
             expected_versions=dict(normalized_expected_versions),
@@ -277,45 +255,9 @@ class TurnoverLedgerWriteFacade:
                 },
             )
         refresh_scope_keys = _scoped_month_keys_or_all(normalized_months)
-        workbench_refresh_scope_keys = _scoped_month_keys_or_all(normalized_months)
-        cost_statistics_scope_keys = _active_cost_statistics_scope_keys(normalized_months)
         command = TurnoverLedgerWriteCommand(
             action_name=action_name,
             scope_keys=refresh_scope_keys,
-            refresh_requests=[
-                {
-                    "scope_type": "turnover_ledger",
-                    "scope_keys": refresh_scope_keys,
-                    "reason": "turnover_closure_changed",
-                },
-                {
-                    "scope_type": "workbench",
-                    "scope_keys": workbench_refresh_scope_keys,
-                    "reason": "turnover_closure_changed",
-                },
-                {
-                    "scope_type": "workbench_relation",
-                    "scope_keys": workbench_refresh_scope_keys,
-                    "reason": "turnover_closure_changed",
-                },
-                *(
-                    [
-                        {
-                            "scope_type": "cost_statistics",
-                            "scope_keys": cost_statistics_scope_keys,
-                            "reason": "cost_statistics_relation_delta",
-                            "metadata": {"row_ids": list(normalized_bank_row_ids)},
-                        }
-                    ]
-                    if cost_statistics_scope_keys
-                    else []
-                ),
-                {
-                    "scope_type": "search",
-                    "scope_keys": refresh_scope_keys,
-                    "reason": "turnover_closure_changed",
-                },
-            ],
             actor_id=actor_id,
             tenant_id=tenant_id,
             expected_versions=dict(normalized_expected_versions),
@@ -392,44 +334,10 @@ class TurnoverLedgerWriteFacade:
                 payload=dict(command_payload),
             )
         refresh_scope_keys = _scoped_month_keys_or_all(normalized_months)
-        cost_statistics_scope_keys = _active_cost_statistics_scope_keys(normalized_months)
         command = TurnoverLedgerWriteCommand(
             action_name=action_name,
             scope_keys=refresh_scope_keys,
             expected_versions=dict(normalized_expected_versions),
-            refresh_requests=[
-                {
-                    "scope_type": "turnover_ledger",
-                    "scope_keys": refresh_scope_keys,
-                    "reason": "turnover_relation_changed",
-                },
-                {
-                    "scope_type": "workbench",
-                    "scope_keys": refresh_scope_keys,
-                    "reason": "turnover_relation_changed",
-                },
-                {
-                    "scope_type": "workbench_relation",
-                    "scope_keys": refresh_scope_keys,
-                    "reason": "turnover_relation_changed",
-                },
-                *(
-                    [
-                        {
-                            "scope_type": "cost_statistics",
-                            "scope_keys": cost_statistics_scope_keys,
-                            "reason": "cost_statistics_relation_delta",
-                        }
-                    ]
-                    if cost_statistics_scope_keys
-                    else []
-                ),
-                {
-                    "scope_type": "search",
-                    "scope_keys": refresh_scope_keys,
-                    "reason": "turnover_relation_changed",
-                },
-            ],
             actor_id=actor_id,
             tenant_id=tenant_id,
             idempotency_key=normalized_idempotency_key,
@@ -506,44 +414,9 @@ class TurnoverLedgerWriteFacade:
                 action_name=action_name,
                 payload=dict(command_payload),
             )
-        refresh_scope_keys = _scoped_month_keys_or_all(normalized_months)
-        cost_statistics_scope_keys = _active_cost_statistics_scope_keys(normalized_months)
         command = TurnoverLedgerWriteCommand(
             action_name=action_name,
-            scope_keys=list(refresh_scope_keys),
-            refresh_requests=[
-                {
-                    "scope_type": "turnover_ledger",
-                    "scope_keys": list(refresh_scope_keys),
-                    "reason": "turnover_relation_changed",
-                },
-                {
-                    "scope_type": "workbench",
-                    "scope_keys": refresh_scope_keys,
-                    "reason": "turnover_relation_changed",
-                },
-                {
-                    "scope_type": "workbench_relation",
-                    "scope_keys": refresh_scope_keys,
-                    "reason": "turnover_relation_changed",
-                },
-                *(
-                    [
-                        {
-                            "scope_type": "cost_statistics",
-                            "scope_keys": cost_statistics_scope_keys,
-                            "reason": "cost_statistics_relation_delta",
-                        }
-                    ]
-                    if cost_statistics_scope_keys
-                    else []
-                ),
-                {
-                    "scope_type": "search",
-                    "scope_keys": refresh_scope_keys,
-                    "reason": "turnover_relation_changed",
-                },
-            ],
+            scope_keys=list(normalized_months),
             actor_id=actor_id,
             tenant_id=tenant_id,
             idempotency_key=normalized_idempotency_key,
@@ -609,13 +482,6 @@ class TurnoverLedgerWriteFacade:
         command = TurnoverLedgerWriteCommand(
             action_name=action_name,
             scope_keys=list(scope_keys or ["all"]),
-            refresh_requests=[
-                {
-                    "scope_type": "turnover_ledger",
-                    "scope_keys": list(scope_keys or ["all"]),
-                    "reason": "turnover_ledger_tag_selection_changed",
-                }
-            ],
             actor_id=actor_id,
             tenant_id=tenant_id,
             idempotency_key=normalized_idempotency_key,

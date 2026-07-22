@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,14 +15,8 @@ from fin_ops_platform.services.postgres_repositories.workbench_relation import (
 from fin_ops_platform.services.postgres_repositories.workbench_idempotency import (
     PostgresWorkbenchIdempotencyRepository,
 )
-from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent, RuntimeQueueRepository
-from fin_ops_platform.services.turnover_ledger_write_adapters import TurnoverLedgerDirtyOutboxWriter
 from fin_ops_platform.services.turnover_ledger_write_uow import TurnoverLedgerWriteUnitOfWork
-from fin_ops_platform.services.workbench_uow import (
-    RuntimeQueueReadModelRefreshWriter,
-    WorkbenchWriteUnitOfWork,
-)
-from fin_ops_platform.tools import write_operation_slo_audit
+from fin_ops_platform.services.workbench_uow import WorkbenchWriteUnitOfWork
 from tests.postgres_test_utils import (
     apply_test_migrations,
     assert_safe_test_database_url,
@@ -59,7 +52,6 @@ class _CheckpointCommand:
     tenant_id: str = "default"
     actor_id: str = ""
     expected_versions: dict[str, object] = field(default_factory=dict)
-    refresh_requests: list[dict[str, object]] = field(default_factory=list)
 
 
 class ReversibleRelationPostgresSafetyTests(unittest.TestCase):
@@ -79,7 +71,6 @@ class ReversibleRelationClosurePostgresTests(unittest.TestCase):
     def setUp(self) -> None:
         truncate_test_database(self.database_url)
         self.connection = PostgresConnection(PostgresSettings(database_url=self.database_url, pool_enabled=False))
-        self.queue = RuntimeQueueRepository(self.connection)
         self.run_id = uuid4().hex
         self.actor_id = f"phase20-postgres-test-{self.run_id}"
 
@@ -90,25 +81,24 @@ class ReversibleRelationClosurePostgresTests(unittest.TestCase):
         )
         truncate_test_database(self.database_url)
 
-    def test_three_registered_profile_pairs_bind_each_checkpoint_to_exact_durable_events(self) -> None:
+    def test_three_registered_profile_pairs_commit_idempotently_without_write_fanout(self) -> None:
         pairs = self._profile_pairs()
         self.assertEqual(pairs, EXPECTED_PROFILE_PAIRS)
-        checkpoint_event_ids: list[str] = []
+        checkpoint_keys: list[str] = []
 
         for shape_index, (shape, profiles) in enumerate(pairs.items(), start=1):
             month = f"2026-{shape_index:02d}"
             for direction, profile in zip(("confirm", "withdraw"), profiles, strict=True):
                 with self.subTest(shape=shape, direction=direction):
-                    event_ids = self._run_checkpoint(
+                    idempotency_key = self._run_checkpoint(
                         shape=shape,
                         direction=direction,
                         profile=profile,
                         month=month,
                     )
-                    self.assertTrue(set(event_ids).isdisjoint(checkpoint_event_ids))
-                    checkpoint_event_ids.extend(event_ids)
+                    checkpoint_keys.append(idempotency_key)
 
-        self.assertEqual(len(checkpoint_event_ids), len(set(checkpoint_event_ids)))
+        self.assertEqual(len(checkpoint_keys), len(set(checkpoint_keys)))
         self.assertEqual(
             self.connection.fetch_one(
                 """
@@ -119,6 +109,14 @@ class ReversibleRelationClosurePostgresTests(unittest.TestCase):
                 (self.actor_id,),
             )["count"],
             6,
+        )
+        self.assertEqual(
+            self.connection.fetch_one("select count(*)::integer as count from job.outbox_events")["count"],
+            0,
+        )
+        self.assertEqual(
+            self.connection.fetch_one("select count(*)::integer as count from job.read_model_dirty_scopes")["count"],
+            0,
         )
 
     def test_partial_relation_projection_removes_stale_members_from_replaced_group(self) -> None:
@@ -306,17 +304,13 @@ class ReversibleRelationClosurePostgresTests(unittest.TestCase):
         direction: str,
         profile: str,
         month: str,
-    ) -> list[str]:
-        expectations = write_operation_slo_audit.selected_expectations_for_operations([profile])
-        expected_scope_types = {expectation.scope_type for expectation in expectations}
+    ) -> str:
         idempotency_key = f"phase20:{self.run_id}:{shape}:{direction}"
-        started_at = self.connection.fetch_one("select clock_timestamp() as value")["value"]
         command = self._command(
             shape=shape,
             direction=direction,
             month=month,
             idempotency_key=idempotency_key,
-            expected_scope_types=expected_scope_types,
             actor_id=self.actor_id,
             profile=profile,
         )
@@ -327,12 +321,6 @@ class ReversibleRelationClosurePostgresTests(unittest.TestCase):
                 extra_repository=SimpleNamespace(),
                 settings_port=SimpleNamespace(),
                 bankdetail_port=SimpleNamespace(),
-                dirty_outbox_writer=TurnoverLedgerDirtyOutboxWriter(
-                    queue_repository=self.queue,
-                    tenant_id="default",
-                    priority="high",
-                    trace_id=idempotency_key,
-                ),
                 stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None),
                 idempotency_store=PostgresWorkbenchIdempotencyRepository(self.connection),
             )
@@ -345,12 +333,6 @@ class ReversibleRelationClosurePostgresTests(unittest.TestCase):
                     row_overrides=None,
                     candidate_matches=None,
                 ),
-                read_model_refresh_writer=RuntimeQueueReadModelRefreshWriter(
-                    self.queue,
-                    tenant_id="default",
-                    priority="high",
-                    trace_id=idempotency_key,
-                ),
                 idempotency_store=PostgresWorkbenchIdempotencyRepository(self.connection),
             )
 
@@ -361,142 +343,12 @@ class ReversibleRelationClosurePostgresTests(unittest.TestCase):
                 "affected_scope_keys": [month],
             },
         )
-        event_ids = write_operation_slo_audit.committed_workbench_outbox_event_ids(
-            self.connection,
-            tenant_id="default",
-            idempotency_key=idempotency_key,
+        self.assertEqual(result["outbox_event_ids"], [])
+        self.assertEqual(
+            self.connection.fetch_one("select count(*)::integer as count from job.outbox_events")["count"],
+            0,
         )
-        self.assertEqual(event_ids, result["outbox_event_ids"])
-
-        pending_rows = self._exact_rows(
-            started_at=started_at,
-            expectations=expectations,
-            event_ids=event_ids,
-        )
-        self.assertEqual({row["event_id"] for row in pending_rows}, set(event_ids))
-        self.assertEqual({row["scope_type"] for row in pending_rows}, expected_scope_types)
-        self.assertTrue(all(row["event_status"] == "pending" for row in pending_rows))
-        self.assertTrue(all(row["dirty_status"] == "pending" for row in pending_rows))
-        self.assertTrue(
-            any(
-                result.status == "fail"
-                for result in write_operation_slo_audit.evaluate_operation_expectations(
-                    pending_rows,
-                    expectations=expectations,
-                    target_ms=10_000,
-                )
-            ),
-            "worker-unavailable/pending evidence must fail closed",
-        )
-
-        self._drain_events(event_ids)
-        fresh_rows = self._exact_rows(
-            started_at=started_at,
-            expectations=expectations,
-            event_ids=event_ids,
-        )
-        results = write_operation_slo_audit.evaluate_operation_expectations(
-            fresh_rows,
-            expectations=expectations,
-            target_ms=10_000,
-        )
-        self.assertTrue(results)
-        self.assertTrue(all(result.status == "pass" for result in results), results)
-
-        if shape == "bank_invoice" and direction == "confirm":
-            self._assert_same_profile_event_cannot_contaminate_checkpoint(
-                started_at=started_at,
-                expectations=expectations,
-                checkpoint_event_ids=event_ids,
-            )
-        return event_ids
-
-    def _assert_same_profile_event_cannot_contaminate_checkpoint(
-        self,
-        *,
-        started_at: datetime,
-        expectations: list[write_operation_slo_audit.OperationExpectation],
-        checkpoint_event_ids: list[str],
-    ) -> None:
-        concurrent = self.queue.enqueue_read_model_refresh(
-            scope_type="workbench",
-            scope_key="2026-12",
-            reason="workbench_relation_changed",
-            priority="high",
-            trace_id="phase20:concurrent",
-            metadata={"action_name": "confirm_link"},
-        )
-        try:
-            exact_rows = self._exact_rows(
-                started_at=started_at,
-                expectations=expectations,
-                event_ids=checkpoint_event_ids,
-            )
-            unfiltered_rows = write_operation_slo_audit.recent_read_model_refresh_events_since(
-                self.connection,
-                tenant_id="default",
-                started_at=started_at,
-                limit=100,
-                expectations=expectations,
-            )
-            self.assertNotIn(concurrent.event_id, {row["event_id"] for row in exact_rows})
-            self.assertIn(concurrent.event_id, {row["event_id"] for row in unfiltered_rows})
-            self.assertTrue(
-                all(
-                    result.status == "pass"
-                    for result in write_operation_slo_audit.evaluate_operation_expectations(
-                        exact_rows,
-                        expectations=expectations,
-                        target_ms=10_000,
-                    )
-                )
-            )
-            self.assertTrue(
-                any(
-                    result.status == "fail"
-                    for result in write_operation_slo_audit.evaluate_operation_expectations(
-                        unfiltered_rows,
-                        expectations=expectations,
-                        target_ms=10_000,
-                    )
-                ),
-                "same-profile pending evidence must fail an uncorrelated audit",
-            )
-        finally:
-            self._drain_events([concurrent.event_id])
-
-    def _exact_rows(
-        self,
-        *,
-        started_at: datetime,
-        expectations: list[write_operation_slo_audit.OperationExpectation],
-        event_ids: list[str],
-    ) -> list[dict[str, object]]:
-        return write_operation_slo_audit.recent_read_model_refresh_events_since(
-            self.connection,
-            tenant_id="default",
-            started_at=started_at,
-            limit=max(20, len(event_ids) * 2),
-            expectations=expectations,
-            event_ids=event_ids,
-        )
-
-    def _drain_events(self, event_ids: list[str]) -> None:
-        worker_id = "phase20-postgres-test-worker"
-        for event_id in event_ids:
-            event = self.queue.claim_event_by_id(event_id=event_id, worker_id=worker_id)
-            self.assertIsNotNone(event, event_id)
-            assert isinstance(event, RuntimeQueueEvent)
-            self.assertTrue(
-                self.queue.complete_read_model_refresh(
-                    tenant_id=event.tenant_id,
-                    scope_type=str(event.scope_type),
-                    scope_key=str(event.scope_key),
-                    source_version=event.source_version,
-                ),
-                event_id,
-            )
-            self.assertTrue(self.queue.complete(event_id, worker_id), event_id)
+        return idempotency_key
 
     @staticmethod
     def _command(
@@ -505,51 +357,19 @@ class ReversibleRelationClosurePostgresTests(unittest.TestCase):
         direction: str,
         month: str,
         idempotency_key: str,
-        expected_scope_types: set[str],
         actor_id: str,
         profile: str,
     ) -> _CheckpointCommand:
-        downstream_scope_types = sorted(expected_scope_types - {"workbench", "workbench_relation", "pending_invoice"})
         metadata: dict[str, object] = {
             "source": "phase20_reversible_relation_closure",
             "fixture_ownership": "test_owned",
             "shape": shape,
-            "downstream_scope_types": downstream_scope_types,
         }
-        if "cost_statistics" in expected_scope_types and not profile.startswith("turnover_relation_"):
-            metadata["relation_deltas"] = {
-                f"phase20:{shape}": {
-                    "status": "active" if direction == "confirm" else "cancelled",
-                    "row_ids": [f"phase20:{shape}:bank"],
-                }
-            }
-        if "pending_invoice" in expected_scope_types:
-            metadata["downstream_scope_types"] = [*downstream_scope_types, "pending_invoice"]
-            metadata["pending_invoice_scope_keys"] = [f"expense:all:{month}"]
         action_name = f"{direction}_link"
-        reason = "workbench_relation_changed"
         if profile == "turnover_relation_confirm_cross_page":
             action_name = "turnover_relation_zero_difference_closure"
-            reason = "turnover_relation_changed"
         elif profile == "turnover_relation_withdraw_cross_page":
             action_name = "turnover_relation_withdraw"
-            reason = "turnover_relation_changed"
-        refresh_requests = (
-            [
-                {
-                    "scope_type": scope_type,
-                    "scope_keys": [month],
-                    "reason": (
-                        "cost_statistics_relation_delta"
-                        if scope_type == "cost_statistics"
-                        else reason
-                    ),
-                }
-                for scope_type in sorted(expected_scope_types)
-            ]
-            if profile.startswith("turnover_relation_")
-            else []
-        )
         return _CheckpointCommand(
             action_name=action_name,
             scope_keys=[month],
@@ -561,7 +381,6 @@ class ReversibleRelationClosurePostgresTests(unittest.TestCase):
             },
             refresh_metadata=metadata,
             actor_id=actor_id,
-            refresh_requests=refresh_requests,
         )
 
     @staticmethod

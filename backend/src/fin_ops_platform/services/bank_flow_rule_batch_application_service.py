@@ -628,10 +628,7 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
             },
             "affected_months": sorted(affected_months),
             **write_target_envelope(
-                targets=self._mutation_barrier_targets(
-                    BANK_FLOW_RULE_BATCH_RELATION_MODE,
-                    sorted(affected_months),
-                ),
+                targets=[],
                 scope_keys=sorted(affected_months),
                 fallback_scope_key="all",
             ),
@@ -677,10 +674,10 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         if persist:
             self.persist_mutation(
                 changed_case_ids=changed_case_ids,
-                changed_scope_keys=["all", *normalized_months],
+                changed_scope_keys=normalized_months,
                 changed_batch_ids=changed_batch_ids,
             )
-        return bool(normalized_months)
+        return False
 
     def persist_mutation(
         self,
@@ -692,7 +689,6 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         if self._state_store is None:
             return
         try:
-            self._search_cache_clearer()
             save_mutation = getattr(self._state_store, "save_bank_flow_rule_batch_mutation", None)
             if not callable(save_mutation):
                 raise RuntimeError("bank_flow_rule_batch mutation persistence requires save_bank_flow_rule_batch_mutation.")
@@ -816,14 +812,9 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 "affected_months": affected_scope_keys,
             },
         }
-        refresh_metadata = dict(
-            self._read_model_refresh_metadata_for_relation_mode(BANK_FLOW_RULE_BATCH_RELATION_MODE)
-            or {}
-        )
         refresh_enqueued = self._commit_tag_rule_update(
             prepared=prepared,
             affected_scope_keys=affected_scope_keys,
-            refresh_metadata=refresh_metadata,
         )
         return self._tag_rule_update_response(
             result,
@@ -894,8 +885,8 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         *,
         prepared: dict[str, Any],
         affected_scope_keys: list[str],
-        refresh_metadata: dict[str, object],
     ) -> bool:
+        _ = affected_scope_keys
         state_store = self._state_store
         if state_store is None:
             self._app_settings_service.accept_bank_flow_rule_batch_tag_rules_update(
@@ -910,12 +901,7 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 "save_app_settings_for_bank_flow_rule_version_in_transaction",
                 None,
             )
-            enqueue_refreshes = getattr(
-                self._queue_repository,
-                "enqueue_read_model_refreshes_in_transaction",
-                None,
-            )
-            if connection is None or not callable(save_settings) or not callable(enqueue_refreshes):
+            if connection is None or not callable(save_settings):
                 raise BankFlowRuleBatchPersistenceError(
                     "bank_flow_rule_batch tag-rule transaction boundary is unavailable."
                 )
@@ -931,29 +917,12 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                         "bank_flow_rule_batch_tag_rules_version_conflict",
                         "Bank flow rule batch tag rules version conflict.",
                     )
-                events = enqueue_refreshes(
-                    transaction=transaction,
-                    refreshes=[
-                        {
-                            "scope_type": "bank_flow_rule_batch",
-                            "scope_key": scope_key,
-                            "reason": "bank_flow_rule_batch_tag_rules_changed",
-                            "metadata": refresh_metadata,
-                        }
-                        for scope_key in affected_scope_keys
-                    ],
-                )
-                if affected_scope_keys and len(events) != len(affected_scope_keys):
-                    raise BankFlowRuleBatchPersistenceError(
-                        "bank_flow_rule_batch tag-rule refresh enqueue was incomplete."
-                    )
             self._app_settings_service.accept_bank_flow_rule_batch_tag_rules_update(
                 next_snapshot=dict(saved_snapshot),
                 audit_event=audit_event,
             )
-            return bool(events)
+            return False
 
-        previous_snapshot = dict(prepared.get("previous_snapshot") or {})
         next_snapshot = dict(prepared.get("next_snapshot") or {})
         save_app_settings = getattr(state_store, "save_app_settings", None)
         if not callable(save_app_settings):
@@ -961,28 +930,11 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 "bank_flow_rule_batch local settings persistence is unavailable."
             )
         save_app_settings(next_snapshot)
-        try:
-            event_ids = (
-                self._read_model_refresh_producer.enqueue_scope_keys(
-                    affected_scope_keys,
-                    reason="bank_flow_rule_batch_tag_rules_changed",
-                    metadata=refresh_metadata,
-                )
-                if affected_scope_keys
-                else []
-            )
-            if affected_scope_keys and len(event_ids) != len(affected_scope_keys):
-                raise BankFlowRuleBatchPersistenceError(
-                    "bank_flow_rule_batch tag-rule refresh enqueue was incomplete."
-                )
-        except Exception:
-            save_app_settings(previous_snapshot)
-            raise
         self._app_settings_service.accept_bank_flow_rule_batch_tag_rules_update(
             next_snapshot=next_snapshot,
             audit_event=dict(prepared.get("audit_event") or {}),
         )
-        return bool(event_ids)
+        return False
 
     @staticmethod
     def _tag_rule_update_response(
@@ -999,7 +951,7 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
             "affected_months": list(affected_scope_keys),
             "refresh_enqueued": bool(refresh_enqueued),
             **write_target_envelope(
-                read_model_key="bank_flow_rule_batch",
                 scope_keys=affected_scope_keys,
+                targets=[],
             ),
         }

@@ -610,6 +610,12 @@ class WorkbenchRelationSqlProjectionBuilder:
             "oa_attachment_invoice_parser_version": attachment_invoice_cache_parser_version(),
         }
 
+    def source_versions_for_scope(self, scope_key: str) -> dict[str, Any]:
+        normalized_scope = text(scope_key) or ""
+        if normalized_scope != "all" and not MONTH_RE.match(normalized_scope):
+            raise ValueError("workbench relation source-version scope_key must be a month shard YYYY-MM or all.")
+        return self._source_versions(normalized_scope)
+
 
 def _bank_transaction_object(row: dict[str, Any], *, month: str) -> dict[str, Any]:
     row_id = text(row.get("row_id")) or ""

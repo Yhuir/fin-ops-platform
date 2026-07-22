@@ -2741,46 +2741,25 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             encoding="utf-8"
         )
         page_source = (REPO_ROOT / "web/src/pages/CostStatisticsPage.tsx").read_text(encoding="utf-8")
+        cost_query_source = (SERVICES_ROOT / "cost_statistics_query_service.py").read_text(encoding="utf-8")
+        server_source = (APP_ROOT / "server.py").read_text(encoding="utf-8")
         violations: list[str] = []
 
-        uow_refresh_targets = uow_source[
-            uow_source.index("def _refresh_targets_for(") : uow_source.index("def _extend_refresh_targets(")
-        ]
-        facade_start = facade_source.index("    def _relation_downstream_scope_types(")
-        facade_downstream = facade_source[
-            facade_start : facade_source.index("    def _relation_pending_invoice_scope_keys(", facade_start)
-        ]
-        for required in (
-            'scope_type="cost_statistics"',
-            'reason="cost_statistics_relation_delta"',
-            "_active_cost_statistics_scope_keys(scope_keys)",
-            'metadata["relation_deltas"]',
-            'if action_name == "confirm_link"',
-            'if action_name in {"withdraw_link", "cancel_link"}',
+        for owner, source in (
+            ("relation UoW", uow_source),
+            ("relation facade", facade_source),
+            ("relation repository", relation_repository_source),
+            ("turnover relation writer", turnover_write_source),
         ):
-            if required not in uow_source:
-                violations.append(f"relation UoW is missing bounded cost delta contract {required}")
-        if '"cost_statistics"' in facade_downstream:
-            violations.append("relation facade downstream discovery still owns cost statistics fan-out")
-        for forbidden in (
-            "CostStatisticsRuntimeService",
-            "_workbench_relation_downstream_scope_types",
-            '"cost_statistics"',
-        ):
-            if forbidden in relation_repository_source:
-                violations.append(f"relation repository still owns removed cost path {forbidden}")
-        for required in (
-            '"scope_type": "cost_statistics"',
-            '"reason": "cost_statistics_relation_delta"',
-            "_active_cost_statistics_scope_keys(normalized_months)",
-        ):
-            if required not in turnover_write_source:
-                violations.append(f"turnover relation writer is missing bounded cost delta contract {required}")
-        if re.search(
-            r'"scope_type":\s*"cost_statistics"[\s\S]{0,180}"reason":\s*"turnover_relation_changed"',
-            turnover_write_source,
-        ):
-            violations.append("turnover relation writer still emits the removed full cost refresh reason")
+            for forbidden in (
+                'scope_type="cost_statistics"',
+                '"scope_type": "cost_statistics"',
+                "cost_statistics_relation_delta",
+                "_active_cost_statistics_scope_keys",
+                'metadata["relation_deltas"]',
+            ):
+                if forbidden in source:
+                    violations.append(f"{owner} keeps removed write-time Cost fan-out {forbidden}")
         formal_command_start = matching_orchestrator_source.index("class WorkbenchFormalRelationCommand:")
         formal_command_end = matching_orchestrator_source.index("class WorkbenchMatchingOrchestrator:")
         if '"cost_statistics"' in matching_orchestrator_source[formal_command_start:formal_command_end]:
@@ -2806,22 +2785,31 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 job_end = lifecycle_source.index("        ),", job_start)
                 if '"cost_statistics.read_model.refresh"' in lifecycle_source[job_start:job_end]:
                     violations.append(f"relation lifecycle event {event_name} still advertises a direct cost job")
-        if workbench_refresh_source.count('reason="workbench_shard_published"') != 1:
-            violations.append("Workbench successful publish does not retain one convergence refresh")
-        for required in (
-            '"cost_statistics",',
-            "if payload.get(\"published\") is not True:",
-            'trace_id=event.trace_id or event.event_id',
+        for forbidden in (
+            "_enqueue_cost_statistics_after_publish",
+            "workbench_shard_published",
+            "cost_statistics_enqueued_scope_keys",
         ):
-            if required not in workbench_refresh_source:
-                violations.append(f"Workbench publish-derived convergence owner is missing {required}")
+            if forbidden in workbench_refresh_source:
+                violations.append(f"Workbench publish still fans out Cost refresh via {forbidden}")
         for required in (
-            'relation_deltas=_event_relation_deltas(event)',
-            "if relation_deltas:",
-            'relation_deltas=relation_deltas',
+            "workbench_dependency_versions_provider",
+            "source_version_mismatch_reasons(",
+            "_workbench_dependency_non_fresh_payload(",
+            'payload["refresh_dependency"] = "workbench"',
+            'refresh_reason = "cost_statistics_workbench_dependency_stale"',
         ):
-            if required not in cost_refresh_source:
-                violations.append(f"Cost delta handler is missing explicit relation-state I/O {required}")
+            if required not in cost_query_source:
+                violations.append(f"Cost access-time Workbench dependency gate is missing {required}")
+        for required in (
+            "self._workbench_sql_read_model_source_versions(scope_key)",
+            'active_source_versions(scope_key=scope_key)',
+            "workbench_refresh_enqueuer=self._enqueue_workbench_read_model_refresh",
+        ):
+            if required not in server_source:
+                violations.append(f"Application composition is missing Cost dependency I/O {required}")
+        if "workbench_shard_published" in cost_refresh_source:
+            violations.append("Cost refresh worker still recognizes Workbench publish fan-out")
         if "from app.workbench_pair_relations" in cost_projection_source:
             violations.append("Cost projection still reads the relation module canonical table directly")
         for required in (
@@ -2844,15 +2832,19 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         handler_end = page_source.index("  const handleManualRefresh", handler_start)
         handler_source = page_source[handler_start:handler_end]
         for required in (
-            "waitForOperationFreshness(",
-            "currentCostStatisticsScopeKey",
-            "setIsRelationRefreshWaiting(true)",
             "setLoadedExplorer(null)",
+            "setDomainRefreshNonce((current) => current + 1)",
         ):
             if required not in handler_source:
-                violations.append(f"Cost relation barrier is missing {required}")
-        if "handleDomainMutation" in handler_source:
-            violations.append("Cost relation barrier still delegates to the generic App Status refresh path")
+                violations.append(f"Cost relation access-driven reload is missing {required}")
+        for forbidden in (
+            "waitForOperationFreshness(",
+            "relationBarrierRequestRef",
+            "setIsRelationRefreshWaiting",
+            "/api/operation-barrier/status",
+        ):
+            if forbidden in page_source:
+                violations.append(f"Cost page retains removed operation barrier path {forbidden}")
 
         self.assertEqual(violations, [])
 
@@ -4650,8 +4642,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         source = path.read_text(encoding="utf-8")
         tree = _parse(path)
         port_source = _class_source(tree, source, "TurnoverLedgerWorkbenchPairPort")
-        dirty_writer_source = _class_source(tree, source, "TurnoverLedgerDirtyOutboxWriter")
-        local_dirty_writer_source = _class_source(tree, source, "TurnoverLedgerLocalDirtyOutboxWriter")
         uow_path = SERVICES_ROOT / "turnover_ledger_write_uow.py"
         uow_source = uow_path.read_text(encoding="utf-8")
         uow_tree = _parse(uow_path)
@@ -4704,27 +4694,30 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append("modern closure confirm response restored a non-canonical Turnover relation")
         if "_turnover_relation_id_from_case_id" in projection_source:
             violations.append("turnover projection restored legacy relation-id inference from canonical case ids")
-        if "enqueue_read_model_refreshes_in_transaction" not in dirty_writer_source:
-            violations.append("TurnoverLedgerDirtyOutboxWriter does not use transaction-bound batch enqueue")
+        for removed_writer in (
+            "TurnoverLedgerDirtyOutboxWriter",
+            "TurnoverLedgerLocalDirtyOutboxWriter",
+        ):
+            if removed_writer in source:
+                violations.append(f"turnover write adapters retain removed fan-out writer {removed_writer}")
         if ".enqueue_refresh(" in uow_class_source:
             violations.append("TurnoverLedgerWriteUnitOfWork keeps per-request refresh enqueue")
+        for forbidden in (
+            "enqueue_read_model_refreshes_in_transaction",
+            "refresh_requests",
+            "refresh_targets",
+        ):
+            if forbidden in uow_class_source:
+                violations.append(f"TurnoverLedgerWriteUnitOfWork retains write-time fan-out {forbidden}")
         if 'refresh_scope_keys = ["all"]' in cash_withdraw_source:
             violations.append("cash closure withdraw keeps the removed command-only all refresh target")
-        for required in (
-            "normalized_months",
-            "_scoped_month_keys_or_all(normalized_months)",
-            "_active_cost_statistics_scope_keys(normalized_months)",
+        for forbidden in (
+            "_scoped_month_keys_or_all",
+            "_active_cost_statistics_scope_keys",
+            "refresh_targets",
         ):
-            if required not in cash_withdraw_source:
-                violations.append(f"cash closure withdraw is missing exact-month target contract {required}")
-        for name, writer_source in (
-            ("TurnoverLedgerDirtyOutboxWriter", dirty_writer_source),
-            ("TurnoverLedgerLocalDirtyOutboxWriter", local_dirty_writer_source),
-        ):
-            if "def enqueue_refreshes(" not in writer_source:
-                violations.append(f"{name} does not expose the batched refresh contract")
-            if "def enqueue_refresh(" in writer_source:
-                violations.append(f"{name} keeps the removed single-refresh contract")
+            if forbidden in cash_withdraw_source:
+                violations.append(f"cash closure withdraw retains removed refresh target planner {forbidden}")
 
         self.assertEqual(violations, [])
 
@@ -5161,12 +5154,21 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         source = path.read_text(encoding="utf-8")
         tree = _parse(path)
         method_source = _function_source(tree, source, "_workbench_uow_repository_factory")
+        repository_source = (
+            SERVICES_ROOT / "postgres_repositories" / "workbench_relation.py"
+        ).read_text(encoding="utf-8")
 
         violations: list[str] = []
-        if "PostgresWorkbenchRelationRepository(transaction, enqueue_refreshes=False)" not in method_source:
-            violations.append("Workbench UoW repository factory must disable repository read-model fan-out")
-        if "PostgresWorkbenchRelationRepository(transaction)" in method_source:
-            violations.append("Workbench UoW repository factory still uses default repository fan-out")
+        if "PostgresWorkbenchRelationRepository(transaction)" not in method_source:
+            violations.append("Workbench UoW repository factory no longer uses the narrow relation repository")
+        for forbidden in (
+            "enqueue_refreshes",
+            "enqueue_read_model_refresh",
+            "job.outbox_events",
+            "job.read_model_dirty_scopes",
+        ):
+            if forbidden in repository_source:
+                violations.append(f"relation repository retains removed read-model fan-out I/O {forbidden}")
 
         self.assertEqual(violations, [])
 

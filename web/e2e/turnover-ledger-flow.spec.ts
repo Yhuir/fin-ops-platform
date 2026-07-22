@@ -169,7 +169,7 @@ test.describe("turnover ledger browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
-  test("saves turnover tag selection through the freshness barrier and reloads the ledger", async ({ page }, testInfo) => {
+  test("saves turnover tag selection and reloads the ledger through page access", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       sessionMode: "full_access",
@@ -209,18 +209,15 @@ test.describe("turnover ledger browser flow", () => {
       await drawer.getByLabel("外部往来款收款").uncheck();
       await mark("finalSettledLatencyMs", expect(drawer.getByLabel("外部往来款收款")).not.toBeChecked());
     });
-    const barrierCallsBeforeSave = api.count("POST /api/operation-barrier/status");
     await recordLatency({
       operationId: "turnover-ledger.save-tag-selection",
       visibleLabel: "保存",
       actionType: "click",
     }, async (mark) => {
       const saveResponse = page.waitForResponse(responseFor("PUT", "/api/turnover-ledger/tag-selection"));
-      const barrierResponse = page.waitForResponse(responseFor("POST", "/api/operation-barrier/status"));
       const reloadResponse = waitForTurnoverLedger(page);
       await drawer.getByRole("button", { name: "保存" }).click();
       await mark("apiLatencyMs", saveResponse);
-      await mark("operationBarrierLatencyMs", barrierResponse);
       await mark("firstVisibleResponseLatencyMs", expect(page.getByText("外部往来款标签设置已保存")).toBeVisible());
       await mark("finalSettledLatencyMs", reloadResponse);
     });
@@ -231,13 +228,13 @@ test.describe("turnover ledger browser flow", () => {
       expected_version: 1,
       selected_tag_codes: ["external_turnover_payment"],
     });
-    expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(barrierCallsBeforeSave);
+    expect(api.count("POST /api/operation-barrier/status")).toBe(0);
     expect(api.count("GET /api/turnover-ledger")).toBeGreaterThan(ledgerLoadsBeforeSave);
     await expectNoUnexpectedSuccessUiErrors(page);
     expect(browserErrors).toEqual([]);
   });
 
-  test("confirms and withdraws a manual turnover closure through freshness barriers", async ({ page }, testInfo) => {
+  test("confirms and withdraws a manual turnover closure through page-access convergence", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {
       sessionMode: "full_access",
@@ -305,11 +302,9 @@ test.describe("turnover ledger browser flow", () => {
       actionType: "click",
     }, async (mark) => {
       const confirmResponse = page.waitForResponse(responseFor("POST", "/api/turnover-ledger/closures/confirm"));
-      const barrierResponse = page.waitForResponse(responseFor("POST", "/api/operation-barrier/status"));
       const reloadResponse = waitForTurnoverLedger(page);
       await drawer.getByRole("button", { name: "确定" }).click();
       await mark("apiLatencyMs", confirmResponse);
-      await mark("operationBarrierLatencyMs", barrierResponse);
       await mark("firstVisibleResponseLatencyMs", expect(page.getByText("外部往来闭环已确认")).toBeVisible());
       await mark("finalSettledLatencyMs", reloadResponse);
     });
@@ -318,7 +313,7 @@ test.describe("turnover ledger browser flow", () => {
     await expect(page.getByRole("heading", { name: "操作失败" })).toHaveCount(0);
     await expect(page.getByText("银行流水状态已变化，请刷新后重试。")).toHaveCount(0);
     expect(api.count("POST /api/turnover-ledger/closures/confirm")).toBe(1);
-    expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(0);
+    expect(api.count("POST /api/operation-barrier/status")).toBe(0);
     await expect(page.getByText("收支闭环").first()).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
 
@@ -389,7 +384,7 @@ test.describe("turnover ledger browser flow", () => {
       await page.getByRole("button", { name: "展开 云南建设有限公司 流水明细" }).click();
       await mark("finalSettledLatencyMs", expect(page.getByText("收支闭环").first()).toBeVisible());
     });
-    const barrierCallsBeforeWithdraw = api.count("POST /api/operation-barrier/status");
+    const ledgerLoadsBeforeWithdraw = api.count("GET /api/turnover-ledger");
     await recordLatency({
       operationId: "turnover-ledger.select-closed-row",
       visibleLabel: "选择流水 turnover-bank-expense-1000",
@@ -406,18 +401,17 @@ test.describe("turnover ledger browser flow", () => {
       actionType: "click",
     }, async (mark) => {
       const withdrawResponse = page.waitForResponse(responseFor("POST", "/api/turnover-ledger/closures/withdraw"));
-      const barrierResponse = page.waitForResponse(responseFor("POST", "/api/operation-barrier/status"));
       const reloadResponse = waitForTurnoverLedger(page);
       await page.getByRole("button", { name: "撤回闭环" }).click();
       await mark("apiLatencyMs", withdrawResponse);
-      await mark("operationBarrierLatencyMs", barrierResponse);
       await mark("firstVisibleResponseLatencyMs", expect(page.getByText("外部往来闭环已撤回")).toBeVisible());
       await mark("finalSettledLatencyMs", reloadResponse);
     });
 
     await expect(page.getByText("外部往来闭环已撤回")).toBeVisible();
     expect(api.count("POST /api/turnover-ledger/closures/withdraw")).toBe(1);
-    expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(barrierCallsBeforeWithdraw);
+    expect(api.count("POST /api/operation-barrier/status")).toBe(0);
+    expect(api.count("GET /api/turnover-ledger")).toBeGreaterThan(ledgerLoadsBeforeWithdraw);
     await expect(page.getByText("收支闭环")).toHaveCount(0);
     await expect(table.getByText("未闭环")).toHaveCount(0);
     await expectNoUnexpectedSuccessUiErrors(page);

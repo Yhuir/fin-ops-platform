@@ -50,7 +50,6 @@ import {
   eventAffectedMonths,
 } from "../features/domainEvents";
 import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
-import { operationBarrierTargets, waitForOperationFreshness, type OperationBarrierTarget } from "../features/operationBarrier/api";
 import {
   buildWorkbenchServerPageQuery,
   buildWorkbenchDisplayGroups,
@@ -230,7 +229,6 @@ const OA_SYNC_REFRESH_DEBOUNCE_MS = 120;
 const WORKBENCH_REFRESH_POLL_INTERVAL_MS = 5_000;
 const WORKBENCH_REFRESH_RELOAD_DEBOUNCE_MS = 300;
 const WORKBENCH_OPERATION_FRESH_POLL_MS = 150;
-const WORKBENCH_RELATION_OPERATION_BARRIER_TIMEOUT_MS = 20_000;
 const WORKBENCH_ACTIVE_GENERATION_OPERATION_TIMEOUT_MS = 10_000;
 
 function createWorkbenchServerPageQueryKey(query: WorkbenchGroupsPageQuery) {
@@ -311,31 +309,6 @@ function actionAffectedMonths(result: {
     return changedSnakeScopes;
   }
   return [WORKBENCH_VIEW_MONTH];
-}
-
-function actionFreshnessTargets(result: WorkbenchActionResult | null): OperationBarrierTarget[] {
-  if (!result) {
-    return [];
-  }
-  if (result.operationBarrierTargets.length > 0) {
-    return result.operationBarrierTargets.filter((target) => target.scopeKey !== "all");
-  }
-  if (result.freshnessTargets.length > 0) {
-    return result.freshnessTargets.filter((target) => target.scopeKey !== "all");
-  }
-  const scopeKeys = result.affectedScopeKeys.length > 0
-    ? result.affectedScopeKeys
-    : actionAffectedMonths(result).filter((scopeKey) => scopeKey !== "all");
-  if (scopeKeys.length > 0) {
-    if (hasOperationProjection(result.operationProjection)) {
-      return operationBarrierTargets("workbench_relation", scopeKeys);
-    }
-    return [
-      ...operationBarrierTargets("workbench_relation", scopeKeys),
-      ...operationBarrierTargets("workbench", scopeKeys),
-    ];
-  }
-  return [];
 }
 
 function actionResultMessage(result: string | WorkbenchActionResult) {
@@ -1650,7 +1623,6 @@ export default function ReconciliationWorkbenchPage() {
 
   const executeWorkbenchActionWithFreshness = useCallback(async ({
     loadingMessage,
-    syncingMessage = "正在同步关联台最新数据...",
     action,
     onProgress,
     waitForFreshWorkbenchLoad = false,
@@ -1658,7 +1630,6 @@ export default function ReconciliationWorkbenchPage() {
     onFreshWorkbenchPayload,
   }: {
     loadingMessage: string;
-    syncingMessage?: string;
     action: () => Promise<string | WorkbenchActionResult>;
     onProgress?: WorkbenchActionProgressHandler;
     waitForFreshWorkbenchLoad?: boolean;
@@ -1668,18 +1639,7 @@ export default function ReconciliationWorkbenchPage() {
     onProgress?.({ phase: "submitting", message: loadingMessage, committed: false });
     const result = await action();
     const actionResult = typeof result === "string" ? null : result;
-    const targets = actionFreshnessTargets(actionResult);
     const committed = Boolean(actionResult);
-    if (targets.length > 0) {
-      onProgress?.({ phase: "syncing", message: syncingMessage, committed: true });
-      await waitForOperationFreshness(
-        targets,
-        {
-          timeoutMs: WORKBENCH_RELATION_OPERATION_BARRIER_TIMEOUT_MS,
-          intervalMs: WORKBENCH_OPERATION_FRESH_POLL_MS,
-        },
-      );
-    }
     const projectionApplied = !waitForFreshWorkbenchLoad && actionResult
       ? applyWorkbenchOperationProjection(actionResult)
       : false;
@@ -1750,26 +1710,7 @@ export default function ReconciliationWorkbenchPage() {
     result: WorkbenchExceptionApplyResult,
     onProgress: WorkbenchActionProgressHandler,
   ) => {
-    const targets = result.operationBarrierTargets.length > 0
-      ? result.operationBarrierTargets.filter((target) => target.scopeKey !== "all")
-      : result.freshnessTargets.length > 0
-        ? result.freshnessTargets.filter((target) => target.scopeKey !== "all")
-        : operationBarrierTargets("workbench_relation", result.affectedScopeKeys);
-    if (targets.length > 0) {
-      onProgress({
-        phase: "syncing",
-        message: "异常处理已写入，正在同步关联台最新数据...",
-        committed: true,
-      });
-      await waitForOperationFreshness(
-        targets,
-        {
-          timeoutMs: WORKBENCH_RELATION_OPERATION_BARRIER_TIMEOUT_MS,
-          intervalMs: WORKBENCH_OPERATION_FRESH_POLL_MS,
-        },
-      );
-    }
-    if (result.workbenchRefreshRequired || targets.length > 0) {
+    if (result.workbenchRefreshRequired || result.affectedScopeKeys.length > 0) {
       onProgress({
         phase: "loading",
         message: "正在加载关联台最新数据...",
@@ -1994,7 +1935,6 @@ export default function ReconciliationWorkbenchPage() {
       let submittedResult: WorkbenchActionResult | null = null;
       const message = await executeWorkbenchActionWithFreshness({
         loadingMessage: "正在确认关联...",
-        syncingMessage: "关系已写入，正在同步关联台最新数据...",
         onProgress,
         action: async () => {
           const result = await confirmWorkbenchLink({
@@ -2025,7 +1965,6 @@ export default function ReconciliationWorkbenchPage() {
     let deferredWorkbenchFreshApplied = false;
     const message = await executeWorkbenchActionWithFreshness({
       loadingMessage: operationCopy.submittingMessage,
-      syncingMessage: "关系已写入，正在同步关联台最新数据...",
       onProgress,
       waitForFreshWorkbenchLoad: true,
       deferFreshWorkbenchApply: true,

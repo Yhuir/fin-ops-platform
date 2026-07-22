@@ -361,13 +361,7 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
         self.assertNotIn("免OA", relation["display_tags"])
         self.assertEqual(
             submit_payload["operation_barrier_targets"],
-            [
-                {"read_model_key": "bank_flow_rule_batch", "scope_key": "2026-02"},
-                {"read_model_key": "workbench_relation", "scope_key": "all"},
-                {"read_model_key": "workbench_relation", "scope_key": "2026-02"},
-                {"read_model_key": "workbench", "scope_key": "all"},
-                {"read_model_key": "workbench", "scope_key": "2026-02"},
-            ],
+            [],
         )
 
         workbench_payload = build_grouped_workbench_projection(app, "all")

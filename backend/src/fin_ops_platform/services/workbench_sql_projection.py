@@ -39,7 +39,10 @@ from fin_ops_platform.services.workbench_relation_grouping import WorkbenchRelat
 from fin_ops_platform.services.workbench_relation_requirements import (
     evaluate_bank_relation_completion,
 )
-from fin_ops_platform.services.workbench_read_model_version import WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION
+from fin_ops_platform.services.workbench_read_model_version import (
+    WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION,
+    WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION,
+)
 from fin_ops_platform.services.oa_attachment_invoice_cache import attachment_invoice_cache_parser_version
 from fin_ops_platform.services.workbench_free_matching_engine import RULE_VERSION as WORKBENCH_FORMAL_RELATION_RULE_VERSION
 
@@ -158,6 +161,8 @@ class WorkbenchSqlProjectionBuilder:
             rows_by_id,
             relations,
         )
+        source_versions = self.source_versions_for_scope(normalized_scope)
+        source_versions["source_version"] = resolved_source_version
         snapshot = {
             "read_models": {
                 normalized_scope: {
@@ -166,14 +171,7 @@ class WorkbenchSqlProjectionBuilder:
                     "generated_at": datetime.now().isoformat(),
                     "cache_status": "fresh",
                     "payload": payload,
-                    "source_versions": {
-                        "builder": WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
-                        "source_version": resolved_source_version,
-                        "workbench_formal_relation_rule_version": WORKBENCH_FORMAL_RELATION_RULE_VERSION,
-                        "bank_auto_tag_rules_version": self._current_bank_auto_tag_rules_version(),
-                        "oa_attachment_invoice_parser_version": attachment_invoice_cache_parser_version(),
-                        "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
-                    },
+                    "source_versions": source_versions,
                 },
             }
         }
@@ -192,6 +190,84 @@ class WorkbenchSqlProjectionBuilder:
             "row_count": row_count,
             "ignored_row_count": 0,
             "published": normalized_scope in set(published_scope_keys or set()),
+        }
+
+    def source_versions_for_scope(self, scope_key: str) -> dict[str, object]:
+        """Return the canonical version proof used by both projection and query gates."""
+        normalized_scope = str(scope_key or "").strip()
+        if normalized_scope == "all":
+            row = self._connection.fetch_one(
+                """
+                select
+                  coalesce((select max(updated_at)::text from app.workbench_pair_relations), '') as pair_relations_updated_at,
+                  coalesce((select max(updated_at)::text from app.workbench_exception_cases), '') as exception_cases_updated_at,
+                  coalesce((select max(updated_at)::text from app.workbench_row_overrides), '') as row_overrides_updated_at
+                """
+            )
+            builder_version = WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION
+        else:
+            if not MONTH_RE.match(normalized_scope):
+                raise ValueError("workbench SQL source-version scope_key must be a month shard YYYY-MM or all.")
+            row = self._connection.fetch_one(
+                """
+                with scope as (select %s::date as scope_month),
+                month_objects as (
+                    select coalesce(legacy_mongo_id, id::text) as row_id
+                    from app.bank_transactions, scope
+                    where status <> 'deleted'
+                      and txn_month = scope.scope_month
+                    union
+                    select row_id
+                    from app.oa_applications, scope
+                    where application_date is not null
+                      and application_date >= scope.scope_month
+                      and application_date < scope.scope_month + interval '1 month'
+                      and """
+                + COMPLETED_WORKFLOW_STATUS_SQL
+                + """
+                    union
+                    select coalesce(legacy_mongo_id, id::text) as row_id
+                    from app.invoices, scope
+                    where status <> 'deleted'
+                      and invoice_month = scope.scope_month
+                ),
+                month_object_array as (
+                    select coalesce(array_agg(row_id), array[]::text[]) as row_ids
+                    from month_objects
+                )
+                select
+                  coalesce((
+                    select max(relation.updated_at)::text
+                    from app.workbench_pair_relations relation, scope, month_object_array objects
+                    where relation.month_scope = scope.scope_month
+                       or relation.row_ids && objects.row_ids
+                  ), '') as pair_relations_updated_at,
+                  coalesce((
+                    select max(exception.updated_at)::text
+                    from app.workbench_exception_cases exception, scope, month_object_array objects
+                    where exception.scope_month = scope.scope_month
+                       or exception.row_ids && objects.row_ids
+                  ), '') as exception_cases_updated_at,
+                  coalesce((
+                    select max(override.updated_at)::text
+                    from app.workbench_row_overrides override, scope, month_object_array objects
+                    where override.scope_month = scope.scope_month
+                       or override.row_id = any(objects.row_ids)
+                  ), '') as row_overrides_updated_at
+                """,
+                (month_start(normalized_scope),),
+            )
+            builder_version = WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
+        payload = row if isinstance(row, dict) else {}
+        return {
+            "builder": builder_version,
+            "workbench_formal_relation_rule_version": WORKBENCH_FORMAL_RELATION_RULE_VERSION,
+            "bank_auto_tag_rules_version": self._current_bank_auto_tag_rules_version(),
+            "oa_attachment_invoice_parser_version": attachment_invoice_cache_parser_version(),
+            "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
+            "workbench_pair_relations_updated_at": str(payload.get("pair_relations_updated_at") or ""),
+            "workbench_exception_cases_updated_at": str(payload.get("exception_cases_updated_at") or ""),
+            "workbench_row_overrides_updated_at": str(payload.get("row_overrides_updated_at") or ""),
         }
 
     def _current_bank_auto_tag_rules_version(self) -> int:

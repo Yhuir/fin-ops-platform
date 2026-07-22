@@ -14,7 +14,6 @@ import {
 import { useActivePageEvent, useOptionalPageActivation } from "../contexts/PageRuntimeContext";
 import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
 import { useSessionPermissions } from "../contexts/SessionContext";
-import { waitForOperationFreshness } from "../features/operationBarrier/api";
 import {
   fetchBankFlowRuleBatchDetail,
   fetchBankFlowRuleBatchTagSelection,
@@ -47,7 +46,6 @@ import {
   formatMoney,
   isAbortLikeError,
   isUnsubmittedEligible,
-  mutationBarrierTargets,
   mutationEventDetail,
   relationContextLabels,
   requirementFor,
@@ -111,6 +109,8 @@ const EMPTY_TAG_SELECTION: BankFlowRuleBatchTagSelection = {
 const SELF_SUB_LABEL = "主标签本身";
 const TAG_SYNC_EVENT = "finops:bank-transaction-tags-updated";
 const BANK_FLOW_RULE_READ_MODEL_REFRESH_RETRY_MS = 1000;
+const BANK_FLOW_RULE_ACCESS_FRESH_POLL_MS = 150;
+const BANK_FLOW_RULE_ACCESS_FRESH_TIMEOUT_MS = 3000;
 const BANK_FLOW_RULE_BATCH_PAGE_SIZE = 50;
 
 export default function BankFlowRuleBatchPage() {
@@ -190,7 +190,6 @@ export default function BankFlowRuleBatchPage() {
     }
     applyBatchesPayload(nextPayload);
     setLoading(false);
-    setBackgroundRefreshing(false);
     return nextPayload;
   }, [applyBatchesPayload, batchPage, bucket, month]);
 
@@ -527,26 +526,37 @@ export default function BankFlowRuleBatchPage() {
     });
   }, [bucket]);
 
-  const reconcileMutationInBackground = useCallback((result: {
-    affectedMonths?: string[];
-    freshnessTargets?: Parameters<typeof mutationBarrierTargets>[0]["freshnessTargets"];
-    operationBarrierTargets?: Parameters<typeof mutationBarrierTargets>[0]["operationBarrierTargets"];
-  }, fallbackScopeKey: string, query?: {
+  const reconcileMutationInBackground = useCallback((query?: {
     bucket?: BankFlowRuleBatchStatusBucket;
     page?: number;
   }) => {
     setBackgroundRefreshing(true);
     void (async () => {
       try {
-        await waitForOperationFreshness(
-          mutationBarrierTargets(result, fallbackScopeKey),
-        );
-        await reloadBatchesAfterMutation(query);
+        const deadline = Date.now() + BANK_FLOW_RULE_ACCESS_FRESH_TIMEOUT_MS;
+        while (true) {
+          const nextPayload = await reloadBatchesAfterMutation(query);
+          if (!nextPayload || nextPayload.readModelStatus === "fresh") {
+            setBackgroundRefreshing(false);
+            return;
+          }
+          if (Date.now() >= deadline) {
+            setBackgroundRefreshing(false);
+            setFeedback({
+              severity: "warning",
+              message: "流水规则批次已提交，当前页面数据仍在刷新，请稍后重试。",
+            });
+            return;
+          }
+          await new Promise<void>((resolve) => {
+            window.setTimeout(resolve, BANK_FLOW_RULE_ACCESS_FRESH_POLL_MS);
+          });
+        }
       } catch (caught) {
         setBackgroundRefreshing(false);
         setFeedback({
           severity: "warning",
-          message: caught instanceof Error ? caught.message : "流水规则批次已提交，后台同步状态检查失败，请稍后刷新。",
+          message: caught instanceof Error ? caught.message : "流水规则批次已提交，当前页面刷新失败，请稍后重试。",
         });
       }
     })();
@@ -657,7 +667,7 @@ export default function BankFlowRuleBatchPage() {
             note: "",
           });
           setMessage("正在更新流水规则批次...");
-          reconcileMutationInBackground(submitResult, month);
+          reconcileMutationInBackground();
           return submitResult;
         } finally {
           setMutating(false);
@@ -688,7 +698,7 @@ export default function BankFlowRuleBatchPage() {
           });
           applySubmittedBatchLocally(batch, submitResult.batch);
           setMessage("正在更新流水规则批次...");
-          reconcileMutationInBackground(submitResult, batch.scopeMonth || month);
+          reconcileMutationInBackground();
           return submitResult;
         } finally {
           setMutating(false);
@@ -722,8 +732,8 @@ export default function BankFlowRuleBatchPage() {
           setWithdrawTarget(null);
           setWithdrawReason("");
           applyWithdrawnBatchLocally(target, withdrawResult.batch);
-          setMessage("正在后台同步流水规则批次...");
-          reconcileMutationInBackground(withdrawResult, target.scopeMonth || month);
+          setMessage("正在加载流水规则批次最新数据...");
+          reconcileMutationInBackground();
           return withdrawResult;
         } finally {
           setMutating(false);
@@ -753,8 +763,8 @@ export default function BankFlowRuleBatchPage() {
           setBucket("unsubmitted");
           setBatchPage(1);
           setPayload((current) => ({ ...current, batches: [], readModelStatus: "refreshing" }));
-          setMessage("正在后台重新生成未提交批次...");
-          reconcileMutationInBackground(resetResult, month, { bucket: "unsubmitted", page: 1 });
+          setMessage("正在加载未提交批次最新数据...");
+          reconcileMutationInBackground({ bucket: "unsubmitted", page: 1 });
           return resetResult;
         } finally {
           setMutating(false);
@@ -801,8 +811,8 @@ export default function BankFlowRuleBatchPage() {
             if (bucket === "unsubmitted") {
               setPayload((current) => ({ ...current, batches: [], readModelStatus: "refreshing" }));
             }
-            setMessage("流水规则已保存，正在后台重新生成未提交批次...");
-            reconcileMutationInBackground(saved, month);
+            setMessage("流水规则已保存，正在加载当前页面最新数据...");
+            reconcileMutationInBackground();
           }
           return saved;
         } finally {

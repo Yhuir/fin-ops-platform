@@ -11,7 +11,7 @@ const workbenchRowIds = [
 ];
 
 test.describe("workbench withdraw browser flow", () => {
-  test("withdraws a paired relation only after preview lock, freshness barrier, and fresh refetch", async ({ page }) => {
+  test("withdraws a paired relation after preview lock and current-page refetch", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
       costStatisticsRelationFanout: true,
       inputInvoiceUsageRelationFanout: true,
@@ -46,7 +46,6 @@ test.describe("workbench withdraw browser flow", () => {
     expect(previewBody.row_ids).toEqual(expect.arrayContaining(workbenchRowIds));
     expect(previewBody.row_ids).toHaveLength(workbenchRowIds.length);
 
-    const barrierCallsBeforeWithdraw = api.count("POST /api/operation-barrier/status");
     const workbenchLoadsBeforeWithdraw = api.count("GET /api/workbench");
     await previewDialog.getByRole("textbox", { name: "备注" }).fill("浏览器撤回主链路回归");
     await previewDialog.getByRole("button", { name: "确认撤回" }).click();
@@ -79,7 +78,7 @@ test.describe("workbench withdraw browser flow", () => {
     expect(submitBody.row_ids).toHaveLength(workbenchRowIds.length);
     expect(api.count("POST /api/workbench/actions/withdraw-link/preview")).toBe(1);
     expect(api.count("POST /api/workbench/actions/withdraw-link")).toBe(1);
-    expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(barrierCallsBeforeWithdraw);
+    expect(api.count("POST /api/operation-barrier/status")).toBe(0);
     expect(api.count("GET /api/workbench")).toBeGreaterThan(workbenchLoadsBeforeWithdraw);
 
     await page.getByRole("link", { name: "银行明细" }).click();

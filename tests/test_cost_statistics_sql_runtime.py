@@ -183,6 +183,18 @@ def _cost_statistics_source_versions_fixture(scope_key: str) -> dict[str, object
     )
 
 
+def _fresh_workbench_dependency_versions(
+    _scope_key: str,
+) -> tuple[dict[str, object], dict[str, object]]:
+    source_versions = {"source_version": 1}
+    return source_versions, source_versions
+
+
+def _enqueue_workbench_dependency_refresh(_scope_key: str, *, reason: str) -> bool:
+    del reason
+    return True
+
+
 def cost_statistics_fresh_gate(
     *,
     scope_key: str,
@@ -304,6 +316,8 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
             runtime_service=runtime,
             sql_read_repository=Repository(),
             tag_selection_mapper=AppSettingsService.cost_statistics_tag_selection_payload_from_settings,
+            workbench_dependency_versions_provider=_fresh_workbench_dependency_versions,
+            workbench_refresh_enqueuer=_enqueue_workbench_dependency_refresh,
         )
 
         payload, _cache_hit, _etag, _not_modified = service.get_explorer_page(
@@ -316,6 +330,124 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
         )
 
         self.assertEqual(payload["read_model_status"], "fresh", payload)
+
+    def test_month_access_refreshes_stale_workbench_dependency_before_cost_scope(self) -> None:
+        class Runtime(CostStatisticsRuntimeStub):
+            def __init__(self) -> None:
+                self.cost_refreshes: list[tuple[str, str]] = []
+
+            def enqueue_read_model_refresh(self, scope_key: str, *, reason: str) -> bool:
+                self.cost_refreshes.append((scope_key, reason))
+                return True
+
+        class Repository:
+            def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
+                raise AssertionError(f"stale Workbench must stop Cost gate I/O: {scope_key}")
+
+            def get_cost_statistics_page(self, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("stale Workbench must stop Cost payload I/O")
+
+        runtime = Runtime()
+        workbench_refreshes: list[tuple[str, str]] = []
+        expected_versions = {"builder": "workbench-month-v6", "workbench_pair_relations_updated_at": "v2"}
+        active_versions = {"builder": "workbench-month-v6", "workbench_pair_relations_updated_at": "v1"}
+        service = CostStatisticsQueryService(
+            runtime_service=runtime,
+            sql_read_repository=Repository(),
+            tag_selection_mapper=AppSettingsService.cost_statistics_tag_selection_payload_from_settings,
+            workbench_dependency_versions_provider=lambda _scope_key: (expected_versions, active_versions),
+            workbench_refresh_enqueuer=lambda scope_key, *, reason: (
+                workbench_refreshes.append((scope_key, reason)) or True
+            ),
+        )
+
+        payload, cache_hit, _etag, _not_modified = service.get_explorer_page(
+            scope="2026-05",
+            view="time",
+            project_scope="active",
+            filters={},
+            cursor=None,
+            page_size=50,
+        )
+
+        self.assertFalse(cache_hit)
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(payload["refresh_dependency"], "workbench")
+        self.assertEqual(
+            payload["read_model_stale_reasons"],
+            ["workbench_dependency_workbench_pair_relations_updated_at_mismatch"],
+        )
+        self.assertEqual(
+            workbench_refreshes,
+            [("2026-05", "cost_statistics_workbench_dependency_stale")],
+        )
+        self.assertEqual(runtime.cost_refreshes, [])
+
+    def test_month_access_refreshes_only_cost_after_workbench_dependency_is_fresh(self) -> None:
+        class Runtime(CostStatisticsRuntimeStub):
+            def __init__(self) -> None:
+                self.cost_refreshes: list[tuple[str, str]] = []
+
+            def enqueue_read_model_refresh(self, scope_key: str, *, reason: str) -> bool:
+                self.cost_refreshes.append((scope_key, reason))
+                return True
+
+        current_workbench_versions = {
+            "builder": "workbench-month-v6",
+            "workbench_pair_relations_updated_at": "v2",
+        }
+        stale_cost_versions = cost_statistics_source_versions(
+            month="2026-05",
+            settings_payload=_cost_statistics_source_settings_fixture(),
+            workbench_source_versions={
+                "builder": "workbench-month-v6",
+                "workbench_pair_relations_updated_at": "v1",
+            },
+            bank_detail_source_versions={"source_version": 1},
+        )
+
+        class Repository:
+            def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
+                return cost_statistics_fresh_gate(
+                    scope_key=scope_key,
+                    source_versions=stale_cost_versions,
+                    workbench_source_versions=current_workbench_versions,
+                    bank_detail_source_versions={"source_version": 1},
+                )
+
+            def get_cost_statistics_page(self, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("stale Cost gate must stop payload I/O")
+
+        runtime = Runtime()
+        workbench_refreshes: list[tuple[str, str]] = []
+        service = CostStatisticsQueryService(
+            runtime_service=runtime,
+            sql_read_repository=Repository(),
+            tag_selection_mapper=AppSettingsService.cost_statistics_tag_selection_payload_from_settings,
+            workbench_dependency_versions_provider=lambda _scope_key: (
+                current_workbench_versions,
+                current_workbench_versions,
+            ),
+            workbench_refresh_enqueuer=lambda scope_key, *, reason: (
+                workbench_refreshes.append((scope_key, reason)) or True
+            ),
+        )
+
+        payload, _cache_hit, _etag, _not_modified = service.get_explorer_page(
+            scope="2026-05",
+            view="time",
+            project_scope="active",
+            filters={},
+            cursor=None,
+            page_size=50,
+        )
+
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(workbench_refreshes, [])
+        self.assertEqual(
+            runtime.cost_refreshes,
+            [("active:2026-05", "api_page_source_versions_stale")],
+        )
 
     def test_page_and_detail_use_exactly_one_cost_gate_and_stop_before_payload_io_when_nonfresh(self) -> None:
         runtime = CostStatisticsRuntimeStub()
@@ -343,6 +475,8 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
             runtime_service=runtime,
             sql_read_repository=repository,
             tag_selection_mapper=AppSettingsService.cost_statistics_tag_selection_payload_from_settings,
+            workbench_dependency_versions_provider=_fresh_workbench_dependency_versions,
+            workbench_refresh_enqueuer=_enqueue_workbench_dependency_refresh,
         )
 
         service.get_explorer_page(
@@ -385,6 +519,8 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
             runtime_service=runtime,
             sql_read_repository=Repository(),
             tag_selection_mapper=AppSettingsService.cost_statistics_tag_selection_payload_from_settings,
+            workbench_dependency_versions_provider=_fresh_workbench_dependency_versions,
+            workbench_refresh_enqueuer=_enqueue_workbench_dependency_refresh,
         )
 
         payload, cache_hit, _etag, _not_modified = service.get_explorer_page(
@@ -527,6 +663,8 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
             runtime_service=runtime,
             sql_read_repository=CostStatisticsSqlReadRepositoryStub(payload, source_versions),
             tag_selection_mapper=tag_selection_mapper,
+            workbench_dependency_versions_provider=_fresh_workbench_dependency_versions,
+            workbench_refresh_enqueuer=_enqueue_workbench_dependency_refresh,
         )
 
         detail_source_versions = _cost_statistics_source_versions_fixture("active:all")
@@ -534,6 +672,8 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
             runtime_service=runtime,
             sql_read_repository=CostStatisticsSqlReadRepositoryStub(payload, detail_source_versions),
             tag_selection_mapper=tag_selection_mapper,
+            workbench_dependency_versions_provider=_fresh_workbench_dependency_versions,
+            workbench_refresh_enqueuer=_enqueue_workbench_dependency_refresh,
         )
         income_detail = detail_service.get_transaction_detail("income-fee", project_scope="active")
         self.assertEqual(income_detail["transaction"]["direction"], "收入")
@@ -599,6 +739,8 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
             runtime_service=runtime,
             sql_read_repository=repository,
             tag_selection_mapper=AppSettingsService.cost_statistics_tag_selection_payload_from_settings,
+            workbench_dependency_versions_provider=_fresh_workbench_dependency_versions,
+            workbench_refresh_enqueuer=_enqueue_workbench_dependency_refresh,
         )
 
         detail = service.get_transaction_detail("txn-1", project_scope="active")
@@ -630,6 +772,8 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
             runtime_service=runtime,
             sql_read_repository=Repository(),
             tag_selection_mapper=AppSettingsService.cost_statistics_tag_selection_payload_from_settings,
+            workbench_dependency_versions_provider=_fresh_workbench_dependency_versions,
+            workbench_refresh_enqueuer=_enqueue_workbench_dependency_refresh,
         )
 
         with self.assertRaises(CostStatisticsReadModelNotFreshError) as error:
@@ -689,6 +833,8 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
             runtime_service=runtime,
             sql_read_repository=repository,
             tag_selection_mapper=AppSettingsService.cost_statistics_tag_selection_payload_from_settings,
+            workbench_dependency_versions_provider=_fresh_workbench_dependency_versions,
+            workbench_refresh_enqueuer=_enqueue_workbench_dependency_refresh,
         )
 
         preview = service.get_export_preview(month="2026-05", view="time", project_scope="active")
@@ -753,6 +899,8 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
             runtime_service=runtime,
             sql_read_repository=repository,
             tag_selection_mapper=AppSettingsService.cost_statistics_tag_selection_payload_from_settings,
+            workbench_dependency_versions_provider=_fresh_workbench_dependency_versions,
+            workbench_refresh_enqueuer=_enqueue_workbench_dependency_refresh,
         )
 
         filename, content = service.export_view(month="2026-05", view="time", project_scope="active")
@@ -803,6 +951,8 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
             runtime_service=runtime,
             sql_read_repository=repository,
             tag_selection_mapper=AppSettingsService.cost_statistics_tag_selection_payload_from_settings,
+            workbench_dependency_versions_provider=_fresh_workbench_dependency_versions,
+            workbench_refresh_enqueuer=_enqueue_workbench_dependency_refresh,
         )
 
         with self.assertRaises(CostStatisticsReadModelNotFreshError) as error:
@@ -830,6 +980,8 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
             runtime_service=runtime,
             sql_read_repository=Repository(),
             tag_selection_mapper=AppSettingsService.cost_statistics_tag_selection_payload_from_settings,
+            workbench_dependency_versions_provider=_fresh_workbench_dependency_versions,
+            workbench_refresh_enqueuer=_enqueue_workbench_dependency_refresh,
         )
         service._table_workbook = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("workbook created"))  # type: ignore[method-assign]
 
@@ -1697,6 +1849,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
 
     def test_cost_statistics_page_etag_short_circuits_sql_and_cursor_rejects_new_generation(self) -> None:
         app = object.__new__(Application)
+        app._cost_statistics_workbench_dependency_versions = _fresh_workbench_dependency_versions
         app._app_settings_service = CostStatisticsAppSettingsStub()
         source_versions = _cost_statistics_source_versions_fixture("active:2026-05")
         gate_version = {"value": 7}
@@ -2431,6 +2584,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
 
     def test_cost_statistics_api_reads_redis_hot_cache_after_postgres_gate_without_full_payload(self) -> None:
         app = object.__new__(Application)
+        app._cost_statistics_workbench_dependency_versions = _fresh_workbench_dependency_versions
         app._app_settings_service = CostStatisticsAppSettingsStub()
         source_versions = _cost_statistics_source_versions_fixture("active:2026-05")
         gate_calls: list[str] = []
@@ -2520,6 +2674,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
                 queue = QueueRecorder()
                 redis = RedisRecorder({"payload": {"month": "2026-05", "read_model_status": "fresh"}})
                 app = object.__new__(Application)
+                app._cost_statistics_workbench_dependency_versions = _fresh_workbench_dependency_versions
                 app._app_settings_service = CostStatisticsAppSettingsStub()
                 app._runtime_repositories = type(
                     "RuntimeRepos",
@@ -2563,6 +2718,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         queue = QueueRecorder()
         redis = RedisRecorder()
         app = object.__new__(Application)
+        app._cost_statistics_workbench_dependency_versions = _fresh_workbench_dependency_versions
         app._app_settings_service = CostStatisticsAppSettingsStub()
         app._runtime_repositories = type(
             "RuntimeRepos",
@@ -2593,6 +2749,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
     def test_production_postgres_cost_statistics_requires_sql_read_model_without_sync_build(self) -> None:
         queue = QueueRecorder()
         app = object.__new__(Application)
+        app._cost_statistics_workbench_dependency_versions = _fresh_workbench_dependency_versions
         app._app_settings_service = CostStatisticsAppSettingsStub()
         app._bootstrap_mode = "production"
         app._state_store = type("PostgresStore", (), {"storage_backend": "postgres"})()
@@ -2617,6 +2774,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
     def test_cost_statistics_api_reads_sql_and_populates_short_redis_cache(self) -> None:
         redis = RedisRecorder()
         app = object.__new__(Application)
+        app._cost_statistics_workbench_dependency_versions = _fresh_workbench_dependency_versions
         app._app_settings_service = CostStatisticsAppSettingsStub()
         app._runtime_repositories = type(
             "RuntimeRepos",
@@ -2672,6 +2830,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
     def test_cost_statistics_api_rejects_old_bank_tag_schema_parent_payload_without_old_rows(self) -> None:
         queue = QueueRecorder()
         app = object.__new__(Application)
+        app._cost_statistics_workbench_dependency_versions = _fresh_workbench_dependency_versions
         app._app_settings_service = CostStatisticsAppSettingsStub()
         app._runtime_repositories = type(
             "RuntimeRepos",
@@ -2714,6 +2873,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         queue = QueueRecorder()
         redis = RedisRecorder()
         app = object.__new__(Application)
+        app._cost_statistics_workbench_dependency_versions = _fresh_workbench_dependency_versions
         app._app_settings_service = CostStatisticsAppSettingsStub()
         app._runtime_repositories = type(
             "RuntimeRepos",
@@ -3300,6 +3460,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
     def test_cost_statistics_api_rejects_snapshot_built_from_old_workbench_generation(self) -> None:
         queue = QueueRecorder()
         app = object.__new__(Application)
+        app._cost_statistics_workbench_dependency_versions = _fresh_workbench_dependency_versions
         app._app_settings_service = CostStatisticsAppSettingsStub()
         current_workbench_versions = {"builder": "workbench-v5", "source_version": 2511}
         old_workbench_versions = {"builder": "workbench-v5", "source_version": 2504}
@@ -4022,6 +4183,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         queue = QueueRecorder()
         redis = RedisRecorder()
         app = object.__new__(Application)
+        app._cost_statistics_workbench_dependency_versions = _fresh_workbench_dependency_versions
         app._app_settings_service = CostStatisticsAppSettingsStub()
         app._runtime_repositories = type(
             "RuntimeRepos",
@@ -4044,6 +4206,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
     def test_generic_cost_statistics_enqueue_expands_month_scopes(self) -> None:
         queue = QueueRecorder()
         app = object.__new__(Application)
+        app._cost_statistics_workbench_dependency_versions = _fresh_workbench_dependency_versions
         app._app_settings_service = CostStatisticsAppSettingsStub()
         app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
         enqueued = app._enqueue_generic_read_model_refreshes(

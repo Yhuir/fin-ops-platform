@@ -18,7 +18,6 @@ from tests.app_test_support import (
 from tests.test_workbench_uow_contract import (
     _Command,
     _RecordingConnection,
-    _RecordingDirtyOutboxWriter,
     _RecordingRepositoryFactory,
 )
 
@@ -62,13 +61,11 @@ class WorkbenchDurableIdempotencyContractTests(unittest.TestCase):
         *,
         connection: _RecordingConnection | None = None,
         idempotency_store: object | None = None,
-        read_model_writer: _RecordingDirtyOutboxWriter | None = None,
     ) -> object:
         cls = self._uow_class()
         return cls(
             connection=connection or _RecordingConnection(),
             repository_factory=_RecordingRepositoryFactory(),
-            read_model_refresh_writer=read_model_writer or _RecordingDirtyOutboxWriter(),
             idempotency_store=idempotency_store or _OperationRecordingIdempotencyStore(),
         )
 
@@ -418,8 +415,7 @@ class WorkbenchDurableIdempotencyContractTests(unittest.TestCase):
             "outbox_event_ids": ["event-11"],
         }
         idempotency = _OperationRecordingIdempotencyStore(committed={"confirm:idem-1": stored_response})
-        writer = _RecordingDirtyOutboxWriter()
-        uow = self._new_uow(idempotency_store=idempotency, read_model_writer=writer)
+        uow = self._new_uow(idempotency_store=idempotency)
         called = False
 
         def handler(ctx: object) -> dict[str, object]:
@@ -440,7 +436,6 @@ class WorkbenchDurableIdempotencyContractTests(unittest.TestCase):
         )
 
         self.assertFalse(called)
-        self.assertEqual(writer.calls, [])
         self.assertEqual(result["case_id"], "CASE-IDEM")
         self.assertEqual(result["source_versions"], {"2026-05": 11})
         self.assertEqual(result["outbox_event_ids"], ["event-11"])
@@ -454,8 +449,7 @@ class WorkbenchDurableIdempotencyContractTests(unittest.TestCase):
             "outbox_event_ids": ["event-10"],
         }
         idempotency = _OperationRecordingIdempotencyStore(committed={"confirm:idem-conflict": stored_response})
-        writer = _RecordingDirtyOutboxWriter()
-        uow = self._new_uow(idempotency_store=idempotency, read_model_writer=writer)
+        uow = self._new_uow(idempotency_store=idempotency)
         called = False
 
         def handler(ctx: object) -> dict[str, object]:
@@ -477,7 +471,6 @@ class WorkbenchDurableIdempotencyContractTests(unittest.TestCase):
             )
 
         self.assertFalse(called)
-        self.assertEqual(writer.calls, [])
         self.assertEqual([operation["op"] for operation in idempotency.operations], ["get"])
 
     def test_uow_rejects_existing_reserved_same_fingerprint_without_handler_or_outbox(self) -> None:
@@ -487,8 +480,7 @@ class WorkbenchDurableIdempotencyContractTests(unittest.TestCase):
             "response_payload": {},
         }
         idempotency = _OperationRecordingIdempotencyStore(committed={"confirm:idem-progress": stored_response})
-        writer = _RecordingDirtyOutboxWriter()
-        uow = self._new_uow(idempotency_store=idempotency, read_model_writer=writer)
+        uow = self._new_uow(idempotency_store=idempotency)
         called = False
 
         def handler(ctx: object) -> dict[str, object]:
@@ -510,7 +502,6 @@ class WorkbenchDurableIdempotencyContractTests(unittest.TestCase):
             )
 
         self.assertFalse(called)
-        self.assertEqual(writer.calls, [])
         self.assertEqual([operation["op"] for operation in idempotency.operations], ["get"])
 
     def test_uow_rejects_failed_same_fingerprint_without_handler_or_outbox(self) -> None:
@@ -520,12 +511,10 @@ class WorkbenchDurableIdempotencyContractTests(unittest.TestCase):
             "response_payload": {"error": "previous_failure"},
         }
         idempotency = _OperationRecordingIdempotencyStore(committed={"confirm:idem-failed": stored_response})
-        writer = _RecordingDirtyOutboxWriter()
         connection = _RecordingConnection()
         uow = self._new_uow(
             connection=connection,
             idempotency_store=idempotency,
-            read_model_writer=writer,
         )
         called = False
 
@@ -551,7 +540,6 @@ class WorkbenchDurableIdempotencyContractTests(unittest.TestCase):
         self.assertEqual(payload["error"], "idempotency_key_failed")
         self.assertFalse(payload["retryable"])
         self.assertFalse(called)
-        self.assertEqual(writer.calls, [])
         self.assertEqual([operation["op"] for operation in idempotency.operations], ["get"])
         self.assertEqual(connection.opened, 0)
         self.assertEqual(connection.commits, 0)
@@ -564,12 +552,10 @@ class WorkbenchDurableIdempotencyContractTests(unittest.TestCase):
             "response_payload": {"error": "previous_failure"},
         }
         idempotency = _OperationRecordingIdempotencyStore(committed={"confirm:idem-failed-conflict": stored_response})
-        writer = _RecordingDirtyOutboxWriter()
         connection = _RecordingConnection()
         uow = self._new_uow(
             connection=connection,
             idempotency_store=idempotency,
-            read_model_writer=writer,
         )
         called = False
 
@@ -592,15 +578,13 @@ class WorkbenchDurableIdempotencyContractTests(unittest.TestCase):
             )
 
         self.assertFalse(called)
-        self.assertEqual(writer.calls, [])
         self.assertEqual([operation["op"] for operation in idempotency.operations], ["get"])
         self.assertEqual(connection.opened, 0)
 
-    def test_uow_reserves_and_commits_idempotency_record_inside_same_transaction_after_outbox(self) -> None:
+    def test_uow_reserves_and_commits_idempotency_record_inside_same_transaction_without_fanout(self) -> None:
         connection = _RecordingConnection()
         idempotency = _OperationRecordingIdempotencyStore()
-        writer = _RecordingDirtyOutboxWriter()
-        uow = self._new_uow(connection=connection, idempotency_store=idempotency, read_model_writer=writer)
+        uow = self._new_uow(connection=connection, idempotency_store=idempotency)
 
         def handler(ctx: object) -> dict[str, object]:
             ctx.pair_relations.record("save_relation", case_id="CASE-IDEM-NEW")
@@ -623,7 +607,6 @@ class WorkbenchDurableIdempotencyContractTests(unittest.TestCase):
         self.assertEqual([operation["op"] for operation in idempotency.operations], ["get", "reserve", "commit"])
         self.assertEqual(idempotency.operations[-1]["key"], "confirm:idem-new")
         self.assertEqual(idempotency.operations[-1]["result"], result)
-        self.assertEqual(writer.calls[0]["transaction"], connection.transaction_obj)
         self.assertEqual(connection.commits, 1)
 
 
@@ -696,7 +679,7 @@ class WorkbenchIdempotencyApiCompatibilityTests(unittest.TestCase):
         self.assertEqual(payload["case_id"], "CASE-IDEM-COMPAT")
         self.assertCountEqual(payload["affected_row_ids"], row_ids)
         self.assertEqual(pair_relation_persist.call_count, 1)
-        self.assertEqual(read_model_persist.call_count, 1)
+        self.assertEqual(read_model_persist.call_count, 0)
 
 
 if __name__ == "__main__":

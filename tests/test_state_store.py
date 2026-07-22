@@ -548,11 +548,6 @@ class StateStoreTests(unittest.TestCase):
                         "batch-1": {"batch_id": "batch-1", "status": "submitted"},
                     }
                 },
-                workbench_read_model_snapshot={
-                    "read_models": {
-                        "2026-05": {"scope_key": "2026-05", "payload": {"rows": []}},
-                    }
-                },
                 changed_case_ids=["CASE-1"],
                 changed_scope_keys=["2026-05"],
             )
@@ -564,7 +559,7 @@ class StateStoreTests(unittest.TestCase):
 
         self.assertEqual(pair_snapshot["pair_relations"]["CASE-1"]["row_ids"], ["bank-1"])
         self.assertEqual(no_oa_snapshot["batches"]["batch-1"]["status"], "submitted")
-        self.assertEqual(workbench_snapshot["read_models"]["2026-05"]["scope_key"], "2026-05")
+        self.assertEqual(workbench_snapshot.get("read_models", {}), {})
 
     def test_save_bank_flow_rule_batch_mutation_uses_local_bank_flow_boundary_only(self) -> None:
         with TemporaryDirectory() as temp_dir:

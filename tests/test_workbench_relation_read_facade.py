@@ -845,6 +845,73 @@ class WorkbenchRelationReadFacadeTests(unittest.TestCase):
         self.assertEqual(queue.refreshes, [])
         self.assertEqual(repository.row_id_calls[0]["scope_keys_hint"], ["2026-03"])
 
+    def test_fresh_payload_with_canonical_version_drift_is_hidden_and_exact_scope_enqueued(self) -> None:
+        repository = FakeRelationRepository(
+            {
+                "read_model_status": "fresh",
+                "rows": [{"row_id": "txn-1", "relation_status": "linked"}],
+                "groups": [{"group_id": "case-1"}],
+                "source_versions": {"workbench_pair_relations_updated_at": "v1"},
+                "read_model_scope_keys": ["2026-03"],
+                "stale_reasons": [],
+            }
+        )
+        queue = QueueRecorder()
+        facade = WorkbenchRelationReadFacade(
+            read_model_repository=repository,
+            queue_repository=queue,
+            expected_source_versions=lambda scope_key: {
+                "workbench_pair_relations_updated_at": "v2",
+                "scope_key": scope_key,
+            },
+        )
+
+        payload = facade.get_by_row_ids(
+            ["txn-1"],
+            month_hint="2026-03",
+            require_fresh=True,
+            reason="page_access",
+        )
+
+        self.assertEqual(payload["status"], "stale")
+        self.assertEqual(payload["rows"], [])
+        self.assertEqual(payload["groups"], [])
+        self.assertTrue(payload["refresh_enqueued"])
+        self.assertIn(
+            "2026-03:workbench_pair_relations_updated_at_mismatch",
+            payload["stale_reasons"],
+        )
+        self.assertEqual(queue.refreshes, [("workbench_relation", "2026-03", "page_access")])
+
+    def test_matching_canonical_version_returns_fresh_without_enqueue(self) -> None:
+        source_versions = {
+            "workbench_pair_relations_updated_at": "v2",
+            "scope_key": "2026-03",
+        }
+        repository = FakeRelationRepository(
+            {
+                "read_model_status": "fresh",
+                "rows": [{"row_id": "txn-1", "relation_status": "linked"}],
+                "groups": [{"group_id": "case-1"}],
+                "source_versions": source_versions,
+                "read_model_scope_keys": ["2026-03"],
+                "stale_reasons": [],
+            }
+        )
+        queue = QueueRecorder()
+        facade = WorkbenchRelationReadFacade(
+            read_model_repository=repository,
+            queue_repository=queue,
+            expected_source_versions=lambda _scope_key: dict(source_versions),
+        )
+
+        payload = facade.get_by_row_ids(["txn-1"], month_hint="2026-03", require_fresh=True)
+
+        self.assertEqual(payload["status"], "fresh")
+        self.assertEqual(payload["rows"][0]["row_id"], "txn-1")
+        self.assertFalse(payload["refresh_enqueued"])
+        self.assertEqual(queue.refreshes, [])
+
     def test_non_fresh_result_enqueues_refresh_when_required(self) -> None:
         repository = FakeRelationRepository(
             {

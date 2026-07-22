@@ -39,11 +39,9 @@ class FakeBankFlowRuleBatchApplicationService:
             "affected_months": ["2026-05"],
             "affected_scope_keys": ["2026-05"],
             "read_model_scope_keys": ["2026-05"],
-            "freshness_targets": [{"read_model_key": "bank_flow_rule_batch", "scope_key": "2026-05"}],
-            "operation_barrier_targets": [
-                {"read_model_key": "bank_flow_rule_batch", "scope_key": "2026-05"}
-            ],
-            "refresh_enqueued": True,
+            "freshness_targets": [],
+            "operation_barrier_targets": [],
+            "refresh_enqueued": False,
         }
 
     def submit_batch(self, batch_id, *, actor, expected_version, note, relation_mode):  # type: ignore[no-untyped-def]
@@ -78,20 +76,8 @@ class FakeBankFlowRuleBatchApplicationService:
             "affected_months": ["2026-05"],
             "affected_scope_keys": ["2026-05"],
             "read_model_scope_keys": ["2026-05"],
-            "freshness_targets": [
-                {"read_model_key": "bank_flow_rule_batch", "scope_key": "2026-05"},
-                {"read_model_key": "workbench_relation", "scope_key": "all"},
-                {"read_model_key": "workbench_relation", "scope_key": "2026-05"},
-                {"read_model_key": "workbench", "scope_key": "all"},
-                {"read_model_key": "workbench", "scope_key": "2026-05"},
-            ],
-            "operation_barrier_targets": [
-                {"read_model_key": "bank_flow_rule_batch", "scope_key": "2026-05"},
-                {"read_model_key": "workbench_relation", "scope_key": "all"},
-                {"read_model_key": "workbench_relation", "scope_key": "2026-05"},
-                {"read_model_key": "workbench", "scope_key": "all"},
-                {"read_model_key": "workbench", "scope_key": "2026-05"},
-            ],
+            "freshness_targets": [],
+            "operation_barrier_targets": [],
         }
 
     def submit_selected_rows(self, *, row_ids, actor, note, relation_mode):  # type: ignore[no-untyped-def]
@@ -156,8 +142,9 @@ class BankFlowRuleBatchRoutesTests(unittest.TestCase):
         self.assertEqual(update_status, HTTPStatus.OK)
         self.assertEqual(update_payload["affected_months"], ["2026-05"])
         self.assertEqual(update_payload["read_model_scope_keys"], ["2026-05"])
-        self.assertEqual(update_payload["freshness_targets"], update_payload["operation_barrier_targets"])
-        self.assertTrue(update_payload["refresh_enqueued"])
+        self.assertEqual(update_payload["freshness_targets"], [])
+        self.assertEqual(update_payload["operation_barrier_targets"], [])
+        self.assertFalse(update_payload["refresh_enqueued"])
         self.assertEqual(conflict_status, HTTPStatus.CONFLICT)
         self.assertEqual(conflict_payload["error"], "bank_flow_rule_batch_tag_rules_version_conflict")
 
@@ -198,17 +185,8 @@ class BankFlowRuleBatchRoutesTests(unittest.TestCase):
 
         self.assertEqual(submit_status, HTTPStatus.OK)
         self.assertEqual(withdraw_status, HTTPStatus.OK)
-        self.assertEqual(
-            withdraw_payload["operation_barrier_targets"],
-            [
-                {"read_model_key": "bank_flow_rule_batch", "scope_key": "2026-05"},
-                {"read_model_key": "workbench_relation", "scope_key": "all"},
-                {"read_model_key": "workbench_relation", "scope_key": "2026-05"},
-                {"read_model_key": "workbench", "scope_key": "all"},
-                {"read_model_key": "workbench", "scope_key": "2026-05"},
-            ],
-        )
-        self.assertEqual(withdraw_payload["freshness_targets"], withdraw_payload["operation_barrier_targets"])
+        self.assertEqual(withdraw_payload["operation_barrier_targets"], [])
+        self.assertEqual(withdraw_payload["freshness_targets"], [])
         self.assertEqual(withdraw_payload["read_model_scope_keys"], ["2026-05"])
         self.assertEqual(
             service.calls,

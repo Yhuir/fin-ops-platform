@@ -1419,12 +1419,7 @@ class BatchAccountingApiTests(unittest.TestCase):
         )
         self.assertEqual(payload["affected_months"], ["2026-01"])
         self.assertEqual(payload["affected_scope_keys"], ["2026-01"])
-        self.assertEqual(
-            payload["operation_barrier_targets"],
-            [
-                {"read_model_key": "workbench_relation", "scope_key": "2026-01"},
-            ],
-        )
+        self.assertEqual(payload["operation_barrier_targets"], [])
 
     def test_submit_allows_invoice_only_oa_relation_without_linked_bank_flow(self) -> None:
         app, _payload_patcher = self._app_with_grouped_payload()
@@ -1724,12 +1719,7 @@ class BatchAccountingApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.body)
         self.assertEqual(payload["action"], "withdraw_batch_accounting")
         self.assertEqual(payload["affected_scope_keys"], ["2026-01"])
-        self.assertEqual(
-            payload["operation_barrier_targets"],
-            [
-                {"read_model_key": "workbench_relation", "scope_key": "2026-01"},
-            ],
-        )
+        self.assertEqual(payload["operation_barrier_targets"], [])
         self.assertEqual(payload["restored_relations"], [])
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id("txn_imported_202601_batch_001"))
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id("oa-exp-ba-001"))

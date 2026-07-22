@@ -6176,6 +6176,7 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
         status = "fresh"
         stale_reasons: list[str] = []
         source_versions: dict[str, Any] = {}
+        scope_source_versions: dict[str, dict[str, Any]] = {}
         for scope_key in normalized_scope_keys:
             scope_row = self._workbench_relation_scope_row(scope_key=scope_key, tenant_id=tenant_id)
             if scope_row is None:
@@ -6188,6 +6189,8 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
                 stale_reasons.append(f"{scope_status}:{scope_key}")
             if not source_versions and isinstance(scope_row.get("source_versions"), dict):
                 source_versions = dict(scope_row.get("source_versions"))
+            if isinstance(scope_row.get("source_versions"), dict):
+                scope_source_versions[scope_key] = dict(scope_row.get("source_versions"))
         if not source_versions:
             source_versions = (
                 dict(fallback_source_versions or {})
@@ -6199,6 +6202,7 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
             "rows": [_workbench_relation_row_payload(row) for row in rows],
             "groups": [_workbench_relation_group_payload(group) for group in groups],
             "source_versions": source_versions,
+            "read_model_scope_source_versions": scope_source_versions,
             "read_model_scope_keys": normalized_scope_keys,
             "stale_reasons": stale_reasons,
         }
@@ -16510,6 +16514,14 @@ def _workbench_composed_all_source_versions(rows: list[dict[str, Any]]) -> dict[
         values = {value for value in observed if value}
         if observed and len(values) == 1 and all(observed):
             result[key] = next(iter(values))
+    for key in (
+        "workbench_pair_relations_updated_at",
+        "workbench_exception_cases_updated_at",
+        "workbench_row_overrides_updated_at",
+    ):
+        latest = max((text(versions.get(key)) for versions in source_versions_rows), default="")
+        if latest:
+            result[key] = latest
     return result
 
 

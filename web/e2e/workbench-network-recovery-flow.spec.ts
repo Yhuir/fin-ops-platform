@@ -91,7 +91,7 @@ test.describe("workbench network recovery and duplicate submit browser flow", ()
     await expect(page.getByTestId("candidate-group-paired-case:CASE-202603-101")).toBeVisible();
     await expect(page.getByTestId("candidate-group-unpaired-row:oa-o-202603-001")).toHaveCount(0);
     expect(api.count("POST /api/workbench/actions/confirm-link")).toBe(2);
-    expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(0);
+    expect(api.count("POST /api/operation-barrier/status")).toBe(0);
     expect(api.count("GET /api/workbench")).toBeGreaterThan(workbenchLoadsBeforeRetry);
     await expectNoUnexpectedSuccessUiErrors(page);
   });

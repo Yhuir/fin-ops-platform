@@ -92,12 +92,12 @@ describe("bank flow rule batch API", () => {
   test("resets all submitted flow rule batches through the reset endpoint", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       affected_months: ["2026-01"],
-      operation_barrier_targets: [{ read_model_key: "bank_flow_rule_batch", scope_key: "2026-01" }],
+      operation_barrier_targets: [],
       results: [
         { batch_id: "flow-batch-001", status: "withdrawn" },
         { batch_id: "flow-batch-002", status: "withdrawn" },
       ],
-      workbench_rebuild_queued: true,
+      workbench_rebuild_queued: false,
     }), { status: 200, headers: { "Content-Type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -112,7 +112,7 @@ describe("bank flow rule batch API", () => {
     );
     expect(result).toMatchObject({
       affectedMonths: ["2026-01"],
-      operationBarrierTargets: [{ readModelKey: "bank_flow_rule_batch", scopeKey: "2026-01" }],
+      operationBarrierTargets: [],
       results: [
         { batch_id: "flow-batch-001", status: "withdrawn" },
         { batch_id: "flow-batch-002", status: "withdrawn" },
@@ -512,10 +512,8 @@ describe("bank flow rule batch API", () => {
       },
       affected_months: ["2026-05"],
       affected_scope_keys: ["2026-05"],
-      operation_barrier_targets: [
-        { read_model_key: "bank_flow_rule_batch", scope_key: "2026-05" },
-      ],
-      workbench_rebuild_queued: true,
+      operation_barrier_targets: [],
+      workbench_rebuild_queued: false,
       results: [],
     }), { status: 200, headers: { "Content-Type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
@@ -538,9 +536,7 @@ describe("bank flow rule batch API", () => {
       }),
     );
     expect(submit.affectedScopeKeys).toEqual(["2026-05"]);
-    expect(submit.operationBarrierTargets).toEqual([
-      { readModelKey: "bank_flow_rule_batch", scopeKey: "2026-05" },
-    ]);
+    expect(submit.operationBarrierTargets).toEqual([]);
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
       "/api/bank-flow-rule-batches/batch-fee-2026-05/withdraw",
@@ -580,10 +576,8 @@ describe("bank flow rule batch API", () => {
         version: 2,
       },
       affected_months: ["2026-05"],
-      operation_barrier_targets: [
-        { read_model_key: "bank_flow_rule_batch", scope_key: "2026-05" },
-      ],
-      workbench_rebuild_queued: true,
+      operation_barrier_targets: [],
+      workbench_rebuild_queued: false,
       results: [{ batch_id: "batch-selected-fee", status: "submitted" }],
     }), { status: 200, headers: { "Content-Type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
@@ -598,9 +592,7 @@ describe("bank flow rule batch API", () => {
       }),
     );
     expect(result.batch?.batchId).toBe("batch-selected-fee");
-    expect(result.operationBarrierTargets).toEqual([
-      { readModelKey: "bank_flow_rule_batch", scopeKey: "2026-05" },
-    ]);
+    expect(result.operationBarrierTargets).toEqual([]);
     expect(result.results).toEqual([{ batch_id: "batch-selected-fee", status: "submitted" }]);
   });
 

@@ -24,7 +24,6 @@ from fin_ops_platform.services.state_store import ApplicationStateStore
 from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerBankRowTagsRequestBoundaryFacade,
     TurnoverLedgerConfirmRequestBoundaryFacade,
-    TurnoverLedgerDirtyOutboxWriter,
     TurnoverLedgerRelationExtraRequestBoundaryFacade,
     TurnoverLedgerTagSelectionRequestBoundaryFacade,
     TurnoverLedgerWithdrawRequestBoundaryFacade,
@@ -331,43 +330,14 @@ class _RecordingTurnoverLedgerUow:
 
 
 class TurnoverLedgerApiTests(unittest.TestCase):
-    def test_postgres_dirty_outbox_writer_normalizes_cost_statistics_scopes_in_transaction(self) -> None:
-        queue = _PostgresQueueRecorder()
-        transaction = _PostgresFakeTransaction()
-        writer = TurnoverLedgerDirtyOutboxWriter(queue_repository=queue)
-
-        events = writer.enqueue_refreshes(
-            transaction=transaction,
-            refreshes=[
-                {
-                    "scope_type": "cost_statistics",
-                    "scope_keys": ["2026-02", "all"],
-                    "reason": "import_state_changed",
-                }
-            ],
+    def test_turnover_write_adapters_do_not_expose_legacy_outbox_writer(self) -> None:
+        module = __import__(
+            "fin_ops_platform.services.turnover_ledger_write_adapters",
+            fromlist=["TurnoverLedgerDirtyOutboxWriter"],
         )
 
-        self.assertEqual(
-            [item[:3] for item in queue.transactional],
-            [
-                ("cost_statistics", "active:2026-02", "import_state_changed"),
-                ("cost_statistics", "all:2026-02", "import_state_changed"),
-                ("cost_statistics", "active:all", "import_state_changed"),
-                ("cost_statistics", "all:all", "import_state_changed"),
-            ],
-        )
-        self.assertEqual(
-            [event["scope_key"] for event in events],
-            ["active:2026-02", "all:2026-02", "active:all", "all:all"],
-        )
-        self.assertNotIn(
-            ("cost_statistics", "2026-02", "import_state_changed", transaction),
-            queue.transactional,
-        )
-        self.assertNotIn(
-            ("cost_statistics", "all", "import_state_changed", transaction),
-            queue.transactional,
-        )
+        self.assertFalse(hasattr(module, "TurnoverLedgerDirtyOutboxWriter"))
+        self.assertFalse(hasattr(module, "TurnoverLedgerLocalDirtyOutboxWriter"))
 
     @contextmanager
     def _without_default_test_auth(self):
@@ -1117,16 +1087,16 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             {tag["code"] for tag in saved_payload["active_tags"]},
             {"external_rule_borrow_out", "external_rule_repaid"},
         )
-        self.assertEqual(queue.enqueued, [("turnover_ledger", "all", "turnover_ledger_tag_selection_changed")])
+        self.assertEqual(queue.enqueued, [])
         self.assertEqual(read_repository.clear_calls, 0)
         self.assertEqual(conflict_response.status_code, 409)
         self.assertEqual(json.loads(conflict_response.body)["error"], "turnover_ledger_tag_selection_version_conflict")
         self.assertEqual(invalid_response.status_code, 400)
         self.assertEqual(json.loads(invalid_response.body)["error"], "invalid_turnover_ledger_tag")
-        self.assertEqual(queue.enqueued, [("turnover_ledger", "all", "turnover_ledger_tag_selection_changed")])
+        self.assertEqual(queue.enqueued, [])
         self.assertEqual(read_repository.clear_calls, 0)
 
-    def test_turnover_ledger_tag_selection_queue_failure_rolls_back_settings_save(self) -> None:
+    def test_turnover_ledger_tag_selection_does_not_depend_on_queue(self) -> None:
         with TemporaryDirectory() as temp_dir:
             ApplicationStateStore(Path(temp_dir)).save_app_settings(
                 {
@@ -1195,25 +1165,25 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             app._turnover_ledger_sql_read_repository = read_repository
             initial_payload = json.loads(app.handle_request("GET", "/api/turnover-ledger/tag-selection").body)
 
-            with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
-                app.handle_request(
-                    "PUT",
-                    "/api/turnover-ledger/tag-selection",
-                    body=json.dumps(
-                        {
-                            "expected_version": initial_payload["version"],
-                            "selected_tag_codes": ["external_rule_borrow_out"],
-                        }
-                    ),
-                )
+            response = app.handle_request(
+                "PUT",
+                "/api/turnover-ledger/tag-selection",
+                body=json.dumps(
+                    {
+                        "expected_version": initial_payload["version"],
+                        "selected_tag_codes": ["external_rule_borrow_out"],
+                    }
+                ),
+            )
             restored_payload = json.loads(app.handle_request("GET", "/api/turnover-ledger/tag-selection").body)
 
+        self.assertEqual(response.status_code, 200)
         self.assertEqual(read_repository.clear_calls, 0)
-        self.assertEqual(queue.attempts, [("turnover_ledger", "all", "turnover_ledger_tag_selection_changed")])
-        self.assertEqual(restored_payload["selected_tag_codes"], initial_payload["selected_tag_codes"])
-        self.assertEqual(restored_payload["version"], initial_payload["version"])
+        self.assertEqual(queue.attempts, [])
+        self.assertEqual(restored_payload["selected_tag_codes"], ["external_rule_borrow_out"])
+        self.assertEqual(restored_payload["version"], initial_payload["version"] + 1)
 
-    def test_target_turnover_ledger_tag_selection_queue_failure_rolls_back_settings_save(self) -> None:
+    def test_target_turnover_ledger_tag_selection_does_not_depend_on_queue(self) -> None:
         with TemporaryDirectory() as temp_dir:
             ApplicationStateStore(Path(temp_dir)).save_app_settings(
                 {
@@ -1254,21 +1224,22 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
             initial_payload = json.loads(app.handle_request("GET", "/api/turnover-ledger/tag-selection").body)
 
-            with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
-                app.handle_request(
-                    "PUT",
-                    "/api/turnover-ledger/tag-selection",
-                    body=json.dumps(
-                        {
-                            "expected_version": initial_payload["version"],
-                            "selected_tag_codes": [],
-                        }
-                    ),
-                )
+            response = app.handle_request(
+                "PUT",
+                "/api/turnover-ledger/tag-selection",
+                body=json.dumps(
+                    {
+                        "expected_version": initial_payload["version"],
+                        "selected_tag_codes": [],
+                    }
+                ),
+            )
             restored_payload = json.loads(app.handle_request("GET", "/api/turnover-ledger/tag-selection").body)
 
-        self.assertEqual(restored_payload["selected_tag_codes"], initial_payload["selected_tag_codes"])
-        self.assertEqual(restored_payload["version"], initial_payload["version"])
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(queue.attempts, [])
+        self.assertEqual(restored_payload["selected_tag_codes"], [])
+        self.assertEqual(restored_payload["version"], initial_payload["version"] + 1)
 
     def test_target_turnover_ledger_tag_selection_uow_path_does_not_clear_read_model_directly(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -1326,7 +1297,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(queue.enqueued, [("turnover_ledger", "all", "turnover_ledger_tag_selection_changed")])
+        self.assertEqual(queue.enqueued, [])
         self.assertEqual(read_repository.clear_calls, 0)
 
     def test_turnover_ledger_tag_selection_handler_does_not_inline_legacy_fallback_side_effects(self) -> None:
@@ -1374,7 +1345,8 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             with self.subTest(method=method.__name__):
                 source = inspect.getsource(method)
                 self.assertIn("state_store = getattr(self, \"_state_store\", None)", source)
-                self.assertIn("queue_repository = self._turnover_ledger_write_queue_repository(state_store)", source)
+                self.assertNotIn("_turnover_ledger_write_queue_repository", source)
+                self.assertNotIn("queue_repository=", source)
                 self.assertNotIn("TurnoverLedgerWriteUnitOfWork(", source)
 
     def test_turnover_ledger_primary_write_facades_no_longer_inline_placeholder_ports_or_default_stale_precondition(self) -> None:
@@ -1467,10 +1439,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         )
         self.assertEqual(command.idempotency_key, "idem-1")
         self.assertTrue(command.request_fingerprint)
-        self.assertEqual(
-            command.refresh_requests,
-            [{"scope_type": "turnover_ledger", "scope_keys": ["all"], "reason": "turnover_relation_extra_changed"}],
-        )
+        self.assertFalse(hasattr(command, "refresh_requests"))
 
     def test_withdraw_write_facade_keeps_expected_versions_but_has_no_durable_idempotency_contract(self) -> None:
         uow = _RecordingTurnoverLedgerUow()
@@ -1490,36 +1459,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(command.expected_versions, {"relation:turnover_rel_withdraw_consistency": 3})
         self.assertEqual(command.idempotency_key, "")
         self.assertEqual(command.request_fingerprint, "")
-        self.assertEqual(
-            command.refresh_requests,
-            [
-                {
-                    "scope_type": "turnover_ledger",
-                    "scope_keys": ["2026-02", "2026-03"],
-                    "reason": "turnover_relation_changed",
-                },
-                {
-                    "scope_type": "workbench",
-                    "scope_keys": ["2026-02", "2026-03"],
-                    "reason": "turnover_relation_changed",
-                },
-                {
-                    "scope_type": "workbench_relation",
-                    "scope_keys": ["2026-02", "2026-03"],
-                    "reason": "turnover_relation_changed",
-                },
-                {
-                    "scope_type": "cost_statistics",
-                    "scope_keys": ["active:2026-02", "active:2026-03"],
-                    "reason": "cost_statistics_relation_delta",
-                },
-                {
-                    "scope_type": "search",
-                    "scope_keys": ["2026-02", "2026-03"],
-                    "reason": "turnover_relation_changed",
-                },
-            ],
-        )
+        self.assertFalse(hasattr(command, "refresh_requests"))
 
     def test_withdraw_stale_precondition_rejects_changed_relation_before_mutation_or_refresh(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -1699,13 +1639,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             [(entry["action"], entry["new_status"]) for entry in audit_log],
             [("confirm_relation", "confirmed")],
         )
-        self.assertEqual(
-            [item for item in queue.enqueued if item[0] == "turnover_ledger"],
-            [
-                ("turnover_ledger", "2026-02", "turnover_relation_changed"),
-                ("turnover_ledger", "2026-03", "turnover_relation_changed"),
-            ],
-        )
+        self.assertEqual(queue.enqueued, [])
 
     def test_target_confirm_idempotency_key_conflict_rejects_different_payload(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -1746,13 +1680,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             [(entry["action"], entry["new_status"]) for entry in audit_log],
             [("confirm_relation", "confirmed")],
         )
-        self.assertEqual(
-            [item for item in queue.enqueued if item[0] == "turnover_ledger"],
-            [
-                ("turnover_ledger", "2026-02", "turnover_relation_changed"),
-                ("turnover_ledger", "2026-03", "turnover_relation_changed"),
-            ],
-        )
+        self.assertEqual(queue.enqueued, [])
 
     def test_bank_row_tags_write_facade_without_idempotency_key_keeps_empty_idempotency_contract(self) -> None:
         uow = _RecordingTurnoverLedgerUow()
@@ -1795,7 +1723,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(command.idempotency_key, "")
         self.assertEqual(command.request_fingerprint, "")
 
-    def test_turnover_ledger_primary_write_builders_still_use_local_and_postgres_dirty_outbox_split(self) -> None:
+    def test_turnover_ledger_primary_write_builders_have_no_dirty_outbox_dependency(self) -> None:
         builder_sources = {
             "relation_extra": inspect.getsource(Application._turnover_ledger_relation_extra_write_facade),
             "withdraw": inspect.getsource(Application._turnover_ledger_withdraw_write_facade),
@@ -1809,14 +1737,14 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                 self.assertIn("PrimaryWriteFacadeBuilder(", source)
 
         adapter_source = inspect.getsource(Application._turnover_ledger_relation_extra_write_facade.__globals__["TurnoverLedgerRelationExtraPrimaryWriteFacadeBuilder"].build)
-        self.assertIn("TurnoverLedgerDirtyOutboxWriter(", adapter_source)
-        self.assertIn("TurnoverLedgerLocalDirtyOutboxWriter(", adapter_source)
+        self.assertNotIn("DirtyOutboxWriter", adapter_source)
+        self.assertNotIn("queue_repository", adapter_source)
 
         withdraw_builder_source = inspect.getsource(
             Application._turnover_ledger_withdraw_write_facade.__globals__["TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder"].build
         )
-        self.assertIn("TurnoverLedgerDirtyOutboxWriter(", withdraw_builder_source)
-        self.assertIn("TurnoverLedgerLocalDirtyOutboxWriter(", withdraw_builder_source)
+        self.assertNotIn("DirtyOutboxWriter", withdraw_builder_source)
+        self.assertNotIn("queue_repository", withdraw_builder_source)
 
     def test_turnover_closure_and_withdraw_wiring_use_workbench_relation_command_service(self) -> None:
         sources = {
@@ -1831,14 +1759,11 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertFalse(hasattr(Application, "_turnover_ledger_closure_legacy_fallback_facade"))
         self.assertFalse(hasattr(Application, "_turnover_ledger_withdraw_legacy_fallback_facade"))
 
-    def test_turnover_relation_command_repository_leaves_refresh_fanout_to_the_turnover_uow(self) -> None:
+    def test_turnover_relation_command_repository_has_no_refresh_fanout_option(self) -> None:
         source = inspect.getsource(Application._turnover_workbench_relation_command_service)
 
-        self.assertIn(
-            "PostgresWorkbenchRelationRepository(transaction, enqueue_refreshes=False)",
-            source,
-        )
-        self.assertNotIn("PostgresWorkbenchRelationRepository(transaction)\n", source)
+        self.assertIn("PostgresWorkbenchRelationRepository(transaction)", source)
+        self.assertNotIn("enqueue_refreshes", source)
 
     def test_turnover_ledger_primary_write_builders_still_use_noop_local_stale_precondition_ports(self) -> None:
         builder_methods = [
@@ -2021,7 +1946,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertIsInstance(postgres_repository, PostgresWorkbenchRepository)
         self.assertIs(fallback_repository, state_store)
 
-    def test_turnover_ledger_tag_selection_primary_facade_updates_and_refreshes(self) -> None:
+    def test_turnover_ledger_tag_selection_primary_facade_updates_without_fanout(self) -> None:
         with TemporaryDirectory() as temp_dir:
             self._seed_turnover_tag_selection_settings(Path(temp_dir))
             app = build_application(data_dir=Path(temp_dir))
@@ -2048,7 +1973,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(payload["selected_tag_codes"], [])
         self.assertGreater(payload["version"], initial_payload["version"])
         self.assertEqual(read_repository.clear_calls, 0)
-        self.assertEqual(queue.enqueued, [("turnover_ledger", "all", "turnover_ledger_tag_selection_changed")])
+        self.assertEqual(queue.enqueued, [])
 
     def test_turnover_ledger_tag_selection_legacy_fallback_facade_is_removed(self) -> None:
         self.assertFalse(hasattr(Application, "_turnover_ledger_tag_selection_legacy_fallback_facade"))
@@ -2085,10 +2010,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(first_response.status_code, 200)
         self.assertEqual(replay_response.status_code, 200)
         self.assertEqual(json.loads(replay_response.body), json.loads(first_response.body))
-        self.assertEqual(
-            [item[:3] for item in queue.transactional],
-            [("turnover_ledger", "all", "turnover_ledger_tag_selection_changed")],
-        )
+        self.assertEqual(queue.transactional, [])
         self.assertEqual(read_repository.clear_calls, 0)
 
     def test_target_tag_selection_idempotency_key_conflict_rejects_different_payload(self) -> None:
@@ -2125,10 +2047,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(first_response.status_code, 200)
         self.assertEqual(conflict_response.status_code, 409)
         self.assertEqual(json.loads(conflict_response.body)["error"], "idempotency_key_conflict")
-        self.assertEqual(
-            [item[:3] for item in queue.transactional],
-            [("turnover_ledger", "all", "turnover_ledger_tag_selection_changed")],
-        )
+        self.assertEqual(queue.transactional, [])
 
     def test_turnover_bank_row_tag_batch_save_updates_category_and_reflects_to_bank_details(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -2160,7 +2079,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(saved_category["category_code"], "borrow_in_company_pending_repayment")
         self.assertEqual(saved_category["category_label"], "公司暂借款：待还款")
 
-    def test_turnover_bank_row_tag_batch_queue_failure_happens_after_category_save(self) -> None:
+    def test_turnover_bank_row_tag_batch_does_not_depend_on_queue(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
@@ -2170,62 +2089,57 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             app._workbench_sql_read_repository = read_repository
             app._turnover_ledger_sql_read_repository = read_repository
 
-            with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
-                app.handle_request(
-                    "POST",
-                    "/api/turnover-ledger/bank-row-tags/batch",
-                    body=json.dumps(
-                        {
-                            "updates": [
-                                {
-                                    "transaction_id": transaction_ids[0],
-                                    "category_code": "borrow_in_company_pending_repayment",
-                                    "expected_version": 0,
-                                }
-                            ]
-                        }
-                    ),
-                )
+            response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/bank-row-tags/batch",
+                body=json.dumps(
+                    {
+                        "updates": [
+                            {
+                                "transaction_id": transaction_ids[0],
+                                "category_code": "borrow_in_company_pending_repayment",
+                                "expected_version": 0,
+                            }
+                        ]
+                    }
+                ),
+            )
             saved_category = app._bank_transaction_category_service.get(transaction_ids[0])
 
+        self.assertEqual(response.status_code, 200)
         self.assertEqual(read_repository.clear_calls, 0)
-        self.assertIn(("bank_detail", "2026-02", "bank_transaction_category_changed"), queue.attempts)
-        self.assertEqual(
-            [item for item in queue.attempts if item[0] == "turnover_ledger"],
-            [],
-        )
-        self.assertIsNone(saved_category["category_code"])
+        self.assertEqual(queue.attempts, [])
+        self.assertEqual(saved_category["category_code"], "borrow_in_company_pending_repayment")
 
-    def test_target_turnover_bank_row_tag_batch_queue_failure_rolls_back_category_save(self) -> None:
+    def test_target_turnover_bank_row_tag_batch_has_zero_queue_io(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
             queue = _FailingQueueRecorder()
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
 
-            with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
-                app.handle_request(
-                    "POST",
-                    "/api/turnover-ledger/bank-row-tags/batch",
-                    body=json.dumps(
-                        {
-                            "updates": [
-                                {
-                                    "transaction_id": transaction_ids[0],
-                                    "category_code": "borrow_in_company_pending_repayment",
-                                    "expected_version": 0,
-                                }
-                            ]
-                        }
-                    ),
-                )
+            response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/bank-row-tags/batch",
+                body=json.dumps(
+                    {
+                        "updates": [
+                            {
+                                "transaction_id": transaction_ids[0],
+                                "category_code": "borrow_in_company_pending_repayment",
+                                "expected_version": 0,
+                            }
+                        ]
+                    }
+                ),
+            )
             saved_category = app._bank_transaction_category_service.get(transaction_ids[0])
 
-        self.assertIsNone(saved_category["category_code"])
-        self.assertIn(("bank_detail", "2026-02", "bank_transaction_category_changed"), queue.attempts)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(saved_category["category_code"], "borrow_in_company_pending_repayment")
+        self.assertEqual(queue.attempts, [])
 
-    def test_target_turnover_bank_row_tag_batch_queue_failure_rolls_back_relation_snapshot(self) -> None:
-        # PF-P118 characterization: local facade rollback must restore both category and relation snapshots.
+    def test_target_turnover_bank_row_tag_batch_commits_snapshots_without_queue_io(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
@@ -2249,27 +2163,28 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             app._state_store.save_bank_transaction_categories = record_save_categories  # type: ignore[method-assign]
             app._state_store.save_turnover_relations = record_save_relations  # type: ignore[method-assign]
 
-            with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
-                app.handle_request(
-                    "POST",
-                    "/api/turnover-ledger/bank-row-tags/batch",
-                    body=json.dumps(
-                        {
-                            "updates": [
-                                {
-                                    "transaction_id": transaction_ids[0],
-                                    "category_code": "borrow_in_company_pending_repayment",
-                                    "expected_version": 0,
-                                }
-                            ]
-                        }
-                    ),
-                )
+            response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/bank-row-tags/batch",
+                body=json.dumps(
+                    {
+                        "updates": [
+                            {
+                                "transaction_id": transaction_ids[0],
+                                "category_code": "borrow_in_company_pending_repayment",
+                                "expected_version": 0,
+                            }
+                        ]
+                    }
+                ),
+            )
 
-        self.assertEqual(app._bank_transaction_category_service.snapshot(), initial_category_snapshot)
-        self.assertEqual(app._turnover_relation_service.snapshot(), initial_relation_snapshot)
-        self.assertEqual(saved_categories[-1], initial_category_snapshot)
-        self.assertEqual(saved_relations[-1], initial_relation_snapshot)
+        self.assertEqual(response.status_code, 200)
+        self.assertNotEqual(app._bank_transaction_category_service.snapshot(), initial_category_snapshot)
+        self.assertNotEqual(app._turnover_relation_service.snapshot(), initial_relation_snapshot)
+        self.assertEqual(saved_categories[-1], app._bank_transaction_category_service.snapshot())
+        self.assertEqual(saved_relations[-1], app._turnover_relation_service.snapshot())
+        self.assertEqual(queue.attempts, [])
 
     def test_target_turnover_bank_row_tag_batch_local_facade_saves_snapshots_and_rebuilds_after_apply(self) -> None:
         # PF-P118 characterization: local facade success saves category/relation snapshots and preserves apply -> rebuild order.
@@ -2331,10 +2246,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertGreaterEqual(len(saved_categories), 1)
         self.assertGreaterEqual(len(saved_relations), 1)
         self.assertEqual(read_repository.clear_calls, 0)
-        self.assertIn(("bank_detail", "2026-02", "bank_transaction_category_changed"), queue.enqueued)
-        self.assertIn(("bank_flow_rule_batch", "2026-02", "bank_transaction_category_changed"), queue.enqueued)
-        self.assertIn(("workbench", "2026-02", "bank_transaction_category_changed"), queue.enqueued)
-        self.assertIn(("turnover_ledger", "2026-02", "bank_transaction_category_changed"), queue.enqueued)
+        self.assertEqual(queue.enqueued, [])
 
     def test_turnover_bank_row_tag_batch_facade_none_fails_fast_without_legacy_side_effects(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -2419,7 +2331,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(payload["updated"], 2)
         self.assertEqual(payload["affected_months"], ["2026-02", "2026-03"])
         self.assertEqual(payload["affected_scope_keys"], ["2026-02", "2026-03"])
-        self.assertEqual(payload["operation_barrier_targets"][0], {"read_model_key": "turnover_ledger", "scope_key": "2026-02"})
+        self.assertEqual(payload["operation_barrier_targets"], [])
         self.assertTrue(payload["turnover_ledger_invalidated"])
         self.assertTrue(payload["workbench_invalidated"])
         self.assertEqual(
@@ -2494,10 +2406,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(sorted(call_order), ["rebuild", "save_categories"])
         self.assertGreaterEqual(len(saved_categories), 1)
         self.assertEqual(read_repository.clear_calls, 0)
-        self.assertIn(("bank_detail", "2026-02", "bank_transaction_category_changed"), queue.enqueued)
-        self.assertIn(("bank_flow_rule_batch", "2026-02", "bank_transaction_category_changed"), queue.enqueued)
-        self.assertIn(("workbench", "2026-02", "bank_transaction_category_changed"), queue.enqueued)
-        self.assertIn(("turnover_ledger", "2026-02", "bank_transaction_category_changed"), queue.enqueued)
+        self.assertEqual(queue.enqueued, [])
 
     def test_target_turnover_bank_row_tag_batch_handler_does_not_inline_legacy_fallback_side_effects(self) -> None:
         source = inspect.getsource(TurnoverLedgerApiRoutes.handle_bank_row_tags_batch_route)
@@ -2584,10 +2493,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(read_repository.clear_calls, 0)
-        self.assertIn(
-            ("turnover_ledger", "2026-02", "bank_transaction_category_changed"),
-            [item[:3] for item in queue.transactional],
-        )
+        self.assertEqual(queue.transactional, [])
         self.assertEqual(queue.enqueued, [])
 
     def test_target_bank_row_tags_idempotency_key_replays_without_duplicate_category_update_relation_rebuild_or_refresh(self) -> None:
@@ -2625,23 +2531,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(first_response.status_code, 200)
         self.assertEqual(replay_response.status_code, 200)
         self.assertEqual(json.loads(replay_response.body), json.loads(first_response.body))
-        self.assertEqual(
-            [item[:3] for item in queue.transactional],
-            [
-                ("bank_detail", "2026-02", "bank_transaction_category_changed"),
-                ("bank_flow_rule_batch", "2026-02", "bank_transaction_category_changed"),
-                ("workbench", "2026-02", "bank_transaction_category_changed"),
-                ("workbench_relation", "2026-02", "bank_transaction_category_changed"),
-                ("invoice_lifecycle", "2026-02", "bank_transaction_category_changed"),
-                ("cost_statistics", "active:2026-02", "bank_transaction_category_changed"),
-                ("cost_statistics", "all:2026-02", "bank_transaction_category_changed"),
-                ("search", "2026-02", "bank_transaction_category_changed"),
-                ("turnover_ledger", "2026-02", "bank_transaction_category_changed"),
-                ("pending_invoice", "expense:all:2026-02", "bank_transaction_category_changed"),
-                ("pending_invoice", "income:all:2026-02", "bank_transaction_category_changed"),
-                ("pending_invoice", "income:cash_income:2026-02", "bank_transaction_category_changed"),
-            ],
-        )
+        self.assertEqual(queue.transactional, [])
         self.assertEqual(read_repository.clear_calls, 0)
 
     def test_target_bank_row_tags_idempotency_key_conflict_rejects_different_payload(self) -> None:
@@ -2686,12 +2576,9 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(first_response.status_code, 200)
         self.assertEqual(conflict_response.status_code, 409)
         self.assertEqual(json.loads(conflict_response.body)["error"], "idempotency_key_conflict")
-        self.assertEqual(
-            [item for item in queue.transactional if item[0] == "turnover_ledger"],
-            [("turnover_ledger", "2026-02", "bank_transaction_category_changed", queue.transactional[-1][3])],
-        )
+        self.assertEqual(queue.transactional, [])
 
-    def test_turnover_bank_row_tag_batch_dependency_missing_fails_fast_without_side_effects(self) -> None:
+    def test_turnover_bank_row_tag_batch_does_not_require_refresh_queue(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
@@ -2702,27 +2589,27 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             app._workbench_sql_read_repository = read_repository
             app._turnover_ledger_sql_read_repository = read_repository
 
-            with self.assertRaisesRegex(RuntimeError, "turnover bank row tags write facade is unavailable"):
-                app.handle_request(
-                    "POST",
-                    "/api/turnover-ledger/bank-row-tags/batch",
-                    body=json.dumps(
-                        {
-                            "updates": [
-                                {
-                                    "transaction_id": transaction_ids[0],
-                                    "category_code": "borrow_in_company_pending_repayment",
-                                    "expected_version": 0,
-                                }
-                            ]
-                        }
-                    ),
-                )
+            response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/bank-row-tags/batch",
+                body=json.dumps(
+                    {
+                        "updates": [
+                            {
+                                "transaction_id": transaction_ids[0],
+                                "category_code": "borrow_in_company_pending_repayment",
+                                "expected_version": 0,
+                            }
+                        ]
+                    }
+                ),
+            )
             category_snapshot = app._bank_transaction_category_service.snapshot()
 
+        self.assertEqual(response.status_code, 200)
         self.assertEqual(read_repository.clear_calls, 0)
         self.assertEqual(queue.attempts, [])
-        self.assertNotEqual(
+        self.assertEqual(
             category_snapshot.get("categories", {}).get(transaction_ids[0], {}).get("category_code"),
             "borrow_in_company_pending_repayment",
         )
@@ -2786,13 +2673,10 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(read_repository.clear_calls, 0)
-        self.assertIn(
-            ("turnover_ledger", "2026-02", "bank_transaction_category_changed"),
-            [item[:3] for item in queue.transactional],
-        )
+        self.assertEqual(queue.transactional, [])
         self.assertEqual(queue.enqueued, [])
 
-    def test_turnover_bank_row_tag_batch_refreshes_all_required_scopes(self) -> None:
+    def test_turnover_bank_row_tag_batch_enqueues_zero_downstream_scopes(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
@@ -2816,10 +2700,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn(("bank_detail", "2026-02", "bank_transaction_category_changed"), queue.enqueued)
-        self.assertIn(("bank_flow_rule_batch", "2026-02", "bank_transaction_category_changed"), queue.enqueued)
-        self.assertIn(("workbench", "2026-02", "bank_transaction_category_changed"), queue.enqueued)
-        self.assertIn(("turnover_ledger", "2026-02", "bank_transaction_category_changed"), queue.enqueued)
+        self.assertEqual(queue.enqueued, [])
 
     def test_grouped_view_preserves_service_flow_rows_and_allocation_lots(self) -> None:
         class FakeLedgerService:
@@ -3076,9 +2957,9 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(reloaded_response.status_code, 200)
         self.assertEqual(reloaded_payload["extra"]["note"], "页面维护备注")
         self.assertEqual(read_repository.clear_calls, 0)
-        self.assertIn(("turnover_ledger", "all", "turnover_relation_extra_changed"), queue.enqueued)
+        self.assertEqual(queue.enqueued, [])
 
-    def test_relation_extra_same_payload_put_currently_updates_marker_and_reenqueues(self) -> None:
+    def test_relation_extra_same_payload_put_updates_marker_without_fanout(self) -> None:
         # PF-P102 current behavior: repeated same payload is not durable-idempotent yet.
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
@@ -3107,13 +2988,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(first_payload["extra"]["note"], "same payload")
         self.assertEqual(second_payload["extra"]["note"], "same payload")
         self.assertNotEqual(first_payload["extra"]["updated_at"], second_payload["extra"]["updated_at"])
-        self.assertEqual(
-            queue.enqueued,
-            [
-                ("turnover_ledger", "all", "turnover_relation_extra_changed"),
-                ("turnover_ledger", "all", "turnover_relation_extra_changed"),
-            ],
-        )
+        self.assertEqual(queue.enqueued, [])
 
     def test_target_relation_extra_idempotency_key_replays_without_duplicate_save_or_refresh(self) -> None:
         # PF-P105 target contract: same idempotency key/fingerprint should replay the first response.
@@ -3146,10 +3021,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(first_response.status_code, 200)
         self.assertEqual(second_response.status_code, 200)
         self.assertEqual(second_payload, first_payload)
-        self.assertEqual(
-            queue.enqueued,
-            [("turnover_ledger", "all", "turnover_relation_extra_changed")],
-        )
+        self.assertEqual(queue.enqueued, [])
 
     def test_target_relation_extra_idempotency_key_conflict_rejects_different_payload(self) -> None:
         # PF-P105 target contract: same idempotency key with different payload must be a 409 conflict.
@@ -3178,10 +3050,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(conflict_response.status_code, 409)
         self.assertEqual(json.loads(conflict_response.body)["error"], "idempotency_key_conflict")
         self.assertEqual(restored_payload["extra"]["note"], "first idem")
-        self.assertEqual(
-            queue.enqueued,
-            [("turnover_ledger", "all", "turnover_relation_extra_changed")],
-        )
+        self.assertEqual(queue.enqueued, [])
 
     def test_target_relation_extra_stale_expected_version_rejects_without_save_or_refresh(self) -> None:
         # PF-P102 target contract: stale relation extra writes should become conflict-safe.
@@ -3221,13 +3090,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(stale_response.status_code, 409)
         self.assertEqual(json.loads(stale_response.body)["error"], "turnover_relation_extra_conflict")
         self.assertEqual(restored_payload["extra"]["note"], "newer version")
-        self.assertEqual(
-            queue.enqueued,
-            [
-                ("turnover_ledger", "all", "turnover_relation_extra_changed"),
-                ("turnover_ledger", "all", "turnover_relation_extra_changed"),
-            ],
-        )
+        self.assertEqual(queue.enqueued, [])
 
     def test_relation_extra_persistence_failure_is_best_effort_success_and_refreshes(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -3261,9 +3124,9 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(restored_response.status_code, 200)
         self.assertEqual(restored_payload["extra"]["note"], "persistence warning is best effort")
         self.assertEqual(read_repository.clear_calls, 0)
-        self.assertEqual(queue.enqueued, [("turnover_ledger", "all", "turnover_relation_extra_changed")])
+        self.assertEqual(queue.enqueued, [])
 
-    def test_relation_extra_queue_failure_happens_after_extra_update_and_read_model_clear(self) -> None:
+    def test_relation_extra_does_not_depend_on_queue(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
@@ -3275,19 +3138,19 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             app._workbench_sql_read_repository = read_repository
             app._turnover_ledger_sql_read_repository = read_repository
 
-            with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
-                app.handle_request(
-                    "PUT",
-                    f"/api/turnover-ledger/relations/{relation_id}/extra",
-                    body=json.dumps({"note": "queue failure happens after update"}),
-                )
+            response = app.handle_request(
+                "PUT",
+                f"/api/turnover-ledger/relations/{relation_id}/extra",
+                body=json.dumps({"note": "queue independent update"}),
+            )
             restored_response = app.handle_request("GET", f"/api/turnover-ledger/relations/{relation_id}/extra")
             restored_payload = json.loads(restored_response.body)
 
         self.assertEqual(restored_response.status_code, 200)
-        self.assertEqual(restored_payload["extra"]["note"], "")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(restored_payload["extra"]["note"], "queue independent update")
         self.assertEqual(read_repository.clear_calls, 0)
-        self.assertEqual(queue.attempts, [("turnover_ledger", "all", "turnover_relation_extra_changed")])
+        self.assertEqual(queue.attempts, [])
 
     def test_relation_extra_handler_does_not_inline_legacy_fallback_side_effects(self) -> None:
         source = inspect.getsource(TurnoverLedgerApiRoutes.handle_relation_extra_update_route)
@@ -3342,7 +3205,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
     def test_relation_extra_legacy_fallback_facade_is_removed(self) -> None:
         self.assertFalse(hasattr(Application, "_turnover_ledger_relation_extra_legacy_fallback_facade"))
 
-    def test_target_relation_extra_queue_failure_rolls_back_extra_save(self) -> None:
+    def test_target_relation_extra_has_zero_queue_io(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
@@ -3354,18 +3217,19 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             queue = _FailingQueueRecorder()
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
 
-            with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
-                app.handle_request(
-                    "PUT",
-                    f"/api/turnover-ledger/relations/{relation_id}/extra",
-                    body=json.dumps({"note": "target rollback"}),
-                )
+            response = app.handle_request(
+                "PUT",
+                f"/api/turnover-ledger/relations/{relation_id}/extra",
+                body=json.dumps({"note": "target commit"}),
+            )
             restored_payload = json.loads(
                 app.handle_request("GET", f"/api/turnover-ledger/relations/{relation_id}/extra").body
             )
 
-        self.assertEqual(restored_payload["extra"], initial_payload["extra"])
-        self.assertEqual(queue.attempts, [("turnover_ledger", "all", "turnover_relation_extra_changed")])
+        self.assertEqual(response.status_code, 200)
+        self.assertNotEqual(restored_payload["extra"], initial_payload["extra"])
+        self.assertEqual(restored_payload["extra"]["note"], "target commit")
+        self.assertEqual(queue.attempts, [])
 
     def test_target_relation_extra_uow_path_does_not_clear_read_model_directly(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -3389,7 +3253,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["extra"]["note"], "target no clear")
         self.assertEqual(payload["row"]["relation_id"], relation_id)
-        self.assertEqual(queue.enqueued, [("turnover_ledger", "all", "turnover_relation_extra_changed")])
+        self.assertEqual(queue.enqueued, [])
         self.assertEqual(read_repository.clear_calls, 0)
 
     def test_relation_extra_facade_override_skips_legacy_best_effort_side_effects(self) -> None:
@@ -3756,15 +3620,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(withdrawn.status_code, 200)
         self.assertEqual([entry["action"] for entry in audit_log], ["confirm_relation", "withdraw_relation"])
         self.assertEqual(read_repository.clear_calls, 0)
-        self.assertEqual(
-            [item for item in queue.enqueued if item[0] == "turnover_ledger"],
-            [
-                ("turnover_ledger", "2026-02", "turnover_relation_changed"),
-                ("turnover_ledger", "2026-03", "turnover_relation_changed"),
-                ("turnover_ledger", "2026-02", "turnover_relation_changed"),
-                ("turnover_ledger", "2026-03", "turnover_relation_changed"),
-            ],
-        )
+        self.assertEqual(queue.enqueued, [])
 
     def test_confirm_duplicate_submit_rejects_after_first_success_without_second_refresh(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -3795,15 +3651,9 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(duplicate_payload["error"], "relation_row_conflict")
         self.assertEqual([entry["action"] for entry in audit_log], ["confirm_relation"])
         self.assertEqual(read_repository.clear_calls, 0)
-        self.assertEqual(
-            [item for item in queue.enqueued if item[0] == "turnover_ledger"],
-            [
-                ("turnover_ledger", "2026-02", "turnover_relation_changed"),
-                ("turnover_ledger", "2026-03", "turnover_relation_changed"),
-            ],
-        )
+        self.assertEqual(queue.enqueued, [])
 
-    def test_confirm_relation_persistence_failure_is_best_effort_success_and_still_enqueues_refresh(self) -> None:
+    def test_confirm_relation_persistence_warning_has_zero_refresh_fanout(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
@@ -3831,13 +3681,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(payload["relation"]["status"], "confirmed")
         self.assertEqual([entry["action"] for entry in audit_log], ["confirm_relation"])
         self.assertEqual(read_repository.clear_calls, 0)
-        self.assertEqual(
-            [item for item in queue.enqueued if item[0] == "turnover_ledger"],
-            [
-                ("turnover_ledger", "2026-02", "turnover_relation_changed"),
-                ("turnover_ledger", "2026-03", "turnover_relation_changed"),
-            ],
-        )
+        self.assertEqual(queue.enqueued, [])
 
     def test_confirm_relation_handler_does_not_inline_legacy_fallback_side_effects(self) -> None:
         source = inspect.getsource(TurnoverLedgerApiRoutes.handle_confirm_relation_route)
@@ -3930,7 +3774,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertNotIn("requires_oa=", source)
         self.assertNotIn("requires_invoice=", source)
 
-    def test_confirm_relation_queue_failure_happens_after_relation_confirm_and_read_model_clear(self) -> None:
+    def test_confirm_relation_does_not_depend_on_queue(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
@@ -3941,22 +3785,19 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             app._workbench_sql_read_repository = read_repository
             app._turnover_ledger_sql_read_repository = read_repository
 
-            with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
-                app.handle_request(
-                    "POST",
-                    "/api/turnover-ledger/relations/confirm",
-                    body=json.dumps({"bank_row_ids": transaction_ids, "note": "queue failure after confirm"}),
-                )
+            response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/relations/confirm",
+                body=json.dumps({"bank_row_ids": transaction_ids, "note": "queue independent confirm"}),
+            )
             audit_log = app._turnover_relation_service.audit_log()
 
-        self.assertEqual([entry["action"] for entry in audit_log], [])
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([entry["action"] for entry in audit_log], ["confirm_relation"])
         self.assertEqual(read_repository.clear_calls, 0)
-        self.assertEqual(
-            [item for item in queue.attempts if item[0] == "turnover_ledger"],
-            [("turnover_ledger", "2026-02", "turnover_relation_changed")],
-        )
+        self.assertEqual(queue.attempts, [])
 
-    def test_target_confirm_relation_queue_failure_rolls_back_relation_confirm(self) -> None:
+    def test_target_confirm_relation_has_zero_queue_io(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
@@ -3964,19 +3805,16 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             queue = _FailingQueueRecorder()
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": queue})()
 
-            with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
-                app.handle_request(
-                    "POST",
-                    "/api/turnover-ledger/relations/confirm",
-                    body=json.dumps({"bank_row_ids": transaction_ids, "note": "target rollback"}),
-                )
+            response = app.handle_request(
+                "POST",
+                "/api/turnover-ledger/relations/confirm",
+                body=json.dumps({"bank_row_ids": transaction_ids, "note": "target commit"}),
+            )
             audit_log = app._turnover_relation_service.audit_log()
 
-        self.assertEqual(audit_log, [])
-        self.assertEqual(
-            [item for item in queue.attempts if item[0] == "turnover_ledger"],
-            [("turnover_ledger", "2026-02", "turnover_relation_changed")],
-        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([entry["action"] for entry in audit_log], ["confirm_relation"])
+        self.assertEqual(queue.attempts, [])
 
     def test_confirm_relation_primary_facade_rebuilds_confirms_and_invalidates(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -4009,20 +3847,11 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(payload["relation"]["status"], "confirmed")
         self.assertEqual(payload["affected_months"], ["2026-02", "2026-03"])
         self.assertEqual(payload["affected_scope_keys"], ["2026-02", "2026-03"])
-        self.assertEqual(
-            payload["operation_barrier_targets"],
-            [
-                {"read_model_key": "turnover_ledger", "scope_key": "2026-02"},
-                {"read_model_key": "turnover_ledger", "scope_key": "2026-03"},
-                {"read_model_key": "workbench_relation", "scope_key": "2026-02"},
-                {"read_model_key": "workbench_relation", "scope_key": "2026-03"},
-            ],
-        )
+        self.assertEqual(payload["operation_barrier_targets"], [])
         self.assertEqual(call_order, ["rebuild"])
         self.assertEqual([entry["action"] for entry in audit_log], ["confirm_relation"])
         self.assertEqual(read_repository.clear_calls, 0)
-        self.assertIn(("turnover_ledger", "2026-02", "turnover_relation_changed"), queue.enqueued)
-        self.assertIn(("turnover_ledger", "2026-03", "turnover_relation_changed"), queue.enqueued)
+        self.assertEqual(queue.enqueued, [])
 
     def test_target_confirm_relation_uow_path_does_not_clear_read_model_directly(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -4071,13 +3900,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(read_repository.clear_calls, 0)
-        self.assertEqual(
-            [item[:3] for item in queue.transactional],
-            [
-                ("turnover_ledger", "2026-02", "turnover_relation_changed"),
-                ("turnover_ledger", "2026-03", "turnover_relation_changed"),
-            ],
-        )
+        self.assertEqual(queue.transactional, [])
         self.assertEqual(queue.enqueued, [])
 
     def test_confirm_relation_facade_override_skips_legacy_after_mutation_side_effects(self) -> None:
@@ -4154,15 +3977,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             ],
         )
         self.assertEqual(read_repository.clear_calls, 0)
-        self.assertEqual(
-            [item for item in queue.enqueued if item[0] == "turnover_ledger"],
-            [
-                ("turnover_ledger", "2026-02", "turnover_relation_changed"),
-                ("turnover_ledger", "2026-03", "turnover_relation_changed"),
-                ("turnover_ledger", "2026-02", "turnover_relation_changed"),
-                ("turnover_ledger", "2026-03", "turnover_relation_changed"),
-            ],
-        )
+        self.assertEqual(queue.enqueued, [])
 
     def test_target_withdraw_idempotency_key_replays_without_duplicate_withdraw_or_refresh(self) -> None:
         # PF-P179 target contract: same idempotency key/fingerprint should replay the first withdraw response.
@@ -4204,15 +4019,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                 ("withdraw_relation", "withdrawn"),
             ],
         )
-        self.assertEqual(
-            [item for item in queue.enqueued if item[0] == "turnover_ledger"],
-            [
-                ("turnover_ledger", "2026-02", "turnover_relation_changed"),
-                ("turnover_ledger", "2026-03", "turnover_relation_changed"),
-                ("turnover_ledger", "2026-02", "turnover_relation_changed"),
-                ("turnover_ledger", "2026-03", "turnover_relation_changed"),
-            ],
-        )
+        self.assertEqual(queue.enqueued, [])
 
     def test_target_withdraw_idempotency_key_conflict_rejects_different_payload(self) -> None:
         # PF-P179 target contract: same idempotency key with different payload must be a 409 conflict.
@@ -4251,15 +4058,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                 ("withdraw_relation", "withdrawn"),
             ],
         )
-        self.assertEqual(
-            [item for item in queue.enqueued if item[0] == "turnover_ledger"],
-            [
-                ("turnover_ledger", "2026-02", "turnover_relation_changed"),
-                ("turnover_ledger", "2026-03", "turnover_relation_changed"),
-                ("turnover_ledger", "2026-02", "turnover_relation_changed"),
-                ("turnover_ledger", "2026-03", "turnover_relation_changed"),
-            ],
-        )
+        self.assertEqual(queue.enqueued, [])
 
     def test_target_withdraw_duplicate_submit_rejects_without_second_mutation_or_refresh(self) -> None:
         # PF-P099 target contract: duplicate withdraw should become a conflict, not a second mutation.
@@ -4302,15 +4101,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             ],
         )
         self.assertEqual(read_repository.clear_calls, 0)
-        self.assertEqual(
-            [item for item in queue.enqueued if item[0] == "turnover_ledger"],
-            [
-                ("turnover_ledger", "2026-02", "turnover_relation_changed"),
-                ("turnover_ledger", "2026-03", "turnover_relation_changed"),
-                ("turnover_ledger", "2026-02", "turnover_relation_changed"),
-                ("turnover_ledger", "2026-03", "turnover_relation_changed"),
-            ],
-        )
+        self.assertEqual(queue.enqueued, [])
 
     def test_target_postgres_withdraw_relation_uses_facade_without_direct_read_model_clear(self) -> None:
         # PF-P092 PostgreSQL Facade Readiness: withdraw relation should not fall back on postgres.
@@ -4343,21 +4134,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(read_repository.clear_calls, 0)
-        self.assertEqual(
-            [item[:3] for item in queue.transactional],
-            [
-                ("turnover_ledger", "2026-02", "turnover_relation_changed"),
-                ("turnover_ledger", "2026-03", "turnover_relation_changed"),
-                ("workbench", "2026-02", "turnover_relation_changed"),
-                ("workbench", "2026-03", "turnover_relation_changed"),
-                ("workbench_relation", "2026-02", "turnover_relation_changed"),
-                ("workbench_relation", "2026-03", "turnover_relation_changed"),
-                ("cost_statistics", "active:2026-02", "cost_statistics_relation_delta"),
-                ("cost_statistics", "active:2026-03", "cost_statistics_relation_delta"),
-                ("search", "2026-02", "turnover_relation_changed"),
-                ("search", "2026-03", "turnover_relation_changed"),
-            ],
-        )
+        self.assertEqual(queue.transactional, [])
         self.assertEqual(queue.enqueued, [])
 
     def test_withdraw_relation_facade_override_skips_legacy_after_mutation_side_effects(self) -> None:
@@ -4389,7 +4166,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(payload["relation"]["relation_id"], relation_id)
         self.assertEqual(payload["affected_months"], ["2026-02", "2026-03"])
         self.assertEqual(payload["affected_scope_keys"], ["2026-02", "2026-03"])
-        self.assertEqual(payload["freshness_targets"][0], {"read_model_key": "turnover_ledger", "scope_key": "2026-02"})
+        self.assertEqual(payload["freshness_targets"], [])
         self.assertEqual(len(facade.withdraw_calls), 1)
         self.assertEqual(facade.withdraw_calls[0]["relation_id"], relation_id)
         self.assertEqual(facade.withdraw_calls[0]["note"], "facade withdraw")
@@ -4449,7 +4226,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
         self.assertNotIn("save_snapshot=lambda", source)
 
-    def test_withdraw_relation_queue_failure_happens_after_relation_withdraw_and_read_model_clear(self) -> None:
+    def test_withdraw_relation_does_not_depend_on_queue(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
@@ -4468,22 +4245,19 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             failing_queue = _FailingQueueRecorder()
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": failing_queue})()
 
-            with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
-                app.handle_request(
-                    "POST",
-                    f"/api/turnover-ledger/relations/{relation_id}/withdraw",
-                    body=json.dumps({"note": "queue failure after withdraw"}),
-                )
+            response = app.handle_request(
+                "POST",
+                f"/api/turnover-ledger/relations/{relation_id}/withdraw",
+                body=json.dumps({"note": "queue independent withdraw"}),
+            )
             audit_log = app._turnover_relation_service.audit_log()
             relation_detail = app._turnover_ledger_api_routes.get_relation(relation_id)
 
-        self.assertEqual([entry["action"] for entry in audit_log], ["confirm_relation"])
-        self.assertEqual(relation_detail["relation"]["status"], "confirmed")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([entry["action"] for entry in audit_log], ["confirm_relation", "withdraw_relation"])
+        self.assertEqual(relation_detail["relation"]["status"], "withdrawn")
         self.assertEqual(read_repository.clear_calls, 0)
-        self.assertEqual(
-            [item for item in failing_queue.attempts if item[0] == "turnover_ledger"],
-            [("turnover_ledger", "2026-02", "turnover_relation_changed")],
-        )
+        self.assertEqual(failing_queue.attempts, [])
 
     def test_withdraw_relation_primary_facade_withdraws_and_invalidates(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -4516,14 +4290,12 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(payload["relation"]["relation_id"], relation_id)
         self.assertEqual(payload["relation"]["status"], "withdrawn")
         self.assertEqual(payload["affected_months"], ["2026-02", "2026-03"])
-        self.assertEqual(payload["operation_barrier_targets"][2], {"read_model_key": "workbench_relation", "scope_key": "2026-02"})
+        self.assertEqual(payload["operation_barrier_targets"], [])
         self.assertEqual([entry["action"] for entry in audit_log], ["confirm_relation", "withdraw_relation"])
         self.assertEqual(read_repository.clear_calls, 0)
-        self.assertIn(("turnover_ledger", "2026-02", "turnover_relation_changed"), queue.enqueued)
-        self.assertIn(("turnover_ledger", "2026-03", "turnover_relation_changed"), queue.enqueued)
-        self.assertIn(("workbench_relation", "2026-02", "turnover_relation_changed"), queue.enqueued)
+        self.assertEqual(queue.enqueued, [])
 
-    def test_target_withdraw_relation_queue_failure_rolls_back_relation_withdraw(self) -> None:
+    def test_target_withdraw_relation_has_zero_queue_io(self) -> None:
         with TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             transaction_ids = self._import_bank_rows(app)
@@ -4539,21 +4311,18 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             failing_queue = _FailingQueueRecorder()
             app._runtime_repositories = type("RuntimeRepositories", (), {"queue_repository": failing_queue})()
 
-            with self.assertRaisesRegex(RuntimeError, "queue unavailable"):
-                app.handle_request(
-                    "POST",
-                    f"/api/turnover-ledger/relations/{relation_id}/withdraw",
-                    body=json.dumps({"note": "target rollback"}),
-                )
+            response = app.handle_request(
+                "POST",
+                f"/api/turnover-ledger/relations/{relation_id}/withdraw",
+                body=json.dumps({"note": "target commit"}),
+            )
             audit_log = app._turnover_relation_service.audit_log()
             relation_detail = app._turnover_ledger_api_routes.get_relation(relation_id)
 
-        self.assertEqual([entry["action"] for entry in audit_log], ["confirm_relation"])
-        self.assertEqual(relation_detail["relation"]["status"], "confirmed")
-        self.assertEqual(
-            [item for item in failing_queue.attempts if item[0] == "turnover_ledger"],
-            [("turnover_ledger", "2026-02", "turnover_relation_changed")],
-        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([entry["action"] for entry in audit_log], ["confirm_relation", "withdraw_relation"])
+        self.assertEqual(relation_detail["relation"]["status"], "withdrawn")
+        self.assertEqual(failing_queue.attempts, [])
 
     def test_target_withdraw_relation_uow_path_does_not_clear_read_model_directly(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -4582,15 +4351,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["affected_months"], ["2026-02", "2026-03"])
         self.assertEqual(read_repository.clear_calls, 0)
-        self.assertEqual(
-            [item for item in queue.enqueued if item[0] == "turnover_ledger"],
-            [
-                ("turnover_ledger", "2026-02", "turnover_relation_changed"),
-                ("turnover_ledger", "2026-03", "turnover_relation_changed"),
-                ("turnover_ledger", "2026-02", "turnover_relation_changed"),
-                ("turnover_ledger", "2026-03", "turnover_relation_changed"),
-            ],
-        )
+        self.assertEqual(queue.enqueued, [])
 
     def test_withdraw_rejects_system_generated_relation(self) -> None:
         with TemporaryDirectory() as temp_dir:

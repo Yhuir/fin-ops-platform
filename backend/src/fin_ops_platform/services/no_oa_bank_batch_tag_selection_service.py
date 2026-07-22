@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any
 
 from fin_ops_platform.services.app_settings_service import AppSettingsService
 
@@ -10,12 +10,8 @@ class NoOaBankBatchTagSelectionApplicationService:
         self,
         *,
         app_settings_service: AppSettingsService,
-        enqueue_no_oa_bank_batch_refresh: Callable[[list[str]], Any],
-        after_no_oa_bank_batch_mutation: Callable[..., Any],
     ) -> None:
         self._app_settings_service = app_settings_service
-        self._enqueue_no_oa_bank_batch_refresh = enqueue_no_oa_bank_batch_refresh
-        self._after_no_oa_bank_batch_mutation = after_no_oa_bank_batch_mutation
 
     def get_tag_selection_payload(self) -> dict[str, Any]:
         return self._app_settings_service.get_no_oa_bank_batch_tag_selection_payload()
@@ -30,10 +26,4 @@ class NoOaBankBatchTagSelectionApplicationService:
             payload,
             actor_id=actor_id,
         )
-        self._after_no_oa_bank_batch_mutation(
-            ["all"],
-            changed_case_ids=[],
-            persist=False,
-        )
-        self._enqueue_no_oa_bank_batch_refresh(["all"])
         return result

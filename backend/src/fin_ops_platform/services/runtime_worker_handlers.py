@@ -74,7 +74,7 @@ from fin_ops_platform.services.workbench_matching_dirty_scope_worker import (
 from fin_ops_platform.services.workbench_matching_orchestrator import WorkbenchMatchingOrchestrator
 from fin_ops_platform.services.workbench_reconciliation_dirty_queue import WorkbenchReconciliationDirtyQueue
 from fin_ops_platform.services.workbench_sql_projection import WorkbenchSqlProjectionBuilder
-from fin_ops_platform.services.workbench_uow import RuntimeQueueReadModelRefreshWriter, WorkbenchWriteUnitOfWork
+from fin_ops_platform.services.workbench_uow import WorkbenchWriteUnitOfWork
 
 IMPORT_FACT_CHANGED_EVENT = "import.fact.changed"
 IMPORT_JOB_PROCESSOR_TYPES = (
@@ -228,11 +228,6 @@ class WorkbenchMatchingWorkerFactory:
         relation_uow = WorkbenchWriteUnitOfWork(
             connection=self._connection,
             repository_factory=self._workbench_uow_repository_factory,
-            read_model_refresh_writer=RuntimeQueueReadModelRefreshWriter(
-                queue_repository,
-                tenant_id="default",
-                priority="high",
-            ),
             idempotency_store=PostgresWorkbenchIdempotencyRepository(self._connection),
         )
         return build_workbench_matching_dirty_scope_worker(
@@ -269,7 +264,7 @@ class WorkbenchMatchingWorkerFactory:
     def _workbench_uow_repository_factory(transaction: Any) -> SimpleNamespace:
         workbench_repository = PostgresWorkbenchRepository(transaction)
         return SimpleNamespace(
-            pair_relations=PostgresWorkbenchRelationRepository(transaction, enqueue_refreshes=False),
+            pair_relations=PostgresWorkbenchRelationRepository(transaction),
             etc_batch_links=PostgresWorkbenchFormalRelationFactRepository(transaction),
             exception_cases=workbench_repository,
             row_overrides=workbench_repository,

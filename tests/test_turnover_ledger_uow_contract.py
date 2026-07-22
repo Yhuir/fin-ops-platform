@@ -769,15 +769,12 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         module = importlib.import_module("fin_ops_platform.services.turnover_ledger_extra_service")
         return getattr(module, "TurnoverLedgerExtraService")
 
-    def test_cost_statistics_relation_delta_requires_concrete_affected_month(self) -> None:
+    def test_turnover_write_command_has_no_refresh_plan(self) -> None:
         module = importlib.import_module("fin_ops_platform.services.turnover_ledger_write_facade")
 
-        self.assertEqual(module._active_cost_statistics_scope_keys([]), [])
-        self.assertEqual(module._active_cost_statistics_scope_keys(["all"]), [])
-        self.assertEqual(
-            module._active_cost_statistics_scope_keys(["2026-02", "2026-02"]),
-            ["active:2026-02"],
-        )
+        command = module.TurnoverLedgerWriteCommand(action_name="confirm", scope_keys=["2026-02"])
+
+        self.assertFalse(hasattr(command, "refresh_requests"))
 
     def test_turnover_workbench_pair_port_delegates_manual_closure_to_relation_command_service(self) -> None:
         module = self._write_adapters_module()
@@ -1568,7 +1565,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             "extra_repository": dependencies.extra_repository,
             "settings_port": dependencies.settings_port,
             "bankdetail_port": dependencies.bankdetail_port,
-            "dirty_outbox_writer": dependencies.dirty_outbox_writer,
             "stale_precondition_port": dependencies.stale_precondition_port,
         }
         if idempotency_store is not None:
@@ -1584,7 +1580,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             self.fail("TurnoverLedgerWriteUnitOfWork must expose run(command, handler).")
         return run(command, handler)
 
-    def test_confirm_relation_commits_relation_audit_dirty_scope_and_outbox_in_one_transaction(self) -> None:
+    def test_confirm_relation_commits_relation_and_audit_without_outbox(self) -> None:
         uow, deps = self._build_uow()
 
         def handler(context: object) -> dict[str, object]:
@@ -1605,10 +1601,9 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(deps.connection.rollbacks, 0)
         self.assertEqual(len(deps.relation_repository.facts), 1)
         self.assertEqual(len(deps.relation_repository.audit), 1)
-        self.assertEqual(deps.dirty_outbox_writer.calls[0]["scope_type"], "turnover_ledger")
-        self.assertEqual(deps.dirty_outbox_writer.calls[0]["reason"], "confirm_relation")
+        self.assertEqual(deps.dirty_outbox_writer.calls, [])
 
-    def test_confirm_relation_outbox_failure_rolls_back_relation_fact_and_audit(self) -> None:
+    def test_confirm_relation_does_not_depend_on_legacy_outbox_writer(self) -> None:
         uow, deps = self._build_uow(dirty_outbox_writer=_RecordingDirtyOutboxWriter(fail=True))
 
         def handler(context: object) -> dict[str, object]:
@@ -1617,11 +1612,12 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             deps.relation_repository.append_audit({"action": "confirm_relation"}, transaction=transaction)
             return {"relation_id": "turnover_rel_1"}
 
-        with self.assertRaisesRegex(RuntimeError, "forced dirty/outbox failure"):
-            self._run_uow(uow, _Command(action_name="confirm_relation", scope_keys=["all"]), handler)
+        result = self._run_uow(uow, _Command(action_name="confirm_relation", scope_keys=["all"]), handler)
 
-        self.assertEqual(deps.connection.commits, 0)
-        self.assertEqual(deps.connection.rollbacks, 1)
+        self.assertEqual(result, {"relation_id": "turnover_rel_1"})
+        self.assertEqual(deps.dirty_outbox_writer.calls, [])
+        self.assertEqual(deps.connection.commits, 1)
+        self.assertEqual(deps.connection.rollbacks, 0)
 
     def test_relation_extra_idempotency_reserves_before_handler_and_commits_response(self) -> None:
         idempotency_store = _RecordingIdempotencyStore()
@@ -1652,7 +1648,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(deps.connection.commits, 1)
         self.assertEqual(deps.connection.rollbacks, 0)
         self.assertEqual(len(deps.extra_repository.extras), 1)
-        self.assertEqual(len(deps.dirty_outbox_writer.calls), 1)
+        self.assertEqual(deps.dirty_outbox_writer.calls, [])
 
     def test_relation_extra_idempotency_replays_committed_without_handler_or_dirty_outbox(self) -> None:
         idempotency_store = _RecordingIdempotencyStore()
@@ -1685,7 +1681,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(handler_calls, 1)
         self.assertEqual(len(deps.extra_repository.extras), 1)
-        self.assertEqual(len(deps.dirty_outbox_writer.calls), 1)
+        self.assertEqual(deps.dirty_outbox_writer.calls, [])
         self.assertEqual(len(deps.stale_precondition_port.checked), 1)
         self.assertEqual(deps.connection.opened, 2)
 
@@ -1716,7 +1712,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
                 lambda _context: self.fail("fingerprint conflict must not call handler"),
             )
 
-        self.assertEqual(len(deps.dirty_outbox_writer.calls), 1)
+        self.assertEqual(deps.dirty_outbox_writer.calls, [])
         self.assertEqual(deps.connection.opened, 2)
 
     def test_relation_extra_idempotency_reserved_in_progress_rejects_before_handler(self) -> None:
@@ -1776,7 +1772,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         )
         self.assertEqual(deps.connection.commits, 1)
 
-    def test_target_confirm_relation_facade_rolls_back_when_dirty_outbox_fails(self) -> None:
+    def test_target_confirm_relation_facade_ignores_removed_dirty_outbox_dependency(self) -> None:
         relation_port = _RecordingConfirmRelationPort()
         uow, deps = self._build_uow(
             relation_repository=relation_port,  # type: ignore[arg-type]
@@ -1784,20 +1780,20 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         )
         facade = self._write_facade_class()(uow=uow)
 
-        with self.assertRaisesRegex(RuntimeError, "forced dirty/outbox failure"):
-            facade.confirm_relation(
-                bank_row_ids=["bank_txn_1", "bank_txn_2"],
-                actor_id="finance-user",
-                tenant_id="default",
-                note="manual confirm",
-                affected_months=["2026-02"],
-            )
+        facade.confirm_relation(
+            bank_row_ids=["bank_txn_1", "bank_txn_2"],
+            actor_id="finance-user",
+            tenant_id="default",
+            note="manual confirm",
+            affected_months=["2026-02"],
+        )
 
         self.assertEqual(len(relation_port.confirm_calls), 1)
-        self.assertEqual(deps.connection.commits, 0)
-        self.assertEqual(deps.connection.rollbacks, 1)
+        self.assertEqual(deps.dirty_outbox_writer.calls, [])
+        self.assertEqual(deps.connection.commits, 1)
+        self.assertEqual(deps.connection.rollbacks, 0)
 
-    def test_target_confirm_relation_facade_enqueues_turnover_refresh(self) -> None:
+    def test_target_confirm_relation_facade_enqueues_zero_refreshes(self) -> None:
         uow, deps = self._build_uow(
             relation_repository=_RecordingConfirmRelationPort(),  # type: ignore[arg-type]
         )
@@ -1811,10 +1807,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             affected_months=["2026-02"],
         )
 
-        self.assertEqual(
-            [(call["scope_type"], call["scope_keys"], call["reason"]) for call in deps.dirty_outbox_writer.calls],
-            [("turnover_ledger", ["2026-02"], "turnover_relation_changed")],
-        )
+        self.assertEqual(deps.dirty_outbox_writer.calls, [])
 
     def test_target_withdraw_relation_facade_uses_relation_port_and_returns_service_payload(self) -> None:
         relation_port = _RecordingWithdrawRelationPort()
@@ -1843,7 +1836,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         )
         self.assertEqual(deps.connection.commits, 1)
 
-    def test_target_withdraw_relation_facade_rolls_back_when_dirty_outbox_fails(self) -> None:
+    def test_target_withdraw_relation_facade_ignores_removed_dirty_outbox_dependency(self) -> None:
         relation_port = _RecordingWithdrawRelationPort()
         uow, deps = self._build_uow(
             relation_repository=relation_port,  # type: ignore[arg-type]
@@ -1851,20 +1844,20 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         )
         facade = self._write_facade_class()(uow=uow)
 
-        with self.assertRaisesRegex(RuntimeError, "forced dirty/outbox failure"):
-            facade.withdraw_relation(
-                relation_id="turnover_rel_1",
-                actor_id="finance-user",
-                tenant_id="default",
-                note="manual withdraw",
-                affected_months=["2026-02"],
-            )
+        facade.withdraw_relation(
+            relation_id="turnover_rel_1",
+            actor_id="finance-user",
+            tenant_id="default",
+            note="manual withdraw",
+            affected_months=["2026-02"],
+        )
 
         self.assertEqual(len(relation_port.withdraw_calls), 1)
-        self.assertEqual(deps.connection.commits, 0)
-        self.assertEqual(deps.connection.rollbacks, 1)
+        self.assertEqual(deps.dirty_outbox_writer.calls, [])
+        self.assertEqual(deps.connection.commits, 1)
+        self.assertEqual(deps.connection.rollbacks, 0)
 
-    def test_target_withdraw_relation_facade_enqueues_turnover_and_workbench_refreshes(self) -> None:
+    def test_target_withdraw_relation_facade_enqueues_zero_refreshes(self) -> None:
         uow, deps = self._build_uow(
             relation_repository=_RecordingWithdrawRelationPort(),  # type: ignore[arg-type]
         )
@@ -1878,21 +1871,8 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             affected_months=["2026-02"],
         )
 
-        self.assertEqual(
-            [(call["scope_type"], call["scope_keys"], call["reason"]) for call in deps.dirty_outbox_writer.calls],
-            [
-                ("turnover_ledger", ["2026-02"], "turnover_relation_changed"),
-                ("workbench", ["2026-02"], "turnover_relation_changed"),
-                ("workbench_relation", ["2026-02"], "turnover_relation_changed"),
-                ("cost_statistics", ["active:2026-02"], "cost_statistics_relation_delta"),
-                ("search", ["2026-02"], "turnover_relation_changed"),
-            ],
-        )
-        self.assertEqual(len(deps.dirty_outbox_writer.batch_calls), 1)
-        self.assertIs(
-            deps.dirty_outbox_writer.batch_calls[0]["transaction"],
-            deps.connection.transaction_obj,
-        )
+        self.assertEqual(deps.dirty_outbox_writer.calls, [])
+        self.assertEqual(deps.dirty_outbox_writer.batch_calls, [])
 
     def test_target_confirm_relation_facade_passes_expected_versions_before_repository(self) -> None:
         # PF-P173 target contract: confirm should accept bank-row expected versions and reject stale submits before mutation.
@@ -2064,16 +2044,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
                 assert getattr(command, "expected_versions") == {"turnover_bank_row:bank_txn_1": "v1"}
                 assert getattr(command, "idempotency_key") == "closure-idem-1"
                 assert getattr(command, "request_fingerprint")
-                assert [
-                    (request["scope_type"], request["scope_keys"], request["reason"])
-                    for request in getattr(command, "refresh_requests")
-                ] == [
-                    ("turnover_ledger", ["2026-02"], "turnover_closure_changed"),
-                    ("workbench", ["2026-02"], "turnover_closure_changed"),
-                    ("workbench_relation", ["2026-02"], "turnover_closure_changed"),
-                    ("cost_statistics", ["active:2026-02"], "cost_statistics_relation_delta"),
-                    ("search", ["2026-02"], "turnover_closure_changed"),
-                ]
+                assert not hasattr(command, "refresh_requests")
                 return handler(
                     SimpleNamespace(
                         transaction=object(),
@@ -2199,21 +2170,9 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
 
         self.assertEqual(result["affected_months"], ["2026-02", "2026-03"])
         self.assertEqual(getattr(uow.command, "scope_keys"), ["2026-02", "2026-03"])
-        self.assertEqual(
-            [
-                (request["scope_type"], request["scope_keys"])
-                for request in getattr(uow.command, "refresh_requests")
-            ],
-            [
-                ("turnover_ledger", ["2026-02", "2026-03"]),
-                ("workbench", ["2026-02", "2026-03"]),
-                ("workbench_relation", ["2026-02", "2026-03"]),
-                ("cost_statistics", ["active:2026-02", "active:2026-03"]),
-                ("search", ["2026-02", "2026-03"]),
-            ],
-        )
+        self.assertFalse(hasattr(uow.command, "refresh_requests"))
 
-    def test_closure_request_boundary_returns_workbench_visibility_freshness_targets(self) -> None:
+    def test_closure_request_boundary_returns_affected_scopes_without_barrier_targets(self) -> None:
         module = self._write_adapters_module()
 
         class _RecordingClosureFacade:
@@ -2256,15 +2215,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         )
 
         self.assertEqual(result["affected_months"], ["2026-02", "2026-02", "2026-03"])
-        self.assertEqual(
-            result["freshness_targets"],
-            [
-                {"read_model_key": "turnover_ledger", "scope_key": "2026-02"},
-                {"read_model_key": "turnover_ledger", "scope_key": "2026-03"},
-                {"read_model_key": "workbench_relation", "scope_key": "2026-02"},
-                {"read_model_key": "workbench_relation", "scope_key": "2026-03"},
-            ],
-        )
+        self.assertEqual(result["freshness_targets"], [])
         self.assertEqual(result["affected_scope_keys"], ["2026-02", "2026-03"])
         self.assertEqual(result["operation_barrier_targets"], result["freshness_targets"])
 
@@ -2398,16 +2349,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
 
             def run(self, command: object, handler: Callable[[object], object]) -> object:
                 self.commands.append(command)
-                assert [
-                    (request["scope_type"], request["scope_keys"], request["reason"])
-                    for request in getattr(command, "refresh_requests")
-                ] == [
-                    ("turnover_ledger", ["2026-02"], "turnover_relation_changed"),
-                    ("workbench", ["2026-02"], "turnover_relation_changed"),
-                    ("workbench_relation", ["2026-02"], "turnover_relation_changed"),
-                    ("cost_statistics", ["active:2026-02"], "cost_statistics_relation_delta"),
-                    ("search", ["2026-02"], "turnover_relation_changed"),
-                ]
+                assert not hasattr(command, "refresh_requests")
                 return handler(
                     SimpleNamespace(
                         transaction=object(),
@@ -2544,7 +2486,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
 
         self.assertEqual(uow.withdraw_calls, [])
 
-    def test_relation_extra_outbox_failure_does_not_return_best_effort_success(self) -> None:
+    def test_relation_extra_commits_without_legacy_outbox_dependency(self) -> None:
         uow, deps = self._build_uow(dirty_outbox_writer=_RecordingDirtyOutboxWriter(fail=True))
 
         def handler(context: object) -> dict[str, object]:
@@ -2554,13 +2496,14 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             )
             return {"relation_id": "turnover_rel_1", "note": "must be atomic"}
 
-        with self.assertRaisesRegex(RuntimeError, "forced dirty/outbox failure"):
-            self._run_uow(uow, _Command(action_name="relation_extra_update", scope_keys=["all"]), handler)
+        result = self._run_uow(uow, _Command(action_name="relation_extra_update", scope_keys=["all"]), handler)
 
-        self.assertEqual(deps.connection.commits, 0)
-        self.assertEqual(deps.connection.rollbacks, 1)
+        self.assertEqual(result["relation_id"], "turnover_rel_1")
+        self.assertEqual(deps.dirty_outbox_writer.calls, [])
+        self.assertEqual(deps.connection.commits, 1)
+        self.assertEqual(deps.connection.rollbacks, 0)
 
-    def test_tag_selection_outbox_failure_rolls_back_settings_save_and_audit(self) -> None:
+    def test_tag_selection_does_not_depend_on_legacy_outbox_writer(self) -> None:
         uow, deps = self._build_uow(dirty_outbox_writer=_RecordingDirtyOutboxWriter(fail=True))
 
         def handler(context: object) -> dict[str, object]:
@@ -2569,13 +2512,14 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             deps.settings_port.append_audit({"action": "turnover_ledger_tag_selection_changed"}, transaction=transaction)
             return {"selected_tag_codes": ["external_rule_borrow_out"]}
 
-        with self.assertRaisesRegex(RuntimeError, "forced dirty/outbox failure"):
-            self._run_uow(uow, _Command(action_name="tag_selection_update", scope_keys=["all"]), handler)
+        result = self._run_uow(uow, _Command(action_name="tag_selection_update", scope_keys=["all"]), handler)
 
-        self.assertEqual(deps.connection.commits, 0)
-        self.assertEqual(deps.connection.rollbacks, 1)
+        self.assertEqual(result["selected_tag_codes"], ["external_rule_borrow_out"])
+        self.assertEqual(deps.dirty_outbox_writer.calls, [])
+        self.assertEqual(deps.connection.commits, 1)
+        self.assertEqual(deps.connection.rollbacks, 0)
 
-    def test_tag_selection_settings_port_uses_uow_transaction_before_dirty_outbox(self) -> None:
+    def test_tag_selection_settings_port_uses_uow_transaction_without_outbox(self) -> None:
         uow, deps = self._build_uow()
 
         def handler(context: object) -> dict[str, object]:
@@ -2604,8 +2548,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertTrue(forbidden_keys.isdisjoint(result))
         self.assertEqual(deps.connection.commits, 1)
         self.assertIs(deps.settings_port.saved[0]["transaction"], deps.connection.transaction_obj)
-        self.assertIs(deps.dirty_outbox_writer.calls[0]["transaction"], deps.connection.transaction_obj)
-        self.assertEqual(deps.dirty_outbox_writer.calls[0]["reason"], "turnover_ledger_tag_selection_changed")
+        self.assertEqual(deps.dirty_outbox_writer.calls, [])
 
     def test_tag_selection_pure_normalizer_returns_next_selection_without_mutating_settings_snapshot(self) -> None:
         module = importlib.import_module("fin_ops_platform.services.app_settings_service")
@@ -2644,7 +2587,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(updated["selected_tag_codes"], ["external_rule_borrow_out"])
         self.assertEqual(len(state_store.saved_payloads), 1)
 
-    def test_bank_row_tags_batch_uses_explicit_bankdetail_port_and_rolls_back_on_outbox_failure(self) -> None:
+    def test_bank_row_tags_batch_uses_explicit_bankdetail_port_without_outbox(self) -> None:
         uow, deps = self._build_uow(dirty_outbox_writer=_RecordingDirtyOutboxWriter(fail=True))
 
         def handler(context: object) -> dict[str, object]:
@@ -2654,11 +2597,12 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             )
             return {"updated_transaction_ids": ["bank_txn_1"]}
 
-        with self.assertRaisesRegex(RuntimeError, "forced dirty/outbox failure"):
-            self._run_uow(uow, _Command(action_name="bank_row_tags_batch", scope_keys=["all"]), handler)
+        result = self._run_uow(uow, _Command(action_name="bank_row_tags_batch", scope_keys=["all"]), handler)
 
-        self.assertEqual(deps.connection.commits, 0)
-        self.assertEqual(deps.connection.rollbacks, 1)
+        self.assertEqual(result["updated_transaction_ids"], ["bank_txn_1"])
+        self.assertEqual(deps.dirty_outbox_writer.calls, [])
+        self.assertEqual(deps.connection.commits, 1)
+        self.assertEqual(deps.connection.rollbacks, 0)
 
     def test_bank_row_tags_facade_uses_bankdetail_port_and_returns_service_payload(self) -> None:
         uow, deps = self._build_uow(
@@ -2682,22 +2626,22 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertIs(deps.bankdetail_port.category_updates[0]["transaction"], deps.connection.transaction_obj)
         self.assertTrue({"headers", "cookies", "response", "status_code"}.isdisjoint(result))
 
-    def test_bank_row_tags_facade_rolls_back_when_dirty_outbox_fails(self) -> None:
+    def test_bank_row_tags_facade_has_zero_refresh_jobs(self) -> None:
         uow, deps = self._build_uow(dirty_outbox_writer=_RecordingDirtyOutboxWriter(fail=True))
         facade = self._write_facade_class()(uow=uow)
 
-        with self.assertRaisesRegex(RuntimeError, "forced dirty/outbox failure"):
-            facade.update_bank_row_tags_batch(
-                updates=[{"transaction_id": "bank_txn_1", "category_code": "borrow_in"}],
-                actor_id="finance-user",
-                tenant_id="default",
-                affected_months=["2026-02"],
-            )
+        facade.update_bank_row_tags_batch(
+            updates=[{"transaction_id": "bank_txn_1", "category_code": "borrow_in"}],
+            actor_id="finance-user",
+            tenant_id="default",
+            affected_months=["2026-02"],
+        )
 
-        self.assertEqual(deps.connection.commits, 0)
-        self.assertEqual(deps.connection.rollbacks, 1)
+        self.assertEqual(deps.dirty_outbox_writer.calls, [])
+        self.assertEqual(deps.connection.commits, 1)
+        self.assertEqual(deps.connection.rollbacks, 0)
 
-    def test_bank_row_tags_facade_enqueues_bankdetail_workbench_and_turnover_refreshes(self) -> None:
+    def test_bank_row_tags_facade_enqueues_zero_refreshes(self) -> None:
         uow, deps = self._build_uow()
         facade = self._write_facade_class()(uow=uow)
 
@@ -2708,38 +2652,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             affected_months=["2026-02", "2026-03"],
         )
 
-        self.assertEqual(
-            [
-                (call["scope_type"], call["scope_keys"], call["reason"])
-                for call in deps.dirty_outbox_writer.calls
-            ],
-            [
-                ("bank_detail", ["2026-02", "2026-03"], "bank_transaction_category_changed"),
-                ("bank_flow_rule_batch", ["2026-02", "2026-03"], "bank_transaction_category_changed"),
-                ("workbench", ["2026-02", "2026-03"], "bank_transaction_category_changed"),
-                ("workbench_relation", ["2026-02", "2026-03"], "bank_transaction_category_changed"),
-                ("invoice_lifecycle", ["2026-02", "2026-03"], "bank_transaction_category_changed"),
-                (
-                    "cost_statistics",
-                    ["active:2026-02", "all:2026-02", "active:2026-03", "all:2026-03"],
-                    "bank_transaction_category_changed",
-                ),
-                ("search", ["2026-02", "2026-03"], "bank_transaction_category_changed"),
-                ("turnover_ledger", ["2026-02", "2026-03"], "bank_transaction_category_changed"),
-                (
-                    "pending_invoice",
-                    [
-                        "expense:all:2026-02",
-                        "income:all:2026-02",
-                        "income:cash_income:2026-02",
-                        "expense:all:2026-03",
-                        "income:all:2026-03",
-                        "income:cash_income:2026-03",
-                    ],
-                    "bank_transaction_category_changed",
-                ),
-            ],
-        )
+        self.assertEqual(deps.dirty_outbox_writer.calls, [])
 
     def test_target_bank_row_tags_facade_passes_idempotency_before_bankdetail_port(self) -> None:
         idempotency_store = _RecordingIdempotencyStore()
@@ -2781,7 +2694,7 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             facade_class(application=object())
 
-    def test_tag_selection_write_facade_commits_settings_and_dirty_outbox_in_one_uow(self) -> None:
+    def test_tag_selection_write_facade_commits_settings_without_outbox(self) -> None:
         uow, deps = self._build_uow()
         normalizer = _RecordingTagSelectionNormalizer()
         facade = self._write_facade_class()(uow=uow, tag_selection_normalizer=normalizer)
@@ -2816,28 +2729,27 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
                 }
             },
         )
-        self.assertIs(deps.dirty_outbox_writer.calls[0]["transaction"], deps.connection.transaction_obj)
-        self.assertEqual(deps.dirty_outbox_writer.calls[0]["reason"], "turnover_ledger_tag_selection_changed")
+        self.assertEqual(deps.dirty_outbox_writer.calls, [])
         forbidden_keys = {"headers", "cookies", "cookie", "response", "status_code", "http_status", "auth"}
         self.assertTrue(forbidden_keys.isdisjoint(result))
 
-    def test_tag_selection_write_facade_rolls_back_settings_when_dirty_outbox_fails(self) -> None:
+    def test_tag_selection_write_facade_ignores_removed_dirty_outbox_dependency(self) -> None:
         uow, deps = self._build_uow(dirty_outbox_writer=_RecordingDirtyOutboxWriter(fail=True))
         facade = self._write_facade_class()(
             uow=uow,
             tag_selection_normalizer=_RecordingTagSelectionNormalizer(),
         )
 
-        with self.assertRaisesRegex(RuntimeError, "forced dirty/outbox failure"):
-            facade.update_tag_selection(
-                payload={"expected_version": 1, "selected_tag_codes": ["external_rule_borrow_out"]},
-                actor_id="finance-user",
-                tenant_id="default",
-                scope_keys=["all"],
-            )
+        facade.update_tag_selection(
+            payload={"expected_version": 1, "selected_tag_codes": ["external_rule_borrow_out"]},
+            actor_id="finance-user",
+            tenant_id="default",
+            scope_keys=["all"],
+        )
 
-        self.assertEqual(deps.connection.commits, 0)
-        self.assertEqual(deps.connection.rollbacks, 1)
+        self.assertEqual(deps.dirty_outbox_writer.calls, [])
+        self.assertEqual(deps.connection.commits, 1)
+        self.assertEqual(deps.connection.rollbacks, 0)
 
     def test_tag_selection_write_facade_normalization_error_prevents_uow_side_effects(self) -> None:
         uow, deps = self._build_uow()
@@ -2881,9 +2793,9 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         )
         self.assertEqual(len(deps.settings_port.saved), 1)
         self.assertIs(deps.settings_port.saved[0]["transaction"], deps.connection.transaction_obj)
-        self.assertEqual(deps.dirty_outbox_writer.calls[0]["reason"], "turnover_ledger_tag_selection_changed")
+        self.assertEqual(deps.dirty_outbox_writer.calls, [])
 
-    def test_relation_extra_write_facade_commits_extra_and_dirty_outbox_in_one_uow(self) -> None:
+    def test_relation_extra_write_facade_commits_extra_without_outbox(self) -> None:
         # PF-P056 target contract: facade must remain service-layer only and delegate transaction scope to UoW.
         uow, deps = self._build_uow()
         facade = self._write_facade_class()(uow=uow)
@@ -2903,27 +2815,24 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertIs(deps.extra_repository.extras[0]["transaction"], deps.connection.transaction_obj)
         self.assertEqual(deps.extra_repository.extras[0]["extra"]["relation_id"], "turnover_rel_1")
         self.assertEqual(deps.extra_repository.extras[0]["extra"]["note"], "facade note")
-        self.assertEqual(deps.dirty_outbox_writer.calls[0]["scope_type"], "turnover_ledger")
-        self.assertEqual(deps.dirty_outbox_writer.calls[0]["reason"], "turnover_relation_extra_changed")
-        self.assertEqual(deps.dirty_outbox_writer.calls[0]["scope_keys"], ["all"])
+        self.assertEqual(deps.dirty_outbox_writer.calls, [])
         self.assertEqual(result["extra"]["relation_id"], "turnover_rel_1")
 
-    def test_relation_extra_write_facade_rolls_back_extra_when_dirty_outbox_fails(self) -> None:
-        # PF-P056 target contract: target semantics must not preserve current best-effort success behavior.
+    def test_relation_extra_write_facade_ignores_removed_dirty_outbox_dependency(self) -> None:
         uow, deps = self._build_uow(dirty_outbox_writer=_RecordingDirtyOutboxWriter(fail=True))
         facade = self._write_facade_class()(uow=uow)
 
-        with self.assertRaisesRegex(RuntimeError, "forced dirty/outbox failure"):
-            facade.update_relation_extra(
-                relation_id="turnover_rel_1",
-                payload={"note": "must roll back"},
-                actor_id="finance-user",
-                tenant_id="default",
-                scope_keys=["all"],
-            )
+        facade.update_relation_extra(
+            relation_id="turnover_rel_1",
+            payload={"note": "must commit"},
+            actor_id="finance-user",
+            tenant_id="default",
+            scope_keys=["all"],
+        )
 
-        self.assertEqual(deps.connection.commits, 0)
-        self.assertEqual(deps.connection.rollbacks, 1)
+        self.assertEqual(deps.dirty_outbox_writer.calls, [])
+        self.assertEqual(deps.connection.commits, 1)
+        self.assertEqual(deps.connection.rollbacks, 0)
 
     def test_target_relation_extra_facade_passes_expected_versions_before_repository(self) -> None:
         # PF-P102 target contract: stale relation extra checks must run before repository save.
@@ -3002,16 +2911,12 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         # PF-P186 target contract: the primary relation extra facade should not rely
         # solely on request-boundary stale checks. The generated UoW must receive an
         # explicit relation-extra stale port so expected_versions are checked in the
-        # same transaction before repository save and dirty/outbox enqueue.
+        # same transaction before repository save.
         adapters = self._write_adapters_module()
         connection = _RecordingConnection()
-        queue_repository = SimpleNamespace(
-            enqueue_read_model_refresh_in_transaction=lambda **kwargs: kwargs,
-        )
 
         builder = adapters.TurnoverLedgerRelationExtraPrimaryWriteFacadeBuilder(
             state_store=SimpleNamespace(storage_backend="postgres", _connection=connection),
-            queue_repository=queue_repository,
             routes=SimpleNamespace(),
             replace_snapshot=lambda _snapshot: None,
             emit_persistence_warning=lambda **_kwargs: None,
@@ -3020,7 +2925,6 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             current_extra_reader=lambda _relation_id: {
                 "extra": {"relation_id": "turnover_rel_1", "updated_at": "2026-06-03T00:00:00+00:00"}
             },
-            tenant_id="default",
             postgres_extra_repository_factory=lambda _transaction: _RecordingExtraRepository(),
             postgres_idempotency_store_factory=lambda _connection: InMemoryWorkbenchIdempotencyRepository(),
             local_idempotency_store_provider=InMemoryWorkbenchIdempotencyRepository,
@@ -3400,58 +3304,11 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertIn("app.app_settings", str(call["sql"]))
         self.assertEqual(call["params"][0], "app_settings")
 
-    def test_turnover_dirty_outbox_writer_batches_all_scopes_in_one_transaction(self) -> None:
+    def test_turnover_legacy_outbox_writers_are_removed(self) -> None:
         module = self._write_adapters_module()
-        writer_class = getattr(module, "TurnoverLedgerDirtyOutboxWriter")
-        queue = _TransactionOnlyQueueRepository()
-        transaction = _RecordingTransaction()
-        writer = writer_class(queue_repository=queue, tenant_id="tenant-a", priority="high", trace_id="trace-1")
 
-        events = writer.enqueue_refreshes(
-            transaction=transaction,
-            refreshes=[
-                {
-                    "scope_type": "turnover_ledger",
-                    "scope_keys": ["all", "2026-05"],
-                    "reason": "relation_extra_update",
-                    "payload": {"action_name": "turnover_relation_extra_update", "actor_id": "finance-user"},
-                }
-            ],
-        )
-
-        self.assertEqual(events, queue.calls)
-        self.assertEqual(len(queue.batch_calls), 1)
-        self.assertIs(queue.batch_calls[0]["transaction"], transaction)
-        self.assertEqual([call["transaction"] for call in queue.calls], [transaction, transaction])
-        self.assertEqual([call["scope_key"] for call in queue.calls], ["all", "2026-05"])
-        self.assertEqual([call["scope_type"] for call in queue.calls], ["turnover_ledger", "turnover_ledger"])
-        self.assertEqual([call["reason"] for call in queue.calls], ["relation_extra_update", "relation_extra_update"])
-        self.assertEqual([call["tenant_id"] for call in queue.calls], ["tenant-a", "tenant-a"])
-        self.assertEqual([call["priority"] for call in queue.calls], ["high", "high"])
-        self.assertEqual([call["trace_id"] for call in queue.calls], ["trace-1", "trace-1"])
-        self.assertEqual(
-            [call["metadata"] for call in queue.calls],
-            [
-                {"action_name": "turnover_relation_extra_update"},
-                {"action_name": "turnover_relation_extra_update"},
-            ],
-        )
-
-    def test_turnover_dirty_outbox_writer_rejects_non_transactional_queue(self) -> None:
-        writer_class = getattr(self._write_adapters_module(), "TurnoverLedgerDirtyOutboxWriter")
-        writer = writer_class(queue_repository=_NonTransactionalQueueRepository())
-
-        with self.assertRaisesRegex(RuntimeError, "enqueue_read_model_refreshes_in_transaction"):
-            writer.enqueue_refreshes(
-                transaction=_RecordingTransaction(),
-                refreshes=[
-                    {
-                        "scope_type": "turnover_ledger",
-                        "scope_keys": ["all"],
-                        "reason": "relation_extra_update",
-                    }
-                ],
-            )
+        self.assertFalse(hasattr(module, "TurnoverLedgerDirtyOutboxWriter"))
+        self.assertFalse(hasattr(module, "TurnoverLedgerLocalDirtyOutboxWriter"))
 
     def test_relation_extra_normalizer_adapter_reuses_service_rules_without_state_mutation(self) -> None:
         service = self._extra_service_class().from_snapshot(

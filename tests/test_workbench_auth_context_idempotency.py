@@ -372,7 +372,6 @@ def _new_facade(
     relation_command_service: object | None = None,
     exception_case_service: object | None = None,
     override_service: object | None = None,
-    lifecycle_calls: list[dict[str, object]] | None = None,
     live_rows: list[dict[str, object]] | None = None,
     relation_groups: object | None = None,
     withdraw_rows_and_after_relations: object | None = None,
@@ -422,12 +421,6 @@ def _new_facade(
         restore_exception_pair_snapshots=lambda **_: None,
         schedule_pair_relation_persist=lambda **_: None,
         restore_pair_relation_snapshot=lambda *_, **__: None,
-        execute_derived_data_lifecycle_event=(
-            lambda *args, **kwargs: lifecycle_calls.append({"args": args, "kwargs": kwargs})
-            if lifecycle_calls is not None
-            else None
-        ),
-        schedule_read_model_persist=lambda *_, **__: None,
         emit_action_timing=lambda **_: None,
         confirm_link_uow=confirm_uow,
         cancel_link_uow=cancel_uow,
@@ -559,7 +552,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         self.assertEqual(getattr(command, "actor_id"), "oa-user-1")
         self.assertEqual(getattr(command, "tenant_id"), "default")
 
-    def test_confirm_link_response_returns_operation_freshness_targets_for_affected_scopes(self) -> None:
+    def test_confirm_link_response_returns_zero_downstream_freshness_targets(self) -> None:
         facade = _new_facade(confirm_uow=_RecordingUoW())
 
         result = facade.confirm_link(
@@ -575,14 +568,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
 
         self.assertEqual(result.status_code, HTTPStatus.OK)
         self.assertEqual(result.payload["affected_scope_keys"], ["2026-05"])
-        self.assertNotIn({"read_model_key": "workbench_relation", "scope_key": "all"}, result.payload["freshness_targets"])
-        self.assertEqual(
-            result.payload["freshness_targets"],
-            [
-                {"read_model_key": "workbench", "scope_key": "2026-05"},
-                {"read_model_key": "workbench_relation", "scope_key": "2026-05"},
-            ],
-        )
+        self.assertEqual(result.payload["freshness_targets"], [])
 
     def test_confirm_link_two_pane_operation_projection_uses_group_zone(self) -> None:
         def relation_groups(relations: list[dict[str, object]], **_: object) -> list[dict[str, object]]:
@@ -703,15 +689,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         self.assertEqual(result.status_code, HTTPStatus.OK)
         self.assertEqual(getattr(uow.run_commands[0], "scope_keys"), ["2026-03", "2026-02"])
         self.assertEqual(result.payload["affected_scope_keys"], ["2026-03", "2026-02"])
-        self.assertEqual(
-            result.payload["freshness_targets"],
-            [
-                {"read_model_key": "workbench", "scope_key": "2026-03"},
-                {"read_model_key": "workbench_relation", "scope_key": "2026-03"},
-                {"read_model_key": "workbench", "scope_key": "2026-02"},
-                {"read_model_key": "workbench_relation", "scope_key": "2026-02"},
-            ],
-        )
+        self.assertEqual(result.payload["freshness_targets"], [])
 
     def test_cancel_link_replay_and_run_commands_use_explicit_actor_and_tenant_context(self) -> None:
         uow = _RecordingUoW()
@@ -847,7 +825,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         self.assertEqual(metadata["paired_requirement_version"], 3)
         self.assertFalse(metadata["requires_invoice"])
 
-    def test_withdraw_link_response_returns_operation_freshness_targets_for_affected_scopes(self) -> None:
+    def test_withdraw_link_response_returns_zero_downstream_freshness_targets(self) -> None:
         facade = _new_facade(
             withdraw_uow=_RecordingUoW(),
             relation_command_service=_RecordingRelationCommandService(),
@@ -866,13 +844,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
 
         self.assertEqual(result.status_code, HTTPStatus.OK)
         self.assertEqual(result.payload["affected_scope_keys"], ["2026-05"])
-        self.assertEqual(
-            result.payload["freshness_targets"],
-            [
-                {"read_model_key": "workbench", "scope_key": "2026-05"},
-                {"read_model_key": "workbench_relation", "scope_key": "2026-05"},
-            ],
-        )
+        self.assertEqual(result.payload["freshness_targets"], [])
 
     def test_withdraw_link_submit_skips_optional_operation_projection_rebuild(self) -> None:
         def forbidden_projection_rebuild(**_kwargs: object) -> tuple[list[dict[str, object]], list[dict[str, object]], list[str]]:
@@ -897,13 +869,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
 
         self.assertEqual(result.status_code, HTTPStatus.OK)
         self.assertEqual(result.payload["operation_projection"], {})
-        self.assertEqual(
-            result.payload["freshness_targets"],
-            [
-                {"read_model_key": "workbench", "scope_key": "2026-05"},
-                {"read_model_key": "workbench_relation", "scope_key": "2026-05"},
-            ],
-        )
+        self.assertEqual(result.payload["freshness_targets"], [])
 
     def test_withdraw_link_uow_submit_reuses_alias_map_in_postprocess(self) -> None:
         resolve_calls: list[dict[str, object]] = []
@@ -1055,15 +1021,7 @@ class WorkbenchAuthContextIdempotencyTests(unittest.TestCase):
         self.assertEqual(len(relation_command.preview_withdraw_calls), 0)
         self.assertEqual(relation_command.withdraw_calls[0]["row_ids"], row_ids)
         self.assertEqual(result.payload["affected_scope_keys"], ["2026-03", "2026-02"])
-        self.assertEqual(
-            result.payload["freshness_targets"],
-            [
-                {"read_model_key": "workbench", "scope_key": "2026-03"},
-                {"read_model_key": "workbench_relation", "scope_key": "2026-03"},
-                {"read_model_key": "workbench", "scope_key": "2026-02"},
-                {"read_model_key": "workbench_relation", "scope_key": "2026-02"},
-            ],
-        )
+        self.assertEqual(result.payload["freshness_targets"], [])
 
     def test_confirm_and_cancel_link_map_in_progress_idempotency_to_stable_conflict_payload(self) -> None:
         facade = _new_facade(confirm_uow=_InProgressUoW(), cancel_uow=_InProgressUoW())

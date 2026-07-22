@@ -6,6 +6,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import PageRouteHost from "../app/PageRouteHost";
 import type { AppPageRoute } from "../app/pageRegistry";
+import { PageRuntimeProvider } from "../contexts/PageRuntimeContext";
 import { PageSessionStateProvider } from "../contexts/PageSessionStateContext";
 import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
 import { FINANCE_DOMAIN_EVENTS, emitFinanceDomainEvent } from "../features/domainEvents";
@@ -64,6 +65,36 @@ afterEach(() => {
 });
 
 describe("useActiveFinanceDomainEvent", () => {
+  test("defers the latest event while a mounted page is hidden and handles it once when visible", async () => {
+    const handler = vi.fn();
+
+    function Page() {
+      useActiveFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, handler);
+      return <div>page</div>;
+    }
+
+    const { rerender } = render(
+      <PageRuntimeProvider value={{ pageKey: "workbench", active: false, activationGeneration: 1 }}>
+        <Page />
+      </PageRuntimeProvider>,
+    );
+
+    act(() => {
+      emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, { action: "hidden-first" });
+      emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.workbenchRelationUpdated, { action: "hidden-latest" });
+    });
+    expect(handler).not.toHaveBeenCalled();
+
+    rerender(
+      <PageRuntimeProvider value={{ pageKey: "workbench", active: true, activationGeneration: 2 }}>
+        <Page />
+      </PageRuntimeProvider>,
+    );
+
+    await waitFor(() => expect(handler).toHaveBeenCalledTimes(1));
+    expect(handler.mock.calls[0][0].detail.action).toBe("hidden-latest");
+  });
+
   test("handles events while mounted and does not replay events after route unmount", async () => {
     const user = userEvent.setup();
     const handler = vi.fn();

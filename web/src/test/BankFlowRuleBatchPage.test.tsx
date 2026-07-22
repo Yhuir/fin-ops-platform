@@ -416,7 +416,6 @@ function installFetchMock(
   payload = listPayload,
   options: {
     listFailuresBeforeSuccess?: number;
-    mutationOperationBarrierTargets?: Array<{ read_model_key: string; scope_key: string }>;
     tagSelection?: Record<string, unknown>;
   } = {},
 ) {
@@ -463,10 +462,8 @@ function installFetchMock(
       return jsonResponse({
         batch: payload.batches[4],
         affected_months: ["2026-05"],
-        ...(options.mutationOperationBarrierTargets
-          ? { operation_barrier_targets: options.mutationOperationBarrierTargets }
-          : {}),
-        workbench_rebuild_queued: true,
+        operation_barrier_targets: [],
+        workbench_rebuild_queued: false,
         results: [],
       });
     }
@@ -474,10 +471,8 @@ function installFetchMock(
       return jsonResponse({
         batch: payload.batches[0],
         affected_months: ["2026-05"],
-        ...(options.mutationOperationBarrierTargets
-          ? { operation_barrier_targets: options.mutationOperationBarrierTargets }
-          : {}),
-        workbench_rebuild_queued: true,
+        operation_barrier_targets: [],
+        workbench_rebuild_queued: false,
         results: [],
       });
     }
@@ -485,18 +480,16 @@ function installFetchMock(
       return jsonResponse({
         batch: payload.batches[2],
         affected_months: ["2026-05"],
-        ...(options.mutationOperationBarrierTargets
-          ? { operation_barrier_targets: options.mutationOperationBarrierTargets }
-          : {}),
-        workbench_rebuild_queued: true,
+        operation_barrier_targets: [],
+        workbench_rebuild_queued: false,
         results: [],
       });
     }
     if (url.pathname === "/api/bank-flow-rule-batches/reset-submitted") {
       return jsonResponse({
         affected_months: ["2026-05"],
-        operation_barrier_targets: [{ read_model_key: "bank_flow_rule_batch", scope_key: "2026-05" }],
-        workbench_rebuild_queued: true,
+        operation_barrier_targets: [],
+        workbench_rebuild_queued: false,
         results: [{ batch_id: "batch-submitted-salary", status: "withdrawn" }],
       });
     }
@@ -1054,7 +1047,7 @@ describe("BankFlowRuleBatchPage", () => {
     }
   });
 
-  test("submits selected rows without foreground freshness wait or opening the next batch", async () => {
+  test("submits selected rows and reconciles through the current page GET without operation barrier", async () => {
     const user = userEvent.setup();
     const nextFeeBatch = {
       ...listPayload.batches[0],
@@ -1077,13 +1070,14 @@ describe("BankFlowRuleBatchPage", () => {
       },
       batches: [listPayload.batches[0], nextFeeBatch, ...listPayload.batches.slice(1)],
     };
-    const operationBarrierStarted = vi.fn();
+    let listRequestCount = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
       if (url.pathname === "/api/bank-flow-rule-batches/tag-rules") {
         return jsonResponse(tagSelectionPayload);
       }
       if (url.pathname === "/api/bank-flow-rule-batches" && (!init?.method || init.method === "GET")) {
+        listRequestCount += 1;
         return jsonResponse(withPagination(payload, url));
       }
       if (url.pathname === "/api/bank-flow-rule-batches/batch-draft-fee") {
@@ -1096,16 +1090,12 @@ describe("BankFlowRuleBatchPage", () => {
         return jsonResponse({
           batch: { ...listPayload.batches[0], status: "submitted", status_bucket: "submitted", version: 2 },
           affected_months: ["2026-05"],
-          operation_barrier_targets: [
-            { read_model_key: "bank_flow_rule_batch", scope_key: "2026-05" },
-            { read_model_key: "workbench", scope_key: "all" },
-          ],
+          operation_barrier_targets: [],
           results: [{ batch_id: "batch-selected-fee", status: "submitted" }],
         });
       }
       if (url.pathname === "/api/operation-barrier/status") {
-        operationBarrierStarted();
-        return new Promise<Response>(() => undefined);
+        throw new Error("bank flow mutation must not call operation barrier");
       }
       return jsonResponse({ message: `Unhandled ${url.pathname}` }, 404);
     });
@@ -1114,12 +1104,14 @@ describe("BankFlowRuleBatchPage", () => {
     renderPage();
 
     await user.click(await screen.findByRole("checkbox", { name: "选择流水 bank-row-001" }));
+    const listRequestsBeforeSubmit = listRequestCount;
     await user.click(screen.getByRole("button", { name: "提交批次" }));
 
     expect(await screen.findByText("选中流水已提交")).toBeInTheDocument();
     await waitFor(() => {
-      expect(operationBarrierStarted).toHaveBeenCalled();
+      expect(listRequestCount).toBeGreaterThan(listRequestsBeforeSubmit);
     });
+    expect(operationBarrierRequests(fetchMock)).toHaveLength(0);
     expect(fetchMock.mock.calls.some(([input]) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
       return url.pathname === "/api/bank-flow-rule-batches/batch-draft-fee-next";
@@ -1425,14 +1417,7 @@ describe("BankFlowRuleBatchPage", () => {
       },
       batches: [...listPayload.batches, nextTransferBatch],
     };
-    const fetchMock = installFetchMock(payloadWithNextTransfer, {
-      mutationOperationBarrierTargets: [
-        { read_model_key: "bank_flow_rule_batch", scope_key: "2026-05" },
-        { read_model_key: "workbench_relation", scope_key: "all" },
-        { read_model_key: "workbench", scope_key: "all" },
-        { read_model_key: "workbench", scope_key: "2026-05" },
-      ],
-    });
+    const fetchMock = installFetchMock(payloadWithNextTransfer);
     const relationListener = vi.fn();
     window.addEventListener("workbenchRelationUpdated", relationListener);
 
@@ -1455,7 +1440,15 @@ describe("BankFlowRuleBatchPage", () => {
         expect(screen.queryByText("正在加载流水明细")).not.toBeInTheDocument();
       });
       await waitFor(() => {
-        expect(operationBarrierRequests(fetchMock)).toHaveLength(1);
+        const submitCallIndex = fetchMock.mock.calls.findIndex(([input]) => {
+          const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+          return url.pathname === "/api/bank-flow-rule-batches/batch-draft-transfer/submit";
+        });
+        expect(submitCallIndex).toBeGreaterThanOrEqual(0);
+        expect(fetchMock.mock.calls.slice(submitCallIndex + 1).some(([input, init]) => {
+          const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+          return url.pathname === "/api/bank-flow-rule-batches" && (!init?.method || init.method === "GET");
+        })).toBe(true);
       });
       expect(fetchMock.mock.calls.some(([input]) => {
         const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
@@ -1465,19 +1458,9 @@ describe("BankFlowRuleBatchPage", () => {
         "/api/bank-flow-rule-batches/submit-selection",
         expect.anything(),
       );
-      expect(operationBarrierRequests(fetchMock).at(-1)).toEqual({
-        targets: [
-          { read_model_key: "bank_flow_rule_batch", scope_key: "2026-05" },
-        ],
-      });
+      expect(operationBarrierRequests(fetchMock)).toHaveLength(0);
       expectCustomEventDetailContaining(relationListener, {
         affectedMonths: ["2026-05"],
-        operationBarrierTargets: expect.arrayContaining([
-          { readModelKey: "bank_flow_rule_batch", scopeKey: "2026-05" },
-          { readModelKey: "workbench_relation", scopeKey: "all" },
-          { readModelKey: "workbench", scopeKey: "all" },
-          { readModelKey: "workbench", scopeKey: "2026-05" },
-        ]),
       });
     } finally {
       window.removeEventListener("workbenchRelationUpdated", relationListener);
@@ -1628,24 +1611,24 @@ describe("BankFlowRuleBatchPage", () => {
 
     expect(await screen.findByRole("heading", { name: "流水规则批量处理" })).toBeInTheDocument();
     await waitFor(() => {
-      expect(listCallCount).toBe(1);
+      expect(listCallCount).toBeGreaterThan(0);
     });
-
     await user.click(screen.getByRole("link", { name: "设置" }));
     expect(await screen.findByTestId("settings-page")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "流水规则批量处理" })).not.toBeInTheDocument();
+    const listCallCountAfterUnmount = listCallCount;
     vi.useFakeTimers();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1_000);
     });
 
-    expect(listCallCount).toBe(1);
+    expect(listCallCount).toBe(listCallCountAfterUnmount);
 
     vi.useRealTimers();
     fireEvent.click(screen.getByRole("link", { name: "流水规则批量处理" }));
     expect(await screen.findByRole("heading", { name: "流水规则批量处理" })).toBeInTheDocument();
 
-    expect(listCallCount).toBeGreaterThan(1);
+    expect(listCallCount).toBeGreaterThan(listCallCountAfterUnmount);
   });
 
   test("keeps visible transaction rows while stale read model polling runs in the background", async () => {

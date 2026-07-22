@@ -203,7 +203,7 @@ test.describe("batch accounting browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
-  test("submits and withdraws daily reimbursement rows through the relation freshness barrier", async ({ page }, testInfo) => {
+  test("submits and withdraws daily reimbursement rows through page-access convergence", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, { sessionMode: "full_access" });
     const recordLatency = createBatchAccountingLatencyRecorder(page, testInfo);
@@ -251,18 +251,16 @@ test.describe("batch accounting browser flow", () => {
       actionType: "click",
     }, async (mark) => {
       const submitResponse = page.waitForResponse(responseFor("POST", "/api/batch-accounting/submit"));
-      const barrierResponse = page.waitForResponse(responseFor("POST", "/api/operation-barrier/status"));
       const reloadResponse = waitForBatchAccountingList(page);
       await page.getByRole("button", { name: "关联OA项与流水" }).click();
       await mark("apiLatencyMs", submitResponse);
-      await mark("operationBarrierLatencyMs", barrierResponse);
       await mark("firstVisibleResponseLatencyMs", expect(page.getByText("已关联批量账务流水与 2 项 OA。")).toBeVisible());
       await mark("finalSettledLatencyMs", reloadResponse);
     });
 
     await expect(page.getByText("已关联批量账务流水与 2 项 OA。")).toBeVisible();
     expect(api.count("POST /api/batch-accounting/submit")).toBe(1);
-    expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(0);
+    expect(api.count("POST /api/operation-barrier/status")).toBe(0);
     expect(api.count("GET /api/batch-accounting")).toBeGreaterThan(batchAccountingGetsBeforeSubmit);
     await expect(page.getByRole("button", { name: "已提交 1" })).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);
@@ -286,7 +284,7 @@ test.describe("batch accounting browser flow", () => {
     await expect(page.getByText("已选 OA 2 项")).toBeVisible();
     await expect(page.getByText("差额 0.00")).toBeVisible();
 
-    const barrierCallsBeforeWithdraw = api.count("POST /api/operation-barrier/status");
+    const batchAccountingGetsBeforeWithdraw = api.count("GET /api/batch-accounting");
     const withdrawDialog = page.getByRole("dialog", { name: "撤回关联" });
     await recordLatency({
       operationId: "batch-accounting.open-withdraw-dialog",
@@ -311,18 +309,17 @@ test.describe("batch accounting browser flow", () => {
       actionType: "click",
     }, async (mark) => {
       const withdrawResponse = page.waitForResponse(responseFor("POST", "/api/batch-accounting/BA-REL-202604-001/withdraw"));
-      const barrierResponse = page.waitForResponse(responseFor("POST", "/api/operation-barrier/status"));
       const reloadResponse = waitForBatchAccountingList(page);
       await withdrawDialog.getByRole("button", { name: "确认撤回" }).click();
       await mark("apiLatencyMs", withdrawResponse);
-      await mark("operationBarrierLatencyMs", barrierResponse);
       await mark("firstVisibleResponseLatencyMs", expect(page.getByText("已撤回批量账务关联。")).toBeVisible());
       await mark("finalSettledLatencyMs", reloadResponse);
     });
 
     await expect(page.getByText("已撤回批量账务关联。")).toBeVisible();
     expect(api.count("POST /api/batch-accounting/BA-REL-202604-001/withdraw")).toBe(1);
-    expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(barrierCallsBeforeWithdraw);
+    expect(api.count("POST /api/operation-barrier/status")).toBe(0);
+    expect(api.count("GET /api/batch-accounting")).toBeGreaterThan(batchAccountingGetsBeforeWithdraw);
     await expect(page.getByRole("button", { name: "已提交 0" })).toBeVisible();
     await expect(page.getByText("当前年份暂无批量账务流水")).toBeVisible();
     await expectNoUnexpectedSuccessUiErrors(page);

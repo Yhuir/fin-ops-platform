@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { MemoryRouter } from "react-router-dom";
@@ -218,14 +218,10 @@ describe("Cost statistics page", () => {
     expect(within(drawer).getByRole("button", { name: "关闭抽屉" })).toBeEnabled();
   });
 
-  test("waits for the active all-scope barrier before one explorer refresh and supersedes duplicate events", async () => {
+  test("revalidates the active all-scope through the normal explorer GET without an operation barrier", async () => {
     window.history.pushState({}, "", "/cost-statistics");
     const user = userEvent.setup();
-    let releaseBarrier = () => undefined;
-    const barrierDelay = new Promise<void>((resolve) => {
-      releaseBarrier = resolve;
-    });
-    const fetchMock = installMockApiFetch({ operationBarrierDelay: barrierDelay });
+    const fetchMock = installMockApiFetch();
 
     renderCostStatisticsPage();
 
@@ -239,30 +235,14 @@ describe("Cost statistics page", () => {
     fireEvent(window, new CustomEvent("workbenchRelationUpdated", { detail: { affectedMonths: ["2026-03"] } }));
     fireEvent(window, new CustomEvent("workbenchRelationUpdated", { detail: { affectedMonths: ["2026-03"] } }));
 
-    expect(await screen.findByText("成本数据正在同步")).toBeInTheDocument();
-    expect(screen.getByTestId("cost-statistics-interaction-overlay")).toBeInTheDocument();
-    expect(fetchMock.mock.calls.filter(([request]) => (
-      String(request).startsWith("/api/cost-statistics/explorer?")
-    ))).toHaveLength(explorerCallsBeforeEvent);
     await waitFor(() => {
-      const barrierCalls = fetchMock.mock.calls.filter(([request]) => String(request) === "/api/operation-barrier/status");
-      expect(barrierCalls).toHaveLength(2);
-      for (const [, init] of barrierCalls) {
-        expect(JSON.parse(String(init?.body))).toEqual({
-          targets: [{
-            read_model_key: "cost_statistics",
-            scope_key: "active:all",
-            scope_type: "cost_statistics",
-          }],
-        });
-      }
+      expect(fetchMock.mock.calls.filter(([request]) => (
+        String(request).startsWith("/api/cost-statistics/explorer?")
+      )).length).toBeGreaterThan(explorerCallsBeforeEvent);
     });
-
-    await act(async () => releaseBarrier());
-
-    await waitFor(() => expect(fetchMock.mock.calls.filter(([request]) => (
-      String(request).startsWith("/api/cost-statistics/explorer?")
-    ))).toHaveLength(explorerCallsBeforeEvent + 1));
+    expect(fetchMock.mock.calls.filter(([request]) => (
+      String(request) === "/api/operation-barrier/status"
+    ))).toHaveLength(0);
     await waitForCostStatisticsReady();
   });
 

@@ -748,12 +748,11 @@ class PostgresStateStore:
         *,
         pair_relation_snapshot: dict[str, Any],
         no_oa_bank_batch_snapshot: dict[str, Any],
-        workbench_read_model_snapshot: dict[str, Any],
         changed_case_ids: set[str] | list[str] | tuple[str, ...],
         changed_scope_keys: set[str] | list[str] | tuple[str, ...],
     ) -> None:
         normalized_case_ids = {str(case_id).strip() for case_id in changed_case_ids if str(case_id).strip()}
-        normalized_scope_keys = {str(scope_key).strip() for scope_key in changed_scope_keys if str(scope_key).strip()}
+        _ = changed_scope_keys
 
         def write(_connection: Any) -> None:
             if normalized_case_ids:
@@ -762,10 +761,6 @@ class PostgresStateStore:
                     changed_case_ids=normalized_case_ids,
                 )
             self.save_no_oa_bank_batches(no_oa_bank_batch_snapshot)
-            self.save_workbench_read_models(
-                workbench_read_model_snapshot,
-                changed_scope_keys=normalized_scope_keys,
-            )
 
         run_in_transaction(self._connection, write)
 

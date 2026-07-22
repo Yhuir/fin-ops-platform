@@ -531,13 +531,7 @@ class TurnoverWorkbenchIntegrationTests(unittest.TestCase):
         self.assertEqual(payload["status"], "confirmed")
         self.assertNotIn("turnover_relation", payload)
         self.assertEqual(payload["workbench_pair_relation"]["relation_mode"], "turnover_manual_closure")
-        self.assertEqual(
-            payload["freshness_targets"],
-            [
-                {"read_model_key": "turnover_ledger", "scope_key": "2026-03"},
-                {"read_model_key": "workbench_relation", "scope_key": "2026-03"},
-            ],
-        )
+        self.assertEqual(payload["freshness_targets"], [])
         matching_paired_groups = [
             group
             for group in paired_groups

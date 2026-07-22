@@ -109,10 +109,8 @@ export async function confirmWorkbenchRelation(page: Page, recordLatency?: Opera
     actionType: "click",
   }, async (mark) => {
     const confirmResponse = page.waitForResponse(isPostTo("/api/workbench/actions/confirm-link"));
-    const barrierResponse = page.waitForResponse(isPostTo("/api/operation-barrier/status"));
     await previewDialog.getByRole("button", { name: "确认关联" }).click();
     await mark("apiLatencyMs", confirmResponse);
-    await mark("operationBarrierLatencyMs", barrierResponse);
     const pairedGroup = page.getByTestId("candidate-group-paired-case:CASE-202603-101");
     await mark("firstVisibleResponseLatencyMs", expect(pairedGroup).toBeVisible());
     await mark("finalSettledLatencyMs", expect(pairedGroup).toBeVisible());

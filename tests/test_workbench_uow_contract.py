@@ -446,18 +446,18 @@ class WorkbenchUoWContractTests(unittest.TestCase):
         idempotency_store: _RecordingIdempotencyStore | None = None,
         repository_factory: _RecordingRepositoryFactory | None = None,
     ) -> object:
+        _ = read_model_writer
         cls = self._uow_class()
         try:
             return cls(
                 connection=connection or _RecordingConnection(),
                 repository_factory=repository_factory or _RecordingRepositoryFactory(),
-                read_model_refresh_writer=read_model_writer or _RecordingDirtyOutboxWriter(),
                 idempotency_store=idempotency_store or _RecordingIdempotencyStore(),
             )
         except TypeError as exc:
             self.fail(
                 "WorkbenchWriteUnitOfWork constructor must accept connection, repository_factory, "
-                f"read_model_refresh_writer, and idempotency_store. Got: {exc}"
+                f"and idempotency_store. Got: {exc}"
             )
 
     def _run_uow(self, uow: object, command: _Command, handler: Callable[[object], object]) -> object:
@@ -503,48 +503,9 @@ class WorkbenchUoWContractTests(unittest.TestCase):
         self.assertEqual(event_payload["scope_type"], "workbench")
         self.assertEqual(event_payload["scope_key"], "2026-05")
 
-    def test_read_model_refresh_writer_uses_batch_repository_interface_when_available(self) -> None:
+    def test_workbench_uow_no_longer_owns_runtime_queue_refresh_writer(self) -> None:
         module = importlib.import_module("fin_ops_platform.services.workbench_uow")
-        writer_class = getattr(module, "RuntimeQueueReadModelRefreshWriter")
-        queue_repository = _BatchQueueRepository()
-        writer = writer_class(
-            queue_repository,
-            tenant_id="tenant-a",
-            priority="high",
-            trace_id="trace-batch",
-        )
-        transaction = _RecordingTransaction()
-
-        events = writer.enqueue_refreshes(
-            transaction=transaction,
-            targets=[
-                {"scope_type": "workbench", "scope_key": "2026-05", "reason": "workbench_relation_changed"},
-                {
-                    "scope_type": "workbench_relation",
-                    "scope_key": "2026-05",
-                    "reason": "workbench_pair_relation_changed",
-                    "metadata": {"action_name": "withdraw_link"},
-                },
-            ],
-        )
-
-        self.assertEqual([event["event_id"] for event in events], ["batch-event-1", "batch-event-2"])
-        self.assertEqual(queue_repository.single_calls, [])
-        self.assertEqual(len(queue_repository.batch_calls), 1)
-        self.assertIs(queue_repository.batch_calls[0]["transaction"], transaction)
-        self.assertEqual(queue_repository.batch_calls[0]["tenant_id"], "tenant-a")
-        self.assertEqual(queue_repository.batch_calls[0]["priority"], "high")
-        self.assertEqual(queue_repository.batch_calls[0]["trace_id"], "trace-batch")
-        self.assertEqual(
-            [
-                (refresh["scope_type"], refresh["scope_key"], refresh["reason"])
-                for refresh in queue_repository.batch_calls[0]["refreshes"]
-            ],
-            [
-                ("workbench", "2026-05", "workbench_relation_changed"),
-                ("workbench_relation", "2026-05", "workbench_pair_relation_changed"),
-            ],
-        )
+        self.assertFalse(hasattr(module, "RuntimeQueueReadModelRefreshWriter"))
 
     def test_read_model_refresh_writer_failure_rolls_back_transaction(self) -> None:
         connection = _RecordingConnection(_RecordingTransaction(fail_on_outbox=True))
@@ -564,7 +525,7 @@ class WorkbenchUoWContractTests(unittest.TestCase):
         self.assertEqual(connection.commits, 0)
         self.assertEqual(connection.rollbacks, 1)
 
-    def test_confirm_link_commits_pair_relation_history_dirty_scope_and_outbox_in_one_transaction(self) -> None:
+    def test_confirm_link_commits_pair_relation_history_without_downstream_jobs(self) -> None:
         connection = _RecordingConnection()
         writer = _RecordingDirtyOutboxWriter()
         factory = _RecordingRepositoryFactory()
@@ -584,17 +545,11 @@ class WorkbenchUoWContractTests(unittest.TestCase):
 
         self.assertEqual(connection.commits, 1)
         self.assertEqual(connection.rollbacks, 0)
-        self.assertEqual(writer.calls[0]["transaction"], connection.transaction_obj)
-        self.assertEqual(writer.calls[0]["reason"], "workbench_relation_changed")
-        self.assertEqual(writer.calls[0]["metadata"], {"action_name": "confirm_link"})
-        self.assertEqual(writer.calls[1]["scope_type"], "workbench_relation")
-        self.assertEqual(writer.calls[1]["scope_key"], "2026-05")
-        self.assertEqual(writer.calls[1]["reason"], "workbench_pair_relation_changed")
-        self.assertEqual(result["source_versions"]["2026-05"], 1)
-        self.assertEqual(result["source_versions"]["workbench_relation:2026-05"], 2)
-        self.assertEqual(result["outbox_event_ids"], ["event-1", "event-2"])
+        self.assertEqual(writer.calls, [])
+        self.assertEqual(result["source_versions"], {})
+        self.assertEqual(result["outbox_event_ids"], [])
 
-    def test_relation_write_uow_uses_batch_read_model_refresh_writer_when_available(self) -> None:
+    def test_relation_write_uow_never_calls_batch_read_model_refresh_writer(self) -> None:
         connection = _RecordingConnection()
         writer = _BatchRecordingDirtyOutboxWriter()
         uow = self._new_uow(connection=connection, read_model_writer=writer)
@@ -611,23 +566,11 @@ class WorkbenchUoWContractTests(unittest.TestCase):
 
         self.assertEqual(connection.commits, 1)
         self.assertEqual(writer.single_calls, [])
-        self.assertEqual(len(writer.batch_calls), 1)
-        self.assertIs(writer.batch_calls[0]["transaction"], connection.transaction_obj)
-        self.assertEqual(
-            [
-                (target["scope_type"], target["scope_key"], target["reason"])
-                for target in writer.batch_calls[0]["targets"]
-            ],
-            [
-                ("workbench", "2026-05", "workbench_relation_changed"),
-                ("workbench_relation", "2026-05", "workbench_pair_relation_changed"),
-            ],
-        )
-        self.assertEqual(result["source_versions"]["2026-05"], 1)
-        self.assertEqual(result["source_versions"]["workbench_relation:2026-05"], 2)
-        self.assertEqual(result["outbox_event_ids"], ["event-1", "event-2"])
+        self.assertEqual(writer.batch_calls, [])
+        self.assertEqual(result["source_versions"], {})
+        self.assertEqual(result["outbox_event_ids"], [])
 
-    def test_confirm_link_preserves_relation_refresh_metadata_in_transactional_outbox(self) -> None:
+    def test_confirm_link_refresh_metadata_cannot_restore_write_fan_out(self) -> None:
         connection = _RecordingConnection()
         writer = _RecordingDirtyOutboxWriter()
         uow = self._new_uow(connection=connection, read_model_writer=writer)
@@ -654,38 +597,11 @@ class WorkbenchUoWContractTests(unittest.TestCase):
             handler,
         )
 
-        self.assertEqual(result["outbox_event_ids"], ["event-1", "event-2", "event-3", "event-4", "event-5", "event-6"])
-        self.assertEqual(
-            [(call["scope_type"], call["scope_key"], call["reason"]) for call in writer.calls],
-            [
-                ("workbench", "2026-05", "workbench_relation_changed"),
-                ("workbench_relation", "2026-05", "workbench_pair_relation_changed"),
-                ("cost_statistics", "active:2026-05", "cost_statistics_relation_delta"),
-                ("bank_detail", "2026-05", "workbench_relation_changed"),
-                ("search", "2026-05", "workbench_relation_changed"),
-                ("pending_invoice", "expense:all:2026-05", "workbench_relation_changed"),
-            ],
-        )
-        self.assertEqual(writer.calls[0]["reason"], "workbench_relation_changed")
-        self.assertEqual(
-            writer.calls[0]["metadata"],
-            {
-                "source": "confirm_link",
-                "case_id": "CASE-1",
-                "row_ids": ["oa-1", "txn-1"],
-                "case_ids": ["CASE-1"],
-                "action_name": "confirm_link",
-                "relation_deltas": {
-                    "CASE-1": {"status": "active", "row_ids": ["oa-1", "txn-1"]},
-                },
-                "downstream_scope_types": ["bank_detail", "pending_invoice", "search"],
-                "invoice_usage_scope_types": ["input_invoice_usage"],
-                "pending_invoice_scope_keys": ["expense:all:2026-05"],
-            },
-        )
-        self.assertEqual(writer.calls[4]["metadata"], writer.calls[0]["metadata"])
+        self.assertEqual(result["outbox_event_ids"], [])
+        self.assertEqual(result["source_versions"], {})
+        self.assertEqual(writer.calls, [])
 
-    def test_withdraw_link_merges_handler_refresh_metadata_in_transactional_outbox(self) -> None:
+    def test_withdraw_link_handler_refresh_metadata_cannot_restore_write_fan_out(self) -> None:
         writer = _RecordingDirtyOutboxWriter()
         uow = self._new_uow(read_model_writer=writer)
 
@@ -711,31 +627,9 @@ class WorkbenchUoWContractTests(unittest.TestCase):
             handler,
         )
 
-        self.assertEqual(result["outbox_event_ids"], ["event-1", "event-2", "event-3", "event-4", "event-5"])
-        self.assertEqual(
-            [(call["scope_type"], call["scope_key"], call["reason"]) for call in writer.calls],
-            [
-                ("workbench", "2026-05", "workbench_relation_changed"),
-                ("workbench_relation", "2026-05", "workbench_pair_relation_changed"),
-                ("cost_statistics", "active:2026-05", "cost_statistics_relation_delta"),
-                ("bank_detail", "2026-05", "workbench_relation_changed"),
-                ("search", "2026-05", "workbench_relation_changed"),
-            ],
-        )
-        self.assertEqual(
-            writer.calls[0]["metadata"],
-            {
-                "source": "withdraw_link",
-                "case_id": "CASE-WITHDRAW",
-                "row_ids": ["oa-1", "txn-1"],
-                "action_name": "withdraw_link",
-                "relation_deltas": {
-                    "CASE-WITHDRAW": {"status": "cancelled", "row_ids": ["oa-1", "txn-1"]},
-                },
-                "downstream_scope_types": ["bank_detail", "search"],
-            },
-        )
-        self.assertEqual(writer.calls[3]["metadata"], writer.calls[0]["metadata"])
+        self.assertEqual(result["outbox_event_ids"], [])
+        self.assertEqual(result["source_versions"], {})
+        self.assertEqual(writer.calls, [])
 
     def test_confirm_link_without_row_identity_does_not_enqueue_cost_statistics_delta(self) -> None:
         writer = _RecordingDirtyOutboxWriter()
@@ -759,13 +653,7 @@ class WorkbenchUoWContractTests(unittest.TestCase):
             handler,
         )
 
-        self.assertEqual(
-            [(call["scope_type"], call["scope_key"]) for call in writer.calls],
-            [
-                ("workbench", "2026-05"),
-                ("workbench_relation", "2026-05"),
-            ],
-        )
+        self.assertEqual(writer.calls, [])
 
     def test_confirm_link_with_row_ids_but_without_case_identity_does_not_enqueue_cost_delta(self) -> None:
         writer = _RecordingDirtyOutboxWriter()
@@ -781,12 +669,9 @@ class WorkbenchUoWContractTests(unittest.TestCase):
             handler,
         )
 
-        self.assertEqual(
-            [(call["scope_type"], call["scope_key"]) for call in writer.calls],
-            [("workbench", "2026-05"), ("workbench_relation", "2026-05")],
-        )
+        self.assertEqual(writer.calls, [])
 
-    def test_confirm_link_outbox_failure_rolls_back_pair_relation_and_history(self) -> None:
+    def test_removed_outbox_writer_cannot_fail_or_roll_back_confirm_link(self) -> None:
         connection = _RecordingConnection()
         writer = _RecordingDirtyOutboxWriter(fail=True)
         uow = self._new_uow(connection=connection, read_model_writer=writer)
@@ -796,13 +681,14 @@ class WorkbenchUoWContractTests(unittest.TestCase):
             ctx.pair_relations.record("append_history", case_id="CASE-ROLLBACK")
             return {"case_id": "CASE-ROLLBACK", "affected_scope_keys": ["2026-05"]}
 
-        with self.assertRaises(RuntimeError):
-            self._run_uow(uow, _Command(action_name="confirm_link", scope_keys=["2026-05"]), handler)
+        result = self._run_uow(uow, _Command(action_name="confirm_link", scope_keys=["2026-05"]), handler)
 
-        self.assertEqual(connection.commits, 0)
-        self.assertEqual(connection.rollbacks, 1)
+        self.assertEqual(result["outbox_event_ids"], [])
+        self.assertEqual(writer.calls, [])
+        self.assertEqual(connection.commits, 1)
+        self.assertEqual(connection.rollbacks, 0)
 
-    def test_exception_apply_commits_case_override_dirty_scope_and_outbox_in_one_transaction(self) -> None:
+    def test_exception_apply_commits_owned_facts_without_downstream_jobs(self) -> None:
         connection = _RecordingConnection()
         writer = _RecordingDirtyOutboxWriter()
         uow = self._new_uow(connection=connection, read_model_writer=writer)
@@ -819,10 +705,11 @@ class WorkbenchUoWContractTests(unittest.TestCase):
         )
 
         self.assertEqual(connection.commits, 1)
-        self.assertEqual(writer.calls[0]["transaction"], connection.transaction_obj)
-        self.assertEqual(result["source_versions"]["2026-05"], 1)
+        self.assertEqual(writer.calls, [])
+        self.assertEqual(result["source_versions"], {})
+        self.assertEqual(result["outbox_event_ids"], [])
 
-    def test_personal_advance_repayment_rolls_back_case_and_relation_when_dirty_scope_fails(self) -> None:
+    def test_removed_dirty_scope_writer_cannot_fail_personal_advance_commit(self) -> None:
         connection = _RecordingConnection()
         writer = _RecordingDirtyOutboxWriter(fail=True)
         uow = self._new_uow(connection=connection, read_model_writer=writer)
@@ -832,15 +719,16 @@ class WorkbenchUoWContractTests(unittest.TestCase):
             ctx.pair_relations.record("save_relation", case_id="PERSONAL-1")
             return {"case_id": "PERSONAL-1", "affected_scope_keys": ["2026-05"]}
 
-        with self.assertRaises(RuntimeError):
-            self._run_uow(
-                uow,
-                _Command(action_name="confirm_personal_advance_repayment", scope_keys=["2026-05"]),
-                handler,
-            )
+        result = self._run_uow(
+            uow,
+            _Command(action_name="confirm_personal_advance_repayment", scope_keys=["2026-05"]),
+            handler,
+        )
 
-        self.assertEqual(connection.commits, 0)
-        self.assertEqual(connection.rollbacks, 1)
+        self.assertEqual(result["outbox_event_ids"], [])
+        self.assertEqual(writer.calls, [])
+        self.assertEqual(connection.commits, 1)
+        self.assertEqual(connection.rollbacks, 0)
 
     def test_withdraw_submit_rejects_stale_preview_relation_version(self) -> None:
         connection = _RecordingConnection()
@@ -961,7 +849,7 @@ class WorkbenchUoWContractTests(unittest.TestCase):
         self.assertEqual(call_count, 1)
         self.assertEqual(idempotency.records.get("confirm:idem-1"), first)
 
-    def test_exception_apply_idempotency_key_replays_first_result_without_duplicate_case_or_outbox(self) -> None:
+    def test_exception_apply_idempotency_key_replays_without_case_or_job_duplication(self) -> None:
         idempotency = _RecordingIdempotencyStore()
         writer = _RecordingDirtyOutboxWriter()
         uow = self._new_uow(idempotency_store=idempotency, read_model_writer=writer)
@@ -985,7 +873,7 @@ class WorkbenchUoWContractTests(unittest.TestCase):
         self._run_uow(uow, command, handler)
 
         self.assertEqual(call_count, 1)
-        self.assertEqual(len(writer.calls), 1)
+        self.assertEqual(writer.calls, [])
         self.assertIn("exception:idem-1", idempotency.records)
 
     def test_cash_special_idempotency_key_does_not_append_duplicate_history(self) -> None:
@@ -1103,7 +991,7 @@ class WorkbenchUoWContractTests(unittest.TestCase):
         self.assertEqual(result["case_id"], "CASE-RETRY")
         self.assertEqual(idempotency.reserve_calls[0]["transaction"], connection.transaction_obj)
         self.assertEqual(idempotency.commit_calls[0]["transaction"], connection.transaction_obj)
-        self.assertEqual(writer.calls[0]["transaction"], connection.transaction_obj)
+        self.assertEqual(writer.calls, [])
         self.assertEqual(connection.commits, 1)
         self.assertEqual(connection.rollbacks, 0)
 

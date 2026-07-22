@@ -1,5 +1,3 @@
-import { operationBarrierTargetsFromMonths } from "../operationBarrier/api";
-import type { OperationBarrierTarget } from "../operationBarrier/api";
 import type {
   BankFlowRuleBatch,
   BankFlowRuleBatchDetailRow,
@@ -10,7 +8,6 @@ import type {
 } from "./types";
 
 export const SELF_SUB_LABEL = "主标签本身";
-export const BANK_FLOW_RULE_BATCH_READ_MODEL_KEY = "bank_flow_rule_batch";
 
 export type BankFlowRuleTagNode = {
   code: string;
@@ -98,42 +95,11 @@ export function batchBlockingReason(_batch: BankFlowRuleBatch) {
 export function mutationEventDetail(result: {
   affectedMonths?: string[];
   affectedScopeKeys?: string[];
-  operationBarrierTargets?: OperationBarrierTarget[];
 }) {
   return {
     affectedMonths: result.affectedMonths ?? [],
     affectedScopeKeys: result.affectedScopeKeys ?? [],
-    operationBarrierTargets: result.operationBarrierTargets ?? [],
   };
-}
-
-export function mutationBarrierTargets(
-  result: {
-    affectedMonths?: string[];
-    freshnessTargets?: OperationBarrierTarget[];
-    operationBarrierTargets?: OperationBarrierTarget[];
-  },
-  fallbackScopeKey: string,
-) {
-  const selfTargets = [
-    ...(result.operationBarrierTargets ?? []),
-    ...(result.freshnessTargets ?? []),
-  ].filter((target) => target.readModelKey === BANK_FLOW_RULE_BATCH_READ_MODEL_KEY);
-  return selfTargets.length > 0
-    ? dedupeOperationTargets(selfTargets)
-    : operationBarrierTargetsFromMonths(BANK_FLOW_RULE_BATCH_READ_MODEL_KEY, result.affectedMonths ?? [], fallbackScopeKey);
-}
-
-function dedupeOperationTargets(targets: OperationBarrierTarget[]) {
-  const seen = new Set<string>();
-  return targets.filter((target) => {
-    const key = `${target.readModelKey}\u0000${target.scopeKey}\u0000${target.scopeType ?? ""}`;
-    if (seen.has(key)) {
-      return false;
-    }
-    seen.add(key);
-    return true;
-  });
 }
 
 export function cleanText(value: unknown) {

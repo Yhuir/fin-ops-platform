@@ -537,6 +537,16 @@ class CostStatisticsApiTests(unittest.TestCase):
             lambda scope_key: _cost_statistics_gate_snapshot(self.app, scope_key),
         )
         self.app._cost_statistics_sql_read_repository = self.cost_repository
+        self.app._cost_statistics_workbench_dependency_versions = self._workbench_dependency_versions
+
+    def _workbench_dependency_versions(
+        self,
+        scope_key: str,
+    ) -> tuple[dict[str, object], dict[str, object]]:
+        source_versions = dict(
+            _cost_statistics_gate_snapshot(self.app, f"active:{scope_key}")["workbench_source_versions"]
+        )
+        return source_versions, source_versions
 
     def _install_queue_recorder(self) -> _CostStatisticsQueueRecorder:
         queue = _CostStatisticsQueueRecorder()
@@ -1445,6 +1455,10 @@ class CostStatisticsApiTests(unittest.TestCase):
             lambda scope_key: _cost_statistics_gate_snapshot(app, scope_key),
         )
         app._cost_statistics_sql_read_repository = cost_repository
+        app._cost_statistics_workbench_dependency_versions = lambda scope_key: (
+            dict(_cost_statistics_gate_snapshot(app, f"active:{scope_key}")["workbench_source_versions"]),
+            dict(_cost_statistics_gate_snapshot(app, f"active:{scope_key}")["workbench_source_versions"]),
+        )
 
         _confirm_active_cost_relation(
             app,

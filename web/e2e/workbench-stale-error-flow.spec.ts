@@ -170,8 +170,7 @@ test.describe("workbench stale and error browser flow", () => {
     expect(api.count("POST /api/operation-barrier/status")).toBe(0);
   });
 
-  test("keeps committed preview error when the freshness barrier times out", async ({ page }) => {
-    await page.clock.install({ time: new Date("2026-06-18T00:00:00Z") });
+  test("does not let a legacy operation barrier block a committed relation", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
       sessionMode: "full_access",
       operationBarrierMode: "refreshing",
@@ -180,21 +179,15 @@ test.describe("workbench stale and error browser flow", () => {
     await page.goto("/");
 
     const { openGroup, previewDialog } = await openConfirmRelationPreview(page);
+    const workbenchLoadsBeforeSubmit = api.count("GET /api/workbench");
     await previewDialog.getByRole("button", { name: "确认关联" }).click();
 
-    await expect(previewDialog).toHaveAttribute("aria-busy", "true");
-    await expect(previewDialog.getByText("关系已写入，正在同步关联台最新数据...")).toBeVisible();
-    await page.clock.runFor(21_000);
-
-    await expect(previewDialog.getByRole("alert")).toContainText("关系已写入，关联台刷新未完成");
-    await expect(previewDialog.getByRole("alert")).toContainText("操作同步等待超时");
-    await expect(previewDialog.getByRole("button", { name: "重试" })).toHaveCount(0);
-    await expect(previewDialog.getByRole("button", { name: "关闭", exact: true })).toBeEnabled();
-    await expect(previewDialog.getByRole("textbox", { name: "备注" })).toBeDisabled();
-    await expect(openGroup).toBeVisible();
-    await expect(page.getByTestId("candidate-group-paired-case:CASE-202603-101")).toHaveCount(0);
+    await expect(previewDialog).toHaveCount(0);
+    await expect(openGroup).toHaveCount(0);
+    await expect(page.getByTestId("candidate-group-paired-case:CASE-202603-101")).toBeVisible();
     expect(api.count("POST /api/workbench/actions/confirm-link")).toBe(1);
-    expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(1);
+    expect(api.count("POST /api/operation-barrier/status")).toBe(0);
+    expect(api.count("GET /api/workbench")).toBeGreaterThan(workbenchLoadsBeforeSubmit);
   });
 
   test("keeps projected relation committed when the background fresh refetch fails", async ({ page }) => {
@@ -213,7 +206,7 @@ test.describe("workbench stale and error browser flow", () => {
     await expect(openGroup).toHaveCount(0);
     await expect(page.getByTestId("candidate-group-paired-case:CASE-202603-101")).toBeVisible();
     expect(api.count("POST /api/workbench/actions/confirm-link")).toBe(1);
-    expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(0);
+    expect(api.count("POST /api/operation-barrier/status")).toBe(0);
     expect(api.count("GET /api/workbench")).toBeGreaterThan(workbenchLoadsBeforeSubmit);
   });
 });

@@ -74,8 +74,6 @@ type ApiMockOptions = {
   bankFlowRuleBatchReadModelStatus?: BankFlowRuleBatchReadModelMockStatus;
   bankFlowRuleBatchReadModelStatuses?: BankFlowRuleBatchReadModelMockStatus[];
   bankFlowRuleBatchScenario?: BankFlowRuleBatchMockScenario;
-  bankFlowRuleMutationWorkbenchTargets?: boolean;
-  bankFlowRuleWorkbenchBarrierRefreshing?: boolean;
   settingsProjectScopeFanout?: boolean;
   turnoverCostFanout?: boolean;
   turnoverLedgerFailOnce?: boolean;
@@ -5725,24 +5723,8 @@ function bankFlowRuleInternalTransferDetailPayload(batch: Record<string, unknown
   };
 }
 
-function bankFlowRuleMutationTargets(includeWorkbenchTargets = false, scopeKey = "2026-05") {
-  const targets = [
-    { read_model_key: "bank_flow_rule_batch", scope_key: scopeKey },
-  ];
-  if (includeWorkbenchTargets) {
-    targets.push(
-      { read_model_key: "workbench_relation", scope_key: "all" },
-      { read_model_key: "workbench_relation", scope_key: scopeKey },
-      { read_model_key: "workbench", scope_key: "all" },
-      { read_model_key: "workbench", scope_key: scopeKey },
-    );
-  }
-  return targets;
-}
-
 function bankFlowRuleBatchMutationPayload(
   status: BankFlowRuleBrowserBatchStatus,
-  includeWorkbenchTargets = false,
   scopeKey = "2026-05",
 ) {
   return {
@@ -5750,9 +5732,9 @@ function bankFlowRuleBatchMutationPayload(
     affected_months: [scopeKey],
     affected_scope_keys: [scopeKey],
     read_model_scope_keys: [scopeKey],
-    freshness_targets: bankFlowRuleMutationTargets(includeWorkbenchTargets, scopeKey),
-    operation_barrier_targets: bankFlowRuleMutationTargets(includeWorkbenchTargets, scopeKey),
-    workbench_rebuild_queued: true,
+    freshness_targets: [],
+    operation_barrier_targets: [],
+    workbench_rebuild_queued: false,
     results: [],
   };
 }
@@ -6500,12 +6482,7 @@ function confirmResultPayload() {
     case_id: "CASE-202603-101",
     affected_months: ["2026-03"],
     affected_scope_keys: ["2026-03"],
-    freshness_targets: [
-      {
-        read_model_key: "workbench_relation",
-        scope_key: "2026-03",
-      },
-    ],
+    freshness_targets: [],
     operation_projection: {
       after: {
         paired_groups: [buildPairedWorkbenchGroup()],
@@ -6545,12 +6522,7 @@ function withdrawResultPayload() {
     case_id: "CASE-202603-101",
     affected_months: ["2026-03"],
     affected_scope_keys: ["2026-03"],
-    freshness_targets: [
-      {
-        read_model_key: "workbench_relation",
-        scope_key: "2026-03",
-      },
-    ],
+    freshness_targets: [],
     operation_projection: {
       after: {
         paired_groups: [],
@@ -6623,12 +6595,7 @@ function workbenchExceptionApplyResultPayload() {
     updated_rows: [],
     affected_row_ids: ["oa-o-202603-001", "bk-o-202603-001", "iv-o-202603-001"],
     affected_scope_keys: ["2026-03"],
-    freshness_targets: [
-      {
-        read_model_key: "workbench_relation",
-        scope_key: "2026-03",
-      },
-    ],
+    freshness_targets: [],
     workbench_refresh_required: true,
     message: "已提交统一异常处理。",
   };
@@ -6651,12 +6618,7 @@ function workbenchExceptionActionResultPayload(action: "cancel_exception" | "ign
     exception_case_id: "WEX-BROWSER-001",
     affected_months: ["2026-03"],
     affected_scope_keys: ["2026-03"],
-    freshness_targets: [
-      {
-        read_model_key: "workbench_relation",
-        scope_key: "2026-03",
-      },
-    ],
+    freshness_targets: [],
     message: messages[action],
   };
 }
@@ -6680,12 +6642,7 @@ function workbenchCashSpecialResultPayload(action: WorkbenchCashSpecialAction) {
     case_id: "CASE-202603-101",
     affected_months: ["2026-03"],
     affected_scope_keys: ["2026-03"],
-    freshness_targets: [
-      {
-        read_model_key: "workbench_relation",
-        scope_key: "2026-03",
-      },
-    ],
+    freshness_targets: [],
     operation_projection: {
       after: {
         paired_groups: [buildPairedWorkbenchGroup(true)],
@@ -6993,12 +6950,7 @@ function turnoverClosureMutationPayload() {
       relation_mode: "turnover_manual_closure",
     },
     affected_months: ["2026-05"],
-    freshness_targets: [
-      { read_model_key: "turnover_ledger", scope_key: "all" },
-      { read_model_key: "workbench_relation", scope_key: "2026-05" },
-      { read_model_key: "workbench", scope_key: "2026-05" },
-      { read_model_key: "workbench", scope_key: "all" },
-    ],
+    freshness_targets: [],
   };
 }
 
@@ -8504,15 +8456,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
     }
 
     if (path === "/api/operation-barrier/status") {
-      if (options.bankFlowRuleWorkbenchBarrierRefreshing) {
-        const body = parseJsonBody(request.postData()) as { targets?: Array<Record<string, unknown>> };
-        const hasWorkbenchTarget = Array.isArray(body.targets)
-          && body.targets.some((target) => {
-            const readModelKey = String(target.read_model_key ?? target.readModelKey ?? "");
-            return readModelKey === "workbench" || readModelKey === "workbench_relation";
-          });
-        return json(route, operationBarrierPayload(hasWorkbenchTarget ? "refreshing" : "fresh"));
-      }
       return json(route, operationBarrierPayload(options.operationBarrierMode));
     }
 
@@ -9337,9 +9280,9 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
         affected_months: ["2026-05"],
         affected_scope_keys: ["2026-05"],
         read_model_scope_keys: ["2026-05"],
-        freshness_targets: [{ read_model_key: "bank_flow_rule_batch", scope_key: "2026-05" }],
-        operation_barrier_targets: [{ read_model_key: "bank_flow_rule_batch", scope_key: "2026-05" }],
-        refresh_enqueued: true,
+        freshness_targets: [],
+        operation_barrier_targets: [],
+        refresh_enqueued: false,
       });
     }
 
@@ -9391,7 +9334,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       bankFlowRuleBatchStatus = "submitted";
       return json(route, bankFlowRuleBatchMutationPayload(
         bankFlowRuleBatchStatus,
-        Boolean(options.bankFlowRuleMutationWorkbenchTargets),
         bankFlowRuleMutationScope,
       ));
     }
@@ -9401,7 +9343,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       bankFlowRuleBatchStatus = "submitted";
       return json(route, bankFlowRuleBatchMutationPayload(
         bankFlowRuleBatchStatus,
-        Boolean(options.bankFlowRuleMutationWorkbenchTargets),
         bankFlowRuleMutationScope,
       ));
     }
@@ -9410,7 +9351,6 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
       bankFlowRuleBatchStatus = "withdrawn";
       return json(route, bankFlowRuleBatchMutationPayload(
         bankFlowRuleBatchStatus,
-        Boolean(options.bankFlowRuleMutationWorkbenchTargets),
         bankFlowRuleMutationScope,
       ));
     }

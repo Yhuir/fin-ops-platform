@@ -30,7 +30,7 @@ describe("batch accounting API", () => {
     expect(payload.readModelStatus).toBe("refreshing");
   });
 
-  test("maps mutation operation barrier targets", async () => {
+  test("keeps mutation scopes while the write response has no page rebuild targets", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response(JSON.stringify({
@@ -39,12 +39,8 @@ describe("batch accounting API", () => {
         affected_row_ids: ["bank-1", "oa-1"],
         affected_months: ["2026-05"],
         affected_scope_keys: ["2026-05"],
-        freshness_targets: [
-          { read_model_key: "workbench_relation", scope_key: "2026-05" },
-        ],
-        operation_barrier_targets: [
-          { read_model_key: "workbench_relation", scope_key: "2026-05" },
-        ],
+        freshness_targets: [],
+        operation_barrier_targets: [],
         message: "ok",
       }), { status: 200, headers: { "Content-Type": "application/json" } })),
     );
@@ -58,9 +54,7 @@ describe("batch accounting API", () => {
     });
 
     expect(payload.affectedScopeKeys).toEqual(["2026-05"]);
-    expect(payload.operationBarrierTargets).toEqual([
-      { readModelKey: "workbench_relation", scopeKey: "2026-05" },
-    ]);
+    expect(payload.operationBarrierTargets).toEqual([]);
     expect(fetch).toHaveBeenCalledWith(
       "/api/batch-accounting/submit",
       expect.objectContaining({

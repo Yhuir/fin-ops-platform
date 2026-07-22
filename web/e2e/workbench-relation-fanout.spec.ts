@@ -26,7 +26,7 @@ test.describe("workbench relation browser flow", () => {
 
     expect(api.count("POST /api/workbench/actions/confirm-link/preview")).toBe(1);
     expect(api.count("POST /api/workbench/actions/confirm-link")).toBe(1);
-    expect(api.count("POST /api/operation-barrier/status")).toBeGreaterThan(0);
+    expect(api.count("POST /api/operation-barrier/status")).toBe(0);
 
     await recordLatency({
       route: "/bank-details",

@@ -14,16 +14,6 @@ def _json(response):
     return json.loads(response.body)
 
 
-def _bank_flow_rule_batch_operation_barrier_targets(month: str) -> list[dict[str, str]]:
-    return [
-        {"read_model_key": "bank_flow_rule_batch", "scope_key": month},
-        {"read_model_key": "workbench_relation", "scope_key": "all"},
-        {"read_model_key": "workbench_relation", "scope_key": month},
-        {"read_model_key": "workbench", "scope_key": "all"},
-        {"read_model_key": "workbench", "scope_key": month},
-    ]
-
-
 class _ReadModelQueue:
     def __init__(self) -> None:
         self.enqueued: list[tuple[str, str, str]] = []
@@ -253,7 +243,7 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         self.assertEqual(enabled_batches["batches"], [])
         self.assertEqual(enabled_batches["read_model_status"], "unavailable")
         self.assertTrue(enabled_batches["refresh_enqueued"])
-        self.assertIn(("no_oa_bank_batch", "all", "no_oa_bank_batch_tag_selection_changed"), queue.enqueued)
+        self.assertNotIn(("no_oa_bank_batch", "all", "no_oa_bank_batch_tag_selection_changed"), queue.enqueued)
         self.assertIn(("no_oa_bank_batch", "all", "api_no_oa_read_model_unavailable"), queue.enqueued)
 
     def test_new_auto_tag_rule_is_available_but_not_selected_by_default(self) -> None:
@@ -456,7 +446,7 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         self.assertFalse(metadata["collapsed_bank_rows"])
         self.assertEqual(
             payload["operation_barrier_targets"],
-            _bank_flow_rule_batch_operation_barrier_targets("2026-05"),
+            [],
         )
 
     def test_bank_flow_rule_tag_rule_update_preserves_submitted_relation_history(self) -> None:
@@ -799,7 +789,7 @@ class NoOaBankBatchTagSelectionApiTests(unittest.TestCase):
         self.assertEqual(reset["results"], [{"batch_id": batch_id, "status": "withdrawn"}])
         self.assertEqual(
             reset["operation_barrier_targets"],
-            _bank_flow_rule_batch_operation_barrier_targets("2026-05"),
+            [],
         )
         self.assertEqual(app._bank_flow_rule_batch_service.get_batch(batch_id)["status"], "withdrawn")
         self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_row_id(row_id))

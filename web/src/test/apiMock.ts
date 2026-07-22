@@ -7158,9 +7158,8 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         case_id: typeof jsonBody?.case_id === "string" ? jsonBody.case_id : undefined,
         affected_months: Array.from(touchedMonths),
         affected_scope_keys: Array.from(touchedMonths),
-        freshness_targets: Array.from(touchedMonths).map((scopeKey) => (
-          { read_model_key: "workbench_relation", scope_key: scopeKey }
-        )),
+        freshness_targets: [],
+        operation_barrier_targets: [],
         operation_projection: operationProjection,
         message: `已确认 ${rowIds.length} 条记录关联。`,
       };
@@ -7216,9 +7215,8 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         restored_relations: [],
         changed_scopes: Array.from(touchedMonths),
         affected_scope_keys: Array.from(touchedMonths),
-        freshness_targets: Array.from(touchedMonths).map((scopeKey) => (
-          { read_model_key: "workbench_relation", scope_key: scopeKey }
-        )),
+        freshness_targets: [],
+        operation_barrier_targets: [],
         operation_projection: operationProjection,
         message: "已撤回 1 组关联。",
       };

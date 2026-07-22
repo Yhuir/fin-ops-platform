@@ -552,9 +552,9 @@ class NoOaBankBatchApiTests(unittest.TestCase):
             self.assertEqual(payload["affected_scope_keys"], ["2026-03"])
             self.assertEqual(
                 payload["operation_barrier_targets"],
-                [{"read_model_key": "no_oa_bank_batch", "scope_key": "2026-03"}],
+                [],
             )
-            self.assertTrue(payload["workbench_rebuild_queued"])
+            self.assertFalse(payload["workbench_rebuild_queued"])
             self.assertEqual(payload["results"][0]["status"], "submitted")
             self.assertEqual(app._state_store.load_no_oa_bank_batches()["batches"][batch["batch_id"]]["status"], "submitted")
             pair_relations = app._state_store.load().get("workbench_pair_relations", {}).get("pair_relations", {})
@@ -589,13 +589,7 @@ class NoOaBankBatchApiTests(unittest.TestCase):
         self.assertEqual(payload["pair_relation"]["relation_mode"], BANK_FLOW_RULE_BATCH_RELATION_MODE)
         self.assertEqual(
             payload["operation_barrier_targets"],
-            [
-                {"read_model_key": BANK_FLOW_RULE_BATCH_RELATION_MODE, "scope_key": "2026-03"},
-                {"read_model_key": "workbench_relation", "scope_key": "all"},
-                {"read_model_key": "workbench_relation", "scope_key": "2026-03"},
-                {"read_model_key": "workbench", "scope_key": "all"},
-                {"read_model_key": "workbench", "scope_key": "2026-03"},
-            ],
+            [],
         )
         self.assertEqual([item["batch_id"] for item in submitted_payload["batches"]], [payload["batch"]["batch_id"]])
         self.assertEqual(submitted_payload["batches"][0]["relation_mode"], BANK_FLOW_RULE_BATCH_RELATION_MODE)
@@ -669,8 +663,8 @@ class NoOaBankBatchApiTests(unittest.TestCase):
         self.assertEqual(payload["pair_relation"]["relation_mode"], "no_oa_bank_batch")
         self.assertEqual(payload["pair_relation"]["row_ids"], ["bank-202603-fee-1"])
         self.assertEqual(payload["affected_months"], ["2026-03"])
-        self.assertEqual(payload["freshness_targets"], [{"read_model_key": "no_oa_bank_batch", "scope_key": "2026-03"}])
-        self.assertTrue(payload["workbench_rebuild_queued"])
+        self.assertEqual(payload["freshness_targets"], [])
+        self.assertFalse(payload["workbench_rebuild_queued"])
 
     def test_withdraw_cancels_pair_relation_and_persists_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -697,7 +691,7 @@ class NoOaBankBatchApiTests(unittest.TestCase):
             self.assertEqual(payload["read_model_scope_keys"], ["2026-03"])
             self.assertEqual(
                 payload["operation_barrier_targets"],
-                [{"read_model_key": "no_oa_bank_batch", "scope_key": "2026-03"}],
+                [],
             )
             self.assertEqual(payload["pair_relation"]["status"], "cancelled")
             self.assertIsNone(app._workbench_pair_relation_service.get_active_relation_by_case_id(submitted["relation_case_id"]))
@@ -745,7 +739,7 @@ class NoOaBankBatchApiTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["failed"], 1)
         self.assertEqual(payload["affected_months"], ["2026-03"])
         self.assertEqual(payload["affected_scope_keys"], ["2026-03"])
-        self.assertEqual(payload["freshness_targets"], [{"read_model_key": "no_oa_bank_batch", "scope_key": "2026-03"}])
+        self.assertEqual(payload["freshness_targets"], [])
         self.assertEqual([result["status"] for result in payload["results"]], ["submitted", "failed"])
         self.assertEqual(payload["results"][1]["error"], "no_oa_bank_batch_version_conflict")
 

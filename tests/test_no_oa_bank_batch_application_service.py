@@ -862,7 +862,7 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
         self.assertEqual(call["special_metadata"]["batch_type"], "internal_transfer")
         self.assertEqual(call["display_tags"], ["免OA", "内部往来款"])
 
-    def test_after_mutation_persists_changed_cases_and_expanded_workbench_scopes(self) -> None:
+    def test_after_mutation_persists_changed_cases_and_exact_source_scopes(self) -> None:
         lifecycle_events: list[dict[str, object]] = []
         cache_clears: list[str] = []
 
@@ -902,28 +902,16 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
             action_name="no_oa_bank_batch_withdraw",
         )
 
-        self.assertTrue(changed)
-        self.assertEqual(
-            lifecycle_events,
-            [
-                {
-                    "event_type": "no_oa_bank_batch_changed",
-                    "months": ["2026-05", "2026-06"],
-                    "metadata": {
-                        "source": "no_oa_bank_batch",
-                        "action_name": "no_oa_bank_batch_withdraw",
-                    },
-                }
-            ],
-        )
-        self.assertEqual(cache_clears, ["search"])
+        self.assertFalse(changed)
+        self.assertEqual(lifecycle_events, [])
+        self.assertEqual(cache_clears, [])
         self.assertEqual(len(state_store.saved_mutations), 1)
         saved = state_store.saved_mutations[0]
         self.assertEqual(saved["changed_case_ids"], ["case-001", "case-002"])
-        self.assertEqual(saved["changed_scope_keys"], ["expanded:all", "expanded:2026-05", "expanded:2026-06"])
+        self.assertEqual(saved["changed_scope_keys"], ["2026-05", "2026-06"])
         self.assertEqual(saved["pair_relation_snapshot"], {"relations": ["case-001", "case-002"]})
         self.assertEqual(saved["no_oa_bank_batch_snapshot"], {"batches": {}})
-        self.assertEqual(saved["workbench_read_model_snapshot"], {"workbench": "snapshot"})
+        self.assertNotIn("workbench_read_model_snapshot", saved)
 
     def test_after_mutation_without_atomic_persistence_boundary_fails_fast(self) -> None:
         class BroadOnlyStateStore:
@@ -982,7 +970,7 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
 
         changed = service.after_mutation(["2026-05"], changed_case_ids=["case-001"], persist=False)
 
-        self.assertTrue(changed)
+        self.assertFalse(changed)
         self.assertEqual(lifecycle_events[0]["event_type"], "no_oa_bank_batch_changed")
         self.assertEqual(lifecycle_events[0]["months"], ["2026-05"])
 

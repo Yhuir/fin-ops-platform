@@ -6,11 +6,6 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any, Callable
 
-from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
-from fin_ops_platform.services.read_model_scope_policy import (
-    DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY,
-    ReadModelScopePolicyRegistry,
-)
 from fin_ops_platform.services.read_model_write_targets import write_target_envelope
 from fin_ops_platform.services.turnover_bank_row_version import turnover_bank_row_version
 from fin_ops_platform.services.turnover_ledger_write_facade import TurnoverLedgerWriteFacade
@@ -318,17 +313,13 @@ class TurnoverLedgerTagSelectionPrimaryWriteFacadeBuilder:
         self,
         *,
         state_store: Any,
-        queue_repository: Any,
         app_settings_service: Any,
-        tenant_id: str,
         postgres_settings_repository_factory: Callable[[Any], Any],
         postgres_idempotency_store_factory: Callable[[Any], Any],
         local_idempotency_store_provider: Callable[[], Any],
     ) -> None:
         self._state_store = state_store
-        self._queue_repository = queue_repository
         self._app_settings_service = app_settings_service
-        self._tenant_id = tenant_id
         self._postgres_settings_repository_factory = postgres_settings_repository_factory
         self._postgres_idempotency_store_factory = postgres_idempotency_store_factory
         self._local_idempotency_store_provider = local_idempotency_store_provider
@@ -337,15 +328,10 @@ class TurnoverLedgerTagSelectionPrimaryWriteFacadeBuilder:
         storage_backend = str(getattr(self._state_store, "storage_backend", "") or "").strip()
         if storage_backend == "postgres":
             connection = getattr(self._state_store, "_connection", None)
-            enqueue_in_transaction = getattr(self._queue_repository, "enqueue_read_model_refresh_in_transaction", None)
-            if connection is None or not callable(enqueue_in_transaction):
+            if connection is None:
                 return None
             settings_port = TurnoverLedgerTagSelectionSettingsAdapter(
                 repository_factory=self._postgres_settings_repository_factory
-            )
-            dirty_outbox_writer = TurnoverLedgerDirtyOutboxWriter(
-                queue_repository=self._queue_repository,
-                tenant_id=self._tenant_id,
             )
             idempotency_store = self._postgres_idempotency_store_factory(connection)
         else:
@@ -354,9 +340,6 @@ class TurnoverLedgerTagSelectionPrimaryWriteFacadeBuilder:
             )
             connection = local_adapters.connection()
             settings_port = local_adapters.settings_writer()
-            dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(
-                queue_repository=self._queue_repository
-            )
             idempotency_store = self._local_idempotency_store_provider()
         uow = TurnoverLedgerWriteUnitOfWork(
             connection=connection,
@@ -364,7 +347,6 @@ class TurnoverLedgerTagSelectionPrimaryWriteFacadeBuilder:
             extra_repository=SimpleNamespace(),
             settings_port=settings_port,
             bankdetail_port=SimpleNamespace(),
-            dirty_outbox_writer=dirty_outbox_writer,
             stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None),
             idempotency_store=idempotency_store,
         )
@@ -379,14 +361,12 @@ class TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder:
         self,
         *,
         state_store: Any,
-        queue_repository: Any,
         relation_service: Any,
         routes: Any,
         bank_rows_provider: Callable[[], list[dict[str, object]]],
         bank_rows_by_ids_provider: Callable[[list[str]], list[dict[str, object]]],
         replace_snapshot: Callable[[dict[str, object]], None],
         emit_persistence_warning: Callable[..., None],
-        tenant_id: str,
         persistence_repository_factory: Callable[[Any], Any],
         postgres_idempotency_store_factory: Callable[[Any], Any],
         local_idempotency_store_provider: Callable[[], Any],
@@ -395,14 +375,12 @@ class TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder:
         relation_facade: Any | None = None,
     ) -> None:
         self._state_store = state_store
-        self._queue_repository = queue_repository
         self._relation_service = relation_service
         self._routes = routes
         self._bank_rows_provider = bank_rows_provider
         self._bank_rows_by_ids_provider = bank_rows_by_ids_provider
         self._replace_snapshot = replace_snapshot
         self._emit_persistence_warning = emit_persistence_warning
-        self._tenant_id = tenant_id
         self._persistence_repository_factory = persistence_repository_factory
         self._postgres_idempotency_store_factory = postgres_idempotency_store_factory
         self._local_idempotency_store_provider = local_idempotency_store_provider
@@ -414,18 +392,13 @@ class TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder:
         storage_backend = str(getattr(self._state_store, "storage_backend", "") or "").strip()
         if storage_backend == "postgres":
             connection = getattr(self._state_store, "_connection", None)
-            enqueue_in_transaction = getattr(self._queue_repository, "enqueue_read_model_refresh_in_transaction", None)
-            if connection is None or not callable(enqueue_in_transaction):
+            if connection is None:
                 return None
             relation_repository = TurnoverLedgerRelationWritePort(
                 relation_service=self._relation_service,
                 routes=self._routes,
                 bank_rows_by_ids_provider=self._bank_rows_by_ids_provider,
                 persistence_repository_factory=self._persistence_repository_factory,
-            )
-            dirty_outbox_writer = TurnoverLedgerDirtyOutboxWriter(
-                queue_repository=self._queue_repository,
-                tenant_id=self._tenant_id,
             )
             idempotency_store = self._postgres_idempotency_store_factory(connection)
             workbench_pair_port = (
@@ -437,8 +410,6 @@ class TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder:
                 else None
             )
         else:
-            if not ReadModelRefreshGateway(queue_repository=self._queue_repository).can_enqueue():
-                return None
             local_adapters = TurnoverLedgerLocalWithdrawRelationAdapterSet(
                 state_store=self._state_store,
                 relation_service=self._relation_service,
@@ -457,9 +428,6 @@ class TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder:
                 else local_adapters.connection()
             )
             relation_repository = local_adapters.relation_repository()
-            dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(
-                queue_repository=self._queue_repository
-            )
             idempotency_store = self._local_idempotency_store_provider()
             workbench_pair_port = (
                 TurnoverLedgerWorkbenchPairPort(
@@ -478,7 +446,6 @@ class TurnoverLedgerWithdrawPrimaryWriteFacadeBuilder:
             extra_repository=SimpleNamespace(),
             settings_port=SimpleNamespace(),
             bankdetail_port=SimpleNamespace(),
-            dirty_outbox_writer=dirty_outbox_writer,
             stale_precondition_port=stale_precondition_port,
             idempotency_store=idempotency_store,
             workbench_pair_port=workbench_pair_port,
@@ -491,14 +458,12 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
         self,
         *,
         state_store: Any,
-        queue_repository: Any,
         relation_service: Any,
         routes: Any,
         bank_rows_provider: Callable[[], list[dict[str, object]]],
         bank_rows_by_ids_provider: Callable[[list[str]], list[dict[str, object]]],
         replace_snapshot: Callable[[dict[str, object]], None],
         emit_persistence_warning: Callable[..., None],
-        tenant_id: str,
         persistence_repository_factory: Callable[[Any], Any],
         postgres_idempotency_store_factory: Callable[[Any], Any],
         local_idempotency_store_provider: Callable[[], Any],
@@ -508,14 +473,12 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
         relation_facade: Any | None = None,
     ) -> None:
         self._state_store = state_store
-        self._queue_repository = queue_repository
         self._relation_service = relation_service
         self._routes = routes
         self._bank_rows_provider = bank_rows_provider
         self._bank_rows_by_ids_provider = bank_rows_by_ids_provider
         self._replace_snapshot = replace_snapshot
         self._emit_persistence_warning = emit_persistence_warning
-        self._tenant_id = tenant_id
         self._persistence_repository_factory = persistence_repository_factory
         self._postgres_idempotency_store_factory = postgres_idempotency_store_factory
         self._local_idempotency_store_provider = local_idempotency_store_provider
@@ -531,18 +494,13 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
         )
         if storage_backend == "postgres":
             connection = getattr(self._state_store, "_connection", None)
-            enqueue_in_transaction = getattr(self._queue_repository, "enqueue_read_model_refresh_in_transaction", None)
-            if connection is None or not callable(enqueue_in_transaction):
+            if connection is None:
                 return None
             relation_repository = TurnoverLedgerRelationWritePort(
                 relation_service=self._relation_service,
                 routes=self._routes,
                 bank_rows_by_ids_provider=bank_row_selection_port.rows_by_ids,
                 persistence_repository_factory=self._persistence_repository_factory,
-            )
-            dirty_outbox_writer = TurnoverLedgerDirtyOutboxWriter(
-                queue_repository=self._queue_repository,
-                tenant_id=self._tenant_id,
             )
             idempotency_store = self._postgres_idempotency_store_factory(connection)
             workbench_pair_port = (
@@ -556,8 +514,6 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
                 else None
             )
         else:
-            if not ReadModelRefreshGateway(queue_repository=self._queue_repository).can_enqueue():
-                return None
             local_adapters = TurnoverLedgerLocalConfirmRelationAdapterSet(
                 state_store=self._state_store,
                 relation_service=self._relation_service,
@@ -578,9 +534,6 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
                 else local_adapters.connection()
             )
             relation_repository = local_adapters.relation_repository()
-            dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(
-                queue_repository=self._queue_repository
-            )
             idempotency_store = self._local_idempotency_store_provider()
             workbench_pair_port = (
                 TurnoverLedgerWorkbenchPairPort(
@@ -599,7 +552,6 @@ class TurnoverLedgerConfirmPrimaryWriteFacadeBuilder:
             extra_repository=SimpleNamespace(),
             settings_port=SimpleNamespace(),
             bankdetail_port=SimpleNamespace(),
-            dirty_outbox_writer=dirty_outbox_writer,
             stale_precondition_port=stale_precondition_port,
             idempotency_store=idempotency_store,
             workbench_pair_port=workbench_pair_port,
@@ -612,28 +564,24 @@ class TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder:
         self,
         *,
         state_store: Any,
-        queue_repository: Any,
         category_service: Any,
         relation_service: Any,
         bank_rows_provider: Callable[[], list[dict[str, object]]],
         replace_category_snapshot: Callable[[dict[str, object]], None],
         replace_relation_snapshot: Callable[[dict[str, object]], None],
         emit_persistence_warning: Callable[..., None],
-        tenant_id: str,
         persistence_repository_factory: Callable[[Any], Any],
         category_mutation_writer: Any | None,
         postgres_idempotency_store_factory: Callable[[Any], Any],
         local_idempotency_store_provider: Callable[[], Any],
     ) -> None:
         self._state_store = state_store
-        self._queue_repository = queue_repository
         self._category_service = category_service
         self._relation_service = relation_service
         self._bank_rows_provider = bank_rows_provider
         self._replace_category_snapshot = replace_category_snapshot
         self._replace_relation_snapshot = replace_relation_snapshot
         self._emit_persistence_warning = emit_persistence_warning
-        self._tenant_id = tenant_id
         self._persistence_repository_factory = persistence_repository_factory
         self._category_mutation_writer = category_mutation_writer
         self._postgres_idempotency_store_factory = postgres_idempotency_store_factory
@@ -643,8 +591,7 @@ class TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder:
         storage_backend = str(getattr(self._state_store, "storage_backend", "") or "").strip()
         if storage_backend == "postgres":
             connection = getattr(self._state_store, "_connection", None)
-            enqueue_in_transaction = getattr(self._queue_repository, "enqueue_read_model_refresh_in_transaction", None)
-            if connection is None or not callable(enqueue_in_transaction):
+            if connection is None:
                 return None
             bankdetail_port = TurnoverLedgerBankdetailWritePort(
                 category_service=self._category_service,
@@ -653,14 +600,8 @@ class TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder:
                 persistence_repository_factory=self._persistence_repository_factory,
                 category_mutation_writer=self._category_mutation_writer,
             )
-            dirty_outbox_writer = TurnoverLedgerDirtyOutboxWriter(
-                queue_repository=self._queue_repository,
-                tenant_id=self._tenant_id,
-            )
             idempotency_store = self._postgres_idempotency_store_factory(connection)
         else:
-            if not ReadModelRefreshGateway(queue_repository=self._queue_repository).can_enqueue():
-                return None
             local_adapters = TurnoverLedgerLocalBankRowTagsAdapterSet(
                 state_store=self._state_store,
                 category_service=self._category_service,
@@ -672,9 +613,6 @@ class TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder:
             )
             connection = local_adapters.connection()
             bankdetail_port = local_adapters.bankdetail_port()
-            dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(
-                queue_repository=self._queue_repository
-            )
             idempotency_store = self._local_idempotency_store_provider()
         uow = TurnoverLedgerWriteUnitOfWork(
             connection=connection,
@@ -682,7 +620,6 @@ class TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder:
             extra_repository=SimpleNamespace(),
             settings_port=SimpleNamespace(),
             bankdetail_port=bankdetail_port,
-            dirty_outbox_writer=dirty_outbox_writer,
             stale_precondition_port=SimpleNamespace(assert_current=lambda **_kwargs: None),
             idempotency_store=idempotency_store,
         )
@@ -694,27 +631,23 @@ class TurnoverLedgerRelationExtraPrimaryWriteFacadeBuilder:
         self,
         *,
         state_store: Any,
-        queue_repository: Any,
         routes: Any,
         replace_snapshot: Callable[[dict[str, object]], None],
         emit_persistence_warning: Callable[..., None],
         extra_service: Any,
         row_provider: Callable[..., dict[str, object] | None],
         current_extra_reader: Callable[[str], dict[str, object]],
-        tenant_id: str,
         postgres_extra_repository_factory: Callable[[Any], Any],
         postgres_idempotency_store_factory: Callable[[Any], Any],
         local_idempotency_store_provider: Callable[[], Any],
     ) -> None:
         self._state_store = state_store
-        self._queue_repository = queue_repository
         self._routes = routes
         self._replace_snapshot = replace_snapshot
         self._emit_persistence_warning = emit_persistence_warning
         self._extra_service = extra_service
         self._row_provider = row_provider
         self._current_extra_reader = current_extra_reader
-        self._tenant_id = tenant_id
         self._postgres_extra_repository_factory = postgres_extra_repository_factory
         self._postgres_idempotency_store_factory = postgres_idempotency_store_factory
         self._local_idempotency_store_provider = local_idempotency_store_provider
@@ -723,20 +656,13 @@ class TurnoverLedgerRelationExtraPrimaryWriteFacadeBuilder:
         storage_backend = str(getattr(self._state_store, "storage_backend", "") or "").strip()
         if storage_backend == "postgres":
             connection = getattr(self._state_store, "_connection", None)
-            enqueue_in_transaction = getattr(self._queue_repository, "enqueue_read_model_refresh_in_transaction", None)
-            if connection is None or not callable(enqueue_in_transaction):
+            if connection is None:
                 return None
             extra_repository = TurnoverLedgerExtraRepositoryAdapter(
                 repository_factory=self._postgres_extra_repository_factory
             )
-            dirty_outbox_writer = TurnoverLedgerDirtyOutboxWriter(
-                queue_repository=self._queue_repository,
-                tenant_id=self._tenant_id,
-            )
             idempotency_store = self._postgres_idempotency_store_factory(connection)
         else:
-            if not ReadModelRefreshGateway(queue_repository=self._queue_repository).can_enqueue():
-                return None
             local_adapters = TurnoverLedgerLocalRelationExtraAdapterSet(
                 state_store=self._state_store,
                 routes=self._routes,
@@ -745,9 +671,6 @@ class TurnoverLedgerRelationExtraPrimaryWriteFacadeBuilder:
             )
             connection = local_adapters.connection()
             extra_repository = local_adapters.extra_repository()
-            dirty_outbox_writer = TurnoverLedgerLocalDirtyOutboxWriter(
-                queue_repository=self._queue_repository
-            )
             idempotency_store = self._local_idempotency_store_provider()
         uow = TurnoverLedgerWriteUnitOfWork(
             connection=connection,
@@ -755,7 +678,6 @@ class TurnoverLedgerRelationExtraPrimaryWriteFacadeBuilder:
             extra_repository=extra_repository,
             settings_port=SimpleNamespace(),
             bankdetail_port=SimpleNamespace(),
-            dirty_outbox_writer=dirty_outbox_writer,
             stale_precondition_port=TurnoverLedgerRelationExtraStalePreconditionPort(
                 current_extra_reader=self._current_extra_reader
             ),
@@ -816,37 +738,12 @@ class TurnoverLedgerLocalRelationExtraAdapterSet:
             )
 
 
-def _turnover_closure_visibility_freshness_targets(affected_months: list[str]) -> list[dict[str, str]]:
-    normalized_months: list[str] = []
-    for month in list(affected_months or []):
-        scope_key = str(month or "").strip()
-        if not scope_key or scope_key == "all" or scope_key in normalized_months:
-            continue
-        normalized_months.append(scope_key)
-    if not normalized_months:
-        return [{"read_model_key": "turnover_ledger", "scope_key": "all"}]
-    return [
-        *[
-            {"read_model_key": "turnover_ledger", "scope_key": scope_key}
-            for scope_key in normalized_months
-        ],
-        *[
-            {"read_model_key": "workbench_relation", "scope_key": scope_key}
-            for scope_key in normalized_months
-        ],
-    ]
-
-
 def _turnover_write_target_envelope(
     affected_months: list[str],
-    *,
-    targets: list[dict[str, str]] | None = None,
 ) -> dict[str, object]:
     return write_target_envelope(
         scope_keys=list(affected_months or []),
-        targets=targets
-        if targets is not None
-        else _turnover_closure_visibility_freshness_targets(affected_months),
+        targets=[],
         fallback_scope_key="all",
     )
 
@@ -930,10 +827,7 @@ class TurnoverLedgerConfirmRequestBoundaryFacade:
             raise RuntimeError("turnover ledger closure facade is not configured.")
         payload = dict(confirm(**closure_kwargs) or {})
         payload["affected_months"] = list(affected_months)
-        payload["freshness_targets"] = _turnover_closure_visibility_freshness_targets(
-            affected_months
-        )
-        payload.update(_turnover_write_target_envelope(affected_months, targets=payload["freshness_targets"]))
+        payload.update(_turnover_write_target_envelope(affected_months))
         return payload
 
     def withdraw_cash_closure_case_from_request(
@@ -1005,8 +899,7 @@ class TurnoverLedgerConfirmRequestBoundaryFacade:
             withdraw_kwargs["idempotency_key"] = idempotency_key
         payload = dict(withdraw(**withdraw_kwargs) or {})
         payload["affected_months"] = affected_months
-        payload["freshness_targets"] = _turnover_closure_visibility_freshness_targets(affected_months)
-        payload.update(_turnover_write_target_envelope(affected_months, targets=payload["freshness_targets"]))
+        payload.update(_turnover_write_target_envelope(affected_months))
         return payload
 
 
@@ -1318,12 +1211,7 @@ class TurnoverLedgerTagSelectionRequestBoundaryFacade:
             )
             or {}
         )
-        payload.update(
-            _turnover_write_target_envelope(
-                ["all"],
-                targets=[{"read_model_key": "turnover_ledger", "scope_key": "all"}],
-            )
-        )
+        payload.update(_turnover_write_target_envelope(["all"]))
         return payload
 
 
@@ -2199,106 +2087,6 @@ class TurnoverLedgerBankdetailWritePort:
 
     def commit_in_memory(self) -> None:
         self._pending_category_snapshot = None
-
-
-class TurnoverLedgerDirtyOutboxWriter:
-    def __init__(
-        self,
-        *,
-        queue_repository: Any,
-        tenant_id: str = "default",
-        priority: str = "normal",
-        trace_id: str | None = None,
-        scope_policy_registry: ReadModelScopePolicyRegistry = DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY,
-    ) -> None:
-        self._queue_repository = queue_repository
-        self._tenant_id = str(tenant_id or "default")
-        self._priority = str(priority or "normal")
-        self._trace_id = str(trace_id).strip() if trace_id else None
-        self._scope_policy_registry = scope_policy_registry
-
-    def enqueue_refreshes(
-        self,
-        *,
-        transaction: Any,
-        refreshes: list[dict[str, object]],
-    ) -> list[Any]:
-        enqueue = getattr(self._queue_repository, "enqueue_read_model_refreshes_in_transaction", None)
-        if not callable(enqueue):
-            raise RuntimeError("queue_repository must expose enqueue_read_model_refreshes_in_transaction.")
-        targets: list[dict[str, object]] = []
-        for refresh in list(refreshes or []):
-            if not isinstance(refresh, dict):
-                raise TypeError("turnover refresh request must be a dict.")
-            scope_type = str(refresh.get("scope_type") or "").strip()
-            payload = refresh.get("payload") if isinstance(refresh.get("payload"), dict) else {}
-            scope_keys = self._scope_policy_registry.normalize_and_validate(
-                scope_type,
-                [str(scope_key or "all") for scope_key in list(refresh.get("scope_keys") or ["all"])],
-            )
-            metadata = _turnover_refresh_metadata(payload)
-            targets.extend(
-                {
-                    "scope_type": scope_type,
-                    "scope_key": scope_key,
-                    "reason": str(refresh.get("reason") or "read_model_refresh"),
-                    **({"metadata": metadata} if metadata else {}),
-                }
-                for scope_key in scope_keys
-            )
-        return list(
-            enqueue(
-                transaction=transaction,
-                refreshes=targets,
-                tenant_id=self._tenant_id,
-                priority=self._priority,
-                trace_id=self._trace_id,
-            )
-        )
-
-
-class TurnoverLedgerLocalDirtyOutboxWriter:
-    def __init__(self, *, queue_repository: Any) -> None:
-        self._queue_repository = queue_repository
-
-    def enqueue_refreshes(
-        self,
-        *,
-        transaction: Any,
-        refreshes: list[dict[str, object]],
-    ) -> list[Any]:
-        _ = transaction
-        refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
-        if not refresh_gateway.can_enqueue():
-            raise RuntimeError("queue_repository must expose enqueue_read_model_refresh.")
-        events: list[Any] = []
-        for refresh in list(refreshes or []):
-            if not isinstance(refresh, dict):
-                raise TypeError("turnover refresh request must be a dict.")
-            reason = str(refresh.get("reason") or "read_model_refresh")
-            refresh_reason = "turnover_relation_extra_changed" if reason == "relation_extra_update" else reason
-            payload = refresh.get("payload") if isinstance(refresh.get("payload"), dict) else {}
-            events.extend(
-                refresh_gateway.enqueue_many_events(
-                    str(refresh.get("scope_type") or ""),
-                    [str(scope_key or "all") for scope_key in list(refresh.get("scope_keys") or ["all"])],
-                    reason=refresh_reason,
-                    metadata=_turnover_refresh_metadata(payload),
-                )
-            )
-        return events
-
-
-def _turnover_refresh_metadata(payload: dict[str, object]) -> dict[str, object]:
-    metadata = {
-        "action_name": str(payload.get("action_name") or "").strip(),
-        "row_ids": list(payload.get("row_ids") or []),
-        "case_ids": list(payload.get("case_ids") or []),
-        "relation_deltas": dict(payload.get("relation_deltas") or {})
-        if isinstance(payload.get("relation_deltas"), dict)
-        else {},
-    }
-    return {key: value for key, value in metadata.items() if value}
 
 
 class TurnoverLedgerLocalRelationExtraConnection:

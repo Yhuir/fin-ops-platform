@@ -1007,49 +1007,9 @@ describe("Workbench row selection and detail drawer", () => {
     );
   });
 
-  test("workbench action uses operation-scoped freshness targets and backend projection", async () => {
+  test("workbench action applies backend projection and never calls the operation barrier", async () => {
     const user = userEvent.setup();
-    const baseFetchMock = installMockApiFetch({ actionDelayMs: 20, workbenchBackgroundLoadDelayMs: 180 });
-    let barrierPollCount = 0;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (fetchPath(input).startsWith("/api/operation-barrier/status")) {
-        barrierPollCount += 1;
-        const fresh = barrierPollCount >= 9;
-        return jsonResponse({
-          status: fresh ? "fresh" : "refreshing",
-          fresh,
-          targets: [
-            {
-              read_model_key: "workbench_relation",
-              scope_type: "workbench_relation",
-              scope_key: "2026-03",
-              status: fresh ? "fresh" : "refreshing",
-              fresh,
-              blocking: !fresh,
-              raw_status: fresh ? "fresh" : "pending",
-              reason: fresh ? undefined : "refresh outbox pending",
-            },
-          ],
-          blocked_targets: [],
-          refreshing_targets: fresh
-            ? []
-            : [
-              {
-                read_model_key: "workbench_relation",
-                scope_type: "workbench_relation",
-                scope_key: "2026-03",
-                status: "refreshing",
-                fresh: false,
-                blocking: true,
-                raw_status: "pending",
-                reason: "refresh outbox pending",
-              },
-            ],
-        });
-      }
-      return baseFetchMock(input, init);
-    });
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = installMockApiFetch({ actionDelayMs: 20, workbenchBackgroundLoadDelayMs: 180 });
     renderWorkbenchPage();
 
     const unpairedZone = await screen.findByTestId("zone-unpaired");
@@ -1072,10 +1032,6 @@ describe("Workbench row selection and detail drawer", () => {
     expect(unpairedZone).toHaveTextContent("2026-03-28");
     expect(unpairedZone).toHaveTextContent("智能工厂设备商");
     await waitFor(() => {
-      expect(within(preview).getByText("关系已写入，正在同步关联台最新数据...")).toBeInTheDocument();
-    }, { timeout: 2_000 });
-
-    await waitFor(() => {
       expect(screen.queryByRole("dialog", { name: "关联预览" })).not.toBeInTheDocument();
     }, { timeout: 5_000 });
     expect(
@@ -1088,15 +1044,10 @@ describe("Workbench row selection and detail drawer", () => {
         name: /2026-03-28.*智能工厂设备商/,
       }),
     ).toBeInTheDocument();
-    const barrierCall = fetchMock.mock.calls.find(([input]) => fetchPath(input).startsWith("/api/operation-barrier/status"));
-    expect(barrierCall).toBeDefined();
-    const barrierBody = JSON.parse(String((barrierCall?.[1]?.body ?? "{}")));
-    expect(barrierBody.targets).toEqual([
-      { read_model_key: "workbench_relation", scope_key: "2026-03" },
-    ]);
+    expect(fetchMock.mock.calls.some(([input]) => fetchPath(input).startsWith("/api/operation-barrier/status"))).toBe(false);
   });
 
-  test("workbench action never waits on global relation scope when action response lacks precise targets", async () => {
+  test("workbench action ignores legacy global freshness targets and does not call the barrier", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch({
       actionDelayMs: 20,

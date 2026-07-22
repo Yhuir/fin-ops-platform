@@ -9,8 +9,6 @@ import { useGlobalOperationOverlay } from "../contexts/GlobalOperationOverlayCon
 import { useSessionPermissions } from "../contexts/SessionContext";
 import { FINANCE_DOMAIN_EVENTS, emitFinanceDomainEvent } from "../features/domainEvents";
 import { ApiClientError } from "../features/apiClient";
-import { operationBarrierTargetsFromMonths, waitForOperationFreshness } from "../features/operationBarrier/api";
-import type { OperationBarrierTarget } from "../features/operationBarrier/api";
 import {
   fetchBatchAccounting,
   submitBatchAccounting,
@@ -40,7 +38,8 @@ const EMPTY_PAYLOAD: BatchAccountingResponse = {
 };
 
 const BATCH_ACCOUNTING_PAGE_SIZE = 200;
-const BATCH_ACCOUNTING_MUTATION_BARRIER_TIMEOUT_MS = 4_000;
+const BATCH_ACCOUNTING_ACCESS_FRESH_TIMEOUT_MS = 3_000;
+const BATCH_ACCOUNTING_ACCESS_FRESH_POLL_MS = 150;
 
 function currentYear() {
   return String(new Date().getFullYear());
@@ -178,27 +177,11 @@ function oaSearchText(row: BatchAccountingOaRow) {
 function mutationEventDetail(result: {
   affectedMonths?: string[];
   affectedScopeKeys?: string[];
-  operationBarrierTargets?: OperationBarrierTarget[];
 }) {
   return {
     affectedMonths: result.affectedMonths ?? [],
     affectedScopeKeys: result.affectedScopeKeys ?? [],
-    operationBarrierTargets: result.operationBarrierTargets ?? [],
   };
-}
-
-function mutationBarrierTargets(
-  result: { affectedMonths?: string[]; operationBarrierTargets?: OperationBarrierTarget[] },
-  fallbackScopeKey: string,
-) {
-  return result.operationBarrierTargets && result.operationBarrierTargets.length > 0
-    ? result.operationBarrierTargets
-    : operationBarrierTargetsFromMonths("workbench_relation", result.affectedMonths ?? [], fallbackScopeKey);
-}
-
-function monthFromBankRow(row: BatchAccountingBankRow | null) {
-  const month = String(row?.tradeTime ?? "").slice(0, 7);
-  return /^\d{4}-\d{2}$/.test(month) ? month : "all";
 }
 
 function stringListFromPayload(value: unknown) {
@@ -232,6 +215,12 @@ function mutationErrorMessage(caught: unknown, fallback: string) {
 
 function mutationDeferredSyncMessage(message: string | undefined, fallback: string) {
   return `${message || fallback} 关联关系仍在后台同步，稍后刷新可查看最新结果。`;
+}
+
+function waitForBatchAccountingAccessPoll() {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, BATCH_ACCOUNTING_ACCESS_FRESH_POLL_MS);
+  });
 }
 
 function cx(...values: Array<string | false | null | undefined>) {
@@ -418,16 +407,25 @@ export default function BatchAccountingPage() {
     if (!isValidYear(bankYear)) {
       return null;
     }
-    const nextPayload = await fetchBatchAccounting({
-      bankYear,
-      bucket,
-      bankPage,
-      bankPageSize: BATCH_ACCOUNTING_PAGE_SIZE,
-      oaPage: bucket === "unsubmitted" ? oaPage : undefined,
-      oaPageSize: bucket === "unsubmitted" ? BATCH_ACCOUNTING_PAGE_SIZE : undefined,
-    });
-    applyBatchAccountingPayload(nextPayload);
-    return nextPayload;
+    const startedAt = Date.now();
+    while (true) {
+      const nextPayload = await fetchBatchAccounting({
+        bankYear,
+        bucket,
+        bankPage,
+        bankPageSize: BATCH_ACCOUNTING_PAGE_SIZE,
+        oaPage: bucket === "unsubmitted" ? oaPage : undefined,
+        oaPageSize: bucket === "unsubmitted" ? BATCH_ACCOUNTING_PAGE_SIZE : undefined,
+      });
+      applyBatchAccountingPayload(nextPayload);
+      if (nextPayload.readModelStatus === "fresh") {
+        return nextPayload;
+      }
+      if (Date.now() - startedAt >= BATCH_ACCOUNTING_ACCESS_FRESH_TIMEOUT_MS) {
+        throw new Error("批量账务关联读模型未在 3 秒内收敛。");
+      }
+      await waitForBatchAccountingAccessPoll();
+    }
   }, [applyBatchAccountingPayload, bankPage, bankYear, bucket, oaPage]);
 
   const loadData = useCallback((signal?: AbortSignal) => {
@@ -560,13 +558,8 @@ export default function BatchAccountingPage() {
             expectedVersion: selectedBankRow.version,
             note: isAmountMismatch ? differenceNote : "",
           });
-          setMessage("正在等待批量账务关联读模型同步...");
+          setMessage("正在加载批量账务最新数据...");
           try {
-            await waitForOperationFreshness(
-              mutationBarrierTargets(submitResult, monthFromBankRow(selectedBankRow)),
-              { timeoutMs: BATCH_ACCOUNTING_MUTATION_BARRIER_TIMEOUT_MS },
-            );
-            setMessage("正在刷新批量账务关联数据...");
             await reloadDataAfterMutation();
           } catch {
             return {
@@ -607,13 +600,8 @@ export default function BatchAccountingPage() {
           });
           setWithdrawOpen(false);
           setWithdrawReason("");
-          setMessage("正在等待批量账务关联读模型同步...");
+          setMessage("正在加载批量账务最新数据...");
           try {
-            await waitForOperationFreshness(
-              mutationBarrierTargets(withdrawResult, monthFromBankRow(selectedBankRow)),
-              { timeoutMs: BATCH_ACCOUNTING_MUTATION_BARRIER_TIMEOUT_MS },
-            );
-            setMessage("正在刷新批量账务关联数据...");
             await reloadDataAfterMutation();
           } catch {
             return {

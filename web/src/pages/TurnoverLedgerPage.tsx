@@ -15,11 +15,6 @@ import {
   FINANCE_DOMAIN_EVENTS,
   emitFinanceDomainEvent,
 } from "../features/domainEvents";
-import {
-  operationBarrierTargetsFromMonths,
-  waitForOperationFreshness,
-  type OperationBarrierTarget,
-} from "../features/operationBarrier/api";
 import { useActiveFinanceDomainEvent } from "../hooks/useActiveFinanceDomainEvent";
 import { ApiClientError } from "../features/apiClient";
 import {
@@ -97,6 +92,8 @@ const EMPTY_TAG_SELECTION: TurnoverLedgerTagSelection = {
 const SELF_SUB_LABEL = "主标签本身";
 const CLOSURE_SELECTION_STALE_MESSAGE = "所选流水已刷新，请重新选择后再确认闭环。";
 const POST_MUTATION_SYNC_WARNING_MESSAGE = "操作已提交，后台同步尚未完成，请稍后刷新。";
+const ACCESS_FRESH_TIMEOUT_MS = 3_000;
+const ACCESS_FRESH_POLL_MS = 150;
 
 type TurnoverLedgerToastSeverity = "success" | "warning" | "error";
 
@@ -193,20 +190,6 @@ function flowBankRowId(row: TurnoverLedgerGroupedRow) {
   return cleanText(row.sourceBankRowId) || cleanText(row.bankRowIds[0]) || cleanText(row.flowId);
 }
 
-function rowScopeMonth(row: TurnoverLedgerGroupedRow) {
-  for (const value of [row.transactionAt, row.borrowDate, row.repaymentDate]) {
-    const text = cleanText(value);
-    if (/^\d{4}-\d{2}/.test(text)) {
-      return text.slice(0, 7);
-    }
-  }
-  return "";
-}
-
-function turnoverRowScopeMonths(rows: TurnoverLedgerGroupedRow[]) {
-  return Array.from(new Set(rows.map(rowScopeMonth).filter(Boolean)));
-}
-
 function cashClosureCaseIdForRow(row: TurnoverLedgerGroupedRow) {
   return cleanText(row.cashClosureCaseId);
 }
@@ -278,30 +261,34 @@ function relationDetailErrorMessage(caught: unknown) {
   return caught instanceof Error ? caught.message : "往来关系详情加载失败";
 }
 
-function mutationVisibilityTargets(result: {
-  affectedMonths: string[];
-  freshnessTargets: OperationBarrierTarget[];
-  operationBarrierTargets?: OperationBarrierTarget[];
-}) {
-  if (result.operationBarrierTargets && result.operationBarrierTargets.length > 0) {
-    return result.operationBarrierTargets;
+async function waitForFreshLedgerOnAccess(
+  reloadLedger: () => Promise<TurnoverLedgerGroupedResponse>,
+  markReloading: () => void,
+) {
+  const deadline = Date.now() + ACCESS_FRESH_TIMEOUT_MS;
+  markReloading();
+  while (true) {
+    const ledger = await reloadLedger();
+    if ((cleanText(ledger.readModelStatus) || "refreshing") === "fresh") {
+      return ledger;
+    }
+    if (Date.now() >= deadline) {
+      return null;
+    }
+    await new Promise<void>((resolve) => {
+      window.setTimeout(resolve, ACCESS_FRESH_POLL_MS);
+    });
   }
-  if (result.freshnessTargets.length > 0) {
-    return result.freshnessTargets;
-  }
-  return operationBarrierTargetsFromMonths("turnover_ledger", result.affectedMonths, "all");
 }
 
 async function waitForPostMutationVisibility(
-  targets: OperationBarrierTarget[],
   reloadLedger: () => Promise<TurnoverLedgerGroupedResponse>,
   markReloading: () => void,
 ) {
   try {
-    await waitForOperationFreshness(targets);
-    markReloading();
-    await reloadLedger();
-    return "";
+    return await waitForFreshLedgerOnAccess(reloadLedger, markReloading)
+      ? ""
+      : POST_MUTATION_SYNC_WARNING_MESSAGE;
   } catch {
     return POST_MUTATION_SYNC_WARNING_MESSAGE;
   }
@@ -631,17 +618,14 @@ export default function TurnoverLedgerPage() {
     const result = await runOperation({
       loadingMessage: "正在确认外部往来闭环...",
       action: async ({ setMessage }) => {
-        setClosureSubmitting(true);
+          setClosureSubmitting(true);
         try {
           setMessage("正在确认所选流水为最新版本...");
-          await waitForOperationFreshness(operationBarrierTargetsFromMonths(
-            "turnover_ledger",
-            turnoverRowScopeMonths(currentSelection.rows),
-            "all",
-          ));
-          setMessage("正在刷新往来款台账...");
-          const freshLedger = await reloadLedgerAfterMutation();
-          if ((cleanText(freshLedger.readModelStatus) || "refreshing") !== "fresh") {
+          const freshLedger = await waitForFreshLedgerOnAccess(
+            reloadLedgerAfterMutation,
+            () => setMessage("正在刷新往来款台账..."),
+          );
+          if (!freshLedger) {
             setClosureSelection(null);
             setClosureDrawerOpen(false);
             throw new Error(CLOSURE_SELECTION_STALE_MESSAGE);
@@ -662,9 +646,8 @@ export default function TurnoverLedgerPage() {
           });
           setClosureSelection(null);
           setClosureDrawerOpen(false);
-          setMessage("正在等待往来款台账和关联台读模型同步...");
+          setMessage("正在刷新往来款台账...");
           postMutationSyncWarning = await waitForPostMutationVisibility(
-            mutationVisibilityTargets(closureResult),
             reloadLedgerAfterMutation,
             () => setMessage("正在刷新往来款台账..."),
           );
@@ -761,9 +744,8 @@ export default function TurnoverLedgerPage() {
           const saved = await saveTurnoverRelationExtra(targetRow.relationId, nextExtra);
           setExtraForm(saved.extra);
           setExtraDirty(false);
-          setMessage("正在等待往来款台账读模型同步...");
+          setMessage("正在刷新往来款台账...");
           postMutationSyncWarning = await waitForPostMutationVisibility(
-            operationBarrierTargetsFromMonths("turnover_ledger", [], "all"),
             reloadLedgerAfterMutation,
             () => setMessage("正在刷新往来款台账..."),
           );
@@ -802,9 +784,8 @@ export default function TurnoverLedgerPage() {
           const mutationResult = kind === "confirm"
             ? await confirmTurnoverRelation({ bankRowIds: targetRow.bankRowIds })
             : await withdrawTurnoverRelation({ relationId: targetRow.relationId });
-          setMessage("正在等待往来款台账读模型同步...");
+          setMessage("正在刷新往来款台账...");
           postMutationSyncWarning = await waitForPostMutationVisibility(
-            mutationVisibilityTargets(mutationResult),
             reloadLedgerAfterMutation,
             () => setMessage("正在刷新往来款台账..."),
           );
@@ -856,9 +837,8 @@ export default function TurnoverLedgerPage() {
             : await withdrawTurnoverClosure({ cashClosureCaseId });
           setClosureSelection(null);
           setClosureDrawerOpen(false);
-          setMessage("正在等待往来款台账和关联台读模型同步...");
+          setMessage("正在刷新往来款台账...");
           postMutationSyncWarning = await waitForPostMutationVisibility(
-            mutationVisibilityTargets(mutationResult),
             reloadLedgerAfterMutation,
             () => setMessage("正在刷新往来款台账..."),
           );
@@ -918,9 +898,8 @@ export default function TurnoverLedgerPage() {
           setTagSelection(saved);
           setDraftSelectedTagCodes(new Set(saved.selectedTagCodes));
           setTagDrawerOpen(false);
-          setMessage("正在等待往来款台账读模型同步...");
+          setMessage("正在刷新往来款台账...");
           postMutationSyncWarning = await waitForPostMutationVisibility(
-            operationBarrierTargetsFromMonths("turnover_ledger", [], "all"),
             reloadLedgerAfterMutation,
             () => setMessage("正在刷新往来款台账..."),
           );

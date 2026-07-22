@@ -372,7 +372,7 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
 
         self.assertFalse(hasattr(app, "_workbench_matching_dirty_scope_service"))
 
-    def test_exception_apply_api_marks_db_dirty_queue(self) -> None:
+    def test_exception_apply_api_commits_without_write_time_read_model_fanout(self) -> None:
         app = build_application()
         queue = RecordingDirtyQueue()
         app._workbench_reconciliation_dirty_queue = queue
@@ -422,10 +422,7 @@ class WorkbenchDirtyQueueWiringTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            [(call["months"], call["reason"]) for call in queue.mark_calls],
-            [(["2026-05"], "exception_apply")],
-        )
+        self.assertEqual(queue.mark_calls, [])
 
     def test_http_server_does_not_start_workbench_dirty_worker_by_default(self) -> None:
         class FakeServer:

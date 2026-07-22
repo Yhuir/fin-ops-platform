@@ -71,7 +71,6 @@ class _WorkbenchConfirmLinkCommand:
     expected_versions: dict[str, object] | None = None
     tenant_id: str = "default"
     actor_id: str = "system"
-    refresh_metadata: dict[str, object] | None = None
     timing_emit: Callable[[str, float, str | None], None] | None = None
 
 
@@ -89,7 +88,6 @@ class _WorkbenchCancelLinkCommand:
     expected_versions: dict[str, object] | None = None
     tenant_id: str = "default"
     actor_id: str = "system"
-    refresh_metadata: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -105,7 +103,6 @@ class _WorkbenchWithdrawLinkCommand:
     expected_versions: dict[str, object] | None = None
     tenant_id: str = "default"
     actor_id: str = "system"
-    refresh_metadata: dict[str, object] | None = None
     timing_emit: Callable[[str, float, str | None], None] | None = None
 
 
@@ -202,8 +199,6 @@ class WorkbenchWriteFacade:
         restore_exception_pair_snapshots: Callable[..., None],
         schedule_pair_relation_persist: Callable[..., None],
         restore_pair_relation_snapshot: Callable[..., None],
-        execute_derived_data_lifecycle_event: Callable[..., None],
-        schedule_read_model_persist: Callable[..., None],
         emit_action_timing: Callable[..., None],
         confirm_link_uow: Any | None = None,
         cancel_link_uow: Any | None = None,
@@ -245,8 +240,6 @@ class WorkbenchWriteFacade:
         self._restore_exception_pair_snapshots = restore_exception_pair_snapshots
         self._schedule_pair_relation_persist = schedule_pair_relation_persist
         self._restore_pair_relation_snapshot = restore_pair_relation_snapshot
-        self._execute_derived_data_lifecycle_event = execute_derived_data_lifecycle_event
-        self._schedule_read_model_persist = schedule_read_model_persist
         self._emit_action_timing = emit_action_timing
         self._confirm_link_uow = confirm_link_uow
         self._cancel_link_uow = cancel_link_uow
@@ -587,7 +580,6 @@ class WorkbenchWriteFacade:
                 started_at=pair_relation_started_at,
                 detail=f"case_id={resolved_case_id}",
             )
-            schedule_started_at = monotonic()
             try:
                 self._schedule_pair_relation_persist(
                     changed_case_ids=list(command_result.get("changed_case_ids") or changed_case_ids),
@@ -600,30 +592,6 @@ class WorkbenchWriteFacade:
                     changed_case_ids=changed_case_ids,
                 )
                 return self._persistence_unavailable_result("工作台关联关系暂时无法保存，请稍后重试。")
-            self._invalidate_and_schedule_read_model(
-                action_name=action_name,
-                changed_scope_keys=changed_scope_keys,
-                metadata={
-                    "source": action_name,
-                    "case_id": resolved_case_id,
-                    **self._relation_refresh_metadata(
-                        relation=dict(
-                            command_result.get("relation")
-                            or {
-                                "case_id": resolved_case_id,
-                                "row_ids": list(row_ids),
-                                "row_types": list(row_types),
-                                "month_scope": month,
-                            }
-                        ),
-                        row_ids=row_ids,
-                        month=month,
-                    ),
-                },
-                include_all=False,
-                request_id=request_id,
-                schedule_started_at=schedule_started_at,
-            )
             return WorkbenchWriteResult(
                 HTTPStatus.OK,
                 self._confirm_link_response_payload(
@@ -681,16 +649,6 @@ class WorkbenchWriteFacade:
             payload.get("idempotency_key") or payload.get("request_idempotency_key") or ""
         ).strip() or None
         expected_versions = payload.get("expected_versions") if isinstance(payload.get("expected_versions"), dict) else {}
-        relation_refresh_metadata = self._relation_refresh_metadata(
-            relation={
-                "case_id": resolved_case_id,
-                "row_ids": list(row_ids),
-                "row_types": list(row_types),
-                "month_scope": month,
-            },
-            row_ids=row_ids,
-            month=month,
-        )
         command = _WorkbenchConfirmLinkCommand(
             action_name=action_name,
             month=month,
@@ -702,11 +660,6 @@ class WorkbenchWriteFacade:
             expected_versions=dict(expected_versions),
             tenant_id=_normalize_tenant_id(tenant_id),
             actor_id=_normalize_actor_id(actor_id),
-            refresh_metadata={
-                "source": action_name,
-                "case_id": resolved_case_id,
-                **relation_refresh_metadata,
-            },
             timing_emit=emit_phase_timing,
         )
 
@@ -1141,18 +1094,10 @@ class WorkbenchWriteFacade:
         )
 
     @staticmethod
-    def _operation_freshness_targets(scope_keys: list[str]) -> list[dict[str, str]]:
-        return [
-            {"read_model_key": read_model_key, "scope_key": scope_key}
-            for scope_key in scope_keys
-            for read_model_key in ("workbench", "workbench_relation")
-        ]
-
-    @staticmethod
     def _operation_write_target_envelope(scope_keys: list[str]) -> dict[str, object]:
         return write_target_envelope(
             scope_keys=scope_keys,
-            targets=WorkbenchWriteFacade._operation_freshness_targets(scope_keys),
+            targets=[],
         )
 
     def _relation_command_service_for(self, *, repository: Any | None = None) -> Any | None:
@@ -1319,27 +1264,11 @@ class WorkbenchWriteFacade:
                 started_at=pair_relation_started_at,
                 detail=f"row_id={row_id}",
             )
-            schedule_started_at = monotonic()
             try:
                 self._schedule_pair_relation_persist(
                     changed_case_ids=list(command_result.get("changed_case_ids") or changed_case_ids),
                     request_id=request_id,
                     action_name=action_name,
-                )
-                self._invalidate_and_schedule_read_model(
-                    action_name=action_name,
-                    changed_scope_keys=changed_scope_keys,
-                    metadata={
-                        "source": action_name,
-                        "case_id": str(active_relation.get("case_id") or ""),
-                        **self._relation_refresh_metadata(
-                            relation=active_relation,
-                            row_ids=affected_row_ids,
-                            month=month,
-                        ),
-                    },
-                    request_id=request_id,
-                    schedule_started_at=schedule_started_at,
                 )
             except Exception:
                 self._restore_pair_relation_snapshot(
@@ -1435,15 +1364,6 @@ class WorkbenchWriteFacade:
             else {},
             tenant_id=_normalize_tenant_id(tenant_id),
             actor_id=_normalize_actor_id(actor_id),
-            refresh_metadata={
-                "source": action_name,
-                "case_id": str(active_relation.get("case_id") or ""),
-                **self._relation_refresh_metadata(
-                    relation=active_relation,
-                    row_ids=affected_row_ids,
-                    month=month,
-                ),
-            },
         )
 
         def handler(ctx: object) -> dict[str, object]:
@@ -1778,28 +1698,11 @@ class WorkbenchWriteFacade:
             },
             affected_row_ids=affected_row_ids,
         )
-        schedule_started_at = monotonic()
         try:
             self._schedule_pair_relation_persist(
                 changed_case_ids=changed_case_ids,
                 request_id=request_id,
                 action_name=action_name,
-            )
-            self._invalidate_and_schedule_read_model(
-                action_name=action_name,
-                changed_scope_keys=changed_scope_keys,
-                metadata={
-                    "source": action_name,
-                    "case_id": case_id,
-                    **self._relation_refresh_metadata(
-                        relation=active_relation,
-                        row_ids=affected_row_ids,
-                        month=month,
-                    ),
-                },
-                include_all=False,
-                request_id=request_id,
-                schedule_started_at=schedule_started_at,
             )
         except Exception:
             self._restore_pair_relation_snapshot(
@@ -1889,11 +1792,6 @@ class WorkbenchWriteFacade:
             preview=preview,
             affected_row_ids=affected_row_ids,
         )
-        relation_refresh_metadata = self._relation_refresh_metadata(
-            relation=active_relation,
-            row_ids=affected_row_ids,
-            month=month,
-        )
         command = _WorkbenchWithdrawLinkCommand(
             action_name=action_name,
             month=month,
@@ -1907,11 +1805,6 @@ class WorkbenchWriteFacade:
             else {},
             tenant_id=_normalize_tenant_id(tenant_id),
             actor_id=_normalize_actor_id(actor_id),
-            refresh_metadata={
-                "source": action_name,
-                "case_id": case_id,
-                **relation_refresh_metadata,
-            },
         )
 
         def handler(ctx: object) -> dict[str, object]:
@@ -2025,7 +1918,6 @@ class WorkbenchWriteFacade:
             else {},
             tenant_id=_normalize_tenant_id(tenant_id),
             actor_id=_normalize_actor_id(actor_id),
-            refresh_metadata={"source": action_name},
             timing_emit=emit_phase_timing,
         )
 
@@ -2090,24 +1982,6 @@ class WorkbenchWriteFacade:
                     },
                     affected_row_ids=affected_row_ids,
                 )
-            metadata_started_at = monotonic()
-            refresh_metadata = {
-                "source": action_name,
-                "case_id": case_id,
-                **self._relation_refresh_metadata(
-                    relation=before_relation,
-                    row_ids=affected_row_ids,
-                    month=month,
-                    resolve_rows=False,
-                ),
-            }
-            self._emit_timing_if_requested(
-                request_id=request_id,
-                action_name=action_name,
-                phase="relation_refresh_metadata",
-                started_at=metadata_started_at,
-                detail=f"scope_count={len(changed_scope_keys)}",
-            )
             self._emit_timing_if_requested(
                 request_id=request_id,
                 action_name=action_name,
@@ -2127,7 +2001,6 @@ class WorkbenchWriteFacade:
                 "affected_row_ids": affected_row_ids,
                 "restored_relations": restored_relations,
                 "operation_projection": {},
-                "refresh_metadata": refresh_metadata,
                 "message": "已撤回 1 组关联。",
             }
 
@@ -2857,13 +2730,6 @@ class WorkbenchWriteFacade:
             request_id=request_id,
             action_name=action_name,
         )
-        self._invalidate_and_schedule_read_model(
-            action_name=action_name,
-            changed_scope_keys=changed_scope_keys,
-            metadata={"source": action_name},
-            request_id=request_id,
-            schedule_started_at=monotonic(),
-        )
         affected_scope_keys = WorkbenchWriteFacade._operation_affected_scope_keys(
             {"affected_scope_keys": changed_scope_keys}
         )
@@ -3286,13 +3152,6 @@ class WorkbenchWriteFacade:
             request_id=request_id,
             action_name=action_name,
         )
-        self._invalidate_and_schedule_read_model(
-            action_name=action_name,
-            changed_scope_keys=changed_scope_keys,
-            metadata={"source": action_name, "case_id": str(relation.get("case_id") or "")},
-            request_id=request_id,
-            schedule_started_at=monotonic(),
-        )
         return WorkbenchWriteFacade._operation_affected_scope_keys(
             {"affected_scope_keys": changed_scope_keys}
         )
@@ -3589,22 +3448,12 @@ class WorkbenchWriteFacade:
         ))
         result["affected_scope_keys"] = list(changed_scope_keys)
         result.update(self._operation_write_target_envelope(changed_scope_keys))
-        self._execute_derived_data_lifecycle_event(
-            "exception_case_changed",
-            scope_keys=changed_scope_keys,
-            metadata={"source": action_name, "reason": action_name},
-        )
         if isinstance(relation, dict):
             self._schedule_pair_relation_persist(
                 changed_case_ids=[str(relation.get("case_id") or "")],
                 request_id=request_id,
                 action_name=action_name,
             )
-        self._schedule_read_model_persist(
-            changed_scope_keys=changed_scope_keys,
-            request_id=request_id,
-            action_name=action_name,
-        )
         return result
 
     def _persist_exception_and_override_change(
@@ -3628,176 +3477,7 @@ class WorkbenchWriteFacade:
                 previous_override_snapshot=previous_override_snapshot,
             )
             raise _WorkbenchWritePersistenceError("工作台状态暂时无法保存，请稍后重试。") from exc
-        if changed_scope_keys is not None:
-            self._execute_derived_data_lifecycle_event(
-                "exception_case_changed",
-                scope_keys=changed_scope_keys,
-                metadata={"source": action_name or "workbench_exception_change"},
-            )
-            self._schedule_read_model_persist(
-                changed_scope_keys=changed_scope_keys,
-                request_id=request_id,
-                action_name=action_name,
-            )
         return result
-
-    def _relation_refresh_metadata(
-        self,
-        *,
-        relation: dict[str, object],
-        row_ids: list[str],
-        month: str,
-        resolve_rows: bool = True,
-    ) -> dict[str, object]:
-        rows: list[dict[str, object]] = []
-        row_types = self._relation_row_types(relation=relation, rows=[])
-        if resolve_rows and ("invoice" in row_types or not row_types):
-            try:
-                resolved_row_ids = [str(row_id) for row_id in list(row_ids or []) if str(row_id).strip()]
-                rows = self._resolve_live_rows_direct(resolved_row_ids, month_hint=month) if resolved_row_ids else []
-            except Exception:
-                rows = []
-        downstream_scope_types = self._relation_downstream_scope_types(relation=relation, rows=rows)
-        invoice_usage_scope_types = sorted(
-            downstream_scope_types & {"input_invoice_usage", "output_invoice_collection", "oa_pending_payment"}
-        )
-        pending_invoice_scope_keys = self._relation_pending_invoice_scope_keys(
-            relation=relation,
-            rows=rows,
-            month=month,
-        )
-        metadata: dict[str, object] = {
-            "downstream_scope_types": sorted(downstream_scope_types),
-            "invoice_usage_scope_types": invoice_usage_scope_types,
-        }
-        normalized_row_ids = [str(row_id).strip() for row_id in list(row_ids or []) if str(row_id).strip()]
-        if normalized_row_ids:
-            metadata["row_ids"] = list(dict.fromkeys(normalized_row_ids))
-        case_id = str(relation.get("case_id") or "").strip()
-        if case_id:
-            metadata["case_ids"] = [case_id]
-        if pending_invoice_scope_keys:
-            metadata["pending_invoice_scope_keys"] = pending_invoice_scope_keys
-        return metadata
-
-    def _relation_downstream_scope_types(
-        self,
-        *,
-        relation: dict[str, object],
-        rows: list[dict[str, object]],
-    ) -> set[str]:
-        row_types = self._relation_row_types(relation=relation, rows=rows)
-        unknown_row_types = not row_types
-        has_bank = "bank" in row_types or unknown_row_types
-        has_invoice = "invoice" in row_types or unknown_row_types
-        has_oa = "oa" in row_types
-        scope_types: set[str] = {"search", "workbench_relation"}
-        if has_bank:
-            scope_types.update({"bank_detail", "pending_invoice"})
-        if has_invoice or has_oa or unknown_row_types:
-            scope_types.add("invoice_lifecycle")
-        if has_invoice:
-            scope_types.update({"input_invoice_usage", "output_invoice_collection"})
-        if has_bank or has_invoice or has_oa or unknown_row_types:
-            scope_types.add("oa_pending_payment")
-        return scope_types
-
-    def _relation_pending_invoice_scope_keys(
-        self,
-        *,
-        relation: dict[str, object],
-        rows: list[dict[str, object]],
-        month: str | None = None,
-    ) -> list[str]:
-        row_types = self._relation_row_types(relation=relation, rows=rows)
-        if row_types and "bank" not in row_types:
-            return []
-        directions = self._bank_directions(rows)
-        if not directions:
-            directions = {"expense", "income"}
-        scope_keys: list[str] = []
-        month_suffix = f":{month}" if month and SEARCH_MONTH_RE.match(str(month)) else ""
-        if "expense" in directions:
-            scope_keys.append(f"expense:all{month_suffix}")
-        if "income" in directions:
-            scope_keys.append(f"income:all{month_suffix}")
-        return list(dict.fromkeys(scope_keys))
-
-    @staticmethod
-    def _relation_row_types(*, relation: dict[str, object], rows: list[dict[str, object]]) -> set[str]:
-        row_types = {
-            str(row_type).strip()
-            for row_type in list(relation.get("row_types") or [])
-            if str(row_type).strip()
-        }
-        if row_types:
-            return row_types
-        row_types.update(
-            str(row.get("type") or "").strip()
-            for row in list(rows or [])
-            if str(row.get("type") or "").strip()
-        )
-        if row_types:
-            return row_types
-        return {
-            row_type_for_workbench_row_id(row_id, unknown="")
-            for row_id in list(relation.get("row_ids") or [])
-            if row_type_for_workbench_row_id(row_id, unknown="")
-        }
-
-    def _bank_directions(self, rows: list[dict[str, object]]) -> set[str]:
-        directions: set[str] = set()
-        for row in list(rows or []):
-            if str(row.get("type") or "") != "bank":
-                continue
-            raw_direction = str(row.get("txn_direction") or row.get("direction") or "").strip().lower()
-            if raw_direction in {"outflow", "debit", "expense"} or "支" in raw_direction or "付" in raw_direction:
-                directions.add("expense")
-            if raw_direction in {"inflow", "credit", "income"} or "收" in raw_direction or "入" in raw_direction:
-                directions.add("income")
-            debit_amount = self._decimal_from_value(row.get("debit_amount"))
-            credit_amount = self._decimal_from_value(row.get("credit_amount"))
-            if debit_amount is not None and debit_amount > 0:
-                directions.add("expense")
-            if credit_amount is not None and credit_amount > 0:
-                directions.add("income")
-        return directions
-
-    def _invalidate_and_schedule_read_model(
-        self,
-        *,
-        action_name: str,
-        changed_scope_keys: list[str],
-        metadata: dict[str, object],
-        include_all: bool = True,
-        request_id: str | None,
-        schedule_started_at: float,
-    ) -> None:
-        invalidate_started_at = monotonic()
-        self._execute_derived_data_lifecycle_event(
-            "pair_relation_changed",
-            scope_keys=changed_scope_keys,
-            include_all=include_all,
-            metadata={**dict(metadata), "action_name": action_name},
-        )
-        self._emit_timing_if_requested(
-            request_id=request_id,
-            action_name=action_name,
-            phase="invalidate_read_model_scopes",
-            started_at=invalidate_started_at,
-            detail=",".join(changed_scope_keys),
-        )
-        self._schedule_read_model_persist(
-            changed_scope_keys=changed_scope_keys,
-            request_id=request_id,
-            action_name=action_name,
-        )
-        self._emit_timing_if_requested(
-            request_id=request_id,
-            action_name=action_name,
-            phase="schedule_background_persist",
-            started_at=schedule_started_at,
-        )
 
     def _emit_timing_if_requested(
         self,

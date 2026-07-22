@@ -41,6 +41,9 @@ const staticSession: SessionContextValue = {
 };
 
 const unsubmittedPayload = {
+  read_model_status: "fresh",
+  refresh_enqueued: false,
+  read_model_stale_reasons: [],
   summary: {
     unsubmitted_count: 2,
     submitted_count: 1,
@@ -94,6 +97,9 @@ const unsubmittedPayload = {
 };
 
 const submittedPayload = {
+  read_model_status: "fresh",
+  refresh_enqueued: false,
+  read_model_stale_reasons: [],
   summary: {
     unsubmitted_count: 1,
     submitted_count: 2,
@@ -294,9 +300,6 @@ function installFetchMock() {
         affected_months: ["2026-02"],
         message: "已撤回批量账务关联。",
       }), { status: 200, headers: { "Content-Type": "application/json" } });
-    }
-    if (url.pathname === "/api/operation-barrier/status") {
-      return jsonResponse({ status: "fresh", fresh: true, targets: [], blocked_targets: [], refreshing_targets: [] });
     }
     return new Response(JSON.stringify({ message: `Unhandled ${url.pathname}` }), { status: 404, headers: { "Content-Type": "application/json" } });
   });
@@ -876,7 +879,7 @@ describe("BatchAccountingPage", () => {
     });
   });
 
-  test("keeps a successful submit successful when the relation barrier is still blocked", async () => {
+  test("reloads the visible page through its normal GET without calling the operation barrier", async () => {
     const user = userEvent.setup();
     const relationListener = vi.fn();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -892,24 +895,6 @@ describe("BatchAccountingPage", () => {
           message: "已关联批量账务流水与 2 项 OA。",
         });
       }
-      if (url.pathname === "/api/operation-barrier/status") {
-        return jsonResponse({
-          status: "blocked",
-          fresh: false,
-          targets: [],
-          refreshing_targets: [],
-          blocked_targets: [{
-            read_model_key: "workbench_relation",
-            scope_type: "workbench_relation",
-            scope_key: "2026-01",
-            status: "blocked",
-            fresh: false,
-            blocking: true,
-            raw_status: "unavailable",
-            reason: "statement timeout",
-          }],
-        });
-      }
       return jsonResponse({ message: `Unhandled ${url.pathname}` }, 404);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -923,9 +908,18 @@ describe("BatchAccountingPage", () => {
       await user.click(screen.getByRole("checkbox", { name: "选择 王青 2026-01-07" }));
       await user.click(screen.getByRole("button", { name: "关联OA项与流水" }));
 
-      expect(await screen.findByText(/已关联批量账务流水与 2 项 OA。 关联关系仍在后台同步/)).toBeInTheDocument();
+      expect(await screen.findByText("已关联批量账务流水与 2 项 OA。")).toBeInTheDocument();
       expect(screen.queryByText("操作失败")).not.toBeInTheDocument();
       expectCustomEventDetailContaining(relationListener, { affectedMonths: ["2026-01"] });
+      const pageReads = fetchMock.mock.calls.filter(([input, init]) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+        return url.pathname === "/api/batch-accounting" && (!init?.method || init.method === "GET");
+      });
+      expect(pageReads.length).toBeGreaterThanOrEqual(2);
+      expect(fetchMock.mock.calls.some(([input]) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
+        return url.pathname === "/api/operation-barrier/status";
+      })).toBe(false);
     } finally {
       window.removeEventListener("workbenchRelationUpdated", relationListener);
     }

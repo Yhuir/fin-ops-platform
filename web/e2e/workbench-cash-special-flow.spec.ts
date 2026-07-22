@@ -45,7 +45,6 @@ test.describe("workbench cash special browser flow", () => {
     await page.goto("/");
     await expect(page.getByTestId(pairedGroupTestId)).toBeVisible();
 
-    const barrierCallsBeforePassThrough = api.count(operationBarrierPath);
     const workbenchLoadsBeforePassThrough = api.count(workbenchLoadPath);
     await openPairedBankRowMenu(page);
     const passThroughResponse = waitForWorkbenchPost(page, passThroughPath);
@@ -61,11 +60,11 @@ test.describe("workbench cash special browser flow", () => {
       note: "由关联台确认现金往来过账",
     });
     expectWorkbenchRowIds(passThroughBody);
-    expect(api.count(operationBarrierPath)).toBeGreaterThan(barrierCallsBeforePassThrough);
+    expect(api.count(operationBarrierPath)).toBe(0);
     expect(api.count(workbenchLoadPath)).toBeGreaterThan(workbenchLoadsBeforePassThrough);
     await expectNoUnexpectedSuccessUiErrors(page);
 
-    const barrierCallsBeforeTicket = api.count(operationBarrierPath);
+    const workbenchLoadsBeforeTicket = api.count(workbenchLoadPath);
     await openPairedBankRowMenu(page);
     await page.getByRole("menuitem", { name: "确认为买票" }).click();
 
@@ -100,10 +99,11 @@ test.describe("workbench cash special browser flow", () => {
       note: "浏览器确认买票成本",
     });
     expectWorkbenchRowIds(ticketBody);
-    expect(api.count(operationBarrierPath)).toBeGreaterThan(barrierCallsBeforeTicket);
+    expect(api.count(operationBarrierPath)).toBe(0);
+    expect(api.count(workbenchLoadPath)).toBeGreaterThan(workbenchLoadsBeforeTicket);
     await expectNoUnexpectedSuccessUiErrors(page);
 
-    const barrierCallsBeforeCancel = api.count(operationBarrierPath);
+    const workbenchLoadsBeforeCancel = api.count(workbenchLoadPath);
     await openPairedBankRowMenu(page);
     const cancelResponse = waitForWorkbenchPost(page, cancelCashSpecialPath);
     await page.getByRole("menuitem", { name: "取消现金处理" }).click();
@@ -118,7 +118,8 @@ test.describe("workbench cash special browser flow", () => {
       note: "由关联台取消现金往来特殊处理",
     });
     expectWorkbenchRowIds(cancelBody);
-    expect(api.count(operationBarrierPath)).toBeGreaterThan(barrierCallsBeforeCancel);
+    expect(api.count(operationBarrierPath)).toBe(0);
+    expect(api.count(workbenchLoadPath)).toBeGreaterThan(workbenchLoadsBeforeCancel);
     await expectNoUnexpectedSuccessUiErrors(page);
   });
 });

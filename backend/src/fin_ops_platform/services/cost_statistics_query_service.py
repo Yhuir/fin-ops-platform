@@ -16,7 +16,10 @@ from fin_ops_platform.services.cost_statistics_source_versions import (
     cost_statistics_semantic_source_versions,
     cost_statistics_source_versions,
 )
-from fin_ops_platform.services.read_model_freshness import resolve_read_model_freshness
+from fin_ops_platform.services.read_model_freshness import (
+    resolve_read_model_freshness,
+    source_version_mismatch_reasons,
+)
 from fin_ops_platform.services.read_model_query_gateway import (
     ReadModelQueryGateway,
     ReadModelRefreshQueueAdapter,
@@ -54,10 +57,16 @@ class CostStatisticsQueryService:
         redis_helper: Any | None = None,
         sql_read_repository: Any | None = None,
         tag_selection_mapper: Callable[[dict[str, Any]], dict[str, Any]],
+        workbench_dependency_versions_provider: Callable[
+            [str], tuple[dict[str, Any], dict[str, Any]]
+        ],
+        workbench_refresh_enqueuer: Callable[..., bool],
     ) -> None:
         self._runtime_service = runtime_service
         self._sql_read_repository = sql_read_repository
         self._tag_selection_mapper = tag_selection_mapper
+        self._workbench_dependency_versions_provider = workbench_dependency_versions_provider
+        self._workbench_refresh_enqueuer = workbench_refresh_enqueuer
         self._read_model_query_gateway = ReadModelQueryGateway(
             queue_repository=ReadModelRefreshQueueAdapter(
                 scope_type="cost_statistics",
@@ -385,6 +394,25 @@ class CostStatisticsQueryService:
         stale_reason: str,
         source_mismatch_reason: str,
     ) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
+        scope_month = str(scope_key).split(":", 1)[1] if ":" in str(scope_key) else ""
+        if scope_month and scope_month != "all":
+            expected_workbench_versions, active_workbench_versions = (
+                self._workbench_dependency_versions_provider(scope_month)
+            )
+            workbench_stale_reasons = source_version_mismatch_reasons(
+                expected=expected_workbench_versions,
+                actual=active_workbench_versions,
+            )
+            if workbench_stale_reasons:
+                return None, None, self._workbench_dependency_non_fresh_payload(
+                    scope_key=scope_key,
+                    workbench_scope_key=scope_month,
+                    empty_payload_factory=empty_payload_factory,
+                    stale_reasons=tuple(
+                        f"workbench_dependency_{reason}" for reason in workbench_stale_reasons
+                    ),
+                )
+
         gate = get_freshness_gate(scope_key=scope_key)
         if not isinstance(gate, dict):
             return None, None, self._cost_statistics_non_fresh_gate_payload(
@@ -408,7 +436,6 @@ class CostStatisticsQueryService:
                 stale_reasons=gate_reasons,
             )
 
-        scope_month = str(scope_key).split(":", 1)[1] if ":" in str(scope_key) else ""
         expected_source_versions = cost_statistics_source_versions(
             month=scope_month,
             settings_payload=(
@@ -450,6 +477,29 @@ class CostStatisticsQueryService:
             refresh_reason=refresh_reason,
             stale_reasons=freshness.stale_reasons,
         )
+
+    def _workbench_dependency_non_fresh_payload(
+        self,
+        *,
+        scope_key: str,
+        workbench_scope_key: str,
+        empty_payload_factory: Any,
+        stale_reasons: tuple[str, ...],
+    ) -> dict[str, Any]:
+        refresh_reason = "cost_statistics_workbench_dependency_stale"
+        payload = dict(empty_payload_factory())
+        payload["read_model_status"] = "refreshing"
+        payload["read_model_scope_key"] = scope_key
+        payload["read_model_stale_reasons"] = list(stale_reasons)
+        payload["refresh_reason"] = refresh_reason
+        payload["refresh_dependency"] = "workbench"
+        payload["refresh_enqueued"] = bool(
+            self._workbench_refresh_enqueuer(
+                workbench_scope_key,
+                reason=refresh_reason,
+            )
+        )
+        return payload
 
     def _cost_statistics_non_fresh_gate_payload(
         self,

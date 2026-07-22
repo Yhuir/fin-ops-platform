@@ -1535,6 +1535,34 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             ),
         )
 
+    def test_page_access_source_versions_include_canonical_workbench_write_tables(self) -> None:
+        class SourceVersionConnection:
+            def __init__(self) -> None:
+                self.fetch_one_calls: list[tuple[str, tuple[object, ...]]] = []
+
+            def fetch_one(self, sql: str, params: tuple[object, ...] = ()) -> dict[str, object]:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_one_calls.append((normalized, params))
+                if "from app.app_settings" in normalized:
+                    return {"settings_payload": {"bank_transaction_tags": {"version": 9}}}
+                return {
+                    "pair_relations_updated_at": "relations-v2",
+                    "exception_cases_updated_at": "exceptions-v3",
+                    "row_overrides_updated_at": "overrides-v4",
+                }
+
+        connection = SourceVersionConnection()
+        versions = WorkbenchSqlProjectionBuilder(connection=connection).source_versions_for_scope("2026-05")
+
+        self.assertEqual(versions["workbench_pair_relations_updated_at"], "relations-v2")
+        self.assertEqual(versions["workbench_exception_cases_updated_at"], "exceptions-v3")
+        self.assertEqual(versions["workbench_row_overrides_updated_at"], "overrides-v4")
+        source_sql, source_params = connection.fetch_one_calls[0]
+        self.assertIn("from app.workbench_pair_relations", source_sql)
+        self.assertIn("from app.workbench_exception_cases", source_sql)
+        self.assertIn("from app.workbench_row_overrides", source_sql)
+        self.assertEqual(source_params, ("2026-05-01",))
+
     def test_workbench_sql_all_source_versions_expect_composed_active_month_shards(self) -> None:
         app = object.__new__(Application)
 
@@ -6213,7 +6241,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         result = service.handle_runtime_event(event)
 
         self.assertEqual(builder.rebuilt, [("2026-05", 7)])
-        self.assertEqual(len(queue.refreshes), 2)
+        self.assertEqual(queue.refreshes, [])
         self.assertEqual(queue.completed, [("tenant-a", "workbench", "2026-05", 7)])
         self.assertEqual(result["scope_key"], "2026-05")
         self.assertEqual(result["row_count"], 1)
@@ -6280,7 +6308,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
 
 
 
-    def test_workbench_month_publish_enqueues_cost_statistics_after_projection_commit(self) -> None:
+    def test_workbench_month_publish_completes_without_downstream_fanout(self) -> None:
         calls: list[str] = []
 
         class FakeBuilder:
@@ -6299,8 +6327,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                 self.completed: list[tuple[str, str, str, object]] = []
 
             def enqueue_read_model_refresh(self, **kwargs: object) -> None:
-                calls.append(f"enqueued:{kwargs['scope_type']}:{kwargs['scope_key']}")
-                self.refreshes.append(dict(kwargs))
+                raise AssertionError(f"Workbench publish must not fan out downstream refreshes: {kwargs}")
 
             def complete_read_model_refresh(
                 self,
@@ -6316,7 +6343,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         queue = FakeQueue()
         service = WorkbenchReadModelRefreshService(projection_builder=FakeBuilder(), queue_repository=queue)
         event = RuntimeQueueEvent(
-            event_id="event-month-cost-fanout",
+            event_id="event-month-no-fanout",
             tenant_id="tenant-a",
             event_type="workbench.read_model.refresh",
             aggregate_type="read_model",
@@ -6328,56 +6355,19 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             attempts=1,
             status="processing",
             priority="high",
-            trace_id="trace-workbench-cost-fanout",
+            trace_id="trace-workbench-no-fanout",
         )
 
         result = service.handle_runtime_event(event)
 
-        self.assertEqual(
-            result["cost_statistics_enqueued_scope_keys"],
-            ["active:2026-05", "all:2026-05"],
-        )
-        self.assertEqual(
-            [(item["scope_type"], item["scope_key"], item["reason"]) for item in queue.refreshes],
-            [
-                ("cost_statistics", "active:2026-05", "workbench_shard_published"),
-                ("cost_statistics", "all:2026-05", "workbench_shard_published"),
-            ],
-        )
-        self.assertEqual(
-            [item["trace_id"] for item in queue.refreshes],
-            ["trace-workbench-cost-fanout", "trace-workbench-cost-fanout"],
-        )
+        self.assertNotIn("cost_statistics_enqueued_scope_keys", result)
+        self.assertEqual(queue.refreshes, [])
         self.assertEqual(
             calls,
             [
                 "published:2026-05:19",
-                "enqueued:cost_statistics:active:2026-05",
-                "enqueued:cost_statistics:all:2026-05",
                 "completed:workbench:2026-05",
             ],
-        )
-
-        queue.refreshes.clear()
-        service.handle_runtime_event(
-            RuntimeQueueEvent(
-                event_id="event-month-cost-fallback-trace",
-                tenant_id="tenant-a",
-                event_type="workbench.read_model.refresh",
-                aggregate_type="read_model",
-                aggregate_id="2026-05",
-                scope_type="workbench",
-                scope_key="2026-05",
-                dedupe_key=None,
-                payload={"scope_key": "2026-05", "source_version": 20},
-                attempts=1,
-                status="processing",
-                priority="high",
-            )
-        )
-        self.assertEqual(
-            [item["trace_id"] for item in queue.refreshes],
-            ["event-month-cost-fallback-trace", "event-month-cost-fallback-trace"],
         )
 
 
@@ -6479,7 +6469,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(result["skip_reason"], "stale_source_version_after_publish")
         self.assertEqual(queue.completed, [])
 
-    def test_workbench_cost_enqueue_failure_does_not_complete_dirty_scope(self) -> None:
+    def test_workbench_publish_does_not_touch_unrelated_refresh_queue(self) -> None:
         class FakeBuilder:
             def rebuild_workbench_read_model_scope(
                 self,
@@ -6493,8 +6483,8 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             def __init__(self) -> None:
                 self.completed: list[dict[str, object]] = []
 
-            def enqueue_read_model_refresh(self, **_kwargs: object) -> None:
-                raise RuntimeError("durable queue unavailable")
+            def enqueue_read_model_refresh(self, **kwargs: object) -> None:
+                raise AssertionError(f"unrelated refresh queue must not be touched: {kwargs}")
 
             def complete_read_model_refresh(self, **kwargs: object) -> None:
                 self.completed.append(dict(kwargs))
@@ -6515,10 +6505,20 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
             status="processing",
         )
 
-        with self.assertRaisesRegex(RuntimeError, "durable queue unavailable"):
-            service.handle_runtime_event(event)
+        result = service.handle_runtime_event(event)
 
-        self.assertEqual(queue.completed, [])
+        self.assertTrue(result["published"])
+        self.assertEqual(
+            queue.completed,
+            [
+                {
+                    "tenant_id": "tenant-a",
+                    "scope_type": "workbench",
+                    "scope_key": "2026-05",
+                    "source_version": 22,
+                }
+            ],
+        )
 
     def test_workbench_refresh_handler_expands_all_into_month_shards(self) -> None:
         class FakeBuilder:
@@ -6688,7 +6688,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         result = service.handle_runtime_event(event)
 
         self.assertEqual(queue.completed, [("tenant-a", "workbench", "2026-05", 17)])
-        self.assertEqual(len(queue.refreshes), 2)
+        self.assertEqual(queue.refreshes, [])
         self.assertEqual(result["active_generation_id"], "gen-2026-05")
         self.assertNotIn("cache_warmup", result)
 

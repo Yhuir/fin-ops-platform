@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from fin_ops_platform.services.postgres_repositories.common import text, text_list
+from fin_ops_platform.services.read_model_freshness import source_version_mismatch_reasons
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 
 
@@ -25,10 +26,12 @@ class WorkbenchRelationReadFacade:
         read_model_repository: Any,
         queue_repository: Any | None = None,
         tenant_id: str = "default",
+        expected_source_versions: Callable[[str], dict[str, Any]] | None = None,
     ) -> None:
         self._read_model_repository = read_model_repository
         self._queue_repository = queue_repository
         self._tenant_id = text(tenant_id) or "default"
+        self._expected_source_versions = expected_source_versions
         self._last_result: dict[str, Any] = _facade_result(status="missing")
 
     @property
@@ -302,14 +305,41 @@ class WorkbenchRelationReadFacade:
         if require_fresh and status != FRESH_WORKBENCH_RELATION_STATUS and not scope_keys:
             scope_keys = ["all"]
         source_versions = payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}
+        scope_source_versions = (
+            payload.get("read_model_scope_source_versions")
+            if isinstance(payload.get("read_model_scope_source_versions"), dict)
+            else {}
+        )
         stale_reasons = text_list(payload.get("stale_reasons"))
+        canonical_stale_scopes: list[str] = []
+        if callable(self._expected_source_versions):
+            for scope_key in scope_keys:
+                expected = self._expected_source_versions(scope_key)
+                actual = scope_source_versions.get(scope_key)
+                if not isinstance(actual, dict) and len(scope_keys) == 1:
+                    actual = source_versions
+                mismatch_reasons = source_version_mismatch_reasons(
+                    expected=expected if isinstance(expected, dict) else {},
+                    actual=actual if isinstance(actual, dict) else {},
+                )
+                if mismatch_reasons:
+                    canonical_stale_scopes.append(scope_key)
+                    stale_reasons.extend(
+                        f"{scope_key}:{reason}"
+                        for reason in mismatch_reasons
+                        if f"{scope_key}:{reason}" not in stale_reasons
+                    )
+        if canonical_stale_scopes:
+            status = "stale"
         if require_fresh and status != FRESH_WORKBENCH_RELATION_STATUS:
-            refresh_enqueued = self._enqueue_scope_refresh(scope_keys=scope_keys, reason=reason)
+            refresh_scope_keys = canonical_stale_scopes or scope_keys
+            refresh_enqueued = self._enqueue_scope_refresh(scope_keys=refresh_scope_keys, reason=reason)
             return _facade_result(
                 status=status,
                 rows=[],
                 groups=[],
                 source_versions=source_versions,
+                scope_source_versions=scope_source_versions,
                 scope_keys=scope_keys,
                 refresh_enqueued=refresh_enqueued,
                 stale_reasons=stale_reasons,
@@ -319,6 +349,7 @@ class WorkbenchRelationReadFacade:
             rows=[row for row in list(payload.get("rows") or []) if isinstance(row, dict)],
             groups=[group for group in list(payload.get("groups") or []) if isinstance(group, dict)],
             source_versions=source_versions,
+            scope_source_versions=scope_source_versions,
             scope_keys=scope_keys,
             refresh_enqueued=False,
             stale_reasons=stale_reasons,
@@ -371,6 +402,7 @@ def _facade_result(
     rows: list[dict[str, Any]] | None = None,
     groups: list[dict[str, Any]] | None = None,
     source_versions: dict[str, Any] | None = None,
+    scope_source_versions: dict[str, Any] | None = None,
     scope_keys: list[str] | None = None,
     refresh_enqueued: bool = False,
     stale_reasons: list[str] | None = None,
@@ -380,6 +412,7 @@ def _facade_result(
         "rows": list(rows or []),
         "groups": list(groups or []),
         "source_versions": dict(source_versions or {}),
+        "read_model_scope_source_versions": dict(scope_source_versions or {}),
         "read_model_scope_keys": list(scope_keys or []),
         "refresh_enqueued": bool(refresh_enqueued),
         "stale_reasons": list(stale_reasons or []),

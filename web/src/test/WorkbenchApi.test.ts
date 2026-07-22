@@ -148,8 +148,8 @@ describe("workbench api bank amount mapping", () => {
           affected_row_ids: ["oa-partial", "bank-partial"],
           affected_months: ["2026-05"],
           affected_scope_keys: ["2026-05"],
-          freshness_targets: [{ read_model_key: "workbench_relation", scope_key: "2026-05" }],
-          operation_barrier_targets: [{ read_model_key: "workbench_relation", scope_key: "2026-05" }],
+          freshness_targets: [],
+          operation_barrier_targets: [],
           operation_projection: {
             after: {
               paired_groups: [
@@ -209,7 +209,7 @@ describe("workbench api bank amount mapping", () => {
     expect(result.operationProjection?.after.pairedGroups[0].rows.bank.map((row) => row.id)).toEqual(["bank-partial"]);
     expect(result.operationProjection?.after.pairedGroups[0].rows.invoice).toEqual([]);
     expect(result.operationProjection?.after.unpairedGroups).toEqual([]);
-    expect(result.operationBarrierTargets).toEqual([{ readModelKey: "workbench_relation", scopeKey: "2026-05" }]);
+    expect(result.operationBarrierTargets).toEqual([]);
   });
 
   test("loads initial workbench page with one versioned request", async () => {
@@ -1106,18 +1106,8 @@ describe("workbench exception api", () => {
           updated_rows: [{ id: "bank-1" }],
           affected_row_ids: ["bank-1"],
           affected_scope_keys: ["2026-05"],
-          freshness_targets: [
-            {
-              read_model_key: "workbench_relation",
-              scope_key: "2026-05",
-            },
-          ],
-          operation_barrier_targets: [
-            {
-              read_model_key: "workbench_relation",
-              scope_key: "2026-05",
-            },
-          ],
+          freshness_targets: [],
+          operation_barrier_targets: [],
           workbench_refresh_required: true,
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
@@ -1162,18 +1152,8 @@ describe("workbench exception api", () => {
       updatedRows: [{ id: "bank-1" }],
       affectedRowIds: ["bank-1"],
       affectedScopeKeys: ["2026-05"],
-      freshnessTargets: [
-        {
-          readModelKey: "workbench_relation",
-          scopeKey: "2026-05",
-        },
-      ],
-      operationBarrierTargets: [
-        {
-          readModelKey: "workbench_relation",
-          scopeKey: "2026-05",
-        },
-      ],
+      freshnessTargets: [],
+      operationBarrierTargets: [],
       workbenchRefreshRequired: true,
     });
   });
