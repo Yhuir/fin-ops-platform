@@ -19,7 +19,7 @@
 - 与 invoice usage collection worker 的 event 合同。
 - rows 聚合单位必须是 confirmed/linked 配对关系组优先；同一配对关系组内多张进项发票、多条 OA 或多条流水只能生成一行，行内展示合计和 `+N` 明细。没有 confirmed relation group 的发票才按发票 identity 聚合兜底。
 - `InputInvoiceUsageQueryService` 必须显式接收支付状态规则 provider 或上层 lifecycle policy；生产 `Application` 和 SQL projection 必须注入 app-settings backed provider，`InvoiceLifecyclePolicy` 不提供进项支付规则默认值，生产模块不得保留静态支付规则 provider，禁止静默回退静态规则污染支付状态链路；规则设置完整保存时以提交的 `conditions` 为准，读取历史配置时才补默认条件。
-- OA reverse evidence detected 后通过 relation command 写入真正影响 rows 的事实，并返回 `input_invoice_usage` write target envelope。真实新建 batch 会增加页面标题的 OA 批次数，因此保存成功后单独 enqueue `input_invoice_usage:all` 统计刷新；幂等命中、创建 OA 草稿、撤回本地草稿绑定和 submitted/not_submitted 状态更新不改变批次数，不重复 enqueue 统计刷新，也不污染 relation/rows 事实。
+- OA reverse evidence detected 后只通过 relation command 写入真正影响 rows 的 canonical relation；新建 batch、创建/撤回草稿和 submitted/not_submitted 状态只写本模块 batch/version/audit。普通 Drawer 操作不直接 enqueue rows 或标题统计；当前页面保存后重跑正常 GET，由 relation/batch generation mismatch 在访问边界精确收敛。
 
 ### 不负责
 
@@ -35,7 +35,7 @@
 | Filter options | `InputInvoiceUsageReadModelFreshGateService.filter_options(...)` | 生产路径调用 `InputInvoiceUsageReadModelRepositoryPort.list_input_invoice_usage_filter_options(...)`，由 PostgreSQL 结构化列聚合 enum options；筛选字段配置和 query 解析来自 `input_invoice_usage_query_contract.py`；禁止为 options 拉齐全部 row payload 或依赖 `InputInvoiceUsageQueryService` 私有方法 |
 | OA reverse preview 读路径 | `InputInvoiceUsageOaReverseService.preview(...)` | 当前筛选走 `InputInvoiceUsageReadModelFreshGateService.rows(...)`；显式发票选择走 `rows_by_invoice_ids(...)` 和 repository `list_input_invoice_usage_rows_by_invoice_ids(...)`；非 fresh 或 repository 缺失时返回 refreshing 业务错误并入队刷新，不得接收 `InputInvoiceUsageQueryService` 或回退 live scan |
 | OA reverse 写操作 | `input_invoice_usage_oa_reverse_service.py` | 必须带 OA applicant context 和审计 |
-| OA reverse target envelope | `InputInvoiceUsageOaReverseService.batch_payload(..., include_write_targets=True)` | 仅用于 evidence detected / relation-impacting 写入；从 batch invoice display rows 提取 invoice month；无月份时退回 `all`，并返回 `affected_scope_keys`、`read_model_scope_keys`、`freshness_targets`、`operation_barrier_targets` |
+| OA reverse scope hints | `InputInvoiceUsageOaReverseService.batch_payload(..., include_write_targets=True)` | 从 batch invoice display rows 提取受影响 invoice month，作为 `affected_scope_keys` / `read_model_scope_keys` 信息性提示；所有普通 batch/evidence 状态写返回空 `freshness_targets` / `operation_barrier_targets`，不得无月份退回写时 `all` fan-out |
 | Refresh scope | `input_invoice_usage` manifest | month or `all`；`all` 是 fan-out command。显式运维 `force_refresh=true` 必须传播到 month shard 并绕过 unchanged fast path，重新生成并覆盖目标 scope rows；不得写 canonical invoice 或 relation facts |
 | Relation upstream freshness | `workbench_relation` month scope | projection 在读取 relation source versions、执行 unchanged-scope 判断或写 rows 前必须先通过 fresh gate；non-fresh 抛出已登记 dependency-not-fresh 错误交 worker defer，禁止与 relation refresh 并行落盘旧版本 |
 
@@ -46,8 +46,8 @@
 | 使用情况 rows/details/statistics | 前端页面 | fresh/status 可见；confirmed relation group 是优先行边界，组内发票/OA/流水各显示一次合计与 `+N`，未 linked 发票按 identity 兜底；all scope 读取多个 month shard 时按 read model row id 去重。主 rows 响应的 `statistics` 从完整 `input_invoice_usage` 投影按唯一发票成员 ID 计算发票、OA/流水关联、付款及补集，并补充本模块 OA reverse 批次数；忽略当前 keyword/filter/month/sort/page。`pagination.total` 仍是表格行数/配对组行数；任一 child scope non-fresh 时统计不可用，合法 fresh 空集才返回零。 |
 | 页面 Audit icon | AppHealth operations audit API | admin-only；active canonical 进项发票（含 collapsed members）是 independent expected-set，成员/金额/scope 与共享 relation 的受影响月份双向 edge 必须在同一只读一致性快照中相等；relation source-version 仅有全局 `workbench_pair_relations_updated_at` 前进时，只有该时间点之后的 relation 与本月 canonical/PostgreSQL/OA source-link 发票 identity 相交才判为本页 mismatch，纯银行关系变化不得污染本页 integrity；其它版本差异仍 fail closed。此规则只收窄只读 Audit 分类，页面 fresh gate 仍按完整 source-version 合同按访问触发刷新，精确化由 Phase 27 负责；只有结构化 integrity=pass、freshness=fresh、queue=drained 且 database snapshot 已启用才显示成功，unknown 不得伪装 fresh，问题数显示为 sample |
 | 支付状态 | rows/filter/export/read model | 只消费 `workbench_relation` distribution 中 confirmed/linked 关系；多 OA/多流水用 linked 合计与发票价税合计比对；无 active relation 或历史 candidate 兼容值不参与 `已付款` 判断 |
-| OA reverse 本地状态 | API/OA drawer | draft/staged/submitted/not_submitted 只落 `app.input_invoice_usage_oa_reverse_batches`，前端立即释放按钮；真实新建 batch 额外 enqueue `input_invoice_usage:all` 仅刷新标题批次数，幂等命中和后续状态更新不 enqueue；前端不等待该统计 refresh 的 operation barrier |
-| OA reverse relation 结果 | Workbench relation / API / operation barrier | evidence detected 写入 relation 后触发 dirty scope，并返回 `read_model_key=input_invoice_usage`、`scope_key=<invoice month>` |
+| OA reverse 本地状态 | API/OA drawer | draft/staged/submitted/not_submitted 只落 `app.input_invoice_usage_oa_reverse_batches`，canonical commit 后立即释放按钮并让当前页正常 GET；不在写响应链 enqueue 统计或等待 barrier |
+| OA reverse relation 结果 | Workbench relation / API | evidence detected 写入 canonical relation 后返回月份 hints；`input_invoice_usage` 与 relation distribution 均由被访问 owner 自行检测版本差异并收敛，不从 Drawer fan-out |
 | Dirty scope | runtime queue | `input_invoice_usage.read_model.refresh` |
 
 ## 持久化与投影
@@ -82,7 +82,7 @@
 - `tests/test_input_invoice_usage_api.py`
 - `tests/test_input_invoice_usage_read_model_fresh_gate_service.py`
 - `tests/test_invoice_usage_collection_sql_runtime.py`
-- `tests/test_input_invoice_usage_oa_reverse_service.py` 覆盖 OA reverse 本地状态不触发 read model target、evidence detected 才返回 target envelope，并覆盖 preview 通过 read model/fresh gate 读取、不回退 live query。
+- `tests/test_input_invoice_usage_oa_reverse_service.py` 覆盖全部 OA reverse 状态和 evidence detected 都不触发 write-time read model target，同时覆盖 preview 通过 read model/fresh gate 读取、不回退 live query。
 - `web/e2e/input-invoice-usage-flow.spec.ts`
 
 ## 当前缺口和删除条件
@@ -97,6 +97,6 @@
 - Owned facts: `app.input_invoice_usage_oa_reverse_batches`。
 - Allowed writes: input invoice usage OA reverse service、明确 application/UoW boundary。
 - Allowed reads: input invoice usage application/query services、OA reverse query ports。
-- Downstream outputs: input_invoice_usage、invoice_lifecycle、workbench_relation dirty scopes 或 owner producer 输出。
+- Downstream outputs: owner batch/relation version与受影响月份 hints；input-invoice-usage、invoice-lifecycle、workbench-relation dirty scope 只由对应访问 owner 输出。
 - Forbidden paths: OA reverse 工具不得绕过 owner 状态机；read model rows 不得反向成为 reverse batch 事实。
 - Old code deletion: 旧 OA reverse direct-write path 和 snapshot fallback 必须删除；migration/audit/rollback 工具保留不算 closure。
