@@ -56,6 +56,7 @@ Runtime worker 本身不拥有业务实体；它维护后台执行事实和派�
 - defer 会回滚本次 claim 增加的 `attempts`，不会走 `runtime_failure`、`failed` 或 `dead_lettered`。
 - defer 不会把任何 projection/readiness 标为 fresh；它只缩短已知依赖顺序竞态的等待时间。
 - dependency refresh 只能补投可从 source scope 明确推导的依赖 scope。对 `bank_detail` 依赖，裸月份或 source scope 内嵌月份可补投对应月份；下游 `all` scope 不能自动补投 `bank_detail:all`。
+- `invoice_lifecycle:YYYY-MM` 依赖 `pending_invoice` 时必须补投同月 `expense:all:YYYY-MM` 与 `income:all:YYYY-MM`；禁止把裸 `YYYY-MM` 作为 `pending_invoice` scope。显式 lifecycle `all` 只可对应合法的 `expense:all` 与 `income:all` 基础 scope。
 - `bank_detail:all` 是 fan-out 命令，不是稳定 freshness 依赖；它只能由导入、规则变化、backfill 或明确的银行明细 refresh producer 触发，再由 bank detail handler 展开为月份 shard。
 - App Health 汇总 runtime/read model 状态时必须以 current-effective facts 为准。Workbench active repair 已进入 `pending`/`processing` 或 repository 报 `read_model_status=refreshing/rebuilding` 时，旧 generation consistency failure 只能作为诊断，不能升级为 unavailable dependency 或全局 blocked；没有 active repair 的 failed/dead-letter 才是 blocker。
 

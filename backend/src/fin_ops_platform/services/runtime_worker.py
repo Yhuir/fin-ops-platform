@@ -394,15 +394,27 @@ class RuntimeWorker:
                 continue
             if scope_type == str(event.scope_type or ""):
                 continue
-            scope_key = cls._dependency_scope_key(scope_type, event)
-            if not scope_key:
-                continue
-            identity = (scope_type, scope_key)
-            if identity in seen:
-                continue
-            seen.add(identity)
-            dependencies.append({"scope_type": scope_type, "scope_key": scope_key})
+            for scope_key in cls._dependency_scope_keys(scope_type, event):
+                identity = (scope_type, scope_key)
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                dependencies.append({"scope_type": scope_type, "scope_key": scope_key})
         return dependencies
+
+    @classmethod
+    def _dependency_scope_keys(cls, dependency_scope_type: str, event: RuntimeQueueEvent) -> list[str]:
+        source_scope_key = str(event.scope_key or event.aggregate_id or "").strip()
+        if dependency_scope_type == "pending_invoice":
+            months = MONTH_SCOPE_RE.findall(source_scope_key)
+            if months:
+                month = months[-1]
+                return [f"expense:all:{month}", f"income:all:{month}"]
+            if source_scope_key == "all":
+                return ["expense:all", "income:all"]
+            return []
+        scope_key = cls._dependency_scope_key(dependency_scope_type, event)
+        return [scope_key] if scope_key else []
 
     @staticmethod
     def _parent_scope_keys_from_error(error: str) -> list[str]:

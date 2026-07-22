@@ -6,6 +6,7 @@
 ## 当前决策
 
 - Worker lifecycle 触发 read model refresh 时必须走统一 scope policy/gateway 入队；worker 不直接拼接或投递成本统计等 read model 的业务 scope contract。
+- `invoice_lifecycle:YYYY-MM` 遇到 pending-invoice 依赖未 fresh 时，worker 必须补投同月 `expense:all:YYYY-MM` 与 `income:all:YYYY-MM`，禁止生成 scope policy 会拒绝的裸月份。
 - 非事务 read model refresh producer 由 architecture guard 约束：不得绕过 `ReadModelRefreshGateway` 直接调用 `RuntimeQueueRepository.enqueue_read_model_refresh(...)`。
 - `bank_detail:all` 是显式 fan-out 命令，不是 downstream `*_read_model_not_fresh` 可自动推导的稳定 freshness 依赖 scope；下游 all-scope event 只能等待或补投可识别的具体月份 shard。
 - `*_read_model_not_fresh` 可携带 `parent_scope_keys=YYYY-MM,...` 表示同一 read model 的 parent shard 依赖；runtime worker 必须允许这类 same-scope parent refresh。若错误包含 `parent_generation_inconsistent`，即使 readiness 显示 fresh，也要强制补投 parent scope，因为 consistency failure 比 readiness 更接近发布边界。
@@ -30,6 +31,13 @@
 ```
 
 ## 历史记录
+
+## 2026-07-22 - Invoice lifecycle 的 pending-invoice 依赖 scope 收敛
+
+- 生产根因：`invoice_lifecycle:YYYY-MM` 等待 pending-invoice 输入时，通用 dependency mapper 把月份直接映射成 `pending_invoice:YYYY-MM`；正式 scope policy 拒绝该非法 scope，enqueue 异常被记录后 lifecycle event 继续短 defer，最终形成无进展循环并让多个依赖 lifecycle 的页面持续显示同步中。
+- 最小修复：只在现有 `RuntimeWorker` dependency scope 推导中把 pending-invoice 月份展开为 `expense:all:YYYY-MM` 与 `income:all:YYYY-MM`；显式 all 展开为两个合法基础 scope。后续仍统一经过 `ReadModelRefreshGateway` 的 normalize/validate/active+fresh dedupe 和 PostgreSQL durable queue。
+- 边界不变：不新增表、worker、read model、service、repository、event type 或 fallback；不改变 API/DTO、projection 业务规则或页面 I/O。
+- 自动验证：`PYTHONPATH=backend/src:. python3 -m pytest -q tests/test_runtime_worker.py tests/test_read_model_refresh_gateway.py tests/test_invoice_lifecycle_read_model_refresh.py tests/test_invoice_lifecycle_sql_projection.py tests/test_pending_invoice_service.py tests/test_runtime_queue.py`。
 
 ## 2026-07-16 - 删除 Workbench worker 同步 cache warmer
 

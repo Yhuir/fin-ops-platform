@@ -253,6 +253,58 @@ class RuntimeWorkerTests(unittest.TestCase):
         deferred_payloads = [payload for _worker_id, _kind, status, payload in queue.heartbeats if status == "deferred"]
         self.assertEqual(deferred_payloads[0]["dependency_refreshes"], [{"scope_type": "bank_detail", "scope_key": "2026-04"}])
 
+    def test_run_once_expands_invoice_lifecycle_pending_invoice_dependency_to_valid_direction_scopes(self) -> None:
+        claimed = RuntimeQueueEvent(
+            **{
+                **event("invoice_lifecycle.read_model.refresh").__dict__,
+                "scope_type": "invoice_lifecycle",
+                "scope_key": "2026-04",
+                "priority": "normal",
+                "trace_id": "trace-lifecycle-1",
+            }
+        )
+        queue = FakeQueue(claimed)
+
+        def fail_not_fresh(_event: RuntimeQueueEvent) -> None:
+            raise RuntimeError("pending_invoice_read_model_not_fresh: status=refreshing")
+
+        worker = RuntimeWorker(
+            queue_repository=queue,
+            config=RuntimeWorkerConfig(
+                worker_id="worker-1",
+                event_types=["invoice_lifecycle.read_model.refresh"],
+                dependency_not_fresh_delay_seconds=0.25,
+            ),
+            handlers={"invoice_lifecycle.read_model.refresh": fail_not_fresh},
+        )
+
+        self.assertEqual(worker.run_once(), RuntimeWorkerResult.DEFERRED)
+        self.assertEqual(
+            [
+                (refresh["scope_type"], refresh["scope_key"])
+                for refresh in queue.enqueued_read_model_refreshes
+            ],
+            [
+                ("pending_invoice", "expense:all:2026-04"),
+                ("pending_invoice", "income:all:2026-04"),
+            ],
+        )
+        self.assertNotIn(
+            ("pending_invoice", "2026-04"),
+            [
+                (refresh["scope_type"], refresh["scope_key"])
+                for refresh in queue.enqueued_read_model_refreshes
+            ],
+        )
+        deferred_payloads = [payload for _worker_id, _kind, status, payload in queue.heartbeats if status == "deferred"]
+        self.assertEqual(
+            deferred_payloads[0]["dependency_refreshes"],
+            [
+                {"scope_type": "pending_invoice", "scope_key": "expense:all:2026-04"},
+                {"scope_type": "pending_invoice", "scope_key": "income:all:2026-04"},
+            ],
+        )
+
     def test_run_once_does_not_enqueue_bank_detail_all_for_all_scope_dependency(self) -> None:
         claimed = RuntimeQueueEvent(
             **{
