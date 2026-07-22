@@ -340,6 +340,10 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
             rules_payload=rules_payload,
         )
         empty = build_bank_relation_requirement_metadata(tag_codes=[], rules_payload=rules_payload)
+        partially_missing = build_bank_relation_requirement_metadata(
+            tag_codes=["requires-neither", ""],
+            rules_payload=rules_payload,
+        )
         missing_rules = build_bank_relation_requirement_metadata(
             tag_codes=["requires-neither"],
             rules_payload={},
@@ -351,6 +355,9 @@ class WorkbenchRelationGroupingServiceTests(unittest.TestCase):
         for metadata in (unknown, empty, missing_rules):
             self.assertTrue(metadata["requires_oa"])
             self.assertTrue(metadata["requires_invoice"])
+        self.assertEqual(partially_missing["paired_requirement_tag_codes"], ["requires-neither"])
+        self.assertTrue(partially_missing["requires_oa"])
+        self.assertTrue(partially_missing["requires_invoice"])
 
     def test_batch_accounting_and_etc_completion_exemptions_remain_complete(self) -> None:
         for relation_mode, metadata, amount_check in [

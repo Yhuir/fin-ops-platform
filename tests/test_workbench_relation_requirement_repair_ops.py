@@ -288,6 +288,44 @@ class WorkbenchRelationRequirementRepairOpsTests(unittest.TestCase):
         report = _run(command, ["--dry-run"], tag_facade=_TagFacade(""), rules={})
         self.assertEqual(report["requirement_counts"], {"oa=1,invoice=1": 1})
 
+    def test_partial_missing_bank_tag_fails_closed_with_one_bulk_read(self) -> None:
+        relation = _relation(metadata={"requires_oa": False, "requires_invoice": False})
+        relation["row_ids"] = ["bank-known", "bank-missing"]
+        relation["row_types"] = ["bank", "bank"]
+
+        class PartialMissingTagFacade:
+            def __init__(self) -> None:
+                self.calls: list[list[str]] = []
+
+            def category_records_by_transaction_ids(
+                self,
+                row_ids: list[str],
+                **_kwargs: object,
+            ) -> dict[str, object]:
+                self.calls.append(list(row_ids))
+                return {
+                    "bank-known": {
+                        "effective_category_code": "expense:engineering_service:personnel_insurance"
+                    },
+                    "bank-missing": {"effective_category_code": ""},
+                }
+
+        tag_facade = PartialMissingTagFacade()
+        plan = repair_ops._build_plan(
+            [relation],
+            tag_facade=tag_facade,
+            rules_payload=_rules(requires_oa=False, requires_invoice=False),
+        )
+
+        self.assertEqual(plan[0]["bank_tag_codes"], ["expense:engineering_service:personnel_insurance"])
+        self.assertEqual(
+            plan[0]["special_metadata"]["paired_requirement_tag_codes"],
+            ["expense:engineering_service:personnel_insurance"],
+        )
+        self.assertTrue(plan[0]["special_metadata"]["requires_oa"])
+        self.assertTrue(plan[0]["special_metadata"]["requires_invoice"])
+        self.assertEqual(tag_facade.calls, [["bank-known", "bank-missing"]])
+
     def test_rollback_restores_exact_metadata_without_recreating_relation(self) -> None:
         preimage = {"legacy_key": "keep", "requires_oa": False, "requires_invoice": False}
         command = _CommandService([_relation(metadata=preimage)])

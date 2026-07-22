@@ -160,21 +160,23 @@ def _build_plan(
 
     plan: list[dict[str, Any]] = []
     for relation in sorted(relations, key=lambda item: str(item.get("case_id") or "")):
+        raw_tag_codes = [
+            _category_code(
+                category_records.get(row_id)
+                if isinstance(category_records.get(row_id), dict)
+                else {}
+            )
+            for row_id in _bank_row_ids(relation)
+        ]
         tag_codes = list(
             dict.fromkeys(
                 tag_code
-                for row_id in _bank_row_ids(relation)
-                if (
-                    tag_code := _category_code(
-                        category_records.get(row_id)
-                        if isinstance(category_records.get(row_id), dict)
-                        else {}
-                    )
-                )
+                for tag_code in raw_tag_codes
+                if tag_code
             )
         )
         built = build_bank_relation_requirement_metadata(
-            tag_codes=tag_codes,
+            tag_codes=raw_tag_codes,
             rules_payload=rules_payload,
         )
         existing = relation.get("special_metadata")

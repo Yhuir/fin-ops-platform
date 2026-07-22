@@ -19,7 +19,9 @@ def build_bank_relation_requirement_metadata(
         tag_code = str(item.get("tag_code") or item.get("code") or "").strip()
         if tag_code:
             requirements[tag_code] = item
-    normalized_tags = list(dict.fromkeys(str(value or "").strip() for value in tag_codes if str(value or "").strip()))
+    raw_tags = [str(value or "").strip() for value in tag_codes]
+    has_missing_tag = any(not tag_code for tag_code in raw_tags)
+    normalized_tags = list(dict.fromkeys(tag_code for tag_code in raw_tags if tag_code))
     requires_oa = False
     requires_invoice = False
     for tag_code in normalized_tags:
@@ -30,7 +32,7 @@ def build_bank_relation_requirement_metadata(
         else:
             requires_oa = True
             requires_invoice = True
-    if not normalized_tags:
+    if has_missing_tag or not normalized_tags:
         requires_oa = True
         requires_invoice = True
     metadata: dict[str, object] = {

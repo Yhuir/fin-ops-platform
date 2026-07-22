@@ -882,6 +882,71 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(call["history_operation_type"], "turnover_manual_closure_confirm")
         self.assertIs(call["preparation"], preparation.confirm_preparation)
 
+    def test_turnover_workbench_pair_port_fails_closed_on_one_missing_bank_tag(self) -> None:
+        module = self._write_adapters_module()
+        bank_row_reads: list[list[str]] = []
+        rules_reads: list[None] = []
+        confirm_calls: list[dict[str, object]] = []
+
+        def prepare_confirm_relation(**_kwargs: object) -> object:
+            return SimpleNamespace(active_relations=[])
+
+        def confirm_relation(**kwargs: object) -> dict[str, object]:
+            confirm_calls.append(dict(kwargs))
+            return {"relation": {"case_id": kwargs["case_id"]}}
+
+        command = SimpleNamespace(
+            prepare_confirm_relation=prepare_confirm_relation,
+            confirm_relation=confirm_relation,
+        )
+
+        def bank_rows_by_ids(row_ids: list[str]) -> list[dict[str, object]]:
+            bank_row_reads.append(list(row_ids))
+            return [
+                {"id": "bank-known", "effective_category_code": "requires-neither"},
+                {"id": "bank-missing", "effective_category_code": ""},
+            ]
+
+        def rules_payload() -> dict[str, object]:
+            rules_reads.append(None)
+            return {
+                "version": 8,
+                "requirements_by_tag_code": {
+                    "requires-neither": {"requires_oa": False, "requires_invoice": False}
+                },
+            }
+
+        port = module.TurnoverLedgerWorkbenchPairPort(
+            relation_command_service_factory=lambda _transaction: command,
+            bank_rows_by_ids_provider=bank_rows_by_ids,
+            rules_payload_provider=rules_payload,
+        )
+        preparation = port.prepare_turnover_manual_closure_write(
+            bank_row_ids=["bank-known", "bank-missing"],
+            affected_months=["2026-02"],
+            transaction=object(),
+        )
+        port.create_turnover_manual_closure(
+            closure={
+                "relation_id": "turnover-partial-missing-tag",
+                "principal_amount": "100.00",
+                "settled_amount": "100.00",
+            },
+            bank_row_ids=["bank-known", "bank-missing"],
+            actor_id="finance-user",
+            note=None,
+            affected_months=["2026-02"],
+            transaction=object(),
+            preparation=preparation,
+        )
+
+        metadata = dict(confirm_calls[0]["special_metadata"])
+        self.assertEqual(metadata["paired_requirement_tag_codes"], ["requires-neither"])
+        self.assertTrue(metadata["requires_oa"])
+        self.assertTrue(metadata["requires_invoice"])
+        self.assertEqual(bank_row_reads, [["bank-known", "bank-missing"]])
+        self.assertEqual(rules_reads, [None])
+
     def test_turnover_manual_closure_preparation_keeps_cross_month_scope_keys(self) -> None:
         module = self._write_adapters_module()
 
