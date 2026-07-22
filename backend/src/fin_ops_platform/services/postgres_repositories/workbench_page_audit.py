@@ -665,8 +665,7 @@ def _is_requirement_exempt_relation(relation: dict[str, Any]) -> bool:
     amount_check = relation.get("amount_check")
     amount_check = amount_check if isinstance(amount_check, dict) else {}
     return bool(
-        str(relation.get("relation_mode") or "").strip() == "turnover_manual_closure"
-        or str(metadata.get("source") or "").strip() == "batch_accounting"
+        str(metadata.get("source") or "").strip() == "batch_accounting"
         or isinstance(metadata.get("etc_batch_link"), dict)
         or str(
             amount_check.get("external_etc_batch_id")

@@ -139,6 +139,38 @@ class AuditWorkbenchRelationDisplayToolTests(unittest.TestCase):
             {issue["code"] for issue in report["issues"]},
         )
 
+    def test_turnover_closure_waiting_for_oa_in_unpaired_zone_passes_partition_audit(self) -> None:
+        relation = _turnover_closure_relation()
+
+        report = audit_workbench_relation_display.audit_workbench_relation_display(
+            FakeConnection(
+                relations=[relation],
+                generations=[_generation("2026-01", "2026-06-14 10:00:00+08")],
+                group_rows=[_group_row("2026-01", "bank-1", relation_mode="turnover_manual_closure", zone="unpaired")],
+            )
+        )
+
+        self.assertNotIn(
+            "relation_requirement_partition_mismatch",
+            {issue["code"] for issue in report["issues"]},
+        )
+
+    def test_turnover_closure_waiting_for_oa_in_paired_zone_blocks_page_audit(self) -> None:
+        relation = _turnover_closure_relation()
+
+        report = audit_workbench_relation_display.audit_workbench_relation_display(
+            FakeConnection(
+                relations=[relation],
+                generations=[_generation("2026-01", "2026-06-14 10:00:00+08")],
+                group_rows=[_group_row("2026-01", "bank-1", relation_mode="turnover_manual_closure", zone="paired")],
+            )
+        )
+
+        self.assertIn(
+            "relation_requirement_partition_mismatch",
+            {issue["code"] for issue in report["issues"]},
+        )
+
     def test_missing_expected_etc_relation_owner_blocks_page_audit(self) -> None:
         report = audit_workbench_relation_display.audit_workbench_relation_display(
             FakeConnection(
@@ -509,6 +541,23 @@ def _relation() -> dict[str, object]:
             }
         },
     }
+
+
+def _turnover_closure_relation() -> dict[str, object]:
+    relation = _relation()
+    relation["relation_mode"] = "turnover_manual_closure"
+    relation["row_ids"] = ["bank-1"]
+    relation["row_types"] = ["bank"]
+    relation["raw_payload"] = {
+        "normalized_payload": {
+            "case_id": "case-a",
+            "relation_mode": "turnover_manual_closure",
+            "row_ids": ["bank-1"],
+            "row_types": ["bank"],
+            "special_metadata": {"requires_oa": True, "requires_invoice": False},
+        }
+    }
+    return relation
 
 
 def _generation(scope_key: str, activated_at: str) -> dict[str, object]:

@@ -1266,3 +1266,8 @@
 - month generation 和 all composed schema 同步升级 v6；groups/initial cache 继续由 month schema 自动派生。旧 v5 generation/cache 经既有 freshness gate fail closed，不修改 `workbench_relation` schema、registry、manifest、worker/env 或 API shape。
 - 历史 Turnover requirement snapshot 只通过现有 operator repair ops 与 canonical relation command 更新；forward/rollback 都绑定 original execute fingerprint，任一 current-state drift 在首写前终止，rollback 精确恢复完整 metadata preimage。
 - 生产只允许 exact release、canonical relation/history 与 active generation restore point、approved fingerprint 和 test-owned 可恢复 scenario 齐全后执行；rehydrate 仍走现有 worker/active-generation 原子发布，禁止直接 SQL mark-fresh。
+
+## 2026-07-22 - Turnover requirement 审计旧豁免清理
+
+- 生产 v6 rehydrate 已把缺 OA 的 Turnover closure 正确投影到 unpaired，但 Page Audit 仍把 `turnover_manual_closure` 无条件列为 requirement exempt，产生“实际 unpaired、预期 paired”的假阳性。这是写链路 bypass 删除后遗漏的审计旧路径。
+- 修复只删除 `_is_requirement_exempt_relation(...)` 中该 relation-mode 特例；审计和 projection 现在统一读取冻结的 `requires_oa/requires_invoice` 与实际 typed members。`batch_accounting`、ETC 的既有显式豁免保持不变，无新 I/O、API、schema、worker 或兼容分支。
