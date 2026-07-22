@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 import re
@@ -13,6 +14,21 @@ WRITE_ENTRY_INVENTORY_PATH = (
     REPO_ROOT / "docs" / "modules" / "permissions-and-audit" / "write-entry-inventory.md"
 )
 FEATURES_DIR = REPO_ROOT / "web" / "src" / "features"
+COVERAGE_MATRIX_PATH = (
+    REPO_ROOT / ".planning" / "phases" / "27-read-model-fan-out" / "27-COVERAGE-MATRIX.md"
+)
+
+
+def _coverage_section(heading: str, next_heading: str) -> str:
+    coverage = COVERAGE_MATRIX_PATH.read_text(encoding="utf-8")
+    section_match = re.search(
+        rf"^## {re.escape(heading)}\s*$\n(?P<body>.*?)^## {re.escape(next_heading)}\s*$",
+        coverage,
+        re.MULTILINE | re.DOTALL,
+    )
+    if section_match is None:
+        raise AssertionError(f"Could not find coverage matrix section: {heading}")
+    return section_match.group("body")
 
 
 @dataclass(frozen=True)
@@ -225,7 +241,222 @@ def _mutating_feature_api_files() -> list[str]:
     return mutating_files
 
 
+def _coverage_page_routes() -> list[PageRoute]:
+    body = _coverage_section("Registered page coverage", "Read model coverage")
+    routes = [
+        PageRoute(path=path, page_key=page_key)
+        for page_key, path in re.findall(
+            r"^\| `([^`]+)` \| `([^`]+)` \|",
+            body,
+            re.MULTILINE,
+        )
+    ]
+    if not routes:
+        raise AssertionError("Could not find registered page rows in Phase 27 coverage matrix")
+    return routes
+
+
+def _top_level_function_segments(source: str) -> dict[str, tuple[bool, str]]:
+    declarations = list(
+        re.finditer(
+            r"^(?P<export>export\s+)?(?:async\s+)?function\s+(?P<name>[A-Za-z_]\w*)\s*\(",
+            source,
+            re.MULTILINE,
+        )
+    )
+    segments: dict[str, tuple[bool, str]] = {}
+    for index, declaration in enumerate(declarations):
+        end = declarations[index + 1].start() if index + 1 < len(declarations) else len(source)
+        segments[declaration.group("name")] = (
+            declaration.group("export") is not None,
+            source[declaration.start():end],
+        )
+    return segments
+
+
+def _mutating_exported_functions(source: str) -> set[str]:
+    segments = _top_level_function_segments(source)
+    mutation_pattern = re.compile(r"method:\s*[\"'](?:POST|PUT|PATCH|DELETE)[\"']")
+    call_pattern = re.compile(r"\b([A-Za-z_]\w*)\s*\(")
+
+    def reaches_mutation(function_name: str, visiting: set[str]) -> bool:
+        if function_name in visiting:
+            return False
+        function = segments.get(function_name)
+        if function is None:
+            return False
+        _exported, body = function
+        if mutation_pattern.search(body):
+            return True
+        next_visiting = {*visiting, function_name}
+        return any(
+            called_name in segments and reaches_mutation(called_name, next_visiting)
+            for called_name in call_pattern.findall(body)
+        )
+
+    return {
+        function_name
+        for function_name, (exported, _body) in segments.items()
+        if exported and reaches_mutation(function_name, set())
+    }
+
+
+def _mutating_feature_api_function_ids() -> set[str]:
+    function_ids: set[str] = set()
+    for path in sorted(FEATURES_DIR.glob("*/api.ts")):
+        relative_path = path.relative_to(FEATURES_DIR).as_posix()
+        for function_name in _mutating_exported_functions(path.read_text(encoding="utf-8")):
+            function_ids.add(f"{relative_path}#{function_name}")
+    return function_ids
+
+
+def _coverage_mutating_api_function_ids() -> set[str]:
+    body = _coverage_section("Mutating frontend API function coverage", "Drawer component coverage")
+    function_ids = set(re.findall(r"`([^`|\s]+/api\.ts#[A-Za-z_]\w*)`", body))
+    if not function_ids:
+        raise AssertionError("Could not find mutating frontend API function ids in coverage matrix")
+    return function_ids
+
+
+def _business_drawer_sources() -> set[str]:
+    sources = {
+        path.relative_to(REPO_ROOT).as_posix()
+        for root in (REPO_ROOT / "web" / "src" / "components", REPO_ROOT / "web" / "src" / "features")
+        for path in root.rglob("*Drawer.tsx")
+    }
+    sources.discard("web/src/components/common/AppDrawer.tsx")
+    return sources
+
+
+def _coverage_drawer_sources() -> dict[str, str]:
+    body = _coverage_section("Drawer component coverage", "Executable dynamic opener coverage")
+    rows = {
+        source: classification
+        for source, classification in re.findall(
+            r"^\| `([^`]+Drawer\.tsx)` \| .*? \| `([^`]+)` \|",
+            body,
+            re.MULTILINE,
+        )
+    }
+    if not rows:
+        raise AssertionError("Could not find Drawer component rows in coverage matrix")
+    return rows
+
+
+def _coverage_opener_ids() -> set[str]:
+    body = _coverage_section("Executable dynamic opener coverage", "Lifecycle, enqueue and barrier call sites")
+    opener_ids = set(re.findall(r"^\| `([^`]+:[^`]+)` \|", body, re.MULTILINE))
+    if not opener_ids:
+        raise AssertionError("Could not find dynamic opener ids in coverage matrix")
+    return opener_ids
+
+
+def _direct_lifecycle_enqueue_barrier_sites() -> Counter[tuple[str, str]]:
+    sites: Counter[tuple[str, str]] = Counter()
+    backend_patterns = (
+        ".plan_event(",
+        ".enqueue_read_model_refresh(",
+        ".enqueue_read_model_refreshes_in_transaction(",
+    )
+    for path in (REPO_ROOT / "backend" / "src" / "fin_ops_platform").rglob("*.py"):
+        source = path.read_text(encoding="utf-8")
+        relative_path = path.relative_to(REPO_ROOT).as_posix()
+        for sentinel in backend_patterns:
+            count = source.count(sentinel)
+            if count:
+                sites[(relative_path, sentinel)] += count
+
+    for root in (REPO_ROOT / "web" / "src" / "pages", REPO_ROOT / "web" / "src" / "components"):
+        for path in root.rglob("*.tsx"):
+            source = path.read_text(encoding="utf-8")
+            count = source.count("waitForOperationFreshness(")
+            if count:
+                sites[(path.relative_to(REPO_ROOT).as_posix(), "waitForOperationFreshness(")] += count
+    return sites
+
+
+def _coverage_lifecycle_enqueue_barrier_sites() -> Counter[tuple[str, str]]:
+    body = _coverage_section("Lifecycle, enqueue and barrier call sites", "Migration and deletion rule")
+    sites: Counter[tuple[str, str]] = Counter()
+    rows = re.findall(
+        r"^\| `[^`]+` \| `([^`]+)` \| `([^`]+)` \| `(\d+)` \| `(retain|migrate|delete)` \|",
+        body,
+        re.MULTILINE,
+    )
+    if not rows:
+        raise AssertionError("Could not find lifecycle/enqueue/barrier site rows in coverage matrix")
+    for source_path, sentinel, calls, _status in rows:
+        sites[(source_path, sentinel)] += int(calls)
+    return sites
+
+
 class PermissionsWriteEntryInventoryTests(unittest.TestCase):
+    def test_phase_27_page_coverage_matches_current_page_registry_bidirectionally(self) -> None:
+        self.assertEqual(
+            _coverage_page_routes(),
+            _page_registry_routes(),
+            "Phase 27 coverage must list exactly the current appPageDefinitions entries in registry order.",
+        )
+
+    def test_phase_27_mutating_api_function_coverage_is_bidirectional(self) -> None:
+        actual = _mutating_feature_api_function_ids()
+        documented = _coverage_mutating_api_function_ids()
+
+        self.assertEqual(
+            sorted(actual - documented),
+            [],
+            "Every exported feature API function that reaches POST/PUT/PATCH/DELETE must have a "
+            "Phase 27 operation-classification row.",
+        )
+        self.assertEqual(
+            sorted(documented - actual),
+            [],
+            "Phase 27 API function rows must reference current exported mutating/read-like command clients.",
+        )
+
+    def test_mutating_api_parser_distinguishes_read_like_exports_and_local_write_helpers(self) -> None:
+        synthetic_source = """
+async function sendWrite() {
+  return request('/write', { method: 'POST' });
+}
+export async function previewOnly() {
+  return request('/preview');
+}
+export async function commitThroughHelper() {
+  return sendWrite();
+}
+"""
+        self.assertEqual(_mutating_exported_functions(synthetic_source), {"commitThroughHelper"})
+
+    def test_phase_27_drawer_component_coverage_is_bidirectional_and_classified(self) -> None:
+        actual = _business_drawer_sources()
+        documented = _coverage_drawer_sources()
+
+        self.assertEqual(sorted(actual - set(documented)), [], "Every business Drawer must be classified.")
+        self.assertEqual(sorted(set(documented) - actual), [], "Drawer rows must point to current components.")
+        self.assertEqual(
+            sorted(
+                source
+                for source, classification in documented.items()
+                if classification not in {"read-only", "writable", "mixed"}
+            ),
+            [],
+            "Each Drawer must explicitly declare read-only, writable, or mixed behavior.",
+        )
+
+    def test_phase_27_dynamic_opener_coverage_matches_role_matrix_and_inventory(self) -> None:
+        documented = _coverage_opener_ids()
+        self.assertEqual(documented, set(_role_matrix_opener_ids()))
+        self.assertEqual(documented, set(_inventory_opener_ids()))
+
+    def test_phase_27_lifecycle_enqueue_and_barrier_call_counts_are_bidirectional(self) -> None:
+        self.assertEqual(
+            _coverage_lifecycle_enqueue_barrier_sites(),
+            _direct_lifecycle_enqueue_barrier_sites(),
+            "Every direct lifecycle/enqueue/barrier production call must be classified retain/migrate/delete, "
+            "including its current call count, so same-file additions cannot bypass review.",
+        )
+
     def test_every_page_registry_route_has_a_write_entry_inventory_row(self) -> None:
         routes = _page_registry_routes()
         inventory_modules = set(_inventory_rows())

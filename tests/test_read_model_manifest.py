@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 from pathlib import Path
+import re
 import unittest
 
 from fin_ops_platform.services.app_status_read_model_registry import APP_STATUS_READ_MODEL_REGISTRY
@@ -30,9 +31,48 @@ from fin_ops_platform.tools.read_model_slo_smoke import PAGE_FIRST_SCREEN_SCOPE_
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+COVERAGE_MATRIX_PATH = (
+    REPO_ROOT / ".planning" / "phases" / "27-read-model-fan-out" / "27-COVERAGE-MATRIX.md"
+)
+
+
+def _phase_27_read_model_coverage() -> dict[str, tuple[str, str]]:
+    coverage = COVERAGE_MATRIX_PATH.read_text(encoding="utf-8")
+    section_match = re.search(
+        r"^## Read model coverage\s*$\n(?P<body>.*?)^## Mutating frontend API function coverage\s*$",
+        coverage,
+        re.MULTILINE | re.DOTALL,
+    )
+    if section_match is None:
+        raise AssertionError("Could not find Phase 27 read model coverage section")
+    rows = {
+        key: (scope_contract, query_owner)
+        for key, scope_contract, query_owner in re.findall(
+            r"^\| `([^`]+)` \| (.*?) \| `([^`]+)` \|",
+            section_match.group("body"),
+            re.MULTILINE,
+        )
+    }
+    if not rows:
+        raise AssertionError("Could not find Phase 27 read model coverage rows")
+    return rows
 
 
 class ReadModelManifestTests(unittest.TestCase):
+    def test_phase_27_coverage_matches_manifest_keys_scopes_and_query_owners(self) -> None:
+        coverage = _phase_27_read_model_coverage()
+
+        self.assertEqual(
+            set(coverage),
+            set(READ_MODEL_MANIFEST),
+            "Phase 27 coverage must list exactly the 15 manifest read models.",
+        )
+        for key, entry in READ_MODEL_MANIFEST.items():
+            with self.subTest(read_model_key=key):
+                scope_contract, query_owner = coverage[key]
+                self.assertIn(f"`{entry.scope_type}`", scope_contract)
+                self.assertEqual(query_owner, entry.query_owner)
+
     def test_manifest_covers_every_app_status_read_model(self) -> None:
         self.assertEqual(set(READ_MODEL_MANIFEST), set(APP_STATUS_READ_MODEL_REGISTRY))
 

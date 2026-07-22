@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 26 Plan 01 completed; Plan 26-02 historical repair and production closure remains.
-last_updated: "2026-07-22T18:03:00+08:00"
-last_activity: 2026-07-22 - Phase 26 Plan 01 online correction completed
+stopped_at: Phase 27 Plan 01 completed; Plan 27-02 vertical bank-details/cost-statistics migration next.
+last_updated: "2026-07-23T01:24:00+08:00"
+last_activity: 2026-07-23 - Phase 27 Plan 01 coverage contract and static hard gates completed
 progress:
-  total_phases: 22
+  total_phases: 23
   completed_phases: 2
-  total_plans: 28
-  completed_plans: 25
-  percent: 89
+  total_plans: 35
+  completed_plans: 26
+  percent: 74
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-16)
 
 **Core value:** Preserve production finance workflow correctness while improving individual pages through isolated, reviewable GSD phases.
-**Current focus:** Phase 26 online turnover-closure correction, historical repair, Workbench v6, and controlled production verification.
+**Current focus:** Phase 27 access-time exact-scope freshness migration and removal of ordinary write-time global fan-out; Phase 26 frozen Turnover correctness remains an invariant and its performance closure is consumed by Phase 27.
 
 ## Current Position
 
-Phase: 26 of 26 (外部往来闭环冻结要求分区)
-Plan: 26-02 of 26-02
-Status: Online correction complete; historical repair and controlled production closure pending
-Last activity: 2026-07-22 - Phase 26 Plan 01 online correction completed
+Phase: 27 of 27 (按页面访问收敛 Read Model)
+Plan: 27-02 of 27-07
+Status: Plan 27-01 coverage hard gate complete; first runtime vertical slice next
+Last activity: 2026-07-23 - 17 pages, 110 API functions, 22 Drawers, 23 openers, 15 read models and 36 direct calls mechanically covered
 
-Progress: [█████████░] 89%
+Progress: [███████░░░] 74%
 
 ## Performance Metrics
 
@@ -51,6 +51,9 @@ Progress: [█████████░] 89%
 
 ### Decisions
 
+- Phase 27-01: Reuse `PageRuntimeContext`, `ReadModelQueryGateway`, `ReadModelRefreshGateway`, PostgreSQL durable queue and existing workers; do not add a page coordinator, dependency registry or second freshness system.
+- Phase 27-01: Classify all POST/PUT/PATCH/DELETE exports as `fact-write`, `rule-write`, `read-like-command` or `explicit-batch`; an HTTP mutation method alone does not justify read-model invalidation.
+- Phase 27-01: Ordinary target behavior is canonical commit plus current-page exact reconcile and access-time consumer proof; full-history convergence remains an explicit batch exception, while Workbench keeps active-generation atomic publish.
 - Phase 26-01: `turnover_manual_closure` active relation expresses ownership only; paired/unpaired comes from the immutable OA/invoice requirement snapshot.
 - Phase 26-01: Turnover confirm reuses one selected-row snapshot and one canonical rules payload through the existing helper; merged bank membership must remain inside selected ids.
 - Phase 26-01: Rule saves never retroactively rewrite Turnover relation requirements; legacy-invalid snapshots remain fail closed for controlled Plan 26-02 repair.
@@ -88,6 +91,7 @@ Progress: [█████████░] 89%
 
 ### Roadmap Evolution
 
+- 2026-07-22: Phase 27 added for access-time read-model freshness convergence, elimination of ordinary write-time global fan-out, complete page/drawer coverage, legacy-path removal, and production performance verification.
 - 2026-07-22: Phase 26 added for fixing external-turnover closure partitioning by frozen OA/invoice requirements, including legacy-path removal, historical repair, and Workbench rehydrate safety.
 - 2026-06-16: Minimal planning scaffold created for page-scoped GSD phases.
 - 2026-06-16: Phase 1 added for 外部往来款管理 page analysis and improvement planning.

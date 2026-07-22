@@ -14,6 +14,37 @@
 
 查询端必须经过 freshness/status/enqueue 边界；页面不能读取旧 read model 却返回 fresh。Redis 只能缓存 fresh gate 之后的 payload；RabbitMQ 只能作为可选 transport/wakeup，不能作为 read model 状态事实源。
 
+### Phase 27 访问驱动迁移合同（目标态，尚未全量上线）
+
+Phase 27 把“普通写后同步等待所有受影响页面”迁移为“canonical commit + 页面访问时的精确 freshness 收敛”。当前生产仍有按 slice 存在的 `DerivedDataLifecycleService` fan-out、事务内 downstream dirty/outbox 和前端 operation barrier；这些旧路径只有在对应 query/read facade 已能独立证明 canonical source/rule/schema version mismatch，并完成生产 probe 后才能删除。完整当前清单和逐调用点删除状态见 `.planning/phases/27-read-model-fan-out/27-COVERAGE-MATRIX.md`。
+
+操作只分四类，不引入新的运行时协调器：
+
+| 操作类 | 事实合同 | 目标刷新合同 |
+| --- | --- | --- |
+| `fact-write` | 原子写 canonical business fact/relation/state，返回业务 identity、受影响月份和 canonical version/receipt | 普通命令不等待其它页面重建；当前可见页面只收敛自身 exact scope，其他页面在访问时验证 source version |
+| `rule-write` | 写规则/设置事实，返回 rule/settings version 和语义影响范围 | 保存不默认 full-history rebuild；消费者访问时比较稳定 rule signature，只刷新真实受影响 scope |
+| `read-like-command` | POST/PUT 只执行 preview、calculate、candidate query 或 barrier status，不写 canonical business fact | 不 dirty、不 enqueue、不发 domain invalidation，不因 HTTP method 被误当成 mutation |
+| `explicit-batch` | 导入、reapply、reset、repair 或用户明确发起的批任务，返回 job/session/receipt | 允许 durable scoped/full-history job，但必须可观测、可重试、可恢复；不得伪装成普通写的同步闭环 |
+
+访问与可见性语义：
+
+- “隐藏页面”不是后台保留一份持续运行的页面。当前 `PageRouteHost` 离开 route 会卸载 React tree；目标页面重新被访问时重新 mount，通过已有 query/read boundary 触发 freshness 检查。
+- 同一页面仍处于当前 route 时，`PageRuntimeContext.active` / `activationGeneration` 允许成功写入后对当前 exact scope 做一次 reconcile；未激活页面不得发 query、enqueue 或 rebuild，也不得保存旧 payload 当 fresh。
+- query/read facade 必须用 canonical source versions、schema version、稳定 rule signature 和 current-effective dirty/outbox 证明 freshness。mismatch 返回 `refreshing/stale` 并通过现有 `ReadModelRefreshGateway` enqueue exact scope；页面展示明确状态，不能 stale-as-fresh。
+- 如果两个页面是两个独立浏览器 tab，它们不靠进程内 domain event 保证一致；另一 tab 下次 focus/visibility activation 或正常 query 时必须走同一 freshness contract。跨 tab 即时提示可以优化 UX，但不能成为正确性事实源。
+- `workbench` 继续保留 active generation 原子发布；访问驱动迁移不把它改成普通 read model，也不允许消费者绕过 active-generation proof。
+
+性能与 fan-out 约束：
+
+- 目标是普通 command 的 downstream read-model enqueue 数为零；写 API 只承担 canonical commit、审计和必要的同事务业务不变量，不承担所有页面收敛。
+- 页面只 enqueue/query 自己请求的 exact scope；不得以未知影响为由 fallback `all`。需要父聚合时，父 scope 必须是 manifest 已登记的真实 queryable aggregate。
+- 普通写 HTTP、fresh 页面读取、stale 页 exact-scope enqueue/首屏分别计时。稳定 warm path 目标小于 1 秒，exact-scope stale convergence 的产品上限目标小于 3 秒；达不到时必须报告真实数据量、query/worker/queue 分段耗时，不能扩大同步等待来掩盖。
+- `explicit-batch` 的 3 秒只约束 job acceptance/canonical commit；full-history convergence 使用独立 bounded job SLO。把全历史重建承诺为 3 秒既不真实，也不属于普通页面加载合同。
+- strict stale consumer 在 required dependency non-fresh 时必须 fail closed；可以返回 refreshing 并由 exact dependency enqueue 收敛，不能回退 live scan、旧 snapshot 或宽泛跨页面 barrier。
+
+每个 vertical slice 的删除顺序固定为：先建立并测试 read-side canonical drift proof；再迁移写返回与当前页面 exact reconcile；最后删除旧 lifecycle target、事务内 downstream fan-out、前端 cross-page barrier、重复 helper 和旧断言。禁止用 compatibility fallback 同时保留两条生产主链路。
+
 ## 页面 Audit 证明合同
 
 - 页面 Audit 的 `pass` 不是“SQL 可运行”或“readiness=fresh”的别名。每个登记页面必须声明 independent canonical expected-set、关键展示字段、共享 relation 依赖和外部来源边界。

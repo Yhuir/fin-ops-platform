@@ -2,6 +2,8 @@
 
 本文维护 `PERM-E2E-003` 的页面级写入口清单。目标是让后续新增页面按钮、抽屉、批量动作时，能明确判断它是否已经被 Browser role matrix 覆盖，而不是只依赖后端 guard 或组件测试。`tests/test_permissions_write_entry_inventory.py` 会双向校验 `pageRegistry.tsx` 与本清单 row 一致、`pageRegistry.tsx` 与 role matrix readable route 一致、每个非 admin route 都进入 role matrix read-export smoke、`covered-*` row 必须引用 Browser E2E 证据，并校验源码高风险写控件文案 sentinel 仍与关键词 registry 同步。
 
+Phase 27 的 read-model fan-out 迁移另有一份测试时全量合同：`.planning/phases/27-read-model-fan-out/27-COVERAGE-MATRIX.md`。它把本清单扩展到当前 17 个注册页面、110 个导出 POST/PUT/PATCH/DELETE 客户端函数、22 个业务 `Drawer.tsx`、23 个 Browser dynamic opener、15 个 manifest read model 和直接 lifecycle/enqueue/barrier 调用点，并由本文件对应测试与 `tests/test_read_model_manifest.py` 双向校验。该矩阵只用于规划、测试和删除审计，不进入生产 I/O，也不建立第二套 runtime registry；其中 `planned` 目标在对应 vertical slice 部署验证前不得描述为已上线。
+
 状态说明：
 
 - `covered-browser`：已有 Browser E2E 证明 `read_export_only` 下入口隐藏/禁用，且 durable mutation 为 0。
@@ -117,7 +119,7 @@
 
 ## Mutating feature API coverage map
 
-`tests/test_permissions_write_entry_inventory.py` 会扫描 `web/src/features/*/api.ts` 中的 POST/PUT/PATCH/DELETE client，并校验每个 mutating feature API 文件都在本节登记、且登记的模块存在于页面写入口矩阵。shared API 应映射到实际消费该写操作的页面或运维模块。
+`tests/test_permissions_write_entry_inventory.py` 会扫描 `web/src/features/*/api.ts` 中的 POST/PUT/PATCH/DELETE client，并校验每个 mutating feature API 文件都在本节登记、且登记的模块存在于页面写入口矩阵。它还会递归解析当前文件内 helper，按导出函数粒度与 Phase 27 矩阵双向核对，并区分 preview/calculate/barrier 等 `read-like-command`。shared API 应映射到实际消费该写操作的页面或运维模块。
 
 | Feature API | Inventory modules | 说明 |
 | --- | --- | --- |

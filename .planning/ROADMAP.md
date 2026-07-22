@@ -514,11 +514,38 @@ Plans:
   5. Existing repair ops safely repair active legacy-invalid turnover snapshots with metadata-preimage+after-image fingerprint, original-plan reconstruction for audited/idempotent partial execution, and history-based in-place exact metadata rollback; relation members/status/mode/lifecycle/created fields remain unchanged, while Workbench v6 plus existing atomic rehydrate prevents v5 generation/cache from appearing fresh.
   6. Seven-category tests, provider call counts, exact current/previous release evidence, formal readiness/identity/Page/System Audit, controlled dry-run SLO and same-scenario reversible E2E pass; post-execute failure rolls metadata back before previous-release activation/rehydration, with backup and approval.
 
-**Plans:** 2 plans
+**Plans:** 3 plans
 
 Plans:
 
 - [x] 26-01-PLAN — TDD online root-cause fix, selected-member invariant, real policy snapshot, legacy sync deletion, minimal docs and isolated regression coverage.
-- [ ] 26-02-PLAN — Historical repair target expansion, Workbench v6, automatic verification, then human-gated production repair/rehydrate/SLO/E2E and rollback evidence.
+- [x] 26-02-PLAN — Historical repair target expansion, Workbench v6 and automatic verification; production dry-run found zero metadata-repair targets but exposed a separate lifecycle dependency loop before final closure.
+- [ ] 26-03-PLAN — Minimal invoice-lifecycle dependency-scope repair, regression/docs, exact-release deployment, queue drain, affected-page Audit and performance closure.
+
+### Phase 27: 按页面访问收敛 Read Model、消除写后全局 Fan-out 并完成全页面生产性能验证
+
+**Goal:** Migrate ordinary writes from synchronous cross-page read-model fan-out to canonical commit plus exact access-time freshness convergence, without new runtime infrastructure, while preserving strict correctness, Workbench active generations, explicit batch workflows and full production verification.
+**Requirements**: RMF-01, RMF-02, RMF-03, RMF-04, RMF-05, RMF-06, RMF-07, RMF-08, RMF-09
+**Depends on:** Phase 26 correctness/frozen-requirement contracts and its controlled production fixture baseline; Phase 27 closes the fan-out performance failures exposed by that baseline.
+**Canonical refs:** `.planning/phases/27-read-model-fan-out/27-CONTEXT.md`, `.planning/phases/27-read-model-fan-out/27-RESEARCH.md`, `.planning/phases/27-read-model-fan-out/27-COVERAGE-MATRIX.md`, `docs/app-architecture/pages.md`, `docs/architecture/module-boundaries/read-model-contracts.md`, `docs/modules/read-models/boundary-io.md`, `docs/modules/runtime-workers/boundary-io.md`, `docs/operations/runtime-worker-governance.md`
+**Success Criteria** (what must be TRUE):
+
+  1. All 17 registered pages, 110 exported POST/PUT/PATCH/DELETE clients, business Drawers/dynamic openers, 15 manifest read models and direct lifecycle/enqueue/barrier sites stay at zero unmapped coverage.
+  2. Ordinary fact/rule writes commit canonical facts, audit/idempotency and stable versions without downstream page refresh fan-out; read-like commands never invalidate and explicit batches remain observable durable jobs.
+  3. Page route entry/reactivation/current-page reconcile performs a cheap freshness/version check and enqueues at most one exact-scope job on mismatch; hidden/unmounted pages produce no I/O and stale dependencies fail closed.
+  4. Existing gateway/queue/worker/CAS boundaries are reused, Workbench keeps active-generation atomic publish, and superseded lifecycle/barrier/fallback paths are deleted rather than retained in parallel.
+  5. Seven-category local gates and exact deployed production probes cover every page, operation and writable Drawer, including correctness, isolation, amplification and latency; the verified exact commit is pushed to remote main and deployed through the official entry.
+
+**Plans:** 7 plans
+
+Plans:
+
+- [x] 27-01-PLAN — Freeze the mechanically checked page, operation, Drawer, read-model and legacy-call coverage contract.
+- [ ] 27-02-PLAN — Prove the architecture vertically on bank-details and cost-statistics fact/rule/batch behavior.
+- [ ] 27-03-PLAN — Migrate Workbench, bank-flow, batch-accounting and Turnover relation-heavy writes.
+- [ ] 27-04-PLAN — Migrate pending/input/OA/output invoice-family rules, facts, Drawers and strict consumers.
+- [ ] 27-05-PLAN — Complete imports, tax, ETC, settings, App Health and minimal page activation behavior.
+- [ ] 27-06-PLAN — Delete superseded fan-out paths and close all local correctness/performance gates.
+- [ ] 27-07-PLAN — Commit/push main, deploy the exact release and run every-page/every-operation production validation.
 
 ---
