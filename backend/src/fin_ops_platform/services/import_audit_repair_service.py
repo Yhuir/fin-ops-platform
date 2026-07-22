@@ -119,7 +119,14 @@ def _lifecycle_repair_plan(snapshot: dict[str, list[dict[str, Any]]]) -> list[di
         or int(evidence.get("created_canonical_owner_count") or 0) != int(evidence.get("created_count") or 0)
         or int(evidence.get("manual_source_link_success_count") or 0) != expected_counts["success_count"]
     ):
-        raise ValueError("Import lifecycle canonical invoice closure is incomplete.")
+        raise ValueError(
+            "Import lifecycle canonical invoice closure is incomplete: "
+            f"success={expected_counts['success_count']}, "
+            f"created={int(evidence.get('created_count') or 0)}, "
+            f"linked={int(evidence.get('linked_success_count') or 0)}, "
+            f"created_owner={int(evidence.get('created_canonical_owner_count') or 0)}, "
+            f"manual_link={int(evidence.get('manual_source_link_success_count') or 0)}."
+        )
 
     batch_payload = _payload(target.get("batch_raw_payload"))
     file_payload = _payload(target.get("file_raw_payload"))
