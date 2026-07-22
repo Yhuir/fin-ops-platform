@@ -34,6 +34,7 @@
 - `preview_stale` 后禁止继续确认旧 session；必须重新预览。
 - unknown selected file id 必须返回 404，不得静默跳过。
 - 已有 idempotency key 的 confirm 不得创建重复 import job。
+- 任一银行流水 preview/retry 不得写回其它 session，更不得把其它进程已确认的发票或银行导入降级为 pending。
 - 不能把 `queued` / `processing` 展示成下游 read model 已 fresh。
 
 ## UI 状态
@@ -85,6 +86,7 @@ Refresh / fan-out 来源：
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-07-22 | preview 持久化改为 session-scoped exact delta | 银行预览不再携带历史 session/batch，避免跨导入域 stale snapshot 丢失更新 | `test_preview_session_persistence_payload_excludes_unrelated_sessions_and_canonical_facts`、`test_stale_api_preview_cannot_downgrade_another_process_confirmed_import` |
 | 2026-06-11 | 首轮测试闭环状态机补齐 | 明确文件/session/job/worker/read model 状态和禁止流转 | `tests/test_import_*`、`tests/test_import_job_queue.py`、`web/src/test/ImportCenterPage.test.tsx` |
 | 2026-06-16 | 修复银行流水导入 job 的 App Status 域 | 银行流水文件确认后的 background job 不再误归到发票导入页；generic import fallback 覆盖全部导入域 | `tests.test_import_file_api`、`tests.test_app_status_overview_service` |
 | 2026-07-05 | 模块边界 close 与旧 wrapper 删除 | 银行流水页面 file/session 状态机锁定；`server.py` 不再保留 import confirm processor wrapper | `tests.test_platform_runtime_boundary_guards` |

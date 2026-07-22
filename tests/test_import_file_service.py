@@ -195,6 +195,29 @@ class ImportFileServiceTests(unittest.TestCase):
             all(transaction.source_batch_id == bank_session.files[0].batch_id for transaction in payload["imports"]["transactions"])
         )
 
+    def test_preview_session_persistence_payload_excludes_unrelated_sessions_and_canonical_facts(self) -> None:
+        import_service = ImportNormalizationService(id_registry=FakeImportEntityRegistry())
+        service = FileImportService(import_service)
+        invoice_session = service.preview_files(
+            imported_by="user_finance_01",
+            uploads=[UploadedImportFile(file_name=INVOICE_JAN.name, content=INVOICE_JAN.content)],
+        )
+        bank_session = service.preview_files(
+            imported_by="user_finance_01",
+            uploads=[UploadedImportFile(file_name=PINGAN_JAN.name, content=PINGAN_JAN.content)],
+        )
+
+        payload = service.preview_session_persistence_payload(bank_session.id)
+
+        self.assertEqual(set(payload["file_imports"]["sessions"]), {bank_session.id})
+        self.assertEqual(set(payload["imports"]["batches"]), {bank_session.files[0].preview_batch_id})
+        self.assertNotIn(invoice_session.files[0].preview_batch_id, payload["imports"]["batches"])
+        self.assertNotIn("invoices", payload["imports"])
+        self.assertNotIn("transactions", payload["imports"])
+        self.assertGreaterEqual(payload["imports"]["batch_counter"], 2)
+        self.assertEqual(payload["file_imports"]["session_counter"], 2)
+        self.assertEqual(payload["file_imports"]["file_counter"], 2)
+
     def test_company_identity_name_keywords_use_yunnan_and_generic_suyuan_names(self) -> None:
         self.assertTrue(is_company_identity(None, "云南溯源科技有限公司"))
         self.assertTrue(is_company_identity(None, "溯源科技有限公司"))

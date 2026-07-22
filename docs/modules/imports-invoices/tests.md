@@ -30,6 +30,7 @@
 - 发票 `信息汇总表` 模板必须识别 `数电号码`、`购方企业名称`、`购方税号`、`销方企业名称`、`销方税号`、`商品名称` 等表头别名，并跳过末尾 `份数：...金额：...` 汇总页脚。
 - 服务器 PostgreSQL runtime 下，发票 preview/full snapshot persistence 不得直接写 import fact dirty/outbox 旁路；确认后的刷新必须通过 import processing、derived lifecycle 和 read model gateway 边界收敛。
 - 发票 preview/confirm 必须对本批次 invoice identity 做批量 preload，不能对每行逐次远程 DB 查重；preview 只保存预览/session 状态，不能触发 workbench/read model 刷新或保存 `workbench_pair_relations` 快照。
+- preview/retry 只能持久化当前 session 与其 preview batches；另一个进程完成 confirm 后，持有 stale 内存的 API 再预览银行文件也不得把已完成发票降级。PostgreSQL batch 与 file/session delta 必须同事务回滚。
 - 240 行合成发票同文件重复组必须只产生一个 confirmable representative，其余进入 duplicate audit / skipped count。
 - input/output invoice identity 必须覆盖稳定号码、占位电子发票号、弱 fingerprint、跨批次重复、批内重复。
 - ETC 来源或 tag 指向 ETC 时，input invoice import 只允许合并已存在 canonical invoice，不能因为 ETC metadata/ZIP 来源创建新的统一发票池事实。
@@ -75,6 +76,7 @@
 | 发票文件确认 background job 在 App Status 中落到泛化导入域 | `tests/test_import_file_api.py::ImportFileApiTests::test_confirm_files_imports_only_selected_files_from_session` 断言 `affected_domains=["imports_invoices"]`、route `/imports/invoices`；`tests/test_app_status_overview_service.py` 覆盖泛化 import fallback |
 | 发票 `信息汇总表` 表头别名不被识别，或汇总页脚被当作错误发票行 | `tests/test_import_file_service.py::ImportFileServiceTests::test_preview_accepts_invoice_summary_header_aliases`、`tests/test_import_file_service.py::ImportFileServiceTests::test_preview_detects_invoice_summary_without_template_override` |
 | 服务器预览完成后 PostgreSQL import-fact outbox 旁路导致刷新风暴 | `tests/test_postgres_repositories_core.py::test_save_imports_does_not_emit_import_fact_refresh_from_full_snapshot` 断言 full snapshot persistence 不再直接写 `job.read_model_dirty_scopes` / `job.outbox_events`；正式刷新必须走 import processing、derived lifecycle 和 read model gateway 边界 |
+| stale API 后续预览把已完成发票状态覆盖回 pending | `tests/test_import_file_service.py::ImportFileServiceTests::test_preview_session_persistence_payload_excludes_unrelated_sessions_and_canonical_facts`、`tests/test_import_formalization_api.py::ImportFormalizationApiTests::test_stale_api_preview_cannot_downgrade_another_process_confirmed_import`、`tests/test_postgres_repositories_core.py::test_save_import_delta_rolls_back_batch_when_file_write_fails`、`tests/test_read_model_architecture_guards.py` |
 
 ## 关键 smoke flows
 

@@ -133,6 +133,78 @@ class ImportFormalizationApiTests(unittest.TestCase):
             app.shutdown_background_jobs()
             restarted.shutdown_background_jobs()
 
+    def test_stale_api_preview_cannot_downgrade_another_process_confirmed_import(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            stale_api = build_application(data_dir=data_dir)
+            invoice_body, invoice_headers = build_multipart_payload(
+                imported_by="user_finance_01",
+                files=[INVOICE_JAN],
+            )
+            invoice_preview_response = stale_api.handle_request(
+                "POST",
+                "/imports/files/preview",
+                body=invoice_body,
+                headers=invoice_headers,
+            )
+            self.assertEqual(invoice_preview_response.status_code, 200)
+            invoice_preview = json.loads(invoice_preview_response.body)
+            invoice_session_id = invoice_preview["session"]["id"]
+            invoice_file = invoice_preview["files"][0]
+            invoice_batch_id = invoice_file["preview_batch_id"]
+
+            worker_api = build_application(data_dir=data_dir, bootstrap_mode="legacy")
+            import_queue = install_durable_import_queue(worker_api)
+            confirm_response = worker_api.handle_request(
+                "POST",
+                "/imports/files/confirm",
+                json.dumps(
+                    {
+                        "session_id": invoice_session_id,
+                        "selected_file_ids": [invoice_file["id"]],
+                    }
+                ),
+            )
+            self.assertEqual(confirm_response.status_code, 202)
+            confirm_payload = json.loads(confirm_response.body)
+            import_queue.process_all()
+            job_payload = self._wait_for_background_job(worker_api, confirm_payload["job"]["job_id"])
+            self.assertEqual(job_payload["status"], "succeeded")
+            matching_job_id = job_payload["result_summary"].get("enqueued_matching_job_id")
+            if matching_job_id:
+                matching_job_payload = self._wait_for_background_job(worker_api, matching_job_id)
+                self.assertEqual(matching_job_payload["status"], "succeeded")
+
+            bank_body, bank_headers = build_multipart_payload(
+                imported_by="user_finance_01",
+                files=[PINGAN_JAN],
+            )
+            bank_preview_response = stale_api.handle_request(
+                "POST",
+                "/imports/files/preview",
+                body=bank_body,
+                headers=bank_headers,
+            )
+            self.assertEqual(bank_preview_response.status_code, 200)
+
+            restarted = build_application(data_dir=data_dir, bootstrap_mode="legacy")
+            session_response = restarted.handle_request(
+                "GET",
+                f"/imports/files/sessions/{invoice_session_id}",
+            )
+            self.assertEqual(session_response.status_code, 200)
+            session_payload = json.loads(session_response.body)
+            self.assertEqual(session_payload["session"]["status"], "confirmed")
+            self.assertEqual(session_payload["files"][0]["status"], "confirmed")
+            self.assertEqual(
+                restarted._import_service.get_batch(invoice_batch_id).batch.status.value,  # noqa: SLF001
+                "completed",
+            )
+
+            stale_api.shutdown_background_jobs()
+            worker_api.shutdown_background_jobs()
+            restarted.shutdown_background_jobs()
+
     def test_templates_retry_with_invoice_batch_override_and_original_file_retention(self) -> None:
         with TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)

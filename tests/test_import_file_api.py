@@ -114,7 +114,7 @@ class ImportFileApiTests(unittest.TestCase):
         app._persist_confirmed_import_delta_with_read_model_invalidation = lambda **_kwargs: self.fail(  # type: ignore[attr-defined]
             "file preview must not persist full workbench state"
         )
-        app._persist_import_preview_state = lambda: persist_calls.append("preview")  # type: ignore[attr-defined]
+        app._persist_import_preview_delta = lambda session_id: persist_calls.append(session_id)  # type: ignore[attr-defined]
         body, headers = build_multipart_payload(
             imported_by="user_finance_01",
             files=[INVOICE_JAN],
@@ -123,7 +123,7 @@ class ImportFileApiTests(unittest.TestCase):
         response = app.handle_request("POST", "/imports/files/preview", body=body, headers=headers)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(persist_calls, ["preview"])
+        self.assertEqual(persist_calls, ["import_session_0001"])
 
     def test_preview_files_keeps_corrupt_excel_as_file_level_error_without_aborting_batch(self) -> None:
         app = build_application()

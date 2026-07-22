@@ -10,9 +10,11 @@ from unittest.mock import patch
 
 from fin_ops_platform.app.server import build_application
 from fin_ops_platform.domain.enums import BatchType
+from fin_ops_platform.services.import_file_service import UploadedImportFile
 
 from postgres_test_utils import apply_test_migrations, fetch_scalar, require_postgres_test_database_url, truncate_test_database
 from tests.app_test_support import seed_confirmed_import
+from tests.mock_import_files import INVOICE_JAN, PINGAN_JAN
 
 
 @contextmanager
@@ -93,6 +95,51 @@ class AppPostgresModeIntegrationTests(unittest.TestCase):
         self.assertEqual(app_health_payload["dependencies"]["oa_sync"]["status"], "unavailable")
         self.assertEqual(app_health_payload["dependencies"]["oa_mongo"]["status"], "unavailable")
         self.assertNotIn("postgresql://", json.dumps(app_health_payload).lower())
+
+    def test_stale_preview_delta_does_not_downgrade_confirmed_import(self) -> None:
+        stale_api = self._build_app()
+        invoice_session = stale_api._file_import_service.preview_files(  # noqa: SLF001
+            imported_by="user_finance_01",
+            uploads=[UploadedImportFile(file_name=INVOICE_JAN.name, content=INVOICE_JAN.content)],
+        )
+        stale_api._persist_import_preview_delta(invoice_session.id)  # noqa: SLF001
+        invoice_file = invoice_session.files[0]
+        invoice_batch_id = invoice_file.preview_batch_id
+
+        worker_api = self._build_app()
+        confirmed_session = worker_api._file_import_service.confirm_session(  # noqa: SLF001
+            session_id=invoice_session.id,
+            selected_file_ids=[invoice_file.id],
+        )
+        worker_api._state_store.save_import_delta(  # noqa: SLF001
+            worker_api._file_import_service.confirmed_session_persistence_payload(  # noqa: SLF001
+                session_id=confirmed_session.id,
+                selected_file_ids=[invoice_file.id],
+            )
+        )
+
+        stale_bank_session = stale_api._file_import_service.preview_files(  # noqa: SLF001
+            imported_by="user_finance_01",
+            uploads=[UploadedImportFile(file_name=PINGAN_JAN.name, content=PINGAN_JAN.content)],
+        )
+        stale_api._persist_import_preview_delta(stale_bank_session.id)  # noqa: SLF001
+
+        self.assertEqual(
+            fetch_scalar(
+                self.database_url,
+                f"select status from app.import_batches where legacy_mongo_id = '{invoice_batch_id}';",
+            ),
+            "completed",
+        )
+        self.assertEqual(
+            fetch_scalar(
+                self.database_url,
+                f"select status from app.import_files where legacy_mongo_id = '{invoice_file.id}';",
+            ),
+            "confirmed",
+        )
+        stale_api.shutdown_background_jobs()
+        worker_api.shutdown_background_jobs()
 
     def test_workbench_settings_round_trip_survives_app_rebuild(self) -> None:
         app = self._build_app()

@@ -202,6 +202,25 @@ class FileImportService:
             "sessions": self._sessions,
         }
 
+    def preview_session_persistence_payload(self, session_id: str) -> dict[str, Any]:
+        session = self._sessions[session_id]
+        batch_ids = [
+            str(item.preview_batch_id).strip()
+            for item in session.files
+            if str(item.preview_batch_id or "").strip()
+        ]
+        return {
+            "imports": self._import_service.persistence_snapshot_for_batches(
+                batch_ids,
+                include_facts=False,
+            ),
+            "file_imports": {
+                "session_counter": self._session_counter,
+                "file_counter": self._file_counter,
+                "sessions": {session.id: session},
+            },
+        }
+
     def confirmed_session_persistence_payload(
         self,
         *,

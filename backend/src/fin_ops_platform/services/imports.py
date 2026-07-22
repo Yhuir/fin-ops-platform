@@ -194,26 +194,38 @@ class ImportNormalizationService:
         service._batches = dict(snapshot.get("batches", {}))
         return service
 
-    def snapshot(self, *, include_facts: bool = True) -> dict[str, Any]:
-        snapshot = {
+    def snapshot(self) -> dict[str, Any]:
+        return {
             "batch_counter": self._batch_counter,
             "invoice_counter": self._invoice_counter,
             "txn_counter": self._txn_counter,
             "counterparty_counter": self._counterparty_counter,
             "batches": self._batches,
+            "invoices": self.list_invoices(),
+            "transactions": self.list_transactions(),
         }
-        if include_facts:
-            snapshot["invoices"] = self.list_invoices()
-            snapshot["transactions"] = self.list_transactions()
-        return snapshot
 
-    def persistence_snapshot_for_batches(self, batch_ids: list[str]) -> dict[str, Any]:
+    def persistence_snapshot_for_batches(
+        self,
+        batch_ids: list[str],
+        *,
+        include_facts: bool = True,
+    ) -> dict[str, Any]:
         selected_ids = {str(batch_id).strip() for batch_id in batch_ids if str(batch_id).strip()}
         selected_batches = {
-            batch_id: preview
-            for batch_id, preview in self._batches.items()
-            if batch_id in selected_ids
+            batch_id: self._batches[batch_id]
+            for batch_id in selected_ids
+            if batch_id in self._batches
         }
+        snapshot: dict[str, Any] = {
+            "batch_counter": self._batch_counter,
+            "invoice_counter": self._invoice_counter,
+            "txn_counter": self._txn_counter,
+            "counterparty_counter": self._counterparty_counter,
+            "batches": selected_batches,
+        }
+        if not include_facts:
+            return snapshot
         invoice_ids: set[str] = set()
         transaction_ids: set[str] = set()
         for preview in selected_batches.values():
@@ -228,18 +240,12 @@ class ImportNormalizationService:
                     and row.decision in {ImportDecision.CREATED, ImportDecision.STATUS_UPDATED}
                 ):
                     transaction_ids.add(linked_id)
-        return {
-            "batch_counter": self._batch_counter,
-            "invoice_counter": self._invoice_counter,
-            "txn_counter": self._txn_counter,
-            "counterparty_counter": self._counterparty_counter,
-            "batches": selected_batches,
-            "invoices": [self._invoices_by_id[invoice_id] for invoice_id in sorted(invoice_ids)],
-            "transactions": [
-                self._transactions_by_id[transaction_id]
-                for transaction_id in sorted(transaction_ids)
-            ],
-        }
+        snapshot["invoices"] = [self._invoices_by_id[invoice_id] for invoice_id in sorted(invoice_ids)]
+        snapshot["transactions"] = [
+            self._transactions_by_id[transaction_id]
+            for transaction_id in sorted(transaction_ids)
+        ]
+        return snapshot
 
     def preview_import(
         self,

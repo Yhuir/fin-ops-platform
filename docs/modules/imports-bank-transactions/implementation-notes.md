@@ -28,6 +28,12 @@
 
 ## 历史记录
 
+## 2026-07-22 - preview session-scoped delta
+
+- 目标：防止银行流水 preview/retry 的 stale API 内存覆盖其它进程已确认的发票或银行导入状态。
+- 关键决策：共享 preview writer 只接收当前 `session_id`，只持久化当前 session/files/preview batches；确认链和 downstream lifecycle 不变。
+- 测试覆盖：精确 payload、发票确认后 stale API 继续预览银行文件的跨进程回归、PostgreSQL 原子回滚和旧路径 guard。
+
 ## 2026-07-11 - direct-canonical Audit 与旧 JSON 写入链删除
 
 - 目标：证明全部已登记 bank file/session/batch/row/canonical transaction 与当前 import job/outbox 闭包，并删除并行 HTTP 写入合同。

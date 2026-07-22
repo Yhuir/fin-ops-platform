@@ -35,6 +35,7 @@
 | 选择银行映射持久化，检测账号冲突，银行别名/简称/法定名称不误报 | covered | `test_preview_persists_selected_bank_mapping_and_marks_conflict_against_detected_account`、`test_preview_does_not_mark_bank_*_as_conflict_when_last4_matches` |
 | preview stale 时拒绝 confirm | covered | `test_confirm_session_rejects_stale_preview_when_existing_records_change`、`test_import_file_confirm_returns_preview_stale_when_existing_records_change` |
 | confirm 只导入 selected files | covered | `test_confirm_files_imports_only_selected_files_from_session` |
+| stale API 预览银行文件不得覆盖另一进程已确认的发票/session/batch | covered | `test_preview_session_persistence_payload_excludes_unrelated_sessions_and_canonical_facts`、`test_stale_api_preview_cannot_downgrade_another_process_confirmed_import`、`test_save_import_delta_rolls_back_batch_when_file_write_fails` |
 | file/session confirm 只处理 selected files 并返回银行导入 domain targets | covered | `test_confirm_files_imports_only_selected_files_from_session`、`test_confirm_bank_transaction_file_job_reports_bank_import_domain`、`test_file_import_confirm_job_returns_import_write_targets` |
 | 旧 JSON HTTP route、`general_import.confirm` processor 和 server confirm wrapper 保持删除 | covered | `test_bank_transaction_import_frontend_uses_file_session_api_only`、`test_server_no_longer_exposes_legacy_json_import_write_routes`、`test_server_no_longer_owns_import_confirm_processors` |
 | 银行导入确认后的 Workbench/bank detail/cost operation targets | covered | `test_file_import_confirm_job_returns_import_write_targets` |
@@ -67,6 +68,7 @@
 | RabbitMQ confirm | 异步 confirm 只能传小 envelope，processor 由 worker 拉取事实 | covered |
 | App Status job mapping | 银行流水文件确认必须写入 `imports_bank_transactions` affected domain；generic `file_import` / `import.process.requested` fallback 不能误指发票页 | fixed 2026-06-16 |
 | 2026-07-05 边界 close | 银行流水页面不得回退旧 `/imports/preview`、`/imports/confirm` JSON API；`server.py` 不得重新拥有 import confirm processor wrapper | fixed by `tests/test_platform_runtime_boundary_guards.py` |
+| 2026-07-22 stale preview lost update | 银行 preview/retry 只能写当前 session/preview batch，不能把其它已确认导入覆盖回 pending；PostgreSQL batch 与 file/session 同事务 | fixed by `tests/test_import_file_service.py`、`tests/test_import_formalization_api.py`、`tests/test_postgres_repositories_core.py` |
 | 大重复组 | 合成 240 行同文件银行流水重复组必须只产生一个 confirmable representative，避免大文件 preview 把重复项全部当作可确认 | fixed 2026-06-16 |
 | 2026-06-17 Browser e2e | 银行账户冲突弹窗里确认导入成功后未关闭，modal backdrop 阻塞用户导航到银行明细或其他页面。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |
 | 2026-06-19 Browser e2e | 银行账户冲突弹窗取消必须只关闭弹窗，不能提交 confirm、不能调用 operation barrier 或 Workbench 页面 API、不能显示导入成功；用户随后仍可重新确认导入。 | fixed by `web/e2e/imports-bank-transactions-flow.spec.ts` |

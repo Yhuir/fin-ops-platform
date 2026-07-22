@@ -816,6 +816,80 @@ def test_save_imports_does_not_emit_import_fact_refresh_from_full_snapshot() -> 
     assert "2026-05" not in repr(dirty_params)
 
 
+def test_save_import_delta_rolls_back_batch_when_file_write_fails() -> None:
+    class Transaction:
+        def __init__(self, connection) -> None:
+            self.connection = connection
+            self.pending_sql: list[str] = []
+
+        def __enter__(self):
+            self.connection.transaction_count += 1
+            return self
+
+        def __exit__(self, exc_type, _exc, _traceback) -> bool:
+            if exc_type is None:
+                self.connection.committed_sql.extend(self.pending_sql)
+            return False
+
+        def execute(self, sql: str, _params: tuple = ()) -> int:
+            normalized = " ".join(sql.lower().split())
+            if "insert into app.import_files" in normalized:
+                raise RuntimeError("file write failed")
+            self.pending_sql.append(normalized)
+            return 1
+
+    class TransactionConnection:
+        def __init__(self) -> None:
+            self.transaction_count = 0
+            self.committed_sql: list[str] = []
+
+        def transaction(self):
+            return Transaction(self)
+
+    connection = TransactionConnection()
+    repository = PostgresCoreRepository(connection)
+    imports_snapshot = {
+        "batches": {
+            "batch_import_0001": {
+                "batch": {
+                    "id": "batch_import_0001",
+                    "batch_type": "input_invoice",
+                    "source_name": "invoice.xlsx",
+                    "imported_by": "tester",
+                    "status": "pending",
+                },
+                "row_results": [],
+                "normalized_rows": [],
+            }
+        }
+    }
+    file_imports_snapshot = {
+        "sessions": {
+            "import_session_0001": {
+                "id": "import_session_0001",
+                "status": "preview_ready",
+                "files": [
+                    {
+                        "id": "import_file_0001",
+                        "file_name": "invoice.xlsx",
+                        "status": "preview_ready",
+                    }
+                ],
+            }
+        }
+    }
+
+    try:
+        repository.save_import_delta(imports_snapshot, file_imports_snapshot)
+    except RuntimeError as exc:
+        assert str(exc) == "file write failed"
+    else:
+        raise AssertionError("expected file write failure")
+
+    assert connection.transaction_count == 1
+    assert connection.committed_sql == []
+
+
 def test_import_batch_row_upsert_refuses_cross_batch_reparent() -> None:
     class ConflictConnection:
         def execute(self, sql: str, _params: tuple = ()) -> int:

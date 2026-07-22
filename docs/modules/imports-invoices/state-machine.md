@@ -37,6 +37,7 @@
 - `preview_stale` 不得继续 confirm；必须重新预览。
 - `queued` / `processing` 不得向下游页面报告 fresh。
 - `confirmed` 后不得绕过 lifecycle/dirty scope 直接让下游 read model 复用旧 cache。
+- 任一其它 session 的 preview/retry 不得把已 `confirmed` 的 file/session 或已完成 batch 降级回 `preview_ready` / `pending`。
 - unknown selected file ids 必须失败，不能静默忽略。
 
 ## UI 状态
@@ -77,5 +78,6 @@
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-07-22 | preview 持久化收窄为 session-scoped exact delta | stale API 后续预览不能覆盖另一进程已确认的 file/session/batch；batch 与 file/session 同事务提交 | `test_stale_api_preview_cannot_downgrade_another_process_confirmed_import`、`test_save_import_delta_rolls_back_batch_when_file_write_fails` |
 | 2026-06-16 | 补齐发票确认 job 的 App Status domain/route contract | `file_import` 发票确认不再落到泛化导入页面，跨页状态反馈可回到 `/imports/invoices`；共享 `import.process.requested` 仍作为多导入域兜底 | `tests/test_import_file_api.py::ImportFileApiTests::test_confirm_files_imports_only_selected_files_from_session`、`tests/test_app_status_overview_service.py`、`web/src/test/AppStatusIndicator.test.tsx` |
 | 2026-06-11 | 首轮补齐发票导入状态机 | 明确 file/session/job/lifecycle/read model 状态边界 | `tests/test_import_*`、`web/src/test/ImportCenterPage.test.tsx`、`bash scripts/verify.sh docs` |

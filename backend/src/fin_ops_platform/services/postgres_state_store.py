@@ -1067,8 +1067,11 @@ class PostgresStateStore:
         normalized = self._serialize_value(payload)
         if not isinstance(normalized, dict) or not normalized or set(normalized) - {"imports", "file_imports"}:
             raise ValueError("Import delta requires only imports and file_imports payloads.")
-        self._core_repository.save_imports(normalized.get("imports") or {})
-        self._core_repository.save_file_imports(normalized.get("file_imports") or {})
+        self._core_repository.save_import_delta(
+            normalized.get("imports") or {},
+            normalized.get("file_imports") or {},
+        )
+
     def save_workbench_overrides(self, workbench_overrides_snapshot: dict[str, Any], *, changed_row_ids: set[str] | None = None) -> None:
         self._workbench_repository.save_workbench_overrides(workbench_overrides_snapshot, changed_row_ids=changed_row_ids)
 

@@ -104,9 +104,23 @@ def seed_confirmed_import(
         imported_by=imported_by,
         rows=rows,
     )
-    application._persist_import_preview_state()  # noqa: SLF001
+    persist = getattr(application._state_store, "save_import_delta", None)  # noqa: SLF001
+    if callable(persist):
+        persist(
+            {
+                "imports": application._import_service.persistence_snapshot_for_batches(  # noqa: SLF001
+                    [preview.id],
+                    include_facts=False,
+                )
+            }
+        )
     batch = application._import_service.confirm_import(preview.id)  # noqa: SLF001
-    application._persist_import_preview_state()  # noqa: SLF001
+    if callable(persist):
+        persist(
+            {
+                "imports": application._import_service.persistence_snapshot_for_batches([preview.id])  # noqa: SLF001
+            }
+        )
     return preview, batch
 
 

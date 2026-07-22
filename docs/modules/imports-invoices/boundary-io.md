@@ -1,6 +1,6 @@
 # 发票导入模块边界与 I/O
 
-日期：2026-07-15
+日期：2026-07-22
 
 ## 模块化状态
 
@@ -8,7 +8,7 @@
 - 当前边界可信度：high（App 内部合同；外部税务来源证据仍独立）
 - 目标边界：发票导入通过 import service/job queue 进入预览、确认和 lifecycle，触发 invoice lifecycle/search/input/output read model 刷新。
 - 当前缺口：外部税务平台导出完整性、原始文件 control total 和对象字节可读性仍需独立证据。
-- 旧代码删除状态：旧 JSON preview/confirm、file confirm inline 写入、batch revert 和 `app.import_files.import_batch_id` 反推链均已删除并由 guard 保护。
+- 旧代码删除状态：旧 JSON preview/confirm、file confirm inline 写入、batch revert、`app.import_files.import_batch_id` 反推链和无 session 范围的 preview 全量 snapshot writer 均已删除并由 guard 保护。
 
 ## 职责边界
 
@@ -33,13 +33,13 @@
 | 预览确认 | `ImportWorkflowPage.tsx` | 确认后创建 job/正式化 |
 | Job event | import job queue | 后台可恢复处理 |
 
-file/session confirm 必须先通过 `save_import_delta` 持久化所选 session、batch 与 canonical invoice 精确 delta，成功后才允许发布 tax/read-model invalidation 和 Workbench matching。持久化失败时下游发布数必须为零；禁止以“先 enqueue、后保存”的旧顺序让 worker 读取未提交事实或覆盖确认状态。
+file/session preview/retry 只允许通过当前 `session_id` 持久化该 session、files 与其 `preview_batch_id` 的精确 delta，且不得携带 canonical `invoices` / `transactions`；不得把进程内其它历史 session/batch 的 snapshot 写回 PostgreSQL。confirm 必须先通过 `save_import_delta` 在同一事务持久化所选 session、batch 与 canonical invoice 精确 delta，成功后才允许发布 tax/read-model invalidation 和 Workbench matching。持久化失败时 batch 与 file/session 必须整体回滚，且下游发布数必须为零。
 
 ## 输出 I/O
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| 预览 rows/errors | 前端页面 / `app.import_batches` / `app.import_batch_rows` / `app.import_files` | 未确认前不作为业务事实；预览持久化不得携带正式 `invoices` / `transactions` facts |
+| 预览 rows/errors | 前端页面 / `app.import_batches` / `app.import_batch_rows` / `app.import_files` | 未确认前不作为业务事实；只写当前 session/preview batches，不得携带正式 `invoices` / `transactions` facts，也不得覆盖其它 session 的 terminal 状态 |
 | 导入文件事实列表 | `/api/import-facts/files`、HTTP SLO probe | 只返回分页文件摘要字段；不得输出完整 `raw_payload`、`row_results`、`normalized_rows`，预览明细只能走 `/imports/files/*` session/preview 边界 |
 | 导入结果 | state store/repository | 可审计、可幂等；确认异常必须回滚 import service 与 file session 内存状态 |
 | Dirty scope | derived lifecycle/runtime queue | invoice lifecycle/search/input/output/pending invoice |
@@ -95,7 +95,7 @@ file/session confirm 必须先通过 `save_import_delta` 持久化所选 session
 - Forbidden paths: production API/worker 不得从 full snapshot、local pickle、`state:imports`、`state:full_state` 或 OA/ETC cache 直接构造第二发票池。
 - Old code deletion: 旧同步导入、直接状态写入、snapshot 发票池 fallback、batch revert 和从 `app.import_files.import_batch_id` 反推 file session 状态的 fallback 已删除；历史 migration/只读 audit 工具不构成 runtime fallback。
 - Durable confirm：`/imports/files/confirm` 必须创建 `job.import_jobs(import_type=file_import.confirm)` 与 `job.outbox_events(event_type=import.process.requested)`；PostgreSQL polling 与 RabbitMQ wakeup 共用该 gateway，queue/repository 不可用返回 `503 import_queue_unavailable`，禁止进程内确认。
-- 2026-07-01：文件发票导入预览保存改为 `ImportNormalizationService.snapshot(include_facts=False)`，禁止旧 full snapshot 预览链路把失败确认残留的正式发票写入发票池；确认路径仍负责正式 facts 和下游 dirty scope。
+- 2026-07-22：文件预览保存改为 `FileImportService.preview_session_persistence_payload(session_id)`，只写当前 session 和 `preview_batch_id`；删除 `ImportNormalizationService.snapshot(include_facts=False)` 与无参全量 preview writer。PostgreSQL `save_import_delta` 在同一事务写 batch 与 file/session，防止 stale API 覆盖其它已确认导入或形成半写状态。
 
 ## Audit v19 provenance 版本边界（2026-07-12）
 

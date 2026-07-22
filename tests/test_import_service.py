@@ -944,7 +944,7 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         self.assertEqual(service.list_invoices(), [])
         self.assertIsNone(restored.row_results[0].linked_object_id)
 
-    def test_preview_snapshot_can_exclude_formalized_facts(self) -> None:
+    def test_batch_persistence_snapshot_can_exclude_formalized_facts(self) -> None:
         preview = self.service.preview_import(
             batch_type=BatchType.INPUT_INVOICE,
             source_name="input.xlsx",
@@ -961,7 +961,10 @@ class ImportNormalizationServiceTests(unittest.TestCase):
         )
         self.service.confirm_import(preview.id)
 
-        preview_snapshot = self.service.snapshot(include_facts=False)
+        preview_snapshot = self.service.persistence_snapshot_for_batches(
+            [preview.id],
+            include_facts=False,
+        )
 
         self.assertNotIn("invoices", preview_snapshot)
         self.assertNotIn("transactions", preview_snapshot)

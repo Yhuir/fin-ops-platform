@@ -5002,7 +5002,7 @@ class Application:
                 {"error": "invalid_import_file_retry_request", "message": str(exc)},
             )
         self._background_job_service.acknowledge_job(job.job_id, owner_user_id)
-        self._persist_import_preview_state()
+        self._persist_import_preview_delta(session.id)
         return self._json_response(
             HTTPStatus.OK,
             {
@@ -9188,7 +9188,7 @@ class Application:
                 for file, override in zip(files, file_overrides)
             ]
         session = self._file_import_service.preview_files(imported_by=imported_by, uploads=files)
-        self._persist_import_preview_state()
+        self._persist_import_preview_delta(session.id)
         return self._json_response(HTTPStatus.OK, self._serialize_file_session(session))
 
     def _handle_import_file_confirm(self, body: str | bytes | None, headers: dict[str, str] | None) -> Response:
@@ -9345,7 +9345,7 @@ class Application:
                 HTTPStatus.BAD_REQUEST,
                 {"error": "invalid_import_file_retry_request", "message": str(exc)},
             )
-        self._persist_import_preview_state()
+        self._persist_import_preview_delta(session.id)
         return self._json_response(HTTPStatus.OK, self._serialize_file_session(session))
 
     def _handle_import_file_session(self, session_id: str) -> Response:
@@ -10103,18 +10103,13 @@ class Application:
             if callable(persist):
                 persist(snapshot)
 
-    def _persist_import_preview_state(self) -> None:
+    def _persist_import_preview_delta(self, session_id: str) -> None:
         if self._state_store is None:
             return
         persist = getattr(self._state_store, "save_import_delta", None)
         if not callable(persist):
             raise RuntimeError("File import preview requires the import delta persistence port.")
-        persist(
-            {
-                "imports": self._import_service.snapshot(include_facts=False),
-                "file_imports": self._file_import_service.snapshot(),
-            }
-        )
+        persist(self._file_import_service.preview_session_persistence_payload(session_id))
 
     def _persist_confirmed_import_delta_with_read_model_invalidation(
         self,

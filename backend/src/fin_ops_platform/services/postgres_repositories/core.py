@@ -774,6 +774,21 @@ class PostgresCoreRepository:
         else:
             self._save_imports_with_connection(connection, snapshot)
 
+    def save_import_delta(
+        self,
+        imports_snapshot: dict[str, Any],
+        file_imports_snapshot: dict[str, Any],
+    ) -> None:
+        connection = self._connection
+        transaction_factory = getattr(connection, "transaction", None)
+        if callable(transaction_factory):
+            with transaction_factory() as tx:
+                self._save_imports_with_connection(tx, imports_snapshot)
+                self._save_file_imports_with_connection(tx, file_imports_snapshot)
+        else:
+            self._save_imports_with_connection(connection, imports_snapshot)
+            self._save_file_imports_with_connection(connection, file_imports_snapshot)
+
     def save_invoices(self, invoices: list[Any]) -> None:
         serialized_invoices = self._iter_items(invoices)
         if not serialized_invoices:
@@ -942,6 +957,9 @@ class PostgresCoreRepository:
         }
 
     def save_file_imports(self, snapshot: dict[str, Any]) -> None:
+        self._save_file_imports_with_connection(self._connection, snapshot)
+
+    def _save_file_imports_with_connection(self, connection: Any, snapshot: dict[str, Any]) -> None:
         sessions = snapshot.get("sessions") if isinstance(snapshot, dict) else None
         if not isinstance(sessions, dict):
             return
@@ -958,7 +976,7 @@ class PostgresCoreRepository:
                 file_id = self._text(raw_file.get("id"))
                 if not file_id:
                     continue
-                self._connection.execute(
+                connection.execute(
                     """
                     insert into app.import_files(
                         legacy_mongo_id, session_id, stored_file_path, original_filename,

@@ -26,6 +26,13 @@
 
 ## 历史记录
 
+## 2026-07-22 - stale preview 覆盖已确认导入修复
+
+- 目标：修复 API 进程持有旧 preview 内存时，后续预览其它文件把 worker 已确认的发票 batch/file/session 覆盖回 `pending/preview_ready`。
+- 关键决策：删除无 session 范围的 preview 全量 snapshot writer；preview/retry 只写当前 session 与 `preview_batch_id`，不携带 canonical facts。PostgreSQL import/file delta 复用现有 repository transaction 同时提交。
+- 测试覆盖：session-scoped payload、跨进程 stale API 回归、计数器单调、PostgreSQL 半写回滚和旧 writer 架构守卫。
+- 文档影响：仅更新发票与银行共享导入边界；API、App Health、worker registry 和 read model 合同不变。
+
 ## 2026-07-11 - 发票导入 direct-canonical Audit 与 durable confirm 单链闭环
 
 - 目标：使 `imports.invoices` 能证明全部已登记 App 内部导入事实，同时删除绕过 durable queue 或制造不可逆半状态的旧路径。

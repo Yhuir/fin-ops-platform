@@ -239,8 +239,16 @@ class StateStoreTests(unittest.TestCase):
                     },
                 }
             )
+            store.save_import_delta(
+                {
+                    "imports": {"batch_counter": 1},
+                    "file_imports": {"session_counter": 1},
+                }
+            )
 
             loaded = store.load()
+            self.assertEqual(loaded["imports"]["batch_counter"], 2)
+            self.assertEqual(loaded["file_imports"]["session_counter"], 2)
             self.assertEqual(set(loaded["imports"]["batches"]), {"batch-1", "batch-2"})
             self.assertEqual(loaded["imports"]["invoices"], [{"id": "invoice-1"}])
             self.assertEqual(loaded["imports"]["transactions"], [{"id": "transaction-2"}])
