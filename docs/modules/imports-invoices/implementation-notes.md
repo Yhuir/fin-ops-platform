@@ -220,3 +220,10 @@
 
 - 根因：税局导出是一票多行，旧 parser 将每一物理行作为独立 invoice import row；首行创建 canonical invoice，后续明细成为 duplicate，造成 9 张发票合计缺少 15 条明细/折扣金额。
 - 决策：同文件按发票强身份聚合不同明细；完全相同重复行保留，部分重复冲突 fail closed。历史严格合同 Audit 与受控 repair 使用同一聚合规则。
+## 2026-07-22 - 精确导入生命周期生产修复边界
+
+- 目标：在根因修复发布后，安全恢复已被旧 stale preview writer 降级的历史 batch/file 状态，不修改 canonical 发票、导入行、job 或 read model。
+- 设计：复用既有 `import-audit-repair`，增加必须成对出现的 `--batch-id` / `--file-id`；dry-run 是 repeatable-read read-only，execute 是 serializable + advisory lock + expected fingerprint。纯 plan 只接受唯一 succeeded job、完整 batch counter/row decision、created invoice owner 和成功行 `manual_invoice_import` source-link 闭环。
+- 写入范围：只把精确目标从 `batch pending + file preview_ready + batch_id null` 恢复为 `batch completed + file confirmed + batch_id/session_status terminal`；SQL 自带旧状态与 preview batch precondition，任一步 rowcount 不是 1 都回滚整个事务。
+- 非目标：不新增 HTTP 修复接口，不做常驻扫描，不重放 worker/read model，不覆盖 raw payload 的其它字段，不支持其它中间态推断。
+- 测试：`tests/test_import_audit_repair_ops.py` 覆盖 plan、幂等、fail-closed、CLI exact target 与 repository precondition；`tests/test_app_postgres_mode_integration.py` 覆盖真实 PostgreSQL 状态恢复（无测试 DSN 时 skip）。

@@ -164,3 +164,5 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_aud
 - `tests/test_import_file_service.py`：不同商品/折扣行合并为一张整票；完全相同重复行仍进入 duplicate audit。
 - `tests/test_audit_invoice_import_page.py`：历史 component rows 按整票合计比较；完全相同重复行不二次加总。
 - `tests/test_import_audit_repair_ops.py`：canonical 金额恢复、source batch guard、dry-run plan 幂等和 rollback manifest。
+- `tests/test_import_audit_repair_ops.py`：精确生命周期目标、succeeded job 证明、registered row/canonical/source-link 闭环、terminal 幂等、活跃 job/闭环缺失 fail-closed、batch/file 原子事务 precondition。
+- `tests/test_app_postgres_mode_integration.py::test_controlled_import_repair_restores_only_exact_downgraded_lifecycle`：真实 PostgreSQL 上模拟 stale preview 降级，验证受控 repair 恢复并再次 dry-run 幂等；本机未配置 `FIN_OPS_TEST_DATABASE_URL` 时显式 skip。

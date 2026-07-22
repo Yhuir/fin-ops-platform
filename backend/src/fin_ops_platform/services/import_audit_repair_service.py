@@ -17,16 +17,19 @@ def build_import_audit_repair_plan(snapshot: dict[str, list[dict[str, Any]]]) ->
         snapshot.get("bank_rows") or [],
     )
     invoice_updates = _invoice_update_plan(snapshot.get("invoice_rows") or [])
+    lifecycle_repairs = _lifecycle_repair_plan(snapshot)
     return {
         "source_fingerprint": source_fingerprint,
         "bank_rows": bank_rows,
         "invoice_updates": invoice_updates,
+        "lifecycle_repairs": lifecycle_repairs,
         "affected_invoice_months": sorted(
             {_text(update.get("invoice_month")) for update in invoice_updates if _text(update.get("invoice_month"))}
         ),
         "rollback_manifest": {
             "delete_bank_row_ids": [row["row_id"] for row in bank_rows],
             "restore_invoices": [update["before"] for update in invoice_updates],
+            "restore_import_lifecycle": [repair["before"] for repair in lifecycle_repairs],
         },
     }
 
@@ -39,10 +42,124 @@ def public_repair_report(plan: dict[str, Any], *, mode: str, written: bool) -> d
         "source_fingerprint": plan["source_fingerprint"],
         "bank_row_count": len(plan["bank_rows"]),
         "invoice_update_count": len(plan["invoice_updates"]),
+        "lifecycle_repair_count": len(plan["lifecycle_repairs"]),
         "affected_invoice_months": plan["affected_invoice_months"],
         "rollback_manifest": plan["rollback_manifest"],
-        "authorized_write_scope": ["app.import_batch_rows", "app.invoices"],
+        "authorized_write_scope": [
+            "app.import_batch_rows",
+            "app.invoices",
+            "app.import_batches",
+            "app.import_files",
+        ],
     }
+
+
+def _lifecycle_repair_plan(snapshot: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    requested = list(snapshot.get("lifecycle_requested") or [])
+    if not requested:
+        return []
+    if len(requested) != 1:
+        raise ValueError("Import lifecycle repair requires exactly one batch/file target.")
+    request = requested[0]
+    batch_id = _text(request.get("batch_id"))
+    file_id = _text(request.get("file_id"))
+    targets = list(snapshot.get("lifecycle_targets") or [])
+    if len(targets) != 1:
+        raise ValueError(f"Import lifecycle target must resolve exactly once: {batch_id}/{file_id}")
+    target = targets[0]
+    if _text(target.get("batch_id")) != batch_id or _text(target.get("file_id")) != file_id:
+        raise ValueError("Import lifecycle target identity changed during repair planning.")
+    if _text(target.get("batch_type")) not in {"input_invoice", "output_invoice"}:
+        raise ValueError("Import lifecycle repair only supports invoice file imports.")
+
+    jobs = list(snapshot.get("lifecycle_jobs") or [])
+    succeeded_jobs = [row for row in jobs if _text(row.get("status")) == "succeeded"]
+    active_jobs = [row for row in jobs if _text(row.get("status")) in {"pending", "processing"}]
+    if active_jobs:
+        raise ValueError("Import lifecycle repair refused while a matching import job is active.")
+    if len(succeeded_jobs) != 1:
+        raise ValueError("Import lifecycle repair requires exactly one succeeded import job.")
+    job = succeeded_jobs[0]
+    job_payload = dict(job.get("payload") or {})
+    result_payload = dict(job.get("result_payload") or {})
+    selected_file_ids = {_text(value) for value in list(job_payload.get("selected_file_ids") or []) if _text(value)}
+    if (
+        _text(job.get("stage")) != "succeeded"
+        or _text(job.get("import_session_id") or job_payload.get("session_id")) != _text(target.get("session_id"))
+        or file_id not in selected_file_ids
+        or int(result_payload.get("selected") or 0) != len(selected_file_ids)
+        or int(result_payload.get("confirmed") or 0) != len(selected_file_ids)
+    ):
+        raise ValueError("Succeeded import job does not prove the selected file was fully confirmed.")
+
+    evidence_rows = list(snapshot.get("lifecycle_row_evidence") or [])
+    if len(evidence_rows) != 1:
+        raise ValueError("Import lifecycle row evidence must resolve exactly once.")
+    evidence = evidence_rows[0]
+    expected_counts = {
+        "row_count": int(target.get("row_count") or 0),
+        "success_count": int(target.get("success_count") or 0),
+        "error_count": int(target.get("error_count") or 0),
+        "duplicate_count": int(target.get("duplicate_count") or 0),
+        "suspected_duplicate_count": int(target.get("suspected_duplicate_count") or 0),
+        "updated_count": int(target.get("updated_count") or 0),
+    }
+    actual_counts = {
+        "row_count": int(evidence.get("row_count") or 0),
+        "success_count": int(evidence.get("created_count") or 0) + int(evidence.get("status_updated_count") or 0),
+        "error_count": int(evidence.get("error_count") or 0),
+        "duplicate_count": int(evidence.get("duplicate_count") or 0),
+        "suspected_duplicate_count": int(evidence.get("suspected_duplicate_count") or 0),
+        "updated_count": int(evidence.get("status_updated_count") or 0),
+    }
+    if actual_counts != expected_counts:
+        raise ValueError("Import lifecycle batch counters do not match durable row evidence.")
+    if (
+        int(evidence.get("linked_success_count") or 0) != expected_counts["success_count"]
+        or int(evidence.get("created_canonical_owner_count") or 0) != int(evidence.get("created_count") or 0)
+        or int(evidence.get("manual_source_link_success_count") or 0) != expected_counts["success_count"]
+    ):
+        raise ValueError("Import lifecycle canonical invoice closure is incomplete.")
+
+    batch_payload = _payload(target.get("batch_raw_payload"))
+    file_payload = _payload(target.get("file_raw_payload"))
+    terminal = (
+        _text(target.get("batch_status")) == "completed"
+        and _text(batch_payload.get("status")) == "completed"
+        and _text(target.get("file_status")) == "confirmed"
+        and _text(file_payload.get("status")) == "confirmed"
+        and _text(file_payload.get("batch_id")) == batch_id
+        and _text(file_payload.get("session_status")) == "confirmed"
+    )
+    if terminal:
+        return []
+    downgraded = (
+        _text(target.get("batch_status")) == "pending"
+        and _text(batch_payload.get("status")) == "pending"
+        and _text(target.get("file_status")) == "preview_ready"
+        and _text(file_payload.get("status")) == "preview_ready"
+        and not _text(file_payload.get("batch_id"))
+        and _text(file_payload.get("preview_batch_id")) == batch_id
+        and _text(file_payload.get("session_status")) == "preview_ready"
+    )
+    if not downgraded:
+        raise ValueError("Import lifecycle state is neither the exact downgraded state nor the terminal state.")
+    return [
+        {
+            "batch_id": batch_id,
+            "file_id": file_id,
+            "before": {
+                "batch_id": batch_id,
+                "batch_status": _text(target.get("batch_status")),
+                "batch_payload_status": _text(batch_payload.get("status")),
+                "file_id": file_id,
+                "file_status": _text(target.get("file_status")),
+                "file_payload_status": _text(file_payload.get("status")),
+                "file_payload_batch_id": _text(file_payload.get("batch_id")) or None,
+                "file_payload_session_status": _text(file_payload.get("session_status")),
+            },
+        }
+    ]
 
 
 def _bank_row_plan(

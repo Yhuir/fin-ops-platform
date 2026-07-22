@@ -10,7 +10,12 @@ from unittest.mock import patch
 
 from fin_ops_platform.app.server import build_application
 from fin_ops_platform.domain.enums import BatchType
+from fin_ops_platform.services.import_audit_repair_service import build_import_audit_repair_plan
 from fin_ops_platform.services.import_file_service import UploadedImportFile
+from fin_ops_platform.services.postgres_repositories.import_audit_repair import (
+    apply_import_audit_repair,
+    load_import_audit_repair_snapshot,
+)
 
 from postgres_test_utils import apply_test_migrations, fetch_scalar, require_postgres_test_database_url, truncate_test_database
 from tests.app_test_support import seed_confirmed_import
@@ -140,6 +145,102 @@ class AppPostgresModeIntegrationTests(unittest.TestCase):
         )
         stale_api.shutdown_background_jobs()
         worker_api.shutdown_background_jobs()
+
+    def test_controlled_import_repair_restores_only_exact_downgraded_lifecycle(self) -> None:
+        app = self._build_app()
+        session = app._file_import_service.preview_files(  # noqa: SLF001
+            imported_by="user_finance_01",
+            uploads=[UploadedImportFile(file_name=INVOICE_JAN.name, content=INVOICE_JAN.content)],
+        )
+        app._persist_import_preview_delta(session.id)  # noqa: SLF001
+        file = session.files[0]
+        batch_id = str(file.preview_batch_id)
+        confirmed = app._file_import_service.confirm_session(  # noqa: SLF001
+            session_id=session.id,
+            selected_file_ids=[file.id],
+        )
+        app._state_store.save_import_delta(  # noqa: SLF001
+            app._file_import_service.confirmed_session_persistence_payload(  # noqa: SLF001
+                session_id=confirmed.id,
+                selected_file_ids=[file.id],
+            )
+        )
+        connection = app._state_store._connection  # noqa: SLF001
+        connection.execute(
+            """
+            insert into job.import_jobs(
+                import_type, import_session_id, status, stage, payload, result_payload, finished_at
+            ) values (
+                'file_import.confirm', %s, 'succeeded', 'succeeded', %s::jsonb, %s::jsonb, now()
+            )
+            """,
+            (
+                session.id,
+                json.dumps({"session_id": session.id, "selected_file_ids": [file.id]}),
+                json.dumps({"selected": 1, "confirmed": 1}),
+            ),
+        )
+        connection.execute(
+            """
+            update app.import_batches
+            set status = 'pending',
+                raw_payload = jsonb_set(raw_payload, '{normalized_payload,status}', '"pending"'::jsonb)
+            where legacy_mongo_id = %s
+            """,
+            (batch_id,),
+        )
+        connection.execute(
+            """
+            update app.import_files
+            set status = 'preview_ready',
+                raw_payload = jsonb_set(
+                    jsonb_set(
+                        jsonb_set(raw_payload, '{normalized_payload,status}', '"preview_ready"'::jsonb),
+                        '{normalized_payload,batch_id}', 'null'::jsonb
+                    ),
+                    '{normalized_payload,session_status}', '"preview_ready"'::jsonb
+                )
+            where legacy_mongo_id = %s
+            """,
+            (file.id,),
+        )
+
+        with connection.transaction() as transaction:
+            transaction.execute("set transaction isolation level serializable")
+            plan = build_import_audit_repair_plan(
+                load_import_audit_repair_snapshot(
+                    transaction,
+                    lifecycle_batch_id=batch_id,
+                    lifecycle_file_id=file.id,
+                )
+            )
+            self.assertEqual(len(plan["lifecycle_repairs"]), 1)
+            apply_import_audit_repair(transaction, plan)
+
+        self.assertEqual(
+            fetch_scalar(
+                self.database_url,
+                f"select status from app.import_batches where legacy_mongo_id = '{batch_id}';",
+            ),
+            "completed",
+        )
+        self.assertEqual(
+            fetch_scalar(
+                self.database_url,
+                f"select status from app.import_files where legacy_mongo_id = '{file.id}';",
+            ),
+            "confirmed",
+        )
+        with connection.transaction() as transaction:
+            terminal_plan = build_import_audit_repair_plan(
+                load_import_audit_repair_snapshot(
+                    transaction,
+                    lifecycle_batch_id=batch_id,
+                    lifecycle_file_id=file.id,
+                )
+            )
+        self.assertEqual(terminal_plan["lifecycle_repairs"], [])
+        app.shutdown_background_jobs()
 
     def test_workbench_settings_round_trip_survives_app_rebuild(self) -> None:
         app = self._build_app()

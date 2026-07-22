@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from fin_ops_platform.services.import_audit_repair_service import build_import_audit_repair_plan
+from fin_ops_platform.services.postgres_repositories.import_audit_repair import apply_import_audit_repair
 from fin_ops_platform.tools import import_audit_repair_ops
 
 
@@ -122,7 +123,131 @@ def _snapshot() -> dict[str, list[dict[str, object]]]:
     }
 
 
+def _lifecycle_snapshot(*, terminal: bool = False) -> dict[str, list[dict[str, object]]]:
+    batch_status = "completed" if terminal else "pending"
+    file_status = "confirmed" if terminal else "preview_ready"
+    return {
+        "bank_files": [],
+        "bank_transactions": [],
+        "bank_rows": [],
+        "invoice_rows": [],
+        "lifecycle_requested": [{"batch_id": "batch-import-1", "file_id": "file-import-1"}],
+        "lifecycle_targets": [
+            {
+                "batch_id": "batch-import-1",
+                "batch_type": "input_invoice",
+                "batch_status": batch_status,
+                "row_count": 3,
+                "success_count": 2,
+                "error_count": 0,
+                "duplicate_count": 1,
+                "suspected_duplicate_count": 0,
+                "updated_count": 0,
+                "batch_raw_payload": {"normalized_payload": {"status": batch_status}},
+                "file_id": "file-import-1",
+                "session_id": "session-import-1",
+                "file_status": file_status,
+                "file_raw_payload": {
+                    "normalized_payload": {
+                        "status": file_status,
+                        "preview_batch_id": "batch-import-1",
+                        "batch_id": "batch-import-1" if terminal else None,
+                        "session_status": "confirmed" if terminal else "preview_ready",
+                    }
+                },
+            }
+        ],
+        "lifecycle_jobs": [
+            {
+                "job_id": "job-import-1",
+                "import_session_id": "session-import-1",
+                "status": "succeeded",
+                "stage": "succeeded",
+                "payload": {
+                    "session_id": "session-import-1",
+                    "selected_file_ids": ["file-import-1"],
+                },
+                "result_payload": {"selected": 1, "confirmed": 1},
+            }
+        ],
+        "lifecycle_row_evidence": [
+            {
+                "row_count": 3,
+                "created_count": 2,
+                "status_updated_count": 0,
+                "error_count": 0,
+                "duplicate_count": 1,
+                "suspected_duplicate_count": 0,
+                "linked_success_count": 2,
+                "created_canonical_owner_count": 2,
+                "manual_source_link_success_count": 2,
+            }
+        ],
+    }
+
+
 class ImportAuditRepairPlanTests(unittest.TestCase):
+    def test_plan_repairs_exact_downgraded_lifecycle_from_succeeded_job_and_canonical_closure(self) -> None:
+        plan = build_import_audit_repair_plan(_lifecycle_snapshot())
+
+        self.assertEqual(
+            plan["lifecycle_repairs"],
+            [
+                {
+                    "batch_id": "batch-import-1",
+                    "file_id": "file-import-1",
+                    "before": {
+                        "batch_id": "batch-import-1",
+                        "batch_status": "pending",
+                        "batch_payload_status": "pending",
+                        "file_id": "file-import-1",
+                        "file_status": "preview_ready",
+                        "file_payload_status": "preview_ready",
+                        "file_payload_batch_id": None,
+                        "file_payload_session_status": "preview_ready",
+                    },
+                }
+            ],
+        )
+        self.assertEqual(plan["rollback_manifest"]["restore_import_lifecycle"], [plan["lifecycle_repairs"][0]["before"]])
+
+    def test_plan_is_idempotent_after_lifecycle_is_terminal(self) -> None:
+        plan = build_import_audit_repair_plan(_lifecycle_snapshot(terminal=True))
+
+        self.assertEqual(plan["lifecycle_repairs"], [])
+
+    def test_plan_refuses_lifecycle_repair_without_single_succeeded_job(self) -> None:
+        snapshot = _lifecycle_snapshot()
+        snapshot["lifecycle_jobs"][0]["status"] = "processing"
+
+        with self.assertRaisesRegex(ValueError, "job is active"):
+            build_import_audit_repair_plan(snapshot)
+
+    def test_plan_refuses_lifecycle_repair_without_canonical_invoice_closure(self) -> None:
+        snapshot = _lifecycle_snapshot()
+        snapshot["lifecycle_row_evidence"][0]["manual_source_link_success_count"] = 1
+
+        with self.assertRaisesRegex(ValueError, "canonical invoice closure"):
+            build_import_audit_repair_plan(snapshot)
+
+    def test_repository_applies_lifecycle_batch_and_file_with_exact_preconditions(self) -> None:
+        class Connection:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+            def execute(self, sql: str, params: tuple[object, ...] = ()) -> int:
+                self.calls.append((sql, params))
+                return 1
+
+        connection = Connection()
+        plan = build_import_audit_repair_plan(_lifecycle_snapshot())
+
+        apply_import_audit_repair(connection, plan)
+
+        self.assertEqual([params for _sql, params in connection.calls], [("batch-import-1",), ("batch-import-1", "file-import-1", "batch-import-1")])
+        self.assertIn("status = 'completed'", connection.calls[0][0])
+        self.assertIn("status = 'confirmed'", connection.calls[1][0])
+
     def test_plan_restores_bank_provenance_and_aggregates_invoice_components(self) -> None:
         plan = build_import_audit_repair_plan(_snapshot())
 
@@ -249,6 +374,43 @@ class ImportAuditRepairPlanTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(connection.statements, ["set transaction isolation level repeatable read read only"])
         self.assertFalse(json.loads(output.getvalue())["written"])
+
+    def test_cli_requires_batch_and_file_target_together(self) -> None:
+        with self.assertRaisesRegex(SystemExit, "provided together"):
+            import_audit_repair_ops.main(["--dry-run", "--batch-id", "batch-import-1"])
+
+    def test_cli_passes_exact_lifecycle_target_to_snapshot_loader(self) -> None:
+        class Connection:
+            @contextmanager
+            def transaction(self):
+                yield self
+
+            def execute(self, _sql: str, _params: tuple = ()) -> int:
+                return 0
+
+        connection = Connection()
+        output = io.StringIO()
+        with (
+            patch.object(import_audit_repair_ops.PostgresSettings, "from_env", return_value=object()),
+            patch.object(import_audit_repair_ops, "PostgresConnection", return_value=connection),
+            patch.object(
+                import_audit_repair_ops,
+                "load_import_audit_repair_snapshot",
+                return_value=_lifecycle_snapshot(),
+            ) as load_snapshot,
+        ):
+            result = import_audit_repair_ops.main(
+                ["--dry-run", "--batch-id", "batch-import-1", "--file-id", "file-import-1"],
+                stdout=output,
+            )
+
+        self.assertEqual(result, 0)
+        load_snapshot.assert_called_once_with(
+            connection,
+            lifecycle_batch_id="batch-import-1",
+            lifecycle_file_id="file-import-1",
+        )
+        self.assertEqual(json.loads(output.getvalue())["lifecycle_repair_count"], 1)
 
     def test_cli_execute_rejects_changed_fingerprint_before_writes(self) -> None:
         class Connection:

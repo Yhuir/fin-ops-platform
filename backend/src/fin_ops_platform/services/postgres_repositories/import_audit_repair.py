@@ -6,13 +6,31 @@ from typing import Any
 from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
 
 
-def load_import_audit_repair_snapshot(connection: Any) -> dict[str, list[dict[str, Any]]]:
-    return {
+def load_import_audit_repair_snapshot(
+    connection: Any,
+    *,
+    lifecycle_batch_id: str | None = None,
+    lifecycle_file_id: str | None = None,
+) -> dict[str, list[dict[str, Any]]]:
+    snapshot = {
         "bank_files": connection.fetch_all(_BANK_FILE_SQL),
         "bank_transactions": connection.fetch_all(_BANK_TRANSACTION_SQL),
         "bank_rows": connection.fetch_all(_BANK_ROW_SQL),
         "invoice_rows": connection.fetch_all(_INVOICE_ROW_SQL),
     }
+    if not lifecycle_batch_id or not lifecycle_file_id:
+        return snapshot
+    targets = connection.fetch_all(_LIFECYCLE_TARGET_SQL, (lifecycle_batch_id, lifecycle_file_id))
+    session_id = str(targets[0].get("session_id") or "").strip() if len(targets) == 1 else ""
+    snapshot.update(
+        {
+            "lifecycle_requested": [{"batch_id": lifecycle_batch_id, "file_id": lifecycle_file_id}],
+            "lifecycle_targets": targets,
+            "lifecycle_jobs": connection.fetch_all(_LIFECYCLE_JOB_SQL, (session_id, lifecycle_file_id)),
+            "lifecycle_row_evidence": connection.fetch_all(_LIFECYCLE_ROW_EVIDENCE_SQL, (lifecycle_batch_id,)),
+        }
+    )
+    return snapshot
 
 
 def apply_import_audit_repair(connection: Any, plan: dict[str, Any]) -> None:
@@ -45,6 +63,13 @@ def apply_import_audit_repair(connection: Any, plan: dict[str, Any]) -> None:
         connection,
         list(plan.get("invoice_updates") or []),
     )
+    for repair in list(plan.get("lifecycle_repairs") or []):
+        batch_id = str(repair["batch_id"])
+        file_id = str(repair["file_id"])
+        if connection.execute(_LIFECYCLE_BATCH_UPDATE_SQL, (batch_id,)) != 1:
+            raise RuntimeError(f"Import batch {batch_id} lifecycle precondition changed.")
+        if connection.execute(_LIFECYCLE_FILE_UPDATE_SQL, (batch_id, file_id, batch_id)) != 1:
+            raise RuntimeError(f"Import file {file_id} lifecycle precondition changed.")
 
 
 _BANK_FILE_SQL = """
@@ -163,4 +188,98 @@ on conflict (legacy_mongo_id) do update set
     counterparty_name = excluded.counterparty_name,
     raw_payload = excluded.raw_payload
 where app.import_batch_rows.legacy_batch_id = excluded.legacy_batch_id
+"""
+
+_LIFECYCLE_TARGET_SQL = """
+select coalesce(batch.legacy_mongo_id, batch.id::text) as batch_id,
+       batch.batch_type, batch.status as batch_status,
+       batch.row_count, batch.success_count, batch.error_count, batch.duplicate_count,
+       batch.suspected_duplicate_count, batch.updated_count,
+       batch.raw_payload as batch_raw_payload,
+       coalesce(file.legacy_mongo_id, file.id::text) as file_id,
+       file.session_id, file.status as file_status, file.raw_payload as file_raw_payload
+from app.import_batches batch
+cross join app.import_files file
+where coalesce(batch.legacy_mongo_id, batch.id::text) = %s
+  and coalesce(file.legacy_mongo_id, file.id::text) = %s
+"""
+
+_LIFECYCLE_JOB_SQL = """
+select id::text as job_id, import_session_id, source_file_id, status, stage,
+       attempt_count, max_attempts, last_error, payload, result_payload
+from job.import_jobs
+where import_type = 'file_import.confirm'
+  and coalesce(import_session_id, payload->>'session_id') = %s
+  and coalesce(payload->'selected_file_ids', '[]'::jsonb) ? %s
+order by created_at, id
+"""
+
+_LIFECYCLE_ROW_EVIDENCE_SQL = """
+with target_batch as (
+    select id, coalesce(legacy_mongo_id, id::text) as batch_id
+    from app.import_batches
+    where coalesce(legacy_mongo_id, id::text) = %s
+), target_rows as (
+    select rows.*, target.batch_id
+    from app.import_batch_rows rows
+    join target_batch target on target.id = rows.import_batch_id
+)
+select count(*)::bigint as row_count,
+       count(*) filter (where decision = 'created')::bigint as created_count,
+       count(*) filter (where decision = 'status_updated')::bigint as status_updated_count,
+       count(*) filter (where decision = 'error')::bigint as error_count,
+       count(*) filter (where decision = 'duplicate_skipped')::bigint as duplicate_count,
+       count(*) filter (where decision = 'suspected_duplicate')::bigint as suspected_duplicate_count,
+       count(*) filter (
+           where decision in ('created', 'status_updated') and nullif(linked_object_id, '') is not null
+       )::bigint as linked_success_count,
+       count(*) filter (
+           where decision = 'created' and exists (
+               select 1 from app.invoices invoice
+               where coalesce(invoice.legacy_mongo_id, invoice.id::text) = target_rows.linked_object_id
+                 and invoice.legacy_source_batch_id = target_rows.batch_id
+           )
+       )::bigint as created_canonical_owner_count,
+       count(*) filter (
+           where decision in ('created', 'status_updated') and exists (
+               select 1 from app.invoices invoice
+               where coalesce(invoice.legacy_mongo_id, invoice.id::text) = target_rows.linked_object_id
+                 and exists (
+                     select 1
+                     from jsonb_array_elements(coalesce(invoice.source_links, '[]'::jsonb)) source_link
+                     where source_link->>'source_type' = 'manual_invoice_import'
+                       and source_link->>'batch_id' = target_rows.batch_id
+                 )
+           )
+       )::bigint as manual_source_link_success_count
+from target_rows
+"""
+
+_LIFECYCLE_BATCH_UPDATE_SQL = """
+update app.import_batches
+set status = 'completed',
+    raw_payload = jsonb_set(raw_payload, '{normalized_payload,status}', to_jsonb('completed'::text), true),
+    updated_at = now()
+where coalesce(legacy_mongo_id, id::text) = %s
+  and batch_type in ('input_invoice', 'output_invoice')
+  and status = 'pending'
+  and raw_payload->'normalized_payload'->>'status' = 'pending'
+"""
+
+_LIFECYCLE_FILE_UPDATE_SQL = """
+update app.import_files
+set status = 'confirmed',
+    raw_payload = jsonb_set(
+        jsonb_set(
+            jsonb_set(raw_payload, '{normalized_payload,status}', to_jsonb('confirmed'::text), true),
+            '{normalized_payload,batch_id}', to_jsonb(%s::text), true
+        ),
+        '{normalized_payload,session_status}', to_jsonb('confirmed'::text), true
+    )
+where coalesce(legacy_mongo_id, id::text) = %s
+  and status = 'preview_ready'
+  and raw_payload->'normalized_payload'->>'status' = 'preview_ready'
+  and nullif(raw_payload->'normalized_payload'->>'batch_id', '') is null
+  and raw_payload->'normalized_payload'->>'preview_batch_id' = %s
+  and raw_payload->'normalized_payload'->>'session_status' = 'preview_ready'
 """
