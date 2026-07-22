@@ -1165,7 +1165,7 @@ ETC 对账任务、ZIP 导入和 OA 草稿提交统一使用 `/api/etc/business-
 - `request_performance.endpoints[*]` 包含 `duration_ms`、`database_duration_ms`、`connection_acquire_ms`、`sql_execute_fetch_ms`、`database_query_count` 的 p50/p95/p99。
 - `runtime_performance.queues[*]` 基于已知 RabbitMQ route 输出，即使 RabbitMQ Management API 不可用也保留行，数值为 `null`。
 - Dashboard API 可返回短 TTL 缓存 payload。缓存刷新失败但已有旧 payload 时，响应仍为 `200`，并在 `freshness.warnings` 中包含 `dashboard_cache_stale_after_error`。
-- `runtime_performance.read_models[*].historical_refresh_duration_ms` 是 bounded history，当前基于最近 7 天或每个 event type 最近 512 条完成事件，不代表永久全历史。
+- `runtime_performance.read_models[*].historical_refresh_duration_ms` 是 bounded history，当前同时限制为最近 7 天、且每个 event type 最多 512 条完成事件，不代表永久全历史。
 - unknown 指标用 `null` 和 `status="unknown"` 表示。前端显示 `--`，不得把 unknown 当成 `0`。
 
 ## AppHealth 进项使用审计 API

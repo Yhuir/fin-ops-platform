@@ -3,6 +3,7 @@
 ## 2026-07-22 - AppHealth 导入状态与运行指标故障隔离
 
 - 目标：修复已完成导入在 `/operations/app-health` 长时间显示 `pending`，并消除 read-model 指标查询对 dashboard 刷新耗时的历史全表扫描放大。
+- 生产性能复验补充：read-model duration 聚合只读取最近 7 天，并按 event type 通过窗口排名限制为最多 512 条；删除逐 event type lateral 历史探测，保持现有 response shape 和指标语义，同时让现有 `(event_type, updated_at)` partial index 能在固定时间范围内完成读取。
 - 影响范围：仅调整 Operations dashboard 的整页缓存判定、运行指标只读查询、对应测试与模块文档；不修改导入 preview/confirm/job/canonical 持久化、worker、read model refresh、权限或 API shape。
 - 关键决策：删除“任一局部 warning 就返回整页旧缓存”的旧逻辑；局部 block 失败继续使用既有 unknown/warning 合同并接受本轮其它当前事实，只有 `build_payload()` 整体异常才返回旧缓存。dirty-scope 指标查询只扫描实际参与统计的 `pending/processing/failed`，复用现有 status 索引，不新增 migration。
 - 测试覆盖：API cache 回归锁定 `pending -> completed` 即使 read-model metrics 超时也必须刷新，同时保留整体构建异常的 stale fallback；repository SQL contract 锁定 dirty-scope 状态上限。
