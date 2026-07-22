@@ -135,6 +135,9 @@ event 或 worker instance 时，必须先更新 registry，再让 deploy/preflig
 - 成本统计 consumer 只使用当前 explorer 合同：query 为 `scope/view/project_scope/page_size`，业务行根为
   `rows`。旧 `month` query 与 `time_rows` / `bank_flow_time_rows` / `project_rows` /
   `expense_type_rows` response root 已退出生产合同，不得继续用于 write smoke 或作为兼容 fallback。
+- 可逆关系 consumer assertion 只接受 typed `equals`、`contains` 与 `excludes`。`excludes` 递归检查指定
+  业务根中不再包含明确的 test-owned row/case identity，用于撤回后目标行按正式页面规则退出列表的场景；
+  它仍必须绑定 scenario 的 fixture row 或已捕获 case，不能用空数组或宽泛状态断言绕过 identity gate。
 - `finops-deploy-control write-operation-e2e-smoke ... --apply-stdin` 从 stdin 第一行读取 Admin Token、
   第二行读取 standing approval ticket；任一为空都在业务 mutation 前失败，避免把 root-owned env 漂移误判为已授权。
 - 同步写超过门禁仍判定为 SLO failure；如果 HTTP 结果已经证明 mutation committed，恢复步骤必须先按该响应的

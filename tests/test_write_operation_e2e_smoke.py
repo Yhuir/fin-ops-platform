@@ -1245,7 +1245,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "unique across the file"):
                 write_operation_e2e_smoke.load_scenarios(path, http_target_ms=1000)
 
-    def test_json_pointer_equals_and_contains_are_typed_and_fail_closed(self) -> None:
+    def test_json_pointer_assertions_are_typed_and_fail_closed(self) -> None:
         payload = {"rows": [{"id": "row-1", "labels": ["linked"], "meta": {"state": "active"}}]}
         equals = write_operation_e2e_smoke._evaluate_json_assertion(
             write_operation_e2e_smoke.JsonPointerAssertion("/rows/0/id", "equals", "row-1"),
@@ -1257,6 +1257,16 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             payload=payload,
             variables={},
         )
+        excludes = write_operation_e2e_smoke._evaluate_json_assertion(
+            write_operation_e2e_smoke.JsonPointerAssertion("/rows", "excludes", "row-2"),
+            payload=payload,
+            variables={},
+        )
+        includes_excluded_identity = write_operation_e2e_smoke._evaluate_json_assertion(
+            write_operation_e2e_smoke.JsonPointerAssertion("/rows", "excludes", "row-1"),
+            payload=payload,
+            variables={},
+        )
         missing = write_operation_e2e_smoke._evaluate_json_assertion(
             write_operation_e2e_smoke.JsonPointerAssertion("/rows/1/id", "equals", "row-1"),
             payload=payload,
@@ -1265,7 +1275,34 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
 
         self.assertEqual(equals["status"], "pass")
         self.assertEqual(contains["status"], "pass")
+        self.assertEqual(excludes["status"], "pass")
+        self.assertEqual(includes_excluded_identity["status"], "fail")
         self.assertEqual(missing["status"], "fail")
+
+    def test_reversible_consumer_excludes_assertion_binds_test_owned_identity(self) -> None:
+        scenario = _raw_bank_turnover_scenario("turnover-excludes", "turnover-excludes")
+        for checkpoint in (scenario["checkpoints"][1], scenario["recovery_checkpoint"]):
+            workbench = next(
+                consumer
+                for consumer in checkpoint["consumers"]
+                if consumer["page_key"] == "reconciliation-workbench"
+            )
+            workbench["assertions"] = [{"pointer": "/groups", "excludes": "turnover-bank-test-1"}]
+
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "scenario.json"
+            path.write_text(json.dumps([scenario]), encoding="utf-8")
+            loaded = write_operation_e2e_smoke.load_scenarios(path, http_target_ms=1000)[0]
+
+        for checkpoint in (loaded.checkpoints[1], loaded.recovery_checkpoint):
+            assert checkpoint is not None
+            assertion = next(
+                consumer.assertions[0]
+                for consumer in checkpoint.consumers
+                if consumer.page_key == "reconciliation-workbench"
+            )
+            self.assertEqual(assertion.operator, "excludes")
+            self.assertEqual(assertion.expected, "turnover-bank-test-1")
 
     def test_canonical_preview_payloads_fail_closed_before_mutation(self) -> None:
         confirm = write_operation_e2e_smoke.WriteStep(

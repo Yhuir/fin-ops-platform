@@ -1873,6 +1873,8 @@ def _evaluate_json_assertion(
                 passed = all(actual.get(key) == value for key, value in expected.items())
             else:
                 passed = False
+        elif assertion.operator == "excludes":
+            passed = not bool(_string_leaves(actual) & _string_leaves(expected))
         else:
             raise ValueError(f"unsupported_json_assertion_operator:{assertion.operator}")
         return {
@@ -2589,9 +2591,12 @@ def _load_consumer(raw: Any, *, index: int, default_target_ms: float, role: str 
     for assertion_index, item in enumerate(raw_assertions, start=1):
         if not isinstance(item, dict) or not str(item.get("pointer") or "").startswith("/"):
             raise ValueError(f"consumer #{index} assertion #{assertion_index} requires a JSON Pointer.")
-        operators = [operator for operator in ("equals", "contains") if operator in item]
+        operators = [operator for operator in ("equals", "contains", "excludes") if operator in item]
         if len(operators) != 1:
-            raise ValueError(f"consumer #{index} assertion #{assertion_index} requires exactly one equals/contains.")
+            raise ValueError(
+                f"consumer #{index} assertion #{assertion_index} requires exactly one "
+                "equals/contains/excludes."
+            )
         operator = operators[0]
         assertions.append(
             JsonPointerAssertion(
