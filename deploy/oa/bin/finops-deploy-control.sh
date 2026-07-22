@@ -613,6 +613,9 @@ write_operation_restore_point() {
   command -v pg_restore >/dev/null || die "pg_restore is required to verify write-operation restore points"
   install -d -m 0700 "$WRITE_E2E_BACKUP_ROOT"
   output_dir="$WRITE_E2E_BACKUP_ROOT/$run_id"
+  if [[ -d "$output_dir" ]] && [[ -z "$(find "$output_dir" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+    rmdir -- "$output_dir"
+  fi
   [[ ! -e "$output_dir" ]] || die "write-operation restore point already exists: $output_dir"
   install -d -m 0700 "$output_dir"
   dump_path="$output_dir/fin_ops.dump"
@@ -626,11 +629,51 @@ write_operation_restore_point() {
     # shellcheck disable=SC1090
     source "$SECRETS_ENV"
     set +a
-    export PGDATABASE="${FIN_OPS_POSTGRES_DATABASE_URL:-${DATABASE_URL:-}}"
-    [[ -n "$PGDATABASE" ]] || die "PostgreSQL DSN is empty after loading runtime env"
+    [[ -n "${FIN_OPS_POSTGRES_DATABASE_URL:-${DATABASE_URL:-}}" ]] \
+      || die "PostgreSQL DSN is empty after loading runtime env"
     umask 077
-    trap 'rm -f -- "$temp_path"' EXIT
-    pg_dump --format=custom --no-owner --no-acl --file="$temp_path"
+    trap 'rm -f -- "$temp_path"; rmdir -- "$output_dir" 2>/dev/null || true' EXIT
+    "$API_PYTHON" - "$temp_path" <<'PY'
+import os
+import subprocess
+import sys
+
+from psycopg.conninfo import conninfo_to_dict
+
+database_url = (os.environ.get("FIN_OPS_POSTGRES_DATABASE_URL") or os.environ.get("DATABASE_URL") or "").strip()
+if database_url.startswith("postgresql+psycopg://"):
+    database_url = "postgresql://" + database_url.removeprefix("postgresql+psycopg://")
+parameters = conninfo_to_dict(database_url)
+environment = {key: value for key, value in os.environ.items() if not key.startswith("PG")}
+parameter_environment = {
+    "host": "PGHOST",
+    "hostaddr": "PGHOSTADDR",
+    "port": "PGPORT",
+    "dbname": "PGDATABASE",
+    "user": "PGUSER",
+    "password": "PGPASSWORD",
+    "passfile": "PGPASSFILE",
+    "connect_timeout": "PGCONNECT_TIMEOUT",
+    "client_encoding": "PGCLIENTENCODING",
+    "options": "PGOPTIONS",
+    "sslmode": "PGSSLMODE",
+    "sslcert": "PGSSLCERT",
+    "sslkey": "PGSSLKEY",
+    "sslpassword": "PGSSLPASSWORD",
+    "sslrootcert": "PGSSLROOTCERT",
+    "target_session_attrs": "PGTARGETSESSIONATTRS",
+}
+for parameter, environment_name in parameter_environment.items():
+    value = parameters.get(parameter)
+    if value is not None and str(value):
+        environment[environment_name] = str(value)
+environment["PGAPPNAME"] = "finops-write-operation-restore-point"
+subprocess.run(
+    ["pg_dump", "--format=custom", "--no-owner", "--no-acl", f"--file={sys.argv[1]}"],
+    check=True,
+    env=environment,
+)
+PY
     pg_restore --list "$temp_path" >/dev/null
     mv "$temp_path" "$dump_path"
     trap - EXIT
