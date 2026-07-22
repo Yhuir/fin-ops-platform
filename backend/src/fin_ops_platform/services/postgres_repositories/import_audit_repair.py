@@ -237,7 +237,10 @@ select count(*)::bigint as row_count,
            where decision = 'created' and exists (
                select 1 from app.invoices invoice
                where coalesce(invoice.legacy_mongo_id, invoice.id::text) = target_rows.linked_object_id
-                 and invoice.legacy_source_batch_id = target_rows.batch_id
+                 and (
+                     invoice.source_batch_id = target_rows.import_batch_id
+                     or invoice.legacy_source_batch_id = target_rows.batch_id
+                 )
            )
        )::bigint as created_canonical_owner_count,
        count(*) filter (

@@ -227,3 +227,4 @@
 - 写入范围：只把精确目标从 `batch pending + file preview_ready + batch_id null` 恢复为 `batch completed + file confirmed + batch_id/session_status terminal`；SQL 自带旧状态与 preview batch precondition，任一步 rowcount 不是 1 都回滚整个事务。
 - 非目标：不新增 HTTP 修复接口，不做常驻扫描，不重放 worker/read model，不覆盖 raw payload 的其它字段，不支持其它中间态推断。
 - 测试：`tests/test_import_audit_repair_ops.py` 覆盖 plan、幂等、fail-closed、CLI exact target 与 repository precondition；`tests/test_app_postgres_mode_integration.py` 覆盖真实 PostgreSQL 状态恢复（无测试 DSN 时 skip）。
+- 生产 dry-run 校准：canonical invoice owner 与页面 Audit 保持同一合同，接受正式 UUID `source_batch_id` 或迁移期 `legacy_source_batch_id`；不把只缺 legacy 文本列的有效 owner 误判为闭环缺失。
