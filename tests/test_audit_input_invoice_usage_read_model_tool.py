@@ -67,6 +67,17 @@ class AuditInputInvoiceUsageReadModelToolTests(unittest.TestCase):
         self.assertIn("read_model.workbench_relation_groups", queried_sql)
         self.assertIn("job.outbox_events", queried_sql)
         self.assertIn("/* check: consumer_relation_edge_equality */", queried_sql)
+        source_version_sql = next(
+            sql for sql, _params in connection.fetch_all_calls if _check_name(sql) == "source_version_mismatch"
+        )
+        self.assertIn("embedded_relation_versions - 'workbench_pair_relations_updated_at'", source_version_sql)
+        self.assertIn("current_relation_versions - 'workbench_pair_relations_updated_at'", source_version_sql)
+        self.assertIn("app.workbench_pair_relations changed_relation", source_version_sql)
+        self.assertIn("active_invoice.invoice_id = any(changed_relation.row_ids)", source_version_sql)
+        self.assertIn("active_invoice.postgres_invoice_id = any(changed_relation.row_ids)", source_version_sql)
+        self.assertIn("changed_relation.row_ids && active_invoice.source_workbench_row_ids", source_version_sql)
+        self.assertIn("active_invoice.scope_key = invoice_versions.scope_key", source_version_sql)
+        self.assertIn("changed_relation.updated_at >", source_version_sql)
 
     def test_outbox_backlog_is_a_real_queue_failure(self) -> None:
         report = run_input_invoice_usage_audit(
@@ -149,6 +160,13 @@ class AuditInputInvoiceUsageReadModelToolTests(unittest.TestCase):
                 "missing_read_model_member": [
                     {"invoice_id": "inv-missing", "scope_key": "2026-05", "invoice_no": "1001"}
                 ],
+                "source_version_mismatch": [
+                    {
+                        "scope_key": "2026-05",
+                        "embedded_relation_versions": {"source_version": "old"},
+                        "current_relation_versions": {"source_version": "new"},
+                    }
+                ],
                 "duplicate_invoice_member": [
                     {
                         "invoice_id": "inv-dup",
@@ -191,11 +209,12 @@ class AuditInputInvoiceUsageReadModelToolTests(unittest.TestCase):
         self.assertEqual(report["overall_status"], "issues_found")
         issue_codes = set(report["summary"]["issue_sample_counts_by_code"])
         self.assertIn("missing_input_invoice_usage_member", issue_codes)
+        self.assertIn("input_usage_relation_source_versions_mismatch", issue_codes)
         self.assertIn("duplicate_input_invoice_usage_member", issue_codes)
         self.assertIn("input_invoice_usage_amount_mismatch", issue_codes)
         self.assertIn("input_invoice_usage_relation_edge_mismatch", issue_codes)
         self.assertIn("input_invoice_usage_consumer_relation_edge_mismatch", issue_codes)
-        self.assertEqual(report["summary"]["blocking_issue_sample_count"], 5)
+        self.assertEqual(report["summary"]["blocking_issue_sample_count"], 6)
         self.assertEqual(connection.executed, [])
 
     def test_cli_fail_on_issues_returns_nonzero(self) -> None:

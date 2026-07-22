@@ -720,23 +720,57 @@ def _source_version_mismatch_issues(
     rows = connection.fetch_all(
         f"""
         /* check: source_version_mismatch */
+        with
+        {_active_invoices_cte(contract)},
+        invoice_scope_versions as (
+            select
+                invoice_scope.scope_key,
+                coalesce(
+                    invoice_scope.source_versions->'workbench_relation_source_versions',
+                    '{{}}'::jsonb
+                ) as embedded_relation_versions,
+                coalesce(relation_scope.source_versions, '{{}}'::jsonb) as current_relation_versions
+            from {contract.scopes_table} invoice_scope
+            join read_model.workbench_relation_scopes relation_scope
+              on relation_scope.tenant_id = %s
+             and relation_scope.scope_key = invoice_scope.scope_key
+            where invoice_scope.scope_key <> 'all'
+              and exists (
+                  select 1
+                  from {contract.rows_table} row
+                  where row.scope_key = invoice_scope.scope_key
+              )
+        )
         select
-            invoice_scope.scope_key,
-            invoice_scope.source_versions->'workbench_relation_source_versions' as embedded_relation_versions,
-            relation_scope.source_versions as current_relation_versions
-        from {contract.scopes_table} invoice_scope
-        join read_model.workbench_relation_scopes relation_scope
-          on relation_scope.tenant_id = %s
-         and relation_scope.scope_key = invoice_scope.scope_key
-        where invoice_scope.scope_key <> 'all'
-          and exists (
-              select 1
-              from {contract.rows_table} row
-              where row.scope_key = invoice_scope.scope_key
+            invoice_versions.scope_key,
+            invoice_versions.embedded_relation_versions,
+            invoice_versions.current_relation_versions
+        from invoice_scope_versions invoice_versions
+        where invoice_versions.embedded_relation_versions <> invoice_versions.current_relation_versions
+          and (
+              invoice_versions.embedded_relation_versions - 'workbench_pair_relations_updated_at'
+                  <> invoice_versions.current_relation_versions - 'workbench_pair_relations_updated_at'
+              or exists (
+                  select 1
+                  from active_invoices active_invoice
+                  join app.workbench_pair_relations changed_relation
+                    on (
+                        active_invoice.invoice_id = any(changed_relation.row_ids)
+                        or active_invoice.postgres_invoice_id = any(changed_relation.row_ids)
+                        or changed_relation.row_ids && active_invoice.source_workbench_row_ids
+                    )
+                  where active_invoice.scope_key = invoice_versions.scope_key
+                    and changed_relation.updated_at > coalesce(
+                        nullif(
+                            invoice_versions.embedded_relation_versions
+                                ->> 'workbench_pair_relations_updated_at',
+                            ''
+                        )::timestamptz,
+                        '-infinity'::timestamptz
+                    )
+              )
           )
-          and coalesce(invoice_scope.source_versions->'workbench_relation_source_versions', '{{}}'::jsonb)
-              <> coalesce(relation_scope.source_versions, '{{}}'::jsonb)
-        order by invoice_scope.scope_key
+        order by invoice_versions.scope_key
         limit %s
         """,
         (tenant_id, limit),

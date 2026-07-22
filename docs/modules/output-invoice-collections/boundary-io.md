@@ -43,7 +43,7 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | 收款 rows/details/statistics | 前端页面 | fresh/status 可见；linked 多销项发票 relation 输出单条 row，`invoiceRelations.summaries` 包含全部成员发票，`invoiceRelations.totalWithTax` 为成员净额。主 rows 响应的 `statistics` 从完整 `output_invoice_collection` 投影按唯一发票成员 ID 计算发票、OA/收入流水关联、收款及补集、红字和已开收据；忽略当前 keyword/filter/month/sort/page。`pagination.total` 仍是表格行数/配对组行数；任一 child scope non-fresh 时统计不可用，合法 fresh 空集才返回零。 |
-| 页面 Audit icon | AppHealth operations audit API | admin-only；active canonical 销项发票（含 collapsed members）是 independent expected-set，成员/金额/scope 与共享 relation 的受影响月份双向 edge 必须在同一只读一致性快照中相等；只有结构化 integrity=pass、freshness=fresh、queue=drained 且 database snapshot 已启用才显示成功，unknown/live-query 不得伪装 fresh，问题数显示为 sample |
+| 页面 Audit icon | AppHealth operations audit API | admin-only；active canonical 销项发票（含 collapsed members）是 independent expected-set，成员/金额/scope 与共享 relation 的受影响月份双向 edge 必须在同一只读一致性快照中相等；relation source-version 仅有全局 `workbench_pair_relations_updated_at` 前进时，只有该时间点之后的 relation 与本月 canonical/PostgreSQL/OA source-link 发票 identity 相交才判为本页 mismatch，纯银行关系变化不得污染本页 integrity；其它版本差异仍 fail closed。此规则只收窄只读 Audit 分类，页面 fresh gate 仍按完整 source-version 合同按访问触发刷新，精确化由 Phase 27 负责；只有结构化 integrity=pass、freshness=fresh、queue=drained 且 database snapshot 已启用才显示成功，unknown/live-query 不得伪装 fresh，问题数显示为 sample |
 | lifecycle/status result | API | 写后可恢复、可审计 |
 | operation barrier targets | 前端页面 | lifecycle/receipt 写成功后用服务端返回 targets 等待 fresh；缺省时才回退当前查询月份 |
 | Dirty scope | runtime queue | `output_invoice_collection.read_model.refresh` |
