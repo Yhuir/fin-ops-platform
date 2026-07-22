@@ -140,6 +140,9 @@ event 或 worker instance 时，必须先更新 registry，再让 deploy/preflig
   它仍必须绑定 scenario 的 fixture row 或已捕获 case，不能用空数组或宽泛状态断言绕过 identity gate。
 - `finops-deploy-control write-operation-e2e-smoke ... --apply-stdin` 从 stdin 第一行读取 Admin Token、
   第二行读取 standing approval ticket；任一为空都在业务 mutation 前失败，避免把 root-owned env 漂移误判为已授权。
+- apply 前必须先用 `finops-deploy-control write-operation-restore-point <release> <run-id>` 生成当次完整
+  PostgreSQL custom-format dump；只有 `pg_restore --list` 已通过且 SHA-256 manifest 已保存时，才把该路径作为
+  restore-point reference。命令不接受任意输出路径、SQL 或表名，DSN 不进入命令参数和 manifest。
 - 同步写超过门禁仍判定为 SLO failure；如果 HTTP 结果已经证明 mutation committed，恢复步骤必须先按该响应的
   精确 `outbox_event_ids` 等待 durable fan-out 收敛，再读取隔离页基线和执行撤回。`202 refreshing`
   不是稳定恢复基线，不能据此跳过撤回或把生产关系留在 active 状态。

@@ -717,7 +717,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_scenari
 - 工具只读，不发 mutating HTTP，也不写数据库。
 - discovery 会列出 `turnover_manual_closure_or_withdraw`、Workbench relation 与 no-OA 候选，但这些普通生产关系仅作为只读审核上下文，不再自动写入 executable scenario；当前只有 bank-flow submit 的独立正式 owner 可以生成可执行 scenario。
 - 三组可逆 relation closure 必须由调用者显式提供 test-owned、bounded、confirm+withdraw checkpoint 场景，不能把 discovery 中的真实业务候选转换为测试写入。
-- `turnover_manual_closure_or_withdraw` 只读上下文仍选择 active Workbench relation 支撑的手工往来闭环；其历史 standing operation 的正式入口仍是 `/api/workbench/actions/withdraw-link`。它与本阶段 bank+turnover test-owned closure 的 `/api/turnover-ledger/closures/confirm` → `/api/turnover-ledger/relations/{id}/withdraw` 是两条不同合同，不得互换 profile 或 endpoint。
+- `turnover_manual_closure_or_withdraw` 只读上下文仍选择 active Workbench relation 支撑的手工往来闭环；其历史 standing operation 的正式入口仍是 `/api/workbench/actions/withdraw-link`。它与 bank+turnover test-owned closure 的 `/api/turnover-ledger/closures/confirm` → `/api/turnover-ledger/closures/withdraw` 是两条不同合同；后者必须捕获并消费 canonical closure case id，禁止恢复旧 relation-id 直连撤回路径。
 - 生产标准对可生成的 bank-flow 场景使用 `--limit 1`，避免 full gate 串行执行过多生产写步骤。
 - 如果没有发现候选，报告返回 `status=no_candidates`，即使传了 `--scenario-output` 也不会写空 scenario 文件；主控
   workflow 应先准备已审批、可回滚的测试对象，再重新 discovery。
@@ -728,6 +728,16 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_scenari
 没有可下发 PostgreSQL DSN 的生产环境通过 root-owned helper 执行同一 runner。scenario 必须位于
 `/tmp/finops-write-e2e-*.json`、由 `finops-deploy` 持有、不可 group/world write 且不超过 1 MiB；helper
 固定公网 API prefix 和 SLO，拒绝任意 Python/SQL/额外参数。apply 时 Admin Token 只能经 SSH stdin 输入：
+
+```bash
+ssh finops-deploy@finops-prod \
+  sudo -n /usr/local/sbin/finops-deploy-control \
+  write-operation-restore-point <release-name> <run-id>
+```
+
+恢复点命令只在固定 root-owned 目录创建全库 custom-format dump，并在输出 manifest 前执行
+`pg_restore --list`；manifest 的路径和 SHA-256 是本次 apply 的 restore-point reference。它不接受任意 SQL、
+表名或输出路径，且不会输出 DSN。恢复点成功后才执行 apply：
 
 ```bash
 scripts/with-production-admin-token.sh bash -lc '

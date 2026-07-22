@@ -32,6 +32,7 @@
 | Verify command | `scripts/verify.sh` | 按 backend/web/docs/ops 分类执行 |
 | Runtime env examples | `deploy/oa/env/*.env.example` | 按 common/secrets/migrator/worker/dispatcher 拆分，禁止恢复单文件 env |
 | Controlled write smoke stdin | operator | `--apply-stdin` 第一行为 Admin Token、第二行为 approval ticket；两者均必填且不落盘。consumer assertion 只接受 typed `equals` / `contains` / `excludes`；`excludes` 只能证明已登记业务根不再含显式 test-owned row/case identity，不能解除 fixture identity gate |
+| Controlled write smoke restore point | operator | `write-operation-restore-point <release> <run-id>` 只接受受限 run-id，在固定 root-owned 目录生成完整 PostgreSQL custom-format dump；DSN 仅经环境传递，dump 必须通过 `pg_restore --list` 并输出 SHA-256 manifest 后才可作为 apply 前恢复点 |
 | Request error lookup | API `requestId` | 只接受 12 位小写十六进制 ID，并从最近两小时 API journal 返回精确匹配的单行异常；不开放任意日志查询 |
 | Import audit repair | `finops-deploy-control import-audit-repair` | 只调用固定 Python module；execute 必须携带同一数据快照 dry-run 返回的 SHA-256 fingerprint；生命周期修复必须同时显式提供唯一 `--batch-id` / `--file-id` |
 
@@ -42,6 +43,7 @@
 | Release artifact | 生产服务器 | 可追踪版本 |
 | systemd/env files | deploy/oa | 与 registry 一致 |
 | Verification result | operator/CI | 失败不得伪装成功 |
+| Write smoke restore-point manifest | operator | 固定记录 release、run-id、UTC 时间、dump 路径、字节数、格式和 SHA-256；不得包含 DSN、token 或业务 payload |
 
 ## 持久化与投影
 

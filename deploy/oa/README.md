@@ -459,6 +459,8 @@ sudo /usr/local/sbin/finops-deploy-control read-model-slo-smoke <release-name> \
   --json \
   --critical-only \
   --target-ms 5000
+sudo /usr/local/sbin/finops-deploy-control write-operation-restore-point <release-name> \
+  <run-id>
 sudo /usr/local/sbin/finops-deploy-control write-operation-e2e-smoke <release-name> \
   /tmp/finops-write-e2e-<run-id>.json --dry-run
 sudo /usr/local/sbin/finops-deploy-control api-request-error <request-id>

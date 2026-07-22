@@ -19,6 +19,7 @@ SECRETS_ENV="$ENV_DIR/fin-ops.secrets.env"
 MIGRATOR_ENV="$ENV_DIR/fin-ops.postgres-migrator.env"
 DEPLOY_CONTROL_HELPER="${FINOPS_DEPLOY_CONTROL_HELPER:-/usr/local/sbin/finops-deploy-control}"
 ENSURE_RUNTIME_WORKERS_HELPER="${FINOPS_ENSURE_RUNTIME_WORKERS_HELPER:-/usr/local/sbin/finops-ensure-runtime-workers}"
+WRITE_E2E_BACKUP_ROOT="${FINOPS_WRITE_E2E_BACKUP_ROOT:-/opt/fin-ops/backups/write-operation-e2e}"
 PRUNE_WORKBENCH_GENERATIONS_HELPER="${FINOPS_PRUNE_WORKBENCH_GENERATIONS_HELPER:-/usr/local/sbin/finops-prune-workbench-generations}"
 PRUNE_WORKBENCH_GENERATIONS_SERVICE_UNIT="${FINOPS_PRUNE_WORKBENCH_GENERATIONS_SERVICE_UNIT:-/etc/systemd/system/finops-prune-workbench-generations.service}"
 PRUNE_WORKBENCH_GENERATIONS_TIMER_UNIT="${FINOPS_PRUNE_WORKBENCH_GENERATIONS_TIMER_UNIT:-/etc/systemd/system/finops-prune-workbench-generations.timer}"
@@ -53,6 +54,8 @@ commands:
                                       check or repair read model scope contracts using runtime env
   read-model-slo-smoke <release-name> [args]
                                       run read model SLO smoke dry-run using runtime env; --apply is refused
+  write-operation-restore-point <release-name> <run-id>
+                                      create and verify a fixed full PostgreSQL backup before write smoke
   write-operation-e2e-smoke <release-name> <scenario-path> [--dry-run|--apply-stdin]
   api-request-error <request-id>
   api-request-timing <request-id>
@@ -596,6 +599,50 @@ read_model_slo_smoke() {
   run_with_runtime_env "$src" -m fin_ops_platform.tools.read_model_slo_smoke "$@"
 }
 
+write_operation_restore_point() {
+  local release="${1:-}" run_id="${2:-}"
+  [[ -n "$release" ]] || die "write-operation-restore-point requires release name"
+  [[ "$run_id" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$ ]] \
+    || die "write-operation-restore-point run-id must be 1..80 safe filename characters"
+  [[ $# -le 2 ]] || die "write-operation-restore-point accepts only release name and run-id"
+
+  local src output_dir dump_path temp_path manifest_path checksum size created_at
+  src="$(release_src "$release")"
+  assert_runtime_env_contract
+  command -v pg_dump >/dev/null || die "pg_dump is required for write-operation restore points"
+  command -v pg_restore >/dev/null || die "pg_restore is required to verify write-operation restore points"
+  install -d -m 0700 "$WRITE_E2E_BACKUP_ROOT"
+  output_dir="$WRITE_E2E_BACKUP_ROOT/$run_id"
+  [[ ! -e "$output_dir" ]] || die "write-operation restore point already exists: $output_dir"
+  install -d -m 0700 "$output_dir"
+  dump_path="$output_dir/fin_ops.dump"
+  temp_path="$output_dir/.fin_ops.dump.tmp"
+  manifest_path="$output_dir/manifest.json"
+
+  (
+    set -a
+    # shellcheck disable=SC1090
+    source "$COMMON_ENV"
+    # shellcheck disable=SC1090
+    source "$SECRETS_ENV"
+    set +a
+    export PGDATABASE="${FIN_OPS_POSTGRES_DATABASE_URL:-${DATABASE_URL:-}}"
+    [[ -n "$PGDATABASE" ]] || die "PostgreSQL DSN is empty after loading runtime env"
+    umask 077
+    trap 'rm -f -- "$temp_path"' EXIT
+    pg_dump --format=custom --no-owner --no-acl --file="$temp_path"
+    pg_restore --list "$temp_path" >/dev/null
+    mv "$temp_path" "$dump_path"
+    trap - EXIT
+    checksum="$(sha256sum "$dump_path" | awk '{print $1}')"
+    size="$(stat -c '%s' "$dump_path")"
+    created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf '{\n  "status": "created",\n  "run_id": "%s",\n  "release": "%s",\n  "created_at": "%s",\n  "dump_path": "%s",\n  "size_bytes": %s,\n  "sha256": "%s",\n  "format": "postgresql_custom"\n}\n' \
+      "$run_id" "$release" "$created_at" "$dump_path" "$size" "$checksum" >"$manifest_path"
+    cat "$manifest_path"
+  )
+}
+
 write_operation_e2e_smoke() {
   local release="${1:-}" scenario="${2:-}" mode="${3:---dry-run}"
   [[ -n "$release" ]] || die "write-operation-e2e-smoke requires release name"
@@ -777,6 +824,10 @@ case "$cmd" in
   read-model-slo-smoke)
     shift
     read_model_slo_smoke "$@"
+    ;;
+  write-operation-restore-point)
+    shift
+    write_operation_restore_point "$@"
     ;;
   write-operation-e2e-smoke)
     shift

@@ -322,6 +322,7 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("EnvironmentFile=$SECRETS_ENV", script)
         self.assertIn('ENSURE_RUNTIME_WORKERS_HELPER="${FINOPS_ENSURE_RUNTIME_WORKERS_HELPER:-/usr/local/sbin/finops-ensure-runtime-workers}"', script)
         self.assertIn('DEPLOY_CONTROL_HELPER="${FINOPS_DEPLOY_CONTROL_HELPER:-/usr/local/sbin/finops-deploy-control}"', script)
+        self.assertIn('WRITE_E2E_BACKUP_ROOT="${FINOPS_WRITE_E2E_BACKUP_ROOT:-/opt/fin-ops/backups/write-operation-e2e}"', script)
         self.assertIn("self-update <release-name>", script)
         self.assertIn("install_deploy_control_helper", script)
         self.assertIn("install_runtime_worker_helper", script)
@@ -346,6 +347,13 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("read_model_slo_smoke()", script)
         self.assertIn("read-model-slo-smoke only permits dry-run through deploy-control", script)
         self.assertIn('run_with_runtime_env "$src" -m fin_ops_platform.tools.read_model_slo_smoke "$@"', script)
+        self.assertIn("write-operation-restore-point <release-name> <run-id>", script)
+        self.assertIn("write_operation_restore_point()", script)
+        self.assertIn("write-operation-restore-point run-id must be 1..80 safe filename characters", script)
+        self.assertIn('export PGDATABASE="${FIN_OPS_POSTGRES_DATABASE_URL:-${DATABASE_URL:-}}"', script)
+        self.assertIn('pg_dump --format=custom --no-owner --no-acl --file="$temp_path"', script)
+        self.assertIn('pg_restore --list "$temp_path"', script)
+        self.assertIn('sha256sum "$dump_path"', script)
         self.assertIn("write-operation-e2e-smoke <release-name> <scenario-path> [--dry-run|--apply-stdin]", script)
         self.assertIn("write_operation_e2e_smoke()", script)
         self.assertIn("scenario path must match /tmp/finops-write-e2e-*.json", script)
@@ -440,6 +448,25 @@ class DeployOAScriptTest(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("scenario path must match /tmp/finops-write-e2e-*.json", result.stderr)
+        self.assertNotIn("release src directory not found", result.stderr)
+
+    def test_deploy_control_write_restore_point_refuses_unsafe_run_id_before_release_lookup(self) -> None:
+        result = subprocess.run(
+            [
+                str(DEPLOY_CONTROL_SCRIPT_PATH),
+                "write-operation-restore-point",
+                "fake-release",
+                "../unsafe",
+            ],
+            cwd=Path(__file__).resolve().parents[1],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("run-id must be 1..80 safe filename characters", result.stderr)
         self.assertNotIn("release src directory not found", result.stderr)
 
 
