@@ -321,7 +321,11 @@ describe("Bank details page", () => {
     const page = await screen.findByTestId("bank-details-page");
     const table = await findBankTransactionSurface(page);
     expect(within(table).getByRole("columnheader", { name: "类型" })).toBeInTheDocument();
-    expect(await within(table).findByText("费用 / 工资")).toBeInTheDocument();
+    const autoCategory = await within(table).findByText("费用 / 工资");
+    expect(autoCategory).toBeInTheDocument();
+    const autoCategoryRow = autoCategory.closest("tr");
+    expect(autoCategoryRow).toBeInstanceOf(HTMLElement);
+    expect(within(autoCategoryRow as HTMLElement).queryByRole("button", { name: "撤销" })).not.toBeInTheDocument();
     expect(within(table).queryByLabelText("bank-detail-001 类型")).not.toBeInTheDocument();
     expect(within(table).queryByText("自动")).not.toBeInTheDocument();
     expect(within(page).queryByText(exactTextContent("公司暂借款：待还款 2"))).not.toBeInTheDocument();
@@ -852,6 +856,41 @@ describe("Bank details page", () => {
     expect(within(page).queryByRole("button", { name: "保存分类" })).not.toBeInTheDocument();
   });
 
+  test("clearing a manual assignment immediately restores the row to pending classification", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installMockApiFetch({
+      bankDetailManualAssignmentActive: true,
+      bankDetailManualClearReadModelStatuses: ["refreshing", "fresh"],
+    });
+    renderBankDetailsPage();
+
+    const page = await screen.findByTestId("bank-details-page");
+    await user.type(within(page).getByPlaceholderText("搜索流水"), "普通供应商");
+    const table = await findBankTransactionSurface(page);
+    const supplier = await within(table).findByText("普通供应商");
+    const row = supplier.closest("tr");
+    expect(row).toBeInstanceOf(HTMLElement);
+    expect(within(row as HTMLElement).getByText("费用 / 工资")).toBeInTheDocument();
+    const transactionReadsBeforeClear = requestUrls(fetchMock, "/api/bank-details/transactions").length;
+
+    await user.click(within(row as HTMLElement).getByRole("button", { name: "撤销" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/bank-details/transactions/bank-detail-search-filler/category-assignment",
+        expect.objectContaining({ method: "DELETE" }),
+      );
+      expect(within(row as HTMLElement).getByRole("button", { name: "待分类" })).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(requestUrls(fetchMock, "/api/bank-details/transactions").length).toBeGreaterThan(
+        transactionReadsBeforeClear,
+      );
+    });
+    expect(within(row as HTMLElement).getByRole("button", { name: "待分类" })).toBeInTheDocument();
+    expect(within(row as HTMLElement).queryByText("unknown")).not.toBeInTheDocument();
+  });
+
   test("manual classification choices update after automatic tag rules are saved", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch();
@@ -1320,6 +1359,7 @@ describe("Bank details page", () => {
       const url = new URL(rawUrl, "http://localhost");
       if (url.pathname === "/api/bank-details/accounts") {
         return new Response(JSON.stringify({
+          read_model_status: "fresh",
           total_balance: "130500.50",
           balance_account_count: 1,
           missing_balance_account_count: 0,
@@ -1339,6 +1379,7 @@ describe("Bank details page", () => {
       }
       if (url.pathname === "/api/bank-details/transactions") {
         return new Response(JSON.stringify({
+          read_model_status: "fresh",
           rows: [
             {
               id: `bank-detail-version-${tagVersion}`,
@@ -1364,6 +1405,13 @@ describe("Bank details page", () => {
             version: tagVersion,
             tags: [{ code: "fee", label: "手续费", path: ["自动识别", "手续费"], status: "active", source: "system" }],
           },
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (url.pathname === "/api/bank-details/auto-tag-rules") {
+        return new Response(JSON.stringify({
+          version: tagVersion,
+          active_rules: [],
+          archived_rules: [],
         }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
       throw new Error(`Unhandled fetch mock for ${url.pathname}`);

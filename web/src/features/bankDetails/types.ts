@@ -136,6 +136,11 @@ export type BankDetailTransaction = {
   relationStatus: BankDetailRelationStatus;
 };
 
+export type BankDetailCategoryMutationResult = {
+  changed: boolean;
+  affectedMonths: string[];
+};
+
 export type BankDetailStatistics = {
   transactionCount?: number;
   expenseTransactionCount?: number;

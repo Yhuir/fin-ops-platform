@@ -579,7 +579,7 @@ class PostgresStateStoreTests(unittest.TestCase):
 
             store.save_workbench_pair_relations({"pair_relations": {"case-1": {"case_id": "case-1"}}})
             store.save_no_oa_bank_batches({"batches": {"batch-1": {"batch_id": "batch-1"}}})
-            store.save_bank_transaction_categories({"categories": {"cat-1": {"id": "cat-1"}}})
+            self.assertFalse(hasattr(store, "save_bank_transaction_categories"))
             store.save_turnover_relations({"relations": {"rel-1": {"relation_id": "rel-1"}}})
             store.save_turnover_ledger_extras({"version": 1, "extras": [{"id": "extra-1"}]})
             store.save_tax_certified_imports({"records": {"record-1": {"record_id": "record-1"}}})

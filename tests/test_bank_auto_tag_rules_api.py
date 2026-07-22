@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from tests.app_test_support import build_local_state_application as build_application
-from fin_ops_platform.services.bank_detail_category_side_effects import BankDetailCategoryMutationSideEffectPort
+from fin_ops_platform.services.bank_transaction_category_refresh import bank_transaction_category_refreshes
 from fin_ops_platform.services.postgres_repositories.read_models import WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION
 from fin_ops_platform.services.state_store import ApplicationStateStore
 from fin_ops_platform.services.workbench_sql_projection import WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION
@@ -589,11 +589,9 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         app._bank_transaction_category_service.assign_manual_category = assign_stub
         app._bank_transaction_category_affected_months = lambda _transaction_ids: ["2026-02"]
         app._state_store = SimpleNamespace(save_bank_transaction_categories=lambda snapshot: saved_snapshots.append(snapshot))
+        app._audit_service = SimpleNamespace(record_action=lambda **kwargs: mutations.append(dict(kwargs)))
 
-        with (
-            patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)),
-            patch.object(BankDetailCategoryMutationSideEffectPort, "after_mutation", lambda _self, **kwargs: mutations.append(dict(kwargs))),
-        ):
+        with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
             response = app._handle_request_untracked(
                 "POST",
                 "/api/bank-details/transactions/txn-unmatched/category-assignment",
@@ -682,11 +680,9 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         app._bank_transaction_category_service.clear_manual_category = clear_stub
         app._bank_transaction_category_affected_months = lambda _transaction_ids: ["2026-02"]
         app._state_store = SimpleNamespace(save_bank_transaction_categories=lambda _snapshot: None)
+        app._audit_service = SimpleNamespace(record_action=lambda **kwargs: mutations.append(dict(kwargs)))
 
-        with (
-            patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)),
-            patch.object(BankDetailCategoryMutationSideEffectPort, "after_mutation", lambda _self, **kwargs: mutations.append(dict(kwargs))),
-        ):
+        with patch.object(app, "_resolve_bank_details_read_session", return_value=(_session(), None)):
             response = app._handle_request_untracked(
                 "DELETE",
                 "/api/bank-details/transactions/txn-manual/category-assignment",
@@ -1215,30 +1211,23 @@ class BankAutoTagRulesApiTests(unittest.TestCase):
         self.assertNotIn(("bank_detail", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
         self.assertIn(("bank_flow_rule_batch", "all", "bank_auto_tag_rules_changed"), queue.enqueued)
 
-    def test_bank_category_mutation_side_effect_port_enqueues_turnover_ledger_all_refresh(self) -> None:
-        app = build_application()
-        queue = _ReadModelQueue()
-        app._runtime_repositories = SimpleNamespace(queue_repository=queue)
-        app._invalidate_workbench_after_bank_transaction_categories = lambda _months: True
-        app._audit_service = SimpleNamespace(record_action=lambda **_kwargs: None)
-        side_effect_port = BankDetailCategoryMutationSideEffectPort(
-            enqueue_bank_detail_refresh=app._bank_detail_read_model_refresh_producer().enqueue,
-            enqueue_turnover_ledger_refresh=app._turnover_ledger_read_model_refresh_producer().enqueue,
-            invalidate_workbench_after_category_mutation=app._invalidate_workbench_after_bank_transaction_categories,
-            audit_service=app._audit_service,
-        )
+    def test_bank_category_mutation_refresh_contract_uses_exact_downstream_scopes(self) -> None:
+        refreshes = bank_transaction_category_refreshes(["2026-03"])
+        scopes = {(str(item["scope_type"]), str(item["scope_key"])) for item in refreshes}
 
-        side_effect_port.after_mutation(
-            transaction_id="txn-001",
-            actor_id="TESTFULL001",
-            action="bank_detail_category_confirmed",
-            affected_months=["2026-03"],
-            metadata={},
-        )
-
-        self.assertIn(("bank_detail", "2026-03", "bank_detail_category_confirmation_changed"), queue.enqueued)
-        self.assertIn(("turnover_ledger", "all", "bank_detail_category_confirmation_changed"), queue.enqueued)
-        self.assertNotIn(("turnover_ledger", "2026-03", "bank_detail_category_confirmation_changed"), queue.enqueued)
+        for scope_type in (
+            "bank_detail",
+            "bank_flow_rule_batch",
+            "workbench",
+            "workbench_relation",
+            "invoice_lifecycle",
+            "search",
+            "turnover_ledger",
+        ):
+            self.assertIn((scope_type, "2026-03"), scopes)
+        self.assertIn(("cost_statistics", "active:2026-03"), scopes)
+        self.assertIn(("cost_statistics", "all:2026-03"), scopes)
+        self.assertNotIn(("turnover_ledger", "all"), scopes)
 
     def test_bank_detail_api_does_not_reenqueue_already_refreshing_scopes(self) -> None:
         app = build_application()

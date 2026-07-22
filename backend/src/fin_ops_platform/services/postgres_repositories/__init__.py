@@ -1,6 +1,9 @@
 """PostgreSQL repository helpers for the application state store."""
 
 from fin_ops_platform.services.postgres_repositories.core import PostgresCoreRepository
+from fin_ops_platform.services.postgres_repositories.bank_transaction_category import (
+    PostgresBankTransactionCategoryRepository,
+)
 from fin_ops_platform.services.postgres_repositories.etc_import_sessions import PostgresEtcImportSessionRepository
 from fin_ops_platform.services.postgres_repositories.external_control_evidence import (
     PostgresExternalControlEvidenceRepository,
@@ -22,6 +25,7 @@ __all__ = [
     "PostgresOAProjectionAdapter",
     "PostgresOAProjectionRepository",
     "PostgresCoreRepository",
+    "PostgresBankTransactionCategoryRepository",
     "PostgresEtcImportSessionRepository",
     "PostgresExternalControlEvidenceRepository",
     "audit_external_control_evidence",

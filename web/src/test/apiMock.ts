@@ -101,6 +101,8 @@ type MockApiOptions = {
   bankDetailInitialTransactionReadModelStatus?: "fresh" | "refreshing" | "stale" | "schema_mismatch";
   bankDetailPostSaveAccountsTotalBalance?: string;
   bankDetailRefreshingTransactionsEmpty?: boolean;
+  bankDetailManualAssignmentActive?: boolean;
+  bankDetailManualClearReadModelStatuses?: Array<"fresh" | "refreshing" | "stale" | "schema_mismatch">;
 };
 
 const templateRegistry = [
@@ -4733,6 +4735,9 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
   let bankDetailAutoTagRulesSaved = false;
   let bankDetailPostSaveAccountRequestCount = 0;
   let bankDetailPostSaveTransactionRequestCount = 0;
+  let bankDetailManualAssignmentActive = Boolean(options.bankDetailManualAssignmentActive);
+  let bankDetailManualClearPending = false;
+  let bankDetailManualClearReadModelStatusIndex = 0;
   let workbenchWriteActionCount = 0;
   let workbenchRefreshStatusIndex = 0;
   const workbenchStateStore = createWorkbenchStateStore(options);
@@ -6246,11 +6251,25 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
       };
     },
     "/api/bank-details/transactions": ({ url }) => {
-      const readModelStatus = bankDetailAutoTagRulesSaved && options.bankDetailTransactionReadModelStatuses?.length
-        ? options.bankDetailTransactionReadModelStatuses[
-          Math.min(bankDetailPostSaveTransactionRequestCount++, options.bankDetailTransactionReadModelStatuses.length - 1)
+      const manualClearReadModelStatus = bankDetailManualClearPending
+        && options.bankDetailManualClearReadModelStatuses?.length
+        ? options.bankDetailManualClearReadModelStatuses[
+          Math.min(
+            bankDetailManualClearReadModelStatusIndex++,
+            options.bankDetailManualClearReadModelStatuses.length - 1,
+          )
         ]
-        : options.bankDetailInitialTransactionReadModelStatus ?? "fresh";
+        : null;
+      if (bankDetailManualClearPending && manualClearReadModelStatus === "fresh") {
+        bankDetailManualAssignmentActive = false;
+        bankDetailManualClearPending = false;
+      }
+      const readModelStatus = manualClearReadModelStatus
+        ?? (bankDetailAutoTagRulesSaved && options.bankDetailTransactionReadModelStatuses?.length
+          ? options.bankDetailTransactionReadModelStatuses[
+            Math.min(bankDetailPostSaveTransactionRequestCount++, options.bankDetailTransactionReadModelStatuses.length - 1)
+          ]
+          : options.bankDetailInitialTransactionReadModelStatus ?? "fresh");
       const accountKey = url.searchParams.get("account_key");
       const dateFrom = url.searchParams.get("date_from");
       const dateTo = url.searchParams.get("date_to");
@@ -6460,6 +6479,15 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           purpose_text: "普通用途",
           summary_text: "普通付款",
           note_text: "",
+          category_code: bankDetailManualAssignmentActive ? "salary" : null,
+          category_label: bankDetailManualAssignmentActive ? "工资" : null,
+          category_path: bankDetailManualAssignmentActive ? ["自动识别", "工资"] : [],
+          category_primary_label: bankDetailManualAssignmentActive ? "费用" : null,
+          category_sub_label: bankDetailManualAssignmentActive ? "工资" : null,
+          category_label_path: bankDetailManualAssignmentActive ? ["费用", "工资"] : [],
+          category_source: bankDetailManualAssignmentActive ? "manual" : "",
+          category_resolution_status: bankDetailManualAssignmentActive ? "manual_confirmed" : "unmatched",
+          manual_confirmed_category_code: bankDetailManualAssignmentActive ? "salary" : null,
           auto_category_code: null,
           auto_category_label: null,
           auto_category_path: [],
@@ -6467,14 +6495,14 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
           auto_category_sub_label: null,
           auto_category_third_label: null,
           auto_category_label_path: [],
-          effective_category_code: null,
-          effective_category_label: null,
-          effective_category_path: [],
-          effective_category_primary_label: null,
-          effective_category_sub_label: null,
+          effective_category_code: bankDetailManualAssignmentActive ? "salary" : null,
+          effective_category_label: bankDetailManualAssignmentActive ? "工资" : null,
+          effective_category_path: bankDetailManualAssignmentActive ? ["自动识别", "工资"] : [],
+          effective_category_primary_label: bankDetailManualAssignmentActive ? "费用" : null,
+          effective_category_sub_label: bankDetailManualAssignmentActive ? "工资" : null,
           effective_category_third_label: null,
-          effective_category_label_path: [],
-          effective_category_source: "",
+          effective_category_label_path: bankDetailManualAssignmentActive ? ["费用", "工资"] : [],
+          effective_category_source: bankDetailManualAssignmentActive ? "manual" : "",
         },
         {
           ...visibleRow,
@@ -7935,9 +7963,20 @@ export function installMockApiFetch(options: MockApiOptions = {}) {
         || url.pathname.endsWith("/category-assignment")
       )
     ) {
+      if (
+        url.pathname === "/api/bank-details/transactions/bank-detail-search-filler/category-assignment"
+        && String(init?.method || "GET").toUpperCase() === "DELETE"
+      ) {
+        if (options.bankDetailManualClearReadModelStatuses?.length) {
+          bankDetailManualClearPending = true;
+          bankDetailManualClearReadModelStatusIndex = 0;
+        } else {
+          bankDetailManualAssignmentActive = false;
+        }
+      }
       return jsonResponse({
         body: {
-          ok: true,
+          changed: true,
           affected_months: ["2026-04"],
         },
       });

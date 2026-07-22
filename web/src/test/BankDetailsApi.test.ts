@@ -292,14 +292,17 @@ describe("bank details API", () => {
   });
 
   test("assigns and clears unmatched bank detail manual categories through scoped endpoints", async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      changed: true,
+      affected_months: ["2026-02"],
+    }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await assignBankDetailCategory("bank-detail-unmatched", "salary");
-    await clearBankDetailCategoryAssignment("bank-detail-unmatched");
+    const assigned = await assignBankDetailCategory("bank-detail-unmatched", "salary");
+    const cleared = await clearBankDetailCategoryAssignment("bank-detail-unmatched");
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/bank-details/transactions/bank-detail-unmatched/category-assignment", expect.objectContaining({
       method: "POST",
@@ -308,6 +311,8 @@ describe("bank details API", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/bank-details/transactions/bank-detail-unmatched/category-assignment", expect.objectContaining({
       method: "DELETE",
     }));
+    expect(assigned).toEqual({ changed: true, affectedMonths: ["2026-02"] });
+    expect(cleared).toEqual({ changed: true, affectedMonths: ["2026-02"] });
   });
 
   test("reapplies saved auto tag rules through a dedicated endpoint", async () => {

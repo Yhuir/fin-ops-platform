@@ -121,12 +121,31 @@ class _PostgresFakeConnection:
         yield self.transaction_obj
 
 
+class _PostgresCategoryMutationRepository:
+    def apply_mutation(self, **kwargs: object) -> dict[str, object]:
+        record = dict(kwargs.get("record") or {})
+        return {
+            "changed": True,
+            "version": record.get("version", 1),
+            "affected_months": ["2026-02"],
+            "transaction_id": kwargs.get("transaction_id"),
+        }
+
+
+class _PostgresMatchingRepository:
+    @staticmethod
+    def mark_workbench_matching_dirty_scopes_in_transaction(**_kwargs: object) -> list[str]:
+        return []
+
+
 class _PostgresLikeStateStore:
     storage_backend = "postgres"
 
     def __init__(self, delegate: object, pair_relation_service: object | None = None) -> None:
         self._delegate = delegate
         self._connection = _PostgresFakeConnection(delegate, pair_relation_service)
+        self.bank_transaction_category_repository = _PostgresCategoryMutationRepository()
+        self.read_model_repository = _PostgresMatchingRepository()
 
     def __getattr__(self, name: str) -> object:
         return getattr(self._delegate, name)
@@ -2314,8 +2333,8 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(read_repository.clear_calls, 0)
         self.assertIn(("bank_detail", "2026-02", "bank_transaction_category_changed"), queue.enqueued)
         self.assertIn(("bank_flow_rule_batch", "2026-02", "bank_transaction_category_changed"), queue.enqueued)
-        self.assertIn(("workbench", "2026-02", "workbench_scope_invalidated"), queue.enqueued)
-        self.assertIn(("turnover_ledger", "2026-02", "turnover_relation_changed"), queue.enqueued)
+        self.assertIn(("workbench", "2026-02", "bank_transaction_category_changed"), queue.enqueued)
+        self.assertIn(("turnover_ledger", "2026-02", "bank_transaction_category_changed"), queue.enqueued)
 
     def test_turnover_bank_row_tag_batch_facade_none_fails_fast_without_legacy_side_effects(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -2477,8 +2496,8 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(read_repository.clear_calls, 0)
         self.assertIn(("bank_detail", "2026-02", "bank_transaction_category_changed"), queue.enqueued)
         self.assertIn(("bank_flow_rule_batch", "2026-02", "bank_transaction_category_changed"), queue.enqueued)
-        self.assertIn(("workbench", "2026-02", "workbench_scope_invalidated"), queue.enqueued)
-        self.assertIn(("turnover_ledger", "2026-02", "turnover_relation_changed"), queue.enqueued)
+        self.assertIn(("workbench", "2026-02", "bank_transaction_category_changed"), queue.enqueued)
+        self.assertIn(("turnover_ledger", "2026-02", "bank_transaction_category_changed"), queue.enqueued)
 
     def test_target_turnover_bank_row_tag_batch_handler_does_not_inline_legacy_fallback_side_effects(self) -> None:
         source = inspect.getsource(TurnoverLedgerApiRoutes.handle_bank_row_tags_batch_route)
@@ -2565,7 +2584,10 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(read_repository.clear_calls, 0)
-        self.assertIn(("turnover_ledger", "2026-02", "turnover_relation_changed"), [item[:3] for item in queue.transactional])
+        self.assertIn(
+            ("turnover_ledger", "2026-02", "bank_transaction_category_changed"),
+            [item[:3] for item in queue.transactional],
+        )
         self.assertEqual(queue.enqueued, [])
 
     def test_target_bank_row_tags_idempotency_key_replays_without_duplicate_category_update_relation_rebuild_or_refresh(self) -> None:
@@ -2608,8 +2630,16 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             [
                 ("bank_detail", "2026-02", "bank_transaction_category_changed"),
                 ("bank_flow_rule_batch", "2026-02", "bank_transaction_category_changed"),
-                ("workbench", "2026-02", "workbench_scope_invalidated"),
-                ("turnover_ledger", "2026-02", "turnover_relation_changed"),
+                ("workbench", "2026-02", "bank_transaction_category_changed"),
+                ("workbench_relation", "2026-02", "bank_transaction_category_changed"),
+                ("invoice_lifecycle", "2026-02", "bank_transaction_category_changed"),
+                ("cost_statistics", "active:2026-02", "bank_transaction_category_changed"),
+                ("cost_statistics", "all:2026-02", "bank_transaction_category_changed"),
+                ("search", "2026-02", "bank_transaction_category_changed"),
+                ("turnover_ledger", "2026-02", "bank_transaction_category_changed"),
+                ("pending_invoice", "expense:all:2026-02", "bank_transaction_category_changed"),
+                ("pending_invoice", "income:all:2026-02", "bank_transaction_category_changed"),
+                ("pending_invoice", "income:cash_income:2026-02", "bank_transaction_category_changed"),
             ],
         )
         self.assertEqual(read_repository.clear_calls, 0)
@@ -2658,7 +2688,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(json.loads(conflict_response.body)["error"], "idempotency_key_conflict")
         self.assertEqual(
             [item for item in queue.transactional if item[0] == "turnover_ledger"],
-            [("turnover_ledger", "2026-02", "turnover_relation_changed", queue.transactional[-1][3])],
+            [("turnover_ledger", "2026-02", "bank_transaction_category_changed", queue.transactional[-1][3])],
         )
 
     def test_turnover_bank_row_tag_batch_dependency_missing_fails_fast_without_side_effects(self) -> None:
@@ -2756,7 +2786,10 @@ class TurnoverLedgerApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(read_repository.clear_calls, 0)
-        self.assertIn(("turnover_ledger", "2026-02", "turnover_relation_changed"), [item[:3] for item in queue.transactional])
+        self.assertIn(
+            ("turnover_ledger", "2026-02", "bank_transaction_category_changed"),
+            [item[:3] for item in queue.transactional],
+        )
         self.assertEqual(queue.enqueued, [])
 
     def test_turnover_bank_row_tag_batch_refreshes_all_required_scopes(self) -> None:
@@ -2785,8 +2818,8 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(("bank_detail", "2026-02", "bank_transaction_category_changed"), queue.enqueued)
         self.assertIn(("bank_flow_rule_batch", "2026-02", "bank_transaction_category_changed"), queue.enqueued)
-        self.assertIn(("workbench", "2026-02", "workbench_scope_invalidated"), queue.enqueued)
-        self.assertIn(("turnover_ledger", "2026-02", "turnover_relation_changed"), queue.enqueued)
+        self.assertIn(("workbench", "2026-02", "bank_transaction_category_changed"), queue.enqueued)
+        self.assertIn(("turnover_ledger", "2026-02", "bank_transaction_category_changed"), queue.enqueued)
 
     def test_grouped_view_preserves_service_flow_rows_and_allocation_lots(self) -> None:
         class FakeLedgerService:

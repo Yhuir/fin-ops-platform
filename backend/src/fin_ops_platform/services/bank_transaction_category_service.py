@@ -603,6 +603,24 @@ class BankTransactionCategoryService:
                 "tag_dictionary": deepcopy(self._tag_dictionary_payload),
             }
 
+    def restore_snapshot(self, snapshot: dict[str, Any]) -> None:
+        """Restore the process-local category cache after a durable write rollback."""
+        categories = snapshot.get("categories") if isinstance(snapshot, dict) else None
+        audit_log = snapshot.get("audit_log") if isinstance(snapshot, dict) else None
+        tag_dictionary = snapshot.get("tag_dictionary") if isinstance(snapshot, dict) else None
+        with self._lock:
+            self._categories = self._normalize_categories(categories if isinstance(categories, dict) else {})
+            self._audit_log = [
+                deepcopy(entry)
+                for entry in list(audit_log or [])
+                if isinstance(entry, dict)
+            ]
+            self._tag_dictionary_payload = self._normalize_tag_dictionary_payload(
+                tag_dictionary if isinstance(tag_dictionary, dict) else None
+            )
+            self._tag_definitions_by_code = self._build_tag_definition_index(self._tag_dictionary_payload)
+            self._snapshot_version_cache = None
+
     def snapshot_version(self) -> str:
         """Return the canonical snapshot hash without copying the full state on every read."""
         with self._lock:
@@ -1360,6 +1378,13 @@ class BankTransactionCategoryService:
                 f"Unknown bank transaction id: {normalized_transaction_id}",
                 transaction_id=normalized_transaction_id,
             )
+        current = self.get(normalized_transaction_id)
+        if str(current.get("source") or "") != "manual" or not bool(current.get("manual_assignment")):
+            raise BankTransactionCategoryValidationError(
+                "invalid_manual_category_clear_target",
+                "只能撤销从待分类状态人工添加的标签。",
+                transaction_id=normalized_transaction_id,
+            )
         return self._apply_updates(
             [{"transaction_id": normalized_transaction_id, "category_code": None, "manual_assignment": True}],
             actor=actor,
@@ -1374,6 +1399,13 @@ class BankTransactionCategoryService:
             raise BankTransactionCategoryValidationError(
                 "unknown_transaction_id",
                 f"Unknown bank transaction id: {normalized_transaction_id}",
+                transaction_id=normalized_transaction_id,
+            )
+        current = self.get(normalized_transaction_id)
+        if str(current.get("source") or "") not in {"auto_confirmation", "auto_confirmation_revoked"}:
+            raise BankTransactionCategoryValidationError(
+                "invalid_category_confirmation_revoke_target",
+                "当前流水没有可撤销的标签确认。",
                 transaction_id=normalized_transaction_id,
             )
         return self._apply_updates(
@@ -1509,6 +1541,7 @@ class BankTransactionCategoryService:
             if audit_entries:
                 self._snapshot_version_cache = None
             return {
+                "changed": bool(audit_entries),
                 "updated_transaction_ids": [entry["transaction_id"] for entry in updated_categories],
                 "updated_categories": [
                     {

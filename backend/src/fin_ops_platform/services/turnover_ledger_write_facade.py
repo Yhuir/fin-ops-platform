@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from fin_ops_platform.services.bank_transaction_category_refresh import turnover_category_refresh_requests
 from fin_ops_platform.services.workbench_idempotency import workbench_request_fingerprint
 
 
@@ -128,28 +129,7 @@ class TurnoverLedgerWriteFacade:
             for month in list(affected_months or [])
             if str(month).strip()
         ]
-        refresh_requests = [
-            {
-                "scope_type": "bank_detail",
-                "scope_keys": list(normalized_months),
-                "reason": "bank_transaction_category_changed",
-            },
-            {
-                "scope_type": "bank_flow_rule_batch",
-                "scope_keys": list(normalized_months),
-                "reason": "bank_transaction_category_changed",
-            },
-            {
-                "scope_type": "workbench",
-                "scope_keys": list(normalized_months),
-                "reason": "workbench_scope_invalidated",
-            },
-            {
-                "scope_type": "turnover_ledger",
-                "scope_keys": _scoped_month_keys_or_all(normalized_months),
-                "reason": "turnover_relation_changed",
-            },
-        ]
+        refresh_requests = turnover_category_refresh_requests(normalized_months)
         normalized_idempotency_key = str(idempotency_key or "").strip()
         action_name = "turnover_bank_row_tags_batch" if normalized_idempotency_key else "bank_row_tags_batch"
         command_payload = {

@@ -23,6 +23,7 @@ from fin_ops_platform.services.oa_pending_payment_read_model_repository import O
 from fin_ops_platform.services.output_invoice_collection_read_model_repository import OutputInvoiceCollectionReadModelRepositoryPort
 from fin_ops_platform.services.pending_invoice_read_model_repository import PendingInvoiceReadModelRepositoryPort
 from fin_ops_platform.services.postgres_repositories import (
+    PostgresBankTransactionCategoryRepository,
     PostgresCoreRepository,
     PostgresEtcImportSessionRepository,
     PostgresOaPendingPaymentRelationRepository,
@@ -34,7 +35,6 @@ from fin_ops_platform.services.postgres_repositories import (
 )
 from fin_ops_platform.services.postgres_repositories.common import run_in_transaction
 from fin_ops_platform.services.postgres_snapshot_contracts import (
-    normalize_bank_transaction_categories,
     normalize_no_oa_bank_batches,
     normalize_turnover_relations,
     normalize_workbench_pair_relations,
@@ -185,6 +185,7 @@ class PostgresStateStore:
         self._turnover_ledger_sql_read_repository = TurnoverLedgerReadModelRepositoryPort(self._sql_read_model_repository)
         self._workbench_relation_sql_read_repository = WorkbenchRelationReadModelRepositoryPort(self._sql_read_model_repository)
         self._workbench_repository = PostgresWorkbenchRepository(connection)
+        self._bank_transaction_category_repository = PostgresBankTransactionCategoryRepository(connection)
         self._workbench_relation_repository = PostgresWorkbenchRelationRepository(connection)
         self._oa_pending_payment_relation_repository = PostgresOaPendingPaymentRelationRepository(connection)
         self._file_root = self._data_dir / "postgres_files"
@@ -837,18 +838,7 @@ class PostgresStateStore:
         return {batch_id for batch_id in batch_ids if batch_id}
 
     def load_bank_transaction_categories(self) -> dict[str, Any]:
-        snapshot = self._workbench_repository.load_bank_transaction_categories()
-        if snapshot:
-            categories = snapshot.get("categories") if isinstance(snapshot, dict) else None
-            audit_log = snapshot.get("audit_log") if isinstance(snapshot, dict) else None
-            return normalize_bank_transaction_categories(
-                categories if isinstance(categories, dict) else {},
-                audit_log if isinstance(audit_log, list) else [],
-            )
-        return {}
-
-    def save_bank_transaction_categories(self, snapshot: dict[str, Any]) -> None:
-        self._workbench_repository.save_bank_transaction_categories(snapshot)
+        return self._bank_transaction_category_repository.load_snapshot()
 
     def load_turnover_relations(self) -> dict[str, Any]:
         snapshot = self._workbench_repository.load_turnover_relations()
@@ -904,6 +894,10 @@ class PostgresStateStore:
     @property
     def read_model_repository(self) -> PostgresReadModelRepository:
         return self._read_model_repository
+
+    @property
+    def bank_transaction_category_repository(self) -> PostgresBankTransactionCategoryRepository:
+        return self._bank_transaction_category_repository
 
     @property
     def oa_pending_payment_relation_repository(self) -> PostgresOaPendingPaymentRelationRepository:
@@ -1040,8 +1034,6 @@ class PostgresStateStore:
             self._core_repository.save_imports(normalized.get("imports") or {})
         if "file_imports" in normalized:
             self._core_repository.save_file_imports(normalized.get("file_imports") or {})
-        if "bank_transaction_categories" in normalized:
-            self.save_bank_transaction_categories(normalized.get("bank_transaction_categories") or {})
         if "workbench_overrides" in normalized:
             self.save_workbench_overrides(normalized.get("workbench_overrides") or {})
         if "workbench_exception_cases" in normalized:

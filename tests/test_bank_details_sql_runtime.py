@@ -1492,7 +1492,11 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         self.assertEqual(repository.scope_key_calls, [{"date_from": "2026-05-01", "date_to": "2026-05-31"}])
         self.assertEqual(repository.summary_calls, [["2026-05"]])
 
-    def test_category_mutation_refreshes_turnover_ledger_all_scope(self) -> None:
+    def test_local_category_mutation_refreshes_turnover_ledger_exact_month(self) -> None:
+        class CategoryStore:
+            def save_bank_transaction_categories(self, _snapshot: dict[str, object]) -> None:
+                return None
+
         class Queue:
             def __init__(self) -> None:
                 self.enqueued: list[tuple[str, str, str]] = []
@@ -1506,7 +1510,7 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             bank_transaction_category_service=SimpleNamespace(snapshot=lambda: {}),
             bank_transaction_auto_category_service=SimpleNamespace(),
             audit_service=SimpleNamespace(record_action=lambda **_kwargs: None),
-            bank_transaction_category_store=None,
+            bank_transaction_category_store=CategoryStore(),
             bank_detail_sql_read_repository=None,
             runtime_repositories=SimpleNamespace(queue_repository=queue),
             affected_months_provider=lambda _transaction_ids: ["2026-04"],
@@ -1517,18 +1521,19 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
         )
 
-        affected_months = service._persist_category_mutation(
+        persisted = service._persist_category_mutation(
             ["txn-apr"],
             transaction_id="txn-apr",
+            mutation_type="manual_assign",
             actor_id="TESTFULL001",
             action="bank_detail_category_manually_assigned",
             metadata={},
         )
 
-        self.assertEqual(affected_months, ["2026-04"])
+        self.assertEqual(persisted["affected_months"], ["2026-04"])
         self.assertIn(("bank_detail", "2026-04", "bank_detail_category_confirmation_changed"), queue.enqueued)
-        self.assertIn(("turnover_ledger", "all", "bank_detail_category_confirmation_changed"), queue.enqueued)
-        self.assertNotIn(("turnover_ledger", "2026-04", "bank_detail_category_confirmation_changed"), queue.enqueued)
+        self.assertIn(("turnover_ledger", "2026-04", "bank_detail_category_confirmation_changed"), queue.enqueued)
+        self.assertNotIn(("turnover_ledger", "all", "bank_detail_category_confirmation_changed"), queue.enqueued)
 
     def test_category_mutation_persists_via_explicit_category_store_port(self) -> None:
         saved_snapshots: list[dict[str, object]] = []
@@ -1553,18 +1558,23 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
         )
 
-        affected_months = service._persist_category_mutation(
+        persisted = service._persist_category_mutation(
             ["txn-apr"],
             transaction_id="txn-apr",
+            mutation_type="manual_assign",
             actor_id="TESTFULL001",
             action="bank_detail_category_manually_assigned",
             metadata={},
         )
 
-        self.assertEqual(affected_months, ["2026-04"])
+        self.assertEqual(persisted["affected_months"], ["2026-04"])
         self.assertEqual(saved_snapshots, [{"categories": {"txn-apr": {"version": 2}}}])
 
     def test_category_mutation_response_returns_bank_detail_operation_barrier_targets(self) -> None:
+        class CategoryStore:
+            def save_bank_transaction_categories(self, _snapshot: dict[str, object]) -> None:
+                return None
+
         class Queue:
             def __init__(self) -> None:
                 self.enqueued: list[tuple[str, str, str]] = []
@@ -1586,7 +1596,7 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             ),
             bank_transaction_auto_category_service=SimpleNamespace(),
             audit_service=SimpleNamespace(record_action=lambda **_kwargs: None),
-            bank_transaction_category_store=None,
+            bank_transaction_category_store=CategoryStore(),
             bank_detail_sql_read_repository=None,
             runtime_repositories=SimpleNamespace(queue_repository=queue),
             affected_months_provider=lambda _transaction_ids: ["2026-04"],
@@ -1610,10 +1620,41 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         self.assertEqual(result["freshness_targets"], [{"read_model_key": "bank_detail", "scope_key": "2026-04"}])
         self.assertEqual(result["operation_barrier_targets"], [{"read_model_key": "bank_detail", "scope_key": "2026-04"}])
         self.assertIn(("bank_detail", "2026-04", "bank_detail_category_confirmation_changed"), queue.enqueued)
-        self.assertIn(("turnover_ledger", "all", "bank_detail_category_confirmation_changed"), queue.enqueued)
+        self.assertIn(("turnover_ledger", "2026-04", "bank_detail_category_confirmation_changed"), queue.enqueued)
         self.assertNotIn(("bank_detail", "all", "bank_detail_category_confirmation_changed"), queue.enqueued)
 
-    def test_category_mutation_side_effect_port_suppresses_fallback_enqueue_audit_and_invalidate(self) -> None:
+    def test_category_mutation_without_durable_writer_or_local_store_fails_closed(self) -> None:
+        queue = SimpleNamespace(enqueue_read_model_refresh=lambda **_kwargs: self.fail("must not enqueue"))
+        service = BankDetailsApplicationService(
+            app_settings_service=SimpleNamespace(),
+            bank_transaction_category_service=SimpleNamespace(
+                snapshot=lambda: {},
+                get=lambda transaction_id: {"transaction_id": transaction_id},
+            ),
+            bank_transaction_auto_category_service=SimpleNamespace(),
+            audit_service=SimpleNamespace(record_action=lambda **_kwargs: self.fail("must not audit")),
+            bank_transaction_category_store=None,
+            bank_detail_sql_read_repository=None,
+            runtime_repositories=SimpleNamespace(queue_repository=queue),
+            affected_months_provider=lambda _transaction_ids: ["2026-04"],
+            invalidate_after_category_mutation=lambda _affected_months: self.fail("must not invalidate"),
+            execute_derived_data_lifecycle_event=lambda *_args, **_kwargs: None,
+            clear_relation_tag_projection_cache=lambda: None,
+            available_month_scope_keys_provider=lambda: ["2026-04"],
+            enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "durable bank transaction category writer is unavailable"):
+            service._persist_category_mutation(
+                ["txn-apr"],
+                transaction_id="txn-apr",
+                mutation_type="manual_assign",
+                actor_id="TESTFULL001",
+                action="bank_detail_category_manually_assigned",
+                metadata={},
+            )
+
+    def test_category_mutation_writer_suppresses_legacy_fallback_side_effects(self) -> None:
         class Queue:
             def __init__(self) -> None:
                 self.enqueued: list[tuple[str, str, str]] = []
@@ -1624,11 +1665,17 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         queue = Queue()
         audit_records: list[dict[str, object]] = []
         invalidated: list[list[str]] = []
-        port_calls: list[dict[str, object]] = []
-        side_effect_port = SimpleNamespace(after_mutation=lambda **kwargs: port_calls.append(dict(kwargs)))
+        writer_calls: list[dict[str, object]] = []
+        writer = SimpleNamespace(
+            persist=lambda **kwargs: writer_calls.append(dict(kwargs))
+            or {"changed": True, "affected_months": ["2026-04"], "outbox_event_ids": ["event-1"]}
+        )
         service = BankDetailsApplicationService(
             app_settings_service=SimpleNamespace(),
-            bank_transaction_category_service=SimpleNamespace(snapshot=lambda: {}),
+            bank_transaction_category_service=SimpleNamespace(
+                snapshot=lambda: {},
+                get=lambda transaction_id: {"transaction_id": transaction_id, "category_code": "salary"},
+            ),
             bank_transaction_auto_category_service=SimpleNamespace(),
             audit_service=SimpleNamespace(record_action=lambda **kwargs: audit_records.append(dict(kwargs))),
             bank_transaction_category_store=None,
@@ -1640,35 +1687,26 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             clear_relation_tag_projection_cache=lambda: None,
             available_month_scope_keys_provider=lambda: ["2026-04"],
             enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
-            category_mutation_side_effects=side_effect_port,
+            category_mutation_writer=writer,
         )
 
-        affected_months = service._persist_category_mutation(
+        persisted = service._persist_category_mutation(
             ["txn-apr"],
             transaction_id="txn-apr",
+            mutation_type="manual_assign",
             actor_id="TESTFULL001",
             action="bank_detail_category_manually_assigned",
             metadata={"source": "unit"},
         )
 
-        self.assertEqual(affected_months, ["2026-04"])
-        self.assertEqual(
-            port_calls,
-            [
-                {
-                    "transaction_id": "txn-apr",
-                    "actor_id": "TESTFULL001",
-                    "action": "bank_detail_category_manually_assigned",
-                    "affected_months": ["2026-04"],
-                    "metadata": {"source": "unit"},
-                }
-            ],
-        )
+        self.assertEqual(persisted["affected_months"], ["2026-04"])
+        self.assertEqual(writer_calls[0]["mutation_type"], "manual_assign")
+        self.assertEqual(writer_calls[0]["record"]["category_code"], "salary")
         self.assertEqual(queue.enqueued, [])
-        self.assertEqual(audit_records, [])
+        self.assertEqual(len(audit_records), 1)
         self.assertEqual(invalidated, [])
 
-    def test_category_mutation_side_effect_port_failure_does_not_run_fallback_side_effects(self) -> None:
+    def test_category_mutation_writer_failure_does_not_run_legacy_fallback_side_effects(self) -> None:
         class Queue:
             def __init__(self) -> None:
                 self.enqueued: list[tuple[str, str, str]] = []
@@ -1682,11 +1720,14 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
 
         def failing_callback(**_kwargs: object) -> None:
             raise RuntimeError("category_uow_adapter_failed")
-        side_effect_port = SimpleNamespace(after_mutation=failing_callback)
+        writer = SimpleNamespace(persist=failing_callback)
 
         service = BankDetailsApplicationService(
             app_settings_service=SimpleNamespace(),
-            bank_transaction_category_service=SimpleNamespace(snapshot=lambda: {}),
+            bank_transaction_category_service=SimpleNamespace(
+                snapshot=lambda: {},
+                get=lambda transaction_id: {"transaction_id": transaction_id, "category_code": "salary"},
+            ),
             bank_transaction_auto_category_service=SimpleNamespace(),
             audit_service=SimpleNamespace(record_action=lambda **kwargs: audit_records.append(dict(kwargs))),
             bank_transaction_category_store=None,
@@ -1698,13 +1739,14 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             clear_relation_tag_projection_cache=lambda: None,
             available_month_scope_keys_provider=lambda: ["2026-04"],
             enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
-            category_mutation_side_effects=side_effect_port,
+            category_mutation_writer=writer,
         )
 
         with self.assertRaisesRegex(RuntimeError, "category_uow_adapter_failed"):
             service._persist_category_mutation(
                 ["txn-apr"],
                 transaction_id="txn-apr",
+                mutation_type="manual_assign",
                 actor_id="TESTFULL001",
                 action="bank_detail_category_manually_assigned",
                 metadata={"source": "unit"},

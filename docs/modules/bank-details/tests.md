@@ -2,6 +2,18 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+## 2026-07-22 - 人工补标签撤销恢复待分类
+
+- Business core unit tests：适用。`tests/test_bank_transaction_category_service.py` 覆盖只有人工补标签可撤销、自动标签不可撤销、候选确认撤销保持原语义；`tests/test_bank_transaction_category_postgres_mutation.py` 覆盖 canonical active 记录转为 `cleared` 且不插入 `unknown`、重复撤销幂等。
+- Service-layer tests：适用。新增 PostgreSQL mutation writer/repository 测试，覆盖分类事实、category event、persistent audit、精确月份 batch outbox、matching dirty、无变化不入队和批量去重；更新 BankDetails application、state store 与 Turnover UoW 回滚/提交缓存合同。
+- API contract tests：适用。更新银行明细分类 POST/DELETE 和外部往来批量标签回归，断言 `changed`、`affected_months`、operation barrier 及错误状态保持；权限与确认撤销 API shape 不变。
+- Read model/cache/background job tests：适用。断言 changed mutation 一次批量输出 `bank_detail`、`bank_flow_rule_batch`、`workbench`、`workbench_relation`、`invoice_lifecycle`、`pending_invoice`、`cost_statistics`、`search`、`turnover_ledger` 精确月份 scopes，并同步标记 matching window；事务失败不留下半写 cache 或 outbox。
+- Frontend component and interaction tests：适用。`web/src/test/BankDetailsPage.test.tsx` 覆盖点击人工标签“撤销”后立即显示“待分类”、重新提供标签入口且页面不出现 `unknown`；`BankDetailsApi.test.ts` 覆盖 mutation response 映射。
+- End-to-end business-flow integration tests：适用。生产闭环为人工标签撤销 -> canonical cleared -> read-model worker drain -> 银行明细待分类 -> 可重新标签，并检查外部往来/Workbench 等下游 freshness；历史脏数据 repair 走 dry-run/count gate/apply/再 dry-run。
+- Existing feature regression tests：适用。复跑银行明细查询/路由、自动标签、候选确认、外部往来批量标签、PostgreSQL state store、边界 guards 和前端页面/API 测试，防止自动标签误出现撤销、候选确认撤销被改义或其他页面 scope 漏刷。
+
+验证命令与生产结果以本轮最终交付记录为准。
+
 ## 2026-07-13 - 跨月 relation 删除 source-version 闭环
 
 - 变更类型：read model canonical source-version 修复。

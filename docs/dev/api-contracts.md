@@ -644,7 +644,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 
 `DELETE /api/bank-details/transactions/{transaction_id}/category-assignment`
 
-清除该流水来源为 `manual` 的人工补分类事实。成功后写审计动作 `bank_detail_category_manual_assignment_cleared`，并触发同样的派生数据刷新链路。该接口不撤销 `auto_confirmation` 候选确认；候选确认仍必须调用 `/category-confirmation` 的 DELETE。
+只清除该流水从 `unmatched` / `待分类` 状态人工补上的 `manual` 分类事实。成功后原 category fact 进入 `cleared`，不得创建 active `unknown` 标签；页面立即回到 `unmatched` / `待分类`，允许重新选标签。成功响应包含 `changed`、精确 `affected_months` 和 transaction-bound `operation_barrier_targets`，并写审计动作 `bank_detail_category_manual_assignment_cleared`。该接口不撤销 `auto_confirmation` 候选确认；候选确认仍必须调用 `/category-confirmation` 的 DELETE，确定性自动分配标签不提供撤销入口。
 
 `GET /api/bank-details/auto-tag-rules`
 

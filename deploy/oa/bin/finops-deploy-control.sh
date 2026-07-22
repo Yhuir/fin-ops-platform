@@ -57,6 +57,8 @@ commands:
                                       normalize App settings through the canonical service/repository boundary
   import-audit-repair <release-name> [--dry-run|--execute --expected-fingerprint <sha256>]
                                       repair strict import facts through the canonical PostgreSQL boundary
+  bank-transaction-category-repair <release-name> [--dry-run|--apply --operator <actor> --expected-candidate-count <count>]
+                                      repair proven historical manual category clears through the canonical writer
   runtime-queue-resolve-covered <release-name> [args]
                                       resolve only dead letters covered by fresh/done scope proof
   restart                              restart API, active workers, and active dispatcher
@@ -655,6 +657,16 @@ import_audit_repair() {
   run_with_runtime_env "$src" -m fin_ops_platform.tools.import_audit_repair_ops "$@"
 }
 
+bank_transaction_category_repair() {
+  local release="${1:-}"
+  [[ -n "$release" ]] || die "bank-transaction-category-repair requires release name"
+  shift
+  local src
+  src="$(release_src "$release")"
+  assert_runtime_env_contract
+  run_with_runtime_env "$src" -m fin_ops_platform.tools.repair_unknown_bank_transaction_categories "$@"
+}
+
 runtime_queue_resolve_covered() {
   local release="${1:-}"
   [[ -n "$release" ]] || die "runtime-queue-resolve-covered requires release name"
@@ -742,6 +754,10 @@ case "$cmd" in
   import-audit-repair)
     shift
     import_audit_repair "$@"
+    ;;
+  bank-transaction-category-repair)
+    shift
+    bank_transaction_category_repair "$@"
     ;;
   runtime-queue-resolve-covered)
     shift

@@ -52,6 +52,18 @@
 | read model backfill | scope、source version、dirty scope、worker drain、freshness 验证 |
 | 批量撤回/repair | affected objects、审计、跨页刷新、回滚说明 |
 
+## 银行分类历史 `unknown` 修复
+
+`tools/repair_unknown_bank_transaction_categories.py` 只处理旧人工撤销错误留下的 active `category=unknown, source=manual`。工具默认拒绝写入；生产操作必须依次执行：
+
+1. 确认 active release 后，通过 root-owned helper 运行 `sudo /usr/local/sbin/finops-deploy-control bank-transaction-category-repair <release-name> --dry-run`，记录 `strict_candidate_count` 与 `manual_review_candidate_count`。
+2. 只有同时满足可解析 canonical bank transaction/精确月份、raw payload 标明人工补标签、且 category event 明确证明“从非空人工标签清除为 null”的记录进入 strict 集合；证据不足记录只进入人工复核，不自动修改。
+3. 使用同一 helper 追加 `--apply --operator <审计操作者> --expected-candidate-count <dry-run数量>` 执行。数量变化立即失败，禁止扩大 predicate 或跳过 count gate。
+4. 工具在一个事务内把 strict category 标为 `cleared`，写 event/audit，并通过正式 writer 批量输出精确 read-model scopes；任一写入或入队失败全部回滚。
+5. 等待 durable queue drain 后再次 dry-run；strict 必须为 0。随后验证银行明细显示待分类、可重新打标签、自动标签无撤销按钮，并检查 BankDetails/Workbench/外部往来等受影响页面 freshness/Page Audit。
+
+不得直接 `UPDATE` read model、把 `unknown` 改成任意业务标签、忽略 manual review，或以兼容 fallback 保留旧撤销路径。数据库备份/PITR 是灾难回滚边界；单条业务恢复应重新人工补标签，保留审计历史。
+
 ## 相关文档
 
 - PostgreSQL runtime：`postgresql-runtime.md`

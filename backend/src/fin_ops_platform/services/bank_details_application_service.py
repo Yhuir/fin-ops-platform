@@ -3,11 +3,11 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from threading import RLock
 from typing import Any, Callable, Protocol
 
 from fin_ops_platform.services.app_settings_service import AppSettingsService
 from fin_ops_platform.services.audit import AuditTrailService
-from fin_ops_platform.services.bank_detail_category_side_effects import BankDetailCategoryMutationSideEffectPort
 from fin_ops_platform.services.bank_detail_category_selection import confirmation_selection, manual_assignment_selection
 from fin_ops_platform.services.bank_details_export_service import (
     BankDetailsExportResult,
@@ -58,7 +58,8 @@ class BankDetailsApplicationService:
         enqueue_turnover_ledger_refresh: Callable[..., bool] | None = None,
         suggestion_provider: Callable[[str], dict[str, object] | None] | None = None,
         bank_transaction_tags_provider: Callable[[], dict[str, object]] | None = None,
-        category_mutation_side_effects: BankDetailCategoryMutationSideEffectPort | None = None,
+        category_mutation_writer: Any | None = None,
+        clear_search_cache: Callable[[], None] | None = None,
     ) -> None:
         self._app_settings_service = app_settings_service
         self._bank_transaction_category_service = bank_transaction_category_service
@@ -81,7 +82,9 @@ class BankDetailsApplicationService:
         self._enqueue_turnover_ledger_refresh = enqueue_turnover_ledger_refresh
         self._suggestion_provider = suggestion_provider
         self._bank_transaction_tags_provider = bank_transaction_tags_provider
-        self._category_mutation_side_effects = category_mutation_side_effects
+        self._category_mutation_writer = category_mutation_writer
+        self._clear_search_cache = clear_search_cache or (lambda: None)
+        self._category_mutation_lock = RLock()
 
     def accounts_payload(self, *, date_from: str | None, date_to: str | None) -> dict[str, object]:
         return self._accounts_from_sql_read_model(date_from=date_from, date_to=date_to)
@@ -184,52 +187,70 @@ class BankDetailsApplicationService:
         )
         selected_code = str(selection["category_code"])
         candidate_codes = list(selection.get("candidate_category_codes") or [])
-        result = self._bank_transaction_category_service.confirm_auto_category(
-            transaction_id=transaction_id,
-            category_code=selected_code,
-            candidate_category_codes=candidate_codes,
-            rule_version=self._bank_transaction_auto_category_service.current_rule_version(),
-            actor=actor_id,
-            category_primary_label=selection.get("category_primary_label"),
-            category_sub_label=selection.get("category_sub_label"),
-            category_third_label=selection.get("category_third_label"),
-            category_label_path=list(selection.get("category_label_path") or []),
-            turnover_action_type=selection.get("turnover_action_type"),
-            turnover_family=selection.get("turnover_family"),
-        )
-        affected_months = self._persist_category_mutation(
-            [transaction_id],
-            transaction_id=transaction_id,
-            actor_id=actor_id,
-            action="bank_detail_category_confirmed",
-            metadata={
-                "selected_category_code": selected_code,
-                "selected_category_third_label": selection.get("category_third_label"),
-                "candidate_category_codes": candidate_codes,
-            },
-        )
+        with self._category_mutation_lock:
+            before_snapshot = self._bank_transaction_category_service.snapshot()
+            try:
+                result = self._bank_transaction_category_service.confirm_auto_category(
+                    transaction_id=transaction_id,
+                    category_code=selected_code,
+                    candidate_category_codes=candidate_codes,
+                    rule_version=self._bank_transaction_auto_category_service.current_rule_version(),
+                    actor=actor_id,
+                    category_primary_label=selection.get("category_primary_label"),
+                    category_sub_label=selection.get("category_sub_label"),
+                    category_third_label=selection.get("category_third_label"),
+                    category_label_path=list(selection.get("category_label_path") or []),
+                    turnover_action_type=selection.get("turnover_action_type"),
+                    turnover_family=selection.get("turnover_family"),
+                )
+                persisted = self._persist_category_mutation(
+                    [transaction_id],
+                    transaction_id=transaction_id,
+                    mutation_type="confirmation_confirm",
+                    actor_id=actor_id,
+                    action="bank_detail_category_confirmed",
+                    metadata={
+                        "selected_category_code": selected_code,
+                        "selected_category_third_label": selection.get("category_third_label"),
+                        "candidate_category_codes": candidate_codes,
+                    },
+                )
+            except Exception:
+                self._bank_transaction_category_service.restore_snapshot(before_snapshot)
+                raise
+        affected_months = list(persisted.get("affected_months") or [])
         return {
             **result,
-            "affected_months": affected_months,
             **self._bank_detail_refresh_contract_payload(affected_months),
+            **persisted,
+            "affected_months": affected_months,
         }
 
     def revoke_category_confirmation(self, transaction_id: str, *, actor_id: str) -> dict[str, Any]:
-        result = self._bank_transaction_category_service.revoke_auto_category_confirmation(
-            transaction_id=transaction_id,
-            actor=actor_id,
-        )
-        affected_months = self._persist_category_mutation(
-            [transaction_id],
-            transaction_id=transaction_id,
-            actor_id=actor_id,
-            action="bank_detail_category_confirmation_revoked",
-            metadata={},
-        )
+        with self._category_mutation_lock:
+            before_snapshot = self._bank_transaction_category_service.snapshot()
+            try:
+                result = self._bank_transaction_category_service.revoke_auto_category_confirmation(
+                    transaction_id=transaction_id,
+                    actor=actor_id,
+                )
+                persisted = self._persist_category_mutation(
+                    [transaction_id],
+                    transaction_id=transaction_id,
+                    mutation_type="confirmation_revoke",
+                    actor_id=actor_id,
+                    action="bank_detail_category_confirmation_revoked",
+                    metadata={},
+                )
+            except Exception:
+                self._bank_transaction_category_service.restore_snapshot(before_snapshot)
+                raise
+        affected_months = list(persisted.get("affected_months") or [])
         return {
             **result,
-            "affected_months": affected_months,
             **self._bank_detail_refresh_contract_payload(affected_months),
+            **persisted,
+            "affected_months": affected_months,
         }
 
     def assign_manual_category(self, transaction_id: str, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
@@ -251,51 +272,69 @@ class BankDetailsApplicationService:
                 "只能选择当前自动标签规则中的可用标签。",
                 transaction_id=transaction_id,
             )
-        result = self._bank_transaction_category_service.assign_manual_category(
-            transaction_id=transaction_id,
-            category_code=selected_code,
-            actor=actor_id,
-            category_primary_label=selection.get("category_primary_label"),
-            category_sub_label=selection.get("category_sub_label"),
-            category_third_label=selection.get("category_third_label"),
-            category_label_path=list(selection.get("category_label_path") or []),
-            turnover_action_type=selection.get("turnover_action_type"),
-            turnover_family=selection.get("turnover_family"),
-        )
-        affected_months = self._persist_category_mutation(
-            [transaction_id],
-            transaction_id=transaction_id,
-            actor_id=actor_id,
-            action="bank_detail_category_manually_assigned",
-            metadata={
-                "selected_category_code": selected_code,
-                "selected_category_third_label": selection.get("category_third_label"),
-                "previous_resolution_status": previous_resolution_status,
-                "assignment_source": "manual",
-            },
-        )
+        with self._category_mutation_lock:
+            before_snapshot = self._bank_transaction_category_service.snapshot()
+            try:
+                result = self._bank_transaction_category_service.assign_manual_category(
+                    transaction_id=transaction_id,
+                    category_code=selected_code,
+                    actor=actor_id,
+                    category_primary_label=selection.get("category_primary_label"),
+                    category_sub_label=selection.get("category_sub_label"),
+                    category_third_label=selection.get("category_third_label"),
+                    category_label_path=list(selection.get("category_label_path") or []),
+                    turnover_action_type=selection.get("turnover_action_type"),
+                    turnover_family=selection.get("turnover_family"),
+                )
+                persisted = self._persist_category_mutation(
+                    [transaction_id],
+                    transaction_id=transaction_id,
+                    mutation_type="manual_assign",
+                    actor_id=actor_id,
+                    action="bank_detail_category_manually_assigned",
+                    metadata={
+                        "selected_category_code": selected_code,
+                        "selected_category_third_label": selection.get("category_third_label"),
+                        "previous_resolution_status": previous_resolution_status,
+                        "assignment_source": "manual",
+                    },
+                )
+            except Exception:
+                self._bank_transaction_category_service.restore_snapshot(before_snapshot)
+                raise
+        affected_months = list(persisted.get("affected_months") or [])
         return {
             **result,
-            "affected_months": affected_months,
             **self._bank_detail_refresh_contract_payload(affected_months),
+            **persisted,
+            "affected_months": affected_months,
         }
 
     def clear_manual_category(self, transaction_id: str, *, actor_id: str) -> dict[str, Any]:
-        result = self._bank_transaction_category_service.clear_manual_category(
-            transaction_id=transaction_id,
-            actor=actor_id,
-        )
-        affected_months = self._persist_category_mutation(
-            [transaction_id],
-            transaction_id=transaction_id,
-            actor_id=actor_id,
-            action="bank_detail_category_manual_assignment_cleared",
-            metadata={"assignment_source": "manual"},
-        )
+        with self._category_mutation_lock:
+            before_snapshot = self._bank_transaction_category_service.snapshot()
+            try:
+                result = self._bank_transaction_category_service.clear_manual_category(
+                    transaction_id=transaction_id,
+                    actor=actor_id,
+                )
+                persisted = self._persist_category_mutation(
+                    [transaction_id],
+                    transaction_id=transaction_id,
+                    mutation_type="manual_clear",
+                    actor_id=actor_id,
+                    action="bank_detail_category_manual_assignment_cleared",
+                    metadata={"assignment_source": "manual"},
+                )
+            except Exception:
+                self._bank_transaction_category_service.restore_snapshot(before_snapshot)
+                raise
+        affected_months = list(persisted.get("affected_months") or [])
         return {
             **result,
-            "affected_months": affected_months,
             **self._bank_detail_refresh_contract_payload(affected_months),
+            **persisted,
+            "affected_months": affected_months,
         }
 
     def export_transactions(
@@ -698,42 +737,64 @@ class BankDetailsApplicationService:
         transaction_ids: list[str],
         *,
         transaction_id: str,
+        mutation_type: str,
         actor_id: str,
         action: str,
         metadata: dict[str, object],
-    ) -> list[str]:
+    ) -> dict[str, object]:
         affected_months = self._affected_months_provider(transaction_ids)
+        if self._category_mutation_writer is not None:
+            persisted = dict(
+                self._category_mutation_writer.persist(
+                    transaction_id=transaction_id,
+                    mutation_type=mutation_type,
+                    record=self._bank_transaction_category_service.get(transaction_id),
+                    actor_id=actor_id,
+                    action=action,
+                    metadata=metadata,
+                )
+                or {}
+            )
+            affected_months = list(persisted.get("affected_months") or affected_months)
+            self._clear_relation_tag_projection_cache()
+            self._clear_search_cache()
+            self._audit_service.record_action(
+                actor_id=actor_id,
+                action=action,
+                entity_type="bank_transaction_category",
+                entity_id=str(transaction_id or ""),
+                metadata={
+                    "transaction_id": str(transaction_id or ""),
+                    "affected_months": affected_months,
+                    "persistent_audit": True,
+                    **dict(metadata),
+                },
+            )
+            return {**persisted, "affected_months": affected_months}
+        if self._bank_transaction_category_store is None:
+            raise RuntimeError("durable bank transaction category writer is unavailable")
         if self._bank_transaction_category_store is not None:
             self._bank_transaction_category_store.save_bank_transaction_categories(
                 self._bank_transaction_category_service.snapshot()
             )
-        if self._category_mutation_side_effects is not None:
-            self._category_mutation_side_effects.after_mutation(
-                transaction_id=transaction_id,
-                actor_id=actor_id,
-                action=action,
-                affected_months=affected_months,
-                metadata=metadata,
-            )
-        else:
-            self._enqueue_read_model_refreshes(affected_months or ["all"], reason="bank_detail_category_confirmation_changed")
-            self._enqueue_turnover_ledger_read_model_refreshes(
-                ["all"],
-                reason="bank_detail_category_confirmation_changed",
-            )
-            self._invalidate_after_category_mutation(affected_months)
-            self._audit_service.record_action(
-                actor_id=actor_id,
-                action=action,
-                entity_type="bank_transaction_category_confirmation",
-                entity_id=str(transaction_id or ""),
-                metadata={
-                    "transaction_id": str(transaction_id or ""),
-                    "affected_months": list(affected_months or []),
-                    **dict(metadata),
-                },
-            )
-        return affected_months
+        self._enqueue_read_model_refreshes(affected_months or ["all"], reason="bank_detail_category_confirmation_changed")
+        self._enqueue_turnover_ledger_read_model_refreshes(
+            affected_months or ["all"],
+            reason="bank_detail_category_confirmation_changed",
+        )
+        self._invalidate_after_category_mutation(affected_months)
+        self._audit_service.record_action(
+            actor_id=actor_id,
+            action=action,
+            entity_type="bank_transaction_category",
+            entity_id=str(transaction_id or ""),
+            metadata={
+                "transaction_id": str(transaction_id or ""),
+                "affected_months": list(affected_months or []),
+                **dict(metadata),
+            },
+        )
+        return {"changed": True, "affected_months": affected_months}
 
     def _latest_auto_category_suggestion(self, transaction_id: str) -> dict[str, object] | None:
         if callable(self._suggestion_provider):

@@ -13174,11 +13174,29 @@ class PostgresReadModelRepository:
         source_versions: dict[str, object],
         debounce_seconds: int,
     ) -> list[str]:
-        normalized_months = sorted({str(month)[:7] for month in scope_months if str(month or "").strip()})
+        with self._connection.transaction() as transaction:
+            return self.mark_workbench_matching_dirty_scopes_in_transaction(
+                transaction=transaction,
+                tenant_id=tenant_id,
+                scope_months=scope_months,
+                reason=reason,
+                source_versions=source_versions,
+                debounce_seconds=debounce_seconds,
+            )
 
-        def write(connection: Any) -> None:
-            for scope_month in normalized_months:
-                connection.execute(
+    @staticmethod
+    def mark_workbench_matching_dirty_scopes_in_transaction(
+        *,
+        transaction: Any,
+        tenant_id: str,
+        scope_months: list[str],
+        reason: str,
+        source_versions: dict[str, object],
+        debounce_seconds: int,
+    ) -> list[str]:
+        normalized_months = sorted({str(month)[:7] for month in scope_months if str(month or "").strip()})
+        for scope_month in normalized_months:
+            transaction.execute(
                     """
                     insert into job.workbench_matching_dirty_scopes(
                         tenant_id, scope_month, reason, status, available_at, source_versions, raw_payload
@@ -13234,8 +13252,6 @@ class PostgresReadModelRepository:
                         ),
                     ),
                 )
-
-        run_in_transaction(self._connection, write)
         return normalized_months
 
     def mark_stale_workbench_matching_completed_scopes(

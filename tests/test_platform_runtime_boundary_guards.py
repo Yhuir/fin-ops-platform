@@ -2298,7 +2298,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
 
         owner_markers = {
             SERVICES_ROOT / "bank_details_application_service.py": "class BankDetailsApplicationService",
-            SERVICES_ROOT / "bank_detail_category_side_effects.py": "class BankDetailCategoryMutationSideEffectPort",
+            SERVICES_ROOT / "bank_transaction_category_mutation_writer.py": "class BankTransactionCategoryMutationWriter",
             APP_ROOT / "routes_bank_details.py": "class BankDetailsApiRoutes",
         }
         for path, marker in owner_markers.items():
@@ -2548,7 +2548,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 violations.append(f"BankDetailsApplicationService factory still injects removed helper {removed_helper_name}")
         for retained_callback in (
             "_bank_detail_auto_category_suggestion_provider",
-            "_bank_detail_read_model_refresh_producer",
             "_bank_detail_available_month_scope_provider",
             "_bank_account_balance_read_model_refresh_producer",
             "_turnover_ledger_read_model_refresh_producer",
@@ -2570,28 +2569,12 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             violations.append(f"server.py still owns removed bank detail category side-effect callback {removed_side_effect_callback}")
         if removed_side_effect_callback in factory_source:
             violations.append("BankDetailsApplicationService factory still injects removed category side-effect callback")
-        if "BankDetailCategoryMutationSideEffectPort(" not in factory_source:
-            violations.append("BankDetailsApplicationService factory does not build the explicit category side-effect port")
-        if "category_mutation_side_effects=category_mutation_side_effects" not in factory_source:
-            violations.append("BankDetailsApplicationService factory does not inject the explicit category side-effect port")
-
-        side_effect_source = (SERVICES_ROOT / "bank_detail_category_side_effects.py").read_text(encoding="utf-8")
-        side_effect_tree = _parse(SERVICES_ROOT / "bank_detail_category_side_effects.py")
-        side_effect_class = _class_source(side_effect_tree, side_effect_source, "BankDetailCategoryMutationSideEffectPort")
-        for snippet in (
-            "def after_mutation(",
-            'reason="bank_detail_category_confirmation_changed"',
-            "entity_type=\"bank_transaction_category_confirmation\"",
-            "self._enqueue_bank_detail_refresh(",
-            "self._enqueue_turnover_ledger_refresh(",
-            "self._invalidate_workbench_after_category_mutation(",
-            "self._audit_service.record_action(",
-        ):
-            if snippet not in side_effect_class:
-                violations.append(f"category side-effect port is missing behavior {snippet}")
-        direct_job_writes = _sql_write_table_references(side_effect_class)
-        if direct_job_writes:
-            violations.append(f"category side-effect port writes job queue tables directly: {direct_job_writes}")
+        if "category_mutation_writer = self._bank_transaction_category_mutation_writer()" not in factory_source:
+            violations.append("BankDetailsApplicationService factory does not inject the transactional category writer")
+        if "BankTransactionCategoryMutationWriter(" not in server_source:
+            violations.append("server.py does not build the transactional category writer")
+        if (SERVICES_ROOT / "bank_detail_category_side_effects.py").exists():
+            violations.append("removed post-commit category side-effect port still exists")
 
         self.assertEqual(violations, [])
 

@@ -19,6 +19,9 @@ from fin_ops_platform.services.etc_service import (
     EtcService,
 )
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
+from fin_ops_platform.services.postgres_repositories.bank_transaction_category import (
+    PostgresBankTransactionCategoryRepository,
+)
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
 from fin_ops_platform.services.postgres_state_store import PostgresStateStore
@@ -77,6 +80,75 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
                 )
                 raise RuntimeError("force rollback")
         self.assertEqual(fetch_scalar(self.database_url, "select count(*) from app.app_settings where settings_key = 'tx-rollback';"), "0")
+
+    def test_manual_category_clear_executes_json_update_and_returns_to_unmatched_fact(self) -> None:
+        repository = PostgresBankTransactionCategoryRepository(self.connection)
+        transaction_id = "bank-manual-clear"
+        with self.connection.transaction() as transaction:
+            transaction.execute(
+                """
+                insert into app.bank_transactions(
+                    legacy_mongo_id, account_no, txn_direction, counterparty_name_raw,
+                    amount, signed_amount, txn_date, txn_month, status
+                ) values (%s, %s, %s, %s, %s, %s, %s::date, %s::date, 'active')
+                """,
+                (
+                    transaction_id,
+                    "62220002",
+                    "inflow",
+                    "人工撤销集成测试",
+                    "100.00",
+                    "100.00",
+                    "2026-02-03",
+                    "2026-02-01",
+                ),
+            )
+            repository.apply_mutation(
+                transaction=transaction,
+                transaction_id=transaction_id,
+                mutation_type="manual_assign",
+                record={"category_code": "borrow_in", "manual_assignment": True, "category_version": 1},
+                actor_id="integration-test",
+                action="bank_detail_category_manually_assigned",
+                metadata={"integration_test": True},
+            )
+            result = repository.apply_mutation(
+                transaction=transaction,
+                transaction_id=transaction_id,
+                mutation_type="manual_clear",
+                record={"category_version": 2},
+                actor_id="integration-test",
+                action="bank_detail_category_manual_assignment_cleared",
+                metadata={"integration_test": True},
+            )
+
+        self.assertTrue(result["changed"])
+        persisted = self.connection.fetch_one(
+            """
+            select status, version,
+                   raw_payload #>> '{normalized_payload,category_code}' as category_code,
+                   raw_payload #>> '{normalized_payload,updated_by}' as updated_by
+            from app.bank_transaction_categories
+            where legacy_transaction_id = %s
+            """,
+            (transaction_id,),
+        )
+        self.assertEqual(
+            persisted,
+            {
+                "status": "cleared",
+                "version": 2,
+                "category_code": None,
+                "updated_by": "integration-test",
+            },
+        )
+        self.assertEqual(
+            fetch_scalar(
+                self.database_url,
+                "select count(*) from app.bank_transaction_categories where legacy_transaction_id = 'bank-manual-clear' and status = 'active';",
+            ),
+            "0",
+        )
 
     def test_turnover_relation_change_preserves_unrelated_relation_and_audit_history(self) -> None:
         repository = PostgresWorkbenchRepository(self.connection)
@@ -429,22 +501,25 @@ class PostgresStateStoreIntegrationTests(unittest.TestCase):
                 }
             }
         )
-        self.store.save_bank_transaction_categories(
-            {
-                "categories": {"bank-1": {"category": "fee", "source": "manual", "confidence": "1", "version": 1}},
-                "audit_log": [
-                    {"operation_id": "category-op-1", "transaction_id": "bank-1", "event_type": "category_updated"}
-                ],
-            }
-        )
-        self.store.save_bank_transaction_categories(
-            {
-                "categories": {"bank-1": {"category": "fee", "source": "manual", "confidence": "1", "version": 2}},
-                "audit_log": [
-                    {"operation_id": "category-op-1", "transaction_id": "bank-1", "event_type": "category_updated"}
-                ],
-            }
-        )
+        with self.connection.transaction() as transaction:
+            transaction.execute(
+                """
+                insert into app.bank_transactions(
+                    legacy_mongo_id, account_no, txn_direction, counterparty_name_raw,
+                    amount, signed_amount, txn_date, txn_month, status
+                ) values (%s, %s, %s, %s, %s, %s, %s::date, %s::date, 'active')
+                """,
+                ("bank-1", "62220001", "outflow", "测试供应商", "125.50", "-125.50", "2026-03-01", "2026-03-01"),
+            )
+            PostgresBankTransactionCategoryRepository(self.connection).apply_mutation(
+                transaction=transaction,
+                transaction_id="bank-1",
+                mutation_type="manual_assign",
+                record={"category_code": "fee", "manual_assignment": True},
+                actor_id="integration-test",
+                action="bank_detail_category_manually_assigned",
+                metadata={"integration_test": True},
+            )
         self.store.save_turnover_relations(
             {
                 "relations": {

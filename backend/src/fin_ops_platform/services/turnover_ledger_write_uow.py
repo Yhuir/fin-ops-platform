@@ -54,6 +54,19 @@ class TurnoverLedgerWriteUnitOfWork:
         self._workbench_pair_port = workbench_pair_port
 
     def run(self, command: Any, handler: Callable[[TurnoverLedgerWriteContext], Any]) -> Any:
+        try:
+            result = self._run_transaction(command, handler)
+        except Exception:
+            rollback_in_memory = getattr(self._bankdetail_port, "rollback_in_memory", None)
+            if callable(rollback_in_memory):
+                rollback_in_memory()
+            raise
+        commit_in_memory = getattr(self._bankdetail_port, "commit_in_memory", None)
+        if callable(commit_in_memory):
+            commit_in_memory()
+        return result
+
+    def _run_transaction(self, command: Any, handler: Callable[[TurnoverLedgerWriteContext], Any]) -> Any:
         idempotency = _idempotency_request_for(command) if self._idempotency_store is not None else None
         with self._connection.transaction() as transaction:
             idempotency_store = (

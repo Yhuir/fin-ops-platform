@@ -541,6 +541,12 @@ class _RecordingBankTransactionCategoryService:
     def snapshot(self) -> dict[str, object]:
         return dict(self._snapshot)
 
+    def get(self, transaction_id: str) -> dict[str, object]:
+        return {"transaction_id": transaction_id, **dict(self._snapshot["categories"][transaction_id])}
+
+    def restore_snapshot(self, snapshot: dict[str, object]) -> None:
+        self._snapshot = dict(snapshot)
+
 
 class _FailingTurnoverRelationPort:
     def confirm_relation(
@@ -2445,8 +2451,28 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
             [
                 ("bank_detail", ["2026-02", "2026-03"], "bank_transaction_category_changed"),
                 ("bank_flow_rule_batch", ["2026-02", "2026-03"], "bank_transaction_category_changed"),
-                ("workbench", ["2026-02", "2026-03"], "workbench_scope_invalidated"),
-                ("turnover_ledger", ["2026-02", "2026-03"], "turnover_relation_changed"),
+                ("workbench", ["2026-02", "2026-03"], "bank_transaction_category_changed"),
+                ("workbench_relation", ["2026-02", "2026-03"], "bank_transaction_category_changed"),
+                ("invoice_lifecycle", ["2026-02", "2026-03"], "bank_transaction_category_changed"),
+                (
+                    "cost_statistics",
+                    ["active:2026-02", "all:2026-02", "active:2026-03", "all:2026-03"],
+                    "bank_transaction_category_changed",
+                ),
+                ("search", ["2026-02", "2026-03"], "bank_transaction_category_changed"),
+                ("turnover_ledger", ["2026-02", "2026-03"], "bank_transaction_category_changed"),
+                (
+                    "pending_invoice",
+                    [
+                        "expense:all:2026-02",
+                        "income:all:2026-02",
+                        "income:cash_income:2026-02",
+                        "expense:all:2026-03",
+                        "income:all:2026-03",
+                        "income:cash_income:2026-03",
+                    ],
+                    "bank_transaction_category_changed",
+                ),
             ],
         )
 
@@ -3044,12 +3070,18 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         category_service = _RecordingBankTransactionCategoryService()
         relation_service = _RecordingTurnoverRelationService()
         persistence_factory = _RecordingTurnoverPersistenceRepositoryFactory()
+        mutation_calls: list[dict[str, object]] = []
+        mutation_writer = SimpleNamespace(
+            persist_many=lambda **kwargs: mutation_calls.append(dict(kwargs))
+            or {"changed": True, "affected_months": ["2026-02"]}
+        )
         transaction = _RecordingTransaction()
         port = port_class(
             category_service=category_service,
             relation_service=relation_service,
             bank_rows_provider=lambda: [{"id": "bank_txn_1"}],
             persistence_repository_factory=persistence_factory,
+            category_mutation_writer=mutation_writer,
         )
         updates = [{"transaction_id": "bank_txn_1", "category_code": "borrow_in"}]
 
@@ -3062,7 +3094,9 @@ class TurnoverLedgerUoWContractTests(unittest.TestCase):
         self.assertEqual(persistence_factory.transactions, [transaction])
         self.assertEqual(category_service.updates, [{"updates": updates, "actor": "finance-user"}])
         self.assertEqual(relation_service.rebuilds, [[{"id": "bank_txn_1"}]])
-        self.assertEqual(len(persistence_factory.repositories[0].saved_categories), 1)
+        self.assertEqual(len(persistence_factory.repositories[0].saved_categories), 0)
+        self.assertEqual(mutation_calls[0]["mutations"][0]["mutation_type"], "turnover_update")
+        self.assertIs(mutation_calls[0]["transaction"], transaction)
         self.assertEqual(len(persistence_factory.repositories[0].saved_relations), 1)
         self.assertEqual(result["updated_categories"], updates)
         self.assertTrue({"headers", "cookies", "response", "status_code", "auth"}.isdisjoint(result))

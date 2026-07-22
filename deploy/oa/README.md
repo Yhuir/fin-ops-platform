@@ -456,6 +456,10 @@ sudo /usr/local/sbin/finops-deploy-control settings-normalize <release-name> --d
 sudo /usr/local/sbin/finops-deploy-control import-audit-repair <release-name> --dry-run
 sudo /usr/local/sbin/finops-deploy-control import-audit-repair <release-name> \
   --dry-run --batch-id <batch-id> --file-id <file-id>
+sudo /usr/local/sbin/finops-deploy-control bank-transaction-category-repair <release-name> \
+  --dry-run
+sudo /usr/local/sbin/finops-deploy-control bank-transaction-category-repair <release-name> \
+  --apply --operator <actor> --expected-candidate-count <dry-run-count>
 sudo /usr/local/sbin/finops-deploy-control runtime-queue-resolve-covered <release-name> \
   --limit 100 --dry-run
 ```

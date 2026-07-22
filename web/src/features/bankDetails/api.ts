@@ -4,6 +4,7 @@ import type {
   BankDetailAccountsResponse,
   BankDetailAutoCandidateCategory,
   BankDetailCategoryResolutionStatus,
+  BankDetailCategoryMutationResult,
   BankDetailReadModelStatus,
   BankDetailExportRequest,
   BankDetailExportResponse,
@@ -53,6 +54,12 @@ type ApiBankDetailAccountsResponse = {
   balance_read_model_status?: string | null;
   read_model_status?: string | null;
   cache_status?: string | null;
+};
+
+type ApiBankDetailCategoryMutationResponse = {
+  changed?: boolean;
+  affected_months?: unknown[];
+  affectedMonths?: unknown[];
 };
 
 type ApiBankDetailTransaction = {
@@ -573,6 +580,13 @@ function unknownStringList(value: unknown) {
   return Array.isArray(value) ? value.map(String).map((item) => item.trim()).filter(Boolean) : [];
 }
 
+function mapCategoryMutationResponse(payload: ApiBankDetailCategoryMutationResponse): BankDetailCategoryMutationResult {
+  return {
+    changed: Boolean(payload.changed),
+    affectedMonths: unknownStringList(payload.affected_months ?? payload.affectedMonths),
+  };
+}
+
 function readModelTargets(value: unknown): OperationBarrierTarget[] {
   if (!Array.isArray(value)) {
     return [];
@@ -886,8 +900,8 @@ export async function confirmBankDetailCategory(
   transactionId: string,
   categoryCode: BankTransactionCategoryCode,
   categoryThirdLabel?: string | null,
-): Promise<unknown> {
-  return requestJson(`/api/bank-details/transactions/${encodeURIComponent(transactionId)}/category-confirmation`, {
+): Promise<BankDetailCategoryMutationResult> {
+  const response = await requestJson<ApiBankDetailCategoryMutationResponse>(`/api/bank-details/transactions/${encodeURIComponent(transactionId)}/category-confirmation`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -895,12 +909,14 @@ export async function confirmBankDetailCategory(
       ...(categoryThirdLabel ? { category_third_label: categoryThirdLabel } : {}),
     }),
   });
+  return mapCategoryMutationResponse(response);
 }
 
-export async function revokeBankDetailCategoryConfirmation(transactionId: string): Promise<unknown> {
-  return requestJson(`/api/bank-details/transactions/${encodeURIComponent(transactionId)}/category-confirmation`, {
+export async function revokeBankDetailCategoryConfirmation(transactionId: string): Promise<BankDetailCategoryMutationResult> {
+  const response = await requestJson<ApiBankDetailCategoryMutationResponse>(`/api/bank-details/transactions/${encodeURIComponent(transactionId)}/category-confirmation`, {
     method: "DELETE",
   });
+  return mapCategoryMutationResponse(response);
 }
 
 export async function assignBankDetailCategory(
@@ -914,8 +930,8 @@ export async function assignBankDetailCategory(
     turnoverActionType?: string | null;
     turnoverFamily?: string | null;
   } = {},
-): Promise<unknown> {
-  return requestJson(`/api/bank-details/transactions/${encodeURIComponent(transactionId)}/category-assignment`, {
+): Promise<BankDetailCategoryMutationResult> {
+  const response = await requestJson<ApiBankDetailCategoryMutationResponse>(`/api/bank-details/transactions/${encodeURIComponent(transactionId)}/category-assignment`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -928,12 +944,14 @@ export async function assignBankDetailCategory(
       ...(options.turnoverFamily ? { turnover_family: options.turnoverFamily } : {}),
     }),
   });
+  return mapCategoryMutationResponse(response);
 }
 
-export async function clearBankDetailCategoryAssignment(transactionId: string): Promise<unknown> {
-  return requestJson(`/api/bank-details/transactions/${encodeURIComponent(transactionId)}/category-assignment`, {
+export async function clearBankDetailCategoryAssignment(transactionId: string): Promise<BankDetailCategoryMutationResult> {
+  const response = await requestJson<ApiBankDetailCategoryMutationResponse>(`/api/bank-details/transactions/${encodeURIComponent(transactionId)}/category-assignment`, {
     method: "DELETE",
   });
+  return mapCategoryMutationResponse(response);
 }
 
 export async function downloadBankDetailTransactionsExport({

@@ -1677,6 +1677,9 @@ export default function BankDetailsPage() {
     const nextReadModelStatus = normalizeReadModelStatus(payload.readModelStatus);
     setTransactionsReadModelStatus(nextReadModelStatus);
     setStatistics(nextReadModelStatus === "fresh" ? payload.statistics ?? null : null);
+    if (nextReadModelStatus !== "fresh" && hasTransactionPayloadRef.current) {
+      return;
+    }
     if (nextReadModelStatus !== "fresh" && payload.rows.length === 0) {
       return;
     }
@@ -2104,13 +2107,65 @@ export default function BankDetailsPage() {
     ));
   };
 
+  const applyOptimisticManualCategoryClear = (row: BankDetailTransaction) => {
+    const nextRow: BankDetailTransaction = {
+      ...row,
+      categoryCode: null,
+      categoryLabel: null,
+      categoryPath: [],
+      categoryPrimaryLabel: null,
+      categorySubLabel: null,
+      categoryThirdLabel: null,
+      categoryLabelPath: [],
+      categorySource: "",
+      categoryResolutionStatus: "unmatched",
+      manualConfirmedCategoryCode: null,
+      effectiveCategoryCode: null,
+      effectiveCategoryLabel: null,
+      effectiveCategoryPath: [],
+      effectiveCategoryPrimaryLabel: null,
+      effectiveCategorySubLabel: null,
+      effectiveCategoryThirdLabel: null,
+      effectiveCategoryLabelPath: [],
+      effectiveCategorySource: "",
+    };
+    const rowStillVisible = selectedCategoryFilter.kind === "all"
+      || selectedCategoryFilter.kind === "uncategorized";
+    setRows((currentRows) => (
+      rowStillVisible
+        ? currentRows.map((currentRow) => (currentRow.id === row.id ? nextRow : currentRow))
+        : currentRows.filter((currentRow) => currentRow.id !== row.id)
+    ));
+    setRowCount((current) => (rowStillVisible ? current : Math.max(0, current - 1)));
+    setCategoryFilterSnapshot((current) => (
+      current.queryKey === categoryFilterQueryKey
+        ? {
+          ...current,
+          categoryCounts: {
+            ...current.categoryCounts,
+            uncategorized: Number(current.categoryCounts.uncategorized ?? 0) + 1,
+            ...(row.effectiveCategoryCode
+              ? {
+                [row.effectiveCategoryCode]: Math.max(
+                  0,
+                  Number(current.categoryCounts[row.effectiveCategoryCode] ?? 0) - 1,
+                ),
+              }
+              : {}),
+          },
+        }
+        : current
+    ));
+  };
+
   const handleConfirmCategory = (row: BankDetailTransaction, choice: ConfirmationChoice) => {
     setCategoryMutationId(row.id);
     setError(null);
     return confirmBankDetailCategory(row.id, choice.categoryCode, choice.thirdLabel)
-      .then(() => {
+      .then((result) => {
         applyOptimisticCategoryChoice(row, choice);
         emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.bankTransactionCategoryUpdated, {
+          affectedMonths: result.affectedMonths,
           affectedRowIds: [row.id],
           action: "bank_detail_category_confirmed",
         });
@@ -2137,9 +2192,10 @@ export default function BankDetailsPage() {
       }
       : {};
     return assignBankDetailCategory(row.id, choice.categoryCode, structuredSelection)
-      .then(() => {
+      .then((result) => {
         applyOptimisticCategoryChoice(row, choice);
         emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.bankTransactionCategoryUpdated, {
+          affectedMonths: result.affectedMonths,
           affectedRowIds: [row.id],
           action: "bank_detail_category_manually_assigned",
         });
@@ -2156,7 +2212,14 @@ export default function BankDetailsPage() {
     setCategoryMutationId(row.id);
     setError(null);
     revokeBankDetailCategoryConfirmation(row.id)
-      .then(() => setRefreshToken((current) => current + 1))
+      .then((result) => {
+        emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.bankTransactionCategoryUpdated, {
+          affectedMonths: result.affectedMonths,
+          affectedRowIds: [row.id],
+          action: "bank_detail_category_confirmation_revoked",
+        });
+        setRefreshToken((current) => current + 1);
+      })
       .catch((caught) => setError(caught instanceof Error ? caught.message : "银行明细标签撤销失败。"))
       .finally(() => setCategoryMutationId(null));
   };
@@ -2165,7 +2228,15 @@ export default function BankDetailsPage() {
     setCategoryMutationId(row.id);
     setError(null);
     clearBankDetailCategoryAssignment(row.id)
-      .then(() => setRefreshToken((current) => current + 1))
+      .then((result) => {
+        applyOptimisticManualCategoryClear(row);
+        emitFinanceDomainEvent(FINANCE_DOMAIN_EVENTS.bankTransactionCategoryUpdated, {
+          affectedMonths: result.affectedMonths,
+          affectedRowIds: [row.id],
+          action: "bank_detail_category_manual_assignment_cleared",
+        });
+        setRefreshToken((current) => current + 1);
+      })
       .catch((caught) => setError(caught instanceof Error ? caught.message : "银行明细标签撤销失败。"))
       .finally(() => setCategoryMutationId(null));
   };

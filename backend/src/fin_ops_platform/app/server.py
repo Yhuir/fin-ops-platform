@@ -87,7 +87,6 @@ from fin_ops_platform.services.bank_account_balance_derived_lifecycle_executor i
 from fin_ops_platform.services.bank_account_balance_read_model_refresh_producer import BankAccountBalanceReadModelRefreshProducer
 from fin_ops_platform.services.bank_detail_available_month_scope_provider import BankDetailAvailableMonthScopeProvider
 from fin_ops_platform.services.bank_detail_auto_category_suggestion_provider import BankDetailAutoCategorySuggestionProvider
-from fin_ops_platform.services.bank_detail_category_side_effects import BankDetailCategoryMutationSideEffectPort
 from fin_ops_platform.services.bank_detail_derived_lifecycle_executor import BankDetailDerivedLifecycleExecutor
 from fin_ops_platform.services.bank_detail_read_model_refresh_producer import BankDetailReadModelRefreshProducer
 from fin_ops_platform.services.bank_details_relation_tag_projection_service import (
@@ -96,6 +95,9 @@ from fin_ops_platform.services.bank_details_relation_tag_projection_service impo
 from fin_ops_platform.services.bank_details_service import BankDetailsService
 from fin_ops_platform.services.bank_details_application_service import BankDetailsApplicationService
 from fin_ops_platform.services.bank_transaction_auto_category_service import BankTransactionAutoCategoryService
+from fin_ops_platform.services.bank_transaction_category_mutation_writer import (
+    BankTransactionCategoryMutationWriter,
+)
 from fin_ops_platform.services.bank_transaction_category_service import (
     BANK_TRANSACTION_CATEGORY_SCHEMA_VERSION,
     BANK_TRANSACTION_CATEGORY_LABELS,
@@ -2898,6 +2900,7 @@ class Application:
                 transaction,
                 state_store=state_store,
             ),
+            category_mutation_writer=self._bank_transaction_category_mutation_writer(),
             postgres_idempotency_store_factory=self._turnover_ledger_bank_row_tags_postgres_idempotency_store,
             local_idempotency_store_provider=self._turnover_ledger_bank_row_tags_local_idempotency_store,
         ).build()
@@ -8223,19 +8226,10 @@ class Application:
         elif not callable(suggestion_provider):
             latest = getattr(suggestion_provider, "latest", None)
             suggestion_provider = latest if callable(latest) else None
-        category_mutation_side_effects = BankDetailCategoryMutationSideEffectPort(
-            enqueue_bank_detail_refresh=self._bank_detail_read_model_refresh_producer().enqueue,
-            enqueue_turnover_ledger_refresh=self._turnover_ledger_read_model_refresh_producer().enqueue,
-            invalidate_workbench_after_category_mutation=getattr(
-                self,
-                "_invalidate_workbench_after_bank_transaction_categories",
-                lambda _affected_months: False,
-            ),
-            audit_service=getattr(self, "_audit_service", SimpleNamespace(record_action=lambda **_kwargs: None)),
-        )
-        category_store = getattr(self, "_state_store", None)
-        if not callable(getattr(category_store, "save_bank_transaction_categories", None)):
-            category_store = None
+        state_store = getattr(self, "_state_store", None)
+        storage_backend = str(getattr(state_store, "storage_backend", "") or "").strip()
+        category_store = state_store if storage_backend != "postgres" else None
+        category_mutation_writer = self._bank_transaction_category_mutation_writer()
         return BankDetailsApplicationService(
             app_settings_service=getattr(self, "_app_settings_service", SimpleNamespace(get_bank_auto_tag_rules_payload=lambda **_kwargs: {"version": 1, "active_rules": []})),
             bank_transaction_category_service=getattr(self, "_bank_transaction_category_service", SimpleNamespace(snapshot=lambda: {})),
@@ -8266,7 +8260,27 @@ class Application:
                 "_bank_transaction_tags_payload",
                 lambda: {},
             ),
-            category_mutation_side_effects=category_mutation_side_effects,
+            category_mutation_writer=category_mutation_writer,
+            clear_search_cache=self._search_service.clear_cache,
+        )
+
+    def _bank_transaction_category_mutation_writer(self) -> BankTransactionCategoryMutationWriter | None:
+        state_store = getattr(self, "_state_store", None)
+        if str(getattr(state_store, "storage_backend", "") or "").strip() != "postgres":
+            return None
+        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
+        category_repository = getattr(state_store, "bank_transaction_category_repository", None)
+        matching_repository = getattr(state_store, "read_model_repository", None)
+        connection = getattr(state_store, "_connection", None)
+        if connection is None or category_repository is None or queue_repository is None or matching_repository is None:
+            return None
+        return BankTransactionCategoryMutationWriter(
+            connection=connection,
+            repository=category_repository,
+            queue_repository=queue_repository,
+            workbench_matching_repository=matching_repository,
+            workbench_matching_source_versions_provider=self._workbench_matching_source_versions,
+            tenant_id=self._workbench_reconciliation_tenant_id(),
         )
 
     def _bank_details_routes(self) -> BankDetailsApiRoutes:
@@ -10088,8 +10102,7 @@ class Application:
         self._search_service.clear_cache()
         if self._state_store is None:
             return
-        persistence_calls = (
-            ("save_bank_transaction_categories", self._bank_transaction_category_service.snapshot()),
+        persistence_calls = [
             ("save_matching_snapshot", self._matching_service.snapshot()),
             ("save_workbench_overrides", self._workbench_override_service.snapshot()),
             ("save_workbench_exception_cases", self._workbench_exception_case_service.snapshot()),
@@ -10097,7 +10110,12 @@ class Application:
             ("save_turnover_relations", self._turnover_relation_service.snapshot()),
             ("save_turnover_ledger_extras", self._turnover_ledger_api_routes.extras_snapshot()),
             ("save_pending_invoice_commands", dict(getattr(self, "_pending_invoice_commands", {}) or {})),
-        )
+        ]
+        if str(getattr(self._state_store, "storage_backend", "") or "").strip() != "postgres":
+            persistence_calls.insert(
+                0,
+                ("save_bank_transaction_categories", self._bank_transaction_category_service.snapshot()),
+            )
         for method_name, snapshot in persistence_calls:
             persist = getattr(self._state_store, method_name, None)
             if callable(persist):

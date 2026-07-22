@@ -1,5 +1,12 @@
 # 外部往来款管理 实施记录
 
+## 2026-07-22 - 银行流水批量标签共享原子写边界
+
+- 外部往来批量标签不再通过 PostgreSQL 分类全量 snapshot 保存；改为复用 `BankTransactionCategoryMutationWriter.persist_many(...)`，在 Turnover UoW 的同一事务内批量写 canonical category/event/audit，并一次输出所有精确月份 refresh 与 matching dirty。
+- UoW 在事务或 queue 失败时恢复本次 bank-detail in-memory snapshot，提交后清除 pending snapshot；禁止数据库已回滚但进程 cache 留下新标签。
+- 删除旧 snapshot writer 与 active `unknown` 撤销表示，不新增第二套 adapter、fallback、worker 或表；Turnover 页面/API 合同不变。
+- 回归覆盖批量去重、一次 enqueue、queue failure rollback、bank-details 下游可见性及现有 Turnover API/UoW 行为。
+
 ## 2026-07-20 - 写命令重复 I/O 收口
 
 - 第二轮生产证据：release `ffdcfcdcb` 三轮业务与恢复均通过，response-to-fresh/visible p95 为 `1210.886/1805.972ms`，但 command p95 仍为 `5443.004ms`，热态约 `1.09–1.34s`。一次性 PostgreSQL 对同一请求的 17/15 条 SQL trace 证明，relation repository 仍自行执行 3 条 scope 解析和 1 次 outbox batch，Turnover UoW 随后又执行第二次 outbox batch。

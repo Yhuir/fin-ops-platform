@@ -10,7 +10,7 @@
 - 账户余额 read model 与银行明细 rows read model 必须保持独立。标签规则保存、重应用、关键字/分类/日期筛选不能用 stale account payload 覆盖已有 fresh balance。
 - 银行明细前端 domain event 只负责刷新提示和 refetch；跨页面一致性的事实源仍是后端 dirty scope、outbox、worker 和 read model freshness。
 - 银行明细对 no-OA、turnover ledger、pending/search、cost/tax、workbench relation 的 fan-out 在本模块记录上游影响；具体下游页面的 UI/业务流回归由各模块轮次继续补齐。
-- 银行分类写入的当前 owner 是 `BankDetailsApplicationService`、明确 category store 和 `BankDetailCategoryMutationSideEffectPort`；仓库不保留未接入生产的平行 Bankdetail UoW。
+- 银行分类写入的当前 owner 是 `BankDetailsApplicationService` 与 `BankTransactionCategoryMutationWriter`；PostgreSQL 分类事实、审计、精确月份 read-model outbox 和 Workbench matching dirty 必须在同一事务提交，本地运行时才允许使用 snapshot store。
 
 ## 记录模板
 
@@ -28,6 +28,19 @@
 ```
 
 ## 历史记录
+
+## 2026-07-22 - 人工补标签撤销恢复待分类
+
+- 目标：修复人工补标签点击“撤销”后显示 `unknown` 的问题；撤销后恢复为“待分类”并允许重新选择标签。自动分配标签继续不显示撤销按钮，候选确认撤销语义保持不变。
+- 影响范围：银行分类 domain/application、PostgreSQL canonical repository、事务写入与精确 read-model fan-out、外部往来批量标签共享写链、银行明细 API client/page optimistic state、历史脏数据修复工具和模块文档。
+- 关键决策：人工撤销只接受当前 active 记录满足 `source=manual` 且 `manual_assignment=true`；canonical 分类事实改为 `cleared`，原始银行流水分类字段置空，不创建 active `unknown`。写入、persistent audit、category event、精确月份 dirty/outbox 与 matching dirty 在一个 PostgreSQL 事务内完成；批量标签共用同一 writer 并一次批量输出 refresh。前端成功后立即把该行变为 unmatched/待分类，不等待全页 refetch。历史 `unknown` 只由带人工清除证据的受控工具处理，证据不足的记录 fail closed 进入人工复核。
+- 旧代码删除：删除 `BankDetailCategoryMutationSideEffectPort` 以及 PostgreSQL 分类全量 delete/reinsert snapshot writer；删除人工撤销写入 active `unknown` 的旧分支和全局 `_persist_state()` 分类快照保存。保留 local snapshot store 仅服务非 PostgreSQL 本地运行时，不作为生产 fallback。
+- 文档影响：更新银行明细 boundary/state machine/tests、外部往来 boundary、API contract 和数据安全运维口径；read model scope、worker manifest、权限与公开路由不变。
+- 测试覆盖：新增 canonical repository/事务 writer/repair 候选测试；更新 domain、service、API/UoW、state-store 与 architecture guard；新增前端撤销后立即显示待分类且不出现 `unknown` 的交互测试，并复跑 BankDetails API/page 回归。
+- 验证结果：release `main-d4f9fdee-20260722122859` 已部署，schema version 为 `120`，API 与全部 required workers active/ready。生产 repair dry-run 严格命中 1 条 `2026-02` 历史人工撤销记录、人工复核 0 条；按 expected count `1` 原子 apply 后重复 dry-run 为 0。目标流水生产 API 返回 `read_model_status=fresh`、`category_resolution_status=unmatched`、`category_code=null`、`effective_category_code=null`；连续 3 次只读样本为 297.2/231.7/284.8ms。银行明细、流水规则批处理、关联台、成本统计和外部往来 Page Audit 均为 `integrity=pass/freshness=fresh/queue=drained`；待开发票的 `2026-02` 页面 API 为 fresh，整体 Audit 只被 5 个既有 `invoice_lifecycle` 月份（2025-04/09/11/12、2026-07）历史 backlog 阻断，不包含本次月份。首次 apply 因 `jsonb_build_object` 参数缺少 PostgreSQL 显式类型而整体回滚，补充 `text`/`integer` cast 并增加 SQL contract/真实 PostgreSQL integration test 后重新发布成功，没有半写。
+- 验证命令：`bash scripts/verify.sh lint`；`bash scripts/verify.sh docs`；698 项受影响后端回归；完整 frontend Vitest/build；`npm run e2e:smoke`；`./scripts/deploy-oa.sh --allow-dirty`；root-owned repair dry-run/apply/post-check；authenticated bank-details API freshness/字段/延迟 probe；公开 `/health/ready` 与 deploy-control status。
+- 未测风险：本机未配置 `FIN_OPS_TEST_DATABASE_URL`，新增真实 PostgreSQL integration test 本地跳过；最终同一 SQL 已在生产事务成功执行。完整后端 suite 的 3 个 no-OA 失败、完整 Browser suite 的 1 个 ETC 权限失败均已在干净 `HEAD` 复现，属于既有基线问题，不由本次银行分类链路引入。
+- 后续事项：无；证据不足的历史记录仍应继续 fail closed，禁止扩大自动修复范围。
 
 ## 2026-07-20 - 生产性能、操作后 freshness 与隔离闭环
 

@@ -611,6 +611,7 @@ class TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder:
         emit_persistence_warning: Callable[..., None],
         tenant_id: str,
         persistence_repository_factory: Callable[[Any], Any],
+        category_mutation_writer: Any | None,
         postgres_idempotency_store_factory: Callable[[Any], Any],
         local_idempotency_store_provider: Callable[[], Any],
     ) -> None:
@@ -624,6 +625,7 @@ class TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder:
         self._emit_persistence_warning = emit_persistence_warning
         self._tenant_id = tenant_id
         self._persistence_repository_factory = persistence_repository_factory
+        self._category_mutation_writer = category_mutation_writer
         self._postgres_idempotency_store_factory = postgres_idempotency_store_factory
         self._local_idempotency_store_provider = local_idempotency_store_provider
 
@@ -639,6 +641,7 @@ class TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder:
                 relation_service=self._relation_service,
                 bank_rows_provider=self._bank_rows_provider,
                 persistence_repository_factory=self._persistence_repository_factory,
+                category_mutation_writer=self._category_mutation_writer,
             )
             dirty_outbox_writer = TurnoverLedgerDirtyOutboxWriter(
                 queue_repository=self._queue_repository,
@@ -2044,11 +2047,14 @@ class TurnoverLedgerBankdetailWritePort:
         relation_service: Any,
         bank_rows_provider: Callable[[], list[dict[str, object]]],
         persistence_repository_factory: Callable[[Any], Any],
+        category_mutation_writer: Any,
     ) -> None:
         self._category_service = category_service
         self._relation_service = relation_service
         self._bank_rows_provider = bank_rows_provider
         self._persistence_repository_factory = persistence_repository_factory
+        self._category_mutation_writer = category_mutation_writer
+        self._pending_category_snapshot: dict[str, object] | None = None
 
     def apply_turnover_category_updates(
         self,
@@ -2057,38 +2063,63 @@ class TurnoverLedgerBankdetailWritePort:
         actor_id: str,
         transaction: Any,
     ) -> dict[str, object]:
+        if self._category_mutation_writer is None:
+            raise RuntimeError("PostgreSQL turnover category mutation writer is unavailable.")
+        before_snapshot = dict(self._category_service.snapshot() or {})
+        self._pending_category_snapshot = before_snapshot
         apply_updates = getattr(self._category_service, "apply_turnover_updates", None)
         if not callable(apply_updates):
             raise RuntimeError("category_service must expose apply_turnover_updates.")
-        result = dict(
-            apply_updates(
-                [dict(update) for update in list(updates or [])],
-                actor=actor_id,
+        try:
+            result = dict(
+                apply_updates(
+                    [dict(update) for update in list(updates or [])],
+                    actor=actor_id,
+                )
+                or {}
             )
-            or {}
-        )
-        rebuild = getattr(self._relation_service, "rebuild_from_bank_rows", None)
-        if not callable(rebuild):
-            raise RuntimeError("relation_service must expose rebuild_from_bank_rows.")
-        rebuild([dict(row) for row in list(self._bank_rows_provider() or [])])
-        repository = self._persistence_repository_factory(transaction)
-        save_categories = getattr(repository, "save_bank_transaction_categories", None)
-        if not callable(save_categories):
-            raise RuntimeError(
-                "turnover persistence repository must expose save_bank_transaction_categories."
+            self._category_mutation_writer.persist_many(
+                mutations=[
+                    {
+                        "transaction_id": transaction_id,
+                        "mutation_type": "turnover_update",
+                        "record": self._category_service.get(transaction_id),
+                        "actor_id": actor_id,
+                        "action": "turnover_bank_transaction_category_updated",
+                        "metadata": {"assignment_source": "turnover_ledger"},
+                    }
+                    for update in list(updates or [])
+                    if (transaction_id := str(update.get("transaction_id") or "").strip())
+                ],
+                transaction=transaction,
+                enqueue_refreshes=False,
             )
-        category_snapshot = getattr(self._category_service, "snapshot", None)
-        if not callable(category_snapshot):
-            raise RuntimeError("category_service must expose snapshot.")
-        save_categories(dict(category_snapshot() or {}))
-        save_relations = getattr(repository, "save_turnover_relations", None)
-        if not callable(save_relations):
-            raise RuntimeError("turnover persistence repository must expose save_turnover_relations.")
-        relation_snapshot = getattr(self._relation_service, "snapshot", None)
-        if not callable(relation_snapshot):
-            raise RuntimeError("relation_service must expose snapshot.")
-        save_relations(dict(relation_snapshot() or {}))
-        return result
+            rebuild = getattr(self._relation_service, "rebuild_from_bank_rows", None)
+            if not callable(rebuild):
+                raise RuntimeError("relation_service must expose rebuild_from_bank_rows.")
+            rebuild([dict(row) for row in list(self._bank_rows_provider() or [])])
+            repository = self._persistence_repository_factory(transaction)
+            save_relations = getattr(repository, "save_turnover_relations", None)
+            if not callable(save_relations):
+                raise RuntimeError("turnover persistence repository must expose save_turnover_relations.")
+            relation_snapshot = getattr(self._relation_service, "snapshot", None)
+            if not callable(relation_snapshot):
+                raise RuntimeError("relation_service must expose snapshot.")
+            save_relations(dict(relation_snapshot() or {}))
+            return result
+        except Exception:
+            self._category_service.restore_snapshot(before_snapshot)
+            self._pending_category_snapshot = None
+            raise
+
+    def rollback_in_memory(self) -> None:
+        if self._pending_category_snapshot is None:
+            return
+        self._category_service.restore_snapshot(self._pending_category_snapshot)
+        self._pending_category_snapshot = None
+
+    def commit_in_memory(self) -> None:
+        self._pending_category_snapshot = None
 
 
 class TurnoverLedgerDirtyOutboxWriter:
