@@ -510,3 +510,9 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api tests.
 - API/Frontend：response shape、operation barrier targets 与 UI 不变，不新增专项测试；既有 API/Page/E2E 回归继续保护。
 - Existing regression：manifest port contract、full projection、query freshness、Workbench relation canonical bundle 与跨页面 Audit 均需复跑。
 - 生产门：确认/撤回各三轮，command p95 `<=1000ms`、response-to-fresh p95 `<=2000ms`、hard max `<=3000ms`；最终 fixture unlinked、queue drained、直接与交叉 Audit 通过。
+
+## 2026-07-22 - 历史 requirement snapshot 可逆修复
+
+- Business core：repair 回归覆盖 active Turnover 旧 source、缺 tag/version、真实规则覆盖旧写死 requirements，以及 ordinary missing snapshot、ETC、batch 和 inactive 豁免合同。
+- Service：forward fingerprint 同时绑定完整 metadata preimage 与 intended after image；partial execute、partial rollback、幂等重放和任一 drift 首写前零写入均有测试。rollback 通过现有 command 原地精确恢复 metadata，不 cancel/recreate relation。
+- Read model：Workbench month/all 升级 v6 后，旧 v5 generation 与派生 cache key 均不能冒充 fresh；生产 repair、rehydrate 和可逆写证据必须停在受控 operator checkpoint 执行。

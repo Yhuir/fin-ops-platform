@@ -744,3 +744,9 @@ git diff --check
 - 安全边界：合并 preview 完成后，最终 typed bank members 必须是 selected ids 的子集；缺行、重复行、无效 rules、未知 tag 或未选 bank member 都在 relation command 前 fail closed。事务、幂等、权限、版本、dirty/outbox 与撤回合同保持原 owner。
 - 旧链删除：删除 Workbench 对 turnover active relation 的无条件完成 bypass；删除 legacy no-OA 规则保存后扫描并回写既有 Turnover relation requirement 的同步方法、常量和专用测试语义。规则保存只维护当前规则，不追溯污染已冻结 relation；存量缺快照关系继续 fail closed，留给受控 repair。
 - 隔离与性能：改动仅位于 Turnover composition/write adapter、Workbench 纯分区 policy 与 legacy no-OA service 的旧链清理；普通 manual/deterministic、batch accounting、ETC、其它页面 API/read model/worker I/O 不变。request 热路径保持固定 I/O 次数，且不增加逐流水或逐 relation 查询。
+
+## 2026-07-22 - 历史冻结要求修复与 Workbench v6
+
+- 复用现有 requirement repair ops 增加 forward/rollback 四种固定模式；Turnover 目标从 fresh bank tags 和 canonical rules 重算，fingerprint 绑定 original preimage 与 intended after，支持中断后的安全续跑。
+- rollback 仅选择同一 fingerprint 的 durable repair history，经 `WorkbenchRelationCommandService` 以显式 exact-metadata replace 原地恢复；默认 metadata update 继续保持 merge，relation ownership、members、lifecycle 与 created fields 不变。
+- Workbench month/all schema 升至 v6，groups/initial cache 继续从 month schema 派生；不新增表、migration、service、worker、read model、cache 或同步刷新链。真实 execute、rollback、rehydrate、Audit 和 SLO 只在备份、previous release 与审批齐全的生产 checkpoint 执行。

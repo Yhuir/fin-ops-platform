@@ -1260,3 +1260,9 @@
 - 边界决策：删除该唯一 bypass，统一复用现有 relation requirement completion policy。active relation 继续拥有同组 case，不拆成 singleton；冻结 requirements 未满足时整组进入 unpaired，全部满足后进入 paired。未知、空或缺失 metadata fail closed。
 - 隔离：`batch_accounting`、ETC 显式完成合同保留，普通 manual/deterministic 行为不放宽；不改变 projection schema、SQL shape、API response、cache、worker、queue、权限或前端生产组件。
 - 回归：business matrix、SQL production-shape projection、Turnover UoW/integration、frontend mapper/render，以及 no-OA/bank-flow/普通 Workbench 回归共同保护跨页面边界。
+
+## 2026-07-22 - Workbench v6 与可逆历史修复
+
+- month generation 和 all composed schema 同步升级 v6；groups/initial cache 继续由 month schema 自动派生。旧 v5 generation/cache 经既有 freshness gate fail closed，不修改 `workbench_relation` schema、registry、manifest、worker/env 或 API shape。
+- 历史 Turnover requirement snapshot 只通过现有 operator repair ops 与 canonical relation command 更新；forward/rollback 都绑定 original execute fingerprint，任一 current-state drift 在首写前终止，rollback 精确恢复完整 metadata preimage。
+- 生产只允许 exact release、canonical relation/history 与 active generation restore point、approved fingerprint 和 test-owned 可恢复 scenario 齐全后执行；rehydrate 仍走现有 worker/active-generation 原子发布，禁止直接 SQL mark-fresh。

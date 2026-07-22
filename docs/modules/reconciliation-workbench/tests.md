@@ -119,3 +119,9 @@ scripts/with-production-admin-token.sh python3 -m fin_ops_platform.tools.audit_w
 - rehydrate 只发布新 generation，不原地改旧 generation。
 - Audit 必须证明满足冻结 requirement 的 active relation typed members 与 paired display 双向相等；未满足 requirement 的 active relation 必须保持同 case、显式 incomplete 并进入 unpaired；无 active owner 的其余 canonical facts 全部 singleton unpaired。
 - 520 case、发票号和 OA row id 必须在 fresh generation 中同组；13 张样例必须完整可见。
+
+## 2026-07-22 Workbench v6 与历史修复回归
+
+- `tests/test_workbench_sql_runtime.py` 证明 month/all v6 同步，groups/initial cache key 随 schema 派生失效，旧 v5 source version 返回 `builder_mismatch`，不能作为 fresh generation 消费。
+- requirement repair 测试证明 legacy Turnover active relation 的完整 preimage/intended after fingerprint、partial execute、exact metadata rollback、partial rollback retry 和 drift zero-write；普通 relation、ETC、batch 与 inactive relation 不受影响。
+- 既有 grouping/projection/query 回归继续证明：要求 OA 的 bank-only case 保持同 case unpaired，补齐 OA 后进入 paired，active generation 只经现有原子 publish 边界切换。

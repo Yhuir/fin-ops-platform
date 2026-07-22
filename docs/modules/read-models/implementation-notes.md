@@ -1812,3 +1812,9 @@
 - 生产三轮可逆 turnover closure 探针证明 `turnover_ledger` delta 已达到 recent p95 `126.677ms`，剩余 response-to-fresh 长尾来自 `workbench_relation` recent p95/p99 `3178.564/5376.672ms`。
 - 显式 `relation_deltas + row_ids` 事件新增单一 relation-only delta 边界：既有 scope proof只推进 impacted pair-relation timestamp，canonical relation、pending claim与 source objects只按 affected ids读取，持久化复用原 partial save port。
 - relation-only path不再执行整月 source-version CTE或 `month_scope OR row_ids` active relation加载。普通 row hint、首次 scope、schema mismatch、force/`all`仍走原安全路径；无新增 read model、queue、worker、cache、表或 fallback。
+
+## 2026-07-22 - Workbench v6 失效与 rehydrate 边界
+
+- `WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION` 与 all composed schema 同步升级 v6；groups page 和 initial page cache schema 继续由 month version 派生，因此无需新增 eviction、cache、worker 或 registry 配置。
+- 旧 v5 generation 由既有 source-version freshness gate 判定不匹配；v6 只通过正式 refresh queue 和 active-generation 原子 publish 生效，不直接修改 read model rows 或状态。
+- 历史 requirement repair 与 rollback 写 canonical relation/history 后，生产 rehydrate、queue drain、Page Audit 和 SLO/E2E 证据必须在备份、previous release 与审批齐全的人工 checkpoint 执行。

@@ -590,3 +590,9 @@ git diff --check
 - Projection bounded I/O：`tests/test_workbench_relation_sql_projection.py::WorkbenchRelationSqlProjectionTests::test_relation_delta_uses_narrow_version_and_active_relation_queries`。
 - Repository contract：`tests/test_postgres_repositories_boundaries.py::test_workbench_relation_delta_source_versions_preserve_unrelated_sources`。
 - 真实 PostgreSQL：`tests/test_turnover_ledger_postgres_integration.py::TurnoverLedgerPostgresIntegrationTests::test_workbench_relation_delta_source_versions_advance_only_relation_proof`。
+
+## 2026-07-22 - Workbench v6 freshness 边界
+
+- `tests/test_workbench_sql_runtime.py::test_workbench_v6_rejects_v5_month_all_and_cache_versions` 覆盖 month/all v6、groups/initial cache 派生版本，以及旧 v5 source version 的 `builder_mismatch`。
+- 既有 SQL runtime/query tests 继续覆盖 building/failed 不可读为 fresh、active generation 原子发布和 requirement-aware paired/unpaired 分区；本轮没有新增 worker、registry、manifest、env 或 read model scope。
+- 生产验证必须经 exact release checkpoint 先 repair、再由正式 gateway/worker rehydrate；禁止直接写 projection 或伪造 fresh。
