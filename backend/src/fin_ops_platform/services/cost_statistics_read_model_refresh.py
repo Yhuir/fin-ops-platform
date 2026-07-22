@@ -29,6 +29,7 @@ class CostStatisticsReadModelRefreshService:
             raise ValueError("Cost statistics refresh requires scope_type='cost_statistics' and scope_key.")
         source_version = _event_source_version(event)
         priority = str(event.priority or "normal").strip() or "normal"
+        force_refresh = _event_force_refresh(event)
 
         if scope_key.endswith(":all"):
             result = self._handle_parent_scope(
@@ -37,6 +38,7 @@ class CostStatisticsReadModelRefreshService:
                 source_version=source_version,
                 priority=priority,
                 trace_id=event.trace_id,
+                force_refresh=force_refresh,
             )
         else:
             result = self._handle_month_scope(
@@ -44,6 +46,7 @@ class CostStatisticsReadModelRefreshService:
                 tenant_id=event.tenant_id,
                 source_version=source_version,
                 relation_deltas=_event_relation_deltas(event),
+                force_refresh=force_refresh,
             )
         payload = result if isinstance(result, dict) else {"scope_key": scope_key}
         payload.setdefault("scope_key", scope_key)
@@ -87,26 +90,34 @@ class CostStatisticsReadModelRefreshService:
         tenant_id: str,
         source_version: int,
         relation_deltas: list[dict[str, object]],
+        force_refresh: bool,
     ) -> dict[str, Any]:
         if relation_deltas:
-            rebuild_delta = getattr(self._projection_builder, "rebuild_cost_statistics_relation_delta", None)
-            if not callable(rebuild_delta):
-                raise RuntimeError("Projection builder does not expose rebuild_cost_statistics_relation_delta.")
-            result = rebuild_delta(
-                scope_key,
-                tenant_id=tenant_id,
-                source_version=source_version,
-                relation_deltas=relation_deltas,
-            )
-            payload = result if isinstance(result, dict) else {"scope_key": scope_key}
-            payload.setdefault("refresh_kind", "relation_delta")
-            if payload.get("published") is False:
-                payload["readiness_status"] = "refreshing"
-            return payload
+            if not force_refresh:
+                rebuild_delta = getattr(self._projection_builder, "rebuild_cost_statistics_relation_delta", None)
+                if not callable(rebuild_delta):
+                    raise RuntimeError("Projection builder does not expose rebuild_cost_statistics_relation_delta.")
+                result = rebuild_delta(
+                    scope_key,
+                    tenant_id=tenant_id,
+                    source_version=source_version,
+                    relation_deltas=relation_deltas,
+                )
+                payload = result if isinstance(result, dict) else {"scope_key": scope_key}
+                payload.setdefault("refresh_kind", "relation_delta")
+                if payload.get("published") is False:
+                    payload["readiness_status"] = "refreshing"
+                return payload
         rebuild_month = getattr(self._projection_builder, "rebuild_cost_statistics_month_scope", None)
         if not callable(rebuild_month):
             raise RuntimeError("Projection builder does not expose rebuild_cost_statistics_month_scope.")
-        result = rebuild_month(scope_key, tenant_id=tenant_id, source_version=source_version)
+        rebuild_kwargs: dict[str, object] = {
+            "tenant_id": tenant_id,
+            "source_version": source_version,
+        }
+        if force_refresh:
+            rebuild_kwargs["force_refresh"] = True
+        result = rebuild_month(scope_key, **rebuild_kwargs)
         payload = result if isinstance(result, dict) else {"scope_key": scope_key}
         payload.setdefault("refresh_kind", "month")
         if payload.get("published") is False:
@@ -122,15 +133,21 @@ class CostStatisticsReadModelRefreshService:
         source_version: int,
         priority: str,
         trace_id: str | None,
+        force_refresh: bool,
     ) -> dict[str, Any]:
-        missing_shards = self._missing_or_stale_shards(scope_key)
-        if missing_shards:
+        pending_shards = (
+            self._all_shards(scope_key)
+            if force_refresh
+            else self._missing_or_stale_shards(scope_key)
+        )
+        if pending_shards:
             enqueued_scope_keys = self._enqueue_scope_keys(
-                missing_shards,
+                pending_shards,
                 reason="cost_statistics_all_shard",
                 tenant_id=tenant_id,
                 priority=priority,
                 trace_id=trace_id,
+                force_refresh=force_refresh,
             )
             return {
                 "scope_key": scope_key,
@@ -143,7 +160,13 @@ class CostStatisticsReadModelRefreshService:
         rebuild_parent = getattr(self._projection_builder, "rebuild_cost_statistics_parent_scope", None)
         if not callable(rebuild_parent):
             raise RuntimeError("Projection builder does not expose rebuild_cost_statistics_parent_scope.")
-        result = rebuild_parent(scope_key, tenant_id=tenant_id, source_version=source_version)
+        rebuild_kwargs: dict[str, object] = {
+            "tenant_id": tenant_id,
+            "source_version": source_version,
+        }
+        if force_refresh:
+            rebuild_kwargs["force_refresh"] = True
+        result = rebuild_parent(scope_key, **rebuild_kwargs)
         payload = result if isinstance(result, dict) else {"scope_key": scope_key}
         payload.setdefault("refresh_kind", "parent")
         payload["readiness_status"] = "refreshing" if payload.get("published") is False else "fresh"
@@ -157,6 +180,16 @@ class CostStatisticsReadModelRefreshService:
         if not callable(list_shards):
             return []
         return [str(item).strip() for item in list(list_shards(scope_key) or []) if str(item).strip()]
+
+    def _all_shards(self, scope_key: str) -> list[str]:
+        list_shards = getattr(self._projection_builder, "list_cost_statistics_scope_shards", None)
+        if not callable(list_shards):
+            raise RuntimeError("Projection builder does not expose list_cost_statistics_scope_shards.")
+        return [
+            str(item).strip()
+            for item in list(list_shards(scope_key) or [])
+            if str(item).strip()
+        ]
 
     def _enqueue_parent_scope(
         self,
@@ -185,6 +218,7 @@ class CostStatisticsReadModelRefreshService:
         tenant_id: str,
         priority: str,
         trace_id: str | None,
+        force_refresh: bool = False,
     ) -> list[str]:
         refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
         if not refresh_gateway.can_enqueue():
@@ -196,6 +230,7 @@ class CostStatisticsReadModelRefreshService:
             tenant_id=tenant_id,
             priority=priority,
             trace_id=trace_id,
+            metadata={"force_refresh": True} if force_refresh else None,
         )
 
 
@@ -210,6 +245,13 @@ def _event_source_version(event: RuntimeQueueEvent) -> int:
     if source_version < 0 or str(value).strip() != str(source_version):
         raise ValueError("Cost statistics refresh requires a non-negative integer source_version.")
     return source_version
+
+
+def _event_force_refresh(event: RuntimeQueueEvent) -> bool:
+    if event.payload.get("force_refresh") is True:
+        return True
+    metadata = event.payload.get("metadata")
+    return isinstance(metadata, dict) and metadata.get("force_refresh") is True
 
 
 def _event_relation_deltas(event: RuntimeQueueEvent) -> list[dict[str, object]]:

@@ -75,6 +75,7 @@ class CostStatisticsSqlProjectionBuilder:
         *,
         tenant_id: str,
         source_version: int,
+        force_refresh: bool = False,
     ) -> dict[str, object]:
         project_scope, month = _parse_cost_scope_key(scope_key)
         if month == "all":
@@ -82,11 +83,13 @@ class CostStatisticsSqlProjectionBuilder:
                 scope_key,
                 tenant_id=tenant_id,
                 source_version=source_version,
+                force_refresh=force_refresh,
             )
         return self.rebuild_cost_statistics_month_scope(
             scope_key,
             tenant_id=tenant_id,
             source_version=source_version,
+            force_refresh=force_refresh,
         )
 
     def rebuild_cost_statistics_month_scope(
@@ -95,6 +98,7 @@ class CostStatisticsSqlProjectionBuilder:
         *,
         tenant_id: str,
         source_version: int,
+        force_refresh: bool = False,
     ) -> dict[str, object]:
         self._settings_payload_cache = None
         try:
@@ -107,17 +111,18 @@ class CostStatisticsSqlProjectionBuilder:
                 include_transaction_ids=_bank_transaction_ids_from_groups(workbench_groups),
             )
             source_versions = self._source_versions(month, bank_detail_payload=bank_detail_payload)
-            unchanged = self._unchanged_cost_statistics_scope_result(
-                scope_key=f"{project_scope}:{month}",
-                month=month,
-                project_scope=project_scope,
-                source_versions=source_versions,
-                refresh_kind="month",
-                tenant_id=tenant_id,
-                source_version=source_version,
-            )
-            if unchanged is not None:
-                return unchanged
+            if not force_refresh:
+                unchanged = self._unchanged_cost_statistics_scope_result(
+                    scope_key=f"{project_scope}:{month}",
+                    month=month,
+                    project_scope=project_scope,
+                    source_versions=source_versions,
+                    refresh_kind="month",
+                    tenant_id=tenant_id,
+                    source_version=source_version,
+                )
+                if unchanged is not None:
+                    return unchanged
             payload = self._build_explorer_payload(
                 month,
                 project_scope=project_scope,
@@ -340,6 +345,7 @@ class CostStatisticsSqlProjectionBuilder:
         *,
         tenant_id: str,
         source_version: int,
+        force_refresh: bool = False,
     ) -> dict[str, object]:
         self._settings_payload_cache = None
         try:
@@ -358,17 +364,18 @@ class CostStatisticsSqlProjectionBuilder:
                 "source_shard_count": len(shard_versions),
                 "source_shards": shard_versions,
             }
-            unchanged = self._unchanged_cost_statistics_scope_result(
-                scope_key=f"{project_scope}:all",
-                month="all",
-                project_scope=project_scope,
-                source_versions=source_versions,
-                refresh_kind="parent",
-                tenant_id=tenant_id,
-                source_version=source_version,
-            )
-            if unchanged is not None and not obsolete_scope_keys:
-                return unchanged
+            if not force_refresh:
+                unchanged = self._unchanged_cost_statistics_scope_result(
+                    scope_key=f"{project_scope}:all",
+                    month="all",
+                    project_scope=project_scope,
+                    source_versions=source_versions,
+                    refresh_kind="parent",
+                    tenant_id=tenant_id,
+                    source_version=source_version,
+                )
+                if unchanged is not None and not obsolete_scope_keys:
+                    return unchanged
             return self._publish_cost_statistics_scope(
                 month="all",
                 project_scope=project_scope,

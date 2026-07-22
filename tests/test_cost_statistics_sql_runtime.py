@@ -43,6 +43,7 @@ class QueueRecorder:
         tenant_id: str = "default",
         priority: str = "normal",
         trace_id: str | None = None,
+        metadata: dict[str, object] | None = None,
     ) -> None:
         self.refreshes.append((scope_type, scope_key, reason))
         self.refresh_details.append(
@@ -53,6 +54,7 @@ class QueueRecorder:
                 "tenant_id": tenant_id,
                 "priority": priority,
                 "trace_id": trace_id,
+                **({"metadata": dict(metadata)} if isinstance(metadata, dict) else {}),
             }
         )
 
@@ -2860,6 +2862,68 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(queue.refreshes, [("cost_statistics", "active:all", "cost_statistics_shard_converged")])
         self.assertEqual(queue.refresh_details[0]["trace_id"], "event-delta")
 
+    def test_cost_statistics_force_refresh_uses_full_month_rebuild_instead_of_delta(self) -> None:
+        class FakeBuilder:
+            def __init__(self) -> None:
+                self.month_calls: list[tuple[str, str, int, bool]] = []
+
+            def rebuild_cost_statistics_relation_delta(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("force refresh must not use relation delta")
+
+            def rebuild_cost_statistics_month_scope(
+                self,
+                scope_key: str,
+                *,
+                tenant_id: str,
+                source_version: int,
+                force_refresh: bool = False,
+            ) -> dict[str, object]:
+                self.month_calls.append(
+                    (scope_key, tenant_id, source_version, force_refresh)
+                )
+                return {"scope_key": scope_key, "published": True, "row_count": 1}
+
+        queue = QueueRecorder()
+        builder = FakeBuilder()
+        service = CostStatisticsReadModelRefreshService(
+            projection_builder=builder,
+            queue_repository=queue,
+        )
+        event = RuntimeQueueEvent(
+            event_id="event-force-month",
+            tenant_id="tenant-a",
+            event_type="cost_statistics.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id="active:2026-05",
+            scope_type="cost_statistics",
+            scope_key="active:2026-05",
+            dedupe_key=None,
+            payload={
+                "scope_key": "active:2026-05",
+                "source_version": 9,
+                "metadata": {
+                    "force_refresh": True,
+                    "relation_deltas": {
+                        "CASE-1": {
+                            "status": "active",
+                            "row_ids": ["oa-1", "txn-1"],
+                        }
+                    },
+                },
+            },
+            attempts=1,
+            status="processing",
+            priority="high",
+        )
+
+        result = service.handle_runtime_event(event)
+
+        self.assertEqual(
+            builder.month_calls,
+            [("active:2026-05", "tenant-a", 9, True)],
+        )
+        self.assertEqual(result["refresh_kind"], "month")
+
     def test_cost_statistics_refresh_handler_does_not_guess_relation_state(self) -> None:
         class FakeBuilder:
             def __init__(self) -> None:
@@ -3384,6 +3448,32 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
             [("default", "active:2026-05", 7, repository.source_versions)],
         )
 
+    def test_cost_statistics_sql_projection_force_refresh_bypasses_unchanged_scope(self) -> None:
+        repository = UnchangedCostStatisticsSaveRecorder()
+        connection = CostStatisticsProjectionConnection()
+        builder = CostStatisticsSqlProjectionBuilder(
+            connection=connection,
+            read_model_repository=repository,
+        )
+        repository.source_versions = builder._source_versions("2026-05")
+
+        result = builder.rebuild_cost_statistics_read_model_scope(
+            "active:2026-05",
+            tenant_id="default",
+            source_version=7,
+            force_refresh=True,
+        )
+
+        self.assertTrue(result["published"])
+        self.assertNotIn("skip_reason", result)
+        self.assertEqual(repository.acknowledge_calls, [])
+        self.assertTrue(
+            any(
+                "read_model.workbench_groups" in " ".join(sql.lower().split())
+                for sql, _params in connection.fetch_all_calls
+            )
+        )
+
     def test_cost_statistics_sql_projection_rejects_unchanged_ack_after_dirty_version_race(self) -> None:
         repository = UnchangedCostStatisticsSaveRecorder(acknowledge_result=False)
         builder = CostStatisticsSqlProjectionBuilder(
@@ -3880,6 +3970,53 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(result["scope_key"], "active:all")
         self.assertEqual(result["readiness_status"], "fresh")
         self.assertEqual(result["refresh_kind"], "parent")
+
+    def test_cost_statistics_force_refresh_propagates_to_every_month_shard(self) -> None:
+        class FakeBuilder:
+            @staticmethod
+            def list_cost_statistics_scope_shards(_scope_key: str) -> list[str]:
+                return ["active:2026-05", "active:2026-04"]
+
+            @staticmethod
+            def missing_or_stale_cost_statistics_shards(_scope_key: str) -> list[str]:
+                raise AssertionError("force refresh must enumerate every shard")
+
+        queue = QueueRecorder()
+        service = CostStatisticsReadModelRefreshService(
+            projection_builder=FakeBuilder(),
+            queue_repository=queue,
+        )
+        event = RuntimeQueueEvent(
+            event_id="event-force-all",
+            tenant_id="tenant-a",
+            event_type="cost_statistics.read_model.refresh",
+            aggregate_type="read_model",
+            aggregate_id="active:all",
+            scope_type="cost_statistics",
+            scope_key="active:all",
+            dedupe_key=None,
+            payload={
+                "scope_key": "active:all",
+                "source_version": 8,
+                "metadata": {"force_refresh": True},
+            },
+            attempts=1,
+            status="processing",
+            priority="high",
+            trace_id="trace-force-cost",
+        )
+
+        result = service.handle_runtime_event(event)
+
+        self.assertEqual(
+            result["enqueued_scope_keys"],
+            ["active:2026-05", "active:2026-04"],
+        )
+        self.assertEqual(
+            [item.get("metadata") for item in queue.refresh_details],
+            [{"force_refresh": True}, {"force_refresh": True}],
+        )
+        self.assertEqual(queue.completed, [])
 
     def test_cost_statistics_invalidation_marks_dirty_even_when_no_cached_model_exists(self) -> None:
         queue = QueueRecorder()

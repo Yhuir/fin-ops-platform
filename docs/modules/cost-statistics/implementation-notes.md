@@ -2,6 +2,7 @@
 
 ## 2026-07-22 - 银行流水中心 OA 成本资格与多 OA 明确金额拆分
 
+- 生产 v11 验证发现 `cost_statistics` worker 未读取/透传 durable event 的 `force_refresh`：`active:all` / `all:all` 虽重新发布为 fresh，实际仍聚合旧 v10 月分片，独立 Audit 以旧 `txn:index` row key、跨月残留和 expected-set 缺行为证据阻断。修复保持原架构，只补齐 parent→month force metadata、forced month 全量重建和 unchanged/delta bypass；不新增表、worker、queue 或 endpoint。
 - 原因：旧 projection 只接受 `zone=paired`，并要求 OA 项目/费用/内容/申请人形成唯一完整 tuple；同时把 `cost_excluded`、`冲`、自动冲销 code、借款/还款和 `cost_policy=exclude_all` 当成否决条件。这使无发票但已正式 OA+bank 的 `unpaired relation`、多 OA、多维度和借还款流水被漏掉；跨月 relation 还可能在非银行原生月份重复落行。
 - 决策：唯一资格是“银行原生月份非零支出 + active 正式 Workbench relation + 至少一条上游已准入 OA”。发票、relation zone 和旧 OA 排除标记不参与资格。candidate/singleton/无 OA 不进入。
 - 多 OA：仅一笔银行流水且每张 OA 有正数明确金额，并且按 `0.01` 精度合计等于流水金额时逐 OA 拆分；否则每笔银行流水只生成一条 full allocation。项目和费用类型独立判断，一致维度保留，不一致维度使用 `多项目` / `多费用类型`；不按比例猜测、不新增待归因状态或人工操作。
