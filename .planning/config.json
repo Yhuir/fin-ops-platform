@@ -5,9 +5,12 @@
     "parallelization": true,
     "research_before_planning": true,
     "plan_check": true,
-    "verify_after_execution": true
+    "verify_after_execution": true,
+    "_auto_chain_active": false,
+    "use_worktrees": false
   },
   "commit_docs": true,
   "phase_naming": "numbered",
-  "project_code": ""
+  "project_code": "",
+  "runtime": "codex"
 }

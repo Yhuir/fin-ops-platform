@@ -13,6 +13,7 @@ This roadmap is the root page-analysis roadmap. Cross-module modular IO refactor
 - Integer phases (0-17): Cross-page baseline first, then page-specific analysis and planning work for every registered app page.
 - Phase 18: Cross-module repair/evolution work that closes the canonical invoice + ETC batch-link boundary after the page-analysis phases exposed the issue.
 - Phase 19-21: Cross-page Audit, reversible relation runtime proof, and deterministic Workbench relation visibility production closure.
+- Phase 26: Turnover closure ownership/completion separation, frozen policy correction, historical repair and Workbench v6 production closure. Its dependencies are logical Phase 1 and Phase 21 contracts, not the immediately preceding numeric phase.
 - Decimal phases (2.1, 2.2): Urgent insertions between existing phases.
 
 ## Phase Details
@@ -393,6 +394,7 @@ Phase 0 is the shared baseline and must be completed before page implementation 
 | 16. 发票导入 | 0/0 | Not started | - |
 | 17. ETC发票导入 | 0/0 | Not started | - |
 | 18. 发票池与 ETC 批次关系闭环 | 1/1 | Implementation complete, apply gated | 2026-06-23 |
+| 26. 外部往来闭环冻结要求分区 | 0/2 | Planned | - |
 
 ### Phase 19: 全页面 Audit 证明、跨页关系一致性、readiness 语义与旧链路移除的生产闭环
 
@@ -496,5 +498,27 @@ Plans:
 Plans:
 
 - [ ] 21.1-01 — Implement exact enrichment, canonical count/ownership, scoped fast convergence, Audit proof, old-path removal, and production verification.
+
+### Phase 26: 修复外部往来闭环按冻结 OA/发票要求进入关联台分区
+
+**Goal:** Separate canonical active relation ownership from Workbench completion for turnover manual closures; freeze the actual Bank Transaction Paired Policy at confirmation, fail closed when merged bank membership is not fully selected, remove hard-coded and legacy resync paths, repair historical invalid snapshots with fingerprint-bound exact metadata rollback that preserves relation ownership/lifecycle, upgrade Workbench to v6 and close exact-release production rehydration without adding runtime architecture.
+**Requirements**: TURN-CLOSURE-01, TURN-CLOSURE-02, TURN-CLOSURE-03, TURN-CLOSURE-04, TURN-CLOSURE-05, TURN-CLOSURE-06
+**Depends on:** Phase 1 turnover-ledger canonical closure/write contracts and Phase 21 formal-relation paired/unpaired visibility contracts. There is no dependency on Phase 25 merely because of numbering.
+**Canonical refs:** `.planning/phases/26-oa/26-CONTEXT.md`, `.planning/phases/26-oa/26-RESEARCH.md`, `docs/product-specs/bank-turnover-and-no-oa.md`, `docs/modules/turnover-ledger/boundary-io.md`, `docs/modules/reconciliation-workbench/boundary-io.md`, `docs/modules/workbench-relations/boundary-io.md`, `docs/modules/bank-flow-rule-batches/boundary-io.md`, `docs/modules/read-models/boundary-io.md`, `docs/operations/runtime-worker-governance.md`
+**Success Criteria** (what must be TRUE):
+
+  1. Bank-only `turnover_manual_closure` with frozen OA requirement remains one active same-case unpaired relation with missing OA; adding OA moves the same case to paired, while a frozen double-false policy permits direct paired display.
+  2. New turnover relations freeze actual selected bank tag codes, canonical rule version/source and OR-composed OA/invoice requirements through the existing helper; unknown/missing inputs fail closed.
+  3. Merged closure bank members are a subset of selected bank IDs, selected-row cache covers every policy input with zero additional bank list I/O, and invalid supersets conflict before relation mutation.
+  4. The turnover completion bypass, hard-coded metadata and legacy no-OA active-relation resync chain are deleted with no fallback or old runtime references; API/DTO/frontend production code and unrelated relation modes remain unchanged.
+  5. Existing repair ops safely repair active legacy-invalid turnover snapshots with metadata-preimage+after-image fingerprint, original-plan reconstruction for audited/idempotent partial execution, and history-based in-place exact metadata rollback; relation members/status/mode/lifecycle/created fields remain unchanged, while Workbench v6 plus existing atomic rehydrate prevents v5 generation/cache from appearing fresh.
+  6. Seven-category tests, provider call counts, exact current/previous release evidence, formal readiness/identity/Page/System Audit, controlled dry-run SLO and same-scenario reversible E2E pass; post-execute failure rolls metadata back before previous-release activation/rehydration, with backup and approval.
+
+**Plans:** 2 plans
+
+Plans:
+
+- [ ] 26-01-PLAN — TDD online root-cause fix, selected-member invariant, real policy snapshot, legacy sync deletion, minimal docs and isolated regression coverage.
+- [ ] 26-02-PLAN — Historical repair target expansion, Workbench v6, automatic verification, then human-gated production repair/rehydrate/SLO/E2E and rollback evidence.
 
 ---

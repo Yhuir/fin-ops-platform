@@ -72,6 +72,15 @@
 - [ ] **RELVIS-09**: The forward migration deletes only retired derived candidate/decision state, never creates or rewrites canonical facts or pre-existing active relations, and is followed by registered read-model rehydration plus before/after hash and count verification.
 - [ ] **RELVIS-10**: Applicable seven-category tests and controlled data verification prove the Yunnan Lifu 520 invoice/OA relation is paired, the known 13 omitted invoices are recovered as unpaired, queues/read models converge, and canonical data is unchanged.
 
+### Turnover Closure Frozen Requirement Correctness
+
+- [ ] **TURN-CLOSURE-01**: A `turnover_manual_closure` active relation represents canonical member ownership only; it enters Workbench paired only when its frozen OA/invoice requirements are complete, otherwise it remains one same-case unpaired relation with explicit missing row types.
+- [ ] **TURN-CLOSURE-02**: Turnover closure confirmation reuses the existing Bank Transaction Paired Policy helper to freeze actual selected bank tag codes, rule version, source and OA/invoice requirements; multi-tag requirements use OR and unknown/missing inputs fail closed.
+- [ ] **TURN-CLOSURE-03**: Every bank member in a merged turnover closure is contained in the current selected bank IDs, selected-row cache covers all policy inputs with no additional bank list I/O, and the hard-coded requirement path plus legacy no-OA relation resync chain are fully removed without fallback.
+- [ ] **TURN-CLOSURE-04**: Existing repair ops identify active turnover relations with non-canonical requirement source or missing canonical tag/version metadata and rebuild them from fresh tags/rules; forward fingerprint binds exact metadata preimage plus intended after image, partial replay rebuilds the original plan from fresh targets plus fingerprint histories, and rollback verifies every current after image before the first write then precisely replaces only `special_metadata` with its recorded preimage through the canonical audited/idempotent metadata-update UoW without cancel/recreate or ownership/lifecycle/created-field changes; drift is zero-write, rollback reaches target zero, ordinary missing-snapshot compatibility and ETC/batch exemptions remain unchanged.
+- [ ] **TURN-CLOSURE-05**: Workbench month/all schema is upgraded from v5 to v6 so old generations and derived caches fail closed; an exact uploaded release uses captured previous release, authorized atomic rehydrate, formal readiness/Audit evidence and a post-execute failure sequence of exact metadata rollback before previous-release activation/rehydration, all backed by restore point and approval.
+- [ ] **TURN-CLOSURE-06**: Applicable seven-category tests, provider I/O counts, old-symbol zero-reference guards, minimal docs, controlled dry-run SLO checks and same-scenario test-owned reversible E2E compare previous/new releases under explicit safety ceilings without changing API/DTO/frontend production components or adding tables, workers, read models, runtime services/repositories/helpers or dependencies.
+
 ## v2 Requirements
 
 ### Automation
@@ -143,12 +152,18 @@
 | RELVIS-08 | Phase 21 | Pending |
 | RELVIS-09 | Phase 21 | Pending |
 | RELVIS-10 | Phase 21 | Pending |
+| TURN-CLOSURE-01 | Phase 26 | Pending |
+| TURN-CLOSURE-02 | Phase 26 | Pending |
+| TURN-CLOSURE-03 | Phase 26 | Pending |
+| TURN-CLOSURE-04 | Phase 26 | Pending |
+| TURN-CLOSURE-05 | Phase 26 | Pending |
+| TURN-CLOSURE-06 | Phase 26 | Pending |
 
 **Coverage:**
-- v1 requirements: 52 total
-- Mapped to phases: 52
+- v1 requirements: 58 total
+- Mapped to phases: 58
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-16*
-*Last updated: 2026-07-14 after adding Phase 21 deterministic relation visibility closure requirements*
+*Last updated: 2026-07-22 after adding Phase 26 turnover closure frozen-requirement correctness requirements*

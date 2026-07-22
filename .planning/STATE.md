@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: verifying
-stopped_at: v3 full local gate passed after the safe v2 rollback; branch/main exact-SHA CI and recutover remain gated.
-last_updated: "2026-07-21T17:48:06+08:00"
-last_activity: 2026-07-21 - bank-flow canonical relation/Audit fresh fix deployed and production verified
+status: executing
+stopped_at: Phase 26 Plan 01 ready for execution after validated planning and production gate design.
+last_updated: "2026-07-22T17:32:23+08:00"
+last_activity: 2026-07-22 - Phase 26 execution started
 progress:
-  total_phases: 21
+  total_phases: 22
   completed_phases: 2
-  total_plans: 26
+  total_plans: 28
   completed_plans: 24
-  percent: 92
+  percent: 86
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-16)
 
 **Core value:** Preserve production finance workflow correctness while improving individual pages through isolated, reviewable GSD phases.
-**Current focus:** Phase 21 Release A v3 production-audit hotfix preserves active override ownership after v2 failed its second production Audit; production remains on the rehydrated safe rollback release while branch/main exact-SHA CI, clean deployment, rehydrate and production data-safety evidence remain gated. Migration 0104 stays in Release B only.
+**Current focus:** Phase 26 online turnover-closure correction, historical repair, Workbench v6, and controlled production verification.
 
 ## Current Position
 
-Phase: 21 of 21 (关联台确定性自动正式关系与全量可见性生产闭环)
-Plan: 21-01 through 21-03 complete; 21-04 production cutover pending
-Status: v3 full local gate passes; production safely rolled back after v2 Audit retained 5 blocking override mismatches
-Last activity: 2026-07-15 - v3 full gate passed with 4192 backend, 835 frontend, production build and 177 Chromium tests
+Phase: 26 of 26 (外部往来闭环冻结要求分区)
+Plan: 26-01 of 26-02
+Status: Executing online root-cause correction
+Last activity: 2026-07-22 - Phase 26 execution started
 
-Progress: [█████████░] 92%
+Progress: [█████████░] 86%
 
 ## Performance Metrics
 
@@ -84,6 +84,7 @@ Progress: [█████████░] 92%
 
 ### Roadmap Evolution
 
+- 2026-07-22: Phase 26 added for fixing external-turnover closure partitioning by frozen OA/invoice requirements, including legacy-path removal, historical repair, and Workbench rehydrate safety.
 - 2026-06-16: Minimal planning scaffold created for page-scoped GSD phases.
 - 2026-06-16: Phase 1 added for 外部往来款管理 page analysis and improvement planning.
 - 2026-06-16: Phase 2 added for 银行明细 page analysis and improvement planning.
