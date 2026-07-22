@@ -40,7 +40,7 @@ patterns-established:
   - "Closure snapshot: selected rows and one canonical rules payload produce immutable relation requirement metadata in the creation transaction."
   - "Selected-member invariant: every final merged bank member must be present in the user's normalized selected ids before mutation."
 
-requirements-completed: [TURN-CLOSURE-01, TURN-CLOSURE-02, TURN-CLOSURE-03, TURN-CLOSURE-06]
+requirements-completed: [TURN-CLOSURE-01, TURN-CLOSURE-02, TURN-CLOSURE-03]
 
 duration: 31min
 completed: 2026-07-22
