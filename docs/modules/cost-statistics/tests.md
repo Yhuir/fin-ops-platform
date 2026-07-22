@@ -2,6 +2,14 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+## 2026-07-22 - OA 配对流水漏统修复与 v11 重投影
+
+- Business core：`tests/test_cost_statistics_sql_projection_rules.py` 覆盖旧 OA 排除标记/借还款不再否决、缺失维度 fallback、一银行多 OA 6万/4万精确拆分、金额不闭合不推断、多银行不拆分、active completed project 与银行原生月份去重。
+- Service/read model：`tests/test_cost_statistics_sql_runtime.py` 覆盖 `paired`/`unpaired` 正式 relation、candidate 排除、full/delta 共用投影、stable row key、allocation row count 与唯一 transaction count、单 statement tag-selected 标题数、detail allocations、v11 source versions、CAS publish/parent rollup 回归。
+- API/frontend：`tests/test_cost_statistics_api.py` 保持 explorer/detail/export/tag-rules 状态与权限合同；`web/src/test/CostStatisticsApi.test.ts`、`CostStatisticsPage.test.tsx` 覆盖 additive mapping 与详情拆分展示，loading/error/freshness/关闭交互保持。
+- Audit/integration：`tests/test_cost_statistics_page_audit.py` 锁定正式 relation 两区、银行原生月份、exact split/full fallback/stable row key 和四组只读 query budget；`web/e2e/cost-statistics-relation-fanout.spec.ts` 覆盖 candidate 不入成本、OA+bank 无发票正式关系确认后进入成本的全链路。
+- Regression：成本之外的 Workbench、Bank Detail、Tax Offset、Pending Invoice、OA Pending、read-model gateway/worker/manifest 与平台边界测试必须随全量 backend/frontend/e2e 验证复跑；本变更不新增表、migration、endpoint、queue、worker、依赖或共享 UI 状态。
+
 ## 2026-07-18 - relation identity 与 downstream lifecycle 最终门
 
 - Cost projection：`tests/test_cost_statistics_sql_runtime.py` 锁定 active/cancelled/mixed delta 的 affected group 与 replacement row 都使用 `case:<case_id>`，同时保留 transaction-target 原子替换、完整 metadata 和 parent fan-out 回归。
@@ -294,7 +302,7 @@
 
 | 场景 | 优先级 | 当前覆盖 | 状态 | 说明 |
 | --- | --- | --- | --- | --- |
-| 成本统计核心归因 | P0 | `tests/test_cost_statistics_sql_projection_rules.py`、`tests/test_cost_statistics_sql_runtime.py`、`tests/test_project_costing_service.py` | covered | 唯一 production SQL projection 覆盖支出行、OA cost 字段、冲账排除、现金/票据/往来特殊场景、完成/未知项目范围；Workbench open/proposed candidate 不计入成本。 |
+| 成本统计核心归因 | P0 | `tests/test_cost_statistics_sql_projection_rules.py`、`tests/test_cost_statistics_sql_runtime.py`、`tests/test_project_costing_service.py` | covered | 唯一 production SQL projection 覆盖银行原生月份非零支出、正式 OA relation、旧排除标记不再否决、借还款、多 OA 明确金额拆分/不闭合 fallback、完成/未知项目范围；Workbench open/proposed candidate 不计入成本。 |
 | API shape、route facade、project scope | P0 | `tests/test_cost_statistics_api.py` | covered | explorer/detail/export、`project_scope`、invalid scope、cache hit/miss、导入 invalidation；旧 root/project route 保持删除。 |
 | 导出和 export preview | P1 | `tests/test_cost_statistics_api.py`、`tests/test_cost_statistics_sql_runtime.py`、`web/src/test/CostStatisticsApi.test.ts`、`web/src/test/CostStatisticsPage.test.tsx`、`web/e2e/cost-statistics-flow.spec.ts` | covered | XLSX、filename、date range、project/expense filters、project scope 透传；导出只在 fresh gate 后读取 cost-owned SQL summary/bounded rows，preview <=8、download batch <=1000、write-only 且结束复核发布版本；Browser 覆盖 `read_export_only` 成功 download event、请求不带页面分页参数、下载内容字段；超过 20,000 行同步导出上限时结构化返回 `cost_statistics_export_row_limit_exceeded` 并在真实浏览器导出中心展示。 |
 | durable invalidation / no local owner | P0 | `tests/test_cost_statistics_runtime_service.py`、`tests/test_cost_statistics_derived_lifecycle_executor.py`、`tests/test_settings_data_reset_service.py` | covered | month/all scope normalization、queue-only invalidation、queue unavailable不假成功、data reset durable rebuild；旧进程内 service/module/test 由 guard 禁止回归。 |

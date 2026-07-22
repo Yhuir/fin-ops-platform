@@ -545,7 +545,7 @@ class WriteOperationSloAuditTests(unittest.TestCase):
                 self.assertTrue(oa_expectation.required)
                 self.assertEqual(oa_expectation.reason, "workbench_relation_changed")
 
-    def test_workbench_relation_bank_invoice_cross_page_profile_uses_transactional_cost_delta(self) -> None:
+    def test_workbench_relation_bank_invoice_cross_page_profile_excludes_cost_without_oa(self) -> None:
         rows = [
             _event(scope_type="workbench", reason="workbench_relation_changed"),
             _event(scope_type="workbench_relation", reason="workbench_pair_relation_changed"),
@@ -556,7 +556,6 @@ class WriteOperationSloAuditTests(unittest.TestCase):
             _event(scope_type="output_invoice_collection", reason="workbench_relation_changed"),
             _event(scope_type="oa_pending_payment", reason="workbench_relation_changed"),
             _event(scope_type="search", reason="workbench_relation_changed"),
-            _event(scope_type="cost_statistics", reason="cost_statistics_relation_delta"),
         ]
 
         report = write_operation_slo_audit.audit_write_operation_slo(
@@ -566,13 +565,13 @@ class WriteOperationSloAuditTests(unittest.TestCase):
         )
 
         self.assertEqual(report["status"], "pass")
-        self.assertEqual(report["expectation_count"], 10)
-        self.assertIn(
+        self.assertEqual(report["expectation_count"], 9)
+        self.assertNotIn(
             "cost_statistics",
             {result["scope_type"] for result in report["results"]},
         )
 
-    def test_workbench_relation_bank_invoice_withdraw_cross_page_profile_uses_transactional_cost_delta(
+    def test_workbench_relation_bank_invoice_withdraw_cross_page_profile_excludes_cost_without_oa(
         self,
     ) -> None:
         rows = [
@@ -585,7 +584,6 @@ class WriteOperationSloAuditTests(unittest.TestCase):
             _event(scope_type="output_invoice_collection", reason="workbench_relation_changed"),
             _event(scope_type="oa_pending_payment", reason="workbench_relation_changed"),
             _event(scope_type="search", reason="workbench_relation_changed"),
-            _event(scope_type="cost_statistics", reason="cost_statistics_relation_delta"),
         ]
 
         report = write_operation_slo_audit.audit_write_operation_slo(
@@ -595,8 +593,8 @@ class WriteOperationSloAuditTests(unittest.TestCase):
         )
 
         self.assertEqual(report["status"], "pass")
-        self.assertEqual(report["expectation_count"], 10)
-        self.assertIn(
+        self.assertEqual(report["expectation_count"], 9)
+        self.assertNotIn(
             "cost_statistics",
             {result["scope_type"] for result in report["results"]},
         )

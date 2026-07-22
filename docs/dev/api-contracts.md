@@ -50,8 +50,10 @@
 - 页面合同必须携带 `scope=YYYY-MM|year:YYYY|all`、`view=time|project|bank|expense_type|bank_tag` 和 `project_scope=active|all`；`page_size` 默认 50、最大 100，`cursor` 是绑定当前 query 与已发布 read-model version 的 opaque token。
 - 响应只返回当前 scope/view 的 `summary`、`available_years`、必要的 bounded `facets`、当前层级 `rows`、`row_count`、`next_cursor` 与 freshness metadata。不得恢复完整 `time_rows` / `bank_flow_time_rows` explorer DTO，也不得在缺少 `view` 时回退旧 shape。
 - `time|bank_tag` 的 summary/rows 使用全银行收入与支出口径；`project|bank|expense_type` 使用 OA 配对支出口径。summary/facets 由完整筛选集合在 SQL 中计算，cursor 只分页 rows，页面不得用当前页重算总额、笔数、百分比或完整 facets。
+- `summary.row_count` 表示当前事实集的结构化行/allocation 行数，`summary.transaction_count` 表示唯一银行流水数。`statistics.cost_transaction_count` 使用 parent 全期间集合与当前成本统计标签规则筛选后的唯一 OA 成本流水数；不因当前 explorer 时间范围或一笔流水拆成多条 OA allocation 而重复计数。
 - 每次请求先过 PostgreSQL durable freshness gate；non-fresh 返回 `202` 和空 rows/facets，不能读取旧 Redis/rows。fresh 响应使用 `ETag`、`Cache-Control: private, no-cache`、`Vary: Authorization, Cookie`；条件命中可返回 `304` 且跳过 page SQL。
 - `year:YYYY` 复用 `project_scope:all` parent gate 后过滤结构化月份 rows，不新增 year read-model scope。稳定排序为交易日期/时间降序，再按 transaction/row identity；read-model version 变化后旧 cursor 必须拒绝。
+- `GET /api/cost-statistics/transactions/{transaction_id}` 对已拆分流水在 `transaction.cost_allocations[]` additive 返回 `row_key/project_name/project_id/expense_type/expense_content/oa_applicant/amount`；`transaction.amount` 是 allocations 合计。未拆分流水也可返回单条 allocation；旧客户端忽略新字段时仍可读取原详情。
 
 `GET /api/cost-statistics/export-preview` 与 `GET /api/cost-statistics/export`
 

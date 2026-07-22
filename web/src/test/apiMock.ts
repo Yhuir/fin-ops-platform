@@ -3688,8 +3688,18 @@ type CostTransactionDetail = {
     counterparty_name: string;
     payment_account_label: string;
     remark: string;
+    oa_applicant?: string;
     summary_fields: Record<string, string>;
     detail_fields: Record<string, string>;
+    cost_allocations?: Array<{
+      row_key: string;
+      project_name: string;
+      project_id: string;
+      expense_type: string;
+      expense_content: string;
+      oa_applicant: string;
+      amount: string;
+    }>;
   };
 };
 
@@ -3788,6 +3798,27 @@ const costStatisticsTransactionDetails: Record<string, CostTransactionDetail> = 
       counterparty_name: "昆明设备供应商",
       payment_account_label: "工商银行 账户 0001",
       remark: "设备采购款",
+      oa_applicant: "张三、李四",
+      cost_allocations: [
+        {
+          row_key: "cost-txn-001:oa:oa-a",
+          project_name: "云南溯源科技",
+          project_id: "P-A",
+          expense_type: "设备货款及材料费",
+          expense_content: "PLC 模块采购",
+          oa_applicant: "张三",
+          amount: "6,000.00",
+        },
+        {
+          row_key: "cost-txn-001:oa:oa-b",
+          project_name: "昆明升级项目",
+          project_id: "P-B",
+          expense_type: "安装服务费",
+          expense_content: "PLC 安装",
+          oa_applicant: "李四",
+          amount: "4,000.00",
+        },
+      ],
       summary_fields: {
         资金方向: "支出",
         交易时间: "2026-03-10 21:27:55",

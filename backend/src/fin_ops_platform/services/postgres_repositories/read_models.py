@@ -6631,11 +6631,19 @@ class PostgresSummaryReadModelRepository:
             return None
 
         tag_filter_sql = ""
+        cost_tag_filter_sql = ""
         if selected_tag_codes is not None:
             tag_filter_sql = (
                 "and coalesce(nullif(bank_tag_code, ''), %s) = any(%s)"
             )
             base_params.extend(("__uncategorized__", selected_tag_codes))
+            cost_tag_filter_sql = (
+                "and coalesce(nullif(payload->>'bank_tag_code', ''), %s) = any(%s)"
+            )
+
+        cost_count_params: list[Any] = [normalized_project_scope]
+        if selected_tag_codes is not None:
+            cost_count_params.extend(("__uncategorized__", selected_tag_codes))
 
         primary_facet_sql = "'[]'::jsonb"
         secondary_facet_sql = "'[]'::jsonb"
@@ -6703,6 +6711,7 @@ class PostgresSummaryReadModelRepository:
             )
         query_params = [
             normalized_project_scope,
+            *cost_count_params,
             *base_params,
             *row_filter_params,
             *cursor_params,
@@ -6717,6 +6726,11 @@ class PostgresSummaryReadModelRepository:
                 from {table_name}
                 where project_scope = %s
                   and scope_month is not null
+            ), selected_cost_transactions as materialized (
+                select transaction_id
+                from read_model.cost_statistics_rows
+                where project_scope = %s
+                  {cost_tag_filter_sql}
             ), raw_base as materialized (
                 select
                     scope_key,
@@ -6769,9 +6783,12 @@ class PostgresSummaryReadModelRepository:
                         'total_amount', coalesce(sum(amount), 0)::text,
                         'expense_amount', coalesce(sum(amount) filter (where direction = '支出'), 0)::text,
                         'income_amount', coalesce(sum(amount) filter (where direction = '收入'), 0)::text,
-                        'expense_transaction_count', count(*) filter (where direction = '支出'),
-                        'income_transaction_count', count(*) filter (where direction = '收入')
+                        'expense_transaction_count', count(distinct transaction_id) filter (where direction = '支出'),
+                        'income_transaction_count', count(distinct transaction_id) filter (where direction = '收入')
                     ) from base
+                ),
+                'cost_transaction_count', (
+                    select count(distinct transaction_id) from selected_cost_transactions
                 ),
                 'available_years', (
                     select coalesce(jsonb_agg(scope_year order by scope_year desc), '[]'::jsonb)
@@ -6973,7 +6990,7 @@ class PostgresSummaryReadModelRepository:
                     expense_type,
                     expense_content,
                     sum(amount)::text as amount,
-                    count(*)::bigint as transaction_count
+                    count(distinct transaction_id)::bigint as transaction_count
                 from base
                 group by to_char(trade_date, 'YYYY-MM'), project_name, expense_type, expense_content
             """
@@ -6986,7 +7003,7 @@ class PostgresSummaryReadModelRepository:
                     expense_type,
                     expense_content,
                     sum(amount)::text as amount,
-                    count(*)::bigint as transaction_count
+                    count(distinct transaction_id)::bigint as transaction_count
                 from base
                 group by to_char(trade_date, 'YYYY'), project_name, expense_type, expense_content
             """
@@ -6998,7 +7015,7 @@ class PostgresSummaryReadModelRepository:
                     expense_type,
                     expense_content,
                     sum(amount)::text as amount,
-                    count(*)::bigint as transaction_count
+                    count(distinct transaction_id)::bigint as transaction_count
                 from base
                 group by project_name, expense_type, expense_content
             """
@@ -7024,9 +7041,9 @@ class PostgresSummaryReadModelRepository:
                         as expense_amount,
                     (select coalesce(sum(amount) filter (where direction = '收入'), 0)::text from base)
                         as income_amount,
-                    (select count(*) filter (where direction = '支出') from base)::bigint
+                    (select count(distinct transaction_id) filter (where direction = '支出') from base)::bigint
                         as expense_transaction_count,
-                    (select count(*) filter (where direction = '收入') from base)::bigint
+                    (select count(distinct transaction_id) filter (where direction = '收入') from base)::bigint
                         as income_transaction_count,
                     (select count(distinct expense_type) from base)::bigint as expense_type_count
                 """,
@@ -7070,8 +7087,7 @@ class PostgresSummaryReadModelRepository:
             return None
         row = self._connection.fetch_one(
             """
-            select *
-            from (
+            with candidate as (
                 select
                     0 as row_priority, 'cost' as row_kind,
                     scope_key, project_scope, scope_month::text as scope_month, row_key, transaction_id,
@@ -7094,11 +7110,36 @@ class PostgresSummaryReadModelRepository:
                     bank_tag_label_path, payload, raw_payload
                 from read_model.cost_statistics_bank_flow_rows
                 where project_scope = %s and transaction_id = %s
-            ) candidate
-            order by row_priority, scope_month desc, row_key
-            limit 1
+            ), selected as (
+                select *
+                from candidate
+                order by row_priority, scope_month desc, row_key
+                limit 1
+            ), allocations as (
+                select coalesce(
+                    jsonb_agg(
+                        jsonb_build_object(
+                            'row_key', row_key,
+                            'project_name', project_name,
+                            'project_id', coalesce(project_id, ''),
+                            'expense_type', expense_type,
+                            'expense_content', coalesce(expense_content, ''),
+                            'oa_applicant', coalesce(nullif(oa_applicant, ''), '—'),
+                            'amount', amount::text
+                        ) order by row_key
+                    ),
+                    '[]'::jsonb
+                ) as cost_allocations
+                from read_model.cost_statistics_rows
+                where project_scope = %s and transaction_id = %s
+            )
+            select selected.*, allocations.cost_allocations
+            from selected
+            cross join allocations
             """,
             (
+                normalized_project_scope,
+                normalized_transaction_id,
                 normalized_project_scope,
                 normalized_transaction_id,
                 normalized_project_scope,
@@ -14345,13 +14386,13 @@ def _cost_statistics_aggregate_payload(
                   and scope_month is not null
             ), projects as (
                 select project_name, sum(amount) as total_amount,
-                       count(*)::integer as transaction_count,
+                       count(distinct transaction_id)::integer as transaction_count,
                        count(distinct expense_type)::integer as expense_type_count
                 from base
                 group by project_name
             ), expenses as (
                 select expense_type, sum(amount) as total_amount,
-                       count(*)::integer as transaction_count,
+                       count(distinct transaction_id)::integer as transaction_count,
                        count(distinct project_name)::integer as project_count
                 from base
                 group by expense_type
@@ -14431,6 +14472,7 @@ def _cost_statistics_aggregate_payload(
     for row in [*project_rows, *expense_type_rows]:
         row["total_amount"] = _format_decimal(_decimal_or_zero(row.get("total_amount")))
     cost_count = int_value(cost_row.get("row_count"), 0)
+    cost_transaction_count = int_value(cost_row.get("transaction_count"), 0)
     bank_count = int_value(bank_row.get("row_count"), 0)
     bank_transaction_count = int_value(bank_row.get("transaction_count"), 0)
     tagged_transaction_count = int_value(bank_row.get("tagged_transaction_count"), 0)
@@ -14439,7 +14481,7 @@ def _cost_statistics_aggregate_payload(
         "project_scope": project_scope,
         "summary": {
             "row_count": cost_count,
-            "transaction_count": cost_count,
+            "transaction_count": cost_transaction_count,
             "total_amount": _format_decimal(_decimal_or_zero(cost_row.get("total_amount"))),
         },
         "bank_flow_summary": {
@@ -14461,7 +14503,7 @@ def _cost_statistics_aggregate_payload(
             "project_count": int_value(cost_row.get("project_count"), 0),
             "expense_type_count": int_value(cost_row.get("expense_type_count"), 0),
             "bank_tag_count": int_value(bank_row.get("bank_tag_count"), 0),
-            "cost_transaction_count": int_value(cost_row.get("transaction_count"), 0),
+            "cost_transaction_count": cost_transaction_count,
         },
         "bank_accounts": [dict(row) for row in bank_accounts if isinstance(row, dict)],
         "project_rows": project_rows,
@@ -14529,7 +14571,7 @@ def _cost_statistics_project_facets_sql(where_sql: str = "true") -> str:
             select
                 project_name,
                 sum(amount) as total_amount,
-                count(*) as transaction_count,
+                count(distinct transaction_id) as transaction_count,
                 count(distinct expense_type) as expense_type_count,
                 {_cost_statistics_percentage_sql()} as percentage_label
             from base
@@ -14557,7 +14599,7 @@ def _cost_statistics_expense_facets_sql(where_sql: str = "true") -> str:
             select
                 expense_type,
                 sum(amount) as total_amount,
-                count(*) as transaction_count,
+                count(distinct transaction_id) as transaction_count,
                 count(distinct project_name) as project_count,
                 {_cost_statistics_percentage_sql()} as percentage_label
             from base
@@ -14585,7 +14627,7 @@ def _cost_statistics_bank_facets_sql() -> str:
             select
                 coalesce(nullif(payment_account_label, ''), '未识别账户') as payment_account_label,
                 sum(amount) as total_amount,
-                count(*) as transaction_count,
+                count(distinct transaction_id) as transaction_count,
                 count(distinct project_name) as project_count,
                 {_cost_statistics_percentage_sql()} as percentage_label
             from base
@@ -14614,8 +14656,8 @@ def _cost_statistics_bank_tag_primary_facets_sql() -> str:
                 tag_primary_label as primary_label,
                 coalesce(sum(amount) filter (where direction = '支出'), 0) as expense_amount,
                 coalesce(sum(amount) filter (where direction = '收入'), 0) as income_amount,
-                count(*) filter (where direction = '支出') as expense_transaction_count,
-                count(*) filter (where direction = '收入') as income_transaction_count,
+                count(distinct transaction_id) filter (where direction = '支出') as expense_transaction_count,
+                count(distinct transaction_id) filter (where direction = '收入') as income_transaction_count,
                 count(distinct tag_sub_label) as sub_tag_count
             from base
             group by tag_primary_label
@@ -14644,8 +14686,8 @@ def _cost_statistics_bank_tag_sub_facets_sql() -> str:
                 tag_sub_label as sub_label,
                 coalesce(sum(amount) filter (where direction = '支出'), 0) as expense_amount,
                 coalesce(sum(amount) filter (where direction = '收入'), 0) as income_amount,
-                count(*) filter (where direction = '支出') as expense_transaction_count,
-                count(*) filter (where direction = '收入') as income_transaction_count
+                count(distinct transaction_id) filter (where direction = '支出') as expense_transaction_count,
+                count(distinct transaction_id) filter (where direction = '收入') as income_transaction_count
             from base
             where tag_primary_label = %s
             group by tag_primary_label, tag_sub_label
@@ -14695,6 +14737,7 @@ def _cost_statistics_row_payload(db_row: dict[str, Any], *, fallback_index: int)
     label_path = db_row.get("bank_tag_label_path")
     if not isinstance(label_path, list):
         label_path = row_payload_value.get("bank_tag_label_path")
+    cost_allocations = db_row.get("cost_allocations")
     return {
         **row_payload_value,
         "transaction_id": transaction_id,
@@ -14726,6 +14769,11 @@ def _cost_statistics_row_payload(db_row: dict[str, Any], *, fallback_index: int)
             db_row.get("bank_tag_sub_label") or row_payload_value.get("bank_tag_sub_label")
         ),
         "bank_tag_label_path": deepcopy(label_path) if isinstance(label_path, list) else [],
+        "cost_allocations": [
+            deepcopy(item)
+            for item in list(cost_allocations or [])
+            if isinstance(item, dict)
+        ],
     }
 
 

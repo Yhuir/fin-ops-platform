@@ -236,7 +236,7 @@ class WriteOperationImpactMatrixTests(unittest.TestCase):
             self.assertIn("oa_pending_payment", row["expected_outbox_scope_types"], operation)
             self.assertIn("oa-pending-payments", row["target_page_keys"], operation)
 
-    def test_bank_invoice_profile_matches_real_workbench_fanout_including_cost(self) -> None:
+    def test_bank_invoice_profile_matches_real_workbench_fanout_without_oa_cost(self) -> None:
         facade = object.__new__(WorkbenchWriteFacade)
         actual_downstream = facade._relation_downstream_scope_types(
             relation={"row_types": ["bank", "invoice"]},
@@ -258,7 +258,7 @@ class WriteOperationImpactMatrixTests(unittest.TestCase):
         for operation in REVERSIBLE_RELATION_PROFILE_PAIRS["bank_oa_invoice"]:
             self.assertEqual(
                 set(self.rows_by_operation[operation]["expected_outbox_scope_types"]),
-                full_downstream | {"workbench"},
+                full_downstream | {"workbench", "cost_statistics"},
                 operation,
             )
 

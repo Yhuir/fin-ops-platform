@@ -7,7 +7,7 @@ from fin_ops_platform.services.cost_statistics_bank_accounts import (
     bank_auto_tag_rules_version_from_settings_payload,
 )
 
-COST_STATISTICS_READ_MODEL_SCHEMA_VERSION = "2026-07-cost-statistics-structured-rows-v10"
+COST_STATISTICS_READ_MODEL_SCHEMA_VERSION = "2026-07-cost-statistics-oa-bank-flow-v11"
 
 
 def cost_statistics_source_versions(
@@ -19,9 +19,6 @@ def cost_statistics_source_versions(
 ) -> dict[str, Any]:
     """Build the single business source-version contract shared by publish and query gates."""
 
-    from fin_ops_platform.services.oa_attachment_invoice_cache import (
-        attachment_invoice_cache_parser_version,
-    )
     from fin_ops_platform.services.postgres_repositories.oa_projection import (
         OA_PROJECTION_SYNC_VERSION,
     )
@@ -36,7 +33,6 @@ def cost_statistics_source_versions(
         "workbench_read_model_schema_version": WORKBENCH_SQL_PROJECTION_SCHEMA_VERSION,
         "bank_auto_tag_rules_version": bank_auto_tag_rules_version_from_settings_payload(settings_payload),
         "bank_account_mappings_fingerprint": bank_account_mappings_fingerprint_from_settings_payload(settings_payload),
-        "oa_attachment_invoice_parser_version": attachment_invoice_cache_parser_version(),
         "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
     }
     if normalized_month == "all":

@@ -88,6 +88,26 @@ export default function CostTransactionDetailPanel({ detail }: CostTransactionDe
         </dl>
       </section>
 
+      {detail.costAllocations.length > 1 ? (
+        <section className="cost-detail-section">
+          <header className="cost-detail-section-header">
+            <h2>OA 成本拆分</h2>
+            <p>该流水按 OA 明确金额拆分；各行合计等于流水成本金额。</p>
+          </header>
+          <dl className="cost-detail-grid compact">
+            {detail.costAllocations.map((allocation) => (
+              <div key={allocation.rowKey} className="cost-detail-item">
+                <dt>{allocation.projectName} · {allocation.expenseType}</dt>
+                <dd>
+                  {formatCostAmount(allocation.amount)}
+                  {allocation.expenseContent ? ` · ${allocation.expenseContent}` : ""}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+      ) : null}
+
       <section className="cost-detail-section">
         <header className="cost-detail-section-header">
           <h2>流水摘要字段</h2>

@@ -72,11 +72,11 @@ REVERSIBLE_RELATION_SHAPE_CONTRACTS: dict[str, dict[str, object]] = {
             "bank-details",
             "pending-invoices",
             "input-invoice-usage",
-            "cost-statistics",
         ),
         "non_consumer_isolation_page_keys": (
             "output-invoice-collections",
             "oa-pending-payments",
+            "cost-statistics",
             "tax-offset",
         ),
     },

@@ -474,6 +474,11 @@ describe("Cost statistics page", () => {
     expect(within(dialog).queryByText("支付账户")).not.toBeInTheDocument();
     expect(within(dialog).queryByText("资金方向")).not.toBeInTheDocument();
     expect(within(dialog).getByText("支出")).toHaveClass("direction-tag");
+    expect(within(dialog).getByRole("heading", { name: "OA 成本拆分" })).toBeInTheDocument();
+    expect(within(dialog).getByText("云南溯源科技 · 设备货款及材料费")).toBeInTheDocument();
+    expect(within(dialog).getByText("昆明升级项目 · 安装服务费")).toBeInTheDocument();
+    expect(within(dialog).getByText(/6,000\.00/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/4,000\.00/)).toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "关闭" }));
     expect(screen.queryByRole("dialog", { name: "流水详情" })).not.toBeInTheDocument();
   });

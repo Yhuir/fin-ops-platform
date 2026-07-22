@@ -60,13 +60,43 @@ class CostStatisticsSqlProjectionRuleTests(unittest.TestCase):
         self.assertEqual(payload["time_rows"][0]["expense_content"], "项目现场往返交通")
         self.assertEqual(payload["time_rows"][0]["oa_applicant"], "刘际涛")
 
-    def test_projection_rejects_excluded_oa_rows(self) -> None:
-        excluded_fields = (
+    def test_projection_excludes_in_progress_oa_and_uses_only_completed_contexts(self) -> None:
+        only_in_progress = self._group(
+            group_id="in-progress-only",
+            oa_row=self._oa_row(workflow_status="in_progress"),
+        )
+        mixed = self._group(
+            group_id="mixed-status",
+            oa_rows=[
+                self._oa_row(
+                    id="oa-completed",
+                    workflow_status="completed",
+                    project_name="已完成项目",
+                    expense_type="材料费",
+                ),
+                self._oa_row(
+                    id="oa-in-progress",
+                    workflow_status="in_progress",
+                    project_name="进行中项目",
+                    expense_type="劳务费",
+                ),
+            ],
+        )
+
+        payload = self._payload([only_in_progress, mixed])
+
+        self.assertEqual(payload["summary"], {"row_count": 1, "transaction_count": 1, "total_amount": "1,000.00"})
+        self.assertEqual(payload["time_rows"][0]["group_id"], "mixed-status")
+        self.assertEqual(payload["time_rows"][0]["project_name"], "已完成项目")
+        self.assertEqual(payload["time_rows"][0]["expense_type"], "材料费")
+
+    def test_projection_ignores_legacy_oa_exclusion_markers(self) -> None:
+        legacy_exclusion_fields = (
             {"cost_excluded": True},
             {"tags": ["冲"]},
             {"oa_bank_relation": {"code": "oa_invoice_offset_auto_match"}},
         )
-        for index, excluded in enumerate(excluded_fields):
+        for index, excluded in enumerate(legacy_exclusion_fields):
             with self.subTest(excluded=excluded):
                 group = self._group(
                     group_id=f"excluded-{index}",
@@ -78,10 +108,10 @@ class CostStatisticsSqlProjectionRuleTests(unittest.TestCase):
                     },
                 )
                 payload = self._payload([group])
-                self.assertEqual(payload["summary"]["transaction_count"], 0)
-                self.assertEqual(payload["time_rows"], [])
+                self.assertEqual(payload["summary"]["transaction_count"], 1)
+                self.assertEqual(payload["summary"]["total_amount"], "1,000.00")
 
-    def test_projection_rejects_loan_incomplete_and_conflicting_oa_contexts(self) -> None:
+    def test_projection_keeps_loan_incomplete_and_conflicting_oa_contexts(self) -> None:
         cases = (
             [self._oa_row(expense_type="借款")],
             [self._oa_row(expense_content="")],
@@ -90,9 +120,15 @@ class CostStatisticsSqlProjectionRuleTests(unittest.TestCase):
         for index, oa_rows in enumerate(cases):
             with self.subTest(index=index):
                 payload = self._payload([self._group(group_id=f"invalid-{index}", oa_rows=oa_rows)])
-                self.assertEqual(payload["summary"]["transaction_count"], 0)
+                self.assertEqual(payload["summary"]["transaction_count"], 1)
+        loan = self._payload([self._group(oa_rows=cases[0])])["time_rows"][0]
+        incomplete = self._payload([self._group(oa_rows=cases[1])])["time_rows"][0]
+        conflicting = self._payload([self._group(oa_rows=cases[2])])["time_rows"][0]
+        self.assertEqual(loan["expense_type"], "借款")
+        self.assertEqual(incomplete["expense_content"], "交通费")
+        self.assertEqual(conflicting["project_name"], "多项目")
 
-    def test_projection_keeps_hint_only_and_excludes_exclude_all(self) -> None:
+    def test_projection_ignores_legacy_special_exclusion_policy(self) -> None:
         hint = self._group(
             group_id="cash-hint",
             special_metadata={
@@ -112,9 +148,12 @@ class CostStatisticsSqlProjectionRuleTests(unittest.TestCase):
 
         payload = self._payload([hint, excluded])
 
-        self.assertEqual(payload["summary"]["transaction_count"], 1)
-        self.assertEqual(payload["summary"]["total_amount"], "1,000.00")
-        self.assertEqual(payload["time_rows"][0]["group_id"], "cash-hint")
+        self.assertEqual(payload["summary"]["transaction_count"], 2)
+        self.assertEqual(payload["summary"]["total_amount"], "2,000.00")
+        self.assertEqual(
+            {row["group_id"] for row in payload["time_rows"]},
+            {"cash-hint", "cash-pass-through"},
+        )
 
     def test_projection_uses_only_confirmed_ticket_cost(self) -> None:
         group = self._group(
@@ -138,13 +177,122 @@ class CostStatisticsSqlProjectionRuleTests(unittest.TestCase):
         self.assertEqual(payload["time_rows"][0]["expense_type"], "现金往来")
         self.assertEqual(payload["time_rows"][0]["expense_content"], "买票成本")
 
-    def test_projection_reads_special_policy_from_group_member(self) -> None:
+    def test_projection_excludes_ticket_cost_when_oa_is_in_progress(self) -> None:
+        group = self._group(
+            group_id="cash-ticket-in-progress",
+            oa_row=self._oa_row(workflow_status="in_progress"),
+            special_metadata={
+                "special_type": "cash_ticket_purchase",
+                "ticket_cost_amount": "120.00",
+            },
+        )
+
+        payload = self._payload([group])
+
+        self.assertEqual(
+            payload["summary"],
+            {"row_count": 0, "transaction_count": 0, "total_amount": "0.00"},
+        )
+
+    def test_projection_ignores_invoice_member_metadata(self) -> None:
+        group = self._group(group_id="invoice-metadata")
+        group["invoice_rows"] = [
+            {
+                "id": "invoice-1",
+                "type": "invoice",
+                "special_metadata": {
+                    "special_type": "cash_ticket_purchase",
+                    "ticket_cost_amount": "120.00",
+                },
+            }
+        ]
+
+        payload = self._payload([group])
+
+        self.assertEqual(
+            payload["summary"],
+            {"row_count": 1, "transaction_count": 1, "total_amount": "1,000.00"},
+        )
+
+    def test_projection_does_not_let_member_exclude_all_override_oa_pair(self) -> None:
         group = self._group(group_id="member-policy")
         group["oa_rows"][0]["special_metadata"] = {"cost_policy": "exclude_all"}
 
         payload = self._payload([group])
 
-        self.assertEqual(payload["summary"]["transaction_count"], 0)
+        self.assertEqual(payload["summary"]["transaction_count"], 1)
+
+    def test_projection_splits_one_bank_by_exact_multi_oa_amounts(self) -> None:
+        group = self._group(
+            oa_rows=[
+                self._oa_row(id="oa-a", project_name="项目A", expense_type="材料费", amount="60.00"),
+                self._oa_row(id="oa-b", project_name="项目B", expense_type="劳务费", amount="40.00"),
+            ],
+            bank_rows=[self._bank_row("bank-split", debit_amount="100.00")],
+        )
+
+        payload = self._payload([group])
+
+        self.assertEqual(payload["summary"], {"row_count": 2, "transaction_count": 1, "total_amount": "100.00"})
+        self.assertEqual(
+            {(row["row_key"], row["project_name"], row["expense_type"], row["amount"]) for row in payload["time_rows"]},
+            {
+                ("bank-split:oa:oa-a", "项目A", "材料费", "60.00"),
+                ("bank-split:oa:oa-b", "项目B", "劳务费", "40.00"),
+            },
+        )
+        self.assertEqual({row["transaction_count"] for row in payload["project_rows"]}, {1})
+
+    def test_projection_does_not_infer_split_when_amounts_mismatch(self) -> None:
+        group = self._group(
+            oa_rows=[
+                self._oa_row(id="oa-a", project_name="项目A", expense_type="材料费", amount="60.00"),
+                self._oa_row(id="oa-b", project_name="项目B", expense_type="劳务费", amount="30.00"),
+            ],
+            bank_rows=[self._bank_row("bank-full", debit_amount="100.00")],
+        )
+
+        payload = self._payload([group])
+
+        self.assertEqual(payload["summary"], {"row_count": 1, "transaction_count": 1, "total_amount": "100.00"})
+        self.assertEqual(payload["time_rows"][0]["row_key"], "bank-full:full")
+        self.assertEqual(payload["time_rows"][0]["project_name"], "多项目")
+        self.assertEqual(payload["time_rows"][0]["expense_type"], "多费用类型")
+
+    def test_projection_does_not_split_multiple_bank_rows(self) -> None:
+        group = self._group(
+            oa_rows=[
+                self._oa_row(id="oa-a", project_name="项目A", amount="60.00"),
+                self._oa_row(id="oa-b", project_name="项目B", amount="40.00"),
+            ],
+            bank_rows=[
+                self._bank_row("bank-a", debit_amount="60.00"),
+                self._bank_row("bank-b", debit_amount="40.00"),
+            ],
+        )
+
+        payload = self._payload([group])
+
+        self.assertEqual(payload["summary"], {"row_count": 2, "transaction_count": 2, "total_amount": "100.00"})
+        self.assertEqual({row["project_name"] for row in payload["time_rows"]}, {"多项目"})
+        self.assertEqual({row["row_key"] for row in payload["time_rows"]}, {"bank-a:full", "bank-b:full"})
+
+    def test_projection_owns_cross_month_relation_by_native_bank_month(self) -> None:
+        payload = self._payload(
+            [
+                self._group(
+                    bank_rows=[
+                        {
+                            **self._bank_row("bank-feb", debit_amount="100.00"),
+                            "trade_time": "2026-02-28 23:59:59",
+                        }
+                    ]
+                )
+            ]
+        )
+
+        self.assertEqual(payload["summary"], {"row_count": 0, "transaction_count": 0, "total_amount": "0.00"})
+        self.assertEqual(payload["time_rows"], [])
 
     def test_active_scope_excludes_only_known_completed_projects(self) -> None:
         groups = [

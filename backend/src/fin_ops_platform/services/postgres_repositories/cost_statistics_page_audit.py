@@ -145,8 +145,8 @@ def _audit_cost_statistics_snapshot(
             "scope_types": list(COST_STATISTICS_AUDIT_SCOPE_TYPES),
             "event_types": list(COST_STATISTICS_AUDIT_EVENT_TYPES),
             "canonical_expected_set": (
-                "eligible proven active Workbench OA-bank rows plus every active canonical expense "
-                "bank transaction by month"
+                "native-month non-zero bank outflows in active formal Workbench relations that contain "
+                "completed OA rows, with exact one-bank multi-OA amount allocation when OA amounts close"
             ),
             "key_display_fields": [
                 "transaction_id",
@@ -549,18 +549,27 @@ def _exact_set_issues(
         order by scope_key, activated_at desc nulls last, updated_at desc
     ),
     scoped_groups as (
-        select generation.generation_id, generation.scope_key, group_row.group_id, group_row.zone
+        select generation.generation_id, generation.scope_key, group_row.group_id, group_row.zone,
+               case
+                   when jsonb_typeof(group_row.payload->'normalized_payload') = 'object'
+                   then group_row.payload->'normalized_payload'
+                   when group_row.payload is not null then group_row.payload
+                   when jsonb_typeof(group_row.raw_payload->'normalized_payload') = 'object'
+                   then group_row.raw_payload->'normalized_payload'
+                   else coalesce(group_row.raw_payload, '{}'::jsonb)
+               end as group_payload
         from active_generations generation
         join read_model.workbench_groups group_row
           on group_row.generation_id = generation.generation_id
          and group_row.scope_key = generation.scope_key
         where group_row.zone in ('paired', 'unpaired')
+          and group_row.group_type = 'relation'
           and group_row.source_kinds && array['oa', 'bank']::text[]
     ),
     member_payloads as not materialized (
         select group_row.generation_id, group_row.scope_key, group_row.group_id,
-               group_row.zone,
-               member.pane, member.row_id,
+               group_row.zone, group_row.group_payload,
+               member.pane, member.row_id, member.row_index,
                case
                    when source.payload is not null then
                        case
@@ -601,27 +610,39 @@ def _exact_set_issues(
          and source.row_id = member.row_id
     ),
     group_facts as (
-        select generation_id, scope_key, group_id, zone,
+        select generation_id, scope_key, group_id, zone, group_payload,
                bool_or(pane = 'oa') as has_oa,
                bool_or(pane = 'bank') as has_bank
         from member_payloads
-        group by generation_id, scope_key, group_id, zone
+        group by generation_id, scope_key, group_id, zone, group_payload
     ),
     eligible_groups as (
-        select generation_id, scope_key, group_id, zone
+        select generation_id, scope_key, group_id, zone,
+               coalesce(
+                   case when jsonb_typeof(group_payload->'special_metadata') = 'object'
+                        then group_payload->'special_metadata' end,
+                   '{}'::jsonb
+               ) as special_metadata
         from group_facts
         where has_oa
           and has_bank
-          and zone = 'paired'
     ),
     oa_contexts as (
         select group_row.generation_id, group_row.scope_key, group_row.group_id,
+               group_row.special_metadata,
+               coalesce(
+                   nullif(member.member_payload->>'id', ''),
+                   nullif(member.member_payload->>'row_id', ''),
+                   member.row_id,
+                   'index-' || member.row_index::text
+               ) as oa_id,
                coalesce(
                    nullif(case when btrim(member.member_payload->>'project_name') in ('', '-', '--', '—', '——')
                                then '' else btrim(member.member_payload->>'project_name') end, ''),
                    nullif(case when btrim(member.member_payload->'detail_fields'->>'项目名称')
                                         in ('', '-', '--', '—', '——')
                                then '' else btrim(member.member_payload->'detail_fields'->>'项目名称') end, '')
+                   , '未归集项目'
                ) as project_name,
                coalesce(
                    nullif(case when btrim(member.member_payload->>'project_id') in ('', '-', '--', '—', '——')
@@ -637,6 +658,7 @@ def _exact_set_issues(
                    nullif(case when btrim(member.member_payload->'detail_fields'->>'费用类型')
                                         in ('', '-', '--', '—', '——')
                                then '' else btrim(member.member_payload->'detail_fields'->>'费用类型') end, '')
+                   , '未分类'
                ) as expense_type,
                coalesce(
                    nullif(case when btrim(member.member_payload->>'expense_content') in ('', '-', '--', '—', '——')
@@ -646,6 +668,14 @@ def _exact_set_issues(
                    nullif(case when btrim(member.member_payload->'detail_fields'->>'费用内容')
                                         in ('', '-', '--', '—', '——')
                                then '' else btrim(member.member_payload->'detail_fields'->>'费用内容') end, '')
+                   , coalesce(
+                       nullif(case when btrim(member.member_payload->>'expense_type') in ('', '-', '--', '—', '——')
+                                   then '' else btrim(member.member_payload->>'expense_type') end, ''),
+                       nullif(case when btrim(member.member_payload->'detail_fields'->>'费用类型')
+                                            in ('', '-', '--', '—', '——')
+                                   then '' else btrim(member.member_payload->'detail_fields'->>'费用类型') end, ''),
+                       '未分类'
+                   )
                ) as expense_content,
                coalesce(
                    nullif(case when btrim(member.member_payload->>'applicant') in ('', '-', '--', '—', '——')
@@ -653,31 +683,50 @@ def _exact_set_issues(
                    nullif(case when btrim(member.member_payload->'detail_fields'->>'申请人')
                                         in ('', '-', '--', '—', '——')
                                then '' else btrim(member.member_payload->'detail_fields'->>'申请人') end, ''),
-                   ''
-               ) as applicant
+                   '—'
+               ) as applicant,
+               case
+                   when replace(coalesce(member.member_payload->>'reconciliation_amount', ''), ',', '')
+                        ~ '^-?[0-9]+([.][0-9]+)?$'
+                    and replace(member.member_payload->>'reconciliation_amount', ',', '')::numeric > 0
+                   then round(replace(member.member_payload->>'reconciliation_amount', ',', '')::numeric, 2)
+                   when replace(coalesce(member.member_payload->>'amount', ''), ',', '')
+                        ~ '^-?[0-9]+([.][0-9]+)?$'
+                    and replace(member.member_payload->>'amount', ',', '')::numeric > 0
+                   then round(replace(member.member_payload->>'amount', ',', '')::numeric, 2)
+                   else null
+               end as allocation_amount
         from eligible_groups group_row
         join member_payloads member
           on member.generation_id = group_row.generation_id
          and member.scope_key = group_row.scope_key
          and member.group_id = group_row.group_id
          and member.pane = 'oa'
+        where (
+            member.member_payload->>'workflow_status' is null
+            or member.member_payload->>'workflow_status' = ''
+            or member.member_payload->>'workflow_status'
+               in ('completed', '已完成', 'approved', 'APPROVED', 'Approved', '2')
+        )
     ),
     eligible_context_groups as (
-        select generation_id, scope_key, group_id,
-               max(project_name) as project_name,
-               max(project_id) as project_id,
-               max(expense_type) as expense_type,
-               max(expense_content) as expense_content,
-               max(applicant) as applicant
+        select generation_id, scope_key, group_id, special_metadata,
+               case when count(distinct project_name) = 1
+                    then min(project_name) else '多项目' end as project_name,
+               case when count(distinct project_name) = 1
+                         and count(distinct nullif(project_id, '')) = 1
+                    then max(project_id) else '' end as project_id,
+               case when count(distinct expense_type) = 1
+                    then min(expense_type) else '多费用类型' end as expense_type,
+               string_agg(distinct expense_content, '、' order by expense_content) as expense_content,
+               string_agg(distinct applicant, '、' order by applicant) as applicant,
+               count(*)::integer as oa_count,
+               count(distinct project_name)::integer as project_identity_count,
+               count(distinct expense_type)::integer as expense_type_count,
+               bool_and(allocation_amount is not null) as all_allocation_amounts_valid,
+               sum(allocation_amount) as oa_amount_sum
         from oa_contexts
-        where nullif(project_name, '') is not null
-          and nullif(expense_type, '') is not null
-          and nullif(expense_content, '') is not null
-          and expense_type not in ('借款', '还款')
-        group by generation_id, scope_key, group_id
-        having count(distinct concat_ws(
-                   chr(31), project_name, project_id, expense_type, expense_content, applicant
-               )) = 1
+        group by generation_id, scope_key, group_id, special_metadata
     ),
     bank_tag_sources as (
         select transaction_id,
@@ -720,8 +769,19 @@ def _exact_set_issues(
                effective_label_path
         from bank_tag_sources
     ),
-    expected_cost_members as (
-        select group_row.scope_key, group_row.group_id,
+    bank_cost_members as (
+        select coalesce(
+                   to_char(bank_source.txn_month, 'YYYY-MM'),
+                   substring(coalesce(
+                       nullif(member.member_payload->>'trade_time', ''),
+                       member.member_payload->>'date',
+                       ''
+                   ) from 1 for 7)
+               ) as scope_key,
+               group_row.scope_key as relation_scope_key,
+               group_row.group_id,
+               group_row.special_metadata,
+               member.row_id, member.row_index,
                bank_identity.transaction_id,
                group_row.project_name,
                group_row.project_id,
@@ -769,7 +829,9 @@ def _exact_set_issues(
                        member.member_payload->>'amount'
                    ),
                    ',', ''
-               ) as amount_value
+               ) as amount_value,
+               replace(coalesce(member.member_payload->>'credit_amount', ''), ',', '')
+                   as credit_amount_value
         from eligible_context_groups group_row
         join member_payloads member
           on member.generation_id = group_row.generation_id
@@ -784,7 +846,7 @@ def _exact_set_issues(
                    ) as transaction_id
         ) bank_identity
         left join lateral (
-            select source.id
+            select source.id, source.txn_month
             from app.bank_transactions source
             where source.id = case
                       when bank_identity.transaction_id ~* (
@@ -796,7 +858,7 @@ def _exact_set_issues(
                   end
               and source.status <> 'deleted'
             union all
-            select source.id
+            select source.id, source.txn_month
             from app.bank_transactions source
             where source.legacy_mongo_id = bank_identity.transaction_id
               and source.status <> 'deleted'
@@ -812,12 +874,152 @@ def _exact_set_issues(
         left join bank_tag_contexts tag
           on tag.transaction_id = bank_source.id::text
     ),
+    valid_bank_cost_members as (
+        select bank_row.*,
+               round(abs(amount_value::numeric), 2) as bank_amount
+        from bank_cost_members bank_row
+        where scope_key = relation_scope_key
+          and (
+                direction_value = ''
+             or position('out' in direction_value) > 0
+             or position('支出' in direction_value) > 0
+             or position('付款' in direction_value) > 0
+             or position('debit' in direction_value) > 0
+        )
+          and amount_value ~ '^-?[0-9]+([.][0-9]+)?$'
+          and amount_value::numeric <> 0
+          and (
+                credit_amount_value !~ '^-?[0-9]+([.][0-9]+)?$'
+             or credit_amount_value::numeric = 0
+          )
+    ),
+    bank_group_facts as (
+        select relation_scope_key, group_id,
+               count(*)::integer as bank_count,
+               max(bank_amount) as single_bank_amount
+        from valid_bank_cost_members
+        group by relation_scope_key, group_id
+    ),
+    allocation_groups as (
+        select group_row.*,
+               bank_row.bank_count,
+               bank_row.single_bank_amount,
+               (
+                   bank_row.bank_count = 1
+                   and group_row.oa_count > 1
+                   and (group_row.project_identity_count > 1 or group_row.expense_type_count > 1)
+                   and group_row.all_allocation_amounts_valid
+                   and round(group_row.oa_amount_sum, 2) = round(bank_row.single_bank_amount, 2)
+               ) as exact_split,
+               coalesce(group_row.special_metadata->>'cost_policy', '') = 'include_ticket_cost_only'
+                   as ticket_only
+        from eligible_context_groups group_row
+        join bank_group_facts bank_row
+          on bank_row.relation_scope_key = group_row.scope_key
+         and bank_row.group_id = group_row.group_id
+    ),
+    expected_cost_members as (
+        select bank_row.scope_key, bank_row.group_id,
+               bank_row.transaction_id || ':oa:' || oa_row.oa_id as row_key,
+               bank_row.transaction_id,
+               oa_row.project_name,
+               oa_row.project_id,
+               oa_row.expense_type,
+               oa_row.expense_content,
+               oa_row.applicant as oa_applicant,
+               bank_row.trade_time,
+               bank_row.counterparty_name,
+               bank_row.payment_account_label,
+               bank_row.direction,
+               bank_row.remark,
+               bank_row.bank_tag_code,
+               bank_row.bank_tag_label,
+               bank_row.bank_tag_primary_label,
+               bank_row.bank_tag_sub_label,
+               bank_row.bank_tag_label_path,
+               oa_row.allocation_amount as expected_amount
+        from allocation_groups allocation
+        join valid_bank_cost_members bank_row
+          on bank_row.relation_scope_key = allocation.scope_key
+         and bank_row.group_id = allocation.group_id
+        join oa_contexts oa_row
+          on oa_row.scope_key = allocation.scope_key
+         and oa_row.group_id = allocation.group_id
+        where allocation.exact_split
+          and not allocation.ticket_only
+
+        union all
+
+        select bank_row.scope_key, bank_row.group_id,
+               bank_row.transaction_id || ':full' as row_key,
+               bank_row.transaction_id,
+               allocation.project_name,
+               allocation.project_id,
+               allocation.expense_type,
+               allocation.expense_content,
+               coalesce(nullif(allocation.applicant, ''), '—') as oa_applicant,
+               bank_row.trade_time,
+               bank_row.counterparty_name,
+               bank_row.payment_account_label,
+               bank_row.direction,
+               bank_row.remark,
+               bank_row.bank_tag_code,
+               bank_row.bank_tag_label,
+               bank_row.bank_tag_primary_label,
+               bank_row.bank_tag_sub_label,
+               bank_row.bank_tag_label_path,
+               bank_row.bank_amount as expected_amount
+        from allocation_groups allocation
+        join valid_bank_cost_members bank_row
+          on bank_row.relation_scope_key = allocation.scope_key
+         and bank_row.group_id = allocation.group_id
+        where not allocation.exact_split
+          and not allocation.ticket_only
+
+        union all
+
+        select bank_row.scope_key, bank_row.group_id,
+               bank_row.transaction_id || ':ticket' as row_key,
+               bank_row.transaction_id,
+               coalesce(nullif(allocation.special_metadata->>'project_name', ''), allocation.project_name),
+               coalesce(nullif(allocation.special_metadata->>'project_id', ''), allocation.project_id),
+               coalesce(nullif(allocation.special_metadata->>'expense_type', ''), allocation.expense_type, '现金往来'),
+               coalesce(nullif(allocation.special_metadata->>'expense_content', ''), '买票成本'),
+               coalesce(nullif(allocation.applicant, ''), '—') as oa_applicant,
+               bank_row.trade_time,
+               bank_row.counterparty_name,
+               bank_row.payment_account_label,
+               bank_row.direction,
+               bank_row.remark,
+               bank_row.bank_tag_code,
+               bank_row.bank_tag_label,
+               bank_row.bank_tag_primary_label,
+               bank_row.bank_tag_sub_label,
+               bank_row.bank_tag_label_path,
+               abs(replace(allocation.special_metadata->>'ticket_cost_amount', ',', '')::numeric)
+                   as expected_amount
+        from allocation_groups allocation
+        join lateral (
+            select member.*
+            from valid_bank_cost_members member
+            where member.relation_scope_key = allocation.scope_key
+              and member.group_id = allocation.group_id
+            order by member.row_index, member.row_id
+            limit 1
+        ) bank_row on true
+        where allocation.ticket_only
+          and allocation.special_metadata->>'special_type' = 'cash_ticket_purchase'
+          and replace(coalesce(allocation.special_metadata->>'ticket_cost_amount', ''), ',', '')
+              ~ '^-?[0-9]+([.][0-9]+)?$'
+          and replace(allocation.special_metadata->>'ticket_cost_amount', ',', '')::numeric <> 0
+    ),
     expected_cost as (
         select scope_key, transaction_id,
                count(*)::integer as expected_count,
-               sum(abs(amount_value::numeric))::numeric as expected_amount,
+               sum(expected_amount)::numeric as expected_amount,
                jsonb_agg(
                    jsonb_build_object(
+                       'row_key', row_key,
                        'group_id', group_id,
                        'project_name', project_name,
                        'project_id', project_id,
@@ -835,18 +1037,9 @@ def _exact_set_issues(
                        'bank_tag_sub_label', bank_tag_sub_label,
                        'bank_tag_label_path', bank_tag_label_path
                    )
-                   order by group_id, project_name, expense_type, expense_content
+                   order by row_key
                ) as expected_fields
         from expected_cost_members
-        where (
-                direction_value = ''
-             or position('out' in direction_value) > 0
-             or position('支出' in direction_value) > 0
-             or position('付款' in direction_value) > 0
-             or position('debit' in direction_value) > 0
-        )
-          and amount_value ~ '^-?[0-9]+([.][0-9]+)?$'
-          and amount_value::numeric <> 0
         group by scope_key, transaction_id
     ),
     projected_cost as (
@@ -855,6 +1048,7 @@ def _exact_set_issues(
                sum(abs(amount))::numeric as projected_amount,
                jsonb_agg(
                    jsonb_build_object(
+                       'row_key', row_key,
                        'group_id', coalesce(group_id, ''),
                        'project_name', coalesce(project_name, ''),
                        'project_id', coalesce(project_id, ''),
@@ -872,7 +1066,7 @@ def _exact_set_issues(
                        'bank_tag_sub_label', coalesce(payload->>'bank_tag_sub_label', ''),
                        'bank_tag_label_path', coalesce(payload->'bank_tag_label_path', '[]'::jsonb)
                    )
-                   order by coalesce(group_id, ''), project_name, expense_type, expense_content
+                   order by row_key
                ) as projected_fields
         from read_model.cost_statistics_rows
         where project_scope = 'all'
@@ -1285,7 +1479,7 @@ def _key_display_field_issues(
                       when coalesce(model.payload->'payload'->'summary'->>'transaction_count', '') ~ '^[0-9]+$'
                       then (model.payload->'payload'->'summary'->>'transaction_count')::integer
                       else -1
-                  end <> recalculated.row_count
+                  end <> recalculated.transaction_count
                or case
                       when coalesce(model.payload->'payload'->'summary'->>'row_count', '') ~ '^[0-9]+$'
                       then (model.payload->'payload'->'summary'->>'row_count')::integer
@@ -1312,7 +1506,7 @@ def _key_display_field_issues(
                            ) ~ '^[0-9]+$'
                       then (model.payload->'payload'->'bank_flow_summary'->>'transaction_count')::integer
                       else -1
-                  end <> bank_recalculated.row_count
+                  end <> bank_recalculated.transaction_count
                or case
                       when coalesce(model.payload->'payload'->'bank_flow_summary'->>'row_count', '') ~ '^[0-9]+$'
                       then (model.payload->'payload'->'bank_flow_summary'->>'row_count')::integer
@@ -1452,16 +1646,16 @@ def _key_display_field_issues(
             """
             /* check: cost_group_summaries */
             with expected_scope_rows as (
-                select scope_key, project_name, expense_type, amount
+                select scope_key, transaction_id, project_name, expense_type, amount
                 from read_model.cost_statistics_rows
                 union all
-                select project_scope || ':all', project_name, expense_type, amount
+                select project_scope || ':all', transaction_id, project_name, expense_type, amount
                 from read_model.cost_statistics_rows
                 where scope_key ~ '^(active|all):[0-9]{4}-[0-9]{2}$'
             ),
             expected_projects as (
                 select scope_key, project_name as group_key,
-                       count(*)::integer as transaction_count,
+                       count(distinct transaction_id)::integer as transaction_count,
                        count(distinct expense_type)::integer as related_count,
                        sum(amount)::numeric as total_amount
                 from expected_scope_rows
@@ -1517,7 +1711,7 @@ def _key_display_field_issues(
             ),
             expected_expenses as (
                 select scope_key, expense_type as group_key,
-                       count(*)::integer as transaction_count,
+                       count(distinct transaction_id)::integer as transaction_count,
                        count(distinct project_name)::integer as related_count,
                        sum(amount)::numeric as total_amount
                 from expected_scope_rows

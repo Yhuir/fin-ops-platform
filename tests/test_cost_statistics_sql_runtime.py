@@ -570,6 +570,26 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
                     "payment_account_label": "工行",
                     "bank_tag_code": "fee",
                     "bank_tag_label_path": ["费用", "材料"],
+                    "cost_allocations": [
+                        {
+                            "row_key": "txn-1:oa:oa-a",
+                            "project_name": "项目A",
+                            "project_id": "P-A",
+                            "expense_type": "材料",
+                            "expense_content": "钢材",
+                            "oa_applicant": "张三",
+                            "amount": "60.00",
+                        },
+                        {
+                            "row_key": "txn-1:oa:oa-b",
+                            "project_name": "项目B",
+                            "project_id": "P-B",
+                            "expense_type": "劳务",
+                            "expense_content": "安装",
+                            "oa_applicant": "李四",
+                            "amount": "40.00",
+                        },
+                    ],
                 }
 
         repository = Repository()
@@ -583,7 +603,10 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
 
         self.assertEqual(repository.transaction_calls, [("active", "txn-1")])
         self.assertEqual(detail["month"], "2026-05")
-        self.assertEqual(detail["transaction"]["amount"], "88.50")
+        self.assertEqual(detail["transaction"]["amount"], "100.00")
+        self.assertEqual(detail["transaction"]["project_name"], "多项目")
+        self.assertEqual(detail["transaction"]["expense_type"], "多费用类型")
+        self.assertEqual(len(detail["transaction"]["cost_allocations"]), 2)
 
     def test_transaction_detail_non_fresh_gate_blocks_point_lookup(self) -> None:
         runtime = CostStatisticsRuntimeStub()
@@ -834,11 +857,26 @@ class CostStatisticsReadConnection:
     def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
         normalized = " ".join(sql.lower().split())
         self.fetch_one_calls.append((normalized, params))
-        if "from (" in normalized and "read_model.cost_statistics_bank_flow_rows" in normalized:
+        if "with candidate as" in normalized and "read_model.cost_statistics_bank_flow_rows" in normalized:
             project_scope, transaction_id = params[:2]
             for row in [*self.cost_rows, *self.bank_flow_rows]:
                 if row.get("project_scope") == project_scope and row.get("transaction_id") == transaction_id:
-                    return row
+                    result = dict(row)
+                    result["cost_allocations"] = [
+                        {
+                            "row_key": item.get("row_key"),
+                            "project_name": item.get("project_name") or (item.get("payload") or {}).get("project_name"),
+                            "project_id": item.get("project_id") or "",
+                            "expense_type": item.get("expense_type") or (item.get("payload") or {}).get("expense_type"),
+                            "expense_content": item.get("expense_content") or "",
+                            "oa_applicant": item.get("oa_applicant") or "—",
+                            "amount": item.get("amount"),
+                        }
+                        for item in self.cost_rows
+                        if item.get("project_scope") == project_scope
+                        and item.get("transaction_id") == transaction_id
+                    ]
+                    return result
             return None
         if "left join lateral" in normalized and "read_model.cost_statistics_read_models" in normalized:
             if not isinstance(self.read_model_row, dict):
@@ -928,8 +966,14 @@ class CostStatisticsWriteConnection:
 
 
 class CostStatisticsProjectionConnection:
-    def __init__(self, *, include_open_candidate: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        include_open_candidate: bool = False,
+        include_unpaired_relation: bool = False,
+    ) -> None:
         self.include_open_candidate = include_open_candidate
+        self.include_unpaired_relation = include_unpaired_relation
         self.fetch_all_calls: list[tuple[str, tuple]] = []
         self.fetch_one_calls: list[tuple[str, tuple]] = []
 
@@ -990,7 +1034,10 @@ class CostStatisticsProjectionConnection:
                     "member_payload": {"row_id": "bank-1", "type": "bank"},
                 }
             ]
-            if self.include_open_candidate:
+            if self.include_unpaired_relation or (
+                self.include_open_candidate and "g.group_type = 'relation'" not in normalized
+            ):
+                extra_group_type = "relation" if self.include_unpaired_relation else "candidate"
                 rows.extend(
                     [
                         {
@@ -998,7 +1045,7 @@ class CostStatisticsProjectionConnection:
                             "zone": "unpaired",
                             "payload": {
                                 "group_id": "group-candidate",
-                                "group_type": "candidate",
+                                "group_type": extra_group_type,
                                 "relation_status": "candidate",
                                 "reason": "attached_unique_candidate",
                                 "workbench_group_rows_materialized": True,
@@ -1024,7 +1071,7 @@ class CostStatisticsProjectionConnection:
                             "zone": "unpaired",
                             "payload": {
                                 "group_id": "group-candidate",
-                                "group_type": "candidate",
+                                "group_type": extra_group_type,
                                 "relation_status": "candidate",
                                 "reason": "attached_unique_candidate",
                                 "workbench_group_rows_materialized": True,
@@ -1665,6 +1712,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
                 page_calls.append(dict(query))
                 return {
                     "summary": {"row_count": 2, "transaction_count": 2, "total_amount": "30.00"},
+                    "cost_transaction_count": 1,
                     "available_years": ["2026"],
                     "primary_facets": [],
                     "secondary_facets": [],
@@ -1691,6 +1739,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         etag = first.headers["ETag"]
         self.assertEqual(first.status_code, int(HTTPStatus.OK))
         self.assertTrue(first_payload["next_cursor"])
+        self.assertEqual(first_payload["statistics"]["cost_transaction_count"], 1)
         self.assertEqual(len(page_calls), 1)
 
         not_modified = app._cost_statistics_routes().route(
@@ -1763,6 +1812,8 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(sql.count("%s"), len(params))
         self.assertIn("from read_model.cost_statistics_rows", sql.lower())
         self.assertIn("with available_years as materialized", sql.lower())
+        self.assertIn("selected_cost_transactions as materialized", sql.lower())
+        self.assertIn("count(distinct transaction_id)", sql.lower())
         self.assertIn("raw_base as materialized", sql.lower())
         self.assertIn("then '0.0%%'", sql)
         self.assertIn("::text || '%%'", sql)
@@ -2301,11 +2352,15 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual(row["transaction_id"], "txn-1")
         self.assertEqual(row["amount"], "19.25")
+        self.assertEqual(row["cost_allocations"][0]["amount"], "19.25")
         sql, params = connection.fetch_one_calls[0]
         self.assertIn("from read_model.cost_statistics_rows", sql)
         self.assertIn("from read_model.cost_statistics_bank_flow_rows", sql)
         self.assertIn("order by row_priority", sql)
-        self.assertEqual(params, ("active", "txn-1", "active", "txn-1"))
+        self.assertEqual(
+            params,
+            ("active", "txn-1", "active", "txn-1", "active", "txn-1"),
+        )
 
     def test_repository_cost_export_page_filters_and_bounds_structured_rows(self) -> None:
         class Connection:
@@ -2980,6 +3035,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["time_rows"][0]["bank_tag_primary_label"], "项目开销")
         self.assertEqual(payload["time_rows"][0]["bank_tag_sub_label"], "设备材料")
         self.assertEqual(payload["time_rows"][0]["bank_tag_label_path"], ["项目开销", "设备材料"])
+        self.assertIn("g.group_type = 'relation'", connection.fetch_all_calls[0][0])
         self.assertEqual(tag_facade.source_version_calls, [])
         self.assertEqual(tag_facade.category_calls, [])
         self.assertEqual(tag_facade.month_calls, [])
@@ -3028,6 +3084,29 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
             if "from app.app_settings" in sql
         ]
         self.assertEqual(len(settings_reads), 1)
+
+    def test_cost_statistics_sql_projection_includes_unpaired_formal_relation_without_invoice(self) -> None:
+        repository = CostStatisticsSaveRecorder()
+        builder = CostStatisticsSqlProjectionBuilder(
+            connection=CostStatisticsProjectionConnection(include_unpaired_relation=True),
+            read_model_repository=repository,
+            bank_transaction_tag_read_facade=CostStatisticsBankTagFacade(),
+        )
+
+        result = builder.rebuild_cost_statistics_read_model_scope(
+            "active:2026-05",
+            tenant_id="default",
+            source_version=7,
+        )
+
+        self.assertEqual(result["entry_count"], 2)
+        payload = repository.saved[0][0]["read_models"]["active:2026-05"]["payload"]
+        self.assertEqual(payload["summary"]["transaction_count"], 2)
+        self.assertEqual(payload["summary"]["total_amount"], "1,009.00")
+        self.assertEqual(
+            {row["transaction_id"] for row in payload["time_rows"]},
+            {"bank-1", "bank-candidate"},
+        )
 
     def test_cost_statistics_sql_projection_reports_rejected_publish(self) -> None:
         repository = CostStatisticsSaveRecorder(publish_result=False)
@@ -3098,6 +3177,11 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(
             source_versions["workbench_source_versions"],
             {"builder": "workbench-v5", "source_version": 2511},
+        )
+        self.assertNotIn("oa_attachment_invoice_parser_version", source_versions)
+        self.assertEqual(
+            source_versions["cost_statistics_read_model_schema_version"],
+            "2026-07-cost-statistics-oa-bank-flow-v11",
         )
         parent_source_versions = cost_statistics_source_versions(
             month="all",
@@ -3551,9 +3635,10 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
                             "source_kind": "bank",
                             "payload": {
                                 "id": "txn-active",
-                                "type": "bank",
-                                "direction": "支出",
-                                "amount": "10.00",
+                            "type": "bank",
+                            "direction": "支出",
+                            "amount": "10.00",
+                            "trade_time": "2026-05-02 10:00:00",
                             },
                         },
                         {

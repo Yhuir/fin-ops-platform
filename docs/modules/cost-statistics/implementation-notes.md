@@ -1,5 +1,13 @@
 # 成本统计 实施记录
 
+## 2026-07-22 - 银行流水中心 OA 成本资格与多 OA 明确金额拆分
+
+- 原因：旧 projection 只接受 `zone=paired`，并要求 OA 项目/费用/内容/申请人形成唯一完整 tuple；同时把 `cost_excluded`、`冲`、自动冲销 code、借款/还款和 `cost_policy=exclude_all` 当成否决条件。这使无发票但已正式 OA+bank 的 `unpaired relation`、多 OA、多维度和借还款流水被漏掉；跨月 relation 还可能在非银行原生月份重复落行。
+- 决策：唯一资格是“银行原生月份非零支出 + active 正式 Workbench relation + 至少一条上游已准入 OA”。发票、relation zone 和旧 OA 排除标记不参与资格。candidate/singleton/无 OA 不进入。
+- 多 OA：仅一笔银行流水且每张 OA 有正数明确金额，并且按 `0.01` 精度合计等于流水金额时逐 OA 拆分；否则每笔银行流水只生成一条 full allocation。项目和费用类型独立判断，一致维度保留，不一致维度使用 `多项目` / `多费用类型`；不按比例猜测、不新增待归因状态或人工操作。
+- 架构：全量与 relation delta 复用同一 allocation helper；现有 `cost_statistics_rows` 以 `<txn>:full` / `<txn>:oa:<oa_id>` / `<txn>:ticket` 存储多行，无 migration。query 单 statement 同时计算当前标签选择下唯一 OA 成本流水数；detail point query additive 返回 allocations。Audit 独立 SQL重算相同事实合同。schema 提升为 v11 并删除 Cost 自身对发票 parser version 的 source dependency。
+- 隔离：不改 Workbench、Bank Detail、Tax Offset、Pending Invoice 或其它页面 owner；不新增 API、worker、queue、表、索引、依赖或 fallback。旧资格函数和常量直接删除，没有并行旧链。
+
 ## 2026-07-21 - 金额展示统一两位小数
 
 - 目标：修复 `1584.350000` 等数据库精度字符串直接出现在成本统计页面的问题。
@@ -403,7 +411,7 @@
 
 - 目标：配合 Workbench active generation payload owner 边界迁移，避免成本统计继续依赖 `workbench_groups.payload` 的旧成员数组。
 - 影响范围：`CostStatisticsSqlProjectionBuilder._cost_entries_from_workbench(...)`、Workbench read model generation payload 合同、成本统计状态机/实施记录、read-models 持久化文档；不改变成本归因业务规则、scope contract、API response 或前端页面行为。
-- 关键决策：成本统计 worker 先从 Workbench 月份 active generation 的 `workbench_group_rows + workbench_rows` materialize 成本关系输入，再复用既有 `is_candidate_workbench_group`、`is_cost_eligible_open_group` 和 `_cost_context_from_oa_rows` 业务判断；禁止恢复 `jsonb_path_exists(workbench_groups.payload, ...)` 读取旧 JSON 成员。
+- 当时决策：成本统计 worker 先从 Workbench 月份 active generation 的 `workbench_group_rows + workbench_rows` materialize 成本关系输入；2026-07-22 已以银行流水中心资格和统一 allocation helper 替换当时的 candidate/open/context 判断。仍禁止恢复 `jsonb_path_exists(workbench_groups.payload, ...)` 读取旧 JSON 成员。
 - 文档影响：更新成本统计状态机/实施记录、read-models boundary、关联台 boundary 和持久化架构文档。
 - 测试覆盖：`tests/test_cost_statistics_sql_runtime.py::CostStatisticsSqlRuntimeTests::test_cost_statistics_sql_projection_excludes_open_candidate_groups_from_amounts` 锁定 SQL 必须 join `workbench_group_rows` 与 `workbench_rows`，且不再使用 `jsonb_path_exists`。
 - 验证命令：`PYTHONPATH=backend/src python3 -m pytest tests/test_cost_statistics_sql_runtime.py tests/test_workbench_sql_runtime.py -q`。

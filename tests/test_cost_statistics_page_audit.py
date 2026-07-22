@@ -204,7 +204,14 @@ class CostStatisticsPageAuditTests(unittest.TestCase):
         self.assertIn("source.legacy_mongo_id = bank_identity.transaction_id", proof_sql)
         self.assertIn("source.id is distinct from case", proof_sql)
         self.assertIn("member_payloads as not materialized", proof_sql)
-        self.assertNotIn("group_payload", proof_sql)
+        self.assertIn("group_row.group_type = 'relation'", proof_sql)
+        self.assertIn("group_row.zone in ('paired', 'unpaired')", proof_sql)
+        self.assertNotIn("zone = 'paired'", proof_sql)
+        self.assertIn("member.member_payload->>'workflow_status'", proof_sql)
+        self.assertIn("'已完成'", proof_sql)
+        self.assertIn("bank_row.transaction_id || ':oa:' || oa_row.oa_id", proof_sql)
+        self.assertIn("bank_row.transaction_id || ':full'", proof_sql)
+        self.assertIn("scope_key = relation_scope_key", proof_sql)
 
         source = COST_PAGE_AUDIT_PATH.read_text(encoding="utf-8")
         for retired_helper in (
@@ -594,6 +601,18 @@ class CostStatisticsPageAuditPostgresTests(unittest.TestCase):
                     "expense_transaction_count": 0,
                     "income_transaction_count": 0,
                 },
+                "statistics": {
+                    "transaction_count": 0,
+                    "expense_transaction_count": 0,
+                    "income_transaction_count": 0,
+                    "cost_group_count": 0,
+                    "tagged_transaction_count": 0,
+                    "untagged_transaction_count": 0,
+                    "project_count": 0,
+                    "expense_type_count": 0,
+                    "bank_tag_count": 0,
+                    "cost_transaction_count": 0,
+                },
                 "bank_accounts": [],
                 "project_rows": [],
                 "expense_type_rows": [],
@@ -616,10 +635,31 @@ class CostStatisticsPageAuditPostgresTests(unittest.TestCase):
                 ),
             )
 
+        empty_page_statistics = json.dumps(
+            {
+                "oa_count": 0,
+                "bank_transaction_count": 0,
+                "paired_group_count": 0,
+                "paired_oa_count": 0,
+                "paired_bank_transaction_count": 0,
+                "paired_invoice_count": 0,
+                "unpaired_object_count": 0,
+            }
+        )
+        for zone in ("paired", "unpaired"):
+            self.connection.execute(
+                """
+                insert into read_model.workbench_generation_stats(
+                    generation_id, scope_key, zone, status_bucket, payload
+                ) values ('empty-all', 'all', %s, 'all', jsonb_build_object('page_statistics', %s::jsonb))
+                """,
+                (zone, empty_page_statistics),
+            )
+
     def tearDown(self) -> None:
         truncate_test_database(self.database_url)
 
-    def test_v9_parent_without_row_arrays_passes_real_postgres_audit(self) -> None:
+    def test_v11_parent_without_row_arrays_passes_real_postgres_audit(self) -> None:
         report = audit_cost_statistics_page(
             self.connection,
             tenant_id="default",

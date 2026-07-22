@@ -135,6 +135,15 @@ type ApiCostTransactionDetail = {
     remark: string;
     summary_fields: Record<string, string>;
     detail_fields: Record<string, string>;
+    cost_allocations?: Array<{
+      row_key: string;
+      project_name: string;
+      project_id: string;
+      expense_type: string;
+      expense_content: string;
+      oa_applicant: string;
+      amount: string;
+    }> | null;
     bank_tag_code?: string | null;
     bank_tag_label?: string | null;
     bank_tag_primary_label?: string | null;
@@ -446,6 +455,15 @@ export async function fetchCostTransactionDetail(
       remark: payload.transaction.remark,
       summaryFields: payload.transaction.summary_fields,
       detailFields: payload.transaction.detail_fields,
+      costAllocations: (payload.transaction.cost_allocations ?? []).map((allocation) => ({
+        rowKey: allocation.row_key,
+        projectName: allocation.project_name,
+        projectId: allocation.project_id,
+        expenseType: allocation.expense_type,
+        expenseContent: allocation.expense_content,
+        oaApplicant: allocation.oa_applicant,
+        amount: allocation.amount,
+      })),
       ...bankTagFields(payload.transaction),
     },
   };

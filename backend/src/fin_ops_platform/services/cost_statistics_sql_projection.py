@@ -18,14 +18,20 @@ from fin_ops_platform.services.cost_statistics_source_versions import (
 )
 from fin_ops_platform.services.live_workbench_service import format_decimal
 from fin_ops_platform.services.postgres_repositories.common import row_payload
+from fin_ops_platform.services.postgres_repositories.oa_projection import (
+    is_completed_workflow_status,
+)
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 
 MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 PROJECT_SCOPES = {"active", "all"}
 ZERO = Decimal("0.00")
-OA_INVOICE_OFFSET_AUTO_MATCH_CODE = "oa_invoice_offset_auto_match"
-OA_INVOICE_OFFSET_TAG = "冲"
+MONEY_QUANTUM = Decimal("0.01")
 CASH_TICKET_PURCHASE_MODE = "cash_ticket_purchase"
+UNATTRIBUTED_PROJECT_NAME = "未归集项目"
+UNCATEGORIZED_EXPENSE_TYPE = "未分类"
+MULTI_PROJECT_NAME = "多项目"
+MULTI_EXPENSE_TYPE = "多费用类型"
 
 
 class CostStatisticsSqlProjectionBuilder:
@@ -199,6 +205,7 @@ class CostStatisticsSqlProjectionBuilder:
 
             replacement_entries = self._cost_entries_from_workbench(
                 groups,
+                month=month,
                 project_scope=project_scope,
                 bank_detail_rows=self._cost_bank_tag_rows(
                     scope_key=scope_key,
@@ -315,7 +322,8 @@ class CostStatisticsSqlProjectionBuilder:
             return []
         return self._connection.fetch_all(
             """
-            select transaction_id, bank_tag_code, bank_tag_label,
+            select transaction_id, scope_month::text as scope_key, trade_date, trade_time_text as trade_time,
+                   bank_tag_code, bank_tag_label,
                    bank_tag_primary_label, bank_tag_sub_label, bank_tag_label_path,
                    payload, raw_payload
             from read_model.cost_statistics_bank_flow_rows
@@ -616,6 +624,7 @@ class CostStatisticsSqlProjectionBuilder:
         ]
         entries = self._cost_entries_from_workbench(
             workbench_groups,
+            month=month,
             project_scope=project_scope,
             bank_detail_rows=bank_detail_rows,
         )
@@ -641,7 +650,15 @@ class CostStatisticsSqlProjectionBuilder:
         project_scope: str,
         bank_flow_entries: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        sorted_entries = sorted(entries, key=lambda item: (str(item["trade_time"]), str(item["transaction_id"])), reverse=True)
+        sorted_entries = sorted(
+            entries,
+            key=lambda item: (
+                str(item["trade_time"]),
+                str(item["transaction_id"]),
+                str(item.get("row_key") or ""),
+            ),
+            reverse=True,
+        )
         sorted_bank_flow_entries = sorted(
             bank_flow_entries or [],
             key=lambda item: (str(item["trade_time"]), str(item["transaction_id"])),
@@ -652,24 +669,35 @@ class CostStatisticsSqlProjectionBuilder:
         for entry in sorted_entries:
             project_bucket = project_groups.setdefault(
                 entry["project_name"],
-                {"project_name": entry["project_name"], "total_amount": ZERO, "transaction_count": 0, "expense_types": set()},
+                {
+                    "project_name": entry["project_name"],
+                    "total_amount": ZERO,
+                    "transaction_ids": set(),
+                    "expense_types": set(),
+                },
             )
             project_bucket["total_amount"] += entry["amount_decimal"]
-            project_bucket["transaction_count"] += 1
+            project_bucket["transaction_ids"].add(entry["transaction_id"])
             project_bucket["expense_types"].add(entry["expense_type"])
             expense_bucket = expense_type_groups.setdefault(
                 entry["expense_type"],
-                {"expense_type": entry["expense_type"], "total_amount": ZERO, "transaction_count": 0, "projects": set()},
+                {
+                    "expense_type": entry["expense_type"],
+                    "total_amount": ZERO,
+                    "transaction_ids": set(),
+                    "projects": set(),
+                },
             )
             expense_bucket["total_amount"] += entry["amount_decimal"]
-            expense_bucket["transaction_count"] += 1
+            expense_bucket["transaction_ids"].add(entry["transaction_id"])
             expense_bucket["projects"].add(entry["project_name"])
+        transaction_ids = {str(entry["transaction_id"]) for entry in sorted_entries}
         return {
             "month": month,
             "project_scope": project_scope,
             "summary": {
                 "row_count": len(sorted_entries),
-                "transaction_count": len(sorted_entries),
+                "transaction_count": len(transaction_ids),
                 "total_amount": format_decimal(sum((entry["amount_decimal"] for entry in sorted_entries), start=ZERO)),
             },
             "time_rows": [_serialize_cost_entry(entry) for entry in sorted_entries],
@@ -680,7 +708,7 @@ class CostStatisticsSqlProjectionBuilder:
                 {
                     "project_name": bucket["project_name"],
                     "total_amount": format_decimal(bucket["total_amount"]),
-                    "transaction_count": bucket["transaction_count"],
+                    "transaction_count": len(bucket["transaction_ids"]),
                     "expense_type_count": len(bucket["expense_types"]),
                 }
                 for bucket in sorted(project_groups.values(), key=lambda item: (-item["total_amount"], item["project_name"]))
@@ -689,7 +717,7 @@ class CostStatisticsSqlProjectionBuilder:
                 {
                     "expense_type": bucket["expense_type"],
                     "total_amount": format_decimal(bucket["total_amount"]),
-                    "transaction_count": bucket["transaction_count"],
+                    "transaction_count": len(bucket["transaction_ids"]),
                     "project_count": len(bucket["projects"]),
                 }
                 for bucket in sorted(expense_type_groups.values(), key=lambda item: (-item["total_amount"], item["expense_type"]))
@@ -714,6 +742,7 @@ class CostStatisticsSqlProjectionBuilder:
             select
                 g.group_id,
                 g.zone,
+                g.group_type,
                 g.payload,
                 g.raw_payload,
                 gr.pane,
@@ -738,6 +767,7 @@ class CostStatisticsSqlProjectionBuilder:
              and wr.row_id = gr.row_id
             where g.scope_key = %s
               and g.zone in ('paired', 'unpaired')
+              and g.group_type = 'relation'
               and g.source_kinds && array['oa', 'bank']::text[]
               and gr.pane in ('oa', 'bank')
               and coalesce(gr.row_role, '') <> 'collapsed'
@@ -772,12 +802,13 @@ class CostStatisticsSqlProjectionBuilder:
                 member_payload.setdefault("row_id", row_id)
             member_payload.setdefault("type", pane)
             group_payload.setdefault(f"{pane}_rows", []).append(member_payload)
-        return [group for group in groups_by_id.values() if group.get("zone") == "paired"]
+        return list(groups_by_id.values())
 
     def _cost_entries_from_workbench(
         self,
         groups: list[dict[str, Any]],
         *,
+        month: str,
         project_scope: str,
         bank_detail_rows: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
@@ -795,15 +826,29 @@ class CostStatisticsSqlProjectionBuilder:
             self._completed_project_identities() if project_scope == "active" else (set(), set())
         )
         entries: list[dict[str, Any]] = []
+        bank_detail_rows_by_id = {
+            transaction_id: row
+            for row in bank_detail_rows
+            for transaction_id in [
+                str(row.get("transaction_id") or row.get("id") or row.get("row_id") or "").strip()
+            ]
+            if transaction_id
+        }
         for group in groups:
             oa_rows = [row for row in list(group.get("oa_rows") or []) if isinstance(row, dict)]
-            bank_rows = [row for row in list(group.get("bank_rows") or []) if isinstance(row, dict)]
+            bank_rows = [
+                row
+                for row in list(group.get("bank_rows") or [])
+                if isinstance(row, dict)
+                and (
+                    month == "all"
+                    or _bank_row_native_month(row, bank_detail_rows_by_id=bank_detail_rows_by_id) == month
+                )
+            ]
             if not oa_rows or not bank_rows:
                 continue
             special_metadata = _group_special_metadata(group)
             special_policy = _clean_text(special_metadata.get("cost_policy"))
-            if special_policy == "exclude_all":
-                continue
             if special_policy == "include_ticket_cost_only":
                 ticket_entry = _cash_ticket_cost_entry(
                     group,
@@ -812,45 +857,25 @@ class CostStatisticsSqlProjectionBuilder:
                     special_metadata=special_metadata,
                     bank_tag_contexts=bank_tag_contexts,
                 )
-                if ticket_entry is not None and not _is_completed_project(
+                if ticket_entry is not None and not _is_completed_project_allocation(
                     ticket_entry,
                     completed_project_ids=completed_project_ids,
                     completed_project_names=completed_project_names,
                 ):
                     entries.append(ticket_entry)
                 continue
-            context = _cost_context_from_oa_rows(oa_rows)
-            if context is None:
-                continue
-            if _is_completed_project(
-                context,
-                completed_project_ids=completed_project_ids,
-                completed_project_names=completed_project_names,
+            for entry in _oa_cost_entries_for_group(
+                group,
+                oa_rows=oa_rows,
+                bank_rows=bank_rows,
+                bank_tag_contexts=bank_tag_contexts,
             ):
-                continue
-            for bank_row in bank_rows:
-                amount = _outflow_amount(bank_row)
-                if amount is None:
-                    continue
-                transaction_id = str(bank_row.get("id") or bank_row.get("row_id") or "")
-                entries.append(
-                    {
-                        "group_id": str(group.get("group_id") or ""),
-                        "transaction_id": transaction_id,
-                        "trade_time": str(bank_row.get("trade_time") or bank_row.get("date") or ""),
-                        "counterparty_name": str(bank_row.get("counterparty_name") or ""),
-                        "payment_account_label": str(bank_row.get("payment_account_label") or bank_row.get("bank_name") or ""),
-                        "direction": str(bank_row.get("direction") or "支出"),
-                        "remark": str(bank_row.get("remark") or ""),
-                        "project_name": context["project_name"],
-                        "project_id": context["project_id"],
-                        "expense_type": context["expense_type"],
-                        "expense_content": context["expense_content"],
-                        "oa_applicant": context["oa_applicant"],
-                        "amount_decimal": amount,
-                        **(bank_tag_contexts.get(transaction_id) or bank_tag_context_from_row({})),
-                    }
-                )
+                if not _is_completed_project_allocation(
+                    entry,
+                    completed_project_ids=completed_project_ids,
+                    completed_project_names=completed_project_names,
+                ):
+                    entries.append(entry)
         return entries
 
     def _bank_flow_entries_from_bank_detail_rows(
@@ -1068,31 +1093,179 @@ def _app_settings_payload(connection: Any) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
-def _cost_context_from_oa_rows(oa_rows: list[dict[str, Any]]) -> dict[str, str] | None:
-    contexts: set[tuple[str, str, str, str, str]] = set()
-    for row in oa_rows:
-        if _is_cost_excluded_oa_row(row):
-            continue
-        detail_fields = row.get("detail_fields") if isinstance(row.get("detail_fields"), dict) else {}
-        project_name = _clean_text(row.get("project_name")) or _clean_text(detail_fields.get("项目名称"))
-        project_id = _clean_text(row.get("project_id")) or _clean_text(detail_fields.get("项目编号"))
-        expense_type = _clean_text(row.get("expense_type")) or _clean_text(detail_fields.get("费用类型"))
-        expense_content = _clean_text(row.get("expense_content")) or _clean_text(row.get("reason")) or _clean_text(detail_fields.get("费用内容"))
-        applicant = _clean_text(row.get("applicant")) or _clean_text(detail_fields.get("申请人"))
-        if expense_type in {"借款", "还款"}:
-            continue
-        if project_name and expense_type and expense_content:
-            contexts.add((project_name, project_id, expense_type, expense_content, applicant))
-    if len(contexts) != 1:
-        return None
-    project_name, project_id, expense_type, expense_content, applicant = next(iter(contexts))
+def _oa_cost_entries_for_group(
+    group: dict[str, Any],
+    *,
+    oa_rows: list[dict[str, Any]],
+    bank_rows: list[dict[str, Any]],
+    bank_tag_contexts: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    eligible_oa_rows = [row for row in oa_rows if _is_completed_oa_cost_row(row)]
+    contexts = [
+        _oa_cost_context(row, fallback_index=index)
+        for index, row in enumerate(eligible_oa_rows)
+    ]
+    outflows = [
+        (bank_row, amount)
+        for bank_row in bank_rows
+        if (amount := _outflow_amount(bank_row)) is not None
+    ]
+    if not contexts or not outflows:
+        return []
+
+    project_names = {str(context["project_name"]) for context in contexts}
+    expense_types = {str(context["expense_type"]) for context in contexts}
+    dimensions_differ = len(project_names) > 1 or len(expense_types) > 1
+    exact_split = (
+        len(outflows) == 1
+        and len(contexts) > 1
+        and dimensions_differ
+        and all(context["allocation_amount"] is not None for context in contexts)
+        and sum(
+            (context["allocation_amount"] for context in contexts),
+            start=ZERO,
+        ).quantize(MONEY_QUANTUM)
+        == outflows[0][1].quantize(MONEY_QUANTUM)
+    )
+    if exact_split:
+        bank_row, _bank_amount = outflows[0]
+        return [
+            _cost_entry(
+                group,
+                bank_row=bank_row,
+                context=context,
+                amount=context["allocation_amount"],
+                row_key_suffix=f"oa:{context['oa_id']}",
+                bank_tag_contexts=bank_tag_contexts,
+            )
+            for context in contexts
+        ]
+
+    context = _fallback_cost_context(contexts)
+    return [
+        _cost_entry(
+            group,
+            bank_row=bank_row,
+            context=context,
+            amount=amount,
+            row_key_suffix="full",
+            bank_tag_contexts=bank_tag_contexts,
+        )
+        for bank_row, amount in outflows
+    ]
+
+
+def _oa_cost_context(row: dict[str, Any], *, fallback_index: int) -> dict[str, Any]:
+    detail_fields = row.get("detail_fields") if isinstance(row.get("detail_fields"), dict) else {}
+    project_name = (
+        _clean_text(row.get("project_name"))
+        or _clean_text(detail_fields.get("项目名称"))
+        or UNATTRIBUTED_PROJECT_NAME
+    )
+    project_id = _clean_text(row.get("project_id")) or _clean_text(detail_fields.get("项目编号"))
+    expense_type = (
+        _clean_text(row.get("expense_type"))
+        or _clean_text(detail_fields.get("费用类型"))
+        or UNCATEGORIZED_EXPENSE_TYPE
+    )
+    expense_content = (
+        _clean_text(row.get("expense_content"))
+        or _clean_text(row.get("reason"))
+        or _clean_text(detail_fields.get("费用内容"))
+        or expense_type
+    )
+    applicant = _clean_text(row.get("applicant")) or _clean_text(detail_fields.get("申请人"))
+    allocation_amount = _decimal(row.get("reconciliation_amount"))
+    if allocation_amount is None or allocation_amount <= ZERO:
+        allocation_amount = _decimal(row.get("amount"))
+    if allocation_amount is not None and allocation_amount <= ZERO:
+        allocation_amount = None
+    oa_id = _clean_text(row.get("id") or row.get("row_id")) or f"index-{fallback_index}"
     return {
+        "oa_id": oa_id,
         "project_name": project_name,
         "project_id": project_id,
         "expense_type": expense_type,
         "expense_content": expense_content,
         "oa_applicant": applicant or "—",
+        "allocation_amount": allocation_amount.quantize(MONEY_QUANTUM)
+        if allocation_amount is not None
+        else None,
     }
+
+
+def _fallback_cost_context(contexts: list[dict[str, Any]]) -> dict[str, Any]:
+    project_names = {str(context["project_name"]) for context in contexts}
+    project_ids = {
+        str(context["project_id"])
+        for context in contexts
+        if str(context["project_id"])
+    }
+    expense_types = {str(context["expense_type"]) for context in contexts}
+    if len(project_names) == 1:
+        project_name = next(iter(project_names))
+        project_id = next(iter(project_ids)) if len(project_ids) == 1 else ""
+    else:
+        project_id, project_name = "", MULTI_PROJECT_NAME
+    return {
+        "project_name": project_name,
+        "project_id": project_id,
+        "expense_type": next(iter(expense_types)) if len(expense_types) == 1 else MULTI_EXPENSE_TYPE,
+        "expense_content": _join_unique_text(context["expense_content"] for context in contexts)
+        or UNCATEGORIZED_EXPENSE_TYPE,
+        "oa_applicant": _join_unique_text(context["oa_applicant"] for context in contexts) or "—",
+        "source_project_contexts": [
+            {"project_id": context["project_id"], "project_name": context["project_name"]}
+            for context in contexts
+        ],
+    }
+
+
+def _cost_entry(
+    group: dict[str, Any],
+    *,
+    bank_row: dict[str, Any],
+    context: dict[str, Any],
+    amount: Decimal,
+    row_key_suffix: str,
+    bank_tag_contexts: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    transaction_id = str(
+        bank_row.get("id") or bank_row.get("transaction_id") or bank_row.get("row_id") or ""
+    ).strip()
+    return {
+        "row_key": f"{transaction_id}:{row_key_suffix}",
+        "group_id": str(group.get("group_id") or ""),
+        "transaction_id": transaction_id,
+        "trade_time": str(
+            bank_row.get("trade_time")
+            or bank_row.get("pay_receive_time")
+            or bank_row.get("date")
+            or ""
+        ),
+        "counterparty_name": str(bank_row.get("counterparty_name") or ""),
+        "payment_account_label": str(
+            bank_row.get("payment_account_label") or bank_row.get("bank_name") or ""
+        ),
+        "direction": str(bank_row.get("direction") or "支出"),
+        "remark": str(bank_row.get("remark") or ""),
+        "project_name": str(context["project_name"]),
+        "project_id": str(context["project_id"]),
+        "expense_type": str(context["expense_type"]),
+        "expense_content": str(context["expense_content"]),
+        "oa_applicant": str(context["oa_applicant"]),
+        "amount_decimal": amount.quantize(MONEY_QUANTUM),
+        **(
+            {"source_project_contexts": list(context["source_project_contexts"])}
+            if isinstance(context.get("source_project_contexts"), list)
+            else {}
+        ),
+        **(bank_tag_contexts.get(transaction_id) or bank_tag_context_from_row({})),
+    }
+
+
+def _join_unique_text(values: Any) -> str:
+    return "、".join(sorted({_clean_text(value) for value in values if _clean_text(value)}))
 
 
 def _outflow_amount(bank_row: dict[str, Any]) -> Decimal | None:
@@ -1108,21 +1281,33 @@ def _outflow_amount(bank_row: dict[str, Any]) -> Decimal | None:
     return abs(amount)
 
 
+def _bank_row_native_month(
+    bank_row: dict[str, Any],
+    *,
+    bank_detail_rows_by_id: dict[str, dict[str, Any]],
+) -> str:
+    transaction_id = str(
+        bank_row.get("id") or bank_row.get("transaction_id") or bank_row.get("row_id") or ""
+    ).strip()
+    detail_row = bank_detail_rows_by_id.get(transaction_id) or {}
+    for value in (
+        detail_row.get("scope_key"),
+        detail_row.get("month"),
+        detail_row.get("trade_date"),
+        detail_row.get("trade_time"),
+        bank_row.get("trade_time"),
+        bank_row.get("pay_receive_time"),
+        bank_row.get("date"),
+    ):
+        normalized = str(value or "").strip()
+        if MONTH_RE.match(normalized[:7]):
+            return normalized[:7]
+    return ""
+
+
 def _group_special_metadata(group: dict[str, Any]) -> dict[str, Any]:
     metadata = group.get("special_metadata")
-    if isinstance(metadata, dict) and metadata:
-        return dict(metadata)
-    for row in [
-        *list(group.get("oa_rows") or []),
-        *list(group.get("bank_rows") or []),
-        *list(group.get("invoice_rows") or []),
-    ]:
-        if not isinstance(row, dict):
-            continue
-        row_metadata = row.get("special_metadata")
-        if isinstance(row_metadata, dict) and row_metadata:
-            return dict(row_metadata)
-    return {}
+    return dict(metadata) if isinstance(metadata, dict) else {}
 
 
 def _cash_ticket_cost_entry(
@@ -1141,12 +1326,18 @@ def _cash_ticket_cost_entry(
     bank_row = next((row for row in bank_rows if _outflow_amount(row) is not None), None)
     if bank_row is None:
         return None
-    context = _cost_context_from_oa_rows(oa_rows) or {}
-    project_name = _clean_text(special_metadata.get("project_name")) or str(context.get("project_name") or "")
-    if not project_name:
+    eligible_oa_rows = [row for row in oa_rows if _is_completed_oa_cost_row(row)]
+    if not eligible_oa_rows:
         return None
+    contexts = [
+        _oa_cost_context(row, fallback_index=index)
+        for index, row in enumerate(eligible_oa_rows)
+    ]
+    context = _fallback_cost_context(contexts)
+    project_name = _clean_text(special_metadata.get("project_name")) or str(context["project_name"])
     transaction_id = str(bank_row.get("id") or bank_row.get("row_id") or "")
     return {
+        "row_key": f"{transaction_id}:ticket",
         "group_id": str(group.get("group_id") or ""),
         "transaction_id": transaction_id,
         "trade_time": str(bank_row.get("trade_time") or bank_row.get("pay_receive_time") or ""),
@@ -1159,8 +1350,15 @@ def _cash_ticket_cost_entry(
         "expense_type": _clean_text(special_metadata.get("expense_type"))
         or str(context.get("expense_type") or "现金往来"),
         "expense_content": _clean_text(special_metadata.get("expense_content")) or "买票成本",
-        "oa_applicant": str(context.get("oa_applicant") or _cash_special_applicant(oa_rows) or "—"),
+        "oa_applicant": str(
+            context.get("oa_applicant") or _cash_special_applicant(eligible_oa_rows) or "—"
+        ),
         "amount_decimal": amount,
+        **(
+            {"source_project_contexts": list(context["source_project_contexts"])}
+            if isinstance(context.get("source_project_contexts"), list)
+            else {}
+        ),
         **(bank_tag_contexts.get(transaction_id) or bank_tag_context_from_row(bank_row)),
     }
 
@@ -1178,17 +1376,35 @@ def _cash_special_applicant(oa_rows: list[dict[str, Any]]) -> str:
     return ""
 
 
-def _is_cost_excluded_oa_row(row: dict[str, Any]) -> bool:
-    if bool(row.get("cost_excluded")):
-        return True
-    tags = {_clean_text(tag) for tag in list(row.get("tags") or []) if _clean_text(tag)}
-    if OA_INVOICE_OFFSET_TAG in tags:
-        return True
-    relation = row.get("oa_bank_relation")
-    return isinstance(relation, dict) and _clean_text(relation.get("code")) == OA_INVOICE_OFFSET_AUTO_MATCH_CODE
+def _is_completed_oa_cost_row(row: dict[str, Any]) -> bool:
+    return is_completed_workflow_status(row.get("workflow_status"))
 
 
-def _is_completed_project(
+def _is_completed_project_allocation(
+    context: dict[str, Any],
+    *,
+    completed_project_ids: set[str],
+    completed_project_names: set[str],
+) -> bool:
+    source_contexts = context.get("source_project_contexts")
+    if isinstance(source_contexts, list) and source_contexts:
+        return all(
+            _is_completed_project_identity(
+                item,
+                completed_project_ids=completed_project_ids,
+                completed_project_names=completed_project_names,
+            )
+            for item in source_contexts
+            if isinstance(item, dict)
+        )
+    return _is_completed_project_identity(
+        context,
+        completed_project_ids=completed_project_ids,
+        completed_project_names=completed_project_names,
+    )
+
+
+def _is_completed_project_identity(
     context: dict[str, Any],
     *,
     completed_project_ids: set[str],
@@ -1228,6 +1444,7 @@ def _bank_flow_summary(entries: list[dict[str, Any]]) -> dict[str, Any]:
 def _serialize_cost_entry(entry: dict[str, Any]) -> dict[str, Any]:
     bank_tag_context = bank_tag_context_from_row(entry)
     return {
+        "row_key": entry.get("row_key") or f"{entry['transaction_id']}:full",
         "group_id": entry.get("group_id") or "",
         "transaction_id": entry["transaction_id"],
         "trade_time": entry["trade_time"],
@@ -1249,6 +1466,7 @@ def _cost_entry_from_payload_row(row: dict[str, Any], *, fallback_index: int) ->
     amount = _decimal(row.get("amount")) or ZERO
     transaction_id = str(row.get("transaction_id") or row.get("id") or f"payload-row-{fallback_index}")
     return {
+        "row_key": str(row.get("row_key") or f"{transaction_id}:full"),
         "group_id": str(row.get("group_id") or ""),
         "transaction_id": transaction_id,
         "trade_time": str(row.get("trade_time") or ""),

@@ -280,20 +280,62 @@ class CostStatisticsQueryService:
         stored_month = str(row.get("month") or "").strip()
         month = stored_month[:7] or trade_time[:7] or "all"
         label_path = row.get("bank_tag_label_path")
+        cost_allocations = [
+            {
+                "row_key": str(item.get("row_key") or ""),
+                "project_name": str(item.get("project_name") or "未归集项目"),
+                "project_id": str(item.get("project_id") or ""),
+                "expense_type": str(item.get("expense_type") or "未分类"),
+                "expense_content": str(item.get("expense_content") or ""),
+                "oa_applicant": str(item.get("oa_applicant") or "—"),
+                "amount": _plain_money(_decimal_from_value(item.get("amount")) or Decimal("0.00")),
+            }
+            for item in list(row.get("cost_allocations") or [])
+            if isinstance(item, dict)
+        ]
+        project_names = {item["project_name"] for item in cost_allocations}
+        expense_types = {item["expense_type"] for item in cost_allocations}
+        allocation_amount = sum(
+            (_decimal_from_value(item["amount"]) or Decimal("0.00") for item in cost_allocations),
+            start=Decimal("0.00"),
+        )
         return {
             "month": month,
             "transaction": {
                 "id": normalized_transaction_id,
-                "project_name": str(row.get("project_name") or ""),
-                "expense_type": str(row.get("expense_type") or ""),
-                "expense_content": str(row.get("expense_content") or ""),
+                "project_name": (
+                    next(iter(project_names))
+                    if len(project_names) == 1
+                    else "多项目"
+                    if project_names
+                    else str(row.get("project_name") or "")
+                ),
+                "expense_type": (
+                    next(iter(expense_types))
+                    if len(expense_types) == 1
+                    else "多费用类型"
+                    if expense_types
+                    else str(row.get("expense_type") or "")
+                ),
+                "expense_content": (
+                    "、".join(sorted({item["expense_content"] for item in cost_allocations if item["expense_content"]}))
+                    or str(row.get("expense_content") or "")
+                ),
                 "trade_time": trade_time,
                 "direction": str(row.get("direction") or ""),
-                "amount": _plain_money(_decimal_from_value(row.get("amount")) or Decimal("0.00")),
+                "amount": _plain_money(
+                    allocation_amount
+                    if cost_allocations
+                    else _decimal_from_value(row.get("amount")) or Decimal("0.00")
+                ),
                 "counterparty_name": str(row.get("counterparty_name") or ""),
                 "payment_account_label": str(row.get("payment_account_label") or ""),
                 "remark": str(row.get("remark") or ""),
-                "oa_applicant": str(row.get("oa_applicant") or ""),
+                "oa_applicant": (
+                    "、".join(sorted({item["oa_applicant"] for item in cost_allocations if item["oa_applicant"]}))
+                    or str(row.get("oa_applicant") or "")
+                ),
+                "cost_allocations": cost_allocations,
                 "summary_fields": {},
                 "detail_fields": {},
                 "relation_status": "read_model",
@@ -788,10 +830,19 @@ class CostStatisticsQueryService:
                 query_binding=query_binding,
                 published_source_version=published_source_version,
             )
+        normalized_statistics = dict(statistics) if isinstance(statistics, dict) else None
+        cost_transaction_count = payload.get("cost_transaction_count")
+        if (
+            normalized_statistics is not None
+            and not isinstance(cost_transaction_count, bool)
+            and isinstance(cost_transaction_count, int)
+            and cost_transaction_count >= 0
+        ):
+            normalized_statistics["cost_transaction_count"] = cost_transaction_count
         return {
             "scope": scope,
             "view": view,
-            "statistics": dict(statistics) if isinstance(statistics, dict) else None,
+            "statistics": normalized_statistics,
             "statistics_status": statistics_status,
             **({"statistics_refresh_enqueued": True} if statistics_refresh_enqueued else {}),
             "summary": dict(payload.get("summary") or {}),

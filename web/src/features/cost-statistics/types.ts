@@ -137,6 +137,15 @@ export type CostTransactionDetail = {
     remark: string;
     summaryFields: Record<string, string>;
     detailFields: Record<string, string>;
+    costAllocations: Array<{
+      rowKey: string;
+      projectName: string;
+      projectId: string;
+      expenseType: string;
+      expenseContent: string;
+      oaApplicant: string;
+      amount: string;
+    }>;
     bankTagCode?: string;
     bankTagLabel?: string;
     bankTagPrimaryLabel?: string;

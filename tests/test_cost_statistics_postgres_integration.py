@@ -56,6 +56,42 @@ class CostStatisticsPostgresIntegrationTests(unittest.TestCase):
                 self.assertEqual(len(facets), 1)
                 self.assertTrue(facets[0]["percentage_label"].endswith("%"))
 
+    def test_split_transaction_detail_aggregates_all_cost_allocations(self) -> None:
+        self.connection.execute(
+            """
+            insert into read_model.cost_statistics_rows(
+                scope_key, project_scope, scope_month, row_key, transaction_id,
+                trade_time_text, trade_date, direction, project_name, expense_type,
+                expense_content, oa_applicant, amount
+            )
+            values
+                (
+                    'active:2026-05', 'active', '2026-05-01', 'txn-split:oa:oa-a', 'txn-split',
+                    '2026-05-02 10:00:00', '2026-05-02', '支出', '项目A', '材料',
+                    '采购材料', '申请人A', 60000
+                ),
+                (
+                    'active:2026-05', 'active', '2026-05-01', 'txn-split:oa:oa-b', 'txn-split',
+                    '2026-05-02 10:00:00', '2026-05-02', '支出', '项目B', '服务',
+                    '技术服务', '申请人B', 40000
+                )
+            """
+        )
+
+        row = self.repository.get_cost_statistics_transaction(
+            project_scope="active",
+            transaction_id="txn-split",
+        )
+
+        self.assertIsNotNone(row)
+        self.assertEqual(
+            [(item["row_key"], item["amount"]) for item in row["cost_allocations"]],
+            [
+                ("txn-split:oa:oa-a", "60000.000000"),
+                ("txn-split:oa:oa-b", "40000.000000"),
+            ],
+        )
+
     def test_unchanged_scope_acknowledgement_advances_only_exact_current_version(self) -> None:
         self.connection.execute(
             """

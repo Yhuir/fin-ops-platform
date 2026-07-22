@@ -41,6 +41,8 @@
 
 2026-07-13 后成本统计页面有两组统计口径：`按项目`、`按银行`、`按OA费用类型` 是 OA 配对支出流水统计；`按标签`、`按时间` 是全银行收支流水统计。2026-07-16 起页面不再接收两类完整 row arrays，而是通过原 explorer endpoint 的 `scope/view/filter/cursor` 合同读取服务端 summary/facets 和 bounded rows；统计口径不变。全流水视图不显示收入与支出的合并总金额：页面顶部、主标签和子标签均分别显示正数绝对值的“支出金额 / 收入金额”，同时分别显示笔数；收入使用绿色，支出使用橘色，流水明细保留资金方向和该笔金额。成本统计标签规则由右侧紧凑抽屉维护，收入与支出标签都可选择；旧显式选择在 selection schema v2 归一化时保留原支出选择并一次性加入当前有效收入标签。保存规则只持久化 app settings，不触发 read model rebuild。
 
+2026-07-22 起 OA 配对支出改为银行流水中心口径：只读取银行原生月份内、属于 active 正式 OA+bank relation 的非零支出；`paired` 和仍处于 `unpaired` 的正式 relation 都有效，发票不是资格条件。一个流水对应多个 OA 时，仅在 OA 明确金额按分闭合且关系只有一笔银行流水时按 OA 金额拆分；否则该流水只计一次，并分别以 `多项目` / `多费用类型` 表达不一致维度。交易详情通过原 endpoint 的 additive `cost_allocations` 返回拆分行，不新增人工归因流程。
+
 2026-07-14 起五个统计分类与“成本统计”标题同排，当前视图的时间范围和金额摘要位于下一行且范围控件固定在最左。OA 配对三类汇总和列表金额统一显式标注“支出”；按标签的收支标签左对齐、金额右对齐。项目、银行、OA 费用类型和标签四种下钻表不再保留独立“时间”列，而是在“对方户名”或“项目名”下方显示时间 chip；桌面端 explorer 各栏共享同一高度并独立滚动。`按时间`主表仍保留独立时间列，因为时间是该视图的主维度。
 
 2026-07-16 起成本页用唯一 `effectiveCostPageState` 合并当前 explorer lifecycle、explorer freshness envelope、App Status 中精确 `cost_statistics + active scope` 和标签规则 operation barrier。只有明确 `fresh` 才开放成本业务操作；loading/refreshing/stale/unavailable/error 使用页面内内联状态轨、原生 `inert` 和约 80% 透明的 cost-local 拦截层。它不是 dialog，没有实色 card、背景模糊或任何遮罩/状态装饰动画；标题、Audit、App Shell 和导航始终在锁定边界外。进入锁定会关闭成本页自有详情/导出 portal，标签规则抽屉保留草稿但锁定 body/footer；focus、visibility 与 BFCache 返回都会先重校验。
