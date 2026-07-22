@@ -735,9 +735,10 @@ ssh finops-deploy@finops-prod \
   write-operation-restore-point <release-name> <run-id>
 ```
 
-恢复点命令只在固定 root-owned 目录创建全库 custom-format dump，并在输出 manifest 前执行
-`pg_restore --list`；manifest 的路径和 SHA-256 是本次 apply 的 restore-point reference。它不接受任意 SQL、
-表名或输出路径，且不会输出 DSN。恢复点成功后才执行 apply：
+对于明确 test-owned、幂等且 runner 自动执行 inverse/recovery 的 relation smoke，不把全库备份设为固定前置；
+安全门是独立 idempotency key、exact receipt、失败 recovery、最终 inactive 状态和 System Audit。只有无法靠业务
+inverse 完整恢复或审批明确要求时，才运行上述可选恢复点命令。已创建恢复点只允许用固定 root-owned helper 按
+run-id + manifest/dump SHA-256 精确删除，禁止宽泛路径删除。通过场景安全门后执行 apply：
 
 ```bash
 scripts/with-production-admin-token.sh bash -lc '

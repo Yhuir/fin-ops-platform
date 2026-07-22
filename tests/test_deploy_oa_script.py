@@ -360,6 +360,12 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn('pg_restore --list "$temp_path"', script)
         self.assertIn('sha256sum "$dump_path"', script)
         self.assertNotIn('pg_dump "$FIN_OPS_POSTGRES_DATABASE_URL"', script)
+        self.assertIn("write-operation-restore-point-delete <run-id> <expected-sha256>", script)
+        self.assertIn("write_operation_restore_point_delete()", script)
+        self.assertIn("write-operation restore point directory contains unexpected files", script)
+        self.assertIn('[[ "$actual_checksum" == "$expected_checksum" ]]', script)
+        self.assertIn('rm -f -- "$dump_path" "$manifest_path"', script)
+        self.assertIn('rmdir -- "$output_dir"', script)
         self.assertIn("write-operation-e2e-smoke <release-name> <scenario-path> [--dry-run|--apply-stdin]", script)
         self.assertIn("write_operation_e2e_smoke()", script)
         self.assertIn("scenario path must match /tmp/finops-write-e2e-*.json", script)
@@ -474,6 +480,25 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("run-id must be 1..80 safe filename characters", result.stderr)
         self.assertNotIn("release src directory not found", result.stderr)
+
+    def test_deploy_control_restore_point_delete_requires_exact_sha256_before_file_lookup(self) -> None:
+        result = subprocess.run(
+            [
+                str(DEPLOY_CONTROL_SCRIPT_PATH),
+                "write-operation-restore-point-delete",
+                "safe-run-id",
+                "not-a-sha",
+            ],
+            cwd=Path(__file__).resolve().parents[1],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("requires a lowercase SHA-256 checksum", result.stderr)
+        self.assertNotIn("restore point directory is unavailable", result.stderr)
 
 
 if __name__ == "__main__":

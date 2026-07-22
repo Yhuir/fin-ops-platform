@@ -56,6 +56,8 @@ commands:
                                       run read model SLO smoke dry-run using runtime env; --apply is refused
   write-operation-restore-point <release-name> <run-id>
                                       create and verify a fixed full PostgreSQL backup before write smoke
+  write-operation-restore-point-delete <run-id> <expected-sha256>
+                                      delete one exact verified write-smoke backup
   write-operation-e2e-smoke <release-name> <scenario-path> [--dry-run|--apply-stdin]
   api-request-error <request-id>
   api-request-timing <request-id>
@@ -694,6 +696,42 @@ PY
   )
 }
 
+write_operation_restore_point_delete() {
+  local run_id="${1:-}" expected_checksum="${2:-}"
+  [[ "$run_id" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$ ]] \
+    || die "write-operation-restore-point-delete run-id must be 1..80 safe filename characters"
+  [[ "$expected_checksum" =~ ^[0-9a-f]{64}$ ]] \
+    || die "write-operation-restore-point-delete requires a lowercase SHA-256 checksum"
+  [[ $# -le 2 ]] || die "write-operation-restore-point-delete accepts only run-id and expected checksum"
+
+  local output_dir dump_path manifest_path actual_checksum manifest_values manifest_run_id manifest_checksum
+  output_dir="$WRITE_E2E_BACKUP_ROOT/$run_id"
+  dump_path="$output_dir/fin_ops.dump"
+  manifest_path="$output_dir/manifest.json"
+  [[ -d "$output_dir" && ! -L "$output_dir" ]] || die "write-operation restore point directory is unavailable"
+  [[ -f "$dump_path" && ! -L "$dump_path" ]] || die "write-operation restore point dump is unavailable"
+  [[ -f "$manifest_path" && ! -L "$manifest_path" ]] || die "write-operation restore point manifest is unavailable"
+  [[ "$(find "$output_dir" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)" == $'fin_ops.dump\nmanifest.json' ]] \
+    || die "write-operation restore point directory contains unexpected files"
+  actual_checksum="$(sha256sum "$dump_path" | awk '{print $1}')"
+  [[ "$actual_checksum" == "$expected_checksum" ]] || die "write-operation restore point checksum mismatch"
+  manifest_values="$($API_PYTHON - "$manifest_path" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    manifest = json.load(handle)
+print(str(manifest.get("run_id") or ""), str(manifest.get("sha256") or ""))
+PY
+)"
+  read -r manifest_run_id manifest_checksum <<<"$manifest_values"
+  [[ "$manifest_run_id" == "$run_id" && "$manifest_checksum" == "$expected_checksum" ]] \
+    || die "write-operation restore point manifest identity mismatch"
+  rm -f -- "$dump_path" "$manifest_path"
+  rmdir -- "$output_dir"
+  printf '{"status":"deleted","run_id":"%s","sha256":"%s"}\n' "$run_id" "$expected_checksum"
+}
+
 write_operation_e2e_smoke() {
   local release="${1:-}" scenario="${2:-}" mode="${3:---dry-run}"
   [[ -n "$release" ]] || die "write-operation-e2e-smoke requires release name"
@@ -879,6 +917,10 @@ case "$cmd" in
   write-operation-restore-point)
     shift
     write_operation_restore_point "$@"
+    ;;
+  write-operation-restore-point-delete)
+    shift
+    write_operation_restore_point_delete "$@"
     ;;
   write-operation-e2e-smoke)
     shift
