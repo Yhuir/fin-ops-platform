@@ -274,7 +274,7 @@ left join lateral (
       and source_link->>'source_id' = coalesce(nullif(rows.source_unique_key, ''), nullif(rows.data_fingerprint, ''))
 ) candidate on true
 group by rows.id, rows.legacy_mongo_id, rows.decision, rows.source_unique_key,
-         rows.data_fingerprint, rows.linked_object_type, rows.linked_object_id
+         rows.data_fingerprint, rows.linked_object_type, rows.linked_object_id, rows.row_no
 order by rows.row_no, row_id
 """
 
