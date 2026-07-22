@@ -1264,6 +1264,58 @@ class WorkbenchRelationCommandServiceTests(unittest.TestCase):
         self.assertEqual(history["before_relations"][0]["relation_mode"], "manual_confirmed")
         self.assertEqual(history["after_relations"][0]["relation_mode"], "turnover_manual_closure")
 
+    def test_update_relation_metadata_exact_replace_is_audited_and_in_idempotency_fingerprint(self) -> None:
+        original = {
+            "case_id": "turnover:rollback-1",
+            "row_ids": ["oa-1", "bank-1"],
+            "row_types": ["oa", "bank"],
+            "status": "active",
+            "relation_mode": "turnover_manual_closure",
+            "month_scope": "2026-05",
+            "special_metadata": {
+                "legacy_key": "keep",
+                "requires_oa": True,
+                "requires_invoice": True,
+                "paired_requirement_source": "bank_transaction_paired_policy",
+            },
+            "created_by": "finance-user",
+            "created_at": "2026-05-01T10:00:00+00:00",
+            "updated_at": "2026-05-01T10:00:00+00:00",
+        }
+        repository = FakeRelationRepository({"pair_relations": {original["case_id"]: original}})
+        service = WorkbenchRelationCommandService(
+            relation_repository=repository,
+            relation_facade=FakeRelationFacade(),
+        )
+
+        result = service.update_relation_metadata_for_case_id(
+            case_id="turnover:rollback-1",
+            actor_id="system_requirement_repair_rollback",
+            special_metadata={"legacy_key": "keep"},
+            replace_special_metadata=True,
+            idempotency_key="repair-rollback:fp:turnover:rollback-1",
+            history_operation_type="workbench_relation_requirement_repair_rollback",
+        )
+
+        self.assertEqual(result["relation"]["special_metadata"], {"legacy_key": "keep"})
+        for field in ("case_id", "row_ids", "row_types", "status", "relation_mode", "created_at"):
+            self.assertEqual(result["relation"][field], original[field])
+        history = repository.save_calls[0]["snapshot"]["pair_relation_history"][0]
+        self.assertEqual(history["before_relations"][0]["special_metadata"], original["special_metadata"])
+        self.assertEqual(history["after_relations"][0]["special_metadata"], {"legacy_key": "keep"})
+
+        with self.assertRaises(WorkbenchRelationCommandError) as context:
+            service.update_relation_metadata_for_case_id(
+                case_id="turnover:rollback-1",
+                actor_id="system_requirement_repair_rollback",
+                special_metadata={"legacy_key": "keep"},
+                replace_special_metadata=False,
+                idempotency_key="repair-rollback:fp:turnover:rollback-1",
+                history_operation_type="workbench_relation_requirement_repair_rollback",
+            )
+        self.assertEqual(context.exception.error_code, "workbench_relation_idempotency_conflict")
+        self.assertEqual(len(repository.save_calls), 1)
+
     def test_confirm_relation_allows_oa_invoice_offset_auto_match_mode(self) -> None:
         repository = FakeRelationRepository()
         service = WorkbenchRelationCommandService(

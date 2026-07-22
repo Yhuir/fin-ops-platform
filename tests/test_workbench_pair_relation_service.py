@@ -769,6 +769,49 @@ class WorkbenchPairRelationServiceTests(unittest.TestCase):
         )
         self.assertEqual(service.get_active_relation_by_case_id("CASE-1")["row_ids"], ["bank-1", "oa-1"])
 
+    def test_update_metadata_defaults_to_merge_and_explicit_replace_restores_exact_preimage(self) -> None:
+        service = WorkbenchPairRelationService()
+        created = service.create_active_relation(
+            case_id="case-repair",
+            row_ids=["oa-1", "bank-1"],
+            row_types=["oa", "bank"],
+            relation_mode="turnover_manual_closure",
+            created_by="finance",
+            created_at="2026-07-20T10:00:00+08:00",
+            special_metadata={"legacy_key": "keep", "requires_oa": False},
+        )
+
+        merged, merge_history = service.update_relation_metadata_for_case_id(
+            "case-repair",
+            special_metadata={"requires_oa": True, "requires_invoice": True},
+            updated_by="repair",
+            updated_at="2026-07-22T10:00:00+08:00",
+        )
+        restored, rollback_history = service.update_relation_metadata_for_case_id(
+            "case-repair",
+            special_metadata={"legacy_key": "keep", "requires_oa": False},
+            replace_special_metadata=True,
+            updated_by="rollback",
+            updated_at="2026-07-22T10:01:00+08:00",
+        )
+
+        self.assertEqual(
+            merged["special_metadata"],
+            {"legacy_key": "keep", "requires_oa": True, "requires_invoice": True},
+        )
+        self.assertEqual(restored["special_metadata"], {"legacy_key": "keep", "requires_oa": False})
+        for field in ("case_id", "row_ids", "row_types", "status", "relation_mode", "created_at"):
+            self.assertEqual(restored[field], created[field])
+        self.assertEqual(restored["updated_at"], "2026-07-22T10:01:00+08:00")
+        self.assertEqual(
+            merge_history["before_relations"][0]["special_metadata"],
+            {"legacy_key": "keep", "requires_oa": False},
+        )
+        self.assertEqual(
+            rollback_history["after_relations"][0]["special_metadata"],
+            {"legacy_key": "keep", "requires_oa": False},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
