@@ -212,6 +212,8 @@ class CostStatisticsPageAuditTests(unittest.TestCase):
         self.assertIn("bank_row.transaction_id || ':oa:' || oa_row.oa_id", proof_sql)
         self.assertIn("bank_row.transaction_id || ':full'", proof_sql)
         self.assertIn("scope_key = relation_scope_key", proof_sql)
+        self.assertIn('expense_content collate "C"', proof_sql)
+        self.assertIn('applicant collate "C"', proof_sql)
 
         source = COST_PAGE_AUDIT_PATH.read_text(encoding="utf-8")
         for retired_helper in (

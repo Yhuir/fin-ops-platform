@@ -718,8 +718,14 @@ def _exact_set_issues(
                     then max(project_id) else '' end as project_id,
                case when count(distinct expense_type) = 1
                     then min(expense_type) else '多费用类型' end as expense_type,
-               string_agg(distinct expense_content, '、' order by expense_content) as expense_content,
-               string_agg(distinct applicant, '、' order by applicant) as applicant,
+               string_agg(
+                   distinct expense_content collate "C",
+                   '、' order by expense_content collate "C"
+               ) as expense_content,
+               string_agg(
+                   distinct applicant collate "C",
+                   '、' order by applicant collate "C"
+               ) as applicant,
                count(*)::integer as oa_count,
                count(distinct project_name)::integer as project_identity_count,
                count(distinct expense_type)::integer as expense_type_count,
