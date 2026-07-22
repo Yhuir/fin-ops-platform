@@ -141,6 +141,44 @@ class FakeConnection(EtcTicketsFakeConnection):
 
 
 class EtcImportPageAuditTests(unittest.TestCase):
+    def test_succeeded_session_accepts_later_closed_task_state(self) -> None:
+        facts = {
+            "tasks": [{"task_id": "task-1", "status": "closed", "raw_payload": {}}],
+            "batches": [
+                {
+                    "business_batch_id": "business-batch-1",
+                    "raw_payload": {"normalized_payload": {"import_attempts": [{"session_id": "session-1"}]}},
+                }
+            ],
+            "import_batches": [
+                {
+                    "batch_id": "import-batch-1",
+                    "raw_payload": {
+                        "normalized_payload": {"source_session_id": "session-1", "invoice_ids": []}
+                    },
+                }
+            ],
+            "invoices": [],
+        }
+        succeeded_issues = etc_import_page_audit._session_task_edge_issues(
+            sessions=[{"session_id": "session-1", "task_id": "task-1", "status": "succeeded"}],
+            facts=facts,
+        )
+
+        self.assertNotIn(
+            "etc_import_terminal_task_status_mismatch",
+            {issue.code for issue in succeeded_issues},
+        )
+
+        partial_issues = etc_import_page_audit._session_task_edge_issues(
+            sessions=[{"session_id": "session-1", "task_id": "task-1", "status": "partial_success"}],
+            facts=facts,
+        )
+        self.assertIn(
+            "etc_import_terminal_task_status_mismatch",
+            {issue.code for issue in partial_issues},
+        )
+
     def test_failed_session_and_job_are_non_blocking_only_after_formal_task_completion(self) -> None:
         connection = FakeConnection()
         connection.tasks[0]["status"] = "imported"

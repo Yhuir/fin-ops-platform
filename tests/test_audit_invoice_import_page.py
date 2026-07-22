@@ -331,6 +331,96 @@ class InvoiceImportPageAuditTests(unittest.TestCase):
         self.assertEqual(report["summary"]["strict_contract_file_count"], 0)
         self.assertEqual(report["summary"]["legacy_file_count"], 1)
 
+    def test_formal_invoice_may_retain_a_known_legacy_batch_source_link(self) -> None:
+        connection = FakeConnection()
+        legacy_file = deepcopy(connection.files[0])
+        legacy_file.update(
+            {
+                "file_id": "legacy-file-1",
+                "session_id": "legacy-session-1",
+                "audit_contract_revision": None,
+            }
+        )
+        legacy_file_payload = legacy_file["raw_payload"]["normalized_payload"]
+        legacy_file_payload.update(
+            {
+                "id": "legacy-file-1",
+                "session_id": "legacy-session-1",
+                "preview_batch_id": "legacy-batch-1",
+                "batch_id": "legacy-batch-1",
+            }
+        )
+        legacy_batch = deepcopy(connection.batches[0])
+        legacy_batch["batch_id"] = "legacy-batch-1"
+        legacy_batch["raw_payload"]["normalized_payload"]["id"] = "legacy-batch-1"
+        connection.files.append(legacy_file)
+        connection.batches.append(legacy_batch)
+        legacy_source_link = {
+            "source_type": "manual_invoice_import",
+            "source_id": "legacy-source-1",
+            "batch_id": "legacy-batch-1",
+            "created_at": "2026-06-01T10:01:00+00:00",
+        }
+        connection.invoices[0]["source_links"].append(legacy_source_link)
+        connection.invoices[0]["raw_payload"]["normalized_payload"]["source_links"].append(
+            deepcopy(legacy_source_link)
+        )
+
+        report = invoice_import_page_audit.audit_invoice_import_page(connection)
+
+        self.assertEqual(report["overall_status"], "pass", report)
+        codes = report["summary"]["issue_sample_counts_by_code"]
+        self.assertIn("invoice_import_legacy_provenance_unproven", codes)
+        self.assertNotIn("invoice_import_source_link_batch_orphan", codes)
+        self.assertNotIn("invoice_import_manual_source_link_orphan", codes)
+
+    def test_formal_invoice_source_link_to_unknown_batch_still_fails_closed(self) -> None:
+        connection = FakeConnection()
+        unknown_source_link = {
+            "source_type": "manual_invoice_import",
+            "source_id": "unknown-source-1",
+            "batch_id": "missing-batch-1",
+            "created_at": "2026-06-01T10:01:00+00:00",
+        }
+        connection.invoices[0]["source_links"].append(unknown_source_link)
+        connection.invoices[0]["raw_payload"]["normalized_payload"]["source_links"].append(
+            deepcopy(unknown_source_link)
+        )
+
+        report = invoice_import_page_audit.audit_invoice_import_page(connection)
+
+        self.assertEqual(report["overall_status"], "issues_found")
+        self.assertIn(
+            "invoice_import_source_link_batch_orphan",
+            report["summary"]["issue_sample_counts_by_code"],
+        )
+
+    def test_formal_invoice_source_link_to_non_invoice_batch_still_fails_closed(self) -> None:
+        connection = FakeConnection()
+        non_invoice_batch = deepcopy(connection.batches[0])
+        non_invoice_batch.update({"batch_id": "bank-batch-1", "batch_type": "bank_transaction"})
+        non_invoice_batch_payload = non_invoice_batch["raw_payload"]["normalized_payload"]
+        non_invoice_batch_payload.update({"id": "bank-batch-1", "batch_type": "bank_transaction"})
+        connection.batches.append(non_invoice_batch)
+        invalid_source_link = {
+            "source_type": "manual_invoice_import",
+            "source_id": "bank-source-1",
+            "batch_id": "bank-batch-1",
+            "created_at": "2026-06-01T10:01:00+00:00",
+        }
+        connection.invoices[0]["source_links"].append(invalid_source_link)
+        connection.invoices[0]["raw_payload"]["normalized_payload"]["source_links"].append(
+            deepcopy(invalid_source_link)
+        )
+
+        report = invoice_import_page_audit.audit_invoice_import_page(connection)
+
+        self.assertEqual(report["overall_status"], "issues_found")
+        self.assertIn(
+            "invoice_import_source_link_batch_orphan",
+            report["summary"]["issue_sample_counts_by_code"],
+        )
+
     def test_dispatch_registers_zero_read_model_relation_nonconsumer_contract(self) -> None:
         report = PostgresOperationsAuditRepository(FakeConnection()).audit_page(
             page_key="imports.invoices",

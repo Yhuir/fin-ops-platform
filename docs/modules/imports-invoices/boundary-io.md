@@ -103,6 +103,7 @@ file/session preview/retry 只允许通过当前 `session_id` 持久化该 sessi
 - migration 0101 为新 `app.import_files` 设置 `audit_contract_revision=import-page-audit.v1` 默认值，但不回填历史行。
 - 当前 revision 的新导入严格证明 file object/hash/session/batch/row/canonical invoice 与 source link；税率按语义归一化比较，例如 `1% == 0.01`。
 - revision 为 NULL 的 pre-contract 历史保留明确 warning，不伪造来源证据；canonical 发票、展示字段和 relation 完整性由对应业务页面 Audit 阻断证明。
+- 当前 revision 发票可能同时保留已登记 strict batch 与已存在 pre-contract invoice batch 的 `manual_invoice_import` source-link。严格双向 equality 只比较当前 revision batch/row 对应的边；已存在 legacy invoice batch 的边继续由 provenance warning 标记为未证明，不伪报 strict orphan。引用不存在的 batch 或非发票 batch 仍必须阻断。
 - 税局导出的一张发票可以包含多条商品/服务/折扣明细。preview 在同一文件内按数电票号或代码+号码聚合互不重复的明细金额、税额和价税合计；完全相同的重复行仍保留给 duplicate audit；“部分重复 + 部分不同”或表头身份冲突必须 fail closed。
 - 当前严格合同 Audit 对历史多行发票按同一 batch + canonical invoice 重算合计后比较；不得把第一条物理明细误当整票金额，也不得把完全相同的重复行二次加总。
 - 历史金额恢复只能更新 source batch 仍一致的 canonical invoice，并由 repeatable-read dry-run fingerprint、serializable transaction 和 rollback manifest 约束；运行时导入链不调用该修复工具。

@@ -161,3 +161,4 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_slo_aud
 
 - `tests/test_audit_etc_import_page.py` 同时覆盖：failed session/job 的精确 task 已 `imported` 时只报告 covered warning；task 未正式完成时仍返回 blocking integrity issue。
 - 覆盖判定复用 ETC 票据 Audit 常量，防止两个页面对同一 job/session 得出相反结果。
+- 同一测试文件覆盖 `succeeded` session 对应 task 后续从 `imported` 合法推进到 `closed`；完整 terminal output edges 下不得产生 task-status mismatch，非法状态仍按原合同阻断。

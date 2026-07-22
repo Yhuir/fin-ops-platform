@@ -83,6 +83,11 @@ def _audit_snapshot(
         for batch_id in (_text(_payload(row).get("preview_batch_id")), _text(_payload(row).get("batch_id")))
         if batch_id
     }
+    known_invoice_batch_ids = {
+        _text(row.get("batch_id"))
+        for row in batches
+        if _text(row.get("batch_type")) in INVOICE_BATCH_TYPES and _text(row.get("batch_id"))
+    }
     formal_batches = [row for row in batches if _text(row.get("batch_id")) in formal_batch_ids]
     formal_rows = [row for row in rows if _text(row.get("batch_id")) in formal_batch_ids]
     formal_invoices = [
@@ -113,7 +118,14 @@ def _audit_snapshot(
     issues.extend(_file_issues(formal_files, formal_files, formal_batches))
     issues.extend(_batch_row_issues(formal_batches, formal_rows))
     issues.extend(_session_audit_issues(formal_files, formal_rows))
-    issues.extend(_canonical_invoice_issues(formal_batches, formal_rows, formal_invoices))
+    issues.extend(
+        _canonical_invoice_issues(
+            formal_batches,
+            formal_rows,
+            formal_invoices,
+            known_batch_ids=known_invoice_batch_ids,
+        )
+    )
     issues.extend(_job_issues(invoice_jobs, formal_files, formal_files, formal_batches))
     issues.extend(_outbox_issues(invoice_outbox))
     if legacy_files:
@@ -438,10 +450,12 @@ def _canonical_invoice_issues(
     batches: list[dict[str, Any]],
     rows: list[dict[str, Any]],
     invoices: list[dict[str, Any]],
+    *,
+    known_batch_ids: set[str],
 ) -> list[AuditIssue]:
     issues: list[AuditIssue] = []
     batch_status = {_text(row.get("batch_id")): _text(row.get("status")) for row in batches}
-    known_batch_ids = set(batch_status)
+    formal_batch_ids = set(batch_status)
     invoice_by_id = {_text(row.get("invoice_id")): row for row in invoices}
     expected_edges: set[tuple[str, str, str]] = set()
     expected_invoice_ids: set[str] = set()
@@ -494,6 +508,12 @@ def _canonical_invoice_issues(
                 continue
             if batch_id not in known_batch_ids:
                 issues.append(_issue("invoice_import_source_link_batch_orphan", invoice_id, {"batch_id": batch_id}))
+                continue
+            if batch_id not in formal_batch_ids:
+                # Pre-contract invoice provenance remains explicitly unproven, but
+                # a known legacy invoice batch is not part of the strict edge set.
+                manual_batch_ids.add(batch_id)
+                continue
             if edge in actual_edges:
                 issues.append(_issue("invoice_import_source_link_duplicate", invoice_id, {"batch_id": batch_id, "source_id": source_id}))
             actual_edges.add(edge)

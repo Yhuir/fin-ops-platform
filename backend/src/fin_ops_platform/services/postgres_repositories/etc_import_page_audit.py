@@ -452,8 +452,17 @@ def _session_task_edge_issues(
         ):
             issues.append(_issue("etc_import_session_processing_task_mismatch", session_id, None))
         if status in TERMINAL_SESSION_STATUSES:
-            expected_task_status = "imported" if status == "succeeded" else "ready_for_import"
-            if _text(task.get("status")) != expected_task_status:
+            expected_task_statuses = (
+                COVERED_IMPORT_TASK_STATUSES
+                if status == "succeeded"
+                else frozenset({"ready_for_import"})
+            )
+            if _text(task.get("status")) not in expected_task_statuses:
+                expected_task_status = (
+                    "imported|closed"
+                    if status == "succeeded"
+                    else "ready_for_import"
+                )
                 issues.append(
                     _issue(
                         "etc_import_terminal_task_status_mismatch",
