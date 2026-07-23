@@ -589,6 +589,13 @@ class WorkbenchRelationReadFacadeTests(unittest.TestCase):
 
         self.assertEqual(row_payload["read_model_status"], "fresh")
         self.assertEqual(row_payload["submitted_count"], 1)
+        self.assertEqual(
+            row_payload["read_model_scope_source_versions"],
+            {
+                f"2026-{month:02d}": {"workbench_relation_schema_version": "bulk-v1"}
+                for month in range(1, 13)
+            },
+        )
         self.assertEqual(len(row_connection.fetch_all_calls) + len(row_connection.fetch_one_calls), 1)
         self.assertEqual(
             sum(
@@ -609,6 +616,27 @@ class WorkbenchRelationReadFacadeTests(unittest.TestCase):
         self.assertEqual(list_payload["read_model_status"], "fresh")
         self.assertEqual(list_payload["groups"][0]["group_id"], "CASE-BATCH-1")
         self.assertEqual(len(list_connection.fetch_all_calls) + len(list_connection.fetch_one_calls), 2)
+
+    def test_batch_accounting_bulk_proof_converges_against_each_scope_source_version(self) -> None:
+        queue = QueueRecorder()
+        facade = WorkbenchRelationReadFacade(
+            read_model_repository=PostgresReadModelRepository(BatchAccountingBulkRelationConnection()),
+            queue_repository=queue,
+            expected_source_versions=lambda _scope_key: {
+                "workbench_relation_schema_version": "bulk-v1",
+            },
+        )
+
+        payload = facade.get_batch_accounting_by_row_ids(
+            ["txn-batch-1"],
+            scope_keys_hint=["2026-01"],
+            submitted_year="2026",
+        )
+
+        self.assertEqual(payload["status"], "fresh")
+        self.assertEqual(len(payload["read_model_scope_source_versions"]), 12)
+        self.assertFalse(payload["refresh_enqueued"])
+        self.assertEqual(queue.refreshes, [])
 
     def test_batch_accounting_bulk_proof_preserves_non_fresh_contract(self) -> None:
         missing_connection = BatchAccountingBulkRelationConnection(missing_scope="2026-12")

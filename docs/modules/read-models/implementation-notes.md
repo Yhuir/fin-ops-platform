@@ -1,5 +1,12 @@
 # Read Model 实施记录
 
+## 2026-07-23 - Workbench SSE 复用轻量 freshness 查询
+
+- 目标：降低已打开 Workbench 页面等待 freshness 事件的首包耗时，同时保持 PostgreSQL durable dirty scope、active generation 与 source version 的真实状态语义。
+- 决策：`WorkbenchRefreshStatusPayloadProvider` 优先复用现有 `get_workbench_groups_freshness_status(...)` 页面查询边界；repository 未实现该端口时才降级到完整 `get_workbench_refresh_status(...)`。不新增缓存、队列、worker 或状态事实源。
+- 边界：SSE provider 仍只负责读取、source-freshness 校验和 payload normalize；不 enqueue、不重建、不写 readiness，也不改变公开 refresh-status API 的完整诊断合同。
+- 测试：`tests/test_workbench_refresh_status_payload_provider.py::WorkbenchRefreshStatusPayloadProviderTests::test_prefers_lightweight_groups_freshness_port` 锁定生产 repository 同时具备两个端口时不得调用完整诊断查询；原有测试继续覆盖兼容降级、source freshness 和 unavailable 状态。
+
 ## 2026-07-17 - Cost Statistics unchanged CAS 隔离修复（生产验证待发布）
 
 - 生产根因：成本 projection 内容来源未变时旧逻辑只返回 `skipped`，没有把当前 dirty event version 写入 parent `published_source_version`；共享 readiness 按既有合同忽略 skipped，导致成本 month/parent 相互补投并持续 refreshing。

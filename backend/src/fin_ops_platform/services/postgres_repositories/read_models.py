@@ -6303,6 +6303,7 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
         status = "fresh"
         stale_reasons: list[str] = []
         source_versions: dict[str, Any] = {}
+        scope_source_versions: dict[str, dict[str, Any]] = {}
         for scope_key in normalized_scope_keys:
             proof = proof_by_scope.get(scope_key)
             if not isinstance(proof, dict) or not bool(proof.get("scope_exists")):
@@ -6314,8 +6315,11 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
                 scope_status = "refreshing" if dirty_status in {"pending", "processing"} else "stale"
                 status = scope_status
                 stale_reasons.append(f"{scope_status}:{scope_key}")
-            if not source_versions and isinstance(proof.get("source_versions"), dict):
-                source_versions = dict(proof.get("source_versions"))
+            proof_source_versions = proof.get("source_versions")
+            if isinstance(proof_source_versions, dict):
+                scope_source_versions[scope_key] = dict(proof_source_versions)
+                if not source_versions:
+                    source_versions = dict(proof_source_versions)
         if not source_versions:
             source_versions = (
                 dict(fallback_source_versions or {})
@@ -6328,6 +6332,7 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
             "groups": [_workbench_relation_group_payload(group) for group in groups],
             **({"submitted_count": int_value(submitted_count, 0) if status == "fresh" else 0} if submitted_count is not None else {}),
             "source_versions": source_versions,
+            "read_model_scope_source_versions": scope_source_versions,
             "read_model_scope_keys": normalized_scope_keys,
             "stale_reasons": stale_reasons,
         }

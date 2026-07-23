@@ -7,6 +7,25 @@ from fin_ops_platform.services.workbench_refresh_status_payload_provider import 
 
 
 class WorkbenchRefreshStatusPayloadProviderTests(unittest.TestCase):
+    def test_prefers_lightweight_groups_freshness_port(self) -> None:
+        class Repository:
+            def get_workbench_groups_freshness_status(self, *, scope_key: str) -> dict[str, object]:
+                return {"scope_key": scope_key, "read_model_status": "fresh"}
+
+            def get_workbench_refresh_status(self, *, scope_key: str) -> dict[str, object]:
+                raise AssertionError("SSE status must not call the full diagnostic query")
+
+        provider = WorkbenchRefreshStatusPayloadProvider(
+            repository_provider=Repository,
+            source_freshness=lambda payload, **_kwargs: payload,
+            normalizer=WorkbenchRefreshStatusPayloadNormalizer(),
+        )
+
+        payload = provider.payload_for_scope("all")
+
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual(payload["scope_key"], "all")
+
     def test_unavailable_when_repository_has_no_refresh_status_port(self) -> None:
         provider = WorkbenchRefreshStatusPayloadProvider(
             repository_provider=lambda: object(),

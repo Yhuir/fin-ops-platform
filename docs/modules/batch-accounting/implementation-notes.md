@@ -1,5 +1,12 @@
 # 批量账务 实施记录
 
+## 2026-07-23 - 年度 bulk proof 逐 scope freshness 闭环
+
+- 生产根因：批量账务专用 repository 已在单条 bundle SQL 中读取全年 12 个 `workbench_relation` scope proof，但 DTO 只返回第一个 scope 的汇总 `source_versions`，漏掉 `read_model_scope_source_versions`。facade 对每个月执行 canonical 比较时因此把全部 scope 判为版本缺失，导致页面 20/20 stale 且每次访问重复 enqueue，即使 worker 已完成重建也无法收敛。
+- 修复：复用现有 `scope_proof`，原样输出每个存在 scope 的 source versions；不新增 SQL、缓存、worker、队列或抽象。汇总 `source_versions` 保持兼容，逐 scope map 承担 freshness proof。
+- 测试：repository 固定 statement-count 测试新增 12-scope map 断言；facade 回归证明全年 canonical versions 一致时返回 fresh、零 refresh enqueue。
+- 边界：只修复批量账务 relation read DTO 内部合同，不改变 HTTP shape、canonical relation 写入、普通写零 fan-out 或其他页面 I/O。
+
 ## 2026-07-16 - 删除 generic Workbench full-page fallback
 
 - 目标：让批量账务未提交列表、submit/withdraw 窄上下文、已提交银行上下文只读取各自现有 SQL I/O，消除 wiring 缺失时同步构建 Workbench 全页 payload 的慢链路。

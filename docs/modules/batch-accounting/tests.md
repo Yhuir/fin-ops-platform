@@ -57,6 +57,7 @@
 | --- | --- | --- |
 | Legacy case id collision | 旧 batch-accounting service-level repair 入口已删除，生产 API/worker 主链路不再提供该兼容写入口；如仍需处理历史数据，必须走 owner 批准的独立迁移/repair runbook，而不是重新接回页面模块 | covered |
 | Relation read model non-fresh | missing/stale 不能被解释成“无关联，可提交”；列表读取必须入队刷新，submit/withdraw 默认由 canonical write safety、owner 状态、权限/session、DB 可写性决定 | covered |
+| Annual bulk proof source versions | 年度 12-scope bundle 必须逐 scope 返回 source version proof；canonical versions 一致时 facade 必须 fresh 且零 enqueue，不能因只返回首月汇总版本而永久 stale | covered |
 | Submit command boundary | submit 缺少 relation command service 时不能 direct 写 pair service，必须返回结构化错误 | covered |
 | Withdraw command boundary | withdraw 缺少 relation command service 时不能 direct 写 pair service，PostgreSQL runtime 必须接入 durable repository；撤回语义是 cancel current batch relation，不是旧 snapshot restore | covered |
 | Route boundary contamination | GET route 只能通过 `BatchAccountingApiRoutes.list_payload(...)` / `BatchAccountingService.build_payload(...)` 读，不得 repair/write/schedule；submit/withdraw `server.py` wrapper 必须经 mutation session 并委托 `BatchAccountingApiRoutes`，route owner 必须委托 `BatchAccountingService` 且不得直接调用 relation write internals、旧 lifecycle、旧 pair persist 或旧 workbench persist；app-level `_repair_batch_accounting_relation_case_ids` 和 service-level `repair_legacy_case_id_collisions` 不得回归 | covered |

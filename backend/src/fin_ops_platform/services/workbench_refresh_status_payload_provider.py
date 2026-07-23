@@ -21,7 +21,9 @@ class WorkbenchRefreshStatusPayloadProvider:
 
     def payload_for_scope(self, scope_key: str) -> dict[str, object]:
         repository = self._repository_provider()
-        get_refresh_status = getattr(repository, "get_workbench_refresh_status", None)
+        get_refresh_status = getattr(repository, "get_workbench_groups_freshness_status", None)
+        if not callable(get_refresh_status):
+            get_refresh_status = getattr(repository, "get_workbench_refresh_status", None)
         if not callable(get_refresh_status):
             return self._normalizer.normalize(
                 {},
