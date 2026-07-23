@@ -64,10 +64,10 @@
 
 覆盖：
 
-- dynamic expected/actual source vector、dirty/outbox gate、month/all token。
+- dynamic expected/actual source vector、dirty/outbox gate、month/all token；completed Workbench relation confirm/withdraw 必须通过 set-based canonical relation version 让旧 OA summaries 在下次访问变 stale。
 - `all` freshness gate 对跨 scope 重复 `row_id` fail closed；Page Audit 按全局 `row_id` 返回涉及 scopes；rows SQL 不再包含旧 `deduped_oa_pending_payment_rows` / `DISTINCT ON(row_id)` 隐藏去重。
 - PG-only projector，按 relation member id 批量读取 canonical facts，纯函数组装，单次 values 批量写入，空 scope清理，原子 publish。
-- projector/freshness SQL 不包含 `WorkbenchRelationReadFacade`、`workbench_relation_read_model_not_fresh`、`workbench_relation_source_versions` 或 `read_model.workbench_relation_scopes`。
+- projector/freshness SQL 不包含 `WorkbenchRelationReadFacade`、`workbench_relation_read_model_not_fresh`、`workbench_relation_source_versions` 或 `read_model.workbench_relation_scopes`；canonical `app.workbench_pair_relations` 版本证明不属于 read-model 串行依赖。
 - stale event在读取源前 skip，CAS lost不清新 dirty，all仅低优先级 fan-out；all 的 shard inventory 按 event tenant union OA source watermarks、未删除银行月份和未删除进项发票月份。测试锁定 coverage-only month 使用 read-model empty vector且不写 source watermark、真实 OA source 出现会使旧 coverage vector stale，并禁止从 read-model scopes 反推 inventory。
 - `oa-pending-payment` worker claim隔离；shared `invoice-usage-collection` 不含 OA handler。
 - source snapshot/migration/permission/schema contract。

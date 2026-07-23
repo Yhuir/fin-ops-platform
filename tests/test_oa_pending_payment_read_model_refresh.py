@@ -322,6 +322,13 @@ class MissingOaSourceConnection:
     def fetch_one(self, _sql: str, _params: tuple[object, ...]) -> None:
         return None
 
+    @staticmethod
+    def fetch_all(_sql: str, params: tuple[object, ...]) -> list[dict[str, object]]:
+        return [
+            {"scope_key": scope_key, "relation_updated_at": ""}
+            for scope_key in params[0]
+        ]
+
     def execute(self, sql: str, params: tuple[object, ...]) -> None:
         self.executions.append((sql, params))
 

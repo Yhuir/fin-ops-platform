@@ -1,5 +1,13 @@
 # OA待付款核对 实施记录
 
+## 2026-07-23 - Workbench 撤回后的访问时 freshness 漏洞
+
+- 生产证据：test-owned Workbench relation 通过正式 API 撤回后，`oa_pending_payment` queue 已 drained、scope 被标记 fresh，但 Page Audit 仍发现同一 case 的 OA、银行流水和进项发票 3 条 `consumer_edge_not_shared`；旧 OA rows 仍保存已撤回 relation summaries。
+- 根因：OA projector 直接读取 `app.workbench_pair_relations`，但 expected/actual source vector 只包含 OA integration snapshot、pending relation 和 event version，没有登记 completed Workbench canonical relation 这个真实输入。Phase 27 又正确删除了普通写后 OA fan-out，因此访问 gate 没有任何依据识别撤回。
+- 最小修复：复用 OA PostgreSQL source-snapshot owner，一次 set-based 查询计算各月份 completed OA 涉及的 canonical relation `updated_at` 上界；projector 发布与 query gate 写入/比较同一个 key。普通 confirm/withdraw 继续零 OA dirty/outbox，页面只在访问时 enqueue mismatch 的精确月份；不新增表、migration、worker、cache、read-model 依赖或 fallback。
+- 测试：新增 canonical relation version 的月份去重/set-based SQL合同，以及“published OA vector=old、canonical relation=new 时 scope 必须 refreshing”的回归；保留 projector 不读取/等待 `workbench_relation` read model 的架构 guard。
+- 生产关闭门：部署精确 SHA 后访问 `oa_pending_payment:2026-06`，要求一次精确 refresh 后 3 条 stale edge 消失；同时访问 `cost_statistics active:2026-06` 收敛其真实 upstream mismatch，再重跑 strict confirm→withdraw、零 fan-out、最终 System Audit 和 3 秒 access-to-fresh。
+
 ## 2026-07-22 - 标题统计覆盖月份闭环
 
 - 目标：让 `oa_pending_payment:all` 统计覆盖只有银行流水或进项发票、尚无 OA integration watermark 的月份，避免标题全期间库存漏月。

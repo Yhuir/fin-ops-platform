@@ -68,6 +68,7 @@
 每个月份实际与期望版本至少包含：
 
 - completed OA、in-progress admission、payment-status snapshot 的 source signature/version；
+- 该月 completed OA 涉及的 canonical Workbench relation `updated_at` 上界；query gate 与 projector 共用 OA source-snapshot owner 的 set-based 版本读取，撤回后即使没有写后 fan-out也必须在下次访问判定旧 summaries stale；
 - pending relation scope version；
 - canonical relation schema、pending relation scope version，以及本次 `oa_pending_payment` event source version；
 - OA projector/API/read-model contract revision。

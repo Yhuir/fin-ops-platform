@@ -22,6 +22,7 @@ from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_s
     PostgresOaPendingPaymentStatusSnapshotReader,
     oa_pending_payment_coverage_only_source_versions,
     oa_pending_payment_source_versions_from_snapshot,
+    oa_pending_payment_workbench_relation_versions_by_scope,
 )
 from fin_ops_platform.services.postgres_repositories.oa_projection import PostgresOAProjectionRepository
 from fin_ops_platform.services.postgres_repositories.read_models import MONTH_SCOPE_RE, PostgresReadModelRepository
@@ -249,10 +250,15 @@ class OaPendingPaymentSqlProjectionBuilder:
             scope_key=scope_key,
             tenant_id=tenant_id,
         )
+        workbench_relation_versions = oa_pending_payment_workbench_relation_versions_by_scope(
+            connection,
+            scope_keys=[scope_key],
+        ).get(scope_key, {})
         if not snapshot_versions and coverage_only:
             return {
                 **oa_pending_payment_base_source_versions(),
                 **oa_pending_payment_coverage_only_source_versions(scope_key),
+                **workbench_relation_versions,
                 "oa_pending_payment_relation_version": int(
                     pending_relation_versions.get("oa_pending_payment_relation_version") or 0
                 ),
@@ -264,6 +270,7 @@ class OaPendingPaymentSqlProjectionBuilder:
         return {
             **oa_pending_payment_base_source_versions(),
             **snapshot_versions,
+            **workbench_relation_versions,
             **pending_relation_versions,
         }
 

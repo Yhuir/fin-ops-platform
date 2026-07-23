@@ -19,6 +19,7 @@ from fin_ops_platform.services.read_model_freshness import normalize_source_vers
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_snapshot import (
     OA_PENDING_PAYMENT_COVERAGE_ONLY_SCHEMA_VERSION,
     oa_pending_payment_coverage_only_source_versions,
+    oa_pending_payment_workbench_relation_versions_by_scope,
 )
 from fin_ops_platform.services.postgres_repositories.oa_projection import COMPLETED_WORKFLOW_STATUS_SQL
 from fin_ops_platform.services.postgres_repositories.common import (
@@ -1354,6 +1355,10 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
         state_rows = [dict(row) for row in rows if isinstance(row, dict)]
         month_rows = [row for row in state_rows if MONTH_SCOPE_RE.match(text(row.get("scope_key")) or "")]
         control_rows = [row for row in state_rows if text(row.get("scope_key")) == "all"]
+        workbench_relation_versions_by_scope = oa_pending_payment_workbench_relation_versions_by_scope(
+            self._connection,
+            scope_keys=[text(row.get("scope_key")) or "" for row in month_rows],
+        )
         blocking_scope_keys: set[str] = set()
         stale_reasons: list[str] = []
         actual_versions_by_scope: dict[str, dict[str, Any]] = {}
@@ -1363,6 +1368,10 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
         for row in month_rows:
             row_scope_key = text(row.get("scope_key")) or ""
             source_payload = row.get("source_payload") if isinstance(row.get("source_payload"), dict) else {}
+            workbench_relation_versions = workbench_relation_versions_by_scope.get(
+                row_scope_key,
+                {},
+            )
             actual_versions = (
                 dict(row.get("actual_source_versions"))
                 if isinstance(row.get("actual_source_versions"), dict)
@@ -1380,12 +1389,14 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                 expected_versions: dict[str, Any] = {
                     **dict(base_source_versions),
                     **oa_pending_payment_coverage_only_source_versions(row_scope_key),
+                    **workbench_relation_versions,
                     "oa_pending_payment_relation_version": int_value(row.get("pending_relation_version"), 0),
                     "oa_pending_payment_event_source_version": int_value(row.get("dirty_source_version"), -1),
                 }
             else:
                 expected_versions = {
                     **dict(base_source_versions),
+                    **workbench_relation_versions,
                     "oa_pending_payment_source_snapshot_version": int_value(row.get("source_snapshot_version"), 0),
                     "completed_oa_signature": text(source_payload.get("completed_oa_signature")) or "",
                     "in_progress_admission_signature": text(source_payload.get("admission_signature")) or "",

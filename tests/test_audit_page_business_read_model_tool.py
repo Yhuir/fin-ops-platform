@@ -45,6 +45,14 @@ class FakeConnection:
         check_name = _check_name(sql)
         if check_name == "oa_pending_payment_query_state" and check_name not in self.rows_by_check:
             return [_fresh_oa_pending_payment_query_state_row()]
+        if (
+            check_name == "oa_pending_payment_workbench_relation_versions"
+            and check_name not in self.rows_by_check
+        ):
+            return [
+                {"scope_key": scope_key, "relation_updated_at": ""}
+                for scope_key in params[0]
+            ]
         return [dict(row) for row in self.rows_by_check.get(check_name, [])]
 
     def execute(self, sql: str, params: tuple[object, ...] = ()) -> int:

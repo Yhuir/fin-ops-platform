@@ -46,6 +46,8 @@ Workbench confirm / withdraw
 
 页面热路径和 read model worker 都不得访问 Mongo/MySQL。外部系统变化尚未进入 PostgreSQL 时，属于 OA sync lag；一旦 PostgreSQL canonical snapshot 已提交，动态 source version、访问时 dirty/outbox、CAS 和 fresh gate 必须阻止旧 rows 被伪装成 fresh。
 
+completed OA 投影直接读取 canonical Workbench relation，因此月份 source vector 同时记录该月 completed OA 涉及的 `app.workbench_pair_relations.updated_at` 上界。confirm/withdraw 后不写 OA dirty/outbox；下次页面访问以同一个 set-based canonical proof 发现 mismatch，只 enqueue 当前精确月份。这个证明不读取或等待 `workbench_relation` read model。
+
 月份 shard 只能包含该月份的 OA 主行。跨月正式 relation 可以继续为各月提供 relation evidence，但不得把其它月份的 OA 成员复制进当前月份 rows；relation group row identity 同时包含 month scope。`month=all` 不做隐藏去重，freshness gate 与 Page Audit 会把跨 scope 重复 `row_id` 明确判为阻断错误。
 
 ## 页面合同

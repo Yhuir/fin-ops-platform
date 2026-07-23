@@ -13,6 +13,35 @@ from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_s
 
 
 class OaPendingPaymentReadModelQueryTests(unittest.TestCase):
+    def test_workbench_relation_change_makes_published_oa_scope_stale(self) -> None:
+        base_versions = {"schema": 1}
+        row = _fresh_state_row(
+            scope_key="2026-05",
+            base_versions=base_versions,
+            snapshot_version=3,
+            event_source_version=7,
+        )
+        row["actual_source_versions"] = {
+            **dict(row["actual_source_versions"]),
+            "oa_pending_payment_workbench_pair_relations_updated_at": "old",
+        }
+        repository = PostgresInvoiceUsageCollectionReadModelRepository(
+            QueryStateConnection(
+                [row],
+                workbench_relation_versions={"2026-05": "new"},
+            )
+        )
+
+        state = repository.oa_pending_payment_query_state(
+            scope_key="2026-05",
+            tenant_id="default",
+            base_source_versions=base_versions,
+        )
+
+        self.assertEqual(state["status"], "refreshing")
+        self.assertEqual(state["blocking_scope_keys"], ["2026-05"])
+        self.assertIn("2026-05:source_versions_mismatch", state["stale_reasons"])
+
     def test_coverage_only_scope_is_fresh_without_integration_or_relation_watermarks(self) -> None:
         base_versions = {"schema": 1}
         coverage_versions = {
@@ -337,12 +366,26 @@ class OaPendingPaymentReadModelQueryTests(unittest.TestCase):
 
 
 class QueryStateConnection:
-    def __init__(self, rows: list[dict[str, object]]) -> None:
+    def __init__(
+        self,
+        rows: list[dict[str, object]],
+        *,
+        workbench_relation_versions: dict[str, str] | None = None,
+    ) -> None:
         self.rows = rows
+        self.workbench_relation_versions = dict(workbench_relation_versions or {})
         self.calls: list[tuple[str, tuple[object, ...]]] = []
 
     def fetch_all(self, sql: str, params: tuple[object, ...]) -> list[dict[str, object]]:
         self.calls.append((sql, params))
+        if "oa_pending_payment_workbench_relation_versions" in sql:
+            return [
+                {
+                    "scope_key": scope_key,
+                    "relation_updated_at": self.workbench_relation_versions.get(scope_key, ""),
+                }
+                for scope_key in params[0]
+            ]
         return deepcopy(self.rows)
 
 
