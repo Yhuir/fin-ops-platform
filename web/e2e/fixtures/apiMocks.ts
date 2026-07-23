@@ -5720,7 +5720,6 @@ function bankFlowRuleBatchMutationPayload(
     read_model_scope_keys: [scopeKey],
     freshness_targets: [],
     operation_barrier_targets: [],
-    workbench_rebuild_queued: false,
     results: [],
   };
 }
@@ -9736,6 +9735,47 @@ export async function installDeterministicApiMocks(page: Page, options: ApiMockO
 
     if (path === "/api/turnover-ledger/tag-selection") {
       return json(route, turnoverLedgerTagSelectionPayload(turnoverSelectedTagCodes, turnoverTagSelectionVersion));
+    }
+
+    if (path === "/api/turnover-ledger/relations/turnover_rel_e2e_expense") {
+      return json(route, {
+        relation: turnoverFlowRow(
+          turnoverBankRows.expense,
+          "expense",
+          turnoverClosureConfirmed,
+          turnoverBankRowVersions[turnoverBankRows.expense],
+        ),
+        bank_rows: [
+          {
+            id: turnoverBankRows.expense,
+            trade_time: "2026-05-03 10:00:00",
+            counterparty_name: "云南建设有限公司",
+            direction_label: "支",
+            amount: "1000.00",
+            bank_account_label: "建行 8106",
+            summary: "浏览器 e2e 归还借款",
+          },
+        ],
+        audit_history: [],
+      });
+    }
+
+    if (path === "/api/turnover-ledger/relations/turnover_rel_e2e_expense/extra") {
+      if (request.method() === "PUT") {
+        return json(route, {
+          relation_id: "turnover_rel_e2e_expense",
+          extra: parseJsonBody(request.postData()),
+        });
+      }
+      return json(route, {
+        relation_id: "turnover_rel_e2e_expense",
+        interest_rate_type: "annual",
+        interest_rate_value: "0.060000",
+        interest_paid_amount: "10.00",
+        interest_paid_date: "2026-05-05",
+        interest_payment_method: "转账",
+        note: "浏览器 e2e 补充信息",
+      });
     }
 
     if (path === "/api/turnover-ledger") {

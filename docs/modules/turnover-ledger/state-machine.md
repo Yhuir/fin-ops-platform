@@ -24,7 +24,7 @@
 
 - `selected_tag_codes` 可为空，表示暂不拉取新的外部往来流水。
 - PUT 只能提交当前 `active_tags` 中存在且属于外部往来的 code。
-- 保存成功必须写审计，并触发 `turnover_ledger` read model refresh。
+- 保存成功必须写 canonical settings/version/audit；不投递任何页面 refresh，当前台账页随后重跑 normal GET 并由 fresh gate 按需收敛。
 
 ### 台账候选和分组
 
@@ -84,11 +84,11 @@ same group flow rows selected
   -> freeze tag code, requires_oa/requires_invoice, rule source and version in relation metadata
   -> Workbench evaluates the frozen turnover_manual_closure requirements
   -> bank-only stays open when requires_oa=true; OA + bank can become paired when requires_invoice=false
-  -> turnover/workbench/workbench_relation dirty-outbox refresh
-  -> API 返回 operation freshness targets
-  -> frontend waits affected turnover_ledger month scopes + affected workbench_relation scopes as hard operation visibility targets
-  -> workbench month aggregate and other downstream read models converge in background SLO path
-  -> frontend emits Workbench refresh event; post-write sync/reload blockage is warning, not mutation failure
+  -> canonical relation/history/version/audit 原子提交，零页面 dirty/outbox
+  -> API 返回业务结果、case identity 与信息性 affected months；freshness target arrays 为空
+  -> frontend 结束命令阻塞并重跑当前 turnover normal GET
+  -> turnover fresh gate 发现 mismatch 时只入队当前 exact month；Workbench/成本/搜索等页面在访问或重新激活时各自收敛
+  -> frontend emits lightweight refresh hints; post-write current-page reload blockage is warning, not mutation failure
 ```
 
 现代确认不得写 `app.turnover_relations` 或 `app.turnover_relation_events`。成功响应以 `workbench_pair_relation.case_id` 作为撤回身份；projection 只有在历史 relation 的 `special_metadata.turnover_relation_id` 显式存在时才输出 `cash_closure_relation_id`，不得从 case id 推断。
@@ -123,7 +123,8 @@ manual confirmed relation
   -> withdrawn
   -> command service withdraws only turnover_manual_closure case
   -> restorable previous OA-bank relations are reactivated
-  -> turnover/workbench/workbench_relation dirty-outbox refresh
+  -> canonical relation/history/version/audit 原子提交，零页面 dirty/outbox
+  -> 当前 turnover 页 normal GET；其它消费者仅在访问/重新激活时收敛
 ```
 
 禁止：
@@ -150,7 +151,7 @@ manual confirmed relation
 | invalid | 利率类型、负数、日期或过长文本非法 |
 | stale | `expected_versions` 不匹配，拒绝保存 |
 
-extra 保存只影响 Turnover ledger read model 和局部 UI；前端可发 `turnoverLedgerExtraUpdated` 作为刷新提示，但不能让无关页面依赖该事件作为事实源。
+extra 保存只改变 Turnover canonical extra/version/audit 和局部 UI；前端可发 `turnoverLedgerExtraUpdated` 作为刷新提示并重跑本页 normal GET，但不能投递页面 refresh，也不能让无关页面依赖该事件作为事实源。
 
 ## UI 状态
 
@@ -199,12 +200,9 @@ Refresh event：`turnover_ledger.read_model.refresh`
 
 refresh 触发来源：
 
-- tag-selection 保存。
-- bank-row-tags batch，按 affected months refresh。
-- relation extra 保存。
-- manual closure confirm，按 affected months refresh；无法解析 affected months 时才退回 `all`。
-- withdraw 只保存 canonical relation/history 并返回可解析的 affected months；无法解析时 fail closed，不使用 `all` fan-out。
-- 底层银行流水分类、relation、extra、settings、source versions 变化。
+- 页面首次访问、筛选/月 scope 变化、可见页面自身 reload 或 hidden→visible 时，GET fresh gate 发现 exact scope missing/stale/source-version mismatch。
+- 显式 App Health/初始化/修复命令；`all` 只允许在这些已授权维护入口使用。
+- tag-selection、bank-row-tags、relation extra、manual closure confirm/withdraw 和底层事实变化只推进 canonical version，不在写路径触发 refresh。
 
 worker 流程：
 
@@ -230,7 +228,7 @@ job.outbox_events / job.read_model_dirty_scopes
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
-| 2026-06-26 | 普通 turnover 写操作从 `turnover_ledger:all` 收敛为 affected month scopes | bank-row-tags、manual closure confirm、relation confirm/withdraw、frontend pre/post operation barrier 默认等待 affected month scopes；`all` 只保留为 fan-out/未知月份例外，降低写后 read model 全量刷新长尾 | `tests/test_turnover_ledger_api.py`、`tests/test_turnover_ledger_uow_contract.py`、`web/src/test/TurnoverLedgerApi.test.ts`、`web/src/test/TurnoverLedgerPage.test.tsx` |
+| 2026-06-26（历史） | 普通 turnover 写操作曾从 `turnover_ledger:all` 收敛为 affected month scopes | 该写后 barrier 方案已由 Phase 27 的“写后零页面 fan-out、页面访问时 exact-scope 收敛”取代；本行仅保留演进记录。 | `tests/test_turnover_ledger_api.py`、`tests/test_turnover_ledger_uow_contract.py`、`web/src/test/TurnoverLedgerApi.test.ts`、`web/src/test/TurnoverLedgerPage.test.tsx` |
 | 2026-06-23 | 补 read model manifest 合同守卫 | 不改变外部往来业务/UI/read model/worker 状态；锁定 `turnover_ledger` 为 `partitioned_scoped_incremental`、`all` 为 fan-out command，并保持 query owner、permission owner 和 repository ports 不与 cost/tax 混用 | `tests/test_read_model_manifest.py::ReadModelManifestTests::test_cost_tax_and_turnover_manifest_preserve_summary_contracts` |
 | 2026-06-11 | 补齐外部往来款管理状态机 | 固定标签准入、候选/人工闭环、撤回、extra、UI stale、read model/worker 状态 | 待本轮模块验证命令 |
 | 2026-06-14 | tag-selection/extra/confirm/withdraw 接入 operation overlay 与 freshness barrier | 写 API 成功后等待 `turnover_ledger` barrier fresh 并 reload，避免旧 grouped payload 暴露给用户 | `web/src/test/TurnoverLedgerPage.test.tsx`、`web/src/test/OperationBarrierApi.test.ts` |

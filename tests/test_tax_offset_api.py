@@ -416,15 +416,14 @@ class TaxOffsetApiTests(unittest.TestCase):
             )
             preview_payload = json.loads(preview_response.body)
 
-            with patch.object(app, "_execute_derived_data_lifecycle_event") as lifecycle_event:
-                confirm_response = app.handle_request(
-                    "POST",
-                    "/api/tax-offset/certified-import/confirm",
-                    json.dumps({"session_id": preview_payload["session"]["id"]}),
-                )
+            confirm_response = app.handle_request(
+                "POST",
+                "/api/tax-offset/certified-import/confirm",
+                json.dumps({"session_id": preview_payload["session"]["id"]}),
+            )
 
         self.assertEqual(confirm_response.status_code, 200)
-        lifecycle_event.assert_not_called()
+        self.assertFalse(hasattr(app, "_execute_derived_data_lifecycle_event"))
 
     def test_tax_offset_includes_oa_attachment_invoice_rows_by_issue_month(self) -> None:
         app = build_application()

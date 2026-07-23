@@ -440,7 +440,7 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api -v
 1. 银行明细已确认外部往来分类 -> tag-selection 生效 -> 空 targets -> 当前 grouped normal GET 重新加载。Browser 覆盖保存请求体、零 barrier、reload 和零可见错误。
 2. grouped table 选择同组多条真实 flow rows -> 提交前 normal GET并重绑最新 row versions -> Turnover domain 无副作用校验 -> 只写 canonical Workbench pair relation -> 当前页 GET 显示闭环；随后独立访问成本统计，由其两阶段 gate 展示闭环成本行。Browser 覆盖该主链、`收支闭环`、`外部往来闭环成本项目` 和零可见错误。
 3. 现代手动闭环统一按 `cash_closure_case_id` 调用 `/api/turnover-ledger/closures/withdraw`，只撤回同一 Workbench case，并恢复确认前的 OA-bank relation；只有元数据显式携带旧 `turnover_relation_id` 的历史闭环才走 `/relations/{id}/withdraw`。已升级为包含发票或其他业务 row type 时必须从关联台撤回；任何失败都不得产生 Turnover 半写入。`web/e2e/turnover-ledger-flow.spec.ts` 已覆盖已闭环 flow row toolbar 撤回和 grouped payload 移除“收支闭环”。
-4. extra 保存 -> relation row 更新 -> `turnoverLedgerExtraUpdated` 只作为局部刷新提示。
+4. extra 保存 -> relation row 更新 -> `turnoverLedgerExtraUpdated` 只作为局部刷新提示。Browser 已覆盖 flow row 打开补充信息 Drawer、GET detail/extra、PUT 保存、当前 Turnover GET 重载、零 operation barrier，并记录 opener/save latency。
 5. grouped ledger `read_model_status=stale` -> 页面显示非最新 warning、保留当前 flow rows；即使选中两条真实流水，确认闭环仍禁用，Browser smoke 断言零 confirm mutation。
 6. tag-selection / bank-row-tags / confirm / withdraw / extra 只保存各自 canonical facts/version/audit；任一事务失败必须 rollback，成功时必须零 read-model queue I/O。
 7. tag-selection / extra / confirm / withdraw -> 只阻塞写请求；manual closure 提交前执行 grouped normal GET/rebind，无法解析精确月份 fail closed；写成功后零 operation barrier并 reload 当前页。Browser 断言不会调用 `POST /api/operation-barrier/status`。
@@ -481,7 +481,7 @@ PYTHONPATH=backend/src python3 -m unittest tests.test_turnover_ledger_api tests.
 
 ## Nightly CI 覆盖
 
-`bash scripts/verify.sh all` 通过 backend unittest discovery、frontend Vitest、frontend build 和 deterministic Playwright smoke 覆盖本模块。Browser smoke 保护 grouped GET 失败恢复、tag-selection、confirm/withdraw 零 barrier、当前页 reload、Cost 独立访问、grouped recovery 和零可见错误；后端 guards 保护普通写零 fan-out。
+`bash scripts/verify.sh all` 通过 backend unittest discovery、frontend Vitest、frontend build 和 deterministic Playwright smoke 覆盖本模块。Browser smoke 保护 grouped GET 失败恢复、tag-selection、relation extra Drawer 保存、confirm/withdraw 零 barrier、当前页 reload、Cost 独立访问、grouped recovery 和零可见错误；后端 guards 保护普通写零 fan-out。
 
 ## 未测风险
 

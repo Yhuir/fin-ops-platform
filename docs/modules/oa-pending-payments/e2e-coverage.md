@@ -8,9 +8,9 @@
 | `OA-PENDING-E2E-002` | covered | `oa-pending-payments-flow.spec.ts`、API/query tests | 搜索、筛选、排序、分页、view mode进入同一query |
 | `OA-PENDING-E2E-003` | covered | `oa-pending-payments-flow.spec.ts`、`oa-pending-payments-nonfresh-flow.spec.ts` | details惰性加载与non-fresh不可用 |
 | `OA-PENDING-E2E-004` | covered by component/API | `OaPendingPaymentsPage.test.tsx`、`test_oa_pending_payment_read_model_query.py` | 500ms检查、304、one-in-flight、query取消；Playwright网络计数为补充证据 |
-| `OA-PENDING-E2E-005` | covered locally | `oa-pending-payments-nonfresh-flow.spec.ts`、`OaPendingPaymentsPage.test.tsx` | 202隐藏旧rows、barrier、fresh重读；真实worker链待统一部署 |
-| `OA-PENDING-E2E-006` | covered locally | `oa-pending-payments-confirm-paid-flow.spec.ts`、command/API/component tests | 写回成功/409失败、barrier、新rows；真实MySQL+PG reconcile待统一部署 |
-| `OA-PENDING-E2E-007` | covered locally | `oa-pending-payments-bank-link-flow.spec.ts`、command/relation/Workbench tests | pending relation、候选限制、自动写回、Workbench隔离 |
+| `OA-PENDING-E2E-005` | covered locally | `oa-pending-payments-nonfresh-flow.spec.ts`、`OaPendingPaymentsPage.test.tsx` | 202 隐藏旧 rows、等待 GET 产生的 exact target、fresh 重读；真实 worker 链待统一部署 |
+| `OA-PENDING-E2E-006` | covered locally | `oa-pending-payments-confirm-paid-flow.spec.ts`、command/API/component tests、`tests/test_oa_pending_payment_source_snapshot_repository.py` | 写回成功/409失败、命令零页面 fan-out、本页 normal GET 新 rows；真实 MySQL+PG reconcile 待统一部署 |
+| `OA-PENDING-E2E-007` | covered locally | `oa-pending-payments-bank-link-flow.spec.ts`、command/relation/Workbench tests、`tests/test_read_model_architecture_guards.py` | pending relation、候选限制、自动写回、Workbench/其它页面 queue 隔离 |
 | `OA-PENDING-E2E-008` | covered by component | `OaPendingPaymentsPage.test.tsx` | visibility pause/resume、unmount/query cancellation |
 | `OA-PENDING-E2E-009` | covered by component/API | `OaPendingPaymentAuditIcon.test.tsx`、Audit repository/API tests | OA专属五态文案、issue samples、共享组件隔离 |
 

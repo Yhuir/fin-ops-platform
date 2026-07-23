@@ -169,19 +169,19 @@ class RuntimeWorkerRegistryTests(unittest.TestCase):
             ),
         )
 
-    def test_import_claim_events_include_import_fact_changed_in_all_transports(self) -> None:
+    def test_import_claim_events_exclude_deleted_fact_changed_bridge(self) -> None:
         registration = registration_by_instance_name()["import"]
 
         self.assertEqual(
             worker_claim_event_types(registration, transport="postgres"),
-            ("import.process.requested", "import.fact.changed"),
+            ("import.process.requested",),
         )
         self.assertEqual(
             worker_claim_event_types(registration, transport="rabbitmq"),
-            ("import.process.requested", "import.fact.changed"),
+            ("import.process.requested",),
         )
         self.assertIn("import.process.requested", rabbitmq_dispatch_event_types())
-        self.assertIn("import.fact.changed", rabbitmq_dispatch_event_types())
+        self.assertNotIn("import.fact.changed", rabbitmq_dispatch_event_types())
 
     def test_read_model_monitoring_events_are_covered_by_registry(self) -> None:
         registry_events = set(rabbitmq_dispatch_event_types())

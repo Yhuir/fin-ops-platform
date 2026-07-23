@@ -17,7 +17,7 @@
 
 - `backend/src/fin_ops_platform/app/server.py`：当前 `/api/search` route、SQL read model HTTP 映射、Search service/producer 依赖组装和 legacy/local fallback 入口。
 - `backend/src/fin_ops_platform/services/search_query_freshness_service.py`：Search SQL read model miss/stale/source-version freshness contract。
-- `backend/src/fin_ops_platform/services/search_read_model_refresh_producer.py`：Search refresh enqueue、invalidation scope normalization 和上游 fan-out producer boundary。
+- `backend/src/fin_ops_platform/services/search_read_model_refresh_producer.py`：Search 访问时/显式运维 refresh enqueue 与 scope normalization boundary；普通上游 writer 不调用。
 - `backend/src/fin_ops_platform/services/search_pending_read_model_refresh.py`：`search.read_model.refresh` 与兼容 pending invoice refresh worker handler。
 - `backend/src/fin_ops_platform/services/search_pending_sql_projection.py`：search index projection builder 与 pending invoice 兼容 projection builder。
 - `backend/src/fin_ops_platform/services/read_model_manifest.py`：`search` read model manifest contract。
@@ -30,7 +30,7 @@
 
 `search:all` 是 fan-out command，不是页面 freshness parent proof。worker 应把 `all` 展开为 month shard；month shard rebuild 后才能写入 search index rows。
 
-当前本地已完成 repository port、query freshness service、refresh producer、rebuild helper quarantine、生产 repository-unavailable fail-closed、OA projection sync Search fan-out producer boundary、runtime import-state Search fan-out producer boundary、Search worker `search:all` shard fan-out producer boundary 和 post-all-scope local closure audit。审计未发现剩余本地 implementation gap；Search local support 已进入 `production-evidence-deferred`，但不是全局模块闭环。真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍需后续生产证据或显式人工 gate。
+当前本地已完成 repository port、query freshness service、访问时 refresh producer、rebuild helper quarantine、生产 repository-unavailable fail-closed，并删除 OA projection sync/runtime import-state/普通 relation writer 的 Search fan-out。`search:all` 只保留为显式运维 shard fan-out；真实 PostgreSQL/worker/App Status/high-row/access-to-fresh 证据仍需统一部署后验证。
 
 ## 维护触发器
 

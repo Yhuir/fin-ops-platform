@@ -211,19 +211,19 @@
 | Import worker | `ImportJobRepository`、`ImportJobWorker`、`runtime_worker_handlers.py` | `import.process.requested` small envelope、processor registry、failed processor 不吞错 |
 | App Status | `app_status_domain_registry.py`、`app_status_job_registry.py` | `imports_bank_transactions` 绑定 `import` worker 和 `bank_transaction_import`；`import.process.requested` affected domain 当前偏向 invoices，需后续专项校准 |
 
-`imports-bank-transactions` fan-out：
+`imports-bank-transactions` 访问收敛：
 
 | 动作 | Dirty/outbox / event | 受影响页面 |
 | --- | --- | --- |
 | file preview | 创建 `FileImportSession`，不应刷新业务 read model | 当前导入页 |
 | file confirm queued | `file_import` background job，RabbitMQ 模式下 `import.process.requested` | 导入页、App Status/App Health |
-| file confirm processed | 所选 session/batch import delta 持久化、Workbench matching 入队、`import_state_changed` lifecycle | 银行明细、关联台、往来款、成本统计、搜索 |
-| bank import lifecycle | `bank_import_confirmed` -> bank balance/detail、workbench、workbench relation、workbench matching、invoice lifecycle、cost、search | 银行明细、关联台、待找发票、成本统计、App Health |
+| file confirm processed | 所选 session/batch import delta 持久化、必要非页面领域任务；页面 targets 为空、无 `import_state_changed` lifecycle | 银行明细、关联台、往来款、成本统计、搜索在各自被访问时收敛 |
+| consumer access after import | 普通确认不发布 `bank_import_confirmed` 页面 lifecycle；各消费页 GET 比较 canonical import/source version 后按 exact scope 入队 | 银行明细、账户余额、关联台、待找发票、成本统计、Search、App Health |
 | preview stale | API `409 preview_stale`，前端提示重新预览 | 当前导入页 |
 
 当前 Browser e2e：
 
-- `web/e2e/imports-bank-transactions-flow.spec.ts`：真实 Chromium 中上传两份银行流水 XLSX、选择银行账户、预览 audit/重复项、处理银行账户冲突弹窗、confirm 后触发 `/api/workbench` 刷新，再进入银行明细验证导入流水可见。
+- `web/e2e/imports-bank-transactions-flow.spec.ts`：真实 Chromium 中上传两份银行流水 XLSX、选择银行账户、预览 audit/重复项、处理银行账户冲突弹窗；confirm 响应不携带页面 target，随后进入银行明细/成本统计时分别走自身 fresh gate 并验证导入影响可见。
 - `tests/test_platform_runtime_boundary_guards.py`：静态保护银行流水前端不调用旧 JSON import API，并保护 `server.py` 不重新持有 import confirm processor wrapper。
 
 ## 模块细化：imports-invoices
@@ -238,23 +238,23 @@
 | HTTP routes | `server.py` `/imports/files/preview`、`/imports/files/confirm`、`/imports/files/retry`、`/imports/files/sessions/{session_id}` | file/session API 是唯一 HTTP 写入合同；confirm 必须防 stale、unknown selected ids 和重复提交 |
 | File import service | `FileImportService` | 损坏 Excel file-level error、模板识别、session/file/batch id、selected files confirm、预览审计 |
 | Normalization core | `ImportNormalizationService` | input/output invoice identity、占位电子发票号 fallback、弱 fingerprint、ETC canonical merge、source links、tags |
-| Import processing | `ImportProcessingService` | confirm 后必须触发发票 lifecycle、workbench matching、tax/cost scope 和 state persistence |
-| Derived lifecycle | `DerivedDataLifecycleService` | `invoice_import_confirmed` 必须使 `invoice_lifecycle` 先于待找发票、税金、进项/销项/OA 待付款等下游页面 |
+| Import processing | `ImportProcessingService` | confirm 只持久化发票 canonical facts/source version 与必要非页面领域任务；不得触发页面 dirty/outbox |
+| Consumer fresh gates | invoice lifecycle、Workbench、pending/tax/usage/output/OA/Cost/Search query services | 各页面访问时按自身依赖和 exact scope 收敛；存在依赖顺序的页面必须 fail closed，而不是写后 fan-out |
 | App Status | `app_status_domain_registry.py`、`app_status_job_registry.py`、`runtime_worker_registry.py` | `imports_invoices` 绑定 `import` worker 和 `invoice_import`；共享 `import.process.requested` envelope 仍需后续专项校准 |
 
-`imports-invoices` fan-out：
+`imports-invoices` 访问收敛：
 
 | 动作 | Dirty/outbox / event | 受影响页面 |
 | --- | --- | --- |
 | file preview | 创建 `FileImportSession` 和 `ImportPreviewAuditCounts`，不应刷新业务 read model | 当前导入页 |
 | file confirm queued | `file_import` background job，RabbitMQ 模式下 `import.process.requested` | 导入页、App Status/App Health |
-| file confirm processed | input/output invoice facts 持久化、source links、duplicate decisions、Workbench matching scope 计算 | 关联台、待找发票、税金抵扣、进项/销项/OA 待付款、成本统计、搜索 |
-| invoice import lifecycle | `invoice_import_confirmed` -> workbench、workbench relation、workbench matching、invoice lifecycle、tax offset、tax month cache、cost statistics、search | 关联台、待找发票、税金抵扣、进项发票使用、销项收款、OA 待付款、成本统计、App Health |
+| file confirm processed | input/output invoice facts、source links、duplicate decisions 与 source version 持久化；页面 targets 为空 | 关联台、待找发票、税金抵扣、进项/销项/OA 待付款、成本统计、Search 在各自访问时收敛 |
+| consumer access after import | 普通确认不发布 `invoice_import_confirmed` 页面 lifecycle；各消费页 GET 依赖 canonical invoice/source version 并按 exact scope 入队 | 关联台、待找发票、税金抵扣、进项发票使用、销项收款、OA 待付款、成本统计、Search、App Health |
 | preview stale | API `409 preview_stale`，前端提示重新预览 | 当前导入页 |
 
 当前 Browser e2e：
 
-- `web/e2e/imports-invoices-flow.spec.ts`：真实 Chromium 中上传两份发票 XLSX、分别选择销项/进项方向、预览 audit/重复与需复核文案、confirm 后触发 `/api/workbench` 刷新并清空导入草稿。
+- `web/e2e/imports-invoices-flow.spec.ts`：真实 Chromium 中上传两份发票 XLSX、分别选择销项/进项方向、预览 audit/重复与需复核文案；confirm 后清空导入草稿且无页面 target，随后逐个访问消费页并验证 fresh/业务展示。
 
 ## 模块细化：imports-etc-invoices
 
@@ -271,19 +271,19 @@
 | ETC service | `EtcService` | import session freshness、duplicate/idempotency、attachments、business batch merge、partial success、delete/release |
 | Import processing | `ImportProcessingService` | `etc_invoice_import.confirm` 创建/复用 task-scoped business batch、progress、mark imported/failed、保存 ETC metadata/PDF/XML 附件关系并只关联已存在 canonical invoice |
 | Import cleanup | `EtcReconciliationImportCleanupService`、`EtcBusinessBatchDeleteService` | 删除/重导只清理 ETC 自有 facts 和 changed months，不调用通用 import service 删除或改写 canonical invoice |
-| Derived lifecycle | `DerivedDataLifecycleService`、`runtime_worker_handlers.py` | `etc_import_confirmed` 仅按真实 changed months 刷新显式 import 合同中的 Workbench/relation/matching、invoice lifecycle、tax offset、search；Cost 在页面访问时先收敛 Workbench、再收敛自身，historical repair 不进入热路径 |
+| Consumer fresh gates | ETC tickets、Workbench、invoice lifecycle、tax、Cost、Search query services | ETC confirm 只提交 canonical metadata/source version；各消费页访问时 exact-scope 收敛，Cost 先验证 Workbench dependency，historical repair 不进入热路径 |
 | App Status | `app_status_domain_registry.py`、`app_status_job_registry.py`、`runtime_worker_registry.py` | `imports_etc_invoices` 绑定 `import` worker 和 `etc_invoice_import` job；共享 `import.process.requested` envelope 仍需后续专项校准 |
 
-`imports-etc-invoices` fan-out：
+`imports-etc-invoices` 访问收敛：
 
 | 动作 | Dirty/outbox / event | 受影响页面 |
 | --- | --- | --- |
 | ready task 查询 | 读取 confirmed reconciliation task，不刷新业务 read model | ETC 导入页 |
 | zip preview | `EtcZipFilterPreview` + `EtcImportSession` + audit，不刷新业务 read model | ETC 导入页 |
 | confirm queued | `etc_invoice_import` background job，RabbitMQ 模式下 `import.process.requested` | 导入页、App Status/App Health |
-| confirm processed | ETC business batch、ETC invoice metadata/附件关系、已存在 canonical invoice 关联、task imported/failed | ETC 票据管理、关联台 summary、税金抵扣、成本统计、search |
-| lifecycle refresh | `etc_import_confirmed` -> workbench、invoice lifecycle、tax offset、search；`etc_business_batch_status_changed` 只到精确 Workbench/matching/search。Cost 不消费 publish fan-out，访问时按 Workbench→Cost 两阶段 gate 收敛 | 关联台、税金抵扣、成本统计、ETC 票据管理、App Health |
-| task/business batch delete | `etc_reconciliation_task_deleted` 或 business batch reset；不触碰 canonical invoice pool | ETC 票据管理、关联台 summary row、税金/成本、search |
+| confirm processed | ETC business batch、ETC invoice metadata/附件关系、已存在 canonical invoice 关联、task imported/failed；页面 targets 为空 | ETC 票据管理、关联台 summary、税金抵扣、成本统计、Search 在各自访问时收敛 |
+| consumer access after import | 普通确认不发布 `etc_import_confirmed` 页面 lifecycle；消费页 GET 比较 canonical/source version 后按 exact scope 入队，Cost 按 Workbench→Cost 两阶段 gate 收敛 | 关联台、税金抵扣、成本统计、ETC 票据管理、Search、App Health |
+| task/business batch delete | 只提交 ETC owner facts/version，不触碰 canonical invoice pool，也不发布页面 target | ETC 票据管理、关联台 summary row、税金/成本、Search 在各自访问时收敛 |
 | preview stale | API `409 stale_reconciliation_task_preview` 或 `409 preview_stale`，前端清空 preview | 当前导入页 |
 
 当前 Browser e2e：
@@ -383,16 +383,16 @@
 | Settings service | `AppSettingsService` | 项目范围、访问控制、银行映射、OA retention/import、OA invoice offset、银行标签、pending invoice 规则、audit/OA role sync |
 | Data reset service | `SettingsDataResetService` | protected targets、导入/文件/关联台/read model/dirty scope 清理、OA rebuild、progress、失败不泄密 |
 | Credential service | `OaApplicantCredentialService`、repository、`TargetOaApplicantTokenProvider` | admin-only、pgcrypto 加密、列表不解密、目标 OA 登录失败不泄露密码 |
-| Derived lifecycle | `DerivedDataLifecycleService`、read model refresh gateway | 设置规则变化必须产生正确 fan-out；data reset 后旧 read model/cache 不能伪装 fresh |
+| Derived lifecycle | `DerivedDataLifecycleService`、read model refresh gateway | 普通设置/规则保存零页面 fan-out；仅显式 data reset 可使用全局 lifecycle，且 reset 后旧 read model/cache 不能伪装 fresh |
 | App Status | app status registries、overview service | reset/job/dirty scope/worker busy 必须在全局状态平面可见 |
 
-`settings` 写入 fan-out：
+`settings` 写入与访问收敛：
 
 | 写入动作 | Dirty/outbox / event | 受影响页面 |
 | --- | --- | --- |
-| pending invoice 规则保存 | `pending_invoice_rules_changed`，income/expense rule version 独立递增 | 待找发票、关联台、发票 lifecycle、进项发票使用、销项收款、OA 待付款、税金、成本、搜索 |
-| 银行标签/自动标签保存 | bank tag settings audit、`bank_auto_tag_rules_changed` 或等价 category lifecycle | 银行明细、免 OA、关联台候选、往来款、成本统计、搜索 |
-| 项目范围变化 | `project_scope_changed` 或等价 project scope dirty | 成本统计、搜索、关联台项目展示 |
+| pending invoice 规则保存 | income/expense rule version 独立递增，普通保存零页面 dirty/outbox | 待找发票、关联台、发票 lifecycle、进项发票使用、销项收款、OA 待付款、税金、成本、Search 在访问时分别收敛 |
+| 银行标签/自动标签保存 | bank tag/rule version + audit，普通保存零页面 dirty/outbox | 银行明细、免 OA、关联台候选、往来款、成本统计、Search 在访问时分别收敛 |
+| 项目范围变化 | project scope version + audit，普通保存零页面 dirty/outbox | 成本统计、Search、关联台项目展示在访问时分别收敛 |
 | 访问控制保存 | state store + OA role sync；不经过 read model | 全局页面可见性、写入权限、导出权限、数据重置和运维入口 |
 | OA retention/import filters 保存 | state store；后续 OA reset/rebuild/sync 消费 | OA 待付款、进项/销项、税金、成本、关联台 |
 | OA 申请人凭据保存/删除 | 独立 credential repository；普通 settings payload 不变 | 进项发票使用 OA 反提草稿、目标 OA 登录/token provider |
@@ -405,7 +405,7 @@
 - `tests/test_app_settings_service.py` 保护 settings normalize、访问控制、银行标签、pending invoice 规则版本、历史非法映射、项目同步/手工项目和 OA role sync。
 - `tests/test_settings_data_reset_service.py` 保护 data reset protected targets、job API、password gate、OA rebuild、relation 保留/移除和失败不泄密。
 - `tests/test_oa_applicant_credentials_*`、`tests/test_target_oa_applicant_token_provider.py` 保护独立凭据事实源、PG 加密、无密码回显和目标 OA token provider。
-- `tests/test_derived_data_lifecycle_service.py`、`tests/test_app_status_overview_service.py` 保护 settings fan-out 到 read model/worker/App Status 的共享 contract。
+- `tests/test_derived_data_lifecycle_service.py`、`tests/test_app_status_overview_service.py` 保护普通 settings 写零页面 fan-out、显式 data reset lifecycle 与 read model/worker/App Status contract。
 - `web/src/test/SettingsPage.test.tsx`、`web/src/test/WorkbenchSelection.test.tsx`、`web/src/test/AppStatusIndicator.test.tsx` 保护设置页、关联台内设置入口、data reset progress/reentry、admin-only 凭据和全局状态提示。
 - `web/e2e/settings-data-reset-flow.spec.ts` 保护真实 Chromium 下设置页 data reset：数据重置 section、影响确认、OA 密码复核、job create/polling、完成后 settings reload 和全局成功反馈；同一 spec 也覆盖项目标记完成 -> 保存 settings -> 成本统计 active/all fresh project scope。
 
@@ -673,17 +673,17 @@
 
 | 写入动作 | 典型入口 | Lifecycle event / dirty source | 受影响派生域 | 受影响页面 | 回归测试重点 |
 | --- | --- | --- | --- | --- | --- |
-| 银行流水导入确认 | import API / import worker | `bank_import_confirmed` | bank balance/detail、workbench、workbench relation、workbench matching、invoice lifecycle、cost statistics、search | 银行明细、关联台、待找发票、成本统计、App Health | 导入确认幂等、dirty scope、worker 入队、旧页面不把 stale 当 fresh |
-| 发票导入确认 | import API / import worker | `invoice_import_confirmed` | workbench、workbench relation、workbench matching、invoice lifecycle、tax offset、cost statistics、search | 关联台、待找发票、税金抵扣、进项/销项/OA 待付款、成本统计 | API shape、source_versions、invoice lifecycle 先于下游页面 |
-| ETC 导入确认 | `/api/etc/import/confirm` | `etc_import_confirmed`；无 `workbench_shard_published` Cost fan-out | workbench、invoice lifecycle、tax offset、search；Cost 访问时两阶段收敛 | ETC、关联台、税金、成本 | ETC 汇总行、散票隐藏、税金刷新、Cost 访问从 Workbench 依赖到自身 fresh；历史修复不进入热路径 |
-| OA 同步/重建 | OA sync worker / manual import | `oa_rebuilt`、`oa_attachment_invoice_cache_updated` | OA adapter cache、workbench、invoice lifecycle、tax/cost/search | 关联台、OA 待付款、进项/销项、税金、成本 | OA 源只读、附件发票 identity、worker readiness |
+| 银行流水导入确认 | import API / import worker | canonical import facts/source version；零页面 target | bank balance/detail、Workbench/relation/matching、invoice lifecycle、Cost、Search 在访问时收敛 | 银行明细、关联台、待找发票、成本统计、App Health | 导入确认幂等、写后零 dirty/outbox、逐页 fresh gate、旧页面不把 stale 当 fresh |
+| 发票导入确认 | import API / import worker | canonical invoice facts/source version；零页面 target | Workbench/relation/matching、invoice lifecycle、tax、Cost、Search 在访问时收敛 | 关联台、待找发票、税金抵扣、进项/销项/OA 待付款、成本统计 | API shape、source_versions、写后零 fan-out、依赖页访问顺序与 fail-closed |
+| ETC 导入确认 | `/api/etc/import/confirm` | canonical ETC metadata/source version；零页面 target | Workbench、invoice lifecycle、tax、Search 在访问时收敛；Cost 两阶段 gate | ETC、关联台、税金、成本 | ETC 汇总行、散票隐藏、逐页访问收敛；历史修复不进入热路径 |
+| OA 同步/重建 | OA sync worker / manual import | OA canonical snapshot/source version；零页面 target | OA pending、Workbench、invoice lifecycle、tax/Cost/Search 在访问时收敛 | 关联台、OA 待付款、进项/销项、税金、成本 | OA 源只读、附件发票 identity、普通 sync 零 fan-out、逐页 fresh gate |
 | 关系确认/撤回 | workbench actions、batch accounting、turnover | canonical relation/history/idempotency/audit/version；零 page target | 各消费者访问时按 canonical source proof 收敛 | 关联台、批量账务、往来款及后续访问页 | stale write contract、idempotency、当前页 normal GET、隐藏页零 I/O、关系 read-model access gate |
 | 批量账务提交/撤回 | `/api/batch-accounting/submit`、`/api/batch-accounting/{relation_id}/withdraw` | canonical relation commit；零 dirty/outbox fan-out | workbench relation / workbench 在各自访问时收敛 | 批量账务、关联台 | relation fresh gate、cancel current relation、GET 只读、route/repository 零 fan-out |
 | 标签/规则保存 | bank details、bank-flow、turnover | canonical settings/category version；普通 save 零 page target | 当前可见页 normal GET，其它页访问时收敛 | 当前页与后续访问的语义消费页 | 配置版本、资格中性零工作、无 `all` fallback、不误伤无关页面 |
-| 税金认证导入 | tax offset import | `tax_certified_import_confirmed` | invoice lifecycle、tax offset、tax month cache、search | 税金抵扣、进项使用、App Health | import job、read model freshness、已认证状态 |
+| 税金认证导入 | tax offset import | canonical certified facts/source version；零页面 target | invoice lifecycle、tax offset、tax month cache、Search 在访问时收敛 | 税金抵扣、进项使用、App Health | import job、写后零 fan-out、访问时 freshness、已认证状态 |
 | no-OA 批处理 | no-OA API | canonical legacy batch/relation facts；零 page target | no-OA/workbench 在访问时收敛 | legacy 免 OA API、关联台 | 批量提交/撤回、零旧 bank-flow 污染、access-time stale/fresh |
 | 设置重置 / backfill | settings data reset | `settings_reset_completed`、`startup_stale_scan` | 多数 read model/cache/session cleanup | 所有列表页、App Health | protected targets 不删除、全局 busy/blocked、worker readiness |
-| 项目范围变化 | settings/project scope | `project_scope_changed` | cost statistics、search | 成本统计、搜索 | 成本统计 all/month scope、search 刷新 |
+| 项目范围变化 | settings/project scope | canonical settings/rule version；零页面 target | Cost、Search 在访问时收敛 | 成本统计、搜索 | active/all scope version、写后零 fan-out、访问收敛 |
 | OA 反提草稿/提交确认 | input invoice usage OA reverse | service/API 状态写入，可能影响 invoice usage/OA 关系 | input invoice usage、invoice lifecycle、OA 关系、审计 | 进项发票使用、设置、App Health | 目标申请人凭据、preview stale、外部 OA 失败、提交历史、不泄露内部 id |
 
 ## 前端刷新与跨页事件图

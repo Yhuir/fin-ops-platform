@@ -111,7 +111,7 @@ confirm 的 I/O 顺序必须是 `save_import_delta` 原子提交在先，必要�
 - Owned facts: `app.bank_transactions` 的导入正式化事实，以及对应 `app.import_batches`、`app.import_batch_rows`、`app.import_files`、`app.file_objects` 中的银行流水导入事实。
 - Allowed writes: bank transaction import preview/confirm/job、import processing service、受控去重/正式化 repository。
 - Allowed reads: bank transaction repository/query ports、bank detail/import API。
-- Downstream outputs: bank_detail、bank_account_balance、workbench、turnover_ledger、no_oa_bank_batch、search read model dirty scopes 或 owner producer 输出。
+- Downstream outputs: bank_detail、bank_account_balance、workbench、turnover_ledger、no_oa_bank_batch、search 可比较的 canonical source-version 变化；各页面访问 gateway 自行创建精确 dirty scope。
 - Forbidden paths: 银行流水页面不得调用旧 JSON `/imports/preview`、`/imports/confirm`；production API/worker 不得从 full snapshot、local pickle、`state:imports`、`state:full_state` 或前端 payload 直接补写银行流水。
 - Old code deletion: 已删除旧 JSON HTTP route/handler/entrypoint、`general_import.confirm` job producer/processor 及只为该链服务的 preview scope dependencies；snapshot 银行流水 fallback、直接跨模块写银行事实路径必须保持删除。migration/audit/rollback 工具和 file/session worker restore 端口保留不算 closure。
 

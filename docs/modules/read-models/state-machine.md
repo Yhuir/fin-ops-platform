@@ -4,14 +4,14 @@
 
 ## 业务状态
 
-- 当前状态：read model 是写模型之外的派生投影；普通 canonical 写不直接改页面投影，也不主动写 dirty/outbox。页面访问时 query gate 比较 canonical expected versions，只有 missing/stale scope 才经 gateway 触发 worker。显式 import/reapply/repair/job 可按其声明合同直接写 exact dirty/outbox。
+- 当前状态：read model 是写模型之外的派生投影；普通 canonical 写（含 import confirm）不直接改页面投影，也不主动写 dirty/outbox。页面访问时 query gate 比较 canonical expected versions，只有 missing/stale scope 才经 gateway 触发 worker。显式 reapply/repair/reset/force-refresh job 可按其声明合同直接写 exact dirty/outbox。
 - 状态事实源：
   - PostgreSQL durable queue：`job.outbox_events`、`job.read_model_dirty_scopes`
   - Readiness 证明层：`read_model.app_status_readiness`
   - Workbench 例外：active generation/readiness metadata
 - 允许流转：
   - ordinary business write -> canonical source version commit -> consumer page access -> query mismatch -> exact dirty/outbox -> worker -> projection publish -> fresh
-  - explicit import/reapply/repair/job -> declared exact dirty/outbox -> worker -> projection publish -> fresh
+  - explicit reapply/repair/reset/force-refresh job -> declared exact dirty/outbox -> worker -> projection publish -> fresh
   - API miss/stale -> `ReadModelQueryGateway` 返回 refreshing payload -> `ReadModelRefreshGateway` enqueue refresh
   - expected schema/source contract 与 actual projection metadata 不匹配或缺失 -> refreshing/stale reason -> enqueue refresh
   - fresh gate 通过但业务 payload contract 不满足当前 API shape -> 忽略 Redis cache 或返回 refreshing/stale reason -> enqueue refresh

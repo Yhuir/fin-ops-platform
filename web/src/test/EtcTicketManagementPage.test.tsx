@@ -237,10 +237,7 @@ describe("ETC ticket management page", () => {
             failed: 1,
             total: 4,
             affected_months: ["2026-04"],
-            operation_barrier_targets: [
-              { read_model_key: "workbench_relation", scope_key: "2026-04" },
-              { read_model_key: "cost_statistics", scope_key: "active:2026-04" },
-            ],
+            operation_barrier_targets: [],
           },
           error: null,
           created_at: "2026-05-03T10:00:00+00:00",
@@ -254,23 +251,10 @@ describe("ETC ticket management page", () => {
     await screen.findByTestId("etc-ticket-management-page", {}, { timeout: 5000 });
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/operation-barrier/status",
-        expect.objectContaining({
-          method: "POST",
-          body: JSON.stringify({
-            targets: [
-              { read_model_key: "workbench_relation", scope_key: "2026-04" },
-              { read_model_key: "cost_statistics", scope_key: "active:2026-04" },
-            ],
-          }),
-        }),
-      );
-    });
-    await waitFor(() => {
       const batchListCalls = fetchMock.mock.calls.filter(([url]) => String(url).startsWith("/api/etc/business-batches?"));
       expect(batchListCalls.length).toBeGreaterThanOrEqual(2);
     });
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/operation-barrier/status")).toBe(false);
     expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/etc/reconciliation-tasks")).toBe(false);
     const taskCreateCalls = fetchMock.mock.calls.filter(([url, init]) =>
       String(url) === "/api/etc/reconciliation-tasks" && init?.method === "POST"

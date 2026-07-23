@@ -12,8 +12,8 @@
 | --- | --- | --- |
 | `READMODEL-E2E-001` | 页面读取 fresh read model 时显示业务数据、summary、分页、导出入口和状态提示一致。 | API payload 必须带 `read_model_status=fresh` 或等价 fresh 证明；Redis 只能缓存 fresh gate 后 payload。 |
 | `READMODEL-E2E-002` | 页面遇到 missing/stale/refreshing read model 时显示同步中/诊断状态，不能显示普通空态或旧 rows。 | API 需要返回 refreshing/stale/missing reason，并通过规范 scope 入队。 |
-| `READMODEL-E2E-003` | 写操作成功后，页面必须等待 operation barrier 或目标 read model fresh reload，不能只凭 POST 200 就显示已同步。 | `/api/operation-barrier/status` 或页面 fresh reload 证明 affected scopes 已 fresh。 |
-| `READMODEL-E2E-004` | 导入、关联、撤回、规则保存、data reset、project scope change 等跨页写操作必须产生正确 dirty/outbox/readiness fan-out。 | durable queue 事件、dirty scopes、readiness 和页面下游 fresh 证据一致。 |
+| `READMODEL-E2E-003` | 普通写操作成功即结束命令阻塞；当前页必须重跑 normal GET，由自己的 fresh gate 证明/收敛，不能只凭 POST 200 把旧 projection 显示为已同步。 | 普通写零 barrier target；页面 GET fresh 或其访问产生的 exact target 完成后才展示最终结果。 |
+| `READMODEL-E2E-004` | 导入、关联、撤回、规则保存等普通事实写必须产生零页面 dirty/outbox；data reset、reapply、repair 等显式 batch 只产生 owner 声明的精确 job。 | write-operation 零 fan-out 证据 + 各消费页访问后的 exact dirty/readiness/fresh 证据一致。 |
 | `READMODEL-E2E-005` | 生产/staging direct read model apply gate 能把 critical scopes enqueue 到 worker 并收敛到 done/fresh。 | `read_model_slo_smoke --critical-only --apply` 通过；dry-run 只能证明 scope discovery。 |
 | `READMODEL-E2E-006` | 真实业务写入口必须能被 write-operation audit 关联到 required scopes 和 SLO。 | `write_operation_slo_audit` 有非空 matching samples 且通过 operation profile；无样本是 missing，不是 covered。 |
 | `READMODEL-E2E-007` | 非规范 scope、历史 failed/outbox、legacy readiness 不得污染当前 App Health。 | scope contract check 区分 covered historical failure 与 current blocker，repair 需要 audit/rollback。 |

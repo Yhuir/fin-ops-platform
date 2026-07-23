@@ -289,7 +289,7 @@ class FakeWorkerMetricsConnection:
                 "heartbeat_lag_seconds": 3.0,
                 "payload": {
                     "worker_instance": "import",
-                    "configured_event_types": ["import.process.requested", "import.fact.changed"],
+                    "configured_event_types": ["import.process.requested"],
                 },
             },
             {

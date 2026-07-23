@@ -48,14 +48,14 @@
 | `workbench_relation` | `workbench_relation`; month；`all=fan_out_command` | `WorkbenchRelationReadFacade` | `reconciliation-workbench`, `batch-accounting`, invoice family | exact relation scope source versions；消费者不得把旧 relation projection 伪装 fresh | `implemented-local` |
 | `bank_detail` | `bank_detail`; month；`all=fan_out_command` | `BankDetailsApplicationService` | `bank-details`, `pending-invoices`, `cost-statistics` | exact month signature/source versions + queue state | `implemented-local` |
 | `bank_account_balance` | `bank_account_balance`; global `all=queryable_all_scope` | `BankDetailsApplicationService` | `bank-details`, App Status | all-only canonical balance source version | `implemented-local` |
-| `pending_invoice` | `pending_invoice`; `direction:filter_group[:month]`; bare all forbidden | `PendingInvoiceReadModelService` | `pending-invoices`, `invoice_lifecycle` | page-first-screen exact scope + bank/relation dependency versions | `migrated-27-04` |
-| `search` | `search`; month；`all=fan_out_command` | `Search read API` | global search, settings manual OA search | requested month index source versions；普通写零 refresh，访问 non-fresh 才 enqueue | `migrated-27-05` |
-| `invoice_lifecycle` | `invoice_lifecycle`; month；`all=fan_out_command` | `InvoiceLifecycleReadFacade` | pending/input/output/OA invoice resources | exact lifecycle + upstream source proof；strict stale consumer | `migrated-27-04` |
-| `input_invoice_usage` | `input_invoice_usage`; month；`all=fan_out_command` | `InputInvoiceUsageReadModelService` | `input-invoice-usage` | exact month + relation/lifecycle/rule signature | `migrated-27-04` |
-| `output_invoice_collection` | `output_invoice_collection`; month；`all=fan_out_command` | `OutputInvoiceCollectionReadApplicationService` | `output-invoice-collections` | exact month + relation/lifecycle/receipt/rule versions | `migrated-27-04` |
-| `oa_pending_payment` | `oa_pending_payment`; month；`all=fan_out_command` | `OaPendingPaymentReadModelService` | `oa-pending-payments`, lifecycle resource | exact OA snapshot/relation/schema versions | `migrated-27-04` |
+| `pending_invoice` | `pending_invoice`; `direction:filter_group[:month]`; bare all forbidden | `PendingInvoiceReadModelService` | `pending-invoices`, `invoice_lifecycle` | page-first-screen exact scope + bank/relation dependency versions | `implemented-local` |
+| `search` | `search`; month；`all=fan_out_command` | `Search read API` | global search, settings manual OA search | requested month index source versions；普通写零 refresh，访问 non-fresh 才 enqueue | `implemented-local` |
+| `invoice_lifecycle` | `invoice_lifecycle`; month；`all=fan_out_command` | `InvoiceLifecycleReadFacade` | pending/input/output/OA invoice resources | exact lifecycle + upstream source proof；strict stale consumer | `implemented-local` |
+| `input_invoice_usage` | `input_invoice_usage`; month；`all=fan_out_command` | `InputInvoiceUsageReadModelService` | `input-invoice-usage` | exact month + relation/lifecycle/rule signature | `implemented-local` |
+| `output_invoice_collection` | `output_invoice_collection`; month；`all=fan_out_command` | `OutputInvoiceCollectionReadApplicationService` | `output-invoice-collections` | exact month + relation/lifecycle/receipt/rule versions | `implemented-local` |
+| `oa_pending_payment` | `oa_pending_payment`; month；`all=fan_out_command` | `OaPendingPaymentReadModelService` | `oa-pending-payments`, lifecycle resource | exact OA snapshot/relation/schema versions | `implemented-local` |
 | `cost_statistics` | `cost_statistics`; `active/all` shard + queryable parent | `CostStatisticsQueryService` | `cost-statistics` | Workbench expected/active gate 先收敛，再检查 Cost/Bank Detail dependency-bound gate；两级不同时 enqueue | `implemented-local` |
-| `tax_offset` | `tax_offset`; month；`all=fan_out_command` | `TaxOffsetQueryService` | `tax-offset` | exact invoice/certified source versions；普通写零 refresh，访问 current month 收敛 | `migrated-27-05` |
+| `tax_offset` | `tax_offset`; month；`all=fan_out_command` | `TaxOffsetQueryService` | `tax-offset` | exact invoice/certified source versions；普通写零 refresh，访问 current month 收敛 | `implemented-local` |
 | `no_oa_bank_batch` | `no_oa_bank_batch`; month；`all=fan_out_command` | `NoOaBankBatchApplicationService` | legacy API/regression only | exact canonical no-OA relation versions；不新增页面依赖 | `implemented-local` |
 | `bank_flow_rule_batch` | `bank_flow_rule_batch`; month；`all=fan_out_command` | `BankFlowRuleBatchApplicationService` | `bank-flow-rule-batches` | exact bank/tag eligibility/relation versions；普通写零 target | `implemented-local` |
 | `turnover_ledger` | `turnover_ledger`; month；`all=fan_out_command` | `TurnoverLedgerQueryService` | `turnover-ledger` | exact ledger + canonical relation source bundle；普通写零 target | `implemented-local` |
@@ -115,7 +115,7 @@
 | `web/src/components/inputInvoiceUsage/OaReverseWorkspaceDrawer.tsx` | input usage | `mixed` | preview read-like；draft/batch/status/revoke writes | preview zero mutation；writes only exact current scope |
 | `web/src/components/inputInvoiceUsage/PaymentStatusRulesDrawer.tsx` | input usage | `writable` | `saveInputInvoiceUsagePaymentStatusRules` | rule version save；access-time semantic proof |
 | `web/src/components/outputInvoiceCollections/CollectionStatusReminderDrawer.tsx` | output collection | `writable` | reminder update/cancel | fact commit + current row reconcile |
-| `web/src/components/outputInvoiceCollections/CollectionStatusRulesDrawer.tsx` | output collection | `writable` | collection status/rule change | rule/fact version；no broad fan-out |
+| `web/src/components/outputInvoiceCollections/CollectionStatusRulesDrawer.tsx` | output collection | `read-only` | none；Sheet6 静态规则只读展示 | load current canonical rules；不得 dirty 或 fan-out |
 | `web/src/components/outputInvoiceCollections/OutputInvoiceCollectionDetailDrawer.tsx` | output collection | `read-only` | none | freshness-gated detail read only |
 | `web/src/components/outputInvoiceCollections/OutputInvoiceCollectionExportDrawer.tsx` | output collection | `read-only` | none | export read only；不得 dirty |
 | `web/src/components/outputInvoiceCollections/ReceiptHistoryDrawer.tsx` | output collection | `mixed` | void/reissue receipt | fact commit + current row/history reconcile |
@@ -168,13 +168,10 @@
 
 | Site id | Source file | Sentinel | Calls | Status | Owner / target and deletion condition |
 | --- | --- | --- | --- | --- | --- |
-| `life-worker-event` | `backend/src/fin_ops_platform/services/runtime_worker_handlers.py` | `.plan_event(` | `1` | `migrate` | runtime worker ordinary/derived event；普通写 broad plan 必须删除 |
-| `life-worker-import-state` | `backend/src/fin_ops_platform/services/runtime_worker_handlers.py` | `.plan_event(` | `1` | `retain` | explicit import batch owner；只输出真实 changed scopes |
-| `life-server-derived` | `backend/src/fin_ops_platform/app/server.py` | `.plan_event(` | `1` | `delete` | legacy server orchestration；全部 slice 有 query-side proof 后删除普通 broad入口 |
-| `enqueue-category-uow` | `backend/src/fin_ops_platform/services/bank_transaction_category_mutation_writer.py` | `.enqueue_read_model_refreshes_in_transaction(` | `1` | `migrate` | bank category UoW；Phase 27-02 改为 canonical fact/version + visible page exact scope，删除 downstream fan-out |
+| `life-server-maintenance` | `backend/src/fin_ops_platform/app/server.py` | `.plan_event(` | `1` | `retain` | 仅显式 settings reset / historical ETC repair；普通写入口已删除 |
 | `enqueue-tax-runtime` | `backend/src/fin_ops_platform/services/tax_offset_runtime_service.py` | `.enqueue_read_model_refresh(` | `1` | `retain` | query/force refresh wrapper，经 gateway；禁止普通 unrelated write 调用 |
 | `enqueue-tax-query` | `backend/src/fin_ops_platform/services/tax_offset_query_service.py` | `.enqueue_read_model_refresh(` | `2` | `retain` | access-time exact scope miss/stale owner |
-| `enqueue-tax-server` | `backend/src/fin_ops_platform/app/server.py` | `.enqueue_read_model_refresh(` | `1` | `migrate` | thin route helper；保持 gateway-backed，删除业务 fan-out调用 |
+| `enqueue-tax-server` | `backend/src/fin_ops_platform/app/server.py` | `.enqueue_read_model_refresh(` | `1` | `retain` | access/explicit force-refresh thin helper，经 gateway；无普通写 fan-out caller |
 | `enqueue-cost-runtime` | `backend/src/fin_ops_platform/services/cost_statistics_runtime_service.py` | `.enqueue_read_model_refresh(` | `1` | `retain` | access/force refresh gateway wrapper |
 | `enqueue-cost-query` | `backend/src/fin_ops_platform/services/cost_statistics_query_service.py` | `.enqueue_read_model_refresh(` | `2` | `retain` | access-time dependency-bound exact scope miss/stale owner |
 | `barrier-cost-page` | `web/src/pages/CostStatisticsPage.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | 页面首次/事件/hidden→visible 均复用正常 GET；refreshing 使用 3s 有界自身重试 |
@@ -185,7 +182,7 @@
 | `barrier-turnover-page` | `web/src/pages/TurnoverLedgerPage.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | command 后只重跑 current ledger normal GET；删除 Workbench/search/cost cross-page wait |
 | `barrier-workbench-page` | `web/src/pages/ReconciliationWorkbenchPage.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | command 后只重跑当前 active-generation normal GET；下游页面访问时收敛 |
 | `barrier-etc-page` | `web/src/pages/EtcTicketManagementPage.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | import/ordinary batch write 后只重跑当前 ETC canonical query；其它页面访问收敛 |
-| `barrier-oa-page` | `web/src/pages/OaPendingPaymentsPage.tsx` | `waitForOperationFreshness(` | `1` | `retain-explicit-audit` | 普通写已删除 barrier；只保留显式 Audit/reconcile action exact OA scope |
+| `barrier-oa-page` | `web/src/pages/OaPendingPaymentsPage.tsx` | `waitForOperationFreshness(` | `1` | `retain` | 普通写已删除 barrier；只保留显式 Audit/reconcile action exact OA scope |
 | `barrier-pending-page` | `web/src/pages/PendingInvoicesPage.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | 当前 direction/filter/month normal GET；rule save 不 rebuild all |
 | `barrier-output-page` | `web/src/pages/OutputInvoiceCollectionsPage.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | 当前 output normal GET；receipt settings 不 rebuild |
 | `barrier-bank-flow-page` | `web/src/pages/BankFlowRuleBatchPage.tsx` | `waitForOperationFreshness(` | `0` | `deleted-local` | 规则/submit/withdraw/reset 成功后只重跑当前 normal GET |

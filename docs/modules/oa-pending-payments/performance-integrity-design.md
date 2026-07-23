@@ -1,7 +1,9 @@
 # OA 待付款核对：高性能与完整性闭环设计
 
+> 历史设计说明（2026-07-22）：本文保留 Phase 27 之前的方案与实施依据。其“事实写入后由 writer/outbox 主动刷新 OA read model”“可见页面轮询 operation barrier”等段落已被 Phase 27 的统一合同取代：普通写和 OA snapshot sync 只提交 canonical fact/version，产生零下游页面 refresh job；页面访问、重新激活或自身刷新时由 OA fresh gate 比较 exact scope source versions，只有 mismatch 才经 gateway 去重入队。显式 App Health 修复/全量维护仍是独立运维命令。当前合同以 `boundary-io.md`、`state-machine.md` 和 `docs/architecture/module-boundaries/read-model-contracts.md` 为准。
+
 日期：2026-07-16
-状态：本地实施与旧链路清理完成，`READY_FOR_UNIFIED_DEPLOYMENT`；生产回填和 SLO 证据待统一部署
+状态：历史设计；Phase 27 本地迁移完成，生产部署和 SLO 证据待验证
 适用范围：`/oa-pending-payments` 页面、`oa_pending_payment` read model、OA 专属刷新链路和页面 Audit
 
 ## 1. 结论

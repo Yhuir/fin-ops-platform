@@ -1,5 +1,7 @@
 # Search 测试矩阵
 
+> 2026-07-22 Phase 27 当前合同：普通 import、relation、规则与 OA 写入零 Search fan-out；`/api/search` 访问发现 source-version mismatch 后才经 gateway 入队 exact scope。本文后续 2026-06/07 的 fan-out 记录只保留为历史回归溯源，不是当前 writer 合同。
+
 ## 七类测试适用性
 
 | 类别 | 适用性 | 当前入口 / 要求 |
@@ -9,7 +11,7 @@
 | 3. API contract tests | 适用 | `/api/search` response shape、status、filter、permission 或 stale/refreshing 行为变化必须覆盖。 |
 | 4. Read model/cache/background job tests | 适用 | `search.read_model.refresh`、`search:all` fan-out、dirty/outbox/readiness、source-version stale skip 必须覆盖。 |
 | 5. Frontend component and interaction tests | 当前不适用 | 当前没有独立 search 页面；若新增全局搜索 UI，必须补 Vitest/Browser e2e。 |
-| 6. End-to-end business-flow integration tests | 条件适用 | Workbench relation/import/tax/cost/lifecycle 写入影响 search 时适用。 |
+| 6. End-to-end business-flow integration tests | 条件适用 | Workbench relation/import/tax/cost/lifecycle 写入后访问 Search、验证 access-time 收敛时适用。 |
 | 7. Existing feature regression tests | 适用 | 保持 pending invoice/search compatibility、worker lanes、manifest contract 和 API fallback 行为。 |
 
 ## 当前测试入口

@@ -2,6 +2,12 @@
 
 本文是测试闭环 master goal 的控制状态。每轮只处理一个模块或共享边界；结束时必须更新本文件，再根据状态选择下一轮。
 
+## 2026-07-22 - Phase 27 写后零 fan-out / 访问时收敛 release candidate
+
+- 当前合同：普通写、import confirm 与 OA authoritative sync 只提交 canonical facts/version/audit，页面 refresh targets、outbox IDs 和 unrelated dirty delta 必须为零；消费页在被访问时由 normal GET 精确收敛。
+- 旧记录说明：本文件下方所有把 `import_state_changed`、`import.fact.changed`、relation repository fan-out、OA sync fan-out 或“等待 exact event IDs”描述为当前成功条件的历史条目，均已被本节取代，只保留为演进记录。
+- 本地门禁：write-operation impact/SLO、architecture guards、全量 backend/frontend/Chromium、docs/infra；生产逐操作/逐页面 p50/p95/p99/max 与部署后 Audit 由 Phase 27-07 完成。
+
 ## 2026-07-12 - 三组可逆 relation checkpoint 闭环
 
 - 架构：复用唯一 `write_operation_e2e_smoke`，legacy 输入只在 load 阶段映射为单 checkpoint；可执行 shape/consumer 合同位于部署包内的 runner 常量，impact matrix 仅是测试约束的文档镜像，生产运行不读取 `docs/`。新链路不新增 relation/queue/freshness/Audit owner，也不改变业务 HTTP DTO。

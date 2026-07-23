@@ -430,7 +430,7 @@ outbox failures 只有在没有后续同 scope `done` 事件、且没有后续�
 - `transaction_ids` 必填且不能为空，不能重复。
 - 所有流水必须来自同一月份、同一银行账户、同一 `category_code`，且该 `category_code` 必须在当前免 OA 标签准入范围内。
 - 只提交请求中的流水；同银行区域内未选中的流水不提交。
-- 成功后写入 `relation_mode=no_oa_bank_batch`，并在 relation `special_metadata` 保留 no-OA 专属冻结要求与规则版本。该显式批次合同继续由 no-OA owner 解释，不允许通用 Workbench 读路径回查当前规则。接口返回信息性 `affected_months`，`workbench_rebuild_queued=false` 且两个 target 数组为空；当前 no-OA 页面用正常 GET 收敛，关联台只在被访问时收敛自身。
+- 成功后写入 `relation_mode=no_oa_bank_batch`，并在 relation `special_metadata` 保留 no-OA 专属冻结要求与规则版本。该显式批次合同继续由 no-OA owner 解释，不允许通用 Workbench 读路径回查当前规则。接口返回信息性 `affected_months`，两个 target 数组为空；当前 no-OA 页面用正常 GET 收敛，关联台只在被访问时收敛自身。旧 `workbench_rebuild_queued` 字段已删除，避免把访问时 freshness 收敛误表述成写后重建。
 
 `POST /api/no-oa-bank-batches/{batch_id}/withdraw`
 

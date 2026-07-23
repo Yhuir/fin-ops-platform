@@ -22,7 +22,6 @@ from fin_ops_platform.services.postgres_repositories.read_models import (
 )
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
-from fin_ops_platform.services.runtime_worker_handlers import _RuntimeWorkerDerivedLifecycle
 from fin_ops_platform.services.workbench_free_matching_engine import RULE_VERSION as WORKBENCH_FORMAL_RELATION_RULE_VERSION
 from fin_ops_platform.services.workbench_groups_page_cache import (
     WORKBENCH_GROUPS_PAGE_CACHE_SCHEMA_VERSION,
@@ -6189,7 +6188,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         app._workbench_read_model_service = FakeWorkbenchReadModelService()
         app._expand_workbench_read_model_scope_keys_for_base_scopes = lambda scope_keys: scope_keys
         app._invalidate_cost_statistics_read_model_scopes = lambda *_args, **_kwargs: []
-        changed = app._invalidate_workbench_read_model_scopes(["2026-05"], invalidate_cost_statistics=False)
+        changed = app._refresh_workbench_read_model_scopes_for_maintenance(["2026-05"])
 
         self.assertEqual(changed, ["2026-05"])
         self.assertEqual(queue.refreshes, [("workbench", "2026-05", "workbench_scope_invalidated")])
@@ -6691,162 +6690,6 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(queue.refreshes, [])
         self.assertEqual(result["active_generation_id"], "gen-2026-05")
         self.assertNotIn("cache_warmup", result)
-
-
-    def test_import_state_invalidation_enqueues_workbench_month_scopes_before_all_aggregate(self) -> None:
-        class FakeQueue:
-            def __init__(self) -> None:
-                self.calls: list[dict[str, object]] = []
-
-            def enqueue_read_model_refresh(self, **kwargs: object) -> None:
-                self.calls.append(dict(kwargs))
-
-        class FakeSearch:
-            def __init__(self) -> None:
-                self.clear_count = 0
-
-            def clear_cache(self) -> None:
-                self.clear_count += 1
-
-        class FakeStateStore:
-            def __init__(self) -> None:
-                self.saved_payloads: list[dict[str, object]] = []
-
-            def save_import_delta(self, payload: dict[str, object]) -> None:
-                self.saved_payloads.append(payload)
-
-        queue = FakeQueue()
-        lifecycle = _RuntimeWorkerDerivedLifecycle(
-            queue_repository=queue,
-            state_store=FakeStateStore(),
-            search_service=FakeSearch(),
-            workbench_source_versions_provider=lambda: {},
-        )
-        lifecycle.persist_confirmed_import_delta(
-            import_state_payload={"imports": {}, "file_imports": {}},
-            cost_statistics_scope_keys=["2026-05"],
-        )
-
-        workbench_calls = [call for call in queue.calls if call["scope_type"] == "workbench"]
-        self.assertEqual(workbench_calls, [{"scope_type": "workbench", "scope_key": "2026-05", "reason": "import_state_changed"}])
-        month_scoped_types = {
-            "workbench_relation",
-            "invoice_lifecycle",
-            "search",
-            "input_invoice_usage",
-            "output_invoice_collection",
-            "oa_pending_payment",
-        }
-        for scope_type in month_scoped_types:
-            with self.subTest(scope_type=scope_type):
-                self.assertIn(
-                    {"scope_type": scope_type, "scope_key": "2026-05", "reason": "import_state_changed"},
-                    queue.calls,
-                )
-                self.assertNotIn(
-                    {"scope_type": scope_type, "scope_key": "all", "reason": "import_state_changed"},
-                    queue.calls,
-                )
-        self.assertIn(
-            {"scope_type": "cost_statistics", "scope_key": "active:2026-05", "reason": "import_state_changed"},
-            queue.calls,
-        )
-        self.assertIn(
-            {"scope_type": "cost_statistics", "scope_key": "all:2026-05", "reason": "import_state_changed"},
-            queue.calls,
-        )
-        pending_invoice_calls = [call for call in queue.calls if call["scope_type"] == "pending_invoice"]
-        self.assertEqual(
-            pending_invoice_calls,
-            [
-                {"scope_type": "pending_invoice", "scope_key": "expense:all:2026-05", "reason": "import_state_changed"},
-                {"scope_type": "pending_invoice", "scope_key": "income:all:2026-05", "reason": "import_state_changed"},
-                {"scope_type": "pending_invoice", "scope_key": "income:cash_income:2026-05", "reason": "import_state_changed"},
-            ],
-        )
-
-    def test_import_state_invalidation_skips_unaffected_invoice_relation_read_models(self) -> None:
-        class FakeQueue:
-            def __init__(self) -> None:
-                self.calls: list[dict[str, object]] = []
-
-            def enqueue_read_model_refresh(self, **kwargs: object) -> None:
-                self.calls.append(dict(kwargs))
-
-        class FakeSearch:
-            def clear_cache(self) -> None:
-                return None
-
-        class FakeStateStore:
-            def save_import_delta(self, _payload: dict[str, object]) -> None:
-                return None
-
-        queue = FakeQueue()
-        lifecycle = _RuntimeWorkerDerivedLifecycle(
-            queue_repository=queue,
-            state_store=FakeStateStore(),
-            search_service=FakeSearch(),
-            workbench_source_versions_provider=lambda: {},
-        )
-        lifecycle.persist_confirmed_import_delta(
-            import_state_payload={"imports": {}, "file_imports": {}},
-            cost_statistics_scope_keys=["2026-05"],
-            input_invoice_usage_scope_keys=["2026-05"],
-            output_invoice_collection_scope_keys=[],
-        )
-
-        self.assertIn(
-            {"scope_type": "input_invoice_usage", "scope_key": "2026-05", "reason": "import_state_changed"},
-            queue.calls,
-        )
-        self.assertNotIn(
-            {"scope_type": "output_invoice_collection", "scope_key": "2026-05", "reason": "import_state_changed"},
-            queue.calls,
-        )
-        self.assertNotIn(
-            {"scope_type": "workbench", "scope_key": "all", "reason": "import_state_changed"},
-            queue.calls,
-        )
-        self.assertNotIn(
-            {"scope_type": "pending_invoice", "scope_key": "expense:all", "reason": "import_state_changed"},
-            queue.calls,
-        )
-
-    def test_import_state_invalidation_enqueues_bank_detail_for_transaction_month_scopes(self) -> None:
-        class FakeQueue:
-            def __init__(self) -> None:
-                self.calls: list[dict[str, object]] = []
-
-            def enqueue_read_model_refresh(self, **kwargs: object) -> None:
-                self.calls.append(dict(kwargs))
-
-        class FakeStateStore:
-            def save_import_delta(self, _payload: dict[str, object]) -> None:
-                return None
-
-        lifecycle = _RuntimeWorkerDerivedLifecycle(
-            queue_repository=FakeQueue(),
-            state_store=FakeStateStore(),
-            search_service=SimpleNamespace(clear_cache=lambda: None),
-            workbench_source_versions_provider=lambda: {},
-        )
-        lifecycle.persist_confirmed_import_delta(
-            import_state_payload={"imports": {}, "file_imports": {}},
-            cost_statistics_scope_keys=["2026-05"],
-            bank_detail_scope_keys=["2026-06"],
-        )
-
-        queue = lifecycle._queue_repository
-        bank_detail_calls = [call for call in queue.calls if call["scope_type"] == "bank_detail"]
-        self.assertEqual(
-            bank_detail_calls,
-            [{"scope_type": "bank_detail", "scope_key": "2026-06", "reason": "import_facts_changed"}],
-        )
-        bank_account_balance_calls = [call for call in queue.calls if call["scope_type"] == "bank_account_balance"]
-        self.assertEqual(
-            bank_account_balance_calls,
-            [{"scope_type": "bank_account_balance", "scope_key": "all", "reason": "import_state_changed"}],
-        )
 
     def test_sql_projection_prevents_same_invoice_identity_in_paired_and_open_zones(self) -> None:
         builder = WorkbenchSqlProjectionBuilder(

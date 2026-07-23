@@ -774,7 +774,7 @@ class CostStatisticsApiTests(unittest.TestCase):
         create_job.assert_not_called()
         run_job.assert_not_called()
 
-    def test_workbench_scope_invalidation_only_enqueues_durable_cost_refresh(self) -> None:
+    def test_workbench_maintenance_refresh_does_not_fan_out_cost_statistics(self) -> None:
         queue = self._install_queue_recorder()
         repository = self.cost_repository
         for month in ("2026-03", "all"):
@@ -796,18 +796,16 @@ class CostStatisticsApiTests(unittest.TestCase):
             patch.object(self.app._background_job_service, "create_or_get_idempotent_job_with_created") as create_job,
             patch.object(self.app._background_job_service, "run_job") as run_job,
         ):
-            deleted_workbench_scopes = self.app._invalidate_workbench_read_model_scopes(["2026-03"])
+            deleted_workbench_scopes = self.app._refresh_workbench_read_model_scopes_for_maintenance(["2026-03"])
 
         self.assertEqual(deleted_workbench_scopes, ["2026-03"])
         self.assertIsNotNone(repository.get_read_model("2026-03", "active"))
         self.assertIsNotNone(repository.get_read_model("2026-03", "all"))
         cost_refreshes = [refresh for refresh in queue.refreshes if refresh[0] == "cost_statistics"]
+        self.assertEqual(cost_refreshes, [])
         self.assertEqual(
-            cost_refreshes,
-            [
-                ("cost_statistics", "active:2026-03", "workbench_scope_invalidated"),
-                ("cost_statistics", "all:2026-03", "workbench_scope_invalidated"),
-            ],
+            [refresh for refresh in queue.refreshes if refresh[0] == "workbench"],
+            [("workbench", "2026-03", "workbench_scope_invalidated")],
         )
         create_job.assert_not_called()
         run_job.assert_not_called()
@@ -827,18 +825,12 @@ class CostStatisticsApiTests(unittest.TestCase):
             )
         queue.refreshes.clear()
 
-        self.app._invalidate_workbench_read_model_scopes(["all"])
+        self.app._refresh_workbench_read_model_scopes_for_maintenance(["all"])
 
         self.assertIsNotNone(repository.get_read_model("all", "active"))
         self.assertIsNotNone(repository.get_read_model("all", "all"))
         cost_refreshes = [refresh for refresh in queue.refreshes if refresh[0] == "cost_statistics"]
-        self.assertEqual(
-            cost_refreshes,
-            [
-                ("cost_statistics", "active:all", "workbench_scope_invalidated"),
-                ("cost_statistics", "all:all", "workbench_scope_invalidated"),
-            ],
-        )
+        self.assertEqual(cost_refreshes, [])
 
     def test_get_cost_statistics_routes_return_expected_shapes(self) -> None:
         from fin_ops_platform.domain.enums import BatchType

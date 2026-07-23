@@ -14,7 +14,7 @@
 | 自动标签解析 | `manual_confirmed` | 候选确认来自 `app.bank_transaction_category_confirmations`；人工补分类来自 active `app.bank_transaction_categories` | 候选确认只能通过 confirmation DELETE 撤销并回到当前规则重算；只有从 `unmatched` 人工补上的分类显示 assignment 撤销，清除后回到 `unmatched` / `待分类`。确定性 `auto_matched` 不显示撤销按钮。 |
 | 自动标签规则 | `active` | `bank_transaction_tags` snapshot | GET/PUT/file replacement/reapply 读取；PUT 可改 label、priority、rules、status。 |
 | 自动标签规则 | `archived` | `bank_transaction_tags` snapshot | 不参与新命中；可作为历史回显；被引用时归档需要同步移除下游规则引用并审计。 |
-| 关系标签 | `unlinked` / `relation-tagged` | Workbench relation distribution / relation projection | 关联台、批量账务、免 OA、往来款等写入或撤回后由 read model 刷新。 |
+| 关系标签 | `unlinked` / `relation-tagged` | Workbench relation distribution / relation projection | 关联台、批量账务、免 OA、往来款等写入或撤回只推进 canonical relation version；银行页访问时由 fresh gate 刷新。 |
 | 账户余额 | `has_balance` / `missing_balance` | `read_model.bank_account_balances` | 导入、删除、重导或原始 balance 字段变化触发刷新；标签规则变化不改变余额事实。 |
 
 关键规则：
@@ -22,7 +22,7 @@
 - 页面不得本地推断标签结果；必须消费后端返回的 `effective_*`、`category_resolution_status` 和候选列表。
 - `needs_confirmation` 只能提交当前 `auto_candidate_categories` 中的候选；同一 code 存在多第三层候选时必须同时提交并校验 `category_third_label`。
 - `category-assignment` 只允许当前解析状态为 `unmatched` 的流水；禁止用它覆盖 `auto_matched`、`needs_confirmation` 或 `internal_transfer`。
-- 标签/分类写操作必须写审计并触发 bank detail read model 和相关下游 dirty/outbox；不能只更新页面状态。
+- 标签/分类写操作必须写 canonical fact/version/audit，但不得触发 bank detail 或相关下游 dirty/outbox；当前银行页用 normal GET 收敛，其它页面在访问时收敛。
 - 人工补分类清除必须把既有 category fact 标记为 `cleared` 并保留历史 code；active fact 不允许用 `unknown` 代替空分类。前端成功响应后立即显示 `待分类`，随后按 `affected_months` 刷新 read model。
 - 账户余额 read model 独立于 bank detail rows；日期筛选只影响账户流水数量，不改变 latest balance。
 

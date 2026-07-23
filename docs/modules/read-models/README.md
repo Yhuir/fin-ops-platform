@@ -47,7 +47,7 @@ read model 查询边界必须 fail-closed。调用 `ReadModelQueryGateway` 时�
 
 `read_model_scope_policy.py` 是 refresh scope 入口契约。除 `cost_statistics` 与 `pending_invoice` 的特殊 scope 外，主要页面 read model（`bank_detail`、`bank_account_balance`、`bank_flow_rule_batch`、`input_invoice_usage`、`output_invoice_collection`、`oa_pending_payment`、`invoice_lifecycle`、`search`、`tax_offset`、`turnover_ledger`、`workbench`、`workbench_relation`）接受 month 或 `all` scope，并在 gateway 阶段拒绝 `active:*` 等非本 read model 合约 scope。`no_oa_bank_batch` 仍接受 legacy month/all scope，但默认生产页面 SLO 和 critical read model smoke 不再把它当作当前页面目标。新增 read model 或变更 scope 形态时必须先更新 registry、worker manifest、tests 和本模块文档。
 
-`read_model_manifest.py` 是 14 个 App Status read model 的共享合同清单。它不替代具体 query service、repository 或 worker 实现，但必须与 `APP_STATUS_READ_MODEL_REGISTRY`、`runtime_worker_registry.py`、RabbitMQ dispatch events 和 `ReadModelScopePolicyRegistry` 保持一致。manifest 还登记 force refresh 与显式 import/reapply/job 可能使用的 operation barrier target 合同；普通 canonical 写不生成 barrier target，也不靠 App Status 代表页面 fresh。页面访问必须通过自己的 query freshness gate。新增 read model、变更 refresh event、worker、`all` scope、force refresh/barrier 或 query freshness 合同时，必须同步更新 manifest 和测试。
+`read_model_manifest.py` 是 15 个 App Status read model 的共享合同清单。它不替代具体 query service、repository 或 worker 实现，但必须与 `APP_STATUS_READ_MODEL_REGISTRY`、`runtime_worker_registry.py`、RabbitMQ dispatch events 和 `ReadModelScopePolicyRegistry` 保持一致。manifest 还登记 force refresh 与显式 reapply/repair/reset job 可能使用的 operation barrier target 合同；普通 canonical 写（含 import confirm）不生成 barrier target，也不靠 App Status 代表页面 fresh。页面访问必须通过自己的 query freshness gate。新增 read model、变更 refresh event、worker、`all` scope、force refresh/barrier 或 query freshness 合同时，必须同步更新 manifest 和测试。
 
 `read_model_manifest.py` 同时登记每个 read model 当前占用的 `PostgresReadModelRepository` repository port contract。`postgres_repositories/read_models.py` 仍是过渡期共享 SQL owner，但每个公共 repository 方法必须有且只有一个 manifest owner；后续拆分只能按已登记 port 小步迁移，不能在共享 repository 中继续新增未登记的跨模块方法。
 
@@ -72,7 +72,7 @@ read model 查询边界必须 fail-closed。调用 `ReadModelQueryGateway` 时�
 | 输出 | 必需字段 / 证明 | 禁止行为 |
 | --- | --- | --- |
 | API payload | `read_model_status` 或等价 freshness 语义、`read_model_scope_keys`、stale/missing reason、`refresh_enqueued`、schema/source proof | 把 missing/stale/failed payload 标为 fresh；把 fresh 空态用于非 fresh rows。 |
-| Write API result | 普通 canonical mutation 返回业务 receipt/version 和信息性 affected scopes/months，freshness/barrier targets 为空；显式 import/reapply/job 可返回经过 owner 声明的 exact targets | 普通写后制造跨页面 target/fan-out；或前端把轻量事件当作 fresh 证明。 |
+| Write API result | 普通 canonical mutation（含 import confirm）返回业务 receipt/version 和信息性 affected scopes/months，freshness/barrier targets 为空；显式 reapply/repair/reset/force-refresh job 可返回 owner 声明的 exact targets | 普通写后制造跨页面 target/fan-out；或前端把轻量事件当作 fresh 证明。 |
 | Dirty scope / outbox | `read_model_key`、规范 `scope_type/scope_key`、reason、priority、metadata/action name、dedupe contract | 业务 service 直接 SQL 写 `job.outbox_events` 或 `job.read_model_dirty_scopes`。 |
 | Readiness | 当前 schema/source proof、current-effective status、worker/error 诊断 | Redis/RabbitMQ 作为状态事实源；fan-out-only `all` 写假 parent fresh proof。 |
 | Cache | 只缓存 fresh gate 后、且通过 payload validator 的 payload | Redis cache 命中绕过 fresh gate 或 payload contract。 |
@@ -99,7 +99,7 @@ read model 查询边界必须 fail-closed。调用 `ReadModelQueryGateway` 时�
 - `ReadModelQueryGateway`：统一 fresh gate、cache gate 和 miss/stale enqueue。
 - `ReadModelRefreshGateway`：非事务 refresh 的唯一 enqueue 边界。
 - `ReadModelScopePolicyRegistry` / scope contract helpers：scope normalize/validate/dedupe 合同。
-- `OperationFreshnessBarrierService`：写后可见性等待目标。
+- `OperationFreshnessBarrierService`：页面访问发现 non-fresh 后，或显式 import/reapply/repair job 的精确可见性等待目标；普通写命令不使用。
 - `READ_MODEL_MANIFEST`：manifest/registry/test owner 合同清单。
 - 每个 read model 自己登记的 query facade、repository port、refresh producer、derived lifecycle executor 和 worker handler。
 
@@ -150,7 +150,7 @@ Scoped incremental projection 可以在当前 SQL view 已 fresh 且 `source_ver
 | `bank_flow_rule_batch` | `bank_flow_rule_batch` | bank-flow rule batch month_scope; all is fan-out only | bank-flow rule batch public rows for affected month scopes | gateway force refresh all enumerates bank-flow rule batch month shards through the refresh producer | bank_flow_rule_batch source_versions plus app_status readiness and current-effective dirty/outbox state | `gateway_force_refresh` / `app_status_registry_target` |
 | `turnover_ledger` | `turnover_ledger` | turnover ledger month_scope; all is fan-out only | turnover ledger grouped/list rows plus turnover_ledger_scopes row-count/statistics summary for affected month scopes and the all-page aggregate | gateway force refresh all enumerates turnover ledger month shards and supports explicit clear/rebuild | turnover_ledger_scopes generation/source_versions/statistics with module-global serialized CAS plus ReadModelQueryGateway expected versions, workbench_relation versions, and current-effective dirty/outbox state | `gateway_force_refresh` / `app_status_registry_target` |
 
-依赖 `workbench_relation` distribution 的页面 read model 还必须把当前 `read_model.workbench_relation_scopes.source_versions` 纳入 expected source versions。进项发票使用、销项发票收款等实际 consumer只要 relation scope版本与 payload保存时不一致，就必须返回 refreshing/stale并入队对应页面 read model refresh。OA 待付款是明确例外：Workbench写事务直接投递 OA月份，OA projector读取 canonical relation，因此 OA freshness只比较自己的 dirty/outbox、source snapshot、pending relation和 event version，不得等待其它页面 read model。待找发票通过 pending invoice source versions按当前筛选范围读取 `workbench_relation` scope versions，必须保持等价语义。
+依赖 `workbench_relation` distribution 的页面 read model 还必须把当前 `read_model.workbench_relation_scopes.source_versions` 纳入 expected source versions。进项发票使用、销项发票收款等实际 consumer只要 relation scope版本与 payload保存时不一致，就必须返回 refreshing/stale并由该次页面访问入队对应 read model refresh。OA 待付款是明确例外：OA projector 访问时直接读取 canonical relation，不等待 `workbench_relation` read model；Workbench 写事务同样不投递 OA，OA freshness 比较自己的 source snapshot、pending/canonical relation、dirty/outbox 和 event version。待找发票通过 pending invoice source versions按当前筛选范围读取 `workbench_relation` scope versions，必须保持等价语义。
 
 `all` scope 必须区分两种语义：refresh command 的 `all` 可以是 fan-out 控制 scope，只负责枚举并投递 month shards；页面查询的 `all` 必须有可验证的 freshness proof。fan-out-only refresh 结果不能写假 fresh readiness；相应 API/repository 必须把无界查询解析为实际月份 shard 的 source/readiness 证明，或显式发布一个真实可查询的 parent aggregate proof。不能让页面等待一个 worker 永远不会发布为 fresh 的 parent `all` scope，也不能在 stale parent `all` 上反复补投刷新。
 

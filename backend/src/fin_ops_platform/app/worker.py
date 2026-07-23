@@ -90,7 +90,6 @@ from fin_ops_platform.services.postgres_repositories.workbench_relation import P
 from fin_ops_platform.services.postgres_state_store import PostgresStateStore
 from fin_ops_platform.services.rabbitmq_runtime import RabbitMqConsumer, rabbitmq_event_routes
 from fin_ops_platform.services.read_model_readiness import ReadModelReadinessReporter
-from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.runtime_monitoring import RuntimeMonitoringRepository
 from fin_ops_platform.services.runtime_paths import default_data_dir
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository, RuntimeQueueSettings
@@ -101,7 +100,6 @@ from fin_ops_platform.services.runtime_worker import (
     RuntimeWorkerConfig,
 )
 from fin_ops_platform.services.runtime_worker_handlers import (
-    IMPORT_FACT_CHANGED_EVENT,
     ImportRuntimeProcessorFactory,
     WorkbenchMatchingWorkerFactory,
     build_import_job_handler_bundle,
@@ -115,7 +113,6 @@ from fin_ops_platform.services.runtime_worker_registry import (
 )
 from fin_ops_platform.services.search_pending_read_model_refresh import SearchPendingReadModelRefreshService
 from fin_ops_platform.services.search_pending_sql_projection import SearchPendingSqlProjectionBuilder
-from fin_ops_platform.services.search_read_model_refresh_producer import SearchReadModelRefreshProducer
 from fin_ops_platform.services.tax_offset_read_model_refresh import TaxOffsetReadModelRefreshService
 from fin_ops_platform.services.tax_offset_sql_projection import TaxOffsetSqlProjectionBuilder
 from fin_ops_platform.services.turnover_ledger_read_model_refresh import TurnoverLedgerReadModelRefreshService
@@ -133,7 +130,6 @@ from fin_ops_platform.services.workbench_pair_relation_service import (
 )
 from fin_ops_platform.services.workbench_read_model_refresh import WorkbenchReadModelRefreshService
 from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
-from fin_ops_platform.services.workbench_reconciliation_dirty_queue import WorkbenchReconciliationDirtyQueue
 from fin_ops_platform.services.workbench_relation_command_service import WorkbenchRelationCommandService
 from fin_ops_platform.services.workbench_relation_read_facade import WorkbenchRelationReadFacade
 from fin_ops_platform.services.workbench_relation_read_model_refresh import (
@@ -304,7 +300,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         pending_payment_source_snapshot_repository = (
             PostgresOaPendingPaymentSourceSnapshotRepository(
                 connection,
-                queue_repository=queue,
                 pending_relation_repository=pending_relation_repository,
             )
             if payment_status_repository is not None
@@ -313,17 +308,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         sync_service = OAProjectionSyncService(
             source_adapter=source_adapter,
             projection_repository=projection_repository,
-            queue_repository=queue,
             retention_cutoff_date_provider=lambda: str(oa_runtime_settings["cutoff_date"]),
             pending_payment_relation_promoter=pending_relation_promoter,
-            search_read_model_refresh_producer=SearchReadModelRefreshProducer(
-                refresh_gateway_provider=lambda: ReadModelRefreshGateway(queue_repository=queue)
-            ),
             payment_status_repository=payment_status_repository,
             pending_payment_source_snapshot_repository=pending_payment_source_snapshot_repository,
-            workbench_matching_dirty_queue=WorkbenchReconciliationDirtyQueue(
-                repository=read_model_repository,
-            ),
         )
         handlers["oa.sync"] = sync_service.handle_runtime_event
         if "oa.sync" not in config.event_types:
@@ -592,21 +580,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             else ImportRuntimeProcessorFactory(
                 data_dir=default_data_dir(),
                 connection=connection,
-                queue_repository=queue,
             ).build_processors()
         )
         import_handlers = build_import_job_handler_bundle(
             connection=connection,
             worker_id=config.worker_id,
             processors=import_processors,
-            include_import_fact_changed=True,
-            queue_repository=queue,
         )
         handlers.update(import_handlers.handlers)
         if IMPORT_PROCESS_REQUESTED_EVENT not in config.event_types:
             config.event_types.append(IMPORT_PROCESS_REQUESTED_EVENT)
-        if IMPORT_FACT_CHANGED_EVENT not in config.event_types:
-            config.event_types.append(IMPORT_FACT_CHANGED_EVENT)
 
     if args.check:
         print(

@@ -1185,4 +1185,52 @@ test.describe("output invoice collections browser flow", () => {
     expect(api.count("GET /api/output-invoice-collections/receipt-settings")).toBe(0);
     expect(browserErrors).toEqual([]);
   });
+
+  test("saves receipt numbering settings without rebuilding collection rows", async ({ page }, testInfo) => {
+    const browserErrors = startStrictBrowserErrorCapture(page);
+    const api = await installDeterministicApiMocks(page, {
+      sessionMode: "admin",
+    });
+    const recordLatency = createOutputInvoiceCollectionsLatencyRecorder(page, testInfo);
+
+    const rowsPromise = waitForOutputInvoiceRows(page);
+    await page.goto("/output-invoice-collections");
+    expect((await rowsPromise).status()).toBe(200);
+    await expect(page.getByTestId("output-invoice-collections-page")).toBeVisible();
+
+    const drawer = page.getByRole("dialog", { name: "收据编号设置" });
+    await recordLatency({
+      operationId: "output-invoice-collections.open-receipt-settings",
+      visibleLabel: "收据编号设置",
+      actionType: "click",
+    }, async (mark) => {
+      const settingsResponse = page.waitForResponse((response) =>
+        response.request().method() === "GET"
+        && new URL(response.url()).pathname.endsWith("/api/output-invoice-collections/receipt-settings"));
+      await page.getByRole("button", { name: "收据编号设置" }).click();
+      expect((await mark("apiLatencyMs", settingsResponse)).status()).toBe(200);
+      await mark("firstVisibleResponseLatencyMs", expect(drawer).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(drawer.getByRole("button", { name: "保存收据编号设置" })).toBeEnabled());
+    });
+
+    await drawer.getByLabel("编号前缀").fill("YS");
+    const rowsBeforeSave = api.count("GET /api/output-invoice-collections/rows");
+    await recordLatency({
+      operationId: "output-invoice-collections.save-receipt-settings",
+      visibleLabel: "保存收据编号设置",
+      actionType: "click",
+    }, async (mark) => {
+      const saveResponse = page.waitForResponse((response) =>
+        response.request().method() === "PUT"
+        && new URL(response.url()).pathname.endsWith("/api/output-invoice-collections/receipt-settings"));
+      await drawer.getByRole("button", { name: "保存收据编号设置" }).click();
+      expect((await mark("apiLatencyMs", saveResponse)).status()).toBe(200);
+      await mark("finalSettledLatencyMs", expect(drawer).toBeHidden());
+    });
+
+    expect(api.count("PUT /api/output-invoice-collections/receipt-settings")).toBe(1);
+    expect(api.count("GET /api/output-invoice-collections/rows")).toBe(rowsBeforeSave);
+    expect(api.count("GET /api/operation-barrier/status")).toBe(0);
+    expect(browserErrors).toEqual([]);
+  });
 });

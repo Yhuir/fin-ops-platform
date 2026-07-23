@@ -63,9 +63,8 @@ class OaPendingPaymentSourceSnapshotResult:
 class PostgresOaPendingPaymentSourceSnapshotRepository:
     """Own the integration-side, PostgreSQL-only inputs for the OA pending projection."""
 
-    def __init__(self, connection: Any, *, queue_repository: Any, pending_relation_repository: Any) -> None:
+    def __init__(self, connection: Any, *, pending_relation_repository: Any) -> None:
         self._connection = connection
-        self._queue_repository = queue_repository
         self._pending_relation_repository = pending_relation_repository
 
     def payment_status_reader(
@@ -331,11 +330,6 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
                     payload=payload,
                 )
                 source_signatures[scope] = str(payload["source_signature"])
-                self._enqueue_refresh(
-                    transaction,
-                    tenant_id=normalized_tenant_id,
-                    scope_key=scope,
-                )
 
             return OaPendingPaymentSourceSnapshotResult(
                 completed_projection_changed_scopes=tuple(
@@ -731,24 +725,6 @@ class PostgresOaPendingPaymentSourceSnapshotRepository:
             ),
         )
 
-    def _enqueue_refresh(
-        self,
-        transaction: Any,
-        *,
-        tenant_id: str,
-        scope_key: str,
-    ) -> None:
-        enqueue = getattr(self._queue_repository, "enqueue_read_model_refresh_in_transaction", None)
-        if not callable(enqueue):
-            raise RuntimeError("queue_repository must expose enqueue_read_model_refresh_in_transaction().")
-        enqueue(
-            transaction=transaction,
-            tenant_id=tenant_id,
-            scope_type="oa_pending_payment",
-            scope_key=scope_key,
-            reason="oa_pending_payment_source_snapshot_changed",
-            priority="low" if scope_key == "all" else "normal",
-        )
 
 
 class PostgresOaPendingPaymentStatusSnapshotReader:

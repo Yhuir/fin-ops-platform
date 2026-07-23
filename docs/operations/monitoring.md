@@ -581,20 +581,20 @@ chmod 600 "$FIN_OPS_WRITE_E2E_SCENARIO"
 | 页面 / 模块 | Apply policy | 标准写场景 | Approval ticket | 说明 |
 | --- | --- | --- | --- | --- |
 | 往来款 | `standing_apply` | `turnover_manual_closure_or_withdraw` | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 只选择已有 active Workbench relation 承载的手工往来闭环，并通过 `/api/workbench/actions/withdraw-link` 撤回；不走旧的 turnover relation 直连撤回路径。 |
-| 关联台 / Workbench relation | `standing_apply` | `workbench_relation_withdraw` | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 只选择 `manual_confirmed` active relation，要求有明确月份且成员行数 bounded，覆盖 workbench/workbench_relation 及跨页 fan-out。 |
-| 免 OA 流水批次 | `standing_apply` | `no_oa_bank_batch_withdraw` | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 只选择 submitted 且有明确 scope month 的批次，要求银行流水成员 bounded，覆盖 no-OA、workbench、cost/search fan-out。 |
-| 流水规则批量处理 | `fanout_evidence` | `no_oa_bank_batch_withdraw` | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 不新增独立生产写入；通过 no-OA/bank-flow fan-out、direct read model smoke 和页面 API SLO 证明。 |
-| 银行明细 | `fanout_evidence` | 三类 standing write 场景 | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 用上游可逆 withdraw 的 affected scopes、direct read model smoke、authenticated HTTP/SSE 和 audit 证明；不伪造银行明细独立生产 mutation。 |
-| 银行账户余额 | `fanout_evidence` | 三类 standing write 场景 | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 用银行事实源 fan-out 与 all-only read model smoke 证明。 |
-| 待找发票 | `fanout_evidence` | 三类 standing write 场景 | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 用上游关联撤回影响的 pending scope 和 read model/API SLO 证明。 |
-| 进项发票使用情况 | `fanout_evidence` | 三类 standing write 场景 | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 用 workbench/no-OA/turnover fan-out 和 invoice usage worker 证明。 |
-| 销项发票收款情况 | `fanout_evidence` | 三类 standing write 场景 | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 用 fan-out、direct read model smoke 和 post API probe 证明。 |
-| 发票生命周期 | `fanout_evidence` | 三类 standing write 场景 | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 用关联撤回后的 lifecycle affected scope 证明。 |
-| OA 待付款 | `fanout_evidence` | 三类 standing write 场景 | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 生产 smoke 不自动写 OA 付款状态；页面显式写回必须由 OA 写回配置和单独业务流程控制。 |
-| 税金抵扣 | `fanout_evidence` | 三类 standing write 场景 | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 用成本/发票 fan-out、read model smoke 和页面 API SLO 证明。 |
-| 成本统计 | `fanout_evidence` | 三类 standing write 场景 | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 用 Workbench active generation fan-out、成本统计 read model smoke 和页面 API SLO 证明。 |
-| 搜索 | `fanout_evidence` | 三类 standing write 场景 | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 用各写入链路的 search refresh fan-out、direct read model smoke 和 search API SLO 证明。 |
-| 批量账务 | `fanout_evidence` | `workbench_relation_withdraw` | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 用 Workbench relation fan-out 与批量账务查询 read model 证明，不新增独立 production apply。 |
+| 关联台 / Workbench relation | `standing_apply` | `workbench_relation_withdraw` | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 只选择 test-owned、`manual_confirmed` active relation，要求有明确月份且成员行数 bounded；证明 canonical withdraw 成功、写后零页面 fan-out，并在关联台重新访问时收敛。 |
+| 免 OA 流水批次 | `standing_apply` | `no_oa_bank_batch_withdraw` | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 只选择 test-owned、submitted 且有明确 scope month 的批次，要求银行流水成员 bounded；证明 no-OA canonical withdraw 与写后零页面 fan-out。 |
+| 流水规则批量处理 | `access_convergence_evidence` | `bank_flow_rule_batch_submit` | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 使用 test-owned 可逆批次；证明 submit 写后零页面 fan-out，并在当前页/消费页访问时收敛。 |
+| 银行明细 | `access_convergence_evidence` | 标准 test-owned 可逆场景 | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 写步骤证明零银行明细 refresh；随后 authenticated 页面 API 访问证明 exact-scope fresh gate、worker drain 与读取 SLO。 |
+| 银行账户余额 | `access_convergence_evidence` | 标准 test-owned 可逆场景 | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 写步骤证明零账户余额 refresh；随后账户余额访问证明自身 freshness 收敛。 |
+| 待找发票 | `access_convergence_evidence` | 标准 test-owned 可逆场景 | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 写步骤零 pending refresh；随后待找发票访问证明自身 exact scope 收敛。 |
+| 进项发票使用情况 | `access_convergence_evidence` | 标准 test-owned 可逆场景 | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 写步骤零 invoice usage refresh；随后页面访问证明自身收敛。 |
+| 销项发票收款情况 | `access_convergence_evidence` | 标准 test-owned 可逆场景 | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 写步骤零 output collection refresh；随后页面访问和 post API probe 证明收敛。 |
+| 发票生命周期 | `access_convergence_evidence` | 标准 test-owned 可逆场景 | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 写步骤零 lifecycle refresh；随后 lifecycle 消费 API 访问证明收敛。 |
+| OA 待付款 | `access_convergence_evidence` | 标准 test-owned 可逆场景 | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 不自动写真实 OA 付款状态；用 test-owned relation 场景证明零 OA refresh，并在页面访问时收敛。 |
+| 税金抵扣 | `access_convergence_evidence` | 标准 test-owned 可逆场景 | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 写步骤零 tax refresh；随后税金页访问证明 canonical invoice/certified facts 收敛。 |
+| 成本统计 | `access_convergence_evidence` | 标准 test-owned 可逆场景 | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 写步骤零 Cost refresh；随后 Cost 访问按 Workbench dependency gate 两阶段收敛。 |
+| 搜索 | `access_convergence_evidence` | 标准 test-owned 可逆场景 | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 写步骤零 Search refresh；随后 Search API 访问证明 exact-scope 收敛。 |
+| 批量账务 | `access_convergence_evidence` | `workbench_relation_withdraw` | `FINOPS-WRITE-SMOKE-STANDING-20260702` | 用 test-owned Workbench relation withdraw 证明写后零页面 fan-out和批量账务/关系页访问收敛，不新增独立 production apply。 |
 | 导入：银行流水 / 发票 / ETC | `no_standing_production_apply` | 无 | 无 standing ticket | 只能 staging 或单次审批的可回滚 scenario；不得用 standing approval 自动执行导入写入。 |
 | 设置 | `no_standing_production_apply` | 无 | 无 standing ticket | 设置写入会改变系统口径或权限，只能 staging 或单次审批。 |
 | 数据重置 | `no_standing_production_apply` | 无 | 无 standing ticket | destructive/reset 操作禁止使用 standing production smoke。 |
@@ -627,7 +627,7 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_e2e_smo
 
 说明：`write_operation_scenario_discovery --limit 1` 用来生成每类 operation 最多 1 条最小闭环 scenario；
 `write_operation_e2e_smoke` 的写后 SLO 事件读取会按当前 scenario 的 operation expectation 过滤 outbox，并保持有效采样窗口下限。
-因此主控 workflow 可以继续使用最小 scenario 输入，不会因为 `--limit 1` 漏掉同一写事务内稍晚完成的必需 read model refresh。
+因此主控 workflow 可以继续使用最小 scenario 输入；审计会拒绝同一写事务产生的任何普通页面 refresh，并由 post API probes 验证页面访问时收敛。
 
 执行前要求：
 
@@ -635,8 +635,8 @@ PYTHONPATH=backend/src python3 -m fin_ops_platform.tools.write_operation_e2e_smo
 - `--apply` 必须带审批引用；缺少 `--approval-ticket` / `FIN_OPS_WRITE_E2E_APPROVAL_TICKET` 会返回 `status=approval_missing`，且不会连接 Postgres 或发起 mutating HTTP。
 - 每个 mutating step 必须有预期状态码；工具不会把 409/403/500 继续包装成已同步。
 - mutating step 如果拿到 `text/html` 或 HTML 页面壳，即使状态码匹配，也会按 `html_response_for_api_probe` 失败并跳过 write SLO claim；这通常表示 API prefix、Nginx fallback 或路径配置错误。
-- 正式 relation confirm/withdraw 同步完成权限、freshness、canonical 校验、事务关系写、幂等提交和 durable fan-out；生产 standing correctness smoke 的 HTTP 写响应门禁固定为 `5000ms`，exact receipt 绑定的异步 refresh 收敛门禁为 `30000ms`、总等待上限为 `120s`，consumer HTTP 读取门禁为 `1000ms`。这些门禁分别证明同步写响应、最终一致收敛和 fresh 后读取性能，禁止共用一个阈值。需要证明“所有页面一秒级真同步”时，后文 closure gate 必须显式使用独立的 1s 性能合同，不得把 standing correctness 门禁冒充一秒级性能证明。
-- 写步骤成功后，工具优先以事务 response receipt 的 exact event IDs 为因果边界，等待对应 operation profile 的 outbox/dirty scope 全部 `done`；standing correctness 使用 refresh p95/p99 `30000ms` 门禁。只有没有 receipt 的旧式只读性能审计才使用数据库 `clock_timestamp()` 时间窗。
+- 正式 relation confirm/withdraw 同步完成权限、freshness、canonical 校验、事务关系写和幂等提交；普通写必须零页面 dirty/outbox。生产 standing correctness smoke 的 HTTP 写响应门禁固定为 `5000ms`，页面访问到 fresh 的收敛门禁为 `30000ms`、总等待上限为 `120s`，fresh consumer HTTP 读取门禁为 `1000ms`。性能 closure 另以 access p95 `1000ms`、p99 `3000ms` 判断，不能用 correctness 上限冒充性能结果。
+- 写步骤成功后，工具优先以事务 response receipt 的 exact event IDs 为因果边界，拒绝 operation profile 中任何 forbidden page refresh；随后 post API probes 触发消费页自身 fresh gate，并验证 access-time dirty/outbox/worker/fresh 证据。只有没有 receipt 的旧式只读性能审计才使用数据库 `clock_timestamp()` 时间窗。
 - post API probe 只用于验证写后页面首屏 API；最终仍要结合登录态 HTTP SLO、App Health 和审计记录。
 - 输出不包含 token、cookie、Authorization header，也不输出 scenario 请求 body，只记录路径、状态码、耗时和 outbox/readiness 结果。
 

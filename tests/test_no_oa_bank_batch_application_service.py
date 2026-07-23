@@ -862,8 +862,7 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
         self.assertEqual(call["special_metadata"]["batch_type"], "internal_transfer")
         self.assertEqual(call["display_tags"], ["免OA", "内部往来款"])
 
-    def test_after_mutation_persists_changed_cases_and_exact_source_scopes(self) -> None:
-        lifecycle_events: list[dict[str, object]] = []
+    def test_persist_mutation_persists_changed_cases_and_exact_source_scopes(self) -> None:
         cache_clears: list[str] = []
 
         class StateStore:
@@ -886,24 +885,14 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
             )),
             workbench_read_model_service=SimpleNamespace(snapshot=lambda: {"workbench": "snapshot"}),
             state_store=state_store,
-            execute_derived_data_lifecycle_event=lambda event_type, **kwargs: lifecycle_events.append(
-                {"event_type": event_type, **kwargs}
-            ),
-            expand_workbench_read_model_scope_keys_for_base_scopes=lambda scope_keys: [
-                f"expanded:{scope_key}" for scope_key in scope_keys
-            ],
             search_cache_clearer=lambda: cache_clears.append("search"),
         )
 
-        changed = service.after_mutation(
-            ["2026-05", "not-a-month", "2026-06"],
+        service.persist_mutation(
             changed_case_ids=["case-001", "case-002"],
-            persist=True,
-            action_name="no_oa_bank_batch_withdraw",
+            changed_scope_keys=["2026-05", "not-a-month", "2026-06"],
         )
 
-        self.assertFalse(changed)
-        self.assertEqual(lifecycle_events, [])
         self.assertEqual(cache_clears, [])
         self.assertEqual(len(state_store.saved_mutations), 1)
         saved = state_store.saved_mutations[0]
@@ -913,7 +902,7 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
         self.assertEqual(saved["no_oa_bank_batch_snapshot"], {"batches": {}})
         self.assertNotIn("workbench_read_model_snapshot", saved)
 
-    def test_after_mutation_without_atomic_persistence_boundary_fails_fast(self) -> None:
+    def test_persist_mutation_without_atomic_persistence_boundary_fails_fast(self) -> None:
         class BroadOnlyStateStore:
             def save_workbench_pair_relations(self, *_args: object, **_kwargs: object) -> None:
                 raise AssertionError("no-OA mutation must not fall back to broad pair relation persistence")
@@ -936,43 +925,13 @@ class NoOaBankBatchApplicationServiceTests(unittest.TestCase):
             )),
             workbench_read_model_service=SimpleNamespace(snapshot=lambda: {"workbench": "snapshot"}),
             state_store=BroadOnlyStateStore(),
-            execute_derived_data_lifecycle_event=lambda *_args, **_kwargs: None,
         )
 
         with self.assertRaisesRegex(
             NoOaBankBatchPersistenceError,
             "save_no_oa_bank_batch_mutation",
         ):
-            service.after_mutation(["2026-05"], changed_case_ids=["case-001"], persist=True)
-
-    def test_after_mutation_without_persist_only_emits_lifecycle_event(self) -> None:
-        lifecycle_events: list[dict[str, object]] = []
-
-        class StateStore:
-            def save_no_oa_bank_batch_mutation(self, **_kwargs: object) -> None:
-                raise AssertionError("persist=False must not save no-OA mutation snapshots")
-
-        service = NoOaBankBatchApplicationService(
-            import_service=SimpleNamespace(),
-            effective_category_provider=SimpleNamespace(),
-            no_oa_bank_batch_service=SimpleNamespace(snapshot=lambda: {}),
-            app_settings_service=SimpleNamespace(),
-            bank_transaction_category_service=SimpleNamespace(),
-            pair_relation_snapshot_port=NoOaPairRelationSnapshotPort(
-                SimpleNamespace(snapshot=lambda: {}, snapshot_case_ids=lambda _case_ids: {})
-            ),
-            workbench_read_model_service=SimpleNamespace(snapshot=lambda: {}),
-            state_store=StateStore(),
-            execute_derived_data_lifecycle_event=lambda event_type, **kwargs: lifecycle_events.append(
-                {"event_type": event_type, **kwargs}
-            ),
-        )
-
-        changed = service.after_mutation(["2026-05"], changed_case_ids=["case-001"], persist=False)
-
-        self.assertFalse(changed)
-        self.assertEqual(lifecycle_events[0]["event_type"], "no_oa_bank_batch_changed")
-        self.assertEqual(lifecycle_events[0]["months"], ["2026-05"])
+            service.persist_mutation(changed_case_ids=["case-001"], changed_scope_keys=["2026-05"])
 
     def test_enqueue_background_refresh_uses_durable_queue_boundary(self) -> None:
         class QueueRepository:

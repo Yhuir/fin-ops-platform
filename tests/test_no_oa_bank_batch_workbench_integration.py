@@ -204,7 +204,8 @@ class NoOaBankBatchWorkbenchIntegrationTests(unittest.TestCase):
             actor="tester",
         )
         self._enable_no_oa_tags(app, sorted(set(category_codes)))
-        app._invalidate_workbench_read_models()
+        for scope_key in list(app._workbench_read_model_service.snapshot().get("read_models", {})):
+            app._workbench_read_model_service.delete_read_model(str(scope_key))
         return app, row_ids
 
     def _post_confirm_link(self, app: object, row_ids: list[str]):

@@ -109,14 +109,6 @@ def oa_record_with_attachment_files(row_id: str = "oa-exp-files", month: str = "
     return record
 
 
-class QueueRecorder:
-    def __init__(self) -> None:
-        self.refreshes: list[tuple[str, str, str]] = []
-
-    def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str) -> None:
-        self.refreshes.append((scope_type, scope_key, reason))
-
-
 class OAProjectionConnection:
     def __init__(self, rows: list[dict] | None = None) -> None:
         self.rows = list(rows or [])
@@ -399,12 +391,10 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
             def record_sync_run(self, payload: dict[str, object]) -> None:
                 self.runs.append(payload)
 
-        queue = QueueRecorder()
         repository = ProjectionRepository()
         service = OAProjectionSyncService(
             source_adapter=SourceAdapter(),
             projection_repository=repository,
-            queue_repository=queue,
         )
         event = RuntimeQueueEvent(
             event_id="event-1",
@@ -424,21 +414,7 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual(result["upserted_count"], 1)
         self.assertEqual([record.id for record in repository.records], ["oa-pay-001"])
-        self.assertIn(("workbench", "2026-05", "oa_projection_sync"), queue.refreshes)
-        self.assertIn(("workbench", "all", "oa_projection_sync"), queue.refreshes)
-        self.assertIn(("search", "2026-05", "oa_projection_sync"), queue.refreshes)
-        self.assertIn(("pending_invoice", "expense:all", "oa_projection_sync"), queue.refreshes)
-        for read_model_key in (
-            "workbench_relation",
-            "bank_detail",
-            "invoice_lifecycle",
-            "input_invoice_usage",
-            "output_invoice_collection",
-            "turnover_ledger",
-            "no_oa_bank_batch",
-            "bank_flow_rule_batch",
-        ):
-            self.assertIn((read_model_key, "2026-05", "oa_projection_sync"), queue.refreshes)
+        self.assertFalse(hasattr(service, "_queue_repository"))
         self.assertEqual(repository.runs[0]["status"], "succeeded")
 
     def test_oa_sync_all_scope_respects_retention_cutoff_months(self) -> None:
@@ -476,7 +452,6 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         service = OAProjectionSyncService(
             source_adapter=source,
             projection_repository=repository,
-            queue_repository=QueueRecorder(),
             retention_cutoff_date_provider=lambda: "2026-01-01",
         )
         event = RuntimeQueueEvent(
@@ -524,12 +499,10 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
                 self.pruned_cutoff_months.append(cutoff_month)
                 return ["2025-12"]
 
-        queue = QueueRecorder()
         repository = ProjectionRepository()
         service = OAProjectionSyncService(
             source_adapter=SourceAdapter(),
             projection_repository=repository,
-            queue_repository=queue,
             retention_cutoff_date_provider=lambda: "2026-01-01",
         )
         event = RuntimeQueueEvent(
@@ -550,8 +523,7 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual(repository.pruned_cutoff_months, ["2026-01"])
         self.assertEqual(result["pruned_count"], 1)
-        self.assertIn(("workbench", "2025-12", "oa_projection_sync"), queue.refreshes)
-        self.assertIn(("search", "2025-12", "oa_projection_sync"), queue.refreshes)
+        self.assertFalse(hasattr(service, "_queue_repository"))
 
     def test_oa_sync_projection_preserves_source_bound_invoice_attachment_facts(self) -> None:
         from fin_ops_platform.services.oa_projection_sync import OAProjectionSyncService
@@ -613,7 +585,6 @@ class OAProjectionSqlRuntimeTests(unittest.TestCase):
         service = OAProjectionSyncService(
             source_adapter=SourceAdapter(),
             projection_repository=repository,
-            queue_repository=QueueRecorder(),
         )
         event = RuntimeQueueEvent(
             event_id="event-1",

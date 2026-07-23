@@ -16,15 +16,6 @@ from fin_ops_platform.services.read_model_write_targets import write_target_enve
 from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
 
 
-BANK_FLOW_RULE_BATCH_ONLINE_MUTATION_ACTIONS = frozenset(
-    {
-        "bank_flow_rule_batch_submit",
-        "bank_flow_rule_batch_withdraw",
-        "bank_flow_rule_batch_reset_submitted",
-    }
-)
-
-
 class BankFlowRuleBatchPersistenceError(BankBatchPersistenceError):
     error_code = "bank_flow_rule_batch_persistence_failed"
 
@@ -433,7 +424,6 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 batch,
                 status="submitted",
                 persist=persist,
-                read_model_key=BANK_FLOW_RULE_BATCH_RELATION_MODE,
             )
         except Exception:
             self._restore_batch_service_snapshot(self._bank_batch_service, previous_batch_snapshot)
@@ -502,7 +492,6 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 batch,
                 status="submitted",
                 persist=True,
-                read_model_key=BANK_FLOW_RULE_BATCH_RELATION_MODE,
             )
         except Exception:
             self._restore_batch_service_snapshot(self._bank_batch_service, previous_batch_snapshot)
@@ -559,7 +548,6 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 },
                 "affected_months": [],
                 **write_target_envelope(targets=[], scope_keys=[], fallback_scope_key="all"),
-                "workbench_rebuild_queued": False,
                 "results": [],
             }
 
@@ -605,16 +593,14 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 for case_id in list(cancel_result.get("changed_case_ids") or [])
                 if str(case_id).strip()
             ]
-            workbench_rebuild_queued = self.after_mutation(
-                sorted(affected_months),
+            self.persist_mutation(
                 changed_case_ids=changed_case_ids,
                 changed_batch_ids=[
                     str(batch.get("batch_id") or "").strip()
                     for batch in withdrawn_batches
                     if str(batch.get("batch_id") or "").strip()
                 ],
-                persist=True,
-                action_name="bank_flow_rule_batch_reset_submitted",
+                changed_scope_keys=sorted(affected_months),
             )
         except Exception:
             self._restore_snapshots(previous_batch_snapshot, previous_relation_snapshot)
@@ -632,52 +618,11 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 scope_keys=sorted(affected_months),
                 fallback_scope_key="all",
             ),
-            "workbench_rebuild_queued": workbench_rebuild_queued,
             "results": [
                 {"batch_id": batch.get("batch_id"), "status": "withdrawn"}
                 for batch in withdrawn_batches
             ],
         }
-
-    def after_mutation(
-        self,
-        affected_months: list[str],
-        *,
-        changed_case_ids: list[str],
-        changed_batch_ids: list[str] | None = None,
-        persist: bool,
-        action_name: str | None = None,
-    ) -> bool:
-        normalized_action_name = str(action_name or "").strip()
-        if not normalized_action_name.startswith("bank_flow_rule_batch"):
-            return super().after_mutation(
-                affected_months,
-                changed_case_ids=changed_case_ids,
-                persist=persist,
-                action_name=action_name,
-            )
-        normalized_months = [
-            str(month).strip()
-            for month in list(affected_months or [])
-            if SEARCH_MONTH_RE.match(str(month).strip())
-        ]
-        if normalized_action_name not in BANK_FLOW_RULE_BATCH_ONLINE_MUTATION_ACTIONS:
-            self._execute_derived_data_lifecycle_event(
-                "bank_flow_rule_batch_changed",
-                months=normalized_months,
-                metadata={
-                    "source": BANK_FLOW_RULE_BATCH_RELATION_MODE,
-                    "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE,
-                    **({"action_name": normalized_action_name} if normalized_action_name else {}),
-                },
-            )
-        if persist:
-            self.persist_mutation(
-                changed_case_ids=changed_case_ids,
-                changed_scope_keys=normalized_months,
-                changed_batch_ids=changed_batch_ids,
-            )
-        return False
 
     def persist_mutation(
         self,
@@ -689,6 +634,11 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
         if self._state_store is None:
             return
         try:
+            normalized_scope_keys = [
+                str(scope_key).strip()
+                for scope_key in changed_scope_keys
+                if SEARCH_MONTH_RE.match(str(scope_key).strip())
+            ]
             save_mutation = getattr(self._state_store, "save_bank_flow_rule_batch_mutation", None)
             if not callable(save_mutation):
                 raise RuntimeError("bank_flow_rule_batch mutation persistence requires save_bank_flow_rule_batch_mutation.")
@@ -698,7 +648,7 @@ class BankFlowRuleBatchApplicationService(BankBatchApplicationService):
                 else self._pair_relation_snapshot_port.snapshot(),
                 bank_flow_rule_batch_snapshot=self._bank_batch_public_snapshot(),
                 changed_case_ids=changed_case_ids,
-                changed_scope_keys=changed_scope_keys,
+                changed_scope_keys=normalized_scope_keys,
                 changed_batch_ids=list(changed_batch_ids or []),
             )
         except Exception as exc:

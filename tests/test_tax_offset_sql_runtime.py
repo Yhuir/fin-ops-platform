@@ -862,7 +862,10 @@ class TaxOffsetSqlRuntimeTests(unittest.TestCase):
             AssertionError("SQL runtime invalidation should enqueue durable refresh when queue exists")
         )
 
-        deleted = app._invalidate_tax_offset_read_model_scopes(["2026-05"], reason="unit_test")
+        deleted = app._tax_offset_runtime_for_read_model().invalidate_read_models(
+            scope_keys=["2026-05"],
+            reason="unit_test",
+        )
 
         self.assertEqual(deleted, [])
         self.assertEqual(queue.refreshes, [("tax_offset", "2026-05", "unit_test")])
@@ -895,7 +898,10 @@ class TaxOffsetSqlRuntimeTests(unittest.TestCase):
         app._persist_tax_offset_read_models_best_effort = lambda **_kwargs: None
         app._schedule_tax_offset_cache_warmup = lambda *_args, **_kwargs: None
 
-        deleted = app._invalidate_tax_offset_read_model_scopes(["2026-05"], reason="invoice_import_confirmed")
+        deleted = app._tax_offset_runtime_for_read_model().invalidate_read_models(
+            scope_keys=["2026-05"],
+            reason="invoice_import_confirmed",
+        )
 
         self.assertEqual(deleted, ["2026-04", "2026-06"])
         self.assertEqual(
@@ -922,7 +928,7 @@ class TaxOffsetSqlRuntimeTests(unittest.TestCase):
             {"tax_offset_statistics_generation_token": lambda _self: "generation-1"},
         )()
 
-        app._delete_tax_offset_redis_cache("2026-05")
+        app._tax_offset_runtime_for_read_model().delete_redis_cache("2026-05")
 
         self.assertEqual(len(redis.deletes), 2)
         self.assertTrue(all(f":schema:{TAX_OFFSET_READ_MODEL_SCHEMA_VERSION}:sources:" in key for key in redis.deletes))

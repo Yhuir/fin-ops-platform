@@ -43,7 +43,7 @@
 - 共享 primitive 不发 HTTP；API contract 由页面 API 和后端模块负责。
 - 页面必须把筛选、排序、分页和导出参数作为稳定契约测试。
 - read model freshness 由页面 API/read model 模块提供；表格不能伪造 fresh。
-- 写操作后的 worker drain/freshness barrier 由页面业务流 E2E 或 runtime smoke 验证。
+- 普通写后的当前页 normal GET/access-time fresh gate 由页面业务流 E2E 验证；显式 batch/repair 的 worker drain/barrier 由 owner E2E 或 runtime smoke 验证。
 
 ## 跨页面影响
 

@@ -13,7 +13,7 @@
       "deterministic_evidence": [
         {
           "path": "web/e2e/fixtures/workbenchFlow.ts",
-          "required_markers": ["candidate-group-unpaired-row:oa-o-202603-001", "candidate-group-unpaired-row:bk-o-202603-001", "candidate-group-unpaired-row:iv-o-202603-001", "candidate-group-paired-case:CASE-202603-101", "/api/operation-barrier/status"]
+          "required_markers": ["candidate-group-unpaired-row:oa-o-202603-001", "candidate-group-unpaired-row:bk-o-202603-001", "candidate-group-unpaired-row:iv-o-202603-001", "candidate-group-paired-case:CASE-202603-101"]
         },
         {
           "path": "web/e2e/workbench-withdraw-flow.spec.ts",

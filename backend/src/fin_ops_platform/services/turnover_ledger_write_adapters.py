@@ -2059,7 +2059,6 @@ class TurnoverLedgerBankdetailWritePort:
                     if (transaction_id := str(update.get("transaction_id") or "").strip())
                 ],
                 transaction=transaction,
-                enqueue_refreshes=False,
             )
             rebuild = getattr(self._relation_service, "rebuild_from_bank_rows", None)
             if not callable(rebuild):

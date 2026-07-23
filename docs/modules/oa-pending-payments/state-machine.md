@@ -26,10 +26,10 @@
 | --- | --- |
 | 外部读取中 | 每个启用 form/scope 只读一次并构造双视图；不改变 PostgreSQL canonical snapshot，不删除旧记录 |
 | 外部读取失败/部分 form 成功/schema 非法 | 整轮失败并记录 failed sync run；不得提交部分集合或把未知集合解释为删除 |
-| 外部读取成功 | `projection_records` 遵守通用导入配置，`admission_records` 固定包含 completed + in-progress；合法 in-progress 草稿未填业务字段仍以稳定 identity 准入，空金额为 `NULL`；同一 PostgreSQL 事务提交 completed projection、admission、payment-status snapshot、source watermark 和 OA 精确月份 dirty/outbox |
+| 外部读取成功 | `projection_records` 遵守通用导入配置，`admission_records` 固定包含 completed + in-progress；合法 in-progress 草稿未填业务字段仍以稳定 identity 准入，空金额为 `NULL`；同一 PostgreSQL 事务只提交 completed projection、admission、payment-status snapshot 与 source watermark/version，不写任何页面 dirty/outbox |
 | PostgreSQL commit 失败 | 全部回滚；上一次 snapshot 继续是页面可证明事实 |
-| commit 成功且仅 admission/payment-status 变化 | `T0`；只刷新 OA 待付款精确月份，不触发 Workbench、成本统计或其它 shared consumers |
-| commit 成功且 completed canonical 变化 | `T0`；刷新 OA 待付款，并由 sync service 通过既有 shared owner fan-out 合法 consumers |
+| commit 成功且仅 admission/payment-status 变化 | `T0`；不主动刷新页面；OA 待付款页下次条件 GET、访问或重新激活时按 exact month source version 收敛 |
+| commit 成功且 completed canonical 变化 | `T0`；不主动 fan-out；OA 待付款及其它合法 consumers 分别在访问/重新激活时用自己的 fresh gate 收敛 |
 
 Mongo/MySQL 变化尚未同步进 PostgreSQL 时属于 integration sync lag。页面和 read model worker 不允许直连外部系统掩盖该延迟。
 
@@ -43,17 +43,17 @@ in-progress 同步当前只保留原始/上下文化附件文件元数据，不�
 2. 复核 outflow、支出合计等于 OA 金额、可解析 `flow_id`。
 3. 幂等读取/写入 MySQL `t_payment_simple.pay_status=1`。
 4. 无论 MySQL 本次新写还是此前已为 paid，都调用 PostgreSQL `record_paid_statuses(records=...)`。
-5. PG writer 同事务更新 payment-status snapshot、月份 source watermark 和精确月份 dirty/outbox。
+5. PG writer 同事务更新 payment-status snapshot、月份 source watermark/version，不写页面 dirty/outbox。
 6. 若步骤 5 失败，返回 `oa_payment_status_snapshot_write_failed`；不声称页面已完成同步。命令可安全重试，下一次 OA sync 也会修复。
-7. 前端收到成功后立即隐藏旧 rows，等待 operation barrier fresh，再读取新版本。
+7. 前端收到成功后重跑当前 rows normal GET；若访问 gate 发现 mismatch，它才返回访问产生的 exact scope target，页面等待该 target 后读取新版本。写命令本身不等待或返回下游页面重建。
 
 ### `link-bank-transactions`
 
 1. 只允许 in-progress OA 和 outflow bank transaction。
 2. 创建 OA pending relation 与 bank claim，不写 Workbench active relation。
 3. 金额相等且 flow id 合法时执行同一 MySQL + PG paid reconcile。
-4. 关系 owner 和 payment snapshot writer分别对同一月份提交版本/outbox；queue dedupe 合并重复 wakeup。
-5. 返回受影响 scope/barrier；前端等待 fresh 后重读。
+4. 关系 owner 和 payment snapshot writer 分别提交 canonical version/audit，不写页面 outbox。
+5. 返回 canonical 结果和信息性 affected scope；前端重跑本页 normal GET，访问 gate 按需精确入队并收敛。
 
 不做跨 MySQL/PostgreSQL 的分布式事务。外部成功、PG 失败的唯一恢复合同是幂等重试或下一次 OA sync；禁止用 live read/fallback 猜测完成状态。
 
@@ -65,11 +65,11 @@ in-progress 同步当前只保留原始/上下文化附件文件元数据，不�
 | `ready` | `200` 且 fresh | 展示 rows、summary、filters，并保存当前 query 的 ETag |
 | `checking` | 可见 tab 的 500ms 条件 GET | 保留当前 fresh rows；同一时刻最多一个请求 |
 | `unchanged` | `304` | 不更新 rows，不执行完整聚合/渲染 |
-| `refreshing` | `202` / dirty / source mismatch | 立即隐藏旧 rows，停止条件轮询，展示“新数据正在生成”，等待精确 barrier targets |
+| `refreshing` | `202` / dirty / source mismatch | 立即隐藏旧 rows，停止条件轮询，展示“新数据正在生成”，等待本次页面访问产生的精确 target |
 | `empty` | fresh `200` 且 total=0 | 真实空态；不得由 `202` 或错误推断 |
 | `error` | 请求、barrier 或合同失败 | 不显示旧 rows；提供明确错误与重试 |
 | `hidden` | document/tab 不可见 | 取消条件检查；恢复可见时立即检查一次 |
-| `mutation_waiting` | 写命令成功 | 隐藏旧 rows，等待返回的 OA scope fresh 后完整重读 |
+| `mutation_waiting` | 写命令成功 | 命令立即结束后执行本页 normal GET；只有 GET 判定 non-fresh 才等待其 exact target |
 
 query、分页、排序、筛选、view mode、认证或 contract revision 变化时，取消旧请求并清除不匹配 ETag；晚到响应不得覆盖新 query。
 
@@ -85,7 +85,7 @@ query、分页、排序、筛选、view mode、认证或 contract revision 变�
 | `failed` | projector/publish/outbox处理失败 | retry/failed 可观测；API不得返回旧 rows |
 | `unavailable` | repository/queue/worker依赖缺失 | fail closed，不启用 live fallback |
 
-专属 `oa-pending-payment` worker 只 claim `oa_pending_payment.read_model.refresh`。`all` 是低优先级 fan-out control scope，只用于初始化和显式修复；普通业务 writer 只 enqueue 精确月份。
+专属 `oa-pending-payment` worker 只 claim `oa_pending_payment.read_model.refresh`。`all` 是低优先级 fan-out control scope，只用于初始化和显式修复；普通业务 writer 与 OA authoritative sync 都不 enqueue，页面访问 freshness boundary 只 enqueue 当前精确月份。
 
 月份构建顺序：
 

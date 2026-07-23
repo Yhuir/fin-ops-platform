@@ -115,35 +115,12 @@ class BatchRepository:
         return {"changed": True, "transaction_id": transaction_id, "affected_months": [month], "version": 2}
 
 
-class BatchQueue:
-    def __init__(self) -> None:
-        self.calls: list[dict[str, object]] = []
-
-    def enqueue_read_model_refreshes_in_transaction(self, **kwargs: object) -> list[dict[str, object]]:
-        self.calls.append(dict(kwargs))
-        return [{"event_id": "event-1"}]
-
-
-class MatchingRepository:
-    def __init__(self) -> None:
-        self.calls: list[dict[str, object]] = []
-
-    def mark_workbench_matching_dirty_scopes_in_transaction(self, **kwargs: object) -> list[str]:
-        self.calls.append(dict(kwargs))
-        return []
-
-
-def test_batch_writer_deduplicates_refresh_io_and_expands_matching_once() -> None:
+def test_batch_writer_commits_canonical_facts_without_write_time_fan_out() -> None:
     repository = BatchRepository()
-    queue = BatchQueue()
-    matching = MatchingRepository()
     transaction = object()
     writer = BankTransactionCategoryMutationWriter(
         connection=SimpleNamespace(),
         repository=repository,
-        queue_repository=queue,
-        workbench_matching_repository=matching,
-        workbench_matching_source_versions_provider=lambda: {"bank_transaction_category_version": "v1"},
     )
 
     result = writer.persist_many(
@@ -162,41 +139,16 @@ def test_batch_writer_deduplicates_refresh_io_and_expands_matching_once() -> Non
     )
 
     assert len(repository.calls) == 2
-    assert len(queue.calls) == 1
-    assert len(matching.calls) == 1
     assert result["affected_months"] == ["2026-02", "2026-03"]
-    refreshes = list(queue.calls[0]["refreshes"])
-    assert {item["scope_type"] for item in refreshes} == {
-        "bank_detail",
-        "bank_flow_rule_batch",
-        "workbench",
-        "workbench_relation",
-        "invoice_lifecycle",
-        "cost_statistics",
-        "search",
-        "turnover_ledger",
-        "pending_invoice",
-    }
-    assert matching.calls[0]["scope_months"] == [
-        "2025-12",
-        "2026-01",
-        "2026-02",
-        "2026-03",
-        "2026-04",
-        "2026-05",
-    ]
+    assert "outbox_event_ids" not in result
+    assert "operation_barrier_targets" not in result
 
 
 def test_batch_writer_can_commit_canonical_facts_without_write_time_fan_out() -> None:
     repository = BatchRepository()
-    queue = BatchQueue()
-    matching = MatchingRepository()
     writer = BankTransactionCategoryMutationWriter(
         connection=SimpleNamespace(),
         repository=repository,
-        queue_repository=queue,
-        workbench_matching_repository=matching,
-        workbench_matching_source_versions_provider=lambda: {"bank_transaction_category_version": "v1"},
     )
 
     result = writer.persist_many(
@@ -211,12 +163,9 @@ def test_batch_writer_can_commit_canonical_facts_without_write_time_fan_out() ->
             }
         ],
         transaction=object(),
-        enqueue_refreshes=False,
     )
 
     assert len(repository.calls) == 1
-    assert queue.calls == []
-    assert matching.calls == []
     assert result["changed"] is True
     assert result["affected_months"] == ["2026-02"]
     assert "outbox_event_ids" not in result

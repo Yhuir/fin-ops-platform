@@ -674,7 +674,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         self.assertEqual(report["status"], "auth_missing")
         self.assertEqual(calls, [])
 
-    def test_apply_executes_step_and_waits_for_required_write_refreshes(self) -> None:
+    def test_apply_executes_step_and_verifies_zero_write_time_page_fan_out(self) -> None:
         scenario = write_operation_e2e_smoke.WriteScenario(
             name="turnover-withdraw",
             operations=("turnover_manual_closure_or_withdraw",),
@@ -702,7 +702,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             )
 
         report = write_operation_e2e_smoke.run_write_operation_e2e_smoke(
-            FakeConnection(_turnover_withdraw_rows()),
+            FakeConnection([]),
             scenarios=[scenario],
             apply=True,
             base_url="https://example.test",
@@ -736,21 +736,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             ),
             post_api_probes=(),
         )
-        connection = LimitAwareConnection(
-            [
-                _event(scope_type="workbench", reason="workbench_relation_changed", action_name="withdraw_link"),
-                _event(
-                    scope_type="workbench_relation",
-                    reason="workbench_pair_relation_changed",
-                    action_name="withdraw_link",
-                ),
-                _event(
-                    scope_type="cost_statistics",
-                    reason="cost_statistics_relation_delta",
-                    action_name="withdraw_link",
-                ),
-            ]
-        )
+        connection = LimitAwareConnection([])
 
         def request_fn(
             url: str, method: str, headers, body, timeout_seconds: float
@@ -816,7 +802,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         self.assertEqual(report["error"], "exact_checkpoint_event_set_mismatch")
         self.assertEqual(report["missing_or_unmatched_event_ids"], ["unknown-extra-event"])
 
-    def test_exact_receipt_uses_scope_contract_when_deduplicated_event_metadata_predates_write(self) -> None:
+    def test_exact_receipt_rejects_forbidden_write_time_page_refreshes(self) -> None:
         rows = [
             _event(scope_type="workbench", reason="older_refresh", action_name="older_action"),
             _event(scope_type="workbench_relation", reason="older_relation_refresh", action_name="older_action"),
@@ -835,9 +821,10 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             event_ids=[str(row["event_id"]) for row in rows],
         )
 
-        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["status"], "fail")
+        self.assertEqual(report["error"], "forbidden_write_time_read_model_fan_out_detected")
         self.assertEqual(report["unexpected_event_contracts"], [])
-        self.assertTrue(all(result["status"] == "pass" for result in report["results"]))
+        self.assertTrue(any(result["status"] == "fail" for result in report["results"]))
 
     def test_exact_receipt_rejects_refresh_scope_outside_operation_contract(self) -> None:
         rows = [

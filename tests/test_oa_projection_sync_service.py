@@ -19,7 +19,6 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
             OAProjectionSyncService(
                 source_adapter=FakeSourceAdapter(months=[], records_by_month={}),
                 projection_repository=FakeProjectionRepository(),
-                queue_repository=FakeQueueRepository(),
                 payment_status_repository=FakePaymentStatusRepository({}),
             )
 
@@ -32,11 +31,9 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
     def test_month_sync_with_no_source_records_clears_existing_projection_scope(self) -> None:
         source_adapter = FakeSourceAdapter(months=[], records_by_month={"2026-06": []})
         projection_repository = FakeProjectionRepository()
-        queue_repository = FakeQueueRepository()
         service = OAProjectionSyncService(
             source_adapter=source_adapter,
             projection_repository=projection_repository,
-            queue_repository=queue_repository,
         )
 
         result = service.handle_runtime_event(_event("2026-06"))
@@ -45,18 +42,16 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
         self.assertEqual(projection_repository.stale_completed_scopes, ["2026-06"])
         self.assertEqual(projection_repository.non_completed_scopes, ["2026-06"])
 
-    def test_oa_sync_marks_oa_pending_payment_read_model_dirty_for_progress_rows(self) -> None:
+    def test_oa_sync_commits_projection_facts_without_downstream_page_fan_out(self) -> None:
         records = [
             _oa("oa-pay-completed", "2026-06", workflow_status="completed"),
             _oa("oa-pay-progress", "2026-06", workflow_status="in_progress"),
         ]
         source_adapter = FakeSourceAdapter(months=["2026-06"], records_by_month={"2026-06": records})
         projection_repository = FakeProjectionRepository()
-        queue_repository = FakeQueueRepository()
         service = OAProjectionSyncService(
             source_adapter=source_adapter,
             projection_repository=projection_repository,
-            queue_repository=queue_repository,
             retention_cutoff_date_provider=lambda: "2026-01-01",
         )
 
@@ -68,45 +63,20 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
         self.assertEqual(result["removed_non_completed_count"], 1)
         self.assertEqual([record.workflow_status for record in projection_repository.saved_records], ["completed"])
         self.assertEqual([record.workflow_status for record in projection_repository.deleted_non_completed_records], ["completed", "in_progress"])
-        self.assertIn(("oa_pending_payment", "2026-06", "oa_projection_sync"), queue_repository.refreshes)
-        self.assertIn(("oa_pending_payment", "all", "oa_projection_sync"), queue_repository.refreshes)
-        for read_model_key in (
-            "workbench_relation",
-            "bank_detail",
-            "invoice_lifecycle",
-            "input_invoice_usage",
-            "output_invoice_collection",
-            "turnover_ledger",
-            "no_oa_bank_batch",
-            "bank_flow_rule_batch",
-        ):
-            self.assertIn((read_model_key, "2026-06", "oa_projection_sync"), queue_repository.refreshes)
-            self.assertNotIn((read_model_key, "all", "oa_projection_sync"), queue_repository.refreshes)
+        self.assertFalse(hasattr(service, "_queue_repository"))
 
-    def test_completed_projection_change_marks_matching_scope_urgent(self) -> None:
-        matching_queue = FakeMatchingDirtyQueue()
+    def test_completed_projection_change_does_not_publish_matching_work(self) -> None:
         service = OAProjectionSyncService(
             source_adapter=FakeSourceAdapter(
                 months=["2026-06"],
                 records_by_month={"2026-06": [_oa("oa-etc", "2026-06", workflow_status="completed")]},
             ),
             projection_repository=FakeProjectionRepository(),
-            queue_repository=FakeQueueRepository(),
-            workbench_matching_dirty_queue=matching_queue,
         )
 
         service.handle_runtime_event(_event("2026-06"))
 
-        self.assertEqual(
-            matching_queue.calls,
-            [
-                {
-                    "months": ["2026-06"],
-                    "reason": "oa_projection_sync",
-                    "debounce_seconds": 0,
-                }
-            ],
-        )
+        self.assertFalse(hasattr(service, "_workbench_matching_dirty_queue"))
 
     def test_oa_sync_treats_legacy_completed_workflow_aliases_as_completed(self) -> None:
         records = [
@@ -116,11 +86,9 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
         ]
         source_adapter = FakeSourceAdapter(months=["2026-06"], records_by_month={"2026-06": records})
         projection_repository = FakeProjectionRepository()
-        queue_repository = FakeQueueRepository()
         service = OAProjectionSyncService(
             source_adapter=source_adapter,
             projection_repository=projection_repository,
-            queue_repository=queue_repository,
             retention_cutoff_date_provider=lambda: "2026-01-01",
         )
 
@@ -137,30 +105,23 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
             ["oa-pay-legacy-cn", "oa-pay-legacy-approved", "oa-pay-progress"],
         )
 
-    def test_oa_sync_search_refresh_uses_search_producer_boundary(self) -> None:
+    def test_oa_sync_has_no_search_refresh_collaborator(self) -> None:
         records = [_oa("oa-pay-completed", "2026-06", workflow_status="completed")]
         source_adapter = FakeSourceAdapter(months=["2026-06"], records_by_month={"2026-06": records})
         projection_repository = FakeProjectionRepository()
-        queue_repository = FakeQueueRepository()
-        search_refresh_producer = FakeSearchRefreshProducer()
         service = OAProjectionSyncService(
             source_adapter=source_adapter,
             projection_repository=projection_repository,
-            queue_repository=queue_repository,
-            search_read_model_refresh_producer=search_refresh_producer,
         )
 
         service.handle_runtime_event(_event("2026-06"))
 
-        self.assertEqual(search_refresh_producer.calls, [(["2026-06", "all"], "oa_projection_sync")])
-        self.assertNotIn(("search", "2026-06", "oa_projection_sync"), queue_repository.refreshes)
-        self.assertIn(("workbench", "2026-06", "oa_projection_sync"), queue_repository.refreshes)
+        self.assertFalse(hasattr(service, "_search_read_model_refresh_producer"))
 
     def test_oa_sync_promotes_completed_pending_payment_relations_and_marks_affected_scopes_dirty(self) -> None:
         records = [_oa("oa-pay-completed", "2026-06", workflow_status="completed")]
         source_adapter = FakeSourceAdapter(months=["2026-06"], records_by_month={"2026-06": records})
         projection_repository = FakeProjectionRepository()
-        queue_repository = FakeQueueRepository()
         promoter = FakePendingPaymentRelationPromoter(
             {
                 "promoted_count": 1,
@@ -173,7 +134,6 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
         service = OAProjectionSyncService(
             source_adapter=source_adapter,
             projection_repository=projection_repository,
-            queue_repository=queue_repository,
             pending_payment_relation_promoter=promoter,
         )
 
@@ -182,8 +142,7 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
         self.assertEqual([record.id for record in promoter.completed_records], ["oa-pay-completed"])
         self.assertEqual(result["promoted_pending_payment_relation_count"], 1)
         self.assertEqual(result["pending_payment_relation_promotion_error_count"], 0)
-        self.assertIn(("workbench", "2026-02", "oa_projection_sync"), queue_repository.refreshes)
-        self.assertIn(("oa_pending_payment", "2026-02", "oa_projection_sync"), queue_repository.refreshes)
+        self.assertFalse(hasattr(service, "_queue_repository"))
 
     def test_oa_sync_replaces_payment_status_and_admission_snapshot_after_complete_external_reads(self) -> None:
         records = [
@@ -192,11 +151,9 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
         ]
         payment_statuses = {"progress": OAPaymentStatusRecord(flow_id="progress", pay_status=0)}
         snapshot_repository = FakePendingPaymentSourceSnapshotRepository()
-        queue_repository = FakeQueueRepository()
         service = OAProjectionSyncService(
             source_adapter=FakeSourceAdapter(months=["2026-06"], records_by_month={"2026-06": records}),
             projection_repository=FakeProjectionRepository(),
-            queue_repository=queue_repository,
             payment_status_repository=FakePaymentStatusRepository(payment_statuses),
             pending_payment_source_snapshot_repository=snapshot_repository,
         )
@@ -210,14 +167,10 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
         self.assertEqual(result["pending_payment_source_snapshot_count"], 1)
         self.assertEqual(result["pending_payment_admission_count"], 1)
         self.assertEqual(result["pending_payment_affected_scope_keys"], ["2026-06"])
-        self.assertNotIn(("oa_pending_payment", "2026-06", "oa_projection_sync"), queue_repository.refreshes)
-        self.assertIn(("workbench", "2026-06", "oa_projection_sync"), queue_repository.refreshes)
-        self.assertIn(("workbench", "all", "oa_projection_sync"), queue_repository.refreshes)
+        self.assertFalse(hasattr(service, "_queue_repository"))
 
     def test_identical_authoritative_snapshot_does_not_fan_out_downstream_refreshes(self) -> None:
         records = [_oa("oa-pay-completed", "2026-06", workflow_status="completed")]
-        queue_repository = FakeQueueRepository()
-
         class UnchangedSnapshotRepository(FakePendingPaymentSourceSnapshotRepository):
             def commit_authoritative_snapshot(self, **kwargs: object) -> OaPendingPaymentSourceSnapshotResult:
                 self.calls.append(dict(kwargs))
@@ -233,7 +186,6 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
         service = OAProjectionSyncService(
             source_adapter=FakeSourceAdapter(months=["2026-06"], records_by_month={"2026-06": records}),
             projection_repository=FakeProjectionRepository(),
-            queue_repository=queue_repository,
             payment_status_repository=FakePaymentStatusRepository({}),
             pending_payment_source_snapshot_repository=UnchangedSnapshotRepository(),
         )
@@ -242,12 +194,9 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
 
         self.assertEqual(result["upserted_count"], 0)
         self.assertEqual(result["pending_payment_affected_scope_keys"], [])
-        self.assertEqual(queue_repository.refreshes, [])
 
     def test_admission_only_change_does_not_fan_out_shared_read_models(self) -> None:
         in_progress = _oa("oa-pay-progress", "2026-06", workflow_status="in_progress")
-        queue_repository = FakeQueueRepository()
-
         class AdmissionOnlySnapshotRepository(FakePendingPaymentSourceSnapshotRepository):
             def commit_authoritative_snapshot(self, **kwargs: object) -> OaPendingPaymentSourceSnapshotResult:
                 self.calls.append(dict(kwargs))
@@ -266,7 +215,6 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
                 projection_records_by_month={"2026-06": []},
             ),
             projection_repository=FakeProjectionRepository(),
-            queue_repository=queue_repository,
             payment_status_repository=FakePaymentStatusRepository(
                 {"progress": OAPaymentStatusRecord(flow_id="progress", pay_status=0)}
             ),
@@ -277,7 +225,6 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
 
         self.assertEqual(result["completed_projection_changed_scope_keys"], [])
         self.assertEqual(result["pending_payment_affected_scope_keys"], ["2026-06"])
-        self.assertEqual(queue_repository.refreshes, [])
 
     def test_external_payment_status_failure_prevents_any_postgres_projection_write(self) -> None:
         projection_repository = FakeProjectionRepository()
@@ -288,7 +235,6 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
                 records_by_month={"2026-06": [_oa("oa-pay-progress", "2026-06", workflow_status="in_progress")]},
             ),
             projection_repository=projection_repository,
-            queue_repository=FakeQueueRepository(),
             payment_status_repository=FakePaymentStatusRepository(error=RuntimeError("incomplete mysql read")),
             pending_payment_source_snapshot_repository=snapshot_repository,
         )
@@ -317,7 +263,6 @@ class OaProjectionSyncServiceTests(unittest.TestCase):
         service = OAProjectionSyncService(
             source_adapter=FailingSourceAdapter(),
             projection_repository=projection_repository,
-            queue_repository=FakeQueueRepository(),
         )
 
         with self.assertRaisesRegex(RuntimeError, "partial mongo read"):
@@ -412,23 +357,6 @@ class FakeProjectionRepository:
         self.sync_runs.append(dict(payload))
 
 
-class FakeQueueRepository:
-    def __init__(self) -> None:
-        self.refreshes: list[tuple[str, str, str]] = []
-
-    def enqueue_read_model_refresh(self, *, scope_type: str, scope_key: str, reason: str, **_kwargs: object) -> None:
-        self.refreshes.append((scope_type, scope_key, reason))
-
-
-class FakeSearchRefreshProducer:
-    def __init__(self) -> None:
-        self.calls: list[tuple[list[str], str]] = []
-
-    def enqueue(self, scope_keys: list[str], *, reason: str, **_kwargs: object) -> bool:
-        self.calls.append((list(scope_keys), reason))
-        return True
-
-
 class FakePendingPaymentRelationPromoter:
     def __init__(self, result: dict[str, object]) -> None:
         self.result = dict(result)
@@ -485,27 +413,6 @@ class FakePendingPaymentSourceSnapshotRepository:
             upserted_completed_count=completed_count,
             removed_non_completed_count=non_completed_count,
         )
-
-
-class FakeMatchingDirtyQueue:
-    def __init__(self) -> None:
-        self.calls: list[dict[str, object]] = []
-
-    def mark_dirty_expanded(
-        self,
-        months: list[str],
-        *,
-        reason: str,
-        debounce_seconds: int,
-    ) -> list[str]:
-        self.calls.append(
-            {
-                "months": list(months),
-                "reason": reason,
-                "debounce_seconds": debounce_seconds,
-            }
-        )
-        return list(months)
 
 
 def _oa(row_id: str, month: str, *, workflow_status: str) -> OAApplicationRecord:

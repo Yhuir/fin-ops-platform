@@ -75,7 +75,7 @@ OA reverse batch 只记录本地流程状态，不是 OA/发票 relation 事实�
 - oa reverse relation display：候选发票清单只展示 OA 关联二态。可反提发票展示 `未关联oa` chip 并可勾选；已有 active/linked OA 关系的发票展示 `已关联oa` chip、禁用勾选；历史 `candidate` 兼容值归入 `未关联oa`，不再提供独立“候选 OA”筛选。表头提供 drawer 内局部筛选：`全部`、`已经关联oa`、`未关联oa`，并支持发票清单搜索。
 - oa reverse submitted tab：`已提交` 页签展示用户确认过的已提交历史，只显示申请人、时间、金额和发票摘要等业务字段。
 - oa reverse confirmation：OA 草稿创建成功后显示确认弹窗，用户可以选择 `我已在OA系统提交该草稿 / OA正在进行中`、`OA提交内容需修改 / 删除本次提交内容`，也可以点击右上角取消只关闭弹窗。取消、页面刷新、父组件重渲染或 preview reload 都不能清空当前草稿 batch；未决批次必须可在 `暂存` 页签恢复处理。
-- oa reverse local-state performance：创建草稿、确认 submitted、确认 not_submitted 都是本地 batch 状态动作，drawer 在 API 成功后立即释放按钮；这些动作不等待 `input_invoice_usage` operation barrier。只有 evidence detected 后真正写入 relation 时，才刷新 rows read model。
+- oa reverse local-state performance：创建草稿、确认 submitted、确认 not_submitted 都是本地 batch 状态动作，drawer 在 API 成功后立即释放按钮；这些动作不等待或刷新 `input_invoice_usage`。evidence detected 后真正写入 relation 也只提交 canonical relation/version/audit，当前页再通过 normal GET/fresh gate 收敛。
 
 ## Read Model / Worker 状态
 

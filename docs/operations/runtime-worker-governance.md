@@ -60,8 +60,8 @@ invoice usage/output collection backfill、App Health/workbench performance 和 
   迁移到当前 release env 示例声明的 poll 值，并只对 `workbench-matching` 把旧 `5s` 迁移为当前值。该迁移不会重写 RabbitMQ 灰度或自定义事件。
 - OA 待付款使用 required registration `oa-pending-payment`，只 claim `oa_pending_payment.read_model.refresh`；`invoice-usage-collection` 只保留 `input_invoice_usage` / `output_invoice_collection`。release helper 必须幂等删除既有 shared worker env 中精确命中的 OA handler/event 参数，不能让旧 env 覆盖新 registry 边界。OA projector不得访问Mongo/MySQL或复用shared invoice projector。普通业务变化不 enqueue 页面 refresh；页面访问只 enqueue 精确月份。显式 `all` 作为低优先级 fan-out，仅用于首次回填、repair 或 backfill。
 - OA release统一切换时不允许两个worker同时claim OA event。先由registry激活新`oa-pending-payment`实例并确认shared invoice registration已不含OA handler，再执行`oa.sync:all`建立completed/admission/payment-status snapshot和watermark；该同步必须使用单次 dual-view source batch，任一 form 失败整轮不提交并记录 failed run。核对 `scanned_projection_count`、`scanned_completed_count`、`scanned_in_progress_count` 后，低优先级enqueue `oa_pending_payment:all`。全部月份dirty/outbox drain并Audit通过前，页面保持refreshing且不展示旧rows。
-- OA页面写回MySQL成功后由API进程通过窄PG snapshot writer同事务更新status、月份watermark和outbox；PG失败返回可重试错误。运维不得直接SQL补read model或把MySQL当前值当作页面fresh证明；可重试命令或重新运行OA sync。
-- 周期性 `oa.sync` 必须是 change-driven：completed OA、status、admission 与上一 snapshot 一致时只记录 run/watermark，不更新 projection/status/admission 的业务时间戳，也不 fan-out Workbench/OA/成本等页面 refresh。admission/payment-status-only 变化只刷新 OA 待付款；只有 completed canonical 真实新增、修改或删除才允许 shared owner fan-out。snapshot repository 不得直接 enqueue Workbench/shared consumers。若无对应业务变化却持续出现跨页面 dirty/outbox 或 `app.oa_applications.updated_at` 漂移，按同步 owner 回归处理，禁止通过扩大 worker 数量掩盖写放大。
+- OA页面写回MySQL成功后由API进程通过窄PG snapshot writer同事务更新status与月份watermark，但不写页面 outbox；PG失败返回可重试错误。运维不得直接SQL补read model或把MySQL当前值当作页面fresh证明；可重试命令或重新运行OA sync。
+- 周期性 `oa.sync` 必须是 change-driven canonical commit：相同 completed OA、status、admission snapshot 不更新业务时间戳；真实变化也只提交 canonical facts/source watermark。snapshot repository 与 sync service 都不得 enqueue Workbench/OA/成本/Search/Matching 等页面 refresh。消费页面访问时按 source vector mismatch 收敛自身精确 scope。若 sync 后持续出现跨页面 dirty/outbox 或无变化时 `app.oa_applications.updated_at` 漂移，按同步 owner 回归处理，禁止通过扩大 worker 数量掩盖写放大。
 - PostgreSQL durable queue worker 的空轮询 heartbeat 必须节流。`idle` 只证明 worker 存活和当前无可 claim event，
   不能每个 0.05s poll 都写 `job.runtime_worker_heartbeats`；`processing`、`deferred`、`failed`、`stopping`、`stopped`
   必须即时写入，保证 App Health 和故障定位不丢关键状态。
@@ -148,12 +148,12 @@ event 或 worker instance 时，必须先更新 registry，再让 deploy/preflig
   业务 inverse 完整恢复、或审批明确要求灾难恢复点时，才使用 `write-operation-restore-point`。已创建恢复点只能
   通过 `write-operation-restore-point-delete <run-id> <expected-sha256>` 精确校验固定文件集、manifest 和 dump
   checksum 后删除；禁止宽泛路径删除。
-- 同步写超过门禁仍判定为 SLO failure；如果 HTTP 结果已经证明 mutation committed，恢复步骤必须先按该响应的
-  精确 `outbox_event_ids` 等待 durable fan-out 收敛，再读取隔离页基线和执行撤回。隔离/causal 写前基线遇到
+- 同步写超过门禁仍判定为 SLO failure；如果 HTTP 结果已经证明 mutation committed，runner 必须先证明
+  `outbox_event_ids` 为空且没有出现登记的旧 fan-out signature，再读取目标消费页并执行撤回。隔离/causal 写前基线遇到
   `202 refreshing`、`read_model_not_fresh` 或 dependency `503` 时，必须在同一个有界 timeout 内轮询到 fresh；
   这些瞬态状态不能据此跳过撤回或把生产关系留在 active 状态。
 - 首批 receipt 完成后，consumer gate 对 `202` / `read_model_not_fresh` / dependency `503` 在总 timeout
-  内继续轮询，因为这些状态可由合法链式 fan-out 产生；业务字段断言失败和单次 fresh 响应超过页面 SLO
+  内继续轮询，因为这些状态属于合法的 access-time convergence；业务字段断言失败和单次 fresh 响应超过页面 SLO
   不可重试，仍立即失败，防止 eventual consistency 轮询掩盖错误内容或性能退化。
 - no-OA withdraw 候选必须同时满足 `app.no_oa_bank_batches.status='submitted'`、`relation.status='active'`
   和 `relation.relation_mode='no_oa_bank_batch'`，不能把 bank-flow rule batch 关系误送到 no-OA endpoint。
@@ -164,18 +164,18 @@ event 或 worker instance 时，必须先更新 registry，再让 deploy/preflig
 | `reconciliation-workbench` | standing apply | `workbench_relation_withdraw` | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
 | `workbench-relations` | standing apply | `workbench_relation_withdraw` | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
 | `no-oa-bank-batches` | standing apply | `no_oa_bank_batch_withdraw` | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
-| `bank-flow-rule-batches` | fan-out evidence | `no_oa_bank_batch_withdraw` | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
-| `bank-details` | fan-out evidence | turnover / Workbench / no-OA withdraw | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
-| `bank-account-balance` | fan-out evidence | turnover / Workbench / no-OA withdraw | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
-| `pending-invoices` | fan-out evidence | turnover / Workbench / no-OA withdraw | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
-| `input-invoice-usage` | fan-out evidence | turnover / Workbench / no-OA withdraw | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
-| `output-invoice-collections` | fan-out evidence | turnover / Workbench / no-OA withdraw | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
-| `invoice-lifecycle` | fan-out evidence | turnover / Workbench / no-OA withdraw | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
-| `oa-pending-payments` | fan-out evidence | turnover / Workbench / no-OA withdraw | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
-| `tax-offset` | fan-out evidence | turnover / Workbench / no-OA withdraw | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
-| `cost-statistics` | fan-out evidence | turnover / Workbench / no-OA withdraw | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
-| `search` | fan-out evidence | turnover / Workbench / no-OA withdraw | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
-| `batch-accounting` | fan-out evidence | `workbench_relation_withdraw` | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
+| `bank-flow-rule-batches` | access convergence evidence | `no_oa_bank_batch_withdraw` | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
+| `bank-details` | access convergence evidence | turnover / Workbench / no-OA withdraw | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
+| `bank-account-balance` | access convergence evidence | turnover / Workbench / no-OA withdraw | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
+| `pending-invoices` | access convergence evidence | turnover / Workbench / no-OA withdraw | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
+| `input-invoice-usage` | access convergence evidence | turnover / Workbench / no-OA withdraw | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
+| `output-invoice-collections` | access convergence evidence | turnover / Workbench / no-OA withdraw | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
+| `invoice-lifecycle` | access convergence evidence | turnover / Workbench / no-OA withdraw | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
+| `oa-pending-payments` | access convergence evidence | turnover / Workbench / no-OA withdraw | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
+| `tax-offset` | access convergence evidence | turnover / Workbench / no-OA withdraw | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
+| `cost-statistics` | access convergence evidence | turnover / Workbench / no-OA withdraw | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
+| `search` | access convergence evidence | turnover / Workbench / no-OA withdraw | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
+| `batch-accounting` | access convergence evidence | `workbench_relation_withdraw` | `FINOPS-WRITE-SMOKE-STANDING-20260702` |
 | `imports-bank-transactions` | no standing production apply | staging 或单次审批导入 scenario | 不使用常驻 ticket |
 | `imports-invoices` | no standing production apply | staging 或单次审批导入 scenario | 不使用常驻 ticket |
 | `imports-etc-invoices` | no standing production apply | staging 或单次审批导入 scenario | 不使用常驻 ticket |

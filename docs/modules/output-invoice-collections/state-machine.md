@@ -53,16 +53,17 @@
 - refreshing：dirty/outbox 或 readiness 显示 scope 正在刷新；页面保持 busy/auto retry。
 - failed/unavailable：App Status domain 进入 blocked 或 unavailable；页面不能伪装数据 ready。
 - refresh 触发来源：
-  - 发票导入、关系变化、pending invoice rules、invoice lifecycle 变化后，先刷新 `invoice_lifecycle`，再刷新 `output_invoice_collection`。
-  - 手动状态、提醒、红蓝票关系、收据 create/void/reissue 直接 enqueue `output_invoice_collection` month scope。
-  - 手动状态、提醒、红蓝票关系、收据 create/void/reissue 响应必须携带 `read_model_scope_keys` 和 `freshness_targets`；前端必须把返回的具体月份 target 传给 operation barrier 后再 refetch rows。
-  - `all` scope 由 `InvoiceUsageCollectionReadModelRefreshService` 扩展为月份 shard。
+  - 页面 rows/detail/export 访问先比较 source/schema/rule version；只有当前 exact month scope missing/stale/mismatch 时才经 gateway 去重入队。
+  - 发票导入、关系变化、pending invoice rules、手动状态、提醒、红蓝票关系、收据 create/void/reissue 只提交 canonical fact/version，普通写响应的 `freshness_targets` / `operation_barrier_targets` 为空；当前页写成功后重跑 normal GET，其它页面访问或重新激活时独立收敛。
+  - `all` scope 只允许显式维护/修复使用，并由 `InvoiceUsageCollectionReadModelRefreshService` 扩展为月份 shard；普通写不得 fallback `all`。
 - 失败恢复：
   - 按 `docs/operations/runtime-worker-governance.md` 先确认 `workbench_relation` 和 `invoice_lifecycle` fresh，再重放 `output_invoice_collection`。
   - outbox/dirty scope 失败必须保留审计，不允许直接 SQL 抹平。
   - 重放后以 API fresh 和 App Status readiness 为准。
 
 ## 变更记录
+
+> 2026-07-22 Phase 27 已用“普通写零页面 fan-out、页面访问 exact-scope 收敛”取代此前的写后 freshness target / operation barrier 方案。下方 2026-06/07 记录只用于历史回归溯源，不是当前 writer 合同。
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |

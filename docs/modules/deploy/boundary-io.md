@@ -8,7 +8,7 @@
 - 当前边界可信度：high
 - 目标边界：部署模块负责发布、runtime worker/systemd/env/nginx/verify，不承载业务逻辑。
 - 当前缺口：无 P0/P1 模块化缺口；新增 read model/worker 仍必须同步 deploy examples 和 runtime worker manifest。
-- 旧代码删除状态：`legacy-current` 覆盖式发布入口、旧单文件 `deploy/oa/fin_ops.env.example` 和 systemd 示例中的 current/backend runtime 路径已移除；release helper 只保留历史 `/opt/fin-ops/current` 归档/guard，不作为旧发布 I/O。
+- 旧代码删除状态：`legacy-current` 覆盖式发布入口、旧单文件 `deploy/oa/fin_ops.env.example` 和 systemd 示例中的 current/backend runtime 路径已移除；import worker/dispatcher env 已移除退役的 `import.fact.changed` event，只保留 `import.process.requested`。release helper 只保留历史 `/opt/fin-ops/current` 归档/guard，不作为旧发布 I/O。
 
 ## 职责边界
 

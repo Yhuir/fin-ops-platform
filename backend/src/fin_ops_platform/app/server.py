@@ -130,9 +130,6 @@ from fin_ops_platform.services.invoice_lifecycle_derived_lifecycle_executor impo
 from fin_ops_platform.services.no_oa_bank_batch_derived_lifecycle_executor import (
     NoOaBankBatchDerivedLifecycleExecutor,
 )
-from fin_ops_platform.services.pending_invoice_scope_planner import (
-    pending_invoice_read_model_scope_keys_for_import_state,
-)
 from fin_ops_platform.services.prometheus_metrics import PROMETHEUS_CONTENT_TYPE, render_prometheus_metrics
 from fin_ops_platform.services.read_model_scope_policy import ReadModelScopeError
 from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
@@ -760,7 +757,7 @@ class Application:
                 else self._import_service
             ),
             persist_workbench_pair_relations=lambda case_ids: self._persist_workbench_pair_relations(changed_case_ids=case_ids),
-            invalidate_workbench_scopes=self._invalidate_workbench_read_model_scopes,
+            invalidate_workbench_scopes=self._refresh_workbench_read_model_scopes_for_maintenance,
             save_invoice_etc_metadata=(
                 state_store.save_invoice_etc_metadata
                 if callable(getattr(state_store, "save_invoice_etc_metadata", None))
@@ -1062,7 +1059,7 @@ class Application:
                 persist_pair_relations=lambda case_ids: self._persist_workbench_pair_relations(
                     changed_case_ids=case_ids,
                 ),
-                invalidate_workbench_scopes=self._invalidate_workbench_read_model_scopes,
+                invalidate_workbench_scopes=self._refresh_workbench_read_model_scopes_for_maintenance,
                 persist_etc_state=lambda: self._state_store.save_etc_state(self._etc_service.snapshot()),
             )
             if self._state_store is not None
@@ -4604,11 +4601,6 @@ class Application:
             for month in list(raw_affected_months or [])
             if str(month).strip() and str(month).strip().lower() != "all"
         ]
-        if changed_months:
-            self._invalidate_workbench_read_model_scopes(
-                sorted(set(changed_months)),
-                invalidate_cost_statistics=False,
-            )
         return sorted(set(changed_months))
 
     def _assert_etc_summary_relation_write_precondition_for_batch(self, batch: object) -> None:
@@ -5056,9 +5048,10 @@ class Application:
         ]
         if not normalized_months:
             return
-        self._execute_derived_data_lifecycle_event(
+        self._execute_explicit_maintenance_lifecycle(
             "etc_business_batch_changed",
             months=normalized_months,
+            include_all=False,
             metadata={"source": "historical_etc_repair_link", "reason": reason},
         )
 
@@ -5642,120 +5635,6 @@ class Application:
             )
 
 
-    def _persist_workbench_exception_and_override_change(
-        self,
-        *,
-        changed_row_ids: list[str],
-        mutation: Callable[[], object],
-        changed_scope_keys: list[str] | None = None,
-        request_id: str | None = None,
-        action_name: str | None = None,
-    ) -> object:
-        previous_exception_snapshot = self._workbench_exception_case_service.snapshot()
-        previous_override_snapshot = self._workbench_override_service.snapshot()
-        result = mutation()
-        try:
-            self._save_workbench_exception_cases_snapshot()
-            if changed_scope_keys is None:
-                self._persist_workbench_overrides(changed_row_ids=changed_row_ids)
-            else:
-                self._save_workbench_overrides_snapshot(changed_row_ids=changed_row_ids)
-        except Exception as exc:
-            self._workbench_exception_rollback_restore_service().restore_override_snapshots(
-                previous_exception_snapshot=previous_exception_snapshot,
-                previous_override_snapshot=previous_override_snapshot,
-            )
-            raise StatePersistenceError("工作台状态暂时无法保存，请稍后重试。") from exc
-        if changed_scope_keys is not None:
-            self._execute_derived_data_lifecycle_event(
-                "exception_case_changed",
-                scope_keys=changed_scope_keys,
-                metadata={"source": action_name or "workbench_exception_change"},
-            )
-            self._schedule_workbench_read_model_persist(
-                changed_scope_keys=changed_scope_keys,
-                request_id=request_id,
-                action_name=action_name,
-            )
-        return result
-
-    def _apply_workbench_exception_application(
-        self,
-        payload: dict[str, object],
-        *,
-        actor: str,
-        request_id: str | None = None,
-        action_name: str = "exception_apply",
-    ) -> dict[str, object]:
-        previous_exception_snapshot = self._workbench_exception_case_service.snapshot()
-        previous_pair_snapshot = self._workbench_pair_relation_service.snapshot()
-        previous_override_snapshot = self._workbench_override_service.snapshot()
-        result = self._workbench_exception_application_service.apply(payload, actor=actor)
-        row_ids = [
-            str(row_id)
-            for row_id in list(result.get("affected_row_ids") or [])
-            if str(row_id).strip()
-        ]
-        month = str(payload.get("month") or "")
-        rows = self._resolve_live_rows_direct(row_ids, month_hint=month) if row_ids else []
-        relation = result.get("pair_relation")
-        case_payload = result.get("case")
-        if isinstance(case_payload, dict):
-            if isinstance(relation, dict):
-                updated_rows = self._workbench_override_service.apply_relation_projection(
-                    relation,
-                    rows,
-                    case_payload=case_payload,
-                    candidate_evidence=list(result.get("candidate_evidence") or []),
-                )
-            else:
-                updated_rows = self._workbench_override_service.apply_exception_projection(
-                    case_payload,
-                    rows,
-                    candidate_evidence=list(result.get("candidate_evidence") or []),
-                )
-            result["updated_rows"] = updated_rows
-        try:
-            self._save_workbench_exception_cases_snapshot()
-            if isinstance(relation, dict):
-                self._persist_workbench_pair_relations(
-                    changed_case_ids=[str(relation.get("case_id") or "")],
-                )
-            self._save_workbench_overrides_snapshot(changed_row_ids=row_ids)
-        except Exception as exc:
-            self._workbench_exception_rollback_restore_service().restore_write_snapshots(
-                previous_exception_snapshot=previous_exception_snapshot,
-                previous_pair_snapshot=previous_pair_snapshot,
-                previous_override_snapshot=previous_override_snapshot,
-            )
-            raise StatePersistenceError("工作台状态暂时无法保存，请稍后重试。") from exc
-
-        changed_scope_keys = list(
-            self._scope_keys_for_row_ids(
-                month=month,
-                row_ids=row_ids,
-                month_scope=str(relation.get("month_scope") or "") if isinstance(relation, dict) else month,
-            )
-        )
-        self._execute_derived_data_lifecycle_event(
-            "exception_case_changed",
-            scope_keys=changed_scope_keys,
-            metadata={"source": action_name, "reason": action_name},
-        )
-        if isinstance(relation, dict):
-            self._schedule_workbench_pair_relation_persist(
-                changed_case_ids=[str(relation.get("case_id") or "")],
-                request_id=request_id,
-                action_name=action_name,
-            )
-        self._schedule_workbench_read_model_persist(
-            changed_scope_keys=changed_scope_keys,
-            request_id=request_id,
-            action_name=action_name,
-        )
-        return result
-
-
     def _handle_oa_attachment_invoice_cache_updated(self, months: list[str]) -> None:
         scope_keys = {
             str(month).strip()
@@ -6133,7 +6012,6 @@ class Application:
             load_json_body=self._load_json_body,
             json_response=self._json_response,
             finalize_settings_event=self._finalize_workbench_settings_event,
-            after_settings_update=self._after_workbench_settings_update,
             execute_data_reset=self._execute_settings_data_reset,
             serialize_sync_run=self._serialize_sync_run,
             serialize_data_reset_background_job=self._serialize_data_reset_background_job,
@@ -6414,15 +6292,13 @@ class Application:
             return repository
         state_store = getattr(self, "_state_store", None)
         connection = getattr(state_store, "_connection", None)
-        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
         pending_relation_repository = self._oa_pending_payment_relation_repository()
-        if connection is None or queue_repository is None or pending_relation_repository is None:
+        if connection is None or pending_relation_repository is None:
             if self._requires_sql_read_model_runtime():
                 raise RuntimeError("OA pending payment source snapshot writer requires PostgreSQL runtime repositories.")
             return None
         repository = PostgresOaPendingPaymentSourceSnapshotRepository(
             connection,
-            queue_repository=queue_repository,
             pending_relation_repository=pending_relation_repository,
         )
         self._oa_pending_payment_source_snapshot_repository_instance = repository
@@ -6951,20 +6827,6 @@ class Application:
                 break
         self._search_service.clear_cache()
 
-    def _after_workbench_settings_update(
-        self,
-        previous_oa_invoice_offset: dict[str, Any],
-        updated_payload: dict[str, Any],
-        _pending_invoice_rules_changed: bool,
-    ) -> None:
-        self._invalidate_workbench_read_models()
-        if self._state_store is not None:
-            self._persist_workbench_read_models_best_effort(
-                snapshot=self._workbench_read_model_service.snapshot(),
-                operation="invalidate_read_models_after_settings_update",
-            )
-        self._search_service.clear_cache()
-
     def _settings_oa_manual_import_affected_scope_keys(
         self,
         result: dict[str, object],
@@ -7056,7 +6918,7 @@ class Application:
             reload_percent = 15 if action == RESET_OA_AND_REBUILD_ACTION else 90
             progress("reload", "正在重新载入运行时服务。", reload_percent)
         self._reload_runtime_services()
-        lifecycle_summary = self._execute_derived_data_lifecycle_event(
+        lifecycle_summary = self._execute_explicit_maintenance_lifecycle(
             "settings_reset_completed",
             include_all=True,
             metadata={"action": action},
@@ -7983,8 +7845,6 @@ class Application:
             no_oa_bank_batch_read_model_repository=getattr(self, "_no_oa_bank_batch_sql_read_repository", None),
             workbench_matching_source_versions_provider=self._bank_batch_workbench_source_versions,
             bank_transaction_category_affected_months_provider=self._bank_transaction_category_affected_months,
-            execute_derived_data_lifecycle_event=self._execute_derived_data_lifecycle_event,
-            expand_workbench_read_model_scope_keys_for_base_scopes=self._expand_workbench_read_model_scope_keys_for_base_scopes,
             search_cache_clearer=self._search_service.clear_cache,
             queue_repository=getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None),
             read_model_refresh_producer=self._no_oa_bank_batch_read_model_refresh_producer(),
@@ -8030,8 +7890,6 @@ class Application:
             bank_batch_read_model_repository=read_repository,
             workbench_matching_source_versions_provider=self._bank_batch_workbench_source_versions,
             bank_transaction_category_affected_months_provider=self._bank_transaction_category_affected_months,
-            execute_derived_data_lifecycle_event=self._execute_derived_data_lifecycle_event,
-            expand_workbench_read_model_scope_keys_for_base_scopes=self._expand_workbench_read_model_scope_keys_for_base_scopes,
             search_cache_clearer=self._search_service.clear_cache,
             queue_repository=getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None),
             read_model_refresh_producer=self._bank_flow_rule_batch_read_model_refresh_producer(),
@@ -8100,19 +7958,13 @@ class Application:
         state_store = getattr(self, "_state_store", None)
         if str(getattr(state_store, "storage_backend", "") or "").strip() != "postgres":
             return None
-        queue_repository = getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None)
         category_repository = getattr(state_store, "bank_transaction_category_repository", None)
-        matching_repository = getattr(state_store, "read_model_repository", None)
         connection = getattr(state_store, "_connection", None)
-        if connection is None or category_repository is None or queue_repository is None or matching_repository is None:
+        if connection is None or category_repository is None:
             return None
         return BankTransactionCategoryMutationWriter(
             connection=connection,
             repository=category_repository,
-            queue_repository=queue_repository,
-            workbench_matching_repository=matching_repository,
-            workbench_matching_source_versions_provider=self._workbench_matching_source_versions,
-            tenant_id=self._workbench_reconciliation_tenant_id(),
         )
 
     def _bank_details_routes(self) -> BankDetailsApiRoutes:
@@ -8466,22 +8318,6 @@ class Application:
             if SEARCH_MONTH_RE.match(month):
                 months.add(month)
         return sorted(months)
-
-    def _invalidate_workbench_after_bank_transaction_categories(self, affected_months: list[str]) -> bool:
-        normalized_months = [
-            str(month).strip()
-            for month in list(affected_months or [])
-            if SEARCH_MONTH_RE.match(str(month).strip())
-        ]
-        if not normalized_months:
-            self._search_service.clear_cache()
-            return False
-        self._execute_derived_data_lifecycle_event(
-            "bank_transaction_category_changed",
-            months=normalized_months,
-            metadata={"source": "bank_transaction_categories"},
-        )
-        return True
 
     def _finalize_bank_transaction_tag_settings_update(self, event: dict[str, object]) -> None:
         projection = getattr(self, "_bank_details_relation_tag_projection_service", None)
@@ -9950,85 +9786,6 @@ class Application:
                 raise RuntimeError("File import confirmation requires the import delta persistence port.")
             persist(payload)
 
-    def _execute_import_state_changed_lifecycle(
-        self,
-        *,
-        cost_statistics_scope_keys: list[str] | None,
-        bank_detail_scope_keys: list[str] | None,
-        input_invoice_usage_scope_keys: list[str] | None,
-        output_invoice_collection_scope_keys: list[str] | None,
-        invalidate_cost_statistics: bool,
-        source: str,
-    ) -> dict[str, object]:
-        return self._execute_derived_data_lifecycle_event(
-            "import_state_changed",
-            scope_keys=cost_statistics_scope_keys or ["all"],
-            include_all=False,
-            metadata={"source": source, "reason": "import_state_changed"},
-            executor_overrides={
-                "bank_detail_read_model": self._import_state_bank_detail_lifecycle_executor,
-            },
-            domain_scope_keys=self._import_state_lifecycle_domain_scope_keys(
-                cost_statistics_scope_keys=cost_statistics_scope_keys,
-                bank_detail_scope_keys=bank_detail_scope_keys,
-                input_invoice_usage_scope_keys=input_invoice_usage_scope_keys,
-                output_invoice_collection_scope_keys=output_invoice_collection_scope_keys,
-                invalidate_cost_statistics=invalidate_cost_statistics,
-            ),
-        )
-
-    @staticmethod
-    def _import_state_lifecycle_domain_scope_keys(
-        *,
-        cost_statistics_scope_keys: list[str] | None,
-        bank_detail_scope_keys: list[str] | None,
-        input_invoice_usage_scope_keys: list[str] | None,
-        output_invoice_collection_scope_keys: list[str] | None,
-        invalidate_cost_statistics: bool,
-    ) -> dict[str, list[str]]:
-        cost_scope_keys = list(cost_statistics_scope_keys or ["all"])
-        bank_scope_keys = list(bank_detail_scope_keys or [])
-        input_scope_keys = list(input_invoice_usage_scope_keys) if input_invoice_usage_scope_keys is not None else cost_scope_keys
-        output_scope_keys = (
-            list(output_invoice_collection_scope_keys)
-            if output_invoice_collection_scope_keys is not None
-            else cost_scope_keys
-        )
-        return {
-            "workbench_read_model": Application._import_state_workbench_scope_keys(cost_statistics_scope_keys),
-            "workbench_relation_read_model": cost_scope_keys,
-            "invoice_lifecycle_read_model": cost_scope_keys,
-            "pending_invoice_read_model": Application._import_state_pending_invoice_scope_keys(
-                cost_statistics_scope_keys,
-                bank_detail_scope_keys,
-            ),
-            "input_invoice_usage_read_model": input_scope_keys,
-            "output_invoice_collection_read_model": output_scope_keys,
-            "oa_pending_payment_read_model": cost_scope_keys,
-            "bank_account_balance_read_model": ["all"] if bank_scope_keys else [],
-            "bank_detail_read_model": bank_scope_keys,
-            "cost_statistics_read_model": cost_scope_keys if invalidate_cost_statistics else [],
-            "search_cache": cost_scope_keys,
-        }
-
-    def _import_state_bank_detail_lifecycle_executor(self, domain_plan: dict[str, object]) -> dict[str, object]:
-        next_plan = dict(domain_plan)
-        next_plan["reason"] = "import_facts_changed"
-        return self._bank_detail_derived_lifecycle_executor().execute(next_plan)
-
-    @staticmethod
-    def _import_state_workbench_scope_keys(scope_keys: list[str] | None) -> list[str]:
-        month_scope_keys = [
-            str(scope_key).strip()
-            for scope_key in dict.fromkeys(scope_keys or [])
-            if SEARCH_MONTH_RE.match(str(scope_key).strip())
-        ]
-        return month_scope_keys or ["all"]
-
-    @staticmethod
-    def _import_state_pending_invoice_scope_keys(*scope_key_groups: object) -> list[str]:
-        return pending_invoice_read_model_scope_keys_for_import_state(*scope_key_groups)
-
     def _persist_workbench_pair_relations(
         self,
         *,
@@ -10350,11 +10107,6 @@ class Application:
 
     def _persist_workbench_overrides(self, *, changed_row_ids: list[str] | None = None) -> None:
         self._save_workbench_overrides_snapshot(changed_row_ids=changed_row_ids)
-        self._invalidate_workbench_read_models()
-        self._persist_workbench_read_models_best_effort(
-            snapshot=self._workbench_read_model_service.snapshot(),
-            operation="invalidate_read_models_after_override_save",
-        )
 
     def _list_search_months(self) -> list[str]:
         months = set(self._workbench_query_service.list_available_months())
@@ -10572,7 +10324,7 @@ class Application:
         payload["handled_exception"] = False
         return payload
 
-    def _execute_derived_data_lifecycle_event(
+    def _execute_explicit_maintenance_lifecycle(
         self,
         event: str,
         *,
@@ -10580,9 +10332,6 @@ class Application:
         scope_keys: list[str] | None = None,
         include_all: bool = True,
         metadata: dict[str, object] | None = None,
-        excluded_domains: set[str] | list[str] | tuple[str, ...] | None = None,
-        executor_overrides: dict[str, object] | None = None,
-        domain_scope_keys: dict[str, list[str]] | None = None,
     ) -> dict[str, object]:
         plan = self._derived_data_lifecycle_service.plan_event(
             event,
@@ -10593,39 +10342,11 @@ class Application:
             metadata=metadata,
         )
         reason = str((metadata or {}).get("reason") or event).strip()
-        action_name = str((metadata or {}).get("action_name") or "").strip()
-        if event == "pair_relation_changed":
-            plan["domains"] = self._filter_pair_relation_lifecycle_domains(
-                list(plan.get("domains") or []),
-                metadata=metadata,
-            )
-        excluded_domain_names = {
-            str(domain).strip()
-            for domain in list(excluded_domains or [])
-            if str(domain).strip()
-        }
-        if excluded_domain_names:
-            plan["domains"] = [
-                domain_plan
-                for domain_plan in list(plan.get("domains") or [])
-                if not (
-                    isinstance(domain_plan, dict)
-                    and str(domain_plan.get("domain") or "").strip() in excluded_domain_names
-                )
-            ]
-        if domain_scope_keys:
-            plan["domains"] = self._apply_lifecycle_domain_scope_overrides(
-                list(plan.get("domains") or []),
-                domain_scope_keys=domain_scope_keys,
-            )
         for domain_plan in list(plan.get("domains") or []):
             if isinstance(domain_plan, dict):
                 domain_plan["reason"] = reason
-                domain_metadata = dict(metadata or {})
-                if action_name:
-                    domain_metadata["action_name"] = action_name
-                if domain_metadata:
-                    domain_plan["metadata"] = domain_metadata
+                if metadata:
+                    domain_plan["metadata"] = dict(metadata)
         executors = {
             "workbench_read_model": self._derived_lifecycle_workbench_read_model_executor,
             "workbench_relation_read_model": self._workbench_relation_derived_lifecycle_executor().execute,
@@ -10655,9 +10376,6 @@ class Application:
             "oa_adapter_records_cache": self._derived_lifecycle_oa_adapter_cache_executor,
             "historical_etc_repair_state": self._derived_lifecycle_historical_etc_executor,
         }
-        for domain_name, executor in dict(executor_overrides or {}).items():
-            if callable(executor):
-                executors[str(domain_name)] = executor
         return self._derived_data_lifecycle_service.execute_plan(
             plan,
             executors=executors,
@@ -10685,9 +10403,8 @@ class Application:
             if not deleted_scope_keys:
                 deleted_scope_keys = ["all"]
         else:
-            deleted_scope_keys = self._invalidate_workbench_read_model_scopes(
+            deleted_scope_keys = self._refresh_workbench_read_model_scopes_for_maintenance(
                 scope_keys,
-                invalidate_cost_statistics=False,
                 metadata=refresh_metadata,
             )
             if not isinstance(deleted_scope_keys, list):
@@ -10877,73 +10594,6 @@ class Application:
         ]
 
     @staticmethod
-    def _filter_pair_relation_lifecycle_domains(
-        domain_plans: list[object],
-        *,
-        metadata: dict[str, object] | None,
-    ) -> list[dict[str, object]]:
-        downstream_scope_types = {
-            str(scope_type).strip()
-            for scope_type in list((metadata or {}).get("downstream_scope_types") or [])
-            if str(scope_type).strip()
-        }
-        if not downstream_scope_types:
-            return [dict(plan) for plan in domain_plans if isinstance(plan, dict)]
-        always_keep = {
-            "workbench_read_model",
-            "workbench_relation_read_model",
-            "workbench_matching_dirty_scopes",
-        }
-        domain_scope_types = {
-            "bank_detail_read_model": "bank_detail",
-            "invoice_lifecycle_read_model": "invoice_lifecycle",
-            "pending_invoice_read_model": "pending_invoice",
-            "input_invoice_usage_read_model": "input_invoice_usage",
-            "output_invoice_collection_read_model": "output_invoice_collection",
-            "oa_pending_payment_read_model": "oa_pending_payment",
-            "tax_offset_read_model": "tax_offset",
-            "tax_offset_month_cache": "tax_offset",
-            "search_cache": "search",
-            "no_oa_bank_batch_read_model": "no_oa_bank_batch",
-            "oa_adapter_records_cache": "oa",
-        }
-        filtered: list[dict[str, object]] = []
-        for plan in domain_plans:
-            if not isinstance(plan, dict):
-                continue
-            domain = str(plan.get("domain") or "").strip()
-            required_scope_type = domain_scope_types.get(domain)
-            if domain in always_keep or required_scope_type is None or required_scope_type in downstream_scope_types:
-                filtered.append(dict(plan))
-        return filtered
-
-    @staticmethod
-    def _apply_lifecycle_domain_scope_overrides(
-        domain_plans: list[object],
-        *,
-        domain_scope_keys: dict[str, list[str]],
-    ) -> list[dict[str, object]]:
-        filtered: list[dict[str, object]] = []
-        for plan in domain_plans:
-            if not isinstance(plan, dict):
-                continue
-            domain = str(plan.get("domain") or "").strip()
-            next_plan = dict(plan)
-            if domain in domain_scope_keys:
-                scope_keys = [
-                    str(scope_key).strip()
-                    for scope_key in list(domain_scope_keys.get(domain) or [])
-                    if str(scope_key).strip()
-                ]
-                scope_keys = list(dict.fromkeys(scope_keys))
-                if not scope_keys:
-                    continue
-                next_plan["scope_keys"] = scope_keys
-                next_plan["estimated_count"] = len(scope_keys)
-            filtered.append(next_plan)
-        return filtered
-
-    @staticmethod
     def _domain_plan_metadata(domain_plan: dict[str, object]) -> dict[str, object]:
         metadata = domain_plan.get("metadata")
         return dict(metadata) if isinstance(metadata, dict) else {}
@@ -11002,18 +10652,10 @@ class Application:
             }
         )
 
-    def _invalidate_workbench_read_models(self, *, invalidate_cost_statistics: bool = True) -> None:
-        snapshot = self._workbench_read_model_service.snapshot()
-        for scope_key in list(snapshot.get("read_models", {}).keys()):
-            self._workbench_read_model_service.delete_read_model(str(scope_key))
-        if invalidate_cost_statistics:
-            self._invalidate_cost_statistics_read_models()
-
-    def _invalidate_workbench_read_model_scopes(
+    def _refresh_workbench_read_model_scopes_for_maintenance(
         self,
         scope_keys: list[str],
         *,
-        invalidate_cost_statistics: bool = True,
         metadata: dict[str, object] | None = None,
     ) -> list[str]:
         normalized_scope_keys = {
@@ -11025,21 +10667,6 @@ class Application:
         for scope_key in expanded_scope_keys:
             self._workbench_read_model_service.delete_read_model(scope_key)
             self._enqueue_workbench_read_model_refresh(scope_key, reason="workbench_scope_invalidated", metadata=metadata)
-        if invalidate_cost_statistics:
-            self._invalidate_cost_statistics_read_model_scopes(
-                list(normalized_scope_keys),
-                reason="workbench_scope_invalidated",
-            )
-            self._invalidate_tax_offset_read_model_scopes(
-                list(normalized_scope_keys),
-                reason="workbench_scope_invalidated",
-            )
-            self._search_read_model_refresh_producer().invalidate(
-                list(normalized_scope_keys),
-                reason="workbench_scope_invalidated",
-                metadata=metadata,
-            )
-            self._invalidate_pending_invoice_read_model_scopes(reason="workbench_scope_invalidated", metadata=metadata)
         return expanded_scope_keys
 
     @staticmethod
@@ -11088,55 +10715,6 @@ class Application:
             if "oa_pending_payment" in enabled_scope_types and self._enqueue_oa_pending_payment_read_model_refresh(scope_key, reason=reason, metadata=metadata):
                 invalidated.append(f"oa_pending_payment:{scope_key}")
         return invalidated
-
-    def _invalidate_cost_statistics_read_models(self) -> list[str]:
-        return self._cost_statistics_runtime().invalidate_read_models()
-
-    def _invalidate_cost_statistics_read_model_scopes(
-        self,
-        scope_keys: list[str],
-        *,
-        reason: str = "",
-    ) -> list[str]:
-        return self._cost_statistics_runtime().invalidate_read_model_scopes(
-            scope_keys,
-            reason=reason,
-        )
-
-    def _invalidate_tax_offset_read_models(self) -> list[str]:
-        return self._tax_offset_runtime_for_read_model().invalidate_read_models()
-
-    def _invalidate_tax_offset_read_model_scopes(
-        self,
-        scope_keys: list[str],
-        *,
-        reason: str = "",
-    ) -> list[str]:
-        if not scope_keys:
-            return []
-        # Tax-offset scopes share one global invoice-fact source version.
-        return self._tax_offset_runtime_for_read_model().invalidate_read_models(
-            scope_keys=scope_keys,
-            reason=reason,
-        )
-
-    def _enqueue_tax_offset_refresh_for_months(self, months: list[str], *, reason: str) -> bool:
-        return self._tax_offset_runtime_for_read_model().enqueue_refresh_for_months(months, reason=reason)
-
-    def _delete_tax_offset_redis_cache(self, scope_key: str) -> None:
-        self._tax_offset_runtime_for_read_model().delete_redis_cache(scope_key)
-
-    @staticmethod
-    def _tax_offset_months_from_scope_keys(scope_keys: list[str]) -> set[str]:
-        return TaxOffsetRuntimeService.months_from_scope_keys(scope_keys)
-
-    @staticmethod
-    def _tax_offset_warmup_months_from_scope_keys(scope_keys: list[str]) -> list[str]:
-        return TaxOffsetRuntimeService.warmup_months_from_scope_keys(scope_keys)
-
-    @staticmethod
-    def _default_tax_offset_warmup_months() -> list[str]:
-        return TaxOffsetRuntimeService.default_warmup_months()
 
     def _tax_offset_read_model_scope_key(
         self,

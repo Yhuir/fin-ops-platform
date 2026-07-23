@@ -52,57 +52,57 @@ STANDARD_PAGE_WRITE_SCENARIO_POLICIES: tuple[dict[str, Any], ...] = (
     },
     {
         "page_key": "bank-details",
-        "apply_policy": "fanout_evidence",
+        "apply_policy": "access_convergence_evidence",
         "scenario_operations": STANDARD_WRITE_OPERATIONS,
     },
     {
         "page_key": "bank-account-balance",
-        "apply_policy": "fanout_evidence",
+        "apply_policy": "access_convergence_evidence",
         "scenario_operations": STANDARD_WRITE_OPERATIONS,
     },
     {
         "page_key": "pending-invoices",
-        "apply_policy": "fanout_evidence",
+        "apply_policy": "access_convergence_evidence",
         "scenario_operations": STANDARD_WRITE_OPERATIONS,
     },
     {
         "page_key": "input-invoice-usage",
-        "apply_policy": "fanout_evidence",
+        "apply_policy": "access_convergence_evidence",
         "scenario_operations": STANDARD_WRITE_OPERATIONS,
     },
     {
         "page_key": "output-invoice-collections",
-        "apply_policy": "fanout_evidence",
+        "apply_policy": "access_convergence_evidence",
         "scenario_operations": STANDARD_WRITE_OPERATIONS,
     },
     {
         "page_key": "invoice-lifecycle",
-        "apply_policy": "fanout_evidence",
+        "apply_policy": "access_convergence_evidence",
         "scenario_operations": STANDARD_WRITE_OPERATIONS,
     },
     {
         "page_key": "oa-pending-payments",
-        "apply_policy": "fanout_evidence",
+        "apply_policy": "access_convergence_evidence",
         "scenario_operations": STANDARD_WRITE_OPERATIONS,
     },
     {
         "page_key": "tax-offset",
-        "apply_policy": "fanout_evidence",
+        "apply_policy": "access_convergence_evidence",
         "scenario_operations": STANDARD_WRITE_OPERATIONS,
     },
     {
         "page_key": "cost-statistics",
-        "apply_policy": "fanout_evidence",
+        "apply_policy": "access_convergence_evidence",
         "scenario_operations": STANDARD_WRITE_OPERATIONS,
     },
     {
         "page_key": "search",
-        "apply_policy": "fanout_evidence",
+        "apply_policy": "access_convergence_evidence",
         "scenario_operations": STANDARD_WRITE_OPERATIONS,
     },
     {
         "page_key": "batch-accounting",
-        "apply_policy": "fanout_evidence",
+        "apply_policy": "access_convergence_evidence",
         "scenario_operations": ("workbench_relation_withdraw",),
     },
     {
@@ -547,7 +547,7 @@ def _bank_flow_rule_batch_submit_scenario(candidate: dict[str, Any]) -> dict[str
                 "target_ms": 1000,
             },
             *_workbench_paired_probes(month),
-            *_bank_relation_fanout_probes(month),
+            *_bank_relation_access_probes(month),
             {
                 "name": "operations_app_health_dashboard",
                 "path": "/api/operations/app-health-dashboard",
@@ -588,7 +588,7 @@ def _workbench_paired_probes(month: str) -> list[dict[str, Any]]:
     ]
 
 
-def _bank_relation_fanout_probes(month: str) -> list[dict[str, Any]]:
+def _bank_relation_access_probes(month: str) -> list[dict[str, Any]]:
     month_scope = _month_text(month) or "all"
     return [
         {
@@ -631,7 +631,7 @@ def _page_write_scenario_policy_payload() -> list[dict[str, Any]]:
     payload: list[dict[str, Any]] = []
     for policy in STANDARD_PAGE_WRITE_SCENARIO_POLICIES:
         apply_policy = str(policy["apply_policy"])
-        standard_apply = apply_policy in {"standing_apply", "fanout_evidence"}
+        standard_apply = apply_policy in {"standing_apply", "access_convergence_evidence"}
         payload.append(
             {
                 "page_key": policy["page_key"],

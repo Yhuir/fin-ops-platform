@@ -31,7 +31,7 @@
 | ETC import service | `EtcService.preview_import_zips(...)`、`confirm_business_batch_import(...)` | import session freshness、duplicate/idempotency、attachments、business batch merge、partial success |
 | Import processing | `ImportProcessingService.execute_etc_invoice_import_confirm_job(...)` | 创建/复用 task-scoped business batch、background progress、mark imported/failed、保存 ETC metadata/PDF/XML 附件关系，并只关联已存在 canonical invoice |
 | Import cleanup | `EtcReconciliationImportCleanupService`、`EtcBusinessBatchDeleteService` | 删除/重导只清理 ETC task/import batch/business batch 自有事实和 changed months，不调用通用 import service 删除或改写 canonical invoice |
-| Derived lifecycle | `RuntimeWorkerDerivedLifecycle.refresh_after_etc_invoice_link(...)`、`DerivedDataLifecycleService` | `etc_import_confirmed` 只按真实 canonical metadata changed months、`include_all=false` 刷新显式 import 合同声明的 Workbench/relation/matching、invoice lifecycle、tax offset、search；Cost 不由 Workbench publish fan-out，在页面访问时两阶段收敛，historical repair 不进入热路径 |
+| 页面访问收敛 | import processor、各消费页 fresh gate、`ReadModelRefreshGateway` | `etc_import_confirmed` 只提交 canonical metadata/source version，普通确认零页面 dirty/outbox；ETC 票据、Workbench/relation/matching、invoice lifecycle、tax offset、search、Cost 分别在访问或重新激活时按 exact scope 收敛；historical repair 不进入热路径 |
 | App Status / worker | `import` worker、`app_status_*_registry.py`、`tests/test_platform_runtime_boundary_guards.py` | `etc_invoice_import` job readiness、`import.process.requested` envelope、全局 status 不能误判 ready，且 runtime ETC import link helper 不得调用 canonical invoice create API |
 
 ## 场景覆盖清单

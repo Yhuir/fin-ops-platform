@@ -264,7 +264,8 @@ class BankDetailReadModelFixture:
 class WorkbenchV2ApiTests(unittest.TestCase):
     def _install_workbench_query_service(self, app: Application, query_service: WorkbenchQueryService) -> None:
         app._workbench_query_service = query_service
-        app._invalidate_workbench_read_models(invalidate_cost_statistics=False)
+        for scope_key in list(app._workbench_read_model_service.snapshot().get("read_models", {})):
+            app._workbench_read_model_service.delete_read_model(str(scope_key))
 
     def _create_imported_bank_transaction(
         self,

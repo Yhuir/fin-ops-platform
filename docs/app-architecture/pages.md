@@ -76,24 +76,24 @@ domain registry 是页面域入口；`AppStatusReadModelRegistry` 是 read model
 - 多页面共享且需要 freshness/backfill 的结果，必须通过 policy/service + read boundary 暴露。
 - 只有一个页面使用且规则简单的派生结果，可以留在页面 service；后续被复用时再上提。
 
-### Phase 27 页面访问 freshness 迁移（目标态，按 slice 实施）
+### Phase 27 页面访问 freshness 迁移（本地已实施，待生产验证）
 
 当前 route 生命周期已经提供目标方案需要的最小机制：离开页面会卸载页面 React tree，返回时重新 mount；`PageRuntimeContext` 提供当前页面 `active` 状态。Phase 27 不增加 keep-alive frame、全局页面 coordinator、第二套依赖 registry 或后台隐藏页面轮询。
 
-| 场景 | 当前生产事实 | Phase 27 完成后的合同 |
+| 场景 | 旧生产事实 | Phase 27 当前合同 |
 | --- | --- | --- |
 | 在页面 A 普通确认/撤回 | 部分链路写后 fan-out 多个 read model，并由页面 barrier 等待跨页 target | canonical commit 后只 reconcile A 当前 exact scope；页面 B 不成为 A 的同步依赖 |
-| 从 A 导航到 B，再返回 A | A React tree 已卸载；返回会重新 mount | 每次访问触发 A 正常 query；fresh gate 比较 source/schema/rule versions，只有 mismatch 才 enqueue/rebuild exact scope |
+| 从 A 导航到 B，再返回 A，或浏览器从 back-forward cache 恢复 | 普通路由切换会重新 mount；BFCache 恢复不会重新 mount | mount 或 `pageshow(persisted=true)` 都递增页面 activation generation 并触发正常 query；fresh gate 比较 source/schema/rule versions，只有 mismatch 才 enqueue/rebuild exact scope |
 | 两个独立 browser tab 同时打开 | 前端内存事件不能可靠跨 tab 证明 freshness | B 在 focus/visibility activation 或下一次 query 时走后端 fresh gate；可加提示，但正确性只由后端版本合同保证 |
 | Drawer 规则保存 | 当前部分 Drawer 文案和实现仍是“保存并同步/刷新”并等待 projection | 保存 rule version/signature 后立即完成；当前页面按 query-time 规则或 exact scope reconcile，其他消费者访问时判断语义 mismatch |
 | 导入、reapply、reset、repair | 本来就是可能大批量的 durable/background workflow | 继续作为 `explicit-batch`，3 秒约束 accept/commit，不承诺 3 秒全历史重建；进度、失败、恢复必须可见 |
 
 并非每个页面都有独立 read model，也并非每个 Drawer 保存都需要 rebuild。设置、ETC workflow、导入 session 等页面可以直接读取 canonical/config/job state；read-only Drawer 和 export/preview 不得制造 dirty scope。完整的 17 页面、110 个 API 函数、22 个业务 Drawer、15 个 read model 和旧调用点清单由 `.planning/phases/27-read-model-fan-out/27-COVERAGE-MATRIX.md` 与静态测试维护。
 
-迁移期间要同时区分：
+发布验收时要同时区分：
 
-- 当前态：尚未迁移的 slice 继续使用既有 lifecycle/barrier，以保证生产一致性。
-- 目标态：普通 `fact-write` / `rule-write` 不做跨页 fan-out；目标页面访问时 exact-scope freshness 收敛。
+- 本地实现态：全部已盘点普通 `fact-write` / `rule-write` 不做跨页 fan-out；目标页面访问时 exact-scope freshness 收敛。
+- 生产态：只有 Phase 27 全量门禁、部署和逐页逐操作 production smoke 通过后才能声明已生效；发布前生产仍按线上版本解释。
 - 例外：`read-like-command` 永不 invalidation；`explicit-batch` 保留 durable job；Workbench 保留 active-generation 原子发布。
 
 “重新计算页面数据”不等于每次访问无条件重建。高性能合同是每次访问都做廉价 freshness/version check：版本一致直接读取 fresh projection；只有不一致才重建当前 exact scope。无条件 rebuild 会让已 fresh 页面也承担数据库和 worker 成本，反而更慢。

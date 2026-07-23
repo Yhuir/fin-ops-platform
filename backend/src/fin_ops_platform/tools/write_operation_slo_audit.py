@@ -38,6 +38,7 @@ class OperationExpectation:
     action_names: tuple[str, ...] = ()
     required: bool = True
     event_type: str | None = None
+    forbidden: bool = True
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,7 @@ class OperationExpectationResult:
     reason: str
     action_names: tuple[str, ...]
     required: bool
+    forbidden: bool
     status: str
     sample_count: int
     failed_sample_count: int
@@ -360,7 +362,7 @@ DEFAULT_OPERATION_EXPECTATIONS: tuple[OperationExpectation, ...] = (
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Audit recent real write-operation read model refresh SLO from durable outbox events.",
+        description="Audit ordinary writes for forbidden page fan-out and access-time convergence evidence.",
     )
     parser.add_argument("--json", action="store_true", help="Print JSON output. This is the default output shape.")
     parser.add_argument("--output", type=Path, help="Optional path to write the JSON report.")
@@ -453,7 +455,7 @@ def audit_write_operation_slo(
     failures = [result for result in results if result.status not in {"pass", "skipped"}]
     missing = [result for result in results if result.status == "missing"]
     return {
-        "version": 1,
+        "version": 2,
         "status": "pass" if not failures else "fail",
         "generated_at": datetime.now(UTC).isoformat(),
         "tenant_id": tenant_id,
@@ -539,7 +541,7 @@ def workbench_idempotency_evidence(
     raw_event_ids = row.get("outbox_event_ids")
     if status == "committed" and not isinstance(raw_event_ids, list):
         raise ValueError("committed Workbench idempotency record has invalid outbox_event_ids")
-    event_ids = _exact_event_ids(raw_event_ids) if status == "committed" else []
+    event_ids = _exact_event_ids(raw_event_ids) if status == "committed" and raw_event_ids else []
     response_payload = row.get("response_payload")
     if response_payload is None:
         response_payload = {}
@@ -609,7 +611,7 @@ def recent_read_model_refresh_events_since(
          and d.scope_key = e.scope_key
          and d.source_version = coalesce(e.source_version, 0)
         where e.tenant_id = %s
-          and (e.event_type like '%%.read_model.refresh' or e.event_type = 'import.fact.changed')
+          and e.event_type like '%%.read_model.refresh'
           {time_filter_sql}
           {expectation_filter_sql}
           {event_filter_sql}
@@ -684,7 +686,7 @@ def _recent_read_model_refresh_events(
          and d.scope_key = e.scope_key
          and d.source_version = coalesce(e.source_version, 0)
         where e.tenant_id = %s
-          and (e.event_type like '%%.read_model.refresh' or e.event_type = 'import.fact.changed')
+          and e.event_type like '%%.read_model.refresh'
           and e.created_at >= now() - (%s * interval '1 hour')
         order by e.created_at desc, e.id desc
         limit %s
@@ -731,7 +733,8 @@ def _evaluate_expectation(
             reason=expectation.reason,
             action_names=expectation.action_names,
             required=expectation.required,
-            status="missing" if expectation.required else "skipped",
+            forbidden=expectation.forbidden,
+            status="pass" if expectation.forbidden else "missing" if expectation.required else "skipped",
             sample_count=0,
             failed_sample_count=0,
             p95_enqueue_to_done_ms=None,
@@ -742,7 +745,13 @@ def _evaluate_expectation(
             latest_action_name=None,
             latest_event_status=None,
             latest_dirty_status=None,
-            latest_error="no_recent_required_write_refresh_event" if expectation.required else None,
+            latest_error=(
+                None
+                if expectation.forbidden
+                else "no_recent_required_access_refresh_event"
+                if expectation.required
+                else None
+            ),
         )
     durations = [
         duration
@@ -760,7 +769,10 @@ def _evaluate_expectation(
     p99 = _percentile(durations, 0.99)
     max_duration = max(durations) if durations else None
     latest_error = str(latest.get("event_last_error") or latest.get("dirty_last_error") or "").strip() or None
-    if failed_samples:
+    if expectation.forbidden:
+        status = "fail"
+        latest_error = latest_error or "forbidden_write_time_read_model_fan_out_detected"
+    elif failed_samples:
         status = "fail"
     elif p95 is None:
         status = "fail"
@@ -780,6 +792,7 @@ def _evaluate_expectation(
         reason=expectation.reason,
         action_names=expectation.action_names,
         required=expectation.required,
+        forbidden=expectation.forbidden,
         status=status,
         sample_count=len(samples),
         failed_sample_count=len(failed_samples),

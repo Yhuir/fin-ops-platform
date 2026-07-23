@@ -463,7 +463,6 @@ function installFetchMock(
         batch: payload.batches[4],
         affected_months: ["2026-05"],
         operation_barrier_targets: [],
-        workbench_rebuild_queued: false,
         results: [],
       });
     }
@@ -472,7 +471,6 @@ function installFetchMock(
         batch: payload.batches[0],
         affected_months: ["2026-05"],
         operation_barrier_targets: [],
-        workbench_rebuild_queued: false,
         results: [],
       });
     }
@@ -481,7 +479,6 @@ function installFetchMock(
         batch: payload.batches[2],
         affected_months: ["2026-05"],
         operation_barrier_targets: [],
-        workbench_rebuild_queued: false,
         results: [],
       });
     }
@@ -489,7 +486,6 @@ function installFetchMock(
       return jsonResponse({
         affected_months: ["2026-05"],
         operation_barrier_targets: [],
-        workbench_rebuild_queued: false,
         results: [{ batch_id: "batch-submitted-salary", status: "withdrawn" }],
       });
     }

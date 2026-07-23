@@ -182,7 +182,6 @@ export type BankFlowRuleBatchMutationResult = {
   readModelScopeKeys: string[];
   freshnessTargets: ReadModelOperationBarrierTarget[];
   operationBarrierTargets: ReadModelOperationBarrierTarget[];
-  workbenchRebuildQueued: boolean;
   results: Array<Record<string, unknown>>;
 };
 

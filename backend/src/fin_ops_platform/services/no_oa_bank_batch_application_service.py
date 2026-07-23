@@ -120,8 +120,6 @@ class NoOaBankBatchApplicationService:
         workbench_sql_read_repository: Any | None = None,
         workbench_matching_source_versions_provider: Callable[[], dict[str, object]] | None = None,
         bank_transaction_category_affected_months_provider: Callable[[list[str]], list[str]] | None = None,
-        execute_derived_data_lifecycle_event: Callable[..., Any] | None = None,
-        expand_workbench_read_model_scope_keys_for_base_scopes: Callable[[list[str]], list[str]] | None = None,
         search_cache_clearer: Callable[[], Any] | None = None,
         queue_repository: Any | None = None,
         read_model_refresh_producer: Any | None = None,
@@ -145,10 +143,6 @@ class NoOaBankBatchApplicationService:
         self._workbench_matching_source_versions_provider = workbench_matching_source_versions_provider or (lambda: {})
         self._bank_transaction_category_affected_months_provider = (
             bank_transaction_category_affected_months_provider or (lambda _row_ids: [])
-        )
-        self._execute_derived_data_lifecycle_event = execute_derived_data_lifecycle_event or (lambda *_args, **_kwargs: None)
-        self._expand_workbench_read_model_scope_keys_for_base_scopes = (
-            expand_workbench_read_model_scope_keys_for_base_scopes or (lambda scope_keys: scope_keys)
         )
         self._search_cache_clearer = search_cache_clearer or (lambda: None)
         self._queue_repository = queue_repository
@@ -327,7 +321,6 @@ class NoOaBankBatchApplicationService:
                 batch,
                 status="submitted",
                 persist=persist,
-                read_model_key=self._read_model_key_for_relation_mode(relation_mode),
             )
         except Exception:
             self._restore_snapshots(previous_batch_snapshot, previous_relation_snapshot)
@@ -367,7 +360,6 @@ class NoOaBankBatchApplicationService:
                 batch,
                 status="submitted",
                 persist=True,
-                read_model_key=self._read_model_key_for_relation_mode(relation_mode),
             )
         except Exception:
             self._restore_snapshots(previous_batch_snapshot, previous_relation_snapshot)
@@ -890,8 +882,8 @@ class NoOaBankBatchApplicationService:
         )
         migration_result = self._no_oa_bank_batch_service.last_legacy_migration_result()
         if apply_relation_repairs and migration_result.get("changed"):
-            self.after_mutation(
-                [
+            self.persist_mutation(
+                changed_scope_keys=[
                     str(month)
                     for month in list(migration_result.get("affected_months") or [])
                     if str(month).strip()
@@ -901,7 +893,6 @@ class NoOaBankBatchApplicationService:
                     for case_id in list(migration_result.get("changed_case_ids") or [])
                     if str(case_id).strip()
                 ],
-                persist=True,
             )
         return bank_rows, categories_by_transaction_id
 
@@ -1351,55 +1342,6 @@ class NoOaBankBatchApplicationService:
                     reasons.append(reason)
         return reasons
 
-    def after_mutation(
-        self,
-        affected_months: list[str],
-        *,
-        changed_case_ids: list[str],
-        persist: bool,
-        action_name: str | None = None,
-    ) -> bool:
-        normalized_months = [
-            str(month).strip()
-            for month in list(affected_months or [])
-            if SEARCH_MONTH_RE.match(str(month).strip())
-        ]
-        normalized_action_name = str(action_name or "").strip()
-        if normalized_action_name not in {"no_oa_bank_batch_submit", "no_oa_bank_batch_withdraw"}:
-            event_name = self._mutation_lifecycle_event(action_name)
-            lifecycle_source = self._mutation_lifecycle_source(action_name)
-            self._execute_derived_data_lifecycle_event(
-                event_name,
-                months=normalized_months,
-                metadata={
-                    "source": lifecycle_source,
-                    **(
-                        {"relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE}
-                        if lifecycle_source == BANK_FLOW_RULE_BATCH_RELATION_MODE
-                        else {}
-                    ),
-                    **({"action_name": normalized_action_name} if normalized_action_name else {}),
-                },
-            )
-        if persist:
-            self.persist_mutation(
-                changed_case_ids=changed_case_ids,
-                changed_scope_keys=normalized_months,
-            )
-        return False
-
-    @staticmethod
-    def _mutation_lifecycle_event(action_name: str | None) -> str:
-        if str(action_name or "").strip().startswith("bank_flow_rule_batch"):
-            return "bank_flow_rule_batch_changed"
-        return "no_oa_bank_batch_changed"
-
-    @staticmethod
-    def _mutation_lifecycle_source(action_name: str | None) -> str:
-        if str(action_name or "").strip().startswith("bank_flow_rule_batch"):
-            return BANK_FLOW_RULE_BATCH_RELATION_MODE
-        return NO_OA_BANK_BATCH_RELATION_MODE
-
     def enqueue_background_refresh(
         self,
         scope_keys: list[str],
@@ -1436,6 +1378,11 @@ class NoOaBankBatchApplicationService:
         if self._state_store is None:
             return
         try:
+            normalized_scope_keys = [
+                str(scope_key).strip()
+                for scope_key in changed_scope_keys
+                if SEARCH_MONTH_RE.match(str(scope_key).strip())
+            ]
             save_mutation = getattr(self._state_store, "save_no_oa_bank_batch_mutation", None)
             if not callable(save_mutation):
                 raise RuntimeError("No-OA mutation persistence requires save_no_oa_bank_batch_mutation.")
@@ -1445,7 +1392,7 @@ class NoOaBankBatchApplicationService:
                 else self._pair_relation_snapshot_port.snapshot(),
                 no_oa_bank_batch_snapshot=self._no_oa_public_snapshot(),
                 changed_case_ids=changed_case_ids,
-                changed_scope_keys=changed_scope_keys,
+                changed_scope_keys=normalized_scope_keys,
             )
         except Exception as exc:
             raise NoOaBankBatchPersistenceError(str(exc)) from exc
@@ -1465,29 +1412,15 @@ class NoOaBankBatchApplicationService:
         *,
         status: str,
         persist: bool,
-        read_model_key: str = "no_oa_bank_batch",
     ) -> dict[str, object]:
         relation_case_id = str(batch.get("relation_case_id") or batch.get("batch_id") or "").strip()
         relation = self.pair_relation_snapshot_by_case_id(relation_case_id)
         affected_months = self.affected_months(batch)
-        action_name_by_status = (
-            {
-                "submitted": "bank_flow_rule_batch_submit",
-                "withdrawn": "bank_flow_rule_batch_withdraw",
-            }
-            if read_model_key == BANK_FLOW_RULE_BATCH_RELATION_MODE
-            else {
-                "submitted": "no_oa_bank_batch_submit",
-                "withdrawn": "no_oa_bank_batch_withdraw",
-            }
-        )
-        action_name = action_name_by_status.get(str(status or "").strip())
-        workbench_rebuild_queued = self.after_mutation(
-            affected_months,
-            changed_case_ids=[relation_case_id] if relation_case_id else [],
-            persist=persist,
-            action_name=action_name,
-        )
+        if persist:
+            self.persist_mutation(
+                changed_case_ids=[relation_case_id] if relation_case_id else [],
+                changed_scope_keys=affected_months,
+            )
         return {
             "batch": self.resolve_labels([batch])[0],
             "pair_relation": relation or {},
@@ -1497,7 +1430,6 @@ class NoOaBankBatchApplicationService:
                 targets=[],
                 fallback_scope_key="all",
             ),
-            "workbench_rebuild_queued": workbench_rebuild_queued,
             "results": [{"batch_id": batch.get("batch_id"), "status": status}],
         }
 

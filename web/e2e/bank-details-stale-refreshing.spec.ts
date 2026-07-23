@@ -50,7 +50,21 @@ test.describe("bank details read model freshness browser behavior", () => {
 
   test("retries account schema upgrades without dropping visible balances or bank rows", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
-      bankDetailsAccountReadModelStatuses: ["schema_mismatch", "schema_mismatch", "fresh"],
+      bankDetailsAccountReadModelStatuses: [
+        "schema_mismatch",
+        "schema_mismatch",
+        "schema_mismatch",
+        "schema_mismatch",
+        "schema_mismatch",
+        "schema_mismatch",
+        "schema_mismatch",
+        "schema_mismatch",
+        "schema_mismatch",
+        "schema_mismatch",
+        "schema_mismatch",
+        "schema_mismatch",
+        "fresh",
+      ],
       sessionMode: "full_access",
     });
 
@@ -61,7 +75,7 @@ test.describe("bank details read model freshness browser behavior", () => {
     await expect(page.getByRole("row", { name: /智能工厂设备商/ })).toBeVisible();
     await expect(page.getByText("130,500.50").first()).toBeVisible();
 
-    await expect.poll(() => api.count("GET /api/bank-details/accounts")).toBeGreaterThanOrEqual(3);
+    await expect.poll(() => api.count("GET /api/bank-details/accounts")).toBeGreaterThanOrEqual(13);
     await expect(page.getByText("银行明细结构正在升级，暂时显示当前可用数据。").first()).not.toBeVisible();
     await expect(page.getByRole("row", { name: /智能工厂设备商/ })).toBeVisible();
     await expect(page.getByText("当前时间范围内没有流水。")).not.toBeVisible();

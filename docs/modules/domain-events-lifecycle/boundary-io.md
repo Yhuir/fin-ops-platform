@@ -1,20 +1,20 @@
 # Domain Events 与 Derived Lifecycle 模块边界与 I/O
 
-日期：2026-07-23
+日期：2026-07-22
 
 ## 模块化状态
 
 - 状态：close
 - 当前边界可信度：high
-- 目标边界：领域事件和 derived lifecycle 只为显式 import/reapply/repair/batch 工作输出明确 scopes/jobs；普通写操作不用 lifecycle 做跨页 read-model fan-out。
+- 目标边界：derived lifecycle 只服务管理员设置重置与历史 ETC 修复两个显式维护入口；普通写、导入确认和周期 OA sync 都不借 lifecycle 做跨页 read-model fan-out。
 - 当前缺口：无阻塞缺口；新增 event、domain 或 executor 时仍必须补 scope contract、执行器 wiring 和回归测试。
-- 旧代码删除状态：`import_state_changed` 已成为通用导入持久化后的唯一派生刷新事件；`Application` / runtime worker 中旧手写 import-state downstream fan-out 已移除，`workbench_read_model` executor 和 workbench scope invalidation helper 都不再隐藏刷新 invoice usage collection。无生产调用方的 `etc_oa_submitted` / `etc_oa_revoked` 事件、domain/job mapping 已删除。
+- 旧代码删除状态：`import_state_changed`、`import.fact.changed` worker bridge、普通 bank/category/settings callback 与 OA sync downstream fan-out 已删除。`DERIVED_DATA_EVENTS` 只保留 `etc_business_batch_changed`、`settings_reset_completed`；前者仅由历史 ETC repair 调用且 `include_all=false`，后者仅由管理员 data reset 调用并允许显式 `include_all=true`。
 
 ## 职责边界
 
 ### 负责
 
-- 领域事件类型、显式 batch/import/repair lifecycle 执行与它们声明的 read-model scopes。
+- 两个显式维护事件、执行计划与它们声明的 read-model scopes。
 - 前端 domain event hook/API 的轻量提示和刷新协调。
 
 ### 不负责
@@ -27,8 +27,8 @@
 
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
-| Domain event | business service/write UoW | 事件必须包含足够 scope 信息 |
-| include_all/reset event | settings/data reset/import | 必须显式标记大范围影响 |
+| Historical ETC repair event | 管理维护入口 | 必须提供精确月份，`include_all=false` |
+| Settings reset event | admin-only data reset | 必须显式标记 `include_all=true`，保留权限、审计与进度合同 |
 | Frontend event state | `web/src/features/domainEvents.ts` | 只用于 UI 观察/刷新协调 |
 
 ## 输出 I/O
@@ -37,13 +37,9 @@
 | --- | --- | --- |
 | Dirty scope/outbox | runtime queue | 经 gateway 或等价事务合同 |
 | Derived job | runtime worker/background job | 可观察、可失败恢复 |
-| `import_state_changed` event | import persistence callbacks / runtime import worker | 导入 facts 保存后必须通过该 event fan out 到 workbench、relation、invoice lifecycle、pending invoice、invoice usage collection、bank detail/balance、bank-flow rule batches、cost 和 search；具体 scope 由 per-domain override 表达，禁止在 persist callback 手写逐个 downstream refresh；bank detail 输出必须保留 `import_facts_changed` reason 合同。 |
-| invoice usage collection dirty scope | `input_invoice_usage` / `output_invoice_collection` / `oa_pending_payment` workers | 只能作为显式 derived lifecycle domain 输出；不得挂在 `workbench_read_model` executor 的隐藏副作用里。 |
-| `bank_flow_rule_batch_changed` event | explicit bank-flow repair/import tooling | 不得由 tag-rule save、submit、withdraw 或 reset 调用。若由显式 repair/import 保留，只能输出声明的 bank-flow exact scopes，不得 fan-out Workbench/relation/Cost/Search。 |
-| `bank_transaction_category_changed` event | explicit import/reapply compatibility owner | 普通银行分类/Turnover UoW 只推进 canonical category version，不写 bank-flow 或其它页面 dirty/outbox。消费页在访问时比较该版本。 |
-| `bank_auto_tag_rules_changed` event | explicit reapply/import owner | 规则保存本身不调用该事件；只有用户明确“重新应用规则”或 import 合同可输出有界 exact month scopes，不得因无月份 fallback `all` 污染未访问页面。 |
-| `etc_import_confirmed` event | ETC import worker / application service | 仅在 existing canonical invoice 元数据真实变化时按精确月份、`include_all=false` 输出该显式 import 合同仍声明的 Workbench/relation/matching、invoice lifecycle、tax 和 search；不得直接投递 cost 或 historical repair。Cost 在页面访问时按 Workbench→Cost 两阶段 gate 收敛，不消费 `workbench_shard_published`。 |
-| `etc_business_batch_status_changed` event | ETC manual submitted / draft revoke | 只按 business batch scope 与成员发票日期计算精确月份，输出当前显式合同声明的 Workbench、matching 和 search；不得直投 relation、invoice lifecycle、tax、cost 或 historical repair。Cost 仅在后续访问时收敛。 |
+| `etc_business_batch_changed` event | historical ETC repair | 仅按修复得到的精确月份输出维护计划；普通 ETC import、submit/revoke 不调用。 |
+| `settings_reset_completed` event | admin data reset | reset canonical/state 完成并 reload runtime 后执行显式全域维护；不是普通 settings Drawer 保存路径。 |
+| Import/OA/category/rule facts | 各 canonical owner | 只推进 canonical/source/rule version；消费页面在访问时比较版本并 enqueue 自己的精确 scope，不经过本模块。 |
 | Frontend refresh signal | pages | 不伪装 fresh |
 
 ## 持久化与投影
@@ -65,7 +61,7 @@
 ## 依赖方向
 
 - 允许依赖：module-specific derived lifecycle executors, runtime queue。
-- 必须通过：explicit event/scope contract。
+- 必须通过：`Application._execute_explicit_maintenance_lifecycle(...)` 的显式维护入口与 event/scope contract。
 - 禁止绕过：service 里散落手写 downstream SQL refresh；persist callback 逐个调用 read model producer；一个 domain executor 隐式刷新其它 read model domain；frontend event 直接改业务 state；把 ETC 批次/OA 状态事件冒充发票事实变化。
 
 ## 测试与验证
@@ -78,5 +74,5 @@
 
 ## 当前缺口和删除条件
 
-- 新增 lifecycle event 必须列出影响 read models 和 scope fan-out，并在 app/runtime 两个执行边界都有 executor 或明确 skipped contract。
-- 如果未来再出现手写 import-state fan-out、`workbench_read_model` executor 隐式刷新 invoice usage collection、或 runtime 缺失已声明 domain executor，视为边界回归。
+- 新增 lifecycle event 必须先证明无法由页面访问 freshness 收敛，列出权限、审计、影响 read models 和 scope fan-out，并在 app 执行边界提供 executor 与回归测试。
+- 如果未来再出现 import/OA/category/rule 普通写 fan-out、`import.fact.changed` worker bridge、`after_mutation` callback 或 executor 隐式刷新其它页面，视为边界回归。

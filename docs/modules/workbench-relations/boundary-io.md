@@ -24,7 +24,7 @@ Release A 已移除旧 `read_model.workbench_candidate_matches`、`read_model.wo
 | withdraw command | owner API | active case identity、preview id、expected versions、reason |
 | read request | downstream facade | scope keys、row ids、`require_fresh`、source version contract |
 | batch-accounting read request | `BatchAccountingService` via facade/port | 候选 row ids + 明确年份；使用一个批量账务专用 bundle 返回候选 rows、referenced groups、候选/年度 bulk scope proof 和 `submitted_count`，固定查询次数并保留等价 freshness/status；年度聚合只允许命中 batch-accounting partial expression index，不得改变其他页面通用 reader 行为 |
-| OA canonical snapshot changed | OA integration transactional writer | 只允许在提交 OA canonical snapshot 的同一事务中按精确月份标记 `workbench_relation` dirty/outbox；该 target 必须先于同事务的 `oa_pending_payment` consumer target，使 OA worker 对旧 relation fail-closed。它不写 relation fact，也不改变本模块 owner。 |
+| OA canonical snapshot changed | OA integration transactional writer | 只提交 OA canonical snapshot/source version，零 `workbench_relation`/`oa_pending_payment` dirty/outbox。关系页或消费页访问时按自己的 source dependency 精确收敛；OA projector 直接读 canonical relation，不等待本 read model。 |
 | completed ETC OA marker | `app.oa_applications.normalized_payload.etc_batch_id` + submitted `app.etc_business_batches` | 仅允许精确相等且 OA/batch owner 各自唯一；写入前在关系 UoW 内锁定 external batch identity 并重验 OA 状态、批次状态、数量、金额和 active relation owner。禁止金额、名称、OCR 或模糊匹配。 |
 
 ## 输出 I/O

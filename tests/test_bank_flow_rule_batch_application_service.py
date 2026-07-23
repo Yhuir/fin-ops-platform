@@ -612,7 +612,8 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         self.assertEqual(result["batch"]["status"], "submitted")
         self.assertEqual(result["batch"]["row_ids"], ["bank-row-1", "bank-row-2"])
         self.assertEqual(confirm_calls[0]["relation_mode"], BANK_FLOW_RULE_BATCH_RELATION_MODE)
-        self.assertEqual(mutation_calls[0]["read_model_key"], BANK_FLOW_RULE_BATCH_RELATION_MODE)
+        self.assertTrue(mutation_calls[0]["persist"])
+        self.assertNotIn("read_model_key", mutation_calls[0])
 
     def test_submit_selected_bank_flow_internal_transfer_fails_fast_without_legacy_refresh(self) -> None:
         class ImportService:
@@ -696,7 +697,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
             )
         self.assertEqual(submit_selection_error.exception.error_code, "invalid_bank_flow_rule_batch_relation_mode")
 
-    def test_withdraw_uses_bank_flow_relation_mode_for_shared_mutation_boundary(self) -> None:
+    def test_withdraw_uses_bank_flow_relation_mode_for_relation_command(self) -> None:
         service, _batch_service, _refresh_calls = self._service_with_refresh_aware_batch()
         cancel_calls: list[dict[str, object]] = []
         mutation_calls: list[dict[str, object]] = []
@@ -719,7 +720,8 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(cancel_calls[0]["history_operation_type"], "bank_flow_rule_batch_withdraw")
-        self.assertEqual(mutation_calls[0]["read_model_key"], BANK_FLOW_RULE_BATCH_RELATION_MODE)
+        self.assertTrue(mutation_calls[0]["persist"])
+        self.assertNotIn("read_model_key", mutation_calls[0])
 
     def test_withdraw_falls_back_to_all_scope_refresh_when_batch_is_missing(self) -> None:
         service, batch_service, refresh_calls = self._service_with_refresh_aware_batch(
@@ -830,9 +832,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         )
         service.affected_months = lambda _batch: ["2026-05"]  # type: ignore[method-assign]
         service.refresh_batches = lambda **kwargs: refresh_calls.append(dict(kwargs)) or ([], {})  # type: ignore[method-assign]
-        service.after_mutation = lambda *_args, **_kwargs: True  # type: ignore[method-assign]
-        service._expand_workbench_read_model_scope_keys_for_base_scopes = lambda scope_keys: scope_keys
-
+        service.persist_mutation = lambda **_kwargs: None  # type: ignore[method-assign]
         result = service.reset_submitted_bank_flow_rule_batches(actor="finance-user", reason="重置")
 
         self.assertEqual(result["summary"]["reset_count"], 1)
@@ -877,9 +877,7 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
             {"batch_id": "batch-1", "status": "submitted"}
         ]
         service.affected_months = lambda _batch: ["2026-05"]  # type: ignore[method-assign]
-        service.after_mutation = (  # type: ignore[method-assign]
-            lambda *_args, **kwargs: mutation_calls.append(dict(kwargs)) or True
-        )
+        service.persist_mutation = lambda **kwargs: mutation_calls.append(dict(kwargs))  # type: ignore[method-assign]
 
         service.reset_submitted_bank_flow_rule_batches(actor="finance-user", reason="重置")
 
@@ -897,7 +895,10 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
         )
         service._bank_batch_public_snapshot = lambda: {"batches": {"batch-1": {"batch_id": "batch-1"}}}
 
-        service.persist_mutation(changed_case_ids=["case-1"], changed_scope_keys=["2026-05"])
+        service.persist_mutation(
+            changed_case_ids=["case-1"],
+            changed_scope_keys=["2026-05", "not-a-month"],
+        )
 
         self.assertEqual(len(state_store.bank_flow_mutations), 1)
         mutation = state_store.bank_flow_mutations[0]
@@ -921,102 +922,6 @@ class BankFlowRuleBatchApplicationServiceTests(unittest.TestCase):
 
         with self.assertRaises(BankBatchPersistenceError):
             service.persist_mutation(changed_case_ids=[], changed_scope_keys=["all"])
-
-    def test_after_mutation_skips_legacy_lifecycle_for_online_submit(self) -> None:
-        lifecycle_events: list[dict[str, object]] = []
-        persist_calls: list[dict[str, object]] = []
-        service = object.__new__(BankFlowRuleBatchApplicationService)
-        service._execute_derived_data_lifecycle_event = (  # type: ignore[method-assign]
-            lambda event_type, **kwargs: lifecycle_events.append({"event_type": event_type, **kwargs})
-        )
-        service._expand_workbench_read_model_scope_keys_for_base_scopes = (  # type: ignore[method-assign]
-            lambda scope_keys: [f"expanded:{scope_key}" for scope_key in scope_keys]
-        )
-        service.persist_mutation = (  # type: ignore[method-assign]
-            lambda **kwargs: persist_calls.append(dict(kwargs))
-        )
-
-        changed = service.after_mutation(
-            ["2026-05", "not-a-month"],
-            changed_case_ids=["case-1"],
-            persist=True,
-            action_name="bank_flow_rule_batch_submit",
-        )
-
-        self.assertFalse(changed)
-        self.assertEqual(lifecycle_events, [])
-        self.assertEqual(
-            persist_calls,
-            [
-                {
-                    "changed_case_ids": ["case-1"],
-                    "changed_scope_keys": ["2026-05"],
-                    "changed_batch_ids": None,
-                }
-            ],
-        )
-
-    def test_after_mutation_keeps_lifecycle_for_explicit_non_online_repair(self) -> None:
-        lifecycle_events: list[dict[str, object]] = []
-        persist_calls: list[dict[str, object]] = []
-        service = object.__new__(BankFlowRuleBatchApplicationService)
-        service._execute_derived_data_lifecycle_event = (  # type: ignore[method-assign]
-            lambda event_type, **kwargs: lifecycle_events.append({"event_type": event_type, **kwargs})
-        )
-        service.persist_mutation = (  # type: ignore[method-assign]
-            lambda **kwargs: persist_calls.append(dict(kwargs))
-        )
-
-        changed = service.after_mutation(
-            ["2026-05", "not-a-month"],
-            changed_case_ids=[],
-            persist=False,
-            action_name="bank_flow_rule_batch_tag_rules_changed",
-        )
-
-        self.assertFalse(changed)
-        self.assertEqual(
-            lifecycle_events,
-            [
-                {
-                    "event_type": "bank_flow_rule_batch_changed",
-                    "months": ["2026-05"],
-                    "metadata": {
-                        "source": BANK_FLOW_RULE_BATCH_RELATION_MODE,
-                        "relation_mode": BANK_FLOW_RULE_BATCH_RELATION_MODE,
-                        "action_name": "bank_flow_rule_batch_tag_rules_changed",
-                    },
-                }
-            ],
-        )
-        self.assertEqual(persist_calls, [])
-
-    def test_after_mutation_does_not_expand_workbench_scope_keys(self) -> None:
-        service = object.__new__(BankFlowRuleBatchApplicationService)
-        persist_calls: list[dict[str, object]] = []
-        service._execute_derived_data_lifecycle_event = lambda *_args, **_kwargs: None  # type: ignore[method-assign]
-        service._expand_workbench_read_model_scope_keys_for_base_scopes = (  # type: ignore[method-assign]
-            lambda _scope_keys: (_ for _ in ()).throw(AssertionError("bank-flow mutation must not list workbench scopes"))
-        )
-        service.persist_mutation = lambda **kwargs: persist_calls.append(dict(kwargs))  # type: ignore[method-assign]
-
-        service.after_mutation(
-            ["2026-05"],
-            changed_case_ids=["case-1"],
-            persist=True,
-            action_name="bank_flow_rule_batch_submit",
-        )
-
-        self.assertEqual(
-            persist_calls,
-            [
-                {
-                    "changed_case_ids": ["case-1"],
-                    "changed_scope_keys": ["2026-05"],
-                    "changed_batch_ids": None,
-                }
-            ],
-        )
 
     def test_pair_relation_snapshot_by_case_id_uses_scoped_snapshot(self) -> None:
         pair_service = RecordingPairSnapshotPort()

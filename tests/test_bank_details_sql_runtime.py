@@ -1766,7 +1766,7 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         self.assertEqual(persisted["affected_months"], ["2026-04"])
         self.assertEqual(writer_calls[0]["mutation_type"], "manual_assign")
         self.assertEqual(writer_calls[0]["record"]["category_code"], "salary")
-        self.assertFalse(writer_calls[0]["enqueue_refreshes"])
+        self.assertNotIn("enqueue_refreshes", writer_calls[0])
         self.assertEqual(queue.enqueued, [])
         self.assertEqual(len(audit_records), 1)
 

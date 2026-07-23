@@ -292,7 +292,7 @@ class WriteOperationScenarioDiscoveryTests(unittest.TestCase):
         )
         self.assertEqual(policy_by_page["bank-flow-rule-batches"]["apply_policy"], "standing_apply")
         self.assertNotIn("no-oa-bank-batches", policy_by_page)
-        self.assertEqual(policy_by_page["bank-details"]["apply_policy"], "fanout_evidence")
+        self.assertEqual(policy_by_page["bank-details"]["apply_policy"], "access_convergence_evidence")
         self.assertEqual(
             policy_by_page["bank-details"]["scenario_operations"],
             [

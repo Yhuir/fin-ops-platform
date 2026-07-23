@@ -23,10 +23,10 @@
 | `PENDING-E2E-006` | 导出失败或超限 | 后端 row-limit / non-fresh / 下载错误必须显示结构化错误；不能显示下载成功。 |
 | `PENDING-E2E-007` | 选择已有发票 | 多选 eligible 支出流水、打开候选抽屉、显示候选流水关联 chip、preview 汇总差额和冲突原因、confirm 后刷新 rows；confirm 暂时失败时必须显示错误、保留 drawer/preview/选择、允许重试且 rows 不半写；重复点击和不可确认状态不能半写。 |
 | `PENDING-E2E-008` | 收入批量标记 | 收入方向可多选，批量标记无需开票/现金收入必须整批校验、一次写入、刷新 rows；confirm 暂时失败时必须显示错误、保留选择、允许重试且 rows 不半写；不允许逐行半成功。 |
-| `PENDING-E2E-009` | 规则保存 | 支出/收入规则版本独立；保存后显示等待 read model 同步并重读 rows；保存暂时失败时必须显示规则抽屉内错误、保留草稿、允许重试、不触发 barrier/rows 刷新，且不能留下不可点击的全局阻塞错误层；barrier timeout 不能误报保存失败。 |
+| `PENDING-E2E-009` | 规则保存 | 支出/收入规则版本独立；保存命令不等待或投递页面重建，成功后重跑当前 rows normal GET，由 fresh gate 按需收敛；保存暂时失败时必须显示规则抽屉内错误、保留草稿、允许重试、不触发 rows 刷新，且不能留下不可点击的全局阻塞错误层。 |
 
 ## Read Model / Worker 合同
 
 - Browser mock 必须显式表达 `fresh`、`refreshing`、`stale` 或错误态；不能把所有路径默认 mock 为永远 fresh。
-- 后端/API 测试必须覆盖 dirty scope、outbox enqueue、lifecycle fan-out、worker refresh 和 stale/source mismatch。
+- 后端/API 测试必须覆盖普通写零 dirty/outbox、访问时 exact-scope enqueue/dedupe、worker refresh 和 stale/source mismatch。
 - 本地 Browser E2E 可用 deterministic mock 证明页面行为；真实 PostgreSQL/RabbitMQ/Redis/systemd worker drain 仍需 staging 或运维 smoke。

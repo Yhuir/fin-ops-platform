@@ -1342,17 +1342,11 @@ class BatchAccountingApiTests(unittest.TestCase):
         def fail_persist(*_args, **_kwargs):
             raise AssertionError("batch accounting route must not call legacy pair relation persist")
 
-        def fail_lifecycle(*_args, **_kwargs):
-            raise AssertionError("batch accounting route must not call duplicate lifecycle fan-out")
-
         def fail_workbench_persist(*_args, **_kwargs):
             raise AssertionError("batch accounting route must not call legacy workbench read model persist")
 
         app._schedule_workbench_pair_relation_persist = fail_persist
-        with (
-            patch.object(app, "_execute_derived_data_lifecycle_event", side_effect=fail_lifecycle),
-            patch.object(app, "_schedule_workbench_read_model_persist", side_effect=fail_workbench_persist),
-        ):
+        with patch.object(app, "_schedule_workbench_read_model_persist", side_effect=fail_workbench_persist):
             response = app.handle_request(
                 "POST",
                 "/api/batch-accounting/submit",
@@ -1370,6 +1364,7 @@ class BatchAccountingApiTests(unittest.TestCase):
         payload = json.loads(response.body)
         self.assertEqual(payload["affected_scope_keys"], ["2026-01"])
         self.assertEqual(payload["affected_months"], ["2026-01"])
+        self.assertFalse(hasattr(app, "_execute_derived_data_lifecycle_event"))
 
     def test_submit_creates_batch_accounting_relation_with_current_invoice_rows(self) -> None:
         app, _payload_patcher = self._app_with_grouped_payload()

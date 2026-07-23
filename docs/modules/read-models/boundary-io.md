@@ -1,6 +1,6 @@
 # Read Model 模块边界与 I/O
 
-日期：2026-07-23
+日期：2026-07-22
 
 ## 模块化状态
 
@@ -41,7 +41,7 @@
 | Scope key | manifest/scope policy | 必须符合注册 scope policy |
 | Query freshness request | API/read facade | 必须返回 fresh/stale/refreshing 或等价状态。共享 `ReadModelQueryGateway` 必须先调用当前 repository view，或调用方显式提供的轻量 `load_freshness_view`，完成 durable dirty + canonical dependency proof；只有该次请求明确 fresh 才可读取 Redis，cache hit 不能替代当前 freshness proof。轻量 proof 只能来自同一 owner 已完成的 PostgreSQL gate；cache miss 后必须再加载完整 view 并复核，不能由前端/内存猜测。`cost_statistics` 与 `oa_pending_payment` 复用各自已有 gate；`tax_offset` 复用已经进入 cache key 的当前 statistics generation token（该 token 聚合 projection、dirty 与 outbox）。竞态返回 `202`，不写其它页面 cache 或失效目标 |
 | Write response target envelope | 页面写 API/service | 普通 canonical write 至少返回业务 receipt/identity 和可确定的 `affected_scope_keys` / `read_model_scope_keys`，但不为未访问页面制造 `freshness_targets` / `operation_barrier_targets`。只有显式 import/reapply/batch 或当前页面必须阻塞验证的 exact target 才返回 barrier；缺少/未知前端 read model status 必须保持非 fresh |
-| Transactional refresh targets | 显式 import/reapply/repair/integration-snapshot writer | 只有定义了业务事务内刷新合同的显式 import/reapply/repair 或 OA 权威 integration snapshot 可直接写 dirty scope/outbox，并必须使用等价 scope contract。Workbench relation、bank-flow/no-OA/batch-accounting/turnover，以及 pending/input/OA pending/output invoice-family 的普通命令与可写 Drawer 均为零 target，不得恢复 `refresh_metadata.downstream_scope_types`、UoW target planner、service callback 或 repository 隐式 scope 扫描。 |
+| Transactional refresh targets | 显式 reapply/repair writer | 只有仍登记为显式重建的 maintenance/reapply/repair 事务可直接写 dirty scope/outbox，并必须使用等价 scope contract。普通 import confirm、OA 权威 snapshot、Workbench relation、bank-flow/no-OA/batch-accounting/turnover，以及 pending/input/OA pending/output invoice-family 的命令与可写 Drawer 均为零 target，不得恢复 `refresh_metadata.downstream_scope_types`、UoW target planner、service callback 或 repository 隐式 scope 扫描。 |
 | Projection source versions | Worker/projection/upstream read model | 必须包含 own projection schema version 和依赖 source_versions；行为变更必须 bump version。runtime event 的 dirty `source_version` 是发布竞态令牌，不得混入业务 projection `source_versions`：`cost_statistics` 必须用它在 repository 内锁定唯一 active dirty row 并精确比较；内容变化走条件发布，内容未变走 cost-only unchanged CAS 推进同一 `published_source_version`，然后再用同一版本条件完成 |
 | Invoice lifecycle upstream rows | `InvoiceLifecycleReadModelRepositoryPort` / `pending_invoice` | 只读 exact `expense:all:YYYY-MM` 与 `income:all:YYYY-MM` fresh shards；dirty/missing 在 rows I/O 前 fail closed，fresh 才按 `scope_month + direction` 读取 payload。dependency-not-fresh 恢复必须补投这两个合法月方向 scope，禁止投递 `pending_invoice:YYYY-MM` 裸月份。禁止回流 canonical pending-invoice builder、HTTP 或 live fallback |
 | Query-time read model filters | 页面 query service / settings owner | 只允许在 fresh payload 之后做不会改变 projection source fact 的过滤，例如成本统计标签规则；这类 filter 必须进入 query cache key，但不得写 dirty scope/outbox 或伪装成 read model source version |
@@ -53,7 +53,7 @@
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
 | Dirty scope/outbox event | PostgreSQL durable queue | `job.outbox_events` 与 `job.read_model_dirty_scopes` 是事实源 |
-| OA sync change-cause fan-out | OA snapshot repository / `OAProjectionSyncService` | 权威 complete snapshot repository 只在 integration canonical 事务内写 OA 私有精确月份 refresh，并分别返回 `oa_pending_payment_changed_scopes` 与 `completed_projection_changed_scopes`。页面 `record_paid_statuses` 增量 reconcile 不写 outbox；admission/payment-status-only 变化不得进入 shared fan-out；completed canonical 真实变化才由 sync service 交给既有 shared owner。禁止 repository hidden Workbench fan-out、把页面写回当 snapshot refresh，或混合 `affected scopes` |
+| OA sync canonical commit | OA snapshot repository / `OAProjectionSyncService` | 权威 complete snapshot repository 在一个 PostgreSQL 事务内只提交 completed/admission/payment-status/watermark canonical facts，并返回 change summaries；不写任何页面 dirty/outbox。周期 sync service 不再拥有 shared downstream producer、matching invalidator 或页面 refresh gateway。OA 与其它消费页都在访问时比较 canonical source vector并只 enqueue 自身精确 scope。 |
 | Fresh payload | 页面 API/Redis | Redis 只能缓存 fresh gate 后 payload；每次读取 cache 前仍要完成当前 SQL/source-version proof。版本化 key 必须让当前 gate 能机械拒绝旧版本，不能要求 writer 广播无边界 cache invalidation |
 | Readiness/status | app status/operation barrier | 页面不能伪装 fresh。App Status dashboard 保留全局 snapshot；高频 operation barrier 必须把请求中的 registry target 传入 `PostgresStateStore.operation_barrier_runtime_snapshot(...)`，只查询这些 read model 的 exact/`all` readiness、dirty、current-effective outbox 与相关 worker 状态。target-scoped outbox 查询通过 migration `0114` 的规范 scope 索引，对每个 exact/`all` scope 执行 `LATERAL ... ORDER BY created_at DESC, id DESC LIMIT 1`，再用较新的 readiness/active dirty 判定是否已覆盖；禁止在每次轮询中对同 scope 全量历史事件逐行执行相关子查询。全局 App Status 仍保留完整历史诊断。缺少该 target-scoped provider 时 fail closed，禁止回退全局 App Status 聚合或另建缓存事实源 |
 | Parent readiness role | manifest / app status | `fan_out_command` 的 command-only `all` parent 不写 current readiness；旧记录只作 diagnostics。真实 month shard、`queryable_parent_aggregate`、`queryable_all_scope` 和 Workbench active generation 继续作为 current proof。当前 parent command 失败仍由 dirty/outbox 阻断，不能因旧 fresh readiness 被覆盖。 |
@@ -85,7 +85,7 @@
 | --- | --- |
 | Gateway/manifest | `read_model_query_gateway.py`、`read_model_refresh_gateway.py`、`read_model_manifest.py` |
 | Scope/freshness | `read_model_scope_policy.py`、`read_model_scope_contract.py`、`read_model_freshness.py`、`operation_freshness_barrier.py`、`runtime_monitoring.py` 的 target-scoped barrier snapshot |
-| Write target envelope | `read_model_write_targets.py` 只保留仍有明确 production owner 的显式 batch/import/reapply/repair/integration 路径。pending/input/OA pending/output invoice-family 普通 command 可以返回信息性 affected/read-model scope hints，但 freshness/barrier targets 必须为空；pending invoice import 的显式 processing fan-out 仍使用 `pending_invoice_scope_planner.py`，不得与普通规则/关联写混用 |
+| Write target envelope | `read_model_write_targets.py` 只保留信息性 scope envelope 与仍有明确 production owner 的显式 maintenance/reapply/repair 路径。import、pending/input/OA pending/output invoice-family 普通 command 可以返回 affected scope hints，但 freshness/barrier targets 必须为空；已删除的 `pending_invoice_scope_planner.py` 不得恢复。 |
 | Repository | `postgres_repositories/read_models.py`、`postgres_repositories/read_model_scope_contracts.py` |
 | Worker | `runtime_worker_registry.py`、`runtime_worker.py`、`runtime_worker_handlers.py`；单一 `workbench` lane 同时处理月份 shard 与 `all` fan-out command，`all` 不发布 generation |
 | Frontend | `web/src/features/operationBarrier/api.ts` |
@@ -114,7 +114,7 @@
 - Projection 行为、索引、跨 scope 分发或上游依赖合同变化时必须 bump projection schema version；禁止只改 SQL/service 逻辑却复用旧 `source_versions`。
 - Readiness reporter 与 App Status current-effective 聚合必须通过 `read_model_manifest.is_command_only_read_model_scope(...)` 使用同一 scope-role 合同；禁止页面、worker 或运维脚本另写 OA/bank 等 read model 特例。
 - Operation barrier 只保留给显式 import/reapply/batch/repair 或当前页必须阻塞验证的 exact target，只能读取调用方明确提交的 scopes 并复用 App Status 折叠语义。普通 relation/bank-flow/no-OA/batch-accounting/turnover 页面不得轮询 barrier 或全局 `app_status_runtime_snapshot()`。
-- 显式事务 writer 若直接写 dirty scope/outbox，必须有等价 scope contract 测试。Workbench confirm/withdraw 不能恢复 repository hidden fan-out、UoW target planner 或 downstream discovery。
+- 显式 maintenance/reapply/repair 事务 writer 若直接写 dirty scope/outbox，必须有等价 scope contract 测试。普通 import/OA sync/Workbench confirm/withdraw 不能恢复 repository hidden fan-out、UoW target planner 或 downstream discovery。
 - `pending_invoice` 的 `filter=all` freshness dependency 月份必须来自 canonical `app.bank_transactions`，父 scope refresh_status 必须上卷子月份 dirty scope，防止新导入事实源已增加但页面仍显示旧 rows 且标记 fresh。
 - `workbench_relation` 的 `rows` 索引是 scope 内唯一，不是 row 全局唯一；跨月 relation 必须在每个受影响 scope 写入所有成员 row 索引，禁止恢复旧的 `(tenant_id, row_id)` 覆盖模型。
 - `workbench_relation` 操作级局部投影必须通过 `WorkbenchRelationReadModelRepositoryPort.save_workbench_relation_distribution_rows(...)` 进入 repository；service/projection 不得直接写 SQL。relation-only delta 的版本输入必须先通过 `workbench_relation_delta_source_versions(...)` 在一个 bounded canonical/read-model snapshot 中读取既有 scope proof并只推进受影响 relation version；scope 缺失或 schema 不匹配必须显式 full rebuild。repository 必须按受影响 row overlap 删除旧 groups、删除/写回受影响 rows、同步 scope source_versions 并重算 row/group count。

@@ -3,6 +3,7 @@ import { expect, test, type Locator, type Page, type TestInfo } from "./fixtures
 
 import { installDeterministicApiMocks } from "./fixtures/apiMocks";
 import { createOperationLatencyRecorder, type OperationLatencyRecorder } from "./fixtures/operationLatency";
+import { expectNoUnexpectedSuccessUiErrors } from "./fixtures/successAssertions";
 
 type CostExplorerBrowserPayload = {
   read_model_scope_key?: string;
@@ -138,6 +139,48 @@ async function expectVerticalScroll(locator: Locator, label: string) {
 }
 
 test.describe("cost statistics browser flow", () => {
+  test("saves tag rules without a write-time barrier and reloads the visible cost view", async ({ page }, testInfo) => {
+    const api = await installDeterministicApiMocks(page, {
+      sessionMode: "full_access",
+    });
+    const recordLatency = createCostStatisticsLatencyRecorder(page, testInfo);
+
+    await page.goto("/cost-statistics");
+    await expect(page.getByRole("heading", { name: "成本统计" })).toBeVisible();
+    await expect(page.getByRole("grid", { name: "按时间统计表" })).toBeVisible();
+
+    const drawer = page.getByRole("dialog", { name: "成本统计标签规则" });
+    await recordLatency({
+      operationId: "cost-statistics.open-tag-rules-drawer",
+      visibleLabel: "成本统计标签规则",
+      actionType: "click",
+    }, async (mark) => {
+      await page.getByRole("button", { name: "成本统计标签规则" }).click();
+      await mark("firstVisibleResponseLatencyMs", expect(drawer).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(drawer.getByRole("button", { name: "保存" })).toBeEnabled());
+    });
+
+    const saveResponsePromise = page.waitForResponse((response) =>
+      response.request().method() === "PUT"
+      && requestPath(response.url()).endsWith("/api/cost-statistics/tag-rules"));
+    const explorerResponsePromise = waitForCostStatisticsExplorer(page);
+    await recordLatency({
+      operationId: "cost-statistics.save-tag-rules",
+      visibleLabel: "保存成本统计标签规则",
+      actionType: "click",
+    }, async (mark) => {
+      await drawer.getByRole("button", { name: "保存" }).click();
+      await mark("apiLatencyMs", saveResponsePromise);
+      await mark("firstVisibleResponseLatencyMs", expect(drawer).toBeHidden());
+      await mark("finalSettledLatencyMs", explorerResponsePromise);
+    });
+
+    expect(api.count("PUT /api/cost-statistics/tag-rules")).toBe(1);
+    expect(api.count("GET /api/operation-barrier/status")).toBe(0);
+    await expect(page.getByRole("grid", { name: "按时间统计表" })).toBeVisible();
+    await expectNoUnexpectedSuccessUiErrors(page);
+  });
+
   test("recovers explorer after a transient load failure when refreshed", async ({ page }) => {
     const api = await installDeterministicApiMocks(page, {
       costStatisticsExplorerFailuresBeforeSuccess: 2,

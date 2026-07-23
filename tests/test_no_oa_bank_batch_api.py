@@ -554,7 +554,7 @@ class NoOaBankBatchApiTests(unittest.TestCase):
                 payload["operation_barrier_targets"],
                 [],
             )
-            self.assertFalse(payload["workbench_rebuild_queued"])
+            self.assertNotIn("workbench_rebuild_queued", payload)
             self.assertEqual(payload["results"][0]["status"], "submitted")
             self.assertEqual(app._state_store.load_no_oa_bank_batches()["batches"][batch["batch_id"]]["status"], "submitted")
             pair_relations = app._state_store.load().get("workbench_pair_relations", {}).get("pair_relations", {})
@@ -664,7 +664,7 @@ class NoOaBankBatchApiTests(unittest.TestCase):
         self.assertEqual(payload["pair_relation"]["row_ids"], ["bank-202603-fee-1"])
         self.assertEqual(payload["affected_months"], ["2026-03"])
         self.assertEqual(payload["freshness_targets"], [])
-        self.assertFalse(payload["workbench_rebuild_queued"])
+        self.assertNotIn("workbench_rebuild_queued", payload)
 
     def test_withdraw_cancels_pair_relation_and_persists_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

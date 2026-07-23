@@ -13,8 +13,6 @@ from fin_ops_platform.services.postgres_connection import PostgresConnection, Po
 from fin_ops_platform.services.postgres_repositories.bank_transaction_category import (
     PostgresBankTransactionCategoryRepository,
 )
-from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
-from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
 
 
 REPAIR_ACTION = "repair_unknown_manual_bank_transaction_category"
@@ -87,12 +85,9 @@ def _apply_repair(
     operator: str,
     expected_candidate_count: int,
 ) -> dict[str, object]:
-    queue_repository = RuntimeQueueRepository(connection)
     writer = BankTransactionCategoryMutationWriter(
         connection=connection,
         repository=repository,
-        queue_repository=queue_repository,
-        workbench_matching_repository=PostgresReadModelRepository(connection),
     )
     with connection.transaction() as transaction:
         inspection = repository.inspect_unknown_manual_clear_candidates(reader=transaction)

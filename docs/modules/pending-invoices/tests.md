@@ -2,12 +2,12 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
-## 2026-07-02 - import/runtime pending invoice scope planner
+## 2026-07-22 - Phase 27 访问时收敛
 
-- 变更类型：跨模块 read model scope fan-out 收口。
-- 新增/更新测试：`tests/test_import_processing_service.py::test_import_write_target_envelope_uses_bank_detail_months_for_pending_invoice`。
-- 覆盖点：导入确认与 runtime derived lifecycle 统一使用 `pending_invoice_scope_planner`，从 cost/bank_detail 月份 scope 生成 pending_invoice expense/income/cash_income scope；无月份时只返回父 scope，不写 bare `all`。
-- 验证命令：见本轮最终说明。
+- 变更类型：删除 import/runtime 写后 pending-invoice scope fan-out。
+- 新增/更新测试：write-operation impact/SLO、pending-invoice API/read-model、import processing 与 architecture guards。
+- 覆盖点：规则、关联、income status 与 import confirm 只提交 facts/version/hints，targets 为空；当前页面 GET 只 enqueue 当前精确 direction/month scope。`pending_invoice_scope_planner.py` 已删除并由静态 guard 防回归。
+- 验证命令：见 Phase 27 verification。
 
 ## 2026-07-05 - pending invoice boundary close
 

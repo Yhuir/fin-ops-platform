@@ -94,7 +94,7 @@
 - Shared facts: `app.invoices` 仍由 canonical invoice pool owner 管理；ETC 只能通过受控 existing-link/promotion port 关联，不创建第二发票池。
 - Allowed writes: ETC import preview/confirm/job、ETC import processing service、受控 batch invoice link adapter。
 - Allowed reads: ETC import/query ports、canonical invoice existing-link ports。
-- Downstream outputs: ETC tickets、workbench、workbench_relation、tax/cost/search read model dirty scopes 或 owner producer 输出。
+- Downstream outputs: ETC tickets canonical facts，以及 workbench、workbench_relation、tax/cost/search 可比较的 source-version 变化；各页面访问 gateway 自行创建精确 dirty scope。
 - Forbidden paths: `app.etc_invoices` 不得被当作 canonical invoice pool；ETC metadata 不得绕过 invoice owner 直接写 `app.invoices`。
 - Old code deletion: 旧 ETC 导入 fallback、pickle/import snapshot 写事实路径、runtime canonical cleanup surface 已删除；historical repair / invoice-pool cleanup 工具保留不算页面/API closure 阻断。
 

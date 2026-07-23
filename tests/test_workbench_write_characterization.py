@@ -1036,14 +1036,8 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
     def test_withdraw_link_enqueues_zero_derived_lifecycle_events(self) -> None:
         app = self._build_app()
         row_ids = self._default_open_row_ids(app)
-        lifecycle_calls: list[dict[str, object]] = []
-
-        def record_lifecycle_event(event: str, **kwargs: object) -> dict[str, object]:
-            lifecycle_calls.append({"event": event, **kwargs})
-            return {}
 
         with (
-            patch.object(app, "_execute_derived_data_lifecycle_event", side_effect=record_lifecycle_event),
             patch.object(app, "_schedule_workbench_pair_relation_persist"),
             patch.object(app, "_schedule_workbench_read_model_persist"),
         ):
@@ -1052,7 +1046,6 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
                 "/api/workbench/actions/confirm-link",
                 {"month": "2026-03", "row_ids": row_ids, "case_id": "CASE-WITHDRAW-SCOPE"},
             )
-            lifecycle_calls.clear()
             withdraw_response = self._post(
                 app,
                 "/api/workbench/actions/withdraw-link",
@@ -1061,19 +1054,13 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
 
         self.assertEqual(confirm_response.status_code, 200, confirm_response.body)
         self.assertEqual(withdraw_response.status_code, 200, withdraw_response.body)
-        self.assertEqual(lifecycle_calls, [])
+        self.assertFalse(hasattr(app, "_execute_derived_data_lifecycle_event"))
 
     def test_confirm_link_enqueues_zero_derived_lifecycle_events(self) -> None:
         app = self._build_app()
         row_ids = self._default_open_row_ids(app)
-        lifecycle_calls: list[dict[str, object]] = []
-
-        def record_lifecycle_event(event: str, **kwargs: object) -> dict[str, object]:
-            lifecycle_calls.append({"event": event, **kwargs})
-            return {}
 
         with (
-            patch.object(app, "_execute_derived_data_lifecycle_event", side_effect=record_lifecycle_event),
             patch.object(app, "_schedule_workbench_pair_relation_persist"),
             patch.object(app, "_schedule_workbench_read_model_persist"),
         ):
@@ -1084,7 +1071,7 @@ class WorkbenchWriteCharacterizationTests(unittest.TestCase):
             )
 
         self.assertEqual(confirm_response.status_code, 200, confirm_response.body)
-        self.assertEqual(lifecycle_calls, [])
+        self.assertFalse(hasattr(app, "_execute_derived_data_lifecycle_event"))
 
     def test_workbench_write_facade_has_no_legacy_relation_fanout_helpers(self) -> None:
         self.assertFalse(hasattr(WorkbenchWriteFacade, "_relation_pending_invoice_scope_keys"))

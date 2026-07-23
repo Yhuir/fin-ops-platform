@@ -104,7 +104,7 @@ class OAManualImportApiTests(unittest.TestCase):
         app = self._build_app_with_service(adapter=RecordingOAAdapter([oa_record("oa-exp-1981", month="2025-12", invoices=[])]))
 
         with (
-            patch.object(app, "_invalidate_workbench_read_model_scopes") as invalidate,
+            patch.object(app, "_refresh_workbench_read_model_scopes_for_maintenance") as invalidate,
             patch.object(app._search_service, "clear_cache") as clear_cache,
         ):
             response = app.handle_request(
@@ -158,7 +158,7 @@ class OAManualImportApiTests(unittest.TestCase):
 
         list_response = app.handle_request("GET", "/api/workbench/settings/oa/manual-imports")
         with (
-            patch.object(app, "_invalidate_workbench_read_model_scopes") as invalidate,
+            patch.object(app, "_refresh_workbench_read_model_scopes_for_maintenance") as invalidate,
             patch.object(app._search_service, "clear_cache") as clear_cache,
         ):
             delete_response = app.handle_request(

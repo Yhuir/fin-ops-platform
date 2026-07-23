@@ -23,7 +23,7 @@
 - `files_configured -> previewing -> preview_ready`：文件上传成功，后端能识别模板或保留文件级错误。
 - `preview_ready -> preview_stale`：确认前 audit 检测到底层事实变化。
 - `preview_ready -> queued`：至少一个 selected file 可确认，API 创建 idempotent background job。
-- `queued -> processing -> confirmed`：import worker 或 inline job 确认 selected files，持久化 import facts，并触发 Workbench matching / read model fan-out。
+- `queued -> processing -> confirmed`：import worker 或 inline job 确认 selected files，持久化 import facts 与必要 Workbench matching 领域任务；不触发页面 read model fan-out，消费者访问时按 source version 收敛。
 - `failed -> files_configured/previewing`：用户重试 session files 或重新预览。
 
 ### 禁止流转
@@ -64,22 +64,22 @@
 | `processing` | import worker 执行 `file_import.confirm` processor。 | 不阻塞页面离开；不能重放旧 confirm。 |
 | `succeeded` | selected files 已确认，结果 summary 写入 job。 | 下游 read model 可能仍在 refreshing。 |
 | `failed` | import job 或 background job 失败。 | 暴露错误，允许 retry 或重新预览。 |
-| `refreshing/stale` | 银行明细、账户余额、Workbench、Workbench relation、matching、invoice lifecycle、cost/search 等下游 dirty。 | 导入页不伪装这些页面 fresh；由下游页面和 App Status 展示。 |
-| `fresh` | 下游 worker 完成对应 scope refresh。 | 由银行明细/关联台/成本统计等页面读取。 |
+| `refreshing/stale` | 后续访问的消费页发现 canonical source version mismatch，并为自己的精确 scope 入队。 | 导入页不伪装这些页面 fresh；由被访问页面和 App Status 展示。 |
+| `fresh` | 被访问页面的 worker 完成对应 scope refresh。 | 由银行明细/关联台/成本统计等消费页读取。 |
 
-Refresh / fan-out 来源：
+访问时 refresh 来源：
 
 - `/imports/files/confirm` inline 或 worker confirm selected files。
 - `ImportProcessingService.execute_file_import_confirm_job(...)` enqueue Workbench auto matching。
-- `ImportProcessingService` 先输出所选 session/batch 的精确 persistence delta，再通过 `import_state_changed` lifecycle 触发受影响 Workbench、银行明细、成本统计等 refresh。
-- `DerivedDataLifecycleService` 的 `bank_import_confirmed` 映射到 `bank_account_balance`、`bank_detail`、`workbench`、`workbench_relation`、`workbench_matching`、`invoice_lifecycle`、`cost_statistics`、`search`。
+- `ImportProcessingService` 输出所选 session/batch 的精确 persistence delta、source version 与空页面 targets；不调用 derived lifecycle。
+- 银行明细、账户余额、Workbench、成本统计等页面在进入/重新可见时，由各自 query owner 比较 canonical source proof 并只刷新当前精确 scope。
 
 失败恢复：
 
 1. 查看 background job / import job 的 `status`、`stage`、`last_error` 和 `result_summary`。
 2. 如果是 `preview_stale`，重新预览，不复用旧 session confirm。
 3. 如果是 worker/queue 失败，确认 `import` worker、`import.process.requested` event、RabbitMQ/Redis/Postgres queue 状态。
-4. 如果导入确认已成功但下游页面 stale，检查对应 read model dirty scope 和 worker readiness。
+4. 如果导入确认已成功但消费页 stale，先实际访问该页，再检查该页 query gateway 创建的精确 dirty scope 和 worker readiness。
 5. 禁止通过前端本地状态手动标记下游页面 fresh。
 
 ## 变更记录

@@ -33,7 +33,6 @@ SessionResolver = Callable[[dict[str, str] | None], tuple[OARequestSession | Non
 SettingsServiceProvider = Callable[[], AppSettingsService]
 SettingsDataResetServiceProvider = Callable[[], SettingsDataResetService | None]
 ServiceProvider = Callable[[], Any]
-AfterSettingsUpdate = Callable[[dict[str, Any], dict[str, Any], bool], None]
 FinalizeSettingsEvent = Callable[[dict[str, Any]], None]
 DataResetExecutor = Callable[[str, Callable[[str, str, int], None] | None], dict[str, object]]
 
@@ -58,7 +57,6 @@ class SettingsApiRoutes:
         load_json_body: JsonBodyLoader,
         json_response: JsonResponse,
         finalize_settings_event: FinalizeSettingsEvent,
-        after_settings_update: AfterSettingsUpdate,
         execute_data_reset: DataResetExecutor,
         serialize_sync_run: Callable[[object], dict[str, object]],
         serialize_data_reset_background_job: Callable[[Any], dict[str, object]],
@@ -82,7 +80,6 @@ class SettingsApiRoutes:
         self._load_json_body = load_json_body
         self._json_response = json_response
         self._finalize_settings_event = finalize_settings_event
-        self._after_settings_update = after_settings_update
         self._execute_data_reset = execute_data_reset
         self._serialize_sync_run = serialize_sync_run
         self._serialize_data_reset_background_job = serialize_data_reset_background_job
@@ -169,9 +166,6 @@ class SettingsApiRoutes:
         actor_id = actor_id_for_session(session) if session is not None else "workbench_settings"
 
         app_settings_service = self._app_settings_service()
-        previous_oa_invoice_offset = app_settings_service.get_settings_payload().get("oa_invoice_offset")
-        if not isinstance(previous_oa_invoice_offset, dict):
-            previous_oa_invoice_offset = {}
         if (
             not isinstance(completed_project_ids, list)
             or not isinstance(bank_account_mappings, list)
@@ -254,11 +248,6 @@ class SettingsApiRoutes:
                     "message": f"设置保存失败：无法写入持久化设置源，请检查配置后重试。底层错误：{exc}",
                 },
             )
-        self._after_settings_update(
-            previous_oa_invoice_offset,
-            updated_payload,
-            pending_invoice_tag_groups is not None or pending_output_invoice_tag_groups is not None,
-        )
         return self._json_response(HTTPStatus.OK, updated_payload)
 
     def oa_applicant_credentials(self, headers: dict[str, str] | None) -> Any:

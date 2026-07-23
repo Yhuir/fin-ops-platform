@@ -5,7 +5,7 @@
 ## 全局合同
 
 - 首屏只请求 `GET /api/oa-pending-payments/rows`；旧 filter endpoint请求次数必须为 0。
-- `200` 只展示 fresh payload；`202` 立即隐藏旧 rows，等待精确 operation barrier 后重读；不得 stale-while-revalidate。
+- `200` 只展示 fresh payload；`202` 立即隐藏旧 rows，等待该 GET/fresh gate 产生的精确 target 后重读；不得 stale-while-revalidate。普通写命令自身不返回页面 fan-out target。
 - 页面可见时每 500ms 最多一个 `If-None-Match` 条件请求；隐藏时暂停，恢复可见立即检查。
 - `304` 不改变页面；query变化不得复用旧 ETag，晚到响应不得覆盖新 query。
 - `paymentStatus` 由后端给出且只有 paid/unpaid；页面不得按金额推断。
@@ -20,8 +20,8 @@
 | `OA-PENDING-E2E-003` | OA/银行/发票/relation detail | 用户打开 drawer时惰性读取；non-fresh detail明确不可用，不访问 live source |
 | `OA-PENDING-E2E-004` | 可见页无变化 | 500ms条件请求返回304；rows不闪烁，最多一个in-flight |
 | `OA-PENDING-E2E-005` | 页面保持打开时 source变化 | 条件请求返回202后旧 rows立即消失；barrier fresh后一次200显示新版本，无人工刷新 |
-| `OA-PENDING-E2E-006` | writeback-paid | 首屏不自动写；合法行单次命令；成功后隐藏旧 rows、等待barrier并显示written；409/503明确且不伪成功 |
-| `OA-PENDING-E2E-007` | in-progress link-bank | 候选携带 oa_row_ids；只允许未占用outflow；创建pending relation，金额匹配时写回；barrier后新rows，不污染Workbench active relation |
+| `OA-PENDING-E2E-006` | writeback-paid | 首屏不自动写；合法行单次命令且零页面 fan-out；成功后重跑 rows normal GET，访问 gate 按需收敛并显示 written；409/503 明确且不伪成功 |
+| `OA-PENDING-E2E-007` | in-progress link-bank | 候选携带 oa_row_ids；只允许未占用 outflow；创建 pending relation，金额匹配时写回；命令后本页 normal GET 显示新 rows，不污染 Workbench active relation或其它页面 queue |
 | `OA-PENDING-E2E-008` | tab隐藏/恢复 | 隐藏期间无条件请求；恢复时立即检查；unmount不replay |
 | `OA-PENDING-E2E-009` | Audit | pass/checking/integrity fail/timeout/unavailable文案正确，issue samples去重且不显示内部拼接文案 |
 

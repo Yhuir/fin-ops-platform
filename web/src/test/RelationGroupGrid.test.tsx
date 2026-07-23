@@ -782,7 +782,6 @@ describe("Workbench candidate grouping layout", () => {
           JSON.stringify({
             batch: null,
             affected_months: ["2026-03"],
-            workbench_rebuild_queued: true,
             results: [],
           }),
           { status: 200 },

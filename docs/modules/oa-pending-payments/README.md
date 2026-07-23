@@ -33,7 +33,9 @@ OA Mongo / t_payment_simple
   -> OA integration sync
   -> PostgreSQL completed OA + admission + payment-status snapshot + source watermark
 Workbench confirm / withdraw
-  -> 同一业务事务提交 canonical relation + oa_pending_payment:<month> dirty/outbox
+  -> 同一业务事务只提交 canonical relation/version/audit，零页面 dirty/outbox
+页面访问 / 条件 GET / hidden→visible
+  -> OA fresh gate 比较 exact month source vector；mismatch 才经 gateway 去重入队
   -> oa-pending-payment 专属 worker直接读取 canonical relation与关联银行/发票事实（仅 PostgreSQL）
   -> 纯内存行组装 + 单批次月份发布
   -> 月份 read model 原子发布/CAS
@@ -42,7 +44,7 @@ Workbench confirm / withdraw
   -> 页面 500ms 条件检查 / 202 barrier / fresh 重读
 ```
 
-页面热路径和 read model worker 都不得访问 Mongo/MySQL。外部系统变化尚未进入 PostgreSQL 时，属于 OA sync lag；一旦 PostgreSQL canonical snapshot 已提交，dirty/outbox、动态 source version、CAS 和 fresh gate 必须阻止旧 rows 被伪装成 fresh。
+页面热路径和 read model worker 都不得访问 Mongo/MySQL。外部系统变化尚未进入 PostgreSQL 时，属于 OA sync lag；一旦 PostgreSQL canonical snapshot 已提交，动态 source version、访问时 dirty/outbox、CAS 和 fresh gate 必须阻止旧 rows 被伪装成 fresh。
 
 月份 shard 只能包含该月份的 OA 主行。跨月正式 relation 可以继续为各月提供 relation evidence，但不得把其它月份的 OA 成员复制进当前月份 rows；relation group row identity 同时包含 month scope。`month=all` 不做隐藏去重，freshness gate 与 Page Audit 会把跨 scope 重复 `row_id` 明确判为阻断错误。
 
@@ -51,8 +53,8 @@ Workbench confirm / withdraw
 - 页面只有 `GET /api/oa-pending-payments/rows` 一个首屏聚合入口；旧 `filter-options` endpoint 已删除。
 - `200` 返回 rows、pagination、summary、`filterConfig`、`filterOptions`、freshness proof 和 `ETag`。
 - 同一 normalized query 在版本未变且仍 fresh 时返回 `304`，不得执行 rows/facet 聚合。
-- dirty、source mismatch、scope missing 或 queue 活跃时返回 `202` 和精确月份 `operationBarrierTargets`，不返回旧 rows。
-- 可见页面每 500ms 最多发起一个条件 GET；tab 隐藏时停止，恢复可见时立即检查。收到 `202` 后立即隐藏旧 rows，等待 barrier fresh 再完整读取一次。
+- dirty、source mismatch、scope missing 或 queue 活跃时返回 `202` 和由本次访问 freshness boundary 产生的精确月份 `operationBarrierTargets`，不返回旧 rows。
+- 可见页面每 500ms 最多发起一个条件 GET；tab 隐藏时停止，恢复可见时立即检查。收到 `202` 后立即隐藏旧 rows，等待该访问 target fresh 再完整读取一次。普通写命令不投递或等待页面 target。
 - `paymentStatus` 只有 `paid` / `unpaid`，由后端 lifecycle/read model 判定；页面不得按金额或候选关系自行推断。
 
 ## Completed 与 in-progress
@@ -64,7 +66,7 @@ Workbench confirm / withdraw
 
 ## 写回一致性
 
-`writeback-paid` 和金额匹配后的 `link-bank-transactions` 先完成幂等 MySQL `pay_status=1` 写回，再通过窄 PostgreSQL snapshot writer 更新对应 flow 的支付状态、月份 source watermark 和精确月份 outbox。PostgreSQL 三项写入同事务；失败时命令返回可安全重试错误，重试即使发现 MySQL 已经是 paid，也必须继续修复 PostgreSQL snapshot。
+`writeback-paid` 和金额匹配后的 `link-bank-transactions` 先完成幂等 MySQL `pay_status=1` 写回，再通过窄 PostgreSQL snapshot writer 更新对应 flow 的支付状态、月份 source watermark/version；普通命令不写页面 outbox。PostgreSQL snapshot 更新同事务；失败时命令返回可安全重试错误，重试即使发现 MySQL 已经是 paid，也必须继续修复 PostgreSQL snapshot。
 
 Mongo/MySQL 与 PostgreSQL 之间不做分布式事务。若外部写成功而 PostgreSQL 提交失败，页面继续基于最后一个可证明的 PostgreSQL snapshot，不把外部状态猜成 fresh；幂等重试或下一次 OA sync 完成修复。
 

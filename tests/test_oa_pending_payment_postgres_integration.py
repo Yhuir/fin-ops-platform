@@ -48,7 +48,6 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
     def test_identical_canonical_commit_keeps_projection_and_status_rows_unchanged(self) -> None:
         source_snapshot = PostgresOaPendingPaymentSourceSnapshotRepository(
             self.connection,
-            queue_repository=self.queue,
             pending_relation_repository=self.pending_relations,
         )
         payment_statuses = {
@@ -111,7 +110,6 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
     def test_admission_only_commit_preserves_stable_completed_fact_and_never_enqueues_shared_read_models(self) -> None:
         source_snapshot = PostgresOaPendingPaymentSourceSnapshotRepository(
             self.connection,
-            queue_repository=self.queue,
             pending_relation_repository=self.pending_relations,
         )
         completed_record = _record()
@@ -258,7 +256,6 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
     def test_in_progress_to_completed_removes_admission_and_reports_shared_fact_change(self) -> None:
         source_snapshot = PostgresOaPendingPaymentSourceSnapshotRepository(
             self.connection,
-            queue_repository=self.queue,
             pending_relation_repository=self.pending_relations,
         )
         in_progress = _in_progress_record()
@@ -301,7 +298,6 @@ class OaPendingPaymentPostgresIntegrationTests(unittest.TestCase):
     def test_canonical_commit_reaches_fresh_rows_and_etag_through_durable_worker_chain(self) -> None:
         source_snapshot = PostgresOaPendingPaymentSourceSnapshotRepository(
             self.connection,
-            queue_repository=self.queue,
             pending_relation_repository=self.pending_relations,
         )
         source_snapshot.commit_authoritative_snapshot(

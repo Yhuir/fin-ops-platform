@@ -306,7 +306,7 @@ describe("Import pages", () => {
     expect(requestedPaths).not.toContain("/api/workbench");
   });
 
-  test("invoice import waits for declared targets without reading a Workbench page", async () => {
+  test("invoice import ignores legacy declared page targets without reading Workbench or a barrier", async () => {
     const user = userEvent.setup();
     const fetchMock = installMockApiFetch({
       importConfirmOperationBarrierTargets: [
@@ -329,15 +329,8 @@ describe("Import pages", () => {
 
     await user.click(screen.getByRole("button", { name: "确认导入" }));
     expect(await screen.findByText("已确认导入")).toBeInTheDocument();
-    await waitFor(() => {
-      expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/operation-barrier/status")).toHaveLength(1);
-    });
-
-    const barrierCall = fetchMock.mock.calls.find(([input]) => String(input) === "/api/operation-barrier/status");
-    expect(JSON.parse(String((barrierCall?.[1] as RequestInit).body))).toEqual({
-      targets: [{ read_model_key: "workbench_relation", scope_key: "2026-01" }],
-    });
     const requestedPaths = fetchMock.mock.calls.map(([input]) => String(input).split("?")[0]);
+    expect(requestedPaths).not.toContain("/api/operation-barrier/status");
     expect(requestedPaths).not.toContain("/api/workbench");
   });
 

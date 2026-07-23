@@ -10,7 +10,7 @@
 | `IMPORT-BANK-E2E-004` | 银行账户冲突 | 文件识别账号与所选账号不一致时，确认前必须弹出“银行账户冲突确认”；取消不提交，确认后仍按用户选择账户导入。 |
 | `IMPORT-BANK-E2E-005` | preview stale | 预览后底层事实变化时，confirm 返回 `preview_stale`；页面必须提示重新预览，不创建 import job，也不调用 operation barrier 或 Workbench 页面 API。 |
 | `IMPORT-BANK-E2E-006` | confirm 失败 | confirm API/worker 入队失败时，页面必须显示错误，不展示“已确认导入”，不调用 operation barrier 或 Workbench 页面 API，也不把下游 read model 伪装成 fresh。 |
-| `IMPORT-BANK-E2E-007` | confirm 成功和下游刷新 | 可确认文件提交后显示确认反馈；只等待后端声明的 `operation_barrier_targets`，整个导入页不得读取 Workbench 页面探测刷新；进入银行明细后能看到导入行，成本统计必须通过自身 fresh read model 展示导入流水证据。返回 `job` 时只能展示“已开始后台导入”，不能宣称下游 fresh。 |
+| `IMPORT-BANK-E2E-007` | confirm 成功和下游访问收敛 | 可确认文件提交后显示事实提交反馈；普通 import job result 的 `operation_barrier_targets` 必须为空，导入页不得读取或等待任何业务页面；进入银行明细、成本统计等消费者时，各页通过自己的 fresh gate 展示导入事实。返回 `job` 时只能展示“已开始后台导入”，不能宣称下游 fresh。 |
 | `IMPORT-BANK-E2E-008` | 权限和系统保护 | `read_export_only` 不能上传、预览或确认；系统 write-safety blocked 时不能执行确认。 |
 | `IMPORT-BANK-E2E-009` | 真实基础设施 worker drain | PostgreSQL/RabbitMQ/Redis/systemd import worker、Workbench matching、bank detail/account balance/read model freshness 必须在 staging 或生产只读 smoke 验证。 |
 

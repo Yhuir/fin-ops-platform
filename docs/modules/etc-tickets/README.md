@@ -66,7 +66,7 @@
 - source file 上传必须先落对象存储，再追加 source file 元数据；对象存储失败不得留下半写入 source file、版本号或审计事件。
 - source file 元数据、解析结果和派生明细必须共享同一个 `file_id` 生命周期；慢 OCR 的解析提交与删除必须互斥，源文件已删除时不得再提交解析结果。历史孤儿解析结果必须通过既有 source file 删除边界清理，不得由前端过滤掩盖。
 - 信用卡 PDF 上传先解析可选文字；只有未识别到交易行时才回退到按页渲染的布局 OCR。OCR 成功结果必须保留人工核对警告，不得把图像识别结果冒充为无风险的文本解析。
-- ETC 导入确认只在 existing canonical metadata 真变更时按精确月份刷新关联台、税金和 search，成本由 Workbench publish 后有序收敛；业务批次 manual submitted/not-submitted 只刷新精确关联台/matching/search，OA draft create 不触发下游。删除与显式历史迁移按各自 owner 合同处理。所有流程都不允许旧 ETC 模块创建新的 canonical invoice。
+- ETC 导入确认只在 existing canonical metadata 真变更时推进 canonical source version；关联台、税金、search、成本等消费者各自在访问/重新激活时按 exact scope 收敛。业务批次 manual submitted/not-submitted 同样只提交 owner facts/version/audit，OA draft create 不改变下游事实；删除与显式历史迁移按各自 owner 合同处理。所有流程都不允许旧 ETC 模块创建新的 canonical invoice。
 - ETC 页面自身没有 manifest read model；统一 Audit 直接在一个只读 repeatable-read PostgreSQL snapshot 内证明 business batch/task/file/ETC invoice/import/submission/canonical invoice bridge 与 import queue，并阻断超过 15 分钟的 creating、缺失 durable attempt、无 draft 的 pending、bucket 错配和退回后占用未释放。Workbench、税金抵扣、成本统计和 invoice lifecycle 只是下游影响目标，不得登记成 ETC 页面已消费 read model；shared Workbench relation 由关联台 Audit 负责。
 
 ## 维护触发器

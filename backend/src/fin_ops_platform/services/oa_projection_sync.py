@@ -8,24 +8,10 @@ from typing import Any
 from fin_ops_platform.services.oa_adapter import OAApplicationRecord
 from fin_ops_platform.services.oa_payment_status_service import OAPaymentStatusRecord
 from fin_ops_platform.services.postgres_repositories.oa_projection import is_completed_workflow_status
-from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
-from fin_ops_platform.services.search_read_model_refresh_producer import SearchReadModelRefreshProducer
 
 
 MONTH_FORMAT = "%Y-%m"
-
-OA_PROJECTION_SCOPED_READ_MODEL_DEPENDENTS = (
-    "workbench_relation",
-    "bank_detail",
-    "invoice_lifecycle",
-    "input_invoice_usage",
-    "output_invoice_collection",
-    "turnover_ledger",
-    "no_oa_bank_batch",
-    "bank_flow_rule_batch",
-)
-
 
 class OAProjectionSyncService:
     def __init__(
@@ -33,13 +19,10 @@ class OAProjectionSyncService:
         *,
         source_adapter: Any,
         projection_repository: Any,
-        queue_repository: Any,
         retention_cutoff_date_provider: Any | None = None,
         pending_payment_relation_promoter: Any | None = None,
-        search_read_model_refresh_producer: Any | None = None,
         payment_status_repository: Any | None = None,
         pending_payment_source_snapshot_repository: Any | None = None,
-        workbench_matching_dirty_queue: Any | None = None,
     ) -> None:
         if (payment_status_repository is None) != (pending_payment_source_snapshot_repository is None):
             raise ValueError(
@@ -47,18 +30,10 @@ class OAProjectionSyncService:
             )
         self._source_adapter = source_adapter
         self._projection_repository = projection_repository
-        self._queue_repository = queue_repository
         self._retention_cutoff_date_provider = retention_cutoff_date_provider
         self._pending_payment_relation_promoter = pending_payment_relation_promoter
         self._payment_status_repository = payment_status_repository
         self._pending_payment_source_snapshot_repository = pending_payment_source_snapshot_repository
-        self._workbench_matching_dirty_queue = workbench_matching_dirty_queue
-        self._search_read_model_refresh_producer = (
-            search_read_model_refresh_producer
-            or SearchReadModelRefreshProducer(
-                refresh_gateway_provider=lambda: ReadModelRefreshGateway(queue_repository=self._queue_repository)
-            )
-        )
 
     def handle_runtime_event(self, event: RuntimeQueueEvent) -> dict[str, Any]:
         scope_key = self._event_scope_key(event)
@@ -154,20 +129,6 @@ class OAProjectionSyncService:
         record_sync_run = getattr(self._projection_repository, "record_sync_run", None)
         if callable(record_sync_run):
             record_sync_run(result)
-        completed_projection_changed_scopes = (
-            list(getattr(source_snapshot_result, "completed_projection_changed_scopes", ()))
-            if source_snapshot_result is not None
-            else None
-        )
-        promotion_scopes = list(promotion_result.get("affected_months") or [])
-        self._mark_downstream_dirty(
-            scope_key,
-            projection_records,
-            changed_scope_keys=completed_projection_changed_scopes,
-            extra_months=[*pruned_months, *promotion_scopes],
-        )
-        if self._pending_payment_source_snapshot_repository is not None:
-            self._mark_oa_pending_payment_dirty([*pruned_months, *promotion_scopes])
         return result
 
     def _record_failed_sync_run(self, *, scope_key: str, error: Exception) -> None:
@@ -383,71 +344,6 @@ class OAProjectionSyncService:
             raise RuntimeError("pending payment relation promoter must expose promote_completed_records().")
         result = promote(completed_records, actor_id="oa_projection_sync")
         return result if isinstance(result, dict) else {}
-
-    def _mark_downstream_dirty(
-        self,
-        scope_key: str,
-        records: list[OAApplicationRecord],
-        *,
-        changed_scope_keys: list[str] | None = None,
-        extra_months: list[str] | None = None,
-    ) -> None:
-        if changed_scope_keys is None:
-            months = {
-                str(record.month).strip()
-                for record in list(records or [])
-                if str(getattr(record, "month", "")).strip()
-            }
-            if scope_key != "all" and scope_key:
-                months.add(scope_key)
-        else:
-            months = {str(value).strip() for value in changed_scope_keys if str(value).strip()}
-        months.update(month for month in list(extra_months or []) if month)
-        if not months:
-            return
-        target_scopes = sorted({month for month in months if month and month != "all"})
-        if target_scopes:
-            target_scopes.append("all")
-        else:
-            target_scopes = ["all"]
-        refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
-        if not refresh_gateway.can_enqueue():
-            return
-        refresh_gateway.enqueue_many("workbench", target_scopes, reason="oa_projection_sync")
-        matching_months = [scope for scope in target_scopes if scope != "all"]
-        mark_matching_dirty = getattr(self._workbench_matching_dirty_queue, "mark_dirty_expanded", None)
-        if matching_months and callable(mark_matching_dirty):
-            mark_matching_dirty(
-                matching_months,
-                reason="oa_projection_sync",
-                debounce_seconds=0,
-            )
-        self._search_read_model_refresh_producer.enqueue(target_scopes, reason="oa_projection_sync")
-        if self._pending_payment_source_snapshot_repository is None:
-            refresh_gateway.enqueue_many("oa_pending_payment", target_scopes, reason="oa_projection_sync")
-        refresh_gateway.enqueue_many("pending_invoice", ["expense:all", "income:all"], reason="oa_projection_sync")
-        concrete_month_scopes = [scope for scope in target_scopes if scope != "all"] or ["all"]
-        for read_model_key in OA_PROJECTION_SCOPED_READ_MODEL_DEPENDENTS:
-            refresh_gateway.enqueue_many(read_model_key, concrete_month_scopes, reason="oa_projection_sync")
-
-    def _mark_oa_pending_payment_dirty(self, scope_keys: list[str]) -> None:
-        normalized_scope_keys = sorted(
-            {
-                str(scope_key).strip()
-                for scope_key in list(scope_keys or [])
-                if str(scope_key).strip() == "all" or self._is_month_scope(scope_key)
-            }
-        )
-        if not normalized_scope_keys:
-            return
-        refresh_gateway = ReadModelRefreshGateway(queue_repository=self._queue_repository)
-        if refresh_gateway.can_enqueue():
-            refresh_gateway.enqueue_many(
-                "oa_pending_payment",
-                normalized_scope_keys,
-                reason="oa_projection_relation_or_prune_changed",
-            )
-
 
 def _is_invoice_attachment_payload(value: Any) -> bool:
     if not isinstance(value, dict):

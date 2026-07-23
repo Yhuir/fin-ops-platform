@@ -16,7 +16,6 @@ from fin_ops_platform.services.etc_business_batch_application_service import Etc
 from fin_ops_platform.services.etc_existing_invoice_link_service import EtcExistingInvoiceLinkService
 from fin_ops_platform.services.etc_service import EtcImportItem, EtcImportResult
 from fin_ops_platform.services.runtime_worker_handlers import (
-    _RuntimeWorkerDerivedLifecycle,
     _link_etc_import_result_to_existing_invoices,
 )
 
@@ -254,15 +253,22 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         self.assertNotIn("f.import_batch_id", bank_audit_source)
         self.assertNotIn("f.import_batch_id", invoice_audit_source)
 
-    def test_workbench_scope_invalidation_does_not_refresh_invoice_usage_domains(self) -> None:
+    def test_workbench_maintenance_refresh_is_exact_and_does_not_fan_out_other_domains(self) -> None:
         source_path = APP_ROOT / "server.py"
         source = source_path.read_text(encoding="utf-8")
-        function_source = _function_source(_parse(source_path), source, "_invalidate_workbench_read_model_scopes")
+        function_source = _function_source(
+            _parse(source_path),
+            source,
+            "_refresh_workbench_read_model_scopes_for_maintenance",
+        )
 
         self.assertNotIn("_invalidate_invoice_usage_collection_read_model_scopes", function_source)
         self.assertNotIn("_enqueue_input_invoice_usage_read_model_refresh", function_source)
         self.assertNotIn("_enqueue_output_invoice_collection_read_model_refresh", function_source)
         self.assertNotIn("_enqueue_oa_pending_payment_read_model_refresh", function_source)
+        self.assertNotIn("_invalidate_cost_statistics_read_model_scopes", function_source)
+        self.assertNotIn("_invalidate_tax_offset_read_model_scopes", function_source)
+        self.assertNotIn("_search_read_model_refresh_producer", function_source)
 
     def test_explicit_production_guard_rejects_non_postgres_storage_backend(self) -> None:
         app = _bare_application(backend="local_pickle")
@@ -444,7 +450,7 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 "load_full_snapshot": 0,
                 "MongoOAAdapter": 0,
                 "WorkbenchPairRelationService": 3,
-                "pair_relation_service": 27,
+                "pair_relation_service": 26,
             },
             "backend/src/fin_ops_platform/app/worker.py": {
                 "GridFSObjectMigrationService": 0,
@@ -2373,7 +2379,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "self._app_settings_service.update_bank_auto_tag_rules(",
             "self._app_settings_service.replace_bank_auto_tag_rules_from_file_source(",
             "def _bank_detail_access_scope_payload(",
-            "enqueue_refreshes=False",
             "self._bank_transaction_category_service.confirm_auto_category(",
             "self._bank_transaction_category_service.assign_manual_category(",
             "self._persist_category_mutation(",
@@ -2764,8 +2769,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
         formal_command_end = matching_orchestrator_source.index("class WorkbenchMatchingOrchestrator:")
         if '"cost_statistics"' in matching_orchestrator_source[formal_command_start:formal_command_end]:
             violations.append("formal relation command still advertises removed direct cost fan-out")
-        domain_registry_start = lifecycle_source.index("    _EVENT_DOMAINS:")
-        job_registry_start = lifecycle_source.index("    _EVENT_JOBS:")
         for event_name in (
             "pair_relation_changed",
             "pending_invoice_manual_invoice_confirmed",
@@ -2775,16 +2778,8 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             "batch_accounting_relation_changed",
             "turnover_relation_changed",
         ):
-            domain_start = lifecycle_source.index(f'        "{event_name}": (', domain_registry_start)
-            domain_end = lifecycle_source.index("        ),", domain_start)
-            if '"cost_statistics_read_model"' in lifecycle_source[domain_start:domain_end]:
-                violations.append(f"relation lifecycle event {event_name} still directly invalidates cost statistics")
-            job_marker = f'        "{event_name}": ('
-            job_start = lifecycle_source.find(job_marker, job_registry_start)
-            if job_start >= 0:
-                job_end = lifecycle_source.index("        ),", job_start)
-                if '"cost_statistics.read_model.refresh"' in lifecycle_source[job_start:job_end]:
-                    violations.append(f"relation lifecycle event {event_name} still advertises a direct cost job")
+            if f'"{event_name}"' in lifecycle_source:
+                violations.append(f"ordinary relation event {event_name} remains in maintenance lifecycle registry")
         for forbidden in (
             "_enqueue_cost_statistics_after_publish",
             "workbench_shard_published",
@@ -5386,13 +5381,6 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
                 "_restore_workbench_exception_override_snapshots",
             )
         ]
-        inline_restore_sources = [
-            _function_source(server_tree, server_source, name)
-            for name in (
-                "_apply_workbench_exception_application",
-                "_persist_workbench_exception_and_override_change",
-            )
-        ]
         violations: list[str] = []
 
         if "WorkbenchExceptionRollbackRestoreService(" not in factory_source:
@@ -5407,16 +5395,12 @@ class PlatformRuntimeBoundaryGuardTests(unittest.TestCase):
             ):
                 if forbidden in source:
                     violations.append(f"server.py exception restore wrapper still owns behavior {forbidden}")
-        for source in inline_restore_sources:
-            if "_workbench_exception_rollback_restore_service().restore_" not in source:
-                violations.append("exception inline restore path does not delegate to rollback restore service")
-            for forbidden in (
-                "WorkbenchExceptionCaseService.from_snapshot",
-                "WorkbenchOverrideService.from_snapshot",
-                "save_workbench_exception_cases(previous_exception_snapshot)",
-            ):
-                if forbidden in source:
-                    violations.append(f"server.py exception inline restore still owns behavior {forbidden}")
+        for removed_name in (
+            "_apply_workbench_exception_application",
+            "_persist_workbench_exception_and_override_change",
+        ):
+            if f"def {removed_name}(" in server_source:
+                violations.append(f"server.py retains dead exception write path {removed_name}")
         for snippet in (
             "class WorkbenchExceptionRollbackRestoreService",
             "def restore_write_snapshots(",
@@ -8161,15 +8145,11 @@ class RuntimeWorkerEtcImportLinkExistingTests(unittest.TestCase):
             with self.subTest(status_refresh_method=method.__name__):
                 self.assertIn("_refresh_business_batch_status_change", inspect.getsource(method))
 
-    def test_etc_invoice_refresh_uses_changed_months_once_without_all_scope_or_duplicate_matching(self) -> None:
+    def test_etc_invoice_refresh_does_not_enqueue_page_read_models(self) -> None:
         api_source = inspect.getsource(server_module.Application._refresh_after_etc_invoice_link)
-        worker_source = inspect.getsource(_RuntimeWorkerDerivedLifecycle.refresh_after_etc_invoice_link)
-
-        for source in (api_source, worker_source):
-            with self.subTest(source=source.splitlines()[0].strip()):
-                self.assertIn("include_all=False", source)
-                self.assertNotIn("schedule_workbench_matching", source)
-                self.assertNotIn("_schedule_or_run_workbench_auto_matching_for_scopes", source)
+        self.assertIn("clear_cache", api_source)
+        self.assertNotIn("_execute_explicit_maintenance_lifecycle", api_source)
+        self.assertNotIn("enqueue", api_source)
 
     def test_cost_and_tax_pages_ignore_etc_batch_only_domain_events(self) -> None:
         for path in (

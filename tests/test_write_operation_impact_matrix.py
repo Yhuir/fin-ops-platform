@@ -14,7 +14,6 @@ if str(BACKEND_SRC) not in sys.path:
     sys.path.insert(0, str(BACKEND_SRC))
 
 from fin_ops_platform.services.app_status_read_model_registry import APP_STATUS_READ_MODEL_REGISTRY  # noqa: E402
-from fin_ops_platform.services.workbench_write_facade import WorkbenchWriteFacade  # noqa: E402
 from fin_ops_platform.tools import (  # noqa: E402
     write_operation_e2e_smoke,
     write_operation_scenario_discovery,
@@ -75,16 +74,17 @@ class WriteOperationImpactMatrixTests(unittest.TestCase):
         self.assertEqual(audit_operations - matrix_operations, set())
         self.assertEqual(len(self.rows), len(matrix_operations))
 
-    def test_matrix_scope_types_match_write_operation_slo_expectations(self) -> None:
+    def test_matrix_rejects_every_legacy_write_time_fan_out_signature(self) -> None:
         audit_scope_types_by_operation = _audit_scope_types_by_operation()
 
         for operation, row in self.rows_by_operation.items():
+            self.assertEqual(row["expected_outbox_scope_types"], [], operation)
             self.assertEqual(
-                set(row["expected_outbox_scope_types"]),
+                set(row["forbidden_write_time_scope_types"]),
                 audit_scope_types_by_operation[operation],
                 operation,
             )
-            direct_scope_types = set(row["expected_outbox_scope_types"])
+            direct_scope_types = set(row["forbidden_write_time_scope_types"])
             derived_read_model_keys = set(row.get("derived_read_model_keys", []))
             self.assertEqual(direct_scope_types & derived_read_model_keys, set(), operation)
             self.assertEqual(
@@ -96,11 +96,13 @@ class WriteOperationImpactMatrixTests(unittest.TestCase):
     def test_slo_targets_match_runtime_write_operation_gates(self) -> None:
         slo = self.matrix["slo"]
 
-        self.assertEqual(slo["p95_enqueue_to_done_ms"], write_operation_slo_audit.DEFAULT_TARGET_MS)
+        self.assertEqual(slo["write_time_page_fan_out_max"], 0)
+        self.assertEqual(slo["access_to_fresh_p95_ms"], write_operation_slo_audit.DEFAULT_TARGET_MS)
         self.assertEqual(
-            slo["p99_enqueue_to_done_ms"],
+            slo["access_to_fresh_p99_ms"],
             write_operation_slo_audit.effective_p99_target_ms_for(write_operation_slo_audit.DEFAULT_TARGET_MS, None),
         )
+        self.assertTrue(all(expectation.forbidden for expectation in write_operation_slo_audit.DEFAULT_OPERATION_EXPECTATIONS))
 
     def test_scope_and_page_targets_are_current_read_model_contracts(self) -> None:
         valid_read_model_keys = set(APP_STATUS_READ_MODEL_REGISTRY)
@@ -137,11 +139,14 @@ class WriteOperationImpactMatrixTests(unittest.TestCase):
     def test_pairing_operations_use_the_canonical_relation_fact_sources(self) -> None:
         for operation, row in self.rows_by_operation.items():
             relation_sources = set(row["pairing_relation_fact_sources"])
-            if "workbench_relation" in set(row["expected_outbox_scope_types"]):
-                self.assertIn("app.workbench_pair_relations", relation_sources, operation)
-                self.assertIn("read_model.workbench_relation_rows", relation_sources, operation)
-            else:
-                self.assertEqual(relation_sources, set(), operation)
+            if not relation_sources:
+                continue
+            self.assertEqual(
+                relation_sources,
+                {"app.workbench_pair_relations", "read_model.workbench_relation_rows"},
+                operation,
+            )
+            self.assertIn("workbench_relation", row["target_read_model_keys"], operation)
 
     def test_reversible_relation_registry_has_exactly_three_safe_profile_pairs(self) -> None:
         pairs = list(self.matrix["reversible_relation_profile_pairs"])
@@ -230,37 +235,20 @@ class WriteOperationImpactMatrixTests(unittest.TestCase):
         self.assertEqual(retired_asymmetric_profiles & set(self.rows_by_operation), set())
         self.assertEqual(retired_asymmetric_profiles & set(_audit_scope_types_by_operation()), set())
 
-    def test_full_bank_oa_invoice_pair_includes_oa_pending_payment_fanout(self) -> None:
+    def test_full_bank_oa_invoice_pair_declares_oa_access_time_consumer_without_write_fan_out(self) -> None:
         for operation in REVERSIBLE_RELATION_PROFILE_PAIRS["bank_oa_invoice"]:
             row = self.rows_by_operation[operation]
-            self.assertIn("oa_pending_payment", row["expected_outbox_scope_types"], operation)
+            self.assertEqual(row["expected_outbox_scope_types"], [], operation)
+            self.assertIn("oa_pending_payment", row["target_read_model_keys"], operation)
             self.assertIn("oa-pending-payments", row["target_page_keys"], operation)
 
-    def test_bank_invoice_profile_matches_real_workbench_fanout_without_oa_cost(self) -> None:
-        facade = object.__new__(WorkbenchWriteFacade)
-        actual_downstream = facade._relation_downstream_scope_types(
-            relation={"row_types": ["bank", "invoice"]},
-            rows=[{"type": "bank"}, {"type": "invoice", "invoice_type": "input"}],
-        )
-        expected_with_workbench = actual_downstream | {"workbench"}
-
-        for operation in REVERSIBLE_RELATION_PROFILE_PAIRS["bank_invoice"]:
-            self.assertEqual(
-                set(self.rows_by_operation[operation]["expected_outbox_scope_types"]),
-                expected_with_workbench,
-                operation,
-            )
-
-        full_downstream = facade._relation_downstream_scope_types(
-            relation={"row_types": ["bank", "oa", "invoice"]},
-            rows=[{"type": "bank"}, {"type": "oa"}, {"type": "invoice", "invoice_type": "input"}],
-        )
-        for operation in REVERSIBLE_RELATION_PROFILE_PAIRS["bank_oa_invoice"]:
-            self.assertEqual(
-                set(self.rows_by_operation[operation]["expected_outbox_scope_types"]),
-                full_downstream | {"workbench", "cost_statistics"},
-                operation,
-            )
+    def test_relation_profiles_keep_consumer_coverage_without_legacy_facade_fan_out_helpers(self) -> None:
+        for pair in self.matrix["reversible_relation_profile_pairs"]:
+            for operation in (pair["confirm_profile"], pair["withdraw_profile"]):
+                row = self.rows_by_operation[operation]
+                self.assertEqual(row["expected_outbox_scope_types"], [], operation)
+                self.assertTrue(row["target_read_model_keys"], operation)
+                self.assertTrue(row["target_page_keys"], operation)
 
     def test_production_gate_policy_is_explicit_and_matches_standing_ticket_rules(self) -> None:
         policy_by_page = {

@@ -2,6 +2,13 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口、影响面、P0/P1/P2 缺口和未测风险。全局依赖地图见 `../../dev/testing-closure-dependency-map.md`。
 
+## 2026-07-22 Phase 27 当前门禁
+
+- 普通 mutation、import confirm 与 OA authoritative sync 必须零下游页面 job、零 unrelated dirty delta；历史 fan-out 测试记录只作演进档案。
+- 被访问页面的 normal GET 必须以 expected/actual source proof 判定 missing/stale，并只经 gateway enqueue 当前精确 scope。
+- `tests/test_read_model_architecture_guards.py` 禁止 `after_mutation`、`workbench_rebuild_queued`、普通 `include_all=true`、service/repository 私写 job tables 与 `affected_months -> all` fallback 回归。
+- 生产门禁改为 write latency + zero fan-out + 逐页 access-to-fresh p50/p95/p99/max，不再以普通写产生 durable refresh event 为成功。
+
 ## 修改前影响面清单
 
 - 页面入口：无独立页面；所有列表/统计页面都依赖 read model freshness/status 语义。
@@ -217,7 +224,7 @@
 | background job queued/running/succeeded/failed | 适用 | `tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_read_model_readiness_reporter.py` | 后台任务 UI 属 app-health/background-jobs 模块 | P1 |
 | cache hit/cache miss | 适用 | `tests/test_read_model_query_gateway.py` | Redis 真连接不在本地单测覆盖；本地覆盖缺 schema proof 与 payload contract invalid 的 cache miss | P2 |
 | authenticated HTTP SLO fresh gate | 适用 | `tests/test_http_slo_probe.py` | 真实生产登录态 HTTP SLO 需发布后运行；本地覆盖 probe 语义和默认参数 | P1 |
-| operation freshness barrier | 适用 | `tests/test_operation_freshness_barrier.py`、`tests/test_app_health_api.py`、`web/src/test/OperationBarrierApi.test.ts` | 真实生产写操作后的 barrier latency 需发布后用登录态 scenario 证明 | P1 |
+| operation freshness barrier | 仅显式维护/访问轮询适用 | `tests/test_operation_freshness_barrier.py`、`tests/test_app_health_api.py`、`web/src/test/OperationBarrierApi.test.ts` | 普通写 targets 为空；生产测的是消费页 access-to-fresh，不是写后跨页 barrier | P1 |
 | external dependency timeout/failure | 不直接适用 | runtime/app-health 模块覆盖依赖状态 | OA/Redis/RabbitMQ/PostgreSQL 真失败需 staging | P2 |
 | frontend loading | 间接适用 | 业务页面测试 | 本模块无 UI | 不适用 |
 | frontend empty | 间接适用 | 业务页面测试 | 本模块无 UI | 不适用 |
@@ -225,13 +232,13 @@
 | drawer/dialog open/close | 不适用 | N/A | 本模块无 UI | 不适用 |
 | filters/sorting/pagination/search | 间接适用 | 业务模块测试 | 本模块只保护 freshness 边界 | P2 |
 | export shape | 间接适用 | 业务 export tests | 本模块只保护 fresh gate 语义 | P2 |
-| cross-page refresh | 适用 | `tests/test_derived_data_lifecycle_service.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py` | 前端事件和业务 page refresh 在 domain-events/business 模块继续审计 | P1 |
+| cross-page access convergence | 适用 | write-operation impact/SLO、各页面 API/read-model/Playwright、`tests/test_runtime_worker_read_model_refresh_scopes.py` | 写后零 fan-out；每个消费页被访问时独立收敛 | P1 |
 | write operation action attribution | 适用 | `tests/test_workbench_uow_contract.py`、`tests/test_no_oa_bank_batch_application_service.py`、`tests/test_workbench_dirty_queue_wiring.py`、`tests/test_write_operation_slo_audit.py`、`tests/test_write_operation_scenario_discovery.py` | 本地覆盖 profile、action metadata、missing scope、P95 target 和 P99 长尾 target；生产仍需真实登录态和人工批准 scenario 才能执行 mutating gate | P1 |
 | old feature regression | 适用 | `tests/test_platform_runtime_boundary_guards.py`、`tests/test_read_model_scope_contract.py` | 旧业务 shape 由各模块继续覆盖 | P1 |
 | historical bug regression | 适用 | `tests/test_read_model_scope_contract.py`、`tests/test_read_model_refresh_gateway.py` | 生产真实库 dry-run 仍需发布前执行 | P2 |
 | production data / migration risk | 适用 | `scripts/check-read-model-scope-contracts.py`、`tests/test_read_model_scope_contract.py`、`tests/test_postgres_migrations.py::PostgresMigrationSqlTests::test_app_status_read_model_storage_contracts_are_declared` 覆盖 cost statistics scope contract repair、orphaned import fact dirty scope repair、invalid read model scope repair、repair manifest、audit、rollback、幂等 apply 和 App Status read model storage contract | 当前 runtime apply 必须先 dry-run 并保留 manifest/audit；invalid scope repair 只删除 policy 明确判定 invalid 的 dirty/outbox/readiness 行；新增 read model 必须同步 migration storage contract | P1 documented-risk |
 | performance-sensitive query path | 适用 | `tests/test_api_performance_metrics.py`、SQL runtime tests、`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_bounds_all_scope_groups_page_query`、`tests/test_postgres_repositories_boundaries.py::test_invoice_lifecycle_rows_are_saved_in_batch_and_scope_is_updated` | Workbench all-scope groups 首屏读取必须保持 page API + `limit/offset` 护栏；invoice lifecycle rows 保存必须保持 batch insert/upsert，避免 critical worker refresh 在真实生产库里被逐行 upsert 放大。 | P2 |
-| import fan-out bounded refresh | 适用 | `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_import_state_invalidation_enqueues_workbench_month_scopes_before_all_aggregate`、`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_import_state_invalidation_skips_unaffected_invoice_relation_read_models`、`tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_import_state_invalidation_enqueues_bank_detail_for_transaction_month_scopes`、`tests/test_postgres_repositories_core.py::test_save_imports_does_not_emit_import_fact_refresh_from_full_snapshot`、`tests/test_import_job_queue.py::ImportJobRepositoryTests::test_import_fact_changed_handler_completes_matching_dirty_scope`、`tests/test_import_job_queue.py::ImportJobRepositoryTests::test_invoice_relation_scope_helpers_split_input_and_output_file_months`、`tests/test_import_job_queue.py::ImportJobRepositoryTests::test_tax_offset_scope_helpers_ignore_bank_transaction_files` | 发票导入有影响月份时，Workbench 和 pending invoice 必须投递月级 scope；进项/销项方向页按本次文件方向命中刷新；tax offset 只接受进项/销项发票文件；完整 snapshot 保存不能生成 read model refresh 旁路；银行明细必须投递真实 `bank_detail.read_model.refresh`，兼容 `import.fact.changed` 只可作为 legacy bridge；银行导入必须同步投递 `bank_account_balance:all`。 | P1 |
+| import zero-fan-out + access convergence | 适用 | `tests/test_import_job_queue.py`、`tests/test_import_processing_service.py`、write-operation impact/SLO、银行/发票/ETC 导入 Playwright | confirm 只提交 selected canonical delta 与空页面 targets；无 `import.fact.changed`/`import_state_changed` bridge。随后逐页访问并验证 exact-scope freshness。 | P1 |
 | manifest / registry parity | 适用 | `tests/test_read_model_manifest.py`、`tests/test_runtime_worker_registry.py::RuntimeWorkerRegistryTests::test_app_status_read_model_registry_matches_worker_and_rabbitmq_contracts` | 14 个 App Status read model 必须同时存在于 manifest、App Status registry、worker registry、RabbitMQ dispatch 和 scope policy registry；manifest 还必须登记 query contract、projection strategy、`all` scope 语义、force refresh contract、operation barrier contract、repository port contract、owner 和 test owner。 | P1 |
 | Workbench active generation special case | 适用 | `tests/test_read_model_manifest.py::ReadModelManifestTests::test_workbench_manifest_preserves_active_generation_exception`、`tests/test_workbench_sql_runtime.py`、`tests/test_workbench_query_facade.py` | Workbench 必须保留 active generation 原子发布和等价 freshness contract；不能被误改成普通 gateway/rebuild read model。 | P1 |
 | Bank detail / account balance boundary | 适用 | `tests/test_read_model_manifest.py::ReadModelManifestTests::test_bank_detail_and_balance_manifest_keep_separate_contracts`、`tests/test_bank_details_sql_runtime.py`、`tests/test_bank_auto_tag_rules_api.py`、`tests/test_bank_account_balance_read_model.py` | 银行明细和账户余额保持独立 scope/event/repository owner。普通 category/rule 写入零 barrier 且由当前页面 GET 比较精确 month signature；只有显式 reapply 返回并等待 bounded bank-detail month targets。 | P1 |

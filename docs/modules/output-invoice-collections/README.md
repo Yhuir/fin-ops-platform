@@ -57,8 +57,8 @@
 - 页面表头显示的 `销项票 N` 是 rows summary 的唯一销项发票数，用于核对销项发票数据拉取完整性；linked 多销项发票 relation 归并为一条 row 时，必须计入所有 `invoiceRelations.summaries` 成员。`pagination.total` 只代表表格行数/配对组行数，不能作为发票数量。
 - 收款状态规则由 `InvoiceLifecyclePolicy` 与 `OutputInvoiceCollectionStatusRuleService` 统一判定；页面不能自定义销项收款状态规则。
 - 写接口只通过 `OutputInvoiceCollectionLifecycleService` 与 `OutputInvoiceCollectionReceiptService` 写 lifecycle facts；service 不读取 HTTP header/cookie。
-- 手动收款状态、提醒、红蓝票关系、收据 create/void/reissue 必须 enqueue `output_invoice_collection` scope，并在 PostgreSQL 模式下通过 transaction-bound queue writer 与事实写入同事务提交。
-- 手动收款状态、提醒、红蓝票关系、收据 create/void/reissue 响应必须返回 `read_model_scope_keys` 与 `freshness_targets`。前端写后同步优先等待具体月份 `output_invoice_collection:<YYYY-MM>` operation barrier target；`all` 只作为无法定位具体月份时的 fan-out 控制 fallback。
+- 手动收款状态、提醒、红蓝票关系、收据 create/void/reissue 只在业务事务内提交 lifecycle/canonical fact、版本、审计与信息性 affected scope，不写 `output_invoice_collection` 或其它页面 dirty/outbox。
+- 上述写接口成功后立即结束命令阻塞；当前可见页重跑自身 normal GET，由 output fresh gate 比较 exact month/source versions，只有 mismatch 才经 gateway 去重入队并返回访问产生的 freshness target。其它页面只在访问或重新激活时独立收敛；普通写无法定位月份时 fail closed，不回退 `all` fan-out。
 - 正式收据创建必须有 `Idempotency-Key` 或 body `idempotencyKey`；历史接口返回真实 receipt lifecycle facts，不伪造空历史。
 - `output_invoice_collection_source_versions()` 包含销项收款 read model、invoice lifecycle policy、lifecycle facts、status rules、receipt schema 和 OA projection sync 版本；统一关系展示字段缺失属于 SQL payload schema stale，必须 enqueue refresh。
 - `output_invoice_collection:all` 在 refresh 链路中是 fan-out 到月份 shard 的控制 scope；页面默认 all 查询的 freshness 证明来自实际 rows/month scopes 和 active dirty/outbox 状态。month scope 必须继续严格比对对应月份 `workbench_relation` source versions；all 查询不能直接使用全局 `workbench_relation:all` source versions 作为 expected contract，否则会把已 fresh 的月份 shard 误判为 stale 并反复显示“正在刷新”。
@@ -68,7 +68,7 @@
 跨模块影响：
 
 - 上游：发票导入、关联台关系、invoice lifecycle、pending invoice rules、OA projection、银行流水关系和 tax/cost 相关 lifecycle。
-- 下游：税金抵扣、成本统计、搜索和 App Health 通过 invoice lifecycle/domain events/readiness 观察销项发票事实变化；本模块写入自身 lifecycle facts 时首要刷新 `output_invoice_collection`。
+- 下游：税金抵扣、成本统计、搜索和 App Health 通过各自 canonical source/version/freshness boundary 观察销项发票事实变化；本模块写入 lifecycle facts 后不主动刷新任一页面。
 - 真实运行回填顺序必须遵守 `workbench_relation -> invoice_lifecycle -> output_invoice_collection`，不能用旧 SQL 或页面私有规则伪装 fresh。
 
 ## 维护触发器

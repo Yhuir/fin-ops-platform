@@ -1465,7 +1465,7 @@ describe("OA pending payments page", () => {
   });
 
   test("pauses conditional checks while hidden and checks immediately when visible", async () => {
-    let visibilityState: DocumentVisibilityState = "hidden";
+    let visibilityState: DocumentVisibilityState = "visible";
     Object.defineProperty(document, "visibilityState", {
       configurable: true,
       get: () => visibilityState,
@@ -1481,11 +1481,18 @@ describe("OA pending payments page", () => {
 
     const page = await screen.findByTestId("oa-pending-payments-page");
     expect(await within(page).findByText("张三")).toBeInTheDocument();
+
+    await act(async () => {
+      visibilityState = "hidden";
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
     await new Promise((resolve) => window.setTimeout(resolve, 550));
     expect(rowsRequests(fetchMock)).toHaveLength(1);
 
-    visibilityState = "visible";
-    document.dispatchEvent(new Event("visibilitychange"));
+    await act(async () => {
+      visibilityState = "visible";
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
     await waitFor(() => expect(rowsRequests(fetchMock)).toHaveLength(2));
   });
 

@@ -252,11 +252,9 @@ class NoOaBankBatchApiRoutes:
                 changed_case_id = str(result_relation.get("case_id") or result_batch.get("relation_case_id") or "").strip()
                 if changed_case_id:
                     changed_case_ids.append(changed_case_id)
-            workbench_rebuild_queued = self._application_service.after_mutation(
-                sorted(affected_months),
+            self._application_service.persist_mutation(
                 changed_case_ids=changed_case_ids,
-                persist=True,
-                action_name="no_oa_bank_batch_submit",
+                changed_scope_keys=sorted(affected_months),
             )
         except NoOaBankBatchPersistenceError as exc:
             return self._persistence_error_response(exc)
@@ -271,7 +269,6 @@ class NoOaBankBatchApiRoutes:
                 targets=[],
                 fallback_scope_key="all",
             ),
-            "workbench_rebuild_queued": workbench_rebuild_queued,
         }
 
     @staticmethod

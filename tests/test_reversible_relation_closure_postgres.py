@@ -236,7 +236,7 @@ class ReversibleRelationClosurePostgresTests(unittest.TestCase):
         )
 
     def test_relation_command_delta_appends_history_without_rewriting_existing_events(self) -> None:
-        repository = PostgresWorkbenchRelationRepository(self.connection, enqueue_refreshes=False)
+        repository = PostgresWorkbenchRelationRepository(self.connection)
         relation = {
             "case_id": "case-delta",
             "relation_mode": "manual_confirmed",

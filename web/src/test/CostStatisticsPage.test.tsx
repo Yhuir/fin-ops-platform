@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { MemoryRouter } from "react-router-dom";
 import { vi } from "vitest";
 
+import PageRouteHost from "../app/PageRouteHost";
 import { AppChromeProvider } from "../contexts/AppChromeContext";
 import { PageSessionStateProvider } from "../contexts/PageSessionStateContext";
 import { SessionContext, type SessionContextValue } from "../contexts/SessionContext";
@@ -110,6 +111,25 @@ function renderCostStatisticsPage(session: SessionContextValue = staticSession) 
         <SessionContext.Provider value={session}>
           <PageSessionStateProvider>
             <CostStatisticsPage />
+          </PageSessionStateProvider>
+        </SessionContext.Provider>
+      </AppChromeProvider>
+    </MemoryRouter>,
+  );
+}
+
+function renderCostStatisticsPageWithRuntime(session: SessionContextValue = staticSession) {
+  return render(
+    <MemoryRouter initialEntries={["/cost-statistics"]}>
+      <AppChromeProvider>
+        <SessionContext.Provider value={session}>
+          <PageSessionStateProvider>
+            <PageRouteHost routes={[{
+              path: "/cost-statistics",
+              pageKey: "cost-statistics",
+              component: CostStatisticsPage,
+              preload: () => Promise.resolve(),
+            }]} />
           </PageSessionStateProvider>
         </SessionContext.Provider>
       </AppChromeProvider>
@@ -250,7 +270,7 @@ describe("Cost statistics page", () => {
     window.history.pushState({}, "", "/cost-statistics");
     const fetchMock = installMockApiFetch({ costExplorerDelayMs: 50 });
 
-    renderCostStatisticsPage();
+    renderCostStatisticsPageWithRuntime();
 
     expect(await screen.findByRole("grid", { name: "按时间统计表" })).toBeInTheDocument();
     const explorerCallsBeforeRestore = fetchMock.mock.calls.filter(([request]) => (

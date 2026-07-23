@@ -64,7 +64,6 @@
 | Frontend feature/components | `web/src/features/pendingInvoices/*`、`web/src/components/pendingInvoices/*` |
 | Backend route | `backend/src/fin_ops_platform/app/routes_pending_invoices.py` |
 | Backend service | `pending_invoice_service.py`、`pending_invoice_read_model_service.py`、`pending_invoice_rules_application_service.py`、`pending_invoice_lifecycle_service.py`、`pending_invoice_status.py` |
-| Scope planning | `backend/src/fin_ops_platform/services/pending_invoice_scope_planner.py` |
 | Repository / SQL | `pending_invoice_read_model_repository.py`、`search_pending_sql_projection.py`、`invoice_lifecycle_sql_projection.py` |
 | Tests | `tests/test_pending_invoice*.py`、`web/src/test/PendingInvoices*.test.*`、`web/e2e/pending-invoices-*.spec.ts` |
 
@@ -72,7 +71,7 @@
 
 - 允许依赖：invoice lifecycle policy/read facade、search projection、workbench relation read facade。
 - 必须通过：PendingInvoiceReadModelService and rules application service。
-- 禁止绕过：bare all refresh；页面自行合成 invoice status。
+- 禁止绕过：恢复已删除的 import/runtime `pending_invoice_scope_planner.py`、普通写 fan-out 或 bare all refresh；页面自行合成 invoice status。
 
 ## 测试与验证
 

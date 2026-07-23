@@ -715,7 +715,6 @@ class BankDetailsApplicationService:
                     actor_id=actor_id,
                     action=action,
                     metadata=metadata,
-                    enqueue_refreshes=False,
                 )
                 or {}
             )

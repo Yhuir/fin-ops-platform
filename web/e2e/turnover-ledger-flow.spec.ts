@@ -234,6 +234,66 @@ test.describe("turnover ledger browser flow", () => {
     expect(browserErrors).toEqual([]);
   });
 
+  test("saves relation extra details and reloads only the visible turnover ledger", async ({ page }, testInfo) => {
+    const browserErrors = startStrictBrowserErrorCapture(page);
+    const api = await installDeterministicApiMocks(page, {
+      sessionMode: "full_access",
+    });
+    const recordLatency = createTurnoverLatencyRecorder(page, testInfo);
+
+    await page.goto("/turnover-ledger");
+    await expect(page.getByRole("heading", { name: "外部往来款管理" })).toBeVisible();
+    const table = page.getByRole("table", { name: "往来款左右双栏台账" });
+    await page.getByRole("button", { name: "展开 云南建设有限公司 流水明细" }).click();
+    await expect(table.getByRole("row", { name: /turnover-bank-expense-1000.*外部往来款付款.*归还借款/ })).toBeVisible();
+
+    const drawer = page.getByRole("dialog", { name: "编辑流水补充信息" });
+    await recordLatency({
+      operationId: "turnover-ledger.open-relation-extra",
+      visibleLabel: "编辑流水补充信息",
+      actionType: "click",
+    }, async (mark) => {
+      const detailResponse = page.waitForResponse(responseFor(
+        "GET",
+        "/api/turnover-ledger/relations/turnover_rel_e2e_expense",
+      ));
+      const extraResponse = page.waitForResponse(responseFor(
+        "GET",
+        "/api/turnover-ledger/relations/turnover_rel_e2e_expense/extra",
+      ));
+      await table.getByRole("button", { name: "编辑流水 turnover-bank-expense-1000" }).click();
+      expect((await mark("apiLatencyMs", detailResponse)).status()).toBe(200);
+      expect((await extraResponse).status()).toBe(200);
+      await mark("firstVisibleResponseLatencyMs", expect(drawer).toBeVisible());
+      await mark("finalSettledLatencyMs", expect(drawer.getByRole("button", { name: "保存补充信息" })).toBeDisabled());
+    });
+
+    await drawer.getByLabel("利率值").fill("0.070000");
+    await expect(drawer.getByRole("button", { name: "保存补充信息" })).toBeEnabled();
+    const ledgerLoadsBeforeSave = api.count("GET /api/turnover-ledger");
+    await recordLatency({
+      operationId: "turnover-ledger.save-relation-extra",
+      visibleLabel: "保存补充信息",
+      actionType: "click",
+    }, async (mark) => {
+      const saveResponse = page.waitForResponse(responseFor(
+        "PUT",
+        "/api/turnover-ledger/relations/turnover_rel_e2e_expense/extra",
+      ));
+      const reloadResponse = waitForTurnoverLedger(page);
+      await drawer.getByRole("button", { name: "保存补充信息" }).click();
+      expect((await mark("apiLatencyMs", saveResponse)).status()).toBe(200);
+      await mark("firstVisibleResponseLatencyMs", expect(page.getByText("补充信息已保存")).toBeVisible());
+      await mark("finalSettledLatencyMs", reloadResponse);
+    });
+
+    expect(api.count("PUT /api/turnover-ledger/relations/turnover_rel_e2e_expense/extra")).toBe(1);
+    expect(api.count("GET /api/turnover-ledger")).toBeGreaterThan(ledgerLoadsBeforeSave);
+    expect(api.count("POST /api/operation-barrier/status")).toBe(0);
+    await expectNoUnexpectedSuccessUiErrors(page);
+    expect(browserErrors).toEqual([]);
+  });
+
   test("confirms and withdraws a manual turnover closure through page-access convergence", async ({ page }, testInfo) => {
     const browserErrors = startStrictBrowserErrorCapture(page);
     const api = await installDeterministicApiMocks(page, {

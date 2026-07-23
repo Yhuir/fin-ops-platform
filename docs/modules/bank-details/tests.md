@@ -2,7 +2,19 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
-## 2026-07-22 - 人工补标签撤销恢复待分类
+## 2026-07-22 - Phase 27 当前写后零 fan-out 合同
+
+- Business core unit tests：分类确认/撤销、人工补标签/清除、规则 CAS、幂等、非法标签与空变更保持原业务合同。
+- Service-layer tests：`BankTransactionCategoryMutationWriter(enqueue_refreshes=False)` 原子提交 canonical category/event/audit/version；普通分类与规则保存创建零 read-model dirty/outbox，失败无半写。
+- API contract tests：保留 `changed`、`affected_months`、权限/冲突/error shape；普通写的 freshness/operation targets 为空，旧 `workbench_rebuild_queued` 不得恢复。
+- Read model/cache/background job tests：fresh GET 零 job；missing/stale/source/rule mismatch 只由 bank page access gate 为 exact month 去重入队；显式 reapply/force refresh 继续按 explicit-batch 合同测试。
+- Frontend interaction：分类/规则保存成功立即结束写阻塞并重跑当前 transactions normal GET；只有显式 reapply 可等待 exact month job。隐藏页面不发 I/O，重新激活时 normal GET。
+- E2E：银行明细当前页刷新、Workbench/Turnover/Cost 等消费者分别访问后看到统一事实；写操作期间零下游 job/零 unrelated dirty delta。
+- Regression：账户余额、筛选/排序/分页、导出、权限、Drawer、non-fresh false-empty 与 Workbench relation tags 保持原有覆盖。
+
+以下日期条目是当时的实施/bug 回归记录；其中任何“写后 enqueue/fan-out/barrier”描述均为历史合同，已被本节和 `boundary-io.md` 取代。
+
+## 历史 2026-07-22 - 人工补标签撤销恢复待分类
 
 - Business core unit tests：适用。`tests/test_bank_transaction_category_service.py` 覆盖只有人工补标签可撤销、自动标签不可撤销、候选确认撤销保持原语义；`tests/test_bank_transaction_category_postgres_mutation.py` 覆盖 canonical active 记录转为 `cleared` 且不插入 `unknown`、重复撤销幂等。
 - Service-layer tests：适用。新增 PostgreSQL mutation writer/repository 测试，覆盖分类事实、category event、persistent audit、精确月份 batch outbox、matching dirty、无变化不入队和批量去重；更新 BankDetails application、state store 与 Turnover UoW 回滚/提交缓存合同。

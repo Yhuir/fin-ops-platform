@@ -301,4 +301,31 @@ describe("PageRouteHost", () => {
     expect(loadCurrentPage).toHaveBeenCalledTimes(2);
     expect(pageEventHandler).not.toHaveBeenCalled();
   });
+
+  test("reactivates the current page when restored from the back-forward cache", async () => {
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const loadCurrentPage = vi.fn();
+
+    function PageA() {
+      const activation = usePageActivation("page-a");
+      useEffect(() => {
+        if (activation.active) {
+          loadCurrentPage(activation.activationGeneration);
+        }
+      }, [activation.active, activation.activationGeneration]);
+      return <span data-testid="page-generation">{activation.activationGeneration}</span>;
+    }
+
+    render(<PageRouteHost routes={[createRoute("/a", "page-a", PageA)]} />, { wrapper: Harness });
+    expect(loadCurrentPage).toHaveBeenCalledTimes(1);
+
+    const pageShowEvent = new Event("pageshow") as PageTransitionEvent;
+    Object.defineProperty(pageShowEvent, "persisted", { value: true });
+    act(() => {
+      window.dispatchEvent(pageShowEvent);
+    });
+
+    await waitFor(() => expect(screen.getByTestId("page-generation")).toHaveTextContent("2"));
+    expect(loadCurrentPage).toHaveBeenCalledTimes(2);
+  });
 });

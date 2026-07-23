@@ -11,13 +11,11 @@ from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_s
 
 
 class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
-    def test_complete_snapshot_replaces_status_and_admission_then_enqueues_in_same_transaction(self) -> None:
+    def test_complete_snapshot_replaces_status_and_admission_in_one_canonical_transaction(self) -> None:
         connection = FakeConnection()
-        queue = FakeTransactionalQueue()
         pending_relations = FakePendingRelationRepository()
         repository = PostgresOaPendingPaymentSourceSnapshotRepository(
             connection,
-            queue_repository=queue,
             pending_relation_repository=pending_relations,
         )
 
@@ -34,15 +32,6 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
         self.assertEqual(result.admission_count, 1)
         self.assertTrue(connection.committed)
         self.assertFalse(connection.rolled_back)
-        self.assertEqual(len(queue.calls), 1)
-        self.assertIs(queue.calls[0]["transaction"], connection.transaction_handle)
-        self.assertEqual(
-            [(call["scope_type"], call["scope_key"]) for call in queue.calls],
-            [("oa_pending_payment", "2026-06")],
-        )
-        self.assertTrue(
-            all(call["transaction"] is connection.transaction_handle for call in queue.calls)
-        )
         self.assertEqual(pending_relations.calls[0]["admitted_oa_row_ids"], ["oa-pay-row-1"])
         self.assertIs(pending_relations.calls[0]["transaction"], connection.transaction_handle)
         self.assertEqual(len(pending_relations.ensure_calls), 1)
@@ -56,8 +45,10 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
         self.assertIn("delete from app.oa_pending_payment_admissions", executed_sql)
         self.assertIn("insert into app.oa_pending_payment_admissions", executed_sql)
         self.assertIn("insert into app.oa_sync_watermarks", executed_sql)
+        self.assertNotIn("job.read_model_dirty_scopes", executed_sql)
+        self.assertNotIn("job.outbox_events", executed_sql)
 
-    def test_authoritative_empty_snapshot_deletes_removed_rows_and_refreshes_their_old_month(self) -> None:
+    def test_authoritative_empty_snapshot_reports_removed_rows_old_month(self) -> None:
         connection = FakeConnection(
             status_rows=[
                 {
@@ -76,10 +67,8 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
                 }
             ],
         )
-        queue = FakeTransactionalQueue()
         repository = PostgresOaPendingPaymentSourceSnapshotRepository(
             connection,
-            queue_repository=queue,
             pending_relation_repository=FakePendingRelationRepository(),
         )
 
@@ -94,37 +83,11 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
         self.assertEqual(result.oa_pending_payment_changed_scopes, ("2026-05",))
         self.assertEqual(result.payment_status_count, 0)
         self.assertEqual(result.admission_count, 0)
-        self.assertEqual(
-            [(call["scope_type"], call["scope_key"]) for call in queue.calls],
-            [("oa_pending_payment", "2026-05")],
-        )
 
-    def test_queue_failure_rolls_back_snapshot_watermark_and_outbox_transaction(self) -> None:
+    def test_completed_projection_change_is_reported_without_page_refresh_side_effects(self) -> None:
         connection = FakeConnection()
-        queue = FakeTransactionalQueue(error=RuntimeError("outbox unavailable"))
         repository = PostgresOaPendingPaymentSourceSnapshotRepository(
             connection,
-            queue_repository=queue,
-            pending_relation_repository=FakePendingRelationRepository(),
-        )
-
-        with self.assertRaisesRegex(RuntimeError, "outbox unavailable"):
-            repository.replace_authoritative_snapshot(
-                scope_key="2026-06",
-                completed_projection_records=[],
-                admission_records=[_oa("oa-pay-row-1", "2026-06", workflow_status="in_progress", flow_id="flow-1")],
-                payment_statuses={"flow-1": OAPaymentStatusRecord(flow_id="flow-1", pay_status=0)},
-            )
-
-        self.assertFalse(connection.committed)
-        self.assertTrue(connection.rolled_back)
-
-    def test_completed_projection_change_is_reported_separately_and_only_repository_owned_oa_refresh_is_enqueued(self) -> None:
-        connection = FakeConnection()
-        queue = FakeTransactionalQueue()
-        repository = PostgresOaPendingPaymentSourceSnapshotRepository(
-            connection,
-            queue_repository=queue,
             pending_relation_repository=FakePendingRelationRepository(),
         )
         completed = _oa("oa-pay-row-1", "2026-06", workflow_status="completed", flow_id="flow-1")
@@ -138,10 +101,7 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
 
         self.assertEqual(result.completed_projection_changed_scopes, ("2026-06",))
         self.assertEqual(result.oa_pending_payment_changed_scopes, ("2026-06",))
-        self.assertEqual(
-            [(call["scope_type"], call["scope_key"]) for call in queue.calls],
-            [("oa_pending_payment", "2026-06")],
-        )
+        self.assertFalse(hasattr(repository, "_queue_repository"))
 
     def test_payment_status_only_change_does_not_report_completed_projection_change(self) -> None:
         connection = FakeConnection(
@@ -155,10 +115,8 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
             ],
             watermark_rows=[_watermark("2026-06", completed_signature=_signature([]))],
         )
-        queue = FakeTransactionalQueue()
         repository = PostgresOaPendingPaymentSourceSnapshotRepository(
             connection,
-            queue_repository=queue,
             pending_relation_repository=FakePendingRelationRepository(),
         )
 
@@ -171,17 +129,11 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
 
         self.assertEqual(result.completed_projection_changed_scopes, ())
         self.assertEqual(result.oa_pending_payment_changed_scopes, ("2026-06",))
-        self.assertEqual(
-            [(call["scope_type"], call["scope_key"]) for call in queue.calls],
-            [("oa_pending_payment", "2026-06")],
-        )
 
     def test_removed_completed_only_scope_uses_old_watermark_and_reports_shared_projection_change(self) -> None:
         connection = FakeConnection(watermark_rows=[_watermark("2026-05")])
-        queue = FakeTransactionalQueue()
         repository = PostgresOaPendingPaymentSourceSnapshotRepository(
             connection,
-            queue_repository=queue,
             pending_relation_repository=FakePendingRelationRepository(),
         )
 
@@ -194,29 +146,6 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
 
         self.assertEqual(result.completed_projection_changed_scopes, ("2026-05",))
         self.assertEqual(result.oa_pending_payment_changed_scopes, ("2026-05",))
-        self.assertEqual([call["scope_key"] for call in queue.calls], ["2026-05"])
-
-    def test_canonical_commit_rolls_back_completed_projection_with_snapshot_when_outbox_fails(self) -> None:
-        connection = FakeConnection()
-        repository = PostgresOaPendingPaymentSourceSnapshotRepository(
-            connection,
-            queue_repository=FakeTransactionalQueue(error=RuntimeError("outbox unavailable")),
-            pending_relation_repository=FakePendingRelationRepository(),
-        )
-
-        with self.assertRaisesRegex(RuntimeError, "outbox unavailable"):
-            repository.commit_authoritative_snapshot(
-                scope_key="2026-06",
-                projection_records=[_oa("oa-pay-row-1", "2026-06", workflow_status="completed", flow_id="flow-1")],
-                admission_records=[_oa("oa-pay-row-1", "2026-06", workflow_status="completed", flow_id="flow-1")],
-                payment_statuses={"flow-1": OAPaymentStatusRecord(flow_id="flow-1", pay_status=0)},
-            )
-
-        executed_sql = "\n".join(sql for sql, _params in connection.transaction_handle.executions)
-        self.assertIn("insert into app.oa_applications", executed_sql)
-        self.assertIn("insert into app.oa_sync_watermarks", executed_sql)
-        self.assertFalse(connection.committed)
-        self.assertTrue(connection.rolled_back)
 
     def test_paid_writeback_updates_snapshot_watermark_without_downstream_outbox(self) -> None:
         connection = FakeConnection(
@@ -230,10 +159,8 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
             ],
             watermark_rows=[_watermark("2026-06")],
         )
-        queue = FakeTransactionalQueue()
         repository = PostgresOaPendingPaymentSourceSnapshotRepository(
             connection,
-            queue_repository=queue,
             pending_relation_repository=FakePendingRelationRepository(),
         )
 
@@ -242,7 +169,6 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
         )
 
         self.assertEqual(result.oa_pending_payment_changed_scopes, ("2026-06",))
-        self.assertEqual(queue.calls, [])
         executed_sql = "\n".join(sql for sql, _params in connection.transaction_handle.executions)
         self.assertIn("insert into app.oa_pending_payment_status_snapshots", executed_sql)
         self.assertIn("(item.scope_month || '-01')::date", executed_sql)
@@ -261,10 +187,8 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
                 }
             ]
         )
-        queue = FakeTransactionalQueue()
         repository = PostgresOaPendingPaymentSourceSnapshotRepository(
             connection,
-            queue_repository=queue,
             pending_relation_repository=FakePendingRelationRepository(),
         )
 
@@ -273,11 +197,10 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
         )
 
         self.assertEqual(result.oa_pending_payment_changed_scopes, ())
-        self.assertEqual(queue.calls, [])
         self.assertEqual(connection.transaction_handle.executions, [])
         self.assertTrue(connection.committed)
 
-    def test_paid_writeback_does_not_depend_on_downstream_outbox_availability(self) -> None:
+    def test_paid_writeback_does_not_require_a_downstream_queue_dependency(self) -> None:
         connection = FakeConnection(
             status_rows=[
                 {
@@ -289,10 +212,8 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
             ],
             watermark_rows=[_watermark("2026-06")],
         )
-        queue = FakeTransactionalQueue(error=RuntimeError("outbox unavailable"))
         repository = PostgresOaPendingPaymentSourceSnapshotRepository(
             connection,
-            queue_repository=queue,
             pending_relation_repository=FakePendingRelationRepository(),
         )
 
@@ -301,7 +222,7 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
         )
 
         self.assertEqual(result.oa_pending_payment_changed_scopes, ("2026-06",))
-        self.assertEqual(queue.calls, [])
+        self.assertFalse(hasattr(repository, "_queue_repository"))
         self.assertTrue(connection.committed)
         self.assertFalse(connection.rolled_back)
 
@@ -318,7 +239,6 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
         )
         repository = PostgresOaPendingPaymentSourceSnapshotRepository(
             connection,
-            queue_repository=FakeTransactionalQueue(),
             pending_relation_repository=FakePendingRelationRepository(),
         )
 
@@ -335,7 +255,6 @@ class OaPendingPaymentSourceSnapshotRepositoryTests(unittest.TestCase):
         connection = FakeConnection()
         repository = PostgresOaPendingPaymentSourceSnapshotRepository(
             connection,
-            queue_repository=FakeTransactionalQueue(),
             pending_relation_repository=FakePendingRelationRepository(),
         )
 
@@ -419,33 +338,6 @@ class FakeConnection:
     def transaction(self) -> FakeTransactionContext:
         self.transaction_count += 1
         return FakeTransactionContext(self)
-
-
-class FakeTransactionalQueue:
-    def __init__(self, *, error: Exception | None = None) -> None:
-        self.error = error
-        self.calls: list[dict[str, object]] = []
-
-    def enqueue_read_model_refresh_in_transaction(self, **kwargs: object) -> None:
-        self.calls.append(dict(kwargs))
-        if self.error is not None:
-            raise self.error
-
-    def enqueue_read_model_refreshes_in_transaction(self, **kwargs: object) -> None:
-        transaction = kwargs.get("transaction")
-        tenant_id = kwargs.get("tenant_id")
-        priority = kwargs.get("priority")
-        for refresh in list(kwargs.get("refreshes") or []):
-            self.calls.append(
-                {
-                    "transaction": transaction,
-                    "tenant_id": tenant_id,
-                    "priority": priority,
-                    **dict(refresh),
-                }
-            )
-        if self.error is not None:
-            raise self.error
 
 
 class FakePendingRelationRepository:

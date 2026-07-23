@@ -704,7 +704,7 @@ def _wait_for_failed_committed_mutation_refresh(
     poll_interval_seconds: float,
     limit: int,
 ) -> dict[str, Any]:
-    """Let a committed write finish its durable fan-out before recovery reads a baseline."""
+    """Verify a committed ordinary write did not create legacy page fan-out before recovery."""
 
     event_ids = _response_outbox_event_ids(variables.get(_RESPONSE_OUTBOX_EVENT_IDS))
     if not event_ids:
@@ -719,8 +719,6 @@ def _wait_for_failed_committed_mutation_refresh(
                 )
             except Exception as exc:
                 return {"status": "fail", "error": str(exc) or exc.__class__.__name__}
-    if not event_ids:
-        return {"status": "fail", "error": "committed_mutation_outbox_receipt_missing"}
     return _wait_for_write_slo(
         connection,
         operations=checkpoint.operations,
@@ -1276,6 +1274,23 @@ def _wait_for_write_slo(
             )
         ]
         exact_event_set_matches = expected_event_ids is None or last_matched_event_ids == expected_event_ids
+        forbidden_fan_out_detected = any(
+            bool(result.forbidden) and result.status == "fail" and result.sample_count > 0
+            for result in results
+        )
+        if exact_event_set_matches and not last_unexpected_events and forbidden_fan_out_detected:
+            return {
+                "status": "fail",
+                "target_ms": target_ms,
+                "p99_target_ms": p99_target_ms,
+                "requested_event_sample_limit": max(1, int(limit)),
+                "effective_event_sample_limit": effective_limit,
+                "event_sample_count": len(rows),
+                "matched_event_ids": sorted(last_matched_event_ids),
+                "unexpected_event_contracts": [],
+                "error": "forbidden_write_time_read_model_fan_out_detected",
+                "results": [asdict(result) for result in results],
+            }
         if exact_event_set_matches and not last_unexpected_events and all(result.status == "pass" for result in results):
             return {
                 "status": "pass",

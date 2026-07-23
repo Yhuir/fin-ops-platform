@@ -96,19 +96,16 @@ class FakeNoOaApplicationService:
             "results": [{"batch_id": "batch-001", "status": "withdrawn"}],
         }
 
-    def after_mutation(self, affected_months, *, changed_case_ids, persist=True, action_name=None):
+    def persist_mutation(self, *, changed_case_ids, changed_scope_keys):
         self.calls.append(
             (
-                "after_mutation",
+                "persist_mutation",
                 {
-                    "affected_months": list(affected_months),
                     "changed_case_ids": list(changed_case_ids),
-                    "persist": persist,
-                    "action_name": action_name,
+                    "changed_scope_keys": list(changed_scope_keys),
                 },
             )
         )
-        return False
 
 
 def fake_session(username: str = "alice"):
@@ -338,20 +335,17 @@ class NoOaBankBatchRoutesTests(unittest.TestCase):
             payload["operation_barrier_targets"],
             [],
         )
-        self.assertFalse(payload["workbench_rebuild_queued"])
         self.assertEqual(payload["results"][0]["status"], "submitted")
         self.assertEqual(payload["results"][1]["error"], "unknown_no_oa_bank_batch")
         self.assertEqual(payload["results"][2]["error"], "no_oa_bank_batch_version_conflict")
         self.assertEqual(payload["results"][3]["error"], "invalid_no_oa_bank_batch_request")
         self.assertEqual(payload["results"][4]["error"], "invalid_no_oa_bank_batch_request")
-        self.assertEqual(service.calls[-1][0], "after_mutation")
+        self.assertEqual(service.calls[-1][0], "persist_mutation")
         self.assertEqual(
             service.calls[-1][1],
             {
-                "affected_months": ["2026-05"],
                 "changed_case_ids": ["case-batch-001"],
-                "persist": True,
-                "action_name": "no_oa_bank_batch_submit",
+                "changed_scope_keys": ["2026-05"],
             },
         )
 

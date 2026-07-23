@@ -347,7 +347,7 @@ class SettingsDataResetServiceTests(unittest.TestCase):
             app = build_application(data_dir=Path(temp_dir))
             with patch.object(
                 app,
-                "_execute_derived_data_lifecycle_event",
+                "_execute_explicit_maintenance_lifecycle",
                 return_value={
                     "event": "settings_reset_completed",
                     "errors": [

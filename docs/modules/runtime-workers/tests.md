@@ -2,6 +2,12 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+## 2026-07-22 Phase 27 当前门禁
+
+- import registration 只含 `import.process.requested`；`import.fact.changed` 仅可出现在历史 orphan cleanup 诊断，不得出现在 worker registry/handler/env。
+- 普通写、import confirm 与 OA sync 不生成页面 refresh event；页面 query gateway 是精确 scope enqueue owner。
+- registry/manifest/env、zero-fan-out、worker exact-scope drain 与 access-to-fresh 必须分别验证。
+
 ## 修改前影响面清单
 
 Runtime worker 是全局后台执行面，修改前必须逐项确认影响范围：
@@ -17,7 +23,7 @@ Runtime worker 是全局后台执行面，修改前必须逐项确认影响范�
 | Readiness / App Health | `RuntimeMonitoringRepository`、`ReadModelReadinessReporter` | missing/stale/mismatch/failed/unavailable 聚合、scope 级诊断、worker kind/event type mismatch |
 | RabbitMQ transport | `rabbitmq_runtime.py`、dispatcher/consumer/preflight | RabbitMQ 只传 envelope/wakeup，不携带业务 payload；Postgres 仍是事实源；ack 必须在 Postgres claim 成功后 |
 | 运维命令 | `runtime_queue_ops`、scope contract check、readiness backfill | inspect/requeue/resolve-dead-letter 必须保留审计和 freshness 前置条件 |
-| 跨模块 fan-out | import、ETC、workbench、bank detail、invoice lifecycle、cost/tax read models | 新增事件不能绕过 gateway、registry 或 readiness reporter；旧页面不能读取 stale projection 伪装 fresh |
+| 跨模块访问收敛 | import、OA、ETC、workbench、bank detail、invoice lifecycle、cost/tax read models | 普通 writer 不 fan-out；访问 query 不能绕过 gateway、registry 或 readiness reporter，旧页面不能读取 stale projection 伪装 fresh |
 
 ## 场景覆盖清单
 

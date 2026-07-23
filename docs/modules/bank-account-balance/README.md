@@ -36,10 +36,10 @@
 
 - Projection save path 已通过 `BankAccountBalanceReadModelRepositoryPort.save_bank_account_balances(...)` 写入。
 - Bank Details accounts SQL read path 已通过显式 `BankAccountBalanceReadModelRepositoryPort` 读取；`BankDetailReadModelRepositoryPort` 不再暴露 `list_bank_account_balances(...)`。
-- Refresh producer 已通过 `BankAccountBalanceReadModelRefreshProducer` 收敛；Application、Bank Details service injection、runtime import-state fan-out、runtime derived lifecycle fan-out 和 backfill enqueue 均走该 producer。
+- Refresh producer 仅服务账户余额访问时 fresh gate 与显式 backfill/repair；Application、Bank Details 普通写、runtime import-state 和 derived lifecycle 不得调用该 producer或 fan-out 账户余额。
 - Derived lifecycle response assembly 已通过 `BankAccountBalanceDerivedLifecycleExecutor` 移出 Application。
 - `bank_account_balance:all` 是当前唯一 publish scope；`ReadModelRefreshGateway` 已通过 all-only scope policy 拒绝 month/account/active scope。
-- dedicated `bank_account_balance:all` operation barrier regression 已补齐。
+- `bank_account_balance:all` 访问时 non-fresh target 与显式 backfill/repair barrier regression 已补齐；普通银行导入 target 必须为空。
 - 2026-07-05 性能修复已把 projection 改为账户级 SQL 聚合、repository 批量写入，并为 stale source-version event 增加 skip；PostgreSQL hot-path index 由 `0089_read_model_performance_hot_paths.sql` 提供。
 - 真实 PostgreSQL/worker/App Status/high-row/browser evidence 仍需发布后复测闭环。
 

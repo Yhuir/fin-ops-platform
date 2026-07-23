@@ -97,7 +97,6 @@ describe("bank flow rule batch API", () => {
         { batch_id: "flow-batch-001", status: "withdrawn" },
         { batch_id: "flow-batch-002", status: "withdrawn" },
       ],
-      workbench_rebuild_queued: false,
     }), { status: 200, headers: { "Content-Type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -513,7 +512,6 @@ describe("bank flow rule batch API", () => {
       affected_months: ["2026-05"],
       affected_scope_keys: ["2026-05"],
       operation_barrier_targets: [],
-      workbench_rebuild_queued: false,
       results: [],
     }), { status: 200, headers: { "Content-Type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
@@ -577,7 +575,6 @@ describe("bank flow rule batch API", () => {
       },
       affected_months: ["2026-05"],
       operation_barrier_targets: [],
-      workbench_rebuild_queued: false,
       results: [{ batch_id: "batch-selected-fee", status: "submitted" }],
     }), { status: 200, headers: { "Content-Type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);

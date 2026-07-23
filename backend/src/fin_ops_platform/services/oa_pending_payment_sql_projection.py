@@ -163,10 +163,7 @@ class OaPendingPaymentSqlProjectionBuilder:
         ]
         payment_statuses = payment_status_repository.list_payment_statuses()
 
-        canonical_snapshot = PostgresWorkbenchRelationRepository(
-            connection,
-            enqueue_refreshes=False,
-        ).load_workbench_pair_relations_for_row_ids(
+        canonical_snapshot = PostgresWorkbenchRelationRepository(connection).load_workbench_pair_relations_for_row_ids(
             [record.id for record in completed_records],
         )
         canonical_relations = _active_relations(canonical_snapshot)

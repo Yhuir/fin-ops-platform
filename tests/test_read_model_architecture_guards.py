@@ -407,7 +407,7 @@ class ReadModelArchitectureGuardTests(unittest.TestCase):
         )
         preview_helper_body = server_source[preview_start:preview_end]
         start = server_source.index("    def _persist_confirmed_import_delta(")
-        end = server_source.index("\n    def _execute_import_state_changed_lifecycle", start)
+        end = server_source.index("\n    def _persist_workbench_pair_relations(", start)
         helper_body = server_source[start:end]
 
         self.assertNotIn("def _persist_import_preview_state(", server_source)
@@ -419,6 +419,7 @@ class ReadModelArchitectureGuardTests(unittest.TestCase):
         self.assertNotIn("_tax_certified_import_service.snapshot()", helper_body)
         self.assertIn('getattr(self._state_store, "save_import_delta", None)', helper_body)
         self.assertIn("persist(payload)", helper_body)
+        self.assertNotIn("def _execute_import_state_changed_lifecycle", server_source)
 
     def test_no_oa_bank_batches_are_not_written_by_broad_full_state_persist(self) -> None:
         server_source = (SOURCE_ROOT / "app" / "server.py").read_text(encoding="utf-8")
@@ -435,6 +436,63 @@ class ReadModelArchitectureGuardTests(unittest.TestCase):
         self.assertIn("class NoOaBankBatchReadModelPersistencePort", service_source)
         self.assertIn("def save_no_oa_bank_batch_mutation(", state_store_source)
         self.assertIn("def save_no_oa_bank_batch_mutation(", postgres_state_store_source)
+
+    def test_legacy_write_time_fan_out_contracts_do_not_return(self) -> None:
+        offenders: list[str] = []
+        forbidden_backend_tokens = (
+            "def after_mutation(",
+            '"workbench_rebuild_queued"',
+            "workbench_read_model_snapshot=self._workbench_read_model_service.snapshot()",
+            'affected_months or ["all"]',
+        )
+        for path in SOURCE_ROOT.rglob("*.py"):
+            source = path.read_text(encoding="utf-8")
+            for token in forbidden_backend_tokens:
+                if token in source:
+                    offenders.append(f"{path.relative_to(REPO_ROOT)} keeps {token}")
+
+        for path in WEB_SOURCE_ROOT.rglob("*.ts*"):
+            source = path.read_text(encoding="utf-8")
+            for token in ("workbench_rebuild_queued", "workbenchRebuildQueued"):
+                if token in source:
+                    offenders.append(f"{path.relative_to(REPO_ROOT)} keeps {token}")
+
+        self.assertEqual(offenders, [])
+
+    def test_only_runtime_queue_repository_writes_read_model_job_tables(self) -> None:
+        offenders: list[str] = []
+        runtime_queue_path = SOURCE_ROOT / "services" / "runtime_queue.py"
+        for path in (SOURCE_ROOT / "services").rglob("*.py"):
+            if path == runtime_queue_path:
+                continue
+            source = path.read_text(encoding="utf-8").lower()
+            for token in (
+                "insert into job.outbox_events",
+                "insert into job.read_model_dirty_scopes",
+            ):
+                if token in source:
+                    offenders.append(f"{path.relative_to(REPO_ROOT)} writes {token}")
+
+        self.assertEqual(offenders, [])
+
+    def test_global_refresh_is_owned_only_by_explicit_settings_reset(self) -> None:
+        offenders: list[str] = []
+        server_path = SOURCE_ROOT / "app" / "server.py"
+        server_source = server_path.read_text(encoding="utf-8")
+        reset_start = server_source.index("    def _execute_settings_data_reset(")
+        reset_end = server_source.index("\n    def ", reset_start + 5)
+        reset_body = server_source[reset_start:reset_end]
+        if reset_body.count("include_all=True") != 1:
+            offenders.append("settings reset must own exactly one explicit include_all=True maintenance call")
+        for path in SOURCE_ROOT.rglob("*.py"):
+            source = path.read_text(encoding="utf-8")
+            count = source.count("include_all=True")
+            if path == server_path:
+                count -= reset_body.count("include_all=True")
+            if count:
+                offenders.append(f"{path.relative_to(REPO_ROOT)} keeps {count} non-maintenance include_all=True call(s)")
+
+        self.assertEqual(offenders, [])
 
     def test_read_model_query_gateway_load_call_sites_declare_freshness_contract(self) -> None:
         offenders: list[str] = []

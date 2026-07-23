@@ -866,7 +866,7 @@ class AppSettingsServiceTests(unittest.TestCase):
         self.assertEqual(mapping_changed["pending_invoice_tag_groups"]["version"], initial["pending_invoice_tag_groups"]["version"] + 1)
         self.assertEqual(mapping_changed["pending_output_invoice_tag_groups"]["version"], initial["pending_output_invoice_tag_groups"]["version"])
 
-    def test_workbench_settings_api_pending_invoice_rules_trigger_lifecycle(self) -> None:
+    def test_workbench_settings_api_pending_invoice_rules_do_not_fan_out_on_write(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             app = build_application(data_dir=Path(temp_dir))
             queue_repository = RecordingQueueRepository()
@@ -904,11 +904,8 @@ class AppSettingsServiceTests(unittest.TestCase):
             )
             saved = app._app_settings_service.get_settings_payload()
 
-        enqueued_reasons = {reason for _scope_type, _scope_key, reason in queue_repository.enqueued}
-        enqueued_scope_types = {scope_type for scope_type, _scope_key, _reason in queue_repository.enqueued}
         self.assertEqual(response.status_code, 200)
-        self.assertIn("pending_invoice_rules_changed", enqueued_reasons)
-        self.assertIn("pending_invoice", enqueued_scope_types)
+        self.assertEqual(queue_repository.enqueued, [])
         self.assertEqual(saved["pending_invoice_tag_groups"]["version"], current["pending_invoice_tag_groups"]["version"] + 1)
 
     def test_income_and_expense_pending_invoice_rule_versions_are_independent(self) -> None:

@@ -62,7 +62,7 @@ React 启动时由 `SessionProvider` 调用 `fetchSessionMe()`，通过 `Session
 5. 当前可见页可以在成功后重新执行自己的普通 GET；未访问或 hidden 页面不执行 I/O。
 6. 页面进入、focus 或 hidden→visible 时，页面 query owner 比较 expected/actual source versions。只有 missing/stale 的当前精确 scope 经 `ReadModelRefreshGateway` 入 durable queue，worker 异步重建 projection，页面有界轮询到 fresh。
 
-显式 authoritative integration snapshot、data reset、repair/backfill/reapply 和人工 maintenance 可以按各自合同主动入队；它们必须被标记为 batch/full-history，经过 scope policy/gateway，并与普通用户写严格区分。`DerivedDataLifecycleService` 只服务这些已登记例外，不是普通写后的默认分发器。
+authoritative integration snapshot 默认同样只提交 canonical facts/source version；当前 OA sync 不主动入队页面 refresh。只有 data reset、repair/backfill/reapply 和人工 maintenance 可按已登记合同主动入队；它们必须被标记为 batch/full-history，经过 scope policy/gateway，并与普通用户写严格区分。`DerivedDataLifecycleService` 只服务管理员 settings reset 与历史 ETC repair，不是普通写后的默认分发器。
 
 写模型、权限认证、冲突校验不做“分发 read model”；它们保留明确 command/service 边界。
 

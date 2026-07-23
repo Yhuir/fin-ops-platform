@@ -258,8 +258,6 @@ type ApiBankFlowRuleBatchMutationResult = {
   freshnessTargets?: unknown;
   operation_barrier_targets?: unknown;
   operationBarrierTargets?: unknown;
-  workbench_rebuild_queued?: boolean | null;
-  workbenchRebuildQueued?: boolean | null;
   results?: Array<Record<string, unknown>>;
 };
 
@@ -577,7 +575,6 @@ function mapMutationResult(payload: ApiBankFlowRuleBatchMutationResult): BankFlo
     readModelScopeKeys,
     freshnessTargets,
     operationBarrierTargets: operationTargets.length > 0 ? operationTargets : freshnessTargets,
-    workbenchRebuildQueued: Boolean(payload.workbench_rebuild_queued ?? payload.workbenchRebuildQueued),
     results: Array.isArray(payload.results) ? payload.results : [],
   };
 }

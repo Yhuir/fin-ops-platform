@@ -13,7 +13,6 @@ from fin_ops_platform.services.postgres_repositories.read_models import (
 )
 from fin_ops_platform.services.postgres_repositories.workbench import PostgresWorkbenchRepository
 from fin_ops_platform.services.postgres_repositories.workbench_relation import PostgresWorkbenchRelationRepository
-from fin_ops_platform.services.read_model_scope_policy import DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY
 
 
 class TransactionRecorder:
@@ -178,27 +177,6 @@ class TurnoverGenerationConnection(RecordingConnection):
                 "published_source_version": self.published_source_version,
             }
         return None
-
-
-def _workbench_relation_batch_refresh_rows(connection: WorkbenchRelationWriteConnection) -> list[dict[str, object]]:
-    rows: list[dict[str, object]] = []
-    for sql, params in connection.fetched_all:
-        normalized_sql = " ".join(sql.lower().split())
-        if "with input(" not in normalized_sql or "insert into job.read_model_dirty_scopes" not in normalized_sql:
-            continue
-        for start in range(0, len(params), 9):
-            row = params[start : start + 9]
-            if len(row) != 9:
-                continue
-            rows.append(
-                {
-                    "scope_type": str(row[2]),
-                    "scope_key": str(row[3]),
-                    "event_type": str(row[7]),
-                    "dedupe_key": str(row[8]),
-                }
-            )
-    return rows
 
 
 class WorkbenchReadConnection:
@@ -1498,7 +1476,7 @@ def test_workbench_active_relation_overlap_load_is_one_history_free_query() -> N
     assert params == (["row-1"], ["case-1"])
 
 
-def test_workbench_relation_repository_save_writes_relation_history_and_refresh_scopes() -> None:
+def test_workbench_relation_repository_save_writes_only_relation_facts_and_history() -> None:
     connection = WorkbenchRelationWriteConnection()
     repository = PostgresWorkbenchRelationRepository(connection)
 
@@ -1528,17 +1506,13 @@ def test_workbench_relation_repository_save_writes_relation_history_and_refresh_
 
     executed_sql = " ".join(sql for sql, _params in connection.executed)
     fetch_all_sql = " ".join(sql for sql, _params in connection.fetched_all)
-    refresh_rows = _workbench_relation_batch_refresh_rows(connection)
     assert connection.transaction_enters == 1
     assert connection.transaction_exits == 1
     assert "insert into app.workbench_pair_relations" in executed_sql
     assert "delete from app.workbench_pair_relation_history" in executed_sql
     assert "insert into app.workbench_pair_relation_history" in executed_sql
-    assert "insert into job.read_model_dirty_scopes" in fetch_all_sql
-    assert "insert into job.outbox_events" in fetch_all_sql
-    assert any(row["scope_type"] == "workbench_relation" and row["scope_key"] == "2026-05" for row in refresh_rows)
-    assert any(row["event_type"] == "workbench_relation.read_model.refresh" for row in refresh_rows)
-    assert not any(row["event_type"] == "cost_statistics.read_model.refresh" for row in refresh_rows)
+    assert "job.read_model_dirty_scopes" not in fetch_all_sql
+    assert "job.outbox_events" not in fetch_all_sql
 
 
 def test_workbench_relation_repository_replaces_long_case_history_with_two_statements() -> None:
@@ -1668,7 +1642,7 @@ def test_workbench_relation_delta_appends_one_history_event_without_delete() -> 
     assert len(history_statements[0][1]) == 8
 
 
-def test_workbench_relation_transactional_refresh_scopes_match_scope_policy_contracts() -> None:
+def test_workbench_relation_transaction_does_not_write_page_refresh_scopes() -> None:
     connection = WorkbenchRelationWriteConnection()
     repository = PostgresWorkbenchRelationRepository(connection)
 
@@ -1689,15 +1663,13 @@ def test_workbench_relation_transactional_refresh_scopes_match_scope_policy_cont
         changed_case_ids={"case-1"},
     )
 
-    refresh_rows = _workbench_relation_batch_refresh_rows(connection)
-    dirty_scopes = [(row["scope_type"], row["scope_key"]) for row in refresh_rows]
-    outbox_scopes = [(row["scope_type"], row["scope_key"]) for row in refresh_rows]
-
-    assert dirty_scopes
-    assert dirty_scopes == outbox_scopes
-    for scope_type, scope_key in dirty_scopes:
-        normalized = DEFAULT_READ_MODEL_SCOPE_POLICY_REGISTRY.normalize_and_validate(scope_type, [scope_key])
-        assert normalized == [scope_key]
+    all_sql = " ".join(
+        sql
+        for calls in (connection.executed, connection.fetched_one, connection.fetched_all)
+        for sql, _params in calls
+    )
+    assert "job.read_model_dirty_scopes" not in all_sql
+    assert "job.outbox_events" not in all_sql
 
 
 def test_workbench_repository_delegates_pair_relation_load_to_relation_repository() -> None:

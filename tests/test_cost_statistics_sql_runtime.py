@@ -4191,7 +4191,10 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
             {"queue_repository": queue, "redis_helper": redis},
         )()
 
-        invalidated = app._invalidate_cost_statistics_read_model_scopes(["2026-05"], reason="unit_test")
+        invalidated = app._cost_statistics_runtime().invalidate_read_model_scopes(
+            ["2026-05"],
+            reason="unit_test",
+        )
 
         self.assertEqual(invalidated, ["active:2026-05", "all:2026-05"])
         self.assertEqual(

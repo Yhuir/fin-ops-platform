@@ -446,7 +446,6 @@ class AppHealthSystemAuditPostgresTests(unittest.TestCase):
         )
         PostgresOaPendingPaymentSourceSnapshotRepository(
             self.connection,
-            queue_repository=queue,
             pending_relation_repository=PostgresOaPendingPaymentRelationRepository(self.connection),
         ).commit_authoritative_snapshot(
             scope_key="all",

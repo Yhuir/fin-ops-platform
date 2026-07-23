@@ -31,7 +31,7 @@
 `以发票反提 OA` 的当前目标是：操作人在 FinOps 中选择目标 OA 申请人与发票，FinOps 后端使用目标 OA 申请人的已配置凭据创建 OA 暂存草稿；OA 提交流程由用户在 OA 系统中手动完成。草稿创建成功后本地 batch 立即进入 `暂存`，用户可以稍后选择 `我已在OA系统提交该草稿 / OA正在进行中` 或 `OA提交内容需修改 / 删除本次提交内容`；FinOps 只记录本地确认后的已提交历史。
 
 OA reverse batch 只记录本地流程状态；OA/发票 relation 事实必须通过 `WorkbenchRelationCommandService` 写入 `input_invoice_oa_reverse` 并由 `workbench_relation` read model 分发给相关页面。
-创建 OA 草稿、清除暂存、手动确认已提交都不改变进项使用 rows；这些动作不能触发或等待 `input_invoice_usage` read model 刷新。只有 evidence detected 后真正写入 relation 时，才污染受影响月份并返回 operation barrier target。
+创建 OA 草稿、清除暂存、手动确认已提交都不改变进项使用 rows；这些动作不能触发或等待 `input_invoice_usage` read model 刷新。evidence detected 后真正写入 relation 也只提交 canonical relation/version/audit，不投递页面 refresh；当前可见页重跑自身 normal GET，隐藏页在重新激活时由 fresh gate 按 exact scope 收敛。
 
 进项发票使用情况的列表和关系详情是读路径：关系证据来自 `WorkbenchRelationReadFacade` / `DistributedInvoiceRelationContext`，不直接调用 `WorkbenchRelationCommandService`。只有 Workbench active relation 能进入本页已关联口径；未正式化的自动匹配 decision 不作为本页 candidate relation 展示，本页不能直接读取关联台候选表或自行拼候选。
 

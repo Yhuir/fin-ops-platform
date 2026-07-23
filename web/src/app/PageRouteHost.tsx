@@ -45,13 +45,20 @@ export default function PageRouteHost({ routes }: { routes: AppPageRoute[] }) {
     const handleFocus = () => setActive(document.visibilityState !== "hidden", true);
     const handleBlur = () => setActive(false);
     const handleVisibilityChange = () => setActive(document.visibilityState !== "hidden");
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) {
+        setActive(document.visibilityState !== "hidden", true);
+      }
+    };
 
     window.addEventListener("focus", handleFocus);
     window.addEventListener("blur", handleBlur);
+    window.addEventListener("pageshow", handlePageShow);
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
       window.removeEventListener("focus", handleFocus);
       window.removeEventListener("blur", handleBlur);
+      window.removeEventListener("pageshow", handlePageShow);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, []);

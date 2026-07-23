@@ -16,9 +16,7 @@ from fin_ops_platform.services.import_job_queue import (
     ImportJobRepository,
     ImportJobWorker,
 )
-from fin_ops_platform.services.runtime_queue import RuntimeQueueEvent
 from fin_ops_platform.services.runtime_worker_handlers import (
-    IMPORT_FACT_CHANGED_EVENT,
     ImportRuntimeProcessorFactory,
     _input_invoice_usage_scope_keys_for_import_file_session,
     _output_invoice_collection_scope_keys_for_import_file_session,
@@ -408,18 +406,15 @@ class ImportJobRepositoryTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         payload = json.loads(stdout.getvalue())
         self.assertEqual(payload["worker_kind"], "import-job")
-        self.assertEqual(payload["event_types"], [IMPORT_PROCESS_REQUESTED_EVENT, "import.fact.changed"])
-        self.assertEqual(payload["handlers"], ["import.fact.changed", IMPORT_PROCESS_REQUESTED_EVENT])
+        self.assertEqual(payload["event_types"], [IMPORT_PROCESS_REQUESTED_EVENT])
+        self.assertEqual(payload["handlers"], [IMPORT_PROCESS_REQUESTED_EVENT])
         self.assertEqual(
             payload["rabbitmq_event_routes"][IMPORT_PROCESS_REQUESTED_EVENT]["queue"],
             "finops.import.process.requested",
         )
-        self.assertEqual(
-            payload["rabbitmq_event_routes"]["import.fact.changed"]["queue"],
-            "finops.import.fact.changed",
-        )
+        self.assertNotIn("import.fact.changed", payload["rabbitmq_event_routes"])
 
-    def test_worker_check_claims_import_fact_changed_in_postgres_mode(self) -> None:
+    def test_worker_check_claims_only_import_process_requested_in_postgres_mode(self) -> None:
         stdout = StringIO()
         with patch.dict(
             os.environ,
@@ -434,70 +429,18 @@ class ImportJobRepositoryTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         payload = json.loads(stdout.getvalue())
         self.assertEqual(payload["worker_kind"], "import-job")
-        self.assertEqual(payload["event_types"], [IMPORT_PROCESS_REQUESTED_EVENT, "import.fact.changed"])
-        self.assertEqual(payload["handlers"], ["import.fact.changed", IMPORT_PROCESS_REQUESTED_EVENT])
+        self.assertEqual(payload["event_types"], [IMPORT_PROCESS_REQUESTED_EVENT])
+        self.assertEqual(payload["handlers"], [IMPORT_PROCESS_REQUESTED_EVENT])
 
-    def test_import_fact_changed_handler_completes_matching_dirty_scope(self) -> None:
-        class FakeQueue:
-            def __init__(self) -> None:
-                self.enqueued: list[dict[str, object]] = []
-                self.completed: list[dict[str, object]] = []
-
-            def enqueue_read_model_refresh(self, **kwargs: object) -> None:
-                self.enqueued.append(dict(kwargs))
-
-            def complete_read_model_refresh(self, **kwargs: object) -> None:
-                self.completed.append(dict(kwargs))
-
-        queue = FakeQueue()
+    def test_import_handler_bundle_has_no_legacy_fact_changed_bridge(self) -> None:
         bundle = build_import_job_handler_bundle(
             connection=SimpleNamespace(),
             worker_id="worker-1",
             processors={},
-            include_import_fact_changed=True,
-            queue_repository=queue,
-        )
-        event = RuntimeQueueEvent(
-            event_id="event-1",
-            tenant_id="tenant-a",
-            event_type=IMPORT_FACT_CHANGED_EVENT,
-            aggregate_type="import_fact",
-            aggregate_id="2026-03",
-            scope_type="bank_detail",
-            scope_key="2026-03",
-            dedupe_key="import.fact.changed:bank_detail:2026-03",
-            payload={"scope_type": "bank_detail", "scope_key": "2026-03"},
-            attempts=1,
-            status="processing",
-            source_version=0,
         )
 
-        result = bundle.handlers[IMPORT_FACT_CHANGED_EVENT](event)
-
-        self.assertEqual(result["status"], "acknowledged")
-        self.assertTrue(result["refresh_enqueued"])
-        self.assertTrue(result["dirty_scope_completed"])
-        self.assertEqual(
-            queue.enqueued,
-            [
-                {
-                    "scope_type": "bank_detail",
-                    "scope_key": "2026-03",
-                    "reason": "import_facts_changed",
-                }
-            ],
-        )
-        self.assertEqual(
-            queue.completed,
-            [
-                {
-                    "tenant_id": "tenant-a",
-                    "scope_type": "bank_detail",
-                    "scope_key": "2026-03",
-                    "source_version": 0,
-                }
-            ],
-        )
+        self.assertEqual(set(bundle.handlers), {IMPORT_PROCESS_REQUESTED_EVENT})
+        self.assertNotIn("import.fact.changed", bundle.handlers)
 
     def test_tax_certified_import_confirm_queue_result_can_be_polled(self) -> None:
         app = build_application()

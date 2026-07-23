@@ -225,7 +225,7 @@
 - 变更类型：settings-backed rule contract + read model payload contract + frontend drawer interaction。
 - 架构结论：成本统计标签规则由 `AppSettingsService` 持久化，暴露主/子标签 leaf code 与虚拟 `__uncategorized__` 未分类标签；当前 schema v2 默认全选有效收入与支出标签 + 未分类，显式空数组表示全部不进入成本统计。`按项目`、`按银行`、`按OA费用类型` 只统计 OA 配对支出 `time_rows`；`按标签`、`按时间` 统计全部银行收支 `bank_flow_time_rows`。规则保存不触发 read model rebuild。
 - 新增/更新测试：`tests/test_app_settings_service.py`、`tests/test_cost_statistics_sql_runtime.py`、`tests/test_cost_statistics_api.py`、`web/src/test/CostStatisticsApi.test.ts`、`web/src/test/CostStatisticsPage.test.tsx`。
-- 覆盖点：默认标签选择包含有效收支标签和未分类；保存空选择可持久化；API 读写标签规则并返回空 targets，缺少写权限时不调用 settings service；query service 对 OA 配对行和全银行收支行按同一标签规则过滤；前端 mapper 支持 `bank_flow_time_rows`；规则抽屉保存后递增当前页 query nonce 并关闭，不等待 operation barrier。
+- 覆盖点：默认标签选择包含有效收支标签和未分类；保存空选择可持久化；API 读写标签规则并返回空 targets，缺少写权限时不调用 settings service；query service 对 OA 配对行和全银行收支行按同一标签规则过滤；前端 mapper 支持 `bank_flow_time_rows`；规则抽屉保存后递增当前页 query nonce并关闭，不等待 operation barrier；Browser 记录 Drawer 打开/保存 latency、PUT 一次、当前 explorer normal GET 与零 barrier。
 - 七类测试决策：business core 适用，覆盖标签选择和金额口径过滤；service-layer 适用，覆盖 settings 持久化、query service 过滤和 read model payload 使用；API contract 适用，覆盖 `GET/PUT /api/cost-statistics/tag-rules` 与空 targets；read model/cache/background job 适用，覆盖 query-time filtering 和不触发 rebuild；frontend interaction 适用，覆盖紧凑抽屉、normal GET 和零 barrier；existing regression 覆盖 explorer、五视图、导出/详情不回退 live fallback。
 - 验证命令：见本轮最终说明。
 

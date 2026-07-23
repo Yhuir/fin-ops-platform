@@ -1,8 +1,10 @@
 # 成本统计高性能、鲜度与轻量锁定遮罩设计
 
-> 状态：relation 写后精准增量已实现，`PRODUCTION_VERIFICATION_PENDING`
+> 历史设计说明（2026-07-22）：本文保留成本模块此前的演进记录。其“relation 写后事务内投递成本增量”“Workbench 发布后再投递成本收敛”等主动 fan-out 段落已被 Phase 27 取代：普通 relation/rule write 只提交 canonical fact/version，成本页访问或重新激活时由 dependency-bound fresh gate 比较 exact scope，mismatch 才经 gateway 去重入队；显式维护命令仍按运维合同执行。当前边界以 `boundary-io.md` 与 `docs/architecture/module-boundaries/read-model-contracts.md` 为准。
+>
+> 状态：历史设计；Phase 27 本地迁移完成，`PRODUCTION_VERIFICATION_PENDING`
 > 日期：2026-07-18
-> 范围：`/cost-statistics` 页面、`cost_statistics` read model / worker / query / Audit 链路，以及直接影响该 read model 的发布后 fan-out
+> 范围：`/cost-statistics` 页面、`cost_statistics` read model / worker / query / Audit 链路，以及历史发布后 fan-out 方案
 > 本文是唯一主设计与实施校准文档；已落地内容和剩余门禁必须在此区分，不以设计项冒充完成项。
 
 ## 1. 结论
