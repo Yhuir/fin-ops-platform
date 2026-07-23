@@ -910,13 +910,16 @@ PYTHONPATH="$release_src/backend/src" \
 ## Ensure refresh 与真实写入 dirty 的边界
 
 `dependency_not_fresh`、`api_*`、`pending_invoice_sql_projection`、`bank_detail_relation_tags_read`、
-`workbench_relation_write_precondition`、`downstream_bank_tag_read` 属于 ensure/wakeup 类刷新请求。成本统计读取
+`workbench_relation_write_precondition`、`downstream_bank_tag_read`、`cost_statistics_workbench_dependency_stale`
+属于 ensure/wakeup 类刷新请求。成本统计读取
 `bank_detail` source versions、transaction tags 或 month rows 时必须统一复用 `downstream_bank_tag_read`，不能另造绕过
 active coalescing 的 reason。它们只能确保目标
 read model 有 refresh 在跑；当同一 `tenant_id + scope_type + scope_key` 已经 `pending` 或 `processing` 时，
 `ReadModelRefreshGateway` 必须 coalesce，不应 bump `source_version`，否则 downstream projection 会追逐移动目标。
 active 的事实判断必须读取 `job.read_model_dirty_scopes` 的 `pending/processing` 状态；outbox event 可能先于实际 projection
-完成而进入 terminal 状态，不能单独作为“刷新已结束”的证明。页面轮询只负责 ensure，不得在这个窗口重复创建 source version。
+完成而进入 terminal 状态，不能单独作为“刷新已结束”的证明。Workbench 重建进行中时，成本统计的 Workbench
+依赖检查也必须复用该 active refresh，不得让下游访问把 in-flight Workbench publish supersede。页面轮询只负责 ensure，
+不得在这个窗口重复创建 source version。
 上述 coalesce 仅适用于普通 ensure/wakeup；显式 `force_refresh=true` 必须保留独立 durable event 语义。
 
 真实写入原因，例如 `workbench_relation_changed`、`confirm_link`、`withdraw_link`、导入/设置/标签变更，仍然必须写

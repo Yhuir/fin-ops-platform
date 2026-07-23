@@ -150,6 +150,7 @@ _ACTIVE_COALESCED_REFRESH_REASONS = {
     "pending_invoice_sql_projection",
     "bank_detail_all_shard",
     "bank_detail_relation_tags_read",
+    "cost_statistics_workbench_dependency_stale",
     "cost_statistics_all_shard",
     "cost_statistics_shard_converged",
     "workbench_relation_write_precondition",

@@ -271,20 +271,24 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
     def test_ensure_refresh_reason_does_not_bump_active_scope(self) -> None:
         from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 
-        for reason in ("pending_invoice_sql_projection", "downstream_bank_tag_read"):
+        for scope_type, scope_key, reason in (
+            ("bank_detail", "2026-02", "pending_invoice_sql_projection"),
+            ("bank_detail", "2026-02", "downstream_bank_tag_read"),
+            ("workbench", "2026-02", "cost_statistics_workbench_dependency_stale"),
+        ):
             with self.subTest(reason=reason):
                 queue = QueueRecorder()
-                queue.active_refreshes.add(("default", "bank_detail", "2026-02"))
+                queue.active_refreshes.add(("default", scope_type, scope_key))
                 gateway = ReadModelRefreshGateway(queue_repository=queue)
 
                 enqueued = gateway.enqueue_many(
-                    "bank_detail",
-                    ["2026-02"],
+                    scope_type,
+                    [scope_key],
                     reason=reason,
                 )
 
-                self.assertEqual(enqueued, ["2026-02"])
-                self.assertEqual(queue.active_checks, [("default", "bank_detail", "2026-02")])
+                self.assertEqual(enqueued, [scope_key])
+                self.assertEqual(queue.active_checks, [("default", scope_type, scope_key)])
                 self.assertEqual(queue.refreshes, [])
 
     def test_bank_detail_all_shard_reason_does_not_bump_active_scope(self) -> None:
