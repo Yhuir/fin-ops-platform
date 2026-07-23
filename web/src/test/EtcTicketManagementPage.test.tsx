@@ -3697,6 +3697,7 @@ describe("ETC ticket management page", () => {
     await user.click(within(page).getByRole("button", { name: "提交审批" }));
     await user.click(within(await screen.findByRole("dialog", { name: "创建审批草稿" })).getByRole("button", { name: "创建草稿" }));
     const resultDialog = await screen.findByRole("dialog", { name: "确认 OA 草稿处理结果" });
+    await waitFor(() => expect(resultDialog.contains(document.activeElement)).toBe(true));
     await user.keyboard("{Escape}");
     await waitFor(() => expect(resultDialog).not.toBeInTheDocument());
     await user.click(within(page).getByRole("radio", { name: "暂存 2" }));
