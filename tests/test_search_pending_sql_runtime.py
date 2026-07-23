@@ -1351,6 +1351,40 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
             ],
         )
 
+    def test_pending_invoice_filtered_source_provider_uses_direction_wide_dependencies(self) -> None:
+        class PendingSourceVersionRepository:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, dict[str, object]]] = []
+
+            def pending_invoice_bank_detail_source_versions(self, **kwargs: object) -> dict[str, object]:
+                self.calls.append(("bank", dict(kwargs)))
+                return {"2026-01": {"source": "bank"}}
+
+            def pending_invoice_workbench_relation_source_versions(self, **kwargs: object) -> dict[str, object]:
+                self.calls.append(("relation", dict(kwargs)))
+                return {"2026-01": {"source": "relation"}}
+
+        repository = PendingSourceVersionRepository()
+        provider = PendingInvoiceSourceVersionsProvider(
+            settings_provider=lambda: {},
+            attachment_invoice_parser_version_provider=lambda: "parser-v1",
+            oa_projection_sync_version_provider=lambda: "oa-sync-v1",
+            repository=repository,
+        )
+
+        provider(
+            query={"direction": ["income"], "filter": ["cash_income"]},
+            payload={},
+        )
+
+        self.assertEqual(
+            repository.calls,
+            [
+                ("bank", {"direction": "income", "filter": "all"}),
+                ("relation", {"direction": "income", "filter": "all"}),
+            ],
+        )
+
     def test_pending_invoice_writer_and_api_source_version_contracts_match(self) -> None:
         connection = SearchPendingConnection()
         builder = SearchPendingSqlProjectionBuilder(connection=connection)
@@ -3269,6 +3303,51 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(
             source_versions["bank_detail_source_versions"],
             {"2026-05": {"bank_detail_schema_version": 12, "rules": 8}},
+        )
+
+    def test_pending_invoice_filtered_scope_keeps_zero_row_month_dependency_proofs(self) -> None:
+        class PendingScopeConnection:
+            def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:
+                if "from read_model.pending_invoice_scopes" not in " ".join(sql.lower().split()):
+                    return []
+                return [
+                    {
+                        "scope_key": "income:cash_income:2026-04",
+                        "row_count": 0,
+                        "source_versions": {
+                            **_pending_invoice_expected_source_versions(),
+                            "bank_detail_source_versions": {"source_version": 7},
+                            "workbench_relation_source_versions": {"source_version": 41},
+                        },
+                    },
+                    {
+                        "scope_key": "income:cash_income:2026-05",
+                        "row_count": 0,
+                        "source_versions": {
+                            **_pending_invoice_expected_source_versions(),
+                            "bank_detail_source_versions": {"source_version": 8},
+                            "workbench_relation_source_versions": {"source_version": 42},
+                        },
+                    },
+                ]
+
+        repository = PostgresReadModelRepository(PendingScopeConnection())
+
+        scope_row = repository._pending_invoice_scope_row("income:cash_income")
+
+        self.assertEqual(
+            scope_row["source_versions"]["bank_detail_source_versions"],
+            {
+                "2026-04": {"source_version": 7},
+                "2026-05": {"source_version": 8},
+            },
+        )
+        self.assertEqual(
+            scope_row["source_versions"]["workbench_relation_source_versions"],
+            {
+                "2026-04": {"source_version": 41},
+                "2026-05": {"source_version": 42},
+            },
         )
 
     def test_pending_invoice_repository_loads_workbench_relation_source_versions_for_matching_months(self) -> None:

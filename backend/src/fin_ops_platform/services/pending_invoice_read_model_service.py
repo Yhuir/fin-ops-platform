@@ -712,7 +712,6 @@ class PendingInvoiceSourceVersionsProvider:
         payload: dict[str, Any],
     ) -> dict[str, Any]:
         direction = str(query.get("direction", [payload.get("direction") or "expense"])[0] or "expense").strip()
-        filter_name = str(query.get("filter", [payload.get("filter") or "all"])[0] or "all").strip() or "all"
         if direction == "all":
             result: dict[str, Any] = {}
             for child_direction in ("expense", "income"):
@@ -720,4 +719,4 @@ class PendingInvoiceSourceVersionsProvider:
                 if isinstance(child_versions, dict) and child_versions:
                     result[child_direction] = dict(child_versions)
             return result
-        return dict(source_versions_loader(direction=direction, filter=filter_name) or {})
+        return dict(source_versions_loader(direction=direction, filter="all") or {})

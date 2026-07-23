@@ -4625,7 +4625,12 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
             """,
             (scope_key, f"{scope_key}:%"),
         )
-        return _pending_invoice_scope_source_versions_row(scope_key=scope_key, rows=rows)
+        _direction, filter_group, _month = _parse_pending_invoice_scope_key(scope_key)
+        return _pending_invoice_scope_source_versions_row(
+            scope_key=scope_key,
+            rows=rows,
+            include_empty=filter_group != "all",
+        )
 
 
     def pending_invoice_bank_detail_source_versions(
