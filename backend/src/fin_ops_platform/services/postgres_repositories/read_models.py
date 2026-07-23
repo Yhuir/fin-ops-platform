@@ -16911,6 +16911,13 @@ def _pending_invoice_scope_source_versions_row(
     normalized_rows = [row for row in list(rows or []) if isinstance(row, dict)]
     if not normalized_rows:
         return None
+    child_rows = [
+        row
+        for row in normalized_rows
+        if text(row.get("scope_key")).startswith(f"{scope_key}:")
+    ]
+    if child_rows:
+        normalized_rows = child_rows
     if len(normalized_rows) == 1:
         row = normalized_rows[0]
         return {

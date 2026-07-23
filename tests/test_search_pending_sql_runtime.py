@@ -3312,6 +3312,16 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                     return []
                 return [
                     {
+                        "scope_key": "income:cash_income",
+                        "row_count": 0,
+                        "source_versions": {
+                            **_pending_invoice_expected_source_versions(),
+                            "bank_auto_tag_rules_version": 1,
+                            "bank_detail_source_versions": {"legacy": "parent"},
+                            "workbench_relation_source_versions": {"legacy": "parent"},
+                        },
+                    },
+                    {
                         "scope_key": "income:cash_income:2026-04",
                         "row_count": 0,
                         "source_versions": {
