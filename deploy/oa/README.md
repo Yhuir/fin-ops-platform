@@ -514,6 +514,8 @@ apply 的 Admin Token 与 approval ticket 只从 stdin 的前两行读取，固�
 “所有页面一秒级真同步”的性能声明。
 `api-request-error` 只接受 API 返回的 12 位小写十六进制 request ID，并只从最近两小时
 `fin-ops.service` journal 返回匹配的单行异常摘要；它不开放任意 journal 参数或日志全文。
+`api-request-trace` 使用同一严格 request ID，从该摘要开始最多返回 32 行，并在 traceback 的异常终止行
+立即停止；它不包含 locals、不接受任意时间窗或 journal 参数，用于把生产 500 精确定位到文件和行号。
 `api-request-timing` 使用同一 request ID，只返回最近两小时最多 32 条结构化
 `workbench_action_timing` 记录；它不返回业务 payload，也不开放时间窗或 journal 参数。
 

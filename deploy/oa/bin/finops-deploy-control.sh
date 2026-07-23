@@ -60,6 +60,7 @@ commands:
                                       delete one exact verified write-smoke backup
   write-operation-e2e-smoke <release-name> <scenario-path> [--dry-run|--apply-stdin]
   api-request-error <request-id>
+  api-request-trace <request-id>
   api-request-timing <request-id>
                                       run the fixed production relation runner; admin token is read from stdin
   read-model-refresh <release-name> [args]
@@ -792,6 +793,30 @@ api_request_error() {
   printf '%s\n' "$match"
 }
 
+api_request_trace() {
+  local request_id="${1:-}"
+  [[ "$request_id" =~ ^[0-9a-f]{12}$ ]] || die "request id must be 12 lowercase hexadecimal characters"
+  [[ $# -le 1 ]] || die "api-request-trace accepts only request id"
+  local journal line_number trace
+  journal="$(journalctl -u fin-ops.service --since '2 hours ago' --no-pager -o cat)"
+  line_number="$(printf '%s\n' "$journal" | grep -n -F "request_id=$request_id" | tail -n 1 | cut -d: -f1 || true)"
+  [[ "$line_number" =~ ^[0-9]+$ ]] || die "request trace not found in the bounded journal window"
+  trace="$(
+    printf '%s\n' "$journal" \
+      | tail -n "+$line_number" \
+      | awk '
+          NR <= 32 {
+            print
+            if (NR > 1 && $0 ~ /^[A-Za-z_][A-Za-z0-9_.]*(Error|Exception)(:|$)/) {
+              exit
+            }
+          }
+        '
+  )"
+  [[ -n "$trace" ]] || die "request trace not found in the bounded journal window"
+  printf '%s\n' "$trace"
+}
+
 api_request_timing() {
   local request_id="${1:-}"
   [[ "$request_id" =~ ^[0-9a-f]{12}$ ]] || die "request id must be 12 lowercase hexadecimal characters"
@@ -929,6 +954,10 @@ case "$cmd" in
   api-request-error)
     shift
     api_request_error "$@"
+    ;;
+  api-request-trace)
+    shift
+    api_request_trace "$@"
     ;;
   api-request-timing)
     shift
