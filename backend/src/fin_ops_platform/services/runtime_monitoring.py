@@ -1449,44 +1449,10 @@ class RuntimeMonitoringRepository:
             where worker_kind <> 'runtime'
             """
         )
-        refresh_failure_row = self._connection.fetch_one(
-            f"""
-            with event_type_filter(event_type) as (
-              select unnest(%s::text[])
-            ),
-            recent_refresh_events as (
-              select refresh_event.status
-              from event_type_filter
-              cross join lateral (
-                select status, updated_at
-                from job.outbox_events
-                where event_type = event_type_filter.event_type
-                  and event_type like '%%.read_model.refresh'
-                  and {_CURRENT_EFFECTIVE_OUTBOX_EVENT_PREDICATE_SQL}
-                  and (
-                    status in ('failed', 'dead_lettered')
-                    or (
-                      status = 'done'
-                      and raw_payload->'runtime_result' ? 'duration_ms'
-                    )
-                  )
-                order by updated_at desc
-                limit %s
-              ) refresh_event
-            )
-            select
-              count(*) filter (where status in ('failed', 'dead_lettered'))::bigint as failed_count,
-              count(*)::bigint as read_model_refresh_total
-            from recent_refresh_events
-            """,
-            (list(READ_MODEL_EVENT_TYPES.keys()), READ_MODEL_REFRESH_METRIC_SAMPLE_LIMIT),
-        )
         queue_backlog = outbox_summary["queue_backlog"]
         dirty_scopes = dirty_summary["dirty_scopes"]
         publish_status = outbox_summary["publish_status"]
         stale_dirty_scopes = dirty_summary["stale_dirty_scopes"]
-        total_refresh_count = int((refresh_failure_row or {}).get("read_model_refresh_total") or 0)
-        failed_refresh_count = int((refresh_failure_row or {}).get("failed_count") or 0)
         worker_metrics = self.dashboard_worker_metrics()
         missing_required_worker_count = sum(1 for row in worker_metrics if row.get("warning_code") == "required_worker_missing")
         stale_required_worker_count = sum(1 for row in worker_metrics if row.get("warning_code") == "worker_heartbeat_stale")
@@ -1507,10 +1473,6 @@ class RuntimeMonitoringRepository:
             "missing_required_worker_count": missing_required_worker_count,
             "stale_required_worker_count": stale_required_worker_count,
             "mismatched_required_worker_count": mismatched_required_worker_count,
-            "read_model_refresh_sample_count": total_refresh_count,
-            "read_model_refresh_failure_rate": (
-                round(failed_refresh_count / total_refresh_count, 6) if total_refresh_count else 0.0
-            ),
             "rabbitmq_publish_status": publish_status,
             "rabbitmq_unpublished_backlog": int(publish_status.get("unpublished", 0)),
             "rabbitmq_publish_failed_backlog": int(publish_status.get("failed", 0)),

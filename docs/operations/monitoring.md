@@ -79,6 +79,7 @@ create index if not exists workbench_group_rows_column_values_gin on read_model.
 - 工作台实时刷新事件由 `/api/workbench/events` 暴露。SSE 连接失败时前端应回退 `/api/workbench/refresh-status`，运维排障需要同时查看代理是否缓冲 `text/event-stream`、worker lag 和 dirty scope 状态。
 - `/health` / `/health/ready` 输出 bounded `api_performance` 进程内 rolling window 摘要，按 `METHOD path` 聚合 `duration_ms`、`connection_acquire_ms`、`sql_execute_fetch_ms`、`database_duration_ms` 和 `database_query_count` 的 p50/p95/p99，但只保留 p95 最慢的有限 endpoint，并通过 `endpoint_count` / `omitted_endpoint_count` 标明是否被截断。完整 endpoint 明细由 `/metrics` 或 admin-only `/api/operations/app-health-dashboard` 提供。
 - P2/P3 readiness payload gate 使用 `health_ready_payload_probe` 验证 `/fin-ops-api/health/ready` 本身不成为慢探针：默认要求 1000ms 内、JSON、response 不超过 50KB、`api_performance.endpoints<=20` 且带 `endpoint_count` / `omitted_endpoint_count`；ready payload 只保留 runtime blocker 需要的 counts、status summary 和 bounded problem samples，不输出完整 `entrypoints`、`worker_metrics` 或重复的 `storage.runtime_infrastructure`；慢、大、未截断、缺 metadata 或 HTML fallback 均视为失败。
+- `/health/ready` 只计算当前 blocker：current-effective outbox、dirty scope、required worker heartbeat 和发布状态；历史完成 refresh 的 duration/failure 样本不属于 readiness blocker，不在该热路径读取。完整历史/窗口性能指标保留在 `/health`、`/metrics` 和 admin-only Operations dashboard。
 - 不输出 token、密码、完整附件正文或敏感原始文件内容。
 - 高风险动作需要审计日志，不只依赖应用日志。
 
@@ -99,7 +100,7 @@ create index if not exists workbench_group_rows_column_values_gin on read_model.
 - `read_model_refresh_by_key`：按 read model key / event type 拆分的 bounded refresh duration、enqueue-to-fresh p50/p95/p99、样本数、失败数和失败率，用于定位拖慢总体 p95 的具体 projection。
 - `read_model_refresh_current_windows`：按固定窗口 `recent_15m` / `recent_1h` / `recent_6h` 聚合的当前 enqueue-to-fresh 和 duration SLO 口径，用于把当前体验和历史滞留 repair 样本分开。
 - `read_model_refresh_by_key_current_windows`：按 read model key / event type / current window 拆分当前 SLO，用于定位当前窗口内仍慢的 projection。
-- `read_model_refresh_slow_events`：最近 bounded 样本中最慢的有限条 outbox event 摘要，包含 event/scope/status/source_version/duration/enqueue-to-fresh/skipped 信息；该字段只用于 `/health/ready` drilldown，不把 `event_id` 或 `scope_key` 作为 Prometheus label。
+- `read_model_refresh_slow_events`：最近 bounded 样本中最慢的有限条 outbox event 摘要，包含 event/scope/status/source_version/duration/enqueue-to-fresh/skipped 信息；该字段用于完整 runtime drilldown，不进入 `/health/ready` 热路径，也不把 `event_id` 或 `scope_key` 作为 Prometheus label。
 - `read_model_refresh_current_slow_events`：`recent_6h` bounded 样本中最慢的有限条 event/scope 摘要，用于定位当前窗口内具体慢 scope；同样不作为 Prometheus label 导出。
 - `stale_dirty_scope_count` 和 `stale_dirty_scopes`：超时 dirty scope 摘要。
 - `read_model.workbench_generation_consistency`：active workbench generation 的 metadata、实际 rows/groups、对象身份跨区一致性和可见 row 归属唯一性。`inconsistent` 必须按 read model unavailable 处理；如果原因是 `duplicate_invoice_identity_cross_zone`、`duplicate_bank_identity_cross_zone` 或 `duplicate_row_membership`，先运行 `python3 -m fin_ops_platform.tools.audit_object_identity --json --workbench-scope <scope>` 定位重复对象，再重建受影响 workbench/workbench_relation scope。发布前也要用同一审计命令确认 `workbench_unpaired_visible_owner_duplicate_group_count=0`；同一命令的 `blocking_issue_count` 只计入强发票 identity、银行 identity、OA 附件强 identity、Workbench 归属和 active relation orphan 风险，弱税额指纹与 `app.etc_invoices` 原始来源重复只作为 warning。
