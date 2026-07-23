@@ -161,7 +161,9 @@ class OutputInvoiceCollectionReadApplicationService:
         if not self._allow_live_fallback:
             return OutputInvoiceCollectionReadModelDetailService.refreshing_payload(
                 kind=query.get("kind", [""])[0],
-                scope_key="all",
+                scope_key=OutputInvoiceCollectionReadModelFreshGateService.scope_key_from_query(
+                    query
+                ),
             )
         return self._query_service.row_relation_details(row_id, kind=query.get("kind", [""])[0])
 

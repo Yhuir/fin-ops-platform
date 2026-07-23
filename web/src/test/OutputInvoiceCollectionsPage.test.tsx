@@ -1108,6 +1108,7 @@ describe("Output invoice collections page", () => {
       .map(([input]) => new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost"))
       .filter((url) => url.pathname === "/api/output-invoice-collections/rows/output-collection-row-multi/relation-details");
     expect(relationRequests.map((url) => url.searchParams.get("kind"))).toEqual(["oa", "bank", "invoice"]);
+    expect(relationRequests.map((url) => url.searchParams.get("month"))).toEqual(["2026-05", "2026-05", "2026-05"]);
   });
 
   test("opens the three right-side workflow drawers without reloading the main rows", async () => {

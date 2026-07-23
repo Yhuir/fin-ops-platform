@@ -97,7 +97,25 @@ class WorkbenchQueryFacade:
         )
         if dependency_cache_status != "fresh":
             if dependency_cache_status in {"refreshing", "stale", "missing", "schema_mismatch"}:
-                self._enqueue_refresh(scope_key, reason="api_initial_page_relation_dependency_stale")
+                dependency_scope_keys = (
+                    list(dependency_status_payload.get("refresh_scope_keys") or [])
+                    if isinstance(dependency_status_payload, dict)
+                    else []
+                )
+                refresh_scope_keys = (
+                    [scope_key]
+                    if scope_key != "all"
+                    else [
+                        str(candidate).strip()
+                        for candidate in dependency_scope_keys
+                        if str(candidate).strip() and str(candidate).strip() != "all"
+                    ]
+                )
+                for refresh_scope_key in dict.fromkeys(refresh_scope_keys):
+                    self._enqueue_refresh(
+                        refresh_scope_key,
+                        reason="api_initial_page_relation_dependency_stale",
+                    )
             return self._non_fresh_initial_page_result(
                 current_month=current_month,
                 scope_key=scope_key,

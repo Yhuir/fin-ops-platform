@@ -55,6 +55,18 @@ class InputInvoiceUsageReadModelRepositoryPort:
         )
         return dict(payload) if isinstance(payload, dict) else None
 
+    def input_invoice_usage_scope_source_versions(
+        self,
+        *,
+        scope_key: str,
+        tenant_id: str = "default",
+    ) -> dict[str, object]:
+        payload = self._repository.input_invoice_usage_scope_source_versions(
+            scope_key=scope_key,
+            tenant_id=tenant_id,
+        )
+        return dict(payload) if isinstance(payload, dict) else {}
+
     def get_input_invoice_usage_row_by_row_id(self, row_id: str) -> dict[str, object] | None:
         payload = self._repository.get_input_invoice_usage_row_by_row_id(row_id)
         return dict(payload) if isinstance(payload, dict) else None

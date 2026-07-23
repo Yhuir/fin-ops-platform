@@ -51,7 +51,7 @@
 - `OutputInvoiceCollectionApiRoutes` 只负责 HTTP/session/权限/响应映射；rows、filter-options、export-preview、export 和 relation detail 的 SQL read model 编排由 `OutputInvoiceCollectionReadApplicationService` 负责。
 - 生产 PostgreSQL runtime 下，SQL read repository 缺失也属于 read model unavailable：API 必须 enqueue `output_invoice_collection` 对应 month/all scope 并返回 `read_model_status=refreshing`，不能回退 `OutputInvoiceCollectionQueryService.list_rows(...)` 或返回 `live_query`。legacy/local 模式保留 query service 作为开发兼容路径。
 - 页面首屏和筛选态由 rows 与 filter-options 两个读接口共同证明 fresh。前端必须合并两者的 `readModelStatus` / `read_model_status`：任一接口返回 `stale`、`missing`、`schema_mismatch`、`refreshing` 或等价非 fresh 状态时，页面整体进入刷新诊断，不展示普通空态，不启用导出，也不把另一接口的 fresh 空 rows 当成最终事实。
-- 生产 PostgreSQL runtime 下，`/rows/{row_id}/relation-details` 也必须优先读取 SQL read model detail row；SQL read repository 或 row detail lookup 缺失时返回 `202`、`read_model_status=refreshing` 并 enqueue `output_invoice_collection:all`，不能回退 live detail rebuild。legacy/local 模式保留 query service detail 作为开发兼容路径。
+- 生产 PostgreSQL runtime 下，`/rows/{row_id}/relation-details` 必须优先读取 SQL read model detail row，并由页面携带当前行 `month`。SQL read repository 或 row detail lookup 缺失时只对该具体月份返回 `202`/refreshing 并 enqueue；没有合法月份时 fail closed 且零 enqueue，禁止回退 `output_invoice_collection:all` 或 live detail rebuild。legacy/local 模式保留 query service detail 作为开发兼容路径。
 - fresh SQL rows 在返回前叠加 lifecycle facts：`collectionStatus`、手动状态、提醒、红蓝票关系和正式收据摘要。
 - 页面展示统一关系事实源中的 OA、收入流水和销项发票项：rows 中 `oa`、`bankTransactions`、`invoiceRelations` 都携带 `relationCount`、`hasMultiple`、`detailMode` 和 `summaries`；同一 linked relation 下多张销项发票由 `output_invoice_collection` 投影为一条收款行，发票金额按成员净额汇总，负数/红字发票必须进入 `invoiceRelations.summaries`。多项对象在对应栏显示 `+N`，其中 `N=relationCount-1` 表示除主展示对象外的额外项数，点击 `/rows/{row_id}/relation-details?kind=oa|bank|invoice` 展开全部明细。销项发票栏多项时仍显示当前行的发票主信息和多张发票合计，避免只剩 `+N` 无合计。
 - 页面表头显示的 `销项票 N` 是 rows summary 的唯一销项发票数，用于核对销项发票数据拉取完整性；linked 多销项发票 relation 归并为一条 row 时，必须计入所有 `invoiceRelations.summaries` 成员。`pagination.total` 只代表表格行数/配对组行数，不能作为发票数量。
@@ -62,6 +62,7 @@
 - 正式收据创建必须有 `Idempotency-Key` 或 body `idempotencyKey`；历史接口返回真实 receipt lifecycle facts，不伪造空历史。
 - `output_invoice_collection_source_versions()` 包含销项收款 read model、invoice lifecycle policy、lifecycle facts、status rules、receipt schema 和 OA projection sync 版本；统一关系展示字段缺失属于 SQL payload schema stale，必须 enqueue refresh。
 - `output_invoice_collection:all` 在 refresh 链路中是 fan-out 到月份 shard 的控制 scope；页面默认 all 查询的 freshness 证明来自实际 rows/month scopes 和 active dirty/outbox 状态。month scope 必须继续严格比对对应月份 `workbench_relation` source versions；all 查询不能直接使用全局 `workbench_relation:all` source versions 作为 expected contract，否则会把已 fresh 的月份 shard 误判为 stale 并反复显示“正在刷新”。
+- 默认 all 页面查询不得 enqueue 上述控制 scope；query gate 必须枚举有效月份并只刷新 mismatch shard。`all` 控制 scope 仅供显式 maintenance/reapply/repair。
 - `Application` 不再保留 output collection app-level projection helpers；`list_output_invoice_collection_scope_shards(...)`、`mark_output_invoice_collection_scope_empty(...)` 和 `rebuild_output_invoice_collection_read_model_scope(...)` 的 owner 是 `InvoiceUsageCollectionSqlProjectionBuilder` / `InvoiceUsageCollectionReadModelRefreshService` worker projection boundary。
 - App Status domain `output_invoice_collections` 依赖 `output_invoice_collection`、`invoice_lifecycle` readiness，以及 `invoice-usage-collection`、`invoice-lifecycle` worker。
 

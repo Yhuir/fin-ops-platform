@@ -321,7 +321,7 @@ class OutputInvoiceCollectionApiTests(unittest.TestCase):
 
             response = app.handle_request(
                 "GET",
-                "/api/output-invoice-collections/rows/output-row-missing-repository/relation-details?kind=invoice",
+                "/api/output-invoice-collections/rows/output-row-missing-repository/relation-details?kind=invoice&month=2026-05",
             )
 
         payload = json.loads(response.body)
@@ -329,10 +329,16 @@ class OutputInvoiceCollectionApiTests(unittest.TestCase):
         self.assertEqual(payload["read_model_status"], "refreshing")
         self.assertEqual(payload["readModelStatus"], "refreshing")
         self.assertEqual(payload["detailAvailable"], False)
-        self.assertEqual(payload["read_model_scope_key"], "all")
+        self.assertEqual(payload["read_model_scope_key"], "2026-05")
         self.assertEqual(
             queue.refreshes,
-            [("output_invoice_collection", "all", "api_detail_sql_repository_unavailable")],
+            [
+                (
+                    "output_invoice_collection",
+                    "2026-05",
+                    "api_detail_sql_repository_unavailable",
+                )
+            ],
         )
 
     def test_relation_details_use_fresh_sql_read_model_row_without_live_rebuild(self) -> None:

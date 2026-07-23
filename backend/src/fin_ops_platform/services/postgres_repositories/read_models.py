@@ -607,6 +607,19 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
             include_statistics=include_statistics,
         )
 
+    def input_invoice_usage_scope_source_versions(
+        self,
+        *,
+        scope_key: str,
+        tenant_id: str = "default",
+    ) -> dict[str, Any]:
+        return self._invoice_relation_scope_source_versions(
+            scope_table_name="read_model.input_invoice_usage_scopes",
+            scope_type="input_invoice_usage",
+            scope_key=scope_key,
+            tenant_id=tenant_id,
+        )
+
     def list_input_invoice_usage_filter_options(
         self,
         *,
@@ -829,6 +842,19 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
             page_size=page_size,
             summary_kind="output",
             include_statistics=include_statistics,
+        )
+
+    def output_invoice_collection_scope_source_versions(
+        self,
+        *,
+        scope_key: str,
+        tenant_id: str = "default",
+    ) -> dict[str, Any]:
+        return self._invoice_relation_scope_source_versions(
+            scope_table_name="read_model.output_invoice_collection_scopes",
+            scope_type="output_invoice_collection",
+            scope_key=scope_key,
+            tenant_id=tenant_id,
         )
 
     def get_output_invoice_collection_row_by_row_id(self, row_id: str) -> dict[str, Any] | None:
@@ -1852,6 +1878,115 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
             "source_versions": source_versions,
         }
 
+    def _invoice_relation_scope_source_versions(
+        self,
+        *,
+        scope_table_name: str,
+        scope_type: str,
+        scope_key: str,
+        tenant_id: str,
+    ) -> dict[str, Any]:
+        normalized_scope_key = _invoice_relation_scope_key(scope_key)
+        rows = self._connection.fetch_all(
+            f"""
+            with projection_scopes as (
+                select scope_key, row_count, source_versions, cache_status
+                from {scope_table_name}
+                where (
+                    %s = 'all'
+                    and scope_key <> 'all'
+                ) or scope_key = %s
+            ),
+            active_dirty as (
+                select distinct on (scope_key)
+                    scope_key,
+                    status as dirty_status
+                from job.read_model_dirty_scopes
+                where tenant_id = %s
+                  and scope_type = %s
+                  and status in ('pending', 'processing', 'failed')
+                  and (
+                      (%s = 'all' and scope_key <> 'all')
+                      or scope_key = %s
+                  )
+                order by scope_key, source_version desc, updated_at desc, id desc
+            ),
+            requested_scopes as (
+                select scope_key from projection_scopes
+                union
+                select scope_key from active_dirty
+                union
+                select %s where %s <> 'all'
+            )
+            select requested.scope_key,
+                   projection.row_count,
+                   projection.source_versions,
+                   projection.cache_status,
+                   dirty.dirty_status
+            from requested_scopes requested
+            left join projection_scopes projection using (scope_key)
+            left join active_dirty dirty using (scope_key)
+            order by requested.scope_key
+            """,
+            (
+                normalized_scope_key,
+                normalized_scope_key,
+                tenant_id,
+                scope_type,
+                normalized_scope_key,
+                normalized_scope_key,
+                normalized_scope_key,
+                normalized_scope_key,
+            ),
+        )
+        source_versions_by_scope: dict[str, dict[str, Any]] = {}
+        statuses_by_scope: dict[str, str] = {}
+        blocking_scope_keys: list[str] = []
+        effective_rows = rows
+        if normalized_scope_key == "all" and any(
+            int_value(row.get("row_count"), 0) > 0
+            for row in rows
+            if row.get("row_count") is not None
+        ):
+            effective_rows = [
+                row
+                for row in rows
+                if row.get("row_count") is None
+                or int_value(row.get("row_count"), 0) > 0
+                or text(row.get("dirty_status")) in {"pending", "processing", "failed"}
+            ]
+        for row in effective_rows:
+            current_scope_key = text(row.get("scope_key"))
+            if not current_scope_key or not MONTH_SCOPE_RE.match(current_scope_key):
+                continue
+            source_versions = (
+                row.get("source_versions")
+                if isinstance(row.get("source_versions"), dict)
+                else {}
+            )
+            source_versions_by_scope[current_scope_key] = dict(source_versions)
+            dirty_status = text(row.get("dirty_status"))
+            cache_status = text(row.get("cache_status"))
+            if dirty_status in {"pending", "processing"}:
+                status = "refreshing"
+            elif dirty_status == "failed":
+                status = "stale"
+            elif not source_versions:
+                status = "missing"
+            elif cache_status not in {"", "fresh"}:
+                status = "stale"
+            else:
+                status = "fresh"
+            statuses_by_scope[current_scope_key] = status
+            if status != "fresh":
+                blocking_scope_keys.append(current_scope_key)
+        return {
+            "scope_keys": list(source_versions_by_scope),
+            "source_versions_by_scope": source_versions_by_scope,
+            "statuses_by_scope": statuses_by_scope,
+            "blocking_scope_keys": blocking_scope_keys,
+        }
+
     def _list_invoice_relation_filter_options(
         self,
         *,
@@ -2177,12 +2312,12 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
             return {
                 "scope_key": "all",
                 "source_versions": self._common_source_versions(rows_for_all_status),
-                "statistics_source_versions": self._common_source_versions(rows),
+                "statistics_source_versions": self._common_source_versions(rows_for_all_status),
                 "statistics_metadata_rows": [
                     row.get("raw_payload", {}).get("statistics_metadata")
                     if isinstance(row.get("raw_payload"), dict)
                     else None
-                    for row in rows
+                    for row in rows_for_all_status
                 ],
             }
         row = self._connection.fetch_one(
@@ -9655,6 +9790,9 @@ class PostgresReadModelRepository:
     def list_input_invoice_usage_filter_options(self, **kwargs: Any) -> dict[str, Any] | None:
         return self._invoice_usage_collection_repository.list_input_invoice_usage_filter_options(**kwargs)
 
+    def input_invoice_usage_scope_source_versions(self, **kwargs: Any) -> dict[str, Any]:
+        return self._invoice_usage_collection_repository.input_invoice_usage_scope_source_versions(**kwargs)
+
     def save_input_invoice_usage_rows(self, **kwargs: Any) -> None:
         self._invoice_usage_collection_repository.save_input_invoice_usage_rows(**kwargs)
 
@@ -9672,6 +9810,9 @@ class PostgresReadModelRepository:
 
     def list_output_invoice_collection_rows(self, **kwargs: Any) -> dict[str, Any] | None:
         return self._invoice_usage_collection_repository.list_output_invoice_collection_rows(**kwargs)
+
+    def output_invoice_collection_scope_source_versions(self, **kwargs: Any) -> dict[str, Any]:
+        return self._invoice_usage_collection_repository.output_invoice_collection_scope_source_versions(**kwargs)
 
     def get_output_invoice_collection_row_by_row_id(self, row_id: str) -> dict[str, Any] | None:
         return self._invoice_usage_collection_repository.get_output_invoice_collection_row_by_row_id(row_id)
@@ -14402,7 +14543,6 @@ def _invoice_relation_statistics_from_scope_metadata(
             "unlinked_bank_invoice_count",
             "unpaid_invoice_count",
             "formal_relation_group_count",
-            "oa_reverse_batch_count",
         )
         if summary_kind == "input"
         else (
@@ -14418,7 +14558,6 @@ def _invoice_relation_statistics_from_scope_metadata(
         )
     )
     totals = {key: 0 for key in keys}
-    oa_reverse_batch_counts: set[int] = set()
     for metadata in metadata_rows:
         if not isinstance(metadata, dict) or not isinstance(metadata.get("statistics"), dict):
             return None
@@ -14432,24 +14571,19 @@ def _invoice_relation_statistics_from_scope_metadata(
             return None
         for key in keys:
             value = int(statistics[key])
-            if key == "oa_reverse_batch_count":
-                oa_reverse_batch_counts.add(value)
-            else:
-                totals[key] += value
+            totals[key] += value
     invoice_count = totals["invoice_count"]
     linked_oa_count = totals["linked_oa_invoice_count"]
     if totals["unlinked_oa_invoice_count"] != invoice_count - linked_oa_count:
         return None
     if summary_kind == "input":
-        if len(oa_reverse_batch_counts) != 1:
-            return None
         if (
             totals["unlinked_bank_invoice_count"]
             != invoice_count - totals["linked_bank_invoice_count"]
             or totals["unpaid_invoice_count"] != invoice_count - totals["paid_invoice_count"]
         ):
             return None
-        totals["oa_reverse_batch_count"] = next(iter(oa_reverse_batch_counts))
+        totals["oa_reverse_batch_count"] = 0
     elif (
         totals["unlinked_bank_invoice_count"]
         != invoice_count - totals["linked_income_bank_invoice_count"]

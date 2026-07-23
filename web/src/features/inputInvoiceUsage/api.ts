@@ -926,6 +926,9 @@ export async function fetchInputInvoiceUsageOaDetail(id: string, signal?: AbortS
 export async function fetchInputInvoiceUsageRowRelationDetail(target: InputInvoiceUsageDetailTarget, signal?: AbortSignal) {
   const params = new URLSearchParams();
   params.set("kind", target.kind === "relationList" ? target.relationKind ?? "oa" : target.kind);
+  if (target.scopeKey) {
+    params.set("month", target.scopeKey);
+  }
   const payload = await apiRequestJson<unknown>(
     `/api/input-invoice-usage/rows/${encodeURIComponent(target.rowId ?? target.id)}/relation-details?${params.toString()}`,
     { method: "GET", signal },

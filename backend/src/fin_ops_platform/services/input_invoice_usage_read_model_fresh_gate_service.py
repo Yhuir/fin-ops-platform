@@ -12,6 +12,9 @@ from fin_ops_platform.services.input_invoice_usage_query_contract import (
     parse_input_invoice_usage_sort,
 )
 from fin_ops_platform.services.input_invoice_usage_service import InputInvoiceUsageError
+from fin_ops_platform.services.invoice_usage_collection_dependency_gate import (
+    InvoiceUsageCollectionDependencyGate,
+)
 from fin_ops_platform.services.read_model_freshness import (
     require_expected_source_versions,
     source_version_mismatch_reasons,
@@ -26,14 +29,24 @@ class InputInvoiceUsageReadModelFreshGateService:
         requires_sql_read_model_runtime: Callable[[], bool],
         enqueue_refresh: Callable[[str, str], bool],
         expected_source_versions: Callable[..., dict[str, object]],
-        expected_statistics_source_versions: Callable[..., dict[str, object]] | None = None,
+        workbench_relation_reader: Any | None = None,
+        statistics_overlay: Callable[[], dict[str, object]] | None = None,
     ) -> None:
         self._repository = repository
         self._requires_sql_read_model_runtime = requires_sql_read_model_runtime
         self._enqueue_refresh = enqueue_refresh
         self._expected_source_versions = expected_source_versions
-        self._expected_statistics_source_versions = (
-            expected_statistics_source_versions or expected_source_versions
+        self._statistics_overlay = statistics_overlay
+        self._relation_dependency_gate = InvoiceUsageCollectionDependencyGate(
+            scope_state_loader=getattr(
+                repository,
+                "input_invoice_usage_scope_source_versions",
+                None,
+            ),
+            relation_reader=workbench_relation_reader,
+            expected_source_versions=expected_source_versions,
+            requires_sql_runtime=requires_sql_read_model_runtime,
+            context="input_invoice_usage_read_model",
         )
 
     def export_page(self, **kwargs: object) -> dict[str, object] | None:
@@ -43,17 +56,46 @@ class InputInvoiceUsageReadModelFreshGateService:
         if sql_payload is not None:
             return sql_payload
         scope_key = self.scope_key_from_query(query)
-        self._enqueue_refresh(scope_key, "api_export_read_model_unavailable")
-        return self.refreshing_payload(scope_key=scope_key)
+        refresh_scope_keys = self._enqueue_scope_refreshes(
+            scope_key,
+            reason="api_export_read_model_unavailable",
+        )
+        return self.refreshing_payload(
+            scope_key=scope_key,
+            refresh_scope_keys=refresh_scope_keys,
+        )
 
     def filter_options(self, query: dict[str, list[str]]) -> dict[str, object] | None:
         list_options = getattr(self._repository, "list_input_invoice_usage_filter_options", None)
         scope_key = self.scope_key_from_query(query)
         if not callable(list_options):
             if self._requires_sql_read_model_runtime():
-                self._enqueue_refresh(scope_key, "api_filter_options_sql_repository_unavailable")
-                return self.refreshing_payload(scope_key=scope_key)
+                refresh_scope_keys = self._enqueue_scope_refreshes(
+                    scope_key,
+                    reason="api_filter_options_sql_repository_unavailable",
+                )
+                return self.refreshing_payload(
+                    scope_key=scope_key,
+                    refresh_scope_keys=refresh_scope_keys,
+                )
             return None
+        dependency_status = self._relation_dependency_gate.resolve(
+            scope_key,
+            reason="input_invoice_usage_filter_options",
+        )
+        if dependency_status["status"] != "fresh":
+            refresh_scope_keys = self._enqueue_scope_refreshes(
+                scope_key,
+                reason="api_filter_options_relation_dependency_stale",
+                candidate_scope_keys=list(
+                    dependency_status.get("blocking_scope_keys") or []
+                ),
+            )
+            return self.refreshing_payload(
+                scope_key=scope_key,
+                stale_reasons=list(dependency_status.get("stale_reasons") or []),
+                refresh_scope_keys=refresh_scope_keys,
+            )
         try:
             payload = list_options(
                 month=query.get("month", [None])[0],
@@ -67,12 +109,26 @@ class InputInvoiceUsageReadModelFreshGateService:
         except ValueError as exc:
             raise InputInvoiceUsageError("invalid_input_invoice_usage_query", str(exc)) from exc
         if not isinstance(payload, dict):
-            self._enqueue_refresh(scope_key, "api_filter_options_miss")
-            return self.refreshing_payload(scope_key=scope_key)
+            refresh_scope_keys = self._enqueue_scope_refreshes(
+                scope_key,
+                reason="api_filter_options_miss",
+                candidate_scope_keys=list(dependency_status.get("scope_keys") or []),
+            )
+            return self.refreshing_payload(
+                scope_key=scope_key,
+                refresh_scope_keys=refresh_scope_keys,
+            )
         refresh_status = str(payload.get("refresh_status") or "fresh")
         if refresh_status != "fresh":
-            self._enqueue_refresh(scope_key, "api_filter_options_stale")
-            return self.refreshing_payload(scope_key=scope_key)
+            refresh_scope_keys = self._enqueue_scope_refreshes(
+                scope_key,
+                reason="api_filter_options_stale",
+                candidate_scope_keys=list(dependency_status.get("scope_keys") or []),
+            )
+            return self.refreshing_payload(
+                scope_key=scope_key,
+                refresh_scope_keys=refresh_scope_keys,
+            )
         stale_reasons = source_version_mismatch_reasons(
             expected=require_expected_source_versions(
                 self._expected_source_versions(scope_key=scope_key),
@@ -81,8 +137,16 @@ class InputInvoiceUsageReadModelFreshGateService:
             actual=payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {},
         )
         if stale_reasons:
-            self._enqueue_refresh(scope_key, "api_filter_options_source_versions_stale")
-            return self.refreshing_payload(scope_key=scope_key, stale_reasons=stale_reasons)
+            refresh_scope_keys = self._enqueue_scope_refreshes(
+                scope_key,
+                reason="api_filter_options_source_versions_stale",
+                candidate_scope_keys=list(dependency_status.get("scope_keys") or []),
+            )
+            return self.refreshing_payload(
+                scope_key=scope_key,
+                stale_reasons=stale_reasons,
+                refresh_scope_keys=refresh_scope_keys,
+            )
 
         options_by_field = payload.get("options") if isinstance(payload.get("options"), dict) else {}
         fields: list[dict[str, object]] = []
@@ -115,9 +179,40 @@ class InputInvoiceUsageReadModelFreshGateService:
         scope_key = self.scope_key_from_query(query)
         if not callable(list_rows):
             if self._requires_sql_read_model_runtime():
-                self._enqueue_refresh(scope_key, "api_sql_repository_unavailable")
-                return self.refreshing_payload(scope_key=scope_key)
+                refresh_scope_keys = self._enqueue_scope_refreshes(
+                    scope_key,
+                    reason="api_sql_repository_unavailable",
+                )
+                return self.refreshing_payload(
+                    scope_key=scope_key,
+                    refresh_scope_keys=refresh_scope_keys,
+                )
             return None
+        dependency_status = self._relation_dependency_gate.resolve(
+            "all" if include_statistics else scope_key,
+            reason="input_invoice_usage_rows",
+        )
+        blocking_scope_keys = list(dependency_status.get("blocking_scope_keys") or [])
+        page_blocking_scope_keys = (
+            blocking_scope_keys
+            if scope_key == "all"
+            else [blocking_scope_key for blocking_scope_key in blocking_scope_keys if blocking_scope_key == scope_key]
+        )
+        dependency_unresolved = (
+            str(dependency_status.get("status") or "unavailable") != "fresh"
+            and not blocking_scope_keys
+        )
+        if page_blocking_scope_keys or dependency_unresolved:
+            refresh_scope_keys = self._enqueue_scope_refreshes(
+                scope_key,
+                reason="api_relation_dependency_stale",
+                candidate_scope_keys=page_blocking_scope_keys,
+            )
+            return self.refreshing_payload(
+                scope_key=scope_key,
+                stale_reasons=list(dependency_status.get("stale_reasons") or []),
+                refresh_scope_keys=refresh_scope_keys,
+            )
         try:
             payload = list_rows(
                 month=query.get("month", [None])[0],
@@ -136,15 +231,36 @@ class InputInvoiceUsageReadModelFreshGateService:
         except ValueError as exc:
             raise InputInvoiceUsageError("invalid_input_invoice_usage_query", str(exc)) from exc
         if not isinstance(payload, dict):
-            self._enqueue_refresh(scope_key, "api_miss")
-            return self.refreshing_payload(scope_key=scope_key)
+            refresh_scope_keys = self._enqueue_scope_refreshes(
+                scope_key,
+                reason="api_miss",
+                candidate_scope_keys=list(dependency_status.get("scope_keys") or []),
+            )
+            return self.refreshing_payload(
+                scope_key=scope_key,
+                refresh_scope_keys=refresh_scope_keys,
+            )
         if self.payload_requires_schema_refresh(payload):
-            self._enqueue_refresh(scope_key, "api_schema_stale")
-            return self.refreshing_payload(scope_key=scope_key)
+            refresh_scope_keys = self._enqueue_scope_refreshes(
+                scope_key,
+                reason="api_schema_stale",
+                candidate_scope_keys=list(dependency_status.get("scope_keys") or []),
+            )
+            return self.refreshing_payload(
+                scope_key=scope_key,
+                refresh_scope_keys=refresh_scope_keys,
+            )
         refresh_status = str(payload.get("refresh_status") or "fresh")
         if refresh_status != "fresh":
-            self._enqueue_refresh(scope_key, "api_stale")
-            return self.refreshing_payload(scope_key=scope_key)
+            refresh_scope_keys = self._enqueue_scope_refreshes(
+                scope_key,
+                reason="api_stale",
+                candidate_scope_keys=list(dependency_status.get("scope_keys") or []),
+            )
+            return self.refreshing_payload(
+                scope_key=scope_key,
+                refresh_scope_keys=refresh_scope_keys,
+            )
         stale_reasons = source_version_mismatch_reasons(
             expected=require_expected_source_versions(
                 self._expected_source_versions(scope_key=scope_key),
@@ -153,8 +269,16 @@ class InputInvoiceUsageReadModelFreshGateService:
             actual=payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {},
         )
         if stale_reasons:
-            self._enqueue_refresh(scope_key, "api_source_versions_stale")
-            return self.refreshing_payload(scope_key=scope_key, stale_reasons=stale_reasons)
+            refresh_scope_keys = self._enqueue_scope_refreshes(
+                scope_key,
+                reason="api_source_versions_stale",
+                candidate_scope_keys=list(dependency_status.get("scope_keys") or []),
+            )
+            return self.refreshing_payload(
+                scope_key=scope_key,
+                stale_reasons=stale_reasons,
+                refresh_scope_keys=refresh_scope_keys,
+            )
         parsed_filters = self._parse_filters(query.get("filters", [None])[0])
         sort_field, sort_direction = self._parse_sort(
             query.get("sort_field", ["invoice_date"])[0],
@@ -162,7 +286,11 @@ class InputInvoiceUsageReadModelFreshGateService:
         )
         result = dict(payload)
         if include_statistics:
-            self._gate_statistics(result)
+            self._gate_statistics(
+                result,
+                dependency_blocking_scope_keys=blocking_scope_keys,
+                refresh_scope_keys=blocking_scope_keys or list(dependency_status.get("scope_keys") or []),
+            )
         result["filterConfig"] = self._filter_config()
         result["appliedFilters"] = {"filters": parsed_filters}
         result["sort"] = {"field": sort_field, "direction": sort_direction}
@@ -171,7 +299,24 @@ class InputInvoiceUsageReadModelFreshGateService:
         result.pop("refresh_status", None)
         return result
 
-    def _gate_statistics(self, payload: dict[str, object]) -> None:
+    def _gate_statistics(
+        self,
+        payload: dict[str, object],
+        *,
+        dependency_blocking_scope_keys: list[str],
+        refresh_scope_keys: list[str],
+    ) -> None:
+        if dependency_blocking_scope_keys:
+            payload["statistics"] = None
+            payload["statistics_status"] = "refreshing"
+            for scope_key in self._relation_dependency_gate.concrete_scope_keys(
+                dependency_blocking_scope_keys
+            ):
+                self._enqueue_refresh(
+                    scope_key,
+                    "api_statistics_relation_dependency_stale",
+                )
+            return
         status = str(payload.get("statistics_status") or "stale")
         actual_versions = (
             payload.get("statistics_source_versions")
@@ -180,27 +325,58 @@ class InputInvoiceUsageReadModelFreshGateService:
         )
         stale_reasons = source_version_mismatch_reasons(
             expected=require_expected_source_versions(
-                self._expected_statistics_source_versions(scope_key="all"),
+                self._expected_source_versions(scope_key="all"),
                 context="input_invoice_usage_statistics",
             ),
             actual=actual_versions,
         )
         if status == "fresh" and isinstance(payload.get("statistics"), dict) and not stale_reasons:
-            return
+            if callable(self._statistics_overlay):
+                overlay = self._statistics_overlay()
+                batch_count = (
+                    overlay.get("oa_reverse_batch_count")
+                    if isinstance(overlay, dict)
+                    else None
+                )
+                if (
+                    isinstance(batch_count, int)
+                    and not isinstance(batch_count, bool)
+                    and batch_count >= 0
+                ):
+                    payload["statistics"] = {
+                        **dict(payload["statistics"]),
+                        "oa_reverse_batch_count": batch_count,
+                    }
+                    return
+            if not self._requires_sql_read_model_runtime():
+                return
+            stale_reasons = ["input_invoice_usage_statistics_overlay_unavailable"]
         payload["statistics"] = None
         payload["statistics_status"] = "refreshing"
-        self._enqueue_refresh(
-            "all",
-            "api_statistics_source_versions_stale" if stale_reasons else f"api_statistics_{status}",
+        reason = (
+            "api_statistics_source_versions_stale"
+            if stale_reasons
+            else f"api_statistics_{status}"
         )
+        for scope_key in self._relation_dependency_gate.concrete_scope_keys(
+            refresh_scope_keys
+        ):
+            self._enqueue_refresh(scope_key, reason)
 
     def relation_details(self, row_id: str, query: dict[str, list[str]]) -> dict[str, object] | None:
+        requested_scope_key = self.scope_key_from_query(query)
         if not callable(getattr(self._repository, "get_input_invoice_usage_row_by_row_id", None)):
             if self._requires_sql_read_model_runtime():
-                self._enqueue_refresh("all", "api_detail_sql_repository_unavailable")
+                if self._relation_dependency_gate.is_concrete_scope_key(
+                    requested_scope_key
+                ):
+                    self._enqueue_refresh(
+                        requested_scope_key,
+                        "api_detail_sql_repository_unavailable",
+                    )
                 return InputInvoiceUsageReadModelDetailService.refreshing_payload(
                     kind=query.get("kind", [""])[0],
-                    scope_key="all",
+                    scope_key=requested_scope_key,
                 )
             return None
         service = InputInvoiceUsageReadModelDetailService(
@@ -208,29 +384,35 @@ class InputInvoiceUsageReadModelFreshGateService:
             enqueue_refresh=self._enqueue_refresh,
             source_versions_provider=self._expected_source_versions,
         )
-        return service.relation_details(row_id, kind=query.get("kind", [""])[0])
+        return service.relation_details(
+            row_id,
+            kind=query.get("kind", [""])[0],
+            requested_scope_key=requested_scope_key,
+        )
 
     def rows_by_invoice_ids(self, invoice_ids: list[str]) -> dict[str, object] | None:
         list_rows = getattr(self._repository, "list_input_invoice_usage_rows_by_invoice_ids", None)
         if not callable(list_rows):
             if self._requires_sql_read_model_runtime():
-                self._enqueue_refresh("all", "api_invoice_id_lookup_sql_repository_unavailable")
                 return self.refreshing_payload(scope_key="all")
             return None
         payload = list_rows(invoice_ids)
         if not isinstance(payload, dict):
-            self._enqueue_refresh("all", "api_invoice_id_lookup_miss")
             return self.refreshing_payload(scope_key="all")
-        scope_keys = [
-            str(scope_key or "all")
+        scope_keys = self._relation_dependency_gate.concrete_scope_keys(
+            [
+                str(scope_key or "")
             for scope_key in list(payload.get("read_model_scope_keys") or [])
             if str(scope_key or "").strip()
-        ] or ["all"]
+            ]
+        )
         refresh_status = str(payload.get("refresh_status") or "fresh")
         if refresh_status != "fresh":
             for scope_key in scope_keys:
                 self._enqueue_refresh(scope_key, "api_invoice_id_lookup_stale")
-            return self.refreshing_payload(scope_key=scope_keys[0])
+            return self.refreshing_payload(
+                scope_key=scope_keys[0] if scope_keys else "all"
+            )
 
         source_versions_by_scope = payload.get("source_versions_by_scope") if isinstance(payload.get("source_versions_by_scope"), dict) else {}
         stale_reasons: list[str] = []
@@ -247,12 +429,33 @@ class InputInvoiceUsageReadModelFreshGateService:
                 self._enqueue_refresh(scope_key, "api_invoice_id_lookup_source_versions_stale")
                 stale_reasons.extend(scope_stale_reasons)
         if stale_reasons:
-            return self.refreshing_payload(scope_key=scope_keys[0], stale_reasons=stale_reasons)
+            return self.refreshing_payload(
+                scope_key=scope_keys[0] if scope_keys else "all",
+                stale_reasons=stale_reasons,
+            )
 
         result = dict(payload)
         result["read_model_status"] = "fresh"
         result.pop("refresh_status", None)
         return result
+
+    def _enqueue_scope_refreshes(
+        self,
+        scope_key: str,
+        *,
+        reason: str,
+        candidate_scope_keys: list[object] | None = None,
+    ) -> list[str]:
+        refresh_scope_keys = (
+            [scope_key]
+            if self._relation_dependency_gate.is_concrete_scope_key(scope_key)
+            else self._relation_dependency_gate.concrete_scope_keys(
+                list(candidate_scope_keys or [])
+            )
+        )
+        for refresh_scope_key in refresh_scope_keys:
+            self._enqueue_refresh(refresh_scope_key, reason)
+        return refresh_scope_keys
 
     @staticmethod
     def export_query_from_kwargs(kwargs: dict[str, object]) -> dict[str, list[str]]:
@@ -305,6 +508,7 @@ class InputInvoiceUsageReadModelFreshGateService:
         *,
         scope_key: str,
         stale_reasons: list[str] | None = None,
+        refresh_scope_keys: list[str] | None = None,
     ) -> dict[str, object]:
         payload: dict[str, object] = {
             "rows": [],
@@ -319,4 +523,6 @@ class InputInvoiceUsageReadModelFreshGateService:
         }
         if stale_reasons:
             payload["read_model_stale_reasons"] = list(stale_reasons)
+        if refresh_scope_keys:
+            payload["read_model_refresh_scope_keys"] = list(refresh_scope_keys)
         return payload

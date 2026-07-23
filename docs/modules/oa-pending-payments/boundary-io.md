@@ -97,6 +97,7 @@
 - `invoice-usage-collection` 只负责 input/output invoice，不注册或 claim OA refresh。
 - query service 只依赖窄 read-model repository、queue、expected source-version provider 与可选 Redis helper；Redis 只经共享 `ReadModelQueryGateway` 进入 gate 后的版本化 OA 私有 payload 路径，禁止完整 live `OaPendingPaymentQueryService`、共享页面 key 或主动跨页面失效。
 - route 只做一次认证、query/header 传递和 HTTP 映射；业务和 SQL 不进入 route。共享 auth policy 不复制到模块，global guard 也不重复包裹本模块路径。
+- OA、银行、发票和多关联详情抽屉必须从当前 OA row 的 `oa.month` 携带 `month` query。detail miss、repository unavailable 或 freshness blocked 只允许 enqueue 该具体月份；缺少合法月份时返回 unavailable/not-found 且零 enqueue，禁止访问 Drawer 触发 `oa_pending_payment:all`。`all` 只允许显式初始化、reapply/repair。
 
 ## 文件范围
 

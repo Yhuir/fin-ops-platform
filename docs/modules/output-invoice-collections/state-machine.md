@@ -49,7 +49,7 @@
 - missing/stale/source version mismatch：rows route 返回 `202`、`read_model_status=refreshing`，enqueue `output_invoice_collection` refresh；不得同步 live rebuild。
 - schema stale：SQL payload 缺少 `oa` 或 `invoiceRelations` 等统一关系字段时，视为 schema stale 并 enqueue refresh；旧 read model 不得作为 fresh rows 返回。
 - relation-group projection：linked relation 下多张销项发票是 row ownership 事实，必须先按 relation 归并为单条收款行，再回退到单发票 identity 行；归并行的 `invoiceRelations.totalWithTax`、`invoiceTotal` 和收款状态基于成员净额与 linked 收入流水计算，不能把同一 relation 拆成重复的 364800 行，也不能漏掉负数发票。
-- relation detail unavailable：生产 PostgreSQL runtime 下缺少 SQL read repository 或 row detail lookup 时，`/rows/{row_id}/relation-details` 返回 `202`、`read_model_status=refreshing` 并 enqueue `output_invoice_collection:all`；不得 live rebuild detail 并伪装 fresh。
+- relation detail unavailable：页面从当前行携带 `month`；生产 PostgreSQL runtime 下缺少 SQL read repository 或 row detail lookup 时，`/rows/{row_id}/relation-details` 返回 `202`、`read_model_status=refreshing` 并只 enqueue 该具体月份。缺少合法月份时 fail closed、零 enqueue；不得使用 `output_invoice_collection:all` 或 live rebuild detail 伪装 fresh。
 - refreshing：dirty/outbox 或 readiness 显示 scope 正在刷新；页面保持 busy/auto retry。
 - failed/unavailable：App Status domain 进入 blocked 或 unavailable；页面不能伪装数据 ready。
 - refresh 触发来源：

@@ -155,7 +155,9 @@ class InputInvoiceUsageApiRoutes:
                 return self._json_response(status_code, sql_payload)
             payload = InputInvoiceUsageReadModelDetailService.refreshing_payload(
                 kind=query.get("kind", [""])[0],
-                scope_key="all",
+                scope_key=InputInvoiceUsageReadModelFreshGateService.scope_key_from_query(
+                    query
+                ),
             )
             return self._json_response(HTTPStatus.ACCEPTED, payload)
         except InputInvoiceUsageError as exc:

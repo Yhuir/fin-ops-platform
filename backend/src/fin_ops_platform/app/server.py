@@ -5963,9 +5963,8 @@ class Application:
                 reason=reason,
             ),
             expected_source_versions=self._input_invoice_usage_expected_source_versions,
-            expected_statistics_source_versions=(
-                self._input_invoice_usage_statistics_expected_source_versions
-            ),
+            workbench_relation_reader=self._workbench_relation_read_facade(),
+            statistics_overlay=self._input_invoice_usage_statistics_overlay,
         )
         self._input_invoice_usage_read_model_fresh_gate_instance = service
         return service
@@ -6483,6 +6482,7 @@ class Application:
                 reason=reason,
             ),
             expected_source_versions=self._output_invoice_collection_expected_source_versions,
+            workbench_relation_reader=self._workbench_relation_read_facade(),
         )
         self._output_invoice_collection_read_model_fresh_gate_instance = service
         return service
@@ -6549,20 +6549,15 @@ class Application:
             source_versions["workbench_relation_source_versions"] = relation_source_versions
         return source_versions
 
-    def _input_invoice_usage_statistics_expected_source_versions(
-        self,
-        scope_key: str | None = None,
-    ) -> dict[str, object]:
-        source_versions = self._input_invoice_usage_expected_source_versions(scope_key=scope_key or "all")
+    def _input_invoice_usage_statistics_overlay(self) -> dict[str, object]:
         state_store = getattr(self, "_state_store", None)
         connection = getattr(state_store, "_connection", None)
         if str(getattr(state_store, "storage_backend", "") or "").strip() == "postgres" and connection is not None:
             reverse_statistics = input_invoice_usage_oa_reverse_statistics_snapshot(connection)
-            source_version = str(reverse_statistics["source_version"])
-        else:
-            source_version = "rows:0|max_created_at:"
-        source_versions["input_invoice_usage_oa_reverse_batch_source_version"] = source_version
-        return source_versions
+            return {
+                "oa_reverse_batch_count": int(reverse_statistics["batch_count"]),
+            }
+        return {"oa_reverse_batch_count": 0}
 
     def _output_invoice_collection_expected_source_versions(self, scope_key: str | None = None) -> dict[str, object]:
         source_versions = output_invoice_collection_source_versions()

@@ -236,7 +236,11 @@ export default function OaPendingPaymentsTable({
                           <DetailButton
                             disabled={!row.oa.detailAvailable}
                             label={`查看 OA ${row.oa.applicantName} 详情`}
-                            onClick={() => onOpenDetail({ kind: "oa", id: row.oa.id })}
+                            onClick={() => onOpenDetail({
+                              kind: "oa",
+                              id: row.oa.id,
+                              scopeKey: detailScopeKey(row),
+                            })}
                           />
                         </span>
                         <span className="oa-pending-payments-tag-row">
@@ -1097,30 +1101,63 @@ function hasBankTransaction(row: OaPendingPaymentRow): boolean {
 }
 
 function bankDetailTarget(row: OaPendingPaymentRow): OaPendingPaymentDetailTarget | null {
+  const scopeKey = detailScopeKey(row);
   if (row.bankTransaction.detailMode === "single" && row.bankTransaction.primaryBankTransactionId) {
-    return { kind: "bank", id: row.bankTransaction.primaryBankTransactionId };
+    return {
+      kind: "bank",
+      id: row.bankTransaction.primaryBankTransactionId,
+      scopeKey,
+    };
   }
   if (row.bankTransaction.detailMode === "list") {
-    return { kind: "relationList", id: row.id, rowId: row.id, relationKind: "bank" };
+    return {
+      kind: "relationList",
+      id: row.id,
+      rowId: row.id,
+      relationKind: "bank",
+      scopeKey,
+    };
   }
   return null;
 }
 
 function invoiceDetailTarget(row: OaPendingPaymentRow): OaPendingPaymentDetailTarget | null {
+  const scopeKey = detailScopeKey(row);
   if (row.invoice.detailMode === "single" && row.invoice.primaryInvoiceId) {
-    return { kind: "invoice", id: row.invoice.primaryInvoiceId };
+    return {
+      kind: "invoice",
+      id: row.invoice.primaryInvoiceId,
+      scopeKey,
+    };
   }
   if (row.invoice.detailMode === "list") {
-    return { kind: "relationList", id: row.id, rowId: row.id, relationKind: "invoice" };
+    return {
+      kind: "relationList",
+      id: row.id,
+      rowId: row.id,
+      relationKind: "invoice",
+      scopeKey,
+    };
   }
   return null;
 }
 
 function oaRelationDetailTarget(row: OaPendingPaymentRow): OaPendingPaymentDetailTarget | null {
   if (row.oa.detailMode === "list" && Number(row.oa.relationCount ?? 0) > 1) {
-    return { kind: "relationList", id: row.id, rowId: row.id, relationKind: "oa" };
+    return {
+      kind: "relationList",
+      id: row.id,
+      rowId: row.id,
+      relationKind: "oa",
+      scopeKey: detailScopeKey(row),
+    };
   }
   return null;
+}
+
+function detailScopeKey(row: OaPendingPaymentRow): string | undefined {
+  const scopeKey = String(row.oa.month ?? "").slice(0, 7);
+  return /^\d{4}-\d{2}$/.test(scopeKey) ? scopeKey : undefined;
 }
 
 function extraRelationCount(relationCount: number | undefined): number {

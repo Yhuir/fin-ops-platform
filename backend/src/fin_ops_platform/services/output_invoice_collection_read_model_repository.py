@@ -41,6 +41,18 @@ class OutputInvoiceCollectionReadModelRepositoryPort:
         payload = self._repository.get_output_invoice_collection_row_by_row_id(row_id)
         return dict(payload) if isinstance(payload, dict) else None
 
+    def output_invoice_collection_scope_source_versions(
+        self,
+        *,
+        scope_key: str,
+        tenant_id: str = "default",
+    ) -> dict[str, object]:
+        payload = self._repository.output_invoice_collection_scope_source_versions(
+            scope_key=scope_key,
+            tenant_id=tenant_id,
+        )
+        return dict(payload) if isinstance(payload, dict) else {}
+
     def save_output_invoice_collection_rows(
         self,
         *,

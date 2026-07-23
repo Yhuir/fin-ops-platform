@@ -21,9 +21,6 @@ from fin_ops_platform.services.postgres_repositories import (
     PostgresOAProjectionRepository,
     PostgresReadModelRepository,
 )
-from fin_ops_platform.services.postgres_repositories.input_invoice_usage_oa_reverse import (
-    input_invoice_usage_oa_reverse_statistics_snapshot,
-)
 from fin_ops_platform.services.postgres_repositories.output_invoice_collection import (
     build_output_invoice_collection_lifecycle_repository,
 )
@@ -81,10 +78,9 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
     ) -> dict[str, object]:
         normalized_scope_key = self._month_scope(scope_key)
         self._require_fresh_workbench_relation_scope(normalized_scope_key)
-        reverse_statistics = input_invoice_usage_oa_reverse_statistics_snapshot(self._connection)
         source_versions = input_invoice_usage_source_versions(
             payment_status_rules_version=self._payment_rules_provider.rules_source_version(),
-            oa_reverse_batch_source_version=str(reverse_statistics["source_version"]),
+            oa_reverse_batch_source_version=None,
         )
         relation_source_versions = self._workbench_relation_source_versions_for_scope(normalized_scope_key)
         if relation_source_versions:
@@ -119,7 +115,6 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
                 rows,
                 summary_kind="input",
                 scope_key=normalized_scope_key,
-                oa_reverse_batch_count=int(reverse_statistics["batch_count"]),
             ),
         )
         return {"scope_key": normalized_scope_key, "row_count": len(rows), "source_versions": source_versions}
@@ -171,19 +166,17 @@ class InvoiceUsageCollectionSqlProjectionBuilder:
         return {"scope_key": normalized_scope_key, "row_count": len(rows), "source_versions": source_versions}
 
     def mark_input_invoice_usage_scope_empty(self, scope_key: str) -> None:
-        reverse_statistics = input_invoice_usage_oa_reverse_statistics_snapshot(self._connection)
         self._input_invoice_usage_read_model_repository.mark_input_invoice_usage_scope(
             scope_key=scope_key,
             row_count=0,
             source_versions=input_invoice_usage_source_versions(
                 payment_status_rules_version=self._payment_rules_provider.rules_source_version(),
-                oa_reverse_batch_source_version=str(reverse_statistics["source_version"]),
+                oa_reverse_batch_source_version=None,
             ),
             statistics_metadata=_invoice_relation_statistics_metadata(
                 [],
                 summary_kind="input",
                 scope_key=scope_key,
-                oa_reverse_batch_count=int(reverse_statistics["batch_count"]),
             ),
         )
 
@@ -298,7 +291,6 @@ def _invoice_relation_statistics_metadata(
     *,
     summary_kind: str,
     scope_key: str,
-    oa_reverse_batch_count: int = 0,
 ) -> dict[str, object]:
     members: dict[str, dict[str, object]] = {}
     formal_group_ids: set[str] = set()
@@ -388,7 +380,6 @@ def _invoice_relation_statistics_metadata(
         members,
         summary_kind=summary_kind,
         formal_group_count=len(formal_group_ids),
-        oa_reverse_batch_count=oa_reverse_batch_count,
     )
     return {"statistics": statistics}
 
@@ -398,7 +389,6 @@ def _invoice_relation_statistics_from_members(
     *,
     summary_kind: str,
     formal_group_count: int = 0,
-    oa_reverse_batch_count: int = 0,
 ) -> dict[str, int]:
     values = list(members.values())
     invoice_count = len(values)
@@ -415,7 +405,6 @@ def _invoice_relation_statistics_from_members(
             "unlinked_bank_invoice_count": invoice_count - linked_bank_count,
             "unpaid_invoice_count": invoice_count - paid_count,
             "formal_relation_group_count": formal_group_count,
-            "oa_reverse_batch_count": max(int(oa_reverse_batch_count), 0),
         }
     linked_bank_count = sum(bool(item.get("linked_income_bank")) for item in values)
     collected_count = sum(bool(item.get("collected")) for item in values)

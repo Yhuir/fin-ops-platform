@@ -407,7 +407,7 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         response = _input_invoice_usage_relation_details_response(
             app,
             "usage-row-missing-repository",
-            {"kind": ["oa"]},
+            {"kind": ["oa"], "month": ["2026-05"]},
         )
 
         payload = json.loads(response.body)
@@ -415,10 +415,16 @@ class InputInvoiceUsageApiTests(unittest.TestCase):
         self.assertEqual(payload["read_model_status"], "refreshing")
         self.assertEqual(payload["readModelStatus"], "refreshing")
         self.assertEqual(payload["detailAvailable"], False)
-        self.assertEqual(payload["read_model_scope_key"], "all")
+        self.assertEqual(payload["read_model_scope_key"], "2026-05")
         self.assertEqual(
             queue.refreshes,
-            [("input_invoice_usage", "all", "api_detail_sql_repository_unavailable")],
+            [
+                (
+                    "input_invoice_usage",
+                    "2026-05",
+                    "api_detail_sql_repository_unavailable",
+                )
+            ],
         )
 
     def test_relation_details_compare_source_versions_with_row_scope(self) -> None:

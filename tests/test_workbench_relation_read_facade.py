@@ -705,6 +705,7 @@ class WorkbenchRelationReadFacadeTests(unittest.TestCase):
         self.assertEqual(payload["status"], "stale")
         self.assertEqual(payload["rows"], [])
         self.assertTrue(payload["refresh_enqueued"])
+        self.assertEqual(payload["refresh_scope_keys"], ["2026-02"])
         self.assertEqual(Repository.calls, [{"scope_keys": ["2026-01", "2026-02"], "tenant_id": "default"}])
         self.assertEqual(expected_calls, [["2026-01", "2026-02"]])
         self.assertEqual(

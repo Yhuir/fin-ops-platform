@@ -23,6 +23,7 @@ const rowsPayload = {
         applicationType: "报销",
         projectName: "红河卷烟厂能源管理系统运维服务",
         applicationTime: "2026-01-03",
+        month: "2026-01",
         amount: "10000.00",
         detailAvailable: true,
         reason: "红河卷烟厂运维服务保证金",
@@ -80,6 +81,7 @@ const rowsPayload = {
         applicationType: "支付申请",
         projectName: "昭通卷烟厂能源集控平台维护",
         applicationTime: "2026-01-20 02:51:26",
+        month: "2026-01",
         amount: "4450.00",
         detailAvailable: true,
         workflowStatus: "completed",
@@ -1368,7 +1370,10 @@ describe("OA pending payments page", () => {
     })).toBe(true);
     expect(fetchMock.mock.calls.some(([input]) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      return url.pathname === "/api/oa-pending-payments/bank-transactions/bank-001/detail";
+      return (
+        url.pathname === "/api/oa-pending-payments/bank-transactions/bank-001/detail"
+        && url.searchParams.get("month") === "2026-01"
+      );
     })).toBe(true);
     expect(fetchMock.mock.calls.some(([input]) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
@@ -1376,15 +1381,27 @@ describe("OA pending payments page", () => {
     })).toBe(true);
     expect(fetchMock.mock.calls.some(([input]) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      return url.pathname === "/api/oa-pending-payments/rows/oa-payment-group-case-001/relation-details" && url.searchParams.get("kind") === "oa";
+      return (
+        url.pathname === "/api/oa-pending-payments/rows/oa-payment-group-case-001/relation-details"
+        && url.searchParams.get("kind") === "oa"
+        && url.searchParams.get("month") === "2026-01"
+      );
     })).toBe(true);
     expect(fetchMock.mock.calls.some(([input]) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      return url.pathname === "/api/oa-pending-payments/rows/oa-payment-group-case-001/relation-details" && url.searchParams.get("kind") === "bank";
+      return (
+        url.pathname === "/api/oa-pending-payments/rows/oa-payment-group-case-001/relation-details"
+        && url.searchParams.get("kind") === "bank"
+        && url.searchParams.get("month") === "2026-01"
+      );
     })).toBe(true);
     expect(fetchMock.mock.calls.some(([input]) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
-      return url.pathname === "/api/oa-pending-payments/rows/oa-payment-group-case-001/relation-details" && url.searchParams.get("kind") === "invoice";
+      return (
+        url.pathname === "/api/oa-pending-payments/rows/oa-payment-group-case-001/relation-details"
+        && url.searchParams.get("kind") === "invoice"
+        && url.searchParams.get("month") === "2026-01"
+      );
     })).toBe(true);
   });
 

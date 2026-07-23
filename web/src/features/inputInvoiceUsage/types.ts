@@ -32,6 +32,7 @@ export type InputInvoiceUsageDetailTarget = {
   id: string;
   rowId?: string;
   relationKind?: "oa" | "bank" | "invoice";
+  scopeKey?: string;
 };
 
 export type InputInvoiceUsageInvoiceSummary = {

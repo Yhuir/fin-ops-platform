@@ -51,6 +51,7 @@ export type OutputInvoiceCollectionDetailTarget = {
   id: string;
   rowId?: string;
   relationKind?: "oa" | "bank" | "invoice" | "red_invoice" | "receipt";
+  scopeKey?: string;
 };
 
 export type OutputInvoiceCollectionInvoiceSummary = {

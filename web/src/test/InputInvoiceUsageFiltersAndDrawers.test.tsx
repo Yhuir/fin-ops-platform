@@ -289,6 +289,7 @@ describe("Input invoice usage workflow drawers", () => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
       expect(url.pathname).toBe("/api/input-invoice-usage/rows/row-refreshing/relation-details");
       expect(url.searchParams.get("kind")).toBe("oa");
+      expect(url.searchParams.get("month")).toBe("2026-05");
       return new Response(JSON.stringify({
         row_id: "row-refreshing",
         kind: "oa",
@@ -307,6 +308,7 @@ describe("Input invoice usage workflow drawers", () => {
       id: "row-refreshing",
       rowId: "row-refreshing",
       relationKind: "oa",
+      scopeKey: "2026-05",
     });
 
     expect(detail.title).toBe("OA关联明细");

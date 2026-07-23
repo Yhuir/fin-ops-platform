@@ -31,6 +31,7 @@ export type OaPendingPaymentOaSummary = {
   applicationType: string;
   projectName: string;
   applicationTime: string;
+  month?: string;
   amount: string;
   detailAvailable: boolean;
   reason?: string;
@@ -297,6 +298,7 @@ export type OaPendingPaymentDetailTarget = {
   id: string;
   rowId?: string;
   relationKind?: "oa" | "bank" | "invoice";
+  scopeKey?: string;
 };
 
 export type OaPendingPaymentDetailResponse = {

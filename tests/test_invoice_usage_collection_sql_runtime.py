@@ -147,6 +147,21 @@ class FreshEmptyWorkbenchRelationFacade:
     def get_by_row_ids(self, *_args: object, **_kwargs: object) -> dict[str, object]:
         return self.list_by_month()
 
+    def source_versions_for_scopes(
+        self,
+        scope_keys: list[str],
+        **_kwargs: object,
+    ) -> dict[str, object]:
+        return {
+            "status": "fresh",
+            "read_model_scope_source_versions": {
+                scope_key: {"relation_generation": 1}
+                for scope_key in scope_keys
+            },
+            "refresh_scope_keys": [],
+            "stale_reasons": [],
+        }
+
 
 class RefreshingWorkbenchRelationFacade(FreshEmptyWorkbenchRelationFacade):
     def list_by_month(self, *_args: object, **_kwargs: object) -> dict[str, object]:
@@ -390,9 +405,11 @@ class InvoiceReadModelConnection:
                 return rows
             return self._oa_rows_for_sql(normalized)
         if "from read_model.input_invoice_usage_scopes" in normalized:
-            return self._scope_rows_with_statistics(self.input_scope_rows, summary_kind="input")
+            rows = self._scope_rows_with_statistics(self.input_scope_rows, summary_kind="input")
+            return self._with_relation_source_versions(rows) if "requested_scopes as" in normalized else rows
         if "from read_model.output_invoice_collection_scopes" in normalized:
-            return self._scope_rows_with_statistics(self.output_scope_rows, summary_kind="output")
+            rows = self._scope_rows_with_statistics(self.output_scope_rows, summary_kind="output")
+            return self._with_relation_source_versions(rows) if "requested_scopes as" in normalized else rows
         if (
             "from read_model.oa_pending_payment_scopes" in normalized
             and "with base_rows as materialized" not in normalized
@@ -401,6 +418,22 @@ class InvoiceReadModelConnection:
         if "from read_model.workbench_relation_scopes" in normalized:
             return self.workbench_relation_scope_rows
         return []
+
+    @staticmethod
+    def _with_relation_source_versions(rows: list[dict]) -> list[dict]:
+        result: list[dict] = []
+        for row in rows:
+            source_versions = (
+                dict(row.get("source_versions"))
+                if isinstance(row.get("source_versions"), dict)
+                else {}
+            )
+            source_versions.setdefault(
+                "workbench_relation_source_versions",
+                {"relation_generation": 1},
+            )
+            result.append({**row, "source_versions": source_versions})
+        return result
 
     def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
         normalized = " ".join(sql.lower().split())
@@ -1294,7 +1327,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertNotIn("input_invoice_usage_oa_reverse_batch_source_version", versions)
         self.assertEqual(versions["input_invoice_usage_statistics_schema_version"], 2)
 
-    def test_input_statistics_expected_versions_use_live_oa_reverse_batch_generation(self) -> None:
+    def test_input_statistics_overlay_uses_live_oa_reverse_batch_count(self) -> None:
         class StatisticsConnection:
             def fetch_one(self, sql: str, params: tuple = ()) -> dict[str, object]:
                 self.sql = " ".join(sql.split())
@@ -1316,18 +1349,13 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
             {"storage_backend": "postgres", "_connection": connection},
         )()
 
-        versions = app._input_invoice_usage_statistics_expected_source_versions(scope_key="all")
+        overlay = app._input_invoice_usage_statistics_overlay()
 
-        self.assertEqual(
-            versions["input_invoice_usage_oa_reverse_batch_source_version"],
-            "rows:3|max_created_at:2026-07-22 09:00:00+00",
-        )
-        self.assertEqual(versions["input_invoice_usage_statistics_schema_version"], 2)
-        self.assertIn("oa_projection_sync_version", versions)
+        self.assertEqual(overlay, {"oa_reverse_batch_count": 3})
         self.assertIn("from app.input_invoice_usage_oa_reverse_batches", connection.sql)
         self.assertEqual(connection.params, ())
 
-    def test_input_all_scope_uses_one_consistent_global_oa_reverse_batch_count(self) -> None:
+    def test_input_all_scope_ignores_legacy_embedded_oa_reverse_batch_count(self) -> None:
         month_statistics = {
             "invoice_count": 1,
             "linked_oa_invoice_count": 0,
@@ -1350,18 +1378,19 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
 
         self.assertIsNotNone(statistics)
         self.assertEqual(statistics["invoice_count"], 2)
-        self.assertEqual(statistics["oa_reverse_batch_count"], 3)
+        self.assertEqual(statistics["oa_reverse_batch_count"], 0)
 
         inconsistent = dict(month_statistics)
         inconsistent["oa_reverse_batch_count"] = 4
-        self.assertIsNone(
+        self.assertEqual(
             _invoice_relation_statistics_from_scope_metadata(
                 [
                     {"statistics": dict(month_statistics)},
                     {"statistics": inconsistent},
                 ],
                 summary_kind="input",
-            )
+            )["oa_reverse_batch_count"],
+            0,
         )
 
     def test_input_repository_can_skip_statistics_on_later_export_pages(self) -> None:
@@ -2525,7 +2554,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(stale_payload["rows"], [])
         self.assertEqual(stale_payload["read_model_status"], "refreshing")
         self.assertIn("oa_projection_sync_version_missing", stale_payload["read_model_stale_reasons"])
-        self.assertEqual(queue.refreshes, [("input_invoice_usage", "all", "api_source_versions_stale")])
+        self.assertEqual(queue.refreshes, [])
 
         repository.prune_input_invoice_usage_scope_shards(["2026-06"])
         fresh_response = _input_invoice_usage_rows_response(app, {"page": ["1"], "page_size": ["50"]})
@@ -2536,7 +2565,7 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(fresh_payload["read_model_scope_key"], "all")
         self.assertEqual(fresh_payload["rows"][0]["id"], "input_invoice_usage_current_row")
         self.assertNotIn("read_model_stale_reasons", fresh_payload)
-        self.assertEqual(queue.refreshes, [("input_invoice_usage", "all", "api_source_versions_stale")])
+        self.assertEqual(queue.refreshes, [])
 
     def test_output_api_all_scope_ignores_stale_empty_month_scope_versions(self) -> None:
         base_versions = output_invoice_collection_source_versions()
@@ -2601,12 +2630,9 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["pagination"]["total"], 1)
         self.assertEqual(payload["rows"][0]["id"], "output_invoice_collection_row_1")
         self.assertNotIn("read_model_stale_reasons", payload)
-        self.assertEqual(payload["statistics_status"], "refreshing")
-        self.assertIsNone(payload["statistics"])
-        self.assertEqual(
-            queue.refreshes,
-            [("output_invoice_collection", "all", "api_statistics_source_versions_stale")],
-        )
+        self.assertEqual(payload["statistics_status"], "fresh")
+        self.assertIsInstance(payload["statistics"], dict)
+        self.assertEqual(queue.refreshes, [])
 
     def test_output_api_all_scope_does_not_loop_on_relation_all_versions(self) -> None:
         base_versions = output_invoice_collection_source_versions()

@@ -28,8 +28,15 @@ class InputInvoiceUsageReadModelDetailService:
         self._enqueue_refresh = enqueue_refresh
         self._source_versions_provider = source_versions_provider
 
-    def relation_details(self, row_id: str, *, kind: str) -> dict[str, object] | None:
+    def relation_details(
+        self,
+        row_id: str,
+        *,
+        kind: str,
+        requested_scope_key: str | None = None,
+    ) -> dict[str, object] | None:
         normalized_kind = str(kind or "").strip()
+        normalized_requested_scope_key = str(requested_scope_key or "").strip()
         if normalized_kind not in {"oa", "bank", "invoice"}:
             raise InputInvoiceUsageError("invalid_relation_kind", "kind must be oa, bank or invoice.")
         lookup = getattr(self._repository, "get_input_invoice_usage_row_by_row_id", None)
@@ -40,12 +47,32 @@ class InputInvoiceUsageReadModelDetailService:
         except ValueError as exc:
             raise InputInvoiceUsageError("invalid_input_invoice_usage_query", str(exc)) from exc
         if not isinstance(payload, dict):
-            self._enqueue_refresh("all", "api_detail_miss")
-            return self.refreshing_payload(kind=normalized_kind, scope_key="all")
-        scope_key = str(payload.get("read_model_scope_key") or "all")
+            if _is_month_scope_key(normalized_requested_scope_key):
+                self._enqueue_refresh(
+                    normalized_requested_scope_key,
+                    "api_detail_miss",
+                )
+                return self.refreshing_payload(
+                    kind=normalized_kind,
+                    scope_key=normalized_requested_scope_key,
+                )
+            raise InputInvoiceUsageError(
+                "row_not_found",
+                f"Input invoice usage row not found: {row_id}",
+                status_code=HTTPStatus.NOT_FOUND,
+            )
+        scope_key = str(
+            payload.get("read_model_scope_key")
+            or (
+                normalized_requested_scope_key
+                if _is_month_scope_key(normalized_requested_scope_key)
+                else "all"
+            )
+        )
         refresh_status = str(payload.get("refresh_status") or "fresh")
         if refresh_status != "fresh":
-            self._enqueue_refresh(scope_key, "api_detail_stale")
+            if _is_month_scope_key(scope_key):
+                self._enqueue_refresh(scope_key, "api_detail_stale")
             return self.refreshing_payload(kind=normalized_kind, scope_key=scope_key)
         stale_reasons = source_version_mismatch_reasons(
             expected=require_expected_source_versions(
@@ -55,7 +82,8 @@ class InputInvoiceUsageReadModelDetailService:
             actual=payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {},
         )
         if stale_reasons:
-            self._enqueue_refresh(scope_key, "api_detail_source_versions_stale")
+            if _is_month_scope_key(scope_key):
+                self._enqueue_refresh(scope_key, "api_detail_source_versions_stale")
             return self.refreshing_payload(kind=normalized_kind, scope_key=scope_key, stale_reasons=stale_reasons)
         row = payload.get("row")
         if not isinstance(row, dict):
@@ -108,3 +136,8 @@ def _source_versions_from_provider(
         return dict(provider(scope_key=scope_key) or {})
     except TypeError:
         return dict(provider() or {})
+
+
+def _is_month_scope_key(scope_key: object) -> bool:
+    normalized = str(scope_key or "").strip()
+    return len(normalized) == 7 and normalized[4] == "-"

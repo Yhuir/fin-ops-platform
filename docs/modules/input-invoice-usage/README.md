@@ -63,6 +63,8 @@ filter config、filters JSON 解析和排序字段校验由 `input_invoice_usage
 
 `input_invoice_usage:all` 在 refresh 链路中是 fan-out 到月份 shard 的控制 scope；页面默认 all 查询的 freshness 证明来自实际 rows/month scopes 和 active dirty/outbox 状态。month scope 必须继续严格比对对应月份 `workbench_relation` source versions；all 查询不能直接使用全局 `workbench_relation:all` source versions 作为 expected contract，否则会把已 fresh 的月份 shard 误判为 stale 并反复显示“正在刷新”。
 
+默认 all 页面查询不得 enqueue 该控制 scope；query gate 通过轻量 scope/source-version port 枚举有效月份并只刷新 mismatch shard。关联详情抽屉携带当前行月份，无法证明月份时零 enqueue。`all` 只供显式 maintenance/reapply/repair。
+
 `input_invoice_usage:all` fan-out 发现当前月份 shard 后，必须清理不再属于当前进项发票事实集的旧月份 rows/scopes。否则旧 month scope 的基础 source versions 会继续参与 all 查询 freshness 聚合，导致 `oa_projection_sync_version_missing` 等 stale reason 反复出现，页面长期显示“正在刷新”。
 
 ## 维护触发器

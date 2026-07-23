@@ -993,6 +993,7 @@ describe("Input invoice usage page", () => {
       .map(([input]) => new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost"))
       .filter((url) => url.pathname === "/api/input-invoice-usage/rows/usage-row-multi/relation-details");
     expect(relationRequests.map((url) => url.searchParams.get("kind"))).toEqual(["oa", "bank", "invoice"]);
+    expect(relationRequests.map((url) => url.searchParams.get("month"))).toEqual(["2026-05", "2026-05", "2026-05"]);
   });
 
   test("opens OA reverse workspace with one-step draft creation and submitted history tabs", async () => {

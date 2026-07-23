@@ -405,6 +405,7 @@ class WorkbenchRelationReadFacade:
                 source_versions=source_versions,
                 scope_source_versions=scope_source_versions,
                 scope_keys=scope_keys,
+                refresh_scope_keys=refresh_scope_keys,
                 refresh_enqueued=refresh_enqueued,
                 stale_reasons=stale_reasons,
             )
@@ -468,6 +469,7 @@ def _facade_result(
     source_versions: dict[str, Any] | None = None,
     scope_source_versions: dict[str, Any] | None = None,
     scope_keys: list[str] | None = None,
+    refresh_scope_keys: list[str] | None = None,
     refresh_enqueued: bool = False,
     stale_reasons: list[str] | None = None,
 ) -> dict[str, Any]:
@@ -478,6 +480,7 @@ def _facade_result(
         "source_versions": dict(source_versions or {}),
         "read_model_scope_source_versions": dict(scope_source_versions or {}),
         "read_model_scope_keys": list(scope_keys or []),
+        "refresh_scope_keys": list(refresh_scope_keys or []),
         "refresh_enqueued": bool(refresh_enqueued),
         "stale_reasons": list(stale_reasons or []),
     }

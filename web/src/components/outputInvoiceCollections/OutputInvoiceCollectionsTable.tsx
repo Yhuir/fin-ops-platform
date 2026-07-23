@@ -617,7 +617,14 @@ function relationListTarget(
 ): OutputInvoiceCollectionDetailTarget | null {
   const relation = relationKind === "oa" ? row.oa : relationKind === "bank" ? row.bank : row.invoiceRelations;
   if (relation.detailMode === "list" && Number(relation.relationCount ?? 0) > 1) {
-    return { kind: "relationList", id: row.id, rowId: row.id, relationKind };
+    const scopeKey = row.invoice.issueDate.slice(0, 7);
+    return {
+      kind: "relationList",
+      id: row.id,
+      rowId: row.id,
+      relationKind,
+      scopeKey: /^\d{4}-\d{2}$/.test(scopeKey) ? scopeKey : undefined,
+    };
   }
   return null;
 }

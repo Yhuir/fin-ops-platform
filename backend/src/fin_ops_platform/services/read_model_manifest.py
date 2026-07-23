@@ -255,10 +255,13 @@ READ_MODEL_MANIFEST: dict[str, ReadModelManifestEntry] = {
         operation_barrier_contract="app_status_registry_target",
         repository_port_contract=(
             "list_input_invoice_usage_rows",
+            "list_input_invoice_usage_filter_options",
+            "input_invoice_usage_scope_source_versions",
+            "get_input_invoice_usage_row_by_row_id",
+            "list_input_invoice_usage_rows_by_invoice_ids",
             "save_input_invoice_usage_rows",
             "mark_input_invoice_usage_scope",
             "prune_input_invoice_usage_scope_shards",
-            "get_input_invoice_usage_row_by_row_id",
         ),
         query_owner="InputInvoiceUsageReadModelService",
         repository_owner="InputInvoiceUsageReadModelRepositoryPort",
@@ -282,6 +285,7 @@ READ_MODEL_MANIFEST: dict[str, ReadModelManifestEntry] = {
         operation_barrier_contract="app_status_registry_target",
         repository_port_contract=(
             "list_output_invoice_collection_rows",
+            "output_invoice_collection_scope_source_versions",
             "get_output_invoice_collection_row_by_row_id",
             "save_output_invoice_collection_rows",
             "mark_output_invoice_collection_scope",

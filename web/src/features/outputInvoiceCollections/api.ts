@@ -697,6 +697,9 @@ export async function fetchOutputInvoiceCollectionRowRelationDetail(
 ) {
   const params = new URLSearchParams();
   params.set("kind", target.kind === "relationList" ? target.relationKind ?? "bank" : target.kind);
+  if (target.scopeKey) {
+    params.set("month", target.scopeKey);
+  }
   const payload = await apiRequestJson<unknown>(
     `/api/output-invoice-collections/rows/${encodeURIComponent(target.rowId ?? target.id)}/relation-details?${params.toString()}`,
     { method: "GET", signal },

@@ -100,7 +100,9 @@ class OaPendingPaymentReadModelService:
         blocking_scope_keys = [str(value) for value in list(state.get("blocking_scope_keys") or []) if str(value)]
         stale_reasons = [str(value) for value in list(state.get("stale_reasons") or []) if str(value)]
         if str(state.get("status") or "refreshing") != "fresh":
-            refresh_scope_keys = blocking_scope_keys or [scope_key]
+            refresh_scope_keys = _concrete_scope_keys(blocking_scope_keys)
+            if not refresh_scope_keys and _month_scope_key(scope_key):
+                refresh_scope_keys = [scope_key]
             for blocking_scope_key in refresh_scope_keys:
                 self._enqueue_refresh(blocking_scope_key, reason="api_freshness_gate_blocked")
             return OaPendingPaymentRowsRead(
@@ -122,11 +124,9 @@ class OaPendingPaymentReadModelService:
                 base_source_versions=statistics_base_source_versions,
             ) or {}
         if str(statistics_state.get("status") or "refreshing") != "fresh":
-            statistics_blocking_scope_keys = [
-                str(value)
-                for value in list(statistics_state.get("blocking_scope_keys") or [])
-                if str(value).strip()
-            ] or ["all"]
+            statistics_blocking_scope_keys = _concrete_scope_keys(
+                list(statistics_state.get("blocking_scope_keys") or [])
+            )
             for blocking_scope_key in statistics_blocking_scope_keys:
                 self._enqueue_refresh(str(blocking_scope_key), reason="api_statistics_freshness_gate_blocked")
 
@@ -239,9 +239,11 @@ class OaPendingPaymentReadModelService:
             raise OaPendingPaymentError("invalid_oa_pending_payment_query", str(exc)) from exc
         if cached_read.freshness_status != "fresh":
             failed_state = snapshot_state if isinstance(snapshot_state, dict) else {}
-            refresh_scope_keys = [
-                str(value) for value in list(failed_state.get("blocking_scope_keys") or []) if str(value)
-            ] or [scope_key]
+            refresh_scope_keys = _concrete_scope_keys(
+                list(failed_state.get("blocking_scope_keys") or [])
+            )
+            if not refresh_scope_keys and _month_scope_key(scope_key):
+                refresh_scope_keys = [scope_key]
             for blocking_scope_key in refresh_scope_keys:
                 self._enqueue_refresh(blocking_scope_key, reason="api_freshness_gate_changed_during_read")
             return OaPendingPaymentRowsRead(
@@ -268,7 +270,12 @@ class OaPendingPaymentReadModelService:
         result["read_model_scope_key"] = scope_key
         return OaPendingPaymentRowsRead(status=HTTPStatus.OK, payload=result, etag=etag)
 
-    def oa_detail(self, oa_id: str) -> dict[str, Any]:
+    def oa_detail(
+        self,
+        oa_id: str,
+        *,
+        requested_scope_key: str | None = None,
+    ) -> dict[str, Any]:
         return self._detail(
             lookup_method_name="get_oa_pending_payment_row_by_oa_id",
             identifier=oa_id,
@@ -276,9 +283,15 @@ class OaPendingPaymentReadModelService:
             not_found_code="oa_not_found",
             not_found_message=f"OA detail not found: {oa_id}",
             title="OA详情",
+            requested_scope_key=requested_scope_key,
         )
 
-    def bank_transaction_detail(self, bank_transaction_id: str) -> dict[str, Any]:
+    def bank_transaction_detail(
+        self,
+        bank_transaction_id: str,
+        *,
+        requested_scope_key: str | None = None,
+    ) -> dict[str, Any]:
         return self._detail(
             lookup_method_name="get_oa_pending_payment_row_by_bank_transaction_id",
             identifier=bank_transaction_id,
@@ -286,9 +299,15 @@ class OaPendingPaymentReadModelService:
             not_found_code="bank_transaction_not_found",
             not_found_message=f"Bank transaction detail not found: {bank_transaction_id}",
             title="支出流水详情",
+            requested_scope_key=requested_scope_key,
         )
 
-    def invoice_detail(self, invoice_id: str) -> dict[str, Any]:
+    def invoice_detail(
+        self,
+        invoice_id: str,
+        *,
+        requested_scope_key: str | None = None,
+    ) -> dict[str, Any]:
         return self._detail(
             lookup_method_name="get_oa_pending_payment_row_by_invoice_id",
             identifier=invoice_id,
@@ -296,9 +315,16 @@ class OaPendingPaymentReadModelService:
             not_found_code="invoice_not_found",
             not_found_message=f"Invoice detail not found: {invoice_id}",
             title="发票详情",
+            requested_scope_key=requested_scope_key,
         )
 
-    def relation_details(self, row_id: str, *, kind: str) -> dict[str, Any]:
+    def relation_details(
+        self,
+        row_id: str,
+        *,
+        kind: str,
+        requested_scope_key: str | None = None,
+    ) -> dict[str, Any]:
         title = "支出流水关联明细" if kind == "bank" else "发票关联明细"
         return self._detail(
             lookup_method_name="get_oa_pending_payment_row_by_row_id",
@@ -307,6 +333,7 @@ class OaPendingPaymentReadModelService:
             not_found_code="row_not_found",
             not_found_message=f"OA pending payment row not found: {row_id}",
             title=title,
+            requested_scope_key=requested_scope_key,
         )
 
     def expected_source_versions(self, *, scope_key: str | None = None) -> dict[str, Any]:
@@ -324,7 +351,11 @@ class OaPendingPaymentReadModelService:
         stale_reasons: list[str] | None = None,
         blocking_scope_keys: list[str] | None = None,
     ) -> dict[str, Any]:
-        normalized_blocking_scope_keys = list(dict.fromkeys(blocking_scope_keys or [scope_key]))
+        normalized_blocking_scope_keys = _concrete_scope_keys(
+            list(blocking_scope_keys or [])
+        )
+        if not normalized_blocking_scope_keys and _month_scope_key(scope_key):
+            normalized_blocking_scope_keys = [scope_key]
         payload: dict[str, Any] = {
             "rows": [],
             "pagination": {"page": 1, "pageSize": 50, "total": 0},
@@ -353,27 +384,65 @@ class OaPendingPaymentReadModelService:
         not_found_code: str,
         not_found_message: str,
         title: str,
+        requested_scope_key: str | None = None,
     ) -> dict[str, Any]:
+        normalized_requested_scope_key = _month_scope_key(requested_scope_key)
         if self._repository is None:
-            self._enqueue_refresh("all", reason="api_detail_sql_repository_unavailable")
-            return self._refreshing_detail_payload(title=title, scope_key="all")
+            if normalized_requested_scope_key:
+                self._enqueue_refresh(
+                    normalized_requested_scope_key,
+                    reason="api_detail_sql_repository_unavailable",
+                )
+            return self._refreshing_detail_payload(
+                title=title,
+                scope_key=normalized_requested_scope_key or "all",
+            )
         with self._repository.read_snapshot() as repository:
             lookup = getattr(repository, lookup_method_name, None)
             if not callable(lookup):
-                self._enqueue_refresh("all", reason="api_detail_sql_repository_unavailable")
-                return self._refreshing_detail_payload(title=title, scope_key="all")
+                if normalized_requested_scope_key:
+                    self._enqueue_refresh(
+                        normalized_requested_scope_key,
+                        reason="api_detail_sql_repository_unavailable",
+                    )
+                return self._refreshing_detail_payload(
+                    title=title,
+                    scope_key=normalized_requested_scope_key or "all",
+                )
             payload = lookup(identifier)
             if not isinstance(payload, dict):
-                self._enqueue_refresh("all", reason="api_detail_miss")
-                return self._refreshing_detail_payload(title=title, scope_key="all")
-            scope_key = str(payload.get("read_model_scope_key") or "all")
+                if normalized_requested_scope_key:
+                    self._enqueue_refresh(
+                        normalized_requested_scope_key,
+                        reason="api_detail_miss",
+                    )
+                    return self._refreshing_detail_payload(
+                        title=title,
+                        scope_key=normalized_requested_scope_key,
+                    )
+                raise OaPendingPaymentError(
+                    not_found_code,
+                    not_found_message,
+                    status_code=HTTPStatus.NOT_FOUND,
+                )
+            scope_key = str(
+                payload.get("read_model_scope_key")
+                or normalized_requested_scope_key
+                or "all"
+            )
             state = repository.query_state(
                 scope_key=scope_key,
                 tenant_id="default",
                 base_source_versions=self.expected_source_versions(scope_key=scope_key),
             )
             if not isinstance(state, dict) or str(state.get("status") or "refreshing") != "fresh":
-                blocking_scope_keys = [str(value) for value in list((state or {}).get("blocking_scope_keys") or [scope_key])]
+                blocking_scope_keys = [
+                    current_scope_key
+                    for value in list(
+                        (state or {}).get("blocking_scope_keys") or [scope_key]
+                    )
+                    if (current_scope_key := _month_scope_key(value))
+                ]
                 for blocking_scope_key in blocking_scope_keys:
                     self._enqueue_refresh(blocking_scope_key, reason="api_detail_freshness_gate_blocked")
                 return self._refreshing_detail_payload(
@@ -460,6 +529,21 @@ def _source_versions_from_provider(provider: SourceVersionsProvider, *, scope_ke
         return dict(provider(scope_key=scope_key) or {})  # type: ignore[misc]
     except TypeError:
         return dict(provider() or {})
+
+
+def _month_scope_key(scope_key: object) -> str:
+    normalized = str(scope_key or "").strip()
+    return normalized if len(normalized) == 7 and normalized[4] == "-" else ""
+
+
+def _concrete_scope_keys(scope_keys: list[object]) -> list[str]:
+    return list(
+        dict.fromkeys(
+            normalized
+            for scope_key in scope_keys
+            if (normalized := _month_scope_key(scope_key))
+        )
+    )
 
 
 def _etag_matches(if_none_match: str | None, etag: str) -> bool:

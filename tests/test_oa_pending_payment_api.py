@@ -1130,7 +1130,12 @@ class OaPendingPaymentApiTests(unittest.TestCase):
 
         app._oa_pending_payment_sql_read_repository = OaDetailRepository(row=None, has_scope=False)
         app._oa_pending_payment_api_routes = _read_model_routes(repository=app._oa_pending_payment_sql_read_repository, queue=queue)
-        missing_scope_response = _json_test_response_for_payload(app._oa_pending_payment_api_routes.oa_detail("oa-api"))
+        missing_scope_response = _json_test_response_for_payload(
+            app._oa_pending_payment_api_routes.oa_detail(
+                "oa-api",
+                {"month": ["2026-05"]},
+            )
+        )
         missing_scope_payload = json.loads(missing_scope_response.body)
 
         self.assertEqual(stale_response.status_code, 202)
@@ -1143,15 +1148,16 @@ class OaPendingPaymentApiTests(unittest.TestCase):
             queue.refreshes,
             [
                 ("oa_pending_payment", "2026-05", "api_detail_freshness_gate_blocked"),
-                ("oa_pending_payment", "all", "api_detail_miss"),
+                ("oa_pending_payment", "2026-05", "api_detail_miss"),
             ],
         )
 
     def test_production_detail_fresh_miss_returns_not_found_and_invalid_relation_kind_is_400(self) -> None:
+        queue = QueueRecorder()
         app = object.__new__(Application)
         app._bootstrap_mode = "production"
         app._state_store = type("StateStore", (), {"storage_backend": "postgres"})()
-        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": QueueRecorder()})()
+        app._runtime_repositories = type("RuntimeRepos", (), {"queue_repository": queue})()
         app._oa_pending_payment_sql_read_repository = OaDetailRepository(row=None, has_scope=True)
         app._oa_pending_payment_api_routes = _read_model_routes(
             repository=app._oa_pending_payment_sql_read_repository,
@@ -1179,6 +1185,7 @@ class OaPendingPaymentApiTests(unittest.TestCase):
         self.assertEqual(json.loads(missing_response.body)["error"]["code"], "oa_not_found")
         self.assertEqual(invalid_kind_response.status_code, 400)
         self.assertEqual(json.loads(invalid_kind_response.body)["error"]["code"], "invalid_relation_kind")
+        self.assertEqual(queue.refreshes, [])
 
     def test_oa_source_versions_cover_relation_and_import_fact_dependencies(self) -> None:
         versions = oa_pending_payment_source_versions()

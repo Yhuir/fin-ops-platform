@@ -78,13 +78,28 @@ class OaPendingPaymentApiRoutes:
             return self._json_read(headers, lambda _session: (HTTPStatus.OK, self.bank_transaction_candidates(query)))
         if method == "GET" and route_path.startswith("/api/oa-pending-payments/oa/") and route_path.endswith("/detail"):
             oa_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._json_read(headers, lambda _session: self._detail_response(self.oa_detail(oa_id)))
+            return self._json_read(
+                headers,
+                lambda _session: self._detail_response(
+                    self.oa_detail(oa_id, query)
+                ),
+            )
         if method == "GET" and route_path.startswith("/api/oa-pending-payments/bank-transactions/") and route_path.endswith("/detail"):
             bank_transaction_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._json_read(headers, lambda _session: self._detail_response(self.bank_transaction_detail(bank_transaction_id)))
+            return self._json_read(
+                headers,
+                lambda _session: self._detail_response(
+                    self.bank_transaction_detail(bank_transaction_id, query)
+                ),
+            )
         if method == "GET" and route_path.startswith("/api/oa-pending-payments/invoices/") and route_path.endswith("/detail"):
             invoice_id = unquote(route_path.rsplit("/", 2)[-2])
-            return self._json_read(headers, lambda _session: self._detail_response(self.invoice_detail(invoice_id)))
+            return self._json_read(
+                headers,
+                lambda _session: self._detail_response(
+                    self.invoice_detail(invoice_id, query)
+                ),
+            )
         if method == "GET" and route_path.startswith("/api/oa-pending-payments/rows/") and route_path.endswith("/relation-details"):
             row_id = unquote(route_path.rsplit("/", 2)[-2])
             return self._json_read(headers, lambda _session: self._detail_response(self.relation_details(row_id, query)))
@@ -122,17 +137,42 @@ class OaPendingPaymentApiRoutes:
             response_headers["ETag"] = read.etag
         return read.status, read.payload, response_headers
 
-    def oa_detail(self, oa_id: str) -> dict[str, Any]:
-        return self._read_model_service_required().oa_detail(oa_id)
+    def oa_detail(
+        self,
+        oa_id: str,
+        query: dict[str, list[str]] | None = None,
+    ) -> dict[str, Any]:
+        return self._read_model_service_required().oa_detail(
+            oa_id,
+            requested_scope_key=_scope_key_from_query(query),
+        )
 
-    def bank_transaction_detail(self, bank_transaction_id: str) -> dict[str, Any]:
-        return self._read_model_service_required().bank_transaction_detail(bank_transaction_id)
+    def bank_transaction_detail(
+        self,
+        bank_transaction_id: str,
+        query: dict[str, list[str]] | None = None,
+    ) -> dict[str, Any]:
+        return self._read_model_service_required().bank_transaction_detail(
+            bank_transaction_id,
+            requested_scope_key=_scope_key_from_query(query),
+        )
 
-    def invoice_detail(self, invoice_id: str) -> dict[str, Any]:
-        return self._read_model_service_required().invoice_detail(invoice_id)
+    def invoice_detail(
+        self,
+        invoice_id: str,
+        query: dict[str, list[str]] | None = None,
+    ) -> dict[str, Any]:
+        return self._read_model_service_required().invoice_detail(
+            invoice_id,
+            requested_scope_key=_scope_key_from_query(query),
+        )
 
     def relation_details(self, row_id: str, query: dict[str, list[str]]) -> dict[str, Any]:
-        return self._read_model_service_required().relation_details(row_id, kind=query.get("kind", [""])[0])
+        return self._read_model_service_required().relation_details(
+            row_id,
+            kind=query.get("kind", [""])[0],
+            requested_scope_key=_scope_key_from_query(query),
+        )
 
     def link_bank_transactions(self, payload: dict[str, Any], *, actor_id: str) -> dict[str, Any]:
         if self._command_service is None:
@@ -250,3 +290,10 @@ def _header(headers: dict[str, str] | None, name: str) -> str | None:
         if str(key).lower() == normalized_name:
             return str(value)
     return None
+
+
+def _scope_key_from_query(
+    query: dict[str, list[str]] | None,
+) -> str | None:
+    month = str((query or {}).get("month", [""])[0] or "").strip()
+    return month[:7] if len(month) >= 7 and month[4] == "-" else None
