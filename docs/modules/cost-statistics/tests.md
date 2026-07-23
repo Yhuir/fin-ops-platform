@@ -425,6 +425,7 @@ PYTHONPATH=backend/src scripts/check-read-model-scope-contracts.py --help
 - `tests/test_cost_statistics_sql_runtime.py`：Cost all 访问先批量比较 canonical→active Workbench generations，只 enqueue 全部且仅 stale Workbench 月份；Workbench fresh 后，repository gate 逐月比较 Cost child 的 Workbench/Bank Detail lineage 与 parent `source_shards`，只 enqueue 精确 stale Cost child。concrete month 主表保持当前月 freshness，但同页全期间 statistics 也使用 parent-child proof；其它月份 drift 时 statistics fail-closed 并 ensure exact child，不把当前月 rows 伪装 stale。
 - `tests/test_batch_accounting_postgres_integration.py`：真实 PostgreSQL 下批量 Workbench proof 必须与逐月 proof 完全一致；`tests/test_cost_statistics_postgres_integration.py`：真实 PostgreSQL 制造 child Workbench lineage drift，证明 parent fail-closed 并返回精确 child scope。
 - `tests/test_read_model_manifest.py`：锁定 Cost repository port 的 bulk active Workbench version I/O；不新增 endpoint、worker、queue、registry、cache 或第二套刷新协调器。
+- 真实数据库结果：CI 因未配置 `FIN_OPS_TEST_DATABASE_URL` 明确跳过 PostgreSQL 集成；随后使用显式 host 的一次性本机 PostgreSQL 应用全部 migrations，首次发现并修复无 dirty row 时 SQL 三值逻辑漏报，复跑 `tests.test_cost_statistics_postgres_integration` 与 `tests.test_batch_accounting_postgres_integration` 为 `12/12`，临时库自动删除。
 - 发布后门禁：使用 test-owned 可逆 relation fixture，在不预读 concrete child 的前提下访问 Cost all；必须由 all GET 自身发现 drift、只生成 exact month/child refresh、`<=3s` 收敛为 fresh，随后 System Audit `16/16`。同时分别量测 all 与 concrete-month warm p95/p99，证明包含 global statistics child proof 后仍满足页面 SLO。
 
 ## 2026-07-23 relation 后访问时可见性门禁

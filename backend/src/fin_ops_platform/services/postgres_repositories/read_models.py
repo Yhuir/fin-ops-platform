@@ -7075,7 +7075,10 @@ class PostgresSummaryReadModelRepository:
                     select
                         state.*,
                         (
-                            state.workbench_dirty_status in ('pending', 'processing', 'failed')
+                            coalesce(
+                                state.workbench_dirty_status in ('pending', 'processing', 'failed'),
+                                false
+                            )
                             or (
                                 state.workbench_dirty_status is not null
                                 and (
