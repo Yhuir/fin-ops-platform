@@ -2761,6 +2761,12 @@ class PostgresBankReadModelRepository:
 
         status = status_for(normalized_scope_keys)
         statistics_status = status_for(statistics_scope_keys, require_statistics=True)
+        statistics_refresh_scope_keys = [
+            scope_key
+            for scope_key in statistics_scope_keys
+            if status_for([scope_key], require_statistics=True)
+            not in {"fresh", "refreshing"}
+        ]
         generated_values = [
             text(by_scope[scope_key].get("generated_at"))
             for scope_key in normalized_scope_keys
@@ -2826,6 +2832,7 @@ class PostgresBankReadModelRepository:
             "statistics": statistics,
             "statistics_status": statistics_status,
             "statistics_scope_keys": statistics_scope_keys,
+            "statistics_refresh_scope_keys": statistics_refresh_scope_keys,
             "statistics_scope_signatures": all_signatures,
             "statistics_signature": statistics_signature,
             "dirty_scopes": [

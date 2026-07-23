@@ -44,7 +44,7 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| 银行明细列表/账户/标签 payload | 前端页面 | 必须来自 read model/query port 并带 freshness/status；标题统计由全部已发布 month shard 的 `raw_payload.statistics` 汇总，固定表示页面未筛选完整集合，不随月份、账户、标签、搜索或分页变化；统计与任一 shard 非 fresh 时返回 `statistics=null` 并入队缺失 shard，禁止回读 canonical/统一事实源填数。read model 缺失或非 fresh 时返回 `refreshing/stale/schema_mismatch/missing` 诊断，不回退同步导入扫描 |
+| 银行明细列表/账户/标签 payload | 前端页面 | 必须来自 read model/query port 并带 freshness/status；标题统计由全部已发布 month shard 的 `raw_payload.statistics` 汇总，固定表示页面未筛选完整集合，不随月份、账户、标签、搜索或分页变化；统计与任一 shard 非 fresh 时返回 `statistics=null`，repository 必须输出精确 `statistics_refresh_scope_keys`，API 只入队真实 non-fresh 月份，禁止因一个月 relation/category proof 变化刷新全部历史/未来月份，也禁止回读 canonical/统一事实源填数。read model 缺失或非 fresh 时返回 `refreshing/stale/schema_mismatch/missing` 诊断，不回退同步导入扫描 |
 | 页面 Audit 状态 | 标题附件 | integrity/freshness/queue 均通过且列表 read model 明确 fresh 才显示成功；issue 数为样本 |
 | 自动标签规则写入结果 | 前端页面 | 普通保存立即完成，当前可见页面递增 query refresh token，并以返回的 `refreshing/stale/fresh` 状态收敛；route unmount 后不保留后台轮询，重新访问时走同一 query gate。显式 `reapply` 必须等待服务端 exact month `operation_barrier_targets` |
 | 标签/分类事实写入 | canonical store | PostgreSQL 只通过 `BankTransactionCategoryMutationWriter` -> `PostgresBankTransactionCategoryRepository` 定向写 canonical facts；人工补分类撤销把原 active fact 标记为 `cleared`，不得插入 active `unknown`。`BankTransactionCategoryStorePort` 仅供 local runtime snapshot 持久化，禁止重新接入 PostgreSQL |

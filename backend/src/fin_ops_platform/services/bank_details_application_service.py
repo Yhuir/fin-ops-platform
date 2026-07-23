@@ -579,9 +579,17 @@ class BankDetailsApplicationService:
             )
         if statistics_status not in {"fresh", "refreshing"}:
             selected_scope_keys = set(scope_keys) if refresh_enqueued else set()
+            reported_statistics_refresh_scope_keys = scope_summary.get(
+                "statistics_refresh_scope_keys"
+            )
+            statistics_refresh_scope_keys = (
+                list(reported_statistics_refresh_scope_keys)
+                if isinstance(reported_statistics_refresh_scope_keys, list)
+                else list(scope_summary.get("statistics_scope_keys") or scope_keys)
+            )
             statistics_scope_keys = [
                 scope_key
-                for scope_key in list(scope_summary.get("statistics_scope_keys") or scope_keys)
+                for scope_key in statistics_refresh_scope_keys
                 if scope_key not in selected_scope_keys
             ]
             if statistics_scope_keys:

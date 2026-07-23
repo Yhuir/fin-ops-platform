@@ -1125,6 +1125,9 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
                                 "relation_updated_at": "2026-05-25 10:00:00+08",
                             },
                         },
+                        raw_payload={
+                            "statistics": _bank_detail_statistics_from_rows([])
+                        },
                     ),
                     scope_row(
                         "2026-06",
@@ -1137,6 +1140,9 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
                                 "relation_count": 3,
                                 "relation_updated_at": "2026-06-20 09:00:00+08",
                             },
+                        },
+                        raw_payload={
+                            "statistics": _bank_detail_statistics_from_rows([])
                         },
                     ),
                 ],
@@ -1159,6 +1165,8 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         payload = repository.bank_detail_scope_summary(scope_keys=["2026-05", "2026-06"])
 
         self.assertEqual(payload["read_model_status"], "stale")
+        self.assertEqual(payload["statistics_status"], "stale")
+        self.assertEqual(payload["statistics_refresh_scope_keys"], ["2026-05"])
         relation_summary_calls = [
             (sql, params)
             for method, sql, params in connection.calls
@@ -1621,6 +1629,86 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             json.dumps(expected_signature, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
         ).hexdigest()
         self.assertEqual(cache_key, f"bank_detail:transactions:{expected_digest}")
+
+    def test_application_statistics_refresh_enqueues_only_reported_stale_scopes(self) -> None:
+        class BankDetailRepository:
+            @staticmethod
+            def bank_detail_scope_keys_for_range(**_kwargs: object) -> list[str]:
+                return ["2026-02"]
+
+            @staticmethod
+            def bank_detail_scope_summary(*, scope_keys: list[str]) -> dict[str, object]:
+                signatures = {
+                    scope_key: {
+                        "source_versions": {"bank_auto_tag_rules_version": 1},
+                    }
+                    for scope_key in ("2026-01", "2026-02", "2026-03")
+                }
+                return {
+                    "read_model_status": "fresh",
+                    "read_model_scope_keys": list(scope_keys),
+                    "read_model_scope_signatures": {
+                        "2026-02": signatures["2026-02"]
+                    },
+                    "statistics": None,
+                    "statistics_status": "stale",
+                    "statistics_scope_keys": [
+                        "2026-01",
+                        "2026-02",
+                        "2026-03",
+                    ],
+                    "statistics_refresh_scope_keys": ["2026-02"],
+                    "statistics_scope_signatures": signatures,
+                }
+
+            @staticmethod
+            def list_bank_detail_transactions(**_kwargs: object) -> dict[str, object]:
+                return {
+                    "read_model_status": "fresh",
+                    "rows": [{"id": "txn-1"}],
+                    "category_counts": {"uncategorized": 1},
+                    "pagination": {"page": 1, "page_size": 20, "total": 1},
+                }
+
+        queue = CaptureRuntimeQueueRepository()
+        service = BankDetailsApplicationService(
+            app_settings_service=SimpleNamespace(
+                get_bank_auto_tag_rules_payload=lambda **_kwargs: {
+                    "version": 1,
+                    "active_rules": [],
+                }
+            ),
+            bank_transaction_category_service=SimpleNamespace(),
+            bank_transaction_auto_category_service=SimpleNamespace(),
+            audit_service=SimpleNamespace(),
+            bank_transaction_category_store=None,
+            bank_detail_sql_read_repository=BankDetailRepository(),
+            runtime_repositories=SimpleNamespace(queue_repository=queue),
+            affected_months_provider=lambda _transaction_ids: [],
+            available_month_scope_keys_provider=lambda: ["2026-02"],
+            enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
+        )
+
+        payload = service.transactions_payload(
+            account_key=None,
+            date_from="2026-02-01",
+            date_to="2026-02-28",
+            keyword=None,
+            page=1,
+            page_size=20,
+        )
+
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual(payload["statistics_status"], "stale")
+        self.assertTrue(payload["statistics_refresh_enqueued"])
+        self.assertEqual(
+            [
+                item["scope_key"]
+                for item in queue.enqueued
+                if item.get("scope_type") == "bank_detail"
+            ],
+            ["2026-02"],
+        )
 
     def test_application_accounts_uses_account_balance_repository_port(self) -> None:
         class BankDetailRepository:
