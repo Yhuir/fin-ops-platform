@@ -314,9 +314,10 @@ class WorkbenchQueryFacade:
         if "oa_status" not in payload and callable(self._oa_status_provider):
             payload["oa_status"] = self._serialize_value(self._oa_status_provider())
         if initial_status != "fresh":
-            if (
-                dependency_cache_status == "fresh"
-                and initial_status != "refreshing"
+            if dependency_cache_status in {"refreshing", "stale", "missing", "schema_mismatch"}:
+                self._enqueue_refresh(scope_key, reason="api_initial_page_relation_dependency_stale")
+            elif (
+                initial_status != "refreshing"
                 and refresh_status not in {"refreshing", "stale"}
             ):
                 self._enqueue_refresh(scope_key, reason="api_initial_page_stale")

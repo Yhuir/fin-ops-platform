@@ -173,7 +173,7 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
         self.assertEqual(result.payload["read_model_status"], "refreshing")
         self.assertEqual(queue.refreshes, [("all", "api_initial_page_miss")])
 
-    def test_initial_page_does_not_refresh_workbench_when_relation_dependency_is_stale(self) -> None:
+    def test_initial_page_enqueues_exact_workbench_scope_when_relation_dependency_is_stale(self) -> None:
         class Repository:
             @staticmethod
             def get_workbench_groups_freshness_status(*, scope_key: str) -> dict[str, object]:
@@ -228,7 +228,10 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
             ["workbench_relation:2026-05:workbench_pair_relations_updated_at_mismatch"],
         )
         self.assertEqual(dependency_calls, ["2026-05"])
-        self.assertEqual(queue.refreshes, [])
+        self.assertEqual(
+            queue.refreshes,
+            [("2026-05", "api_initial_page_relation_dependency_stale")],
+        )
 
     def test_default_initial_page_cache_hit_skips_cold_repository_query(self) -> None:
         class Repository:
