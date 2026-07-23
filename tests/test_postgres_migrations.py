@@ -134,6 +134,7 @@ EXPECTED_MIGRATIONS = [
     "0118_bank_flow_rule_batch_settings_raw_alignment.sql",
     "0119_turnover_ledger_scope_summaries.sql",
     "0120_bank_transaction_category_legacy_lookup.sql",
+    "0121_app_health_scope_evidence_hot_path.sql",
 ]
 EXPECTED_TABLES = [
     "audit.events",
@@ -297,7 +298,7 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
     def test_expected_migration_files_are_present_and_ordered(self) -> None:
         migrations = migrate.discover_migrations(MIGRATIONS_DIR)
         self.assertEqual([item.path.name for item in migrations], EXPECTED_MIGRATIONS)
-        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 121)])
+        self.assertEqual([item.version for item in migrations], [f"{number:04d}" for number in range(1, 122)])
         for item in migrations:
             self.assertRegex(item.checksum_sha256, r"^[0-9a-f]{64}$")
 
@@ -454,6 +455,11 @@ class PostgresMigrationDiscoveryTests(unittest.TestCase):
         self.assertIn("on job.outbox_events (event_type, updated_at desc)", sql)
         self.assertIn("status in ('failed', 'dead_lettered')", sql)
         self.assertIn("status = 'done' and raw_payload->'runtime_result' ? 'duration_ms'", " ".join(sql.split()))
+        self.assertIn("outbox_events_read_model_scope_evidence_idx", sql)
+        self.assertIn(
+            "on job.outbox_events (event_type, updated_at desc) where event_type like '%.read_model.refresh'",
+            " ".join(sql.split()),
+        )
         self.assertIn("workbench_rows_oa_attachment_inventory_idx", sql)
         self.assertIn("on read_model.workbench_rows (row_id, generated_at desc)", sql)
         self.assertIn("where source_kind = 'oa_attachment_invoice'", sql)

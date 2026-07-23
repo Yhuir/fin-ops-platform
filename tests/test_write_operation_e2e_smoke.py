@@ -1682,6 +1682,106 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             "stable",
         )
 
+    def test_isolation_baseline_does_not_block_recovery_on_slow_fresh_read(self) -> None:
+        checkpoint = write_operation_e2e_smoke.WriteCheckpoint(
+            name="recovery",
+            operations=("turnover_relation_withdraw_cross_page",),
+            steps=(),
+            consumers=(
+                write_operation_e2e_smoke.ConsumerProbe(
+                    probe=http_slo_probe.HttpProbe("isolation", "/api/isolation", target_ms=0),
+                    assertions=(
+                        write_operation_e2e_smoke.JsonPointerAssertion("/rows/0/id", "equals", "stable"),
+                    ),
+                    page_key="input-invoice-usage",
+                    role="isolation",
+                ),
+            ),
+        )
+
+        def slow_but_fresh(*_args) -> http_slo_probe.HttpProbeResponse:
+            return http_slo_probe.HttpProbeResponse(
+                status_code=200,
+                headers={"content-type": "application/json"},
+                body=json.dumps(
+                    {
+                        "read_model_status": "fresh",
+                        "refresh_enqueued": False,
+                        "rows": [{"id": "stable"}],
+                    }
+                ).encode(),
+            )
+
+        baseline = write_operation_e2e_smoke._capture_isolation_baseline(
+            checkpoint,
+            base_url="https://example.test",
+            api_prefix="/fin-ops-api",
+            headers={"Authorization": "Bearer token"},
+            timeout_seconds=1,
+            request_fn=slow_but_fresh,
+            variables={},
+        )
+
+        self.assertEqual(baseline["status"], "pass")
+        self.assertEqual(
+            baseline["values"]["input-invoice-usage\x1f/rows/0/id"],
+            "stable",
+        )
+
+    def test_terminal_consumer_failure_does_not_stop_other_consumer_convergence(self) -> None:
+        checkpoint = _strict_checkpoint("confirm", key="confirm-key", relation_state_after="active")
+        terminal = {
+            "page_key": "bank-turnover",
+            "name": "turnover",
+            "path": "/api/turnover-ledger",
+            "role": "affected",
+            "status": "fail",
+            "error": "consumer_slo_miss:1044>1000",
+        }
+        refreshing = {
+            "page_key": "cost-statistics",
+            "name": "cost",
+            "path": "/api/cost-statistics/explorer",
+            "role": "affected",
+            "status": "fail",
+            "error": "consumer_read_model_not_fresh",
+        }
+        converged = {
+            "page_key": "cost-statistics",
+            "name": "cost",
+            "path": "/api/cost-statistics/explorer",
+            "role": "affected",
+            "status": "pass",
+            "operation_commit_to_visible_ms": 900.0,
+        }
+
+        with (
+            patch(
+                "fin_ops_platform.tools.write_operation_e2e_smoke._collect_checkpoint_consumers",
+                side_effect=[
+                    {"status": "fail", "consumer_count": 2, "results": [terminal, refreshing]},
+                    {"status": "pass", "consumer_count": 2, "results": [{**terminal, "status": "pass"}, converged]},
+                ],
+            ) as collect,
+            patch("fin_ops_platform.tools.write_operation_e2e_smoke.sleep", return_value=None),
+        ):
+            result = write_operation_e2e_smoke._wait_for_checkpoint_consumers(
+                checkpoint,
+                base_url="https://example.test",
+                api_prefix="/fin-ops-api",
+                headers={"Authorization": "Bearer token"},
+                timeout_seconds=1,
+                poll_interval_seconds=0.05,
+                request_fn=lambda *_args: http_slo_probe.HttpProbeResponse(200, {}, b"{}"),
+                variables={},
+                strict=True,
+            )
+
+        self.assertEqual(collect.call_count, 2)
+        self.assertEqual(result["status"], "fail")
+        self.assertEqual(result["results"][0]["error"], "consumer_slo_miss:1044>1000")
+        self.assertEqual(result["results"][1]["status"], "pass")
+
     def test_cost_all_consumer_requires_fresh_changed_source_versions_and_business_value(self) -> None:
         checkpoint = write_operation_e2e_smoke.WriteCheckpoint(
             name="cost-all-causal",

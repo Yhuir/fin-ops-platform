@@ -132,6 +132,7 @@ EXPECTED_MIGRATION_FILES = [
     "0118_bank_flow_rule_batch_settings_raw_alignment.sql",
     "0119_turnover_ledger_scope_summaries.sql",
     "0120_bank_transaction_category_legacy_lookup.sql",
+    "0121_app_health_scope_evidence_hot_path.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (

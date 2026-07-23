@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-
-import pytest
+from unittest import TestCase
 
 from fin_ops_platform.services.postgres_repositories.ops_tax_etc import PostgresOpsTaxEtcRepository
 from fin_ops_platform.services.postgres_repositories.common import max_numeric_suffix
@@ -509,7 +508,7 @@ def test_turnover_full_save_rejects_generation_that_lost_the_cross_scope_commit_
     connection = TurnoverGenerationConnection(generation=4, published_source_version=7)
     repository = PostgresReadModelRepository(connection)
 
-    with pytest.raises(TurnoverLedgerGenerationConflictError, match="advanced from 3 to 4"):
+    with TestCase().assertRaisesRegex(TurnoverLedgerGenerationConflictError, "advanced from 3 to 4"):
         repository.save_turnover_ledger_rows(
             {
                 "rows": [],
@@ -530,7 +529,7 @@ def test_turnover_delta_rejects_older_scope_event_after_generation_cas_passes() 
     connection = TurnoverGenerationConnection(generation=5, published_source_version=9)
     repository = PostgresReadModelRepository(connection)
 
-    with pytest.raises(TurnoverLedgerGenerationConflictError, match="older than the published"):
+    with TestCase().assertRaisesRegex(TurnoverLedgerGenerationConflictError, "older than the published"):
         repository.save_turnover_ledger_relation_delta(
             {
                 "rows": [],
@@ -550,7 +549,7 @@ def test_turnover_delta_started_before_newer_full_generation_cannot_overwrite_it
     connection = TurnoverGenerationConnection(generation=12, published_source_version=None)
     repository = PostgresReadModelRepository(connection)
 
-    with pytest.raises(TurnoverLedgerGenerationConflictError, match="advanced from 11 to 12"):
+    with TestCase().assertRaisesRegex(TurnoverLedgerGenerationConflictError, "advanced from 11 to 12"):
         repository.save_turnover_ledger_relation_delta(
             {
                 "rows": [{"relation_id": "stale-delta"}],

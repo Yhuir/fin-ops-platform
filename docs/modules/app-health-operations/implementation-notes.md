@@ -1,5 +1,13 @@
 # 系统状态 实施记录
 
+## 2026-07-23 - 生产写闭环恢复门与 Dashboard 冷路径修复
+
+- 目标：修复 test-owned 生产 confirm smoke 失败后的恢复基线被 1 秒读性能门错误阻断，以及 App Health dashboard 冷缓存约 6.7 秒的问题。
+- 影响范围：`write_operation_e2e_smoke` 的验证编排、App Health scope-evidence 查询索引、migration/test/docs；不改变任何业务写 API、read model refresh 触发方式、页面 response shape、事实源或权限。
+- 关键决策：恢复前 baseline 只要求 consumer 已 fresh 且业务值可读取，不能让慢但正确的 baseline 阻止正式 inverse；写后性能门仍严格执行。一个 consumer 已产生 terminal SLO failure 时，runner 仍继续轮询其它 retryable refreshing consumers，但最终保留首次 terminal failure，不把后续 warm hit 伪装成通过。Dashboard 不增加 stale cache、并行查询或新服务层，只为现有 exact event-type recent lookup 增加匹配 partial index。
+- 测试覆盖：新增 slow-fresh recovery baseline 与 terminal-failure/other-consumer convergence 回归；移除 CI 对未声明 `pytest` 包的导入依赖；migration 清单/SQL contract 覆盖新索引，既有 dashboard payload 测试保持。
+- 发布后验证：跨三个 30 秒 TTL 周期采集 dashboard 冷/热请求；运行 authenticated 52-probe、readiness、SSE、16 route shell 和 test-owned confirm→按需收敛→withdraw→按需收敛，最终 System Audit 必须 16/16、queue drained、fixture inactive。
+
 ## 2026-07-23 - App Health/readiness 热路径去重
 
 - 目标：修复生产 App Health p95 超过 1 秒和 `/health/ready` 稳定约 3 秒的问题。

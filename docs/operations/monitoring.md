@@ -281,7 +281,7 @@ Dashboard API 使用短 TTL 进程内缓存，默认 30 秒，可通过 `FIN_OPS
 - `/health/ready` 和 `/metrics` 的 read model refresh / enqueue-to-fresh / RabbitMQ publish confirm percentile 使用每个 event type 最近 512 条样本，不扫全历史 `done` outbox。
 - `read_model_refresh_current_windows` 仍基于每个 event type 最近 512 条 bounded 样本，但按 `created_at` 过滤固定窗口；它用于当前 SLO 判定，历史滞留事件仍由 all-time bounded 指标和 slow events 保留。
 - `/health/ready.runtime_infrastructure.read_model_refresh_slow_events` 和 `read_model_refresh_current_slow_events` 用于定位慢 scope；Prometheus 只导出聚合分位数，避免 event/scope 高基数 label。
-- read model refresh 指标查询必须使用 bounded partial indexes；`outbox_events_read_model_refresh_metric_attention_idx` 覆盖 completed duration rows 与 failed/dead-lettered rows，避免 full health/dashboard 在大 outbox 表上因 `done OR failed` 样本条件退化为历史扫描。
+- read model refresh 指标查询必须使用 bounded partial indexes；`outbox_events_read_model_refresh_metric_attention_idx` 覆盖 completed duration rows 与 failed/dead-lettered rows，避免 full health/dashboard 在大 outbox 表上因 `done OR failed` 样本条件退化为历史扫描。Dashboard scope evidence 需要任意状态的最近事件，必须走 `outbox_events_read_model_scope_evidence_idx (event_type, updated_at desc)`，不能复用 terminal-only metric index 后退化成逐 model 历史扫描。
 - outbox pending 和 RabbitMQ queue 同时增长，优先看 worker/consumer。
 - RabbitMQ queue 增长但 outbox 不增长，优先看 broker consumer、prefetch、DLQ 和 ack/nack。
 
@@ -752,6 +752,8 @@ scripts/with-production-admin-token.sh bash -lc '
 ```
 
 runner 结束后删除远端临时 scenario；禁止把 token 放入命令参数、scenario 或输出文件。
+
+恢复 checkpoint 的 pre-mutation baseline 只证明 isolation/causal consumer 已 `fresh` 且当前值可读取，不执行 SLO 判定；否则慢但正确的 baseline 会阻止正式 inverse，留下 `recovery_required`。恢复写入后的 consumer probe 继续执行完整性能门。若一个 consumer 已发生 terminal SLO failure，runner 仍须继续驱动其它 retryable `refreshing` consumer 收敛，并在最终报告中保留原始 terminal failure。
 
 普通写 API 响应中的 `outbox_event_ids` 是 transaction receipt。显式空列表表示该写入按零 fan-out 合同没有创建页面
 refresh event；runner 必须保留该空 receipt，并用 operation profile 的 forbidden-event 时间窗验证，不得把空列表当成

@@ -1521,6 +1521,7 @@ def _wait_for_checkpoint_consumers(
 ) -> dict[str, Any]:
     deadline = monotonic() + max(1.0, timeout_seconds)
     first_visible_ms: dict[tuple[str, str, str], float] = {}
+    terminal_failures: dict[tuple[str, str, str], dict[str, Any]] = {}
     while True:
         result = _collect_checkpoint_consumers(
             checkpoint,
@@ -1539,18 +1540,27 @@ def _wait_for_checkpoint_consumers(
             elapsed = item.get("operation_commit_to_visible_ms")
             if item.get("status") == "pass" and isinstance(elapsed, int | float):
                 first_visible_ms.setdefault(_consumer_result_key(item), float(elapsed))
+            elif item.get("status") != "pass" and not _consumer_failure_is_retryable(item):
+                terminal_failures.setdefault(_consumer_result_key(item), dict(item))
         if result.get("status") in {"pass", "skipped"}:
             for item in list(result.get("results") or []):
                 key = _consumer_result_key(item)
                 if key in first_visible_ms:
                     item["operation_commit_to_visible_ms"] = first_visible_ms[key]
+                if key in terminal_failures:
+                    item.clear()
+                    item.update(terminal_failures[key])
+            if terminal_failures:
+                result["status"] = "fail"
             return result
         failed = [item for item in list(result.get("results") or []) if item.get("status") != "pass"]
-        if (
-            not failed
-            or any(not _consumer_failure_is_retryable(item) for item in failed)
-            or monotonic() >= deadline
-        ):
+        retryable_failed = [item for item in failed if _consumer_failure_is_retryable(item)]
+        if not retryable_failed or monotonic() >= deadline:
+            for item in list(result.get("results") or []):
+                key = _consumer_result_key(item)
+                if key in terminal_failures:
+                    item.clear()
+                    item.update(terminal_failures[key])
             return result
         sleep(max(0.05, poll_interval_seconds))
 
@@ -1581,6 +1591,7 @@ def _capture_isolation_baseline(
                 poll_interval_seconds=poll_interval_seconds,
                 request_fn=request_fn,
                 variables=variables,
+                enforce_slo=False,
             )
             for assertion in consumer.assertions:
                 values[_isolation_key(consumer.page_key, assertion.pointer)] = _json_pointer(
@@ -1625,6 +1636,7 @@ def _capture_consumer_causal_baseline(
                 poll_interval_seconds=poll_interval_seconds,
                 request_fn=request_fn,
                 variables=variables,
+                enforce_slo=False,
             )
             values[_consumer_causal_key(consumer, path)] = _cost_source_versions_fingerprint(payload)
     except Exception as exc:
@@ -1825,6 +1837,7 @@ def _request_fresh_consumer_payload(
     timeout_seconds: float,
     request_fn: RequestFn,
     variables: Mapping[str, Any],
+    enforce_slo: bool = True,
 ) -> tuple[str, Any, Any]:
     path = str(_resolve_value(consumer.probe.path, variables))
     url = http_slo_probe.resolve_probe_url(base_url, path, api_prefix=api_prefix)
@@ -1836,7 +1849,7 @@ def _request_fresh_consumer_payload(
     html_error = http_slo_probe._html_response_error(consumer.probe, content_type, response.body or b"")
     if not status_ok or html_error:
         raise ValueError(html_error or f"unexpected_status:{response.status_code}")
-    if elapsed_ms > consumer.probe.target_ms:
+    if enforce_slo and elapsed_ms > consumer.probe.target_ms:
         raise ValueError(f"consumer_slo_miss:{round(elapsed_ms, 3)}>{round(consumer.probe.target_ms, 3)}")
     payload = json.loads((response.body or b"").decode("utf-8"))
     metadata = http_slo_probe._extract_response_metadata(response.body or b"", content_type)
@@ -1855,6 +1868,7 @@ def _wait_for_fresh_consumer_payload(
     poll_interval_seconds: float,
     request_fn: RequestFn,
     variables: Mapping[str, Any],
+    enforce_slo: bool = True,
 ) -> tuple[str, Any, Any]:
     deadline = monotonic() + max(1.0, timeout_seconds)
     while True:
@@ -1867,6 +1881,7 @@ def _wait_for_fresh_consumer_payload(
                 timeout_seconds=timeout_seconds,
                 request_fn=request_fn,
                 variables=variables,
+                enforce_slo=enforce_slo,
             )
         except ValueError as exc:
             if str(exc) not in _RETRYABLE_CONSUMER_ERRORS or monotonic() >= deadline:

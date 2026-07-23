@@ -2,6 +2,13 @@
 
 > 修改本模块前先读取本文件，确认 App Health / App Status 的事实源、状态优先级、测试入口和旧功能回归范围。实现后按实际影响更新矩阵。
 
+## 2026-07-23 - App Health 冷缓存 scope evidence 热路径
+
+- 变更类型：生产大库只读查询性能修复；API shape、Dashboard cache/fallback、状态语义、权限和业务事实源不变。
+- 生产根因证据：30 秒 cache miss 时 dashboard 约 6.7 秒，API rolling metrics 的 SQL execute/fetch p95 约 10.3 秒，而 connection acquire p95 低于 1ms；scope-evidence owner 对每个 read-model event type 分别执行 recent-event lateral lookup，但现有 partial indexes 只覆盖带 duration 的 done 或 failed/dead-lettered 事件，不能覆盖 pending/processing/latest-any-status 合同。
+- 新增/更新测试：migration 清单和 SQL contract 必须包含 `outbox_events_read_model_scope_evidence_idx (event_type, updated_at desc) where event_type like '%.read_model.refresh'`；既有 `tests/test_operations_dashboard_service.py` 继续锁定 current/full-history、readiness/source_versions、timing/retry payload 不变。
+- 回归重点：不扩大 Dashboard 查询范围，不添加 stale-while-revalidate 或并行 DB fan-out；发布后跨至少三个 TTL 周期验证冷/热响应、payload 状态和 System Audit。
+
 ## 2026-07-23 - App Health/readiness 重复 I/O 收敛
 
 - 变更类型：只读运行状态性能修复；API shape、状态优先级、durable facts 和权限不变。
@@ -62,6 +69,7 @@
 | 日期 | Bug / 风险 | 回归测试 | 状态 |
 | --- | --- | --- | --- |
 | 2026-07-23 | App Health 周期性超过 1 秒：1 秒 runtime snapshot cache 失效时，App Status summary 从全部 readiness scopes 解码未消费的 `source_versions` JSON；生产 709 行约 366KB 版本向量使该查询由约 170ms 上升到 0.7–1.1s。 | `tests/test_runtime_monitoring.py::RuntimeMonitoringRepositoryTests::test_app_status_readiness_summary_does_not_load_unconsumed_source_versions` | covered；summary I/O 禁止该列回流，详细版本证据继续归 Operations dashboard |
+| 2026-07-23 | App Health 30 秒冷缓存约 6.7 秒：scope-evidence 对每个 read-model event type 读取任意状态最近事件，现有只覆盖 terminal metric rows 的 partial indexes 无法服务该查询，导致重复扫描/排序 outbox 历史。 | `tests/test_postgres_migrations.py::PostgresMigrationDiscoveryTests::test_app_health_dashboard_metrics_indexes_are_declared`、`tests/test_operations_dashboard_service.py::OperationsDashboardServiceTests::test_runtime_repository_uses_recent_window_for_read_model_health_duration` | covered；新增 exact partial index，response shape 和只读合同不变 |
 | 2026-06-21 | Workbench parent generation 正在重刷时，旧 `workbench_all_scope_parent_inconsistent` failed outbox 仍进入 App Status queue failed，导致 hover 同时显示 syncing 和 blocked。 | `tests/test_app_status_overview_service.py::AppStatusRuntimeRepositoryTests::test_runtime_repository_ignores_failed_outbox_row_covered_by_active_dirty_scope` | covered |
 | 2026-06-21 | `/health/ready` 已无 backlog，但 App Status outbox 仍把 `status='done'` 的历史 `publish_status='failed'` / `oa.sync` 行算成当前 failed。 | `tests/test_app_status_overview_service.py::AppStatusRuntimeRepositoryTests::test_runtime_repository_ignores_covered_outbox_statuses` | covered |
 | 2026-06-21 | `/health/ready` / App Status runtime summary 的 dirty scope current-effective SQL helper 未插值，生产 PostgreSQL 收到 `{_current_effective_dirty_scope_predicate_sql()}` 后 syntax error，导致 runtime 诊断自身不可信。 | `tests/test_runtime_monitoring.py::RuntimeMonitoringRepositoryTests::test_ready_health_summary_uses_lightweight_runtime_contract` | covered |
