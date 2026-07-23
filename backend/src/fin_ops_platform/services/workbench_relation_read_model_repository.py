@@ -81,6 +81,18 @@ class WorkbenchRelationReadModelRepositoryPort:
         )
         return dict(payload) if isinstance(payload, dict) else {}
 
+    def workbench_relation_scope_summaries(
+        self,
+        *,
+        scope_keys: list[str],
+        tenant_id: str = "default",
+    ) -> dict[str, object]:
+        payload = self._repository.workbench_relation_scope_summaries(
+            scope_keys=scope_keys,
+            tenant_id=tenant_id,
+        )
+        return dict(payload) if isinstance(payload, dict) else {}
+
     def list_active_workbench_relation_source_rows(
         self,
         *,

@@ -20,6 +20,7 @@ from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_s
     OA_PENDING_PAYMENT_COVERAGE_ONLY_SCHEMA_VERSION,
     oa_pending_payment_coverage_only_source_versions,
 )
+from fin_ops_platform.services.postgres_repositories.oa_projection import COMPLETED_WORKFLOW_STATUS_SQL
 from fin_ops_platform.services.postgres_repositories.common import (
     decimal_text,
     int_value,
@@ -2434,6 +2435,78 @@ class PostgresBankReadModelRepository:
                 signatures[scope_key] = source_signature
         return signatures
 
+    def _bank_detail_relation_source_summaries(
+        self,
+        *,
+        scope_keys: list[str],
+        connection: Any | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        normalized_scope_keys = _dedupe_preserve_order(
+            str(scope_key).strip()
+            for scope_key in list(scope_keys or [])
+            if MONTH_SCOPE_RE.match(str(scope_key).strip())
+        )
+        if not normalized_scope_keys:
+            return {}
+        executor = connection or self._connection
+        scope_months = [month_start(scope_key) for scope_key in normalized_scope_keys]
+        rows = executor.fetch_all(
+            """
+            /* bank_detail_relation_source_summaries */
+            with requested_scopes as (
+                select unnest(%s::date[]) as scope_month
+            ),
+            bank_scope_ids as (
+                select
+                    requested.scope_month,
+                    coalesce(
+                        array_agg(distinct coalesce(bank.legacy_mongo_id, bank.id::text))
+                            filter (where bank.id is not null),
+                        array[]::text[]
+                    ) as row_ids
+                from requested_scopes requested
+                left join app.bank_transactions bank
+                  on bank.txn_month = requested.scope_month
+                 and bank.status <> 'deleted'
+                group by requested.scope_month
+            )
+            select
+                to_char(scope.scope_month, 'YYYY-MM') as scope_key,
+                count(relation.*)::integer as relation_count,
+                coalesce(max(relation.updated_at)::text, '') as relation_updated_at
+            from bank_scope_ids scope
+            left join app.workbench_pair_relations relation
+              on relation.status = 'active'
+             and (
+                    relation.month_scope = scope.scope_month
+                    or relation.row_ids && scope.row_ids
+                 )
+            group by scope.scope_month
+            order by scope.scope_month
+            """,
+            (scope_months,),
+        )
+        summaries = {
+            scope_key: {
+                "source": "workbench_pair_relations",
+                "scope_key": scope_key,
+                "relation_count": 0,
+                "relation_updated_at": "",
+            }
+            for scope_key in normalized_scope_keys
+        }
+        for row in rows:
+            scope_key = text(row.get("scope_key"))
+            if scope_key not in summaries:
+                continue
+            summaries[scope_key] = {
+                "source": "workbench_pair_relations",
+                "scope_key": scope_key,
+                "relation_count": int_value(row.get("relation_count"), 0),
+                "relation_updated_at": text(row.get("relation_updated_at")) or "",
+            }
+        return summaries
+
 
     def bank_detail_scope_summary(
         self,
@@ -2494,6 +2567,10 @@ class PostgresBankReadModelRepository:
             tenant_id=tenant_id,
             connection=executor,
         )
+        current_relation_source_summaries = self._bank_detail_relation_source_summaries(
+            scope_keys=_dedupe_preserve_order([*normalized_scope_keys, *statistics_scope_keys]),
+            connection=executor,
+        )
 
         def status_for(scope_key_values: list[str], *, require_statistics: bool = False) -> str:
             statuses = {
@@ -2524,6 +2601,19 @@ class PostgresBankReadModelRepository:
                     ).get("bank_transaction_category_source_signature")
                 )
                 != current_category_signatures.get(scope_key, "")
+                for scope_key in scope_key_values
+            ):
+                return "stale"
+            if any(
+                _normalized_workbench_relation_source_summary(
+                    (
+                        by_scope[scope_key].get("source_versions")
+                        if isinstance(by_scope[scope_key].get("source_versions"), dict)
+                        else {}
+                    ).get("workbench_relation_source_versions"),
+                    scope_key=scope_key,
+                )
+                != current_relation_source_summaries.get(scope_key)
                 for scope_key in scope_key_values
             ):
                 return "stale"
@@ -5898,6 +5988,117 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
         scope_row = self._workbench_relation_scope_row(scope_key=normalized_scope_key, tenant_id=tenant_id)
         source_versions = scope_row.get("source_versions") if isinstance(scope_row, dict) else None
         return dict(source_versions) if isinstance(source_versions, dict) else {}
+
+    def workbench_relation_scope_summaries(
+        self,
+        *,
+        scope_keys: list[str],
+        tenant_id: str = "default",
+    ) -> dict[str, Any]:
+        requested_scope_keys = _dedupe_preserve_order(
+            text(scope_key)
+            for scope_key in list(scope_keys or [])
+        )
+        all_requested = "all" in requested_scope_keys
+        normalized_scope_keys = (
+            self._workbench_relation_available_scope_keys(tenant_id=tenant_id)
+            if all_requested
+            else [scope_key for scope_key in requested_scope_keys if MONTH_SCOPE_RE.match(scope_key)]
+        )
+        if not normalized_scope_keys:
+            return {
+                "read_model_status": "fresh" if all_requested else "missing",
+                "read_model_scope_keys": [],
+                "read_model_scope_source_versions": {},
+                "source_versions": {},
+                "stale_reasons": [] if all_requested else ["month_scope_required"],
+            }
+        proof_rows = self._batch_accounting_relation_scope_proof(
+            scope_keys=normalized_scope_keys,
+            tenant_id=tenant_id,
+        )
+        proof_by_scope = {
+            text(row.get("scope_key")): row
+            for row in proof_rows
+            if isinstance(row, dict) and text(row.get("scope_key"))
+        }
+        statuses: list[str] = []
+        stale_reasons: list[str] = []
+        source_versions_by_scope: dict[str, dict[str, Any]] = {}
+        for scope_key in normalized_scope_keys:
+            proof = proof_by_scope.get(scope_key, {})
+            dirty_status = text(proof.get("dirty_status"))
+            scope_exists = bool(proof.get("scope_exists"))
+            source_versions = proof.get("source_versions")
+            if isinstance(source_versions, dict):
+                source_versions_by_scope[scope_key] = dict(source_versions)
+            if dirty_status in {"pending", "processing"}:
+                statuses.append("refreshing")
+                stale_reasons.append(f"{scope_key}:dirty_{dirty_status}")
+            elif dirty_status == "failed":
+                statuses.append("stale")
+                stale_reasons.append(f"{scope_key}:dirty_failed")
+            elif not scope_exists or not isinstance(source_versions, dict):
+                statuses.append("missing")
+                stale_reasons.append(f"{scope_key}:read_model_missing")
+            else:
+                statuses.append("fresh")
+        status = "fresh"
+        for candidate in ("refreshing", "stale", "missing"):
+            if candidate in statuses:
+                status = candidate
+                break
+        return {
+            "read_model_status": status,
+            "read_model_scope_keys": normalized_scope_keys,
+            "read_model_scope_source_versions": source_versions_by_scope,
+            "source_versions": (
+                source_versions_by_scope.get(normalized_scope_keys[0], {})
+                if len(normalized_scope_keys) == 1
+                else {}
+            ),
+            "stale_reasons": stale_reasons,
+        }
+
+    def _workbench_relation_available_scope_keys(self, *, tenant_id: str) -> list[str]:
+        rows = self._connection.fetch_all(
+            """
+            /* workbench_relation_available_scope_keys */
+            select distinct to_char(scope_month, 'YYYY-MM') as scope_key
+            from (
+                select txn_month as scope_month
+                from app.bank_transactions
+                where txn_month is not null and status <> 'deleted'
+                union
+                select invoice_month as scope_month
+                from app.invoices
+                where invoice_month is not null and status <> 'deleted'
+                union
+                select date_trunc('month', application_date)::date as scope_month
+                from app.oa_applications
+                where application_date is not null
+                  and """
+            + COMPLETED_WORKFLOW_STATUS_SQL
+            + """
+                union
+                select month_scope as scope_month
+                from app.workbench_pair_relations
+                where month_scope is not null and status = 'active'
+                union
+                select scope_month
+                from read_model.workbench_relation_scopes
+                where tenant_id = %s and scope_month is not null
+            ) scopes
+            where scope_month is not null
+            order by scope_key
+            """,
+            (tenant_id,),
+        )
+        return _dedupe_preserve_order(
+            text(row.get("scope_key"))
+            for row in rows
+            if isinstance(row, dict) and MONTH_SCOPE_RE.match(text(row.get("scope_key")))
+        )
 
     def list_active_workbench_relation_source_rows(
         self,
@@ -9381,6 +9582,9 @@ class PostgresReadModelRepository:
 
     def workbench_relation_source_versions(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         return self._search_workbench_relation_repository.workbench_relation_source_versions(*args, **kwargs)
+
+    def workbench_relation_scope_summaries(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return self._search_workbench_relation_repository.workbench_relation_scope_summaries(*args, **kwargs)
 
     def list_active_workbench_relation_source_rows(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
         return self._search_workbench_relation_repository.list_active_workbench_relation_source_rows(*args, **kwargs)
@@ -17069,6 +17273,20 @@ def _bank_detail_empty_statistics() -> dict[str, int]:
         "unclassified_transaction_count": 0,
         "linked_transaction_count": 0,
         "unlinked_transaction_count": 0,
+    }
+
+
+def _normalized_workbench_relation_source_summary(
+    value: Any,
+    *,
+    scope_key: str,
+) -> dict[str, Any]:
+    payload = value if isinstance(value, dict) else {}
+    return {
+        "source": text(payload.get("source")),
+        "scope_key": text(payload.get("scope_key")) or scope_key,
+        "relation_count": int_value(payload.get("relation_count"), 0),
+        "relation_updated_at": text(payload.get("relation_updated_at")) or "",
     }
 
 

@@ -59,7 +59,17 @@ class InvoiceLifecyclePostgresIntegrationTests(unittest.TestCase):
             )
             values (
                 'default', 'bank_detail', '2026-05', '2026-05-01', 10,
-                'fresh', 0, 7, '{"bank_detail_signature": "empty-v1"}'::jsonb, now()
+                'fresh', 0, 7,
+                '{
+                    "bank_detail_signature": "empty-v1",
+                    "workbench_relation_source_versions": {
+                        "source": "workbench_pair_relations",
+                        "scope_key": "2026-05",
+                        "relation_count": 0,
+                        "relation_updated_at": ""
+                    }
+                }'::jsonb,
+                now()
             )
             """
         )
@@ -74,7 +84,15 @@ class InvoiceLifecyclePostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(payload["rows"], [])
         self.assertEqual(
             payload["source_versions"]["pending_invoice_empty_month_direction"]["bank_detail_source_versions"],
-            {"bank_detail_signature": "empty-v1"},
+            {
+                "bank_detail_signature": "empty-v1",
+                "workbench_relation_source_versions": {
+                    "source": "workbench_pair_relations",
+                    "scope_key": "2026-05",
+                    "relation_count": 0,
+                    "relation_updated_at": "",
+                },
+            },
         )
 
     def test_reads_oa_lifecycle_rows_only_through_exact_fresh_month_scope(self) -> None:

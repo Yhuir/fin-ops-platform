@@ -168,6 +168,13 @@ class WorkbenchRelationReadFacade:
         reason: str = "downstream_workbench_relation_source_versions",
     ) -> dict[str, Any]:
         normalized_month = text(month) or ""
+        bulk_reader = getattr(self._read_model_repository, "workbench_relation_scope_summaries", None)
+        if callable(bulk_reader) and normalized_month:
+            return self.source_versions_for_scopes(
+                [normalized_month],
+                require_fresh=require_fresh,
+                reason=reason,
+            )
         reader = getattr(self._read_model_repository, "workbench_relation_source_versions", None)
         if not callable(reader) or not normalized_month:
             return self._non_fresh_result(
@@ -191,6 +198,43 @@ class WorkbenchRelationReadFacade:
             require_fresh=require_fresh,
             reason=reason,
             fallback_scope_keys=[normalized_month],
+        )
+        self._last_result = result
+        return result
+
+    def source_versions_for_scopes(
+        self,
+        scope_keys: list[str],
+        *,
+        require_fresh: bool = True,
+        reason: str = "downstream_workbench_relation_source_versions",
+    ) -> dict[str, Any]:
+        normalized_scope_keys = _dedupe_preserve_order(
+            text(scope_key)
+            for scope_key in list(scope_keys or [])
+        )
+        if not normalized_scope_keys:
+            result = _facade_result(status=FRESH_WORKBENCH_RELATION_STATUS)
+            self._last_result = result
+            return result
+        reader = getattr(self._read_model_repository, "workbench_relation_scope_summaries", None)
+        if not callable(reader):
+            return self._non_fresh_result(
+                status="unavailable",
+                scope_keys=normalized_scope_keys,
+                require_fresh=require_fresh,
+                reason=reason,
+                stale_reasons=["repository_method_unavailable"],
+            )
+        payload = reader(
+            scope_keys=normalized_scope_keys,
+            tenant_id=self._tenant_id,
+        )
+        result = self._result_from_repository_payload(
+            payload,
+            require_fresh=require_fresh,
+            reason=reason,
+            fallback_scope_keys=normalized_scope_keys,
         )
         self._last_result = result
         return result

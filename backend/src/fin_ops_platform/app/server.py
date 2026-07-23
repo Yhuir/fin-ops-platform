@@ -656,6 +656,7 @@ class Application:
             "get_batch_accounting_relation_rows_by_ids",
             "list_workbench_relation_rows",
             "get_workbench_relation_groups_by_ids",
+            "workbench_relation_scope_summaries",
         )
         if repository is None or not all(callable(getattr(repository, method_name, None)) for method_name in required_methods):
             return None
@@ -668,6 +669,21 @@ class Application:
         )
         self._workbench_relation_facade = facade
         return facade
+
+    def _workbench_page_relation_status(self, scope_key: str) -> dict[str, object]:
+        relation_facade = self._workbench_relation_read_facade()
+        source_versions_for_month = getattr(relation_facade, "source_versions_for_month", None)
+        if relation_facade is None or not callable(source_versions_for_month):
+            return {
+                "status": "unavailable",
+                "refresh_enqueued": False,
+                "stale_reasons": ["workbench_relation_read_facade_unavailable"],
+            }
+        return source_versions_for_month(
+            scope_key,
+            require_fresh=True,
+            reason="reconciliation_workbench_page_access",
+        )
 
     def _workbench_relation_expected_source_versions(self, scope_key: str) -> dict[str, object]:
         state_store = getattr(self, "_state_store", None)
@@ -2622,6 +2638,12 @@ class Application:
             is_default_initial_query=is_default_workbench_initial_query,
             oa_status_provider=getattr(query_service, "oa_status_payload", None),
             serialize_value=Application._serialize_value,
+            page_dependency_status=(
+                self._workbench_page_relation_status
+                if getattr(self, "_workbench_relation_sql_read_repository", None) is not None
+                or getattr(self, "_workbench_relation_facade", None) is not None
+                else None
+            ),
         )
 
     def _workbench_write_facade(self) -> WorkbenchWriteFacade:
@@ -7978,6 +8000,7 @@ class Application:
                 lambda: {},
             ),
             category_mutation_writer=category_mutation_writer,
+            workbench_relation_reader=self._workbench_relation_read_facade(),
         )
 
     def _bank_transaction_category_mutation_writer(self) -> BankTransactionCategoryMutationWriter | None:

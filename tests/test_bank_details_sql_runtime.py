@@ -32,6 +32,7 @@ class FakeConnection:
         category_source_signature_rows: list[dict[str, object]] | None = None,
         confirmation_rows: list[dict[str, object]] | None = None,
         relation_rows: list[dict[str, object]] | None = None,
+        relation_source_summary_rows: list[dict[str, object]] | None = None,
         relation_source_row: dict[str, object] | None = None,
     ) -> None:
         self.rows = list(rows or [])
@@ -41,6 +42,7 @@ class FakeConnection:
         self.category_source_signature_rows = list(category_source_signature_rows or [])
         self.confirmation_rows = list(confirmation_rows or [])
         self.relation_rows = list(relation_rows or [])
+        self.relation_source_summary_rows = list(relation_source_summary_rows or [])
         self.relation_source_row = relation_source_row
         self.calls: list[tuple[str, str, tuple[object, ...]]] = []
 
@@ -65,6 +67,8 @@ class FakeConnection:
             return list(self.dirty_scope_rows)
         if "/* bank_detail_category_source_signatures */" in normalized_sql:
             return list(self.category_source_signature_rows)
+        if "/* bank_detail_relation_source_summaries */" in normalized_sql:
+            return list(self.relation_source_summary_rows)
         if "from app.bank_transaction_categories" in normalized_sql:
             return list(self.category_rows)
         if "from app.bank_transaction_category_confirmations" in normalized_sql:
@@ -228,6 +232,12 @@ def scope_row(scope_key: str, **overrides: object) -> dict[str, object]:
         "source_versions": {
             "source_version": 3,
             "bank_transaction_category_source_signature": BANK_DETAIL_EMPTY_CATEGORY_SOURCE_SIGNATURE,
+            "workbench_relation_source_versions": {
+                "source": "workbench_pair_relations",
+                "scope_key": scope_key,
+                "relation_count": 0,
+                "relation_updated_at": "",
+            },
         },
         "generated_at": "2026-05-25T00:00:00+00:00",
         "last_error": None,
@@ -1053,6 +1063,12 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
                         source_versions={
                             "source_version": 3,
                             "bank_transaction_category_source_signature": "projected-category-source-signature",
+                            "workbench_relation_source_versions": {
+                                "source": "workbench_pair_relations",
+                                "scope_key": "2026-05",
+                                "relation_count": 0,
+                                "relation_updated_at": "",
+                            },
                         },
                     ),
                     scope_row(
@@ -1060,6 +1076,12 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
                         source_versions={
                             "source_version": 4,
                             "bank_transaction_category_source_signature": current_signature,
+                            "workbench_relation_source_versions": {
+                                "source": "workbench_pair_relations",
+                                "scope_key": "2026-06",
+                                "relation_count": 0,
+                                "relation_updated_at": "",
+                            },
                         },
                     ),
                 ],
@@ -1086,6 +1108,96 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         self.assertIn("from app.bank_transaction_categories", normalized_sql)
         self.assertIn("from app.bank_transaction_category_confirmations", normalized_sql)
         self.assertIn("digest(", normalized_sql)
+
+    def test_scope_summary_detects_relation_source_change_with_one_set_based_query(self) -> None:
+        connection = FakeConnection(
+            rows=[
+                [
+                    scope_row(
+                        "2026-05",
+                        source_versions={
+                            "source_version": 3,
+                            "bank_transaction_category_source_signature": BANK_DETAIL_EMPTY_CATEGORY_SOURCE_SIGNATURE,
+                            "workbench_relation_source_versions": {
+                                "source": "workbench_pair_relations",
+                                "scope_key": "2026-05",
+                                "relation_count": 7,
+                                "relation_updated_at": "2026-05-25 10:00:00+08",
+                            },
+                        },
+                    ),
+                    scope_row(
+                        "2026-06",
+                        source_versions={
+                            "source_version": 4,
+                            "bank_transaction_category_source_signature": BANK_DETAIL_EMPTY_CATEGORY_SOURCE_SIGNATURE,
+                            "workbench_relation_source_versions": {
+                                "source": "workbench_pair_relations",
+                                "scope_key": "2026-06",
+                                "relation_count": 3,
+                                "relation_updated_at": "2026-06-20 09:00:00+08",
+                            },
+                        },
+                    ),
+                ],
+            ],
+            relation_source_summary_rows=[
+                {
+                    "scope_key": "2026-05",
+                    "relation_count": 8,
+                    "relation_updated_at": "2026-07-23 16:22:07+08",
+                },
+                {
+                    "scope_key": "2026-06",
+                    "relation_count": 3,
+                    "relation_updated_at": "2026-06-20 09:00:00+08",
+                },
+            ],
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.bank_detail_scope_summary(scope_keys=["2026-05", "2026-06"])
+
+        self.assertEqual(payload["read_model_status"], "stale")
+        relation_summary_calls = [
+            (sql, params)
+            for method, sql, params in connection.calls
+            if method == "fetch_all" and "/* bank_detail_relation_source_summaries */" in sql
+        ]
+        self.assertEqual(len(relation_summary_calls), 1)
+        relation_sql, relation_params = relation_summary_calls[0]
+        self.assertEqual(relation_params, (["2026-05-01", "2026-06-01"],))
+        normalized_sql = " ".join(relation_sql.lower().split())
+        self.assertIn("left join app.workbench_pair_relations", normalized_sql)
+        self.assertIn("relation.row_ids && scope.row_ids", normalized_sql)
+
+    def test_scope_summary_keeps_relation_source_current_when_proof_matches(self) -> None:
+        relation_proof = {
+            "source": "workbench_pair_relations",
+            "scope_key": "2026-05",
+            "relation_count": 7,
+            "relation_updated_at": "2026-05-25 10:00:00+08",
+        }
+        connection = FakeConnection(
+            rows=[
+                [
+                    scope_row(
+                        "2026-05",
+                        source_versions={
+                            "source_version": 3,
+                            "bank_transaction_category_source_signature": BANK_DETAIL_EMPTY_CATEGORY_SOURCE_SIGNATURE,
+                            "workbench_relation_source_versions": relation_proof,
+                        },
+                    )
+                ],
+            ],
+            relation_source_summary_rows=[dict(relation_proof)],
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.bank_detail_scope_summary(scope_keys=["2026-05"])
+
+        self.assertEqual(payload["read_model_status"], "fresh")
 
     def test_transactions_return_none_when_month_scope_is_missing(self) -> None:
         connection = FakeConnection(rows=[[]])
@@ -1196,6 +1308,12 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             {
                 "source_version": 3,
                 "bank_transaction_category_source_signature": BANK_DETAIL_EMPTY_CATEGORY_SOURCE_SIGNATURE,
+                "workbench_relation_source_versions": {
+                    "source": "workbench_pair_relations",
+                    "scope_key": "2026-05",
+                    "relation_count": 0,
+                    "relation_updated_at": "",
+                },
             },
         )
         sql_text = " ".join(" ".join(call[1].lower().split()) for call in connection.calls)
@@ -1244,6 +1362,12 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
                         source_versions={
                             "source_version": 3,
                             "bank_transaction_category_source_signature": BANK_DETAIL_EMPTY_CATEGORY_SOURCE_SIGNATURE,
+                            "workbench_relation_source_versions": {
+                                "source": "workbench_pair_relations",
+                                "scope_key": "2026-05",
+                                "relation_count": 0,
+                                "relation_updated_at": "",
+                            },
                         },
                     ),
                     scope_row(
@@ -1252,6 +1376,12 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
                         source_versions={
                             "source_version": 2,
                             "bank_transaction_category_source_signature": BANK_DETAIL_EMPTY_CATEGORY_SOURCE_SIGNATURE,
+                            "workbench_relation_source_versions": {
+                                "source": "workbench_pair_relations",
+                                "scope_key": "2026-04",
+                                "relation_count": 0,
+                                "relation_updated_at": "",
+                            },
                         },
                     ),
                 ],
@@ -1279,10 +1409,22 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
                 "2026-05": {
                     "source_version": 3,
                     "bank_transaction_category_source_signature": BANK_DETAIL_EMPTY_CATEGORY_SOURCE_SIGNATURE,
+                    "workbench_relation_source_versions": {
+                        "source": "workbench_pair_relations",
+                        "scope_key": "2026-05",
+                        "relation_count": 0,
+                        "relation_updated_at": "",
+                    },
                 },
                 "2026-04": {
                     "source_version": 2,
                     "bank_transaction_category_source_signature": BANK_DETAIL_EMPTY_CATEGORY_SOURCE_SIGNATURE,
+                    "workbench_relation_source_versions": {
+                        "source": "workbench_pair_relations",
+                        "scope_key": "2026-04",
+                        "relation_count": 0,
+                        "relation_updated_at": "",
+                    },
                 },
             },
         )
@@ -1326,6 +1468,12 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
             {
                 "source_version": 3,
                 "bank_transaction_category_source_signature": BANK_DETAIL_EMPTY_CATEGORY_SOURCE_SIGNATURE,
+                "workbench_relation_source_versions": {
+                    "source": "workbench_pair_relations",
+                    "scope_key": "2026-05",
+                    "relation_count": 0,
+                    "relation_updated_at": "",
+                },
             },
         )
         sql_text = " ".join(" ".join(call[1].lower().split()) for call in connection.calls)
@@ -1511,6 +1659,94 @@ class BankDetailSqlRepositoryTests(unittest.TestCase):
         self.assertEqual(
             account_balance_repository.calls,
             [{"date_from": "2026-05-01", "date_to": "2026-05-31"}],
+        )
+
+    def test_application_transactions_bulk_checks_relation_page_dependency(self) -> None:
+        class SqlReadRepository:
+            @staticmethod
+            def bank_detail_scope_keys_for_range(**_kwargs: object) -> list[str]:
+                return ["2026-02", "2026-03"]
+
+            @staticmethod
+            def bank_detail_scope_summary(*, scope_keys: list[str]) -> dict[str, object]:
+                signatures = {
+                    scope_key: {
+                        "source_versions": {"bank_auto_tag_rules_version": 1},
+                    }
+                    for scope_key in scope_keys
+                }
+                return {
+                    "read_model_status": "fresh",
+                    "read_model_scope_keys": list(scope_keys),
+                    "read_model_scope_signatures": signatures,
+                    "statistics_status": "fresh",
+                    "statistics_scope_signatures": signatures,
+                    "statistics_scope_keys": list(scope_keys),
+                    "statistics": _bank_detail_statistics_from_rows([]),
+                }
+
+            @staticmethod
+            def list_bank_detail_transactions(**_kwargs: object) -> dict[str, object]:
+                return {
+                    "read_model_status": "fresh",
+                    "rows": [],
+                    "category_counts": {"uncategorized": 0},
+                    "pagination": {"page": 1, "page_size": 100, "total": 0},
+                }
+
+        class RelationReader:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            def source_versions_for_scopes(self, scope_keys: list[str], **kwargs: object) -> dict[str, object]:
+                self.calls.append({"scope_keys": list(scope_keys), **dict(kwargs)})
+                return {
+                    "status": "stale",
+                    "refresh_enqueued": True,
+                    "stale_reasons": ["2026-03:workbench_pair_relations_updated_at_mismatch"],
+                }
+
+        relation_reader = RelationReader()
+        service = BankDetailsApplicationService(
+            app_settings_service=SimpleNamespace(
+                get_bank_auto_tag_rules_payload=lambda **_kwargs: {"version": 1, "active_rules": []}
+            ),
+            bank_transaction_category_service=SimpleNamespace(),
+            bank_transaction_auto_category_service=SimpleNamespace(),
+            audit_service=SimpleNamespace(),
+            bank_transaction_category_store=None,
+            bank_detail_sql_read_repository=SqlReadRepository(),
+            runtime_repositories=SimpleNamespace(),
+            affected_months_provider=lambda _transaction_ids: [],
+            available_month_scope_keys_provider=lambda: ["2026-02", "2026-03"],
+            enqueue_bank_account_balance_refresh=lambda **_kwargs: False,
+            workbench_relation_reader=relation_reader,
+        )
+
+        payload = service.transactions_payload(
+            account_key=None,
+            date_from=None,
+            date_to=None,
+            keyword=None,
+            page=1,
+            page_size=100,
+        )
+
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(payload["read_model_dependency_statuses"], {"workbench_relation": "stale"})
+        self.assertEqual(
+            payload["read_model_stale_reasons"],
+            ["workbench_relation:2026-03:workbench_pair_relations_updated_at_mismatch"],
+        )
+        self.assertEqual(
+            relation_reader.calls,
+            [
+                {
+                    "scope_keys": ["2026-02", "2026-03"],
+                    "require_fresh": True,
+                    "reason": "bank_details_page_access",
+                }
+            ],
         )
 
     def test_application_transactions_missing_sql_scope_enqueues_refresh_without_legacy_scan(self) -> None:

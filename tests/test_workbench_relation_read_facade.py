@@ -172,6 +172,32 @@ class UnderlyingWorkbenchRelationRepository:
         self.calls.append(("workbench_relation_source_versions", {"scope_key": scope_key, "tenant_id": tenant_id}))
         return {"workbench_relation_schema_version": "test"}
 
+    def workbench_relation_scope_summaries(
+        self,
+        *,
+        scope_keys: list[str],
+        tenant_id: str = "default",
+    ) -> dict[str, object]:
+        self.calls.append(
+            (
+                "workbench_relation_scope_summaries",
+                {"scope_keys": list(scope_keys), "tenant_id": tenant_id},
+            )
+        )
+        return {
+            "read_model_status": "fresh",
+            "read_model_scope_keys": list(scope_keys),
+            "read_model_scope_source_versions": {
+                scope_key: {"workbench_relation_schema_version": "test"}
+                for scope_key in scope_keys
+            },
+            "source_versions": (
+                {"workbench_relation_schema_version": "test"}
+                if len(scope_keys) == 1
+                else {}
+            ),
+        }
+
     def workbench_relation_source_bundle_from_source(
         self,
         *,
@@ -528,6 +554,13 @@ class WorkbenchRelationReadModelRepositoryPortTests(unittest.TestCase):
             "test",
         )
         self.assertEqual(
+            port.workbench_relation_scope_summaries(
+                scope_keys=["2026-01", "2026-02"],
+                tenant_id="tenant",
+            )["read_model_scope_keys"],
+            ["2026-01", "2026-02"],
+        )
+        self.assertEqual(
             port.workbench_relation_source_bundle_from_source(
                 scope_key="2026-01",
                 row_ids=["txn-1"],
@@ -567,6 +600,7 @@ class WorkbenchRelationReadModelRepositoryPortTests(unittest.TestCase):
                 "list_workbench_relation_rows",
                 "get_workbench_relation_groups_by_ids",
                 "workbench_relation_source_versions",
+                "workbench_relation_scope_summaries",
                 "workbench_relation_source_bundle_from_source",
                 "workbench_relation_scope_summary",
                 "list_batch_accounting_relation_groups_by_year",
@@ -577,6 +611,107 @@ class WorkbenchRelationReadModelRepositoryPortTests(unittest.TestCase):
 
 
 class WorkbenchRelationReadFacadeTests(unittest.TestCase):
+    def test_all_scope_summary_expands_to_concrete_months_before_bulk_proof(self) -> None:
+        class Connection:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+            def fetch_all(self, sql: str, params: tuple[object, ...] = ()) -> list[dict[str, object]]:
+                normalized_sql = " ".join(sql.lower().split())
+                self.calls.append((normalized_sql, params))
+                if "/* workbench_relation_available_scope_keys */" in normalized_sql:
+                    return [{"scope_key": "2026-01"}, {"scope_key": "2026-02"}]
+                if "from unnest(%s::text[]) with ordinality" in normalized_sql:
+                    return [
+                        {
+                            "scope_key": scope_key,
+                            "scope_exists": True,
+                            "source_versions": {"workbench_relation_schema_version": "v1"},
+                            "dirty_status": None,
+                        }
+                        for scope_key in params[0]
+                    ]
+                return []
+
+        connection = Connection()
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.workbench_relation_scope_summaries(scope_keys=["all"])
+
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual(payload["read_model_scope_keys"], ["2026-01", "2026-02"])
+        self.assertEqual(len(connection.calls), 2)
+        self.assertEqual(connection.calls[1][1][0], ["2026-01", "2026-02"])
+
+    def test_scope_summary_repository_reads_many_relation_scopes_in_one_query(self) -> None:
+        connection = BatchAccountingBulkRelationConnection(dirty_scope="2026-02", dirty_status="processing")
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.workbench_relation_scope_summaries(
+            scope_keys=["2026-01", "2026-02"],
+        )
+
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(payload["read_model_scope_keys"], ["2026-01", "2026-02"])
+        self.assertEqual(payload["stale_reasons"], ["2026-02:dirty_processing"])
+        self.assertEqual(len(connection.fetch_all_calls), 1)
+        self.assertEqual(connection.fetch_one_calls, [])
+
+    def test_bulk_scope_freshness_enqueues_only_canonical_mismatch(self) -> None:
+        class Repository:
+            calls: list[dict[str, object]] = []
+
+            @classmethod
+            def workbench_relation_scope_summaries(
+                cls,
+                *,
+                scope_keys: list[str],
+                tenant_id: str,
+            ) -> dict[str, object]:
+                cls.calls.append({"scope_keys": list(scope_keys), "tenant_id": tenant_id})
+                return {
+                    "read_model_status": "fresh",
+                    "read_model_scope_keys": list(scope_keys),
+                    "read_model_scope_source_versions": {
+                        "2026-01": {"workbench_pair_relations_updated_at": "v2"},
+                        "2026-02": {"workbench_pair_relations_updated_at": "v1"},
+                    },
+                    "source_versions": {},
+                    "stale_reasons": [],
+                }
+
+        expected_calls: list[list[str]] = []
+
+        def expected_versions(scope_keys: list[str]) -> dict[str, dict[str, object]]:
+            expected_calls.append(list(scope_keys))
+            return {
+                scope_key: {"workbench_pair_relations_updated_at": "v2"}
+                for scope_key in scope_keys
+            }
+
+        queue = QueueRecorder()
+        facade = WorkbenchRelationReadFacade(
+            read_model_repository=Repository(),
+            queue_repository=queue,
+            expected_source_versions_by_scope=expected_versions,
+        )
+
+        payload = facade.source_versions_for_scopes(
+            ["2026-01", "2026-02"],
+            require_fresh=True,
+            reason="bank_details_page_access",
+        )
+
+        self.assertEqual(payload["status"], "stale")
+        self.assertEqual(payload["rows"], [])
+        self.assertTrue(payload["refresh_enqueued"])
+        self.assertEqual(Repository.calls, [{"scope_keys": ["2026-01", "2026-02"], "tenant_id": "default"}])
+        self.assertEqual(expected_calls, [["2026-01", "2026-02"]])
+        self.assertEqual(
+            queue.refreshes,
+            [("workbench_relation", "2026-02", "bank_details_page_access")],
+        )
+
     def test_batch_accounting_repository_uses_fixed_statement_counts(self) -> None:
         row_connection = BatchAccountingBulkRelationConnection()
         row_repository = PostgresReadModelRepository(row_connection)
@@ -756,7 +891,12 @@ class WorkbenchRelationReadFacadeTests(unittest.TestCase):
         self.assertEqual(payload["source_versions"], {"workbench_relation_schema_version": "test"})
         self.assertEqual(
             repository.calls,
-            [("workbench_relation_source_versions", {"scope_key": "2026-01", "tenant_id": "default"})],
+            [
+                (
+                    "workbench_relation_scope_summaries",
+                    {"scope_keys": ["2026-01"], "tenant_id": "default"},
+                )
+            ],
         )
 
     def test_batch_accounting_row_bundle_includes_annual_count_without_separate_reader(self) -> None:

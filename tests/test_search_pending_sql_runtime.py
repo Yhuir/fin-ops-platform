@@ -601,6 +601,12 @@ class SearchPendingConnection:
                     "source_versions": {
                         "bank_detail_signature": "empty-v1",
                         "bank_transaction_category_source_signature": BANK_DETAIL_EMPTY_CATEGORY_SOURCE_SIGNATURE,
+                        "workbench_relation_source_versions": {
+                            "source": "workbench_pair_relations",
+                            "scope_key": requested_scope,
+                            "relation_count": 0,
+                            "relation_updated_at": "",
+                        },
                     },
                     "generated_at": "2026-05-21T09:00:00+00:00",
                     "last_error": None,
@@ -1932,6 +1938,12 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
             {
                 "bank_detail_signature": "empty-v1",
                 "bank_transaction_category_source_signature": BANK_DETAIL_EMPTY_CATEGORY_SOURCE_SIGNATURE,
+                "workbench_relation_source_versions": {
+                    "source": "workbench_pair_relations",
+                    "scope_key": "2026-05",
+                    "relation_count": 0,
+                    "relation_updated_at": "",
+                },
             },
         )
 

@@ -36,6 +36,7 @@ class WorkbenchQueryFacade:
         is_default_initial_query: Callable[..., bool] | None = None,
         oa_status_provider: Callable[[], object] | None = None,
         serialize_value: Callable[[object], object] | None = None,
+        page_dependency_status: Callable[[str], dict[str, object]] | None = None,
     ) -> None:
         self._repository = repository
         self._redis_helper = redis_helper
@@ -56,6 +57,7 @@ class WorkbenchQueryFacade:
         self._is_default_initial_query = is_default_initial_query
         self._oa_status_provider = oa_status_provider
         self._serialize_value = serialize_value or (lambda value: value)
+        self._page_dependency_status = page_dependency_status
 
     def initial_page(
         self,
@@ -83,6 +85,7 @@ class WorkbenchQueryFacade:
                     "message": "Workbench SQL initial page repository is not configured.",
                 },
             )
+        dependency_status_payload = self._page_dependency_status_payload(scope_key)
         cacheable_query = bool(
             callable(self._is_default_initial_query)
             and self._is_default_initial_query(paired_query, unpaired_query)
@@ -141,9 +144,19 @@ class WorkbenchQueryFacade:
         )
         payload: object = None
         loaded_from_cache = False
-        cache_status_allows_read = refresh_status in {"fresh", "refreshing"}
+        dependency_cache_status = str(
+            dependency_status_payload.get("status") or "fresh"
+        ) if isinstance(dependency_status_payload, dict) else "fresh"
+        cache_status_allows_read = (
+            refresh_status in {"fresh", "refreshing"}
+            and dependency_cache_status == "fresh"
+        )
         if scope_key != "all":
-            cache_status_allows_read = refresh_status == "fresh" and statistics_cache_status == "fresh"
+            cache_status_allows_read = (
+                refresh_status == "fresh"
+                and statistics_cache_status == "fresh"
+                and dependency_cache_status == "fresh"
+            )
         if cache_key and cache_status_allows_read:
             get_cached = getattr(self._redis_helper, "get_json", None)
             if callable(get_cached):
@@ -279,6 +292,8 @@ class WorkbenchQueryFacade:
                 *stale_reasons,
             ]
         initial_status = str(payload.get("read_model_status") or "fresh")
+        self._apply_page_dependency_status(payload, dependency_status_payload)
+        initial_status = str(payload.get("read_model_status") or initial_status)
         statistics_cache_is_fresh = scope_key == "all" or statistics_cache_status == "fresh"
         if not loaded_from_cache and cacheable_query and initial_status == "fresh" and statistics_cache_is_fresh:
             resolved_cache_key = (
@@ -299,7 +314,11 @@ class WorkbenchQueryFacade:
         if "oa_status" not in payload and callable(self._oa_status_provider):
             payload["oa_status"] = self._serialize_value(self._oa_status_provider())
         if initial_status != "fresh":
-            if initial_status != "refreshing" and refresh_status not in {"refreshing", "stale"}:
+            if (
+                dependency_cache_status == "fresh"
+                and initial_status != "refreshing"
+                and refresh_status not in {"refreshing", "stale"}
+            ):
                 self._enqueue_refresh(scope_key, reason="api_initial_page_stale")
             self._emit_status_metric(
                 endpoint="/api/workbench",
@@ -892,6 +911,47 @@ class WorkbenchQueryFacade:
         if refresh_status not in {"fresh", "refreshing"}:
             self._enqueue_refresh(scope_key, reason="api_groups_source_versions_stale")
         return refresh_status_payload
+
+    def _page_dependency_status_payload(self, scope_key: str) -> dict[str, object] | None:
+        if not callable(self._page_dependency_status):
+            return None
+        payload = self._page_dependency_status(scope_key)
+        return dict(payload) if isinstance(payload, dict) else {
+            "status": "unavailable",
+            "refresh_enqueued": False,
+            "stale_reasons": ["page_dependency_status_unavailable"],
+        }
+
+    @staticmethod
+    def _apply_page_dependency_status(
+        payload: dict[str, object],
+        dependency_status_payload: dict[str, object] | None,
+    ) -> None:
+        if not isinstance(dependency_status_payload, dict):
+            return
+        status = str(dependency_status_payload.get("status") or "unavailable")
+        payload["read_model_dependency_statuses"] = {"workbench_relation": status}
+        if status == "fresh":
+            return
+        refresh_enqueued = bool(dependency_status_payload.get("refresh_enqueued"))
+        payload["read_model_status"] = "refreshing" if refresh_enqueued else status
+        dependency_reasons = [
+            f"workbench_relation:{reason}"
+            for reason in list(dependency_status_payload.get("stale_reasons") or [])
+            if str(reason).strip()
+        ]
+        payload["read_model_stale_reasons"] = list(
+            dict.fromkeys(
+                [
+                    *list(
+                        payload.get("read_model_stale_reasons")
+                        if isinstance(payload.get("read_model_stale_reasons"), list)
+                        else []
+                    ),
+                    *dependency_reasons,
+                ]
+            )
+        )
 
     def _read_model_temporarily_unavailable_result(
         self,
