@@ -29,7 +29,7 @@
 | 输入 | 来源 | 合同 |
 | --- | --- | --- |
 | 页面读取 | `AppHealthOperationsPage.tsx`、`features/appHealth/api.ts` | 只读 API |
-| Health probe | app health endpoints | 返回 readiness/status |
+| Health probe | app health endpoints | 返回 readiness/status；单次 App Health snapshot 只读取一次 runtime status，Workbench 仍执行完整 generation consistency 合同。`/health/ready` 仍实时读取 durable facts、不加伪 freshness cache，但同一请求内 outbox current-effective 集合与 dirty-scope current-effective 集合分别只计算一次，再生成原有 aggregate/scope diagnostics |
 | Runtime registry | app status services | 聚合 worker/read model/job/dependency 状态；operations dashboard 默认不等待 RabbitMQ management API，RabbitMQ queue metrics 作为可选 transport 观测以 unknown 降级。每个 read model 额外读取最近 scope 事件与 readiness，区分 `current_scope` 和 `full_history_batch` |
 | Dashboard inventory facts | `app.bank_transactions`、`app.invoices` / `source_links`、`app.import_batches`、`app.oa_*`、`app.oa_sync_runs` | 发票 inventory 按 canonical invoice source link 和 `invoice_type` 统计；OA 上次读取时间优先使用 `app.oa_sync_runs(sync_type='oa_projection')` 的成功 run；导入历史只读 `app.import_batches` 中手工银行流水和发票导入批次 |
 | OA sync runtime facts | `job.outbox_events(event_type='oa.sync')`、`runtime_worker_heartbeats`、`app.oa_sync_runs` | `/api/oa-sync/status` 和 AppHealth `oa_sync` 只读 durable queue、worker 和 projection run facts；不得依赖 HTTP 进程内内存状态 |

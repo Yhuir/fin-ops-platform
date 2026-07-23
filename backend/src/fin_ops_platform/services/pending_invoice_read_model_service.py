@@ -232,7 +232,7 @@ class PendingInvoiceReadModelService:
         gate_query = {key: list(values) for key, values in query.items()}
         gate_query["page"] = ["1"]
         gate_query["page_size"] = ["1"]
-        gate_payload = self.rows(gate_query)
+        gate_payload = self.rows(gate_query, include_statistics=False)
         if gate_payload.get("read_model_status") != "fresh":
             return gate_payload
         try:

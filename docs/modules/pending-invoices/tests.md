@@ -9,6 +9,13 @@
 - 覆盖点：规则、关联、income status 与 import confirm 只提交 facts/version/hints，targets 为空；当前页面 GET 只 enqueue 当前精确 direction/month scope。`pending_invoice_scope_planner.py` 已删除并由静态 guard 防回归。
 - 验证命令：见 Phase 27 verification。
 
+## 2026-07-23 - filter-options source-version 热路径收敛
+
+- 变更类型：只读 freshness/source-version SQL 性能修复，不改变 API shape、scope、worker 或业务口径。
+- 新增/更新测试：`test_filter_options_fresh_gate_skips_unused_page_statistics`、`test_pending_invoice_repository_loads_workbench_relation_source_versions_for_matching_months`。
+- 覆盖点：filter-options freshness gate 显式 `include_statistics=false`；全部命中月份的 `workbench_pair_relations` count/max(updated_at) 在一次批量 SQL 中返回，禁止恢复逐月 `fetch_one` N+1；每月 source-version payload shape 保持不变。
+- 验证命令：见 Phase 27 最终 verification 与生产 SLO 证据。
+
 ## 2026-07-05 - pending invoice boundary close
 
 - 变更类型：旧同步读链路删除与 route/read-model 边界收口。

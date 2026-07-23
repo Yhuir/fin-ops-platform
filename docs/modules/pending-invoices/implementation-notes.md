@@ -1,5 +1,14 @@
 # 待找发票 实施记录
 
+## 2026-07-23 - filter-options freshness N+1 删除
+
+- 目标：修复生产 `/api/pending-invoices/filter-options` 一次请求约 59 次 SQL、p95 超过 1 秒的问题。
+- 影响范围：`PendingInvoiceReadModelService.filter_options`、PostgreSQL pending-invoice source-version repository、对应 service/repository tests 与模块文档；不改变 response shape、freshness 判断、scope、queue、worker 或写链路。
+- 关键决策：filter-options 仍先走正式 rows freshness gate，但不计算自身完全不消费的页面 statistics；把原来每个命中月份单独读取 relation source summary 的 N+1 收敛成单条 CTE 聚合，继续按月份输出相同 count/max(updated_at) proof。没有新增缓存、worker、read model 或 fallback。
+- 测试覆盖：锁定 filter-options 以 `include_statistics=false` gate，批量 SQL 只调用一次且旧 per-scope `fetch_one` 会直接失败；既有 API fresh gate/SQL aggregation 测试保持。
+- 验证命令：见 Phase 27 最终交付说明。
+- 未测风险：本地 fake SQL 不证明生产执行计划；发布后必须用 authenticated 20-sample probe 验证 fresh/zero-enqueue 与 p95 <= 1 秒。
+
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 

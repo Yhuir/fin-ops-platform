@@ -210,6 +210,52 @@ class FakeConnection:
         normalized = " ".join(sql.lower().split())
         if "like '%." in normalized:
             raise AssertionError("literal percent signs must be escaped for psycopg SQL")
+        if "ready_outbox_snapshot" in normalized:
+            return {
+                "queue_backlog": {"pending": 3, "failed": 1},
+                "max_pending_age_seconds": 42.0,
+                "publish_status": {"unpublished": 4, "failed": 2},
+                "max_unpublished_age_seconds": 11.0,
+                "pending_outbox_events_by_scope": [
+                    {
+                        "event_type": "workbench.read_model.refresh",
+                        "status": "pending",
+                        "scope_type": "workbench",
+                        "scope_key": "all",
+                        "count": 2,
+                        "oldest_age_seconds": 610.0,
+                        "attempts": 1,
+                        "last_error": "",
+                    }
+                ],
+            }
+        if "ready_dirty_scope_snapshot" in normalized:
+            return {
+                "dirty_scopes": {"pending": 2, "processing": 1},
+                "stale_dirty_scopes": [
+                    {
+                        "tenant_id": "default",
+                        "scope_type": "workbench",
+                        "scope_key": "workbench:month:2026-05",
+                        "status": "pending",
+                        "age_seconds": 600.0,
+                        "attempts": 2,
+                        "last_error": "boom",
+                        "total_count": 1,
+                    }
+                ],
+                "dirty_scopes_by_scope": [
+                    {
+                        "scope_type": "workbench",
+                        "scope_key": "all",
+                        "status": "pending",
+                        "count": 1,
+                        "oldest_age_seconds": 620.0,
+                        "attempts": 2,
+                        "last_error": "still refreshing",
+                    }
+                ],
+            }
         if "from job.runtime_worker_heartbeats" in normalized:
             return {"max_worker_heartbeat_lag_seconds": 8.0}
         if "rabbitmq_publish" in normalized:
@@ -494,13 +540,17 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertNotIn("read_model_refresh_slow_events", summary)
         self.assertNotIn("workbench_read_model", summary)
         self.assertIn("event_type = 'cost_statistics.read_model.refresh'", executed_sql)
-        self.assertIn("scope_key = 'all' or scope_key ~ '^[0-9]{4}-[0-9]{2}$'", executed_sql)
+        self.assertIn("dirty.scope_key = 'all' or dirty.scope_key ~ '^[0-9]{4}-[0-9]{2}$'", executed_sql)
         self.assertIn("payload->>'scope_key'", executed_sql)
         self.assertNotIn("{_current_effective_dirty_scope_predicate_sql", executed_sql)
         self.assertNotIn("slow_refresh_event_samples", executed_sql)
         self.assertNotIn("current_refresh_event_samples", executed_sql)
         self.assertNotIn("workbench_generation_status_counts", executed_sql)
         self.assertNotIn("recent_publish_confirms", executed_sql)
+        self.assertEqual(executed_sql.count("ready_outbox_snapshot"), 1)
+        self.assertEqual(executed_sql.count("ready_dirty_scope_snapshot"), 1)
+        self.assertIn("current_events as materialized", executed_sql)
+        self.assertIn("current_dirty_scopes as materialized", executed_sql)
 
     def test_dashboard_outbox_metric_only_scans_current_attention_statuses(self) -> None:
         class OutboxMetricConnection:

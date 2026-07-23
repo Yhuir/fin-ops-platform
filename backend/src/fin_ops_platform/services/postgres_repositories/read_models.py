@@ -4472,6 +4472,7 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
         filters: str | list[dict[str, Any]] | None = None,
         tenant_id: str = "default",
     ) -> dict[str, Any]:
+        _ = tenant_id
         normalized_direction = str(direction or "").strip()
         normalized_filter = str(filter or "all").strip() or "all"
         if normalized_direction == "all" and normalized_filter != "all":
@@ -4498,32 +4499,49 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
             params.extend(clause_params)
         where_sql = " and ".join(where) if where else "true"
         with self._connection.transaction() as connection:
-            month_rows = connection.fetch_all(
+            scope_rows = connection.fetch_all(
                 f"""
+                /* pending_invoice_relation_source_versions_bulk */
+                with pending_scopes as (
+                    select
+                        to_char(scope_month, 'YYYY-MM') as scope_key,
+                        scope_month,
+                        array_agg(distinct row_id order by row_id)
+                            filter (where row_id is not null) as row_ids
+                    from read_model.pending_invoice_rows
+                    where {where_sql}
+                      and scope_month is not null
+                    group by scope_month
+                )
                 select
-                    to_char(scope_month, 'YYYY-MM') as scope_key,
-                    array_agg(distinct row_id order by row_id) filter (where row_id is not null) as row_ids
-                from read_model.pending_invoice_rows
-                where {where_sql}
-                  and scope_month is not null
-                group by scope_month
-                order by scope_key
+                    pending_scopes.scope_key,
+                    count(relations.*)::integer as relation_count,
+                    coalesce(max(relations.updated_at)::text, '') as relation_updated_at
+                from pending_scopes
+                left join app.workbench_pair_relations relations
+                  on relations.status = 'active'
+                 and (
+                    relations.month_scope = pending_scopes.scope_month
+                    or relations.row_ids && pending_scopes.row_ids
+                 )
+                group by pending_scopes.scope_key
+                order by pending_scopes.scope_key
                 """,
                 tuple(params),
             )
         result: dict[str, Any] = {}
-        for row in month_rows:
+        for row in scope_rows:
             if not isinstance(row, dict):
                 continue
             scope_key = text(row.get("scope_key"))
             if not scope_key:
                 continue
-            result[scope_key] = self._workbench_relation_source_summary_from_source(
-                scope_key=scope_key,
-                row_ids=text_list(row.get("row_ids")),
-                include_row_ids=True,
-                tenant_id=tenant_id,
-            )
+            result[scope_key] = {
+                "source": "workbench_pair_relations",
+                "scope_key": scope_key,
+                "relation_count": int_value(row.get("relation_count"), 0),
+                "relation_updated_at": text(row.get("relation_updated_at")) or "",
+            }
         return result
 
 

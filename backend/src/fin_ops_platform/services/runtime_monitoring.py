@@ -1433,52 +1433,8 @@ class RuntimeMonitoringRepository:
         }
 
     def ready_health_summary(self, *, stale_after_seconds: int = 300) -> dict[str, Any]:
-        queue_rows = self._connection.fetch_all(
-            f"""
-            select e.status, count(*)::bigint as count
-            from job.outbox_events e
-            where e.status <> 'done'
-              and {_current_effective_outbox_attention_predicate_sql("e")}
-            group by e.status
-            order by e.status
-            """
-        )
-        age_row = self._connection.fetch_one(
-            f"""
-            select extract(epoch from max(now() - e.created_at))::float as max_pending_age_seconds
-            from job.outbox_events e
-            where e.status = 'pending'
-              and {_current_effective_outbox_attention_predicate_sql("e")}
-            """
-        )
-        dirty_count_rows = self._connection.fetch_all(
-            """
-            select status, count(*)::bigint as count
-            from job.read_model_dirty_scopes
-            group by status
-            order by status
-            """
-        )
-        stale_rows = self._connection.fetch_all(
-            f"""
-            select
-              tenant_id,
-              scope_type,
-              scope_key,
-              status,
-              extract(epoch from now() - updated_at)::float as age_seconds,
-              attempts,
-              last_error,
-              count(*) over()::bigint as total_count
-            from job.read_model_dirty_scopes
-            where status in ('pending', 'processing', 'failed')
-              and updated_at < now() - (%s * interval '1 second')
-              and {_current_effective_dirty_scope_predicate_sql()}
-            order by updated_at, tenant_id, scope_type, scope_key
-            limit 5
-            """,
-            (stale_after_seconds,),
-        )
+        outbox_summary = self._ready_outbox_summary()
+        dirty_summary = self._ready_dirty_scope_summary(stale_after_seconds=stale_after_seconds)
         worker_lag_row = self._connection.fetch_one(
             """
             with latest_worker_kind_heartbeats as (
@@ -1525,46 +1481,10 @@ class RuntimeMonitoringRepository:
             """,
             (list(READ_MODEL_EVENT_TYPES.keys()), READ_MODEL_REFRESH_METRIC_SAMPLE_LIMIT),
         )
-        publish_rows = self._connection.fetch_all(
-            f"""
-            select e.publish_status, count(*)::bigint as count
-            from job.outbox_events e
-            where e.status = 'pending'
-              and e.event_type = any(%s)
-              and {_current_effective_outbox_attention_predicate_sql("e")}
-            group by e.publish_status
-            order by e.publish_status
-            """,
-            (list(_rabbitmq_dispatch_event_types()),),
-        )
-        publish_lag_row = self._connection.fetch_one(
-            f"""
-            select extract(epoch from max(now() - e.created_at))::float as max_unpublished_age_seconds
-            from job.outbox_events e
-            where e.status = 'pending'
-              and e.event_type = any(%s)
-              and e.publish_status in ('unpublished', 'failed')
-              and {_current_effective_outbox_attention_predicate_sql("e")}
-            """,
-            (list(_rabbitmq_dispatch_event_types()),),
-        )
-        pending_outbox_by_scope = self._pending_outbox_events_by_scope()
-        dirty_scopes_by_scope = self._dirty_scopes_by_scope()
-        queue_backlog = {str(row["status"]): int(row["count"]) for row in queue_rows}
-        dirty_scopes = {str(row["status"]): int(row["count"]) for row in dirty_count_rows}
-        publish_status = {str(row["publish_status"]): int(row["count"]) for row in publish_rows}
-        stale_dirty_scopes = [
-            {
-                "tenant_id": row.get("tenant_id"),
-                "scope_type": row.get("scope_type"),
-                "scope_key": row.get("scope_key"),
-                "status": row.get("status"),
-                "age_seconds": row.get("age_seconds"),
-                "attempts": row.get("attempts"),
-                "last_error": row.get("last_error"),
-            }
-            for row in stale_rows
-        ]
+        queue_backlog = outbox_summary["queue_backlog"]
+        dirty_scopes = dirty_summary["dirty_scopes"]
+        publish_status = outbox_summary["publish_status"]
+        stale_dirty_scopes = dirty_summary["stale_dirty_scopes"]
         total_refresh_count = int((refresh_failure_row or {}).get("read_model_refresh_total") or 0)
         failed_refresh_count = int((refresh_failure_row or {}).get("failed_count") or 0)
         worker_metrics = self.dashboard_worker_metrics()
@@ -1576,14 +1496,12 @@ class RuntimeMonitoringRepository:
             if row.get("required") and row.get("warning_code") in {"worker_kind_mismatch", "worker_event_type_mismatch"}
         )
         rabbitmq_metrics = self._rabbitmq_metrics()
-        stale_dirty_scope_count = int(stale_rows[0].get("total_count") or len(stale_rows)) if stale_rows else 0
-        max_pending_age_seconds = (age_row or {}).get("max_pending_age_seconds")
         return {
             "queue_backlog": queue_backlog,
             "dirty_scopes": dirty_scopes,
             "failed_jobs": int(queue_backlog.get("failed", 0)) + int(queue_backlog.get("dead_lettered", 0)),
-            "max_pending_age_seconds": max_pending_age_seconds,
-            "oldest_pending_event_age_seconds": max_pending_age_seconds,
+            "max_pending_age_seconds": outbox_summary["max_pending_age_seconds"],
+            "oldest_pending_event_age_seconds": outbox_summary["max_pending_age_seconds"],
             "worker_heartbeat_lag_seconds": (worker_lag_row or {}).get("max_worker_heartbeat_lag_seconds"),
             "worker_metrics": worker_metrics,
             "missing_required_worker_count": missing_required_worker_count,
@@ -1596,12 +1514,213 @@ class RuntimeMonitoringRepository:
             "rabbitmq_publish_status": publish_status,
             "rabbitmq_unpublished_backlog": int(publish_status.get("unpublished", 0)),
             "rabbitmq_publish_failed_backlog": int(publish_status.get("failed", 0)),
-            "rabbitmq_dispatcher_lag_seconds": (publish_lag_row or {}).get("max_unpublished_age_seconds"),
+            "rabbitmq_dispatcher_lag_seconds": outbox_summary["max_unpublished_age_seconds"],
             **rabbitmq_metrics,
-            "stale_dirty_scope_count": stale_dirty_scope_count,
+            "stale_dirty_scope_count": dirty_summary["stale_dirty_scope_count"],
             "stale_dirty_scopes": stale_dirty_scopes,
-            "pending_outbox_events_by_scope": pending_outbox_by_scope,
-            "dirty_scopes_by_scope": dirty_scopes_by_scope,
+            "pending_outbox_events_by_scope": outbox_summary["pending_outbox_events_by_scope"],
+            "dirty_scopes_by_scope": dirty_summary["dirty_scopes_by_scope"],
+        }
+
+    def _ready_outbox_summary(self) -> dict[str, Any]:
+        row = self._connection.fetch_one(
+            f"""
+            /* ready_outbox_snapshot */
+            with current_events as materialized (
+              select
+                e.event_type,
+                e.status,
+                e.publish_status,
+                coalesce(e.scope_type, e.raw_payload->>'scope_type', e.aggregate_type, '') as scope_type,
+                coalesce(e.scope_key, e.raw_payload->>'scope_key', e.aggregate_id, '') as scope_key,
+                e.created_at,
+                e.attempts,
+                e.last_error
+              from job.outbox_events e
+              where e.status <> 'done'
+                and {_current_effective_outbox_attention_predicate_sql("e")}
+            ),
+            queue_counts as (
+              select status, count(*)::bigint as count
+              from current_events
+              group by status
+            ),
+            publish_counts as (
+              select publish_status, count(*)::bigint as count
+              from current_events
+              where status = 'pending'
+                and event_type = any(%s)
+              group by publish_status
+            ),
+            scope_rows as (
+              select
+                event_type,
+                status,
+                scope_type,
+                scope_key,
+                count(*)::bigint as count,
+                extract(epoch from max(now() - created_at))::float as oldest_age_seconds,
+                max(attempts)::integer as attempts,
+                max(coalesce(last_error, '')) as last_error
+              from current_events
+              where status in ('pending', 'processing', 'failed', 'dead_lettered')
+              group by event_type, status, scope_type, scope_key
+              order by oldest_age_seconds desc nulls last, event_type, scope_type, scope_key
+              limit 30
+            )
+            select
+              coalesce(
+                (select jsonb_object_agg(status, count) from queue_counts),
+                '{{}}'::jsonb
+              ) as queue_backlog,
+              (
+                select extract(epoch from max(now() - created_at))::float
+                from current_events
+                where status = 'pending'
+              ) as max_pending_age_seconds,
+              coalesce(
+                (select jsonb_object_agg(publish_status, count) from publish_counts),
+                '{{}}'::jsonb
+              ) as publish_status,
+              (
+                select extract(epoch from max(now() - created_at))::float
+                from current_events
+                where status = 'pending'
+                  and event_type = any(%s)
+                  and publish_status in ('unpublished', 'failed')
+              ) as max_unpublished_age_seconds,
+              coalesce(
+                (select jsonb_agg(to_jsonb(scope_rows)) from scope_rows),
+                '[]'::jsonb
+              ) as pending_outbox_events_by_scope
+            """,
+            (list(_rabbitmq_dispatch_event_types()), list(_rabbitmq_dispatch_event_types())),
+        )
+        payload = row if isinstance(row, dict) else {}
+        queue_payload = payload.get("queue_backlog") if isinstance(payload.get("queue_backlog"), dict) else {}
+        publish_payload = payload.get("publish_status") if isinstance(payload.get("publish_status"), dict) else {}
+        scope_rows = (
+            payload.get("pending_outbox_events_by_scope")
+            if isinstance(payload.get("pending_outbox_events_by_scope"), list)
+            else []
+        )
+        return {
+            "queue_backlog": {str(key): int(value or 0) for key, value in queue_payload.items()},
+            "max_pending_age_seconds": payload.get("max_pending_age_seconds"),
+            "publish_status": {str(key): int(value or 0) for key, value in publish_payload.items()},
+            "max_unpublished_age_seconds": payload.get("max_unpublished_age_seconds"),
+            "pending_outbox_events_by_scope": [
+                {
+                    "event_type": str(scope.get("event_type") or ""),
+                    "status": str(scope.get("status") or ""),
+                    "scope_type": str(scope.get("scope_type") or ""),
+                    "scope_key": str(scope.get("scope_key") or ""),
+                    "count": int(scope.get("count") or 0),
+                    "oldest_age_seconds": scope.get("oldest_age_seconds"),
+                    "attempts": int(scope.get("attempts") or 0),
+                    "last_error": str(scope.get("last_error") or ""),
+                }
+                for scope in scope_rows
+                if isinstance(scope, dict)
+            ],
+        }
+
+    def _ready_dirty_scope_summary(self, *, stale_after_seconds: int) -> dict[str, Any]:
+        row = self._connection.fetch_one(
+            f"""
+            /* ready_dirty_scope_snapshot */
+            with current_dirty_scopes as materialized (
+              select dirty.tenant_id, dirty.scope_type, dirty.scope_key, dirty.status,
+                     dirty.updated_at, dirty.attempts, dirty.last_error
+              from job.read_model_dirty_scopes dirty
+              where dirty.status in ('pending', 'processing', 'failed')
+                and {_current_effective_dirty_scope_predicate_sql("dirty")}
+            ),
+            dirty_counts as (
+              select status, count(*)::bigint as count
+              from job.read_model_dirty_scopes
+              group by status
+            ),
+            stale_rows as (
+              select
+                tenant_id,
+                scope_type,
+                scope_key,
+                status,
+                extract(epoch from now() - updated_at)::float as age_seconds,
+                attempts,
+                last_error,
+                count(*) over()::bigint as total_count
+              from current_dirty_scopes
+              where updated_at < now() - (%s * interval '1 second')
+              order by updated_at, tenant_id, scope_type, scope_key
+              limit 5
+            ),
+            scope_rows as (
+              select
+                scope_type,
+                scope_key,
+                status,
+                count(*)::bigint as count,
+                extract(epoch from max(now() - updated_at))::float as oldest_age_seconds,
+                max(attempts)::integer as attempts,
+                max(coalesce(last_error, '')) as last_error
+              from current_dirty_scopes
+              group by scope_type, scope_key, status
+              order by oldest_age_seconds desc nulls last, scope_type, scope_key
+              limit 30
+            )
+            select
+              coalesce(
+                (select jsonb_object_agg(status, count) from dirty_counts),
+                '{{}}'::jsonb
+              ) as dirty_scopes,
+              coalesce(
+                (select jsonb_agg(to_jsonb(stale_rows)) from stale_rows),
+                '[]'::jsonb
+              ) as stale_dirty_scopes,
+              coalesce(
+                (select jsonb_agg(to_jsonb(scope_rows)) from scope_rows),
+                '[]'::jsonb
+              ) as dirty_scopes_by_scope
+            """,
+            (stale_after_seconds,),
+        )
+        payload = row if isinstance(row, dict) else {}
+        dirty_payload = payload.get("dirty_scopes") if isinstance(payload.get("dirty_scopes"), dict) else {}
+        raw_stale_rows = payload.get("stale_dirty_scopes") if isinstance(payload.get("stale_dirty_scopes"), list) else []
+        raw_scope_rows = payload.get("dirty_scopes_by_scope") if isinstance(payload.get("dirty_scopes_by_scope"), list) else []
+        stale_dirty_scopes = [
+            {
+                "tenant_id": stale.get("tenant_id"),
+                "scope_type": stale.get("scope_type"),
+                "scope_key": stale.get("scope_key"),
+                "status": stale.get("status"),
+                "age_seconds": stale.get("age_seconds"),
+                "attempts": stale.get("attempts"),
+                "last_error": stale.get("last_error"),
+            }
+            for stale in raw_stale_rows
+            if isinstance(stale, dict)
+        ]
+        first_stale = next((item for item in raw_stale_rows if isinstance(item, dict)), None)
+        return {
+            "dirty_scopes": {str(key): int(value or 0) for key, value in dirty_payload.items()},
+            "stale_dirty_scope_count": int((first_stale or {}).get("total_count") or len(stale_dirty_scopes)),
+            "stale_dirty_scopes": stale_dirty_scopes,
+            "dirty_scopes_by_scope": [
+                {
+                    "scope_type": str(scope.get("scope_type") or ""),
+                    "scope_key": str(scope.get("scope_key") or ""),
+                    "status": str(scope.get("status") or ""),
+                    "count": int(scope.get("count") or 0),
+                    "oldest_age_seconds": scope.get("oldest_age_seconds"),
+                    "attempts": int(scope.get("attempts") or 0),
+                    "last_error": str(scope.get("last_error") or ""),
+                }
+                for scope in raw_scope_rows
+                if isinstance(scope, dict)
+            ],
         }
 
     def _pending_outbox_events_by_scope(self) -> list[dict[str, Any]]:

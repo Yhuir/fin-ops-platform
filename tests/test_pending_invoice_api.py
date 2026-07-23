@@ -9,7 +9,10 @@ from types import SimpleNamespace
 
 from tests.app_test_support import build_local_state_application as build_application
 from fin_ops_platform.domain.enums import BatchType, TransactionDirection
-from fin_ops_platform.services.pending_invoice_read_model_service import pending_invoice_source_versions
+from fin_ops_platform.services.pending_invoice_read_model_service import (
+    PendingInvoiceReadModelService,
+    pending_invoice_source_versions,
+)
 from fin_ops_platform.services.pending_invoice_service import PENDING_INVOICE_EXPORT_ROW_LIMIT
 from fin_ops_platform.services.oa_identity_service import OAUserIdentity
 from fin_ops_platform.services.pending_invoice_rules import pending_invoice_rules_payload
@@ -506,6 +509,39 @@ class PendingInvoiceApiTests(unittest.TestCase):
         self.assertEqual(payload["read_model_status"], "fresh")
         self.assertEqual(payload["options"]["bank_account"], [{"value": "光大 8826", "label": "光大 8826", "count": 9}])
         self.assertEqual(repository.option_calls[0]["direction"], "expense")
+
+    def test_filter_options_fresh_gate_skips_unused_page_statistics(self) -> None:
+        class FilterOptionsRepository:
+            @staticmethod
+            def list_pending_invoice_filter_options(**_kwargs: object) -> dict[str, object]:
+                return {"options": {}}
+
+        class RecordingReadModelService(PendingInvoiceReadModelService):
+            def __init__(self) -> None:
+                super().__init__(repository=FilterOptionsRepository())
+                self.include_statistics_calls: list[bool] = []
+
+            def rows(
+                self,
+                query: dict[str, list[str]],
+                *,
+                include_statistics: bool = True,
+            ) -> dict[str, object]:
+                self.include_statistics_calls.append(include_statistics)
+                return {
+                    "direction": query["direction"][0],
+                    "filter": query["filter"][0],
+                    "summary": {},
+                    "read_model_status": "fresh",
+                    "read_model_scope_key": "expense:all",
+                }
+
+        service = RecordingReadModelService()
+
+        payload = service.filter_options({"direction": ["expense"], "filter": ["all"]})
+
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual(service.include_statistics_calls, [False])
 
     def test_rows_endpoint_rejects_unconfigured_read_model_without_sync_scan(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

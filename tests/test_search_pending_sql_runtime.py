@@ -3143,23 +3143,25 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         class PendingRelationScopeConnection:
             def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:
                 normalized = " ".join(sql.lower().split())
-                if "from read_model.pending_invoice_rows" in normalized:
+                if "pending_invoice_relation_source_versions_bulk" in normalized:
+                    self.relation_source_summary_params = getattr(self, "relation_source_summary_params", [])
+                    self.relation_source_summary_params.append(params)
                     return [
-                        {"scope_key": "2026-04", "row_ids": ["txn-april"]},
-                        {"scope_key": "2026-05", "row_ids": ["txn-may-1", "txn-may-2"]},
+                        {
+                            "scope_key": "2026-04",
+                            "relation_count": 1,
+                            "relation_updated_at": "2026-04-01 10:00:00",
+                        },
+                        {
+                            "scope_key": "2026-05",
+                            "relation_count": 2,
+                            "relation_updated_at": "2026-05-01 10:00:00",
+                        },
                     ]
                 return []
 
             def fetch_one(self, sql: str, params: tuple = ()) -> dict[str, object] | None:
-                normalized = " ".join(sql.lower().split())
-                if "from app.workbench_pair_relations" in normalized:
-                    self.relation_source_summary_params = getattr(self, "relation_source_summary_params", [])
-                    self.relation_source_summary_params.append(params)
-                    return {
-                        "relation_count": 2 if "txn-may-1" in params[-1] else 1,
-                        "relation_updated_at": f"{params[0]} 10:00:00",
-                    }
-                return None
+                raise AssertionError(f"unexpected per-scope source-version query: {sql} {params}")
 
             def transaction(self):
                 connection = self
@@ -3183,10 +3185,7 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
 
         self.assertEqual(
             connection.relation_source_summary_params,
-            [
-                ("2026-04-01", ["txn-april"]),
-                ("2026-05-01", ["txn-may-1", "txn-may-2"]),
-            ],
+            [("expense",)],
         )
         self.assertEqual(
             source_versions,

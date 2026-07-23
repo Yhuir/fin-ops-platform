@@ -4015,7 +4015,8 @@ class Application:
         owner_user_id = session.identity.username or session.identity.user_id or "web_finance_user"
         active_jobs = self._background_job_service.list_active_jobs(owner_user_id, include_system=True)
         attention_jobs = self._background_job_service.list_attention_jobs(owner_user_id, include_system=True)
-        oa_sync_payload = self._app_health_oa_sync_payload()
+        runtime_statuses = self._app_status_runtime_statuses()
+        oa_sync_payload = self._app_health_oa_sync_payload(runtime_statuses=runtime_statuses)
         state_store_info = {
             "storage_mode": self._state_store.storage_mode if self._state_store is not None else "memory",
             "backend": self._state_store.storage_backend if self._state_store is not None else "memory",
@@ -4038,7 +4039,6 @@ class Application:
         metrics = snapshot.get("metrics") if isinstance(snapshot.get("metrics"), dict) else {}
         metrics["active_alert_count"] = len(alerts.get("active", [])) if isinstance(alerts, dict) else 0
         snapshot["metrics"] = metrics
-        runtime_statuses = self._app_status_runtime_statuses()
         snapshot["app_status"] = self._app_status_overview_service.build_overview(
             session=session,
             active_jobs=active_jobs,
@@ -4192,10 +4192,16 @@ class Application:
         }
         print(json.dumps(log_payload, ensure_ascii=False))
 
-    def _oa_sync_status_payload(self) -> dict[str, object]:
-        runtime_statuses = self._app_status_runtime_statuses()
-        outbox_statuses = runtime_statuses.get("outbox_statuses")
-        worker_statuses = runtime_statuses.get("worker_statuses")
+    def _oa_sync_status_payload(
+        self,
+        *,
+        runtime_statuses: dict[str, dict[str, dict[str, object]] | None] | None = None,
+    ) -> dict[str, object]:
+        resolved_runtime_statuses = (
+            runtime_statuses if runtime_statuses is not None else self._app_status_runtime_statuses()
+        )
+        outbox_statuses = resolved_runtime_statuses.get("outbox_statuses")
+        worker_statuses = resolved_runtime_statuses.get("worker_statuses")
         outbox_payload = (
             outbox_statuses.get("oa.sync")
             if isinstance(outbox_statuses, dict) and isinstance(outbox_statuses.get("oa.sync"), dict)
@@ -4278,8 +4284,12 @@ class Application:
             scopes.append("all")
         return sorted(dict.fromkeys(scopes))
 
-    def _app_health_oa_sync_payload(self) -> dict[str, object]:
-        payload = self._serialize_value(self._oa_sync_status_payload())
+    def _app_health_oa_sync_payload(
+        self,
+        *,
+        runtime_statuses: dict[str, dict[str, dict[str, object]] | None] | None = None,
+    ) -> dict[str, object]:
+        payload = self._serialize_value(self._oa_sync_status_payload(runtime_statuses=runtime_statuses))
         if not isinstance(payload, dict):
             payload = {}
         matching_queue = getattr(self, "_workbench_reconciliation_dirty_queue", None)

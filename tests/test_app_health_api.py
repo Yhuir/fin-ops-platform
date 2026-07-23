@@ -485,6 +485,32 @@ class AppHealthApiTests(unittest.TestCase):
 
         self.assertEqual(calls, 1)
 
+    def test_app_health_reuses_one_runtime_snapshot_with_cache_disabled(self) -> None:
+        app = build_application()
+        calls = 0
+
+        def runtime_snapshot() -> dict[str, object]:
+            nonlocal calls
+            calls += 1
+            return {
+                "read_model_statuses": {},
+                "worker_statuses": {},
+                "outbox_statuses": {},
+            }
+
+        app._state_store = SimpleNamespace(
+            storage_mode="postgres",
+            storage_backend="postgres",
+            app_status_runtime_snapshot=runtime_snapshot,
+            save_app_health_alerts=lambda _snapshot: None,
+        )
+
+        with self._temporary_env(FIN_OPS_APP_STATUS_RUNTIME_SNAPSHOT_CACHE_TTL_SECONDS="0"):
+            response = app.handle_request("GET", "/api/app-health")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(calls, 1)
+
     def test_dirty_oa_scopes_block_workbench_write_actions(self) -> None:
         app = build_application()
         read_model_version = install_fresh_workbench_write_gate(app)
