@@ -1896,6 +1896,42 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
             {"source_version": 7},
         )
 
+    def test_pending_invoice_statistics_keep_source_proof_while_refresh_is_in_flight(self) -> None:
+        connection = SearchPendingConnection(
+            pending_rows=[
+                {
+                    "payload": {
+                        "id": "txn-1",
+                        "bank_transaction": {"id": "txn-1"},
+                    },
+                    "missing_invoice": True,
+                    "can_create_invoice": True,
+                }
+            ],
+            dirty=True,
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        state = repository.list_pending_invoice_rows(
+            direction="expense",
+            filter="all",
+            date_from=None,
+            date_to=None,
+            keyword=None,
+            page=1,
+            page_size=50,
+        )
+
+        self.assertEqual(state["statistics_status"], "refreshing")
+        self.assertIsNone(state["statistics"])
+        self.assertEqual(
+            state["statistics_source_versions_by_scope"],
+            {
+                "expense:all": _pending_invoice_expected_source_versions(),
+                "income:all": _pending_invoice_expected_source_versions(),
+            },
+        )
+
     def test_invoice_lifecycle_reads_exact_pending_invoice_month_shard(self) -> None:
         connection = SearchPendingConnection(
             pending_rows=[
@@ -3044,6 +3080,49 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
             queue.refreshes,
             [("pending_invoice", "expense:all:2026-02", "api_statistics_source_versions_stale")],
         )
+
+    def test_pending_invoice_in_flight_statistics_with_current_proof_do_not_enqueue_parent_scopes(self) -> None:
+        current_versions = _pending_invoice_expected_source_versions()
+        queue = QueueRecorder()
+        service = PendingInvoiceReadModelService(
+            repository=type(
+                "PendingRepo",
+                (),
+                {
+                    "list_pending_invoice_rows": lambda *_args, **_kwargs: {
+                        "direction": "expense",
+                        "filter": "all",
+                        "rows": [
+                            {
+                                "id": "txn-2026-02",
+                                "invoice_acquisition_status": {"code": "paid_pending_invoice"},
+                                "input_invoices": {"primary": None, "summaries": []},
+                                "oa": {"primary": None, "summaries": []},
+                            }
+                        ],
+                        "pagination": {"page": 1, "page_size": 50, "total": 1},
+                        "summary": {"total_rows": 1},
+                        "refresh_status": "fresh",
+                        "statistics": None,
+                        "statistics_status": "refreshing",
+                        "statistics_source_versions_by_scope": {
+                            "expense:all": current_versions,
+                            "income:all": current_versions,
+                        },
+                        "source_versions": current_versions,
+                    },
+                },
+            )(),
+            queue_repository=queue,
+            source_versions_provider=lambda: current_versions,
+        )
+
+        payload = service.rows({"direction": ["expense"], "filter": ["all"]})
+
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual(payload["statistics_status"], "refreshing")
+        self.assertIsNone(payload["statistics"])
+        self.assertEqual(queue.refreshes, [])
 
     def test_pending_invoice_read_model_service_all_rows_rejects_export_row_limit_before_scanning_more_pages(self) -> None:
         class PendingRepo:

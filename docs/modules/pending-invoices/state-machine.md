@@ -71,7 +71,7 @@
 | --- | --- | --- |
 | `fresh` | scope schema/source/readiness 与当前事实一致，且没有 active dirty scope | rows/filter-options/export 可使用当前 payload。 |
 | `missing` | 没有对应 scope read model 或 readiness | 入队 `pending_invoice.read_model.refresh`；API 返回 refreshing。 |
-| `refreshing` | dirty scope pending/processing，或 parent scope 正 fan-out month shards | worker 继续处理；页面展示同步中。 |
+| `refreshing` | dirty scope pending/processing，或 parent scope 正 fan-out month shards | worker 继续处理；页面展示同步中。统计刷新在途时 repository 仍保留已发布 child scope source proof，API 不得把 proof 暂缺误判成 expense/income 父 scope 缺失并重复 fan-out。 |
 | `stale` / `source_mismatch` / `schema_mismatch` | bank tags、relation、invoice lifecycle、schema source version 落后 | 入队重建；可展示旧 rows 但必须暴露 stale reason。 |
 | `failed` | projection/worker refresh 失败 | App Status busy/blocked，页面显示失败或等待运维重试。 |
 | `unavailable` | repository、queue、worker dependency 不可用 | API 返回 unavailable/refreshing；不得返回 fake fresh。 |

@@ -4858,10 +4858,13 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
             limit 1
             """
         )
+        runtime_status: str | None = None
         if isinstance(dirty_row, dict):
-            return {
-                "status": "refreshing" if text(dirty_row.get("status")) in {"pending", "processing"} else "stale"
-            }
+            runtime_status = (
+                "refreshing"
+                if text(dirty_row.get("status")) in {"pending", "processing"}
+                else "stale"
+            )
         outbox_row = connection.fetch_one(
             """
             select
@@ -4876,9 +4879,9 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
             """
         )
         if isinstance(outbox_row, dict) and bool(outbox_row.get("has_failed")):
-            return {"status": "stale"}
-        if isinstance(outbox_row, dict) and bool(outbox_row.get("has_active")):
-            return {"status": "refreshing"}
+            runtime_status = "stale"
+        elif isinstance(outbox_row, dict) and bool(outbox_row.get("has_active")) and runtime_status != "stale":
+            runtime_status = "refreshing"
         rows = connection.fetch_all(
             """
             select scope_key, direction, row_count, cache_status, source_versions, raw_payload
@@ -4900,7 +4903,10 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
             parent_rows = [row for row in direction_rows if text(row.get("scope_key") or "").count(":") < 2]
             effective_rows = nonempty_child_rows or parent_rows[-1:] or child_rows[-1:]
             if not effective_rows or any(text(row.get("cache_status")) not in {"", "fresh"} for row in effective_rows):
-                return {"status": "stale"}
+                return {
+                    "status": runtime_status or "stale",
+                    "source_versions_by_scope": source_versions_by_scope,
+                }
             by_direction[direction] = effective_rows
             source_row = _pending_invoice_scope_source_versions_row(
                 f"{direction}:all",
@@ -4919,7 +4925,15 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
             )
         statistics = _pending_invoice_statistics_from_scope_metadata(metadata_rows)
         if statistics is None:
-            return {"status": "stale", "source_versions_by_scope": source_versions_by_scope}
+            return {
+                "status": runtime_status or "stale",
+                "source_versions_by_scope": source_versions_by_scope,
+            }
+        if runtime_status is not None:
+            return {
+                "status": runtime_status,
+                "source_versions_by_scope": source_versions_by_scope,
+            }
         return {
             "status": "fresh",
             "statistics": statistics,
