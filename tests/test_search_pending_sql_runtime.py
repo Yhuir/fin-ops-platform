@@ -3308,7 +3308,10 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
     def test_pending_invoice_filtered_scope_keeps_zero_row_month_dependency_proofs(self) -> None:
         class PendingScopeConnection:
             def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:
-                if "from read_model.pending_invoice_scopes" not in " ".join(sql.lower().split()):
+                normalized = " ".join(sql.lower().split())
+                if "from read_model.pending_invoice_rows" in normalized:
+                    return [{"scope_key": "2026-04"}, {"scope_key": "2026-05"}]
+                if "from read_model.pending_invoice_scopes" not in normalized:
                     return []
                 return [
                     {
@@ -3319,6 +3322,16 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
                             "bank_auto_tag_rules_version": 1,
                             "bank_detail_source_versions": {"legacy": "parent"},
                             "workbench_relation_source_versions": {"legacy": "parent"},
+                        },
+                    },
+                    {
+                        "scope_key": "income:cash_income:2023-05",
+                        "row_count": 0,
+                        "source_versions": {
+                            **_pending_invoice_expected_source_versions(),
+                            "bank_auto_tag_rules_version": 1,
+                            "bank_detail_source_versions": {"legacy": "historical"},
+                            "workbench_relation_source_versions": {"legacy": "historical"},
                         },
                     },
                     {

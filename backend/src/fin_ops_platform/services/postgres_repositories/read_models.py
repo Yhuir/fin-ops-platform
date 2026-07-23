@@ -4615,6 +4615,7 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
 
     def _pending_invoice_scope_row(self, scope_key: str, *, connection: Any | None = None) -> dict[str, Any] | None:
         executor = connection or self._connection
+        direction, filter_group, scope_month = _parse_pending_invoice_scope_key(scope_key)
         rows = executor.fetch_all(
             """
             select scope_key, row_count, source_versions
@@ -4625,7 +4626,31 @@ class PostgresPendingInvoiceLifecycleReadModelRepository:
             """,
             (scope_key, f"{scope_key}:%"),
         )
-        _direction, filter_group, _month = _parse_pending_invoice_scope_key(scope_key)
+        if filter_group != "all" and scope_month is None:
+            month_rows = executor.fetch_all(
+                """
+                select distinct to_char(scope_month, 'YYYY-MM') as scope_key
+                from read_model.pending_invoice_rows
+                where direction = %s
+                  and scope_month is not null
+                order by scope_key
+                """,
+                (direction,),
+            )
+            active_months = {
+                text(row.get("scope_key"))
+                for row in month_rows
+                if isinstance(row, dict) and text(row.get("scope_key"))
+            }
+            rows = [
+                row
+                for row in rows
+                if text(row.get("scope_key")) == scope_key
+                or text(
+                    _parse_pending_invoice_scope_key(text(row.get("scope_key")))[2]
+                )[:7]
+                in active_months
+            ]
         return _pending_invoice_scope_source_versions_row(
             scope_key=scope_key,
             rows=rows,
