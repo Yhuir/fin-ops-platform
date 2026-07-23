@@ -185,16 +185,7 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
 
             @staticmethod
             def get_workbench_initial_page(**_kwargs: object) -> dict[str, object]:
-                return {
-                    "month": "2026-05",
-                    "scope_key": "2026-05",
-                    "summary": {"oa_count": 1},
-                    "paired": {"groups": [], "total": 0},
-                    "unpaired": {"groups": [], "total": 0},
-                    "source_versions": {"builder": "current"},
-                    "read_model_status": "fresh",
-                    "read_model_version": "generation-2026-05",
-                }
+                raise AssertionError("non-fresh dependency must skip the cold initial-page query")
 
         dependency_calls: list[str] = []
 
@@ -232,6 +223,41 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
             queue.refreshes,
             [("2026-05", "api_initial_page_relation_dependency_stale")],
         )
+
+    def test_initial_page_refreshing_status_skips_cold_repository_query(self) -> None:
+        class Repository:
+            @staticmethod
+            def get_workbench_groups_freshness_status(*, scope_key: str) -> dict[str, object]:
+                return {
+                    "scope_key": scope_key,
+                    "read_model_status": "refreshing",
+                    "read_model_version": f"generation-{scope_key}",
+                }
+
+            @staticmethod
+            def get_workbench_initial_page(**_kwargs: object) -> dict[str, object]:
+                raise AssertionError("refreshing read model must skip the cold initial-page query")
+
+        queue = QueueRecorder()
+        facade = WorkbenchQueryFacade(
+            repository=Repository(),
+            redis_helper=None,
+            enqueue_refresh=queue.enqueue,
+            scope_key_for_month=scope_key_for_month,
+            stale_reasons=no_stale_reasons,
+            emit_status_metric=MetricRecorder().emit,
+            missing_read_model_error=lambda _error: False,
+            initial_cache_key_from_version=build_workbench_initial_redis_cache_key,
+            is_default_initial_query=is_default_workbench_initial_query,
+        )
+
+        result = facade.initial_page("2026-05")
+
+        self.assertEqual(result.status_code, HTTPStatus.OK)
+        self.assertEqual(result.payload["read_model_status"], "refreshing")
+        self.assertEqual(result.payload["read_model_version"], "generation-2026-05")
+        self.assertEqual(result.payload["paired"]["groups"], [])
+        self.assertEqual(queue.refreshes, [])
 
     def test_default_initial_page_cache_hit_skips_cold_repository_query(self) -> None:
         class Repository:

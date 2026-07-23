@@ -90,6 +90,21 @@ class WorkbenchQueryFacade:
             callable(self._is_default_initial_query)
             and self._is_default_initial_query(paired_query, unpaired_query)
         )
+        dependency_cache_status = (
+            str(dependency_status_payload.get("status") or "fresh")
+            if isinstance(dependency_status_payload, dict)
+            else "fresh"
+        )
+        if dependency_cache_status != "fresh":
+            if dependency_cache_status in {"refreshing", "stale", "missing", "schema_mismatch"}:
+                self._enqueue_refresh(scope_key, reason="api_initial_page_relation_dependency_stale")
+            return self._non_fresh_initial_page_result(
+                current_month=current_month,
+                scope_key=scope_key,
+                read_model_status=dependency_cache_status,
+                dependency_status_payload=dependency_status_payload,
+                reason="relation_dependency_gate",
+            )
         refresh_status_payload: dict[str, object] | None = None
         if cacheable_query:
             try:
@@ -134,6 +149,14 @@ class WorkbenchQueryFacade:
                 if isinstance(statistics_status_payload, dict)
                 else ""
             )
+        if refresh_status and refresh_status != "fresh":
+            return self._non_fresh_initial_page_result(
+                current_month=current_month,
+                scope_key=scope_key,
+                read_model_status=refresh_status,
+                read_model_version=expected_payload_version or None,
+                reason="workbench_freshness_gate",
+            )
         cache_version = expected_payload_version
         if scope_key != "all" and expected_payload_version and statistics_cache_version:
             cache_version = f"{expected_payload_version}|all-statistics:{statistics_cache_version}"
@@ -144,9 +167,6 @@ class WorkbenchQueryFacade:
         )
         payload: object = None
         loaded_from_cache = False
-        dependency_cache_status = str(
-            dependency_status_payload.get("status") or "fresh"
-        ) if isinstance(dependency_status_payload, dict) else "fresh"
         cache_status_allows_read = (
             refresh_status in {"fresh", "refreshing"}
             and dependency_cache_status == "fresh"
@@ -922,6 +942,44 @@ class WorkbenchQueryFacade:
             "refresh_enqueued": False,
             "stale_reasons": ["page_dependency_status_unavailable"],
         }
+
+    def _non_fresh_initial_page_result(
+        self,
+        *,
+        current_month: str,
+        scope_key: str,
+        read_model_status: str,
+        read_model_version: str | None = None,
+        dependency_status_payload: dict[str, object] | None = None,
+        reason: str,
+    ) -> WorkbenchQueryResult:
+        payload: dict[str, object] = {
+            "month": current_month,
+            "scope_key": scope_key,
+            "read_model_scope_key": scope_key,
+            "summary": {
+                "oa_count": 0,
+                "bank_count": 0,
+                "invoice_count": 0,
+                "paired_count": 0,
+                "unpaired_count": 0,
+                "exception_count": 0,
+            },
+            "paired": {"groups": [], "total": 0, "has_more": False},
+            "unpaired": {"groups": [], "total": 0, "has_more": False},
+            "read_model_status": read_model_status,
+            "read_model_version": read_model_version,
+            "generated_at": None,
+        }
+        self._apply_page_dependency_status(payload, dependency_status_payload)
+        effective_status = str(payload.get("read_model_status") or read_model_status)
+        self._emit_status_metric(
+            endpoint="/api/workbench",
+            scope_key=scope_key,
+            read_model_status=effective_status,
+            reason=reason,
+        )
+        return WorkbenchQueryResult(HTTPStatus.OK, payload)
 
     @staticmethod
     def _apply_page_dependency_status(
