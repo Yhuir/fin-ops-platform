@@ -4,7 +4,7 @@
 
 - 目标：修复生产 App Health p95 超过 1 秒和 `/health/ready` 稳定约 3 秒的问题。
 - 影响范围：App Health snapshot 组装、Workbench status 选择、`RuntimeMonitoringRepository.ready_health_summary` 与对应测试/模块文档；不改变 API shape、状态判断、权限、queue/readiness 事实源或业务数据。
-- 关键决策：单次 App Health request 显式复用一份 runtime snapshot；Workbench 继续执行完整 generation consistency 检查，不能用 lightweight status 漏报不一致。ready probe 不增加缓存，而是在一个 SQL request 内各 materialize 一次 outbox current-effective 与 dirty-scope current-effective 集合，再从该集合生成原有 count/age/publish/by-scope 结果。保留 worker、refresh failure 和 RabbitMQ 合同。
+- 关键决策：单次 App Health request 显式复用一份 runtime snapshot 和一份 background-job snapshot；Workbench 继续执行完整 generation consistency 检查，不能用 lightweight status 漏报不一致，但其 `outbox_backlog` 只统计 pending/processing/failed/dead-lettered，不扫描历史 done。ready probe 不增加缓存，而是在一个 SQL request 内各 materialize 一次 outbox current-effective 与 dirty-scope current-effective 集合，再从该集合生成当前 blocker count/age/publish/by-scope 结果；不再为了 readiness 扫描历史 `done` dirty scopes。保留 worker、refresh failure 和 RabbitMQ 合同。
 - 测试覆盖：App Health runtime/lightweight port 回归；ready summary 全字段与 current-effective SQL contract 回归。
 - 验证命令：见 Phase 27 最终交付说明。
 - 未测风险：本地 fake connection 不能证明生产大库 planner/执行耗时；发布后必须验证 payload status/blocker 不变及 20-sample p95。

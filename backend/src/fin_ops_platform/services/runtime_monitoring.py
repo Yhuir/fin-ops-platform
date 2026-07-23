@@ -1638,7 +1638,7 @@ class RuntimeMonitoringRepository:
             ),
             dirty_counts as (
               select status, count(*)::bigint as count
-              from job.read_model_dirty_scopes
+              from current_dirty_scopes
               group by status
             ),
             stale_rows as (

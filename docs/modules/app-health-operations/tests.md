@@ -5,7 +5,7 @@
 ## 2026-07-23 - App Health/readiness 重复 I/O 收敛
 
 - 变更类型：只读运行状态性能修复；API shape、状态优先级、durable facts 和权限不变。
-- 新增/更新测试：App Health cache disabled 时单请求仍只取一次 runtime snapshot；既有完整 Workbench generation consistency failure/repair 回归保持；ready summary 的 outbox/dirty current-effective CTE 各只 materialize 一次并保持原字段断言。
+- 新增/更新测试：App Health cache disabled 时单请求仍只取一次 runtime snapshot，active/attention jobs 共用一次 durable snapshot；既有完整 Workbench generation consistency failure/repair 回归保持，Workbench outbox backlog 禁止扫描历史 done；ready summary 的 outbox/dirty current-effective CTE 各只 materialize 一次，dirty status count 只来自 current-effective CTE，禁止恢复历史 `done` 全表扫描。
 - 回归重点：不得用 TTL 缓存伪装 readiness；consistency failure、active repair、worker/read-model/outbox blocker 语义保持；完整 AppHealth 与 `/health/ready` 都必须在生产重新取样。
 
 ## 影响面清单

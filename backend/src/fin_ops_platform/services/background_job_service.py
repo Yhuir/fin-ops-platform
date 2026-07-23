@@ -499,6 +499,34 @@ class BackgroundJobService:
         ]
         return sorted(attention_jobs, key=lambda item: item.updated_at, reverse=True)
 
+    def list_app_health_jobs(
+        self,
+        owner_user_id: str,
+        *,
+        include_system: bool = True,
+    ) -> tuple[list[BackgroundJob], list[BackgroundJob]]:
+        """Load one durable snapshot for App Health active/attention views."""
+        owner = self._normalize_owner(owner_user_id)
+        now = datetime.now(UTC)
+        with self._lock:
+            jobs = [self._job_from_payload(payload) for payload in self._load_jobs().values()]
+        visible_jobs = [
+            job
+            for job in jobs
+            if self._can_view(job, owner, include_system=include_system)
+        ]
+        active_jobs = sorted(
+            (job for job in visible_jobs if self._is_active(job, now)),
+            key=lambda item: item.updated_at,
+            reverse=True,
+        )
+        attention_jobs = sorted(
+            (job for job in visible_jobs if self._is_attention(job)),
+            key=lambda item: item.updated_at,
+            reverse=True,
+        )
+        return active_jobs, attention_jobs
+
     def run_job(self, job: BackgroundJob, handler: Callable[[BackgroundJob], dict[str, object] | None]) -> Future:
         def runner() -> None:
             running_job = self.start_job(job.job_id)

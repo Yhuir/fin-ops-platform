@@ -12375,6 +12375,7 @@ class PostgresReadModelRepository:
             select status, count(*)::bigint as count
             from job.outbox_events
             where event_type = 'workbench.read_model.refresh'
+              and status in ('pending', 'processing', 'failed', 'dead_lettered')
             group by status
             order by status
             """

@@ -551,6 +551,10 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertEqual(executed_sql.count("ready_dirty_scope_snapshot"), 1)
         self.assertIn("current_events as materialized", executed_sql)
         self.assertIn("current_dirty_scopes as materialized", executed_sql)
+        self.assertIn(
+            "dirty_counts as ( select status, count(*)::bigint as count from current_dirty_scopes",
+            " ".join(executed_sql.split()),
+        )
 
     def test_dashboard_outbox_metric_only_scans_current_attention_statuses(self) -> None:
         class OutboxMetricConnection:

@@ -4013,8 +4013,10 @@ class Application:
 
     def _build_app_health_snapshot(self, session: OARequestSession, *, started_at: float) -> dict[str, object]:
         owner_user_id = session.identity.username or session.identity.user_id or "web_finance_user"
-        active_jobs = self._background_job_service.list_active_jobs(owner_user_id, include_system=True)
-        attention_jobs = self._background_job_service.list_attention_jobs(owner_user_id, include_system=True)
+        active_jobs, attention_jobs = self._background_job_service.list_app_health_jobs(
+            owner_user_id,
+            include_system=True,
+        )
         runtime_statuses = self._app_status_runtime_statuses()
         oa_sync_payload = self._app_health_oa_sync_payload(runtime_statuses=runtime_statuses)
         state_store_info = {

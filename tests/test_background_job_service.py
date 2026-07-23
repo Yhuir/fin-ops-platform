@@ -34,6 +34,40 @@ class BackgroundJobServiceTests(unittest.TestCase):
         self.assertEqual(active_jobs[0].status, "queued")
         self.assertEqual(active_jobs[0].short_label, "正在导入 ETC发票 0/31")
 
+    def test_app_health_active_and_attention_views_share_one_store_snapshot(self) -> None:
+        class CountingStore:
+            def __init__(self) -> None:
+                self.jobs: dict[str, dict[str, object]] = {}
+                self.load_calls = 0
+
+            def load_background_jobs(self) -> dict[str, dict[str, object]]:
+                self.load_calls += 1
+                return {job_id: dict(payload) for job_id, payload in self.jobs.items()}
+
+            def save_background_jobs(self, snapshot: dict[str, dict[str, object]]) -> None:
+                self.jobs = {job_id: dict(payload) for job_id, payload in snapshot.items()}
+
+        store = CountingStore()
+        service = BackgroundJobService(store, recent_success_seconds=60)
+        active_job = service.create_job(
+            job_type="file_import",
+            label="导入测试",
+            owner_user_id="user-001",
+        )
+        failed_job = service.create_job(
+            job_type="file_import",
+            label="失败测试",
+            owner_user_id="user-001",
+        )
+        service.fail_job(failed_job.job_id, "失败。", "boom")
+        store.load_calls = 0
+
+        active_jobs, attention_jobs = service.list_app_health_jobs("user-001")
+
+        self.assertEqual(store.load_calls, 1)
+        self.assertIn(active_job.job_id, [job.job_id for job in active_jobs])
+        self.assertEqual([job.job_id for job in attention_jobs], [failed_job.job_id])
+
     def test_update_progress_recomputes_percent_and_active_payload(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             service = self._service(temp_dir)

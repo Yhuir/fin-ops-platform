@@ -4161,6 +4161,12 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(status["last_error"], "worker timeout")
         self.assertEqual(status["worker_lag_seconds"], 12.0)
         self.assertEqual(status["outbox_backlog"]["failed"], 1)
+        backlog_sql = next(
+            sql
+            for sql, _params in connection.fetch_all_calls
+            if "from job.outbox_events" in sql and "group by status" in sql
+        )
+        self.assertIn("status in ('pending', 'processing', 'failed', 'dead_lettered')", backlog_sql)
 
     def test_repository_reports_failed_workbench_generation_without_promoting_it(self) -> None:
         connection = FailedWorkbenchGenerationConnection()
