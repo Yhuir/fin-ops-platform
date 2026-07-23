@@ -501,6 +501,55 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
         self.assertEqual(result.payload["read_model_stale_reasons"], ["builder_mismatch"])
         self.assertEqual(queue.refreshes, [("all", "api_initial_page_stale")])
 
+    def test_initial_page_reuses_source_freshness_from_refresh_status(self) -> None:
+        class Repository:
+            @staticmethod
+            def get_workbench_groups_freshness_status(*, scope_key: str) -> dict[str, object]:
+                return {
+                    "scope_key": scope_key,
+                    "read_model_status": "fresh",
+                    "read_model_version": f"generation-{scope_key}",
+                }
+
+            @staticmethod
+            def get_workbench_initial_page(**_kwargs: object) -> dict[str, object]:
+                return {
+                    "summary": {},
+                    "paired": {"groups": [], "total": 0},
+                    "unpaired": {"groups": [], "total": 0},
+                    "source_versions": {"builder": "current"},
+                    "read_model_status": "fresh",
+                    "read_model_version": "generation-2026-05",
+                }
+
+        checked_scopes: list[str] = []
+
+        def source_freshness(
+            payload: dict[str, object], *, scope_key: str
+        ) -> dict[str, object]:
+            checked_scopes.append(scope_key)
+            return payload
+
+        facade = WorkbenchQueryFacade(
+            repository=Repository(),
+            redis_helper=None,
+            enqueue_refresh=QueueRecorder().enqueue,
+            scope_key_for_month=scope_key_for_month,
+            stale_reasons=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("payload must reuse the refresh-status source proof")
+            ),
+            emit_status_metric=MetricRecorder().emit,
+            missing_read_model_error=lambda _error: False,
+            refresh_status_with_source_freshness=source_freshness,
+            is_default_initial_query=is_default_workbench_initial_query,
+        )
+
+        result = facade.initial_page("2026-05")
+
+        self.assertEqual(result.status_code, HTTPStatus.OK)
+        self.assertEqual(result.payload["read_model_status"], "fresh")
+        self.assertEqual(checked_scopes, ["2026-05", "all"])
+
     def test_filtered_initial_page_refreshing_payload_does_not_enqueue_all_fan_out(self) -> None:
         class Repository:
             @staticmethod
@@ -782,6 +831,48 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
         self.assertEqual(result.status_code, HTTPStatus.OK)
         self.assertEqual(result.payload["groups"][0]["group_id"], "fresh-db")
         self.assertEqual(result.payload["read_model_status"], "fresh")
+
+    def test_groups_reuses_source_freshness_from_refresh_status(self) -> None:
+        class Repository:
+            @staticmethod
+            def get_workbench_groups_freshness_status(**_kwargs: object) -> dict[str, object]:
+                return {"read_model_status": "fresh", "scope_key": "2026-05"}
+
+            @staticmethod
+            def get_workbench_groups_page(**_kwargs: object) -> dict[str, object]:
+                return {
+                    "month": "2026-05",
+                    "zone": "paired",
+                    "groups": [{"group_id": "fresh-db"}],
+                    "read_model_status": "fresh",
+                    "source_versions": {"builder": "current"},
+                }
+
+        source_freshness_calls = 0
+
+        def source_freshness(payload: dict[str, object], **_kwargs: object) -> dict[str, object]:
+            nonlocal source_freshness_calls
+            source_freshness_calls += 1
+            return payload
+
+        facade = WorkbenchQueryFacade(
+            repository=Repository(),
+            redis_helper=None,
+            enqueue_refresh=QueueRecorder().enqueue,
+            scope_key_for_month=scope_key_for_month,
+            stale_reasons=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("groups payload must reuse the refresh-status source proof")
+            ),
+            emit_status_metric=MetricRecorder().emit,
+            missing_read_model_error=lambda _error: False,
+            refresh_status_with_source_freshness=source_freshness,
+        )
+
+        result = facade.groups("2026-05", zone="paired")
+
+        self.assertEqual(result.status_code, HTTPStatus.OK)
+        self.assertEqual(result.payload["read_model_status"], "fresh")
+        self.assertEqual(source_freshness_calls, 1)
 
     def test_groups_missing_exact_generation_stats_enqueues_refresh_and_returns_accepted(self) -> None:
         class Repository:

@@ -32,6 +32,7 @@ DEFAULT_POLL_INTERVAL_SECONDS = 0.5
 DEFAULT_LIMIT = 2_000
 MIN_WRITE_SLO_EVENT_SAMPLE_LIMIT = 200
 MAX_TEST_OWNED_RELATION_ROW_IDS = 20
+MAX_AFFECTED_CONSUMER_SCOPES_PER_PAGE = 2
 SYSTEM_AUDIT_PATH = "/api/operations/app-health/page-audit?page=app-health-operations"
 CONFIRM_PREVIEW_PATH = "/api/workbench/actions/confirm-link/preview"
 CONFIRM_MUTATION_PATH = "/api/workbench/actions/confirm-link"
@@ -2304,10 +2305,18 @@ def _validate_checkpoint_consumers_and_rows(
     expected_business_roots: Mapping[str, frozenset[str]],
 ) -> None:
     page_keys = [consumer.page_key for consumer in checkpoint.consumers]
-    if len(page_keys) != len(set(page_keys)) or set(page_keys) != set(expected_roles):
+    consumer_counts = {page_key: page_keys.count(page_key) for page_key in set(page_keys)}
+    invalid_scope_counts = [
+        page_key
+        for page_key, count in consumer_counts.items()
+        if count > MAX_AFFECTED_CONSUMER_SCOPES_PER_PAGE
+        or (expected_roles.get(page_key) == "isolation" and count != 1)
+    ]
+    if set(page_keys) != set(expected_roles) or invalid_scope_counts:
         raise ValueError(
             f"scenario {scenario_name!r} checkpoint {checkpoint.name!r} consumers must exactly match "
-            "the registered affected and isolation pages."
+            "the registered affected and isolation pages; an affected page may declare at most two exact "
+            "scope probes, while an isolation page must declare exactly one."
         )
     if any(consumer.role != expected_roles[consumer.page_key] for consumer in checkpoint.consumers):
         raise ValueError(

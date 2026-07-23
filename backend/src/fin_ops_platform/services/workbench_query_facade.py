@@ -259,7 +259,15 @@ class WorkbenchQueryFacade:
             context_stale_reasons = refresh_status_payload.get("read_model_stale_reasons")
             if isinstance(context_stale_reasons, list) and context_stale_reasons:
                 payload["read_model_stale_reasons"] = list(context_stale_reasons)
-        stale_reasons = self._stale_reasons(payload.get("source_versions"), scope_key=scope_key)
+        source_freshness_already_checked = bool(
+            isinstance(refresh_status_payload, dict)
+            and callable(self._refresh_status_with_source_freshness)
+        )
+        stale_reasons = (
+            []
+            if source_freshness_already_checked
+            else self._stale_reasons(payload.get("source_versions"), scope_key=scope_key)
+        )
         if stale_reasons:
             payload["read_model_status"] = "stale"
             payload["read_model_stale_reasons"] = [
@@ -500,7 +508,15 @@ class WorkbenchQueryFacade:
                     *list(payload.get("read_model_stale_reasons") if isinstance(payload.get("read_model_stale_reasons"), list) else []),
                     *refresh_stale_reasons,
                 ]
-        stale_reasons = self._stale_reasons(payload.get("source_versions"), scope_key=scope_key)
+        source_freshness_already_checked = bool(
+            isinstance(refresh_status_payload, dict)
+            and callable(self._refresh_status_with_source_freshness)
+        )
+        stale_reasons = (
+            []
+            if source_freshness_already_checked
+            else self._stale_reasons(payload.get("source_versions"), scope_key=scope_key)
+        )
         if stale_reasons:
             payload["read_model_status"] = "stale"
             payload["read_model_stale_reasons"] = [

@@ -1,5 +1,12 @@
 # 关联台 实施记录
 
+## 2026-07-23 - 访问时 canonical proof 去重
+
+- 生产 test-owned turnover closure 证明普通 confirm 已在 `198.312ms` 内提交且写后页面 refresh event 为零，但首次访问 stale Workbench groups 为 `1548.125ms`，超过单次 HTTP 1 秒门槛；请求 profile 显示约 `1471.805ms` 为数据库时间。
+- 真实原因是同一次 `WorkbenchQueryFacade.initial_page/groups` 请求先通过 freshness status 计算 canonical expected source proof，加载 payload 后又调用 payload stale-reason gate计算同一 proof。两次 proof 的 scope、结果和 enqueue 语义相同，第二次属于旧重复读链路。
+- 最小修复复用 freshness status 已完成的 source proof；freshness status 不可用时仍执行既有 payload fallback 并 fail closed。active generation、version conflict、Redis fresh gate、精确 refresh gateway、Cost 上游依赖 gate 和普通写零 fan-out合同均不改变。
+- 测试锁定 initial/groups 不再第二次调用 payload stale proof，同时保留 freshness callback、月份/all 依赖和现有 stale/refreshing/version-drift 回归。
+
 ## 2026-07-22 - 两区滚动自动分页与全量搜索闭环
 
 - 目标：移除已配对和未配对区域底部“已加载 N / total”与手动“加载更多”，保留每区 50 组首屏，并在用户滚动接近各自列表底部时自动加载下一页；区域搜索继续命中服务端全部数据，包括尚未加载页、隐藏 pane 和折叠明细。

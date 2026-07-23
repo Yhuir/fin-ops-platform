@@ -1241,6 +1241,53 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         )
         self.assertEqual(scenario.checkpoints[0].fixture_row_ids, scenario.checkpoints[1].fixture_row_ids)
 
+    def test_reversible_scenario_allows_two_exact_scopes_for_one_affected_page(self) -> None:
+        scenario = _raw_bank_turnover_scenario("turnover-scopes", "shape-scopes")
+        shared_consumers = scenario["checkpoints"][0]["consumers"]  # type: ignore[index]
+        cost_consumer = next(
+            consumer for consumer in shared_consumers if consumer["page_key"] == "cost-statistics"
+        )
+        shared_consumers.append(
+            {
+                **cost_consumer,
+                "name": "cost-statistics-all-scope",
+                "path": f"{cost_consumer['path']}&project_scope=all",
+            }
+        )
+
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "scenario.json"
+            path.write_text(json.dumps([scenario]), encoding="utf-8")
+            loaded = write_operation_e2e_smoke.load_scenarios(path, http_target_ms=1000)[0]
+
+        for checkpoint in (*loaded.checkpoints, loaded.recovery_checkpoint):
+            assert checkpoint is not None
+            self.assertEqual(
+                len([consumer for consumer in checkpoint.consumers if consumer.page_key == "cost-statistics"]),
+                2,
+            )
+
+    def test_reversible_scenario_rejects_three_scopes_for_one_affected_page(self) -> None:
+        scenario = _raw_bank_turnover_scenario("turnover-scopes", "shape-scopes")
+        shared_consumers = scenario["checkpoints"][0]["consumers"]  # type: ignore[index]
+        cost_consumer = next(
+            consumer for consumer in shared_consumers if consumer["page_key"] == "cost-statistics"
+        )
+        for suffix in ("all", "second-all"):
+            shared_consumers.append(
+                {
+                    **cost_consumer,
+                    "name": f"cost-statistics-{suffix}",
+                    "path": f"{cost_consumer['path']}&project_scope=all&probe={suffix}",
+                }
+            )
+
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "scenario.json"
+            path.write_text(json.dumps([scenario]), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "at most two exact scope probes"):
+                write_operation_e2e_smoke.load_scenarios(path, http_target_ms=1000)
+
     def test_reversible_scenarios_reject_missing_consumer_or_cross_scenario_idempotency_reuse(self) -> None:
         missing_consumer = _raw_bank_invoice_scenario("missing-consumer", "shape-1")
         missing_consumer["checkpoints"][0]["consumers"].pop()  # type: ignore[index]

@@ -14,6 +14,12 @@
 
 ## 历史记录
 
+## 2026-07-23 - 受影响页面多 scope 生产验证边界
+
+- Cost Statistics 正式页面使用 `project_scope=active`，同一 API 的 `project_scope=all` 仍是导出/后端合同；只访问其中一个 scope 不能证明另一个 scope 已收敛，也不能用运行时 sibling enqueue 伪造覆盖。
+- write-operation runner 因此允许同一“受影响页面”最多两个明确 consumer scope probe，逐个执行正常 GET 和 fresh/business assertion；isolation 页面仍必须恰好一个 probe，第三个重复 scope fail fast。
+- 该能力只属于 test-owned 生产验证输入，不修改应用 read model scope policy、query owner、写路径 target、worker、queue 或 Cost 精确访问语义，不引入 fan-out。
+
 ## 2026-07-23 - Write-operation zero-fan-out receipt 边界修复
 
 - 生产 test-owned bank-turnover closure 中，confirm 与 recovery 均在 1 秒内返回 200/committed，业务 inverse 已恢复 inactive；runner 却因响应的 `outbox_event_ids: []` 被 truthy 判断丢失，继续强制查询 disabled-by-default durable idempotency 表并误报 `expected exactly one Workbench idempotency record`。
