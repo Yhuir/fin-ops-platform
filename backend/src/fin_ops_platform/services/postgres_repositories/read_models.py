@@ -12412,11 +12412,22 @@ class PostgresReadModelRepository:
         ):
             active_refresh_in_progress = False
         consistency_failures = []
-        if include_consistency and not active_refresh_in_progress:
-            consistency_failures = self._cached_workbench_generation_consistency_failures(
-                scope_key=normalized_scope_key,
-                generation_metadata=generation_metadata,
-            )
+        consistency_status = "fresh"
+        if include_consistency:
+            if active_refresh_in_progress:
+                active_generation_id = text(generation_metadata.get("active_generation_id"))
+                cached_failures = self._workbench_generation_consistency_cache.get(
+                    (normalized_scope_key, active_generation_id)
+                )
+                if cached_failures is not None:
+                    consistency_failures = deepcopy(cached_failures)
+                consistency_status = "failed" if consistency_failures else "refreshing"
+            else:
+                consistency_failures = self._cached_workbench_generation_consistency_failures(
+                    scope_key=normalized_scope_key,
+                    generation_metadata=generation_metadata,
+                )
+                consistency_status = "failed" if consistency_failures else "fresh"
         read_model_status = "fresh"
         if active_refresh_in_progress:
             read_model_status = "refreshing"
@@ -12456,7 +12467,7 @@ class PostgresReadModelRepository:
         return {
             "scope_key": normalized_scope_key,
             "read_model_status": read_model_status,
-            "consistency_status": "failed" if consistency_failures else "fresh",
+            "consistency_status": consistency_status,
             "consistency_failures": consistency_failures,
             "all_scope_parent_failures": all_scope_parent_failures,
             "active_generation_id": generation_metadata.get("active_generation_id"),

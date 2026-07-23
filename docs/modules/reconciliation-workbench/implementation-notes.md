@@ -603,7 +603,7 @@
 
 - 目标：修复 Workbench parent generation 已经入队/processing 重刷时，`/api/workbench/refresh-status` 和 App Status 仍优先展示旧 generation consistency failure，导致用户看到“刷新中”和“阻断”并存的问题。
 - 影响范围：`PostgresReadModelRepository.get_workbench_refresh_status(...)`、App Status 读取 Workbench refresh status 的 blocked/busy 推导、外部往来闭环后的 Workbench month/all 后台追赶展示；不改变 Workbench active generation 发布事实或 relation 写入口。
-- 关键决策：同一 Workbench scope 有 `pending`/`processing` dirty scope 或 building generation 时，当前 read model 状态为 `refreshing`；generation consistency failure 仍保留在 `consistency_status` 和 `read_model_stale_reasons` 中供诊断，但旧 `last_error` 不再作为当前失败弹窗/阻断原因。若没有 active repair，generation consistency failure 仍为 `failed`，不能伪装 fresh。
+- 关键决策：同一 Workbench scope 有 `pending`/`processing` dirty scope 或 building generation 时，当前 read model 状态为 `refreshing`；同一 immutable active generation 已缓存的 consistency failure 仍保留在 `consistency_status` 和 `read_model_stale_reasons` 中，尚无缓存 proof 时 `consistency_status=refreshing`，不能伪装 fresh，也不能为了诊断在 active repair 热路径重跑重型 generation audit。旧 `last_error` 不再作为当前失败弹窗/阻断原因。若没有 active repair，generation consistency failure 仍为 `failed`。
 - 文档影响：同步本实施记录、`state-machine.md`、系统状态实施记录/状态机/测试矩阵和 runtime worker 测试矩阵。
 - 测试覆盖：新增 `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_repository_reports_inconsistent_workbench_generation_as_refreshing_during_active_repair`。
 - 验证命令：见本轮最终执行记录。

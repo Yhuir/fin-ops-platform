@@ -6118,9 +6118,36 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                             "build_metadata": {},
                         }
                     ]
+                if "from read_model.workbench_generations" in normalized:
+                    return [
+                        {
+                            "generation_id": "gen-2026-03",
+                            "status": "active",
+                            "activated_at": "2026-06-21T22:47:00+08:00",
+                            "source_versions": {"source_version": 8},
+                            "row_count": 253,
+                            "group_count": 151,
+                            "build_metadata": {},
+                        }
+                    ]
                 return super().fetch_all(sql, params)
 
-        repository = PostgresReadModelRepository(RepairingInconsistentGenerationConnection())
+        connection = RepairingInconsistentGenerationConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        unchecked_status = repository.get_workbench_refresh_status(scope_key="2026-03")
+
+        self.assertEqual(unchecked_status["read_model_status"], "refreshing")
+        self.assertEqual(unchecked_status["consistency_status"], "refreshing")
+        self.assertNotIn("generation_metadata_actual_mismatch", unchecked_status["read_model_stale_reasons"])
+
+        repository._workbench_generation_consistency_cache[("2026-03", "gen-2026-03")] = [
+            {
+                "scope_key": "2026-03",
+                "generation_id": "gen-2026-03",
+                "reasons": ["group_count metadata=151 actual=0"],
+            }
+        ]
 
         status = repository.get_workbench_refresh_status(scope_key="2026-03")
 
@@ -6128,6 +6155,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(status["consistency_status"], "failed")
         self.assertIn("generation_metadata_actual_mismatch", status["read_model_stale_reasons"])
         self.assertIsNone(status["last_error"])
+        self.assertFalse(any("duplicate_identity_counts as" in sql for sql, _params in connection.fetch_all_calls))
 
     def test_repository_treats_covered_dirty_workbench_scope_as_fresh(self) -> None:
         class CoveredDirtyScopeConnection(ActiveWorkbenchGenerationConnection):

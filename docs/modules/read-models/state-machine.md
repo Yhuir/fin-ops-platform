@@ -68,7 +68,7 @@
 
 依赖未 fresh 不是 fresh，也不是普通失败：当 downstream refresh handler 读取 source read model 时遇到 `*_read_model_not_fresh`，runtime worker 会短延迟 defer 该 outbox event，等待 source projection/readiness 真实收敛后再处理；readiness reporter 必须记录为 `refreshing` 并保留 last_error 诊断，不能写 `failed` blocker，也不得因为 defer 把页面标为已同步。Workbench `all` aggregate-only refresh 携带 `parent_scope_keys` 时同样适用：parent month shard 仍 pending/processing/failed 时返回 `workbench_read_model_not_fresh`，等待 parent active generation 收敛后再聚合。
 
-同一 scope 的 current-effective 状态必须合并后展示：如果历史 `failed` 已被新的 `pending`/`processing` 覆盖，当前状态是 `refreshing`，旧 `last_error` 只能作为历史诊断，不能继续作为当前失败阻断页面或操作。App Health 聚合 Workbench active generation 诊断时也必须遵守这一点：`read_model_status=refreshing/rebuilding` 时，即使 `consistency_status=failed`，也只能展示 busy/rebuilding 和诊断字段，不能把 `workbench_read_model` 写成 unavailable dependency 或全局 blocked。
+同一 scope 的 current-effective 状态必须合并后展示：如果历史 `failed` 已被新的 `pending`/`processing` 覆盖，当前状态是 `refreshing`，旧 `last_error` 只能作为历史诊断，不能继续作为当前失败阻断页面或操作。App Health 聚合 Workbench active generation 诊断时也必须遵守这一点：`read_model_status=refreshing/rebuilding` 时，若当前进程已缓存该 immutable active generation 的失败 proof，则保留 `consistency_status=failed` 诊断；尚无 proof 时返回 `consistency_status=refreshing`，不得伪装 `fresh`，也不得在 active repair 热路径重新执行重型全 generation consistency SQL。两种情况都只能展示 busy/rebuilding，不能把 `workbench_read_model` 写成 unavailable dependency 或全局 blocked。
 
 `refresh_enqueued` 只表示本次 query gateway 调用实际写入了新的 refresh request；如果 `ReadModelRefreshGateway` 因同 scope 已有 active refresh 而合并/去重，API 仍可返回 `read_model_status=refreshing`，但 `refresh_enqueued=false`。页面和 SLO probe 不能把“已有刷新在跑”误解为“本次请求又触发了一轮刷新”。
 
