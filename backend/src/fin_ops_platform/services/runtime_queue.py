@@ -1970,15 +1970,14 @@ class RuntimeQueueRepository:
         row = self._connection.fetch_one(
             """
             select 1
-            from job.outbox_events
+            from job.read_model_dirty_scopes
             where tenant_id = %s
               and scope_type = %s
               and scope_key = %s
-              and event_type = %s
               and status in ('pending', 'processing')
             limit 1
             """,
-            (tenant_id, scope_type, scope_key, f"{scope_type}.read_model.refresh"),
+            (tenant_id, scope_type, scope_key),
         )
         return row is not None
 

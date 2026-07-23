@@ -32,6 +32,7 @@
 | matching scope | durable matching dirty queue | 合法 `YYYY-MM`；repository 读取 ±365 日组合窗口，显式引用可补载全部保留历史 |
 | matching source versions | matching worker / orchestrator | 只跟踪会改变正式关系计算结果的输入；Workbench 展示投影 schema 不是 matching 输入，禁止因纯展示版本升级重算历史月份。 |
 | generation source versions | Workbench normal GET / projection builder | expected 与 published generation 使用同一个 scope vector：relation/exception/override/rule versions，加 requested month 与 active relation members 的 OA、银行流水、发票 canonical `updated_at` 和 active pending claim version；`all` query使用对应全量 vector。同一次 normal GET 的 freshness status 已完成该 canonical proof 后，后续 payload/version/cache gate 必须复用同一结果，禁止对同一 scope再次执行完整 proof；若 freshness status I/O 不可用，既有 payload source-version fallback 仍 fail closed。canonical 变化只让被访问 scope 判 stale 并走现有 gateway，禁止恢复写后 fan-out。 |
+| access refresh coalescing | Workbench normal GET / durable queue | normal GET 发现 stale 后只 ensure 当前 exact scope。dirty scope 仍为 `pending/processing` 时，后续轮询必须复用该 active refresh，不能因 outbox 已 terminal 而再次提高 source version；真实 relation/canonical mutation 和显式 repair 不适用 ensure 合并。 |
 | exact ETC relation enrichment scopes | `PostgresWorkbenchFormalRelationFactRepository` | candidate 只输出 OA 月份与 ETC batch 月份；已知月份时禁止附加 `all`。`month=all` 查询直接组合 active 月 generation，因此 exact enrichment 只需刷新受影响月份；只有完全无法解析月份的通用 relation 合同才允许 `all` fan-out command |
 
 ## 输出 I/O

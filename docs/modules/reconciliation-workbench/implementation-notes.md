@@ -7,6 +7,12 @@
 - 最小修复复用 freshness status 已完成的 source proof；freshness status 不可用时仍执行既有 payload fallback 并 fail closed。active generation、version conflict、Redis fresh gate、精确 refresh gateway、Cost 上游依赖 gate 和普通写零 fan-out合同均不改变。
 - 测试锁定 initial/groups 不再第二次调用 payload stale proof，同时保留 freshness callback、月份/all 依赖和现有 stale/refreshing/version-drift 回归。
 
+## 2026-07-23 - 访问轮询 active refresh 去重
+
+- 生产 test-owned fixture 证明普通 confirm/withdraw 写耗时短且零页面 fan-out，但 Workbench worker 单次 handler 约 1.3–1.6 秒时，页面轮询仍在数秒内产生多个 source version，使 in-flight generation 被 supersede，访问到 fresh 延长到约 4.7 秒。
+- 根因是 `RuntimeQueueRepository.read_model_refresh_is_active(...)` 只看 outbox active event；outbox 可先于 durable dirty scope 完成，形成错误的“无任务”窗口。
+- 最小修复把 active 事实改为 exact dirty scope `pending/processing`。不新增缓存、协调器、页面分支或写后 target；canonical mutation、显式 repair/reapply 和 force 仍推进版本。
+
 ## 2026-07-22 - 两区滚动自动分页与全量搜索闭环
 
 - 目标：移除已配对和未配对区域底部“已加载 N / total”与手动“加载更多”，保留每区 50 组首屏，并在用户滚动接近各自列表底部时自动加载下一页；区域搜索继续命中服务端全部数据，包括尚未加载页、隐藏 pane 和折叠明细。

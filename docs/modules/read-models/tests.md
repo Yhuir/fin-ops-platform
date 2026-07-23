@@ -611,3 +611,9 @@ git diff --check
 - `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_all_scope_source_versions_include_canonical_workbench_objects` 覆盖 `all` query 的同类全量 canonical proof，不新增第二状态源。
 - `tests/test_batch_accounting_postgres_integration.py::BatchAccountingPostgresIntegrationTests::test_workbench_page_source_versions_track_canonical_oa_objects` 在 disposable PostgreSQL 执行真实 SQL，并证明 completed OA 写入会改变 month/all expected source vector。
 - 覆盖类别：业务核心 source-version 合同、service/read-model freshness、API fresh gate 的上游证明、后台 worker 原子重建输入，以及 Workbench/成本统计既有行为回归。HTTP shape 和前端交互不变，因此本条不新增前端组件断言；完整跨模块 E2E 由 Phase 27 test-owned 生产 fixture 验证。
+
+## 2026-07-23 - active refresh durable dirty-scope coalescing
+
+- `tests/test_runtime_queue.py::RuntimeQueueRepositoryTests::test_read_model_refresh_is_active_checks_pending_or_processing_dirty_scope` 锁定 active 事实源为 exact dirty scope，不允许回退 outbox-only 判断。
+- `tests/test_runtime_infrastructure_postgres_integration.py::RuntimeInfrastructurePostgresIntegrationTests::test_active_refresh_remains_true_after_outbox_completion_until_dirty_scope_completes` 在 disposable PostgreSQL 复现 outbox 已 done、projection dirty 仍 pending 的真实时序；dirty 完成前 active 必须为 true，完成后才为 false。
+- 七类决策：service-layer、read model/cache/background job、跨模块 E2E 和 existing feature regression 适用；前两类由上述 unit/真实 PostgreSQL覆盖，E2E 与回归由 Phase 27 test-owned confirm/withdraw、全页面 HTTP/SSE 和 System Audit 生产门禁覆盖。business core、API contract、frontend interaction 不新增测试，因为本修复不改变业务规则、HTTP shape 或 UI 状态机。

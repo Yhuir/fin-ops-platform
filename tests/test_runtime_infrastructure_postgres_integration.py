@@ -219,6 +219,45 @@ class RuntimeInfrastructurePostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(row["publish_attempt_count"], 0)
         self.assertEqual(row["payload"]["source_version"], event.source_version)
 
+    def test_active_refresh_remains_true_after_outbox_completion_until_dirty_scope_completes(self) -> None:
+        event = self.runtime_queue.enqueue_read_model_refresh(
+            scope_type="workbench",
+            scope_key="2026-02",
+            reason="api_groups_source_versions_stale",
+        )
+        self.connection.fetch_one(
+            """
+            update job.outbox_events
+            set status = 'done', processed_at = clock_timestamp()
+            where id = %s
+            returning id
+            """,
+            (event.event_id,),
+        )
+
+        self.assertTrue(
+            self.runtime_queue.read_model_refresh_is_active(
+                tenant_id="default",
+                scope_type="workbench",
+                scope_key="2026-02",
+            )
+        )
+        self.assertTrue(
+            self.runtime_queue.complete_read_model_refresh(
+                tenant_id="default",
+                scope_type="workbench",
+                scope_key="2026-02",
+                source_version=event.source_version,
+            )
+        )
+        self.assertFalse(
+            self.runtime_queue.read_model_refresh_is_active(
+                tenant_id="default",
+                scope_type="workbench",
+                scope_key="2026-02",
+            )
+        )
+
     def test_cost_relation_delta_dedupe_merges_cases_and_overwrites_same_case(self) -> None:
         first = self.runtime_queue.enqueue_read_model_refresh(
             scope_type="cost_statistics",

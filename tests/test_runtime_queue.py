@@ -1466,7 +1466,7 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
             ),
         )
 
-    def test_read_model_refresh_is_active_checks_pending_or_processing_outbox_event(self) -> None:
+    def test_read_model_refresh_is_active_checks_pending_or_processing_dirty_scope(self) -> None:
         class DirectFetchConnection:
             def __init__(self) -> None:
                 self.calls: list[tuple[str, tuple[object, ...]]] = []
@@ -1488,10 +1488,10 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
 
         sql, params = connection.calls[0]
         normalized_sql = " ".join(sql.lower().split())
-        self.assertIn("from job.outbox_events", normalized_sql)
-        self.assertIn("event_type = %s", normalized_sql)
+        self.assertIn("from job.read_model_dirty_scopes", normalized_sql)
+        self.assertNotIn("from job.outbox_events", normalized_sql)
         self.assertIn("status in ('pending', 'processing')", normalized_sql)
-        self.assertEqual(params, ("tenant-a", "bank_detail", "2026-04", "bank_detail.read_model.refresh"))
+        self.assertEqual(params, ("tenant-a", "bank_detail", "2026-04"))
 
     def test_read_model_refresh_is_fresh_checks_no_active_or_failed_dirty_scope(self) -> None:
         class DirectFetchConnection:
