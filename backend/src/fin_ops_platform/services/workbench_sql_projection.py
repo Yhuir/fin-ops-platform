@@ -201,7 +201,34 @@ class WorkbenchSqlProjectionBuilder:
                 select
                   coalesce((select max(updated_at)::text from app.workbench_pair_relations), '') as pair_relations_updated_at,
                   coalesce((select max(updated_at)::text from app.workbench_exception_cases), '') as exception_cases_updated_at,
-                  coalesce((select max(updated_at)::text from app.workbench_row_overrides), '') as row_overrides_updated_at
+                  coalesce((select max(updated_at)::text from app.workbench_row_overrides), '') as row_overrides_updated_at,
+                  coalesce((
+                    select max(updated_at)::text
+                    from app.bank_transaction_relation_claims
+                    where status = 'active'
+                  ), '') as oa_pending_payment_bank_claims_updated_at,
+                  coalesce((
+                    select max(updated_at)::text
+                    from app.bank_transactions
+                    where status <> 'deleted'
+                  ), '') as bank_transactions_updated_at,
+                  coalesce((
+                    select max(updated_at)::text
+                    from app.invoices
+                    where status <> 'deleted'
+                  ), '') as invoices_updated_at,
+                  coalesce((
+                    select max(oa.updated_at)::text
+                    from app.oa_applications oa
+                    where """
+                + COMPLETED_WORKFLOW_STATUS_SQL
+                + """
+                       or oa.row_id in (
+                         select unnest(relation.row_ids)
+                         from app.workbench_pair_relations relation
+                         where relation.status = 'active'
+                       )
+                  ), '') as oa_projection_updated_at
                 """
             )
             builder_version = WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION
@@ -234,26 +261,82 @@ class WorkbenchSqlProjectionBuilder:
                 month_object_array as (
                     select coalesce(array_agg(row_id), array[]::text[]) as row_ids
                     from month_objects
-                )
-                select
-                  coalesce((
-                    select max(relation.updated_at)::text
+                ),
+                scoped_relations as (
+                    select relation.status, relation.updated_at, relation.row_ids
                     from app.workbench_pair_relations relation, scope, month_object_array objects
                     where relation.month_scope = scope.scope_month
                        or relation.row_ids && objects.row_ids
+                ),
+                active_relation_row_ids as (
+                    select distinct unnest(row_ids) as row_id
+                    from scoped_relations
+                    where status = 'active'
+                ),
+                scope_row_ids as (
+                    select row_id from month_objects
+                    union
+                    select row_id from active_relation_row_ids
+                ),
+                scope_row_id_array as (
+                    select coalesce(array_agg(row_id), array[]::text[]) as row_ids
+                    from scope_row_ids
+                )
+                select
+                  coalesce((
+                    select max(updated_at)::text
+                    from scoped_relations
                   ), '') as pair_relations_updated_at,
                   coalesce((
                     select max(exception.updated_at)::text
-                    from app.workbench_exception_cases exception, scope, month_object_array objects
+                    from app.workbench_exception_cases exception, scope, scope_row_id_array objects
                     where exception.scope_month = scope.scope_month
                        or exception.row_ids && objects.row_ids
                   ), '') as exception_cases_updated_at,
                   coalesce((
                     select max(override.updated_at)::text
-                    from app.workbench_row_overrides override, scope, month_object_array objects
+                    from app.workbench_row_overrides override, scope, scope_row_id_array objects
                     where override.scope_month = scope.scope_month
                        or override.row_id = any(objects.row_ids)
-                  ), '') as row_overrides_updated_at
+                  ), '') as row_overrides_updated_at,
+                  coalesce((
+                    select max(claim.updated_at)::text
+                    from app.bank_transaction_relation_claims claim, scope
+                    where claim.status = 'active'
+                      and claim.scope_month = scope.scope_month
+                  ), '') as oa_pending_payment_bank_claims_updated_at,
+                  coalesce((
+                    select max(bank.updated_at)::text
+                    from app.bank_transactions bank, scope, scope_row_id_array objects
+                    where bank.status <> 'deleted'
+                      and (
+                        bank.txn_month = scope.scope_month
+                        or coalesce(bank.legacy_mongo_id, bank.id::text) = any(objects.row_ids)
+                      )
+                  ), '') as bank_transactions_updated_at,
+                  coalesce((
+                    select max(invoice.updated_at)::text
+                    from app.invoices invoice, scope, scope_row_id_array objects
+                    where invoice.status <> 'deleted'
+                      and (
+                        invoice.invoice_month = scope.scope_month
+                        or coalesce(invoice.legacy_mongo_id, invoice.id::text) = any(objects.row_ids)
+                      )
+                  ), '') as invoices_updated_at,
+                  coalesce((
+                    select max(oa.updated_at)::text
+                    from app.oa_applications oa, scope, scope_row_id_array objects
+                    where (
+                      (
+                        oa.application_date >= scope.scope_month
+                        and oa.application_date < scope.scope_month + interval '1 month'
+                        and """
+                + COMPLETED_WORKFLOW_STATUS_SQL
+                + """
+                      )
+                      or oa.row_id = any(objects.row_ids)
+                    )
+                  ), '') as oa_projection_updated_at
                 """,
                 (month_start(normalized_scope),),
             )
@@ -268,6 +351,12 @@ class WorkbenchSqlProjectionBuilder:
             "workbench_pair_relations_updated_at": str(payload.get("pair_relations_updated_at") or ""),
             "workbench_exception_cases_updated_at": str(payload.get("exception_cases_updated_at") or ""),
             "workbench_row_overrides_updated_at": str(payload.get("row_overrides_updated_at") or ""),
+            "oa_pending_payment_bank_claims_updated_at": str(
+                payload.get("oa_pending_payment_bank_claims_updated_at") or ""
+            ),
+            "bank_transactions_updated_at": str(payload.get("bank_transactions_updated_at") or ""),
+            "invoices_updated_at": str(payload.get("invoices_updated_at") or ""),
+            "oa_projection_updated_at": str(payload.get("oa_projection_updated_at") or ""),
         }
 
     def _current_bank_auto_tag_rules_version(self) -> int:

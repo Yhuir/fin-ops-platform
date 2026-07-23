@@ -1286,3 +1286,9 @@
 - 真实原因：页面按钮与点击守卫维护了两套重复条件；页面已有 3 秒 `/api/oa-sync/status` 轮询，但按钮只消费全局 App Health 的 OA 快照，导致专属状态已 synced 时仍可能被旧 dirty/refreshing 快照禁用。
 - 关键决策：用无 I/O 的 `resolveWorkbenchWriteGate` 统一权限、系统写安全、OA、Workbench page freshness 和 active generation version；按钮、选择区提示和点击守卫消费同一个结果。OA 状态优先使用页面既有专属轮询，首次结果前才回退全局 App Health。删除 `useCanMutateWithHealth` 与页面内三段重复旧判断，不新增请求、worker、read model、API 或跨页面状态。
 - 测试覆盖：新增 `WorkbenchWriteGate.test.ts`；扩展 `WorkbenchSelection.test.tsx` 覆盖旧全局 dirty 快照下的 3 秒自动恢复和选择保留；扩展 `WorkbenchZone.test.tsx` 与 `workbench-stale-error-flow.spec.ts` 覆盖可访问禁用原因及 dirty/refreshing 零写入。
+
+## 2026-07-23 - 页面访问不能把缺 canonical 对象的 generation 标成 fresh
+
+- 生产证据：`2026-07` active generation 创建于 OA projection 更新之前，Page Audit 报 `workbench_canonical_object_set_mismatch`，缺少一个已完成 OA 对象；normal Workbench GET 与 refresh-status 却返回 `fresh`。这证明旧 expected source vector 不完整，不是 worker 慢或队列堆积。
+- 边界修复：沿用现有 `WorkbenchSqlProjectionBuilder` source-version I/O，month scope 增加该月和 active relation members 的 OA/银行/发票更新时间及 pending claim 版本；`all` query增加对应全量 proof。写命令仍只提交 canonical fact/version，不恢复写后页面 fan-out。
+- 性能约束：proof 仍是一条 bounded PostgreSQL query，不读取 payload、不 live rebuild、不新增网络 I/O；页面 non-fresh 时只 enqueue 当前 scope。生产发布后必须重新验证 Workbench month/all p95、System Audit 与 test-owned confirm/withdraw/recovery。

@@ -604,3 +604,10 @@ git diff --check
 - `tests/test_workbench_sql_runtime.py::test_workbench_v6_rejects_v5_month_all_and_cache_versions` 覆盖 month/all v6、groups/initial cache 派生版本，以及旧 v5 source version 的 `builder_mismatch`。
 - 既有 SQL runtime/query tests 继续覆盖 building/failed 不可读为 fresh、active generation 原子发布和 requirement-aware paired/unpaired 分区；本轮没有新增 worker、registry、manifest、env 或 read model scope。
 - 生产验证必须经 exact release checkpoint 先 repair、再由正式 gateway/worker rehydrate；禁止直接写 projection 或伪造 fresh。
+
+## 2026-07-23 - Workbench canonical object freshness proof
+
+- `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_page_access_source_versions_include_canonical_workbench_write_tables` 覆盖月 scope proof 同时读取 active relation members、OA、银行流水、发票、pending claim、exception 与 override 版本；缺少任一 canonical owner 时不得只凭静态 OA sync schema 把 generation 判成 fresh。
+- `tests/test_workbench_sql_runtime.py::WorkbenchSqlRuntimeTests::test_all_scope_source_versions_include_canonical_workbench_objects` 覆盖 `all` query 的同类全量 canonical proof，不新增第二状态源。
+- `tests/test_batch_accounting_postgres_integration.py::BatchAccountingPostgresIntegrationTests::test_workbench_page_source_versions_track_canonical_oa_objects` 在 disposable PostgreSQL 执行真实 SQL，并证明 completed OA 写入会改变 month/all expected source vector。
+- 覆盖类别：业务核心 source-version 合同、service/read-model freshness、API fresh gate 的上游证明、后台 worker 原子重建输入，以及 Workbench/成本统计既有行为回归。HTTP shape 和前端交互不变，因此本条不新增前端组件断言；完整跨模块 E2E 由 Phase 27 test-owned 生产 fixture 验证。

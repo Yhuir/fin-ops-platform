@@ -6,6 +6,7 @@ import unittest
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
 from fin_ops_platform.services.workbench_relation_sql_projection import WorkbenchRelationSqlProjectionBuilder
+from fin_ops_platform.services.workbench_sql_projection import WorkbenchSqlProjectionBuilder
 from tests.postgres_test_utils import (
     apply_test_migrations,
     require_postgres_test_database_url,
@@ -165,6 +166,30 @@ class BatchAccountingPostgresIntegrationTests(unittest.TestCase):
         }
 
         self.assertEqual(source_versions_by_scope, single_scope_versions)
+
+    def test_workbench_page_source_versions_track_canonical_oa_objects(self) -> None:
+        builder = WorkbenchSqlProjectionBuilder(connection=self.connection)
+        before_month = builder.source_versions_for_scope("2026-07")
+
+        self.connection.execute(
+            """
+            insert into app.oa_applications(
+                oa_source_id, form_id, row_id, status, workflow_status,
+                application_date, scope_month, amount, currency, normalized_payload
+            )
+            values (
+                'source-proof-oa', 'source-proof-form', 'oa-source-proof-2026-07',
+                'active', 'completed', '2026-07-22', '2026-07-01', 1, 'CNY', '{}'::jsonb
+            )
+            """
+        )
+
+        after_month = builder.source_versions_for_scope("2026-07")
+        after_all = builder.source_versions_for_scope("all")
+
+        self.assertEqual(before_month["oa_projection_updated_at"], "")
+        self.assertTrue(after_month["oa_projection_updated_at"])
+        self.assertEqual(after_all["oa_projection_updated_at"], after_month["oa_projection_updated_at"])
 
     def test_unsubmitted_candidate_and_attachment_reads_use_hot_paths(self) -> None:
         self.connection.execute(

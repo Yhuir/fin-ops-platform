@@ -1548,6 +1548,10 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                     "pair_relations_updated_at": "relations-v2",
                     "exception_cases_updated_at": "exceptions-v3",
                     "row_overrides_updated_at": "overrides-v4",
+                    "oa_pending_payment_bank_claims_updated_at": "claims-v5",
+                    "bank_transactions_updated_at": "bank-v6",
+                    "invoices_updated_at": "invoices-v7",
+                    "oa_projection_updated_at": "oa-v8",
                 }
 
         connection = SourceVersionConnection()
@@ -1556,11 +1560,44 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(versions["workbench_pair_relations_updated_at"], "relations-v2")
         self.assertEqual(versions["workbench_exception_cases_updated_at"], "exceptions-v3")
         self.assertEqual(versions["workbench_row_overrides_updated_at"], "overrides-v4")
+        self.assertEqual(versions["oa_pending_payment_bank_claims_updated_at"], "claims-v5")
+        self.assertEqual(versions["bank_transactions_updated_at"], "bank-v6")
+        self.assertEqual(versions["invoices_updated_at"], "invoices-v7")
+        self.assertEqual(versions["oa_projection_updated_at"], "oa-v8")
         source_sql, source_params = connection.fetch_one_calls[0]
         self.assertIn("from app.workbench_pair_relations", source_sql)
         self.assertIn("from app.workbench_exception_cases", source_sql)
         self.assertIn("from app.workbench_row_overrides", source_sql)
+        self.assertIn("from app.bank_transaction_relation_claims", source_sql)
+        self.assertIn("from app.bank_transactions", source_sql)
+        self.assertIn("from app.invoices", source_sql)
+        self.assertIn("from app.oa_applications", source_sql)
+        self.assertIn("active_relation_row_ids", source_sql)
         self.assertEqual(source_params, ("2026-05-01",))
+
+    def test_all_scope_source_versions_include_canonical_workbench_objects(self) -> None:
+        class SourceVersionConnection:
+            def __init__(self) -> None:
+                self.source_sql = ""
+
+            def fetch_one(self, sql: str, params: tuple[object, ...] = ()) -> dict[str, object]:
+                normalized = " ".join(sql.lower().split())
+                if "from app.app_settings" in normalized:
+                    return {"settings_payload": {}}
+                self.source_sql = normalized
+                return {}
+
+        connection = SourceVersionConnection()
+        versions = WorkbenchSqlProjectionBuilder(connection=connection).source_versions_for_scope("all")
+
+        self.assertEqual(versions["bank_transactions_updated_at"], "")
+        self.assertEqual(versions["invoices_updated_at"], "")
+        self.assertEqual(versions["oa_projection_updated_at"], "")
+        self.assertIn("from app.bank_transaction_relation_claims", connection.source_sql)
+        self.assertIn("from app.bank_transactions", connection.source_sql)
+        self.assertIn("from app.invoices", connection.source_sql)
+        self.assertIn("from app.oa_applications", connection.source_sql)
+        self.assertIn("where relation.status = 'active'", connection.source_sql)
 
     def test_workbench_sql_all_source_versions_expect_composed_active_month_shards(self) -> None:
         app = object.__new__(Application)

@@ -1825,3 +1825,9 @@
 - `WORKBENCH_MONTH_SCOPE_SCHEMA_VERSION` 与 all composed schema 同步升级 v6；groups page 和 initial page cache schema 继续由 month version 派生，因此无需新增 eviction、cache、worker 或 registry 配置。
 - 旧 v5 generation 由既有 source-version freshness gate 判定不匹配；v6 只通过正式 refresh queue 和 active-generation 原子 publish 生效，不直接修改 read model rows 或状态。
 - 历史 requirement repair 与 rollback 写 canonical relation/history 后，生产 rehydrate、queue drain、Page Audit 和 SLO/E2E 证据必须在备份、previous release 与审批齐全的人工 checkpoint 执行。
+
+## 2026-07-23 - 主 Workbench canonical freshness proof 补全
+
+- 生产 System Audit 发现 `2026-07` active generation 缺少一个已完成 OA 对象，但 normal GET/refresh-status 仍返回 `fresh`。真实原因是主 `WorkbenchSqlProjectionBuilder.source_versions_for_scope(...)` 只比较 relation/exception/override 和静态规则版本，没有比较页面实际消费的 OA、银行流水、发票 canonical rows，也没有包含 active pending claim。
+- 最小修复只扩展现有 source-version SQL：month scope 覆盖该月对象与 active relation 跨月成员，`all` 覆盖全量对象；generation rebuild 与 normal GET 继续复用同一 expected vector。canonical 变化本身不投递页面 target，只有访问相关 scope 才返回 refreshing、经现有 gateway 精确入队并由既有 worker 原子发布。
+- 不新增表、索引、缓存、queue、worker、registry、API 字段或 fallback；旧 generation 因缺少新增 proof keys 在访问时自然失效，不保留兼容分支。

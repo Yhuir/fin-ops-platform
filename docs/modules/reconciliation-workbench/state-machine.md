@@ -43,14 +43,14 @@ durable dirty scope
 unpaired singleton selection
   -> preview locks canonical row set + expected versions
   -> command/UoW creates active relation only
-  -> current page normal GET compares canonical source version
+  -> current page normal GET compares relation/rule versions and scoped OA/bank/invoice/pending-claim canonical versions
   -> exact Workbench scope converges on access
   -> paired group
 
 paired group
   -> withdraw preview locks active case + expected versions
   -> command/UoW withdraws/cancels relation only
-  -> current page normal GET converges on access
+  -> current page normal GET compares the same canonical vector and converges on access
   -> each no-longer-owned fact becomes an unpaired singleton
 ```
 
