@@ -64,7 +64,7 @@ Mode 只描述业务 owner/provenance，不形成第三种页面状态。当前 
 - `require_fresh=True` 时，missing/stale/source mismatch 必须返回非 fresh 并受控 enqueue，调用方不得把空 rows 当作无关系。
 - 下游只有 active relation 是 linked 证据。历史关系、显示 tags、候选搜索结果、matching evidence 都不是支付/关联/成本证据。
 - downstream read models 必须记录并比较 relation source versions，relation mutation 后旧 payload 不得继续 fresh。当前访问只能 enqueue 本页面所需的精确 scope；未访问/隐藏页面不得由 relation 写路径提前 fan-out。
-- 批量账务未提交列表专用 `get_batch_accounting_by_row_ids(..., submitted_year=...)` 必须在同一 bundle 中读取所有候选/年度 scopes 的 current-effective dirty status、候选 rows、referenced groups 和年度 `submitted_count`，保留原 status/reason/source-version 合同；不能恢复独立 count port 或回退通用逐 scope 查询。`workbench_relation_groups_batch_accounting_year_scope_group_idx` 只覆盖 linked batch-accounting 年度聚合谓词，不改变其他 consumer 的查询或数据。已提交年度 list 继续使用自己的固定 I/O。
+- 批量账务未提交列表专用 `get_batch_accounting_by_row_ids(..., submitted_year=...)` 必须在同一 bundle 中读取所有候选/年度 scopes 的 current-effective dirty status、候选 rows、referenced groups 和年度 `submitted_count`，保留原 status/reason/source-version 合同；12 个月 canonical expected proof 必须由 projection builder 的一次 bulk SQL 返回逐 scope 映射，facade 仍逐 scope 精确比较，不能恢复 12 次单月 source-version N+1、独立 count port 或通用逐 scope查询。`workbench_relation_groups_batch_accounting_year_scope_group_idx` 只覆盖 linked batch-accounting 年度聚合谓词，不改变其他 consumer 的查询或数据。已提交年度 list 继续使用自己的固定 I/O。
 
 ## 文件范围
 

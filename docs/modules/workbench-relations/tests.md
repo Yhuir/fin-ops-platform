@@ -1,6 +1,6 @@
 # Workbench 正式关系测试
 
-日期：2026-07-20
+日期：2026-07-23
 
 ## 七类覆盖
 
@@ -37,6 +37,7 @@
 - active case 校验只执行一条 relation query，不查询 history；in-memory fallback 直接按 case 读取，不能复制全局 snapshot。
 - confirm overlap 校验只执行 active relation query，不加载 cancelled relation/history；command delta 只携带本次 history event，数据库不删除或重写旧 history，重复 operation id 保持幂等。
 - 下游只把 active relation 视为 linked。
+- 多 scope freshness 仍逐 scope 比较 canonical expected/source proof；年度批量账务必须用一次 bulk SQL 返回 12 个月精确映射，并由真实 PostgreSQL 测试证明与 12 次单月 proof 完全相等，禁止年度汇总替代或逐月 N+1 回归。
 - old candidate/decision 表、service、state key 和 API 不存在生产调用。
 - Release A 静态 guard 证明运行时不再访问旧状态；Release B 届时使用下一个可用 migration version，其 contract 必须证明只删除派生旧状态，不删除 canonical facts/relations/history。
 - browser deterministic mocks 即使保留相同历史 `case_id` metadata，也必须把无 active relation 的 OA、流水和发票输出为三个 `row:<typed-id>` singleton；确认后才合并为 relation，撤回后恢复三个 singleton。

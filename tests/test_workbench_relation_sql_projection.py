@@ -343,6 +343,27 @@ class ScopedSourceVersionsRelationProjectionConnection(WorkbenchRelationProjecti
         }
 
 
+class BulkScopedSourceVersionsRelationProjectionConnection(WorkbenchRelationProjectionConnection):
+    def __init__(self) -> None:
+        super().__init__()
+        self.fetch_all_calls: list[tuple[str, tuple]] = []
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:
+        normalized_sql = " ".join(sql.lower().split())
+        self.fetch_all_calls.append((normalized_sql, params))
+        return [
+            {
+                "scope_key": str(scope_month)[:7],
+                "pair_relations_updated_at": f"{str(scope_month)[:7]}-28T00:00:00+08:00",
+                "oa_pending_payment_bank_claims_updated_at": f"{str(scope_month)[:7]}-27T00:00:00+08:00",
+                "bank_transactions_updated_at": f"{str(scope_month)[:7]}-26T00:00:00+08:00",
+                "invoices_updated_at": f"{str(scope_month)[:7]}-25T00:00:00+08:00",
+                "oa_projection_updated_at": f"{str(scope_month)[:7]}-24T00:00:00+08:00",
+            }
+            for scope_month in params[0]
+        ]
+
+
 class DuplicateInvoiceIdentityRelationProjectionConnection(WorkbenchRelationProjectionConnection):
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, object]]:
         normalized = " ".join(sql.lower().split())
@@ -772,6 +793,48 @@ class WorkbenchRelationSqlProjectionTests(unittest.TestCase):
         self.assertIn("application_date >= scope.scope_month", sql)
         self.assertIn("application_date < scope.scope_month + interval '1 month'", sql)
         self.assertNotIn("workbench_reconciliation_decisions", sql)
+
+    def test_bulk_source_versions_use_one_query_and_preserve_per_scope_relation_members(self) -> None:
+        connection = BulkScopedSourceVersionsRelationProjectionConnection()
+        builder = WorkbenchRelationSqlProjectionBuilder(
+            connection=connection,
+            read_model_repository=CaptureWorkbenchRelationRepository(),
+        )
+
+        source_versions_by_scope = builder.source_versions_for_scopes(
+            ["2026-04", "2026-05", "2026-04"]
+        )
+
+        self.assertEqual(list(source_versions_by_scope), ["2026-04", "2026-05"])
+        self.assertEqual(len(connection.fetch_all_calls), 1)
+        sql, params = connection.fetch_all_calls[0]
+        self.assertEqual(params, (["2026-04-01", "2026-05-01"],))
+        self.assertIn("with requested_scopes as", sql)
+        self.assertIn("scoped_relations as", sql)
+        self.assertIn("relation.row_ids && objects.row_ids", sql)
+        self.assertIn("active_relation_row_ids as", sql)
+        self.assertIn("where relations.status = 'active'", sql)
+        self.assertIn("scope_row_ids as", sql)
+        self.assertIn("application_date >= scopes.scope_month", sql)
+        self.assertIn("application_date < scopes.scope_month + interval '1 month'", sql)
+        self.assertNotIn("workbench_reconciliation_decisions", sql)
+        self.assertEqual(
+            source_versions_by_scope["2026-05"]["workbench_pair_relations_updated_at"],
+            "2026-05-28T00:00:00+08:00",
+        )
+        self.assertEqual(
+            source_versions_by_scope["2026-05"]["workbench_relation_schema_version"],
+            "2026-07-14-formal-linked-unlinked-v1",
+        )
+
+    def test_bulk_source_versions_reject_non_month_scope(self) -> None:
+        builder = WorkbenchRelationSqlProjectionBuilder(
+            connection=BulkScopedSourceVersionsRelationProjectionConnection(),
+            read_model_repository=CaptureWorkbenchRelationRepository(),
+        )
+
+        with self.assertRaisesRegex(ValueError, "month shards YYYY-MM"):
+            builder.source_versions_for_scopes(["all"])
 
     def test_rebuild_keeps_oa_summary_for_legacy_completed_workflow_status(self) -> None:
         repository = CaptureWorkbenchRelationRepository()

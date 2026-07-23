@@ -30,11 +30,13 @@ class WorkbenchRelationReadFacade:
         queue_repository: Any | None = None,
         tenant_id: str = "default",
         expected_source_versions: Callable[[str], dict[str, Any]] | None = None,
+        expected_source_versions_by_scope: Callable[[list[str]], dict[str, dict[str, Any]]] | None = None,
     ) -> None:
         self._read_model_repository = read_model_repository
         self._queue_repository = queue_repository
         self._tenant_id = text(tenant_id) or "default"
         self._expected_source_versions = expected_source_versions
+        self._expected_source_versions_by_scope = expected_source_versions_by_scope
         self._last_result: dict[str, Any] = _facade_result(status="missing")
 
     @property
@@ -315,10 +317,22 @@ class WorkbenchRelationReadFacade:
         )
         stale_reasons = text_list(payload.get("stale_reasons"))
         canonical_stale_scopes: list[str] = []
-        if callable(self._expected_source_versions):
+        expected_source_versions_by_scope: dict[str, dict[str, Any]] = {}
+        if len(scope_keys) > 1 and callable(self._expected_source_versions_by_scope):
+            bulk_expected = self._expected_source_versions_by_scope(scope_keys)
+            if isinstance(bulk_expected, dict):
+                expected_source_versions_by_scope = {
+                    scope_key: dict(source_versions)
+                    for scope_key, source_versions in bulk_expected.items()
+                    if isinstance(source_versions, dict)
+                }
+        if callable(self._expected_source_versions) or callable(self._expected_source_versions_by_scope):
             for scope_key in scope_keys:
+                expected_source_versions = expected_source_versions_by_scope.get(scope_key)
+                if expected_source_versions is None and callable(self._expected_source_versions):
+                    expected_source_versions = self._expected_source_versions(scope_key)
                 expected = require_expected_source_versions(
-                    self._expected_source_versions(scope_key),
+                    expected_source_versions,
                     context="workbench_relation_read",
                 )
                 actual = scope_source_versions.get(scope_key)

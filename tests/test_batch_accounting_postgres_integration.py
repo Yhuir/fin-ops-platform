@@ -5,6 +5,7 @@ import unittest
 
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
+from fin_ops_platform.services.workbench_relation_sql_projection import WorkbenchRelationSqlProjectionBuilder
 from tests.postgres_test_utils import (
     apply_test_migrations,
     require_postgres_test_database_url,
@@ -152,6 +153,18 @@ class BatchAccountingPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(refreshing["read_model_status"], "refreshing")
         self.assertIn("refreshing:2026-01", refreshing["stale_reasons"])
         self.assertEqual(refreshing["submitted_count"], 0)
+
+    def test_bulk_canonical_source_versions_match_twelve_single_scope_proofs(self) -> None:
+        builder = WorkbenchRelationSqlProjectionBuilder(connection=self.connection)
+        scope_keys = [f"2026-{month:02d}" for month in range(1, 13)]
+
+        source_versions_by_scope = builder.source_versions_for_scopes(scope_keys)
+        single_scope_versions = {
+            scope_key: builder.source_versions_for_scope(scope_key)
+            for scope_key in scope_keys
+        }
+
+        self.assertEqual(source_versions_by_scope, single_scope_versions)
 
     def test_unsubmitted_candidate_and_attachment_reads_use_hot_paths(self) -> None:
         self.connection.execute(

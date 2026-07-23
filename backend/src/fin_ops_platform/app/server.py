@@ -664,6 +664,7 @@ class Application:
             queue_repository=getattr(getattr(self, "_runtime_repositories", None), "queue_repository", None),
             tenant_id=self._workbench_reconciliation_tenant_id(),
             expected_source_versions=self._workbench_relation_expected_source_versions,
+            expected_source_versions_by_scope=self._workbench_relation_expected_source_versions_by_scope,
         )
         self._workbench_relation_facade = facade
         return facade
@@ -674,6 +675,19 @@ class Application:
         if connection is None or not callable(getattr(connection, "fetch_one", None)):
             return {}
         return WorkbenchRelationSqlProjectionBuilder(connection=connection).source_versions_for_scope(scope_key)
+
+    def _workbench_relation_expected_source_versions_by_scope(
+        self,
+        scope_keys: list[str],
+    ) -> dict[str, dict[str, object]]:
+        state_store = getattr(self, "_state_store", None)
+        connection = getattr(state_store, "_connection", None)
+        if connection is None or not callable(getattr(connection, "fetch_all", None)):
+            return {}
+        try:
+            return WorkbenchRelationSqlProjectionBuilder(connection=connection).source_versions_for_scopes(scope_keys)
+        except ValueError:
+            return {}
 
     def _workbench_reconciliation_dirty_queue_repository(self):
         repository = getattr(self._state_store, "read_model_repository", None)
