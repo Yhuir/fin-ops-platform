@@ -6903,7 +6903,12 @@ class PostgresSummaryReadModelRepository:
                 statistics_parent_dirty.source_version as statistics_dirty_source_version,
                 statistics_parent_dirty.status as statistics_dirty_status,
                 statistics_children.has_failed as statistics_child_has_failed,
-                statistics_children.has_active as statistics_child_has_active
+                statistics_children.has_active as statistics_child_has_active,
+                parent_children.workbench_refresh_scope_keys,
+                parent_children.child_refresh_scope_keys,
+                parent_children.has_failed as parent_child_has_failed,
+                parent_children.has_active as parent_child_has_active,
+                parent_children.source_shards_match as parent_source_shards_match
             from read_model.cost_statistics_read_models model
             left join lateral (
                 select source_version, status, updated_at, last_error
@@ -6967,7 +6972,7 @@ class PostgresSummaryReadModelRepository:
                 limit 1
             ) bank_detail_dirty on true
             left join lateral (
-                select scope_key, payload, raw_payload, published_source_version
+                select scope_key, payload, raw_payload, source_versions, published_source_version
                 from read_model.cost_statistics_read_models
                 where scope_key = split_part(model.scope_key, ':', 1) || ':all'
                 limit 1
@@ -6992,10 +6997,205 @@ class PostgresSummaryReadModelRepository:
                   and scope_key <> split_part(model.scope_key, ':', 1) || ':all'
                   and status in ('pending', 'processing', 'failed')
             ) statistics_children on true
+            left join lateral (
+                with active_months as (
+                    select distinct on (generation.scope_key)
+                           generation.scope_key as month_key,
+                           generation.source_versions
+                    from read_model.workbench_generations generation
+                    where generation.tenant_id = 'default'
+                      and generation.status = 'active'
+                      and generation.scope_key ~ '^[0-9]{4}-[0-9]{2}$'
+                    order by generation.scope_key,
+                             generation.activated_at desc nulls last,
+                             generation.completed_at desc nulls last,
+                             generation.updated_at desc
+                ),
+                child_states as (
+                    select
+                        month.month_key,
+                        split_part(model.scope_key, ':', 1) || ':' || month.month_key
+                            as child_scope_key,
+                        month.source_versions as active_workbench_source_versions,
+                        child.scope_key is not null as child_present,
+                        coalesce(
+                            nullif(child.payload->>'schema_version', ''),
+                            nullif(child.raw_payload #>> '{normalized_payload,schema_version}', '')
+                        ) as child_schema_version,
+                        child.source_versions as child_source_versions,
+                        child.published_source_version as child_published_source_version,
+                        child_dirty.source_version as child_dirty_source_version,
+                        child_dirty.status as child_dirty_status,
+                        workbench_dirty.source_version as workbench_dirty_source_version,
+                        workbench_dirty.status as workbench_dirty_status,
+                        bank_detail.schema_version as bank_detail_schema_version,
+                        bank_detail.status as bank_detail_status,
+                        bank_detail.source_version as bank_detail_source_version,
+                        bank_detail.source_versions as bank_detail_source_versions,
+                        bank_detail_dirty.source_version as bank_detail_dirty_source_version,
+                        bank_detail_dirty.status as bank_detail_dirty_status
+                    from active_months month
+                    left join read_model.cost_statistics_read_models child
+                      on child.scope_key =
+                         split_part(model.scope_key, ':', 1) || ':' || month.month_key
+                    left join lateral (
+                        select source_version, status
+                        from job.read_model_dirty_scopes
+                        where tenant_id = 'default'
+                          and scope_type = 'cost_statistics'
+                          and scope_key =
+                              split_part(model.scope_key, ':', 1) || ':' || month.month_key
+                        order by source_version desc, updated_at desc, id desc
+                        limit 1
+                    ) child_dirty on true
+                    left join lateral (
+                        select source_version, status
+                        from job.read_model_dirty_scopes
+                        where tenant_id = 'default'
+                          and scope_type = 'workbench'
+                          and scope_key = month.month_key
+                        order by source_version desc, updated_at desc, id desc
+                        limit 1
+                    ) workbench_dirty on true
+                    left join read_model.bank_detail_scopes bank_detail
+                      on bank_detail.tenant_id = 'default'
+                     and bank_detail.scope_type = 'bank_detail'
+                     and bank_detail.scope_key = month.month_key
+                    left join lateral (
+                        select source_version, status
+                        from job.read_model_dirty_scopes
+                        where tenant_id = 'default'
+                          and scope_type = 'bank_detail'
+                          and scope_key = month.month_key
+                        order by source_version desc, updated_at desc, id desc
+                        limit 1
+                    ) bank_detail_dirty on true
+                ),
+                child_proofs as (
+                    select
+                        state.*,
+                        (
+                            state.workbench_dirty_status in ('pending', 'processing', 'failed')
+                            or (
+                                state.workbench_dirty_status is not null
+                                and (
+                                    state.workbench_dirty_status <> 'done'
+                                    or coalesce(
+                                        state.active_workbench_source_versions->>'source_version',
+                                        ''
+                                    ) <> coalesce(state.workbench_dirty_source_version::text, '')
+                                )
+                            )
+                        ) as workbench_not_fresh,
+                        (
+                            not state.child_present
+                            or state.child_schema_version <> %s
+                            or coalesce(
+                                state.child_source_versions->'workbench_source_versions',
+                                '{}'::jsonb
+                            ) <> coalesce(state.active_workbench_source_versions, '{}'::jsonb)
+                            or state.bank_detail_schema_version is null
+                            or state.bank_detail_schema_version <> %s
+                            or state.bank_detail_status <> 'fresh'
+                            or coalesce(
+                                state.child_source_versions->'bank_detail_source_versions',
+                                '{}'::jsonb
+                            ) - 'source_version' - 'workbench_relation_source_versions'
+                               <> coalesce(state.bank_detail_source_versions, '{}'::jsonb)
+                                  - 'source_version' - 'workbench_relation_source_versions'
+                            or state.child_dirty_status in ('pending', 'processing', 'failed')
+                            or (
+                                state.child_dirty_status is not null
+                                and (
+                                    state.child_dirty_status <> 'done'
+                                    or state.child_published_source_version
+                                       <> state.child_dirty_source_version
+                                )
+                            )
+                            or state.bank_detail_dirty_status in ('pending', 'processing', 'failed')
+                            or (
+                                state.bank_detail_dirty_status is not null
+                                and (
+                                    state.bank_detail_dirty_status <> 'done'
+                                    or state.bank_detail_source_version
+                                       <> state.bank_detail_dirty_source_version
+                                )
+                            )
+                        ) as child_not_fresh
+                    from child_states state
+                ),
+                aggregated as (
+                    select
+                        count(*)::integer as expected_shard_count,
+                        count(*) filter (where child_present)::integer as present_shard_count,
+                        coalesce(
+                            jsonb_object_agg(child_scope_key, child_source_versions)
+                                filter (where child_present),
+                            '{}'::jsonb
+                        ) as expected_source_shards,
+                        coalesce(
+                            array_agg(month_key order by month_key)
+                                filter (where workbench_not_fresh),
+                            array[]::text[]
+                        ) as workbench_refresh_scope_keys,
+                        coalesce(
+                            array_agg(child_scope_key order by child_scope_key)
+                                filter (where not workbench_not_fresh and child_not_fresh),
+                            array[]::text[]
+                        ) as child_refresh_scope_keys,
+                        coalesce(
+                            bool_or(
+                                workbench_dirty_status = 'failed'
+                                or child_dirty_status = 'failed'
+                                or bank_detail_dirty_status = 'failed'
+                            ),
+                            false
+                        ) as has_failed,
+                        coalesce(
+                            bool_or(
+                                workbench_dirty_status in ('pending', 'processing')
+                                or child_dirty_status in ('pending', 'processing')
+                                or bank_detail_dirty_status in ('pending', 'processing')
+                            ),
+                            false
+                        ) as has_active
+                    from child_proofs
+                )
+                select
+                    workbench_refresh_scope_keys,
+                    child_refresh_scope_keys,
+                    has_failed,
+                    has_active,
+                    (
+                        statistics_parent.source_versions is not null
+                        and statistics_parent.source_versions->>'cost_statistics_parent_source'
+                            = 'materialized_shards'
+                        and coalesce(
+                            statistics_parent.source_versions->'source_shards',
+                            '{}'::jsonb
+                        ) = expected_source_shards
+                        and case
+                                when coalesce(
+                                    statistics_parent.source_versions->>'source_shard_count',
+                                    ''
+                                ) ~ '^[0-9]+$'
+                                then (
+                                    statistics_parent.source_versions->>'source_shard_count'
+                                )::integer
+                                else -1
+                            end = expected_shard_count
+                        and present_shard_count = expected_shard_count
+                    ) as source_shards_match
+                from aggregated
+            ) parent_children on true
             where model.scope_key = %s
             limit 1
             """,
-            (normalized_scope_key,),
+            (
+                COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+                BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
+                normalized_scope_key,
+            ),
         )
         if row is None:
             return None
@@ -7088,6 +7288,43 @@ class PostgresSummaryReadModelRepository:
             if bank_detail_status != "fresh":
                 refresh_status = "stale" if refresh_status == "fresh" else refresh_status
                 stale_reasons.append("bank_detail_scope_not_fresh")
+        parent_workbench_refresh_scope_keys = list(
+            dict.fromkeys(
+                normalized
+                for value in list(row.get("workbench_refresh_scope_keys") or [])
+                for normalized in [str(value or "").strip()]
+                if normalized
+            )
+        )
+        parent_child_refresh_scope_keys = list(
+            dict.fromkeys(
+                normalized
+                for value in list(row.get("child_refresh_scope_keys") or [])
+                for normalized in [str(value or "").strip()]
+                if normalized
+            )
+        )
+        parent_child_has_failed = row.get("parent_child_has_failed") is True
+        parent_child_has_active = row.get("parent_child_has_active") is True
+        parent_source_shards_match = row.get("parent_source_shards_match") is True
+        parent_proof_non_fresh = bool(
+            parent_workbench_refresh_scope_keys
+            or parent_child_refresh_scope_keys
+            or not parent_source_shards_match
+        )
+        if scope_month == "all" and parent_proof_non_fresh:
+            if parent_child_has_failed:
+                refresh_status = "failed"
+            elif parent_child_has_active and refresh_status != "failed":
+                refresh_status = "refreshing"
+            elif refresh_status == "fresh":
+                refresh_status = "stale"
+            if parent_workbench_refresh_scope_keys:
+                stale_reasons.append("cost_statistics_parent_workbench_dependency_not_fresh")
+            if parent_child_refresh_scope_keys:
+                stale_reasons.append("cost_statistics_parent_child_scope_not_fresh")
+            if not parent_source_shards_match:
+                stale_reasons.append("cost_statistics_parent_source_shards_mismatch")
         statistics = _cost_statistics_page_statistics(row.get("statistics"))
         statistics_published_source_version = (
             int_value(row.get("statistics_published_source_version"), -1)
@@ -7114,6 +7351,13 @@ class PostgresSummaryReadModelRepository:
             or statistics_dirty_source_version != statistics_published_source_version
         ):
             statistics_status = "stale"
+        if parent_proof_non_fresh:
+            if parent_child_has_failed:
+                statistics_status = "failed"
+            elif parent_child_has_active:
+                statistics_status = "refreshing"
+            else:
+                statistics_status = "stale"
         if statistics_status != "fresh":
             statistics = None
         return {
@@ -7129,11 +7373,15 @@ class PostgresSummaryReadModelRepository:
             "dirty_source_version": dirty_source_version,
             "refresh_status": refresh_status,
             "stale_reasons": stale_reasons,
+            "workbench_refresh_scope_keys": parent_workbench_refresh_scope_keys,
+            "child_refresh_scope_keys": parent_child_refresh_scope_keys,
             "statistics": statistics,
             "statistics_status": statistics_status,
             "statistics_scope_key": text(row.get("statistics_scope_key"))
             or f"{normalized_scope_key.split(':', 1)[0]}:all",
             "statistics_published_source_version": statistics_published_source_version,
+            "statistics_workbench_refresh_scope_keys": parent_workbench_refresh_scope_keys,
+            "statistics_child_refresh_scope_keys": parent_child_refresh_scope_keys,
             "dirty_scope": (
                 {
                     "source_version": dirty_source_version,
@@ -9693,6 +9941,42 @@ class PostgresReadModelRepository:
             self._connection,
             scope_key=normalized_scope_key,
         )
+
+    def active_workbench_source_versions_by_scope(
+        self,
+        *,
+        scope_keys: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        normalized_scope_keys = list(
+            dict.fromkeys(
+                normalized
+                for scope_key in list(scope_keys or [])
+                for normalized in [str(scope_key or "").strip()]
+                if normalized
+            )
+        )
+        if not normalized_scope_keys:
+            return {}
+        rows = self._connection.fetch_all(
+            """
+            select distinct on (scope_key) scope_key, source_versions
+            from read_model.workbench_generations
+            where tenant_id = 'default'
+              and scope_key = any(%s::text[])
+              and status = 'active'
+            order by scope_key,
+                     activated_at desc nulls last,
+                     completed_at desc nulls last,
+                     updated_at desc
+            """,
+            (normalized_scope_keys,),
+        )
+        return {
+            scope_key: dict(row.get("source_versions") or {})
+            for row in rows
+            for scope_key in [str(row.get("scope_key") or "").strip()]
+            if scope_key and isinstance(row.get("source_versions"), dict)
+        }
 
     def publish_cost_statistics_read_models(self, *args: Any, **kwargs: Any) -> bool:
         return self._summary_read_model_repository.publish_cost_statistics_read_models(*args, **kwargs)

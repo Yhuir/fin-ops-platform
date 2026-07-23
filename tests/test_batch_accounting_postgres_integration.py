@@ -191,6 +191,18 @@ class BatchAccountingPostgresIntegrationTests(unittest.TestCase):
         self.assertTrue(after_month["oa_projection_updated_at"])
         self.assertEqual(after_all["oa_projection_updated_at"], after_month["oa_projection_updated_at"])
 
+    def test_bulk_workbench_page_source_versions_match_single_scope_proofs(self) -> None:
+        builder = WorkbenchSqlProjectionBuilder(connection=self.connection)
+        scope_keys = [f"2026-{month:02d}" for month in range(1, 13)]
+
+        source_versions_by_scope = builder.source_versions_for_scopes(scope_keys)
+        single_scope_versions = {
+            scope_key: builder.source_versions_for_scope(scope_key)
+            for scope_key in scope_keys
+        }
+
+        self.assertEqual(source_versions_by_scope, single_scope_versions)
+
     def test_unsubmitted_candidate_and_attachment_reads_use_hot_paths(self) -> None:
         self.connection.execute(
             """

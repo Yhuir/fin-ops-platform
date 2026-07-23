@@ -1382,6 +1382,9 @@ class Application:
             sql_read_repository=getattr(self, "_cost_statistics_sql_read_repository", None),
             tag_selection_mapper=AppSettingsService.cost_statistics_tag_selection_payload_from_settings,
             workbench_dependency_versions_provider=self._cost_statistics_workbench_dependency_versions,
+            workbench_dependency_versions_by_scope_provider=(
+                self._cost_statistics_workbench_dependency_versions_by_scope
+            ),
             workbench_refresh_enqueuer=self._enqueue_workbench_read_model_refresh,
         )
         self._cost_statistics_api_routes = CostStatisticsApiRoutes(
@@ -1410,6 +1413,34 @@ class Application:
         return (
             self._workbench_sql_read_model_source_versions(scope_key),
             dict(active_source_versions(scope_key=scope_key) or {}),
+        )
+
+    def _cost_statistics_workbench_dependency_versions_by_scope(
+        self,
+    ) -> tuple[dict[str, dict[str, object]], dict[str, dict[str, object]]]:
+        state_store = getattr(self, "_state_store", None)
+        connection = getattr(state_store, "_connection", None)
+        repository = getattr(self, "_cost_statistics_sql_read_repository", None)
+        active_source_versions_by_scope = getattr(
+            repository,
+            "active_workbench_source_versions_by_scope",
+            None,
+        )
+        if connection is None or not callable(getattr(connection, "fetch_all", None)):
+            raise RuntimeError("Cost statistics requires the Workbench canonical source-version boundary.")
+        if not callable(active_source_versions_by_scope):
+            raise RuntimeError("Cost statistics requires the Workbench bulk source-version read boundary.")
+        builder = WorkbenchSqlProjectionBuilder(connection=connection)
+        scope_keys = builder.list_workbench_scope_shards("all")
+        return (
+            builder.source_versions_for_scopes(scope_keys),
+            {
+                str(scope_key): dict(source_versions)
+                for scope_key, source_versions in dict(
+                    active_source_versions_by_scope(scope_keys=scope_keys) or {}
+                ).items()
+                if isinstance(source_versions, dict)
+            },
         )
 
     def _cost_statistics_current_dependency_key(self) -> tuple[int | None, ...]:

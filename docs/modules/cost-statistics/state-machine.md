@@ -20,7 +20,8 @@
 - 合法 read model scope 只允许 `active:YYYY-MM`、`all:YYYY-MM`、`active:all`、`all:all`。
 - 裸月份或裸 `all` 只能通过 `ReadModelRefreshGateway` 归一化后入队；未知 project scope 必须拒绝。
 - 月份 shard 只有在当前 event `source_version` 成功条件发布且用同一版本完成 dirty scope 后，才重新入队同 project scope 的父 scope，推动全期间视图收敛。任一 CAS 失败都保持 `refreshing`，不允许 fan-out。
-- 父 scope 等待缺失、stale 或 failed 月份 shard 时只能记录 `refreshing`，不能伪造 `fresh`。
+- 父 scope 每次被读取都必须证明全部 active Workbench 月份、Cost child 嵌入的 Workbench/Bank Detail versions、child dependency dirty state 与 parent `source_shards` 一致；只看 parent 自身 dirty/readiness 不足以返回 `fresh`。
+- 父 scope 等待缺失、stale 或 failed 月份 shard 时只能记录 `refreshing`，并只 enqueue 证明漂移的 exact month scopes，不能伪造 `fresh` 或先投一个宽泛 parent 掩盖 child drift。
 
 禁止流转：
 
@@ -57,7 +58,7 @@
 
 | 状态 | 判定 | 后续动作 |
 | --- | --- | --- |
-| `fresh` | 单次 dependency-bound PostgreSQL gate 证明 cost metadata/current dirty 一致；concrete month 还必须在同一 snapshot 证明 settings shape、Workbench active generation/current dirty、Bank Detail scope/schema/status/current dirty/source versions 均有效，并由 shared helper 精确匹配已发布业务 source versions。parent `all` 不读取虚构的 upstream `all` scope | 页面可展示；只有 gate 之后才可执行 ETag short-circuit、读取/写入 query-owned Redis 或 page SQL。projection 不写 Redis。 |
+| `fresh` | dependency-bound gate 证明 cost metadata/current dirty 一致；concrete month 还必须证明 settings、Workbench active generation/current dirty、Bank Detail schema/status/current dirty/source versions 均有效。parent `all` 先用 set-based canonical→active Workbench month proofs 收敛精确上游月份，再由单条 Cost gate 证明全部 concrete child 的嵌入 lineage、dependency dirty state 与 parent `source_shards` 一致；不读取虚构 upstream `all` scope | 页面可展示；只有 gate 之后才可执行 ETag short-circuit、读取/写入 query-owned Redis 或 page SQL。projection 不写 Redis。 |
 | `missing` | 没有对应 scope readiness 或 read model payload | 入队对应 scope refresh；页面/API 返回 refreshing 或 busy。 |
 | `refreshing` | dirty scope pending/processing，或父 scope 正等待 shard | worker 继续处理；父 scope 不能 complete 为 fresh。 |
 | `stale` / `source_mismatch` / `schema_mismatch` | source/schema/version 落后 | 入队重建；不得同步 rebuild 伪装 fresh。 |
@@ -98,6 +99,7 @@ Refresh 触发来源：
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-07-24 | 修复 `scope=all` parent false-fresh | 生产写后证明 parent 自身 `done` 不能代表 child lineage fresh。全期间访问先用一个 set-based Workbench canonical proof 找出 exact stale months，再由 Cost parent gate 比较 child Workbench/Bank Detail versions 与 `source_shards`；只 enqueue 漂移 child，child 完成后沿既有 month→parent 收敛。不新增 worker、queue、cache、表、HTTP 或写后 fan-out | `tests/test_cost_statistics_sql_runtime.py`、`tests/test_workbench_sql_runtime.py`、`tests/test_cost_statistics_postgres_integration.py`、`tests/test_batch_accounting_postgres_integration.py`、`tests/test_read_model_manifest.py` |
 | 2026-07-16 | 统一发布准备删除最后的 warmup 与旧 HTTP/full-view 链 | owner 证明与生产只读 active/attention=0 关闭删除门；root/project route、warmup job、full-view repository/query、projection Redis compat I/O 与相应 registry/mock/test 均删除。正式状态机只剩 durable refresh + narrow read I/O | `tests/test_cost_statistics_*`、`tests/test_platform_runtime_boundary_guards.py`、`tests/test_read_model_architecture_guards.py`、前端与 E2E 回归 |
 | 2026-07-16 | bulk export/preview 改为有界 SQL 与 write-only XLSX | UI 状态与 HTTP 错误码不变；preview 只读 summary+8 行，download 门槛后每批 <=1000 并在结束时复核发布版本。中途变化继续表现为 409 non-fresh，不返回混合版本文件 | `tests/test_cost_statistics_sql_runtime.py`、`tests/test_cost_statistics_api.py`、`tests/test_platform_runtime_boundary_guards.py` |
 | 2026-07-16 | 删除成本 read model 全量 load 与无条件 save 旧表面 | 启动/全状态 snapshot 不再扫描或携带成本表；broad save 不再写成本 snapshot；port/manifest 只保留 scoped reads 与 source-version conditional publish。其他页面 read model、API、worker、schema 和 UI 不变 | `tests/test_postgres_state_store.py::PostgresStateStoreTests::test_postgres_full_state_snapshot_omits_cost_statistics_read_model`、`tests/test_platform_runtime_boundary_guards.py::PlatformRuntimeBoundaryGuardTests::test_cost_statistics_does_not_retain_full_snapshot_load_or_unconditional_save_io`、`tests/test_cost_statistics_sql_runtime.py`、`tests/test_read_model_manifest.py` |

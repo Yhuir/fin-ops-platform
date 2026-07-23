@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+import json
 import unittest
 
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
+from fin_ops_platform.services.cost_statistics_source_versions import (
+    COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+)
 from fin_ops_platform.services.cost_statistics_sql_projection import CostStatisticsSqlProjectionBuilder
-from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
+from fin_ops_platform.services.postgres_repositories.read_models import (
+    BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
+    PostgresReadModelRepository,
+)
 from tests.postgres_test_utils import (
     apply_test_migrations,
     require_postgres_test_database_url,
@@ -55,6 +62,120 @@ class CostStatisticsPostgresIntegrationTests(unittest.TestCase):
                 facets = payload["primary_facets"]
                 self.assertEqual(len(facets), 1)
                 self.assertTrue(facets[0]["percentage_label"].endswith("%"))
+
+    def test_parent_freshness_gate_returns_exact_child_when_embedded_workbench_version_drifts(
+        self,
+    ) -> None:
+        child_source_versions = {
+            "cost_statistics_read_model_schema_version": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+            "workbench_scope_key": "2026-03",
+            "workbench_read_model_schema_version": "workbench-month-v6",
+            "bank_auto_tag_rules_version": 1,
+            "bank_account_mappings_fingerprint": "[]",
+            "oa_projection_sync_version": "test",
+            "workbench_source_versions": {"source_version": 7},
+            "bank_detail_source_versions": {"source_version": 1, "signature": "bank-v1"},
+        }
+        parent_source_versions = {
+            "cost_statistics_read_model_schema_version": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+            "workbench_scope_key": "all",
+            "workbench_read_model_schema_version": "workbench-month-v6",
+            "bank_auto_tag_rules_version": 1,
+            "bank_account_mappings_fingerprint": "[]",
+            "oa_projection_sync_version": "test",
+            "cost_statistics_parent_source": "materialized_shards",
+            "source_shard_count": 1,
+            "source_shards": {"active:2026-03": child_source_versions},
+        }
+        self.connection.execute(
+            """
+            insert into app.app_settings(settings_key, settings_payload)
+            values (
+                'app_settings',
+                '{
+                    "bank_transaction_tags": {},
+                    "bank_account_mappings": [],
+                    "cost_statistics_tag_selection": {}
+                }'::jsonb
+            )
+            """
+        )
+        self.connection.execute(
+            """
+            insert into read_model.workbench_generations(
+                generation_id, tenant_id, scope_key, status, source_versions,
+                completed_at, activated_at
+            )
+            values (
+                'cost-parent-workbench-2026-03', 'default', '2026-03', 'active',
+                '{"source_version": 8}'::jsonb, now(), now()
+            )
+            """
+        )
+        self.connection.execute(
+            """
+            insert into read_model.bank_detail_scopes(
+                tenant_id, scope_type, scope_key, scope_month, schema_version,
+                status, row_count, source_version, source_versions, generated_at
+            )
+            values (
+                'default', 'bank_detail', '2026-03', '2026-03-01', %s,
+                'fresh', 0, 1, '{"source_version": 1, "signature": "bank-v1"}'::jsonb, now()
+            )
+            """,
+            (BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,),
+        )
+        self.connection.execute(
+            """
+            insert into read_model.cost_statistics_read_models(
+                scope_key, project_scope, scope_month, generated_at, entry_count,
+                source_versions, payload, published_source_version
+            )
+            values
+                (
+                    'active:2026-03', 'active', '2026-03-01', now(), 0,
+                    %s::jsonb,
+                    jsonb_build_object('schema_version', %s::text, 'payload', '{}'::jsonb),
+                    7
+                ),
+                (
+                    'active:all', 'active', null, now(), 0,
+                    %s::jsonb,
+                    jsonb_build_object(
+                        'schema_version', %s::text,
+                        'payload', jsonb_build_object(
+                            'statistics',
+                            jsonb_build_object(
+                                'transaction_count', 0,
+                                'expense_transaction_count', 0,
+                                'income_transaction_count', 0,
+                                'cost_group_count', 0,
+                                'tagged_transaction_count', 0,
+                                'untagged_transaction_count', 0,
+                                'project_count', 0,
+                                'expense_type_count', 0,
+                                'bank_tag_count', 0,
+                                'cost_transaction_count', 0
+                            )
+                        )
+                    ),
+                    7
+                )
+            """,
+            (
+                json.dumps(child_source_versions),
+                COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+                json.dumps(parent_source_versions),
+                COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+            ),
+        )
+
+        gate = self.repository.get_cost_statistics_freshness_gate(scope_key="active:all")
+
+        self.assertEqual(gate["refresh_status"], "stale")
+        self.assertEqual(gate["workbench_refresh_scope_keys"], [])
+        self.assertEqual(gate["child_refresh_scope_keys"], ["active:2026-03"])
+        self.assertIn("cost_statistics_parent_child_scope_not_fresh", gate["stale_reasons"])
 
     def test_split_transaction_detail_aggregates_all_cost_allocations(self) -> None:
         self.connection.execute(

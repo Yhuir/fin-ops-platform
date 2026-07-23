@@ -1538,22 +1538,28 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
     def test_page_access_source_versions_include_canonical_workbench_write_tables(self) -> None:
         class SourceVersionConnection:
             def __init__(self) -> None:
-                self.fetch_one_calls: list[tuple[str, tuple[object, ...]]] = []
+                self.fetch_all_calls: list[tuple[str, tuple[object, ...]]] = []
 
-            def fetch_one(self, sql: str, params: tuple[object, ...] = ()) -> dict[str, object]:
+            def fetch_all(
+                self,
+                sql: str,
+                params: tuple[object, ...] = (),
+            ) -> list[dict[str, object]]:
                 normalized = " ".join(sql.lower().split())
-                self.fetch_one_calls.append((normalized, params))
-                if "from app.app_settings" in normalized:
-                    return {"settings_payload": {"bank_transaction_tags": {"version": 9}}}
-                return {
-                    "pair_relations_updated_at": "relations-v2",
-                    "exception_cases_updated_at": "exceptions-v3",
-                    "row_overrides_updated_at": "overrides-v4",
-                    "oa_pending_payment_bank_claims_updated_at": "claims-v5",
-                    "bank_transactions_updated_at": "bank-v6",
-                    "invoices_updated_at": "invoices-v7",
-                    "oa_projection_updated_at": "oa-v8",
-                }
+                self.fetch_all_calls.append((normalized, params))
+                return [
+                    {
+                        "scope_key": "2026-05",
+                        "pair_relations_updated_at": "relations-v2",
+                        "exception_cases_updated_at": "exceptions-v3",
+                        "row_overrides_updated_at": "overrides-v4",
+                        "oa_pending_payment_bank_claims_updated_at": "claims-v5",
+                        "bank_transactions_updated_at": "bank-v6",
+                        "invoices_updated_at": "invoices-v7",
+                        "oa_projection_updated_at": "oa-v8",
+                        "bank_auto_tag_rules_version": 9,
+                    }
+                ]
 
         connection = SourceVersionConnection()
         versions = WorkbenchSqlProjectionBuilder(connection=connection).source_versions_for_scope("2026-05")
@@ -1565,16 +1571,82 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(versions["bank_transactions_updated_at"], "bank-v6")
         self.assertEqual(versions["invoices_updated_at"], "invoices-v7")
         self.assertEqual(versions["oa_projection_updated_at"], "oa-v8")
-        source_sql, source_params = connection.fetch_one_calls[0]
-        self.assertIn("from app.workbench_pair_relations", source_sql)
-        self.assertIn("from app.workbench_exception_cases", source_sql)
-        self.assertIn("from app.workbench_row_overrides", source_sql)
+        source_sql, source_params = connection.fetch_all_calls[0]
+        self.assertIn("app.workbench_pair_relations", source_sql)
+        self.assertIn("app.workbench_exception_cases", source_sql)
+        self.assertIn("app.workbench_row_overrides", source_sql)
         self.assertIn("from app.bank_transaction_relation_claims", source_sql)
-        self.assertIn("from app.bank_transactions", source_sql)
-        self.assertIn("from app.invoices", source_sql)
-        self.assertIn("from app.oa_applications", source_sql)
+        self.assertIn("app.bank_transactions", source_sql)
+        self.assertIn("app.invoices", source_sql)
+        self.assertIn("app.oa_applications", source_sql)
         self.assertIn("active_relation_row_ids", source_sql)
-        self.assertEqual(source_params, ("2026-05-01",))
+        self.assertEqual(source_params, (["2026-05-01"],))
+
+    def test_bulk_page_access_source_versions_use_one_set_based_month_query(self) -> None:
+        class SourceVersionConnection:
+            def __init__(self) -> None:
+                self.fetch_all_calls: list[tuple[str, tuple[object, ...]]] = []
+                self.fetch_one_calls: list[tuple[str, tuple[object, ...]]] = []
+
+            def fetch_all(
+                self,
+                sql: str,
+                params: tuple[object, ...] = (),
+            ) -> list[dict[str, object]]:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_all_calls.append((normalized, params))
+                return [
+                    {
+                        "scope_key": "2026-05",
+                        "pair_relations_updated_at": "relations-v2",
+                        "exception_cases_updated_at": "exceptions-v3",
+                        "row_overrides_updated_at": "overrides-v4",
+                        "oa_pending_payment_bank_claims_updated_at": "claims-v5",
+                        "bank_transactions_updated_at": "bank-v6",
+                        "invoices_updated_at": "invoices-v7",
+                        "oa_projection_updated_at": "oa-v8",
+                        "bank_auto_tag_rules_version": 9,
+                    },
+                    {
+                        "scope_key": "2026-06",
+                        "pair_relations_updated_at": "relations-v9",
+                        "bank_auto_tag_rules_version": 9,
+                    },
+                ]
+
+            def fetch_one(
+                self,
+                sql: str,
+                params: tuple[object, ...] = (),
+            ) -> dict[str, object]:
+                normalized = " ".join(sql.lower().split())
+                self.fetch_one_calls.append((normalized, params))
+                return {"settings_payload": {"bank_transaction_tags": {"version": 9}}}
+
+        connection = SourceVersionConnection()
+        versions = WorkbenchSqlProjectionBuilder(connection=connection).source_versions_for_scopes(
+            ["2026-05", "2026-06", "2026-05"]
+        )
+
+        self.assertEqual(list(versions), ["2026-05", "2026-06"])
+        self.assertEqual(versions["2026-05"]["workbench_pair_relations_updated_at"], "relations-v2")
+        self.assertEqual(versions["2026-05"]["workbench_exception_cases_updated_at"], "exceptions-v3")
+        self.assertEqual(versions["2026-05"]["workbench_row_overrides_updated_at"], "overrides-v4")
+        self.assertEqual(versions["2026-05"]["bank_auto_tag_rules_version"], 9)
+        self.assertEqual(versions["2026-06"]["workbench_pair_relations_updated_at"], "relations-v9")
+        self.assertEqual(len(connection.fetch_all_calls), 1)
+        source_sql, source_params = connection.fetch_all_calls[0]
+        self.assertIn("with requested_scopes as", source_sql)
+        self.assertIn("app.workbench_pair_relations", source_sql)
+        self.assertIn("app.workbench_exception_cases", source_sql)
+        self.assertIn("app.workbench_row_overrides", source_sql)
+        self.assertIn("app.bank_transaction_relation_claims", source_sql)
+        self.assertIn("app.bank_transactions", source_sql)
+        self.assertIn("app.invoices", source_sql)
+        self.assertIn("app.oa_applications", source_sql)
+        self.assertIn("from app.app_settings", source_sql)
+        self.assertEqual(source_params, (["2026-05-01", "2026-06-01"],))
+        self.assertEqual(connection.fetch_one_calls, [])
 
     def test_all_scope_source_versions_include_canonical_workbench_objects(self) -> None:
         class SourceVersionConnection:

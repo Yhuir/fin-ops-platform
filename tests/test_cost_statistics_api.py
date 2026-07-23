@@ -538,6 +538,7 @@ class CostStatisticsApiTests(unittest.TestCase):
         )
         self.app._cost_statistics_sql_read_repository = self.cost_repository
         self.app._cost_statistics_workbench_dependency_versions = self._workbench_dependency_versions
+        self.app._cost_statistics_workbench_dependency_versions_by_scope = lambda: ({}, {})
 
     def _workbench_dependency_versions(
         self,
@@ -751,6 +752,7 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 202)
         self.assertEqual(payload["read_model_status"], "refreshing")
         self.assertEqual(payload["refresh_reason"], "api_page_miss")
+        self.assertEqual(payload["refresh_scope_keys"], ["active:2026-03"])
         self.assertEqual(payload["rows"], [])
         self.assertEqual(payload["facets"]["projects"], [])
         self.assertEqual(queue.refreshes, [("cost_statistics", "active:2026-03", "api_page_miss")])
@@ -770,6 +772,7 @@ class CostStatisticsApiTests(unittest.TestCase):
         self.assertEqual(payload["scope"], "all")
         self.assertEqual(payload["read_model_status"], "refreshing")
         self.assertEqual(payload["refresh_reason"], "api_page_miss")
+        self.assertEqual(payload["refresh_scope_keys"], ["active:all"])
         self.assertEqual(queue.refreshes, [("cost_statistics", "active:all", "api_page_miss")])
         create_job.assert_not_called()
         run_job.assert_not_called()
@@ -1451,6 +1454,7 @@ class CostStatisticsApiTests(unittest.TestCase):
             dict(_cost_statistics_gate_snapshot(app, f"active:{scope_key}")["workbench_source_versions"]),
             dict(_cost_statistics_gate_snapshot(app, f"active:{scope_key}")["workbench_source_versions"]),
         )
+        app._cost_statistics_workbench_dependency_versions_by_scope = lambda: ({}, {})
 
         _confirm_active_cost_relation(
             app,

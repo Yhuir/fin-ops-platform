@@ -52,6 +52,7 @@
 - `time|bank_tag` 的 summary/rows 使用全银行收入与支出口径；`project|bank|expense_type` 使用 OA 配对支出口径。summary/facets 由完整筛选集合在 SQL 中计算，cursor 只分页 rows，页面不得用当前页重算总额、笔数、百分比或完整 facets。
 - `summary.row_count` 表示当前事实集的结构化行/allocation 行数，`summary.transaction_count` 表示唯一银行流水数。`statistics.cost_transaction_count` 使用 parent 全期间集合与当前成本统计标签规则筛选后的唯一 OA 成本流水数；不因当前 explorer 时间范围或一笔流水拆成多条 OA allocation 而重复计数。
 - 每次请求先过 PostgreSQL durable freshness gate；non-fresh 返回 `202` 和空 rows/facets，不能读取旧 Redis/rows。fresh 响应使用 `ETag`、`Cache-Control: private, no-cache`、`Vary: Authorization, Cookie`；条件命中可返回 `304` 且跳过 page SQL。
+- non-fresh 响应可 additive 返回 `refresh_dependency=workbench` 与 `refresh_scope_keys[]`，表示本次访问实际 ensure 的精确 Workbench month 或 Cost child scopes；该字段只用于诊断/验证，不允许客户端据此自行 fan-out 或把 `refresh_enqueued=false` 解释为未收敛，因为 durable gateway 可能已合并同 scope active event。
 - `year:YYYY` 复用 `project_scope:all` parent gate 后过滤结构化月份 rows，不新增 year read-model scope。稳定排序为交易日期/时间降序，再按 transaction/row identity；read-model version 变化后旧 cursor 必须拒绝。
 - `GET /api/cost-statistics/transactions/{transaction_id}` 对已拆分流水在 `transaction.cost_allocations[]` additive 返回 `row_key/project_name/project_id/expense_type/expense_content/oa_applicant/amount`；`transaction.amount` 是 allocations 合计。未拆分流水也可返回单条 allocation；旧客户端忽略新字段时仍可读取原详情。
 

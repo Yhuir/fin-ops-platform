@@ -61,12 +61,18 @@ class CostStatisticsQueryService:
         workbench_dependency_versions_provider: Callable[
             [str], tuple[dict[str, Any], dict[str, Any]]
         ],
+        workbench_dependency_versions_by_scope_provider: Callable[
+            [], tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]
+        ],
         workbench_refresh_enqueuer: Callable[..., bool],
     ) -> None:
         self._runtime_service = runtime_service
         self._sql_read_repository = sql_read_repository
         self._tag_selection_mapper = tag_selection_mapper
         self._workbench_dependency_versions_provider = workbench_dependency_versions_provider
+        self._workbench_dependency_versions_by_scope_provider = (
+            workbench_dependency_versions_by_scope_provider
+        )
         self._workbench_refresh_enqueuer = workbench_refresh_enqueuer
         self._read_model_query_gateway = ReadModelQueryGateway(
             queue_repository=ReadModelRefreshQueueAdapter(
@@ -123,11 +129,40 @@ class CostStatisticsQueryService:
         statistics_status = str(gate.get("statistics_status") or "stale").strip().lower()
         statistics = gate.get("statistics") if statistics_status == "fresh" else None
         statistics_refresh_enqueued = False
-        if statistics_status not in {"fresh", "refreshing"}:
-            statistics_refresh_enqueued = self._runtime_service.enqueue_read_model_refresh(
-                str(gate.get("statistics_scope_key") or f"{normalized_project_scope}:all"),
-                reason=f"api_statistics_{statistics_status}",
+        if statistics_status != "fresh":
+            statistics_workbench_scope_keys = self._normalized_refresh_scope_keys(
+                gate.get("statistics_workbench_refresh_scope_keys")
             )
+            statistics_child_scope_keys = self._normalized_refresh_scope_keys(
+                gate.get("statistics_child_refresh_scope_keys")
+            )
+            if statistics_workbench_scope_keys:
+                statistics_refresh_results = [
+                    bool(
+                        self._workbench_refresh_enqueuer(
+                            workbench_scope_key,
+                            reason="cost_statistics_workbench_dependency_stale",
+                        )
+                    )
+                    for workbench_scope_key in statistics_workbench_scope_keys
+                ]
+                statistics_refresh_enqueued = any(statistics_refresh_results)
+            elif statistics_child_scope_keys:
+                statistics_refresh_results = [
+                    bool(
+                        self._runtime_service.enqueue_read_model_refresh(
+                            child_scope_key,
+                            reason=f"api_statistics_{statistics_status}",
+                        )
+                    )
+                    for child_scope_key in statistics_child_scope_keys
+                ]
+                statistics_refresh_enqueued = any(statistics_refresh_results)
+            else:
+                statistics_refresh_enqueued = self._runtime_service.enqueue_read_model_refresh(
+                    str(gate.get("statistics_scope_key") or f"{normalized_project_scope}:all"),
+                    reason=f"api_statistics_{statistics_status}",
+                )
         statistics_published_source_version = gate.get("statistics_published_source_version")
         query_binding = self._page_query_binding(
             scope=normalized_scope,
@@ -411,11 +446,40 @@ class CostStatisticsQueryService:
             if workbench_stale_reasons:
                 return None, None, self._workbench_dependency_non_fresh_payload(
                     scope_key=scope_key,
-                    workbench_scope_key=scope_month,
+                    workbench_scope_keys=(scope_month,),
                     empty_payload_factory=empty_payload_factory,
                     stale_reasons=tuple(
                         f"workbench_dependency_{reason}" for reason in workbench_stale_reasons
                     ),
+                )
+        elif scope_month == "all":
+            expected_by_scope, active_by_scope = (
+                self._workbench_dependency_versions_by_scope_provider()
+            )
+            workbench_stale_reasons: list[str] = []
+            workbench_stale_scope_keys: list[str] = []
+            for workbench_scope_key in sorted(expected_by_scope):
+                expected_workbench_versions = require_expected_source_versions(
+                    expected_by_scope.get(workbench_scope_key),
+                    context=f"cost_statistics_workbench_dependency:{workbench_scope_key}",
+                )
+                scope_stale_reasons = source_version_mismatch_reasons(
+                    expected=expected_workbench_versions,
+                    actual=active_by_scope.get(workbench_scope_key),
+                )
+                if not scope_stale_reasons:
+                    continue
+                workbench_stale_scope_keys.append(workbench_scope_key)
+                workbench_stale_reasons.extend(
+                    f"workbench_dependency_{workbench_scope_key}_{reason}"
+                    for reason in scope_stale_reasons
+                )
+            if workbench_stale_scope_keys:
+                return None, None, self._workbench_dependency_non_fresh_payload(
+                    scope_key=scope_key,
+                    workbench_scope_keys=tuple(workbench_stale_scope_keys),
+                    empty_payload_factory=empty_payload_factory,
+                    stale_reasons=tuple(workbench_stale_reasons),
                 )
 
         gate = get_freshness_gate(scope_key=scope_key)
@@ -433,12 +497,25 @@ class CostStatisticsQueryService:
             for reason in list(gate.get("stale_reasons") or [])
             if str(reason).strip()
         )
+        workbench_refresh_scope_keys = self._normalized_refresh_scope_keys(
+            gate.get("workbench_refresh_scope_keys")
+        )
+        if scope_month == "all" and workbench_refresh_scope_keys:
+            return gate, None, self._workbench_dependency_non_fresh_payload(
+                scope_key=scope_key,
+                workbench_scope_keys=workbench_refresh_scope_keys,
+                empty_payload_factory=empty_payload_factory,
+                stale_reasons=gate_reasons or ("workbench_dependency_not_fresh",),
+            )
         if gate_status != "fresh":
             return gate, None, self._cost_statistics_non_fresh_gate_payload(
                 scope_key=scope_key,
                 empty_payload_factory=empty_payload_factory,
                 refresh_reason=stale_reason,
                 stale_reasons=gate_reasons,
+                refresh_scope_keys=self._normalized_refresh_scope_keys(
+                    gate.get("child_refresh_scope_keys")
+                ),
             )
 
         expected_source_versions = cost_statistics_source_versions(
@@ -487,7 +564,7 @@ class CostStatisticsQueryService:
         self,
         *,
         scope_key: str,
-        workbench_scope_key: str,
+        workbench_scope_keys: tuple[str, ...],
         empty_payload_factory: Any,
         stale_reasons: tuple[str, ...],
     ) -> dict[str, Any]:
@@ -498,12 +575,17 @@ class CostStatisticsQueryService:
         payload["read_model_stale_reasons"] = list(stale_reasons)
         payload["refresh_reason"] = refresh_reason
         payload["refresh_dependency"] = "workbench"
-        payload["refresh_enqueued"] = bool(
-            self._workbench_refresh_enqueuer(
-                workbench_scope_key,
-                reason=refresh_reason,
+        payload["refresh_scope_keys"] = list(workbench_scope_keys)
+        refresh_results = [
+            bool(
+                self._workbench_refresh_enqueuer(
+                    workbench_scope_key,
+                    reason=refresh_reason,
+                )
             )
-        )
+            for workbench_scope_key in workbench_scope_keys
+        ]
+        payload["refresh_enqueued"] = any(refresh_results)
         return payload
 
     def _cost_statistics_non_fresh_gate_payload(
@@ -513,6 +595,7 @@ class CostStatisticsQueryService:
         empty_payload_factory: Any,
         refresh_reason: str,
         stale_reasons: tuple[str, ...],
+        refresh_scope_keys: tuple[str, ...] = (),
     ) -> dict[str, Any]:
         payload = dict(empty_payload_factory())
         payload["read_model_status"] = "refreshing"
@@ -520,11 +603,32 @@ class CostStatisticsQueryService:
         if stale_reasons:
             payload["read_model_stale_reasons"] = list(stale_reasons)
         payload["refresh_reason"] = refresh_reason
-        payload["refresh_enqueued"] = self._runtime_service.enqueue_read_model_refresh(
-            scope_key,
-            reason=refresh_reason,
-        )
+        target_scope_keys = refresh_scope_keys or (scope_key,)
+        payload["refresh_scope_keys"] = list(target_scope_keys)
+        refresh_results = [
+            bool(
+                self._runtime_service.enqueue_read_model_refresh(
+                    target_scope_key,
+                    reason=refresh_reason,
+                )
+            )
+            for target_scope_key in target_scope_keys
+        ]
+        payload["refresh_enqueued"] = any(refresh_results)
         return payload
+
+    @staticmethod
+    def _normalized_refresh_scope_keys(value: Any) -> tuple[str, ...]:
+        if not isinstance(value, (list, tuple)):
+            return ()
+        return tuple(
+            dict.fromkeys(
+                normalized
+                for item in value
+                for normalized in [str(item or "").strip()]
+                if normalized
+            )
+        )
 
     @staticmethod
     def _empty_non_fresh_payload(payload: dict[str, Any], empty_payload_factory: Any) -> dict[str, Any]:

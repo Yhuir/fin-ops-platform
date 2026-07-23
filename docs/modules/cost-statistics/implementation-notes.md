@@ -1,5 +1,11 @@
 # 成本统计 实施记录
 
+## 2026-07-24 - 全期间访问的 exact child freshness 证明
+
+- 生产 test-owned turnover confirm/withdraw 证明普通写事务确实实现零 downstream fan-out，但也暴露真实 false-fresh：`active:all` / `all:all` parent 自身为 `done/fresh` 时，`active:2026-03` / `all:2026-03` 仍嵌入旧 Workbench 与 Bank Detail versions；Cost explorer 因只检查 parent key 返回 `200/fresh`，System Audit 正确阻断。精确访问两个 2026-03 child 后约 1.17s 收敛，Audit 恢复 16/16，证明问题在 query proof，不在 canonical write 或 worker 发布。
+- 修复保持现有两阶段架构。`scope=all` 先由 `WorkbenchSqlProjectionBuilder.source_versions_for_scopes(...)` 用一个 set-based SQL 生成与单月完全等价的 canonical proofs，再与 active generations bulk 比较；只 enqueue 漂移 Workbench months。Workbench fresh 后，Cost 单条 PostgreSQL gate 聚合 concrete child metadata、Bank Detail 与 latest dirty proof，返回 exact `child_refresh_scope_keys`；query 不再先投 parent。concrete month 的主 rows 仍只服从当前月 proof，但同页全期间 statistics 复用该 child proof，漂移时只置 statistics stale 并 ensure exact child。month worker 成功后继续使用已有 month→parent enqueue，parent `source_shards` 完全一致才允许 fresh。
+- 边界与性能：没有新增表、migration、worker、queue、Redis、HTTP、协调器、writer target 或兼容 fallback；普通写仍为零页面 outbox。warm path 使用 bounded set-based SQL，不做月份 N+1；stale path 的 enqueue 数等于实际漂移月份。旧 parent-only fresh 假设被测试和文档删除，不能以 App Status/Audit 后置识别代替页面 gate。
+
 ## 2026-07-23 - Workbench→Cost 访问时两阶段收敛
 
 - 普通 relation/turnover/bank-flow 写入与 Workbench generation publish 均不再投递 Cost。`CostStatisticsQueryService` 先比较 canonical Workbench expected versions 与 active generation；上游 stale 时只 enqueue 当前 Workbench 月份并返回 `refresh_dependency=workbench`，不同时 enqueue Cost。Workbench fresh 后的下一次 GET 才允许 enqueue 当前 Cost scope。

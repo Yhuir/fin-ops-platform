@@ -105,9 +105,9 @@ OA 付款算法不读取待找发票规则，因此 OA 页面不因该规则保�
 
 成本统计的 `all` scope 是真实物化视图，不是只负责 fan-out 的队列父 scope：
 
-1. Cost 访问先比较 canonical Workbench expected versions 与对应 active month generation。上游 stale 时只 enqueue 该 Workbench 月份，不同时 enqueue Cost；上游 fresh 后的下一次 GET 才允许收敛当前 Cost scope。relation transaction 和 Workbench publish 都不 fan-out Cost。
+1. Cost concrete-month 访问比较该月 canonical Workbench expected versions 与 active generation；Cost all 访问用一次 set-based proof 比较全部 canonical month scopes 与 active generations。上游 stale 时只 enqueue 真正漂移的 Workbench 月份，不同时 enqueue Cost；上游 fresh 后的下一次 GET 才允许收敛当前 Cost scope。relation transaction 和 Workbench publish 都不 fan-out Cost。
 2. `active:YYYY-MM` / `all:YYYY-MM` 月份 shard 由 `CostStatisticsSqlProjectionBuilder` 基于对应工作台月份 read model 重建。
-3. `CostStatisticsReadModelRefreshService` 收到 `active:all` 或 `all:all` 时，先检查所需月份 shard readiness。缺失、stale 或 failed 的 shard 通过 `ReadModelRefreshGateway` 入队，父 scope 返回 `readiness_status=refreshing`，不写假 fresh。
+3. all 页面 gate 与 `CostStatisticsReadModelRefreshService` 都不能只信任 parent 自身 readiness。页面 gate 逐月比较 Cost child 的 Workbench/Bank Detail lineage、latest dependency dirty 与 parent `source_shards`；concrete month 页面也用该证明保护同页全期间 statistics，但 parent drift 不阻断当前月主 rows。缺失、stale 或 failed 的 shard 通过 `ReadModelRefreshGateway` 精确入队，父 scope 返回 `readiness_status=refreshing`，不写假 fresh。
 4. 所有所需月份 shard fresh 后，`active:all` / `all:all` 从结构化月份 rows 聚合生成，并原子发布 parent snapshot；父 scope 不重复物化业务 rows，也不读 Workbench `all` 历史 payload。
 5. 月份 shard 发布成功后重新入队同 project scope 的父 scope，使全期间视图最终收敛。
 6. 页面只在 Cost scope fresh 时解锁；refreshing 显示本页面 overlay 并有界重试，不轮询全局 App Status 或 operation barrier。
