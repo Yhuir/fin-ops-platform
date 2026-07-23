@@ -16511,6 +16511,10 @@ def _workbench_composed_all_source_versions(rows: list[dict[str, Any]]) -> dict[
         "workbench_pair_relations_updated_at",
         "workbench_exception_cases_updated_at",
         "workbench_row_overrides_updated_at",
+        "oa_pending_payment_bank_claims_updated_at",
+        "bank_transactions_updated_at",
+        "invoices_updated_at",
+        "oa_projection_updated_at",
     ):
         latest = max((text(versions.get(key)) or "" for versions in source_versions_rows), default="")
         if latest:

@@ -1830,4 +1830,5 @@
 
 - 生产 System Audit 发现 `2026-07` active generation 缺少一个已完成 OA 对象，但 normal GET/refresh-status 仍返回 `fresh`。真实原因是主 `WorkbenchSqlProjectionBuilder.source_versions_for_scope(...)` 只比较 relation/exception/override 和静态规则版本，没有比较页面实际消费的 OA、银行流水、发票 canonical rows，也没有包含 active pending claim。
 - 最小修复只扩展现有 source-version SQL：month scope 覆盖该月对象与 active relation 跨月成员，`all` 覆盖全量对象；generation rebuild 与 normal GET 继续复用同一 expected vector。canonical 变化本身不投递页面 target，只有访问相关 scope 才返回 refreshing、经现有 gateway 精确入队并由既有 worker 原子发布。
+- `month=all` 的 active-generation-set proof 必须从 active month generations 汇总同一组 canonical timestamps；只扩展 expected SQL 而不扩展 `_workbench_composed_all_source_versions(...)` 会让月分片已 fresh、all 仍永久 stale。汇总继续复用既有 helper，并按字段取 active shards 最新值。
 - 不新增表、索引、缓存、queue、worker、registry、API 字段或 fallback；旧 generation 因缺少新增 proof keys 在访问时自然失效，不保留兼容分支。

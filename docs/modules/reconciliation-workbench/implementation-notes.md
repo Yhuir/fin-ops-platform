@@ -1291,4 +1291,5 @@
 
 - 生产证据：`2026-07` active generation 创建于 OA projection 更新之前，Page Audit 报 `workbench_canonical_object_set_mismatch`，缺少一个已完成 OA 对象；normal Workbench GET 与 refresh-status 却返回 `fresh`。这证明旧 expected source vector 不完整，不是 worker 慢或队列堆积。
 - 边界修复：沿用现有 `WorkbenchSqlProjectionBuilder` source-version I/O，month scope 增加该月和 active relation members 的 OA/银行/发票更新时间及 pending claim 版本；`all` query增加对应全量 proof。写命令仍只提交 canonical fact/version，不恢复写后页面 fan-out。
+- all-scope composed proof 同步从 active month generations 汇总上述 canonical 字段；月分片发布后 all active-generation-set version仍按既有原子组合模型生成，不另建 `all` generation 或全局状态源。
 - 性能约束：proof 仍是一条 bounded PostgreSQL query，不读取 payload、不 live rebuild、不新增网络 I/O；页面 non-fresh 时只 enqueue 当前 scope。生产发布后必须重新验证 Workbench month/all p95、System Audit 与 test-owned confirm/withdraw/recovery。

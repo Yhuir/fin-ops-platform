@@ -16,6 +16,7 @@ from fin_ops_platform.services.postgres_repositories.read_models import (
     WORKBENCH_ALL_SCOPE_COMPOSED_SCHEMA_VERSION,
     PostgresReadModelRepository,
     _workbench_group_row_records,
+    _workbench_composed_all_source_versions,
     _workbench_literal_ilike_pattern,
     _workbench_payload_row_matches_preview_criteria,
     _workbench_row_payload_for_write,
@@ -1598,6 +1599,39 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertIn("from app.invoices", connection.source_sql)
         self.assertIn("from app.oa_applications", connection.source_sql)
         self.assertIn("where relation.status = 'active'", connection.source_sql)
+
+    def test_composed_all_source_versions_include_latest_canonical_month_proofs(self) -> None:
+        versions = _workbench_composed_all_source_versions(
+            [
+                {
+                    "source_versions": {
+                        "source_version": 4,
+                        "bank_transactions_updated_at": "2026-07-20 10:00:00+08",
+                        "invoices_updated_at": "2026-07-20 11:00:00+08",
+                        "oa_projection_updated_at": "2026-07-20 12:00:00+08",
+                        "oa_pending_payment_bank_claims_updated_at": "2026-07-20 13:00:00+08",
+                    }
+                },
+                {
+                    "source_versions": {
+                        "source_version": 5,
+                        "bank_transactions_updated_at": "2026-07-21 10:00:00+08",
+                        "invoices_updated_at": "2026-07-21 11:00:00+08",
+                        "oa_projection_updated_at": "2026-07-21 12:00:00+08",
+                        "oa_pending_payment_bank_claims_updated_at": "2026-07-21 13:00:00+08",
+                    }
+                },
+            ]
+        )
+
+        self.assertEqual(versions["source_version"], 5)
+        self.assertEqual(versions["bank_transactions_updated_at"], "2026-07-21 10:00:00+08")
+        self.assertEqual(versions["invoices_updated_at"], "2026-07-21 11:00:00+08")
+        self.assertEqual(versions["oa_projection_updated_at"], "2026-07-21 12:00:00+08")
+        self.assertEqual(
+            versions["oa_pending_payment_bank_claims_updated_at"],
+            "2026-07-21 13:00:00+08",
+        )
 
     def test_workbench_sql_all_source_versions_expect_composed_active_month_shards(self) -> None:
         app = object.__new__(Application)
