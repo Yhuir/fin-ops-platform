@@ -1493,6 +1493,41 @@ class RuntimeQueueRepositoryTests(unittest.TestCase):
         self.assertIn("status in ('pending', 'processing')", normalized_sql)
         self.assertEqual(params, ("tenant-a", "bank_detail", "2026-04"))
 
+    def test_read_model_refresh_event_is_active_requires_live_outbox_event(self) -> None:
+        class DirectFetchConnection:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, tuple[object, ...]]] = []
+
+            def fetch_one(self, sql: str, params: tuple[object, ...] = ()) -> dict[str, object] | None:
+                self.calls.append((sql, params))
+                return {"exists": 1}
+
+        connection = DirectFetchConnection()
+        repository = RuntimeQueueRepository(connection)
+
+        self.assertTrue(
+            repository.read_model_refresh_event_is_active(
+                tenant_id="tenant-a",
+                scope_type="cost_statistics",
+                scope_key="active:all",
+            )
+        )
+
+        sql, params = connection.calls[0]
+        normalized_sql = " ".join(sql.lower().split())
+        self.assertIn("from job.outbox_events", normalized_sql)
+        self.assertIn("event_type = %s", normalized_sql)
+        self.assertIn("status in ('pending', 'processing')", normalized_sql)
+        self.assertEqual(
+            params,
+            (
+                "tenant-a",
+                "cost_statistics.read_model.refresh",
+                "cost_statistics",
+                "active:all",
+            ),
+        )
+
     def test_read_model_refresh_is_fresh_checks_no_active_or_failed_dirty_scope(self) -> None:
         class DirectFetchConnection:
             def __init__(self, row: dict[str, object] | None) -> None:

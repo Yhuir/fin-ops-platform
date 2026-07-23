@@ -127,13 +127,19 @@ class WorkbenchRelationReadModelRepositoryPort:
         scope_key: str,
         row_ids: list[str] | None = None,
         include_row_ids: bool = False,
+        relation_modes: list[str] | None = None,
         tenant_id: str = "default",
     ) -> dict[str, object]:
+        kwargs: dict[str, object] = {
+            "scope_key": scope_key,
+            "row_ids": row_ids,
+            "include_row_ids": include_row_ids,
+            "tenant_id": tenant_id,
+        }
+        if relation_modes is not None:
+            kwargs["relation_modes"] = list(relation_modes)
         payload = self._repository.workbench_relation_source_summary_from_source(
-            scope_key=scope_key,
-            row_ids=row_ids,
-            include_row_ids=include_row_ids,
-            tenant_id=tenant_id,
+            **kwargs,
         )
         return dict(payload) if isinstance(payload, dict) else {}
 

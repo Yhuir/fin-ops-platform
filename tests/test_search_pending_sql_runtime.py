@@ -2454,7 +2454,10 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["id"], "txn-stale-version")
         self.assertEqual(payload["read_model_status"], "refreshing")
         self.assertIn("pending_invoice_tag_groups_version_mismatch", payload["read_model_stale_reasons"])
-        self.assertEqual(queue.refreshes, [("pending_invoice", "expense:all", "api_source_versions_stale")])
+        self.assertEqual(
+            queue.refreshes,
+            [("pending_invoice", "expense:all", "api_source_versions_stale")],
+        )
 
     def test_pending_invoice_api_bank_detail_source_version_stale_enqueues_refresh(self) -> None:
         queue = QueueRecorder()
@@ -2529,7 +2532,10 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["id"], "txn-bank-tag-stale")
         self.assertEqual(payload["read_model_status"], "refreshing")
         self.assertIn("bank_detail_source_versions_missing", payload["read_model_stale_reasons"])
-        self.assertEqual(queue.refreshes, [("pending_invoice", "expense:all", "api_source_versions_stale")])
+        self.assertEqual(
+            queue.refreshes,
+            [("pending_invoice", "expense:all:2026-04", "api_source_versions_stale")],
+        )
         self.assertEqual(pending_repo.version_queries[0]["direction"], "expense")
         self.assertEqual(pending_repo.version_queries[0]["filter"], "all")
 
@@ -2610,7 +2616,10 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["rows"][0]["id"], "txn-relation-stale")
         self.assertEqual(payload["read_model_status"], "refreshing")
         self.assertIn("workbench_relation_source_versions_missing", payload["read_model_stale_reasons"])
-        self.assertEqual(queue.refreshes, [("pending_invoice", "expense:all", "api_source_versions_stale")])
+        self.assertEqual(
+            queue.refreshes,
+            [("pending_invoice", "expense:all:2026-04", "api_source_versions_stale")],
+        )
         self.assertEqual(pending_repo.version_queries[0]["direction"], "expense")
         self.assertEqual(pending_repo.version_queries[0]["filter"], "all")
 
@@ -2687,7 +2696,10 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(response.status_code, int(HTTPStatus.OK))
         self.assertEqual(payload["read_model_status"], "refreshing")
         self.assertIn("workbench_relation_source_versions_mismatch", payload["read_model_stale_reasons"])
-        self.assertEqual(queue.refreshes, [("pending_invoice", "expense:all", "api_source_versions_stale")])
+        self.assertEqual(
+            queue.refreshes,
+            [("pending_invoice", "expense:all:2026-04", "api_source_versions_stale")],
+        )
 
     def test_pending_invoice_all_direction_miss_enqueues_expense_and_income_refresh_without_sync_scan(self) -> None:
         queue = QueueRecorder()
@@ -2890,6 +2902,114 @@ class SearchPendingSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["read_model_status"], "refreshing")
         self.assertEqual(payload["rows"], [])
         self.assertEqual(queue.refreshes, [("pending_invoice", "expense:all", "api_miss")])
+
+    def test_pending_invoice_dependency_mismatch_enqueues_only_changed_month_shard(self) -> None:
+        current_versions = {
+            **_pending_invoice_expected_source_versions(),
+            "workbench_relation_source_versions": {
+                "2026-02": {"relation_count": 2, "relation_updated_at": "new"},
+                "2026-03": {"relation_count": 1, "relation_updated_at": "same"},
+            },
+        }
+        persisted_versions = {
+            **current_versions,
+            "workbench_relation_source_versions": {
+                "2026-02": {"relation_count": 1, "relation_updated_at": "old"},
+                "2026-03": {"relation_count": 1, "relation_updated_at": "same"},
+            },
+        }
+        queue = QueueRecorder()
+        service = PendingInvoiceReadModelService(
+            repository=type(
+                "PendingRepo",
+                (),
+                {
+                    "list_pending_invoice_rows": lambda *_args, **_kwargs: {
+                        "direction": "expense",
+                        "filter": "all",
+                        "rows": [
+                            {
+                                "id": "txn-2026-02",
+                                "invoice_acquisition_status": {"code": "paid_pending_invoice"},
+                                "input_invoices": {"primary": None, "summaries": []},
+                                "oa": {"primary": None, "summaries": []},
+                            }
+                        ],
+                        "pagination": {"page": 1, "page_size": 50, "total": 1},
+                        "summary": {"total_rows": 1},
+                        "refresh_status": "fresh",
+                        "source_versions": persisted_versions,
+                    },
+                },
+            )(),
+            queue_repository=queue,
+            source_versions_provider=lambda: current_versions,
+        )
+
+        payload = service.rows({"direction": ["expense"], "filter": ["all"]}, include_statistics=False)
+
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(
+            queue.refreshes,
+            [("pending_invoice", "expense:all:2026-02", "api_source_versions_stale")],
+        )
+
+    def test_pending_invoice_statistics_dependency_mismatch_enqueues_only_changed_month_shard(self) -> None:
+        current_versions = {
+            **_pending_invoice_expected_source_versions(),
+            "workbench_relation_source_versions": {
+                "2026-02": {"relation_count": 2, "relation_updated_at": "new"},
+                "2026-03": {"relation_count": 1, "relation_updated_at": "same"},
+            },
+        }
+        stale_expense_versions = {
+            **current_versions,
+            "workbench_relation_source_versions": {
+                "2026-02": {"relation_count": 1, "relation_updated_at": "old"},
+                "2026-03": {"relation_count": 1, "relation_updated_at": "same"},
+            },
+        }
+        queue = QueueRecorder()
+        service = PendingInvoiceReadModelService(
+            repository=type(
+                "PendingRepo",
+                (),
+                {
+                    "list_pending_invoice_rows": lambda *_args, **_kwargs: {
+                        "direction": "expense",
+                        "filter": "all",
+                        "rows": [
+                            {
+                                "id": "txn-2026-02",
+                                "invoice_acquisition_status": {"code": "paid_pending_invoice"},
+                                "input_invoices": {"primary": None, "summaries": []},
+                                "oa": {"primary": None, "summaries": []},
+                            }
+                        ],
+                        "pagination": {"page": 1, "page_size": 50, "total": 1},
+                        "summary": {"total_rows": 1},
+                        "refresh_status": "fresh",
+                        **_pending_invoice_statistics_contract(
+                            expense_versions=stale_expense_versions,
+                            income_versions=current_versions,
+                        ),
+                        "source_versions": current_versions,
+                    },
+                },
+            )(),
+            queue_repository=queue,
+            source_versions_provider=lambda: current_versions,
+        )
+
+        payload = service.rows({"direction": ["expense"], "filter": ["all"]})
+
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual(payload["statistics_status"], "refreshing")
+        self.assertIsNone(payload["statistics"])
+        self.assertEqual(
+            queue.refreshes,
+            [("pending_invoice", "expense:all:2026-02", "api_statistics_source_versions_stale")],
+        )
 
     def test_pending_invoice_read_model_service_all_rows_rejects_export_row_limit_before_scanning_more_pages(self) -> None:
         class PendingRepo:

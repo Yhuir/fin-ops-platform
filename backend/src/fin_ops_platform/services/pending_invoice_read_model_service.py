@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from http import HTTPStatus
 from inspect import signature
+import json
 from typing import Any, Callable
 
 from fin_ops_platform.services.invoice_lifecycle_policy import INVOICE_LIFECYCLE_POLICY_SCHEMA_VERSION
@@ -22,6 +23,10 @@ from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefres
 RowNormalizer = Callable[[list[dict[str, Any]]], list[dict[str, Any]]]
 SettingsProvider = Callable[[], dict[str, Any]]
 SourceVersionsProvider = Callable[[], dict[str, Any]]
+DEPENDENCY_SOURCE_VERSION_KEYS = (
+    "bank_detail_source_versions",
+    "workbench_relation_source_versions",
+)
 
 
 def pending_invoice_source_versions(
@@ -127,12 +132,29 @@ class PendingInvoiceReadModelService:
         if refresh_status != "fresh":
             return self.payload_response(payload, read_model_status=refresh_status, scope_key=scope_key)
 
+        expected_source_versions = require_expected_source_versions(
+            self.expected_source_versions(query=query, payload=payload),
+            context=f"pending_invoice_rows:{scope_key}",
+        )
+        actual_source_versions = (
+            payload.get("source_versions")
+            if isinstance(payload.get("source_versions"), dict)
+            else {}
+        )
         stale_reasons = source_version_mismatch_reasons(
-            expected=self.expected_source_versions(query=query, payload=payload),
-            actual=payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {},
+            expected=expected_source_versions,
+            actual=actual_source_versions,
         )
         if stale_reasons:
-            self.enqueue_refreshes_for_scope(direction=direction, filter_name=filter_name, reason="api_source_versions_stale")
+            refresh_scope_keys = self._refresh_scope_keys_for_source_mismatch(
+                direction=direction,
+                filter_name=filter_name,
+                expected=expected_source_versions,
+                actual=actual_source_versions,
+                payload=payload,
+            )
+            for refresh_scope_key in refresh_scope_keys:
+                self.enqueue_refresh(refresh_scope_key, reason="api_source_versions_stale")
             if list(payload.get("rows") or []):
                 result = self.payload_response(payload, read_model_status="refreshing", scope_key=scope_key)
                 result["read_model_stale_reasons"] = list(stale_reasons)
@@ -171,14 +193,165 @@ class PendingInvoiceReadModelService:
                 context=f"pending_invoice_statistics:{direction}",
             )
             if source_version_mismatch_reasons(expected=expected_versions, actual=actual_versions):
-                stale_scope_keys.append(scope_key)
+                stale_scope_keys.extend(
+                    self._refresh_scope_keys_for_source_mismatch(
+                        direction=direction,
+                        filter_name="all",
+                        expected=expected_versions,
+                        actual=actual_versions,
+                        payload=payload,
+                    )
+                )
+        stale_scope_keys = list(dict.fromkeys(stale_scope_keys))
         if status == "fresh" and isinstance(payload.get("statistics"), dict) and not stale_scope_keys:
             return
         payload["statistics"] = None
         payload["statistics_status"] = "refreshing"
-        refresh_scope_keys = stale_scope_keys or ["expense:all", "income:all"]
+        refresh_scope_keys = stale_scope_keys
+        if not refresh_scope_keys and status not in {"fresh", "refreshing"}:
+            refresh_scope_keys = ["expense:all", "income:all"]
         for scope_key in refresh_scope_keys:
             self.enqueue_refresh(scope_key, reason="api_statistics_source_versions_stale")
+
+    def _refresh_scope_keys_for_source_mismatch(
+        self,
+        *,
+        direction: str,
+        filter_name: str,
+        expected: dict[str, Any],
+        actual: dict[str, Any],
+        payload: dict[str, Any],
+    ) -> list[str]:
+        base_expected = {
+            key: value
+            for key, value in expected.items()
+            if key not in DEPENDENCY_SOURCE_VERSION_KEYS
+        }
+        base_actual = {
+            key: value
+            for key, value in actual.items()
+            if key not in DEPENDENCY_SOURCE_VERSION_KEYS
+        }
+        aggregate_scope_keys = (
+            ["expense:all", "income:all"]
+            if direction == "all"
+            else [self.scope_key(direction=direction, filter_name=filter_name)]
+        )
+        if source_version_mismatch_reasons(
+            expected=require_expected_source_versions(
+                base_expected,
+                context=f"pending_invoice_base:{direction}:{filter_name}",
+            ),
+            actual=base_actual,
+        ):
+            return aggregate_scope_keys
+
+        mismatched_by_direction: dict[str, set[str]] = {}
+        dependency_mismatch = False
+        child_directions = ("expense", "income") if direction == "all" else (direction,)
+        for dependency_key in DEPENDENCY_SOURCE_VERSION_KEYS:
+            expected_dependency = self._dependency_source_version_payload(expected.get(dependency_key))
+            actual_dependency = self._dependency_source_version_payload(actual.get(dependency_key))
+            if not source_version_mismatch_reasons(
+                expected=require_expected_source_versions(
+                    {dependency_key: expected_dependency},
+                    context=f"pending_invoice_dependency:{direction}:{filter_name}:{dependency_key}",
+                ),
+                actual={dependency_key: actual_dependency},
+            ):
+                continue
+            dependency_mismatch = True
+            for child_direction in child_directions:
+                child_expected = (
+                    expected_dependency.get(child_direction)
+                    if direction == "all" and isinstance(expected_dependency.get(child_direction), dict)
+                    else expected_dependency
+                )
+                child_actual = (
+                    actual_dependency.get(child_direction)
+                    if direction == "all" and isinstance(actual_dependency.get(child_direction), dict)
+                    else actual_dependency
+                )
+                months = self._mismatched_dependency_months(child_expected, child_actual)
+                if months:
+                    mismatched_by_direction.setdefault(child_direction, set()).update(months)
+
+        if not dependency_mismatch:
+            return []
+        if not mismatched_by_direction and direction != "all":
+            row_months = self._payload_scope_months(payload)
+            if row_months:
+                mismatched_by_direction[direction] = set(row_months)
+        if not mismatched_by_direction:
+            return aggregate_scope_keys
+        return [
+            f"{child_direction}:{'all' if direction == 'all' else filter_name}:{month}"
+            for child_direction in child_directions
+            for month in sorted(mismatched_by_direction.get(child_direction, set()))
+        ]
+
+    @staticmethod
+    def _mismatched_dependency_months(expected: Any, actual: Any) -> set[str]:
+        expected_payload = expected if isinstance(expected, dict) else {}
+        actual_payload = actual if isinstance(actual, dict) else {}
+        month_keys = {
+            key
+            for key in {*expected_payload, *actual_payload}
+            if PendingInvoiceReadModelService._is_month_scope_key(key)
+        }
+        return {
+            month
+            for month in month_keys
+            if expected_payload.get(month) != actual_payload.get(month)
+        }
+
+    @staticmethod
+    def _dependency_source_version_payload(value: Any) -> dict[str, Any]:
+        if isinstance(value, dict):
+            return dict(value)
+        if isinstance(value, str) and value.strip().startswith("{"):
+            try:
+                payload = json.loads(value)
+            except json.JSONDecodeError:
+                return {}
+            return dict(payload) if isinstance(payload, dict) else {}
+        return {}
+
+    @staticmethod
+    def _payload_scope_months(payload: dict[str, Any]) -> list[str]:
+        months: list[str] = []
+        for row in list(payload.get("rows") or []):
+            if not isinstance(row, dict):
+                continue
+            bank_transaction = (
+                row.get("bank_transaction")
+                if isinstance(row.get("bank_transaction"), dict)
+                else {}
+            )
+            for value in (
+                row.get("scope_month"),
+                row.get("trade_date"),
+                row.get("trade_time"),
+                bank_transaction.get("scope_month"),
+                bank_transaction.get("trade_date"),
+                bank_transaction.get("trade_time"),
+            ):
+                normalized = str(value or "").strip()[:7]
+                if PendingInvoiceReadModelService._is_month_scope_key(normalized):
+                    months.append(normalized)
+                    break
+        return list(dict.fromkeys(months))
+
+    @staticmethod
+    def _is_month_scope_key(value: object) -> bool:
+        normalized = str(value or "").strip()
+        return (
+            len(normalized) == 7
+            and normalized[4] == "-"
+            and normalized[:4].isdigit()
+            and normalized[5:].isdigit()
+            and 1 <= int(normalized[5:]) <= 12
+        )
 
     def all_rows(self, query: dict[str, list[str]]) -> dict[str, Any]:
         page_size = 200

@@ -40,7 +40,7 @@
 
 | 输出 | 目标 | 合同 |
 | --- | --- | --- |
-| 待找发票 rows/summary/statistics | 前端页面 | fresh/status 可见；主 rows 响应附带全期间 `statistics` 与独立 `statistics_status`，按 `bank_transactions.summaries` 中唯一流水 ID 统计总流水、支出、收入、已找到/待找、无需开票、现金收入及 OA/进项/销项关联覆盖；统计忽略当前 direction/filter/date/keyword/sort/page。任一 pending-invoice child scope non-fresh 或完整方向 scope 缺失时 `statistics=null`，合法 fresh 空集才返回零；缺少/未知 read model status 保持 refreshing/non-fresh。 |
+| 待找发票 rows/summary/statistics | 前端页面 | fresh/status 可见；主 rows 响应附带全期间 `statistics` 与独立 `statistics_status`，按 `bank_transactions.summaries` 中唯一流水 ID 统计总流水、支出、收入、已找到/待找、无需开票、现金收入及 OA/进项/销项关联覆盖；统计忽略当前 direction/filter/date/keyword/sort/page。任一 pending-invoice child scope non-fresh 或完整方向 scope 缺失时 `statistics=null`，合法 fresh 空集才返回零；缺少/未知 read model status 保持 refreshing/non-fresh。若仅 Bank Detail/Workbench relation 的嵌套月份版本不同，rows 与 statistics gate 都只 enqueue 差异月份 shard；own schema 或规则版本变化才允许父 scope 展开全部月份。 |
 | 页面 Audit 状态 | 标题附件 | 仅 integrity pass、freshness fresh、queue drained 且页面 read model 明确 fresh 才显示成功 |
 | 规则保存结果 | API | 持久化 direction-owned 规则版本和审计；expense expected versions 不包含收入规则版本，income expected versions 不包含支出规则版本；不触发写时刷新 |
 | 发票关联/收入状态写结果 | API/frontend | 返回 `affected_months`、`affected_scope_keys`、`read_model_scope_keys` 作为访问提示；`freshness_targets=[]`、`operation_barrier_targets=[]`，前端不得把响应中的旧 targets 恢复为写时 barrier |

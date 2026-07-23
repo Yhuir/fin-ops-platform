@@ -117,7 +117,9 @@ class ReadModelRefreshGateway:
             return False
         if not _reason_is_active_coalescible(reason):
             return False
-        checker = getattr(self._queue_repository, "read_model_refresh_is_active", None)
+        checker = getattr(self._queue_repository, "read_model_refresh_event_is_active", None)
+        if not callable(checker):
+            checker = getattr(self._queue_repository, "read_model_refresh_is_active", None)
         if not callable(checker):
             return False
         return bool(checker(tenant_id=tenant_id, scope_type=scope_type, scope_key=scope_key))

@@ -6439,13 +6439,20 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
         scope_key: str,
         row_ids: list[str] | None = None,
         include_row_ids: bool = False,
+        relation_modes: list[str] | None = None,
         tenant_id: str = "default",
     ) -> dict[str, Any]:
         _ = tenant_id
         normalized_scope_key = text(scope_key) or ""
         normalized_row_ids = text_list(row_ids)
+        normalized_relation_modes = text_list(relation_modes)
         where = ["status = 'active'"]
         params: list[Any] = []
+        if relation_modes is not None:
+            if not normalized_relation_modes:
+                raise ValueError("relation_modes must contain at least one mode when supplied.")
+            where.append("relation_mode = any(%s)")
+            params.append(normalized_relation_modes)
         month = month_start(normalized_scope_key)
         if month and include_row_ids and normalized_row_ids:
             where.append("(month_scope = %s::date or row_ids && %s::text[])")
@@ -6456,7 +6463,7 @@ class PostgresSearchWorkbenchRelationReadModelRepository:
         elif normalized_row_ids:
             where.append("row_ids && %s::text[]")
             params.append(normalized_row_ids)
-        else:
+        elif relation_modes is None:
             return {
                 "source": "workbench_pair_relations",
                 "scope_key": normalized_scope_key,

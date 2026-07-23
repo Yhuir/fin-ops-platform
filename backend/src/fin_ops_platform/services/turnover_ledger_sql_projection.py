@@ -13,7 +13,10 @@ from fin_ops_platform.services.imports import ImportNormalizationService
 from fin_ops_platform.services.postgres_state_store import PostgresStateStore
 from fin_ops_platform.services.turnover_ledger_extra_service import TurnoverLedgerExtraService
 from fin_ops_platform.services.turnover_ledger_service import TurnoverLedgerService
-from fin_ops_platform.services.turnover_ledger_source_versions import build_turnover_ledger_source_versions
+from fin_ops_platform.services.turnover_ledger_source_versions import (
+    build_turnover_ledger_source_versions,
+    turnover_manual_closure_source_version,
+)
 from fin_ops_platform.services.turnover_relation_service import TurnoverRelationService
 from fin_ops_platform.services.runtime_paths import default_data_dir
 
@@ -456,6 +459,9 @@ class TurnoverLedgerSqlProjectionBuilder:
                     extra_snapshot_provider=extra_service.snapshot,
                     app_settings_service=app_settings_service,
                     bank_transaction_category_service=category_service,
+                    turnover_manual_closure_source_version_provider=lambda: (
+                        turnover_manual_closure_source_version(state_store.read_model_repository)
+                    ),
                 ),
                 category_provider,
             ),

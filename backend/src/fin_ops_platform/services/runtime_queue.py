@@ -1981,6 +1981,28 @@ class RuntimeQueueRepository:
         )
         return row is not None
 
+    def read_model_refresh_event_is_active(
+        self,
+        *,
+        tenant_id: str,
+        scope_type: str,
+        scope_key: str,
+    ) -> bool:
+        row = self._connection.fetch_one(
+            """
+            select 1
+            from job.outbox_events
+            where tenant_id = %s
+              and event_type = %s
+              and scope_type = %s
+              and scope_key = %s
+              and status in ('pending', 'processing')
+            limit 1
+            """,
+            (tenant_id, f"{scope_type}.read_model.refresh", scope_type, scope_key),
+        )
+        return row is not None
+
     def read_model_refresh_is_fresh(
         self,
         *,

@@ -382,7 +382,10 @@ from fin_ops_platform.services.turnover_ledger_export_service import (
     XLSX_MIME_TYPE,
 )
 from fin_ops_platform.services.turnover_bank_row_version import turnover_bank_row_version
-from fin_ops_platform.services.turnover_ledger_source_versions import build_turnover_ledger_source_versions
+from fin_ops_platform.services.turnover_ledger_source_versions import (
+    build_turnover_ledger_source_versions,
+    turnover_manual_closure_source_version,
+)
 from fin_ops_platform.services.turnover_ledger_write_adapters import (
     TurnoverLedgerBankRowTagsRequestBoundaryFacade,
     TurnoverLedgerBankRowTagsPrimaryWriteFacadeBuilder,
@@ -9634,12 +9637,24 @@ class Application:
         )
 
     def _turnover_ledger_source_versions(self) -> dict[str, object]:
+        relation_repository = getattr(self, "_workbench_relation_sql_read_repository", None)
+        relation_source_loader = getattr(
+            relation_repository,
+            "workbench_relation_source_summary_from_source",
+            None,
+        )
+        closure_source_version_provider = (
+            lambda: turnover_manual_closure_source_version(relation_repository)
+            if relation_repository is not None
+            else {}
+        ) if callable(relation_source_loader) else None
         return build_turnover_ledger_source_versions(
             relation_service=self._turnover_relation_service,
             extra_snapshot_provider=self._turnover_ledger_api_routes.extras_snapshot,
             app_settings_service=self._app_settings_service,
             bank_transaction_category_service=self._bank_transaction_category_service,
             bank_auto_tag_rules_version_provider=self._current_bank_auto_tag_rules_version,
+            turnover_manual_closure_source_version_provider=closure_source_version_provider,
             oa_projection_sync_version=self._current_oa_projection_sync_version(),
         )
 

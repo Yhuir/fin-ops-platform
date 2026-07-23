@@ -684,6 +684,7 @@ git diff --check
 - 根因：`turnover_relation_snapshot_version` 旧实现散列整个 relation snapshot，包含不参与当前 grouped projection 的 `withdrawn` 关系和 audit history。确认再撤回后当前业务输入已经恢复，但历史记录必然增长，API 与 worker 的 source-version gate 因而无法回到操作前值，并在每次读取时重复 enqueue。
 - 修复：source version 只散列会改变当前台账的 canonical `confirmed` relations，并按 `relation_id` 稳定排序；audit history 和 withdrawn history 继续完整持久化、参与审计，但不再污染当前 projection freshness。确认改变版本，撤回完成后版本回到操作前值。
 - 版本：`TURNOVER_LEDGER_SCHEMA_VERSION` 升至 `2026-07-turnover-ledger-v7`，强制旧 read model 通过正式 gateway/worker 重建；不新增 cache、表、queue、worker、API 或 fallback。
+- 版本：`TURNOVER_LEDGER_SCHEMA_VERSION` 升至 `2026-07-turnover-ledger-v8`；基础 source vector 新增 canonical active `turnover_manual_closure` count/max-updated proof，修复统一关系事实变化未被页面 freshness gate 识别的问题。旧投影只通过正式 gateway/worker 重建。
 - 测试：新增 source-version 回归覆盖 confirmed 变化、relation 顺序稳定、withdrawn/audit-only 不变；相关 source/query/projection/UoW/API 237 项通过。真实 PostgreSQL repository integration 在前一发布收口已 4/4 通过；本次复跑尝试因当前本地 runtime PostgreSQL 用户无 `CREATE DATABASE` 且对既有 `fin_ops_test.schema_migrations` 无权限而未执行，本修复不改变 repository/SQL。
 - 生产验收：必须发布 v7 后重新执行两轮安全可逆 confirm→fresh→withdraw→fresh；command p95 `<=1000ms`、response-to-fresh p95 `<=2000ms`、任一 hard max `<=3000ms`，最终无 active relation 残留、两条 fixture 均未关联、直接与交叉 Audit 通过，才可关闭本页。
 

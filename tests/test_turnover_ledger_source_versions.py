@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import unittest
 
-from fin_ops_platform.services.turnover_ledger_source_versions import build_turnover_ledger_source_versions
+from fin_ops_platform.services.turnover_ledger_source_versions import (
+    build_turnover_ledger_source_versions,
+    turnover_manual_closure_source_version,
+)
 
 
 class FakeRelationService:
@@ -42,6 +45,7 @@ class TurnoverLedgerSourceVersionsTests(unittest.TestCase):
         tag_selection: dict[str, object] | None = None,
         bank_category_snapshot: dict[str, object] | None = None,
         bank_rules_version: int = 1,
+        closure_source_version: dict[str, object] | None = None,
         oa_projection_sync_version: str | None = "oa-v1",
     ) -> dict[str, object]:
         return build_turnover_ledger_source_versions(
@@ -54,6 +58,11 @@ class TurnoverLedgerSourceVersionsTests(unittest.TestCase):
             bank_transaction_category_service=FakeBankTransactionCategoryService(
                 bank_category_snapshot or {"categories": []}
             ),
+            turnover_manual_closure_source_version_provider=(
+                (lambda: dict(closure_source_version))
+                if closure_source_version is not None
+                else None
+            ),
             oa_projection_sync_version=oa_projection_sync_version,
         )
 
@@ -61,7 +70,7 @@ class TurnoverLedgerSourceVersionsTests(unittest.TestCase):
         versions = self._versions()
 
         self.assertIn("turnover_ledger_schema_version", versions)
-        self.assertEqual(versions["turnover_ledger_schema_version"], "2026-07-turnover-ledger-v7")
+        self.assertEqual(versions["turnover_ledger_schema_version"], "2026-07-turnover-ledger-v8")
         self.assertIn("turnover_relation_schema_version", versions)
         self.assertIn("bank_transaction_category_schema_version", versions)
         self.assertIn("bank_auto_tag_rules_version", versions)
@@ -101,6 +110,53 @@ class TurnoverLedgerSourceVersionsTests(unittest.TestCase):
         )
         self.assertNotEqual(baseline["bank_auto_tag_rules_version"], rules_changed["bank_auto_tag_rules_version"])
         self.assertNotEqual(baseline["oa_projection_sync_version"], oa_changed["oa_projection_sync_version"])
+
+    def test_source_versions_track_canonical_turnover_manual_closure_relations(self) -> None:
+        baseline = self._versions(
+            closure_source_version={
+                "source": "workbench_pair_relations",
+                "scope_key": "all",
+                "relation_count": 0,
+                "relation_updated_at": "",
+            }
+        )
+        changed = self._versions(
+            closure_source_version={
+                "source": "workbench_pair_relations",
+                "scope_key": "all",
+                "relation_count": 1,
+                "relation_updated_at": "2026-07-23 20:00:00+08",
+            }
+        )
+
+        self.assertNotEqual(
+            baseline["turnover_manual_closure_source_version"],
+            changed["turnover_manual_closure_source_version"],
+        )
+
+    def test_canonical_closure_source_version_uses_relation_mode_filter(self) -> None:
+        class Repository:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            def workbench_relation_source_summary_from_source(self, **kwargs: object) -> dict[str, object]:
+                self.calls.append(dict(kwargs))
+                return {
+                    "source": "workbench_pair_relations",
+                    "scope_key": "all",
+                    "relation_count": 2,
+                    "relation_updated_at": "2026-07-23 20:00:00+08",
+                }
+
+        repository = Repository()
+
+        payload = turnover_manual_closure_source_version(repository)
+
+        self.assertEqual(payload["relation_count"], 2)
+        self.assertEqual(
+            repository.calls,
+            [{"scope_key": "all", "relation_modes": ["turnover_manual_closure"]}],
+        )
 
     def test_relation_projection_version_tracks_active_confirmed_relations_only(self) -> None:
         baseline = self._versions(relation_snapshot={"relations": [], "audit_log": []})

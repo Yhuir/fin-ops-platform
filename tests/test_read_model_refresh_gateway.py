@@ -17,6 +17,24 @@ class QueueRecorder:
         return key in self.active_refreshes
 
 
+class EventAwareQueueRecorder(QueueRecorder):
+    def __init__(self) -> None:
+        super().__init__()
+        self.active_events: set[tuple[str, str, str]] = set()
+        self.active_event_checks: list[tuple[str, str, str]] = []
+
+    def read_model_refresh_event_is_active(
+        self,
+        *,
+        tenant_id: str,
+        scope_type: str,
+        scope_key: str,
+    ) -> bool:
+        key = (tenant_id, scope_type, scope_key)
+        self.active_event_checks.append(key)
+        return key in self.active_events
+
+
 class ReadModelRefreshGatewayTests(unittest.TestCase):
     def test_cost_statistics_policy_normalizes_validates_and_dedupes_legacy_scopes(self) -> None:
         from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
@@ -354,6 +372,49 @@ class ReadModelRefreshGatewayTests(unittest.TestCase):
                 self.assertEqual(enqueued, ["active:all"])
                 self.assertEqual(queue.active_checks, [("default", "cost_statistics", "active:all")])
                 self.assertEqual(queue.refreshes, [])
+
+    def test_orphan_dirty_scope_without_active_event_is_reenqueued(self) -> None:
+        from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
+
+        queue = EventAwareQueueRecorder()
+        queue.active_refreshes.add(("default", "cost_statistics", "active:all"))
+        gateway = ReadModelRefreshGateway(queue_repository=queue)
+
+        enqueued = gateway.enqueue_many(
+            "cost_statistics",
+            ["active:all"],
+            reason="cost_statistics_shard_converged",
+        )
+
+        self.assertEqual(enqueued, ["active:all"])
+        self.assertEqual(queue.active_event_checks, [("default", "cost_statistics", "active:all")])
+        self.assertEqual(queue.active_checks, [])
+        self.assertEqual(
+            queue.refreshes,
+            [
+                {
+                    "scope_type": "cost_statistics",
+                    "scope_key": "active:all",
+                    "reason": "cost_statistics_shard_converged",
+                }
+            ],
+        )
+
+    def test_active_refresh_event_is_still_coalesced(self) -> None:
+        from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
+
+        queue = EventAwareQueueRecorder()
+        queue.active_events.add(("default", "cost_statistics", "active:all"))
+        gateway = ReadModelRefreshGateway(queue_repository=queue)
+
+        gateway.enqueue_many(
+            "cost_statistics",
+            ["active:all"],
+            reason="cost_statistics_shard_converged",
+        )
+
+        self.assertEqual(queue.active_event_checks, [("default", "cost_statistics", "active:all")])
+        self.assertEqual(queue.refreshes, [])
 
     def test_mutating_refresh_reason_still_bumps_active_scope(self) -> None:
         from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway

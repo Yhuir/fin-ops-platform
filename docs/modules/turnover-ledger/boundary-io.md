@@ -54,6 +54,7 @@
 - Projection：`partitioned_scoped_incremental`
 - 生产投影必须信任 `BankTransactionTagReadFacade` 输出的 fresh bank-detail tag 事实；只有无 provider 的 legacy/local 路径才允许回退 `BankTransactionCategoryService` snapshot。禁止在 provider-backed worker hot path 逐笔读取旧 category service。
 - 关系 enrichment 必须通过 `WorkbenchRelationReadModelRepositoryPort.workbench_relation_source_bundle_from_source(...)` 读取 `app.workbench_pair_relations`；rows 与 source summary 必须来自同一个 SQL 快照。这是只读 shared-fact I/O，不读取或等待 `read_model.workbench_relation_*`。canonical source 不可用时不得伪造 linked relation context。
+- 页面与 worker 的基础 source vector 必须额外包含 canonical `app.workbench_pair_relations` 中 active `turnover_manual_closure` 的 count/max-updated proof；confirm/withdraw 即使不改变 Turnover 自有 relation snapshot，也必须使下一次页面访问判 stale。该查询归 workbench-relations repository 所有，Turnover service 不直接写 SQL。
 - grouped 当前台账不得消费 `withdrawn` relation；撤回历史只留在 relation snapshot/audit log。系统自动关系恢复后，同一 bank leaf 在 grouped financial totals 和 flow rows 中只能计算一次。
 - `turnover_relation_snapshot_version` 只散列通用 suggested-relation 链会改变当前台账的 canonical `confirmed` Turnover relations，并按 `relation_id` 稳定排序；`withdrawn` relation 与 audit history 不属于当前 projection 输入。现代 closure confirm/withdraw 只改变 Workbench canonical context，不得改变该版本；通用 relation 确认改变版本、撤回后回到操作前值。
 - Month projection 首次读取的现有 read-model page 必须在 unchanged 检查和 relation-only refresh 之间复用，禁止对 page 1 重复 SQL；同一 worker 内的基础 grouped rows memoization 只能保留最近一个完整 source-version 快照，调用方得到副本，任何 source-version 变化都必须重新读取 canonical facts 并重算。

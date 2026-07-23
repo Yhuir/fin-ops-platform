@@ -9,6 +9,9 @@ from fin_ops_platform.services.turnover_relation_service import TURNOVER_RELATIO
 from fin_ops_platform.services.workbench_read_model_service import WorkbenchReadModelService
 
 
+TURNOVER_MANUAL_CLOSURE_RELATION_MODE = "turnover_manual_closure"
+
+
 def build_turnover_ledger_source_versions(
     *,
     relation_service: Any,
@@ -16,6 +19,7 @@ def build_turnover_ledger_source_versions(
     app_settings_service: Any,
     bank_transaction_category_service: Any,
     bank_auto_tag_rules_version_provider: Callable[[], Any] | None = None,
+    turnover_manual_closure_source_version_provider: Callable[[], dict[str, Any]] | None = None,
     oa_projection_sync_version: str | None = OA_PROJECTION_SYNC_VERSION,
 ) -> dict[str, object]:
     payload: dict[str, object] = {
@@ -40,9 +44,27 @@ def build_turnover_ledger_source_versions(
             bank_transaction_category_service.snapshot()
         ),
     }
+    if turnover_manual_closure_source_version_provider is not None:
+        source_version = turnover_manual_closure_source_version_provider()
+        if not isinstance(source_version, dict):
+            raise ValueError("Turnover manual closure source version provider must return a mapping.")
+        payload["turnover_manual_closure_source_version"] = dict(source_version)
     if oa_projection_sync_version:
         payload["oa_projection_sync_version"] = oa_projection_sync_version
     return payload
+
+
+def turnover_manual_closure_source_version(repository: Any) -> dict[str, Any]:
+    loader = getattr(repository, "workbench_relation_source_summary_from_source", None)
+    if not callable(loader):
+        raise RuntimeError("Turnover manual closure source version requires canonical relation repository I/O.")
+    payload = loader(
+        scope_key="all",
+        relation_modes=[TURNOVER_MANUAL_CLOSURE_RELATION_MODE],
+    )
+    if not isinstance(payload, dict):
+        raise RuntimeError("Turnover manual closure source version is unavailable.")
+    return dict(payload)
 
 
 def _turnover_relation_projection_snapshot(relation_service: Any) -> dict[str, list[dict[str, Any]]]:
