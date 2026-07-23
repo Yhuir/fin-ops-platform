@@ -753,6 +753,11 @@ scripts/with-production-admin-token.sh bash -lc '
 
 runner 结束后删除远端临时 scenario；禁止把 token 放入命令参数、scenario 或输出文件。
 
+普通写 API 响应中的 `outbox_event_ids` 是 transaction receipt。显式空列表表示该写入按零 fan-out 合同没有创建页面
+refresh event；runner 必须保留该空 receipt，并用 operation profile 的 forbidden-event 时间窗验证，不得把空列表当成
+字段缺失后强制依赖默认关闭的 durable Workbench idempotency。响应完全缺少 receipt 时才查询 durable record；每个
+checkpoint 的 receipt 独立，confirm/withdraw/recovery 之间不得复用。
+
 ## Phase 1.5 读 API 验证
 
 生产和 staging 的工作台列表页使用分层契约，不再把完整 group payload 当作首屏数据：

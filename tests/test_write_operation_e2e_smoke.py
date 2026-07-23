@@ -978,6 +978,32 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             ["event-1", "event-2"],
         )
 
+    def test_write_step_preserves_explicit_zero_fanout_receipt(self) -> None:
+        step = write_operation_e2e_smoke.WriteStep(
+            name="confirm",
+            method="POST",
+            path="/api/turnover-ledger/closures/confirm",
+            json_body={"idempotency_key": "zero-fanout-receipt"},
+            expected_statuses=(200,),
+        )
+
+        executed = write_operation_e2e_smoke._execute_step(
+            step,
+            base_url="https://example.test",
+            api_prefix="/fin-ops-api",
+            headers={"Authorization": "Bearer token"},
+            target_ms=1000,
+            timeout_seconds=1,
+            request_fn=lambda *args: http_slo_probe.HttpProbeResponse(
+                status_code=200,
+                headers={"content-type": "application/json"},
+                body=b'{"success":true,"outbox_event_ids":[]}',
+            ),
+        )
+
+        self.assertIn(write_operation_e2e_smoke._RESPONSE_OUTBOX_EVENT_IDS, executed.captures)
+        self.assertEqual(executed.captures[write_operation_e2e_smoke._RESPONSE_OUTBOX_EVENT_IDS], [])
+
     def test_slow_write_step_fails_before_claiming_write_slo(self) -> None:
         scenario = write_operation_e2e_smoke.WriteScenario(
             name="workbench-withdraw",
@@ -1848,6 +1874,72 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             result["checkpoints"][0]["system_audit"]["system_audit_id"],
             result["checkpoints"][1]["system_audit"]["system_audit_id"],
         )
+
+    def test_zero_fanout_receipt_skips_durable_lookup_and_does_not_leak_to_next_checkpoint(self) -> None:
+        checkpoints = (
+            _strict_checkpoint("confirm-link", key="confirm-key", relation_state_after="active"),
+            _strict_checkpoint("withdraw-link", key="withdraw-key", relation_state_after="inactive"),
+        )
+        scenario = write_operation_e2e_smoke.WriteScenario(
+            name="closure",
+            operations=(),
+            steps=(),
+            post_api_probes=(),
+            checkpoints=checkpoints,
+            recovery_checkpoint=_strict_checkpoint("recover", key="recovery-key", relation_state_after="inactive"),
+            fixture_ownership="test_owned",
+        )
+        audit_count = 0
+        mutation_count = 0
+
+        def request_fn(
+            url: str, method: str, headers, body, timeout_seconds: float
+        ) -> http_slo_probe.HttpProbeResponse:
+            nonlocal audit_count, mutation_count
+            if "page-audit" in url:
+                audit_count += 1
+                response = _system_audit_payload(f"system-audit:zero-fanout:{audit_count}")
+            elif url.endswith("/api/consumer"):
+                response = {"read_model_status": "fresh", "refresh_enqueued": False, "rows": [{"linked": True}]}
+            else:
+                mutation_count += 1
+                response = {"ok": True, **({"outbox_event_ids": []} if mutation_count == 1 else {})}
+            return http_slo_probe.HttpProbeResponse(
+                status_code=200,
+                headers={"content-type": "application/json"},
+                body=json.dumps(response).encode(),
+            )
+
+        with (
+            patch(
+                "fin_ops_platform.tools.write_operation_e2e_smoke.write_operation_slo_audit.committed_workbench_outbox_event_ids",
+                return_value=["event-withdraw"],
+            ) as durable_receipt,
+            patch(
+                "fin_ops_platform.tools.write_operation_e2e_smoke._wait_for_write_slo",
+                return_value={"status": "pass", "results": []},
+            ) as wait_slo,
+        ):
+            report = write_operation_e2e_smoke.run_write_operation_e2e_smoke(
+                FakeConnection([]),
+                scenarios=[scenario],
+                apply=True,
+                base_url="https://example.test",
+                api_prefix="/fin-ops-api",
+                tenant_id="default",
+                headers={"Authorization": "Bearer token"},
+                approval_reference="TEST-APPROVAL",
+                request_fn=request_fn,
+            )
+
+        self.assertEqual(report["status"], "pass")
+        durable_receipt.assert_called_once_with(
+            unittest.mock.ANY,
+            tenant_id="default",
+            idempotency_key="withdraw-key",
+        )
+        self.assertIsNone(wait_slo.call_args_list[0].kwargs["event_ids"])
+        self.assertEqual(wait_slo.call_args_list[1].kwargs["event_ids"], ["event-withdraw"])
 
     def test_committed_confirm_gate_failure_runs_declared_recovery_and_keeps_original_failure(self) -> None:
         scenario = write_operation_e2e_smoke.WriteScenario(

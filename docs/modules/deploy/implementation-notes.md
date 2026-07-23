@@ -14,6 +14,13 @@
 
 ## 历史记录
 
+## 2026-07-23 - Write-operation zero-fan-out receipt 边界修复
+
+- 生产 test-owned bank-turnover closure 中，confirm 与 recovery 均在 1 秒内返回 200/committed，业务 inverse 已恢复 inactive；runner 却因响应的 `outbox_event_ids: []` 被 truthy 判断丢失，继续强制查询 disabled-by-default durable idempotency 表并误报 `expected exactly one Workbench idempotency record`。
+- 最小修复保留显式空 receipt：空列表代表本次普通写没有写后页面 refresh event；只有响应完全缺少 receipt 时才查询 durable record。每个 checkpoint 开始前清除内部 receipt 变量，禁止 confirm receipt 污染 withdraw/recovery。
+- 不打开 `FIN_OPS_WORKBENCH_DURABLE_IDEMPOTENCY`，不改变业务 API、canonical facts、read model、worker、queue 或生产 env；verification 继续用同一 test-owned fixture 复跑 confirm -> withdraw/recovery -> System Audit。
+- 测试新增空 receipt 捕获和跨 checkpoint 隔离，覆盖显式零 fan-out跳过 durable lookup、下一 checkpoint receipt 缺失时仍准确查询 durable evidence。
+
 ## 2026-07-05 - 部署模块边界与 I/O close
 
 - 目标：关闭部署模块旧 I/O 污染，确保发布入口、runtime env、worker/helper 合同只服务 release-based 链路。

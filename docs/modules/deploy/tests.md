@@ -59,6 +59,7 @@
 | 既有 | Nginx 把 `/fin-ops/api/*` 吃成 SPA index.html | `test_fin_ops_relative_api_routes_do_not_fall_back_to_index_html` | 模块后端验证 |
 | 既有 | required worker 清单在 deploy helper 中硬编码，新增 worker 后生产漏启 | `test_required_workers_match_deploy_helper_defaults`、`test_manifest_cli_lists_required_instances_and_env_examples` | 模块后端验证 |
 | 2026-07-05 | `legacy-current` 覆盖式发布、旧单文件 env 模板或 systemd 示例 current/backend 路径继续污染 release-based I/O | `test_legacy_current_deploy_mode_is_removed`、`test_systemd_examples_do_not_pin_retired_current_backend_path`、`test_runtime_env_examples_pin_standard_write_operation_smoke_inputs`、deploy runtime template guards | `PYTHONPATH=backend/src python3 -m unittest tests.test_deploy_oa_script tests.test_deploy_runtime_examples tests.test_platform_runtime_boundary_guards -v` |
+| 2026-07-23 | 普通写响应显式返回 `outbox_event_ids: []`，runner 把空 receipt 当成缺失并错误要求 durable Workbench idempotency record；共享变量还可能把上一 checkpoint receipt 带入下一步 | `test_write_step_preserves_explicit_zero_fanout_receipt`、`test_zero_fanout_receipt_skips_durable_lookup_and_does_not_leak_to_next_checkpoint` | `PYTHONPATH=backend/src python3 -m unittest tests.test_write_operation_e2e_smoke -v` |
 
 ## 关键 smoke flows
 

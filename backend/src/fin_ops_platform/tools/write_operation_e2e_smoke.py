@@ -706,17 +706,19 @@ def _wait_for_failed_committed_mutation_refresh(
 ) -> dict[str, Any]:
     """Verify a committed ordinary write did not create legacy page fan-out before recovery."""
 
-    event_ids = _response_outbox_event_ids(variables.get(_RESPONSE_OUTBOX_EVENT_IDS))
-    if not event_ids:
+    response_receipt_present = _RESPONSE_OUTBOX_EVENT_IDS in variables
+    event_ids = _response_outbox_event_ids(variables.get(_RESPONSE_OUTBOX_EVENT_IDS)) or None
+    if not response_receipt_present:
         mutation = next((step for step in checkpoint.steps if step.mutation), None)
         idempotency_key = str(((mutation.json_body if mutation else None) or {}).get("idempotency_key") or "").strip()
         if idempotency_key:
             try:
-                event_ids = write_operation_slo_audit.committed_workbench_outbox_event_ids(
+                durable_event_ids = write_operation_slo_audit.committed_workbench_outbox_event_ids(
                     connection,
                     tenant_id=tenant_id,
                     idempotency_key=idempotency_key,
                 )
+                event_ids = durable_event_ids or None
             except Exception as exc:
                 return {"status": "fail", "error": str(exc) or exc.__class__.__name__}
     return _wait_for_write_slo(
@@ -751,6 +753,7 @@ def _run_checkpoint(
     strict: bool,
 ) -> dict[str, Any]:
     started_at = _database_timestamp(connection)
+    variables.pop(_RESPONSE_OUTBOX_EVENT_IDS, None)
     step_results: list[WriteStepResult] = []
     isolation_baseline = _capture_isolation_baseline(
         checkpoint,
@@ -873,16 +876,18 @@ def _run_checkpoint(
             mutation_committed=mutation_committed,
             mutation_ambiguous=mutation_ambiguous,
         )
+    response_receipt_present = _RESPONSE_OUTBOX_EVENT_IDS in variables
     response_event_ids = _response_outbox_event_ids(variables.get(_RESPONSE_OUTBOX_EVENT_IDS))
     event_ids: list[str] | None = response_event_ids or None
     if idempotency_key:
-        if not event_ids:
+        if not response_receipt_present:
             try:
-                event_ids = write_operation_slo_audit.committed_workbench_outbox_event_ids(
+                durable_event_ids = write_operation_slo_audit.committed_workbench_outbox_event_ids(
                     connection,
                     tenant_id=tenant_id,
                     idempotency_key=idempotency_key,
                 )
+                event_ids = durable_event_ids or None
             except Exception as exc:
                 return _failed_checkpoint(
                     checkpoint,
@@ -1102,10 +1107,11 @@ def _execute_step(
                 payload = json.loads((response.body or b"").decode("utf-8"))
                 _validate_canonical_preview_payload(step, payload)
                 captures = {name: _json_pointer(payload, pointer) for name, pointer in step.captures}
-                if step.mutation:
+                if step.mutation and "outbox_event_ids" in payload:
+                    if not isinstance(payload.get("outbox_event_ids"), list):
+                        raise ValueError("outbox_event_ids must be a list")
                     response_event_ids = _response_outbox_event_ids(payload.get("outbox_event_ids"))
-                    if response_event_ids:
-                        captures[_RESPONSE_OUTBOX_EVENT_IDS] = response_event_ids
+                    captures[_RESPONSE_OUTBOX_EVENT_IDS] = response_event_ids
             except (UnicodeDecodeError, json.JSONDecodeError, KeyError, ValueError, TypeError) as exc:
                 result = WriteStepResult(
                     **{**asdict(result), "status": "fail", "error": f"response_capture_failed:{exc}"}
