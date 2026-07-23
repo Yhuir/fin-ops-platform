@@ -9254,6 +9254,7 @@ class PostgresSummaryReadModelRepository:
 class PostgresReadModelRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
+        self._workbench_generation_consistency_cache: dict[tuple[str, str], list[dict[str, Any]]] = {}
         self._summary_read_model_repository = PostgresSummaryReadModelRepository(connection)
         self._search_workbench_relation_repository = PostgresSearchWorkbenchRelationReadModelRepository(connection)
         self._bank_read_model_repository = PostgresBankReadModelRepository(connection)
@@ -12396,13 +12397,6 @@ class PostgresReadModelRepository:
             if normalized_scope_key == "all"
             else self._workbench_generation_metadata(self._connection, scope_key=normalized_scope_key)
         )
-        consistency_failures = []
-        if include_consistency:
-            consistency_failures = self._workbench_generation_consistency_failures(
-                self._connection,
-                scope_key=None if normalized_scope_key == "all" else normalized_scope_key,
-                include_all=normalized_scope_key != "all",
-            )
         all_scope_parent_failures = self._workbench_all_scope_parent_stale_failures(
             self._connection,
             scope_key=normalized_scope_key,
@@ -12417,6 +12411,12 @@ class PostgresReadModelRepository:
             dirty_scopes=dirty_scopes,
         ):
             active_refresh_in_progress = False
+        consistency_failures = []
+        if include_consistency and not active_refresh_in_progress:
+            consistency_failures = self._cached_workbench_generation_consistency_failures(
+                scope_key=normalized_scope_key,
+                generation_metadata=generation_metadata,
+            )
         read_model_status = "fresh"
         if active_refresh_in_progress:
             read_model_status = "refreshing"
@@ -12482,6 +12482,34 @@ class PostgresReadModelRepository:
             ],
             "outbox_backlog": {text(row.get("status")) or "unknown": int_value(row.get("count"), 0) for row in backlog_rows},
         }
+
+    def _cached_workbench_generation_consistency_failures(
+        self,
+        *,
+        scope_key: str,
+        generation_metadata: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        active_generation_id = text(generation_metadata.get("active_generation_id"))
+        if not active_generation_id:
+            return self._workbench_generation_consistency_failures(
+                self._connection,
+                scope_key=None if scope_key == "all" else scope_key,
+                include_all=scope_key != "all",
+            )
+        cache_key = (scope_key, active_generation_id)
+        cached = self._workbench_generation_consistency_cache.get(cache_key)
+        if cached is not None:
+            return deepcopy(cached)
+        failures = self._workbench_generation_consistency_failures(
+            self._connection,
+            scope_key=None if scope_key == "all" else scope_key,
+            include_all=scope_key != "all",
+        )
+        for existing_key in tuple(self._workbench_generation_consistency_cache):
+            if existing_key[0] == scope_key:
+                self._workbench_generation_consistency_cache.pop(existing_key, None)
+        self._workbench_generation_consistency_cache[cache_key] = deepcopy(failures)
+        return failures
 
     @staticmethod
     def _workbench_active_generation_covers_dirty_scopes(

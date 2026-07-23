@@ -4168,6 +4168,39 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         )
         self.assertIn("status in ('pending', 'processing', 'failed', 'dead_lettered')", backlog_sql)
 
+    def test_repository_reuses_consistency_result_for_immutable_active_generation(self) -> None:
+        connection = FailedWorkbenchGenerationConnection()
+        repository = PostgresReadModelRepository(connection)
+
+        first = repository.get_workbench_refresh_status(scope_key="2026-05")
+        second = repository.get_workbench_refresh_status(scope_key="2026-05")
+
+        self.assertEqual(first["active_generation_id"], second["active_generation_id"])
+        consistency_queries = [
+            sql
+            for sql, _params in connection.fetch_all_calls
+            if "duplicate_identity_counts as" in sql
+        ]
+        self.assertEqual(len(consistency_queries), 1)
+
+    def test_repository_invalidates_consistency_result_when_active_generation_changes(self) -> None:
+        repository = PostgresReadModelRepository(WorkbenchSummaryGroupsConnection())
+        with patch.object(repository, "_workbench_generation_consistency_failures", return_value=[]) as load:
+            repository._cached_workbench_generation_consistency_failures(
+                scope_key="2026-05",
+                generation_metadata={"active_generation_id": "gen-1"},
+            )
+            repository._cached_workbench_generation_consistency_failures(
+                scope_key="2026-05",
+                generation_metadata={"active_generation_id": "gen-1"},
+            )
+            repository._cached_workbench_generation_consistency_failures(
+                scope_key="2026-05",
+                generation_metadata={"active_generation_id": "gen-2"},
+            )
+
+        self.assertEqual(load.call_count, 2)
+
     def test_repository_reports_failed_workbench_generation_without_promoting_it(self) -> None:
         connection = FailedWorkbenchGenerationConnection()
         repository = PostgresReadModelRepository(connection)
