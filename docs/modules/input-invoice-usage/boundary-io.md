@@ -91,6 +91,7 @@
 - 已删除标题计数的 `page_size=1` 二次请求；标题统计只能消费 rows 主响应，禁止恢复独立 title-total I/O。
 - `input_invoice_usage_statistics_schema_version` 负责生产旧 scope 的统计元数据回填；source version 相同但缺少合法统计元数据时也必须重建，不能走 unchanged skip。批量导出的所有分页均传 `include_statistics=false`，不重复读取、校验或透传页面标题统计；每一页仍执行 rows freshness、schema 和 source-version gate。
 - 默认 `month=all` 只表示页面查询视图，不是 refresh 命令。fresh gate 通过 `input_invoice_usage_scope_source_versions(...)` 一次读取有效月份 shard 的 base/source status，再通过 `WorkbenchRelationReadFacade.source_versions_for_scopes(...)` 批量比较 relation 依赖；只 enqueue mismatch 的具体月份，禁止 rows/filter/export/detail/统计失败回退 `input_invoice_usage:all`。
+- 标题统计 freshness 与 rows 共用 durable dirty scope、已发布 metadata 和 source-version proof。投影已经发布且 dirty scope 已完成后，worker 正在收尾的 outbox event 不得再次把统计降级为 refreshing，也不得由页面轮询创建下一代相同月份任务；outbox `pending/processing` 只用于 active enqueue coalescing 和运维可观测性。
 - `oa_reverse_batch_count` 是 owned batch 表的当前小型 canonical 聚合，只在标题统计返回前 overlay；不再写入每个月份 scope metadata，也不参与月 shard source version。因此 OA reverse Drawer 保存不会令全部历史月份 stale。月度统计仍由 worker 原子发布；overlay 不改变 rows freshness。
 - 关联详情抽屉从当前行 `invoice.issueDate` 传递 `month`。detail miss 或 repository unavailable 只刷新该月份；缺少合法月份时 fail closed，不猜测性 enqueue `all`。
 

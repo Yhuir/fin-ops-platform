@@ -1806,7 +1806,10 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
         refresh_status = self._invoice_relation_refresh_status(scope_type=scope_type, scope_key=scope_key)
         scope_row = self._invoice_relation_scope_row(scope_table_name=scope_table_name, scope_key=scope_key)
         statistics_status = (
-            self._invoice_relation_statistics_refresh_status(scope_type=scope_type)
+            self._invoice_relation_refresh_status(
+                scope_type=scope_type,
+                scope_key="all",
+            )
             if include_statistics
             else "not_requested"
         )
@@ -2325,28 +2328,6 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
             (scope_key,),
         )
         return dict(row) if isinstance(row, dict) else None
-
-    def _invoice_relation_statistics_refresh_status(self, *, scope_type: str) -> str:
-        status = self._invoice_relation_refresh_status(scope_type=scope_type, scope_key="all")
-        if status != "fresh":
-            return status
-        row = self._connection.fetch_one(
-            """
-            select
-                coalesce(bool_or(status in ('failed', 'dead_lettered')), false) as has_failed,
-                coalesce(bool_or(status in ('pending', 'processing')), false) as has_active
-            from job.outbox_events
-            where tenant_id = 'default'
-              and event_type = %s
-              and status in ('pending', 'processing', 'failed', 'dead_lettered')
-            """,
-            (f"{scope_type}.read_model.refresh",),
-        )
-        if isinstance(row, dict) and bool(row.get("has_failed")):
-            return "stale"
-        if isinstance(row, dict) and bool(row.get("has_active")):
-            return "refreshing"
-        return "fresh"
 
     def _invoice_relation_refresh_status(self, *, scope_type: str, scope_key: str) -> str:
         if scope_key != "all":

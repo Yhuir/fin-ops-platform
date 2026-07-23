@@ -1552,6 +1552,52 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertNotIn("invoice_flags as", executed_sql)
         self.assertIn("from read_model.input_invoice_usage_scopes", executed_sql)
 
+    def test_invoice_statistics_do_not_requeue_after_projection_completed_while_outbox_finalizes(self) -> None:
+        class FinalizingOutboxConnection(InvoiceReadModelConnection):
+            def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+                normalized = " ".join(sql.lower().split())
+                if "from job.outbox_events" in normalized:
+                    self.fetch_one_calls.append((normalized, params))
+                    return {"has_failed": False, "has_active": True}
+                return super().fetch_one(sql, params)
+
+        connection = FinalizingOutboxConnection(
+            input_rows=[
+                {
+                    "payload": {
+                        "id": "input_invoice_usage_row_1",
+                        "invoiceId": "invoice-1",
+                        "invoice": {
+                            "id": "invoice-1",
+                            "invoiceNo": "1001",
+                            "totalWithTax": "118.00",
+                        },
+                        "paymentStatus": {"code": "pending", "label": "待处理"},
+                        "oa": {"relationCount": 1},
+                        "bankTransactions": {"relationCount": 1},
+                    },
+                    "raw_payload": {},
+                }
+            ],
+        )
+        repository = PostgresReadModelRepository(connection)
+
+        payload = repository.list_input_invoice_usage_rows(
+            month=None,
+            page=1,
+            page_size=50,
+        )
+
+        self.assertEqual(payload["refresh_status"], "fresh")
+        self.assertEqual(payload["statistics_status"], "fresh")
+        self.assertIsInstance(payload["statistics"], dict)
+        executed_sql = " ".join(
+            sql
+            for sql, _params in connection.fetch_all_calls
+            + connection.fetch_one_calls
+        )
+        self.assertNotIn("from job.outbox_events", executed_sql)
+
     def test_input_repository_filter_options_use_sql_aggregation_without_payload_rows(self) -> None:
         class FilterOptionConnection:
             def __init__(self) -> None:
