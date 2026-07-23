@@ -558,8 +558,8 @@ describe("Cost statistics page", () => {
 
     const transactionTable = screen.getByRole("grid", { name: "按费用类型流水表" });
     expectProjectCostTable("按费用类型流水表");
-    expect(within(transactionTable).getByText("2026-03-18 17:02:09")).toBeInTheDocument();
-    expect(within(transactionTable).getByText("2026-03-18 17:02:09")).toHaveClass("cost-transaction-time-chip");
+    const transactionTime = await within(transactionTable).findByText("2026-03-18 17:02:09");
+    expect(transactionTime).toHaveClass("cost-transaction-time-chip");
     expect(within(transactionTable).getByText("云南溯源科技")).toBeInTheDocument();
     expect(within(transactionTable).getByText("860.00")).toBeInTheDocument();
     expect(within(transactionTable).getByText("项目现场往返交通")).toBeInTheDocument();

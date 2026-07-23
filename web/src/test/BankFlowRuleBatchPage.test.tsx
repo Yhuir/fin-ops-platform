@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
@@ -44,6 +44,7 @@ const tagSelectionPayload = {
 };
 
 const listPayload = {
+  read_model_status: "fresh",
   summary: {
     draft_count: 3,
     submitted_count: 1,
@@ -508,6 +509,7 @@ function operationBarrierRequests(fetchMock: ReturnType<typeof installFetchMock>
 }
 
 afterEach(() => {
+  cleanup();
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
@@ -1580,7 +1582,6 @@ describe("BankFlowRuleBatchPage", () => {
   });
 
   test("cleans up stale read model retry reload after route unmount", async () => {
-    const user = userEvent.setup();
     let listCallCount = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url, "http://localhost");
@@ -1609,18 +1610,16 @@ describe("BankFlowRuleBatchPage", () => {
     await waitFor(() => {
       expect(listCallCount).toBeGreaterThan(0);
     });
-    await user.click(screen.getByRole("link", { name: "设置" }));
+    fireEvent.click(screen.getByRole("link", { name: "设置" }));
     expect(await screen.findByTestId("settings-page")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "流水规则批量处理" })).not.toBeInTheDocument();
     const listCallCountAfterUnmount = listCallCount;
-    vi.useFakeTimers();
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(1_000);
+      await new Promise((resolve) => window.setTimeout(resolve, 1_100));
     });
 
     expect(listCallCount).toBe(listCallCountAfterUnmount);
 
-    vi.useRealTimers();
     fireEvent.click(screen.getByRole("link", { name: "流水规则批量处理" }));
     expect(await screen.findByRole("heading", { name: "流水规则批量处理" })).toBeInTheDocument();
 
