@@ -84,13 +84,20 @@ class InputInvoiceUsageReadModelFreshGateService:
             reason="input_invoice_usage_filter_options",
         )
         if dependency_status["status"] != "fresh":
-            refresh_scope_keys = self._enqueue_scope_refreshes(
-                scope_key,
-                reason="api_filter_options_relation_dependency_stale",
-                candidate_scope_keys=list(
-                    dependency_status.get("blocking_scope_keys") or []
-                ),
+            refresh_scope_keys = self._relation_dependency_gate.concrete_scope_keys(
+                list(dependency_status.get("refresh_scope_keys") or [])
             )
+            if scope_key != "all":
+                refresh_scope_keys = [
+                    candidate
+                    for candidate in refresh_scope_keys
+                    if candidate == scope_key
+                ]
+            for refresh_scope_key in refresh_scope_keys:
+                self._enqueue_refresh(
+                    refresh_scope_key,
+                    "api_filter_options_relation_dependency_stale",
+                )
             return self.refreshing_payload(
                 scope_key=scope_key,
                 stale_reasons=list(dependency_status.get("stale_reasons") or []),
@@ -198,16 +205,29 @@ class InputInvoiceUsageReadModelFreshGateService:
             if scope_key == "all"
             else [blocking_scope_key for blocking_scope_key in blocking_scope_keys if blocking_scope_key == scope_key]
         )
+        dependency_refresh_scope_keys = self._relation_dependency_gate.concrete_scope_keys(
+            list(dependency_status.get("refresh_scope_keys") or [])
+        )
+        page_dependency_refresh_scope_keys = (
+            dependency_refresh_scope_keys
+            if scope_key == "all"
+            else [
+                refresh_scope_key
+                for refresh_scope_key in dependency_refresh_scope_keys
+                if refresh_scope_key == scope_key
+            ]
+        )
         dependency_unresolved = (
             str(dependency_status.get("status") or "unavailable") != "fresh"
             and not blocking_scope_keys
         )
         if page_blocking_scope_keys or dependency_unresolved:
-            refresh_scope_keys = self._enqueue_scope_refreshes(
-                scope_key,
-                reason="api_relation_dependency_stale",
-                candidate_scope_keys=page_blocking_scope_keys,
-            )
+            refresh_scope_keys = page_dependency_refresh_scope_keys
+            for refresh_scope_key in refresh_scope_keys:
+                self._enqueue_refresh(
+                    refresh_scope_key,
+                    "api_relation_dependency_stale",
+                )
             return self.refreshing_payload(
                 scope_key=scope_key,
                 stale_reasons=list(dependency_status.get("stale_reasons") or []),
@@ -289,7 +309,11 @@ class InputInvoiceUsageReadModelFreshGateService:
             self._gate_statistics(
                 result,
                 dependency_blocking_scope_keys=blocking_scope_keys,
-                refresh_scope_keys=blocking_scope_keys or list(dependency_status.get("scope_keys") or []),
+                refresh_scope_keys=(
+                    dependency_refresh_scope_keys
+                    if blocking_scope_keys
+                    else list(dependency_status.get("scope_keys") or [])
+                ),
             )
         result["filterConfig"] = self._filter_config()
         result["appliedFilters"] = {"filters": parsed_filters}
@@ -310,7 +334,7 @@ class InputInvoiceUsageReadModelFreshGateService:
             payload["statistics"] = None
             payload["statistics_status"] = "refreshing"
             for scope_key in self._relation_dependency_gate.concrete_scope_keys(
-                dependency_blocking_scope_keys
+                refresh_scope_keys
             ):
                 self._enqueue_refresh(
                     scope_key,

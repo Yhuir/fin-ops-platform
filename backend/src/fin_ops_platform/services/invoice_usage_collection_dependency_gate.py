@@ -113,11 +113,18 @@ class InvoiceUsageCollectionDependencyGate:
         status: str,
         scope_keys: list[str] | None = None,
         blocking_scope_keys: list[str] | None = None,
+        refresh_scope_keys: list[str] | None = None,
         stale_reasons: list[str] | None = None,
     ) -> dict[str, object]:
+        blocking = list(blocking_scope_keys or [])
         return {
             "status": status,
             "scope_keys": list(scope_keys or []),
-            "blocking_scope_keys": list(blocking_scope_keys or []),
+            "blocking_scope_keys": blocking,
+            "refresh_scope_keys": (
+                list(refresh_scope_keys)
+                if refresh_scope_keys is not None
+                else blocking
+            ),
             "stale_reasons": list(stale_reasons or []),
         }

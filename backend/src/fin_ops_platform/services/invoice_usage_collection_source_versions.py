@@ -88,6 +88,11 @@ def invoice_relation_dependency_status(
         for scope_key in list(scope_state.get("blocking_scope_keys") or [])
         if str(scope_key).strip()
     ]
+    active_event_scope_keys = {
+        str(scope_key).strip()
+        for scope_key in list(scope_state.get("active_event_scope_keys") or [])
+        if str(scope_key).strip()
+    }
     stale_reasons: list[str] = []
     for scope_key in scope_keys:
         consumer_versions = consumer_versions_by_scope.get(scope_key)
@@ -144,9 +149,15 @@ def invoice_relation_dependency_status(
                     f"{scope_key}:workbench_relation:{reason}"
                     for reason in mismatch_reasons
                 )
+    normalized_blocking_scope_keys = list(dict.fromkeys(blocking_scope_keys))
     return {
-        "status": "fresh" if not blocking_scope_keys else "refreshing",
+        "status": "fresh" if not normalized_blocking_scope_keys else "refreshing",
         "scope_keys": scope_keys,
-        "blocking_scope_keys": list(dict.fromkeys(blocking_scope_keys)),
+        "blocking_scope_keys": normalized_blocking_scope_keys,
+        "refresh_scope_keys": [
+            scope_key
+            for scope_key in normalized_blocking_scope_keys
+            if scope_key not in active_event_scope_keys
+        ],
         "stale_reasons": list(dict.fromkeys(stale_reasons)),
     }

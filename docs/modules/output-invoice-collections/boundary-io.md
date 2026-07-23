@@ -91,6 +91,7 @@
 - 已删除标题计数的 `page_size=1` 二次请求；标题统计只能消费 rows 主响应，禁止恢复独立 title-total I/O。
 - `output_invoice_collection_statistics_schema_version` 负责生产旧 scope 的统计元数据回填；source version 相同但缺少合法统计元数据时也必须重建，不能走 unchanged skip。批量导出的所有分页均传 `include_statistics=false`，不重复读取、校验或透传页面标题统计；每一页仍执行 rows freshness、schema 和 source-version gate。
 - 默认 `month=all` 是页面聚合视图，不是 refresh scope。fresh gate 通过 `output_invoice_collection_scope_source_versions(...)` 读取有效月份 shard，并批量比较每月已嵌入与当前 `workbench_relation` source versions；只 enqueue mismatch 的具体月份，禁止 rows/export/detail/统计异常回退 `output_invoice_collection:all`。
+- `output_invoice_collection_scope_source_versions(...)` 必须在同一 SQL statement snapshot 内同时读取 scope dirty 状态和同 scope active outbox event。已有 `pending|processing` event 的阻塞月份只返回 `refreshing`，不得再次进入 enqueue candidates；页面下一轮 normal GET 再观察该 event 发布后的 fresh proof。
 - 标题统计 freshness 与 rows 共用 durable dirty scope、已发布 metadata 和 source-version proof。投影已经发布且 dirty scope 已完成后，worker 正在收尾的 outbox event 不得再次把统计降级为 refreshing，也不得由页面轮询创建下一代相同月份任务；outbox `pending/processing` 只用于 active enqueue coalescing 和运维可观测性。
 - 关联详情抽屉从当前行 `invoice.issueDate` 传递 `month`。detail miss 或 repository unavailable 只刷新该具体月份；无法证明月份时 fail closed，不做全历史重建。
 

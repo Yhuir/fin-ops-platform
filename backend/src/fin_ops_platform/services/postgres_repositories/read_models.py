@@ -1925,7 +1925,16 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                    projection.row_count,
                    projection.source_versions,
                    projection.cache_status,
-                   dirty.dirty_status
+                   dirty.dirty_status,
+                   exists (
+                       select 1
+                       from job.outbox_events event
+                       where event.tenant_id = %s
+                         and event.event_type = %s
+                         and event.scope_type = %s
+                         and event.scope_key = requested.scope_key
+                         and event.status in ('pending', 'processing')
+                   ) as has_active_event
             from requested_scopes requested
             left join projection_scopes projection using (scope_key)
             left join active_dirty dirty using (scope_key)
@@ -1940,11 +1949,15 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
                 normalized_scope_key,
                 normalized_scope_key,
                 normalized_scope_key,
+                tenant_id,
+                f"{scope_type}.read_model.refresh",
+                scope_type,
             ),
         )
         source_versions_by_scope: dict[str, dict[str, Any]] = {}
         statuses_by_scope: dict[str, str] = {}
         blocking_scope_keys: list[str] = []
+        active_event_scope_keys: list[str] = []
         effective_rows = rows
         if normalized_scope_key == "all" and any(
             int_value(row.get("row_count"), 0) > 0
@@ -1983,11 +1996,14 @@ class PostgresInvoiceUsageCollectionReadModelRepository:
             statuses_by_scope[current_scope_key] = status
             if status != "fresh":
                 blocking_scope_keys.append(current_scope_key)
+                if bool(row.get("has_active_event")):
+                    active_event_scope_keys.append(current_scope_key)
         return {
             "scope_keys": list(source_versions_by_scope),
             "source_versions_by_scope": source_versions_by_scope,
             "statuses_by_scope": statuses_by_scope,
             "blocking_scope_keys": blocking_scope_keys,
+            "active_event_scope_keys": active_event_scope_keys,
         }
 
     def _list_invoice_relation_filter_options(

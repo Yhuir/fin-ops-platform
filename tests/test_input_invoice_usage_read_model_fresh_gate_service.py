@@ -54,6 +54,98 @@ class InputInvoiceUsageReadModelFreshGateServiceTests(unittest.TestCase):
         self.assertNotIn("all", [scope_key for scope_key, _reason in enqueued])
         self.assertEqual(repository.rows_calls, 0)
 
+    def test_active_refresh_event_blocks_rows_without_duplicate_enqueue(self) -> None:
+        enqueued: list[tuple[str, str]] = []
+        repository = DependencyBlockedRepository(
+            scope_state={
+                "scope_keys": ["2026-03"],
+                "source_versions_by_scope": {
+                    "2026-03": {
+                        "schema": "v1",
+                        "workbench_relation_source_versions": {
+                            "relation_generation": 1,
+                        },
+                    },
+                },
+                "blocking_scope_keys": ["2026-03"],
+                "active_event_scope_keys": ["2026-03"],
+            }
+        )
+        service = InputInvoiceUsageReadModelFreshGateService(
+            repository=repository,
+            requires_sql_read_model_runtime=lambda: True,
+            enqueue_refresh=lambda scope_key, reason: enqueued.append((scope_key, reason)) or True,
+            expected_source_versions=lambda **_: {"schema": "v1"},
+            workbench_relation_reader=StaticRelationReader(
+                {"2026-03": {"relation_generation": 2}}
+            ),
+            statistics_overlay=lambda: {"oa_reverse_batch_count": 0},
+        )
+
+        payload = service.rows({"month": ["2026-03"]})
+        filter_payload = service.filter_options({"month": ["2026-03"]})
+
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(filter_payload["read_model_status"], "refreshing")
+        self.assertNotIn("read_model_refresh_scope_keys", payload)
+        self.assertNotIn("read_model_refresh_scope_keys", filter_payload)
+        self.assertEqual(enqueued, [])
+        self.assertEqual(repository.rows_calls, 0)
+
+    def test_active_refresh_event_does_not_requeue_for_other_month_statistics(self) -> None:
+        enqueued: list[tuple[str, str]] = []
+        service = InputInvoiceUsageReadModelFreshGateService(
+            repository=RowsRepository(
+                {
+                    "rows": [
+                        {
+                            "id": "row-1",
+                            "invoice": {},
+                            "paymentStatus": {},
+                            "oa": {},
+                            "bankTransactions": {},
+                        }
+                    ],
+                    "pagination": {"page": 1, "pageSize": 50, "total": 1},
+                    "refresh_status": "fresh",
+                    "source_versions": {"schema": "v1"},
+                    "statistics": {"invoice_count": 1},
+                    "statistics_status": "fresh",
+                    "statistics_source_versions": {"schema": "v1"},
+                },
+                scope_state={
+                    "scope_keys": ["2026-02", "2026-03"],
+                    "source_versions_by_scope": {
+                        "2026-02": {
+                            "schema": "v1",
+                            "workbench_relation_source_versions": {
+                                "relation_generation": 1,
+                            },
+                        },
+                        "2026-03": {
+                            "schema": "v1",
+                            "workbench_relation_source_versions": {
+                                "relation_generation": 1,
+                            },
+                        },
+                    },
+                    "blocking_scope_keys": ["2026-02"],
+                    "active_event_scope_keys": ["2026-02"],
+                },
+            ),
+            requires_sql_read_model_runtime=lambda: True,
+            enqueue_refresh=lambda scope_key, reason: enqueued.append((scope_key, reason)) or True,
+            expected_source_versions=lambda **_: {"schema": "v1"},
+            workbench_relation_reader=FreshRelationReader(),
+            statistics_overlay=lambda: {"oa_reverse_batch_count": 0},
+        )
+
+        payload = service.rows({"month": ["2026-03"]})
+
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual(payload["statistics_status"], "refreshing")
+        self.assertEqual(enqueued, [])
+
     def test_all_scope_fails_closed_without_dependency_port_or_all_refresh(self) -> None:
         enqueued: list[tuple[str, str]] = []
         repository = DependencyBlockedRepository(
@@ -326,8 +418,14 @@ class InputInvoiceUsageReadModelFreshGateServiceTests(unittest.TestCase):
 
 
 class RowsRepository:
-    def __init__(self, payload: dict[str, object]) -> None:
+    def __init__(
+        self,
+        payload: dict[str, object],
+        *,
+        scope_state: dict[str, object] | None = None,
+    ) -> None:
         self._payload = payload
+        self._scope_state = scope_state
 
     def list_input_invoice_usage_rows(self, **_: object) -> dict[str, object]:
         return dict(self._payload)
@@ -339,6 +437,8 @@ class RowsRepository:
         tenant_id: str,
     ) -> dict[str, object]:
         del tenant_id
+        if self._scope_state is not None:
+            return dict(self._scope_state)
         target_scope_key = scope_key if scope_key != "all" else "2026-05"
         return fresh_scope_state(
             target_scope_key,
@@ -396,6 +496,9 @@ class DependencyBlockedRepository:
     def list_input_invoice_usage_rows(self, **_: object) -> dict[str, object]:
         self.rows_calls += 1
         raise AssertionError("non-fresh dependency must short-circuit the rows query")
+
+    def list_input_invoice_usage_filter_options(self, **_: object) -> dict[str, object]:
+        raise AssertionError("non-fresh dependency must short-circuit the filter query")
 
 
 class StaticRelationReader:

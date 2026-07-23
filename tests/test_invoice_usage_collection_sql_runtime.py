@@ -1425,6 +1425,36 @@ class InvoiceUsageCollectionSqlRuntimeTests(unittest.TestCase):
         self.assertNotIn("input_invoice_usage_oa_reverse_batches", executed_sql)
         self.assertNotIn("statistics_metadata_rows", executed_sql)
 
+    def test_scope_state_keeps_active_refresh_out_of_enqueue_candidates(self) -> None:
+        connection = InvoiceReadModelConnection(
+            input_scope_rows=[
+                {
+                    "scope_key": "2026-03",
+                    "source_versions": input_invoice_usage_source_versions(),
+                    "dirty_status": "processing",
+                    "has_active_event": True,
+                }
+            ]
+        )
+        repository = PostgresInvoiceUsageCollectionReadModelRepository(connection)
+
+        payload = repository.input_invoice_usage_scope_source_versions(
+            scope_key="2026-03",
+        )
+
+        self.assertEqual(payload["blocking_scope_keys"], ["2026-03"])
+        self.assertEqual(payload["active_event_scope_keys"], ["2026-03"])
+        sql, params = connection.fetch_all_calls[-1]
+        self.assertIn("from job.outbox_events event", sql)
+        self.assertEqual(
+            params[-3:],
+            (
+                "default",
+                "input_invoice_usage.read_model.refresh",
+                "input_invoice_usage",
+            ),
+        )
+
     def test_input_repository_returns_fresh_empty_scope_without_api_miss(self) -> None:
         repository = PostgresReadModelRepository(
             InvoiceReadModelConnection(input_rows=[], dirty=False, scope_exists=True)
