@@ -382,7 +382,7 @@ class DeployOAScriptTest(unittest.TestCase):
         self.assertIn("api-request-trace <request-id>", script)
         self.assertIn("api_request_trace()", script)
         self.assertIn("request trace not found in the bounded journal window", script)
-        self.assertIn("NR <= 32", script)
+        self.assertIn("NR <= 64", script)
         self.assertIn("api-request-timing <request-id>", script)
         self.assertIn("api_request_timing()", script)
         self.assertIn("request timing not found in the bounded journal window", script)

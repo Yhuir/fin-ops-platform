@@ -805,7 +805,7 @@ api_request_trace() {
     printf '%s\n' "$journal" \
       | tail -n "+$line_number" \
       | awk '
-          NR <= 32 {
+          NR <= 64 {
             print
             if (NR > 1 && $0 ~ /^[A-Za-z_][A-Za-z0-9_.]*(Error|Exception)(:|$)/) {
               exit

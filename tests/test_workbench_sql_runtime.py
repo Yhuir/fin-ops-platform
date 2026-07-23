@@ -4196,7 +4196,7 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         self.assertIsNone(status["last_error"])
 
 
-    def test_repository_ignores_empty_materialized_all_generation_when_active_month_shards_exist(self) -> None:
+    def test_repository_composes_active_month_shards_with_missing_optional_source_versions(self) -> None:
         class EmptyAllWithParentGenerationConnection(WorkbenchSummaryGroupsConnection):
             def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
                 normalized = " ".join(sql.lower().split())
@@ -4229,7 +4229,13 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
                             "generation_id": "gen-2026-03-active",
                             "source_versions": {"source_version": 19},
                             "generated_at": "2026-07-03T10:00:00+08:00",
-                        }
+                        },
+                        {
+                            "scope_key": "2026-02",
+                            "generation_id": "gen-2026-02-active",
+                            "source_versions": {"source_version": 18},
+                            "generated_at": "2026-07-02T10:00:00+08:00",
+                        },
                     ]
                 if "from read_model.workbench_generations" in normalized:
                     return [
