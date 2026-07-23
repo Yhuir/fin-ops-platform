@@ -614,6 +614,37 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
         self.assertIn("cost-tax", snapshot["worker_statuses"])
         self.assertNotIn("cost-tax-read-model", snapshot["worker_statuses"])
 
+    def test_app_status_readiness_summary_does_not_load_unconsumed_source_versions(self) -> None:
+        class ReadinessSummaryConnection:
+            def __init__(self) -> None:
+                self.sql = ""
+
+            def fetch_all(self, sql: str, params: tuple[object, ...] = ()) -> list[dict[str, object]]:
+                self.sql = " ".join(sql.lower().split())
+                return [
+                    {
+                        "read_model_key": "turnover_ledger",
+                        "scope_type": "turnover_ledger",
+                        "scope_key": "2026-02",
+                        "status": "fresh",
+                        "schema_version": "7",
+                        "row_count": 2,
+                        "generated_at": "2026-07-20T01:00:00+00:00",
+                        "updated_at": "2026-07-20T01:00:01+00:00",
+                        "last_error": None,
+                    }
+                ]
+
+        connection = ReadinessSummaryConnection()
+        repository = RuntimeMonitoringRepository(connection)
+
+        statuses = repository._app_status_readiness_statuses()
+
+        self.assertEqual(statuses["turnover_ledger"]["status"], "fresh")
+        self.assertEqual(statuses["turnover_ledger"]["generated_at"], "2026-07-20T01:00:00+00:00")
+        self.assertNotIn("source_versions", connection.sql)
+        self.assertNotIn("source_versions", statuses["turnover_ledger"])
+
     def test_operation_barrier_runtime_snapshot_queries_only_requested_scopes(self) -> None:
         class TargetScopedConnection:
             def __init__(self) -> None:
@@ -630,7 +661,6 @@ class RuntimeMonitoringRepositoryTests(unittest.TestCase):
                             "scope_key": "2026-02",
                             "status": "fresh",
                             "schema_version": "7",
-                            "source_versions": {},
                             "row_count": 2,
                             "generated_at": "2026-07-20T01:00:00+00:00",
                             "updated_at": "2026-07-20T01:00:01+00:00",
