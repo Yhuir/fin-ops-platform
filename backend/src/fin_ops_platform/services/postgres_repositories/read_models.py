@@ -7951,6 +7951,7 @@ class PostgresSummaryReadModelRepository:
         bank_detail_refresh_scope_keys: list[str] = []
         bank_flow_bank_detail_refresh_scope_keys: list[str] = []
         bank_flow_child_refresh_scope_keys: list[str] = []
+        month_workbench_dependency_not_fresh = False
         if scope_month != "all":
             dependency_statuses = {
                 text(row.get("workbench_dirty_status")),
@@ -7963,6 +7964,7 @@ class PostgresSummaryReadModelRepository:
                 refresh_status = "refreshing"
                 stale_reasons.append("cost_statistics_dependency_refreshing")
             if not workbench_source_versions:
+                month_workbench_dependency_not_fresh = True
                 refresh_status = "stale" if refresh_status == "fresh" else refresh_status
                 stale_reasons.append("workbench_source_versions_missing")
             elif (
@@ -7970,8 +7972,15 @@ class PostgresSummaryReadModelRepository:
                 and int_value(workbench_source_versions.get("source_version"), -1)
                 != int_value(row.get("workbench_dirty_source_version"), -1)
             ):
+                month_workbench_dependency_not_fresh = True
                 refresh_status = "stale" if refresh_status == "fresh" else refresh_status
                 stale_reasons.append("workbench_published_source_version_mismatch")
+            if text(row.get("workbench_dirty_status")) in {
+                "pending",
+                "processing",
+                "failed",
+            }:
+                month_workbench_dependency_not_fresh = True
             bank_detail_schema_version = int_value(row.get("bank_detail_schema_version"), 0)
             bank_detail_status = text(row.get("bank_detail_status"))
             bank_detail_dependency_not_fresh = False
@@ -8049,6 +8058,11 @@ class PostgresSummaryReadModelRepository:
                 for normalized in [str(value or "").strip()]
                 if normalized
             )
+        )
+        workbench_refresh_scope_keys = (
+            [scope_month]
+            if scope_month != "all" and month_workbench_dependency_not_fresh
+            else parent_workbench_refresh_scope_keys
         )
         parent_bank_detail_refresh_scope_keys = list(
             dict.fromkeys(
@@ -8174,7 +8188,7 @@ class PostgresSummaryReadModelRepository:
             "stale_reasons": stale_reasons,
             "bank_flow_refresh_status": bank_flow_refresh_status,
             "bank_flow_stale_reasons": list(dict.fromkeys(bank_flow_stale_reasons)),
-            "workbench_refresh_scope_keys": parent_workbench_refresh_scope_keys,
+            "workbench_refresh_scope_keys": workbench_refresh_scope_keys,
             "bank_detail_refresh_scope_keys": bank_detail_refresh_scope_keys,
             "child_refresh_scope_keys": parent_child_refresh_scope_keys,
             "bank_flow_bank_detail_refresh_scope_keys": (

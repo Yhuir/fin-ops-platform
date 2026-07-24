@@ -733,7 +733,7 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
             [("active:2026-05", "api_page_source_versions_stale")],
         )
 
-    def test_month_access_stages_only_requested_cost_scope_behind_stale_workbench(self) -> None:
+    def test_month_access_waits_to_stage_cost_scope_until_workbench_is_fresh(self) -> None:
         class Runtime(CostStatisticsRuntimeStub):
             def __init__(self) -> None:
                 self.cost_refreshes: list[tuple[str, str]] = []
@@ -743,8 +743,16 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
                 return True
 
         class Repository:
-            def get_cost_statistics_freshness_gate(self, **_kwargs: object) -> dict[str, object]:
-                raise AssertionError("stale Workbench must stop Cost gate I/O")
+            def get_cost_statistics_freshness_gate(
+                self,
+                *,
+                scope_key: str,
+                dependency_profile: str = "workbench",
+            ) -> dict[str, object]:
+                return cost_statistics_fresh_gate(
+                    scope_key=scope_key,
+                    source_versions=_cost_statistics_source_versions_fixture(scope_key),
+                )
 
             def get_cost_statistics_page(self, **_kwargs: object) -> dict[str, object]:
                 raise AssertionError("stale Workbench must stop Cost payload I/O")
@@ -783,10 +791,10 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
         )
         self.assertEqual(
             runtime.cost_refreshes,
-            [("active:2026-05", "api_workbench_dependency_stale")],
+            [],
         )
 
-    def test_parent_access_stages_exact_cost_children_and_parent_behind_stale_workbench(self) -> None:
+    def test_month_refresh_poll_skips_canonical_workbench_proof_and_cost_enqueue(self) -> None:
         class Runtime(CostStatisticsRuntimeStub):
             def __init__(self) -> None:
                 self.cost_refreshes: list[tuple[str, str]] = []
@@ -802,7 +810,72 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
                 scope_key: str,
                 dependency_profile: str = "workbench",
             ) -> dict[str, object]:
-                raise AssertionError(f"stale Workbench must stop parent Cost gate I/O: {scope_key}")
+                return {
+                    **cost_statistics_fresh_gate(
+                        scope_key=scope_key,
+                        source_versions=_cost_statistics_source_versions_fixture(scope_key),
+                        refresh_status="refreshing",
+                        stale_reasons=["cost_statistics_dependency_refreshing"],
+                    ),
+                    "workbench_refresh_scope_keys": ["2026-05"],
+                }
+
+            def get_cost_statistics_page(self, **_kwargs: object) -> dict[str, object]:
+                raise AssertionError("refreshing Workbench must stop Cost payload I/O")
+
+        runtime = Runtime()
+        workbench_refreshes: list[tuple[str, str]] = []
+        service = CostStatisticsQueryService(
+            runtime_service=runtime,
+            sql_read_repository=Repository(),
+            tag_selection_mapper=AppSettingsService.cost_statistics_tag_selection_payload_from_settings,
+            workbench_dependency_versions_provider=lambda _scope_key: (_ for _ in ()).throw(
+                AssertionError("refreshing Cost gate must skip canonical Workbench proof")
+            ),
+            workbench_dependency_versions_by_scope_provider=(
+                _fresh_workbench_dependency_versions_by_scope
+            ),
+            workbench_refresh_enqueuer=lambda scope_key, *, reason: (
+                workbench_refreshes.append((scope_key, reason)) or True
+            ),
+        )
+
+        payload, _cache_hit, _etag, _not_modified = service.get_explorer_page(
+            scope="2026-05",
+            view="project",
+            project_scope="active",
+            filters={},
+            cursor=None,
+            page_size=50,
+        )
+
+        self.assertEqual(payload["refresh_dependency"], "workbench")
+        self.assertEqual(
+            workbench_refreshes,
+            [("2026-05", "cost_statistics_workbench_dependency_stale")],
+        )
+        self.assertEqual(runtime.cost_refreshes, [])
+
+    def test_parent_access_waits_to_stage_cost_children_until_workbench_is_fresh(self) -> None:
+        class Runtime(CostStatisticsRuntimeStub):
+            def __init__(self) -> None:
+                self.cost_refreshes: list[tuple[str, str]] = []
+
+            def enqueue_read_model_refresh(self, scope_key: str, *, reason: str) -> bool:
+                self.cost_refreshes.append((scope_key, reason))
+                return True
+
+        class Repository:
+            def get_cost_statistics_freshness_gate(
+                self,
+                *,
+                scope_key: str,
+                dependency_profile: str = "workbench",
+            ) -> dict[str, object]:
+                return cost_statistics_fresh_gate(
+                    scope_key=scope_key,
+                    source_versions=_cost_statistics_source_versions_fixture(scope_key),
+                )
 
             def get_cost_statistics_page(self, **_kwargs: object) -> dict[str, object]:
                 raise AssertionError("stale Workbench must stop parent Cost payload I/O")
@@ -860,11 +933,7 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
         )
         self.assertEqual(
             runtime.cost_refreshes,
-            [
-                ("active:2026-03", "api_workbench_dependency_stale"),
-                ("active:2026-04", "api_workbench_dependency_stale"),
-                ("active:all", "api_workbench_dependency_stale"),
-            ],
+            [],
         )
 
     def test_parent_access_refreshes_exact_stale_cost_children_instead_of_parent(self) -> None:
@@ -903,8 +972,8 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
             sql_read_repository=Repository(),
             tag_selection_mapper=AppSettingsService.cost_statistics_tag_selection_payload_from_settings,
             workbench_dependency_versions_provider=_fresh_workbench_dependency_versions,
-            workbench_dependency_versions_by_scope_provider=(
-                _fresh_workbench_dependency_versions_by_scope
+            workbench_dependency_versions_by_scope_provider=lambda: (_ for _ in ()).throw(
+                AssertionError("non-fresh Cost gate must skip canonical Workbench proof")
             ),
             workbench_refresh_enqueuer=lambda scope_key, *, reason: (
                 workbench_refreshes.append((scope_key, reason)) or True
@@ -3297,6 +3366,16 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
 
                 self.assertEqual(gate["refresh_status"], expected_status)
                 self.assertIn(expected_reason, gate["stale_reasons"])
+                self.assertEqual(
+                    gate["workbench_refresh_scope_keys"],
+                    ["2026-05"]
+                    if (
+                        overrides.get("workbench_dirty_status")
+                        in {"pending", "processing", "failed"}
+                        or overrides.get("workbench_dirty_source_version") is not None
+                    )
+                    else [],
+                )
 
     def test_repository_bank_flow_gate_ignores_cost_and_workbench_dirty_state(self) -> None:
         connection = CostStatisticsReadConnection(

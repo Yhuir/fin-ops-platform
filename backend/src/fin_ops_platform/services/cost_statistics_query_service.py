@@ -454,57 +454,6 @@ class CostStatisticsQueryService:
     ) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
         scope_month = str(scope_key).split(":", 1)[1] if ":" in str(scope_key) else ""
         bank_flow_profile = dependency_profile == "bank_flow"
-        if not bank_flow_profile and scope_month and scope_month != "all":
-            expected_workbench_versions, active_workbench_versions = (
-                self._workbench_dependency_versions_provider(scope_month)
-            )
-            expected_workbench_versions = require_expected_source_versions(
-                expected_workbench_versions,
-                context="cost_statistics_workbench_dependency",
-            )
-            workbench_stale_reasons = source_version_mismatch_reasons(
-                expected=expected_workbench_versions,
-                actual=active_workbench_versions,
-            )
-            if workbench_stale_reasons:
-                return None, None, self._workbench_dependency_non_fresh_payload(
-                    scope_key=scope_key,
-                    workbench_scope_keys=(scope_month,),
-                    empty_payload_factory=empty_payload_factory,
-                    stale_reasons=tuple(
-                        f"workbench_dependency_{reason}" for reason in workbench_stale_reasons
-                    ),
-                )
-        elif not bank_flow_profile and scope_month == "all":
-            expected_by_scope, active_by_scope = (
-                self._workbench_dependency_versions_by_scope_provider()
-            )
-            workbench_stale_reasons: list[str] = []
-            workbench_stale_scope_keys: list[str] = []
-            for workbench_scope_key in sorted(expected_by_scope):
-                expected_workbench_versions = require_expected_source_versions(
-                    expected_by_scope.get(workbench_scope_key),
-                    context=f"cost_statistics_workbench_dependency:{workbench_scope_key}",
-                )
-                scope_stale_reasons = source_version_mismatch_reasons(
-                    expected=expected_workbench_versions,
-                    actual=active_by_scope.get(workbench_scope_key),
-                )
-                if not scope_stale_reasons:
-                    continue
-                workbench_stale_scope_keys.append(workbench_scope_key)
-                workbench_stale_reasons.extend(
-                    f"workbench_dependency_{workbench_scope_key}_{reason}"
-                    for reason in scope_stale_reasons
-                )
-            if workbench_stale_scope_keys:
-                return None, None, self._workbench_dependency_non_fresh_payload(
-                    scope_key=scope_key,
-                    workbench_scope_keys=tuple(workbench_stale_scope_keys),
-                    empty_payload_factory=empty_payload_factory,
-                    stale_reasons=tuple(workbench_stale_reasons),
-                )
-
         gate = get_freshness_gate(
             scope_key=scope_key,
             dependency_profile=dependency_profile,
@@ -540,7 +489,7 @@ class CostStatisticsQueryService:
         workbench_refresh_scope_keys = self._normalized_refresh_scope_keys(
             gate.get("workbench_refresh_scope_keys")
         )
-        if not bank_flow_profile and scope_month == "all" and workbench_refresh_scope_keys:
+        if not bank_flow_profile and workbench_refresh_scope_keys:
             return gate, None, self._workbench_dependency_non_fresh_payload(
                 scope_key=scope_key,
                 workbench_scope_keys=workbench_refresh_scope_keys,
@@ -576,6 +525,57 @@ class CostStatisticsQueryService:
                 stale_reasons=gate_reasons,
                 refresh_scope_keys=child_refresh_scope_keys,
             )
+
+        if not bank_flow_profile and scope_month and scope_month != "all":
+            expected_workbench_versions, active_workbench_versions = (
+                self._workbench_dependency_versions_provider(scope_month)
+            )
+            expected_workbench_versions = require_expected_source_versions(
+                expected_workbench_versions,
+                context="cost_statistics_workbench_dependency",
+            )
+            workbench_stale_reasons = source_version_mismatch_reasons(
+                expected=expected_workbench_versions,
+                actual=active_workbench_versions,
+            )
+            if workbench_stale_reasons:
+                return gate, None, self._workbench_dependency_non_fresh_payload(
+                    scope_key=scope_key,
+                    workbench_scope_keys=(scope_month,),
+                    empty_payload_factory=empty_payload_factory,
+                    stale_reasons=tuple(
+                        f"workbench_dependency_{reason}" for reason in workbench_stale_reasons
+                    ),
+                )
+        elif not bank_flow_profile and scope_month == "all":
+            expected_by_scope, active_by_scope = (
+                self._workbench_dependency_versions_by_scope_provider()
+            )
+            workbench_stale_reasons: list[str] = []
+            workbench_stale_scope_keys: list[str] = []
+            for workbench_scope_key in sorted(expected_by_scope):
+                expected_workbench_versions = require_expected_source_versions(
+                    expected_by_scope.get(workbench_scope_key),
+                    context=f"cost_statistics_workbench_dependency:{workbench_scope_key}",
+                )
+                scope_stale_reasons = source_version_mismatch_reasons(
+                    expected=expected_workbench_versions,
+                    actual=active_by_scope.get(workbench_scope_key),
+                )
+                if not scope_stale_reasons:
+                    continue
+                workbench_stale_scope_keys.append(workbench_scope_key)
+                workbench_stale_reasons.extend(
+                    f"workbench_dependency_{workbench_scope_key}_{reason}"
+                    for reason in scope_stale_reasons
+                )
+            if workbench_stale_scope_keys:
+                return gate, None, self._workbench_dependency_non_fresh_payload(
+                    scope_key=scope_key,
+                    workbench_scope_keys=tuple(workbench_stale_scope_keys),
+                    empty_payload_factory=empty_payload_factory,
+                    stale_reasons=tuple(workbench_stale_reasons),
+                )
 
         expected_source_versions = cost_statistics_source_versions(
             month=scope_month,
@@ -674,28 +674,7 @@ class CostStatisticsQueryService:
             )
             for workbench_scope_key in workbench_scope_keys
         ]
-        project_scope = scope_key.split(":", 1)[0]
-        cost_scope_keys = (
-            tuple(
-                dict.fromkeys(
-                    self._runtime_service.request_scope_key(month, project_scope)
-                    for month in (*workbench_scope_keys, "all")
-                )
-            )
-            if scope_key.endswith(":all")
-            else (scope_key,)
-        )
-        # ponytail: stage only this page's exact children and parent; the worker owns dependency order.
-        cost_refresh_results = [
-            bool(
-                self._runtime_service.enqueue_read_model_refresh(
-                    cost_scope_key,
-                    reason="api_workbench_dependency_stale",
-                )
-            )
-            for cost_scope_key in cost_scope_keys
-        ]
-        payload["refresh_enqueued"] = any(cost_refresh_results) or any(refresh_results)
+        payload["refresh_enqueued"] = any(refresh_results)
         return payload
 
     def _cost_statistics_non_fresh_gate_payload(

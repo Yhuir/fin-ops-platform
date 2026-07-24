@@ -1,5 +1,5 @@
 ---
-status: dependency_contention_fix_local_verified
+status: r11_dependency_poll_contention_fix_local_verified
 trigger: "Access-triggered read model candidate emitted zero write fan-out but production still showed cost bank-tag blocked for 121s, Workbench visible after 6.13s, and unrelated input-invoice-usage visible after 37.7s."
 created: 2026-07-24
 updated: 2026-07-24
@@ -93,3 +93,10 @@ updated: 2026-07-24
 - staging_root: parent Cost access knew the exact Workbench months but staged only `project_scope:all`; child Cost scopes were discovered only after Workbench convergence, preserving a Workbench→child→parent serial tail.
 - fix: launch the normal concurrent consumer GETs before the write-time audit; enforce each consumer's first-access-to-fresh/business-visible duration while retaining commit-to-visible as observation. When an `:all` Cost request sees stale exact Workbench months, use the existing runtime gateway to stage those same-project Cost month scopes plus the requested parent in one access. No new coordinator, queue, cache, version ledger or sibling project scope is added.
 - remaining_risk: Workbench production handler samples still reached `3.078–3.704s` under concurrency, so corrected measurement and Cost staging must be deployed and measured before claiming the `<3s` product gate.
+
+## 2026-07-24 production round 10 dependency poll contention
+
+- evidence: release `main-bb585805-20260724212902` preserved 307.195ms/193.828ms writes, zero forbidden write fan-out, 16/16 final System Audit correctness and drained workers. Cost bank-tag passed at 1.371s/1.180s, but Cost project/all took 13.545s/13.248s, Workbench 8.667s/7.441s and one Turnover access 8.237s.
+- measured_root: concurrent page metrics showed Cost explorer p50 1.087s, p95 6.963s and up to 19 database queries. Workbench events took 2.509–3.590s only under this concurrent loop, while isolated production rehydrate rebuilt the same scope in 0.773s. Staged Cost children retried their known-stale Workbench dependency 3–4 times each as the page simultaneously repeated the all-scope canonical proof; this self-generated database contention delayed Workbench and unrelated page reads.
+- fix: delete known-stale Workbench→Cost pre-staging again, and move canonical Workbench proof after the existing Cost gate. A non-fresh gate now returns/enqueues only its exact dependency/child and skips the expensive canonical proof; canonical proof runs only before a response could otherwise be fresh. Month gates expose their exact Workbench refresh scope so polling cannot fall through to Cost enqueue. No table, cache, coordinator, worker, retry policy or new queue path was added.
+- local_verification: focused Cost/Workbench query, repository and worker tests pass 110/110 (23 subtests), including explicit assertions that non-fresh polls do not call the canonical provider and do not enqueue Cost behind Workbench. Full directed regression, lint/docs/diff and one production candidate remain pending.
