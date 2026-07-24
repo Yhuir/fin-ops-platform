@@ -2,10 +2,10 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
-## 2026-07-24 - 首次访问同时收敛 Workbench 与 Cost
+## 2026-07-24 - 页面自动轮询依次收敛 Workbench 与 Cost
 
-- Service/read model：`tests/test_cost_statistics_sql_runtime.py` 证明一次 month/all 页面访问会为每个 stale Workbench 月份同时 ensure 对应 Workbench scope 与同 project scope 的 Cost child；Cost projection 在任何 payload I/O 前比较 canonical Workbench expected versions 与 active generation，不匹配时 fail closed。`tests/test_cost_statistics_postgres_integration.py` 保护默认 provider 的真实 PostgreSQL 查询和同一 fail-closed 合同。
-- Worker/manifest：`tests/test_runtime_worker.py` 与 `tests/test_read_model_manifest.py` 证明标准化 `workbench_read_model_not_fresh` 只补投同月 Workbench，并把 Cost event 短延迟 defer；不发布半成品、不需要第二次页面访问。
+- Service/read model：`tests/test_cost_statistics_sql_runtime.py` 证明 month/all 页面发现 stale Workbench 时只 ensure exact Workbench scope且不提前投递Cost；依赖 fresh 后的下一次页面自动轮询才由既有 Cost gate enqueue同 project scope的 exact child。Cost projection仍在任何 payload I/O 前比较 canonical Workbench expected versions 与 active generation，不匹配时 fail closed。`tests/test_cost_statistics_postgres_integration.py` 保护默认 provider 的真实 PostgreSQL查询和同一 fail-closed合同。
+- Worker/manifest：`tests/test_runtime_worker.py` 与 `tests/test_read_model_manifest.py` 继续证明意外进入 worker 的 `workbench_read_model_not_fresh` 只补投同月 Workbench并短延迟defer；正常页面访问不再提前制造必然defer的Cost任务。
 - 回归：`tests/test_read_model_architecture_guards.py` 继续要求 access enqueue 走共享 gateway；普通 relation 写零 fan-out、Bank Detail profile 与 parent rollup 合同不变。生产 `<3s` 仍以候选部署后的 test-owned fixture 为最终门禁。
 
 ## 2026-07-24 - 全流水视图复用 Bank Detail 与旧复制表删除

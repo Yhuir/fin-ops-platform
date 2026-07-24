@@ -674,21 +674,8 @@ class CostStatisticsQueryService:
             )
             for workbench_scope_key in workbench_scope_keys
         ]
-        project_scope = str(scope_key).split(":", 1)[0]
-        dependent_scope_keys = tuple(
-            f"{project_scope}:{workbench_scope_key}"
-            for workbench_scope_key in workbench_scope_keys
-        )
-        dependent_refresh_results = [
-            bool(
-                self._runtime_service.enqueue_read_model_refresh(
-                    dependent_scope_key,
-                    reason=refresh_reason,
-                )
-            )
-            for dependent_scope_key in dependent_scope_keys
-        ]
-        payload["refresh_enqueued"] = any((*refresh_results, *dependent_refresh_results))
+        # ponytail: existing page polling re-enters the Cost gate after Workbench is fresh.
+        payload["refresh_enqueued"] = any(refresh_results)
         return payload
 
     def _cost_statistics_non_fresh_gate_payload(

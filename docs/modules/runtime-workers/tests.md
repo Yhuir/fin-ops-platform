@@ -6,7 +6,7 @@
 
 - `tests/test_runtime_worker.py`：Cost projection 抛出结构化 `workbench_read_model_not_fresh` 时，只 ensure 同月 Workbench，当前 Cost event 短延迟 defer，不进入普通失败/dead-letter。
 - `tests/test_read_model_manifest.py`：Cost manifest 只登记当前实际依赖 `workbench` 与 `bank_detail`。
-- `tests/test_cost_statistics_sql_runtime.py`：同一次页面访问同时 ensure exact Workbench 与 Cost child；Cost worker 在依赖匹配前零 payload/publish I/O，匹配后沿既有 child→parent 收敛。
+- `tests/test_cost_statistics_sql_runtime.py`：页面发现 Workbench stale 时只 ensure exact Workbench，不提前投递必然 defer 的 Cost child；依赖 fresh 后，页面已有的有界自动轮询再 ensure exact Cost child，并沿既有 child→parent 收敛。Cost worker 在依赖匹配前仍保持零 payload/publish I/O。
 
 ## 2026-07-22 Phase 27 当前门禁
 

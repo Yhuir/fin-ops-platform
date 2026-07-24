@@ -1,5 +1,5 @@
 ---
-status: performance_fix_local_verified
+status: dependency_contention_fix_local_verified
 trigger: "Access-triggered read model candidate emitted zero write fan-out but production still showed cost bank-tag blocked for 121s, Workbench visible after 6.13s, and unrelated input-invoice-usage visible after 37.7s."
 created: 2026-07-24
 updated: 2026-07-24
@@ -17,9 +17,9 @@ updated: 2026-07-24
 
 ## Current Focus
 
-- hypothesis: after the Bank/Pending repair reached production, the remaining SLO misses came from two measured shared roots: Cost access enqueued Workbench before Cost and therefore required a second GET, while Workbench persisted three generation tables through large multi-values INSERT statements.
-- test: one Cost access now ensures exact Workbench and matching Cost children; Cost workers fail closed/defer before payload I/O until Workbench versions match; the existing atomic Workbench generation transaction uses PostgreSQL COPY for only the three measured hot tables.
-- expecting: no write fan-out returns; first Cost access converges without a second request, and Workbench generation write tail is materially shorter without a second writer or staging architecture.
+- hypothesis: the remaining production tail came from Cost children being enqueued while their exact Workbench dependencies were known stale; repeated Cost defer/reclaim competed with Workbench and other page rebuilds.
+- test: stale Workbench access now ensures only exact Workbench scopes. The page's existing bounded automatic polling enters the same gate after Workbench converges and only then ensures the exact stale Cost child.
+- expecting: no write fan-out returns; no Cost retry storm competes with Workbench; the existing staged access loop converges Cost child and parent without a coordinator, callback or second refresh path.
 - next_action: close docs/diff gates, commit/push/deploy one candidate, then rerun the approved reversible production fixture plus every affected page SLO/Audit/drain proof.
 - reasoning_checkpoint: production fresh reads were at most 2.32s, while cold Workbench was 5.15s, Turnover 4.25s, Cost all about 7.66s and one Cost project/all access exceeded 120s; handler timings isolated Cost dependency sequencing and Workbench generation persistence rather than HTTP rendering or canonical source-version SQL.
 - tdd_checkpoint: complete; production validation remains.
@@ -54,9 +54,9 @@ updated: 2026-07-24
 
 ## Final performance-root follow-up
 
-- root_cause: Cost query access sequenced Workbench enqueue before Cost enqueue, so the first request could not schedule the complete dependency chain. Workbench generation then wrote hundreds of rows through three large multi-values INSERT statements, producing the remaining measured persistence tail.
-- fix: the same access now ensures exact Workbench and matching Cost child scopes; Cost projection compares canonical/active Workbench versions before payload I/O and lets the existing worker defer contract order the dependency. The existing Workbench atomic transaction uses native psycopg COPY only for rows, groups and group_rows, then activates the generation as before.
-- verification: local unit/service/read-model/worker/architecture/lint and disposable PostgreSQL typed-COPY tests pass. Commit, deploy, production `<3s`, concurrency, zero unrelated I/O, System Audit and queue-drain proof remain open.
+- superseded_candidate: ensuring exact Workbench and matching Cost child scopes in the same access was locally correct but production-unsafe; release `main-232f4515-20260724192504` proved that known-blocked Cost events can retry more than 130 times and create shared contention.
+- current_fix: stale Workbench access ensures only exact Workbench scopes. Cost projection still fails closed before payload I/O, while the existing page polling reaches the exact Cost gate only after Workbench is fresh. The existing Workbench atomic transaction continues to use native psycopg COPY for rows, groups and group_rows.
+- verification: directed Cost service/read-model/worker/architecture regression, lint, docs and diff gates pass. Commit, deploy, production `<3s`, concurrency, zero unrelated I/O, System Audit and queue-drain proof remain open.
 
 ## 2026-07-24 production Cost statistics loop
 
@@ -64,3 +64,10 @@ updated: 2026-07-24
 - root_cause: Bank Detail stores `direction='expense|income'` and the display-only short label `direction_label='支|收'`. The shared Cost bank-flow SQL exposed the short label as `direction`, while every Cost summary/statistics proof counted `支出|收入`. Global statistics therefore failed validation forever, and each access re-enqueued an unchanged parent scope.
 - fix: the single shared bank-flow SQL now maps canonical `direction` to the Cost `支出|收入` contract; the Cost page Audit uses the identical mapping. The parent aggregate source vector carries one version marker so an old invalid statistics payload rebuilds once without invalidating Workbench-backed month shards. No cache, queue, worker, endpoint or fallback was added.
 - verification: focused Cost SQL/Audit/API/App Health tests pass; a disposable PostgreSQL using realistic `支|收` rows proves expense/income summaries and parent statistics. Release `main-a43d0354-20260724191749` proved live page summaries now count 868 expense + 146 income = 1,014, then exposed the missing parent aggregate version because the old parent payload was still skipped as unchanged. Follow-up deployment, `<3s` fixture, System Audit and queue-drain proof remain open.
+
+## 2026-07-24 production dependency contention
+
+- evidence: release `main-232f4515-20260724192504` passed preflight System Audit and kept the confirm write at 284.615ms with zero forbidden fan-out. Concurrent access made Cost `project/all` remain `202` for 121.834s, Workbench visible in 6.541s and Turnover visible in 4.188s. Recovery completed with `recovery_required=false`, but Cost Audit found `active:all` still held Workbench source version `10884` while `active:2026-02` required `10886`; Cost month events showed 133/135 retries.
+- root_cause: the previous first-request optimization enqueued Cost children while their exact Workbench dependencies were known stale. Cost workers correctly failed closed, but the deferred Cost events repeatedly competed with the Workbench rebuilds and left parent shard lineage behind after recovery.
+- fix: delete the premature dependent Cost enqueue. A stale Workbench gate now enqueues only exact Workbench scopes; the page's existing bounded `202` polling enters the same gate again after dependency convergence and then enqueues only the exact stale Cost child. No coordinator, callback, queue path or compatibility branch is added.
+- verification: local directed tests pass; one final production candidate/fixture remains pending.

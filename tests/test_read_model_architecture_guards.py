@@ -252,10 +252,6 @@ DIRECT_REFRESH_ENQUEUE_ALLOWLIST: dict[tuple[str, str], str] = {
         "CostStatisticsQueryService._cost_statistics_non_fresh_gate_payload",
     ): "dependency-bound cost gate mismatch delegates to the same runtime gateway before any payload read.",
     (
-        "backend/src/fin_ops_platform/services/cost_statistics_query_service.py",
-        "CostStatisticsQueryService._workbench_dependency_non_fresh_payload",
-    ): "access-time Workbench mismatch ensures the matching Cost month through the same runtime gateway.",
-    (
         "backend/src/fin_ops_platform/services/cost_statistics_runtime_service.py",
         "CostStatisticsRuntimeService._enqueue_invalidation_scopes",
     ): "cost invalidation records only gateway-accepted durable dirty scopes and owns no local read-model state.",
