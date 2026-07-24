@@ -326,7 +326,19 @@ class RuntimeQueueRepository:
                 ),
             )
             if active_row is not None:
-                return None
+                incoming_metadata = _safe_read_model_refresh_metadata(metadata)
+                active_payload = active_row.get("payload")
+                active_metadata = (
+                    active_payload.get("metadata")
+                    if isinstance(active_payload, dict)
+                    and isinstance(active_payload.get("metadata"), dict)
+                    else {}
+                )
+                if _refresh_metadata_covers(
+                    active_metadata=active_metadata,
+                    incoming_metadata=incoming_metadata,
+                ):
+                    return None
             return self.enqueue_read_model_refresh_in_transaction(
                 transaction=transaction,
                 scope_type=normalized_scope_type,
@@ -2434,6 +2446,36 @@ def _safe_read_model_refresh_metadata(metadata: dict[str, object] | None) -> dic
     if metadata.get("force_refresh") is True:
         result["force_refresh"] = True
     return result
+
+
+def _refresh_metadata_covers(
+    *,
+    active_metadata: dict[str, object],
+    incoming_metadata: dict[str, object],
+) -> bool:
+    incoming_row_ids = set(_normalized_metadata_list(incoming_metadata.get("row_ids")))
+    active_row_ids = set(_normalized_metadata_list(active_metadata.get("row_ids")))
+    incoming_case_ids = set(_normalized_metadata_list(incoming_metadata.get("case_ids")))
+    active_case_ids = set(_normalized_metadata_list(active_metadata.get("case_ids")))
+    incoming_deltas = _normalized_relation_deltas(incoming_metadata.get("relation_deltas"))
+    active_deltas = _normalized_relation_deltas(active_metadata.get("relation_deltas"))
+    incoming_is_force = incoming_metadata.get("force_refresh") is True
+    active_is_force = active_metadata.get("force_refresh") is True
+    incoming_is_partial = bool(incoming_row_ids or incoming_case_ids or incoming_deltas)
+    active_is_partial = bool(active_row_ids or active_case_ids or active_deltas)
+    if incoming_is_force:
+        return active_is_force
+    if active_is_force:
+        return True
+    if not incoming_is_partial:
+        return not active_is_partial
+    if not active_is_partial:
+        return True
+    if not incoming_row_ids.issubset(active_row_ids):
+        return False
+    if not incoming_case_ids.issubset(active_case_ids):
+        return False
+    return all(active_deltas.get(case_id) == delta for case_id, delta in incoming_deltas.items())
 
 
 def _merge_refresh_payload_sql(existing_payload: str, incoming_payload: str) -> str:

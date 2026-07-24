@@ -29,6 +29,23 @@ class TurnoverLedgerReadModelRepositoryPort:
         )
         return dict(payload) if isinstance(payload, dict) else None
 
+    def get_turnover_ledger_freshness_view(self) -> dict[str, Any] | None:
+        payload = self._repository.get_turnover_ledger_freshness_view()
+        return dict(payload) if isinstance(payload, dict) else None
+
+    def list_turnover_manual_closure_changes(
+        self,
+        *,
+        updated_after: str,
+    ) -> list[dict[str, Any]]:
+        return [
+            dict(item)
+            for item in self._repository.list_turnover_manual_closure_changes(
+                updated_after=updated_after,
+            )
+            if isinstance(item, dict)
+        ]
+
     def save_turnover_ledger_rows(self, payload: dict[str, Any], *, scope_key: str | None = None) -> None:
         self._repository.save_turnover_ledger_rows(payload, scope_key=scope_key)
 

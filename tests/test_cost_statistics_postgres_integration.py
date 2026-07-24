@@ -176,6 +176,9 @@ class CostStatisticsPostgresIntegrationTests(unittest.TestCase):
         self.assertEqual(gate["workbench_refresh_scope_keys"], [])
         self.assertEqual(gate["child_refresh_scope_keys"], ["active:2026-03"])
         self.assertIn("cost_statistics_parent_child_scope_not_fresh", gate["stale_reasons"])
+        self.assertEqual(gate["bank_flow_refresh_status"], "fresh")
+        self.assertEqual(gate["bank_flow_bank_detail_refresh_scope_keys"], [])
+        self.assertEqual(gate["bank_flow_child_refresh_scope_keys"], [])
 
     def test_split_transaction_detail_aggregates_all_cost_allocations(self) -> None:
         self.connection.execute(

@@ -5071,11 +5071,11 @@ class WorkbenchSqlRuntimeTests(unittest.TestCase):
         payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, int(HTTPStatus.OK))
-        self.assertEqual(payload["groups"][0]["group_id"], "fresh-db")
-        self.assertEqual(redis.get_text_calls, ["workbench:groups:version:all"])
+        self.assertEqual(payload["groups"], [])
+        self.assertEqual(redis.get_text_calls, [])
         self.assertEqual(redis.get_json_calls, [])
         self.assertEqual(redis.set_json_calls, [])
-        self.assertEqual(page_calls[0]["scope_key"], "all")
+        self.assertEqual(page_calls, [])
         self.assertEqual(payload["read_model_status"], "refreshing")
         self.assertEqual(queue.refreshes, [])
 

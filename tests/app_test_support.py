@@ -60,6 +60,22 @@ class _LocalTurnoverReadModelFixtureRepository:
         result["refresh_status"] = "fresh"
         return result
 
+    def get_turnover_ledger_freshness_view(self) -> dict[str, object]:
+        return {
+            "source_versions": dict(
+                self._application._turnover_ledger_source_versions()  # noqa: SLF001
+            ),
+            "refresh_status": "fresh",
+        }
+
+    def list_turnover_manual_closure_changes(
+        self,
+        *,
+        updated_after: str,
+    ) -> list[dict[str, object]]:
+        del updated_after
+        return []
+
 
 def build_local_state_application(*args, **kwargs):
     data_dir = kwargs.get("data_dir")

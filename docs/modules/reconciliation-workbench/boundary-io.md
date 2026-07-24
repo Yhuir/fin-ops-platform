@@ -36,6 +36,8 @@
 | page relation dependency | `WorkbenchQueryFacade` -> `WorkbenchRelationReadFacade` | combined initial GET 在读取/写入 Redis page cache 前检查页面登记的共享 relation distribution proof。月份请求只检查该月；`all` 先批量枚举 canonical object、active relation 与已有 projection 的 concrete months，再以固定查询数比较全部 scope，并返回真正 mismatch 的 `refresh_scope_keys`。non-fresh 时 enqueue relation mismatch scopes，并在同一次页面访问中只 enqueue 相同的精确 Workbench 月份 scope，让两者并行收敛且仍由 worker freshness gate 阻止半成品发布；`all` 禁止退化成 `workbench:all` 全月份重建。freshness gate 命中后立即返回轻量 non-fresh 首屏契约，禁止继续执行旧 generation 的完整首屏 SQL，worker 收敛后只读取一次 fresh 首屏。后续 `/groups` 继续绑定 initial 返回的 Workbench generation version，不重复执行全页 dependency proof。禁止关系写路径 fan-out、逐月 N+1 或 relation `all` 伪 projection。 |
 | exact ETC relation enrichment scopes | `PostgresWorkbenchFormalRelationFactRepository` | candidate 只输出 OA 月份与 ETC batch 月份；已知月份时禁止附加 `all`。`month=all` 查询直接组合 active 月 generation，因此 exact enrichment 只需刷新受影响月份；只有完全无法解析月份的通用 relation 合同才允许 `all` fan-out command |
 
+`/groups` 在 generation/version proof 不是 `fresh` 时必须立即返回空 groups、分页元数据、freshness status 与版本；该分支不得读取 Redis、生成 page cache key，也不得调用 `get_workbench_groups_page(...)`。只有 proof 明确 fresh 才允许执行有界 page SQL。该早停合同与 combined initial 一致，防止刷新中的旧 generation 继续占用数据库并拖慢 worker。
+
 ## 输出 I/O
 
 | 输出 | Consumer | 合同 |

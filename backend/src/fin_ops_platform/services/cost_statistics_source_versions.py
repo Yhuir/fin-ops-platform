@@ -56,3 +56,17 @@ def cost_statistics_semantic_source_versions(source_versions: dict[str, Any]) ->
             if key not in {"source_version", "workbench_relation_source_versions"}
         }
     return normalized
+
+
+def cost_statistics_bank_flow_source_versions(source_versions: dict[str, Any]) -> dict[str, Any]:
+    """Return the source proof consumed by Bank Detail-backed Cost views."""
+
+    normalized = cost_statistics_semantic_source_versions(source_versions)
+    for key in (
+        "workbench_scope_key",
+        "workbench_read_model_schema_version",
+        "workbench_source_versions",
+        "oa_projection_sync_version",
+    ):
+        normalized.pop(key, None)
+    return normalized

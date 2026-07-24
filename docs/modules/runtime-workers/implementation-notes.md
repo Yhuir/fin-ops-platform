@@ -1,5 +1,10 @@
 # Runtime Worker 实施记录
 
+## 2026-07-24 - exact scope refresh 覆盖关系
+
+- ensure/wakeup 原子去重不再只按 scope 判断：同一 scope 的覆盖顺序是 `force > full scope > partial delta`。新 delta/full/force 若未被 active event 语义覆盖，必须原子合并或创建 processing 后续事件；相同任务才 no-op。
+- 该变化只在既有 PostgreSQL durable queue/repository 边界内完成，不增加协调器、transport、worker 或状态事实源；真实 PostgreSQL relation metadata merge 与定向 queue tests 已通过。
+
 
 > 本文件只保存提炼后的实施记录，不保存原始 Codex prompt、阶段性闲聊或临时探索日志。完成后的长期事实应沉淀到 `README.md`、`state-machine.md`、`tests.md` 或对应长期事实源。
 

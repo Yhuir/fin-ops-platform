@@ -181,6 +181,7 @@ class TurnoverLedgerPostgresIntegrationTests(unittest.TestCase):
     def test_all_scope_aggregates_child_dirty_status_and_failed_takes_precedence(self) -> None:
         self.repository.save_turnover_ledger_rows(
             {
+                "source_versions": self.source_versions,
                 "rows": [
                     {
                         "relation_id": "turnover-dirty",
@@ -219,9 +220,10 @@ class TurnoverLedgerPostgresIntegrationTests(unittest.TestCase):
         stale = self.repository.list_turnover_ledger_view(scope_key="all")
         self.assertEqual(stale["refresh_status"], "stale")
 
-    def test_mixed_source_versions_are_proved_without_loading_every_payload(self) -> None:
+    def test_all_scope_uses_atomic_scope_proof_when_child_rows_have_mixed_versions(self) -> None:
         self.repository.save_turnover_ledger_rows(
             {
+                "source_versions": self.source_versions,
                 "rows": [
                     {
                         "relation_id": "turnover-version-old",
@@ -248,8 +250,8 @@ class TurnoverLedgerPostgresIntegrationTests(unittest.TestCase):
 
         payload = self.repository.list_turnover_ledger_view(scope_key="all")
 
-        self.assertEqual(payload["source_versions"], {})
-        self.assertTrue(payload["source_versions_mixed"])
+        self.assertEqual(payload["source_versions"], self.source_versions)
+        self.assertNotIn("source_versions_mixed", payload)
 
     def test_relation_source_bundle_returns_rows_and_version_from_one_canonical_scope(self) -> None:
         self.connection.execute(

@@ -13,6 +13,7 @@ from openpyxl import Workbook
 from fin_ops_platform.services.app_settings_service import COST_STATISTICS_UNCATEGORIZED_TAG_CODE
 from fin_ops_platform.services.cost_statistics_source_versions import (
     COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+    cost_statistics_bank_flow_source_versions,
     cost_statistics_semantic_source_versions,
     cost_statistics_source_versions,
 )
@@ -120,6 +121,11 @@ class CostStatisticsQueryService:
             missing_reason="api_page_miss",
             stale_reason="api_page_stale",
             source_mismatch_reason="api_page_source_versions_stale",
+            dependency_profile=(
+                "bank_flow"
+                if normalized_view == "bank_tag"
+                else "workbench"
+            ),
         )
         if non_fresh_payload is not None:
             return non_fresh_payload, False, "", False
@@ -431,9 +437,11 @@ class CostStatisticsQueryService:
         missing_reason: str,
         stale_reason: str,
         source_mismatch_reason: str,
+        dependency_profile: str = "workbench",
     ) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
         scope_month = str(scope_key).split(":", 1)[1] if ":" in str(scope_key) else ""
-        if scope_month and scope_month != "all":
+        bank_flow_profile = dependency_profile == "bank_flow"
+        if not bank_flow_profile and scope_month and scope_month != "all":
             expected_workbench_versions, active_workbench_versions = (
                 self._workbench_dependency_versions_provider(scope_month)
             )
@@ -454,7 +462,7 @@ class CostStatisticsQueryService:
                         f"workbench_dependency_{reason}" for reason in workbench_stale_reasons
                     ),
                 )
-        elif scope_month == "all":
+        elif not bank_flow_profile and scope_month == "all":
             expected_by_scope, active_by_scope = (
                 self._workbench_dependency_versions_by_scope_provider()
             )
@@ -493,16 +501,30 @@ class CostStatisticsQueryService:
                 stale_reasons=(),
             )
 
-        gate_status = str(gate.get("refresh_status") or "stale").strip().lower()
+        gate_status = str(
+            (
+                gate.get("bank_flow_refresh_status")
+                if bank_flow_profile
+                else gate.get("refresh_status")
+            )
+            or "stale"
+        ).strip().lower()
         gate_reasons = tuple(
             str(reason).strip()
-            for reason in list(gate.get("stale_reasons") or [])
+            for reason in list(
+                (
+                    gate.get("bank_flow_stale_reasons")
+                    if bank_flow_profile
+                    else gate.get("stale_reasons")
+                )
+                or []
+            )
             if str(reason).strip()
         )
         workbench_refresh_scope_keys = self._normalized_refresh_scope_keys(
             gate.get("workbench_refresh_scope_keys")
         )
-        if scope_month == "all" and workbench_refresh_scope_keys:
+        if not bank_flow_profile and scope_month == "all" and workbench_refresh_scope_keys:
             return gate, None, self._workbench_dependency_non_fresh_payload(
                 scope_key=scope_key,
                 workbench_scope_keys=workbench_refresh_scope_keys,
@@ -510,7 +532,11 @@ class CostStatisticsQueryService:
                 stale_reasons=gate_reasons or ("workbench_dependency_not_fresh",),
             )
         bank_detail_refresh_scope_keys = self._normalized_refresh_scope_keys(
-            gate.get("bank_detail_refresh_scope_keys")
+            gate.get(
+                "bank_flow_bank_detail_refresh_scope_keys"
+                if bank_flow_profile
+                else "bank_detail_refresh_scope_keys"
+            )
         )
         if bank_detail_refresh_scope_keys:
             return gate, None, self._bank_detail_dependency_non_fresh_payload(
@@ -519,15 +545,20 @@ class CostStatisticsQueryService:
                 empty_payload_factory=empty_payload_factory,
                 stale_reasons=gate_reasons or ("bank_detail_dependency_not_fresh",),
             )
+        child_refresh_scope_keys = self._normalized_refresh_scope_keys(
+            gate.get(
+                "bank_flow_child_refresh_scope_keys"
+                if bank_flow_profile
+                else "child_refresh_scope_keys"
+            )
+        )
         if gate_status != "fresh":
             return gate, None, self._cost_statistics_non_fresh_gate_payload(
                 scope_key=scope_key,
                 empty_payload_factory=empty_payload_factory,
                 refresh_reason=stale_reason,
                 stale_reasons=gate_reasons,
-                refresh_scope_keys=self._normalized_refresh_scope_keys(
-                    gate.get("child_refresh_scope_keys")
-                ),
+                refresh_scope_keys=child_refresh_scope_keys,
             )
 
         expected_source_versions = cost_statistics_source_versions(
@@ -548,18 +579,23 @@ class CostStatisticsQueryService:
                 else None
             ),
         )
+        source_version_filter = (
+            cost_statistics_bank_flow_source_versions
+            if bank_flow_profile
+            else cost_statistics_semantic_source_versions
+        )
         freshness = resolve_read_model_freshness(
             expected_schema_version=COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
             actual_schema_version=gate.get("schema_version"),
-            expected_source_versions=cost_statistics_semantic_source_versions(expected_source_versions),
-            actual_source_versions=cost_statistics_semantic_source_versions(
+            expected_source_versions=source_version_filter(expected_source_versions),
+            actual_source_versions=source_version_filter(
                 gate.get("source_versions")
                 if isinstance(gate.get("source_versions"), dict)
                 else {}
             ),
         )
         if freshness.status == "fresh":
-            return gate, cost_statistics_semantic_source_versions(expected_source_versions), None
+            return gate, source_version_filter(expected_source_versions), None
         refresh_reason = (
             source_mismatch_reason
             if any(reason.endswith("_missing") or reason.endswith("_mismatch") for reason in freshness.stale_reasons)

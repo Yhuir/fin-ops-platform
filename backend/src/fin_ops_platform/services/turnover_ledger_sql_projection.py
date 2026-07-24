@@ -59,12 +59,18 @@ class TurnoverLedgerSqlProjectionBuilder:
             raise ValueError("Turnover relation delta requires one month scope and affected row ids.")
         read_repository = self._read_repository
         workbench_relation_source_repository = self._workbench_relation_source_repository
-        if read_repository is None or workbench_relation_source_repository is None:
+        source_versions_provider = self._source_versions_provider
+        if (
+            read_repository is None
+            or workbench_relation_source_repository is None
+            or source_versions_provider is None
+        ):
             built = self._build_runtime_dependencies()
             read_repository = read_repository or built["read_repository"]
             workbench_relation_source_repository = (
                 workbench_relation_source_repository or built.get("workbench_relation_source_repository")
             )
+            source_versions_provider = source_versions_provider or built["source_versions_provider"]
         load_delta = getattr(read_repository, "load_turnover_ledger_relation_delta", None)
         save_delta = getattr(read_repository, "save_turnover_ledger_relation_delta", None)
         if not callable(load_delta) or not callable(save_delta):
@@ -82,11 +88,7 @@ class TurnoverLedgerSqlProjectionBuilder:
                 source_version=source_version,
             )
             return {**result, "relation_delta": False, "relation_delta_reason": "source_versions_mixed"}
-        source_versions = (
-            dict(existing.get("source_versions"))
-            if isinstance(existing.get("source_versions"), dict)
-            else {}
-        )
+        source_versions = dict(source_versions_provider())
         expected_generation = max(int(existing.get("generation") or 0), 0)
         rows = [dict(row) for row in list(existing.get("rows") or []) if isinstance(row, dict)]
         rows = self._with_workbench_relation_context(

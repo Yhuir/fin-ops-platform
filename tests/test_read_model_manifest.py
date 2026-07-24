@@ -416,6 +416,8 @@ class ReadModelManifestTests(unittest.TestCase):
             "list_bank_flow_rule_batch_rows",
             "bank_flow_rule_batch_source_versions_summary",
             "list_turnover_ledger_view",
+            "get_turnover_ledger_freshness_view",
+            "list_turnover_manual_closure_changes",
             "save_turnover_ledger_rows",
             "turnover_ledger_generation",
             "acknowledge_unchanged_turnover_ledger_scope",
@@ -622,6 +624,8 @@ class ReadModelManifestTests(unittest.TestCase):
         }
         required_turnover_ports = {
             "list_turnover_ledger_view",
+            "get_turnover_ledger_freshness_view",
+            "list_turnover_manual_closure_changes",
             "save_turnover_ledger_rows",
             "turnover_ledger_generation",
             "acknowledge_unchanged_turnover_ledger_scope",

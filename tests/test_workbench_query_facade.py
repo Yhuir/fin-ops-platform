@@ -1088,13 +1088,7 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
                 return {"read_model_status": "refreshing", "dirty_scopes": [{"scope_key": "all"}]}
 
             def get_workbench_groups_page(self, **_kwargs: object) -> dict[str, object]:
-                return {
-                    "month": "all",
-                    "zone": "unpaired",
-                    "groups": [{"group_id": "fresh-db"}],
-                    "read_model_status": "fresh",
-                    "source_versions": {"builder": "v1"},
-                }
+                raise AssertionError("refreshing status must stop before the heavy page query")
 
         cache_key = "workbench:v7:groups:digest"
         redis = RedisRecorder(
@@ -1127,7 +1121,9 @@ class WorkbenchQueryFacadeTests(unittest.TestCase):
         result = facade.groups("all", zone="unpaired")
 
         self.assertEqual(result.status_code, HTTPStatus.OK)
-        self.assertEqual(result.payload["groups"][0]["group_id"], "fresh-db")
+        self.assertEqual(result.payload["groups"], [])
+        self.assertEqual(result.payload["read_model_status"], "refreshing")
+        self.assertEqual(redis.get_text_calls, [])
         self.assertEqual(redis.get_json_calls, [])
         self.assertEqual(redis.set_json_calls, [])
         self.assertEqual(queue.refreshes, [])

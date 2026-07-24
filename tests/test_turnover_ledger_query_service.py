@@ -20,9 +20,31 @@ class FakeQueue:
 
 
 class FakeRepository:
-    def __init__(self, payload: dict[str, object] | None) -> None:
+    def __init__(
+        self,
+        payload: dict[str, object] | None,
+        *,
+        changes: list[dict[str, object]] | None = None,
+    ) -> None:
         self.payload = payload
+        self.changes = list(changes or [])
         self.calls: list[dict[str, object]] = []
+
+    def get_turnover_ledger_freshness_view(self) -> dict[str, object] | None:
+        if not isinstance(self.payload, dict):
+            return None
+        return {
+            "source_versions": dict(self.payload.get("source_versions") or {}),
+            "refresh_status": self.payload.get("refresh_status") or "fresh",
+        }
+
+    def list_turnover_manual_closure_changes(
+        self,
+        *,
+        updated_after: str,
+    ) -> list[dict[str, object]]:
+        self.change_updated_after = updated_after
+        return list(self.changes)
 
     def list_turnover_ledger_view(self, **kwargs: object) -> dict[str, object] | None:
         self.calls.append(dict(kwargs))
@@ -37,7 +59,11 @@ class TurnoverLedgerQueryServiceTests(unittest.TestCase):
         self.assertIn("sum(pending_repayment_amount)", source)
         self.assertIn("read_model.turnover_ledger_scopes", source)
         self.assertIn("scope_summary as materialized", source)
-        self.assertLess(source.index("from base\n"), source.index("from normalized\n"))
+        version_proof_source = source.partition("), version_proof as (")[2].partition(
+            "), statistics as ("
+        )[0]
+        self.assertIn("exists (select 1 from scope_summary)", version_proof_source)
+        self.assertNotIn("from base", version_proof_source)
         self.assertNotIn("jsonb_array_elements", source)
         self.assertNotIn("statistics_flows", source)
         self.assertNotIn("raw_payload", source)
@@ -83,7 +109,7 @@ class TurnoverLedgerQueryServiceTests(unittest.TestCase):
 
         self.assertEqual(payload["read_model_status"], "refreshing")
         self.assertEqual(payload["refresh_reason"], "source_version_mismatch")
-        self.assertEqual(payload["rows"], [{"relation_id": "stale"}])
+        self.assertEqual(payload["rows"], [])
         self.assertEqual(queue.enqueued, [{"scope_type": "turnover_ledger", "scope_key": "all", "reason": "api_stale"}])
 
     def test_fresh_sql_read_model_is_returned_without_legacy_rebuild(self) -> None:
@@ -112,7 +138,7 @@ class TurnoverLedgerQueryServiceTests(unittest.TestCase):
         self.assertEqual(repository.calls[0]["page"], 2)
         self.assertEqual(queue.enqueued, [])
 
-    def test_mixed_all_scope_row_versions_fail_closed_even_when_dirty_scope_is_clean(self) -> None:
+    def test_scope_proof_mismatch_fails_closed_even_when_row_payload_claims_fresh(self) -> None:
         queue = FakeQueue()
         repository = FakeRepository(
             {
@@ -145,7 +171,7 @@ class TurnoverLedgerQueryServiceTests(unittest.TestCase):
             [{"scope_type": "turnover_ledger", "scope_key": "all", "reason": "api_stale"}],
         )
 
-    def test_mixed_all_scope_row_versions_still_refresh_when_dirty_scope_is_active(self) -> None:
+    def test_active_exact_scope_returns_lightweight_refreshing_payload_without_duplicate_enqueue(self) -> None:
         queue = FakeQueue()
         repository = FakeRepository(
             {
@@ -153,7 +179,7 @@ class TurnoverLedgerQueryServiceTests(unittest.TestCase):
                 "pagination": {"page": 1, "page_size": 50, "total": 1},
                 "source_versions": {},
                 "source_versions_mixed": True,
-                "refresh_status": "processing",
+                "refresh_status": "refreshing",
                 "read_model_status": "fresh",
             }
         )
@@ -166,8 +192,77 @@ class TurnoverLedgerQueryServiceTests(unittest.TestCase):
         payload = service.list_ledger(family="all", direction="all", status=None, page=1, page_size=50)
 
         self.assertEqual(payload["read_model_status"], "refreshing")
-        self.assertEqual(payload["refresh_reason"], "source_version_mismatch")
+        self.assertEqual(payload["refresh_reason"], "api_stale")
         self.assertEqual(payload["source_versions"], {})
+        self.assertEqual(payload["rows"], [])
+        self.assertEqual(queue.enqueued, [])
+
+    def test_manual_closure_mismatch_enqueues_exact_month_deltas_instead_of_all(self) -> None:
+        queue = FakeQueue()
+        actual_closure = {
+            "source": "workbench_pair_relations",
+            "scope_key": "all",
+            "relation_count": 2,
+            "relation_updated_at": "2026-07-24 10:00:00+00",
+        }
+        expected_closure = {
+            **actual_closure,
+            "relation_count": 3,
+            "relation_updated_at": "2026-07-24 10:01:00+00",
+        }
+        repository = FakeRepository(
+            {
+                "rows": [{"relation_id": "stale"}],
+                "source_versions": {
+                    "turnover_ledger_schema_version": "same",
+                    "turnover_manual_closure_source_version": actual_closure,
+                },
+            },
+            changes=[
+                {
+                    "case_id": "turnover:case-1",
+                    "status": "active",
+                    "row_ids": ["bank-1", "bank-2"],
+                    "affected_months": ["2026-02", "2026-03"],
+                    "updated_at": "2026-07-24 10:01:00+00",
+                }
+            ],
+        )
+        service = TurnoverLedgerQueryService(
+            read_repository=repository,
+            refresh_queue_repository=queue,
+            source_versions_provider=lambda: {
+                "turnover_ledger_schema_version": "same",
+                "turnover_manual_closure_source_version": expected_closure,
+            },
+        )
+
+        payload = service.list_ledger(
+            family="all",
+            direction="all",
+            status=None,
+            page=1,
+            page_size=50,
+        )
+
+        self.assertEqual(payload["read_model_status"], "refreshing")
+        self.assertEqual(payload["refresh_reason"], "api_relation_delta")
+        self.assertEqual(payload["refresh_scope_keys"], ["2026-02", "2026-03"])
+        self.assertEqual(repository.calls, [])
+        self.assertEqual(repository.change_updated_after, "2026-07-24 10:00:00+00")
+        self.assertEqual(
+            [(item["scope_key"], item["reason"]) for item in queue.enqueued],
+            [
+                ("2026-02", "api_relation_delta"),
+                ("2026-03", "api_relation_delta"),
+            ],
+        )
+        self.assertTrue(
+            all(
+                item["metadata"]["row_ids"] == ["bank-1", "bank-2"]
+                for item in queue.enqueued
+            )
+        )
 
     def test_missing_required_sql_read_model_returns_empty_refreshing_payload_and_enqueues_miss(self) -> None:
         queue = FakeQueue()
@@ -217,6 +312,23 @@ class TurnoverLedgerReadModelRepositoryPortTests(unittest.TestCase):
                 self.calls.append(("list_turnover_ledger_view", dict(kwargs)))
                 return {"rows": [{"relation_id": "turnover-1"}]}
 
+            def get_turnover_ledger_freshness_view(self) -> dict[str, object]:
+                self.calls.append(("get_turnover_ledger_freshness_view", {}))
+                return {"source_versions": {"proof": "v1"}, "refresh_status": "fresh"}
+
+            def list_turnover_manual_closure_changes(
+                self,
+                *,
+                updated_after: str,
+            ) -> list[dict[str, object]]:
+                self.calls.append(
+                    (
+                        "list_turnover_manual_closure_changes",
+                        {"updated_after": updated_after},
+                    )
+                )
+                return [{"case_id": "case-1"}]
+
             def save_turnover_ledger_rows(self, payload: dict[str, object], *, scope_key: str | None = None) -> None:
                 self.calls.append(
                     (
@@ -254,6 +366,14 @@ class TurnoverLedgerReadModelRepositoryPortTests(unittest.TestCase):
             ),
             {"rows": [{"relation_id": "turnover-1"}]},
         )
+        self.assertEqual(
+            port.get_turnover_ledger_freshness_view(),
+            {"source_versions": {"proof": "v1"}, "refresh_status": "fresh"},
+        )
+        self.assertEqual(
+            port.list_turnover_manual_closure_changes(updated_after="v1"),
+            [{"case_id": "case-1"}],
+        )
         port.save_turnover_ledger_rows({"rows": []}, scope_key="all")
 
         self.assertFalse(hasattr(port, "clear_turnover_ledger_rows"))
@@ -275,6 +395,14 @@ class TurnoverLedgerReadModelRepositoryPortTests(unittest.TestCase):
                         "page_size": 25,
                         "scope_key": "all",
                     },
+                ),
+                (
+                    "get_turnover_ledger_freshness_view",
+                    {},
+                ),
+                (
+                    "list_turnover_manual_closure_changes",
+                    {"updated_after": "v1"},
                 ),
                 (
                     "save_turnover_ledger_rows",

@@ -15,6 +15,7 @@ from fin_ops_platform.services.cost_statistics_read_model_refresh import CostSta
 from fin_ops_platform.services.cost_statistics_read_model_repository import CostStatisticsReadModelRepositoryPort
 from fin_ops_platform.services.cost_statistics_source_versions import (
     COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+    cost_statistics_bank_flow_source_versions,
     cost_statistics_semantic_source_versions,
     cost_statistics_source_versions,
 )
@@ -241,6 +242,10 @@ def cost_statistics_fresh_gate(
         "published_source_version": published_source_version,
         "dirty_source_version": published_source_version,
         "refresh_status": refresh_status,
+        "bank_flow_refresh_status": refresh_status,
+        "bank_flow_stale_reasons": list(stale_reasons or []),
+        "bank_flow_bank_detail_refresh_scope_keys": [],
+        "bank_flow_child_refresh_scope_keys": [],
         "statistics": {
             "transaction_count": 0,
             "expense_transaction_count": 0,
@@ -453,6 +458,64 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
             [("2026-05", "cost_statistics_workbench_dependency_stale")],
         )
         self.assertEqual(runtime.cost_refreshes, [])
+
+    def test_bank_tag_access_reads_fresh_bank_flow_rows_while_workbench_refreshes(self) -> None:
+        workbench_refreshes: list[tuple[str, str]] = []
+        source_versions = _cost_statistics_source_versions_fixture("active:2026-05")
+
+        class Repository:
+            def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
+                gate = cost_statistics_fresh_gate(
+                    scope_key=scope_key,
+                    source_versions=source_versions,
+                    refresh_status="refreshing",
+                    stale_reasons=["cost_statistics_dependency_refreshing"],
+                )
+                gate["bank_flow_refresh_status"] = "fresh"
+                gate["bank_flow_stale_reasons"] = []
+                return gate
+
+            def get_cost_statistics_page(self, **_kwargs: object) -> dict[str, object]:
+                return {
+                    "summary": {"row_count": 1, "transaction_count": 1, "total_amount": "88.00"},
+                    "available_years": [2026],
+                    "primary_facets": [],
+                    "secondary_facets": [],
+                    "rows": [{"transaction_id": "bank-1", "amount": "88.00"}],
+                    "row_count": 1,
+                    "next_cursor_values": None,
+                }
+
+        expected_versions = {"builder": "workbench-month-v6", "relation": "v2"}
+        active_versions = {"builder": "workbench-month-v6", "relation": "v1"}
+        service = CostStatisticsQueryService(
+            runtime_service=CostStatisticsRuntimeStub(),
+            sql_read_repository=Repository(),
+            tag_selection_mapper=AppSettingsService.cost_statistics_tag_selection_payload_from_settings,
+            workbench_dependency_versions_provider=lambda _scope_key: (
+                expected_versions,
+                active_versions,
+            ),
+            workbench_dependency_versions_by_scope_provider=(
+                _fresh_workbench_dependency_versions_by_scope
+            ),
+            workbench_refresh_enqueuer=lambda scope_key, *, reason: (
+                workbench_refreshes.append((scope_key, reason)) or True
+            ),
+        )
+
+        payload, _cache_hit, _etag, _not_modified = service.get_explorer_page(
+            scope="2026-05",
+            view="bank_tag",
+            project_scope="active",
+            filters={},
+            cursor=None,
+            page_size=50,
+        )
+
+        self.assertEqual(payload["read_model_status"], "fresh", payload)
+        self.assertEqual(payload["rows"][0]["transaction_id"], "bank-1")
+        self.assertEqual(workbench_refreshes, [])
 
     def test_all_access_ignores_unrelated_active_dependency_events(self) -> None:
         class Repository:
@@ -1385,6 +1448,10 @@ class CostStatisticsReadConnection:
             row.setdefault("parent_child_has_failed", False)
             row.setdefault("parent_child_has_active", False)
             row.setdefault("parent_source_shards_match", True)
+            row.setdefault("bank_flow_bank_detail_refresh_scope_keys", [])
+            row.setdefault("bank_flow_child_refresh_scope_keys", [])
+            row.setdefault("bank_flow_has_failed", False)
+            row.setdefault("bank_flow_has_active", False)
             row.setdefault("bank_detail_status", "fresh")
             row.setdefault("bank_detail_source_version", 1)
             row.setdefault("bank_detail_source_versions", {"source_version": 1})
@@ -2839,6 +2906,28 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
                 self.assertEqual(gate["refresh_status"], expected_status)
                 self.assertIn(expected_reason, gate["stale_reasons"])
 
+    def test_repository_bank_flow_gate_ignores_workbench_dirty_state_only(self) -> None:
+        connection = CostStatisticsReadConnection(
+            read_model_row={
+                "scope_key": "active:2026-05",
+                "schema_version": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+                "source_versions": _cost_statistics_source_versions_fixture("active:2026-05"),
+                "published_source_version": 7,
+                "workbench_dirty_status": "processing",
+            },
+            dirty_status="done",
+            dirty_source_version=7,
+        )
+
+        gate = PostgresReadModelRepository(connection).get_cost_statistics_freshness_gate(
+            scope_key="active:2026-05"
+        )
+
+        self.assertEqual(gate["refresh_status"], "refreshing")
+        self.assertEqual(gate["bank_flow_refresh_status"], "fresh")
+        self.assertEqual(gate["bank_flow_bank_detail_refresh_scope_keys"], [])
+        self.assertEqual(gate["bank_flow_child_refresh_scope_keys"], [])
+
     def test_repository_gets_cost_statistics_transaction_by_indexed_identity(self) -> None:
         connection = CostStatisticsReadConnection(
             cost_rows=[
@@ -3766,6 +3855,34 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
                     },
                 }
             ),
+        )
+
+    def test_bank_flow_versions_exclude_workbench_and_keep_bank_business_proof(self) -> None:
+        payload = cost_statistics_bank_flow_source_versions(
+            {
+                "cost_statistics_read_model_schema_version": "v11",
+                "workbench_scope_key": "2026-05",
+                "workbench_read_model_schema_version": "workbench-v6",
+                "workbench_source_versions": {"source_version": 20},
+                "oa_projection_sync_version": "oa-v3",
+                "bank_auto_tag_rules_version": 7,
+                "bank_detail_source_versions": {
+                    "source_version": 11,
+                    "bank_detail_source_signature": "business-v2",
+                    "workbench_relation_source_versions": {"source_version": 31},
+                },
+            }
+        )
+
+        self.assertEqual(
+            payload,
+            {
+                "cost_statistics_read_model_schema_version": "v11",
+                "bank_auto_tag_rules_version": 7,
+                "bank_detail_source_versions": {
+                    "bank_detail_source_signature": "business-v2",
+                },
+            },
         )
 
     def test_cost_statistics_api_rejects_snapshot_built_from_old_workbench_generation(self) -> None:

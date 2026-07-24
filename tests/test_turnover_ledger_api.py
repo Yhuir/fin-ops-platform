@@ -667,6 +667,12 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                     "source_versions": {"turnover_ledger_schema_version": "old"},
                 }
 
+            def get_turnover_ledger_freshness_view(self) -> dict[str, object]:
+                return {
+                    "source_versions": {"turnover_ledger_schema_version": "old"},
+                    "refresh_status": "fresh",
+                }
+
             def save_turnover_ledger_rows(self, payload: dict[str, object], **_kwargs: object) -> None:
                 self.saved_payload = payload
 
@@ -685,7 +691,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
             payload = json.loads(response.body)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["rows"][0]["relation_id"], "stale_sql_row")
+        self.assertEqual(payload["rows"], [])
         self.assertEqual(payload["read_model_status"], "refreshing")
         self.assertTrue(payload["refresh_enqueued"])
         self.assertEqual(payload["refresh_reason"], "source_version_mismatch")
@@ -718,6 +724,12 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                     "read_model_status": "fresh",
                     "source_versions": dict(self.source_versions),
                     "generation": 11,
+                }
+
+            def get_turnover_ledger_freshness_view(self) -> dict[str, object]:
+                return {
+                    "source_versions": dict(self.source_versions),
+                    "refresh_status": "fresh",
                 }
 
             def save_turnover_ledger_rows(self, payload: dict[str, object], **_kwargs: object) -> None:
@@ -765,6 +777,12 @@ class TurnoverLedgerApiTests(unittest.TestCase):
                     "source_versions": {"turnover_ledger_schema_version": "old"},
                 }
 
+            def get_turnover_ledger_freshness_view(self) -> dict[str, object]:
+                return {
+                    "source_versions": {"turnover_ledger_schema_version": "old"},
+                    "refresh_status": "fresh",
+                }
+
             def save_turnover_ledger_rows(self, payload: dict[str, object], **_kwargs: object) -> None:
                 raise AssertionError("GET must not save turnover ledger rows")
 
@@ -782,7 +800,7 @@ class TurnoverLedgerApiTests(unittest.TestCase):
         self.assertEqual(payload["read_model_status"], "refreshing")
         self.assertTrue(payload["refresh_enqueued"])
         self.assertEqual(payload["refresh_reason"], "source_version_mismatch")
-        self.assertEqual(payload["groups"][0]["counterparty_name"], "旧SQL对方")
+        self.assertEqual(payload["groups"], [])
         self.assertIn(("turnover_ledger", "all", "api_stale"), queue.enqueued)
 
     def test_get_turnover_ledger_grouped_view_returns_groups(self) -> None:

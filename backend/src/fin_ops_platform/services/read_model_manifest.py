@@ -458,6 +458,8 @@ READ_MODEL_MANIFEST: dict[str, ReadModelManifestEntry] = {
         operation_barrier_contract="app_status_registry_target",
         repository_port_contract=(
             "list_turnover_ledger_view",
+            "get_turnover_ledger_freshness_view",
+            "list_turnover_manual_closure_changes",
             "save_turnover_ledger_rows",
             "turnover_ledger_generation",
             "acknowledge_unchanged_turnover_ledger_scope",

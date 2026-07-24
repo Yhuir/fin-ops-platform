@@ -1,5 +1,11 @@
 # 外部往来款管理 实施记录
 
+## 2026-07-24 - 访问时 closure exact delta 与轻量 gate
+
+- Turnover GET 先读取原子 `all` scope source/dirty proof；non-fresh 在 page SQL 前返回空 rows。sole canonical manual-closure mismatch 且 change rows 能安全给出 case/status/row ids/months 时，只入队 exact month relation delta；其它 drift fail closed 为 full-`all`。
+- `all` 公开 source proof 改由 `turnover_ledger_scopes:all` + 全部 current-effective child dirty 收敛负责，允许精确月 delta 后跨月行版本不同；单月不一致与无法定位的变化仍完整重建。严格 global generation CAS 保留。
+- 一次性 PostgreSQL 17 实例应用全部 migrations 后，空 generation、mixed child rows、dirty 聚合、delta 保存/CAS、canonical relation bundle 共 7 项真实集成通过；同时修复 nullable `published_source_version` 的 bigint 参数类型和无 rows 时 `version_proof` 不产行的问题。
+
 ## 2026-07-22 - 银行流水批量标签共享原子写边界
 
 - 外部往来批量标签不再通过 PostgreSQL 分类全量 snapshot 保存；改为复用 `BankTransactionCategoryMutationWriter.persist_many(...)`，在 Turnover UoW 的同一事务内批量写 canonical category/event/audit，并一次输出所有精确月份 refresh 与 matching dirty。

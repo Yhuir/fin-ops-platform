@@ -7015,7 +7015,11 @@ class PostgresSummaryReadModelRepository:
                 parent_children.child_refresh_scope_keys,
                 parent_children.has_failed as parent_child_has_failed,
                 parent_children.has_active as parent_child_has_active,
-                parent_children.source_shards_match as parent_source_shards_match
+                parent_children.source_shards_match as parent_source_shards_match,
+                parent_children.bank_flow_bank_detail_refresh_scope_keys,
+                parent_children.bank_flow_child_refresh_scope_keys,
+                parent_children.bank_flow_has_failed,
+                parent_children.bank_flow_has_active
             from read_model.cost_statistics_read_models model
             left join lateral (
                 select source_version, status, updated_at, last_error
@@ -7201,7 +7205,10 @@ class PostgresSummaryReadModelRepository:
                             state.bank_detail_schema_version is null
                             or state.bank_detail_schema_version <> %s
                             or state.bank_detail_status <> 'fresh'
-                            or state.bank_detail_dirty_status in ('pending', 'processing', 'failed')
+                            or coalesce(
+                                state.bank_detail_dirty_status in ('pending', 'processing', 'failed'),
+                                false
+                            )
                             or (
                                 state.bank_detail_dirty_status is not null
                                 and (
@@ -7224,7 +7231,10 @@ class PostgresSummaryReadModelRepository:
                             ) - 'source_version' - 'workbench_relation_source_versions'
                                <> coalesce(state.bank_detail_source_versions, '{}'::jsonb)
                                   - 'source_version' - 'workbench_relation_source_versions'
-                            or state.child_dirty_status in ('pending', 'processing', 'failed')
+                            or coalesce(
+                                state.child_dirty_status in ('pending', 'processing', 'failed'),
+                                false
+                            )
                             or (
                                 state.child_dirty_status is not null
                                 and (
@@ -7234,6 +7244,29 @@ class PostgresSummaryReadModelRepository:
                                 )
                             )
                         ) as cost_child_not_fresh
+                        ,
+                        (
+                            not state.child_present
+                            or state.child_schema_version <> %s
+                            or coalesce(
+                                state.child_source_versions->'bank_detail_source_versions',
+                                '{}'::jsonb
+                            ) - 'source_version' - 'workbench_relation_source_versions'
+                               <> coalesce(state.bank_detail_source_versions, '{}'::jsonb)
+                                  - 'source_version' - 'workbench_relation_source_versions'
+                            or coalesce(
+                                state.child_dirty_status in ('pending', 'processing', 'failed'),
+                                false
+                            )
+                            or (
+                                state.child_dirty_status is not null
+                                and (
+                                    state.child_dirty_status <> 'done'
+                                    or state.child_published_source_version
+                                       <> state.child_dirty_source_version
+                                )
+                            )
+                        ) as bank_flow_child_not_fresh
                     from child_states state
                 ),
                 aggregated as (
@@ -7282,7 +7315,34 @@ class PostgresSummaryReadModelRepository:
                                 or bank_detail_dirty_status in ('pending', 'processing')
                             ),
                             false
-                        ) as has_active
+                        ) as has_active,
+                        coalesce(
+                            array_agg(month_key order by month_key)
+                                filter (where bank_detail_not_fresh),
+                            array[]::text[]
+                        ) as bank_flow_bank_detail_refresh_scope_keys,
+                        coalesce(
+                            array_agg(child_scope_key order by child_scope_key)
+                                filter (
+                                    where not bank_detail_not_fresh
+                                      and bank_flow_child_not_fresh
+                                ),
+                            array[]::text[]
+                        ) as bank_flow_child_refresh_scope_keys,
+                        coalesce(
+                            bool_or(
+                                bank_detail_dirty_status = 'failed'
+                                or child_dirty_status = 'failed'
+                            ),
+                            false
+                        ) as bank_flow_has_failed,
+                        coalesce(
+                            bool_or(
+                                bank_detail_dirty_status in ('pending', 'processing')
+                                or child_dirty_status in ('pending', 'processing')
+                            ),
+                            false
+                        ) as bank_flow_has_active
                     from child_proofs
                 )
                 select
@@ -7291,6 +7351,10 @@ class PostgresSummaryReadModelRepository:
                     child_refresh_scope_keys,
                     has_failed,
                     has_active,
+                    bank_flow_bank_detail_refresh_scope_keys,
+                    bank_flow_child_refresh_scope_keys,
+                    bank_flow_has_failed,
+                    bank_flow_has_active,
                     (
                         statistics_parent.source_versions is not null
                         and statistics_parent.source_versions->>'cost_statistics_parent_source'
@@ -7318,6 +7382,7 @@ class PostgresSummaryReadModelRepository:
             """,
             (
                 BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
+                COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
                 COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
                 normalized_scope_key,
             ),
@@ -7359,6 +7424,8 @@ class PostgresSummaryReadModelRepository:
         if source_settings is None:
             refresh_status = "stale" if refresh_status == "fresh" else refresh_status
             stale_reasons.append("cost_statistics_source_settings_missing")
+        bank_flow_refresh_status = refresh_status
+        bank_flow_stale_reasons = list(stale_reasons)
 
         scope_month = normalized_scope_key.split(":", 1)[1] if ":" in normalized_scope_key else ""
         workbench_source_versions = (
@@ -7372,6 +7439,8 @@ class PostgresSummaryReadModelRepository:
             else {}
         )
         bank_detail_refresh_scope_keys: list[str] = []
+        bank_flow_bank_detail_refresh_scope_keys: list[str] = []
+        bank_flow_child_refresh_scope_keys: list[str] = []
         if scope_month != "all":
             dependency_statuses = {
                 text(row.get("workbench_dirty_status")),
@@ -7428,6 +7497,41 @@ class PostgresSummaryReadModelRepository:
                 bank_detail_dependency_not_fresh = True
             if bank_detail_dependency_not_fresh:
                 bank_detail_refresh_scope_keys = [scope_month]
+                bank_flow_bank_detail_refresh_scope_keys = [scope_month]
+                bank_flow_refresh_status = (
+                    "failed"
+                    if text(row.get("bank_detail_dirty_status")) == "failed"
+                    else "refreshing"
+                    if text(row.get("bank_detail_dirty_status")) in {"pending", "processing"}
+                    else "stale"
+                )
+                bank_flow_stale_reasons.append("bank_detail_dependency_not_fresh")
+            else:
+                stored_bank_detail_versions = (
+                    row.get("source_versions", {}).get("bank_detail_source_versions")
+                    if isinstance(row.get("source_versions"), dict)
+                    else None
+                )
+                stored_bank_detail_semantic = (
+                    without_keys(
+                        stored_bank_detail_versions,
+                        {"source_version", "workbench_relation_source_versions"},
+                    )
+                    if isinstance(stored_bank_detail_versions, dict)
+                    else {}
+                )
+                current_bank_detail_semantic = without_keys(
+                    bank_detail_source_versions,
+                    {"source_version", "workbench_relation_source_versions"},
+                )
+                if stored_bank_detail_semantic != current_bank_detail_semantic:
+                    bank_flow_refresh_status = (
+                        "stale" if bank_flow_refresh_status == "fresh" else bank_flow_refresh_status
+                    )
+                    bank_flow_stale_reasons.append(
+                        "bank_flow_bank_detail_source_versions_mismatch"
+                    )
+                    bank_flow_child_refresh_scope_keys = [normalized_scope_key]
         parent_workbench_refresh_scope_keys = list(
             dict.fromkeys(
                 normalized
@@ -7446,6 +7550,38 @@ class PostgresSummaryReadModelRepository:
         )
         if scope_month == "all":
             bank_detail_refresh_scope_keys = parent_bank_detail_refresh_scope_keys
+            bank_flow_bank_detail_refresh_scope_keys = list(
+                dict.fromkeys(
+                    str(value).strip()
+                    for value in list(
+                        row.get("bank_flow_bank_detail_refresh_scope_keys") or []
+                    )
+                    if str(value).strip()
+                )
+            )
+            bank_flow_child_refresh_scope_keys = list(
+                dict.fromkeys(
+                    str(value).strip()
+                    for value in list(row.get("bank_flow_child_refresh_scope_keys") or [])
+                    if str(value).strip()
+                )
+            )
+            if bank_flow_bank_detail_refresh_scope_keys or bank_flow_child_refresh_scope_keys:
+                bank_flow_refresh_status = (
+                    "failed"
+                    if row.get("bank_flow_has_failed") is True
+                    else "refreshing"
+                    if row.get("bank_flow_has_active") is True
+                    else "stale"
+                )
+                if bank_flow_bank_detail_refresh_scope_keys:
+                    bank_flow_stale_reasons.append(
+                        "cost_statistics_bank_flow_bank_detail_dependency_not_fresh"
+                    )
+                if bank_flow_child_refresh_scope_keys:
+                    bank_flow_stale_reasons.append(
+                        "cost_statistics_bank_flow_child_scope_not_fresh"
+                    )
         parent_child_refresh_scope_keys = list(
             dict.fromkeys(
                 normalized
@@ -7526,9 +7662,15 @@ class PostgresSummaryReadModelRepository:
             "dirty_source_version": dirty_source_version,
             "refresh_status": refresh_status,
             "stale_reasons": stale_reasons,
+            "bank_flow_refresh_status": bank_flow_refresh_status,
+            "bank_flow_stale_reasons": list(dict.fromkeys(bank_flow_stale_reasons)),
             "workbench_refresh_scope_keys": parent_workbench_refresh_scope_keys,
             "bank_detail_refresh_scope_keys": bank_detail_refresh_scope_keys,
             "child_refresh_scope_keys": parent_child_refresh_scope_keys,
+            "bank_flow_bank_detail_refresh_scope_keys": (
+                bank_flow_bank_detail_refresh_scope_keys
+            ),
+            "bank_flow_child_refresh_scope_keys": bank_flow_child_refresh_scope_keys,
             "statistics": statistics,
             "statistics_status": statistics_status,
             "statistics_scope_key": text(row.get("statistics_scope_key"))
@@ -8730,21 +8872,9 @@ class PostgresSummaryReadModelRepository:
                 select
                     exists (select 1 from scope_summary) as scope_exists,
                     coalesce((select global_generation from scope_summary), 0) as generation,
-                    case
-                        when count(*) > 0
-                         and bool_and(jsonb_typeof(source_versions) = 'object')
-                         and count(distinct source_versions) = 1
-                            then min(source_versions::text)::jsonb
-                        when count(*) = 0
-                            then coalesce((select source_versions from scope_summary), '{{}}'::jsonb)
-                        else '{{}}'::jsonb
-                    end as source_versions,
-                    coalesce(
-                        bool_and(jsonb_typeof(source_versions) = 'object' and source_versions <> '{{}}'::jsonb)
-                        and count(distinct source_versions) > 1,
-                        false
-                    ) as source_versions_mixed
-                from base
+                    coalesce((select source_versions from scope_summary), '{{}}'::jsonb)
+                        as source_versions,
+                    false as source_versions_mixed
             ), statistics as (
                 select
                     coalesce(
@@ -8846,6 +8976,92 @@ class PostgresSummaryReadModelRepository:
         if bool(aggregate.get("source_versions_mixed")):
             payload["source_versions_mixed"] = True
         return payload
+
+    def get_turnover_ledger_freshness_view(self) -> dict[str, Any] | None:
+        row = self._connection.fetch_one(
+            """
+            select
+                scope.source_versions,
+                scope.generated_at,
+                coalesce(dirty.has_failed, false) as has_failed,
+                coalesce(dirty.has_active, false) as has_active
+            from read_model.turnover_ledger_scopes scope
+            left join lateral (
+                select
+                    bool_or(status = 'failed') as has_failed,
+                    bool_or(status in ('pending', 'processing')) as has_active
+                from job.read_model_dirty_scopes
+                where tenant_id = 'default'
+                  and scope_type = 'turnover_ledger'
+                  and status in ('pending', 'processing', 'failed')
+            ) dirty on true
+            where scope.scope_key = 'all'
+            limit 1
+            """
+        )
+        if not isinstance(row, dict):
+            return None
+        refresh_status = (
+            "failed"
+            if bool(row.get("has_failed"))
+            else "refreshing"
+            if bool(row.get("has_active"))
+            else "fresh"
+        )
+        return {
+            "source_versions": (
+                dict(row.get("source_versions"))
+                if isinstance(row.get("source_versions"), dict)
+                else {}
+            ),
+            "generated_at": row.get("generated_at"),
+            "refresh_status": refresh_status,
+        }
+
+    def list_turnover_manual_closure_changes(
+        self,
+        *,
+        updated_after: str,
+    ) -> list[dict[str, Any]]:
+        normalized_updated_after = text(updated_after)
+        if not normalized_updated_after:
+            return []
+        rows = self._connection.fetch_all(
+            """
+            select
+                case_id,
+                status,
+                coalesce(
+                    special_metadata->'turnover_closure_bank_row_ids',
+                    to_jsonb(row_ids),
+                    '[]'::jsonb
+                ) as row_ids,
+                coalesce(
+                    special_metadata->'turnover_closure_affected_months',
+                    case
+                        when month_scope is null then '[]'::jsonb
+                        else jsonb_build_array(to_char(month_scope, 'YYYY-MM'))
+                    end
+                ) as affected_months,
+                updated_at::text as updated_at
+            from app.workbench_pair_relations
+            where relation_mode = 'turnover_manual_closure'
+              and updated_at > %s::timestamptz
+            order by updated_at, case_id
+            """,
+            (normalized_updated_after,),
+        )
+        return [
+            {
+                "case_id": text(row.get("case_id")),
+                "status": text(row.get("status")),
+                "row_ids": text_list(row.get("row_ids")),
+                "affected_months": text_list(row.get("affected_months")),
+                "updated_at": text(row.get("updated_at")),
+            }
+            for row in rows
+            if isinstance(row, dict)
+        ]
 
     def _turnover_ledger_refresh_status(self, *, scope_key: str) -> str:
         if scope_key != "all":
@@ -9241,7 +9457,7 @@ class PostgresSummaryReadModelRepository:
                 generation, published_source_version, generated_at, cache_status
             )
             select scope_key, scope_month, row_count, %s, statistics, %s,
-                   case when scope_key = %s then %s else null end,
+                   case when scope_key = %s then %s::bigint else null::bigint end,
                    now(), 'fresh'
             from summaries
             on conflict (scope_key) do update set
@@ -10059,6 +10275,18 @@ class PostgresReadModelRepository:
 
     def list_turnover_ledger_view(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
         return self._summary_read_model_repository.list_turnover_ledger_view(*args, **kwargs)
+
+    def get_turnover_ledger_freshness_view(self, *args: Any, **kwargs: Any) -> dict[str, Any] | None:
+        return self._summary_read_model_repository.get_turnover_ledger_freshness_view(
+            *args,
+            **kwargs,
+        )
+
+    def list_turnover_manual_closure_changes(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        return self._summary_read_model_repository.list_turnover_manual_closure_changes(
+            *args,
+            **kwargs,
+        )
 
     def save_turnover_ledger_rows(self, *args: Any, **kwargs: Any) -> None:
         self._summary_read_model_repository.save_turnover_ledger_rows(*args, **kwargs)

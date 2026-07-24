@@ -1,5 +1,11 @@
 # Read Model 实施记录
 
+## 2026-07-24 - access refresh 原子语义去重
+
+- `enqueue_read_model_refresh_if_inactive(...)` 在 exact tenant/type/scope advisory lock 内比较规范化 metadata，覆盖顺序固定为 `force > full scope > partial delta`；full 覆盖 partial，partial 不得吞掉 full，非 force 不得吞掉 force。processing event 后出现新语义时建立 pending follow-up，pending event 则原子合并。
+- Workbench `/groups` 在 freshness proof 非 fresh 时立即返回空 groups/status/version，不读取 Redis 或旧 generation page SQL，避免页面轮询与 worker争用数据库。
+- 定向 unit/service/API/read-model/architecture 回归和一次性真实 PostgreSQL queue merge 均通过；未新增表、queue、worker、HTTP、兼容 fallback 或第二条发布链。
+
 ## 2026-07-23 - Workbench SSE 复用轻量 freshness 查询
 
 - 目标：降低已打开 Workbench 页面等待 freshness 事件的首包耗时，同时保持 PostgreSQL durable dirty scope、active generation 与 source version 的真实状态语义。

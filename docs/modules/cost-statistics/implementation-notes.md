@@ -1,5 +1,11 @@
 # 成本统计 实施记录
 
+## 2026-07-24 - `bank_tag` 明细与 Workbench 全局统计解耦
+
+- `bank_tag` rows 只消费结构化 bank-flow rows、Bank Detail 语义 proof 与成本 settings，跳过无关 Workbench pre-gate；标题 global statistics 保留完整 parent lineage，允许独立 non-fresh/null，不能反向阻塞 rows。
+- 单条 Cost PostgreSQL gate 同时返回完整 Cost、bank-flow rows 与 statistics 三组状态及 exact scopes；source-version mapper 只移除 bank-flow 不消费的 Workbench/OA provenance，保留 Bank Detail business signature、schema、row count、标签规则和未知语义键。
+- 真实 PostgreSQL 17 gate 测试证明同一 fixture 下完整 parent 因 Workbench child drift 为 stale，而 `bank_flow_refresh_status=fresh` 且零 Bank Detail/Cost child refresh；测试同时暴露并修复无 dirty row 时 SQL 三值逻辑把 `false OR null` 漏判的问题。
+
 ## 2026-07-24 - access-time `all` 收敛热路径
 
 - 生产 test-owned confirm/withdraw 证明普通写事务保持零 Cost fan-out，但首次访问 `active:all` / `all:all` 仍需 `13.807–25.885s`。Cost worker 自身 `p95=505.077ms`，真正长尾来自 `all` 轮询反复执行 Workbench canonical bulk proof 与 Cost child proof；同时单一 Workbench/Cost consumer 串行处理两个 sibling month，Workbench 单月约 `1.5–2.8s`，累计超过页面 `3s` 收敛门槛。
