@@ -1172,7 +1172,19 @@ export default function CostStatisticsPage() {
       setSelectedBankTagTransactionId(row.transactionId);
     }
     try {
-      const payload = await fetchCostTransactionDetail(row.transactionId, controller.signal, costProjectScope);
+      const detailView =
+        source === "bankTag"
+          ? "bank_tag"
+          : source === "expenseType"
+            ? "expense_type"
+            : source;
+      const payload = await fetchCostTransactionDetail(
+        row.transactionId,
+        detailView,
+        explorerScope,
+        controller.signal,
+        costProjectScope,
+      );
       if (!controller.signal.aborted) {
         setTransactionDetail(payload);
       }

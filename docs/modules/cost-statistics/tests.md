@@ -2,6 +2,16 @@
 
 > 修改本模块前先读取本文件，确认现有测试入口和应覆盖的回归范围。实现后按实际影响更新矩阵。
 
+## 2026-07-24 - 全流水视图复用 Bank Detail 与旧复制表删除
+
+- Business/read boundary：`time|bank_tag` 的 explorer、transaction detail、export-preview/export统一使用 `dependency_profile=bank_flow`，只等待 Bank Detail exact month scopes并直接查询 `read_model.bank_detail_rows`；`project|bank|expense_type` 保持 Workbench→Bank Detail→Cost OA allocation profile。global statistics可独立 non-fresh，不能阻塞已 fresh rows。
+- API/frontend：transaction detail现在必须携带 `view + scope + project_scope`；后端用同一 scope约束 freshness gate与 point SQL，防止跨月绕过 freshness。缺失/非法参数返回400，profile non-fresh返回409。前端从当前 explorer state透传三项参数；export final recheck复用首次查询的同一 profile。
+- Old-path deletion：projection/repository/query/Audit不再写或读 `cost_statistics_bank_flow_rows`，也不生成 `bank_flow_time_rows/bank_flow_summary` legacy payload。migration `0123_drop_legacy_cost_statistics_bank_flow_rows.sql` 删除物理复制表；历史 0107/0108 migration保留不可变，但 production runtime禁止 dual-read、fallback和第二 writer。
+- Service/read-model/Audit：`tests/test_cost_statistics_sql_runtime.py`、`tests/test_cost_statistics_page_audit.py`、`tests/test_cost_statistics_postgres_integration.py` 覆盖 profile gate、Bank Detail直接查询、Cost conditional publish只替换 allocation rows、parent统计和Audit exact-set；`tests/test_postgres_migrations.py` 覆盖0123存在及执行后旧表缺失。
+- App Health fixture：测试不再依赖已删除的写后 fan-out或手写空 Cost parent，而是通过正式 gateway→worker访问链建立 Workbench、Bank Detail、Cost与OA fresh状态；真实 PostgreSQL System Audit `16/16`。
+- 本轮定向结果：真实 PostgreSQL相关 backend组合 `231/231`；write-operation runner单元 `55/55`；Cost页面组件 `32/32`；前端 production build成功。未运行183项浏览器套件，也未运行无意义全量CI。候选部署后的 test-owned可恢复 fixture、所有相关页面访问收敛与生产p95/p99仍是最终门禁。
+- 七类决策：1 source-version/profile与标签/金额业务合同、2 query/repository/Audit、3 transaction/explorer/export API、4 read model/migration/worker、5 Cost页面参数与non-fresh交互、6 write→零fan-out→按访问收敛、7 Workbench/Bank Detail/Cost/OA/System Audit回归全部适用并有对应定向证据。
+
 ## 2026-07-24 - access-time `all` 快速 refreshing 与 sibling month 并行
 
 - Service/API contract：`tests/test_cost_statistics_sql_runtime.py` 证明 `scope=all` 发现 durable outbox active dependency 后立即返回现有 `refreshing` envelope，不执行 Workbench canonical bulk proof、Cost dependency gate、payload read 或重复 enqueue；没有 active event 时仍走完整 fail-closed proof。month scope 不使用该短路，保留“当前 rows fresh、全期间 statistics refreshing”的既有合同。
@@ -347,11 +357,11 @@
 | --- | --- | --- | --- |
 | 1. Business core unit tests | 适用 | `tests/test_cost_statistics_sql_projection_rules.py`、`tests/test_project_costing_service.py` | 直接覆盖 production SQL projection 的成本归因、项目范围、特殊业务链路、票据/往来排除或保留规则。 |
 | 2. Service-layer tests | 适用 | `tests/test_cost_statistics_page_audit.py`、`tests/test_cost_statistics_runtime_service.py`、`tests/test_cost_statistics_derived_lifecycle_executor.py`、`tests/test_project_costing_api.py`、`tests/test_platform_runtime_boundary_guards.py` | 覆盖成本专属 Audit owner、durable invalidation、runtime/lifecycle、project costing 与旧 owner删除，并静态禁止 local service/live fallback/writer 回归。 |
-| 3. API contract tests | 适用 | `tests/test_cost_statistics_api.py`、`web/src/test/CostStatisticsApi.test.ts`、`tests/test_http_slo_probe.py`、`web/e2e/cost-statistics-flow.spec.ts`、`web/e2e/cost-statistics-relation-fanout.spec.ts`、`web/e2e/imports-etc-invoices-flow.spec.ts`、`web/e2e/bank-flow-rule-batches-flow.spec.ts`、`web/e2e/turnover-ledger-flow.spec.ts`、`web/e2e/settings-data-reset-flow.spec.ts` | 覆盖 explorer、transaction、export/export-preview、project scope、默认 SLO 探针、错误和 response shape；后端/API tests 覆盖 `project_scope=all` 合同与旧 root/project route 删除，页面 e2e 断言 active scope、transaction detail、export-preview、export request/response、download filename/content、Workbench confirm 后成本 explorer/detail 重新读取、ETC import confirm 后成本 explorer 返回 `read_model_status=fresh`，bank-flow selected-row submit 后成本 explorer 返回 fresh，turnover manual closure confirm 后成本 explorer 返回 fresh，以及 settings 保存项目状态后 active explorer 返回 fresh 并排除已完成项目。 |
-| 4. Read model/cache/background job tests | 适用 | `tests/test_cost_statistics_sql_runtime.py`、`tests/test_read_model_query_gateway.py`、`tests/test_read_model_refresh_gateway.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py`、`tests/test_read_model_scope_contract.py`、`tests/test_app_status_overview_service.py` | 覆盖 SQL read model、Redis hot cache、payload contract invalid fail-closed、scope contract、worker refresh、parent/shard readiness、父 scope 有界聚合和 App Status。 |
-| 5. Frontend component and interaction tests | 适用 | `web/src/test/CostStatisticsPage.test.tsx`、`web/src/test/CostStatisticsApi.test.ts`、相关 Playwright specs | 覆盖页面状态、范围、drilldown、export、错误、API mapper、标签 drawer 保存零 barrier，以及 relation/import/bank-flow/turnover 事实变化后 normal GET 的 Workbench dependency→Cost refreshing/fresh；真实 Chromium 另覆盖大表、下钻、导出和对应成本行。 |
-| 6. End-to-end business-flow integration tests | 适用 | `tests/test_cost_statistics_api.py`、`tests/test_cost_statistics_sql_runtime.py`、`tests/test_runtime_worker_read_model_refresh_scopes.py`、相关 Playwright specs | 覆盖普通 relation 写与 Workbench publish 零 Cost enqueue，随后独立访问成本页，先收敛 Workbench 精确月份、再收敛 Cost scope；Playwright 覆盖 Workbench/ETC/bank-flow/turnover/settings 事实变化后的 fresh explorer和业务行。真实 worker drain 仍为 production risk。 |
-| 7. Existing feature regression tests | 适用 | 上述全部 cost statistics tests，加 imports、invoice lifecycle、workbench、turnover、settings/project scope tests 的按改动选择扩展集 | 成本统计受多模块写入影响；任何导入、关系、规则、项目范围或 worker 改动都要问会影响哪些旧成本视图；e2e 防止真实浏览器中 project scope、detail modal、export center 和 candidate/linked relation 成本语义断链。 |
+| 3. API contract tests | 适用 | `tests/test_cost_statistics_api.py`、`web/src/test/CostStatisticsApi.test.ts`、`tests/test_http_slo_probe.py`、相关定向 E2E specs | 覆盖 explorer、transaction、export/export-preview、project scope、错误和 response shape；transaction锁定必需 `view/scope/project_scope`、非法请求400和profile-specific 409，export锁定首次/final gate同 profile。 |
+| 4. Read model/cache/background job tests | 适用 | `tests/test_cost_statistics_sql_runtime.py`、`tests/test_cost_statistics_postgres_integration.py`、`tests/test_cost_statistics_page_audit.py`、`tests/test_postgres_migrations.py`、gateway/worker/App Health tests | 覆盖两个 dependency profile、Bank Detail直接 rows、Cost allocation CAS/parent、0123 drop、freshness fail-closed、正式 gateway→worker收敛和System Audit。 |
+| 5. Frontend component and interaction tests | 适用 | `web/src/test/CostStatisticsPage.test.tsx`、`web/src/test/CostStatisticsApi.test.ts`、相关 Playwright specs | 覆盖页面状态、范围、drilldown、export、错误、API mapper、标签 drawer保存零 barrier，以及详情请求透传当前 view/scope。浏览器历史覆盖保留，本轮按用户要求不重复运行183项。 |
+| 6. End-to-end business-flow integration tests | 适用 | `tests/test_write_operation_e2e_smoke.py`、`tests/test_cost_statistics_postgres_integration.py`、`tests/test_audit_app_health_system.py`、候选生产 fixture | 本地锁定普通写零页面 fan-out、访问哪个 profile只ensure其所需scope、同scope去重、worker/App Health收敛；真实生产write→access→fresh仍在唯一候选部署后验证。 |
+| 7. Existing feature regression tests | 适用 | 成本API/SQL/Audit/PG组合，加 Workbench、Bank Detail、OA App Health与前端Cost定向集 | 防止删除复制表后污染Workbench/Bank Detail/OA、旧API shape、detail/export和System Audit。当前真实PG组合231项、runner 55项、页面32项与build均通过。 |
 
 ## 历史 bug 回归库
 
@@ -431,7 +441,7 @@ PYTHONPATH=backend/src scripts/check-read-model-scope-contracts.py --help
 ## 未测风险
 
 - 本轮不连接真实生产 PostgreSQL 执行 `scripts/check-read-model-scope-contracts.py --apply`；发布前后需先 dry-run JSON 报告，再按 runbook 受控清理。
-- 本地测试不跑真实 RabbitMQ/Redis/cost-statistics worker drain；Cost 页面访问后 Workbench dependency→Cost 自身的真实 enqueue-to-fresh 收敛、父 scope 与月份 shard 在真实多 worker 环境中的最终收敛，以及真实网络中断后的浏览器重试体验需要生产或 staging smoke。
+- 本地真实 PostgreSQL已跑 gateway→worker→App Health/System Audit，但未模拟生产 RabbitMQ/Redis/systemd并发。候选部署后仍须分别证明 OA allocation view 的 Workbench→Bank Detail→Cost收敛，以及 `time|bank_tag` 仅 Bank Detail收敛且零 Cost event。
 - 本地已覆盖成本统计超过 20,000 行同步导出 fail-closed、导出中心错误反馈，以及 120+ 行窄屏宽表滚动/控件可用性；真实浏览器文件打开、真实生产超大数据查询/下载耗时和生产视觉性能仍需 staging/manual smoke。
 
 ## 2026-07-24 all scope 子分片 freshness 门禁

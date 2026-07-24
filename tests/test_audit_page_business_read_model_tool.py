@@ -670,10 +670,8 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertNotIn("bank_source.id::text =", canonical_sql)
         self.assertIn("expected_fields", canonical_sql)
         self.assertIn("projected_fields", canonical_sql)
-        expected_bank_flow_sql = canonical_sql.split("expected_bank_flow as", 1)[1].split("projected_bank_flow as", 1)[0]
-        self.assertIn("from app.bank_transactions source", expected_bank_flow_sql)
-        self.assertIn("coalesce(source.legacy_mongo_id, source.id::text) as transaction_id", expected_bank_flow_sql)
-        self.assertNotIn("read_model.bank_detail_rows", expected_bank_flow_sql)
+        self.assertNotIn("expected_bank_flow as", canonical_sql)
+        self.assertNotIn("projected_bank_flow as", canonical_sql)
 
     def test_cost_statistics_reuses_workbench_integrity_proof_in_same_snapshot(self) -> None:
         report = audit_cost_statistics_page(
@@ -741,7 +739,7 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertIn("expected_source_shards", queried_sql)
         self.assertIn("expected_shard_count > 0", queried_sql)
 
-    def test_cost_statistics_recalculates_bank_flow_and_group_summaries(self) -> None:
+    def test_cost_statistics_recalculates_bank_statistics_and_group_summaries(self) -> None:
         connection = FakeConnection()
 
         audit_cost_statistics_page(
@@ -749,20 +747,17 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         )
 
         queried_sql = " ".join(sql for sql, _params in connection.fetch_all_calls)
-        self.assertIn("cost_bank_flow_key_fields", queried_sql)
-        self.assertIn("detail.transaction_id in (", queried_sql)
-        self.assertIn("source.id::text", queried_sql)
-        self.assertIn("coalesce(source.legacy_mongo_id, source.id::text)", queried_sql)
-        self.assertIn("bank_tag_label_path", queried_sql)
-        self.assertIn("bank_flow_summary", queried_sql)
+        self.assertIn("cost_summary_recalculation", queried_sql)
+        self.assertIn("from read_model.bank_detail_rows", queried_sql)
+        self.assertIn("direction_label as direction", queried_sql)
+        self.assertIn("effective_category_code as bank_tag_code", queried_sql)
         self.assertIn(
-            "select project_scope || ':all', row_key, transaction_id, amount",
+            "select project_scope || ':all' as scope_key",
             queried_sql,
         )
         self.assertIn("model.payload->'payload'->'statistics'", queried_sql)
-        self.assertIn("read_model.cost_statistics_bank_flow_rows", queried_sql)
+        self.assertNotIn("read_model.cost_statistics_bank_flow_rows", queried_sql)
         self.assertNotIn("bank_flow_time_rows", queried_sql)
-        self.assertIn("expected_sub_label", queried_sql)
         self.assertIn("cost_group_summaries", queried_sql)
         self.assertIn("expected_projects", queried_sql)
         self.assertIn("expected_expenses", queried_sql)
@@ -963,23 +958,22 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
         self.assertIn("edge.value->>'bankTransactionId'", consumer_sql)
         self.assertIn("edge.value->>'relationCaseId'", consumer_sql)
 
-    def test_cost_statistics_bank_flow_recalculation_uses_bank_detail_scope_owner(self) -> None:
+    def test_cost_statistics_bank_statistics_use_bank_detail_scope_owner(self) -> None:
         connection = FakeConnection()
 
         audit_cost_statistics_page(
             connection,
         )
 
-        bank_flow_sql = next(
+        bank_statistics_sql = next(
             sql
             for sql, _params in connection.fetch_all_calls
-            if "cost_bank_flow_key_fields" in sql
+            if "cost_summary_recalculation" in sql
         )
-        self.assertIn("detail.scope_key as bank_detail_scope_key", bank_flow_sql)
-        self.assertIn("month_key <> coalesce(bank_detail_scope_key", bank_flow_sql)
-        self.assertIn("detail.payload as bank_detail_payload", bank_flow_sql)
-        self.assertIn("nullif(purpose, '')", bank_flow_sql)
-        self.assertIn("nullif(bank_detail_payload->>'remark', '')", bank_flow_sql)
+        self.assertIn("scope_key as month_key", bank_statistics_sql)
+        self.assertIn("from read_model.bank_detail_rows", bank_statistics_sql)
+        self.assertIn("where tenant_id = %s", bank_statistics_sql)
+        self.assertIn("and schema_version = %s", bank_statistics_sql)
 
     def test_pending_invoice_audit_proves_registered_consumer_edges(self) -> None:
         connection = FakeConnection()
@@ -1045,9 +1039,10 @@ class AuditPageBusinessReadModelToolTests(unittest.TestCase):
 
         queried_sql = " ".join(sql for sql, _params in connection.fetch_all_calls)
         self.assertNotIn("replace(member.value->>'amount', ',', '')", queried_sql)
-        self.assertIn("sum(abs(row.amount))", queried_sql)
+        self.assertIn("count(distinct row.transaction_id)", queried_sql)
         self.assertIn("replace(row.payload->>'amount', ',', '')", queried_sql)
         self.assertIn("model.payload->'payload'->'summary'->>'total_amount'", queried_sql)
+        self.assertNotIn("bank_flow_summary", queried_sql)
 
     def test_cli_fail_on_issues_returns_nonzero(self) -> None:
         stdout = io.StringIO()

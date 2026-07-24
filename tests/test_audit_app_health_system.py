@@ -3,15 +3,25 @@ from __future__ import annotations
 from contextlib import contextmanager
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
+from http import HTTPStatus
 import json
 import unittest
 
 from fin_ops_platform.services.api_performance_metrics import ApiPerformanceRecorder
 from fin_ops_platform.services.app_settings_service import AppSettingsService
+from fin_ops_platform.services.bank_detail_read_model_refresh import BankDetailReadModelRefreshService
+from fin_ops_platform.services.bank_detail_sql_projection import BankDetailSqlProjectionBuilder
+from fin_ops_platform.services.bank_transaction_tag_read_facade import BankTransactionTagReadFacade
+from fin_ops_platform.services.cost_statistics_read_model_refresh import CostStatisticsReadModelRefreshService
+from fin_ops_platform.services.cost_statistics_sql_projection import CostStatisticsSqlProjectionBuilder
 from fin_ops_platform.services.external_control_evidence import ExternalControlEvidenceService
 from fin_ops_platform.services.operations_dashboard import OperationsDashboardService
 from fin_ops_platform.services.oa_pending_payment_read_model_refresh import OaPendingPaymentReadModelRefreshService
-from fin_ops_platform.services.oa_pending_payment_sql_projection import OaPendingPaymentSqlProjectionBuilder
+from fin_ops_platform.services.oa_pending_payment_read_model_service import OaPendingPaymentReadModelService
+from fin_ops_platform.services.oa_pending_payment_sql_projection import (
+    OaPendingPaymentSqlProjectionBuilder,
+    oa_pending_payment_base_source_versions,
+)
 from fin_ops_platform.services.page_audit_registry import PAGE_AUDIT_REGISTRY
 from fin_ops_platform.services.app_status_read_model_registry import APP_STATUS_READ_MODEL_REGISTRY
 from fin_ops_platform.services.postgres_connection import PostgresConnection, PostgresSettings
@@ -27,8 +37,11 @@ from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_s
     PostgresOaPendingPaymentSourceSnapshotRepository,
 )
 from fin_ops_platform.services.postgres_repositories.read_models import PostgresReadModelRepository
+from fin_ops_platform.services.read_model_refresh_gateway import ReadModelRefreshGateway
 from fin_ops_platform.services.runtime_queue import RuntimeQueueRepository
 from fin_ops_platform.services.runtime_worker_registry import worker_registrations
+from fin_ops_platform.services.workbench_read_model_refresh import WorkbenchReadModelRefreshService
+from fin_ops_platform.services.workbench_sql_projection import WorkbenchSqlProjectionBuilder
 from postgres_test_utils import apply_test_migrations, require_postgres_test_database_url, truncate_test_database
 from tests.external_evidence_test_support import manifest_payload
 
@@ -381,44 +394,6 @@ class AppHealthSystemAuditPostgresTests(unittest.TestCase):
             """,
             (json.dumps(settings), json.dumps({"normalized_payload": settings})),
         )
-        parent_versions = {
-            "cost_statistics_parent_source": "materialized_shards",
-            "source_shards": {},
-            "source_shard_count": 0,
-        }
-        parent_payload = {
-            "payload": {
-                "summary": {"row_count": 0, "transaction_count": 0, "total_amount": "0"},
-                "bank_flow_summary": {
-                    "row_count": 0,
-                    "transaction_count": 0,
-                    "total_amount": "0",
-                    "expense_amount": "0",
-                    "income_amount": "0",
-                    "expense_transaction_count": 0,
-                    "income_transaction_count": 0,
-                },
-                "bank_accounts": [],
-                "projects": [],
-                "expense_types": [],
-            }
-        }
-        for project_scope in ("active", "all"):
-            self.connection.execute(
-                """
-                insert into read_model.cost_statistics_read_models(
-                    scope_key, project_scope, scope_month, generated_at, entry_count,
-                    source_counts, source_versions, payload, raw_payload
-                ) values (%s, %s, null, now(), 0, '{}'::jsonb, %s::jsonb, %s::jsonb, %s::jsonb)
-                """,
-                (
-                    f"{project_scope}:all",
-                    project_scope,
-                    json.dumps(parent_versions),
-                    json.dumps(parent_payload),
-                    json.dumps({"normalized_payload": parent_payload}),
-                ),
-            )
         for registration in worker_registrations(required_only=True):
             payload = {
                 "worker_instance": registration.instance_name,
@@ -439,36 +414,136 @@ class AppHealthSystemAuditPostgresTests(unittest.TestCase):
             )
         queue = RuntimeQueueRepository(self.connection)
         read_models = PostgresReadModelRepository(self.connection)
-        read_models.mark_workbench_relation_scope_empty(
-            scope_key="all",
-            tenant_id="default",
-            source_versions={"system_audit_seed": 1},
+        refresh_gateway = ReadModelRefreshGateway(queue_repository=queue)
+
+        def run_one_refresh(
+            *,
+            event_type: str,
+            worker_id: str,
+            service: object,
+        ) -> dict[str, object]:
+            event = queue.claim_next(worker_id, event_types=[event_type])
+            if event is None:
+                raise AssertionError(f"{event_type} clean-system seed did not enqueue a refresh event.")
+            result = service.handle_runtime_event(event)  # type: ignore[attr-defined]
+            if not queue.complete(event.event_id, worker_id, result_payload=result):
+                raise AssertionError(f"{event_type} clean-system seed did not complete its refresh event.")
+            return dict(result)
+
+        for relation_scope in ("all", "2026-01"):
+            read_models.mark_workbench_relation_scope_empty(
+                scope_key=relation_scope,
+                tenant_id="default",
+                source_versions=read_models.workbench_relation_source_summary_from_source(
+                    scope_key=relation_scope,
+                ),
+            )
+
+        if refresh_gateway.enqueue_one(
+            "workbench",
+            "2026-01",
+            reason="api_freshness_gate_blocked",
+        ) != ["2026-01"]:
+            raise AssertionError("Workbench clean-system seed did not normalize the exact access scope.")
+        run_one_refresh(
+            event_type="workbench.read_model.refresh",
+            worker_id="system-audit-workbench-test",
+            service=WorkbenchReadModelRefreshService(
+                projection_builder=WorkbenchSqlProjectionBuilder(
+                    connection=self.connection,
+                    read_model_repository=read_models,
+                ),
+                queue_repository=queue,
+            ),
         )
+
+        if refresh_gateway.enqueue_one(
+            "bank_detail",
+            "2026-01",
+            reason="api_freshness_gate_blocked",
+        ) != ["2026-01"]:
+            raise AssertionError("Bank Detail clean-system seed did not normalize the exact access scope.")
+        run_one_refresh(
+            event_type="bank_detail.read_model.refresh",
+            worker_id="system-audit-bank-detail-test",
+            service=BankDetailReadModelRefreshService(
+                projection_builder=BankDetailSqlProjectionBuilder(
+                    connection=self.connection,
+                    read_model_repository=read_models,
+                ),
+                queue_repository=queue,
+            ),
+        )
+
+        cost_scope_keys = ["active:2026-01", "all:2026-01"]
+        if refresh_gateway.enqueue_many(
+            "cost_statistics",
+            cost_scope_keys,
+            reason="api_freshness_gate_blocked",
+        ) != cost_scope_keys:
+            raise AssertionError("Cost Statistics clean-system seed did not normalize the exact access scopes.")
+        cost_refresh = CostStatisticsReadModelRefreshService(
+            projection_builder=CostStatisticsSqlProjectionBuilder(
+                connection=self.connection,
+                read_model_repository=read_models,
+                bank_transaction_tag_read_facade=BankTransactionTagReadFacade(
+                    read_model_repository=read_models,
+                    queue_repository=queue,
+                ),
+            ),
+            queue_repository=queue,
+        )
+        processed_cost_scopes = [
+            str(
+                run_one_refresh(
+                    event_type="cost_statistics.read_model.refresh",
+                    worker_id="system-audit-cost-statistics-test",
+                    service=cost_refresh,
+                ).get("scope_key")
+                or ""
+            )
+            for _ in range(4)
+        ]
+        if set(processed_cost_scopes) != {
+            "active:2026-01",
+            "all:2026-01",
+            "active:all",
+            "all:all",
+        }:
+            raise AssertionError(f"Cost Statistics clean-system seed scopes were incomplete: {processed_cost_scopes}")
+
         PostgresOaPendingPaymentSourceSnapshotRepository(
             self.connection,
             pending_relation_repository=PostgresOaPendingPaymentRelationRepository(self.connection),
         ).commit_authoritative_snapshot(
-            scope_key="all",
+            scope_key="2026-01",
             tenant_id="default",
             projection_records=[],
             admission_records=[],
             payment_statuses={},
         )
-        event = queue.claim_next(
-            "system-audit-test",
-            event_types=["oa_pending_payment.read_model.refresh"],
-        )
-        if event is None:
-            raise AssertionError("OA pending payment clean-system seed did not enqueue a refresh event.")
-        result = OaPendingPaymentReadModelRefreshService(
-            projection_builder=OaPendingPaymentSqlProjectionBuilder(
-                connection=self.connection,
-                read_model_repository=read_models,
-            ),
+        access = OaPendingPaymentReadModelService(
+            repository=read_models,
             queue_repository=queue,
-        ).handle_runtime_event(event)
-        if not queue.complete(event.event_id, "system-audit-test", result_payload=result):
-            raise AssertionError("OA pending payment clean-system seed did not complete its refresh event.")
+            source_versions_provider=oa_pending_payment_base_source_versions,
+        ).conditional_rows(
+            {"month": ["2026-01"], "page": ["1"], "page_size": ["20"]},
+            tenant_id="default",
+            if_none_match=None,
+        )
+        if access.status != HTTPStatus.ACCEPTED:
+            raise AssertionError("OA pending payment clean-system seed did not enter the access freshness gate.")
+        run_one_refresh(
+            event_type="oa_pending_payment.read_model.refresh",
+            worker_id="system-audit-oa-pending-payment-test",
+            service=OaPendingPaymentReadModelRefreshService(
+                projection_builder=OaPendingPaymentSqlProjectionBuilder(
+                    connection=self.connection,
+                    read_model_repository=read_models,
+                ),
+                queue_repository=queue,
+            ),
+        )
 
     @staticmethod
     def _dashboard(connection: object) -> dict[str, object]:

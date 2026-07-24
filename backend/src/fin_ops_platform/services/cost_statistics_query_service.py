@@ -123,7 +123,7 @@ class CostStatisticsQueryService:
             source_mismatch_reason="api_page_source_versions_stale",
             dependency_profile=(
                 "bank_flow"
-                if normalized_view == "bank_tag"
+                if normalized_view in {"time", "bank_tag"}
                 else "workbench"
             ),
         )
@@ -231,11 +231,7 @@ class CostStatisticsQueryService:
             )
             return {
                 "payload": payload,
-                "source_versions": cost_statistics_semantic_source_versions(
-                    gate.get("source_versions")
-                    if isinstance(gate.get("source_versions"), dict)
-                    else {}
-                ),
+                "source_versions": expected_source_versions,
                 "schema_version": gate.get("schema_version"),
                 "generated_at": gate.get("generated_at"),
                 "refresh_status": "fresh",
@@ -286,12 +282,25 @@ class CostStatisticsQueryService:
         transaction_id: str,
         *,
         project_scope: str,
+        view: str,
+        scope: str,
     ) -> dict[str, Any]:
         normalized_project_scope = self._normalize_project_scope(project_scope)
+        scope_kind, scope_value, _normalized_scope = self._normalize_page_scope(scope)
+        normalized_view, _filters = self._normalize_page_query(view, {})
+        dependency_profile = (
+            "bank_flow"
+            if normalized_view in {"time", "bank_tag"}
+            else "workbench"
+        )
         normalized_transaction_id = str(transaction_id or "").strip()
         get_transaction = getattr(self._sql_read_repository, "get_cost_statistics_transaction", None)
         get_freshness_gate = getattr(self._sql_read_repository, "get_cost_statistics_freshness_gate", None)
-        scope_key = self._runtime_service.request_scope_key("all", normalized_project_scope)
+        gate_scope_month = scope_value if scope_kind == "month" else "all"
+        scope_key = self._runtime_service.request_scope_key(
+            gate_scope_month,
+            normalized_project_scope,
+        )
         if not callable(get_transaction) or not callable(get_freshness_gate):
             payload = self._cost_statistics_non_fresh_gate_payload(
                 scope_key=scope_key,
@@ -310,6 +319,7 @@ class CostStatisticsQueryService:
             missing_reason="api_detail_miss",
             stale_reason="api_detail_stale",
             source_mismatch_reason="api_detail_source_versions_stale",
+            dependency_profile=dependency_profile,
         )
         if non_fresh_payload is not None:
             raise CostStatisticsReadModelNotFreshError(
@@ -329,6 +339,9 @@ class CostStatisticsQueryService:
         row = get_transaction(
             project_scope=normalized_project_scope,
             transaction_id=normalized_transaction_id,
+            dependency_profile=dependency_profile,
+            scope_kind=scope_kind,
+            scope_value=scope_value,
         )
         if not isinstance(row, dict):
             raise KeyError(transaction_id)
@@ -492,7 +505,10 @@ class CostStatisticsQueryService:
                     stale_reasons=tuple(workbench_stale_reasons),
                 )
 
-        gate = get_freshness_gate(scope_key=scope_key)
+        gate = get_freshness_gate(
+            scope_key=scope_key,
+            dependency_profile=dependency_profile,
+        )
         if not isinstance(gate, dict):
             return None, None, self._cost_statistics_non_fresh_gate_payload(
                 scope_key=scope_key,
@@ -576,6 +592,7 @@ class CostStatisticsQueryService:
             bank_detail_source_versions=(
                 gate.get("bank_detail_source_versions")
                 if isinstance(gate.get("bank_detail_source_versions"), dict)
+                and gate.get("bank_detail_source_versions")
                 else None
             ),
         )
@@ -752,129 +769,6 @@ class CostStatisticsQueryService:
         if selected is None:
             return None
         return {str(code).strip() for code in list(selected or []) if str(code).strip()}
-
-    def _apply_tag_selection_to_explorer_payload(
-        self,
-        payload: dict[str, Any],
-        tag_selection_payload: dict[str, Any] | None,
-    ) -> dict[str, Any]:
-        selected_codes = self._selected_bank_tag_codes(tag_selection_payload)
-        if selected_codes is None:
-            return dict(payload)
-        filtered_time_rows = self._filter_rows_by_selected_tags(payload.get("time_rows"), selected_codes)
-        filtered_bank_flow_rows = self._filter_rows_by_selected_tags(payload.get("bank_flow_time_rows"), selected_codes)
-        next_payload = dict(payload)
-        next_payload["time_rows"] = filtered_time_rows
-        next_payload["summary"] = self._summary_from_time_rows(filtered_time_rows)
-        next_payload["project_rows"] = self._project_rows_from_time_rows(filtered_time_rows)
-        next_payload["expense_type_rows"] = self._expense_type_rows_from_time_rows(filtered_time_rows)
-        next_payload["bank_flow_time_rows"] = filtered_bank_flow_rows
-        next_payload["bank_flow_summary"] = self._bank_flow_summary_from_time_rows(filtered_bank_flow_rows)
-        next_payload["cost_statistics_tag_selection_version"] = (
-            int(tag_selection_payload.get("version") or 1) if isinstance(tag_selection_payload, dict) else 1
-        )
-        return next_payload
-
-    @staticmethod
-    def _filter_rows_by_selected_tags(rows: Any, selected_codes: set[str]) -> list[dict[str, Any]]:
-        if not isinstance(rows, list):
-            return []
-        filtered: list[dict[str, Any]] = []
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            tag_code = str(row.get("bank_tag_code") or "").strip() or COST_STATISTICS_UNCATEGORIZED_TAG_CODE
-            if tag_code in selected_codes:
-                filtered.append(row)
-        return filtered
-
-    @staticmethod
-    def _summary_from_time_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
-        transaction_ids: set[str] = set()
-        total_amount = Decimal("0.00")
-        for row in rows:
-            transaction_id = str(row.get("transaction_id") or "").strip()
-            if transaction_id:
-                transaction_ids.add(transaction_id)
-            total_amount += _decimal_from_value(row.get("amount")) or Decimal("0.00")
-        return {
-            "row_count": len(rows),
-            "transaction_count": len(transaction_ids) if transaction_ids else len(rows),
-            "total_amount": _plain_money(total_amount),
-        }
-
-    @staticmethod
-    def _bank_flow_summary_from_time_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
-        summary = CostStatisticsQueryService._summary_from_time_rows(rows)
-        expense_rows = [row for row in rows if str(row.get("direction") or "").strip() == "支出"]
-        income_rows = [row for row in rows if str(row.get("direction") or "").strip() == "收入"]
-        return {
-            **summary,
-            "expense_amount": _plain_money(
-                sum((_decimal_from_value(row.get("amount")) or Decimal("0.00") for row in expense_rows), start=Decimal("0.00"))
-            ),
-            "income_amount": _plain_money(
-                sum((_decimal_from_value(row.get("amount")) or Decimal("0.00") for row in income_rows), start=Decimal("0.00"))
-            ),
-            "expense_transaction_count": len(expense_rows),
-            "income_transaction_count": len(income_rows),
-        }
-
-    @staticmethod
-    def _project_rows_from_time_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        groups: dict[str, dict[str, Any]] = {}
-        for row in rows:
-            project_name = str(row.get("project_name") or "").strip()
-            expense_type = str(row.get("expense_type") or "").strip()
-            bucket = groups.setdefault(
-                project_name,
-                {
-                    "project_name": project_name,
-                    "total_amount": Decimal("0.00"),
-                    "transaction_count": 0,
-                    "expense_types": set(),
-                },
-            )
-            bucket["total_amount"] += _decimal_from_value(row.get("amount")) or Decimal("0.00")
-            bucket["transaction_count"] += 1
-            bucket["expense_types"].add(expense_type)
-        return [
-            {
-                "project_name": bucket["project_name"],
-                "total_amount": _plain_money(bucket["total_amount"]),
-                "transaction_count": bucket["transaction_count"],
-                "expense_type_count": len(bucket["expense_types"]),
-            }
-            for bucket in sorted(groups.values(), key=lambda item: (-item["total_amount"], item["project_name"]))
-        ]
-
-    @staticmethod
-    def _expense_type_rows_from_time_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        groups: dict[str, dict[str, Any]] = {}
-        for row in rows:
-            expense_type = str(row.get("expense_type") or "").strip()
-            project_name = str(row.get("project_name") or "").strip()
-            bucket = groups.setdefault(
-                expense_type,
-                {
-                    "expense_type": expense_type,
-                    "total_amount": Decimal("0.00"),
-                    "transaction_count": 0,
-                    "projects": set(),
-                },
-            )
-            bucket["total_amount"] += _decimal_from_value(row.get("amount")) or Decimal("0.00")
-            bucket["transaction_count"] += 1
-            bucket["projects"].add(project_name)
-        return [
-            {
-                "expense_type": bucket["expense_type"],
-                "total_amount": _plain_money(bucket["total_amount"]),
-                "transaction_count": bucket["transaction_count"],
-                "project_count": len(bucket["projects"]),
-            }
-            for bucket in sorted(groups.values(), key=lambda item: (-item["total_amount"], item["expense_type"]))
-        ]
 
     @staticmethod
     def _normalize_page_scope(scope: str) -> tuple[str, str | None, str]:
@@ -1162,35 +1056,10 @@ class CostStatisticsQueryService:
                 "total_amount": "0.00",
             },
             "time_rows": [],
-            "bank_flow_summary": {
-                "row_count": 0,
-                "transaction_count": 0,
-                "total_amount": "0.00",
-                "expense_amount": "0.00",
-                "income_amount": "0.00",
-                "expense_transaction_count": 0,
-                "income_transaction_count": 0,
-            },
-            "bank_flow_time_rows": [],
             "bank_accounts": [],
             "project_rows": [],
             "expense_type_rows": [],
         }
-
-    @staticmethod
-    def _is_explorer_payload(payload: dict[str, Any]) -> bool:
-        summary = payload.get("summary")
-        if not isinstance(summary, dict):
-            return False
-        bank_flow_summary = payload.get("bank_flow_summary")
-        if bank_flow_summary is not None and not isinstance(bank_flow_summary, dict):
-            return False
-        return all(
-            isinstance(payload.get(key), list)
-            for key in ("time_rows", "bank_accounts", "project_rows", "expense_type_rows")
-        ) and (
-            "bank_flow_time_rows" not in payload or isinstance(payload.get("bank_flow_time_rows"), list)
-        )
 
     @staticmethod
     def empty_month_payload(month: str) -> dict[str, Any]:
@@ -1440,7 +1309,12 @@ class CostStatisticsQueryService:
             transaction_id = str(kwargs.get("transaction_id") or "").strip()
             if not transaction_id:
                 raise ValueError("transaction_id is required for transaction export")
-            payload = self.get_transaction_detail(transaction_id, project_scope=project_scope)
+            payload = self.get_transaction_detail(
+                transaction_id,
+                project_scope=project_scope,
+                view="project",
+                scope=month,
+            )
             workbook = self._transaction_workbook(payload)
             filename = self._build_filename(
                 month=payload["month"],
@@ -1571,7 +1445,11 @@ class CostStatisticsQueryService:
             )
 
         content = self._serialize_workbook(workbook)
-        self._assert_export_gate_unchanged(scope_key=gate_scope_key, initial_gate=gate)
+        self._assert_export_gate_unchanged(
+            scope_key=gate_scope_key,
+            initial_gate=gate,
+            dependency_profile=str(query["dependency_profile"]),
+        )
         return filename, content
 
     def _load_export_first_page(
@@ -1593,6 +1471,7 @@ class CostStatisticsQueryService:
         get_freshness_gate = getattr(self._sql_read_repository, "get_cost_statistics_freshness_gate", None)
         gate_month = month if re.fullmatch(r"\d{4}-\d{2}", month) else "all"
         scope_key = self._runtime_service.request_scope_key(gate_month, project_scope)
+        dependency_profile = "bank_flow" if row_shape == "raw_bank" else "workbench"
         if not callable(get_export_page) or not callable(get_freshness_gate):
             payload = self._cost_statistics_non_fresh_gate_payload(
                 scope_key=scope_key,
@@ -1608,6 +1487,7 @@ class CostStatisticsQueryService:
             missing_reason="api_export_miss",
             stale_reason="api_export_stale",
             source_mismatch_reason="api_export_source_versions_stale",
+            dependency_profile=dependency_profile,
         )
         if non_fresh_payload is not None or gate is None:
             raise CostStatisticsReadModelNotFreshError(
@@ -1630,9 +1510,14 @@ class CostStatisticsQueryService:
             "get_export_page": get_export_page,
             "view": view,
             "scope_key": scope_key,
+            "dependency_profile": dependency_profile,
         }
         first_page = get_export_page(
-            **{key: value for key, value in query.items() if key not in {"get_export_page", "view", "scope_key"}},
+            **{
+                key: value
+                for key, value in query.items()
+                if key not in {"get_export_page", "view", "scope_key", "dependency_profile"}
+            },
             offset=0,
             include_summary=True,
         )
@@ -1661,7 +1546,7 @@ class CostStatisticsQueryService:
                 **{
                     key: value
                     for key, value in query.items()
-                    if key not in {"get_export_page", "view", "scope_key"}
+                    if key not in {"get_export_page", "view", "scope_key", "dependency_profile"}
                 },
                 offset=int(next_offset),
                 include_summary=False,
@@ -1676,7 +1561,13 @@ class CostStatisticsQueryService:
                     message="成本统计数据正在刷新，请稍后重试导出。",
                 )
 
-    def _assert_export_gate_unchanged(self, *, scope_key: str, initial_gate: dict[str, Any]) -> None:
+    def _assert_export_gate_unchanged(
+        self,
+        *,
+        scope_key: str,
+        initial_gate: dict[str, Any],
+        dependency_profile: str,
+    ) -> None:
         get_freshness_gate = getattr(self._sql_read_repository, "get_cost_statistics_freshness_gate", None)
         if not callable(get_freshness_gate):
             raise CostStatisticsReadModelNotFreshError(
@@ -1690,6 +1581,7 @@ class CostStatisticsQueryService:
             missing_reason="api_export_final_miss",
             stale_reason="api_export_final_stale",
             source_mismatch_reason="api_export_final_source_versions_stale",
+            dependency_profile=dependency_profile,
         )
         initial_proof = (
             initial_gate.get("schema_version"),

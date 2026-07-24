@@ -412,18 +412,10 @@ class CostStatisticsSqlProjectionBuilder:
             project_scope=project_scope,
             bank_detail_rows=bank_detail_rows,
         )
-        bank_flow_entries = self._bank_flow_entries_from_bank_detail_rows(
-            [
-                row
-                for row in list((bank_detail_payload or {}).get("month_rows") or [])
-                if isinstance(row, dict)
-            ]
-        )
         return self._build_explorer_payload_from_entries(
             entries,
             month=month,
             project_scope=project_scope,
-            bank_flow_entries=bank_flow_entries,
         )
 
     def _build_explorer_payload_from_entries(
@@ -432,7 +424,6 @@ class CostStatisticsSqlProjectionBuilder:
         *,
         month: str,
         project_scope: str,
-        bank_flow_entries: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         sorted_entries = sorted(
             entries,
@@ -441,11 +432,6 @@ class CostStatisticsSqlProjectionBuilder:
                 str(item["transaction_id"]),
                 str(item.get("row_key") or ""),
             ),
-            reverse=True,
-        )
-        sorted_bank_flow_entries = sorted(
-            bank_flow_entries or [],
-            key=lambda item: (str(item["trade_time"]), str(item["transaction_id"])),
             reverse=True,
         )
         project_groups: dict[str, dict[str, Any]] = {}
@@ -485,8 +471,6 @@ class CostStatisticsSqlProjectionBuilder:
                 "total_amount": format_decimal(sum((entry["amount_decimal"] for entry in sorted_entries), start=ZERO)),
             },
             "time_rows": [_serialize_cost_entry(entry) for entry in sorted_entries],
-            "bank_flow_summary": _bank_flow_summary(sorted_bank_flow_entries),
-            "bank_flow_time_rows": [_serialize_cost_entry(entry) for entry in sorted_bank_flow_entries],
             "bank_accounts": self._bank_accounts_from_settings(),
             "project_rows": [
                 {
@@ -660,49 +644,6 @@ class CostStatisticsSqlProjectionBuilder:
                     completed_project_names=completed_project_names,
                 ):
                     entries.append(entry)
-        return entries
-
-    def _bank_flow_entries_from_bank_detail_rows(
-        self,
-        bank_detail_rows: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        entries: list[dict[str, Any]] = []
-        for index, row in enumerate(bank_detail_rows):
-            if not isinstance(row, dict):
-                continue
-            direction = _bank_flow_direction(row)
-            if direction is None:
-                continue
-            transaction_id = str(row.get("transaction_id") or row.get("id") or row.get("row_id") or f"bank-flow-{index}").strip()
-            amount = _decimal(row.get("amount") or row.get("signed_amount") or row.get("debit_amount"))
-            if amount in (None, ZERO):
-                continue
-            bank_tag_context = bank_tag_context_from_row(row)
-            label = str(
-                bank_tag_context.get("bank_tag_sub_label")
-                or bank_tag_context.get("bank_tag_label")
-                or bank_tag_context.get("bank_tag_primary_label")
-                or "未分类"
-            )
-            summary = _clean_text(row.get("summary")) or _clean_text(row.get("purpose")) or _clean_text(row.get("remark"))
-            entries.append(
-                {
-                    "group_id": "",
-                    "transaction_id": transaction_id,
-                    "trade_time": str(row.get("trade_time") or row.get("trade_date") or ""),
-                    "counterparty_name": str(row.get("counterparty_name") or ""),
-                    "payment_account_label": _bank_detail_payment_account_label(row),
-                    "direction": direction,
-                    "remark": str(row.get("purpose") or row.get("remark") or row.get("summary") or ""),
-                    "project_name": "未配对OA",
-                    "project_id": "",
-                    "expense_type": label,
-                    "expense_content": summary or label,
-                    "oa_applicant": "—",
-                    "amount_decimal": abs(amount),
-                    **bank_tag_context,
-                }
-            )
         return entries
 
     def _bank_tag_contexts_for_rows(
@@ -1158,29 +1099,6 @@ def _is_completed_project_identity(
     )
 
 
-def _bank_flow_direction(row: dict[str, Any]) -> str | None:
-    direction = str(row.get("direction") or row.get("txn_direction") or "").strip().lower()
-    if direction in {"income", "inflow", "收入", "收", "收款", "credit"}:
-        return "收入"
-    if direction in {"expense", "outflow", "支出", "支", "付款", "debit"}:
-        return "支出"
-    return None
-
-
-def _bank_flow_summary(entries: list[dict[str, Any]]) -> dict[str, Any]:
-    expense_entries = [entry for entry in entries if entry.get("direction") == "支出"]
-    income_entries = [entry for entry in entries if entry.get("direction") == "收入"]
-    return {
-        "row_count": len(entries),
-        "transaction_count": len(entries),
-        "total_amount": format_decimal(sum((entry["amount_decimal"] for entry in entries), start=ZERO)),
-        "expense_amount": format_decimal(sum((entry["amount_decimal"] for entry in expense_entries), start=ZERO)),
-        "income_amount": format_decimal(sum((entry["amount_decimal"] for entry in income_entries), start=ZERO)),
-        "expense_transaction_count": len(expense_entries),
-        "income_transaction_count": len(income_entries),
-    }
-
-
 def _serialize_cost_entry(entry: dict[str, Any]) -> dict[str, Any]:
     bank_tag_context = bank_tag_context_from_row(entry)
     return {
@@ -1222,17 +1140,6 @@ def _cost_entry_from_payload_row(row: dict[str, Any], *, fallback_index: int) ->
         "amount_decimal": amount,
         **bank_tag_context_from_row(row),
     }
-
-
-def _bank_detail_payment_account_label(row: dict[str, Any]) -> str:
-    explicit_label = _clean_text(row.get("payment_account_label"))
-    if explicit_label:
-        return explicit_label
-    bank_name = _clean_text(row.get("bank_name"))
-    account_last4 = _clean_text(row.get("account_last4"))
-    if bank_name and account_last4:
-        return f"{bank_name} 账户 {account_last4}"
-    return bank_name or account_last4
 
 
 def _bank_transaction_ids_from_groups(groups: list[dict[str, Any]]) -> list[str]:

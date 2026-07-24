@@ -455,7 +455,7 @@ describe("Cost statistics page", () => {
     expectProjectCostDialog("流水详情");
     expect(dialog).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/cost-statistics/transactions/cost-txn-001?project_scope=active",
+      "/api/cost-statistics/transactions/cost-txn-001?project_scope=active&view=project&scope=all",
       expect.any(Object),
     );
     expect(screen.getAllByText("PLC 模块采购").length).toBeGreaterThan(0);
@@ -621,7 +621,7 @@ describe("Cost statistics page", () => {
 
     expect(await screen.findByRole("dialog", { name: "流水详情" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/cost-statistics/transactions/cost-txn-001?project_scope=active",
+      "/api/cost-statistics/transactions/cost-txn-001?project_scope=active&view=bank_tag&scope=2026-03",
       expect.any(Object),
     );
   });

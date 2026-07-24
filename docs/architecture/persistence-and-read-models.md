@@ -80,7 +80,7 @@ production bootstrap 不再调用 full/compat snapshot。`PostgresStateStore` �
 
 PostgreSQL store 不再读取 legacy GridFS reference；production API 读取文件时只接受 `migration_status='verified'` 的对象存储记录。旧 GridFS 校验/回滚工具和 `file_object.gridfs_migration` worker path 均已删除，不能作为 source-of-truth 路径回归。
 
-导入事实写入 `app.invoices` / `app.bank_transactions` / `app.import_batches` 后，必须同时 upsert `job.read_model_dirty_scopes` 并写入 `job.outbox_events`，通知 `workbench`、`cost`、`tax`、`search` 后续投影或 read model 收敛。
+导入事实写入 `app.invoices` / `app.bank_transactions` / `app.import_batches` 后，只提交 canonical事实、owner version、audit和可定位 scope hints。普通导入完成不得同时 fan-out `workbench`、`cost`、`tax`、`search` 等页面 dirty/outbox；每个消费页在访问或重新激活时比较自身 exact-scope proof并按需入队。显式 import processing job本身的队列不属于页面 read-model fan-out。
 
 ## 工作台 SQL read model 边界
 
@@ -91,7 +91,7 @@ PostgreSQL store 不再读取 legacy GridFS reference；production API 读取文
 - `job.read_model_dirty_scopes` 提供 stale/refreshing 状态。API miss 或 dirty scope 未完成时只 enqueue `workbench.read_model.refresh`；请求路径不存在同步扫描事实源并拼装整页 payload 的 fallback。
 - production PostgreSQL runtime 如果未配置 workbench SQL read repository，会返回 `read_model_unavailable` 并尝试 enqueue refresh，不会退回旧同步 builder。测试也必须直接使用当前 facade/repository contract，不再读取 generic full-view DTO。
 - standalone worker 用 `python3 -m fin_ops_platform.app.worker --enable-workbench-read-model-refresh` claim PostgreSQL durable queue 后重建对应 scope，并原子发布 `read_model.workbench_generations`、groups/group rows、snapshots/rows 和正式关系分发。
-- Pair relations、row overrides、exception cases 等写路径只标记受影响 scope dirty，并由 worker 收敛；生产读取不再使用 `state:workbench_read_models` 或任何 candidate/decision state fallback。
+- Pair relations、row overrides、exception cases 等普通写路径只提交 canonical事实/version/audit；当前 Workbench页面随后重跑正常 GET，访问 gate发现 drift后只标记当前 exact scope并由 worker收敛。生产读取不再使用 `state:workbench_read_models` 或任何 candidate/decision state fallback。
 
 工作台 generation 发布契约：
 
@@ -114,20 +114,23 @@ OA、银行流水、进项发票、销项发票之间的两两/三栏关系上�
 - 分发 rows 必须覆盖无关联对象：`relation_status='unlinked'`、`group_ids=[]`、`linked_*=[]`。页面需要显示空 OA/空发票时直接消费空数组，不再自行补空。
 - OA 附件发票只从 `read_model.workbench_rows.source_kind='oa_attachment_invoice'` 纳入 `linked_input_invoices`；付款凭证、未知附件、解析失败附件不得进入发票关系。
 - standalone worker 用 `python3 -m fin_ops_platform.app.worker --enable-workbench-relation-read-model-refresh` claim `workbench_relation.read_model.refresh` 后按 `YYYY-MM` shard 重建。`all` 只展开为月份 shard，不在 API 热路径同步扫描事实。
-- 写入、扩展或撤回 active pair relation 时，事务内 writer 必须标记 `workbench_relation` dirty/outbox，并触发待找发票、OA 待付款、进项发票使用、销项发票收款、银行明细、搜索、成本、税金和免 OA 批次等下游 read model 重新收敛。确定性匹配只允许经同一 relation UoW 写正式关系；不存在 candidate/decision 的 upsert/expire 刷新路径。
+- 写入、扩展或撤回 active pair relation 时，事务内 writer只提交 canonical relation事实、version/audit和可定位 scope hints；普通写后不得向待找发票、OA待付款、进项使用、销项收款、银行明细、搜索、成本、税金等页面 fan-out refresh。各消费页在首次访问、focus或 hidden→visible后比较自身 exact-scope source proof，只经统一 gateway入队实际 non-fresh scope。确定性匹配仍只允许经同一 relation UoW写正式关系；不存在 candidate/decision 的 upsert/expire刷新路径。
 - 该机制不是关联台 UI payload 复用。各页面保留自己的 SQL read model、筛选、状态、权限和导出，只消费统一关系上下文作为上游事实。
 
 ## 成本统计 SQL read model 边界
 
-`/api/cost-statistics/explorer`、export 和 transaction detail 的生产读取边界是 `read_model.cost_statistics_read_models` metadata 与两张结构化行表：
+`/api/cost-statistics/explorer`、export 和 transaction detail 按 `view` 使用两个显式生产读取边界：
 
-- API 先执行 PostgreSQL dependency-bound freshness gate；只有 fresh 后才允许 ETag、versioned Redis page cache 或窄 SQL query。Redis 清空不影响已构建 SQL read model。
+- `project|bank|expense_type` 使用 Cost workbench profile：`read_model.cost_statistics_read_models` metadata + `read_model.cost_statistics_rows`，并证明 Workbench、Bank Detail与 Cost exact scopes。
+- `time|bank_tag` 使用 Bank Detail profile：证明 Bank Detail exact scopes后直接查询 `read_model.bank_detail_rows`，不入队或等待 Workbench/Cost。
+- API只有在对应 profile fresh后才允许 ETag、versioned cache或窄 SQL query。global statistics状态独立，不能阻塞当前 rows。
 - explorer cache miss 通过 `get_cost_statistics_page(...)` 的单次 set-based SQL 返回完整筛选 summary、小型 facets 与 bounded rows；export 使用 bounded export page，transaction 使用 identity point lookup。不存在 root month summary、project route 或 full-view payload loader。
-- PostgreSQL miss 或 dirty scope pending 时只 enqueue `cost_statistics.read_model.refresh`，不会在 API 请求里同步重算大范围统计。
+- PostgreSQL non-fresh只经 `ReadModelRefreshGateway` enqueue当前 profile实际需要的 exact scope；不会在API请求里同步重算，也不会扩散到其它页面。
 - production PostgreSQL runtime 未配置成本统计 SQL repository 时同样返回 `read_model_unavailable` / `refreshing`，不回落到内存 read model 或同步计算。
-- standalone worker 用 `python3 -m fin_ops_platform.app.worker --enable-cost-statistics-read-model-refresh` claim durable queue 后，从 Workbench active generation 和 Bank Detail fresh snapshot 构建月份 shard，再条件发布 parent metadata 与结构化成本/银行流水 rows。
+- standalone Cost worker从 Workbench active generation和 Bank Detail snapshot构建 OA allocation month shard，再条件发布 parent metadata与 `cost_statistics_rows`；它不复制全银行 rows。
 - 成本统计从 Workbench 月份 active generation 的 `workbench_group_rows + workbench_rows` materialize 成本关系输入，不能再通过 `jsonb_path_exists(read_model.workbench_groups.payload, ...)` 读取旧 group JSON 成员行。
-- 发票、银行流水、pair relation、row override、exception case 等影响成本口径的写路径必须通过 `ReadModelRefreshGateway` 标记规范 `cost_statistics` dirty scope。缓存 key 绑定发布版本与 source versions，不需要写路径删除无版本 key。
+- 发票、银行流水、pair relation、row override、exception case 等普通写路径只推进 owner事实/version，不直接标记 Cost dirty scope。Cost访问gate发现真实 drift后才经 gateway精确入队。缓存 key绑定profile source token，不需要写路径删除 key。
+- migration `0123_drop_legacy_cost_statistics_bank_flow_rows.sql` 删除旧 Bank Detail复制表；禁止 dual-read、第二 writer或 JSON fallback。
 
 旧 `reconcile_cost_statistics_read_model` 工具已删除。成本统计 read model 不再通过 `Application._cost_statistics_service.get_explorer(...)` legacy 对照链路验证；验证应走 cost-statistics 模块测试、worker refresh/fresh gate 和生产只读 SLO evidence。
 
@@ -139,7 +142,7 @@ OA、银行流水、进项发票、销项发票之间的两两/三栏关系上�
 - PostgreSQL miss 或 dirty scope pending 时只 enqueue `tax_offset.read_model.refresh`，不会在 API 请求里同步调用 `TaxApiRoutes.get_tax_offset()` 计算整月 payload。
 - production PostgreSQL runtime 未配置税金 SQL repository 时返回 `read_model_unavailable` / `refreshing`，不回落到内存 read model 或同步计算。
 - standalone worker 用 `python3 -m fin_ops_platform.app.worker --enable-tax-offset-read-model-refresh` claim durable queue 后，按既有 `TaxOffsetService` 口径从发票、认证抵扣状态、关系事实构建月度 payload，并写回 `read_model.tax_offset_read_models`。
-- 发票导入、认证抵扣导入、关系变更和影响税金口径的设置写入必须标记 `tax_offset` dirty scope，并失效 `tax_offset:month:{month}` Redis key。
+- 发票导入、认证抵扣导入、关系变更和影响税金口径的设置写入只推进 owner事实/version；Tax页面访问时比较当前月份 proof，non-fresh才标记 exact `tax_offset` scope。写路径不得失效页面 cache或返回 barrier target。
 
 旧 `reconcile_tax_offset_read_model` 工具已删除。税金抵扣 read model 不再通过 `Application._tax_api_routes.get_tax_offset(...)` legacy 对照链路验证；验证应走 tax-offset 模块测试、worker refresh/fresh gate 和生产只读 SLO evidence。
 
@@ -151,7 +154,7 @@ OA、银行流水、进项发票、销项发票之间的两两/三栏关系上�
 - `read_model.search_index_rows` 按 `scope_month`、`source_kind`、`status` 和 trigram `searchable_text/project_name/counterparty_name` 建索引，用于全局搜索和跳转 payload。
 - `read_model.pending_invoice_rows` 按 `direction/filter_group/trade_date` 建分页索引，并用 trigram `searchable_text` 支持关键字过滤。
 - standalone worker 用 `python3 -m fin_ops_platform.app.worker --enable-search-read-model-refresh --enable-pending-invoice-read-model-refresh` claim durable queue 后，从 facts、`WorkbenchRelationReadFacade` 和银行标签设置构建 read model。
-- 补票、银行标签设置、pair relation、row override、exception case、导入 facts 等影响结果的写路径必须标记 search/pending invoice dirty scope。
+- 补票、银行标签设置、pair relation、row override、exception case、导入 facts 等写路径只推进 owner事实/version；Search/Pending Invoice在访问时各自比较 source proof并只标记实际 non-fresh scope。
 
 ## OA projection SQL 边界
 
@@ -161,7 +164,7 @@ OA Mongo 是外部 read-only source，只允许由独立 worker 拉取；App run
 - `PostgresOAProjectionAdapter` 实现 `WorkbenchQueryService` 需要的 OA adapter 协议；PostgreSQL state store 存在时，工作台读取 OA 行不访问 Mongo，不依赖全量内存同步。
 - `POST /integrations/oa/sync` 只 enqueue `oa.sync` durable event，不在 API 请求里执行同步。
 - standalone worker 用 `python3 -m fin_ops_platform.app.worker --enable-oa-sync --event-type oa.sync` 从 OA Mongo 拉取并 upsert projection。
-- worker 完成后标记 `workbench`、`search` 和 `pending_invoice` 相关 dirty scope。OA source 临时不可用只影响后续 sync job，不破坏已有 SQL projection 查询。
+- OA sync worker完成 authoritative projection commit后不标记任何页面 dirty scope；Workbench、Search、Pending Invoice等消费者在访问时发现 OA watermark/version变化并按自身边界收敛。OA source临时不可用只影响本次 sync，不破坏已有 SQL projection查询。
 - API server 默认不启动 in-process OA polling，也不会在 production bootstrap 构造 direct `MongoOAAdapter`。如需本地排障旧路径，必须显式使用 `FIN_OPS_BOOTSTRAP_MODE=legacy`，并确保不作为生产请求路径运行。
 
 ## 生产演进建议

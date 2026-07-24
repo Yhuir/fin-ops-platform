@@ -205,6 +205,9 @@ class CostStatisticsPostgresIntegrationTests(unittest.TestCase):
         row = self.repository.get_cost_statistics_transaction(
             project_scope="active",
             transaction_id="txn-split",
+            dependency_profile="workbench",
+            scope_kind="month",
+            scope_value="2026-05",
         )
 
         self.assertIsNotNone(row)
@@ -318,16 +321,19 @@ class CostStatisticsPostgresIntegrationTests(unittest.TestCase):
             """
         )
         self.connection.execute(
-            """
-            insert into read_model.cost_statistics_bank_flow_rows(
-                scope_key, project_scope, scope_month, row_key, transaction_id,
-                trade_time_text, trade_date, direction, project_name, expense_type, amount
+            f"""
+            insert into read_model.bank_detail_rows(
+                tenant_id, transaction_id, scope_key, scope_month, account_key,
+                bank_name, account_last4, trade_time_sort, trade_date,
+                direction, direction_label, amount, schema_version
             )
             values
-                ('active:2026-05', 'active', '2026-05-01', 'current:bank', 'current',
-                 '2026-05-02', '2026-05-02', '支出', '未配对OA', '未分类', 20),
-                ('active:2026-04', 'active', '2026-04-01', 'obsolete:bank', 'obsolete',
-                 '2026-04-02', '2026-04-02', '收入', '未配对OA', '未分类', 999)
+                ('default', 'current', '2026-05', '2026-05-01', 'current-account',
+                 '工商银行', '0001', '2026-05-02', '2026-05-02',
+                 'expense', '支出', 20, {BANK_DETAIL_READ_MODEL_SCHEMA_VERSION}),
+                ('default', 'obsolete', '2026-04', '2026-04-01', 'obsolete-account',
+                 '工商银行', '0001', '2026-04-02', '2026-04-02',
+                 'income', '收入', 999, {BANK_DETAIL_READ_MODEL_SCHEMA_VERSION})
             """
         )
         builder = CostStatisticsSqlProjectionBuilder(
@@ -341,10 +347,9 @@ class CostStatisticsPostgresIntegrationTests(unittest.TestCase):
         )
 
         self.assertEqual(payload["summary"], {"row_count": 1, "transaction_count": 1, "total_amount": "10.00"})
-        self.assertEqual(payload["bank_flow_summary"]["row_count"], 1)
-        self.assertEqual(payload["bank_flow_summary"]["total_amount"], "20.00")
-        self.assertEqual(payload["bank_flow_summary"]["expense_transaction_count"], 1)
-        self.assertEqual(payload["bank_flow_summary"]["income_transaction_count"], 0)
+        self.assertEqual(payload["statistics"]["transaction_count"], 1)
+        self.assertEqual(payload["statistics"]["expense_transaction_count"], 1)
+        self.assertEqual(payload["statistics"]["income_transaction_count"], 0)
         self.assertEqual(payload["project_rows"], [
             {
                 "project_name": "当前项目",

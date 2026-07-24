@@ -14,6 +14,9 @@ from fin_ops_platform.services.postgres_repositories.cost_statistics_page_audit 
     audit_cost_statistics_page,
 )
 from fin_ops_platform.services.postgres_repositories.operations_audit import PostgresOperationsAuditRepository
+from fin_ops_platform.services.postgres_repositories.read_models import (
+    BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
+)
 from tests.test_audit_page_business_read_model_tool import FakeConnection
 from tests.postgres_test_utils import (
     apply_test_migrations,
@@ -371,11 +374,6 @@ class CostStatisticsPageAuditTests(unittest.TestCase):
                     {"structured_amount": "10", "payload_amount": "9"},
                 ),
                 (
-                    "cost_statistics_bank_flow_key_display_fields_mismatch",
-                    "bank-row-1",
-                    {"canonical_amount": "20", "projected_fields": {"amount": "19"}},
-                ),
-                (
                     "cost_statistics_summary_recalculation_mismatch",
                     "active:2026-06",
                     {"row_count": 2, "recalculated_total_amount": "30"},
@@ -415,23 +413,21 @@ class CostStatisticsPageAuditTests(unittest.TestCase):
         proof_sql, proof_params = proof_calls[0]
         for marker in (
             "/* check: key_display_fields */",
-            "/* check: cost_bank_flow_key_fields */",
             "/* check: cost_summary_recalculation */",
             "/* check: cost_group_summaries */",
             "/* check: cost_bank_accounts */",
         ):
             self.assertEqual(proof_sql.count(marker), 1)
         self.assertIn("model.scope_key ~ '^(active|all):all$'", proof_sql)
-        self.assertEqual(proof_sql.count("limit %s"), 5)
+        self.assertEqual(proof_sql.count("limit %s"), 4)
         self.assertEqual(
             proof_params,
             (
                 "cost_statistics_key_display_fields_mismatch",
                 51,
-                "cost_statistics_bank_flow_key_display_fields_mismatch",
-                "default",
-                51,
                 "cost_statistics_summary_recalculation_mismatch",
+                "default",
+                BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
                 51,
                 "cost_statistics_group_summaries_mismatch",
                 51,
@@ -440,7 +436,7 @@ class CostStatisticsPageAuditTests(unittest.TestCase):
             ),
         )
 
-    def test_bank_flow_proofs_read_only_v9_structured_rows(self) -> None:
+    def test_bank_statistics_proof_reads_canonical_bank_detail_rows(self) -> None:
         connection = CostAuditFakeConnection()
 
         audit_cost_statistics_page(connection)
@@ -459,18 +455,13 @@ class CostStatisticsPageAuditTests(unittest.TestCase):
 
         self.assertNotIn("bank_flow_time_rows", queried_sql)
         self.assertNotIn("model.payload->'payload'->'bank_flow_time_rows'", queried_sql)
-        self.assertIn("from read_model.cost_statistics_bank_flow_rows row", canonical_sql)
-        self.assertIn("sum(abs(row.amount))", canonical_sql)
-        self.assertIn("/* check: cost_bank_flow_key_fields */", business_sql)
-        self.assertIn("row.bank_tag_label_path", business_sql)
+        self.assertNotIn("cost_statistics_bank_flow_rows", queried_sql)
+        self.assertIn("from read_model.bank_detail_rows", business_sql)
+        self.assertIn("direction_label as direction", business_sql)
         self.assertIn("expected_bank_scope_rows as (", business_sql)
         self.assertIn(
-            "select project_scope || ':all', row_key, transaction_id, amount, direction, bank_tag_code",
+            "select project_scope || ':all' as scope_key",
             business_sql,
-        )
-        self.assertGreaterEqual(
-            queried_sql.count("read_model.cost_statistics_bank_flow_rows"),
-            4,
         )
 
     def test_relation_equality_runs_once_and_preserves_both_existing_issue_codes(self) -> None:
@@ -594,15 +585,6 @@ class CostStatisticsPageAuditPostgresTests(unittest.TestCase):
         parent_payload = {
             "payload": {
                 "summary": {"row_count": 0, "transaction_count": 0, "total_amount": "0"},
-                "bank_flow_summary": {
-                    "row_count": 0,
-                    "transaction_count": 0,
-                    "total_amount": "0",
-                    "expense_amount": "0",
-                    "income_amount": "0",
-                    "expense_transaction_count": 0,
-                    "income_transaction_count": 0,
-                },
                 "statistics": {
                     "transaction_count": 0,
                     "expense_transaction_count": 0,

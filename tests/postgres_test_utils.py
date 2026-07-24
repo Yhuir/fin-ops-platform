@@ -134,6 +134,7 @@ EXPECTED_MIGRATION_FILES = [
     "0120_bank_transaction_category_legacy_lookup.sql",
     "0121_app_health_scope_evidence_hot_path.sql",
     "0122_cost_statistics_access_convergence_hot_paths.sql",
+    "0123_drop_legacy_cost_statistics_bank_flow_rows.sql",
 ]
 TEST_SCHEMAS = ("audit", "job", "read_model", "app", "staging")
 TEST_TABLES = (
@@ -177,7 +178,6 @@ TEST_TABLES = (
     "read_model.oa_pending_payment_scopes",
     "read_model.cost_statistics_read_models",
     "read_model.cost_statistics_rows",
-    "read_model.cost_statistics_bank_flow_rows",
     "read_model.tax_offset_read_models",
     "read_model.tax_offset_items",
     "read_model.no_oa_bank_batch_rows",

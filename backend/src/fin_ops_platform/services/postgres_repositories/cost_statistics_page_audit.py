@@ -14,6 +14,9 @@ from fin_ops_platform.services.postgres_repositories.audit_report import (
 from fin_ops_platform.services.postgres_repositories.page_business_audit import (
     collect_bank_detail_projection_integrity_issues,
 )
+from fin_ops_platform.services.postgres_repositories.read_models import (
+    BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
+)
 from fin_ops_platform.services.postgres_repositories.workbench_page_audit import (
     collect_workbench_page_integrity_issues,
 )
@@ -171,10 +174,10 @@ def _audit_cost_statistics_snapshot(
                 "scope_count_and_source_version_equality",
                 "bidirectional_relation_edge_equality",
                 "same_snapshot_workbench_and_bank_detail_dependency_integrity",
-                "canonical_bank_transaction_bank_flow_equality",
+                "canonical_bank_detail_dependency_equality",
                 "month_upstream_source_version_equality",
                 "parent_source_shard_map_equality",
-                "project_expense_and_bank_flow_summary_recalculation",
+                "project_expense_and_statistics_recalculation",
                 "page_statistics_recalculation",
                 "durable_queue_and_freshness_gate",
             ],
@@ -1093,40 +1096,6 @@ def _exact_set_issues(
            or coalesce(expected.expected_fields, '[]'::jsonb)
               <> coalesce(projected.projected_fields, '[]'::jsonb)
     ),
-    expected_bank_flow as (
-        select to_char(source.txn_month, 'YYYY-MM') as scope_key,
-               coalesce(source.legacy_mongo_id, source.id::text) as transaction_id,
-               count(*)::integer as expected_count,
-               sum(abs(source.amount))::numeric as expected_amount
-        from app.bank_transactions source
-        where source.status <> 'deleted'
-          and source.txn_direction in ('outflow', 'inflow')
-          and source.txn_month is not null
-          and coalesce(source.amount, 0) <> 0
-        group by to_char(source.txn_month, 'YYYY-MM'),
-                 coalesce(source.legacy_mongo_id, source.id::text)
-    ),
-    projected_bank_flow as (
-        select to_char(row.scope_month, 'YYYY-MM') as scope_key,
-               row.transaction_id,
-               count(*)::integer as projected_count,
-               sum(abs(row.amount))::numeric as projected_amount
-        from read_model.cost_statistics_bank_flow_rows row
-        where row.project_scope = 'all'
-        group by row.scope_month, row.transaction_id
-    ),
-    bank_flow_mismatches as (
-        select coalesce(expected.scope_key, projected.scope_key) as scope_key,
-               coalesce(expected.transaction_id, projected.transaction_id) as transaction_id,
-               expected.expected_count, projected.projected_count,
-               expected.expected_amount, projected.projected_amount
-        from expected_bank_flow expected
-        full join projected_bank_flow projected
-          on projected.scope_key = expected.scope_key
-         and projected.transaction_id = expected.transaction_id
-        where coalesce(expected.expected_count, -1) <> coalesce(projected.projected_count, -1)
-           or abs(coalesce(expected.expected_amount, 0) - coalesce(projected.projected_amount, 0)) > 0.01
-    ),
     canonical_mismatches as (
         select 4 as proof_order,
                'cost_statistics_canonical_expected_set_mismatch'::text as issue_code,
@@ -1142,21 +1111,6 @@ def _exact_set_issues(
                    'projected_fields', projected_fields
                ) as details
         from cost_mismatches
-        union all
-        select 4 as proof_order,
-               'cost_statistics_canonical_expected_set_mismatch'::text as issue_code,
-               transaction_id as subject_id,
-               scope_key,
-               jsonb_build_object(
-                   'mismatch_kind', 'bank_detail_cost_projection_mismatch',
-                   'expected_count', expected_count,
-                   'projected_count', projected_count,
-                   'expected_amount', expected_amount::text,
-                   'projected_amount', projected_amount::text,
-                   'expected_fields', null::jsonb,
-                   'projected_fields', null::jsonb
-               ) as details
-        from bank_flow_mismatches
         order by scope_key, subject_id
         limit %s
     ),
@@ -1221,184 +1175,6 @@ def _key_display_field_issues(
         ),
         (
             """
-            /* check: cost_bank_flow_key_fields */
-            with projected as (
-                select row.scope_key,
-                       to_char(row.scope_month, 'YYYY-MM') as month_key,
-                       row.row_key,
-                       row.transaction_id,
-                       row.group_id,
-                       row.trade_time_text,
-                       row.amount,
-                       row.counterparty_name,
-                       row.payment_account_label,
-                       row.direction,
-                       row.remark,
-                       row.project_name,
-                       row.project_id,
-                       row.oa_applicant,
-                       row.expense_type,
-                       row.expense_content,
-                       row.bank_tag_code,
-                       row.bank_tag_label,
-                       row.bank_tag_primary_label,
-                       row.bank_tag_sub_label,
-                       row.bank_tag_label_path
-                from read_model.cost_statistics_bank_flow_rows row
-                where row.project_scope = 'all'
-            ),
-            resolved as (
-                select projected.*,
-                       source.id::text as canonical_id,
-                       coalesce(source.legacy_mongo_id, source.id::text) as canonical_transaction_id,
-                       source.amount as canonical_amount,
-                       source.txn_direction as canonical_direction,
-                       detail.transaction_id as bank_detail_transaction_id,
-                       detail.scope_key as bank_detail_scope_key,
-                       detail.trade_date,
-                       detail.counterparty_name as bank_detail_counterparty_name,
-                       detail.bank_name,
-                       detail.account_last4,
-                       detail.purpose,
-                       detail.summary,
-                       detail.payload as bank_detail_payload,
-                       detail.effective_category_code,
-                       detail.effective_category_label,
-                       detail.effective_category_primary_label,
-                       detail.effective_category_sub_label,
-                       detail.effective_category_label_path,
-                       detail.effective_category_path
-                from projected
-                left join app.bank_transactions source
-                  on (
-                        source.id::text = projected.transaction_id
-                     or source.legacy_mongo_id = projected.transaction_id
-                 )
-                 and source.status <> 'deleted'
-                 and source.txn_direction in ('outflow', 'inflow')
-                left join read_model.bank_detail_rows detail
-                  on detail.tenant_id = %s
-                 and detail.transaction_id in (
-                       source.id::text,
-                       coalesce(source.legacy_mongo_id, source.id::text)
-                 )
-            ),
-            tag_sources as (
-                select resolved.*,
-                       case
-                           when cardinality(effective_category_label_path) > 0
-                           then effective_category_label_path
-                           when cardinality(effective_category_path) > 0
-                           then effective_category_path
-                           else array[]::text[]
-                       end as effective_label_path
-                from resolved
-            ),
-            tagged as (
-                select tag_sources.*,
-                       coalesce(
-                           effective_category_primary_label,
-                           effective_label_path[1],
-                           effective_category_label,
-                           '未标记'
-                       ) as expected_primary_label,
-                       coalesce(
-                           effective_category_sub_label,
-                           effective_label_path[2],
-                           effective_category_label,
-                           effective_category_primary_label,
-                           effective_label_path[1],
-                           '未标记'
-                       ) as expected_sub_label
-                from tag_sources
-            )
-            select coalesce(transaction_id, scope_key || ':' || row_key) as subject_id,
-                   scope_key,
-                   canonical_transaction_id,
-                   canonical_amount::text,
-                   jsonb_build_object(
-                       'group_id', coalesce(group_id, ''),
-                       'transaction_id', transaction_id,
-                       'trade_time', coalesce(trade_time_text, ''),
-                       'amount', amount::text,
-                       'counterparty_name', coalesce(counterparty_name, ''),
-                       'payment_account_label', coalesce(payment_account_label, ''),
-                       'direction', coalesce(direction, ''),
-                       'remark', coalesce(remark, ''),
-                       'project_name', coalesce(project_name, ''),
-                       'project_id', coalesce(project_id, ''),
-                       'oa_applicant', coalesce(oa_applicant, ''),
-                       'expense_type', coalesce(expense_type, ''),
-                       'expense_content', coalesce(expense_content, ''),
-                       'bank_tag_code', coalesce(bank_tag_code, ''),
-                       'bank_tag_label', coalesce(bank_tag_label, ''),
-                       'bank_tag_primary_label', coalesce(bank_tag_primary_label, ''),
-                       'bank_tag_sub_label', coalesce(bank_tag_sub_label, ''),
-                       'bank_tag_label_path', coalesce(bank_tag_label_path, '[]'::jsonb)
-                   ) as projected_fields
-            from tagged
-            where canonical_id is null
-               or bank_detail_transaction_id is null
-               or coalesce(transaction_id, '') <> coalesce(canonical_transaction_id, '')
-               or month_key <> coalesce(bank_detail_scope_key, substring(trade_date::text from 1 for 7), '')
-               or abs(amount) is distinct from abs(canonical_amount)
-               or coalesce(counterparty_name, '') <> coalesce(bank_detail_counterparty_name, '')
-               or coalesce(payment_account_label, '') <> case
-                      when coalesce(bank_name, '') <> '' and coalesce(account_last4, '') <> ''
-                      then bank_name || ' 账户 ' || account_last4
-                      else coalesce(bank_name, account_last4, '')
-                  end
-               or coalesce(direction, '') <> case
-                      when canonical_direction = 'inflow' then '收入'
-                      else '支出'
-                  end
-               or coalesce(remark, '') <> coalesce(nullif(purpose, ''), nullif(summary, ''), '')
-               or coalesce(project_name, '') <> '未配对OA'
-               or coalesce(project_id, '') <> ''
-               or coalesce(oa_applicant, '') <> '—'
-               or coalesce(expense_type, '') <> coalesce(
-                    expected_sub_label, '未标记'
-               )
-               or coalesce(expense_content, '') <> coalesce(
-                    nullif(summary, ''),
-                    nullif(purpose, ''),
-                    nullif(bank_detail_payload->>'remark', ''),
-                    expected_sub_label,
-                    '未标记'
-                  )
-               or coalesce(bank_tag_code, '') <> coalesce(effective_category_code, '')
-               or coalesce(bank_tag_label, '')
-                  <> coalesce(
-                       effective_category_label,
-                       effective_category_sub_label,
-                       expected_sub_label,
-                       '未标记'
-                  )
-               or coalesce(bank_tag_primary_label, '')
-                  <> coalesce(expected_primary_label, '未标记')
-               or coalesce(bank_tag_sub_label, '')
-                  <> coalesce(expected_sub_label, '未标记')
-               or coalesce(bank_tag_label_path, '[]'::jsonb) <> to_jsonb(
-                   case
-                       when cardinality(effective_label_path) > 0
-                       then effective_label_path
-                       when coalesce(expected_primary_label, '未标记')
-                            = coalesce(expected_sub_label, '未标记')
-                       then array[coalesce(expected_primary_label, '未标记')]::text[]
-                       else array[
-                                coalesce(expected_primary_label, '未标记'),
-                                coalesce(expected_sub_label, '未标记')
-                            ]::text[]
-                   end
-               )
-            order by scope_key, subject_id
-            limit %s
-            """,
-            (tenant_id, limit),
-            "cost_statistics_bank_flow_key_display_fields_mismatch",
-        ),
-        (
-            """
             /* check: cost_summary_recalculation */
             with expected_scope_rows as (
                 select scope_key, row_key, transaction_id, group_id, project_name, expense_type, amount
@@ -1426,19 +1202,31 @@ def _key_display_field_issues(
                 left join expected_scope_rows row on row.scope_key = model.scope_key
                 group by model.scope_key
             ),
+            bank_rows as (
+                select scope_key as month_key,
+                       transaction_id as row_key,
+                       transaction_id,
+                       direction_label as direction,
+                       effective_category_code as bank_tag_code
+                from read_model.bank_detail_rows
+                where tenant_id = %s
+                  and schema_version = %s
+            ),
             expected_bank_scope_rows as (
-                select scope_key, row_key, transaction_id, amount, direction, bank_tag_code
-                from read_model.cost_statistics_bank_flow_rows
+                select project_scope || ':' || month_key as scope_key,
+                       row_key, transaction_id, direction, bank_tag_code
+                from bank_rows
+                cross join (values ('active'), ('all')) scopes(project_scope)
                 union all
-                select project_scope || ':all', row_key, transaction_id, amount, direction, bank_tag_code
-                from read_model.cost_statistics_bank_flow_rows
-                where scope_key ~ '^(active|all):[0-9]{4}-[0-9]{2}$'
+                select project_scope || ':all' as scope_key,
+                       row_key, transaction_id, direction, bank_tag_code
+                from bank_rows
+                cross join (values ('active'), ('all')) scopes(project_scope)
             ),
             bank_recalculated as (
                 select model.scope_key,
                        count(row.row_key)::integer as row_count,
                        count(distinct row.transaction_id)::integer as transaction_count,
-                       coalesce(sum(abs(row.amount)), 0)::numeric as total_amount,
                        count(distinct row.transaction_id) filter (
                            where row.direction = '支出'
                        )::integer as expense_transaction_count
@@ -1451,18 +1239,6 @@ def _key_display_field_issues(
                        , count(distinct row.bank_tag_code) filter (
                            where nullif(btrim(row.bank_tag_code), '') is not null
                        )::integer as bank_tag_count
-                       , coalesce(sum(
-                           case
-                               when row.direction = '支出' then abs(row.amount)
-                               else 0
-                           end
-                       ), 0)::numeric as expense_amount
-                       , coalesce(sum(
-                           case
-                               when row.direction = '收入' then abs(row.amount)
-                               else 0
-                           end
-                       ), 0)::numeric as income_amount
                 from read_model.cost_statistics_read_models model
                 left join expected_bank_scope_rows row on row.scope_key = model.scope_key
                 group by model.scope_key
@@ -1471,13 +1247,9 @@ def _key_display_field_issues(
                    model.payload->'payload'->'summary' as stored_summary,
                    recalculated.row_count,
                    recalculated.total_amount::text as recalculated_total_amount,
-                   model.payload->'payload'->'bank_flow_summary' as stored_bank_flow_summary,
                    model.payload->'payload'->'statistics' as stored_statistics,
-                   bank_recalculated.row_count as bank_flow_row_count,
-                   bank_recalculated.transaction_count as bank_flow_transaction_count,
-                   bank_recalculated.total_amount::text as bank_flow_total_amount,
-                   bank_recalculated.expense_amount::text as bank_flow_expense_amount,
-                   bank_recalculated.income_amount::text as bank_flow_income_amount
+                   bank_recalculated.row_count as bank_row_count,
+                   bank_recalculated.transaction_count as bank_transaction_count
             from read_model.cost_statistics_read_models model
             join recalculated on recalculated.scope_key = model.scope_key
             join bank_recalculated on bank_recalculated.scope_key = model.scope_key
@@ -1506,71 +1278,6 @@ def _key_display_field_issues(
                     end
                     - recalculated.total_amount
                ) > 0.01
-               or case
-                      when coalesce(
-                               model.payload->'payload'->'bank_flow_summary'->>'transaction_count', ''
-                           ) ~ '^[0-9]+$'
-                      then (model.payload->'payload'->'bank_flow_summary'->>'transaction_count')::integer
-                      else -1
-                  end <> bank_recalculated.transaction_count
-               or case
-                      when coalesce(model.payload->'payload'->'bank_flow_summary'->>'row_count', '') ~ '^[0-9]+$'
-                      then (model.payload->'payload'->'bank_flow_summary'->>'row_count')::integer
-                      else -1
-                  end <> bank_recalculated.row_count
-               or replace(
-                    coalesce(model.payload->'payload'->'bank_flow_summary'->>'total_amount', ''), ',', ''
-                  ) !~ '^-?[0-9]+([.][0-9]+)?$'
-               or abs(
-                    case
-                        when replace(
-                                coalesce(
-                                    model.payload->'payload'->'bank_flow_summary'->>'total_amount', ''
-                                ), ',', ''
-                             ) ~ '^-?[0-9]+([.][0-9]+)?$'
-                        then replace(
-                                model.payload->'payload'->'bank_flow_summary'->>'total_amount', ',', ''
-                             )::numeric
-                        else 0
-                    end
-                    - bank_recalculated.total_amount
-               ) > 0.01
-               or case
-                      when coalesce(
-                               model.payload->'payload'->'bank_flow_summary'->>'expense_transaction_count', ''
-                           ) ~ '^[0-9]+$'
-                      then (model.payload->'payload'->'bank_flow_summary'->>'expense_transaction_count')::integer
-                      else -1
-                  end <> bank_recalculated.expense_transaction_count
-               or case
-                      when coalesce(
-                               model.payload->'payload'->'bank_flow_summary'->>'income_transaction_count', ''
-                           ) ~ '^[0-9]+$'
-                      then (model.payload->'payload'->'bank_flow_summary'->>'income_transaction_count')::integer
-                      else -1
-                  end <> bank_recalculated.income_transaction_count
-               or abs(
-                    case
-                        when replace(coalesce(
-                                model.payload->'payload'->'bank_flow_summary'->>'expense_amount', ''
-                             ), ',', '') ~ '^-?[0-9]+([.][0-9]+)?$'
-                        then replace(
-                            model.payload->'payload'->'bank_flow_summary'->>'expense_amount', ',', ''
-                        )::numeric
-                        else 0
-                    end - bank_recalculated.expense_amount
-                  ) > 0.01
-               or abs(
-                    case
-                        when replace(coalesce(
-                                model.payload->'payload'->'bank_flow_summary'->>'income_amount', ''
-                             ), ',', '') ~ '^-?[0-9]+([.][0-9]+)?$'
-                        then replace(
-                            model.payload->'payload'->'bank_flow_summary'->>'income_amount', ',', ''
-                        )::numeric
-                        else 0
-                    end - bank_recalculated.income_amount
-                  ) > 0.01
                or (
                   model.scope_key ~ '^(active|all):all$'
                   and (
@@ -1645,7 +1352,7 @@ def _key_display_field_issues(
             order by model.scope_key
             limit %s
             """,
-            (limit,),
+            (tenant_id, BANK_DETAIL_READ_MODEL_SCHEMA_VERSION, limit),
             "cost_statistics_summary_recalculation_mismatch",
         ),
         (

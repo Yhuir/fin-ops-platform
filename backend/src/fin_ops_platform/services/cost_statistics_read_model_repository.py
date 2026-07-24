@@ -27,8 +27,16 @@ class CostStatisticsReadModelRepositoryPort:
         )
         return dict(payload) if isinstance(payload, dict) else {}
 
-    def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, Any] | None:
-        payload = self._repository.get_cost_statistics_freshness_gate(scope_key=scope_key)
+    def get_cost_statistics_freshness_gate(
+        self,
+        *,
+        scope_key: str,
+        dependency_profile: str = "workbench",
+    ) -> dict[str, Any] | None:
+        payload = self._repository.get_cost_statistics_freshness_gate(
+            scope_key=scope_key,
+            dependency_profile=dependency_profile,
+        )
         return dict(payload) if isinstance(payload, dict) else None
 
     def get_cost_statistics_page(self, **query: Any) -> dict[str, Any] | None:
@@ -44,10 +52,16 @@ class CostStatisticsReadModelRepositoryPort:
         *,
         project_scope: str,
         transaction_id: str,
+        dependency_profile: str,
+        scope_kind: str,
+        scope_value: str | None,
     ) -> dict[str, Any] | None:
         payload = self._repository.get_cost_statistics_transaction(
             project_scope=project_scope,
             transaction_id=transaction_id,
+            dependency_profile=dependency_profile,
+            scope_kind=scope_kind,
+            scope_value=scope_value,
         )
         return dict(payload) if isinstance(payload, dict) else None
 

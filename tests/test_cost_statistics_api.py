@@ -8,6 +8,7 @@ from urllib.parse import quote
 
 from fin_ops_platform.services.cost_statistics_source_versions import (
     COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+    cost_statistics_bank_flow_source_versions,
     cost_statistics_source_versions,
 )
 from fin_ops_platform.services.cost_statistics_sql_projection import CostStatisticsSqlProjectionBuilder
@@ -165,7 +166,7 @@ def _project_cost_statistics_payload(app, month: str, project_scope: str) -> dic
     )
 
 
-def _canonical_bank_flow_projection(app, month: str) -> tuple[list[dict[str, object]], dict[str, object]]:
+def _canonical_bank_projection(app, month: str) -> tuple[list[dict[str, object]], dict[str, object]]:
     rows: list[dict[str, object]] = []
     total_amount = 0
     expense_amount = 0
@@ -258,22 +259,59 @@ class _MemoryCostStatisticsSqlRepository:
         self.read_models[scope_key] = read_model
         return read_model
 
-    def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object] | None:
+    def get_cost_statistics_freshness_gate(
+        self,
+        *,
+        scope_key: str,
+        dependency_profile: str = "workbench",
+    ) -> dict[str, object] | None:
         view = self._stored_view(scope_key=scope_key)
         if not isinstance(view, dict):
             return None
         gate_snapshot = self._gate_snapshot_provider(scope_key)
+        source_versions = (
+            cost_statistics_bank_flow_source_versions(
+                dict(gate_snapshot["source_versions"])
+            )
+            if dependency_profile == "bank_flow"
+            else (
+                view.get("source_versions")
+                if isinstance(view.get("source_versions"), dict)
+                else {}
+            )
+        )
         return {
             "scope_key": scope_key,
             "schema_version": view.get("schema_version"),
             "generated_at": view.get("generated_at"),
-            "source_versions": view.get("source_versions") if isinstance(view.get("source_versions"), dict) else {},
+            "source_versions": source_versions,
             "source_settings": dict(gate_snapshot["source_settings"]),
             "workbench_source_versions": dict(gate_snapshot["workbench_source_versions"]),
             "bank_detail_source_versions": dict(gate_snapshot["bank_detail_source_versions"]),
             "published_source_version": int(view.get("published_source_version") or 0),
             "dirty_source_version": None,
             "refresh_status": view.get("refresh_status") or "fresh",
+            "bank_flow_refresh_status": view.get("refresh_status") or "fresh",
+            "bank_flow_stale_reasons": [],
+            "bank_flow_bank_detail_refresh_scope_keys": [],
+            "bank_flow_child_refresh_scope_keys": [],
+            "statistics": {
+                "transaction_count": 0,
+                "expense_transaction_count": 0,
+                "income_transaction_count": 0,
+                "cost_group_count": 0,
+                "tagged_transaction_count": 0,
+                "untagged_transaction_count": 0,
+                "project_count": 0,
+                "expense_type_count": 0,
+                "bank_tag_count": 0,
+                "cost_transaction_count": 0,
+            },
+            "statistics_status": "fresh",
+            "statistics_scope_key": f"{scope_key.split(':', 1)[0]}:all",
+            "statistics_published_source_version": int(
+                view.get("published_source_version") or 0
+            ),
             "stale_reasons": [],
         }
 
@@ -319,7 +357,7 @@ class _MemoryCostStatisticsSqlRepository:
         payload = stored.get("payload") if isinstance(stored, dict) else None
         if not isinstance(payload, dict):
             return None
-        rows_key = "bank_flow_time_rows" if view in {"time", "bank_tag"} else "time_rows"
+        rows_key = "bank_rows" if view in {"time", "bank_tag"} else "time_rows"
         rows = [dict(row) for row in list(payload.get(rows_key) or payload.get("time_rows") or []) if isinstance(row, dict)]
         if filters.get("project_name"):
             rows = [row for row in rows if row.get("project_name") == filters["project_name"]]
@@ -343,7 +381,7 @@ class _MemoryCostStatisticsSqlRepository:
             rows = []
         return {
             "summary": (
-                payload.get("bank_flow_summary") or payload.get("summary")
+                payload.get("bank_summary") or payload.get("summary")
                 if view in {"time", "bank_tag"}
                 else payload.get("summary")
             ),
@@ -386,7 +424,7 @@ class _MemoryCostStatisticsSqlRepository:
         payload = stored.get("payload") if isinstance(stored, dict) else None
         if not isinstance(payload, dict):
             return None
-        rows_key = "bank_flow_time_rows" if row_shape == "raw_bank" else "time_rows"
+        rows_key = "bank_rows" if row_shape == "raw_bank" else "time_rows"
         rows = [dict(row) for row in list(payload.get(rows_key) or []) if isinstance(row, dict)]
         if start_month and end_month and start_month > end_month:
             start_month, end_month = end_month, start_month
@@ -504,17 +542,21 @@ class _MemoryCostStatisticsSqlRepository:
         *,
         project_scope: str,
         transaction_id: str,
+        dependency_profile: str,
+        scope_kind: str,
+        scope_value: str | None,
     ) -> dict[str, object] | None:
+        del scope_kind, scope_value
         view = self._stored_view(scope_key=f"{project_scope}:all")
         if not isinstance(view, dict):
             return None
         payload = view.get("payload")
         if not isinstance(payload, dict):
             return None
-        for rows_key in ("time_rows", "bank_flow_time_rows"):
-            for row in list(payload.get(rows_key) or []):
-                if isinstance(row, dict) and row.get("transaction_id") == transaction_id:
-                    return dict(row)
+        rows_key = "bank_rows" if dependency_profile == "bank_flow" else "time_rows"
+        for row in list(payload.get(rows_key) or []):
+            if isinstance(row, dict) and row.get("transaction_id") == transaction_id:
+                return dict(row)
         return None
 
 
@@ -575,9 +617,9 @@ class CostStatisticsApiTests(unittest.TestCase):
         for scope in project_scopes:
             for target_month in months:
                 payload = _project_cost_statistics_payload(self.app, target_month, scope)
-                bank_flow_rows, bank_flow_summary = _canonical_bank_flow_projection(self.app, target_month)
-                payload["bank_flow_time_rows"] = bank_flow_rows
-                payload["bank_flow_summary"] = bank_flow_summary
+                bank_rows, bank_summary = _canonical_bank_projection(self.app, target_month)
+                payload["bank_rows"] = bank_rows
+                payload["bank_summary"] = bank_summary
                 scope_key = self.cost_repository.scope_key(target_month, scope)
                 self.cost_repository.upsert_read_model(
                     target_month,
@@ -660,8 +702,15 @@ class CostStatisticsApiTests(unittest.TestCase):
                 calls.append(("export", kwargs.get("project_scope")))
                 return "cost.xlsx", b"xlsx"
 
-            def get_transaction_detail(self, _transaction_id: str, *, project_scope: str) -> dict[str, object]:
-                calls.append(("transaction", project_scope))
+            def get_transaction_detail(
+                self,
+                _transaction_id: str,
+                *,
+                project_scope: str,
+                view: str,
+                scope: str,
+            ) -> dict[str, object]:
+                calls.append(("transaction", (project_scope, view, scope)))
                 raise CostStatisticsReadModelNotFreshError(
                     {
                         "read_model_status": "refreshing",
@@ -690,12 +739,26 @@ class CostStatisticsApiTests(unittest.TestCase):
         transaction_response = routes.route(
             "GET",
             "/api/cost-statistics/transactions/txn-1",
+            {
+                "project_scope": ["active"],
+                "view": ["bank_tag"],
+                "scope": ["2026-03"],
+            },
+        )
+        missing_view_response = routes.route(
+            "GET",
+            "/api/cost-statistics/transactions/txn-1",
             {"project_scope": ["active"]},
         )
 
         self.assertEqual(preview_response.status_code, 200)
         self.assertEqual(export_response.status_code, 200)
         self.assertEqual(transaction_response.status_code, 409)
+        self.assertEqual(missing_view_response.status_code, 400)
+        self.assertEqual(
+            json.loads(missing_view_response.body)["error"],
+            "invalid_cost_statistics_transaction_request",
+        )
         transaction_payload = json.loads(transaction_response.body)
         self.assertEqual(transaction_payload["error"], "cost_statistics_read_model_not_fresh")
         self.assertEqual(
@@ -703,7 +766,7 @@ class CostStatisticsApiTests(unittest.TestCase):
             [
                 ("preview", "all"),
                 ("export", "all"),
-                ("transaction", "active"),
+                ("transaction", ("active", "bank_tag", "2026-03")),
             ],
         )
 
@@ -870,7 +933,13 @@ class CostStatisticsApiTests(unittest.TestCase):
         transaction_id = time_payload["rows"][0]["transaction_id"]
 
         detail_payload = json.loads(
-            self.app.handle_request("GET", f"/api/cost-statistics/transactions/{transaction_id}").body
+            self.app.handle_request(
+                "GET",
+                (
+                    f"/api/cost-statistics/transactions/{transaction_id}"
+                    "?view=project&scope=2026-03"
+                ),
+            ).body
         )
         self.assertEqual(detail_payload["transaction"]["id"], transaction_id)
         self.assertEqual(detail_payload["transaction"]["project_name"], "云南溯源科技")

@@ -1,6 +1,6 @@
 # 成本统计高性能、鲜度与轻量锁定遮罩设计
 
-> 历史设计说明（2026-07-22）：本文保留成本模块此前的演进记录。其“relation 写后事务内投递成本增量”“Workbench 发布后再投递成本收敛”等主动 fan-out 段落已被 Phase 27 取代：普通 relation/rule write 只提交 canonical fact/version，成本页访问或重新激活时由 dependency-bound fresh gate 比较 exact scope，mismatch 才经 gateway 去重入队；显式维护命令仍按运维合同执行。当前边界以 `boundary-io.md` 与 `docs/architecture/module-boundaries/read-model-contracts.md` 为准。
+> 历史设计说明（2026-07-24）：本文保留成本模块此前的演进记录。其主动 fan-out 段落已被 Phase 27 取代；其“两张 Cost结构化行表”方案也已被更简单的单一事实投影取代：`time|bank_tag` 直接读取 fresh Bank Detail rows，`project|bank|expense_type` 保留 Cost OA allocation rows，migration 0123删除旧 Bank Detail复制表。当前边界只以 `boundary-io.md` 与 `docs/architecture/module-boundaries/read-model-contracts.md` 为准；下文旧批次记录不得作为恢复 dual-read、第二 writer或写后 fan-out的依据。
 >
 > 状态：历史设计；Phase 27 本地迁移完成，`PRODUCTION_VERIFICATION_PENDING`
 > 日期：2026-07-18

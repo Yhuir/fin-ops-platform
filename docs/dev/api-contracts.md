@@ -54,12 +54,13 @@
 - 每次请求先过 PostgreSQL durable freshness gate；non-fresh 返回 `202` 和空 rows/facets，不能读取旧 Redis/rows。fresh 响应使用 `ETag`、`Cache-Control: private, no-cache`、`Vary: Authorization, Cookie`；条件命中可返回 `304` 且跳过 page SQL。
 - non-fresh 响应可 additive 返回 `refresh_dependency=workbench` 与 `refresh_scope_keys[]`，表示本次访问实际 ensure 的精确 Workbench month 或 Cost child scopes；该字段只用于诊断/验证，不允许客户端据此自行 fan-out 或把 `refresh_enqueued=false` 解释为未收敛，因为 durable gateway 可能已合并同 scope active event。
 - `year:YYYY` 复用 `project_scope:all` parent gate 后过滤结构化月份 rows，不新增 year read-model scope。稳定排序为交易日期/时间降序，再按 transaction/row identity；read-model version 变化后旧 cursor 必须拒绝。
-- `GET /api/cost-statistics/transactions/{transaction_id}` 对已拆分流水在 `transaction.cost_allocations[]` additive 返回 `row_key/project_name/project_id/expense_type/expense_content/oa_applicant/amount`；`transaction.amount` 是 allocations 合计。未拆分流水也可返回单条 allocation；旧客户端忽略新字段时仍可读取原详情。
+- `GET /api/cost-statistics/transactions/{transaction_id}` 必须携带当前 `view`、`scope` 与 `project_scope`；缺少或非法参数返回 `400 invalid_cost_statistics_transaction_request`。同一个规范 `month|year|all` scope既用于 freshness gate，也下推到 point SQL，禁止用 fresh A月的 gate读取B月行。`time|bank_tag` 点查 Bank Detail row；`project|bank|expense_type` 点查 Cost allocation并返回 `transaction.cost_allocations[]`。任一 profile non-fresh均返回 `409 cost_statistics_read_model_not_fresh`，禁止跨 profile/scope fallback。
 
 `GET /api/cost-statistics/export-preview` 与 `GET /api/cost-statistics/export`
 
 - `view=time` 和 `view=bank_tag` 均导出全银行收入与支出；`bank_tag` 工作表包含主标签、子标签、资金方向和金额。
 - preview 的 `summary` 返回分方向金额和笔数。`view=project|expense_type|transaction` 继续使用 OA 配对支出口径。
+- `time|bank_tag` preview/download 使用 Bank Detail exact-scope profile并直接读取其结构化 rows；其余 view使用 Cost OA allocation profile。文件生成后的 final gate必须复用同一 profile。
 - read model 非 fresh 时返回 `409 cost_statistics_read_model_not_fresh`，route 不回退 live scan。
 - preview 的业务 shape 不变，但服务端只读取完整筛选 summary 与最多 8 行；download 在 20,000 行门槛通过后按最多 1,000 行批次生成 write-only XLSX，不读取完整 explorer payload。
 - download 绑定初始 fresh gate 的 schema、业务 source versions 与 published source version；生成期间任一证明变化时丢弃文件并返回同一 non-fresh 409，不能返回混合版本 workbook。

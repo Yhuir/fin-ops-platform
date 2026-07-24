@@ -10,7 +10,7 @@
 | 项目范围 | `all` | app settings project status / cost statistics API query | 用户选择 all project scope 后展示所有项目。 |
 | 成本行 | `included` | `CostStatisticsSqlProjectionBuilder` / SQL projection payload | 支出流水或可计入成本关系满足项目/费用字段要求后进入统计。 |
 | 成本行 | `excluded` | cost attribution policy / relation context | OA 发票抵扣、现金代收代付确认组等不应计入成本的关系被排除。 |
-| 月份 shard | `active:YYYY-MM` / `all:YYYY-MM` | `read_model.cost_statistics_rows`、`read_model.cost_statistics_bank_flow_rows`、readiness metadata | 由 `cost-statistics` 专用 worker 从对应 Workbench 月份 active generation 与单次 bank-detail snapshot 构建。OA 配对成本行与全银行收支行分表存储，parent JSON 不保存两类大数组；禁止再从 `workbench_groups.payload` 或旧成本 JSON array 读取成员行；旧 `cost-tax` 不再消费成本统计刷新。 |
+| OA allocation 月份 shard | `active:YYYY-MM` / `all:YYYY-MM` | `read_model.cost_statistics_rows`、readiness metadata | 由 `cost-statistics` 专用 worker 从对应 Workbench active generation与 Bank Detail snapshot构建。只存 OA配对 allocation；parent JSON不保存业务 arrays。`time|bank_tag` 不创建 Cost shard，而直接读取 fresh `read_model.bank_detail_rows`。 |
 | 全期间父 scope | `active:all` / `all:all` | `read_model.cost_statistics_read_models`、readiness | 从已物化月份 shard rows 聚合生成；不读取 Workbench `all` 全量 payload。 |
 
 关键规则：
@@ -22,6 +22,7 @@
 - 月份 shard 只有在当前 event `source_version` 成功条件发布且用同一版本完成 dirty scope 后，才重新入队同 project scope 的父 scope，推动全期间视图收敛。任一 CAS 失败都保持 `refreshing`，不允许 fan-out。
 - 父 scope 每次被读取都必须证明全部 active Workbench 月份、Cost child 嵌入的 Workbench/Bank Detail versions、child dependency dirty state 与 parent `source_shards` 一致；只看 parent 自身 dirty/readiness 不足以返回 `fresh`。
 - 父 scope 等待缺失、stale 或 failed 月份 shard 时只能记录 `refreshing`，并只 enqueue 证明漂移的 exact month scopes，不能伪造 `fresh` 或先投一个宽泛 parent 掩盖 child drift。
+- `time|bank_tag` 只证明 Bank Detail exact month scopes；Workbench/Cost状态不得阻塞rows或产生相应 enqueue。global statistics可独立 non-fresh。
 
 禁止流转：
 
@@ -37,8 +38,8 @@
 | --- | --- | --- |
 | loading | 页面首次请求 explorer，或 scope/view/domain/lifecycle refresh 触发当前 scope 重读 | 显示内联“正在加载成本统计”状态轨；成本业务区域 `inert`，上一 scope payload 立即退出可操作内容，不渲染假数据。 |
 | export reference loading | 项目/费用类型导出缺少 fresh 全期间筛选选项 | 用户动作后才并行读取两个 `scope=all&page_size=1` bounded facets；请求期间禁止重复触发，fresh 后打开导出中心，non-fresh/失败则保持关闭并显示错误。 |
-| refreshing | explorer GET 判定 Workbench dependency 或当前精确 Cost scope 为 loading/pending/processing/refreshing | 显示“成本数据正在同步”并锁定业务区域；150ms 有界重试 normal GET，不能把空 accepted payload 或上一 scope 内容当作当前最终结果。 |
-| stale | API 返回 stale/schema/source mismatch，或 App Status 显示当前精确 cost scope stale | 显示“正在更新至最新数据”并锁定；其他月份或其他 read model non-fresh 不得误锁当前页面。 |
+| refreshing | explorer GET 判定当前 view profile的 exact dependency 为 loading/pending/processing/refreshing | 显示“成本数据正在同步”并锁定业务区域；150ms 有界重试 normal GET，不能把空 accepted payload 或上一 scope内容当作最终结果。 |
+| stale | API 返回当前 view profile的 stale/schema/source mismatch | 显示“正在更新至最新数据”并锁定；其它 profile或 global statistics non-fresh不得误锁当前rows。 |
 | unavailable | API/App Status 当前精确 cost scope 为 missing/failed/unavailable | 显示“成本数据暂未就绪”，保持锁定并提供状态轨内的“重新检查”。 |
 | fresh | 当前 request identity 的 explorer payload 明确 fresh，且 App Status 当前精确 cost scope 没有 non-fresh 反证 | 一次性移除成本业务区域 `inert` 与拦截层；如焦点曾被锁定迁移，安全地恢复原控件或页面标题。 |
 | empty | fresh payload 且 summary row count 为 0 | 只有 fresh 后才代表当前 view/range/project scope 真实无成本数据。 |
@@ -58,30 +59,30 @@
 
 | 状态 | 判定 | 后续动作 |
 | --- | --- | --- |
-| `fresh` | dependency-bound gate 证明 cost metadata/current dirty 一致；concrete month 还必须证明 settings、Workbench active generation/current dirty、Bank Detail schema/status/current dirty/source versions 均有效。parent `all` 先用 set-based canonical→active Workbench month proofs 收敛精确上游月份，再由单条 Cost gate 证明全部 concrete child 的嵌入 lineage、dependency dirty state 与 parent `source_shards` 一致；不读取虚构 upstream `all` scope | 页面可展示；只有 gate 之后才可执行 ETag short-circuit、读取/写入 query-owned Redis 或 page SQL。projection 不写 Redis。 |
+| `fresh` | `project|bank|expense_type` 的 workbench profile证明 settings、Workbench、Bank Detail、Cost child/parent一致；`time|bank_tag` 的 bank-flow profile证明 Bank Detail exact scopes、schema、row count、业务 signature和标签规则一致。global statistics有独立状态 | 页面可展示；只有对应 profile gate 后才可执行 ETag/cache/page SQL。projection不写 Redis。 |
 | `missing` | 没有对应 scope readiness 或 read model payload | 入队对应 scope refresh；页面/API 返回 refreshing 或 busy。 |
 | `refreshing` | dirty scope pending/processing，或父 scope 正等待 shard | worker 继续处理；父 scope 不能 complete 为 fresh。 |
 | `stale` / `source_mismatch` / `schema_mismatch` | source/schema/version 落后 | 入队重建；不得同步 rebuild 伪装 fresh。 |
 | `failed` | worker refresh 失败或 readiness 记录失败 | 父 scope failed 阻断成本统计主体验；月份 shard failed 只标记局部 busy/attention。 |
 | `unavailable` | repository/queue/worker dependency 不可用 | App Status blocked 或 busy，视父 scope/月 shard 和 dependency 关键性判定。 |
 
-Refresh 触发来源：
+可能改变下次访问 freshness proof 的事实来源（普通写只推进事实/version，不直接投递 Cost）：
 
 - 银行流水、发票、ETC 导入确认。
 - Workbench relation 确认/撤回、批量账务、往来款手动闭环。
 - 待找发票规则、银行标签、税金认证、发票生命周期变化。
 - 项目范围或项目状态设置变化。
 - scope contract repair、App Health/backfill 运维任务。
-- explorer page shape invalid，例如旧 Redis cache 缺少 `scope`、`view`、`summary`、`facets`、`rows`、`row_count`、`next_cursor`。
+- explorer page shape invalid，例如旧 cache缺少 `scope`、`view`、`summary`、`facets`、`rows`、`row_count`、`next_cursor`。
 - `startup_stale_scan` 默认关闭，且不直接刷新成本统计 read model；只有后续 matching 结果真实变化并触发业务 lifecycle 时才影响成本。
 
 父 scope 流程：
 
 1. 收到 `active:all` 或 `all:all` refresh。
-2. 检查同 project scope 的月份 shard readiness。
-3. 缺失、stale 或 failed shard 通过 `ReadModelRefreshGateway` 入队。
-4. 父 scope 写/返回 `refreshing`，不写 fake rows，不 complete dirty scope 为 fresh。
-5. 所有 shard fresh 后，从 `read_model.cost_statistics_rows` 和 `read_model.cost_statistics_bank_flow_rows` 聚合父 scope metadata/逻辑 DTO，并计算需删除的过期月份 scope；禁止读取 child JSON arrays。
+2. 普通 parent event只从当前已物化 OA月份 metadata/rows构建廉价 rollup；不得根据 readiness枚举或补投 child。
+3. child freshness只由页面的 workbench profile gate判定；gate只把证明漂移的 exact Workbench/Bank Detail/Cost scopes经 `ReadModelRefreshGateway` 入队。
+4. parent或任一 required child non-fresh时页面返回 `refreshing`，不写 fake rows。
+5. worker从 `read_model.cost_statistics_rows` 聚合 OA parent metadata并计算 obsolete Cost scopes；全银行统计直接来自 fresh Bank Detail rows，不进入 parent复制表。
 6. repository 在同一事务内通过现有 partial unique index 锁定唯一 active 父 dirty row；仅当其 `source_version` 与事件版本精确相等时，原子发布 parent snapshot 并删除过期月份 rows。拒绝发布时不写 SQL/Redis。
 7. 仅用同一 `source_version` 成功完成父 dirty scope 后，父 scope 才可进入 fresh；若期间有新 dirty 版本则保持 `refreshing`，等待新事件收敛。
 
@@ -99,6 +100,7 @@ Refresh 触发来源：
 
 | 日期 | 变更 | 影响 | 验证 |
 | --- | --- | --- | --- |
+| 2026-07-24 | 全流水 view直接复用 Bank Detail | `time|bank_tag` 使用 Bank Detail profile，detail/export同 profile；0123删除旧 Cost bank-flow复制表。OA view和global statistics边界不变且独立 | Cost SQL/API/Audit/PG integration、migration、frontend Cost tests |
 | 2026-07-24 | 修复 `scope=all` parent false-fresh | 生产写后证明 parent 自身 `done` 不能代表 child lineage fresh。全期间访问先用一个 set-based Workbench canonical proof 找出 exact stale months，再由 Cost parent gate 比较 child Workbench/Bank Detail versions 与 `source_shards`；只 enqueue 漂移 child，child 完成后沿既有 month→parent 收敛。不新增 worker、queue、cache、表、HTTP 或写后 fan-out | `tests/test_cost_statistics_sql_runtime.py`、`tests/test_workbench_sql_runtime.py`、`tests/test_cost_statistics_postgres_integration.py`、`tests/test_batch_accounting_postgres_integration.py`、`tests/test_read_model_manifest.py` |
 | 2026-07-16 | 统一发布准备删除最后的 warmup 与旧 HTTP/full-view 链 | owner 证明与生产只读 active/attention=0 关闭删除门；root/project route、warmup job、full-view repository/query、projection Redis compat I/O 与相应 registry/mock/test 均删除。正式状态机只剩 durable refresh + narrow read I/O | `tests/test_cost_statistics_*`、`tests/test_platform_runtime_boundary_guards.py`、`tests/test_read_model_architecture_guards.py`、前端与 E2E 回归 |
 | 2026-07-16 | bulk export/preview 改为有界 SQL 与 write-only XLSX | UI 状态与 HTTP 错误码不变；preview 只读 summary+8 行，download 门槛后每批 <=1000 并在结束时复核发布版本。中途变化继续表现为 409 non-fresh，不返回混合版本文件 | `tests/test_cost_statistics_sql_runtime.py`、`tests/test_cost_statistics_api.py`、`tests/test_platform_runtime_boundary_guards.py` |

@@ -148,7 +148,12 @@ class CostStatisticsSqlReadRepositoryStub:
         self.source_versions = source_versions
         self.source_settings = source_settings or _cost_statistics_source_settings_fixture()
 
-    def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
+    def get_cost_statistics_freshness_gate(
+        self,
+        *,
+        scope_key: str,
+        dependency_profile: str = "workbench",
+    ) -> dict[str, object]:
         return cost_statistics_fresh_gate(
             scope_key=scope_key,
             source_versions=self.source_versions,
@@ -160,12 +165,15 @@ class CostStatisticsSqlReadRepositoryStub:
         *,
         project_scope: str,
         transaction_id: str,
+        dependency_profile: str,
+        scope_kind: str,
+        scope_value: str | None,
     ) -> dict[str, object] | None:
-        del project_scope
-        for rows_key in ("time_rows", "bank_flow_time_rows"):
-            for row in list(self.payload.get(rows_key) or []):
-                if isinstance(row, dict) and row.get("transaction_id") == transaction_id:
-                    return dict(row)
+        del project_scope, scope_kind, scope_value
+        rows_key = "bank_rows" if dependency_profile == "bank_flow" else "time_rows"
+        for row in list(self.payload.get(rows_key) or []):
+            if isinstance(row, dict) and row.get("transaction_id") == transaction_id:
+                return dict(row)
         return None
 
 
@@ -299,7 +307,12 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
         }
 
         class Repository:
-            def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
+            def get_cost_statistics_freshness_gate(
+                self,
+                *,
+                scope_key: str,
+                dependency_profile: str = "workbench",
+            ) -> dict[str, object]:
                 return cost_statistics_fresh_gate(
                     scope_key=scope_key,
                     source_versions=stored_versions,
@@ -356,7 +369,12 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
                 return True
 
         class Repository:
-            def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
+            def get_cost_statistics_freshness_gate(
+                self,
+                *,
+                scope_key: str,
+                dependency_profile: str = "workbench",
+            ) -> dict[str, object]:
                 gate = cost_statistics_fresh_gate(
                     scope_key=scope_key,
                     source_versions=_cost_statistics_source_versions_fixture(scope_key),
@@ -404,7 +422,7 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
             [("active:2026-03", "api_statistics_stale")],
         )
 
-    def test_month_access_refreshes_stale_workbench_dependency_before_cost_scope(self) -> None:
+    def test_time_access_reads_bank_flow_without_workbench_dependency(self) -> None:
         class Runtime(CostStatisticsRuntimeStub):
             def __init__(self) -> None:
                 self.cost_refreshes: list[tuple[str, str]] = []
@@ -414,11 +432,32 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
                 return True
 
         class Repository:
-            def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
-                raise AssertionError(f"stale Workbench must stop Cost gate I/O: {scope_key}")
+            def get_cost_statistics_freshness_gate(
+                self,
+                *,
+                scope_key: str,
+                dependency_profile: str = "workbench",
+            ) -> dict[str, object]:
+                gate = cost_statistics_fresh_gate(
+                    scope_key=scope_key,
+                    source_versions=_cost_statistics_source_versions_fixture(scope_key),
+                    refresh_status="refreshing",
+                    stale_reasons=["cost_statistics_dependency_refreshing"],
+                )
+                gate["bank_flow_refresh_status"] = "fresh"
+                gate["bank_flow_stale_reasons"] = []
+                return gate
 
             def get_cost_statistics_page(self, **_kwargs: object) -> dict[str, object]:
-                raise AssertionError("stale Workbench must stop Cost payload I/O")
+                return {
+                    "summary": {"row_count": 1, "transaction_count": 1, "total_amount": "88.00"},
+                    "available_years": [2026],
+                    "primary_facets": [],
+                    "secondary_facets": [],
+                    "rows": [{"transaction_id": "bank-1", "amount": "88.00"}],
+                    "row_count": 1,
+                    "next_cursor_values": None,
+                }
 
         runtime = Runtime()
         workbench_refreshes: list[tuple[str, str]] = []
@@ -447,16 +486,9 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
         )
 
         self.assertFalse(cache_hit)
-        self.assertEqual(payload["read_model_status"], "refreshing")
-        self.assertEqual(payload["refresh_dependency"], "workbench")
-        self.assertEqual(
-            payload["read_model_stale_reasons"],
-            ["workbench_dependency_workbench_pair_relations_updated_at_mismatch"],
-        )
-        self.assertEqual(
-            workbench_refreshes,
-            [("2026-05", "cost_statistics_workbench_dependency_stale")],
-        )
+        self.assertEqual(payload["read_model_status"], "fresh")
+        self.assertEqual(payload["rows"][0]["transaction_id"], "bank-1")
+        self.assertEqual(workbench_refreshes, [])
         self.assertEqual(runtime.cost_refreshes, [])
 
     def test_bank_tag_access_reads_fresh_bank_flow_rows_while_workbench_refreshes(self) -> None:
@@ -464,7 +496,12 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
         source_versions = _cost_statistics_source_versions_fixture("active:2026-05")
 
         class Repository:
-            def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
+            def get_cost_statistics_freshness_gate(
+                self,
+                *,
+                scope_key: str,
+                dependency_profile: str = "workbench",
+            ) -> dict[str, object]:
                 gate = cost_statistics_fresh_gate(
                     scope_key=scope_key,
                     source_versions=source_versions,
@@ -519,7 +556,12 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
 
     def test_all_access_ignores_unrelated_active_dependency_events(self) -> None:
         class Repository:
-            def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
+            def get_cost_statistics_freshness_gate(
+                self,
+                *,
+                scope_key: str,
+                dependency_profile: str = "workbench",
+            ) -> dict[str, object]:
                 return cost_statistics_fresh_gate(
                     scope_key=scope_key,
                     source_versions=_cost_statistics_source_versions_fixture(scope_key),
@@ -562,7 +604,12 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
         bank_detail_refreshes: list[tuple[list[str], str]] = []
 
         class Repository:
-            def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
+            def get_cost_statistics_freshness_gate(
+                self,
+                *,
+                scope_key: str,
+                dependency_profile: str = "workbench",
+            ) -> dict[str, object]:
                 return {
                     **cost_statistics_fresh_gate(
                         scope_key=scope_key,
@@ -570,7 +617,7 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
                         refresh_status="stale",
                         stale_reasons=["cost_statistics_parent_bank_detail_dependency_not_fresh"],
                     ),
-                    "bank_detail_refresh_scope_keys": ["2026-03"],
+                    "bank_flow_bank_detail_refresh_scope_keys": ["2026-03"],
                 }
 
             def get_cost_statistics_page(self, **_kwargs: object) -> dict[str, object]:
@@ -636,7 +683,12 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
         )
 
         class Repository:
-            def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
+            def get_cost_statistics_freshness_gate(
+                self,
+                *,
+                scope_key: str,
+                dependency_profile: str = "workbench",
+            ) -> dict[str, object]:
                 return cost_statistics_fresh_gate(
                     scope_key=scope_key,
                     source_versions=stale_cost_versions,
@@ -667,7 +719,7 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
 
         payload, _cache_hit, _etag, _not_modified = service.get_explorer_page(
             scope="2026-05",
-            view="time",
+            view="project",
             project_scope="active",
             filters={},
             cursor=None,
@@ -691,7 +743,12 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
                 return True
 
         class Repository:
-            def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
+            def get_cost_statistics_freshness_gate(
+                self,
+                *,
+                scope_key: str,
+                dependency_profile: str = "workbench",
+            ) -> dict[str, object]:
                 raise AssertionError(f"stale Workbench must stop parent Cost gate I/O: {scope_key}")
 
             def get_cost_statistics_page(self, **_kwargs: object) -> dict[str, object]:
@@ -723,7 +780,7 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
 
         payload, cache_hit, _etag, _not_modified = service.get_explorer_page(
             scope="all",
-            view="time",
+            view="project",
             project_scope="active",
             filters={},
             cursor=None,
@@ -760,7 +817,12 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
                 return True
 
         class Repository:
-            def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
+            def get_cost_statistics_freshness_gate(
+                self,
+                *,
+                scope_key: str,
+                dependency_profile: str = "workbench",
+            ) -> dict[str, object]:
                 return {
                     **cost_statistics_fresh_gate(
                         scope_key=scope_key,
@@ -791,7 +853,7 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
 
         payload, _cache_hit, _etag, _not_modified = service.get_explorer_page(
             scope="all",
-            view="time",
+            view="project",
             project_scope="active",
             filters={},
             cursor=None,
@@ -813,7 +875,12 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
             def __init__(self) -> None:
                 self.gate_calls: list[str] = []
 
-            def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
+            def get_cost_statistics_freshness_gate(
+                self,
+                *,
+                scope_key: str,
+                dependency_profile: str = "workbench",
+            ) -> dict[str, object]:
                 self.gate_calls.append(scope_key)
                 return cost_statistics_fresh_gate(
                     scope_key=scope_key,
@@ -848,11 +915,16 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
             page_size=50,
         )
         with self.assertRaises(CostStatisticsReadModelNotFreshError):
-            service.get_transaction_detail("txn-1", project_scope="active")
+            service.get_transaction_detail(
+                "txn-1",
+                project_scope="active",
+                view="time",
+                scope="2026-05",
+            )
 
         self.assertEqual(
             repository.gate_calls,
-            ["active:2026-05", "active:all"],
+            ["active:2026-05", "active:2026-05"],
         )
 
     def test_current_settings_change_locks_old_cost_snapshot_without_loading_rows(self) -> None:
@@ -865,7 +937,12 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
         actual_source_versions = _cost_statistics_source_versions_fixture("active:2026-05")
 
         class Repository:
-            def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
+            def get_cost_statistics_freshness_gate(
+                self,
+                *,
+                scope_key: str,
+                dependency_profile: str = "workbench",
+            ) -> dict[str, object]:
                 return cost_statistics_fresh_gate(
                     scope_key=scope_key,
                     source_versions=actual_source_versions,
@@ -941,8 +1018,7 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
                     "bank_tag_label_path": ["差旅", "交通"],
                 },
             ],
-            "bank_flow_summary": {"row_count": 4, "transaction_count": 4, "total_amount": "355.00"},
-            "bank_flow_time_rows": [
+            "bank_rows": [
                 {
                     "transaction_id": "oa-fee",
                     "trade_time": "2026-05-21 09:00:00",
@@ -1044,21 +1120,36 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
             ),
             workbench_refresh_enqueuer=_enqueue_workbench_dependency_refresh,
         )
-        income_detail = detail_service.get_transaction_detail("income-fee", project_scope="active")
+        income_detail = detail_service.get_transaction_detail(
+            "income-fee",
+            project_scope="active",
+            view="bank_tag",
+            scope="all",
+        )
         self.assertEqual(income_detail["transaction"]["direction"], "收入")
         self.assertEqual(income_detail["transaction"]["amount"], "200.00")
         with self.assertRaises(KeyError):
-            detail_service.get_transaction_detail("flow-uncategorized", project_scope="active")
+            detail_service.get_transaction_detail(
+                "flow-uncategorized",
+                project_scope="active",
+                view="bank_tag",
+                scope="all",
+            )
 
     def test_transaction_detail_uses_freshness_gate_and_indexed_point_lookup_only(self) -> None:
         runtime = CostStatisticsRuntimeStub()
-        source_versions = _cost_statistics_source_versions_fixture("active:all")
+        source_versions = _cost_statistics_source_versions_fixture("active:2026-05")
 
         class Repository:
             def __init__(self) -> None:
-                self.transaction_calls: list[tuple[str, str]] = []
+                self.transaction_calls: list[tuple[str, str, str, str, str | None]] = []
 
-            def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
+            def get_cost_statistics_freshness_gate(
+                self,
+                *,
+                scope_key: str,
+                dependency_profile: str = "workbench",
+            ) -> dict[str, object]:
                 return cost_statistics_fresh_gate(scope_key=scope_key, source_versions=source_versions)
 
             def get_cost_statistics_transaction(
@@ -1066,8 +1157,19 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
                 *,
                 project_scope: str,
                 transaction_id: str,
+                dependency_profile: str,
+                scope_kind: str,
+                scope_value: str | None,
             ) -> dict[str, object]:
-                self.transaction_calls.append((project_scope, transaction_id))
+                self.transaction_calls.append(
+                    (
+                        project_scope,
+                        transaction_id,
+                        dependency_profile,
+                        scope_kind,
+                        scope_value,
+                    )
+                )
                 return {
                     "transaction_id": transaction_id,
                     "month": "2026-05-01",
@@ -1115,9 +1217,17 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
             workbench_refresh_enqueuer=_enqueue_workbench_dependency_refresh,
         )
 
-        detail = service.get_transaction_detail("txn-1", project_scope="active")
+        detail = service.get_transaction_detail(
+            "txn-1",
+            project_scope="active",
+            view="project",
+            scope="2026-05",
+        )
 
-        self.assertEqual(repository.transaction_calls, [("active", "txn-1")])
+        self.assertEqual(
+            repository.transaction_calls,
+            [("active", "txn-1", "workbench", "month", "2026-05")],
+        )
         self.assertEqual(detail["month"], "2026-05")
         self.assertEqual(detail["transaction"]["amount"], "100.00")
         self.assertEqual(detail["transaction"]["project_name"], "多项目")
@@ -1129,7 +1239,12 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
         source_versions = _cost_statistics_source_versions_fixture("active:all")
 
         class Repository:
-            def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
+            def get_cost_statistics_freshness_gate(
+                self,
+                *,
+                scope_key: str,
+                dependency_profile: str = "workbench",
+            ) -> dict[str, object]:
                 return cost_statistics_fresh_gate(
                     scope_key=scope_key,
                     source_versions=source_versions,
@@ -1152,7 +1267,12 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
         )
 
         with self.assertRaises(CostStatisticsReadModelNotFreshError) as error:
-            service.get_transaction_detail("txn-1", project_scope="active")
+            service.get_transaction_detail(
+                "txn-1",
+                project_scope="active",
+                view="project",
+                scope="all",
+            )
 
         self.assertEqual(error.exception.payload["read_model_status"], "refreshing")
 
@@ -1163,8 +1283,15 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
         class Repository:
             def __init__(self) -> None:
                 self.export_calls: list[dict[str, object]] = []
+                self.gate_profiles: list[str] = []
 
-            def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
+            def get_cost_statistics_freshness_gate(
+                self,
+                *,
+                scope_key: str,
+                dependency_profile: str = "workbench",
+            ) -> dict[str, object]:
+                self.gate_profiles.append(dependency_profile)
                 return cost_statistics_fresh_gate(
                     scope_key=scope_key,
                     source_versions=source_versions,
@@ -1223,6 +1350,7 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
         self.assertEqual(repository.export_calls[0]["page_size"], 8)
         self.assertEqual(repository.export_calls[0]["offset"], 0)
         self.assertTrue(repository.export_calls[0]["include_summary"])
+        self.assertEqual(repository.gate_profiles, ["bank_flow"])
 
     def test_bulk_export_uses_bounded_pages_and_rechecks_same_published_version(self) -> None:
         runtime = CostStatisticsRuntimeStub()
@@ -1231,10 +1359,17 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
         class Repository:
             def __init__(self) -> None:
                 self.gate_calls = 0
+                self.gate_profiles: list[str] = []
                 self.export_calls: list[dict[str, object]] = []
 
-            def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
+            def get_cost_statistics_freshness_gate(
+                self,
+                *,
+                scope_key: str,
+                dependency_profile: str = "workbench",
+            ) -> dict[str, object]:
                 self.gate_calls += 1
+                self.gate_profiles.append(dependency_profile)
                 return cost_statistics_fresh_gate(
                     scope_key=scope_key,
                     source_versions=source_versions,
@@ -1289,6 +1424,7 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
         self.assertEqual(filename, "成本统计_2026-05_按时间统计.xlsx")
         self.assertTrue(content.startswith(b"PK"))
         self.assertEqual(repository.gate_calls, 2)
+        self.assertEqual(repository.gate_profiles, ["bank_flow", "bank_flow"])
         self.assertEqual([call["offset"] for call in repository.export_calls], [0, 1])
         self.assertTrue(all(call["page_size"] == 1000 for call in repository.export_calls))
         self.assertEqual([call["include_summary"] for call in repository.export_calls], [True, False])
@@ -1301,7 +1437,12 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
             def __init__(self) -> None:
                 self.gate_calls = 0
 
-            def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
+            def get_cost_statistics_freshness_gate(
+                self,
+                *,
+                scope_key: str,
+                dependency_profile: str = "workbench",
+            ) -> dict[str, object]:
                 self.gate_calls += 1
                 return cost_statistics_fresh_gate(
                     scope_key=scope_key,
@@ -1350,7 +1491,12 @@ class CostStatisticsQueryServiceTagFilterTests(unittest.TestCase):
         source_versions = _cost_statistics_source_versions_fixture("active:2026-05")
 
         class Repository:
-            def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
+            def get_cost_statistics_freshness_gate(
+                self,
+                *,
+                scope_key: str,
+                dependency_profile: str = "workbench",
+            ) -> dict[str, object]:
                 return cost_statistics_fresh_gate(scope_key=scope_key, source_versions=source_versions)
 
             def get_cost_statistics_export_page(self, **_query: object) -> dict[str, object]:
@@ -1398,26 +1544,36 @@ class CostStatisticsReadConnection:
     def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
         normalized = " ".join(sql.lower().split())
         self.fetch_one_calls.append((normalized, params))
-        if "with candidate as" in normalized and "read_model.cost_statistics_bank_flow_rows" in normalized:
+        if "select 'bank_flow' as row_kind" in normalized:
+            transaction_id = params[0]
+            for row in self.bank_flow_rows:
+                if row.get("transaction_id") == transaction_id:
+                    return {**row, "cost_allocations": []}
+            return None
+        if "with selected as" in normalized and "read_model.cost_statistics_rows" in normalized:
             project_scope, transaction_id = params[:2]
-            for row in [*self.cost_rows, *self.bank_flow_rows]:
-                if row.get("project_scope") == project_scope and row.get("transaction_id") == transaction_id:
-                    result = dict(row)
-                    result["cost_allocations"] = [
-                        {
-                            "row_key": item.get("row_key"),
-                            "project_name": item.get("project_name") or (item.get("payload") or {}).get("project_name"),
-                            "project_id": item.get("project_id") or "",
-                            "expense_type": item.get("expense_type") or (item.get("payload") or {}).get("expense_type"),
-                            "expense_content": item.get("expense_content") or "",
-                            "oa_applicant": item.get("oa_applicant") or "—",
-                            "amount": item.get("amount"),
-                        }
-                        for item in self.cost_rows
-                        if item.get("project_scope") == project_scope
-                        and item.get("transaction_id") == transaction_id
-                    ]
-                    return result
+            for row in self.cost_rows:
+                if (
+                    row.get("transaction_id") == transaction_id
+                    and row.get("project_scope") == project_scope
+                ):
+                    return {
+                        **row,
+                        "cost_allocations": [
+                            {
+                                "row_key": item.get("row_key"),
+                                "project_name": item.get("project_name") or (item.get("payload") or {}).get("project_name"),
+                                "project_id": item.get("project_id") or "",
+                                "expense_type": item.get("expense_type") or (item.get("payload") or {}).get("expense_type"),
+                                "expense_content": item.get("expense_content") or "",
+                                "oa_applicant": item.get("oa_applicant") or "—",
+                                "amount": item.get("amount"),
+                            }
+                            for item in self.cost_rows
+                            if item.get("project_scope") == project_scope
+                            and item.get("transaction_id") == transaction_id
+                        ],
+                    }
             return None
         if "left join lateral" in normalized and "read_model.cost_statistics_read_models" in normalized:
             if not isinstance(self.read_model_row, dict):
@@ -1465,7 +1621,7 @@ class CostStatisticsReadConnection:
     def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
         normalized = " ".join(sql.lower().split())
         self.fetch_all_calls.append((normalized, params))
-        if "from read_model.cost_statistics_bank_flow_rows" in normalized:
+        if "from read_model.bank_detail_rows" in normalized:
             return self.bank_flow_rows
         if "from read_model.cost_statistics_rows" in normalized:
             return self.cost_rows
@@ -1507,10 +1663,7 @@ class CostStatisticsWriteConnection:
     def execute(self, sql: str, params: tuple = ()) -> int:
         normalized = " ".join(sql.lower().split())
         self.executed.append((normalized, params))
-        if (
-            "insert into read_model.cost_statistics_rows" in normalized
-            or "insert into read_model.cost_statistics_bank_flow_rows" in normalized
-        ) and params[2] is None:
+        if "insert into read_model.cost_statistics_rows" in normalized and params[2] is None:
             raise AssertionError("parent cost statistics scope must not write rows with null scope_month")
         return 1
 
@@ -1783,7 +1936,7 @@ class CostStatisticsParentAggregationConnection:
                     "source_versions": {"scope": f"{project_scope}:2026-05"},
                 },
             ]
-        if "from read_model.cost_statistics_bank_flow_rows" in normalized:
+        if "from read_model.bank_detail_rows" in normalized:
             return [
                 {
                     "scope_key": "active:2026-05",
@@ -1911,7 +2064,7 @@ class CostStatisticsParentAggregationConnection:
                 "expense_type_count": 2,
                 "total_amount": "15.50",
             }
-        if "from read_model.cost_statistics_bank_flow_rows" in normalized:
+        if "from read_model.bank_detail_rows" in normalized:
             return {
                 "row_count": 1,
                 "transaction_count": 1,
@@ -1931,6 +2084,67 @@ class CostStatisticsParentAggregationConnection:
                 }
             }
         return None
+
+
+class CostStatisticsDirectBankFlowGateConnection:
+    def __init__(self, *, current_rules_version: int = 7) -> None:
+        self.current_rules_version = current_rules_version
+        self.fetch_all_calls: list[tuple[str, tuple]] = []
+        self.fetch_one_calls: list[tuple[str, tuple]] = []
+
+    def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_one_calls.append((normalized, params))
+        if "from read_model.cost_statistics_read_models model" in normalized:
+            return None
+        if "from app.app_settings" in normalized:
+            return {
+                "source_settings": {
+                    "bank_transaction_tags": {
+                        "version": self.current_rules_version,
+                        "active_rules": [],
+                    },
+                    "bank_account_mappings": [],
+                    "cost_statistics_tag_selection": {},
+                }
+            }
+        return None
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        normalized = " ".join(sql.lower().split())
+        self.fetch_all_calls.append((normalized, params))
+        if "from read_model.bank_detail_scopes" in normalized:
+            return [
+                {
+                    "scope_key": "2026-05",
+                    "scope_type": "bank_detail",
+                    "schema_version": BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
+                    "status": "fresh",
+                    "row_count": 2,
+                    "source_version": 11,
+                    "source_versions": {
+                        "source_version": 11,
+                        "bank_auto_tag_rules_version": 7,
+                        "bank_transaction_category_source_signature": "category-signature",
+                        "workbench_relation_source_versions": {
+                            "source_version": 99,
+                        },
+                    },
+                    "generated_at": "2026-07-24T00:00:00+00:00",
+                    "last_error": None,
+                    "raw_payload": {},
+                }
+            ]
+        if "from job.read_model_dirty_scopes" in normalized:
+            return []
+        if "/* bank_detail_category_source_signatures */" in normalized:
+            return [
+                {
+                    "scope_key": "2026-05",
+                    "source_signature": "category-signature",
+                }
+            ]
+        raise AssertionError(f"unexpected SQL: {normalized}")
 
 
 class CostStatisticsSaveRecorder:
@@ -1973,14 +2187,17 @@ class CostStatisticsSaveRecorder:
             "month": "all",
             "project_scope": project_scope,
             "summary": {"row_count": 2, "transaction_count": 2, "total_amount": "15.50"},
-            "bank_flow_summary": {
-                "row_count": 1,
+            "statistics": {
                 "transaction_count": 1,
-                "total_amount": "20.00",
-                "expense_amount": "20.00",
-                "income_amount": "0.00",
                 "expense_transaction_count": 1,
                 "income_transaction_count": 0,
+                "cost_group_count": 2,
+                "tagged_transaction_count": 1,
+                "untagged_transaction_count": 0,
+                "project_count": 2,
+                "expense_type_count": 2,
+                "bank_tag_count": 1,
+                "cost_transaction_count": 2,
             },
             "bank_accounts": list(bank_accounts),
             "project_rows": [
@@ -2064,7 +2281,12 @@ class CostStatisticsReadModelRepositoryPortTests(unittest.TestCase):
             def get_cost_statistics_scope_metadata(self, *, scope_key: str) -> dict[str, object]:
                 return {"scope_key": scope_key, "entry_count": 1, "source_versions": {"proof": "v1"}}
 
-            def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
+            def get_cost_statistics_freshness_gate(
+                self,
+                *,
+                scope_key: str,
+                dependency_profile: str = "workbench",
+            ) -> dict[str, object]:
                 return {"scope_key": scope_key, "published_source_version": 7}
 
             def get_cost_statistics_page(self, **query: object) -> dict[str, object]:
@@ -2078,8 +2300,17 @@ class CostStatisticsReadModelRepositoryPortTests(unittest.TestCase):
                 *,
                 project_scope: str,
                 transaction_id: str,
+                dependency_profile: str,
+                scope_kind: str,
+                scope_value: str | None,
             ) -> dict[str, object]:
-                return {"project_scope": project_scope, "transaction_id": transaction_id}
+                return {
+                    "project_scope": project_scope,
+                    "transaction_id": transaction_id,
+                    "dependency_profile": dependency_profile,
+                    "scope_kind": scope_kind,
+                    "scope_value": scope_value,
+                }
 
             def active_workbench_source_versions(self, *, scope_key: str) -> dict[str, object]:
                 return {"scope_key": scope_key, "source_version": 42}
@@ -2145,8 +2376,20 @@ class CostStatisticsReadModelRepositoryPortTests(unittest.TestCase):
             {"row_shape": "raw_cost", "rows": []},
         )
         self.assertEqual(
-            port.get_cost_statistics_transaction(project_scope="active", transaction_id="txn-1"),
-            {"project_scope": "active", "transaction_id": "txn-1"},
+            port.get_cost_statistics_transaction(
+                project_scope="active",
+                transaction_id="txn-1",
+                dependency_profile="bank_flow",
+                scope_kind="month",
+                scope_value="2026-05",
+            ),
+            {
+                "project_scope": "active",
+                "transaction_id": "txn-1",
+                "dependency_profile": "bank_flow",
+                "scope_kind": "month",
+                "scope_value": "2026-05",
+            },
         )
         self.assertEqual(
             port.active_workbench_source_versions(scope_key="2026-05"),
@@ -2195,6 +2438,58 @@ class CostStatisticsReadModelRepositoryPortTests(unittest.TestCase):
 
 
 class CostStatisticsSqlRuntimeTests(unittest.TestCase):
+    def test_bank_flow_gate_reads_bank_detail_without_cost_or_relation_dependency(self) -> None:
+        connection = CostStatisticsDirectBankFlowGateConnection()
+
+        gate = PostgresReadModelRepository(connection).get_cost_statistics_freshness_gate(
+            scope_key="active:2026-05",
+            dependency_profile="bank_flow",
+        )
+
+        self.assertEqual(gate["bank_flow_refresh_status"], "fresh")
+        self.assertEqual(gate["bank_flow_bank_detail_refresh_scope_keys"], [])
+        self.assertEqual(
+            gate["source_versions"]["bank_detail_source_versions"],
+            {
+                "scope_keys": ["2026-05"],
+                "scope_signatures": {
+                    "2026-05": {
+                        "schema_version": BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
+                        "row_count": 2,
+                        "source_versions": {
+                            "bank_auto_tag_rules_version": 7,
+                            "bank_transaction_category_source_signature": "category-signature",
+                        },
+                    }
+                },
+            },
+        )
+        queried_sql = " ".join(
+            sql
+            for sql, _params in [
+                *connection.fetch_one_calls,
+                *connection.fetch_all_calls,
+            ]
+        )
+        self.assertNotIn("bank_detail_relation_source_summaries", queried_sql)
+        self.assertNotIn("cost_statistics_bank_flow_rows", queried_sql)
+
+    def test_bank_flow_gate_enqueues_only_exact_scope_after_rule_change(self) -> None:
+        connection = CostStatisticsDirectBankFlowGateConnection(
+            current_rules_version=8
+        )
+
+        gate = PostgresReadModelRepository(connection).get_cost_statistics_freshness_gate(
+            scope_key="active:2026-05",
+            dependency_profile="bank_flow",
+        )
+
+        self.assertEqual(gate["bank_flow_refresh_status"], "stale")
+        self.assertEqual(
+            gate["bank_flow_bank_detail_refresh_scope_keys"],
+            ["2026-05"],
+        )
+
     def test_page_statistics_reject_invalid_partition_totals(self) -> None:
         statistics = {
             "transaction_count": 4,
@@ -2255,7 +2550,12 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         page_calls: list[dict[str, object]] = []
 
         class SqlCostStats:
-            def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
+            def get_cost_statistics_freshness_gate(
+                self,
+                *,
+                scope_key: str,
+                dependency_profile: str = "workbench",
+            ) -> dict[str, object]:
                 return cost_statistics_fresh_gate(
                     scope_key=scope_key,
                     source_versions=source_versions,
@@ -2376,6 +2676,42 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["next_cursor_values"], ("2026-05-02", "2026-05-02 10:00:00", "txn-2", "txn-2:0"))
         self.assertNotIn("_cursor_date", payload["rows"][0])
 
+    def test_bank_flow_page_reads_canonical_bank_detail_rows(self) -> None:
+        class Connection:
+            def __init__(self) -> None:
+                self.fetch_one_calls: list[tuple[str, tuple[object, ...]]] = []
+
+            def fetch_one(self, sql: str, params: tuple[object, ...] = ()) -> dict[str, object]:
+                self.fetch_one_calls.append((" ".join(sql.lower().split()), params))
+                return {
+                    "payload": {
+                        "summary": {"row_count": 0, "transaction_count": 0, "total_amount": "0.00"},
+                        "available_years": [],
+                        "primary_facets": [],
+                        "secondary_facets": [],
+                        "row_count": 0,
+                        "rows": [],
+                    }
+                }
+
+        connection = Connection()
+        repository = PostgresReadModelRepository(connection)
+
+        repository.get_cost_statistics_page(
+            project_scope="active",
+            scope_kind="month",
+            scope_value="2026-05",
+            view="time",
+            filters={},
+            selected_tag_codes=None,
+            cursor_values=None,
+            page_size=50,
+        )
+
+        sql, _params = connection.fetch_one_calls[0]
+        self.assertIn("from read_model.bank_detail_rows", sql)
+        self.assertNotIn("cost_statistics_bank_flow_rows", sql)
+
     def test_shared_postgres_repository_exposes_active_workbench_versions_to_cost_port(self) -> None:
         class Connection:
             def __init__(self) -> None:
@@ -2425,18 +2761,6 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
                                     "amount": "1,872.93",
                                 }
                             ],
-                            "bank_flow_time_rows": [
-                                {
-                                    "transaction_id": "bank-1",
-                                    "trade_time": "2026-05-03 10:00:00",
-                                    "direction": "支出",
-                                    "project_name": "未配对OA",
-                                    "expense_type": "材料",
-                                    "amount": "25.50",
-                                    "bank_tag_code": "project_material",
-                                    "bank_tag_label_path": ["项目开销", "设备材料"],
-                                }
-                            ],
                         },
                     }
                 }
@@ -2455,12 +2779,9 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
             if "insert into read_model.cost_statistics_rows" in sql
         )
         self.assertEqual(insert[16], "1872.93")
-        bank_flow_insert = next(
-            params
-            for sql, params in connection.executed
-            if "insert into read_model.cost_statistics_bank_flow_rows" in sql
+        self.assertFalse(
+            any("cost_statistics_bank_flow_rows" in sql for sql, _params in connection.executed)
         )
-        self.assertEqual(bank_flow_insert[16], "25.50")
         parent_insert = next(
             params
             for sql, params in connection.executed
@@ -2549,12 +2870,8 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertIn("for update", cas_sql)
         self.assertEqual(cas_params, ("default", "active:all"))
         self.assertTrue(any(params == ("active:2023-05",) for _sql, params in connection.executed))
-        self.assertTrue(
-            any(
-                "delete from read_model.cost_statistics_bank_flow_rows where scope_key" in sql
-                and params == ("active:2023-05",)
-                for sql, params in connection.executed
-            )
+        self.assertFalse(
+            any("cost_statistics_bank_flow_rows" in sql for sql, _params in connection.executed)
         )
         self.assertTrue(any("insert into read_model.cost_statistics_read_models" in sql for sql, _params in connection.executed))
         self.assertTrue(
@@ -2906,7 +3223,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
                 self.assertEqual(gate["refresh_status"], expected_status)
                 self.assertIn(expected_reason, gate["stale_reasons"])
 
-    def test_repository_bank_flow_gate_ignores_workbench_dirty_state_only(self) -> None:
+    def test_repository_bank_flow_gate_ignores_cost_and_workbench_dirty_state(self) -> None:
         connection = CostStatisticsReadConnection(
             read_model_row={
                 "scope_key": "active:2026-05",
@@ -2915,8 +3232,8 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
                 "published_source_version": 7,
                 "workbench_dirty_status": "processing",
             },
-            dirty_status="done",
-            dirty_source_version=7,
+            dirty_status="processing",
+            dirty_source_version=8,
         )
 
         gate = PostgresReadModelRepository(connection).get_cost_statistics_freshness_gate(
@@ -2957,6 +3274,9 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         row = PostgresReadModelRepository(connection).get_cost_statistics_transaction(
             project_scope="active",
             transaction_id="txn-1",
+            dependency_profile="workbench",
+            scope_kind="month",
+            scope_value="2026-05",
         )
 
         self.assertEqual(row["transaction_id"], "txn-1")
@@ -2964,12 +3284,62 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         self.assertEqual(row["cost_allocations"][0]["amount"], "19.25")
         sql, params = connection.fetch_one_calls[0]
         self.assertIn("from read_model.cost_statistics_rows", sql)
-        self.assertIn("from read_model.cost_statistics_bank_flow_rows", sql)
-        self.assertIn("order by row_priority", sql)
+        self.assertIn("scope_month = %s::date", sql)
+        self.assertNotIn("from read_model.bank_detail_rows", sql)
+        self.assertNotIn("cost_statistics_bank_flow_rows", sql)
+        self.assertIn("with selected as", sql)
         self.assertEqual(
             params,
-            ("active", "txn-1", "active", "txn-1", "active", "txn-1"),
+            (
+                "active",
+                "txn-1",
+                "2026-05-01",
+                "active",
+                "txn-1",
+                "2026-05-01",
+            ),
         )
+
+    def test_repository_gets_bank_flow_transaction_without_cost_io(self) -> None:
+        connection = CostStatisticsReadConnection(
+            cost_rows=[
+                {
+                    "scope_key": "active:2026-05",
+                    "project_scope": "active",
+                    "scope_month": "2026-05-01",
+                    "row_key": "txn-1:0",
+                    "transaction_id": "txn-1",
+                    "amount": "19.25",
+                }
+            ],
+            bank_flow_rows=[
+                {
+                    "scope_key": "2026-05",
+                    "scope_month": "2026-05-01",
+                    "row_key": "txn-1",
+                    "transaction_id": "txn-1",
+                    "amount": "99.00",
+                    "bank_tag_code": "fee",
+                }
+            ],
+        )
+
+        row = PostgresReadModelRepository(connection).get_cost_statistics_transaction(
+            project_scope="active",
+            transaction_id="txn-1",
+            dependency_profile="bank_flow",
+            scope_kind="year",
+            scope_value="2026",
+        )
+
+        self.assertEqual(row["amount"], "99.00")
+        self.assertEqual(row["cost_allocations"], [])
+        sql, params = connection.fetch_one_calls[0]
+        self.assertIn("from read_model.bank_detail_rows", sql)
+        self.assertNotIn("from read_model.cost_statistics_rows", sql)
+        self.assertNotIn("cost_statistics_bank_flow_rows", sql)
+        self.assertIn("extract(year from scope_month)::integer = %s", sql)
+        self.assertEqual(params, ("txn-1", 2026))
 
     def test_repository_cost_export_page_filters_and_bounds_structured_rows(self) -> None:
         class Connection:
@@ -3083,7 +3453,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
             "SqlCostStats",
             (),
             {
-                "get_cost_statistics_freshness_gate": lambda _self, *, scope_key: (
+                "get_cost_statistics_freshness_gate": lambda _self, *, scope_key, dependency_profile="workbench": (
                     gate_calls.append(scope_key)
                     or call_order.append("gate")
                     or cost_statistics_fresh_gate(
@@ -3145,7 +3515,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
                     "SqlCostStats",
                     (),
                     {
-                        "get_cost_statistics_freshness_gate": lambda _self, *, scope_key: (
+                "get_cost_statistics_freshness_gate": lambda _self, *, scope_key, dependency_profile="workbench": (
                             cost_statistics_fresh_gate(
                                 scope_key=scope_key,
                                 source_versions={},
@@ -3254,7 +3624,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
             "SqlCostStats",
             (),
             {
-                "get_cost_statistics_freshness_gate": lambda _self, *, scope_key: cost_statistics_fresh_gate(
+                "get_cost_statistics_freshness_gate": lambda _self, *, scope_key, dependency_profile="workbench": cost_statistics_fresh_gate(
                     scope_key=scope_key,
                     source_versions=_cost_statistics_source_versions_fixture(scope_key),
                 ),
@@ -3313,7 +3683,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
             "SqlCostStats",
             (),
             {
-                "get_cost_statistics_freshness_gate": lambda _self, *, scope_key: {
+                "get_cost_statistics_freshness_gate": lambda _self, *, scope_key, dependency_profile="workbench": {
                     **cost_statistics_fresh_gate(
                         scope_key=scope_key,
                         source_versions=_cost_statistics_source_versions_fixture(scope_key),
@@ -3359,7 +3729,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
             "SqlCostStats",
             (),
             {
-                "get_cost_statistics_freshness_gate": lambda _self, *, scope_key: cost_statistics_fresh_gate(
+                "get_cost_statistics_freshness_gate": lambda _self, *, scope_key, dependency_profile="workbench": cost_statistics_fresh_gate(
                     scope_key=scope_key,
                     source_versions=_cost_statistics_source_versions_fixture(scope_key),
                 ),
@@ -3646,12 +4016,8 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         payload = snapshot["read_models"]["active:2026-05"]["payload"]
         self.assertEqual(payload["summary"]["transaction_count"], 1)
         self.assertEqual(payload["summary"]["total_amount"], "10.00")
-        self.assertEqual(
-            [(row["transaction_id"], row["direction"]) for row in payload["bank_flow_time_rows"]],
-            [("bank-income", "收入"), ("bank-expense", "支出")],
-        )
-        self.assertEqual(payload["bank_flow_summary"]["expense_amount"], "20.00")
-        self.assertEqual(payload["bank_flow_summary"]["income_amount"], "30.00")
+        self.assertNotIn("bank_flow_time_rows", payload)
+        self.assertNotIn("bank_flow_summary", payload)
         self.assertNotIn("direction", tag_facade.snapshot_calls[0][1])
         self.assertEqual([row["transaction_id"] for row in payload["time_rows"]], ["bank-1"])
         self.assertEqual(payload["time_rows"][0]["group_id"], "group-1")
@@ -3814,7 +4180,10 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
             bank_detail_source_versions={"source_version": 12},
         )
         self.assertNotIn("workbench_source_versions", parent_source_versions)
-        self.assertNotIn("bank_detail_source_versions", parent_source_versions)
+        self.assertEqual(
+            parent_source_versions["bank_detail_source_versions"],
+            {"source_version": 12},
+        )
 
     def test_cost_statistics_semantic_versions_ignore_only_bank_detail_nonconsumed_provenance(self) -> None:
         first = cost_statistics_semantic_source_versions(
@@ -3897,7 +4266,12 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         old_workbench_versions = {"builder": "workbench-v5", "source_version": 2504}
 
         class SqlCostStats:
-            def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, object]:
+            def get_cost_statistics_freshness_gate(
+                self,
+                *,
+                scope_key: str,
+                dependency_profile: str = "workbench",
+            ) -> dict[str, object]:
                 source_versions = _cost_statistics_source_versions_fixture(scope_key)
                 source_versions["workbench_source_versions"] = old_workbench_versions
                 return cost_statistics_fresh_gate(
@@ -3920,7 +4294,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         response = app._cost_statistics_routes().route(
             "GET",
             "/api/cost-statistics/explorer",
-            {"scope": ["2026-05"], "view": ["time"], "project_scope": ["active"]},
+            {"scope": ["2026-05"], "view": ["project"], "project_scope": ["active"]},
         )
         payload = json.loads(response.body)
 
@@ -4165,7 +4539,7 @@ class CostStatisticsSqlRuntimeTests(unittest.TestCase):
         payload = snapshot["read_models"]["active:all"]["payload"]
         self.assertEqual(payload["month"], "all")
         self.assertEqual(payload["summary"]["total_amount"], "15.50")
-        self.assertEqual(payload["bank_flow_summary"]["total_amount"], "20.00")
+        self.assertEqual(payload["statistics"]["transaction_count"], 1)
         self.assertEqual(len(payload["project_rows"]), 2)
         self.assertEqual(len(payload["expense_type_rows"]), 2)
         self.assertEqual(payload["bank_accounts"][0]["payment_account_label"], "工商银行 账户 0001")

@@ -35,9 +35,7 @@ def cost_statistics_source_versions(
         "bank_account_mappings_fingerprint": bank_account_mappings_fingerprint_from_settings_payload(settings_payload),
         "oa_projection_sync_version": OA_PROJECTION_SYNC_VERSION,
     }
-    if normalized_month == "all":
-        return source_versions
-    if workbench_source_versions:
+    if normalized_month != "all" and workbench_source_versions:
         source_versions["workbench_source_versions"] = dict(workbench_source_versions)
     if bank_detail_source_versions is not None:
         source_versions["bank_detail_source_versions"] = dict(bank_detail_source_versions)

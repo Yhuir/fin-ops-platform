@@ -1,6 +1,13 @@
 # 成本统计 实施记录
 
-## 2026-07-24 - `bank_tag` 明细与 Workbench 全局统计解耦
+## 2026-07-24 - `time|bank_tag` 直接复用 Bank Detail，删除 Cost 复制投影
+
+- 全量扫描确认 `time|bank_tag` 的唯一业务输入本来就是 Bank Detail结构化 rows；继续复制到 Cost表会增加一次 projection写入、一次版本同步、Audit SQL和删除/parent rollup I/O，却不提供新业务能力。
+- 最小边界改为两个显式 dependency profile：`bank_flow` 只证明 Bank Detail exact scopes并直接查询 rows；`workbench` 保留 OA allocation的 Workbench→Bank Detail→Cost proof。explorer、transaction detail、export-preview/export和文件生成后的final gate必须按当前 `view` 使用同一 profile；transaction point SQL还必须使用与 gate相同的 month/year/all限制，禁止跨scope读取。
+- migration `0123` 删除 `read_model.cost_statistics_bank_flow_rows`。projection/repository/query/Audit与 App Health fixture均删除旧writer/read/fallback；历史0107/0108 migration保持不可变。没有新增表、worker、queue、cache、协调器或跨页面I/O。
+- 本地真实 PostgreSQL组合231项、write-operation runner 55项、Cost页面32项与production build通过。生产尚未部署该候选；最终结论必须等唯一候选部署后的可恢复fixture、逐页access-to-fresh、零fan-out、queue/worker drain、System Audit和p95/p99验证。
+
+## 2026-07-24 - `bank_tag` 明细与 Workbench 全局统计解耦（中间态，已由上节直接 Bank Detail 边界取代）
 
 - `bank_tag` rows 只消费结构化 bank-flow rows、Bank Detail 语义 proof 与成本 settings，跳过无关 Workbench pre-gate；标题 global statistics 保留完整 parent lineage，允许独立 non-fresh/null，不能反向阻塞 rows。
 - 单条 Cost PostgreSQL gate 同时返回完整 Cost、bank-flow rows 与 statistics 三组状态及 exact scopes；source-version mapper 只移除 bank-flow 不消费的 Workbench/OA provenance，保留 Bank Detail business signature、schema、row count、标签规则和未知语义键。

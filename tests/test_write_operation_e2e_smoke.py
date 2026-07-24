@@ -1637,6 +1637,60 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             "successful_mutation_response_received",
         )
 
+    def test_consumer_wait_retries_only_unresolved_consumers(self) -> None:
+        stable_consumer = write_operation_e2e_smoke.ConsumerProbe(
+            probe=http_slo_probe.HttpProbe("stable", "/api/stable", target_ms=1000),
+            assertions=(write_operation_e2e_smoke.JsonPointerAssertion("/ready", "equals", True),),
+            page_key="stable-page",
+            role="affected",
+        )
+        delayed_consumer = write_operation_e2e_smoke.ConsumerProbe(
+            probe=http_slo_probe.HttpProbe("delayed", "/api/delayed", target_ms=1000),
+            assertions=(write_operation_e2e_smoke.JsonPointerAssertion("/ready", "equals", True),),
+            page_key="delayed-page",
+            role="affected",
+        )
+        checkpoint = write_operation_e2e_smoke.WriteCheckpoint(
+            name="confirm",
+            operations=("workbench_relation_confirm_cross_page",),
+            steps=(),
+            consumers=(stable_consumer, delayed_consumer),
+        )
+        calls = {"/api/stable": 0, "/api/delayed": 0}
+
+        def request_fn(url: str, *_args) -> http_slo_probe.HttpProbeResponse:
+            path = "/api/stable" if url.endswith("/api/stable") else "/api/delayed"
+            calls[path] += 1
+            refreshing = path == "/api/delayed" and calls[path] == 1
+            return http_slo_probe.HttpProbeResponse(
+                status_code=202 if refreshing else 200,
+                headers={"content-type": "application/json"},
+                body=json.dumps(
+                    {
+                        "read_model_status": "refreshing" if refreshing else "fresh",
+                        "refresh_enqueued": refreshing,
+                        "ready": not refreshing,
+                    }
+                ).encode(),
+            )
+
+        with patch("fin_ops_platform.tools.write_operation_e2e_smoke.sleep", return_value=None):
+            result = write_operation_e2e_smoke._wait_for_checkpoint_consumers(
+                checkpoint,
+                base_url="https://example.test",
+                api_prefix="/fin-ops-api",
+                headers={"Authorization": "Bearer token"},
+                timeout_seconds=1,
+                poll_interval_seconds=0.05,
+                request_fn=request_fn,
+                variables={},
+                strict=True,
+            )
+
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual([item["page_key"] for item in result["results"]], ["stable-page", "delayed-page"])
+        self.assertEqual(calls, {"/api/stable": 1, "/api/delayed": 2})
+
     def test_system_audit_waits_for_transient_queue_backlog_and_requires_new_snapshot(self) -> None:
         checkpoint = _strict_checkpoint("confirm", key="confirm-key", relation_state_after="active")
         attempts = 0
@@ -1830,7 +1884,23 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         )
 
     def test_terminal_consumer_failure_does_not_stop_other_consumer_convergence(self) -> None:
-        checkpoint = _strict_checkpoint("confirm", key="confirm-key", relation_state_after="active")
+        checkpoint = write_operation_e2e_smoke.WriteCheckpoint(
+            name="confirm",
+            operations=("workbench_relation_confirm_cross_page",),
+            steps=(),
+            consumers=(
+                write_operation_e2e_smoke.ConsumerProbe(
+                    probe=http_slo_probe.HttpProbe("turnover", "/api/turnover-ledger"),
+                    assertions=(write_operation_e2e_smoke.JsonPointerAssertion("/ready", "equals", True),),
+                    page_key="bank-turnover",
+                ),
+                write_operation_e2e_smoke.ConsumerProbe(
+                    probe=http_slo_probe.HttpProbe("cost", "/api/cost-statistics/explorer"),
+                    assertions=(write_operation_e2e_smoke.JsonPointerAssertion("/ready", "equals", True),),
+                    page_key="cost-statistics",
+                ),
+            ),
+        )
         terminal = {
             "page_key": "bank-turnover",
             "name": "turnover",
@@ -1861,7 +1931,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                 "fin_ops_platform.tools.write_operation_e2e_smoke._collect_checkpoint_consumers",
                 side_effect=[
                     {"status": "fail", "consumer_count": 2, "results": [terminal, refreshing]},
-                    {"status": "pass", "consumer_count": 2, "results": [{**terminal, "status": "pass"}, converged]},
+                    {"status": "pass", "consumer_count": 1, "results": [converged]},
                 ],
             ) as collect,
             patch("fin_ops_platform.tools.write_operation_e2e_smoke.sleep", return_value=None),
@@ -1883,7 +1953,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         self.assertEqual(result["results"][0]["error"], "consumer_slo_miss:1044>1000")
         self.assertEqual(result["results"][1]["status"], "pass")
 
-    def test_cost_all_consumer_requires_fresh_changed_source_versions_and_business_value(self) -> None:
+    def test_cost_consumer_does_not_require_unrelated_source_version_change(self) -> None:
         checkpoint = write_operation_e2e_smoke.WriteCheckpoint(
             name="cost-all-causal",
             operations=("workbench_relation_confirm_cross_page",),
@@ -1903,7 +1973,6 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                 ),
             ),
         )
-        source_version = 1
 
         def request_fn(*_args) -> http_slo_probe.HttpProbeResponse:
             return http_slo_probe.HttpProbeResponse(
@@ -1914,22 +1983,13 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
                         "read_model_status": "fresh",
                         "read_model_scope_key": "active:all",
                         "refresh_enqueued": False,
-                        "source_versions": {"workbench": source_version},
+                        "source_versions": {"bank_detail": 1},
                         "rows": [{"linked": True}],
                     }
                 ).encode(),
             )
 
-        baseline = write_operation_e2e_smoke._capture_consumer_causal_baseline(
-            checkpoint,
-            base_url="https://example.test",
-            api_prefix="/fin-ops-api",
-            headers={"Authorization": "Bearer token"},
-            timeout_seconds=1,
-            request_fn=request_fn,
-            variables={},
-        )
-        unchanged = write_operation_e2e_smoke._collect_checkpoint_consumers(
+        result = write_operation_e2e_smoke._collect_checkpoint_consumers(
             checkpoint,
             base_url="https://example.test",
             api_prefix="/fin-ops-api",
@@ -1938,28 +1998,12 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
             request_fn=request_fn,
             variables={},
             strict=True,
-            causal_baseline=baseline["values"],
-        )
-        source_version = 2
-        changed = write_operation_e2e_smoke._collect_checkpoint_consumers(
-            checkpoint,
-            base_url="https://example.test",
-            api_prefix="/fin-ops-api",
-            headers={"Authorization": "Bearer token"},
-            timeout_seconds=1,
-            request_fn=request_fn,
-            variables={},
-            strict=True,
-            causal_baseline=baseline["values"],
         )
 
-        self.assertEqual(baseline["status"], "pass")
-        self.assertEqual(unchanged["status"], "fail")
-        self.assertEqual(
-            unchanged["results"][0]["assertions"][-1]["error"],
-            "consumer_source_version_unchanged",
-        )
-        self.assertEqual(changed["status"], "pass")
+        self.assertEqual(result["status"], "pass")
+        self.assertEqual(result["results"][0]["assertions"], [
+            {"pointer": "/rows/0/linked", "operator": "equals", "status": "pass"}
+        ])
 
     def test_admin_system_audit_preflight_blocks_first_mutation(self) -> None:
         scenario = write_operation_e2e_smoke.WriteScenario(
@@ -2199,7 +2243,7 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         self.assertEqual(result["recovery"]["status"], "pass")
         self.assertFalse(result["recovery_required"])
 
-    def test_committed_write_slo_miss_waits_for_fanout_before_recovery_baseline(self) -> None:
+    def test_committed_write_slo_miss_runs_recovery_before_read_side_convergence(self) -> None:
         isolation_consumer = write_operation_e2e_smoke.ConsumerProbe(
             probe=http_slo_probe.HttpProbe("isolation", "/api/isolation", target_ms=1000),
             assertions=(write_operation_e2e_smoke.JsonPointerAssertion("/rows/0/id", "equals", "stable"),),
@@ -2323,8 +2367,8 @@ class WriteOperationE2ESmokeTests(unittest.TestCase):
         result = report["results"][0]
         self.assertEqual(report["status"], "fail")
         self.assertEqual(result["checkpoints"][0]["steps"][0]["error"], "write_step_slo_miss:5270.0>5000.0")
-        self.assertEqual(result["checkpoints"][0]["recovery_precondition"]["status"], "pass")
-        self.assertEqual(wait_event_ids, [["event-confirm"], ["event-recover"]])
+        self.assertNotIn("recovery_precondition", result["checkpoints"][0])
+        self.assertEqual(wait_event_ids, [["event-recover"]])
         self.assertEqual(result["recovery"]["status"], "pass")
         self.assertFalse(result["recovery_required"])
 

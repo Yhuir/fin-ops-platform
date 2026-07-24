@@ -18,7 +18,7 @@
 - App Health 只根据 `cost_statistics` read model 的真实 readiness、dirty scope、outbox 和 `cost-statistics` worker 状态判定成本统计页面。历史 failed readiness 必须由后续真实成功 rebuild 覆盖，不能手工伪造绿色。
 - App Status 必须保留 `cost_statistics` 的 scope-level readiness：`active:all`、`all:all`、`active:YYYY-MM`、`all:YYYY-MM`。全期间父 scope failed/unavailable 代表成本统计主体验不可用；单个月份 shard failed/unavailable 只代表局部分片需要重试，域级显示 busy/attention，不阻断已经 fresh 的全期间视图。
 - 页面 API 只表达当前查询 scope 的数据平面状态，例如 `fresh`、`refreshing`、`stale`、`failed` 或 `unavailable`；App Status 负责解释多个 scope、dirty scope、outbox、worker heartbeat 和 last error 的状态平面。两者必须使用同一套 scope key 语义，不能用页面请求线程同步重建来掩盖缺失 read model。
-- 页面存在两套不可混用的事实集：`按项目`、`按银行`、`按OA费用类型` 只消费 OA 配对支出 `time_rows`；`按时间`、`按标签` 消费全银行收入与支出 `bank_flow_time_rows`。因此两组金额不要求相等。
+- 页面存在两套不可混用的事实集：`按项目`、`按银行`、`按OA费用类型` 消费 OA配对支出 allocation；`按时间`、`按标签` 消费完整银行收入与支出。因此两组金额不要求相等。API只暴露当前 view的 bounded `rows`，产品口径不依赖已删除的旧 full-array DTO字段。
 - 全流水统计不显示“总金额”或净额。页面顶部、主标签和子标签分别显示支出金额与收入金额，二者均为正数绝对值；支出金额是当前可见支出流水绝对金额之和，收入金额是当前可见收入流水绝对金额之和。收入用绿色、支出用橘色；明细逐行保留资金方向和该笔金额。
 - 主标签和子标签分别显示收支金额及收支笔数，不显示合并金额和占比。收入与支出都进入同一成本统计标签选择规则；旧显式规则升级时保留原支出选择并一次性加入当前有效收入标签，未分类选择保持不变。
 - `按时间` 和 `按标签` 导出都必须包含收入与支出明细、资金方向，以及分方向金额/笔数摘要；OA 项目类导出保持 OA 配对支出口径。

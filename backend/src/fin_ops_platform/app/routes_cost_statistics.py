@@ -110,7 +110,12 @@ class CostStatisticsApiRoutes:
             )
         if method == "GET" and route_path.startswith("/api/cost-statistics/transactions/"):
             transaction_id = route_path.rsplit("/", 1)[-1]
-            return self.handle_transaction(transaction_id, query.get("project_scope", [None])[0])
+            return self.handle_transaction(
+                transaction_id,
+                query.get("project_scope", [None])[0],
+                query.get("view", [None])[0],
+                query.get("scope", [None])[0],
+            )
         return None
 
     def handle_tag_rules(self, headers: dict[str, str] | None) -> Any:
@@ -328,15 +333,40 @@ class CostStatisticsApiRoutes:
             )
         return self._json_response(HTTPStatus.OK, payload)
 
-    def handle_transaction(self, transaction_id: str, project_scope: str | None) -> Any:
+    def handle_transaction(
+        self,
+        transaction_id: str,
+        project_scope: str | None,
+        view: str | None,
+        scope: str | None,
+    ) -> Any:
+        normalized_view = str(view or "").strip().lower()
+        if normalized_view not in {"time", "project", "bank", "expense_type", "bank_tag"}:
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "invalid_cost_statistics_transaction_request",
+                    "message": "view must be time, project, bank, expense_type, or bank_tag.",
+                },
+            )
         try:
             normalized_project_scope = self._normalize_project_scope(project_scope)
             payload = self._query_service.get_transaction_detail(
                 transaction_id,
                 project_scope=normalized_project_scope,
+                view=normalized_view,
+                scope=str(scope or ""),
             )
         except ValueError as error:
-            return self._project_scope_error_response(error)
+            if str(error) == "project_scope must be active or all":
+                return self._project_scope_error_response(error)
+            return self._json_response(
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "error": "invalid_cost_statistics_transaction_request",
+                    "message": str(error),
+                },
+            )
         except CostStatisticsReadModelNotFreshError as error:
             return self._json_response(HTTPStatus.CONFLICT, error.payload)
         except KeyError:

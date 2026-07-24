@@ -101,16 +101,16 @@ OA 付款算法不读取待找发票规则，因此 OA 页面不因该规则保�
 3. 自动匹配只允许在内存中生成可原子提交的 `FormalRelationPlan`；无法满足确定性安全规则的结果不持久化、不合并未配对事实，也不得驱动 pending invoice、input invoice usage、OA pending、cost statistics 等 linked-only 下游状态。
 4. Workbench active generation、all-scope aggregate、groups page 和 `audit_workbench_relation_display` 必须共同保证旧 `case:decision:*`、`automatic_decision` / `automatic_match` payload 不会继续污染页面。Release A 仅为应用回滚暂留旧物理表，但运行时必须保持零访问；Release B 通过独立 migration 删除。
 
-### 成本统计全期间 read model
+### 成本统计 view-specific read boundary
 
-成本统计的 `all` scope 是真实物化视图，不是只负责 fan-out 的队列父 scope：
+成本统计按视图使用两个明确 profile，不再把完整银行流水复制为第二份 Cost read model：
 
-1. Cost concrete-month 访问比较该月 canonical Workbench expected versions 与 active generation；Cost all 访问用一次 set-based proof 比较全部 canonical month scopes 与 active generations。上游 stale 时只 enqueue 真正漂移的 Workbench 月份，不同时 enqueue Cost；上游 fresh 后的下一次 GET 才允许收敛当前 Cost scope。relation transaction 和 Workbench publish 都不 fan-out Cost。
-2. `active:YYYY-MM` / `all:YYYY-MM` 月份 shard 由 `CostStatisticsSqlProjectionBuilder` 基于对应工作台月份 read model 重建。
-3. all 页面 gate 与 `CostStatisticsReadModelRefreshService` 都不能只信任 parent 自身 readiness。页面 gate 逐月比较 Cost child 的 Workbench/Bank Detail lineage、latest dependency dirty 与 parent `source_shards`；concrete month 页面也用该证明保护同页全期间 statistics，但 parent drift 不阻断当前月主 rows。缺失、stale 或 failed 的 shard 通过 `ReadModelRefreshGateway` 精确入队，父 scope 返回 `readiness_status=refreshing`，不写假 fresh。
-4. 所有所需月份 shard fresh 后，`active:all` / `all:all` 从结构化月份 rows 聚合生成，并原子发布 parent snapshot；父 scope 不重复物化业务 rows，也不读 Workbench `all` 历史 payload。
-5. 月份 shard 发布成功后重新入队同 project scope 的父 scope，使全期间视图最终收敛。
-6. 页面只在 Cost scope fresh 时解锁；refreshing 显示本页面 overlay 并有界重试，不轮询全局 App Status 或 operation barrier。
+1. `project|bank|expense_type` 使用 OA allocation profile。concrete month访问比较该月 canonical Workbench expected/active versions、Bank Detail proof与 Cost child；all访问使用 set-based month proof并只enqueue真实漂移的 exact scopes。relation transaction与 Workbench publish零 Cost fan-out。
+2. `active:YYYY-MM` / `all:YYYY-MM` Cost shard只承载 OA allocation rows，由 `CostStatisticsSqlProjectionBuilder` 基于 active Workbench generation和 Bank Detail snapshot构建。
+3. `time|bank_tag` 使用 Bank Detail profile，直接查询 fresh `read_model.bank_detail_rows`。它只ensure non-fresh Bank Detail exact months，不等待或enqueue Workbench/Cost。transaction detail与export必须携带当前 view/scope并复用同一 profile。
+4. `active:all` / `all:all` Cost parent只聚合 OA child metadata/rows；普通 parent event不根据 readiness枚举 child。global statistics可独立 non-fresh并ensure自身依赖，但不能阻塞已经 fresh的当前视图 rows。
+5. migration `0123_drop_legacy_cost_statistics_bank_flow_rows.sql` 删除旧 Bank Detail复制表；禁止 dual-read、第二 writer或 JSON fallback。
+6. 页面只在当前 view profile fresh时解锁；refreshing显示本页面 overlay并有界重试，不轮询全局 App Status或 operation barrier。
 
 ## Worker 与队列
 

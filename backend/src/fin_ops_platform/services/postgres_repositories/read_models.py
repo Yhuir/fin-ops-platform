@@ -13,7 +13,15 @@ from urllib.parse import unquote
 from uuid import uuid4
 
 from fin_ops_platform.services.bank_transaction_category_service import BANK_TRANSACTION_CATEGORY_COUNT_KEYS
-from fin_ops_platform.services.cost_statistics_source_versions import COST_STATISTICS_READ_MODEL_SCHEMA_VERSION
+from fin_ops_platform.services.cost_statistics_bank_accounts import (
+    bank_accounts_from_settings_payload,
+    bank_auto_tag_rules_version_from_settings_payload,
+)
+from fin_ops_platform.services.cost_statistics_source_versions import (
+    COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+    cost_statistics_bank_flow_source_versions,
+    cost_statistics_source_versions,
+)
 from fin_ops_platform.services.pending_invoice_status import pending_invoice_filter_status_codes
 from fin_ops_platform.services.read_model_freshness import normalize_source_versions
 from fin_ops_platform.services.postgres_repositories.oa_pending_payment_source_snapshot import (
@@ -79,6 +87,52 @@ WORKBENCH_BANK_BATCH_SUMMARY_SOURCE_KINDS = frozenset(
     {NO_OA_BANK_BATCH_SUMMARY_SOURCE_KIND, BANK_FLOW_RULE_BATCH_SUMMARY_SOURCE_KIND}
 )
 WORKBENCH_ROW_PAYLOAD_PRUNED_KEYS = {"object_identity"}
+_COST_STATISTICS_BANK_FLOW_SOURCE_SQL = f"""
+    select
+        scope_key,
+        null::text as project_scope,
+        scope_month,
+        transaction_id as row_key,
+        transaction_id,
+        ''::text as group_id,
+        coalesce(nullif(payload->>'trade_time', ''), trade_time::text, trade_date::text) as trade_time_text,
+        trade_date,
+        counterparty_name,
+        case
+            when nullif(btrim(bank_name), '') is not null
+             and nullif(btrim(account_last4), '') is not null
+                then bank_name || ' 账户 ' || account_last4
+            else coalesce(nullif(btrim(bank_name), ''), nullif(btrim(account_last4), ''), '')
+        end as payment_account_label,
+        direction_label as direction,
+        coalesce(nullif(purpose, ''), nullif(summary, ''), '') as remark,
+        ''::text as project_id,
+        '未配对OA'::text as project_name,
+        coalesce(
+            nullif(effective_category_sub_label, ''),
+            nullif(effective_category_label, ''),
+            nullif(effective_category_primary_label, ''),
+            '未分类'
+        ) as expense_type,
+        coalesce(
+            nullif(summary, ''),
+            nullif(purpose, ''),
+            nullif(effective_category_label, ''),
+            '未分类'
+        ) as expense_content,
+        abs(amount) as amount,
+        '—'::text as oa_applicant,
+        effective_category_code as bank_tag_code,
+        effective_category_label as bank_tag_label,
+        effective_category_primary_label as bank_tag_primary_label,
+        effective_category_sub_label as bank_tag_sub_label,
+        to_jsonb(effective_category_label_path) as bank_tag_label_path,
+        payload,
+        raw_payload
+    from read_model.bank_detail_rows
+    where tenant_id = 'default'
+      and schema_version = {BANK_DETAIL_READ_MODEL_SCHEMA_VERSION}
+"""
 
 
 class TurnoverLedgerGenerationConflictError(RuntimeError):
@@ -2540,11 +2594,19 @@ class PostgresBankReadModelRepository:
         executor = connection or self._connection
         rows = executor.fetch_all(
             """
-            select scope_key
-            from read_model.bank_detail_scopes
-            where tenant_id = %s
-              and scope_type = 'bank_detail'
-              and scope_key ~ '^[0-9]{4}-[0-9]{2}$'
+            select distinct scope_key
+            from (
+                select scope_key
+                from read_model.bank_detail_scopes
+                where tenant_id = %s
+                  and scope_type = 'bank_detail'
+                  and scope_key ~ '^[0-9]{4}-[0-9]{2}$'
+                union all
+                select to_char(txn_month, 'YYYY-MM') as scope_key
+                from app.bank_transactions
+                where status <> 'deleted'
+                  and txn_month is not null
+            ) available
             order by scope_key
             """,
             (tenant_id,),
@@ -2756,6 +2818,7 @@ class PostgresBankReadModelRepository:
         scope_keys: list[str],
         tenant_id: str = "default",
         connection: Any | None = None,
+        include_relation_source_versions: bool = True,
     ) -> dict[str, Any]:
         normalized_scope_keys = _dedupe_preserve_order(
             str(scope_key).strip()
@@ -2809,9 +2872,13 @@ class PostgresBankReadModelRepository:
             tenant_id=tenant_id,
             connection=executor,
         )
-        current_relation_source_summaries = self._bank_detail_relation_source_summaries(
-            scope_keys=_dedupe_preserve_order([*normalized_scope_keys, *statistics_scope_keys]),
-            connection=executor,
+        current_relation_source_summaries = (
+            self._bank_detail_relation_source_summaries(
+                scope_keys=_dedupe_preserve_order([*normalized_scope_keys, *statistics_scope_keys]),
+                connection=executor,
+            )
+            if include_relation_source_versions
+            else {}
         )
 
         def status_for(scope_key_values: list[str], *, require_statistics: bool = False) -> str:
@@ -2846,7 +2913,7 @@ class PostgresBankReadModelRepository:
                 for scope_key in scope_key_values
             ):
                 return "stale"
-            if any(
+            if include_relation_source_versions and any(
                 _normalized_workbench_relation_source_summary(
                     (
                         by_scope[scope_key].get("source_versions")
@@ -6965,7 +7032,210 @@ class PostgresSummaryReadModelRepository:
             bank_accounts=bank_accounts,
         )
 
-    def get_cost_statistics_freshness_gate(self, *, scope_key: str) -> dict[str, Any] | None:
+    def get_cost_statistics_freshness_gate(
+        self,
+        *,
+        scope_key: str,
+        dependency_profile: str = "workbench",
+    ) -> dict[str, Any] | None:
+        if dependency_profile == "bank_flow":
+            return self._get_cost_statistics_bank_flow_freshness_gate(scope_key=scope_key)
+        if dependency_profile != "workbench":
+            raise ValueError("cost statistics dependency_profile must be workbench or bank_flow")
+        return self._get_cost_statistics_workbench_freshness_gate(scope_key=scope_key)
+
+    def _get_cost_statistics_bank_flow_freshness_gate(
+        self,
+        *,
+        scope_key: str,
+    ) -> dict[str, Any] | None:
+        normalized_scope_key = str(scope_key or "").strip()
+        if ":" not in normalized_scope_key:
+            return None
+        project_scope, scope_month = normalized_scope_key.split(":", 1)
+        if project_scope not in {"active", "all"} or (
+            scope_month != "all" and not MONTH_SCOPE_RE.fullmatch(scope_month)
+        ):
+            return None
+
+        statistics_gate = self._get_cost_statistics_workbench_freshness_gate(
+            scope_key=normalized_scope_key
+        )
+        source_settings = (
+            statistics_gate.get("source_settings")
+            if isinstance(statistics_gate, dict)
+            and isinstance(statistics_gate.get("source_settings"), dict)
+            else None
+        )
+        if source_settings is None:
+            settings_row = self._connection.fetch_one(
+                """
+                select jsonb_build_object(
+                    'bank_transaction_tags',
+                        coalesce(settings_payload->'bank_transaction_tags', '{}'::jsonb),
+                    'bank_account_mappings',
+                        coalesce(settings_payload->'bank_account_mappings', '[]'::jsonb),
+                    'cost_statistics_tag_selection',
+                        coalesce(settings_payload->'cost_statistics_tag_selection', '{}'::jsonb)
+                ) as source_settings
+                from app.app_settings
+                where settings_key = 'app_settings'
+                limit 1
+                """
+            )
+            source_settings = (
+                settings_row.get("source_settings")
+                if isinstance(settings_row, dict)
+                and isinstance(settings_row.get("source_settings"), dict)
+                else None
+            )
+        if source_settings is None:
+            return {
+                "scope_key": normalized_scope_key,
+                "schema_version": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+                "source_versions": {},
+                "source_settings": {},
+                "bank_accounts": [],
+                "published_source_version": 0,
+                "bank_flow_refresh_status": "stale",
+                "bank_flow_stale_reasons": ["cost_statistics_source_settings_missing"],
+                "bank_flow_bank_detail_refresh_scope_keys": [],
+                "bank_flow_child_refresh_scope_keys": [],
+                "statistics": None,
+                "statistics_status": "stale",
+            }
+
+        bank_repository = PostgresBankReadModelRepository(self._connection)
+        bank_scope_keys = (
+            bank_repository._bank_detail_available_month_scope_keys()
+            if scope_month == "all"
+            else [scope_month]
+        )
+        scope_summary = bank_repository.bank_detail_scope_summary(
+            scope_keys=bank_scope_keys,
+            include_relation_source_versions=False,
+        )
+        signatures = (
+            scope_summary.get("read_model_scope_signatures")
+            if isinstance(scope_summary.get("read_model_scope_signatures"), dict)
+            else {}
+        )
+        expected_rules_version = bank_auto_tag_rules_version_from_settings_payload(
+            source_settings
+        )
+        stale_scope_keys: list[str] = []
+        semantic_scope_signatures: dict[str, dict[str, Any]] = {}
+        for bank_scope_key in bank_scope_keys:
+            signature = signatures.get(bank_scope_key)
+            if not isinstance(signature, dict):
+                stale_scope_keys.append(bank_scope_key)
+                continue
+            stored_source_versions = (
+                signature.get("source_versions")
+                if isinstance(signature.get("source_versions"), dict)
+                else {}
+            )
+            semantic_scope_signatures[bank_scope_key] = {
+                "schema_version": int_value(signature.get("schema_version"), 0),
+                "row_count": int_value(signature.get("row_count"), 0),
+                "source_versions": without_keys(
+                    stored_source_versions,
+                    {"source_version", "workbench_relation_source_versions"},
+                ),
+            }
+            if (
+                text(signature.get("freshness_status")) != "fresh"
+                or int_value(stored_source_versions.get("bank_auto_tag_rules_version"), 0)
+                != expected_rules_version
+            ):
+                stale_scope_keys.append(bank_scope_key)
+
+        summary_status = text(scope_summary.get("read_model_status"))
+        if not bank_scope_keys:
+            bank_flow_status = "fresh"
+        elif summary_status == "refreshing":
+            bank_flow_status = "refreshing"
+        elif stale_scope_keys or summary_status != "fresh":
+            bank_flow_status = "stale"
+        else:
+            bank_flow_status = "fresh"
+        bank_detail_source_versions = {
+            "scope_keys": bank_scope_keys,
+            "scope_signatures": semantic_scope_signatures,
+        }
+        source_versions = cost_statistics_bank_flow_source_versions(
+            cost_statistics_source_versions(
+                month=scope_month,
+                settings_payload=source_settings,
+                bank_detail_source_versions=bank_detail_source_versions,
+            )
+        )
+        version_token = int(
+            hashlib.sha256(
+                json.dumps(
+                    source_versions,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    default=str,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()[:15],
+            16,
+        )
+        return {
+            "scope_key": normalized_scope_key,
+            "schema_version": COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
+            "generated_at": scope_summary.get("read_model_generated_at"),
+            "source_versions": source_versions,
+            "source_settings": source_settings,
+            "bank_detail_source_versions": bank_detail_source_versions,
+            "bank_accounts": bank_accounts_from_settings_payload(source_settings),
+            "published_source_version": version_token,
+            "bank_flow_refresh_status": bank_flow_status,
+            "bank_flow_stale_reasons": (
+                ["bank_detail_dependency_not_fresh"] if stale_scope_keys else []
+            ),
+            "bank_flow_bank_detail_refresh_scope_keys": list(
+                dict.fromkeys(stale_scope_keys)
+            ),
+            "bank_flow_child_refresh_scope_keys": [],
+            "statistics": (
+                statistics_gate.get("statistics")
+                if isinstance(statistics_gate, dict)
+                else None
+            ),
+            "statistics_status": (
+                text(statistics_gate.get("statistics_status")) or "stale"
+                if isinstance(statistics_gate, dict)
+                else "stale"
+            ),
+            "statistics_scope_key": (
+                text(statistics_gate.get("statistics_scope_key"))
+                if isinstance(statistics_gate, dict)
+                else f"{project_scope}:all"
+            ),
+            "statistics_published_source_version": (
+                statistics_gate.get("statistics_published_source_version")
+                if isinstance(statistics_gate, dict)
+                else None
+            ),
+            "statistics_workbench_refresh_scope_keys": (
+                list(statistics_gate.get("statistics_workbench_refresh_scope_keys") or [])
+                if isinstance(statistics_gate, dict)
+                else []
+            ),
+            "statistics_child_refresh_scope_keys": (
+                list(statistics_gate.get("statistics_child_refresh_scope_keys") or [])
+                if isinstance(statistics_gate, dict)
+                else []
+            ),
+        }
+
+    def _get_cost_statistics_workbench_freshness_gate(
+        self,
+        *,
+        scope_key: str,
+    ) -> dict[str, Any] | None:
         normalized_scope_key = str(scope_key or "").strip()
         if not normalized_scope_key:
             return None
@@ -7245,28 +7515,7 @@ class PostgresSummaryReadModelRepository:
                             )
                         ) as cost_child_not_fresh
                         ,
-                        (
-                            not state.child_present
-                            or state.child_schema_version <> %s
-                            or coalesce(
-                                state.child_source_versions->'bank_detail_source_versions',
-                                '{}'::jsonb
-                            ) - 'source_version' - 'workbench_relation_source_versions'
-                               <> coalesce(state.bank_detail_source_versions, '{}'::jsonb)
-                                  - 'source_version' - 'workbench_relation_source_versions'
-                            or coalesce(
-                                state.child_dirty_status in ('pending', 'processing', 'failed'),
-                                false
-                            )
-                            or (
-                                state.child_dirty_status is not null
-                                and (
-                                    state.child_dirty_status <> 'done'
-                                    or state.child_published_source_version
-                                       <> state.child_dirty_source_version
-                                )
-                            )
-                        ) as bank_flow_child_not_fresh
+                        false as bank_flow_child_not_fresh
                     from child_states state
                 ),
                 aggregated as (
@@ -7332,14 +7581,12 @@ class PostgresSummaryReadModelRepository:
                         coalesce(
                             bool_or(
                                 bank_detail_dirty_status = 'failed'
-                                or child_dirty_status = 'failed'
                             ),
                             false
                         ) as bank_flow_has_failed,
                         coalesce(
                             bool_or(
                                 bank_detail_dirty_status in ('pending', 'processing')
-                                or child_dirty_status in ('pending', 'processing')
                             ),
                             false
                         ) as bank_flow_has_active
@@ -7383,7 +7630,6 @@ class PostgresSummaryReadModelRepository:
             (
                 BANK_DETAIL_READ_MODEL_SCHEMA_VERSION,
                 COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
-                COST_STATISTICS_READ_MODEL_SCHEMA_VERSION,
                 normalized_scope_key,
             ),
         )
@@ -7424,8 +7670,10 @@ class PostgresSummaryReadModelRepository:
         if source_settings is None:
             refresh_status = "stale" if refresh_status == "fresh" else refresh_status
             stale_reasons.append("cost_statistics_source_settings_missing")
-        bank_flow_refresh_status = refresh_status
-        bank_flow_stale_reasons = list(stale_reasons)
+        bank_flow_refresh_status = "fresh" if source_settings is not None else "stale"
+        bank_flow_stale_reasons = (
+            [] if source_settings is not None else ["cost_statistics_source_settings_missing"]
+        )
 
         scope_month = normalized_scope_key.split(":", 1)[1] if ":" in normalized_scope_key else ""
         workbench_source_versions = (
@@ -7708,12 +7956,13 @@ class PostgresSummaryReadModelRepository:
         if view not in {"time", "project", "bank", "expense_type", "bank_tag"}:
             return None
 
+        bank_flow_view = view in {"time", "bank_tag"}
         table_name = (
-            "read_model.cost_statistics_bank_flow_rows"
-            if view in {"time", "bank_tag"}
+            f"({_COST_STATISTICS_BANK_FLOW_SOURCE_SQL}) bank_flow"
+            if bank_flow_view
             else "read_model.cost_statistics_rows"
         )
-        if table_name.endswith("bank_flow_rows"):
+        if bank_flow_view:
             tag_columns = """
                 bank_tag_code,
                 bank_tag_label,
@@ -7730,7 +7979,10 @@ class PostgresSummaryReadModelRepository:
                 coalesce(payload->'bank_tag_label_path', '[]'::jsonb) as bank_tag_label_path
             """
 
-        base_params: list[Any] = [normalized_project_scope]
+        available_year_params: list[Any] = [] if bank_flow_view else [normalized_project_scope]
+        available_year_scope_sql = "true" if bank_flow_view else "project_scope = %s"
+        base_params: list[Any] = [] if bank_flow_view else [normalized_project_scope]
+        base_project_scope_sql = "true" if bank_flow_view else "project_scope = %s"
         scope_sql = ""
         if scope_kind == "month":
             scope_sql = "and scope_month = %s::date"
@@ -7822,7 +8074,7 @@ class PostgresSummaryReadModelRepository:
                 )
             )
         query_params = [
-            normalized_project_scope,
+            *available_year_params,
             *cost_count_params,
             *base_params,
             *row_filter_params,
@@ -7836,7 +8088,7 @@ class PostgresSummaryReadModelRepository:
             with available_years as materialized (
                 select distinct to_char(scope_month, 'YYYY') as scope_year
                 from {table_name}
-                where project_scope = %s
+                where {available_year_scope_sql}
                   and scope_month is not null
             ), selected_cost_transactions as materialized (
                 select transaction_id
@@ -7867,7 +8119,7 @@ class PostgresSummaryReadModelRepository:
                     oa_applicant,
                     {tag_columns}
                 from {table_name}
-                where project_scope = %s
+                where {base_project_scope_sql}
                   {scope_sql}
             ), base as materialized (
                 select
@@ -8001,39 +8253,40 @@ class PostgresSummaryReadModelRepository:
         if start_date and end_date and start_date > end_date:
             start_date, end_date = end_date, start_date
 
+        raw_bank_rows = normalized_row_shape == "raw_bank"
         table_name = (
-            "read_model.cost_statistics_bank_flow_rows"
-            if normalized_row_shape == "raw_bank"
+            f"({_COST_STATISTICS_BANK_FLOW_SOURCE_SQL}) bank_flow"
+            if raw_bank_rows
             else "read_model.cost_statistics_rows"
         )
         bank_tag_code_sql = (
             "bank_tag_code"
-            if normalized_row_shape == "raw_bank"
+            if raw_bank_rows
             else "nullif(payload->>'bank_tag_code', '')"
         )
         bank_tag_label_sql = (
             "bank_tag_label"
-            if normalized_row_shape == "raw_bank"
+            if raw_bank_rows
             else "nullif(payload->>'bank_tag_label', '')"
         )
         bank_tag_primary_sql = (
             "bank_tag_primary_label"
-            if normalized_row_shape == "raw_bank"
+            if raw_bank_rows
             else "nullif(payload->>'bank_tag_primary_label', '')"
         )
         bank_tag_sub_sql = (
             "bank_tag_sub_label"
-            if normalized_row_shape == "raw_bank"
+            if raw_bank_rows
             else "nullif(payload->>'bank_tag_sub_label', '')"
         )
         bank_tag_path_sql = (
             "bank_tag_label_path"
-            if normalized_row_shape == "raw_bank"
+            if raw_bank_rows
             else "coalesce(payload->'bank_tag_label_path', '[]'::jsonb)"
         )
 
-        where_parts = ["project_scope = %s"]
-        params: list[Any] = [normalized_project_scope]
+        where_parts = [] if raw_bank_rows else ["project_scope = %s"]
+        params: list[Any] = [] if raw_bank_rows else [normalized_project_scope]
         if normalized_month.lower() != "all":
             if not MONTH_SCOPE_RE.fullmatch(normalized_month):
                 return None
@@ -8067,7 +8320,7 @@ class PostgresSummaryReadModelRepository:
             where_parts.append(f"coalesce({bank_tag_code_sql}, %s) = any(%s)")
             params.extend(("__uncategorized__", list(selected_tag_codes)))
 
-        where_sql = " and ".join(where_parts)
+        where_sql = " and ".join(where_parts) or "true"
         base_sql = f"""
             select
                 scope_month,
@@ -8192,72 +8445,106 @@ class PostgresSummaryReadModelRepository:
         *,
         project_scope: str,
         transaction_id: str,
+        dependency_profile: str,
+        scope_kind: str,
+        scope_value: str | None,
     ) -> dict[str, Any] | None:
         normalized_project_scope = text(project_scope)
         normalized_transaction_id = text(transaction_id)
-        if normalized_project_scope not in {"active", "all"} or normalized_transaction_id is None:
+        normalized_dependency_profile = text(dependency_profile)
+        normalized_scope_kind = text(scope_kind)
+        normalized_scope_value = text(scope_value)
+        if (
+            normalized_project_scope not in {"active", "all"}
+            or normalized_transaction_id is None
+            or normalized_dependency_profile not in {"workbench", "bank_flow"}
+            or normalized_scope_kind not in {"all", "year", "month"}
+        ):
             return None
-        row = self._connection.fetch_one(
-            """
-            with candidate as (
+        if normalized_scope_kind == "month":
+            if normalized_scope_value is None or not MONTH_SCOPE_RE.fullmatch(normalized_scope_value):
+                return None
+            scope_filter_sql = "and scope_month = %s::date"
+            scope_filter_params: tuple[Any, ...] = (f"{normalized_scope_value}-01",)
+        elif normalized_scope_kind == "year":
+            if normalized_scope_value is None or not re.fullmatch(r"\d{4}", normalized_scope_value):
+                return None
+            scope_filter_sql = "and extract(year from scope_month)::integer = %s"
+            scope_filter_params = (int(normalized_scope_value),)
+        else:
+            if normalized_scope_value is not None:
+                return None
+            scope_filter_sql = ""
+            scope_filter_params = ()
+        if normalized_dependency_profile == "bank_flow":
+            row = self._connection.fetch_one(
+                f"""
                 select
-                    0 as row_priority, 'cost' as row_kind,
-                    scope_key, project_scope, scope_month::text as scope_month, row_key, transaction_id,
-                    group_id, trade_time_text, trade_date::text as trade_date, counterparty_name,
-                    payment_account_label, direction, remark, project_id, project_name, expense_type,
-                    expense_content, amount::text as amount, oa_applicant,
-                    null::text as bank_tag_code, null::text as bank_tag_label,
-                    null::text as bank_tag_primary_label, null::text as bank_tag_sub_label,
-                    '[]'::jsonb as bank_tag_label_path, payload, raw_payload
-                from read_model.cost_statistics_rows
-                where project_scope = %s and transaction_id = %s
-                union all
-                select
-                    1 as row_priority, 'bank_flow' as row_kind,
+                    'bank_flow' as row_kind,
                     scope_key, project_scope, scope_month::text as scope_month, row_key, transaction_id,
                     group_id, trade_time_text, trade_date::text as trade_date, counterparty_name,
                     payment_account_label, direction, remark, project_id, project_name, expense_type,
                     expense_content, amount::text as amount, oa_applicant,
                     bank_tag_code, bank_tag_label, bank_tag_primary_label, bank_tag_sub_label,
-                    bank_tag_label_path, payload, raw_payload
-                from read_model.cost_statistics_bank_flow_rows
-                where project_scope = %s and transaction_id = %s
-            ), selected as (
-                select *
-                from candidate
-                order by row_priority, scope_month desc, row_key
+                    bank_tag_label_path, payload, raw_payload, '[]'::jsonb as cost_allocations
+                from ({_COST_STATISTICS_BANK_FLOW_SOURCE_SQL}) bank_flow
+                where transaction_id = %s
+                  {scope_filter_sql}
+                order by scope_month desc, row_key
                 limit 1
-            ), allocations as (
-                select coalesce(
-                    jsonb_agg(
-                        jsonb_build_object(
-                            'row_key', row_key,
-                            'project_name', project_name,
-                            'project_id', coalesce(project_id, ''),
-                            'expense_type', expense_type,
-                            'expense_content', coalesce(expense_content, ''),
-                            'oa_applicant', coalesce(nullif(oa_applicant, ''), '—'),
-                            'amount', amount::text
-                        ) order by row_key
-                    ),
-                    '[]'::jsonb
-                ) as cost_allocations
-                from read_model.cost_statistics_rows
-                where project_scope = %s and transaction_id = %s
+                """,
+                (normalized_transaction_id, *scope_filter_params),
             )
-            select selected.*, allocations.cost_allocations
-            from selected
-            cross join allocations
-            """,
-            (
-                normalized_project_scope,
-                normalized_transaction_id,
-                normalized_project_scope,
-                normalized_transaction_id,
-                normalized_project_scope,
-                normalized_transaction_id,
-            ),
-        )
+        else:
+            row = self._connection.fetch_one(
+                f"""
+                with selected as (
+                    select
+                        'cost' as row_kind,
+                        scope_key, project_scope, scope_month::text as scope_month, row_key, transaction_id,
+                        group_id, trade_time_text, trade_date::text as trade_date, counterparty_name,
+                        payment_account_label, direction, remark, project_id, project_name, expense_type,
+                        expense_content, amount::text as amount, oa_applicant,
+                        null::text as bank_tag_code, null::text as bank_tag_label,
+                        null::text as bank_tag_primary_label, null::text as bank_tag_sub_label,
+                        '[]'::jsonb as bank_tag_label_path, payload, raw_payload
+                    from read_model.cost_statistics_rows
+                    where project_scope = %s and transaction_id = %s
+                      {scope_filter_sql}
+                    order by scope_month desc, row_key
+                    limit 1
+                ), allocations as (
+                    select coalesce(
+                        jsonb_agg(
+                            jsonb_build_object(
+                                'row_key', row_key,
+                                'project_name', project_name,
+                                'project_id', coalesce(project_id, ''),
+                                'expense_type', expense_type,
+                                'expense_content', coalesce(expense_content, ''),
+                                'oa_applicant', coalesce(nullif(oa_applicant, ''), '—'),
+                                'amount', amount::text
+                            ) order by row_key
+                        ),
+                        '[]'::jsonb
+                    ) as cost_allocations
+                    from read_model.cost_statistics_rows
+                    where project_scope = %s and transaction_id = %s
+                      {scope_filter_sql}
+                )
+                select selected.*, allocations.cost_allocations
+                from selected
+                cross join allocations
+                """,
+                (
+                    normalized_project_scope,
+                    normalized_transaction_id,
+                    *scope_filter_params,
+                    normalized_project_scope,
+                    normalized_transaction_id,
+                    *scope_filter_params,
+                ),
+            )
         if row is None:
             return None
         return _cost_statistics_row_payload(row, fallback_index=0)
@@ -8383,23 +8670,14 @@ class PostgresSummaryReadModelRepository:
             present_scope_keys = {scope_key for scope_key, _ in iter_mapping(read_models)}
             for scope_key in sorted(set(changed_scope_keys) - present_scope_keys):
                 connection.execute("delete from read_model.cost_statistics_rows where scope_key = %s", (scope_key,))
-                connection.execute(
-                    "delete from read_model.cost_statistics_bank_flow_rows where scope_key = %s",
-                    (scope_key,),
-                )
         for scope_key, payload in iter_mapping(read_models):
             if changed_scope_keys is not None and scope_key not in changed_scope_keys:
                 continue
             model_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
             if _is_cost_statistics_parent_scope(scope_key, payload=model_payload):
                 connection.execute("delete from read_model.cost_statistics_rows where scope_key = %s", (scope_key,))
-                connection.execute(
-                    "delete from read_model.cost_statistics_bank_flow_rows where scope_key = %s",
-                    (scope_key,),
-                )
                 continue
             self._replace_cost_statistics_rows(connection, scope_key=scope_key, payload=payload)
-            self._replace_cost_statistics_bank_flow_rows(connection, scope_key=scope_key, payload=payload)
 
     def load_tax_offset_read_models(self) -> dict[str, Any]:
         return self._load_table_map(
@@ -9855,117 +10133,6 @@ class PostgresSummaryReadModelRepository:
                 expense_content = excluded.expense_content,
                 amount = excluded.amount,
                 oa_applicant = excluded.oa_applicant,
-                source_versions = excluded.source_versions,
-                generated_at = excluded.generated_at,
-                cache_status = excluded.cache_status,
-                payload = excluded.payload,
-                raw_payload = excluded.raw_payload,
-                updated_at = now()
-            """,
-            row_params,
-        )
-
-    def _replace_cost_statistics_bank_flow_rows(
-        self,
-        connection: Any,
-        *,
-        scope_key: str,
-        payload: dict[str, Any],
-    ) -> None:
-        connection.execute(
-            "delete from read_model.cost_statistics_bank_flow_rows where scope_key = %s",
-            (scope_key,),
-        )
-        model_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
-        bank_flow_rows = model_payload.get("bank_flow_time_rows") if isinstance(model_payload, dict) else None
-        if not isinstance(bank_flow_rows, list):
-            return
-        source_versions = payload.get("source_versions") if isinstance(payload.get("source_versions"), dict) else {}
-        project_scope, scope_month_text = _parse_cost_statistics_scope_parts(scope_key, payload=model_payload)
-        if scope_month_text == "all":
-            raise ValueError("cost_statistics_bank_flow_rows only supports concrete month scopes.")
-        scope_month = month_start(model_payload.get("scope_month") or model_payload.get("month") or scope_month_text)
-        if scope_month is None:
-            raise ValueError("cost_statistics_bank_flow_rows requires a concrete scope_month.")
-        generated_at = text(payload.get("generated_at") or model_payload.get("generated_at"))
-        cache_status = text(payload.get("cache_status") or model_payload.get("cache_status") or "fresh") or "fresh"
-        row_params: list[tuple[Any, ...]] = []
-        for index, item in enumerate(bank_flow_rows):
-            if not isinstance(item, dict):
-                continue
-            row = serialize_value(item)
-            transaction_id = text(row.get("transaction_id")) or f"row-{index}"
-            row_key = text(row.get("row_key") or f"{transaction_id}:{index}") or f"row-{index}"
-            row_params.append(
-                (
-                    scope_key,
-                    project_scope,
-                    scope_month,
-                    row_key,
-                    transaction_id,
-                    text(row.get("group_id")),
-                    text(row.get("trade_time")),
-                    _date_text(row.get("trade_date") or row.get("trade_time")),
-                    text(row.get("counterparty_name")),
-                    text(row.get("payment_account_label")),
-                    text(row.get("direction")),
-                    text(row.get("remark")),
-                    text(row.get("project_id")),
-                    text(row.get("project_name")) or "未配对OA",
-                    text(row.get("expense_type")) or "未分类",
-                    text(row.get("expense_content")),
-                    decimal_text(str(row.get("amount") or "").replace(",", "")) or "0",
-                    text(row.get("oa_applicant")),
-                    text(row.get("bank_tag_code")),
-                    text(row.get("bank_tag_label")),
-                    text(row.get("bank_tag_primary_label")),
-                    text(row.get("bank_tag_sub_label")),
-                    jsonb(row.get("bank_tag_label_path") if isinstance(row.get("bank_tag_label_path"), list) else []),
-                    jsonb(source_versions),
-                    generated_at,
-                    cache_status,
-                    jsonb(row),
-                    jsonb({"normalized_payload": row}),
-                )
-            )
-        _execute_many(
-            connection,
-            """
-            insert into read_model.cost_statistics_bank_flow_rows(
-                scope_key, project_scope, scope_month, row_key, transaction_id, group_id,
-                trade_time_text, trade_date, counterparty_name, payment_account_label, direction,
-                remark, project_id, project_name, expense_type, expense_content, amount,
-                oa_applicant, bank_tag_code, bank_tag_label, bank_tag_primary_label,
-                bank_tag_sub_label, bank_tag_label_path, source_versions, generated_at,
-                cache_status, payload, raw_payload
-            )
-            values (
-                %s, %s, %s::date, %s, %s, %s, %s, %s::date, %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, coalesce(%s::timestamptz, now()),
-                %s, %s, %s
-            )
-            on conflict (scope_key, row_key) do update set
-                project_scope = excluded.project_scope,
-                scope_month = excluded.scope_month,
-                transaction_id = excluded.transaction_id,
-                group_id = excluded.group_id,
-                trade_time_text = excluded.trade_time_text,
-                trade_date = excluded.trade_date,
-                counterparty_name = excluded.counterparty_name,
-                payment_account_label = excluded.payment_account_label,
-                direction = excluded.direction,
-                remark = excluded.remark,
-                project_id = excluded.project_id,
-                project_name = excluded.project_name,
-                expense_type = excluded.expense_type,
-                expense_content = excluded.expense_content,
-                amount = excluded.amount,
-                oa_applicant = excluded.oa_applicant,
-                bank_tag_code = excluded.bank_tag_code,
-                bank_tag_label = excluded.bank_tag_label,
-                bank_tag_primary_label = excluded.bank_tag_primary_label,
-                bank_tag_sub_label = excluded.bank_tag_sub_label,
-                bank_tag_label_path = excluded.bank_tag_label_path,
                 source_versions = excluded.source_versions,
                 generated_at = excluded.generated_at,
                 cache_status = excluded.cache_status,
@@ -15609,6 +15776,11 @@ def _cost_statistics_aggregate_payload(
     bank_accounts: list[dict[str, Any]],
 ) -> dict[str, Any]:
     normalized_scope_keys = sorted({value for item in scope_keys if (value := text(item))})
+    bank_detail_scope_keys = [
+        scope_key.split(":", 1)[-1]
+        for scope_key in normalized_scope_keys
+        if MONTH_SCOPE_RE.match(scope_key.split(":", 1)[-1])
+    ]
     if normalized_scope_keys:
         cost_row = connection.fetch_one(
             """
@@ -15675,11 +15847,7 @@ def _cost_statistics_aggregate_payload(
         bank_row = connection.fetch_one(
             """
             select
-                count(*)::integer as row_count,
                 count(distinct transaction_id)::integer as transaction_count,
-                coalesce(sum(abs(amount)), 0)::text as total_amount,
-                coalesce(sum(abs(amount)) filter (where direction = '支出'), 0)::text as expense_amount,
-                coalesce(sum(abs(amount)) filter (where direction = '收入'), 0)::text as income_amount,
                 count(distinct transaction_id) filter (where direction = '支出')::integer
                     as expense_transaction_count,
                 count(distinct transaction_id) filter (where direction = '收入')::integer
@@ -15690,12 +15858,11 @@ def _cost_statistics_aggregate_payload(
                 count(distinct bank_tag_code) filter (
                     where nullif(btrim(bank_tag_code), '') is not null
                 )::integer as bank_tag_count
-            from read_model.cost_statistics_bank_flow_rows
-            where project_scope = %s
-              and scope_key = any(%s::text[])
+            from (""" + _COST_STATISTICS_BANK_FLOW_SOURCE_SQL + """) bank_flow
+            where scope_key = any(%s::text[])
               and scope_month is not null
             """,
-            (project_scope, normalized_scope_keys),
+            (bank_detail_scope_keys,),
         ) or {}
     else:
         cost_row = {}
@@ -15707,7 +15874,6 @@ def _cost_statistics_aggregate_payload(
         row["total_amount"] = _format_decimal(_decimal_or_zero(row.get("total_amount")))
     cost_count = int_value(cost_row.get("row_count"), 0)
     cost_transaction_count = int_value(cost_row.get("transaction_count"), 0)
-    bank_count = int_value(bank_row.get("row_count"), 0)
     bank_transaction_count = int_value(bank_row.get("transaction_count"), 0)
     tagged_transaction_count = int_value(bank_row.get("tagged_transaction_count"), 0)
     return {
@@ -15717,15 +15883,6 @@ def _cost_statistics_aggregate_payload(
             "row_count": cost_count,
             "transaction_count": cost_transaction_count,
             "total_amount": _format_decimal(_decimal_or_zero(cost_row.get("total_amount"))),
-        },
-        "bank_flow_summary": {
-            "row_count": bank_count,
-            "transaction_count": bank_transaction_count,
-            "total_amount": _format_decimal(_decimal_or_zero(bank_row.get("total_amount"))),
-            "expense_amount": _format_decimal(_decimal_or_zero(bank_row.get("expense_amount"))),
-            "income_amount": _format_decimal(_decimal_or_zero(bank_row.get("income_amount"))),
-            "expense_transaction_count": int_value(bank_row.get("expense_transaction_count"), 0),
-            "income_transaction_count": int_value(bank_row.get("income_transaction_count"), 0),
         },
         "statistics": {
             "transaction_count": bank_transaction_count,
@@ -15959,7 +16116,6 @@ def _cost_statistics_metadata_snapshot(snapshot: dict[str, Any]) -> dict[str, An
         model_payload = read_model.get("payload")
         if isinstance(model_payload, dict):
             model_payload.pop("time_rows", None)
-            model_payload.pop("bank_flow_time_rows", None)
     return storage_snapshot
 
 

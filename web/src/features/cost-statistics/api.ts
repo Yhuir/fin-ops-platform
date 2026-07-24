@@ -10,6 +10,7 @@ import type {
   CostStatisticsExplorerPageRequest,
   CostStatisticsTagRules,
   CostStatisticsTagRuleTag,
+  CostStatisticsView,
   CostTimeRow,
   CostTransactionDetail,
   SaveCostStatisticsTagRulesRequest,
@@ -405,12 +406,16 @@ export async function saveCostStatisticsTagRules(
 
 export async function fetchCostTransactionDetail(
   transactionId: string,
+  view: CostStatisticsView,
+  scope: string,
   signal?: AbortSignal,
   projectScope: CostProjectScope = "active",
 ): Promise<CostTransactionDetail> {
   const payload = await requestJson<ApiCostTransactionDetail>(
     buildScopedUrl(`/api/cost-statistics/transactions/${encodeURIComponent(transactionId)}`, {
       project_scope: projectScope,
+      view,
+      scope,
     }),
     {
       method: "GET",
